@@ -148,9 +148,9 @@ type 'gate: annotated value is a non-null readonly computed container', '''
     params?: any;
     query?: any;
     children?: Node | string | number | boolean | null;
-    mount(target?: any): UserCard;
+    mount(target?: Node | string): UserCard;
     unmount(options?: { removeDOM?: boolean }): void;
-    emit(name: string, detail?: any): void;
+    emit(name: string, detail?: unknown): void;
   }
   export declare let UserCard: {
     readonly prototype: UserCard;

@@ -2728,7 +2728,7 @@ class Emitter {
       // on a host bound later in the module; and `null!` is never, so a
       // required props parameter draws no arity error.
       line(() => {
-        this.b.emit('static __ripHost() { return new ');
+        this.b.emit('private static __ripHost() { return new ');
         if (info.hostSpan !== null && info.hostNodeId !== null) {
           this.b.markSpan(info.hostNodeId, 'identifier', info.hostSpan[0], info.hostSpan[1], () => this.b.emit(info.extendsComponent));
         } else {
@@ -3052,11 +3052,10 @@ class Emitter {
       // (componentCtorMembers, under the same condition). The base
       // supplies it at runtime but types as `any`, so the class must
       // declare it or a hoisted binding's assignment fails TS2741
-      // against its own published type. The RETURN stays `any`: a class
-      // expression has no name to give its own instance type, and the
-      // precise return already reaches every use site through the
-      // published type on the binding.
-      this.b.tsOnly(() => this.b.emit(`${pad}declare static mount: (target?: any) => any;\n`));
+      // against its own published type. A class expression has no name
+      // for its own instance type; `typeof this` in a static member is
+      // the constructor, so InstanceType of it is that type without one.
+      this.b.tsOnly(() => this.b.emit(`${pad}declare static mount: (target?: Node | string) => InstanceType<typeof this>;\n`));
     }
     this.b.tsOnly(() => {
       this.b.emit(`${pad}constructor(props${propsParamOptional(info) ? '?' : ''}: `);
@@ -9874,7 +9873,11 @@ class Emitter {
         });
       }
       if (tsInfo !== null) this.tsComponentCtor(tsInfo, pad);
-      this.b.emit(`${pad}_init(__given`);
+      // The lowering's own methods are private on the face: they are
+      // the runtime's to call, and no consumer's surface.
+      this.b.emit(pad);
+      if (tsInfo !== null) this.b.tsOnly(() => this.b.emit('private '));
+      this.b.emit('_init(__given');
       if (tsInfo !== null) this.b.tsOnly(() => { this.b.emit(': '); this.emitDeclaredTypeCopies(propsTypeText(tsInfo, { road: 'face' })); });
       this.b.emit(') {\n');
       this.scopes.push(initNames);
@@ -10339,7 +10342,9 @@ class Emitter {
     }
     this.closeRenderScope(classRecord);
     // ── Phase 2: replay through the builder ──
-    this.b.emit(`${pad}_create() {\n`);
+    this.b.emit(pad);
+    if (this.ts) this.b.tsOnly(() => this.b.emit('private '));
+    this.b.emit('_create() {\n');
     this.mark(renderNode, '$self', () => this.mark(renderNode, 'body', () => {
       this.withRecordContext(classRecord, () => {
         if (classRecord.locals.size > 0) {
@@ -10351,7 +10356,9 @@ class Emitter {
     }));
     this.b.emit(`${pad}}\n`);
     if (classRecord.setups.length > 0) {
-      this.b.emit(`${pad}_setup() {\n`);
+      this.b.emit(pad);
+      if (this.ts) this.b.tsOnly(() => this.b.emit('private '));
+      this.b.emit('_setup() {\n');
       this.withRecordContext(classRecord, () => this.replaySetups(classRecord, ipad));
       this.b.emit(`${pad}}\n`);
     }

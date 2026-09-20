@@ -656,13 +656,13 @@ type 'void slot: optionality reaches inside the container only where absence can
     params?: any;
     query?: any;
     children?: Node | string | number | boolean | null;
-    mount(target?: any): Panel;
+    mount(target?: Node | string): Panel;
     unmount(options?: { removeDOM?: boolean }): void;
-    emit(name: string, detail?: any): void;
+    emit(name: string, detail?: unknown): void;
   }
   export declare let Panel: {
     new (props?: { title?: string | { value: string | undefined; read(): string | undefined; touch?(): void }; __bind_title__?: { value: string | undefined; read(): string | undefined; touch?(): void }; children?: Node | string | number | boolean | null }): Panel;
-    mount(target?: any): Panel;
+    mount(target?: Node | string): Panel;
   };
   '''
 

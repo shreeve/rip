@@ -256,7 +256,7 @@ const LITERAL_CLASSIFICATION = [
   excluded("'\\ndeclare function __ripNarrowed<T extends { value: unknown }>(c: T): { readonly value: NonNullable<T[\\'value\\']>; read(): NonNullable<T[\\'value\\']> };\\n'", 1, 'an ambient declaration carries no body — no source control flow can inhabit it; a TypeScript-only region, erased from generated JavaScript'),
   excluded("`\\ndeclare function __ripRoute<const T extends string>(s: ${…}): T;\\n`", 1, 'an ambient declaration carries no body — no source control flow can inhabit it; a TypeScript-only region, erased from generated JavaScript'),
   excluded("`\\ndeclare function __ripSourceKey<const T extends ((${…}) | \\`\\${${…}}.\\${string}\\`)>(s: T): T;\\n`", 1, 'an ambient declaration carries no body — no source control flow can inhabit it; a TypeScript-only region, erased from generated JavaScript'),
-  excluded("`${…}declare static mount: (target?: any) => any;\\n`", 1, 'the static mount mirror the runtime base supplies untyped — a declared member carries no body, so no source control flow can inhabit it; a TypeScript-only region, erased from generated JavaScript'),
+  excluded("`${…}declare static mount: (target?: Node | string) => InstanceType<typeof this>;\\n`", 1, 'the static mount mirror the runtime base supplies untyped — a declared member carries no body, so no source control flow can inhabit it; a TypeScript-only region, erased from generated JavaScript'),
   generated("`${…}  if (${…}._t) { ${…}.f(); ${…}(${…}._first, ${…}._t, 'leave', () => ${…}.d(true)); }\\n`", 1, 'emitter-owned transition callback'),
   generated("`${…}(() => { `", 1, 'render control is rejected before updater emission'),
   generated("`${…}(() => `", 1, 'emitter-owned render batch window'),

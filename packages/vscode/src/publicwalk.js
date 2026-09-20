@@ -377,6 +377,23 @@ async function isStatedExport(symbol, synthesized) {
   return node.initializer === undefined;
 }
 
+// Whether a type is a class's own — its instance type (the class flag)
+// or its constructor type (the class symbol).
+async function isClassType(type) {
+  if ((type.objectFlags & ObjectFlags.Class) !== 0) return true;
+  const symbol = await type.getSymbol();
+  return symbol != null && (symbol.flags & SymbolFlags.Class) !== 0;
+}
+
+// Whether a member is declared `private` (a class member no consumer can
+// name), read off its declaration's modifiers.
+async function isPrivate(symbol) {
+  const declaration = symbol?.declarations?.[0];
+  if (declaration === undefined) return false;
+  const node = await declaration.resolve().catch(() => null);
+  return node?.modifiers?.some?.((m) => m.kind === SyntaxKind.PrivateKeyword) === true;
+}
+
 // WHERE a position was declared, as a generated-text offset.
 //
 // The path a finding prints says where the defect surfaces in the type; it
@@ -599,6 +616,9 @@ async function walkOne(ck, rootType, rootName, owns, rootSymbol, siblings, funct
       }
       for (const prop of props) {
         if (!declaredUnder(prop, owns)) continue;
+        // A private member is the class's own, not a consumer's surface:
+        // no caller can reach it, so nothing in it can be wrong for them.
+        if (await isPrivate(prop)) continue;
         const propType = await ck.getTypeOfSymbol(prop);
         if (propType === undefined) { lost++; continue; }
         const propStop = await siblingStop(ck, propType, siblings, rootSymbol, owns, functionTypeId, caches);
@@ -661,6 +681,16 @@ async function walkOne(ck, rootType, rootName, owns, rootSymbol, siblings, funct
         // writes and none of them can reach.
         if ((info.keyType.flags & (TypeFlags.String | TypeFlags.Number)) === 0) continue;
         if (info.declaration !== undefined && !declaredAt(info.declaration, owns)) continue;
+        // A CLASS type's index signature nobody declared is the checker's
+        // own: a class whose base types as `any` (the inlined runtime's
+        // `__Component`) answers every unknown name through a synthesized
+        // `string` index, on its instance and its constructor alike.
+        // Nothing in the package wrote it, so nothing in it is the
+        // package's to fix. A mapped type's index (`Record<string, any>`)
+        // has no declaration node either, and IS the surface: a class
+        // is what tells the two apart — the instance type carries the
+        // class flag, the constructor type is the class symbol's.
+        if (info.declaration == null && await isClassType(item.type)) continue;
         next.push({ type: info.valueType, at: `${item.at}[]`, bare: false, stated: item.stated, origin: item.origin });
       }
       if (await item.type.isUnionType() || await item.type.isIntersectionType()) {

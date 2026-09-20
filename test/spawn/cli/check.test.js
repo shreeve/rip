@@ -1930,6 +1930,33 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
   // consumer an `any`, while the type itself is an array or a promise or an
   // object, and every member it exposes belongs to the language. Checking
   // only flags and members passes all three.
+  test('--public counts a component by what its author can type: the lowering, the runtime base, and the passthrough are not holes', async () => {
+    const dir = workspace({
+      'index.rip': [
+        'export Card = component',
+        '  @title: string',
+        '  render',
+        '    div',
+        '      = title',
+        '',
+        'export Btn = component extends button',
+        '  @label: string',
+        '  render',
+        '    button',
+        '      = label',
+        '',
+      ].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'typed-pkg', exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = await check(dir, ['--public']);
+      expect(out.stdout).toContain('2/2 exports fully typed (100.0%)');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   test('--public reaches an `any` held inside a type: element, type argument, and index value', async () => {
     const dir = workspace({
       'index.rip': [

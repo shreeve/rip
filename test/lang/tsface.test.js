@@ -65,6 +65,7 @@ const REGION_SHAPES = [
   new RegExp(String.raw`^declare (static |readonly )?${ID}\??: \S`, 'su'), // component member declare (optional for the projection channel) / static-mount narrowing / =! readonly 
   new RegExp(String.raw`^${ID}(: \S[^;]*)?;$`, 'su'),      // the field a promoted param or a constructor-body `@x =` declares (bare when the assignment's own inference is the honest type)
   /^\[key: `_\$\{string\}`\]: any;$/u,                    // the component slot-namespace index signature (M12-E)
+  /^private$/u,                                            // the lowering's own methods (_init/_create/_setup), no consumer's surface
   /^constructor\(props\??: \{ .*\{ super\(props\); \}$/su, // the component props ctor (M12-E)
   /^as any\)?$/u,                                          // scaffold/handler quieting casts (M12-E)
   /^\) as any$/u,                                          // handler cast's TS-only close (arrow-safe grouping)
@@ -1488,7 +1489,7 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     // statics — without the declare, a hoisted binding's class
     // expression is not assignable to its own published type. The
     // precise return reaches use sites through that published type.
-    expect(code).toContain('declare static mount: (target?: any) => any;');
+    expect(code).toContain('declare static mount: (target?: Node | string) => InstanceType<typeof this>;');
     expect(code).not.toContain('declare static mount: never');
   });
 
@@ -1501,7 +1502,7 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     const src = 'mk = -> new Chip()\nChip = component\n  @label := "c"\n';
     const faced = ts(src);
     expect(faced.code).toContain(
-      'let Chip!: { new (props?: { label?: string | { value: string; read(): string; touch?(): void }; __bind_label__?: { value: string; read(): string; touch?(): void }; children?: __RipChildren }): Chip; mount(target?: any): Chip; };',
+      'let Chip!: { new (props?: { label?: string | { value: string; read(): string; touch?(): void }; __bind_label__?: { value: string; read(): string; touch?(): void }; children?: __RipChildren }): Chip; mount(target?: Node | string): Chip; };',
     );
     // Whole-line TS syntax: stripping restores the bare hoist.
     expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
@@ -1524,9 +1525,9 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
   test('the companion interface: the instance surface under the binding name (value/type pairing)', () => {
     const code = ts(FIXTURE).code;
     expect(code).toContain('interface Counter {');
-    expect(code).toContain('  mount(target?: any): Counter;');
+    expect(code).toContain('  mount(target?: Node | string): Counter;');
     expect(code).toContain('  unmount(options?: { removeDOM?: boolean }): void;');
-    expect(code).toContain('  emit(name: string, detail?: any): void;');
+    expect(code).toContain('  emit(name: string, detail?: unknown): void;');
     expect(code).toContain('  bump(n: number): number;');
     // An exported component exports its companion.
     expect(ts('export Chip = component\n  @label: string\n').code).toContain('export interface Chip {');
@@ -1541,8 +1542,8 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     // extends-Record guard. Each answers to ONE spelling — its own —
     // and the camelCased DOM property is where its type is read from,
     // never a second key.
-    expect(code).toContain(`id?: HTMLElementTagNameMap["section"] extends Record<'id', infer T> ? T : any`);
-    expect(code).toContain(`tabindex?: HTMLElementTagNameMap["section"] extends Record<'tabIndex', infer T> ? T : any`);
+    expect(code).toContain(`id?: HTMLElementTagNameMap["section"] extends Record<'id', infer T> ? (T extends string | number | boolean | null | undefined ? T : string) : string`);
+    expect(code).toContain(`tabindex?: HTMLElementTagNameMap["section"] extends Record<'tabIndex', infer T> ? (T extends string | number | boolean | null | undefined ? T : string) : string`);
     expect(code).not.toContain('tabIndex?:');
     // `class` takes the element road's own admission, both spellings — no DOM
     // property is named `class`, and the runtime applies it through __clsx.

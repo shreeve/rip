@@ -3148,7 +3148,7 @@ function presentComponentSignatureHover(contents) {
   // Two printings of the one construct: a lone construct signature
   // prints in arrow form (`new (props: …) => Name`), and the hoisted
   // binding's published type with its static `mount` beside it prints
-  // as the object it is (`{ new (props?: …): Name; mount(target?: any):
+  // as the object it is (`{ new (props?: …): Name; mount(target?: Node | string):
   // Name; }`) — a forward-used declaration answers that form.
   // A GENERIC component's use site carries the inferred instantiation
   // — `new <"alpha">(props?: {…}) => Chip<"alpha">` — and the args
@@ -3179,7 +3179,7 @@ function presentComponentSignatureHover(contents) {
   if (presented === null) return null;
   const { props, extendsTag, at } = presented;
   const tail = (objectForm
-    ? /^\): ([A-Za-z_$][\w$]*)(?:<.*>)?(?:; mount\(target\?: any\): \1(?:<.*>)?)?;? \}$/
+    ? /^\): ([A-Za-z_$][\w$]*)(?:<.*>)?(?:; mount\(target\?: Node \| string\): \1(?:<.*>)?)?;? \}$/
     : /^\) => ([A-Za-z_$][\w$]*)(?:<.*>)?(?: import [A-Za-z_$][\w$]*)?$/
   ).exec(flat.slice(at).trim());
   if (!tail) return null;

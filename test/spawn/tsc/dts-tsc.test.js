@@ -196,11 +196,16 @@ describeTscExtended('a declaration file names its own lib dependency', () => {
       '      = @label',
       '',
     ].join('\n')).declarations;
+    // Every component names `Element` through its `mount`, so one that
+    // owns `children` and extends nothing carries the reference too.
+    const owned = compile('export Own = component\n  @children: string\n').declarations;
     expect(card.split('\n')[0]).toBe('/// <reference lib="dom" />');
     expect(button.split('\n')[0]).toBe('/// <reference lib="dom" />');
-    const { status, byFile, unattributed } = tscBatch(TSC, { 'card.d.ts': card, 'push.d.ts': button }, [], LANG_ONLY);
+    expect(owned.split('\n')[0]).toBe('/// <reference lib="dom" />');
+    const { status, byFile, unattributed } = tscBatch(TSC, { 'card.d.ts': card, 'push.d.ts': button, 'own.d.ts': owned }, [], LANG_ONLY);
     expect(byFile.get('card.d.ts')).toEqual([]);
     expect(byFile.get('push.d.ts')).toEqual([]);
+    expect(byFile.get('own.d.ts')).toEqual([]);
     expect(unattributed).toEqual([]);
     expect(status).toBe(0);
   }, TSC_TIMEOUT);
@@ -208,11 +213,8 @@ describeTscExtended('a declaration file names its own lib dependency', () => {
   test('a module naming no DOM global carries no reference, and checks the same way', () => {
     const fn = compile('export def f(a: number): string\n  String(a)\n').declarations;
     const schema = compile('export S = schema :input\n  email! email\n  age? ~integer\n').declarations;
-    // A component that owns `children` and extends nothing spells no
-    // DOM global either — the reference follows the NAMES, not the kind.
-    const owned = compile('export Own = component\n  @children: string\n').declarations;
-    for (const d of [fn, schema, owned]) expect(d).not.toContain('<reference');
-    const { status, byFile, unattributed } = tscBatch(TSC, { 'fn.d.ts': fn, 'schema.d.ts': schema, 'own.d.ts': owned }, [], LANG_ONLY);
+    for (const d of [fn, schema]) expect(d).not.toContain('<reference');
+    const { status, byFile, unattributed } = tscBatch(TSC, { 'fn.d.ts': fn, 'schema.d.ts': schema }, [], LANG_ONLY);
     for (const [name, diags] of byFile) expect({ name, diags }).toEqual({ name, diags: [] });
     expect(unattributed).toEqual([]);
     expect(status).toBe(0);

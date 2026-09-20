@@ -37,7 +37,7 @@
 // consumers, no drift.
 
 import { tidyType, normalizeTypeText, renderParams, optionalReader } from './types.js';
-import { attributeNamesFor } from '../dom.js';
+import { attributeNamesFor, BOOLEAN_ATTRS } from '../dom.js';
 import { CAMEL, CLASS_TYPE, STYLE_TYPE, CSS_PROPERTIES_TEXT } from './dom-types.js';
 
 // Same spellings as src/emitter.js COMPONENT_HOOKS (emission owns the
@@ -747,8 +747,12 @@ const childrenType = (road) => (road === 'face' ? '__RipChildren' : CHILDREN_UNI
 // inline (less the keys declared props own), and the `rest` view holds
 // it. Intrinsic attr typing: each attribute types through the tag's DOM
 // interface — `disabled?:` on a button is boolean, not any — via an
-// extends-Record guard so attributes with no matching property fall back
-// to any instead of erroring. An attribute answers to ONE spelling — its
+// extends-Record guard whose fallback is what the attribute is when
+// lib.dom has no property of its name: boolean for a boolean attribute
+// (`itemscope`), a string for any other (microdata, `is`, one lib.dom
+// has not caught up with), as the plain line's road already reads
+// them. One guard shape for every row, so the editor folds the
+// passthrough out of a signature by that shape alone. An attribute answers to ONE spelling — its
 // own — and its camelCased DOM property name is where the VALUE type is
 // read from, never a second key: the shared CAMEL bridge, the same one
 // the intrinsic surfaces read. Undeclared rest props ride the
@@ -758,7 +762,12 @@ const childrenType = (road) => (road === 'face' ? '__RipChildren' : CHILDREN_UNI
 export const REST_TEMPLATES = '[key: `data-${string}`]: any; [key: `aria-${string}`]: any';
 export function restPassthroughEntries(tag, road = 'dts') {
   const tagMap = `HTMLElementTagNameMap[${JSON.stringify(tag)}]`;
-  const guarded = (prop) => `${tagMap} extends Record<'${prop}', infer T> ? T : any`;
+  // A property's type is the attribute's only when it is a primitive: a
+  // property that reflects an ELEMENT (`form`, `list`, the popover and
+  // command targets) reflects the id the attribute holds, which is a
+  // string — and lib.dom's HTMLFormElement carries an `any` index for
+  // its named controls that would otherwise read as the attribute's.
+  const guarded = (prop, fallback) => `${tagMap} extends Record<'${prop}', infer T> ? (T extends string | number | boolean | null | undefined ? T : string) : ${fallback}`;
   const isHtmlTag = attributeNamesFor(tag).length > 0 && !/^(svg|path|circle|rect|line|g|text|defs|use)$/.test(tag);
   const out = [];
   const seen = new Set();
@@ -778,7 +787,8 @@ export function restPassthroughEntries(tag, road = 'dts') {
       continue;
     }
     const prop = CAMEL[attr] ?? attr;
-    const t = !isHtmlTag ? 'any' : attr === 'style' ? (road === 'face' ? STYLE_TYPE : `${CSS_PROPERTIES_TEXT} | string`) : guarded(prop);
+    const t = !isHtmlTag ? 'any' : attr === 'style' ? (road === 'face' ? STYLE_TYPE : `${CSS_PROPERTIES_TEXT} | string`)
+      : guarded(prop, BOOLEAN_ATTRS.has(attr) ? 'boolean' : 'string');
     put(attr, t);
   }
   return out;
@@ -894,7 +904,7 @@ export const componentCtorSegments = (info, name, typeParams = '', self = name, 
   return [
     { text: `{ new ${typeParams}(props${optional ? '?' : ''}: ` },
     ...propsTypeSegments(info, opts),
-    { text: `): ${self};${optional ? ` mount${typeParams}(target?: any): ${self};` : ''} }` },
+    { text: `): ${self};${optional ? ` mount${typeParams}(target?: Node | string): ${self};` : ''} }` },
   ];
 };
 
@@ -915,7 +925,7 @@ export const componentCtorMembers = (info, name, typeParams = '', self = name, o
   // container holding undefined. Requiredness is a TYPE-story fact
   // (annotations erase — the runtime never sees it), so the gate lives
   // here, never as a runtime throw.
-  if (optional) members.push(`mount${typeParams}(target?: any): ${self};`);
+  if (optional) members.push(`mount${typeParams}(target?: Node | string): ${self};`);
   return members;
 };
 
@@ -952,9 +962,9 @@ export const AMBIENT_FIELDS = ['stash', 'router', 'params', 'query'];
 // A null `returns` is the INSTANCE type, which each road spells its own
 // way — the companion interface by name, the class road as `this`.
 const RUNTIME_API = [
-  { name: 'mount', params: 'target?: any', returns: null },
+  { name: 'mount', params: 'target?: Node | string', returns: null },
   { name: 'unmount', params: 'options?: { removeDOM?: boolean }', returns: 'void' },
-  { name: 'emit', params: 'name: string, detail?: any', returns: 'void' },
+  { name: 'emit', params: 'name: string, detail?: unknown', returns: 'void' },
 ];
 
 // The interface road's spelling: method members.

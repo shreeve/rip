@@ -449,9 +449,9 @@ describe('component declarations: the class shape, the props surface, the extend
     expect(d).toContain('  theme: any;');
     expect(d).toContain('  bump(n: number): number;');
     expect(d).toContain('  mounted(): any;');
-    expect(d).toContain('  mount(target?: any): Counter;');
+    expect(d).toContain('  mount(target?: Node | string): Counter;');
     expect(d).toContain('  unmount(options?: { removeDOM?: boolean }): void;');
-    expect(d).toContain('  emit(name: string, detail?: any): void;');
+    expect(d).toContain('  emit(name: string, detail?: unknown): void;');
     expect(d).toContain('declare let Counter: {');
     // The required prop's union arm and the bind slot.
     expect(d).toContain('& ({ title: string | { value: string; read(): string; touch?(): void } } | { __bind_title__: { value: string; read(): string; touch?(): void } })');
@@ -462,8 +462,8 @@ describe('component declarations: the class shape, the props surface, the extend
     // runtime's static mount constructs with NO props — offering it
     // would be tsc-clean with a required container holding
     // undefined); the INSTANCE mount stays.
-    expect(d).toContain('  mount(target?: any): Counter;\n  unmount');
-    expect(d).not.toContain('  mount(target?: any): Counter;\n};');
+    expect(d).toContain('  mount(target?: Node | string): Counter;\n  unmount');
+    expect(d).not.toContain('  mount(target?: Node | string): Counter;\n};');
     // The module-marker interplay: no emitted line self-scopes, so the
     // non-exported artifact carries the marker.
     expect(d.endsWith('export {};\n')).toBe(true);
@@ -475,7 +475,7 @@ describe('component declarations: the class shape, the props surface, the extend
     expect(d).toContain('export declare let Chip: {');
     expect(d).toContain('new (props?: {');
     // All-optional props: the static mount mirror IS offered.
-    expect(d).toContain('  mount(target?: any): Chip;\n};');
+    expect(d).toContain('  mount(target?: Node | string): Chip;\n};');
     expect(d.endsWith('export {};\n')).toBe(false);
   });
 
@@ -517,15 +517,18 @@ describe('component declarations: the class shape, the props surface, the extend
     const d = compile('Btn = component extends button\n  @label := "go"\n  render\n    button\n      = @label\n').declarations;
     // The rest view holds the passthrough object itself, spelled inline in a
     // declaration file — DOM-typed per attribute, never a catch-all.
-    expect(d).toContain(`rest: { readonly value: { accesskey?: HTMLElementTagNameMap["button"] extends Record<'accessKey', infer T> ? T : any;`);
+    expect(d).toContain(`rest: { readonly value: { accesskey?: HTMLElementTagNameMap["button"] extends Record<'accessKey', infer T> ? (T extends string | number | boolean | null | undefined ? T : string) : string;`);
     expect(d).not.toContain('Record<string, any>');
-    expect(d).toContain(`disabled?: HTMLElementTagNameMap["button"] extends Record<'disabled', infer T> ? T : any`); // per-tag, DOM-typed
-    expect(d).toContain(`formaction?: HTMLElementTagNameMap["button"] extends Record<'formAction', infer T> ? T : any`); // camelCased DOM twin
-    expect(d).toContain(`id?: HTMLElementTagNameMap["button"] extends Record<'id', infer T> ? T : any`); // global attr, DOM-typed
+    expect(d).toContain(`disabled?: HTMLElementTagNameMap["button"] extends Record<'disabled', infer T> ? (T extends string | number | boolean | null | undefined ? T : string) : boolean`); // a boolean attribute falls back to boolean
+    expect(d).toContain(`itemscope?: HTMLElementTagNameMap["button"] extends Record<'itemscope', infer T> ? (T extends string | number | boolean | null | undefined ? T : string) : boolean`);
+    expect(d).toContain(`type?: HTMLElementTagNameMap["button"] extends Record<'type', infer T> ? (T extends string | number | boolean | null | undefined ? T : string) : string`); // per-tag, DOM-typed
+    expect(d).toContain(`formaction?: HTMLElementTagNameMap["button"] extends Record<'formAction', infer T> ? (T extends string | number | boolean | null | undefined ? T : string) : string`); // camelCased DOM twin
+    expect(d).toContain(`id?: HTMLElementTagNameMap["button"] extends Record<'id', infer T> ? (T extends string | number | boolean | null | undefined ? T : string) : string`); // global attr, DOM-typed
     expect(d).toContain('[key: `data-${string}`]: any; [key: `aria-${string}`]: any');   // rest admits the template keys, never a catch-all
     // A caller passes an undeclared key its value or a container of it; the
     // rest view above holds the value alone.
-    expect(d).toContain(`disabled?: (HTMLElementTagNameMap["button"] extends Record<'disabled', infer T> ? T : any) extends infer __V ? __V | { value: __V | undefined; read(): __V | undefined; touch?(): void } : never`);
+    expect(d).toContain(`type?: (HTMLElementTagNameMap["button"] extends Record<'type', infer T> ? (T extends string | number | boolean | null | undefined ? T : string) : string) extends infer __V ? __V | { value: __V | undefined; read(): __V | undefined; touch?(): void } : never`);
+    expect(d).toContain(`disabled?: (HTMLElementTagNameMap["button"] extends Record<'disabled', infer T> ? (T extends string | number | boolean | null | undefined ? T : string) : boolean) extends infer __V ? __V | { value: __V | undefined; read(): __V | undefined; touch?(): void } : never`);
     expect(d.match(/rest: \{ readonly value: \{([^]*?)\[key:/)[1]).not.toContain('infer __V');
   });
 
@@ -594,10 +597,11 @@ describe('component declarations: the class shape, the props surface, the extend
     expect(card).toContain('children?: Node | string | number | boolean | null;');
     const push = compile('export Push = component extends button\n  @label := "x"\n  render\n    button\n      = @label\n').declarations;
     expect(push.split('\n')[0]).toBe('/// <reference lib="dom" />');
-    // A component that owns `children` and extends nothing spells no
-    // DOM global — the reference follows the names the file uses, so
-    // a schema-only or function-only module stays directive-free too.
-    expect(compile('export Own = component\n  @children: string\n').declarations).not.toContain('<reference');
+    // Every component names `Element` through its `mount`, so every
+    // component file carries the reference; it follows the names the
+    // file uses, so a schema-only or function-only module stays
+    // directive-free.
+    expect(compile('export Own = component\n  @children: string\n').declarations.split('\n')[0]).toBe('/// <reference lib="dom" />');
     expect(compile('export S = schema :input\n  email! email\n').declarations).not.toContain('<reference');
     expect(compile('export def f(a: number): string\n  String(a)\n').declarations).not.toContain('<reference');
   });

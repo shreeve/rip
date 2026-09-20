@@ -10628,7 +10628,7 @@ class Emitter {
     } else if (info.extendsComponent !== null) {
       line(() => this.b.emit(`declare rest: ${restContainerType(restOfComponentText(info))};`));
       line(() => {
-        this.b.emit("static __ripHost() { return new ");
+        this.b.emit("private static __ripHost() { return new ");
         if (info.hostSpan !== null && info.hostNodeId !== null) {
           this.b.markSpan(info.hostNodeId, "identifier", info.hostSpan[0], info.hostSpan[1], () => this.b.emit(info.extendsComponent));
         } else {
@@ -10816,7 +10816,7 @@ class Emitter {
       this.b.tsOnly(() => this.b.emit(`${pad}declare static mount: never;
 `));
     } else {
-      this.b.tsOnly(() => this.b.emit(`${pad}declare static mount: (target?: any) => any;
+      this.b.tsOnly(() => this.b.emit(`${pad}declare static mount: (target?: Node | string) => InstanceType<typeof this>;
 `));
     }
     this.b.tsOnly(() => {
@@ -16017,7 +16017,10 @@ ${pad ?? ""}`);
       }
       if (tsInfo !== null)
         this.tsComponentCtor(tsInfo, pad);
-      this.b.emit(`${pad}_init(__given`);
+      this.b.emit(pad);
+      if (tsInfo !== null)
+        this.b.tsOnly(() => this.b.emit("private "));
+      this.b.emit("_init(__given");
       if (tsInfo !== null)
         this.b.tsOnly(() => {
           this.b.emit(": ");
@@ -16397,7 +16400,10 @@ ${pad ?? ""}`);
       this.rframes.pop();
     }
     this.closeRenderScope(classRecord);
-    this.b.emit(`${pad}_create() {
+    this.b.emit(pad);
+    if (this.ts)
+      this.b.tsOnly(() => this.b.emit("private "));
+    this.b.emit(`_create() {
 `);
     this.mark(renderNode, "$self", () => this.mark(renderNode, "body", () => {
       this.withRecordContext(classRecord, () => {
@@ -16413,7 +16419,10 @@ ${pad ?? ""}`);
     this.b.emit(`${pad}}
 `);
     if (classRecord.setups.length > 0) {
-      this.b.emit(`${pad}_setup() {
+      this.b.emit(pad);
+      if (this.ts)
+        this.b.tsOnly(() => this.b.emit("private "));
+      this.b.emit(`_setup() {
 `);
       this.withRecordContext(classRecord, () => this.replaySetups(classRecord, ipad));
       this.b.emit(`${pad}}
