@@ -62,4 +62,4 @@ bun run demo
 bun run test
 ```
 
-Playwright specs in `test/browser/` drive the demo on Chromium, Firefox, and WebKit, on a server of their own that the config starts, or on the running Sites instance with `RIP_UI_URL=https://ui.local/ bun run test`. They assert platform facts: `dialog:modal` matches after the trigger is clicked, the active element is inside, Escape closes and focus returns to the trigger, focus stays contained past either end, and the document does not scroll while a modal is open.
+Playwright specs in `test/browser/` drive the demo on Chromium and WebKit, on a server of their own that the config starts, or on the running Sites instance with `RIP_UI_URL=https://ui.local/ bun run test`. They assert platform facts: `dialog:modal` matches after the trigger is clicked, the active element is inside, Escape closes and focus returns to the trigger, focus stays contained past either end, and the document does not scroll while a modal is open.

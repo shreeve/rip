@@ -430,7 +430,7 @@ the affected final gates again.
   workflow runs it with the corpus audit and generated-byte gates. It
   is not the edit loop or an automatic pull-request gate. The ONE
   suite it does not carry is `test/browser` — it needs installed
-  Playwright browsers. CI runs its deterministic Chromium/Firefox/WebKit
+  Playwright browsers. CI runs its deterministic Chromium/WebKit
   smoke matrix as a required job (`bun run test:browser`); the live
   Server/Manager suite is explicit through `bun run test:live` and the
   manual `live-certification` workflow. `packages/sites` needs
@@ -446,7 +446,7 @@ the affected final gates again.
   spawning them there (deps come from the repo-root `bun install`; no
   package-local lock).
 - `bun run test:browser` — the required real-DOM Playwright matrix
- (`test/browser`) across Chromium, Firefox, and WebKit. It does not boot
+ (`test/browser`) across Chromium and WebKit. It does not boot
  a live Server/Manager harness and includes the Workspace
  publication-change spec.
 - `bun run test:live` — Chromium against `test/browser/hmr-app` on a live

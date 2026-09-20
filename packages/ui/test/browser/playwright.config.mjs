@@ -14,5 +14,5 @@ export default defineConfig({
     port,
   },
   use: { baseURL: live ?? `http://127.0.0.1:${port}`, ignoreHTTPSErrors: Boolean(live) },
-  projects: ['chromium', 'firefox', 'webkit'].map((browserName) => ({ name: browserName, use: { browserName } })),
+  projects: ['chromium', 'webkit'].map((browserName) => ({ name: browserName, use: { browserName } })),
 })

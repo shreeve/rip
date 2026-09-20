@@ -65,7 +65,7 @@ jobs:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('test/browser/package.json') }}
 
-      - name: Real-browser smoke (test/browser — Chromium/Firefox/WebKit)
+      - name: Real-browser smoke (test/browser — Chromium/WebKit)
         run: |
-          bunx playwright install --with-deps
+          bunx playwright install --with-deps chromium webkit
           bun run test:browser

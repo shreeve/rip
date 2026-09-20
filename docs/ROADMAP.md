@@ -38,7 +38,7 @@ publish story.
 Shipped and CI-certified: `<script type="text/rip">`,
 `assembleRipBundle` → `bootApp` → `launch`, Workspace publication
 consume ([WORKSPACE.md](WORKSPACE.md)), and real-browser Playwright
-(`bun run test:browser`) across Chromium, Firefox, and WebKit.
+(`bun run test:browser`) across Chromium and WebKit.
 
 Product HMR for the contracted Cart bars is done
 ([HMR.md](HMR.md)); optional seam compression only, not morph.
