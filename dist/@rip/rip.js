@@ -25911,45 +25911,30 @@ function setContext(key, value) {
     __currentComponent._context = new Map;
   __currentComponent._context.set(key, value);
 }
-function __findContext(provider, key) {
-  if (provider !== null && typeof provider !== "function") {
-    throw new Error(`context: the provider named for ${JSON.stringify(key)} is not a component`);
+function __findContext(fn, provider, key) {
+  if (typeof provider !== "function") {
+    throw new Error(key === undefined ? `${fn}: a context read names its provider — ${fn}(Provider, ${JSON.stringify(provider)})` : `${fn}: the provider named for ${JSON.stringify(key)} is not a component`);
   }
   let component = __currentComponent;
   const visited = new Set;
   while (component && !visited.has(component)) {
     visited.add(component);
-    const offered = component._context !== undefined && component._context.has(key);
-    if (provider === null) {
-      if (offered)
-        return { found: true, value: component._context.get(key) };
-    } else if (component instanceof provider) {
-      return offered ? { found: true, value: component._context.get(key) } : { found: false, provider: component };
+    if (component instanceof provider) {
+      return component._context !== undefined && component._context.has(key) ? { found: true, value: component._context.get(key) } : { found: false, provider: component };
     }
     component = component._parent;
   }
   return { found: false, provider: null };
 }
 function getContext(provider, key) {
-  if (key === undefined) {
-    key = provider;
-    provider = null;
-  }
-  const hit = __findContext(provider, key);
+  const hit = __findContext("getContext", provider, key);
   if (hit.found)
     return hit.value;
-  if (provider === null) {
-    throw new Error(`getContext: no provider for context ${JSON.stringify(key)} in this component's parent chain — ` + "offer it from an ancestor, or probe with hasContext(key) where absence is legal");
-  }
   const name = provider.name || "the provider";
   throw new Error(hit.provider !== null ? `getContext: ${name} offers no ${JSON.stringify(key)}` : `getContext: no ${name} above this component — render one around it, or probe with hasContext(${name}, ${JSON.stringify(key)}) where absence is legal`);
 }
 function hasContext(provider, key) {
-  if (key === undefined) {
-    key = provider;
-    provider = null;
-  }
-  return __findContext(provider, key).found;
+  return __findContext("hasContext", provider, key).found;
 }
 function __clsx(...args) {
   let out = "";

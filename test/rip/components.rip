@@ -579,7 +579,7 @@ test 'setContext and getContext via effect', '''
     theme =! "dark"
     ~>
       setContext("theme", @theme)
-      result = getContext("theme")
+      result = getContext(A, "theme")
   a = A.new()
   result
 ''', 'dark'
@@ -712,7 +712,7 @@ test 'accept from a binding that holds no component throws at mount, naming the 
     'no throw'
   catch e
     e.message
-''', 'context: the provider named for "theme" is not a component'
+''', 'getContext: the provider named for "theme" is not a component'
 
 # `offer` opens a declaration the way `export` does, so an offer takes an
 # annotation like any other state.
@@ -5210,10 +5210,12 @@ test 'init failure without onError throws from constructor', '''
 test 'context walk terminates on a cycled parent chain', '''
   A = component
     val =! "x"
+  Absent = component
+    val =! "y"
   a = A.new()
   a._parent = a
   __pushComponent(a)
-  result = hasContext("missing")
+  result = hasContext(Absent, "missing")
   __popComponent(null)
   result
   ''', false
@@ -5238,36 +5240,57 @@ test 'context propagates from outer to inner across re-push', '''
   Outer = component
     init = -> setContext("greeting", "hi")
   Inner = component
-    val := getContext("greeting")
+    val := getContext(Outer, "greeting")
   o = Outer.new()
   __pushComponent(o)
   o.init()
   i = Inner.new()
   __popComponent(null)
   __pushComponent(i)
-  again = getContext("greeting")
+  again = getContext(Outer, "greeting")
   __popComponent(null)
   [i.val.value, again]
   ''', ['hi', 'hi']
 
-# A context miss is LOUD — getContext without a provider rejects and
-# names the probe; hasContext is the legal-absence spelling.
+# A context miss is LOUD — getContext with no such provider above rejects
+# and names the probe; hasContext is the legal-absence spelling. A read
+# that names no provider at all is refused, pointing at the spelling.
 
-test 'getContext without a provider rejects; hasContext probes', '''
+test 'getContext with no such provider above rejects; hasContext probes', '''
+  A = component
+    render
+      div
+  Absent = component
+    render
+      div
+  a = A.new()
+  __pushComponent(a)
+  probe = hasContext(Absent, "missing")
+  msg = try
+    getContext(Absent, "missing")
+    "no-throw"
+  catch e
+    e.message
+  __popComponent(null)
+  [probe, msg]
+  ''', [false, 'getContext: no Absent above this component — render one around it, or probe with hasContext(Absent, "missing") where absence is legal']
+
+test 'a context read that names no provider is refused, pointing at the spelling', '''
   A = component
     render
       div
   a = A.new()
   __pushComponent(a)
-  probe = hasContext("missing")
-  msg = try
-    getContext("missing")
-    "no-throw"
-  catch e
-    e.message.includes("no provider")
+  msgs = []
+  for read in [(-> getContext("theme")), (-> hasContext("theme"))]
+    try
+      read()
+      msgs.push "no-throw"
+    catch e
+      msgs.push e.message
   __popComponent(null)
-  [probe, msg]
-  ''', [false, true]
+  msgs
+  ''', ['getContext: a context read names its provider — getContext(Provider, "theme")', 'hasContext: a context read names its provider — hasContext(Provider, "theme")']
 
 test 'mount failure dispatch restores the parent component and owner frames', '''
   source := 0

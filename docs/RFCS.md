@@ -5,7 +5,7 @@ Design proposals under discussion. The **Tags** column groups by area (`type-sys
 |    # | RFC                                                                                  | Tags                   | Status      |
 | ---: | ------------------------------------------------------------------------------------ | ---------------------- | ----------- |
 |    1 | [Split `rip/ui` into headless components and `rip/email`](#rfc-1-split-ripui-into-headless-components-and-ripemail) | `packaging`, `runtime` | 🟢 Implemented |
-|    2 | [Context names its provider: `accept name from Provider`](#rfc-2-context-names-its-provider-accept-name-from-provider) | `compiler`, `runtime`, `type-system` | 🟡 Proposed |
+|    2 | [Context names its provider: `accept name from Provider`](#rfc-2-context-names-its-provider-accept-name-from-provider) | `compiler`, `runtime`, `type-system` | 🟢 Implemented |
 
 ---
 
@@ -53,9 +53,9 @@ The deletion, both packages, and every outside reference land together: `test/to
 
 ## RFC 2: Context names its provider: `accept name from Provider`
 
-> **Status: Proposed.**
+> **Status: Implemented.** Four things landed differently from the first draft of this text, and the sections below say them as they are: the Drawer's root became the Dialog's, with `side` on its popup, where the draft took the package's parts to be separate already; an offer takes an annotation, which no offer could before; a provider that holds no component is a type error on the accept and a throw at mount, where the draft promised a compile error the emitter cannot deliver for an import; and the hand-callable reads name their provider as `accept` does, which the draft left unsaid.
 
-`offer` takes one form, a `:=` declaration. `accept` names the component it reads from: `accept open from Dialog`. The runtime resolves the read to the nearest ancestor instance of that component instead of walking a string map, and the typed face types the accepted member as that component's own offered member. `packages/ui` moves in the same change. Nothing else in the language changes.
+`offer` takes one form, a `:=` declaration. `accept` names the component it reads from: `accept open from Dialog`. The runtime resolves the read to the nearest ancestor instance of that component instead of walking a string map, and the typed face types the accepted member as that component's own offered member. The hand-callable `getContext` and `hasContext` name their provider the same way. `packages/ui` moves in the same change. Nothing else in the language changes.
 
 ### Why
 
@@ -69,9 +69,11 @@ The deletion, both packages, and every outside reference land together: `test/to
 
 **`accept name from Provider`.** `Provider` is a component binding in module scope, defined in the module or imported. The lowering is `this.name = getContext(Provider, 'name')`. The runtime walks the parent chain for the nearest instance of `Provider`, reads the member from that instance's offered set, and returns its container; a miss throws at mount naming both the provider and the member. A `Provider` that is not bound in the module is a compile error at the word. One bound to something that is not a component is caught where it can be seen: the emitter cannot tell what an import holds, so it is a type error on the accept, `'Plain' is not a component, so it offers nothing to accept`, and in untyped code a throw at mount that names the member. Any binding that holds the component provides, so an alias does, as it does everywhere else a component is named: `Drawer = Dialog` makes `accept open from Drawer` the same read, and an app that imports `Drawer` writes that. The bare `accept name` is a compile error naming the new spelling.
 
+**The calls underneath.** `setContext`, `getContext`, and `hasContext` are callable from source, and `offer` and `accept` are spellings over them. The two reads name their provider too: `getContext(Provider, key)` and `hasContext(Provider, key)`. A read by key alone is the flat namespace under another name, so it is refused at the call, pointing at the spelling. Nothing is lost with it: `setContext` runs only inside a component's init, so every value has a provider to name, a plain value comes back as it was set, and a class written by hand provides as a compiled one does. This breaks any caller outside these repos that reads by key alone. `setContext(key, value)` is unchanged.
+
 **The type.** The face declares the accepted member as the provider's own offered member, the taken container `{ value: boolean; read(): boolean; touch?(): void }`, so reads and writes through it type as `boolean`. Every component carries a TS-only `__offers` record of its offered names, empty when it offers nothing, and the accept indexes through it off the provider's value, `NonNullable<InstanceType<typeof Dialog>['__offers']>['open']`, so an alias or an import provides as a direct binding does. It indexes what the provider offers and not what it has: `DialogClose` carries a member named `open`, its own accept, and naming it as a provider is the miss the runtime throws on, so it is a type error at the accept, reported once on the name as `DialogClose offers no 'open'`. The `.d.ts` road shares the segments, so a package's consumers see the same types.
 
-**Hover.** An accepted name answers `(accept) open: boolean`, value-first, the kind minted from the spelling as `(state)` is. The keywords `offer` and `accept` decline as structure keywords do. An offered member answers as its own kind, and nothing in the answer says it is offered.
+**Hover.** An accepted name answers `(accept) open: boolean`, value-first, the kind minted from the spelling as `(state)` is. The keywords `offer`, `accept`, and `from` decline as structure keywords do. An offered member answers as its own kind, and nothing in the answer says it is offered.
 
 **What it reaches.** An offered member is readable from anywhere that can import its provider. A library's parts name a provider inside the library. An app that wants a library themed renders the library's provider and hands it the value as a prop. A library cannot reach an app's provider, because it cannot import it. A root offering a value to every descendant is written as a provider component, the same shape the dialog already has:
 
@@ -111,4 +113,4 @@ export Card = component
 
 ### One change
 
-The grammar production, the lexer's statement boundary for `offer`, and the emitter's two lowerings, the JS read and the face's declare; the offered-names record in `src/ts/components.js`, which `rip check --public` skips and the browser bundle stubs; the runtime's `getContext` signature; the miss's wording in `mapTsDiagnostic`; `dialog.rip`, and `drawer.rip` reduced to aliases of the Dialog's root and parts with `side` on its popup; the components fixture in the corpus rewritten in the new spelling, its claims rows and error pins, and the ruling row unparked with its hover pin; the emitter-cases battery line and the runtime-components context scenario; `docs/TYPES.md`. medlabs offers and accepts nothing and needs no edit.
+The grammar production, the lexer's statement boundary for `offer`, and the emitter's two lowerings, the JS read and the face's declare; the offered-names record in `src/ts/components.js`, which `rip check --public` skips and the browser bundle stubs; the runtime's `getContext` and `hasContext` signatures, with every hand-written read in the tests naming its provider; the miss's wording in `mapTsDiagnostic`; `dialog.rip`, and `drawer.rip` reduced to aliases of the Dialog's root and parts with `side` on its popup; the components fixture in the corpus rewritten in the new spelling, its claims rows and error pins, and the ruling row unparked with its hover pin; the emitter-cases battery line and the runtime-components context scenario; `docs/TYPES.md`. medlabs offers and accepts nothing and needs no edit.

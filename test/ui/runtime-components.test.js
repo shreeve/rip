@@ -836,9 +836,9 @@ describe('context: offer/accept walks', () => {
       const Leaf = defineComponent(api, {
         name: 'Leaf', props: [],
         init(props, a) {
-          this.theme = a.getContext('theme');       // the signal container
-          out.push(a.getContext('version'));        // a readonly offer: the plain value
-          out.push(a.hasContext('theme'), a.hasContext('nope'));
+          this.theme = a.getContext(Root, 'theme');       // the signal container
+          out.push(a.getContext(Root, 'version'));        // a plain value comes back as it was set
+          out.push(a.hasContext(Root, 'theme'), a.hasContext(Root, 'nope'));
         },
         create() { return document.createComment('leaf'); },
       });
@@ -883,12 +883,12 @@ describe('context: offer/accept walks', () => {
       .toEqual(['throw', 'Error']);
   });
 
-  test('a nearer provider shadows a farther one', () => {
+  test('a read answers the provider it names, past a nearer one that set the same key', () => {
     expect(both((api) => {
       const out = [];
       const Leaf = defineComponent(api, {
         name: 'Leaf', props: [],
-        init(props, a) { out.push(a.getContext('depth')); },
+        init(props, a) { out.push(a.getContext(Mid, 'depth'), a.getContext(Root, 'depth')); },
         create() { return document.createComment('leaf'); },
       });
       const Mid = defineComponent(api, {
@@ -911,7 +911,7 @@ describe('context: offer/accept walks', () => {
       });
       new Root({}).mount(document.createElement('body'));
       return out;
-    })).toEqual(['mid']);
+    })).toEqual(['mid', 'root']);
   });
 });
 
@@ -932,7 +932,7 @@ describe('teardown ordering: descendants tear down before ancestors release', ()
       const Leaf = defineComponent(api, {
         name: 'Leaf', props: [],
         init(props, a) {
-          const pool = a.getContext('pool');
+          const pool = a.getContext(Root, 'pool');
           a.__effect(() => () => log.push(`leaf-cleanup pool=${pool.read()}`));
         },
         create() { return document.createComment('leaf'); },
@@ -1551,14 +1551,23 @@ describe('defect battery: emit outside the mounted window is loud in ;  drops it
 
 describe('defect battery: a context miss is loud in ;  returns undefined and dies downstream', () => {
 
-  test('getContext on a missing key rejects naming the key and the probe', () => {
+  test('getContext with no such provider above rejects naming the provider, the key, and the probe', () => {
+    const Theme = defineComponent(RT, { name: 'Theme', props: [] });
+    const Kid = defineComponent(RT, {
+      name: 'Kid', props: [],
+      init(props, a) { this.theme = a.getContext(Theme, 'theme'); },
+    });
+    expect(() => new Kid({})).toThrow(
+ 'getContext: no Theme above this component — render one around it, or probe with hasContext(Theme, "theme") where absence is legal',
+    );
+  });
+
+  test('a read that names no provider is refused, pointing at the spelling', () => {
     const Kid = defineComponent(RT, {
       name: 'Kid', props: [],
       init(props, a) { this.theme = a.getContext('theme'); },
     });
-    expect(() => new Kid({})).toThrow(
- 'getContext: no provider for context "theme" in this component\'s parent chain — offer it from an ancestor, or probe with hasContext(key) where absence is legal',
-    );
+    expect(() => new Kid({})).toThrow('getContext: a context read names its provider — getContext(Provider, "theme")');
   });
 
 });
@@ -1921,10 +1930,11 @@ const ALL_COMPONENT_NAMES = ['setContext', 'getContext', 'hasContext', '__Compon
 // A program that exercises the runtime for real without the language
 // surface: a hand-built component scope around the context API.
 const RUN_SRC = [
- 'c = {_parent: null}',
+ 'class Holder',
+ 'c = Holder.new()',
  'prev = __pushComponent(c)',
  'setContext("theme", "dark")',
- 'console.log(getContext("theme"))',
+ 'console.log(getContext(Holder, "theme"))',
  'console.log(__clsx("a", {b: true}, ["c"]))',
  '__popComponent(prev)',
 ].join('\n');
@@ -1972,10 +1982,11 @@ describe('runtime delivery: the components runtime', () => {
     expect(rows).toHaveLength(1);
     // Value pin via none+binding against the shared modules.
     const valueSrc = [
-      'c = {_parent: null}',
+      'class Holder',
+      'c = Holder.new()',
       'prev = __pushComponent(c)',
       'setContext("theme", "dark")',
-      'theme = getContext("theme")',
+      'theme = getContext(Holder, "theme")',
       'cls = __clsx("a", {b: true}, ["c"])',
       '__popComponent(prev)',
     ].join('\n');
@@ -2144,10 +2155,11 @@ describe('runtime delivery: the components runtime', () => {
     // Byte-shape parity of the two deliveries is covered above; the
     // observable value is pinned once via none+binding.
     const valueSrc = [
-      'c = {_parent: null}',
+      'class Holder',
+      'c = Holder.new()',
       'prev = __pushComponent(c)',
       'setContext("theme", "dark")',
-      'theme = getContext("theme")',
+      'theme = getContext(Holder, "theme")',
       'cls = __clsx("a", {b: true}, ["c"])',
       '__popComponent(prev)',
     ].join('\n');
