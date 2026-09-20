@@ -91,6 +91,71 @@ const yieldsIn = (x) => {
 // `spellable`, when given, decides which module names a `typeof`
 // spelling may root at — the declaration road passes the names its own
 // file binds; a refused root types the member `any`.
+// The keys the host's own render line sets, less any the body reads
+// back through `@rest.<key>`: the runtime never writes those from rest
+// (the line's), so the props surface leaves them out and a caller's
+// value for one is refused rather than dropped. The host line is the
+// first class-scope element of the tag, or construction of the
+// component, in the render, the emitter's own binding rule; a branch
+// or loop body never binds.
+function lineOwnedKeys(stmts, host, isComponent) {
+  const owned = new Set();
+  if (host === null) return owned;
+  const render = stmts.find((st) => isNode(st) && st[0] === 'render');
+  if (!render || !isBlock(render[1])) return owned;
+  const headOf = (n) => {
+    if (typeof n === 'string') return n;
+    if (isNode(n) && n[0] === '.' && typeof n[1] === 'string') return n[1];
+    return null;
+  };
+  const tagOf = (head) => head === null ? null : head.split(/[#.]/)[0];
+  const keysOf = (node) => {
+    const head = headOf(node[0]);
+    if (!isComponent) {
+      if (head.includes('#')) owned.add('id');
+      if (head.includes('.') || (isNode(node[0]) && node[0][0] === '.')) { owned.add('class'); owned.add('className'); }
+    }
+    const take = (obj) => {
+      for (const pair of obj.slice(1)) {
+        if (!isNode(pair) || pair.length !== 3 || typeof pair[1] !== 'string') continue;
+        const key = pair[1].replace(/^"|"$/g, '');
+        if (key === 'ref' || key === 'key' || key.startsWith('__')) continue;
+        owned.add(key);
+      }
+    };
+    for (const arg of node.slice(1)) {
+      if (isNode(arg) && arg[0] === 'object') take(arg);
+      else if (isNode(arg) && arg[0] === '->' && isBlock(arg[2])) for (const child of arg[2].slice(1)) if (isNode(child) && child[0] === 'object') take(child);
+    }
+    if (owned.has('class') || owned.has('className')) { owned.add('class'); owned.add('className'); }
+  };
+  // Class scope: the render's statements, and the bodies of elements
+  // on the way down; a construct (if/for/switch) is not descended.
+  const walk = (items) => {
+    for (const item of items) {
+      const head = headOf(isNode(item) ? item[0] : item);
+      if (head !== null && (isComponent ? head === host : tagOf(head) === host)) {
+        if (isNode(item)) keysOf(item);
+        return true;
+      }
+      if (isNode(item) && head !== null && !/^[A-Z]/.test(tagOf(head) ?? '')) {
+        for (const arg of item.slice(1)) if (isNode(arg) && arg[0] === '->' && isBlock(arg[2]) && walk(arg[2].slice(1))) return true;
+      }
+    }
+    return false;
+  };
+  walk(render[1].slice(1));
+  const reads = new Set();
+  const scan = (n) => {
+    if (!isNode(n)) return;
+    if (n[0] === '.' && isNode(n[1]) && n[1][0] === '.' && n[1][1] === 'this' && n[1][2] === 'rest' && typeof n[2] === 'string') reads.add(n[2]);
+    for (const c of n) scan(c);
+  };
+  for (const st of stmts) scan(st);
+  for (const key of reads) { owned.delete(key); if (key === 'class' || key === 'className') { owned.delete('class'); owned.delete('className'); } }
+  return owned;
+}
+
 export function componentTypeInfo(stores, source, node, behavior = null, { spellable = null } = {}) {
   const [, parent, body] = node;
   // The host: a tag, or a component the render constructs (JS emission
@@ -236,9 +301,11 @@ export function componentTypeInfo(stores, source, node, behavior = null, { spell
   // typeof).
   const siblings = new Set(members.map((m) => m.name));
   for (const m of members) { m.siblings = siblings; m.behavior = behavior; m.spellable = spellable; }
+  const lineOwned = lineOwnedKeys(stmts, extendsTag ?? extendsComponent, extendsComponent !== null);
   return {
     extendsTag,
     extendsComponent,
+    lineOwned,
     behavior,
     members,
     roleText,
@@ -362,8 +429,9 @@ export const containerType = (t, ro = '', notify = TAKEN) =>
   `{ ${ro}value: ${t}; read(): ${t}${ro === '' ? notify : ''} }`;
 
 // What a caller may pass for an undeclared key: the value, or a
-// container of it (the rest view reads it through). `t` is spelled once.
-export const valueOrContainer = (t) => `(${t}) extends infer __V ? __V | ${containerType('__V')} : never`;
+// container of it (the rest view reads it through). The key is optional,
+// so the container may hold undefined as the value may. `t` is spelled once.
+export const valueOrContainer = (t) => `(${t}) extends infer __V ? __V | ${containerType('__V | undefined')} : never`;
 
 // The rest view's container: readonly value WITH touch(). The runtime
 // holds this._rest by reference and _setRestProp mutates-then-touches
@@ -732,7 +800,7 @@ export const restAliasName = (tag) => `__RipRest_${tag.replace(/[^A-Za-z0-9_]/g,
 // Spelled inline on both roads: the host name is the only reference,
 // and a declaration file resolves it through its own import or binding.
 export const restOfComponentText = (info) => {
-  const own = new Set(['children']);
+  const own = new Set(['children', ...(info.lineOwned ?? [])]);
   for (const m of publicProps(info)) own.add(m.name);
   const keys = [...[...own].map((k) => `'${k}'`), '`__bind_${string}__`'].join(' | ');
   return `(NonNullable<ConstructorParameters<typeof ${info.extendsComponent}>[0]> extends infer __P ? (__P extends unknown ? Omit<__P, ${keys}> : never) : never)`;
@@ -787,7 +855,7 @@ export function propsTypeSegments(info, { road = 'dts' } = {}) {
     // The passthrough object (restPassthroughEntries), less any key a
     // declared prop already owns.
     for (const [key, t] of restPassthroughEntries(info.extendsTag, road)) {
-      if (used.has(key)) continue;
+      if (used.has(key) || info.lineOwned?.has(key)) continue;
       segs.push({ text: `; ${keyText(key)}?: ${valueOrContainer(t)}` });
     }
     segs.push({ text: `; ${REST_TEMPLATES}` });

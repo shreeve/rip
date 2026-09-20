@@ -525,13 +525,34 @@ describe('component declarations: the class shape, the props surface, the extend
     expect(d).toContain('[key: `data-${string}`]: any; [key: `aria-${string}`]: any');   // rest admits the template keys, never a catch-all
     // A caller passes an undeclared key its value or a container of it; the
     // rest view above holds the value alone.
-    expect(d).toContain(`disabled?: (HTMLElementTagNameMap["button"] extends Record<'disabled', infer T> ? T : any) extends infer __V ? __V | { value: __V; read(): __V; touch?(): void } : never`);
+    expect(d).toContain(`disabled?: (HTMLElementTagNameMap["button"] extends Record<'disabled', infer T> ? T : any) extends infer __V ? __V | { value: __V | undefined; read(): __V | undefined; touch?(): void } : never`);
     expect(d.match(/rest: \{ readonly value: \{([^]*?)\[key:/)[1]).not.toContain('infer __V');
+  });
+
+  test("extends: a key the host line sets leaves the props surface, unless the body reads it back through `@rest`", () => {
+    const d = compile("Btn = component extends button\n  render\n    button#go.primary type: 'button'\n      title: 't'\n      @click: (-> null)\n      slot\n").declarations;
+    const ctorOf = (text, name) => { const at = text.indexOf('new (props?:'); return text.slice(at, text.indexOf(`): ${name}`, at)); };
+    const hasKey = (text, key) => new RegExp(`[ ;{]${key}\\?:`).test(text);
+    const props = ctorOf(d, 'Btn');
+    for (const key of ['type', 'title', 'id', 'class', 'className']) expect(hasKey(props, key)).toBe(false);
+    expect(hasKey(props, 'disabled')).toBe(true);
+    // The rest view keeps every attribute: the line reads through it.
+    expect(hasKey(d.match(/rest: \{ readonly value: \{([^]*?)\[key:/)[1], 'type')).toBe(true);
+    const read = compile("Titled = component extends h2\n  id =! @rest.id ?? 'm'\n  render\n    h2 id: id\n      slot\n").declarations;
+    expect(hasKey(ctorOf(read, 'Titled'), 'id')).toBe(true);
+    // A branch or loop body never binds the host, so its keys are nobody's.
+    const deep = compile("Btn = component extends button\n  vis := true\n  render\n    div\n      if vis\n        button type: 'submit'\n      button title: 't'\n").declarations;
+    const deepProps = ctorOf(deep, 'Btn');
+    expect(hasKey(deepProps, 'type')).toBe(true);
+    expect(hasKey(deepProps, 'title')).toBe(false);
+    // A component host constructed inside an element body binds too.
+    const hosted = compile("Btn = component extends button\n  render\n    button\n      slot\nWrap = component extends Btn\n  render\n    div\n      Btn title: 't'\n        slot\n").declarations;
+    expect(hosted).toContain("Omit<__P, 'children' | 'title' | `__bind_${string}__`>");
   });
 
   test('extends a component: the props surface is the host\'s less the declared keys, and the rest view holds that object', () => {
     const d = compile("import { Popup } from './popup.rip'\nSheet = component extends Popup\n  @side := 'left'\n  render\n    Popup data-side: @side\n      slot\n").declarations;
-    const omitted = "(NonNullable<ConstructorParameters<typeof Popup>[0]> extends infer __P ? (__P extends unknown ? Omit<__P, 'children' | 'side' | `__bind_${string}__`> : never) : never)";
+    const omitted = "(NonNullable<ConstructorParameters<typeof Popup>[0]> extends infer __P ? (__P extends unknown ? Omit<__P, 'children' | 'data-side' | 'side' | `__bind_${string}__`> : never) : never)";
     // The parameter is required under a component host (the host may
     // carry a required prop this surface cannot name).
     expect(d).toContain(`new (props: { side?: string`);

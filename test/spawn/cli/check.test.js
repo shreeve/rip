@@ -391,6 +391,41 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  test('a key the host line sets is refused at a use, on both hosts; a key the line reads back stays passable', async () => {
+    const dir = workspace({
+      'app.rip': [
+        'Btn = component extends button',
+        '  render',
+        "    button type: 'button'",
+        '      slot',
+        'Host = component extends Btn',
+        '  render',
+        "    Btn title: 'host'",
+        '      slot',
+        'Titled = component extends h2',
+        "  id =! @rest.id ?? 'minted'",
+        '  render',
+        '    h2 id: id',
+        '      slot',
+        'export Page = component',
+        '  render',
+        '    div',
+        "      Btn type: 'submit', 'refused: the line owns type'",
+        "      Btn title: 'ok', 'fine: the line does not set title'",
+        "      Host title: 'refused', 'refused: the host line owns title'",
+        "      Host type: 'refused', 'refused: Btn owns type, through Host'",
+        "      Titled id: 'given', 'fine: the line reads @rest.id'",
+        '',
+      ].join('\n'),
+    });
+    try {
+      const { stdout, status } = await check(dir);
+      expect(status).toBe(1);
+      const lines = stdout.split('\n').filter((l) => /^app\.rip:\d+:\d+ - error TS2353/.test(l)).map((l) => Number(l.split(':')[1]));
+      expect(lines).toEqual([17, 19, 20]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   // The two face-only BEHAVIOR OBJECTS (a component's computed members, a
   // schema's callables) are re-emissions of bodies the descriptor and _init
   // already carry, and each has a shape that the fixtures which drove them
