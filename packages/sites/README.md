@@ -1220,7 +1220,7 @@ Rip App and browser tests establish:
    quarantined generation, or reload to a newer complete bundle.
 6. Initial HTTP boot and the last committed App remain usable while the Hub is
    unavailable.
-7. Real-browser Chromium, Firefox, and WebKit scenarios exercise initial load
+7. Real-browser Chromium and WebKit scenarios exercise initial load
    and live change; focused feed tests exercise disconnect, reconnect, races,
    and failed activation.
 
@@ -1655,5 +1655,5 @@ bun run test:browser
 ```
 
 The first command covers the compiler and generated browser bundle; Playwright
-certifies the real browser App and Workspace path across Chromium, Firefox,
-and WebKit.
+certifies the real browser App and Workspace path across Chromium and
+WebKit.

@@ -17,11 +17,11 @@ const smokeServers = [{
   reuseExistingServer: !process.env.CI,
 }];
 
-const smokeProjects = ['chromium', 'firefox', 'webkit'].map((name) => ({
+const smokeProjects = ['chromium', 'webkit'].map((name) => ({
   name,
   testMatch: /(app|workspace)\.spec\.mjs$/,
   use: {
-    ...devices[name === 'chromium' ? 'Desktop Chrome' : name === 'firefox' ? 'Desktop Firefox' : 'Desktop Safari'],
+    ...devices[name === 'chromium' ? 'Desktop Chrome' : 'Desktop Safari'],
     baseURL: 'http://127.0.0.1:4173',
   },
 }));

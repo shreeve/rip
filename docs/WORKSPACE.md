@@ -261,7 +261,7 @@ The complete implementation is pinned by tests for:
 7. last-known-good behavior after compile or activation failure;
 8. duplicate, missing, racing, and reconnect transitions;
 9. watch-off boot with no file-publication channel requirement; and
-10. real-browser Chromium, Firefox, and WebKit coverage.
+10. real-browser Chromium and WebKit coverage.
 
 The Server/Manager half and browser half are separate test boundaries. The
 wire contract has one format; there is no compatibility adapter or dual
