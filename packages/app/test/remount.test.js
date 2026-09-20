@@ -491,17 +491,30 @@ describe('renderer remountDirty', () => {
       target: target(),
     });
 
-    await renderer.mount(info);
-    components.setCompiled('failed/page.rip', { Page: Breaks });
-    // The patch fails, then the floor fails: the chain keeps a failed instance.
-    await expect(renderer.remountDirty(['failed/page.rip'])).rejects.toBeDefined();
-    expect(renderer.current._state).toBe('failed');
+    // The renderer announces a failed patch on console.error before it
+    // falls back; capture it so the announcement is asserted, not printed.
+    const reported = [];
+    const prev = console.error;
+    console.error = (...args) => { reported.push(args); };
+    try {
+      await renderer.mount(info);
+      components.setCompiled('failed/page.rip', { Page: Breaks });
+      // The patch fails, then the floor fails: the chain keeps a failed instance.
+      await expect(renderer.remountDirty(['failed/page.rip'])).rejects.toBeDefined();
+      expect(renderer.current._state).toBe('failed');
+      expect(reported).toHaveLength(1);
+      expect(reported[0][0]).toBe('[Rip] HMR patch failed; falling back to remount:');
+      expect(reported[0][1].message).toBe('broken render');
 
-    components.setCompiled('failed/page.rip', { Page: Mended });
-    expect(await renderer.remountDirty(['failed/page.rip'])).toBe('narrow');
-    expect(renderer.current).toBeInstanceOf(Mended);
-    expect(renderer.current._state).toBe('mounted');
-    renderer.stop();
+      components.setCompiled('failed/page.rip', { Page: Mended });
+      expect(await renderer.remountDirty(['failed/page.rip'])).toBe('narrow');
+      expect(renderer.current).toBeInstanceOf(Mended);
+      expect(renderer.current._state).toBe('mounted');
+      expect(reported).toHaveLength(1);
+      renderer.stop();
+    } finally {
+      console.error = prev;
+    }
   });
 
   test('a registered instance that was never mounted takes the floor', async () => {
