@@ -114,8 +114,8 @@ Routed = component
       = user.name
       span "#{mode}: #{entry}"
 
-# ── offer / accept: minimal grammar coverage only ──
-# The channel's model is PARKED: no pin lands while it is open (RULINGS.md, Components / render).
+# ── offer / accept: an accept names the component it reads from ──
+# The accepted name answers value-first; the provider is a plain reference (RULINGS.md, Components / render).
 
 Give = component
   offer theme := 'dark'
@@ -124,7 +124,7 @@ Give = component
     div 'give'
 
 Take = component
-  accept theme
+  accept theme from Give
 
   render
     span 'take'

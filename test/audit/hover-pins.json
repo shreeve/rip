@@ -428,6 +428,22 @@
         "why": "the path leaf; an address into the app stash, erased at emit, so no symbol stands at the word — ruled silent"
       },
       {
+        "line": 127,
+        "character": 9,
+        "token": "theme",
+        "expect": "(accept) theme: string",
+        "rule": "member declaration (accept)",
+        "why": "an accepted member is the named provider's own offered member, so it answers value-first under its minted kind like the offer it reads; the face indexes the provider's record of what it offers, and the container never shows"
+      },
+      {
+        "line": 127,
+        "character": 20,
+        "token": "Give",
+        "expect": "let Give: typeof Give",
+        "rule": "accept provider name",
+        "why": "the provider after `from` is a real reference to the component, marked on the author's bytes, so it answers as every bare reference to a component does and navigates and renames with it"
+      },
+      {
         "line": 162,
         "character": 6,
         "token": "aria-busy",

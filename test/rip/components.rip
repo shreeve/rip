@@ -614,12 +614,12 @@ test 'a part projected through slot accepts what the receiving root offers', '''
 
     seen = []
     Part = component
-      accept open
+      accept open from Root
       ~> seen.push open
       render
         span
     Other = component
-      accept open
+      accept open from Root
       ~> seen.push open
       render
         em
@@ -646,7 +646,7 @@ test 'a part projected through slot accepts what the receiving root offers', '''
 test 'offer and accept share the same signal', '''
   result = null
   Child = component
-    accept active
+    accept active from Parent
     ~> result = active
   Parent = component
     offer active := "hello"
@@ -655,6 +655,90 @@ test 'offer and accept share the same signal', '''
   __popComponent(null)
   result
 ''', 'hello'
+
+# The read names its provider: a nearer ancestor offering the same key
+# is passed over, and a provider that is not above the reader is a miss
+# at mount, naming both.
+test 'accept reads the named provider past a nearer one offering the same key', '''
+  result = null
+  Child = component
+    accept active from Outer
+    ~> result = active
+  Inner = component
+    offer active := "inner"
+  Outer = component
+    offer active := "outer"
+  o = __pushComponent(Outer.new())
+  i = __pushComponent(Inner.new())
+  c = Child.new()
+  __popComponent(null)
+  result
+''', 'outer'
+
+test 'accept without the named provider above it throws at mount', '''
+  Child = component
+    accept active from Outer
+  Inner = component
+    offer active := "inner"
+  Outer = component
+    offer active := "outer"
+  i = __pushComponent(Inner.new())
+  try
+    Child.new()
+    'no throw'
+  catch e
+    e.message
+''', 'getContext: no Outer above this component — render one around it, or probe with hasContext(Outer, "active") where absence is legal'
+
+test 'accept of a member the named provider does not offer throws at mount', '''
+  Child = component
+    accept theme from Root
+  Root = component
+    offer active := "x"
+  r = __pushComponent(Root.new())
+  try
+    Child.new()
+    'no throw'
+  catch e
+    e.message
+''', 'getContext: Root offers no "theme"'
+
+test 'accept from a binding that holds no component throws at mount, naming the member', '''
+  Plain = 5
+  Child = component
+    accept theme from Plain
+  try
+    Child.new()
+    'no throw'
+  catch e
+    e.message
+''', 'context: the provider named for "theme" is not a component'
+
+fail 'accept names its provider', '''
+  Child = component
+    accept active
+''', 'emitter: accept names its provider'
+
+fail 'accept reads from a component, not any binding', '''
+  mint = -> 1
+  Child = component
+    accept active from mint
+''', "emitter: accept reads from a component bound in this module — 'mint' is not one"
+
+fail 'offer takes a state declaration, not a readonly', '''
+  Root = component
+    offer limit =! 10
+''', 'emitter: offer takes a state declaration'
+
+fail 'offer takes a state declaration, not a computed', '''
+  Root = component
+    offer total ~= 1
+''', 'emitter: offer takes a state declaration'
+
+fail 'offer takes a state declaration, not a method', '''
+  Root = component
+    offer save = (e) ->
+''', 'emitter: offer takes a state declaration'
 
 test 'component multiple computed chain', '''
   A = component
@@ -1504,19 +1588,34 @@ code 'offer compiles to state + setContext', '''
   };
   '''
 
-code 'accept compiles to getContext', '''
-  export A = component
-    accept active
+code 'accept compiles to getContext naming the provider', '''
+  export Root = component
+    offer active := "hello"
+    render
+      div
+  export Part = component
+    accept active from Root
     render
       div
   ''', '''
-  export const A = class extends __Component {
+  export const Root = class extends __Component {
     _init(__given) {
-      this.active = getContext('active');
+      this.active = __state("hello");
+      setContext('active', this.active);
     }
     _create() {
       this._el0 = document.createElement('div');
-      this._el0.setAttribute('data-part', 'A');
+      this._el0.setAttribute('data-part', 'Root');
+      return this._el0;
+    }
+  };
+  export const Part = class extends __Component {
+    _init(__given) {
+      this.active = getContext(Root, 'active');
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'Part');
       return this._el0;
     }
   };

@@ -2049,7 +2049,7 @@ describe('runtime delivery: the components runtime', () => {
       '__pushComponent = null',
       '__popComponent = null',
       'Child = component',
-      '  accept theme',
+      '  accept theme from Parent',
       '  render',
       '    span',
       '      = theme',

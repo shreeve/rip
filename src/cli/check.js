@@ -826,6 +826,7 @@ while (queue.length) {
       // The emitter's per-position records — the unknown-attribute rows
       // the mapper re-words, so batch and editor read one message.
       intrinsics: result.intrinsics ?? [],
+      kinds: result.kinds ?? [],
       // Display-side route-union prettifying (mapTsDiagnostic): the CLI
       // reads the same words the editor does.
       routeEntries: appRoutesFor(fsPath, workspaceRoot, routesMemo).entries,

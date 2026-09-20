@@ -193,14 +193,16 @@ export function componentTypeInfo(stores, source, node, behavior = null, { spell
     const kind = semantic(stmt);
     if (kind === 'render' || kind === 'effect') return;
     if (kind === 'offer') {
+      const from = members.length;
       classify(stmt[1]);
+      for (let i = from; i < members.length; i++) members[i].offered = true;
       return;
     }
     if (kind === 'accept' && typeof stmt[1] === 'string') {
       members.push({
         node: stmt, name: stmt[1], kind: 'accept', isPublic: false,
         optional: false, hasDefault: false, annotation: null,
-        nameNode: stmt, nameRole: 'name',
+        nameNode: stmt, nameRole: 'name', provider: typeof stmt[2] === 'string' ? stmt[2] : null,
       });
       return;
     }
@@ -516,13 +518,26 @@ const typeofSpelling = (v, spellable = null) => {
   return null;
 };
 
+// The TS-only record of what a component offers, each name with the
+// container an accept takes. EVERY component carries it, empty included:
+// the class road's `_`-prefixed index signature would otherwise answer a
+// missing record as `any`, and an accept naming a component that offers
+// nothing would type clean. A `__`-prefixed user name rejects at parse,
+// so the key can never be an author's.
+export const OFFERS = '__offers';
+export const offersRecordText = (info) => {
+  const rows = info.members.filter((m) => m.offered === true)
+    .map((m) => `${m.name}: ${memberTypeSegments(m, '', info).map((s) => s.text).join('')}`);
+  return rows.length === 0 ? '{}' : `{ ${rows.join('; ')} }`;
+};
+
 // Does the face declare this member as the lowering's CONTAINER rather
 // than as its value? Only these have a container for a declaration
 // hover to see past — a `=!` or plain member's declared type IS its
 // value type (`declare readonly cap: number`), and a member whose
 // annotation happens to spell the container shape by hand meant it.
 export const declaresContainer = (m) =>
-  containerish(m) || m.kind === 'computed' || m.kind === 'gate';
+  containerish(m) || m.kind === 'computed' || m.kind === 'gate' || m.kind === 'accept';
 
 // Does this member's face type read through the lowering's behavior
 // object? The projection below is the one member type spelled from a
@@ -599,7 +614,22 @@ const memberTypeSegments = (m, lead, info = null) => {
     ? [{ text: `: ${t}`, node: m.node, role: 'annotation' }]
     : [{ text: ': any' }];
   const vt = t ?? 'any';
-  if (m.kind === 'accept') return [{ text: `${lead}any` }];
+  // An accepted member is the provider's own OFFERED member, indexed
+  // through the record of what it offers (offersRecordText): a member the
+  // provider merely has is a miss at mount, so it must be one here. The
+  // provider is read as a VALUE: an alias of a component (`Drawer =
+  // Dialog`) is a provider the runtime honors, and it has no type of its
+  // own name to index. Its name is a reference like any other, so it
+  // carries the span the author wrote after `from`: unmapped, it would be
+  // a generated-only occurrence, and a rename of the component refuses.
+  if (m.kind === 'accept') {
+    if (m.provider === null) return [{ text: `${lead}any` }];
+    return [
+      { text: `${lead}NonNullable<InstanceType<typeof ` },
+      { text: m.provider, node: m.node, role: 'provider' },
+      { text: `>['${OFFERS}']>['${m.name}']` },
+    ];
+  }
   // The container renders the member's type TWICE — once on `value`, once
   // as `read()`'s return. Both spellings are the same annotation, so both
   // carry its span: an unmarked one falls to whatever cover encloses the
@@ -1207,6 +1237,9 @@ export function instanceTypeLines(info, selfType, { road = 'dts' } = {}) {
     lines.push({ segs: [{ text: `${name}?: any;` }] });
   }
   if (!hasChildren) lines.push({ segs: [{ text: `children?: ${childrenType(road)};` }] });
+  // Optional, like the ambience: a hand-built value assigned to the
+  // interface owes no record.
+  lines.push({ segs: [{ text: `${OFFERS}?: ${offersRecordText(info)};` }] });
   // The rest view: the passthrough object, named on the face and inline
   // in the declarations (a .d.ts owes its reader a self-contained type).
   if (info.extendsTag !== null) lines.push({ segs: [{ text: `rest: ${restContainerType(road === 'face' ? restAliasName(info.extendsTag) : restPassthroughText(info.extendsTag))};` }] });

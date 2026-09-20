@@ -296,6 +296,33 @@ export function mapTsDiagnostic(good, d) {
     // the span keeps its own voice.
     if (row && d.code === 2339 && d.message.includes(`'${row.name}'`)) return null;
   }
+  // AN ACCEPT ITS PROVIDER DOES NOT ANSWER. The face types an accept by
+  // indexing the record of what the provider offers, so tsgo reports a
+  // miss in that record's vocabulary: a property absent from `{}`, or a
+  // value that fails InstanceType's constraint. The type is spelled
+  // twice, on the class's `declare` line and on the companion interface,
+  // and so is a miss in it. The class's copy is the one report, because
+  // every component has a class and a nested or expression-valued one has
+  // no companion. Its type text carries no row, so it maps onto the whole
+  // component; it re-anchors on the accept's own name, found by that name
+  // inside the component it mapped to, and reads as the runtime's claim
+  // would at mount.
+  if (d.code === 2339 || d.code === 2344) {
+    const lineStart = good.code.lastIndexOf('\n', s) + 1;
+    const lineEnd = good.code.indexOf('\n', s);
+    const line = good.code.slice(lineStart, lineEnd === -1 ? undefined : lineEnd);
+    if (line.includes("['__offers']>")) {
+      const name = /^declare ([A-Za-z_$][\w$]*): /.exec(line.trimStart())?.[1];
+      if (name === undefined) return null;
+      const row = (good.kinds ?? []).find((k) => k.provider != null && k.name === name && k.start >= span[0] && k.end <= span[1]);
+      if (row) {
+        span = [row.start, row.end];
+        message = d.code === 2339 && d.message.includes(`'${row.name}'`)
+          ? `${row.provider} offers no '${row.name}'`
+          : `'${row.provider}' is not a component, so it offers nothing to accept`;
+      }
+    }
+  }
   return {
     severity: d.severity ?? 1,
     code: d.code,

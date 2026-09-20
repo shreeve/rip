@@ -15,6 +15,8 @@
 //   __popComponent(prev)      - restore the previous component
 //   setContext(key, value)    - provide a context value on the current
 //                               component (init-time only)
+//   getContext(Provider, key) - read a context value from the nearest
+//                               ancestor instance of Provider
 //   getContext(key)           - read a context value from the nearest
 //                               provider up the parent chain; a missing
 //                               key REJECTS loudly (hasContext is the
@@ -488,36 +490,58 @@ function setContext(key, value) {
   __currentComponent._context.set(key, value);
 }
 
-// The context read is LOUD on a miss: the miss is
-// detectable right here, and returning undefined manufactures a
-// distant `.value` TypeError (or a silently rendered undefined) at
-// the consumer. hasContext is the optional-use probe. The value
-// comes back AS ITS CONTAINER — the signal a reactive member offered,
-// the plain value a readonly offered — the accept container contract.
-function getContext(key) {
+// The context read is LOUD on a miss: the miss is detectable right
+// here, and returning undefined manufactures a distant `.value`
+// TypeError (or a silently rendered undefined) at the consumer.
+// hasContext is the optional-use probe. The value comes back as it was
+// set: for a compiled offer, the state container an accept reads and
+// writes.
+//
+// A read that names its provider answers from the nearest ancestor
+// that is an instance of that component, and nothing else on the walk:
+// a provider above it that offers the same key is not consulted. A key
+// alone answers from the nearest ancestor offering it.
+function __findContext(provider, key) {
+  // `instanceof` against a value that is not callable throws a TypeError
+  // that names neither the accept nor what was passed.
+  if (provider !== null && typeof provider !== 'function') {
+    throw new Error(`context: the provider named for ${JSON.stringify(key)} is not a component`);
+  }
   let component = __currentComponent;
   // Cycle guard: a corrupted _parent chain must not hang the lookup.
   const visited = new Set();
   while (component && !visited.has(component)) {
     visited.add(component);
-    if (component._context && component._context.has(key)) return component._context.get(key);
+    const offered = component._context !== undefined && component._context.has(key);
+    if (provider === null) {
+      if (offered) return { found: true, value: component._context.get(key) };
+    } else if (component instanceof provider) {
+      return offered ? { found: true, value: component._context.get(key) } : { found: false, provider: component };
+    }
     component = component._parent;
   }
-  throw new Error(
-    `getContext: no provider for context ${JSON.stringify(key)} in this component's parent chain — ` +
-    'offer it from an ancestor, or probe with hasContext(key) where absence is legal',
-  );
+  return { found: false, provider: null };
 }
 
-function hasContext(key) {
-  let component = __currentComponent;
-  const visited = new Set();
-  while (component && !visited.has(component)) {
-    visited.add(component);
-    if (component._context && component._context.has(key)) return true;
-    component = component._parent;
+function getContext(provider, key) {
+  if (key === undefined) { key = provider; provider = null; }
+  const hit = __findContext(provider, key);
+  if (hit.found) return hit.value;
+  if (provider === null) {
+    throw new Error(
+      `getContext: no provider for context ${JSON.stringify(key)} in this component's parent chain — ` +
+      'offer it from an ancestor, or probe with hasContext(key) where absence is legal',
+    );
   }
-  return false;
+  const name = provider.name || 'the provider';
+  throw new Error(hit.provider !== null
+    ? `getContext: ${name} offers no ${JSON.stringify(key)}`
+    : `getContext: no ${name} above this component — render one around it, or probe with hasContext(${name}, ${JSON.stringify(key)}) where absence is legal`);
+}
+
+function hasContext(provider, key) {
+  if (key === undefined) { key = provider; provider = null; }
+  return __findContext(provider, key).found;
 }
 
 function __clsx(...args) {

@@ -656,6 +656,7 @@ type 'void slot: optionality reaches inside the container only where absence can
     params?: any;
     query?: any;
     children?: Node | string | number | boolean | null;
+    __offers?: {};
     mount(target?: Node | string): Panel;
     unmount(options?: { removeDOM?: boolean }): void;
     emit(name: string, detail?: unknown): void;

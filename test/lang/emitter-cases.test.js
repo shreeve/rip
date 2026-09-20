@@ -339,7 +339,7 @@ describe('compiler-generated runtime aliases', () => {
       .join('\n');
     const context = [
       'ContextChild = component',
-      '  accept theme',
+      '  accept theme from ContextParent',
       'ContextParent = component',
       '  offer theme := "dark"',
     ].join('\n');

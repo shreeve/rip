@@ -349,7 +349,11 @@ describe('the member model: _init lowering and member unwrap', () => {
     console.log note
   ~> console.log count
   offer theme := "dark"
-  accept locale
+  accept locale from Locale
+  render
+    div "x"
+Locale = component
+  offer locale := "en"
   render
     div "x"
 `;
@@ -371,7 +375,7 @@ describe('the member model: _init lowering and member unwrap', () => {
  'this.note = "plain";',
  'this.total = __computed(() => (this.count.value * 2));',
  'this.theme = __state("dark");',
-      "this.locale = getContext('locale');",
+      "this.locale = getContext(Locale, 'locale');",
       "setContext('theme', this.theme);",
  '__effect(() => { return console.log(this.count.value); });',
     ]);
@@ -507,7 +511,7 @@ describe('the defect layer: every silent  class rejects loudly, positioned', () 
   test('#123: duplicate member names reject across ALL kinds', () => {
     emitFails('C = component\n  count := 0\n  count ~= 5\n  render\n    div "x"', /duplicate component member 'count'/s);
     emitFails('C = component\n  save = -> 1\n  save := 0\n  render\n    div "x"', /duplicate component member 'save'/);
-    emitFails('C = component\n  x := 0\n  accept x\n  render\n    div "x"', /duplicate component member 'x'/);
+    emitFails('Root = component\n  offer x := 1\n  render\n    div "x"\nC = component\n  x := 0\n  accept x from Root\n  render\n    div "x"', /duplicate component member 'x'/);
     emitFails('C = component\n  @flag\n  flag = 1\n  render\n    div "x"', /duplicate component member 'flag'/);
     emitFails('C = component\n  mounted = -> 1\n  mounted = -> 2\n  render\n    div "x"', /duplicate component member 'mounted'/);
   });
@@ -582,8 +586,8 @@ describe('the defect layer: every silent  class rejects loudly, positioned', () 
   });
 
   test('#127: offer of a non-declaration rejects ', () => {
-    emitFails('C = component\n  offer console.log("hi")\n  render\n    div "x"', /offer takes a member DECLARATION/s);
-    emitFails('C = component\n  offer 42\n  render\n    div "x"', /offer takes a member DECLARATION/);
+    emitFails('C = component\n  offer console.log("hi")\n  render\n    div "x"', /offer takes a state declaration/s);
+    emitFails('C = component\n  offer 42\n  render\n    div "x"', /offer takes a state declaration/);
   });
 
   test('#140: a bound effect in a component body rejects ', () => {

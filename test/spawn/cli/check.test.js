@@ -426,6 +426,72 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  // An accept is typed from what its provider OFFERS, never from what it
+  // has: `Part` carries a member named `open` (its own accept), and naming
+  // it as a provider is the miss the runtime throws at mount. Each miss is
+  // one report, on the accept's name, in the words the runtime would use,
+  // whether or not the component has a companion interface to repeat it.
+  test('an accept is typed from what its provider offers, and a miss names the provider once, on the name', async () => {
+    const dir = workspace({
+      'app.rip': [
+        'export Root = component',
+        '  offer open := false',
+        '  render',
+        '    slot',
+        'Alias = Root',
+        'export Part = component',
+        '  accept open from Root',
+        '  shut = -> open = false',
+        '  render',
+        '    span',
+        'export ViaAlias = component',
+        '  accept open from Alias',
+        '  flag: boolean =! open',
+        '  render',
+        '    span',
+        'export HasButDoesNotOffer = component',
+        '  accept open from Part',
+        '  render',
+        '    span',
+        'export Misspelled = component',
+        '  accept opne from Root',
+        '  render',
+        '    span',
+        'Plain = 5',
+        'export NotAComponent = component',
+        '  accept open from Plain',
+        '  render',
+        '    span',
+        'export WrongType = component',
+        '  accept open from Root',
+        '  label: string =! open',
+        '  render',
+        '    span',
+        'export held = [',
+        '  component',
+        '    accept opne from Root',
+        '    render',
+        '      span',
+        ']',
+        '',
+      ].join('\n'),
+    });
+    try {
+      const { stdout, status } = await check(dir);
+      expect(status).toBe(1);
+      const errors = stdout.split('\n').filter((l) => /^app\.rip:\d+:\d+ - error/.test(l)).map((l) => l.replace(/ - error TS\d+:/, ''));
+      expect(errors).toEqual([
+        "app.rip:17:10 Part offers no 'open'",
+        "app.rip:21:10 Root offers no 'opne'",
+        "app.rip:26:10 'Plain' is not a component, so it offers nothing to accept",
+        "app.rip:31:3 Type 'boolean' is not assignable to type 'string'.",
+        // A component no binding names has no companion interface, so the
+        // class's copy of the miss is the only one there is.
+        "app.rip:36:12 Root offers no 'opne'",
+      ]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   // The two face-only BEHAVIOR OBJECTS (a component's computed members, a
   // schema's callables) are re-emissions of bodies the descriptor and _init
   // already carry, and each has a shape that the fixtures which drove them

@@ -949,7 +949,8 @@ grammar =
     o 'Expression'
     o 'Statement'
     o 'OFFER Expression' , '["offer", 2]' , 'offer: _, value'
-    o 'ACCEPT IDENTIFIER', '["accept", 2]', 'accept: _, name'
+    o 'ACCEPT IDENTIFIER'                , '["accept", 2]'   , 'accept: _, name'
+    o 'ACCEPT IDENTIFIER FROM IDENTIFIER', '["accept", 2, 4]', 'accept: _, name, provider'
   ]
 
   # Render block: the template DSL for fine-grained reactive DOM.
@@ -1494,7 +1495,7 @@ displays =
 # sit outside the schema by design.
 
 kinds =
-  'accept':        ['name']
+  'accept':        ['name', 'provider']
   'array':         ['elisions', 'items']
   'as':            ['alias', 'name']
   'assign':        ['annotation', 'operator', 'optionalMarker', 'target', 'typeParams', 'value', 'voidMarker']

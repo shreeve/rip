@@ -33,7 +33,7 @@ import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttri
 import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls, CLSX_TYPE, STYLE_FN_TYPE } from './ts/dom-types.js';
 import { restAliasName, restPassthroughText, restOfComponentText, COMPONENT_FAILURE_TYPE,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
-  declaresContainer, ambientClassDeclares, plainBehaviorValued,
+  declaresContainer, ambientClassDeclares, plainBehaviorValued, OFFERS, offersRecordText,
   propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType, restContainerType, MINTED,
   componentCtorMembers, componentCtorSegments, runtimeApiDeclares,
   syntacticLiteralType,
@@ -1991,7 +1991,7 @@ class Emitter {
   // appended `.value` to a bare name), so the channel's meaning is "a
   // position that answers VALUE-FIRST"; a consumer holding an instance
   // is in neither set and keeps the container. Spans and nothing else.
-  static MEMBER_KINDS = { state: 'state', computed: 'computed', readonly: 'readonly', gate: 'gate' };
+  static MEMBER_KINDS = { state: 'state', computed: 'computed', readonly: 'readonly', gate: 'gate', accept: 'accept' };
 
   // A member's minted word. The PROP test is the `@` sigil, not the operator:
   // `@shades?: T := []` is a prop carrying a default, and reading its `:=`
@@ -2015,7 +2015,10 @@ class Emitter {
     // own does for an optional member.
     const label = Emitter.memberLabel(m);
     if (label !== null) {
-      this.kinds.push({ start: row.sourceStart, end: row.sourceEnd, label, name: m.name, optional: m.optional === true });
+      // An accept's row names its provider, so a miss reported on the name
+      // can say which component was asked (mapTsDiagnostic).
+      this.kinds.push({ start: row.sourceStart, end: row.sourceEnd, label, name: m.name, optional: m.optional === true,
+        ...(m.kind === 'accept' && m.provider != null ? { provider: m.provider } : {}) });
     }
     if (!declaresContainer(m)) return;
     this.memberDecls.push({
@@ -2701,6 +2704,7 @@ class Emitter {
     // surfaces) that the editor shows as `Children`.
     if (!hasChildren) line(() => this.b.emit('declare children?: __RipChildren;'));
     this._needsChildren = true;
+    line(() => this.b.emit(`declare ${OFFERS}: ${offersRecordText(info)};`));
     // The ambience helper the `stash` field infers through is declared
     // once at MODULE scope, from the emit() tail — keyed off the USE,
     // never off companion emission: expression-valued and function-
@@ -9184,7 +9188,7 @@ class Emitter {
   // lowers to _create()/_setup(). The categorization is TOTAL — a body
   // statement matching no category REJECTS positioned,
   // duplicate members and render blocks reject, and
-  // `offer` takes member declarations only (#127).
+  // `offer` takes a state declaration only (#127).
 
   // The exact-five lifecycle hooks (module COMPONENT_HOOKS above).
   static COMPONENT_HOOKS = COMPONENT_HOOKS;
@@ -9218,7 +9222,7 @@ class Emitter {
 
   isRenderNode(x) { return this.componentKindOf(x, 'render', 2); }
   isOfferNode(x) { return this.componentKindOf(x, 'offer', 2); }
-  isAcceptNode(x) { return this.componentKindOf(x, 'accept', 2); }
+  isAcceptNode(x) { return this.componentKindOf(x, 'accept', 2) || this.componentKindOf(x, 'accept', 3); }
 
   // A member TARGET: `x` (private) or `@x` ([".", "this", "x"] —
   // public). Returns { name, isPublic } or null.
@@ -9383,6 +9387,7 @@ class Emitter {
     const effects = [];
     const offeredVars = [];
     const acceptedVars = [];
+    const acceptProviders = new Map();
     let renderNode = null;
 
     const members = new Map();       // name → kind (the frame's map)
@@ -9492,8 +9497,19 @@ class Emitter {
       if (this.isAcceptNode(stmt)) {
         if (offered) rejectOffer(stmt);
         this.noteHeadKeyword('context-channel', 'accept', stmt);
+        if (stmt.length === 2) {
+          throw this.positionedError(stmt,
+            `emitter: accept names its provider — \`accept ${stmt[1]} from <Component>\` reads the nearest ` +
+            'ancestor instance of that component', node);
+        }
+        const provider = stmt[2];
+        if (!(isComponentName(provider) && (this.inScope(provider) || this.moduleBound.has(provider)))) {
+          throw this.positionedError(stmt,
+            `emitter: accept reads from a component bound in this module — '${provider}' is not one`, node);
+        }
         declare(stmt[1], 'accept', stmt, true);
         acceptedVars.push(stmt[1]);
+        acceptProviders.set(stmt[1], provider);
         return;
       }
       if (this.isGateDecl(stmt)) {
@@ -9650,16 +9666,14 @@ class Emitter {
     };
     const rejectOffer = (stmt) => {
       throw this.positionedError(stmt,
-        'emitter: offer takes a member DECLARATION — `offer theme := v`, `offer limit =! v`, `offer total ~= e`, ' +
-        '`offer save = (e) ->` — anything else has no context key to publish', node);
+        'emitter: offer takes a state declaration — `offer theme := v` — so every offered value is a ' +
+        'container an accept reads and writes', node);
     };
 
     for (const stmt of stmts) {
       if (this.isOfferNode(stmt)) {
         const payload = stmt[1];
-        const declKinds = this.isReactiveDecl(payload) || this.isReadonlyDecl(payload) ||
-          (isNode(payload) && (payload[0] === '=' || payload[0] === 'void-assign') && payload.length === 3 && Emitter.memberTarget(payload[1]) !== null);
-        if (!declKinds) rejectOffer(stmt);
+        if (!(this.isReactiveDecl(payload) && payload[0] === 'state')) rejectOffer(stmt);
         this.noteHeadKeyword('context-channel', 'offer', stmt);
         categorize(payload, true);
         const t = Emitter.memberTarget(payload[1]);
@@ -9977,7 +9991,12 @@ class Emitter {
         const stmt = seen.get(name);
         initLine(stmt, () => {
           memberName(stmt, name, 'name');
-          this.b.emit(` = ${this.runtimeName('getContext')}('${name}')`);
+          // The provider is a real reference, marked on the bytes the author
+          // wrote after `from`, so the name there hovers, defines, renames,
+          // and colors as the component it names.
+          this.b.emit(` = ${this.runtimeName('getContext')}(`);
+          this.mark(stmt, 'provider', () => this.noteNameSpan(acceptProviders.get(name)));
+          this.b.emit(`, '${name}')`);
         });
       };
       const emitState = (m) => {

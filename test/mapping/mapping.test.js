@@ -199,7 +199,7 @@ describe('TS face: consumed vocabulary is recorded where the compiler eats it', 
   test('the context channel words are recorded, the name they bind is not', () => {
     expect(vocabOf("G = component\n  offer theme := 'dark'\n\n  render\n    div 'g'\n"))
       .toEqual([{ kind: 'context-channel', text: 'offer' }]);
-    expect(vocabOf("T = component\n  accept theme\n\n  render\n    span 't'\n"))
+    expect(vocabOf("Give = component\n  render\n    div 'g'\nT = component\n  accept theme from Give\n\n  render\n    span 't'\n"))
       .toEqual([{ kind: 'context-channel', text: 'accept' }]);
   });
 

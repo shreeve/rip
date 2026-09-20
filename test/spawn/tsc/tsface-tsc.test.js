@@ -220,7 +220,7 @@ const CLEAN_ROWS = [
  'Chip = component\n  @label := "c"\n  fire = ->\n    @emit "pick", @label\n  render\n    span.chip\n      = @label\nDeck = component extends section\n  name := "n"\n  onPick = (e) -> 1\n  render\n    section.deck\n      Chip label: name, @pick: @onPick\n        "projected"\nconsole.log Chip, Deck',
     //  offer/accept + the dynamic render layer (swap/reconcile
     // scaffolding, bind, ref) stay quiet through the face
- 'App = component\n  offer theme := "dark"\n  items := [1]\n  vis := true\n  sel := ""\n  el := null\n  onClick = -> vis = !vis\n  render\n    div\n      button @click\n      if vis\n        p "on"\n      ul\n        for item in items\n          li key: item\n            = item\n      input type: "text", value <=> sel\n      div ref: el\nSub = component\n  accept theme\n  render\n    span\n      = @theme\nconsole.log App, Sub',
+ 'App = component\n  offer theme := "dark"\n  items := [1]\n  vis := true\n  sel := ""\n  el := null\n  onClick = -> vis = !vis\n  render\n    div\n      button @click\n      if vis\n        p "on"\n      ul\n        for item in items\n          li key: item\n            = item\n      input type: "text", value <=> sel\n      div ref: el\nSub = component\n  accept theme from App\n  render\n    span\n      = @theme\nconsole.log App, Sub',
     // The GPT addendum F1: a declared @children prop owns the key —
     // the face carries NO duplicate `children` entries (was TS2300 ×4
     // + TS2717 ×2 on this five-line legal component)

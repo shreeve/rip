@@ -1430,9 +1430,11 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
  '  total: number ~= count * 2',
  '  limit: number =! 100',
  '  note = "n"',
- '  accept theme',
+ '  accept theme from Theme',
  '  bump = (n: number): number -> count += n',
  '  mounted = -> console.log "hi"',
+ 'Theme = component',
+ '  offer theme := "dark"',
  '',
   ].join('\n');
 
@@ -1447,7 +1449,7 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     expect(code).toContain('declare total: { readonly value: number; read(): number };'); // computed
     expect(code).toContain('declare readonly limit: number;'); // =! members declare readonly                   // readonly: the raw value
     expect(code).toContain('declare note: string;');                   // plain field: literal initializer infers 
-    expect(code).toContain('declare theme: any;');                     // accept: the cross-component boundary is honest any
+    expect(code).toContain("declare theme: NonNullable<InstanceType<typeof Theme>['__offers']>['theme'];"); // accept: the provider's own offered member, read off the value so an alias provides too
     expect(code).toContain('declare children?: __RipChildren;');       // the projection slot (slot reads this.children), typed as what the runtime delivers
     expect(code).toContain('[key: `_${string}`]: any;');               // the minted/runtime slot namespace
   });
