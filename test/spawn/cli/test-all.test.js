@@ -126,6 +126,25 @@ describe('the lane orchestrator', () => {
     expect(afterSummary).toContain('Expected: 2'); // the assertion detail, not just the name
   });
 
+  test('a rip-harness failure far above the lane tail still names its test after the summary', () => {
+    // A package lane of many sub-suites (packages/sites) prints its one
+    // `✗` line where that sub-suite finished, with every later suite's
+    // green checks below it — well past the 60 lines the tail repeats.
+    const failure = '  ✗ stop command exits the canonical manager: expected 0, got null';
+    const body = [
+      `console.log(${JSON.stringify(failure)});`,
+      "for (let i = 0; i < 80; i++) console.log(`  ✓ later case ${i}`);",
+      "console.log('18 tests: 17 passed, 1 failed');",
+      'process.exit(1);',
+      '',
+    ].join('\n');
+    const r = orchestrate(fixture({ alpha: GREEN, sites: { script: 'bun suite.test.js', body } }));
+    expect(r.stdout).toContain('✗ packages/sites');
+    expect(r.status).not.toBe(0);
+    const afterSummary = r.stdout.slice(r.stdout.indexOf('summary —'));
+    expect(afterSummary).toContain(failure);
+  });
+
   test('a red ROOT lane fails the run (the root suite is aggregated like any other)', () => {
     const root = fixture({ alpha: GREEN });
     writeFileSync(join(root, 'test/root.test.js'), FAILING);

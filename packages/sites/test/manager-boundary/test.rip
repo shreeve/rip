@@ -483,7 +483,9 @@ test! 'stop command gracefully deregisters and exits the canonical manager', ->
 
     stopped = run project, ['stop', project]
     eq await stopped.proc.exited, 0
-    eq manager.exitCode, 0
+    # `stop` returns once the control socket stops answering, which is
+    # before the process has finished exiting; await the exit itself.
+    eq await manager.exited, 0
     eq JSON.parse(await stopped.out),
       name: 'project'
       root: realpathSync(project)
