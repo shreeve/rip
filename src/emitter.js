@@ -5219,6 +5219,33 @@ class Emitter {
         'move it to the top level, or guard the exported value instead (`export x = v if c`)');
     }
     const head = node[0];
+    // A TYPE-ONLY re-export (`export type { … } from …`, the side-band
+    // typeOnly role) is `import type`'s mirror: the whole statement
+    // erases from the JS, so the module is never loaded for it, and the
+    // TS face keeps it as one region whose stripping reproduces the JS
+    // byte for byte.
+    const nodeId = this.stores.idOf(node);
+    if (head === 'export-from' && nodeId !== null && this.stores.role(nodeId, 'typeOnly') !== null) {
+      if (!this.ts) {
+        this.mark(node, '$self', () => {});
+        this.mark(node, 'source', () => {});
+        return;
+      }
+      this.b.tsOnly(() => {
+        this.mark(node, '$self', () => {
+          this.b.emit('export ');
+          this.mark(node, 'typeOnly', () => this.b.emit('type'));
+          this.b.emit(' { ');
+          this.emitSpecifiers(node[1]);
+          this.b.emit(' } from ');
+          const specStart = this.b.offset;
+          this.mark(node, 'source', () => this.b.emit(this.moduleSource(node[2])));
+          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(node[2]) });
+        });
+        this.b.emit(';');
+      });
+      return;
+    }
     this.mark(node, '$self', () => {
       if (head === 'export-all') {
         if (node.length === 3) {

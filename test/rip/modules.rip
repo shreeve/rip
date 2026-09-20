@@ -112,6 +112,23 @@ code "export from block", '''
   } from "./math"
   ''', "export { add, multiply as times } from './math';"
 
+# A type-only re-export is `import type`'s mirror: the statement erases
+# from the JS whole, so the module is never loaded for it, and the
+# declarations keep it. Only the brace selects the keyword — `export type
+# Name = …` is a declaration, and `type` is still a legal binding name.
+code "export type from erases", '''
+  export type { Shape, Side as Edge } from "./geometry"
+  x = 1
+  ''', '''
+  let x = 1;
+  '''
+type "export type from declares", 'export type { Shape, Side as Edge } from "./geometry"', '''
+  export type { Shape, Side as Edge } from './geometry';
+  '''
+code "a binding named type still exports", 'export type = 1', 'export const type = 1;'
+fail "export type needs its source", 'export type { Shape }', 'expected from'
+fail "no per-specifier type keyword", 'export { type Shape } from "./geometry"', 'Unexpected'
+
 # ==============================================================================
 # Meta Properties (ES6)
 # ==============================================================================

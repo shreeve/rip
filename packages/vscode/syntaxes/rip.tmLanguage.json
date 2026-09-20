@@ -412,11 +412,12 @@
 
     {"comment": "=== IMPORT STATEMENTS (before keywords so imported names get scoped) ==="},
     {
-      "comment": "Named exports: export { a, b as c }. The twin of the named-import rule below, and load-bearing for the same reason the import one is: without it the `as` in an export list is loose, and the cast rule downstream would read `as c` as a cast and paint the exported name as a type.",
-      "begin": "\\b(export)\\s*(\\{)",
+      "comment": "Named exports: export { a, b as c }, plain or type-only (`export type { … } from`) — one rule, as the import one folds `type` in. The twin of the named-import rule below, and load-bearing for the same reason the import one is: without it the `as` in an export list is loose, and the cast rule downstream would read `as c` as a cast and paint the exported name as a type.",
+      "begin": "\\b(export)(?:\\s+(type))?\\s*(\\{)",
       "beginCaptures": {
         "1": { "name": "keyword.control.rip" },
-        "2": { "name": "punctuation.definition.modules.begin.rip" }
+        "2": { "name": "keyword.control.type.rip" },
+        "3": { "name": "punctuation.definition.modules.begin.rip" }
       },
       "end": "(\\})",
       "endCaptures": {

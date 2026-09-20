@@ -1,11 +1,10 @@
+import type { ClosedBy } from 'rip/ui'
 import { Dialog, DialogClose, DialogDescription, DialogPopup, DialogTitle, DialogTrigger } from 'rip/ui'
 import { COMPONENTS } from '../components.rip'
 
-type ClosedBy = 'any' | 'closerequest' | 'none' | undefined
-
 export DialogPage = component
   open := false
-  closedby: ClosedBy := undefined
+  closedby: ClosedBy | undefined := undefined
   render
     div class: 'mx-auto max-w-2xl px-5 py-8 md:px-8 md:py-10'
       h1 class: 'text-2xl font-semibold', COMPONENTS.dialog.name
@@ -45,7 +44,7 @@ export DialogPage = component
         h2 class: 'text-xs-plus font-medium text-tertiary', 'Dismissal'
         p class: 'mt-2 text-sm text-secondary', 'The page passes closedby to the popup. Left out, the popup uses any: Escape and a click on the backdrop both close it.'
         div class: 'mt-4 flex flex-wrap items-center gap-2'
-          for option in [undefined, 'any', 'closerequest', 'none'] as ClosedBy[]
+          for option in [undefined, 'any', 'closerequest', 'none'] as (ClosedBy | undefined)[]
             button
               type: 'button'
               aria-pressed: if closedby is option then 'true' else 'false'

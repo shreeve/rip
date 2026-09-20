@@ -1456,6 +1456,16 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         return text.slice(at, j) !== 'from';
       })()) {
         push('IMPORT_TYPE', word, start, pos);
+      } else if (word === 'type' && prev?.kind === 'EXPORT' && (() => {
+        // Contextual: `export type {` opens a TYPE-ONLY re-export, the
+        // mirror of `import type`. Only the brace selects it: `export
+        // type Name = …` is a declaration (src/types.js folds it), and
+        // `export type = 1` is a binding named `type`.
+        let at = pos;
+        while (text[at] === ' ' || text[at] === '\t') at++;
+        return text[at] === '{';
+      })()) {
+        push('EXPORT_TYPE', word, start, pos);
       } else if (word === 'as' && seenFor !== null) {
         // After FOR on the same logical line, `as` is the iterator-
         // protocol connector (`for x as iterable`); `as!` is its

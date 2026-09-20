@@ -213,6 +213,14 @@ grammar =
     o 'EXPORT EXPORT_ALL AS (Identifier[alias] | DEFAULT[alias]) FROM String[source]', '["export-all", @source, @alias]', 'export: _, source, alias'
     o 'EXPORT { } FROM String'                             , '["export-from", "{}", 5]'       , 'export: _, spec, source'
     o 'EXPORT { ExportSpecifierList OptComma } FROM String', '["export-from", 3, 7]'          , 'export: _, spec, source'
+    # A TYPE-ONLY re-export (`export type { … } from …`), the mirror of
+    # `import type`: the keyword rides the side-band typeOnly role and
+    # the node keeps the plain re-export's shape. The statement erases
+    # from the JS whole — the module is never loaded for it — and the
+    # TS face and the declarations keep it as `export type …`. One
+    # spelling: no per-specifier `type`, and no source-less form, since
+    # a local type exports at its own declaration.
+    o 'EXPORT EXPORT_TYPE[typeOnly] { ExportSpecifierList OptComma } FROM String', '["export-from", 4, 8]', 'export: _, spec, source'
   ]
 
   # An exported binding (`export x = v`; typed `export x: T = v`).
@@ -1362,6 +1370,7 @@ displays =
   OPT_MARKER: '?'
   VOID_MARKER: '!'
   IMPORT_TYPE: 'type'
+  EXPORT_TYPE: 'type'
   # Layout and lexer-classified kinds, in the words a reader knows.
   TERMINATOR: 'newline'
   INDENT: 'indent'
@@ -1510,7 +1519,7 @@ kinds =
   'enum':          ['body', 'name']
   'existence':     ['operator', 'value']
   'expansion':     []
-  'export':        ['alias', 'source', 'spec']
+  'export':        ['alias', 'source', 'spec', 'typeOnly']
   'foras':         ['await', 'body', 'guard', 'iterable', 'vars']
   'forin':         ['body', 'guard', 'iterable', 'step', 'vars']
   'forof':         ['body', 'guard', 'object', 'own', 'vars']

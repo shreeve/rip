@@ -179,6 +179,45 @@ test('the two plain readings of `type` keep their statements', () => {
   expect(two.code).toContain("import { type } from 'mod';");
 });
 
+test('an `export type … from` re-export erases the whole statement — the module never runs, and the facade still loads', async () => {
+  const { dir, url } = build({
+    'lib.rip': LIB,
+    'facade.rip': [
+      "export type { Shape } from './lib.rip'",
+      'export ready = true',
+    ].join('\n') + '\n',
+  }, 'facade.rip');
+  const logged = [];
+  const realLog = console.log;
+  console.log = (...a) => logged.push(a.join(' '));
+  try {
+    const mod = await import(url);
+    expect(mod.ready).toBe(true);
+    expect(Object.keys(mod)).toEqual(['ready']);
+    expect(logged).not.toContain('lib ran');
+  } finally {
+    console.log = realLog;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a type-only re-export erases from the JS, rides the TS face and the declarations, and leaves its plain neighbors alone', () => {
+  const src = [
+    "export type { Shape, Form as F } from './lib.rip'",
+    "export { make } from './lib.rip'",
+    "export type Side = 'l' | 'r'",
+    'export type = 1',
+  ].join('\n') + '\n';
+  const js = compile(src, { runtimeDelivery: 'none' });
+  expect(js.code).toBe("\nexport { make } from './lib.rip';\nexport const type = 1;");
+  expect(js.declarations).toContain("export type { Shape, Form as F } from './lib.rip';");
+  expect(js.declarations).toContain("export { make } from './lib.rip';");
+  const ts = compile(src, { runtimeDelivery: 'none', face: 'ts' });
+  expect(ts.code).toContain("export type { Shape, Form as F } from './lib.rip';");
+  // The strip gate: deleting the TS-only regions reproduces the JS.
+  expect(stripFace(ts.code, ts.tsRegions)).toBe(js.code);
+});
+
 test('every type-only clause form erases from the JS and rides the TS face', () => {
   const src = [
     "import type Big from './big.rip'",

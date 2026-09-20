@@ -560,7 +560,9 @@ export function emitDeclarations({ sexpr, stores, source }) {
     }
     if (head === 'export-from') {
       const spec = stmt[1] === '{}' ? '{}' : `{ ${specListText(stmt[1])} }`;
-      pass.lines.push(`export ${spec} from ${moduleSourceText(stmt[2])};`);
+      const id = stores.idOf(stmt);
+      const typeOnly = id !== null && stores.role(id, 'typeOnly') !== null;
+      pass.lines.push(`export ${typeOnly ? 'type ' : ''}${spec} from ${moduleSourceText(stmt[2])};`);
       return;
     }
     if (head === 'export-default') {
