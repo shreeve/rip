@@ -26199,6 +26199,37 @@ function __style(el, value) {
   for (const k of Object.keys(value))
     __writeStyle(el.style, k, value[k]);
 }
+var __BOOLEAN_ATTRS = new Set([
+  "disabled",
+  "hidden",
+  "readonly",
+  "required",
+  "checked",
+  "selected",
+  "autofocus",
+  "autoplay",
+  "controls",
+  "loop",
+  "muted",
+  "multiple",
+  "novalidate",
+  "open",
+  "reversed",
+  "defer",
+  "async",
+  "formnovalidate",
+  "allowfullscreen",
+  "inert",
+  "ismap",
+  "nomodule",
+  "playsinline",
+  "default",
+  "itemscope",
+  "alpha",
+  "shadowrootdelegatesfocus",
+  "shadowrootclonable",
+  "shadowrootserializable"
+]);
 var __restView = (rest) => new Proxy(rest, {
   get(map, key) {
     const held = map[key];
@@ -26416,24 +26447,18 @@ class __Component {
       el[key] = value ?? "";
       return;
     }
-    if (key in el && !key.includes("-")) {
-      if (typeof el[key] === "boolean")
-        el[key] = !!value;
-      else if (value == null)
-        el.removeAttribute(key);
-      else
-        el[key] = value;
+    if (key === "checked") {
+      el.checked = !!value;
       return;
     }
-    if (value == null || value === false) {
+    if (__BOOLEAN_ATTRS.has(key)) {
+      el.toggleAttribute(key, !!value);
+      return;
+    }
+    if (value == null)
       el.removeAttribute(key);
-      return;
-    }
-    if (value === true) {
-      el.setAttribute(key, "");
-      return;
-    }
-    el.setAttribute(key, value);
+    else
+      el.setAttribute(key, value);
   }
   _beginMount() {
     if (this._state === "new") {

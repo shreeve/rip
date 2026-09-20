@@ -43,6 +43,7 @@ Wrapped = component extends Probe
 export Home = component
   tip: string | undefined := undefined
   flag: boolean | undefined := undefined
+  pressed := false
   kind: 'submit' | 'reset' := 'submit'
   state := 'x'
   derived ~= state
@@ -53,8 +54,9 @@ export Home = component
       section
         button id: 'nullish-set', @click: (-> tip = 'hello'; flag = true), 'set'
         button id: 'nullish-unset', @click: (-> tip = undefined; flag = undefined), 'unset'
-        WrapA id: 'wrap-a', title: tip, hidden: flag, lang: tip
-        a id: 'plain-a', title: tip, hidden: flag, lang: tip, 'plain'
+        button id: 'press', @click: (-> pressed = not pressed), 'press'
+        WrapA id: 'wrap-a', title: tip, hidden: flag, lang: tip, "aria-pressed": pressed, "data-on": pressed, draggable: pressed
+        a id: 'plain-a', title: tip, hidden: flag, lang: tip, "aria-pressed": pressed, "data-on": pressed, draggable: pressed, 'plain'
         WrapInput id: 'wrap-input', value: tip, disabled: flag, placeholder: tip
         input id: 'plain-input', value: tip, disabled: flag, placeholder: tip
 

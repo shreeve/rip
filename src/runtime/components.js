@@ -906,6 +906,19 @@ function __style(el, value) {
   for (const k of Object.keys(value)) __writeStyle(el.style, k, value[k]);
 }
 
+// The attributes whose presence is their value: src/dom.js's
+// BOOLEAN_ATTRS, spelled here because an inlined runtime reaches no
+// compiler module (test/ui/runtime-components.test.js holds the two in
+// lockstep).
+const __BOOLEAN_ATTRS = new Set([
+  'disabled', 'hidden', 'readonly', 'required', 'checked', 'selected',
+  'autofocus', 'autoplay', 'controls', 'loop', 'muted', 'multiple',
+  'novalidate', 'open', 'reversed', 'defer', 'async', 'formnovalidate',
+  'allowfullscreen', 'inert', 'ismap', 'nomodule', 'playsinline',
+  'default', 'itemscope', 'alpha', 'shadowrootdelegatesfocus',
+  'shadowrootclonable', 'shadowrootserializable',
+]);
+
 // What `@rest` reads: the rest map with every shared container read
 // through, so a read answers the value and tracks the container. The
 // map itself keeps the containers — the forwarding roads bind to them.
@@ -1192,29 +1205,22 @@ class __Component {
       return;
     }
     if (key === 'style') { __style(el, value); return; }
+    // A forwarded value may change, so from here the writer takes the
+    // road the render line takes for a REACTIVE value of the same key:
+    // `value`, `checked`, and the text family are properties; a boolean
+    // attribute is presence; every other key is an attribute whose
+    // nullish value is its absence and whose `false` is the word, as
+    // `aria-pressed` and `data-*` need it to be. (A line's FIXED `value`
+    // or `checked` is the attribute, the form's reset default; a
+    // forwarded one sets no default.)
     if (key === 'innerHTML' || key === 'textContent' || key === 'innerText' || key === 'value') {
       el[key] = value ?? '';
       return;
     }
-    // A key the element reflects as a property is written as one, as the
-    // render's own line writes it: a boolean reflector takes presence,
-    // and a nullish value on any other is the attribute's absence, never
-    // the word "undefined" a string reflector would make of it.
-    if (key in el && !key.includes('-')) {
-      if (typeof el[key] === 'boolean') el[key] = !!value;
-      else if (value == null) el.removeAttribute(key);
-      else el[key] = value;
-      return;
-    }
-    if (value == null || value === false) {
-      el.removeAttribute(key);
-      return;
-    }
-    if (value === true) {
-      el.setAttribute(key, '');
-      return;
-    }
-    el.setAttribute(key, value);
+    if (key === 'checked') { el.checked = !!value; return; }
+    if (__BOOLEAN_ATTRS.has(key)) { el.toggleAttribute(key, !!value); return; }
+    if (value == null) el.removeAttribute(key);
+    else el.setAttribute(key, value);
   }
   _beginMount() {
     if (this._state === 'new') {

@@ -1630,26 +1630,45 @@ describe('the extends rest seam (runtime-owned;  re-emits it per class — /#165
     stop();
   });
 
-  test('a forwarded key the element reflects as a property: a boolean takes presence, a nullish string is the attribute\'s absence', () => {
-    // The recording DOM reflects nothing, so the element models the two
-    // reflector kinds a browser has: `hidden` (boolean) and `title` (string).
+  test("the runtime's boolean-attribute list is the compiler's, name for name", async () => {
+    const { BOOLEAN_ATTRS } = await import('../../src/dom.js');
+    const { readFileSync } = await import('node:fs');
+    const text = readFileSync(new URL('../../src/runtime/components.js', import.meta.url), 'utf8');
+    const literal = text.match(/const __BOOLEAN_ATTRS = new Set\(\[([^\]]*)\]\)/)[1];
+    expect(literal.match(/'[^']+'/g).map((w) => w.slice(1, -1)).sort()).toEqual([...BOOLEAN_ATTRS].sort());
+  });
+
+  test("a forwarded key lands as the render line would write it: presence for a boolean attribute, the word for any other, absence for nullish", () => {
     const inst = makeBtn({});
     const el = document.createElement('button');
-    let hidden = false;
-    Object.defineProperty(el, 'hidden', { get: () => hidden, set: (v) => { hidden = v; el.toggleAttribute('hidden', v); } });
-    Object.defineProperty(el, 'title', { get: () => el.getAttribute('title') ?? '', set: (v) => el.setAttribute('title', String(v)) });
     inst._inheritedEl = el;
+    // A boolean attribute is presence, whatever truthy value carries it.
+    inst._applyInheritedProp(el, 'hidden', 'yes');
+    expect(el.getAttribute('hidden')).toBe('');
+    inst._applyInheritedProp(el, 'hidden', undefined);
+    expect(el.getAttribute('hidden')).toBeNull();
+    inst._applyInheritedProp(el, 'disabled', false);
+    expect(el.getAttribute('disabled')).toBeNull();
+    // Any other attribute takes the value's word: `false` is "false", never absence.
+    for (const key of ['aria-pressed', 'data-on', 'draggable']) {
+      inst._applyInheritedProp(el, key, false);
+      expect(el.getAttribute(key)).toBe('false');
+      inst._applyInheritedProp(el, key, true);
+      expect(el.getAttribute(key)).toBe('true');
+      inst._applyInheritedProp(el, key, null);
+      expect(el.getAttribute(key)).toBeNull();
+    }
+    inst._applyInheritedProp(el, 'tabindex', 0);
+    expect(el.getAttribute('tabindex')).toBe('0');
     inst._applyInheritedProp(el, 'title', 'tip');
-    expect(el.getAttribute('title')).toBe('tip');
     inst._applyInheritedProp(el, 'title', undefined);
     expect(el.getAttribute('title')).toBeNull();
-    inst._applyInheritedProp(el, 'hidden', undefined);
-    expect(hidden).toBe(false);
-    inst._applyInheritedProp(el, 'hidden', 'yes');
-    expect(hidden).toBe(true);
-    expect(el.getAttribute('hidden')).toBe('');
+    // `value` and `checked` are the two property roads.
     inst._applyInheritedProp(el, 'value', undefined);
     expect(el.value).toBe('');
+    inst._applyInheritedProp(el, 'checked', 1);
+    expect(el.checked).toBe(true);
+    expect(el.getAttribute('checked')).toBeNull();
   });
 
   test('_updateProp routes undeclared names to rest and applies onto the inherited element; declared props keep their contracts', () => {

@@ -10,9 +10,13 @@ const boot = async (page) => {
   await expect.poll(() => page.evaluate(() => globalThis.__bootResult)).toBe('ok');
   await expect(page.locator('#bind-cell')).toBeAttached();
 };
-// The opening tag less the ids the page minted, so a wrapper and its plain
-// twin compare as one string.
-const tag = (page, id) => page.locator(`#${id}`).evaluate((el) => el.outerHTML.slice(0, el.outerHTML.indexOf('>') + 1).replace(/ id="[^"]*"| data-part="[^"]*"/g, ''));
+// The element as `<tag a="1" b="2">`, its attributes sorted and the ids the
+// page minted left out, so a wrapper and its plain twin compare as one
+// string whatever order each road wrote them in.
+const tag = (page, id) => page.locator(`#${id}`).evaluate((el) => {
+  const attrs = [...el.attributes].filter((a) => a.name !== 'id' && a.name !== 'data-part').map((a) => ` ${a.name}="${a.value}"`).sort();
+  return `<${el.localName}${attrs.join('')}>`;
+});
 const valueOf = (page, id) => page.locator(`#${id}`).evaluate((el) => el.value);
 const click = async (page, id) => { await page.click(`#${id}`); await page.waitForTimeout(50); };
 
@@ -24,16 +28,22 @@ test('a nullish value is absence: a forwarded key agrees with the plain line thr
     expect(await valueOf(page, 'wrap-input')).toBe(await valueOf(page, 'plain-input'));
   };
   await agree();
-  expect(await tag(page, 'wrap-a')).toBe('<a>');
+  // `false` is the word on any attribute that is not a boolean one: an
+  // absent `aria-pressed` says "not a toggle", and an empty one is invalid.
+  expect(await tag(page, 'wrap-a')).toBe('<a aria-pressed="false" data-on="false" draggable="false">');
   expect(await valueOf(page, 'wrap-input')).toBe('');
+  await click(page, 'press');
+  await agree();
+  expect(await tag(page, 'wrap-a')).toBe('<a aria-pressed="true" data-on="true" draggable="true">');
+  await click(page, 'press');
   await click(page, 'nullish-set');
   await agree();
-  expect(await tag(page, 'wrap-a')).toBe('<a title="hello" lang="hello" hidden="">');
+  expect(await tag(page, 'wrap-a')).toBe('<a aria-pressed="false" data-on="false" draggable="false" hidden="" lang="hello" title="hello">');
   expect(await valueOf(page, 'wrap-input')).toBe('hello');
-  expect(await tag(page, 'wrap-input')).toBe('<input placeholder="hello" disabled="">');
+  expect(await tag(page, 'wrap-input')).toBe('<input disabled="" placeholder="hello">');
   await click(page, 'nullish-unset');
   await agree();
-  expect(await tag(page, 'wrap-a')).toBe('<a>');
+  expect(await tag(page, 'wrap-a')).toBe('<a aria-pressed="false" data-on="false" draggable="false">');
   expect(await tag(page, 'wrap-input')).toBe('<input>');
   expect(await valueOf(page, 'wrap-input')).toBe('');
 });
