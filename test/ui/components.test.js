@@ -963,10 +963,10 @@ describe('the static render DSL: emission pins', () => {
     expect(code).toContain("document.createElementNS('http://www.w3.org/2000/svg', 'circle')");
   });
 
-  test('presence values keep their guarded attribute forms', () => {
-    const { code } = compile('P = component\n  vis := true\n  render\n    div title: vis?!\n    div lang: "x"?!\n');
-    expect(code).toContain("__effect(() => { { const __v = (this.vis.value ? true : undefined); __v == null ? this._el1.removeAttribute('title') : this._el1.setAttribute('title', __v); } });");
-    expect(code).toContain(`{ const __v = ("x" ? true : undefined); if (__v != null) this._el2.setAttribute('lang', __v); }`);
+  test('absence-producing values keep their guarded attribute forms', () => {
+    const { code } = compile('P = component\n  vis := true\n  render\n    div title: vis or undefined\n    div lang: "x" or undefined\n');
+    expect(code).toContain("__effect(() => { { const __v = (this.vis.value || undefined); __v == null ? this._el1.removeAttribute('title') : this._el1.setAttribute('title', __v); } });");
+    expect(code).toContain(`{ const __v = ("x" || undefined); if (__v != null) this._el2.setAttribute('lang', __v); }`);
   });
 
   test('unknown lowercase words: a BARE line is a custom element; with args it is a CALL rendered as text (\'s rules, both)', () => {
@@ -1054,7 +1054,7 @@ describe('cross-scope local reads reject in EVERY attribute position', () => {
     ['dynamic-class expression', 'span.("on", total)'],
     ['event handler body', 'button @click: ((x) => f(total))'],
     ['bind chain', 'input value <=> box[total].x'],
-    ['presence value', 'span lang: total?!'],
+    ['absence-producing value', 'span lang: total or undefined'],
   ])('%s', (_name, line) => {
     emitFails(wrap(line), /render local.*ENCLOSING render scope|render local 'total' is not visible here/);
   });

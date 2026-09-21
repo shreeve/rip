@@ -698,7 +698,7 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
   test('hover: a hyphenated key answers on every road — never the effect machinery', async () => {
     // A hyphenated key's stored primitive keeps the lexer's quotes, so
     // its claim must go through the stored spelling; without the exact
-    // row the presence road's key bytes fall to the pair's cover row,
+    // row the absence road's key bytes fall to the pair's cover row,
     // whose generated start is the `__effect` helper — the machinery
     // hover this pin holds out.
     await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
@@ -707,17 +707,17 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
         '  busy := false',            // 1
         '  render',                   // 2
         '    button',                 // 3
-        '      aria-busy: @busy?!',   // 4 — the presence road
+        '      aria-busy: @busy or undefined',   // 4 — the absence road
         "      data-kind: 'primary'", // 5 — the template attr road
         '',
       ].join('\n');
       await api.open('chip.rip', src);
       expect(api.diagnostics('chip.rip').filter((d) => d.severity <= 2)).toEqual([]);
-      const presenceKey = await api.hover('chip.rip', 4, 9);   // inside `aria-busy`
-      // A presence VALUE does not move the key's road: aria-busy is not
+      const absenceKey = await api.hover('chip.rip', 4, 9);   // inside `aria-busy`
+      // An absence-producing VALUE does not move the key's road: aria-busy is not
       // a boolean attribute, so its type is still the template row's.
-      expect(presenceKey?.contents?.value).toContain('(attribute) aria-busy: string | number | boolean | undefined');
-      expect(presenceKey?.contents?.value).not.toContain('__effect');
+      expect(absenceKey?.contents?.value).toContain('(attribute) aria-busy: string | number | boolean | undefined');
+      expect(absenceKey?.contents?.value).not.toContain('__effect');
       const dataKey = await api.hover('chip.rip', 5, 9);       // inside `data-kind`
       expect(dataKey?.contents?.value).toContain('(attribute) data-kind: string | number | boolean | undefined');
       expect(dataKey?.contents?.value).not.toContain('__effect');

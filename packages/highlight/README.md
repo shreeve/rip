@@ -35,7 +35,7 @@ html = hljs.highlight('tags = %w[alpha beta]', { language: 'rip' }).value
   **symbol literals** (`:name`, `:domain.name`, `:kebab-name`)
 - **Rip operators** — reactive (`:=`, `~=`, `~>`, `<~`, `!>`), two-way bind
   (`<=>`), method/readonly assignment (`.=`, `=!`), compound assignment,
-  prototype `::`, dammit `!`, Houdini/maybe dammit `?!`, tagged-template `$`;
+  prototype `::`, dammit `!`, maybe dammit `?!`, tagged-template `$`;
   `then` / `else` keep their keyword color as connectors, `as` / `satisfies`
   as casts
 - **Division is not a regex** — `a / b / c` stays arithmetic; a regex

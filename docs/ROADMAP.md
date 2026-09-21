@@ -166,7 +166,7 @@ closure lazily; the feature that requests the expansion owns its cost.
 
 ### Render-DSL intelligence — CLOSED
 
-Every render attribute, event, property, ref, and tag position is a tsgo-native typed position in the face (docs/TYPES.md § Intrinsic element typing): generated per-tag surfaces plus TS-only receiver casts make the existing lowering's own bytes check, complete, and hover, with shipped output byte-identical under the strip gate. What remains is not a gap but decided semantics, named there: a `<=>` bind checks the element→cell direction and lets the DOM coerce the write back, a presence value is a truthiness position by the `?!` operator's own meaning, and selector-token words share one lexer token (no per-word rows).
+Every render attribute, event, property, ref, and tag position is a tsgo-native typed position in the face (docs/TYPES.md § Intrinsic element typing): generated per-tag surfaces plus TS-only receiver casts make the existing lowering's own bytes check, complete, and hover, with shipped output byte-identical under the strip gate. What remains is not a gap but decided semantics, named there: a `<=>` bind checks the element→cell direction and lets the DOM coerce the write back, removal on a falsy value is spelled `or undefined`, and selector-token words share one lexer token (no per-word rows).
 
 ## Rip-native hypermedia
 

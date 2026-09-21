@@ -86,13 +86,17 @@ test "optional call juxta multi", "fn = (a, b) -> a + b\nfn? 3, 4", 7
 code "optional call juxta gen", "fn? 42", "fn?.(42)"
 code "optional call juxta multi gen", "fn? 3, 4", "fn?.(3, 4)"
 
-# Maybe dammit awaits an optional call. Arguments disambiguate it from
-# bare Houdini/presence, so a zero-argument call keeps its empty parens.
+# Maybe dammit awaits an optional call — dammit's shapes with an optional
+# callee: bare, empty parens, parenthesized, and juxta arguments.
+code "maybe dammit bare gen", "fn?!", "await fn?.()"
 code "maybe dammit empty parens gen", "fn?!()", "await fn?.()"
 code "maybe dammit paren gen", "fn?!(42)", "await fn?.(42)"
 code "maybe dammit juxta gen", "fn?! 42", "await fn?.(42)"
 code "maybe dammit juxta multi gen", "fn?! 3, 4", "await fn?.(3, 4)"
 
+test "maybe dammit bare calls and awaits", "fn = -> Promise.resolve(42)\nfn?!", 42
+test "maybe dammit bare skips a missing function", "fn = null\nfn?!", undefined
+test "maybe dammit bare preserves a method receiver", "obj = { n: 40, add: -> Promise.resolve(@n + 2) }\nobj.add?!", 42
 test "maybe dammit empty parens calls and awaits", "fn = -> Promise.resolve(42)\nfn?!()", 42
 test "maybe dammit empty parens skips a missing function", "fn = null\nfn?!()", undefined
 test "maybe dammit awaits a present function", "fn = (x) -> Promise.resolve(x * 2)\nfn?!(21)", 42
@@ -153,21 +157,62 @@ test 'maybe dammit missing result composes with nullish fallback', '''
   fn?!() ?? 42
 ''', 42
 
-# Without call arguments, the same token is always Houdini/presence.
-code "bare presence stays presence", "fn?!", "(fn ? true : undefined)"
-code "bare presence before nullish stays presence", "fn?! ?? fallback", "(fn ? true : undefined) ?? fallback"
-code "bare presence in an array stays presence", "[fn?!, other]", "[(fn ? true : undefined), other]"
-code "line end closes bare presence", "fn?!\nnext = 1", "(fn ? true : undefined);\nlet next = 1;"
+# Without call arguments the token is still the call: what follows it is
+# never read as an argument.
+code "bare maybe dammit before nullish", "fn?! ?? fallback", "await fn?.() ?? fallback"
+code "bare maybe dammit in an array", "[fn?!, other]", "[await fn?.(), other]"
+code "line end closes bare maybe dammit", "fn?!\nnext = 1", "await fn?.();\nlet next = 1;"
+code "bare maybe dammit continues through a member chain", "fn?!.answer", "(await fn?.()).answer"
+test 'bare maybe dammit only skips nullish callees', '''
+  do ->
+    fn = 5
+    try
+      fn?!
+      false
+    catch e
+      e instanceof TypeError
+''', true
 
 # Juxta shares implicit-call argument extent for maybe dammit too. Call
 # parens keep a following binary outside the optional awaited call.
 code "maybe dammit juxta or binds into arg", "fn?! a or b", "await fn?.(a || b)"
 code "maybe dammit paren or stays outside", "fn?!(a) or b", "await fn?.(a) || b;"
 
-fail 'render attributes reject maybe dammit but keep bare presence legal', '''
+# A constructor is never an optional callee. A member call on the
+# constructed instance is an ordinary one.
+fail 'maybe dammit rejects a bare construction', "x = new Foo?!", 'maybe dammit has no reading on a constructor'
+fail 'maybe dammit rejects a member construction', "x = new a.b?!(1)", 'maybe dammit has no reading on a constructor'
+fail 'maybe dammit rejects the .new construction alias', "x = K.new?! 1", 'maybe dammit has no reading on a constructor'
+
+# Maybe dammit calls what dammit calls: a name. After any other value it
+# has no reading, where dammit's `!` has none either.
+fail 'maybe dammit rejects a literal callee', "x = 5?!", "maybe dammit '?!' follows a name"
+fail 'maybe dammit rejects a string callee', "x = 's'?!", "maybe dammit '?!' follows a name"
+fail 'maybe dammit rejects a call result', "x = f()?!", "maybe dammit '?!' follows a name"
+fail 'maybe dammit rejects an index result', "x = a[0]?!", "maybe dammit '?!' follows a name"
+fail 'maybe dammit rejects a parenthesized value', "x = (f)?!", "maybe dammit '?!' follows a name"
+fail 'maybe dammit rejects this', "x = this?!", "maybe dammit '?!' follows a name"
+code "maybe dammit follows an optional member", "a?.b?!", "await a?.b?.()"
+code "maybe dammit follows a this-member", "@save?!", "await this.save?.()"
+code "maybe dammit on a spread head", "x = {...f?!}", "let x = {...await f?.()};"
+code "maybe dammit on a spread head takes its arguments", "x = {...f?!(1)}", "let x = {...await f?.(1)};"
+code "maybe dammit on a spread head takes juxta arguments", "x = {...f?! 1, 2}", "let x = {...await f?.(1, 2)};"
+test "maybe dammit on a spread head passes its arguments to the callee", "f = (n) -> Promise.resolve({ n })\nx = {...f?!(7)}\nx.n", 7
+test "a nullish maybe dammit with arguments spreads nothing", "g = null\nx = {...g?!(1), k: 1}\nObject.keys(x).join()", "k"
+code "maybe dammit on a spread head, chained", "x = {...f?!.data, a: 1}", "let x = {...(await f?.()).data, a: 1};"
+test "a nullish maybe dammit spreads nothing", "f = null\nx = {...f?!, a: 1}\nObject.keys(x).join()", "a"
+code "maybe dammit on a constructed instance's method", "new Foo(1).go?!", "await new Foo(1).go?.()"
+
+fail 'render attributes reject maybe dammit with arguments', '''
   A = component
     render
       div title: fn?!()
+''', 'render body evaluates synchronously'
+
+fail 'render attributes reject bare maybe dammit', '''
+  A = component
+    render
+      div title: fn?!
 ''', 'render body evaluates synchronously'
 
 # Juxta shares implicit-call argument extent: `or` is absorbed into the

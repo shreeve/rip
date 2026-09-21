@@ -66,14 +66,14 @@ counter--
 --counter
 console.log('counter:', counter)
 
-# ── Existence ? and presence ?! — and the soak family ?. ?.[ ?.( ──
+# ── Existence ? — and the soak family ?. ?.[ ?.( ──
 
 port: number | null = null
 chosen = port ?? 8080
 exists = port?
 config: { host: string, retries?: number } | null = { host: 'local' }
 hostname = config?.host
-present = hostname?!
+present = if hostname then true else undefined
 retries = config?.retries ?? 0
 maybeList: number[] | null = [5, 6]
 first = maybeList?.[0]
@@ -82,7 +82,7 @@ scaled = scale?.(21) ?? 42
 # The space is load-bearing: `scale?(21)` is the soak call above.
 called = scale? (21)
 
-console.log('presence:', chosen, exists, hostname, present, retries, first, scaled, called)
+console.log('existence:', chosen, exists, hostname, present, retries, first, scaled, called)
 
 # ── Invocation: explicit parens, the implicit spelling, do, dammit, maybe-dammit, tagged ──
 
@@ -97,7 +97,7 @@ gotten = fetchNumber!
 maybeFetch: (() => Promise<number>) | undefined = -> Promise.resolve(8)
 handlers: { fire?: () => Promise<number> } = {}
 perhaps = maybeFetch?!()
-skipped = handlers.fire?!()
+skipped = handlers.fire?!
 bundle = await
   value: 9
 rawPath = String.raw"col\t#{ten}"

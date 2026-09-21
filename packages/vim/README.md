@@ -13,7 +13,7 @@ Vim plugin for the [Rip](https://github.com/shreeve/rip) programming language.
 - **Syntax highlighting** — keywords, strings, numbers, operators, types, built-ins, comments
 - **String interpolation** — `#{}` and `${}` with nested brace support
 - **Comments** — line, `###` blocks (line-start only), and the `__DATA__` payload
-- **Function calls** — `fetch(`, `.json(`, dammit (`name!`), and maybe dammit (`name?!()`)
+- **Function calls** — `fetch(`, `.json(`, dammit (`name!`), and maybe dammit (`name?!`, `name?! arg`)
 - **Object keys** — `method:` and `optional?:`, including keys spelled with a value word (`{on: 2}`)
 - **Declarations** — `x = 5`, readonly `x =! 5`, state `x := 0`, computed `x ~= y`
 - **Function definitions** — `def name`, `name = ->`, and `name: ->`

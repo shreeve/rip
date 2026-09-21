@@ -464,7 +464,7 @@ export function rewriteRender(tokens, mintId, fail) {
         isTemplateElement = true;
       } else if (t.kind === 'IDENTIFIER' && !isAfterControlFlow) {
         isTemplateElement = atLineStart || startsWithTag(t);
-      } else if (['PROPERTY', 'STRING', 'STRING_END', 'NUMBER', 'BOOL', 'CALL_END', ')', ']', 'INDEX_END', '}', 'PRESENCE'].includes(t.kind)) {
+      } else if (['PROPERTY', 'STRING', 'STRING_END', 'NUMBER', 'BOOL', 'CALL_END', ')', ']', 'INDEX_END', '}', 'MAYBE_DAMMIT'].includes(t.kind)) {
         isTemplateElement = startsWithTag(t);
       }
 
