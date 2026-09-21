@@ -1002,10 +1002,12 @@ Optional, feature-detected:
 **The adapter owns value decoding — with one temporal backstop.** The
 harbor adapter decodes off each column's `duckdbType`: temporal columns
 become real `Date`s (and `Date` params encode to ISO-8601 UTC on the
-way out), and a `JSON` column's text becomes its document. Everything
-else arrives already shaped — a LIST is a real array, a STRUCT a real
-object, and a DECIMAL a lossless decimal string that `rip/decimal`
-parses exactly. For an adapter that skips the temporal step, the ORM
+way out), and a `JSON` column's text becomes its document — text that
+does not parse rejects the query with a `DbError` naming the column
+([VARIANTS.md](VARIANTS.md), *In Rip*). Everything else arrives already
+shaped — a LIST is a real array, a STRUCT a real object, and a DECIMAL a
+lossless decimal string that `rip/decimal` parses exactly. For an
+adapter that skips the temporal step, the ORM
 coerces the columns whose *declared* type is temporal (`date`/`datetime`
 fields, plus the `@times`/`@softDelete` columns) through the same codec
 on hydrate: `Date`s pass through untouched, ISO-8601 / SQL-timestamp

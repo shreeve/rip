@@ -205,17 +205,43 @@ result (`SELECT [doc]`, `struct_pack(d := doc)`, `list(doc.name)`) is JSON
 text inside the container. Select the document or a path directly, or
 aggregate with `variant_group_array` instead of `list`.
 
-**A document holding NaN or an infinity arrives as a string.** The engine
+**A document holding NaN or an infinity fails the read.** The engine
 accepts `'{"x":1e999}'::JSON` and `'{"x":NaN}'::JSON`, and a struct literal
 carries `'nan'::DOUBLE`; inside the VARIANT the value is a `DOUBLE`, and
 harbor emits the cell as `{"x":Infinity}`, which is not JSON. The driver
-returns a cell that does not parse as its text, so the app reads the *string*
-`'{"x":Infinity}'` where it expected an object, and a path to the number
-reads as the string `'Infinity'`. A save that leaves the field alone leaves
-the column alone; assigning that string back stores a VARIANT string, and
-every path into it is NULL. A model never writes such a document (see *What
-JSON cannot carry*); another client can. A `JSON` column keeps its text as
-written, `{"x":1e999}`, which does parse: `x` is the JS number `Infinity`.
+refuses a cell that does not parse. The query rejects with a `DbError` whose
+`code` is `'invalid_json'`; it names the column (`columnName`), the row's
+index in the result (`row`) and the statement (`sql`), and its message quotes
+the first 40 characters of the text:
+
+```
+db: column 'doc' holds text that is not JSON: {"x":Infinity,"keep":"b"} — the
+engine stores NaN and ±Infinity inside a document, and JSON has no form for
+them. Read the value in SQL through a cast (doc.x::DOUBLE), or repair the row.
+```
+
+The whole result fails, not the one row: `Report.find!` of that row rejects,
+and so does `Report.all!` while the row is in the table. A path to the number
+(`SELECT doc.x AS x`) fails under the name the query gives it, and so do a
+value that is NaN as a whole and a `variant_group_array` that gathers such a
+document. A model never writes one (see *What JSON cannot carry*); another
+client can. A `JSON` column keeps its text as written: `{"x":1e999}` parses,
+and `x` is the JS number `Infinity`; `{"x":NaN}` does not, and fails the
+same way.
+
+To read around it, select the other columns, or cast in SQL.
+`doc.x::DOUBLE` arrives as the string `'Infinity'`, `'-Infinity'` or `'NaN'`,
+which is how harbor carries a `DOUBLE` that JSON has no number for, and
+`doc::JSON::VARCHAR` is the document's text, not decoded. `WHERE
+isinf(doc.x::DOUBLE) OR isnan(doc.x::DOUBLE)` finds the rows for a known
+path. To repair a row, patch the key: a merge patch of `null` drops it, any
+other value replaces it, a nested patch reaches a nested key, and an array is
+replaced whole (`'{"a":[1,null]}'`).
+
+```sql
+UPDATE reports SET doc = json_merge_patch(doc::JSON, '{"x":null}')::VARIANT WHERE id = 2;
+UPDATE reports SET doc = json_merge_patch(doc::JSON, '{"p":{"x":0}}')::VARIANT WHERE id = 3;
+```
 
 **Numbers.** Every number in a document becomes a JS number, a double. The
 engine holds an integer exactly up to 2^64 − 1, but `JSON.parse` rounds one

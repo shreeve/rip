@@ -56,8 +56,8 @@ and 10 lease connections. medlabs' SQL surface is point lookups, small
 
   `JSON` columns decode to their document at the same seam the temporals
   use (`cellKind`/`decodeJson`, `duckdb.js`), keyed off the per-column
-  type harbor sends. Text that does not parse returns unchanged — the
-  rule `decodeTemporal` already followed. This makes the `json` write
+  type harbor sends. Text that does not parse rejects the query with a
+  `DbError` naming the column. This makes the `json` write
   path symmetric (`serialize` stringifies, the seam parses) and it makes
   dirty tracking work on a `json` field, which previously compared a
   hydrated string against an assigned object and so always read dirty.
