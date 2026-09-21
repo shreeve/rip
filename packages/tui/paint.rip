@@ -26,6 +26,8 @@ tint =! (color, base) ->
   throw Error.new "rip/tui: '#{color}' is not a color — use a name (red, greenBright, gray) or '#rrggbb'" unless code?
   String base + code
 
+LIMIT =! 65536   # style ids a cell's sixteen bits can hold
+
 FLAGS =! [['bold', 1], ['dim', 2], ['italic', 3], ['underline', 4], ['inverse', 7]]
 
 ids =! Map.new()
@@ -43,6 +45,7 @@ export intern =! (fg, bg, flags) ->
     parts.push code if flags & (1 << i)
   parts.push tint(fg, 30) if fg?
   parts.push tint(bg, 40) if bg?
+  throw Error.new "rip/tui: more than #{LIMIT} distinct styles are in use — a cell holds a style id in sixteen bits" if records.length >= LIMIT
   records.push { fg, bg, flags, sgr: parts.join(';') }
   ids.set key, records.length - 1
   records.length - 1
@@ -54,6 +57,8 @@ styleOf =! (node, inherited) ->
   flags = base.flags
   for [name], i in FLAGS
     flags |= (1 << i) if s[name]
+  # Most nodes say nothing about color or weight, and keep the id as it is.
+  return inherited if flags is base.flags and not s.color? and not s.backgroundColor?
   intern s.color ?? base.fg, s.backgroundColor ?? base.bg, flags
 
 # The escape sequence that leaves style `from` for style `to`.
@@ -97,9 +102,13 @@ export class Grid
     return if y < 0 or y >= @rows
     left = Math.max left, 0
     right = Math.min right, @cols
-    for glyph in text
-      code = glyph.codePointAt 0
-      span = if code < 127 then 1 else Bun.stringWidth(glyph)
+    # A counted walk by code point: ASCII and the box-drawing block are
+    # one cell wide, and only what is left asks for a measured width.
+    i = 0
+    while i < text.length
+      code = text.codePointAt i
+      i += if code > 0xFFFF then 2 else 1
+      span = if code < 127 or (code >= 0x2500 and code <= 0x257F) then 1 else Bun.stringWidth(String.fromCodePoint code)
       continue if span is 0
       if x >= left and x + span <= right
         at = y * @cols + x
@@ -150,11 +159,11 @@ BORDERS =! {
   single: '┌─┐│└┘', round: '╭─╮│╰╯', double: '╔═╗║╚╝', bold: '┏━┓┃┗┛'
 }
 
-frame =! (grid, node, id) ->
+frame! =! (grid, node, id) ->
   glyphs = BORDERS[node.styles.borderStyle]
   throw Error.new "rip/tui: '#{node.styles.borderStyle}' is not a border style — use single, round, double, or bold" unless glyphs
   { x, y, w, h } = node.rect
-  return if w < 2 or h < 2
+  return if w < 2 or h < 2 or y + h <= grid.top or y >= grid.top + grid.rows
   line = intern node.styles.borderColor ?? null, records[id].bg, 0
   grid.write x, y, glyphs[0] + glyphs[1].repeat(w - 2) + glyphs[2], line
   grid.write x, y + h - 1, glyphs[4] + glyphs[1].repeat(w - 2) + glyphs[5], line
@@ -174,7 +183,7 @@ runs =! (node, id, out) ->
       kid = kid.nextSibling
   out
 
-words =! (grid, node, id) ->
+words! =! (grid, node, id) ->
   { x, y, w } = node.rect
   col = x
   row = y
@@ -187,7 +196,7 @@ words =! (grid, node, id) ->
       grid.write col, row, part, run, x, x + w
       col += Bun.stringWidth part
 
-export paint =! (grid, node, inherited = 0) ->
+export paint! =! (grid, node, inherited = 0) ->
   if node.nodeType is 3 or node.tagName is 'span'
     words grid, node, inherited
     return

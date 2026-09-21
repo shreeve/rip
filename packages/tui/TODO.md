@@ -91,7 +91,23 @@ the test, re-seed the bug, and see it caught.
       and `rows` at `layout`'s door, as the rest of the package names
       them.
 
-## 4. The painter and the screen
+## 4. Layout cost
+
+- [ ] **`flex: n` turns the cache off up to the root.** It writes a
+      point basis, so its container counts as order-sensitive whenever
+      its main size is not a plain number, and every ancestor recomputes
+      every pass: one text change costs 2,325 visits and 268 µs where
+      the same tree with `flexGrow: 1` costs 307 visits and 40 µs.
+      Narrow the rule soundly — two attempts at "only containers
+      offered an undefined main size" still fail the fuzz.
+- [ ] `parse`: a node parsed for the first time skips the change scan
+      (about 7% of a first layout).
+
+## 5. The painter and the screen
+
+- [ ] The style tables never evict, and a cell holds a style id in
+      sixteen bits: an app that animates `'#rrggbb'` colors reaches the
+      limit and is refused. Reclaim ids no cell uses.
 
 - [ ] A layout error names the node it came from.
 - [ ] `overflow: 'hidden'` clips (text wider than its box draws past it
@@ -102,11 +118,13 @@ the test, re-seed the bug, and see it caught.
 - [ ] Text wrapping, truncation, grapheme clusters (PLAN §6).
 - [ ] Damage tracking: paint and diff only what moved (PLAN §6).
 
-## 5. Compiler-side, filed separately
+## 6. Compiler-side, filed separately
 
 - A loop variable named like a tag (`i`, `a`, `b`, `p`) at the end of a
   render line takes the indented children beneath it.
 - A bound effect that awaits marks its enclosing function `async`.
 - `rip -t` prints a stack trace for a lexer error.
+- `src/runtime/reactive.js` makes and aborts an `AbortController` on
+  every effect run: half the CPU of the 40×8 table bench.
 - A typed vocabulary for non-HTML hosts, so `rip check` and the editor
   accept terminal props (PLAN §14).
