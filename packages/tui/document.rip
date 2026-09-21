@@ -92,6 +92,8 @@ export class Node
     @rect = NOWHERE
     @cell = null
     @dirty = true
+    @lay = null       # layout's record of the node
+    @measure = null   # a function that sizes it, where one is set
 
   # The children as an array, rebuilt only after the list changed.
   get childNodes: ->

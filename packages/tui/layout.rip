@@ -1973,15 +1973,15 @@ pass! =! (root, ownerW, ownerH) ->
   seat lay, ownerW, ownerH
   settle root, 0, 0, 0, 0
 
-# Lay the tree out in a space `availableWidth` by `availableHeight`, where
-# null is unlimited. A pass that throws — a style with no meaning, a
+# Lay the tree out in a space `cols` by `rows`, where either left out, or
+# null, is unlimited. A pass that throws — a style with no meaning, a
 # measure function that fails — stops with records half brought up to
 # date, so none of them is kept.
-export layout =! (root, availableWidth, availableHeight = null) ->
+export layout =! (root, cols, rows) ->
   generation += 1
   rootNode = root
   try
-    pass root, availableWidth ?? NaN, availableHeight ?? NaN
+    pass root, cols ?? NaN, rows ?? NaN
   catch error
     rootNode = null
     forget root
