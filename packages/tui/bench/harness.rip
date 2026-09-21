@@ -1,0 +1,70 @@
+# ==============================================================================
+# tui bench harness — the measuring half, shared by every contender
+#
+# A contender is `{name, mount, update, unmount}` driven against a fake
+# terminal stream, so no real TTY is involved and both sides see the
+# same columns, rows, and write sink. One scenario run reports CPU time,
+# set-to-write latency, bytes and writes per update, and heap growth.
+# ==============================================================================
+
+import { EventEmitter } from 'node:events'
+
+# A write sink shaped like process.stdout. It counts, and keeps the
+# bytes only when asked, so a long run holds no output in memory.
+export def terminal(columns, rows, keep = false)
+  out = EventEmitter.new()
+  out.columns = columns
+  out.rows = rows
+  out.isTTY = true
+  out.bytes = 0
+  out.writes = 0
+  out.kept = []
+  out.write = (data, encoding, done) ->
+    done = encoding if typeof encoding is 'function'
+    text = String(data)
+    out.bytes += Buffer.byteLength(text)
+    out.writes += 1
+    out.kept.push text if keep
+    queueMicrotask done if typeof done is 'function'
+    true
+  out.getWindowSize = -> [columns, rows]
+  out
+
+def percentile(sorted, fraction)
+  return 0 unless sorted.length
+  sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))]
+
+# Drive `updates` awaited updates through one contender. `step(i)`
+# applies update i and resolves when its frame has been written.
+export def measure(label, out, updates, warmup, step)
+  for i in [0...warmup]
+    step! i
+  Bun.gc true
+  heap0 = process.memoryUsage().heapUsed
+  bytes0 = out.bytes
+  writes0 = out.writes
+  cpu0 = process.cpuUsage()
+  waits = []
+  for i in [0...updates]
+    t0 = performance.now()
+    step! warmup + i
+    waits.push performance.now() - t0
+  cpu = process.cpuUsage cpu0
+  heap = process.memoryUsage().heapUsed - heap0
+  waits.sort (a, b) -> a - b
+  {
+    label
+    updates
+    cpuMicros: (cpu.user + cpu.system) / updates
+    p50: percentile(waits, 0.50)
+    p99: percentile(waits, 0.99)
+    bytes: (out.bytes - bytes0) / updates
+    writes: (out.writes - writes0) / updates
+    heapKB: heap / 1024
+  }
+
+export def report(title, rows)
+  p "\n#{title}"
+  p "  #{'scenario'.padEnd(34)} #{'cpu µs/upd'.padStart(11)} #{'p50 ms'.padStart(8)} #{'p99 ms'.padStart(8)} #{'bytes/upd'.padStart(10)} #{'writes/upd'.padStart(11)} #{'heap KB'.padStart(9)}"
+  for r in rows
+    p "  #{r.label.padEnd(34)} #{r.cpuMicros.toFixed(0).padStart(11)} #{r.p50.toFixed(2).padStart(8)} #{r.p99.toFixed(2).padStart(8)} #{r.bytes.toFixed(0).padStart(10)} #{r.writes.toFixed(2).padStart(11)} #{r.heapKB.toFixed(0).padStart(9)}"

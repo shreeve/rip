@@ -371,8 +371,17 @@ terminals cannot report: Shift-Enter distinct from Enter (multi-line
 input), Ctrl-I distinct from Tab, and an Escape that needs no timer.
 Support is probed with a `CSI ? u` query followed by a device
 attributes query; whichever reply arrives first decides, so no timer
-is involved. tmux strips the protocol, and the app runs on ordinary
-reports there.
+is involved. tmux answers only the second query, so the app runs on
+ordinary reports there: nothing hangs, and only the extra keys are
+lost. Three rules follow. An app never makes an enhanced-only key the
+sole way to do something (a chat input that takes Shift-Enter for a
+new line also takes Alt-Enter or Ctrl-J). `screen.keyboard` reads
+`'enhanced'` or `'basic'`, so an app shows the hint that matches the
+terminal. The decoder also reads xterm's modify-other-keys form
+(`CSI 27 ; mod ; code ~`), which tmux forwards when its
+`extended-keys` option is on. tmux's 500 ms `escape-time` delays a
+lone Escape for every terminal program and is the user's setting; the
+README names it.
 
 **Mouse** is opt-in (`run App, mouse: true`), because capture takes
 over the terminal's own text selection. SGR mouse reports decode to
@@ -383,8 +392,10 @@ event then bubbles like any other, and a click on a focusable node
 focuses it as a preventable default. Ink has no mouse support.
 
 **Scrolling** is Ink's content offset: `contentOffsetX` /
-`contentOffsetY` shift a node's children under `overflow: hidden`. It
-is a paint-only change, so a scroll runs no layout. A wheel handler
+`contentOffsetY` shift a node's children under `overflow: hidden`
+(on Ink's main branch; the published 7.1.1 scrolls by a negative
+margin, which is what the bench drives). It is a paint-only change,
+so a scroll runs no layout. A wheel handler
 that adjusts the offset is the whole scrolled-list pattern.
 
 **Focus** follows tree order, computed by a walk on Tab (Ink uses
@@ -490,8 +501,60 @@ because paint is throttled and piped output writes no frames. Ours:
 | Wide-character and emoji text | Text path |
 
 Ink runs with `interactive: true`, with incremental rendering on and
-off, `CI` unset, on the same Bun. Two loops: one awaited paint per
-update, and a 1 kHz burst.
+off, `CI` unset, on the same Bun, **on React's production build** (a
+run without `NODE_ENV=production` is refused), written the way a
+careful React app is (memoized cells and rows). Its frame throttle is
+lifted and every update awaits the frame it causes, so a number is
+the cost of one update.
+
+### The Ink baseline
+
+`bench/` holds the harness (`harness.rip`), the Ink scenarios
+(`ink.rip`, `ink-startup.rip`), and the frame profiler
+(`profile.rip`). Reproduce with `cd bench && bun install`, then
+`bun run ink` and `bun run profile`. Ink 7.1.1, React 19.3.0, Bun
+1.4.2, Apple M5, a 200×60 terminal, incremental rendering on:
+
+| Scenario | CPU per update | p50 / p99 latency | Bytes per update |
+|---|---|---|---|
+| One counter in a 1,000-element tree | 3.8 ms | 3.1 / 4.9 ms | 347 (9,013 with incremental off) |
+| 40×8 table, 10% churn | 2.8 ms | 2.2 / 3.3 ms | 3,109 |
+| 40×8 table, 100% churn | 3.9 ms | 3.3 / 4.5 ms | 3,852 |
+| 2,000-row list, scroll by one | 22.0 ms | 20.7 / 22.9 ms | 2,501 |
+| 1,000 scrollback appends | 0.14 ms | 0.11 / 0.57 ms | 55 |
+| Cold start to first frame | 83 ms from process start; importing Ink and React is 47 ms of it | | |
+
+Every update costs three writes. Heap deltas swing with collector
+timing and are not quoted.
+
+**Where an Ink frame goes** (share of in-frame CPU time, sampled):
+
+| Stage | counter | table 100% | list |
+|---|---|---|---|
+| Text: measure, wrap, tokenize and re-join ANSI | 74% | 43% | 82% |
+| Layout: Yoga | 12% | 36% | 12% |
+| Reconcile: React and the host config | 5% | 14% | 3% |
+| Paint: the output grid, borders | 9% | 7% | 3% |
+| Emit: diff and write | under 1% | under 1% | under 1% |
+
+In the counter scenario four functions of the ANSI tokenizer
+(`diffAnsiCodes`, `tokenize`, `undoAnsiCodes`, `ansiCodesToString`)
+take over half of the whole run. One changed digit in a 1,000-element
+tree costs Ink about 4 ms because every frame re-tokenizes and
+re-joins the styled text of the entire screen.
+
+What this settles:
+
+- **The text path is the prize, not layout.** Structural styling,
+  interned style ids, and sanitizing once in the text setter (§6)
+  remove the largest stage outright. Yoga is a minority cost, so a
+  native flexbox needs to be correct and cached, not heroic.
+- **Knowing the changed node is the right bet.** The dominant costs
+  are whole-screen work repeated per frame, which damage tracking and
+  the same-size fast path never start.
+- **The order of work stands.** The skeleton (PR 1) proves the damage
+  path early; the text and paint step (PR 3) is where the measured
+  win lands and carries the bench for it.
 
 ## 12. Order of work
 
@@ -499,7 +562,7 @@ Each step is its own branch and PR under the repo's landing rules.
 
 | PR | Contents | Exit |
 |---|---|---|
-| 0 | Bench harness, Ink baselines, a profile of where Ink spends a frame (reconcile, Yoga, output, write) | Baseline numbers checked in; the riskiest assumption — that knowing the changed node beats Ink's pipeline — is confirmed or the order below changes |
+| 0 | Bench harness, Ink baselines, a profile of where Ink spends a frame (`bench/`) | The baseline and the frame profile are recorded in §11 |
 | 1 | Walking skeleton: scoped `document`, row / column + grow + padding + border layout, grid paint with diff, `renderToString`, counter and two-pane examples | Keyed `for`, `if` / `else`, fragments, rest-prop styles, and `ref:` metrics all work end to end |
 | 2 | Full layout engine, cache, dirty boundaries, vendored Yoga suite and skip list | ≥ 480 in-scope cases pass; RTL experiment recorded |
 | 3 | Text, width, wrap / truncate, clipping, content offset, borders, backgrounds | Ported Ink paint cases pass |
