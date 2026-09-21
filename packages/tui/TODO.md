@@ -6,11 +6,15 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 4. Layout cost
 
-- [ ] **A layout boundary.** A change dirties every ancestor up to the
-      root and each recomputes: a widened text in a flat column of
-      2,000 costs 6,001 visits, and a chain of 14 definite-size boxes
-      recomputes all 14. Stop at the first ancestor whose width and
-      height are both definite (PLAN §5).
+- [ ] A boundary is a node whose answers CANNOT differ (PLAN §5). A
+      change under a content-sized chain still computes every ancestor
+      to the root, its siblings answering from the cache: a text
+      widened among 2,000 in a column costs 6,001 visits, 610 µs. The
+      open rule stops where the answers DID not differ: lay the node
+      out again under every ask it holds, and climb only if one came
+      out another size.
+- [ ] Under a boundary, `sync` still reads every child of each dirty
+      ancestor on the way down: 40 µs for 2,000 siblings.
 - [ ] First layout of a 1,551-node tree is about 665 µs; style parsing
       is a third of it.
 

@@ -2,12 +2,16 @@
 # then changed a step at a time — a style set, set to what it holds, or
 # set and put back; a text rewritten or replaced; a node hidden, shown,
 # removed, inserted, reordered, moved to another parent, or taken out,
-# changed, and put back elsewhere; the width or the height of the space —
-# and laid out again after every step. Each time, every box in the tree,
+# changed, and put back elsewhere; the width or the height of the space;
+# sometimes two of these at once — and laid out again after every step. Each time, every box in the tree,
 # text nodes and comment anchors included, must equal the box of a twin
 # cloned from the live tree and laid out once, and no node may be left
 # dirty. Trees carry bare text children, comment anchors, and measure
-# functions whose height follows the width they are offered.
+# functions whose height follows the width they are offered. About one
+# box in three is given a width and a height, in points or percent, at
+# any depth, so layout boundaries nest, hold wrapped text, absolute
+# children, baseline rows and scrolling boxes, and sit under them; a
+# step gives a box such a size, takes one away, or scrolls its content.
 #
 # Every round draws from its own seed, so a failure replays alone:
 #
@@ -22,7 +26,7 @@ import { test, ok } from 'rip/testing'
 import { Element, Text, Node } from '../document.rip'
 import { layout } from '../layout.rip'
 
-SEEDS =! [1, 7, 13, 21, 42]
+SEEDS =! [1, 7, 13, 21, 42, 77, 2024]
 ROUNDS =! 1500
 STEPS =! 10
 
@@ -63,6 +67,7 @@ STYLES =! {
   overflow: ['scroll', 'hidden', undefined, undefined]
 }
 KEYS =! Object.keys STYLES
+SIZED =! { width: [4, 12, 30, '50%', '100%'], height: [1, 3, 8, '50%', '100%'] }
 
 # Texts of equal width and different height sit side by side, so a change
 # of height alone is one the fuzz makes.
@@ -118,6 +123,9 @@ make = (depth) ->
     key = pick KEYS
     value = pick STYLES[key]
     node.styles[key] = value unless value is undefined
+  if rnd() < 0.3
+    node.styles.width = pick SIZED.width
+    node.styles.height = pick SIZED.height
   if depth < 4
     for n in [0...Math.floor rnd() * 4]
       node.appendChild Node.new 8 if rnd() < 0.1
@@ -190,6 +198,17 @@ mutate = (root) ->
     node.measure = wrapper node.prose
     node.changed true
     return 'measure function replaced'
+  if roll < 0.05
+    node.set 'width', pick SIZED.width
+    node.set 'height', pick SIZED.height
+    return "sized #{node.styles.width} × #{node.styles.height}"
+  if roll < 0.09
+    key = pick ['width', 'height']
+    node.set key, pick ['auto', undefined]
+    return "#{key} left to the content"
+  if roll < 0.11
+    node.set 'contentOffsetY', pick [0, 1, 3, undefined]
+    return "content scrolled to #{node.styles.contentOffsetY}"
   if roll < 0.35
     key = pick KEYS
     value = pick STYLES[key]
@@ -281,6 +300,9 @@ round = (start, number, narrate) ->
       "height #{height}"
     else
       mutate root
+    # One frame in three holds a second change: under one boundary and
+    # above it, under two at once, or with a new space.
+    did += " + #{mutate root}" if rnd() < 0.33
     console.log "  step #{step}: #{did}" if narrate
     layout root, width, height
     twin = clone root

@@ -15,7 +15,9 @@
 # Every node carries one `Lay` record: its styles parsed to numbers, its
 # layout children, its float results, and its cache. The record is
 # rebuilt only while the node is dirty, and a node whose rebuild finds
-# nothing different stops being dirty before layout looks at it.
+# nothing different stops being dirty before layout looks at it. A change
+# that lies under a layout boundary is laid out from the boundary down,
+# and nothing above it is (see `boundary`).
 #
 # A loop over a list is written `for kid, i in list` though nothing reads
 # `i`: with the index Rip emits a counted loop, and without it a
@@ -279,6 +281,8 @@ class Lay
     @linePass = 0            # …broke its children into lines: their `lineAt` is that pass's
     @layoutPass = 0          # …laid it out: its children's `pos` is that pass's
     @settlePass = 0          # …computed it, resized it, or placed an absolute child under it: `settle` owes it a rounding
+    @freshPass = 0           # …started its answers over: every answer it holds is that pass's or a later one's
+    @loosePass = -1          # …offered it a size that was not exact, so that its answer followed its content
     # Its remembered answers:
     @entry = Entry.new()     # the last layout
     @measures = null         # up to MEASURES measure-only ones, of which `used` are live
@@ -297,6 +301,8 @@ PROBE.u = Uint8Array.new BLANK_U
 # it.
 generation = 0   # the number of the pass under way, which the pass stamps record
 rootNode = null  # the node `layout` was handed, while its pass runs
+visits = 0       # how many times the pass under way has called `visit`
+halted =! []     # the boundaries `sync` stopped a change at, innermost first
 differs = false  # out of `parse`: whether any slot came out different
 outMode = 0      # out of `constrain`: the offer, as the child's max leaves it
 outSize = 0
@@ -751,8 +757,11 @@ gather =! (node, host, lay, list) ->
 # Bring a dirty node's record up to date — styles, children, text size —
 # and its dirty descendants' records with it. Answers whether anything
 # layout reads is different; a node where nothing is stops being dirty,
-# so its cached layout stands.
-sync =! (node) ->
+# so its cached layout stands. `owner` is the record of the node whose
+# layout child this is. A change that lies wholly under a boundary (see
+# `boundary`) stops there: the node stays dirty and joins `halted`, and
+# its answer is that nothing is different, so no ancestor computes again.
+sync =! (node, owner) ->
   lay = node.lay
   # The root is laid out by rules of its own — it never grows, and it is
   # a containing block whatever its position — and no cache key says so.
@@ -761,6 +770,7 @@ sync =! (node) ->
   turned = lay and lay.asRoot isnt (node is rootNode)
   return false if lay and not node.dirty and not turned
   changed = not lay or turned
+  under = false
   lay = node.lay = Lay.new() unless lay
   lay.asRoot = node is rootNode
   node.dirty = true if turned
@@ -810,11 +820,11 @@ sync =! (node) ->
     lay.boxless = 0
     lay.hiddenFlex = false
     lay.hiddenBaseline = false
-    changed = true if gather node, node, lay, list
-    changed = true if list.length isnt lay.filled or count isnt lay.count or hiddenFlex isnt lay.hiddenFlex or hiddenBaseline isnt lay.hiddenBaseline
+    under = true if gather node, node, lay, list
+    under = true if list.length isnt lay.filled or count isnt lay.count or hiddenFlex isnt lay.hiddenFlex or hiddenBaseline isnt lay.hiddenBaseline
     list.length = lay.filled
     for kid, i in list
-      changed = true if sync kid
+      under = true if sync kid, lay
     # The flags climb: a dirty node's ancestors are all dirty, so each
     # takes its children's in turn, and a clean node keeps what it had.
     below = lay.underBaseline or baselined lay
@@ -830,6 +840,10 @@ sync =! (node) ->
   # through its own percent margin, padding, min or max. Only then is the
   # owner's size part of a cached answer's key.
   lay.leansOnOwner = lay.marginPercent or lay.insidePercent or lay.limitPercent
+  if under and not changed and owner and boundary owner, lay
+    halted.push node
+    return false
+  changed or= under
   node.dirty = false unless changed
   changed
 
@@ -1796,12 +1810,34 @@ carryBaseline! =! (node, value) ->
   for kid, i in lay.kids
     carryBaseline kid, below if kid.lay.underBaseline isnt below
 
+# A layout boundary is a node whose answers cannot follow its content.
+# An offer that is exact in both dimensions IS the answer, held in the
+# node's own min and max; so where every offer `lay` has had since
+# `owner`, whose layout child it is, last started its answers over was
+# exact, every answer an ancestor holds was computed from sizes a change
+# under the node cannot move. The ancestors' answers stand, and the node
+# alone is laid out again (`halt`). No style names the case: a definite
+# width and height, a percent of an exact owner, a stretched or flexed
+# child of one, an absolute node with sizes or opposing insets all
+# qualify by the offers they get, and a percent of a content-sized
+# owner, or a size put back to `auto`, stops qualifying at the first
+# offer that is not exact. Two readers go past the answer. A baseline row
+# reads its children's baselines, to any depth — and is computed on
+# every pass, with every node above it and under it (see
+# `orderSensitive`), so a boundary under one is reached, dirty, before
+# `halt` runs. And a static node's absolute descendants are laid out by
+# a containing block above it, so a static node is no boundary.
+boundary =! (owner, lay) -> lay.loosePass < owner.freshPass and lay.position isnt STATIC
+
 # Size `node`, from its cache when the offer is one it has answered since
 # it was last dirty (calculateLayoutInternal). A node keeps one layout
 # answer and up to MEASURES measure-only ones.
 visit! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
   lay = node.lay
+  visits += 1
+  lay.loosePass = generation unless modeW is STRETCH_FIT and modeH is STRETCH_FIT
   if (node.dirty or lay.noCache or (lay.underBaseline and not lay.leaf)) and lay.visitPass isnt generation
+    lay.freshPass = generation
     lay.used = 0
     lay.entry.live = false
   hit = null
@@ -1941,10 +1977,27 @@ forget! =! (node) ->
     forget kid
     kid = kid.nextSibling
 
+# Lay out again each boundary a change stopped at, under the offer its
+# last layout was made for — its `entry` holds that offer whether or not
+# it still answers — and round what is under it from the node's own
+# corner as `settle` left it, absolute and rounded; `gather` has put the
+# children that make no box at that corner, which has not moved.
+# Outermost first: a boundary under a node laid out here, or under one
+# the pass reached, was laid out with it and is clean.
+halt! =! ->
+  while node = halted.pop()
+    continue unless node.dirty
+    lay = node.lay
+    entry = lay.entry
+    visit node, entry.availW, entry.availH, entry.modeW, entry.modeH, entry.ownerW, entry.ownerH, true
+    rect = node.rect
+    for kid, i in lay.kids
+      settle kid, lay.atX, lay.atY, rect.x, rect.y
+
 # One pass over the tree. The root takes its own size if it has one, else
 # its max as a limit, else the space (calculateLayout).
 pass! =! (root, ownerW, ownerH) ->
-  sync root
+  sync root, null
   lay = root.lay
   # The root is offered a number where the space has one, which can
   # change from pass to pass with nothing dirty.
@@ -1970,6 +2023,7 @@ pass! =! (root, ownerW, ownerH) ->
   visit root, wide, tall, modeW, modeH, ownerW, ownerH, true
   seat lay, ownerW, ownerH
   settle root, 0, 0, 0, 0
+  halt()
 
 # Lay the tree out in a space `cols` by `rows`, where either left out, or
 # null, is unlimited. A pass that throws — a style with no meaning, a
@@ -1978,10 +2032,12 @@ pass! =! (root, ownerW, ownerH) ->
 export layout =! (root, cols, rows) ->
   generation += 1
   rootNode = root
+  visits = 0
   try
     pass root, cols ?? NaN, rows ?? NaN
   catch error
     rootNode = null
+    halted.length = 0
     forget root
     throw error
   rootNode = null
@@ -1992,3 +2048,7 @@ export layout =! (root, cols, rows) ->
     outer.dirty = true
     outer = outer.parentNode
   root.rect
+
+# How many times the last layout called `visit`, for a test of the work
+# a layout does.
+export visited =! -> visits

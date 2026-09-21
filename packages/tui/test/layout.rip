@@ -8,7 +8,7 @@
 
 import { test, eq, ok, throws } from 'rip/testing'
 import { Element, Text, Node } from '../document.rip'
-import { layout, admit, whereabouts } from '../layout.rip'
+import { layout, visited, admit, whereabouts } from '../layout.rip'
 
 div = (styles = {}, kids = []) ->
   node = Element.new 'div'
@@ -320,6 +320,174 @@ test "a comment anchor is cleaned like any node", ->
   layout root, 10
   ok not anchor.dirty
   ok not hidden.dirty
+
+# ==[ Layout boundaries ]==
+#
+# A change under a node whose every offer is exact stops there: the node
+# is laid out again and nothing above it is. These hold the WORK, by the
+# visits a layout makes, beside the answer.
+
+console.log "\nLayout boundaries"
+
+test "a text widened in one row of 2,000 visits the row and its text, and nothing else", ->
+  rows = (div { height: 1 }, [span "row #{n}"] for n in [0...2000])
+  root = div {}, rows
+  settled root, 80
+  rows[1234].firstChild.firstChild.data = 'a row that is wider than it was'
+  settled root, 80
+  layout root, 80
+  eq visited(), 1
+  rows[1234].firstChild.firstChild.data = 'wider than the row, so that it wraps onto a second line, and then onto a third, and the row cuts it'
+  layout root, 80
+  eq visited(), 5
+  eq at(rows[1234].firstChild), '0,1234 80x2'
+  eq root.rect.h, 2000
+
+test "a change at the bottom of 14 boxes of a definite size lays out the innermost", ->
+  words = span 'deep'
+  box = div { width: 10, height: 2 }, [words]
+  inner = box
+  box = div { width: 12 + n, height: 3 + n, paddingLeft: 1, paddingTop: 1 }, [box] for n in [0...13]
+  root = div {}, [box, span('after')]
+  settled root, 80
+  words.firstChild.data = 'deeper, and wrapped'
+  layout root, 80
+  eq visited(), 5
+  eq [at(inner), at(words)], ['13,13 10x2', '13,13 10x3']
+  settled root, 80
+
+test "a percent of an exact owner is a boundary, and a percent of a content-sized one is not", ->
+  words = span 'a'
+  half = div { width: '50%', height: '50%' }, [words]
+  below = div { height: 1 }
+  root = div {}, [div({ width: 40, height: 10 }, [half]), below]
+  settled root, 80
+  words.firstChild.data = 'a\nb\nc'
+  layout root, 80
+  eq visited(), 5
+  settled root, 80
+  words = span 'a'
+  half = div { width: '50%', height: '50%' }, [words]
+  below = div { height: 1 }
+  root = div {}, [div({ width: 40 }, [half]), below]
+  settled root, 80
+  eq below.rect.y, 1
+  words.firstChild.data = 'a\nb\nc'
+  settled root, 80
+  eq below.rect.y, 3
+
+test "a stretched, flexed pane of an exact box is a boundary by the offers it gets", ->
+  words = span 'log'
+  pane = div { flex: 1 }, [words]
+  root = div { height: 20 }, [div({ height: 3 }), pane]
+  settled root, 80
+  words.firstChild.data = 'log\nlog\nlog'
+  layout root, 80
+  eq visited(), 5
+  eq [at(pane), at(words)], ['0,3 80x17', '0,3 80x3']
+  settled root, 80
+
+test "a change under a box on a baseline row moves the row's other children", ->
+  words = span 'a'
+  label = span 'label'
+  root = div {}, [div({ flexDirection: 'row', alignItems: 'baseline' }, [div({ width: 10, height: 4 }, [words]), label])]
+  settled root, 80
+  eq label.rect.y, 0
+  words.firstChild.data = 'a\nb\nc'
+  settled root, 80
+  eq label.rect.y, 2
+
+test "a static box is no boundary: a containing block above it lays out its absolute nodes", ->
+  pinned = div { position: 'absolute', right: 0, top: 0 }, [span('ab')]
+  root = div { width: 40, height: 10 }, [div({ position: 'static', width: 20, height: 5 }, [pinned])]
+  settled root, 80
+  eq at(pinned), '38,0 2x1'
+  pinned.firstChild.firstChild.data = 'abcdef'
+  settled root, 80
+  eq at(pinned), '34,0 6x1'
+
+test "a boundary whose own size changes is laid out by its parent, and is a boundary again after", ->
+  words = span 'ab'
+  box = div { width: 10, height: 2 }, [words]
+  after = div { width: 1, height: 1 }
+  root = div { flexDirection: 'row', alignItems: 'flex-start' }, [box, after]
+  settled root, 80
+  box.set 'height', 5
+  layout root, 80
+  ok visited() > 5, 'its parent computes again'
+  settled root, 80
+  words.firstChild.data = 'abc'
+  layout root, 80
+  eq visited(), 5
+  # Its width left to its content, it follows its text, and its neighbor moves.
+  box.set 'width', undefined
+  settled root, 80
+  eq [at(box), at(after)], ['0,0 3x5', '3,0 1x1']
+  words.firstChild.data = 'abcdef'
+  settled root, 80
+  eq [at(box), at(after)], ['0,0 6x5', '6,0 1x1']
+  box.set 'width', 10
+  settled root, 80
+  words.firstChild.data = 'a'
+  layout root, 80
+  eq visited(), 5
+  settled root, 80
+
+test "a boundary rounds what is under it from its own corner, whatever is put there", ->
+  box = div { width: 10.5, height: 4, marginLeft: 0.4, paddingLeft: 0.3 }, [span('one')]
+  root = div { paddingLeft: 3, paddingTop: 2 }, [div({ height: 1.5 }), box]
+  settled root, 80
+  box.appendChild div { width: 3.3, height: 1 }, [span('in')]
+  box.appendChild div { display: 'contents' }, [div({ hidden: true }), span('shown')]
+  layout root, 80
+  eq visited(), 12
+  settled root, 80
+  box.firstChild.set 'hidden', true
+  settled root, 80
+
+test "a change under a boundary and a new space in one frame, and a boundary under a boundary that changes too", ->
+  words = span 'a'
+  inner = div { width: '50%', height: 2 }, [words]
+  outer = div { width: '100%', height: 6 }, [div({ height: 1 }), inner]
+  root = div {}, [div({ height: 1 }), outer]
+  settled root, 80
+  words.firstChild.data = 'a b c d e f g h i j k l m n o p q r s t u v w x y z'
+  settled root, 30
+  eq at(inner), '0,2 15x2'
+  words.firstChild.data = 'z'
+  outer.insertBefore div({ height: 2 }), inner
+  layout root, 30
+  eq visited(), 10
+  settled root, 30
+  # A new space that measures the boundary's owner again and lays it out
+  # as it was: the boundary is measured, dirty, and its last layout's
+  # answer goes; the offer it was made for still stands.
+  words = span 'ab'
+  root = div { flexDirection: 'row', alignItems: 'flex-start' }, [div({}, [div({ width: 10, height: 2 }, [words])])]
+  settled root, 80
+  words.firstChild.data = 'abcdefghijkl'
+  settled root, 70
+  eq at(words), '0,0 10x2'
+
+test "a layout that throws under a boundary leaves no boundary behind for the next", ->
+  sized = ->
+    leaf = div()
+    leaf.measure = -> { width: 1, height: 1 }
+    leaf
+  first = sized()
+  second = sized()
+  root = div {}, [div({ width: 10, height: 4 }, [div({ alignSelf: 'flex-start' }, [first])]), div({ width: 10, height: 4 }, [div({ alignSelf: 'flex-start' }, [second])])]
+  settled root, 80
+  first.measure = -> { width: 3, height: 1 }
+  second.measure = -> throw Error.new 'no size'
+  first.changed true
+  second.changed true
+  throws (-> layout root, 80), 'no size'
+  settled div({}, [span('another tree')]), 80
+  second.measure = -> { width: 2, height: 2 }
+  second.changed true
+  settled root, 80
+  eq [at(first), at(second)], ['0,0 3x1', '0,4 2x2']
 
 # ==[ Plain trees ]==
 
