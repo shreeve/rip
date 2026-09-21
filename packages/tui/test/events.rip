@@ -241,6 +241,13 @@ test "a lone ESC is the Escape key only once its wait has run out", ->
     view.tick 1000
     eq seen, ['Escape', 'ArrowUp']
 
+test "a close leaves no wait of the parser armed", ->
+  view = mount Nest
+  view.send ESC
+  eq view.held.clock.due.length, 1
+  view.close()
+  eq view.held.clock.due.length, 0
+
 # ==[ Default actions ]==
 
 console.log "\nDefault actions"
@@ -299,9 +306,12 @@ test! "a key that follows the one that quit, in the same read, is nobody's", ->
       Box @keydown: ((event) -> heard.push event.key; quit 'done' if event.key is 'q')
         Text "x"
   view = mount Quits
-  view.send 'aqbc'
-  eq await view.done, 'done'
-  eq heard, ['a', 'q']
+  try
+    view.send 'aqbc'
+    eq heard, ['a', 'q']
+    eq await view.done, 'done'
+  finally
+    view.close()
 
 test "Escape does nothing by default", ->
   mounted Trio, {}, (view) ->
@@ -471,6 +481,12 @@ test "`autofocus` is a claim made once: on mount the first in tree order takes i
     eq view.focused, null, 'a claim is made once, and is not made again when focus is let go'
     view.app.again.value = true
     eq idOf(view.focused), 'again', 'a node that arrives when nothing holds focus takes it'
+
+test "claims are settled in tree order, whatever order they were made in", ->
+  mounted Trio, {}, (view) ->
+    find('c').set 'autofocus', true
+    find('b').set 'autofocus', true
+    eq idOf(view.focused), 'b'
 
 test "`autofocus` on a node that cannot take focus claims nothing", ->
   Cannot = component
@@ -859,13 +875,42 @@ test! "under `run` a key that changes nothing books no frame and writes nothing"
   term = Terminal.new()
   running = run Cells, stdin: stdin, stdout: term
   mark = term.sent.length
+  owed = 0
+  book = document.onOwe
+  document.onOwe = ->
+    owed += 1
+    book()
   stdin.key 'x'
   stdin.key '\t'
   sleep! 30
-  eq term.sent.length, mark
+  eq [term.sent.length, owed], [mark, 0]
   stdin.key '+++'
   sleep! 30
   eq [term.sent.length, term.text], [mark + 1, "a line that stays\ncount 3"], 'one read is one frame'
+  quit()
+  await running.done
+
+test! "under `run` a cursor that moves alone — by focus, or by what the focused node declares — owes a frame of moves and no cell", ->
+  Fields = component
+    at := 0
+    render
+      Box flexDirection: 'column', @keydown: ((event) => @at += 1 if event.key is 'ArrowRight')
+        Box focusable: true, autofocus: true, cursor: { x: at, y: 0 }
+          Text "one"
+        Box focusable: true, cursor: { x: 2, y: 0 }
+          Text "two"
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Fields, stdin: stdin, stdout: term
+  eq term.cursor, { x: 0, y: 0 }
+  mark = term.sent.length
+  stdin.key "#{CSI}C"
+  sleep! 30
+  eq term.cursor, { x: 1, y: 0 }
+  stdin.key '\t'
+  sleep! 30
+  eq term.cursor, { x: 2, y: 1 }
+  eq term.since(mark).replace(/\x1b\[[?0-9;]*[A-Za-z]|\r/g, ''), '', 'no cell was drawn'
   quit()
   await running.done
 

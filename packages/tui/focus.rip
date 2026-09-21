@@ -80,8 +80,13 @@ export advance! =! (doc, back) ->
   tend doc
   start = doc.active ?? doc.body
   node = start
+  round = false
   loop
-    node = if back then before(node, doc.body) ?? deepest(doc.body) else after(node, doc.body) ?? doc.body
+    node = if back then before(node, doc.body) else after(node, doc.body)
+    unless node
+      return if round
+      round = true
+      node = if back then deepest(doc.body) else doc.body
     return if node is start
     if node.focusable and not shut node
       take doc, node
