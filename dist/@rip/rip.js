@@ -11454,12 +11454,11 @@ class Emitter {
       targets.delete(x);
     for (const x of reactive)
       targets.delete(x);
-    const scopeStmts = nodes.length === 1 && isBlock(nodes[0]) ? nodes[0].slice(1) : nodes;
-    for (const x of Emitter.declaredNames(scopeStmts))
+    for (const x of Emitter.declaredNames(nodes))
       targets.delete(x);
     for (const x of extraDeclared)
       targets.delete(x);
-    for (const s of scopeStmts) {
+    for (const s of nodes) {
       if (this.isModuleImport(s))
         for (const x of Emitter.importedNames([s]))
           targets.delete(x);
@@ -11488,8 +11487,7 @@ class Emitter {
   }
   static declaresInPlace = new WeakSet;
   static inlineOwners = new WeakMap;
-  captureScan(nodes) {
-    const stmts = nodes.length === 1 && isBlock(nodes[0]) ? nodes[0].slice(1) : nodes;
+  captureScan(stmts) {
     const top = new Set(stmts.filter(isNode));
     const facts = new Map;
     const occur = (name, inFn, write = false, declStmt = null, writeNode = null, writePath = "") => {
@@ -11659,10 +11657,9 @@ class Emitter {
     const facts = this.captureScan(rawStmts);
     let tail = null;
     if (tailIsExpression) {
-      const stmts = rawStmts.length === 1 && isBlock(rawStmts[0]) ? rawStmts[0].slice(1) : rawStmts;
-      for (let i = stmts.length - 1;i >= 0; i--) {
-        if (!Emitter.isErasedStmt(stmts[i])) {
-          tail = stmts[i];
+      for (let i = rawStmts.length - 1;i >= 0; i--) {
+        if (!Emitter.isErasedStmt(rawStmts[i])) {
+          tail = rawStmts[i];
           break;
         }
       }
@@ -12742,7 +12739,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
         sub.implicitReturn(stmt, 0);
       bodyText = `{ ${sub.b.code} }`;
     } else {
-      const { entries, names: scoped } = sub.scopedHoist([bodyNode], names);
+      const { entries, names: scoped } = sub.scopedHoist(stmts, names);
       for (const n of sub.pushReactiveFrame(stmts, scoped, names))
         scoped.add(n);
       sub.scopes.push(scoped);
@@ -14567,7 +14564,7 @@ ${pad ?? ""}`);
       this.tsReturnAnnotation(node, isAsync, isVoid, isGen);
       this.b.emit(" ");
       const stmts = this.liveStmts(isBlock(node[3]) ? node[3].slice(1) : [node[3]], { forwards: true });
-      const { entries, names } = this.scopedHoist([node[3]], node[2]);
+      const { entries, names } = this.scopedHoist(isBlock(node[3]) ? node[3].slice(1) : [node[3]], node[2]);
       for (const n of this.pushReactiveFrame(stmts, names, node[2], node))
         names.add(n);
       this.scopes.push(names);
