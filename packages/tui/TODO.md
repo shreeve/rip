@@ -15,8 +15,15 @@ steps are in [PLAN.md](PLAN.md).
       out another size.
 - [ ] Under a boundary, `sync` still reads every child of each dirty
       ancestor on the way down: 40 µs for 2,000 siblings.
-- [ ] First layout of a 1,551-node tree is about 665 µs; style parsing
-      is a third of it.
+- [ ] First layout of a 1,551-node tree is about 630 µs: its 3,651
+      visits are 63% of it, rounding 4%, and reading the tree 32% — 55
+      µs making 1,051 records, 70 µs parsing 551 of them, 25 µs the
+      500 text flows. No single line moves it: a `seat` and a `boxOf`
+      that return early, a parse that skips sums it has no edges for,
+      `slice` for the blank slots, plain arrays for them, and zero
+      edges shared until written each measured within the noise, 3%.
+      What is left is structural: fewer allocations a record, or fewer
+      visits a node.
 
 ## 5. The painter and the screen
 

@@ -742,6 +742,21 @@ test "a shorthand yields to its longhands", ->
   eq at(outer), '2,4 30x10'
   eq at(inner), '7,5 22x8'
 
+test "styles that are all the painter's leave a record blank, and a layout style written after them is read", ->
+  words = span 'hello', { color: 'green', bold: true }
+  box = div { backgroundColor: 'blue' }, [words]
+  root = div { alignItems: 'flex-start' }, [box]
+  settled root, 40
+  eq at(box), '0,0 5x1'
+  ok box.lay.v is words.lay.v, 'both read the blank slots'
+  box.set 'paddingLeft', 2
+  settled root, 40
+  eq [at(box), at(words)], ['0,0 7x1', '2,0 5x1']
+  ok box.lay.v isnt words.lay.v, 'the box has slots of its own'
+  box.set 'paddingLeft', undefined
+  settled root, 40
+  eq [at(box), at(words)], ['0,0 5x1', '0,0 5x1']
+
 test "a value layout cannot use is refused by name, for the key it was written to", ->
   refused = [
     ['flexGrow', 'lots', 'flexGrow: "lots" is not a number']

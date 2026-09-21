@@ -218,7 +218,8 @@ PERCENTAGE =! /^-?(\d+(\.\d+)?|\.\d+)%$/
 
 # A new record holds what parsing no styles at all gives, so a node
 # without styles is never parsed; it reads the blank lengths themselves,
-# and takes its own copy on its first parse.
+# and takes its own copy when a style first writes a slot — which the
+# styles of colored text never do.
 class Lay
   constructor: ->
     # What the node wrote, parsed:
@@ -434,6 +435,12 @@ constrain! =! (lay, axis, axisSize, widthSize, mode, size) ->
 
 # ── Reading a node ────────────────────────────────────────────────────────────
 
+# A record's own slots, taken when a style first writes one.
+own! =! (lay) ->
+  return unless lay.v is BLANK_V
+  lay.v = Float64Array.new BLANK_V
+  lay.u = Uint8Array.new BLANK_U
+
 # Parse one written value into its slot, unless a style that outranks
 # this one has written it: a longhand outranks its axis shorthand, which
 # outranks the all-sides one. The intrinsic sizing keywords are sizes
@@ -461,6 +468,7 @@ put! =! (lay, slot, value, rank, key) ->
     throw Error.new "rip/tui: #{key}: #{value} is not a length — a length is a finite number" unless Number.isFinite number
     throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is below zero — a size is zero or more" if sized and number < 0
   return if rank < RANKS[slot]
+  own lay
   RANKS[slot] = rank
   lay.u[slot] = unit
   lay.v[slot] = number
@@ -474,6 +482,7 @@ put! =! (lay, slot, value, rank, key) ->
 borderAt! =! (lay, slot, width, rank, key) ->
   throw Error.new "rip/tui: #{key}: #{JSON.stringify width} is not a border width — write a finite number" unless Number.isFinite width
   return if rank < RANKS[slot]
+  own lay
   RANKS[slot] = rank
   lay.u[slot] = POINT
   lay.v[slot] = if width > 0 then width else 0
@@ -481,6 +490,7 @@ borderAt! =! (lay, slot, width, rank, key) ->
 # A number or a word, held in its slot beside the lengths.
 scalar! =! (lay, slot, value, rank) ->
   return if rank < RANKS[slot]
+  own lay
   RANKS[slot] = rank
   lay.v[slot] = value
 
@@ -607,15 +617,14 @@ parse! =! (lay, s, scan) ->
   if scan
     PRIOR_V.set lay.v
     PRIOR_U.set lay.u
-  if lay.v is BLANK_V
-    lay.v = Float64Array.new BLANK_V
-    lay.u = Uint8Array.new BLANK_U
-  else
+  unless lay.v is BLANK_V
     lay.v.set BLANK_V
     lay.u.set BLANK_U
   RANKS.fill 0
   for key, value of s
     style lay, key, value unless value is undefined
+  # Styles that are all the painter's wrote nothing: the record is blank still.
+  return if lay.v is BLANK_V
   # A max equal to its min IS the size (Node::processDimensions).
   for dim in [0...2]
     if lay.u[MAX + dim] isnt NIL and lay.u[MAX + dim] is lay.u[MIN + dim] and near(lay.v[MAX + dim], lay.v[MIN + dim])
