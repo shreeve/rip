@@ -1,0 +1,145 @@
+# Ink's test/text.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/text.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, plain, styled } from './harness.rip'
+
+console.log "\nText"
+
+test "<Text> with undefined children", ->
+  App = component
+    render
+      Text
+  eq plain(App), []
+
+test "<Text> with null children", ->
+  App = component
+    render
+      Text
+  eq plain(App), []
+
+test "tabs are measured and rendered without overwriting adjacent text", ->
+  App = component
+    render
+      Box width: 20
+        Text
+          "A"
+          Text "\tB"
+        Text "!"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "A\t!"
+  eq plain(App), ["A       B!"]
+
+test "expanded tabs participate in text wrapping", ->
+  App = component
+    render
+      Box width: 5, flexDirection: 'column'
+        Text "A\tB"
+        Text "!"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "A\tB\n!"
+  eq plain(App), [
+    "A"
+    "   B"
+    "!"
+  ]
+
+test "tab stops account for styled wide characters", ->
+  App = component
+    render
+      Box width: 20
+        Text
+          Text color: 'red'
+            "界"
+          "\tB"
+        Text "!"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "\u001b[31m界\u001b[39m\t!"
+  eq styled(App), ["«red»界«»      B!"]
+
+test "text with standard color", ->
+  App = component
+    render
+      Text color: 'green'
+        "Test"
+  eq styled(App), ["«green»Test"]
+
+test "text with dim+bold", ->
+  App = component
+    render
+      Text dimColor: true, bold: true
+        "Test"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq styled(App), ["«bold dim»Test"]
+
+test "text with dimmed color", ->
+  App = component
+    render
+      Text dimColor: true, color: 'green'
+        "Test"
+  eq styled(App), ["«green dim»Test"]
+
+test "text with hex color", ->
+  App = component
+    render
+      Text color: '#FF8800'
+        "Test"
+  eq styled(App), ["«#ff8800»Test"]
+
+test "text with rgb color", ->
+  App = component
+    render
+      Text color: 'rgb(255, 136, 0)'
+        "Test"
+  eq styled(App), ["«#ff8800»Test"]
+
+test "text with ansi256 color", ->
+  App = component
+    render
+      Text color: 'ansi256(194)'
+        "Test"
+  eq styled(App), ["«ansi256(194)»Test"]
+
+test "text with standard background color", ->
+  App = component
+    render
+      Text backgroundColor: 'green'
+        "Test"
+  eq styled(App), ["«on green»Test"]
+
+test "text with hex background color", ->
+  App = component
+    render
+      Text backgroundColor: '#FF8800'
+        "Test"
+  eq styled(App), ["«on #ff8800»Test"]
+
+test "text with rgb background color", ->
+  App = component
+    render
+      Text backgroundColor: 'rgb(255, 136, 0)'
+        "Test"
+  eq styled(App), ["«on #ff8800»Test"]
+
+test "text with ansi256 background color", ->
+  App = component
+    render
+      Text backgroundColor: 'ansi256(194)'
+        "Test"
+  eq styled(App), ["«on ansi256(194)»Test"]
+
+test "text with inversion", ->
+  App = component
+    render
+      Text inverse: true
+        "Test"
+  eq styled(App), ["«inverse»Test"]
+
+test "text with content \"constructor\" wraps correctly", ->
+  App = component
+    render
+      Text "constructor"
+  eq plain(App), ["constructor"]
+

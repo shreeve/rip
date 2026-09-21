@@ -1,0 +1,224 @@
+# Ink's test/text-width.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/text-width.rip
+
+import { test, eq, ok } from 'rip/testing'
+import { Box, Text, plain, styled } from './harness.rip'
+
+console.log "\nText Width"
+
+# Ink's two zero-width tests compare the frame with every U+200B taken
+# out, so a renderer may keep the character or drop it. Published Ink
+# 7.1.1 fails both: it loses the right border, and half of the wide pair.
+bare = (rows) -> (row.replaceAll('\u200b', '') for row in rows)
+
+test "zero-width spaces do not overwrite box borders", ->
+  App = component
+    render
+      Box borderStyle: 'single', width: 7
+        Text "he\u200bllo"
+  eq bare(plain App), [
+    "┌─────┐"
+    "│hello│"
+    "└─────┘"
+  ]
+
+test "zero-width overlay does not erase wide characters", ->
+  App = component
+    render
+      Box width: 4, height: 1
+        Text "你好"
+        Box position: 'absolute', left: 1
+          Text "\u200b"
+  eq bare(plain App), ["你好"]
+
+test "combining marks and joined emoji retain their graphemes", ->
+  App = component
+    render
+      Box borderStyle: 'single', width: 5
+        Text "e\u0301👩\u200d💻"
+  eq plain(App), [
+    "┌───┐"
+    "│e\u0301👩\u200d💻│"
+    "└───┘"
+  ]
+
+test "CRLF line endings do not overwrite box borders", ->
+  App = component
+    render
+      Box borderStyle: 'single', width: 7
+        Text "hello\r\nworld"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "┌─────┐\n│hello\n│world│\n└─────┘"
+  eq plain(App), [
+    "┌─────┐"
+    "│hello│"
+    "│world│"
+    "└─────┘"
+  ]
+
+test "wide characters do not add extra space inside fixed-width Box", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Box
+          Box width: 2
+            Text "🍔"
+          Text "|"
+        Box
+          Box width: 2
+            Text "⏳"
+          Text "|"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq plain(App), [
+    "🍔|"
+    "⏳|"
+  ]
+
+test "CJK characters occupy correct width in fixed-width Box", ->
+  App = component
+    render
+      Box
+        Box width: 4
+          Text "你好"
+        Text "|"
+  eq plain(App), ["你好|"]
+
+test "mixed ASCII and wide characters align correctly", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Box
+          Box width: 6
+            Text "ab🍔cd"
+          Text "|"
+        Box
+          Box width: 6
+            Text "abcdef"
+          Text "|"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq plain(App), [
+    "ab🍔cd|"
+    "abcdef|"
+  ]
+
+test "ANSI styled text does not affect layout width", ->
+  App = component
+    render
+      Box
+        Box width: 5
+          Text color: 'red'
+            "hello"
+        Text "|"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq styled(App), ["«red»hello«»|"]
+
+test "empty Text does not affect sibling layout", ->
+  App = component
+    render
+      Box
+        Text
+        Text "hello"
+  eq plain(App), ["hello"]
+
+# Ink's test asks that the row fit the box and no more; published Ink
+# 7.1.1 draws "あいうえおかきくけ…".
+test "truncate CJK text at end", ->
+  App = component
+    render
+      Box width: 20
+        Text wrap: 'truncate'
+          "あいうえおかきくけこ|end"
+  rows = plain App
+  eq rows.length, 1
+  ok Bun.stringWidth(rows[0]) <= 20, "the row is #{Bun.stringWidth rows[0]} columns wide"
+
+# Ink's test asks that the row fit the box and no more; published Ink
+# 7.1.1 draws "あいうえ…けこ|end".
+test "truncate CJK text in the middle", ->
+  App = component
+    render
+      Box width: 20
+        Text wrap: 'truncate-middle'
+          "あいうえおかきくけこ|end"
+  rows = plain App
+  eq rows.length, 1
+  ok Bun.stringWidth(rows[0]) <= 20, "the row is #{Bun.stringWidth rows[0]} columns wide"
+
+# Ink's test asks that the row fit the box and no more; published Ink
+# 7.1.1 draws "…えおかきくけこ|end".
+test "truncate CJK text at start", ->
+  App = component
+    render
+      Box width: 20
+        Text wrap: 'truncate-start'
+          "あいうえおかきくけこ|end"
+  rows = plain App
+  eq rows.length, 1
+  ok Bun.stringWidth(rows[0]) <= 20, "the row is #{Bun.stringWidth rows[0]} columns wide"
+
+# Ink's test asks for one row that ends with the bar; published Ink
+# 7.1.1 draws "あいうえおかきくけ… |".
+test "truncate CJK text does not exceed Box width", ->
+  App = component
+    render
+      Box
+        Box width: 20
+          Text wrap: 'truncate'
+            "あいうえおかきくけこ|end"
+        Text "|"
+  rows = plain App
+  eq rows.length, 1
+  ok rows[0].endsWith('|'), "the row is #{JSON.stringify rows[0]}"
+  eq Bun.stringWidth(rows[0]), 21
+
+test "overlay on 2nd cell of CJK character clears the full character", ->
+  App = component
+    render
+      Box width: 20, height: 1
+        Text "あいうえおかきくけこ"
+        Box position: 'absolute', left: 9
+          Text "XYZ"
+  eq plain(App, 20), ["あいうえ XYZきくけこ"]
+
+test "overlay on 1st cell of CJK character clears trailing placeholder", ->
+  App = component
+    render
+      Box width: 20, height: 1
+        Text "あいうえおかきくけこ"
+        Box position: 'absolute', left: 10
+          Text "X"
+  eq plain(App, 20), ["あいうえおX きくけこ"]
+
+test "CJK overlay on 2nd cell of CJK clears both sides", ->
+  App = component
+    render
+      Box width: 20, height: 1
+        Text "あいうえおかきくけこ"
+        Box position: 'absolute', left: 5
+          Text "漢字テスト"
+  eq plain(App, 20), ["あい 漢字テスト けこ"]
+
+test "clipped empty write does not corrupt existing wide characters", ->
+  App = component
+    render
+      Box width: 4, height: 1, overflowX: 'hidden'
+        Text "あい"
+        Box position: 'absolute', left: -1, width: 1
+          Text "Z"
+  eq plain(App, 4), ["あい"]
+
+test "wide characters crossing the left output edge preserve visible columns", ->
+  App = component
+    render
+      Box width: 4, height: 1
+        Box position: 'absolute', left: -1
+          Text "好AB"
+        Box position: 'absolute', left: 3
+          Text "!"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "AB!"
+  eq plain(App), [" AB!"]
+

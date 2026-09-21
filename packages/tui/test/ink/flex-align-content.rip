@@ -1,0 +1,153 @@
+# Ink's test/flex-align-content.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/flex-align-content.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, plain, tall } from './harness.rip'
+
+console.log "\nFlex Align Content"
+
+test "align content flex-start", ->
+  App = component
+    render
+      Box width: 2, height: 6, flexWrap: 'wrap', alignContent: 'flex-start'
+        Text "A"
+        Text "B"
+        Text "C"
+        Text "D"
+  eq plain(App), [
+    "AB"
+    "CD"
+  ]
+  eq tall(App), 6
+
+test "align content center", ->
+  App = component
+    render
+      Box width: 2, height: 6, flexWrap: 'wrap', alignContent: 'center'
+        Text "A"
+        Text "B"
+        Text "C"
+        Text "D"
+  eq plain(App), [
+    ""
+    ""
+    "AB"
+    "CD"
+  ]
+  eq tall(App), 6
+
+test "align content flex-end", ->
+  App = component
+    render
+      Box width: 2, height: 6, flexWrap: 'wrap', alignContent: 'flex-end'
+        Text "A"
+        Text "B"
+        Text "C"
+        Text "D"
+  eq plain(App), [
+    ""
+    ""
+    ""
+    ""
+    "AB"
+    "CD"
+  ]
+
+test "align content space-between", ->
+  App = component
+    render
+      Box width: 2, height: 6, flexWrap: 'wrap', alignContent: 'space-between'
+        Text "A"
+        Text "B"
+        Text "C"
+        Text "D"
+  eq plain(App), [
+    "AB"
+    ""
+    ""
+    ""
+    ""
+    "CD"
+  ]
+
+test "align content space-around", ->
+  App = component
+    render
+      Box width: 2, height: 6, flexWrap: 'wrap', alignContent: 'space-around'
+        Text "A"
+        Text "B"
+        Text "C"
+        Text "D"
+  eq plain(App), [
+    ""
+    "AB"
+    ""
+    ""
+    "CD"
+  ]
+  eq tall(App), 6
+
+test "align content space-evenly", ->
+  App = component
+    render
+      Box width: 2, height: 6, flexWrap: 'wrap', alignContent: 'space-evenly'
+        Text "A"
+        Text "B"
+        Text "C"
+        Text "D"
+  eq plain(App), [
+    ""
+    "AB"
+    ""
+    "CD"
+  ]
+  eq tall(App), 6
+
+test "align content stretch", ->
+  App = component
+    render
+      Box width: 2, height: 6, flexWrap: 'wrap', alignContent: 'stretch'
+        Text "A"
+        Text "B"
+        Text "C"
+        Text "D"
+  eq plain(App), [
+    "AB"
+    ""
+    ""
+    "CD"
+  ]
+  eq tall(App), 6
+
+test "align content defaults to flex-start", ->
+  App = component
+    render
+      Box width: 2, height: 6, flexWrap: 'wrap'
+        Text "A"
+        Text "B"
+        Text "C"
+        Text "D"
+  eq plain(App), [
+    "AB"
+    "CD"
+  ]
+  eq tall(App), 6
+
+test "align content does not add extra spacing when there is no free cross-axis space", ->
+  App = component
+    render
+      Box width: 2, height: 2, flexWrap: 'wrap', alignContent: 'center'
+        Text "A"
+        Text "B"
+        Text "C"
+        Text "D"
+  eq plain(App), [
+    "AB"
+    "CD"
+  ]
+

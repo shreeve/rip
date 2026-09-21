@@ -1,0 +1,54 @@
+# The cell reader, held to a few frames whose cells are known.
+#
+#   rip test/ink/cells-check.rip
+
+import { test, eq, throws } from 'rip/testing'
+import { parse, canon, styled, plain } from './cells.rip'
+
+console.log "\nCells"
+
+test "two spellings of one picture read as the same cells", ->
+  chalk = "\x1b[1m\x1b[32mok\x1b[39m\x1b[22m done"
+  ours  = "\x1b[1;32mok\x1b[0m done"
+  eq styled(chalk), ["«green bold»ok«» done"]
+  eq styled(ours), styled(chalk)
+
+test "the sixteen colors, the 256, and true color take one spelling each", ->
+  eq styled("\x1b[31mA\x1b[91mB\x1b[90mC\x1b[38;5;1mD\x1b[38;5;9mE\x1b[38;5;194mF\x1b[38;2;255;136;0mG\x1b[39mH"), [
+    "«red»A«redBright»B«gray»C«red»D«redBright»E«ansi256(194)»F«#ff8800»G«»H"
+  ]
+  eq styled("\x1b[44mA\x1b[104mB\x1b[48;5;194mC\x1b[48;2;0;0;255mD\x1b[49mE"), [
+    "«on blue»A«on blueBright»B«on ansi256(194)»C«on #0000ff»D«»E"
+  ]
+
+test "each attribute sets and clears, and 22 clears bold and dim together", ->
+  eq styled("\x1b[1mA\x1b[2mB\x1b[22mC\x1b[3mD\x1b[23m\x1b[4mE\x1b[24m\x1b[9mF\x1b[29m\x1b[7mG\x1b[27mH"), [
+    "«bold»A«bold dim»B«»C«italic»D«underline»E«strikethrough»F«inverse»G«»H"
+  ]
+
+test "every row starts in the default style, and a style runs on across a newline", ->
+  eq styled("\x1b[32mA\nB\x1b[39m\nC"), ["«green»A", "«green»B", "C"]
+
+test "a space keeps its background and loses what it cannot show", ->
+  eq styled("\x1b[1;32m a \x1b[0m"), [" «green bold»a"]
+  eq styled("\x1b[41m a \x1b[49m  "), ["«on red» a "]
+  eq styled("\x1b[4m a \x1b[24m"), ["«underline» a "]
+
+test "trailing blank rows are dropped, and blank rows between are kept", ->
+  eq styled("A\n\n\x1b[32mB\x1b[39m\n   \n\n"), ["A", "", "«green»B"]
+  eq plain("A  \n\nB\n \n"), ["A", "", "B"]
+
+test "plain drops every style before it trims", ->
+  eq plain("\x1b[41mA  \x1b[49m\n\x1b[32mB\x1b[0m"), ["A", "B"]
+
+test "a wide character and an emoji sequence are one cell each", ->
+  eq parse("日本\u{1F468}\u200d\u{1F469}\u200d\u{1F467}X")[0].length, 4
+
+test "a combining mark after a style change joins the cell before it", ->
+  eq styled("\x1b[34me\x1b[39m\x1b[31m\u0301X\x1b[39m"), ["«blue»e\u0301«red»X"]
+  eq canon(parse("e\x1b[31m\u0301\x1b[39m"))[0].length, 1
+
+test "a sequence that is not SGR, or a style outside the table, is refused", ->
+  throws (-> parse "\x1b[2J"), 'not SGR'
+  throws (-> parse "\x1b[5mblink"), 'SGR 5 is not a style'
+  throws (-> styled "«"), "notation's own bracket"

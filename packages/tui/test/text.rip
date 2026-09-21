@@ -1,0 +1,339 @@
+# ==============================================================================
+# tui text tests — sanitize, units and their widths, wrap, truncate, the cache
+#
+#   rip test/text.rip
+#
+# The wrap and truncate expectations are what `wrap-ansi` under
+# `{trim: false, hard: true}` and `cli-truncate` answer for the same
+# text and width — the two libraries Ink's <Text> stands on.
+# ==============================================================================
+
+import { test, eq, ok } from 'rip/testing'
+import { sanitize, Flow, MODES, glyph, lead, CLUSTER, refresh } from '../text.rip'
+import { Element, Text } from '../document.rip'
+import { Grid, intern } from '../paint.rip'
+
+at = (code) -> String.fromCodePoint code
+
+ESC      =! at 0x1B
+ZWJ      =! at 0x200D
+ACUTE    =! at 0x301
+SUN      =! at 0x65E5
+BOOK     =! at 0x672C
+WORD     =! at 0x8A9E
+FAMILY   =! at(0x1F468) + ZWJ + at(0x1F469) + ZWJ + at(0x1F467)
+FLAG     =! at(0x1F1FA) + at(0x1F1F8)
+THUMB    =! at(0x1F44D) + at(0x1F3FD)
+KEYCAP   =! '1' + at(0xFE0F) + at(0x20E3)
+
+# The rows a text wraps into at a width, as strings.
+rows = (text, width, mode = 'wrap') ->
+  flow = Flow.new()
+  flow.set text, null
+  flow.wrap width, MODES[mode]
+  (flow.line n for n in [0...flow.rows])
+
+units = (text) ->
+  flow = Flow.new()
+  flow.set text, null
+  ([glyph(flow.code n), flow.span(n)] for n in [0...flow.count])
+
+# ==[ Sanitize ]==
+
+console.log "\nSanitize"
+
+test "printable ASCII comes back as it went in", ->
+  text = 'count 41 ~ {ok}\nnext'
+  ok sanitize(text) is text
+
+test "anything written becomes a string", ->
+  eq [sanitize(41), sanitize(null), sanitize(true)], ['41', 'null', 'true']
+
+test "an escape sequence goes whole: CSI, OSC, a string, a two-byte escape", ->
+  eq sanitize("#{ESC}[31mred#{ESC}[0m"), 'red'
+  eq sanitize("a#{ESC}[2Jb#{ESC}[10;20Hc"), 'abc'
+  eq sanitize("#{ESC}]8;;https://rip.dev#{at 7}link#{ESC}]8;;#{ESC}\\"), 'link'
+  eq sanitize("#{ESC}]0;title#{at 7}x"), 'x'
+  eq sanitize("#{ESC}Pq#data#{ESC}\\y"), 'y'
+  eq sanitize("#{ESC}cz"), 'z'
+  eq sanitize("#{at 0x9B}1mC1"), 'C1'
+
+test "C0 and C1 controls go; the newline and the tab stay", ->
+  eq sanitize("a#{at 0}b#{at 7}c#{at 8}d#{at 0x7F}e#{at 0x85}f#{at 0x9F}g"), 'abcdefg'
+  eq sanitize("a\r\nb\rc"), 'a\nbc'
+  eq sanitize("a\tb\nc"), 'a\tb\nc'
+
+test "text that is not ASCII keeps every code point it came with", ->
+  text = "#{SUN}#{BOOK} e#{ACUTE} #{FAMILY}"
+  eq sanitize(text), text
+
+test "the document sanitizes a text node when it is made and when it is set", ->
+  node = Text.new "a#{ESC}[1mb"
+  eq node.data, 'ab'
+  node.data = "c#{at 7}d"
+  eq node.data, 'cd'
+
+# ==[ Units ]==
+
+console.log "\nUnits"
+
+test "ASCII is its own unit table, and the segmenter is never asked", ->
+  flow = Flow.new()
+  flow.set 'hello, world', null
+  ok flow.ascii
+  eq [flow.count, flow.cuts, flow.spans, flow.cells], [12, null, null, null]
+  eq [flow.span(4), flow.code(4)], [1, 111]
+
+test "a wide character is one unit of two cells", ->
+  eq units("a#{SUN}#{BOOK}b"), [['a', 1], [SUN, 2], [BOOK, 2], ['b', 1]]
+
+test "an emoji joined by ZWJ, a flag, a skin tone, and a keycap are each one unit of two cells", ->
+  eq units("#{FAMILY}#{FLAG}#{THUMB}#{KEYCAP}"), [[FAMILY, 2], [FLAG, 2], [THUMB, 2], [KEYCAP, 2]]
+
+test "a combining mark stays with its base, in one cell", ->
+  eq units("e#{ACUTE}x"), [["e#{ACUTE}", 1], ['x', 1]]
+
+test "a mark that opens a text or a line joins the unit after it: no width of its own, never apart from it", ->
+  eq units("#{ACUTE}Xy"), [["#{ACUTE}X", 1], ['y', 1]]
+  eq units("#{ACUTE}#{SUN}y"), [["#{ACUTE}#{SUN}", 2], ['y', 1]]
+  eq units("ab\n#{ACUTE}#{ACUTE}cd"), [['a', 1], ['b', 1], ['\n', 0], ["#{ACUTE}#{ACUTE}c", 1], ['d', 1]]
+  flow = Flow.new()
+  flow.set "#{ACUTE}Xy", null
+  eq [flow.wide, flow.tall, flow.cuts], [2, 1, [0, 2, 3]]
+  eq lead(flow.code 0), 1
+  eq lead(flow.code 1), 0
+
+test "marks with nothing after them on their line are a unit of no width", ->
+  eq units(ACUTE), [[ACUTE, 0]]
+  eq units("#{ACUTE}#{ACUTE}\nab"), [["#{ACUTE}#{ACUTE}", 0], ['\n', 0], ['a', 1], ['b', 1]]
+  flow = Flow.new()
+  flow.set "#{ACUTE}#{ACUTE}", null
+  eq [flow.wide, flow.tall], [0, 1]
+  flow.measure 5, false
+  eq [flow.w, flow.h], [0, 1]
+  eq rows("#{ACUTE}#{ACUTE}", 3), ["#{ACUTE}#{ACUTE}"]
+
+test "a leading mark wraps, cuts, and measures with the unit it joined", ->
+  eq rows("#{ACUTE}abcdef", 3), ["#{ACUTE}abc", 'def']
+  eq rows("abc\n#{ACUTE}defg", 3), ['abc', "#{ACUTE}def", 'g']
+  eq rows("ab #{SUN}\n#{ACUTE}#{SUN}#{BOOK}", 3), ['ab ', SUN, "#{ACUTE}#{SUN}", BOOK]
+  eq rows("#{ACUTE}abcdef", 4, 'truncate'), ["#{ACUTE}abc…"]
+  eq rows("#{ACUTE}abcdef", 4, 'truncate-start'), ['…def']
+  eq rows("#{ACUTE}abcdef", 5, 'truncate-middle'), ["#{ACUTE}ab…ef"]
+  eq rows("#{ACUTE}abcdef", 1, 'truncate'), ['…']
+
+test "on the grid a leading mark shares its base's cell, is written ahead of the cell's style, and clips with it", ->
+  red = intern 'red', null, 0
+  grid = Grid.new 4, 1
+  grid.write 0, 0, "#{ACUTE}Xy", red
+  eq Array.from(grid.wide), [1, 1, 1, 1]
+  eq grid.toString(), "#{ACUTE}Xy"
+  eq grid.toString(true), "#{ACUTE}#{ESC}[31mXy#{ESC}[0m  "
+  clipped = Grid.new 4, 1
+  clipped.clip 1, 0, 4, 1
+  clipped.write 0, 0, "#{ACUTE}Xy", red
+  eq clipped.toString(), ' y'
+
+test "a cluster of several code points is one flagged cell that reads back whole", ->
+  flow = Flow.new()
+  flow.set "a#{FAMILY}", null
+  ok flow.code(0) is 97
+  ok flow.code(1) >= CLUSTER
+  eq glyph(flow.code 1), FAMILY
+
+test "the unwrapped size is the widest line and the lines; no text is no line", ->
+  size = (text) ->
+    flow = Flow.new()
+    flow.set text, null
+    [flow.wide, flow.tall]
+  eq size(''), [0, 0]
+  eq size('hello'), [5, 1]
+  eq size('a\nbcd\n'), [3, 3]
+  eq size("#{SUN}#{BOOK}\n#{FAMILY}x"), [4, 2]
+
+# ==[ Wrap ]==
+
+console.log "\nWrap"
+
+test "words wrap at the width, and the space stays on the row it follows", ->
+  eq rows('the quick brown fox', 10), ['the quick ', 'brown fox']
+  eq rows('hello world', 7), ['hello ', 'world']
+
+test "a space that does not fit starts a row of its own", ->
+  eq rows('hello world', 5), ['hello', ' ', 'world']
+
+test "leading, trailing, and repeated spaces are kept", ->
+  eq rows('  ab  cd  ', 4), ['  ab', '  cd', '  ']
+  eq rows(' a', 1), [' ', 'a']
+
+test "a word longer than the row breaks between clusters", ->
+  eq rows('supercalifragilistic', 8), ['supercal', 'ifragili', 'stic']
+  eq rows('a supercalifragilistic b', 8), ['a superc', 'alifragi', 'listic b']
+
+test "a long word starts on the next row when that saves a row", ->
+  eq rows('ab abcdefghij', 6), ['ab ', 'abcdef', 'ghij']
+  eq rows('abcde abcdefgh', 6), ['abcde ', 'abcdef', 'gh']
+
+test "explicit newlines break, and an empty line is a row", ->
+  eq rows('ab\n\ncd ef', 4), ['ab', '', 'cd ', 'ef']
+  eq rows('ab\n', 4), ['ab', '']
+
+test "a wide character that does not fit goes to the next row whole", ->
+  eq rows("#{SUN}#{BOOK}#{WORD}", 5), ["#{SUN}#{BOOK}", WORD]
+  eq rows("a#{SUN}#{BOOK}", 2), ['a', SUN, BOOK]
+  eq rows("#{FAMILY}#{FLAG}", 3), [FAMILY, FLAG]
+
+test "one column holds a character a row, and a wide one stands alone past it", ->
+  eq rows('abc', 1), ['a', 'b', 'c']
+  eq rows("a#{SUN}", 1), ['a', SUN]
+
+test "with no width at all the text keeps its own lines", ->
+  eq rows('hello world\nagain', 0), ['hello world', 'again']
+
+test "a width under one cell is one cell", ->
+  eq rows('abc', 0.5), ['a', 'b', 'c']
+
+test "a fraction of a cell past a whole one does not count", ->
+  eq rows('hello world', 7.9), ['hello ', 'world']
+
+test "hard fills every row and breaks words where the row ends", ->
+  eq rows('the quick brown', 6, 'hard'), ['the qu', 'ick br', 'own']
+
+test "text that fits is its own rows", ->
+  eq rows('ab\ncd', 10), ['ab', 'cd']
+
+# ==[ Truncate ]==
+
+console.log "\nTruncate"
+
+test "a line is cut at the end, the start, or the middle, with an ellipsis", ->
+  eq rows('the quick brown fox', 12, 'truncate'), ['the quick b…']
+  eq rows('the quick brown fox', 12, 'truncate-end'), ['the quick b…']
+  eq rows('the quick brown fox', 12, 'truncate-start'), ['…k brown fox']
+  eq rows('the quick brown fox', 12, 'truncate-middle'), ['the qu…n fox']
+  eq rows('the quick brown fox', 11, 'truncate-middle'), ['the q…n fox']
+
+test "text that fits is not cut", ->
+  eq rows('hello', 5, 'truncate'), ['hello']
+
+test "one column is the ellipsis alone, and none is nothing", ->
+  eq rows('hello', 1, 'truncate'), ['…']
+  eq rows('hello', 1, 'truncate-start'), ['…']
+  eq rows('hello', 1, 'truncate-middle'), ['…']
+  eq rows('hello', 0, 'truncate'), ['']
+  eq rows('hello', 2, 'truncate-middle'), ['h…']
+
+test "each line is cut by itself", ->
+  eq rows('hello world\nhi\nanother line', 6, 'truncate'), ['hello…', 'hi', 'anoth…']
+
+test "a wide character on the cut is dropped, and the row is a cell short", ->
+  text = "#{SUN}#{BOOK}#{WORD}#{SUN}#{BOOK}"
+  eq rows(text, 6, 'truncate'), ["#{SUN}#{BOOK}…"]
+  eq rows(text, 5, 'truncate'), ["#{SUN}#{BOOK}…"]
+  eq rows(text, 6, 'truncate-start'), ["…#{SUN}#{BOOK}"]
+  eq rows(text, 5, 'truncate-start'), ["…#{SUN}#{BOOK}"]
+  eq rows(text, 7, 'truncate'), ["#{SUN}#{BOOK}#{WORD}…"]
+  eq rows(text, 7, 'truncate-middle'), ["#{SUN}…#{BOOK}"]
+  eq rows(text, 6, 'truncate-middle'), ["#{SUN}…#{BOOK}"]
+  flow = Flow.new()
+  flow.set text, null
+  flow.wrap 7, MODES['truncate-middle']
+  eq flow.reach, 5
+
+test "a cluster is never split by a cut", ->
+  eq rows("ab#{FAMILY}cd", 4, 'truncate'), ['ab…']
+  eq rows("e#{ACUTE}e#{ACUTE}e#{ACUTE}e#{ACUTE}", 3, 'truncate'), ["e#{ACUTE}e#{ACUTE}…"]
+
+# ==[ Measure ]==
+
+console.log "\nMeasure"
+
+measured = (flow, width, unlimited = false) ->
+  flow.measure width, unlimited
+  [flow.w, flow.h]
+
+test "unlimited, or wide enough, a text measures as it is written", ->
+  flow = Flow.new()
+  flow.set 'hello world', null
+  eq measured(flow, NaN, true), [11, 1]
+  eq measured(flow, 11), [11, 1]
+  eq measured(flow, 40), [11, 1]
+
+test "narrower, it measures as its rows: the widest, and how many", ->
+  flow = Flow.new()
+  flow.set 'hello world', null
+  eq measured(flow, 8), [6, 2]
+  eq measured(flow, 5), [5, 3]
+
+test "truncated, it measures the whole width offered and one row a line", ->
+  flow = Flow.new()
+  flow.set "#{SUN}#{BOOK}#{WORD}#{SUN}", null
+  flow.mode = MODES['truncate']
+  eq measured(flow, 6), [6, 1]
+
+test "no text measures nothing", ->
+  flow = Flow.new()
+  flow.set '', null
+  eq measured(flow, 10), [0, 0]
+
+# ==[ The cache ]==
+
+console.log "\nCache"
+
+test "the same text at the same width and mode is wrapped once", ->
+  flow = Flow.new()
+  flow.set 'the quick brown fox jumps', null
+  flow.wrap 10, 0
+  flow.wrap 10, 0
+  flow.wrap 10.5, 0
+  eq flow.wraps, 1
+  flow.wrap 9, 0
+  eq flow.wraps, 2
+  flow.wrap 9, MODES['truncate']
+  eq flow.wraps, 3
+  flow.set 'the quick brown fox leaps', null
+  flow.wrap 9, MODES['truncate']
+  eq flow.wraps, 4
+
+test "a new text moves layout only when it answers an offer differently", ->
+  flow = Flow.new()
+  flow.set 'count 41', null
+  eq measured(flow, 20), [8, 1]
+  flow.set 'count 42', null
+  ok not flow.moved, 'the same size, never wrapped'
+  flow.set 'count 100', null
+  ok flow.moved, 'a wider line'
+
+test "a wrapped text of the same width moves layout when its rows change", ->
+  flow = Flow.new()
+  flow.set 'aaa bbb ccc', null
+  eq measured(flow, 7), [7, 2]
+  flow.set 'aaa ccc bbb', null
+  ok not flow.moved, 'the same rows at the width it was asked'
+  flow.set 'a b c d e f', null
+  ok not flow.moved
+  flow.set 'aaaa bbbbbb', null
+  ok flow.moved, 'rows of six where they were seven'
+
+test "a leaf's flow follows its text nodes: one run for a bare text, one for each under a span", ->
+  bare = Text.new 'plain'
+  eq [refresh(bare).text, bare.flow.ends], ['plain', null]
+  leaf = Element.new 'span'
+  leaf.appendChild Text.new 'all '
+  inner = Element.new 'span'
+  inner.appendChild Text.new "#{SUN}#{BOOK}"
+  leaf.appendChild inner
+  leaf.appendChild Text.new ' end'
+  flow = refresh leaf
+  eq [flow.text, flow.marks, flow.ends], ["all #{SUN}#{BOOK} end", [4, 6, 10], [4, 6, 10]]
+  again = refresh leaf
+  ok again is flow
+  eq flow.wraps, 0
+
+test "a tab runs to the next stop of eight, counted across the runs of its line", ->
+  leaf = Element.new 'span'
+  leaf.appendChild Text.new 'A'
+  inner = Element.new 'span'
+  inner.appendChild Text.new '\tB\n\tC'
+  leaf.appendChild inner
+  eq refresh(leaf).text, 'A       B\n        C'

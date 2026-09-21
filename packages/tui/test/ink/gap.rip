@@ -1,0 +1,46 @@
+# Ink's test/gap.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/gap.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, plain } from './harness.rip'
+
+console.log "\nGap"
+
+test "gap", ->
+  App = component
+    render
+      Box gap: 1, width: 3, flexWrap: 'wrap'
+        Text "A"
+        Text "B"
+        Text "C"
+  eq plain(App), [
+    "A B"
+    ""
+    "C"
+  ]
+
+test "column gap", ->
+  App = component
+    render
+      Box gap: 1
+        Text "A"
+        Text "B"
+  eq plain(App), ["A B"]
+
+test "row gap", ->
+  App = component
+    render
+      Box flexDirection: 'column', gap: 1
+        Text "A"
+        Text "B"
+  eq plain(App), [
+    "A"
+    ""
+    "B"
+  ]
+

@@ -6,6 +6,8 @@
 
 import { __setChildFailureReporter } from '../../src/runtime/components.js'
 import { admit } from './layout.rip'
+import { allow } from './paint.rip'
+import { sanitize, refresh } from './text.rip'
 
 # Styles that move boxes, and styles that only recolor cells.
 LAYOUT =! [
@@ -16,9 +18,20 @@ LAYOUT =! [
   'padding', 'paddingX', 'paddingY', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight'
   'margin', 'marginX', 'marginY', 'marginTop', 'marginBottom', 'marginLeft', 'marginRight'
   'position', 'top', 'right', 'bottom', 'left'
-  'display', 'hidden', 'borderStyle'
+  'display', 'hidden', 'borderStyle', 'borderTop', 'borderBottom', 'borderLeft', 'borderRight', 'wrap'
 ]
-PAINT =! ['color', 'backgroundColor', 'borderColor', 'bold', 'dim', 'italic', 'underline', 'inverse']
+PAINT =! [
+  'color', 'backgroundColor', 'bold', 'dimColor', 'italic', 'underline', 'strikethrough', 'inverse'
+  'overflow', 'overflowX', 'overflowY', 'contentOffsetX', 'contentOffsetY'
+  'borderColor', 'borderTopColor', 'borderBottomColor', 'borderLeftColor', 'borderRightColor'
+  'borderDimColor', 'borderTopDimColor', 'borderBottomDimColor', 'borderLeftDimColor', 'borderRightDimColor'
+  'borderBackgroundColor', 'borderTopBackgroundColor', 'borderBottomBackgroundColor', 'borderLeftBackgroundColor', 'borderRightBackgroundColor'
+]
+
+# Switches that stand unless they are turned off, so `false` is a value
+# to keep and not a style taken away.
+PRESENT =! Set.new ['hidden']   # keys the compiler writes as bare presence
+STANDING =! Set.new ['borderTop', 'borderBottom', 'borderLeft', 'borderRight']
 
 KIND =! Map.new()
 KIND.set key, 'layout' for key in LAYOUT
@@ -39,10 +52,13 @@ distance =! (a, b) ->
       corner = above
   row[b.length]
 
+# The real style a mistyped one most likely meant: the closest by edits,
+# or one the typed word begins (`dim` for `dimColor`).
 nearest =! (key) ->
   best = null
   score = 3
   for [name] in KIND
+    return name if key.length > 2 and name.toLowerCase().startsWith key.toLowerCase()
     d = distance key.toLowerCase(), name.toLowerCase()
     if d < score
       best = name
@@ -167,30 +183,38 @@ export class Element extends Node
       return
     kind = KIND.get key
     throw unknown(key, @tagName) unless kind
-    # Text is drawn glyph by glyph: it has no inside to pad or frame, and
-    # text nested in text is a run of words, not a box to size or place.
-    if @tagName is 'span' and value? and value isnt false and value isnt ''
-      if key is 'borderStyle' or key.startsWith('padding')
+    # Text is drawn glyph by glyph: it has no inside to pad, frame, clip or
+    # scroll, and text nested in text is a run of words, not a box to size
+    # or place. A box holds no words of its own to wrap.
+    meant = value? and value isnt false and value isnt ''
+    if meant and @tagName is 'span'
+      if key.startsWith('border') or key.startsWith('padding')
         throw Error.new "rip/tui: '#{key}' has no meaning on text — put the text in a box and style the box"
+      if key.startsWith('overflow') or key.startsWith('contentOffset')
+        throw Error.new "rip/tui: '#{key}' has no meaning on text — it clips and scrolls a box's children; text is cut by `wrap`, or by the box it is in"
       if kind is 'layout' and @parentNode?.tagName is 'span'
         throw Error.new "rip/tui: '#{key}' has no meaning on text nested in text — it is a run of words, styled by color and weight only"
-    value = undefined if value is '' or value is null or value is false
+    else if meant and key is 'wrap'
+      throw Error.new "rip/tui: 'wrap' has no meaning on a box — it breaks or cuts the words of a text; a box wraps its children with flexWrap"
+    value = undefined if value is '' or value is null or (value is false and not STANDING.has key)
     return if @styles[key] is value
-    # A layout value is refused here, on the line that wrote it, and not
-    # from inside a later frame.
-    admit key, value if kind is 'layout' and value isnt undefined
+    # A value is refused here, on the line that wrote it, and not from
+    # inside a later frame.
+    if value isnt undefined
+      admit key, value if kind is 'layout'
+      allow key, value
     if value is undefined then delete @styles[key] else @styles[key] = value
     @changed kind is 'layout'
 
   setAttribute!: (key, value) ->
     throw Error.new "rip/tui: a string `style` has no terminal meaning on <#{@tagName}> — pass the styles as props, or `style:` an object" if key is 'style'
-    # A boolean attribute written on a raw tag arrives as presence, the
-    # empty string (`div hidden: true`); on the style road an empty
-    # string clears a key, so the two are told apart here.
-    @set key, (if value is '' then true else value)
+    # An HTML boolean attribute written on a raw tag arrives as presence,
+    # the empty string (`div hidden: true`). For every other key an empty
+    # string clears it, as it does on the style road.
+    @set key, (if value is '' and PRESENT.has(key) then true else value)
 
   removeAttribute!: (key) -> @set key, undefined unless key is 'style'
-  toggleAttribute!: (key, force) -> @set key, (if force then true else undefined)
+  toggleAttribute!: (key, force) -> @set key, (if force then true else if STANDING.has(key) then false else undefined)
   getAttribute: (key) -> @attributes?.get(key) ?? @styles[key] ?? null
 
   # `style:` with an object lands here key by key (`el.style[key] = value`).
@@ -228,14 +252,21 @@ for [key] in KIND
 export class Text extends Node
   constructor: (data) ->
     super 3
-    @text = String data
+    @text = sanitize data
 
+  # Text is sanitized once, here, and never again on its way to the
+  # screen. A new text owes a layout only when its leaf — this node, or
+  # the span it is a run of — would answer some offer it was measured
+  # under differently; a counter ticking from 41 to 42 owes a paint.
   get data: -> @text
   set data: (value) ->
-    value = String value
+    value = sanitize value
     return if value is @text
-    moved = Bun.stringWidth(value) isnt Bun.stringWidth(@text) or value.includes('\n') or @text.includes('\n')
     @text = value
+    leaf = this
+    leaf = leaf.parentNode while leaf.parentNode?.tagName is 'span'
+    moved = true
+    moved = refresh(leaf).moved if leaf.flow and leaf.lay and not leaf.dirty
     @changed moved
 
 export class Document

@@ -1,0 +1,136 @@
+# Ink's test/clip-wide-background.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/clip-wide-background.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, styled } from './harness.rip'
+
+console.log "\nClip Wide Background"
+
+test "clipping wide text preserves its background (nested: false, offset: 1, width: 3)", ->
+  App = component
+    render
+      Box width: 3, height: 1, overflowX: 'hidden', contentOffsetX: 1
+        Box width: 4, flexShrink: 0
+          Text backgroundColor: 'blue'
+            "你好"
+  # The frame is the literal Ink's test compares against: `contentOffsetX`
+  # is on Ink's main branch only.
+  eq styled(App, 80), ["«on blue» 好"]
+
+test "clipping wide text preserves its background (nested: false, offset: 0, width: 3)", ->
+  App = component
+    render
+      Box width: 3, height: 1, overflowX: 'hidden', contentOffsetX: 0
+        Box width: 4, flexShrink: 0
+          Text backgroundColor: 'blue'
+            "你好"
+  # The frame is the literal Ink's test compares against: `contentOffsetX`
+  # is on Ink's main branch only.
+  eq styled(App, 80), ["«on blue»你 "]
+
+test "clipping wide text preserves its background (nested: false, offset: 1, width: 2)", ->
+  App = component
+    render
+      Box width: 2, height: 1, overflowX: 'hidden', contentOffsetX: 1
+        Box width: 4, flexShrink: 0
+          Text backgroundColor: 'blue'
+            "你好"
+  # The frame is the literal Ink's test compares against: `contentOffsetX`
+  # is on Ink's main branch only.
+  eq styled(App, 80), ["«on blue»  "]
+
+test "clipping wide text preserves its background (nested: false, offset: 0, width: 4)", ->
+  App = component
+    render
+      Box width: 4, height: 1, overflowX: 'hidden', contentOffsetX: 0
+        Box width: 4, flexShrink: 0
+          Text backgroundColor: 'blue'
+            "你好"
+  eq styled(App, 80), ["«on blue»你好"]
+
+test "clipping wide text preserves its background (nested: true, offset: 1, width: 3)", ->
+  App = component
+    render
+      Box width: 3, height: 1, overflowX: 'hidden', contentOffsetX: 1
+        Box width: 4, flexShrink: 0
+          Text
+            Text backgroundColor: 'blue'
+              "你好"
+  # The frame is the literal Ink's test compares against: `contentOffsetX`
+  # is on Ink's main branch only.
+  eq styled(App, 80), ["«on blue» 好"]
+
+test "clipping wide text preserves its background (nested: true, offset: 0, width: 3)", ->
+  App = component
+    render
+      Box width: 3, height: 1, overflowX: 'hidden', contentOffsetX: 0
+        Box width: 4, flexShrink: 0
+          Text
+            Text backgroundColor: 'blue'
+              "你好"
+  # The frame is the literal Ink's test compares against: `contentOffsetX`
+  # is on Ink's main branch only.
+  eq styled(App, 80), ["«on blue»你 "]
+
+test "clipping wide text preserves its background (nested: true, offset: 1, width: 2)", ->
+  App = component
+    render
+      Box width: 2, height: 1, overflowX: 'hidden', contentOffsetX: 1
+        Box width: 4, flexShrink: 0
+          Text
+            Text backgroundColor: 'blue'
+              "你好"
+  # The frame is the literal Ink's test compares against: `contentOffsetX`
+  # is on Ink's main branch only.
+  eq styled(App, 80), ["«on blue»  "]
+
+test "clipping wide text preserves its background (nested: true, offset: 0, width: 4)", ->
+  App = component
+    render
+      Box width: 4, height: 1, overflowX: 'hidden', contentOffsetX: 0
+        Box width: 4, flexShrink: 0
+          Text
+            Text backgroundColor: 'blue'
+              "你好"
+  eq styled(App, 80), ["«on blue»你好"]
+
+test "clipped halves retain their own background colors", ->
+  App1 = component
+    render
+      Box width: 2, height: 1, overflowX: 'hidden', contentOffsetX: 1
+        Box width: 4, flexShrink: 0
+          Text
+            Text backgroundColor: 'blue'
+              "你"
+            Text backgroundColor: 'red'
+              "好"
+  # The frame is the literal Ink's test compares against: `contentOffsetX`
+  # is on Ink's main branch only.
+  eq styled(App1, 80), ["«on blue» «on red» "]
+  App2 = component
+    render
+      Text
+        Text backgroundColor: 'blue'
+          " "
+        Text backgroundColor: 'red'
+          " "
+  # The tree Ink's test draws its expected frame with.
+  eq styled(App2, 80), ["«on blue» «on red» "]
+
+test "clipping a joined emoji preserves its background and adjacent text", ->
+  App = component
+    render
+      Box width: 2, height: 1, overflowX: 'hidden', contentOffsetX: 1
+        Box width: 3, flexShrink: 0
+          Text
+            Text backgroundColor: 'blue'
+              "👩\u200d💻X"
+  # The frame is the literal Ink's test compares against: `contentOffsetX`
+  # is on Ink's main branch only.
+  eq styled(App, 80), ["«on blue» X"]
+

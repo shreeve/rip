@@ -41,9 +41,9 @@ Demo = component
             Spacer
             Text color: 'red'
               "0 failed"
-          Text dim: true
+          Text dimColor: true
             if done then 'all green' else "#{FRAMES[beat % FRAMES.length]} running #{suite}"
-      Text dim: true
+      Text dimColor: true
         "#{screen.cols}×#{screen.rows} — every change above is one diffed write"
 
 run Demo

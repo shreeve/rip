@@ -1,0 +1,166 @@
+# Styled cells: a frame with SGR escape sequences, read into rows of
+# cells and written back as one readable line per row. Two renderers
+# that draw the same picture spell it with different bytes — `\x1b[1;32m`
+# against `\x1b[1m\x1b[32m`, `\x1b[39m` against `\x1b[0m` — so colors are
+# compared here, cell by cell, never as bytes.
+#
+# The notation. A row is its characters, with a `«…»` mark wherever the
+# style changes; every row starts in the default style, and `«»` returns
+# to it. Inside a mark, in this order: the foreground, `on` and the
+# background, then the attributes that are set.
+#
+#   «green»╭────╮
+#   «green»│«»hi  «green»│
+#   «white on red bold»FAIL«» 3 tests «dim»(2 skipped)
+#
+# Colors take one spelling: the sixteen by chalk's names (`red`,
+# `redBright`, `gray` for bright black), the rest of the 256 as
+# `ansi256(n)`, and true color as `#rrggbb`.
+#
+# The rule for blanks, which `plain` and `styled` share. A space shows
+# nothing of its foreground, bold, dim, or italic, so those are dropped
+# from it unless it is inverse, underlined, or struck through. Then
+# trailing default-style spaces are trimmed from each row, and trailing
+# empty rows are dropped from the frame. A space with a background is
+# ink and stays.
+
+NAMES  =! ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white']
+BRIGHT =! ['gray', 'redBright', 'greenBright', 'yellowBright', 'blueBright', 'magentaBright', 'cyanBright', 'whiteBright']
+FLAGS  =! ['bold', 'dim', 'italic', 'underline', 'strikethrough', 'inverse']
+PLAIN  =! { fg: null, bg: null, bold: false, dim: false, italic: false, underline: false, strikethrough: false, inverse: false }
+
+SET   =! { 1: 'bold', 2: 'dim', 3: 'italic', 4: 'underline', 7: 'inverse', 9: 'strikethrough' }
+CLEAR =! { 22: ['bold', 'dim'], 23: ['italic'], 24: ['underline'], 27: ['inverse'], 29: ['strikethrough'] }
+
+SGR      =! /\x1b\[([0-9;]*)m/y
+MARKS    =! /^[\p{M}\u200d\ufe0e\ufe0f]+$/u
+graphemes =! Intl.Segmenter.new undefined, granularity: 'grapheme'
+
+indexed = (n) ->
+  if n < 8 then NAMES[n] else if n < 16 then BRIGHT[n - 8] else "ansi256(#{n})"
+
+hex = (parts) ->
+  '#' + (Number(part).toString(16).padStart(2, '0') for part in parts).join ''
+
+# The color an extended `38` / `48` introduces at `codes[at]`, and how
+# many parameters it took.
+extended = (codes, at) ->
+  if codes[at + 1] is 5
+    [indexed(codes[at + 2]), 3]
+  else if codes[at + 1] is 2
+    [hex(codes.slice at + 2, at + 5), 5]
+  else
+    raise "cells: SGR #{codes.slice(at).join ';'} is not a color this reader knows"
+
+# The style after one SGR sequence's parameters.
+apply = (style, params) ->
+  codes = (Number(part or 0) for part in params.split ';')
+  next = { ...style }
+  at = 0
+  while at < codes.length
+    code = codes[at]
+    step = 1
+    if code is 0
+      next = { ...PLAIN }
+    else if SET[code]
+      next[SET[code]] = true
+    else if CLEAR[code]
+      next[flag] = false for flag in CLEAR[code]
+    else if 30 <= code <= 37
+      next.fg = NAMES[code - 30]
+    else if 90 <= code <= 97
+      next.fg = BRIGHT[code - 90]
+    else if 40 <= code <= 47
+      next.bg = NAMES[code - 40]
+    else if 100 <= code <= 107
+      next.bg = BRIGHT[code - 100]
+    else if code is 39
+      next.fg = null
+    else if code is 49
+      next.bg = null
+    else if code is 38
+      [next.fg, step] = extended codes, at
+    else if code is 48
+      [next.bg, step] = extended codes, at
+    else
+      raise "cells: SGR #{code} is not a style this reader knows"
+    at += step
+  next
+
+# Rows of cells `{ ch, fg, bg, bold, dim, italic, underline,
+# strikethrough, inverse }`, one cell per grapheme. A combining mark
+# that arrives after a style change joins the cell before it and takes
+# that cell's style, as a terminal draws it.
+export parse =! (text) ->
+  rows = [[]]
+  style = { ...PLAIN }
+  at = 0
+  while at < text.length
+    if text[at] is '\x1b'
+      SGR.lastIndex = at
+      found = SGR.exec text
+      raise "cells: an escape sequence that is not SGR at offset #{at}: #{JSON.stringify text.slice(at, at + 12)}" unless found
+      style = apply style, found[1]
+      at += found[0].length
+    else if text[at] is '\n'
+      rows.push []
+      at += 1
+    else
+      stop = at
+      stop += 1 while stop < text.length and text[stop] isnt '\x1b' and text[stop] isnt '\n'
+      row = rows[rows.length - 1]
+      for piece in graphemes.segment text.slice(at, stop)
+        glyph = piece.segment
+        if MARKS.test(glyph) and row.length
+          row[row.length - 1].ch += glyph
+        else
+          row.push { ch: glyph, ...style }
+      at = stop
+  rows
+
+visible = (cell) ->
+  return cell unless cell.ch is ' ' and not (cell.inverse or cell.underline or cell.strikethrough)
+  { ...PLAIN, ch: ' ', bg: cell.bg }
+
+blank = (cell) ->
+  return false unless cell.ch is ' ' and cell.bg is null
+  not FLAGS.some (flag) -> cell[flag]
+
+# The blank rule in the header, applied to parsed rows.
+export canon =! (rows) ->
+  kept = []
+  for row in rows
+    cells = (visible cell for cell in row)
+    cells.pop() while cells.length and blank cells[cells.length - 1]
+    kept.push cells
+  kept.pop() while kept.length and kept[kept.length - 1].length is 0
+  kept
+
+mark = (cell) ->
+  words = []
+  words.push cell.fg if cell.fg
+  words.push "on #{cell.bg}" if cell.bg
+  words.push flag for flag in FLAGS when cell[flag]
+  words.join ' '
+
+# One row in the notation.
+export show =! (row) ->
+  line = ''
+  held = ''
+  for cell in row
+    raise "cells: #{JSON.stringify cell.ch} is the notation's own bracket" if /[«»]/.test cell.ch
+    now = mark cell
+    line += "«#{now}»" if now isnt held
+    held = now
+    line += cell.ch
+  line
+
+# A frame as rows in the notation.
+export styled =! (text) ->
+  (show row for row in canon parse text)
+
+# A frame as rows of bare characters: the same cells with every style
+# dropped first, so a trailing space is blank whatever colored it.
+export plain =! (text) ->
+  bare = (({ ...PLAIN, ch: cell.ch } for cell in row) for row in parse text)
+  ((cell.ch for cell in row).join('') for row in canon bare)

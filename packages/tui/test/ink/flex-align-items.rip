@@ -1,0 +1,116 @@
+# Ink's test/flex-align-items.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/flex-align-items.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, plain, tall } from './harness.rip'
+
+console.log "\nFlex Align Items"
+
+test "row - align text to center", ->
+  App = component
+    render
+      Box alignItems: 'center', height: 3
+        Text "Test"
+  eq plain(App), [
+    ""
+    "Test"
+  ]
+  eq tall(App), 3
+
+test "row - align multiple text nodes to center", ->
+  App = component
+    render
+      Box alignItems: 'center', height: 3
+        Text "A"
+        Text "B"
+  eq plain(App), [
+    ""
+    "AB"
+  ]
+  eq tall(App), 3
+
+test "row - align text to bottom", ->
+  App = component
+    render
+      Box alignItems: 'flex-end', height: 3
+        Text "Test"
+  eq plain(App), [
+    ""
+    ""
+    "Test"
+  ]
+
+test "row - align multiple text nodes to bottom", ->
+  App = component
+    render
+      Box alignItems: 'flex-end', height: 3
+        Text "A"
+        Text "B"
+  eq plain(App), [
+    ""
+    ""
+    "AB"
+  ]
+
+test "column - align text to center", ->
+  App = component
+    render
+      Box flexDirection: 'column', alignItems: 'center', width: 10
+        Text "Test"
+  eq plain(App), ["   Test"]
+
+test "column - align text to right", ->
+  App = component
+    render
+      Box flexDirection: 'column', alignItems: 'flex-end', width: 10
+        Text "Test"
+  eq plain(App), ["      Test"]
+
+test "row - align items stretch", ->
+  App = component
+    render
+      Box alignItems: 'stretch', height: 5
+        Box borderStyle: 'single'
+          Text "X"
+  eq plain(App), [
+    "┌─┐"
+    "│X│"
+    "│ │"
+    "│ │"
+    "└─┘"
+  ]
+
+test "row - default align items stretches children", ->
+  App = component
+    render
+      Box height: 5
+        Box borderStyle: 'single'
+          Text "X"
+  eq plain(App), [
+    "┌─┐"
+    "│X│"
+    "│ │"
+    "│ │"
+    "└─┘"
+  ]
+
+test "row - align text to baseline", ->
+  App = component
+    render
+      Box alignItems: 'baseline', height: 3
+        Text
+          "A"
+          "\n"
+          "B"
+        Text "X"
+  eq plain(App), [
+    "A"
+    "BX"
+  ]
+  eq tall(App), 3
+

@@ -1,0 +1,220 @@
+# Ink's test/render-to-string.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/render-to-string.rip
+
+import { test, eq, throws } from 'rip/testing'
+import { Box, Text, Spacer, plain, styled, tall } from './harness.rip'
+
+console.log "\nRender To String"
+
+test "render simple text", ->
+  App = component
+    render
+      Text "Hello World"
+  eq plain(App, 80), ["Hello World"]
+
+test "render text with variable", ->
+  App = component
+    render
+      Text
+        "Count: "
+        "42"
+  eq plain(App, 80), ["Count: 42"]
+
+test "render nested text components", ->
+  App = component
+    render
+      Text
+        "Hello "
+        Text "World"
+  eq plain(App, 80), ["Hello World"]
+
+test "render null children", ->
+  App = component
+    render
+      Text
+  eq plain(App, 80), []
+
+test "render box with padding", ->
+  App = component
+    render
+      Box paddingLeft: 2
+        Text "Padded"
+  eq plain(App, 80), ["  Padded"]
+
+test "render box with flex direction row", ->
+  App = component
+    render
+      Box
+        Text "A"
+        Text "B"
+        Text "C"
+  eq plain(App, 80), ["ABC"]
+
+test "render box with flex direction column", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Text "Line 1"
+        Text "Line 2"
+  eq plain(App, 80), [
+    "Line 1"
+    "Line 2"
+  ]
+
+test "render margin", ->
+  App = component
+    render
+      Box marginLeft: 2
+        Text "Margined"
+  eq plain(App, 80), ["  Margined"]
+
+test "render gap between items", ->
+  App = component
+    render
+      Box gap: 1
+        Text "A"
+        Text "B"
+  eq plain(App, 80), ["A B"]
+
+test "render box with fixed width and height", ->
+  App = component
+    render
+      Box width: 10, height: 3
+        Text "Hi"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq plain(App, 80), ["Hi"]
+  eq tall(App, 80), 3
+
+test "render spacer pushes content apart", ->
+  App = component
+    render
+      Box width: 20
+        Text "Left"
+        Spacer
+        Text "Right"
+  eq plain(App, 80), ["Left           Right"]
+
+test "render newline inserts blank line", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Text "Above"
+        "\n"
+        Text "Below"
+  eq plain(App, 80), [
+    "Above"
+    ""
+    ""
+    "Below"
+  ]
+
+test "render box with border", ->
+  App = component
+    render
+      Box borderStyle: 'single', width: 20
+        Text "Bordered"
+  eq plain(App, 20), [
+    "┌──────────────────┐"
+    "│Bordered          │"
+    "└──────────────────┘"
+  ]
+
+test "render colored text", ->
+  App = component
+    render
+      Text color: 'green'
+        "Green"
+  eq styled(App, 80), ["«green»Green"]
+
+test "render bold text", ->
+  App = component
+    render
+      Text bold: true
+        "Bold"
+  eq styled(App, 80), ["«bold»Bold"]
+
+test "render text with wrap", ->
+  App = component
+    render
+      Box width: 7
+        Text wrap: 'wrap'
+          "Hello World"
+  eq plain(App, 80), [
+    "Hello"
+    "World"
+  ]
+
+test "render text with truncate", ->
+  App = component
+    render
+      Box width: 7
+        Text wrap: 'truncate'
+          "Hello World"
+  eq plain(App, 80), ["Hello …"]
+
+test "default columns is 80", ->
+  App = component
+    render
+      Text "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq plain(App, 80), [
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAA"
+  ]
+
+test "custom columns option", ->
+  App = component
+    render
+      Text "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq plain(App, 30), [
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAA"
+  ]
+
+test "component that throws propagates the error", ->
+  Broken = component
+    ~> raise 'Component error'
+    render
+      Text "never drawn"
+  throws (-> plain Broken, 80), 'Component error'
+
+test "subsequent calls work after a component error", ->
+  Broken = component
+    ~> raise 'Boom'
+    render
+      Text "never drawn"
+  throws (-> plain Broken, 80)
+  App = component
+    render
+      Text "Still works"
+  eq plain(App, 80), ["Still works"]
+
+test "can be called multiple times independently", ->
+  App1 = component
+    render
+      Text "First"
+  eq plain(App1, 80), ["First"]
+  App2 = component
+    render
+      Text "Second"
+  eq plain(App2, 80), ["Second"]
+
+test "render deeply nested component tree", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Box paddingLeft: 1
+          Box
+            Text bold: true
+              "Nested "
+              Text color: 'green'
+                "deep"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq styled(App, 80), [" «bold»Nested«» «green bold»deep"]
+

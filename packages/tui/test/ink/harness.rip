@@ -1,0 +1,66 @@
+# What every ported file stands on: Ink's two widgets with Ink's
+# defaults, and a frame read the way its expectation was written.
+#
+# Ink's <Box> is a row that shrinks (`flexDirection: 'row'`,
+# `flexShrink: 1`) and its <Text> shrinks too; this package's widgets
+# keep Yoga's defaults (a column, `flexShrink: 0`). Ink's trees are
+# ported prop for prop, so the widgets here spell Ink's defaults out and
+# forward everything else as written. A prop the test writes wins.
+
+import { renderToString, Spacer } from 'rip/tui'
+import * as cells from './cells.rip'
+
+export Box = component extends div
+  @flexDirection := 'row'
+  @flexShrink := 1
+  render
+    div flexDirection: @flexDirection, flexShrink: @flexShrink
+      slot
+
+# Text nested in text is a run of words and takes no layout, so only the
+# outermost <Text> shrinks.
+nested = (part) ->
+  above = part._parent
+  while above
+    return true if above instanceof Text
+    above = above._parent
+  false
+
+export Text = component extends span
+  @flexShrink := if nested(this) then undefined else 1
+  render
+    span flexShrink: @flexShrink
+      slot
+
+export { Spacer }
+
+# The frame `App` draws in `cols` columns as rows of bare characters,
+# and as rows of styled cells in the notation of cells.rip. Both follow
+# that file's rule for blanks. 100 columns is the width Ink's test
+# helper draws at.
+export plain =! (App, cols = 100) ->
+  cells.plain renderToString(App, { cols, ansi: false })
+
+export styled =! (App, cols = 100) ->
+  cells.styled renderToString(App, { cols, ansi: true })
+
+# Where this package draws a frame differently from Ink ON PURPOSE, or
+# where Ink's own test asks for a frame no build of Ink draws. The case
+# still runs: the frame must equal `ours` exactly, and must NOT equal
+# Ink's expectation — a pin the package has outgrown fails, so the list
+# cannot rot. `why` is the decision, in a sentence.
+stated = 0
+export differs =! (actual, ours, inks, why) ->
+  throw Error.new 'a stated difference needs its reason' unless typeof why is 'string' and why.length > 20
+  stated += 1
+  got = JSON.stringify actual
+  throw Error.new "stated difference: expected #{JSON.stringify ours}, got #{got}" unless got is JSON.stringify ours
+  throw Error.new "this frame equals Ink's — the stated difference is stale: #{why}" if got is JSON.stringify inks
+  return
+
+process.on 'exit', -> console.log "#{stated} frames differ from Ink's tests by stated decision\n" if stated
+
+# The frame's height in rows, blank rows at its foot included: what the
+# rule for blanks hides from `plain` and `styled`.
+export tall =! (App, cols = 100) ->
+  renderToString(App, { cols, ansi: false }).split('\n').length

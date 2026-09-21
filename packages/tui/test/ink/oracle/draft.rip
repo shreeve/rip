@@ -1,0 +1,152 @@
+# Writes the first draft of a ported file from the oracle's record of an
+# Ink test file: one test per Ink test, each frame's element tree as a
+# Rip component, and the expected rows as literals. The draft goes to
+# stdout and the cases left out, one per line with the reason, to stderr.
+#
+#   rip test/ink/oracle/draft.rip borders > /tmp/borders.rip
+#
+# An expectation is the literal Ink's test compares the frame against
+# where the test has one, and the frame published Ink drew otherwise;
+# where the two disagree the draft says so beside the literal. A draft
+# is read against Ink's test and finished by hand: `# REVIEW` marks what
+# the tool could not settle, and a finished file carries no such mark.
+
+import { readFileSync } from 'fs'
+import { join } from 'path'
+import * as cells from '../cells.rip'
+
+INVISIBLE =! /[\p{Cc}\p{Cf}\p{M}\u00a0\u3000]/gu
+
+# A string as a double-quoted Rip literal: interpolation is escaped, and
+# a character that draws nothing on its own is written as its escape.
+lit = (text) ->
+  quoted = JSON.stringify(text).replace /#\{/g, '\\#{'
+  quoted.replace INVISIBLE, (ch) ->
+    (("\\u" + ch.charCodeAt(at).toString(16).padStart(4, '0')) for at in [0...ch.length]).join ''
+
+value = (given) ->
+  return "'#{given}'" if typeof given is 'string' and /^[^'\\\n]*$/.test given
+  return lit given if typeof given is 'string'
+  return "{ #{("#{key}: #{value inner}" for own key, inner of given).join ', '} }" if given? and typeof given is 'object'
+  return 'REVIEW_NOT_A_JSON_VALUE' unless given?
+  String given
+
+OUTSIDE =! ['Transform', 'Static']
+
+# Why a tree cannot be ported as it stands, or null.
+outside = (tree) ->
+  for node in tree
+    if typeof node is 'string'
+      return 'an escape or control sequence inside text' if /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/.test node
+      continue
+    return "<#{node.type}>" if node.type in OUTSIDE
+    return "a component with hooks (#{node.type.slice 12})" if node.type.startsWith 'Unsupported:'
+    for own key of node.props
+      return "the prop #{key}" if key.startsWith('aria-') or key is 'internal_transform'
+    deeper = outside node.children
+    return deeper if deeper
+  null
+
+emit = (tree, depth, out) ->
+  pad = '  '.repeat depth
+  for node in tree
+    if typeof node is 'string'
+      out.push "#{pad}#{lit node}"
+    else if node.type is 'Fragment'
+      emit node.children, depth, out
+    else if node.type is 'Newline'
+      out.push "#{pad}#{lit '\n'.repeat(node.props.count ?? 1)}"
+    else
+      props = ("#{key}: #{value given}" for own key, given of node.props when key isnt 'key')
+      kids = node.children
+      if props.length is 0 and kids.length is 1 and typeof kids[0] is 'string'
+        out.push "#{pad}#{node.type} #{lit kids[0]}"
+      else
+        out.push "#{pad}#{node.type}#{if props.length then ' ' + props.join(', ') else ''}"
+        emit kids, depth + 1, out
+  out
+
+name = process.argv[2]
+raise 'usage: rip draft.rip <ink test file base name>' unless name
+report = JSON.parse readFileSync(join(import.meta.dir, 'out', "#{name}.json"), 'utf8')
+titles = Set.new (entry.title for entry in report)
+
+# Why a whole test is left out, or null.
+left = (entry) ->
+  base = entry.title.replace /\s+-\s+concurrent$/, ''
+  return 'concurrent twin' if base isnt entry.title and titles.has base
+  return "published Ink threw or hung: #{entry.error.split('\n')[0]}" if entry.error
+  return 'a rerender of a mounted tree' if entry.frames.some (shot) -> shot.rerendered
+  return 'screen-reader output' if entry.frames.some (shot) -> shot.screenReader
+  for shot in entry.frames
+    why = outside shot.tree
+    return why if why
+  return 'draws no frame' unless entry.frames.length
+  null
+
+body = []
+for entry in report
+  why = left entry
+  if why
+    console.error "#{name}\t#{why}\t#{entry.title}"
+    continue
+  if entry.failing
+    body.push "# Ink marks this case `test.failing`: the frame is the one its authors"
+    body.push "# want, and no build of Ink draws it."
+  body.push "test #{lit entry.title}, ->"
+  loose = entry.asserts.filter (check) -> not check.pass and not entry.frames.some((shot) -> shot.frame is check.actual)
+  body.push "  # REVIEW: published Ink fails an assertion here that names no frame (#{(check.kind for check in loose).join ', '})" if loose.length
+  seen = Set.new()
+  used = Set.new()
+  for shot, nth in entry.frames
+    key = JSON.stringify [shot.tree, shot.columns, shot.frame]
+    continue if seen.has key
+    seen.add key
+    label = if entry.frames.length is 1 then 'App' else "App#{nth + 1}"
+    drawn = emit shot.tree, 3, []
+    drawn.push "      # REVIEW: the tree is empty" unless drawn.length
+    body.push "  #{label} = component", "    render", ...drawn
+    judged = entry.asserts.find (check) -> check.kind is 'is' and check.actual is shot.frame and not used.has check
+    used.add judged if judged
+    want = shot.frame
+    if judged and not judged.pass and typeof judged.expected is 'string'
+      want = judged.expected
+      body.push "  # Ink's test asks for this frame; published Ink 7.1.1 draws #{lit shot.frame}"
+    else if not judged and entry.asserts.some((check) -> check.kind is 'is' and check.expected is shot.frame)
+      body.push "  # The tree Ink's test draws its expected frame with."
+    else unless judged
+      body.push "  # Ink's test checks part of this frame; the whole of it is published Ink's."
+    how = if want.includes '\x1b' then 'styled' else 'plain'
+    rows = cells[how] want
+    cols = if shot.columns is 100 then '' else ", #{shot.columns}"
+    if rows.length < 2
+      body.push "  eq #{how}(#{label}#{cols}), [#{(lit row for row in rows).join ', '}]"
+    else
+      body.push "  eq #{how}(#{label}#{cols}), ["
+      body.push "    #{lit row}" for row in rows
+      body.push "  ]"
+    height = want.split('\n').length
+    body.push "  eq tall(#{label}#{cols}), #{height}" if height isnt Math.max(rows.length, 1)
+  body.push ''
+
+text = body.join '\n'
+widgets = (widget for widget in ['Box', 'Text', 'Spacer'] when RegExp.new("^\\s+#{widget}\\b", 'm').test text)
+reads = (read for read in ['plain', 'styled', 'tall'] when text.includes " #{read}(")
+heading = name.replace(/(^|-)([a-z])/g, (all, dash, letter) -> (if dash then ' ' else '') + letter.toUpperCase())
+
+console.log [
+  "# Ink's test/#{name}.tsx, ported."
+  "#"
+  "# Each test keeps Ink's title and draws Ink's tree, prop for prop."
+  "# SOURCE.md says where each expected frame comes from and which of"
+  "# Ink's cases are left out."
+  "#"
+  "#   rip test/ink/#{name}.rip"
+  ""
+  "import { test, eq } from 'rip/testing'"
+  "import { #{[...widgets, ...reads].join ', '} } from './harness.rip'"
+  ""
+  "console.log \"\\n#{heading}\""
+  ""
+  text
+].join '\n'

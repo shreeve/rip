@@ -1,0 +1,121 @@
+# Ink's test/flex-align-self.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/flex-align-self.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, plain, tall } from './harness.rip'
+
+console.log "\nFlex Align Self"
+
+test "row - align text to center", ->
+  App = component
+    render
+      Box height: 3
+        Box alignSelf: 'center'
+          Text "Test"
+  eq plain(App), [
+    ""
+    "Test"
+  ]
+  eq tall(App), 3
+
+test "row - align multiple text nodes to center", ->
+  App = component
+    render
+      Box height: 3
+        Box alignSelf: 'center'
+          Text "A"
+          Text "B"
+  eq plain(App), [
+    ""
+    "AB"
+  ]
+  eq tall(App), 3
+
+test "row - align text to bottom", ->
+  App = component
+    render
+      Box height: 3
+        Box alignSelf: 'flex-end'
+          Text "Test"
+  eq plain(App), [
+    ""
+    ""
+    "Test"
+  ]
+
+test "row - align multiple text nodes to bottom", ->
+  App = component
+    render
+      Box height: 3
+        Box alignSelf: 'flex-end'
+          Text "A"
+          Text "B"
+  eq plain(App), [
+    ""
+    ""
+    "AB"
+  ]
+
+test "column - align text to center", ->
+  App = component
+    render
+      Box flexDirection: 'column', width: 10
+        Box alignSelf: 'center'
+          Text "Test"
+  eq plain(App), ["   Test"]
+
+test "column - align text to right", ->
+  App = component
+    render
+      Box flexDirection: 'column', width: 10
+        Box alignSelf: 'flex-end'
+          Text "Test"
+  eq plain(App), ["      Test"]
+
+test "column - align self stretch", ->
+  App = component
+    render
+      Box flexDirection: 'column', width: 7
+        Box alignSelf: 'stretch', borderStyle: 'single'
+          Text "X"
+  eq plain(App), [
+    "┌─────┐"
+    "│X    │"
+    "└─────┘"
+  ]
+
+test "row - align self stretch", ->
+  App = component
+    render
+      Box height: 5
+        Box alignSelf: 'stretch', borderStyle: 'single'
+          Text "X"
+  eq plain(App), [
+    "┌─┐"
+    "│X│"
+    "│ │"
+    "│ │"
+    "└─┘"
+  ]
+
+test "row - align self baseline", ->
+  App = component
+    render
+      Box alignItems: 'flex-end', height: 3
+        Text
+          "A"
+          "\n"
+          "B"
+        Box alignSelf: 'baseline'
+          Text "X"
+  eq plain(App), [
+    "AX"
+    "B"
+  ]
+  eq tall(App), 3
+

@@ -1,0 +1,148 @@
+# Ink's test/margin.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/margin.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, plain, tall } from './harness.rip'
+
+console.log "\nMargin"
+
+test "margin", ->
+  App = component
+    render
+      Box margin: 2
+        Text "X"
+  eq plain(App), [
+    ""
+    ""
+    "  X"
+  ]
+  eq tall(App), 5
+
+test "margin X", ->
+  App = component
+    render
+      Box
+        Box marginX: 2
+          Text "X"
+        Text "Y"
+  eq plain(App), ["  X  Y"]
+
+test "margin Y", ->
+  App = component
+    render
+      Box marginY: 2
+        Text "X"
+  eq plain(App), [
+    ""
+    ""
+    "X"
+  ]
+  eq tall(App), 5
+
+test "margin top", ->
+  App = component
+    render
+      Box marginTop: 2
+        Text "X"
+  eq plain(App), [
+    ""
+    ""
+    "X"
+  ]
+
+test "margin bottom", ->
+  App = component
+    render
+      Box marginBottom: 2
+        Text "X"
+  eq plain(App), ["X"]
+  eq tall(App), 3
+
+test "margin left", ->
+  App = component
+    render
+      Box marginLeft: 2
+        Text "X"
+  eq plain(App), ["  X"]
+
+test "margin right", ->
+  App = component
+    render
+      Box
+        Box marginRight: 2
+          Text "X"
+        Text "Y"
+  eq plain(App), ["X  Y"]
+
+test "nested margin", ->
+  App = component
+    render
+      Box margin: 2
+        Box margin: 2
+          Text "X"
+  eq plain(App), [
+    ""
+    ""
+    ""
+    ""
+    "    X"
+  ]
+  eq tall(App), 9
+
+test "margin with multiline string", ->
+  App = component
+    render
+      Box margin: 2
+        Text "A\nB"
+  eq plain(App), [
+    ""
+    ""
+    "  A"
+    "  B"
+  ]
+  eq tall(App), 6
+
+test "apply margin to text with newlines", ->
+  App = component
+    render
+      Box margin: 1
+        Text
+          "Hello"
+          "\n"
+          "World"
+  eq plain(App), [
+    ""
+    " Hello"
+    " World"
+  ]
+  eq tall(App), 4
+
+test "apply margin to wrapped text", ->
+  App = component
+    render
+      Box margin: 1, width: 6
+        Text "Hello World"
+  eq plain(App), [
+    ""
+    " Hello"
+    " World"
+  ]
+  eq tall(App), 4
+
+test "negative margin top with multiline string", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Box marginTop: -1, flexDirection: 'column'
+          Text "Line 1\nLine 2\nLine 3"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "\n"
+  eq plain(App), [
+    "Line 2"
+    "Line 3"
+  ]
+

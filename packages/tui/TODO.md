@@ -6,11 +6,8 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 1. Wrong or silent
 
-- [ ] **Paint values are refused where they are written,** as layout
-      values are: a color that is no color, an unknown `borderStyle`,
-      and a weight flag that is not a boolean (`bold: 'no'` is bold)
-      fail at the first paint, inside a scheduled frame.
-- [ ] An error for a style names the node it was written on.
+- [ ] An error for a style — at the write or from layout — names the
+      node it was written on.
 - [ ] PLAN §5 lists every stated divergence from Yoga, each with a pin:
       the rounding, the baseline child, **the owner's size in the cache
       key** (a `{width: 0, padding: '5%'}` box comes out 10×1 here and
@@ -56,7 +53,7 @@ the test, re-seed the bug, and see it caught.
       their sections.
 - [ ] Say in the header why `for kid, i in` keeps an unused `i` (it
       compiles to a counted loop), or the loops get "cleaned".
-- [ ] Remove what no suite reaches: `edges`, the `textOf` export,
+- [ ] Remove what no suite reaches: `edges`,
       `flatten!` and the fallback arm of `kids`, the `border*` and
       `overflow` slots the document refuses, guards that cannot fire,
       `mainAxis`, parameters nobody reads. Fold the five `measured[0]`
@@ -79,16 +76,26 @@ the test, re-seed the bug, and see it caught.
 
 ## 5. The painter and the screen
 
+- [ ] **A word for the terminal's own colors.** Text with no background
+      keeps the one beneath it, so nothing spells "draw this run on the
+      terminal's default background" inside a colored box (Ink writes
+      `backgroundColor: ''`). `'default'` for both `color` and
+      `backgroundColor`; then the pinned Ink case in
+      `test/ink/background.rip` follows Ink.
+- [ ] **A test driver for updates.** `renderToString` mounts fresh on
+      every call, so 45 of Ink's cases — a mounted tree re-rendered with
+      new props — have no way to run. A public driver that mounts once,
+      hands back the app, and draws frames on demand (PLAN §10); then
+      port those cases.
+- [ ] Yoga resolves a percent `minWidth` / `maxWidth` of a row's child
+      against the wrong reference (a `minWidth: '50%'` child of a
+      10-wide box comes out 50 wide at 100 columns). Ink marks its own
+      tests for it as failing, and this engine is at parity with Yoga.
+      Decide whether to stay at parity or be right, and pin the choice
+      in PLAN §5.
 - [ ] The style tables never evict, and a cell holds a style id in
       sixteen bits: an app that animates `'#rrggbb'` colors reaches the
       limit and is refused. Reclaim ids no cell uses.
-- [ ] A layout error names the node it came from.
-- [ ] `overflow: 'hidden'` clips (text wider than its box draws past it
-      today); the per-edge border switches; then the document accepts
-      both keys.
-- [ ] `backgroundColor` on text fills its box, not only its glyphs —
-      decide, and pin.
-- [ ] Text wrapping, truncation, grapheme clusters (PLAN §6).
 - [ ] Damage tracking: paint and diff only what moved (PLAN §6).
 
 ## 6. Compiler-side, filed separately

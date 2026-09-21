@@ -1,0 +1,209 @@
+# Ink's test/components.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/components.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, Spacer, plain, styled } from './harness.rip'
+
+console.log "\nComponents"
+
+test "text", ->
+  App = component
+    render
+      Text "Hello World"
+  eq plain(App), ["Hello World"]
+
+test "text with variable", ->
+  App = component
+    render
+      Text
+        "Count: "
+        "1"
+  eq plain(App), ["Count: 1"]
+
+test "multiple text nodes", ->
+  App = component
+    render
+      Text
+        "Hello"
+        " World"
+  eq plain(App), ["Hello World"]
+
+test "text with component", ->
+  App = component
+    render
+      Text
+        "Hello "
+        Text "World"
+  eq plain(App), ["Hello World"]
+
+test "text with fragment", ->
+  App = component
+    render
+      Text
+        "Hello "
+        "World"
+        " "
+  eq plain(App), ["Hello World"]
+
+test "wrap text", ->
+  App = component
+    render
+      Box width: 7
+        Text wrap: 'wrap'
+          "Hello World"
+  eq plain(App), [
+    "Hello"
+    "World"
+  ]
+
+test "don’t wrap text if there is enough space", ->
+  App = component
+    render
+      Box width: 20
+        Text wrap: 'wrap'
+          "Hello World"
+  eq plain(App), ["Hello World"]
+
+test "hard wrap text", ->
+  App = component
+    render
+      Box width: 7
+        Text wrap: 'hard'
+          "Hello World"
+  eq plain(App), [
+    "Hello W"
+    "orld"
+  ]
+
+test "hard wrap with long word", ->
+  App = component
+    render
+      Box width: 5
+        Text wrap: 'hard'
+          "aaaaaaaaaa"
+  eq plain(App), [
+    "aaaaa"
+    "aaaaa"
+  ]
+
+test "don’t hard wrap text if there is enough space", ->
+  App = component
+    render
+      Box width: 20
+        Text wrap: 'hard'
+          "Hello World"
+  eq plain(App), ["Hello World"]
+
+test "truncate text in the end", ->
+  App = component
+    render
+      Box width: 7
+        Text wrap: 'truncate'
+          "Hello World"
+  eq plain(App), ["Hello …"]
+
+test "truncate text in the middle", ->
+  App = component
+    render
+      Box width: 7
+        Text wrap: 'truncate-middle'
+          "Hello World"
+  eq plain(App), ["Hel…rld"]
+
+test "truncate text in the beginning", ->
+  App = component
+    render
+      Box width: 7
+        Text wrap: 'truncate-start'
+          "Hello World"
+  eq plain(App), ["… World"]
+
+test "ignore empty text node", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Box
+          Text "Hello World"
+        Text ""
+  eq plain(App), ["Hello World"]
+
+test "render a single empty text node", ->
+  App = component
+    render
+      Text ""
+  eq plain(App), []
+
+test "number", ->
+  App = component
+    render
+      Text "1"
+  eq plain(App), ["1"]
+
+test "fragment", ->
+  App = component
+    render
+      Text "Hello World"
+  eq plain(App), ["Hello World"]
+
+test "ensure wrap-ansi doesn’t trim leading whitespace", ->
+  App = component
+    render
+      Text color: 'red'
+        " ERROR "
+  eq styled(App), [" «red»ERROR"]
+
+test "newline", ->
+  App = component
+    render
+      Text
+        "Hello"
+        "\n"
+        "World"
+  eq plain(App), [
+    "Hello"
+    "World"
+  ]
+
+test "multiple newlines", ->
+  App = component
+    render
+      Text
+        "Hello"
+        "\n\n"
+        "World"
+  eq plain(App), [
+    "Hello"
+    ""
+    "World"
+  ]
+
+test "horizontal spacer", ->
+  App = component
+    render
+      Box width: 20
+        Text "Left"
+        Spacer
+        Text "Right"
+  eq plain(App), ["Left           Right"]
+
+test "vertical spacer", ->
+  App = component
+    render
+      Box flexDirection: 'column', height: 6
+        Text "Top"
+        Spacer
+        Text "Bottom"
+  eq plain(App), [
+    "Top"
+    ""
+    ""
+    ""
+    ""
+    "Bottom"
+  ]
+

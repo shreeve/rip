@@ -1,0 +1,331 @@
+# Ink's test/width-height.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/width-height.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, plain, tall, differs } from './harness.rip'
+
+console.log "\nWidth Height"
+
+test "set width", ->
+  App = component
+    render
+      Box
+        Box width: 5
+          Text "A"
+        Text "B"
+  eq plain(App), ["A    B"]
+
+test "set width in percent", ->
+  App = component
+    render
+      Box width: 10
+        Box width: '50%'
+          Text "A"
+        Text "B"
+  eq plain(App), ["A    B"]
+
+test "set width in fractional percent", ->
+  App = component
+    render
+      Box width: 200
+        Box width: '12.5%'
+          Text "A"
+        Text "B"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "A                       B"
+  eq plain(App, 200), ["A                        B"]
+
+test "set min width", ->
+  App1 = component
+    render
+      Box
+        Box minWidth: 5
+          Text "A"
+        Text "B"
+  eq plain(App1), ["A    B"]
+  App2 = component
+    render
+      Box
+        Box minWidth: 2
+          Text "AAAAA"
+        Text "B"
+  eq plain(App2), ["AAAAAB"]
+
+# Ink marks this case `test.failing`: the frame is the one its authors
+# want, and no build of Ink draws it.
+test "set min width in percent", ->
+  App = component
+    render
+      Box width: 10
+        Box minWidth: '50%'
+          Text "A"
+        Text "B"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "A                                                 B"
+  differs plain(App), ["A                                                 B"], ["A    B"],
+    "Ink marks this test as failing: no build of Ink draws the frame it asks for. This is the frame Yoga's layout gives, and the one published Ink draws."
+
+test "set width to zero", ->
+  App = component
+    render
+      Box
+        Box width: 0
+          Text "hello"
+        Text "|"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "|\ne\nl\nl\no"
+  eq plain(App), ["|ello"]
+
+test "set width to zero with text below", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Box
+          Box width: 0
+            Text "hello"
+          Text "|"
+        Text "next"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "|\ne\nl\nl\no\nnext"
+  eq plain(App), [
+    "|ello"
+    "next"
+  ]
+
+test "set width to a fraction of a column", ->
+  App = component
+    render
+      Box width: 10, flexDirection: 'column'
+        Box
+          Box width: 0.25
+            Text "hello"
+          Text "|"
+        Text "next"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "|\nnext"
+  eq plain(App), [
+    "|"
+    "e"
+    "l"
+    "l"
+    "o"
+    "next"
+  ]
+
+test "truncated text at a positive fractional width keeps its row", ->
+  App = component
+    render
+      Box width: 10, flexDirection: 'column'
+        Box width: 0.5
+          Text wrap: 'truncate'
+            "hello"
+        Text "next"
+  eq plain(App), [
+    "…"
+    "next"
+  ]
+
+test "padding leaves no room for text", ->
+  App = component
+    render
+      Box
+        Box width: 2, paddingX: 1
+          Text "hello"
+        Text "|"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws " h|\n e\n l\n l\n o"
+  eq plain(App), [" h|llo"]
+
+test "shrink text to zero width", ->
+  App = component
+    render
+      Box width: 5
+        Box flexBasis: 0, flexShrink: 1
+          Text "hello"
+        Box width: 5
+          Text "world"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "world\ne\nl\nl\no"
+  eq plain(App), ["world"]
+
+test "set height", ->
+  App = component
+    render
+      Box height: 4
+        Text "A"
+        Text "B"
+  eq plain(App), ["AB"]
+  eq tall(App), 4
+
+test "set height in percent", ->
+  App = component
+    render
+      Box height: 6, flexDirection: 'column'
+        Box height: '50%'
+          Text "A"
+        Text "B"
+  eq plain(App), [
+    "A"
+    ""
+    ""
+    "B"
+  ]
+  eq tall(App), 6
+
+test "cut text over the set height", ->
+  App = component
+    render
+      Box height: 2
+        Text "AAAABBBBCCCC"
+  eq plain(App, 4), [
+    "AAAA"
+    "BBBB"
+  ]
+
+test "set min height", ->
+  App1 = component
+    render
+      Box minHeight: 4
+        Text "A"
+  eq plain(App1), ["A"]
+  eq tall(App1), 4
+  App2 = component
+    render
+      Box minHeight: 2
+        Box height: 4
+          Text "A"
+  eq plain(App2), ["A"]
+  eq tall(App2), 4
+
+test "set min height in percent", ->
+  App = component
+    render
+      Box height: 6, flexDirection: 'column'
+        Box minHeight: '50%'
+          Text "A"
+        Text "B"
+  eq plain(App), [
+    "A"
+    ""
+    ""
+    "B"
+  ]
+  eq tall(App), 6
+
+test "set max width", ->
+  App1 = component
+    render
+      Box
+        Box maxWidth: 3
+          Text "AAAAA"
+        Text "B"
+  eq plain(App1, 10), [
+    "AAAB"
+    "AA"
+  ]
+  App2 = component
+    render
+      Box
+        Box maxWidth: 10
+          Text "AAA"
+        Text "B"
+  eq plain(App2), ["AAAB"]
+
+test "set max height", ->
+  App1 = component
+    render
+      Box maxHeight: 2
+        Box height: 4
+          Text "A"
+  eq plain(App1), ["A"]
+  eq tall(App1), 2
+  App2 = component
+    render
+      Box maxHeight: 4
+        Text "A"
+  eq plain(App2), ["A"]
+
+test "set aspect ratio with width", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Box width: 8, aspectRatio: 2, borderStyle: 'single'
+          Text "X"
+        Text "Y"
+  eq plain(App), [
+    "┌──────┐"
+    "│X     │"
+    "│      │"
+    "└──────┘"
+    "Y"
+  ]
+
+test "set aspect ratio with height", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Box height: 3, aspectRatio: 2, borderStyle: 'single'
+          Text "X"
+        Text "Y"
+  eq plain(App), [
+    "┌────┐"
+    "│X   │"
+    "└────┘"
+    "Y"
+  ]
+
+test "set aspect ratio with width and height", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Box width: 8, height: 3, aspectRatio: 2, borderStyle: 'single'
+          Text "X"
+        Text "Y"
+  eq plain(App), [
+    "┌────┐"
+    "│X   │"
+    "└────┘"
+    "Y"
+  ]
+
+test "set aspect ratio with maxHeight constraint", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Box width: 10, maxHeight: 3, aspectRatio: 2, borderStyle: 'single'
+          Text "X"
+        Text "Y"
+  eq plain(App), [
+    "┌────┐"
+    "│X   │"
+    "└────┘"
+    "Y"
+  ]
+
+# Ink marks this case `test.failing`: the frame is the one its authors
+# want, and no build of Ink draws it.
+test "set max width in percent", ->
+  App = component
+    render
+      Box width: 10
+        Box maxWidth: '50%'
+          Text "AAAAAAAAAA"
+        Text "B"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "AAAAAB\nAAAAA"
+  differs plain(App), ["AAAAAB","AAAAA"], ["AAAAAB"],
+    "Ink marks this test as failing: no build of Ink draws the frame it asks for. This is the frame Yoga's layout gives, and the one published Ink draws."
+
+test "set max height in percent", ->
+  App = component
+    render
+      Box height: 6, flexDirection: 'column'
+        Box maxHeight: '50%'
+          Box height: 6
+            Text "A"
+        Text "B"
+  eq plain(App), [
+    "A"
+    ""
+    ""
+    "B"
+  ]
+  eq tall(App), 6
+

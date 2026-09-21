@@ -70,6 +70,7 @@ def mounted(App, body)
     app = App.new({})
     app.mount doc.body
     show = (cols = 20) ->
+      doc.moved = doc.stale = false
       { h } = layout doc.body, cols
       grid = Grid.new cols, Math.max(h, 1)
       paint grid, doc.body
@@ -140,12 +141,44 @@ test "restore hands the runtime its own reporter back", ->
     console.error = held
   eq printed, ['[Rip] Kid construction failed:']
 
-test "an unknown border style is refused when the frame is drawn", ->
+test "a paint value is refused where it is written, by key, with the words the key takes", ->
   Wavy = component
     render
       Box borderStyle: 'wavy'
         Text "never drawn"
-  throws (-> renderToString Wavy), "'wavy' is not a border style"
+  throws (-> renderToString Wavy), 'borderStyle: "wavy" is not one of single, double, round, bold, singleDouble, doubleSingle, classic, arrow'
+  { doc, restore } = install()
+  try
+    box = doc.createElement 'div'
+    words = doc.createElement 'span'
+    throws (-> words.set 'bold', 'no'), 'bold: "no" is not true or false'
+    throws (-> words.set 'color', 'grean'), 'color: "grean" is not a color'
+    throws (-> box.set 'borderTopColor', 'rgb(1, 2, 300)'), 'borderTopColor: "rgb(1, 2, 300)" is not a color'
+    throws (-> box.set 'borderDimColor', 1), 'borderDimColor: 1 is not true or false'
+    throws (-> box.set 'overflow', 'scroll'), 'overflow: "scroll" is not one of visible, hidden'
+    throws (-> box.set 'contentOffsetY', '2'), 'contentOffsetY: "2" is not a number of cells'
+    throws (-> box.set 'contentOffsetY', NaN), 'contentOffsetY: NaN is not a number of cells'
+    throws (-> words.set 'wrap', 'clip'), 'wrap: "clip" is not one of wrap, hard, truncate, truncate-end, truncate-start, truncate-middle'
+    throws (-> box.set 'borderStyle', { top: '-' }), 'borderStyle: topLeft: undefined is not a border glyph'
+    throws (-> box.set 'borderTop', 'no'), 'borderTop: "no" is not true or false'
+    eq [box.styles, words.styles], [{}, {}]
+    box.set key, value for key, value of { color: '#0af', backgroundColor: 'ansi256(208)', borderColor: 'rgb(0, 128, 255)', borderTop: false, overflowX: 'hidden', contentOffsetX: 3 }
+    eq box.styles.borderTop, false
+  finally
+    restore()
+
+test "a style with no meaning on its node is refused: a box's on text, text's on a box", ->
+  { doc, restore } = install()
+  try
+    box = doc.createElement 'div'
+    words = doc.createElement 'span'
+    throws (-> words.set 'overflow', 'hidden'), "'overflow' has no meaning on text"
+    throws (-> words.set 'contentOffsetY', 1), "'contentOffsetY' has no meaning on text"
+    throws (-> words.set 'borderTop', true), "'borderTop' has no meaning on text"
+    throws (-> box.set 'wrap', 'truncate'), "'wrap' has no meaning on a box"
+    throws (-> box.set 'dim', true), "'dim' is not a terminal style of <div> — did you mean 'dimColor'?"
+  finally
+    restore()
 
 test "a tag with no terminal meaning is refused", ->
   Web = component
@@ -287,13 +320,26 @@ test "an absolute node positions against its nearest ancestor that is not static
   eq corner('static').split('\n')[3], "│         *│"
   eq corner('relative').split('\n')[1], "│   *      │"
 
-test "text wider than its box is cut at the screen's edge, never wrapped onto the row above", ->
+test "text wider than its box wraps inside it, or is cut with `wrap: 'truncate'`", ->
   Wide = component
     render
       Box flexDirection: 'column'
         Text "first row"
         Box width: 10, alignItems: 'center'
           Text "0123456789ABCDEF"
+        Box width: 10
+          Text wrap: 'truncate'
+            "0123456789ABCDEF"
+  eq renderToString(Wide, cols: 20), "first row\n0123456789\nABCDEF\n012345678…"
+
+test "a box wider than the screen is cut at the screen's edge, never wrapped onto the row above", ->
+  Wide = component
+    render
+      Box flexDirection: 'column'
+        Text "first row"
+        Box width: 10, alignItems: 'center'
+          Box width: 16
+            Text "0123456789ABCDEF"
   eq renderToString(Wide, cols: 20), "first row\n3456789ABCDEF"
 
 test "a glyph over half of a wide character blanks the other half", ->
@@ -329,6 +375,187 @@ test "a contents node draws no box, and its color still reaches its children", -
         Box display: 'contents', color: 'green'
           Text "leaf"
   eq renderToString(Lent, cols: 8, ansi: true).trimEnd(), "\x1b[32mleaf\x1b[0m"
+
+# ==[ Text and the painter ]==
+
+console.log "\nPaint"
+
+test "text wraps at its box, and nested runs keep their styles across the rows", ->
+  Mixed = component
+    render
+      Box width: 10
+        Text
+          "plain "
+          Text color: 'green', bold: true
+            "green words"
+          " end"
+  eq renderToString(Mixed, cols: 12), "plain\ngreen\nwords end"
+  rows = renderToString(Mixed, cols: 12, ansi: true).split '\n'
+  eq rows[1].trimEnd(), "\x1b[1;32mgreen \x1b[0m"
+  eq rows[2].trimEnd(), "\x1b[1;32mwords\x1b[0m end"
+
+test "a cut line's ellipsis takes the style of the words it stands beside", ->
+  cut = (wrap) ->
+    Cut = component
+      render
+        Box width: 8
+          Text wrap: wrap
+            Text color: 'red'
+              "red red "
+            Text color: 'blue'
+              "blue blue"
+    renderToString(Cut, cols: 8, ansi: true).trimEnd()
+  eq cut('truncate-end'), "\x1b[31mred red…\x1b[0m"
+  eq cut('truncate-start'), "\x1b[34m…ue blue\x1b[0m"
+  eq cut('truncate-middle'), "\x1b[31mred \x1b[0m…\x1b[34mlue\x1b[0m"
+
+test "overflow: 'hidden' clips children to the padding box; overflowX and overflowY clip one axis", ->
+  clipped = (styles) ->
+    Clipped = component
+      render
+        Box width: 8, height: 4, borderStyle: 'single', style: styles
+          Box width: 12, height: 4, flexShrink: 0
+            Text "0123456789AB\nsecond row..\nthird row...\nfourth row.."
+    renderToString Clipped, cols: 14
+  eq clipped({ overflow: 'hidden' }), "┌──────┐\n│012345│\n│second│\n└──────┘"
+  eq clipped({ overflowX: 'hidden' }), "┌──────┐\n│012345│\n│second│\n└third ┘"
+  eq clipped({ overflowY: 'hidden' }), "┌──────┐\n│0123456789AB\n│second row..\n└──────┘"
+
+test "nested clips intersect", ->
+  Nested = component
+    render
+      Box width: 6, height: 2, overflow: 'hidden'
+        Box width: 4, height: 4, overflow: 'hidden', marginLeft: 3, flexShrink: 0
+          Box width: 9, flexShrink: 0
+            Text "ABCDEFGHI\nabcdefghi\n123456789"
+  eq renderToString(Nested, cols: 12), "   ABC\n   abc"
+
+test "a wide character cut by a clip edge is a space in its style", ->
+  Cut = component
+    render
+      Box width: 3, overflow: 'hidden'
+        Box width: 6, flexShrink: 0
+          Text backgroundColor: 'blue'
+            "日本語"
+  eq renderToString(Cut, cols: 6), "日"
+  eq renderToString(Cut, cols: 6, ansi: true), "\x1b[44m日 \x1b[0m   "
+
+test "content offsets shift a box's children, and owe a paint but no layout", ->
+  Scrolled = component
+    @down := 0
+    render
+      Box width: 6, height: 2, overflow: 'hidden', contentOffsetY: @down, contentOffsetX: 1
+        Box flexShrink: 0
+          Text "row 0\nrow 1\nrow 2\nrow 3"
+  mounted Scrolled, (app, show, doc) ->
+    eq show(), "ow 0\now 1"
+    app.down.value = 2
+    ok doc.stale and not doc.moved, 'a scroll is paint only'
+    eq show(), "ow 2\now 3"
+
+test "a border draws the edges it keeps, with a corner only where two of them meet", ->
+  edge = (styles) ->
+    Edged = component
+      render
+        Box width: 6, borderStyle: 'round', style: styles
+          Text "ab"
+    renderToString Edged, cols: 8
+  eq edge({ borderTop: false }), "│ab  │\n╰────╯"
+  eq edge({ borderBottom: false }), "╭────╮\n│ab  │"
+  eq edge({ borderLeft: false }), "─────╮\nab   │\n─────╯"
+  eq edge({ borderRight: false }), "╭─────\n│ab\n╰─────"
+  eq edge({ borderLeft: false, borderRight: false }), "──────\nab\n──────"
+  eq edge({ borderTop: false, borderBottom: false }), "│ab  │"
+
+test "every border style of Ink's, and a style of one's own", ->
+  framed = (look) ->
+    Framed = component
+      render
+        Box width: 4, borderStyle: look
+          Text "ab"
+    renderToString Framed, cols: 4
+  eq framed('single'), "┌──┐\n│ab│\n└──┘"
+  eq framed('double'), "╔══╗\n║ab║\n╚══╝"
+  eq framed('round'), "╭──╮\n│ab│\n╰──╯"
+  eq framed('bold'), "┏━━┓\n┃ab┃\n┗━━┛"
+  eq framed('singleDouble'), "╓──╖\n║ab║\n╙──╜"
+  eq framed('doubleSingle'), "╒══╕\n│ab│\n╘══╛"
+  eq framed('classic'), "+--+\n|ab|\n+--+"
+  eq framed('arrow'), "↘↓↓↙\n→ab←\n↗↑↑↖"
+  eq framed({ topLeft: '1', top: '2', topRight: '3', right: '4', bottomRight: '5', bottom: '6', bottomLeft: '7', left: '8' }), "1223\n8ab4\n7665"
+
+test "each border edge takes its own color and dimming, else the border's", ->
+  Tinted = component
+    render
+      Box width: 3, height: 3, borderStyle: 'single', borderColor: 'green', borderTopColor: 'red', borderLeftDimColor: true
+  eq renderToString(Tinted, cols: 3, ansi: true).split('\n'), [
+    "\x1b[31m┌─┐\x1b[0m"
+    "\x1b[2;32m│\x1b[0m \x1b[32m│\x1b[0m"
+    "\x1b[32m└─┘\x1b[0m"
+  ]
+
+test "a box's background fills inside its border, and text over it keeps it", ->
+  Panel = component
+    render
+      Box width: 6, height: 3, borderStyle: 'single', backgroundColor: 'blue'
+        Text "hi"
+  eq renderToString(Panel, cols: 6, ansi: true).split('\n')[1], "│\x1b[44mhi  \x1b[0m│"
+
+test "a background covers what lies under it", ->
+  Covered = component
+    render
+      Box width: 8, height: 1
+        Text "日本語日"
+        Box position: 'absolute', left: 3, top: 0, width: 2, height: 1, backgroundColor: 'red'
+  eq renderToString(Covered, cols: 8, ansi: true), "日 \x1b[41m  \x1b[0m 日"
+
+test "text's own background fills its glyph cells and no more", ->
+  Marked = component
+    render
+      Box width: 8
+        Text backgroundColor: 'yellow'
+          "ab"
+  eq renderToString(Marked, cols: 8, ansi: true), "\x1b[43mab\x1b[0m      "
+
+test "dimColor and strikethrough are text attributes beside bold, italic, underline, and inverse", ->
+  Faint = component
+    render
+      Text dimColor: true, strikethrough: true
+        "old"
+  eq renderToString(Faint, cols: 3, ansi: true), "\x1b[2;9mold\x1b[0m"
+
+test "a cluster is one glyph: a mark stays with its base, a joined emoji takes two cells", ->
+  mark = String.fromCodePoint 0x301
+  family = [0x1F468, 0x200D, 0x1F469, 0x200D, 0x1F467].map((code) -> String.fromCodePoint code).join ''
+  Glyphs = component
+    render
+      Box width: 6, borderStyle: 'single'
+        Text "e#{mark}#{family}!"
+  row = renderToString(Glyphs, cols: 6).split('\n')[1]
+  eq row, "│e#{mark}#{family}!│"
+  eq Bun.stringWidth(row), 6
+
+test "a text change that keeps its wrapped size owes a paint; one that changes its rows owes a layout", ->
+  Note = component
+    @words := 'aaa bbb ccc'
+    render
+      Box width: 7
+        Text
+          "#{@words}"
+  mounted Note, (app, show, doc) ->
+    eq show(), "aaa bbb\n ccc"
+    flow = doc.body.firstChild.firstChild.flow
+    eq flow.wraps, 1
+    show()
+    eq flow.wraps, 1, 'a frame that changes nothing wraps nothing'
+    app.words.value = 'ccc bbb aaa'
+    ok doc.stale and not doc.moved, 'the same rows at the same width'
+    eq show(), "ccc bbb\n aaa"
+    app.words.value = 'aaaa bbbbbb'
+    ok doc.moved, 'rows of another width'
+    eq show(), "aaaa\nbbbbbb"
+    app.words.value = 'a b c d e f g h i j'
+    ok doc.moved, 'a third row'
 
 # ==[ The component model on a terminal ]==
 
@@ -447,7 +674,7 @@ test! "a bad layout value is refused on the line that writes it, and the app run
   quit()
   await running.done
 
-test! "a frame that fails later rejects done and gives the terminal back", ->
+test! "a bad paint value is refused on the line that writes it, and the app runs on", ->
   out = terminal 30, 8
   Tinted = component
     @ink := 'green'
@@ -455,13 +682,27 @@ test! "a frame that fails later rejects done and gives the terminal back", ->
       Text color: @ink
         "x"
   running = run Tinted, stdout: out
-  running.app.ink.value = 'grean'
+  throws (-> running.app.ink.value = 'grean'), 'color: "grean" is not a color'
+  ok document?, 'the app is still mounted'
+  quit()
+  await running.done
+
+test! "a frame that fails later rejects done and gives the terminal back", ->
+  out = terminal 30, 8
+  Restless = component
+    @grows := false
+    el := null
+    render
+      Box flexDirection: 'row'
+        div ref: el, width: (if @grows then (el?.box.w ?? 0) + 1 else 5)
+  running = run Restless, stdout: out
+  running.app.grows.value = true
   failure = null
   try
     await running.done
   catch error
     failure = error
-  ok failure?.message.includes("'grean' is not a color"), "done rejected with #{failure?.message}"
+  ok failure?.message.includes('layout did not settle'), "done rejected with #{failure?.message}"
   eq typeof document, 'undefined'
   ok out.sent.join('').endsWith("\x1b[?25h"), 'the cursor is shown again'
 
