@@ -15,11 +15,11 @@
 //   __popComponent(prev)      - restore the previous component
 //   setContext(key, value)    - provide a context value on the current
 //                               component (init-time only)
-//   getContext(key)           - read a context value from the nearest
-//                               provider up the parent chain; a missing
-//                               key REJECTS loudly (hasContext is the
+//   getContext(Provider, key) - read a context value from the nearest
+//                               ancestor instance of Provider; a miss
+//                               REJECTS loudly (hasContext is the
 //                               optional-use probe)
-//   hasContext(key)           - is a provider in reach?
+//   hasContext(Provider, key) - does such an ancestor answer the key?
 //   __gateBind(self, index)   - computed last-good app-data binding
 //                               (resolves the renderer's captured
 //                               source through __gateMetadata)
@@ -499,36 +499,56 @@ function setContext(key, value) {
   __currentComponent._context.set(key, value);
 }
 
-// The context read is LOUD on a miss: the miss is
-// detectable right here, and returning undefined manufactures a
-// distant `.value` TypeError (or a silently rendered undefined) at
-// the consumer. hasContext is the optional-use probe. The value
-// comes back AS ITS CONTAINER — the signal a reactive member offered,
-// the plain value a readonly offered — the accept container contract.
-function getContext(key) {
+// A context read names its provider: the nearest ancestor that is an
+// instance of `provider` answers the key from what it set, and nothing
+// else on the walk is consulted, so a nearer component that set the same
+// key is passed over. The read is LOUD on a miss, which is detectable
+// right here: returning undefined manufactures a distant `.value`
+// TypeError (or a silently rendered undefined) at the consumer.
+// hasContext is the optional-use probe. The value comes back as it was
+// set: for a compiled offer, the state container an accept reads and
+// writes.
+function __findContext(fn, provider, key) {
+  // A read by key alone names no provider, and `instanceof` against a
+  // value that is not callable throws a TypeError that names neither the
+  // read nor what was passed.
+  if (typeof provider !== 'function') {
+    throw new Error(key === undefined
+      ? `${fn}: a context read names its provider — ${fn}(Provider, ${JSON.stringify(provider)})`
+      : `${fn}: the provider named for ${JSON.stringify(key)} is not a component`);
+  }
+  // A hot swap re-points a living instance at its definition's next
+  // class, one instance at a time, so mid-round a part's fresh instance
+  // can name the new class while the provider above it still wears the
+  // old one. The two share the compiler's `__hmrId`, HMR's own word for
+  // the same definition; a production class carries none.
+  const hmrId = typeof provider.__hmrId === 'string' ? provider.__hmrId : null;
   let component = __currentComponent;
   // Cycle guard: a corrupted _parent chain must not hang the lookup.
   const visited = new Set();
   while (component && !visited.has(component)) {
     visited.add(component);
-    if (component._context && component._context.has(key)) return component._context.get(key);
+    if (component instanceof provider || (hmrId !== null && component.constructor?.__hmrId === hmrId)) {
+      return component._context !== undefined && component._context.has(key)
+        ? { found: true, value: component._context.get(key) }
+        : { found: false, provider: component };
+    }
     component = component._parent;
   }
-  throw new Error(
-    `getContext: no provider for context ${JSON.stringify(key)} in this component's parent chain — ` +
-    'offer it from an ancestor, or probe with hasContext(key) where absence is legal',
-  );
+  return { found: false, provider: null };
 }
 
-function hasContext(key) {
-  let component = __currentComponent;
-  const visited = new Set();
-  while (component && !visited.has(component)) {
-    visited.add(component);
-    if (component._context && component._context.has(key)) return true;
-    component = component._parent;
-  }
-  return false;
+function getContext(provider, key) {
+  const hit = __findContext('getContext', provider, key);
+  if (hit.found) return hit.value;
+  const name = provider.name || 'the provider';
+  throw new Error(hit.provider !== null
+    ? `getContext: ${name} offers no ${JSON.stringify(key)}`
+    : `getContext: no ${name} above this component — render one around it, or probe with hasContext(${name}, ${JSON.stringify(key)}) where absence is legal`);
+}
+
+function hasContext(provider, key) {
+  return __findContext('hasContext', provider, key).found;
 }
 
 function __clsx(...args) {

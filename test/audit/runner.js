@@ -2337,6 +2337,7 @@ if (RUN_GRAMMAR) {
     ['For → FOR Range BY Expression Block', 'banned by design — the emitter rejects a for loop that binds no variable'],
     ['Import → IMPORT { ImportSpecifierList OptComma } FROM String WITH Object', 'no corpus carrier — attributes name a JSON module, and a named specifier from JSON has no definition for the landing lane (probed 2026-09-05: `import { port } from "./10-modules-data.json" with …` landed definition-silent); test/rip/modules.rip pins the form'],
     ['Import → IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM String WITH Object', 'no corpus carrier — attributes name a JSON module, and a named specifier from JSON has no definition for the landing lane (probed 2026-09-05, same carrier); test/rip/modules.rip pins the form'],
+    ['ComponentLine → ACCEPT IDENTIFIER', 'an accept names its provider — the emitter rejects the bare form, pointing at `accept name from Component`'],
     ['ImportSpecifier → DEFAULT', 'no legal ES lowering — a bare default specifier binds nothing; the emitter rejects it, pointing at `import name from` and `default as name`'],
     ['Root → ε', 'carried only by a vacuous fixture — the empty program is its sole carrier and declares nothing, so it asserts nothing on any dimension; that an empty file compiles and checks clean is guarded in test/spawn/cli/check.test.js instead'],
   ]);

@@ -631,6 +631,11 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     if (kind === 'IDENTIFIER' && value === 'from' && tokens[tokens.length - 1]?.kind === 'YIELD') {
       kind = 'FROM';
     }
+    // `accept name from Provider` — the same contextual FROM.
+    if (kind === 'IDENTIFIER' && value === 'from' &&
+        tokens[tokens.length - 1]?.kind === 'IDENTIFIER' && tokens[tokens.length - 2]?.kind === 'ACCEPT') {
+      kind = 'FROM';
+    }
     // Negated relations: word-`not` directly before in/of/instanceof
     // folds into ONE token (`a not in b` → RELATION '!in' → the whole
     // membership lowering negates). Word-not alone is UNARY '!'

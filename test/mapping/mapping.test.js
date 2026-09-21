@@ -193,13 +193,13 @@ describe('TS face: consumed vocabulary is recorded where the compiler eats it', 
   });
 
   // `offer`/`accept` are the context channel's own words: the pair lowers to
-  // `setContext('theme', this.theme)` and `this.theme = getContext('theme')`,
+  // `setContext('theme', this.theme)` and `this.theme = getContext(Give, 'theme')`,
   // so neither word survives into the face at all. The NAME each one binds is
   // an ordinary member and stays a read — that is the whole line between them.
   test('the context channel words are recorded, the name they bind is not', () => {
     expect(vocabOf("G = component\n  offer theme := 'dark'\n\n  render\n    div 'g'\n"))
       .toEqual([{ kind: 'context-channel', text: 'offer' }]);
-    expect(vocabOf("T = component\n  accept theme\n\n  render\n    span 't'\n"))
+    expect(vocabOf("Give = component\n  render\n    div 'g'\nT = component\n  accept theme from Give\n\n  render\n    span 't'\n"))
       .toEqual([{ kind: 'context-channel', text: 'accept' }]);
   });
 

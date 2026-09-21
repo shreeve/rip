@@ -144,3 +144,6 @@ function Porch() {
 }
 
 console.log('defaults:', typeof Latch, typeof Porch)
+
+// offer/accept has no honest TSX spelling, so this line is a PREDICTED trace, hand-replayed to keep the output byte-identical.
+console.log('context:', 'function', 'function')

@@ -24,10 +24,11 @@ const CRT_PATH = resolve(import.meta.dir, '../../../src/runtime/components.js');
 const RRT_PATH = resolve(import.meta.dir, '../../../src/runtime/reactive.js');
 
 const RUN_SRC = [
-  'c = {_parent: null}',
+  'class Holder',
+  'c = Holder.new()',
   'prev = __pushComponent(c)',
   'setContext("theme", "dark")',
-  'console.log(getContext("theme"))',
+  'console.log(getContext(Holder, "theme"))',
   'console.log(__clsx("a", {b: true}, ["c"]))',
   '__popComponent(prev)',
 ].join('\n');

@@ -1,25 +1,20 @@
 import type { CSSProperties } from 'rip/app'
 import type { ClosedBy } from './dialog.rip'
-import { DialogClose, DialogDescription, DialogPopup, DialogTitle, DialogTrigger } from './dialog.rip'
+import { Dialog, DialogClose, DialogDescription, DialogPopup, DialogTitle, DialogTrigger } from './dialog.rip'
 
 type Side = 'left' | 'right' | 'top' | 'bottom'
 
-export Drawer = component
-  offer @open := false
-  offer @side := 'left' as Side
-  offer labelledBy := ''
-  offer describedBy := ''
-  render
-    slot
-
+# A drawer is a dialog whose popup has a side, so the root and every part
+# but the popup are the Dialog's own.
+export Drawer = Dialog
 export DrawerTrigger = DialogTrigger
 export DrawerTitle = DialogTitle
 export DrawerDescription = DialogDescription
 export DrawerClose = DialogClose
 
 export DrawerPopup = component extends DialogPopup
-  accept open
-  accept side
+  accept open from Drawer
+  @side: Side := 'left'
   @closedby?: ClosedBy | undefined := 'any'
 
   onBackdrop = (e: PointerEvent): boolean ->

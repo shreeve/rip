@@ -619,6 +619,10 @@ async function walkOne(ck, rootType, rootName, owns, rootSymbol, siblings, funct
         // A private member is the class's own, not a consumer's surface:
         // no caller can reach it, so nothing in it can be wrong for them.
         if (await isPrivate(prop)) continue;
+        // The face's record of what a component offers is how an accept is
+        // typed, never a member a consumer reads; each entry is already
+        // counted as the member it repeats.
+        if (prop.name === '__offers') continue;
         const propType = await ck.getTypeOfSymbol(prop);
         if (propType === undefined) { lost++; continue; }
         const propStop = await siblingStop(ck, propType, siblings, rootSymbol, owns, functionTypeId, caches);

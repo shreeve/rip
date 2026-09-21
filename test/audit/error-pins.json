@@ -82,6 +82,27 @@
       "code": 2322,
       "token": "entries",
       "why": "an array-typed reactive member whose initializer carries a wrong element — the mismatch rip publishes is between CELLS (the declared `{value: string[]}` against the inferred `{value: (string | number)[]}`), so it anchors on the member rather than on the element the twin flags; the twin's own array is correct and stays quiet"
+    },
+    {
+      "line": 101,
+      "character": 9,
+      "code": 2339,
+      "token": "glare",
+      "why": "an accept names a member its provider does not offer — the face indexes the provider's record of what it offers, and the miss reads in the runtime's words on the accept's own name (`Lamp offers no 'glare'`); rip-native: no TSX line spells the context channel, so the twin cannot derive it"
+    },
+    {
+      "line": 102,
+      "character": 9,
+      "code": 2339,
+      "token": "glow",
+      "why": "the provider HAS a member of this name, its own accept, and does not offer it — the miss the runtime throws at mount, so the type indexes what is offered and never what is carried (`Shade offers no 'glow'`); rip-native"
+    },
+    {
+      "line": 103,
+      "character": 9,
+      "code": 2344,
+      "token": "gleam",
+      "why": "the provider is a binding that holds no component — the emitter admits any component-named module binding, since it cannot see what an import holds, so the type is where this lands (`'Hollow' is not a component, so it offers nothing to accept`); rip-native"
     }
   ]
 }

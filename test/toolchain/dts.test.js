@@ -429,13 +429,15 @@ describe('coherence: declarations never change the compile', () => {
 describe('component declarations: the class shape, the props surface, the extends story', () => {
   test('a component binding declares its companion interface + the constructor type', () => {
     const d = compile([
+      'Theme = component',
+      '  offer theme := "dark"',
       'Counter = component',
       '  count := 0',
       '  @title: string',
       '  @max?: number',
       '  total: number ~= count * 2',
       '  limit: number =! 100',
-      '  accept theme',
+      '  accept theme from Theme',
       '  bump = (n: number): number -> count += n',
       '  mounted = -> 1',
       '',
@@ -446,7 +448,8 @@ describe('component declarations: the class shape, the props surface, the extend
     expect(d).toContain('  max: { value: number | undefined; read(): number | undefined; touch?(): void };');
     expect(d).toContain('  total: { readonly value: number; read(): number };');
     expect(d).toContain('  readonly limit: number;');   // =! members surface readonly
-    expect(d).toContain('  theme: any;');
+    expect(d).toContain("  theme: NonNullable<InstanceType<typeof Theme>['__offers']>['theme'];");   // an accept is the provider's own offered member
+    expect(d).toContain('interface Theme {\n  theme: { value: string; read(): string; touch(): void };');
     expect(d).toContain('  bump(n: number): number;');
     expect(d).toContain('  mounted(): any;');
     expect(d).toContain('  mount(target?: Node | string): Counter;');

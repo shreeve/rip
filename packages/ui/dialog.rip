@@ -8,7 +8,7 @@ export Dialog = component
     slot
 
 export DialogTrigger = component extends button
-  accept open
+  accept open from Dialog
   render
     button
       type: 'button'
@@ -26,9 +26,9 @@ export DialogTrigger = component extends button
 # TODO: let the app see a close's reason and cancel it, for close confirmation.
 # TODO: tell the app when a close has finished, after the exit animations.
 export DialogPopup = component extends dialog
-  accept open
-  accept labelledBy
-  accept describedBy
+  accept open from Dialog
+  accept labelledBy from Dialog
+  accept describedBy from Dialog
   @closedby?: ClosedBy | undefined := 'any'
   el: HTMLDialogElement | null := null
   dismiss ~= closedby ?? 'any'
@@ -81,7 +81,7 @@ export DialogPopup = component extends dialog
       slot
 
 export DialogTitle = component extends h2
-  accept labelledBy
+  accept labelledBy from Dialog
   id =! @rest.id ?? mint('title')
   ~>
     labelledBy = id
@@ -91,7 +91,7 @@ export DialogTitle = component extends h2
       slot
 
 export DialogDescription = component extends p
-  accept describedBy
+  accept describedBy from Dialog
   id =! @rest.id ?? mint('description')
   ~>
     describedBy = id
@@ -101,7 +101,7 @@ export DialogDescription = component extends p
       slot
 
 export DialogClose = component extends button
-  accept open
+  accept open from Dialog
   render
     button
       type: 'button'
