@@ -63,6 +63,7 @@ export class Node
     @list = null
     @rect = NOWHERE
     @cell = null
+    @dirty = true
 
   # The children as an array, rebuilt only after the list changed.
   get childNodes: ->
@@ -126,8 +127,17 @@ export class Node
     @cell?.write @rect
 
   # Tell the document a frame is owed: `moved` when boxes may move,
-  # false when only cells recolor.
-  changed!: (moved) -> @ownerDocument?.owe moved
+  # false when only cells recolor. A move dirties this node and every
+  # ancestor, which is what layout reads to know its cached answer for
+  # them is stale; a dirty node's ancestors are dirty already, so the
+  # climb stops at the first one that is.
+  changed!: (moved) ->
+    if moved
+      node = this
+      while node and not node.dirty
+        node.dirty = true
+        node = node.parentNode
+    @ownerDocument?.owe moved
 
 export class Element extends Node
   constructor: (@tagName) ->
