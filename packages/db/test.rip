@@ -598,7 +598,7 @@ test! "a JSON cell that does not parse is a DbError naming the column, never ret
   eq err.code, 'invalid_json'
   eq err.columnName, 'conflict'
   eq err.sql, 'SELECT conflict FROM t'
-  ok err.message.includes "column 'conflict' holds text that is not JSON: {\"status\":\"conflict\",\"x\":Infinity}"
+  ok err.message.includes "column 'conflict' holds text that is not JSON ("
   ok not isRetryable err
 
 p "\nAdapter — timeout and abort"
@@ -790,7 +790,7 @@ test! "JSON text that does not parse fails the read, naming the column", ->
   eq err.columnName, 'v'
   eq err.row, 0
   eq err.sql, 'SELECT v'
-  ok err.message.includes "column 'v' holds text that is not JSON: {not json"
+  ok err.message.includes "column 'v' holds text that is not JSON ("
 
 test! "SQL NULL and a non-string cell in a JSON column pass through", ->
   eq decoded!('JSON', null), null

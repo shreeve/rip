@@ -195,7 +195,8 @@ describe('default adapter temporal wire (decodes identically to packages/db harb
     expect(err.sql).toBe('SELECT doc FROM t');
     expect(err.cause).toBeInstanceOf(SyntaxError);
     expect(err.message).toContain("column 'doc'");
-    expect(err.message).toContain('{"x":Infinity,"keep":"b"}');
+    expect(err.message).toContain("column 'doc' holds text that is not JSON (");
+    expect(err.message).not.toContain('keep');
     expect(err.message).toMatch(/NaN and ±Infinity/);
     expect(err.message).toMatch(/::DOUBLE/);
     expect(err.message).toMatch(/repair the row/);
@@ -207,7 +208,8 @@ describe('default adapter temporal wire (decodes identically to packages/db harb
     expect(err.code).toBe('invalid_json');
     expect(err.columnName).toBe('doc');
     expect(err.row).toBe(0);
-    expect(err.message).toContain('{"x":NaN,"keep":"c"}');
+    expect(err.message).toContain("column 'doc' holds text that is not JSON (");
+    expect(err.message).not.toContain('keep');
   });
 
   test('a scalar NaN or infinity cell fails, under the name the query gave it', async () => {
@@ -216,7 +218,7 @@ describe('default adapter temporal wire (decodes identically to packages/db harb
       expect(err).toBeInstanceOf(hb.DbError);
       expect(err.code).toBe('invalid_json');
       expect(err.columnName).toBe('x');
-      expect(err.message).toContain(`column 'x' holds text that is not JSON: ${text} —`);
+      expect(err.message).toContain(`column 'x' holds text that is not JSON (`);
     }
   });
 
@@ -227,12 +229,13 @@ describe('default adapter temporal wire (decodes identically to packages/db harb
     expect(err.columnName).toBe('j');
   });
 
-  test('the quoted text is a short prefix of the cell', async () => {
-    const text = `{"note":"${'n'.repeat(500)}","x":NaN}`;
+  test('the message never quotes the cell: a document can hold what a log should not', async () => {
+    const text = `{"patient":"${'n'.repeat(500)}","x":NaN}`;
     const err = await refused([VARIANT], [[text]]);
-    expect(err.message).toContain(`${text.slice(0, 40)}… —`);
-    expect(err.message).not.toContain(text.slice(0, 41));
-    expect(err.message.length).toBeLessThan(300);
+    expect(err.message).not.toContain('patient');
+    expect(err.message).not.toContain('nnnn');
+    expect(err.message.length).toBeLessThan(400);
+    expect(err.cause).toBeInstanceOf(SyntaxError);
   });
 
   test('valid documents, scalars and SQL NULL decode as they are', async () => {
@@ -251,7 +254,7 @@ describe('default adapter temporal wire (decodes identically to packages/db harb
   test('a non-string cell under a JSON kind passes through', () => {
     expect(hb.decodeRows([VARIANT], [[7], [{ a: 1 }], [null], [undefined]])).toEqual([[7], [{ a: 1 }], [null], [undefined]]);
     expect(hb.decodeJson(7)).toBe(7);
-    expect(() => hb.decodeJson('NaN')).toThrow(/a JSON column holds text that is not JSON: NaN/);
+    expect(() => hb.decodeJson('NaN')).toThrow(/a JSON column holds text that is not JSON \(/);
   });
 
   test('a VARIANT nested in a LIST, STRUCT or MAP stays JSON text, parseable or not', async () => {

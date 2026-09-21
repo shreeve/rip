@@ -315,8 +315,9 @@ function decodeTemporal(value, kind) {
 // and harbor spells them bare, which is the text JSON cannot carry. A
 // DbError and not a QueryError: the engine accepted the statement, and
 // packages/db's `isRetryable` reads a QueryError's message for a
-// conflict, which a quoted document or a column name could spell.
-const SHOWN_TEXT = 40;
+// conflict, which a column name could spell. The message carries the
+// parser's own complaint and never the cell's text: a document can hold
+// what a log should not.
 
 function decodeJson(value, column = null, row = null) {
   if (typeof value !== 'string') return value;
@@ -324,9 +325,8 @@ function decodeJson(value, column = null, row = null) {
     return JSON.parse(value);
   } catch (cause) {
     const name = column?.name ?? null;
-    const shown = value.length > SHOWN_TEXT ? `${value.slice(0, SHOWN_TEXT)}…` : value;
     const error = new DbError(
-      `db: ${name == null ? 'a JSON column' : `column '${name}'`} holds text that is not JSON: ${shown} — ` +
+      `db: ${name == null ? 'a JSON column' : `column '${name}'`} holds text that is not JSON (${cause.message}) — ` +
       'the engine stores NaN and ±Infinity inside a document, and JSON has no form for them. ' +
       'Read the value in SQL through a cast (doc.x::DOUBLE), or repair the row.');
     error.code = 'invalid_json';

@@ -211,13 +211,15 @@ carries `'nan'::DOUBLE`; inside the VARIANT the value is a `DOUBLE`, and
 harbor emits the cell as `{"x":Infinity}`, which is not JSON. The driver
 refuses a cell that does not parse. The query rejects with a `DbError` whose
 `code` is `'invalid_json'`; it names the column (`columnName`), the row's
-index in the result (`row`) and the statement (`sql`), and its message quotes
-the first 40 characters of the text:
+index in the result (`row`) and the statement (`sql`). Its message carries the
+parser's complaint and never the cell's text, since a document can hold what
+a log should not; the `SyntaxError` is the error's `cause`:
 
 ```
-db: column 'doc' holds text that is not JSON: {"x":Infinity,"keep":"b"} — the
-engine stores NaN and ±Infinity inside a document, and JSON has no form for
-them. Read the value in SQL through a cast (doc.x::DOUBLE), or repair the row.
+db: column 'doc' holds text that is not JSON (JSON Parse error: Unexpected
+identifier "Infinity") — the engine stores NaN and ±Infinity inside a
+document, and JSON has no form for them. Read the value in SQL through a cast
+(doc.x::DOUBLE), or repair the row.
 ```
 
 The whole result fails, not the one row: `Report.find!` of that row rejects,
