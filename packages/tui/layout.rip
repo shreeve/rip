@@ -585,10 +585,37 @@ parse! =! (lay, s, scan) ->
       lay.padding[side] = paddingAt lay, side, NaN
       lay.border[side] = lay.v[BORDER + side]
 
+# A node as an error names it: its tag, with its id or its data-part
+# where it has one, after the ancestors that lead to it, as in
+# `div > div#list > span[data-part=label]`. A long path keeps its last
+# four, behind an ellipsis.
+export whereabouts =! (node) ->
+  path = []
+  while node
+    if path.length is 4
+      path.unshift '…'
+      break
+    name = node.tagName ?? (if node.nodeType is 3 then 'text' else 'node')
+    id = node.attributes?.get 'id'
+    part = node.attributes?.get 'data-part'
+    name += "##{id}" if id?
+    name += "[data-part=#{part}]" if part?
+    path.unshift name
+    node = node.parentNode
+  path.join ' > '
+
+# An error about a style, with the node the style was written on.
+export blame =! (error, node) ->
+  error.message += " (on #{whereabouts node})" if error instanceof Error
+  error
+
 boxOf =! (node) ->
   s = node.styles
-  return NONE if s.hidden isnt undefined and flag 'hidden', s.hidden
-  if s.display is undefined then FLEX else word DISPLAYS, 'display', s.display
+  try
+    return NONE if s.hidden isnt undefined and flag 'hidden', s.hidden
+    if s.display is undefined then FLEX else word DISPLAYS, 'display', s.display
+  catch error
+    throw blame error, node
 
 # Collect the layout children under `node` into `out`: a `contents` child
 # stands aside for its own children, to any depth.
@@ -789,7 +816,10 @@ sync =! (node) ->
     break
   unless bare and lay.bare
     differs = false
-    parse lay, styles, not changed
+    try
+      parse lay, styles, not changed
+    catch error
+      throw blame error, node
     changed = true if differs
   lay.bare = bare
   leaf = node.nodeType is 3 or node.tagName is 'span' or typeof node.measure is 'function'
@@ -1839,8 +1869,14 @@ settle! =! (node, left, top, cornerX, cornerY) ->
   y1 = snap y + tall, raggedH, text and not raggedH
   # A box that is not a number — a measure function that answered with
   # none, a size without end — is refused here, by name, before a painter
-  # is handed it.
-  throw Error.new "rip/tui: layout gave <#{node.tagName ?? 'text'}> a box that is not finite (#{x0}, #{y0}, #{x1 - x0} × #{y1 - y0})" unless Number.isFinite x0 + y0 + x1 + y1
+  # is handed it. A size without end reaches every box around it, so the
+  # one to name is the deepest that has it.
+  unless Number.isFinite x0 + y0 + x1 + y1
+    inner = node
+    while deeper = inner.lay.kids.find((kid) -> not Number.isFinite kid.lay.width + kid.lay.height)
+      inner = deeper
+    box = if inner is node then "#{x0}, #{y0}, #{x1 - x0} × #{y1 - y0}" else "#{inner.lay.width} × #{inner.lay.height}"
+    throw blame Error.new("rip/tui: layout gave <#{inner.tagName ?? 'text'}> a box that is not finite (#{box})"), inner
   if text
     node.place cornerX + snap(lay.pos[LEFT], false, true), cornerY + snap(lay.pos[TOP], false, true), x1 - x0, y1 - y0
     return

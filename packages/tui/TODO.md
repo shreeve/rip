@@ -4,11 +4,6 @@ Open work only, in the order it should be done. Delete a line when it
 lands or moves into docs/tests. The design and the order of the larger
 steps are in [PLAN.md](PLAN.md).
 
-## 1. Wrong or silent
-
-- [ ] An error for a style — at the write or from layout — names the
-      node it was written on.
-
 ## 2. Tests the seeded bugs slipped past
 
 Each of these survived a single-line bug seeded into the engine. Add

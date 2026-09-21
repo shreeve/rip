@@ -5,7 +5,7 @@
 # what changed. A member the terminal cannot honor throws by name.
 
 import { __setChildFailureReporter } from '../../src/runtime/components.js'
-import { admit } from './layout.rip'
+import { admit, blame } from './layout.rip'
 import { allow } from './paint.rip'
 import { sanitize, refresh } from './text.rip'
 
@@ -122,7 +122,7 @@ export class Node
     if @tagName is 'span' and node.tagName is 'span'
       for own key of node.styles
         if KIND.get(key) is 'layout'
-          throw Error.new "rip/tui: '#{key}' has no meaning on text nested in text — it is a run of words, styled by color and weight only"
+          throw blame Error.new("rip/tui: '#{key}' has no meaning on text nested in text — it is a run of words, styled by color and weight only"), node
     node.adopt @ownerDocument
     @list = null
     @changed true
@@ -180,7 +180,15 @@ export class Element extends Node
     @listeners = null
     @road = null
 
+  # A style that is refused is refused by name, and the error says which
+  # node it was written on.
   set: (key, value) ->
+    try
+      @put key, value
+    catch error
+      throw blame error, this
+
+  put: (key, value) ->
     if kept key
       (@attributes ?= Map.new()).set key, value
       return
@@ -210,7 +218,7 @@ export class Element extends Node
     @changed kind is 'layout'
 
   setAttribute!: (key, value) ->
-    throw Error.new "rip/tui: a string `style` has no terminal meaning on <#{@tagName}> — pass the styles as props, or `style:` an object" if key is 'style'
+    throw blame Error.new("rip/tui: a string `style` has no terminal meaning on <#{@tagName}> — pass the styles as props, or `style:` an object"), this if key is 'style'
     # An HTML boolean attribute written on a raw tag arrives as presence,
     # the empty string (`div hidden: true`). For every other key an empty
     # string clears it, as it does on the style road.
@@ -224,7 +232,7 @@ export class Element extends Node
   get style: -> @road ?= road this
 
   get className: -> ''
-  set className: (value) -> throw Error.new "rip/tui: a class has no terminal meaning on <#{@tagName}> — style the node with props"
+  set className: (value) -> throw blame Error.new("rip/tui: a class has no terminal meaning on <#{@tagName}> — style the node with props"), this
 
   addEventListener!: (type, handler) -> ((@listeners ?= {})[type] ?= []).push handler
   removeEventListener!: (type, handler) ->

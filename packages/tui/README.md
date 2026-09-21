@@ -106,8 +106,12 @@ about 2.
 on the node. Anything else is refused by name — an unknown style with
 the nearest real one (`'flexDirecton' is not a terminal style of <div>
 — did you mean 'flexDirection'?`), a tag other than `div` and `span`, a
-class, a string `style`. A child that fails to construct throws from
-`run`; it never leaves a silent hole in the screen.
+class, a string `style`. An error about a style ends with the node it
+was written on — its tag, its `id` or `data-part`, and the way to it,
+as `(on div > div#list > span[data-part=label])`; a node is styled
+before it is attached, so a first write names the node alone. A child
+that fails to construct throws from `run`; it never leaves a silent
+hole in the screen.
 
 ## Measuring a node
 

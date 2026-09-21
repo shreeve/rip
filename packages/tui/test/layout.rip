@@ -8,7 +8,7 @@
 
 import { test, eq, ok, throws } from 'rip/testing'
 import { Element, Text, Node } from '../document.rip'
-import { layout, edges, admit } from '../layout.rip'
+import { layout, edges, admit, whereabouts } from '../layout.rip'
 
 div = (styles = {}, kids = []) ->
   node = Element.new 'div'
@@ -532,6 +532,30 @@ test "a value layout cannot use is refused by name, for the key it was written t
     node = div()
     node.styles[key] = value
     throws (-> layout div({}, [node]), 20), message
+
+test "an error from layout names the node it is about", ->
+  # A value that reaches layout without passing `set` — written straight
+  # to `styles`, as the shim writes — is refused with its node named.
+  bad = div()
+  list = div {}, [div(), bad]
+  list.set 'id', 'list'
+  root = div {}, [list]
+  bad.styles.width = 'wide'
+  throws (-> layout root, 20), "'fit-content' or 'stretch' (on div > div#list > div)"
+  delete bad.styles.width
+  bad.styles.hidden = 'false'
+  bad.changed true
+  throws (-> layout root, 20), 'hidden: "false" is not true or false (on div > div#list > div)'
+  delete bad.styles.hidden
+  bad.styles.display = 'block'
+  bad.changed true
+  throws (-> layout root, 20), 'contents (on div > div#list > div)'
+  delete bad.styles.display
+  bad.set 'data-part', 'meter'
+  bad.measure = -> { width: 1, height: Infinity }
+  bad.changed true
+  throws (-> layout root, 20), 'layout gave <div> a box that is not finite (20 × Infinity) (on div > div#list > div[data-part=meter])'
+  eq whereabouts(Text.new 'x'), 'text'
 
 test "a value layout can use is admitted, and so is a key that is not layout's", ->
   admitted = [['margin', 'auto'], ['marginLeft', -3], ['left', 'auto'], ['width', '50%'], ['width', '12.5%'], ['width', 'auto'],
