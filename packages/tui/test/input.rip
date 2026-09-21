@@ -583,8 +583,11 @@ test "a string the terminal sends — OSC, DCS, APC — is swallowed whole, and 
 console.log "\nBounds"
 
 test "a sequence of 1024 characters is read, and a longer one is discarded whole, holding no more", ->
-  row "#{CSI}1#{';'.repeat 1020}A", [key 'ArrowUp']
-  row "#{CSI}1#{';'.repeat 1021}Ax", typed('x')
+  # A key with the text of 339 code points is 1024 characters: CSI, the
+  # five of `97;1;`, three a code point less one colon, and `u`.
+  text = ('97' for n in [0...339]).join ':'
+  row "#{CSI}97;1;#{text}u", (key 'a' for n in [0...339])
+  row "#{CSI}097;1;#{text}ux", typed('x')
   { feed, parser, all } = open()
   feed CSI
   for round in [0...200]
