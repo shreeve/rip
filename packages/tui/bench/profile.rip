@@ -1,0 +1,89 @@
+# ==============================================================================
+# tui bench — where an Ink frame goes
+#
+#   cd packages/tui/bench
+#   bun run profile              # the counter scenario
+#   rip profile.rip table100     # another scenario
+#
+# Runs one Ink scenario under Bun's sampling CPU profiler and charges
+# every sample to a stage of Ink's pipeline. A sample in a native or
+# built-in frame is charged to the nearest caller that belongs to a
+# stage, so `Array.prototype.map` called from Ink's output grid counts
+# as paint.
+# ==============================================================================
+
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+HERE =! dirname(fileURLToPath(import.meta.url))
+ROOT =! join(HERE, '../../..')
+
+# First match wins. Paths are tested against the frame's script URL.
+STAGES =! [
+  ['reconcile', /node_modules\/(react-reconciler|react|scheduler)\/|ink\/build\/(reconciler|dom|styles|instances)\.js|ink\/build\/(components|hooks)\//]
+  ['layout',    /node_modules\/yoga-layout\//]
+  ['text',      /ink\/build\/(measure-text|wrap-text|squash-text-nodes|sanitize-ansi|ansi-tokenizer|colorize|get-max-width)\.js|node_modules\/(string-width|wrap-ansi|slice-ansi|widest-line|cli-truncate|@alcalzone|chalk|ansi-styles|ansi-regex|strip-ansi|get-east-asian-width|emoji-regex)\//]
+  ['paint',     /ink\/build\/(output|render-node-to-output|renderer|render-border|render-background)\.js|node_modules\/(cli-boxes|indent-string)\//]
+  ['emit',      /ink\/build\/(log-update|ink|write-synchronized|cursor-helpers|render)\.js|node_modules\/(ansi-escapes|es-toolkit|cli-cursor|restore-cursor|onetime|signal-exit)\//]
+  ['harness',   /bench\/(harness|ink)\.rip/]
+  ['startup',   /\/rip\/src\/|^node:|^internal:|^bun:/]
+]
+
+def stageOf(url)
+  for [name, pattern] in STAGES
+    return name if pattern.test(url)
+  null
+
+def profile(scenario)
+  dir = mkdtempSync join(tmpdir(), 'tui-prof-')
+  child = Bun.spawnSync {
+    cmd: ['bun', '--cpu-prof', "--cpu-prof-dir=#{dir}", '--cpu-prof-interval=200',
+          "--preload=#{join(ROOT, 'src/loader.js')}", join(ROOT, 'src/cli/run.js'),
+          join(HERE, 'ink.rip'), scenario, '5']
+    cwd: HERE
+    env: { ...process.env, NODE_ENV: 'production' }
+    stdout: 'pipe'
+    stderr: 'pipe'
+  }
+  throw Error.new "the profiled run exited #{child.exitCode}: #{child.stderr.toString()}" unless child.exitCode is 0
+  file = readdirSync(dir).find (name) -> name.endsWith('.cpuprofile')
+  throw Error.new "Bun wrote no .cpuprofile into #{dir}" unless file
+  data = JSON.parse readFileSync(join(dir, file), 'utf8')
+  rmSync dir, recursive: true, force: true
+  data
+
+def charge(data)
+  byId = Map.new()
+  parent = Map.new()
+  for node in data.nodes
+    byId.set node.id, node
+    for child in node.children ?? []
+      parent.set child, node.id
+  owner = Map.new()
+  resolve = (id) ->
+    return owner.get(id) if owner.has(id)
+    node = byId.get(id)
+    stage = stageOf(node.callFrame.url)
+    stage ?= if parent.has(id) then resolve(parent.get(id)) else 'other'
+    owner.set id, stage
+    stage
+  totals = Map.new()
+  for id, i in data.samples
+    stage = resolve(id)
+    totals.set stage, (totals.get(stage) ?? 0) + (data.timeDeltas[i] ?? 0)
+  totals
+
+scenario = process.argv[2] ?? 'counter'
+totals = charge profile(scenario)
+frame = ['reconcile', 'layout', 'text', 'paint', 'emit']
+inFrame = frame.reduce ((sum, name) -> sum + (totals.get(name) ?? 0)), 0
+
+p "\nInk 7.1.1 — '#{scenario}' scenario, share of in-frame CPU time"
+for name in frame
+  micros = totals.get(name) ?? 0
+  share = 100 * micros / inFrame
+  p "  #{name.padEnd(10)} #{share.toFixed(1).padStart(5)}%  #{'█'.repeat(Math.round(share / 2))}"
+p "\n  outside the frame: " + (['harness', 'startup', 'other'].map (name) -> "#{name} #{((totals.get(name) ?? 0) / 1000).toFixed(0)} ms").join(', ')
+p "  in-frame total: #{(inFrame / 1000).toFixed(0)} ms"

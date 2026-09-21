@@ -1,0 +1,26 @@
+# ==============================================================================
+# tui bench — Ink cold start, one fresh process per sample (see ink.rip)
+#
+# Prints three times in milliseconds since process start: when this
+# module began, when Ink and React had loaded, and when the first frame
+# had been written.
+# ==============================================================================
+
+import { terminal } from './harness.rip'
+
+began = performance.now()
+React = import!('react').default
+ink = import!('ink')
+loaded = performance.now()
+
+out = terminal 200, 60
+App = -> React.createElement ink.Text, { color: 'green' }, 'ready'
+ink['render'] React.createElement(App), {
+  stdout: out
+  patchConsole: false
+  exitOnCtrlC: false
+  interactive: true
+  onRender: ->
+    p JSON.stringify { began, loaded, framed: performance.now() }
+    process.exit 0
+}
