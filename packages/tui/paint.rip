@@ -500,18 +500,21 @@ export class Damage
   # false) its own rectangle, where a border or a background made it ink
   # any; anything else the bounds the last survey left on it, shifted by
   # the content offsets above it. A node under a hidden one inked
-  # nothing: the node that hid it owed its bounds.
+  # nothing: the node that hid it owed its bounds. Nor did a node out of
+  # the tree, whose removal owed them.
   old!: (node, deep) ->
     return if @whole
     dx = dy = 0
     up = node
-    while up
+    loop
       if s = up.styles
         return if s.hidden or s.display is 'none'
         if up isnt node and s.display isnt 'contents'
           dx -= Math.trunc s.contentOffsetX if s.contentOffsetX
           dy -= Math.trunc s.contentOffsetY if s.contentOffsetY
+      break unless up.parentNode
       up = up.parentNode
+    return unless up is node.ownerDocument.body
     rect = node.rect
     if deep
       @box node.bl + dx, node.bt + dy, node.br + dx, node.bb + dy

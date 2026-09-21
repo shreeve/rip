@@ -1679,6 +1679,26 @@ test "a contents node's color reaches the children it lends, and owes their cell
     eq draw(), 4
     eq view.ansi.split('\n')[1].trimEnd(), "\x1b[32mlent\x1b[0m"
 
+test "a node out of the tree owes nothing, whatever is done to it", ->
+  Pair = component
+    render
+      Box flexDirection: 'column', height: 6, alignItems: 'flex-start'
+        Box backgroundColor: 'blue', height: 3
+          Text "soon gone"
+        Text "kept"
+  owing Pair, (app, draw, view) ->
+    draw()
+    gone = document.body.firstChild.firstChild
+    gone.remove()
+    eq draw(), 9 * 3 + 4
+    gone.set 'backgroundColor', 'red'
+    gone.firstChild.firstChild.data = 'words that are longer, and nowhere'
+    eq draw(), 0
+    eq view.bytes, ''
+    document.body.firstChild.appendChild gone
+    draw()
+    eq view.frame().trimEnd(), "kept\nwords that are longer, and nowhere"
+
 test "a contents text lends its words to its parent: each is a leaf, marked and measured as one", ->
   Lender = component
     @n := 1
