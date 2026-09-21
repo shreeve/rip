@@ -15,7 +15,9 @@
 # Every node carries one `Lay` record: its styles parsed to numbers, its
 # layout children, its float results, and its cache. The record is
 # rebuilt only while the node is dirty, and a node whose rebuild finds
-# nothing different stops being dirty before layout looks at it.
+# nothing different stops being dirty before layout looks at it. A change
+# that lies under a layout boundary is laid out from the boundary down,
+# and nothing above it is (see `boundary`).
 #
 # A loop over a list is written `for kid, i in list` though nothing reads
 # `i`: with the index Rip emits a counted loop, and without it a
@@ -113,7 +115,10 @@ NOWRAP       =! 0
 WRAP         =! 1
 WRAP_REVERSE =! 2
 
-# `overflow`, where only scrolling changes a layout, and `boxSizing`
+# `overflow`, where only scrolling changes a layout, and `boxSizing`.
+# The engine's contract is Yoga's suite, which scrolls; the document
+# writes only what a terminal draws, where scrolling is `overflow:
+# 'hidden'` and a content offset, so no app reaches `scroll`.
 SCROLL      =! 2
 CONTENT_BOX =! 1
 
@@ -123,18 +128,20 @@ BOX      =! 0
 NONE     =! 1
 CONTENTS =! 2
 
-DIRECTIONS =! { 'column': COLUMN, 'column-reverse': COLUMN_REVERSE, 'row': ROW, 'row-reverse': ROW_REVERSE }
-WRAPS      =! { 'nowrap': NOWRAP, 'wrap': WRAP, 'wrap-reverse': WRAP_REVERSE }
+# A table of words has no prototype, so a name every object inherits —
+# `constructor`, `toString` — is no word of it.
+DIRECTIONS =! { __proto__: null, 'column': COLUMN, 'column-reverse': COLUMN_REVERSE, 'row': ROW, 'row-reverse': ROW_REVERSE }
+WRAPS      =! { __proto__: null, 'nowrap': NOWRAP, 'wrap': WRAP, 'wrap-reverse': WRAP_REVERSE }
 # Each align key takes its own words: only a child can defer (`auto`),
 # only items sit on a baseline, only lines are spaced.
-ALIGN_ITEMS   =! { 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'stretch': STRETCH, 'baseline': BASELINE }
-ALIGN_SELF    =! { 'auto': ALIGN_AUTO, 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'stretch': STRETCH, 'baseline': BASELINE }
-ALIGN_CONTENT =! { 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'stretch': STRETCH, 'space-between': SPACE_BETWEEN, 'space-around': SPACE_AROUND, 'space-evenly': SPACE_EVENLY }
-JUSTIFIES  =! { 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'space-between': SPACE_BETWEEN, 'space-around': SPACE_AROUND, 'space-evenly': SPACE_EVENLY }
-POSITIONS  =! { 'static': STATIC, 'relative': RELATIVE, 'absolute': ABSOLUTE }
-OVERFLOWS  =! { 'visible': 0, 'hidden': 1, 'scroll': SCROLL }
-DISPLAYS   =! { 'flex': BOX, 'none': NONE, 'contents': CONTENTS }
-SIZINGS    =! { 'border-box': 0, 'content-box': CONTENT_BOX }
+ALIGN_ITEMS   =! { __proto__: null, 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'stretch': STRETCH, 'baseline': BASELINE }
+ALIGN_SELF    =! { __proto__: null, 'auto': ALIGN_AUTO, 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'stretch': STRETCH, 'baseline': BASELINE }
+ALIGN_CONTENT =! { __proto__: null, 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'stretch': STRETCH, 'space-between': SPACE_BETWEEN, 'space-around': SPACE_AROUND, 'space-evenly': SPACE_EVENLY }
+JUSTIFIES  =! { __proto__: null, 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'space-between': SPACE_BETWEEN, 'space-around': SPACE_AROUND, 'space-evenly': SPACE_EVENLY }
+POSITIONS  =! { __proto__: null, 'static': STATIC, 'relative': RELATIVE, 'absolute': ABSOLUTE }
+OVERFLOWS  =! { __proto__: null, 'visible': 0, 'hidden': 1, 'scroll': SCROLL }
+DISPLAYS   =! { __proto__: null, 'flex': BOX, 'none': NONE, 'contents': CONTENTS }
+SIZINGS    =! { __proto__: null, 'border-box': 0, 'content-box': CONTENT_BOX }
 
 # How specific a written key is. A slot keeps what the most specific key
 # wrote to it, in whatever order the keys come.
@@ -211,7 +218,8 @@ PERCENTAGE =! /^-?(\d+(\.\d+)?|\.\d+)%$/
 
 # A new record holds what parsing no styles at all gives, so a node
 # without styles is never parsed; it reads the blank lengths themselves,
-# and takes its own copy on its first parse.
+# and takes its own copy when a style first writes a slot — which the
+# styles of colored text never do.
 class Lay
   constructor: ->
     # What the node wrote, parsed:
@@ -274,6 +282,8 @@ class Lay
     @linePass = 0            # …broke its children into lines: their `lineAt` is that pass's
     @layoutPass = 0          # …laid it out: its children's `pos` is that pass's
     @settlePass = 0          # …computed it, resized it, or placed an absolute child under it: `settle` owes it a rounding
+    @freshPass = 0           # …started its answers over: every answer it holds is that pass's or a later one's
+    @loosePass = -1          # …offered it a size that was not exact, so that its answer followed its content
     # Its remembered answers:
     @entry = Entry.new()     # the last layout
     @measures = null         # up to MEASURES measure-only ones, of which `used` are live
@@ -292,6 +302,8 @@ PROBE.u = Uint8Array.new BLANK_U
 # it.
 generation = 0   # the number of the pass under way, which the pass stamps record
 rootNode = null  # the node `layout` was handed, while its pass runs
+visits = 0       # how many times the pass under way has called `visit`
+halted =! []     # the boundaries `sync` stopped a change at, innermost first
 differs = false  # out of `parse`: whether any slot came out different
 outMode = 0      # out of `constrain`: the offer, as the child's max leaves it
 outSize = 0
@@ -423,6 +435,12 @@ constrain! =! (lay, axis, axisSize, widthSize, mode, size) ->
 
 # ── Reading a node ────────────────────────────────────────────────────────────
 
+# A record's own slots, taken when a style first writes one.
+own! =! (lay) ->
+  return unless lay.v is BLANK_V
+  lay.v = Float64Array.new BLANK_V
+  lay.u = Uint8Array.new BLANK_U
+
 # Parse one written value into its slot, unless a style that outranks
 # this one has written it: a longhand outranks its axis shorthand, which
 # outranks the all-sides one. The intrinsic sizing keywords are sizes
@@ -450,16 +468,21 @@ put! =! (lay, slot, value, rank, key) ->
     throw Error.new "rip/tui: #{key}: #{value} is not a length — a length is a finite number" unless Number.isFinite number
     throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is below zero — a size is zero or more" if sized and number < 0
   return if rank < RANKS[slot]
+  own lay
   RANKS[slot] = rank
   lay.u[slot] = unit
   lay.v[slot] = number
 
-# A border width: a number where a test writes one, one cell where a
-# `borderStyle` draws, none on a side switched off. A side left on writes
-# nothing a `borderStyle` does not outrank.
+# A border width: one cell where a `borderStyle` draws, none on a side
+# switched off, and any number through a `border*Width` key. Yoga's
+# suite, the engine's contract, needs a border of any width; the document
+# writes only what a terminal draws, a border of 0 or 1, so no app
+# reaches those keys. A side left on writes nothing a `borderStyle` does
+# not outrank.
 borderAt! =! (lay, slot, width, rank, key) ->
   throw Error.new "rip/tui: #{key}: #{JSON.stringify width} is not a border width — write a finite number" unless Number.isFinite width
   return if rank < RANKS[slot]
+  own lay
   RANKS[slot] = rank
   lay.u[slot] = POINT
   lay.v[slot] = if width > 0 then width else 0
@@ -467,6 +490,7 @@ borderAt! =! (lay, slot, width, rank, key) ->
 # A number or a word, held in its slot beside the lengths.
 scalar! =! (lay, slot, value, rank) ->
   return if rank < RANKS[slot]
+  own lay
   RANKS[slot] = rank
   lay.v[slot] = value
 
@@ -593,15 +617,14 @@ parse! =! (lay, s, scan) ->
   if scan
     PRIOR_V.set lay.v
     PRIOR_U.set lay.u
-  if lay.v is BLANK_V
-    lay.v = Float64Array.new BLANK_V
-    lay.u = Uint8Array.new BLANK_U
-  else
+  unless lay.v is BLANK_V
     lay.v.set BLANK_V
     lay.u.set BLANK_U
   RANKS.fill 0
   for key, value of s
     style lay, key, value unless value is undefined
+  # Styles that are all the painter's wrote nothing: the record is blank still.
+  return if lay.v is BLANK_V
   # A max equal to its min IS the size (Node::processDimensions).
   for dim in [0...2]
     if lay.u[MAX + dim] isnt NIL and lay.u[MAX + dim] is lay.u[MIN + dim] and near(lay.v[MAX + dim], lay.v[MIN + dim])
@@ -673,21 +696,6 @@ boxOf =! (node) ->
 # children replaced by theirs.
 export kids =! (node) -> node.lay.kids
 
-# Padding plus border on each edge: [top, right, bottom, left]. A clean
-# node resolves its percents against the owner width it was laid out
-# under — `lay.padding` holds whatever the last visit resolved, which a
-# measure-only visit may have made after the layout. Any other node
-# resolves its points.
-export edges =! (node) ->
-  lay = node.lay
-  ref = NaN
-  if lay and not node.dirty
-    ref = lay.ownerW
-  else
-    lay = Lay.new()
-    parse lay, node.styles ?? PLAIN, false
-  [insideAt(lay, TOP, ref), insideAt(lay, RIGHT, ref), insideAt(lay, BOTTOM, ref), insideAt(lay, LEFT, ref)]
-
 # Layout never visits a hidden subtree or the inside of a text leaf, so
 # such a node is put away whole: no dirty mark, which would stop its next
 # change from climbing to the root; no record, so whatever happened to it
@@ -758,8 +766,11 @@ gather =! (node, host, lay, list) ->
 # Bring a dirty node's record up to date — styles, children, text size —
 # and its dirty descendants' records with it. Answers whether anything
 # layout reads is different; a node where nothing is stops being dirty,
-# so its cached layout stands.
-sync =! (node) ->
+# so its cached layout stands. `owner` is the record of the node whose
+# layout child this is. A change that lies wholly under a boundary (see
+# `boundary`) stops there: the node stays dirty and joins `halted`, and
+# its answer is that nothing is different, so no ancestor computes again.
+sync =! (node, owner) ->
   lay = node.lay
   # The root is laid out by rules of its own — it never grows, and it is
   # a containing block whatever its position — and no cache key says so.
@@ -768,6 +779,7 @@ sync =! (node) ->
   turned = lay and lay.asRoot isnt (node is rootNode)
   return false if lay and not node.dirty and not turned
   changed = not lay or turned
+  under = false
   lay = node.lay = Lay.new() unless lay
   lay.asRoot = node is rootNode
   node.dirty = true if turned
@@ -817,11 +829,11 @@ sync =! (node) ->
     lay.boxless = 0
     lay.hiddenFlex = false
     lay.hiddenBaseline = false
-    changed = true if gather node, node, lay, list
-    changed = true if list.length isnt lay.filled or count isnt lay.count or hiddenFlex isnt lay.hiddenFlex or hiddenBaseline isnt lay.hiddenBaseline
+    under = true if gather node, node, lay, list
+    under = true if list.length isnt lay.filled or count isnt lay.count or hiddenFlex isnt lay.hiddenFlex or hiddenBaseline isnt lay.hiddenBaseline
     list.length = lay.filled
     for kid, i in list
-      changed = true if sync kid
+      under = true if sync kid, lay
     # The flags climb: a dirty node's ancestors are all dirty, so each
     # takes its children's in turn, and a clean node keeps what it had.
     below = lay.underBaseline or baselined lay
@@ -837,6 +849,10 @@ sync =! (node) ->
   # through its own percent margin, padding, min or max. Only then is the
   # owner's size part of a cached answer's key.
   lay.leansOnOwner = lay.marginPercent or lay.insidePercent or lay.limitPercent
+  if under and not changed and owner and boundary owner, lay
+    halted.push node
+    return false
+  changed or= under
   node.dirty = false unless changed
   changed
 
@@ -1803,12 +1819,34 @@ carryBaseline! =! (node, value) ->
   for kid, i in lay.kids
     carryBaseline kid, below if kid.lay.underBaseline isnt below
 
+# A layout boundary is a node whose answers cannot follow its content.
+# An offer that is exact in both dimensions IS the answer, held in the
+# node's own min and max; so where every offer `lay` has had since
+# `owner`, whose layout child it is, last started its answers over was
+# exact, every answer an ancestor holds was computed from sizes a change
+# under the node cannot move. The ancestors' answers stand, and the node
+# alone is laid out again (`halt`). No style names the case: a definite
+# width and height, a percent of an exact owner, a stretched or flexed
+# child of one, an absolute node with sizes or opposing insets all
+# qualify by the offers they get, and a percent of a content-sized
+# owner, or a size put back to `auto`, stops qualifying at the first
+# offer that is not exact. Two readers go past the answer. A baseline row
+# reads its children's baselines, to any depth — and is computed on
+# every pass, with every node above it and under it (see
+# `orderSensitive`), so a boundary under one is reached, dirty, before
+# `halt` runs. And a static node's absolute descendants are laid out by
+# a containing block above it, so a static node is no boundary.
+boundary =! (owner, lay) -> lay.loosePass < owner.freshPass and lay.position isnt STATIC
+
 # Size `node`, from its cache when the offer is one it has answered since
 # it was last dirty (calculateLayoutInternal). A node keeps one layout
 # answer and up to MEASURES measure-only ones.
 visit! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
   lay = node.lay
+  visits += 1
+  lay.loosePass = generation unless modeW is STRETCH_FIT and modeH is STRETCH_FIT
   if (node.dirty or lay.noCache or (lay.underBaseline and not lay.leaf)) and lay.visitPass isnt generation
+    lay.freshPass = generation
     lay.used = 0
     lay.entry.live = false
   hit = null
@@ -1948,10 +1986,27 @@ forget! =! (node) ->
     forget kid
     kid = kid.nextSibling
 
+# Lay out again each boundary a change stopped at, under the offer its
+# last layout was made for — its `entry` holds that offer whether or not
+# it still answers — and round what is under it from the node's own
+# corner as `settle` left it, absolute and rounded; `gather` has put the
+# children that make no box at that corner, which has not moved.
+# Outermost first: a boundary under a node laid out here, or under one
+# the pass reached, was laid out with it and is clean.
+halt! =! ->
+  while node = halted.pop()
+    continue unless node.dirty
+    lay = node.lay
+    entry = lay.entry
+    visit node, entry.availW, entry.availH, entry.modeW, entry.modeH, entry.ownerW, entry.ownerH, true
+    rect = node.rect
+    for kid, i in lay.kids
+      settle kid, lay.atX, lay.atY, rect.x, rect.y
+
 # One pass over the tree. The root takes its own size if it has one, else
 # its max as a limit, else the space (calculateLayout).
 pass! =! (root, ownerW, ownerH) ->
-  sync root
+  sync root, null
   lay = root.lay
   # The root is offered a number where the space has one, which can
   # change from pass to pass with nothing dirty.
@@ -1977,6 +2032,7 @@ pass! =! (root, ownerW, ownerH) ->
   visit root, wide, tall, modeW, modeH, ownerW, ownerH, true
   seat lay, ownerW, ownerH
   settle root, 0, 0, 0, 0
+  halt()
 
 # Lay the tree out in a space `cols` by `rows`, where either left out, or
 # null, is unlimited. A pass that throws — a style with no meaning, a
@@ -1985,10 +2041,12 @@ pass! =! (root, ownerW, ownerH) ->
 export layout =! (root, cols, rows) ->
   generation += 1
   rootNode = root
+  visits = 0
   try
     pass root, cols ?? NaN, rows ?? NaN
   catch error
     rootNode = null
+    halted.length = 0
     forget root
     throw error
   rootNode = null
@@ -1999,3 +2057,7 @@ export layout =! (root, cols, rows) ->
     outer.dirty = true
     outer = outer.parentNode
   root.rect
+
+# How many times the last layout called `visit`, for a test of the work
+# a layout does.
+export visited =! -> visits

@@ -4,30 +4,26 @@ Open work only, in the order it should be done. Delete a line when it
 lands or moves into docs/tests. The design and the order of the larger
 steps are in [PLAN.md](PLAN.md).
 
-## 3. Reading `layout.rip`
-
-- [ ] `edges` has no caller but two pins in `test/layout.rip`, and its
-      arm for a node not laid out is reached by nothing: give it a
-      caller, or remove it with its pins.
-- [ ] The `border*Width` keys and `overflow: 'scroll'` are reached only
-      by writing `styles` past the document, which refuses both: Yoga's
-      cases through the shim (about 160 write a border width, 3
-      scroll), and the fuzz. Let the document take them, or stop the
-      suites writing them; until then the slots stay.
-- [ ] A leaf sums its padding and border as Yoga does — both paddings,
-      then both borders — and `insideAxis` sums edge by edge.
-      Fractional edges part the two by one rounding, so one sum for
-      both moves floats: decide which order stands.
-
 ## 4. Layout cost
 
-- [ ] **A layout boundary.** A change dirties every ancestor up to the
-      root and each recomputes: a widened text in a flat column of
-      2,000 costs 6,001 visits, and a chain of 14 definite-size boxes
-      recomputes all 14. Stop at the first ancestor whose width and
-      height are both definite (PLAN §5).
-- [ ] First layout of a 1,551-node tree is about 665 µs; style parsing
-      is a third of it.
+- [ ] A boundary is a node whose answers CANNOT differ (PLAN §5). A
+      change under a content-sized chain still computes every ancestor
+      to the root, its siblings answering from the cache: a text
+      widened among 2,000 in a column costs 6,001 visits, 610 µs. The
+      open rule stops where the answers DID not differ: lay the node
+      out again under every ask it holds, and climb only if one came
+      out another size.
+- [ ] Under a boundary, `sync` still reads every child of each dirty
+      ancestor on the way down: 40 µs for 2,000 siblings.
+- [ ] First layout of a 1,551-node tree is about 630 µs: its 3,651
+      visits are 63% of it, rounding 4%, and reading the tree 32% — 55
+      µs making 1,051 records, 70 µs parsing 551 of them, 25 µs the
+      500 text flows. No single line moves it: a `seat` and a `boxOf`
+      that return early, a parse that skips sums it has no edges for,
+      `slice` for the blank slots, plain arrays for them, and zero
+      edges shared until written each measured within the noise, 3%.
+      What is left is structural: fewer allocations a record, or fewer
+      visits a node.
 
 ## 5. The painter and the screen
 

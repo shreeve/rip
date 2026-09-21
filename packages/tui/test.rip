@@ -223,6 +223,22 @@ test "a paint value is refused where it is written, by key, with the words the k
   finally
     restore()
 
+test "a name every object inherits is no word: a color, a border style, a wrap mode, a layout word", ->
+  { doc, restore } = install()
+  try
+    box = doc.createElement 'div'
+    words = doc.createElement 'span'
+    for name in ['constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf']
+      throws (-> words.set 'color', name), "color: \"#{name}\" is not a color"
+      throws (-> box.set 'borderColor', name), "borderColor: \"#{name}\" is not a color"
+      throws (-> box.set 'borderStyle', name), "borderStyle: \"#{name}\" is not one of single,"
+      throws (-> words.set 'wrap', name), "wrap: \"#{name}\" is not one of wrap,"
+      throws (-> box.set 'flexDirection', name), "flexDirection: \"#{name}\" is not one of column,"
+      throws (-> box.set 'display', name), "display: \"#{name}\" is not one of flex,"
+    eq [box.styles, words.styles], [{}, {}]
+  finally
+    restore()
+
 test "a style with no meaning on its node is refused: a box's on text, text's on a box", ->
   { doc, restore } = install()
   try
