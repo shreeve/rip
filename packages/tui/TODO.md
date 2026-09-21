@@ -1,0 +1,112 @@
+# TODO — Rip TUI
+
+Open work only, in the order it should be done. Delete a line when it
+lands or moves into docs/tests. The design and the order of the larger
+steps are in [PLAN.md](PLAN.md).
+
+## 1. Wrong or silent — before the layout PR lands
+
+- [ ] **`display` flex → contents → flex keeps stale child positions.**
+      `display` is not a parsed slot, so `sync` sees no change and the
+      cached layout stands (`none` ↔ `flex` and `hidden` are fine).
+      Pin with a live toggle compared to a fresh mount.
+- [ ] **Style values are refused where they are written, by name, with
+      the node.** Today a bad value fails at the first layout, inside a
+      scheduled frame, and these never fail at all:
+      `flexGrow: 'lots'` → 0, `flex: '1 1 auto'` → ignored,
+      `aspectRatio: '2'` → ignored, `alignItems: 'space-between'` →
+      flex-end, `alignContent: 'baseline'` → flex-start (one word list
+      serves the three align keys), `padding: 'auto'` / `gap: 'auto'` /
+      `minWidth: 'auto'` → 0, `width: '50px%'` → 50% (`parseFloat`),
+      `width: -5` and `width: NaN` → auto, `hidden: 'false'` → hidden,
+      any truthy `bold`. The error for a length recommends `'auto'` on
+      keys that do not take it.
+- [ ] **`flex` has no test.** Pin the shorthand and what it expands to.
+- [ ] README: an absolute node positions against its PARENT unless every
+      box between is `position: 'static'`; the defaults list omits
+      `position: 'relative'`; "all 543 cases" is the LTR half of each;
+      there are two stated divergences (rounding, the baseline child),
+      not one. The `Gauge` example has no fixed point at some widths
+      (its text changes the space it measures) — give the readout a
+      fixed width.
+- [ ] PLAN: "about four measure entries" (eight); "one recursive
+      `layout(node, …)`" (`visit` and `compute!`); "dirty propagation
+      stops at a boundary" (it climbs to the root — say what the engine
+      really skips); the MIT notice does not ship in `files`; three
+      passages describe a `direction` argument that does not exist.
+
+## 2. Tests the seeded bugs slipped past
+
+Each of these survived a single-line bug seeded into the engine. Add
+the test, re-seed the bug, and see it caught.
+
+- [ ] Shorthands — `margin`, `marginX` / `marginY`, `paddingX` /
+      `paddingY`, `gap`, `flex`, `borderStyle` insets, and their
+      precedence against longhands. The Yoga shim writes longhands
+      only, so nothing reaches this code.
+- [ ] An absolute node with an aspect ratio other than 1.
+- [ ] A measure function on a node with padding and border; a measured
+      size with a fraction rounds up (port Yoga's
+      `YGRoundingMeasureFuncTest.cpp`).
+- [ ] Negative padding clamps to zero; `overflow: 'scroll'` while
+      measuring a basis; the gap count at the wrap limit; the
+      lone-flexible-child shortcut with a shrink of zero.
+- [ ] Fuzz: a pair of texts of equal width and different height, moves
+      of a subtree between parents, sibling reorders; print the failing
+      tree; stop at the first failure; say in the header that
+      `rip test/fuzz.rip 7 413` replays seed 7 through round 412.
+- [ ] The static-ancestor test can fail: today the row's corner is also
+      the outer box's, so `position: 'relative'` draws the same frame.
+- [ ] Port Yoga's hand-written JavaScript tests that the shim can carry
+      (`YGMeasureTest`, `YGMeasureCacheTest`, `YGDirtiedTest`,
+      `YGHasNewLayout`, `YGFlexBasisAuto`, `YGAlignBaseline`,
+      `YGComputedMargin` / `Padding` / `Border`, `YGHadOverflow`).
+
+## 3. Reading `layout.rip`
+
+- [ ] Comment every field of `Lay` and `Flex`; name the five pass
+      stamps for what they record; untangle `hold!` / `holds` / `held`
+      / `HELD`, `pinned` / `pin!`, `owned`, and the two meanings of
+      `left` and of `owner`.
+- [ ] Name the dimension indices (`WIDTH`, `HEIGHT`) and give each enum
+      one labelled group (`RELATIVE`, `WRAP`, `CONTENT_BOX`; `CONTENT`
+      / `CONTENTS` / `MAX_CONTENT` and `FLEX` / `Flex` / `lay.flex`
+      collide).
+- [ ] Split `style!` (71 lines; name the ranks) and `compute!` (143
+      lines; steps 2 and 9 are each written twice); comment the module
+      globals as out-parameters and say why.
+- [ ] Reading order: the cache flags sit 900 lines before "The cache";
+      `baselined`, `percents`, `seat!`, `measureFixed` sit away from
+      their sections.
+- [ ] Say in the header why `for kid, i in` keeps an unused `i` (it
+      compiles to a counted loop), or the loops get "cleaned".
+- [ ] Remove what no suite reaches: `edges`, the `textOf` export,
+      `flatten!` and the fallback arm of `kids`, the `border*` and
+      `overflow` slots the document refuses, guards that cannot fire,
+      `mainAxis`, parameters nobody reads. Fold the five `measured[0]`
+      / `measured[1]` pairs, the two ascent / descent computations, and
+      the inside sums. About 95 lines.
+- [ ] Cite Yoga's functions, not C++ line numbers.
+- [ ] Declare `lay` and `measure` in `Node`'s constructor; take `cols`
+      and `rows` at `layout`'s door, as the rest of the package names
+      them.
+
+## 4. The painter and the screen
+
+- [ ] A layout error names the node it came from.
+- [ ] `overflow: 'hidden'` clips (text wider than its box draws past it
+      today); the per-edge border switches; then the document accepts
+      both keys.
+- [ ] `backgroundColor` on text fills its box, not only its glyphs —
+      decide, and pin.
+- [ ] Text wrapping, truncation, grapheme clusters (PLAN §6).
+- [ ] Damage tracking: paint and diff only what moved (PLAN §6).
+
+## 5. Compiler-side, filed separately
+
+- A loop variable named like a tag (`i`, `a`, `b`, `p`) at the end of a
+  render line takes the indented children beneath it.
+- A bound effect that awaits marks its enclosing function `async`.
+- `rip -t` prints a stack trace for a lexer error.
+- A typed vocabulary for non-HTML hosts, so `rip check` and the editor
+  accept terminal props (PLAN §14).

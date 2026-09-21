@@ -6,7 +6,20 @@
 import { layout } from './layout.rip'
 import { Grid, paint, diff } from './paint.rip'
 
-PACE =! 8   # the least milliseconds between two frames
+PACE =! 8     # the least milliseconds between two frames
+PASSES =! 32  # the most layouts one frame may take to settle
+
+# Lay the document out until a pass moves nothing. A binding that reads
+# a node's box changes the tree it measured, so one change can take a
+# pass per reader in a chain; readers that never agree are refused.
+export settle =! (doc, cols, rows = null) ->
+  passes = 0
+  while doc.moved
+    if (passes += 1) > PASSES
+      throw Error.new "rip/tui: layout did not settle in #{PASSES} passes — a binding keeps changing the box it reads, so no size satisfies it"
+    doc.moved = false
+    layout doc.body, cols, rows
+  return
 
 export class Screen
   constructor: (@doc, @out) ->
@@ -14,6 +27,7 @@ export class Screen
     @spare = null
     @booked = false
     @last = 0
+    @failed = null
 
   get cols: -> @out.columns ?? 80
   get rows: -> @out.rows ?? 24
@@ -22,13 +36,7 @@ export class Screen
   frame!: ->
     @booked = false
     @last = performance.now()
-    # A binding that reads a node's box changes the tree it measured, so
-    # layout repeats until a pass moves nothing.
-    passes = 0
-    while @doc.moved
-      throw Error.new 'rip/tui: layout did not settle — a binding keeps changing the box it reads' if (passes += 1) > 8
-      @doc.moved = false
-      layout @doc.body, @cols
+    settle @doc, @cols
     @doc.stale = false
     tall = @doc.body.rect.h
     shown = Math.min tall, @rows
@@ -50,7 +58,16 @@ export class Screen
     return if @booked
     @booked = true
     wait = PACE - (performance.now() - @last)
-    if wait > 0 then setTimeout (=> @frame()), wait else queueMicrotask (=> @frame())
+    if wait > 0 then setTimeout (=> @drawBooked()), wait else queueMicrotask (=> @drawBooked())
+
+  # A booked frame has no caller to throw to, so its failure goes to
+  # whoever runs the app.
+  drawBooked!: ->
+    try
+      @frame()
+    catch error
+      throw error unless @failed
+      @failed error
 
   # Leave the last frame in the scrollback, the cursor on the line below.
   leave!: ->

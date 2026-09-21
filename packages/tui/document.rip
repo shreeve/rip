@@ -98,6 +98,10 @@ export class Node
     if before then before.nextSibling = node else @firstChild = node
     if ref then ref.previousSibling = node else @lastChild = node
     node.parentNode = this
+    if @tagName is 'span' and node.tagName is 'span'
+      for own key of node.styles
+        if KIND.get(key) is 'layout'
+          throw Error.new "rip/tui: '#{key}' has no meaning on text nested in text — it is a run of words, styled by color and weight only"
     node.adopt @ownerDocument
     @list = null
     @changed true
@@ -161,6 +165,13 @@ export class Element extends Node
       return
     kind = KIND.get key
     throw unknown(key, @tagName) unless kind
+    # Text is drawn glyph by glyph: it has no inside to pad or frame, and
+    # text nested in text is a run of words, not a box to size or place.
+    if @tagName is 'span' and value? and value isnt false and value isnt ''
+      if key is 'borderStyle' or key.startsWith('padding')
+        throw Error.new "rip/tui: '#{key}' has no meaning on text — put the text in a box and style the box"
+      if kind is 'layout' and @parentNode?.tagName is 'span'
+        throw Error.new "rip/tui: '#{key}' has no meaning on text nested in text — it is a run of words, styled by color and weight only"
     value = undefined if value is '' or value is null or value is false
     return if @styles[key] is value
     if value is undefined then delete @styles[key] else @styles[key] = value

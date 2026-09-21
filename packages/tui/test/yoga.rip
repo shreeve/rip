@@ -19,6 +19,11 @@ import { join } from 'node:path'
 import * as shim from './yoga-shim.rip'
 
 DIR =! join(import.meta.dir, 'yoga')
+
+# What the vendored commit holds (yoga/SOURCE.md). A full run that finds
+# anything else has lost files, cases, or expectations, and fails; the
+# numbers move only with a re-vendor.
+HOLDS =! { files: 26, cases: 543, expectations: 8108 }
 SUFFIX =! '.test.ts'
 ENUMS =! ['Align', 'BoxSizing', 'Direction', 'Display', 'Edge', 'Errata', 'ExperimentalFeature',
   'FlexDirection', 'Gutter', 'Justify', 'MeasureMode', 'Overflow', 'PositionType', 'Unit', 'Wrap']
@@ -29,7 +34,6 @@ CLOSE =! '});'
 LTR =! '  root.calculateLayout(undefined, undefined, Direction.LTR);'
 RTL =! '  root.calculateLayout(undefined, undefined, Direction.RTL);'
 EXPECT =! /^\s*expect\((.*)\)\.toBe\((.*)\);$/
-FINALLY =! /^\s*\}\s*finally\s*\{\s*$/
 
 # One file as its cases. Everything outside a case must be an import or
 # a comment; anything else is a file shape this runner does not know.
@@ -54,23 +58,20 @@ def parse(file)
   throw Error.new "#{file}: code outside a case: #{rest.trim().split('\n')[0]}" if rest.trim()
   cases
 
-# The LTR half of a case: everything before the RTL layout, plus a
-# `finally` block when the case has one. What is dropped must be the RTL
-# expectations and nothing else.
+# The LTR half of a case: everything before the RTL layout. What is
+# dropped must be the RTL expectations and nothing else, and every
+# expectation kept must follow the LTR layout.
 def cut(file, item)
   { name, body } = item
   ltr = body.indexOf LTR
   rtl = body.indexOf RTL
   unless ltr >= 0 and rtl > ltr and body.lastIndexOf(LTR) is ltr and body.lastIndexOf(RTL) is rtl
     throw Error.new "#{file}: case '#{name}' is not one LTR layout followed by one RTL layout"
-  tail = body.slice rtl + 1
-  fin = tail.findIndex (line) -> FINALLY.test line
-  dropped = if fin >= 0 then tail.slice(0, fin) else tail
-  stray = dropped.find (line) -> line.trim() and not EXPECT.test line
+  early = body.slice(0, ltr).find (line) -> EXPECT.test line
+  throw Error.new "#{file}: case '#{name}' expects something before its LTR layout: #{early.trim()}" if early?
+  stray = body.slice(rtl + 1).find (line) -> line.trim() and not EXPECT.test line
   throw Error.new "#{file}: case '#{name}' has more than expectations after its RTL layout: #{stray.trim()}" if stray?
-  kept = body.slice 0, rtl
-  kept = kept.concat tail.slice(fin) if fin >= 0
-  kept
+  body.slice 0, rtl
 
 # Where this engine answers differently from Yoga ON PURPOSE: the case,
 # the expectation, and the answer held here instead. An entry is a
@@ -93,6 +94,7 @@ DIVERGES =! Map.new [
 # `expect` numbers each call, so a mismatch can be traced back to the
 # source line that made it.
 calls = 0
+ran = 0
 current = null
 held = Set.new()
 expect =! (actual) ->
@@ -126,6 +128,11 @@ def attempt(item, fn)
   shim.forget()
   try
     fn()
+    # A case that passes ran every expectation its text holds, and holds
+    # at least one.
+    throw Error.new "the case holds no expectation" unless item.labels.length
+    throw Error.new "#{calls} of its #{item.labels.length} expectations ran" unless calls is item.labels.length
+    ran += calls
     null
   catch error
     label = item.labels[error.index] if error.index?
@@ -189,7 +196,7 @@ for [name, answers] in DIVERGES
 pins = if held.size then "  (#{held.size} by stated divergence)" else ''
 console.log "\n  #{'LTR half, total'.padEnd 28} #{String(total.passed).padStart 3} / #{String(total.scope).padEnd 3}#{pins}\n"
 # The tally in the form the repo's lane runner counts.
-console.log "#{total.scope} tests: #{total.passed} passed, #{total.scope - total.passed} failed\n"
+console.log "#{total.scope} tests: #{total.passed} passed, #{total.scope - total.passed} failed#{if held.size then ', ' + held.size + ' pinned' else ''}\n"
 
 if verbose and failures.length and not dump
   console.log "  ✗ #{stem} #{name} — #{failed}" for { stem, name, failed } in failures
@@ -199,4 +206,13 @@ if unheld.length
   console.log "  stale divergence — no such expectation ran: #{entry}" for entry in unheld
   console.log ''
 
-process.exitCode = 1 if failures.length or unheld.length
+short = []
+unless picks.length
+  short.push "#{files.length} files, not #{HOLDS.files}" unless files.length is HOLDS.files
+  short.push "#{names.size} cases, not #{HOLDS.cases}" unless names.size is HOLDS.cases
+  short.push "#{ran} expectations ran, not #{HOLDS.expectations}" unless ran is HOLDS.expectations or failures.length
+if short.length
+  console.log "  the suite is not the one vendored — #{entry}" for entry in short
+  console.log ''
+
+process.exitCode = 1 if failures.length or unheld.length or short.length

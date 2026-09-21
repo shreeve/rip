@@ -247,28 +247,76 @@ test "a hidden child is never the baseline child", ->
     eq [first.rect.y, first.rect.h], [20, 10]
     eq [second.rect.y, second.rect.h], [0, 30]
 
-test "wrap, justify, and an absolute node against a static ancestor", ->
+test "wrapped rows break at the box's width and keep their gap", ->
   Shelf = component
     render
-      Box width: 22, borderStyle: 'single', flexDirection: 'column'
-        Box flexDirection: 'row', justifyContent: 'space-between'
-          Text "left"
-          Text "right"
-        Box position: 'static', flexDirection: 'row', flexWrap: 'wrap', columnGap: 1
-          Text "one"
-          Text "two"
-          Text "three"
-          Text "four"
-          Text "five"
-          Box position: 'absolute', bottom: 0, right: 0
-            Text "*"
+      Box width: 22, borderStyle: 'single', flexDirection: 'row', flexWrap: 'wrap', columnGap: 1
+        Text "one"
+        Text "two"
+        Text "three"
+        Text "four"
+        Text "five"
   eq renderToString(Shelf, cols: 30), [
     "┌────────────────────┐"
-    "│left           right│"
     "│one two three four  │"
-    "│five               *│"
+    "│five                │"
     "└────────────────────┘"
   ].join('\n')
+
+test "an absolute node positions against its nearest ancestor that is not static", ->
+  corner = (position) ->
+    Card = component
+      render
+        Box width: 12, height: 5, borderStyle: 'single'
+          Box position: position, width: 4, height: 1
+            Box position: 'absolute', bottom: 0, right: 0
+              Text "*"
+    renderToString Card, cols: 14
+  eq corner('static').split('\n')[3], "│         *│"
+  eq corner('relative').split('\n')[1], "│   *      │"
+
+test "text wider than its box is cut at the screen's edge, never wrapped onto the row above", ->
+  Wide = component
+    render
+      Box flexDirection: 'column'
+        Text "first row"
+        Box width: 10, alignItems: 'center'
+          Text "0123456789ABCDEF"
+  eq renderToString(Wide, cols: 20), "first row\n3456789ABCDEF"
+
+test "a glyph over half of a wide character blanks the other half", ->
+  for at in [2, 3]
+    Badge = component
+      render
+        Box width: 12, borderStyle: 'single'
+          Text "日本語日本"
+          Box position: 'absolute', top: 0, left: at
+            Text "*"
+    row = renderToString(Badge, cols: 14).split('\n')[1]
+    eq Bun.stringWidth(row), 12
+    eq row, (if at is 2 then "│日* 語日本│" else "│日 *語日本│")
+
+test "text takes no padding or border, and text nested in text no layout at all", ->
+  Padded = component
+    render
+      Text paddingX: 2
+        "hi"
+  Nested = component
+    render
+      Text
+        "shown "
+        Text width: 3
+          "cut"
+  throws (-> renderToString Padded), "'paddingX' has no meaning on text"
+  throws (-> renderToString Nested), "'width' has no meaning on text nested in text"
+
+test "a contents node draws no box, and its color still reaches its children", ->
+  Lent = component
+    render
+      Box
+        Box display: 'contents', color: 'green'
+          Text "leaf"
+  eq renderToString(Lent, cols: 8, ansi: true).trimEnd(), "\x1b[32mleaf\x1b[0m"
 
 # ==[ The component model on a terminal ]==
 
@@ -349,6 +397,61 @@ test "a wide character takes two cells", ->
   grid.write 0, 0, '日本', 0
   eq grid.toString(), '日本'
   eq Array.from(grid.wide), [2, 0, 2, 0, 1, 1]
+
+test! "a run that fails to mount gives the terminal and the process back", ->
+  out = terminal 30, 8
+  Bad = component
+    render
+      Box justifyContent: 'centre'
+        Text "x"
+  throws (-> run Bad, stdout: out), '"centre" is not one of'
+  eq typeof document, 'undefined'
+  ok out.sent.join('').endsWith("\x1b[?25h"), 'the cursor is shown again'
+  Fine = component
+    render
+      Text "ok"
+  again = run Fine, stdout: terminal(30, 8)
+  quit()
+  await again.done
+
+test! "a quit from an effect that runs during construction is heard", ->
+  Early = component
+    ~> quit 'at once'
+    render
+      Text "bye"
+  eq await run(Early, stdout: terminal(30, 8)).done, 'at once'
+  eq typeof document, 'undefined'
+
+test! "a frame that fails later rejects done and gives the terminal back", ->
+  out = terminal 30, 8
+  Turns = component
+    @how := 'center'
+    render
+      Box justifyContent: @how
+        Text "x"
+  running = run Turns, stdout: out
+  running.app.how.value = 'centre'
+  failure = null
+  try
+    await running.done
+  catch error
+    failure = error
+  ok failure?.message.includes('"centre" is not one of'), "done rejected with #{failure?.message}"
+  eq typeof document, 'undefined'
+  ok out.sent.join('').endsWith("\x1b[?25h"), 'the cursor is shown again'
+
+test! "a resize to the same size writes nothing", ->
+  out = terminal 30, 8
+  Still = component
+    render
+      Text "still"
+  running = run Still, stdout: out
+  before = out.sent.length
+  out.emit 'resize'
+  tick!
+  eq out.sent.length, before
+  quit()
+  await running.done
 
 test! "a running app redraws only the cells that changed, and quit gives the process back", ->
   out = terminal 30, 8

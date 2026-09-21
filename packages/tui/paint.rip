@@ -6,7 +6,7 @@
 # a style is a small record interned to an id, and its escape sequence is
 # built once.
 
-import { kids, edges } from './layout.rip'
+import { kids } from './layout.rip'
 
 # ── Styles ────────────────────────────────────────────────────────────────────
 
@@ -90,9 +90,12 @@ export class Grid
     @wide.fill 1
 
   # One line of text at (x, y), clipped to the grid and to [left, right).
+  # A glyph that lands on half of a wide one blanks the other half, so a
+  # row never holds an orphaned lead or continuation cell.
   write!: (x, y, text, id, left = 0, right = @cols) ->
     y -= @top
     return if y < 0 or y >= @rows
+    left = Math.max left, 0
     right = Math.min right, @cols
     for glyph in text
       code = glyph.codePointAt 0
@@ -100,6 +103,8 @@ export class Grid
       continue if span is 0
       if x >= left and x + span <= right
         at = y * @cols + x
+        @blank at - 1 if @wide[at] is 0
+        @blank at + span if x + span < @cols and @wide[at + span] is 0
         @ch[at] = code
         @style[at] = over id, @style[at]
         @wide[at] = span
@@ -108,6 +113,11 @@ export class Grid
           @style[at + 1] = @style[at]
           @wide[at + 1] = 0
       x += span
+
+  # Turn one cell into a plain space, keeping its style.
+  blank!: (at) ->
+    @ch[at] = SPACE
+    @wide[at] = 1
 
   # Restyle a rectangle without touching its characters.
   fill!: (x, y, w, h, id) ->
@@ -185,7 +195,17 @@ export paint =! (grid, node, inherited = 0) ->
   { x, y, w, h } = node.rect
   grid.fill x, y, w, h, id if node.styles.backgroundColor
   frame grid, node, id if node.styles.borderStyle
-  paint grid, kid, id for kid in kids(node)
+  for kid in kids(node)
+    # A `display: contents` node draws no box, but what it says about
+    # color and weight still reaches the children it lends its parent.
+    own = id
+    lent = kid.parentNode
+    chain = []
+    while lent and lent isnt node
+      chain.push lent
+      lent = lent.parentNode
+    own = styleOf(chain[i], own) for i in [chain.length - 1..0] by -1 when chain.length
+    paint grid, kid, own
 
 # ── Grid → bytes ──────────────────────────────────────────────────────────────
 
