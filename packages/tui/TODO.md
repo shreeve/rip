@@ -6,10 +6,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 3. Reading `layout.rip`
 
-- [ ] Comment every field of `Lay` and `Flex`; name the five pass
-      stamps for what they record; untangle `hold!` / `holds` / `held`
-      / `HELD`, `pinned` / `pin!`, `owned`, and the two meanings of
-      `left` and of `owner`.
 - [ ] Name the dimension indices (`WIDTH`, `HEIGHT`) and give each enum
       one labelled group (`RELATIVE`, `WRAP`, `CONTENT_BOX`; `CONTENT`
       / `CONTENTS` / `MAX_CONTENT` and `FLEX` / `Flex` / `lay.flex`

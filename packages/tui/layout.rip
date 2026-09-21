@@ -124,44 +124,45 @@ CHILDLESS =! Object.freeze []
 # One remembered answer: the offer, and the size it produced.
 class Entry
   constructor: ->
-    @live = false
-    @availW = NaN
+    @live = false            # whether it holds an answer at all
+    @availW = NaN            # the offer: two sizes and how each was offered…
     @availH = NaN
     @modeW = MAX_CONTENT
     @modeH = MAX_CONTENT
-    @ownerW = NaN
+    @ownerW = NaN            # …and the owner's size, for a node that leans on it
     @ownerH = NaN
-    @w = NaN
+    @w = NaN                 # the answer
     @h = NaN
 
 # What one container knows while it lays its lines out. A node's layout
 # never re-enters itself, so the record lives on the node and is reused.
 class Flex
   constructor: ->
-    @axis = COLUMN
+    @axis = COLUMN           # the main axis, and the one across it
     @cross = ROW
-    @row = false
-    @wrap = false
-    @innerW = NaN
+    @row = false             # whether the main axis is horizontal
+    @wrap = false            # whether children wrap onto further lines
+    @innerW = NaN            # the space inside padding and border…
     @innerH = NaN
-    @innerMain = NaN
+    @innerMain = NaN         # …by axis; a line settles a main size that was only a limit
     @innerCross = NaN
-    @roomMain = NaN
-    @ownerMain = NaN
-    @modeMain = MAX_CONTENT
+    @roomMain = NaN          # `innerMain` as it was offered: what children's percent limits read
+    @ownerMain = NaN         # the owner's size along the main axis
+    @modeMain = MAX_CONTENT  # how each inner size was offered
     @modeCross = MAX_CONTENT
-    @overflows = false
-    @from = 0
+    @overflows = false       # whether the bases overflow a main size that limits them
+    # The line in hand, a run of the child list:
+    @from = 0                # its first child, and one past its last
     @to = 0
-    @last = -1
-    @items = 0
-    @autos = 0
-    @consumed = 0
-    @grow = 0
-    @shrink = 0
-    @free = 0
-    @mainDim = 0
-    @crossDim = 0
+    @last = -1               # its last child in flow, which no gap follows
+    @items = 0               # its children in flow
+    @autos = 0               # their auto margins along the main axis
+    @consumed = 0            # their bases, margins and gaps, summed
+    @grow = 0                # their grow factors, summed…
+    @shrink = 0              # …and their shrink factors, each scaled by its basis, negated
+    @free = 0                # the space `consumed` leaves; below zero, they overflow
+    @mainDim = 0             # how far the line runs along the main axis, this node's edges included
+    @crossDim = 0            # how far across it
 
 # The parsed lengths of a node with no styles: nothing written, and a
 # border of zero.
@@ -174,9 +175,9 @@ BLANK_V[POSITION] = 1
 BLANK_U =! Uint8Array.new(SLOTS).fill POINT, BORDER, BORDER + 4
 
 # Scratch for one parse: the record as it stood, and each slot's rank.
-HELD   =! Float64Array.new SLOTS
-HELD_U =! Uint8Array.new SLOTS
-RANKS  =! Uint8Array.new SLOTS
+PRIOR_V =! Float64Array.new SLOTS
+PRIOR_U =! Uint8Array.new SLOTS
+RANKS   =! Uint8Array.new SLOTS
 
 # A percent as it is written: digits, an optional fraction, a percent
 # sign, and nothing else.
@@ -187,18 +188,19 @@ PERCENTAGE =! /^-?(\d+(\.\d+)?|\.\d+)%$/
 # and takes its own copy on its first parse.
 class Lay
   constructor: ->
-    @v = BLANK_V
+    # What the node wrote, parsed:
+    @v = BLANK_V             # a number for every slot, and each one's unit
     @u = BLANK_U
-    @bare = true
-    @marginRow = 0
+    @bare = true             # whether it wrote no styles at all
+    @marginRow = 0           # both margins of an axis, summed, unless one is a percent
     @marginColumn = 0
     @marginPercent = false
-    @insideRow = 0
+    @insideRow = 0           # padding plus border, the same way
     @insideColumn = 0
     @insidePercent = false
-    @limitPercent = false
-    @limited = false
-    @direction = COLUMN
+    @limitPercent = false    # whether a min or max is a percent
+    @limited = false         # whether it wrote a min or max at all
+    @direction = COLUMN      # the words and numbers, out of their slots
     @wrap = NOWRAP
     @justify = FLEX_START
     @alignItems = STRETCH
@@ -210,42 +212,47 @@ class Lay
     @shrink = 0
     @ratio = NaN
     @contentBox = false
-    @leaf = false
-    @owned = false
-    @noCache = false
-    @pinned = false
-    @solidW = false
+    @leaf = false            # text, or a node with a measure function: it lays out no children
+    # What the cache needs to know of it (see "The cache"):
+    @leansOnOwner = false    # whether a percent of its own reads the owner's size
+    @noCache = false         # whether it, or a node under it, is order-sensitive
+    @underBaseline = false   # whether a baseline row above reads its lines and positions
+    @solidW = false          # whether every width it is offered is a number, and every height
     @solidH = false
-    @textW = 0
+    @textW = 0               # a text leaf's unwrapped size and its wrap mode, as `sync` last read them
     @textH = 0
     @textMode = 0
-    @kids = CHILDLESS
-    @count = 0
-    @filled = 0
-    @boxless = 0
-    @hiddenFlex = false
+    # Its children:
+    @kids = CHILDLESS        # the ones layout sees
+    @count = 0               # Yoga's child count: those and the hidden
+    @filled = 0              # how many `gather` has put in `kids` so far
+    @boxless = 0             # the ones that make no box, which rounding places by hand
+    @hiddenFlex = false      # whether a hidden one would flex, or sit on a baseline, were it shown
     @hiddenBaseline = false
-    @padding = [0, 0, 0, 0]
+    # What layout gave it, in floats:
+    @padding = [0, 0, 0, 0]  # padding and border by edge, as the last visit resolved them
     @border = [0, 0, 0, 0]
-    @pos = [0, 0, 0, 0]
-    @measured = [NaN, NaN]
-    @width = 0
+    @pos = [0, 0, 0, 0]      # how far each edge sits inside its parent's
+    @measured = [NaN, NaN]   # the size the last visit answered, width then height
+    @width = 0               # the size the last layout gave it…
     @height = 0
-    @ownerW = NaN
-    @asRoot = false
-    @basis = NaN
-    @basisGen = 0
-    @lineGen = 0
-    @doneGen = 0
-    @lineAt = 0
-    @atX = NaN
+    @ownerW = NaN            # …and the owner width that layout resolved its percents against
+    @asRoot = false          # whether the record was made for the root of a layout
+    @basis = NaN             # its flex basis, which stands for one pass
+    @lineAt = 0              # which of its parent's lines it is on
+    @atX = NaN               # its absolute corner as `settle` last rounded it
     @atY = NaN
-    @gen = 0
-    @ran = 0
-    @entry = Entry.new()
-    @measures = null
+    # Pass stamps, each the number of the last pass that…
+    @visitPass = 0           # …visited it: `measured` is that pass's
+    @basisPass = 0           # …started its basis over
+    @linePass = 0            # …broke its children into lines: their `lineAt` is that pass's
+    @layoutPass = 0          # …laid it out: its children's `pos` is that pass's
+    @settlePass = 0          # …computed its layout, resized it, or placed an absolute child under it: `settle` owes it a rounding
+    # Its remembered answers:
+    @entry = Entry.new()     # the last layout
+    @measures = null         # up to MEASURES measure-only ones, of which `used` are live
     @used = 0
-    @flex = null
+    @flex = null             # its `Flex`, made when it first lays out children
 
 # The record `admit` writes a value into to see whether it parses.
 PROBE =! Lay.new()
@@ -540,8 +547,8 @@ export admit! =! (key, value) ->
 # known to be new or changed is not worth the comparison.
 parse! =! (lay, s, scan) ->
   if scan
-    HELD.set lay.v
-    HELD_U.set lay.u
+    PRIOR_V.set lay.v
+    PRIOR_U.set lay.u
   if lay.v is BLANK_V
     lay.v = Float64Array.new BLANK_V
     lay.u = Uint8Array.new BLANK_U
@@ -558,7 +565,7 @@ parse! =! (lay, s, scan) ->
       lay.v[SIZE + dim] = lay.v[MAX + dim]
   if scan
     for slot in [0...SLOTS]
-      differs = true if lay.u[slot] isnt HELD_U[slot] or not same(lay.v[slot], HELD[slot])
+      differs = true if lay.u[slot] isnt PRIOR_U[slot] or not same(lay.v[slot], PRIOR_V[slot])
   lay.grow = lay.v[GROW]
   lay.shrink = lay.v[SHRINK]
   lay.ratio = lay.v[RATIO]
@@ -679,11 +686,6 @@ percents =! (lay, from, to) ->
     return true if lay.u[slot] is PERCENT
   false
 
-# Whether a node's layout depends on its owner's size as well as on the
-# offer: through its own percent margin, padding, min or max. Only then
-# is the owner's size part of a cached answer's key.
-leansOnOwner =! (lay) -> lay.marginPercent or lay.insidePercent or lay.limitPercent
-
 # Whether what a container computes can depend on the ORDER it is asked
 # in, and so on which earlier asks a cached answer stood in for. Two
 # things make it so. A baseline row reads its children's lines and
@@ -736,15 +738,14 @@ firm! =! (node, solidW, solidH) ->
     lay.noCache = true if k.noCache
 
 # Everything under a baseline row is read by it, to any depth, so none of
-# it answers from an earlier pass either. `pinned` holds for a node whose
-# ancestor is such a row; a node's children are pinned when it is, or
-# when it is one.
-hold! =! (node, value) ->
+# it answers from an earlier pass either. A node is `underBaseline` when
+# an ancestor is such a row; its children are when it is, or is one.
+carryBaseline! =! (node, value) ->
   lay = node.lay
-  lay.pinned = value
+  lay.underBaseline = value
   below = value or baselined lay
   for kid, i in lay.kids
-    hold kid, below if kid.lay.pinned isnt below
+    carryBaseline kid, below if kid.lay.underBaseline isnt below
 
 # Whether a hidden child would flex were it shown: Yoga's lone-flexible-
 # child shortcut counts `display: none` children, so one of these among
@@ -756,12 +757,12 @@ flexes =! (s) ->
   shrink = s.flexShrink ?? (if flex < 0 then -flex else 0)
   grow isnt 0 or shrink isnt 0
 
-# Rebuild `owner`'s layout children from the children of `node` — `owner`
+# Rebuild `host`'s layout children from the children of `node` — `host`
 # itself, or a `contents` node under it, which makes no box and leaves
-# its children to `owner`. Answers whether the list differs. `count` is
+# its children to `host`. Answers whether the list differs. `count` is
 # Yoga's child count, which takes in the hidden; `boxless` counts the
 # children rounding must place by hand.
-gather =! (node, owner, lay, list) ->
+gather =! (node, host, lay, list) ->
   changed = false
   kid = node.firstChild
   while kid
@@ -771,19 +772,19 @@ gather =! (node, owner, lay, list) ->
         lay.boxless += 1
         # A `contents` node makes no box and keeps no record, so one that
         # makes a box again is read from scratch. Rounding places it
-        # wherever `owner` moves or is laid out; placing it here covers
+        # wherever `host` moves or is laid out; placing it here covers
         # the pass where neither happens.
         kid.dirty = false
         kid.lay = null
-        kid.place owner.rect.x, owner.rect.y, 0, 0
-        changed = true if gather kid, owner, lay, list
+        kid.place host.rect.x, host.rect.y, 0, 0
+        changed = true if gather kid, host, lay, list
       else
         lay.count += 1
         if box is NONE
           lay.boxless += 1
           lay.hiddenFlex = true if flexes kid.styles
           lay.hiddenBaseline = true if kid.styles.alignSelf is 'baseline' and kid.styles.position isnt 'absolute'
-          vanish kid, owner.rect.x, owner.rect.y unless away kid, owner.rect.x, owner.rect.y
+          vanish kid, host.rect.x, host.rect.y unless away kid, host.rect.x, host.rect.y
         else
           changed = true if list[lay.filled] isnt kid
           list[lay.filled] = kid
@@ -862,7 +863,7 @@ sync =! (node) ->
       changed = true if sync kid
     # The flags climb: a dirty node's ancestors are all dirty, so each
     # takes its children's in turn, and a clean node keeps what it had.
-    below = lay.pinned or baselined lay
+    below = lay.underBaseline or baselined lay
     lay.noCache = orderSensitive lay
     for kid, i in list
       k = kid.lay
@@ -870,8 +871,11 @@ sync =! (node) ->
       tall = offered lay, k, 1
       firm kid, wide, tall if k.solidW isnt wide or k.solidH isnt tall
       lay.noCache = true if k.noCache
-      hold kid, below if k.pinned isnt below
-  lay.owned = leansOnOwner lay
+      carryBaseline kid, below if k.underBaseline isnt below
+  # A node's layout depends on its owner's size as well as on the offer
+  # through its own percent margin, padding, min or max. Only then is the
+  # owner's size part of a cached answer's key.
+  lay.leansOnOwner = lay.marginPercent or lay.insidePercent or lay.limitPercent
   node.dirty = false unless changed
   changed
 
@@ -1044,8 +1048,8 @@ basisAll =! (node, lay, f, modeW, modeH, perform) ->
     continue if k.position is ABSOLUTE
     # Yoga holds a first basis until the child is next dirty; here every
     # pass starts a child over, as a fresh layout does.
-    if k.basisGen isnt generation
-      k.basisGen = generation
+    if k.basisPass isnt generation
+      k.basisPass = generation
       k.basis = NaN
     if kid is only then k.basis = 0 else basisOf lay, f, kid, modeW, modeH
     total += k.basis + marginAxis(k, f.axis, f.innerW)
@@ -1107,16 +1111,16 @@ freeze! =! (lay, f) ->
       scaled = -k.shrink * base
       if scaled isnt 0 and not isNaN scaled
         size = base + f.free / f.shrink * scaled
-        held = bound k, axis, size, f.innerMain, f.innerW
-        if not isNaN(size) and not isNaN(held) and not near size, held
-          delta += held - base
+        clamped = bound k, axis, size, f.innerMain, f.innerW
+        if not isNaN(size) and not isNaN(clamped) and not near size, clamped
+          delta += clamped - base
           f.shrink += k.shrink * k.basis
     else if f.free > 0
       if k.grow isnt 0
         size = base + f.free / f.grow * k.grow
-        held = bound k, axis, size, f.innerMain, f.innerW
-        if not isNaN(size) and not isNaN(held) and not near size, held
-          delta += held - base
+        clamped = bound k, axis, size, f.innerMain, f.innerW
+        if not isNaN(size) and not isNaN(clamped) and not near size, clamped
+          delta += clamped - base
           f.grow -= k.grow
   f.free -= delta
 
@@ -1196,7 +1200,7 @@ distribute =! (node, lay, f, perform) ->
 # at the top.
 baselineOf =! (node) ->
   lay = node.lay
-  lined = lay.lineGen is generation
+  lined = lay.linePass is generation
   pick = null
   for kid, i in lay.kids
     k = kid.lay
@@ -1206,8 +1210,8 @@ baselineOf =! (node) ->
       pick = kid
       break
     pick = kid unless pick
-  return (if lay.gen is generation then lay.measured[1] else NaN) unless pick
-  baselineOf(pick) + (if lay.doneGen is generation then pick.lay.pos[TOP] else 0)
+  return (if lay.visitPass is generation then lay.measured[1] else NaN) unless pick
+  baselineOf(pick) + (if lay.layoutPass is generation then pick.lay.pos[TOP] else 0)
 
 # A row aligns on baselines when it or any in-flow child asks to — a
 # hidden child among them, which Yoga's `isBaselineLayout` counts.
@@ -1326,17 +1330,17 @@ alignLine! =! (node, lay, f, leadingCross, containerCross, lineTop) ->
         modeH = if isNaN(kidH) or (row and loose) then MAX_CONTENT else STRETCH_FIT
         visit kid, kidW, kidH, modeW, modeH, f.innerW, f.innerH, true
     else
-      left = containerCross - (k.measured[crossDimension] + marginAxis(k, cross, f.innerW))
+      spare = containerCross - (k.measured[crossDimension] + marginAxis(k, cross, f.innerW))
       if autoStart and autoEnd
-        lead += fmax 0, left / 2
+        lead += fmax 0, spare / 2
       else if autoEnd
         lead += 0
       else if autoStart
-        lead += fmax 0, left
+        lead += fmax 0, spare
       else if align is CENTER
-        lead += left / 2
+        lead += spare / 2
       else if align isnt FLEX_START
-        lead += left
+        lead += spare
     k.pos[start] += lineTop + lead
 
 # Spread the lines over the cross axis, and set every child against its
@@ -1354,26 +1358,26 @@ alignLines! =! (node, lay, f, lines, totalCross, leadingCross, insideCross, owne
     sizeAt lay, SIZE + crossDimension, ownerCross, ownerW
   else
     totalCross + insideCross
-  left = bound(lay, cross, outer, ownerCross, ownerW) - insideCross - totalCross
+  spare = bound(lay, cross, outer, ownerCross, ownerW) - insideCross - totalCross
   how = lay.alignContent
-  how = FLEX_START if left < 0 and (how is STRETCH or how >= SPACE_BETWEEN)
+  how = FLEX_START if spare < 0 and (how is STRETCH or how >= SPACE_BETWEEN)
   lead = leadingCross
   perLine = 0
   extra = 0
   if how is FLEX_END
-    lead += left
+    lead += spare
   else if how is CENTER
-    lead += left / 2
+    lead += spare / 2
   else if how is STRETCH
-    extra = left / lines
+    extra = spare / lines
   else if how is SPACE_AROUND
-    lead += left / (2 * lines)
-    perLine = left / lines
+    lead += spare / (2 * lines)
+    perLine = spare / lines
   else if how is SPACE_EVENLY
-    lead += left / (lines + 1)
-    perLine = left / (lines + 1)
+    lead += spare / (lines + 1)
+    perLine = spare / (lines + 1)
   else if how is SPACE_BETWEEN
-    perLine = left / (lines - 1) if lines > 1
+    perLine = spare / (lines - 1) if lines > 1
   gap = gapAt lay, cross, f.innerCross
   to = 0
   for line in [0...lines]
@@ -1503,7 +1507,7 @@ compute! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
   crossGap = gapAt lay, cross, f.innerCross
   innerMain = f.innerMain
   f.from = 0
-  lay.lineGen = generation
+  lay.linePass = generation
   while f.from < list.length or lines is 0
     breakLine lay, f, lines
     skipped = not perform and f.modeCross is STRETCH_FIT
@@ -1605,7 +1609,7 @@ extent =! (lay, block, dim) ->
 inset0 =! (lay, block, edge) ->
   if lay is block then lay.padding[edge] + lay.border[edge] else insideAt lay, edge, lay.ownerW
 
-pin! =! (block, parent, kid, axis, main, blockW, blockH) ->
+anchor! =! (block, parent, kid, axis, main, blockW, blockH) ->
   c = block.lay
   q = parent.lay
   k = kid.lay
@@ -1678,8 +1682,8 @@ absolute! =! (block, parent, kid, blockW, blockH, widthMode) ->
     kidW = k.measured[0] + marginAxis(k, ROW, blockW)
     kidH = k.measured[1] + marginAxis(k, COLUMN, blockW)
   visit kid, kidW, kidH, STRETCH_FIT, STRETCH_FIT, blockW, blockH, true
-  pin block, parent, kid, axis, true, blockW, blockH
-  pin block, parent, kid, cross, false, blockW, blockH
+  anchor block, parent, kid, axis, true, blockW, blockH
+  anchor block, parent, kid, cross, false, blockW, blockH
 
 # Lay out every absolute node whose containing block is `block`, walking
 # down through static descendants (layoutAbsoluteDescendants). `left` and
@@ -1712,7 +1716,7 @@ absolutes =! (block, parent, widthMode, left, top) ->
       k.pos[TOP] -= top if downSet
     else if k.position is STATIC and not k.leaf
       found = true if absolutes block, kid, widthMode, left + k.pos[LEFT], top + k.pos[TOP]
-  q.ran = generation if found
+  q.settlePass = generation if found
   found
 
 # ── The cache ─────────────────────────────────────────────────────────────────
@@ -1727,9 +1731,9 @@ same =! (a, b) -> a is b or (isNaN(a) and isNaN(b))
 # the key here for a node that leans on it, so an answer is never one a
 # different owner was given.
 sameOwner =! (lay, entry, ownerW, ownerH) ->
-  not lay.owned or (same(entry.ownerW, ownerW) and same(entry.ownerH, ownerH))
+  not lay.leansOnOwner or (same(entry.ownerW, ownerW) and same(entry.ownerH, ownerH))
 
-holds =! (lay, entry, availW, availH, modeW, modeH, ownerW, ownerH) ->
+answers =! (lay, entry, availW, availH, modeW, modeH, ownerW, ownerH) ->
   entry.live and entry.modeW is modeW and entry.modeH is modeH and same(entry.availW, availW) and same(entry.availH, availH) and sameOwner(lay, entry, ownerW, ownerH)
 
 # Whether one axis of a remembered measurement answers a new offer
@@ -1757,7 +1761,7 @@ reusable =! (lay, entry, availW, availH, modeW, modeH, ownerW, ownerH, marginRow
 # answer and up to MEASURES measure-only ones.
 visit! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
   lay = node.lay
-  if (node.dirty or lay.noCache or (lay.pinned and not lay.leaf)) and lay.gen isnt generation
+  if (node.dirty or lay.noCache or (lay.underBaseline and not lay.leaf)) and lay.visitPass isnt generation
     lay.used = 0
     lay.entry.live = false
   hit = null
@@ -1773,11 +1777,11 @@ visit! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
           hit = entry
           break
   else if perform
-    hit = lay.entry if holds lay, lay.entry, availW, availH, modeW, modeH, ownerW, ownerH
+    hit = lay.entry if answers lay, lay.entry, availW, availH, modeW, modeH, ownerW, ownerH
   else
     for at in [0...lay.used]
       entry = lay.measures[at]
-      if holds lay, entry, availW, availH, modeW, modeH, ownerW, ownerH
+      if answers lay, entry, availW, availH, modeW, modeH, ownerW, ownerH
         hit = entry
         break
   if hit
@@ -1785,7 +1789,7 @@ visit! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
     lay.measured[1] = hit.h
   else
     compute node, availW, availH, modeW, modeH, ownerW, ownerH, perform
-    lay.ran = generation if perform
+    lay.settlePass = generation if perform
     entry = lay.entry
     unless perform
       lay.used = 0 if lay.used is MEASURES
@@ -1803,13 +1807,13 @@ visit! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
   if perform
     # A leaf can answer a layout from a measure-only entry, so a changed
     # size — not only a computed one — is what rounding must see.
-    lay.ran = generation if lay.width isnt lay.measured[0] or lay.height isnt lay.measured[1]
+    lay.settlePass = generation if lay.width isnt lay.measured[0] or lay.height isnt lay.measured[1]
     lay.width = lay.measured[0]
     lay.height = lay.measured[1]
     lay.ownerW = ownerW
-    lay.doneGen = generation
+    lay.layoutPass = generation
     node.dirty = false
-  lay.gen = generation
+  lay.visitPass = generation
 
 # ── Rounding ──────────────────────────────────────────────────────────────────
 
@@ -1855,7 +1859,7 @@ settle! =! (node, left, top, cornerX, cornerY) ->
   lay = node.lay
   x = left + lay.pos[LEFT]
   y = top + lay.pos[TOP]
-  return if lay.ran isnt generation and x is lay.atX and y is lay.atY and not lay.leaf
+  return if lay.settlePass isnt generation and x is lay.atX and y is lay.atY and not lay.leaf
   lay.atX = x
   lay.atY = y
   text = lay.leaf
