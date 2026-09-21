@@ -8,10 +8,9 @@
 # is drawn here as the tree that reaches the same code, a <Text> with
 # that `wrap` in a <Box> of that width, and held to the literal Ink
 # holds the function to (oracle/extra/wrap-text.tsx is the same port on
-# Ink's side). In "keeps styles that span a newline" the style is a
-# `color` prop, where Ink's test writes the escape sequence into the
-# text, and the hyperlink half of that test is left out: hyperlinks are
-# not built here.
+# Ink's side). Where Ink's test writes a color or a hyperlink into the
+# text as an escape sequence, the tree here says it with a `color` or a
+# `link` prop.
 #
 #   rip test/ink/wrap-text.rip
 
@@ -19,6 +18,8 @@ import { test, eq } from 'rip/testing'
 import { Box, Text, plain, styled, differs } from './harness.rip'
 
 console.log "\nWrap Text"
+
+ELLIPSIS =! "A cut line's '…' takes the style of the words it stands beside, their link with it, so the whole cut line is the link. Ink closes the hyperlink before the ellipsis, where it keeps a color across it."
 
 test "wraps text", ->
   App = component
@@ -94,9 +95,8 @@ test "truncates each line of multi-line text separately", ->
     "foo"
   ]
 
-# Ink's test holds a color and then a hyperlink to this. The color is
-# here, as a prop; the hyperlink half is not ported: hyperlinks are not
-# built.
+# Ink's test holds a color and then a hyperlink to this, each written
+# into the text; each is a prop here.
 test "truncated multi-line text keeps styles that span a newline", ->
   App = component
     render
@@ -108,6 +108,12 @@ test "truncated multi-line text keeps styles that span a newline", ->
     "«red»abc…"
     "«red»uvw…"
   ]
+  Linked = component
+    render
+      Box width: 4
+        Text wrap: 'truncate-end', link: 'https://example.com'
+          "abcdef\nuvwxyz"
+  differs styled(Linked), ["«link https://example.com»abc…", "«link https://example.com»uvw…"], ["«link https://example.com»abc«»…", "«link https://example.com»uvw«»…"], ELLIPSIS
 
 test "truncated multi-line text keeps its lines in the layout", ->
   App = component
@@ -132,6 +138,14 @@ test "truncated multi-line text keeps a C1 SGR color that spans a newline", ->
   # Ink's test asks for the styled frame; its text is what stands here.
   differs styled(App), ["abc…", "uvw…"], ["«red»abc…", "«red»uvw…"],
     "Styling is structural only (PLAN §6): an SGR sequence written into text is stripped with every other control sequence, where Ink passes it through to the terminal."
+
+test "truncated multi-line text keeps a C1 OSC hyperlink that spans a newline", ->
+  App = component
+    render
+      Box width: 4
+        Text wrap: 'truncate', link: 'https://example.com'
+          "abcdef\nuvwxyz"
+  differs styled(App), ["«link https://example.com»abc…", "«link https://example.com»uvw…"], ["«link https://example.com»abc«»…", "«link https://example.com»uvw«»…"], ELLIPSIS
 
 test "truncated multi-line text keeps a colon 256-color that spans a newline", ->
   App = component

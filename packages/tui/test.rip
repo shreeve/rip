@@ -7,7 +7,8 @@ import { run, quit, mount, renderToString, screen, Box, Text, Spacer } from 'rip
 import * as mod from 'rip/tui'
 import { install } from './document.rip'
 import { layout } from './layout.rip'
-import { Grid, paint, diff } from './paint.rip'
+import { Grid, paint, diff, tally as styleCount } from './paint.rip'
+import { tally as clusterCount } from './text.rip'
 import { __setChildFailureReporter } from '../../src/runtime/components.js'
 import { EventEmitter } from 'node:events'
 import { readFileSync } from 'fs'
@@ -211,6 +212,11 @@ test "a paint value is refused where it is written, by key, with the words the k
     throws (-> words.set 'wrap', 'clip'), 'wrap: "clip" is not one of wrap, hard, truncate, truncate-end, truncate-start, truncate-middle'
     throws (-> box.set 'borderStyle', { top: '-' }), 'borderStyle: topLeft: undefined is not a border glyph'
     throws (-> box.set 'borderTop', 'no'), 'borderTop: "no" is not true or false'
+    throws (-> words.set 'link', "https://example.com/\x1b\\\x1b[2J"), 'is not a link — write a URL in printable ASCII'
+    throws (-> words.set 'link', "https://example.com/\x07"), 'is not a link'
+    throws (-> words.set 'link', "https://example.com/\u009c"), 'is not a link'
+    throws (-> words.set 'link', 'https://example.com/日本'), 'is not a link'
+    throws (-> words.set 'link', 42), 'link: 42 is not a link'
     eq [box.styles, words.styles], [{}, {}]
     box.set key, value for key, value of { color: '#0af', backgroundColor: 'ansi256(208)', borderColor: 'rgb(0, 128, 255)', borderTop: false, overflowX: 'hidden', contentOffsetX: 3 }
     eq box.styles.borderTop, false
@@ -226,6 +232,7 @@ test "a style with no meaning on its node is refused: a box's on text, text's on
     throws (-> words.set 'contentOffsetY', 1), "'contentOffsetY' has no meaning on text"
     throws (-> words.set 'borderTop', true), "'borderTop' has no meaning on text"
     throws (-> box.set 'wrap', 'truncate'), "'wrap' has no meaning on a box"
+    throws (-> box.set 'link', 'https://example.com'), "'link' has no meaning on a box"
     throws (-> box.set 'dim', true), "'dim' is not a terminal style of <div> — did you mean 'dimColor'?"
   finally
     restore()
@@ -628,6 +635,68 @@ test "text's own background fills its glyph cells and no more", ->
           "ab"
   eq renderToString(Marked, cols: 8, ansi: true), "\x1b[43mab\x1b[0m      "
 
+test "'default' is the terminal's own color: it stands against an ancestor's color and the background beneath", ->
+  Bare = component
+    render
+      Box width: 6, backgroundColor: 'blue', color: 'red', flexDirection: 'row'
+        Text "a"
+        Text backgroundColor: 'default'
+          "b"
+        Text color: 'default'
+          "c"
+  eq renderToString(Bare, cols: 6, ansi: true), "\x1b[31;44ma\x1b[0;31;49mb\x1b[0;39;44mc\x1b[0;44m   \x1b[0m"
+  # On a box it is a fill like any other: it covers what lies under it,
+  # and text over it sits on it.
+  Hole = component
+    render
+      Box width: 5, height: 1, backgroundColor: 'red'
+        Text "abcde"
+        Box position: 'absolute', left: 1, top: 0, width: 3, height: 1, backgroundColor: 'default'
+          Box position: 'absolute', left: 1, top: 0
+            Text "x"
+  eq renderToString(Hole, cols: 5, ansi: true), "\x1b[41ma\x1b[0;49m x \x1b[0;41me\x1b[0m"
+  eq inked(1, (doc) -> words doc, { color: 'red' }, '', words(doc, { color: 'default' }, 'x')), "\x1b[39mx\x1b[0m"
+
+OPEN =! (url) -> "\x1b]8;;#{url}\x1b\\"
+SHUT =! "\x1b]8;;\x1b\\"
+
+test "a link wraps its words in OSC 8, nested text inherits it, and a plain frame has none of it", ->
+  Linked = component
+    render
+      Box width: 16, flexDirection: 'row'
+        Text "see "
+        Text link: 'https://example.com/a?b=1;c'
+          "the "
+          Text bold: true
+            "docs"
+          Text link: 'https://example.com/other'
+            "!"
+  eq renderToString(Linked, cols: 16, ansi: true), "see #{OPEN 'https://example.com/a?b=1;c'}the \x1b[1mdocs\x1b[0m#{OPEN 'https://example.com/other'}!#{SHUT}   "
+  eq renderToString(Linked, cols: 16), "see the docs!"
+  # Over a box's background the words keep their link and the box does not take it.
+  Panel = component
+    render
+      Box width: 4, backgroundColor: 'blue'
+        Text link: 'https://example.com'
+          "go"
+  eq renderToString(Panel, cols: 4, ansi: true), "\x1b[44m#{OPEN 'https://example.com'}go\x1b[0;44m#{SHUT}  \x1b[0m"
+
+test "a link that wraps is closed on every row and opened again on the next, its '…' inside it", ->
+  Long = component
+    render
+      Box width: 5, flexDirection: 'column'
+        Text link: 'https://example.com'
+          "ab cd"
+          Text color: 'red'
+            " ef"
+        Text link: 'https://example.com', wrap: 'truncate'
+          "abcdefgh"
+  eq renderToString(Long, cols: 5, ansi: true).split('\n'), [
+    "#{OPEN 'https://example.com'}ab cd#{SHUT}"
+    "\x1b[31m#{OPEN 'https://example.com'} ef\x1b[0m#{SHUT}  "
+    "#{OPEN 'https://example.com'}abcd…#{SHUT}"
+  ]
+
 test "dimColor and strikethrough are text attributes beside bold, italic, underline, and inverse", ->
   Faint = component
     render
@@ -913,6 +982,161 @@ test "a wide character takes two cells", ->
   grid.write 0, 0, '日本', 0
   eq grid.toString(), '日本'
   eq Array.from(grid.wide), [2, 0, 2, 0, 1, 1]
+
+# A screen's two grids over a mounted document, as screen.rip keeps
+# them: `frame()` answers the bytes of the next frame, `front()` the grid
+# those bytes leave on the terminal.
+def screenFor(doc, cols)
+  front = null
+  spare = null
+  frame = ->
+    doc.moved = doc.stale = false
+    { h } = layout doc.body, cols
+    back = spare
+    if back?.rows is h then back.clear() else back = Grid.new cols, h
+    paint back, doc.body
+    bytes = diff front, back
+    spare = front
+    front = back
+    bytes
+  { frame, front: (-> front) }
+
+test "a link is open only while its cells are written: closed before a cursor move and at the end of a run", ->
+  accent = String.fromCodePoint 0x301
+  Linked = component
+    @to := 'https://example.com/a'
+    render
+      Box flexDirection: 'column', width: 5
+        Text link: @to, backgroundColor: 'blue'
+          "one"
+        Text "plain"
+        Text link: @to
+          "e#{accent}x"
+        Box flexDirection: 'row'
+          Text link: @to
+            "a"
+          Text link: 'https://example.com/z'
+            "z"
+  mounted Linked, (app, show, doc) ->
+    view = screenFor doc, 5
+    a = OPEN 'https://example.com/a'
+    eq view.frame(), "\x1b[J\x1b[1G\x1b[44m#{a}one#{SHUT}\x1b[0m\n\x1b[1Gplain\n\x1b[1G#{a}e#{accent}#{SHUT}\x1b[2G#{a}x#{SHUT}\n\x1b[1G#{a}a#{OPEN 'https://example.com/z'}z#{SHUT}\x1b[3A\r"
+    # A link is part of a cell's style: a new one redraws its cells and no others.
+    app.to.value = 'https://example.com/b'
+    b = OPEN 'https://example.com/b'
+    eq view.frame(), "\x1b[1G\x1b[44m#{b}one#{SHUT}\x1b[0m\n\n\x1b[1G#{b}e#{accent}#{SHUT}\x1b[2G#{b}x#{SHUT}\n\x1b[1G#{b}a#{SHUT}\x1b[3A\r"
+    eq view.frame(), ''
+
+# '#rrggbb' for the `n`th color.
+hue = (n) -> '#' + n.toString(16).padStart(6, '0')
+TEN =! (n for n in [0...10])
+
+test "styles no cell holds are let go: 70,000 colors pass through sixteen bits, and the diff stands across a sweep", ->
+  accent = String.fromCodePoint 0x61, 0x328, 0x301
+  Glow = component
+    @tick := 0
+    render
+      Box flexDirection: 'row', backgroundColor: '#654321', paddingLeft: 1
+        Text color: '#123456'
+          "#{accent}till "
+        for n in TEN
+          Text key: n, color: hue(@tick * 10 + n)
+            "x"
+  # Every colored cell is a style and, over the box, a blend of two.
+  mounted Glow, (app, show, doc) ->
+    view = screenFor doc, 17
+    view.frame()
+    most = 0
+    swept = 0
+    step = 0
+    while step < 7000
+      before = styleCount()
+      app.tick.value = step += 1
+      bytes = view.frame()
+      most = Math.max most, styleCount()
+      if styleCount() < before
+        swept += 1
+        # The grid a sweep renumbers reads as it did.
+        eq view.front().toString(), " #{accent}till xxxxxxxxxx"
+        # The frame after a sweep is a diff against the grid before it.
+        app.tick.value = step += 1
+        bytes = view.frame()
+        ok not bytes.includes('till') and not bytes.includes("\x1b[J"), "the frame after a sweep redrew what had not changed: #{JSON.stringify bytes.slice 0, 80}"
+        eq bytes.match(/x/g).length, 10
+    ok swept >= 3, "#{swept} sweeps"
+    ok most <= 32768 + 20, "#{most} styles were held at once"
+    row = "\x1b[48;2;101;67;33m \x1b[0;38;2;18;52;86;48;2;101;67;33m#{accent}till "
+    for n in TEN
+      code = 70000 + n
+      row += "\x1b[0;38;2;#{code >> 16};#{(code >> 8) & 255};#{code & 255};48;2;101;67;33mx"
+    eq view.front().toString(true), row + "\x1b[0m"
+
+test "a frame painted with no diff is swept as it starts, and a grid held across that sweep is drawn from nothing", ->
+  Flag = component
+    render
+      Text color: 'red'
+        "kept"
+  Rainbow = component
+    @from := 0
+    render
+      Box flexDirection: 'row', flexWrap: 'wrap', width: 100
+        for n in [0...1000]
+          Text key: n, color: hue(0x800000 + @from + n)
+            "x"
+  drawn = ->
+    grid = Grid.new 8, 1
+    mounted Flag, (app, show, doc) ->
+      layout doc.body, 8
+      paint grid, doc.body
+    grid
+  front = drawn()
+  eq diff(front, drawn()), ''
+  swept = 0
+  for from in [0...70000] by 1000
+    before = styleCount()
+    last = renderToString Rainbow, cols: 100, ansi: true, props: { from }
+    swept += 1 if styleCount() < before
+    code = 0x800000 + from
+    ok last.startsWith("\x1b[38;2;#{code >> 16};#{(code >> 8) & 255};#{code & 255}mx"), JSON.stringify last.slice(0, 40)
+  ok swept >= 1, "#{swept} sweeps"
+  eq diff(front, drawn()), "\x1b[J\x1b[1G\x1b[31mkept\x1b[0m\r"
+
+test "clusters no cell shows are let go: 300,000 pass through a table that holds under 16,500", ->
+  # A letter with two combining marks: 26 × 112 × 112 clusters, a cell each.
+  cluster = (n) -> String.fromCodePoint(0x61 + n % 26, 0x300 + Math.floor(n / 26) % 112, 0x300 + Math.floor(n / 2912) % 112)
+  row = (from) -> (cluster from + n for n in [0...100]).join ''
+  accent = String.fromCodePoint 0x61, 0x328, 0x301
+  rim = String.fromCodePoint 0x6f, 0x302
+  rule = { topLeft: '+', top: '-', topRight: '+', right: '|', bottomRight: rim, bottom: rim, bottomLeft: rim, left: '|' }
+  shown = (from) -> "#{accent} still\n#{row from}\n#{rim.repeat 100}"
+  Stream = component
+    @from := 0
+    render
+      Box flexDirection: 'column', borderStyle: rule, borderTop: false, borderLeft: false, borderRight: false
+        Text "#{accent} still"
+        Text row(@from)
+  mounted Stream, (app, show, doc) ->
+    view = screenFor doc, 100
+    view.frame()
+    most = 0
+    swept = 0
+    from = 0
+    while from < 300000
+      before = clusterCount()
+      app.from.value = from += 100
+      bytes = view.frame()
+      most = Math.max most, clusterCount()
+      continue unless clusterCount() < before
+      swept += 1
+      # The cells the grids hold are renumbered; the flow of the row that
+      # stands takes its cells again, and the border its glyphs.
+      eq view.front().toString(), shown from
+      app.from.value = from += 100
+      bytes = view.frame()
+      ok not bytes.includes('still'), "the frame after a sweep redrew what had not changed"
+      eq view.front().toString(), shown from
+    ok swept >= 10, "#{swept} sweeps"
+    ok most <= 16384 + 100, "#{most} clusters were held at once"
 
 test! "a run that fails to mount gives the terminal and the process back", ->
   out = terminal 30, 8

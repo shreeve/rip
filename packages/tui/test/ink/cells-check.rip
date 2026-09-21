@@ -50,8 +50,16 @@ test "a combining mark after a style change joins the cell before it", ->
   eq styled("\x1b[34me\x1b[39m\x1b[31m\u0301X\x1b[39m"), ["«blue»e\u0301«red»X"]
   eq canon(parse("e\x1b[31m\u0301\x1b[39m"))[0].length, 1
 
-test "a sequence that is not SGR, or a style outside the table, is refused", ->
+test "a hyperlink is part of a cell's style, outlasts SGR 0, and ends on the row it begins on", ->
+  eq styled("\x1b]8;;https://example.com\x07a \x1b[0mb\x1b]8;;\x07 c"), ["«link https://example.com»a b«» c"]
+  eq styled("\x1b[31m\x1b]8;id=1;https://example.com\x1b\\a\x1b]8;;\x1b\\b\x1b[39m"), ["«red link https://example.com»a«red»b"]
+  eq plain("\x1b]8;;https://example.com\x07a\x1b]8;;\x07"), ["a"]
+  throws (-> parse "\x1b]8;;https://example.com\x07a\nb\x1b]8;;\x07"), 'left open at the end of row 1'
+  throws (-> parse "\x1b]8;;https://example.com\x07a"), 'left open at the end of the frame'
+
+test "a sequence that is not SGR or a hyperlink, or a style outside the table, is refused", ->
   throws (-> parse "\x1b[2J"), 'not SGR'
+  throws (-> parse "\x1b]0;title\x07"), 'not SGR or a hyperlink'
   throws (-> parse "\x1b[5mblink"), 'SGR 5 is not a style'
 
 test "an extended color that stops short, or leaves the byte range, is refused", ->

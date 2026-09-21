@@ -108,7 +108,7 @@ unfit = (entry) ->
     why = outside shot.tree
     return why if why
   return 'draws no frame' unless entry.frames.length
-  return 'the test compares escape bytes, and hyperlinks are not built' if entry.frames.some((shot) -> raw shot.tree) and texted(entry) is null
+  return 'the test compares the escape bytes of a hyperlink: ported by hand, with the `link` prop' if entry.frames.some((shot) -> raw shot.tree) and texted(entry) is null
   null
 
 # Why a whole test is left out of the draft, or null. A rerender is one
@@ -165,7 +165,7 @@ for entry in report
         body.push "  differs styled(#{label}#{cols}), #{list words}, #{list inks},"
         body.push "    #{lit STRIPPED}"
       else
-        body.push "  # Ink keeps the hyperlink around this text; hyperlinks are not built here." if linked shot.tree
+        body.push "  # Ink keeps the hyperlink around this text; here a hyperlink is the `link` prop, never an escape sequence in the text." if linked shot.tree
         body.push "  eq plain(#{label}#{cols}), #{list words}"
       continue
     if judged and not judged.pass and typeof judged.expected is 'string'
