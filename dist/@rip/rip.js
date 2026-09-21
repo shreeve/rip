@@ -9186,7 +9186,7 @@ var isFunc = (x) => isNode(x) && (x[0] === "->" || x[0] === "=>") && x.length ==
 var CTRL_ALL = new Set(["break", "continue", "return"]);
 var CTRL_BREAK = new Set(["break"]);
 var isDefHead = (h) => h === "def" || h === "void-def";
-function containsAwait(sexpr) {
+function containsAwait(sexpr, stores) {
   if (!isNode(sexpr))
     return false;
   const head = sexpr[0];
@@ -9195,10 +9195,10 @@ function containsAwait(sexpr) {
   if (head === "for-as" && sexpr[3] === true)
     return true;
   if (head === "class")
-    return containsAwait(sexpr[2]);
-  if (head === "->" || head === "=>" || isDefHead(head))
+    return containsAwait(sexpr[2], stores);
+  if (head === "->" || head === "=>" || isDefHead(head) || Emitter.isEffectDeclIn(stores, sexpr))
     return false;
-  return sexpr.some((item) => containsAwait(item));
+  return sexpr.some((item) => containsAwait(item, stores));
 }
 function containsYield(sexpr) {
   if (!isNode(sexpr))
@@ -10880,7 +10880,7 @@ class Emitter {
     const { iter } = entry;
     if (!this.ts || rec === undefined || iter === undefined)
       return null;
-    if (containsAwait(iter) || containsYield(iter))
+    if (this.containsAwait(iter) || containsYield(iter))
       return null;
     if (referencesNames(iter, rec.parent.locals))
       return null;
@@ -12832,7 +12832,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
     if (stmts.length === 0)
       return { code: "(function() {})", thisAt: "(function(".length, annots: [] };
     const bodyNode = stmts.length === 1 ? stmts[0] : ["block", ...stmts];
-    const isAsync = Emitter.containsAwait(bodyNode);
+    const isAsync = this.containsAwait(bodyNode);
     const isGen = Emitter.containsYield(bodyNode);
     const sub = this.subEmitter(stores);
     let bodyText;
@@ -14010,7 +14010,7 @@ ${pad ?? ""}`);
     const pad = "  ".repeat(ind);
     this.rejectYieldInIIFE(node);
     this.mark(node, "$self", () => {
-      this.b.emit(Emitter.containsAwait(node) ? `await (async () => {
+      this.b.emit(this.containsAwait(node) ? `await (async () => {
 ` : `(() => {
 `);
       const acc = this.loopTempName("result");
@@ -14190,7 +14190,7 @@ ${pad ?? ""}`);
     if (!Emitter.ifIsSimple(node)) {
       const ind = this.ind;
       this.rejectYieldInIIFE(node);
-      const isAsync = Emitter.containsAwait(node);
+      const isAsync = this.containsAwait(node);
       this.b.emit(isAsync ? "await (async () => { " : "(() => { ");
       this.mark(node, "$self", () => this.returnifyIf(node, ind));
       this.b.emit(" })()");
@@ -14312,7 +14312,7 @@ ${pad ?? ""}`);
   valueTry(node) {
     const ind = this.ind;
     this.rejectYieldInIIFE(node);
-    this.b.emit(Emitter.containsAwait(node) ? "await (async () => { " : "(() => { ");
+    this.b.emit(this.containsAwait(node) ? "await (async () => { " : "(() => { ");
     this.tryBranches(node, ind);
     this.b.emit(" })()");
   }
@@ -14377,7 +14377,7 @@ ${pad ?? ""}`);
     const ind = this.ind;
     const pad = "  ".repeat(ind);
     this.rejectYieldInIIFE(node);
-    this.b.emit(Emitter.containsAwait(node) ? "await (async () => { " : "(() => { ");
+    this.b.emit(this.containsAwait(node) ? "await (async () => { " : "(() => { ");
     this.mark(node, "$self", () => {
       if (Emitter.hasMatchArms(cases)) {
         this.checkMatchSwitch(node);
@@ -14485,7 +14485,7 @@ ${pad ?? ""}`);
     const ind = this.ind;
     const p1 = "  ".repeat(ind + 1);
     this.rejectYieldInIIFE(node);
-    this.b.emit(Emitter.containsAwait(node) ? `await (async () => {
+    this.b.emit(this.containsAwait(node) ? `await (async () => {
 ` : `(() => {
 `);
     const acc = this.loopTempName("result");
@@ -14656,7 +14656,7 @@ ${pad ?? ""}`);
     if (typeof node[1] !== "string") {
       throw this.positionedError(node, "emitter: `def @name` declares a static class method — spell it inside a class body");
     }
-    const isAsync = Emitter.containsAwait(node[3]);
+    const isAsync = this.containsAwait(node[3]);
     const isGen = Emitter.containsYield(node[3]);
     this.tsOverloadSigs(node, ind);
     this.mark(node, "voidMarker", () => this.mark(node, "returnType", () => this.mark(node, "$self", () => {
@@ -14717,8 +14717,8 @@ ${pad ?? ""}`);
       this.b.emit("  ".repeat(ind) + "}");
     });
   }
-  static containsAwait(sexpr) {
-    return containsAwait(sexpr);
+  containsAwait(sexpr) {
+    return containsAwait(sexpr, this.stores);
   }
   static containsBareIt(n) {
     if (n === "it")
@@ -15022,7 +15022,7 @@ ${pad ?? ""}`);
     if (head === "throw" && node.length === 2) {
       this.rejectYieldInIIFE(node);
       this.mark(node, "$self", () => {
-        this.b.emit(Emitter.containsAwait(node) ? "await (async () => { throw " : "(() => { throw ");
+        this.b.emit(this.containsAwait(node) ? "await (async () => { throw " : "(() => { throw ");
         this.mark(node, "value", () => this.expr(node[1]));
         this.b.emit("; })()");
       });
@@ -15427,7 +15427,7 @@ ${pad ?? ""}`);
     if (head === "state" && target === "__state" || head === "computed" && target === "__computed") {
       throw this.positionedError(node, `emitter: '${target} ${op} …' would bind the very runtime name its own lowering calls (const ${target} = ${target}(…) — a TDZ self-reference); rename the variable`);
     }
-    if (head === "computed" && Emitter.containsAwait(value)) {
+    if (head === "computed" && this.containsAwait(value)) {
       throw this.positionedError(node, "emitter: a computed ('~=') body cannot await — computeds evaluate synchronously (make it a state written by an effect)");
     }
     if (head === "computed" && Emitter.containsYield(value)) {
@@ -15610,7 +15610,7 @@ ${pad ?? ""}`);
       this.b.emit(")");
       return;
     }
-    const isAsync = Emitter.containsAwait(body);
+    const isAsync = this.containsAwait(body);
     emitName();
     this.b.emit(isAsync ? "(async () => " : "(() => ");
     if (isBlock(body)) {
@@ -15938,7 +15938,7 @@ ${pad ?? ""}`);
           declare(t.name, "state", stmt, true);
           stateVars.push({ name: t.name, value: stmt[2], isPublic: t.isPublic, required: false, node: stmt });
         } else {
-          if (Emitter.containsAwait(stmt[2])) {
+          if (this.containsAwait(stmt[2])) {
             throw this.positionedError(stmt, "emitter: a computed ('~=') body cannot await — computeds evaluate synchronously (make it a state written by an effect)", node);
           }
           if (Emitter.containsYield(stmt[2])) {
@@ -16363,7 +16363,7 @@ ${pad ?? ""}`);
       const emitBodyEffects = (bodyPad) => {
         for (const eff of effects) {
           const bodyNode = eff[2];
-          const isAsync = Emitter.containsAwait(bodyNode);
+          const isAsync = this.containsAwait(bodyNode);
           this.b.emit(bodyPad);
           this.mark(eff, "$self", () => {
             this.mark(eff, "operator", () => this.b.emit(this.runtimeName("__effect")));
@@ -16490,7 +16490,7 @@ ${pad ?? ""}`);
         const evParamType = evRec !== undefined ? this.tsEventTypeText([...evRec.events], evHost) : name === "onError" ? COMPONENT_FAILURE_TYPE : null;
         this.b.emit(pad);
         this.mark(owner, "$self", () => {
-          if (Emitter.containsAwait(block))
+          if (this.containsAwait(block))
             this.b.emit("async ");
           if (Emitter.containsYield(block))
             this.b.emit("*");
@@ -16498,7 +16498,7 @@ ${pad ?? ""}`);
           this.b.emit("(");
           this.emitParams(params, evParamType);
           this.b.emit(")");
-          this.tsReturnAnnotation(func, Emitter.containsAwait(block), isVoid, Emitter.containsYield(block), owner);
+          this.tsReturnAnnotation(func, this.containsAwait(block), isVoid, Emitter.containsYield(block), owner);
           this.b.emit(" ");
           this.mark(owner, "value", () => {
             this.methodBlock(func, block, ind + 1, {
@@ -19925,7 +19925,7 @@ ${this.replayPad}}` : " }");
     const simple = typeof source === "string" && (source === "this" || /^[A-Za-z_$][\w$]*$/.test(source));
     if (!simple) {
       for (const item of items) {
-        if (item[2] !== null && Emitter.containsAwait(item[2])) {
+        if (item[2] !== null && this.containsAwait(item[2])) {
           throw this.positionedError(item, "emitter: a pick default cannot await when the source needs single evaluation — the lowering's '(_) =>' arrow is not async; bind the source first", node);
         }
         if (item[2] !== null && Emitter.containsYield(item[2])) {
@@ -20344,7 +20344,7 @@ ${this.replayPad}}` : " }");
             this.b.emit(sep(i));
           if (isMethod[i]) {
             this.mark(pair, "voidMarker", () => this.mark(pair, "$self", () => {
-              if (Emitter.containsAwait(pair[2][2]))
+              if (this.containsAwait(pair[2][2]))
                 this.b.emit("async ");
               if (Emitter.containsYield(pair[2][2]))
                 this.b.emit("*");
@@ -20354,7 +20354,7 @@ ${this.replayPad}}` : " }");
               this.b.emit("(");
               this.mark(pair[2], "params", () => this.emitParams(params, null, !inArgs));
               this.b.emit(")");
-              this.tsReturnAnnotation(pair[2], Emitter.containsAwait(block), pair[0] === "void-pair", Emitter.containsYield(block), pair);
+              this.tsReturnAnnotation(pair[2], this.containsAwait(block), pair[0] === "void-pair", Emitter.containsYield(block), pair);
               this.b.emit(" ");
               this.mark(pair, "value", () => {
                 this.methodBlock(pair[2], block, objInd, { isConstructor: false, binds: [], methodName: pair[1], voidBody: pair[0] === "void-pair" });
@@ -20592,7 +20592,7 @@ ${this.replayPad}}` : " }");
           if (pair[2][0] === "=>") {
             throw this.positionedError(pair, `emitter: a ${form.form} accessor takes '->' — accessors are looked up on the instance, never bound`, stmt);
           }
-          if (Emitter.containsAwait(pair[2][2]) || Emitter.containsYield(pair[2][2])) {
+          if (this.containsAwait(pair[2][2]) || Emitter.containsYield(pair[2][2])) {
             throw this.positionedError(pair, `emitter: a ${form.form} accessor cannot await or yield — JavaScript has no async or generator accessors`, stmt);
           }
           if (form.form === "get" && arity !== 0) {
@@ -20683,7 +20683,7 @@ ${this.replayPad}}` : " }");
     }
   }
   classFieldValue(value) {
-    if (Emitter.containsAwait(value)) {
+    if (this.containsAwait(value)) {
       throw this.positionedError(value, "emitter: a class field initializer cannot await — JavaScript evaluates class fields synchronously");
     }
     if (Emitter.containsYield(value)) {
@@ -20736,7 +20736,7 @@ ${this.replayPad}}` : " }");
             this.mark(pair, "voidMarker", () => this.mark(pair, "$self", () => {
               if (isStaticKey(key))
                 this.b.emit("static ");
-              if (Emitter.containsAwait(value[2]))
+              if (this.containsAwait(value[2]))
                 this.b.emit("async ");
               if (Emitter.containsYield(value[2]))
                 this.b.emit("*");
@@ -20794,7 +20794,7 @@ ${this.replayPad}}` : " }");
               this.emitParams(params, null, accessor !== "set");
               this.b.emit(")");
               if (!isCtor) {
-                this.tsReturnAnnotation(value, Emitter.containsAwait(value[2]), isVoidPair, Emitter.containsYield(value[2]), pair);
+                this.tsReturnAnnotation(value, this.containsAwait(value[2]), isVoidPair, Emitter.containsYield(value[2]), pair);
               }
               this.b.emit(" ");
               this.mark(pair, "value", () => {
@@ -21236,7 +21236,7 @@ ${"  ".repeat(ind)}`);
     for (const n of this.pushReactiveFrame(stmts, names, params, node))
       names.add(n);
     this.scopes.push(names);
-    const isAsync = Emitter.containsAwait(block);
+    const isAsync = this.containsAwait(block);
     const isGen = Emitter.containsYield(block);
     if (isGen && kind === "=>") {
       throw this.positionedError(node, srcKind === "->" ? "emitter: a generator arrow cannot sit inside a component body — thin arrows lower to fat arrows there to keep `this` on the instance, and JS has no generator arrows (name the generator a method and call it)" : "emitter: fat arrows cannot contain yield (JS has no generator arrows; use ->)");

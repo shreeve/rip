@@ -658,6 +658,10 @@ describe('TS-face emission pins', () => {
     // A user-spelled Promise passes through unwrapped.
     expect(ts('def go2(a: number): Promise<number>\n  await a\n').code)
       .toBe('async function go2(a: number): Promise<number> {\n  return await a;\n}' + MARKER);
+    // An effect's await is the effect's own: the function declaring it returns what it says.
+    const watch = ts('def watch(a: number): number\n  ~> await a\n  a\n').code;
+    expect(watch).toContain('function watch(a: number): number {');
+    expect(watch).not.toContain('async function');
   });
 
   test('void definitions annotate `: void` (async: Promise<void>) under the voidMarker', () => {
