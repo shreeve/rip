@@ -2645,8 +2645,9 @@ function serialize(v, field) {
 }
 
 // A document nests no deeper than harbor's own request parser reads. The
-// engine's cast from JSON to VARIANT recurses: text nested twenty thousand
-// deep holds a connection for minutes, and deeper takes the server down.
+// engine's cast from JSON to VARIANT costs the square of the depth, 16
+// seconds at 5,000 levels, and recurses: at 20,000 the engine segfaults,
+// and reading a 5,000-deep document back through harbor ends the server.
 // JSON.parse reads any depth and JSON.stringify writes tens of thousands,
 // so nothing upstream of here stops such a document. The scan is the
 // text's own brackets, outside its strings.
