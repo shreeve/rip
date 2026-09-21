@@ -219,8 +219,19 @@ view.ansi                   # that frame with its escape sequences
 view.bytes                  # what a terminal was sent for it: the 7, and the moves to reach it
 view.damage                 # the cells that frame painted and compared: 7, the text's words
 view.resize 20, 5           # the next frame is drawn whole, 20 by 5
+view.press 'Tab'            # one key, by DOM's name or a character
+view.press 'c', ctrl: true  # with `ctrl`, `shift`, `alt`, `meta`, `repeat`
+view.type 'hello'           # text as a terminal sends it: a key per code point
+view.paste 'two\rlines'     # one paste event
+view.send '\x1b[1;5A'       # raw bytes, through the parser
+view.tick 50                # move the parser's clock: a lone ESC is Escape after 50 ms
+view.focused                # the node that has focus, or null
+view.cursor                 # where the last frame parked the cursor, { x, y }, or null while hidden
 view.close()                # unmount, and give the process its `document` slot back
 ```
+
+Input takes the road `run` reads stdin by — the same dispatch, the same
+default actions — and draws nothing: ask for the frame.
 
 Nothing is drawn until `frame` asks, so a frame that fails — a layout
 that never settles — throws from `frame`, to the test that asked for
@@ -241,12 +252,151 @@ refused by name until the first is closed — close in a `finally`.
 `renderToString App, cols: 40` is a mount, one frame, and a close; it
 takes `props`, and `ansi: true` keeps the escape sequences.
 
+## Input and focus
+
+`run` reads the terminal's keys and hands each to the app as an event,
+the way a browser does. A key is a `keydown` sent to the node that has
+focus, or to the app's root element while nothing has it. It runs the
+capture phase from the document down to that node, then the node's own
+listeners, then bubbles back up to the document, and any listener may
+stop it there (`stopPropagation`) or keep its default action from
+running (`preventDefault`).
+
+```coffee
+Select = component
+  @items := []
+  @chosen := null
+  at := 0
+  el := null
+  move: (event) ->
+    switch event.key
+      when 'ArrowDown' then @at = (@at + 1) % @items.length
+      when 'ArrowUp'   then @at = (@at - 1 + @items.length) % @items.length
+      when 'Enter'     then @chosen = @items[@at]
+  render
+    div ref: el, focusable: true, autofocus: true, @keydown: @move, borderStyle: 'round', borderColor: (if el?.focused then 'cyan' else 'gray')
+      for item, n in @items
+        Text key: item, inverse: n is at
+          "#{item}"
+```
+
+The event is DOM's `KeyboardEvent` in what it carries — `key`
+(`'Enter'`, `'ArrowUp'`, `'F5'`, or one code point), `ctrlKey`,
+`shiftKey`, `altKey`, `metaKey`, `repeat`, and `sequence`, the bytes as
+they came — and DOM's `Event` in how it travels: `target`,
+`currentTarget`, `eventPhase` (1 capture, 2 target, 3 bubble),
+`defaultPrevented`, `stopPropagation()`, `stopImmediatePropagation()`,
+`preventDefault()`. One event object is handed to every listener of a
+key. The path is the tree as the dispatch began, so a listener that
+changes the tree changes nothing of who hears that key.
+
+| Event | Sent to | Carries | Bubbles |
+|---|---|---|---|
+| `@keydown` | the focused node, or the root element | the key's fields | yes |
+| `@paste` | the same | `text`, the whole paste; never key events | yes |
+| `@focus`, `@blur` | the node that takes or loses focus | | no, as DOM's do not; the capture phase reaches them |
+| a component's `emit 'name', detail` | the component's root | `detail` | yes |
+
+A listener asks for the capture phase by a name that ends in `Capture`
+— `@keydownCapture: handler`, which is how a dialog takes a key before
+the node under it does — or, on a node in hand, by
+`node.addEventListener 'keydown', handler, true` (or `{ capture:
+true }`). `document.addEventListener` hears every key last, or first
+when it captures.
+
+**Default actions** run after the listeners, for a key none of them
+prevented:
+
+| Key | Does | Keep the key with |
+|---|---|---|
+| Tab, Shift-Tab (no Ctrl, Alt or Meta) | focus to the next or the previous node | `event.preventDefault()` — a text input that takes Tab |
+| Ctrl-C | `quit()` | `event.preventDefault()` — an app that asks before it leaves |
+| Escape | nothing: closing a dialog or clearing an input is the app's | |
+
+Once the app is closing, what is left of the same read is dropped.
+
+**Focus** belongs to a node. Any element is `focusable: true`;
+`disabled: true` on a node or on anything above it, `hidden`, and
+`display: 'none'` take a node and everything under it out of reach. Tab
+follows the tree's order, found by a walk when Tab is pressed, so a
+list that is reordered is walked as it stands, and a focused node that a
+reorder moves keeps its focus. A focused node that is removed, hidden or
+disabled loses focus to nothing — the next Tab starts from the top —
+and hears `blur`. `autofocus: true` is a claim made once, when the node
+arrives: the first such node in tree order takes focus if nothing has
+it, and never takes it from a node that does.
+
+```coffee
+el.focus()                 # take focus, if the node can hold it
+el.blur()                  # give it up
+el.focused                 # a reactive read: style a node by it, through `ref:`
+document.activeElement     # the node that has focus, or null
+focus.active               # the same, from 'rip/tui'; a reactive read
+focus.next()               # Tab's move, and Shift-Tab's
+focus.previous()
+focus.to node              # `node.focus()`; `focus.to null` lets go
+screen.focused             # whether the terminal itself is the window in use
+```
+
+**The cursor** is hidden unless the focused node declares one:
+`cursor: { x, y }`, in whole cells from the node's own top-left corner,
+its border and padding included, with `x` counted in cells, so text of
+wide glyphs is measured, not counted. After every frame the hardware
+cursor is parked there and shown, where an input method and a screen
+reader look for it. Content offsets above the node move it, and a clip
+that leaves its cell out — or a frame taller than the terminal, whose
+top rows are not shown — hides it. On `quit` it returns to the line
+below the frame.
+
+A text input inserts `event.key` when it is one code point, and cuts
+its buffer into clusters for Backspace and for the cursor's column (the
+next section says why):
+
+```coffee
+clusters = Intl.Segmenter.new undefined, { granularity: 'grapheme' }
+
+Input = component
+  @value := ''
+  typed: (event) ->
+    if event.key is 'Backspace'
+      parts = Array.from clusters.segment(@value), (part) -> part.segment
+      @value = parts.slice(0, -1).join ''
+    else if Array.from(event.key).length is 1 and not event.ctrlKey and not event.altKey and not event.metaKey
+      @value += event.key
+  render
+    Box focusable: true, autofocus: true, borderStyle: 'single', width: 20, cursor: { x: 1 + Bun.stringWidth(@value), y: 1 }, @keydown: @typed, @paste: ((event) => @value += event.text)
+      Text "#{@value}"
+```
+
+`run App, stdin: stream` reads `stream`; the default is the process's
+own stdin, unless `stdout` is given and `stdin` is not, since a stream
+of one's own takes no keys from the terminal the process is on. A stdin
+that is a terminal is set raw and asked for bracketed paste and focus
+reports for the life of the app, and all of it is given back on every
+way out — `quit`, Ctrl-C, a throw while the app mounts, a frame or a
+listener that fails — and stdin is left paused and unref'd, so it does
+not keep the process alive. A stdin that is no terminal (a pipe, CI) is
+left alone: no key arrives and nothing is asked of the terminal. One
+read is one frame, however many keys
+it holds, and a key that changes nothing owes no frame and draws
+nothing. On the select list above with ten items, an arrow key — its
+bytes through the parser, the dispatch, the listener, the state change,
+and the frame of 12 cells and 55 bytes it causes — is about 8 µs, and a
+key no listener acts on about 0.3 µs; with a hundred items the arrow is
+about 55 µs, since each item's `inverse` is a binding that reads `at`
+(Apple M5, Bun 1.4.2; `bun run keys` in `bench/`).
+
+Mouse events (`@click`, `@wheel`), the enhanced keyboard, and Ctrl-Z are
+[PLAN.md](PLAN.md)'s next steps.
+
 ## Input events
 
 `input.rip` turns the bytes a terminal sends into events — `key`,
-`paste`, `focus` / `blur`, `mouse`, `reply`. It stands alone: `run`
-does not read stdin, and wiring the two is step 4 of [PLAN.md](PLAN.md)
-§12. What a text input can rely on is settled:
+`paste`, `focus` / `blur`, `mouse`, `reply` — and stands alone: `run`
+reads stdin through it, and `mount` sends a test's bytes through it. A
+`key` becomes a `keydown`, a `paste` a `paste`, and the terminal's
+`focus` / `blur` reports `screen.focused`. What a text input can rely
+on:
 
 - **Typed text is one `key` event per code point**, never per grapheme
   cluster: a cluster can be cut between two reads, and only code points
@@ -269,11 +419,11 @@ does not read stdin, and wiring the two is step 4 of [PLAN.md](PLAN.md)
 
 ## What is here, and what is planned
 
-[PLAN.md](PLAN.md) is the design and the order of work: key input and
-focus, mouse, the app lifecycle, scrollback output, and the published
-comparison with Ink. `bench/` holds the harness, both contenders
+[PLAN.md](PLAN.md) is the design and the order of work: mouse and the
+enhanced keyboard, the app lifecycle, scrollback output, and the
+published comparison with Ink. `bench/` holds the harness, both contenders
 (`bun run ink`, `bun run tui`), and the cost of one frame, whole and
-damaged (`bun run frame`).
+damaged (`bun run frame`), and of one key (`bun run keys`).
 
 ## Demo
 
@@ -304,7 +454,13 @@ holds the terminal input parser: 244 of Ink's input cases as a table
 (`test/input/SOURCE.md` says which and why not the rest), every
 sequence cut at every byte, its three waits on a clock moved by hand,
 paste, mouse, replies, and 295,000 random bytes in random cuts that
-never throw and decode the same whole or cut. `test/yoga.rip` runs Yoga's
+never throw and decode the same whole or cut. `test/events.rip` holds
+dispatch, focus and the cursor: 164 of Ink's focus, input-hook, cursor
+and exit cases through `mount` and `run` (`test/events/SOURCE.md`), the
+three phases of a dispatch in their exact order, what clears focus, the
+cursor's arithmetic replayed through a terminal that keeps its cursor,
+the bytes and the stdin calls of every way out of `run`, and 9,600
+random steps of focus under a changing tree. `test/yoga.rip` runs Yoga's
 543 generated layout cases, vendored unmodified under `test/yoga/`
 (MIT, © Meta Platforms), against the engine through a shim of the
 `yoga-layout` API. `test/yoga-aspect.rip` is a port of Yoga's 37

@@ -14,6 +14,7 @@
   "files": [
     "tui.rip",
     "document.rip",
+    "focus.rip",
     "layout.rip",
     "text.rip",
     "paint.rip",

@@ -3,6 +3,9 @@
 # carries its links, its terminal styles, and its computed box. Every
 # mutation arrives through a method here, so the document always knows
 # what changed. A member the terminal cannot honor throws by name.
+# Events are dispatched here as DOM dispatches them, and what a node is
+# to the keyboard — `focusable`, `autofocus`, `disabled`, `cursor` — is
+# kept here; who has focus is focus.rip's.
 
 import { __setChildFailureReporter } from '../../src/runtime/components.js'
 import { admit, blame } from './layout.rip'
@@ -391,7 +394,7 @@ export class Element extends Node
 
   # `focusable`, `autofocus` and `disabled` are switches, and `cursor` a
   # place. A frame is owed when the change can move focus or the cursor:
-  # a claim, a node that may no longer hold the focus it has, the focused
+  # a claim, a node that may not hold the focus it has, the focused
   # node's own cursor.
   trait!: (key, value) ->
     if key is 'cursor'
@@ -496,7 +499,7 @@ export class Document extends Target
   createDocumentFragment: -> Node.new 11
 
   # The node that has focus, a reactive read; null the moment that node
-  # can no longer hold it.
+  # cannot hold it.
   get activeElement: ->
     node = @lit.read()
     if node and open(node, this) then node else null

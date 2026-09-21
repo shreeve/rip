@@ -39,7 +39,28 @@ steps are in [PLAN.md](PLAN.md).
       12,000: the run ends while the damage path is still being
       compiled. Warm the bench longer, or make the path smaller.
 
-## 6. Compiler-side, filed separately
+## 6. Input and focus
+
+- [ ] Focus that a removed node held goes to nothing. A dialog that
+      closes leaves the keyboard with the root element until Tab; giving
+      focus back to the node that had it before the dialog took it — and
+      holding Tab inside a dialog while it is open — is undecided.
+- [ ] `autofocus` on a node that is not `focusable` claims nothing, in
+      silence: the two switches arrive in either order, so neither write
+      can refuse the other's absence.
+- [ ] Tab walks the tree from the focused node, passing over shut
+      subtrees whole: unmeasured on a tree of 10,000 nodes.
+- [ ] A select list that marks its choice with one binding an item
+      (`inverse: n is at`) pays for every item on every arrow key: about
+      55 µs at a hundred items where ten cost 8 (`bun run keys`).
+- [ ] `run`'s stdin and mode handling is `listen` and `close` in
+      `tui.rip`; it moves into `terminal.rip`'s setup and teardown with
+      the lifecycle (PLAN §8), where Ctrl-Z and the signals need it.
+
+## 7. Compiler-side, filed separately
 
 - A typed vocabulary for non-HTML hosts, so `rip check` and the editor
   accept terminal props (PLAN §14).
+- A spelling for a capture listener in a render block. The package reads
+  a type that ends in `Capture` (`@keydownCapture:`), since `@name:` is
+  always `addEventListener(name, handler)` with no third argument.

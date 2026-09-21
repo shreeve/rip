@@ -1,0 +1,61 @@
+# ==============================================================================
+# tui bench — what one key costs: the parser, the dispatch, the listener,
+# the state change, and the frame it owes
+#
+#   cd packages/tui/bench
+#   bun run keys
+#
+# The README's select list, mounted with `mount`, sent arrow keys as the
+# bytes a terminal sends them. A key that moves the choice is timed from
+# `send` to the end of the frame it causes; a key no listener acts on
+# owes no frame, and is timed alone, as `run` would leave it. Median
+# microseconds.
+# ==============================================================================
+
+import { mount, Text } from 'rip/tui'
+
+Select = component
+  @items := []
+  @chosen := null
+  at := 0
+  el := null
+  move: (event) ->
+    switch event.key
+      when 'ArrowDown' then @at = (@at + 1) % @items.length
+      when 'ArrowUp'   then @at = (@at - 1 + @items.length) % @items.length
+      when 'Enter'     then @chosen = @items[@at]
+  render
+    div ref: el, focusable: true, autofocus: true, @keydown: @move, borderStyle: 'round', borderColor: (if el?.focused then 'cyan' else 'gray')
+      for item, n in @items
+        Text key: item, inverse: n is at
+          "#{item}"
+
+median =! (times) ->
+  times.sort (a, b) -> a - b
+  times[times.length >> 1]
+
+# The median cost of `rounds` keys, each `bytes`, after as many to warm,
+# with the frame each owes when `drawn`.
+cost =! (view, bytes, rounds, drawn) ->
+  times = []
+  for n in [0...rounds * 2]
+    start = performance.now()
+    view.send bytes
+    view.frame() if drawn
+    times.push (performance.now() - start) * 1000 if n >= rounds
+  median times
+
+for count in [10, 100]
+  items = ("item #{n}" for n in [0...count])
+  view = mount Select, cols: 40, props: { items }
+  try
+    view.frame()
+    moved = cost view, '\x1b[B', 20000, true
+    cells = view.damage
+    bytes = view.bytes.length
+    idle = cost view, 'x', 20000, false
+    view.frame()
+    raise "a key that changes nothing drew #{view.bytes.length} bytes" if view.bytes
+    console.log "#{String(count).padStart 4} items   a key that moves the choice: #{moved.toFixed 1} µs (#{cells} cells, #{bytes} bytes)   a key that changes nothing: #{idle.toFixed 1} µs"
+  finally
+    view.close()

@@ -8,7 +8,7 @@
 # disabled — and so does where it sits: a keyed list reordered takes a
 # node out and puts it back in one turn. So nothing is decided when the
 # tree changes. `tend` settles it before every key and every frame: a
-# node that can no longer hold focus loses it to nothing, and a node
+# focused node that cannot hold focus loses it to nothing, and a node
 # that arrived with `autofocus` takes it if nothing has it.
 
 # Whether `node` shuts the keyboard out of itself and all under it.

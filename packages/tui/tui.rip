@@ -1,6 +1,7 @@
 # Rip TUI: Rip components on a terminal. `run` installs the terminal
-# document, mounts the app onto it, and draws every change; `mount`
-# does the same off any terminal and draws when a test asks.
+# document, mounts the app onto it, draws every change, and reads stdin
+# into events; `mount` does the same off any terminal, draws when a test
+# asks, and takes the test's keys by the same road.
 
 import { install, Event } from './document.rip'
 import { tend, take, advance } from './focus.rip'
