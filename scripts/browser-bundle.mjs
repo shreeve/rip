@@ -96,6 +96,7 @@ const IDE_STUBS = new Map([
     `export const COMPONENT_FAILURE_TYPE = '';`,
     `export const ambientClassDeclares = () => [];`,
     `export const plainBehaviorValued = () => false;`,
+    `export const stateBehaviorValued = () => false;`,
     `export const OFFERS = '';`,
     `export const offersRecordText = ${unavailable('component type story')};`,
     `export const componentCtorMembers = () => [];`,

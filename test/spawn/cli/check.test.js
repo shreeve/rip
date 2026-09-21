@@ -361,6 +361,39 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     }
   }, 90_000);
 
+  test('an unannotated private member reads as its initializer: plain, readonly, and state', async () => {
+    const dir = workspace({
+      'member.rip': [
+        "mint = (part: string): string -> 'id-' + part",
+        'export Title = component extends h2',
+        "  plain = mint('a')",
+        "  fixed =! @rest.id ?? mint('b')",
+        '  fromPlain: number =! plain',
+        '  fromFixed: number =! fixed',
+        "  cell := mint('c')",
+        "  mode := if cell then 'wide' else 'narrow'",
+        '  fromCell: number =! cell',
+        '  Held =! component',
+        '    render',
+        "      span 'held'",
+        '  rewrite: ->',
+        "    mode = 'other'",
+        '    cell = 7',
+        '  render',
+        '    h2 id: fixed',
+        '      Held',
+      ].join('\n') + '\n',
+    });
+    try {
+      const out = JSON.parse((await check(dir, ['--json'])).stdout);
+      expect(out.map((d) => [d.code, d.line, d.column])).toEqual([
+        [2322, 5, 3], [2322, 6, 3], [2322, 9, 3], [2322, 15, 5],
+      ]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   test('an undeclared key on an extends component takes a value or a reactive name of it, and nothing else', async () => {
     const dir = workspace({
       'app.rip': [

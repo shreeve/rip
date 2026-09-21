@@ -33,7 +33,7 @@ import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttri
 import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls, CLSX_TYPE, STYLE_FN_TYPE } from './ts/dom-types.js';
 import { restAliasName, restPassthroughText, restOfComponentText, COMPONENT_FAILURE_TYPE,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
-  declaresContainer, ambientClassDeclares, plainBehaviorValued, OFFERS, offersRecordText,
+  declaresContainer, ambientClassDeclares, plainBehaviorValued, stateBehaviorValued, OFFERS, offersRecordText,
   propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType, restContainerType, MINTED,
   componentCtorMembers, componentCtorSegments, runtimeApiDeclares,
   syntacticLiteralType,
@@ -10066,7 +10066,7 @@ class Emitter {
         // reads exactly as the real emission does; the rollback returns
         // everything it consumed.
         if (behavior !== null && tsInfo !== null) {
-          const tm = tsInfo.members.find((x) => x.node === m.node && x.kind === 'plain');
+          const tm = tsInfo.members.find((x) => x.node === m.node);
           if (tm !== undefined && plainBehaviorValued(tm)) {
             const code = this.capturedExprText(() => memberValue(m.node, m.value));
             computedBodies.push({ name: m.name, code, block: false });
@@ -10107,6 +10107,13 @@ class Emitter {
           }
           this.b.emit(')');
         });
+        if (behavior !== null && tsInfo !== null) {
+          const tm = tsInfo.members.find((x) => x.node === m.node);
+          if (tm !== undefined && stateBehaviorValued(tm)) {
+            const code = this.capturedExprText(() => memberValue(m.node, m.value));
+            computedBodies.push({ name: m.name, code, block: false });
+          }
+        }
       };
       const emitComputed = (m) => {
         initLine(m.node, () => {

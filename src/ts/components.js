@@ -216,6 +216,7 @@ export function componentTypeInfo(stores, source, node, behavior = null, { spell
         node: stmt, name: t.name, kind, isPublic: t.isPublic,
         optional: hasRole(stmt, 'optionalMarker'), hasDefault: true,
         annotation: roleText(stmt, 'annotation'),
+        isComponentValued: kind === 'readonly' && semantic(stmt[2]) === 'component',
         ...nameMark(stmt, stmt[1]),
       });
       return;
@@ -567,17 +568,23 @@ export const formTableType = (m) => {
       : null);
 };
 
-// A PRIVATE plain member the form table cannot spell reads through the
+// A PRIVATE plain or `=!` member the form table cannot spell reads through the
 // behavior object too (`updateUser = createMutation(...)` — a call
 // spells nothing, and `any` buried the initializer's real type). The
 // emitter captures the initializer as a thunk under the same predicate,
-// so the two decisions cannot drift. Public plain members stay out (the
+// so the two decisions cannot drift. Public members stay out (the
 // props seam types them), and a member-held component declaration is
 // excluded by the stores' SEMANTIC verdict, recorded at classify time
 // (its class must not be re-lowered into a thunk).
 export const plainBehaviorValued = (m) =>
-  m.kind === 'plain' && !m.isPublic && Boolean(m.behavior) &&
+  (m.kind === 'plain' || m.kind === 'readonly') && !m.isPublic && Boolean(m.behavior) &&
   formTableType(m) === null && m.isComponentValued !== true;
+
+// Private unannotated state the form table cannot spell takes the same
+// road: `_init` seeds the cell from the initializer and nothing else, so
+// the thunk's return is the cell's value type.
+export const stateBehaviorValued = (m) =>
+  m.kind === 'state' && !m.isPublic && Boolean(m.behavior) && formTableType(m) === null;
 
 // The VOID SLOT: `?:` reaches inside the container — but only where
 // absence can actually inhabit the slot. `x?: T` is `T | undefined` in
@@ -610,6 +617,9 @@ const memberTypeSegments = (m, lead, info = null) => {
   if (isBehaviorProjected(m)) {
     const rt = `ReturnType<typeof ${m.behavior}.${m.name}>`;
     return [{ text: `${lead}{ readonly value: ${rt}; read(): ${rt} }` }];
+  }
+  if (stateBehaviorValued(m)) {
+    return [{ text: `${lead}${containerType(`ReturnType<typeof ${m.behavior}.${m.name}>`, '', MINTED)}` }];
   }
   const t = formTableType(m);
   const typed = t !== null
@@ -717,8 +727,13 @@ export const memberDeclareSegments = (m, info = null) => {
   // table's `any`. `this as any` breaks the same circularity the
   // computed branch documents.
   if (plainBehaviorValued(m)) return [
+    ...(m.kind === 'readonly' ? [{ text: 'readonly ' }] : []),
     { text: m.name, node: m.nameNode, role: m.nameRole },
     { text: ` = ${m.behavior}.${m.name}.call(this as any);` },
+  ];
+  if (stateBehaviorValued(m)) return [
+    { text: m.name, node: m.nameNode, role: m.nameRole },
+    { text: ` = __state(${m.behavior}.${m.name}.call(this as any));` },
   ];
   // A stash-projected gate never reaches here: the emitter emits its
   // face TWIN (emitGateTwin — the read the author wrote, through

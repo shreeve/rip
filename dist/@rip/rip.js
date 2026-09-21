@@ -8921,6 +8921,7 @@ var routeArgType = () => "string";
 var COMPONENT_FAILURE_TYPE = "";
 var ambientClassDeclares = () => [];
 var plainBehaviorValued = () => false;
+var stateBehaviorValued = () => false;
 var OFFERS = "";
 var offersRecordText = () => {
   throw new Error("rip: component type story is unavailable in the browser");
@@ -16186,7 +16187,7 @@ ${pad ?? ""}`);
           this._componentName = prevCN;
         });
         if (behavior !== null && tsInfo !== null) {
-          const tm = tsInfo.members.find((x) => x.node === m.node && x.kind === "plain");
+          const tm = tsInfo.members.find((x) => x.node === m.node);
           if (tm !== undefined && plainBehaviorValued(tm)) {
             const code = this.capturedExprText(() => memberValue(m.node, m.value));
             computedBodies.push({ name: m.name, code, block: false });
@@ -16218,6 +16219,13 @@ ${pad ?? ""}`);
           }
           this.b.emit(")");
         });
+        if (behavior !== null && tsInfo !== null) {
+          const tm = tsInfo.members.find((x) => x.node === m.node);
+          if (tm !== undefined && stateBehaviorValued(tm)) {
+            const code = this.capturedExprText(() => memberValue(m.node, m.value));
+            computedBodies.push({ name: m.name, code, block: false });
+          }
+        }
       };
       const emitComputed = (m) => {
         initLine(m.node, () => {

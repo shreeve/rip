@@ -72,6 +72,7 @@ const REGION_SHAPES = [
   /^\) as \(e: .*\) => unknown$/su,                        // handler cast's TYPED close (the event's function type)
   /^__ripRefCell(Svg)?\('[a-zA-Z][\w-]*',$/u,              // ref-wrap opener (the cell-admission call around the cell bytes)
   new RegExp(String.raw`^${ID} = __computed\(\(\) => __${ID}__computed\.${ID}\.call\(this as any\)\);$`, 'su'), // an unannotated computed's INFERRED position — a field with no type node, so quickinfo prints the resolved type instead of echoing a projection
+  new RegExp(String.raw`^(readonly )?${ID} = (__state\()?__${ID}__computed\.${ID}\.call\(this as any\)\)?;$`, 'su'), // an unannotated private plain, `=!`, or state member's INFERRED position, through the thunk of its initializer
   new RegExp(String.raw`^const __${ID}__(behavior|computed) = \{`, 'su'), // the behavior objects (schema callable / component computed return types)
   new RegExp(String.raw`^(export )?type ${ID}`, 'u'),      // alias / enum companion / schema alias
   new RegExp(String.raw`^/\*\* [^\n]* \*/\ntype __Rip${ID}`, 'u'), // a minted alias carrying its doc — the sentence the editor shows on the name
