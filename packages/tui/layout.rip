@@ -189,8 +189,6 @@ class Flex
     @free = 0                # the space `consumed` leaves; below zero, they overflow
     @mainDim = 0             # how far the line runs along the main axis, this node's edges included
     @crossDim = 0            # how far across it
-    @ascent = 0              # the most a child on it reaches above its baseline, and below
-    @descent = 0
 
 # The parsed lengths of a node with no styles: nothing written, and a
 # border of zero.
@@ -297,6 +295,8 @@ rootNode = null  # the node `layout` was handed, while its pass runs
 differs = false  # out of `parse`: whether any slot came out different
 outMode = 0      # out of `constrain`: the offer, as the child's max leaves it
 outSize = 0
+outAscent = 0    # out of `reach`: the most a line's children reach above their
+outDescent = 0   # baselines, and below
 
 # ── Numbers ───────────────────────────────────────────────────────────────────
 
@@ -1029,11 +1029,11 @@ baselined =! (lay) ->
   false
 
 # One child's reach above and below its baseline, into the most of each
-# on its line.
-reach! =! (f, kid, k) ->
-  up = baselineOf(kid) + marginAt(k, TOP, f.innerW)
-  f.ascent = fmax f.ascent, up
-  f.descent = fmax f.descent, k.measured[HEIGHT] + marginAxis(k, COLUMN, f.innerW) - up
+# on its line so far. Answers in `outAscent` and `outDescent`.
+reach! =! (kid, k, ownerW, ascent, descent) ->
+  up = baselineOf(kid) + marginAt(k, TOP, ownerW)
+  outAscent = fmax ascent, up
+  outDescent = fmax descent, k.measured[HEIGHT] + marginAxis(k, COLUMN, ownerW) - up
 
 # ── Lines ─────────────────────────────────────────────────────────────────────
 
@@ -1228,8 +1228,8 @@ justify! =! (lay, f, ownerW, perform) ->
       between += lead * 2
   f.mainDim = leadingInside + lead
   f.crossDim = 0
-  f.ascent = 0
-  f.descent = 0
+  ascent = 0
+  descent = 0
   onBaseline = baselined lay
   skipped = not perform and f.modeCross is STRETCH_FIT
   for at in [f.from...f.to]
@@ -1249,11 +1249,13 @@ justify! =! (lay, f, ownerW, perform) ->
     else
       f.mainDim += k.measured[mainDimension] + marginAxis(k, axis, f.innerW)
       if onBaseline
-        reach f, kid, k
+        reach kid, k, f.innerW, ascent, descent
+        ascent = outAscent
+        descent = outDescent
       else
         f.crossDim = fmax f.crossDim, k.measured[DIM[cross]] + marginAxis(k, cross, f.innerW)
   f.mainDim += trailingInside
-  f.crossDim = f.ascent + f.descent if onBaseline
+  f.crossDim = ascent + descent if onBaseline
 
 # Place a line's children across it, stretching the ones that stretch.
 alignLine! =! (lay, f, leadingCross, containerCross, lineTop) ->
@@ -1341,16 +1343,18 @@ alignLines! =! (lay, f, lines, totalCross, leadingCross, insideCross, ownerCross
   for line in [0...lines]
     from = to
     tall = 0
-    f.ascent = 0
-    f.descent = 0
+    ascent = 0
+    descent = 0
     while to < list.length
       k = list[to].lay
       if k.position isnt ABSOLUTE
         break if k.lineAt isnt line
         tall = fmax tall, k.measured[crossDimension] + marginAxis(k, cross, f.innerW) if k.measured[crossDimension] >= 0
         if alignOf(lay, k) is BASELINE
-          reach f, list[to], k
-          tall = fmax tall, f.ascent + f.descent
+          reach list[to], k, f.innerW, ascent, descent
+          ascent = outAscent
+          descent = outDescent
+          tall = fmax tall, ascent + descent
       to += 1
     lead += gap if line
     tall += extra
@@ -1377,7 +1381,7 @@ alignLines! =! (lay, f, lines, totalCross, leadingCross, insideCross, ownerCross
           unless near(kidW, k.measured[WIDTH]) and near(kidH, k.measured[HEIGHT])
             visit kid, kidW, kidH, STRETCH_FIT, STRETCH_FIT, f.innerW, f.innerH, true
       else if align is BASELINE
-        k.pos[TOP] = lead + f.ascent - baselineOf(kid) + insetAt(k, TOP, f.innerCross)
+        k.pos[TOP] = lead + ascent - baselineOf(kid) + insetAt(k, TOP, f.innerCross)
     lead += perLine + tall
 
 # ── The algorithm ─────────────────────────────────────────────────────────────
