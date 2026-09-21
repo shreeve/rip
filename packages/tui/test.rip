@@ -1040,11 +1040,12 @@ test "a mount's terminal has a size: a tall frame shows its bottom, and a resize
   view = mount Sized, cols: 30, rows: 2
   try
     eq view.frame(), "two\nthree"
-    view.resize 12, 3
-    eq view.frame(), "12 wide\ntwo\nthree"
-    ok view.bytes.includes("\x1b[J") and view.bytes.includes('two'), 'a resized frame is drawn whole'
+    view.resize 30, 3
+    eq view.frame(), "30 wide\ntwo\nthree"
+    ok view.bytes.includes("\x1b[J") and view.bytes.includes('two'), 'a taller terminal is drawn whole, the rows it showed included'
     view.resize 9
     eq view.frame(), "9 wide\ntwo\nthree"
+    eq [screen.cols, screen.rows], [9, 3]
   finally
     view.close()
 
