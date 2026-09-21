@@ -226,7 +226,12 @@ function resolveTarget(url, env) {
 // Extra fields — httpStatus on any DbError, and code/details/sql on a
 // QueryError — are stamped at the throw site. CancelledError is a
 // DbError too, so one `isDbError` catch covers transport, engine, and
-// cancellation alike.
+// cancellation alike. A result the driver refuses to hand over — a
+// session with no id, a JSON cell that does not parse (`code`
+// 'invalid_json', with `columnName`, `row` and `sql`) — is a plain
+// DbError: neither the engine's verdict on a statement nor a transport
+// failure. The field is `columnName` because JavaScriptCore stamps its
+// own numeric `column`, the throw site, on every Error.
 
 class DbError extends Error {
   constructor(message) { super(message); this.name = 'DbError'; }
@@ -304,11 +309,32 @@ function decodeTemporal(value, kind) {
 // A JSON column arrives as its serialized text — the document is what
 // the column holds, so it decodes here beside the temporals, off the
 // same per-column type harbor already sends. Text that does not parse
-// returns unchanged, the same rule decodeTemporal follows: a column's
-// type stays stable except for values it genuinely names.
-function decodeJson(value) {
+// is an error naming the column: the caller declared a document, and a
+// string in its place reads wrong on every path and saves back as a
+// VARIANT string. The engine stores NaN and ±Infinity inside a document
+// and harbor spells them bare, which is the text JSON cannot carry. A
+// DbError and not a QueryError: the engine accepted the statement, and
+// packages/db's `isRetryable` reads a QueryError's message for a
+// conflict, which a quoted document or a column name could spell.
+const SHOWN_TEXT = 40;
+
+function decodeJson(value, column = null, row = null) {
   if (typeof value !== 'string') return value;
-  try { return JSON.parse(value); } catch { return value; }
+  try {
+    return JSON.parse(value);
+  } catch (cause) {
+    const name = column?.name ?? null;
+    const shown = value.length > SHOWN_TEXT ? `${value.slice(0, SHOWN_TEXT)}…` : value;
+    const error = new DbError(
+      `db: ${name == null ? 'a JSON column' : `column '${name}'`} holds text that is not JSON: ${shown} — ` +
+      'the engine stores NaN and ±Infinity inside a document, and JSON has no form for them. ' +
+      'Read the value in SQL through a cast (doc.x::DOUBLE), or repair the row.');
+    error.code = 'invalid_json';
+    if (name != null) error.columnName = name;
+    if (row != null) error.row = row;
+    error.cause = cause;
+    throw error;
+  }
 }
 
 // The decode kinds, in one lookup — `null` for every type that arrives
@@ -320,16 +346,18 @@ function cellKind(column) {
   return type === 'JSON' || column?.encoding === 'json' ? 'json' : temporalKind(type);
 }
 
-function decodeCell(value, kind) {
-  return kind === 'json' ? decodeJson(value) : decodeTemporal(value, kind);
+function decodeCell(value, kind, column, row) {
+  return kind === 'json' ? decodeJson(value, column, row) : decodeTemporal(value, kind);
 }
 
-// Whole-result decode in one pass. Fast path: when no column decodes
-// the rows are returned untouched, with no row copy.
+// Whole-result decode in one pass, so a cell that cannot decode fails
+// the query that read it; `row` on that error is the row's index in
+// the result. Fast path: when no column decodes the rows are returned
+// untouched, with no row copy.
 function decodeRows(columns, rows) {
   const kinds = (columns ?? []).map(cellKind);
   if (!kinds.some((k) => k)) return rows;
-  return rows.map((row) => row.map((v, i) => (kinds[i] ? decodeCell(v, kinds[i]) : v)));
+  return rows.map((row, r) => row.map((v, i) => (kinds[i] ? decodeCell(v, kinds[i], columns[i], r) : v)));
 }
 
 function isPlainObject(v) {
@@ -500,17 +528,25 @@ function newQueryId() {
 // normalized to `{ name, type }` (aliasing `duckdbType`) with harbor's
 // per-column extras preserved; a bare-string column degrades to
 // `{ name }` rather than spreading into char indices; temporal cells
-// decode per the column type. A write with no result set arrives as
-// empty columns and data.
+// decode per the column type, and a cell that cannot decode throws
+// with the statement stamped on the error. A write with no result set
+// arrives as empty columns and data.
 function toColumn(c) {
   return typeof c === 'string' ? { name: c } : { ...c, type: c.duckdbType ?? c.type };
 }
 
-function toResult(env) {
+function toResult(env, sql = null) {
   const columns = (env?.columns ?? []).map(toColumn);
+  let data;
+  try {
+    data = decodeRows(columns, env?.data ?? []);
+  } catch (error) {
+    if (sql != null && isDbError(error)) error.sql = sql;
+    throw error;
+  }
   return {
     columns,
-    data: decodeRows(columns, env?.data ?? []),
+    data,
     rowCount: env?.rowCount ?? (env?.data?.length ?? 0),
   };
 }
@@ -724,7 +760,7 @@ function harborAdapter(opts = {}) {
 
   const query = async (sql, params = null, opts = {}) =>
     toResult(await request('POST', '/sql', params?.length ? { sql, params: encodeParams(params) } : { sql },
-      sql, opts?.signal, opts?.timeoutMs));
+      sql, opts?.signal, opts?.timeoutMs), sql);
 
   // The deployed schema in ONE call — `GET /catalog` (duckdb-harbor
   // >= 0.9.0): tables with columns, primary keys, genuine CREATE INDEX
@@ -761,7 +797,7 @@ function harborAdapter(opts = {}) {
     const run = async (sql, params = null, opts = {}) => toResult(await request(
       'POST', '/sql',
       params?.length ? { sql, params: encodeParams(params), sessionId } : { sql, sessionId },
-      sql, opts?.signal, opts?.timeoutMs));
+      sql, opts?.signal, opts?.timeoutMs), sql);
     const drop = async () => {
       // Best-effort: harbor's idle TTL reaps an abandoned session, so a
       // failed DELETE only delays cleanup, never leaks a transaction.

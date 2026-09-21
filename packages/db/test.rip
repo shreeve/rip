@@ -585,6 +585,22 @@ test! "a 5xx during a query is a ConnectionError, not a QueryError", ->
   ok err instanceof ConnectionError
   eq err.sql, 'SELECT 1'
 
+# The quoted document and the column name both spell the word isRetryable
+# reads a QueryError's message for, so the class is what keeps a
+# transaction from re-running a read that fails identically every time.
+test! "a JSON cell that does not parse is a DbError naming the column, never retryable", ->
+  columns = [{ name: 'conflict', duckdbType: 'VARIANT', lossless: false, encoding: 'json' }]
+  fetch = fetchDouble { '/sql': { json: { ok: true, columns, data: [['{"status":"conflict","x":Infinity}']], rowCount: 1 } } }
+  err = trap! (-> harborAdapter({ url: 'http://h', fetch }).query! 'SELECT conflict FROM t')
+  ok isDbError err
+  ok not (err instanceof QueryError)
+  ok not (err instanceof ConnectionError)
+  eq err.code, 'invalid_json'
+  eq err.columnName, 'conflict'
+  eq err.sql, 'SELECT conflict FROM t'
+  ok err.message.includes "column 'conflict' holds text that is not JSON: {\"status\":\"conflict\",\"x\":Infinity}"
+  ok not isRetryable err
+
 p "\nAdapter — timeout and abort"
 
 test! "a hung harbor rejects with a TIMEOUT ConnectionError at the deadline", ->
@@ -767,8 +783,16 @@ test! "a JSON column decodes to its document", ->
   eq (decoded! 'JSON', '[1,2,3]'), [1, 2, 3]
   eq (decoded! 'json', '{"a":true}'), { a: true }
 
-test! "JSON text that does not parse passes through unchanged", ->
-  eq decoded!('JSON', '{not json'), '{not json'
+test! "JSON text that does not parse fails the read, naming the column", ->
+  err = caught! decoded('JSON', '{not json')
+  ok isDbError err
+  eq err.code, 'invalid_json'
+  eq err.columnName, 'v'
+  eq err.row, 0
+  eq err.sql, 'SELECT v'
+  ok err.message.includes "column 'v' holds text that is not JSON: {not json"
+
+test! "SQL NULL and a non-string cell in a JSON column pass through", ->
   eq decoded!('JSON', null), null
   eq decoded!('JSON', 42), 42
 
