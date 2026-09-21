@@ -2824,6 +2824,11 @@ var CLOSERS = new Set([
 ]);
 var COMPONENT_RE = /^[A-Z][A-Za-z0-9]*[a-z][A-Za-z0-9]*$/;
 var INLINE_CONTENT = new Set(["STRING", "STRING_START", "NUMBER", "BOOL", "IDENTIFIER", "PROPERTY", "@", "(", "[", "{"]);
+var LINE_BREAKS = new Set(["INDENT", "OUTDENT", "TERMINATOR"]);
+var REACTIVE_DECLS = new Set(["REACTIVE_ASSIGN", "COMPUTED_ASSIGN"]);
+var PLAIN_ASSIGN = new Set(["="]);
+var CONTROL_HEADS = new Set(["IF", "UNLESS", "ELSE", "FOR", "SWITCH", "LEADING_WHEN"]);
+var FOR_SOURCES = new Set(["FORIN", "FOROF", "FORAS", "FORASAWAIT"]);
 var isHtmlTag = (name) => TEMPLATE_TAGS.has(String(name).split("#")[0]);
 var isComponentName = (name) => typeof name === "string" && COMPONENT_RE.test(name);
 var isTemplateTag = (name) => isHtmlTag(name) || isComponentName(name);
@@ -3004,6 +3009,57 @@ function rewriteRender(tokens, mintId, fail) {
       return;
     }
   };
+  const startsLine = (j) => j === 0 || LINE_BREAKS.has(tokens[j - 1].kind);
+  const declares = (j, kinds) => {
+    const after = tokens[j + 1]?.kind === "TYPE" ? tokens[j + 2] : tokens[j + 1];
+    return after !== undefined && kinds.has(after.kind);
+  };
+  const moduleValues = new Set;
+  for (let j = 0, depth = 0;j < tokens.length; j++) {
+    if (counter.on)
+      counter.n++;
+    const k = tokens[j].kind;
+    if (k === "INDENT")
+      depth++;
+    else if (k === "OUTDENT")
+      depth--;
+    else if (depth === 0 && k === "IDENTIFIER" && (startsLine(j) || tokens[j - 1].kind === "EXPORT") && declares(j, REACTIVE_DECLS)) {
+      moduleValues.add(tokens[j].value);
+    }
+  }
+  const memberNames = (from) => {
+    const names = new Set;
+    let j = from + 1;
+    while (j < tokens.length && !LINE_BREAKS.has(tokens[j].kind))
+      j++;
+    if (tokens[j]?.kind !== "INDENT")
+      return names;
+    for (let depth = 0;j < tokens.length; j++) {
+      if (counter.on)
+        counter.n++;
+      const k = tokens[j].kind;
+      if (k === "INDENT")
+        depth++;
+      else if (k === "OUTDENT" && --depth === 0)
+        break;
+      if (depth !== 1 || !LINE_BREAKS.has(k))
+        continue;
+      let h = j + 1;
+      if (tokens[h]?.kind === "OFFER" || tokens[h]?.kind === "ACCEPT")
+        h++;
+      if (tokens[h]?.kind === "@")
+        h++;
+      if (tokens[h]?.kind === "IDENTIFIER" || tokens[h]?.kind === "PROPERTY")
+        names.add(tokens[h].value);
+    }
+    return names;
+  };
+  const memberFrames = [];
+  const renderScopes = [];
+  const functionLevels = [];
+  let lineHead = null;
+  let loopVars = null;
+  const readsAsValue = (name) => renderScopes.some((s) => s.names.has(name)) || memberFrames.length > 0 && memberFrames[memberFrames.length - 1].names.has(name) || moduleValues.has(name);
   for (let i = 0;i < tokens.length; i++) {
     if (counter.on)
       counter.n++;
@@ -3011,19 +3067,39 @@ function rewriteRender(tokens, mintId, fail) {
     const next = tokens[i + 1] ?? null;
     if (textFrames.length > 0)
       closeTextFrames(t);
+    if (!LINE_BREAKS.has(t.kind) && startsLine(i))
+      lineHead = t.kind;
+    if (t.kind === "COMPONENT")
+      memberFrames.push({ level: currentIndent + 1, names: memberNames(i) });
     if (t.kind === "RENDER") {
       inRender = true;
       renderIndentLevel = currentIndent + 1;
+      renderScopes.push({ level: renderIndentLevel, names: new Set });
       out.push(t);
       continue;
     }
     if (t.kind === "INDENT") {
       currentIndent++;
+      if (inRender) {
+        const opener = tokens[i - 1]?.kind;
+        if (opener === "->" || opener === "=>") {
+          functionLevels.push(currentIndent);
+        } else if (functionLevels.length === 0 && CONTROL_HEADS.has(lineHead)) {
+          renderScopes.push({ level: currentIndent, names: new Set(lineHead === "FOR" ? loopVars ?? [] : []) });
+        }
+      }
+      loopVars = null;
       out.push(t);
       continue;
     }
     if (t.kind === "OUTDENT") {
       currentIndent--;
+      for (const frames of [memberFrames, renderScopes]) {
+        while (frames.length > 0 && frames[frames.length - 1].level > currentIndent)
+          frames.pop();
+      }
+      while (functionLevels.length > 0 && functionLevels[functionLevels.length - 1] > currentIndent)
+        functionLevels.pop();
       while (elementBodyLevels.length > 0 && elementBodyLevels[elementBodyLevels.length - 1] > currentIndent) {
         elementBodyLevels.pop();
       }
@@ -3039,6 +3115,17 @@ function rewriteRender(tokens, mintId, fail) {
     if (!inRender) {
       out.push(t);
       continue;
+    }
+    if (functionLevels.length === 0 && startsLine(i)) {
+      if (t.kind === "FOR") {
+        loopVars = [];
+        for (let j = i + 1;j < tokens.length && !FOR_SOURCES.has(tokens[j].kind) && !LINE_BREAKS.has(tokens[j].kind); j++) {
+          if (tokens[j].kind === "IDENTIFIER")
+            loopVars.push(tokens[j].value);
+        }
+      } else if (t.kind === "IDENTIFIER" && declares(i, PLAIN_ASSIGN)) {
+        renderScopes[renderScopes.length - 1]?.names.add(t.value);
+      }
     }
     if (t.kind === "=" && out.length > 0) {
       const pt = out[out.length - 1].kind;
@@ -3152,13 +3239,14 @@ function rewriteRender(tokens, mintId, fail) {
       const pt = out[out.length - 1]?.kind;
       const isAfterControlFlow = ["IF", "UNLESS", "WHILE", "UNTIL", "WHEN", "FORIN", "FOROF", "FORAS", "FORASAWAIT", "BY"].includes(pt);
       const atLineStart = t.kind === "IDENTIFIER" && (pt === "INDENT" || pt === "TERMINATOR" || pt === "RENDER");
+      const isTagWord = t.kind === "IDENTIFIER" && isTemplateTag(t.value) && (atLineStart || !readsAsValue(t.value));
       let isTemplateElement = false;
       let clsxEnd = false;
       if (t.kind === "CALL_END")
         clsxEnd = isClsxCallEnd(t);
       if (clsxEnd) {
         isTemplateElement = true;
-      } else if (t.kind === "IDENTIFIER" && isTemplateTag(t.value) && !isAfterControlFlow) {
+      } else if (isTagWord && !isAfterControlFlow) {
         isTemplateElement = true;
       } else if (t.kind === "IDENTIFIER" && !isAfterControlFlow) {
         isTemplateElement = atLineStart || startsWithTag(t);
@@ -3178,7 +3266,7 @@ function rewriteRender(tokens, mintId, fail) {
             }
           }
         }
-        const isBareTag = clsxEnd || t.kind === "IDENTIFIER" && (isTemplateTag(t.value) || atLineStart) || isClassOrIdTail;
+        const isBareTag = clsxEnd || isTagWord || atLineStart || isClassOrIdTail;
         out.push(t);
         if (isBareTag) {
           out.push(gen("CALL_START", "(", t, { at: next.start }));
