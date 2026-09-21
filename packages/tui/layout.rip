@@ -6,11 +6,11 @@
 # `AbsoluteLayout.cpp`, `FlexLine.cpp`, `Baseline.cpp`, `Cache.cpp` and
 # `PixelGrid.cpp` (MIT, © Meta Platforms, Inc. and affiliates), and
 # targets what Yoga's generated tests encode under its default config. A
-# name in parentheses is the Yoga function a passage follows.
-# An undefined number is NaN throughout, as it is in Yoga. Sizes and
+# name in parentheses is the Yoga function a passage follows. An
+# undefined number is NaN throughout, as it is in Yoga. Sizes and
 # positions stay floats until one pass rounds absolute edges, so
-# neighbors never gap or overlap: three equal shares of 100 come out
-# 33, 34, 33.
+# neighbors never gap or overlap: three equal shares of 100 come out 33,
+# 34, 33.
 #
 # Every node carries one `Lay` record: its styles parsed to numbers, its
 # layout children, its float results, and its cache. The record is
@@ -172,7 +172,7 @@ class Flex
     @innerH = NaN
     @innerMain = NaN         # …by axis; a line settles a main size that was only a limit
     @innerCross = NaN
-    @roomMain = NaN          # `innerMain` as it was offered: what children's percent limits read
+    @roomMain = NaN          # `innerMain` as offered, which children's percent limits read
     @ownerMain = NaN         # the owner's size along the main axis
     @modeMain = MAX_CONTENT  # how each inner size was offered
     @modeCross = MAX_CONTENT
@@ -187,7 +187,7 @@ class Flex
     @grow = 0                # their grow factors, summed…
     @shrink = 0              # …and their shrink factors, each scaled by its basis, negated
     @free = 0                # the space `consumed` leaves; below zero, they overflow
-    @mainDim = 0             # how far the line runs along the main axis, this node's edges included
+    @mainDim = 0             # how far it runs along the main axis, this node's edges included
     @crossDim = 0            # how far across it
 
 # The parsed lengths of a node with no styles: nothing written, and a
@@ -245,7 +245,7 @@ class Lay
     @underBaseline = false   # whether a baseline row above reads its lines and positions
     @solidW = false          # whether every width it is offered is a number, and every height
     @solidH = false
-    @textW = 0               # a text leaf's unwrapped size and its wrap mode, as `sync` last read them
+    @textW = 0               # a text leaf's unwrapped size and wrap mode, as `sync` last read them
     @textH = 0
     @textMode = 0
     # Its children:
@@ -253,7 +253,7 @@ class Lay
     @count = 0               # Yoga's child count: those and the hidden
     @filled = 0              # how many `gather` has put in `kids` so far
     @boxless = 0             # the ones that make no box, which rounding places by hand
-    @hiddenFlex = false      # whether a hidden one would flex, or sit on a baseline, were it shown
+    @hiddenFlex = false      # whether a hidden one, shown, would flex, or sit on a baseline
     @hiddenBaseline = false
     # What layout gave it, in floats:
     @padding = [0, 0, 0, 0]  # padding and border by edge, as the last visit resolved them
@@ -273,7 +273,7 @@ class Lay
     @basisPass = 0           # …started its basis over
     @linePass = 0            # …broke its children into lines: their `lineAt` is that pass's
     @layoutPass = 0          # …laid it out: its children's `pos` is that pass's
-    @settlePass = 0          # …computed its layout, resized it, or placed an absolute child under it: `settle` owes it a rounding
+    @settlePass = 0          # …computed it, resized it, or placed an absolute child under it: `settle` owes it a rounding
     # Its remembered answers:
     @entry = Entry.new()     # the last layout
     @measures = null         # up to MEASURES measure-only ones, of which `used` are live
