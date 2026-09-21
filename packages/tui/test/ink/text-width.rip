@@ -1,0 +1,216 @@
+# Ink's test/text-width.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/text-width.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, plain, styled } from './harness.rip'
+
+console.log "\nText Width"
+
+# Ink's two zero-width tests compare the frame with every U+200B taken
+# out, so a renderer may keep the character or drop it. Published Ink
+# 7.1.1 fails both: it loses the right border, and half of the wide pair.
+bare = (rows) -> (row.replaceAll('\u200b', '') for row in rows)
+
+test "zero-width spaces do not overwrite box borders", ->
+  App = component
+    render
+      Box borderStyle: 'single', width: 7
+        Text "he\u200bllo"
+  eq bare(plain App), [
+    "┌─────┐"
+    "│hello│"
+    "└─────┘"
+  ]
+
+test "zero-width overlay does not erase wide characters", ->
+  App = component
+    render
+      Box width: 4, height: 1
+        Text "你好"
+        Box position: 'absolute', left: 1
+          Text "\u200b"
+  eq bare(plain App), ["你好"]
+
+test "combining marks and joined emoji retain their graphemes", ->
+  App = component
+    render
+      Box borderStyle: 'single', width: 5
+        Text "e\u0301👩\u200d💻"
+  eq plain(App), [
+    "┌───┐"
+    "│e\u0301👩\u200d💻│"
+    "└───┘"
+  ]
+
+test "CRLF line endings do not overwrite box borders", ->
+  App = component
+    render
+      Box borderStyle: 'single', width: 7
+        Text "hello\r\nworld"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "┌─────┐\n│hello\n│world│\n└─────┘"
+  eq plain(App), [
+    "┌─────┐"
+    "│hello│"
+    "│world│"
+    "└─────┘"
+  ]
+
+test "wide characters do not add extra space inside fixed-width Box", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Box
+          Box width: 2
+            Text "🍔"
+          Text "|"
+        Box
+          Box width: 2
+            Text "⏳"
+          Text "|"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq plain(App), [
+    "🍔|"
+    "⏳|"
+  ]
+
+test "CJK characters occupy correct width in fixed-width Box", ->
+  App = component
+    render
+      Box
+        Box width: 4
+          Text "你好"
+        Text "|"
+  eq plain(App), ["你好|"]
+
+test "mixed ASCII and wide characters align correctly", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Box
+          Box width: 6
+            Text "ab🍔cd"
+          Text "|"
+        Box
+          Box width: 6
+            Text "abcdef"
+          Text "|"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq plain(App), [
+    "ab🍔cd|"
+    "abcdef|"
+  ]
+
+test "ANSI styled text does not affect layout width", ->
+  App = component
+    render
+      Box
+        Box width: 5
+          Text color: 'red'
+            "hello"
+        Text "|"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq styled(App), ["«red»hello«»|"]
+
+test "empty Text does not affect sibling layout", ->
+  App = component
+    render
+      Box
+        Text
+        Text "hello"
+  eq plain(App), ["hello"]
+
+test "truncate CJK text at end", ->
+  App = component
+    render
+      Box width: 20
+        Text wrap: 'truncate'
+          "あいうえおかきくけこ|end"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq plain(App), ["あいうえおかきくけ…"]
+
+# Ink's test asks that the row fit the box. The frame is the one Ink's
+# main branch draws: its measure reserves the whole offered width for
+# truncated text (src/dom.ts), so the row is cli-truncate's answer at 20
+# columns (oracle/truncate.ts prints it). Published Ink 7.1.1
+# measures the cut text at 19 columns, cuts it again at that width, and
+# draws "あいうえ…けこ|end".
+test "truncate CJK text in the middle", ->
+  App = component
+    render
+      Box width: 20
+        Text wrap: 'truncate-middle'
+          "あいうえおかきくけこ|end"
+  eq plain(App), ["あいうえお…けこ|end"]
+
+test "truncate CJK text at start", ->
+  App = component
+    render
+      Box width: 20
+        Text wrap: 'truncate-start'
+          "あいうえおかきくけこ|end"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq plain(App), ["…えおかきくけこ|end"]
+
+test "truncate CJK text does not exceed Box width", ->
+  App = component
+    render
+      Box
+        Box width: 20
+          Text wrap: 'truncate'
+            "あいうえおかきくけこ|end"
+        Text "|"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq plain(App), ["あいうえおかきくけ… |"]
+
+test "overlay on 2nd cell of CJK character clears the full character", ->
+  App = component
+    render
+      Box width: 20, height: 1
+        Text "あいうえおかきくけこ"
+        Box position: 'absolute', left: 9
+          Text "XYZ"
+  eq plain(App, 20), ["あいうえ XYZきくけこ"]
+
+test "overlay on 1st cell of CJK character clears trailing placeholder", ->
+  App = component
+    render
+      Box width: 20, height: 1
+        Text "あいうえおかきくけこ"
+        Box position: 'absolute', left: 10
+          Text "X"
+  eq plain(App, 20), ["あいうえおX きくけこ"]
+
+test "CJK overlay on 2nd cell of CJK clears both sides", ->
+  App = component
+    render
+      Box width: 20, height: 1
+        Text "あいうえおかきくけこ"
+        Box position: 'absolute', left: 5
+          Text "漢字テスト"
+  eq plain(App, 20), ["あい 漢字テスト けこ"]
+
+test "clipped empty write does not corrupt existing wide characters", ->
+  App = component
+    render
+      Box width: 4, height: 1, overflowX: 'hidden'
+        Text "あい"
+        Box position: 'absolute', left: -1, width: 1
+          Text "Z"
+  eq plain(App, 4), ["あい"]
+
+test "wide characters crossing the left output edge preserve visible columns", ->
+  App = component
+    render
+      Box width: 4, height: 1
+        Box position: 'absolute', left: -1
+          Text "好AB"
+        Box position: 'absolute', left: 3
+          Text "!"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "AB!"
+  eq plain(App), [" AB!"]
+

@@ -1,0 +1,23 @@
+# Ink's test/absolute-truncation.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# Published Ink 7.1.1 throws on this tree (`Expected columns to be a
+# finite number, got NaN`), so it is no oracle here: the expected frame
+# is the literal Ink's test compares against, "hello" and a blank row.
+#
+#   rip test/ink/absolute-truncation.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, plain } from './harness.rip'
+
+console.log "\nAbsolute Truncation"
+
+for wrap in ['truncate', 'truncate-start', 'truncate-middle', 'truncate-end']
+  test "#{wrap} renders text in an absolute box without an explicit width", ->
+    App = component
+      render
+        Box height: 2
+          Box position: 'absolute'
+            Text wrap: wrap
+              "hello"
+    eq plain(App, 80), ["hello", ""]

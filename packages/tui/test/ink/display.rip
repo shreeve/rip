@@ -1,0 +1,29 @@
+# Ink's test/display.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/display.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, plain } from './harness.rip'
+
+console.log "\nDisplay"
+
+test "display flex", ->
+  App = component
+    render
+      Box display: 'flex'
+        Text "X"
+  eq plain(App), ["X"]
+
+test "display none", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Box display: 'none'
+          Text "Kitty!"
+        Text "Doggo"
+  eq plain(App), ["Doggo"]
+

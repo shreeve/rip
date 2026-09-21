@@ -1,0 +1,354 @@
+# Ink's test/content-offset.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+# `contentOffsetX` and `contentOffsetY` exist on Ink's main branch only,
+# so published Ink 7.1.1 is no oracle here: every expected frame is the
+# literal Ink's test compares against.
+#
+#   rip test/ink/content-offset.rip
+
+import { test, eq, throws } from 'rip/testing'
+import { Box, Text, plain } from './harness.rip'
+
+console.log "\nContent Offset"
+
+test "contentOffsetY - scrolls content up", ->
+  App = component
+    render
+      Box height: 2, overflowY: 'hidden', contentOffsetY: 1, flexDirection: 'column'
+        Box flexDirection: 'column', flexShrink: 0
+          Text "Line 1"
+          Text "Line 2"
+          Text "Line 3"
+  eq plain(App), [
+    "Line 2"
+    "Line 3"
+  ]
+
+test "contentOffsetY - zero offset renders content unchanged", ->
+  App = component
+    render
+      Box height: 2, overflowY: 'hidden', contentOffsetY: 0, flexDirection: 'column'
+        Box flexDirection: 'column', flexShrink: 0
+          Text "Line 1"
+          Text "Line 2"
+          Text "Line 3"
+  eq plain(App), [
+    "Line 1"
+    "Line 2"
+  ]
+
+test "contentOffsetY - offset beyond content renders empty", ->
+  App = component
+    render
+      Box height: 2, overflowY: 'hidden', contentOffsetY: 5, flexDirection: 'column'
+        Box flexDirection: 'column', flexShrink: 0
+          Text "Line 1"
+          Text "Line 2"
+  eq plain(App), [
+    ""
+    ""
+  ]
+
+test "contentOffsetY - negative offset shifts content down", ->
+  App = component
+    render
+      Box height: 2, overflowY: 'hidden', contentOffsetY: -1, flexDirection: 'column'
+        Box flexDirection: 'column', flexShrink: 0
+          Text "Line 1"
+          Text "Line 2"
+  eq plain(App), [
+    ""
+    "Line 1"
+  ]
+
+test "contentOffsetX - scrolls content left", ->
+  App = component
+    render
+      Box width: 5, overflowX: 'hidden', contentOffsetX: 6
+        Box width: 11, flexShrink: 0
+          Text "Hello World"
+  eq plain(App), ["World"]
+
+test "contentOffsetX and contentOffsetY - scroll both directions", ->
+  App = component
+    render
+      Box width: 3, height: 2, overflow: 'hidden', contentOffsetX: 2, contentOffsetY: 1, flexDirection: 'column'
+        Box flexDirection: 'column', flexShrink: 0, width: 5
+          Text "aaaaa"
+          Text "bbbbb"
+          Text "ccccc"
+  eq plain(App), [
+    "bbb"
+    "ccc"
+  ]
+
+test "contentOffsetY - content stays inside border", ->
+  App = component
+    render
+      Box height: 4, width: 8, overflowY: 'hidden', contentOffsetY: 1, borderStyle: 'round', flexDirection: 'column'
+        Box flexDirection: 'column', flexShrink: 0
+          Text "Line 1"
+          Text "Line 2"
+          Text "Line 3"
+  eq plain(App), [
+    "╭──────╮"
+    "│Line 2│"
+    "│Line 3│"
+    "╰──────╯"
+  ]
+
+test "contentOffsetY - nested offset containers compose", ->
+  App = component
+    render
+      Box height: 2, overflowY: 'hidden', contentOffsetY: 1, flexDirection: 'column'
+        Box height: 4, overflowY: 'hidden', contentOffsetY: 1, flexDirection: 'column', flexShrink: 0
+          Box flexDirection: 'column', flexShrink: 0
+            Text "Line 1"
+            Text "Line 2"
+            Text "Line 3"
+            Text "Line 4"
+  eq plain(App), [
+    "Line 3"
+    "Line 4"
+  ]
+
+test "nested clipped content stays inside the outer clip", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Text "ABOVE"
+        Box height: 2, overflowY: 'hidden', flexDirection: 'column'
+          Box height: 4, marginTop: -2, overflowY: 'hidden', flexDirection: 'column', flexShrink: 0
+            Text "Line 1"
+            Text "Line 2"
+            Text "Line 3"
+            Text "Line 4"
+  eq plain(App), [
+    "ABOVE"
+    "Line 3"
+    "Line 4"
+  ]
+
+test "nested clips on different axes both apply", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Text "HEADER"
+        Box height: 2, overflowY: 'hidden', flexDirection: 'column'
+          Box width: 3, overflowX: 'hidden', marginTop: -1, flexDirection: 'column', flexShrink: 0
+            Text "AAAAAA"
+            Text "BBBBBB"
+            Text "CCCCCC"
+  eq plain(App), [
+    "HEADER"
+    "AAA"
+    "BBB"
+  ]
+
+test "disjoint nested clips render nothing", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Text "HEADER"
+        Box width: 5, overflowX: 'hidden'
+          Box marginLeft: 10, width: 10, overflowX: 'hidden', flexShrink: 0
+            Text "XXXXXXXXXX"
+  eq plain(App), [
+    "HEADER"
+    ""
+  ]
+
+test "disjoint nested clips do not overwrite content when a wide character straddles the edge", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Text "XXXXXXXXXX"
+        Box marginTop: -1, width: 5, overflowX: 'hidden', flexShrink: 0
+          Box marginLeft: 6, width: 5, overflowX: 'hidden', contentOffsetX: 1, flexShrink: 0
+            Box flexShrink: 0
+              Text "你AAAA"
+  eq plain(App, 20), [
+    "XXXXXXXXXX"
+    ""
+  ]
+
+test "contentOffsetY - nested clipped content does not escape the outer viewport", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Text "ABOVE"
+        Box height: 2, overflowY: 'hidden', contentOffsetY: 1, flexDirection: 'column'
+          Box height: 4, overflowY: 'hidden', flexDirection: 'column', flexShrink: 0
+            Text "Line 1"
+            Text "Line 2"
+            Text "Line 3"
+            Text "Line 4"
+  eq plain(App), [
+    "ABOVE"
+    "Line 2"
+    "Line 3"
+  ]
+
+test "contentOffsetX/Y - fractional offsets are truncated to whole cells", ->
+  App1 = component
+    render
+      Box height: 2, overflowY: 'hidden', contentOffsetY: 1.5, flexDirection: 'column'
+        Box flexDirection: 'column', flexShrink: 0
+          Text "Line 1"
+          Text "Line 2"
+          Text "Line 3"
+  eq plain(App1), [
+    "Line 2"
+    "Line 3"
+  ]
+  App2 = component
+    render
+      Box width: 6, overflowX: 'hidden', contentOffsetX: 1.5
+        Box flexShrink: 0
+          Text "ABCDEF"
+  eq plain(App2), ["BCDEF"]
+
+test "contentOffsetX/Y - negative fractional offsets are truncated to whole cells", ->
+  App1 = component
+    render
+      Box height: 2, overflowY: 'hidden', contentOffsetY: -0.5, flexDirection: 'column'
+        Box flexDirection: 'column', flexShrink: 0
+          Text "Line 1"
+          Text "Line 2"
+  eq plain(App1), [
+    "Line 1"
+    "Line 2"
+  ]
+  App2 = component
+    render
+      Box width: 6, overflowX: 'hidden', contentOffsetX: -0.5
+        Box flexShrink: 0
+          Text "ABCDEF"
+  eq plain(App2), ["ABCDEF"]
+
+test "contentOffsetX/Y - non-finite offsets fall back to zero", ->
+  # A stated difference: Ink reads NaN and the infinities as zero. This
+  # package refuses a value it cannot use on the line that writes it, so
+  # a scroll position that went wrong is found where it went wrong.
+  for offset in [NaN, Infinity, -Infinity]
+    Vertical = component
+      render
+        Box height: 2, overflowY: 'hidden', contentOffsetY: offset, flexDirection: 'column'
+          Box flexDirection: 'column', flexShrink: 0
+            Text "Line 1"
+            Text "Line 2"
+    throws (-> plain Vertical), 'contentOffsetY', 'is not a number of cells'
+    Horizontal = component
+      render
+        Box width: 6, overflowX: 'hidden', contentOffsetX: offset
+          Box flexShrink: 0
+            Text "ABCDEF"
+    throws (-> plain Horizontal), 'contentOffsetX', 'is not a number of cells'
+
+test "contentOffsetX - preserves columns when offset splits a wide character", ->
+  App1 = component
+    render
+      Box width: 2, overflowX: 'hidden', contentOffsetX: 1
+        Box width: 3, flexShrink: 0
+          Text "你A"
+  eq plain(App1), [" A"]
+  App2 = component
+    render
+      Box width: 2, overflowX: 'hidden', contentOffsetX: 2
+        Box width: 3, flexShrink: 0
+          Text "你A"
+  eq plain(App2), ["A"]
+
+test "contentOffsetX - preserves columns across a line of wide characters", ->
+  App1 = component
+    render
+      Box width: 4, overflowX: 'hidden', contentOffsetX: 0
+        Box width: 6, flexShrink: 0
+          Text "你好AB"
+  eq plain(App1), ["你好"]
+  App2 = component
+    render
+      Box width: 4, overflowX: 'hidden', contentOffsetX: 1
+        Box width: 6, flexShrink: 0
+          Text "你好AB"
+  eq plain(App2), [" 好A"]
+  App3 = component
+    render
+      Box width: 4, overflowX: 'hidden', contentOffsetX: 2
+        Box width: 6, flexShrink: 0
+          Text "你好AB"
+  eq plain(App3), ["好AB"]
+  App4 = component
+    render
+      Box width: 4, overflowX: 'hidden', contentOffsetX: 3
+        Box width: 6, flexShrink: 0
+          Text "你好AB"
+  eq plain(App4), [" AB"]
+  App5 = component
+    render
+      Box width: 4, overflowX: 'hidden', contentOffsetX: 4
+        Box width: 6, flexShrink: 0
+          Text "你好AB"
+  eq plain(App5), ["AB"]
+
+test "clipping blanks the cell of a wide character split by the right edge", ->
+  App = component
+    render
+      Box
+        Text "XY"
+        Box position: 'absolute', width: 2, overflowX: 'hidden'
+          Box width: 3, flexShrink: 0
+            Text "A你"
+  eq plain(App), ["A"]
+
+test "horizontal scrolling preserves borders beside fully clipped rows", ->
+  App = component
+    render
+      Box width: 4, height: 4, borderStyle: 'single', overflow: 'hidden', contentOffsetX: 6
+        Box width: 10, flexShrink: 0
+          Text "A\nABCDEFGHIJ"
+  eq plain(App), [
+    "┌──┐"
+    "│  │"
+    "│GH│"
+    "└──┘"
+  ]
+
+test "contentOffsetY - keeps the visible lines of a multi-line text node", ->
+  App = component
+    render
+      Box height: 2, contentOffsetY: 1, flexDirection: 'column'
+        Box flexDirection: 'column', flexShrink: 0
+          Text "Line 1\nLine 2\nLine 3"
+  eq plain(App), [
+    "Line 2"
+    "Line 3"
+  ]
+
+test "contentOffsetY - keeps the visible lines of a multi-line text node with only horizontal clipping", ->
+  App = component
+    render
+      Box height: 2, overflowX: 'hidden', contentOffsetY: 1, flexDirection: 'column'
+        Box flexDirection: 'column', flexShrink: 0
+          Text "Line 1\nLine 2\nLine 3"
+  eq plain(App), [
+    "Line 2"
+    "Line 3"
+  ]
+
+test "clipped content keeps its visible lines when the clip starts above the top", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Box marginTop: -1, height: 3, overflowY: 'hidden', flexDirection: 'column'
+          Box flexDirection: 'column', flexShrink: 0
+            Text "Line 1\nLine 2\nLine 3"
+  eq plain(App), [
+    "Line 2"
+    "Line 3"
+  ]
+

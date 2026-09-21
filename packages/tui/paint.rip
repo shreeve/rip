@@ -4,9 +4,11 @@
 # A grid is three typed arrays — the character, an interned style id,
 # and a width flag — so a frame allocates nothing. Styling is structural:
 # a style is a small record interned to an id, and its escape sequence is
-# built once.
+# built once. Text arrives as a flow's units and rows (text.rip), so a
+# line is drawn from offsets and no string is cut per frame.
 
 import { kids } from './layout.rip'
+import { CLUSTER, glyph, sanitize, Flow, refresh, MODES, A0, A1, B0, B1, DOTS, ROW } from './text.rip'
 
 # ── Styles ────────────────────────────────────────────────────────────────────
 
@@ -16,19 +18,32 @@ NAMED =! {
   blueBright: 64, magentaBright: 65, cyanBright: 66, whiteBright: 67
 }
 
-# The SGR parameters for a color, on the foreground (30) or background (40).
+COLORS =! "a name (red, greenBright, gray), '#rrggbb', 'rgb(r, g, b)' or 'ansi256(n)'"
+
+# The SGR parameters for a color, on the foreground (30) or background
+# (40); null for a value that is no color.
 tint =! (color, base) ->
-  return '' unless color?
-  if typeof color is 'string' and /^#[0-9a-f]{6}$/i.test(color)
-    n = parseInt color.slice(1), 16
+  return null unless typeof color is 'string'
+  return String base + NAMED[color] if Object.hasOwn NAMED, color
+  if /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test color
+    hex = color.slice 1
+    hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2] if hex.length is 3
+    n = parseInt hex, 16
     return "#{base + 8};2;#{n >> 16};#{(n >> 8) & 255};#{n & 255}"
-  code = NAMED[color]
-  throw Error.new "rip/tui: '#{color}' is not a color — use a name (red, greenBright, gray) or '#rrggbb'" unless code?
-  String base + code
+  if m = /^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/.exec color
+    return null if m[1] > 255 or m[2] > 255 or m[3] > 255
+    return "#{base + 8};2;#{Number m[1]};#{Number m[2]};#{Number m[3]}"
+  if m = /^ansi256\(\s*(\d+)\s*\)$/.exec color
+    return (if m[1] > 255 then null else "#{base + 8};5;#{Number m[1]}")
+  null
 
 LIMIT =! 65536   # style ids a cell's sixteen bits can hold
 
-FLAGS =! [['bold', 1], ['dim', 2], ['italic', 3], ['underline', 4], ['inverse', 7]]
+# A style's switches, each one bit of its flags, and the SGR parameter of
+# each.
+SWITCHES =! ['bold', 'dimColor', 'italic', 'underline', 'inverse', 'strikethrough']
+CODES =! [1, 2, 3, 4, 7, 9]
+DIM =! 2
 
 ids =! Map.new()
 records =! [{ fg: null, bg: null, flags: 0, sgr: '' }]
@@ -41,25 +56,36 @@ export intern =! (fg, bg, flags) ->
   id = ids.get key
   return id if id?
   parts = []
-  for [name, code], i in FLAGS
-    parts.push code if flags & (1 << i)
-  parts.push tint(fg, 30) if fg?
-  parts.push tint(bg, 40) if bg?
+  for code, n in CODES
+    parts.push code if flags & (1 << n)
+  for [color, base] in [[fg, 30], [bg, 40]] when color?
+    sgr = tint color, base
+    throw Error.new "rip/tui: #{JSON.stringify color} is not a color — write #{COLORS}" unless sgr
+    parts.push sgr
   throw Error.new "rip/tui: more than #{LIMIT} distinct styles are in use — a cell holds a style id in sixteen bits" if records.length >= LIMIT
   records.push { fg, bg, flags, sgr: parts.join(';') }
   ids.set key, records.length - 1
   records.length - 1
 
 # The style a node's own props describe, over the style it inherits.
-styleOf =! (node, inherited) ->
+# `color`, `bold`, `dimColor` and the other text attributes pass down the
+# tree, from a box to the text inside it. A background does not: a box's
+# `backgroundColor` is the rectangle `fill` paints and nothing more, and
+# text with none of its own takes the background of each cell it lands
+# on (`over`) — so words that spill out of a blue box are blue only
+# where the box is, and a tip drawn over a red row sits on red whatever
+# box it was written in. Inside one text a background is the text's
+# own: `words` says so, and a nested run keeps it.
+styleOf =! (node, inherited, words) ->
   s = node.styles
   base = records[inherited]
   flags = base.flags
-  for [name], i in FLAGS
-    flags |= (1 << i) if s[name]
+  for name, n in SWITCHES
+    flags |= (1 << n) if s[name]
+  back = if words then s.backgroundColor ?? base.bg else base.bg
   # Most nodes say nothing about color or weight, and keep the id as it is.
-  return inherited if flags is base.flags and not s.color? and not s.backgroundColor?
-  intern s.color ?? base.fg, s.backgroundColor ?? base.bg, flags
+  return inherited if flags is base.flags and not s.color? and back is base.bg
+  intern s.color ?? base.fg, back, flags
 
 # The escape sequence that leaves style `from` for style `to`.
 shift =! (from, to) ->
@@ -75,13 +101,105 @@ over =! (id, beneath) ->
   key = (id << 16) | beneath
   blends.get(key) ?? (blends.set(key, intern(top.fg, under.bg, top.flags)); blends.get(key))
 
+# ── Borders ───────────────────────────────────────────────────────────────────
+
+# Each style's eight glyphs, clockwise from the top left corner — the
+# styles and the glyphs of `cli-boxes`, as Ink draws them.
+TL =! 0
+T  =! 1
+TR =! 2
+R  =! 3
+BR =! 4
+B  =! 5
+BL =! 6
+L  =! 7
+
+PARTS =! ['topLeft', 'top', 'topRight', 'right', 'bottomRight', 'bottom', 'bottomLeft', 'left']
+
+BORDERS =! {
+  single: '┌─┐│┘─└│', double: '╔═╗║╝═╚║', round: '╭─╮│╯─╰│', bold: '┏━┓┃┛━┗┃'
+  singleDouble: '╓─╖║╜─╙║', doubleSingle: '╒═╕│╛═╘│', classic: '+-+|+-+|', arrow: '↘↓↙←↖↑↗→'
+}
+
+frames =! Map.new()
+probe =! Flow.new()
+
+# The eight cells of a border style: one of the names, or an object that
+# gives each part a glyph of its own, one cell wide. An object is read
+# every time it is asked for and remembered by its eight glyphs, never
+# by itself, so one that is changed after it was written is seen — and
+# refused, where what it holds is no glyph. A glyph obeys the rule text
+# does: one that `sanitize` would alter, a control character above all,
+# never reaches the terminal.
+glyphsOf =! (style, key = 'borderStyle') ->
+  custom = style and typeof style is 'object'
+  unless custom or (typeof style is 'string' and Object.hasOwn BORDERS, style)
+    throw Error.new "rip/tui: #{key}: #{JSON.stringify style} is not one of #{Object.keys(BORDERS).join ', '}, or an object of #{PARTS.join ', '}"
+  name = if custom then "#{style.topLeft}\n#{style.top}\n#{style.topRight}\n#{style.right}\n#{style.bottomRight}\n#{style.bottom}\n#{style.bottomLeft}\n#{style.left}" else style
+  cells = frames.get name
+  return cells if cells
+  cells = Uint32Array.new 8
+  for part, n in PARTS
+    text = if custom then style[part] else String.fromCodePoint BORDERS[style].codePointAt(n)
+    probe.set (if typeof text is 'string' then text else ''), null
+    unless typeof text is 'string' and sanitize(text) is text and probe.count is 1 and probe.span(0) is 1
+      throw Error.new "rip/tui: #{key}: #{part}: #{JSON.stringify text} is not a border glyph — write one printing character, one cell wide"
+    cells[n] = probe.code 0
+  frames.set name, cells
+  cells
+
+# ── Values ────────────────────────────────────────────────────────────────────
+
+SWITCH =! 1
+COLOR  =! 2
+CLIP   =! 3
+OFFSET =! 4
+BORDER =! 5
+WRAP   =! 6
+
+CHECKS =! Map.new()
+CHECKS.set name, SWITCH for name in SWITCHES
+for side in ['', 'Top', 'Bottom', 'Left', 'Right']
+  CHECKS.set "border#{side}Color", COLOR
+  CHECKS.set "border#{side}BackgroundColor", COLOR
+  CHECKS.set "border#{side}DimColor", SWITCH
+CHECKS.set 'color', COLOR
+CHECKS.set 'backgroundColor', COLOR
+CHECKS.set key, CLIP for key in ['overflow', 'overflowX', 'overflowY']
+CHECKS.set key, OFFSET for key in ['contentOffsetX', 'contentOffsetY']
+CHECKS.set 'borderStyle', BORDER
+CHECKS.set 'wrap', WRAP
+
+# Refuse a value the painter cannot use, where it is written and by the
+# key it was written to — layout's `admit`, for the styles that recolor
+# cells. A key the painter does not read is none of its business.
+export allow! =! (key, value) ->
+  check = CHECKS.get key
+  return if check is undefined or value is undefined
+  switch check
+    when SWITCH
+      throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not true or false" unless value is true or value is false
+    when COLOR
+      throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not a color — write #{COLORS}" unless tint value, 30
+    when CLIP
+      throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not one of visible, hidden" unless value is 'visible' or value is 'hidden'
+    when OFFSET
+      throw Error.new "rip/tui: #{key}: #{if typeof value is 'number' then value else JSON.stringify value} is not a number of cells — write a finite number" unless Number.isFinite value
+    when BORDER then glyphsOf value, key
+    when WRAP
+      throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not one of #{Object.keys(MODES).join ', '}" unless Object.hasOwn MODES, value
+
 # ── Grid ──────────────────────────────────────────────────────────────────────
 
 SPACE =! 32
+DOT   =! 0x2026
+FAR   =! 1073741823
 
 export class Grid
   # `top` is the tree row shown on the grid's first row: a frame taller
-  # than the screen shows its bottom.
+  # than the screen shows its bottom. Every write is held to the clip —
+  # columns [left, right), grid rows [over, under) — which starts as the
+  # whole grid.
   constructor: (@cols, @rows, @top = 0) ->
     size = @cols * @rows
     @ch = Uint32Array.new size
@@ -93,47 +211,115 @@ export class Grid
     @ch.fill SPACE
     @style.fill 0
     @wide.fill 1
+    @clip 0, -FAR, @cols, FAR
 
-  # One line of text at (x, y), clipped to the grid and to [left, right).
-  # A glyph that lands on half of a wide one blanks the other half, so a
-  # row never holds an orphaned lead or continuation cell.
-  write!: (x, y, text, id, left = 0, right = @cols) ->
-    y -= @top
-    return if y < 0 or y >= @rows
-    left = Math.max left, 0
-    right = Math.min right, @cols
-    # A counted walk by code point: ASCII and the box-drawing block are
-    # one cell wide, and only what is left asks for a measured width.
-    i = 0
-    while i < text.length
-      code = text.codePointAt i
-      i += if code > 0xFFFF then 2 else 1
-      span = if code < 127 or (code >= 0x2500 and code <= 0x257F) then 1 else Bun.stringWidth(String.fromCodePoint code)
-      continue if span is 0
-      if x >= left and x + span <= right
-        at = y * @cols + x
-        @blank at - 1 if @wide[at] is 0
-        @blank at + span if x + span < @cols and @wide[at + span] is 0
-        @ch[at] = code
-        @style[at] = over id, @style[at]
-        @wide[at] = span
-        if span is 2
-          @ch[at + 1] = SPACE
-          @style[at + 1] = @style[at]
-          @wide[at + 1] = 0
-      x += span
+  # Hold the writes that follow to a rectangle of tree coordinates.
+  clip!: (left, top, right, bottom) ->
+    @left = if left > 0 then left else 0
+    @right = if right < @cols then right else @cols
+    @over = if top - @top > 0 then top - @top else 0
+    @under = if bottom - @top < @rows then bottom - @top else @rows
 
-  # Turn one cell into a plain space, keeping its style.
+  # A glyph of `span` cells at index `at` in column `x`: its lead cell
+  # holds it and says how wide it is, and each cell after is a
+  # continuation, width zero. A glyph that lands on part of a wider one
+  # blanks the rest of it, so a row never holds an orphaned lead or
+  # continuation cell.
+  set!: (at, x, cell, span, id) ->
+    @blank at if @wide[at] isnt 1
+    beneath = @style[at]
+    @ch[at] = cell
+    @style[at] = if beneath is 0 then id else over id, beneath
+    return if span is 1
+    for next in [at + 1...at + span]
+      @blank next if @wide[next] > 1
+      @ch[next] = SPACE
+      @style[next] = @style[at]
+    @wide[at] = span
+    @wide.fill 0, at + 1, at + span
+
+  # Turn the whole glyph that covers cell `at` into plain spaces, each
+  # keeping its style.
   blank!: (at) ->
-    @ch[at] = SPACE
-    @wide[at] = 1
+    at -= 1 while @wide[at] is 0
+    span = @wide[at]
+    @ch.fill SPACE, at, at + span
+    @wide.fill 1, at, at + span
 
-  # Restyle a rectangle without touching its characters.
+  # One cell wide glyph at (x, y).
+  put!: (x, y, cell, id) ->
+    y -= @top
+    @set y * @cols + x, x, cell, 1, id if y >= @over and y < @under and x >= @left and x < @right
+
+  # `count` cells of one glyph, rightward from (x, y).
+  run!: (x, y, cell, count, id) ->
+    y -= @top
+    return if y < @over or y >= @under
+    stop = if x + count < @right then x + count else @right
+    x = @left if x < @left
+    while x < stop
+      @set y * @cols + x, x, cell, 1, id
+      x += 1
+
+  # Characters [from, to) of printable ASCII rightward from (x, y):
+  # every one is a cell. Answers the column after the last.
+  ascii: (x, y, text, from, to, id) ->
+    end = x + to - from
+    y -= @top
+    return end if y < @over or y >= @under or x >= @right or end <= @left
+    if x < @left
+      from += @left - x
+      x = @left
+    to -= end - @right if end > @right
+    at = y * @cols + x
+    while from < to
+      @set at, x, text.charCodeAt(from), 1, id
+      from += 1
+      at += 1
+      x += 1
+    end
+
+  # Units [from, to) of a flow rightward from (x, y). A wide cluster cut
+  # by a clip edge leaves a space in its style on each cell of it that
+  # shows; a cluster of no width has no cell. Answers the column after
+  # the last.
+  units: (x, y, flow, from, to, id) ->
+    y -= @top
+    spans = flow.spans
+    cells = flow.cells
+    shown = y >= @over and y < @under
+    row = y * @cols
+    while from < to
+      span = spans[from]
+      if shown and span
+        if x >= @left and x + span <= @right
+          @set row + x, x, cells[from], span, id
+        else if x + span > @left and x < @right
+          for col in [(if x > @left then x else @left)...(if x + span < @right then x + span else @right)]
+            @set row + col, col, SPACE, 1, id
+      x += span
+      from += 1
+    x
+
+  # One line of any text at (x, y). Answers the column after the last.
+  write: (x, y, text, id) ->
+    probe.set text, null
+    if probe.ascii then @ascii(x, y, text, 0, text.length, id) else @units(x, y, probe, 0, probe.count, id)
+
+  # A rectangle of spaces in one style: a background covers what lies
+  # under it. A wide glyph the rectangle's side cuts is blanked.
   fill!: (x, y, w, h, id) ->
     y -= @top
-    for row in [Math.max(0, y)...Math.min(@rows, y + h)]
-      for col in [Math.max(0, x)...Math.min(@cols, x + w)]
-        @style[row * @cols + col] = id
+    left = if x > @left then x else @left
+    right = if x + w < @right then x + w else @right
+    return if left >= right
+    for row in [(if y > @over then y else @over)...(if y + h < @under then y + h else @under)]
+      at = row * @cols
+      @blank at + left if @wide[at + left] is 0
+      @blank at + right if right < @cols and @wide[at + right] is 0
+      @ch.fill SPACE, at + left, at + right
+      @style.fill id, at + left, at + right
+      @wide.fill 1, at + left, at + right
 
   # The grid as text: one string per row, trailing blanks trimmed.
   # With `ansi`, each run of a style carries its escape sequence.
@@ -148,73 +334,165 @@ export class Grid
         if ansi and @style[at] isnt held
           line += shift held, @style[at]
           held = @style[at]
-        line += String.fromCodePoint @ch[at]
+        line += glyph @ch[at]
       line += "\x1b[0m" if ansi and held
       lines.push (if ansi then line else line.trimEnd())
     lines.join '\n'
 
 # ── Tree → grid ───────────────────────────────────────────────────────────────
 
-BORDERS =! {
-  single: '┌─┐│└┘', round: '╭─╮│╰╯', double: '╔═╗║╚╝', bold: '┏━┓┃┗┛'
-}
+# A border, edge by edge (Ink's `renderBorder`): a corner belongs to the
+# top or bottom edge and shows only when its side edge does; a side runs
+# between the top and bottom edges that show. Each edge takes its own
+# color, background and dimming, else the border's. A frame wholly
+# outside the clip, or too small to hold its edges, draws nothing.
+frame! =! (grid, s, x, y, w, h) ->
+  cells = glyphsOf s.borderStyle
+  top = if s.borderTop is false then 0 else 1
+  bottom = if s.borderBottom is false then 0 else 1
+  left = if s.borderLeft is false then 0 else 1
+  right = if s.borderRight is false then 0 else 1
+  return if w < left + right or h < top + bottom
+  return if y + h - grid.top <= grid.over or y - grid.top >= grid.under or x + w <= grid.left or x >= grid.right
+  plain = intern s.borderColor ?? null, s.borderBackgroundColor ?? null, (if s.borderDimColor then DIM else 0)
+  if top
+    id = if s.borderTopColor? or s.borderTopBackgroundColor? or s.borderTopDimColor? then intern(s.borderTopColor ?? s.borderColor ?? null, s.borderTopBackgroundColor ?? s.borderBackgroundColor ?? null, (if s.borderTopDimColor ?? s.borderDimColor then DIM else 0)) else plain
+    grid.put x, y, cells[TL], id if left
+    grid.run x + left, y, cells[T], w - left - right, id
+    grid.put x + w - 1, y, cells[TR], id if right
+  if bottom
+    id = if s.borderBottomColor? or s.borderBottomBackgroundColor? or s.borderBottomDimColor? then intern(s.borderBottomColor ?? s.borderColor ?? null, s.borderBottomBackgroundColor ?? s.borderBackgroundColor ?? null, (if s.borderBottomDimColor ?? s.borderDimColor then DIM else 0)) else plain
+    grid.put x, y + h - 1, cells[BL], id if left
+    grid.run x + left, y + h - 1, cells[B], w - left - right, id
+    grid.put x + w - 1, y + h - 1, cells[BR], id if right
+  if left
+    id = if s.borderLeftColor? or s.borderLeftBackgroundColor? or s.borderLeftDimColor? then intern(s.borderLeftColor ?? s.borderColor ?? null, s.borderLeftBackgroundColor ?? s.borderBackgroundColor ?? null, (if s.borderLeftDimColor ?? s.borderDimColor then DIM else 0)) else plain
+    for row in [y + top...y + h - bottom]
+      grid.put x, row, cells[L], id
+  if right
+    id = if s.borderRightColor? or s.borderRightBackgroundColor? or s.borderRightDimColor? then intern(s.borderRightColor ?? s.borderColor ?? null, s.borderRightBackgroundColor ?? s.borderBackgroundColor ?? null, (if s.borderRightDimColor ?? s.borderDimColor then DIM else 0)) else plain
+    for row in [y + top...y + h - bottom]
+      grid.put x + w - 1, row, cells[R], id
 
-frame! =! (grid, node, id) ->
-  glyphs = BORDERS[node.styles.borderStyle]
-  throw Error.new "rip/tui: '#{node.styles.borderStyle}' is not a border style — use single, round, double, or bold" unless glyphs
-  { x, y, w, h } = node.rect
-  return if w < 2 or h < 2 or y + h <= grid.top or y >= grid.top + grid.rows
-  line = intern node.styles.borderColor ?? null, records[id].bg, 0
-  grid.write x, y, glyphs[0] + glyphs[1].repeat(w - 2) + glyphs[2], line
-  grid.write x, y + h - 1, glyphs[4] + glyphs[1].repeat(w - 2) + glyphs[5], line
-  for row in [y + 1...y + h - 1]
-    grid.write x, row, glyphs[3], line
-    grid.write x + w - 1, row, glyphs[3], line
+# The style of each text node under a leaf, in tree order — the order a
+# flow numbers its runs in. Nested spans restyle their own words.
+shades =! []
 
-# The styled runs of a text leaf: nested spans restyle their own text.
-runs =! (node, id, out) ->
+shade! =! (node, id) ->
+  kid = node.firstChild
+  while kid
+    if kid.nodeType is 3
+      shades.push id
+    else if kid.nodeType is 1
+      shade kid, styleOf(kid, id, true)
+    kid = kid.nextSibling
+
+# Units [from, to) of a leaf's flow at (x, y), each run in its style.
+# Answers the column after the last.
+stretch =! (grid, flow, x, y, from, to) ->
+  return x if from >= to
+  ends = flow.ends
+  run = 0
+  if ends
+    run += 1 while ends[run] <= from
+  while from < to
+    stop = if ends and ends[run] < to then ends[run] else to
+    x = if flow.ascii then grid.ascii(x, y, flow.text, from, stop, shades[run]) else grid.units(x, y, flow, from, stop, shades[run])
+    from = stop
+    run += 1
+  x
+
+# The style of the run that holds `unit`.
+shadeAt =! (flow, unit) ->
+  run = 0
+  if flow.ends
+    run += 1 while flow.ends[run] <= unit
+  shades[run]
+
+# A text leaf: its flow's rows at the width layout gave it. A line that
+# fits is drawn as it is, and no table is asked for. A cut line's '…'
+# takes the style of the words it stands beside — the last kept before
+# it, the first kept after it — and the leaf's own in the middle.
+words! =! (grid, node, inherited, x, y) ->
+  flow = node.flow ?? refresh node
+  return if flow.count is 0
+  shades.length = 0
+  own = inherited
   if node.nodeType is 3
-    out.push [node.data, id]
+    shades.push inherited
   else
-    own = styleOf node, id
-    kid = node.firstChild
-    while kid
-      runs kid, own, out if kid.nodeType is 3 or kid.nodeType is 1
-      kid = kid.nextSibling
-  out
-
-words! =! (grid, node, id) ->
-  { x, y, w } = node.rect
-  col = x
-  row = y
-  for [text, run] in runs(node, id, [])
-    parts = text.split '\n'
-    for part, i in parts
-      if i
-        row += 1
-        col = x
-      grid.write col, row, part, run, x, x + w
-      col += Bun.stringWidth part
-
-export paint! =! (grid, node, inherited = 0) ->
-  if node.nodeType is 3 or node.tagName is 'span'
-    words grid, node, inherited
+    own = styleOf node, inherited, true
+    shade node, own
+  wide = node.rect.w
+  if flow.fits wide
+    stretch grid, flow, x, y, 0, flow.count
     return
+  flow.wrap wide, flow.mode
+  table = flow.table
+  for n in [0...flow.rows]
+    at = n * ROW
+    col = stretch grid, flow, x, y + n, table[at + A0], table[at + A1]
+    continue unless table[at + DOTS]
+    id = own
+    if table[at + B1] is table[at + B0]
+      id = shadeAt flow, table[at + A1] - 1 if table[at + A1] > table[at + A0]
+    else if table[at + A1] is table[at + A0]
+      id = shadeAt flow, table[at + B0]
+    grid.put col, y + n, DOT, id
+    stretch grid, flow, col + 1, y + n, table[at + B0], table[at + B1]
+
+# One node and everything under it. (dx, dy) is how far content offsets
+# above have shifted it from where layout put it, and the four integers
+# are the clip: the padding boxes of the `overflow: 'hidden'` ancestors,
+# intersected. A box's own background and border answer to the clip it
+# was handed, and only its children to the one it makes.
+draw! =! (grid, node, inherited, dx, dy, left, top, right, bottom) ->
+  rect = node.rect
+  x = rect.x + dx
+  y = rect.y + dy
+  if node.nodeType is 3 or node.tagName is 'span'
+    grid.clip left, top, right, bottom
+    words grid, node, inherited, x, y
+    return
+  s = node.styles
   id = styleOf node, inherited
-  { x, y, w, h } = node.rect
-  grid.fill x, y, w, h, id if node.styles.backgroundColor
-  frame grid, node, id if node.styles.borderStyle
-  for kid in kids(node)
+  edged = s.borderStyle?
+  if edged or s.backgroundColor?
+    grid.clip left, top, right, bottom
+    if s.backgroundColor?
+      # The background fills inside the border (Ink's `renderBackground`).
+      l = if edged and s.borderLeft isnt false then 1 else 0
+      t = if edged and s.borderTop isnt false then 1 else 0
+      r = if edged and s.borderRight isnt false then 1 else 0
+      b = if edged and s.borderBottom isnt false then 1 else 0
+      grid.fill x + l, y + t, rect.w - l - r, rect.h - t - b, intern(null, s.backgroundColor, 0)
+    frame grid, s, x, y, rect.w, rect.h if edged
+  if s.overflow? or s.overflowX? or s.overflowY?
+    if (s.overflowX ?? s.overflow) is 'hidden'
+      left = Math.max left, x + (if edged and s.borderLeft isnt false then 1 else 0)
+      right = Math.min right, x + rect.w - (if edged and s.borderRight isnt false then 1 else 0)
+    if (s.overflowY ?? s.overflow) is 'hidden'
+      top = Math.max top, y + (if edged and s.borderTop isnt false then 1 else 0)
+      bottom = Math.min bottom, y + rect.h - (if edged and s.borderBottom isnt false then 1 else 0)
+    return if left >= right or top >= bottom
+  dx -= Math.trunc s.contentOffsetX if s.contentOffsetX
+  dy -= Math.trunc s.contentOffsetY if s.contentOffsetY
+  for kid, n in kids(node)
+    own = id
     # A `display: contents` node draws no box, but what it says about
     # color and weight still reaches the children it lends its parent.
-    own = id
-    lent = kid.parentNode
-    chain = []
-    while lent and lent isnt node
-      chain.push lent
-      lent = lent.parentNode
-    own = styleOf(chain[i], own) for i in [chain.length - 1..0] by -1 when chain.length
-    paint grid, kid, own
+    own = lent kid.parentNode, node, id if kid.parentNode isnt node
+    draw grid, kid, own, dx, dy, left, top, right, bottom
+
+# The style `id` as the `contents` nodes between `node` and `owner`
+# restyle it, outermost first.
+lent =! (node, owner, id) ->
+  return id if node is owner or not node
+  styleOf node, lent(node.parentNode, owner, id)
+
+export paint! =! (grid, node, inherited = 0) ->
+  draw grid, node, inherited, 0, 0, 0, -FAR, grid.cols, FAR
+  grid.clip 0, -FAR, grid.cols, FAR
 
 # ── Grid → bytes ──────────────────────────────────────────────────────────────
 
@@ -232,6 +510,17 @@ shows =! (front, back, drawn, row, i) ->
 # is the move down, since it alone makes a row that does not exist yet.
 # `front` is null before the first frame, and a frame of another width
 # is drawn from nothing.
+#
+# A line feed at the bottom of the screen scrolls, and a terminal with
+# background color erase fills the row it makes with the background then
+# in force — a stripe no later frame repaints, since a row never drawn
+# counts as blank. So no background is held across a line feed.
+#
+# A terminal may not agree how wide a cluster of several code points is
+# (a joined emoji, a flag, a base with its marks), and would put all that
+# follows on its row a cell off. The cell after one is therefore reached
+# by an absolute column move. One code point, wide or not, is left to
+# the width every terminal gives it.
 export diff =! (front, back) ->
   reuse = front? and front.cols is back.cols
   out = if reuse then '' else "\x1b[J"
@@ -246,19 +535,30 @@ export diff =! (front, back) ->
         continue
       if row > at
         down = row - at
-        out += if down > 4 and row < drawn then "\x1b[#{down}B" else '\n'.repeat(down)
+        if down > 4 and row < drawn
+          out += "\x1b[#{down}B"
+        else
+          if held and records[held].bg?
+            out += "\x1b[0m"
+            held = 0
+          out += '\n'.repeat down
       else if row < at
         out += "\x1b[#{at - row}A"
       at = row
       out += "\x1b[#{col + 1}G"
+      loose = false
       while col < back.cols
         i = row * back.cols + col
-        break if shows front, back, drawn, row, i
+        # A continuation cell goes with its glyph; it never ends a run.
+        break if back.wide[i] isnt 0 and shows front, back, drawn, row, i
         if back.wide[i] isnt 0
+          cell = back.ch[i]
+          out += "\x1b[#{col + 1}G" if loose
           if back.style[i] isnt held
             out += shift held, back.style[i]
             held = back.style[i]
-          out += String.fromCodePoint back.ch[i]
+          out += if cell < CLUSTER then String.fromCodePoint(cell) else glyph cell
+          loose = cell >= CLUSTER
         col += 1
   out += "\x1b[0m" if held
   if drawn > back.rows

@@ -16,6 +16,8 @@
 # rebuilt only while the node is dirty, and a node whose rebuild finds
 # nothing different stops being dirty before layout looks at it.
 
+import { refresh, MODES } from './text.rip'
+
 # ── Vocabulary ────────────────────────────────────────────────────────────────
 
 # Physical edges index every four-slot array.
@@ -216,6 +218,7 @@ class Lay
     @solidH = false
     @textW = 0
     @textH = 0
+    @textMode = 0
     @kids = CHILDLESS
     @count = 0
     @filled = 0
@@ -609,16 +612,6 @@ export kids =! (node) ->
   flatten node, out
   out
 
-# The text a leaf shows: a span's descendants joined, or a text node.
-export textOf =! (node) ->
-  return node.data if node.nodeType is 3
-  out = ''
-  kid = node.firstChild
-  while kid
-    out += textOf kid if kid.nodeType is 3 or kid.nodeType is 1
-    kid = kid.nextSibling
-  out
-
 # Padding plus border on each edge: [top, right, bottom, left]. A clean
 # node resolves its percents against the owner width it was laid out
 # under — `lay.padding` holds whatever the last visit resolved, which a
@@ -812,19 +805,17 @@ sync =! (node) ->
     if node.measure
       changed = true
     else
-      text = textOf node
-      wide = 0
-      tall = 1
-      if text.includes '\n'
-        lines = text.split '\n'
-        tall = lines.length
-        for line, i in lines
-          wide = Math.max wide, Bun.stringWidth(line)
-      else
-        wide = Bun.stringWidth text
-      changed = true if wide isnt lay.textW or tall isnt lay.textH
-      lay.textW = wide
-      lay.textH = tall
+      # A leaf's size follows its text, its wrap mode, and the width it is
+      # offered. The flow says whether a new text answers any offer it was
+      # given differently; one that does not leaves the layout standing.
+      flow = refresh node
+      mode = MODES[node.styles?.wrap] ?? 0
+      changed = true if flow.moved or flow.wide isnt lay.textW or flow.tall isnt lay.textH or mode isnt lay.textMode
+      flow.mode = mode
+      flow.forget() if changed
+      lay.textW = flow.wide
+      lay.textH = flow.tall
+      lay.textMode = mode
     kid = node.firstChild
     while kid
       vanish kid, 0, 0 unless away kid, 0, 0
@@ -863,8 +854,9 @@ sync =! (node) ->
 
 # A text leaf, or a node with a `measure` function (CalculateLayout.cpp
 # measureNodeWithMeasureFunc). The function is never offered a negative
-# size. Text without one is as wide as its widest line and as tall as
-# its lines, whatever it is offered.
+# size. Text without one is measured by its flow, under the same
+# contract: unwrapped where no width limits it, else as its wrap mode
+# breaks or cuts it at the width offered.
 measureLeaf! =! (node, lay, availW, availH, modeW, modeH, ownerW, ownerH) ->
   availW = NaN if modeW is MAX_CONTENT
   availH = NaN if modeH is MAX_CONTENT
@@ -876,14 +868,17 @@ measureLeaf! =! (node, lay, availW, availH, modeW, modeH, ownerW, ownerH) ->
     lay.measured[0] = bound lay, ROW, availW, ownerW, ownerW
     lay.measured[1] = bound lay, COLUMN, availH, ownerH, ownerW
     return
-  wide = lay.textW
-  tall = lay.textH
+  innerW = if isNaN availW then availW else fmax 0, availW - insideW
   if node.measure
-    innerW = if isNaN availW then availW else fmax 0, availW - insideW
     innerH = if isNaN availH then availH else fmax 0, availH - insideH
     size = node.measure innerW, modeW, innerH, modeH
     wide = size.width
     tall = size.height
+  else
+    flow = node.flow
+    flow.measure innerW, modeW is MAX_CONTENT
+    wide = flow.w
+    tall = flow.h
   lay.measured[0] = bound lay, ROW, (if modeW is STRETCH_FIT then availW else wide + insideW), ownerW, ownerW
   lay.measured[1] = bound lay, COLUMN, (if modeH is STRETCH_FIT then availH else tall + insideH), ownerH, ownerW
 
@@ -1711,13 +1706,15 @@ holds =! (lay, entry, availW, availH, modeW, modeH, ownerW, ownerH) ->
 # Whether one axis of a remembered measurement answers a new offer
 # (Cache.cpp): the same offer; an exact size equal to the answer; an
 # unlimited answer that fits the new limit; or a tighter limit the
-# answer still fits. Yoga calls two offers the same when they ROUND the
+# answer still fits. An answer WIDER than the limit it was given — text
+# whose widest cluster does not fit the offer — says nothing of an exact
+# size equal to it: its height is that of the narrower wrap. Yoga calls two offers the same when they ROUND the
 # same, and sizes equal within a tolerance; here both are exact, because
 # an exact offer is its own answer, and a stale fraction would round a
 # text box differently from the box a fresh layout gives.
 fits =! (mode, size, offered, lastMode, lastOffered, answer) ->
   return true if lastMode is mode and same(lastOffered, offered)
-  return true if mode is STRETCH_FIT and size is answer
+  return true if mode is STRETCH_FIT and size is answer and (lastMode isnt FIT_CONTENT or answer <= lastOffered)
   return false unless mode is FIT_CONTENT
   return true if lastMode is MAX_CONTENT and size >= answer
   lastMode is FIT_CONTENT and lastOffered > size and answer <= size
@@ -1818,13 +1815,18 @@ ghosts! =! (node, x, y) ->
 
 # Round every box from its absolute float edges and hand it to the node.
 # Text never rounds smaller: its corner rounds down and a fractional
-# size rounds up. A subtree that was not laid out this pass and has not
-# moved has the boxes it had.
-settle! =! (node, left, top) ->
+# size rounds up. And text sits where its offset rounds down to from its
+# parent's rounded corner (`cornerX`, `cornerY`), as Yoga places it: its
+# own absolute corner rounds down while the box it is in rounds to the
+# nearest cell, and the two can part by a cell — the words drawn outside
+# their box, over a neighbor. A subtree that was not laid out this pass
+# and has not moved has the boxes it had; a leaf is placed whenever its
+# parent is, since its parent's corner is part of where it goes.
+settle! =! (node, left, top, cornerX, cornerY) ->
   lay = node.lay
   x = left + lay.pos[LEFT]
   y = top + lay.pos[TOP]
-  return if lay.ran isnt generation and x is lay.atX and y is lay.atY
+  return if lay.ran isnt generation and x is lay.atX and y is lay.atY and not lay.leaf
   lay.atX = x
   lay.atY = y
   text = lay.leaf
@@ -1840,9 +1842,12 @@ settle! =! (node, left, top) ->
   # none, a size without end — is refused here, by name, before a painter
   # is handed it.
   throw Error.new "rip/tui: layout gave <#{node.tagName ?? 'text'}> a box that is not finite (#{x0}, #{y0}, #{x1 - x0} × #{y1 - y0})" unless Number.isFinite x0 + y0 + x1 + y1
+  if text
+    node.place cornerX + snap(lay.pos[LEFT], false, true), cornerY + snap(lay.pos[TOP], false, true), x1 - x0, y1 - y0
+    return
   node.place x0, y0, x1 - x0, y1 - y0
   for kid, i in lay.kids
-    settle kid, x, y
+    settle kid, x, y, x0, y0
   ghosts node, x0, y0 if lay.boxless
 
 # ── Entry ─────────────────────────────────────────────────────────────────────
@@ -1884,7 +1889,7 @@ pass! =! (root, ownerW, ownerH) ->
     modeH = FIT_CONTENT
   visit root, wide, tall, modeW, modeH, ownerW, ownerH, true
   seat lay, ownerW, ownerH
-  settle root, 0, 0
+  settle root, 0, 0, 0, 0
 
 # Lay the tree out in a space `availableWidth` by `availableHeight`, where
 # null is unlimited. A pass that throws — a style with no meaning, a

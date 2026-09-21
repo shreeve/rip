@@ -1,0 +1,209 @@
+# Ink's test/wrap-text.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+# Ink's file calls its `wrapText(text, width, mode)` function. Each call
+# is drawn here as the tree that reaches the same code, a <Text> with
+# that `wrap` in a <Box> of that width, and held to the literal Ink
+# holds the function to (oracle/extra/wrap-text.tsx is the same port on
+# Ink's side). In "keeps styles that span a newline" the style is a
+# `color` prop, where Ink's test writes the escape sequence into the
+# text, and the hyperlink half of that test is left out: hyperlinks are
+# not built here.
+#
+#   rip test/ink/wrap-text.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, plain, styled, differs } from './harness.rip'
+
+console.log "\nWrap Text"
+
+test "wraps text", ->
+  App = component
+    render
+      Box width: 5
+        Text wrap: 'wrap'
+          "hello world"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "hello\n\nworld"
+  eq plain(App), [
+    "hello"
+    ""
+    "world"
+  ]
+
+test "truncates text at the end", ->
+  App = component
+    render
+      Box width: 5
+        Text wrap: 'truncate-end'
+          "hello world"
+  eq plain(App), ["hell…"]
+
+test "truncates each line of multi-line text separately", ->
+  App1 = component
+    render
+      Box width: 6
+        Text wrap: 'truncate-end'
+          "hello world\nfoo"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "hello…"
+  eq plain(App1), [
+    "hello…"
+    "foo"
+  ]
+  App2 = component
+    render
+      Box width: 6
+        Text wrap: 'truncate-end'
+          "foo\nhello world"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "fo…\n"
+  eq plain(App2), [
+    "foo"
+    "hello…"
+  ]
+  App3 = component
+    render
+      Box width: 4
+        Text wrap: 'truncate-end'
+          "ab\ncdefgh\nij"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "a…\n"
+  eq plain(App3), [
+    "ab"
+    "cde…"
+    "ij"
+  ]
+  App4 = component
+    render
+      Box width: 6
+        Text wrap: 'truncate-middle'
+          "hello world\nfoo"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "hel…fo"
+  eq plain(App4), [
+    "hel…ld"
+    "foo"
+  ]
+  App5 = component
+    render
+      Box width: 6
+        Text wrap: 'truncate-start'
+          "hello world\nfoo"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "…fo\n"
+  eq plain(App5), [
+    "…world"
+    "foo"
+  ]
+
+# Ink's test holds a color and then a hyperlink to this. The color is
+# here, as a prop; the hyperlink half is not ported: hyperlinks are not
+# built.
+test "truncated multi-line text keeps styles that span a newline", ->
+  App = component
+    render
+      Box width: 4
+        Text wrap: 'truncate-end', color: 'red'
+          "abcdef\nuvwxyz"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "\u001b[31mabc…\u001b[39m"
+  eq styled(App), [
+    "«red»abc…"
+    "«red»uvw…"
+  ]
+
+test "truncated multi-line text keeps its lines in the layout", ->
+  App = component
+    render
+      Box width: 8, borderStyle: 'single'
+        Text wrap: 'truncate'
+          "hello world\nfoo"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "┌──────┐\n│hello…│\n└──────┘"
+  eq plain(App), [
+    "┌──────┐"
+    "│hello…│"
+    "│foo   │"
+    "└──────┘"
+  ]
+
+test "truncated multi-line text keeps a C1 SGR color that spans a newline", ->
+  App = component
+    render
+      Box width: 4
+        Text wrap: 'truncate'
+          "\u009b31mabcdef\nuvwxyz\u009b39m"
+  # Ink's test asks for the styled frame; its text is what stands here.
+  differs styled(App), ["abc…", "uvw…"], ["«red»abc…", "«red»uvw…"],
+    "Styling is structural only (PLAN §6): an SGR sequence written into text is stripped with every other control sequence, where Ink passes it through to the terminal."
+
+test "truncated multi-line text keeps a colon 256-color that spans a newline", ->
+  App = component
+    render
+      Box width: 4
+        Text wrap: 'truncate'
+          "\u001b[38:5:196mabcdef\nuvwxyz\u001b[39m"
+  # Ink's test asks for the styled frame; its text is what stands here.
+  differs styled(App), ["abc…", "uvw…"], ["«ansi256(196)»abc…", "«ansi256(196)»uvw…"],
+    "Styling is structural only (PLAN §6): an SGR sequence written into text is stripped with every other control sequence, where Ink passes it through to the terminal."
+
+test "truncated multi-line text keeps a colon truecolor that spans a newline", ->
+  App = component
+    render
+      Box width: 4
+        Text wrap: 'truncate'
+          "\u001b[38:2::255:0:0mabcdef\nuvwxyz\u001b[39m"
+  # Ink's test asks for the styled frame; its text is what stands here.
+  differs styled(App), ["abc…", "uvw…"], ["«#ff0000»abc…", "«#ff0000»uvw…"],
+    "Styling is structural only (PLAN §6): an SGR sequence written into text is stripped with every other control sequence, where Ink passes it through to the terminal."
+
+test "uses separate cache entries for different widths", ->
+  App1 = component
+    render
+      Box width: 5
+        Text wrap: 'truncate-end'
+          "hello world"
+  eq plain(App1), ["hell…"]
+  App2 = component
+    render
+      Box width: 8
+        Text wrap: 'truncate-end'
+          "hello world"
+  eq plain(App2), ["hello w…"]
+
+test "uses separate cache entries for texts that end with digits", ->
+  App1 = component
+    render
+      Box width: 12
+        Text wrap: 'wrap'
+          "ab"
+  eq plain(App1), ["ab"]
+  App2 = component
+    render
+      Box width: 2
+        Text wrap: 'wrap'
+          "ab1"
+  eq plain(App2), [
+    "ab"
+    "1"
+  ]
+
+test "does not reuse a cached result from a wider box", ->
+  Wide = component
+    render
+      Box width: 15
+        Text "一二三四五六七八九十"
+  # Ink's test draws this frame first and compares only the next one.
+  eq plain(Wide), [
+    "一二三四五六七"
+    "八九十"
+  ]
+  Narrow = component
+    render
+      Box width: 5
+        Text "一二三四五六七八九十1"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws the wider
+  # box's rows again, "一二三四五六七" and "八九十".
+  eq plain(Narrow), [
+    "一二"
+    "三四"
+    "五六"
+    "七八"
+    "九十1"
+  ]

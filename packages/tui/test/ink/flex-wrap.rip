@@ -1,0 +1,84 @@
+# Ink's test/flex-wrap.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/flex-wrap.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, plain } from './harness.rip'
+
+console.log "\nFlex Wrap"
+
+test "row - no wrap", ->
+  App = component
+    render
+      Box width: 2
+        Text "A"
+        Text "BC"
+  eq plain(App), [
+    "BC"
+    ""
+  ]
+
+test "column - no wrap", ->
+  App = component
+    render
+      Box flexDirection: 'column', height: 2
+        Text "A"
+        Text "B"
+        Text "C"
+  eq plain(App), [
+    "B"
+    "C"
+  ]
+
+test "row - wrap content", ->
+  App = component
+    render
+      Box width: 2, flexWrap: 'wrap'
+        Text "A"
+        Text "BC"
+  eq plain(App), [
+    "A"
+    "BC"
+  ]
+
+test "column - wrap content", ->
+  App = component
+    render
+      Box flexDirection: 'column', height: 2, flexWrap: 'wrap'
+        Text "A"
+        Text "B"
+        Text "C"
+  eq plain(App), [
+    "AC"
+    "B"
+  ]
+
+test "column - wrap content reverse", ->
+  App = component
+    render
+      Box flexDirection: 'column', height: 2, width: 3, flexWrap: 'wrap-reverse'
+        Text "A"
+        Text "B"
+        Text "C"
+  eq plain(App), [
+    " CA"
+    "  B"
+  ]
+
+test "row - wrap content reverse", ->
+  App = component
+    render
+      Box height: 3, width: 2, flexWrap: 'wrap-reverse'
+        Text "A"
+        Text "B"
+        Text "C"
+  eq plain(App), [
+    ""
+    "C"
+    "AB"
+  ]
+

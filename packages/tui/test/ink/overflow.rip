@@ -1,0 +1,572 @@
+# Ink's test/overflow.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/overflow.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, plain, differs } from './harness.rip'
+
+console.log "\nOverflow"
+
+test "overflowX - single text node in a box inside overflow container", ->
+  App = component
+    render
+      Box width: 6, overflowX: 'hidden'
+        Box width: 16, flexShrink: 0
+          Text "Hello World"
+  eq plain(App), ["Hello"]
+
+test "overflowX - single text node in a zero-width overflow container", ->
+  App = component
+    render
+      Box
+        Box width: 0, overflowX: 'hidden'
+          Text "hello"
+        Text "|"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "|\n\n\n\n"
+  eq plain(App), ["|"]
+
+test "overflowX - single text node inside overflow container with border", ->
+  App = component
+    render
+      Box width: 6, overflowX: 'hidden', borderStyle: 'round'
+        Box width: 16, flexShrink: 0
+          Text "Hello World"
+  eq plain(App), [
+    "╭────╮"
+    "│Hell│"
+    "╰────╯"
+  ]
+
+test "overflowX - single text node in a box with border inside overflow container", ->
+  App = component
+    render
+      Box width: 6, overflowX: 'hidden'
+        Box width: 16, flexShrink: 0, borderStyle: 'round'
+          Text "Hello World"
+  eq plain(App), [
+    "╭─────"
+    "│Hello"
+    "╰─────"
+  ]
+
+test "overflowX - multiple text nodes in a box inside overflow container", ->
+  App = component
+    render
+      Box width: 6, overflowX: 'hidden'
+        Box width: 12, flexShrink: 0
+          Text "Hello "
+          Text "World"
+  eq plain(App), ["Hello"]
+
+test "overflowX - multiple text nodes in a box inside overflow container with border", ->
+  App = component
+    render
+      Box width: 8, overflowX: 'hidden', borderStyle: 'round'
+        Box width: 12, flexShrink: 0
+          Text "Hello "
+          Text "World"
+  eq plain(App), [
+    "╭──────╮"
+    "│Hello │"
+    "╰──────╯"
+  ]
+
+test "overflowX - multiple text nodes in a box with border inside overflow container", ->
+  App = component
+    render
+      Box width: 8, overflowX: 'hidden'
+        Box width: 12, flexShrink: 0, borderStyle: 'round'
+          Text "Hello "
+          Text "World"
+  eq plain(App), [
+    "╭───────"
+    "│HelloWo"
+    "│"
+    "╰───────"
+  ]
+
+test "overflowX - multiple boxes inside overflow container", ->
+  App = component
+    render
+      Box width: 6, overflowX: 'hidden'
+        Box width: 6, flexShrink: 0
+          Text "Hello "
+        Box width: 6, flexShrink: 0
+          Text "World"
+  eq plain(App), ["Hello"]
+
+test "overflowX - multiple boxes inside overflow container with border", ->
+  App = component
+    render
+      Box width: 8, overflowX: 'hidden', borderStyle: 'round'
+        Box width: 6, flexShrink: 0
+          Text "Hello "
+        Box width: 6, flexShrink: 0
+          Text "World"
+  eq plain(App), [
+    "╭──────╮"
+    "│Hello │"
+    "╰──────╯"
+  ]
+
+test "overflowX - box before left edge of overflow container", ->
+  App = component
+    render
+      Box width: 6, overflowX: 'hidden'
+        Box marginLeft: -12, width: 6, flexShrink: 0
+          Text "Hello"
+  eq plain(App), [""]
+
+test "overflowX - box before left edge of overflow container with border", ->
+  App = component
+    render
+      Box width: 6, overflowX: 'hidden', borderStyle: 'round'
+        Box marginLeft: -12, width: 6, flexShrink: 0
+          Text "Hello"
+  eq plain(App), [
+    "╭────╮"
+    "│    │"
+    "╰────╯"
+  ]
+
+test "overflowX - box intersecting with left edge of overflow container", ->
+  App = component
+    render
+      Box width: 6, overflowX: 'hidden'
+        Box marginLeft: -3, width: 12, flexShrink: 0
+          Text "Hello World"
+  eq plain(App), ["lo Wor"]
+
+test "overflowX - box intersecting with left edge of overflow container with border", ->
+  App = component
+    render
+      Box width: 8, overflowX: 'hidden', borderStyle: 'round'
+        Box marginLeft: -3, width: 12, flexShrink: 0
+          Text "Hello World"
+  eq plain(App), [
+    "╭──────╮"
+    "│lo Wor│"
+    "╰──────╯"
+  ]
+
+test "overflowX - box after right edge of overflow container", ->
+  App = component
+    render
+      Box width: 6, overflowX: 'hidden'
+        Box marginLeft: 6, width: 6, flexShrink: 0
+          Text "Hello"
+  eq plain(App), [""]
+
+test "overflowX - box intersecting with right edge of overflow container", ->
+  App = component
+    render
+      Box width: 6, overflowX: 'hidden'
+        Box marginLeft: 3, width: 6, flexShrink: 0
+          Text "Hello"
+  eq plain(App), ["   Hel"]
+
+test "overflowY - single text node inside overflow container", ->
+  App = component
+    render
+      Box height: 1, overflowY: 'hidden'
+        Text
+          "Hello"
+          "\n"
+          "World"
+  eq plain(App), ["Hello"]
+
+test "overflowY - single text node inside overflow container with border", ->
+  App = component
+    render
+      Box width: 20, height: 3, overflowY: 'hidden', borderStyle: 'round'
+        Text
+          "Hello"
+          "\n"
+          "World"
+  eq plain(App), [
+    "╭──────────────────╮"
+    "│Hello             │"
+    "╰──────────────────╯"
+  ]
+
+test "overflowY - multiple boxes inside overflow container", ->
+  App = component
+    render
+      Box height: 2, overflowY: 'hidden', flexDirection: 'column'
+        Box flexShrink: 0
+          Text "Line #1"
+        Box flexShrink: 0
+          Text "Line #2"
+        Box flexShrink: 0
+          Text "Line #3"
+        Box flexShrink: 0
+          Text "Line #4"
+  eq plain(App), [
+    "Line #1"
+    "Line #2"
+  ]
+
+test "overflowY - multiple boxes inside overflow container with border", ->
+  App = component
+    render
+      Box width: 9, height: 4, overflowY: 'hidden', flexDirection: 'column', borderStyle: 'round'
+        Box flexShrink: 0
+          Text "Line #1"
+        Box flexShrink: 0
+          Text "Line #2"
+        Box flexShrink: 0
+          Text "Line #3"
+        Box flexShrink: 0
+          Text "Line #4"
+  eq plain(App), [
+    "╭───────╮"
+    "│Line #1│"
+    "│Line #2│"
+    "╰───────╯"
+  ]
+
+test "overflowY - box above top edge of overflow container", ->
+  App = component
+    render
+      Box height: 1, overflowY: 'hidden'
+        Box marginTop: -2, height: 2, flexShrink: 0
+          Text
+            "Hello"
+            "\n"
+            "World"
+  eq plain(App), [""]
+
+test "overflowY - box above top edge of overflow container with border", ->
+  App = component
+    render
+      Box width: 7, height: 3, overflowY: 'hidden', borderStyle: 'round'
+        Box marginTop: -3, height: 2, flexShrink: 0
+          Text
+            "Hello"
+            "\n"
+            "World"
+  eq plain(App), [
+    "╭─────╮"
+    "│     │"
+    "╰─────╯"
+  ]
+
+test "overflowY - box intersecting with top edge of overflow container", ->
+  App = component
+    render
+      Box height: 1, overflowY: 'hidden'
+        Box marginTop: -1, height: 2, flexShrink: 0
+          Text
+            "Hello"
+            "\n"
+            "World"
+  eq plain(App), ["World"]
+
+test "overflowY - box intersecting with top edge of overflow container with border", ->
+  App = component
+    render
+      Box width: 7, height: 3, overflowY: 'hidden', borderStyle: 'round'
+        Box marginTop: -1, height: 2, flexShrink: 0
+          Text
+            "Hello"
+            "\n"
+            "World"
+  eq plain(App), [
+    "╭─────╮"
+    "│World│"
+    "╰─────╯"
+  ]
+
+test "overflowY - box below bottom edge of overflow container", ->
+  App = component
+    render
+      Box height: 1, overflowY: 'hidden'
+        Box marginTop: 1, height: 2, flexShrink: 0
+          Text
+            "Hello"
+            "\n"
+            "World"
+  eq plain(App), [""]
+
+test "overflowY - box below bottom edge of overflow container with border", ->
+  App = component
+    render
+      Box width: 7, height: 3, overflowY: 'hidden', borderStyle: 'round'
+        Box marginTop: 2, height: 2, flexShrink: 0
+          Text
+            "Hello"
+            "\n"
+            "World"
+  eq plain(App), [
+    "╭─────╮"
+    "│     │"
+    "╰─────╯"
+  ]
+
+test "overflowY - box intersecting with bottom edge of overflow container", ->
+  App = component
+    render
+      Box height: 1, overflowY: 'hidden'
+        Box height: 2, flexShrink: 0
+          Text
+            "Hello"
+            "\n"
+            "World"
+  eq plain(App), ["Hello"]
+
+test "overflowY - box intersecting with bottom edge of overflow container with border", ->
+  App = component
+    render
+      Box width: 7, height: 3, overflowY: 'hidden', borderStyle: 'round'
+        Box height: 2, flexShrink: 0
+          Text
+            "Hello"
+            "\n"
+            "World"
+  eq plain(App), [
+    "╭─────╮"
+    "│Hello│"
+    "╰─────╯"
+  ]
+
+test "overflowX visible overrides overflow hidden while preserving vertical clipping", ->
+  App = component
+    render
+      Box width: 6, height: 2
+        Box width: 3, height: 1, overflow: 'hidden', overflowX: 'visible'
+          Box width: 6, height: 2, flexShrink: 0
+            Text "ABCDEF\nGHIJKL"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "ABC\n"
+  eq plain(App), [
+    "ABCDEF"
+    ""
+  ]
+
+test "overflowY visible overrides overflow hidden while preserving horizontal clipping", ->
+  App = component
+    render
+      Box width: 6, height: 2
+        Box width: 3, height: 1, overflow: 'hidden', overflowY: 'visible'
+          Box width: 6, height: 2, flexShrink: 0
+            Text "ABCDEF\nGHIJKL"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "ABC\n"
+  eq plain(App), [
+    "ABC"
+    "GHI"
+  ]
+
+test "overflow - single text node inside overflow container", ->
+  App = component
+    render
+      Box paddingBottom: 1
+        Box width: 6, height: 1, overflow: 'hidden'
+          Box width: 12, height: 2, flexShrink: 0
+            Text
+              "Hello"
+              "\n"
+              "World"
+  eq plain(App), [
+    "Hello"
+    ""
+  ]
+
+test "overflow - single text node inside overflow container with border", ->
+  App = component
+    render
+      Box paddingBottom: 1
+        Box width: 8, height: 3, overflow: 'hidden', borderStyle: 'round'
+          Box width: 12, height: 2, flexShrink: 0
+            Text
+              "Hello"
+              "\n"
+              "World"
+  eq plain(App), [
+    "╭──────╮"
+    "│Hello │"
+    "╰──────╯"
+    ""
+  ]
+
+test "overflow - multiple boxes inside overflow container", ->
+  App = component
+    render
+      Box paddingBottom: 1
+        Box width: 4, height: 1, overflow: 'hidden'
+          Box width: 2, height: 2, flexShrink: 0
+            Text
+              "TL"
+              "\n"
+              "BL"
+          Box width: 2, height: 2, flexShrink: 0
+            Text
+              "TR"
+              "\n"
+              "BR"
+  eq plain(App), [
+    "TLTR"
+    ""
+  ]
+
+test "overflow - multiple boxes inside overflow container with border", ->
+  App = component
+    render
+      Box paddingBottom: 1
+        Box width: 6, height: 3, overflow: 'hidden', borderStyle: 'round'
+          Box width: 2, height: 2, flexShrink: 0
+            Text
+              "TL"
+              "\n"
+              "BL"
+          Box width: 2, height: 2, flexShrink: 0
+            Text
+              "TR"
+              "\n"
+              "BR"
+  eq plain(App), [
+    "╭────╮"
+    "│TLTR│"
+    "╰────╯"
+    ""
+  ]
+
+test "overflow - box intersecting with top left edge of overflow container", ->
+  App = component
+    render
+      Box width: 4, height: 4, overflow: 'hidden'
+        Box marginTop: -2, marginLeft: -2, width: 4, height: 4, flexShrink: 0
+          Text
+            "AAAA"
+            "\n"
+            "BBBB"
+            "\n"
+            "CCCC"
+            "\n"
+            "DDDD"
+  eq plain(App), [
+    "CC"
+    "DD"
+    ""
+    ""
+  ]
+
+test "overflow - box intersecting with top right edge of overflow container", ->
+  App = component
+    render
+      Box width: 4, height: 4, overflow: 'hidden'
+        Box marginTop: -2, marginLeft: 2, width: 4, height: 4, flexShrink: 0
+          Text
+            "AAAA"
+            "\n"
+            "BBBB"
+            "\n"
+            "CCCC"
+            "\n"
+            "DDDD"
+  eq plain(App), [
+    "  CC"
+    "  DD"
+    ""
+    ""
+  ]
+
+test "overflow - box intersecting with bottom left edge of overflow container", ->
+  App = component
+    render
+      Box width: 4, height: 4, overflow: 'hidden'
+        Box marginTop: 2, marginLeft: -2, width: 4, height: 4, flexShrink: 0
+          Text
+            "AAAA"
+            "\n"
+            "BBBB"
+            "\n"
+            "CCCC"
+            "\n"
+            "DDDD"
+  eq plain(App), [
+    ""
+    ""
+    "AA"
+    "BB"
+  ]
+
+test "overflow - box intersecting with bottom right edge of overflow container", ->
+  App = component
+    render
+      Box width: 4, height: 4, overflow: 'hidden'
+        Box marginTop: 2, marginLeft: 2, width: 4, height: 4, flexShrink: 0
+          Text
+            "AAAA"
+            "\n"
+            "BBBB"
+            "\n"
+            "CCCC"
+            "\n"
+            "DDDD"
+  eq plain(App), [
+    ""
+    ""
+    "  AA"
+    "  BB"
+  ]
+
+test "nested overflow", ->
+  App = component
+    render
+      Box paddingBottom: 1
+        Box width: 4, height: 4, overflow: 'hidden', flexDirection: 'column'
+          Box width: 2, height: 2, overflow: 'hidden'
+            Box width: 4, height: 4, flexShrink: 0
+              Text
+                "AAAA"
+                "\n"
+                "BBBB"
+                "\n"
+                "CCCC"
+                "\n"
+                "DDDD"
+          Box width: 4, height: 3
+            Text
+              "XXXX"
+              "\n"
+              "YYYY"
+              "\n"
+              "ZZZZ"
+  eq plain(App), [
+    "AA"
+    "BB"
+    "XXXX"
+    "YYYY"
+    ""
+  ]
+
+test "out of bounds writes do not crash", ->
+  App = component
+    render
+      Box width: 12, height: 10, borderStyle: 'round'
+  differs plain(App, 10), [
+    "╭─────────"
+    "│"
+    "│"
+    "│"
+    "│"
+    "│"
+    "│"
+    "│"
+    "│"
+    "╰─────────"
+  ], [
+    "╭──────────╮"
+    "│         │"
+    "│         │"
+    "│         │"
+    "│         │"
+    "│         │"
+    "│         │"
+    "│         │"
+    "│         │"
+    "╰──────────╯"
+  ], "A frame is as wide as the terminal, so a box wider than its 10 columns is cut at the last one. Ink writes past the edge: its top and bottom rows come out 12 wide, and the rows between lose a column from the middle."

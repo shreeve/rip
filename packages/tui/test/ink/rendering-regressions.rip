@@ -1,0 +1,35 @@
+# Ink's test/rendering-regressions.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/rendering-regressions.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, plain } from './harness.rip'
+
+console.log "\nRendering Regressions"
+
+test "clipping a wide character at the right edge preserves the adjacent marker column", ->
+  App = component
+    render
+      Box
+        Box width: 4, height: 1, overflowX: 'hidden'
+          Box width: 7, flexShrink: 0
+            Text "X你好世"
+        Text "|"
+  eq plain(App), ["X你 |"]
+
+test "clipping a wide character at the left edge preserves the adjacent marker column", ->
+  App = component
+    render
+      Box
+        Box width: 3, height: 1, overflowX: 'hidden', contentOffsetX: 1
+          Box width: 4, flexShrink: 0
+            Text "你好"
+        Text "|"
+  # The frame is the literal Ink's test compares against: `contentOffsetX`
+  # is on Ink's main branch only.
+  eq plain(App), [" 好|"]
+

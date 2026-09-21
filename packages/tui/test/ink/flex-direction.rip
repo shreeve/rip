@@ -1,0 +1,73 @@
+# Ink's test/flex-direction.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/flex-direction.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, plain } from './harness.rip'
+
+console.log "\nFlex Direction"
+
+test "direction row", ->
+  App = component
+    render
+      Box flexDirection: 'row'
+        Text "A"
+        Text "B"
+  eq plain(App), ["AB"]
+
+test "undefined direction uses the default row layout", ->
+  App = component
+    render
+      Box
+        Text "A"
+        Text "B"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "A\nB"
+  eq plain(App), ["AB"]
+
+test "direction row reverse", ->
+  App = component
+    render
+      Box flexDirection: 'row-reverse', width: 4
+        Text "A"
+        Text "B"
+  eq plain(App), ["  BA"]
+
+test "direction column", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Text "A"
+        Text "B"
+  eq plain(App), [
+    "A"
+    "B"
+  ]
+
+test "direction column reverse", ->
+  App = component
+    render
+      Box flexDirection: 'column-reverse', height: 4
+        Text "A"
+        Text "B"
+  eq plain(App), [
+    ""
+    ""
+    "B"
+    "A"
+  ]
+
+test "don’t squash text nodes when column direction is applied", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Text "A"
+        Text "B"
+  eq plain(App), [
+    "A"
+    "B"
+  ]
+

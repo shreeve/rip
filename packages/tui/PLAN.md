@@ -57,7 +57,7 @@ together:
 | Row | Ink + Yoga | Rip TUI (budget) |
 |---|---|---|
 | Framework only | Ink `src/` ≈ 7,250 | ≈ 1,900 |
-| Framework + layout algorithm | + `yoga/algorithm/` 4,679 ≈ 12,000 | ≈ 3,700 |
+| Framework + layout algorithm | + `yoga/algorithm/` 4,679 ≈ 12,000 | ≈ 3,400 |
 | Full runtime closure | + React, react-reconciler, 23 npm deps | + Rip runtime 2,262 |
 
 The honest headline is **roughly 3× smaller**, not more. Raw totals
@@ -127,17 +127,19 @@ Flat package, the `packages/barcodes` shape. All modules are Rip,
 including hot paths (the emitted loops are the JavaScript one would
 write by hand; hot loops use the indexed `for x, i in` form).
 
-| Module | Job | Budget |
+| Module | Job | Code lines |
 |---|---|---|
-| `tui.rip` | Entry: `run`, `screen`, `focus`, `clock`, widgets | 230 |
-| `document.rip` | Terminal document: nodes, tree links, events, style road | 250 |
-| `layout.rip` | Flexbox, containing blocks, baseline, cache, dirty propagation, edge rounding | 1,700 |
-| `paint.rip` | Cell buffers, styles, clip, borders, damage, diff, emit | 650 |
-| `text.rip` | Sanitize, graphemes, width, wrap, truncate | 170 |
-| `screen.rip` | Inline / alternate, `Static`, resize, non-TTY, scheduler | 290 |
-| `input.rip` | Key tokenizer and decoder, paste, mouse reports, keyboard negotiation | 250 |
-| `terminal.rip` | Setup / teardown, signals, suspend, console capture | 170 |
-| | **Total** | **≈ 3,700** |
+| `tui.rip` | Entry: `run`, `screen`, widgets; to come: `focus`, `clock` | 90, about 200 when complete |
+| `document.rip` | Terminal document: nodes, tree links, events, style road | 236 |
+| `layout.rip` | Flexbox, containing blocks, baseline, cache, edge rounding | 1,437 |
+| `text.rip` | Sanitize, grapheme clusters, width, wrap, truncate | 312 |
+| `paint.rip` | Cell grids, styles, clip, borders, backgrounds, diff; to come: damage | 400, about 550 |
+| `screen.rip` | Frames and pacing; to come: alternate screen, `Static`, non-TTY | 53, about 250 |
+| `input.rip` | To come: key tokenizer and decoder, paste, mouse, keyboard negotiation | about 250 |
+| `terminal.rip` | To come: setup / teardown, signals, suspend, console capture | about 170 |
+| | **Total** | **2,528 built; about 3,400 complete** |
+
+Lines are counted as §2 counts them: non-blank and non-comment.
 
 Also at the package root: `test.rip`, `demo.rip`, `bench.rip`,
 `bench/` (its own `package.json` quarantining Ink, React, and
@@ -333,9 +335,13 @@ tree order with absolute nodes deferred into a stable list.
 **Emit.** Diff dirty rows, group runs, move with the cheapest of CUF /
 CHA / CUP (inline mode uses relative vertical moves only), rewrite a
 row when more than about half changed, build one string, make one
-`write`, inside synchronized output (DEC 2026). After any wide or
-clustered cell, force an absolute column move so a width disagreement
-with the terminal cannot smear the rest of the row. Bytes per update
+`write`, inside synchronized output (DEC 2026). After a cell of more
+than one code point, an absolute column move keeps a width
+disagreement with the terminal to that glyph (measured: a CJK-heavy
+80×40 frame is 5,008 bytes this way and 12,648 with a move after
+every wide cell). A line feed is never written with a background
+held, since a terminal that erases with the current background would
+paint the scrolled-in row with it. Bytes per update
 are benchmarked, since a cell diff can emit more than a line diff.
 
 **Decided — styling is structural only.** Raw ANSI inside text is what
@@ -345,6 +351,21 @@ stripped, tabs expanded). For text that arrives pre-colored, an opt-in
 `ansi(str)` helper parses SGR into styled spans once, outside the
 paint path. Ink's string `Transform` is replaced by a per-cell style
 callback.
+
+**Held to Ink's own tests.** `test/ink/` ports 386 of Ink's paint
+cases — borders, backgrounds, overflow, text, wrapping, truncation,
+widths, content offset, position, display, the flex files — with
+every expected frame taken from published Ink 7.1.1 as an oracle, or
+from Ink's test source where its main branch is ahead. Plain frames
+compare as text and colors as styled cells, never as escape bytes.
+The cases run through widgets that spell out Ink's defaults (a row
+that shrinks), since this package keeps Yoga's. Where a frame differs
+from Ink's test on purpose, the case still runs, pinned to this
+package's frame with its reason, and fails when it no longer differs:
+text with no background keeps the one beneath it, where Ink carries
+backgrounds down the tree; a value the package cannot use is refused
+where Ink reads it as zero; and four frames Ink's own tests mark as
+failing, where this package draws what Yoga and published Ink draw.
 
 **Decided — an offset-based wrapper of our own,** with an ASCII fast
 path; `Bun.stringWidth` per grapheme. Structural spans need break

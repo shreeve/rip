@@ -1,0 +1,82 @@
+# Ink's test/border-backgrounds.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/border-backgrounds.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, styled } from './harness.rip'
+
+console.log "\nBorder Backgrounds"
+
+test "border with background color", ->
+  App = component
+    render
+      Box borderStyle: 'single', borderColor: 'white', borderBackgroundColor: 'blue'
+        Box width: 4
+          Text "Test"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq styled(App), [
+    "«white on blue»┌──────────────────────────────────────────────────────────────────────────────────────────────────┐"
+    "«white on blue»│«»Test                                                                                              «white on blue»│"
+    "«white on blue»└──────────────────────────────────────────────────────────────────────────────────────────────────┘"
+  ]
+
+test "border with different background colors per side", ->
+  App = component
+    render
+      Box borderStyle: 'single', borderTopBackgroundColor: 'red', borderBottomBackgroundColor: 'blue', borderLeftBackgroundColor: 'green', borderRightBackgroundColor: 'yellow'
+        Box width: 4
+          Text "Test"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq styled(App), [
+    "«on red»┌──────────────────────────────────────────────────────────────────────────────────────────────────┐"
+    "«on green»│«»Test                                                                                              «on yellow»│"
+    "«on blue»└──────────────────────────────────────────────────────────────────────────────────────────────────┘"
+  ]
+
+test "border background color fallback to general borderBackgroundColor", ->
+  App = component
+    render
+      Box borderStyle: 'single', borderBackgroundColor: 'magenta', borderTopBackgroundColor: 'cyan'
+        Box width: 4
+          Text "Test"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq styled(App), [
+    "«on cyan»┌──────────────────────────────────────────────────────────────────────────────────────────────────┐"
+    "«on magenta»│«»Test                                                                                              «on magenta»│"
+    "«on magenta»└──────────────────────────────────────────────────────────────────────────────────────────────────┘"
+  ]
+
+test "vertical border background does not bleed into content rows", ->
+  App = component
+    render
+      Box borderStyle: 'classic', borderBackgroundColor: 'cyan', alignSelf: 'flex-start', width: 12
+        Text "Text longer than the Box width, so will definitely wrap."
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq styled(App), [
+    "«on cyan»+----------+"
+    "«on cyan»|«»Text      «on cyan»|"
+    "«on cyan»|«»longer    «on cyan»|"
+    "«on cyan»|«»than the  «on cyan»|"
+    "«on cyan»|«»Box width,«on cyan»|"
+    "«on cyan»|«» so will  «on cyan»|"
+    "«on cyan»|«»definitely«on cyan»|"
+    "«on cyan»|«» wrap.    «on cyan»|"
+    "«on cyan»+----------+"
+  ]
+
+test "foreground, background and dim combine correctly", ->
+  App = component
+    render
+      Box borderTopDimColor: true, borderStyle: 'single', borderTopColor: 'red', borderTopBackgroundColor: 'cyan', alignSelf: 'flex-start'
+        Text "Hi"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq styled(App), [
+    "«red on cyan dim»┌──┐"
+    "│Hi│"
+    "└──┘"
+  ]
+

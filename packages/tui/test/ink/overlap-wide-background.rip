@@ -1,0 +1,167 @@
+# Ink's test/overlap-wide-background.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/overlap-wide-background.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, styled, differs } from './harness.rip'
+
+console.log "\nOverlap Wide Background"
+
+test "overwriting 你 cell 0 preserves the other cell's background", ->
+  App1 = component
+    render
+      Box width: 3, height: 1
+        Text backgroundColor: 'blue'
+          "你"
+          "Z"
+        Box position: 'absolute', left: 0, top: 0
+          Text "X"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "X \u001b[44mZ\u001b[49m"
+  differs styled(App1, 80), ["«on blue»X Z"], ["X«on blue» Z"],
+    'Text with no background of its own keeps the background of the cell beneath it (PLAN §6), so an overlay drawn on a colored strip sits on that color; Ink carries backgrounds down the tree and leaves the overlay bare.'
+  App2 = component
+    render
+      Text
+        Text "X"
+        Text backgroundColor: 'blue'
+          " Z"
+  # The tree Ink's test draws its expected frame with.
+  eq styled(App2, 80), ["X«on blue» Z"]
+
+test "overwriting 你 cell 1 preserves the other cell's background", ->
+  App1 = component
+    render
+      Box width: 3, height: 1
+        Text backgroundColor: 'blue'
+          "你"
+          "Z"
+        Box position: 'absolute', left: 1, top: 0
+          Text "X"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws " X\u001b[44mZ\u001b[49m"
+  differs styled(App1, 80), ["«on blue» XZ"], ["«on blue» «»X«on blue»Z"],
+    'Text with no background of its own keeps the background of the cell beneath it (PLAN §6), so an overlay drawn on a colored strip sits on that color; Ink carries backgrounds down the tree and leaves the overlay bare.'
+  App2 = component
+    render
+      Text
+        Text backgroundColor: 'blue'
+          " "
+        Text "X"
+        Text backgroundColor: 'blue'
+          "Z"
+  # The tree Ink's test draws its expected frame with.
+  eq styled(App2, 80), ["«on blue» «»X«on blue»Z"]
+
+test "overwriting 👩\u200d💻 cell 0 preserves the other cell's background", ->
+  App1 = component
+    render
+      Box width: 3, height: 1
+        Text backgroundColor: 'blue'
+          "👩\u200d💻"
+          "Z"
+        Box position: 'absolute', left: 0, top: 0
+          Text "X"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "X \u001b[44mZ\u001b[49m"
+  differs styled(App1, 80), ["«on blue»X Z"], ["X«on blue» Z"],
+    'Text with no background of its own keeps the background of the cell beneath it (PLAN §6), so an overlay drawn on a colored strip sits on that color; Ink carries backgrounds down the tree and leaves the overlay bare.'
+  App2 = component
+    render
+      Text
+        Text "X"
+        Text backgroundColor: 'blue'
+          " Z"
+  # The tree Ink's test draws its expected frame with.
+  eq styled(App2, 80), ["X«on blue» Z"]
+
+test "overwriting 👩\u200d💻 cell 1 preserves the other cell's background", ->
+  App1 = component
+    render
+      Box width: 3, height: 1
+        Text backgroundColor: 'blue'
+          "👩\u200d💻"
+          "Z"
+        Box position: 'absolute', left: 1, top: 0
+          Text "X"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws " X\u001b[44mZ\u001b[49m"
+  differs styled(App1, 80), ["«on blue» XZ"], ["«on blue» «»X«on blue»Z"],
+    'Text with no background of its own keeps the background of the cell beneath it (PLAN §6), so an overlay drawn on a colored strip sits on that color; Ink carries backgrounds down the tree and leaves the overlay bare.'
+  App2 = component
+    render
+      Text
+        Text backgroundColor: 'blue'
+          " "
+        Text "X"
+        Text backgroundColor: 'blue'
+          "Z"
+  # The tree Ink's test draws its expected frame with.
+  eq styled(App2, 80), ["«on blue» «»X«on blue»Z"]
+
+test "fully overwriting a wide character with XY replaces its styles", ->
+  App1 = component
+    render
+      Box width: 3, height: 1
+        Text backgroundColor: 'blue'
+          "你Z"
+        Box position: 'absolute', left: 0, top: 0
+          Text backgroundColor: 'red'
+            "XY"
+  eq styled(App1, 80), ["«on red»XY«on blue»Z"]
+  App2 = component
+    render
+      Text
+        Text backgroundColor: 'red'
+          "XY"
+        Text backgroundColor: 'blue'
+          "Z"
+  # The tree Ink's test draws its expected frame with.
+  eq styled(App2, 80), ["«on red»XY«on blue»Z"]
+
+test "fully overwriting a wide character with 好 replaces its styles", ->
+  App1 = component
+    render
+      Box width: 3, height: 1
+        Text backgroundColor: 'blue'
+          "你Z"
+        Box position: 'absolute', left: 0, top: 0
+          Text backgroundColor: 'red'
+            "好"
+  eq styled(App1, 80), ["«on red»好«on blue»Z"]
+  App2 = component
+    render
+      Text
+        Text backgroundColor: 'red'
+          "好"
+        Text backgroundColor: 'blue'
+          "Z"
+  # The tree Ink's test draws its expected frame with.
+  eq styled(App2, 80), ["«on red»好«on blue»Z"]
+
+test "an overlay crossing two wide characters preserves both exposed backgrounds", ->
+  App1 = component
+    render
+      Box width: 4, height: 1
+        Text
+          Text backgroundColor: 'blue'
+            "你"
+          Text backgroundColor: 'green'
+            "好"
+        Box position: 'absolute', left: 1, top: 0
+          Text backgroundColor: 'red'
+            "XY"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws " \u001b[41mXY\u001b[49m"
+  eq styled(App1, 80), ["«on blue» «on red»XY«on green» "]
+  App2 = component
+    render
+      Text
+        Text backgroundColor: 'blue'
+          " "
+        Text backgroundColor: 'red'
+          "XY"
+        Text backgroundColor: 'green'
+          " "
+  # The tree Ink's test draws its expected frame with.
+  eq styled(App2, 80), ["«on blue» «on red»XY«on green» "]
+

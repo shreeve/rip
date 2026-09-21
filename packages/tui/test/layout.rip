@@ -61,6 +61,79 @@ settled = (live, wide, tall = null) ->
 
 at = (node) -> "#{node.rect.x},#{node.rect.y} #{node.rect.w}x#{node.rect.h}"
 
+# ==[ Text ]==
+
+console.log "\nText"
+
+test "a text leaf is measured at the width it is offered: it wraps, and its height follows", ->
+  words = span 'the quick brown fox jumps'
+  layout div({ width: 10 }, [words]), 100
+  eq at(words), '0,0 10x3'
+  fitted = span 'the quick brown fox jumps', { alignSelf: 'flex-start' }
+  layout div({ width: 12 }, [fitted]), 100
+  eq at(fitted), '0,0 10x3'
+  # Along a row too: a basis is measured at most as wide as the container.
+  along = span 'the quick brown fox jumps'
+  layout div({ flexDirection: 'row', width: 10 }, [along]), 100
+  eq at(along), '0,0 10x3'
+  free = span 'the quick brown fox jumps'
+  layout div({ flexDirection: 'row' }, [free]), null
+  eq at(free), '0,0 25x1'
+
+test "truncated text takes the width it is offered and one row a line", ->
+  cut = span 'the quick brown fox\njumps', { wrap: 'truncate-middle' }
+  layout div({ width: 10 }, [cut]), 100
+  eq at(cut), '0,0 10x2'
+
+test "text with no words takes no row", ->
+  empty = span ''
+  layout div({ width: 10 }, [empty, span('x')]), 100
+  eq at(empty), '0,0 10x0'
+
+test "a wrap mode that changes lays the text out again", ->
+  words = span 'the quick brown fox jumps'
+  root = div { width: 10 }, [words]
+  settled root, 100
+  eq words.rect.h, 3
+  words.set 'wrap', 'truncate'
+  settled root, 100
+  eq words.rect.h, 1
+
+test "a new text lays out again only when it answers an offer differently", ->
+  text = Text.new 'aaa bbb ccc'
+  root = div { width: 7 }, [div({}, [text])]
+  settled root, 100
+  eq at(text), '0,0 7x2'
+  text.data = 'ccc bbb aaa'
+  ok not dirty(root), 'the same rows at the width it was offered'
+  settled root, 100
+  text.data = 'aaaa bbbbbb'
+  ok dirty(root), 'rows of another width'
+  settled root, 100
+  eq at(text), '0,0 7x2'
+  text.data = 'a b c d e f g h i j'
+  ok dirty(root), 'a third row'
+  settled root, 100
+  eq at(text), '0,0 7x3'
+
+test "a text wider than its offer leaves no stale height behind when the offer widens", ->
+  # At 3 columns the bordered box offers its text 1, and "中on" answers 2
+  # wide (the cluster cannot be narrower) and 3 tall. At 4 the text is
+  # exactly 2 wide — the same width, and another height.
+  root = div {}, [div({ flexDirection: 'row' }, [div({ borderStyle: 'single' }, [Text.new "#{String.fromCodePoint 0x4E2D}on"])])]
+  settled root, 3
+  settled root, 4
+  eq root.rect.h, 4
+
+test "text sits inside the box it is in when both land on a fraction of a cell", ->
+  # Three shrink to 4.615, 4.615 and 0.769 cells; the second box starts
+  # at 4.615 and rounds to cell 5, and its text rounds with it.
+  first = span 'A'
+  second = span 'B'
+  boxed = div { width: 6, flexShrink: 1, flexDirection: 'row' }, [second]
+  layout div({ width: 10, flexDirection: 'row' }, [div({ width: 6, flexShrink: 1, flexDirection: 'row' }, [first]), boxed, span('C', { flexShrink: 1 })]), 100
+  eq [at(boxed), at(second)], ['5,0 4x1', '5,0 1x1']
+
 # ==[ An incremental layout equals a fresh one ]==
 
 console.log "\nIncremental layout"

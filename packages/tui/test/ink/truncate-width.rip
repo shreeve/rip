@@ -1,0 +1,95 @@
+# Ink's test/truncate-width.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/truncate-width.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, plain } from './harness.rip'
+
+console.log "\nTruncate Width"
+
+test "truncate keeps wide characters that fit", ->
+  App = component
+    render
+      Box width: 4
+        Text wrap: 'truncate'
+          "你好世界"
+  eq plain(App, 80), ["你…"]
+
+test "truncate preserves the adjacent column", ->
+  App = component
+    render
+      Box width: 5
+        Text wrap: 'truncate'
+          "你好世界"
+        Box flexShrink: 0
+          Text "|"
+  eq plain(App, 80), ["你… |"]
+
+test "truncate-end keeps wide characters that fit", ->
+  App = component
+    render
+      Box width: 4
+        Text wrap: 'truncate-end'
+          "你好世界"
+  eq plain(App, 80), ["你…"]
+
+test "truncate-end preserves the adjacent column", ->
+  App = component
+    render
+      Box width: 5
+        Text wrap: 'truncate-end'
+          "你好世界"
+        Box flexShrink: 0
+          Text "|"
+  eq plain(App, 80), ["你… |"]
+
+test "truncate-middle keeps wide characters that fit", ->
+  App = component
+    render
+      Box width: 4
+        Text wrap: 'truncate-middle'
+          "你好世界"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "…"
+  eq plain(App, 80), ["你…"]
+
+test "truncate-middle preserves the adjacent column", ->
+  App = component
+    render
+      Box width: 5
+        Text wrap: 'truncate-middle'
+          "你好世界"
+        Box flexShrink: 0
+          Text "|"
+  eq plain(App, 80), ["你… |"]
+
+test "truncate-start keeps wide characters that fit", ->
+  App = component
+    render
+      Box width: 4
+        Text wrap: 'truncate-start'
+          "你好世界"
+  eq plain(App, 80), ["…界"]
+
+test "truncate-start preserves the adjacent column", ->
+  App = component
+    render
+      Box width: 5
+        Text wrap: 'truncate-start'
+          "你好世界"
+        Box flexShrink: 0
+          Text "|"
+  eq plain(App, 80), ["…界 |"]
+
+test "text that fits does not reserve extra width", ->
+  App = component
+    render
+      Box width: 10
+        Text wrap: 'truncate-middle'
+          "你好"
+        Text "|"
+  eq plain(App, 80), ["你好|"]
+

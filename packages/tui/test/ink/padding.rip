@@ -1,0 +1,164 @@
+# Ink's test/padding.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/padding.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, plain } from './harness.rip'
+
+console.log "\nPadding"
+
+test "padding", ->
+  App = component
+    render
+      Box padding: 2
+        Text "X"
+  eq plain(App), [
+    ""
+    ""
+    "  X"
+    ""
+    ""
+  ]
+
+test "padding X", ->
+  App = component
+    render
+      Box
+        Box paddingX: 2
+          Text "X"
+        Text "Y"
+  eq plain(App), ["  X  Y"]
+
+test "padding Y", ->
+  App = component
+    render
+      Box paddingY: 2
+        Text "X"
+  eq plain(App), [
+    ""
+    ""
+    "X"
+    ""
+    ""
+  ]
+
+test "padding top", ->
+  App = component
+    render
+      Box paddingTop: 2
+        Text "X"
+  eq plain(App), [
+    ""
+    ""
+    "X"
+  ]
+
+test "padding bottom", ->
+  App = component
+    render
+      Box paddingBottom: 2
+        Text "X"
+  eq plain(App), [
+    "X"
+    ""
+    ""
+  ]
+
+test "padding left", ->
+  App = component
+    render
+      Box paddingLeft: 2
+        Text "X"
+  eq plain(App), ["  X"]
+
+test "padding right", ->
+  App = component
+    render
+      Box
+        Box paddingRight: 2
+          Text "X"
+        Text "Y"
+  eq plain(App), ["X  Y"]
+
+test "nested padding", ->
+  App = component
+    render
+      Box padding: 2
+        Box padding: 2
+          Text "X"
+  eq plain(App), [
+    ""
+    ""
+    ""
+    ""
+    "    X"
+    ""
+    ""
+    ""
+    ""
+  ]
+
+test "padding with multiline string", ->
+  App = component
+    render
+      Box padding: 2
+        Text "A\nB"
+  eq plain(App), [
+    ""
+    ""
+    "  A"
+    "  B"
+    ""
+    ""
+  ]
+
+test "apply padding to text with newlines", ->
+  App = component
+    render
+      Box padding: 1
+        Text
+          "Hello"
+          "\n"
+          "World"
+  eq plain(App), [
+    ""
+    " Hello"
+    " World"
+    ""
+  ]
+
+test "apply padding to wrapped text", ->
+  App = component
+    render
+      Box padding: 1, width: 5
+        Text "Hello World"
+  eq plain(App), [
+    ""
+    " Hel"
+    " lo"
+    " Wor"
+    " ld"
+    ""
+  ]
+
+test "text wrapping respects paddingX with flexGrow", ->
+  App = component
+    render
+      Box width: 40, borderStyle: 'round'
+        Box paddingX: 2
+          Box marginLeft: 2
+            Text "•"
+            Box flexGrow: 1, marginLeft: 1
+              Text "Lorem ipsum dolor sit amet, consectetur adipiscing elit"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq plain(App), [
+    "╭──────────────────────────────────────╮"
+    "│    • Lorem ipsum dolor sit amet,     │"
+    "│      consectetur adipiscing elit     │"
+    "╰──────────────────────────────────────╯"
+  ]
+

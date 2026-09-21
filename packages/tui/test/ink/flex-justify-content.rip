@@ -1,0 +1,126 @@
+# Ink's test/flex-justify-content.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/flex-justify-content.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, plain, styled, differs } from './harness.rip'
+
+console.log "\nFlex Justify Content"
+
+test "row - align text to center", ->
+  App = component
+    render
+      Box justifyContent: 'center', width: 10
+        Text "Test"
+  eq plain(App), ["   Test"]
+
+test "row - align multiple text nodes to center", ->
+  App = component
+    render
+      Box justifyContent: 'center', width: 10
+        Text "A"
+        Text "B"
+  eq plain(App), ["    AB"]
+
+test "row - align text to right", ->
+  App = component
+    render
+      Box justifyContent: 'flex-end', width: 10
+        Text "Test"
+  eq plain(App), ["      Test"]
+
+test "row - align multiple text nodes to right", ->
+  App = component
+    render
+      Box justifyContent: 'flex-end', width: 10
+        Text "A"
+        Text "B"
+  eq plain(App), ["        AB"]
+
+test "row - align two text nodes on the edges", ->
+  App = component
+    render
+      Box justifyContent: 'space-between', width: 4
+        Text "A"
+        Text "B"
+  eq plain(App), ["A  B"]
+
+test "row - space evenly two text nodes", ->
+  App = component
+    render
+      Box justifyContent: 'space-evenly', width: 10
+        Text "A"
+        Text "B"
+  eq plain(App), ["  A   B"]
+
+# Ink marks this case `test.failing`: the frame is the one its authors
+# want, and no build of Ink draws it.
+test "row - align two text nodes with equal space around them", ->
+  App = component
+    render
+      Box justifyContent: 'space-around', width: 5
+        Text "A"
+        Text "B"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "A  B"
+  differs plain(App), ["A  B"], [" A B"],
+    "Ink marks this test as failing: no build of Ink draws the frame it asks for. This is the frame Yoga's layout gives, and the one published Ink draws."
+
+test "row - align colored text node when text is squashed", ->
+  App = component
+    render
+      Box justifyContent: 'flex-end', width: 5
+        Text color: 'green'
+          "X"
+  eq styled(App), ["    «green»X"]
+
+test "column - align text to center", ->
+  App = component
+    render
+      Box flexDirection: 'column', justifyContent: 'center', height: 3
+        Text "Test"
+  eq plain(App), [
+    ""
+    "Test"
+    ""
+  ]
+
+test "column - align text to bottom", ->
+  App = component
+    render
+      Box flexDirection: 'column', justifyContent: 'flex-end', height: 3
+        Text "Test"
+  eq plain(App), [
+    ""
+    ""
+    "Test"
+  ]
+
+test "column - align two text nodes on the edges", ->
+  App = component
+    render
+      Box flexDirection: 'column', justifyContent: 'space-between', height: 4
+        Text "A"
+        Text "B"
+  eq plain(App), [
+    "A"
+    ""
+    ""
+    "B"
+  ]
+
+# Ink marks this case `test.failing`: the frame is the one its authors
+# want, and no build of Ink draws it.
+test "column - align two text nodes with equal space around them", ->
+  App = component
+    render
+      Box flexDirection: 'column', justifyContent: 'space-around', height: 5
+        Text "A"
+        Text "B"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "A\n\n\nB\n"
+  differs plain(App), ["A", "", "", "B", ""], ["", "A", "", "B", ""],
+    "Ink marks this test as failing: no build of Ink draws the frame it asks for. This is the frame Yoga's layout gives, and the one published Ink draws."
+

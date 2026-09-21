@@ -1,0 +1,133 @@
+# Ink's test/styled-combining-marks.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/styled-combining-marks.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, plain, styled, differs } from './harness.rip'
+
+console.log "\nStyled Combining Marks"
+
+test "combining mark \u0301 survives a nested Text style boundary", ->
+  App = component
+    render
+      Box
+        Text
+          "e"
+          Text color: 'red'
+            "\u0301"
+        Text "X"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "eX"
+  eq plain(App, 80), ["e\u0301X"]
+
+test "combining mark \u0308 survives a nested Text style boundary", ->
+  App = component
+    render
+      Box
+        Text
+          "e"
+          Text color: 'red'
+            "\u0308"
+        Text "X"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "eX"
+  eq plain(App, 80), ["e\u0308X"]
+
+test "following text retains its color after a styled combining mark", ->
+  App = component
+    render
+      Text
+        "e"
+        Text color: 'red'
+          "\u0301X"
+        "Y"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "e\u001b[31mX\u001b[39mY"
+  eq styled(App, 80), ["e\u0301«red»X«»Y"]
+
+test "a combining mark retains the style of its base character", ->
+  App1 = component
+    render
+      Text
+        Text color: 'blue'
+          "e"
+        Text color: 'red'
+          "\u0301X"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "\u001b[34me\u001b[31mX\u001b[39m"
+  eq styled(App1, 80), ["«blue»e\u0301«red»X"]
+  App2 = component
+    render
+      Text
+        Text color: 'blue'
+          "e\u0301"
+        Text color: 'red'
+          "X"
+  # The tree Ink's test draws its expected frame with.
+  eq styled(App2, 80), ["«blue»e\u0301«red»X"]
+
+test "multiple styled marks attach to one base cell", ->
+  App = component
+    render
+      Box
+        Text
+          "a"
+          Text bold: true
+            "\u0301"
+          Text color: 'red'
+            "\u0308"
+        Text "X"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "aX"
+  eq plain(App, 80), ["a\u0301\u0308X"]
+
+# Ink's test asks only that the frame starts with the base and a
+# newline. Published Ink 7.1.1 drops the mark, so its second row is no
+# oracle.
+test "newlines remain between a base and a following combining mark", ->
+  App = component
+    render
+      Text
+        "e"
+        "\n"
+        Text color: 'red'
+          "\u0301X"
+  rows = plain App, 80
+  eq rows[0], "e"
+  eq rows.length, 2
+
+# Ink's test compares the frame after Unicode normalization, so the
+# first row is the one precomposed letter. Published Ink 7.1.1 drops the
+# mark and draws a bare "e".
+test "wrapping keeps a styled accent on the preceding base character", ->
+  App = component
+    render
+      Box width: 1
+        Text
+          "e"
+          Text color: 'red'
+            "\u0301X"
+  eq (row.normalize() for row in plain App, 80), ["\u00e9", "X"]
+
+test "a styled variation selector keeps emoji presentation and width", ->
+  App = component
+    render
+      Box
+        Text
+          "❤"
+          Text color: 'red'
+            "\ufe0f"
+        Text "X"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "❤ X"
+  eq plain(App, 80), ["❤\ufe0fX"]
+
+test "a styled mark without a base character keeps its position and style", ->
+  App = component
+    render
+      Text
+        Text color: 'red'
+          "\u0301X"
+        "Y"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "\u001b[31mX\u001b[39mY"
+  differs styled(App, 80), ["«red»X«»Y"], ["\u0301«red»X«»Y"],
+    "A combining mark with no base before it has no cell of its own, and a terminal would attach it to whatever cell precedes the cursor, which the grid does not track. It is measured at no width, as Ink measures it, and not drawn. Published Ink 7.1.1 draws this frame too; Ink's main branch writes the mark out."
+

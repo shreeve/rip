@@ -1,0 +1,251 @@
+# Ink's test/background.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/background.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, plain, styled, differs } from './harness.rip'
+
+console.log "\nBackground"
+
+test "Text inherits parent Box background color", ->
+  App = component
+    render
+      Box backgroundColor: 'green', alignSelf: 'flex-start'
+        Text "Hello World"
+  eq styled(App), ["«on green»Hello World"]
+
+test "Text explicit background color overrides inherited", ->
+  App = component
+    render
+      Box backgroundColor: 'red', alignSelf: 'flex-start'
+        Text backgroundColor: 'blue'
+          "Hello World"
+  eq styled(App), ["«on blue»Hello World"]
+
+test "Nested Box background inheritance", ->
+  App = component
+    render
+      Box backgroundColor: 'red', alignSelf: 'flex-start'
+        Box backgroundColor: 'blue'
+          Text "Hello World"
+  eq styled(App), ["«on blue»Hello World"]
+
+test "Nested Text inherits the nearest Text background instead of the Box background", ->
+  App = component
+    render
+      Box backgroundColor: 'red', alignSelf: 'flex-start'
+        Text backgroundColor: 'blue'
+          "Hello "
+          Text "World"
+  # Ink's test asks for this frame; published Ink 7.1.1 draws "\u001b[44mHello \u001b[41mWorld\u001b[49m"
+  eq styled(App), ["«on blue»Hello World"]
+
+test "Text without parent Box background has no inheritance", ->
+  App = component
+    render
+      Box alignSelf: 'flex-start'
+        Text "Hello World"
+  eq plain(App), ["Hello World"]
+
+test "Multiple Text elements inherit same background", ->
+  App = component
+    render
+      Box backgroundColor: 'yellow', alignSelf: 'flex-start'
+        Text "Hello "
+        Text "World"
+  eq styled(App), ["«on yellow»Hello World"]
+
+test "Mixed text with and without background inheritance", ->
+  App = component
+    render
+      Box backgroundColor: 'green', alignSelf: 'flex-start'
+        Text "Inherited "
+        Text backgroundColor: ''
+          "No BG "
+        Text backgroundColor: 'red'
+          "Red BG"
+  differs styled(App), ["«on green»Inherited No BG «on red»Red BG"], ["«on green»Inherited «»No BG «on red»Red BG"],
+    "An empty backgroundColor clears the key, and text with no background of its own keeps the one beneath it (PLAN §6). Ink reads '' as: draw this run on no background."
+
+test "Complex nested structure with background inheritance", ->
+  App = component
+    render
+      Box backgroundColor: 'yellow', alignSelf: 'flex-start'
+        Box
+          Text "Outer: "
+          Box backgroundColor: 'blue'
+            Text "Inner: "
+            Text backgroundColor: 'red'
+              "Explicit"
+  eq styled(App), ["«on yellow»Outer: «on blue»Inner: «on red»Explicit"]
+
+test "Box background with standard color", ->
+  App = component
+    render
+      Box backgroundColor: 'red', alignSelf: 'flex-start'
+        Text "Hello"
+  eq styled(App), ["«on red»Hello"]
+
+test "Box background with hex color", ->
+  App = component
+    render
+      Box backgroundColor: '#FF0000', alignSelf: 'flex-start'
+        Text "Hello"
+  eq styled(App), ["«on #ff0000»Hello"]
+
+test "Box background with rgb color", ->
+  App = component
+    render
+      Box backgroundColor: 'rgb(255, 0, 0)', alignSelf: 'flex-start'
+        Text "Hello"
+  eq styled(App), ["«on #ff0000»Hello"]
+
+test "Box background with ansi256 color", ->
+  App = component
+    render
+      Box backgroundColor: 'ansi256(9)', alignSelf: 'flex-start'
+        Text "Hello"
+  eq styled(App), ["«on redBright»Hello"]
+
+test "Box background with wide characters", ->
+  App = component
+    render
+      Box backgroundColor: 'yellow', alignSelf: 'flex-start'
+        Text "こんにちは"
+  eq styled(App), ["«on yellow»こんにちは"]
+
+test "Box background with emojis", ->
+  App = component
+    render
+      Box backgroundColor: 'red', alignSelf: 'flex-start'
+        Text "🎉🎊"
+  eq styled(App), ["«on red»🎉🎊"]
+
+test "Box background fills entire area with standard color", ->
+  App = component
+    render
+      Box backgroundColor: 'red', width: 10, height: 3, alignSelf: 'flex-start'
+        Text "Hello"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq styled(App), [
+    "«on red»Hello     "
+    "«on red»          "
+    "«on red»          "
+  ]
+
+test "Box background fills with hex color", ->
+  App = component
+    render
+      Box backgroundColor: '#FF0000', width: 10, height: 3, alignSelf: 'flex-start'
+        Text "Hello"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq styled(App), [
+    "«on #ff0000»Hello     "
+    "«on #ff0000»          "
+    "«on #ff0000»          "
+  ]
+
+test "Box background fills with rgb color", ->
+  App = component
+    render
+      Box backgroundColor: 'rgb(255, 0, 0)', width: 10, height: 3, alignSelf: 'flex-start'
+        Text "Hello"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq styled(App), [
+    "«on #ff0000»Hello     "
+    "«on #ff0000»          "
+    "«on #ff0000»          "
+  ]
+
+test "Box background fills with ansi256 color", ->
+  App = component
+    render
+      Box backgroundColor: 'ansi256(9)', width: 10, height: 3, alignSelf: 'flex-start'
+        Text "Hello"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq styled(App), [
+    "«on redBright»Hello     "
+    "«on redBright»          "
+    "«on redBright»          "
+  ]
+
+test "Box background with border fills content area", ->
+  App = component
+    render
+      Box backgroundColor: 'cyan', borderStyle: 'round', width: 10, height: 5, alignSelf: 'flex-start'
+        Text "Hi"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq styled(App), [
+    "╭────────╮"
+    "│«on cyan»Hi      «»│"
+    "│«on cyan»        «»│"
+    "│«on cyan»        «»│"
+    "╰────────╯"
+  ]
+
+test "Box background with padding fills entire padded area", ->
+  App = component
+    render
+      Box backgroundColor: 'magenta', padding: 1, width: 10, height: 5, alignSelf: 'flex-start'
+        Text "Hi"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq styled(App), [
+    "«on magenta»          "
+    "«on magenta» Hi       "
+    "«on magenta»          "
+    "«on magenta»          "
+    "«on magenta»          "
+  ]
+
+test "Box background with center alignment fills entire area", ->
+  App = component
+    render
+      Box backgroundColor: 'blue', width: 10, height: 3, justifyContent: 'center', alignSelf: 'flex-start'
+        Text "Hi"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq styled(App), [
+    "«on blue»    Hi    "
+    "«on blue»          "
+    "«on blue»          "
+  ]
+
+test "Box background with column layout fills entire area", ->
+  App = component
+    render
+      Box backgroundColor: 'green', flexDirection: 'column', width: 10, height: 5, alignSelf: 'flex-start'
+        Text "Line 1"
+        Text "Line 2"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq styled(App), [
+    "«on green»Line 1    "
+    "«on green»Line 2    "
+    "«on green»          "
+    "«on green»          "
+    "«on green»          "
+  ]
+
+test "Box backgroundColor fills full width on every line when text wraps", ->
+  App = component
+    render
+      Box backgroundColor: 'red', width: 10, alignSelf: 'flex-start'
+        Text "Hello World!!"
+  eq styled(App), [
+    "«on red»Hello     "
+    "«on red»World!!   "
+  ]
+
+test "Text-only backgroundColor colors text content but does not fill Box width", ->
+  App = component
+    render
+      Box width: 10, alignSelf: 'flex-start'
+        Text backgroundColor: 'red'
+          "Hello World!!"
+  eq styled(App), [
+    "«on red»Hello "
+    "«on red»World!!"
+  ]
+

@@ -1,0 +1,736 @@
+# Ink's test/borders.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop.
+# SOURCE.md says where each expected frame comes from and which of
+# Ink's cases are left out.
+#
+#   rip test/ink/borders.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, plain, styled } from './harness.rip'
+
+console.log "\nBorders"
+
+test "single node - full width box", ->
+  App = component
+    render
+      Box borderStyle: 'round'
+        Text "Hello World"
+  eq plain(App), [
+    "╭──────────────────────────────────────────────────────────────────────────────────────────────────╮"
+    "│Hello World                                                                                       │"
+    "╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+  ]
+
+test "single node - full width box with colorful border", ->
+  App = component
+    render
+      Box borderStyle: 'round', borderColor: 'green'
+        Text "Hello World"
+  eq styled(App), [
+    "«green»╭──────────────────────────────────────────────────────────────────────────────────────────────────╮"
+    "«green»│«»Hello World                                                                                       «green»│"
+    "«green»╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+  ]
+
+test "single node - fit-content box", ->
+  App = component
+    render
+      Box borderStyle: 'round', alignSelf: 'flex-start'
+        Text "Hello World"
+  eq plain(App), [
+    "╭───────────╮"
+    "│Hello World│"
+    "╰───────────╯"
+  ]
+
+test "single node - fit-content box with wide characters", ->
+  App = component
+    render
+      Box borderStyle: 'round', alignSelf: 'flex-start'
+        Text "こんにちは"
+  eq plain(App), [
+    "╭──────────╮"
+    "│こんにちは│"
+    "╰──────────╯"
+  ]
+
+test "single node - fit-content box with emojis", ->
+  App = component
+    render
+      Box borderStyle: 'round', alignSelf: 'flex-start'
+        Text "🌊🌊"
+  eq plain(App), [
+    "╭────╮"
+    "│🌊🌊│"
+    "╰────╯"
+  ]
+
+test "single node - fit-content box with variation selector emojis", ->
+  App = component
+    render
+      Box borderStyle: 'round', alignSelf: 'flex-start'
+        Text "🌡\ufe0f⚠\ufe0f✅"
+  eq plain(App), [
+    "╭──────╮"
+    "│🌡\ufe0f⚠\ufe0f✅│"
+    "╰──────╯"
+  ]
+
+test "single node - fixed width box", ->
+  App = component
+    render
+      Box borderStyle: 'round', width: 20
+        Text "Hello World"
+  eq plain(App), [
+    "╭──────────────────╮"
+    "│Hello World       │"
+    "╰──────────────────╯"
+  ]
+
+test "single node - fixed width and height box", ->
+  App = component
+    render
+      Box borderStyle: 'round', width: 20, height: 20
+        Text "Hello World"
+  eq plain(App), [
+    "╭──────────────────╮"
+    "│Hello World       │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "╰──────────────────╯"
+  ]
+
+test "single node - box with padding", ->
+  App = component
+    render
+      Box borderStyle: 'round', padding: 1, alignSelf: 'flex-start'
+        Text "Hello World"
+  eq plain(App), [
+    "╭─────────────╮"
+    "│             │"
+    "│ Hello World │"
+    "│             │"
+    "╰─────────────╯"
+  ]
+
+test "single node - box with horizontal alignment", ->
+  App = component
+    render
+      Box borderStyle: 'round', width: 20, justifyContent: 'center'
+        Text "Hello World"
+  eq plain(App), [
+    "╭──────────────────╮"
+    "│   Hello World    │"
+    "╰──────────────────╯"
+  ]
+
+test "single node - box with vertical alignment", ->
+  App = component
+    render
+      Box borderStyle: 'round', height: 20, alignItems: 'center', alignSelf: 'flex-start'
+        Text "Hello World"
+  eq plain(App), [
+    "╭───────────╮"
+    "│           │"
+    "│           │"
+    "│           │"
+    "│           │"
+    "│           │"
+    "│           │"
+    "│           │"
+    "│           │"
+    "│Hello World│"
+    "│           │"
+    "│           │"
+    "│           │"
+    "│           │"
+    "│           │"
+    "│           │"
+    "│           │"
+    "│           │"
+    "│           │"
+    "╰───────────╯"
+  ]
+
+test "single node - box with wrapping", ->
+  App = component
+    render
+      Box borderStyle: 'round', width: 10
+        Text "Hello World"
+  eq plain(App), [
+    "╭────────╮"
+    "│Hello   │"
+    "│World   │"
+    "╰────────╯"
+  ]
+
+test "multiple nodes - full width box", ->
+  App = component
+    render
+      Box borderStyle: 'round'
+        Text
+          "Hello "
+          "World"
+  eq plain(App), [
+    "╭──────────────────────────────────────────────────────────────────────────────────────────────────╮"
+    "│Hello World                                                                                       │"
+    "╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+  ]
+
+test "multiple nodes - full width box with colorful border", ->
+  App = component
+    render
+      Box borderStyle: 'round', borderColor: 'green'
+        Text
+          "Hello "
+          "World"
+  eq styled(App), [
+    "«green»╭──────────────────────────────────────────────────────────────────────────────────────────────────╮"
+    "«green»│«»Hello World                                                                                       «green»│"
+    "«green»╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+  ]
+
+test "multiple nodes - fit-content box", ->
+  App = component
+    render
+      Box borderStyle: 'round', alignSelf: 'flex-start'
+        Text
+          "Hello "
+          "World"
+  eq plain(App), [
+    "╭───────────╮"
+    "│Hello World│"
+    "╰───────────╯"
+  ]
+
+test "multiple nodes - fixed width box", ->
+  App = component
+    render
+      Box borderStyle: 'round', width: 20
+        Text
+          "Hello "
+          "World"
+  eq plain(App), [
+    "╭──────────────────╮"
+    "│Hello World       │"
+    "╰──────────────────╯"
+  ]
+
+test "multiple nodes - fixed width and height box", ->
+  App = component
+    render
+      Box borderStyle: 'round', width: 20, height: 20
+        Text
+          "Hello "
+          "World"
+  eq plain(App), [
+    "╭──────────────────╮"
+    "│Hello World       │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "│                  │"
+    "╰──────────────────╯"
+  ]
+
+test "multiple nodes - box with padding", ->
+  App = component
+    render
+      Box borderStyle: 'round', padding: 1, alignSelf: 'flex-start'
+        Text
+          "Hello "
+          "World"
+  eq plain(App), [
+    "╭─────────────╮"
+    "│             │"
+    "│ Hello World │"
+    "│             │"
+    "╰─────────────╯"
+  ]
+
+test "multiple nodes - box with horizontal alignment", ->
+  App = component
+    render
+      Box borderStyle: 'round', width: 20, justifyContent: 'center'
+        Text
+          "Hello "
+          "World"
+  eq plain(App), [
+    "╭──────────────────╮"
+    "│   Hello World    │"
+    "╰──────────────────╯"
+  ]
+
+test "multiple nodes - box with vertical alignment", ->
+  App = component
+    render
+      Box borderStyle: 'round', height: 20, alignItems: 'center', alignSelf: 'flex-start'
+        Text
+          "Hello "
+          "World"
+  eq plain(App), [
+    "╭───────────╮"
+    "│           │"
+    "│           │"
+    "│           │"
+    "│           │"
+    "│           │"
+    "│           │"
+    "│           │"
+    "│           │"
+    "│Hello World│"
+    "│           │"
+    "│           │"
+    "│           │"
+    "│           │"
+    "│           │"
+    "│           │"
+    "│           │"
+    "│           │"
+    "│           │"
+    "╰───────────╯"
+  ]
+
+test "multiple nodes - box with wrapping", ->
+  App = component
+    render
+      Box borderStyle: 'round', width: 10
+        Text
+          "Hello "
+          "World"
+  eq plain(App), [
+    "╭────────╮"
+    "│Hello   │"
+    "│World   │"
+    "╰────────╯"
+  ]
+
+test "multiple nodes - box with wrapping and long first node", ->
+  App = component
+    render
+      Box borderStyle: 'round', width: 10
+        Text
+          "Helloooooo"
+          " World"
+  eq plain(App), [
+    "╭────────╮"
+    "│Helloooo│"
+    "│oo World│"
+    "╰────────╯"
+  ]
+
+test "multiple nodes - box with wrapping and very long first node", ->
+  App = component
+    render
+      Box borderStyle: 'round', width: 10
+        Text
+          "Hellooooooooooooo"
+          " World"
+  eq plain(App), [
+    "╭────────╮"
+    "│Helloooo│"
+    "│oooooooo│"
+    "│o World │"
+    "╰────────╯"
+  ]
+
+test "nested boxes", ->
+  App = component
+    render
+      Box borderStyle: 'round', width: 40, padding: 1
+        Box borderStyle: 'round', justifyContent: 'center', padding: 1
+          Text "Hello World"
+  eq plain(App), [
+    "╭──────────────────────────────────────╮"
+    "│                                      │"
+    "│ ╭─────────────╮                      │"
+    "│ │             │                      │"
+    "│ │ Hello World │                      │"
+    "│ │             │                      │"
+    "│ ╰─────────────╯                      │"
+    "│                                      │"
+    "╰──────────────────────────────────────╯"
+  ]
+
+test "nested boxes - fit-content box with wide characters on flex-direction row", ->
+  App = component
+    render
+      Box borderStyle: 'round', alignSelf: 'flex-start'
+        Box borderStyle: 'round'
+          Text "ミスター"
+        Box borderStyle: 'round'
+          Text "スポック"
+        Box borderStyle: 'round'
+          Text "カーク船長"
+  eq plain(App), [
+    "╭────────────────────────────────╮"
+    "│╭────────╮╭────────╮╭──────────╮│"
+    "││ミスター││スポック││カーク船長││"
+    "│╰────────╯╰────────╯╰──────────╯│"
+    "╰────────────────────────────────╯"
+  ]
+
+test "nested boxes - fit-content box with emojis on flex-direction row", ->
+  App = component
+    render
+      Box borderStyle: 'round', alignSelf: 'flex-start'
+        Box borderStyle: 'round'
+          Text "🦾"
+        Box borderStyle: 'round'
+          Text "🌏"
+        Box borderStyle: 'round'
+          Text "😋"
+  eq plain(App), [
+    "╭────────────╮"
+    "│╭──╮╭──╮╭──╮│"
+    "││🦾││🌏││😋││"
+    "│╰──╯╰──╯╰──╯│"
+    "╰────────────╯"
+  ]
+
+test "nested boxes - fit-content box with wide characters on flex-direction column", ->
+  App = component
+    render
+      Box borderStyle: 'round', alignSelf: 'flex-start', flexDirection: 'column'
+        Box borderStyle: 'round'
+          Text "ミスター"
+        Box borderStyle: 'round'
+          Text "スポック"
+        Box borderStyle: 'round'
+          Text "カーク船長"
+  eq plain(App), [
+    "╭────────────╮"
+    "│╭──────────╮│"
+    "││ミスター  ││"
+    "│╰──────────╯│"
+    "│╭──────────╮│"
+    "││スポック  ││"
+    "│╰──────────╯│"
+    "│╭──────────╮│"
+    "││カーク船長││"
+    "│╰──────────╯│"
+    "╰────────────╯"
+  ]
+
+test "nested boxes - fit-content box with emojis on flex-direction column", ->
+  App = component
+    render
+      Box borderStyle: 'round', alignSelf: 'flex-start', flexDirection: 'column'
+        Box borderStyle: 'round'
+          Text "🦾"
+        Box borderStyle: 'round'
+          Text "🌏"
+        Box borderStyle: 'round'
+          Text "😋"
+  eq plain(App), [
+    "╭────╮"
+    "│╭──╮│"
+    "││🦾││"
+    "│╰──╯│"
+    "│╭──╮│"
+    "││🌏││"
+    "│╰──╯│"
+    "│╭──╮│"
+    "││😋││"
+    "│╰──╯│"
+    "╰────╯"
+  ]
+
+test "hide top border", ->
+  App = component
+    render
+      Box flexDirection: 'column', alignItems: 'flex-start'
+        Text "Above"
+        Box borderStyle: 'round', borderTop: false
+          Text "Content"
+        Text "Below"
+  eq plain(App), [
+    "Above"
+    "│Content│"
+    "╰───────╯"
+    "Below"
+  ]
+
+test "hide bottom border", ->
+  App = component
+    render
+      Box flexDirection: 'column', alignItems: 'flex-start'
+        Text "Above"
+        Box borderStyle: 'round', borderBottom: false
+          Text "Content"
+        Text "Below"
+  eq plain(App), [
+    "Above"
+    "╭───────╮"
+    "│Content│"
+    "Below"
+  ]
+
+test "hide top and bottom borders", ->
+  App = component
+    render
+      Box flexDirection: 'column', alignItems: 'flex-start'
+        Text "Above"
+        Box borderStyle: 'round', borderTop: false, borderBottom: false
+          Text "Content"
+        Text "Below"
+  eq plain(App), [
+    "Above"
+    "│Content│"
+    "Below"
+  ]
+
+test "hide left border", ->
+  App = component
+    render
+      Box flexDirection: 'column', alignItems: 'flex-start'
+        Text "Above"
+        Box borderStyle: 'round', borderLeft: false
+          Text "Content"
+        Text "Below"
+  eq plain(App), [
+    "Above"
+    "───────╮"
+    "Content│"
+    "───────╯"
+    "Below"
+  ]
+
+test "hide right border", ->
+  App = component
+    render
+      Box flexDirection: 'column', alignItems: 'flex-start'
+        Text "Above"
+        Box borderStyle: 'round', borderRight: false
+          Text "Content"
+        Text "Below"
+  eq plain(App), [
+    "Above"
+    "╭───────"
+    "│Content"
+    "╰───────"
+    "Below"
+  ]
+
+test "hide left and right border", ->
+  App = component
+    render
+      Box flexDirection: 'column', alignItems: 'flex-start'
+        Text "Above"
+        Box borderStyle: 'round', borderLeft: false, borderRight: false
+          Text "Content"
+        Text "Below"
+  eq plain(App), [
+    "Above"
+    "───────"
+    "Content"
+    "───────"
+    "Below"
+  ]
+
+test "hide all borders", ->
+  App = component
+    render
+      Box flexDirection: 'column', alignItems: 'flex-start'
+        Text "Above"
+        Box borderStyle: 'round', borderTop: false, borderBottom: false, borderLeft: false, borderRight: false
+          Text "Content"
+        Text "Below"
+  eq plain(App), [
+    "Above"
+    "Content"
+    "Below"
+  ]
+
+test "change color of top border", ->
+  App = component
+    render
+      Box flexDirection: 'column', alignItems: 'flex-start'
+        Text "Above"
+        Box borderStyle: 'round', borderTopColor: 'green'
+          Text "Content"
+        Text "Below"
+  eq styled(App), [
+    "Above"
+    "«green»╭───────╮"
+    "│Content│"
+    "╰───────╯"
+    "Below"
+  ]
+
+test "change color of bottom border", ->
+  App = component
+    render
+      Box flexDirection: 'column', alignItems: 'flex-start'
+        Text "Above"
+        Box borderStyle: 'round', borderBottomColor: 'green'
+          Text "Content"
+        Text "Below"
+  eq styled(App), [
+    "Above"
+    "╭───────╮"
+    "│Content│"
+    "«green»╰───────╯"
+    "Below"
+  ]
+
+test "change color of left border", ->
+  App = component
+    render
+      Box flexDirection: 'column', alignItems: 'flex-start'
+        Text "Above"
+        Box borderStyle: 'round', borderLeftColor: 'green'
+          Text "Content"
+        Text "Below"
+  eq styled(App), [
+    "Above"
+    "╭───────╮"
+    "«green»│«»Content│"
+    "╰───────╯"
+    "Below"
+  ]
+
+test "change color of right border", ->
+  App = component
+    render
+      Box flexDirection: 'column', alignItems: 'flex-start'
+        Text "Above"
+        Box borderStyle: 'round', borderRightColor: 'green'
+          Text "Content"
+        Text "Below"
+  eq styled(App), [
+    "Above"
+    "╭───────╮"
+    "│Content«green»│"
+    "╰───────╯"
+    "Below"
+  ]
+
+test "custom border style", ->
+  App = component
+    render
+      Box borderStyle: { topLeft: '↘', top: '↓', topRight: '↙', left: '→', bottomLeft: '↗', bottom: '↑', bottomRight: '↖', right: '←' }
+        Text "Content"
+  eq plain(App), [
+    "↘↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↙"
+    "→Content                                                                                           ←"
+    "↗↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↖"
+  ]
+
+test "dim border color", ->
+  App = component
+    render
+      Box borderDimColor: true, borderStyle: 'round'
+        Text "Content"
+  eq styled(App), [
+    "«dim»╭──────────────────────────────────────────────────────────────────────────────────────────────────╮"
+    "«dim»│«»Content                                                                                           «dim»│"
+    "«dim»╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+  ]
+
+test "dim top border color", ->
+  App = component
+    render
+      Box flexDirection: 'column', alignItems: 'flex-start'
+        Text "Above"
+        Box borderTopDimColor: true, borderStyle: 'round'
+          Text "Content"
+        Text "Below"
+  eq styled(App), [
+    "Above"
+    "«dim»╭───────╮"
+    "│Content│"
+    "╰───────╯"
+    "Below"
+  ]
+
+test "dim bottom border color", ->
+  App = component
+    render
+      Box flexDirection: 'column', alignItems: 'flex-start'
+        Text "Above"
+        Box borderBottomDimColor: true, borderStyle: 'round'
+          Text "Content"
+        Text "Below"
+  eq styled(App), [
+    "Above"
+    "╭───────╮"
+    "│Content│"
+    "«dim»╰───────╯"
+    "Below"
+  ]
+
+test "dim left border color", ->
+  App = component
+    render
+      Box flexDirection: 'column', alignItems: 'flex-start'
+        Text "Above"
+        Box borderLeftDimColor: true, borderStyle: 'round'
+          Text "Content"
+        Text "Below"
+  eq styled(App), [
+    "Above"
+    "╭───────╮"
+    "«dim»│«»Content│"
+    "╰───────╯"
+    "Below"
+  ]
+
+test "dim right border color", ->
+  App = component
+    render
+      Box flexDirection: 'column', alignItems: 'flex-start'
+        Text "Above"
+        Box borderRightDimColor: true, borderStyle: 'round'
+          Text "Content"
+        Text "Below"
+  eq styled(App), [
+    "Above"
+    "╭───────╮"
+    "│Content«dim»│"
+    "╰───────╯"
+    "Below"
+  ]
+
+test "borderDimColor does not dim styled child Text touching left edge", ->
+  App = component
+    render
+      Box borderDimColor: true, borderStyle: 'round', alignSelf: 'flex-start'
+        Text bold: true, color: 'blue'
+          "styled text"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq styled(App), [
+    "«dim»╭───────────╮"
+    "«dim»│«blue bold»styled«» «blue bold»text«dim»│"
+    "«dim»╰───────────╯"
+  ]
+

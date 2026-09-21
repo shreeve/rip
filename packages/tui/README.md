@@ -36,7 +36,7 @@ App = component
       Text color: 'green', bold: true
         "#{passed} passed"
       Spacer
-      Text dim: true
+      Text dimColor: true
         "#{screen.cols}×#{screen.rows}"
 
 run App
@@ -56,14 +56,34 @@ box is a text leaf, and text nested in text restyles its own words.
 
 | Moves boxes | Recolors cells |
 |---|---|
-| `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `flex` | `color`, `backgroundColor`, `borderColor` — a name (`red`, `greenBright`, `gray`) or `'#rrggbb'` |
-| `alignItems`, `alignSelf`, `alignContent`, `justifyContent` | `bold`, `dim`, `italic`, `underline`, `inverse` |
-| `gap`, `rowGap`, `columnGap` | |
+| `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `flex` | `color`, `backgroundColor` — a name (`red`, `greenBright`, `gray`) or `'#rrggbb'` |
+| `alignItems`, `alignSelf`, `alignContent`, `justifyContent` | `bold`, `dimColor`, `italic`, `underline`, `strikethrough`, `inverse` |
+| `gap`, `rowGap`, `columnGap` | `borderColor`, `borderDimColor`, `borderBackgroundColor`, and each per edge (`borderTopColor` …) |
 | `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` — a number, `'50%'`, or `'auto'` | |
 | `padding`, `margin`, and their `X`, `Y`, `Top`, `Right`, `Bottom`, `Left` forms; a margin may be `'auto'` | |
 | `position` (`'relative'`, `'absolute'`, `'static'`) with `top`, `right`, `bottom`, `left` | |
 | `aspectRatio`, `boxSizing`, `display` (`'flex'`, `'none'`, `'contents'`), `hidden` | |
-| `borderStyle`: `single`, `round`, `double`, `bold` | |
+| `borderStyle`: `single`, `double`, `round`, `bold`, `singleDouble`, `doubleSingle`, `classic`, `arrow`, or an object of eight glyphs; `borderTop` / `borderRight` / `borderBottom` / `borderLeft: false` drops an edge | `contentOffsetX`, `contentOffsetY` — shift a box's children; a scroll is a repaint and runs no layout |
+| `overflow`, `overflowX`, `overflowY`: `'visible'` or `'hidden'` (clips to the padding box) | |
+| On `Text`: `wrap` — `'wrap'` (the default: words wrap, and a word longer than the line breaks), `'hard'`, `'truncate'` / `'truncate-end'`, `'truncate-start'`, `'truncate-middle'` (with `…`) | |
+
+Text is measured by grapheme cluster — a flag, a family emoji, a letter
+with its combining marks each take the cells a terminal gives them —
+and control characters are stripped when the text is set: styling
+comes from props, never from escape sequences inside a string: an
+escape sequence in a text is removed whole, as a terminal would
+swallow it, so a filename or a log line cannot repaint the screen.
+
+A `backgroundColor` on a box fills it inside its border, and that is
+all it does: text with no background of its own takes the background
+of the cell it lands on, whoever painted it, so a badge laid over a
+colored panel sits on the panel's color, and text that spills out of
+a colored box is bare once it leaves it. `color`, `bold`, `dimColor`,
+and the other text attributes written on a box do pass down to the
+text inside it, and text nested in text adds to what the outer text
+says. A custom `borderStyle` object is read when it is written.
+`overflow: 'hidden'` clips everything drawn inside the box, an
+absolute child included.
 
 Layout is flexbox as Yoga lays it out — the defaults are Yoga's
 (`flexDirection: 'column'`, `flexShrink: 0`, `alignItems: 'stretch'`,
@@ -139,7 +159,9 @@ bun run test
 `test.rip` covers the document's contract and its refusals, layout and
 cell rounding, `if` / `else` and keyed `for` on a terminal, nested text
 styles, `ref:` metrics, the grid diff replayed through a terminal, and
-a running app from first frame to `quit`. `test/yoga.rip` runs Yoga's
+a running app from first frame to `quit`. `test/text.rip` holds the
+text engine — sanitizing, cluster widths, every wrap and truncate mode
+— and `test/layout.rip` the layout engine's own pins. `test/yoga.rip` runs Yoga's
 543 generated layout cases, vendored unmodified under `test/yoga/`
 (MIT, © Meta Platforms), against the engine through a shim of the
 `yoga-layout` API, and `test/yoga-aspect.rip` is a port of Yoga's 37

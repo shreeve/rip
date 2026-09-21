@@ -8,13 +8,14 @@
     ".": "./tui.rip"
   },
   "scripts": {
-    "test": "rip test.rip && rip test/layout.rip && rip test/yoga.rip && rip test/yoga-aspect.rip && rip test/fuzz.rip",
+    "test": "rip test.rip && rip test/text.rip && rip test/layout.rip && rip test/ink.rip && rip test/yoga.rip && rip test/yoga-aspect.rip && rip test/fuzz.rip",
     "demo": "rip demo.rip"
   },
   "files": [
     "tui.rip",
     "document.rip",
     "layout.rip",
+    "text.rip",
     "paint.rip",
     "screen.rip",
     "README.md",

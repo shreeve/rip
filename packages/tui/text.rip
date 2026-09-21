@@ -1,0 +1,555 @@
+# Text: what a leaf's words are, how wide each one is, and where its
+# lines break.
+#
+# A text node is sanitized once, when it is written. A leaf's `Flow` holds
+# the text as UNITS — one per grapheme cluster, the thing a terminal
+# draws in one or two cells — and answers a width with line breaks as
+# unit offsets, never as new strings, so the styled runs of nested text
+# map onto lines by offset and a frame that changes nothing wraps
+# nothing. Printable ASCII is its own unit table: a unit is a character,
+# a width is one, and `Intl.Segmenter` — some forty times slower than
+# `Bun.stringWidth` there — is never asked.
+#
+# A cluster is as wide as `string-width` 8 says (MIT, © Sindre Sorhus),
+# the measure Ink lays text out by, so the two break a line in the same
+# place.
+#
+# Wrapping answers what Ink's text answers, which is `wrap-ansi` under
+# `{trim: false, hard: true}` and `cli-truncate` (both MIT, © Sindre
+# Sorhus): a space stays on the row it follows, a word longer than the
+# row breaks between clusters, and a cut line shows '…'.
+
+# ── Sanitize ──────────────────────────────────────────────────────────────────
+
+TAB =! 8
+
+PLAIN   =! /^[\x20-\x7e\n]*$/
+CONTROL =! /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g
+ENDING  =! /[\x07\x1b\x9c]/g
+
+# Where reading goes on after the control character at `at` — the rules
+# of Ink's tokenizer (src/ansi-tokenizer.ts), which are a terminal's. A
+# whole sequence goes, never its first byte alone: CSI with its
+# parameters, intermediates and final byte; a control string — OSC, DCS,
+# SOS, PM, APC — up to ST, or BEL for OSC alone, where a doubled ESC is
+# tmux's escaped ESC inside the string and ends nothing; any other escape
+# with its intermediates and final byte. A sequence that never ends takes
+# the rest of the text with it, as a terminal would swallow it, so no
+# payload is ever drawn as words. Every character is read once.
+resume =! (text, at) ->
+  size = text.length
+  code = text.charCodeAt at
+  next = if code is 0x1b then text.charCodeAt(at + 1) else -1
+  if code is 0x9b or next is 0x5b
+    to = if code is 0x9b then at + 1 else at + 2
+    to += 1 while text.charCodeAt(to) >= 0x30 and text.charCodeAt(to) <= 0x3f
+    to += 1 while text.charCodeAt(to) >= 0x20 and text.charCodeAt(to) <= 0x2f
+    return (if text.charCodeAt(to) >= 0x40 and text.charCodeAt(to) <= 0x7e then to + 1 else size)
+  if code is 0x90 or code is 0x98 or code >= 0x9d or next is 0x5d or next is 0x50 or next is 0x58 or next is 0x5e or next is 0x5f
+    bell = code is 0x9d or next is 0x5d
+    ENDING.lastIndex = if code is 0x1b then at + 2 else at + 1
+    while found = ENDING.exec text
+      stop = text.charCodeAt found.index
+      return found.index + 1 if stop is 0x9c or (stop is 0x07 and bell)
+      continue unless stop is 0x1b
+      after = text.charCodeAt found.index + 1
+      return found.index + 2 if after is 0x5c
+      ENDING.lastIndex = found.index + 2 if after is 0x1b
+    return size
+  return at + 1 unless code is 0x1b
+  to = at + 1
+  to += 1 while text.charCodeAt(to) >= 0x20 and text.charCodeAt(to) <= 0x2f
+  return to + 1 if text.charCodeAt(to) >= 0x30 and text.charCodeAt(to) <= 0x7e
+  if to > at + 1 or to >= size then size else at + 1
+
+# The text a terminal can be trusted with: no escape sequence, and no C0
+# or C1 control but the newline and the tab. Ink keeps SGR and OSC inside
+# its text and restyles from them; styling here is structural, so nothing
+# that begins with a control character is kept at all. Printable ASCII —
+# nearly all text — is answered as it came; the rest is read in one
+# pass, whatever it holds.
+export sanitize =! (value) ->
+  text = String value
+  return text if PLAIN.test text
+  text = text.replaceAll '\r\n', '\n'
+  out = ''
+  kept = 0
+  CONTROL.lastIndex = 0
+  while found = CONTROL.exec text
+    out += text.slice kept, found.index
+    kept = resume text, found.index
+    CONTROL.lastIndex = kept
+  out + text.slice kept
+
+# Tabs become spaces up to the next stop of eight. A stop counts columns
+# from the start of the line, across the runs of a leaf, so tabs are
+# expanded where runs are joined: `before` is the line so far.
+untab =! (text, before) ->
+  out = ''
+  col = widthOf before.slice(before.lastIndexOf('\n') + 1)
+  for line, n in text.split '\n'
+    if n
+      out += '\n'
+      col = 0
+    parts = line.split '\t'
+    for part, m in parts
+      out += part
+      col += widthOf part
+      if m < parts.length - 1
+        pad = TAB - (col % TAB)
+        out += ' '.repeat pad
+        col += pad
+  out
+
+# ── Cells ─────────────────────────────────────────────────────────────────────
+
+# What a grid cell holds: a code point, or — for a cluster of several —
+# this flag over an index into the cluster table.
+export CLUSTER =! 0x80000000
+
+clusters =! []
+known =! Map.new()
+
+export glyph =! (cell) -> if cell < CLUSTER then String.fromCodePoint(cell) else clusters[cell - CLUSTER]
+
+cellOf =! (cluster) ->
+  code = cluster.codePointAt 0
+  return code if cluster.length is (if code > 0xFFFF then 2 else 1)
+  cell = known.get cluster
+  unless cell?
+    cell = CLUSTER + clusters.length
+    clusters.push cluster
+    known.set cluster, cell
+  cell
+
+# ── Widths ────────────────────────────────────────────────────────────────────
+
+# The rule of `string-width` 8, cluster by cluster. A cluster of nothing
+# that prints — marks with no base, format and ignorable characters — is
+# no cell. An emoji sequence is two. Hangul jamo are two for each modern
+# syllable they spell, and additive where they spell none. Anything else
+# is the East Asian Width of its first printing character, plus that of
+# each spacing mark and halfwidth or fullwidth form after it: a Bengali
+# or Tamil vowel sign takes a cell beside its consonant, where a Thai or
+# Devanagari mark above one takes none. `Bun.stringWidth` of one
+# character stands in for the East Asian Width table: two cells or one.
+UNSEEN  =! '\\p{Default_Ignorable_Code_Point}\\p{Control}\\p{Format}\\p{Nonspacing_Mark}\\p{Enclosing_Mark}\\p{Surrogate}'
+ZERO    =! RegExp.new "^[#{UNSEEN}]+$", 'v'
+LEADING =! RegExp.new "^[#{UNSEEN}]+", 'v'
+EMOJI   =! RegExp.new '^\\p{RGI_Emoji}$', 'v'
+SPACING =! /\p{Spacing_Mark}/u
+KEYCAP  =! /^[\d#*]\u20E3$/
+PICTURE =! /\p{Extended_Pictographic}/gu
+JOINER  =! String.fromCharCode 0x200D
+
+segmenter =! Intl.Segmenter.new()
+
+eaw =! (code) -> if Bun.stringWidth(String.fromCodePoint code) is 2 then 2 else 1
+
+leadJamo  =! (code) -> (code >= 0x1100 and code <= 0x115F) or (code >= 0xA960 and code <= 0xA97C)
+vowelJamo =! (code) -> (code >= 0x1160 and code <= 0x11A7) or (code >= 0xD7B0 and code <= 0xD7C6)
+trailJamo =! (code) -> (code >= 0x11A8 and code <= 0x11FF) or (code >= 0xD7CB and code <= 0xD7FB)
+
+# The width of a cluster that opens with a jamo, or -1 for any other.
+jamoWidth =! (visible) ->
+  codes = (char.codePointAt(0) for char in Array.from(visible) when not ZERO.test char)
+  wide = 0
+  at = 0
+  while at < codes.length
+    code = codes[at]
+    unless leadJamo(code) or vowelJamo(code) or trailJamo(code)
+      return -1 if wide is 0
+      wide += eaw rest for rest in codes.slice at
+      return wide
+    if leadJamo(code) and vowelJamo(codes[at + 1])
+      wide += 2
+      at += if trailJamo(codes[at + 2]) then 3 else 2
+    else
+      wide += eaw code
+      at += 1
+  if codes.length then wide else -1
+
+export clusterWidth =! (cluster) ->
+  code = cluster.codePointAt 0
+  if cluster.length is (if code > 0xFFFF then 2 else 1)
+    return (if code < 0x20 or code is 0xAD or (code >= 0x7F and code <= 0x9F) then 0 else 1) if code < 0x300
+    return (if ZERO.test cluster then 0 else eaw code)
+  return 0 if ZERO.test cluster
+  return 2 if EMOJI.test cluster
+  if cluster.length <= 50
+    return 2 if KEYCAP.test(cluster) or (cluster.includes(JOINER) and (cluster.match(PICTURE)?.length ?? 0) >= 2)
+  visible = cluster.replace LEADING, ''
+  wide = jamoWidth visible
+  return wide if wide >= 0
+  wide = 0
+  for char, n in Array.from visible
+    wide += eaw char.codePointAt(0) if n is 0 or SPACING.test(char) or (char >= '\uFF00' and char <= '\uFFEF')
+  wide
+
+# The cells a line of text takes.
+export widthOf =! (text) ->
+  return text.length if PLAIN.test text
+  wide = 0
+  for part as segmenter.segment text
+    wide += clusterWidth part.segment
+  wide
+
+# ── Flow ──────────────────────────────────────────────────────────────────────
+
+export MODES =! { 'wrap': 0, 'hard': 1, 'truncate': 2, 'truncate-end': 2, 'truncate-start': 3, 'truncate-middle': 4 }
+
+WRAP   =! 0
+HARD   =! 1
+END    =! 2
+START  =! 3
+MIDDLE =! 4
+
+# A row of the table: units [A0, A1), then '…' when DOTS, then units
+# [B0, B1), and the row's width in cells.
+export A0   =! 0
+export A1   =! 1
+export B0   =! 2
+export B1   =! 3
+export DOTS =! 4
+export WIDE =! 5
+export ROW  =! 6
+
+ASKS =! 8   # the narrow offers a flow remembers its answers to
+
+export class Flow
+  constructor: ->
+    @text = null
+    @marks = null    # where each run of a several-run leaf ends, in string offsets
+    @ends = null     # …and in units
+    @ascii = true
+    @count = 0       # units
+    @cuts = null     # string offset of each unit, and the text's length
+    @spans = null    # cells each unit takes
+    @cells = null    # what each unit puts in a grid cell
+    @wide = 0        # the widest line, unwrapped
+    @tall = 0        # the lines, unwrapped
+    @mode = WRAP
+    @width = -1      # the wrap the table holds
+    @wrapped = -1
+    @rows = 0
+    @reach = 0       # the widest row of the table
+    @table = null
+    @w = 0           # the last measure's answer
+    @h = 0
+    @asks = []       # width, w, h for each narrow offer answered
+    @crowded = false
+    @moved = false   # whether a new text answers any offer differently
+    @wraps = 0       # tables built, for the tests to count
+    @start = 0       # the row being built: its first unit, and its width so far
+    @held = 0
+
+  span: (unit) -> if @ascii then (if @text.charCodeAt(unit) is 10 then 0 else 1) else @spans[unit]
+  code: (unit) -> if @ascii then @text.charCodeAt(unit) else @cells[unit]
+
+  # Take a new text. `marks` is null for a leaf of one run. Notes in
+  # `moved` whether layout could come out differently: the unwrapped size
+  # changed, or some narrow offer this flow answered has a new answer.
+  set!: (text, marks) ->
+    wide = @wide
+    tall = @tall
+    fresh = @text is null
+    @text = text
+    @marks = marks
+    @width = -1
+    @ascii = PLAIN.test text
+    if @ascii then @count = text.length else @segment()
+    @size()
+    @ends = marks
+    @ends = @unitsOf marks if marks and not @ascii
+    return if fresh
+    moved = wide isnt @wide or tall isnt @tall or @crowded
+    unless moved
+      for width, n in @asks by 3
+        @answer width, false
+        moved = true if @w isnt @asks[n + 1] or @h isnt @asks[n + 2]
+    @moved = true if moved
+
+  # Split into units. A printable ASCII character that no mark follows is
+  # a unit by itself; only the stretches between go to the segmenter.
+  #
+  # A space that a mark or a joiner follows is one cluster with it, and
+  # still a space: a line may break there, as `wrap-ansi` breaks it, so
+  # the space is a unit and what leans on it another. Marks with no base
+  # — those, and marks that open the text or a line — are a unit of no
+  # width. A unit of no width takes no cell and draws nothing: a terminal
+  # hangs a mark that arrives alone on whatever cell came before it,
+  # which belongs to someone else.
+  segment!: ->
+    text = @text
+    size = text.length
+    cuts = []
+    spans = []
+    cells = []
+    at = 0
+    while at < size
+      code = text.charCodeAt at
+      if code < 127 and (at + 1 >= size or text.charCodeAt(at + 1) < 0x300)
+        cuts.push at
+        spans.push (if code < 32 then 0 else 1)
+        cells.push code
+        at += 1
+        continue
+      to = at + 1
+      to += 1 while to < size and not (text.charCodeAt(to) < 127 and (to + 1 >= size or text.charCodeAt(to + 1) < 0x300))
+      for part as segmenter.segment text.slice(at, to)
+        first = at + part.index
+        piece = part.segment
+        if piece.length > 1 and piece.charCodeAt(0) is 32
+          cuts.push first
+          spans.push 1
+          cells.push 32
+          first += 1
+          piece = piece.slice 1
+        cuts.push first
+        spans.push clusterWidth piece
+        cells.push cellOf piece
+      at = to
+    cuts.push size
+    @count = spans.length
+    @cuts = cuts
+    @spans = spans
+    @cells = cells
+
+  # The unwrapped size: the widest line and the lines. No text is no line.
+  size!: ->
+    if @ascii and not @text.includes '\n'
+      @wide = @count
+      @tall = if @count then 1 else 0
+      return
+    wide = 0
+    here = 0
+    tall = if @count then 1 else 0
+    for unit in [0...@count]
+      if @code(unit) is 10
+        tall += 1
+        wide = here if here > wide
+        here = 0
+      else
+        here += @span unit
+    @wide = if here > wide then here else wide
+    @tall = tall
+
+  # Run ends as unit indices: a cluster belongs to the run it starts in.
+  unitsOf: (marks) ->
+    ends = []
+    unit = 0
+    for mark, n in marks
+      unit += 1 while unit < @count and @cuts[unit] < mark
+      ends.push unit
+    ends
+
+  # The string offset a unit starts at.
+  offset: (unit) -> if @ascii then unit else @cuts[unit]
+
+  # Row `n` of the table as a string — what a painter draws from offsets.
+  line: (n) ->
+    at = n * ROW
+    table = @table
+    head = @text.slice @offset(table[at + A0]), @offset(table[at + A1])
+    return head unless table[at + DOTS]
+    head + '…' + @text.slice @offset(table[at + B0]), @offset(table[at + B1])
+
+  # ── Measure ──
+
+  # The size at an offered width (Ink's `measureTextNode`): unwrapped when
+  # nothing limits it or it fits; else the wrapped rows and their widest,
+  # or — truncated — the rows and the whole width offered, so the cut
+  # drawn is the cut measured. Leaves the answer in `w` and `h`.
+  answer!: (width, unlimited) ->
+    if unlimited or @wide <= width or @count is 0
+      @w = @wide
+      @h = @tall
+      return
+    @wrap width, @mode
+    @w = if @mode >= END then Math.max(width, 0) else @reach
+    @h = @rows
+
+  # …and remember a narrow offer, so a later text knows what it must
+  # still answer for a layout to stand.
+  measure!: (width, unlimited) ->
+    @answer width, unlimited
+    return if unlimited or @wide <= width or @count is 0
+    for asked, n in @asks by 3
+      return if asked is width
+    if @asks.length >= ASKS * 3 then @crowded = true else @asks.push width, @w, @h
+
+  forget!: ->
+    @asks.length = 0
+    @crowded = false
+    @moved = false
+
+  # ── Wrap ──
+
+  # Whether the text draws as it is at this width: one line that fits.
+  fits: (width) -> @tall <= 1 and @wide <= width
+
+  # Fill the table for `width` cells. A width under one cell is one cell,
+  # as the box the text rounds up into is; with no width at all, wrapped
+  # text keeps its lines and truncated text is cut to nothing.
+  wrap!: (width, mode) ->
+    columns = Math.floor width
+    columns = 1 if width > 0 and columns < 1
+    return if columns is @width and mode is @wrapped
+    @width = columns
+    @wrapped = mode
+    @wraps += 1
+    @rows = 0
+    @reach = 0
+    first = 0
+    for unit in [0..@count]
+      continue unless unit is @count or @code(unit) is 10
+      if mode >= END
+        @truncate first, unit, columns, mode
+      else if columns <= 0 or @wide <= columns
+        @row first, unit, unit, unit, 0, @measureRun(first, unit)
+      else
+        @wrapLine first, unit, columns, mode is HARD
+      first = unit + 1
+
+  measureRun: (first, to) ->
+    return to - first if @ascii
+    wide = 0
+    for unit in [first...to]
+      wide += @spans[unit]
+    wide
+
+  row!: (a0, a1, b0, b1, dots, wide) ->
+    at = @rows * ROW
+    if not @table or at + ROW > @table.length
+      grown = Int32Array.new Math.max(ROW * 4, at * 2)
+      grown.set @table if @table
+      @table = grown
+    table = @table
+    table[at + A0] = a0
+    table[at + A1] = a1
+    table[at + B0] = b0
+    table[at + B1] = b1
+    table[at + DOTS] = dots
+    table[at + WIDE] = wide
+    @rows += 1
+    @reach = wide if wide > @reach
+
+  # One line of words into rows (wrap-ansi `exec`). The space before a
+  # word joins the row first, and only then is the word tried against
+  # what is left — so a row may end in a space, and a row may be one.
+  wrapLine!: (first, to, columns, hard) ->
+    @start = first
+    @held = 0
+    base = @rows
+    word = first
+    loop
+      stop = word
+      size = 0
+      while stop < to and @code(stop) isnt 32
+        size += @span stop
+        stop += 1
+      if word > first
+        @cut word - 1 if @held >= columns
+        @held += 1
+      if size > columns and not hard
+        # Start the long word on the next row when that saves a row.
+        left = columns - @held
+        @cut word if Math.floor((size - 1) / columns) < 1 + Math.floor((size - left - 1) / columns)
+        @wrapWord word, stop, columns, base
+      else if @held + size > columns and @held > 0 and size > 0 and hard and @held < columns
+        @wrapWord word, stop, columns, base
+      else
+        @cut word if @held + size > columns and @held > 0 and size > 0
+        if @held + size > columns and hard then @wrapWord word, stop, columns, base else @held += size
+      break if stop >= to
+      word = stop + 1
+    @row @start, to, to, to, 0, @held
+
+  # End the row being built before `unit`.
+  cut!: (unit) ->
+    @row @start, unit, unit, unit, 0, @held
+    @start = unit
+    @held = 0
+
+  # A word across rows, cluster by cluster (wrap-ansi `wrapWord`). A wide
+  # cluster that does not fit goes to the next row; one wider than the
+  # row stands alone on its own. A row of nothing but zero-width clusters
+  # folds back into the row before it.
+  wrapWord!: (first, to, columns, base) ->
+    for unit in [first...to]
+      size = @span unit
+      @cut unit if size > 0 and @held > 0 and @held + size > columns
+      @held += size
+      @cut unit + 1 if @held is columns and unit < to - 1
+    if @held is 0 and @start < to and @rows > base
+      @rows -= 1
+      @start = @table[@rows * ROW + A0]
+      @held = @table[@rows * ROW + WIDE]
+
+  # One line cut to `columns` (cli-truncate over slice-ansi). A side keeps
+  # the clusters that lie wholly inside its share, so a wide one on the
+  # cut is dropped and the row comes out a cell short.
+  truncate!: (first, to, columns, mode) ->
+    size = @measureRun first, to
+    if columns < 1
+      @row first, first, to, to, 0, 0
+      return
+    if size <= columns
+      @row first, to, to, to, 0, size
+      return
+    head = if mode is END then columns - 1 else if mode is MIDDLE then Math.floor(columns / 2) else 0
+    tail = if mode is START then columns - 1 else if mode is MIDDLE then columns - head - 1 else 0
+    head = tail = 0 if columns is 1
+    a1 = first
+    kept = 0
+    while a1 < to and kept < head and kept + @span(a1) <= head
+      kept += @span a1
+      a1 += 1
+    b0 = to
+    if tail > 0
+      # The tail starts at the first cluster that begins at or after the
+      # column `size - tail`.
+      at = 0
+      b0 = first
+      while b0 < to and at < size - tail
+        at += @span b0
+        b0 += 1
+      kept += size - at
+    @row first, a1, b0, to, 1, kept + 1
+
+# Bring a leaf's flow up to its text: a bare text node's data, or a
+# span's text nodes joined, each one a run.
+joined = ''
+marks = []
+
+gather! =! (node) ->
+  kid = node.firstChild
+  while kid
+    if kid.nodeType is 3
+      joined += if kid.data.includes('\t') then untab(kid.data, joined) else kid.data
+      marks.push joined.length
+    else if kid.nodeType is 1
+      gather kid
+    kid = kid.nextSibling
+
+sameMarks =! (held, next) ->
+  return held is next unless held and next
+  return false unless held.length is next.length
+  for mark, n in held
+    return false unless mark is next[n]
+  true
+
+export refresh =! (leaf) ->
+  flow = leaf.flow ?= Flow.new()
+  if leaf.nodeType is 3
+    text = if leaf.data.includes('\t') then untab(leaf.data, '') else leaf.data
+    flow.set text, null unless flow.text is text and not flow.marks
+    return flow
+  joined = ''
+  marks = []
+  gather leaf
+  text = joined
+  runs = if marks.length > 1 then marks else null
+  joined = ''
+  flow.set text, runs unless flow.text is text and sameMarks(flow.marks, runs)
+  flow

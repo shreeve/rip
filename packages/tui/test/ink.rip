@@ -1,0 +1,37 @@
+# Ink's paint-side tests, ported: text and wrapping, borders,
+# backgrounds, clipping, content offsets, and the layout props as they
+# reach the screen. One file per Ink test file, one tally for all of
+# them; test/ink/SOURCE.md says where the expectations come from.
+#
+#   rip test/ink.rip
+
+import './ink/cells-check.rip'
+import './ink/components.rip'
+import './ink/text.rip'
+import './ink/wrap-text.rip'
+import './ink/text-width.rip'
+import './ink/truncate-width.rip'
+import './ink/absolute-truncation.rip'
+import './ink/styled-combining-marks.rip'
+import './ink/borders.rip'
+import './ink/border-backgrounds.rip'
+import './ink/background.rip'
+import './ink/overflow.rip'
+import './ink/content-offset.rip'
+import './ink/clip-wide-background.rip'
+import './ink/overlap-wide-background.rip'
+import './ink/rendering-regressions.rip'
+import './ink/width-height.rip'
+import './ink/position.rip'
+import './ink/display.rip'
+import './ink/margin.rip'
+import './ink/padding.rip'
+import './ink/gap.rip'
+import './ink/flex.rip'
+import './ink/flex-direction.rip'
+import './ink/flex-wrap.rip'
+import './ink/flex-align-content.rip'
+import './ink/flex-align-items.rip'
+import './ink/flex-align-self.rip'
+import './ink/flex-justify-content.rip'
+import './ink/render-to-string.rip'
