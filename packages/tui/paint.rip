@@ -1,0 +1,242 @@
+# Paint: the laid-out tree becomes a grid of cells, and two grids become
+# the fewest bytes that turn one screen into the other.
+#
+# A grid is three typed arrays — the character, an interned style id,
+# and a width flag — so a frame allocates nothing. Styling is structural:
+# a style is a small record interned to an id, and its escape sequence is
+# built once.
+
+import { kids, edges } from './layout.rip'
+
+# ── Styles ────────────────────────────────────────────────────────────────────
+
+NAMED =! {
+  black: 0, red: 1, green: 2, yellow: 3, blue: 4, magenta: 5, cyan: 6, white: 7
+  gray: 60, grey: 60, blackBright: 60, redBright: 61, greenBright: 62, yellowBright: 63
+  blueBright: 64, magentaBright: 65, cyanBright: 66, whiteBright: 67
+}
+
+# The SGR parameters for a color, on the foreground (30) or background (40).
+tint =! (color, base) ->
+  return '' unless color?
+  if typeof color is 'string' and /^#[0-9a-f]{6}$/i.test(color)
+    n = parseInt color.slice(1), 16
+    return "#{base + 8};2;#{n >> 16};#{(n >> 8) & 255};#{n & 255}"
+  code = NAMED[color]
+  throw Error.new "rip/tui: '#{color}' is not a color — use a name (red, greenBright, gray) or '#rrggbb'" unless code?
+  String base + code
+
+FLAGS =! [['bold', 1], ['dim', 2], ['italic', 3], ['underline', 4], ['inverse', 7]]
+
+ids =! Map.new()
+records =! [{ fg: null, bg: null, flags: 0, sgr: '' }]
+blends =! Map.new()
+ids.set 'null|null|0', 0
+
+# The id of a style, minted on first sight.
+export intern =! (fg, bg, flags) ->
+  key = "#{fg}|#{bg}|#{flags}"
+  id = ids.get key
+  return id if id?
+  parts = []
+  for [name, code], i in FLAGS
+    parts.push code if flags & (1 << i)
+  parts.push tint(fg, 30) if fg?
+  parts.push tint(bg, 40) if bg?
+  records.push { fg, bg, flags, sgr: parts.join(';') }
+  ids.set key, records.length - 1
+  records.length - 1
+
+# The style a node's own props describe, over the style it inherits.
+styleOf =! (node, inherited) ->
+  s = node.styles
+  base = records[inherited]
+  flags = base.flags
+  for [name], i in FLAGS
+    flags |= (1 << i) if s[name]
+  intern s.color ?? base.fg, s.backgroundColor ?? base.bg, flags
+
+# The escape sequence that leaves style `from` for style `to`.
+shift =! (from, to) ->
+  next = records[to].sgr
+  return "\x1b[0m" unless next
+  if records[from].sgr then "\x1b[0;#{next}m" else "\x1b[#{next}m"
+
+# Text drawn with no background of its own keeps the one beneath it.
+over =! (id, beneath) ->
+  top = records[id]
+  under = records[beneath]
+  return id if top.bg? or not under.bg?
+  key = (id << 16) | beneath
+  blends.get(key) ?? (blends.set(key, intern(top.fg, under.bg, top.flags)); blends.get(key))
+
+# ── Grid ──────────────────────────────────────────────────────────────────────
+
+SPACE =! 32
+
+export class Grid
+  # `top` is the tree row shown on the grid's first row: a frame taller
+  # than the screen shows its bottom.
+  constructor: (@cols, @rows, @top = 0) ->
+    size = @cols * @rows
+    @ch = Uint32Array.new size
+    @style = Uint16Array.new size
+    @wide = Uint8Array.new size
+    @clear()
+
+  clear!: ->
+    @ch.fill SPACE
+    @style.fill 0
+    @wide.fill 1
+
+  # One line of text at (x, y), clipped to the grid and to [left, right).
+  write!: (x, y, text, id, left = 0, right = @cols) ->
+    y -= @top
+    return if y < 0 or y >= @rows
+    right = Math.min right, @cols
+    for glyph in text
+      code = glyph.codePointAt 0
+      span = if code < 127 then 1 else Bun.stringWidth(glyph)
+      continue if span is 0
+      if x >= left and x + span <= right
+        at = y * @cols + x
+        @ch[at] = code
+        @style[at] = over id, @style[at]
+        @wide[at] = span
+        if span is 2
+          @ch[at + 1] = SPACE
+          @style[at + 1] = @style[at]
+          @wide[at + 1] = 0
+      x += span
+
+  # Restyle a rectangle without touching its characters.
+  fill!: (x, y, w, h, id) ->
+    y -= @top
+    for row in [Math.max(0, y)...Math.min(@rows, y + h)]
+      for col in [Math.max(0, x)...Math.min(@cols, x + w)]
+        @style[row * @cols + col] = id
+
+  # The grid as text: one string per row, trailing blanks trimmed.
+  # With `ansi`, each run of a style carries its escape sequence.
+  toString: (ansi = false) ->
+    lines = []
+    for row in [0...@rows]
+      line = ''
+      held = 0
+      for col in [0...@cols]
+        at = row * @cols + col
+        continue if @wide[at] is 0
+        if ansi and @style[at] isnt held
+          line += shift held, @style[at]
+          held = @style[at]
+        line += String.fromCodePoint @ch[at]
+      line += "\x1b[0m" if ansi and held
+      lines.push (if ansi then line else line.trimEnd())
+    lines.join '\n'
+
+# ── Tree → grid ───────────────────────────────────────────────────────────────
+
+BORDERS =! {
+  single: '┌─┐│└┘', round: '╭─╮│╰╯', double: '╔═╗║╚╝', bold: '┏━┓┃┗┛'
+}
+
+frame =! (grid, node, id) ->
+  glyphs = BORDERS[node.styles.borderStyle]
+  throw Error.new "rip/tui: '#{node.styles.borderStyle}' is not a border style — use single, round, double, or bold" unless glyphs
+  { x, y, w, h } = node.rect
+  return if w < 2 or h < 2
+  line = intern node.styles.borderColor ?? null, records[id].bg, 0
+  grid.write x, y, glyphs[0] + glyphs[1].repeat(w - 2) + glyphs[2], line
+  grid.write x, y + h - 1, glyphs[4] + glyphs[1].repeat(w - 2) + glyphs[5], line
+  for row in [y + 1...y + h - 1]
+    grid.write x, row, glyphs[3], line
+    grid.write x + w - 1, row, glyphs[3], line
+
+# The styled runs of a text leaf: nested spans restyle their own text.
+runs =! (node, id, out) ->
+  if node.nodeType is 3
+    out.push [node.data, id]
+  else
+    own = styleOf node, id
+    kid = node.firstChild
+    while kid
+      runs kid, own, out if kid.nodeType is 3 or kid.nodeType is 1
+      kid = kid.nextSibling
+  out
+
+words =! (grid, node, id) ->
+  { x, y, w } = node.rect
+  col = x
+  row = y
+  for [text, run] in runs(node, id, [])
+    parts = text.split '\n'
+    for part, i in parts
+      if i
+        row += 1
+        col = x
+      grid.write col, row, part, run, x, x + w
+      col += Bun.stringWidth part
+
+export paint =! (grid, node, inherited = 0) ->
+  if node.nodeType is 3 or node.tagName is 'span'
+    words grid, node, inherited
+    return
+  id = styleOf node, inherited
+  { x, y, w, h } = node.rect
+  grid.fill x, y, w, h, id if node.styles.backgroundColor
+  frame grid, node, id if node.styles.borderStyle
+  paint grid, kid, id for kid in kids(node)
+
+# ── Grid → bytes ──────────────────────────────────────────────────────────────
+
+# Whether cell `i` of `back` already shows on a screen drawn from
+# `front`. A row the screen has never drawn is blank.
+shows =! (front, back, drawn, row, i) ->
+  if row < drawn
+    back.ch[i] is front.ch[i] and back.style[i] is front.style[i] and back.wide[i] is front.wide[i]
+  else
+    back.ch[i] is SPACE and back.style[i] is 0
+
+# The bytes that turn the screen showing `front` into `back`, with the
+# cursor starting and ending at the frame's top-left. Every move is
+# relative, so the frame can sit anywhere in the scrollback; a line feed
+# is the move down, since it alone makes a row that does not exist yet.
+# `front` is null before the first frame, and a frame of another width
+# is drawn from nothing.
+export diff =! (front, back) ->
+  reuse = front? and front.cols is back.cols
+  out = if reuse then '' else "\x1b[J"
+  drawn = if reuse then front.rows else 0
+  at = 0
+  held = 0
+  for row in [0...back.rows]
+    col = 0
+    while col < back.cols
+      if shows front, back, drawn, row, row * back.cols + col
+        col += 1
+        continue
+      if row > at
+        down = row - at
+        out += if down > 4 and row < drawn then "\x1b[#{down}B" else '\n'.repeat(down)
+      else if row < at
+        out += "\x1b[#{at - row}A"
+      at = row
+      out += "\x1b[#{col + 1}G"
+      while col < back.cols
+        i = row * back.cols + col
+        break if shows front, back, drawn, row, i
+        if back.wide[i] isnt 0
+          if back.style[i] isnt held
+            out += shift held, back.style[i]
+            held = back.style[i]
+          out += String.fromCodePoint back.ch[i]
+        col += 1
+  out += "\x1b[0m" if held
+  if drawn > back.rows
+    out += '\n'.repeat(back.rows - at) if back.rows > at
+    out += "\x1b[#{at - back.rows}A" if at > back.rows
+    at = back.rows
+    out += "\r\x1b[J"
+  out += "\x1b[#{at}A" if at > 0
+  out += '\r' if out
+  out

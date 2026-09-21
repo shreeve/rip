@@ -63,16 +63,16 @@ describe('dammit tokenization: the explicit DAMMIT token', () => {
   });
 });
 
-describe('maybe dammit disambiguation', () => {
-  test('the shared ?! token becomes a call only when arguments follow', () => {
-    expect(tokenize('fn?!').tokens.map((t) => t.kind)).toEqual(['IDENTIFIER', 'PRESENCE']);
-    expect(tokenize('fn?!()').tokens.map((t) => t.kind)).toEqual(['IDENTIFIER', 'PRESENCE', 'CALL_START', 'CALL_END']);
-    expect(tokenize('fn?! arg').tokens.map((t) => t.kind)).toEqual(['IDENTIFIER', 'PRESENCE', 'CALL_START', 'IDENTIFIER', 'CALL_END']);
+describe('maybe dammit forms', () => {
+  test('the ?! token is one kind, and an argument list opens after it like any call', () => {
+    expect(tokenize('fn?!').tokens.map((t) => t.kind)).toEqual(['IDENTIFIER', 'MAYBE_DAMMIT']);
+    expect(tokenize('fn?!()').tokens.map((t) => t.kind)).toEqual(['IDENTIFIER', 'MAYBE_DAMMIT', 'CALL_START', 'CALL_END']);
+    expect(tokenize('fn?! arg').tokens.map((t) => t.kind)).toEqual(['IDENTIFIER', 'MAYBE_DAMMIT', 'CALL_START', 'IDENTIFIER', 'CALL_END']);
   });
 
-  test('bare ?! is presence; empty, parenthesized, and juxta args are maybe dammit', () => {
+  test('bare, empty, parenthesized, and juxta forms are all maybe dammit', () => {
     expect(parser.parse('x = fn?!').sexpr)
-      .toEqual(['program', ['=', 'x', ['presence', 'fn']]]);
+      .toEqual(['program', ['=', 'x', ['dammit?', 'fn']]]);
     expect(parser.parse('x = fn?!()').sexpr)
       .toEqual(['program', ['=', 'x', ['dammit?', 'fn']]]);
     expect(parser.parse('x = fn?!(arg)').sexpr)
@@ -172,7 +172,6 @@ describe('dammit mapping surfaces', () => {
     const [maybe] = stores.nodesByKind('maybe-dammit');
     expect(maybe).toBeDefined();
     expect([maybe.sourceStart, maybe.sourceEnd]).toEqual([4, 13]);
-    expect(stores.nodesByKind('presence')).toEqual([]);
 
     const [callee] = mappings.of(maybe.nodeId, 'callee');
     expect(src.slice(callee.sourceStart, callee.sourceEnd)).toBe('fn');

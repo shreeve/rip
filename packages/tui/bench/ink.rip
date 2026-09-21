@@ -1,0 +1,172 @@
+# ==============================================================================
+# tui bench — Ink baselines
+#
+#   cd packages/tui/bench
+#   bun install              # Ink and React live HERE, not in rip/tui
+#   bun run ink              # every scenario, incremental rendering off and on
+#   rip ink.rip counter      # one scenario
+#   rip ink.rip counter 5    # one scenario, five times the updates
+#   bun run profile          # where an Ink frame goes (profile.rip)
+#
+# Ink runs interactive against a fake terminal, its frame throttle
+# lifted (maxFps 1000), and every update awaits the frame it causes, so
+# a number is the cost of one update and not of a 30 fps timer. React
+# loads its production build: the scripts set NODE_ENV, and a run
+# without it is refused, since a development React would flatter us.
+# ==============================================================================
+
+import React from 'react'
+import * as ink from 'ink'
+import { EventEmitter } from 'node:events'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { terminal, measure, report } from './harness.rip'
+
+h =! React.createElement
+Box =! ink.Box
+Text =! ink.Text
+Static =! ink.Static
+draw =! ink['render']
+
+COLUMNS =! 200
+ROWS =! 60
+
+def quietInput()
+  stdin = EventEmitter.new()
+  stdin.isTTY = false
+  stdin.setRawMode = -> stdin
+  stdin.setEncoding = -> stdin
+  stdin.ref = -> stdin
+  stdin.unref = -> stdin
+  stdin.read = -> null
+  stdin.resume = -> stdin
+  stdin.pause = -> stdin
+  stdin
+
+# Mount `App` (a component taking `{tick}`) and return a `step` that
+# sets the tick and resolves once Ink has written the frame.
+def mount(App, out, incremental)
+  framed = null
+  setTick = null
+  Root = ->
+    [tick, set] = React.useState 0
+    setTick = set
+    h App, { tick }
+  app = draw h(Root), {
+    stdout: out
+    stdin: quietInput()
+    patchConsole: false
+    exitOnCtrlC: false
+    interactive: true
+    maxFps: 1000
+    incrementalRendering: incremental
+    onRender: ->
+      done = framed
+      framed = null
+      done?()
+  }
+  step = (i) ->
+    Promise.new (resolve) ->
+      framed = resolve
+      setTick i + 1
+  { app, step }
+
+# ── Scenarios ─────────────────────────────────────────────────────────────────
+
+# Ink is written the way a careful React app is: cells and rows are
+# memoized, so an unchanged prop skips its subtree.
+Cell =! React.memo ({label, width, color}) ->
+  h Box, { width }, h(Text, { color }, label)
+
+# One counter in a tree of about 1,000 elements: 50 rows of 10 boxed
+# labels, one of which shows the tick.
+CounterTree = ({tick}) ->
+  rows = for r in [0...50]
+    cells = for c in [0...10]
+      label = if r is 25 and c is 5 then "count #{tick}" else "cell #{r}.#{c}"
+      h Cell, { key: c, width: 18, label }
+    h Box, { key: r }, ...cells
+  h Box, { flexDirection: 'column' }, ...rows
+
+# A 40 × 8 table whose cells change a tenth at a time, or all at once.
+def churnTable(share)
+  ({tick}) ->
+    rows = for r in [0...40]
+      cells = for c in [0...8]
+        k = r * 8 + c
+        shown = if share is 1 then tick else tick - ((tick - k) %% 10)
+        h Cell, { key: c, width: 12, color: 'green', label: "v#{shown}" }
+      h Box, { key: r }, ...cells
+    h Box, { flexDirection: 'column' }, ...rows
+
+# A long list scrolled one row per update through a 40-row viewport:
+# a negative top margin under overflow hidden, the mechanism the
+# published Ink offers (its content offset props are unreleased).
+def scrolledList(count)
+  ({tick}) ->
+    items = React.useMemo (->
+      for i in [0...count]
+        h Text, { key: i }, "row #{i} — the quick brown fox jumps over the lazy dog"
+    ), []
+    h Box, { height: 40, overflow: 'hidden', flexDirection: 'column' },
+      h(Box, { flexDirection: 'column', flexShrink: 0, marginTop: -(tick % (count - 40)) }, ...items)
+
+# One line appended to scrollback per update, above a live status line.
+StaticLog = ({tick}) ->
+  lines = (i for i in [0...tick])
+  h Box, { flexDirection: 'column' },
+    h(Static, { items: lines }, (i) -> h(Text, { key: i }, "done #{i}")),
+    h(Text, null, "working on #{tick}")
+
+SCENARIOS =! [
+  ['counter',   'counter in a 1,000-element tree', CounterTree,        300, 30]
+  ['table10',   '40×8 table, 10% churn',           churnTable(0.1),    300, 30]
+  ['table100',  '40×8 table, 100% churn',          churnTable(1),      300, 30]
+  ['list',      '2,000-row list, scroll by one',   scrolledList(2000),  60, 5]
+  ['static',    '1,000 scrollback appends',        StaticLog,         1000, 10]
+]
+
+# Cold start: a fresh process per sample, median of seven. Times are
+# milliseconds from process start, so the Rip loader's compile of the
+# entry file is inside the number, as it is for any Rip program.
+def startup()
+  here = dirname(fileURLToPath(import.meta.url))
+  root = join(here, '../../..')
+  samples = for i in [0...7]
+    child = Bun.spawnSync {
+      cmd: ['bun', "--preload=#{join(root, 'src/loader.js')}", join(root, 'src/cli/run.js'), join(here, 'ink-startup.rip')]
+      cwd: here
+      env: { ...process.env, NODE_ENV: 'production' }
+      stdout: 'pipe'
+      stderr: 'pipe'
+    }
+    throw Error.new "the startup sample exited #{child.exitCode}: #{child.stderr.toString()}" unless child.exitCode is 0
+    JSON.parse child.stdout.toString().trim().split('\n').pop()
+  median = (pick) ->
+    sorted = samples.map(pick).sort (a, b) -> a - b
+    sorted[sorted.length >> 1]
+  p "\nInk 7.1.1 — cold start, median of #{samples.length} fresh processes"
+  p "  import ink + react   #{median((s) -> s.loaded - s.began).toFixed(1).padStart(7)} ms"
+  p "  first frame written  #{median((s) -> s.framed - s.loaded).toFixed(1).padStart(7)} ms after import"
+  p "  process start → frame #{median((s) -> s.framed).toFixed(1).padStart(6)} ms"
+
+def run(only, scale = 1)
+  for incremental in [false, true]
+    results = []
+    for [key, label, App, updates, warmup] in SCENARIOS
+      continue if only and only isnt key
+      out = terminal COLUMNS, ROWS
+      { app, step } = mount App, out, incremental
+      results.push measure!(label, out, updates * scale, warmup, step)
+      app.unmount()
+    report "Ink 7.1.1 — incremental rendering #{if incremental then 'on' else 'off'}, #{COLUMNS}×#{ROWS}", results
+
+if import.meta.main
+  unless process.env.NODE_ENV is 'production'
+    throw Error.new "Ink must be measured on React's production build — use `bun run ink`, or set NODE_ENV=production"
+  if process.argv[2] is 'startup'
+    startup()
+  else
+    run! process.argv[2], Number(process.argv[3] ?? 1)
+    startup() unless process.argv[2]
+  process.exit 0

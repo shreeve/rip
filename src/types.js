@@ -59,7 +59,7 @@ const isPostfixTypeWord = (t) => t?.kind === 'IDENTIFIER' && POSTFIX_TYPE_KINDS.
 const CAST_LHS_ENDERS = new Set([
   'IDENTIFIER', 'PROPERTY', 'NUMBER', 'STRING', 'STRING_END', 'REGEX',
   'HEREGEX_END', 'BOOL', 'NULL', 'UNDEFINED', ')', 'CALL_END', 'PARAM_END',
-  ']', 'INDEX_END', '}', 'PICK_END', 'THIS', '@', 'SUPER', '?', 'PRESENCE',
+  ']', 'INDEX_END', '}', 'PICK_END', 'THIS', '@', 'SUPER', '?', 'MAYBE_DAMMIT',
   'DAMMIT', 'CAST', 'SATISFIES', 'IMPORT_META',
 ]);
 
@@ -101,7 +101,7 @@ export const RUN_STOPS = new Set(['TERMINATOR', 'INDENT', 'OUTDENT', ',', '=', '
 // continuation there.
 export const CAST_STOPS = new Set([
   '+', '-', 'MATH', '**', 'SHIFT', 'COMPARE', 'MATCH', '&&', '||', '??',
-  '^', 'RELATION', 'TERNARY', '?', 'PRESENCE', ':', '?.', 'DAMMIT',
+  '^', 'RELATION', 'TERNARY', '?', 'MAYBE_DAMMIT', ':', '?.', 'DAMMIT',
   'EXTENDS', '..', '...',
   'IF', 'UNLESS', 'ELSE', 'THEN', 'WHILE', 'UNTIL', 'LOOP', 'FOR',
   'WHEN', 'BY', 'SWITCH', 'RETURN', 'THROW', 'CATCH', 'FINALLY',
@@ -261,7 +261,7 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
     }
     // Optional-member marker: `name?: T` — the `?`
     // rides between a completed atom (the member name) and its `:`,
-    // whatever kind the scanner gave it (PRESENCE/TERNARY). The same
+    // whatever kind the scanner gave it (existence `?` or TERNARY). The same
     // shape covers optional params inside method shorthand
     // (`m(x?: number): void`). Any other `?` stays code-shaped.
     if (t.value === '?' && atomEnd && tokens[j + 1]?.kind === ':') { atomEnd = false; continue; }

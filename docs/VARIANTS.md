@@ -14,7 +14,7 @@ single rule:
 | Rip | You never see a quote you did not write. Objects in, values out. |
 | Harbor REPL | Display modes show values. csv keeps the JSON text. json modes give JSON. |
 
-Everything below was measured against harbor 0.39.2 on DuckDB v2.0.0-alpha
+Everything below was measured against harbor 0.41.0 on DuckDB v2.0.0-alpha
 (engine build 42289), the build live runs. Where a rule has an edge, the edge
 is listed.
 
@@ -60,8 +60,7 @@ is listed.
 |---|---|
 | `doc->>'a'`, `doc->'a'`, `json_extract(doc, …)` | the JSON operators refuse VARIANT; `doc::JSON` first |
 | `INSERT … VALUES ('{"a":1}')` (no cast) | a bare VARCHAR is stored as a VARIANT *string*; `doc.a` is then NULL, silently |
-| `sql! 'INSERT … (?)', [obj]` (no cast) | same thing from Rip: the object arrives as text; write `?::JSON` |
-| `Model.where(doc: { a: 1 })` | compiles to `"doc" = ?` against a text literal; use the string dialect with a path |
+| `sql! 'INSERT … (?)', [JSON.stringify(obj)]` (no cast) | same thing from Rip: a string param is a string, whatever it spells; write `?::JSON` |
 | `unnest(doc.orders)`, `len(doc.orders)`, `length(doc.name)` | no VARIANT overload; cast (`::VARIANT[]`, `::VARCHAR`) |
 | `doc.age::INTEGER` under a `WHERE` that excludes bad rows | the cast runs in the scan, on every row; use `TRY_CAST` |
 | `UPDATE t SET doc.a = 5` | not supported; rebuild the document with `json_set` |
@@ -238,10 +237,16 @@ you meant a **document**. A bare string is a legal VARIANT value, so the
 engine stores it as a VARIANT string, nothing complains, and every dot path
 into it is NULL. The cast is what says "this text is a document".
 
+An object or an array is a document without being told. Harbor asks the
+engine what each parameter expects, and binds an object or array param aimed
+at a VARIANT — a column in `SET` or `VALUES`, a comparison against one — as
+the document. A string param is a string wherever it goes: `'{"a":1}'` bound
+through a bare `?` is still the seven-character text.
+
 ### In Rip through a model
 
 Hand the field an object. The model stringifies it and binds it through
-`?::JSON`, in `create!`, `save!`, `upsert!` and `updateAll!`:
+`?::JSON`, in `create!`, `save!`, `upsert!`, `updateAll!` and `insertMany!`:
 
 ```rip
 Report.create! { doc: { patient: { firstName: 'Dot', age: 5 } } }
@@ -256,6 +261,17 @@ a string, a number, a boolean. A string is stored as a VARIANT string, not
 parsed as a document, so `doc: '{"a":1}'` is the seven-character text and
 `doc.a` is NULL. Hand it the object.
 
+A document nests at most 128 levels deep, the depth harbor's own request
+parser reads, and the model refuses a deeper one before any SQL. The engine's
+handling of a deeply nested VARIANT is reported upstream as
+duckdb/duckdb#25967: an `UPDATE` of a VARIANT column costs the square of the
+nesting depth (0.6 s at 1,000 levels, 15 s at 5,000, where an `INSERT` of the
+same value takes 10 ms) and segfaults at 20,000 levels, and the cast itself
+segfaults at 40,000. On build 42289 a SQL-side `doc::JSON` over a stored
+5,000-level document ends the harbor process. `JSON.parse` reads any depth.
+Raw SQL that binds text through `?::JSON` carries no such check, so text from
+outside is checked before it is bound.
+
 ### In Rip through raw SQL
 
 The cast is yours. Stringify the object and bind it through `?::JSON`:
@@ -265,8 +281,11 @@ sql! 'INSERT INTO reports (id, doc) VALUES (?, ?::JSON)', [id, JSON.stringify(ob
 sql! 'UPDATE reports SET doc = ?::JSON WHERE id = ?', [JSON.stringify(obj), id]
 ```
 
-Without the cast the driver still delivers the object, harbor renders it as
-text, and the engine stores that text as a VARIANT string.
+Hand `sql!` the object itself and no cast is needed: a bare `?` aimed at the
+VARIANT column stores the document. The cast stays the rule for text, and for
+a scalar: `42` through a bare `?` is an `INT64` where `'42'::JSON` is a
+`UINT64`, and a slot the engine cannot type — `INSERT … SELECT ?`, a `$1`
+used against two types — takes the object as its text.
 
 ### In the REPL
 
@@ -312,9 +331,11 @@ value. Note that `'42'::JSON` is the number 42 and `'42'` is the string.
 ## Filtering from Rip
 
 `Model.where(field: value)` renders `"field" = ?`. For a `variant` field
-that is right for a scalar comparison of the whole column and wrong for a
-document, which arrives as a text literal and never matches. Filter by path
-with the string dialect, which passes SQL through untouched:
+that compares the whole column: a scalar against a scalar, and an object
+against the document, which matches whatever the order of its keys; an array
+of objects renders `IN (?, ?)` and matches the same way. To reach inside a
+document, filter by path with the string dialect, which passes SQL through
+untouched:
 
 ```rip
 Report.where('doc.patient.firstName = ?', 'Steve').all!

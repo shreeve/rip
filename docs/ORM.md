@@ -88,7 +88,9 @@ number, a boolean — and gets the same value back, and SQL reaches into
 it by path — `WHERE meta.patient.firstName = 'Ada'` — where a `json`
 column needs `->>`. The JSON operators do not apply to a `VARIANT`.
 Writes bind through `?::JSON`, which the model renders; a raw `INSERT`
-must cast the same way, or the document lands as a string.
+that binds JSON *text* must cast the same way, or the document lands as a
+string. An object handed to `sql!` as itself needs no cast: harbor binds it
+as the document.
 [VARIANTS.md](VARIANTS.md) is the reference for reading, filtering and
 editing these documents from every surface.
 
@@ -583,8 +585,8 @@ Order.where(createdAt: {between: [monday, friday]})
 The operator set: `eq ne gt gte lt lte like ilike in nin between`.
 `eq`/`ne` collapse to `IS [NOT] NULL` for `null`; empty `in`/`nin`
 render constant predicates rather than the syntax error `IN ()`. On
-fields whose declared type is itself an object (`json`, `any`, arrays)
-an object value is an equality test against the document, never an
+fields whose declared type is itself an object (`json`, `any`, `variant`,
+arrays) an object value is an equality test against the document, never an
 operator map — the field's declared type decides, not the value's
 shape. An `undefined` value is refused loudly: an absent parameter is
 not a filter, and rendering it would turn a missing request param into

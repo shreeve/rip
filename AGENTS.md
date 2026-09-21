@@ -394,12 +394,18 @@ alters surface syntax updates ALL THREE in the same change.
 - A single-failure suite run that a rerun does not reproduce is timing
  sensitivity under machine load until its test is named (sightings
  still unnamed: `test:all` 2026-07-20/21, an audit lane 2026-07-28).
- The one named so far was a bet on a process race: the Sites `stop`
+ The two named so far were bets on a process race. The Sites `stop`
  test read the manager's exit code the instant `stop` returned, and
  `stop` returns when the manager's control socket stops answering —
  before the process has exited. A test asserts an exit by AWAITING it
  (`await proc.exited`), never by reading `exitCode` after a sibling
- command returns. If a logged run fails, capture the test NAME
+ command returns. The Sites monitor test signalled the manager a fixed
+ 25ms after its control stub saw the registration, and the startup
+ report it asserts is written after that. A test waits for the
+ CONDITION its assertion needs (read the child's streams as they
+ arrive), never a fixed sleep after an earlier readiness signal; a stub
+ that answers late proves such a bet deterministically. If a logged
+ run fails, capture the test NAME
  verbatim — identifying it matters more than the green rerun;
  `test:all` repeats each failing lane's `(fail)` and `✗` lines after
  the summary so the name survives a truncated log.

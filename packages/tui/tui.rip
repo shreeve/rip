@@ -1,0 +1,105 @@
+# Rip TUI: Rip components on a terminal. `run` installs the terminal
+# document, mounts the app onto it, and draws every change; the same
+# tree renders to a string for tests.
+
+import { install } from './document.rip'
+import { layout } from './layout.rip'
+import { Grid, paint } from './paint.rip'
+import { Screen } from './screen.rip'
+
+# ── Widgets ───────────────────────────────────────────────────────────────────
+# A box is a div and text is a span. Every prop a widget does not
+# declare is a terminal style, forwarded to its node as written.
+
+export Box = component extends div
+  render
+    div
+      slot
+
+export Text = component extends span
+  render
+    span
+      slot
+
+export Spacer = component
+  render
+    div flexGrow: 1
+
+# ── The running app ───────────────────────────────────────────────────────────
+
+cols := 80
+rows := 24
+live = null
+
+class Viewport
+  get cols: -> cols
+  get rows: -> rows
+
+# The terminal's size, as reactive reads.
+export screen =! Viewport.new()
+
+# Mount `App` on the terminal and keep it drawn until `quit`.
+export run =! (App, options = {}) ->
+  throw Error.new 'rip/tui: an app is already running in this process — `quit` it first' if live
+  out = options.stdout ?? process.stdout
+  { doc, restore } = install()
+  view = Screen.new doc, out
+  cols = view.cols
+  rows = view.rows
+  resized = ->
+    cols = view.cols
+    rows = view.rows
+    view.front = null
+    doc.owe true
+  interrupted = -> quit()
+  finish = null
+  done = Promise.new (resolve) -> finish = resolve
+  app = App.new(options.props ?? {})
+  live = { app, view, out, doc, restore, resized, interrupted, finish }
+  out.write "\x1b[?25l"
+  app.mount doc.body
+  view.frame()
+  doc.onOwe = -> view.book()
+  out.on? 'resize', resized
+  process.on 'SIGINT', interrupted
+  { app, done, quit, flush: (-> view.frame() if doc.stale) }
+
+# Unmount the running app, leave its last frame on screen, and give the
+# process its `document` slot back. The work waits for the turn to end,
+# so a `quit` called from inside an effect still draws what that same
+# change owed.
+export quit =! (result) ->
+  return unless live and not live.closing
+  live.closing = true
+  queueMicrotask ->
+    { app, view, out, doc, restore, resized, interrupted, finish } = live
+    doc.onOwe = null
+    view.leave()
+    app.unmount()
+    out.off? 'resize', resized
+    process.off 'SIGINT', interrupted
+    restore()
+    live = null
+    finish result
+
+# The frame `App` draws in `cols` columns, as text — plain by default,
+# with escape sequences when `ansi` is set.
+export renderToString =! (App, options = {}) ->
+  { doc, restore } = install()
+  try
+    app = App.new(options.props ?? {})
+    app.mount doc.body
+    # A binding that reads a node's box changes the tree it measured, so
+    # layout repeats until a pass moves nothing.
+    passes = 0
+    while doc.moved
+      throw Error.new 'rip/tui: layout did not settle — a binding keeps changing the box it reads' if (passes += 1) > 8
+      doc.moved = false
+      layout doc.body, options.cols ?? 80, options.rows ?? null
+    grid = Grid.new options.cols ?? 80, doc.body.rect.h
+    paint grid, doc.body
+    text = grid.toString options.ansi ?? false
+    app.unmount()
+    text
+  finally
+    restore()

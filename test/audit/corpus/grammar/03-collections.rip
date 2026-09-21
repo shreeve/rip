@@ -82,8 +82,10 @@ secondRow = { ...rows[
 issued = { ...api.fresh() }
 defaulted = { ...makeDefaults(), audited: true }
 eager = { ...fetchDefaults! }
+perhapsEager = { ...fetchDefaults?! }
+perhapsCalled = { ...fetchDefaults?!() }
 
-console.log('spreads:', clone, merged, fallback, capped, soft, firstRow, secondRow, issued, defaulted, eager, { ...import('./03-collections.rip'), loaded: false })
+console.log('spreads:', clone, merged, fallback, capped, soft, firstRow, secondRow, issued, defaulted, eager, perhapsEager, perhapsCalled, { ...import('./03-collections.rip'), loaded: false })
 
 # ── Spread heads that need a class: `super()`, `super.method()`, and `this` ──
 

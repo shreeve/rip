@@ -1,0 +1,70 @@
+# ==============================================================================
+# tui bench — Rip TUI on the scenarios ink.rip gives Ink
+#
+#   cd packages/tui/bench
+#   bun run tui              # every scenario the package can draw so far
+#   rip tui.rip counter      # one scenario
+#
+# The same fake terminal, the same trees, the same awaited loop: each
+# update sets one state and flushes the frame it owes.
+# ==============================================================================
+
+import { run, quit, Box, Text } from 'rip/tui'
+import { terminal, measure, report } from './harness.rip'
+
+COLUMNS =! 200
+ROWS =! 60
+
+ROWS50 =! (r for r in [0...50])
+COLS10 =! (c for c in [0...10])
+ROWS40 =! (r for r in [0...40])
+COLS8 =! (c for c in [0...8])
+
+# One counter in a tree of about 1,000 elements.
+CounterTree = component
+  @tick := 0
+  render
+    Box flexDirection: 'column'
+      for r in ROWS50
+        Box key: r, flexDirection: 'row'
+          for c in COLS10
+            Box key: c, width: 18
+              Text
+                if r is 25 and c is 5 then "count #{@tick}" else "cell #{r}.#{c}"
+
+# A 40 × 8 table whose cells change a tenth at a time, or all at once.
+def churnTable(share)
+  component
+    @tick := 0
+    render
+      Box flexDirection: 'column'
+        for r in ROWS40
+          Box key: r, flexDirection: 'row'
+            for c in COLS8
+              Box key: c, width: 12
+                Text color: 'green'
+                  "v#{if share is 1 then @tick else @tick - ((@tick - (r * 8 + c)) %% 10)}"
+
+SCENARIOS =! [
+  ['counter',  'counter in a 1,000-element tree', CounterTree,     300, 30]
+  ['table10',  '40×8 table, 10% churn',           churnTable(0.1), 300, 30]
+  ['table100', '40×8 table, 100% churn',          churnTable(1),   300, 30]
+]
+
+def bench(only, scale = 1)
+  results = []
+  for [key, label, App, updates, warmup] in SCENARIOS
+    continue if only and only isnt key
+    out = terminal COLUMNS, ROWS
+    running = run App, stdout: out
+    step = (i) ->
+      running.app.tick.value = i + 1
+      running.flush()
+    results.push measure!(label, out, updates * scale, warmup, step)
+    quit()
+    await running.done
+  report "Rip TUI — #{COLUMNS}×#{ROWS}", results
+
+if import.meta.main
+  bench! process.argv[2], Number(process.argv[3] ?? 1)
+  process.exit 0

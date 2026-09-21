@@ -1,0 +1,106 @@
+# Layout: flexbox in float math, rounded to cells once at the end. A
+# box is a div, text is a span or a bare text node, and a comment (the
+# runtime's `if` and `for` anchors) takes no part.
+#
+# Sizes here are the ones a first frame needs — direction, grow, gap,
+# padding, border, fixed width and height, and text measured line by
+# line. Rounding happens on absolute edges, so neighbors never gap or
+# overlap: three equal shares of 100 come out 33, 34, 33.
+
+# The children layout sees: elements and text, never anchors.
+export kids =! (node) ->
+  out = []
+  kid = node.firstChild
+  while kid
+    out.push kid if kid.nodeType is 3 or (kid.nodeType is 1 and not kid.styles.hidden)
+    kid = kid.nextSibling
+  out
+
+# The text a leaf shows: a span's descendants joined, or a text node.
+export textOf =! (node) ->
+  return node.data if node.nodeType is 3
+  out = ''
+  kid = node.firstChild
+  while kid
+    out += textOf kid if kid.nodeType is 3 or kid.nodeType is 1
+    kid = kid.nextSibling
+  out
+
+leaf =! (node) -> node.nodeType is 3 or node.tagName is 'span'
+
+# Padding plus border on each edge: [top, right, bottom, left].
+export edges =! (node) ->
+  s = node.styles
+  all = s.padding ?? 0
+  line = if s.borderStyle then 1 else 0
+  [
+    (s.paddingTop ?? s.paddingY ?? all) + line
+    (s.paddingRight ?? s.paddingX ?? all) + line
+    (s.paddingBottom ?? s.paddingY ?? all) + line
+    (s.paddingLeft ?? s.paddingX ?? all) + line
+  ]
+
+# The size a node asks for when nothing constrains it.
+measure =! (node) ->
+  if leaf node
+    lines = textOf(node).split '\n'
+    wide = 0
+    for line, i in lines
+      wide = Math.max wide, Bun.stringWidth(line)
+    return [wide, lines.length]
+  s = node.styles
+  [top, right, bottom, left] = edges node
+  row = s.flexDirection is 'row'
+  gap = s.gap ?? 0
+  main = 0
+  cross = 0
+  list = kids node
+  for kid, i in list
+    [w, h] = measure kid
+    main += (if row then w else h) + (if i then gap else 0)
+    cross = Math.max cross, (if row then h else w)
+  w = (if row then main else cross) + left + right
+  h = (if row then cross else main) + top + bottom
+  [s.width ?? w, s.height ?? h]
+
+# Give `node` the box (x, y, w, h), in floats, and place its children.
+arrange =! (node, x, y, w, h) ->
+  x0 = Math.round x
+  y0 = Math.round y
+  node.place x0, y0, Math.round(x + w) - x0, Math.round(y + h) - y0
+  return if leaf node
+  s = node.styles
+  [top, right, bottom, left] = edges node
+  row = s.flexDirection is 'row'
+  gap = s.gap ?? 0
+  innerW = Math.max 0, w - left - right
+  innerH = Math.max 0, h - top - bottom
+  list = kids node
+  sizes = []
+  used = 0
+  grow = 0
+  for kid, i in list
+    size = measure kid
+    sizes.push size
+    used += (if row then size[0] else size[1]) + (if i then gap else 0)
+    grow += kid.styles?.flexGrow ?? 0
+  free = Math.max 0, (if row then innerW else innerH) - used
+  at = if row then x + left else y + top
+  for kid, i in list
+    [kw, kh] = sizes[i]
+    share = if grow then free * (kid.styles?.flexGrow ?? 0) / grow else 0
+    if row
+      kh = innerH unless kid.styles?.height?
+      arrange kid, at, y + top, kw + share, kh
+      at += kw + share + gap
+    else
+      kw = innerW unless kid.styles?.width?
+      arrange kid, x + left, at, kw, kh + share
+      at += kh + share + gap
+
+# Lay the tree out in `cols` columns. The root is as tall as its content
+# unless `rows` fixes it.
+export layout =! (root, cols, rows = null) ->
+  [, tall] = measure root
+  arrange root, 0, 0, cols, rows ?? tall
+  root.rect

@@ -476,7 +476,7 @@ const UNFINISHED = new Set([
 // DAMMIT is callable: `f!(1, 2)` calls (and awaits) f. DYNAMIC_IMPORT
 // exists only when a '(' or '!(' follows (the lexer mints it from that
 // lookahead), so `import(url)` and `import!(url)` are real calls.
-const CALLABLE = new Set(['IDENTIFIER', 'PROPERTY', ')', 'CALL_END', 'NUMBER', 'STRING', ']', 'INDEX_END', 'SUPER', 'DAMMIT', 'PRESENCE', 'DYNAMIC_IMPORT']);
+const CALLABLE = new Set(['IDENTIFIER', 'PROPERTY', ')', 'CALL_END', 'NUMBER', 'STRING', ']', 'INDEX_END', 'SUPER', 'DAMMIT', 'MAYBE_DAMMIT', 'DYNAMIC_IMPORT']);
 
 // Token kinds after which an unspaced '[' indexes rather than opening an
 // array literal (the scan-time rule: !prev.spaced && INDEXABLE.has(prev)).
@@ -560,6 +560,21 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // the FOR so the state survives newlines inside brackets opened after
   // it (`for x in [1,\n2]`); null = no pending FOR.
   let seenFor = null;
+  // Where a module line's specifier begins: after its brace, after a
+  // comma, or at the head of a line inside the braces.
+  const specifierStart = (prev) => prev?.kind === '{' || prev?.kind === ',' ||
+    ((prev?.kind === 'INDENT' || prev?.kind === 'TERMINATOR') && parens.length > 0);
+  // A word the scanner reads as anything but a name.
+  const reservedSpelling = (word) => Boolean(KEYWORDS[word] && word !== 'own') ||
+    RESERVED_WORDS.has(word) || STATEMENTS.has(word) || Boolean(ALIASES[word]) ||
+    word === 'in' || word === 'of' || word === 'when' || word === 'import' || word === 'export';
+  // The foreign side of a specifier: on an import line, the word at a
+  // specifier's start with `as` after it; on an export line, the word
+  // after `as`.
+  const foreignModuleName = (prev, afterWord) =>
+    (seenImport && specifierStart(prev) && /^[^\S\n]+as[^\S\n]/.test(afterWord)) ||
+    (seenExport && prev?.kind === 'AS');
+
   // Module-statement scan state (seenImport/seenExport): the
   // contextual keywords `as`/`from`/`default` only tag inside an
   // import/export line — `from = 1` and `as = 2` stay identifiers. The
@@ -1426,6 +1441,17 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         push('PROPERTY', value, start, pos);
       } else if (keysColon || inPickKeyPos()) {
         push('PROPERTY', word, start, pos);
+      } else if (word !== 'default' && word !== 'as' && foreignModuleName(prev, afterWord)) {
+        // A specifier's FOREIGN side names something in another module,
+        // never a binding here — the imported name before `as`, the
+        // exported name after it — so it is a name whatever it spells,
+        // the way a word after a dot is (`{ render as draw }`,
+        // `{ draw as render }`). JavaScript reads both sides the same.
+        push('IDENTIFIER', word, start, pos);
+      } else if (seenImport && word !== 'default' && word !== 'type' && reservedSpelling(word) &&
+                 (specifierStart(prev) || prev?.kind === 'AS' || prev?.kind === 'IMPORT')) {
+        // The LOCAL side is a binding, and a keyword cannot be one.
+        fail(`'${word}' is a Rip keyword, so it cannot be the local name of an import — bind it under another name (\`import { ${word} as ${word}_ } from '…'\`)`, start, pos);
       } else if (word === 'import') {
         // `import(` / `import!(` is the dynamic-import CALL and
         // `import.` heads the import.meta member — neither opens a
@@ -1811,9 +1837,9 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     if (ch === '?') {
       // Spaced '?' is the ternary operator. Unspaced: '?(' and '?['
       // are the optional call/index (the dotless '?.' spelling), '?!'
-      // directly after a value-ending token is the postfix presence
-      // check when bare (`a?!` → `a ? true : undefined`) and maybe
-      // dammit when followed by arguments (`f?!(x)` → `await f?.(x)`),
+      // directly after a value-ending token is maybe dammit, the
+      // awaited optional call (`f?!` → `await f?.()`, `f?!(x)` /
+      // `f?! x` → `await f?.(x)`) — dammit's `f!` with an optional callee,
       // and a '?' directly after a value-ending token is the postfix
       // existence check (`a?` → `a != null`) — real tokens and nodes.
       // A juxta argument after that existence token (`f? x`) is an
@@ -1828,7 +1854,12 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         }
         const prev = last();
         if (text[pos + 1] === '!' && prev && !prev.generated && INDEXABLE.has(prev.kind)) {
-          push('PRESENCE', '?!', pos, pos + 2);
+          // Maybe dammit calls what dammit calls: a name (`f?!`,
+          // `obj.method?!`). After any other value it has no reading.
+          if (prev.kind !== 'IDENTIFIER' && prev.kind !== 'PROPERTY') {
+            fail("maybe dammit '?!' follows a name, as dammit does (`f?!`, `obj.method?!`) — bind the value to a name first", pos, pos + 2);
+          }
+          push('MAYBE_DAMMIT', '?!', pos, pos + 2);
           pos += 2;
           continue;
         }
@@ -2038,7 +2069,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         prevTok.kind === 'HEREGEX_END' || prevTok.kind === 'BOOL' ||
         prevTok.kind === 'NULL' || prevTok.kind === 'UNDEFINED' ||
         prevTok.kind === 'DAMMIT' || prevTok.kind === '?' ||
-        prevTok.kind === 'PRESENCE' || prevTok.kind === 'OPT_MARKER' ||
+        prevTok.kind === 'MAYBE_DAMMIT' || prevTok.kind === 'OPT_MARKER' ||
         prevTok.kind === 'THIS' || prevTok.kind === '@' || prevTok.kind === 'SYMBOL' ||
         // A pending ternary's ELSE colon: after a bare identifier the
         // colon closes the ternary (`c ? d :e`); after `?` or another

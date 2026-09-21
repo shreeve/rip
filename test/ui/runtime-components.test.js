@@ -88,7 +88,7 @@ const childCreate = (api, parent, Cls, props = {}) => {
         el = document.createComment(`rip:child-error: ${Cls.name}`);
       }
     } catch (childErr) {
-      console.error(`[Rip] ${Cls.name} construction failed:`, childErr);
+      api.__reportChildFailure(Cls.name, childErr);
       inst = null;
       el = document.createComment(`rip:child-error: ${Cls.name}`);
     }
@@ -117,7 +117,7 @@ describe('module shape', () => {
  '__hmrRestoreUi', '__hmrSnapshotUi',
  '__lis',
  '__ownerFrame', '__popComponent', '__popOwner', '__pushComponent', '__pushOwner',
- '__reconcile', '__style', '__transition',
+ '__reconcile', '__reportChildFailure', '__setChildFailureReporter', '__style', '__transition',
  'getContext', 'hasContext', 'setContext',
     ]);
   });
@@ -610,6 +610,40 @@ describe('composition and error boundaries', () => {
     })).toEqual([
       ['[Rip] Broken construction failed:'],
  '<main><div><!--rip:child-error: Broken--></div></main>',
+    ]);
+  });
+
+  test('a host swaps the child-failure reporter: a reporter that throws fails the enclosing mount, and the swap hands back the previous one', () => {
+    expect(both((api) => {
+      const seen = [];
+      const prev = api.__setChildFailureReporter((name, error) => {
+        seen.push(`${name}: ${error.message}`);
+        throw error;
+      });
+      try {
+        const Broken = defineComponent(api, {
+          name: 'Broken', props: [],
+          init() { throw new Error('init boom'); },
+        });
+        const Parent = defineComponent(api, {
+          name: 'Parent', props: [],
+          create() {
+            const el = document.createElement('div');
+            el.appendChild(childCreate(api, this, Broken, {}).el);
+            return el;
+          },
+        });
+        const target = document.createElement('main');
+        const outcome = caught(() => new Parent({}).mount(target));
+        return [seen, outcome, serialize(target)];
+      } finally {
+        // The swap returns what it replaced, so a host restores it.
+        expect(api.__setChildFailureReporter(prev)).not.toBe(prev);
+      }
+    })).toEqual([
+      ['Broken: init boom'],
+      ['throw', 'Error'],
+      '<main></main>',
     ]);
   });
 
@@ -1922,7 +1956,7 @@ describe('the extends rest seam (runtime-owned;  re-emits it per class — /#165
 // ════════════════════════════════════════════════════════════════════
 
 const REACTIVE_IMPORT = /^import \{ __state, __computed, __effect, __batch, __readonly, __setErrorHandler, __handleError, __catchErrors, getEffectSignal \} from ".*src\/runtime\/reactive\.js";$/;
-const COMPONENTS_IMPORT = /^import \{ setContext, getContext, hasContext, __Component, __pushComponent, __popComponent, __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __ownerFrame, __pushOwner, __popOwner, __detachRef \} from ".*src\/runtime\/components\.js";$/;
+const COMPONENTS_IMPORT = /^import \{ setContext, getContext, hasContext, __Component, __pushComponent, __popComponent, __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __reportChildFailure, __ownerFrame, __pushOwner, __popOwner, __detachRef \} from ".*src\/runtime\/components\.js";$/;
 const ALL_COMPONENT_NAMES = ['setContext', 'getContext', 'hasContext', '__Component', '__pushComponent',
  '__popComponent', '__clsx', '__style', '__lis', '__reconcile', '__transition', '__handleComponentError', '__gateBind', '__detach',
  '__ownerFrame', '__pushOwner', '__popOwner', '__detachRef'];
@@ -1971,7 +2005,7 @@ describe('runtime delivery: the components runtime', () => {
     expect(/^import /m.test(code)).toBe(false);
     expect(code.startsWith(
  'const { __state, __computed, __effect, __batch, __readonly, __setErrorHandler, __handleError, __catchErrors, getEffectSignal, ' +
- 'setContext, getContext, hasContext, __Component, __pushComponent, __popComponent, __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __ownerFrame, __pushOwner, __popOwner, __detachRef } = (() => {',
+ 'setContext, getContext, hasContext, __Component, __pushComponent, __popComponent, __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __reportChildFailure, __ownerFrame, __pushOwner, __popOwner, __detachRef } = (() => {',
     )).toBe(true);
     expect(code).toContain('__RIP_REACTIVE_SENTINEL');
     expect(code).toContain('__RIP_COMPONENTS_SENTINEL');

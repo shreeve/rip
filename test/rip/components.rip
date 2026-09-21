@@ -3276,11 +3276,11 @@ code 'offer public prop with @', '''
   };
   '''
 
-code 'data attribute with the presence operator (data-open: val?!)', '''
+code 'data attribute removed on a falsy value (data-open: val or undefined)', '''
   export A = component
     @active := false
     render
-      div data-open: @active?!
+      div data-open: @active or undefined
   ''', '''
   export const A = class extends __Component {
     static __props = ['active'];
@@ -3293,7 +3293,7 @@ code 'data attribute with the presence operator (data-open: val?!)', '''
       return this._el0;
     }
     _setup() {
-      __effect(() => { { const __v = (this.active.value ? true : undefined); __v == null ? this._el0.removeAttribute('data-open') : this._el0.setAttribute('data-open', __v); } });
+      __effect(() => { { const __v = (this.active.value || undefined); __v == null ? this._el0.removeAttribute('data-open') : this._el0.setAttribute('data-open', __v); } });
     }
   };
   '''
@@ -3637,7 +3637,7 @@ code 'slot under a child component forwards the received children', '''
         this._el1 = document.createComment('rip:child-error: Section');
       }
       } catch (__childErr) {
-        console.error('[Rip] Section construction failed:', __childErr);
+        __reportChildFailure('Section', __childErr);
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-error: Section');
       }
@@ -3710,7 +3710,7 @@ code 'a member named slot under a child component keeps its text reading', '''
       }
       }
       } catch (__childErr) {
-        console.error('[Rip] Section construction failed:', __childErr);
+        __reportChildFailure('Section', __childErr);
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-error: Section');
       }
@@ -4183,7 +4183,7 @@ code 'child component with static props', '''
         this._el2 = document.createComment('rip:child-error: Child');
       }
       } catch (__childErr) {
-        console.error('[Rip] Child construction failed:', __childErr);
+        __reportChildFailure('Child', __childErr);
         this._inst1 = null;
         this._el2 = document.createComment('rip:child-error: Child');
       }
@@ -4239,7 +4239,7 @@ code 'child component with reactive prop (signal pass-through)', '''
         this._el2 = document.createComment('rip:child-error: Child');
       }
       } catch (__childErr) {
-        console.error('[Rip] Child construction failed:', __childErr);
+        __reportChildFailure('Child', __childErr);
         this._inst1 = null;
         this._el2 = document.createComment('rip:child-error: Child');
       }
@@ -4299,7 +4299,7 @@ code 'child component with children (slot)', '''
       }
       }
       } catch (__childErr) {
-        console.error('[Rip] Child construction failed:', __childErr);
+        __reportChildFailure('Child', __childErr);
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-error: Child');
       }
@@ -4361,7 +4361,7 @@ code 'child component with props and children', '''
       }
       }
       } catch (__childErr) {
-        console.error('[Rip] Child construction failed:', __childErr);
+        __reportChildFailure('Child', __childErr);
         this._inst1 = null;
         this._el2 = document.createComment('rip:child-error: Child');
       }
@@ -4412,7 +4412,7 @@ code 'boolean prop shorthand — single bare identifier', '''
         this._el1 = document.createComment('rip:child-error: Btn');
       }
       } catch (__childErr) {
-        console.error('[Rip] Btn construction failed:', __childErr);
+        __reportChildFailure('Btn', __childErr);
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-error: Btn');
       }
@@ -4468,7 +4468,7 @@ code 'boolean prop shorthand — multiple bare identifiers with text child', '''
       }
       }
       } catch (__childErr) {
-        console.error('[Rip] Btn construction failed:', __childErr);
+        __reportChildFailure('Btn', __childErr);
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-error: Btn');
       }
@@ -4524,7 +4524,7 @@ code 'boolean prop shorthand — mixed with @event and key:value', '''
       }
       }
       } catch (__childErr) {
-        console.error('[Rip] Btn construction failed:', __childErr);
+        __reportChildFailure('Btn', __childErr);
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-error: Btn');
       }
@@ -4581,7 +4581,7 @@ code 'boolean prop shorthand — explicit value still wins', '''
       }
       }
       } catch (__childErr) {
-        console.error('[Rip] Btn construction failed:', __childErr);
+        __reportChildFailure('Btn', __childErr);
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-error: Btn');
       }
@@ -4634,7 +4634,7 @@ code 'bare component reference (no args)', '''
         this._el2 = document.createComment('rip:child-error: Counter');
       }
       } catch (__childErr) {
-        console.error('[Rip] Counter construction failed:', __childErr);
+        __reportChildFailure('Counter', __childErr);
         this._inst1 = null;
         this._el2 = document.createComment('rip:child-error: Counter');
       }
@@ -5813,6 +5813,106 @@ test 'block component effect has matching reference evaluation counts', '''
   [target.x, gets, values]
   ''', [4, 1, 1]
 
+# `_init` runs synchronously during construction, so no member initializer
+# awaits or yields, whatever kind of member it declares. A function VALUE
+# a member holds — a method, a hook, a callback in a list — owns its own.
+fail 'a component state initializer cannot await', '''
+  A = component
+    n := fn!
+    render
+      div n
+  ''', 'a component state initializer cannot await or yield'
+
+fail 'a component readonly initializer cannot await', '''
+  A = component
+    n =! fn!
+    render
+      div n
+  ''', 'a component readonly initializer cannot await or yield'
+
+fail 'a public component readonly initializer cannot await', '''
+  A = component
+    @n =! fn?!
+    render
+      div n
+  ''', 'a component readonly initializer cannot await or yield'
+
+fail 'a plain component member initializer cannot await', '''
+  A = component
+    n = fn!
+    render
+      div n
+  ''', 'a component member initializer cannot await or yield'
+
+fail 'a component prop default cannot await', '''
+  A = component
+    @n: any = fn!
+    render
+      div n
+  ''', 'a component member initializer cannot await or yield'
+
+fail 'a component computed body cannot await', '''
+  A = component
+    n ~= fn!
+    render
+      div n
+  ''', "a computed ('~=') body cannot await"
+
+test 'component members that hold functions own their awaits', '''
+  A = component
+    go =! -> fn!
+    cbs = [-> fn!]
+    load = -> fn!
+    mounted = -> fn!
+    render
+      div "x"
+  typeof A
+  ''', 'function'
+
+code 'a component member holding an awaiting effect keeps it', '''
+  export A = component
+    e = ~> fn!
+    render
+      div "x"
+  ''', '''
+  export const A = class extends __Component {
+    _init(__given) {
+      this.e = __effect(async () => { await fn(); });
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode("x");
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+  };
+  '''
+
+test 'readonly, state and list members may hold awaiting effects', '''
+  A = component
+    e =! ~> fn!
+    s := ~> fn!
+    es = [~> fn!]
+    render
+      div "x"
+  typeof A
+  ''', 'function'
+
+fail 'a member cannot await in a class heritage', '''
+  A = component
+    K = class extends (fn!)
+    render
+      div "x"
+  ''', 'a component member initializer cannot await or yield'
+
+fail 'a user call spelled effect does not hide its await', '''
+  A = component
+    n = effect(a, fn!)
+    render
+      div "x"
+  ''', 'a component member initializer cannot await or yield'
+
 # A render body evaluates synchronously: text, attributes, props, and event
 # listeners all emit into non-async generated scopes, so a bare await/yield
 # in any render expression rejects positioned. A FUNCTION handler value owns
@@ -5859,6 +5959,371 @@ fail 'keyed render expression cannot yield', '''
       for item in items
         div key: yield item.id
   ''', 'render body evaluates synchronously'
+
+# The rule holds at every depth. An element's children arrive as a
+# parameterless arrow in argument position, which is render structure and
+# not a function value, so the check descends through it and through the
+# blocks of `if`, `switch`, and `for`.
+fail 'nested element attribute cannot await', '''
+  A = component
+    render
+      div
+        span title: fn!
+  ''', 'render body evaluates synchronously'
+
+fail 'nested text interpolation cannot await', '''
+  A = component
+    render
+      div
+        span "#{await f()}"
+  ''', 'render body evaluates synchronously'
+
+fail 'nested handler expression cannot await', '''
+  A = component
+    render
+      div
+        button @click: save!()
+  ''', 'render body evaluates synchronously'
+
+fail 'nested render expression cannot yield', '''
+  A = component
+    render
+      div
+        span "#{yield 1}"
+  ''', 'render body evaluates synchronously'
+
+fail 'a text child cannot await', '''
+  A = component
+    render
+      div
+        = load!
+  ''', 'render body evaluates synchronously'
+
+fail 'a text child cannot maybe dammit', '''
+  A = component
+    render
+      div
+        = load?!
+  ''', 'render body evaluates synchronously'
+
+fail 'an element inside a nested conditional cannot await', '''
+  A = component
+    render
+      div
+        if ok
+          p title: fn!
+  ''', 'render body evaluates synchronously'
+
+fail 'an element inside an else-if branch cannot await', '''
+  A = component
+    render
+      if a
+        p "x"
+      else if b
+        div
+          p title: fn!
+  ''', 'render body evaluates synchronously'
+
+fail 'an element inside a switch arm cannot await', '''
+  A = component
+    render
+      switch k
+        when 1
+          div
+            p title: fn!
+  ''', 'render body evaluates synchronously'
+
+fail 'an element inside a loop body cannot await', '''
+  A = component
+    xs := [1]
+    render
+      for x in xs
+        li
+          b title: fn!
+  ''', 'render body evaluates synchronously'
+
+fail 'a child component body cannot await', '''
+  Card = component
+    render
+      div
+        slot
+  A = component
+    render
+      Card
+        b title: fn!
+  ''', 'render body evaluates synchronously'
+
+# An element renders every argument but its attribute objects as a child,
+# so an element nested INLINE on the line, and an arrow standing as a
+# child with or without parameters, are child positions too.
+fail 'an inline nested element with a children block cannot await', '''
+  A = component
+    render
+      ul
+        li a href: "/"
+          b title: fn!
+  ''', 'render body evaluates synchronously'
+
+fail 'an inline nested arrow cannot await', '''
+  A = component
+    render
+      ul
+        li a -> b title: fn!
+  ''', 'render body evaluates synchronously'
+
+fail 'a bare arrow standing as a child cannot await', '''
+  A = component
+    render
+      div
+        -> p title: fn!
+  ''', 'render body evaluates synchronously'
+
+fail 'a fat arrow standing as a child cannot await', '''
+  A = component
+    render
+      div
+        => p title: fn!
+  ''', 'render body evaluates synchronously'
+
+# A component's children arrive as a bare block, as an element's do. A
+# spelled parameter has no reading, and its default would never emit.
+fail 'a component rejects a parameterized children arrow', '''
+  Card = component
+    render
+      div
+        slot
+  A = component
+    render
+      Card (x) ->
+        b "x"
+  ''', 'a parameterized function is not a render child'
+
+fail 'a component rejects a children arrow whose parameter default awaits', '''
+  Card = component
+    render
+      div
+        slot
+  A = component
+    render
+      Card (x = fn!) -> b "x"
+  ''', 'a parameterized function is not a render child'
+
+# Shapes where the render dispatcher and a syntactic reading part ways:
+# a postfix condition wraps its element in a bare list, a render local
+# shadows a tag only inside its own factory, and a dynamic-class head is
+# an element whatever shadows its tag. The check follows emission, so
+# each rejects.
+fail 'an element under a postfix condition cannot await in its children', '''
+  A = component
+    ok := true
+    render
+      ul
+        li(-> b title: fn!) unless ok
+  ''', 'render body evaluates synchronously'
+
+fail 'a tag a parent local shadows is still an element inside a conditional', '''
+  A = component
+    ok := true
+    render
+      code = (g) -> g
+      code "hi"
+      if ok
+        code ->
+          p title: fn!
+  ''', 'render body evaluates synchronously'
+
+fail 'a tag a parent local shadows is still an element inside a loop', '''
+  A = component
+    xs := [1]
+    render
+      code = (g) -> g
+      code "hi"
+      for x in xs
+        code ->
+          p title: fn!
+  ''', 'render body evaluates synchronously'
+
+fail 'a dynamic-class head is an element whatever shadows its tag', '''
+  A = component
+    ok := true
+    render
+      code = (g) -> g
+      code "x"
+      code.("on", ok)
+        p title: fn!
+  ''', 'render body evaluates synchronously'
+
+# An awaited for-as carries its await in a flag, not a node, so it is
+# guarded where `for await` emits.
+fail 'an awaited for-as cannot run in a render attribute', '''
+  A = component
+    xs := [1]
+    render
+      div title: (x for x as! xs)
+  ''', 'render body evaluates synchronously'
+
+fail 'an awaited for-as cannot run in a nested text child', '''
+  A = component
+    xs := [1]
+    render
+      div
+        = (x for x as! xs).length
+  ''', 'render body evaluates synchronously'
+
+fail 'a render local cannot hold an awaited for-as', '''
+  A = component
+    xs := [1]
+    render
+      t = (x for x as! xs)
+      div t
+  ''', 'render body evaluates synchronously'
+
+test 'an awaited for-as inside a handler function owns its await', '''
+  A = component
+    xs := [1]
+    render
+      button @click: -> (y for y as! xs)
+  typeof A
+  ''', 'function'
+
+test 'an effect value in render owns its await, as a local and as an attribute', '''
+  A = component
+    render
+      e = ~> load!
+      div title: (~> load!), data-e: e
+  typeof A
+  ''', 'function'
+
+fail 'a render local cannot hold an awaited value', '''
+  A = component
+    render
+      total = load!
+      div total
+  ''', 'render body evaluates synchronously'
+
+test 'a render local declared in an earlier sibling block still takes a callback', '''
+  A = component
+    render
+      div
+        code = (g) -> g
+        code "x"
+      section
+        code -> await f()
+  typeof A
+  ''', 'function'
+
+test 'an element under a postfix condition keeps its handler function', '''
+  A = component
+    ok := true
+    render
+      li(@click: -> save! 1) if ok
+  typeof A
+  ''', 'function'
+
+test 'a call rendered as text passes a bare arrow as a callback', '''
+  A = component
+    render
+      div
+        compute -> await f()
+        util.compute -> await f()
+  typeof A
+  ''', 'function'
+
+test 'an inline nested element keeps its handler function', '''
+  A = component
+    render
+      ul
+        li a @click: -> save! 1
+  typeof A
+  ''', 'function'
+
+code 'a nested function handler awaits in its own body', '''
+  export A = component
+    render
+      div
+        button @click: -> save! 1
+  ''', '''
+  export const A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._el1 = document.createElement('button');
+      this._el1.addEventListener('click', (e) => __batch(() => (async () => await save(1))(e)));
+      this._el0.appendChild(this._el1);
+      return this._el0;
+    }
+  };
+  '''
+
+# Only an ELEMENT takes render children. A call whose head is a render
+# local or a loop variable renders as text, so a bare arrow it is passed
+# is a callback that owns its own await — including a local that shadows
+# a tag name.
+code 'a call on a render local passes a bare arrow as a callback', '''
+  export A = component
+    render
+      fmt = (f) -> "x"
+      div
+        fmt -> load!
+  ''', '''
+  export const A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      let fmt;
+      fmt = f => "x";
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode(String(fmt(async () => await load())));
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+  };
+  '''
+
+test 'a render local that shadows a tag name is a call, and its callback awaits', '''
+  A = component
+    render
+      code = (f) -> "x"
+      div
+        code -> load!
+  typeof A
+  ''', 'function'
+
+test 'a call on a loop variable passes a bare arrow as a callback', '''
+  A = component
+    fns := []
+    render
+      for fn in fns
+        fn -> load!
+  typeof A
+  ''', 'function'
+
+fail 'a tag used above a same-named render local is still an element', '''
+  A = component
+    render
+      code
+        b title: fn!
+      code = 1
+  ''', 'render body evaluates synchronously'
+
+fail 'the arguments of a render-local call are still render expressions', '''
+  A = component
+    render
+      fmt = (f) -> "x"
+      div
+        fmt load!
+  ''', 'render body evaluates synchronously'
+
+test 'a callback inside a nested render expression owns its own await', '''
+  A = component
+    render
+      div
+        span title: [1].map((x) -> await x).length
+  typeof A
+  ''', 'function'
 
 test 'render function handler awaits in its own body', '''
   save = -> Promise.resolve(1)

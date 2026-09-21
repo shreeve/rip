@@ -292,6 +292,44 @@ describe('orm: paired reference — CRUD and the query builder', () => {
     ]);
   });
 
+  // insertMany writes each row's variant field through the same cast, a
+  // row that leaves the field out included: a NULL passes through it.
+  test('variant: insertMany binds every row through ?::JSON', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT INTO "docs"/, rows(['id'], [1], [2], [3]));
+      const Doc = k.__schema(model('Doc', field('meta', 'variant', { optional: true }), field('rank', 'integer')));
+      await Doc.insertMany([{ meta: { name: 'Ada' }, rank: 1 }, { meta: 'Bob', rank: 2 }, { rank: 3 }]);
+      return null;
+    });
+    expect(r.calls.map((c) => c.sql)).toEqual([
+      'INSERT INTO "docs" ("meta", "rank") VALUES (?::JSON, ?), (?::JSON, ?), (?::JSON, ?) RETURNING *',
+    ]);
+    expect(r.calls[0].params).toEqual(['{"name":"Ada"}', 1, '"Bob"', 2, null, 3]);
+  });
+
+  // A document nests at most 128 deep, the depth harbor's own parser
+  // reads; brackets inside a string are the string's.
+  test('variant/json: a document nested past 128 levels is refused before any SQL', async () => {
+    const nest = (n) => { let v = 'x'; for (let i = 0; i < n; i++) v = [v]; return v; };
+    const ok = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT INTO "docs"/, rows(['id'], [1]));
+      const Doc = k.__schema(model('Doc', field('meta', 'variant'), field('raw', 'json')));
+      await Doc.create({ meta: nest(128), raw: { note: '['.repeat(500) } });
+      return null;
+    });
+    expect(ok.threw).toBeUndefined();
+    expect(ok.calls.length).toBe(1);
+    for (const data of [{ meta: nest(129), raw: {} }, { meta: {}, raw: nest(129) }, { meta: {}, raw: '['.repeat(129) + ']'.repeat(129) }]) {
+      const bad = await paired(async (k) => {
+        const Doc = k.__schema(model('Doc', field('meta', 'variant'), field('raw', 'json')));
+        await Doc.create(data);
+        return null;
+      });
+      expect(bad.threw).toEqual({ error: true });
+      expect(bad.calls.length).toBe(0);
+    }
+  });
+
   test('order: structured forms quote and validate; the string form stays verbatim', async () => {
     const r = await paired(async (k, adapter) => {
       adapter.on(/^SELECT \* FROM "users"/, rows(['id'], [1]));

@@ -69,6 +69,25 @@ describe('generated JavaScript validity under composed lowerings', () => {
     ].join('\n'), 'return seen;');
     expect(out).toEqual([[2, [[2, 4], [3, 6]]], [4, [[2, 4], [3, 6]]]]);
   });
+
+  test('a sequence body composes with every function form and a pattern first write', async () => {
+    const out = await run([
+      'dirty = true',
+      'flush = -> (was = dirty; dirty = false; was)',
+      'fat = => (kept = dirty; kept)',
+      'class Buffer',
+      '  constructor: -> @items = [1, 2]',
+      '  drain: -> (taken = @items; @items = []; taken)',
+      'split = (pair) -> ([head, rest] = pair; {x} = rest; head + x)',
+      'later = -> (await 1; got = 2; got + 1)',
+      'gen = -> (first = yield 1; first * 2)',
+      'g = gen()',
+      'g.next()',
+      'out = [flush(), fat(), Buffer.new().drain(), split([1, {x: 4}]), later!, g.next(5).value]',
+      '',
+    ].join('\n'), 'return out;');
+    expect(out).toEqual([true, false, [1, 2], 5, 3, 10]);
+  });
 });
 
 describe('illegal generated-scope compositions reject before JavaScript execution', () => {

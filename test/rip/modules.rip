@@ -44,6 +44,32 @@ code "import default and namespace", 'import React, * as ReactDOM from "react-do
 code "import alias", 'import { useState as useS } from "react"', "import { useState as useS } from 'react';"
 code "import multiple aliases", 'import { useState as useS, useEffect as useE } from "react"', "import { useState as useS, useEffect as useE } from 'react';"
 
+# A specifier's FOREIGN side names something in another module, never a
+# binding here, so it is a name whatever it spells — a keyword, an alias
+# word, a reserved word. The LOCAL side is a binding and stays refused.
+code "import a keyword-named export under an alias", 'import { render as draw } from "ink"', "import { render as draw } from 'ink';"
+code "import several keyword-named exports", 'import { component as c, if as cond, on as listen } from "lib"', "import { component as c, if as cond, on as listen } from 'lib';"
+code "a keyword-named export beside plain ones", 'import d, { a, render as draw, b as bee } from "lib"', "import d, { a, render as draw, b as bee } from 'lib';"
+code "import a keyword-named export on its own line", '''
+  import {
+    render as draw
+    useState
+  } from "lib"
+''', '''
+  import { render as draw, useState } from 'lib';
+'''
+code "export under a keyword name", 'draw = 1\nexport { draw as render }', '''
+  let draw = 1;
+  export { draw as render };
+'''
+code "re-export under a keyword name", 'export { a as render, b as if } from "./m"', "export { a as render, b as if } from './m';"
+code "export all as a keyword name", 'export * as render from "./m"', "export * as render from './m';"
+fail "a keyword is no local import name", 'import { render } from "ink"', "'render' is a Rip keyword, so it cannot be the local name of an import — bind it under another name (`import { render as render_ } from '…'`)"
+fail "nor an alias word", 'import { on } from "node:events"', "'on' is a Rip keyword"
+fail "nor on the local side of an alias", 'import { x as render } from "lib"', "'render' is a Rip keyword"
+fail "nor as the default binding", 'import render from "lib"', "'render' is a Rip keyword"
+fail "nor as the namespace binding", 'import * as component from "lib"', "'component' is a Rip keyword"
+
 # ==============================================================================
 # Export: "export"
 # ==============================================================================

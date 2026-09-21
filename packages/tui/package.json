@@ -1,0 +1,22 @@
+{
+  "name": "@rip/tui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Terminal user interfaces from Rip components — one reactive tree, a cell-rounded flexbox, and a diffed cell painter, zero dependencies.",
+  "exports": {
+    ".": "./tui.rip"
+  },
+  "scripts": {
+    "test": "rip test.rip",
+    "demo": "rip demo.rip"
+  },
+  "files": [
+    "tui.rip",
+    "document.rip",
+    "layout.rip",
+    "paint.rip",
+    "screen.rip",
+    "README.md"
+  ]
+}
