@@ -8007,7 +8007,9 @@ class Emitter {
       if (tier === 'yield') return context === 'operand';
       return tier === 'binary' || tier === 'ternary' || tier === 'assign' || tier === 'function';
     }
-    if (context === 'head') return tier !== 'primary';
+    // An update expression cannot head a chain: `(--x).z` printed bare is
+    // `--x.z`, which updates the MEMBER, and `x++.z` does not parse.
+    if (context === 'head') return tier !== 'primary' || isUpdate(child);
     // context === 'statement'
     // A statement whose FIRST TOKEN would be `{` parses as a block in
     // JS no matter what follows — the leading-operand walk catches an

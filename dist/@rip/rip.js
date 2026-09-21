@@ -14634,7 +14634,7 @@ ${pad ?? ""}`);
       return tier === "binary" || tier === "ternary" || tier === "assign" || tier === "function";
     }
     if (context === "head")
-      return tier !== "primary";
+      return tier !== "primary" || isUpdate(child);
     if (Emitter.leadsWithObject(child))
       return true;
     return tier === "object" || isUpdate(child) || tier === "function" && child[0] === "->" || isNode(child) && (child[0] === "class" || child[0] === "component") || isTernary(child) && !Emitter.ternaryHoists(child) || tier === "unary" && child[0] === "delete";
