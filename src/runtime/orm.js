@@ -2644,10 +2644,10 @@ function serialize(v, field) {
   return v;
 }
 
-// A document nests no deeper than harbor's own request parser reads. The
-// engine's cast from JSON to VARIANT costs the square of the depth, 16
-// seconds at 5,000 levels, and recurses: at 20,000 the engine segfaults,
-// and reading a 5,000-deep document back through harbor ends the server.
+// A document nests no deeper than harbor's own request parser reads. An
+// UPDATE of a VARIANT column costs the square of the nesting depth, 15
+// seconds at 5,000 levels, and segfaults the engine at 20,000; the cast
+// itself segfaults at 40,000 (duckdb/duckdb#25967).
 // JSON.parse reads any depth and JSON.stringify writes tens of thousands,
 // so nothing upstream of here stops such a document. The scan is the
 // text's own brackets, outside its strings.

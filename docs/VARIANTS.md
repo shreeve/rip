@@ -263,13 +263,14 @@ parsed as a document, so `doc: '{"a":1}'` is the seven-character text and
 
 A document nests at most 128 levels deep, the depth harbor's own request
 parser reads, and the model refuses a deeper one before any SQL. The engine's
-cast from JSON to VARIANT costs the square of the depth and recurses.
-Measured on DuckDB v2.0.0-alpha (build 42289) under harbor 0.40.2, a write
-through `?::JSON` takes 0.6 s at 1,000 levels and 16 s at 5,000, reading that
-5,000-deep document back ends the harbor process, and at 20,000 levels the
-engine segfaults; `JSON.parse` reads any depth. Raw SQL that
-binds text through `?::JSON` carries no such check, so text from outside is
-checked before it is bound.
+handling of a deeply nested VARIANT is reported upstream as
+duckdb/duckdb#25967: an `UPDATE` of a VARIANT column costs the square of the
+nesting depth (0.6 s at 1,000 levels, 15 s at 5,000, where an `INSERT` of the
+same value takes 10 ms) and segfaults at 20,000 levels, and the cast itself
+segfaults at 40,000. On build 42289 a SQL-side `doc::JSON` over a stored
+5,000-level document ends the harbor process. `JSON.parse` reads any depth.
+Raw SQL that binds text through `?::JSON` carries no such check, so text from
+outside is checked before it is bound.
 
 ### In Rip through raw SQL
 
