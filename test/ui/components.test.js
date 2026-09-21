@@ -1298,6 +1298,39 @@ describe('render locals: \'s scope rules plus the structural loudness edges', ()
   test('member/chain writes at child positions reject (no render reading)', () => {
     emitFails('T = component\n  box = {}\n  render\n    div\n      box.x = 5\n', /assignment at a render child position/);
   });
+
+  test('a handler that assigns a render local or a loop variable writes the binding of its block', () => {
+    // The local is a `let` of _create or of the row's factory, and the
+    // loop variables are the factory's parameters: a handler declaring
+    // its own local over one would read it undefined.
+    const source = 'log = []\nApp = component\n  items := [3, 17]\n  render\n    section\n' +
+      '      label = "n"\n      button @click: (-> label = label + "!"; log.push label), label\n' +
+      '      for item, i in items\n        tag = "t"\n' +
+      '        button @click: (-> item = item + 100; tag = tag + i; log.push item, tag), "#{item}#{tag}"\n';
+    const { code } = compile(source, { runtimeDelivery: 'none' });
+    const names = Object.keys(RT);
+    const { App, log } = new Function(...names, `${code}\nreturn { App, log };`)(...names.map((name) => RT[name]));
+    const target = document.createElement('main');
+    const app = new App({});
+    try {
+      app.mount(target);
+      const buttons = [];
+      const collect = (node) => {
+        for (const child of node.childNodes) {
+          if (child._listeners?.has('click')) buttons.push(child);
+          collect(child);
+        }
+      };
+      collect(target);
+      expect(buttons).toHaveLength(3);
+      for (const b of [buttons[0], buttons[0], buttons[1], buttons[1], buttons[2]]) {
+        b.dispatchEvent({ type: 'click', target: b, bubbles: false });
+      }
+      expect(log).toEqual(['n!', 'n!!', 103, 't0', 203, 't00', 117, 't1']);
+    } finally {
+      app.unmount();
+    }
+  });
 });
 
 describe('a word ending a render line: bound is a value, unbound is an element', () => {

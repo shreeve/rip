@@ -9842,7 +9842,7 @@ class Emitter {
     return new Set([...reactive, ...handles, ...readonly]);
   }
   withBindings(names, fn) {
-    this.rframes.push({ reactive: new Set, bound: new Set(names) });
+    this.rframes.push({ reactive: new Set, bound: new Set(names), block: true });
     fn();
     this.rframes.pop();
   }
@@ -11408,7 +11408,7 @@ class Emitter {
       this.mark(stmt, role, () => {});
   }
   inScope(name) {
-    return this.scopes.some((s) => s.has(name));
+    return this.scopes.some((s) => s.has(name)) || this.rframes.some((f) => f.block === true && f.bound.has(name));
   }
   scopedHoist(stmts, params = [], { declareInPlace = true } = {}) {
     for (const p of params) {
@@ -16683,7 +16683,7 @@ ${pad ?? ""}`);
     const prevRecord = this.renderRecord;
     this.renderSelf = rec.self;
     this.renderRecord = rec;
-    this.rframes.push({ reactive: new Set, bound: rec.bindings, loopVars: rec.bindings, loopBindings: Emitter.loopBindingsOf(rec) });
+    this.rframes.push({ reactive: new Set, bound: rec.bindings, block: true, loopVars: rec.bindings, loopBindings: Emitter.loopBindingsOf(rec) });
     try {
       fn();
     } finally {
@@ -19114,6 +19114,7 @@ ${this.replayPad}}` : " }");
         this.rframes.push({
           reactive: new Set,
           bound: new Set([itemVar, indexVar]),
+          block: true,
           loopVars: new Set([itemVar, indexVar]),
           loopBindings: new Map([[itemVar, { owner: rec, which: "item" }], [indexVar, { owner: rec, which: "index" }]])
         });

@@ -212,6 +212,41 @@ test "closure multiple instances", '''
   add5(3) + add10(3)
   ''', 21
 
+# A parameter is a declaration of its function: a closure that assigns
+# it writes the parameter, whatever pattern spelled it.
+
+test "closure assigns a parameter", '''
+  go = (n) ->
+    inc = -> n = n + 1
+    [inc(), inc(), n]
+  go 1
+  ''', [2, 3, 3]
+
+test "closure assigns a defaulted parameter", '''
+  go = (n = 5) ->
+    inc = -> n = n + 1
+    [inc(), n]
+  go()
+  ''', [6, 6]
+
+test "closure assigns a destructured parameter name", '''
+  go = ({a, b}, [c]) ->
+    bump = ->
+      a = a + b
+      c = c + 1
+    bump()
+    [a, b, c]
+  go {a: 1, b: 2}, [3]
+  ''', [3, 2, 4]
+
+test "closure assigns a rest parameter", '''
+  go = (...rest) ->
+    cut = -> rest = rest.slice 1
+    cut()
+    rest
+  go 1, 2, 3
+  ''', [2, 3]
+
 # ==============================================================================
 # Higher-Order Functions
 # ==============================================================================

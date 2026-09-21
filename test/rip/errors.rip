@@ -440,3 +440,71 @@ code "value-position try keeps its wrapper", '''
     return null;
   } })();
   '''
+
+# ==============================================================================
+# A closure assigns the catch binding of the handler it sits in
+# ==============================================================================
+#
+# A catch binding is a declaration of its handler: a function in the
+# handler that assigns it writes the handler's parameter.
+
+test "closure assigns the catch binding, inside a function", '''
+  run = ->
+    out = []
+    try
+      throw 'boom'
+    catch e
+      fix = -> e = 'handled'
+      out.push fix(), e
+    out
+  run()
+  ''', ['handled', 'handled']
+
+test "closure assigns the catch binding, at the top level", '''
+  out = []
+  try
+    throw 'boom'
+  catch e
+    fix = -> e = 'handled'
+    out.push fix(), e
+  out
+  ''', ['handled', 'handled']
+
+test "closure assigns an annotated catch binding", '''
+  run = ->
+    out = []
+    try
+      throw 'boom'
+    catch e: any
+      fix = -> e = 'handled'
+      out.push fix(), e
+    out
+  run()
+  ''', ['handled', 'handled']
+
+test "closure assigns a catch pattern name", '''
+  run = ->
+    out = []
+    try
+      throw new Error 'boom'
+    catch {message}
+      fix = -> message = 'handled'
+      out.push fix(), message
+    out
+  run()
+  ''', ['handled', 'handled']
+
+test "closure after the handler assigns a local of its own", '''
+  run = ->
+    out = []
+    try
+      throw 'boom'
+    catch e
+      out.push e
+    after = ->
+      e = 'mine'
+      e
+    out.push after()
+    out
+  run()
+  ''', ['boom', 'mine']
