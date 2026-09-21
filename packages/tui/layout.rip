@@ -43,7 +43,7 @@ ROW_REVERSE    =! 3
 
 # Where an axis starts and ends for flex flow, and for inline flow. The
 # inline tables are the left-to-right ones: a right-to-left layout swaps
-# their row entries and the row axes `mainAxis` hands out, nothing else.
+# their row entries and the row axes a `flexDirection` names, nothing else.
 START =! [TOP, BOTTOM, LEFT, RIGHT]
 END   =! [BOTTOM, TOP, RIGHT, LEFT]
 LEAD  =! [TOP, TOP, LEFT, LEFT]
@@ -188,6 +188,8 @@ class Flex
     @free = 0                # the space `consumed` leaves; below zero, they overflow
     @mainDim = 0             # how far the line runs along the main axis, this node's edges included
     @crossDim = 0            # how far across it
+    @ascent = 0              # the most a child on it reaches above its baseline, and below
+    @descent = 0
 
 # The parsed lengths of a node with no styles: nothing written, and a
 # border of zero.
@@ -375,9 +377,8 @@ gapAt =! (lay, axis, ref) ->
   value = resolve lay, GAP + DIM[axis], ref
   if value > 0 then value else 0
 
-# The axis resolver: the one place inline direction meets flex direction.
-# Layout runs left to right, so a node's main axis is its flexDirection.
-mainAxis =! (lay) -> lay.direction
+# Layout runs left to right, so a node's main axis is its `flexDirection`,
+# and this is the axis across it.
 crossAxis =! (axis) -> if axis >= ROW then COLUMN else ROW
 
 alignOf =! (lay, kid) ->
@@ -665,27 +666,10 @@ boxOf =! (node) ->
   catch error
     throw blame error, node
 
-# Collect the layout children under `node` into `out`: a `contents` child
-# stands aside for its own children, to any depth.
-flatten! =! (node, out) ->
-  kid = node.firstChild
-  while kid
-    if kid.nodeType is 3
-      out.push kid
-    else if kid.nodeType is 1
-      box = boxOf kid
-      if box is BOX then out.push kid else if box is CONTENTS then flatten kid, out
-    kid = kid.nextSibling
-
-# The children layout sees: elements and text, never anchors or the
-# hidden, with `contents` children replaced by theirs. A clean node
-# answers from its record.
-export kids =! (node) ->
-  lay = node.lay
-  return lay.kids if lay and not node.dirty and not lay.leaf
-  out = []
-  flatten node, out
-  out
+# The children layout sees, for a painter to walk once the tree is laid
+# out: elements and text, never anchors or the hidden, with `contents`
+# children replaced by theirs.
+export kids =! (node) -> node.lay.kids
 
 # Padding plus border on each edge: [top, right, bottom, left]. A clean
 # node resolves its percents against the owner width it was laid out
@@ -856,22 +840,30 @@ sync =! (node) ->
 
 # ── Leaves ────────────────────────────────────────────────────────────────────
 
-# A text leaf, or a node with a `measure` function (CalculateLayout.cpp
-# measureNodeWithMeasureFunc). The function is never offered a negative
+# The size a visit answers: what it found, held inside the node's min and
+# max and never under its padding and border.
+measuredAs! =! (lay, wide, tall, ownerW, ownerH) ->
+  lay.measured[WIDTH] = bound lay, ROW, wide, ownerW, ownerW
+  lay.measured[HEIGHT] = bound lay, COLUMN, tall, ownerH, ownerW
+
+# Padding plus border across a leaf, summed as Yoga sums them: the two
+# paddings, then the two borders. `insideAxis` sums edge by edge, and
+# fractional edges can part the two by a rounding, so a leaf keeps its own.
+insideLeaf =! (lay, lead, trail) -> lay.padding[lead] + lay.padding[trail] + lay.border[lead] + lay.border[trail]
+
+# A text leaf, or a node with a `measure` function
+# (measureNodeWithMeasureFunc). The function is never offered a negative
 # size. Text without one is measured by its flow, under the same
 # contract: unwrapped where no width limits it, else as its wrap mode
 # breaks or cuts it at the width offered.
 measureLeaf! =! (node, lay, availW, availH, modeW, modeH, ownerW, ownerH) ->
   availW = NaN if modeW is MAX_CONTENT
   availH = NaN if modeH is MAX_CONTENT
-  p = lay.padding
-  b = lay.border
-  insideW = p[LEFT] + p[RIGHT] + b[LEFT] + b[RIGHT]
-  insideH = p[TOP] + p[BOTTOM] + b[TOP] + b[BOTTOM]
   if modeW is STRETCH_FIT and modeH is STRETCH_FIT
-    lay.measured[WIDTH] = bound lay, ROW, availW, ownerW, ownerW
-    lay.measured[HEIGHT] = bound lay, COLUMN, availH, ownerH, ownerW
+    measuredAs lay, availW, availH, ownerW, ownerH
     return
+  insideW = insideLeaf lay, LEFT, RIGHT
+  insideH = insideLeaf lay, TOP, BOTTOM
   innerW = if isNaN availW then availW else fmax 0, availW - insideW
   if node.measure
     innerH = if isNaN availH then availH else fmax 0, availH - insideH
@@ -883,17 +875,13 @@ measureLeaf! =! (node, lay, availW, availH, modeW, modeH, ownerW, ownerH) ->
     flow.measure innerW, modeW is MAX_CONTENT
     wide = flow.w
     tall = flow.h
-  lay.measured[WIDTH] = bound lay, ROW, (if modeW is STRETCH_FIT then availW else wide + insideW), ownerW, ownerW
-  lay.measured[HEIGHT] = bound lay, COLUMN, (if modeH is STRETCH_FIT then availH else tall + insideH), ownerH, ownerW
+  measuredAs lay, (if modeW is STRETCH_FIT then availW else wide + insideW), (if modeH is STRETCH_FIT then availH else tall + insideH), ownerW, ownerH
 
 # A box with no children is its padding and border, or what it is given.
 measureEmpty! =! (lay, availW, availH, modeW, modeH, ownerW, ownerH) ->
-  p = lay.padding
-  b = lay.border
-  wide = if modeW is STRETCH_FIT then availW else p[LEFT] + p[RIGHT] + b[LEFT] + b[RIGHT]
-  tall = if modeH is STRETCH_FIT then availH else p[TOP] + p[BOTTOM] + b[TOP] + b[BOTTOM]
-  lay.measured[WIDTH] = bound lay, ROW, wide, ownerW, ownerW
-  lay.measured[HEIGHT] = bound lay, COLUMN, tall, ownerH, ownerW
+  wide = if modeW is STRETCH_FIT then availW else insideLeaf lay, LEFT, RIGHT
+  tall = if modeH is STRETCH_FIT then availH else insideLeaf lay, TOP, BOTTOM
+  measuredAs lay, wide, tall, ownerW, ownerH
 
 # ── Flex basis ────────────────────────────────────────────────────────────────
 
@@ -978,7 +966,7 @@ basisOf! =! (lay, f, kid, modeW, modeH) ->
     k.basis = fmax k.measured[DIM[f.axis]], insideAxis(k, f.axis, width)
 
 # Every child's basis; answers their sum with margins.
-basisAll =! (node, lay, f, modeW, modeH, perform) ->
+basisAll =! (lay, f, modeW, modeH, perform) ->
   list = lay.kids
   total = 0
   # A lone child that both grows and shrinks takes the whole line, so its
@@ -1037,6 +1025,13 @@ baselined =! (lay) ->
     return true if k.position isnt ABSOLUTE and k.alignSelf is BASELINE
   false
 
+# One child's reach above and below its baseline, into the most of each
+# on its line.
+reach! =! (f, kid, k) ->
+  up = baselineOf(kid) + marginAt(k, TOP, f.innerW)
+  f.ascent = fmax f.ascent, up
+  f.descent = fmax f.descent, k.measured[HEIGHT] + marginAxis(k, COLUMN, f.innerW) - up
+
 # ── Lines ─────────────────────────────────────────────────────────────────────
 
 # Take children from `f.from` until the line is full (FlexLine.cpp). A
@@ -1073,9 +1068,9 @@ breakLine! =! (lay, f, lineAt) ->
     f.last = at
     at += 1
   f.to = at
-  # Factors that sum under one are floored to one.
+  # Grow factors that sum under one are floored to one. Yoga floors the
+  # shrink total too, which is never above zero.
   f.grow = 1 if f.grow > 0 and f.grow < 1
-  f.shrink = 1 if f.shrink > 0 and f.shrink < 1
 
 # First pass of two over a line's free space: find the children whose min
 # or max stops them, and take their clamped sizes out of the space and
@@ -1109,7 +1104,7 @@ freeze! =! (lay, f) ->
 # Second pass: give every child its main size and lay it out, or only
 # measure it when a stretch pass will lay it out after. Answers the space
 # the line handed out.
-distribute =! (node, lay, f, perform) ->
+distribute =! (lay, f, perform) ->
   list = lay.kids
   axis = f.axis
   cross = f.cross
@@ -1191,7 +1186,7 @@ seat! =! (lay, ownerW, ownerH) ->
 
 # Place a line's children along the main axis, and find the line's main
 # and cross extent (justifyMainAxis).
-justify! =! (node, lay, f, ownerW, perform) ->
+justify! =! (lay, f, ownerW, perform) ->
   list = lay.kids
   axis = f.axis
   cross = f.cross
@@ -1229,8 +1224,8 @@ justify! =! (node, lay, f, ownerW, perform) ->
       between += lead * 2
   f.mainDim = leadingInside + lead
   f.crossDim = 0
-  ascent = 0
-  descent = 0
+  f.ascent = 0
+  f.descent = 0
   onBaseline = baselined lay
   skipped = not perform and f.modeCross is STRETCH_FIT
   for at in [f.from...f.to]
@@ -1250,17 +1245,14 @@ justify! =! (node, lay, f, ownerW, perform) ->
     else
       f.mainDim += k.measured[mainDimension] + marginAxis(k, axis, f.innerW)
       if onBaseline
-        up = baselineOf(kid) + marginAt(k, TOP, f.innerW)
-        down = k.measured[HEIGHT] + marginAxis(k, COLUMN, f.innerW) - up
-        ascent = fmax ascent, up
-        descent = fmax descent, down
+        reach f, kid, k
       else
         f.crossDim = fmax f.crossDim, k.measured[DIM[cross]] + marginAxis(k, cross, f.innerW)
   f.mainDim += trailingInside
-  f.crossDim = ascent + descent if onBaseline
+  f.crossDim = f.ascent + f.descent if onBaseline
 
 # Place a line's children across it, stretching the ones that stretch.
-alignLine! =! (node, lay, f, leadingCross, containerCross, lineTop) ->
+alignLine! =! (lay, f, leadingCross, containerCross, lineTop) ->
   list = lay.kids
   axis = f.axis
   cross = f.cross
@@ -1297,12 +1289,8 @@ alignLine! =! (node, lay, f, leadingCross, containerCross, lineTop) ->
         visit kid, kidW, kidH, modeW, modeH, f.innerW, f.innerH, true
     else
       spare = containerCross - (k.measured[crossDimension] + marginAxis(k, cross, f.innerW))
-      if autoStart and autoEnd
-        lead += fmax 0, spare / 2
-      else if autoEnd
-        lead += 0
-      else if autoStart
-        lead += fmax 0, spare
+      if autoStart or autoEnd
+        lead += fmax 0, (if autoEnd then spare / 2 else spare) if autoStart
       else if align is CENTER
         lead += spare / 2
       else if align isnt FLEX_START
@@ -1311,7 +1299,7 @@ alignLine! =! (node, lay, f, leadingCross, containerCross, lineTop) ->
 
 # Spread the lines over the cross axis, and set every child against its
 # own line (CalculateLayout.cpp step 8).
-alignLines! =! (node, lay, f, lines, totalCross, leadingCross, insideCross, ownerCross, ownerW) ->
+alignLines! =! (lay, f, lines, totalCross, leadingCross, insideCross, ownerCross, ownerW) ->
   list = lay.kids
   axis = f.axis
   cross = f.cross
@@ -1349,19 +1337,16 @@ alignLines! =! (node, lay, f, lines, totalCross, leadingCross, insideCross, owne
   for line in [0...lines]
     from = to
     tall = 0
-    ascent = 0
-    descent = 0
+    f.ascent = 0
+    f.descent = 0
     while to < list.length
       k = list[to].lay
       if k.position isnt ABSOLUTE
         break if k.lineAt isnt line
         tall = fmax tall, k.measured[crossDimension] + marginAxis(k, cross, f.innerW) if k.measured[crossDimension] >= 0
         if alignOf(lay, k) is BASELINE
-          up = baselineOf(list[to]) + marginAt(k, TOP, f.innerW)
-          down = k.measured[HEIGHT] + marginAxis(k, COLUMN, f.innerW) - up
-          ascent = fmax ascent, up
-          descent = fmax descent, down
-          tall = fmax tall, ascent + descent
+          reach f, list[to], k
+          tall = fmax tall, f.ascent + f.descent
       to += 1
     lead += gap if line
     tall += extra
@@ -1388,7 +1373,7 @@ alignLines! =! (node, lay, f, lines, totalCross, leadingCross, insideCross, owne
           unless near(kidW, k.measured[WIDTH]) and near(kidH, k.measured[HEIGHT])
             visit kid, kidW, kidH, STRETCH_FIT, STRETCH_FIT, f.innerW, f.innerH, true
       else if align is BASELINE
-        k.pos[TOP] = lead + ascent - baselineOf(kid) + insetAt(k, TOP, f.innerCross)
+        k.pos[TOP] = lead + f.ascent - baselineOf(kid) + insetAt(k, TOP, f.innerCross)
     lead += perLine + tall
 
 # ── The algorithm ─────────────────────────────────────────────────────────────
@@ -1401,8 +1386,7 @@ measureFixed =! (lay, availW, availH, modeW, modeH, ownerW, ownerH) ->
   return false unless fixed(availW, modeW) and fixed(availH, modeH)
   wide = if isNaN(availW) or (modeW is FIT_CONTENT and availW < 0) then 0 else availW
   tall = if isNaN(availH) or (modeH is FIT_CONTENT and availH < 0) then 0 else availH
-  lay.measured[WIDTH] = bound lay, ROW, wide, ownerW, ownerW
-  lay.measured[HEIGHT] = bound lay, COLUMN, tall, ownerH, ownerW
+  measuredAs lay, wide, tall, ownerW, ownerH
   true
 
 # Step 1: the axes, and how the space along each was offered.
@@ -1526,7 +1510,7 @@ compute! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
 
   # Step 3: every child's flex basis. The gap total counts hidden and
   # absolute children too, as Yoga's child count does.
-  total = basisAll node, lay, f, modeW, modeH, perform
+  total = basisAll lay, f, modeW, modeH, perform
   total += gapAt(lay, axis, f.innerMain) * (lay.count - 1) if lay.count > 1
   f.overflows = f.modeMain isnt MAX_CONTENT and above total, f.innerMain
   f.modeMain = STRETCH_FIT if f.wrap and f.overflows and f.modeMain is FIT_CONTENT
@@ -1546,10 +1530,10 @@ compute! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
     unless not perform and f.modeCross is STRETCH_FIT
       before = f.free
       freeze lay, f
-      f.free = before - distribute(node, lay, f, perform)
+      f.free = before - distribute(lay, f, perform)
 
     # Step 6: main-axis positions, and the line's cross size.
-    justify node, lay, f, ownerW, perform
+    justify lay, f, ownerW, perform
     containerCross = f.innerCross
     if f.modeCross isnt STRETCH_FIT
       containerCross = bound(lay, cross, f.crossDim + insideCross, ownerCross, ownerW) - insideCross
@@ -1557,14 +1541,14 @@ compute! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
     f.crossDim = bound(lay, cross, f.crossDim + insideCross, ownerCross, ownerW) - insideCross unless f.wrap
 
     # Step 7: cross-axis positions.
-    alignLine node, lay, f, leadingCross, containerCross, totalCross if perform
+    alignLine lay, f, leadingCross, containerCross, totalCross if perform
     totalCross += f.crossDim + (if lines then crossGap else 0)
     widest = fmax widest, f.mainDim
     lines += 1
     f.from = f.to
 
   # Step 8: the lines against each other.
-  alignLines node, lay, f, lines, totalCross, leadingCross, insideCross, ownerCross, ownerW if perform and (f.wrap or baselined lay)
+  alignLines lay, f, lines, totalCross, leadingCross, insideCross, ownerCross, ownerW if perform and (f.wrap or baselined lay)
 
   givenMain = if row then availW - marginRow else availH - marginColumn
   givenCross = if row then availH - marginColumn else availW - marginRow
@@ -1634,7 +1618,7 @@ anchor! =! (block, parent, kid, axis, main, blockW, blockH) ->
 absolute! =! (block, parent, kid, blockW, blockH, widthMode) ->
   c = block.lay
   k = kid.lay
-  axis = mainAxis parent.lay
+  axis = parent.lay.direction
   cross = crossAxis axis
   kidW = NaN
   kidH = NaN
@@ -1690,7 +1674,7 @@ absolutes =! (block, parent, widthMode, left, top) ->
       # relative to the parent. A reversed parent axis set the far edge.
       acrossSet = k.u[INSET + LEFT] isnt NIL or k.u[INSET + RIGHT] isnt NIL
       downSet = k.u[INSET + TOP] isnt NIL or k.u[INSET + BOTTOM] isnt NIL
-      axis = mainAxis q
+      axis = q.direction
       for turn in [0...2]
         if axis is ROW_REVERSE or axis is COLUMN_REVERSE
           dim = DIM[axis]
@@ -1775,7 +1759,7 @@ orderSensitive =! (lay) ->
 # itself and passes it on — which it does not to an absolute child, nor
 # along the axis it scrolls (see `basisOf`).
 offered =! (lay, k, dim) ->
-  return true if k.u[SIZE + dim] is POINT and k.v[SIZE + dim] >= 0
+  return true if k.u[SIZE + dim] is POINT
   return false if k.position is ABSOLUTE or (lay.overflow is SCROLL and DIM[lay.direction] is dim)
   if dim is WIDTH then lay.solidW else lay.solidH
 
@@ -1958,8 +1942,8 @@ pass! =! (root, ownerW, ownerH) ->
   lay = root.lay
   # The root is offered a number where the space has one, which can
   # change from pass to pass with nothing dirty.
-  solidW = not isNaN(ownerW) or (lay.u[SIZE + WIDTH] is POINT and lay.v[SIZE + WIDTH] >= 0)
-  solidH = not isNaN(ownerH) or (lay.u[SIZE + HEIGHT] is POINT and lay.v[SIZE + HEIGHT] >= 0)
+  solidW = not isNaN(ownerW) or lay.u[SIZE + WIDTH] is POINT
+  solidH = not isNaN(ownerH) or lay.u[SIZE + HEIGHT] is POINT
   firm root, solidW, solidH if lay.solidW isnt solidW or lay.solidH isnt solidH
   wide = ownerW
   modeW = if isNaN ownerW then MAX_CONTENT else STRETCH_FIT
