@@ -107,8 +107,12 @@ untab =! (text, before) ->
 # this flag over an index into the cluster table.
 export CLUSTER =! 0x80000000
 
+ROOM =! 16384   # clusters the table holds before a sweep is due
+
 clusters =! []
 known =! Map.new()
+room = ROOM
+age = 0         # sweeps so far; a flow's cells are of the table its age names
 
 export glyph =! (cell) -> if cell < CLUSTER then String.fromCodePoint(cell) else clusters[cell - CLUSTER]
 
@@ -121,6 +125,26 @@ cellOf =! (cluster) ->
     clusters.push cluster
     known.set cluster, cell
   cell
+
+# The clusters held, for the tests to count.
+export tally =! -> clusters.length
+
+# The table grows with every new cluster. Past its mark the painter,
+# between frames, hands `evict` the cells of the grid a screen shows:
+# every cluster none of them holds is let go, and the cells that stay
+# are renumbered. A flow holds cells too, and takes them again when it
+# is next drawn (`renew`). A screen that shows more than half the mark
+# moves the mark, so a sweep is never due every frame.
+export crowded =! (slack) -> clusters.length > room * slack
+
+export evict! =! (ch) ->
+  old = clusters.slice()
+  clusters.length = 0
+  known.clear()
+  age += 1
+  for cell, at in ch when cell >= CLUSTER
+    ch[at] = cellOf old[cell - CLUSTER]
+  room = Math.max ROOM, clusters.length * 2
 
 # ── Widths ────────────────────────────────────────────────────────────────────
 
@@ -226,6 +250,7 @@ export class Flow
     @cuts = null     # string offset of each unit, and the text's length
     @spans = null    # cells each unit takes
     @cells = null    # what each unit puts in a grid cell
+    @age = 0         # the cluster table those cells are of
     @wide = 0        # the widest line, unwrapped
     @tall = 0        # the lines, unwrapped
     @mode = WRAP
@@ -314,6 +339,10 @@ export class Flow
     @cuts = cuts
     @spans = spans
     @cells = cells
+    @age = age
+
+  # Take the cells again when a sweep has renumbered the cluster table.
+  renew!: -> @segment() unless @ascii or @age is age
 
   # The unwrapped size: the widest line and the lines. No text is no line.
   size!: ->

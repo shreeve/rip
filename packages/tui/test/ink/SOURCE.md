@@ -12,11 +12,11 @@
 
 ## What runs
 
-`rip test/ink.rip` runs 434 tests: 423 ported cases and 11 self-tests of
+`rip test/ink.rip` runs 437 tests: 425 ported cases and 12 self-tests of
 `cells.rip` (`cells-check.rip`). Of the ported cases:
 
-- 405 hold the frame to Ink's, row for row;
-- 17 are **stated differences**, pinned through `differs` in
+- 406 hold the frame to Ink's, row for row;
+- 18 are **stated differences**, pinned through `differs` in
   `harness.rip`: the frame must equal this package's stated frame and
   must not equal Ink's, with the decision in a sentence, so a pin the
   package outgrows fails. They are listed below;
@@ -31,7 +31,7 @@ widgets keep Yoga's defaults), and two reads of a frame:
 
 - `plain` — rows of bare characters, for layout and text;
 - `styled` — rows of styled cells in the notation of `cells.rip`, for
-  color, background and attributes. Two renderers spell one picture
+  color, background, attributes and hyperlinks. Two renderers spell one picture
   with different escape bytes, so cells are compared and bytes never
   are.
 
@@ -42,6 +42,11 @@ expectation, so each case is exact on the frame's height, as Ink's
 `t.is(output, literal)` is. Within a row, a space drops the attributes
 it cannot show, and trailing default-style spaces are trimmed. Nothing
 else is trimmed.
+
+One prop value is respelled: Ink's `backgroundColor=""`, a run of text
+on no background inside a colored box, is `backgroundColor: 'default'`
+here, where an empty value clears the key (`background`'s "Mixed text
+with and without background inheritance").
 
 ## Where an expected frame comes from
 
@@ -76,20 +81,25 @@ comment at the literal says which when it is not the first:
    the expectation. Where Ink's frame keeps an SGR style, the case is a
    stated difference: Ink's styled cells against the bare text. Where it
    keeps a hyperlink, the text and its wrapping are compared and the
-   hyperlink is not: **hyperlinks are not built**, and a comment at the
-   case says so.
+   hyperlink is not: a hyperlink here is the `link` prop, never an
+   escape sequence in the text, and a comment at the case says so.
 5. **`text-width`'s "truncate CJK text in the middle"** takes the row
    Ink's main branch draws, `あいうえお…けこ|end`: main's measure reserves
    the whole offered width for truncated text (`src/dom.ts`), so the row
    is cli-truncate's answer at 20 columns, which `oracle/truncate.ts`
    prints. Published Ink 7.1.1 cuts twice and draws `あいうえ…けこ|end`.
+6. **The hyperlink Ink's test compares as escape bytes**, read as styled
+   cells: `components`' "link ansi escapes are closed properly" and
+   `wrap-text`'s two hyperlink frames. The tree says the hyperlink with
+   the `link` prop where Ink's writes it into the text, and `cells.rip`
+   reads OSC 8 and refuses a hyperlink left open at the end of a row.
 
 `wrap-text.tsx` calls Ink's `wrapText` function and cannot load against
 the published build, so `oracle/extra/wrap-text.tsx` asks the same
 questions through components and `wrap-text.rip` ports that. Its
 "keeps styles that span a newline" case holds a color and then a
-hyperlink to the rule in Ink's file; the color is ported, as a `color`
-prop, and the hyperlink half is not ported: hyperlinks are not built.
+hyperlink to the rule in Ink's file; each is ported as a prop, `color`
+and `link`, and the hyperlink half is a stated difference.
 
 ## Stated differences
 
@@ -97,10 +107,11 @@ prop, and the hyperlink half is not ported: hyperlinks are not built.
 - `text`: preserve SGR color sequences in text
 - `text`: preserve colors encoded with colon parameters
 - `text`: preserve SGR sequences around stripped SOS control strings
+- `wrap-text`: truncated multi-line text keeps styles that span a newline (the hyperlink half; the color half holds Ink's frame)
 - `wrap-text`: truncated multi-line text keeps a C1 SGR color that spans a newline
+- `wrap-text`: truncated multi-line text keeps a C1 OSC hyperlink that spans a newline
 - `wrap-text`: truncated multi-line text keeps a colon 256-color that spans a newline
 - `wrap-text`: truncated multi-line text keeps a colon truecolor that spans a newline
-- `background`: Mixed text with and without background inheritance
 - `overflow`: out of bounds writes do not crash
 - `overlap-wide-background`: overwriting 你 cell 0 preserves the other cell's background
 - `overlap-wide-background`: overwriting 你 cell 1 preserves the other cell's background
@@ -118,9 +129,9 @@ offsets fall back to zero.
 
 | Ink test file | cases | ported | left out |
 |---|---:|---:|---:|
-| `components` | 93 | 27 | 66 |
+| `components` | 93 | 28 | 65 |
 | `text` | 57 | 46 | 11 |
-| `wrap-text` | 17 | 11 | 6 |
+| `wrap-text` | 17 | 12 | 5 |
 | `text-width` | 18 | 18 | 0 |
 | `truncate-width` | 9 | 9 | 0 |
 | `absolute-truncation` | 4 | 4 | 0 |
@@ -147,12 +158,13 @@ offsets fall back to zero.
 | `flex-align-self` | 9 | 9 | 0 |
 | `flex-justify-content` | 12 | 12 | 0 |
 | `render-to-string` | 37 | 23 | 14 |
-| **total** | **575** | **423** | **152** |
+| **total** | **575** | **425** | **150** |
 
 A case counts once per title Ink registers, loops included. Files
 finished by hand after the draft: `absolute-truncation` (written by
 hand), `content-offset`, `overflow`, `render-to-string`,
-`styled-combining-marks`, `text-width`, `wrap-text`, the comments in
+`styled-combining-marks`, `text-width`, `wrap-text`, the hyperlink case
+of `components`, the comments in
 `clip-wide-background` and `rendering-regressions`, and every `differs`
 pin that stands where the draft has an `eq`.
 
@@ -245,11 +257,6 @@ pin that stands where the draft has an `eq`.
 - `components`: <Transform> with undefined children
 - `components`: <Transform> with null children
 - `render-to-string`: runs effect cleanup when a transform throws
-
-**The test compares escape bytes of a hyperlink, and hyperlinks are not built** (2)
-
-- `wrap-text`: truncated multi-line text keeps a C1 OSC hyperlink that spans a newline
-- `components`: link ansi escapes are closed properly
 
 **Screen-reader output** (1)
 

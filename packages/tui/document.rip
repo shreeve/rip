@@ -21,7 +21,7 @@ LAYOUT =! [
   'display', 'hidden', 'borderStyle', 'borderTop', 'borderBottom', 'borderLeft', 'borderRight', 'wrap'
 ]
 PAINT =! [
-  'color', 'backgroundColor', 'bold', 'dimColor', 'italic', 'underline', 'strikethrough', 'inverse'
+  'color', 'backgroundColor', 'bold', 'dimColor', 'italic', 'underline', 'strikethrough', 'inverse', 'link'
   'overflow', 'overflowX', 'overflowY', 'contentOffsetX', 'contentOffsetY'
   'borderColor', 'borderTopColor', 'borderBottomColor', 'borderLeftColor', 'borderRightColor'
   'borderDimColor', 'borderTopDimColor', 'borderBottomDimColor', 'borderLeftDimColor', 'borderRightDimColor'
@@ -199,6 +199,8 @@ export class Element extends Node
         throw Error.new "rip/tui: '#{key}' has no meaning on text nested in text — it is a run of words, styled by color and weight only"
     else if meant and key is 'wrap'
       throw Error.new "rip/tui: 'wrap' has no meaning on a box — it breaks or cuts the words of a text; a box wraps its children with flexWrap"
+    else if meant and key is 'link'
+      throw Error.new "rip/tui: 'link' has no meaning on a box — it makes a hyperlink of a text's words"
     value = undefined if value is '' or value is null or (value is false and not STANDING.has key)
     return if @styles[key] is value
     # A value is refused here, on the line that wrote it, and not from

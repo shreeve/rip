@@ -7,7 +7,7 @@
 #   rip test/ink/background.rip
 
 import { test, eq } from 'rip/testing'
-import { Box, Text, plain, styled, differs } from './harness.rip'
+import { Box, Text, plain, styled } from './harness.rip'
 
 console.log "\nBackground"
 
@@ -64,12 +64,13 @@ test "Mixed text with and without background inheritance", ->
     render
       Box backgroundColor: 'green', alignSelf: 'flex-start'
         Text "Inherited "
-        Text backgroundColor: ''
+        # Ink writes `backgroundColor=""` for a run on no background; an
+        # empty value clears the key here, and the word is 'default'.
+        Text backgroundColor: 'default'
           "No BG "
         Text backgroundColor: 'red'
           "Red BG"
-  differs styled(App), ["«on green»Inherited No BG «on red»Red BG"], ["«on green»Inherited «»No BG «on red»Red BG"],
-    "An empty backgroundColor clears the key, and text with no background of its own keeps the one beneath it (PLAN §6). Ink reads '' as: draw this run on no background."
+  eq styled(App), ["«on green»Inherited «»No BG «on red»Red BG"]
 
 test "Complex nested structure with background inheritance", ->
   App = component
