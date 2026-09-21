@@ -45,9 +45,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 5. The painter and the screen
 
-- [ ] A frame of another height is painted whole, so an inline app
-      whose last row comes and goes owes every cell each time. Keep the
-      rows that stay, and owe the ones that came or went.
 - [ ] A whole frame pays for spans it does not need: every grid write
       reads its row's span, about a tenth of the paint of a screen of
       bordered boxes (`bun run frame`, panels).

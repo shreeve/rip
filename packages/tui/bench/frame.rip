@@ -7,7 +7,8 @@
 #
 # Each update sets one state, and only the frame it owes is timed: no
 # layout runs (every text keeps its size), so a frame is a paint, a diff
-# and a write. Every scenario runs twice — owing each frame whole
+# and a write — but for the log, whose last row comes and goes and is
+# laid out each time. Every scenario runs twice — owing each frame whole
 # (`damage: false`), then owing its damage — and `cells` is what one
 # damaged frame painted and compared.
 # ==============================================================================
@@ -23,6 +24,7 @@ COLS10 =! (c for c in [0...10])
 ROWS60 =! (r for r in [0...60])
 COLS20 =! (c for c in [0...20])
 ROWS20 =! (r for r in [0...20])
+ROWS40 =! (r for r in [0...40])
 
 # One counter in a tree of about 1,000 elements.
 Counter = component
@@ -61,11 +63,25 @@ Panels = component
               Text color: 'white'
                 if r is 10 and c is 5 then "日本 #{100 + @tick %% 900}" else "日本語 #{r}.#{c}"
 
+# A log of 40 lines whose last line comes and goes: the frame's height
+# changes with every update.
+Log = component
+  @tick := 0
+  render
+    Box flexDirection: 'column'
+      for r in ROWS40
+        Text key: r, color: 'green'
+          "#{String(r).padStart 3} the quick brown fox jumps over the lazy dog, and the dog lets it"
+      if @tick %% 2
+        Text
+          "tail #{100 + @tick %% 900}"
+
 SCENARIOS =! [
   ['counter', 'one cell of a 1,000-element tree', Counter]
   ['one',     'one cell of a 200×60 table',       table(false)]
   ['all',     'every cell of a 200×60 table',     table(true)]
   ['panels',  'one of 200 bordered wide panels',  Panels]
+  ['log',     'a last row that comes and goes',   Log]
 ]
 
 # The median microseconds of `updates` frames, and the bytes of one.

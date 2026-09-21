@@ -2,8 +2,9 @@
 # tree is mounted and changed a few steps at a time — a text rewritten at
 # its size or another; a color, a border, a background, a clip, a content
 # offset or a layout style set or taken away; a node hidden, shown,
-# inserted, removed, reordered or moved to another parent; the terminal
-# resized — and drawn after every step. Trees carry absolute boxes laid
+# inserted, removed, reordered or moved to another parent; the frame
+# made taller or shorter; the terminal resized — and drawn after every
+# step. Trees carry absolute boxes laid
 # over their neighbors, boxes smaller than their children, wide
 # characters and clusters, and text with no background over boxes that
 # have one. A second kind of round drives a component instead: a keyed
@@ -40,6 +41,7 @@ WORDS =! [
 ]
 COLORS =! ['red', 'green', 'blue', '#303030', 'default', undefined, undefined]
 FLAG =! [true, undefined, undefined]
+HEIGHTS =! [12, 16, undefined, undefined, undefined, undefined]   # of the host, which is the frame's
 
 PAINTED =! {
   color: COLORS, backgroundColor: COLORS, bold: FLAG, dimColor: FLAG, inverse: FLAG
@@ -229,6 +231,18 @@ change = (host, view) ->
   if roll < 0.89
     view.resize pick([30, 40, 60]), pick([6, 20, 40])
     return 'resize'
+  if roll < 0.96
+    # A row comes or goes at the bottom, as a log grows; or the frame
+    # takes another height altogether, which owes all of it.
+    kind = rnd()
+    if kind < 0.4
+      host.appendChild document.createTextNode pick WORDS
+      return 'a row comes'
+    if kind < 0.8 and host.lastChild
+      host.lastChild.remove()
+      return 'a row goes'
+    host.set 'height', pick HEIGHTS
+    return "height #{host.styles.height}"
   'nothing'
 
 # ── A component ───────────────────────────────────────────────────────────────
@@ -329,6 +343,7 @@ unsent = (shown, front) ->
 # nor everything — the frames that can tell the two paints apart.
 frames = 0
 partial = 0
+resized = 0   # partial frames of another height than the frame before
 
 round = (start, number, narrate) ->
   state = start * 7919 + number * 104729 + 1
@@ -338,10 +353,10 @@ round = (start, number, narrate) ->
   shown = Terminal.new()
   try
     host = document.body.firstChild
-    # A frame of another height is painted whole, so most hosts keep theirs.
-    host.set 'height', pick [12, 16, 20, undefined]
+    host.set 'height', pick HEIGHTS
     unless listed
       host.appendChild make 1 for n in [0..2 + Math.floor rnd() * 4]
+    rows = 0
     for step in [0..STEPS]
       did = []
       if step
@@ -356,13 +371,16 @@ round = (start, number, narrate) ->
         return "seed #{start} round #{number} step #{step} (#{did.join ', '}): #{failure}\n#{sketch(document.body, '  ', []).join '\n'}\n  replay: rip test/damage.rip #{start} #{number}"
       console.log "    #{view.damage} cells owed" if narrate
       frames += 1
-      partial += 1 if 0 < view.damage < front.cols * front.rows
+      if 0 < view.damage < front.cols * front.rows
+        partial += 1
+        resized += 1 if step and front.rows isnt rows
+      rows = front.rows
   finally
     view.close()
   null
 
 def run(start, from, to, narrate)
-  frames = partial = 0
+  frames = partial = resized = 0
   for number in [from...to]
     failure = round start, number, narrate
     if failure
@@ -370,7 +388,8 @@ def run(start, from, to, narrate)
       ok false, failure.split('\n')[0]
       return
   ok partial * 3 > frames or to - from is 1, "only #{partial} of #{frames} frames were painted from their damage"
-  console.log "    #{partial} of #{frames} frames painted from their damage"
+  ok resized * 30 > frames or to - from is 1, "only #{resized} of #{frames} frames were painted from their damage at another height"
+  console.log "    #{partial} of #{frames} frames painted from their damage, #{resized} at another height"
 
 console.log "\nA frame painted from its damage equals a frame painted whole"
 

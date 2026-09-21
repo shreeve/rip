@@ -143,8 +143,11 @@ clip, or a content offset, everything under it; a layout, each box that
 moved, where it was and where it is; a node taken out, where it was.
 Whatever lies over or under those cells is painted again inside them,
 in tree order, and every subtree that holds none of them is passed
-over. A first frame, a resize, a frame of another height, and damage
-past half the screen are painted whole. One changed cell of a full
+over. A frame that gains or loses rows at the bottom keeps the rows
+that stay and owes the rows that come. A first frame, a resize, a frame
+whose top row is another (one taller than the terminal shows its
+bottom), a sweep as a paint starts, and damage past half the screen are
+painted whole. One changed cell of a full
 200×60 table is about 1 µs of paint and diff where the whole frame is
 about 150 µs, and the bytes are the same (Apple M5, Bun 1.4.2;
 `bun run frame` in `bench/` prints both).

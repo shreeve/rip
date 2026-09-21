@@ -432,7 +432,8 @@ changed as it will be painted.
 | A node inserted, removed, or moved | Its bounds where it was, and where it is |
 | A node hidden or shown | Its bounds; while hidden, nothing |
 | A `contents` node | Whatever it says is said of the children it lends |
-| A first frame, a resize, a frame of another height or top row, a sweep as a paint starts, damage past half the grid | Every cell |
+| A frame of another height, its top row the same | What the rows that stay owe, and every cell of a row that comes; the rows that go are erased |
+| A first frame, a resize, a frame of another top row, a sweep as a paint starts, damage past half the grid | Every cell |
 
 The paint is held to the spans — each grid write is cut to its row's
 span — and walks the tree in order, passing over every child whose

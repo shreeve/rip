@@ -233,8 +233,10 @@ export class Grid
   # than the screen shows its bottom. Every write is held to the clip —
   # columns [left, right), grid rows [over, under) — which starts as the
   # whole grid, and on each row to the columns [lo, hi) a frame owes,
-  # which are the whole row unless a paint is handed its damage.
+  # which are the whole row unless a paint is handed its damage. `drawn`
+  # is how many rows of it the terminal holds.
   constructor: (@cols, @rows, @top = 0) ->
+    @drawn = @rows
     size = @cols * @rows
     @ch = Uint32Array.new size
     @style = Uint16Array.new size
@@ -261,6 +263,17 @@ export class Grid
       @ch.fill SPACE, from, to
       @style.fill 0, from, to
       @wide.fill 1, from, to
+
+  # This grid at another height: the rows that stay, over blank ones.
+  tall: (rows) ->
+    grid = Grid.new @cols, rows, @top
+    kept = @cols * Math.min rows, @rows
+    grid.ch.set @ch.subarray 0, kept
+    grid.style.set @style.subarray 0, kept
+    grid.wide.set @wide.subarray 0, kept
+    grid.epoch = @epoch
+    grid.drawn = @drawn
+    grid
 
   # Hold the writes that follow to a rectangle of tree coordinates.
   clip!: (left, top, right, bottom) ->
@@ -414,8 +427,9 @@ export class Grid
 # recolored, as it was painted and as it will be. A document owns one. A
 # node says what it inked (`old`) before anything about it changes, and
 # what it inks once the frame is laid out is asked of it then (`survey`).
-# `whole` owes every cell: a first frame, a frame of another size or
-# another top row, a frame after a sweep.
+# `whole` owes every cell: a first frame, a frame of another width or
+# another top row, a frame after a sweep. A frame of another height
+# keeps what the rows that stay owe, and owes each row that comes.
 #
 # A paint is held to the spans and the diff reads nothing else, so the
 # spare grid is a scratch: only its owed cells are blanked, painted and
@@ -447,6 +461,18 @@ export class Damage
     @whole = whole
     @lo.fill (if whole then 0 else @cols)
     @hi.fill (if whole then @cols else 0)
+
+  # Take another height: a row that stays owes what it did, and a row
+  # that comes is owed whole.
+  fit!: (rows) ->
+    return if rows is @rows
+    lo = Int32Array.new rows
+    hi = Int32Array.new(rows).fill @cols
+    lo.set @lo.subarray 0, Math.min(rows, @rows)
+    hi.set @hi.subarray 0, Math.min(rows, @rows)
+    @lo = lo
+    @hi = hi
+    @rows = rows
 
   # Owe a box of tree coordinates.
   box!: (left, top, right, bottom) ->
@@ -721,6 +747,7 @@ export paint! =! (grid, node, damage = null, front = null) ->
     return
   same = front and front.cols is grid.cols and front.rows is grid.rows and front.top is grid.top and front.epoch is epoch
   damage.shape grid, true if damage.whole or early or not same
+  damage.fit grid.rows
   survey node, 0, 0, damage if node.stain
   # Past half the grid a whole frame is the cheaper one: no subtree is
   # tested against the spans, and the grids swap where cells are copied.
@@ -811,7 +838,7 @@ export diff =! (front, back, damage = null) ->
   reuse = front? and front.cols is back.cols and front.epoch is back.epoch
   keep = reuse and damage? and not damage.whole
   out = if reuse then '' else "\x1b[J"
-  drawn = if reuse then front.rows else 0
+  drawn = if reuse then front.drawn else 0
   at = 0
   held = 0
   url = null      # the link of the style held, and the link open on the terminal
@@ -868,5 +895,7 @@ export diff =! (front, back, damage = null) ->
     out += "\r\x1b[J"
   out += "\x1b[#{at}A" if at > 0
   out += '\r' if out
-  sweep (if keep then front else back) if full 1
+  shown = if keep then front else back
+  shown.drawn = back.rows
+  sweep shown if full 1
   out

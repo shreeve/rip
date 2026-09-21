@@ -48,6 +48,10 @@ export class Screen
     back.top = tall - shown
     damage = @doc.damage
     damage.whole = true if @whole
+    # A frame of another height, its top row the same, keeps the rows
+    # that stay.
+    front = @front
+    @front = front.tall shown if front and not damage.whole and front.rows isnt shown and front.cols is @cols and front.top is back.top
     paint back, @doc.body, damage, @front
     bytes = diff @front, back, damage
     @owed = damage.count()

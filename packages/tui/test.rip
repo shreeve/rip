@@ -1417,6 +1417,39 @@ test "a text of unchanged size owes its own box; a first frame and a resized one
     app.count.value = 43
     eq draw(), 8
 
+test "a frame that gains or loses its last rows owes the rows that come, and keeps the rows that stay", ->
+  Log = component
+    @lines := ['one', 'two']
+    render
+      Box flexDirection: 'column', alignItems: 'flex-start', color: 'green'
+        for line in @lines
+          Text key: line, wrap: 'truncate'
+            "#{line}"
+  owing Log, (app, draw, view) ->
+    eq draw(), 40 * 2
+    app.lines.value = ['one', 'two', 'three']
+    eq draw(), 40
+    eq view.bytes, "\x1b[?2026h\n\n\x1b[1G\x1b[32mthree\x1b[0m\x1b[2A\r\x1b[?2026l"
+    app.lines.value = ['one', 'two', 'three', 'four', 'six']
+    eq draw(), 40 * 2
+    # The rows that go are erased, and a row that stays is compared
+    # where its words changed.
+    app.lines.value = ['one', 'six']
+    eq draw(), 3
+    eq view.bytes, "\x1b[?2026h\n\x1b[1G\x1b[32msix\x1b[0m\n\r\x1b[J\x1b[2A\r\x1b[?2026l"
+    app.lines.value = []
+    eq draw(), 0
+    eq view.frame(), ''
+    app.lines.value = ['back']
+    eq draw(), 40
+    eq view.frame().trimEnd(), 'back'
+    # A frame taller than the terminal shows its bottom rows: one more
+    # shifts every row it shows.
+    app.lines.value = (String n for n in [1..12])
+    draw()
+    app.lines.value = (String n for n in [1..13])
+    eq draw(), 40 * 12
+
 test "a border or a background owes the box, and a color that passes down owes everything under it", ->
   Panel = component
     @edge := 'red'
