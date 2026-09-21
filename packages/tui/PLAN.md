@@ -177,11 +177,11 @@ style object is a class with table-generated prototype accessors, not
 a Proxy.
 
 The runtime contains a child that fails to construct: it reports the
-error through `console.error` and leaves a `rip:child-error` comment
-where the child would be. On a terminal that is a silent hole in the
-screen, so the document holds the reported error and throws it from
-the marker comment's creation — `run` and `renderToString` fail with
-the original error.
+error and leaves a `rip:child-error` comment where the child would be.
+On a terminal that is a silent hole in the screen, so `install` swaps
+the runtime's child-failure reporter (`__setChildFailureReporter`) for
+one that throws, and `restore` puts the previous one back — `run` and
+`renderToString` fail with the child's own error.
 
 ## 5. Layout (`layout.rip`)
 
