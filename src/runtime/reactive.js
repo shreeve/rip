@@ -84,8 +84,13 @@ const __computingStack = [];       // active computeds, outermost to innermost
 // Effects queued to run, drained shallowest owner depth first; within
 // one depth, queue insertion order. `low` is the shallowest bucket
 // that may hold an entry — a cursor, never a promise that it does.
+// A bucket drains through ONE iterator held across shifts: a Set keeps
+// a removed entry's slot until it rehashes, so a fresh iterator per
+// shift walks every slot already drained and the drain goes quadratic.
+// A Set iterator is live — it reaches entries added behind it and
+// steps over entries removed ahead of it.
 const __pendingEffects = {
-  buckets: [], size: 0, low: 0,
+  buckets: [], cursors: [], size: 0, low: 0,
   add(e) {
     const d = e.depth;
     let b = this.buckets[d];
@@ -98,14 +103,17 @@ const __pendingEffects = {
     const b = this.buckets[e.depth];
     if (b !== undefined && b.delete(e)) this.size--;
   },
-  clear() { this.buckets = []; this.size = 0; this.low = 0; },
+  clear() { this.buckets = []; this.cursors = []; this.size = 0; this.low = 0; },
   shift() {
     for (let d = this.low; d < this.buckets.length; d++) {
       const b = this.buckets[d];
       if (b === undefined || b.size === 0) continue;
       this.low = d;
-      const e = b.values().next().value;
+      let step = (this.cursors[d] ??= b.values()).next();
+      if (step.done) step = (this.cursors[d] = b.values()).next();
+      const e = step.value;
       b.delete(e); this.size--;
+      if (b.size === 0) this.cursors[d] = undefined;
       return e;
     }
     return null;
@@ -383,7 +391,18 @@ function __effect(fn) {
     computedDeps: new Map(),
     _hard: true, // the creation run always runs; a state write sets it again
     _disposed: false,
-    signal: null, // AbortSignal for the current run; aborts on re-run / dispose
+
+    // AbortSignal for the current run; aborts on re-run / dispose. Made
+    // on first read: most effects never ask, and a controller per run
+    // is the larger part of a small effect's cost. Read after dispose,
+    // it arrives already aborted.
+    get signal() {
+      if (!controller && typeof AbortController !== 'undefined') {
+        controller = new AbortController();
+        if (effect._disposed) controller.abort();
+      }
+      return controller ? controller.signal : null;
+    },
 
     run() {
       // Zombie-run guard. An effect can be queued in __pendingEffects
@@ -398,15 +417,14 @@ function __effect(fn) {
       const hard = effect._hard;
       effect._hard = false;
       if (!hard && !__computedDepsChanged(effect)) return;
-      // Abort the previous run's signal before allocating a new one:
-      // async work still mid-flight from the previous run (a fetch
-      // carrying the signal) sees the abort and can bail, and 'abort'
-      // listeners user code attached to the previous signal fire.
+      // Abort the previous run's signal, if that run asked for one:
+      // async work still mid-flight from it (a fetch carrying the
+      // signal) sees the abort and can bail, and 'abort' listeners
+      // user code attached fire. This run gets its own on first read.
       if (controller) {
         try { controller.abort(); } catch {}
+        controller = null;
       }
-      controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-      effect.signal = controller ? controller.signal : null;
       // Per-run id captured by the closures below. When the effect
       // re-runs while a prior async body is still awaiting, the prior
       // body's eventual resolution sees myRun !== runId and bails —

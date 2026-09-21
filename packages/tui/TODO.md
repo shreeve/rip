@@ -113,7 +113,5 @@ the test, re-seed the bug, and see it caught.
   render line takes the indented children beneath it.
 - A bound effect that awaits marks its enclosing function `async`.
 - `rip -t` prints a stack trace for a lexer error.
-- `src/runtime/reactive.js` makes and aborts an `AbortController` on
-  every effect run: half the CPU of the 40×8 table bench.
 - A typed vocabulary for non-HTML hosts, so `rip check` and the editor
   accept terminal props (PLAN §14).
