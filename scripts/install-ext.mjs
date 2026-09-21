@@ -29,6 +29,14 @@ const EXTENSIONS = {
   print: 'packages/print/vscode',
 };
 
+// Extensions whose `package` script runs vsce IN the package directory.
+// vsce walks `npm list` there and ships `node_modules/<dep>` from there
+// (see the package's .vscodeignore), so each dependency must be a real
+// directory in the package's own node_modules — a copy hoisted to the
+// repo root does not count. An extension absent from this set stages a
+// standalone tree in its own package script.
+const PACKED_IN_PLACE = new Set(['print']);
+
 // Editor CLIs: PATH name + the app-bundle fallbacks worth checking.
 const EDITORS = {
   vscode: {
@@ -87,15 +95,15 @@ const pkgDir = path.join(repoRoot, EXTENSIONS[name]);
 
 // Dependencies first. Under hoisted Bun workspaces, `bun install` in a
 // package dir lands modules at the repo root — so a missing
-// packages/<ext>/node_modules is normal when the root install is present.
-// Packaging materializes a standalone tree from the package lockfile
-// when needed; we only install here when the deps are truly absent.
+// packages/<ext>/node_modules is normal when the root install is present,
+// and an extension that stages its own tree packages from there. One
+// packed in place needs every dependency in its own node_modules.
 function depsAvailable() {
-  if (fs.existsSync(path.join(pkgDir, 'node_modules'))) return true;
   const pkg = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8'));
-  const rootNm = path.join(repoRoot, 'node_modules');
-  return Object.keys(pkg.dependencies || {}).every((dep) =>
-    fs.existsSync(path.join(rootNm, ...dep.split('/'))));
+  const deps = Object.keys(pkg.dependencies || {});
+  const under = (dir) => deps.every((dep) => fs.existsSync(path.join(dir, 'node_modules', ...dep.split('/'))));
+  if (PACKED_IN_PLACE.has(name)) return under(pkgDir);
+  return fs.existsSync(path.join(pkgDir, 'node_modules')) || under(repoRoot);
 }
 if (!depsAvailable()) {
   console.log(`→ installing dependencies in ${EXTENSIONS[name]} (frozen lockfile)`);
