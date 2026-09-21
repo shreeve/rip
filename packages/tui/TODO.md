@@ -41,8 +41,6 @@ wider fuzz generator are kept with the review):
       moved to a new parent, a box or text moved into a span, a text
       in a span hidden and shown. Comment nodes are created dirty and
       never cleaned.
-- [ ] `insertBefore(x, x)` makes a node its own sibling and layout
-      hangs — refuse it.
 - [ ] The fuzz changes the height as well as the width, moves subtrees,
       reorders siblings, replaces text nodes, hides then mutates then
       shows, sets a style to the value it has, checks text nodes and
@@ -95,20 +93,6 @@ wider fuzz generator are kept with the review):
       any truthy `bold`. The error for a length recommends `'auto'` on
       keys that do not take it.
 - [ ] **`flex` has no test.** Pin the shorthand and what it expands to.
-- [ ] README: an absolute node positions against its PARENT unless every
-      box between is `position: 'static'`; the defaults list omits
-      `position: 'relative'`; "all 543 cases" is the LTR half of each;
-      there are two stated divergences (rounding, the baseline child),
-      not one. The `Gauge` example has no fixed point at some widths
-      (its text changes the space it measures) — give the readout a
-      fixed width.
-- [ ] PLAN: "about four measure entries" (eight); "one recursive
-      `layout(node, …)`" (`visit` and `compute!`); "dirty propagation
-      stops at a boundary" — it climbs to the root and every ancestor
-      recomputes (a chain of 14 definite-size boxes recomputes all 14;
-      a changed text in a flat column of 2,000 costs 6,001 visits).
-      Say what the engine really skips, or build the boundary; the MIT notice does not ship in `files`; three
-      passages describe a `direction` argument that does not exist.
 
 ## 2. Tests the seeded bugs slipped past
 

@@ -66,14 +66,21 @@ box is a text leaf, and text nested in text restyles its own words.
 | `borderStyle`: `single`, `round`, `double`, `bold` | |
 
 Layout is flexbox as Yoga lays it out — the defaults are Yoga's
-(`flexDirection: 'column'`, `flexShrink: 0`, `alignItems: 'stretch'`),
-and the engine is held to Yoga's own generated suite: all 543 cases
-run, with one stated divergence (every edge rounds from its absolute
-position, so neighbors never overlap or gap). An absolute node
-positions against its nearest ancestor that is not `position:
-'static'`, which is how a badge or a dialog written deep in the tree
-reaches an outer box. An `aspectRatio` counts cells, which are about
-twice as tall as wide: a box that looks square asks for about 2.
+(`flexDirection: 'column'`, `flexShrink: 0`, `alignItems: 'stretch'`,
+`position: 'relative'`), and the engine is held to Yoga's own
+generated suite: the left-to-right half of all 543 cases runs, and
+none is skipped. Where this engine answers differently on purpose,
+the answer is pinned with its reason (PLAN §5) — above all, every
+edge rounds from its absolute position, so neighbors never overlap or
+gap.
+
+An absolute node positions against its parent, since a box is
+`position: 'relative'` unless it says otherwise. Mark the boxes
+between as `position: 'static'` and it positions against the nearest
+ancestor that is not — which is how a badge or a dialog written deep
+in the tree reaches an outer box. An `aspectRatio` counts cells, which
+are about twice as tall as wide: a box that looks square asks for
+about 2.
 
 `style:` takes the same keys as an object. `role` and `aria-*` are kept
 on the node. Anything else is refused by name — an unknown style with
@@ -94,8 +101,13 @@ Gauge = component
   render
     Box flexDirection: 'row'
       div ref: el, flexGrow: 1
-      Text "#{wide} cells free"
+      Text "#{String(wide).padStart 3} cells free"
 ```
+
+The readout keeps one width whatever it says. A binding that reads a
+box and then changes that box's size must have a size at which both
+agree; text that grew with the number it printed would not, and the
+frame is refused after 32 passes with no answer.
 
 ## Testing an app
 

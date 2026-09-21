@@ -195,8 +195,8 @@ rounding test expects 33/34/33 where an integer distributor gives
 
 **Decided — the layout cache is part of v0.1.** Flexbox visits a node
 for measure, flex, and stretch; without a cache the cost multiplies
-with nesting depth. One layout entry plus about four measure entries
-per node.
+with nesting depth. One layout entry plus up to eight measure entries
+per node, as Yoga keeps.
 
 **Scope** (Ink's `styles.ts` is the floor): direction, wrap, grow,
 shrink, basis, align-items / self / content including **baseline**,
@@ -228,18 +228,19 @@ Also in scope, each behind one seam:
 | Aspect ratio | Yoga's handling, ported. A ratio counts CELLS, which are about twice as tall as wide, so a box that looks square asks for about 2. |
 | Intrinsic keywords | `max-content`, `fit-content`, and `stretch` as a size resolve as Yoga resolves them: to no length, so the node sizes as an `auto` one does. |
 
-**Designed for, implemented later:** right-to-left. One resolver maps
-flex direction and start / end edges through a `direction` argument,
-fixed to LTR; reverse directions need the same machinery.
+**Not laid out:** right-to-left. `row-reverse` and `column-reverse`
+already flip an axis, which is the machinery a right-to-left pass
+would reuse.
 
 **Dropped:** auto-min-size, errata and experimental flags.
 
 **Parity target:** classic Yoga behavior as its generated tests encode
 it (running totals, no auto-min), not the CSS specification.
 
-**Algorithm:** one recursive
-`layout(node, availW, availH, modeW, modeH, ownerW, ownerH, perform)`
-with `perform = false` meaning measure only. Leaf measure → inner
+**Algorithm:** `visit(node, availW, availH, modeW, modeH, ownerW,
+ownerH, perform)` is the cache's door — it answers from a stored entry
+or calls `compute!` — and `perform = false` means measure only. Leaf
+measure → inner
 available size → flex basis → line building → free space → two-pass
 freeze loop for grow / shrink under min / max → justify and auto
 margins → cross-axis align and stretch → align-content → final size →
@@ -252,8 +253,12 @@ container is measured at exact width.
 - *Same-size fast path.* A changed text node is re-measured under its
   last constraints; an unchanged size marks paint-dirty only and runs
   no layout. A counter ticking from 41 to 42 costs zero layout.
-- *Layout boundary.* Dirty propagation stops at the first ancestor
-  whose width and height are both definite, and relayout starts there.
+- *Layout boundary — not built.* A change dirties every ancestor up to
+  the root, and each one recomputes; its other children answer from
+  the cache, at about three visits apiece. A widened text in a flat
+  column of 2,000 costs 6,001 visits, and a chain of 14 definite-size
+  boxes recomputes all 14. Stopping at the first ancestor whose width
+  and height are both definite is open work (TODO §4).
 
 ### Acceptance: Yoga's own suite
 
@@ -277,17 +282,15 @@ byte as upstream wrote them, against a test-only shim shaped like the
   the reason beside it, and fails on a pinned answer that never runs.
 - Every case has a right-to-left half. **Decided — RTL is deferred.**
   One mechanical gate stops each case before its RTL pass and the
-  report says "LTR half". Layout-side RTL is cheap at any time because
-  of the direction seam above; the expensive part of RTL in a terminal
-  is bidirectional text, which no layout decision made here makes
-  harder. When the direction argument is wired through, the RTL halves
-  are 543 more cases waiting in the same files.
+  report says "LTR half". The expensive part of RTL in a terminal is
+  bidirectional text, which no layout decision made here makes harder;
+  the RTL halves are 543 more cases waiting in the same files.
 - `misc/` is gitignored, so **the suite is vendored as-is** under
   `test/yoga/`, excluded from published `files`.
 - **License:** Yoga and Ink are MIT. Vendored tests keep their headers
   and ship with Yoga's `LICENSE`. An engine that follows
   `CalculateLayout.cpp` structurally is a derivative work, so the MIT
-  notice ships in the package itself.
+  notice ships in the package itself (`NOTICE`, listed in `files`).
 
 Build order, so categories go green one at a time: node + shim +
 rounding + fixed sizes + padding / border / margin → grow / shrink /
@@ -609,7 +612,7 @@ start. Each row is a rule the v0.1 code follows.
 | Screen-reader output | `role` and every `aria-*` attribute are accepted and stored on the node, never rejected as unknown keys, so components are written accessibly from day one. The hardware cursor follows focus (§7). | One tree walk that serializes roles, states, and labels as linear text — the counterpart of Ink's `renderNodeToScreenReaderOutput`. |
 | Windows | Rip itself claims only macOS and Linux (CI is Linux). All platform code lives in `terminal.rip`. Resize comes from the stream's `resize` event, never the SIGWINCH signal. Suspend is guarded by platform. The painter never writes the last cell of the last row. Nothing rejects `win32`. | A CI lane and whatever it finds. |
 | Error overview | Uncaught errors and the runtime's component error hook (`__setErrorHandler`) route through one reporter that restores the terminal first. | A prettier reporter: source excerpt and mapped stack. |
-| Right-to-left | The direction resolver in §5. | A flip of one argument, plus bidirectional text. |
+| Right-to-left | The reverse directions already flip an axis (§5). | A flip per direction, the 543 RTL halves, and bidirectional text. |
 
 ## 14. Decisions
 
