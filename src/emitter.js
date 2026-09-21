@@ -280,18 +280,21 @@ const isDefHead = (h) => h === 'def' || h === 'void-def';
 // Does this subtree await — i.e. is the function owning it ASYNC? A
 // `dammit` call (`f!`) awaits, and an awaited for-as carries its await
 // in a flag slot rather than a nested node. Nested function and class
-// bodies own their own awaits, so the walk stops at them. Exported for
-// the same reason as containsYield below: the return type it decides is
-// spelled independently by the face and by the declarations.
-export function containsAwait(sexpr) {
+// bodies own their own awaits, so the walk stops at them — an effect's
+// body among them: it emits as the effect's own function, async when it
+// awaits. The NodeStore row tells the effect from a user call spelled
+// `effect(a, b)`, so the walk takes the stores. Exported for the same
+// reason as containsYield below: the return type it decides is spelled
+// independently by the face and by the declarations.
+export function containsAwait(sexpr, stores) {
   if (!isNode(sexpr)) return false;
   const head = sexpr[0];
   if (head === 'await' || head === 'dammit!' || head === 'dammit?') return true;
   if (head === 'for-as' && sexpr[3] === true) return true;
   // A class body owns its awaits; its heritage evaluates in this scope.
-  if (head === 'class') return containsAwait(sexpr[2]);
-  if (head === '->' || head === '=>' || isDefHead(head)) return false;
-  return sexpr.some((item) => containsAwait(item));
+  if (head === 'class') return containsAwait(sexpr[2], stores);
+  if (head === '->' || head === '=>' || isDefHead(head) || Emitter.isEffectDeclIn(stores, sexpr)) return false;
+  return sexpr.some((item) => containsAwait(item, stores));
 }
 
 // Does this subtree yield — i.e. is the function owning it a GENERATOR?
@@ -2950,7 +2953,7 @@ class Emitter {
     const rec = entry.owner;
     const { iter } = entry;
     if (!this.ts || rec === undefined || iter === undefined) return null;
-    if (containsAwait(iter) || containsYield(iter)) return null;
+    if (this.containsAwait(iter) || containsYield(iter)) return null;
     if (referencesNames(iter, rec.parent.locals)) return null;
     const leaves = new Set();
     Emitter.collectLeafNames(iter, leaves);
@@ -5803,7 +5806,7 @@ class Emitter {
     const { stmts, stores } = this.subParse(bodyTokens);
     if (stmts.length === 0) return { code: '(function() {})', thisAt: '(function('.length, annots: [] };
     const bodyNode = stmts.length === 1 ? stmts[0] : ['block', ...stmts];
-    const isAsync = Emitter.containsAwait(bodyNode);
+    const isAsync = this.containsAwait(bodyNode);
     const isGen = Emitter.containsYield(bodyNode);
     const sub = this.subEmitter(stores);
     let bodyText;
@@ -7153,7 +7156,7 @@ class Emitter {
     const pad = '  '.repeat(ind);
     this.rejectYieldInIIFE(node);
     this.mark(node, '$self', () => {
-      this.b.emit(Emitter.containsAwait(node) ? 'await (async () => {\n' : '(() => {\n');
+      this.b.emit(this.containsAwait(node) ? 'await (async () => {\n' : '(() => {\n');
       const acc = this.loopTempName('result');
       this.b.emit(`${pad}  const ${acc} = ${keyExpr === null ? '[]' : '{}'};\n`);
       this.b.emit(`${pad}  `);
@@ -7362,7 +7365,7 @@ class Emitter {
       // `if` itself.
       const ind = this.ind;
       this.rejectYieldInIIFE(node);
-      const isAsync = Emitter.containsAwait(node);
+      const isAsync = this.containsAwait(node);
       this.b.emit(isAsync ? 'await (async () => { ' : '(() => { ');
       this.mark(node, '$self', () => this.returnifyIf(node, ind));
       this.b.emit(' })()');
@@ -7503,7 +7506,7 @@ class Emitter {
   valueTry(node) {
     const ind = this.ind;
     this.rejectYieldInIIFE(node);
-    this.b.emit(Emitter.containsAwait(node) ? 'await (async () => { ' : '(() => { ');
+    this.b.emit(this.containsAwait(node) ? 'await (async () => { ' : '(() => { ');
     this.tryBranches(node, ind);
     this.b.emit(' })()');
   }
@@ -7573,7 +7576,7 @@ class Emitter {
     const ind = this.ind;
     const pad = '  '.repeat(ind);
     this.rejectYieldInIIFE(node);
-    this.b.emit(Emitter.containsAwait(node) ? 'await (async () => { ' : '(() => { ');
+    this.b.emit(this.containsAwait(node) ? 'await (async () => { ' : '(() => { ');
     this.mark(node, '$self', () => {
       if (Emitter.hasMatchArms(cases)) {
         this.checkMatchSwitch(node);
@@ -7690,7 +7693,7 @@ class Emitter {
     const ind = this.ind;
     const p1 = '  '.repeat(ind + 1);
     this.rejectYieldInIIFE(node);
-    this.b.emit(Emitter.containsAwait(node) ? 'await (async () => {\n' : '(() => {\n');
+    this.b.emit(this.containsAwait(node) ? 'await (async () => {\n' : '(() => {\n');
     const acc = this.loopTempName('result');
     this.b.emit(`${p1}const ${acc} = [];\n`);
     this.b.emit(p1);
@@ -7866,7 +7869,7 @@ class Emitter {
     if (typeof node[1] !== 'string') {
       throw this.positionedError(node, "emitter: `def @name` declares a static class method — spell it inside a class body");
     }
-    const isAsync = Emitter.containsAwait(node[3]);
+    const isAsync = this.containsAwait(node[3]);
     const isGen = Emitter.containsYield(node[3]);
     // TS face: recorded overload signatures print immediately above
     // the implementation, outside its covers.
@@ -7953,8 +7956,8 @@ class Emitter {
   // stops at nested function/class boundaries, so an inner arrow's
   // await marks the INNER function only. Dammit nodes are awaits by
   // construction.
-  static containsAwait(sexpr) {
-    return containsAwait(sexpr);
+  containsAwait(sexpr) {
+    return containsAwait(sexpr, this.stores);
   }
 
   // the implicit `it`: a ZERO-param arrow whose body
@@ -8318,7 +8321,7 @@ class Emitter {
     if (head === 'throw' && node.length === 2) {
       this.rejectYieldInIIFE(node);
       this.mark(node, '$self', () => {
-        this.b.emit(Emitter.containsAwait(node) ? 'await (async () => { throw ' : '(() => { throw ');
+        this.b.emit(this.containsAwait(node) ? 'await (async () => { throw ' : '(() => { throw ');
         this.mark(node, 'value', () => this.expr(node[1]));
         this.b.emit('; })()');
       });
@@ -8903,7 +8906,7 @@ class Emitter {
     // A computed body evaluates SYNCHRONOUSLY (the runtime computes
     // lazily and caches — there is no async
     // computed). Nested functions keep their own awaits/yields.
-    if (head === 'computed' && Emitter.containsAwait(value)) {
+    if (head === 'computed' && this.containsAwait(value)) {
       throw this.positionedError(node, "emitter: a computed ('~=') body cannot await — computeds evaluate synchronously (make it a state written by an effect)");
     }
     if (head === 'computed' && Emitter.containsYield(value)) {
@@ -9215,7 +9218,7 @@ class Emitter {
       this.b.emit(')');
       return;
     }
-    const isAsync = Emitter.containsAwait(body);
+    const isAsync = this.containsAwait(body);
     emitName();
     this.b.emit(isAsync ? '(async () => ' : '(() => ');
     if (isBlock(body)) {
@@ -9634,7 +9637,7 @@ class Emitter {
           declare(t.name, 'state', stmt, true);
           stateVars.push({ name: t.name, value: stmt[2], isPublic: t.isPublic, required: false, node: stmt });
         } else {
-          if (Emitter.containsAwait(stmt[2])) {
+          if (this.containsAwait(stmt[2])) {
             throw this.positionedError(stmt, "emitter: a computed ('~=') body cannot await — computeds evaluate synchronously (make it a state written by an effect)", node);
           }
           if (Emitter.containsYield(stmt[2])) {
@@ -10191,7 +10194,7 @@ class Emitter {
       const emitBodyEffects = (bodyPad) => {
         for (const eff of effects) {
           const bodyNode = eff[2];
-          const isAsync = Emitter.containsAwait(bodyNode);
+          const isAsync = this.containsAwait(bodyNode);
           this.b.emit(bodyPad);
           this.mark(eff, '$self', () => {
             this.mark(eff, 'operator', () => this.b.emit(this.runtimeName('__effect')));
@@ -10346,13 +10349,13 @@ class Emitter {
           : name === 'onError' ? COMPONENT_FAILURE_TYPE : null;
         this.b.emit(pad);
         this.mark(owner, '$self', () => {
-          if (Emitter.containsAwait(block)) this.b.emit('async ');
+          if (this.containsAwait(block)) this.b.emit('async ');
           if (Emitter.containsYield(block)) this.b.emit('*');
           this.mark(owner, 'target', () => this.mark(owner, 'key', () => this.b.emit(name)));
           this.b.emit('(');
           this.emitParams(params, evParamType);
           this.b.emit(')');
-          this.tsReturnAnnotation(func, Emitter.containsAwait(block), isVoid, Emitter.containsYield(block), owner);
+          this.tsReturnAnnotation(func, this.containsAwait(block), isVoid, Emitter.containsYield(block), owner);
           this.b.emit(' ');
           this.mark(owner, 'value', () => {
             this.methodBlock(func, block, ind + 1, {
@@ -14801,7 +14804,7 @@ class Emitter {
     // JS both ways).
     if (!simple) {
       for (const item of items) {
-        if (item[2] !== null && Emitter.containsAwait(item[2])) {
+        if (item[2] !== null && this.containsAwait(item[2])) {
           throw this.positionedError(item, "emitter: a pick default cannot await when the source needs single evaluation — the lowering's '(_) =>' arrow is not async; bind the source first", node);
         }
         if (item[2] !== null && Emitter.containsYield(item[2])) {
@@ -15390,7 +15393,7 @@ class Emitter {
             // return suppressed; its voidMarker role covers the whole
             // emitted method.
             this.mark(pair, 'voidMarker', () => this.mark(pair, '$self', () => {
-              if (Emitter.containsAwait(pair[2][2])) this.b.emit('async ');
+              if (this.containsAwait(pair[2][2])) this.b.emit('async ');
               if (Emitter.containsYield(pair[2][2])) this.b.emit('*');
               this.mark(pair, 'key', () => this.b.emit(pair[1]));
               const [, params, block] = pair[2];
@@ -15401,7 +15404,7 @@ class Emitter {
               this.b.emit('(');
               this.mark(pair[2], 'params', () => this.emitParams(params, null, !inArgs));
               this.b.emit(')');
-              this.tsReturnAnnotation(pair[2], Emitter.containsAwait(block), pair[0] === 'void-pair', Emitter.containsYield(block), pair);
+              this.tsReturnAnnotation(pair[2], this.containsAwait(block), pair[0] === 'void-pair', Emitter.containsYield(block), pair);
               this.b.emit(' ');
               this.mark(pair, 'value', () => {
                 this.methodBlock(pair[2], block, objInd, { isConstructor: false, binds: [], methodName: pair[1], voidBody: pair[0] === 'void-pair' });
@@ -15741,7 +15744,7 @@ class Emitter {
           if (pair[2][0] === '=>') {
             throw this.positionedError(pair, `emitter: a ${form.form} accessor takes '->' — accessors are looked up on the instance, never bound`, stmt);
           }
-          if (Emitter.containsAwait(pair[2][2]) || Emitter.containsYield(pair[2][2])) {
+          if (this.containsAwait(pair[2][2]) || Emitter.containsYield(pair[2][2])) {
             throw this.positionedError(pair, `emitter: a ${form.form} accessor cannot await or yield — JavaScript has no async or generator accessors`, stmt);
           }
           if (form.form === 'get' && arity !== 0) {
@@ -15874,7 +15877,7 @@ class Emitter {
   }
 
   classFieldValue(value) {
-    if (Emitter.containsAwait(value)) {
+    if (this.containsAwait(value)) {
       throw this.positionedError(value,
         'emitter: a class field initializer cannot await — JavaScript evaluates class fields synchronously');
     }
@@ -15936,7 +15939,7 @@ class Emitter {
           this.b.emit(pad);
           this.mark(pair, 'voidMarker', () => this.mark(pair, '$self', () => {
             if (isStaticKey(key)) this.b.emit('static ');
-            if (Emitter.containsAwait(value[2])) this.b.emit('async ');
+            if (this.containsAwait(value[2])) this.b.emit('async ');
             if (Emitter.containsYield(value[2])) this.b.emit('*');
             if (accessor !== null) {
               // The word parsed as a call's callee; the emission is the
@@ -16006,7 +16009,7 @@ class Emitter {
             this.b.emit(')');
             // Constructors take no return annotation in TS.
             if (!isCtor) {
-              this.tsReturnAnnotation(value, Emitter.containsAwait(value[2]), isVoidPair, Emitter.containsYield(value[2]), pair);
+              this.tsReturnAnnotation(value, this.containsAwait(value[2]), isVoidPair, Emitter.containsYield(value[2]), pair);
             }
             this.b.emit(' ');
             this.mark(pair, 'value', () => {
@@ -16622,7 +16625,7 @@ class Emitter {
     const { entries: hoist, names } = this.scopedHoist(stmts, params);
     for (const n of this.pushReactiveFrame(stmts, names, params, node)) names.add(n);
     this.scopes.push(names);
-    const isAsync = Emitter.containsAwait(block);
+    const isAsync = this.containsAwait(block);
     const isGen = Emitter.containsYield(block);
     // Fat arrows cannot be generators: JS has no generator-arrow
     // form, so a yielding fat arrow is unemittable — rejected at the

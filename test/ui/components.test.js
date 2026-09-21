@@ -1294,6 +1294,79 @@ describe('render locals: \'s scope rules plus the structural loudness edges', ()
   });
 });
 
+describe('a word ending a render line: bound is a value, unbound is an element', () => {
+  const mounted = (source) => {
+    const { code } = compile(source, { runtimeDelivery: 'none' });
+    const names = Object.keys(RT);
+    const { App } = new Function(...names, `${code}\nreturn { App };`)(...names.map((name) => RT[name]));
+    const target = document.createElement('main');
+    const app = new App({});
+    try {
+      app.mount(target);
+      return serialize(target);
+    } finally {
+      app.unmount();
+    }
+  };
+
+  test('a loop variable, a member, a local and a module reactive name each leave the block to the line\'s element', () => {
+    expect(mounted('q := "quote"\nApp = component\n  rows := ["x", "y"]\n  b := "bold"\n  render\n    section\n' +
+      '      for p, i in rows\n        div p\n          span "child"\n        div i\n          span "index"\n' +
+      '      div b\n        span "member"\n      code = "local"\n      div code\n        span "local"\n' +
+      '      div q\n        span "module"\n')).toBe(
+      '<main><section data-part="App">' +
+      '<div>x<span>child</span></div><div>0<span>index</span></div>' +
+      '<div>y<span>child</span></div><div>1<span>index</span></div><!--for-->' +
+      '<div>bold<span>member</span></div><div>local<span>local</span></div><div>quote<span>module</span></div>' +
+      '</section></main>');
+  });
+
+  test('the word is a value wherever it stands on the line: an attribute value, after a text child', () => {
+    expect(mounted('App = component\n  rows := ["x"]\n  render\n    section\n      for i in rows\n' +
+      '        span title: i\n          em "pair"\n        span "lit", i\n          em "list"\n')).toBe(
+      '<main><section data-part="App"><span title="x"><em>pair</em></span><span>litx<em>list</em></span><!--for--></section></main>');
+  });
+
+  test('every member spelling binds its name: a prop, a typed state, an offer, a method', () => {
+    for (const member of ['@s := "v"', '@s: string := "v"', 's: string := "v"', 'offer s := "v"', 's =! "v"', 's = "v"']) {
+      expect(mounted(`App = component\n  ${member}\n  render\n    div s\n      em "kid"\n`)).toBe(
+        '<main><div data-part="App">v<em>kid</em></div></main>');
+    }
+    const { code } = compile('App = component\n  render\n    div s\n      em "kid"\n  s: -> "v"\n');
+    expect(code).not.toContain("createElement('s')");
+  });
+
+  test('an unbound word names an element, and the block is that element\'s', () => {
+    expect(mounted('App = component\n  render\n    ul\n      li span\n        b "kid"\n      li title: "t", a\n        "link"\n')).toBe(
+      '<main><ul data-part="App"><li><span><b>kid</b></span></li><li title="t"><a>link</a></li></ul></main>');
+  });
+
+  test('a name binds from its declaration on, and only as a render name', () => {
+    // Above its declaration the word is still the element.
+    expect(mounted('App = component\n  render\n    ul\n      li code\n        b "kid"\n      code = 1\n')).toBe(
+      '<main><ul data-part="App"><li><code><b>kid</b></code></li></ul></main>');
+    // A loop variable ends with its loop.
+    expect(mounted('App = component\n  rows := ["x"]\n  render\n    ul\n      for p in rows\n        li p\n      li p\n        b "kid"\n')).toBe(
+      '<main><ul data-part="App"><li>x</li><!--for--><li><p><b>kid</b></p></li></ul></main>');
+    // A local of one arm is no name in the next; one declared in an
+    // element's block lasts to the end of its factory.
+    expect(mounted('App = component\n  kind := "b"\n  render\n    ul\n      switch kind\n        when "a"\n          em = 2\n          li em\n' +
+      '        else\n          li em\n            b "kid"\n')).toBe(
+      '<main><ul data-part="App"><!--if--><li><em><b>kid</b></em></li></ul></main>');
+    expect(mounted('App = component\n  render\n    ul\n      li\n        code = 1\n      li code\n        b "kid"\n')).toBe(
+      '<main><ul data-part="App"><li></li><li>1<b>kid</b></li></ul></main>');
+    // A function body inside render declares JavaScript locals, never render names.
+    expect(mounted('App = component\n  render\n    ul\n      button @click: ->\n        code = 1\n        code\n      li code\n        b "kid"\n')).toBe(
+      '<main><ul data-part="App"><button></button><li><code><b>kid</b></code></li></ul></main>');
+  });
+
+  test('a local read from a nested block rejects with or without a block beneath the line', () => {
+    const head = 'App = component\n  ok := true\n  render\n    code = 1\n    if ok\n';
+    emitFails(`${head}      div code\n`, /render local 'code' is not visible here/);
+    emitFails(`${head}      div code\n        b "kid"\n`, /render local 'code' is not visible here/);
+  });
+});
+
 describe('two-way binding: the `<=>` matrix and its loudness fork', () => {
   test('the binding matrix: text/number/checkbox/textarea/select — \'s event/accessor cells byte-shaped', () => {
     const { code } = compile([

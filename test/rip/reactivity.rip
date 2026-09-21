@@ -452,3 +452,67 @@ test 'ordinary effect callback may contain a nested generator', '''
     out = g().next().value
   out + 0
   ''', 9
+
+# An effect's body is the effect's own function: it is the one that
+# awaits, and the function the effect is declared in stays synchronous.
+code 'an awaiting effect leaves its function synchronous', '''
+  def watch(load)
+    seen := 0
+    stop ~> seen = load!
+    ~> load!
+    stop
+  ''', '''
+  function watch(load) {
+    const seen = __state(0);
+    const stop = __effect(async () => { (seen.value = await load()); });
+    __effect(async () => { await load(); });
+    return stop;
+  }
+  '''
+
+code 'an awaiting effect leaves its method synchronous', '''
+  class K
+    run: (load) ->
+      stop ~> @x = load!
+      stop
+  ''', '''
+  class K {
+    run(load) {
+      const stop = __effect(async () => { (this.x = await load()); });
+      return stop;
+    }
+  }
+  '''
+
+code 'an awaiting block effect leaves its bound arrow synchronous', '''
+  go = (load) =>
+    ~>
+      v = await load()
+      v
+    1
+  ''', '''
+  let go = load => {
+    __effect(async () => {
+      let v = await load();
+      return v;
+    });
+    return 1;
+  };
+  '''
+
+code 'a call spelled `effect` awaits in the function that makes it', '''
+  def call(effect, a, b)
+    effect a, b!
+  ''', '''
+  async function call(effect, a, b) {
+    return effect(a, await b());
+  }
+  '''
+
+test 'a function declaring an awaiting effect returns its value, never a promise', '''
+  load = -> Promise.resolve 5
+  def watch()
+    stop ~> load!
+    stop
+  typeof watch().then
+  ''', 'undefined'

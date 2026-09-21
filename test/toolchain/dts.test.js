@@ -91,6 +91,10 @@ const ROWS = [
   ['def go(a: number): number\n  await a', 'declare function go(a: number): Promise<number>;\nexport {};\n'],
   ['go! = (a: number) ->\n  await a', 'declare function go(a: number): Promise<void>;\nexport {};\n'],
   ['export class K\n  load: (a: number): number ->\n    await a', 'export declare class K {\n  load(a: number): Promise<number>;\n}\n'],
+  // an effect's body awaits in the effect's own function, so the
+  // function declaring it returns what it says
+  ['def watch(a: number): number\n  ~> await a\n  a', 'declare function watch(a: number): number;\nexport {};\n'],
+  ['watch! = (a: number) ->\n  stop ~> await a\n  stop', 'declare function watch(a: number): void;\nexport {};\n'],
   // an author who already spelled the Promise keeps their spelling
   ['def already(a: number): Promise<number>\n  await a', 'declare function already(a: number): Promise<number>;\nexport {};\n'],
   // a void GENERATOR returns its iterator, so the void spelling would
@@ -576,6 +580,9 @@ describe('component declarations: the class shape, the props surface, the extend
     const d2 = compile('W = component\n  go = -> await 1\n  save! = -> 1\n').declarations;
     expect(d2).toContain('go(): Promise<any>;');
     expect(d2).toContain('save(): void;');
+    // A method declaring an awaiting effect is not the one that awaits.
+    const d3 = compile('W = component\n  watch = ->\n    stop ~> await 1\n    stop\n').declarations;
+    expect(d3).toContain('watch(): any;');
   });
 
   test('a declared @children prop owns the key in the .d.ts too', () => {

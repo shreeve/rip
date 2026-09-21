@@ -16,6 +16,9 @@
 //                      emitter's generated-vs-user discriminator)
 //   <tag> INDENT …   → <tag>(-> INDENT …) (implicit child nesting; the
 //                      matching CALL_END lands after the OUTDENT)
+//   <tag> p INDENT … → <tag> p, -> INDENT … (a trailing word the
+//                      program binds is a value, whatever tag it
+//                      spells; the block stays the line's element's)
 //   Counter          → Counter()         (bare PascalCase reference)
 //
 // Runs BEFORE implicitBlocks (so every INDENT it sees is a real
@@ -49,6 +52,15 @@ const COMPONENT_RE = /^[A-Z][A-Za-z0-9]*[a-z][A-Za-z0-9]*$/;
 // event directive (`button @click "go"` — the text child); the
 // separator/closer kinds stay untouched.
 const INLINE_CONTENT = new Set(['STRING', 'STRING_START', 'NUMBER', 'BOOL', 'IDENTIFIER', 'PROPERTY', '@', '(', '[', '{']);
+
+// The token shapes the value-name tracker reads: what ends a line, the
+// operators that declare a name, the line heads whose block is a render
+// factory of its own, and what ends a `for` line's variable list.
+const LINE_BREAKS = new Set(['INDENT', 'OUTDENT', 'TERMINATOR']);
+const REACTIVE_DECLS = new Set(['REACTIVE_ASSIGN', 'COMPUTED_ASSIGN']);
+const PLAIN_ASSIGN = new Set(['=']);
+const CONTROL_HEADS = new Set(['IF', 'UNLESS', 'ELSE', 'FOR', 'SWITCH', 'LEADING_WHEN']);
+const FOR_SOURCES = new Set(['FORIN', 'FOROF', 'FORAS', 'FORASAWAIT']);
 
 import { TEMPLATE_TAGS } from './dom.js';
 import { counter } from './counter.js';
@@ -244,6 +256,73 @@ export function rewriteRender(tokens, mintId, fail) {
     }
   };
 
+  // ── Words that read as values ──
+  // A word that spells a tag name is a VALUE wherever the program
+  // binds it — a render loop variable, a render local, a member of the
+  // enclosing component, a module-level reactive name: the names the
+  // emitter reads as text in a child position. The nesting rule asks
+  // here before it hands a trailing word the block beneath its line,
+  // so a bound word keeps its value reading and the block belongs to
+  // the element the line starts. Every binding form is a line-start
+  // token shape, read off the tape:
+  //   module   `name :=` / `name ~=` at depth 0, anywhere in the file
+  //   member   the first name of each component-body line, anywhere
+  //            in the body (every body line declares a member)
+  //   loop     `for item, index in …` — bound for the loop's block
+  //   local    `name = …` at a render line start — bound from there
+  //            to the end of its control-flow block (a read from a
+  //            nested block is the emitter's positioned rejection)
+  // A function body inside render binds nothing here: its names are
+  // plain JavaScript locals, never render names.
+  const startsLine = (j) => j === 0 || LINE_BREAKS.has(tokens[j - 1].kind);
+  const declares = (j, kinds) => {
+    const after = tokens[j + 1]?.kind === 'TYPE' ? tokens[j + 2] : tokens[j + 1];
+    return after !== undefined && kinds.has(after.kind);
+  };
+
+  const moduleValues = new Set();
+  for (let j = 0, depth = 0; j < tokens.length; j++) {
+    if (counter.on) counter.n++;
+    const k = tokens[j].kind;
+    if (k === 'INDENT') depth++;
+    else if (k === 'OUTDENT') depth--;
+    else if (depth === 0 && k === 'IDENTIFIER' && (startsLine(j) || tokens[j - 1].kind === 'EXPORT') &&
+             declares(j, REACTIVE_DECLS)) {
+      moduleValues.add(tokens[j].value);
+    }
+  }
+
+  // The members of the component whose body opens after tokens[from].
+  const memberNames = (from) => {
+    const names = new Set();
+    let j = from + 1;
+    while (j < tokens.length && !LINE_BREAKS.has(tokens[j].kind)) j++;
+    if (tokens[j]?.kind !== 'INDENT') return names;
+    for (let depth = 0; j < tokens.length; j++) {
+      if (counter.on) counter.n++;
+      const k = tokens[j].kind;
+      if (k === 'INDENT') depth++;
+      else if (k === 'OUTDENT' && --depth === 0) break;
+      if (depth !== 1 || !LINE_BREAKS.has(k)) continue;
+      let h = j + 1;
+      if (tokens[h]?.kind === 'OFFER' || tokens[h]?.kind === 'ACCEPT') h++;
+      if (tokens[h]?.kind === '@') h++;
+      if (tokens[h]?.kind === 'IDENTIFIER' || tokens[h]?.kind === 'PROPERTY') names.add(tokens[h].value);
+    }
+    return names;
+  };
+
+  const memberFrames = [];   // { level, names } per open component body
+  const renderScopes = [];   // { level, names } per open render control-flow block
+  const functionLevels = []; // indent levels of open function bodies inside render
+  let lineHead = null;       // kind of the current line's first token
+  let loopVars = null;       // the variables of the `for` line being read
+
+  const readsAsValue = (name) =>
+    renderScopes.some((s) => s.names.has(name)) ||
+    (memberFrames.length > 0 && memberFrames[memberFrames.length - 1].names.has(name)) ||
+    moduleValues.has(name);
+
   for (let i = 0; i < tokens.length; i++) {
     if (counter.on) counter.n++;
     let t = tokens[i];
@@ -251,19 +330,36 @@ export function rewriteRender(tokens, mintId, fail) {
 
     if (textFrames.length > 0) closeTextFrames(t);
 
+    if (!LINE_BREAKS.has(t.kind) && startsLine(i)) lineHead = t.kind;
+    if (t.kind === 'COMPONENT') memberFrames.push({ level: currentIndent + 1, names: memberNames(i) });
+
     if (t.kind === 'RENDER') {
       inRender = true;
       renderIndentLevel = currentIndent + 1;
+      renderScopes.push({ level: renderIndentLevel, names: new Set() });
       out.push(t);
       continue;
     }
     if (t.kind === 'INDENT') {
       currentIndent++;
+      if (inRender) {
+        const opener = tokens[i - 1]?.kind;
+        if (opener === '->' || opener === '=>') {
+          functionLevels.push(currentIndent);
+        } else if (functionLevels.length === 0 && CONTROL_HEADS.has(lineHead)) {
+          renderScopes.push({ level: currentIndent, names: new Set(lineHead === 'FOR' ? loopVars ?? [] : []) });
+        }
+      }
+      loopVars = null;
       out.push(t);
       continue;
     }
     if (t.kind === 'OUTDENT') {
       currentIndent--;
+      for (const frames of [memberFrames, renderScopes]) {
+        while (frames.length > 0 && frames[frames.length - 1].level > currentIndent) frames.pop();
+      }
+      while (functionLevels.length > 0 && functionLevels[functionLevels.length - 1] > currentIndent) functionLevels.pop();
       while (elementBodyLevels.length > 0 && elementBodyLevels[elementBodyLevels.length - 1] > currentIndent) {
         elementBodyLevels.pop();
       }
@@ -278,6 +374,17 @@ export function rewriteRender(tokens, mintId, fail) {
     if (!inRender) {
       out.push(t);
       continue;
+    }
+
+    if (functionLevels.length === 0 && startsLine(i)) {
+      if (t.kind === 'FOR') {
+        loopVars = [];
+        for (let j = i + 1; j < tokens.length && !FOR_SOURCES.has(tokens[j].kind) && !LINE_BREAKS.has(tokens[j].kind); j++) {
+          if (tokens[j].kind === 'IDENTIFIER') loopVars.push(tokens[j].value);
+        }
+      } else if (t.kind === 'IDENTIFIER' && declares(i, PLAIN_ASSIGN)) {
+        renderScopes[renderScopes.length - 1]?.names.add(t.value);
+      }
     }
 
     // ── `= expr` at a child position → __text__(expr) ──
@@ -455,12 +562,17 @@ export function rewriteRender(tokens, mintId, fail) {
       const isAfterControlFlow = ['IF', 'UNLESS', 'WHILE', 'UNTIL', 'WHEN', 'FORIN', 'FOROF', 'FORAS', 'FORASAWAIT', 'BY'].includes(pt);
       const atLineStart = t.kind === 'IDENTIFIER' && (pt === 'INDENT' || pt === 'TERMINATOR' || pt === 'RENDER');
 
+      // A word after the line's head names an element only while the
+      // program binds no value to it; a line-starting word is the head
+      // whatever it names.
+      const isTagWord = t.kind === 'IDENTIFIER' && isTemplateTag(t.value) && (atLineStart || !readsAsValue(t.value));
+
       let isTemplateElement = false;
       let clsxEnd = false;
       if (t.kind === 'CALL_END') clsxEnd = isClsxCallEnd(t);
       if (clsxEnd) {
         isTemplateElement = true;
-      } else if (t.kind === 'IDENTIFIER' && isTemplateTag(t.value) && !isAfterControlFlow) {
+      } else if (isTagWord && !isAfterControlFlow) {
         isTemplateElement = true;
       } else if (t.kind === 'IDENTIFIER' && !isAfterControlFlow) {
         isTemplateElement = atLineStart || startsWithTag(t);
@@ -482,7 +594,7 @@ export function rewriteRender(tokens, mintId, fail) {
             }
           }
         }
-        const isBareTag = clsxEnd || (t.kind === 'IDENTIFIER' && (isTemplateTag(t.value) || atLineStart)) || isClassOrIdTail;
+        const isBareTag = clsxEnd || isTagWord || atLineStart || isClassOrIdTail;
         out.push(t);
         if (isBareTag) {
           out.push(gen('CALL_START', '(', t, { at: next.start }));

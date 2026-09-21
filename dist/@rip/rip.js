@@ -2824,6 +2824,11 @@ var CLOSERS = new Set([
 ]);
 var COMPONENT_RE = /^[A-Z][A-Za-z0-9]*[a-z][A-Za-z0-9]*$/;
 var INLINE_CONTENT = new Set(["STRING", "STRING_START", "NUMBER", "BOOL", "IDENTIFIER", "PROPERTY", "@", "(", "[", "{"]);
+var LINE_BREAKS = new Set(["INDENT", "OUTDENT", "TERMINATOR"]);
+var REACTIVE_DECLS = new Set(["REACTIVE_ASSIGN", "COMPUTED_ASSIGN"]);
+var PLAIN_ASSIGN = new Set(["="]);
+var CONTROL_HEADS = new Set(["IF", "UNLESS", "ELSE", "FOR", "SWITCH", "LEADING_WHEN"]);
+var FOR_SOURCES = new Set(["FORIN", "FOROF", "FORAS", "FORASAWAIT"]);
 var isHtmlTag = (name) => TEMPLATE_TAGS.has(String(name).split("#")[0]);
 var isComponentName = (name) => typeof name === "string" && COMPONENT_RE.test(name);
 var isTemplateTag = (name) => isHtmlTag(name) || isComponentName(name);
@@ -3004,6 +3009,57 @@ function rewriteRender(tokens, mintId, fail) {
       return;
     }
   };
+  const startsLine = (j) => j === 0 || LINE_BREAKS.has(tokens[j - 1].kind);
+  const declares = (j, kinds) => {
+    const after = tokens[j + 1]?.kind === "TYPE" ? tokens[j + 2] : tokens[j + 1];
+    return after !== undefined && kinds.has(after.kind);
+  };
+  const moduleValues = new Set;
+  for (let j = 0, depth = 0;j < tokens.length; j++) {
+    if (counter.on)
+      counter.n++;
+    const k = tokens[j].kind;
+    if (k === "INDENT")
+      depth++;
+    else if (k === "OUTDENT")
+      depth--;
+    else if (depth === 0 && k === "IDENTIFIER" && (startsLine(j) || tokens[j - 1].kind === "EXPORT") && declares(j, REACTIVE_DECLS)) {
+      moduleValues.add(tokens[j].value);
+    }
+  }
+  const memberNames = (from) => {
+    const names = new Set;
+    let j = from + 1;
+    while (j < tokens.length && !LINE_BREAKS.has(tokens[j].kind))
+      j++;
+    if (tokens[j]?.kind !== "INDENT")
+      return names;
+    for (let depth = 0;j < tokens.length; j++) {
+      if (counter.on)
+        counter.n++;
+      const k = tokens[j].kind;
+      if (k === "INDENT")
+        depth++;
+      else if (k === "OUTDENT" && --depth === 0)
+        break;
+      if (depth !== 1 || !LINE_BREAKS.has(k))
+        continue;
+      let h = j + 1;
+      if (tokens[h]?.kind === "OFFER" || tokens[h]?.kind === "ACCEPT")
+        h++;
+      if (tokens[h]?.kind === "@")
+        h++;
+      if (tokens[h]?.kind === "IDENTIFIER" || tokens[h]?.kind === "PROPERTY")
+        names.add(tokens[h].value);
+    }
+    return names;
+  };
+  const memberFrames = [];
+  const renderScopes = [];
+  const functionLevels = [];
+  let lineHead = null;
+  let loopVars = null;
+  const readsAsValue = (name) => renderScopes.some((s) => s.names.has(name)) || memberFrames.length > 0 && memberFrames[memberFrames.length - 1].names.has(name) || moduleValues.has(name);
   for (let i = 0;i < tokens.length; i++) {
     if (counter.on)
       counter.n++;
@@ -3011,19 +3067,39 @@ function rewriteRender(tokens, mintId, fail) {
     const next = tokens[i + 1] ?? null;
     if (textFrames.length > 0)
       closeTextFrames(t);
+    if (!LINE_BREAKS.has(t.kind) && startsLine(i))
+      lineHead = t.kind;
+    if (t.kind === "COMPONENT")
+      memberFrames.push({ level: currentIndent + 1, names: memberNames(i) });
     if (t.kind === "RENDER") {
       inRender = true;
       renderIndentLevel = currentIndent + 1;
+      renderScopes.push({ level: renderIndentLevel, names: new Set });
       out.push(t);
       continue;
     }
     if (t.kind === "INDENT") {
       currentIndent++;
+      if (inRender) {
+        const opener = tokens[i - 1]?.kind;
+        if (opener === "->" || opener === "=>") {
+          functionLevels.push(currentIndent);
+        } else if (functionLevels.length === 0 && CONTROL_HEADS.has(lineHead)) {
+          renderScopes.push({ level: currentIndent, names: new Set(lineHead === "FOR" ? loopVars ?? [] : []) });
+        }
+      }
+      loopVars = null;
       out.push(t);
       continue;
     }
     if (t.kind === "OUTDENT") {
       currentIndent--;
+      for (const frames of [memberFrames, renderScopes]) {
+        while (frames.length > 0 && frames[frames.length - 1].level > currentIndent)
+          frames.pop();
+      }
+      while (functionLevels.length > 0 && functionLevels[functionLevels.length - 1] > currentIndent)
+        functionLevels.pop();
       while (elementBodyLevels.length > 0 && elementBodyLevels[elementBodyLevels.length - 1] > currentIndent) {
         elementBodyLevels.pop();
       }
@@ -3039,6 +3115,17 @@ function rewriteRender(tokens, mintId, fail) {
     if (!inRender) {
       out.push(t);
       continue;
+    }
+    if (functionLevels.length === 0 && startsLine(i)) {
+      if (t.kind === "FOR") {
+        loopVars = [];
+        for (let j = i + 1;j < tokens.length && !FOR_SOURCES.has(tokens[j].kind) && !LINE_BREAKS.has(tokens[j].kind); j++) {
+          if (tokens[j].kind === "IDENTIFIER")
+            loopVars.push(tokens[j].value);
+        }
+      } else if (t.kind === "IDENTIFIER" && declares(i, PLAIN_ASSIGN)) {
+        renderScopes[renderScopes.length - 1]?.names.add(t.value);
+      }
     }
     if (t.kind === "=" && out.length > 0) {
       const pt = out[out.length - 1].kind;
@@ -3152,13 +3239,14 @@ function rewriteRender(tokens, mintId, fail) {
       const pt = out[out.length - 1]?.kind;
       const isAfterControlFlow = ["IF", "UNLESS", "WHILE", "UNTIL", "WHEN", "FORIN", "FOROF", "FORAS", "FORASAWAIT", "BY"].includes(pt);
       const atLineStart = t.kind === "IDENTIFIER" && (pt === "INDENT" || pt === "TERMINATOR" || pt === "RENDER");
+      const isTagWord = t.kind === "IDENTIFIER" && isTemplateTag(t.value) && (atLineStart || !readsAsValue(t.value));
       let isTemplateElement = false;
       let clsxEnd = false;
       if (t.kind === "CALL_END")
         clsxEnd = isClsxCallEnd(t);
       if (clsxEnd) {
         isTemplateElement = true;
-      } else if (t.kind === "IDENTIFIER" && isTemplateTag(t.value) && !isAfterControlFlow) {
+      } else if (isTagWord && !isAfterControlFlow) {
         isTemplateElement = true;
       } else if (t.kind === "IDENTIFIER" && !isAfterControlFlow) {
         isTemplateElement = atLineStart || startsWithTag(t);
@@ -3178,7 +3266,7 @@ function rewriteRender(tokens, mintId, fail) {
             }
           }
         }
-        const isBareTag = clsxEnd || t.kind === "IDENTIFIER" && (isTemplateTag(t.value) || atLineStart) || isClassOrIdTail;
+        const isBareTag = clsxEnd || isTagWord || atLineStart || isClassOrIdTail;
         out.push(t);
         if (isBareTag) {
           out.push(gen("CALL_START", "(", t, { at: next.start }));
@@ -9098,7 +9186,7 @@ var isFunc = (x) => isNode(x) && (x[0] === "->" || x[0] === "=>") && x.length ==
 var CTRL_ALL = new Set(["break", "continue", "return"]);
 var CTRL_BREAK = new Set(["break"]);
 var isDefHead = (h) => h === "def" || h === "void-def";
-function containsAwait(sexpr) {
+function containsAwait(sexpr, stores) {
   if (!isNode(sexpr))
     return false;
   const head = sexpr[0];
@@ -9107,10 +9195,10 @@ function containsAwait(sexpr) {
   if (head === "for-as" && sexpr[3] === true)
     return true;
   if (head === "class")
-    return containsAwait(sexpr[2]);
-  if (head === "->" || head === "=>" || isDefHead(head))
+    return containsAwait(sexpr[2], stores);
+  if (head === "->" || head === "=>" || isDefHead(head) || Emitter.isEffectDeclIn(stores, sexpr))
     return false;
-  return sexpr.some((item) => containsAwait(item));
+  return sexpr.some((item) => containsAwait(item, stores));
 }
 function containsYield(sexpr) {
   if (!isNode(sexpr))
@@ -10792,7 +10880,7 @@ class Emitter {
     const { iter } = entry;
     if (!this.ts || rec === undefined || iter === undefined)
       return null;
-    if (containsAwait(iter) || containsYield(iter))
+    if (this.containsAwait(iter) || containsYield(iter))
       return null;
     if (referencesNames(iter, rec.parent.locals))
       return null;
@@ -12744,7 +12832,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
     if (stmts.length === 0)
       return { code: "(function() {})", thisAt: "(function(".length, annots: [] };
     const bodyNode = stmts.length === 1 ? stmts[0] : ["block", ...stmts];
-    const isAsync = Emitter.containsAwait(bodyNode);
+    const isAsync = this.containsAwait(bodyNode);
     const isGen = Emitter.containsYield(bodyNode);
     const sub = this.subEmitter(stores);
     let bodyText;
@@ -13922,7 +14010,7 @@ ${pad ?? ""}`);
     const pad = "  ".repeat(ind);
     this.rejectYieldInIIFE(node);
     this.mark(node, "$self", () => {
-      this.b.emit(Emitter.containsAwait(node) ? `await (async () => {
+      this.b.emit(this.containsAwait(node) ? `await (async () => {
 ` : `(() => {
 `);
       const acc = this.loopTempName("result");
@@ -14102,7 +14190,7 @@ ${pad ?? ""}`);
     if (!Emitter.ifIsSimple(node)) {
       const ind = this.ind;
       this.rejectYieldInIIFE(node);
-      const isAsync = Emitter.containsAwait(node);
+      const isAsync = this.containsAwait(node);
       this.b.emit(isAsync ? "await (async () => { " : "(() => { ");
       this.mark(node, "$self", () => this.returnifyIf(node, ind));
       this.b.emit(" })()");
@@ -14224,7 +14312,7 @@ ${pad ?? ""}`);
   valueTry(node) {
     const ind = this.ind;
     this.rejectYieldInIIFE(node);
-    this.b.emit(Emitter.containsAwait(node) ? "await (async () => { " : "(() => { ");
+    this.b.emit(this.containsAwait(node) ? "await (async () => { " : "(() => { ");
     this.tryBranches(node, ind);
     this.b.emit(" })()");
   }
@@ -14289,7 +14377,7 @@ ${pad ?? ""}`);
     const ind = this.ind;
     const pad = "  ".repeat(ind);
     this.rejectYieldInIIFE(node);
-    this.b.emit(Emitter.containsAwait(node) ? "await (async () => { " : "(() => { ");
+    this.b.emit(this.containsAwait(node) ? "await (async () => { " : "(() => { ");
     this.mark(node, "$self", () => {
       if (Emitter.hasMatchArms(cases)) {
         this.checkMatchSwitch(node);
@@ -14397,7 +14485,7 @@ ${pad ?? ""}`);
     const ind = this.ind;
     const p1 = "  ".repeat(ind + 1);
     this.rejectYieldInIIFE(node);
-    this.b.emit(Emitter.containsAwait(node) ? `await (async () => {
+    this.b.emit(this.containsAwait(node) ? `await (async () => {
 ` : `(() => {
 `);
     const acc = this.loopTempName("result");
@@ -14568,7 +14656,7 @@ ${pad ?? ""}`);
     if (typeof node[1] !== "string") {
       throw this.positionedError(node, "emitter: `def @name` declares a static class method — spell it inside a class body");
     }
-    const isAsync = Emitter.containsAwait(node[3]);
+    const isAsync = this.containsAwait(node[3]);
     const isGen = Emitter.containsYield(node[3]);
     this.tsOverloadSigs(node, ind);
     this.mark(node, "voidMarker", () => this.mark(node, "returnType", () => this.mark(node, "$self", () => {
@@ -14629,8 +14717,8 @@ ${pad ?? ""}`);
       this.b.emit("  ".repeat(ind) + "}");
     });
   }
-  static containsAwait(sexpr) {
-    return containsAwait(sexpr);
+  containsAwait(sexpr) {
+    return containsAwait(sexpr, this.stores);
   }
   static containsBareIt(n) {
     if (n === "it")
@@ -14934,7 +15022,7 @@ ${pad ?? ""}`);
     if (head === "throw" && node.length === 2) {
       this.rejectYieldInIIFE(node);
       this.mark(node, "$self", () => {
-        this.b.emit(Emitter.containsAwait(node) ? "await (async () => { throw " : "(() => { throw ");
+        this.b.emit(this.containsAwait(node) ? "await (async () => { throw " : "(() => { throw ");
         this.mark(node, "value", () => this.expr(node[1]));
         this.b.emit("; })()");
       });
@@ -15339,7 +15427,7 @@ ${pad ?? ""}`);
     if (head === "state" && target === "__state" || head === "computed" && target === "__computed") {
       throw this.positionedError(node, `emitter: '${target} ${op} …' would bind the very runtime name its own lowering calls (const ${target} = ${target}(…) — a TDZ self-reference); rename the variable`);
     }
-    if (head === "computed" && Emitter.containsAwait(value)) {
+    if (head === "computed" && this.containsAwait(value)) {
       throw this.positionedError(node, "emitter: a computed ('~=') body cannot await — computeds evaluate synchronously (make it a state written by an effect)");
     }
     if (head === "computed" && Emitter.containsYield(value)) {
@@ -15522,7 +15610,7 @@ ${pad ?? ""}`);
       this.b.emit(")");
       return;
     }
-    const isAsync = Emitter.containsAwait(body);
+    const isAsync = this.containsAwait(body);
     emitName();
     this.b.emit(isAsync ? "(async () => " : "(() => ");
     if (isBlock(body)) {
@@ -15850,7 +15938,7 @@ ${pad ?? ""}`);
           declare(t.name, "state", stmt, true);
           stateVars.push({ name: t.name, value: stmt[2], isPublic: t.isPublic, required: false, node: stmt });
         } else {
-          if (Emitter.containsAwait(stmt[2])) {
+          if (this.containsAwait(stmt[2])) {
             throw this.positionedError(stmt, "emitter: a computed ('~=') body cannot await — computeds evaluate synchronously (make it a state written by an effect)", node);
           }
           if (Emitter.containsYield(stmt[2])) {
@@ -16275,7 +16363,7 @@ ${pad ?? ""}`);
       const emitBodyEffects = (bodyPad) => {
         for (const eff of effects) {
           const bodyNode = eff[2];
-          const isAsync = Emitter.containsAwait(bodyNode);
+          const isAsync = this.containsAwait(bodyNode);
           this.b.emit(bodyPad);
           this.mark(eff, "$self", () => {
             this.mark(eff, "operator", () => this.b.emit(this.runtimeName("__effect")));
@@ -16402,7 +16490,7 @@ ${pad ?? ""}`);
         const evParamType = evRec !== undefined ? this.tsEventTypeText([...evRec.events], evHost) : name === "onError" ? COMPONENT_FAILURE_TYPE : null;
         this.b.emit(pad);
         this.mark(owner, "$self", () => {
-          if (Emitter.containsAwait(block))
+          if (this.containsAwait(block))
             this.b.emit("async ");
           if (Emitter.containsYield(block))
             this.b.emit("*");
@@ -16410,7 +16498,7 @@ ${pad ?? ""}`);
           this.b.emit("(");
           this.emitParams(params, evParamType);
           this.b.emit(")");
-          this.tsReturnAnnotation(func, Emitter.containsAwait(block), isVoid, Emitter.containsYield(block), owner);
+          this.tsReturnAnnotation(func, this.containsAwait(block), isVoid, Emitter.containsYield(block), owner);
           this.b.emit(" ");
           this.mark(owner, "value", () => {
             this.methodBlock(func, block, ind + 1, {
@@ -19837,7 +19925,7 @@ ${this.replayPad}}` : " }");
     const simple = typeof source === "string" && (source === "this" || /^[A-Za-z_$][\w$]*$/.test(source));
     if (!simple) {
       for (const item of items) {
-        if (item[2] !== null && Emitter.containsAwait(item[2])) {
+        if (item[2] !== null && this.containsAwait(item[2])) {
           throw this.positionedError(item, "emitter: a pick default cannot await when the source needs single evaluation — the lowering's '(_) =>' arrow is not async; bind the source first", node);
         }
         if (item[2] !== null && Emitter.containsYield(item[2])) {
@@ -20256,7 +20344,7 @@ ${this.replayPad}}` : " }");
             this.b.emit(sep(i));
           if (isMethod[i]) {
             this.mark(pair, "voidMarker", () => this.mark(pair, "$self", () => {
-              if (Emitter.containsAwait(pair[2][2]))
+              if (this.containsAwait(pair[2][2]))
                 this.b.emit("async ");
               if (Emitter.containsYield(pair[2][2]))
                 this.b.emit("*");
@@ -20266,7 +20354,7 @@ ${this.replayPad}}` : " }");
               this.b.emit("(");
               this.mark(pair[2], "params", () => this.emitParams(params, null, !inArgs));
               this.b.emit(")");
-              this.tsReturnAnnotation(pair[2], Emitter.containsAwait(block), pair[0] === "void-pair", Emitter.containsYield(block), pair);
+              this.tsReturnAnnotation(pair[2], this.containsAwait(block), pair[0] === "void-pair", Emitter.containsYield(block), pair);
               this.b.emit(" ");
               this.mark(pair, "value", () => {
                 this.methodBlock(pair[2], block, objInd, { isConstructor: false, binds: [], methodName: pair[1], voidBody: pair[0] === "void-pair" });
@@ -20504,7 +20592,7 @@ ${this.replayPad}}` : " }");
           if (pair[2][0] === "=>") {
             throw this.positionedError(pair, `emitter: a ${form.form} accessor takes '->' — accessors are looked up on the instance, never bound`, stmt);
           }
-          if (Emitter.containsAwait(pair[2][2]) || Emitter.containsYield(pair[2][2])) {
+          if (this.containsAwait(pair[2][2]) || Emitter.containsYield(pair[2][2])) {
             throw this.positionedError(pair, `emitter: a ${form.form} accessor cannot await or yield — JavaScript has no async or generator accessors`, stmt);
           }
           if (form.form === "get" && arity !== 0) {
@@ -20595,7 +20683,7 @@ ${this.replayPad}}` : " }");
     }
   }
   classFieldValue(value) {
-    if (Emitter.containsAwait(value)) {
+    if (this.containsAwait(value)) {
       throw this.positionedError(value, "emitter: a class field initializer cannot await — JavaScript evaluates class fields synchronously");
     }
     if (Emitter.containsYield(value)) {
@@ -20648,7 +20736,7 @@ ${this.replayPad}}` : " }");
             this.mark(pair, "voidMarker", () => this.mark(pair, "$self", () => {
               if (isStaticKey(key))
                 this.b.emit("static ");
-              if (Emitter.containsAwait(value[2]))
+              if (this.containsAwait(value[2]))
                 this.b.emit("async ");
               if (Emitter.containsYield(value[2]))
                 this.b.emit("*");
@@ -20706,7 +20794,7 @@ ${this.replayPad}}` : " }");
               this.emitParams(params, null, accessor !== "set");
               this.b.emit(")");
               if (!isCtor) {
-                this.tsReturnAnnotation(value, Emitter.containsAwait(value[2]), isVoidPair, Emitter.containsYield(value[2]), pair);
+                this.tsReturnAnnotation(value, this.containsAwait(value[2]), isVoidPair, Emitter.containsYield(value[2]), pair);
               }
               this.b.emit(" ");
               this.mark(pair, "value", () => {
@@ -21148,7 +21236,7 @@ ${"  ".repeat(ind)}`);
     for (const n of this.pushReactiveFrame(stmts, names, params, node))
       names.add(n);
     this.scopes.push(names);
-    const isAsync = Emitter.containsAwait(block);
+    const isAsync = this.containsAwait(block);
     const isGen = Emitter.containsYield(block);
     if (isGen && kind === "=>") {
       throw this.positionedError(node, srcKind === "->" ? "emitter: a generator arrow cannot sit inside a component body — thin arrows lower to fat arrows there to keep `this` on the instance, and JS has no generator arrows (name the generator a method and call it)" : "emitter: fat arrows cannot contain yield (JS has no generator arrows; use ->)");
