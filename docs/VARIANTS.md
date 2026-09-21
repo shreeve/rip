@@ -159,9 +159,11 @@ SELECT json_keys(doc::JSON), json_extract_string(doc::JSON, '$.patient.firstName
 with keys in document order, `ARRAY(n)`, `VARCHAR`, `UINT64` (a JSON
 integer at or above zero), `INT64` (a negative one), `DOUBLE`, `BOOL_TRUE`,
 `BOOL_FALSE`, `VARIANT_NULL`. A document that came in from a struct literal
-carries SQL's types instead (`INT32`, `DECIMAL`, `DATE`). A JSON integer too
-large for 64 bits becomes a `DOUBLE` at the cast and loses precision then and
-there; store such values as strings.
+carries SQL's types instead (`INT32`, `DECIMAL`, `DATE`). A JSON integer is
+exact across the whole 64-bit range: 18446744073709551615 (2^64 − 1) is a
+`UINT64` and -9223372036854775808 (−2^63) an `INT64`. One step past either
+end, 18446744073709551616 or -9223372036854775809, becomes a `DOUBLE` at the
+cast and loses precision then and there; store such values as strings.
 
 **Null is null.** A key holding JSON `null`, a missing key, and a SQL NULL all
 read as NULL from a path. `variant_exists(doc.patient, 'note')` is the only
@@ -203,9 +205,23 @@ result (`SELECT [doc]`, `struct_pack(d := doc)`, `list(doc.name)`) is JSON
 text inside the container. Select the document or a path directly, or
 aggregate with `variant_group_array` instead of `list`.
 
-**Numbers.** Integers above 2^53 lose precision in `JSON.parse`, and above
-2^63 they were already a DOUBLE in the engine. Store identifiers that size as
-strings.
+**A document holding NaN or an infinity arrives as a string.** The engine
+accepts `'{"x":1e999}'::JSON` and `'{"x":NaN}'::JSON`, and a struct literal
+carries `'nan'::DOUBLE`; inside the VARIANT the value is a `DOUBLE`, and
+harbor emits the cell as `{"x":Infinity}`, which is not JSON. The driver
+returns a cell that does not parse as its text, so the app reads the *string*
+`'{"x":Infinity}'` where it expected an object, and a path to the number
+reads as the string `'Infinity'`. A save that leaves the field alone leaves
+the column alone; assigning that string back stores a VARIANT string, and
+every path into it is NULL. A model never writes such a document (see *What
+JSON cannot carry*); another client can. A `JSON` column keeps its text as
+written, `{"x":1e999}`, which does parse: `x` is the JS number `Infinity`.
+
+**Numbers.** Every number in a document becomes a JS number, a double. The
+engine holds an integer exactly up to 2^64 − 1, but `JSON.parse` rounds one
+beyond ±2^53: a stored 9007199254740993 reads as 9007199254740992. Store
+identifiers that size as strings. Saving the document writes the rounded
+number back; see *Saving rewrites every number*.
 
 **Dates.** A document holds strings. A Date you stored comes back as its ISO
 string, not a Date.
@@ -241,7 +257,10 @@ An object or an array is a document without being told. Harbor asks the
 engine what each parameter expects, and binds an object or array param aimed
 at a VARIANT — a column in `SET` or `VALUES`, a comparison against one — as
 the document. A string param is a string wherever it goes: `'{"a":1}'` bound
-through a bare `?` is still the seven-character text.
+through a bare `?` is still the seven-character text. Binding an object as
+the document is harbor 0.41.0 and later; an earlier server binds its JSON
+text, so an object handed to `sql!` lands as a VARIANT string and
+`where(doc: obj)` never matches.
 
 ### In Rip through a model
 
@@ -259,11 +278,53 @@ r.save!()
 A `variant` field takes any value and gives it back: an object, an array,
 a string, a number, a boolean. A string is stored as a VARIANT string, not
 parsed as a document, so `doc: '{"a":1}'` is the seven-character text and
-`doc.a` is NULL. Hand it the object.
+`doc.a` is NULL. Hand it the object. A `json` field reads a string the other
+way, as JSON text: `'{"a":1}'` is the object, `'42'` the number 42, `'null'`
+a JSON null, and `'Ada'` an engine error (`Malformed JSON`). On a `variant`
+field all four are strings.
 
-A document nests at most 128 levels deep, the depth harbor's own request
-parser reads, and the model refuses a deeper one before any SQL. The engine's
-handling of a deeply nested VARIANT is reported upstream as
+**What JSON cannot carry.** A document is written as `JSON.stringify` spells
+it, for a `variant`, a `json` and an `any` field alike:
+
+| in the document | stored |
+|---|---|
+| a `Date` | its ISO string |
+| `NaN`, `Infinity`, `-Infinity`, an Invalid Date | `null` |
+| a key whose value is `undefined`, a function or a symbol | nothing: the key is dropped |
+| `undefined`, a function or a symbol in an array | `null` |
+| a hole in a sparse array | `null` |
+| a `Map` or a `Set` | `{}` |
+| `-0` | `0` |
+| a `BigInt` | nothing: `JSON.stringify` throws a `TypeError` before any SQL |
+
+As the *whole value* of the field, `NaN`, `Infinity`, `-Infinity`, an Invalid
+Date, a function or a symbol is refused with a `TypeError` naming the field,
+before any SQL. JSON has no form for one, and the column would take SQL NULL
+for a value the caller computed.
+
+**Saving rewrites every number.** `save!` writes the whole document back as
+JS read it, so a number the app never touched is stored as `JSON.stringify`
+spells it. A stored `DOUBLE` `100.0` reads as `100` and is saved as the
+`UINT64` `100`; `-0.0` is saved as `0`; 9007199254740993 as 9007199254740992;
+9223372036854775808 (2^63) as 9223372036854776000; and 18446744073709551615
+as 18446744073709552000.0, a `DOUBLE`. Equality is typed, so the first of
+those changes what matches: `'100'::JSON::VARIANT = '100.0'::JSON::VARIANT`
+is false, `doc.price = 100.0::DOUBLE` finds the row as another client wrote
+it and `doc.price = 100` finds it once a model has saved it, and a
+whole-document comparison follows the same rule. Ordering and arithmetic
+read both as 100. Where writers may spell a number differently, compare
+through a cast, `doc.price::DOUBLE = 100`, which matches both; and store a
+value that must survive exactly — an identifier, a decimal amount — as a
+string.
+
+A document nests at most 100 levels deep, and the model refuses a deeper one
+before any SQL. That is far above any real document and below what harbor's
+request parser reads: 127 levels in all, of which the request's own
+`{"sql": …, "params": [ … ]}` takes two, so an object or array param nests at
+most 125 and a deeper one is answered HTTP 400, `recursion limit exceeded`.
+A write carries the document as text, but `where(doc: obj)` carries the
+object, so at 100 levels every document a model stores can also be asked for.
+The engine's handling of a deeply nested VARIANT is reported upstream as
 duckdb/duckdb#25967: an `UPDATE` of a VARIANT column costs the square of the
 nesting depth (0.6 s at 1,000 levels, 15 s at 5,000, where an `INSERT` of the
 same value takes 10 ms) and segfaults at 20,000 levels, and the cast itself
@@ -333,9 +394,13 @@ value. Note that `'42'::JSON` is the number 42 and `'42'` is the string.
 `Model.where(field: value)` renders `"field" = ?`. For a `variant` field
 that compares the whole column: a scalar against a scalar, and an object
 against the document, which matches whatever the order of its keys; an array
-of objects renders `IN (?, ?)` and matches the same way. To reach inside a
-document, filter by path with the string dialect, which passes SQL through
-untouched:
+of objects renders `IN (?, ?)` and matches the same way. For a `json` field
+the same `where` compares *text*, the column's against `JSON.stringify` of
+the object, so key order and whitespace both count: `where(raw: {b: 'x', a:
+1})` misses a stored `{"a":1,"b":"x"}`, and `where(raw: {a: 1, b: 'x'})`
+misses `{"a": 1, "b": "x"}` written with spaces by another client. To reach
+inside a document, filter by path with the string dialect, which passes SQL
+through untouched:
 
 ```rip
 Report.where('doc.patient.firstName = ?', 'Steve').all!
@@ -348,6 +413,13 @@ Report.where('doc.patient.age > ?', 40).all!
 export Report = schema :model
   doc! variant    # the report, typed: doc.patient.firstName reaches in
 ```
+
+The migration converts the column, not the code that writes it. A `json`
+field takes a string as JSON text, so `doc: JSON.stringify(obj)` stores the
+object; the same line against a `variant` field stores a VARIANT *string*,
+every path into it is NULL, and nothing complains. Find the writes that hand
+the field pre-stringified JSON and hand them the object, in the same change
+that declares the field `variant`.
 
 A `json` column becomes `variant` with `ALTER TABLE t ALTER COLUMN doc SET
 DATA TYPE VARIANT USING doc::VARIANT` (a TEXT column needs

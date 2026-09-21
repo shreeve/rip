@@ -82,17 +82,39 @@ form (a nested schema, `json`, `any`) and a nested schema itself are
 `JSON` documents. An unknown type name is a loud error, never a silent
 `VARCHAR`.
 
-A `variant` field is a `json` field the engine stores typed: the app
+A `variant` field holds a document the engine stores typed: the app
 reads and writes it as a value — an object, an array, a string, a
 number, a boolean — and gets the same value back, and SQL reaches into
 it by path — `WHERE meta.patient.firstName = 'Ada'` — where a `json`
 column needs `->>`. The JSON operators do not apply to a `VARIANT`.
 Writes bind through `?::JSON`, which the model renders; a raw `INSERT`
 that binds JSON *text* must cast the same way, or the document lands as a
-string. An object handed to `sql!` as itself needs no cast: harbor binds it
-as the document.
+string. An object handed to `sql!` as itself needs no cast: harbor
+(0.41.0 and later) binds it as the document; an earlier server binds its
+JSON text, which lands as a string and which `where(meta: obj)` never
+matches.
+
+The two document types differ in how they read a **string**. A `json`
+(or `any`) field takes a string as JSON text, and an object or array as
+the document:
+
+| written | a `json` field stores | a `variant` field stores |
+|---|---|---|
+| `{a: 1}` | the object | the object |
+| `'{"a":1}'` | the object | the string `{"a":1}` |
+| `'42'` | the number 42 | the string `42` |
+| `'null'` | a JSON null (`raw IS NULL` is false) | the string `null` |
+| `'Ada'` | nothing: the engine refuses it, `Malformed JSON` | the string `Ada` |
+
+Code that hands a `json` field `JSON.stringify(obj)` stores strings once
+the field is declared `variant`; hand either field the object. Both
+write a document as `JSON.stringify` spells it, nest it at most 100
+levels, and refuse a whole value JSON has no form for (`NaN`,
+`±Infinity`, an Invalid Date, a function, a symbol) with a `TypeError`
+naming the field, before any SQL.
 [VARIANTS.md](VARIANTS.md) is the reference for reading, filtering and
-editing these documents from every surface.
+editing these documents from every surface, and lists what JSON cannot
+carry and what a save does to a document's numbers.
 
 ### Constraints
 
@@ -586,11 +608,16 @@ The operator set: `eq ne gt gte lt lte like ilike in nin between`.
 `eq`/`ne` collapse to `IS [NOT] NULL` for `null`; empty `in`/`nin`
 render constant predicates rather than the syntax error `IN ()`. On
 fields whose declared type is itself an object (`json`, `any`, `variant`,
-arrays) an object value is an equality test against the document, never an
+arrays) an object value is an equality test against the column, never an
 operator map — the field's declared type decides, not the value's
-shape. An `undefined` value is refused loudly: an absent parameter is
-not a filter, and rendering it would turn a missing request param into
-a silent empty result. Pass `null` to match `IS NULL`, or omit the key.
+shape. For a `variant` field that is a comparison of documents, which
+ignores key order. For a `json` or `any` field it is a comparison of
+*text*, the column's against `JSON.stringify` of the object, so key order
+and whitespace both count: `where(raw: {b: 'x', a: 1})` misses a stored
+`{"a":1,"b":"x"}`. An `undefined` value is refused loudly: an absent
+parameter is not a filter, and rendering it would turn a missing request
+param into a silent empty result. Pass `null` to match `IS NULL`, or omit
+the key.
 
 **The trusted string form** is caller-authored SQL in the *database's*
 namespace — snake_case column names, `?` placeholders — passed through
@@ -730,7 +757,11 @@ link = PanelItem.upsert! {panelId: p.id, testId: t.id, position: 3}, on: [:panel
 must **exactly** match a declared unique tuple — the primary key, a
 `@unique` field, or a `@unique [...]` index; a subset, superset, or
 merely-indexed column is refused, because the database could not
-arbitrate it. When every written column is part of the target the
+arbitrate it. A field that is `null` or absent is not written: it is in
+neither the `INSERT` nor the `DO UPDATE SET`, so on a conflict the stored
+column keeps its value — `upsert {doc: null, tag}, on: :tag` does not
+null `doc`. To null a column of an existing row, `save` the instance or
+use `updateAll`. When every written column is part of the target the
 statement degrades to `DO NOTHING`, and `upsert` then reads back the
 authoritative row by the conflict target. `beforeCreate`/`beforeUpdate`
 never fire (the branch is decided in the database); validation,
