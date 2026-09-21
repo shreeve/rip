@@ -10,6 +10,10 @@
 # a width is one, and `Intl.Segmenter` — some forty times slower than
 # `Bun.stringWidth` there — is never asked.
 #
+# A cluster is as wide as `string-width` 8 says (MIT, © Sindre Sorhus),
+# the measure Ink lays text out by, so the two break a line in the same
+# place.
+#
 # Wrapping answers what Ink's text answers, which is `wrap-ansi` under
 # `{trim: false, hard: true}` and `cli-truncate` (both MIT, © Sindre
 # Sorhus): a space stays on the row it follows, a word longer than the
@@ -19,28 +23,70 @@
 
 TAB =! 8
 
-PLAIN    =! /^[\x20-\x7e\n]*$/
-CONTROLS =! /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g
-# A whole control sequence goes, not only its first byte: CSI, then the
-# strings OSC / DCS / SOS / PM / APC up to their terminator, then any
-# two-byte escape. A string with no terminator loses its introducer
-# alone, so one stray byte never swallows the text after it.
-SEQUENCES =! /(?:\x1b\[|\x9b)[0-?]*[ -\/]*[@-~]|(?:\x1b[\]PX^_]|[\x90\x98\x9d-\x9f])[^\x07\x1b\x9c]*(?:\x07|\x1b\\|\x9c)|\x1b[ -\/]*[0-~]?/g
+PLAIN   =! /^[\x20-\x7e\n]*$/
+CONTROL =! /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g
+ENDING  =! /[\x07\x1b\x9c]/g
+
+# Where reading goes on after the control character at `at` — the rules
+# of Ink's tokenizer (src/ansi-tokenizer.ts), which are a terminal's. A
+# whole sequence goes, never its first byte alone: CSI with its
+# parameters, intermediates and final byte; a control string — OSC, DCS,
+# SOS, PM, APC — up to ST, or BEL for OSC alone, where a doubled ESC is
+# tmux's escaped ESC inside the string and ends nothing; any other escape
+# with its intermediates and final byte. A sequence that never ends takes
+# the rest of the text with it, as a terminal would swallow it, so no
+# payload is ever drawn as words. Every character is read once.
+resume =! (text, at) ->
+  size = text.length
+  code = text.charCodeAt at
+  next = if code is 0x1b then text.charCodeAt(at + 1) else -1
+  if code is 0x9b or next is 0x5b
+    to = if code is 0x9b then at + 1 else at + 2
+    to += 1 while text.charCodeAt(to) >= 0x30 and text.charCodeAt(to) <= 0x3f
+    to += 1 while text.charCodeAt(to) >= 0x20 and text.charCodeAt(to) <= 0x2f
+    return (if text.charCodeAt(to) >= 0x40 and text.charCodeAt(to) <= 0x7e then to + 1 else size)
+  if code is 0x90 or code is 0x98 or code >= 0x9d or next is 0x5d or next is 0x50 or next is 0x58 or next is 0x5e or next is 0x5f
+    bell = code is 0x9d or next is 0x5d
+    ENDING.lastIndex = if code is 0x1b then at + 2 else at + 1
+    while found = ENDING.exec text
+      stop = text.charCodeAt found.index
+      return found.index + 1 if stop is 0x9c or (stop is 0x07 and bell)
+      continue unless stop is 0x1b
+      after = text.charCodeAt found.index + 1
+      return found.index + 2 if after is 0x5c
+      ENDING.lastIndex = found.index + 2 if after is 0x1b
+    return size
+  return at + 1 unless code is 0x1b
+  to = at + 1
+  to += 1 while text.charCodeAt(to) >= 0x20 and text.charCodeAt(to) <= 0x2f
+  return to + 1 if text.charCodeAt(to) >= 0x30 and text.charCodeAt(to) <= 0x7e
+  if to > at + 1 or to >= size then size else at + 1
 
 # The text a terminal can be trusted with: no escape sequence, and no C0
-# or C1 control but the newline and the tab. Printable ASCII — nearly all
-# text — is answered as it came.
+# or C1 control but the newline and the tab. Ink keeps SGR and OSC inside
+# its text and restyles from them; styling here is structural, so nothing
+# that begins with a control character is kept at all. Printable ASCII —
+# nearly all text — is answered as it came; the rest is read in one
+# pass, whatever it holds.
 export sanitize =! (value) ->
   text = String value
   return text if PLAIN.test text
-  text.replaceAll('\r\n', '\n').replace(SEQUENCES, '').replace CONTROLS, ''
+  text = text.replaceAll '\r\n', '\n'
+  out = ''
+  kept = 0
+  CONTROL.lastIndex = 0
+  while found = CONTROL.exec text
+    out += text.slice kept, found.index
+    kept = resume text, found.index
+    CONTROL.lastIndex = kept
+  out + text.slice kept
 
 # Tabs become spaces up to the next stop of eight. A stop counts columns
 # from the start of the line, across the runs of a leaf, so tabs are
 # expanded where runs are joined: `before` is the line so far.
 untab =! (text, before) ->
   out = ''
-  col = Bun.stringWidth before.slice(before.lastIndexOf('\n') + 1)
+  col = widthOf before.slice(before.lastIndexOf('\n') + 1)
   for line, n in text.split '\n'
     if n
       out += '\n'
@@ -48,7 +94,7 @@ untab =! (text, before) ->
     parts = line.split '\t'
     for part, m in parts
       out += part
-      col += Bun.stringWidth part
+      col += widthOf part
       if m < parts.length - 1
         pad = TAB - (col % TAB)
         out += ' '.repeat pad
@@ -62,18 +108,9 @@ untab =! (text, before) ->
 export CLUSTER =! 0x80000000
 
 clusters =! []
-leads =! []
 known =! Map.new()
 
-MARKS =! /^\p{M}+/u
-
 export glyph =! (cell) -> if cell < CLUSTER then String.fromCodePoint(cell) else clusters[cell - CLUSTER]
-
-# How much of a cell's glyph is marks that came before its base: a mark
-# that opens a line has no base behind it, and joins the cell after it.
-# Such marks are written ahead of the cell's style, as Ink writes them,
-# so they never take the color of the words they lean on.
-export lead =! (cell) -> if cell < CLUSTER then 0 else leads[cell - CLUSTER]
 
 cellOf =! (cluster) ->
   code = cluster.codePointAt 0
@@ -82,9 +119,80 @@ cellOf =! (cluster) ->
   unless cell?
     cell = CLUSTER + clusters.length
     clusters.push cluster
-    leads.push MARKS.exec(cluster)?[0].length ?? 0
     known.set cluster, cell
   cell
+
+# ── Widths ────────────────────────────────────────────────────────────────────
+
+# The rule of `string-width` 8, cluster by cluster. A cluster of nothing
+# that prints — marks with no base, format and ignorable characters — is
+# no cell. An emoji sequence is two. Hangul jamo are two for each modern
+# syllable they spell, and additive where they spell none. Anything else
+# is the East Asian Width of its first printing character, plus that of
+# each spacing mark and halfwidth or fullwidth form after it: a Bengali
+# or Tamil vowel sign takes a cell beside its consonant, where a Thai or
+# Devanagari mark above one takes none. `Bun.stringWidth` of one
+# character stands in for the East Asian Width table: two cells or one.
+UNSEEN  =! '\\p{Default_Ignorable_Code_Point}\\p{Control}\\p{Format}\\p{Nonspacing_Mark}\\p{Enclosing_Mark}\\p{Surrogate}'
+ZERO    =! RegExp.new "^[#{UNSEEN}]+$", 'v'
+LEADING =! RegExp.new "^[#{UNSEEN}]+", 'v'
+EMOJI   =! RegExp.new '^\\p{RGI_Emoji}$', 'v'
+SPACING =! /\p{Spacing_Mark}/u
+KEYCAP  =! /^[\d#*]\u20E3$/
+PICTURE =! /\p{Extended_Pictographic}/gu
+JOINER  =! String.fromCharCode 0x200D
+
+segmenter =! Intl.Segmenter.new()
+
+eaw =! (code) -> if Bun.stringWidth(String.fromCodePoint code) is 2 then 2 else 1
+
+leadJamo  =! (code) -> (code >= 0x1100 and code <= 0x115F) or (code >= 0xA960 and code <= 0xA97C)
+vowelJamo =! (code) -> (code >= 0x1160 and code <= 0x11A7) or (code >= 0xD7B0 and code <= 0xD7C6)
+trailJamo =! (code) -> (code >= 0x11A8 and code <= 0x11FF) or (code >= 0xD7CB and code <= 0xD7FB)
+
+# The width of a cluster that opens with a jamo, or -1 for any other.
+jamoWidth =! (visible) ->
+  codes = (char.codePointAt(0) for char in Array.from(visible) when not ZERO.test char)
+  wide = 0
+  at = 0
+  while at < codes.length
+    code = codes[at]
+    unless leadJamo(code) or vowelJamo(code) or trailJamo(code)
+      return -1 if wide is 0
+      wide += eaw rest for rest in codes.slice at
+      return wide
+    if leadJamo(code) and vowelJamo(codes[at + 1])
+      wide += 2
+      at += if trailJamo(codes[at + 2]) then 3 else 2
+    else
+      wide += eaw code
+      at += 1
+  if codes.length then wide else -1
+
+export clusterWidth =! (cluster) ->
+  code = cluster.codePointAt 0
+  if cluster.length is (if code > 0xFFFF then 2 else 1)
+    return (if code < 0x20 or code is 0xAD or (code >= 0x7F and code <= 0x9F) then 0 else 1) if code < 0x300
+    return (if ZERO.test cluster then 0 else eaw code)
+  return 0 if ZERO.test cluster
+  return 2 if EMOJI.test cluster
+  if cluster.length <= 50
+    return 2 if KEYCAP.test(cluster) or (cluster.includes(JOINER) and (cluster.match(PICTURE)?.length ?? 0) >= 2)
+  visible = cluster.replace LEADING, ''
+  wide = jamoWidth visible
+  return wide if wide >= 0
+  wide = 0
+  for char, n in Array.from visible
+    wide += eaw char.codePointAt(0) if n is 0 or SPACING.test(char) or (char >= '\uFF00' and char <= '\uFFEF')
+  wide
+
+# The cells a line of text takes.
+export widthOf =! (text) ->
+  return text.length if PLAIN.test text
+  wide = 0
+  for part as segmenter.segment text
+    wide += clusterWidth part.segment
+  wide
 
 # ── Flow ──────────────────────────────────────────────────────────────────────
 
@@ -108,8 +216,6 @@ export ROW  =! 6
 
 ASKS =! 8   # the narrow offers a flow remembers its answers to
 
-segmenter =! Intl.Segmenter.new()
-
 export class Flow
   constructor: ->
     @text = null
@@ -118,7 +224,7 @@ export class Flow
     @ascii = true
     @count = 0       # units
     @cuts = null     # string offset of each unit, and the text's length
-    @spans = null    # cells each unit takes: 0, 1 or 2
+    @spans = null    # cells each unit takes
     @cells = null    # what each unit puts in a grid cell
     @wide = 0        # the widest line, unwrapped
     @tall = 0        # the lines, unwrapped
@@ -166,60 +272,43 @@ export class Flow
   # Split into units. A printable ASCII character that no mark follows is
   # a unit by itself; only the stretches between go to the segmenter.
   #
-  # Marks with no base before them — at the start of the text or of a
-  # line — take no cell and cannot own one, so they join the unit after
-  # them: one unit, as wide as its base, that wraps, cuts and clips
-  # whole. `open` is where such marks began, or -1. With nothing after
-  # them on their line they stay a unit of no width, which draws nothing.
+  # A space that a mark or a joiner follows is one cluster with it, and
+  # still a space: a line may break there, as `wrap-ansi` breaks it, so
+  # the space is a unit and what leans on it another. Marks with no base
+  # — those, and marks that open the text or a line — are a unit of no
+  # width. A unit of no width takes no cell and draws nothing: a terminal
+  # hangs a mark that arrives alone on whatever cell came before it,
+  # which belongs to someone else.
   segment!: ->
     text = @text
     size = text.length
     cuts = []
     spans = []
     cells = []
-    open = -1
     at = 0
     while at < size
       code = text.charCodeAt at
       if code < 127 and (at + 1 >= size or text.charCodeAt(at + 1) < 0x300)
-        if open >= 0 and code isnt 10
-          cuts.push open
-          spans.push 1
-          cells.push cellOf text.slice(open, at + 1)
-        else
-          if open >= 0
-            cuts.push open
-            spans.push 0
-            cells.push cellOf text.slice(open, at)
-          cuts.push at
-          spans.push (if code is 10 then 0 else 1)
-          cells.push code
-        open = -1
+        cuts.push at
+        spans.push (if code < 32 then 0 else 1)
+        cells.push code
         at += 1
         continue
       to = at + 1
       to += 1 while to < size and not (text.charCodeAt(to) < 127 and (to + 1 >= size or text.charCodeAt(to + 1) < 0x300))
       for part as segmenter.segment text.slice(at, to)
         first = at + part.index
-        wide = Math.min 2, Bun.stringWidth(part.segment)
-        bare = wide is 0 and MARKS.test part.segment
-        if bare and (first is 0 or open >= 0 or text.charCodeAt(first - 1) is 10)
-          open = first if open < 0
-          continue
-        if open >= 0 and wide is 0
-          cuts.push open
-          spans.push 0
-          cells.push cellOf text.slice(open, first)
-          open = -1
-        cuts.push (if open >= 0 then open else first)
-        spans.push wide
-        cells.push cellOf text.slice((if open >= 0 then open else first), first + part.segment.length)
-        open = -1
+        piece = part.segment
+        if piece.length > 1 and piece.charCodeAt(0) is 32
+          cuts.push first
+          spans.push 1
+          cells.push 32
+          first += 1
+          piece = piece.slice 1
+        cuts.push first
+        spans.push clusterWidth piece
+        cells.push cellOf piece
       at = to
-    if open >= 0
-      cuts.push open
-      spans.push 0
-      cells.push cellOf text.slice(open, size)
     cuts.push size
     @count = spans.length
     @cuts = cuts

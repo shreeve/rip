@@ -116,6 +116,15 @@ test "a new text lays out again only when it answers an offer differently", ->
   settled root, 100
   eq at(text), '0,0 7x3'
 
+test "a text wider than its offer leaves no stale height behind when the offer widens", ->
+  # At 3 columns the bordered box offers its text 1, and "中on" answers 2
+  # wide (the cluster cannot be narrower) and 3 tall. At 4 the text is
+  # exactly 2 wide — the same width, and another height.
+  root = div {}, [div({ flexDirection: 'row' }, [div({ borderStyle: 'single' }, [Text.new "#{String.fromCodePoint 0x4E2D}on"])])]
+  settled root, 3
+  settled root, 4
+  eq root.rect.h, 4
+
 test "text sits inside the box it is in when both land on a fraction of a cell", ->
   # Three shrink to 4.615, 4.615 and 0.769 cells; the second box starts
   # at 4.615 and rounds to cell 5, and its text rounds with it.

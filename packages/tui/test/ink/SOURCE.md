@@ -10,24 +10,38 @@
   the foot of this file, copied from `license` at the root of the
   upstream repository.
 
+## What runs
+
+`rip test/ink.rip` runs 434 tests: 423 ported cases and 11 self-tests of
+`cells.rip` (`cells-check.rip`). Of the ported cases:
+
+- 405 hold the frame to Ink's, row for row;
+- 17 are **stated differences**, pinned through `differs` in
+  `harness.rip`: the frame must equal this package's stated frame and
+  must not equal Ink's, with the decision in a sentence, so a pin the
+  package outgrows fails. They are listed below;
+- 1 is a **refusal test**: `content-offset`'s non-finite offsets, which
+  Ink reads as zero and this package refuses by name.
+
 ## What is compared
 
 `harness.rip` gives every file Ink's two widgets with Ink's defaults
 (`<Box>` is a row that shrinks, `<Text>` shrinks; this package's own
-widgets keep Yoga's defaults), and three reads of a frame:
+widgets keep Yoga's defaults), and two reads of a frame:
 
 - `plain` — rows of bare characters, for layout and text;
 - `styled` — rows of styled cells in the notation of `cells.rip`, for
   color, background and attributes. Two renderers spell one picture
   with different escape bytes, so cells are compared and bytes never
-  are;
-- `tall` — the frame's height in rows, asserted wherever the rule
-  below would hide blank rows at the foot of a frame.
+  are.
 
 One rule for blanks serves both sides of every comparison, and
-`cells.rip` states it: a space drops the attributes it cannot show,
-trailing default-style spaces are trimmed from each row, and trailing
-empty rows are dropped.
+`cells.rip` states it: a frame is its rows, split at every newline, and
+every row counts — a blank row at the foot of a frame is part of the
+expectation, so each case is exact on the frame's height, as Ink's
+`t.is(output, literal)` is. Within a row, a space drops the attributes
+it cannot show, and trailing default-style spaces are trimmed. Nothing
+else is trimmed.
 
 ## Where an expected frame comes from
 
@@ -35,38 +49,78 @@ Published Ink 7.1.1, installed under `packages/tui/bench`, is the
 oracle. `oracle/run.ts` runs Ink's own test files against it and
 records, for every frame a test reads, the frame, its width, and the
 element tree that drew it, beside each assertion's actual and expected
-values. Each expected literal in a ported file is one of three things,
-and a comment at the literal says which when it is not the first:
+values. Each expected literal in a ported file is one of these, and a
+comment at the literal says which when it is not the first:
 
 1. **The frame published Ink drew**, where Ink's test compares that
    frame whole and published Ink agrees with it. This is most cases.
 2. **The literal Ink's test compares against**, where published Ink
    draws something else because main is ahead of it. The comment names
-   what published Ink draws. This covers every
-   `contentOffsetX` / `contentOffsetY` case (`content-offset`,
-   `clip-wide-background`, part of `rendering-regressions`), the
-   combining-mark and wide-character overlap fixes, tab expansion,
-   per-line truncation, zero-width boxes, `absolute-truncation`
-   (published Ink throws on it), and four cases Ink itself marks
-   `test.failing`, which state the frame Ink's authors want and no
-   build of Ink draws.
+   what published Ink draws. This covers every `contentOffsetX` /
+   `contentOffsetY` case (`content-offset`, `clip-wide-background`, part
+   of `rendering-regressions`), the combining-mark and wide-character
+   overlap fixes, tab expansion, per-line truncation, zero-width boxes,
+   `absolute-truncation` (published Ink throws on it), and four cases
+   Ink itself marks `test.failing`, which state the frame Ink's authors
+   want and no build of Ink draws (all four are pinned as stated
+   differences).
 3. **The frame published Ink drew, where Ink's test checks only part
    of it** (it looks for an escape code, or counts rows). The comment
-   says so. Where the published frame shows a quirk and not a rule —
-   the CJK truncations in `text-width` — the port asserts what Ink's
-   test asserts and quotes the published frame in a comment.
+   says so.
+4. **The frame's text**, for a tree that writes an escape or control
+   sequence into its text (`text`'s `strip …` and `preserve …` cases,
+   `components`' hyperlink cases, `wrap-text`'s C1 and colon cases).
+   Ink strips most such sequences and passes SGR and hyperlinks through;
+   this package strips every one. Ink's tests compare the text with the
+   escape sequences taken out (`stripAnsi(output)`), and that literal is
+   the expectation. Where Ink's frame keeps an SGR style, the case is a
+   stated difference: Ink's styled cells against the bare text. Where it
+   keeps a hyperlink, the text and its wrapping are compared and the
+   hyperlink is not: **hyperlinks are not built**, and a comment at the
+   case says so.
+5. **`text-width`'s "truncate CJK text in the middle"** takes the row
+   Ink's main branch draws, `あいうえお…けこ|end`: main's measure reserves
+   the whole offered width for truncated text (`src/dom.ts`), so the row
+   is cli-truncate's answer at 20 columns, which `oracle/truncate.ts`
+   prints. Published Ink 7.1.1 cuts twice and draws `あいうえ…けこ|end`.
 
 `wrap-text.tsx` calls Ink's `wrapText` function and cannot load against
 the published build, so `oracle/extra/wrap-text.tsx` asks the same
-questions through components and `wrap-text.rip` ports that.
+questions through components and `wrap-text.rip` ports that. Its
+"keeps styles that span a newline" case holds a color and then a
+hyperlink to the rule in Ink's file; the color is ported, as a `color`
+prop, and the hyperlink half is not ported: hyperlinks are not built.
+
+## Stated differences
+
+- `text`: strip ANSI cursor movement sequences from text
+- `text`: preserve SGR color sequences in text
+- `text`: preserve colors encoded with colon parameters
+- `text`: preserve SGR sequences around stripped SOS control strings
+- `wrap-text`: truncated multi-line text keeps a C1 SGR color that spans a newline
+- `wrap-text`: truncated multi-line text keeps a colon 256-color that spans a newline
+- `wrap-text`: truncated multi-line text keeps a colon truecolor that spans a newline
+- `background`: Mixed text with and without background inheritance
+- `overflow`: out of bounds writes do not crash
+- `overlap-wide-background`: overwriting 你 cell 0 preserves the other cell's background
+- `overlap-wide-background`: overwriting 你 cell 1 preserves the other cell's background
+- `overlap-wide-background`: overwriting 👩‍💻 cell 0 preserves the other cell's background
+- `overlap-wide-background`: overwriting 👩‍💻 cell 1 preserves the other cell's background
+- `width-height`: set min width in percent
+- `width-height`: set max width in percent
+- `flex-justify-content`: row - align two text nodes with equal space around them
+- `flex-justify-content`: column - align two text nodes with equal space around them
+
+and the refusal test, `content-offset`: contentOffsetX/Y - non-finite
+offsets fall back to zero.
 
 ## Files
 
 | Ink test file | cases | ported | left out |
 |---|---:|---:|---:|
-| `components` | 93 | 22 | 71 |
-| `text` | 57 | 17 | 40 |
-| `wrap-text` | 17 | 8 | 9 |
+| `components` | 93 | 27 | 66 |
+| `text` | 57 | 46 | 11 |
+| `wrap-text` | 17 | 11 | 6 |
 | `text-width` | 18 | 18 | 0 |
 | `truncate-width` | 9 | 9 | 0 |
 | `absolute-truncation` | 4 | 4 | 0 |
@@ -93,22 +147,21 @@ questions through components and `wrap-text.rip` ports that.
 | `flex-align-self` | 9 | 9 | 0 |
 | `flex-justify-content` | 12 | 12 | 0 |
 | `render-to-string` | 37 | 23 | 14 |
-| **total** | **575** | **386** | **189** |
+| **total** | **575** | **423** | **152** |
 
 A case counts once per title Ink registers, loops included. Files
 finished by hand after the draft: `absolute-truncation` (written by
 hand), `content-offset`, `overflow`, `render-to-string`,
-`styled-combining-marks`, `text-width`, `wrap-text`, and the comments in
-`clip-wide-background` and `rendering-regressions`.
+`styled-combining-marks`, `text-width`, `wrap-text`, the comments in
+`clip-wide-background` and `rendering-regressions`, and every `differs`
+pin that stands where the draft has an `eq`.
 
 ## Cases left out
 
-**A rerender of a mounted tree: `renderToString` mounts a fresh tree per call** (45)
+**A rerender of a mounted tree, and nothing else: an update driver that keeps a tree mounted can take these** (33)
 
 - `borders`: render border after update
 - `borders`: render border edge changes after update when borderStyle is unchanged
-- `background`: Box preserves child state when adding a background color
-- `background`: Box preserves child state when removing a background color
 - `background`: Box background updates on rerender
 - `text`: text with empty-to-nonempty sibling does not wrap
 - `text`: remeasure text when text is changed
@@ -134,26 +187,41 @@ hand), `content-offset`, `overflow`, `render-to-string`,
 - `flex-align-content`: clears alignContent from stretch on rerender to default flex-start
 - `flex-align-content`: clears alignContent when prop is omitted on rerender
 - `components`: remeasure text dimensions on text change
-- `components`: static padding is not emitted again when there are no new items
-- `components`: skip previous output when rendering new static output
 - `components`: static output stops accumulating after Static unmounts (#904)
-- `components`: fullStaticOutput is reset when <Static> unmounts so stale items are not replayed
-- `components`: unmounting an ancestor of <Static> clears staticNode and does not crash the renderer
-- `components`: removing a <Static> ancestor that is a direct child of the root does not crash
 - `components`: separate Ink instances do not clobber each other’s staticNode
-- `components`: updating <Static> in one instance after another instance mounted <Static> sets the dirty flag on the correct root
-- `components`: unmounting a <Static> ancestor in screen-reader mode does not replay stale output
 - `components`: unmounting a <Static> ancestor in concurrent mode does not crash
-- `components`: remounting <Static> via key change emits the new items (nested under <Box>)
-- `components`: remounting <Static> via key change emits the new items (root-level — removeChildFromContainer)
-- `components`: render only new items in static output on final render
 - `components`: replace child node with text
 - `components`: reset prop when it’s removed from the element
 - `wrap-text`: changing text wrapping recalculates the container height
 
-**Concurrent rendering: the `- concurrent` twin of a case that is ported** (45)
+**A rerender of a mounted tree that is also out of scope for another reason** (12)
 
-`borders` 4, `background` 4, `overflow` 4, `text` 8, `width-height` 2, `position` 1, `display` 2, `margin` 2, `padding` 2, `gap` 3, `flex-direction` 2, `flex-align-content` 1, `components` 10
+- `background`: Box preserves child state when adding a background color — a component with hooks
+- `background`: Box preserves child state when removing a background color — a component with hooks
+- `components`: static padding is not emitted again when there are no new items — `<Static>`
+- `components`: skip previous output when rendering new static output — `<Static>`
+- `components`: fullStaticOutput is reset when <Static> unmounts so stale items are not replayed — `<Static>`
+- `components`: unmounting an ancestor of <Static> clears staticNode and does not crash the renderer — `<Static>`
+- `components`: removing a <Static> ancestor that is a direct child of the root does not crash — `<Static>`
+- `components`: updating <Static> in one instance after another instance mounted <Static> sets the dirty flag on the correct root — `<Static>`
+- `components`: unmounting a <Static> ancestor in screen-reader mode does not replay stale output — screen-reader output
+- `components`: remounting <Static> via key change emits the new items (nested under <Box>) — `<Static>`
+- `components`: remounting <Static> via key change emits the new items (root-level — removeChildFromContainer) — `<Static>`
+- `components`: render only new items in static output on final render — `<Static>`
+
+**Concurrent rendering: the `- concurrent` twin of a case that is ported** (38)
+
+`borders` 3, `background` 3, `overflow` 4, `text` 6, `width-height` 2, `position` 1, `display` 2, `margin` 2, `padding` 2, `gap` 3, `flex-direction` 2, `flex-align-content` 1, `components` 7
+
+**Concurrent rendering, of a case that is itself left out** (7)
+
+- `borders`: render border after update - concurrent — a rerender of a mounted tree
+- `background`: Box background updates on rerender - concurrent — a rerender of a mounted tree
+- `text`: remeasure text when text is changed - concurrent — a rerender of a mounted tree
+- `text`: remeasure text when text nodes are changed - concurrent — a rerender of a mounted tree
+- `components`: transform children - concurrent — `<Transform>`
+- `components`: static output - concurrent — `<Static>`
+- `components`: remeasure text dimensions on text change - concurrent — a rerender of a mounted tree
 
 **`<Static>`** (7)
 
@@ -178,47 +246,10 @@ hand), `content-offset`, `overflow`, `render-to-string`,
 - `components`: <Transform> with null children
 - `render-to-string`: runs effect cleanup when a transform throws
 
-**An escape or control sequence embedded in text** (39)
+**The test compares escape bytes of a hyperlink, and hyperlinks are not built** (2)
 
-- `text`: strip ANSI cursor movement sequences from text
-- `text`: strip ANSI cursor position and erase sequences from text
-- `text`: preserve SGR color sequences in text
-- `text`: preserve OSC hyperlink sequences in text
-- `text`: preserve OSC hyperlink sequences with ST terminator in text
-- `text`: preserve C1 OSC sequences in text
-- `text`: preserve C1 OSC hyperlink sequences with ST terminator in text
-- `text`: preserve colors encoded with colon parameters
-- `text`: strip complete non-SGR CSI sequences without leaking parameters
-- `text`: strip complete C1 non-SGR CSI sequences without leaking parameters
-- `text`: strip complete ESC control sequences with intermediates
-- `text`: strip tmux DCS passthrough wrappers without leaking payload
-- `text`: strip tmux DCS passthrough wrappers with ST-terminated OSC payload
-- `text`: strip C1 DCS control strings as complete units
-- `text`: strip PM and APC control strings as complete units
-- `text`: strip C1 PM and APC control strings as complete units
-- `text`: strip ESC SOS control strings as complete units
-- `text`: strip C1 SOS control strings as complete units
-- `text`: strip malformed SOS control strings to avoid payload leaks
-- `text`: preserve SGR sequences around stripped SOS control strings
-- `text`: strip tmux DCS passthrough containing BEL until the final ST terminator
-- `text`: strip incomplete DCS passthrough sequences to avoid payload leaks
-- `text`: strip incomplete C1 DCS control strings to avoid payload leaks
-- `text`: strip incomplete OSC control strings to avoid payload leaks
-- `text`: strip incomplete C1 OSC control strings to avoid payload leaks
-- `text`: strip incomplete ESC control sequences with intermediates to avoid payload leaks
-- `text`: strip malformed ESC control sequences with intermediates and non-final bytes
-- `text`: strip standalone ST bytes from text output
-- `text`: strip standalone C1 control characters from text output
-- `components`: do not wrap text with BEL-terminated OSC hyperlinks
-- `components`: do not wrap text with ST-terminated OSC hyperlinks
-- `components`: do not wrap text with non-hyperlink OSC sequences
-- `components`: hard-wrap single-word BEL-terminated OSC hyperlink
-- `components`: hard-wrap single-word ST-terminated OSC hyperlink
-- `components`: link ansi escapes are closed properly
-- `wrap-text`: truncated multi-line text keeps a C1 SGR color that spans a newline
 - `wrap-text`: truncated multi-line text keeps a C1 OSC hyperlink that spans a newline
-- `wrap-text`: truncated multi-line text keeps a colon 256-color that spans a newline
-- `wrap-text`: truncated multi-line text keeps a colon truecolor that spans a newline
+- `components`: link ansi escapes are closed properly
 
 **Screen-reader output** (1)
 
@@ -304,6 +335,7 @@ test, and `test/ink.rip` imports none of it.
 ```bash
 cd packages/tui/bench
 bun ../test/ink/oracle/run.ts borders text        # any of the files above
+bun ../test/ink/oracle/truncate.ts                # cli-truncate's CJK rows
 cd ..
 rip test/ink/oracle/draft.rip borders | diff - test/ink/borders.rip
 ```
@@ -316,8 +348,8 @@ ported file: each recorded tree as a Rip component, each expectation
 through `cells.rip`, the cases it leaves out on stderr with the reason.
 For a file the draft produced whole, the diff is empty until Ink or the
 oracle changes, and a changed literal is pasted from the draft. For a
-file finished by hand, the diff shows the hand-finished tests beside
-any change.
+file finished by hand, the diff shows the hand-finished tests and the
+`differs` pins beside any change.
 
 ## Ink's license
 

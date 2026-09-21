@@ -7,7 +7,7 @@
 #   rip test/ink/styled-combining-marks.rip
 
 import { test, eq } from 'rip/testing'
-import { Box, Text, plain, styled } from './harness.rip'
+import { Box, Text, plain, styled, differs } from './harness.rip'
 
 console.log "\nStyled Combining Marks"
 
@@ -128,5 +128,6 @@ test "a styled mark without a base character keeps its position and style", ->
           "\u0301X"
         "Y"
   # Ink's test asks for this frame; published Ink 7.1.1 draws "\u001b[31mX\u001b[39mY"
-  eq styled(App, 80), ["\u0301«red»X«»Y"]
+  differs styled(App, 80), ["«red»X«»Y"], ["\u0301«red»X«»Y"],
+    "A combining mark with no base before it has no cell of its own, and a terminal would attach it to whatever cell precedes the cursor, which the grid does not track. It is measured at no width, as Ink measures it, and not drawn. Published Ink 7.1.1 draws this frame too; Ink's main branch writes the mark out."
 

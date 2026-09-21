@@ -7,7 +7,7 @@
 #   rip test/ink/flex-justify-content.rip
 
 import { test, eq } from 'rip/testing'
-import { Box, Text, plain, styled, tall, differs } from './harness.rip'
+import { Box, Text, plain, styled, differs } from './harness.rip'
 
 console.log "\nFlex Justify Content"
 
@@ -85,8 +85,8 @@ test "column - align text to center", ->
   eq plain(App), [
     ""
     "Test"
+    ""
   ]
-  eq tall(App), 3
 
 test "column - align text to bottom", ->
   App = component
@@ -121,7 +121,6 @@ test "column - align two text nodes with equal space around them", ->
         Text "A"
         Text "B"
   # Ink's test asks for this frame; published Ink 7.1.1 draws "A\n\n\nB\n"
-  differs plain(App), ["A", "", "", "B"], ["", "A", "", "B"],
+  differs plain(App), ["A", "", "", "B", ""], ["", "A", "", "B", ""],
     "Ink marks this test as failing: no build of Ink draws the frame it asks for. This is the frame Yoga's layout gives, and the one published Ink draws."
-  eq tall(App), 5
 

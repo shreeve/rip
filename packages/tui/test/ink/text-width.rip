@@ -6,7 +6,7 @@
 #
 #   rip test/ink/text-width.rip
 
-import { test, eq, ok } from 'rip/testing'
+import { test, eq } from 'rip/testing'
 import { Box, Text, plain, styled } from './harness.rip'
 
 console.log "\nText Width"
@@ -124,44 +124,38 @@ test "empty Text does not affect sibling layout", ->
         Text "hello"
   eq plain(App), ["hello"]
 
-# Ink's test asks that the row fit the box and no more; published Ink
-# 7.1.1 draws "あいうえおかきくけ…".
 test "truncate CJK text at end", ->
   App = component
     render
       Box width: 20
         Text wrap: 'truncate'
           "あいうえおかきくけこ|end"
-  rows = plain App
-  eq rows.length, 1
-  ok Bun.stringWidth(rows[0]) <= 20, "the row is #{Bun.stringWidth rows[0]} columns wide"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq plain(App), ["あいうえおかきくけ…"]
 
-# Ink's test asks that the row fit the box and no more; published Ink
-# 7.1.1 draws "あいうえ…けこ|end".
+# Ink's test asks that the row fit the box. The frame is the one Ink's
+# main branch draws: its measure reserves the whole offered width for
+# truncated text (src/dom.ts), so the row is cli-truncate's answer at 20
+# columns (oracle/truncate.ts prints it). Published Ink 7.1.1
+# measures the cut text at 19 columns, cuts it again at that width, and
+# draws "あいうえ…けこ|end".
 test "truncate CJK text in the middle", ->
   App = component
     render
       Box width: 20
         Text wrap: 'truncate-middle'
           "あいうえおかきくけこ|end"
-  rows = plain App
-  eq rows.length, 1
-  ok Bun.stringWidth(rows[0]) <= 20, "the row is #{Bun.stringWidth rows[0]} columns wide"
+  eq plain(App), ["あいうえお…けこ|end"]
 
-# Ink's test asks that the row fit the box and no more; published Ink
-# 7.1.1 draws "…えおかきくけこ|end".
 test "truncate CJK text at start", ->
   App = component
     render
       Box width: 20
         Text wrap: 'truncate-start'
           "あいうえおかきくけこ|end"
-  rows = plain App
-  eq rows.length, 1
-  ok Bun.stringWidth(rows[0]) <= 20, "the row is #{Bun.stringWidth rows[0]} columns wide"
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq plain(App), ["…えおかきくけこ|end"]
 
-# Ink's test asks for one row that ends with the bar; published Ink
-# 7.1.1 draws "あいうえおかきくけ… |".
 test "truncate CJK text does not exceed Box width", ->
   App = component
     render
@@ -170,10 +164,8 @@ test "truncate CJK text does not exceed Box width", ->
           Text wrap: 'truncate'
             "あいうえおかきくけこ|end"
         Text "|"
-  rows = plain App
-  eq rows.length, 1
-  ok rows[0].endsWith('|'), "the row is #{JSON.stringify rows[0]}"
-  eq Bun.stringWidth(rows[0]), 21
+  # Ink's test checks part of this frame; the whole of it is published Ink's.
+  eq plain(App), ["あいうえおかきくけ… |"]
 
 test "overlay on 2nd cell of CJK character clears the full character", ->
   App = component

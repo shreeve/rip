@@ -7,7 +7,7 @@
 #   rip test/ink/render-to-string.rip
 
 import { test, eq, throws } from 'rip/testing'
-import { Box, Text, Spacer, plain, styled, tall } from './harness.rip'
+import { Box, Text, Spacer, plain, styled } from './harness.rip'
 
 console.log "\nRender To String"
 
@@ -37,7 +37,7 @@ test "render null children", ->
   App = component
     render
       Text
-  eq plain(App, 80), []
+  eq plain(App, 80), [""]
 
 test "render box with padding", ->
   App = component
@@ -87,8 +87,11 @@ test "render box with fixed width and height", ->
       Box width: 10, height: 3
         Text "Hi"
   # Ink's test checks part of this frame; the whole of it is published Ink's.
-  eq plain(App, 80), ["Hi"]
-  eq tall(App, 80), 3
+  eq plain(App, 80), [
+    "Hi"
+    ""
+    ""
+  ]
 
 test "render spacer pushes content apart", ->
   App = component

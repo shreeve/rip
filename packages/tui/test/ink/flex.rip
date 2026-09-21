@@ -7,7 +7,7 @@
 #   rip test/ink/flex.rip
 
 import { test, eq } from 'rip/testing'
-import { Box, Text, plain, tall } from './harness.rip'
+import { Box, Text, plain } from './harness.rip'
 
 console.log "\nFlex"
 
@@ -83,8 +83,9 @@ test "set flex basis with flexDirection=\"column\" container", ->
     ""
     ""
     "B"
+    ""
+    ""
   ]
-  eq tall(App), 6
 
 test "set flex basis in percent with flexDirection=\"column\" container", ->
   App = component
@@ -98,6 +99,7 @@ test "set flex basis in percent with flexDirection=\"column\" container", ->
     ""
     ""
     "B"
+    ""
+    ""
   ]
-  eq tall(App), 6
 

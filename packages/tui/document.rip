@@ -31,7 +31,10 @@ PAINT =! [
 # Switches that stand unless they are turned off, so `false` is a value
 # to keep and not a style taken away.
 PRESENT =! Set.new ['hidden']   # keys the compiler writes as bare presence
-STANDING =! Set.new ['borderTop', 'borderBottom', 'borderLeft', 'borderRight']
+# Keys whose `false` says something and is kept: an edge switched off,
+# and an edge that stays bright under a dimmed border.
+STANDING =! Set.new ['borderTop', 'borderBottom', 'borderLeft', 'borderRight',
+  'borderTopDimColor', 'borderBottomDimColor', 'borderLeftDimColor', 'borderRightDimColor']
 
 KIND =! Map.new()
 KIND.set key, 'layout' for key in LAYOUT
@@ -218,7 +221,7 @@ export class Element extends Node
   getAttribute: (key) -> @attributes?.get(key) ?? @styles[key] ?? null
 
   # `style:` with an object lands here key by key (`el.style[key] = value`).
-  get style: -> @road ?= Road.new this
+  get style: -> @road ?= road this
 
   get className: -> ''
   set className: (value) -> throw Error.new "rip/tui: a class has no terminal meaning on <#{@tagName}> — style the node with props"
@@ -238,16 +241,16 @@ export class Element extends Node
       node = node.parentNode
     not event.defaultPrevented
 
-# The object behind `el.style`: one accessor per terminal style, each a
-# thin door onto the node's own `set`.
-class Road
-  constructor: (@node) ->
-
-for [key] in KIND
-  do (key) ->
-    Object.defineProperty Road.prototype, key,
-      get: -> @node.styles[key]
-      set: (value) -> @node.set key, value
+# The object behind `el.style`: every key written to it goes through the
+# node's own `set`, so a key that is no terminal style is refused by
+# name on this road as on the other. The runtime writes a handful of
+# keys here once per change; a node's hot path is `setAttribute`.
+road =! (node) ->
+  Proxy.new {},
+    get: (target, key) -> node.styles[key]
+    set: (target, key, value) ->
+      node.set key, value
+      true
 
 export class Text extends Node
   constructor: (data) ->

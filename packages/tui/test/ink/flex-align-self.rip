@@ -7,7 +7,7 @@
 #   rip test/ink/flex-align-self.rip
 
 import { test, eq } from 'rip/testing'
-import { Box, Text, plain, tall } from './harness.rip'
+import { Box, Text, plain } from './harness.rip'
 
 console.log "\nFlex Align Self"
 
@@ -20,8 +20,8 @@ test "row - align text to center", ->
   eq plain(App), [
     ""
     "Test"
+    ""
   ]
-  eq tall(App), 3
 
 test "row - align multiple text nodes to center", ->
   App = component
@@ -33,8 +33,8 @@ test "row - align multiple text nodes to center", ->
   eq plain(App), [
     ""
     "AB"
+    ""
   ]
-  eq tall(App), 3
 
 test "row - align text to bottom", ->
   App = component
@@ -116,6 +116,6 @@ test "row - align self baseline", ->
   eq plain(App), [
     "AX"
     "B"
+    ""
   ]
-  eq tall(App), 3
 

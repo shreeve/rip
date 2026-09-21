@@ -8,7 +8,7 @@
 #   rip test/ink/absolute-truncation.rip
 
 import { test, eq } from 'rip/testing'
-import { Box, Text, plain, tall } from './harness.rip'
+import { Box, Text, plain } from './harness.rip'
 
 console.log "\nAbsolute Truncation"
 
@@ -20,5 +20,4 @@ for wrap in ['truncate', 'truncate-start', 'truncate-middle', 'truncate-end']
           Box position: 'absolute'
             Text wrap: wrap
               "hello"
-    eq plain(App, 80), ["hello"]
-    eq tall(App, 80), 2
+    eq plain(App, 80), ["hello", ""]

@@ -7,7 +7,7 @@
 #   rip test/ink/padding.rip
 
 import { test, eq } from 'rip/testing'
-import { Box, Text, plain, tall } from './harness.rip'
+import { Box, Text, plain } from './harness.rip'
 
 console.log "\nPadding"
 
@@ -20,8 +20,9 @@ test "padding", ->
     ""
     ""
     "  X"
+    ""
+    ""
   ]
-  eq tall(App), 5
 
 test "padding X", ->
   App = component
@@ -41,8 +42,9 @@ test "padding Y", ->
     ""
     ""
     "X"
+    ""
+    ""
   ]
-  eq tall(App), 5
 
 test "padding top", ->
   App = component
@@ -60,8 +62,11 @@ test "padding bottom", ->
     render
       Box paddingBottom: 2
         Text "X"
-  eq plain(App), ["X"]
-  eq tall(App), 3
+  eq plain(App), [
+    "X"
+    ""
+    ""
+  ]
 
 test "padding left", ->
   App = component
@@ -91,8 +96,11 @@ test "nested padding", ->
     ""
     ""
     "    X"
+    ""
+    ""
+    ""
+    ""
   ]
-  eq tall(App), 9
 
 test "padding with multiline string", ->
   App = component
@@ -104,8 +112,9 @@ test "padding with multiline string", ->
     ""
     "  A"
     "  B"
+    ""
+    ""
   ]
-  eq tall(App), 6
 
 test "apply padding to text with newlines", ->
   App = component
@@ -119,8 +128,8 @@ test "apply padding to text with newlines", ->
     ""
     " Hello"
     " World"
+    ""
   ]
-  eq tall(App), 4
 
 test "apply padding to wrapped text", ->
   App = component
@@ -133,8 +142,8 @@ test "apply padding to wrapped text", ->
     " lo"
     " Wor"
     " ld"
+    ""
   ]
-  eq tall(App), 6
 
 test "text wrapping respects paddingX with flexGrow", ->
   App = component

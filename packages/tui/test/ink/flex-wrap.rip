@@ -7,7 +7,7 @@
 #   rip test/ink/flex-wrap.rip
 
 import { test, eq } from 'rip/testing'
-import { Box, Text, plain, tall } from './harness.rip'
+import { Box, Text, plain } from './harness.rip'
 
 console.log "\nFlex Wrap"
 
@@ -17,8 +17,10 @@ test "row - no wrap", ->
       Box width: 2
         Text "A"
         Text "BC"
-  eq plain(App), ["BC"]
-  eq tall(App), 2
+  eq plain(App), [
+    "BC"
+    ""
+  ]
 
 test "column - no wrap", ->
   App = component

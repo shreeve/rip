@@ -7,7 +7,7 @@
 #   rip test/ink/text.rip
 
 import { test, eq } from 'rip/testing'
-import { Box, Text, plain, styled } from './harness.rip'
+import { Box, Text, plain, styled, differs } from './harness.rip'
 
 console.log "\nText"
 
@@ -15,13 +15,13 @@ test "<Text> with undefined children", ->
   App = component
     render
       Text
-  eq plain(App), []
+  eq plain(App), [""]
 
 test "<Text> with null children", ->
   App = component
     render
       Text
-  eq plain(App), []
+  eq plain(App), [""]
 
 test "tabs are measured and rendered without overwriting adjacent text", ->
   App = component
@@ -142,4 +142,255 @@ test "text with content \"constructor\" wraps correctly", ->
     render
       Text "constructor"
   eq plain(App), ["constructor"]
+
+test "strip ANSI cursor movement sequences from text", ->
+  App = component
+    render
+      Box
+        Text "\u001b[1A\u001b[2KStarting client ... \u001b[32mdone\u001b[0m\u001b[1B"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  differs styled(App), ["Starting client ... done"], ["Starting client ... «green»done"],
+    "Styling is structural only (PLAN §6): an SGR sequence written into text is stripped with every other control sequence, where Ink passes it through to the terminal."
+
+test "strip ANSI cursor position and erase sequences from text", ->
+  App = component
+    render
+      Box
+        Text "Hello\u001b[5;10HWorld\u001b[2J!"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  eq plain(App), ["HelloWorld!"]
+
+test "preserve SGR color sequences in text", ->
+  App = component
+    render
+      Box
+        Text "\u001b[32mgreen\u001b[0m normal"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  differs styled(App), ["green normal"], ["«green»green«» normal"],
+    "Styling is structural only (PLAN §6): an SGR sequence written into text is stripped with every other control sequence, where Ink passes it through to the terminal."
+
+test "preserve OSC hyperlink sequences in text", ->
+  App = component
+    render
+      Box
+        Text "\u001b]8;;https://example.com\u0007link\u001b]8;;\u0007"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  # Ink keeps the hyperlink around this text; hyperlinks are not built here.
+  eq plain(App), ["link"]
+
+test "preserve OSC hyperlink sequences with ST terminator in text", ->
+  App = component
+    render
+      Box
+        Text "\u001b]8;;https://example.com\u001b\\link\u001b]8;;\u001b\\"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  # Ink keeps the hyperlink around this text; hyperlinks are not built here.
+  eq plain(App), ["link"]
+
+test "preserve C1 OSC sequences in text", ->
+  App = component
+    render
+      Box
+        Text "\u009d8;;https://example.com\u0007link\u009d8;;\u0007"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  # Ink keeps the hyperlink around this text; hyperlinks are not built here.
+  eq plain(App), ["link"]
+
+test "preserve C1 OSC hyperlink sequences with ST terminator in text", ->
+  App = component
+    render
+      Box
+        Text "\u009d8;;https://example.com\u001b\\link\u009d8;;\u001b\\"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  # Ink keeps the hyperlink around this text; hyperlinks are not built here.
+  eq plain(App), ["link"]
+
+test "preserve colors encoded with colon parameters", ->
+  App1 = component
+    render
+      Box
+        Text "A\u001b[38:2::255:100:0mcolor\u001b[0mB"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  differs styled(App1), ["AcolorB"], ["A«#ff6400»color«»B"],
+    "Styling is structural only (PLAN §6): an SGR sequence written into text is stripped with every other control sequence, where Ink passes it through to the terminal."
+  App2 = component
+    render
+      Box
+        Text "A\u001b[38;2;255;100;0mcolor\u001b[0mB"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  differs styled(App2), ["AcolorB"], ["A«#ff6400»color«»B"],
+    "Styling is structural only (PLAN §6): an SGR sequence written into text is stripped with every other control sequence, where Ink passes it through to the terminal."
+
+test "strip complete non-SGR CSI sequences without leaking parameters", ->
+  App = component
+    render
+      Box
+        Text "A\u001b[>4;2mB\u001b[2 qC"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  eq plain(App), ["ABC"]
+
+test "strip complete C1 non-SGR CSI sequences without leaking parameters", ->
+  App = component
+    render
+      Box
+        Text "A\u009b>4;2mB\u009b2 qC"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  eq plain(App), ["ABC"]
+
+test "strip complete ESC control sequences with intermediates", ->
+  App = component
+    render
+      Box
+        Text "A\u001b#8B\u001bcC"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  eq plain(App), ["ABC"]
+
+test "strip tmux DCS passthrough wrappers without leaking payload", ->
+  App = component
+    render
+      Box
+        Text "\u001bPtmux;\u001b\u001b]8;;https://example.com\u0007\u001b\\link\u001bPtmux;\u001b\u001b]8;;\u0007\u001b\\"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  # Ink keeps the hyperlink around this text; hyperlinks are not built here.
+  eq plain(App), ["link"]
+
+test "strip tmux DCS passthrough wrappers with ST-terminated OSC payload", ->
+  App = component
+    render
+      Box
+        Text "\u001bPtmux;\u001b\u001b]8;;https://example.com\u001b\u001b\\\u001b\\link\u001bPtmux;\u001b\u001b]8;;\u001b\u001b\\\u001b\\"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  # Ink keeps the hyperlink around this text; hyperlinks are not built here.
+  eq plain(App), ["link"]
+
+test "strip C1 DCS control strings as complete units", ->
+  App = component
+    render
+      Box
+        Text "A\u0090payload\u001b\\B\u0090payload\u009cC"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  eq plain(App), ["ABC"]
+
+test "strip PM and APC control strings as complete units", ->
+  App = component
+    render
+      Box
+        Text "A\u001b^pm-payload\u001b\\B\u001b_apc-payload\u001b\\C"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  eq plain(App), ["ABC"]
+
+test "strip C1 PM and APC control strings as complete units", ->
+  App = component
+    render
+      Box
+        Text "A\u009epm-payload\u009cB\u009fapc-payload\u009cC"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  eq plain(App), ["ABC"]
+
+test "strip ESC SOS control strings as complete units", ->
+  App = component
+    render
+      Box
+        Text "A\u001bXpayload\u001b\\B"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  eq plain(App), ["AB"]
+
+test "strip C1 SOS control strings as complete units", ->
+  App = component
+    render
+      Box
+        Text "A\u0098payload\u001b\\B\u0098payload\u009cC"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  eq plain(App), ["ABC"]
+
+test "strip malformed SOS control strings to avoid payload leaks", ->
+  App = component
+    render
+      Box
+        Text "A\u001bXpayload\u0007B\u0098payload"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  eq plain(App), ["A"]
+
+test "preserve SGR sequences around stripped SOS control strings", ->
+  App = component
+    render
+      Box
+        Text "A\u001b[32mgreen\u001b[0m\u001bXpayload\u001b\\B"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  differs styled(App), ["AgreenB"], ["A«green»green«»B"],
+    "Styling is structural only (PLAN §6): an SGR sequence written into text is stripped with every other control sequence, where Ink passes it through to the terminal."
+
+test "strip tmux DCS passthrough containing BEL until the final ST terminator", ->
+  App = component
+    render
+      Box
+        Text "A\u001bPtmux;\u001b\u001b]0;title\u0007\u001b\\B"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  eq plain(App), ["AB"]
+
+test "strip incomplete DCS passthrough sequences to avoid payload leaks", ->
+  App = component
+    render
+      Box
+        Text "\u001bPtmux;\u001blink"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  eq plain(App), [""]
+
+test "strip incomplete C1 DCS control strings to avoid payload leaks", ->
+  App = component
+    render
+      Box
+        Text "A\u0090payload"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  eq plain(App), ["A"]
+
+test "strip incomplete OSC control strings to avoid payload leaks", ->
+  App = component
+    render
+      Box
+        Text "A\u001b]8;;https://example.comlink"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  # Ink keeps the hyperlink around this text; hyperlinks are not built here.
+  eq plain(App), ["A"]
+
+test "strip incomplete C1 OSC control strings to avoid payload leaks", ->
+  App = component
+    render
+      Box
+        Text "A\u009d8;;https://example.comlink"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  # Ink keeps the hyperlink around this text; hyperlinks are not built here.
+  eq plain(App), ["A"]
+
+test "strip incomplete ESC control sequences with intermediates to avoid payload leaks", ->
+  App = component
+    render
+      Box
+        Text "A\u001b#"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  eq plain(App), ["A"]
+
+test "strip malformed ESC control sequences with intermediates and non-final bytes", ->
+  App = component
+    render
+      Box
+        Text "A\u001b#\u0007payload"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  eq plain(App), ["A"]
+
+test "strip standalone ST bytes from text output", ->
+  App = component
+    render
+      Box
+        Text "A\u009cB"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  eq plain(App), ["AB"]
+
+test "strip standalone C1 control characters from text output", ->
+  App = component
+    render
+      Box
+        Text "A\u0085B\u008eC"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  eq plain(App), ["ABC"]
 

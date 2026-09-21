@@ -7,7 +7,7 @@
 #   rip test/ink/position.rip
 
 import { test, eq } from 'rip/testing'
-import { Box, Text, plain, tall } from './harness.rip'
+import { Box, Text, plain } from './harness.rip'
 
 console.log "\nPosition"
 
@@ -20,8 +20,8 @@ test "absolute position with top and left offsets", ->
   eq plain(App), [
     ""
     "  X"
+    ""
   ]
-  eq tall(App), 3
 
 test "absolute position with bottom and right offsets", ->
   App = component
@@ -33,8 +33,8 @@ test "absolute position with bottom and right offsets", ->
     ""
     ""
     "    X"
+    ""
   ]
-  eq tall(App), 4
 
 test "renders visible lines of text positioned above the output area", ->
   App = component
@@ -58,8 +58,8 @@ test "absolute position with percentage offsets", ->
     ""
     ""
     "   X"
+    ""
   ]
-  eq tall(App), 4
 
 test "absolute position with percentage bottom and right offsets", ->
   App = component
@@ -70,8 +70,9 @@ test "absolute position with percentage bottom and right offsets", ->
   eq plain(App), [
     ""
     "  X"
+    ""
+    ""
   ]
-  eq tall(App), 4
 
 test "relative position offsets visual position while keeping flow", ->
   App = component

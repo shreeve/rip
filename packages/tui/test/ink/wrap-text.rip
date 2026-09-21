@@ -8,13 +8,15 @@
 # is drawn here as the tree that reaches the same code, a <Text> with
 # that `wrap` in a <Box> of that width, and held to the literal Ink
 # holds the function to (oracle/extra/wrap-text.tsx is the same port on
-# Ink's side). A style that spans a newline is a `color` prop, where
-# Ink's test writes the escape sequence into the text.
+# Ink's side). In "keeps styles that span a newline" the style is a
+# `color` prop, where Ink's test writes the escape sequence into the
+# text, and the hyperlink half of that test is left out: hyperlinks are
+# not built here.
 #
 #   rip test/ink/wrap-text.rip
 
 import { test, eq } from 'rip/testing'
-import { Box, Text, plain, styled } from './harness.rip'
+import { Box, Text, plain, styled, differs } from './harness.rip'
 
 console.log "\nWrap Text"
 
@@ -92,6 +94,9 @@ test "truncates each line of multi-line text separately", ->
     "foo"
   ]
 
+# Ink's test holds a color and then a hyperlink to this. The color is
+# here, as a prop; the hyperlink half is not ported: hyperlinks are not
+# built.
 test "truncated multi-line text keeps styles that span a newline", ->
   App = component
     render
@@ -117,6 +122,36 @@ test "truncated multi-line text keeps its lines in the layout", ->
     "│foo   │"
     "└──────┘"
   ]
+
+test "truncated multi-line text keeps a C1 SGR color that spans a newline", ->
+  App = component
+    render
+      Box width: 4
+        Text wrap: 'truncate'
+          "\u009b31mabcdef\nuvwxyz\u009b39m"
+  # Ink's test asks for the styled frame; its text is what stands here.
+  differs styled(App), ["abc…", "uvw…"], ["«red»abc…", "«red»uvw…"],
+    "Styling is structural only (PLAN §6): an SGR sequence written into text is stripped with every other control sequence, where Ink passes it through to the terminal."
+
+test "truncated multi-line text keeps a colon 256-color that spans a newline", ->
+  App = component
+    render
+      Box width: 4
+        Text wrap: 'truncate'
+          "\u001b[38:5:196mabcdef\nuvwxyz\u001b[39m"
+  # Ink's test asks for the styled frame; its text is what stands here.
+  differs styled(App), ["abc…", "uvw…"], ["«ansi256(196)»abc…", "«ansi256(196)»uvw…"],
+    "Styling is structural only (PLAN §6): an SGR sequence written into text is stripped with every other control sequence, where Ink passes it through to the terminal."
+
+test "truncated multi-line text keeps a colon truecolor that spans a newline", ->
+  App = component
+    render
+      Box width: 4
+        Text wrap: 'truncate'
+          "\u001b[38:2::255:0:0mabcdef\nuvwxyz\u001b[39m"
+  # Ink's test asks for the styled frame; its text is what stands here.
+  differs styled(App), ["abc…", "uvw…"], ["«#ff0000»abc…", "«#ff0000»uvw…"],
+    "Styling is structural only (PLAN §6): an SGR sequence written into text is stripped with every other control sequence, where Ink passes it through to the terminal."
 
 test "uses separate cache entries for different widths", ->
   App1 = component

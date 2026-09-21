@@ -11,7 +11,7 @@
 #   rip test/ink/content-offset.rip
 
 import { test, eq, throws } from 'rip/testing'
-import { Box, Text, plain, tall } from './harness.rip'
+import { Box, Text, plain } from './harness.rip'
 
 console.log "\nContent Offset"
 
@@ -48,8 +48,10 @@ test "contentOffsetY - offset beyond content renders empty", ->
         Box flexDirection: 'column', flexShrink: 0
           Text "Line 1"
           Text "Line 2"
-  eq plain(App), []
-  eq tall(App), 2
+  eq plain(App), [
+    ""
+    ""
+  ]
 
 test "contentOffsetY - negative offset shifts content down", ->
   App = component
@@ -155,8 +157,10 @@ test "disjoint nested clips render nothing", ->
         Box width: 5, overflowX: 'hidden'
           Box marginLeft: 10, width: 10, overflowX: 'hidden', flexShrink: 0
             Text "XXXXXXXXXX"
-  eq plain(App), ["HEADER"]
-  eq tall(App), 2
+  eq plain(App), [
+    "HEADER"
+    ""
+  ]
 
 test "disjoint nested clips do not overwrite content when a wide character straddles the edge", ->
   App = component
@@ -167,8 +171,10 @@ test "disjoint nested clips do not overwrite content when a wide character strad
           Box marginLeft: 6, width: 5, overflowX: 'hidden', contentOffsetX: 1, flexShrink: 0
             Box flexShrink: 0
               Text "你AAAA"
-  eq plain(App, 20), ["XXXXXXXXXX"]
-  eq tall(App, 20), 2
+  eq plain(App, 20), [
+    "XXXXXXXXXX"
+    ""
+  ]
 
 test "contentOffsetY - nested clipped content does not escape the outer viewport", ->
   App = component

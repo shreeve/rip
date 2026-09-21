@@ -9,7 +9,7 @@
 # ==============================================================================
 
 import { test, eq, ok } from 'rip/testing'
-import { sanitize, Flow, MODES, glyph, lead, CLUSTER, refresh } from '../text.rip'
+import { sanitize, Flow, MODES, glyph, CLUSTER, refresh, widthOf } from '../text.rip'
 import { Element, Text } from '../document.rip'
 import { Grid, intern } from '../paint.rip'
 
@@ -59,9 +59,85 @@ test "an escape sequence goes whole: CSI, OSC, a string, a two-byte escape", ->
   eq sanitize("#{at 0x9B}1mC1"), 'C1'
 
 test "C0 and C1 controls go; the newline and the tab stay", ->
-  eq sanitize("a#{at 0}b#{at 7}c#{at 8}d#{at 0x7F}e#{at 0x85}f#{at 0x9F}g"), 'abcdefg'
+  eq sanitize("a#{at 0}b#{at 7}c#{at 8}d#{at 0x7F}e#{at 0x85}f#{at 0x8E}g"), 'abcdefg'
   eq sanitize("a\r\nb\rc"), 'a\nbc'
   eq sanitize("a\tb\nc"), 'a\tb\nc'
+
+# Ink's test/sanitize-ansi.ts, case for case, for what is REMOVED. Its
+# cases about SGR and OSC being PRESERVED have no counterpart: styling
+# here is structural, and no escape sequence is kept inside text at all,
+# so where Ink expects the sequence kept this contract expects the words
+# alone — `A` + SGR + `text` + SGR + `B` is `AtextB`.
+REMOVED =! [
+  ['preserve plain text', 'hello', 'hello']
+  ['SGR sequences go, the words stay', "A#{ESC}[1;4mtext#{ESC}[0mB", 'AtextB']
+  ['colon color and underline parameters go with their sequence', "#{ESC}[38:2::255:0:0mcolor#{ESC}[4:3m!#{ESC}[0m", 'color!']
+  ['empty SGR parameters', "A#{ESC}[mB#{ESC}[;1mC", 'ABC']
+  ['SGR between a base and its combining mark', "e#{ESC}[31m#{ESC}[1m#{ACUTE}X#{ESC}[39m", "e#{ACUTE}X"]
+  ['cursor controls before a combining mark', "e#{ESC}[31m\r#{ACUTE}X", "e#{ACUTE}X"]
+  ['OSC hyperlinks terminated by ESC ST', "#{ESC}]8;;https://example.com#{ESC}\\link#{ESC}]8;;#{ESC}\\", 'link']
+  ['OSC hyperlinks terminated by C1 ST', "#{ESC}]8;;https://example.com#{at 0x9C}link#{ESC}]8;;#{at 0x9C}", 'link']
+  ['C1 OSC hyperlinks terminated by C1 ST', "#{at 0x9D}8;;https://example.com#{at 0x9C}link#{at 0x9D}8;;#{at 0x9C}", 'link']
+  ['C1 OSC hyperlinks terminated by ESC ST', "#{at 0x9D}8;;https://example.com#{ESC}\\link#{at 0x9D}8;;#{ESC}\\", 'link']
+  ['C1 OSC hyperlinks terminated by BEL', "#{at 0x9D}8;;https://example.com#{at 7}link#{at 0x9D}8;;#{at 7}", 'link']
+  ['strip non-SGR CSI sequences as complete units', "A#{ESC}[>4;2mB#{ESC}[2 qC", 'ABC']
+  ['strip C1 non-SGR CSI sequences as complete units', "A#{at 0x9B}>4;2mB#{at 0x9B}2 qC", 'ABC']
+  ['C1 SGR CSI sequences', "A#{at 0x9B}31mgreen#{at 0x9B}0mB", 'AgreenB']
+  ['strip private-parameter m-sequences that are not SGR', "A#{ESC}[>4;2mB", 'AB']
+  ['strip tmux DCS passthrough wrappers with escaped ST payload terminators', "#{ESC}Ptmux;#{ESC}#{ESC}]8;;https://example.com#{ESC}#{ESC}\\#{ESC}\\link#{ESC}Ptmux;#{ESC}#{ESC}]8;;#{ESC}#{ESC}\\#{ESC}\\", 'link']
+  ['strip incomplete DCS passthrough sequences to avoid payload leaks', "A#{ESC}Ptmux;#{ESC}link", 'A']
+  ['strip DCS control strings with BEL in payload until ST terminator', "A#{ESC}Ppayload#{at 7}still-payload#{ESC}\\B", 'AB']
+  ['strip ESC SOS control strings as complete units', "A#{ESC}Xpayload#{ESC}\\B", 'AB']
+  ['strip ESC SOS control strings with C1 ST terminator', "A#{ESC}Xpayload#{at 0x9C}B", 'AB']
+  ['strip C1 SOS control strings as complete units with C1 ST terminator', "A#{at 0x98}payload#{at 0x9C}B", 'AB']
+  ['strip C1 SOS control strings as complete units with ESC ST terminator', "A#{at 0x98}payload#{ESC}\\B", 'AB']
+  ['strip ESC SOS with BEL terminator as malformed control string', "A#{ESC}Xpayload#{at 7}B", 'A']
+  ['strip C1 SOS with BEL terminator as malformed control string', "A#{at 0x98}payload#{at 7}B", 'A']
+  ['strip incomplete ESC SOS control strings to avoid payload leaks', "A#{ESC}Xpayload", 'A']
+  ['strip incomplete C1 SOS control strings to avoid payload leaks', "A#{at 0x98}payload", 'A']
+  ['strip SOS with escaped ESC in payload until final ST terminator', "A#{ESC}Xfoo#{ESC}#{ESC}\\bar#{ESC}\\B", 'AB']
+  ['SGR around stripped SOS control strings', "A#{ESC}[31mR#{ESC}[0m#{ESC}Xpayload#{ESC}\\B", 'ARB']
+  ['strip ESC ST sequences', "A#{ESC}\\B", 'AB']
+  ['strip malformed ESC control sequences with intermediates and non-final bytes', "A#{ESC}##{at 7}payload", 'A']
+  ['strip incomplete CSI after prior SGR content', "A#{ESC}[31mB#{ESC}[", 'AB']
+  ['strip standalone ST bytes', "A#{at 0x9C}B", 'AB']
+  ['strip standalone C1 control characters', "A#{at 0x85}B#{at 0x8E}C", 'ABC']
+  ['a lone ESC goes and the words after it stay', "A#{ESC}#{at 0xE9}B", "A#{at 0xE9}B"]
+  ['an ESC that ends the text', "A#{ESC}", 'A']
+]
+
+test "Ink's sanitize contract, for everything it removes", ->
+  for [title, written, kept] in REMOVED
+    eq sanitize(written), kept, title
+
+test "no C0, C1 or ESC but the newline and the tab survives, whatever is written", ->
+  seed = 11
+  rand = ->
+    seed = (seed * 1664525 + 1013904223) % 4294967296
+    seed / 4294967296
+  pool = [0x1B, 0x1B, 0x9B, 0x9D, 0x90, 0x98, 0x9E, 0x9F, 0x9C, 0x07, 0x5B, 0x5D, 0x5C, 0x50, 0x58, 0x30, 0x3B, 0x20, 0x23, 0x6D, 0x41, 0x7F, 0x00, 0x09, 0x0A, 0x0D, 0x85, 0x61, 0x65E5]
+  for round in [0...20000]
+    text = ''
+    for n in [0...1 + Math.floor(rand() * 12)]
+      text += at pool[Math.floor(rand() * pool.length)]
+    kept = sanitize text
+    ok not /[\x00-\x08\x0b-\x1f\x7f-\x9f]/.test(kept), "#{JSON.stringify text} kept #{JSON.stringify kept}"
+
+test "hostile text is read once, not once per introducer: eight times the text costs about eight times as long", ->
+  # A quadratic reader takes 64 times as long for 8 times the text; a
+  # linear one about 8. The bound sits between, and each size takes its
+  # best of five, so a busy machine moves both numbers and not the ratio.
+  best = (text) ->
+    least = Infinity
+    for round in [0...5]
+      began = performance.now()
+      sanitize text
+      least = Math.min least, performance.now() - began
+    least
+  for unit in [at(0x9D), ESC + ']', ESC + '[1', ESC, ESC + 'a' + at(0x85)]
+    small = best unit.repeat(40000)
+    large = best unit.repeat(320000)
+    ok large < 24 * Math.max(small, 0.05), "#{JSON.stringify unit} × 40,000 took #{small.toFixed 2} ms and × 320,000 took #{large.toFixed 2} ms"
 
 test "text that is not ASCII keeps every code point it came with", ->
   text = "#{SUN}#{BOOK} e#{ACUTE} #{FAMILY}"
@@ -93,46 +169,63 @@ test "an emoji joined by ZWJ, a flag, a skin tone, and a keycap are each one uni
 test "a combining mark stays with its base, in one cell", ->
   eq units("e#{ACUTE}x"), [["e#{ACUTE}", 1], ['x', 1]]
 
-test "a mark that opens a text or a line joins the unit after it: no width of its own, never apart from it", ->
-  eq units("#{ACUTE}Xy"), [["#{ACUTE}X", 1], ['y', 1]]
-  eq units("#{ACUTE}#{SUN}y"), [["#{ACUTE}#{SUN}", 2], ['y', 1]]
-  eq units("ab\n#{ACUTE}#{ACUTE}cd"), [['a', 1], ['b', 1], ['\n', 0], ["#{ACUTE}#{ACUTE}c", 1], ['d', 1]]
-  flow = Flow.new()
-  flow.set "#{ACUTE}Xy", null
-  eq [flow.wide, flow.tall, flow.cuts], [2, 1, [0, 2, 3]]
-  eq lead(flow.code 0), 1
-  eq lead(flow.code 1), 0
-
-test "marks with nothing after them on their line are a unit of no width", ->
+test "a mark with no base — opening a text or a line, or after a space — is a unit of no width", ->
+  eq units("#{ACUTE}Xy"), [[ACUTE, 0], ['X', 1], ['y', 1]]
+  eq units("ab\n#{ACUTE}#{ACUTE}cd"), [['a', 1], ['b', 1], ['\n', 0], ["#{ACUTE}#{ACUTE}", 0], ['c', 1], ['d', 1]]
+  eq units("a #{ACUTE}b"), [['a', 1], [' ', 1], [ACUTE, 0], ['b', 1]]
+  eq units("a #{ZWJ}b"), [['a', 1], [' ', 1], [ZWJ, 0], ['b', 1]]
   eq units(ACUTE), [[ACUTE, 0]]
-  eq units("#{ACUTE}#{ACUTE}\nab"), [["#{ACUTE}#{ACUTE}", 0], ['\n', 0], ['a', 1], ['b', 1]]
   flow = Flow.new()
   flow.set "#{ACUTE}#{ACUTE}", null
   eq [flow.wide, flow.tall], [0, 1]
   flow.measure 5, false
   eq [flow.w, flow.h], [0, 1]
-  eq rows("#{ACUTE}#{ACUTE}", 3), ["#{ACUTE}#{ACUTE}"]
 
-test "a leading mark wraps, cuts, and measures with the unit it joined", ->
+test "a baseless mark keeps its offsets through a wrap and a cut, as wrap-ansi and cli-truncate keep it", ->
   eq rows("#{ACUTE}abcdef", 3), ["#{ACUTE}abc", 'def']
   eq rows("abc\n#{ACUTE}defg", 3), ['abc', "#{ACUTE}def", 'g']
-  eq rows("ab #{SUN}\n#{ACUTE}#{SUN}#{BOOK}", 3), ['ab ', SUN, "#{ACUTE}#{SUN}", BOOK]
+  eq rows("#{ACUTE}#{ACUTE}", 3), ["#{ACUTE}#{ACUTE}"]
   eq rows("#{ACUTE}abcdef", 4, 'truncate'), ["#{ACUTE}abc…"]
   eq rows("#{ACUTE}abcdef", 4, 'truncate-start'), ['…def']
-  eq rows("#{ACUTE}abcdef", 5, 'truncate-middle'), ["#{ACUTE}ab…ef"]
   eq rows("#{ACUTE}abcdef", 1, 'truncate'), ['…']
 
-test "on the grid a leading mark shares its base's cell, is written ahead of the cell's style, and clips with it", ->
+test "a space is where a line may break, whatever leans on it", ->
+  eq rows("aa #{ACUTE}bb", 4), ['aa ', "#{ACUTE}bb"]
+  eq rows("aa #{ZWJ}bb", 4), ['aa ', "#{ZWJ}bb"]
+
+test "on the grid a baseless mark draws nothing: no cell is its own, and none is lent it", ->
   red = intern 'red', null, 0
   grid = Grid.new 4, 1
   grid.write 0, 0, "#{ACUTE}Xy", red
   eq Array.from(grid.wide), [1, 1, 1, 1]
-  eq grid.toString(), "#{ACUTE}Xy"
-  eq grid.toString(true), "#{ACUTE}#{ESC}[31mXy#{ESC}[0m  "
-  clipped = Grid.new 4, 1
-  clipped.clip 1, 0, 4, 1
-  clipped.write 0, 0, "#{ACUTE}Xy", red
-  eq clipped.toString(), ' y'
+  eq grid.toString(), 'Xy'
+  eq grid.toString(true), "#{ESC}[31mXy#{ESC}[0m  "
+
+test "a cluster is as wide as string-width 8 says: a spacing mark takes a cell, a mark above takes none", ->
+  bengali = [0x9AC, 0x9BE, 0x982, 0x9B2, 0x9BE].map(at).join ''
+  hindi = [0x939, 0x93F, 0x928, 0x94D, 0x926, 0x940].map(at).join ''
+  conjunct = [0x915, 0x94D, 0x937, 0x94D, 0x92E].map(at).join ''
+  tamil = [0xBA4, 0xBAE, 0xBBF, 0xBB4, 0xBCD].map(at).join ''
+  thai = [0xE2A, 0xE27, 0xE31, 0xE2A, 0xE14, 0xE35].map(at).join ''
+  eq [widthOf(bengali), widthOf(hindi), widthOf(conjunct), widthOf(tamil), widthOf(thai)], [5, 4, 1, 4, 4]
+  eq (unit[1] for unit in units bengali), [3, 2]
+  eq (unit[1] for unit in units "#{at 0x915}#{at 0x93F}"), [2]
+  eq (unit[1] for unit in units "#{at 0xBA8}#{at 0xBBF}"), [2]
+  eq (unit[1] for unit in units "#{at 0xE01}#{at 0xE33}"), [1]
+  eq (unit[1] for unit in units "#{at 0x1112}#{at 0x1161}#{at 0x11AB}#{at 0xFF8A}#{at 0xFF9E}"), [2, 2]
+  eq (unit[1] for unit in units "#{at 0xAD}#{at 0x200B}x"), [0, 0, 1]
+
+test "a cluster wider than two cells wraps whole, and a tab stop after it counts every cell", ->
+  bengali = [0x9AC, 0x9BE, 0x982].map(at).join ''
+  eq rows("ab#{bengali}c", 4), ['ab', "#{bengali}c"]
+  leaf = Element.new 'span'
+  leaf.appendChild Text.new "#{bengali}\tx"
+  eq refresh(leaf).text, "#{bengali}     x"
+  grid = Grid.new 6, 1
+  grid.write 0, 0, "#{bengali}c", 0
+  eq Array.from(grid.wide), [3, 0, 0, 1, 1, 1]
+  grid.write 1, 0, 'x', 0
+  eq [grid.toString(), Array.from(grid.wide)], [' x c', [1, 1, 1, 1, 1, 1]]
 
 test "a cluster of several code points is one flagged cell that reads back whole", ->
   flow = Flow.new()

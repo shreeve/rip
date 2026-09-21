@@ -7,7 +7,7 @@
 #   rip test/ink/overflow.rip
 
 import { test, eq } from 'rip/testing'
-import { Box, Text, plain, tall } from './harness.rip'
+import { Box, Text, plain, differs } from './harness.rip'
 
 console.log "\nOverflow"
 
@@ -119,7 +119,7 @@ test "overflowX - box before left edge of overflow container", ->
       Box width: 6, overflowX: 'hidden'
         Box marginLeft: -12, width: 6, flexShrink: 0
           Text "Hello"
-  eq plain(App), []
+  eq plain(App), [""]
 
 test "overflowX - box before left edge of overflow container with border", ->
   App = component
@@ -159,7 +159,7 @@ test "overflowX - box after right edge of overflow container", ->
       Box width: 6, overflowX: 'hidden'
         Box marginLeft: 6, width: 6, flexShrink: 0
           Text "Hello"
-  eq plain(App), []
+  eq plain(App), [""]
 
 test "overflowX - box intersecting with right edge of overflow container", ->
   App = component
@@ -238,7 +238,7 @@ test "overflowY - box above top edge of overflow container", ->
             "Hello"
             "\n"
             "World"
-  eq plain(App), []
+  eq plain(App), [""]
 
 test "overflowY - box above top edge of overflow container with border", ->
   App = component
@@ -290,7 +290,7 @@ test "overflowY - box below bottom edge of overflow container", ->
             "Hello"
             "\n"
             "World"
-  eq plain(App), []
+  eq plain(App), [""]
 
 test "overflowY - box below bottom edge of overflow container with border", ->
   App = component
@@ -341,8 +341,10 @@ test "overflowX visible overrides overflow hidden while preserving vertical clip
           Box width: 6, height: 2, flexShrink: 0
             Text "ABCDEF\nGHIJKL"
   # Ink's test asks for this frame; published Ink 7.1.1 draws "ABC\n"
-  eq plain(App), ["ABCDEF"]
-  eq tall(App), 2
+  eq plain(App), [
+    "ABCDEF"
+    ""
+  ]
 
 test "overflowY visible overrides overflow hidden while preserving horizontal clipping", ->
   App = component
@@ -367,8 +369,10 @@ test "overflow - single text node inside overflow container", ->
               "Hello"
               "\n"
               "World"
-  eq plain(App), ["Hello"]
-  eq tall(App), 2
+  eq plain(App), [
+    "Hello"
+    ""
+  ]
 
 test "overflow - single text node inside overflow container with border", ->
   App = component
@@ -384,8 +388,8 @@ test "overflow - single text node inside overflow container with border", ->
     "╭──────╮"
     "│Hello │"
     "╰──────╯"
+    ""
   ]
-  eq tall(App), 4
 
 test "overflow - multiple boxes inside overflow container", ->
   App = component
@@ -402,8 +406,10 @@ test "overflow - multiple boxes inside overflow container", ->
               "TR"
               "\n"
               "BR"
-  eq plain(App), ["TLTR"]
-  eq tall(App), 2
+  eq plain(App), [
+    "TLTR"
+    ""
+  ]
 
 test "overflow - multiple boxes inside overflow container with border", ->
   App = component
@@ -424,8 +430,8 @@ test "overflow - multiple boxes inside overflow container with border", ->
     "╭────╮"
     "│TLTR│"
     "╰────╯"
+    ""
   ]
-  eq tall(App), 4
 
 test "overflow - box intersecting with top left edge of overflow container", ->
   App = component
@@ -443,8 +449,9 @@ test "overflow - box intersecting with top left edge of overflow container", ->
   eq plain(App), [
     "CC"
     "DD"
+    ""
+    ""
   ]
-  eq tall(App), 4
 
 test "overflow - box intersecting with top right edge of overflow container", ->
   App = component
@@ -462,8 +469,9 @@ test "overflow - box intersecting with top right edge of overflow container", ->
   eq plain(App), [
     "  CC"
     "  DD"
+    ""
+    ""
   ]
-  eq tall(App), 4
 
 test "overflow - box intersecting with bottom left edge of overflow container", ->
   App = component
@@ -532,18 +540,14 @@ test "nested overflow", ->
     "BB"
     "XXXX"
     "YYYY"
+    ""
   ]
-  eq tall(App), 5
 
-# The box is 12 columns wide on a 10-column terminal. Published Ink
-# writes past the terminal's edge (its top and bottom rows come out 12
-# wide, and the rows between lose a column from the middle); what it
-# draws inside the 10 columns is the frame here.
 test "out of bounds writes do not crash", ->
   App = component
     render
       Box width: 12, height: 10, borderStyle: 'round'
-  eq plain(App, 10), [
+  differs plain(App, 10), [
     "╭─────────"
     "│"
     "│"
@@ -554,4 +558,15 @@ test "out of bounds writes do not crash", ->
     "│"
     "│"
     "╰─────────"
-  ]
+  ], [
+    "╭──────────╮"
+    "│         │"
+    "│         │"
+    "│         │"
+    "│         │"
+    "│         │"
+    "│         │"
+    "│         │"
+    "│         │"
+    "╰──────────╯"
+  ], "A frame is as wide as the terminal, so a box wider than its 10 columns is cut at the last one. Ink writes past the edge: its top and bottom rows come out 12 wide, and the rows between lose a column from the middle."

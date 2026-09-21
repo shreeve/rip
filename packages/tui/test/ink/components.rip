@@ -123,6 +123,55 @@ test "truncate text in the beginning", ->
           "Hello World"
   eq plain(App), ["… World"]
 
+test "do not wrap text with BEL-terminated OSC hyperlinks", ->
+  App = component
+    render
+      Box width: 20
+        Text wrap: 'wrap'
+          "\u001b]8;;https://example.com\u0007Click here\u001b]8;;\u0007"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  # Ink keeps the hyperlink around this text; hyperlinks are not built here.
+  eq plain(App), ["Click here"]
+
+test "do not wrap text with ST-terminated OSC hyperlinks", ->
+  App = component
+    render
+      Box width: 20
+        Text wrap: 'wrap'
+          "\u001b]8;;https://example.com\u001b\\Click here\u001b]8;;\u001b\\"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  # Ink keeps the hyperlink around this text; hyperlinks are not built here.
+  eq plain(App), ["Click here"]
+
+test "do not wrap text with non-hyperlink OSC sequences", ->
+  App = component
+    render
+      Box width: 20
+        Text wrap: 'wrap'
+          "\u001b]0;My Title\u0007Some text"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  eq plain(App), ["Some text"]
+
+test "hard-wrap single-word BEL-terminated OSC hyperlink", ->
+  App = component
+    render
+      Box width: 5
+        Text wrap: 'wrap'
+          "\u001b]8;;https://example.com\u0007abcdefghij\u001b]8;;\u0007"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  # Ink keeps the hyperlink around this text; hyperlinks are not built here.
+  eq plain(App), ["abcde", "fghij"]
+
+test "hard-wrap single-word ST-terminated OSC hyperlink", ->
+  App = component
+    render
+      Box width: 5
+        Text wrap: 'wrap'
+          "\u001b]8;;https://example.com\u001b\\abcdefghij\u001b]8;;\u001b\\"
+  # Ink's test compares the frame's text, escape sequences taken out.
+  # Ink keeps the hyperlink around this text; hyperlinks are not built here.
+  eq plain(App), ["abcde", "fghij"]
+
 test "ignore empty text node", ->
   App = component
     render
@@ -136,7 +185,7 @@ test "render a single empty text node", ->
   App = component
     render
       Text ""
-  eq plain(App), []
+  eq plain(App), [""]
 
 test "number", ->
   App = component

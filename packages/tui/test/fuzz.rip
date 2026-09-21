@@ -33,7 +33,7 @@ STYLES =! {
   flexShrink: [0, 1, 3, undefined]
   flexBasis: [0, 10, '50%', 'auto', undefined]
   flex: [1, 2, undefined]
-  width: [5, 20, 40, '50%', '100%', '33%', 'auto', undefined, undefined]
+  width: [2, 3, 5, 20, 40, '50%', '100%', '33%', 'auto', undefined, undefined]
   height: [1, 3, 10, '50%', '100%', undefined, undefined]
   minWidth: [3, '20%', undefined, undefined]
   maxWidth: [10, 30, '80%', undefined, undefined]
@@ -66,7 +66,16 @@ KEYS =! Object.keys STYLES
 
 # Texts of equal width and different height sit side by side, so a change
 # of height alone is one the fuzz makes.
-WORDS =! ['a', 'hello', 'hello world', 'two\nlines here', '', 'x'.repeat(30), 'one\ntwo\nthree', 'abcde', 'fghij', 'abc\nde']
+# Wide characters, clusters, and words no row can break sit among the
+# ASCII, so a text can answer WIDER than it is offered and a wrap can
+# turn on a cluster's width.
+wide = (...codes) -> String.fromCodePoint ...codes
+WORDS =! [
+  'a', 'hello', 'hello world', 'two\nlines here', '', 'x'.repeat(30), 'one\ntwo\nthree', 'abcde', 'fghij', 'abc\nde'
+  wide(0x4E2D) + 'on', wide(0x65E5, 0x672C, 0x8A9E) + ' ' + wide(0x65E5, 0x672C), 'a' + wide(0x4E2D) + 'b ' + wide(0x4E2D, 0x4E2D)
+  wide(0x1F468, 0x200D, 0x1F469, 0x200D, 0x1F467) + ' ok', 'e' + wide(0x301) + ' ' + wide(0x1F1FA, 0x1F1F8) + 'x'
+  wide(0x9AC, 0x9BE, 0x982, 0x9B2, 0x9BE) + ' go', 'supercalifragilistic', 'un' + wide(0x4E2D).repeat(9) + ' z'
+]
 PROSE =! ['the quick brown fox jumps over the lazy dog', 'aa bb cc dd ee ff gg', 'z']
 
 state = 1
@@ -264,7 +273,8 @@ round = (start, number, narrate) ->
   for step in [0...STEPS]
     roll = rnd()
     did = if roll < 0.15
-      width = 20 + Math.floor rnd() * 80
+      # A space of a few cells offers a text less than a wide cluster takes.
+      width = if rnd() < 0.3 then 1 + Math.floor rnd() * 6 else 20 + Math.floor rnd() * 80
       "width #{width}"
     else if roll < 0.25
       height = if rnd() < 0.3 then null else 5 + Math.floor rnd() * 40

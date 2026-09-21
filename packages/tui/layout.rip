@@ -1706,13 +1706,15 @@ holds =! (lay, entry, availW, availH, modeW, modeH, ownerW, ownerH) ->
 # Whether one axis of a remembered measurement answers a new offer
 # (Cache.cpp): the same offer; an exact size equal to the answer; an
 # unlimited answer that fits the new limit; or a tighter limit the
-# answer still fits. Yoga calls two offers the same when they ROUND the
+# answer still fits. An answer WIDER than the limit it was given — text
+# whose widest cluster does not fit the offer — says nothing of an exact
+# size equal to it: its height is that of the narrower wrap. Yoga calls two offers the same when they ROUND the
 # same, and sizes equal within a tolerance; here both are exact, because
 # an exact offer is its own answer, and a stale fraction would round a
 # text box differently from the box a fresh layout gives.
 fits =! (mode, size, offered, lastMode, lastOffered, answer) ->
   return true if lastMode is mode and same(lastOffered, offered)
-  return true if mode is STRETCH_FIT and size is answer
+  return true if mode is STRETCH_FIT and size is answer and (lastMode isnt FIT_CONTENT or answer <= lastOffered)
   return false unless mode is FIT_CONTENT
   return true if lastMode is MAX_CONTENT and size >= answer
   lastMode is FIT_CONTENT and lastOffered > size and answer <= size

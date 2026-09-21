@@ -70,9 +70,20 @@ box is a text leaf, and text nested in text restyles its own words.
 Text is measured by grapheme cluster — a flag, a family emoji, a letter
 with its combining marks each take the cells a terminal gives them —
 and control characters are stripped when the text is set: styling
-comes from props, never from escape sequences inside a string. A
-`backgroundColor` on a box fills it inside its border, and text with
-no background of its own keeps the one beneath it.
+comes from props, never from escape sequences inside a string: an
+escape sequence in a text is removed whole, as a terminal would
+swallow it, so a filename or a log line cannot repaint the screen.
+
+A `backgroundColor` on a box fills it inside its border, and that is
+all it does: text with no background of its own takes the background
+of the cell it lands on, whoever painted it, so a badge laid over a
+colored panel sits on the panel's color, and text that spills out of
+a colored box is bare once it leaves it. `color`, `bold`, `dimColor`,
+and the other text attributes written on a box do pass down to the
+text inside it, and text nested in text adds to what the outer text
+says. A custom `borderStyle` object is read when it is written.
+`overflow: 'hidden'` clips everything drawn inside the box, an
+absolute child included.
 
 Layout is flexbox as Yoga lays it out — the defaults are Yoga's
 (`flexDirection: 'column'`, `flexShrink: 0`, `alignItems: 'stretch'`,

@@ -76,6 +76,15 @@ the test, re-seed the bug, and see it caught.
 
 ## 5. The painter and the screen
 
+- [ ] Hyperlinks: a `link` prop on text (OSC 8). Two of Ink's cases
+      and half of a third wait for it (`test/ink/SOURCE.md`).
+- [ ] The cluster table never evicts, as the style tables do not:
+      300,000 distinct clusters hold 41 MB.
+- [ ] Widths follow string-width 8's rule. Where a terminal disagrees
+      (Thai `กำ` is one cell by that rule and two by `Bun.stringWidth`;
+      U+1F6D9 is newer than Bun's tables) the column move after a
+      cluster keeps the damage to that glyph. Say so in the README's
+      text section, with the cases.
 - [ ] **A word for the terminal's own colors.** Text with no background
       keeps the one beneath it, so nothing spells "draw this run on the
       terminal's default background" inside a colored box (Ink writes

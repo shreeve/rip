@@ -24,12 +24,35 @@ def terminal(columns = 40, rows = 10)
     true
   out
 
-# The visible screen after replaying everything a terminal was sent: the
-# escape sequences `diff` emits, applied to a grid of characters.
-def replay(sent, columns, rows)
+# The background an SGR sequence's parameters leave in force, given the
+# one before it: a code, or null for the terminal's own.
+def background(params, held)
+  codes = (Number(part or 0) for part in params.split ';')
+  at = 0
+  while at < codes.length
+    code = codes[at]
+    if code is 0 or code is 49
+      held = null
+    else if (40 <= code <= 47) or (100 <= code <= 107)
+      held = code
+    else if code is 38 or code is 48
+      held = codes.slice(at, at + (if codes[at + 1] is 5 then 3 else 5)).join(';') if code is 48
+      at += if codes[at + 1] is 5 then 2 else 4
+    at += 1
+  held
+
+# The screen after replaying everything a terminal was sent, the cursor
+# starting on row `from`: the escape sequences `diff` emits, applied to a
+# grid of characters and a grid of backgrounds. The terminal erases with
+# the background color (bce), as xterm and Ghostty do: a line feed on the
+# last row scrolls, and the row it makes — like every cell an erase
+# clears — takes the background then in force.
+def screenOf(sent, columns, rows, from = 0)
   lines = (Array(columns).fill(' ') for i in [0...rows])
-  row = 0
+  backs = (Array(columns).fill(null) for i in [0...rows])
+  row = from
   col = 0
+  held = null
   text = sent.join ''
   i = 0
   while i < text.length
@@ -39,15 +62,23 @@ def replay(sent, columns, rows)
       n = parseInt(m[1]) or 1
       switch m[2]
         when 'A' then row -= n
-        when 'B' then row += n
+        when 'B' then row = Math.min rows - 1, row + n
         when 'G' then col = n - 1
+        when 'm' then held = background m[1], held
         when 'J'
           for r in [row...rows]
             for c in [(if r is row then col else 0)...columns]
               lines[r][c] = ' '
+              backs[r][c] = held
       i += m[0].length
     else if ch is '\n'
-      row += 1
+      if row is rows - 1
+        lines.shift()
+        backs.shift()
+        lines.push Array(columns).fill(' ')
+        backs.push Array(columns).fill(held)
+      else
+        row += 1
       col = 0
       i += 1
     else if ch is '\r'
@@ -56,9 +87,34 @@ def replay(sent, columns, rows)
     else
       glyph = String.fromCodePoint text.codePointAt(i)
       lines[row][col] = glyph
+      backs[row][col] = held
       col += 1
       i += glyph.length
-  (line.join('').trimEnd() for line in lines).join('\n').trimEnd()
+  { lines, backs }
+
+def replay(sent, columns, rows)
+  (line.join('').trimEnd() for line in screenOf(sent, columns, rows).lines).join('\n').trimEnd()
+
+# The styled frame of a tree built straight from the document's nodes:
+# `build(doc)` answers the node to draw.
+def inked(cols, build)
+  { doc, restore } = install()
+  try
+    doc.body.appendChild build doc
+    { h } = layout doc.body, cols
+    grid = Grid.new cols, Math.max(h, 1)
+    paint grid, doc.body
+    grid.toString true
+  finally
+    restore()
+
+# A span of `words` with `styles`, and whatever else goes inside it.
+def words(doc, styles, text, inner = null)
+  node = doc.createElement 'span'
+  node.set key, value for key, value of styles
+  node.appendChild doc.createTextNode text
+  node.appendChild inner if inner
+  node
 
 tick = -> Promise.new (resolve) -> setTimeout resolve, 20
 
@@ -214,6 +270,25 @@ test "a string style and a class are refused", ->
     node = doc.createElement 'div'
     throws (-> node.setAttribute 'style', 'color: red'), 'string `style`'
     throws (-> node.className = 'card'), 'class has no terminal meaning'
+  finally
+    restore()
+
+test "a style object refuses what props refuse", ->
+  Styled = component
+    render
+      Box style: { colour: 'red' }
+        Text "x"
+  throws (-> renderToString Styled), "'colour' is not a terminal style"
+
+test "a per-edge dim switch set to false stands against the shared one", ->
+  { doc, restore } = install()
+  try
+    box = doc.createElement 'div'
+    box.set 'borderDimColor', true
+    box.set 'borderLeftDimColor', false
+    eq box.styles.borderLeftDimColor, false
+    box.set 'bold', false
+    eq box.styles.bold, undefined
   finally
     restore()
 
@@ -557,6 +632,130 @@ test "a text change that keeps its wrapped size owes a paint; one that changes i
     app.words.value = 'a b c d e f g h i j'
     ok doc.moved, 'a third row'
 
+test "a background is what a box fills, and is never carried down the tree", ->
+  Spill = component
+    render
+      Box flexDirection: 'row'
+        Box width: 6, height: 1, backgroundColor: 'blue', flexShrink: 0
+          Box width: 14, flexShrink: 0
+            Text "spills-outside"
+  eq renderToString(Spill, cols: 14, ansi: true), "\x1b[44mspills\x1b[0m-outside"
+  Tip = component
+    render
+      Box flexDirection: 'column', width: 12
+        Box height: 1, backgroundColor: 'red'
+          Text "red row"
+        Box height: 1, backgroundColor: 'blue'
+          Text "blue"
+          Box position: 'absolute', top: -1, left: 8
+            Text "tip"
+  eq renderToString(Tip, cols: 12, ansi: true).split('\n'), ["\x1b[41mred row tip \x1b[0m", "\x1b[44mblue        \x1b[0m"]
+
+test "overlay text takes the background beneath it and keeps its own color and weight", ->
+  Badge = component
+    render
+      Box width: 4, height: 1, backgroundColor: 'blue'
+        Box position: 'absolute', left: 1, top: 0
+          Text bold: true, color: 'red'
+            "X"
+  eq renderToString(Badge, cols: 4, ansi: true), "\x1b[44m \x1b[0;1;31;44mX\x1b[0;44m  \x1b[0m"
+
+test "every text attribute sets its own cell flag and SGR parameter, alone, together, and nested", ->
+  for [key, code] in [['bold', 1], ['dimColor', 2], ['italic', 3], ['underline', 4], ['inverse', 7], ['strikethrough', 9]]
+    eq inked(1, (doc) -> words doc, { [key]: true }, 'x'), "\x1b[#{code}mx\x1b[0m", key
+  eq inked(1, (doc) -> words doc, { bold: true, italic: true, underline: true }, 'x'), "\x1b[1;3;4mx\x1b[0m"
+  eq inked(1, (doc) -> words doc, { dimColor: true, inverse: true, strikethrough: true }, 'x'), "\x1b[2;7;9mx\x1b[0m"
+  eq inked(2, (doc) -> words doc, { bold: true }, 'a', words(doc, { underline: true }, 'b')), "\x1b[1ma\x1b[0;1;4mb\x1b[0m"
+  eq inked(2, (doc) -> words doc, { italic: true }, 'a', words(doc, { strikethrough: true }, 'b')), "\x1b[3ma\x1b[0;3;9mb\x1b[0m"
+
+test "color and weight pass down: a box's to the text inside it, a text's to the text nested in it", ->
+  Toned = component
+    render
+      Box color: 'green', bold: true, dimColor: true
+        Text "a"
+  eq renderToString(Toned, cols: 1, ansi: true), "\x1b[1;2;32ma\x1b[0m"
+  eq inked(2, (doc) -> words doc, { color: 'red' }, 'a', words(doc, { underline: true }, 'b')), "\x1b[31ma\x1b[0;4;31mb\x1b[0m"
+  eq inked(2, (doc) -> words doc, { backgroundColor: 'yellow' }, 'a', words(doc, { bold: true }, 'b')), "\x1b[43ma\x1b[0;1;43mb\x1b[0m"
+
+test "a border edge switched off insets neither the background nor the clip", ->
+  filled = (styles) ->
+    Filled = component
+      render
+        Box width: 4, height: 3, borderStyle: 'single', backgroundColor: 'blue', style: styles
+    renderToString(Filled, cols: 4, ansi: true).split '\n'
+  blue = (cells) -> "\x1b[44m#{' '.repeat cells}\x1b[0m"
+  eq filled({ borderTop: false }), ["│#{blue 2}│", "│#{blue 2}│", "└──┘"]
+  eq filled({ borderBottom: false }), ["┌──┐", "│#{blue 2}│", "│#{blue 2}│"]
+  eq filled({ borderLeft: false }), ["───┐", "#{blue 3}│", "───┘"]
+  eq filled({ borderRight: false }), ["┌───", "│#{blue 3}", "└───"]
+  clipped = (styles) ->
+    Clipped = component
+      render
+        Box width: 4, height: 3, borderStyle: 'single', overflow: 'hidden', style: styles
+          Box width: 8, height: 4, flexShrink: 0
+            Text "abcdefgh\nABCDEFGH\n12345678\nzzzzzzzz"
+    renderToString(Clipped, cols: 4).split '\n'
+  eq clipped({}), ["┌──┐", "│ab│", "└──┘"]
+  eq clipped({ borderTop: false }), ["│ab│", "│AB│", "└──┘"]
+  eq clipped({ borderBottom: false }), ["┌──┐", "│ab│", "│AB│"]
+  eq clipped({ borderLeft: false }), ["───┐", "abc│", "───┘"]
+  eq clipped({ borderRight: false }), ["┌───", "│abc", "└───"]
+
+test "a border that straddles a clip edge is cut there, column by column", ->
+  Straddle = component
+    render
+      Box width: 6, height: 3, overflowX: 'hidden'
+        Box width: 4, height: 3, marginLeft: 3, borderStyle: 'single', flexShrink: 0
+          Text "ab"
+  rows = renderToString(Straddle, cols: 10, ansi: true).split '\n'
+  eq rows, ["   ┌──    ", "   │ab    ", "   └──    "]
+  Under = component
+    render
+      Box width: 6, height: 2, overflowY: 'hidden'
+        Box width: 4, height: 3, borderStyle: 'single', flexShrink: 0
+          Text "ab"
+  eq renderToString(Under, cols: 6).split('\n'), ["┌──┐", "│ab│"]
+
+test "a border edge's dimming falls back to the border's, and a false of its own stands against it", ->
+  edges = (styles) ->
+    Dimmed = component
+      render
+        Box width: 3, height: 3, borderStyle: 'single', borderColor: 'green', style: styles
+    renderToString(Dimmed, cols: 3, ansi: true).split '\n'
+  faint = "\x1b[2;32m"
+  plain = "\x1b[32m"
+  eq edges({ borderDimColor: true }), ["#{faint}┌─┐\x1b[0m", "#{faint}│\x1b[0m #{faint}│\x1b[0m", "#{faint}└─┘\x1b[0m"]
+  eq edges({ borderDimColor: true, borderLeftDimColor: false })[1], "#{plain}│\x1b[0m #{faint}│\x1b[0m"
+  eq edges({ borderDimColor: true, borderTopDimColor: false })[0], "#{plain}┌─┐\x1b[0m"
+  eq edges({ borderDimColor: true, borderLeftColor: 'red' })[1], "\x1b[2;31m│\x1b[0m #{faint}│\x1b[0m"
+  eq edges({ borderDimColor: true, borderBottomColor: 'red' })[2], "\x1b[2;31m└─┘\x1b[0m"
+  eq edges({ borderRightDimColor: true }), ["#{plain}┌─┐\x1b[0m", "#{plain}│\x1b[0m #{faint}│\x1b[0m", "#{plain}└─┘\x1b[0m"]
+  eq edges({ borderBottomDimColor: true })[2], "#{faint}└─┘\x1b[0m"
+
+test "a border glyph obeys the rule text does: a control character is refused by name", ->
+  { doc, restore } = install()
+  try
+    box = doc.createElement 'div'
+    frame = { topLeft: '1', top: '2', topRight: '3', right: '4', bottomRight: '5', bottom: '6', bottomLeft: '7', left: '8' }
+    for bad in ['\x1b', '\t', '\x07', '\n', "\x1b[31m-", String.fromCharCode(0x9B)]
+      throws (-> box.set 'borderStyle', { ...frame, top: bad }), "borderStyle: top: #{JSON.stringify bad} is not a border glyph"
+    eq box.styles, {}
+  finally
+    restore()
+
+test "a border object is read every time it is drawn: a change to it is seen, and a bad one refused", ->
+  frame = { topLeft: '1', top: '2', topRight: '3', right: '4', bottomRight: '5', bottom: '6', bottomLeft: '7', left: '8' }
+  Framed = component
+    render
+      Box width: 4, borderStyle: frame
+        Text "ab"
+  mounted Framed, (app, show) ->
+    eq show(4), "1223\n8ab4\n7665"
+    frame.top = '='
+    eq show(4), "1==3\n8ab4\n7665"
+    frame.top = '\x07'
+    throws (-> show 4), 'borderStyle: top: "\\u0007" is not a border glyph'
+
 # ==[ The component model on a terminal ]==
 
 console.log "\nComponents"
@@ -630,6 +829,50 @@ test "an unchanged grid costs no bytes", ->
   a.write 0, 0, 'same', 0
   b.write 0, 0, 'same', 0
   eq diff(a, b), ''
+
+test "no background is held across a line feed, so a row scrolled in at the bottom is never striped", ->
+  Bars = component
+    render
+      Box flexDirection: 'column', width: 10
+        Box backgroundColor: 'blue', height: 1
+          Text "row 0"
+        Box backgroundColor: 'blue', height: 1
+          Text "row 1"
+        Box backgroundColor: 'blue', height: 1
+          Text "row 2"
+  mounted Bars, (app, show, doc) ->
+    { h } = layout doc.body, 24
+    grid = Grid.new 24, h
+    paint grid, doc.body
+    bytes = diff null, grid
+    held = null
+    at = 0
+    feeds = 0
+    while at < bytes.length
+      if m = /^\x1b\[([0-9;]*)m/.exec bytes.slice(at)
+        held = background m[1], held
+        at += m[0].length
+      else
+        if bytes[at] is '\n'
+          feeds += 1
+          ok held is null, "a line feed at byte #{at} with background #{held} in force"
+        at += 1
+    eq feeds, 2
+    # Drawn from the last row of a 6-row terminal, every line feed scrolls.
+    { lines, backs } = screenOf [bytes], 24, 6, 5
+    eq (line.join('').trimEnd() for line in lines.slice 3), ['row 0', 'row 1', 'row 2']
+    for row in backs.slice 3
+      eq row.slice(0, 10), Array(10).fill(44)
+      eq row.slice(10), Array(14).fill(null)
+
+test "the cell after a cluster of several code points is reached by an absolute column move", ->
+  family = [0x1F468, 0x200D, 0x1F469, 0x200D, 0x1F467].map((code) -> String.fromCodePoint code).join ''
+  grid = Grid.new 8, 1
+  grid.write 0, 0, "a#{family}bc", 0
+  eq diff(null, grid), "\x1b[J\x1b[1Ga#{family}\x1b[4Gbc\r"
+  plain = Grid.new 8, 1
+  plain.write 0, 0, "a日本bc", 0
+  eq diff(null, plain), "\x1b[J\x1b[1Ga日本bc\r"
 
 test "a wide character takes two cells", ->
   grid = Grid.new 6, 1

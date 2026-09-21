@@ -7,7 +7,7 @@
 #   rip test/ink/flex-align-content.rip
 
 import { test, eq } from 'rip/testing'
-import { Box, Text, plain, tall } from './harness.rip'
+import { Box, Text, plain } from './harness.rip'
 
 console.log "\nFlex Align Content"
 
@@ -22,8 +22,11 @@ test "align content flex-start", ->
   eq plain(App), [
     "AB"
     "CD"
+    ""
+    ""
+    ""
+    ""
   ]
-  eq tall(App), 6
 
 test "align content center", ->
   App = component
@@ -38,8 +41,9 @@ test "align content center", ->
     ""
     "AB"
     "CD"
+    ""
+    ""
   ]
-  eq tall(App), 6
 
 test "align content flex-end", ->
   App = component
@@ -89,8 +93,8 @@ test "align content space-around", ->
     ""
     ""
     "CD"
+    ""
   ]
-  eq tall(App), 6
 
 test "align content space-evenly", ->
   App = component
@@ -105,8 +109,9 @@ test "align content space-evenly", ->
     "AB"
     ""
     "CD"
+    ""
+    ""
   ]
-  eq tall(App), 6
 
 test "align content stretch", ->
   App = component
@@ -121,8 +126,9 @@ test "align content stretch", ->
     ""
     ""
     "CD"
+    ""
+    ""
   ]
-  eq tall(App), 6
 
 test "align content defaults to flex-start", ->
   App = component
@@ -135,8 +141,11 @@ test "align content defaults to flex-start", ->
   eq plain(App), [
     "AB"
     "CD"
+    ""
+    ""
+    ""
+    ""
   ]
-  eq tall(App), 6
 
 test "align content does not add extra spacing when there is no free cross-axis space", ->
   App = component

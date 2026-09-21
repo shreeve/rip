@@ -36,8 +36,9 @@ export { Spacer }
 
 # The frame `App` draws in `cols` columns as rows of bare characters,
 # and as rows of styled cells in the notation of cells.rip. Both follow
-# that file's rule for blanks. 100 columns is the width Ink's test
-# helper draws at.
+# that file's rule for blanks, which keeps every row: a frame a row too
+# tall or too short is a different frame. 100 columns is the width Ink's
+# test helper draws at.
 export plain =! (App, cols = 100) ->
   cells.plain renderToString(App, { cols, ansi: false })
 
@@ -59,8 +60,3 @@ export differs =! (actual, ours, inks, why) ->
   return
 
 process.on 'exit', -> console.log "#{stated} frames differ from Ink's tests by stated decision\n" if stated
-
-# The frame's height in rows, blank rows at its foot included: what the
-# rule for blanks hides from `plain` and `styled`.
-export tall =! (App, cols = 100) ->
-  renderToString(App, { cols, ansi: false }).split('\n').length

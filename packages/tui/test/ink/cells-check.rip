@@ -34,9 +34,11 @@ test "a space keeps its background and loses what it cannot show", ->
   eq styled("\x1b[41m a \x1b[49m  "), ["«on red» a "]
   eq styled("\x1b[4m a \x1b[24m"), ["«underline» a "]
 
-test "trailing blank rows are dropped, and blank rows between are kept", ->
-  eq styled("A\n\n\x1b[32mB\x1b[39m\n   \n\n"), ["A", "", "«green»B"]
-  eq plain("A  \n\nB\n \n"), ["A", "", "B"]
+test "every row counts: blank rows at the foot of a frame are kept", ->
+  eq styled("A\n\n\x1b[32mB\x1b[39m\n   \n\n"), ["A", "", "«green»B", "", "", ""]
+  eq plain("A  \n\nB\n \n"), ["A", "", "B", "", ""]
+  eq plain(""), [""]
+  eq styled("\n"), ["", ""]
 
 test "plain drops every style before it trims", ->
   eq plain("\x1b[41mA  \x1b[49m\n\x1b[32mB\x1b[0m"), ["A", "B"]
@@ -51,4 +53,12 @@ test "a combining mark after a style change joins the cell before it", ->
 test "a sequence that is not SGR, or a style outside the table, is refused", ->
   throws (-> parse "\x1b[2J"), 'not SGR'
   throws (-> parse "\x1b[5mblink"), 'SGR 5 is not a style'
+
+test "an extended color that stops short, or leaves the byte range, is refused", ->
+  throws (-> parse "\x1b[38;5mX"), 'SGR 38;5 is not a color'
+  throws (-> parse "\x1b[48;5mX"), 'SGR 48;5 is not a color'
+  throws (-> parse "\x1b[38;2;255;136mX"), 'SGR 38;2;255;136 is not a color'
+  throws (-> parse "\x1b[48;2mX"), 'SGR 48;2 is not a color'
+  throws (-> parse "\x1b[38;5;256mX"), 'SGR 38;5;256 is not a color'
+  throws (-> parse "\x1b[38mX"), 'SGR 38 is not a color'
   throws (-> styled "«"), "notation's own bracket"
