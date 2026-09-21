@@ -1,5 +1,6 @@
 # Exhaustive repository certification is an explicit release operation, not
-# the edit loop or an automatic pull-request tax.
+# the edit loop or an automatic pull-request tax. Some things run only
+# here: every lane, and the ui specs on Firefox.
 name: repository-certification
 
 on:
@@ -40,7 +41,11 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/janus" version
 
+      # The ui lane adds Firefox here and nowhere else (its Playwright
+      # config reads the flag); the browser install above provisions it.
       - name: Full suite, every lane
+        env:
+          RIP_FIREFOX: '1'
         run: bun run test:all
 
       - name: Parser regeneration
