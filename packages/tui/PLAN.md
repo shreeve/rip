@@ -134,9 +134,9 @@ write by hand; hot loops use the indexed `for x, i in` form).
 | `text.rip` | Sanitize, grapheme clusters, width, wrap, truncate | 421 |
 | `paint.rip` | Cell grids, styles, clip, borders, backgrounds, damage, diff | 597 |
 | `screen.rip` | Frames and pacing; to come: alternate screen, `Static`, non-TTY | 56, about 250 |
-| `input.rip` | To come: key tokenizer and decoder, paste, mouse, keyboard negotiation | about 250 |
+| `input.rip` | Key tokenizer and decoder, paste, mouse, replies; to come: keyboard negotiation | 263 |
 | `terminal.rip` | To come: setup / teardown, signals, suspend, console capture | about 170 |
-| | **Total** | **2,924 built; about 3,650 complete** |
+| | **Total** | **3,187 built; about 3,650 complete** |
 
 Lines are counted as §2 counts them: non-blank and non-comment.
 
@@ -552,14 +552,55 @@ The event mirrors DOM `KeyboardEvent`: `key`, `ctrlKey`, `shiftKey`,
 `altKey`, `metaKey`, `repeat`, `sequence`. Events: `@keydown`,
 `@paste`, `@focus`, `@blur`, `@resize`, `@click`, `@wheel`.
 
-**Parser.** One module: a CSI / SS3 tokenizer with a pending buffer
-across reads, one table for finals, xterm modifier parameters, ESC +
-char as Alt, CSI-u decoding, bracketed paste. The lone-ESC timer is
-50 ms, configurable, with an injected clock for tests. **A partial
-sequence that times out is discarded, never typed** — on a slow SSH
-link Ink turns an arrow key into the literal text `[A`. About 100 of
-Ink's 156 parser cases port as a table; the rest pin dropped terminal
-forms (rxvt, Cygwin, double-ESC meta).
+**Parser** (`input.rip`, built). `Parser.new {escape, clock, late,
+paste}` and `parser.feed chunk`, a string or a `Uint8Array`, answering
+the events the chunk completed: `key`, `paste`, `focus` / `blur`,
+`mouse`, and `reply`. One state machine reads every byte once — ground,
+ESC, a CSI or SS3 body, an OSC / DCS / APC string, a paste — and holds
+a sequence cut by the end of a read for the next one; UTF-8 and a
+surrogate pair cut the same way come out whole. CSI and SS3 finals come
+from one table; xterm's modifier parameter, its old
+modifier-as-only-parameter form, kitty's `CSI u` with its shifted key,
+associated text and event type, and xterm's `modifyOtherKeys`
+(`CSI 27 ; mod ; code ~`) decode on one road. `key` is DOM's name
+(`'Enter'`, `'ArrowUp'`, `'F5'`) or one code point: text is an event
+per code point, never per grapheme cluster, because a cluster can be
+cut between two reads and only code points decode the same however the
+bytes are split. A C0 control is Ctrl and its letter, with the four
+classic exceptions Ink also makes: 0x09 is Tab, 0x0D is Enter, 0x1B is
+Escape, and 0x08 is Backspace as 0x7F is. Kitty's super and meta bits
+are DOM's `metaKey`; hyper and the locks have no field. Releases are
+dropped (the package has `@keydown` and no `@keyup`) and repeats are
+flagged. SGR mouse reports decode now, at cells counted from zero, with
+a wheel as `deltaX` / `deltaY`; the hit test is the dispatcher's.
+Replies — `CSI ? flags u`, `CSI ? … c`, `CSI row ; col R` — are
+events of kind `keyboard`, `attributes`, `cursor`, so the probe below
+needs no timer.
+
+**Time has one rule.** An ESC with nothing after it for `escape`
+milliseconds (50, with an injected clock for tests) is the Escape key,
+handed to `late`. **Any other partial sequence that times out is
+discarded, never typed** — on a slow SSH link Ink types the tail of an
+arrow key as `[A` — as is one cut short by a byte that cannot continue
+it. Bytes that arrive after the timeout are read as what they are
+alone: `ESC`, the timeout, then `[A` is Escape and the keys `[` and `A`,
+which is the honest reading, since the parser cannot know they belonged
+to what it gave up on. The cost, stated: `ESC [`, `ESC O`, `ESC ]`,
+`ESC P` and `ESC _` alone are partial sequences, so Alt with those five
+characters is not reported by a plain terminal; the enhanced keyboard
+reports each as `CSI u`. Dropped terminal forms are pinned as what they
+decode to here: rxvt's `$` and `^` finals are sequences with no key,
+the Linux console's `CSI [ A` is a sequence with no key followed by
+typed text, a doubled ESC is Escape and then the sequence the second
+one opens, and eight-bit Meta is a byte of UTF-8. What is held is
+bounded: a CSI or SS3 sequence to 1,024 characters (a longer one is
+swallowed to its final byte and discarded), a string to nothing at all,
+and a paste to `paste` characters an event (4 Mi by default; a longer
+one arrives in pieces, in order), so no input grows memory without
+limit, and nothing makes `feed` throw. 244 of Ink's 256 input titles
+are rows of a table in `test/input/`, 202 held to Ink's answer under one
+mapping to DOM names and 42 stated differences; `test/input/SOURCE.md`
+lists them and the 12 left out.
 
 **Enhanced keyboard** is opt-in (`run App, keyboard: 'enhanced'`).
 Setup asks the terminal for the kitty protocol's disambiguation flag
@@ -660,6 +701,10 @@ run App
   `frames[tick.frame % frames.length]`. The frame scheduler already
   coalesces every change into one paint, so the helper is a
   convenience, not a requirement.
+- `Parser` (`input.rip`, §7) is the module `run` reads its terminal
+  through: `Parser.new {escape, clock, late, paste}` and `feed chunk`
+  → events. It is not a `rip/tui` export; a test of an app drives keys
+  through `mount`, never through the parser.
 - Widgets: `Box`, `Text`, `Spacer`, `Newline`, `Static`. Raw `div` and
   `span` are the documented zero-overhead primitives.
 - Metrics: `div ref: el` then `w ~= el?.box.w ?? 0`. The node's `box`
@@ -687,7 +732,17 @@ run App
   tree painted whole, cell for cell, and the bytes sent, replayed over
   what the terminal showed, to that frame: glyphs, colors, links.
   `test.rip` holds each kind of change to the cells it owes.
-- **Input:** about 100 ported parser cases, plus focus and dispatch.
+- **Input:** `test/input.rip` — 244 of Ink's input titles as a table
+  (§7), and the parser's own pins: every key form it reads; the
+  lone-ESC timer and the discard rule on an injected clock; every row
+  cut at every byte across two reads, short of the timeout (decodes the
+  same) and past it (Escape or nothing, then the tail as typed); paste
+  across reads with its terminator never found inside the text; UTF-8
+  and surrogate pairs cut between reads; mouse; replies; the bounds on
+  what is held; a growth-ratio check that hostile input is read once;
+  and a fuzz of random bytes in random cuts that never throws, makes
+  only well-formed events, and decodes the same whole or cut. Focus and
+  dispatch to come.
 - **The test driver is public,** because users' tests are a contract
   too. `mount(App, {cols, rows, props})` is `run` without a terminal:
   the same install, the same `Screen`, the same close, drawing to a

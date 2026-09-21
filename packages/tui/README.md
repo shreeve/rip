@@ -273,7 +273,11 @@ driver, and what each kind of change owes a frame, by its cells.
 frame painted from its damage to the same tree painted whole, cell for
 cell, and to the bytes sent, replayed. `test/text.rip` holds the
 text engine — sanitizing, cluster widths, every wrap and truncate mode
-— and `test/layout.rip` the layout engine's own pins. `test/yoga.rip` runs Yoga's
+— and `test/layout.rip` the layout engine's own pins. `test/input.rip`
+holds the terminal input parser: 244 of Ink's input cases as a table
+(`test/input/SOURCE.md` says which and why not the rest), every
+sequence cut at every byte, the lone-ESC timer, paste, mouse, replies,
+and a fuzz that never throws. `test/yoga.rip` runs Yoga's
 543 generated layout cases, vendored unmodified under `test/yoga/`
 (MIT, © Meta Platforms), against the engine through a shim of the
 `yoga-layout` API. `test/yoga-aspect.rip` is a port of Yoga's 37
