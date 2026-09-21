@@ -220,7 +220,7 @@ export widthOf =! (text) ->
 
 # ── Flow ──────────────────────────────────────────────────────────────────────
 
-export MODES =! { 'wrap': 0, 'hard': 1, 'truncate': 2, 'truncate-end': 2, 'truncate-start': 3, 'truncate-middle': 4 }
+export MODES =! { __proto__: null, 'wrap': 0, 'hard': 1, 'truncate': 2, 'truncate-end': 2, 'truncate-start': 3, 'truncate-middle': 4 }
 
 WRAP   =! 0
 HARD   =! 1

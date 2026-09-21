@@ -604,6 +604,19 @@ test "a value layout cannot use is refused by name, for the key it was written t
     node.styles[key] = value
     throws (-> layout div({}, [node]), 20), message
 
+test "a name every object inherits is no word of any key, and no wrap mode", ->
+  keys = ['flexDirection', 'flexWrap', 'justifyContent', 'alignItems', 'alignSelf', 'alignContent', 'position', 'overflow', 'boxSizing', 'display']
+  for name in ['constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf']
+    for key in keys
+      throws (-> admit key, name), "#{key}: \"#{name}\" is not one of"
+      node = div()
+      node.styles[key] = name
+      throws (-> layout div({}, [node]), 20), "#{key}: \"#{name}\" is not one of"
+    # A wrap mode written past the document is no mode, and wraps.
+    words = span 'the quick brown fox', { wrap: name }
+    layout div({ width: 10 }, [words]), 20
+    eq at(words), '0,0 10x2'
+
 test "an error from layout names the node it is about", ->
   # A value that reaches layout without passing `set` — written straight
   # to `styles`, as the shim writes — is refused with its node named.
