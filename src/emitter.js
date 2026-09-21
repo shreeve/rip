@@ -288,7 +288,9 @@ export function containsAwait(sexpr) {
   const head = sexpr[0];
   if (head === 'await' || head === 'dammit!' || head === 'dammit?') return true;
   if (head === 'for-as' && sexpr[3] === true) return true;
-  if (head === '->' || head === '=>' || isDefHead(head) || head === 'class') return false;
+  // A class body owns its awaits; its heritage evaluates in this scope.
+  if (head === 'class') return containsAwait(sexpr[2]);
+  if (head === '->' || head === '=>' || isDefHead(head)) return false;
   return sexpr.some((item) => containsAwait(item));
 }
 
@@ -303,7 +305,9 @@ export function containsYield(sexpr) {
   if (!isNode(sexpr)) return false;
   const head = sexpr[0];
   if (head === 'yield' || head === 'yield-from') return true;
-  if (head === '->' || head === '=>' || isDefHead(head) || head === 'class') return false;
+  // A class body owns its yields; its heritage evaluates in this scope.
+  if (head === 'class') return containsYield(sexpr[2]);
+  if (head === '->' || head === '=>' || isDefHead(head)) return false;
   return sexpr.some((item) => containsYield(item));
 }
 
@@ -922,6 +926,20 @@ class Emitter {
     const id = this.stores.idOf(node);
     if (id === null) return true;
     return this.stores.node(id)?.semanticKind === kind;
+  }
+
+  // A constructor spine with no call in it: a name, or a member/index
+  // chain rooted at one. Only such a spine may stand bare under `new`.
+  static pureSpine(x) {
+    return typeof x === 'string' ||
+      (isNode(x) && typeof x[0] === 'string' && SPINE_HEADS.has(x[0]) && !isRubyNew(x) && Emitter.pureSpine(x[1]));
+  }
+
+  // The semanticKind the grammar annotated on a node's row, or null for
+  // a node with no row (an emitter-synthesized lowering).
+  semanticKindOf(node) {
+    const id = this.stores.idOf(node);
+    return id !== null ? this.stores.node(id)?.semanticKind ?? null : null;
   }
 
   // A MODULE import statement — not the dynamic-import CALL, whose
@@ -9097,22 +9115,26 @@ class Emitter {
       "into a member (a state written by an effect), or make the handler a function ('-> await ...')", this.rstate.node);
   }
 
-  // The first await/yield an EXPRESSION evaluates in its own scope. An
-  // expression holds no render structure, so every function in it is a
-  // value and the walk stops there. A render local's value is scanned
-  // with this before its binding is judged: the dead-local diagnostic
-  // runs at collection, ahead of emission, and would otherwise answer
-  // for a line whose defect is the await.
-  static firstAwaitIn(n) {
+  // The first await/yield an EXPRESSION evaluates in its own scope:
+  // every function in it is a value and the walk stops there. Formal
+  // parameters and component member initializers are judged with it. A
+  // render local's value is too, before its binding is judged: the
+  // dead-local diagnostic runs at collection, ahead of emission, and
+  // would otherwise answer for a line whose defect is the await.
+  firstAwaitIn(n) {
     if (!isNode(n)) return null;
     const head = n[0];
     if (head === 'await' || head === 'dammit!' || head === 'dammit?' || head === 'yield' || head === 'yield-from') return n;
     if (head === 'for-as' && n[3] === true) return n;
-    // An effect body is a function too: effectValue pushes its scope
-    // and emits it async when it awaits.
-    if (isFunc(n) || isDefHead(head) || head === 'class' || head === 'effect') return null;
+    // An effect is a function too: effectValue pushes its scope and
+    // emits it async when it awaits. Its NodeStore row tells the real
+    // construct from a user call spelled `effect(a, b)`; a BOUND effect
+    // in an expression position is left to its own diagnostic. A class
+    // body owns its awaits, but its HERITAGE evaluates here.
+    if (head === 'class') return this.firstAwaitIn(n[2]);
+    if (isFunc(n) || isDefHead(head) || this.isEffectDecl(n)) return null;
     for (const el of n) {
-      const hit = Emitter.firstAwaitIn(el);
+      const hit = this.firstAwaitIn(el);
       if (hit !== null) return hit;
     }
     return null;
@@ -9547,7 +9569,7 @@ class Emitter {
             'patterns and member chains have no member reading ', node);
         }
         if (stmt[0] === 'state') {
-          if (Emitter.containsAwait(stmt[2]) || Emitter.containsYield(stmt[2])) {
+          if (this.firstAwaitIn(stmt[2]) !== null) {
             throw this.positionedError(stmt, "emitter: a component state initializer cannot await or yield — _init runs synchronously during construction", node);
           }
           declare(t.name, 'state', stmt, true);
@@ -9569,6 +9591,9 @@ class Emitter {
         if (t === null) {
           throw this.positionedError(stmt,
             "emitter: a component readonly member takes a plain name or '@name' — patterns and member chains have no member reading ", node);
+        }
+        if (this.firstAwaitIn(stmt[2]) !== null) {
+          throw this.positionedError(stmt, "emitter: a component readonly initializer cannot await or yield — _init runs synchronously during construction", node);
         }
         declare(t.name, 'readonly', stmt, false);
         readonlyVars.push({ name: t.name, value: stmt[2], isPublic: t.isPublic, node: stmt });
@@ -9637,6 +9662,9 @@ class Emitter {
         }
         if (isVoid) {
           throw this.positionedError(stmt, "emitter: the void marker (a trailing '!' on the defined name) requires a function value — `save! = ->`", node);
+        }
+        if (this.firstAwaitIn(stmt[2]) !== null) {
+          throw this.positionedError(stmt, "emitter: a component member initializer cannot await or yield — _init runs synchronously during construction", node);
         }
         declare(t.name, 'plain', stmt, false);
         plainVars.push({ name: t.name, value: stmt[2], isPublic: t.isPublic, node: stmt });
@@ -12935,7 +12963,7 @@ class Emitter {
   renderBinding(stmt) {
     const [op, name, value] = stmt;
     const rec = this.rstate.sink;
-    const control = Emitter.firstAwaitIn(value);
+    const control = this.firstAwaitIn(value);
     if (control !== null) throw this.renderSyncError(control);
     if (name.startsWith('__')) {
       throw this.positionedError(stmt,
@@ -14447,6 +14475,19 @@ class Emitter {
         : (head === '[]' && n.length === 3) || (head === 'optindex' && n.length === 3 && this.lockedHead(n, 'optindex')) ? 'index'
         : head === 'optcall' && this.lockedHead(n, 'optcall') ? 'optcall'
         : 'call';
+      // An optional call or index DIRECTLY on a construction that spells
+      // no argument list has no reading: JavaScript refuses `new X?.()`,
+      // and the spelling does not say whether the soak guards the
+      // constructor or the instance. An argument list closes the
+      // construction (`new X(1)?(2)` soaks the instance), and so do
+      // parens (`(new X)?(…)`).
+      const soaks = fkind === 'optcall' || (fkind === 'index' && head === 'optindex');
+      const built = soaks && isNode(n[1]) && n[1][0] === 'new' && n[1].length === 2 && !n[1].parenthesized ? n[1][1] : undefined;
+      if (built !== undefined && !(isNode(built) && !built.parenthesized && this.semanticKindOf(built) === 'call')) {
+        throw this.positionedError(n,
+          `emitter: an optional ${fkind === 'optcall' ? 'call' : 'index'} directly on a construction with no argument list has no reading — ` +
+          'JavaScript refuses `new X?.()`; close the construction to soak the instance (`new X()?(…)` or `(new X)?(…)`)');
+      }
       const f = { role: false, kind: fkind };
       frames.push(f);
       if (fkind === 'member') {
@@ -15502,7 +15543,10 @@ class Emitter {
     }
     if (parent != null) {
       this.b.emit(' extends ');
-      this.mark(node, 'parent', () => this.expr(parent));
+      // JavaScript takes a LeftHandSideExpression here, which is what a
+      // chain HEAD is: a primary stands bare, and an await, a logical or
+      // a conditional groups, or `class extends a || b {` does not parse.
+      this.grouped(node, 'parent', parent, Emitter.needsGrouping(parent, 'head'));
     }
     this.b.emit(' {\n');
     if (body != null) this.mark(node, 'body', () => this.classMembers(body, ind));
@@ -16083,11 +16127,14 @@ class Emitter {
     });
   }
 
-  // ["new", operand] — a member operand keeps the
-  // bare NewExpression (`new a.B`); a call-array operand becomes
-  // `new Ctor(args)`; a simple operand gains empty parens (`new A()`).
-  // A sealed dammit operand (`new (f!)`) is an expression, not a call
-  // shape — emit the awaited call, then empty construction args.
+  // ["new", operand] — a construction always spells its argument list:
+  // a name or a PURE spine (names, members, indexes) prints bare with
+  // `()` (`new A()`, `new a.B()`), a call-array operand becomes
+  // `new Ctor(args)`, and every other operand is an EXPRESSION standing
+  // as the constructor, sealed in parens so `new` binds to it whole —
+  // a spine that holds a call included (`new (a().b)()` is not
+  // `new a().b()`). A sealed dammit operand (`new (f!)`) emits the
+  // awaited call, then empty construction args.
   newExpr(node) {
     const [, operand] = node;
     this.mark(node, '$self', () => {
@@ -16109,7 +16156,19 @@ class Emitter {
           this.expr(operand);
           this.b.emit(' ?? undefined)()');
         } else if (isNode(operand) && (operand[0] === '.' || operand[0] === '?.')) {
-          this.member(operand);
+          // The argument list is always spelled. `new a.b` alone means
+          // the same, but anything chained after it would bind into the
+          // constructor spine: `(new a.b).c` printed bare is `new a.b.c`.
+          // A spine that holds a call seals whole: printed bare,
+          // `new (a().b)` would construct `a`.
+          if (Emitter.pureSpine(operand)) {
+            this.member(operand);
+            this.b.emit('()');
+          } else {
+            this.b.emit('(');
+            this.expr(operand);
+            this.b.emit(')()');
+          }
         } else if (isNode(operand) && operand[0] === 'new' && operand.length === 2 &&
                    Emitter.optionalGuard(operand[1])) {
           // `new new a?.b` — the inner construction is the constructor,
@@ -16149,11 +16208,12 @@ class Emitter {
           });
         } else if (isNode(operand) && operand[0] === 'new' && operand.length === 2) {
           // `new new X()` — the inner construction is the constructor:
-          // `new (new X())`. Bare, the outer `new` would read the inner
-          // as a call of a function named `new`.
+          // `new (new X())()`. Bare, the outer `new` would read the inner
+          // as a call of a function named `new`; without its own list,
+          // a chain after it would bind into the inner construction.
           this.b.emit('(');
           this.newExpr(operand);
-          this.b.emit(')');
+          this.b.emit(')()');
         } else if (isNode(operand) && operand[0] === 'dammit!') {
           // `new (f!)` → `new (await f())()`. Source parens selected
           // the program (sealed Value-dammit as the constructor).
@@ -16163,8 +16223,62 @@ class Emitter {
           this.b.emit('()');
         } else if (isNode(operand)) {
           // A call node — [ctor, ...args] — emits Ctor(args); with the
-          // `new ` prefix already written this is `new Ctor(args)`.
-          this.call(operand);
+          // `new ` prefix already written this is `new Ctor(args)`. That
+          // reading holds only for an UNPARENTHESIZED call whose callee
+          // is a name, a spine, or the parenthesized dammit the call
+          // walk seals itself (an index spine rides the same walk).
+          // Everything else is an EXPRESSION standing
+          // as the constructor and seals in parens, so `new` binds to it
+          // whole: a parenthesized call (`new (f())` constructs what `f`
+          // returns, never `f`), an operator or control expression
+          // (`new (a or b)`), a function or class, and a call whose
+          // callee is one of those (`new (f(1))(2)`).
+          const isCall = this.semanticKindOf(operand) === 'call';
+          const callee = operand[0];
+          // Parens around a PURE spine (names, members, indexes) are
+          // redundant; a spine that holds a call seals, wherever its
+          // parens stood (`new (a().b)(1)` and `new (a()).b(1)` are not
+          // `new a().b(1)`).
+          // `X.new(args)` is a construction of its own, so as a callee
+          // it is an expression too: `new a.new(1)` constructs what that
+          // construction returns.
+          const plainCallee = !isRubyNew(callee) && (Emitter.pureSpine(callee) ||
+            (isNode(callee) && !callee.parenthesized && this.semanticKindOf(callee) === 'call') ||
+            (isNode(callee) && callee[0] === 'dammit!'));
+          if (SPINE_HEADS.has(operand[0]) && Emitter.pureSpine(operand)) {
+            // An index spine, with its argument list spelled for the
+            // same reason a member spine's is.
+            this.call(operand);
+            this.b.emit('()');
+          } else if (isCall && !operand.parenthesized && isRubyNew(callee)) {
+            this.b.emit('(');
+            this.call(operand);
+            this.b.emit(')()');
+          } else if (isCall && !operand.parenthesized && plainCallee) {
+            this.call(operand);
+          } else if (isCall && !operand.parenthesized) {
+            const selfGrouped = this.ts && isNode(callee) && (callee[0] === 'cast' || callee[0] === 'satisfies');
+            this.mark(operand, '$self', () => {
+              if (!selfGrouped) this.b.emit('(');
+              this.expr(callee);
+              if (!selfGrouped) this.b.emit(')');
+              this.mark(operand, 'args', () => {
+                this.b.emit('(');
+                operand.slice(1).forEach((arg, i) => {
+                  if (i > 0) this.b.emit(', ');
+                  this.callArg(arg);
+                });
+                this.b.emit(')');
+              });
+            });
+          } else {
+            // On the TS face a cast or `satisfies` operand prints its own
+            // group, which is the seal.
+            const grouped = this.ts && (operand[0] === 'cast' || operand[0] === 'satisfies');
+            if (!grouped) this.b.emit('(');
+            this.expr(operand);
+            this.b.emit(grouped ? '()' : ')()');
+          }
         } else {
           this.emitPrimitive(operand);
           this.b.emit('()');
@@ -16332,6 +16446,16 @@ class Emitter {
     // arity leaves it alone — it is no longer unannotated.
     if (firstParamTypeText !== null) optional.delete(0);
     list.forEach((p, i) => {
+      // JavaScript refuses `await` and `yield` anywhere in formal
+      // parameters — a default, a pattern's default, a computed key —
+      // even in an async or generator function. A nested function
+      // inside a default owns its own (firstAwaitIn stops there).
+      const control = this.firstAwaitIn(p);
+      if (control !== null) {
+        throw this.positionedError(control,
+          "emitter: a parameter cannot await or yield — JavaScript refuses both in formal parameters, a default " +
+          "or a pattern's default included; take the argument and do it in the body (`a ?= load!`)");
+      }
       // A promoted parameter reaching emission was NOT stripped by a
       // constructor — the shape belongs to constructors alone (there
       // is no instance for any other function's `@name` to bind).

@@ -9089,7 +9089,9 @@ function containsAwait(sexpr) {
     return true;
   if (head === "for-as" && sexpr[3] === true)
     return true;
-  if (head === "->" || head === "=>" || isDefHead(head) || head === "class")
+  if (head === "class")
+    return containsAwait(sexpr[2]);
+  if (head === "->" || head === "=>" || isDefHead(head))
     return false;
   return sexpr.some((item) => containsAwait(item));
 }
@@ -9099,7 +9101,9 @@ function containsYield(sexpr) {
   const head = sexpr[0];
   if (head === "yield" || head === "yield-from")
     return true;
-  if (head === "->" || head === "=>" || isDefHead(head) || head === "class")
+  if (head === "class")
+    return containsYield(sexpr[2]);
+  if (head === "->" || head === "=>" || isDefHead(head))
     return false;
   return sexpr.some((item) => containsYield(item));
 }
@@ -9319,6 +9323,13 @@ class Emitter {
     if (id === null)
       return true;
     return this.stores.node(id)?.semanticKind === kind;
+  }
+  static pureSpine(x) {
+    return typeof x === "string" || isNode(x) && typeof x[0] === "string" && SPINE_HEADS.has(x[0]) && !isRubyNew(x) && Emitter.pureSpine(x[1]);
+  }
+  semanticKindOf(node) {
+    const id = this.stores.idOf(node);
+    return id !== null ? this.stores.node(id)?.semanticKind ?? null : null;
   }
   isModuleImport(x) {
     return Emitter.isModuleImportIn(this.stores, x);
@@ -15408,7 +15419,7 @@ ${pad ?? ""}`);
   renderSyncError(node) {
     return this.positionedError(node, "emitter: a render body evaluates synchronously — 'await'/'yield' cannot appear in a render expression " + "(text, attributes, props, and event listeners emit into non-async generated scopes); compute the value " + "into a member (a state written by an effect), or make the handler a function ('-> await ...')", this.rstate.node);
   }
-  static firstAwaitIn(n) {
+  firstAwaitIn(n) {
     if (!isNode(n))
       return null;
     const head = n[0];
@@ -15416,10 +15427,12 @@ ${pad ?? ""}`);
       return n;
     if (head === "for-as" && n[3] === true)
       return n;
-    if (isFunc(n) || isDefHead(head) || head === "class" || head === "effect")
+    if (head === "class")
+      return this.firstAwaitIn(n[2]);
+    if (isFunc(n) || isDefHead(head) || this.isEffectDecl(n))
       return null;
     for (const el of n) {
-      const hit = Emitter.firstAwaitIn(el);
+      const hit = this.firstAwaitIn(el);
       if (hit !== null)
         return hit;
     }
@@ -15763,7 +15776,7 @@ ${pad ?? ""}`);
           throw this.positionedError(stmt, `emitter: a component ${stmt[0] === "state" ? "state" : "computed"} member takes a plain name or '@name' — ` + "patterns and member chains have no member reading ", node);
         }
         if (stmt[0] === "state") {
-          if (Emitter.containsAwait(stmt[2]) || Emitter.containsYield(stmt[2])) {
+          if (this.firstAwaitIn(stmt[2]) !== null) {
             throw this.positionedError(stmt, "emitter: a component state initializer cannot await or yield — _init runs synchronously during construction", node);
           }
           declare(t.name, "state", stmt, true);
@@ -15784,6 +15797,9 @@ ${pad ?? ""}`);
         const t = Emitter.memberTarget(stmt[1]);
         if (t === null) {
           throw this.positionedError(stmt, "emitter: a component readonly member takes a plain name or '@name' — patterns and member chains have no member reading ", node);
+        }
+        if (this.firstAwaitIn(stmt[2]) !== null) {
+          throw this.positionedError(stmt, "emitter: a component readonly initializer cannot await or yield — _init runs synchronously during construction", node);
         }
         declare(t.name, "readonly", stmt, false);
         readonlyVars.push({ name: t.name, value: stmt[2], isPublic: t.isPublic, node: stmt });
@@ -15846,6 +15862,9 @@ ${pad ?? ""}`);
         }
         if (isVoid) {
           throw this.positionedError(stmt, "emitter: the void marker (a trailing '!' on the defined name) requires a function value — `save! = ->`", node);
+        }
+        if (this.firstAwaitIn(stmt[2]) !== null) {
+          throw this.positionedError(stmt, "emitter: a component member initializer cannot await or yield — _init runs synchronously during construction", node);
         }
         declare(t.name, "plain", stmt, false);
         plainVars.push({ name: t.name, value: stmt[2], isPublic: t.isPublic, node: stmt });
@@ -18307,7 +18326,7 @@ ${this.replayPad}}` : " }");
   renderBinding(stmt) {
     const [op, name, value] = stmt;
     const rec = this.rstate.sink;
-    const control = Emitter.firstAwaitIn(value);
+    const control = this.firstAwaitIn(value);
     if (control !== null)
       throw this.renderSyncError(control);
     if (name.startsWith("__")) {
@@ -19556,6 +19575,11 @@ ${this.replayPad}}` : " }");
       const head = n[0];
       const isInner = j === spine.length - 1;
       const fkind = (head === "." || head === "?.") && n.length === 3 ? "member" : head === "[]" && n.length === 3 || head === "optindex" && n.length === 3 && this.lockedHead(n, "optindex") ? "index" : head === "optcall" && this.lockedHead(n, "optcall") ? "optcall" : "call";
+      const soaks = fkind === "optcall" || fkind === "index" && head === "optindex";
+      const built = soaks && isNode(n[1]) && n[1][0] === "new" && n[1].length === 2 && !n[1].parenthesized ? n[1][1] : undefined;
+      if (built !== undefined && !(isNode(built) && !built.parenthesized && this.semanticKindOf(built) === "call")) {
+        throw this.positionedError(n, `emitter: an optional ${fkind === "optcall" ? "call" : "index"} directly on a construction with no argument list has no reading — ` + "JavaScript refuses `new X?.()`; close the construction to soak the instance (`new X()?(…)` or `(new X)?(…)`)");
+      }
       const f = { role: false, kind: fkind };
       frames.push(f);
       if (fkind === "member") {
@@ -20318,7 +20342,7 @@ ${this.replayPad}}` : " }");
     }
     if (parent != null) {
       this.b.emit(" extends ");
-      this.mark(node, "parent", () => this.expr(parent));
+      this.grouped(node, "parent", parent, Emitter.needsGrouping(parent, "head"));
     }
     this.b.emit(` {
 `);
@@ -20803,7 +20827,14 @@ ${"  ".repeat(ind)}`);
           this.expr(operand);
           this.b.emit(" ?? undefined)()");
         } else if (isNode(operand) && (operand[0] === "." || operand[0] === "?.")) {
-          this.member(operand);
+          if (Emitter.pureSpine(operand)) {
+            this.member(operand);
+            this.b.emit("()");
+          } else {
+            this.b.emit("(");
+            this.expr(operand);
+            this.b.emit(")()");
+          }
         } else if (isNode(operand) && operand[0] === "new" && operand.length === 2 && Emitter.optionalGuard(operand[1])) {
           this.b.emit("(");
           this.newExpr(operand);
@@ -20830,7 +20861,7 @@ ${"  ".repeat(ind)}`);
         } else if (isNode(operand) && operand[0] === "new" && operand.length === 2) {
           this.b.emit("(");
           this.newExpr(operand);
-          this.b.emit(")");
+          this.b.emit(")()");
         } else if (isNode(operand) && operand[0] === "dammit!") {
           if (operand.parenthesized)
             this.b.emit("(");
@@ -20839,7 +20870,43 @@ ${"  ".repeat(ind)}`);
             this.b.emit(")");
           this.b.emit("()");
         } else if (isNode(operand)) {
-          this.call(operand);
+          const isCall = this.semanticKindOf(operand) === "call";
+          const callee = operand[0];
+          const plainCallee = !isRubyNew(callee) && (Emitter.pureSpine(callee) || isNode(callee) && !callee.parenthesized && this.semanticKindOf(callee) === "call" || isNode(callee) && callee[0] === "dammit!");
+          if (SPINE_HEADS.has(operand[0]) && Emitter.pureSpine(operand)) {
+            this.call(operand);
+            this.b.emit("()");
+          } else if (isCall && !operand.parenthesized && isRubyNew(callee)) {
+            this.b.emit("(");
+            this.call(operand);
+            this.b.emit(")()");
+          } else if (isCall && !operand.parenthesized && plainCallee) {
+            this.call(operand);
+          } else if (isCall && !operand.parenthesized) {
+            const selfGrouped = this.ts && isNode(callee) && (callee[0] === "cast" || callee[0] === "satisfies");
+            this.mark(operand, "$self", () => {
+              if (!selfGrouped)
+                this.b.emit("(");
+              this.expr(callee);
+              if (!selfGrouped)
+                this.b.emit(")");
+              this.mark(operand, "args", () => {
+                this.b.emit("(");
+                operand.slice(1).forEach((arg, i) => {
+                  if (i > 0)
+                    this.b.emit(", ");
+                  this.callArg(arg);
+                });
+                this.b.emit(")");
+              });
+            });
+          } else {
+            const grouped = this.ts && (operand[0] === "cast" || operand[0] === "satisfies");
+            if (!grouped)
+              this.b.emit("(");
+            this.expr(operand);
+            this.b.emit(grouped ? "()" : ")()");
+          }
         } else {
           this.emitPrimitive(operand);
           this.b.emit("()");
@@ -20942,6 +21009,10 @@ ${"  ".repeat(ind)}`);
     if (firstParamTypeText !== null)
       optional.delete(0);
     list.forEach((p, i) => {
+      const control = this.firstAwaitIn(p);
+      if (control !== null) {
+        throw this.positionedError(control, "emitter: a parameter cannot await or yield — JavaScript refuses both in formal parameters, a default " + "or a pattern's default included; take the argument and do it in the body (`a ?= load!`)");
+      }
       if (atParamName(p) !== null || isNode(p) && p[0] === "default" && atParamName(p[1]) !== null) {
         throw this.positionedError(isNode(p) ? p : params, "emitter: an @-parameter promotes only in a constructor (`constructor: (@name) ->`) — bind a plain parameter and assign it here");
       }

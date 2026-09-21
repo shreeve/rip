@@ -482,7 +482,7 @@ code 'new-member dammit through an optional link', 'x = new X(a)?.b!', 'let x = 
 # the dammit's call IS the construction, awaited. (v3 emits `new await
 # X()()` — a SyntaxError under a spec parser.)
 code 'dammit directly on the new awaits the construction', 'x = new X!', 'let x = await new X();'
-code 'dammit on a member callee awaits the construction', 'x = new X.b!', 'let x = await new X.b;'
+code 'dammit on a member callee awaits the construction', 'x = new X.b!', 'let x = await new X.b();'
 code 'dammit supplies the construction args', 'x = new X!(a)', 'let x = await new X(a);'
 code 'construction dammit continues the chain', 'x = new X!.b', 'let x = (await new X()).b;'
 
@@ -503,7 +503,7 @@ test 'ruby construction dammit awaits a thenable-returning constructor', '''
 code 'parenthesized dammit is the new callee', 'x = new (f!)', 'let x = new (await f())();'
 code 'parenthesized dammit callee takes ctor args', 'x = new (f!)(a)', 'let x = new (await f())(a);'
 code 'parenthesized dammit chain is the new callee', 'x = new (X(a).b!)', 'let x = new (await X(a).b())();'
-code 'member of a parenthesized dammit is constructed', 'x = new (f!).b', 'let x = new (await f()).b;'
+code 'member of a parenthesized dammit is constructed', 'x = new (f!).b', 'let x = new ((await f()).b)();'
 
 # Expression positions inherit the rebinding.
 code 'new-member dammit as a call argument', 'x = f(new X(a).b!)', 'let x = f(await new X(a).b());'
@@ -995,3 +995,37 @@ code "yield* generates yield*", '''
     return yield* other();
   };
   '''
+
+# JavaScript refuses `await` and `yield` anywhere in formal parameters —
+# a default, a pattern's default, a computed key — even in an async or
+# generator function. A nested function inside a default owns its own.
+fail 'a parameter default cannot await through dammit', 'g = (a = f!) -> a', 'a parameter cannot await or yield'
+fail 'a parameter default cannot await', 'g = (a = await f()) -> a', 'a parameter cannot await or yield'
+fail 'a parameter default cannot await through maybe dammit', 'g = (a = f?!) -> a', 'a parameter cannot await or yield'
+fail 'an object pattern default in a parameter cannot await', 'g = ({a = f!}) -> a', 'a parameter cannot await or yield'
+fail 'an array pattern default in a parameter cannot await', 'g = ([a = f!]) -> a', 'a parameter cannot await or yield'
+fail 'a parameter default cannot run an awaited for-as', 'g = (a = (y for y as! xs)) -> a', 'a parameter cannot await or yield'
+fail 'a parameter default cannot yield', 'g = (a = yield 1) -> a', 'a parameter cannot await or yield'
+fail 'a def parameter default cannot await', '''
+  def go(a = f!)
+    a
+  ''', 'a parameter cannot await or yield'
+fail 'a method parameter default cannot await', '''
+  class K
+    m: (a = f!) -> a
+  ''', 'a parameter cannot await or yield'
+code 'a function inside a parameter default owns its await', 'g = (cb = -> await f()) -> cb()', '''
+  let g = function(cb = async function() {
+    return await f();
+  }) {
+    return cb();
+  };
+  '''
+test 'the body is where a missing argument awaits its default', '''
+  load = -> Promise.resolve(42)
+  g = (a) ->
+    a ?= load!
+    a
+  g!
+''', 42
+

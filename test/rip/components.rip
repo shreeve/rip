@@ -5658,6 +5658,106 @@ test 'block component effect has matching reference evaluation counts', '''
   [target.x, gets, values]
   ''', [4, 1, 1]
 
+# `_init` runs synchronously during construction, so no member initializer
+# awaits or yields, whatever kind of member it declares. A function VALUE
+# a member holds — a method, a hook, a callback in a list — owns its own.
+fail 'a component state initializer cannot await', '''
+  A = component
+    n := fn!
+    render
+      div n
+  ''', 'a component state initializer cannot await or yield'
+
+fail 'a component readonly initializer cannot await', '''
+  A = component
+    n =! fn!
+    render
+      div n
+  ''', 'a component readonly initializer cannot await or yield'
+
+fail 'a public component readonly initializer cannot await', '''
+  A = component
+    @n =! fn?!
+    render
+      div n
+  ''', 'a component readonly initializer cannot await or yield'
+
+fail 'a plain component member initializer cannot await', '''
+  A = component
+    n = fn!
+    render
+      div n
+  ''', 'a component member initializer cannot await or yield'
+
+fail 'a component prop default cannot await', '''
+  A = component
+    @n: any = fn!
+    render
+      div n
+  ''', 'a component member initializer cannot await or yield'
+
+fail 'a component computed body cannot await', '''
+  A = component
+    n ~= fn!
+    render
+      div n
+  ''', "a computed ('~=') body cannot await"
+
+test 'component members that hold functions own their awaits', '''
+  A = component
+    go =! -> fn!
+    cbs = [-> fn!]
+    load = -> fn!
+    mounted = -> fn!
+    render
+      div "x"
+  typeof A
+  ''', 'function'
+
+code 'a component member holding an awaiting effect keeps it', '''
+  export A = component
+    e = ~> fn!
+    render
+      div "x"
+  ''', '''
+  export const A = class extends __Component {
+    _init(__given) {
+      this.e = __effect(async () => { await fn(); });
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode("x");
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+  };
+  '''
+
+test 'readonly, state and list members may hold awaiting effects', '''
+  A = component
+    e =! ~> fn!
+    s := ~> fn!
+    es = [~> fn!]
+    render
+      div "x"
+  typeof A
+  ''', 'function'
+
+fail 'a member cannot await in a class heritage', '''
+  A = component
+    K = class extends (fn!)
+    render
+      div "x"
+  ''', 'a component member initializer cannot await or yield'
+
+fail 'a user call spelled effect does not hide its await', '''
+  A = component
+    n = effect(a, fn!)
+    render
+      div "x"
+  ''', 'a component member initializer cannot await or yield'
+
 # A render body evaluates synchronously: text, attributes, props, and event
 # listeners all emit into non-async generated scopes, so a bare await/yield
 # in any render expression rejects positioned. A FUNCTION handler value owns

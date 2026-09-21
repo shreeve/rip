@@ -64,7 +64,8 @@ const awaitsIn = (x) => {
   const h = x[0];
   if (h === 'await' || h === 'dammit!' || h === 'dammit?') return true;
   if (h === 'for-as' && x[3] === true) return true;
-  if (h === '->' || h === '=>' || h === 'def' || h === 'void-def' || h === 'class') return false;
+  if (h === 'class') return awaitsIn(x[2]);
+  if (h === '->' || h === '=>' || h === 'def' || h === 'void-def') return false;
   return x.some(awaitsIn);
 };
 
@@ -75,7 +76,8 @@ const yieldsIn = (x) => {
   if (!isNode(x)) return false;
   const h = x[0];
   if (h === 'yield' || h === 'yield-from') return true;
-  if (h === '->' || h === '=>' || h === 'def' || h === 'void-def' || h === 'class') return false;
+  if (h === 'class') return yieldsIn(x[2]);
+  if (h === '->' || h === '=>' || h === 'def' || h === 'void-def') return false;
   return x.some(yieldsIn);
 };
 
