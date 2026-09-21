@@ -73,10 +73,10 @@ README carries this matrix.
 
 | Must match in v0.1 | Beyond Ink in v0.1 | Disclosed gaps in v0.1 | Never |
 |---|---|---|---|
-| Flexbox layout incl. baseline and static position, borders, backgrounds | Mouse, opt-in: `@click`, `@wheel` (§7) | Screen-reader output mode (`role` / `aria-*` are accepted from the start, §13) | React devtools |
+| Flexbox layout incl. baseline, static position, and aspect ratio; borders, backgrounds | Mouse, opt-in: `@click`, `@wheel` (§7) | Screen-reader output mode (`role` / `aria-*` are accepted from the start, §13) | React devtools |
 | `overflow: hidden` clipping | Keys bubble from the focused node, with preventable default actions | Windows — unclaimed and untested, as for Rip itself (§13) | Concurrent rendering, Suspense |
 | Scrolling by content offset (`contentOffsetX` / `contentOffsetY`) | Tree-order focus | List virtualization | |
-| Wrap and truncate modes | Node-relative cursor placement | Aspect ratio (§5) | |
+| Wrap and truncate modes | Node-relative cursor placement | | |
 | `Static` scrollback output | A text change of unchanged size runs no layout | | |
 | Inline and alternate-screen rendering | | | |
 | Synchronized, diffed, coalesced output | | | |
@@ -219,18 +219,20 @@ expensive and a terminal needs them:
   step (per-line maximum ascent), the most delicate part of the
   algorithm, and is 78 lines in Yoga.
 
-**Designed for, implemented later** — each has one seam, so adding it
-is local:
+Also in scope, each behind one seam:
 
-| Feature | Seam kept from the start |
+| Feature | Seam |
 |---|---|
-| `display: contents` | Layout iterates a cached list of layout children, never raw `childNodes`. The list exists anyway: comment anchors (`if`, `for`) are zero-size and skipped. |
-| `box-sizing: content-box` | Every width / height / min / max / basis read goes through one size resolver. |
-| Right-to-left | One resolver maps flex direction and start / end edges through a `direction` argument, fixed to LTR. Reverse directions need the same machinery. |
-| Aspect ratio | None. Cells are not square, so the ratio has no honest meaning; a disclosed gap (Ink exposes it; one Yoga case). |
+| `display: contents` | Layout iterates a cached list of layout children, never raw `childNodes`, and a contents node's children join its parent's list. The list exists anyway: comment anchors (`if`, `for`) are zero-size and skipped. |
+| `boxSizing: content-box` | Every width / height / min / max / basis read goes through one size resolver. |
+| Aspect ratio | Yoga's handling, ported. A ratio counts CELLS, which are about twice as tall as wide, so a box that looks square asks for about 2. |
+| Intrinsic keywords | `max-content`, `fit-content`, and `stretch` as a size resolve as Yoga resolves them: to no length, so the node sizes as an `auto` one does. |
 
-**Dropped:** intrinsic keywords, auto-min-size, errata and
-experimental flags.
+**Designed for, implemented later:** right-to-left. One resolver maps
+flex direction and start / end edges through a `direction` argument,
+fixed to LTR; reverse directions need the same machinery.
+
+**Dropped:** auto-min-size, errata and experimental flags.
 
 **Parity target:** classic Yoga behavior as its generated tests encode
 it (running totals, no auto-min), not the CSS specification.
@@ -256,23 +258,30 @@ container is measured at exact width.
 ### Acceptance: Yoga's own suite
 
 `misc/yoga/javascript/tests/generated/` holds 543 cases in 26 files,
-each asserting integer boxes recorded from Chrome. They run against a
-test-only shim (about 120 lines) shaped like the `yoga-layout` API.
+each asserting integer boxes recorded from Chrome. They run, byte for
+byte as upstream wrote them, against a test-only shim shaped like the
+`yoga-layout` API (`test/yoga-shim.rip`, `rip test/yoga.rip`).
 
-- About **500 cases are in scope; the bar is 480 or more passing.**
-  These are estimates until the suite runs.
-- A checked-in **skip list with one reason per entry** covers the rest
-  (content-box 23, `display: contents` 9, intrinsic keywords 5, aspect
-  ratio 1). The harness fails on any skip not listed. Nothing is
-  skipped silently.
+- **All 543 run and none is skipped.** Yoga's 37 hand-written aspect
+  ratio cases are ported beside them (`test/yoga-aspect.rip`). Real
+  `yoga-layout` 3.2.1, the release Ink ships, passes 537 of the 543
+  through the same runner: it predates the intrinsic keywords and one
+  alignment fix.
+- **One stated divergence, pinned, not skipped.** Yoga rounds a node's
+  position from its offset in its parent and its size from its
+  absolute edges; under a fractional ancestor offset the two disagree,
+  and `rounding_fractial_input_3` expects two siblings to share a row
+  and a row to be left empty. Here every edge rounds from its absolute
+  position, so neighbors never overlap and never gap. The runner holds
+  the one differing expectation to this engine's exact answer, with
+  the reason beside it, and fails on a pinned answer that never runs.
 - Every case has a right-to-left half. **Decided — RTL is deferred.**
   One mechanical gate stops each case before its RTL pass and the
   report says "LTR half". Layout-side RTL is cheap at any time because
   of the direction seam above; the expensive part of RTL in a terminal
   is bidirectional text, which no layout decision made here makes
-  harder. At the end of PR 2, a time-boxed experiment flips the
-  direction argument on in tests only: if the RTL halves pass, they
-  stay on as free coverage of the reverse machinery.
+  harder. When the direction argument is wired through, the RTL halves
+  are 543 more cases waiting in the same files.
 - `misc/` is gitignored, so **the suite is vendored as-is** under
   `test/yoga/`, excluded from published `files`.
 - **License:** Yoga and Ink are MIT. Vendored tests keep their headers
@@ -475,7 +484,7 @@ run App
   "Package surface" section. Streams and the clock are injectable; no
   pty dependency. One end-to-end smoke test runs under
   `script -q /dev/null`.
-- **Layout:** the Yoga suite and skip list (§5).
+- **Layout:** the Yoga suite and the ported aspect ratio cases (§5).
 - **Paint:** about 400 Ink cases ported as literal expected strings
   plus a plain cell dump — borders 52, backgrounds 35, overflow 44,
   text 57 (minus ANSI), wrap and width 32, dimensions 29, content
@@ -580,7 +589,7 @@ Each step is its own branch and PR under the repo's landing rules.
 |---|---|---|
 | 0 | Bench harness, Ink baselines, a profile of where Ink spends a frame (`bench/`) | The baseline and the frame profile are recorded in §11 |
 | 1 | Walking skeleton: scoped `document`, row / column + grow + padding + border layout, grid paint with diff, `renderToString`, counter and two-pane examples | Keyed `for`, `if` / `else`, fragments, rest-prop styles, and `ref:` metrics all work end to end |
-| 2 | Full layout engine, cache, dirty boundaries, vendored Yoga suite and skip list | ≥ 480 in-scope cases pass; RTL experiment recorded |
+| 2 | Full layout engine, cache, dirty boundaries, vendored Yoga suite | All 543 generated cases and the 37 aspect ratio cases pass; an incremental layout equals a fresh one under fuzz |
 | 3 | Text, width, wrap / truncate, clipping, content offset, borders, backgrounds | Ported Ink paint cases pass |
 | 4 | Input, focus, cursor, mouse, enhanced keyboard | Ported parser cases pass; select-list, text-input, and wheel-scrolled list examples |
 | 5 | Lifecycle, inline `Static`, non-TTY, console capture, resize, animation clock | Crash, signal, and suspend restore the terminal under test |
@@ -600,7 +609,7 @@ start. Each row is a rule the v0.1 code follows.
 | Screen-reader output | `role` and every `aria-*` attribute are accepted and stored on the node, never rejected as unknown keys, so components are written accessibly from day one. The hardware cursor follows focus (§7). | One tree walk that serializes roles, states, and labels as linear text — the counterpart of Ink's `renderNodeToScreenReaderOutput`. |
 | Windows | Rip itself claims only macOS and Linux (CI is Linux). All platform code lives in `terminal.rip`. Resize comes from the stream's `resize` event, never the SIGWINCH signal. Suspend is guarded by platform. The painter never writes the last cell of the last row. Nothing rejects `win32`. | A CI lane and whatever it finds. |
 | Error overview | Uncaught errors and the runtime's component error hook (`__setErrorHandler`) route through one reporter that restores the terminal first. | A prettier reporter: source excerpt and mapped stack. |
-| `display: contents`, content-box, RTL | The layout seams in §5. | Local changes behind each seam. |
+| Right-to-left | The direction resolver in §5. | A flip of one argument, plus bidirectional text. |
 
 ## 14. Decisions
 

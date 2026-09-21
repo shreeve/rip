@@ -8,7 +8,7 @@
     ".": "./tui.rip"
   },
   "scripts": {
-    "test": "rip test.rip",
+    "test": "rip test.rip && rip test/yoga.rip && rip test/yoga-aspect.rip && rip test/fuzz.rip",
     "demo": "rip demo.rip"
   },
   "files": [

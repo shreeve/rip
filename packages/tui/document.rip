@@ -7,8 +7,16 @@
 import { __setChildFailureReporter } from '../../src/runtime/components.js'
 
 # Styles that move boxes, and styles that only recolor cells.
-LAYOUT =! ['flexDirection', 'flexGrow', 'gap', 'width', 'height', 'borderStyle', 'hidden',
-  'padding', 'paddingX', 'paddingY', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight']
+LAYOUT =! [
+  'flexDirection', 'flexWrap', 'flexGrow', 'flexShrink', 'flexBasis', 'flex'
+  'alignItems', 'alignSelf', 'alignContent', 'justifyContent'
+  'gap', 'rowGap', 'columnGap'
+  'width', 'height', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight', 'aspectRatio', 'boxSizing'
+  'padding', 'paddingX', 'paddingY', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight'
+  'margin', 'marginX', 'marginY', 'marginTop', 'marginBottom', 'marginLeft', 'marginRight'
+  'position', 'top', 'right', 'bottom', 'left'
+  'display', 'hidden', 'borderStyle'
+]
 PAINT =! ['color', 'backgroundColor', 'borderColor', 'bold', 'dim', 'italic', 'underline', 'inverse']
 
 KIND =! Map.new()
@@ -160,7 +168,10 @@ export class Element extends Node
 
   setAttribute!: (key, value) ->
     throw Error.new "rip/tui: a string `style` has no terminal meaning on <#{@tagName}> — pass the styles as props, or `style:` an object" if key is 'style'
-    @set key, value
+    # A boolean attribute written on a raw tag arrives as presence, the
+    # empty string (`div hidden: true`); on the style road an empty
+    # string clears a key, so the two are told apart here.
+    @set key, (if value is '' then true else value)
 
   removeAttribute!: (key) -> @set key, undefined unless key is 'style'
   toggleAttribute!: (key, force) -> @set key, (if force then true else undefined)

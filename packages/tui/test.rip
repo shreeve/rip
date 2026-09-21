@@ -229,6 +229,47 @@ test "bare text under a box is a text leaf", ->
         "plain"
   eq renderToString(Bare, cols: 10), "plain"
 
+test "a hidden child is never the baseline child", ->
+  # Yoga picks the first child as a row's baseline child even when it
+  # is `display: none`, reads its zeroed height, and answers NaN for
+  # the row's top. A box that draws nothing has no baseline: the first
+  # child that shows is the one that aligns.
+  Aligned = component
+    render
+      div flexDirection: 'row', alignItems: 'baseline', width: 100, height: 50
+        div width: 20
+          div hidden: true, height: 7
+          div height: 10
+        div width: 20, height: 30
+  mounted Aligned, (app, show, doc) ->
+    show 100
+    [first, second] = doc.body.firstChild.childNodes
+    eq [first.rect.y, first.rect.h], [20, 10]
+    eq [second.rect.y, second.rect.h], [0, 30]
+
+test "wrap, justify, and an absolute node against a static ancestor", ->
+  Shelf = component
+    render
+      Box width: 22, borderStyle: 'single', flexDirection: 'column'
+        Box flexDirection: 'row', justifyContent: 'space-between'
+          Text "left"
+          Text "right"
+        Box position: 'static', flexDirection: 'row', flexWrap: 'wrap', columnGap: 1
+          Text "one"
+          Text "two"
+          Text "three"
+          Text "four"
+          Text "five"
+          Box position: 'absolute', bottom: 0, right: 0
+            Text "*"
+  eq renderToString(Shelf, cols: 30), [
+    "┌────────────────────┐"
+    "│left           right│"
+    "│one two three four  │"
+    "│five               *│"
+    "└────────────────────┘"
+  ].join('\n')
+
 # ==[ The component model on a terminal ]==
 
 console.log "\nComponents"

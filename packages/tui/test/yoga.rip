@@ -1,0 +1,202 @@
+# Yoga's generated layout tests, run against this package's layout.
+#
+#   rip test/yoga.rip                   every file
+#   rip test/yoga.rip YGFlexTest        one file (or several)
+#   rip test/yoga.rip flex_basis_flex_grow_row --dump
+#                                       one case, with the tree it built
+#   rip test/yoga.rip --verbose         name every failure and its first mismatch
+#
+# The files under yoga/ are upstream's, byte for byte. Each is read as
+# text, its imports dropped, each case cut before its right-to-left
+# pass, the TypeScript transpiled, and the result evaluated with `test`,
+# `expect`, `Yoga`, and the enums handed in as parameters. Every case
+# lays out twice upstream, LTR then RTL; layout here is LTR only, so
+# the counts below are for the LTR half and say so. Every case runs:
+# nothing is skipped.
+
+import { readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
+import * as shim from './yoga-shim.rip'
+
+DIR =! join(import.meta.dir, 'yoga')
+SUFFIX =! '.test.ts'
+ENUMS =! ['Align', 'BoxSizing', 'Direction', 'Display', 'Edge', 'Errata', 'ExperimentalFeature',
+  'FlexDirection', 'Gutter', 'Justify', 'MeasureMode', 'Overflow', 'PositionType', 'Unit', 'Wrap']
+PARAMS =! ['test', 'expect', 'Yoga', 'intrinsicSizeMeasureFunc', ...ENUMS]
+
+OPEN =! /^test\('([^']+)', \(\) => \{$/
+CLOSE =! '});'
+LTR =! '  root.calculateLayout(undefined, undefined, Direction.LTR);'
+RTL =! '  root.calculateLayout(undefined, undefined, Direction.RTL);'
+EXPECT =! /^\s*expect\((.*)\)\.toBe\((.*)\);$/
+FINALLY =! /^\s*\}\s*finally\s*\{\s*$/
+
+# One file as its cases. Everything outside a case must be an import or
+# a comment; anything else is a file shape this runner does not know.
+def parse(file)
+  lines = readFileSync(join(DIR, file), 'utf8').split '\n'
+  cases = []
+  head = []
+  current = null
+  for line, i in lines
+    if current
+      if line is CLOSE
+        cases.push current
+        current = null
+      else
+        current.body.push line
+    else if found = line.match OPEN
+      current = { name: found[1], body: [] }
+    else
+      head.push line
+  throw Error.new "#{file}: case '#{current.name}' never closes" if current
+  rest = head.join('\n').replace(/^import\b[\s\S]*?\bfrom\s+['"][^'"]+['"];?[ \t]*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
+  throw Error.new "#{file}: code outside a case: #{rest.trim().split('\n')[0]}" if rest.trim()
+  cases
+
+# The LTR half of a case: everything before the RTL layout, plus a
+# `finally` block when the case has one. What is dropped must be the RTL
+# expectations and nothing else.
+def cut(file, item)
+  { name, body } = item
+  ltr = body.indexOf LTR
+  rtl = body.indexOf RTL
+  unless ltr >= 0 and rtl > ltr and body.lastIndexOf(LTR) is ltr and body.lastIndexOf(RTL) is rtl
+    throw Error.new "#{file}: case '#{name}' is not one LTR layout followed by one RTL layout"
+  tail = body.slice rtl + 1
+  fin = tail.findIndex (line) -> FINALLY.test line
+  dropped = if fin >= 0 then tail.slice(0, fin) else tail
+  stray = dropped.find (line) -> line.trim() and not EXPECT.test line
+  throw Error.new "#{file}: case '#{name}' has more than expectations after its RTL layout: #{stray.trim()}" if stray?
+  kept = body.slice 0, rtl
+  kept = kept.concat tail.slice(fin) if fin >= 0
+  kept
+
+# Where this engine answers differently from Yoga ON PURPOSE: the case,
+# the expectation, and the answer held here instead. An entry is a
+# pinned answer, not a skip — the case runs, and the expectation must
+# come out exactly as written here, or the run fails.
+#
+# rounding_fractial_input_3: a root at top 0.3 holds three growing
+# children. Yoga rounds a node's POSITION from its offset in its parent
+# and its SIZE from its absolute edges, and under a fractional ancestor
+# offset the two disagree: upstream expects the first child on rows
+# 0–64 and the second starting on row 64, so they share a row, and a
+# row is left empty before the third. Here every edge is rounded from
+# its absolute position, so neighbors never overlap and never gap — on
+# a terminal a shared row is one box drawn over another. The second
+# child starts on row 65.
+DIVERGES =! Map.new [
+  ['rounding_fractial_input_3', { 'root_child1.getComputedTop()': 65 }]
+]
+
+# `expect` numbers each call, so a mismatch can be traced back to the
+# source line that made it.
+calls = 0
+current = null
+held = Set.new()
+expect =! (actual) ->
+  index = calls++
+  {
+    toBe: (wanted) ->
+      label = current?.labels[index]
+      pinned = DIVERGES.get(current?.name)?[label]
+      if pinned?
+        held.add "#{current.name} #{label}"
+        wanted = pinned
+      return if Object.is actual, wanted
+      error = Error.new "expected #{wanted}, got #{actual}"
+      error.index = index
+      throw error
+  }
+
+# Evaluate one file's LTR halves and hand back its cases as functions.
+def load(file, items)
+  source = ("test('#{item.name}', () => {\n#{item.kept.join '\n'}\n});" for item in items).join '\n'
+  js = Bun.Transpiler.new({ loader: 'ts' }).transformSync source
+  found = Map.new()
+  register = (name, fn) -> found.set name, fn
+  program = Function.new ...PARAMS, js
+  program register, expect, shim.default, shim.intrinsicSizeMeasureFunc, ...(shim[name] for name in ENUMS)
+  found
+
+def attempt(item, fn)
+  calls = 0
+  current = item
+  shim.forget()
+  try
+    fn()
+    null
+  catch error
+    label = item.labels[error.index] if error.index?
+    if label then "#{label}: #{error.message}" else "#{error.name}: #{error.message}"
+
+args = process.argv.slice 2
+flags = args.filter (arg) -> arg.startsWith '--'
+picks = args.filter (arg) -> not arg.startsWith '--'
+for flag in flags
+  throw Error.new "yoga: unknown flag #{flag}" unless flag in ['--verbose', '--dump']
+verbose = '--verbose' in flags or '--dump' in flags
+dump = '--dump' in flags
+
+files = readdirSync(DIR).filter((name) -> name.endsWith SUFFIX).sort()
+suite = for file in files
+  items = parse file
+  for item in items
+    item.kept = cut file, item
+    item.labels = (line.match(EXPECT)[1] for line in item.kept when EXPECT.test line)
+  { file, stem: file.slice(0, -SUFFIX.length), items }
+
+names = Set.new()
+for { items } in suite
+  names.add item.name for item in items
+stems = Set.new (entry.stem for entry in suite)
+for pick in picks
+  throw Error.new "yoga: '#{pick}' is neither a file nor a case of the suite" unless stems.has(pick) or names.has(pick)
+
+chosen = (item, stem) -> not picks.length or stem in picks or item.name in picks
+
+console.log "\nYoga generated suite — LTR half of each case (the RTL pass is cut), #{names.size} cases in #{files.length} files\n"
+
+total = { passed: 0, scope: 0 }
+failures = []
+for { file, stem, items } in suite
+  mine = items.filter (item) -> chosen item, stem
+  continue unless mine.length
+  fns = load file, mine
+  console.log "  #{stem}" if dump
+  passed = 0
+  scope = 0
+  for item in mine
+    scope++
+    failed = attempt item, fns.get(item.name)
+    if failed then failures.push { stem, name: item.name, failed } else passed++
+    if dump
+      console.log "    #{if failed then '✗' else '✓'} #{item.name}#{if failed then ' — ' + failed else ''}"
+      console.log "        #{line}" for line in shim.describe(root) for root in shim.roots()
+  total.passed += passed
+  total.scope += scope
+  console.log "  #{stem.padEnd 28} #{String(passed).padStart 3} / #{String(scope).padEnd 3}"
+
+# A pinned answer nobody asked for is a rotten entry: the case was
+# renamed, the expectation is gone, or the engine agrees with Yoga.
+unheld = []
+for [name, answers] in DIVERGES
+  continue unless chosen { name }, null
+  for label of answers
+    unheld.push "#{name} #{label}" unless held.has "#{name} #{label}"
+
+pins = if held.size then "  (#{held.size} by stated divergence)" else ''
+console.log "\n  #{'LTR half, total'.padEnd 28} #{String(total.passed).padStart 3} / #{String(total.scope).padEnd 3}#{pins}\n"
+# The tally in the form the repo's lane runner counts.
+console.log "#{total.scope} tests: #{total.passed} passed, #{total.scope - total.passed} failed\n"
+
+if verbose and failures.length and not dump
+  console.log "  ✗ #{stem} #{name} — #{failed}" for { stem, name, failed } in failures
+  console.log ''
+
+if unheld.length
+  console.log "  stale divergence — no such expectation ran: #{entry}" for entry in unheld
+  console.log ''
+
+process.exitCode = 1 if failures.length or unheld.length

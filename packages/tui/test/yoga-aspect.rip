@@ -1,0 +1,859 @@
+# Yoga's hand-written aspect ratio cases, ported one call for one.
+#
+#   Upstream: facebook/yoga, tests/YGAspectRatioTest.cpp
+#   Commit:   9d159f2d3d8dbc777e1f82c20b94e369c113d608
+#
+# A port under Yoga's MIT license, © Meta Platforms, Inc. and affiliates;
+# the text is in test/yoga/LICENSE. Each case keeps its upstream name, builds
+# the same tree through the `yoga-layout` shim, and asserts every box the
+# C++ case asserts.
+#
+#   rip test/yoga-aspect.rip
+
+import { test, eq } from 'rip/testing'
+import Yoga, { Align, Direction, Edge, FlexDirection, Justify, MeasureMode, PositionType } from './yoga-shim.rip'
+
+# Upstream's `_measure`: 50 on any axis it is not given exactly.
+measure =! (width, widthMode, height, heightMode) ->
+  width: if widthMode is MeasureMode.Exactly then width else 50
+  height: if heightMode is MeasureMode.Exactly then height else 50
+
+test 'aspect_ratio_cross_defined', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setWidth 50
+  root_child0.setAspectRatio 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 50
+  eq root_child0.getComputedHeight(), 50
+
+  root.freeRecursive()
+
+test 'aspect_ratio_main_defined', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setHeight 50
+  root_child0.setAspectRatio 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 50
+  eq root_child0.getComputedHeight(), 50
+
+  root.freeRecursive()
+
+test 'aspect_ratio_both_dimensions_defined_row', ->
+  root = Yoga.Node.create()
+  root.setFlexDirection FlexDirection.Row
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setWidth 100
+  root_child0.setHeight 50
+  root_child0.setAspectRatio 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 100
+  eq root_child0.getComputedHeight(), 100
+
+  root.freeRecursive()
+
+test 'aspect_ratio_both_dimensions_defined_column', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setWidth 100
+  root_child0.setHeight 50
+  root_child0.setAspectRatio 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 50
+  eq root_child0.getComputedHeight(), 50
+
+  root.freeRecursive()
+
+test 'aspect_ratio_align_stretch', ->
+  root = Yoga.Node.create()
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setAspectRatio 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 100
+  eq root_child0.getComputedHeight(), 100
+
+  root.freeRecursive()
+
+test 'aspect_ratio_flex_grow', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setHeight 50
+  root_child0.setFlexGrow 1
+  root_child0.setAspectRatio 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 100
+  eq root_child0.getComputedHeight(), 100
+
+  root.freeRecursive()
+
+test 'aspect_ratio_flex_shrink', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setHeight 150
+  root_child0.setFlexShrink 1
+  root_child0.setAspectRatio 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 100
+  eq root_child0.getComputedHeight(), 100
+
+  root.freeRecursive()
+
+test 'aspect_ratio_flex_shrink_2', ->
+  root = Yoga.Node.create()
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setHeight '100%'
+  root_child0.setFlexShrink 1
+  root_child0.setAspectRatio 1
+  root.insertChild root_child0, 0
+
+  root_child1 = Yoga.Node.create()
+  root_child1.setHeight '100%'
+  root_child1.setFlexShrink 1
+  root_child1.setAspectRatio 1
+  root.insertChild root_child1, 1
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 50
+  eq root_child0.getComputedHeight(), 50
+
+  eq root_child1.getComputedLeft(), 0
+  eq root_child1.getComputedTop(), 50
+  eq root_child1.getComputedWidth(), 50
+  eq root_child1.getComputedHeight(), 50
+
+  root.freeRecursive()
+
+test 'aspect_ratio_basis', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setFlexBasis 50
+  root_child0.setAspectRatio 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 50
+  eq root_child0.getComputedHeight(), 50
+
+  root.freeRecursive()
+
+test 'aspect_ratio_absolute_layout_width_defined', ->
+  root = Yoga.Node.create()
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setPositionType PositionType.Absolute
+  root_child0.setPosition Edge.Left, 0
+  root_child0.setPosition Edge.Top, 0
+  root_child0.setWidth 50
+  root_child0.setAspectRatio 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 50
+  eq root_child0.getComputedHeight(), 50
+
+  root.freeRecursive()
+
+test 'aspect_ratio_absolute_layout_height_defined', ->
+  root = Yoga.Node.create()
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setPositionType PositionType.Absolute
+  root_child0.setPosition Edge.Left, 0
+  root_child0.setPosition Edge.Top, 0
+  root_child0.setHeight 50
+  root_child0.setAspectRatio 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 50
+  eq root_child0.getComputedHeight(), 50
+
+  root.freeRecursive()
+
+test 'aspect_ratio_with_max_cross_defined', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setHeight 50
+  root_child0.setMaxWidth 40
+  root_child0.setAspectRatio 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 40
+  eq root_child0.getComputedHeight(), 50
+
+  root.freeRecursive()
+
+test 'aspect_ratio_with_max_main_defined', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setWidth 50
+  root_child0.setMaxHeight 40
+  root_child0.setAspectRatio 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 40
+  eq root_child0.getComputedHeight(), 40
+
+  root.freeRecursive()
+
+test 'aspect_ratio_with_min_cross_defined', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setHeight 30
+  root_child0.setMinWidth 40
+  root_child0.setAspectRatio 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 40
+  eq root_child0.getComputedHeight(), 30
+
+  root.freeRecursive()
+
+test 'aspect_ratio_with_min_main_defined', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setWidth 30
+  root_child0.setMinHeight 40
+  root_child0.setAspectRatio 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 40
+  eq root_child0.getComputedHeight(), 40
+
+  root.freeRecursive()
+
+test 'aspect_ratio_double_cross', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setHeight 50
+  root_child0.setAspectRatio 2
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 100
+  eq root_child0.getComputedHeight(), 50
+
+  root.freeRecursive()
+
+test 'aspect_ratio_half_cross', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setHeight 100
+  root_child0.setAspectRatio 0.5
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 50
+  eq root_child0.getComputedHeight(), 100
+
+  root.freeRecursive()
+
+test 'aspect_ratio_double_main', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setWidth 50
+  root_child0.setAspectRatio 0.5
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 50
+  eq root_child0.getComputedHeight(), 100
+
+  root.freeRecursive()
+
+test 'aspect_ratio_half_main', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setWidth 100
+  root_child0.setAspectRatio 2
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 100
+  eq root_child0.getComputedHeight(), 50
+
+  root.freeRecursive()
+
+test 'aspect_ratio_with_measure_func', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc measure
+  root_child0.setAspectRatio 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 50
+  eq root_child0.getComputedHeight(), 50
+
+  root.freeRecursive()
+
+test 'aspect_ratio_width_height_flex_grow_row', ->
+  root = Yoga.Node.create()
+  root.setFlexDirection FlexDirection.Row
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 200
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setWidth 50
+  root_child0.setHeight 50
+  root_child0.setFlexGrow 1
+  root_child0.setAspectRatio 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 100
+  eq root_child0.getComputedHeight(), 100
+
+  root.freeRecursive()
+
+test 'aspect_ratio_width_height_flex_grow_column', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 200
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setWidth 50
+  root_child0.setHeight 50
+  root_child0.setFlexGrow 1
+  root_child0.setAspectRatio 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 100
+  eq root_child0.getComputedHeight(), 100
+
+  root.freeRecursive()
+
+test 'aspect_ratio_height_as_flex_basis', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setFlexDirection FlexDirection.Row
+  root.setWidth 200
+  root.setHeight 200
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setHeight 50
+  root_child0.setFlexGrow 1
+  root_child0.setAspectRatio 1
+  root.insertChild root_child0, 0
+
+  root_child1 = Yoga.Node.create()
+  root_child1.setHeight 100
+  root_child1.setFlexGrow 1
+  root_child1.setAspectRatio 1
+  root.insertChild root_child1, 1
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 75
+  eq root_child0.getComputedHeight(), 75
+
+  eq root_child1.getComputedLeft(), 75
+  eq root_child1.getComputedTop(), 0
+  eq root_child1.getComputedWidth(), 125
+  eq root_child1.getComputedHeight(), 125
+
+  root.freeRecursive()
+
+test 'aspect_ratio_width_as_flex_basis', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 200
+  root.setHeight 200
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setWidth 50
+  root_child0.setFlexGrow 1
+  root_child0.setAspectRatio 1
+  root.insertChild root_child0, 0
+
+  root_child1 = Yoga.Node.create()
+  root_child1.setWidth 100
+  root_child1.setFlexGrow 1
+  root_child1.setAspectRatio 1
+  root.insertChild root_child1, 1
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 75
+  eq root_child0.getComputedHeight(), 75
+
+  eq root_child1.getComputedLeft(), 0
+  eq root_child1.getComputedTop(), 75
+  eq root_child1.getComputedWidth(), 125
+  eq root_child1.getComputedHeight(), 125
+
+  root.freeRecursive()
+
+test 'aspect_ratio_overrides_flex_grow_row', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setFlexDirection FlexDirection.Row
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setWidth 50
+  root_child0.setFlexGrow 1
+  root_child0.setAspectRatio 0.5
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 100
+  eq root_child0.getComputedHeight(), 200
+
+  root.freeRecursive()
+
+test 'aspect_ratio_overrides_flex_grow_column', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setHeight 50
+  root_child0.setFlexGrow 1
+  root_child0.setAspectRatio 2
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 200
+  eq root_child0.getComputedHeight(), 100
+
+  root.freeRecursive()
+
+test 'aspect_ratio_left_right_absolute', ->
+  root = Yoga.Node.create()
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setPositionType PositionType.Absolute
+  root_child0.setPosition Edge.Left, 10
+  root_child0.setPosition Edge.Top, 10
+  root_child0.setPosition Edge.Right, 10
+  root_child0.setAspectRatio 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 10
+  eq root_child0.getComputedTop(), 10
+  eq root_child0.getComputedWidth(), 80
+  eq root_child0.getComputedHeight(), 80
+
+  root.freeRecursive()
+
+test 'aspect_ratio_top_bottom_absolute', ->
+  root = Yoga.Node.create()
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setPositionType PositionType.Absolute
+  root_child0.setPosition Edge.Left, 10
+  root_child0.setPosition Edge.Top, 10
+  root_child0.setPosition Edge.Bottom, 10
+  root_child0.setAspectRatio 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 10
+  eq root_child0.getComputedTop(), 10
+  eq root_child0.getComputedWidth(), 80
+  eq root_child0.getComputedHeight(), 80
+
+  root.freeRecursive()
+
+test 'aspect_ratio_width_overrides_align_stretch_row', ->
+  root = Yoga.Node.create()
+  root.setFlexDirection FlexDirection.Row
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setWidth 50
+  root_child0.setAspectRatio 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 50
+  eq root_child0.getComputedHeight(), 50
+
+  root.freeRecursive()
+
+test 'aspect_ratio_height_overrides_align_stretch_column', ->
+  root = Yoga.Node.create()
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setHeight 50
+  root_child0.setAspectRatio 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 50
+  eq root_child0.getComputedHeight(), 50
+
+  root.freeRecursive()
+
+test 'aspect_ratio_allow_child_overflow_parent_size', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setHeight 50
+  root_child0.setAspectRatio 4
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root.getComputedWidth(), 100
+  eq root.getComputedHeight(), 50
+
+  eq root_child0.getComputedWidth(), 200
+  eq root_child0.getComputedHeight(), 50
+
+  root.freeRecursive()
+
+test 'aspect_ratio_defined_main_with_margin', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.Center
+  root.setJustifyContent Justify.Center
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setHeight 50
+  root_child0.setAspectRatio 1
+  root_child0.setMargin Edge.Left, 10
+  root_child0.setMargin Edge.Right, 10
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root.getComputedWidth(), 100
+  eq root.getComputedHeight(), 100
+
+  eq root_child0.getComputedWidth(), 50
+  eq root_child0.getComputedHeight(), 50
+
+  root.freeRecursive()
+
+test 'aspect_ratio_defined_cross_with_margin', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.Center
+  root.setJustifyContent Justify.Center
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setWidth 50
+  root_child0.setAspectRatio 1
+  root_child0.setMargin Edge.Left, 10
+  root_child0.setMargin Edge.Right, 10
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root.getComputedWidth(), 100
+  eq root.getComputedHeight(), 100
+
+  eq root_child0.getComputedWidth(), 50
+  eq root_child0.getComputedHeight(), 50
+
+  root.freeRecursive()
+
+test 'aspect_ratio_defined_cross_with_main_margin', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.Center
+  root.setJustifyContent Justify.Center
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setWidth 50
+  root_child0.setAspectRatio 1
+  root_child0.setMargin Edge.Top, 10
+  root_child0.setMargin Edge.Bottom, 10
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root.getComputedWidth(), 100
+  eq root.getComputedHeight(), 100
+
+  eq root_child0.getComputedWidth(), 50
+  eq root_child0.getComputedHeight(), 50
+
+  root.freeRecursive()
+
+test 'aspect_ratio_should_prefer_explicit_height', ->
+  config = Yoga.Config.create()
+  config.setUseWebDefaults true
+
+  root = Yoga.Node.create config
+  root.setFlexDirection FlexDirection.Column
+
+  root_child0 = Yoga.Node.create config
+  root_child0.setFlexDirection FlexDirection.Column
+  root.insertChild root_child0, 0
+
+  root_child0_child0 = Yoga.Node.create config
+  root_child0_child0.setFlexDirection FlexDirection.Column
+  root_child0_child0.setHeight 100
+  root_child0_child0.setAspectRatio 2
+  root_child0.insertChild root_child0_child0, 0
+
+  root.calculateLayout 100, 200, Direction.LTR
+
+  eq root.getComputedWidth(), 100
+  eq root.getComputedHeight(), 200
+
+  eq root_child0.getComputedWidth(), 100
+  eq root_child0.getComputedHeight(), 100
+
+  eq root_child0_child0.getComputedWidth(), 200
+  eq root_child0_child0.getComputedHeight(), 100
+
+  root.freeRecursive()
+
+test 'aspect_ratio_should_prefer_explicit_width', ->
+  config = Yoga.Config.create()
+  config.setUseWebDefaults true
+
+  root = Yoga.Node.create config
+  root.setFlexDirection FlexDirection.Row
+
+  root_child0 = Yoga.Node.create config
+  root_child0.setFlexDirection FlexDirection.Row
+  root.insertChild root_child0, 0
+
+  root_child0_child0 = Yoga.Node.create config
+  root_child0_child0.setFlexDirection FlexDirection.Row
+  root_child0_child0.setWidth 100
+  root_child0_child0.setAspectRatio 0.5
+  root_child0.insertChild root_child0_child0, 0
+
+  root.calculateLayout 200, 100, Direction.LTR
+
+  eq root.getComputedWidth(), 200
+  eq root.getComputedHeight(), 100
+
+  eq root_child0.getComputedWidth(), 100
+  eq root_child0.getComputedHeight(), 100
+
+  eq root_child0_child0.getComputedWidth(), 100
+  eq root_child0_child0.getComputedHeight(), 200
+
+  root.freeRecursive()
+
+test 'aspect_ratio_should_prefer_flexed_dimension', ->
+  config = Yoga.Config.create()
+  config.setUseWebDefaults true
+
+  root = Yoga.Node.create config
+
+  root_child0 = Yoga.Node.create config
+  root_child0.setFlexDirection FlexDirection.Column
+  root_child0.setAspectRatio 2
+  root_child0.setFlexGrow 1
+  root.insertChild root_child0, 0
+
+  root_child0_child0 = Yoga.Node.create config
+  root_child0_child0.setAspectRatio 4
+  root_child0_child0.setFlexGrow 1
+  root_child0.insertChild root_child0_child0, 0
+
+  root.calculateLayout 100, 100, Direction.LTR
+
+  eq root.getComputedWidth(), 100
+  eq root.getComputedHeight(), 100
+
+  eq root_child0.getComputedWidth(), 100
+  eq root_child0.getComputedHeight(), 50
+
+  eq root_child0_child0.getComputedWidth(), 200
+  eq root_child0_child0.getComputedHeight(), 50
+
+  root.freeRecursive()
