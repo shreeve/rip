@@ -17730,7 +17730,7 @@ ${this.replayPad}}` : " }");
     if (projection !== null)
       line(() => this.b.emit("}"));
     line(() => this.b.emit(`} catch (${errV}) {`));
-    line(() => this.b.emit(`  console.error('[Rip] ${name} construction failed:', ${errV});`));
+    line(() => this.b.emit(`  ${this.runtimeName("__reportChildFailure")}('${name}', ${errV});`));
     line(() => this.b.emit(`  ${instVar} = null;`));
     line(() => this.b.emit(`  ${elVar} = document.createComment('rip:child-error: ${name}');`));
     line(() => this.b.emit("}"));
@@ -22229,6 +22229,7 @@ var RUNTIME_TABLE = [
       "__handleComponentError",
       "__gateBind",
       "__detach",
+      "__reportChildFailure",
       "__ownerFrame",
       "__pushOwner",
       "__popOwner",
@@ -22246,6 +22247,7 @@ var RUNTIME_TABLE = [
       "__transition",
       "__gateBind",
       "__detach",
+      "__reportChildFailure",
       "__ownerFrame",
       "__pushOwner",
       "__popOwner",
@@ -25697,6 +25699,8 @@ __export(exports_components, {
   __pushComponent: () => __pushComponent,
   __pushOwner: () => __pushOwner,
   __reconcile: () => __reconcile,
+  __reportChildFailure: () => __reportChildFailure,
+  __setChildFailureReporter: () => __setChildFailureReporter,
   __style: () => __style,
   __transition: () => __transition,
   getContext: () => getContext,
@@ -26300,6 +26304,15 @@ function __componentFailure(error) {
     failure.status = status;
   failure.error = error;
   return failure;
+}
+var __childFailureReporter = (name, error) => console.error(`[Rip] ${name} construction failed:`, error);
+function __setChildFailureReporter(reporter) {
+  const prev = __childFailureReporter;
+  __childFailureReporter = reporter;
+  return prev;
+}
+function __reportChildFailure(name, error) {
+  __childFailureReporter(name, error);
 }
 function __handleComponentError(error, component) {
   const failure = __componentFailure(error);

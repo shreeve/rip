@@ -57,6 +57,17 @@
 //                               injected presets
 //   __handleComponentError(e, c) - walk the parent chain to the nearest
 //                               onError boundary; rethrow past the root
+//   __reportChildFailure(name, e) - the report for a child the construct
+//                               site contained (no boundary took its
+//                               error); prints and continues unless a
+//                               host swapped the reporter
+//
+// Host-facing (exported, never delivered — a program does not spell it):
+//   __setChildFailureReporter(fn) - swap that reporter; returns the
+//                               previous one. A reporter that throws
+//                               fails the enclosing mount, which is how
+//                               a host that cannot show a hole (a
+//                               terminal) makes the failure loud.
 //   __detach(node)            - remove a node from the DOM, tolerant of
 //                               fragments and detached nodes
 //
@@ -783,6 +794,21 @@ function __componentFailure(error) {
   if (status !== undefined) failure.status = status;
   failure.error = error;
   return failure;
+}
+
+// A child whose error reached no `onError` boundary is contained at
+// its construct site: the parent keeps its other children and a marker
+// comment stands where the child would be. This is the report for it.
+let __childFailureReporter = (name, error) => console.error(`[Rip] ${name} construction failed:`, error);
+
+function __setChildFailureReporter(reporter) {
+  const prev = __childFailureReporter;
+  __childFailureReporter = reporter;
+  return prev;
+}
+
+function __reportChildFailure(name, error) {
+  __childFailureReporter(name, error);
 }
 
 function __handleComponentError(error, component) {
@@ -1590,6 +1616,7 @@ class __Component {
 export {
   __Component, __pushComponent, __popComponent, setContext, getContext, hasContext,
   __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach,
+  __reportChildFailure, __setChildFailureReporter,
   __ownerFrame, __pushOwner, __popOwner, __detachRef, __claimGateConstructor,
   __hmrRegistry, __hmrLookup, __hmrEntries, __hmrRegisterDefinition, __hmrClassify, __hmrMigrateDiff,
   __hmrPreserveState, __hmrEmit, __hmrEvents, __hmrPatch, __hmrMigrateRemount, __hmrSnapshotUi, __hmrRestoreUi,
