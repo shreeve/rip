@@ -1,0 +1,15 @@
+# Input: the bytes a terminal sends become events.
+#
+#   parser = Parser.new { escape: 50, clock, late }
+#   events = parser.feed chunk      # a string or a Uint8Array
+#
+# test/input.rip is the contract.
+
+export class Parser
+  constructor: (options = {}) ->
+
+  get pending: -> 0
+
+  feed: (chunk) -> []
+
+  reset!: ->

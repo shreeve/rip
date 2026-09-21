@@ -1,0 +1,187 @@
+# What the input contract stands on: a clock a test moves by hand, the
+# events spelled briefly, the ONE mapping from Ink's key names and flags
+# to this package's, and `differs` for an answer that is not Ink's.
+
+import { Parser } from '../../input.rip'
+
+export ESC =! '\x1b'
+export CSI =! '\x1b['
+export SS3 =! '\x1bO'
+
+# ── A clock with no timers ────────────────────────────────────────────────────
+
+# `tick ms` moves time and runs what came due, in order. `waiting` is
+# how many timers are armed: Ink's `hasPendingEscape()` is `waiting > 0`.
+export class Clock
+  constructor: ->
+    @time = 0
+    @due = []
+
+  get waiting: -> @due.length
+
+  after: (ms, fn) ->
+    entry = { at: @time + ms, fn }
+    @due.push entry
+    => @due = @due.filter (other) -> other isnt entry
+
+  tick!: (ms) ->
+    @time += ms
+    ready = @due.filter (entry) => entry.at <= @time
+    @due = @due.filter (entry) => entry.at > @time
+    entry.fn() for entry in ready.sort (a, b) -> a.at - b.at
+
+# A parser on a clock of its own. `feed` answers what a chunk completed,
+# `late` collects what time completed, and `all` is both, in order.
+export open =! (options = {}) ->
+  clock = Clock.new()
+  late = []
+  all = []
+  parser = Parser.new { clock, late: ((events) -> late.push(...events); all.push(...events)), ...options }
+  feed = (chunk) ->
+    events = parser.feed chunk
+    all.push ...events
+    events
+  { parser, clock, late, all, feed }
+
+# Every event of `chunks`, fed in order with no time passing.
+export decode =! (...chunks) ->
+  { feed, all } = open()
+  feed chunk for chunk in chunks
+  all
+
+export bytes =! (text) -> TextEncoder.new().encode text
+
+# One spelling of a value whatever order its keys were written in.
+export canon =! (value) ->
+  JSON.stringify value, (_, held) ->
+    if held and typeof held is 'object' and not Array.isArray(held) then Object.fromEntries(Object.entries(held).sort()) else held
+
+# A value for a failure message, cut where a hostile row would flood it.
+export brief =! (value) ->
+  text = if typeof value is 'string' then JSON.stringify(value) else canon(value)
+  if text.length > 400 then "#{text.slice 0, 400}…" else text
+
+# ── Events, spelled briefly ───────────────────────────────────────────────────
+
+# Modifiers are letters: c ctrl, s shift, a alt, m meta, r repeat.
+export key =! (name, mods = '', sequence = null) ->
+  { type: 'key', key: name, ctrlKey: mods.includes('c'), shiftKey: mods.includes('s'), altKey: mods.includes('a'), metaKey: mods.includes('m'), repeat: mods.includes('r'), sequence }
+
+# Text is one key per code point; a capital of ASCII carries shift, as
+# Ink's `shift` does.
+export typed =! (text) ->
+  (key(glyph, (if /^[A-Z]$/.test(glyph) then 's' else ''), glyph) for glyph in Array.from text)
+
+export paste =! (text) -> { type: 'paste', text }
+export FOCUS =! { type: 'focus' }
+export BLUR  =! { type: 'blur' }
+
+export mouse =! (action, button, x, y, mods = '', extra = {}) ->
+  { type: 'mouse', action, button, x, y, ...extra, shiftKey: mods.includes('s'), altKey: mods.includes('a'), ctrlKey: mods.includes('c') }
+
+export reply =! (kind, rest) -> { type: 'reply', kind, ...rest }
+
+# ── Ink's vocabulary, mapped once ─────────────────────────────────────────────
+
+# Ink names a key in lower case and says `key.upArrow`, `key.return`;
+# this package says DOM's `KeyboardEvent.key`. A name not listed is a
+# character and stands for itself, and Ink's `fN` is `FN`. Ink's
+# 'enter' is the line feed, which its `key.return` does not cover.
+NAMES =! {
+  up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight'
+  return: 'Enter', enter: 'Enter', escape: 'Escape', tab: 'Tab', backspace: 'Backspace', space: ' '
+  delete: 'Delete', insert: 'Insert', home: 'Home', end: 'End', pageup: 'PageUp', pagedown: 'PageDown', clear: 'Clear'
+  capslock: 'CapsLock', scrolllock: 'ScrollLock', numlock: 'NumLock', printscreen: 'PrintScreen', pause: 'Pause'
+  mediaplay: 'MediaPlay', lowervolume: 'AudioVolumeDown', raisevolume: 'AudioVolumeUp', mutevolume: 'AudioVolumeMute'
+  leftshift: 'Shift', leftcontrol: 'Control'
+}
+
+# Ink's flags, as letters, to this package's:
+#
+#   c  ctrl      → ctrlKey
+#   s  shift     → shiftKey, and a letter's `key` is its capital, as DOM's is
+#   m  meta      → altKey: Ink's `meta` is an ESC prefix, xterm's Alt
+#                  bit (2), or kitty's alt bit
+#   S  super     → metaKey: DOM's Meta is the key kitty calls super (8)
+#   M  meta (32) → metaKey: kitty's own meta bit, which Ink folds into `meta`
+#   r  eventType 'repeat' → repeat
+#   h, l, n  hyper, capsLock, numLock → nothing: a DOM key event has no
+#                  field for them, and they change no other field
+#
+# Ink's `text` and `isPrintable` have no field: a key that types is ONE
+# code point in `key`, and every other `key` is a DOM name of two or
+# more characters. Ink's name '' (a sequence it has no key for, which
+# `useInput` drops) is no event at all. Ink's `input` string of several
+# characters is one key event per code point (`typed`). `sequence` is
+# the bytes as they came, where Ink rewrites the keypad Enter's to '\r'.
+# What Ink's `useInput` never sees — a focus report, a mouse report, a
+# reply — is an event of another type here, and the ported case holds
+# the key events to Ink's and names the other.
+export ink =! (name, flags = '', sequence = null) ->
+  name = NAMES[name] ?? name.replace(/^f(\d+)$/, 'F$1')
+  name = name.toUpperCase() if flags.includes('s') and /^[a-z]$/.test name
+  mods = ''
+  mods += 'c' if flags.includes 'c'
+  mods += 's' if flags.includes 's'
+  mods += 'a' if flags.includes 'm'
+  mods += 'm' if flags.includes('S') or flags.includes('M')
+  mods += 'r' if flags.includes 'r'
+  key name, mods, sequence
+
+# ── Ported cases ──────────────────────────────────────────────────────────────
+
+# Per Ink file, how many of its titles are held to Ink's answer and how
+# many are stated differences. A title with one differing row is a
+# stated difference. test/input.rip holds the tally to SOURCE.md's table.
+export tally =! {}
+titles =! {}
+
+count =! (file, title, kind) ->
+  entry = tally[file] ?= { held: 0, differs: 0 }
+  seen = titles["#{file}: #{title}"]
+  return if seen is kind or seen is 'differs'
+  entry.held -= 1 if seen
+  entry[kind] += 1
+  titles["#{file}: #{title}"] = kind
+
+# Every string row, whole, with what it decodes to: the split tests cut
+# each one at every boundary.
+export ROWS =! []
+
+# A key event written without its sequence takes the row's bytes.
+fill =! (events, whole) ->
+  ((if event.type is 'key' and not event.sequence? then { ...event, sequence: whole } else event) for event in events)
+
+# `given` is a string, bytes, a list of chunks fed in order with no time
+# passing, or a function that answers the events itself (for a case
+# that moves the clock).
+answer =! (given) ->
+  return [given(), null] if typeof given is 'function'
+  chunks = if Array.isArray(given) then given else [given]
+  [decode(...chunks), (if chunks.every((chunk) -> typeof chunk is 'string') then chunks.join('') else null)]
+
+# `given` decodes to `events`, which is Ink's answer under the mapping.
+export holds =! (file, title, given, events) ->
+  count file, title, 'held'
+  [got, whole] = answer given
+  want = fill events, whole
+  ROWS.push { whole, events: want } if whole?
+  raise "#{brief whole ?? title} gave #{brief got}, not #{brief want}" unless canon(got) is canon(want)
+
+# Where this package answers differently from Ink ON PURPOSE. The case
+# still runs: `given` must decode to `ours` exactly, and must NOT decode
+# to `inks`, Ink's answer under the mapping — a pin the package has
+# outgrown fails, so the list cannot rot. `why` is the decision.
+export differs =! (file, title, given, ours, inks, why) ->
+  raise 'a stated difference needs its reason' unless typeof why is 'string' and why.length > 20
+  count file, title, 'differs'
+  [got, whole] = answer given
+  want = fill ours, whole
+  ROWS.push { whole, events: want } if whole?
+  raise "stated difference: #{brief whole ?? title} gave #{brief got}, not #{brief want}" unless canon(got) is canon(want)
+  raise "#{brief whole ?? title} decodes as Ink does — the stated difference is stale: #{why}" if canon(got) is canon(fill inks, whole)
+
+process.on 'exit', ->
+  stated = 0
+  stated += entry.differs for own file, entry of tally
+  console.log "#{stated} of Ink's cases are answered differently by stated decision\n" if stated

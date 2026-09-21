@@ -1,0 +1,473 @@
+# Ink's input tests, ported as tables: bytes in, events out, each row
+# under the title of the Ink test it comes from. A row of three is held
+# to Ink's answer under the mapping of harness.rip; a row of five is a
+# stated difference — ours, Ink's, and the decision. SOURCE.md counts
+# them and lists what is left out.
+
+import { test, ok, eq } from 'rip/testing'
+import { ESC, CSI, SS3, open, bytes, key, typed, paste, FOCUS, BLUR, mouse, reply, ink, holds, differs } from './harness.rip'
+
+BEL =! '\x07'
+DEL =! '\x7f'
+BS  =! '\b'
+START =! "#{CSI}200~"
+END   =! "#{CSI}201~"
+ESCAPE =! key 'Escape', '', ESC
+
+# The decisions the stated differences rest on.
+DISCARD =! 'a partial sequence that times out is discarded, never typed: on a slow link Ink types the tail of an arrow key as text'
+ABORTED =! 'a sequence cut short by a byte that cannot continue it is discarded like one that times out, and that byte is read fresh'
+RXVT    =! 'rxvt\'s `$` and `^` finals are a dropped terminal form: `$` is an intermediate byte (ECMA-48 5.4), so the sequence runs on to the next final byte and is a sequence this package has no key for'
+CYGWIN  =! 'the Linux console and Cygwin `CSI [ A` function keys are a dropped terminal form: `[` is a final byte (ECMA-48 5.4), so `CSI [` is a whole sequence with no key, and what follows is typed'
+DOUBLE  =! 'a doubled ESC as Meta is a dropped terminal form: the first ESC, followed by a byte that cannot continue it, is the Escape key, and the second starts the sequence it introduces'
+RELEASE =! 'key releases are dropped: the package has @keydown and no @keyup, and asks no terminal for release reports'
+PASTED  =! 'a carriage return or a tab outside a bracketed paste is the key wherever it arrives: the host turns bracketed paste on for the app\'s lifetime (PLAN §8), so pasted text is a paste event; Ink keeps the chunk whole for a terminal without it'
+
+# One test per Ink title, its rows in order.
+table =! (file, rows) ->
+  groups = {}
+  (groups[row[0]] ?= []).push row for row in rows
+  for own title, group of groups
+    test "#{file}: #{title}", ->
+      for row in group
+        if row.length is 3 then holds file, row[0], row[1], row[2] else differs file, row[0], row[1], row[2], row[3], row[4]
+  return
+
+# A case that moves the clock: what `steps` leaves in `all`.
+timed =! (steps) ->
+  ->
+    session = open()
+    steps session
+    session.all
+
+kitty =! (code, mods, kind, text) ->
+  out = "#{CSI}#{code}"
+  out += ";#{mods ?? 1}" if mods? or kind? or text?
+  out += ":#{kind ?? 1}" if kind? or text?
+  out += ";#{text.join ':'}" if text?
+  out + 'u'
+
+up    =! (flags = '', sequence = "#{CSI}A") -> ink 'up', flags, sequence
+down  =! (flags = '', sequence = "#{CSI}B") -> ink 'down', flags, sequence
+
+# ── input-parser.ts ───────────────────────────────────────────────────────────
+
+console.log "\nInk: input-parser"
+
+table 'input-parser', [
+  ['passes through plain text chunks', ['hello', ' ', 'world'], typed('hello world')]
+  ['keeps plain text and control sequences separate', "a#{CSI}Ab", [...typed('a'), up(), ...typed('b')]]
+  ['parses multiple standard CSI keys in one chunk', "#{CSI}A#{CSI}B#{CSI}C#{CSI}D", [up(), down(), ink('right', '', "#{CSI}C"), ink('left', '', "#{CSI}D")]]
+  ['parses CSI sequences with parameters', "#{CSI}1;5A#{CSI}5~#{CSI}6~", [up('c', "#{CSI}1;5A"), ink('pageup', '', "#{CSI}5~"), ink('pagedown', '', "#{CSI}6~")]]
+  ['keeps rxvt shifted editing keys separate from following text', "#{CSI}3$hello", typed('ello'), [ink('delete', 's', "#{CSI}3$"), ...typed('hello')], RXVT]
+  ['keeps rxvt shifted editing keys separate from following text', "#{CSI}7$hello", typed('ello'), [ink('home', 's', "#{CSI}7$"), ...typed('hello')], RXVT]
+  ['emits rxvt Shift+Delete as soon as its final byte arrives', ["#{CSI}3", '$', 'hello'], typed('ello'), [ink('delete', 's', "#{CSI}3$"), ...typed('hello')], RXVT]
+  ['parses consecutive rxvt shifted keys including meta', "#{CSI}3$#{ESC}#{CSI}5$#{CSI}A", [ESCAPE, up()], [ink('delete', 's', "#{CSI}3$"), ink('pageup', 'sm', "#{ESC}#{CSI}5$"), up()], RXVT]
+  ['preserves CSI intermediate bytes outside rxvt shifted keys', ["#{CSI}1;", '2$', 'yhello'], typed('hello')]
+  ['parses kitty protocol sequence as one key event', "#{CSI}97;5u", [ink('a', 'c')]]
+  ['parses SS3 sequences as one key event', "#{SS3}A#{SS3}B#{SS3}C#{SS3}D", [up('', "#{SS3}A"), down('', "#{SS3}B"), ink('right', '', "#{SS3}C"), ink('left', '', "#{SS3}D")]]
+  ['preserves modified SS3 keys and following text', "#{SS3}2Phello", [ink('f1', 's', "#{SS3}2P"), ...typed('hello')]]
+  ['preserves modified SS3 keys and following text', "#{SS3}1;5Ahello", [up('c', "#{SS3}1;5A"), ...typed('hello')]]
+  ['preserves modified SS3 keys and following text', "#{ESC}#{SS3}5Dhello", [ESCAPE, ink('left', 'c', "#{SS3}5D"), ...typed('hello')], [ink('left', 'cm', "#{ESC}#{SS3}5D"), ...typed('hello')], DOUBLE]
+  ['holds modified SS3 sequences until their final byte arrives', timed(({ feed, clock }) ->
+    eq feed("#{SS3}1"), []
+    eq clock.waiting, 1
+    eq feed(';5'), []
+    eq feed('A'), [up('c', "#{SS3}1;5A")]
+    eq clock.waiting, 0
+  ), [up('c', "#{SS3}1;5A")]]
+  ['does not consume a following escape as SS3 final byte', "#{SS3}#{CSI}A", [up()], [ink('o', 'sm', SS3), up()], ABORTED]
+  ['parses meta+CSI sequence with double escape', "#{ESC}#{CSI}A", [ESCAPE, up()], [up('m', "#{ESC}#{CSI}A")], DOUBLE]
+  ['parses escaped printable code points', "#{ESC}x#{ESC}1", [ink('x', 'm', "#{ESC}x"), ink('1', 'm', "#{ESC}1")]]
+  ['parses escaped supplementary code points', "#{ESC}😀", [ink('😀', 'm')]]
+  ['preserves legacy ESC[[... sequences in a mixed chunk', "#{CSI}[A#{CSI}[5~", typed('A5~'), [ink('f1', '', "#{CSI}[A"), ink('pageup', '', "#{CSI}[5~")], CYGWIN]
+  ['preserves legacy ESC[[... sequences across chunks', ["#{CSI}[", "A#{CSI}[5~"], typed('A5~'), [ink('f1', '', "#{CSI}[A"), ink('pageup', '', "#{CSI}[5~")], CYGWIN]
+  ['parses legacy and standard CSI sequences mixed together', "#{CSI}[A#{CSI}B#{CSI}[6~#{CSI}1;5D", [...typed('A'), down(), ...typed('6~'), ink('left', 'c', "#{CSI}1;5D")], [ink('f1', '', "#{CSI}[A"), down(), ink('pagedown', '', "#{CSI}[6~"), ink('left', 'c', "#{CSI}1;5D")], CYGWIN]
+  ['holds incomplete CSI sequence until final byte arrives', timed(({ feed, clock }) ->
+    eq feed(CSI), []
+    eq clock.waiting, 1
+    eq feed('1;5'), []
+    eq feed('A'), [up('c', "#{CSI}1;5A")]
+  ), [up('c', "#{CSI}1;5A")]]
+  ['holds incomplete legacy ESC[[... sequence until final byte arrives', ["#{CSI}[", '5', '~'], typed('5~'), [ink('pageup', '', "#{CSI}[5~")], CYGWIN]
+  ['holds incomplete SS3 sequence until final byte arrives', [SS3, 'A'], [up('', "#{SS3}A")]]
+  ['holds incomplete double-escape CSI sequence until final byte arrives', ["#{ESC}#{CSI}", 'A'], [ESCAPE, up()], [up('m', "#{ESC}#{CSI}A")], DOUBLE]
+  ['keeps pending plain escape and can flush it', timed(({ feed, clock, late }) ->
+    eq feed(ESC), []
+    eq clock.waiting, 1
+    clock.tick 50
+    eq late, [ESCAPE]
+    eq clock.waiting, 0
+  ), [ESCAPE]]
+  ['flushes pending CSI prefix as literal input', timed(({ feed, clock, late, parser }) ->
+    eq feed(CSI), []
+    eq clock.waiting, 1
+    clock.tick 50
+    eq late, []
+    eq [clock.waiting, parser.pending], [0, 0]
+    feed 'A'
+  ), typed('A'), [key('[', '', CSI), ...typed('A')], DISCARD]
+  ['reset clears pending input state', timed(({ feed, clock, parser }) ->
+    eq feed(CSI), []
+    parser.reset()
+    eq [clock.waiting, parser.pending], [0, 0]
+    feed 'A'
+  ), typed('A')]
+  ['treats invalid CSI continuation as escaped code point plus plain text', "#{CSI}\n", [key('j', 'c', '\n')], [key('[', '', CSI), ink('enter', '', '\n')], ABORTED]
+  ['parses mixed text and many key events in one read', "start#{CSI}A mid #{SS3}H end#{CSI}[5~", [...typed('start'), up(), ...typed(' mid '), ink('home', '', "#{SS3}H"), ...typed(' end'), ...typed('5~')], [...typed('start'), up(), ...typed(' mid '), ink('home', '', "#{SS3}H"), ...typed(' end'), ink('pageup', '', "#{CSI}[5~")], CYGWIN]
+  ['flushes pending SS3 prefix as literal input', timed(({ feed, clock, late }) ->
+    eq feed(SS3), []
+    eq clock.waiting, 1
+    clock.tick 50
+    eq late, []
+    feed 'x'
+  ), typed('x'), [ink('o', 'sm', SS3), ...typed('x')], DISCARD]
+  ['flushes pending legacy CSI prefix as literal input', timed(({ feed, clock }) ->
+    eq feed("#{CSI}["), []
+    eq clock.waiting, 0
+    feed 'x'
+  ), typed('x'), [...typed('[['), ...typed('x')], CYGWIN]
+  ['parses meta+SS3 sequence with double escape', "#{ESC}#{SS3}A", [ESCAPE, up('', "#{SS3}A")], [up('m', "#{ESC}#{SS3}A")], DOUBLE]
+  ['holds incomplete double-escape SS3 sequence until final byte arrives', ["#{ESC}#{SS3}", 'A'], [ESCAPE, up('', "#{SS3}A")], [up('m', "#{ESC}#{SS3}A")], DOUBLE]
+  ['emits double escape as single event for non-control character', "#{ESC}#{ESC}x", [ESCAPE, ink('x', 'm', "#{ESC}x")], [ink('escape', 'm', "#{ESC}#{ESC}"), ...typed('x')], DOUBLE]
+  ['empty chunk produces no events', [''], []]
+  ['empty chunk does not disturb pending state', [CSI, '', 'A'], [up()]]
+  ['plain text followed by incomplete escape holds escape as pending', timed(({ feed, clock }) ->
+    eq feed("hello#{ESC}"), typed('hello')
+    eq clock.waiting, 1
+    clock.tick 50
+  ), [...typed('hello'), ESCAPE]]
+
+  ['splits batched 0x7F backspace characters into individual events', DEL + DEL + DEL, [ink('backspace', '', DEL), ink('backspace', '', DEL), ink('backspace', '', DEL)]]
+  ['splits batched backspace characters into individual events', BS + BS + BS, [ink('backspace', '', BS), ink('backspace', '', BS), ink('backspace', '', BS)]]
+  ['splits mixed 0x7F and 0x08 backspace characters', DEL + BS + DEL, [ink('backspace', '', DEL), ink('backspace', '', BS), ink('backspace', '', DEL)]]
+  ['splits mixed printable text and 0x7F backspace characters', "abc#{DEL}#{DEL}#{DEL}", [...typed('abc'), ink('backspace', '', DEL), ink('backspace', '', DEL), ink('backspace', '', DEL)]]
+  ['single 0x7F backspace character is preserved as individual event', DEL, [ink('backspace')]]
+  ['single backspace character is preserved as individual event', BS, [ink('backspace')]]
+  ['splits trailing 0x7F backspace from text', "abc#{DEL}", [...typed('abc'), ink('backspace', '', DEL)]]
+  ['splits 0x7F backspace characters before escape sequences', "#{DEL}#{DEL}#{CSI}A", [ink('backspace', '', DEL), ink('backspace', '', DEL), up()]]
+  ['splits 0x7F backspace characters after escape sequences', "#{CSI}A#{DEL}#{DEL}", [up(), ink('backspace', '', DEL), ink('backspace', '', DEL)]]
+  ['splits 0x7F backspace characters between escape sequences', "#{CSI}A#{DEL}#{CSI}B", [up(), ink('backspace', '', DEL), down()]]
+  ['splits backspace characters around escape sequences', "#{BS}#{CSI}A#{BS}", [ink('backspace', '', BS), up(), ink('backspace', '', BS)]]
+  ['splits interleaved text and 0x7F backspace characters', "ab#{DEL}cd", [...typed('ab'), ink('backspace', '', DEL), ...typed('cd')]]
+  ['does not split pasted carriage return from text', '\rtest', [ink('return', '', '\r'), ...typed('test')], typed('\rtest'), PASTED]
+  ['does not split pasted tab from text', '\ttest', [ink('tab', '', '\t'), ...typed('test')], typed('\ttest'), PASTED]
+
+  ['assembles CSI sequence from single-byte chunks', [ESC, '[', '1', ';', '5', 'A'], [up('c', "#{CSI}1;5A")]]
+  ['emits paste event for bracketed paste sequence', "#{START}hello world#{END}", [paste('hello world')]]
+  ['emits paste event for multiline bracketed paste', "#{START}line1\nline2#{END}", [paste('line1\nline2')]]
+  ['paste content with escape sequences is delivered verbatim', "#{START}hello#{CSI}Aworld#{END}", [paste("hello#{CSI}Aworld")]]
+  ['emits normal events before and after bracketed paste', "before#{START}pasted#{END}after", [...typed('before'), paste('pasted'), ...typed('after')]]
+  ['emits multiple paste events in one chunk', "#{START}first#{END}mid#{START}second#{END}", [paste('first'), ...typed('mid'), paste('second')]]
+  ['holds incomplete bracketed paste as pending', timed(({ feed, clock }) ->
+    eq feed("#{START}hello"), []
+    eq clock.waiting, 0
+    eq feed(" world#{END}"), [paste('hello world')]
+  ), [paste('hello world')]]
+  ['assembles bracketed paste from chunk-by-chunk delivery', [START, 'hello', END], [paste('hello')]]
+  ['emits empty paste for adjacent paste markers', START + END, [paste('')]]
+  ['handles pasteStart split before the tilde (\\u001B[200 without ~)', ["#{CSI}200", "~hello#{END}"], [paste('hello')]]
+  ['handles pasteStart split before the tilde (\\u001B[200 without ~)', timed(({ feed, clock }) ->
+    eq feed("#{CSI}200"), []
+    eq clock.waiting, 1
+    clock.tick 50
+    feed "~hello#{END}"
+  ), typed('~hello'), [paste('hello')], 'one rule for every partial sequence: a paste marker cut before its `~` and left past the timeout is discarded like any other, where Ink arms no timer for this one prefix and waits without end']
+  ['hasPendingEscape returns true for length-3 pasteStart prefix (\\u001B[2)', timed(({ feed, clock }) ->
+    eq feed("#{CSI}2"), []
+    eq clock.waiting, 1
+  ), []]
+  ['hasPendingEscape returns true for length-4 pasteStart prefix (\\u001B[20)', timed(({ feed, clock }) ->
+    eq feed("#{CSI}20"), []
+    eq clock.waiting, 1
+  ), []]
+  ['paste event delivers backspace chars verbatim without splitting', "#{START}#{DEL}#{BS}#{DEL}#{END}", [paste(DEL + BS + DEL)]]
+]
+
+# ── parse-keypress.ts ─────────────────────────────────────────────────────────
+
+console.log "\nInk: parse-keypress"
+
+# Ink's loop over eight modifier bits, four event-type spellings, and
+# three encodings of a key.
+agreement =! ->
+  title = 'kitty modifiers and event types agree across key encodings'
+  rows = []
+  for flag, bit in ['s', 'm', 'c', 'S', 'h', 'M', 'l', 'n']
+    for [suffix, kind] in [['', ''], [':1', ''], [':2', 'r'], [':3', null]]
+      for [head, tail, name] in [['97', 'u', 'a'], ['1', 'A', 'up'], ['3', '~', 'delete']]
+        given = "#{CSI}#{head};#{2 ** bit + 1}#{suffix}#{tail}"
+        rows.push (if kind? then [title, given, [ink(name, flag + kind)]] else [title, given, [], [ink(name, flag)], RELEASE])
+  rows
+
+table 'parse-keypress', [
+  ['parsing a single-byte Meta key does not mutate the input', timed(({ feed }) ->
+    given = Uint8Array.new [0xe1]
+    feed given
+    eq Array.from(given), [0xe1]
+  ), [], [ink('a', 'm', "#{ESC}a")], 'eight-bit Meta (a byte over 127 standing for ESC and the byte less 128) is a dropped terminal form: input is UTF-8, where 0xE1 opens a three-byte character and is held for the rest of it']
+  ['byte parsing preserves ASCII and multibyte UTF-8 input', bytes('a'), typed('a')]
+  ['byte parsing preserves ASCII and multibyte UTF-8 input', bytes('hello'), typed('hello')]
+  ['byte parsing preserves ASCII and multibyte UTF-8 input', bytes('é'), typed('é')]
+  ['byte parsing preserves ASCII and multibyte UTF-8 input', bytes('😀'), typed('😀')]
+  ['kitty functional keys preserve modifiers without an explicit event type', "#{CSI}1;249A", [ink('up', 'ShMln')]]
+  ['kitty functional keys preserve modifiers without an explicit event type', "#{CSI}3;249~", [ink('delete', 'ShMln')]]
+  ['kitty functional keys preserve modifiers without an explicit event type', "#{CSI}13;249~", [ink('f3', 'ShMln')]]
+  ['kitty functional keys preserve modifiers without an explicit event type', "#{CSI}1;249P", [ink('f1', 'ShMln')]]
+  ['kitty functional keys preserve modifiers without an explicit event type', "#{CSI}1;9A", [ink('up', 'S')]]
+  ...agreement()
+  ['kitty keypad Begin supports both functional encodings', "#{CSI}1E", [ink('clear')]]
+  ['kitty keypad Begin supports both functional encodings', "#{CSI}57427~", [ink('clear')]]
+  ['kitty keypad Begin supports both functional encodings', "#{CSI}1;1:2E", [ink('clear', 'r')]]
+  ['kitty keypad Begin supports both functional encodings', "#{CSI}57427;1:2~", [ink('clear', 'r')]]
+  ['kitty text-only events have no key identity', "#{CSI}0;;229:128169u", [key('å'), key('💩')]]
+  ...(['kitty unknown functional and control codes do not invent printable characters', "#{CSI}#{code}u", []] for code in [0, 1, 3, 31, 128, 159, 57344, 63743])
+  ['kitty unknown functional and control codes do not invent printable characters', "#{CSI}63744u", [key(String.fromCodePoint 63744)]]
+  ['legacy Ctrl+Space preserves the space key and modifiers', '\x00', [ink('space', 'c')]]
+  ['legacy Ctrl+Space preserves the space key and modifiers', "#{ESC}\x00", [ink('space', 'cm')]]
+  ...(['kitty keypad navigation keys use standard key names', "#{CSI}#{57417 + n};5:2u", [ink(name, 'cr')]] for name, n in ['left', 'right', 'up', 'down', 'pageup', 'pagedown', 'home', 'end', 'insert', 'delete'])
+  ...(['legacy Ctrl+punctuation shortcuts preserve the key and modifiers', String.fromCharCode(0x1c + n), [ink(name, 'c')]] for name, n in ['\\', ']', '^', '_'])
+  ...(['legacy Ctrl+punctuation shortcuts preserve the key and modifiers', ESC + String.fromCharCode(0x1c + n), [ink(name, 'cm')]] for name, n in ['\\', ']', '^', '_'])
+  ['kitty alternate key codes preserve the primary key event', "#{CSI}97:65;6:2;65u", [ink('a', 'csr')]]
+  ['kitty alternate key codes preserve the primary key event', "#{CSI}97:65:113;6:2;65u", [ink('a', 'csr')]]
+  ['kitty alternate key codes preserve the primary key event', "#{CSI}97::113;6:2;65u", [ink('a', 'csr')]]
+  ['kitty alternate key codes preserve the primary key event', "#{CSI}1092::97;5u", [ink('ф', 'c')]]
+  ['kitty keypad associated text is printable input', "#{CSI}57399;129;48u", [ink('0', 'n')]]
+  ['kitty keypad associated text is printable input', "#{CSI}57413;1;43u", [ink('+')]]
+  ['kitty keypad Enter produces a return key and carriage return text', "#{CSI}57414u", [ink('return')]]
+  ['kitty keypad Enter produces a return key and carriage return text', "#{CSI}57414;2:2u", [ink('return', 'sr')]]
+  ['application keypad Enter maps to Return with carriage return sequence', "#{SS3}M", [ink('return')]]
+  ['application keypad Enter maps to Return with carriage return sequence', "#{ESC}#{SS3}M", [ESCAPE, ink('return', '', "#{SS3}M")], [ink('return', 'm')], DOUBLE]
+  ['Meta+Tab preserves the tab key and Meta modifier', "#{ESC}\t", [ink('tab', 'm')]]
+  ...(['Ctrl+Meta letters preserve both modifiers and the letter name', ESC + control, [ink(name, 'cm')]] for [control, name] in [['\x02', 'b'], ['\x06', 'f'], ['\x18', 'x']])
+  ['kitty associated text accepts an omitted modifier value', "#{CSI}0;;229u", [key('å')]]
+  ...(['Meta modifier is recognized for punctuation and Unicode characters', ESC + glyph, [ink(glyph, 'm')]] for glyph in ['.', ',', '/', '-', 'é', '😀'])
+  ['Ctrl+F1 resolves to name "f1"', "#{CSI}1;5P", [ink('f1', 'c')]]
+  ['Ctrl+F2 resolves to name "f2"', "#{CSI}1;5Q", [ink('f2', 'c')]]
+  ['Ctrl+F3 resolves to name "f3"', "#{CSI}1;5R", [ink('f3', 'c')]]
+  ['Ctrl+F4 resolves to name "f4"', "#{CSI}1;5S", [ink('f4', 'c')]]
+  ['unmapped ctrl sequence returns empty name', "#{CSI}1;5I", []]
+  ['another unmapped ctrl sequence returns empty name', "#{CSI}1;5X", []]
+  ['Shift+F1 resolves to name "f1" with shift', "#{CSI}1;2P", [ink('f1', 's')]]
+]
+
+# ── kitty-keyboard.tsx ────────────────────────────────────────────────────────
+
+console.log "\nInk: kitty-keyboard"
+
+table 'kitty-keyboard', [
+  ['kitty protocol - simple character', kitty(97), [ink('a')]]
+  ['kitty protocol - uppercase character (shift)', kitty(97, 2), [ink('a', 's')]]
+  ['kitty protocol - ctrl modifier', kitty(97, 5), [ink('a', 'c')]]
+  ['kitty protocol - alt/option modifier', kitty(97, 3), [ink('a', 'm')]]
+  ['kitty protocol - super modifier', kitty(97, 9), [ink('a', 'S')]]
+  ['kitty protocol - hyper modifier', kitty(97, 17), [ink('a', 'h')]]
+  ['kitty protocol - meta modifier', kitty(97, 33), [ink('a', 'M')]]
+  ['kitty protocol - caps lock', kitty(97, 65), [ink('a', 'l')]]
+  ['kitty protocol - num lock', kitty(97, 129), [ink('a', 'n')]]
+  ['kitty protocol - combined modifiers (ctrl+shift)', kitty(97, 6), [ink('a', 'cs')]]
+  ['kitty protocol - combined modifiers (super+ctrl)', kitty(115, 13), [ink('s', 'cS')]]
+  ['kitty protocol - escape key', kitty(27), [ink('escape')]]
+  ['kitty protocol - return/enter key', kitty(13), [ink('return')]]
+  ['kitty protocol - tab key', kitty(9), [ink('tab')]]
+  ['kitty protocol - backspace release', kitty(127, 1, 3), [], [ink('backspace')], RELEASE]
+  ['kitty protocol - backspace key (codepoint 127)', kitty(127), [ink('backspace')]]
+  ['legacy parser - meta + backspace (0x7F)', ESC + DEL, [ink('backspace', 'm')]]
+  ['kitty protocol - space key', kitty(32), [ink('space')]]
+  ['kitty protocol - event type press', kitty(97, 1, 1), [ink('a')]]
+  ['kitty protocol - event type repeat', kitty(97, 1, 2), [ink('a', 'r')]]
+  ['kitty protocol - event type release', kitty(97, 1, 3), [], [ink('a')], RELEASE]
+  ['kitty protocol - number keys', kitty(49), [ink('1')]]
+  ['kitty protocol - special character', kitty(64), [ink('@')]]
+  ['kitty protocol - Ctrl letters retain their unshifted key code', kitty(97, 5), [ink('a', 'c')]]
+  ['kitty protocol - preserves sequence and raw', kitty(97, 5), [ink('a', 'c', "#{CSI}97;5u")]]
+  ['kitty protocol - text-as-codepoints field', kitty(97, 2, 1, [65]), [ink('a', 's')]]
+  ['kitty protocol - text-as-codepoints with multiple codepoints', kitty(97, 1, 1, [72, 101]), [key('H'), key('e')]]
+  ['kitty protocol - supplementary unicode codepoint', kitty(128512), [ink('😀')]]
+  ['kitty protocol - text-as-codepoints with supplementary unicode', kitty(97, 1, 1, [128512]), [key('😀')]]
+  ['kitty protocol - text defaults to character from codepoint', kitty(97), [ink('a')]]
+  ['kitty protocol - arrow keys with event type', "#{CSI}1;1:1A", [ink('up')]]
+  ['kitty protocol - arrow keys with event type', "#{CSI}1;1:3B", [], [ink('down')], RELEASE]
+  ['kitty protocol - arrow keys with event type', "#{CSI}1;1:2C", [ink('right', 'r')]]
+  ['kitty protocol - arrow keys with event type', "#{CSI}1;1:1D", [ink('left')]]
+  ['kitty protocol - arrow keys with modifiers', "#{CSI}1;5:1A", [ink('up', 'c')]]
+  ['kitty protocol - home and end keys', "#{CSI}1;1:1H", [ink('home')]]
+  ['kitty protocol - home and end keys', "#{CSI}1;1:1F", [ink('end')]]
+  ['kitty protocol - tilde-terminated special keys', "#{CSI}3;1:1~", [ink('delete')]]
+  ['kitty protocol - tilde-terminated special keys', "#{CSI}2;1:1~", [ink('insert')]]
+  ['kitty protocol - tilde-terminated special keys', "#{CSI}5;1:1~", [ink('pageup')]]
+  ['kitty protocol - tilde-terminated special keys', "#{CSI}15;1:1~", [ink('f5')]]
+  ['kitty protocol - tilde keys with modifiers', "#{CSI}3;2:1~", [ink('delete', 's')]]
+  ['kitty protocol - invalid codepoint above U+10FFFF returns safe empty keypress', "#{CSI}1114112u", []]
+  ['kitty protocol - surrogate codepoint returns safe empty keypress', "#{CSI}55296u", []]
+  ['kitty protocol - invalid text codepoint replaced with fallback', kitty(97, 1, 1, [1114112]), [key('a')], [key('?')], 'a code point no string can hold is skipped, and the key falls back to the character of its own code; Ink types a question mark the user never pressed']
+  ['kitty protocol - malformed modifier 0 does not set all flags', "#{CSI}97;0u", [ink('a')]]
+  ['non-kitty sequences fall back to legacy parsing', "#{CSI}A", [ink('up')]]
+  ['non-kitty sequences - ctrl+c', '\x03', [ink('c', 'c')]]
+  ['kitty protocol - isPrintable is true for regular characters', kitty(97), [key('a')]]
+  ['kitty protocol - isPrintable is true for digits', kitty(49), [key('1')]]
+  ['kitty protocol - isPrintable is true for symbols', kitty(64), [key('@')]]
+  ['kitty protocol - isPrintable is true for emoji', kitty(128512), [key('😀')]]
+  ['kitty protocol - isPrintable is false for escape', kitty(27), [key('Escape')]]
+  ['kitty protocol - isPrintable is true for return', kitty(13), [key('Enter')]]
+  ['kitty protocol - isPrintable is false for tab', kitty(9), [key('Tab')]]
+  ['kitty protocol - isPrintable is true for space', kitty(32), [key(' ')]]
+  ['kitty protocol - isPrintable is false for backspace', kitty(127), [key('Backspace')]]
+  ['kitty protocol - Ctrl letters preserve their input character', kitty(97, 5), [key('a', 'c')]]
+  ['kitty protocol - isPrintable is false for special keys (arrows)', "#{CSI}1;1:1A", [key('ArrowUp')]]
+  ['kitty protocol - capslock (57358) is non-printable', "#{CSI}57358u", [ink('capslock')]]
+  ['kitty protocol - printscreen (57361) is non-printable', "#{CSI}57361u", [ink('printscreen')]]
+  ['kitty protocol - f13 (57376) is non-printable', "#{CSI}57376u", [ink('f13')]]
+  ['kitty protocol - media key (57428 mediaplay) is non-printable', "#{CSI}57428u", [ink('mediaplay')]]
+  ['kitty protocol - modifier-only key (57441 leftshift) is non-printable', "#{CSI}57441;2u", [ink('leftshift', 's')]]
+  ['kitty protocol - modifier-only key (57442 leftcontrol) is non-printable', "#{CSI}57442;5u", [ink('leftcontrol', 'c')]]
+  ['kitty protocol - kp keys (57399 kp0) are non-printable', "#{CSI}57399u", [key('0')], [key('kp0')], 'a keypad digit types its digit, as DOM\'s `key` for Numpad0 is "0"; Ink gives it no text unless the terminal reports associated text, so the keypad types nothing when every key is reported as an escape code']
+  ['kitty protocol - scrolllock (57359) is non-printable', "#{CSI}57359u", [ink('scrolllock')]]
+  ['kitty protocol - numlock (57360) is non-printable', "#{CSI}57360u", [ink('numlock')]]
+  ['kitty protocol - pause (57362) is non-printable', "#{CSI}57362u", [ink('pause')]]
+  ['kitty protocol - volume keys are non-printable', "#{CSI}57438u", [ink('lowervolume')]]
+  ['kitty protocol - volume keys are non-printable', "#{CSI}57439u", [ink('raisevolume')]]
+  ['kitty protocol - volume keys are non-printable', "#{CSI}57440u", [ink('mutevolume')]]
+  ['kitty protocol - auto detection handles synchronous query response', "#{CSI}?1u", [reply('keyboard', { flags: 1 })]]
+  ['kitty protocol - auto detection handles Uint8Array query response', bytes("#{CSI}?1u"), [reply('keyboard', { flags: 1 })]]
+  ['kitty protocol - auto detection preserves split UTF-8 input bytes', [Uint8Array.new([0xf0, 0x9f]), Uint8Array.new([0x92, 0xa9])], typed('💩')]
+  ['kitty protocol - auto detection handles split responses with surrounding input', ["before#{CSI}?", '0uafter'], [...typed('before'), reply('keyboard', { flags: 0 }), ...typed('after')]]
+  ['kitty protocol - auto detection timeout preserves query prefix without digits', timed(({ feed, clock }) ->
+    feed "#{CSI}?"
+    clock.tick 250
+  ), [], typed('[?'), DISCARD]
+  ['kitty protocol - auto detection does not treat query response without digits as a response', "#{CSI}?u", []]
+  ['kitty protocol - auto detection does not treat invalid query-like sequence as a response', "#{CSI}?1x", []]
+  ['kitty protocol - space key has text field set to space character', kitty(32), [key(' ')]]
+  ['kitty protocol - return key has text field set to carriage return', kitty(13), [key('Enter')]]
+]
+
+# ── hooks-use-input.tsx ───────────────────────────────────────────────────────
+
+console.log "\nInk: hooks-use-input"
+
+pressed =! timed ({ feed, clock }) ->
+  feed ESC
+  clock.tick 50
+
+table 'hooks-use-input', [
+  ['useInput - handle legacy Ctrl+Space', '\x00', [ink('space', 'c')]]
+  ['useInput - handle Ctrl+punctuation shortcut', '\x1f', [ink('_', 'c')]]
+  ['useInput - handle lowercase character', 'q', [ink('q')]]
+  ['useInput - handle uppercase character', 'Q', [ink('q', 's')]]
+  ['useInput - \\r should not count as an uppercase character', '\r', [ink('return')]]
+  ['useInput - pasted carriage return', '\rtest', [ink('return', '', '\r'), ...typed('test')], typed('\rtest'), PASTED]
+  ['useInput - pasted tab', '\ttest', [ink('tab', '', '\t'), ...typed('test')], typed('\ttest'), PASTED]
+  ['useInput - handle escape', pressed, [ESCAPE]]
+  ['useInput - escape does not set meta', pressed, [ESCAPE]]
+  ['useInput - handle ctrl', '\x06', [ink('f', 'c')]]
+  ['useInput - handle meta', "#{ESC}m", [ink('m', 'm')]]
+  ['useInput - handle ctrl + meta + letter', "#{ESC}\x02", [ink('b', 'cm')]]
+  ['useInput - handle meta + backspace (0x7F)', ESC + DEL, [ink('backspace', 'm')]]
+  ['useInput - flushes ESC[ prefix as literal input', timed(({ feed, clock }) ->
+    feed CSI
+    clock.tick 50
+  ), [], [key('[', '', CSI)], DISCARD]
+  ['useInput - handle meta + O with pending flush', timed(({ feed, clock }) ->
+    feed SS3
+    clock.tick 50
+  ), [], [ink('o', 'sm', SS3)], DISCARD]
+  ['useInput - handle tab', '\t', [ink('tab')]]
+  ['useInput - handle meta + tab', "#{ESC}\t", [ink('tab', 'm')]]
+  ['useInput - handle shift + tab', "#{CSI}Z", [ink('tab', 's')]]
+  ['useInput - handle backspace', BS, [ink('backspace')]]
+  ['useInput - handle delete', "#{CSI}3~", [ink('delete')]]
+  ['useInput - handle remove (delete)', "#{CSI}3~", [ink('delete')]]
+  ['useInput - handle option + return (macOS)', "#{ESC}\r", [ink('return', 'm')]]
+  ['useInput - handle Ctrl+F1 without crashing', "#{CSI}1;5P", [ink('f1', 'c')]]
+  ['useInput - handle unmapped ctrl escape sequence without crashing', "#{CSI}1;5Iq", typed('q')]
+  ['useInput - drops unmapped control sequence: focus in', "#{CSI}Iq", [FOCUS, ...typed('q')]]
+  ['useInput - drops unmapped control sequence: focus out', "#{CSI}Oq", [BLUR, ...typed('q')]]
+  ['useInput - drops unmapped control sequence: cursor position report', "#{CSI}24;80Rq", [reply('cursor', { x: 79, y: 23 }), ...typed('q')]]
+  ['useInput - drops unmapped control sequence: SGR mouse report', "#{CSI}<0;10;20Mq", [mouse('down', 0, 9, 19), ...typed('q')]]
+  ['useInput - drops unmapped control sequence: primary device attributes', "#{CSI}?62;1;4cq", [reply('attributes', { params: [62, 1, 4] }), ...typed('q')]]
+  ['useInput - drops unmapped control sequence: stray bracketed paste end', "#{END}q", typed('q')]
+  ['useInput - drops unmapped control sequence: unmapped legacy CSI', "#{CSI}[Zq", typed('Zq'), typed('q'), CYGWIN]
+  ['useInput - drops unmapped control sequence: unmapped modified SS3', "#{SS3}1;5Zq", [key('Tab', 'cs', "#{SS3}1;5Z"), ...typed('q')], typed('q'), 'one table of finals serves CSI and SS3, so SS3 Z is the Shift-Tab that CSI Z is; Ink keeps a table per introducer and has no SS3 Z, a sequence no terminal sends']
+]
+
+# ── hooks-use-input-kitty.tsx ─────────────────────────────────────────────────
+
+console.log "\nInk: hooks-use-input-kitty"
+
+table 'hooks-use-input-kitty', [
+  ['useInput - handle kitty special key modifiers without event type', "#{CSI}1;9A", [ink('up', 'S')]]
+  ['useInput - handle kitty keypad navigation', "#{CSI}57420;5:2u", [ink('down', 'cr')]]
+  ['useInput - handle kitty alternate key codes', "#{CSI}97:65:113;6:2;65u", [ink('a', 'csr')]]
+  ['useInput - handle kitty keypad associated text', "#{CSI}57399;129;48u", [ink('0', 'n')]]
+  ['useInput - handle kitty keypad Enter', "#{CSI}57414u", [ink('return')]]
+  ['useInput - kitty associated text with omitted modifiers', "#{CSI}0;;229u", [key('å')]]
+  ['useInput - handle kitty protocol super modifier', "#{CSI}115;9u", [ink('s', 'S')]]
+  ['useInput - handle kitty protocol hyper modifier', "#{CSI}104;17u", [ink('h', 'h')]]
+  ['useInput - handle kitty protocol capsLock', "#{CSI}97;65u", [ink('a', 'l')]]
+  ['useInput - handle kitty protocol numLock', "#{CSI}97;129u", [ink('a', 'n')]]
+  ['useInput - kitty capsLock text does not imply shift', "#{CSI}97;65;65u", [key('A')]]
+  ['useInput - handle kitty protocol super+ctrl', "#{CSI}115;13u", [ink('s', 'cS')]]
+  ['useInput - handle kitty protocol press event', "#{CSI}97;1:1u", [ink('a')]]
+  ['useInput - handle kitty protocol repeat event', "#{CSI}97;1:2u", [ink('a', 'r')]]
+  ['useInput - handle kitty protocol release event', "#{CSI}97;1:3u", [], [ink('a')], RELEASE]
+  ['useInput - handle kitty protocol escape key', "#{CSI}27u", [ink('escape')]]
+  ['useInput - handle kitty protocol backspace (codepoint 127)', "#{CSI}127u", [ink('backspace')]]
+  ['useInput - handle kitty protocol delete', "#{CSI}3;1:1~", [ink('delete')]]
+  ['useInput - non-printable kitty key (capslock) produces empty input', "#{CSI}57358u", [ink('capslock')]]
+  ['useInput - non-printable kitty key (f13) produces empty input', "#{CSI}57376u", [ink('f13')]]
+  ['useInput - non-printable kitty key (printscreen) produces empty input', "#{CSI}57361u", [ink('printscreen')]]
+  ['useInput - kitty protocol space key produces space input', "#{CSI}32u", [ink('space')]]
+  ['useInput - kitty protocol return key produces carriage return input', "#{CSI}13u", [ink('return')]]
+  ['useInput - kitty protocol Ctrl+letter produces input', "#{CSI}97;5u", [ink('a', 'c')]]
+]
+
+# ── hooks-use-input-navigation.tsx ────────────────────────────────────────────
+
+console.log "\nInk: hooks-use-input-navigation"
+
+table 'hooks-use-input-navigation', [
+  ['useInput - handle up arrow', "#{CSI}A", [ink('up')]]
+  ['useInput - handle down arrow', "#{CSI}B", [ink('down')]]
+  ['useInput - handle left arrow', "#{CSI}D", [ink('left')]]
+  ['useInput - handle right arrow', "#{CSI}C", [ink('right')]]
+  ['useInput - handles rapid arrows and enter in one chunk', "#{CSI}B#{CSI}B#{CSI}B\r", [down(), down(), down(), ink('return', '', '\r')]]
+  ['useInput - handle meta + up arrow', "#{ESC}#{CSI}A", [ESCAPE, up()], [ink('up', 'm')], DOUBLE]
+  ['useInput - handle meta + down arrow', "#{ESC}#{CSI}B", [ESCAPE, down()], [ink('down', 'm')], DOUBLE]
+  ['useInput - handle meta + left arrow', "#{ESC}#{CSI}D", [ESCAPE, ink('left', '', "#{CSI}D")], [ink('left', 'm')], DOUBLE]
+  ['useInput - handle meta + right arrow', "#{ESC}#{CSI}C", [ESCAPE, ink('right', '', "#{CSI}C")], [ink('right', 'm')], DOUBLE]
+  ['useInput - handle ctrl + up arrow', "#{CSI}1;5A", [ink('up', 'c')]]
+  ['useInput - handle SS3 ctrl + up arrow', "#{SS3}1;5A", [ink('up', 'c')]]
+  ['useInput - handle ctrl + down arrow', "#{CSI}1;5B", [ink('down', 'c')]]
+  ['useInput - handle ctrl + left arrow', "#{CSI}1;5D", [ink('left', 'c')]]
+  ['useInput - handle ctrl + right arrow', "#{CSI}1;5C", [ink('right', 'c')]]
+  ['useInput - handle page down', "#{CSI}6~", [ink('pagedown')]]
+  ['useInput - handle page up', "#{CSI}5~", [ink('pageup')]]
+  ['useInput - handle home', "#{CSI}H", [ink('home')]]
+  ['useInput - handle end', "#{CSI}F", [ink('end')]]
+]
+
+# ── hooks-use-paste.tsx, input-keypad-enter.tsx, input-buffered-ctrl-c.tsx ────
+
+console.log "\nInk: hooks-use-paste, input-keypad-enter, input-buffered-ctrl-c"
+
+table 'hooks-use-paste', [
+  ['usePaste - receives bracketed paste as single text blob', "#{START}hello world#{END}", [paste('hello world')]]
+  ['usePaste - paste content with escape sequences is delivered verbatim', "#{START}hello#{CSI}Aworld#{END}", [paste("hello#{CSI}Aworld")]]
+  ['usePaste - useInput does not receive bracketed paste content', "#{START}hello#{END}", [paste('hello')]]
+]
+
+table 'input-keypad-enter', [
+  ['normal Return submits through useInput', '\r', [ink('return')]]
+  ['application keypad Enter submits through useInput', "#{SS3}M", [ink('return')]]
+]
+
+CTRL_C =! ink 'c', 'c', '\x03'
+
+table 'input-buffered-ctrl-c', [
+  ['Ctrl+C exits when buffered with text: "\\u0003"', '\x03', [CTRL_C]]
+  ['Ctrl+C exits when buffered with text: "ab\\u0003"', 'ab\x03', [...typed('ab'), CTRL_C]]
+  ['Ctrl+C exits when buffered with text: "\\u0003ab"', '\x03ab', [CTRL_C, ...typed('ab')]]
+  ['buffered Ctrl+C respects exitOnCtrlC: false', 'ab\x03cd', [...typed('ab'), CTRL_C, ...typed('cd')]]
+  ['buffered Ctrl+C respects bracketed paste', "#{START}ab\x03cd#{END}", [paste('ab\x03cd')]]
+]
