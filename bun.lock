@@ -138,6 +138,10 @@
         "rip-tray-build": "./build.rip",
       },
     },
+    "packages/tui": {
+      "name": "@rip/tui",
+      "version": "0.0.0",
+    },
     "packages/ui": {
       "name": "@rip/ui",
       "version": "0.0.0",
@@ -232,6 +236,8 @@
     "@rip/time": ["@rip/time@workspace:packages/time"],
 
     "@rip/tray": ["@rip/tray@workspace:packages/tray"],
+
+    "@rip/tui": ["@rip/tui@workspace:packages/tui"],
 
     "@rip/ui": ["@rip/ui@workspace:packages/ui"],
 
