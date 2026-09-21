@@ -550,3 +550,30 @@ fail 'merge assignment is no longer an operator', '*>obj = {a: 1}', "Unexpected 
 fail "'is not' is rejected with the isnt spelling", 'x is not null', 'x isnt y'
 
 test "an identifier starting with `not` after `is` is a plain comparison", 'not$y = 1\nx = 1\nx is not$y', true
+
+# An update expression cannot head a chain. Printed bare, `(--x).z` is
+# `--x.z`, which updates the MEMBER, and `x++.z` does not parse.
+code 'a prefix update heading a member read groups', 'y = (--x).z', 'let y = (--x).z;'
+code 'a postfix update heading a member read groups', 'y = (x++).z', 'let y = (x++).z;'
+code 'an update heading an index groups', 'y = (++x)[0]', 'let y = (++x)[0];'
+code 'an update heading a call groups', 'y = (x--)(1)', 'let y = (x--)(1);'
+code 'an update heading an optional member groups', 'y = (--x)?.z', 'let y = (--x)?.z;'
+code 'an update heading a chain inside interpolation groups', 'y = "#{(--x).z}"', 'let y = `${(--x).z}`;'
+code 'an update as a class heritage groups', 'class K extends (x++)', '''
+  class K extends (x++) {
+  }
+  '''
+code 'an update as an operand stays bare', 'y = x++ + 1', 'let y = x++ + 1;'
+code 'an update as an argument stays bare', 'y = f(x++)', 'let y = f(x++);'
+test 'a prefix update heading a member read updates the binding, not the member', '''
+  box = { toFixed: 5 }
+  n = 3
+  text = (--n).toFixed(0)
+  [text, n, box.toFixed]
+''', ['2', 2, 5]
+test 'a parenthesized update of a member still updates the member', '''
+  box = { z: 10 }
+  got = (--box.z)
+  [got, box.z]
+''', [9, 9]
+
