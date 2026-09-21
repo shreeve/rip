@@ -6,8 +6,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 3. Reading `layout.rip`
 
-- [ ] Say in the header why `for kid, i in` keeps an unused `i` (it
-      compiles to a counted loop), or the loops get "cleaned".
 - [ ] Remove what no suite reaches: `edges`,
       `flatten!` and the fallback arm of `kids`, the `border*` and
       `overflow` slots the document refuses, guards that cannot fire,

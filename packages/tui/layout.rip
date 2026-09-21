@@ -15,6 +15,10 @@
 # layout children, its float results, and its cache. The record is
 # rebuilt only while the node is dirty, and a node whose rebuild finds
 # nothing different stops being dirty before layout looks at it.
+#
+# A loop over a list is written `for kid, i in list` though nothing reads
+# `i`: with the index Rip emits a counted loop, and without it a
+# `for…of`, which walks an iterator on the hottest path here.
 
 import { refresh, MODES } from './text.rip'
 
