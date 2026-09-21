@@ -147,3 +147,23 @@ console.log('defaults:', typeof Latch, typeof Porch)
 
 // offer/accept has no honest TSX spelling, so this line is a PREDICTED trace, hand-replayed to keep the output byte-identical.
 console.log('context:', 'function', 'function')
+
+// ── Unannotated private members type from a non-literal initializer ──
+
+const stamp = (part: string): string => 'tag-' + part
+
+class Stamper {
+  base = 'core'
+  tag = stamp('a')
+  readonly fixedTag = stamp('b')
+  liveTag = stamp('c')
+  echo = this.base
+}
+
+const stamper = new Stamper()
+const stampedTag: string = stamper.tag
+const stampedFixed: string = stamper.fixedTag
+const stampedLive: string = stamper.liveTag
+const stampedEcho: string = stamper.echo
+
+console.log('inferred:', stampedTag, stampedFixed, stampedLive, stampedEcho)

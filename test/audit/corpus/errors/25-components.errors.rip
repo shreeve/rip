@@ -73,6 +73,24 @@ gauge = new Gauge({})
 wrongWidth: string = gauge.width.value
 gauge.cap = 4
 
+stamp = (part: string): string -> 'tag-' + part
+
+Sonde = component
+  base = 'core'
+  tag = stamp('a')
+  fixedTag =! stamp('b')
+  liveTag := stamp('c')
+  echo := base
+
+  render null
+
+sonde = new Sonde({})
+
+wrongTag: number = sonde.tag
+wrongFixedTag: number = sonde.fixedTag
+wrongLiveTag: number = sonde.liveTag.value
+wrongEcho: number = sonde.echo.value
+
 Hinge = component
   @open := false
 

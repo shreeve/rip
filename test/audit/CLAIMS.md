@@ -74,6 +74,7 @@ What that costs is FALSIFIABILITY, not coverage. 10-modules.rip imports across e
 | behavior | carrier | negative carrier |
 | --- | --- | --- |
 | member-kind faces reached through an instance: `=!` rejects writes, `:=` exposes `.value`, `~=` computes, `=` stays plain | 25-components.rip:meterWidth | 25-components.errors.rip:Gauge |
+| an unannotated private member types from a non-literal initializer — a call or a sibling read, in `=`, `=!`, and `:=` alike, never `any` | 25-components.rip:stampedLive | 25-components.errors.rip:Sonde |
 | method faces: typed parameters keep their types in both member layouts (inline body and indented body), defaulted parameters become optional | 25-components.rip:tallied | 25-components.errors.rip:wrongStep |
 | `component extends <tag>` forwards use-site intrinsics typed from the element | 25-components.rip:Prompt | 25-components.errors.rip:Swatch |
 | a literal-union prop keeps its union at the use site rather than widening to its base type | 25-components.rip:Ribbon | 25-components.errors.rip:Tint |

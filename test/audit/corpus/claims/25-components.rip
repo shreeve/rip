@@ -154,3 +154,24 @@ Shade = component
     span "#{half}"
 
 console.log('context:', typeof Lamp, typeof Shade)
+
+# ── Unannotated private members type from a non-literal initializer: a call and a sibling read, in `=`, `=!`, and `:=` ──
+
+stamp = (part: string): string -> 'tag-' + part
+
+Stamper = component
+  base = 'core'
+  tag = stamp('a')
+  fixedTag =! stamp('b')
+  liveTag := stamp('c')
+  echo := base
+
+  render null
+
+stamper = new Stamper({})
+stampedTag: string = stamper.tag
+stampedFixed: string = stamper.fixedTag
+stampedLive: string = stamper.liveTag.value
+stampedEcho: string = stamper.echo.value
+
+console.log('inferred:', stampedTag, stampedFixed, stampedLive, stampedEcho)

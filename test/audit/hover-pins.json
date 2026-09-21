@@ -756,6 +756,10 @@
       {
         "name": "Shade",
         "expect": "let Shade: typeof Shade"
+      },
+      {
+        "name": "Stamper",
+        "expect": "let Stamper: typeof Stamper"
       }
     ],
     "positions": [

@@ -73,6 +73,24 @@ const gauge = new Gauge()
 const wrongWidth: string = gauge.width
 gauge.cap = 4
 
+const stamp = (part: string): string => 'tag-' + part
+
+class Sonde {
+  base = 'core'
+  tag = stamp('a')
+  readonly fixedTag = stamp('b')
+  liveTag = stamp('c')
+  echo = this.base
+
+  render() { return null }
+}
+const sonde = new Sonde()
+
+const wrongTag: number = sonde.tag
+const wrongFixedTag: number = sonde.fixedTag
+const wrongLiveTag: number = sonde.liveTag
+const wrongEcho: number = sonde.echo
+
 function Hinge({ open = false }) {
   return <div>{String(open)}</div>
 }
