@@ -176,7 +176,6 @@ export Heading = component
   @as: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' := 'h1'
   @class: string := ''
   @style: StyleValue := ''
-  @children =! undefined
   render
     switch @as
       when 'h1' then HeadingH1 class: @class, style: @style, children: @children
