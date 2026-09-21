@@ -244,7 +244,7 @@ test "the cache answers only the very offer it was made for", ->
   settled root, 60
   settled root, 86
 
-test "a content-box child's percent padding ties its container to the owner's width", ->
+test "a content-box child's max takes its percent padding from its container, whatever the owner's width", ->
   kid = div { boxSizing: 'content-box', padding: '10%', maxWidth: 20, width: 45, height: 2 }
   row = div { width: 50, height: 10, flexDirection: 'row' }, [kid, div({ flexGrow: 1, height: 2 })]
   root = div { alignItems: 'flex-start' }, [row]
