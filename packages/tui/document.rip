@@ -80,6 +80,13 @@ watch =! (node) ->
 
 export NOWHERE =! Object.freeze { x: 0, y: 0, w: 0, h: 0 }
 
+# The leaf that draws `node`'s words: the outermost text it is a run of.
+# A `contents` text is no leaf — it lends its words to its parent, each
+# a leaf of its own.
+leafOf =! (node) ->
+  node = node.parentNode while node.parentNode?.tagName is 'span' and node.parentNode.styles.display isnt 'contents'
+  node
+
 export class Node
   constructor: (@nodeType) ->
     @ownerDocument = null
@@ -174,8 +181,7 @@ export class Node
   # the leaf it is in, and a `contents` node inks nothing itself: what it
   # says reaches the children it lends its parent.
   mark!: (level, still = false) ->
-    node = this
-    node = node.parentNode while node.parentNode?.tagName is 'span'
+    node = leafOf this
     s = node.styles
     level = 3 if s and (s.overflow? or s.overflowX? or s.overflowY?)
     if level is 3 and s?.display is 'contents'
@@ -326,8 +332,7 @@ export class Text extends Node
     value = sanitize value
     return if value is @text
     @text = value
-    leaf = this
-    leaf = leaf.parentNode while leaf.parentNode?.tagName is 'span'
+    leaf = leafOf this
     moved = true
     moved = refresh(leaf).moved if leaf.flow and leaf.lay and not leaf.dirty
     # One line that fits its box inks cells of that box and no others,

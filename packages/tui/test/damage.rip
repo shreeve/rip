@@ -71,7 +71,7 @@ SPAN =! {
   link: ['https://example.com/a', 'https://example.com/b', undefined, undefined]
   width: [1, 2, 4, 8, undefined, undefined], height: [1, undefined, undefined], flexShrink: [1, undefined]
   position: ['absolute', undefined, undefined, undefined], top: [0, 2, undefined], left: [1, 4, undefined]
-  display: ['none', undefined, undefined], hidden: [true, undefined, undefined]
+  display: ['none', 'contents', undefined, undefined], hidden: [true, undefined, undefined]
 }
 RUN =! { ...PAINTED, link: SPAN.link }
 

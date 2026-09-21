@@ -1679,6 +1679,31 @@ test "a contents node's color reaches the children it lends, and owes their cell
     eq draw(), 4
     eq view.ansi.split('\n')[1].trimEnd(), "\x1b[32mlent\x1b[0m"
 
+test "a contents text lends its words to its parent: each is a leaf, marked and measured as one", ->
+  Lender = component
+    @n := 1
+    @display := 'contents'
+    render
+      Box flexDirection: 'row', height: 2, alignItems: 'flex-start'
+        Text display: @display, color: 'red'
+          "count #{@n}"
+        Text "after"
+  owing Lender, (app, draw, view) ->
+    draw()
+    eq view.ansi.split('\n')[0].trimEnd(), "\x1b[31mcount 1\x1b[0mafter"
+    app.n.value = 2
+    eq draw(), 7
+    # Longer words move their neighbor: the text under a contents one
+    # answers for its own size.
+    app.n.value = 22
+    eq draw(), 8 + 5
+    eq view.frame().trimEnd(), "count 22after"
+    app.display.value = undefined
+    draw()
+    app.display.value = 'contents'
+    draw()
+    eq view.frame().trimEnd(), "count 22after"
+
 test "words that grow under a contents node, or under a box while it is hidden, are surveyed", ->
   Nested = component
     @word := 'lent'
