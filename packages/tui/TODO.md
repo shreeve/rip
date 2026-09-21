@@ -6,32 +6,18 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 3. Reading `layout.rip`
 
-- [ ] Comment every field of `Lay` and `Flex`; name the five pass
-      stamps for what they record; untangle `hold!` / `holds` / `held`
-      / `HELD`, `pinned` / `pin!`, `owned`, and the two meanings of
-      `left` and of `owner`.
-- [ ] Name the dimension indices (`WIDTH`, `HEIGHT`) and give each enum
-      one labelled group (`RELATIVE`, `WRAP`, `CONTENT_BOX`; `CONTENT`
-      / `CONTENTS` / `MAX_CONTENT` and `FLEX` / `Flex` / `lay.flex`
-      collide).
-- [ ] Split `style!` (71 lines; name the ranks) and `compute!` (143
-      lines; steps 2 and 9 are each written twice); comment the module
-      globals as out-parameters and say why.
-- [ ] Reading order: the cache flags sit 900 lines before "The cache";
-      `baselined`, `percents`, `seat!`, `measureFixed` sit away from
-      their sections.
-- [ ] Say in the header why `for kid, i in` keeps an unused `i` (it
-      compiles to a counted loop), or the loops get "cleaned".
-- [ ] Remove what no suite reaches: `edges`,
-      `flatten!` and the fallback arm of `kids`, the `border*` and
-      `overflow` slots the document refuses, guards that cannot fire,
-      `mainAxis`, parameters nobody reads. Fold the five `measured[0]`
-      / `measured[1]` pairs, the two ascent / descent computations, and
-      the inside sums. About 95 lines.
-- [ ] Cite Yoga's functions, not C++ line numbers.
-- [ ] Declare `lay` and `measure` in `Node`'s constructor; take `cols`
-      and `rows` at `layout`'s door, as the rest of the package names
-      them.
+- [ ] `edges` has no caller but two pins in `test/layout.rip`, and its
+      arm for a node not laid out is reached by nothing: give it a
+      caller, or remove it with its pins.
+- [ ] The `border*Width` keys and `overflow: 'scroll'` are reached only
+      by writing `styles` past the document, which refuses both: Yoga's
+      cases through the shim (about 160 write a border width, 3
+      scroll), and the fuzz. Let the document take them, or stop the
+      suites writing them; until then the slots stay.
+- [ ] A leaf sums its padding and border as Yoga does — both paddings,
+      then both borders — and `insideAxis` sums edge by edge.
+      Fractional edges part the two by one rounding, so one sum for
+      both moves floats: decide which order stands.
 
 ## 4. Layout cost
 
