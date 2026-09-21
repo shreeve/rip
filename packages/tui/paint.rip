@@ -52,10 +52,17 @@ SWITCHES =! ['bold', 'dimColor', 'italic', 'underline', 'inverse', 'strikethroug
 CODES =! [1, 2, 3, 4, 7, 9]
 DIM =! 2
 
-ids =! Map.new()
-records =! [{ fg: null, bg: null, flags: 0, link: null, sgr: '', key: 'null|null|0' }]
+ids =! Map.new()   # foreground → background → flags and link → id
+records =! [{ fg: null, bg: null, flags: 0, link: null, sgr: '', key: 0 }]
 blends =! Map.new()
-ids.set records[0].key, 0
+
+# The ids of one foreground on one background. A color is a string the
+# app wrote once, so a style is found with no key built from its parts.
+shelf =! (fg, bg) ->
+  tones = ids.get(fg) ?? (ids.set(fg, Map.new()); ids.get fg)
+  tones.get(bg) ?? (tones.set(bg, Map.new()); tones.get bg)
+
+shelf(null, null).set 0, 0
 
 # The styles held, for the tests to count.
 export tally =! -> records.length
@@ -63,9 +70,9 @@ export tally =! -> records.length
 # The id of a style, minted on first sight; it stands until a sweep. A
 # link is part of the style, so two grids differ where a link does.
 export intern =! (fg, bg, flags, link = null) ->
-  key = "#{fg}|#{bg}|#{flags}"
-  key += "|#{link}" if link
-  id = ids.get key
+  held = shelf fg, bg
+  key = if link then "#{flags}|#{link}" else flags
+  id = held.get key
   return id if id?
   parts = []
   for code, n in CODES
@@ -76,7 +83,7 @@ export intern =! (fg, bg, flags, link = null) ->
     parts.push sgr
   throw Error.new "rip/tui: more than #{LIMIT} distinct styles are in use — a cell holds a style id in sixteen bits" if records.length >= LIMIT
   records.push { fg, bg, flags, link, sgr: parts.join(';'), key }
-  ids.set key, records.length - 1
+  held.set key, records.length - 1
   records.length - 1
 
 # The style a node's own props describe, over the style it inherits.
@@ -760,7 +767,7 @@ sweep! =! (grid) ->
   blends.clear()
   for record, n in kept
     records.push record
-    ids.set record.key, n
+    shelf(record.fg, record.bg).set record.key, n
   evict grid.ch
   frames.clear()
 
