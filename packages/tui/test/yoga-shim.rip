@@ -144,12 +144,36 @@ class YogaNode
     @write 'rowGap', @gutters[Gutter.Row] ?? @gutters[Gutter.All]
 
   # The engine calls `el.measure(width, widthMode, height, heightMode)`
-  # with MeasureMode numbers and reads `{ width, height }` back.
+  # with MeasureMode numbers and reads `{ width, height }` back. As in
+  # Yoga, a measure function set on a clean node dirties nothing: the
+  # caller marks the node dirty.
   setMeasureFunc: (fn) ->
     throw Error.new 'yoga-shim: setMeasureFunc takes a function' unless typeof fn is 'function'
     throw Error.new 'yoga-shim: setMeasureFunc on a node with children' if @children.length
     @el.measure = fn
-    @el.changed true
+
+  # Yoga's dirty flag is the element's own, which `changed` raises on a
+  # node and on every clean ancestor. A dirtied function hears the flag
+  # go up, so it is called once for each time the node turns dirty.
+  isDirty: -> @el.dirty
+  markDirty: -> @el.changed true
+  setDirtiedFunc: (fn) ->
+    el = @el
+    flag = el.dirty
+    Object.defineProperty el, 'dirty',
+      configurable: true
+      get: -> flag
+      set: (value) ->
+        turned = value and not flag
+        flag = value
+        fn() if turned and fn
+
+  # A node with no parent and no children starts over as a new one.
+  reset: ->
+    throw Error.new 'yoga-shim: reset of a node with a parent or children' if @parent or @children.length
+    @el = Element.new 'div'
+    @edges = { margin: [], padding: [], border: [], position: [] }
+    @gutters = []
 
   insertChild: (child, index) ->
     throw Error.new 'yoga-shim: insertChild of a node that already has a parent' if child.parent
@@ -170,6 +194,12 @@ class YogaNode
   getComputedTop: -> @el.rect.y - (if @parent then @parent.el.rect.y else 0) + 0
   getComputedWidth: -> @el.rect.w + 0
   getComputedHeight: -> @el.rect.h + 0
+
+  getChildCount: -> @children.length
+
+  # The padding and border the last layout resolved, by physical edge.
+  getComputedPadding: (which) -> @el.lay.padding[which]
+  getComputedBorder: (which) -> @el.lay.border[which]
 
   free: ->
   freeRecursive: ->

@@ -1,0 +1,1349 @@
+# Yoga's hand-written cases for measure functions, the measure cache,
+# dirtying, and computed edges, ported one call for one.
+#
+#   Upstream: facebook/yoga
+#             tests/YGMeasureTest.cpp, YGMeasureCacheTest.cpp,
+#             YGMeasureModeTest.cpp, YGRoundingMeasureFuncTest.cpp
+#             javascript/tests/YGMeasureTest.test.ts,
+#             YGDirtiedTest.test.ts, YGComputedPaddingTest.test.ts,
+#             YGComputedBorderTest.test.ts, YGComputedMarginTest.test.ts
+#   Commit:   9d159f2d3d8dbc777e1f82c20b94e369c113d608
+#
+# A port under Yoga's MIT license, © Meta Platforms, Inc. and affiliates;
+# the text is in test/yoga/LICENSE. Each case keeps its upstream name,
+# builds the same tree through the `yoga-layout` shim, and asserts what
+# the upstream case asserts. Where a case is cut or adapted, a comment
+# at the case says how; test/yoga/SOURCE.md lists what is not ported.
+#
+#   rip test/yoga-hand.rip
+
+import { test, eq, ok } from 'rip/testing'
+import Yoga, { Align, BoxSizing, Direction, Edge, FlexDirection, Justify, MeasureMode, Overflow, PositionType } from './yoga-shim.rip'
+
+# Upstream keeps a counter, or a list of the offers a node was made, in
+# the node's context. Here the measure function is wrapped instead.
+counting =! (measure, bump) ->
+  (width, widthMode, height, heightMode) ->
+    bump()
+    measure width, widthMode, height, heightMode
+
+recording =! (constraints) ->
+  (width, widthMode, height, heightMode) ->
+    constraints.push { width, widthMode, height, heightMode }
+    width: if widthMode is MeasureMode.Undefined then 10 else width
+    height: if heightMode is MeasureMode.Undefined then 10 else width
+
+# ==[ tests/YGMeasureTest.cpp ]==
+
+console.log "\ntests/YGMeasureTest.cpp"
+
+measure10 =! -> { width: 10, height: 10 }
+measure90x10 =! -> { width: 90, height: 10 }
+measure100 =! -> { width: 100, height: 100 }
+halves =! (width, widthMode, height) -> { width: 0.5 * width, height: 0.5 * height }
+
+wrappingText =! (width, widthMode) ->
+  if widthMode is MeasureMode.Undefined or width >= 68 then { width: 68, height: 16 } else { width: 50, height: 32 }
+
+neverNegative =! (width, widthMode, height) ->
+  ok width >= 0
+  ok height >= 0
+  { width: 0, height: 0 }
+
+test 'dont_measure_single_grow_shrink_child', ->
+  root = Yoga.Node.create()
+  root.setWidth 100
+  root.setHeight 100
+  measureCount = 0
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc counting measure10, -> measureCount += 1
+  root_child0.setFlexGrow 1
+  root_child0.setFlexShrink 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq measureCount, 0
+
+test 'measure_absolute_child_with_no_constraints', ->
+  root = Yoga.Node.create()
+
+  root_child0 = Yoga.Node.create()
+  root.insertChild root_child0, 0
+  measureCount = 0
+
+  root_child0_child0 = Yoga.Node.create()
+  root_child0_child0.setPositionType PositionType.Absolute
+  root_child0_child0.setMeasureFunc counting measure10, -> measureCount += 1
+  root_child0.insertChild root_child0_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq measureCount, 1
+
+test 'dont_measure_when_min_equals_max', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+  measureCount = 0
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc counting measure10, -> measureCount += 1
+  root_child0.setMinWidth 10
+  root_child0.setMaxWidth 10
+  root_child0.setMinHeight 10
+  root_child0.setMaxHeight 10
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq measureCount, 0
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 10
+  eq root_child0.getComputedHeight(), 10
+
+test 'dont_measure_when_min_equals_max_percentages', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+  measureCount = 0
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc counting measure10, -> measureCount += 1
+  root_child0.setMinWidth '10%'
+  root_child0.setMaxWidth '10%'
+  root_child0.setMinHeight '10%'
+  root_child0.setMaxHeight '10%'
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq measureCount, 0
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 10
+  eq root_child0.getComputedHeight(), 10
+
+test 'measure_nodes_with_margin_auto_and_stretch', ->
+  root = Yoga.Node.create()
+  root.setWidth 500
+  root.setHeight 500
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc measure10
+  root_child0.setMargin Edge.Left, 'auto'
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedLeft(), 490
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 10
+  eq root_child0.getComputedHeight(), 10
+
+test 'dont_measure_when_min_equals_max_mixed_width_percent', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+  measureCount = 0
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc counting measure10, -> measureCount += 1
+  root_child0.setMinWidth '10%'
+  root_child0.setMaxWidth '10%'
+  root_child0.setMinHeight 10
+  root_child0.setMaxHeight 10
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq measureCount, 0
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 10
+  eq root_child0.getComputedHeight(), 10
+
+test 'dont_measure_when_min_equals_max_mixed_height_percent', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+  measureCount = 0
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc counting measure10, -> measureCount += 1
+  root_child0.setMinWidth 10
+  root_child0.setMaxWidth 10
+  root_child0.setMinHeight '10%'
+  root_child0.setMaxHeight '10%'
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq measureCount, 0
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 10
+  eq root_child0.getComputedHeight(), 10
+
+test 'measure_enough_size_should_be_in_single_line', ->
+  root = Yoga.Node.create()
+  root.setWidth 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setAlignSelf Align.FlexStart
+  root_child0.setMeasureFunc wrappingText
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedWidth(), 68
+  eq root_child0.getComputedHeight(), 16
+
+test 'measure_not_enough_size_should_wrap', ->
+  root = Yoga.Node.create()
+  root.setWidth 55
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setAlignSelf Align.FlexStart
+  root_child0.setMeasureFunc wrappingText
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedWidth(), 50
+  eq root_child0.getComputedHeight(), 32
+
+test 'measure_zero_space_should_grow', ->
+  root = Yoga.Node.create()
+  root.setHeight 200
+  root.setFlexDirection FlexDirection.Column
+  root.setFlexGrow 0
+  measureCount = 0
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setFlexDirection FlexDirection.Column
+  root_child0.setPadding Edge.All, 100
+  root_child0.setMeasureFunc counting measure10, -> measureCount += 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout 282, undefined, Direction.LTR
+
+  eq root_child0.getComputedWidth(), 282
+  eq root_child0.getComputedTop(), 0
+
+test 'measure_flex_direction_row_and_padding', ->
+  root = Yoga.Node.create()
+  root.setFlexDirection FlexDirection.Row
+  root.setPadding Edge.Left, 25
+  root.setPadding Edge.Top, 25
+  root.setPadding Edge.Right, 25
+  root.setPadding Edge.Bottom, 25
+  root.setWidth 50
+  root.setHeight 50
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc wrappingText
+  root.insertChild root_child0, 0
+
+  root_child1 = Yoga.Node.create()
+  root_child1.setWidth 5
+  root_child1.setHeight 5
+  root.insertChild root_child1, 1
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root.getComputedLeft(), 0
+  eq root.getComputedTop(), 0
+  eq root.getComputedWidth(), 50
+  eq root.getComputedHeight(), 50
+  eq root_child0.getComputedLeft(), 25
+  eq root_child0.getComputedTop(), 25
+  eq root_child0.getComputedWidth(), 50
+  eq root_child0.getComputedHeight(), 0
+  eq root_child1.getComputedLeft(), 75
+  eq root_child1.getComputedTop(), 25
+  eq root_child1.getComputedWidth(), 5
+  eq root_child1.getComputedHeight(), 5
+
+test 'measure_flex_direction_column_and_padding', ->
+  root = Yoga.Node.create()
+  root.setMargin Edge.Top, 20
+  root.setPadding Edge.All, 25
+  root.setWidth 50
+  root.setHeight 50
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc wrappingText
+  root.insertChild root_child0, 0
+
+  root_child1 = Yoga.Node.create()
+  root_child1.setWidth 5
+  root_child1.setHeight 5
+  root.insertChild root_child1, 1
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root.getComputedLeft(), 0
+  eq root.getComputedTop(), 20
+  eq root.getComputedWidth(), 50
+  eq root.getComputedHeight(), 50
+  eq root_child0.getComputedLeft(), 25
+  eq root_child0.getComputedTop(), 25
+  eq root_child0.getComputedWidth(), 0
+  eq root_child0.getComputedHeight(), 32
+  eq root_child1.getComputedLeft(), 25
+  eq root_child1.getComputedTop(), 57
+  eq root_child1.getComputedWidth(), 5
+  eq root_child1.getComputedHeight(), 5
+
+test 'measure_flex_direction_row_no_padding', ->
+  root = Yoga.Node.create()
+  root.setFlexDirection FlexDirection.Row
+  root.setMargin Edge.Top, 20
+  root.setWidth 50
+  root.setHeight 50
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc wrappingText
+  root.insertChild root_child0, 0
+
+  root_child1 = Yoga.Node.create()
+  root_child1.setWidth 5
+  root_child1.setHeight 5
+  root.insertChild root_child1, 1
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root.getComputedLeft(), 0
+  eq root.getComputedTop(), 20
+  eq root.getComputedWidth(), 50
+  eq root.getComputedHeight(), 50
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 50
+  eq root_child0.getComputedHeight(), 50
+  eq root_child1.getComputedLeft(), 50
+  eq root_child1.getComputedTop(), 0
+  eq root_child1.getComputedWidth(), 5
+  eq root_child1.getComputedHeight(), 5
+
+test 'measure_flex_direction_row_no_padding_align_items_flexstart', ->
+  root = Yoga.Node.create()
+  root.setFlexDirection FlexDirection.Row
+  root.setMargin Edge.Top, 20
+  root.setWidth 50
+  root.setHeight 50
+  root.setAlignItems Align.FlexStart
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc wrappingText
+  root.insertChild root_child0, 0
+
+  root_child1 = Yoga.Node.create()
+  root_child1.setWidth 5
+  root_child1.setHeight 5
+  root.insertChild root_child1, 1
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root.getComputedLeft(), 0
+  eq root.getComputedTop(), 20
+  eq root.getComputedWidth(), 50
+  eq root.getComputedHeight(), 50
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 50
+  eq root_child0.getComputedHeight(), 32
+  eq root_child1.getComputedLeft(), 50
+  eq root_child1.getComputedTop(), 0
+  eq root_child1.getComputedWidth(), 5
+  eq root_child1.getComputedHeight(), 5
+
+test 'measure_with_fixed_size', ->
+  root = Yoga.Node.create()
+  root.setMargin Edge.Top, 20
+  root.setPadding Edge.All, 25
+  root.setWidth 50
+  root.setHeight 50
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc wrappingText
+  root_child0.setWidth 10
+  root_child0.setHeight 10
+  root.insertChild root_child0, 0
+
+  root_child1 = Yoga.Node.create()
+  root_child1.setWidth 5
+  root_child1.setHeight 5
+  root.insertChild root_child1, 1
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root.getComputedLeft(), 0
+  eq root.getComputedTop(), 20
+  eq root.getComputedWidth(), 50
+  eq root.getComputedHeight(), 50
+  eq root_child0.getComputedLeft(), 25
+  eq root_child0.getComputedTop(), 25
+  eq root_child0.getComputedWidth(), 10
+  eq root_child0.getComputedHeight(), 10
+  eq root_child1.getComputedLeft(), 25
+  eq root_child1.getComputedTop(), 35
+  eq root_child1.getComputedWidth(), 5
+  eq root_child1.getComputedHeight(), 5
+
+test 'measure_with_flex_shrink', ->
+  root = Yoga.Node.create()
+  root.setMargin Edge.Top, 20
+  root.setPadding Edge.All, 25
+  root.setWidth 50
+  root.setHeight 50
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc wrappingText
+  root_child0.setFlexShrink 1
+  root.insertChild root_child0, 0
+
+  root_child1 = Yoga.Node.create()
+  root_child1.setWidth 5
+  root_child1.setHeight 5
+  root.insertChild root_child1, 1
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root.getComputedLeft(), 0
+  eq root.getComputedTop(), 20
+  eq root.getComputedWidth(), 50
+  eq root.getComputedHeight(), 50
+  eq root_child0.getComputedLeft(), 25
+  eq root_child0.getComputedTop(), 25
+  eq root_child0.getComputedWidth(), 0
+  eq root_child0.getComputedHeight(), 0
+  eq root_child1.getComputedLeft(), 25
+  eq root_child1.getComputedTop(), 25
+  eq root_child1.getComputedWidth(), 5
+  eq root_child1.getComputedHeight(), 5
+
+test 'measure_no_padding', ->
+  root = Yoga.Node.create()
+  root.setMargin Edge.Top, 20
+  root.setWidth 50
+  root.setHeight 50
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc wrappingText
+  root_child0.setFlexShrink 1
+  root.insertChild root_child0, 0
+
+  root_child1 = Yoga.Node.create()
+  root_child1.setWidth 5
+  root_child1.setHeight 5
+  root.insertChild root_child1, 1
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root.getComputedLeft(), 0
+  eq root.getComputedTop(), 20
+  eq root.getComputedWidth(), 50
+  eq root.getComputedHeight(), 50
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 50
+  eq root_child0.getComputedHeight(), 32
+  eq root_child1.getComputedLeft(), 0
+  eq root_child1.getComputedTop(), 32
+  eq root_child1.getComputedWidth(), 5
+  eq root_child1.getComputedHeight(), 5
+
+test 'cant_call_negative_measure', ->
+  root = Yoga.Node.create()
+  root.setFlexDirection FlexDirection.Column
+  root.setWidth 50
+  root.setHeight 10
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc neverNegative
+  root_child0.setMargin Edge.Top, 20
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+test 'cant_call_negative_measure_horizontal', ->
+  root = Yoga.Node.create()
+  root.setFlexDirection FlexDirection.Row
+  root.setWidth 10
+  root.setHeight 20
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc neverNegative
+  root_child0.setMargin Edge.Start, 20
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+test 'percent_with_text_node', ->
+  root = Yoga.Node.create()
+  root.setFlexDirection FlexDirection.Row
+  root.setJustifyContent Justify.SpaceBetween
+  root.setAlignItems Align.Center
+  root.setWidth 100
+  root.setHeight 80
+
+  root_child0 = Yoga.Node.create()
+  root.insertChild root_child0, 0
+
+  root_child1 = Yoga.Node.create()
+  root_child1.setMeasureFunc measure90x10
+  root_child1.setMaxWidth '50%'
+  root_child1.setPadding Edge.Top, '50%'
+  root.insertChild root_child1, 1
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root.getComputedLeft(), 0
+  eq root.getComputedTop(), 0
+  eq root.getComputedWidth(), 100
+  eq root.getComputedHeight(), 80
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 40
+  eq root_child0.getComputedWidth(), 0
+  eq root_child0.getComputedHeight(), 0
+  eq root_child1.getComputedLeft(), 50
+  eq root_child1.getComputedTop(), 10
+  eq root_child1.getComputedWidth(), 50
+  eq root_child1.getComputedHeight(), 60
+
+test 'percent_margin_with_measure_func', ->
+  root = Yoga.Node.create()
+  root.setFlexDirection FlexDirection.Row
+  root.setWidth 500
+  root.setHeight 500
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setWidth 100
+  root_child0.setHeight 100
+  root_child0.setMargin Edge.Top, 0
+  root_child0.setMeasureFunc measure100
+  root.insertChild root_child0, 0
+
+  root_child1 = Yoga.Node.create()
+  root_child1.setWidth 100
+  root_child1.setHeight 100
+  root_child1.setMargin Edge.Top, 100
+  root_child1.setMeasureFunc measure100
+  root.insertChild root_child1, 1
+
+  root_child2 = Yoga.Node.create()
+  root_child2.setWidth 100
+  root_child2.setHeight 100
+  root_child2.setMargin Edge.Top, '10%'
+  root_child2.setMeasureFunc measure100
+  root.insertChild root_child2, 2
+
+  root_child3 = Yoga.Node.create()
+  root_child3.setWidth 100
+  root_child3.setHeight 100
+  root_child3.setMargin Edge.Top, '20%'
+  root_child3.setMeasureFunc measure100
+  root.insertChild root_child3, 3
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root.getComputedLeft(), 0
+  eq root.getComputedTop(), 0
+  eq root.getComputedWidth(), 500
+  eq root.getComputedHeight(), 500
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 100
+  eq root_child0.getComputedHeight(), 100
+  eq root_child1.getComputedLeft(), 100
+  eq root_child1.getComputedTop(), 100
+  eq root_child1.getComputedWidth(), 100
+  eq root_child1.getComputedHeight(), 100
+  eq root_child2.getComputedLeft(), 200
+  eq root_child2.getComputedTop(), 50
+  eq root_child2.getComputedWidth(), 100
+  eq root_child2.getComputedHeight(), 100
+  eq root_child3.getComputedLeft(), 300
+  eq root_child3.getComputedTop(), 100
+  eq root_child3.getComputedWidth(), 100
+  eq root_child3.getComputedHeight(), 100
+
+test 'percent_padding_with_measure_func', ->
+  root = Yoga.Node.create()
+  root.setFlexDirection FlexDirection.Row
+  root.setAlignItems Align.FlexStart
+  root.setAlignContent Align.FlexStart
+  root.setWidth 500
+  root.setHeight 500
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setWidth 100
+  root_child0.setHeight 100
+  root_child0.setPadding Edge.Top, 0
+  root_child0.setMeasureFunc measure100
+  root.insertChild root_child0, 0
+
+  root_child1 = Yoga.Node.create()
+  root_child1.setWidth 100
+  root_child1.setHeight 100
+  root_child1.setPadding Edge.Top, 100
+  root_child1.setMeasureFunc measure100
+  root.insertChild root_child1, 1
+
+  root_child2 = Yoga.Node.create()
+  root_child2.setPadding Edge.Top, '10%'
+  root_child2.setMeasureFunc measure100
+  root.insertChild root_child2, 2
+
+  root_child3 = Yoga.Node.create()
+  root_child3.setPadding Edge.Top, '20%'
+  root_child3.setMeasureFunc measure100
+  root.insertChild root_child3, 3
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root.getComputedLeft(), 0
+  eq root.getComputedTop(), 0
+  eq root.getComputedWidth(), 500
+  eq root.getComputedHeight(), 500
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 100
+  eq root_child0.getComputedHeight(), 100
+  eq root_child1.getComputedLeft(), 100
+  eq root_child1.getComputedTop(), 0
+  eq root_child1.getComputedWidth(), 100
+  eq root_child1.getComputedHeight(), 100
+  eq root_child2.getComputedLeft(), 200
+  eq root_child2.getComputedTop(), 0
+  eq root_child2.getComputedWidth(), 100
+  eq root_child2.getComputedHeight(), 150
+  eq root_child3.getComputedLeft(), 300
+  eq root_child3.getComputedTop(), 0
+  eq root_child3.getComputedWidth(), 100
+  eq root_child3.getComputedHeight(), 200
+
+test 'percent_padding_and_percent_margin_with_measure_func', ->
+  root = Yoga.Node.create()
+  root.setFlexDirection FlexDirection.Row
+  root.setAlignItems Align.FlexStart
+  root.setAlignContent Align.FlexStart
+  root.setWidth 500
+  root.setHeight 500
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setWidth 100
+  root_child0.setHeight 100
+  root_child0.setPadding Edge.Top, 0
+  root_child0.setMeasureFunc measure100
+  root.insertChild root_child0, 0
+
+  root_child1 = Yoga.Node.create()
+  root_child1.setWidth 100
+  root_child1.setHeight 100
+  root_child1.setPadding Edge.Top, 100
+  root_child1.setMeasureFunc measure100
+  root.insertChild root_child1, 1
+
+  root_child2 = Yoga.Node.create()
+  root_child2.setPadding Edge.Top, '10%'
+  root_child2.setMargin Edge.Top, '10%'
+  root_child2.setMeasureFunc measure100
+  root.insertChild root_child2, 2
+
+  root_child3 = Yoga.Node.create()
+  root_child3.setPadding Edge.Top, '20%'
+  root_child3.setMargin Edge.Top, '20%'
+  root_child3.setMeasureFunc measure100
+  root.insertChild root_child3, 3
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root.getComputedLeft(), 0
+  eq root.getComputedTop(), 0
+  eq root.getComputedWidth(), 500
+  eq root.getComputedHeight(), 500
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 100
+  eq root_child0.getComputedHeight(), 100
+  eq root_child1.getComputedLeft(), 100
+  eq root_child1.getComputedTop(), 0
+  eq root_child1.getComputedWidth(), 100
+  eq root_child1.getComputedHeight(), 100
+  eq root_child2.getComputedLeft(), 200
+  eq root_child2.getComputedTop(), 50
+  eq root_child2.getComputedWidth(), 100
+  eq root_child2.getComputedHeight(), 150
+  eq root_child3.getComputedLeft(), 300
+  eq root_child3.getComputedTop(), 100
+  eq root_child3.getComputedWidth(), 100
+  eq root_child3.getComputedHeight(), 200
+
+test 'measure_content_box', ->
+  root = Yoga.Node.create()
+  root.setWidth 100
+  root.setHeight 200
+  root.setBoxSizing BoxSizing.ContentBox
+  root.setPadding Edge.All, 5
+  root.setBorder Edge.All, 10
+  measureCount = 0
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc counting halves, -> measureCount += 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq measureCount, 1
+  eq root.getComputedLeft(), 0
+  eq root.getComputedTop(), 0
+  eq root.getComputedWidth(), 130
+  eq root.getComputedHeight(), 230
+  eq root_child0.getComputedLeft(), 15
+  eq root_child0.getComputedTop(), 15
+  eq root_child0.getComputedWidth(), 100
+  eq root_child0.getComputedHeight(), 100
+
+test 'measure_border_box', ->
+  root = Yoga.Node.create()
+  root.setWidth 100
+  root.setHeight 200
+  root.setBoxSizing BoxSizing.BorderBox
+  root.setPadding Edge.All, 5
+  root.setBorder Edge.All, 10
+  measureCount = 0
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc counting halves, -> measureCount += 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq measureCount, 1
+  eq root.getComputedLeft(), 0
+  eq root.getComputedTop(), 0
+  eq root.getComputedWidth(), 100
+  eq root.getComputedHeight(), 200
+  eq root_child0.getComputedLeft(), 15
+  eq root_child0.getComputedTop(), 15
+  eq root_child0.getComputedWidth(), 70
+  eq root_child0.getComputedHeight(), 85
+
+test 'min_width_larger_than_width_propagates_to_auto_parent', ->
+  root = Yoga.Node.create()
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setFlexDirection FlexDirection.Row
+  root_child0.setHeight 50
+  root.insertChild root_child0, 0
+
+  root_child0_child0 = Yoga.Node.create()
+  root_child0_child0.setWidth 50
+  root_child0_child0.setMinWidth 100
+  root_child0_child0.setHeight 50
+  root_child0.insertChild root_child0_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root.getComputedLeft(), 0
+  eq root.getComputedTop(), 0
+  eq root.getComputedWidth(), 100
+  eq root.getComputedHeight(), 50
+  eq root_child0.getComputedLeft(), 0
+  eq root_child0.getComputedTop(), 0
+  eq root_child0.getComputedWidth(), 100
+  eq root_child0.getComputedHeight(), 50
+  eq root_child0_child0.getComputedLeft(), 0
+  eq root_child0_child0.getComputedTop(), 0
+  eq root_child0_child0.getComputedWidth(), 100
+  eq root_child0_child0.getComputedHeight(), 50
+
+# ==[ tests/YGMeasureCacheTest.cpp ]==
+
+console.log "\ntests/YGMeasureCacheTest.cpp"
+
+measureMax =! (width, widthMode, height, heightMode) ->
+  width: if widthMode is MeasureMode.Undefined then 10 else width
+  height: if heightMode is MeasureMode.Undefined then 10 else height
+
+measureMin =! (width, widthMode, height, heightMode) ->
+  width: if widthMode is MeasureMode.Undefined or (widthMode is MeasureMode.AtMost and width > 10) then 10 else width
+  height: if heightMode is MeasureMode.Undefined or (heightMode is MeasureMode.AtMost and height > 10) then 10 else height
+
+measure84x49 =! -> { width: 84, height: 49 }
+
+test 'measure_once_single_flexible_child', ->
+  root = Yoga.Node.create()
+  root.setFlexDirection FlexDirection.Row
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  measureCount = 0
+  root_child0.setMeasureFunc counting measureMax, -> measureCount += 1
+  root_child0.setFlexGrow 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq measureCount, 1
+
+test 'remeasure_with_same_exact_width_larger_than_needed_height', ->
+  root = Yoga.Node.create()
+
+  root_child0 = Yoga.Node.create()
+  measureCount = 0
+  root_child0.setMeasureFunc counting measureMin, -> measureCount += 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout 100, 100, Direction.LTR
+
+  root.calculateLayout 100, 50, Direction.LTR
+
+  eq measureCount, 1
+
+test 'remeasure_with_same_atmost_width_larger_than_needed_height', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+
+  root_child0 = Yoga.Node.create()
+  measureCount = 0
+  root_child0.setMeasureFunc counting measureMin, -> measureCount += 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout 100, 100, Direction.LTR
+
+  root.calculateLayout 100, 50, Direction.LTR
+
+  eq measureCount, 1
+
+test 'remeasure_with_computed_width_larger_than_needed_height', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+
+  root_child0 = Yoga.Node.create()
+  measureCount = 0
+  root_child0.setMeasureFunc counting measureMin, -> measureCount += 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout 100, 100, Direction.LTR
+
+  root.setAlignItems Align.Stretch
+
+  root.calculateLayout 10, 50, Direction.LTR
+
+  eq measureCount, 1
+
+test 'remeasure_with_atmost_computed_width_undefined_height', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+
+  root_child0 = Yoga.Node.create()
+  measureCount = 0
+  root_child0.setMeasureFunc counting measureMin, -> measureCount += 1
+  root.insertChild root_child0, 0
+
+  root.calculateLayout 100, undefined, Direction.LTR
+
+  root.calculateLayout 10, undefined, Direction.LTR
+
+  eq measureCount, 1
+
+test 'remeasure_with_already_measured_value_smaller_but_still_float_equal', ->
+  measureCount = 0
+
+  root = Yoga.Node.create()
+  root.setWidth 288
+  root.setHeight 288
+  root.setFlexDirection FlexDirection.Row
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setPadding Edge.All, 2.88
+  root_child0.setFlexDirection FlexDirection.Row
+  root.insertChild root_child0, 0
+
+  root_child0_child0 = Yoga.Node.create()
+  root_child0_child0.setMeasureFunc counting measure84x49, -> measureCount += 1
+  root_child0.insertChild root_child0_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  # Upstream asserts 1. The 84 cells measured come back as an exact
+  # offer of 89.76 − 5.76, which is 84.00000000000001; Yoga's cache calls
+  # the two equal within a tolerance and answers from the measurement.
+  # Here the cache compares exactly (PLAN §5), so the leaf is measured
+  # again, and answers the same.
+  eq measureCount, 2
+  eq root_child0_child0.getComputedWidth(), 84
+
+# ==[ tests/YGMeasureModeTest.cpp ]==
+
+console.log "\ntests/YGMeasureModeTest.cpp"
+
+test 'exactly_measure_stretched_child_column', ->
+  constraints = []
+
+  root = Yoga.Node.create()
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc recording constraints
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq constraints.length, 1
+  eq constraints[0].width, 100
+  eq constraints[0].widthMode, MeasureMode.Exactly
+
+test 'exactly_measure_stretched_child_row', ->
+  constraints = []
+
+  root = Yoga.Node.create()
+  root.setFlexDirection FlexDirection.Row
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc recording constraints
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq constraints.length, 1
+  eq constraints[0].height, 100
+  eq constraints[0].heightMode, MeasureMode.Exactly
+
+test 'at_most_main_axis_column', ->
+  constraints = []
+
+  root = Yoga.Node.create()
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc recording constraints
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq constraints.length, 1
+  eq constraints[0].height, 100
+  eq constraints[0].heightMode, MeasureMode.AtMost
+
+test 'at_most_cross_axis_column', ->
+  constraints = []
+
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc recording constraints
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq constraints.length, 1
+  eq constraints[0].width, 100
+  eq constraints[0].widthMode, MeasureMode.AtMost
+
+test 'at_most_main_axis_row', ->
+  constraints = []
+
+  root = Yoga.Node.create()
+  root.setFlexDirection FlexDirection.Row
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc recording constraints
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq constraints.length, 1
+  eq constraints[0].width, 100
+  eq constraints[0].widthMode, MeasureMode.AtMost
+
+test 'at_most_cross_axis_row', ->
+  constraints = []
+
+  root = Yoga.Node.create()
+  root.setFlexDirection FlexDirection.Row
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc recording constraints
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq constraints.length, 1
+  eq constraints[0].height, 100
+  eq constraints[0].heightMode, MeasureMode.AtMost
+
+test 'flex_child', ->
+  constraints = []
+
+  root = Yoga.Node.create()
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setFlexGrow 1
+  root_child0.setMeasureFunc recording constraints
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq constraints.length, 2
+  eq constraints[0].height, 100
+  eq constraints[0].heightMode, MeasureMode.AtMost
+  eq constraints[1].height, 100
+  eq constraints[1].heightMode, MeasureMode.Exactly
+
+test 'flex_child_with_flex_basis', ->
+  constraints = []
+
+  root = Yoga.Node.create()
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setFlexGrow 1
+  root_child0.setFlexBasis 0
+  root_child0.setMeasureFunc recording constraints
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq constraints.length, 1
+  eq constraints[0].height, 100
+  eq constraints[0].heightMode, MeasureMode.Exactly
+
+test 'overflow_scroll_column', ->
+  constraints = []
+
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setOverflow Overflow.Scroll
+  root.setHeight 100
+  root.setWidth 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc recording constraints
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq constraints.length, 1
+  eq constraints[0].width, 100
+  eq constraints[0].widthMode, MeasureMode.AtMost
+  ok Number.isNaN constraints[0].height
+  eq constraints[0].heightMode, MeasureMode.Undefined
+
+test 'overflow_scroll_row', ->
+  constraints = []
+
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setFlexDirection FlexDirection.Row
+  root.setOverflow Overflow.Scroll
+  root.setHeight 100
+  root.setWidth 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc recording constraints
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq constraints.length, 1
+  ok Number.isNaN constraints[0].width
+  eq constraints[0].widthMode, MeasureMode.Undefined
+  eq constraints[0].height, 100
+  eq constraints[0].heightMode, MeasureMode.AtMost
+
+# ==[ tests/YGRoundingMeasureFuncTest.cpp ]==
+
+console.log "\ntests/YGRoundingMeasureFuncTest.cpp"
+
+measureFloor =! -> { width: 10.2, height: 10.2 }
+measureCeil =! -> { width: 10.5, height: 10.5 }
+measureFractial =! -> { width: 0.5, height: 0.5 }
+
+# The grid here has one scale, a cell, so each case keeps what upstream
+# asserts at a point scale factor of 1.
+
+test 'rounding_feature_with_custom_measure_func_floor', ->
+  root = Yoga.Node.create()
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc measureFloor
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedWidth(), 11
+  eq root_child0.getComputedHeight(), 11
+
+test 'rounding_feature_with_custom_measure_func_ceil', ->
+  root = Yoga.Node.create()
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setMeasureFunc measureCeil
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedWidth(), 11
+  eq root_child0.getComputedHeight(), 11
+
+# Upstream lays this out at a scale of 2 alone, and asserts 0.5 × 0.5 at
+# 73.5. The boxes held here are `yoga-layout` 3.2.1's at a scale of 1:
+# the corner rounds down, and the far edge, at 74.125, rounds up.
+test 'rounding_feature_with_custom_measure_and_fractial_matching_scale', ->
+  root = Yoga.Node.create()
+  root.setPositionType PositionType.Absolute
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setPosition Edge.Left, 73.625
+  root_child0.setPositionType PositionType.Relative
+  root_child0.setMeasureFunc measureFractial
+  root.insertChild root_child0, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq root_child0.getComputedWidth(), 2
+  eq root_child0.getComputedHeight(), 1
+  eq root_child0.getComputedLeft(), 73
+
+# ==[ javascript/tests/YGMeasureTest.test.ts ]==
+#
+# Its other case, and YGMeasureCacheTest.test.ts's one, are ports of C++
+# cases above, under the same names.
+
+console.log "\njavascript/tests/YGMeasureTest.test.ts"
+
+test 'dont_fail_with_incomplete_measure_dimensions', ->
+  heightOnly = 0
+  widthOnly = 0
+  empty = 0
+
+  root = Yoga.Node.create()
+  root.setWidth 100
+  root.setHeight 100
+
+  node1 = Yoga.Node.create()
+  node2 = Yoga.Node.create()
+  node3 = Yoga.Node.create()
+
+  root.insertChild node1, root.getChildCount()
+  root.insertChild node2, root.getChildCount()
+  root.insertChild node3, root.getChildCount()
+
+  node1.setMeasureFunc counting (-> { height: 10 }), -> heightOnly += 1
+  node2.setMeasureFunc counting (-> { width: 10 }), -> widthOnly += 1
+  node3.setMeasureFunc counting (-> {}), -> empty += 1
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  eq heightOnly, 1
+  eq widthOnly, 1
+  eq empty, 1
+
+  eq node1.getComputedWidth(), 100
+  eq node1.getComputedHeight(), 10
+
+  eq node2.getComputedWidth(), 100
+  eq node2.getComputedHeight(), 0
+
+  eq node3.getComputedWidth(), 100
+  eq node3.getComputedHeight(), 0
+
+# ==[ javascript/tests/YGDirtiedTest.test.ts ]==
+
+console.log "\njavascript/tests/YGDirtiedTest.test.ts"
+
+test 'dirtied', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  dirtied = 0
+  root.setDirtiedFunc -> dirtied += 1
+
+  # only nodes with a measure function can be marked dirty
+  root.setMeasureFunc -> { width: 0, height: 0 }
+
+  eq dirtied, 0
+
+  # dirtied func MUST be called in case of explicit dirtying.
+  root.markDirty()
+  eq dirtied, 1
+
+  # dirtied func MUST be called ONCE.
+  root.markDirty()
+  eq dirtied, 1
+
+test 'dirtied_propagation', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setAlignItems Align.FlexStart
+  root_child0.setWidth 50
+  root_child0.setHeight 20
+  root_child0.setMeasureFunc -> { width: 0, height: 0 }
+  root.insertChild root_child0, 0
+
+  root_child1 = Yoga.Node.create()
+  root_child1.setAlignItems Align.FlexStart
+  root_child1.setWidth 50
+  root_child1.setHeight 20
+  root.insertChild root_child1, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  dirtied = 0
+  root.setDirtiedFunc -> dirtied += 1
+
+  eq dirtied, 0
+
+  # dirtied func MUST be called for the first time.
+  root_child0.markDirty()
+  eq dirtied, 1
+
+  # dirtied func must NOT be called for the second time.
+  root_child0.markDirty()
+  eq dirtied, 1
+
+test 'dirtied_hierarchy', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+
+  root_child0 = Yoga.Node.create()
+  root_child0.setAlignItems Align.FlexStart
+  root_child0.setWidth 50
+  root_child0.setHeight 20
+  root_child0.setMeasureFunc -> { width: 0, height: 0 }
+  root.insertChild root_child0, 0
+
+  root_child1 = Yoga.Node.create()
+  root_child1.setAlignItems Align.FlexStart
+  root_child1.setWidth 50
+  root_child1.setHeight 20
+  root_child0.setMeasureFunc -> { width: 0, height: 0 }
+  root.insertChild root_child1, 0
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  dirtied = 0
+  root_child0.setDirtiedFunc -> dirtied += 1
+
+  eq dirtied, 0
+
+  # dirtied func must NOT be called for descendants.
+  # NOTE: nodes without a measure function cannot be marked dirty manually,
+  # but nodes with a measure function can not have children.
+  # Update the width to dirty the node instead.
+  root.setWidth 110
+  eq dirtied, 0
+
+  # dirtied func MUST be called in case of explicit dirtying.
+  root_child0.markDirty()
+  eq dirtied, 1
+
+test 'dirtied_reset', ->
+  root = Yoga.Node.create()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+  root.setMeasureFunc -> { width: 0, height: 0 }
+
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  dirtied = 0
+  root.setDirtiedFunc -> dirtied += 1
+
+  eq dirtied, 0
+
+  # dirtied func MUST be called in case of explicit dirtying.
+  root.markDirty()
+  eq dirtied, 1
+
+  # recalculate so the root is no longer dirty
+  root.calculateLayout undefined, undefined, Direction.LTR
+
+  root.reset()
+  root.setAlignItems Align.FlexStart
+  root.setWidth 100
+  root.setHeight 100
+  root.setMeasureFunc -> { width: 0, height: 0 }
+
+  root.markDirty()
+
+  # dirtied func must NOT be called after reset.
+  root.markDirty()
+  eq dirtied, 1
+
+# ==[ javascript/tests/YGComputed{Padding,Border,Margin}Test.test.ts ]==
+#
+# The left-to-right half of each. The engine keeps the padding and the
+# border it resolved and no margin, so `margin_start` reads the margin
+# where it lands: in the root's own position.
+
+console.log "\njavascript/tests/YGComputedPaddingTest, YGComputedBorderTest, YGComputedMarginTest"
+
+test 'padding_start', ->
+  root = Yoga.Node.create()
+  root.setWidth 100
+  root.setHeight 100
+  root.setPadding Edge.Start, '10%'
+
+  root.calculateLayout 100, 100, Direction.LTR
+
+  eq root.getComputedPadding(Edge.Left), 10
+  eq root.getComputedPadding(Edge.Right), 0
+
+test 'border_start', ->
+  root = Yoga.Node.create()
+  root.setWidth 100
+  root.setHeight 100
+  root.setBorder Edge.Start, 10
+
+  root.calculateLayout 100, 100, Direction.LTR
+
+  eq root.getComputedBorder(Edge.Left), 10
+  eq root.getComputedBorder(Edge.Right), 0
+
+test 'margin_start', ->
+  root = Yoga.Node.create()
+  root.setWidth 100
+  root.setHeight 100
+  root.setMargin Edge.Start, '10%'
+
+  root.calculateLayout 100, 100, Direction.LTR
+
+  eq root.getComputedLeft(), 10
+  eq root.getComputedWidth(), 100

@@ -15,8 +15,8 @@
 `rip test/ink.rip` runs 434 tests: 423 ported cases and 11 self-tests of
 `cells.rip` (`cells-check.rip`). Of the ported cases:
 
-- 405 hold the frame to Ink's, row for row;
-- 17 are **stated differences**, pinned through `differs` in
+- 406 hold the frame to Ink's, row for row;
+- 16 are **stated differences**, pinned through `differs` in
   `harness.rip`: the frame must equal this package's stated frame and
   must not equal Ink's, with the decision in a sentence, so a pin the
   package outgrows fails. They are listed below;
@@ -62,8 +62,10 @@ comment at the literal says which when it is not the first:
    overlap fixes, tab expansion, per-line truncation, zero-width boxes,
    `absolute-truncation` (published Ink throws on it), and four cases
    Ink itself marks `test.failing`, which state the frame Ink's authors
-   want and no build of Ink draws (all four are pinned as stated
-   differences).
+   want and no build of Ink draws (three are pinned as stated
+   differences; `width-height`'s "set min width in percent" holds to
+   the frame Ink asks for, since a percent min resolves here against
+   the box it is in).
 3. **The frame published Ink drew, where Ink's test checks only part
    of it** (it looks for an escape code, or counts rows). The comment
    says so.
@@ -106,7 +108,6 @@ prop, and the hyperlink half is not ported: hyperlinks are not built.
 - `overlap-wide-background`: overwriting 你 cell 1 preserves the other cell's background
 - `overlap-wide-background`: overwriting 👩‍💻 cell 0 preserves the other cell's background
 - `overlap-wide-background`: overwriting 👩‍💻 cell 1 preserves the other cell's background
-- `width-height`: set min width in percent
 - `width-height`: set max width in percent
 - `flex-justify-content`: row - align two text nodes with equal space around them
 - `flex-justify-content`: column - align two text nodes with equal space around them
