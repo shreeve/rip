@@ -91,11 +91,6 @@ the test, re-seed the bug, and see it caught.
       `backgroundColor: ''`). `'default'` for both `color` and
       `backgroundColor`; then the pinned Ink case in
       `test/ink/background.rip` follows Ink.
-- [ ] **A test driver for updates.** `renderToString` mounts fresh on
-      every call, so 45 of Ink's cases — a mounted tree re-rendered with
-      new props — have no way to run. A public driver that mounts once,
-      hands back the app, and draws frames on demand (PLAN §10); then
-      port those cases.
 - [ ] Yoga resolves a percent `minWidth` / `maxWidth` of a row's child
       against the wrong reference (a `minWidth: '50%'` child of a
       10-wide box comes out 50 wide at 100 columns). Ink marks its own

@@ -1,0 +1,104 @@
+# Ink's test/reconciler.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop. Ink
+# renders a second, fresh tree beside the one it rerenders and holds
+# the two frames equal; `mounted` holds every updated frame to a fresh
+# mount's, and the literal is the frame published Ink draws. Children
+# Ink tells apart by `key` are a keyed `for` here. SOURCE.md says which
+# of Ink's cases are left out.
+#
+#   rip test/ink/reconciler.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, mounted } from './harness.rip'
+
+console.log "\nReconciler"
+
+Letters =! component
+  @letters := []
+  render
+    Box flexDirection: 'column'
+      for letter in @letters
+        Text key: letter
+          "#{letter}"
+
+test "update child", ->
+  Test = component
+    @update := false
+    render
+      Text
+        "#{if @update then 'B' else 'A'}"
+  mounted Test, {}, (draw) ->
+    eq draw().plain, ["A"]
+    eq draw(update: true).plain, ["B"]
+
+test "update text node", ->
+  Test = component
+    @update := false
+    render
+      Box
+        Text "Hello "
+        Text
+          "#{if @update then 'B' else 'A'}"
+  mounted Test, {}, (draw) ->
+    eq draw().plain, ["Hello A"]
+    eq draw(update: true).plain, ["Hello B"]
+
+# Ink's intrinsic `ink-box` and `ink-text` are this package's raw tags.
+test "remove style prop from intrinsic node", ->
+  Test = component
+    @withStyle := true
+    render
+      div style: (if @withStyle then { marginLeft: 1 })
+        span "X"
+  mounted Test, {}, (draw) ->
+    eq draw().plain, [" X"]
+    eq draw(withStyle: false).plain, ["X"]
+
+test "append child", ->
+  Test = component
+    @append := false
+    render
+      Box flexDirection: 'column'
+        Text "A"
+        if @append
+          Text "B"
+  mounted Test, {}, (draw) ->
+    eq draw().plain, ["A"]
+    eq draw(append: true).plain, ["A", "B"]
+
+test "insert child between other children", ->
+  mounted Letters, { letters: ['A', 'C'] }, (draw) ->
+    eq draw().plain, ["A", "C"]
+    eq draw(letters: ['A', 'B', 'C']).plain, ["A", "B", "C"]
+
+test "remove child", ->
+  Test = component
+    @remove := false
+    render
+      Box flexDirection: 'column'
+        Text "A"
+        unless @remove
+          Text "B"
+  mounted Test, {}, (draw) ->
+    eq draw().plain, ["A", "B"]
+    eq draw(remove: true).plain, ["A"]
+
+test "reorder children", ->
+  mounted Letters, { letters: ['A', 'B'] }, (draw) ->
+    eq draw().plain, ["A", "B"]
+    eq draw(letters: ['B', 'A']).plain, ["B", "A"]
+
+test "replace child node with text", ->
+  Dynamic = component
+    @replace := false
+    render
+      Text
+        if @replace
+          "x"
+        else
+          Text color: 'green'
+            "test"
+  mounted Dynamic, {}, (draw) ->
+    eq draw().styled, ["«green»test"]
+    eq draw(replace: true).styled, ["x"]

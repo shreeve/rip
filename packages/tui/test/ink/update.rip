@@ -1,0 +1,408 @@
+# Ink's rerender cases, ported: the tests in Ink's paint-side files
+# that draw a tree, give the mounted tree other props, and read the
+# frame again. Each keeps Ink's title under the name of its Ink file,
+# and draws Ink's tree, prop for prop: a prop Ink's component takes is a
+# public state here, and a `rerender` is a write to it. SOURCE.md says
+# where each expected frame comes from.
+#
+#   rip test/ink/update.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, mounted } from './harness.rip'
+
+console.log "\nUpdate"
+
+# ── borders.tsx ───────────────────────────────────────────────────────────────
+
+test "render border after update", ->
+  Test = component
+    @borderColor := undefined
+    render
+      Box borderStyle: 'round', borderColor: @borderColor
+        Text "Hello World"
+  edge = '─'.repeat 98
+  bare = ["╭#{edge}╮", "│Hello World#{' '.repeat 87}│", "╰#{edge}╯"]
+  mounted Test, {}, (draw) ->
+    eq draw().styled, bare
+    eq draw(borderColor: 'green').styled, ["«green»╭#{edge}╮", "«green»│«»Hello World#{' '.repeat 87}«green»│", "«green»╰#{edge}╯"]
+    eq draw(borderColor: undefined).styled, bare
+
+test "render border edge changes after update when borderStyle is unchanged", ->
+  Test = component
+    @borderTop := undefined
+    render
+      Box borderStyle: 'round', borderTop: @borderTop, alignSelf: 'flex-start'
+        Text "Content"
+  mounted Test, {}, (draw) ->
+    eq draw().plain, ["╭───────╮", "│Content│", "╰───────╯"]
+    eq draw(borderTop: false).plain, ["│Content│", "╰───────╯"]
+    eq draw(borderTop: undefined).plain, ["╭───────╮", "│Content│", "╰───────╯"]
+
+# ── background.tsx ────────────────────────────────────────────────────────────
+
+test "Box background updates on rerender", ->
+  Test = component
+    @bgColor := undefined
+    render
+      Box backgroundColor: @bgColor, alignSelf: 'flex-start'
+        Text "Hello"
+  mounted Test, {}, (draw) ->
+    eq draw().styled, ["Hello"]
+    eq draw(bgColor: 'green').styled, ["«on green»Hello"]
+    eq draw(bgColor: undefined).styled, ["Hello"]
+
+# ── text.tsx ──────────────────────────────────────────────────────────────────
+
+test "text with empty-to-nonempty sibling does not wrap", ->
+  Test = component
+    @show := false
+    render
+      Box
+        Text
+          "#{if @show then 'x' else ''}"
+          "hello"
+  mounted Test, {}, (draw) ->
+    eq draw().plain, ["hello"]
+    eq draw(show: true).plain, ["xhello"]
+
+test "remeasure text when text is changed", ->
+  Test = component
+    @add := false
+    render
+      Box
+        Text
+          "#{if @add then 'abcx' else 'abc'}"
+  mounted Test, {}, (draw) ->
+    eq draw().plain, ["abc"]
+    eq draw(add: true).plain, ["abcx"]
+
+test "remeasure text when text nodes are changed", ->
+  Test = component
+    @add := false
+    render
+      Box
+        Text
+          "abc"
+          if @add
+            Text "x"
+  mounted Test, {}, (draw) ->
+    eq draw().plain, ["abc"]
+    eq draw(add: true).plain, ["abcx"]
+
+# ── width-height.tsx ──────────────────────────────────────────────────────────
+
+test "clears maxWidth on rerender", ->
+  Test = component
+    @maxWidth := undefined
+    render
+      Box
+        Box maxWidth: @maxWidth
+          Text "AAAAA"
+        Text "B"
+  mounted Test, { maxWidth: 3 }, (draw) ->
+    eq draw().plain, ["AAAB", "AA"]
+    eq draw(maxWidth: undefined).plain, ["AAAAAB"]
+
+test "clears maxHeight on rerender", ->
+  Test = component
+    @maxHeight := undefined
+    render
+      Box maxHeight: @maxHeight
+        Box height: 4
+          Text "A"
+  mounted Test, { maxHeight: 2 }, (draw) ->
+    eq draw().plain, ["A", ""]
+    eq draw(maxHeight: undefined).plain, ["A", "", "", ""]
+
+test "clears aspectRatio on rerender", ->
+  Test = component
+    @aspectRatio := undefined
+    render
+      Box flexDirection: 'column'
+        Box width: 8, aspectRatio: @aspectRatio, borderStyle: 'single'
+          Text "X"
+        Text "Y"
+  mounted Test, { aspectRatio: 2 }, (draw) ->
+    eq draw().plain, ["┌──────┐", "│X     │", "│      │", "└──────┘", "Y"]
+    eq draw(aspectRatio: undefined).plain, ["┌──────┐", "│X     │", "└──────┘", "Y"]
+
+# ── position.tsx ──────────────────────────────────────────────────────────────
+
+test "clears top offset on rerender", ->
+  Test = component
+    @top := undefined
+    render
+      Box width: 5, height: 3
+        Box position: 'absolute', top: @top, left: 2
+          Text "X"
+  mounted Test, { top: 1 }, (draw) ->
+    eq draw().plain, ["", "  X", ""]
+    eq draw(top: undefined).plain, ["  X", "", ""]
+
+test "clears percentage top and left offsets on rerender", ->
+  Test = component
+    @top := undefined
+    @left := undefined
+    render
+      Box width: 6, height: 4
+        Box position: 'absolute', top: @top, left: @left
+          Text "X"
+  mounted Test, { top: '50%', left: '50%' }, (draw) ->
+    eq draw().plain, ["", "", "   X", ""]
+    eq draw(top: undefined, left: undefined).plain, ["X", "", "", ""]
+
+# Ink spreads `{top, left}` into the box or spreads nothing; a prop that
+# is not written is a prop written as undefined.
+test "clears percentage top and left offsets when props are omitted on rerender", ->
+  Test = component
+    @showOffsets := true
+    render
+      Box width: 6, height: 4
+        Box position: 'absolute', top: (if @showOffsets then '50%'), left: (if @showOffsets then '50%')
+          Text "X"
+  mounted Test, {}, (draw) ->
+    eq draw().plain, ["", "", "   X", ""]
+    eq draw(showOffsets: false).plain, ["X", "", "", ""]
+
+test "clears bottom and right offsets on rerender", ->
+  Test = component
+    @bottom := undefined
+    @right := undefined
+    render
+      Box width: 6, height: 4
+        Box position: 'absolute', bottom: @bottom, right: @right
+          Text "X"
+  mounted Test, { bottom: 1, right: 1 }, (draw) ->
+    eq draw().plain, ["", "", "    X", ""]
+    eq draw(bottom: undefined, right: undefined).plain, ["X", "", "", ""]
+
+# ── display.tsx ───────────────────────────────────────────────────────────────
+
+test "removing display=\"none\" restores the default layout", ->
+  Test = component
+    @display := undefined
+    render
+      Box
+        Box display: @display
+          Text "Cat"
+        Text "Dog"
+  mounted Test, { display: 'none' }, (draw) ->
+    eq draw().plain, ["Dog"]
+    # Ink's test asks for this frame; published Ink 7.1.1 draws "Dog"
+    eq draw(display: undefined).plain, ["CatDog"]
+
+test "removing display=\"flex\" restores the default layout", ->
+  Test = component
+    @display := undefined
+    render
+      Box
+        Box display: @display
+          Text "Cat"
+        Text "Dog"
+  mounted Test, { display: 'flex' }, (draw) ->
+    eq draw().plain, ["CatDog"]
+    # Ink's test asks for this frame; published Ink 7.1.1 draws "Dog"
+    eq draw(display: undefined).plain, ["CatDog"]
+
+# ── margin.tsx ────────────────────────────────────────────────────────────────
+
+test "removing marginLeft restores marginX on rerender", ->
+  Example = component
+    @marginLeft := undefined
+    render
+      Box
+        Box marginX: 2, marginLeft: @marginLeft
+          Text "X"
+        Text "Y"
+  mounted Example, { marginLeft: 1 }, (draw) ->
+    eq draw().plain, [" X  Y"]
+    # Ink's test asks for this frame; published Ink 7.1.1 draws "X  Y"
+    eq draw(marginLeft: undefined).plain, ["  X  Y"]
+    eq draw(marginLeft: 0).plain, ["X  Y"]
+
+# ── padding.tsx ───────────────────────────────────────────────────────────────
+
+test "removing paddingLeft restores paddingX on rerender", ->
+  Example = component
+    @paddingLeft := undefined
+    render
+      Box
+        Box paddingX: 2, paddingLeft: @paddingLeft
+          Text "X"
+        Text "Y"
+  mounted Example, { paddingLeft: 1 }, (draw) ->
+    eq draw().plain, [" X  Y"]
+    # Ink's test asks for this frame; published Ink 7.1.1 draws "X  Y"
+    eq draw(paddingLeft: undefined).plain, ["  X  Y"]
+    eq draw(paddingLeft: 0).plain, ["X  Y"]
+
+test "removing paddingX restores padding on rerender", ->
+  Example = component
+    @paddingX := undefined
+    render
+      Box padding: 2, paddingX: @paddingX
+        Text "X"
+  mounted Example, { paddingX: 1 }, (draw) ->
+    eq draw().plain, ["", "", " X", "", ""]
+    # Ink's test asks for this frame; published Ink 7.1.1 draws "\n\nX\n\n"
+    eq draw(paddingX: undefined).plain, ["", "", "  X", "", ""]
+
+# ── gap.tsx ───────────────────────────────────────────────────────────────────
+
+test "removing columnGap restores gap on rerender", ->
+  Example = component
+    @override := undefined
+    render
+      Box gap: 2, flexDirection: 'row', columnGap: @override
+        Text "A"
+        Text "B"
+  mounted Example, { override: 1 }, (draw) ->
+    eq draw().plain, ["A B"]
+    # Ink's test asks for this frame, here and below; published Ink 7.1.1 draws "AB"
+    eq draw(override: undefined).plain, ["A  B"]
+    eq draw(override: 0).plain, ["AB"]
+    eq draw(override: undefined).plain, ["A  B"]
+
+test "removing rowGap restores gap on rerender", ->
+  Example = component
+    @override := undefined
+    render
+      Box gap: 2, flexDirection: 'column', rowGap: @override
+        Text "A"
+        Text "B"
+  mounted Example, { override: 1 }, (draw) ->
+    eq draw().plain, ["A", "", "B"]
+    # Ink's test asks for this frame, here and below; published Ink 7.1.1 draws "A\nB"
+    eq draw(override: undefined).plain, ["A", "", "", "B"]
+    eq draw(override: 0).plain, ["A", "B"]
+    eq draw(override: undefined).plain, ["A", "", "", "B"]
+
+# ── flex-direction.tsx ────────────────────────────────────────────────────────
+
+test "setting direction to undefined restores the default row layout", ->
+  Test = component
+    @flexDirection := undefined
+    render
+      Box flexDirection: @flexDirection
+        Text "A"
+        Text "B"
+  mounted Test, { flexDirection: 'column' }, (draw) ->
+    eq draw().plain, ["A", "B"]
+    # Ink's test asks for this frame; published Ink 7.1.1 draws "A\nB"
+    eq draw(flexDirection: undefined).plain, ["AB"]
+
+# ── flex-wrap.tsx ─────────────────────────────────────────────────────────────
+
+test "setting wrap to undefined restores nowrap", ->
+  Test = component
+    @flexWrap := undefined
+    render
+      Box width: 3, flexWrap: @flexWrap
+        Box flexShrink: 0
+          Text "AB"
+        Box flexShrink: 0
+          Text "CD"
+  mounted Test, { flexWrap: 'wrap' }, (draw) ->
+    eq draw().plain, ["AB", "CD"]
+    # Ink's test asks for this frame; published Ink 7.1.1 draws "AB\nCD"
+    eq draw(flexWrap: undefined).plain, ["ABCD"]
+
+test "setting wrap-reverse to undefined restores nowrap", ->
+  Test = component
+    @flexWrap := undefined
+    render
+      Box width: 3, flexWrap: @flexWrap
+        Box flexShrink: 0
+          Text "AB"
+        Box flexShrink: 0
+          Text "CD"
+  mounted Test, { flexWrap: 'wrap-reverse' }, (draw) ->
+    eq draw().plain, ["CD", "AB"]
+    # Ink's test asks for this frame; published Ink 7.1.1 draws "CD\nAB"
+    eq draw(flexWrap: undefined).plain, ["ABCD"]
+
+# ── flex-align-content.tsx ────────────────────────────────────────────────────
+
+Wrapped =! component
+  @alignContent := undefined
+  render
+    Box width: 2, height: 6, flexWrap: 'wrap', alignContent: @alignContent
+      Text "A"
+      Text "B"
+      Text "C"
+      Text "D"
+
+test "clears alignContent on rerender to default flex-start", ->
+  mounted Wrapped, { alignContent: 'center' }, (draw) ->
+    eq draw().plain, ["", "", "AB", "CD", "", ""]
+    eq draw(alignContent: undefined).plain, ["AB", "CD", "", "", "", ""]
+
+test "clears alignContent from stretch on rerender to default flex-start", ->
+  mounted Wrapped, { alignContent: 'stretch' }, (draw) ->
+    eq draw().plain, ["AB", "", "", "CD", "", ""]
+    eq draw(alignContent: undefined).plain, ["AB", "CD", "", "", "", ""]
+
+test "clears alignContent when prop is omitted on rerender", ->
+  Test = component
+    @showAlignContent := true
+    render
+      Box width: 2, height: 6, flexWrap: 'wrap', alignContent: (if @showAlignContent then 'center')
+        Text "A"
+        Text "B"
+        Text "C"
+        Text "D"
+  mounted Test, {}, (draw) ->
+    eq draw().plain, ["", "", "AB", "CD", "", ""]
+    eq draw(showAlignContent: false).plain, ["AB", "CD", "", "", "", ""]
+
+# ── components.tsx ────────────────────────────────────────────────────────────
+
+test "remeasure text dimensions on text change", ->
+  Test = component
+    @text := 'Hello'
+    render
+      Box
+        Text
+          "#{@text}"
+  mounted Test, {}, (draw) ->
+    eq draw().plain, ["Hello"]
+    eq draw(text: 'Hello World').plain, ["Hello World"]
+
+test "replace child node with text", ->
+  Dynamic = component
+    @replace := false
+    render
+      Text
+        if @replace
+          "x"
+        else
+          Text color: 'green'
+            "test"
+  mounted Dynamic, {}, (draw) ->
+    eq draw().styled, ["«green»test"]
+    eq draw(replace: true).styled, ["x"]
+
+test "reset prop when it’s removed from the element", ->
+  Dynamic = component
+    @remove := false
+    render
+      Box flexDirection: 'column', justifyContent: 'flex-end', height: (if @remove then undefined else 4)
+        Text "x"
+  mounted Dynamic, {}, (draw) ->
+    eq draw().plain, ["", "", "", "x"]
+    eq draw(remove: true).plain, ["x"]
+
+# ── wrap-text.tsx ─────────────────────────────────────────────────────────────
+
+test "changing text wrapping recalculates the container height", ->
+  Example = component
+    @truncate := false
+    render
+      Box width: 7, borderStyle: 'single'
+        Text wrap: (if @truncate then 'truncate' else 'wrap')
+          "abcdefghij"
+  mounted Example, {}, (draw) ->
+    eq draw().plain, ["┌─────┐", "│abcde│", "│fghij│", "└─────┘"]
+    # Ink's test asks for this frame; published Ink 7.1.1 keeps the second row: "┌─────┐\n│abcd…│\n│     │\n└─────┘"
+    eq draw(truncate: true).plain, ["┌─────┐", "│abcd…│", "└─────┘"]
+    eq draw(truncate: false).plain, ["┌─────┐", "│abcde│", "│fghij│", "└─────┘"]
