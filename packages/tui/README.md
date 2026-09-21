@@ -148,9 +148,12 @@ that stay and owes the rows that come. A first frame, a resize, a frame
 whose top row is another (one taller than the terminal shows its
 bottom), a sweep as a paint starts, and damage past half the screen are
 painted whole. One changed cell of a full
-200×60 table is about 1 µs of paint and diff where the whole frame is
-about 150 µs, and the bytes are the same (Apple M5, Bun 1.4.2;
-`bun run frame` in `bench/` prints both).
+200×60 table — a text that keeps its size, which owes its words and no
+survey — is about 1 µs of paint and diff where the whole frame is about
+125 µs; a change that is surveyed costs a few more — a row recolored in
+a 2,000-row clipped log is about 7 µs where the whole frame is about
+85 µs — and the bytes are the same (Apple M5, Bun 1.4.2; `bun run
+frame` in `bench/` prints the first).
 
 Layout is flexbox as Yoga lays it out — the defaults are Yoga's
 (`flexDirection: 'column'`, `flexShrink: 0`, `alignItems: 'stretch'`,

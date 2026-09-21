@@ -787,10 +787,11 @@ and the run refuses to report if they are not:
 
 | Scenario | Whole | Damaged | Cells |
 |---|---|---|---|
-| One cell of a 1,000-element tree | 66 | 1.2 | 18 |
-| One cell of a full 200×60 table | 155 | 0.9 | 10 |
-| Every cell of that table | 186 | 189 | 12,000 |
-| One of 200 bordered panels of wide text | 106 | 1.0 | 18 |
+| One cell of a 1,000-element tree | 65 | 1.1 | 7 |
+| One cell of a full 200×60 table | 125 | 0.8 | 4 |
+| Every cell of that table | 160 | 165 | 12,000 |
+| One of 200 bordered panels of wide text | 90 | 0.9 | 8 |
+| A 40-line log whose last row comes and goes, laid out each time | 57 | 24 | 200 |
 
 A small update's paint and diff fall with its damage, and a frame that
 changes everything costs what a whole one does. Under `bun run tui` the
