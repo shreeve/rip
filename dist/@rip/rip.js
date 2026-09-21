@@ -25226,6 +25226,7 @@ var __currentEffect = null;
 var __computingStack = [];
 var __pendingEffects = {
   buckets: [],
+  cursors: [],
   size: 0,
   low: 0,
   add(e) {
@@ -25247,6 +25248,7 @@ var __pendingEffects = {
   },
   clear() {
     this.buckets = [];
+    this.cursors = [];
     this.size = 0;
     this.low = 0;
   },
@@ -25256,9 +25258,14 @@ var __pendingEffects = {
       if (b === undefined || b.size === 0)
         continue;
       this.low = d;
-      const e = b.values().next().value;
+      let step = (this.cursors[d] ??= b.values()).next();
+      if (step.done)
+        step = (this.cursors[d] = b.values()).next();
+      const e = step.value;
       b.delete(e);
       this.size--;
+      if (b.size === 0)
+        this.cursors[d] = undefined;
       return e;
     }
     return null;
@@ -25508,7 +25515,14 @@ function __effect(fn) {
     computedDeps: new Map,
     _hard: true,
     _disposed: false,
-    signal: null,
+    get signal() {
+      if (!controller && typeof AbortController !== "undefined") {
+        controller = new AbortController;
+        if (effect._disposed)
+          controller.abort();
+      }
+      return controller ? controller.signal : null;
+    },
     run() {
       if (effect._disposed)
         return;
@@ -25520,9 +25534,8 @@ function __effect(fn) {
         try {
           controller.abort();
         } catch {}
+        controller = null;
       }
-      controller = typeof AbortController !== "undefined" ? new AbortController : null;
-      effect.signal = controller ? controller.signal : null;
       const myRun = ++runId;
       if (effect._cleanup) {
         effect._cleanup();

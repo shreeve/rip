@@ -716,6 +716,28 @@ describe('async effects: signals, cleanup routing', () => {
     })).toEqual([null, 'AbortSignal', false]);
   });
 
+  test('a run that never reads its signal makes no AbortController; one read makes one', async () => {
+    expect(await bothAsync(async (rt) => {
+      const Real = globalThis.AbortController;
+      let made = 0;
+      globalThis.AbortController = class extends Real { constructor() { super(); made++; } };
+      try {
+        const s = rt.__state(1);
+        const quiet = rt.__effect(() => { s.value; });
+        s.value = 2; s.value = 3;
+        const unread = made;
+        let late = null;
+        const asking = rt.__effect(() => { s.value; late = rt.getEffectSignal(); rt.getEffectSignal(); });
+        const perRun = made;
+        const first = late;
+        s.value = 4;
+        const superseded = [first.aborted, late.aborted];
+        quiet(); asking();
+        return [unread, perRun, made, superseded, late.aborted];
+      } finally { globalThis.AbortController = Real; }
+    })).toEqual([0, 1, 2, [true, false], true]);
+  });
+
   test('the signal aborts on re-run and on dispose', async () => {
     expect(await bothAsync(async (rt) => {
       const s = rt.__state(1);
