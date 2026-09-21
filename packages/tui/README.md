@@ -131,9 +131,37 @@ frame is refused after 32 passes with no answer.
 
 ## Testing an app
 
-`renderToString App, cols: 40` mounts the app on a private document and
-returns the frame as text; `ansi: true` keeps the escape sequences.
-State a test changes redraws on the next call.
+`mount` is `run` without a terminal: it mounts the app once, hands it
+back, and draws a frame when the test asks for one.
+
+```coffee
+import { mount } from 'rip/tui'
+
+view = mount Counter, cols: 40, rows: 10, props: { count: 3 }
+view.frame()                # "count 3" — lay out, paint, the frame as plain text
+view.app.count.value = 7    # public state is set from outside
+view.frame()                # "count 7"
+view.ansi                   # that frame with its escape sequences
+view.bytes                  # what a terminal was sent for it: the 7, and the moves to reach it
+view.resize 20, 5           # the next frame is drawn whole, 20 by 5
+view.close()                # unmount, and give the process its `document` slot back
+```
+
+Nothing is drawn until `frame` asks, so a frame that fails — a layout
+that never settles, a border glyph gone bad — throws from `frame`, to
+the test that asked for it. `bytes` is the difference from the frame
+before, exactly as `run` writes it; a frame that changes no cell sends
+nothing. With `rows`, a frame taller than the terminal shows its
+bottom, as it does on a terminal; without, the terminal is as tall as
+the frame. A `quit` from the app closes the mount and resolves
+`view.done` with its value.
+
+The terminal document is a global of the process, so one app is
+mounted at a time: a second `mount`, `run`, or `renderToString` is
+refused by name until the first is closed — close in a `finally`.
+
+`renderToString App, cols: 40` is a mount, one frame, and a close; it
+takes `props`, and `ansi: true` keeps the escape sequences.
 
 ## What is here, and what is planned
 
@@ -158,9 +186,9 @@ bun run test
 
 `test.rip` covers the document's contract and its refusals, layout and
 cell rounding, `if` / `else` and keyed `for` on a terminal, nested text
-styles, `ref:` metrics, the grid diff replayed through a terminal, and
-a running app from first frame to `quit`. `test/text.rip` holds the
-text engine — sanitizing, cluster widths, every wrap and truncate mode
+styles, `ref:` metrics, the grid diff replayed through a terminal, a
+running app from first frame to `quit`, and the `mount` driver.
+`test/text.rip` holds the text engine — sanitizing, cluster widths, every wrap and truncate mode
 — and `test/layout.rip` the layout engine's own pins. `test/yoga.rip` runs Yoga's
 543 generated layout cases, vendored unmodified under `test/yoga/`
 (MIT, © Meta Platforms), against the engine through a shim of the
