@@ -868,3 +868,185 @@ test! "under `run` a key that changes nothing books no frame and writes nothing"
   eq [term.sent.length, term.text], [mark + 1, "a line that stays\ncount 3"], 'one read is one frame'
   quit()
   await running.done
+
+# ==[ Fuzz ]==
+
+console.log "\nFuzz"
+
+# The rules of focus, written a second time and another way, for the
+# fuzz to hold the package to: a node can hold focus while it is
+# focusable and every node from it to the body is there, enabled and
+# shown; the order is the tree's, by a recursive walk.
+blocked =! (node) -> node.disabled or node.styles?.hidden is true or node.styles?.display is 'none'
+
+holds =! (node) ->
+  return false unless node.focusable
+  at = node
+  while at
+    return false if blocked at
+    return true if at is document.body
+    at = at.parentNode
+  false
+
+ordered =! (node, out = []) ->
+  return out if blocked node
+  out.push node if node.focusable
+  kid = node.firstChild
+  while kid
+    ordered kid, out if kid.nodeType is 1
+    kid = kid.nextSibling
+  out
+
+everything =! (node, out = []) ->
+  kid = node.firstChild
+  while kid
+    if kid.nodeType is 1
+      out.push kid
+      everything kid, out
+    kid = kid.nextSibling
+  out
+
+Bare =! component
+  render
+    Box id: 'root'
+
+test "random trees under random change: focus is always a node that can hold it, Tab walks the tree in order, focus and blur pair up, and a path is the tree as its dispatch began", ->
+  seed = 20260921
+  rand = ->
+    seed = (seed * 1664525 + 1013904223) % 4294967296
+    seed / 4294967296
+  pick = (list) -> list[Math.floor rand() * list.length]
+  counts = { steps: 0, inserted: 0, removed: 0, moved: 0, switched: 0, tabs: 0, calls: 0, focuses: 0, blurs: 0, cleared: 0, cycles: 0, visited: 0, mutated: 0, heard: 0, claimed: 0 }
+  for round in [0...120]
+    view = mount Bare, cols: 20
+    try
+      root = find 'root'
+      names = 0
+      holder = null      # the node the focus and blur events say has focus
+      trail = []         # who heard the key under way
+      meddle = null      # a change one listener makes mid-dispatch
+      say = (problem) -> raise "seed 20260921 round #{round} step #{counts.steps}: #{problem}"
+      # A node out of the tree hears its own blur and nothing above it
+      # does, so each node listens for itself.
+      gained = (event) ->
+        say "#{idOf event.target} heard focus while #{idOf holder} had not heard blur" if holder
+        holder = event.target
+        counts.focuses += 1
+      lost = (event) ->
+        say "#{idOf event.target} heard blur, and #{idOf holder} had focus" unless holder is event.target
+        holder = null
+        counts.blurs += 1
+      make = ->
+        node = document.createElement 'div'
+        node.set 'id', "n#{names += 1}"
+        node.set 'focusable', true if rand() < 0.7
+        node.set 'disabled', true if rand() < 0.08
+        node.set 'hidden', true if rand() < 0.06
+        node.set 'autofocus', true if rand() < 0.15
+        hear = (event) ->
+          trail.push "#{idOf node} #{event.eventPhase}"
+          if meddle and event.eventPhase > 1
+            todo = meddle
+            meddle = null
+            todo()
+        node.addEventListener 'keydown', hear, true
+        node.addEventListener 'keydown', hear
+        node.addEventListener 'focus', gained
+        node.addEventListener 'blur', lost
+        node
+      place = (node) ->
+        all = [root, ...everything(root)].filter (other) -> other isnt node and not inside other, node
+        parent = pick all
+        kids = parent.childNodes
+        parent.insertBefore node, (if kids.length and rand() < 0.7 then pick(kids) else null)
+      inside = (node, above) ->
+        while node
+          return true if node is above
+          node = node.parentNode
+        false
+      change = ->
+        all = everything root
+        kind = Math.floor rand() * 6
+        if kind is 0 or all.length < 6
+          place make()
+          counts.inserted += 1
+        else if kind is 1 and all.length > 3
+          pick(all).remove()
+          counts.removed += 1
+        else if kind is 2
+          node = pick all
+          node.remove()
+          place node
+          counts.moved += 1
+        else
+          node = pick all
+          key = pick ['focusable', 'disabled', 'hidden', 'display']
+          if key is 'display'
+            node.set 'display', (if node.styles.display is 'none' then 'flex' else 'none')
+          else
+            node.set key, not (if key is 'hidden' then node.styles.hidden is true else node[key])
+          counts.switched += 1
+      place make() for n in [0...8]
+      counts.claimed += 1 if view.focused
+      for step in [0...80]
+        counts.steps += 1
+        had = view.focused   # which settles any claim an arrival made
+        act = rand()
+        if act < 0.45
+          change()
+        else if act < 0.6
+          view.press 'Tab', shift: rand() < 0.5
+          counts.tabs += 1
+        else if act < 0.75
+          target = pick everything root
+          continue unless target
+          counts.calls += 1
+          if rand() < 0.6
+            target.focus()
+            say "focus() on #{idOf target}, which can#{if holds target then '' else 'not'} hold focus, left it with #{idOf view.focused}" unless (view.focused is target) is (holds(target) or had is target)
+          else
+            target.blur()
+            say "blur() on #{idOf target} left focus with it" if view.focused is target
+        else
+          # A key, with a listener that changes the tree on its way up: who
+          # hears it is settled as the dispatch begins.
+          view.frame() if rand() < 0.3
+          target = view.focused ?? root
+          want = []
+          at = target
+          while at and at isnt document.body
+            want.push at unless at is root
+            at = at.parentNode
+          expected = [...(("#{idOf node} #{if node is target then 2 else 1}") for node in want.slice().reverse()), ...(("#{idOf node} #{if node is target then 2 else 3}") for node in want)]
+          trail.length = 0
+          meddle = if rand() < 0.7 then change else null
+          counts.mutated += 1 if meddle and want.length
+          view.press 'x'
+          meddle = null
+          say "the key was heard by #{JSON.stringify trail}, and the path was #{JSON.stringify expected}" unless JSON.stringify(trail) is JSON.stringify(expected)
+          counts.heard += trail.length
+        # What holds after every step.
+        now = view.focused
+        say "#{idOf now} has focus and cannot hold it" if now and not holds now
+        say "the events say #{idOf holder} has focus, and the document says #{idOf now}" unless holder is now
+        say "focus.active is #{idOf focus.active}, not #{idOf now}" unless focus.active is now
+        counts.cleared += 1 if had and not now
+        counts.claimed += 1 if now and not had and act < 0.45
+        # A cycle: Tab from here reaches every node that can hold focus
+        # once, in tree order, and comes back.
+        continue unless step % 10 is 9
+        order = ordered document.body
+        continue unless order.length
+        from = if now then order.indexOf(now) else -1
+        back = rand() < 0.5
+        for n in [1..order.length]
+          view.press 'Tab', shift: back
+          due = if back then order[((if from < 0 then order.length else from) - n + order.length * 2) % order.length] else order[(from + n) % order.length]
+          say "#{if back then 'Shift-' else ''}Tab #{n} of #{order.length} reached #{idOf view.focused}, not #{idOf due}" unless view.focused is due
+          counts.visited += 1
+        counts.cycles += 1
+    finally
+      view.close()
+  # A fuzz that does nothing passes everything: hold it to its volume.
+  floors = { steps: 9600, inserted: 1100, removed: 550, moved: 550, switched: 1600, tabs: 1100, calls: 1100, focuses: 1500, blurs: 1500, cleared: 300, cycles: 440, visited: 950, mutated: 600, heard: 2600, claimed: 60 }
+  ok counts[name] >= floor, "#{name}: #{counts[name]} is under the floor of #{floor} — #{JSON.stringify counts}" for own name, floor of floors
