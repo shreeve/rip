@@ -585,8 +585,10 @@ shows =! (front, back, drawn, row, i) ->
 # A terminal may not agree how wide a cluster of several code points is
 # (a joined emoji, a flag, a base with its marks), and would put all that
 # follows on its row a cell off. The cell after one is therefore reached
-# by an absolute column move. One code point, wide or not, is left to
-# the width every terminal gives it.
+# by an absolute column move, as is the cell after a code point this
+# engine's Unicode leaves unassigned — both are cluster cells (text.rip).
+# Any other code point, wide or not, is left to the width every terminal
+# gives it.
 #
 # A hyperlink is open only while the cells it covers are written: it is
 # closed before every cursor move and at the end of every run, so no

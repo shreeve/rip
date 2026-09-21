@@ -45,11 +45,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 5. The painter and the screen
 
-- [ ] A single code point the width tables do not know gets no column
-      move after it, as a cluster of several does: U+1F6D9, unassigned
-      in Unicode 17, is one cell here, and a terminal that draws it wide
-      puts the rest of its run a cell off. Decide whether a code point
-      outside the tables earns the move.
 - [ ] Damage tracking: paint and diff only what moved (PLAN §6).
 
 ## 6. Compiler-side, filed separately

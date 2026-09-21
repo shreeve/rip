@@ -977,6 +977,15 @@ test "the cell after a cluster of several code points is reached by an absolute 
   plain.write 0, 0, "a日本bc", 0
   eq diff(null, plain), "\x1b[J\x1b[1Ga日本bc\r"
 
+test "an unassigned code point earns the column move after it, and a private use one does not", ->
+  grid = Grid.new 8, 1
+  grid.write 0, 0, "a\u{1F6D9}bc", 0
+  eq diff(null, grid), "\x1b[J\x1b[1Ga\u{1F6D9}\x1b[3Gbc\r"
+  eq grid.toString(), "a\u{1F6D9}bc"
+  arrow = Grid.new 8, 1
+  arrow.write 0, 0, "a\uE0B0bc", 0
+  eq diff(null, arrow), "\x1b[J\x1b[1Ga\uE0B0bc\r"
+
 test "a wide character takes two cells", ->
   grid = Grid.new 6, 1
   grid.write 0, 0, '日本', 0

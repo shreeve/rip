@@ -103,9 +103,14 @@ untab =! (text, before) ->
 
 # ── Cells ─────────────────────────────────────────────────────────────────────
 
-# What a grid cell holds: a code point, or — for a cluster of several —
-# this flag over an index into the cluster table.
+# What a grid cell holds: a code point, or this flag over an index into
+# the cluster table — for a cluster of several, and for a lone code point
+# that is unassigned in this engine's Unicode, which a later terminal may
+# draw wide. Either way the painter reaches the cell after it by an
+# absolute column move. A private use code point is assigned: a terminal
+# gives a powerline or icon-font glyph one cell.
 export CLUSTER =! 0x80000000
+UNASSIGNED =! /\p{Cn}/u
 
 ROOM =! 16384   # clusters the table holds before a sweep is due
 
@@ -118,7 +123,7 @@ export glyph =! (cell) -> if cell < CLUSTER then String.fromCodePoint(cell) else
 
 cellOf =! (cluster) ->
   code = cluster.codePointAt 0
-  return code if cluster.length is (if code > 0xFFFF then 2 else 1)
+  return code if cluster.length is (if code > 0xFFFF then 2 else 1) and not (code >= 0x300 and UNASSIGNED.test cluster)
   cell = known.get cluster
   unless cell?
     cell = CLUSTER + clusters.length

@@ -82,9 +82,11 @@ cells by that rule and one by `Bun.stringWidth`. After every cluster
 of several code points the painter places the cursor by column, so a
 terminal that disagrees misdraws that one glyph and nothing after it.
 A single code point is left to the width every terminal gives it, with
-no move after it: one the width tables do not know — U+1F6D9,
-unassigned in Unicode 17, is one cell here and in `Bun.stringWidth` —
-puts the rest of its run a cell off on a terminal that draws it wide.
+no move after it — unless it is unassigned in the Unicode this runtime
+knows: U+1F6D9, unassigned in Unicode 17, is one cell here and in
+`Bun.stringWidth`, a later terminal may draw it wide, and the move
+after it keeps the rest of its run in place. A private use code point
+(a powerline or icon-font glyph) is one cell and gets no move.
 
 A `backgroundColor` on a box fills it inside its border, and that is
 all it does: text with no background of its own takes the background

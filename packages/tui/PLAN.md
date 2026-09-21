@@ -420,7 +420,9 @@ tree order with absolute nodes deferred into a stable list.
 CHA / CUP (inline mode uses relative vertical moves only), rewrite a
 row when more than about half changed, build one string, make one
 `write`, inside synchronized output (DEC 2026). After a cell of more
-than one code point, an absolute column move keeps a width
+than one code point, or of one that Unicode leaves unassigned (a later
+terminal may draw it wide; a private use glyph is one cell and gets no
+move), an absolute column move keeps a width
 disagreement with the terminal to that glyph (measured: a CJK-heavy
 80×40 frame is 5,008 bytes this way and 12,648 with a move after
 every wide cell). A line feed is never written with a background
