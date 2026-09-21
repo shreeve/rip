@@ -1,10 +1,9 @@
 # Rip TUI: Rip components on a terminal. `run` installs the terminal
-# document, mounts the app onto it, and draws every change; the same
-# tree renders to a string for tests.
+# document, mounts the app onto it, and draws every change; `mount`
+# does the same off any terminal and draws when a test asks.
 
 import { install } from './document.rip'
-import { Grid, paint } from './paint.rip'
-import { Screen, settle } from './screen.rip'
+import { Screen } from './screen.rip'
 
 # ── Widgets ───────────────────────────────────────────────────────────────────
 # A box is a div and text is a span. Every prop a widget does not
@@ -24,7 +23,7 @@ export Spacer = component
   render
     div flexGrow: 1
 
-# ── The running app ───────────────────────────────────────────────────────────
+# ── The mounted app ───────────────────────────────────────────────────────────
 
 cols := 80
 rows := 24
@@ -37,10 +36,13 @@ class Viewport
 # The terminal's size, as reactive reads.
 export screen =! Viewport.new()
 
-# Mount `App` on the terminal and keep it drawn until `quit`.
-export run =! (App, options = {}) ->
-  throw Error.new 'rip/tui: an app is already running in this process — `quit` it first' if live
-  out = options.stdout ?? process.stdout
+# Put `App` on a terminal document of its own, to be drawn to `out`.
+# The document is a global of the process, so one app is mounted at a
+# time and a second is refused. `live` stands before the app is
+# constructed, so a `quit` from an effect that runs during construction
+# is heard.
+open =! (App, options, out, terminal) ->
+  throw Error.new 'rip/tui: an app is already mounted in this process — `quit` or `close` it first' if live
   { doc, restore } = install()
   view = Screen.new doc, out
   cols = view.cols
@@ -51,18 +53,25 @@ export run =! (App, options = {}) ->
     rows = view.rows
     view.front = null
     doc.owe true
-  interrupted = -> quit()
   settled = {}
   done = Promise.new (resolve, reject) ->
     settled.resolve = resolve
     settled.reject = reject
-  # `live` stands before the app is constructed, so a `quit` from an
-  # effect that runs during construction is heard.
-  live = { app: null, view, out, doc, restore, resized, interrupted, settled, closing: false }
-  out.write "\x1b[?25l"
+  live = { app: null, view, out, doc, restore, resized, interrupted: (-> quit()), done, settled, terminal, closing: false }
+  out.write "\x1b[?25l" if terminal
   try
     live.app = App.new(options.props ?? {})
     live.app.mount doc.body
+  catch error
+    close false
+    throw error
+  live
+
+# Mount `App` on the terminal and keep it drawn until `quit`.
+export run =! (App, options = {}) ->
+  held = open App, options, options.stdout ?? process.stdout, true
+  { view, out, doc, settled } = held
+  try
     view.frame()
   catch error
     close false
@@ -73,26 +82,63 @@ export run =! (App, options = {}) ->
     close false
     settled.reject error
   doc.onOwe = -> view.book()
-  out.on? 'resize', resized
-  process.on 'SIGINT', interrupted
-  { app: live.app, done, quit, flush: (-> view.frame() if doc.stale) }
+  out.on? 'resize', held.resized
+  process.on 'SIGINT', held.interrupted
+  { app: held.app, done: held.done, quit, flush: (-> view.frame() if doc.stale) }
+
+# An app mounted off any terminal, for a test to drive: set its state
+# through `app`, then draw. Nothing is drawn until `frame` asks, so a
+# frame that fails throws to the test that asked for it.
+class Mount
+  constructor: (@held) ->
+
+  get app: -> @held.app
+  get done: -> @held.done
+
+  # The last frame with its escape sequences, and what a terminal was
+  # sent to draw it: the difference from the frame before.
+  get ansi: -> @held.view.front?.toString(true) ?? ''
+  get bytes: -> @held.out.sent
+
+  # Draw what the app shows and hand the frame back as plain text.
+  frame: ->
+    throw Error.new 'rip/tui: this mount is closed — there is no app to draw' unless live is @held
+    @held.out.sent = ''
+    @held.view.frame()
+    @held.view.front.toString()
+
+  # The terminal takes another size; the next frame is drawn whole.
+  resize!: (wide, tall) ->
+    @held.out.columns = wide
+    @held.out.rows = tall if tall?
+    @held.resized()
+
+  # Unmount the app and give the process its `document` slot back.
+  close!: -> close false if live is @held
+
+# Mount `App` once on a terminal of `cols` by `rows` that only keeps
+# what it is sent. With no `rows` it is as tall as the frame.
+export mount =! (App, options = {}) ->
+  out = { columns: options.cols ?? 80, rows: options.rows ?? Infinity, sent: '', write: (text) -> @sent += text }
+  Mount.new open(App, options, out, false)
 
 # Give the terminal and the process back: the cursor, the listeners, the
 # `document` slot. `drawn` leaves the last frame in the scrollback; a
 # failure leaves whatever reached the screen.
 close =! (drawn) ->
-  { app, view, out, doc, restore, resized, interrupted } = live
+  { app, view, out, doc, restore, resized, interrupted, terminal } = live
   live = null
   doc.onOwe = null
   try
-    if drawn then view.leave() else out.write "\x1b[?25h"
+    if terminal
+      if drawn then view.leave() else out.write "\x1b[?25h"
     app?.unmount()
   finally
     out.off? 'resize', resized
     process.off 'SIGINT', interrupted
     restore()
 
-# Unmount the running app, leave its last frame on screen, and give the
+# Unmount the mounted app, leave its last frame on screen, and give the
 # process its `document` slot back. The work waits for the turn to end,
 # so a `quit` called from inside an effect still draws what that same
 # change owed.
@@ -109,17 +155,11 @@ export quit =! (result) ->
       settled.reject error
 
 # The frame `App` draws in `cols` columns, as text — plain by default,
-# with escape sequences when `ansi` is set.
+# with escape sequences when `ansi` is set: mount, one frame, close.
 export renderToString =! (App, options = {}) ->
-  { doc, restore } = install()
+  view = mount App, options
   try
-    app = App.new(options.props ?? {})
-    app.mount doc.body
-    settle doc, options.cols ?? 80, options.rows ?? null
-    grid = Grid.new options.cols ?? 80, doc.body.rect.h
-    paint grid, doc.body
-    text = grid.toString options.ansi ?? false
-    app.unmount()
-    text
+    text = view.frame()
+    if options.ansi then view.ansi else text
   finally
-    restore()
+    view.close()

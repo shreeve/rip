@@ -12,13 +12,13 @@ PASSES =! 32  # the most layouts one frame may take to settle
 # Lay the document out until a pass moves nothing. A binding that reads
 # a node's box changes the tree it measured, so one change can take a
 # pass per reader in a chain; readers that never agree are refused.
-export settle =! (doc, cols, rows = null) ->
+settle =! (doc, cols) ->
   passes = 0
   while doc.moved
     if (passes += 1) > PASSES
       throw Error.new "rip/tui: layout did not settle in #{PASSES} passes — a binding keeps changing the box it reads, so no size satisfies it"
     doc.moved = false
-    layout doc.body, cols, rows
+    layout doc.body, cols
   return
 
 export class Screen

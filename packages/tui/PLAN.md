@@ -128,15 +128,15 @@ write by hand; hot loops use the indexed `for x, i in` form).
 
 | Module | Job | Code lines |
 |---|---|---|
-| `tui.rip` | Entry: `run`, `screen`, widgets; to come: `focus`, `clock` | 90, about 200 when complete |
-| `document.rip` | Terminal document: nodes, tree links, events, style road | 236 |
+| `tui.rip` | Entry: `run`, `mount`, `renderToString`, `screen`, widgets; to come: `focus`, `clock` | 109, about 220 when complete |
+| `document.rip` | Terminal document: nodes, tree links, events, style road | 244 |
 | `layout.rip` | Flexbox, containing blocks, baseline, cache, edge rounding | 1,437 |
 | `text.rip` | Sanitize, grapheme clusters, width, wrap, truncate | 312 |
 | `paint.rip` | Cell grids, styles, clip, borders, backgrounds, diff; to come: damage | 400, about 550 |
 | `screen.rip` | Frames and pacing; to come: alternate screen, `Static`, non-TTY | 53, about 250 |
 | `input.rip` | To come: key tokenizer and decoder, paste, mouse, keyboard negotiation | about 250 |
 | `terminal.rip` | To come: setup / teardown, signals, suspend, console capture | about 170 |
-| | **Total** | **2,528 built; about 3,400 complete** |
+| | **Total** | **2,555 built; about 3,400 complete** |
 
 Lines are counted as §2 counts them: non-blank and non-comment.
 
@@ -164,11 +164,13 @@ the terminal cannot honor throws a named error.
 
 `div` is a box and `span` is text. Comments are zero-size anchors.
 
-**Decided — install is scoped.** `run` installs the globals and
-teardown restores them. The install is idempotent for this package's
-own document and throws when a foreign `document` exists
-(`packages/email` installs one transiently; an isomorphic npm library
-probing `typeof document` is a documented hazard).
+**Decided — install is scoped.** `run` and `mount` install the
+globals for the life of the app, and `quit` or `close` restores them.
+The globals are the process's, so one app is mounted at a time: a
+second `run`, `mount`, or `renderToString` is refused by name, and the
+install throws when a foreign `document` exists (`packages/email`
+installs one transiently; an isomorphic npm library probing
+`typeof document` is a documented hazard).
 
 **Decided — styles travel as attributes through rest forwarding.**
 
@@ -187,14 +189,16 @@ costs 22.2 ms and 74.4 MB. One `node.set(key, value)` serves
 values (effects re-fire with identical values), expands shorthands,
 stores numerics, and marks the node layout-dirty or paint-dirty. The
 style object is a class with table-generated prototype accessors, not
-a Proxy.
+a Proxy. The node remembers the keys a `style:` object wrote, so an
+object taken away (`removeAttribute('style')`) takes them with it and
+leaves the props.
 
 The runtime contains a child that fails to construct: it reports the
 error and leaves a `rip:child-error` comment where the child would be.
 On a terminal that is a silent hole in the screen, so `install` swaps
 the runtime's child-failure reporter (`__setChildFailureReporter`) for
-one that throws, and `restore` puts the previous one back — `run` and
-`renderToString` fail with the child's own error.
+one that throws, and `restore` puts the previous one back — `run`,
+`mount`, and `renderToString` fail with the child's own error.
 
 ## 5. Layout (`layout.rip`)
 
@@ -248,7 +252,8 @@ would reuse.
 **Dropped:** auto-min-size, errata and experimental flags.
 
 **Parity target:** classic Yoga behavior as its generated tests encode
-it (running totals, no auto-min), not the CSS specification.
+it (running totals, no auto-min), not the CSS specification — except
+where a divergence is stated below.
 
 **Algorithm:** `visit(node, availW, availH, modeW, modeH, ownerW,
 ownerH, perform)` is the cache's door — it answers from a stored entry
@@ -281,18 +286,18 @@ byte as upstream wrote them, against a test-only shim shaped like the
 `yoga-layout` API (`test/yoga-shim.rip`, `rip test/yoga.rip`).
 
 - **All 543 run and none is skipped.** Yoga's 37 hand-written aspect
-  ratio cases are ported beside them (`test/yoga-aspect.rip`). Real
+  ratio cases are ported beside them (`test/yoga-aspect.rip`), and 53
+  of its hand-written cases for measure functions, the measure cache,
+  measure modes, rounding, dirtying, and computed edges
+  (`test/yoga-hand.rip`; `test/yoga/SOURCE.md` says which are left out
+  and why). Real
   `yoga-layout` 3.2.1, the release Ink ships, passes 537 of the 543
   through the same runner: it predates the intrinsic keywords and one
   alignment fix.
-- **One stated divergence, pinned, not skipped.** Yoga rounds a node's
-  position from its offset in its parent and its size from its
-  absolute edges; under a fractional ancestor offset the two disagree,
-  and `rounding_fractial_input_3` expects two siblings to share a row
-  and a row to be left empty. Here every edge rounds from its absolute
-  position, so neighbors never overlap and never gap. The runner holds
-  the one differing expectation to this engine's exact answer, with
-  the reason beside it, and fails on a pinned answer that never runs.
+- **Two cases answer differently on purpose, pinned, not skipped**
+  (divergences 1 and 6 below). The runner holds each differing
+  expectation to this engine's exact answer, with the reason beside
+  it, and fails on a pinned answer that never runs.
 - Every case has a right-to-left half. **Decided — RTL is deferred.**
   One mechanical gate stops each case before its RTL pass and the
   report says "LTR half". The expensive part of RTL in a terminal is
@@ -309,8 +314,74 @@ Build order, so categories go green one at a time: node + shim +
 rounding + fixed sizes + padding / border / margin → grow / shrink /
 min / max → justify / align / auto margins → reverse directions →
 wrap / align-content / gap → percent → absolute → `display: none` and
-measure functions → cache and dirty (port Yoga's 11 hand-written
-dirtied / new-layout / measure-cache tests).
+measure functions → cache and dirty.
+
+### Stated divergences from Yoga
+
+Each is a decision, and each has a pin that holds this engine's answer
+and states Yoga's beside it; Yoga's answers are `yoga-layout` 3.2.1's
+on the same tree. Divergences 3 and 4 are one rule — an incremental
+layout equals a fresh one — where Yoga's cache breaks it.
+
+1. **Every edge rounds from its absolute position.** Yoga rounds a
+   node's position from its offset in its parent and its size from its
+   absolute edges; under a fractional ancestor offset the two disagree,
+   and `rounding_fractial_input_3` expects two siblings to share a row
+   and a row to be left empty. Here neighbors never overlap and never
+   gap. Pin: `DIVERGES` in `test/yoga.rip`.
+2. **A hidden child is never the baseline child.** Yoga picks a row's
+   first child even when it is `display: none`, reads its zeroed
+   height, and answers NaN for the row's top. Here the first child
+   that shows is the one that aligns. Pin: "a hidden child is never
+   the baseline child" in `test.rip`.
+3. **The owner's size is part of a cached answer's key,** for a node
+   whose own percent margin, padding, min or max reads it. Yoga keys
+   an answer by the offer alone, so a `{width: 0, padding: '5%'}` box
+   laid out under 100 columns and then 10 keeps its 10×10. Here it is
+   1×1, as a fresh layout makes it in both engines. Pin: "divergence:
+   the owner's size is part of a cached answer's key" in
+   `test/layout.rip`.
+4. **A first flex basis stands for one pass.** Yoga keeps the first
+   basis it resolves until the child is dirtied, so a `flexBasis:
+   '50%'` child laid out at 100 and then 200 stays 50. Here every pass
+   starts a child over and it is 100, as a fresh layout makes it in
+   both engines. Pin: "divergence: a first flex basis stands for one
+   pass" in `test/layout.rip`.
+5. **Sizes are compared within a tolerance, in doubles.** Yoga works
+   in float32, where `17.9 − 16` is less than `1 + 0.9`: a wrapping
+   box with 1.9 cells of room overflows and wraps the second child.
+   Doubles miss such sums too, by less and to either side, so every
+   comparison that decides — a line break, an overflow, a frozen share
+   — carries one tolerance (`near`), and what fits by arithmetic fits.
+   Pin: "divergence: sizes are compared within a tolerance, in
+   doubles" in `test/layout.rip`.
+6. **A percent `min` / `max` is one length wherever it is read:** a
+   percent of the space inside the container, as a percent size is
+   and as CSS has it. Yoga resolves it against the container's OWNER
+   when it breaks lines and shares space, and against the container
+   everywhere else: a `minWidth: '50%'` child of a 10-wide row comes
+   out 50 wide at 100 columns, which is why Ink marks its own tests
+   for it as failing. Being right costs one case of the 543:
+   `percentage_flex_basis_main_min_width` passes in Yoga only because
+   its root has no owner, so the percents bound nothing while space is
+   shared — give the root an owner and Yoga answers 128 / 72 at 200
+   columns, 600 / 200 at 1000, and never Chrome's 120 / 80. Here it is
+   128 / 72 at any, as the same mins in points make it in both
+   engines. Pins: `DIVERGES` in `test/yoga.rip`, "divergence: a
+   percent min or max is one length wherever it is read" in
+   `test/layout.rip`, and Ink's "set min width in percent" in
+   `test/ink/width-height.rip`, which holds to the frame Ink's authors
+   ask for.
+7. **The cache compares exactly.** Yoga reuses a measurement for an
+   offer that rounds to the same point, or that equals the measured
+   size within a tolerance. A tolerance is not transitive, and a stale
+   fraction would round a text box differently from the box a fresh
+   layout gives, so an answer here is reused only for the very numbers
+   it was computed from. The boxes are the same; a leaf can be measured
+   once more than Yoga measures it. Pin:
+   `remeasure_with_already_measured_value_smaller_but_still_float_equal`
+   in `test/yoga-hand.rip`, which holds 2 measurements where upstream
+   asserts 1.
 
 ## 6. Paint (`paint.rip`, `text.rip`, `screen.rip`)
 
@@ -365,13 +436,16 @@ stripped, tabs expanded). For text that arrives pre-colored, an opt-in
 paint path. Ink's string `Transform` is replaced by a per-cell style
 callback.
 
-**Held to Ink's own tests.** `test/ink/` ports 425 of Ink's paint
+**Held to Ink's own tests.** `test/ink/` ports 478 of Ink's paint
 cases — borders, backgrounds, overflow, text, wrapping, truncation,
 widths, hyperlinks, content offset, position, display, the flex files
 — with every expected frame taken from published Ink 7.1.1 as an
 oracle, or from Ink's test source where its main branch is ahead. Plain
 frames compare as text, and colors and links as styled cells, never as
-escape bytes.
+escape bytes. 53 of them are Ink's `rerender` cases, drawn through
+`mount` (§10): a tree stays mounted, takes other props, and draws again,
+and each updated frame is also held to a fresh mount's frame and to the
+bytes a terminal was sent for it, replayed.
 The cases run through widgets that spell out Ink's defaults (a row
 that shrinks), since this package keeps Yoga's. Where a frame differs
 from Ink's test on purpose, the case still runs, pinned to this
@@ -510,8 +584,11 @@ run App
 ```
 
 - `run(App, {altScreen, mouse, keyboard, stdin, stdout})` →
-  `{done, quit, flush}`;
-  `suspend(fn)`; `print(text)`; `renderToString(App, {cols, rows})`.
+  `{app, done, quit, flush}`; `suspend(fn)`; `print(text)`.
+- `mount(App, {cols, rows, props})` → `{app, frame, ansi, bytes,
+  resize, close, done}` is the test driver (§10), and
+  `renderToString(App, {cols, rows, props, ansi})` is a mount, one
+  frame, and a close.
 - `screen` (`cols`, `rows`, `interactive`) and `focus` (`active`,
   `next`, `prev`, `to`) are **getter-backed objects**. An imported
   `:=` cell is not unwrapped across modules, so raw cells are never
@@ -544,8 +621,20 @@ run App
   offset 23, position 13, render-to-string 37, log-update 34, resize
   10, synchronized write 5, static 5, wide-character regressions 10.
 - **Input:** about 100 ported parser cases, plus focus and dispatch.
-- The test driver (`renderToString` plus simulated input) is public,
-  because users' tests are a contract too.
+- **The test driver is public,** because users' tests are a contract
+  too. `mount(App, {cols, rows, props})` is `run` without a terminal:
+  the same install, the same `Screen`, the same close, drawing to a
+  terminal of `cols` by `rows` that only keeps what it is sent (with
+  no `rows` it is as tall as the frame). It hands back the app, whose
+  public state a test sets, and draws only when asked: `frame()` lays
+  out, paints, and answers the frame as plain text; `ansi` is that
+  frame with its escape sequences; `bytes` is what the terminal was
+  sent for it, the difference from the frame before, which is what a
+  test of damage tracking reads; `resize(cols, rows)` draws the next
+  frame whole; `close()` unmounts and restores the globals. A frame
+  that fails throws from `frame`, to the test that asked. A `quit`
+  from the app closes the mount and resolves `done`. Simulated input
+  joins it with §7.
 
 ## 11. Benchmark (`bench.rip`, `bench/`)
 
@@ -640,7 +729,7 @@ Each step is its own branch and PR under the repo's landing rules.
 
 | Step | Contents | Exit |
 |---|---|---|
-| 1 | Layout soundness: an incremental layout equals a fresh one, one float tolerance, values refused where they are written (TODO §1–§2) | The reviewers' fuzzers and the differential against compiled Yoga find nothing new; every seeded bug is caught |
+| 1 | Layout soundness: an incremental layout equals a fresh one, one float tolerance, values refused where they are written | The reviewers' fuzzers and the differential against compiled Yoga find nothing new; every seeded bug is caught |
 | 2 | Text and the painter: wrap / truncate, grapheme clusters, `overflow: 'hidden'` clipping, per-edge borders, background fills, content offset | Ported Ink paint cases pass |
 | 3 | Damage tracking: paint and diff only what moved (§6) | A small update's paint and diff fall with the damage, measured in `bench/` |
 | 4 | Input, focus, cursor, capture and bubble phases; then mouse and the enhanced keyboard as opt-ins; then text selection with clipboard copy (OSC 52), since mouse capture takes the terminal's own selection away | Ported parser cases pass; select-list, text-input, and wheel-scrolled list examples |

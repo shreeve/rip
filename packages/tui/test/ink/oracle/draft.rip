@@ -111,9 +111,10 @@ unfit = (entry) ->
   return 'the test compares the escape bytes of a hyperlink: ported by hand, with the `link` prop' if entry.frames.some((shot) -> raw shot.tree) and texted(entry) is null
   null
 
-# Why a whole test is left out, or null. A rerender says what else keeps
-# it out, so the cases an update driver could take are told apart; a
-# `- concurrent` twin says whether the case it repeats is ported.
+# Why a whole test is left out of the draft, or null. A rerender is one
+# component drawn again, which the draft does not write: it is ported by
+# hand (update.rip) unless something else keeps it out, and says what. A
+# `- concurrent` twin says whether the case it repeats is in the draft.
 left = (entry) ->
   base = entry.title.replace /\s+-\s+concurrent$/, ''
   if base isnt entry.title and titles.has base
@@ -121,7 +122,7 @@ left = (entry) ->
     return if twin then "concurrent twin of a case left out: #{twin}" else 'concurrent twin'
   why = unfit entry
   if entry.frames.some((shot) -> shot.rerendered)
-    return if why then "a rerender of a mounted tree, and #{why}" else 'a rerender of a mounted tree'
+    return if why then "a rerender of a mounted tree, and #{why}" else 'a rerender of a mounted tree, ported by hand'
   why
 
 body = []
