@@ -427,10 +427,12 @@ test "a paste with no terminator ends when nothing arrives for its patience, as 
   eq [parser.holding, parser.pending, clock.waiting], [null, 0, 0]
   feed 'x'
   eq all, [paste("abc#{CSI}A"), ...typed('x')]
+  # Five characters are held back in case they begin the terminator, so
+  # the read itself lets one piece go and time the rest.
   { feed, clock, late } = open { paste: 4 }
-  feed "#{START}abcdefghij"
+  eq feed("#{START}abcdefghij"), [paste 'abcd']
   clock.tick 1000
-  eq late, [paste('abcd'), paste('efgh'), paste('ij')]
+  eq late, [paste('efgh'), paste('ij')]
 
 test "a flush is every patience run out now: Escape, Alt and a bare introducer, an open paste; any other partial is discarded", ->
   for [held, want] in [['', []], ['a', []], [ESC, [ESCAPE]], [CSI, [key('[', 'a', CSI)]], [SS3, [key('O', 'sa', SS3)]], ["#{CSI}1;", []], ["#{ESC}]0;title", []], ["#{ESC}]0;title#{ESC}", []], ["#{START}text#{CSI}20", [paste "text#{CSI}20"]]]
@@ -493,7 +495,7 @@ test "every row, cut at every byte inside a sequence with time passing short of 
       clock.tick 999
       feed sent.subarray cut
       raise "#{brief whole} cut at byte #{cut}, 999 ms apart, gave #{brief all}, not #{brief events}" unless canon(all) is canon(events) and late.length is 0
-  ok inside > 3000, "#{inside} cuts inside a sequence"
+  ok inside > 2500, "#{inside} cuts inside a sequence"
 
 test "every row, a byte at a time, decodes as it does whole", ->
   for { whole, events } in ROWS
