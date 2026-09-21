@@ -90,7 +90,7 @@ README carries this matrix.
 | Scrolling by content offset (`contentOffsetX` / `contentOffsetY`) | Tree-order focus | List virtualization | |
 | Wrap and truncate modes | Node-relative cursor placement | | |
 | `Static` scrollback output | A text change of unchanged size runs no layout | | |
-| Inline and alternate-screen rendering | | | |
+| Inline and alternate-screen rendering | Hyperlinks as a prop: `link` on text (OSC 8), refused unless the URL is printable ASCII, never left open across a cursor move | | |
 | Synchronized, diffed, coalesced output | | | |
 | Non-TTY / CI output, `NO_COLOR`, color depth | | | |
 | Console capture while rendering | | | |
@@ -100,7 +100,6 @@ README carries this matrix.
 | Key input, paste, focus, cursor placement | | | |
 | Enhanced keyboard (kitty protocol), opt-in | | | |
 | Animation clock (`useAnimation` equivalent) | | | |
-| Hyperlinks: a `link` prop (OSC 8) | | | |
 
 Ink's string `Transform` has no counterpart because it has no job
 here: a text transform is an ordinary expression in the binding
@@ -324,7 +323,21 @@ a full diff of two typed buffers that size takes about 9 µs.
 
 **Styles** are interned per (fg, bg, attributes, link) with the SGR
 string precomputed and transitions cached by id pair. Text with no
-background inherits the cell beneath it.
+background inherits the cell beneath it; `'default'` is the terminal's
+own color (SGR 39, 49) and a color like any other, so it stands against
+an ancestor's color and against the background beneath. A link is part of the style, so the diff sees
+a changed link as a changed cell; OSC 8 opens on a run and is closed
+before every cursor move and at the end of every run.
+
+**The tables are swept.** A cell holds a style in sixteen bits and a
+cluster of several code points as an index, and both tables grow with
+what an app draws. Between frames, once a table passes its mark
+(32,768 styles, 16,384 clusters), every entry no cell of the grid on
+the terminal holds is let go and that grid is renumbered in place, so
+the next diff stands; a flow takes its cluster cells again when it is
+next drawn. A grid left out of a sweep says so by its epoch and is
+drawn from nothing. Frames that are never diffed (`renderToString`)
+are swept as a paint starts.
 
 **Damage** is a `[lo, hi)` span per row, the union of a node's old and
 new boxes. Paint walks the tree clipped to the damage and skips
@@ -352,20 +365,22 @@ stripped, tabs expanded). For text that arrives pre-colored, an opt-in
 paint path. Ink's string `Transform` is replaced by a per-cell style
 callback.
 
-**Held to Ink's own tests.** `test/ink/` ports 386 of Ink's paint
+**Held to Ink's own tests.** `test/ink/` ports 425 of Ink's paint
 cases — borders, backgrounds, overflow, text, wrapping, truncation,
-widths, content offset, position, display, the flex files — with
-every expected frame taken from published Ink 7.1.1 as an oracle, or
-from Ink's test source where its main branch is ahead. Plain frames
-compare as text and colors as styled cells, never as escape bytes.
+widths, hyperlinks, content offset, position, display, the flex files
+— with every expected frame taken from published Ink 7.1.1 as an
+oracle, or from Ink's test source where its main branch is ahead. Plain
+frames compare as text, and colors and links as styled cells, never as
+escape bytes.
 The cases run through widgets that spell out Ink's defaults (a row
 that shrinks), since this package keeps Yoga's. Where a frame differs
 from Ink's test on purpose, the case still runs, pinned to this
 package's frame with its reason, and fails when it no longer differs:
 text with no background keeps the one beneath it, where Ink carries
-backgrounds down the tree; a value the package cannot use is refused
-where Ink reads it as zero; and four frames Ink's own tests mark as
-failing, where this package draws what Yoga and published Ink draw.
+backgrounds down the tree; the `…` of a cut line is inside its link,
+where Ink closes the link before it; a value the package cannot use is
+refused where Ink reads it as zero; and four frames Ink's own tests mark
+as failing, where this package draws what Yoga and published Ink draw.
 
 **Decided — an offset-based wrapper of our own,** with an ASCII fast
 path; `Bun.stringWidth` per grapheme. Structural spans need break

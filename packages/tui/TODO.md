@@ -76,21 +76,11 @@ the test, re-seed the bug, and see it caught.
 
 ## 5. The painter and the screen
 
-- [ ] Hyperlinks: a `link` prop on text (OSC 8). Two of Ink's cases
-      and half of a third wait for it (`test/ink/SOURCE.md`).
-- [ ] The cluster table never evicts, as the style tables do not:
-      300,000 distinct clusters hold 41 MB.
-- [ ] Widths follow string-width 8's rule. Where a terminal disagrees
-      (Thai `กำ` is one cell by that rule and two by `Bun.stringWidth`;
-      U+1F6D9 is newer than Bun's tables) the column move after a
-      cluster keeps the damage to that glyph. Say so in the README's
-      text section, with the cases.
-- [ ] **A word for the terminal's own colors.** Text with no background
-      keeps the one beneath it, so nothing spells "draw this run on the
-      terminal's default background" inside a colored box (Ink writes
-      `backgroundColor: ''`). `'default'` for both `color` and
-      `backgroundColor`; then the pinned Ink case in
-      `test/ink/background.rip` follows Ink.
+- [ ] A single code point the width tables do not know gets no column
+      move after it, as a cluster of several does: U+1F6D9, unassigned
+      in Unicode 17, is one cell here, and a terminal that draws it wide
+      puts the rest of its run a cell off. Decide whether a code point
+      outside the tables earns the move.
 - [ ] **A test driver for updates.** `renderToString` mounts fresh on
       every call, so 45 of Ink's cases — a mounted tree re-rendered with
       new props — have no way to run. A public driver that mounts once,
@@ -102,9 +92,6 @@ the test, re-seed the bug, and see it caught.
       tests for it as failing, and this engine is at parity with Yoga.
       Decide whether to stay at parity or be right, and pin the choice
       in PLAN §5.
-- [ ] The style tables never evict, and a cell holds a style id in
-      sixteen bits: an app that animates `'#rrggbb'` colors reaches the
-      limit and is refused. Reclaim ids no cell uses.
 - [ ] Damage tracking: paint and diff only what moved (PLAN §6).
 
 ## 6. Compiler-side, filed separately
