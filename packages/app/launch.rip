@@ -29,22 +29,29 @@
 # bundle. destroy() tears down in reverse and restores every global it
 # installed.
 
-import { createStash, _cloneDeclaration, _stampDefaults, _mergePlain } from './stash.rip'
+import { createStash, _cloneDeclaration, _stampDefaults, _mergePlain, Stash } from './stash.rip'
 import { createComponents, ComponentsStore } from './components.rip'
 import { buildRoutes } from './routes.rip'
 import { createRouter, browserAdapter, RouterAdapter, Router } from './router.rip'
-import { createRenderer, Renderer, GateFailure } from './renderer.rip'
+import { createRenderer, Renderer, GateFailure, MountTarget } from './renderer.rip'
 import { interceptClicks, preloadLinks, LinkHost } from './links.rip'
 import { ariaCurrent } from './aria.rip'
 import { persistStash, StashStorage } from './persist.rip'
 
+type Declaration = Record<string, unknown>
+
+type Bundle =
+  modules?: Record<string, string> | null
+  compiled?: Record<string, Record<string, unknown>> | null
+  seed?: Record<string, unknown> | null
+
 export type LaunchOpts =
-  bundle: Record<string, any>
-  target?: Record<string, any>
+  bundle: Bundle
+  target?: MountTarget | null
   adapter?: RouterAdapter
   base?: string
   hash?: boolean
-  declaration?: Record<string, any>
+  declaration?: Declaration | null
   components?: ComponentsStore
   links?: LinkHost
   persist?: boolean | 'local' | 'session'
@@ -52,7 +59,7 @@ export type LaunchOpts =
   onError?: (failure: GateFailure | { status: number, path: string }) => void
 
 export type LaunchResult =
-  stash: Record<string, any>
+  stash: Stash
   components: ComponentsStore
   router: Router
   renderer: Renderer
@@ -82,7 +89,7 @@ validComponents = (store) ->
       fail "launch components store is missing '#{method}'"
   store
 
-export validatePrepared = (value, declaration = null) ->
+export validatePrepared = (value: Bundle, declaration: Declaration | null = null): { bundle: Bundle, declaration: Declaration | undefined } ->
   bundle = validBundle value
   paths = Set.new [
     ...Object.keys(bundle.modules ?? {})

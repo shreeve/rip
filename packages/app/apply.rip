@@ -11,16 +11,18 @@
 #
 # ==============================================================================
 
+import type { Renderer, CompiledModules } from './renderer.rip'
+
 export type ApplyVerdict = 'reload' | 'css' | 'update' | 'ignore'
 
 export type Apply =
-  absorb: (paths: string[], candidate?: Record<string, any>) => Promise<ApplyVerdict>
+  absorb: (paths: string[], candidate?: CompiledModules | null) => Promise<ApplyVerdict>
 
 export type ApplyOpts =
   # Renderer seam still speaks narrow/escape/noop; absorb maps to update/ignore.
-  renderer: { remountDirty: (paths: string[], candidate?: Record<string, any>) => Promise<'narrow' | 'noop' | 'escape' | 'reload'> }
-  escape: (paths: string[], candidate?: Record<string, any>) => Promise<void | 'reload'>
-  report?: (...args: any[]) => void
+  renderer: Pick<Renderer, 'remountDirty'>
+  escape: (paths: string[], candidate?: CompiledModules | null) => Promise<void | 'reload'>
+  report?: (...args: unknown[]) => void
 
 export def createApply(opts: ApplyOpts): Apply
   unless opts? and typeof opts is 'object'

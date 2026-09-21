@@ -765,7 +765,7 @@ withShipInputs = (inputHashes, ship) ->
 # The complete App hash: every graph entry and list source by id, plus
 # the runtime under an id no App path can take.
 appHash = (entries, list, ship) ->
-  identities = Map.new (entries or []).map (entry) -> [entry.id, entry]
+  identities: Map<string, { id: string, hash: string }> = Map.new (entries or []).map (entry) -> [entry.id, entry]
   encoder = TextEncoder.new()
   for [id, source] in list
     identities.set(id, { id, hash: rash(encoder.encode(source)) }) unless identities.has id

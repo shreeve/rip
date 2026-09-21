@@ -9,7 +9,7 @@
 # signal. Params and query keep their object identity across
 # navigations that do not change them.
 
-import { parseQuery, RouteMatch } from './routes.rip'
+import { parseQuery, RouteMatch, RouteManifest } from './routes.rip'
 import { delay } from './timing.rip'
 
 # What the router writes into a history entry: whatever the host keeps,
@@ -36,8 +36,10 @@ export type RouterScroll =
   top?: () => void
   watch?: (fn: () => void) => (() => void) | null
 
+type Manifest = Pick<RouteManifest, 'routes' | 'match'> & Partial<Pick<RouteManifest, 'notFound'>>
+
 export type RouterOpts =
-  routes: Record<string, any> | (() => Record<string, any>)
+  routes: Manifest | (() => Manifest)
   adapter: RouterAdapter
   base?: string
   hash?: boolean

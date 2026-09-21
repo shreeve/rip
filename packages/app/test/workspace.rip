@@ -145,8 +145,8 @@ fakeHub = ->
       onmessage: null
       onclose: null
       onerror: null
-    socket.send = (text) -> socket.sent.push text
-    socket.close = -> socket.onclose?()
+      send: (text) -> socket.sent.push text
+      close: -> socket.onclose?()
     sockets.push socket
     socket
   { factory, sockets }
@@ -222,7 +222,7 @@ reconnect = (sockets) ->
 
 test "connectFeed validates the callback boundary", ->
   throws (-> connectFeed(null)), 'expects hash, apply, and reload callbacks'
-  throws (-> connectFeed({ hash: (-> 'bad'), apply: (-> true), reload: (->) }, { hub: 'x', makeSocket: (-> {}) })), 'client hash'
+  throws (-> connectFeed({ hash: (-> 'bad'), apply: (-> true), reload: (->) }, { hub: 'x' })), 'client hash'
 
 test! "open subscribes with an acknowledgement token before probing latest.json", ->
   { feed, sockets, calls } = openFeed()

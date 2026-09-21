@@ -37,7 +37,7 @@ export type StashMethods<D extends Record<string, any> = Record<string, any>> =
   source: { <K extends keyof D & string>(path: K, key?: unknown): SourceHandleFor<D[K]>; (path: string & {}, key?: unknown): SourceHandle }
 
 # The proxy answers its raw store under RAW; unwrapStash reads it back.
-export type Stash<D extends Record<string, any> = Record<string, any>> = D & StashMethods<D> & { readonly [RAW]?: D }
+export type Stash<D extends Record<string, unknown> = Record<string, unknown>> = D & StashMethods<D> & { readonly [RAW]?: D }
 
 RAW =! Symbol 'rip.app.stash.raw'
 SIGNALS =! Symbol 'rip.app.stash.signals'
@@ -467,12 +467,12 @@ makeProxy = (target) ->
   PROXIES.set target, proxy
   proxy
 
-export def createStash<D extends Record<string, any>>(data: D = {} as D): Stash<D>
+export def createStash<D extends Record<string, unknown>>(data: D = {} as D): Stash<D>
   unless data? and typeof data is 'object' and not Array.isArray(data)
     throw TypeError.new 'Rip App: createStash expects a plain object'
   unless Object.getPrototypeOf(data) is Object.prototype or Object.getPrototypeOf(data) is null
     throw TypeError.new 'Rip App: createStash expects a plain object'
   makeProxy data
 
-export def unwrapStash<D extends Record<string, any>>(stash: Stash<D>): D
+export def unwrapStash<D extends Record<string, unknown>>(stash: Stash<D>): D
   stash?[RAW] or stash

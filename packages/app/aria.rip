@@ -21,6 +21,17 @@
 # anchor's EXTERNAL href through `router.claims`, so base paths and
 # hash mode follow the router's own reading.
 
+import type { Router } from './router.rip'
+
+type Anchor =
+  hasAttribute?: (name: string) => boolean
+  getAttribute?: (name: string) => string | null
+  href?: unknown
+
+type AriaHost =
+  anchors: () => (Anchor & Pick<Element, 'setAttribute' | 'removeAttribute'>)[]
+  observe?: (fn: () => void) => () => void
+
 excluded = (anchor) ->
   return true if anchor.hasAttribute?('data-router-ignore')
   return true if anchor.hasAttribute?('download')
@@ -43,14 +54,14 @@ export def _anchorHref(anchor): string | null
   return null if href.startsWith('//') or href.includes('\\')
   href
 
-export def ownsAnchor(router, anchor): boolean
+export def ownsAnchor(router: Pick<Router, 'claims'>, anchor: Anchor | null): boolean
   return false unless anchor?
   return false if excluded anchor
   href = _anchorHref anchor
   return false unless href?
   router.claims(href)?
 
-browserHost = ->
+browserHost = (): AriaHost ->
   unless typeof document isnt 'undefined' and typeof document.querySelectorAll is 'function'
     throw Error.new 'Rip App: ariaCurrent requires a browser or an injected host'
   anchors: -> Array.from document.querySelectorAll('a[href]')
@@ -73,7 +84,7 @@ browserHost = ->
       attributeFilter: ['href', 'target', 'download', 'data-router-ignore']
     -> observer.disconnect()
 
-export def ariaCurrent(router, host: { anchors: () => any[], observe?: (fn: () => void) => () => void } = null): () => void
+export def ariaCurrent(router: Pick<Router, 'claims' | 'path'>, host: AriaHost = null): () => void
   unless router? and typeof router.claims is 'function'
     throw TypeError.new 'Rip App: ariaCurrent requires a router'
   host = host ?? browserHost()

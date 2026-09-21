@@ -70,7 +70,7 @@ sha256 = (input) ->
   out.setUint32(i * 4, H[i], false) for i in [0...8]
   digest
 
-export rash = (value) ->
+export rash = (value: ArrayBuffer | ArrayBufferView): string ->
   d = sha256 value
   alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
   text = alphabet[d[0] >> 2] +
@@ -84,6 +84,6 @@ export rash = (value) ->
 # Complete authored-App inventory identity. Callers own structural validation;
 # this function owns the one deterministic byte representation hashed on both
 # sides of the publication protocol.
-export check = (files) ->
+export check = (files: { id: unknown, hash: unknown }[]): string ->
   inventory = JSON.stringify files.map (entry) -> [entry.id, entry.hash]
   rash TextEncoder.new().encode(inventory)

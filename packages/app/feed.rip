@@ -19,12 +19,22 @@ export type PublicationClient =
   apply: (change: Record<string, unknown>) => ApplyResult | Promise<ApplyResult>
   reload: (reason?: string) => void
 
+type FeedSocket =
+  send: (data: string) => void
+  close: () => void
+  onopen?: unknown
+  onmessage?: unknown
+  onclose?: unknown
+  onerror?: unknown
+
+type LatestResponse = { ok: boolean, status: number, json: () => unknown }
+
 export type ConnectFeedOpts =
   hub?: string
   latestUrl?: string
-  makeSocket?: (url: string) => any
-  fetch?: (url: string, opts?: Record<string, unknown>) => Promise<any>
-  report?: (...args: any[]) => void
+  makeSocket?: (url: string) => FeedSocket
+  fetch?: (url: string, opts?: Record<string, unknown>) => LatestResponse | Promise<LatestResponse>
+  report?: (...args: unknown[]) => void
   backoff?: { min?: number, max?: number }
   ackTimeout?: number
 
@@ -33,7 +43,7 @@ FEED_BACKOFF_MAX = 8000
 FEED_ACK_TIMEOUT = 5000
 serial = 0
 
-validHash = (hash) -> typeof hash is 'string' and /^[A-Za-z0-9_]{6}$/.test(hash)
+validHash = (hash): hash is string -> typeof hash is 'string' and /^[A-Za-z0-9_]{6}$/.test(hash)
 
 defaultHubUrl = ->
   if typeof location is 'undefined'
@@ -44,7 +54,7 @@ defaultHubUrl = ->
 defaultSocketFactory = ->
   if typeof WebSocket is 'undefined'
     throw Error.new 'Rip App: connectFeed needs a socket factory (no global WebSocket)'
-  (url) -> WebSocket.new(url)
+  (url): FeedSocket -> WebSocket.new(url)
 
 defaultFetch = ->
   if typeof fetch is 'undefined'
@@ -120,7 +130,7 @@ export def connectFeed(client: PublicationClient, opts: ConnectFeedOpts = {}): F
     response = fetchLatest! latestUrl, { cache: 'no-store' }
     unless response?.ok
       throw Error.new "latest.json fetch failed (#{response?.status})"
-    latest = response.json!
+    latest = response.json! as { hash?: unknown }
     unless latest? and typeof latest is 'object' and not Array.isArray(latest) and Object.keys(latest).length is 1 and Object.hasOwn(latest, 'hash') and validHash(latest.hash)
       throw Error.new 'latest.json is malformed'
     return if closed or failed or owner isnt connection

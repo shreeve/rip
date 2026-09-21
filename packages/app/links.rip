@@ -10,6 +10,8 @@
 # test under Node; the browser default delegates on `document`.
 
 import { ownsAnchor, _anchorHref } from './aria.rip'
+import type { Router } from './router.rip'
+import type { Renderer } from './renderer.rip'
 
 export type LinkHost =
   listen: (type: string, fn: (event: Event) => void, opts?: AddEventListenerOptions | boolean | null) => () => void
@@ -34,7 +36,7 @@ anchorFrom = (node) ->
   node = node.parentElement while node? and node.tagName isnt 'A'
   node ?? null
 
-export def interceptClicks(router, host: LinkHost = null): () => void
+export def interceptClicks(router: Pick<Router, 'claims' | 'push'>, host: LinkHost = null): () => void
   unless router? and typeof router.claims is 'function' and typeof router.push is 'function'
     throw TypeError.new 'Rip App: interceptClicks requires a router'
   host = host ?? browserHost()
@@ -58,7 +60,7 @@ export def interceptClicks(router, host: LinkHost = null): () => void
     remove()
     return
 
-export def preloadLinks(router, renderer, host: LinkHost = null): () => void
+export def preloadLinks(router: Pick<Router, 'claims'>, renderer: Pick<Renderer, 'preload'>, host: LinkHost = null): () => void
   unless router? and typeof router.claims is 'function'
     throw TypeError.new 'Rip App: preloadLinks requires a router'
   unless renderer? and typeof renderer.preload is 'function'

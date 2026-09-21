@@ -1,5 +1,7 @@
 import { unwrapStash, Stash } from './stash.rip'
 import { _isSourceCell, _isSourceFamily, SourceCell } from './source.rip'
+import type { Router } from './router.rip'
+import type { ComponentsStore } from './components.rip'
 import {
   __claimGateConstructor
   __hmrClassify
@@ -22,25 +24,35 @@ export type GateFailure =
   file: string
   error: unknown
 
+type RouteInfo =
+  route: { file: string, layouts?: readonly string[] }
+  params?: Record<string, string> | null
+  query?: Record<string, string> | null
+  layouts?: readonly string[] | null
+
+export type CompiledModules = Pick<ComponentsStore, 'getCompiled'> & Partial<Pick<ComponentsStore, 'exists'>>
+
+export type MountTarget = { appendChild(node: unknown): unknown; replaceChildren?: () => void; childNodes?: ArrayLike<unknown>; children?: ArrayLike<unknown> }
+
 export type Renderer =
-  mount: (info: Record<string, any>) => Promise<any>
-  preload: (info: Record<string, any>) => void
+  mount: (info: RouteInfo) => Promise<unknown>
+  preload: (info: RouteInfo | null) => void
   # Patch or remount the current route chain from the first dirty module
   # down, keeping ancestor layouts and the live stash.
   # Returns 'narrow' when it patched or remounted, 'noop' when nothing is
   # mounted or the dirty modules have no living instance, 'escape' when
   # the caller should fall back to whole-launch remount, 'reload' when
   # the committed tree is no longer coherent.
-  remountDirty: (paths: string[], candidate?: Record<string, any>) => Promise<'narrow' | 'noop' | 'escape' | 'reload'>
+  remountDirty: (paths: string[], candidate?: CompiledModules) => Promise<'narrow' | 'noop' | 'escape' | 'reload'>
   start: () => Renderer
   stop: () => void
-  readonly current: Record<string, any> | null
+  readonly current: unknown
 
 export type RendererOpts =
-  router: Record<string, any>
+  router: Router
   stash: Stash
-  components: Record<string, any>
-  target: Record<string, any>
+  components: CompiledModules
+  target: MountTarget
   onError?: (failure: GateFailure) => void
 
 # One mounted component in the route chain: its file, class, living
@@ -130,7 +142,7 @@ export def createRenderer(opts: RendererOpts): Renderer
     a.length is b.length and a.every (file, index) -> b[index] is file
 
   resolveGateCell = (path) ->
-    value = unwrapStash stash
+    value = unwrapStash(stash) as Record<string, any>
     segments = path.split '.'
     for segment, index in segments
       return null unless value? and (typeof value is 'object' or typeof value is 'function')

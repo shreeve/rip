@@ -8,7 +8,7 @@
 # unload, and registers the purge hook reset() invokes — signing out
 # never leaves the previous principal's snapshot behind.
 
-import { unwrapStash, _stashVersion, _mergePlain } from './stash.rip'
+import { unwrapStash, _stashVersion, _mergePlain, Stash } from './stash.rip'
 import { _isSourceCell } from './source.rip'
 
 PERSISTED =! :rip.app.stash.persisted
@@ -26,8 +26,8 @@ resolveStorage = (opts) ->
 # What persistence needs of a storage: the three Web Storage calls it makes.
 export type StashStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 
-export def persistStash(stash, opts: { local?: boolean, key?: string, debounce?: number, storage?: StashStorage } = {}): () => void
-  target = unwrapStash(stash) or stash
+export def persistStash(stash: Stash, opts: { local?: boolean, key?: string, debounce?: number, storage?: StashStorage } = {}): () => void
+  target: Record<string | symbol, unknown> = unwrapStash(stash) or stash
   return (-> null) if target[PERSISTED]
   target[PERSISTED] = true
   storage = resolveStorage opts
