@@ -344,12 +344,11 @@ value that must survive exactly — an identifier, a decimal amount — as a
 string.
 
 A document nests at most 100 levels deep, and the model refuses a deeper one
-before any SQL. That is far above any real document and below what harbor's
-request parser reads: 127 levels in all, of which the request's own
-`{"sql": …, "params": [ … ]}` takes two, so an object or array param nests at
-most 125 and a deeper one is answered HTTP 400, `recursion limit exceeded`.
-A write carries the document as text, but `where(doc: obj)` carries the
-object, so at 100 levels every document a model stores can also be asked for.
+before any SQL. That is far above any real document, and it is harbor's own
+limit for an object or array param: 100 levels bind, and a deeper one is
+answered HTTP 400, `a document param nests at most 100 levels` (harbor 0.41.2
+and later). A write carries the document as text, but `where(doc: obj)`
+carries the object, so every document a model stores can also be asked for.
 The engine's handling of a deeply nested VARIANT is reported upstream as
 duckdb/duckdb#25967: an `UPDATE` of a VARIANT column costs the square of the
 nesting depth (0.6 s at 1,000 levels, 15 s at 5,000, where an `INSERT` of the

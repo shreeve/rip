@@ -2664,8 +2664,8 @@ function carriable(v, field) {
 }
 
 // A document nests at most 100 levels deep: far above any real document,
-// and below the 125 levels harbor's request parser reads in an object or
-// array parameter, so a document a model stored also travels as the
+// and the depth harbor binds in an object or array parameter (a deeper
+// one is its HTTP 400), so a document a model stored also travels as the
 // parameter of a `where`. An UPDATE of a VARIANT column costs the square
 // of the nesting depth, 15 seconds at 5,000 levels, and segfaults the
 // engine at 20,000; the cast itself segfaults at 40,000
