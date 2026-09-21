@@ -385,6 +385,26 @@ async function isClassType(type) {
   return symbol != null && (symbol.flags & SymbolFlags.Class) !== 0;
 }
 
+// A component instance publishes what it offers and the runtime API. A
+// prop is published through the constructor that takes it, which the walk
+// opens on its own. Every other member is the component's own: no parent
+// can hold the instance (`ref:` on a child component rejects at compile),
+// and a render block is the lowering's, with no source to annotate.
+//
+// The instance is known by the `__offers` record every component's face
+// declares, a name no author can write. Null is "not a component";
+// undefined is a record the checker would not open, which the caller
+// counts as lost rather than reading the instance as empty.
+const COMPONENT_API = ['mount', 'unmount', 'emit'];
+async function componentSurface(ck, props, cache) {
+  const record = props.find((p) => p.name === '__offers');
+  if (record === undefined) return null;
+  const recordType = await ck.getTypeOfSymbol(record);
+  if (recordType === undefined) return undefined;
+  const offered = (await membersOf(ck, recordType, cache)).props;
+  return new Set([...COMPONENT_API, ...offered.map((p) => p.name)]);
+}
+
 // Whether a member is declared `private` (a class member no consumer can
 // name), read off its declaration's modifiers.
 async function isPrivate(symbol) {
@@ -614,6 +634,8 @@ async function walkOne(ck, rootType, rootName, owns, rootSymbol, siblings, funct
           });
         }
       }
+      const published = await componentSurface(ck, props, caches.members);
+      if (published === undefined) { lost++; continue; }
       for (const prop of props) {
         if (!declaredUnder(prop, owns)) continue;
         // A private member is the class's own, not a consumer's surface:
@@ -623,6 +645,7 @@ async function walkOne(ck, rootType, rootName, owns, rootSymbol, siblings, funct
         // typed, never a member a consumer reads; each entry is already
         // counted as the member it repeats.
         if (prop.name === '__offers') continue;
+        if (published !== null && !published.has(prop.name)) continue;
         const propType = await ck.getTypeOfSymbol(prop);
         if (propType === undefined) { lost++; continue; }
         const propStop = await siblingStop(ck, propType, siblings, rootSymbol, owns, functionTypeId, caches);

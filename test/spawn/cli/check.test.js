@@ -2056,6 +2056,44 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     }
   }, 90_000);
 
+  test('--public counts a component by its props, its offers, and the runtime API — never a bare member or a render block', async () => {
+    const dir = workspace({
+      'index.rip': [
+        'export Panel = component',
+        '  @open: boolean := false',
+        "  offer tone := 'calm'",
+        '  handle = (e: Event) -> open = false',
+        '  held: any = null',
+        '  render',
+        '    div',
+        '      if open',
+        "        span 'open'",
+        '      slot',
+        '',
+        'export Leaky = component',
+        '  @data: any',
+        '  offer wide: any := 0',
+        '  render',
+        '    div',
+        '      slot',
+        '',
+      ].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'surface-pkg', exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = await check(dir, ['--public']);
+      expect(out.stdout).toMatch(/✓ Panel/);
+      const leaks = out.stdout.split('\n').filter((l) => l.includes(' at: ')).map((l) => l.replace(/^.* at: /, '').trim());
+      expect(leaks.filter((l) => l.startsWith('Leaky#')).sort()).toEqual(['Leaky#wide.read()', 'Leaky#wide.value']);
+      expect(leaks).toContain('Leaky.new(props).data');
+      expect(leaks.every((l) => l.startsWith('Leaky'))).toBe(true);
+      expect(out.stdout).toContain('1/2 exports fully typed (50.0%)');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   test('--public reaches an `any` held inside a type: element, type argument, and index value', async () => {
     const dir = workspace({
       'index.rip': [
