@@ -242,6 +242,16 @@ fail 'an optional call directly on a bare construction rejects', 'x = new a.b?(1
 fail 'an optional call directly on a bare named construction rejects', 'x = new Foo?(1)', 'directly on a construction with no argument list has no reading'
 fail 'an optional index directly on a bare construction rejects', 'x = new a.b?[0]', 'directly on a construction with no argument list has no reading'
 fail 'a parenthesized call operand spells no argument list of its own', 'x = new (f())?(1)', 'directly on a construction with no argument list has no reading'
+fail 'the rejection names the conditional-construction spelling', 'x = new Foo?(1)', 'To construct only when the class exists, test it'
+code 'constructing only when the class exists is spelled with a test', 'x = if Foo? then new Foo(1)', 'let x = (Foo != null) ? new Foo(1) : undefined;'
+test 'a tested construction skips a missing class and builds a present one', '''
+  class Here
+    constructor: (n) -> @n = n
+  Gone = null
+  a = if Here? then new Here(7)
+  b = if Gone? then new Gone(7)
+  [a.n, b]
+''', [7, undefined]
 code 'an optional call after a closed construction soaks the instance', 'x = new X(1)?(2)', 'let x = new X(1)?.(2);'
 code 'an optional index after a closed construction soaks the instance', 'x = new X(1)?[0]', 'let x = new X(1)?.[0];'
 code 'an empty argument list closes the construction too', 'x = new X()?(2)', 'let x = new X()?.(2);'
