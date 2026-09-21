@@ -4,21 +4,6 @@ Open work only, in the order it should be done. Delete a line when it
 lands or moves into docs/tests. The design and the order of the larger
 steps are in [PLAN.md](PLAN.md).
 
-## 3. Reading `layout.rip`
-
-- [ ] `edges` has no caller but two pins in `test/layout.rip`, and its
-      arm for a node not laid out is reached by nothing: give it a
-      caller, or remove it with its pins.
-- [ ] The `border*Width` keys and `overflow: 'scroll'` are reached only
-      by writing `styles` past the document, which refuses both: Yoga's
-      cases through the shim (about 160 write a border width, 3
-      scroll), and the fuzz. Let the document take them, or stop the
-      suites writing them; until then the slots stay.
-- [ ] A leaf sums its padding and border as Yoga does — both paddings,
-      then both borders — and `insideAxis` sums edge by edge.
-      Fractional edges part the two by one rounding, so one sum for
-      both moves floats: decide which order stands.
-
 ## 4. Layout cost
 
 - [ ] **A layout boundary.** A change dirties every ancestor up to the

@@ -113,7 +113,10 @@ NOWRAP       =! 0
 WRAP         =! 1
 WRAP_REVERSE =! 2
 
-# `overflow`, where only scrolling changes a layout, and `boxSizing`
+# `overflow`, where only scrolling changes a layout, and `boxSizing`.
+# The engine's contract is Yoga's suite, which scrolls; the document
+# writes only what a terminal draws, where scrolling is `overflow:
+# 'hidden'` and a content offset, so no app reaches `scroll`.
 SCROLL      =! 2
 CONTENT_BOX =! 1
 
@@ -456,9 +459,12 @@ put! =! (lay, slot, value, rank, key) ->
   lay.u[slot] = unit
   lay.v[slot] = number
 
-# A border width: a number where a test writes one, one cell where a
-# `borderStyle` draws, none on a side switched off. A side left on writes
-# nothing a `borderStyle` does not outrank.
+# A border width: one cell where a `borderStyle` draws, none on a side
+# switched off, and any number through a `border*Width` key. Yoga's
+# suite, the engine's contract, needs a border of any width; the document
+# writes only what a terminal draws, a border of 0 or 1, so no app
+# reaches those keys. A side left on writes nothing a `borderStyle` does
+# not outrank.
 borderAt! =! (lay, slot, width, rank, key) ->
   throw Error.new "rip/tui: #{key}: #{JSON.stringify width} is not a border width — write a finite number" unless Number.isFinite width
   return if rank < RANKS[slot]
@@ -674,21 +680,6 @@ boxOf =! (node) ->
 # out: elements and text, never anchors or the hidden, with `contents`
 # children replaced by theirs.
 export kids =! (node) -> node.lay.kids
-
-# Padding plus border on each edge: [top, right, bottom, left]. A clean
-# node resolves its percents against the owner width it was laid out
-# under — `lay.padding` holds whatever the last visit resolved, which a
-# measure-only visit may have made after the layout. Any other node
-# resolves its points.
-export edges =! (node) ->
-  lay = node.lay
-  ref = NaN
-  if lay and not node.dirty
-    ref = lay.ownerW
-  else
-    lay = Lay.new()
-    parse lay, node.styles ?? PLAIN, false
-  [insideAt(lay, TOP, ref), insideAt(lay, RIGHT, ref), insideAt(lay, BOTTOM, ref), insideAt(lay, LEFT, ref)]
 
 # Layout never visits a hidden subtree or the inside of a text leaf, so
 # such a node is put away whole: no dirty mark, which would stop its next

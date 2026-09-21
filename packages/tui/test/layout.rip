@@ -8,7 +8,7 @@
 
 import { test, eq, ok, throws } from 'rip/testing'
 import { Element, Text, Node } from '../document.rip'
-import { layout, edges, admit, whereabouts } from '../layout.rip'
+import { layout, admit, whereabouts } from '../layout.rip'
 
 div = (styles = {}, kids = []) ->
   node = Element.new 'div'
@@ -209,17 +209,15 @@ test "an absolute node under a static chain follows its parent's laid-out size, 
   settled root, 100, 30
   eq pinned.rect.y, 8
 
-test "edges answers the padding the node was laid out with", ->
-  make = ->
-    padded = div { width: 10, height: 1, paddingLeft: '10%' }
-    root = div { flexDirection: 'row', alignItems: 'flex-start' }, [div({ flexDirection: 'row' }, [div({ width: 30, height: 1 }), padded])]
-    { root, padded }
-  live = make()
-  layout live.root, 100
-  layout live.root, 90
-  fresh = make()
-  layout fresh.root, 90
-  eq edges(live.padded), edges(fresh.padded)
+test "an absolute node under a static parent sits inside the padding that parent was laid out with, not a later measurement's", ->
+  # The row is measured under the space and laid out at its content's 40,
+  # so its child's percent padding is 10 or 9 when measured and 4 laid out.
+  pinned = div { position: 'absolute', width: 2, height: 1 }
+  padded = div { position: 'static', width: 10, height: 1, paddingLeft: '10%' }, [pinned]
+  root = div { flexDirection: 'row', alignItems: 'flex-start' }, [div({ position: 'static', flexDirection: 'row' }, [div({ width: 30, height: 1 }), padded])]
+  settled root, 100
+  settled root, 90
+  eq at(pinned), '34,0 2x1'
 
 test "an offer of −1 is an offer like any other", ->
   inner = div { height: 3 }
@@ -570,12 +568,11 @@ test "flexGrow, flexShrink, and flexBasis each outrank flex, whichever is writte
   eq a.rect.h, 8
 
 test "a shorthand yields to its longhands", ->
-  inner = div()
+  inner = div { flexGrow: 1 }
   outer = div { padding: 1, paddingX: 3, paddingLeft: 5, margin: 2, marginY: 0, marginTop: 4, width: 30, height: 10 }, [inner]
   layout div({ alignItems: 'flex-start' }, [outer]), 60
   eq at(outer), '2,4 30x10'
-  eq at(inner), '7,5 22x0'
-  eq edges(outer), [1, 3, 1, 5]
+  eq at(inner), '7,5 22x8'
 
 test "a value layout cannot use is refused by name, for the key it was written to", ->
   refused = [

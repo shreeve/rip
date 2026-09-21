@@ -220,7 +220,12 @@ shrink, basis, align-items / self / content including **baseline**,
 justify, gap, margin (including auto), padding, border, width /
 height / min / max in points or percent, relative, absolute, and
 **static** position with insets, `display: none`, and measure
-functions for text.
+functions for text. The engine's contract is Yoga's suite, which needs
+a border of any width (`border*Width`) and `overflow: 'scroll'`, so
+the engine keeps both. The document writes only what a terminal can
+draw — a border is 0 or 1 cell, and scrolling is `overflow: 'hidden'`
+plus a content offset — so both are reached by writing `styles` past
+the document, as the shim and the fuzz do.
 
 Two features Ink exposes are in scope because a retrofit would be
 expensive and a terminal needs them:
