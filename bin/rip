@@ -161,11 +161,19 @@ if (args[0] === 'test') {
 // Dispatch is independent of the caller's cwd and of package-manager bin links.
 if (args[0] === 'sites') {
   const applianceCliPath = join(dirname(fileURLToPath(import.meta.url)), '../packages/sites/sites.rip');
+  // Ctrl-C belongs to the manager; this launcher outlives it, then
+  // dies of the same signal so its caller sees an interrupt, not a failure.
+  const interrupt = () => {};
+  process.on('SIGINT', interrupt);
   const r = spawnSync('bun', [`--preload=${loaderPath}`, applianceCliPath, ...args.slice(1)], {
     stdio: 'inherit',
     env: process.env,
   });
-  process.exit(r.status ?? 1);
+  if (r.status === 130 || r.signal === 'SIGINT') {
+    process.off('SIGINT', interrupt);
+    process.kill(process.pid, 'SIGINT');
+  }
+  process.exit(r.status ?? (r.signal === 'SIGINT' ? 130 : r.signal === 'SIGTERM' ? 143 : 1));
 }
 
 // Retired CLIs — point at the unified surface.

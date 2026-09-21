@@ -951,11 +951,13 @@ waitReady = (proc, socket) ->
 
 stopWorker = (proc) ->
   return unless proc?
-  proc.kill 'SIGTERM' unless proc.exitCode?
+  # A signal-killed child reports a signalCode and a null exitCode.
+  gone = -> proc.exitCode? or proc.signalCode?
+  proc.kill 'SIGTERM' unless gone()
   deadline = Date.now() + 5000
-  while not proc.exitCode? and Date.now() < deadline
+  while not gone() and Date.now() < deadline
     Promise.new! (done) -> setTimeout done, 10
-  proc.kill 'SIGKILL' unless proc.exitCode?
+  proc.kill 'SIGKILL' unless gone()
   await proc.exited
 
 killWorker = (proc) ->

@@ -176,6 +176,47 @@ test! 'manager configures a pool and replaces a crashed worker', ->
     control.stop true
     rmSync dir, { recursive: true, force: true }
 
+test! 'a terminal interrupt that also kills the workers stops the manager at once', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-workers-interrupt-')
+  project = temporaryProject dir, 'index.rip'
+  controlSocket = join dir, 'janus.sock'
+  registration = null
+  deleted = false
+  control = Bun.serve
+    unix: controlSocket
+    fetch: (request) ->
+      url = URL.new request.url
+      if request.method is 'POST' and url.pathname is '/1.0/apps'
+        registration = request.json!
+        return Response.json({ id: 'interrupt-registration' }, { status: 201 })
+      if request.method is 'DELETE' and url.pathname is '/1.0/apps/interrupt-registration'
+        deleted = true
+      Response.new(null, { status: 204 })
+  proc = null
+  try
+    proc = Bun.spawn [process.execPath, PRELOAD, SERVER, project, '--host', 'interrupt.test', '--workers', '2', '--no-watch', '--control', controlSocket, '--access-log=off'],
+      stdin: 'ignore'
+      stdout: 'ignore'
+      stderr: 'ignore'
+    waitFor! -> registration?
+    listed = Bun.spawnSync ['pgrep', '-P', String(proc.pid)]
+    pids = listed.stdout.toString().trim().split('\n').map Number
+    eq pids.length, 2
+
+    # Ctrl-C reaches the whole foreground group: the workers, which
+    # do not handle SIGINT, and the manager.
+    started = Date.now()
+    process.kill pid, 'SIGINT' for pid in pids
+    proc.kill 'SIGINT'
+    eq (await proc.exited), 130
+    ok Date.now() - started < 2000
+    ok deleted
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
 test! 'manager replaces one startup crash before publishing readiness', ->
   dir = mkdtempSync join(tmpdir(), 'rip-workers-startup-crash-')
   project = temporaryProject dir, 'crash.rip'

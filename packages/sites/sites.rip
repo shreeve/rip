@@ -79,13 +79,21 @@ runManager = (argv, options = {}) ->
   manager = join(import.meta.dir, 'manager.rip')
   preload = process.execArgv.find (arg) -> arg.startsWith '--preload='
   abort 'rip-sites: the Rip loader is missing' unless preload?
+  # Ctrl-C reaches the manager through the terminal's foreground group;
+  # this process stays up until the manager has released its lock, then
+  # dies of the same signal so its caller sees an interrupt, not a failure.
+  interrupt = ->
+  process.on 'SIGINT', interrupt
   result = Bun.spawnSync [process.execPath, preload, manager, ...argv],
     cwd: options.cwd or process.cwd()
     stdout: 'inherit'
     stderr: 'inherit'
     stdin: 'inherit'
     env: { ...process.env }
-  exit result.exitCode ?? 1
+  if result.exitCode is 130 or result.signalCode is 'SIGINT'
+    process.off 'SIGINT', interrupt
+    process.kill process.pid, 'SIGINT'
+  exit result.exitCode ?? (if result.signalCode is 'SIGINT' then 130 else if result.signalCode is 'SIGTERM' then 143 else 1)
 
 takeAppNoun = ->
   abort "rip-sites: #{verb} requires an app noun (id | name | root)" unless args.length and not args[0].startsWith('-')
