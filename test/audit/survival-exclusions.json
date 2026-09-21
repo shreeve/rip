@@ -150,7 +150,11 @@
     "77:4:div": "lowered into a string — the face holds these bytes inside a literal",
     "78:13:inner": "channel spelling (`<=>`) — rip-native; the lowering leaves no tokenizable identifier at this position",
     "131:4:span": "lowered into a string — the face holds these bytes inside a literal",
-    "135:4:div": "lowered into a string — the face holds these bytes inside a literal"
+    "135:4:div": "lowered into a string — the face holds these bytes inside a literal",
+    "143:2:offer": "context-channel word — lowers to a setContext/getContext call, not an identifier",
+    "146:4:slot": "render DSL word — lowers into a string",
+    "149:2:accept": "context-channel word — lowers to a setContext/getContext call, not an identifier",
+    "154:4:span": "lowered into a string — the face holds these bytes inside a literal"
   },
   "26-schema.rip": {
     "23:6:datetime": "lowered into a string — the face holds these bytes inside a literal",

@@ -148,6 +148,7 @@ type 'gate: annotated value is a non-null readonly computed container', '''
     params?: any;
     query?: any;
     children?: Node | string | number | boolean | null;
+    __offers?: {};
     mount(target?: Node | string): UserCard;
     unmount(options?: { removeDOM?: boolean }): void;
     emit(name: string, detail?: unknown): void;

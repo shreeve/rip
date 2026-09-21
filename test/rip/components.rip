@@ -579,7 +579,7 @@ test 'setContext and getContext via effect', '''
     theme =! "dark"
     ~>
       setContext("theme", @theme)
-      result = getContext("theme")
+      result = getContext(A, "theme")
   a = A.new()
   result
 ''', 'dark'
@@ -614,12 +614,12 @@ test 'a part projected through slot accepts what the receiving root offers', '''
 
     seen = []
     Part = component
-      accept open
+      accept open from Root
       ~> seen.push open
       render
         span
     Other = component
-      accept open
+      accept open from Root
       ~> seen.push open
       render
         em
@@ -646,7 +646,7 @@ test 'a part projected through slot accepts what the receiving root offers', '''
 test 'offer and accept share the same signal', '''
   result = null
   Child = component
-    accept active
+    accept active from Parent
     ~> result = active
   Parent = component
     offer active := "hello"
@@ -655,6 +655,123 @@ test 'offer and accept share the same signal', '''
   __popComponent(null)
   result
 ''', 'hello'
+
+# The read names its provider: a nearer ancestor offering the same key
+# is passed over, and a provider that is not above the reader is a miss
+# at mount, naming both.
+test 'accept reads the named provider past a nearer one offering the same key', '''
+  result = null
+  Child = component
+    accept active from Outer
+    ~> result = active
+  Inner = component
+    offer active := "inner"
+  Outer = component
+    offer active := "outer"
+  o = __pushComponent(Outer.new())
+  i = __pushComponent(Inner.new())
+  c = Child.new()
+  __popComponent(null)
+  result
+''', 'outer'
+
+test 'accept without the named provider above it throws at mount', '''
+  Child = component
+    accept active from Outer
+  Inner = component
+    offer active := "inner"
+  Outer = component
+    offer active := "outer"
+  i = __pushComponent(Inner.new())
+  try
+    Child.new()
+    'no throw'
+  catch e
+    e.message
+''', 'getContext: no Outer above this component — render one around it, or probe with hasContext(Outer, "active") where absence is legal'
+
+test 'accept of a member the named provider does not offer throws at mount', '''
+  Child = component
+    accept theme from Root
+  Root = component
+    offer active := "x"
+  r = __pushComponent(Root.new())
+  try
+    Child.new()
+    'no throw'
+  catch e
+    e.message
+''', 'getContext: Root offers no "theme"'
+
+test 'accept from a binding that holds no component throws at mount, naming the member', '''
+  Plain = 5
+  Child = component
+    accept theme from Plain
+  try
+    Child.new()
+    'no throw'
+  catch e
+    e.message
+''', 'getContext: the provider named for "theme" is not a component'
+
+# `offer` opens a declaration the way `export` does, so an offer takes an
+# annotation like any other state.
+test 'an annotated offer is a state declaration, shared with its accept', '''
+  result = null
+  Child = component
+    accept level from Parent
+    ~> result = level + 1
+  Parent = component
+    offer level: number := 41
+  p = __pushComponent(Parent.new())
+  c = Child.new()
+  __popComponent(null)
+  result
+''', 42
+
+test 'an annotated public offer is a prop the caller can set', '''
+  result = null
+  Child = component
+    accept side from Parent
+    ~> result = side
+  Parent = component
+    offer @side: string := "left"
+  p = __pushComponent(Parent.new(side: "right"))
+  c = Child.new()
+  __popComponent(null)
+  result
+''', 'right'
+
+fail 'an annotated offer is still a state declaration, not a readonly', '''
+  Root = component
+    offer limit: number =! 10
+''', 'emitter: offer takes a state declaration'
+
+fail 'accept names its provider', '''
+  Child = component
+    accept active
+''', 'emitter: accept names its provider'
+
+fail 'accept reads from a component, not any binding', '''
+  mint = -> 1
+  Child = component
+    accept active from mint
+''', "emitter: accept reads from a component bound in this module — 'mint' is not one"
+
+fail 'offer takes a state declaration, not a readonly', '''
+  Root = component
+    offer limit =! 10
+''', 'emitter: offer takes a state declaration'
+
+fail 'offer takes a state declaration, not a computed', '''
+  Root = component
+    offer total ~= 1
+''', 'emitter: offer takes a state declaration'
+
+fail 'offer takes a state declaration, not a method', '''
+  Root = component
+    offer save = (e) ->
+''', 'emitter: offer takes a state declaration'
 
 test 'component multiple computed chain', '''
   A = component
@@ -1504,19 +1621,34 @@ code 'offer compiles to state + setContext', '''
   };
   '''
 
-code 'accept compiles to getContext', '''
-  export A = component
-    accept active
+code 'accept compiles to getContext naming the provider', '''
+  export Root = component
+    offer active := "hello"
+    render
+      div
+  export Part = component
+    accept active from Root
     render
       div
   ''', '''
-  export const A = class extends __Component {
+  export const Root = class extends __Component {
     _init(__given) {
-      this.active = getContext('active');
+      this.active = __state("hello");
+      setContext('active', this.active);
     }
     _create() {
       this._el0 = document.createElement('div');
-      this._el0.setAttribute('data-part', 'A');
+      this._el0.setAttribute('data-part', 'Root');
+      return this._el0;
+    }
+  };
+  export const Part = class extends __Component {
+    _init(__given) {
+      this.active = getContext(Root, 'active');
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'Part');
       return this._el0;
     }
   };
@@ -5078,10 +5210,12 @@ test 'init failure without onError throws from constructor', '''
 test 'context walk terminates on a cycled parent chain', '''
   A = component
     val =! "x"
+  Absent = component
+    val =! "y"
   a = A.new()
   a._parent = a
   __pushComponent(a)
-  result = hasContext("missing")
+  result = hasContext(Absent, "missing")
   __popComponent(null)
   result
   ''', false
@@ -5106,36 +5240,57 @@ test 'context propagates from outer to inner across re-push', '''
   Outer = component
     init = -> setContext("greeting", "hi")
   Inner = component
-    val := getContext("greeting")
+    val := getContext(Outer, "greeting")
   o = Outer.new()
   __pushComponent(o)
   o.init()
   i = Inner.new()
   __popComponent(null)
   __pushComponent(i)
-  again = getContext("greeting")
+  again = getContext(Outer, "greeting")
   __popComponent(null)
   [i.val.value, again]
   ''', ['hi', 'hi']
 
-# A context miss is LOUD — getContext without a provider rejects and
-# names the probe; hasContext is the legal-absence spelling.
+# A context miss is LOUD — getContext with no such provider above rejects
+# and names the probe; hasContext is the legal-absence spelling. A read
+# that names no provider at all is refused, pointing at the spelling.
 
-test 'getContext without a provider rejects; hasContext probes', '''
+test 'getContext with no such provider above rejects; hasContext probes', '''
+  A = component
+    render
+      div
+  Absent = component
+    render
+      div
+  a = A.new()
+  __pushComponent(a)
+  probe = hasContext(Absent, "missing")
+  msg = try
+    getContext(Absent, "missing")
+    "no-throw"
+  catch e
+    e.message
+  __popComponent(null)
+  [probe, msg]
+  ''', [false, 'getContext: no Absent above this component — render one around it, or probe with hasContext(Absent, "missing") where absence is legal']
+
+test 'a context read that names no provider is refused, pointing at the spelling', '''
   A = component
     render
       div
   a = A.new()
   __pushComponent(a)
-  probe = hasContext("missing")
-  msg = try
-    getContext("missing")
-    "no-throw"
-  catch e
-    e.message.includes("no provider")
+  msgs = []
+  for read in [(-> getContext("theme")), (-> hasContext("theme"))]
+    try
+      read()
+      msgs.push "no-throw"
+    catch e
+      msgs.push e.message
   __popComponent(null)
-  [probe, msg]
-  ''', [false, true]
+  msgs
+  ''', ['getContext: a context read names its provider — getContext(Provider, "theme")', 'hasContext: a context read names its provider — hasContext(Provider, "theme")']
 
 test 'mount failure dispatch restores the parent component and owner frames', '''
   source := 0

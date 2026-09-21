@@ -560,6 +560,21 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // the FOR so the state survives newlines inside brackets opened after
   // it (`for x in [1,\n2]`); null = no pending FOR.
   let seenFor = null;
+  // Where a module line's specifier begins: after its brace, after a
+  // comma, or at the head of a line inside the braces.
+  const specifierStart = (prev) => prev?.kind === '{' || prev?.kind === ',' ||
+    ((prev?.kind === 'INDENT' || prev?.kind === 'TERMINATOR') && parens.length > 0);
+  // A word the scanner reads as anything but a name.
+  const reservedSpelling = (word) => Boolean(KEYWORDS[word] && word !== 'own') ||
+    RESERVED_WORDS.has(word) || STATEMENTS.has(word) || Boolean(ALIASES[word]) ||
+    word === 'in' || word === 'of' || word === 'when' || word === 'import' || word === 'export';
+  // The foreign side of a specifier: on an import line, the word at a
+  // specifier's start with `as` after it; on an export line, the word
+  // after `as`.
+  const foreignModuleName = (prev, afterWord) =>
+    (seenImport && specifierStart(prev) && /^[^\S\n]+as[^\S\n]/.test(afterWord)) ||
+    (seenExport && prev?.kind === 'AS');
+
   // Module-statement scan state (seenImport/seenExport): the
   // contextual keywords `as`/`from`/`default` only tag inside an
   // import/export line — `from = 1` and `as = 2` stay identifiers. The
@@ -614,6 +629,11 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     // `yield from` — the delegation keyword pair: `from` right after
     // YIELD is the FROM token (contextual, like the module form).
     if (kind === 'IDENTIFIER' && value === 'from' && tokens[tokens.length - 1]?.kind === 'YIELD') {
+      kind = 'FROM';
+    }
+    // `accept name from Provider` — the same contextual FROM.
+    if (kind === 'IDENTIFIER' && value === 'from' &&
+        tokens[tokens.length - 1]?.kind === 'IDENTIFIER' && tokens[tokens.length - 2]?.kind === 'ACCEPT') {
       kind = 'FROM';
     }
     // Negated relations: word-`not` directly before in/of/instanceof
@@ -1421,6 +1441,17 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         push('PROPERTY', value, start, pos);
       } else if (keysColon || inPickKeyPos()) {
         push('PROPERTY', word, start, pos);
+      } else if (word !== 'default' && word !== 'as' && foreignModuleName(prev, afterWord)) {
+        // A specifier's FOREIGN side names something in another module,
+        // never a binding here — the imported name before `as`, the
+        // exported name after it — so it is a name whatever it spells,
+        // the way a word after a dot is (`{ render as draw }`,
+        // `{ draw as render }`). JavaScript reads both sides the same.
+        push('IDENTIFIER', word, start, pos);
+      } else if (seenImport && word !== 'default' && word !== 'type' && reservedSpelling(word) &&
+                 (specifierStart(prev) || prev?.kind === 'AS' || prev?.kind === 'IMPORT')) {
+        // The LOCAL side is a binding, and a keyword cannot be one.
+        fail(`'${word}' is a Rip keyword, so it cannot be the local name of an import — bind it under another name (\`import { ${word} as ${word}_ } from '…'\`)`, start, pos);
       } else if (word === 'import') {
         // `import(` / `import!(` is the dynamic-import CALL and
         // `import.` heads the import.meta member — neither opens a

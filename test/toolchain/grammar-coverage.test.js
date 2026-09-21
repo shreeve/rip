@@ -21,6 +21,7 @@ const EXCLUDED = new Map([
   ['For → FOR Range Block', 'banned by design — the emitter rejects a for loop that binds no variable (loops.rip pins the rejection)'],
   ['For → FOR Range BY Expression Block', 'banned by design — the emitter rejects a for loop that binds no variable (loops.rip pins the rejection)'],
   ['ImportSpecifier → DEFAULT', 'no legal ES lowering — a bare default specifier binds nothing; the emitter rejects it, pointing at `import name from` and `default as name`'],
+  ['ComponentLine → ACCEPT IDENTIFIER', 'an accept names its provider; the emitter rejects the bare form, pointing at `accept name from Component` (components.rip pins the rejection)'],
 ]);
 
 const names = Parser().ruleNames;

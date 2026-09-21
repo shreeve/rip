@@ -483,14 +483,14 @@ describe('renderer render gates', () => {
     class Inner extends __Component {
       _init() {
         inner = this;
-        accepted.push(getContext('theme'));
+        accepted.push(getContext(Outer, 'theme'));
       }
       _create() { return innerRoot; }
     }
     class Page extends __Component {
       _init() {
         page = this;
-        accepted.push(getContext('theme'));
+        accepted.push(getContext(Outer, 'theme'));
       }
       _create() { return pageRoot; }
     }

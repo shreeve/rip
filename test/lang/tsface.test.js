@@ -1430,9 +1430,11 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
  '  total: number ~= count * 2',
  '  limit: number =! 100',
  '  note = "n"',
- '  accept theme',
+ '  accept theme from Theme',
  '  bump = (n: number): number -> count += n',
  '  mounted = -> console.log "hi"',
+ 'Theme = component',
+ '  offer theme := "dark"',
  '',
   ].join('\n');
 
@@ -1447,9 +1449,39 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     expect(code).toContain('declare total: { readonly value: number; read(): number };'); // computed
     expect(code).toContain('declare readonly limit: number;'); // =! members declare readonly                   // readonly: the raw value
     expect(code).toContain('declare note: string;');                   // plain field: literal initializer infers 
-    expect(code).toContain('declare theme: any;');                     // accept: the cross-component boundary is honest any
+    expect(code).toContain("declare theme: NonNullable<InstanceType<typeof Theme>['__offers']>['theme'];"); // accept: the provider's own offered member, read off the value so an alias provides too
     expect(code).toContain('declare children?: __RipChildren;');       // the projection slot (slot reads this.children), typed as what the runtime delivers
     expect(code).toContain('[key: `_${string}`]: any;');               // the minted/runtime slot namespace
+  });
+
+  test("an offer's annotation types the member, the record of what is offered, and the accept that reads it", () => {
+    const code = ts([
+      "type Side = 'left' | 'right'",
+      'Root = component',
+      '  offer depth: number := 0',
+      "  offer @side: Side := 'left'",
+      'Part = component',
+      '  accept side from Root',
+      '',
+    ].join('\n')).code;
+    expect(code).toContain('declare depth: { value: number; read(): number; touch(): void };');
+    expect(code).toContain('declare side: { value: Side; read(): Side; touch?(): void };');
+    expect(code).toContain('declare __offers: { depth: { value: number; read(): number; touch(): void }; side: { value: Side; read(): Side; touch?(): void } };');
+    expect(code).toContain("declare side: NonNullable<InstanceType<typeof Root>['__offers']>['side'];");
+    // A component that offers nothing still declares the record, empty.
+    expect(code).toContain('declare __offers: {};');
+  });
+
+  test("a generic provider's record carries its parameter, and an accept from it reads at the constraint", () => {
+    const code = ts([
+      'Select<T extends { id: number }> = component',
+      '  offer @options: T[] := []',
+      'Row = component',
+      '  accept options from Select',
+      '',
+    ].join('\n')).code;
+    expect(code).toContain('declare __offers: { options: { value: T[]; read(): T[]; touch?(): void } };');
+    expect(code).toContain("declare options: NonNullable<InstanceType<typeof Select>['__offers']>['options'];");
   });
 
   test('methods and hooks are REAL class methods with annotations — never declares', () => {

@@ -530,7 +530,7 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
         '  @size: number := 1',             // 2
         '  count := 0',                     // 3
         '  total ~= count * 2',             // 4
-        '  accept theme',                   // 5
+        '  accept theme from Theme',        // 5
         '  onClick = (e) ->',               // 6
         '    count += 1',                   // 7
         '  render',                         // 8
@@ -543,7 +543,11 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
         '  render',                         // 15
         '    section',                      // 16
         '      Card title: name, size: 3',  // 17
-        'console.log Card, App',            // 18
+        'console.log Card, App, Theme',     // 18
+        'Theme = component',                // 19
+        '  offer theme := "dark"',          // 20
+        '  render',                         // 21
+        '    div',                          // 22
         '',
       ].join('\n');
       client.notify('textDocument/didOpen', {
@@ -596,10 +600,10 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       // occurrence of it: one binding never answers two ways.
       expect(renderRead.contents.value).toContain('(prop) title: string');
       expect(renderRead.contents.value).not.toContain('read()');
-      // The accept member is the honest cross-component boundary: the
-      // offered container's type is not knowable statically — any.
+      // An accepted member is the named provider's own offered member,
+      // and answers value-first like the offer it reads.
       const accepted = await hoverAt(client, 5, 10);
-      expect(accepted.contents.value).toContain('theme: any');
+      expect(accepted.contents.value).toContain('(accept) theme: string');
     } finally {
       await client.stop();
     }
@@ -822,6 +826,57 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
         textDocument: { uri }, position: { line: 6, character: 35 },
       });
       expect(hover?.contents?.value).toContain('component Popup extends dialog');
+    } finally {
+      await client.stop();
+    }
+  });
+
+  test("an accept's provider is a real reference, and the accepted member answers value-first wherever it is read", async () => {
+    const published = [];
+    const client = await startServer((p) => published.push(p));
+    try {
+      const src = [
+        'Root = component',                   // 0
+        '  offer open := false',              // 1
+        '  render',                           // 2
+        '    slot',                           // 3
+        'Part = component',                   // 4
+        '  accept open from Root',            // 5
+        '  shut = -> open = false',           // 6
+        '  render',                           // 7
+        '    span',                           // 8
+        '      = open',                       // 9
+        'console.log Root, Part',             // 10
+        '',
+      ].join('\n');
+      const wait = nextDiagnostics(published);
+      client.notify('textDocument/didOpen', {
+        textDocument: { uri, languageId: 'rip', version: 1, text: src },
+      });
+      expect((await wait()).diagnostics).toEqual([]);
+      expect(src.split('\n')[5].slice(19, 23)).toBe('Root');
+      const at = { textDocument: { uri }, position: { line: 5, character: 20 } };
+      const def = await client.request('textDocument/definition', at);
+      expect(def?.[0]?.range?.start?.line).toBe(0);
+      const provider = await client.request('textDocument/hover', at);
+      // The name answers as every bare reference to a component does.
+      expect(provider?.contents?.value).toBe((await hoverAt(client, 10, 13)).contents.value);
+      expect(provider?.contents?.value).toContain('Root: typeof Root');
+      // A rename of the component reaches the accept that names it.
+      const rename = await client.request('textDocument/rename', {
+        textDocument: { uri }, position: { line: 0, character: 1 }, newName: 'Base',
+      });
+      expect((rename?.changes?.[uri] ?? []).map((e) => e.range.start.line).sort((a, b) => a - b)).toEqual([0, 5, 10]);
+      const completion = await client.request('textDocument/completion', at);
+      const items = Array.isArray(completion) ? completion : completion?.items ?? [];
+      expect(items.some((i) => i.label === 'Root')).toBe(true);
+      // The member reads as its value at the declaration, in a method, and
+      // in the render, under the one minted kind.
+      for (const [line, character] of [[5, 10], [6, 13], [9, 9]]) {
+        const hover = await hoverAt(client, line, character);
+        expect(hover.contents.value, `${line}:${character}`).toContain('(accept) open: boolean');
+        expect(hover.contents.value).not.toContain('read()');
+      }
     } finally {
       await client.stop();
     }
