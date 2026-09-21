@@ -2639,9 +2639,36 @@ function isDocument(field) {
 // bare string is a JSON string, not a document to parse.
 function serialize(v, field) {
   if (!field || v == null) return v;
-  if (field.typeName === 'variant') return JSON.stringify(v);
-  if (field.typeName === 'json' && typeof v === 'object') return JSON.stringify(v);
+  if (field.typeName === 'variant') return shallowEnough(JSON.stringify(v), field);
+  if (field.typeName === 'json') return shallowEnough(typeof v === 'object' ? JSON.stringify(v) : v, field);
   return v;
+}
+
+// A document nests no deeper than harbor's own request parser reads. The
+// engine's cast from JSON to VARIANT recurses: text nested twenty thousand
+// deep holds a connection for minutes, and deeper takes the server down.
+// JSON.parse reads any depth and JSON.stringify writes tens of thousands,
+// so nothing upstream of here stops such a document. The scan is the
+// text's own brackets, outside its strings.
+const MAX_DOCUMENT_DEPTH = 128;
+
+function shallowEnough(text, field) {
+  if (typeof text !== 'string') return text;
+  let depth = 0, inString = false, escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === 92) escaped = true;          // backslash
+      else if (c === 34) inString = false;        // "
+    } else if (c === 34) inString = true;
+    else if (c === 123 || c === 91) {             // { [
+      if (++depth > MAX_DOCUMENT_DEPTH) {
+        throw new Error("schema: '" + field.name + "' nests deeper than " + MAX_DOCUMENT_DEPTH + ' levels');
+      }
+    } else if (c === 125 || c === 93) depth--;    // } ]
+  }
+  return text;
 }
 
 // A VARIANT column stores a bound string as a string, not as the

@@ -256,6 +256,14 @@ a string, a number, a boolean. A string is stored as a VARIANT string, not
 parsed as a document, so `doc: '{"a":1}'` is the seven-character text and
 `doc.a` is NULL. Hand it the object.
 
+A document nests at most 128 levels deep, the depth harbor's own request
+parser reads, and the model refuses a deeper one before any SQL. The engine's
+cast from JSON to VARIANT recurses: measured on DuckDB v2.0.0-alpha (build
+42289), text nested 20,000 deep holds a connection past a minute and about
+70,000 takes the server down, while `JSON.parse` reads any depth. Raw SQL that
+binds text through `?::JSON` carries no such check, so text from outside is
+checked before it is bound.
+
 ### In Rip through raw SQL
 
 The cast is yours. Stringify the object and bind it through `?::JSON`:
