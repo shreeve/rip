@@ -109,8 +109,9 @@ on:
   `f? x` is optional call, bare `x?` is existence (`x != null`).
   `x ? y` is NOT a default; write `if x is undefined then a else b`
   (never `??` where null must stay loud).
-- `X.new args` constructs (`Uint8Array.new n`, `Map.new()`); `fail
-  msg, kind` raises; `p` prints.
+- `X.new args` constructs (`Uint8Array.new n`, `Map.new()`); `raise
+  msg` throws an `Error` and `raise TypeError, msg` a named one; `p`
+  prints.
 - `if a then b else c` is the conditional expression the owner prefers
   over a ternary; `unless`, `until`, postfix forms are idiomatic.
 - Ranges: `for i in [a...b]` (exclusive), `[a..b]` (inclusive), `by 2`,
