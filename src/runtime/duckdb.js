@@ -340,9 +340,10 @@ function isPlainObject(v) {
 // A value JSON would silently turn into `null` is a caller bug, and
 // binding NULL for it means writing something the caller never asked
 // for. All of them throw loudly here, for the one reason: an Invalid
-// Date, NaN, ±Infinity, and `undefined` all serialize to `null`, and
-// the difference between "no value" and "the value NULL" is not
-// something a database can recover afterwards.
+// Date, NaN, ±Infinity, `undefined`, a function and a symbol all
+// serialize to `null` in the parameter list (and vanish as a key of an
+// object parameter), and the difference between "no value" and "the
+// value NULL" is not something a database can recover afterwards.
 function encodeParam(v) {
   if (v instanceof Date) {
     if (Number.isNaN(v.getTime())) {
@@ -360,6 +361,12 @@ function encodeParam(v) {
       'db: cannot bind ' + (Number.isNaN(v) ? 'NaN' : String(v)) +
       ' as a query parameter — JSON turns it into null, which would write ' +
       'SQL NULL for a number the caller computed');
+  }
+  if (typeof v === 'function' || typeof v === 'symbol') {
+    throw new TypeError(
+      'db: cannot bind a ' + typeof v + ' as a query parameter — JSON has no ' +
+      'form for it and turns it into null, which would write SQL NULL for a ' +
+      'value the caller passed');
   }
   if (typeof v === 'bigint') {
     throw new TypeError(
