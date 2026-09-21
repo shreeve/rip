@@ -672,7 +672,7 @@ code "new on a this-property", '''
   ''', '''
   class A {
     make() {
-      return new this.Inner;
+      return new this.Inner();
     }
   }
   '''
@@ -694,7 +694,7 @@ code "new on a super member", '''
   ''', '''
   class A extends B {
     make() {
-      return new super.Inner;
+      return new super.Inner();
     }
   }
   '''
