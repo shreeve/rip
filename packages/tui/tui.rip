@@ -2,7 +2,9 @@
 # document, mounts the app onto it, and draws every change; `mount`
 # does the same off any terminal and draws when a test asks.
 
-import { install } from './document.rip'
+import { install, Event } from './document.rip'
+import { tend, take, advance } from './focus.rip'
+import { Parser } from './input.rip'
 import { Screen } from './screen.rip'
 
 # ── Widgets ───────────────────────────────────────────────────────────────────
@@ -27,23 +29,112 @@ export Spacer = component
 
 cols := 80
 rows := 24
+shown := true
 live = null
 
 class Viewport
   get cols: -> cols
   get rows: -> rows
+  get focused: -> shown
 
-# The terminal's size, as reactive reads.
+# The terminal's size, and whether it is the window the user is in (its
+# focus reports), as reactive reads.
 export screen =! Viewport.new()
 
-export focus =! {}
+# The node the keyboard goes to, a reactive read, and the ways to move
+# it: Tab's and Shift-Tab's, and to a node — or to nothing, with null.
+class Focus
+  get active: -> live?.doc.activeElement ?? null
+  next!: -> advance live.doc, false if live
+  previous!: -> advance live.doc, true if live
+  to!: (node) -> if node then node.focus() else if live then take live.doc, null
+
+export focus =! Focus.new()
+
+# ── Input ─────────────────────────────────────────────────────────────────────
+
+ASK      =! "\x1b[?2004h\x1b[?1004h"   # bracketed paste, focus reports (xterm ctlseqs)
+WITHDRAW =! "\x1b[?1004l\x1b[?2004l"
+
+# Give `held` its parser, and read `stdin` through it if it is a terminal
+# that can be set raw. Any other stdin — a pipe, none — is left alone:
+# no key arrives, and nothing is asked of the terminal.
+listen! =! (held, stdin, clock) ->
+  held.parser = Parser.new { clock, late: (events) -> receive held, events }
+  return unless stdin?.isTTY and typeof stdin.setRawMode is 'function'
+  held.stdin = stdin
+  held.read = (chunk) -> receive held, held.parser.feed chunk
+  stdin.setRawMode true
+  stdin.ref?()
+  stdin.resume()
+  stdin.on 'data', held.read
+  held.out.write ASK
+
+# Hand the app what was read. A listener that throws under `run` has no
+# caller to throw to: the terminal is given back, and `done` rejects.
+receive! =! (held, events) ->
+  try
+    deliver held, events
+  catch error
+    throw error unless held.terminal
+    fail held, error
+
+fail! =! (held, error) ->
+  return unless live is held
+  close false
+  held.settled.reject error
+
+# The app's root element, where a key goes while nothing has focus.
+rootOf =! (doc) ->
+  node = doc.body.firstChild
+  node = node.nextSibling while node and node.nodeType isnt 1
+  node ?? doc.body
+
+# Each event is a turn of its own: the tree is as the key before left it.
+# Once the app is closing, what is left of a read is nobody's. A mouse
+# report is step 4c's to hit-test, and a reply the keyboard probe's.
+deliver! =! (held, events) ->
+  for event in events
+    return unless live is held and not held.closing
+    switch event.type
+      when 'focus' then shown = true
+      when 'blur'  then shown = false
+      when 'key', 'paste'
+        tend held.doc
+        sent = Event.new (if event.type is 'key' then 'keydown' else 'paste'), event
+        act held, sent if (held.doc.active ?? rootOf held.doc).dispatchEvent(sent) and sent.type is 'keydown'
+
+# The default actions, which run for a key no listener prevented. Ctrl-Z
+# (suspend) joins them with the lifecycle, PLAN §8.
+act! =! (held, event) ->
+  if event.key is 'Tab' and not (event.ctrlKey or event.altKey or event.metaKey)
+    advance held.doc, event.shiftKey
+  else if event.key is 'c' and event.ctrlKey and not (event.altKey or event.metaKey)
+    quit()
+
+# A clock a test moves by hand, for the parser's waits.
+class Clock
+  constructor: ->
+    @time = 0
+    @due = []
+
+  after: (ms, fn) ->
+    entry = { at: @time + ms, fn }
+    @due.push entry
+    => @due = @due.filter (other) -> other isnt entry
+
+  tick!: (ms) ->
+    @time += ms
+    ready = @due.filter((entry) => entry.at <= @time).sort (a, b) -> a.at - b.at
+    @due = @due.filter (entry) => entry.at > @time
+    entry.fn() for entry in ready
 
 # Put `App` on a terminal document of its own, to be drawn to `out`.
 # The document is a global of the process, so one app is mounted at a
 # time and a second is refused. `live` stands before the app is
 # constructed, so a `quit` from an effect that runs during construction
 # is heard.
-open =! (App, options, out, terminal) ->
+open =! (App, options, out, terminal, stdin = null, clock = undefined) ->
   throw Error.new 'rip/tui: an app is already mounted in this process — `quit` or `close` it first' if live
   { doc, restore } = install()
   view = Screen.new doc, out
@@ -60,9 +151,11 @@ open =! (App, options, out, terminal) ->
   done = Promise.new (resolve, reject) ->
     settled.resolve = resolve
     settled.reject = reject
-  live = { app: null, view, out, doc, restore, resized, interrupted: (-> quit()), done, settled, terminal, closing: false }
+  live = { app: null, view, out, doc, restore, resized, interrupted: (-> quit()), done, settled, terminal, closing: false, parser: null, stdin: null, read: null, clock }
+  shown = true
   out.write "\x1b[?25l" if terminal
   try
+    listen live, stdin, clock
     live.app = App.new(options.props ?? {})
     live.app.mount doc.body
   catch error
@@ -70,9 +163,13 @@ open =! (App, options, out, terminal) ->
     throw error
   live
 
-# Mount `App` on the terminal and keep it drawn until `quit`.
+# Mount `App` on the terminal and keep it drawn until `quit`. Keys are
+# read from `stdin`, which is the process's own unless `stdout` is given
+# and `stdin` is not: a stream of one's own takes no keys from the
+# terminal the process happens to be on.
 export run =! (App, options = {}) ->
-  held = open App, options, options.stdout ?? process.stdout, true
+  stdin = if options.stdin isnt undefined then options.stdin else if options.stdout then null else process.stdin
+  held = open App, options, options.stdout ?? process.stdout, true, stdin
   { view, out, doc, settled } = held
   try
     view.frame()
@@ -81,9 +178,7 @@ export run =! (App, options = {}) ->
     throw error
   # A frame that fails later is drawn from a timer, with no caller to
   # throw to: the terminal is given back first, and `done` rejects.
-  view.failed = (error) ->
-    close false
-    settled.reject error
+  view.failed = (error) -> fail held, error
   doc.onOwe = -> view.book()
   out.on? 'resize', held.resized
   process.on 'SIGINT', held.interrupted
@@ -106,6 +201,29 @@ class Mount
   # The cells the last frame owed: those it painted and compared.
   get damage: -> @held.view.owed
 
+  # The node that has focus, and where the last frame parked the cursor:
+  # `{ x, y }` on the mount's terminal, or null while it is hidden.
+  get focused: ->
+    tend @held.doc
+    @held.doc.activeElement
+  get cursor: -> @held.view.parked
+
+  # Input, by the road `run` reads stdin by. `press` is one key — DOM's
+  # name or a character, with `ctrl`, `shift`, `alt`, `meta`, `repeat` —
+  # or, given bytes that begin with a control character, those bytes;
+  # `type` is text as a terminal sends it, a key per code point; `paste`
+  # is one paste; `send` is raw bytes through the parser, whose waits run
+  # on a clock `tick` moves.
+  press!: (key, mods = {}) ->
+    if key.charCodeAt(0) < 0x20 or key is '\x7f'
+      @send key
+      return
+    receive @held, [{ type: 'key', key, ctrlKey: !!mods.ctrl, shiftKey: !!mods.shift, altKey: !!mods.alt, metaKey: !!mods.meta, repeat: !!mods.repeat, sequence: key }]
+  type!: (text) -> @send text
+  paste!: (text) -> receive @held, [{ type: 'paste', text }]
+  send!: (bytes) -> receive @held, @held.parser.feed bytes
+  tick!: (ms) -> @held.clock.tick ms
+
   # Draw what the app shows and hand the frame back as plain text.
   frame: ->
     throw Error.new 'rip/tui: this mount is closed — there is no app to draw' unless live is @held
@@ -126,20 +244,27 @@ class Mount
 # what it is sent. With no `rows` it is as tall as the frame.
 export mount =! (App, options = {}) ->
   out = { columns: options.cols ?? 80, rows: options.rows ?? Infinity, sent: '', write: (text) -> @sent += text }
-  Mount.new open(App, options, out, false)
+  Mount.new open(App, options, out, false, null, Clock.new())
 
 # Give the terminal and the process back: the cursor, the listeners, the
 # `document` slot. `drawn` leaves the last frame in the scrollback; a
 # failure leaves whatever reached the screen.
 close =! (drawn) ->
-  { app, view, out, doc, restore, resized, interrupted, terminal } = live
+  { app, view, out, doc, restore, resized, interrupted, terminal, parser, stdin, read } = live
   live = null
   doc.onOwe = null
   try
     if terminal
-      if drawn then view.leave() else out.write "\x1b[?25h"
+      out.write WITHDRAW if stdin
+      if drawn then view.leave() else out.write view.unpark() + "\x1b[?25h"
     app?.unmount()
   finally
+    parser?.flush()
+    if stdin
+      stdin.off 'data', read
+      stdin.setRawMode false
+      stdin.pause()
+      stdin.unref?()
     out.off? 'resize', resized
     process.off 'SIGINT', interrupted
     restore()

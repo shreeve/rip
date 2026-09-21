@@ -3,7 +3,15 @@
 # damage — are painted into the spare grid and sent as their difference
 # from the grid the terminal already shows, inside a synchronized update
 # so the terminal never shows half of it.
+#
+# The cursor has one rule. `diff` starts and ends every frame at the
+# frame's top-left, and between frames the hardware cursor is either
+# there, hidden, or parked: shown on the cell the focused node declares.
+# `parked` is where, in cells of the grid on the terminal, and the only
+# record of it: a frame first takes the cursor back to the top-left,
+# then draws, then parks it again, all in the one write.
 
+import { tend } from './focus.rip'
 import { layout } from './layout.rip'
 import { Grid, paint, diff } from './paint.rip'
 
@@ -31,6 +39,7 @@ export class Screen
     @failed = null
     @whole = false   # owe every cell of every frame, for a test to compare against
     @owed = 0        # the cells the last frame owed
+    @parked = null   # where the cursor is shown, `{ x, y }` on the grid, or null while it is hidden
 
   get cols: -> @out.columns ?? 80
   get rows: -> @out.rows ?? 24
@@ -39,6 +48,7 @@ export class Screen
   frame!: ->
     @booked = false
     @last = performance.now()
+    tend @doc
     settle @doc, @cols
     @doc.stale = false
     tall = @doc.body.rect.h
@@ -60,7 +70,50 @@ export class Screen
     @spare = if damage.whole then @front else back
     @front = back if damage.whole
     damage.shape @front, false
-    @out.write "\x1b[?2026h#{bytes}\x1b[?2026l" if bytes
+    spot = @place()
+    return unless bytes or spot?.x isnt @parked?.x or spot?.y isnt @parked?.y
+    bytes = @unpark() + bytes
+    @parked = spot
+    if spot
+      bytes += "\x1b[#{spot.y}B" if spot.y
+      bytes += "\x1b[#{spot.x + 1}G\x1b[?25h"
+    @out.write "\x1b[?2026h#{bytes}\x1b[?2026l"
+
+  # The cell the focused node's cursor lands on, on the grid the terminal
+  # shows, or null: its rounded corner plus what it declares, moved by
+  # every content offset above it, and hidden where a clip above it, or
+  # the screen, leaves that cell out — as `draw` moves and clips the node
+  # itself (paint.rip).
+  place: ->
+    node = @doc.active
+    return null unless node?.cursor
+    x = node.rect.x + node.cursor.x
+    y = node.rect.y + node.cursor.y
+    up = node
+    while up = up.parentNode
+      s = up.styles
+      x -= Math.trunc s.contentOffsetX if s.contentOffsetX
+      y -= Math.trunc s.contentOffsetY if s.contentOffsetY
+      continue unless s.overflow? or s.overflowX? or s.overflowY?
+      rect = up.rect
+      edged = s.borderStyle?
+      if (s.overflowX ?? s.overflow) is 'hidden'
+        return null if x < rect.x + (if edged and s.borderLeft isnt false then 1 else 0)
+        return null if x >= rect.x + rect.w - (if edged and s.borderRight isnt false then 1 else 0)
+      if (s.overflowY ?? s.overflow) is 'hidden'
+        return null if y < rect.y + (if edged and s.borderTop isnt false then 1 else 0)
+        return null if y >= rect.y + rect.h - (if edged and s.borderBottom isnt false then 1 else 0)
+    y -= @front.top
+    if x >= 0 and x < @front.cols and y >= 0 and y < @front.rows then { x, y } else null
+
+  # The bytes that hide a parked cursor and take it back to the frame's
+  # top-left, where every frame and `leave` begin.
+  unpark: ->
+    spot = @parked
+    @parked = null
+    return '' unless spot
+    up = if spot.y then "\x1b[#{spot.y}A" else ''
+    "\x1b[?25l#{up}\r"
 
   # Draw what is owed, once this turn's writes are in and no sooner than
   # the pace allows.
@@ -82,4 +135,4 @@ export class Screen
   # Leave the last frame in the scrollback, the cursor on the line below.
   leave!: ->
     @frame() if @doc.stale
-    @out.write '\n'.repeat(@front?.rows ?? 0) + "\x1b[?25h"
+    @out.write @unpark() + '\n'.repeat(@front?.rows ?? 0) + "\x1b[?25h"

@@ -8,6 +8,7 @@ import { __setChildFailureReporter } from '../../src/runtime/components.js'
 import { admit, blame } from './layout.rip'
 import { allow, Damage, PARTS } from './paint.rip'
 import { sanitize, refresh } from './text.rip'
+import { take, open } from './focus.rip'
 
 # Styles that move boxes, and styles that only recolor cells.
 LAYOUT =! [
@@ -30,11 +31,15 @@ PAINT =! [
 
 # Switches that stand unless they are turned off, so `false` is a value
 # to keep and not a style taken away.
-PRESENT =! Set.new ['hidden']   # keys the compiler writes as bare presence
+PRESENT =! Set.new ['hidden', 'autofocus', 'disabled']   # keys the compiler writes as bare presence
 # Keys whose `false` says something and is kept: an edge switched off,
 # and an edge that stays bright under a dimmed border.
 STANDING =! Set.new ['borderTop', 'borderBottom', 'borderLeft', 'borderRight',
   'borderTopDimColor', 'borderBottomDimColor', 'borderLeftDimColor', 'borderRightDimColor']
+
+# What a node is to the keyboard, which moves no box and recolors no
+# cell: kept on the node as fields of their own.
+TRAITS =! Set.new ['focusable', 'autofocus', 'disabled', 'cursor']
 
 KIND =! Map.new()
 KIND.set key, 'layout' for key in LAYOUT
@@ -72,11 +77,110 @@ unknown =! (key, tag) ->
   hint = nearest key
   Error.new "rip/tui: '#{key}' is not a terminal style of <#{tag}>" + (if hint then " — did you mean '#{hint}'?" else '')
 
-# A reactive cell over a node's box, minted on the first `box` read, so
-# a node nobody measures carries none.
-watch =! (node) ->
-  box := node.rect
-  { read: (-> box), write: ((next) -> box = next) }
+# A reactive cell, minted on the first read of what it holds — a node's
+# box, whether it has focus — so a node nobody asks carries none.
+watch =! (first) ->
+  held := first
+  { read: (-> held), write: ((next) -> held = next) }
+
+# A cursor as a node keeps it: `{ x, y }` in whole cells from its corner.
+spot =! (value) ->
+  return null unless value
+  unless typeof value is 'object' and Number.isInteger(value.x) and Number.isInteger(value.y) and value.x >= 0 and value.y >= 0
+    throw Error.new "rip/tui: cursor: #{JSON.stringify value} is not a place — write { x, y } in whole cells from the node's own corner"
+  Object.freeze { x: value.x, y: value.y }
+
+# ── Events ────────────────────────────────────────────────────────────────────
+
+# One event is handed to every listener of a dispatch, as DOM's is:
+# `target`, `currentTarget`, `eventPhase` (1 capture, 2 target, 3
+# bubble), `stopPropagation`, `preventDefault`. A key carries the fields
+# of DOM's KeyboardEvent as the parser decoded them, a paste its `text`,
+# a component's `emit` its `detail`.
+export class Event
+  constructor: (@type, from = null, @bubbles = true) ->
+    @target = @currentTarget = null
+    @eventPhase = 0
+    @defaultPrevented = false
+    @halt = 0
+    return unless from
+    this[name] = value for own name, value of from when name isnt 'type'
+    @detail = from.detail if from.detail isnt undefined
+
+  preventDefault!: -> @defaultPrevented = true
+  stopPropagation!: -> @halt ||= 1
+  stopImmediatePropagation!: -> @halt = 2
+
+paths =! []   # the path of each dispatch under way, kept for the next
+depth = 0
+
+# Call `node`'s listeners under `key`. A list is replaced, never changed,
+# when a listener comes or goes, so the one in hand is the list as the
+# node's turn began; a listener taken away since is passed over.
+call! =! (node, event, key) ->
+  held = node.listeners?[key]
+  return unless held
+  event.currentTarget = node
+  for handler in held
+    continue if node.listeners[key] isnt held and not node.listeners[key].includes handler
+    handler.call node, event
+    return if event.halt > 1
+
+# What can be listened on and dispatched to: every node, and the
+# document. A listener asks for the capture phase by a third argument of
+# `true` or `{ capture: true }`, or by a type that ends in `Capture`,
+# which is how a render block spells it (`@keydownCapture: handler`).
+export class Target
+  constructor: ->
+    @listeners = null
+
+  addEventListener!: (type, handler, options) ->
+    type += 'Capture' if options is true or options?.capture
+    held = (@listeners ?= {})[type]
+    @listeners[type] = if held then [...held, handler] else [handler]
+
+  removeEventListener!: (type, handler, options) ->
+    type += 'Capture' if options is true or options?.capture
+    held = @listeners?[type]
+    @listeners[type] = held.filter((other) -> other isnt handler) if held
+
+  # The path is the tree as the dispatch begins, as DOM's is: root to
+  # target in the capture phase, the target, and back up if the event
+  # bubbles, ending at the document. It is an array kept per depth of
+  # dispatch, so a key allocates its event and nothing per node.
+  dispatchEvent: (event) ->
+    event = Event.new event.type, event, event.bubbles ?? true unless event instanceof Event
+    path = paths[depth] ?= []
+    depth += 1
+    try
+      node = this
+      while node
+        path.push node
+        node = node.parentNode ?? node.host
+      event.target = this
+      last = path.length - 1
+      capture = event.type + 'Capture'
+      event.eventPhase = 1
+      at = last
+      while at > 0 and not event.halt
+        call path[at], event, capture
+        at -= 1
+      unless event.halt
+        event.eventPhase = 2
+        call this, event, capture
+        call this, event, event.type unless event.halt > 1
+      if event.bubbles
+        event.eventPhase = 3
+        at = 1
+        while at <= last and not event.halt
+          call path[at], event, event.type
+          at += 1
+    finally
+      depth -= 1
+      path.length = 0
+    event.eventPhase = 0
+    event.currentTarget = null
+    not event.defaultPrevented
 
 export NOWHERE =! Object.freeze { x: 0, y: 0, w: 0, h: 0 }
 
@@ -87,8 +191,9 @@ leafOf =! (node) ->
   node = node.parentNode while node.parentNode?.tagName is 'span' and node.parentNode.styles.display isnt 'contents'
   node
 
-export class Node
+export class Node extends Target
   constructor: (@nodeType) ->
+    super()
     @ownerDocument = null
     @parentNode = null
     @firstChild = null
@@ -154,9 +259,12 @@ export class Node
 
   remove!: -> @parentNode?.removeChild this
 
+  # A node that arrives with `autofocus` makes its claim, which the next
+  # frame or key settles (focus.rip).
   adopt!: (doc) ->
     return if @ownerDocument is doc
     @ownerDocument = doc
+    doc?.claims.push this if @autofocus
     kid = @firstChild
     while kid
       kid.adopt doc
@@ -164,7 +272,7 @@ export class Node
 
   # The rounded box the last layout gave this node. Reading it inside a
   # binding or an effect subscribes to every later layout.
-  get box: -> (@cell ?= watch this).read()
+  get box: -> (@cell ?= watch @rect).read()
 
   place!: (x, y, w, h) ->
     rect = @rect
@@ -222,9 +330,11 @@ export class Element extends Node
     super 1
     @styles = {}
     @attributes = null
-    @listeners = null
     @road = null
     @styled = null
+    @focusable = @autofocus = @disabled = false
+    @cursor = null
+    @glow = null
 
   # A style that is refused is refused by name, and the error says which
   # node it was written on.
@@ -237,6 +347,9 @@ export class Element extends Node
   put: (key, value) ->
     if kept key
       (@attributes ?= Map.new()).set key, value
+      return
+    if TRAITS.has key
+      @trait key, value
       return
     kind = KIND.get key
     throw unknown(key, @tagName) unless kind
@@ -276,6 +389,31 @@ export class Element extends Node
     @mark 3 if key is 'display'
     @changed kind is 'layout'
 
+  # `focusable`, `autofocus` and `disabled` are switches, and `cursor` a
+  # place. A frame is owed when the change can move focus or the cursor:
+  # a claim, a node that may no longer hold the focus it has, the focused
+  # node's own cursor.
+  trait!: (key, value) ->
+    if key is 'cursor'
+      value = spot value
+      held = @cursor
+      return if held is value or (held and value and held.x is value.x and held.y is value.y)
+    else
+      throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not true or false" unless value is true or value is false or not value
+      value = value is true
+      return if this[key] is value
+    this[key] = value
+    doc = @ownerDocument
+    return unless doc
+    doc.claims.push this if key is 'autofocus' and value
+    doc.owe false if doc.claims.length or (if key is 'cursor' then doc.active is this else doc.active)
+
+  # Take the keyboard, if this node can hold it, and give it up. `focused`
+  # is a reactive read, which is how a node styles itself by its focus.
+  focus!: -> take @ownerDocument, this if @ownerDocument and open this, @ownerDocument
+  blur!: -> take @ownerDocument, null if @ownerDocument?.active is this
+  get focused: -> (@glow ?= watch(@ownerDocument?.active is this)).read()
+
   setAttribute!: (key, value) ->
     throw blame Error.new("rip/tui: a string `style` has no terminal meaning on <#{@tagName}> — pass the styles as props, or `style:` an object"), this if key is 'style'
     # An HTML boolean attribute written on a raw tag arrives as presence,
@@ -299,21 +437,6 @@ export class Element extends Node
 
   get className: -> ''
   set className: (value) -> throw blame Error.new("rip/tui: a class has no terminal meaning on <#{@tagName}> — style the node with props"), this
-
-  addEventListener!: (type, handler) -> ((@listeners ?= {})[type] ?= []).push handler
-  removeEventListener!: (type, handler) ->
-    held = @listeners?[type]
-    @listeners[type] = held.filter((h) -> h isnt handler) if held
-
-  dispatchEvent: (event) ->
-    event.target ?= this
-    node = this
-    while node and not event.cancelBubble
-      if node.listeners?[event.type]
-        event.currentTarget = node
-        handler.call node, event for handler in [...node.listeners[event.type]]
-      node = node.parentNode
-    not event.defaultPrevented
 
 # The object behind `el.style`: every key written to it goes through the
 # node's own `set`, so a key that is no terminal style is refused by
@@ -350,10 +473,15 @@ export class Text extends Node
     leaf.mark 3, not moved and leaf.rect.h > 0 and leaf.flow.fits leaf.rect.w
     @changed moved
 
-export class Document
+export class Document extends Target
   constructor: ->
+    super()
     @damage = Damage.new()
+    @active = null        # the node that has focus, until the next `tend` finds it cannot
+    @claims = []          # nodes that arrived with `autofocus`, unsettled
+    @lit = watch null
     @body = Element.new 'div'
+    @body.host = this
     @body.adopt this
     @moved = true
     @stale = true
@@ -366,6 +494,12 @@ export class Document
   createTextNode: (data) -> Text.new data
   createComment: -> Node.new 8
   createDocumentFragment: -> Node.new 11
+
+  # The node that has focus, a reactive read; null the moment that node
+  # can no longer hold it.
+  get activeElement: ->
+    node = @lit.read()
+    if node and open(node, this) then node else null
 
   get head: -> throw Error.new 'rip/tui: a transition (~name) has no terminal meaning'
   querySelector: -> throw Error.new 'rip/tui: a selector has no terminal meaning — mount onto a node'
