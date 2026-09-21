@@ -539,6 +539,25 @@ describe('cli: diagnostics', () => {
     expect(r.stderr).toContain("parsebad.rip:1:5: Unexpected '*'");
   });
 
+  test('the token and s-expression printers report a lexer rejection as compile mode does', () => {
+    write('lexbad.rip', 'x = "open\n');
+    const compiled = rip(['-c', 'lexbad.rip']);
+    expect(compiled.status).toBe(1);
+    expect(compiled.stderr).toBe('lexbad.rip:1:5: unterminated string\n\n  1 | x = "open\n    |     ^\n');
+    for (const flag of ['-t', '-s', '-ts']) {
+      const r = rip([flag, 'lexbad.rip']);
+      expect(r.status).toBe(1);
+      expect(r.stdout).toBe('');
+      expect(r.stderr).toBe(compiled.stderr);
+    }
+    // A rejection the render rewrite raises reaches the token printer the same way.
+    write('renderbad.rip', 'A = component\n  render\n    button @click = 1\n');
+    const render = rip(['-t', 'renderbad.rip']);
+    expect(render.status).toBe(1);
+    expect(render.stderr).toBe(rip(['-c', 'renderbad.rip']).stderr);
+    expect(render.stderr).toContain('renderbad.rip:3:19: a `=` cannot follow a bare event directive');
+  });
+
   test('a compile error in an IMPORTED module fails the run with its position', () => {
     write('badmod.rip', 'z = (1 +\n');
     write('imports-bad.rip', 'import {z} from "./badmod.rip"\nconsole.log z\n');
