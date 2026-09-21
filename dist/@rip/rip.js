@@ -5783,6 +5783,9 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
   let pendingSpaced = false;
   let pendingNewLine = false;
   let seenFor = null;
+  const specifierStart = (prev) => prev?.kind === "{" || prev?.kind === "," || (prev?.kind === "INDENT" || prev?.kind === "TERMINATOR") && parens.length > 0;
+  const reservedSpelling = (word) => Boolean(KEYWORDS[word] && word !== "own") || RESERVED_WORDS.has(word) || STATEMENTS.has(word) || Boolean(ALIASES[word]) || word === "in" || word === "of" || word === "when" || word === "import" || word === "export";
+  const foreignModuleName = (prev, afterWord) => seenImport && specifierStart(prev) && /^[^\S\n]+as[^\S\n]/.test(afterWord) || seenExport && prev?.kind === "AS";
   let seenImport = false;
   let seenExport = false;
   let inRender = false;
@@ -6436,6 +6439,10 @@ ${baseline}`).join(`
         push("PROPERTY", value, start, pos);
       } else if (keysColon || inPickKeyPos()) {
         push("PROPERTY", word, start, pos);
+      } else if (word !== "default" && word !== "as" && foreignModuleName(prev, afterWord)) {
+        push("IDENTIFIER", word, start, pos);
+      } else if (seenImport && word !== "default" && word !== "type" && reservedSpelling(word) && (specifierStart(prev) || prev?.kind === "AS" || prev?.kind === "IMPORT")) {
+        fail(`'${word}' is a Rip keyword, so it cannot be the local name of an import — bind it under another name (\`import { ${word} as ${word}_ } from '…'\`)`, start, pos);
       } else if (word === "import") {
         if (text[pos] === "(" || text[pos] === "!" && text[pos + 1] === "(") {
           push("DYNAMIC_IMPORT", word, start, pos);
