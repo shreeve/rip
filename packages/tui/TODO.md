@@ -4,7 +4,7 @@ Open work only, in the order it should be done. Delete a line when it
 lands or moves into docs/tests. The design and the order of the larger
 steps are in [PLAN.md](PLAN.md).
 
-## 1. Wrong or silent — before the layout PR lands
+## 1. Wrong or silent
 
 - [ ] **`justifyContent: 'space-around'` on a line with no in-flow
       item divides by zero** and turns the whole tree's boxes to
