@@ -307,27 +307,84 @@ describe('orm: paired reference — CRUD and the query builder', () => {
     expect(r.calls[0].params).toEqual(['{"name":"Ada"}', 1, '"Bob"', 2, null, 3]);
   });
 
-  // A document nests at most 128 deep, the depth harbor's own parser
-  // reads; brackets inside a string are the string's.
-  test('variant/json: a document nested past 128 levels is refused before any SQL', async () => {
+  // A document nests at most 100 deep, below what harbor reads in an
+  // object parameter; brackets inside a string are the string's.
+  test('variant/json/any: a document nested past 100 levels is refused before any SQL', async () => {
     const nest = (n) => { let v = 'x'; for (let i = 0; i < n; i++) v = [v]; return v; };
+    const docs = (k) => k.__schema(model('Doc', field('meta', 'variant'), field('raw', 'json'), field('loose', 'any')));
     const ok = await paired(async (k, adapter) => {
       adapter.on(/^INSERT INTO "docs"/, rows(['id'], [1]));
-      const Doc = k.__schema(model('Doc', field('meta', 'variant'), field('raw', 'json')));
-      await Doc.create({ meta: nest(128), raw: { note: '['.repeat(500) } });
+      const Doc = docs(k);
+      await Doc.create({ meta: nest(100), raw: { note: '['.repeat(500) }, loose: nest(100) });
+      await Doc.insertMany([{ meta: nest(100), raw: nest(100), loose: '['.repeat(100) + ']'.repeat(100) }]);
       return null;
     });
     expect(ok.threw).toBeUndefined();
-    expect(ok.calls.length).toBe(1);
-    for (const data of [{ meta: nest(129), raw: {} }, { meta: {}, raw: nest(129) }, { meta: {}, raw: '['.repeat(129) + ']'.repeat(129) }]) {
-      const bad = await paired(async (k) => {
-        const Doc = k.__schema(model('Doc', field('meta', 'variant'), field('raw', 'json')));
-        await Doc.create(data);
-        return null;
-      });
-      expect(bad.threw).toEqual({ error: true });
-      expect(bad.calls.length).toBe(0);
+    expect(ok.calls.length).toBe(2);
+    expect(ok.calls[0].params[0]).toBe('['.repeat(100) + '"x"' + ']'.repeat(100));
+    const deep = [
+      ['meta', { meta: nest(101), raw: {}, loose: {} }],
+      ['raw', { meta: {}, raw: nest(101), loose: {} }],
+      ['raw', { meta: {}, raw: '['.repeat(101) + ']'.repeat(101), loose: {} }],
+      ['loose', { meta: {}, raw: {}, loose: nest(101) }],
+    ];
+    for (const [name, data] of deep) {
+      for (const write of [(Doc) => Doc.create(data), (Doc) => Doc.insertMany([data]), (Doc) => Doc.where({}).updateAll(data)]) {
+        await K4.scope(async () => {
+          const adapter = recordingAdapter();
+          K4.setAdapter(adapter);
+          await expect(write(docs(K4))).rejects.toThrow("schema: '" + name + "' nests deeper than 100 levels");
+          expect(adapter.calls.length).toBe(0);
+        });
+      }
     }
+  });
+
+  // JSON.stringify answers undefined for a function or a symbol and the
+  // text `null` for NaN, ±Infinity and an Invalid Date, so a document
+  // field handed one would store SQL NULL. The whole value is refused
+  // naming the field; inside a document JSON.stringify's rules apply.
+  test('variant/json/any: a value JSON cannot carry is refused before any SQL', async () => {
+    const docs = (k) => k.__schema(model('Doc',
+      field('meta', 'variant', { optional: true }), field('raw', 'json', { optional: true }), field('loose', 'any', { optional: true })));
+    const cases = [[NaN, 'NaN'], [Infinity, 'Infinity'], [-Infinity, '-Infinity'],
+      [() => 1, 'a function'], [Symbol('s'), 'a symbol'], [new Date(NaN), 'an Invalid Date']];
+    for (const name of ['meta', 'raw', 'loose']) {
+      for (const [value, said] of cases) {
+        for (const write of [(Doc) => Doc.create({ [name]: value }), (Doc) => Doc.insertMany([{ [name]: value }]), (Doc) => Doc.where({}).updateAll({ [name]: value })]) {
+          await K4.scope(async () => {
+            const adapter = recordingAdapter();
+            K4.setAdapter(adapter);
+            let thrown = null;
+            try { await write(docs(K4)); } catch (e) { thrown = e; }
+            expect(thrown).toBeInstanceOf(TypeError);
+            expect(thrown.message).toBe("schema: '" + name + "' cannot store " + said +
+              ' — JSON has no form for it and would write SQL NULL for a value the caller computed');
+            expect(adapter.calls.length).toBe(0);
+          });
+        }
+      }
+    }
+    const nested = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT INTO "docs"/, rows(['id'], [1]));
+      await docs(k).create({ meta: { x: NaN, y: [Infinity], z: undefined }, raw: { x: NaN }, loose: { x: -Infinity } });
+      return null;
+    });
+    expect(nested.calls[0].params).toEqual(['{"x":null,"y":[null]}', '{"x":null}', '{"x":null}']);
+  });
+
+  // An `any` column is a JSON column: it is written as a `json` field is.
+  test('any: an object is written as JSON text; a string is the JSON text it already is', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT INTO "docs"/, rows(['id'], [1]));
+      const Doc = k.__schema(model('Doc', field('loose', 'any')));
+      await Doc.create({ loose: { name: 'Ada' } });
+      await Doc.create({ loose: '{"name":"Ada"}' });
+      await Doc.create({ loose: 42 });
+      return null;
+    });
+    expect(r.calls.map((c) => c.sql)).toEqual(Array(3).fill('INSERT INTO "docs" ("loose") VALUES (?) RETURNING *'));
+    expect(r.calls.map((c) => c.params)).toEqual([['{"name":"Ada"}'], ['{"name":"Ada"}'], [42]]);
   });
 
   test('order: structured forms quote and validate; the string form stays verbatim', async () => {

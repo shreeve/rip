@@ -279,6 +279,12 @@ describe('harbor client: what an error is allowed to say', () => {
     for (const bad of [undefined, NaN, Infinity, -Infinity, 10n]) {
       expect(() => hb.encodeParam(bad)).toThrow();
     }
+    // JSON.stringify turns a function or a symbol into null inside the
+    // parameter list and drops it as a key: refused at every depth.
+    const fn = () => 1, sym = Symbol('s');
+    for (const bad of [fn, sym, [fn], { a: sym }, { a: [{ b: fn }] }]) {
+      expect(() => hb.encodeParam(bad)).toThrow(/cannot bind a (function|symbol) as a query parameter/);
+    }
     expect(hb.encodeParams([null, 0, -0, 'a', true])).toEqual([null, 0, -0, 'a', true]);
   });
 });

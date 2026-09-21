@@ -2630,28 +2630,49 @@ function isDocument(field) {
   return !!field && (field.typeName === 'json' || field.typeName === 'any' || field.typeName === 'variant');
 }
 
-// A document field is written as JSON text. For a `json` column that is
-// the objects and arrays only: a string handed to it is already JSON
-// text, and the column's own cast validates it. A `variant` field binds
-// through `?::JSON`, so what reaches the engine must be JSON, and a
+// A document field is written as JSON text. For a `json` or `any` column
+// that is the objects and arrays only: a string handed to it is already
+// JSON text, and the column's own cast validates it. A `variant` field
+// binds through `?::JSON`, so what reaches the engine must be JSON, and a
 // value comes back exactly as it went in: an object, an array, a string,
 // a number or a boolean — so every non-null value is serialized, and a
 // bare string is a JSON string, not a document to parse.
 function serialize(v, field) {
   if (!field || v == null) return v;
-  if (field.typeName === 'variant') return shallowEnough(JSON.stringify(v), field);
-  if (field.typeName === 'json') return shallowEnough(typeof v === 'object' ? JSON.stringify(v) : v, field);
-  return v;
+  const type = field.typeName;
+  if (type !== 'variant' && type !== 'json' && type !== 'any') return v;
+  carriable(v, field);
+  return shallowEnough(type === 'variant' || typeof v === 'object' ? JSON.stringify(v) : v, field);
 }
 
-// A document nests no deeper than harbor's own request parser reads. An
-// UPDATE of a VARIANT column costs the square of the nesting depth, 15
-// seconds at 5,000 levels, and segfaults the engine at 20,000; the cast
-// itself segfaults at 40,000 (duckdb/duckdb#25967).
-// JSON.parse reads any depth and JSON.stringify writes tens of thousands,
-// so nothing upstream of here stops such a document. The scan is the
-// text's own brackets, outside its strings.
-const MAX_DOCUMENT_DEPTH = 128;
+// JSON.stringify answers `undefined` for a function or a symbol and the
+// text `null` for NaN, ±Infinity and an Invalid Date, so the driver's own
+// guard never sees the value: the column would take SQL NULL for a value
+// the caller computed. The whole value is refused here, naming the field;
+// inside a document JSON.stringify's own rules apply.
+function carriable(v, field) {
+  const what =
+    typeof v === 'function' ? 'a function' :
+    typeof v === 'symbol' ? 'a symbol' :
+    typeof v === 'number' && !Number.isFinite(v) ? (Number.isNaN(v) ? 'NaN' : String(v)) :
+    v instanceof Date && Number.isNaN(v.getTime()) ? 'an Invalid Date' : null;
+  if (what) {
+    throw new TypeError(
+      "schema: '" + field.name + "' cannot store " + what +
+      ' — JSON has no form for it and would write SQL NULL for a value the caller computed');
+  }
+}
+
+// A document nests at most 100 levels deep: far above any real document,
+// and below the 125 levels harbor's request parser reads in an object or
+// array parameter, so a document a model stored also travels as the
+// parameter of a `where`. An UPDATE of a VARIANT column costs the square
+// of the nesting depth, 15 seconds at 5,000 levels, and segfaults the
+// engine at 20,000; the cast itself segfaults at 40,000
+// (duckdb/duckdb#25967). JSON.parse reads any depth and JSON.stringify
+// writes tens of thousands, so nothing upstream of here stops such a
+// document. The scan is the text's own brackets, outside its strings.
+const MAX_DOCUMENT_DEPTH = 100;
 
 function shallowEnough(text, field) {
   if (typeof text !== 'string') return text;
