@@ -812,3 +812,350 @@ test "for own with a value and an own variable in scope", '''
     out.push [k, v, own]
   out
   ''', [['a', 1, 'shadow']]
+
+# ==============================================================================
+# A closure assigns the loop variable of the loop it sits in
+# ==============================================================================
+#
+# A loop variable is a declaration of the block the loop heads. A
+# function nested in the body that assigns it writes THAT binding — the
+# iteration's own `let` — and declares no local over it, inside a
+# function and at the top level alike.
+
+test "closure assigns a for-in variable, inside a function", '''
+  run = ->
+    out = []
+    for seed in [3, 17]
+      step = ->
+        seed = (seed * 5 + 1) % 100
+        seed
+      out.push step(), step()
+    out
+  run()
+  ''', [16, 81, 86, 31]
+
+test "closure assigns a for-in variable, at the top level", '''
+  out = []
+  for seed in [3, 17]
+    step = ->
+      seed = (seed * 5 + 1) % 100
+      seed
+    out.push step(), step(), seed
+  out
+  ''', [16, 81, 81, 86, 31, 31]
+
+test "closure assigns both variables of an indexed for-in", '''
+  run = ->
+    out = []
+    for x, i in [3, 17]
+      bump = ->
+        x = x + 100
+        i = i + 10
+        [x, i]
+      undo = -> i = i - 10
+      out.push bump(), x, i
+      undo()
+    out
+  run()
+  ''', [[103, 10], 103, 10, [117, 11], 117, 11]
+
+test "closure assigns the key and the value of a for-of", '''
+  run = ->
+    out = []
+    for k, v of {a: 1, b: 2}
+      bump = ->
+        k = k + '!'
+        v = v + 100
+        null
+      bump()
+      out.push k, v
+    out
+  run()
+  ''', ['a!', 101, 'b!', 102]
+
+test "closure assigns a for-own key", '''
+  run = ->
+    out = []
+    for own k of {a: 1, b: 2}
+      bump = -> k = k + '!'
+      out.push bump(), k
+    out
+  run()
+  ''', ['a!', 'a!', 'b!', 'b!']
+
+test "closure assigns a for-as variable", '''
+  run = ->
+    out = []
+    for x as new Set([3, 17])
+      bump = -> x = x + 100
+      out.push bump(), x
+    out
+  run()
+  ''', [103, 103, 117, 117]
+
+test "closure assigns a range counter, and the header advances from the write", '''
+  run = ->
+    out = []
+    for i in [0...6]
+      skip = -> i = i + 2
+      out.push i
+      skip()
+    out
+  run()
+  ''', [0, 3]
+
+test "closure assigns a range counter with variable bounds", '''
+  run = (lo, hi) ->
+    out = []
+    for i in [lo..hi]
+      bump = -> i = i + 100
+      undo = -> i = i - 100
+      out.push bump(), i
+      undo()
+    out
+  run 1, 2
+  ''', [101, 101, 102, 102]
+
+test "closure assigns a guarded for-in variable", '''
+  run = ->
+    out = []
+    for x in [3, 4, 17] when x % 2
+      bump = -> x = x + 100
+      out.push bump(), x
+    out
+  run()
+  ''', [103, 103, 117, 117]
+
+test "closure assigns a stepped for-in variable", '''
+  run = ->
+    out = []
+    for x in [3, 4, 17] by 2
+      bump = -> x = x + 100
+      out.push bump(), x
+    out
+  run()
+  ''', [103, 103, 117, 117]
+
+test "closure assigns a descending stepped for-in variable", '''
+  run = ->
+    out = []
+    for x in [17, 3] by -1
+      bump = -> x = x + 100
+      out.push bump(), x
+    out
+  run()
+  ''', [103, 103, 117, 117]
+
+test "closure assigns a destructured object loop variable", '''
+  run = ->
+    out = []
+    for {a, b} in [{a: 3, b: 1}, {a: 17, b: 2}]
+      bump = -> a = a + b
+      out.push bump(), a
+    out
+  run()
+  ''', [4, 4, 19, 19]
+
+test "closure assigns a destructured array loop variable", '''
+  run = ->
+    out = []
+    for [a, b] in [[1, 3], [2, 17]]
+      bump = -> b = b + a
+      out.push bump(), b
+    out
+  run()
+  ''', [4, 4, 19, 19]
+
+test "closure assigns a destructured for-of value variable", '''
+  run = ->
+    out = []
+    for k, {a} of {p: {a: 3}, q: {a: 17}}
+      bump = -> a = a + 100
+      out.push bump(), a
+    out
+  run()
+  ''', [103, 103, 117, 117]
+
+# A zero-parameter function that mentions `it` takes it as its implicit
+# parameter, so the closure that reaches the counter names a parameter.
+test "closure with a parameter assigns the loop-n counter", '''
+  out = []
+  loop 3
+    skip = (n) -> it = it + n
+    out.push it
+    skip 1
+  out
+  ''', [0, 2]
+
+test "closure assigns the outer variable of nested loops", '''
+  run = ->
+    out = []
+    for x in [3, 17]
+      for y in [1, 2]
+        bump = -> x = x + y
+        bump()
+      out.push x
+    out
+  run()
+  ''', [6, 20]
+
+test "closure two functions down assigns the loop variable", '''
+  run = ->
+    out = []
+    for x in [3, 17]
+      outer = ->
+        inner = -> x = x + 100
+        inner()
+      out.push outer(), x
+    out
+  run()
+  ''', [103, 103, 117, 117]
+
+test "closure compound-assigns the loop variable", '''
+  run = ->
+    out = []
+    for x in [3, 17]
+      bump = -> x += 100
+      out.push bump(), x
+    out
+  run()
+  ''', [103, 103, 117, 117]
+
+test "closure assigns the loop variable inside a class method", '''
+  class Walk
+    go: ->
+      out = []
+      for x in [3, 17]
+        bump = => x = x + 100
+        out.push bump(), x
+      out
+  Walk.new().go()
+  ''', [103, 103, 117, 117]
+
+test "closure assigns the loop variable inside a def", '''
+  def run()
+    out = []
+    for x in [3, 17]
+      bump = -> x = x + 100
+      out.push bump(), x
+    out
+  run()
+  ''', [103, 103, 117, 117]
+
+test "closure assigns the loop variable inside a fat arrow", '''
+  run = =>
+    out = []
+    for x in [3, 17]
+      bump = => x = x + 100
+      out.push bump(), x
+    out
+  run()
+  ''', [103, 103, 117, 117]
+
+test "closure assigns the loop variable inside a try", '''
+  run = ->
+    out = []
+    try
+      for x in [3, 17]
+        bump = -> x = x + 100
+        out.push bump(), x
+    catch e
+      out.push String(e)
+    out
+  run()
+  ''', [103, 103, 117, 117]
+
+test "closure assigns the loop variable inside an async function", '''
+  run = ->
+    out = []
+    for x in [3, 17]
+      bump = -> x = x + 100
+      out.push bump(), x
+    await Promise.resolve out
+  run!
+  ''', [103, 103, 117, 117]
+
+# Each iteration owns its binding: a closure that assigns the variable
+# keeps writing its own iteration's value after the loop has moved on.
+
+test "each iteration's closure writes its own binding", '''
+  run = ->
+    fns = []
+    for x in [3, 17]
+      fns.push -> x = x + 100
+    [fns[0](), fns[0](), fns[1]()]
+  run()
+  ''', [103, 203, 117]
+
+test "each range iteration's closure writes its own binding", '''
+  fns = []
+  for i in [1..2]
+    fns.push -> i = i + 100
+  [fns[0](), fns[0](), fns[1]()]
+  ''', [101, 201, 102]
+
+# The loop's value forms bind the same way.
+
+test "closure in a loop used as a value assigns the variable", '''
+  fns = for x in [3, 17]
+    ->
+      x = x + 100
+      x
+  fns.map (f) -> f()
+  ''', [103, 117]
+
+test "closure in a function's tail loop assigns the variable", '''
+  make = ->
+    for k, v of {a: 3, b: 17}
+      ->
+        v = v + 100
+        v
+  make().map (f) -> f()
+  ''', [103, 117]
+
+# The binding ends with the loop, and a parameter still shadows it.
+
+test "closure reads the loop variable", '''
+  run = ->
+    out = []
+    for x in [3, 17]
+      peek = -> x + 1
+      out.push peek()
+    out
+  run()
+  ''', [4, 18]
+
+test "closure assigning another name keeps its own local", '''
+  run = ->
+    out = []
+    for x in [3, 17]
+      f = ->
+        y = x + 1
+        y
+      out.push f()
+    out
+  run()
+  ''', [4, 18]
+
+test "closure after the loop assigns a local of its own", '''
+  run = ->
+    out = []
+    for x in [3, 17]
+      out.push x
+    after = ->
+      x = 99
+      x
+    out.push after()
+    out
+  run()
+  ''', [3, 17, 99]
+
+test "closure parameter shadows the loop variable", '''
+  run = ->
+    out = []
+    for x in [3, 17]
+      f = (x) -> x = x + 1
+      out.push f(0), x
+    out
+  run()
+  ''', [1, 3, 1, 17]

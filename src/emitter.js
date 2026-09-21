@@ -1495,9 +1495,13 @@ class Emitter {
   }
 
   // A binding-only frame (loop variables, catch bindings): the names
-  // shadow outer reactive names for the wrapped emission.
+  // shadow outer reactive names for the wrapped emission. They are
+  // DECLARATIONS of the block they head (`block` is what inScope
+  // reads): a function nested in the block that assigns one writes the
+  // block's binding — the iteration's own `let`, the handler's
+  // parameter — and never declares a local over it.
   withBindings(names, fn) {
-    this.rframes.push({ reactive: new Set(), bound: new Set(names) });
+    this.rframes.push({ reactive: new Set(), bound: new Set(names), block: true });
     fn();
     this.rframes.pop();
   }
@@ -3747,8 +3751,14 @@ class Emitter {
     for (const role of roles) this.mark(stmt, role, () => {});
   }
 
+  // Does an enclosing scope declare `name`? Function and program scopes
+  // answer through this.scopes (hoists, parameters, imports, const
+  // declarations); a block that heads its own bindings (a loop's
+  // variables, a catch binding) pushes no scope and answers through its
+  // binding-only reactive frame.
   inScope(name) {
-    return this.scopes.some((s) => s.has(name));
+    return this.scopes.some((s) => s.has(name)) ||
+      this.rframes.some((f) => f.block === true && f.bound.has(name));
   }
 
   // A function scope's hoist entries: local assignment targets minus
@@ -10561,7 +10571,10 @@ class Emitter {
     // (own plus threaded outer; the class record's is empty), so the same
     // set feeds both roles: `bound` shadows outer names, `loopVars` marks
     // the emissions the token correction records (see noteNameSpan).
-    this.rframes.push({ reactive: new Set(), bound: rec.bindings, loopVars: rec.bindings, loopBindings: Emitter.loopBindingsOf(rec) });
+    // `block` makes them declarations to inScope: the record's bindings
+    // are `let`s and parameters of the function this replay emits into,
+    // so a handler that assigns one writes it and declares no local.
+    this.rframes.push({ reactive: new Set(), bound: rec.bindings, block: true, loopVars: rec.bindings, loopBindings: Emitter.loopBindingsOf(rec) });
     try {
       fn();
     } finally {
@@ -13795,7 +13808,7 @@ class Emitter {
         // without it the token correction reaches every position but the
         // binding's own.
         this.rframes.push({
-          reactive: new Set(), bound: new Set([itemVar, indexVar]), loopVars: new Set([itemVar, indexVar]),
+          reactive: new Set(), bound: new Set([itemVar, indexVar]), block: true, loopVars: new Set([itemVar, indexVar]),
           loopBindings: new Map([[itemVar, { owner: rec, which: 'item' }], [indexVar, { owner: rec, which: 'index' }]]),
         });
         try {

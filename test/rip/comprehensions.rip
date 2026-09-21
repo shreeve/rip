@@ -599,3 +599,47 @@ code 'postfix range binds an impure bound once', '''
     return result;
   })();
   '''
+
+# ==============================================================================
+# A closure in a comprehension's value assigns the clause variable
+# ==============================================================================
+#
+# A clause variable is a declaration of the comprehension's loop: a
+# function in the value that assigns it writes the iteration's binding.
+
+test "closure in a comprehension value assigns the clause variable", '''
+  run = ->
+    fns = ((-> x = x + 100) for x in [3, 17])
+    [fns[0](), fns[0](), fns[1]()]
+  run()
+  ''', [103, 203, 117]
+
+test "closure in a top-level comprehension value assigns the clause variable", '''
+  fns = ((-> x = x + 100) for x in [3, 17])
+  fns.map (f) -> f()
+  ''', [103, 117]
+
+test "closure in a for-of comprehension assigns the value variable", '''
+  fns = ((-> v = v + 100) for k, v of {a: 3, b: 17})
+  fns.map (f) -> f()
+  ''', [103, 117]
+
+test "closure in a range comprehension assigns the counter", '''
+  fns = ((-> i = i + 100) for i in [1..2])
+  fns.map (f) -> f()
+  ''', [101, 102]
+
+test "closure in a guarded comprehension assigns the clause variable", '''
+  fns = ((-> x = x + 100) for x in [3, 4, 17] when x % 2)
+  fns.map (f) -> f()
+  ''', [103, 117]
+
+test "closure in an object comprehension assigns the value variable", '''
+  fns = {k: (-> v = v + 100) for k, v of {a: 3, b: 17}}
+  [fns.a(), fns.b()]
+  ''', [103, 117]
+
+test "closure in a comprehension value reads the clause variable", '''
+  fns = ((-> x + 100) for x in [3, 17])
+  fns.map (f) -> f()
+  ''', [103, 117]

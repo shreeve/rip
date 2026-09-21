@@ -103,7 +103,9 @@ on:
   `x ~= value` a computed. A plain `=` to a name that exists in an
   enclosing function scope is a WRITE to that binding, never a shadow,
   so name locals distinctly from module helpers, and make every
-  module-level binding `=!`.
+  module-level binding `=!`. A loop variable and a `catch` binding are
+  such names inside their block: a closure in a loop body that assigns
+  the loop variable writes that iteration's binding.
 - `name! =! (args) ->` declares a void function (no auto-collected
   return); `f! x` calls `f(x)` and awaits it (the "dammit" form),
   `f? x` is optional call, bare `x?` is existence (`x != null`).
