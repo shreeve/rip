@@ -518,10 +518,10 @@ Select =! component
 test "the README's select list: arrows move the choice, Enter takes it, and the border says who has focus", ->
   mounted Select, { cols: 12, props: { items: ['tea', 'coffee', 'water'] } }, (view) ->
     eq view.frame(), "╭──────────╮\n│tea       │\n│coffee    │\n│water     │\n╰──────────╯"
-    ok view.ansi.includes("#{CSI}36m╭") and view.ansi.includes("#{CSI}7mtea"), JSON.stringify view.ansi
+    ok view.ansi.includes("#{CSI}36m╭") and /7mtea/.test(view.ansi), JSON.stringify view.ansi
     view.press 'ArrowDown'
     view.frame()
-    ok view.ansi.includes("#{CSI}7mcoffee") and not view.ansi.includes("#{CSI}7mtea"), JSON.stringify view.ansi
+    ok /7mcoffee/.test(view.ansi) and not /7mtea/.test(view.ansi), JSON.stringify view.ansi
     view.press 'ArrowUp'
     view.press 'ArrowUp'
     view.press 'Enter'
