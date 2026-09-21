@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { cors, csrf, htmlJson, secureHeaders, sessions, timeout } from 'rip/sites/middleware'
+import * as middleware from 'rip/sites/middleware'
 
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith('--preload=')
 GENERATOR = join(import.meta.dir, '..', '..', 'generate.rip')
@@ -189,11 +190,17 @@ runMode = (encrypt) ->
       ok output.includes('[worker middleware] handler ignored timeout cancellation; recycling') unless encrypt
     rmSync dir, { recursive: true, force: true }
 
+test 'public package surface exposes the documented middleware', ->
+  eq Object.keys(middleware).sort(), ['cors', 'csrf', 'htmlJson', 'secureHeaders', 'sessions', 'timeout']
+
 test 'invalid middleware policy rejects during registration', ->
   throws (-> cors({ origin: '*', credentials: true })), 'specific origin'
   throws (-> cors({ origin: '' })), 'nonempty'
+  # @ts-expect-error credentials is a boolean
   throws (-> cors({ origin: 'https://client.test', credentials: 'true' })), 'boolean'
+  # @ts-expect-error sessions requires a secret
   throws (-> sessions({})), 'nonempty secret'
+  # @ts-expect-error encrypt is a boolean
   throws (-> sessions({ secret: 'x', encrypt: 'true' })), 'boolean'
   throws (-> csrf({ secret: 'x', sameSite: 'None' })), 'requires Secure'
   throws (-> timeout(0)), 'positive integer'
@@ -235,10 +242,10 @@ test! 'htmlJson renders direct iOS navigation and leaves API JSON alone', ->
     start: (controller) ->
       controller.enqueue TextEncoder.new().encode(largeText)
       controller.close()
-  streamed = Promise.race! [
+  streamed = (Promise.race! [
     htmlJson navigation, -> Response.new(stream, { headers: { 'content-type': 'application/json' } })
     Promise.new((_, reject) -> setTimeout((-> reject(Error.new('htmlJson size cancellation blocked'))), 1000))
-  ]
+  ]) as Response
   eq (streamed.text!).length, largeText.length
 
 test! 'secureHeaders fills API defaults without overriding application policy', ->

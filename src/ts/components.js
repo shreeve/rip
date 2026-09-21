@@ -58,15 +58,21 @@ const memberTarget = (t) => {
 };
 
 // containsAwait's shape (the Promise spelling for async methods):
-// nested function/class bodies keep their own awaits.
-const awaitsIn = (x) => {
+// nested function/class bodies keep their own awaits, and an effect's
+// body is one — its NodeStore row tells it from a call spelled
+// `effect(a, b)`.
+const awaitsIn = (x, stores) => {
   if (!isNode(x)) return false;
   const h = x[0];
   if (h === 'await' || h === 'dammit!' || h === 'dammit?') return true;
   if (h === 'for-as' && x[3] === true) return true;
-  if (h === 'class') return awaitsIn(x[2]);
+  if (h === 'class') return awaitsIn(x[2], stores);
   if (h === '->' || h === '=>' || h === 'def' || h === 'void-def') return false;
-  return x.some(awaitsIn);
+  if (h === 'effect' && x.length === 3) {
+    const id = stores.idOf(x);
+    if (id !== null && stores.node(id)?.semanticKind === 'effect') return false;
+  }
+  return x.some((el) => awaitsIn(el, stores));
 };
 
 // containsYield's shape, on the same boundaries: a generator method
@@ -324,6 +330,7 @@ export function componentTypeInfo(stores, source, node, behavior = null, { spell
     // face/dts diff can see it, and both are valid TS, so no tsc gate
     // can either. Read the role; never assume.
     isOptionalParam: optionalReader(stores),
+    awaits: (body) => awaitsIn(body, stores),
   };
 }
 
@@ -1181,7 +1188,7 @@ export function instanceTypeLines(info, selfType, { road = 'dts' } = {}) {
       // return it does not make.
       const isGen = yieldsIn(m.func[2]);
       const base = declared ?? (m.isVoid && !isGen ? 'void' : 'any');
-      const ret = awaitsIn(m.func[2]) && !isGen && !/^Promise\s*</.test(base) ? `Promise<${base}>` : base;
+      const ret = info.awaits(m.func[2]) && !isGen && !/^Promise\s*</.test(base) ? `Promise<${base}>` : base;
       const firstType = m.name === 'onError' ? COMPONENT_FAILURE_TYPE : null;
       lines.push({ segs: [{ text: `${m.name}${renderParams(m.func[1], info.isOptionalParam, firstType)}: ${ret};` }] });
       continue;

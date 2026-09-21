@@ -14,14 +14,59 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+type JanusStatus =
+  running?: boolean
+  pid?: number
+  uptime?: string
+  supervisor?: string
+  autostart?: boolean
+  janus?: string
+  binary_newer?: boolean
+  config?: string
+  sites?: string | null
+  socket?: string
+  admin?: string
+  log?: string
+  dashboard_url?: string
+  scope?: string
+  scope_error?: string
+  'interface'?: string
+  bind?: string[]
+  firewall?: string
+
+type EdgeState =
+  state: 'running' | 'stopped'
+  external: boolean
+  control: string | null
+  dashboardUrl: string | null
+  scope: string | null
+  interface: string | null
+  bind: string[] | null
+  firewall: string | null
+  baseUrl: string
+  pid: number | null
+  uptime: string | null
+  supervisor: string | null
+  autostart: boolean
+  version: string | null
+  binaryNewer: boolean
+  config: string | null
+  sites: string | null
+  log: string | null
+  admin: string | null
+  janus: unknown
+  lastError: string | null
+
+type Report = (message: string, status: number) => null
+
 export JANUS_MISSING = 'no janus on PATH — install Janus: curl -fsSL https://raw.githubusercontent.com/shreeve/janus/main/install.sh | bash'
 export JANUS_STOPPED = "Janus is not running — 'janus autostart' installs it as a service (once), 'janus start' starts it"
 
-export janusBinary = -> Bun.which('janus')
+export janusBinary = (): string | null -> Bun.which('janus')
 
 # `janus status --json`: exit 0 running, 3 stopped. null when there is no
 # janus on PATH or it did not answer as expected.
-export janusStatus = ->
+export janusStatus = (): JanusStatus | null ->
   janus = janusBinary()
   return null unless janus?
   result = Bun.spawnSync [janus, 'status', '--json'], { stdout: 'pipe', stderr: 'pipe' }
@@ -30,11 +75,11 @@ export janusStatus = ->
 
 # The control target apps register with: JANUS_CONTROL when set, else the
 # service's control socket.
-export edgeControl = (janus = null) ->
+export edgeControl = (janus: JanusStatus | null = null): string | null ->
   return process.env.JANUS_CONTROL if process.env.JANUS_CONTROL
   (janus or janusStatus())?.socket or null
 
-export externalEdge = -> process.env.JANUS_CONTROL?
+export externalEdge = (): boolean -> process.env.JANUS_CONTROL?
 
 # The dashboard belongs to Janus. Discover its configured front door instead
 # of assuming a default name, port, or an enabled mDNS capability.
@@ -44,7 +89,7 @@ validDashboardUrl = (value) ->
   return null unless parsed? and parsed.protocol in ['http:', 'https:'] and not parsed.username and not parsed.password
   parsed.href
 
-export dashboardUrl = (edge) ->
+export dashboardUrl = (edge: Partial<Omit<EdgeState, 'state'>> & { state?: string }): Promise<string | null> ->
   return null unless edge.state is 'running'
   return validDashboardUrl(edge.dashboardUrl) if edge.external is false
   return null unless edge.control?
@@ -62,7 +107,7 @@ export SITE_NAME = 'rip.caddy'
 # rip needs a Janus that owns exposure: `janus status --json` carries
 # `scope` and `bind` from 1.13.0 on. An older Janus is refused; nothing
 # falls back to a wildcard bind.
-export requireExposureJanus = (janus, report = abort) ->
+export requireExposureJanus = (janus: JanusStatus | null, report: Report = abort): JanusStatus | null ->
   return report(JANUS_MISSING, 503) unless janus?
   return report("janus exposure state is unusable: #{janus.scope_error}", 503) if janus.scope_error
   return report("rip requires janus >= 1.13.0 (exposure modes); this is janus #{janus.janus or 'of unknown version'}", 503) unless Array.isArray(janus.bind) and typeof janus.scope is 'string'
@@ -70,7 +115,7 @@ export requireExposureJanus = (janus, report = abort) ->
 
 # The edge's exposure scope, from Janus. localhost when there is no Janus
 # to ask: nothing is rendered then, and loopback routing claims the least.
-export edgeScope = (janus = janusStatus()) -> janus?.scope or 'localhost'
+export edgeScope = (janus: JanusStatus | null = janusStatus()): string -> janus?.scope or 'localhost'
 
 lastLine = (result) ->
   lines = (result.stderr.toString() + result.stdout.toString()).trim().split('\n').filter (line) -> line and not line.startsWith('{')
@@ -87,7 +132,7 @@ writeSite = (target, content) ->
 # Keep rip's site file in Janus's sites directory, as shipped, and reload
 # a running edge when it changed. `janus` is Janus's status; `report(message,
 # status)` receives a failure. Returns the status.
-export ensureEdgeSite = (janus, report = abort) ->
+export ensureEdgeSite = (janus: JanusStatus, report: Report = abort): JanusStatus | null ->
   desired = readFileSync SITE, 'utf8'
   target = join janus.sites, SITE_NAME
   current = try readFileSync(target, 'utf8') catch then null
@@ -108,7 +153,7 @@ export ensureEdgeSite = (janus, report = abort) ->
 
 # The service edge, with rip's site file in place. An external edge
 # (JANUS_CONTROL) is used as found.
-export configureEdge = (report = abort) ->
+export configureEdge = (report: Report = abort): JanusStatus | null ->
   return null if externalEdge()
   janus = requireExposureJanus janusStatus(), report
   return null unless janus?
@@ -117,14 +162,14 @@ export configureEdge = (report = abort) ->
 # Snapshot readers share the same short-lived service facts. No disk state
 # is cached: this only avoids spawning Janus once for every app in a list.
 snapshotCache = { at: 0, value: null }
-export snapshotEnvironment = ->
+export snapshotEnvironment = (): JanusStatus ->
   return { scope: 'localhost', sites: null } if externalEdge()
   now = Date.now()
   if now - snapshotCache.at >= 2000
     snapshotCache = { at: now, value: janusStatus() }
   snapshotCache.value or { scope: 'localhost', sites: null }
 
-export snapshotEdgeState = (edge, janus, health = null) ->
+export snapshotEdgeState = (edge: { baseUrl?: string, lastError?: string | null } | null, janus: JanusStatus | null, health: unknown = null): EdgeState ->
   {
     state: if health? then 'running' else 'stopped'
     external: externalEdge()
@@ -149,7 +194,7 @@ export snapshotEdgeState = (edge, janus, health = null) ->
     lastError: edge?.lastError or null
   }
 
-export edgeFetch = (target, path = '/1.0', init = {}) ->
+export edgeFetch = (target: string, path: string = '/1.0', init: BunFetchRequestInit = {}): Promise<Response> ->
   options = { signal: AbortSignal.timeout(5000), ...init }
   if target.startsWith('http://') or target.startsWith('https://')
     fetch "#{target.replace(/\/$/, '')}#{path}", options

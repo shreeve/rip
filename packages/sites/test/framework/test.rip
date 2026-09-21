@@ -303,7 +303,7 @@ test! 'error helpers, terminal handlers, and masking follow the contract', ->
     eq (handle! request('GET', '/missing')).text!, 'lost'
 
     resetGlobals()
-    onError (failure) -> @json { handled: failure.message }, 409
+    onError (failure) -> @json { handled: (failure as Error).message }, 409
     get '/custom' -> throw Error.new 'handled here'
     custom = handle! request('GET', '/custom')
     eq custom.status, 409
@@ -314,7 +314,8 @@ test! 'error helpers, terminal handlers, and masking follow the contract', ->
     # default envelope.
     resetGlobals()
     onError (failure) ->
-      return { claimed: failure.message, code: failure.code } if failure.code is 'teapot'
+      thrown = failure as Error & { code?: string }
+      return { claimed: thrown.message, code: thrown.code } if thrown.code is 'teapot'
       null
     get '/object' -> error! 'short and stout', 418, 'teapot'
     get '/declined' -> throw Error.new 'database password'

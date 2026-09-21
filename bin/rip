@@ -688,5 +688,15 @@ try {
   }
 } catch (err) {
   if (err instanceof CompileError) fail(err.message);
+  // The token and s-expression printers lex outside compile(). A lexer
+  // rejection carries its offset span, and it is the diagnostic
+  // compile() reports for this source — so compile() formats it.
+  if (typeof err.start === 'number') {
+    try {
+      compile(source, { path });
+    } catch (diagnostic) {
+      if (diagnostic instanceof CompileError) fail(diagnostic.message);
+    }
+  }
   throw err;
 }

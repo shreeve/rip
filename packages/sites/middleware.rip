@@ -1,3 +1,24 @@
+type Middleware = (request: Request, next: (request?: Request) => Response | Promise<Response>) => Promise<Response>
+
+type CookiePolicy =
+  sameSite?: 'Strict' | 'Lax' | 'None'
+  secure?: boolean
+
+type SessionOptions = CookiePolicy & {
+  secret: string
+  encrypt?: boolean
+  name?: string
+  maxAge?: number
+  httpOnly?: boolean
+}
+
+type CsrfOptions = CookiePolicy & {
+  secret: string
+  cookieName?: string
+  headerName?: string
+  exempt?: (request: Request) => unknown
+}
+
 SESSION = :rip.server.session
 RECYCLE = :rip.server.recycle
 SAFE_METHODS = Set.new ['GET', 'HEAD', 'OPTIONS']
@@ -115,7 +136,14 @@ decodeSession = (value, secret, encrypt) ->
   catch
     {}
 
-export cors = (opts = {}) ->
+export cors = (opts: {
+  origin?: string | string[] | ((origin: string) => boolean | Promise<boolean>)
+  credentials?: boolean
+  methods?: string | string[]
+  headers?: string | string[]
+  exposeHeaders?: string | string[]
+  maxAge?: number
+} = {}): Middleware ->
   origin = opts.origin ?? '*'
   throw TypeError.new('cors origin must be *, a string, an array, or a function') unless origin is '*' or typeof origin is 'string' or Array.isArray(origin) or typeof origin is 'function'
   throw TypeError.new('cors origin strings must be nonempty') if typeof origin is 'string' and origin.length is 0
@@ -175,7 +203,7 @@ highlightJson = (text) ->
     .replace(/: (-?\d+(?:\.\d+)?)/g, ': <span class="number">$1</span>')
     .replace(/: (true|false|null)/g, ': <span class="literal">$1</span>')
 
-export htmlJson = (request, next) ->
+export htmlJson: Middleware = (request, next) ->
   response = next!
   type = response.headers.get('content-type') or ''
   return response unless type.toLowerCase().includes 'application/json'
@@ -229,7 +257,12 @@ export htmlJson = (request, next) ->
   """
   Response.new html, { status: response.status, statusText: response.statusText, headers }
 
-export timeout = (seconds = 30, opts = {}) ->
+export timeout = (seconds: number = 30, opts: {
+  grace?: number
+  status?: number
+  message?: string
+  exempt?: (request: Request) => unknown
+} = {}): Middleware ->
   grace = opts.grace ?? 1
   status = opts.status ?? 504
   message = opts.message ?? 'Gateway Timeout'
@@ -252,7 +285,7 @@ export timeout = (seconds = 30, opts = {}) ->
       ((response) -> { response }),
       ((error) -> { error })
     )
-    result = Promise.race! [outcome, deadline]
+    result = (Promise.race! [outcome, deadline]) as { timeout?: boolean, error?: unknown, response?: Response }
     unless result.timeout
       clearTimeout timer
       throw result.error if result.error?
@@ -280,7 +313,13 @@ securityHeader = (opts, name, fallback) ->
     throw TypeError.new("secureHeaders #{name} must be a valid header value or false")
   value
 
-export secureHeaders = (opts = {}) ->
+export secureHeaders = (opts: {
+  contentTypeOptions?: string | false
+  referrerPolicy?: string | false
+  contentSecurityPolicy?: string | false
+  frameOptions?: string | false
+  permissionsPolicy?: string | false
+} = {}): Middleware ->
   policy = [
     ['x-content-type-options', securityHeader(opts, 'contentTypeOptions', 'nosniff')]
     ['referrer-policy', securityHeader(opts, 'referrerPolicy', 'strict-origin-when-cross-origin')]
@@ -294,7 +333,7 @@ export secureHeaders = (opts = {}) ->
     withHeaders response, (headers) ->
       headers.set name, value for [name, value] in policy when value? and not headers.has(name)
 
-export sessions = (opts = {}) ->
+export sessions: (opts: SessionOptions) => Middleware = (opts: Partial<SessionOptions> = {}) ->
   secret = opts.secret
   throw TypeError.new('sessions requires a nonempty secret') unless typeof secret is 'string' and secret.length > 0
   encrypt = booleanOption opts, 'encrypt'
@@ -323,7 +362,7 @@ equal = (left, right) ->
     different |= left.charCodeAt(i) ^ right.charCodeAt(i)
   different is 0
 
-export csrf = (opts = {}) ->
+export csrf: (opts: CsrfOptions) => Middleware = (opts: Partial<CsrfOptions> = {}) ->
   secret = opts.secret
   throw TypeError.new('csrf requires a nonempty secret') unless typeof secret is 'string' and secret.length > 0
   name = opts.cookieName or 'csrf_token'
@@ -344,7 +383,7 @@ export csrf = (opts = {}) ->
     unless token?
       token = randomToken()
       emit = true
-    request.csrfToken = token
+    (request as Request & { csrfToken?: string }).csrfToken = token
     response = next!
     return response unless emit
     setCookie response, name, "#{token}.#{sign!(token, secret)}", policy

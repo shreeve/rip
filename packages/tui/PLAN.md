@@ -220,7 +220,12 @@ shrink, basis, align-items / self / content including **baseline**,
 justify, gap, margin (including auto), padding, border, width /
 height / min / max in points or percent, relative, absolute, and
 **static** position with insets, `display: none`, and measure
-functions for text.
+functions for text. The engine's contract is Yoga's suite, which needs
+a border of any width (`border*Width`) and `overflow: 'scroll'`, so
+the engine keeps both. The document writes only what a terminal can
+draw — a border is 0 or 1 cell, and scrolling is `overflow: 'hidden'`
+plus a content offset — so both are reached by writing `styles` past
+the document, as the shim and the fuzz do.
 
 Two features Ink exposes are in scope because a retrofit would be
 expensive and a terminal needs them:
@@ -271,12 +276,31 @@ container is measured at exact width.
 - *Same-size fast path.* A changed text node is re-measured under its
   last constraints; an unchanged size marks paint-dirty only and runs
   no layout. A counter ticking from 41 to 42 costs zero layout.
-- *Layout boundary — not built.* A change dirties every ancestor up to
-  the root, and each one recomputes; its other children answer from
-  the cache, at about three visits apiece. A widened text in a flat
-  column of 2,000 costs 6,001 visits, and a chain of 14 definite-size
-  boxes recomputes all 14. Stopping at the first ancestor whose width
-  and height are both definite is open work (TODO §4).
+- *Layout boundary.* A change stops at the first ancestor whose
+  answers cannot follow its content: a node that has been offered an
+  exact width and height on every ask since its owner last started its
+  answers over. An exact offer is the answer, held in the node's own
+  min and max, so every answer an ancestor holds stands. No style names
+  the case — a definite width and height, a percent of an exact owner,
+  a stretched or `flex: n` child of one, an absolute node with sizes or
+  opposing insets all qualify by the offers they get, and a percent of
+  a content-sized owner, or a size put back to `auto`, stops qualifying
+  at its first offer that is not exact. `sync` leaves such a node dirty,
+  answers its ancestors that nothing is different, and after the pass
+  the node is laid out again under the offer of its last layout (its
+  layout entry) and what is under it is rounded from its own corner,
+  absolute and rounded, as `settle` recorded it. Two readers go past an
+  answer: a baseline row reads baselines to any depth, and is computed
+  on every pass with everything above and under it, so a boundary
+  there is reached before it is laid out alone; and a static node's
+  absolute descendants belong to a containing block above it, so a
+  static node is never a boundary. The dirty climb still reaches the
+  root — the screen is owed a frame — and `sync` still reads the
+  children of each dirty ancestor. A text widened in one row of a
+  definite height among 2,000 costs 5 visits and 41 µs where it cost
+  4,004 and 425 µs; at the bottom of 14 boxes of a definite size, 5
+  visits where it cost 18. A change under a content-sized chain still
+  computes every ancestor to the root (TODO §4).
 
 ### Acceptance: Yoga's own suite
 

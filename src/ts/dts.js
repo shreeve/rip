@@ -191,7 +191,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   const returnTypeOf = (fnNode, body, isVoid) => {
     const declared = roleType(fnNode, 'returnType');
     const isGen = containsYield(body);
-    const isAsync = containsAwait(body);
+    const isAsync = containsAwait(body, stores);
     if (declared !== null) {
       return isAsync && !isGen && !/^Promise\s*</.test(declared) ? `Promise<${declared}>` : declared;
     }

@@ -101,6 +101,8 @@ export class Node
     @dirty = true
     @stain = 3                       # what the painter has yet to survey (paint.rip)
     @bl = @bt = @br = @bb = 0        # the bounds of everything inked from here down
+    @lay = null       # layout's record of the node
+    @measure = null   # a function that sizes it, where one is set
 
   # The children as an array, rebuilt only after the list changed.
   get childNodes: ->

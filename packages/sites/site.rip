@@ -55,7 +55,7 @@ _openapiInfo: Record<string, any>     = { title: 'Rip API', version: '0.0.0' }
 _routeIndex                      = null  # method → { statics, dynamics }; built lazily, cleared on registration
 _composeEpoch: number                 = 0     # bumped when use/before/after mutate the chain inputs
 
-export resetGlobals = ->
+export def resetGlobals!
   _errorHandler        = null
   _notFoundHandler     = null
   _rawFilter           = null
@@ -71,7 +71,7 @@ export resetGlobals = ->
 
 # AsyncLocalStorage for request context (enables sync read() in handlers):
 # the request's Ctx and its merged body/query/params.
-export requestContext: AsyncLocalStorage<{ env?: Ctx, data: Record<string, any> }> = AsyncLocalStorage.new()
+export requestContext: AsyncLocalStorage<{ env?: Ctx, data: Record<string, unknown> | null }> = AsyncLocalStorage.new()
 
 # ==============================================================================
 # Router: Pattern Compiler
@@ -223,7 +223,7 @@ export type RouteOptions =
     toJSONSchema: () => Record<string, unknown>
 
 # The custom error handler: the thrown value, then the request context.
-export type ErrorHandler = (this: Ctx, error: any, c: Ctx) => any
+export type ErrorHandler = (this: Ctx, error: unknown, c: Ctx) => unknown
 
 # Duration units for @cache. Every accepted spelling is listed — plurals
 # included — so nothing is inferred: `m` is minutes, a month is spelled
@@ -428,6 +428,16 @@ STATUS_CODE: Record<number, string> =
 
 export type ErrorBody = { error: string, code: string, fields?: Record<string, string> }
 
+type Thrown =
+  status?: number
+  api?: boolean
+  code?: string
+  notice?: string
+  message?: string
+  field?: string
+  errors?: Record<string, string>
+  issues?: { field?: string, message?: string }[]
+
 # One JSON error envelope for every thrown error, flat: { error, code,
 # fields? }. `error` is the message, `code` is always present, and a
 # refused field is always reported the same way, one or many — `fields`
@@ -438,28 +448,30 @@ export type ErrorBody = { error: string, code: string, fields?: Record<string, s
 # status. `notice` (notice!) is explicitly user-facing and is always the
 # message. Any other 5xx or raw throw (no/invalid status) is masked to a
 # generic status message so internal details never leak, and carries no
-# fields. (`err` is an arbitrary thrown value — untyped by nature, like
-# a catch binding.)
-export errorEnvelope = (err): { status: number, body: ErrorBody } ->
-  raw = err?.status
+# fields. (`err` is an arbitrary thrown value, `unknown` like a strict
+# catch binding; `Thrown` is what the body looks for on it, every field
+# tested before it is trusted.)
+export errorEnvelope = (err: unknown): { status: number, body: ErrorBody } ->
+  thrown = err as Thrown | null
+  raw = thrown?.status
   status = if Number.isInteger(raw) and 400 <= raw <= 599 then raw else 500
-  coded = err?.api is true and typeof err.code is 'string'
+  coded = thrown?.api is true and typeof thrown.code is 'string'
   message =
-    if err?.notice then err.notice
-    else if coded or status < 500 then err.message or STATUS_TEXT[status] or 'Error'
+    if thrown?.notice then thrown.notice
+    else if coded or status < 500 then thrown.message or STATUS_TEXT[status] or 'Error'
     else STATUS_TEXT[status] or 'Internal Server Error'
   body: ErrorBody =
     error: message
-    code:  if coded then err.code else STATUS_CODE[status] ?? "http_#{status}"
+    code:  if coded then thrown.code else STATUS_CODE[status] ?? "http_#{status}"
   fields = null
   if status < 500
-    fields = err?.errors
-    if not fields? and err?.issues?
+    fields = thrown?.errors
+    if not fields? and thrown?.issues?
       fields = {}
-      fields[i.field] = i.message for i in err.issues when i.field and i.message
-    if not fields? and typeof err?.field is 'string'
+      fields[i.field] = i.message for i in thrown.issues when i.field and i.message
+    if not fields? and typeof thrown?.field is 'string'
       fields = {}
-      fields[err.field] = err.message
+      fields[thrown.field] = thrown.message
   if fields? and Object.keys(fields).length
     body.code   = 'invalid_field' unless coded
     body.fields = fields
@@ -595,7 +607,7 @@ buildOpenAPI = ->
 # Customize the document's info block and/or build it imperatively:
 #
 #   openapi title: 'Trust Health API', version: '1.4.0'
-export openapi = (info = null) ->
+export openapi = (info: Record<string, unknown> | null = null): { openapi: string, info: Record<string, unknown>, paths: Record<string, Record<string, unknown>> } ->
   Object.assign(_openapiInfo, info) if info
   buildOpenAPI()
 
@@ -606,13 +618,17 @@ export openapi = (info = null) ->
 # are never exposed to middleware or handlers. Global and scoped middleware
 # share ONE registration order; a scoped entry is skipped when the request
 # path is outside its pattern.
+type Middleware = (request: Request, next: (request?: Request) => Promise<Response>) => Response | Promise<Response>
+
 compileMiddlewarePattern = (path) ->
   path = path.replace /\/+$/, ''
   source = liftParams(path, false)
   source = source.replace /(?<![\\*])\*(?!\*)/g, '.*'
   RegExp.new("^#{source}(?:/|$)")
 
-export use = (pathOrMw, mw = null) ->
+def use(mw: Middleware): void
+def use(path: string, mw: Middleware): void
+def use!(pathOrMw, mw = null)
   _composeEpoch++
   if typeof pathOrMw is 'function' and not mw?
     _middlewares.push { fn: pathOrMw }
@@ -621,7 +637,9 @@ export use = (pathOrMw, mw = null) ->
   else
     throw TypeError.new 'use() takes a middleware function or an absolute path and middleware function'
 
-export prefix = (base, fn) ->
+export { use }
+
+export def prefix!(base: string, fn?: (() => unknown) | null)
   old = _prefix
   _prefix = "#{_prefix}#{base}"
   try
@@ -632,7 +650,7 @@ export prefix = (base, fn) ->
 export onError:  (handler: ErrorHandler) => void = (handler) -> _errorHandler = handler
 export notFound: (handler: RouteHandler) => void = (handler) -> _notFoundHandler = handler
 
-export raw: (fn: (req: Request) => any) => void = (fn) -> _rawFilter = fn
+export raw: (fn: (req: Request) => unknown) => void = (fn) -> _rawFilter = fn
 
 export before: (fn: RouteHandler) => void = (fn) ->
   _composeEpoch++
@@ -821,7 +839,7 @@ export hub = (opts: {
     if kind is 'text' then return text.call(@)
     null
 
-export App = (fn) ->
+export App = (fn?: (() => unknown) | null): ((request: Request) => Promise<Response>) ->
   resetGlobals()
   fn?.()
   fetch
@@ -843,18 +861,18 @@ export ctx = ->
 #     corrId = mark()
 #     console.log "[labcorp] #{corrId or '-'} → #{opts.method} #{path}"
 #
-export mark = -> requestContext.getStore()?.env?.mark or null
+export mark = (): string | null -> requestContext.getStore()?.env?.mark or null
 
 # Subrequest — run a function with new data but same @ context
 # Enables read() to work against a synthetic payload while preserving
 # all @ variables from the parent request (e.g., @token).
-export subrequest = (data, fn) ->
+export subrequest: <T>(data: Record<string, unknown> | null, fn: (this: Ctx) => T | Promise<T>) => Promise<T> = (data, fn) ->
   store = requestContext.getStore() or throw Error.new 'no context for subrequest()'
   requestContext.run! { env: store.env, data }, ->
     fn.call!(store.env)
 
 # Session proxy — access session.foo anywhere (via AsyncLocalStorage)
-export session: Record<string, any> = Proxy.new {},
+export session: Record<string, unknown> = Proxy.new {},
   get: (_, key) ->
     requestContext.getStore()?.env?.session?[String(key)]
   set: (_, key, value) ->
@@ -868,7 +886,7 @@ export session: Record<string, any> = Proxy.new {},
     true
 
 # Env proxy — access env.FOO anywhere (shortcut for process.env)
-export env = Proxy.new {}, get: (_, key) -> process.env[String(key)]
+export env: Readonly<Record<string, string | undefined>> = Proxy.new {}, get: (_, key) -> process.env[String(key)]
 
 # ==============================================================================
 # Error Helpers — Halt request with an HTTP error
@@ -937,7 +955,7 @@ def error(message: string | Record<string, string>, status = 400, code?: string,
     err.field = field if field?
   throw err
 
-def notice(message: string = 'Something went wrong', status = 400): never
+def notice(message: string = 'Something went wrong', status: number = 400): never
   throw Object.assign(Error.new(message), { status, notice: message })
 
 # Always throws — no map form, no no-op, so a plain `never`, and
@@ -953,9 +971,9 @@ def bail(): never
   # (authenticated-but-refused) stays with `error! '…', 403`.
   throw Object.assign(Error.new('Unauthorized'), { status: 401 })
 
-# Declaration form does not take `export` inline (the overload list
-# must sit in the same block as its implementation), so the three
-# error helpers export here.
+# A def with an overload list does not take `export` inline (the list
+# must sit in the same block as its implementation), so `error` exports
+# through a list, as `use` does, and its two companions ride along.
 export { error, notice, bail }
 
 # ==============================================================================

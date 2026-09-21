@@ -19,6 +19,7 @@ import { CLUSTER, glyph, crowded, evict, sanitize, Flow, refresh, MODES, A0, A1,
 # other, so it stands against an ancestor's color and against the
 # background a run of text lands on.
 NAMED =! {
+  __proto__: null
   black: 0, red: 1, green: 2, yellow: 3, blue: 4, magenta: 5, cyan: 6, white: 7, default: 9
   gray: 60, grey: 60, blackBright: 60, redBright: 61, greenBright: 62, yellowBright: 63
   blueBright: 64, magentaBright: 65, cyanBright: 66, whiteBright: 67
@@ -30,7 +31,7 @@ COLORS =! "a name (red, greenBright, gray, default), '#rrggbb', 'rgb(r, g, b)' o
 # (40); null for a value that is no color.
 tint =! (color, base) ->
   return null unless typeof color is 'string'
-  return String base + NAMED[color] if Object.hasOwn NAMED, color
+  return String base + NAMED[color] if NAMED[color] isnt undefined
   if /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test color
     hex = color.slice 1
     hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2] if hex.length is 3
@@ -141,6 +142,7 @@ L  =! 7
 export PARTS =! ['topLeft', 'top', 'topRight', 'right', 'bottomRight', 'bottom', 'bottomLeft', 'left']
 
 BORDERS =! {
+  __proto__: null
   single: '┌─┐│┘─└│', double: '╔═╗║╝═╚║', round: '╭─╮│╯─╰│', bold: '┏━┓┃┛━┗┃'
   singleDouble: '╓─╖║╜─╙║', doubleSingle: '╒═╕│╛═╘│', classic: '+-+|+-+|', arrow: '↘↓↙←↖↑↗→'
 }
@@ -158,7 +160,7 @@ probe =! Flow.new()
 # character above all, never reaches the terminal.
 glyphsOf =! (style, key = 'borderStyle') ->
   custom = style and typeof style is 'object'
-  unless custom or (typeof style is 'string' and Object.hasOwn BORDERS, style)
+  unless custom or (typeof style is 'string' and BORDERS[style])
     throw Error.new "rip/tui: #{key}: #{JSON.stringify style} is not one of #{Object.keys(BORDERS).join ', '}, or an object of #{PARTS.join ', '}"
   name = if custom then "#{style.topLeft}\n#{style.top}\n#{style.topRight}\n#{style.right}\n#{style.bottomRight}\n#{style.bottom}\n#{style.bottomLeft}\n#{style.left}" else style
   cells = frames.get name
@@ -214,7 +216,7 @@ export allow! =! (key, value) ->
       throw Error.new "rip/tui: #{key}: #{if typeof value is 'number' then value else JSON.stringify value} is not a number of cells — write a finite number" unless Number.isFinite value
     when BORDER then glyphsOf value, key
     when WRAP
-      throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not one of #{Object.keys(MODES).join ', '}" unless Object.hasOwn MODES, value
+      throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not one of #{Object.keys(MODES).join ', '}" if MODES[value] is undefined
     # A link goes to the terminal inside an escape sequence, so it is
     # refused, never repaired, unless every character is printable ASCII —
     # what OSC 8 asks of a URI, and what cannot end the sequence early.
