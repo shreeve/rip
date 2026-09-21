@@ -1,0 +1,293 @@
+# ==============================================================================
+# tui tests — the terminal document, layout, paint, and the live diff
+# ==============================================================================
+
+import { test, eq, ok, throws } from 'rip/testing'
+import { run, quit, renderToString, screen, Box, Text, Spacer } from 'rip/tui'
+import * as mod from 'rip/tui'
+import { install } from './document.rip'
+import { layout } from './layout.rip'
+import { Grid, paint, diff } from './paint.rip'
+import { EventEmitter } from 'node:events'
+import { readFileSync } from 'fs'
+import { join } from 'path'
+
+# A terminal that remembers what it was sent.
+def terminal(columns = 40, rows = 10)
+  out = EventEmitter.new()
+  out.columns = columns
+  out.rows = rows
+  out.sent = []
+  out.write = (text) ->
+    out.sent.push text
+    true
+  out
+
+# The visible screen after replaying everything a terminal was sent: the
+# escape sequences `diff` emits, applied to a grid of characters.
+def replay(sent, columns, rows)
+  lines = (Array(columns).fill(' ') for i in [0...rows])
+  row = 0
+  col = 0
+  text = sent.join ''
+  i = 0
+  while i < text.length
+    ch = text[i]
+    if ch is '\x1b'
+      m = /^\x1b\[([?0-9;]*)([A-Za-z])/.exec text.slice(i)
+      n = parseInt(m[1]) or 1
+      switch m[2]
+        when 'A' then row -= n
+        when 'B' then row += n
+        when 'G' then col = n - 1
+        when 'J'
+          for r in [row...rows]
+            for c in [(if r is row then col else 0)...columns]
+              lines[r][c] = ' '
+      i += m[0].length
+    else if ch is '\n'
+      row += 1
+      col = 0
+      i += 1
+    else if ch is '\r'
+      col = 0
+      i += 1
+    else
+      glyph = String.fromCodePoint text.codePointAt(i)
+      lines[row][col] = glyph
+      col += 1
+      i += glyph.length
+  (line.join('').trimEnd() for line in lines).join('\n').trimEnd()
+
+tick = -> Promise.new (resolve) -> setTimeout resolve, 20
+
+# Mount `App` on a fresh document, hand `body(app, show, doc)` the
+# instance and a way to draw it, and always give the document back.
+def mounted(App, body)
+  { doc, restore } = install()
+  try
+    app = App.new({})
+    app.mount doc.body
+    show = (cols = 20) ->
+      { h } = layout doc.body, cols
+      grid = Grid.new cols, Math.max(h, 1)
+      paint grid, doc.body
+      grid.toString()
+    body app, show, doc
+    app.unmount()
+  finally
+    restore()
+
+# ==[ Package surface ]==
+
+console.log "\nPackage"
+
+test "module exports the entry surface and nothing else", ->
+  eq Object.keys(mod).sort(), ['Box', 'Spacer', 'Text', 'quit', 'renderToString', 'run', 'screen']
+
+test "declares no dependencies", ->
+  pkg = JSON.parse readFileSync(join(import.meta.dir, 'package.json'), 'utf8')
+  eq pkg.dependencies, undefined
+  eq pkg.devDependencies, undefined
+
+# ==[ Document ]==
+
+console.log "\nDocument"
+
+test "install is scoped: the process gets its document slot back", ->
+  eq typeof document, 'undefined'
+  { doc, restore } = install()
+  try
+    ok document is doc
+    throws (-> install()), 'already installed'
+  finally
+    restore()
+  eq typeof document, 'undefined'
+
+test "an unknown style is refused by name, with the nearest real one", ->
+  Typo = component
+    render
+      Box flexDirecton: 'row'
+  throws (-> renderToString Typo), "'flexDirecton' is not a terminal style of <div> — did you mean 'flexDirection'?"
+  eq typeof document, 'undefined'
+
+test "a tag with no terminal meaning is refused", ->
+  Web = component
+    render
+      button "save"
+  throws (-> renderToString Web), '<button> has no terminal meaning'
+
+test "role and aria-* are kept on the node, never refused", ->
+  { doc, restore } = install()
+  try
+    node = doc.createElement 'div'
+    node.setAttribute 'role', 'list'
+    node.setAttribute 'aria-label', 'Results'
+    eq node.getAttribute('aria-label'), 'Results'
+  finally
+    restore()
+
+test "a string style and a class are refused", ->
+  { doc, restore } = install()
+  try
+    node = doc.createElement 'div'
+    throws (-> node.setAttribute 'style', 'color: red'), 'string `style`'
+    throws (-> node.className = 'card'), 'class has no terminal meaning'
+  finally
+    restore()
+
+test "a style object takes the same road as props", ->
+  Styled = component
+    render
+      Box style: { borderStyle: 'single', width: 6 }
+        Text "hi"
+  eq renderToString(Styled, cols: 10), "┌────┐\n│hi  │\n└────┘"
+
+# ==[ Layout ]==
+
+console.log "\nLayout"
+
+test "a column stacks and a row sits side by side", ->
+  Stack = component
+    render
+      Box flexDirection: 'column'
+        Text "one"
+        Box flexDirection: 'row', gap: 1
+          Text "a"
+          Text "b"
+  eq renderToString(Stack, cols: 10), "one\na b"
+
+test "three equal shares of 100 round to 33, 34, 33", ->
+  Thirds = component
+    render
+      Box flexDirection: 'row', width: 100
+        Box flexGrow: 1
+        Box flexGrow: 1
+        Box flexGrow: 1
+  mounted Thirds, (app, show, doc) ->
+    show 100
+    row = doc.body.firstChild
+    eq (kid.rect.w for kid in row.childNodes), [33, 34, 33]
+    eq (kid.rect.x for kid in row.childNodes), [0, 33, 67]
+
+test "a spacer takes the free space", ->
+  Ends = component
+    render
+      Box flexDirection: 'row', width: 12
+        Text "L"
+        Spacer
+        Text "R"
+  eq renderToString(Ends, cols: 20), "L          R"
+
+test "padding and a border inset the content", ->
+  Card = component
+    render
+      Box borderStyle: 'round', paddingX: 1, width: 9
+        Text "ok"
+  eq renderToString(Card, cols: 20), "╭───────╮\n│ ok    │\n╰───────╯"
+
+test "bare text under a box is a text leaf", ->
+  Bare = component
+    render
+      Box
+        "plain"
+  eq renderToString(Bare, cols: 10), "plain"
+
+# ==[ The component model on a terminal ]==
+
+console.log "\nComponents"
+
+test "if / else swaps in place, between its neighbors", ->
+  Gate = component
+    @open := false
+    render
+      Box flexDirection: 'column'
+        Text "top"
+        if @open
+          Text "open"
+        else
+          Text "shut"
+        Text "bottom"
+  mounted Gate, (app, show) ->
+    eq show(), "top\nshut\nbottom"
+    app.open.value = true
+    eq show(), "top\nopen\nbottom"
+
+test "a keyed for reorders, inserts, and removes rows", ->
+  Rows = component
+    @items := ['a', 'b', 'c']
+    render
+      Box flexDirection: 'column'
+        for item in @items
+          Text key: item
+            "row #{item}"
+  mounted Rows, (app, show) ->
+    eq show(), "row a\nrow b\nrow c"
+    app.items.value = ['c', 'a', 'd']
+    eq show(), "row c\nrow a\nrow d"
+
+test "nested text restyles its own words", ->
+  Mixed = component
+    render
+      Text
+        "all "
+        Text color: 'green', bold: true
+          "green"
+  eq renderToString(Mixed, cols: 20, ansi: true).trimEnd(), "all \x1b[1;32mgreen\x1b[0m"
+
+test "a ref reads its node's box, and the read follows layout", ->
+  seen = []
+  Measured = component
+    @wide := 5
+    el := null
+    ~> seen.push el.box.w if el
+    render
+      Box flexDirection: 'row'
+        div ref: el, width: @wide
+  mounted Measured, (app, show) ->
+    show 40
+    app.wide.value = 9
+    show 40
+    eq seen, [0, 5, 9]
+
+# ==[ The live screen ]==
+
+console.log "\nScreen"
+
+test "the first diff of a grid reproduces it", ->
+  grid = Grid.new 6, 2
+  grid.write 0, 0, 'hello', 0
+  grid.write 2, 1, 'you', 0
+  eq replay([diff(null, grid)], 6, 4), "hello\n  you"
+
+test "an unchanged grid costs no bytes", ->
+  a = Grid.new 6, 2
+  b = Grid.new 6, 2
+  a.write 0, 0, 'same', 0
+  b.write 0, 0, 'same', 0
+  eq diff(a, b), ''
+
+test "a wide character takes two cells", ->
+  grid = Grid.new 6, 1
+  grid.write 0, 0, '日本', 0
+  eq grid.toString(), '日本'
+  eq Array.from(grid.wide), [2, 0, 2, 0, 1, 1]
+
+test! "a running app redraws only the cells that changed, and quit gives the process back", ->
+  out = terminal 30, 8
+  Counter = component
+    @count := 0
+    render
+      Box borderStyle: 'single', width: 14
+        Text "count #{@count}"
+  running = run Counter, stdout: out
+  eq replay(out.sent, 30, 8), "┌────────────┐\n│count 0     │\n└────────────┘"
+  before = out.sent.length
+  running.app.count.value = 7
+  tick!
+  eq replay(out.sent, 30, 8), "┌────────────┐\n│count 7     │\n└────────────┘"
+  change = out.sent.slice(before).join ''
+  ok change.includes('7') and not change.includes('count'), "the update rewrote more than the changed cell: #{JSON.stringify change}"
+  quit 'bye'
+  eq await running.done, 'bye'
+  eq typeof document, 'undefined'

@@ -1,0 +1,49 @@
+# ==============================================================================
+# tui demo — a test run in two panes, drawn live
+#
+#   bun run demo        # stops by itself; Ctrl-C stops it sooner
+# ==============================================================================
+
+import { run, quit, screen, Box, Text, Spacer } from 'rip/tui'
+
+SUITES =! ['lexer', 'parser', 'emitter', 'runtime', 'packages']
+FRAMES =! '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+
+Demo = component
+  passed := 0
+  beat := 0
+  total =! 250
+  suite ~= SUITES[Math.min(SUITES.length - 1, Math.floor(passed / (total / SUITES.length)))]
+  done ~= passed >= total
+
+  ~>
+    timer = setInterval (->
+      beat += 1
+      passed += 5 if passed < total
+    ), 60
+    -> clearInterval timer
+
+  ~> setTimeout (-> quit()), 400 if done
+
+  render
+    Box flexDirection: 'column', width: Math.min(screen.cols, 64)
+      Box flexDirection: 'row', gap: 1
+        Box borderStyle: 'round', borderColor: 'cyan', paddingX: 1, flexGrow: 1, flexDirection: 'column'
+          Text bold: true
+            "Suites"
+          for name in SUITES
+            Text key: name, color: (if name is suite and not done then 'yellow' else 'gray')
+              (if name is suite and not done then '› ' else '  ') + name
+        Box borderStyle: 'round', borderColor: 'green', paddingX: 1, flexGrow: 2, flexDirection: 'column'
+          Box flexDirection: 'row'
+            Text color: 'green', bold: true
+              "#{passed} passed"
+            Spacer
+            Text color: 'red'
+              "0 failed"
+          Text dim: true
+            if done then 'all green' else "#{FRAMES[beat % FRAMES.length]} running #{suite}"
+      Text dim: true
+        "#{screen.cols}×#{screen.rows} — every change above is one diffed write"
+
+run Demo
