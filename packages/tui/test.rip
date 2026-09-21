@@ -1683,10 +1683,10 @@ test "a sweep as a paint starts owes every cell", ->
   Flood = component
     @words := "few"
     render
-      Box flexDirection: 'column', height: 3
+      Box flexDirection: 'column', height: 6
         Text "still"
-        Box height: 1, overflow: 'hidden'
-          Text "#{@words}"
+        Text wrap: 'truncate'
+          "#{@words}"
   view = mount Flood, cols: 40, rows: 12
   try
     view.frame()
@@ -1696,7 +1696,7 @@ test "a sweep as a paint starts owes every cell", ->
     # 25,000 clusters arrive between two frames: past the mark, and half again.
     view.app.words.value = (cluster n for n in [0...25000]).join ''
     view.frame()
-    eq view.damage, 40 * 3
+    eq view.damage, 40 * 6
     ok view.bytes.includes('still'), 'the frame was not drawn from nothing'
     wholly view
   finally
