@@ -650,11 +650,12 @@ or a validation map, each field's message under `fields`. Explicit 4xx
 messages are visible. Raw failures and 5xx details are masked.
 
 `notFound` handles unmatched requests; `onError` replaces the default matched
-route error response:
+route error response. The handler receives whatever was thrown, so `err` is
+`unknown` until it is narrowed or cast:
 
 ```coffee
 notFound -> @text 'lost', 404
-onError (err) -> @json { error: 'request failed' }, err.status ?? 500
+onError (err) -> @json { error: 'request failed' }, (err as { status?: number })?.status ?? 500
 ```
 
 Both handlers must return a `Response`; smart conversion applies to ordinary

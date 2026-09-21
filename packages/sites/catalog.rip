@@ -130,7 +130,12 @@ hostCovered = (host, dir) ->
       return true if host.endsWith ".#{match[1]}"
   false
 
-export snapshotCatalogApp = (app, label = 'rip-sites', options = {}) ->
+export snapshotCatalogApp = (app, label = 'rip-sites', options: {
+  managerStatus?: (app: unknown) => unknown
+  readDecl?: (app: unknown) => unknown
+  edge?: { scope?: string, sites?: string | null }
+  baseUrl?: string
+} = {}) ->
   manager = null
   if options.managerStatus?
     manager = options.managerStatus! app

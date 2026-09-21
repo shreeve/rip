@@ -171,7 +171,7 @@ test! 'dashboard discovery consumes Janus URLs without reconstructing them', ->
     fetch: (request) ->
       requests.push URL.new(request.url).pathname
       Response.json mdns
-  edge = { state: 'running', external: true, control: "http://127.0.0.1:#{server.port}/custom/" }
+  edge = { state: 'running', external: true, control: "http://127.0.0.1:#{server.port}/custom/", dashboardUrl: null }
   try
     eq dashboardUrl!(edge), mdns.dashboard_url
     eq requests.at(-1), '/custom/1.0/mdns'
