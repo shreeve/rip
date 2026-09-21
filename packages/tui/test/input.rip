@@ -232,6 +232,11 @@ test "xterm's modify-other-keys form, which tmux forwards", ->
   row "#{CSI}27~", []
   row "#{CSI}27;5;1114112~", []
   row "#{CSI}27;5;7~", []
+  # The third parameter is that form's alone.
+  row "#{CSI}27;5;13A", []
+  row "#{CSI}3;5;13~", []
+  row "#{CSI}1;5;13A", []
+  row "#{CSI}97;5;98;99u", []
 
 test "a release is dropped in every form, and a repeat is flagged", ->
   row "#{CSI}97;1:3u", []
