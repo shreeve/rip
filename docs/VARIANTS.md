@@ -205,17 +205,45 @@ result (`SELECT [doc]`, `struct_pack(d := doc)`, `list(doc.name)`) is JSON
 text inside the container. Select the document or a path directly, or
 aggregate with `variant_group_array` instead of `list`.
 
-**A document holding NaN or an infinity arrives as a string.** The engine
+**A document holding NaN or an infinity fails the read.** The engine
 accepts `'{"x":1e999}'::JSON` and `'{"x":NaN}'::JSON`, and a struct literal
 carries `'nan'::DOUBLE`; inside the VARIANT the value is a `DOUBLE`, and
 harbor emits the cell as `{"x":Infinity}`, which is not JSON. The driver
-returns a cell that does not parse as its text, so the app reads the *string*
-`'{"x":Infinity}'` where it expected an object, and a path to the number
-reads as the string `'Infinity'`. A save that leaves the field alone leaves
-the column alone; assigning that string back stores a VARIANT string, and
-every path into it is NULL. A model never writes such a document (see *What
-JSON cannot carry*); another client can. A `JSON` column keeps its text as
-written, `{"x":1e999}`, which does parse: `x` is the JS number `Infinity`.
+refuses a cell that does not parse. The query rejects with a `DbError` whose
+`code` is `'invalid_json'`; it names the column (`columnName`), the row's
+index in the result (`row`) and the statement (`sql`). Its message carries the
+parser's complaint and never the cell's text, since a document can hold what
+a log should not; the `SyntaxError` is the error's `cause`:
+
+```
+db: column 'doc' holds text that is not JSON (JSON Parse error: Unexpected
+identifier "Infinity") — the engine stores NaN and ±Infinity inside a
+document, and JSON has no form for them. Read the value in SQL through a cast
+(doc.x::DOUBLE), or repair the row.
+```
+
+The whole result fails, not the one row: `Report.find!` of that row rejects,
+and so does `Report.all!` while the row is in the table. A path to the number
+(`SELECT doc.x AS x`) fails under the name the query gives it, and so do a
+value that is NaN as a whole and a `variant_group_array` that gathers such a
+document. A model never writes one (see *What JSON cannot carry*); another
+client can. A `JSON` column keeps its text as written: `{"x":1e999}` parses,
+and `x` is the JS number `Infinity`; `{"x":NaN}` does not, and fails the
+same way.
+
+To read around it, select the other columns, or cast in SQL.
+`doc.x::DOUBLE` arrives as the string `'Infinity'`, `'-Infinity'` or `'NaN'`,
+which is how harbor carries a `DOUBLE` that JSON has no number for, and
+`doc::JSON::VARCHAR` is the document's text, not decoded. `WHERE
+isinf(doc.x::DOUBLE) OR isnan(doc.x::DOUBLE)` finds the rows for a known
+path. To repair a row, patch the key: a merge patch of `null` drops it, any
+other value replaces it, a nested patch reaches a nested key, and an array is
+replaced whole (`'{"a":[1,null]}'`).
+
+```sql
+UPDATE reports SET doc = json_merge_patch(doc::JSON, '{"x":null}')::VARIANT WHERE id = 2;
+UPDATE reports SET doc = json_merge_patch(doc::JSON, '{"p":{"x":0}}')::VARIANT WHERE id = 3;
+```
 
 **Numbers.** Every number in a document becomes a JS number, a double. The
 engine holds an integer exactly up to 2^64 − 1, but `JSON.parse` rounds one
@@ -318,12 +346,11 @@ value that must survive exactly — an identifier, a decimal amount — as a
 string.
 
 A document nests at most 100 levels deep, and the model refuses a deeper one
-before any SQL. That is far above any real document and below what harbor's
-request parser reads: 127 levels in all, of which the request's own
-`{"sql": …, "params": [ … ]}` takes two, so an object or array param nests at
-most 125 and a deeper one is answered HTTP 400, `recursion limit exceeded`.
-A write carries the document as text, but `where(doc: obj)` carries the
-object, so at 100 levels every document a model stores can also be asked for.
+before any SQL. That is far above any real document, and it is harbor's own
+limit for an object or array param: 100 levels bind, and a deeper one is
+answered HTTP 400, `a document param nests at most 100 levels` (harbor 0.41.2
+and later). A write carries the document as text, but `where(doc: obj)`
+carries the object, so every document a model stores can also be asked for.
 The engine's handling of a deeply nested VARIANT is reported upstream as
 duckdb/duckdb#25967: an `UPDATE` of a VARIANT column costs the square of the
 nesting depth (0.6 s at 1,000 levels, 15 s at 5,000, where an `INSERT` of the

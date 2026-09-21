@@ -172,6 +172,118 @@ describe('default adapter temporal wire (decodes identically to packages/db harb
     expect(g).toBe('POINT (1 2)'); // display text stays text
   });
 
+  // The cells below are harbor's own bytes for a document holding a
+  // DOUBLE NaN or infinity: `{"x":Infinity}` is not JSON, so the read
+  // fails naming the column instead of handing the app a string where
+  // it declared a document.
+  const VARIANT = { name: 'doc', duckdbType: 'VARIANT', lossless: false, encoding: 'json' };
+  const refused = async (columns, data, sql = 'SELECT doc FROM t') => {
+    const fetch = fetchDouble(envelope(columns, data));
+    return withFetch(fetch, () => adapter().query(sql).then(() => null, (e) => e));
+  };
+
+  test('a document holding Infinity fails the read, naming the column', async () => {
+    const err = await refused([{ name: 'id', duckdbType: 'INTEGER', lossless: true }, VARIANT],
+      [[1, '{"x":1}'], [2, '{"x":Infinity,"keep":"b"}']]);
+    expect(err).toBeInstanceOf(hb.DbError);
+    expect(err).not.toBeInstanceOf(hb.QueryError);      // the engine accepted the statement
+    expect(err).not.toBeInstanceOf(hb.ConnectionError); // and a retry reads the same bytes
+    expect(err.name).toBe('DbError');
+    expect(err.code).toBe('invalid_json');
+    expect(err.columnName).toBe('doc');
+    expect(err.row).toBe(1);
+    expect(err.sql).toBe('SELECT doc FROM t');
+    expect(err.cause).toBeInstanceOf(SyntaxError);
+    expect(err.message).toContain("column 'doc'");
+    expect(err.message).toContain("column 'doc' holds text that is not JSON (");
+    expect(err.message).not.toContain('keep');
+    expect(err.message).toMatch(/NaN and ±Infinity/);
+    expect(err.message).toMatch(/::DOUBLE/);
+    expect(err.message).toMatch(/repair the row/);
+  });
+
+  test('a document holding NaN fails the same way', async () => {
+    const err = await refused([VARIANT], [['{"x":NaN,"keep":"c"}']]);
+    expect(err).toBeInstanceOf(hb.DbError);
+    expect(err.code).toBe('invalid_json');
+    expect(err.columnName).toBe('doc');
+    expect(err.row).toBe(0);
+    expect(err.message).toContain("column 'doc' holds text that is not JSON (");
+    expect(err.message).not.toContain('keep');
+  });
+
+  test('a scalar NaN or infinity cell fails, under the name the query gave it', async () => {
+    for (const text of ['NaN', 'Infinity', '-Infinity']) {
+      const err = await refused([{ ...VARIANT, name: 'x' }], [[text]], 'SELECT doc.x AS x FROM t');
+      expect(err).toBeInstanceOf(hb.DbError);
+      expect(err.code).toBe('invalid_json');
+      expect(err.columnName).toBe('x');
+      expect(err.message).toContain(`column 'x' holds text that is not JSON (`);
+    }
+  });
+
+  test('a JSON-typed column follows the same rule', async () => {
+    const err = await refused([{ name: 'j', duckdbType: 'JSON', lossless: true }], [['{"x":NaN}']]);
+    expect(err).toBeInstanceOf(hb.DbError);
+    expect(err.code).toBe('invalid_json');
+    expect(err.columnName).toBe('j');
+  });
+
+  test('the message never quotes the cell: a document can hold what a log should not', async () => {
+    const text = `{"patient":"${'n'.repeat(500)}","x":NaN}`;
+    const err = await refused([VARIANT], [[text]]);
+    expect(err.message).not.toContain('patient');
+    expect(err.message).not.toContain('nnnn');
+    expect(err.message.length).toBeLessThan(400);
+    expect(err.cause).toBeInstanceOf(SyntaxError);
+  });
+
+  test('valid documents, scalars and SQL NULL decode as they are', async () => {
+    const fetch = fetchDouble(envelope(
+      [VARIANT, { name: 'j', duckdbType: 'JSON', lossless: true }],
+      [['{"x":1e999}', '{"x":1e999}'], ['"NaN"', '[1,"Infinity"]'], ['null', '42'], [null, null]]));
+    const { data } = await withFetch(fetch, () => adapter().query('SELECT doc, j FROM t'));
+    expect(data).toEqual([
+      [{ x: Infinity }, { x: Infinity }], // JSON text that overflows a double is still JSON
+      ['NaN', [1, 'Infinity']],           // the words inside strings are strings
+      [null, 42],
+      [null, null],                       // SQL NULL is not text, so nothing parses
+    ]);
+  });
+
+  test('a non-string cell under a JSON kind passes through', () => {
+    expect(hb.decodeRows([VARIANT], [[7], [{ a: 1 }], [null], [undefined]])).toEqual([[7], [{ a: 1 }], [null], [undefined]]);
+    expect(hb.decodeJson(7)).toBe(7);
+    expect(() => hb.decodeJson('NaN')).toThrow(/a JSON column holds text that is not JSON \(/);
+  });
+
+  test('a VARIANT nested in a LIST, STRUCT or MAP stays JSON text, parseable or not', async () => {
+    const inner = { duckdbType: 'VARIANT', lossless: false, encoding: 'json' };
+    const bad = '{"x":Infinity,"keep":"b"}';
+    const fetch = fetchDouble(envelope(
+      [
+        { name: 'l', duckdbType: 'VARIANT[]', lossless: true, child: inner },
+        { name: 's', duckdbType: 'STRUCT(d VARIANT)', lossless: true, fields: [{ name: 'd', ...inner }] },
+        { name: 'm', duckdbType: 'MAP(VARCHAR, VARIANT)', lossless: true, keyType: { duckdbType: 'VARCHAR', lossless: true }, valueType: inner, encoding: 'pairs' },
+      ],
+      [[['{"x":1}'], { d: '{"x":1}' }, [['k', '{"x":1}']]], [[bad], { d: bad }, [['k', bad]]]]));
+    const { data } = await withFetch(fetch, () => adapter().query('SELECT l, s, m FROM t'));
+    expect(data).toEqual([[['{"x":1}'], { d: '{"x":1}' }, [['k', '{"x":1}']]], [[bad], { d: bad }, [['k', bad]]]]);
+  });
+
+  test('a transaction statement fails the same way, and the session still drops on rollback', async () => {
+    const fetch = bySql({ 'SELECT doc FROM t': { json: { ok: true, columns: [VARIANT], data: [['{"x":NaN}']], rowCount: 1 } } });
+    await withFetch(fetch, async () => {
+      const tx = await adapter().begin();
+      const err = await tx.query('SELECT doc FROM t').then(() => null, (e) => e);
+      expect(err).toBeInstanceOf(hb.DbError);
+      expect(err.code).toBe('invalid_json');
+      expect(err.sql).toBe('SELECT doc FROM t');
+      await tx.rollback();
+    });
+    expect(fetch.wasDropped()).toBe(true);
+  });
+
   test('Date params encode to ISO-Z, nested values included; Invalid Date throws loudly', async () => {
     const fetch = fetchDouble(envelope([], []));
     await withFetch(fetch, () => adapter().query(

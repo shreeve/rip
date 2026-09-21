@@ -257,6 +257,7 @@ as a synonym for `rip-db ping`.
 | `QueryError` | Engine rejected the statement — `.code`, `.details`, `.sql` |
 | `ConnectionError` | Transport failure, HTTP 5xx, timeout, abort |
 | `CancelledError` | The statement was stopped — caller `AbortSignal` or harbor cancellation |
+| `DbError` itself | A result the driver refuses to hand over — a JSON or VARIANT cell whose text is not JSON: `.code` `'invalid_json'`, `.columnName`, `.row`, `.sql` |
 
 Catch the family with `isDbError(err)`. `httpStatus` is set when the
 failure came back over HTTP. The classes, the temporal wire (TIMESTAMP
