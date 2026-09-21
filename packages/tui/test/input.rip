@@ -190,6 +190,7 @@ test "the modifier as the only parameter is xterm's old form (modifyCursorKeys: 
   row "#{CSI}5;3A", []
   row "#{CSI}2;5A", []
   row "#{CSI}1:2;5A", []
+  row "#{CSI}5:2A", []
   row "#{CSI}170671659::5R", []
   row "#{CSI}170671659::5A", []
 
@@ -936,12 +937,14 @@ test "random sequences from the table, joined and cut at random, decode to their
     seed = (seed * 1664525 + 1013904223) % 4294967296
     seed / 4294967296
   fed = made = 0
+  drawn = Set.new()
   for round in [0...3000]
     joined = ''
     want = []
     for n in [0...1 + Math.floor(rand() * 6)]
       picked = rows[Math.floor rand() * rows.length]
       joined += picked.whole
+      drawn.add picked
       want.push ...picked.events
     sent = bytes joined
     pieces = []
@@ -954,4 +957,5 @@ test "random sequences from the table, joined and cut at random, decode to their
     fed += sent.length
     made += got.length
     raise "round #{round}: #{JSON.stringify joined} gave #{canon got}, not #{canon want}" unless canon(got) is canon(want)
-  ok fed > 30000 and made > 10000, "#{fed} bytes made #{made} events"
+  # A generator that stands still draws one row three thousand times.
+  ok fed > 30000 and made > 10000 and drawn.size > 500, "#{fed} bytes made #{made} events from #{drawn.size} rows"
