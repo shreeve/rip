@@ -1,0 +1,162 @@
+# What the events contract stands on: a terminal that keeps its cursor,
+# a stdin that remembers what was asked of it, the spelling of what a
+# listener heard, and `held` / `differs` / a tally for Ink's cases.
+
+import { EventEmitter } from 'node:events'
+import { canon, brief } from '../input/harness.rip'
+
+export { canon, brief }
+
+# ── A terminal with a cursor ──────────────────────────────────────────────────
+
+SEQUENCE =! /\x1b\[([?0-9;]*)([A-Za-z])/y
+LINK     =! /\x1b\]8;;[^\x1b]*\x1b\\/y
+
+# As much of a terminal as a frame, its cursor and its modes need: moves
+# up, down and to a column, an erase below, line feeds that scroll at the
+# last row, DEC private modes set and reset, and glyphs as wide as the
+# terminal draws them. `x`, `y` and `shown` are the hardware cursor;
+# `modes` holds the private modes in force (25 is the cursor, which a
+# terminal shows until it is told otherwise); `scrolled` counts the rows
+# pushed into the scrollback; `sent` is every write.
+export class Terminal extends EventEmitter
+  constructor: (@columns = 40, @rows = 10) ->
+    super()
+    @isTTY = true
+    @sent = []
+    @lines = []
+    @x = @y = 0
+    @modes = Set.new [25]
+    @scrolled = 0
+
+  get shown: -> @modes.has 25
+  get cursor: -> if @shown then { x: @x, y: @y } else null
+  get text: -> (Array.from(@lines[r] ?? [], (ch) -> ch ?? ' ').join('').trimEnd() for r in [0...@lines.length]).join('\n').trimEnd()
+
+  # What was written since `mark`, a count of writes.
+  since: (mark) -> @sent.slice(mark).join ''
+
+  write: (text) ->
+    @sent.push text
+    at = 0
+    while at < text.length
+      ch = text[at]
+      if ch is '\x1b'
+        LINK.lastIndex = at
+        if found = LINK.exec text
+          at += found[0].length
+          continue
+        SEQUENCE.lastIndex = at
+        found = SEQUENCE.exec text
+        raise "the terminal was sent a sequence it does not know: #{JSON.stringify text.slice at, at + 12}" unless found
+        @control found[1], found[2]
+        at += found[0].length
+      else if ch is '\n'
+        @x = 0
+        if @y is @rows - 1
+          @lines.shift()
+          @scrolled += 1
+        else
+          @y += 1
+        at += 1
+      else if ch is '\r'
+        @x = 0
+        at += 1
+      else
+        glyph = String.fromCodePoint text.codePointAt at
+        wide = Bun.stringWidth glyph
+        if wide > 0
+          (@lines[@y] ?= [])[@x] = glyph
+          @lines[@y][@x + 1] = '' if wide is 2
+          @x += wide
+        at += glyph.length
+    true
+
+  control!: (params, verb) ->
+    if params[0] is '?'
+      for mode in params.slice(1).split ';'
+        if verb is 'h' then @modes.add +mode else @modes.delete +mode
+      return
+    n = parseInt(params) or 1
+    switch verb
+      when 'A' then @y = Math.max 0, @y - n
+      when 'B' then @y = Math.min @rows - 1, @y + n
+      when 'G' then @x = n - 1
+      when 'J'
+        @lines.length = @y + 1
+        @lines[@y]?.length = @x
+      when 'm' then null
+      else raise "the terminal was sent CSI #{params}#{verb}, which it does not know"
+
+# ── A stdin that remembers ────────────────────────────────────────────────────
+
+# `calls` is what the app asked of it, in order: 'raw on', 'raw off',
+# 'resume', 'pause', 'ref', 'unref'. `key` hands the app a read.
+export class Stdin extends EventEmitter
+  constructor: (@isTTY = true) ->
+    super()
+    @calls = []
+    @raw = false
+
+  setRawMode: (raw) ->
+    @raw = raw
+    @calls.push (if raw then 'raw on' else 'raw off')
+    this
+  resume: -> (@calls.push 'resume'; this)
+  pause: -> (@calls.push 'pause'; this)
+  ref: -> (@calls.push 'ref'; this)
+  unref: -> (@calls.push 'unref'; this)
+  key!: (chunk) -> @emit 'data', chunk
+
+# ── What a listener heard ─────────────────────────────────────────────────────
+
+# A keydown as the parser spelled the key it came from, and a paste as
+# its text: what test/input's rows are written in.
+export spell =! (event) ->
+  if event.type is 'paste'
+    { type: 'paste', text: event.text }
+  else
+    { type: 'key', key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey, altKey: event.altKey, metaKey: event.metaKey, repeat: event.repeat, sequence: event.sequence }
+
+# The node whose `id` is `id`, in tree order under `node`.
+export find =! (id, node = document.body) ->
+  return node if node.getAttribute?('id') is id
+  kid = node.firstChild
+  while kid
+    found = find id, kid
+    return found if found
+    kid = kid.nextSibling
+  null
+
+export idOf =! (node) -> node?.getAttribute('id') ?? null
+
+# ── Ink's cases, counted ──────────────────────────────────────────────────────
+
+# Per Ink file, how many of its titles are held to Ink's answer and how
+# many are stated differences. test/events.rip holds the tally to
+# SOURCE.md's table.
+export tally =! {}
+titles =! {}
+
+export count =! (file, title, kind) ->
+  entry = tally[file] ?= { held: 0, differs: 0 }
+  seen = titles["#{file}: #{title}"]
+  return if seen is kind or seen is 'differs'
+  entry.held -= 1 if seen
+  entry[kind] += 1
+  titles["#{file}: #{title}"] = kind
+
+# Where this package answers differently from Ink ON PURPOSE. The case
+# still runs: `actual` must equal `ours` exactly, and must NOT equal
+# `inks`, what Ink's test asserts — a pin the package has outgrown
+# fails, so the list cannot rot. `why` is the decision, in a sentence.
+export differs =! (file, title, actual, ours, inks, why) ->
+  raise 'a stated difference needs its reason' unless typeof why is 'string' and why.length > 20
+  count file, title, 'differs'
+  raise "stated difference: expected #{brief ours}, got #{brief actual}" unless canon(actual) is canon(ours)
+  raise "this answer equals Ink's — the stated difference is stale: #{why}" if canon(actual) is canon(inks)
+
+process.on 'exit', ->
+  stated = 0
+  stated += entry.differs for own file, entry of tally
+  console.log "#{stated} of Ink's cases are answered differently by stated decision\n" if stated

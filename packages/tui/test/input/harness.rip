@@ -154,7 +154,7 @@ count =! (file, title, kind) ->
 export ROWS =! []
 
 # A key event written without its sequence takes the row's bytes.
-fill =! (events, whole) ->
+export fill =! (events, whole) ->
   ((if event.type is 'key' and not event.sequence? then { ...event, sequence: whole } else event) for event in events)
 
 # `given` is a string, bytes, a list of chunks fed in order with no time

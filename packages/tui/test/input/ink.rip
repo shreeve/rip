@@ -6,23 +6,7 @@
 
 import { test, ok, eq } from 'rip/testing'
 import { ESC, CSI, SS3, open, bytes, waits, key, typed, paste, FOCUS, BLUR, mouse, reply, ink, holds, differs } from './harness.rip'
-
-BEL =! '\x07'
-DEL =! '\x7f'
-BS  =! '\b'
-START =! "#{CSI}200~"
-END   =! "#{CSI}201~"
-ESCAPE =! key 'Escape', '', ESC
-
-# The decisions the stated differences rest on.
-DISCARD =! 'a sequence that holds a byte past its introducer has a second of patience, and is then discarded, never typed: Ink types it as text after its one short timeout, which on a slow link is the tail of an arrow key'
-BARE    =! 'a bare `ESC [` at the timeout is Alt and `[`, as ESC and any other character is Alt and that character; Ink types the `[` with no modifier'
-ABORTED =! 'a bare `ESC [` before a byte that cannot continue it is Alt and `[`, where Ink types the `[` with no modifier, and the line feed after it is Ctrl-J, the key it is in raw mode, where Ink calls it enter'
-RXVT    =! 'rxvt\'s `$` and `^` finals are a dropped terminal form: `$` is an intermediate byte (ECMA-48 5.4), so the sequence runs on to the next final byte and is a sequence this package has no key for'
-CYGWIN  =! 'the Linux console and Cygwin `CSI [ A` function keys are a dropped terminal form: `[` is a final byte (ECMA-48 5.4), so `CSI [` is a whole sequence with no key, and what follows is typed'
-DOUBLE  =! 'a doubled ESC as Meta is a dropped terminal form: the first ESC, followed by a byte that cannot continue it, is the Escape key, and the second starts the sequence it introduces'
-RELEASE =! 'key releases are dropped: the package has @keydown and no @keyup, and asks no terminal for release reports'
-PASTED  =! 'a carriage return or a tab outside a bracketed paste is the key wherever it arrives: the host turns bracketed paste on for the app\'s lifetime (PLAN §8), so pasted text is a paste event; Ink keeps the chunk whole for a terminal without it'
+import { BEL, DEL, BS, START, END, ESCAPE, DISCARD, BARE, ABORTED, RXVT, CYGWIN, DOUBLE, RELEASE, PASTED, up, down, HOOKS } from './hooks.rip'
 
 # One test per Ink title, its rows in order.
 table =! (file, rows) ->
@@ -48,8 +32,6 @@ kitty =! (code, mods, kind, text) ->
   out += ";#{text.join ':'}" if text?
   out + 'u'
 
-up    =! (flags = '', sequence = "#{CSI}A") -> ink 'up', flags, sequence
-down  =! (flags = '', sequence = "#{CSI}B") -> ink 'down', flags, sequence
 
 # ── input-parser.ts ───────────────────────────────────────────────────────────
 
@@ -357,132 +339,10 @@ table 'kitty-keyboard', [
   ['kitty protocol - return key has text field set to carriage return', kitty(13), [key('Enter')]]
 ]
 
-# ── hooks-use-input.tsx ───────────────────────────────────────────────────────
+# ── the hook tests: hooks.rip ─────────────────────────────────────────────────
 
-console.log "\nInk: hooks-use-input"
-
-pressed =! timed ({ feed, clock }) ->
-  feed ESC
-  clock.tick 50
-
-table 'hooks-use-input', [
-  ['useInput - handle legacy Ctrl+Space', '\x00', [ink('space', 'c')]]
-  ['useInput - handle Ctrl+punctuation shortcut', '\x1f', [ink('_', 'c')]]
-  ['useInput - handle lowercase character', 'q', [ink('q')]]
-  ['useInput - handle uppercase character', 'Q', [ink('q', 's')]]
-  ['useInput - \\r should not count as an uppercase character', '\r', [ink('return')]]
-  ['useInput - pasted carriage return', '\rtest', [ink('return', '', '\r'), ...typed('test')], typed('\rtest'), PASTED]
-  ['useInput - pasted tab', '\ttest', [ink('tab', '', '\t'), ...typed('test')], typed('\ttest'), PASTED]
-  ['useInput - handle escape', pressed, [ESCAPE]]
-  ['useInput - escape does not set meta', pressed, [ESCAPE]]
-  ['useInput - handle ctrl', '\x06', [ink('f', 'c')]]
-  ['useInput - handle meta', "#{ESC}m", [ink('m', 'm')]]
-  ['useInput - handle ctrl + meta + letter', "#{ESC}\x02", [ink('b', 'cm')]]
-  ['useInput - handle meta + backspace (0x7F)', ESC + DEL, [ink('backspace', 'm')]]
-  ['useInput - flushes ESC[ prefix as literal input', timed(({ feed, clock }) ->
-    feed CSI
-    clock.tick 50
-  ), [key('[', 'a', CSI)], [key('[', '', CSI)], BARE]
-  ['useInput - handle meta + O with pending flush', timed(({ feed, clock }) ->
-    feed SS3
-    clock.tick 50
-  ), [ink('o', 'sm', SS3)]]
-  ['useInput - handle tab', '\t', [ink('tab')]]
-  ['useInput - handle meta + tab', "#{ESC}\t", [ink('tab', 'm')]]
-  ['useInput - handle shift + tab', "#{CSI}Z", [ink('tab', 's')]]
-  ['useInput - handle backspace', BS, [ink('backspace')]]
-  ['useInput - handle delete', "#{CSI}3~", [ink('delete')]]
-  ['useInput - handle remove (delete)', "#{CSI}3~", [ink('delete')]]
-  ['useInput - handle option + return (macOS)', "#{ESC}\r", [ink('return', 'm')]]
-  ['useInput - handle Ctrl+F1 without crashing', "#{CSI}1;5P", [ink('f1', 'c')]]
-  ['useInput - handle unmapped ctrl escape sequence without crashing', "#{CSI}1;5Iq", typed('q')]
-  ['useInput - drops unmapped control sequence: focus in', "#{CSI}Iq", [FOCUS, ...typed('q')]]
-  ['useInput - drops unmapped control sequence: focus out', "#{CSI}Oq", [BLUR, ...typed('q')]]
-  ['useInput - drops unmapped control sequence: cursor position report', "#{CSI}24;80Rq", [reply('cursor', { x: 79, y: 23 }), ...typed('q')]]
-  ['useInput - drops unmapped control sequence: SGR mouse report', "#{CSI}<0;10;20Mq", [mouse('down', 0, 9, 19), ...typed('q')]]
-  ['useInput - drops unmapped control sequence: primary device attributes', "#{CSI}?62;1;4cq", [reply('attributes', { params: [62, 1, 4] }), ...typed('q')]]
-  ['useInput - drops unmapped control sequence: stray bracketed paste end', "#{END}q", typed('q')]
-  ['useInput - drops unmapped control sequence: unmapped legacy CSI', "#{CSI}[Zq", typed('Zq'), typed('q'), CYGWIN]
-  ['useInput - drops unmapped control sequence: unmapped modified SS3', "#{SS3}1;5Zq", [key('Tab', 'cs', "#{SS3}1;5Z"), ...typed('q')], typed('q'), 'one table of finals serves CSI and SS3, so SS3 Z is the Shift-Tab that CSI Z is; Ink keeps a table per introducer and has no SS3 Z, a sequence no terminal sends']
-]
-
-# ── hooks-use-input-kitty.tsx ─────────────────────────────────────────────────
-
-console.log "\nInk: hooks-use-input-kitty"
-
-table 'hooks-use-input-kitty', [
-  ['useInput - handle kitty special key modifiers without event type', "#{CSI}1;9A", [ink('up', 'S')]]
-  ['useInput - handle kitty keypad navigation', "#{CSI}57420;5:2u", [ink('down', 'cr')]]
-  ['useInput - handle kitty alternate key codes', "#{CSI}97:65:113;6:2;65u", [ink('a', 'csr')]]
-  ['useInput - handle kitty keypad associated text', "#{CSI}57399;129;48u", [ink('0', 'n')]]
-  ['useInput - handle kitty keypad Enter', "#{CSI}57414u", [ink('return')]]
-  ['useInput - kitty associated text with omitted modifiers', "#{CSI}0;;229u", [key('å')]]
-  ['useInput - handle kitty protocol super modifier', "#{CSI}115;9u", [ink('s', 'S')]]
-  ['useInput - handle kitty protocol hyper modifier', "#{CSI}104;17u", [ink('h', 'h')]]
-  ['useInput - handle kitty protocol capsLock', "#{CSI}97;65u", [ink('a', 'l')]]
-  ['useInput - handle kitty protocol numLock', "#{CSI}97;129u", [ink('a', 'n')]]
-  ['useInput - kitty capsLock text does not imply shift', "#{CSI}97;65;65u", [key('A')]]
-  ['useInput - handle kitty protocol super+ctrl', "#{CSI}115;13u", [ink('s', 'cS')]]
-  ['useInput - handle kitty protocol press event', "#{CSI}97;1:1u", [ink('a')]]
-  ['useInput - handle kitty protocol repeat event', "#{CSI}97;1:2u", [ink('a', 'r')]]
-  ['useInput - handle kitty protocol release event', "#{CSI}97;1:3u", [], [ink('a')], RELEASE]
-  ['useInput - handle kitty protocol escape key', "#{CSI}27u", [ink('escape')]]
-  ['useInput - handle kitty protocol backspace (codepoint 127)', "#{CSI}127u", [ink('backspace')]]
-  ['useInput - handle kitty protocol delete', "#{CSI}3;1:1~", [ink('delete')]]
-  ['useInput - non-printable kitty key (capslock) produces empty input', "#{CSI}57358u", [ink('capslock')]]
-  ['useInput - non-printable kitty key (f13) produces empty input', "#{CSI}57376u", [ink('f13')]]
-  ['useInput - non-printable kitty key (printscreen) produces empty input', "#{CSI}57361u", [ink('printscreen')]]
-  ['useInput - kitty protocol space key produces space input', "#{CSI}32u", [ink('space')]]
-  ['useInput - kitty protocol return key produces carriage return input', "#{CSI}13u", [ink('return')]]
-  ['useInput - kitty protocol Ctrl+letter produces input', "#{CSI}97;5u", [ink('a', 'c')]]
-]
-
-# ── hooks-use-input-navigation.tsx ────────────────────────────────────────────
-
-console.log "\nInk: hooks-use-input-navigation"
-
-table 'hooks-use-input-navigation', [
-  ['useInput - handle up arrow', "#{CSI}A", [ink('up')]]
-  ['useInput - handle down arrow', "#{CSI}B", [ink('down')]]
-  ['useInput - handle left arrow', "#{CSI}D", [ink('left')]]
-  ['useInput - handle right arrow', "#{CSI}C", [ink('right')]]
-  ['useInput - handles rapid arrows and enter in one chunk', "#{CSI}B#{CSI}B#{CSI}B\r", [down(), down(), down(), ink('return', '', '\r')]]
-  ['useInput - handle meta + up arrow', "#{ESC}#{CSI}A", [ESCAPE, up()], [ink('up', 'm')], DOUBLE]
-  ['useInput - handle meta + down arrow', "#{ESC}#{CSI}B", [ESCAPE, down()], [ink('down', 'm')], DOUBLE]
-  ['useInput - handle meta + left arrow', "#{ESC}#{CSI}D", [ESCAPE, ink('left', '', "#{CSI}D")], [ink('left', 'm')], DOUBLE]
-  ['useInput - handle meta + right arrow', "#{ESC}#{CSI}C", [ESCAPE, ink('right', '', "#{CSI}C")], [ink('right', 'm')], DOUBLE]
-  ['useInput - handle ctrl + up arrow', "#{CSI}1;5A", [ink('up', 'c')]]
-  ['useInput - handle SS3 ctrl + up arrow', "#{SS3}1;5A", [ink('up', 'c')]]
-  ['useInput - handle ctrl + down arrow', "#{CSI}1;5B", [ink('down', 'c')]]
-  ['useInput - handle ctrl + left arrow', "#{CSI}1;5D", [ink('left', 'c')]]
-  ['useInput - handle ctrl + right arrow', "#{CSI}1;5C", [ink('right', 'c')]]
-  ['useInput - handle page down', "#{CSI}6~", [ink('pagedown')]]
-  ['useInput - handle page up', "#{CSI}5~", [ink('pageup')]]
-  ['useInput - handle home', "#{CSI}H", [ink('home')]]
-  ['useInput - handle end', "#{CSI}F", [ink('end')]]
-]
-
-# ── hooks-use-paste.tsx, input-keypad-enter.tsx, input-buffered-ctrl-c.tsx ────
-
-console.log "\nInk: hooks-use-paste, input-keypad-enter, input-buffered-ctrl-c"
-
-table 'hooks-use-paste', [
-  ['usePaste - receives bracketed paste as single text blob', "#{START}hello world#{END}", [paste('hello world')]]
-  ['usePaste - paste content with escape sequences is delivered verbatim', "#{START}hello#{CSI}Aworld#{END}", [paste("hello#{CSI}Aworld")]]
-  ['usePaste - useInput does not receive bracketed paste content', "#{START}hello#{END}", [paste('hello')]]
-]
-
-table 'input-keypad-enter', [
-  ['normal Return submits through useInput', '\r', [ink('return')]]
-  ['application keypad Enter submits through useInput', "#{SS3}M", [ink('return')]]
-]
-
-CTRL_C =! ink 'c', 'c', '\x03'
-
-table 'input-buffered-ctrl-c', [
-  ['Ctrl+C exits when buffered with text: "\\u0003"', '\x03', [CTRL_C]]
-  ['Ctrl+C exits when buffered with text: "ab\\u0003"', 'ab\x03', [...typed('ab'), CTRL_C]]
-  ['Ctrl+C exits when buffered with text: "\\u0003ab"', '\x03ab', [CTRL_C, ...typed('ab')]]
-  ['buffered Ctrl+C respects exitOnCtrlC: false', 'ab\x03cd', [...typed('ab'), CTRL_C, ...typed('cd')]]
-  ['buffered Ctrl+C respects bracketed paste', "#{START}ab\x03cd#{END}", [paste('ab\x03cd')]]
-]
+# hooks.rip writes a case that moves the clock as its steps; here they
+# run on a parser's own session.
+for [file, rows] in HOOKS
+  console.log "\nInk: #{file}"
+  table file, ((if typeof row[1] is 'function' then [row[0], timed(row[1]), ...row.slice(2)] else row) for row in rows)

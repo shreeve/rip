@@ -36,6 +36,8 @@ class Viewport
 # The terminal's size, as reactive reads.
 export screen =! Viewport.new()
 
+export focus =! {}
+
 # Put `App` on a terminal document of its own, to be drawn to `out`.
 # The document is a global of the process, so one app is mounted at a
 # time and a second is refused. `live` stands before the app is
