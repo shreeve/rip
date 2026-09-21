@@ -460,3 +460,86 @@ test 'a parameterless def with a generic return type keeps its body', '''
     g().get('a')
   ''', 1
 code 'a parameterless generic def takes a return type', 'def g<T>: T\n  1', 'function g() {\n  return 1;\n}'
+
+# ==============================================================================
+# A parenthesized sequence as the WHOLE body
+# ==============================================================================
+
+# `(a; b; c)` lowers to a comma expression, where JavaScript admits no `let`.
+# A name the sequence first assigns therefore declares on the function's hoist
+# line — the same place it declares when the sequence is one statement of
+# several. Each run-time case loads the module before it can answer, so an
+# invalid body fails here rather than in the reader.
+test 'a sequence body reads then resets a flag', '''
+    dirty = true
+    flush = -> (was = dirty; dirty = false; was)
+    [flush(), flush(), dirty]
+  ''', [true, false, false]
+
+test 'a sequence body under a fat arrow', '''
+    dirty = 3
+    flush = => (was = dirty; dirty = 0; was)
+    [flush(), dirty]
+  ''', [3, 0]
+
+test 'a sequence body in a method', '''
+    class Buffer
+      constructor: -> @items = [1, 2]
+      drain: -> (taken = @items; @items = []; taken)
+    b = Buffer.new()
+    [b.drain(), b.items]
+  ''', [[1, 2], []]
+
+test 'a sequence body whose first write is an object pattern', '''
+    f = (point) -> ({x, y} = point; x + y)
+    f {x: 2, y: 5}
+  ''', 7
+
+test 'a sequence body whose first write is an array pattern', '''
+    f = (pair) -> ([a, b] = pair; a * b)
+    f [3, 4]
+  ''', 12
+
+test 'a sequence body that awaits before its first write', '''
+    f = -> (await 1; got = 2; got + 1)
+    f!
+  ''', 3
+
+test 'a sequence body keeps its local out of the enclosing scope', '''
+    was = 'outer'
+    dirty = 1
+    peek = -> (seen = dirty; seen)
+    [peek(), was, typeof seen]
+  ''', [1, 'outer', 'undefined']
+
+code 'a sequence body hoists the name it first assigns', '''
+    dirty = false
+    flush = -> (was = dirty; dirty = false; was)
+  ''', '''
+  let dirty = false;
+  let flush = function() {
+    let was;
+    return (was = dirty, dirty = false, was);
+  };
+  '''
+
+code 'a sequence body hoists every name a pattern binds', 'f = (p) -> ([a, b] = p; a + b)', '''
+  let f = function(p) {
+    let a, b;
+    return ([a, b] = p, a + b);
+  };
+  '''
+
+# In statement position the sequence is a braced block, and its names still
+# belong to the function: they declare on the hoist line whether the sequence
+# is the only statement or one of several.
+code 'a void sequence body hoists like any other statement', 'f! = -> (w = 1; w)', '''
+  let f = function() {
+    let w;
+    {
+      w = 1;
+      w;
+    };
+    return;
+  };
+  '''
