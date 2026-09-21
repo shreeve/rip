@@ -146,7 +146,7 @@ class Flex
     @innerH = NaN
     @innerMain = NaN
     @innerCross = NaN
-    @ownerW = NaN
+    @roomMain = NaN
     @ownerMain = NaN
     @modeMain = MAX_CONTENT
     @modeCross = MAX_CONTENT
@@ -653,14 +653,9 @@ percents =! (lay, from, to) ->
   false
 
 # Whether a node's layout depends on its owner's size as well as on the
-# offer: through its own percent margin, padding, min or max, or through
-# a child's percent min or max, which lines resolve against this node's
-# owner. Only then is the owner's size part of a cached answer's key.
-leansOnOwner =! (lay) ->
-  return true if lay.marginPercent or lay.insidePercent or lay.limitPercent
-  for kid, i in lay.kids
-    return true if kid.lay.limitPercent or (kid.lay.contentBox and kid.lay.insidePercent)
-  false
+# offer: through its own percent margin, padding, min or max. Only then
+# is the owner's size part of a cached answer's key.
+leansOnOwner =! (lay) -> lay.marginPercent or lay.insidePercent or lay.limitPercent
 
 # Whether what a container computes can depend on the ORDER it is asked
 # in, and so on which earlier asks a cached answer stood in for. Two
@@ -1047,7 +1042,7 @@ breakLine! =! (lay, f, lineAt) ->
     if k.position is ABSOLUTE
       at += 1
       continue
-    hypothetical = boundWithin(k, axis, k.basis, f.ownerMain, f.ownerW) + marginAxis(k, axis, f.innerW) + (if f.items then gap else 0)
+    hypothetical = boundWithin(k, axis, k.basis, f.roomMain, f.innerW) + marginAxis(k, axis, f.innerW) + (if f.items then gap else 0)
     # An item that goes to the next line has already lent this one its
     # auto margins (FlexLine.cpp counts them before it breaks).
     f.autos += 1 if marginAuto k, START[axis]
@@ -1077,7 +1072,7 @@ freeze! =! (lay, f) ->
   for at in [f.from...f.to]
     k = list[at].lay
     continue if k.position is ABSOLUTE
-    base = boundWithin k, axis, k.basis, f.ownerMain, f.ownerW
+    base = boundWithin k, axis, k.basis, f.roomMain, f.innerW
     if f.free < 0
       scaled = -k.shrink * base
       if scaled isnt 0 and not isNaN scaled
@@ -1109,7 +1104,7 @@ distribute =! (node, lay, f, perform) ->
     kid = list[at]
     k = kid.lay
     continue if k.position is ABSOLUTE
-    base = boundWithin k, axis, k.basis, f.ownerMain, f.ownerW
+    base = boundWithin k, axis, k.basis, f.roomMain, f.innerW
     size = base
     if f.free < 0
       scaled = -k.shrink * base
@@ -1250,7 +1245,7 @@ justify! =! (node, lay, f, ownerW, perform) ->
     if skipped
       # The flex step was skipped, so nothing was measured: advance by
       # the clamped basis.
-      f.mainDim += marginAxis(k, axis, f.innerW) + boundWithin(k, axis, k.basis, f.ownerMain, f.ownerW)
+      f.mainDim += marginAxis(k, axis, f.innerW) + boundWithin(k, axis, k.basis, f.roomMain, f.innerW)
       f.crossDim = f.innerCross
     else
       f.mainDim += k.measured[mainDimension] + marginAxis(k, axis, f.innerW)
@@ -1432,9 +1427,6 @@ compute! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
   f.wrap = lay.wrap isnt NOWRAP
   ownerMain = if row then ownerW else ownerH
   ownerCross = if row then ownerH else ownerW
-  f.ownerW = ownerW
-  # A child's percent min and max resolve against THIS node's owner when
-  # lines are broken and space is shared (FlexLine.cpp, mainAxisOwnerSize).
   f.ownerMain = ownerMain
   insideMain = insideAxis lay, axis, ownerW
   insideCross = insideAxis lay, cross, ownerW
@@ -1459,6 +1451,13 @@ compute! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
   f.innerH = innerH
   f.innerMain = if row then innerW else innerH
   f.innerCross = if row then innerH else innerW
+  # A child's percent min and max resolve against the space inside THIS
+  # node wherever they are read, as its percent size does. Yoga reads
+  # them against this node's owner when lines are broken and space is
+  # shared (FlexLine.cpp, mainAxisOwnerSize), and against the space
+  # inside everywhere else. `innerMain` moves once a line settles a main
+  # size that was only a limit; `roomMain` stays.
+  f.roomMain = f.innerMain
 
   # Step 3: every child's flex basis. The gap total counts hidden and
   # absolute children too, as Yoga's child count does.

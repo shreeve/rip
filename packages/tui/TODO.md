@@ -8,15 +8,6 @@ steps are in [PLAN.md](PLAN.md).
 
 - [ ] An error for a style — at the write or from layout — names the
       node it was written on.
-- [ ] PLAN §5 lists every stated divergence from Yoga, each with a pin:
-      the rounding, the baseline child, **the owner's size in the cache
-      key** (a `{width: 0, padding: '5%'}` box comes out 10×1 here and
-      10×10 in Yoga, which reuses a measure taken under another owner
-      width), **a first flex basis that stands for one pass** (a
-      `flexBasis: '50%'` child laid out at 100 then 200 gives 100 here
-      and 50 in Yoga), and **the float tolerance** (Yoga's float32
-      `17.9 − 16 < 1.9` reports an overflow in an auto-sized wrapping
-      container that doubles within a tolerance do not).
 
 ## 2. Tests the seeded bugs slipped past
 
@@ -96,12 +87,6 @@ the test, re-seed the bug, and see it caught.
       new props — have no way to run. A public driver that mounts once,
       hands back the app, and draws frames on demand (PLAN §10); then
       port those cases.
-- [ ] Yoga resolves a percent `minWidth` / `maxWidth` of a row's child
-      against the wrong reference (a `minWidth: '50%'` child of a
-      10-wide box comes out 50 wide at 100 columns). Ink marks its own
-      tests for it as failing, and this engine is at parity with Yoga.
-      Decide whether to stay at parity or be right, and pin the choice
-      in PLAN §5.
 - [ ] The style tables never evict, and a cell holds a style id in
       sixteen bits: an app that animates `'#rrggbb'` colors reaches the
       limit and is refused. Reclaim ids no cell uses.

@@ -249,7 +249,8 @@ would reuse.
 **Dropped:** auto-min-size, errata and experimental flags.
 
 **Parity target:** classic Yoga behavior as its generated tests encode
-it (running totals, no auto-min), not the CSS specification.
+it (running totals, no auto-min), not the CSS specification — except
+where a divergence is stated below.
 
 **Algorithm:** `visit(node, availW, availH, modeW, modeH, ownerW,
 ownerH, perform)` is the cache's door — it answers from a stored entry
@@ -286,14 +287,10 @@ byte as upstream wrote them, against a test-only shim shaped like the
   `yoga-layout` 3.2.1, the release Ink ships, passes 537 of the 543
   through the same runner: it predates the intrinsic keywords and one
   alignment fix.
-- **One stated divergence, pinned, not skipped.** Yoga rounds a node's
-  position from its offset in its parent and its size from its
-  absolute edges; under a fractional ancestor offset the two disagree,
-  and `rounding_fractial_input_3` expects two siblings to share a row
-  and a row to be left empty. Here every edge rounds from its absolute
-  position, so neighbors never overlap and never gap. The runner holds
-  the one differing expectation to this engine's exact answer, with
-  the reason beside it, and fails on a pinned answer that never runs.
+- **Two cases answer differently on purpose, pinned, not skipped**
+  (divergences 1 and 6 below). The runner holds each differing
+  expectation to this engine's exact answer, with the reason beside
+  it, and fails on a pinned answer that never runs.
 - Every case has a right-to-left half. **Decided — RTL is deferred.**
   One mechanical gate stops each case before its RTL pass and the
   report says "LTR half". The expensive part of RTL in a terminal is
@@ -312,6 +309,63 @@ min / max → justify / align / auto margins → reverse directions →
 wrap / align-content / gap → percent → absolute → `display: none` and
 measure functions → cache and dirty (port Yoga's 11 hand-written
 dirtied / new-layout / measure-cache tests).
+
+### Stated divergences from Yoga
+
+Each is a decision, and each has a pin that holds this engine's answer
+and states Yoga's beside it; Yoga's answers are `yoga-layout` 3.2.1's
+on the same tree. Divergences 3 and 4 are one rule — an incremental
+layout equals a fresh one — where Yoga's cache breaks it.
+
+1. **Every edge rounds from its absolute position.** Yoga rounds a
+   node's position from its offset in its parent and its size from its
+   absolute edges; under a fractional ancestor offset the two disagree,
+   and `rounding_fractial_input_3` expects two siblings to share a row
+   and a row to be left empty. Here neighbors never overlap and never
+   gap. Pin: `DIVERGES` in `test/yoga.rip`.
+2. **A hidden child is never the baseline child.** Yoga picks a row's
+   first child even when it is `display: none`, reads its zeroed
+   height, and answers NaN for the row's top. Here the first child
+   that shows is the one that aligns. Pin: "a hidden child is never
+   the baseline child" in `test.rip`.
+3. **The owner's size is part of a cached answer's key,** for a node
+   whose own percent margin, padding, min or max reads it. Yoga keys
+   an answer by the offer alone, so a `{width: 0, padding: '5%'}` box
+   laid out under 100 columns and then 10 keeps its 10×10. Here it is
+   1×1, as a fresh layout makes it in both engines. Pin: "divergence:
+   the owner's size is part of a cached answer's key" in
+   `test/layout.rip`.
+4. **A first flex basis stands for one pass.** Yoga keeps the first
+   basis it resolves until the child is dirtied, so a `flexBasis:
+   '50%'` child laid out at 100 and then 200 stays 50. Here every pass
+   starts a child over and it is 100, as a fresh layout makes it in
+   both engines. Pin: "divergence: a first flex basis stands for one
+   pass" in `test/layout.rip`.
+5. **Sizes are compared within a tolerance, in doubles.** Yoga works
+   in float32, where `17.9 − 16` is less than `1 + 0.9`: a wrapping
+   box with 1.9 cells of room overflows and wraps the second child.
+   Doubles miss such sums too, by less and to either side, so every
+   comparison that decides — a line break, an overflow, a frozen share
+   — carries one tolerance (`near`), and what fits by arithmetic fits.
+   Pin: "divergence: sizes are compared within a tolerance, in
+   doubles" in `test/layout.rip`.
+6. **A percent `min` / `max` is one length wherever it is read:** a
+   percent of the space inside the container, as a percent size is
+   and as CSS has it. Yoga resolves it against the container's OWNER
+   when it breaks lines and shares space, and against the container
+   everywhere else: a `minWidth: '50%'` child of a 10-wide row comes
+   out 50 wide at 100 columns, which is why Ink marks its own tests
+   for it as failing. Being right costs one case of the 543:
+   `percentage_flex_basis_main_min_width` passes in Yoga only because
+   its root has no owner, so the percents bound nothing while space is
+   shared — give the root an owner and Yoga answers 128 / 72 at 200
+   columns, 600 / 200 at 1000, and never Chrome's 120 / 80. Here it is
+   128 / 72 at any, as the same mins in points make it in both
+   engines. Pins: `DIVERGES` in `test/yoga.rip`, "divergence: a
+   percent min or max is one length wherever it is read" in
+   `test/layout.rip`, and Ink's "set min width in percent" in
+   `test/ink/width-height.rip`, which holds to the frame Ink's authors
+   ask for.
 
 ## 6. Paint (`paint.rip`, `text.rip`, `screen.rip`)
 

@@ -56,7 +56,8 @@ test "set min width", ->
   eq plain(App2), ["AAAAAB"]
 
 # Ink marks this case `test.failing`: the frame is the one its authors
-# want, and no build of Ink draws it.
+# want, and no build of Ink draws it. Yoga resolves the percent against
+# the 100 columns outside the 10-wide box; here it is half of the box.
 test "set min width in percent", ->
   App = component
     render
@@ -65,8 +66,7 @@ test "set min width in percent", ->
           Text "A"
         Text "B"
   # Ink's test asks for this frame; published Ink 7.1.1 draws "A                                                 B"
-  differs plain(App), ["A                                                 B"], ["A    B"],
-    "Ink marks this test as failing: no build of Ink draws the frame it asks for. This is the frame Yoga's layout gives, and the one published Ink draws."
+  eq plain(App), ["A    B"]
 
 test "set width to zero", ->
   App = component
@@ -327,7 +327,7 @@ test "set max width in percent", ->
         Text "B"
   # Ink's test asks for this frame; published Ink 7.1.1 draws "AAAAAB\nAAAAA"
   differs plain(App), ["AAAAAB", "AAAAA"], ["AAAAAB"],
-    "Ink marks this test as failing: no build of Ink draws the frame it asks for. This is the frame Yoga's layout gives, and the one published Ink draws."
+    "Ink marks this test as failing: no build of Ink draws the frame it asks for. Half of the 10-wide box is five columns, and ten letters wrap onto two rows of five; Ink's test asks for the first row alone. This is the frame published Ink draws."
 
 test "set max height in percent", ->
   App = component

@@ -388,6 +388,89 @@ test "a box whose children are all hidden is still a container, bounded line by 
   eq root.rect.w, 60
   eq root.firstChild.rect.w, 100
 
+# ==[ Stated divergences from Yoga ]==
+#
+# Each holds this engine's answer where Yoga's is another ON PURPOSE
+# (PLAN §5). Yoga's answers are `yoga-layout` 3.2.1's, the release Ink
+# ships, run on the same trees.
+
+console.log "\nStated divergences from Yoga"
+
+test "divergence: the owner's size is part of a cached answer's key", ->
+  # Yoga keys a cached answer by the offer alone. The box is offered a
+  # width of exactly 0 under either space, so at 10 columns Yoga answers
+  # from the 100-column layout: padding of 5, a 10×10 box, and a root
+  # 10×10 around it. A fresh Yoga layout at 10 gives what is held here:
+  # an incremental layout equals a fresh one.
+  box = div { width: 0, padding: '5%' }
+  root = div {}, [box]
+  settled root, 100
+  eq [at(root), at(box)], ['0,0 100x10', '0,0 10x10']
+  settled root, 10
+  eq [at(root), at(box)], ['0,0 10x1', '0,0 1x1']
+
+test "divergence: a first flex basis stands for one pass", ->
+  # Yoga keeps the first basis it resolves until the child is dirtied, so
+  # the child stays at half of 100 when the space doubles: 50 wide at
+  # 200, and 50 tall at 200 rows. A fresh Yoga layout gives half of 200,
+  # as every pass does here.
+  half = div { flexBasis: '50%', height: 5 }
+  root = div { flexDirection: 'row' }, [half]
+  settled root, 100
+  eq half.rect.w, 50
+  settled root, 200
+  eq half.rect.w, 100
+  half = div { flexBasis: '50%' }
+  root = div {}, [half]
+  settled root, 100, 100
+  eq half.rect.h, 50
+  settled root, 100, 200
+  eq half.rect.h, 100
+
+test "divergence: sizes are compared within a tolerance, in doubles", ->
+  # 17.9 wide less 16 of padding leaves 1.9 for children 1 and 0.9 wide.
+  # In Yoga's float32, 17.9 − 16 is 1.8999996 and 1 + 0.9 is more: the
+  # line overflows, the second child wraps, and the box is two rows tall
+  # — auto-sized or not. Doubles miss too, by one part in 1e15 and to
+  # either side from one sum to the next; `near` calls the two equal, so
+  # what fits by arithmetic fits.
+  for auto in [true, false]
+    first = div { width: 1, height: 1 }
+    second = div { width: 0.9, height: 1 }
+    shelf = div { flexDirection: 'row', flexWrap: 'wrap', paddingLeft: 8, paddingRight: 8 }, [first, second]
+    if auto then shelf.styles.alignSelf = 'flex-start' else shelf.styles.width = 17.9
+    layout div({ width: 17.9 }, [shelf]), null
+    eq [at(shelf), at(first), at(second)], ['0,0 18x1', '8,0 1x1', '9,0 1x1']
+
+test "divergence: a percent min or max is one length wherever it is read", ->
+  # Yoga resolves a child's percent min and max against the container's
+  # OWNER when it breaks lines and shares space, and against the
+  # container everywhere else. Under 100 columns Yoga makes the first
+  # child of the 10-wide row 50 wide; under 20 columns it holds the
+  # 18-wide child of a 40-wide row to 10; the column's child comes out
+  # 20 tall in a box of 10. Here the percent is of the space inside the
+  # container, as a percent width is, and as CSS has it.
+  least = div { minWidth: '50%', height: 1 }
+  after = div { width: 1, height: 1 }
+  layout div({}, [div({ width: 10, flexDirection: 'row' }, [least, after])]), 100
+  eq [at(least), at(after)], ['0,0 5x1', '5,0 1x1']
+  most = div { maxWidth: '50%', width: 18, height: 1 }
+  layout div({}, [div({ width: 40, flexDirection: 'row' }, [most])]), 20
+  eq most.rect.w, 18
+  tall = div { minHeight: '50%' }
+  layout div({}, [div({ height: 10 }, [tall, div({ height: 1 })])]), 100, 40
+  eq tall.rect.h, 5
+  # A percent min bounds the basis as the same min in points does, and
+  # the owner's width has no say (Yoga: 600 and 200 under 1000 columns).
+  for mins in [['60%', '20%'], [120, 40]]
+    a = div { flexGrow: 1, flexBasis: '15%', minWidth: mins[0] }
+    b = div { flexGrow: 4, flexBasis: '10%', minWidth: mins[1] }
+    root = div {}, [div({ width: 200, height: 2, flexDirection: 'row' }, [a, b])]
+    settled root, 1000
+    eq [a.rect.w, b.rect.w], [128, 72]
+    settled root, 200
+    eq [a.rect.w, b.rect.w], [128, 72]
+
 # ==[ Styles ]==
 
 console.log "\nStyles"
