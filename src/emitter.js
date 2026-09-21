@@ -14527,7 +14527,8 @@ class Emitter {
       if (built !== undefined && !(isNode(built) && !built.parenthesized && this.semanticKindOf(built) === 'call')) {
         throw this.positionedError(n,
           `emitter: an optional ${fkind === 'optcall' ? 'call' : 'index'} directly on a construction with no argument list has no reading — ` +
-          'JavaScript refuses `new X?.()`; close the construction to soak the instance (`new X()?(…)` or `(new X)?(…)`)');
+          'JavaScript refuses `new X?.()`. To construct only when the class exists, test it (`if X? then new X(…)`); ' +
+          'to soak the INSTANCE, close the construction first (`new X()?(…)` or `(new X)?(…)`)');
       }
       const f = { role: false, kind: fkind };
       frames.push(f);
