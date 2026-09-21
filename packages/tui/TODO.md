@@ -6,6 +6,37 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 1. Wrong or silent — before the layout PR lands
 
+- [ ] **`justifyContent: 'space-around'` on a line with no in-flow
+      item divides by zero** and turns the whole tree's boxes to
+      Infinity or NaN (`layout root, 80` with `{justifyContent:
+      'space-around', minHeight: 5}` whose only child is absolute).
+      Yoga shares it. Guard it, and pin.
+- [ ] **The flex freeze compares doubles exactly where Yoga compares
+      float32 within a tolerance,** so plain integer trees come out
+      wrong when a lone flexible child's share lands on its min, max,
+      or padding floor: a 100×41 column of `{height: 30}` and `{height:
+      25, minHeight: 11, flexShrink: 1}` gives 25 (Yoga 11); a 100×30
+      root with `{height: 1, flexGrow: 7, maxHeight: '100%'}` gives 1
+      (Yoga 30); a 200-wide row of `{maxWidth: 10, flexGrow: 1}` and
+      `{maxWidth: 30, flexGrow: 0.2}` gives 0 and 0 (Yoga 10 and 30 —
+      1.2 − 1 − 0.2 is negative in doubles). Compare within a
+      tolerance, as Yoga's `inexactEquals` does, and pin all three.
+- [ ] **A percent overshoots its reference in doubles** (`100 * x *
+      0.01 > x` for about a fifth of fractional x, never in float32),
+      so a `width: '100%'` child of a wrapping row can wrap when it
+      fits. The line-break and overflow tests compare with no
+      tolerance. Pin the 10-wide case from the parity review.
+- [ ] Parity: an item that overflows to the next line still adds its
+      auto margins to the line it left, which then ignores
+      `justifyContent` (Yoga's `FlexLine.cpp`); the lone-flexible-child
+      shortcut counts `display: none` children as Yoga does.
+- [ ] PLAN §5 lists every stated divergence, each with a pin: the
+      rounding, the baseline child, **the owner's size in the cache
+      key** (Yoga reuses a measure taken under another owner width: a
+      `{width: 0, padding: '5%'}` box comes out 10×1 here and 10×10 in
+      Yoga), and **a first flex basis that stands for one pass, not
+      until the node is dirtied** (a `flexBasis: '50%'` child laid out
+      at 100 then 200 gives 100 here and 50 in Yoga).
 - [ ] **`display` flex → contents → flex keeps stale child positions.**
       `display` is not a parsed slot, so `sync` sees no change and the
       cached layout stands (`none` ↔ `flex` and `hidden` are fine).
