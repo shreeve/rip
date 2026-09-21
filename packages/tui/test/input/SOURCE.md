@@ -30,8 +30,8 @@ protocol"), and ECMA-48 §5.4 for the shape of a control sequence.
 `rip test/input.rip` runs the ported cases and then this package's own
 pins. Of Ink's 256 titles in the nine files, 244 are ported:
 
-- 202 are **held** to Ink's answer under the mapping below;
-- 42 are **stated differences**, pinned through `differs` in
+- 205 are **held** to Ink's answer under the mapping below;
+- 39 are **stated differences**, pinned through `differs` in
   `harness.rip`: the bytes must decode to this package's stated events
   and must not decode to Ink's, with the decision in a sentence, so a
   pin the package outgrows fails. A title with one differing row is
@@ -45,7 +45,7 @@ A case counts once per title Ink registers, loops included. By
 registration lines, as PLAN.md counts them, the three files of the
 parser are 156 (`input-parser` 52, `parse-keypress` 27,
 `kitty-keyboard` 77); `input-parser`'s loop over fourteen backspace
-cases makes them 169 titles, of which 129 are held.
+cases makes them 169 titles, of which 131 are held.
 
 ## What is compared
 
@@ -67,7 +67,8 @@ once, in `ink`:
 | `eventType: 'repeat'` | `repeat: true` |
 | `text`, `isPrintable`, `input` | a key that types is ONE code point in `key`; every other `key` is a DOM name of two or more characters. Text of several code points is one key event each |
 | `name: ''` (a sequence Ink has no key for, which `useInput` drops) | no event |
-| `hasPendingEscape()`, `flushPendingEscape()` | whether the injected clock has a timer armed, and the clock moved past the timeout |
+| `hasPendingEscape()` | `parser.holding` is `'escape'`, `'sequence'` or `'string'` — a sequence is held that time can end; an open paste is not one in Ink, and has a patience of its own here |
+| `flushPendingEscape()` | the injected clock moved past the timeout, or `parser.flush()` |
 | a sequence `useInput` never sees — a focus report, a mouse report, a reply | an event of its own type (`focus`, `blur`, `mouse`, `reply`); the row holds the keys to Ink's and names the other |
 | `sequence` | the bytes as they came; Ink rewrites the keypad Enter's to `'\r'` |
 
@@ -75,16 +76,16 @@ once, in `ink`:
 
 | Ink test file | titles | held | stated difference | left out |
 |---|---:|---:|---:|---:|
-| `input-parser` | 65 | 41 | 22 | 2 |
+| `input-parser` | 65 | 43 | 20 | 2 |
 | `parse-keypress` | 27 | 22 | 3 | 2 |
 | `kitty-keyboard` | 77 | 66 | 6 | 5 |
-| `hooks-use-input` | 34 | 26 | 6 | 2 |
+| `hooks-use-input` | 34 | 27 | 5 | 2 |
 | `hooks-use-input-kitty` | 24 | 23 | 1 | 0 |
 | `hooks-use-input-navigation` | 18 | 14 | 4 | 0 |
 | `hooks-use-paste` | 4 | 3 | 0 | 1 |
 | `input-keypad-enter` | 2 | 2 | 0 | 0 |
 | `input-buffered-ctrl-c` | 5 | 5 | 0 | 0 |
-| **total** | **256** | **202** | **42** | **12** |
+| **total** | **256** | **205** | **39** | **12** |
 
 The hook files are ported for their bytes and what those decode to. What
 they assert beyond that — that raw mode and bracketed paste are switched
@@ -93,25 +94,23 @@ next step's, with stdin and dispatch.
 
 ## Stated differences
 
-**The discard rule: a partial sequence that times out is discarded,
-never typed** (6). On a slow link Ink types the tail of an arrow key as
-text. The cost, stated: `ESC [`, `ESC O`, `ESC ]`, `ESC P` and `ESC _`
-alone until the timeout are partial sequences, so Alt with `[`, `O`,
-`]`, `P` or `_` is not reported by a plain terminal; the enhanced
-keyboard reports each as `CSI u`.
+**The discard rule: a sequence that holds a byte past its introducer
+has a second of patience, and is then discarded, never typed** (2). Ink
+has one short timeout and types whatever is held when it runs out,
+which on a slow link is the tail of an arrow key.
+
+- `input-parser`: handles pasteStart split before the tilde (\u001B[200 without ~) — Ink arms no timer for this one prefix and waits without end; here it has the patience of every sequence that holds a parameter, and the `~` that comes within it still opens the paste
+- `kitty-keyboard`: kitty protocol - auto detection timeout preserves query prefix without digits
+
+**A bare `ESC [` is Alt and `[`** (3). At the timeout, or before a byte
+that cannot continue it, a bare introducer is what Alt with that key
+sends, as ESC and any other character is Alt and that character. Ink
+types the `[` with no modifier. (Ink's `ESC O` cases hold: it reads
+Alt-O there too.)
 
 - `input-parser`: flushes pending CSI prefix as literal input
-- `input-parser`: flushes pending SS3 prefix as literal input
-- `input-parser`: handles pasteStart split before the tilde ([200 without ~) — Ink arms no timer for this one prefix and waits without end; one rule serves every partial here
-- `kitty-keyboard`: kitty protocol - auto detection timeout preserves query prefix without digits
+- `input-parser`: treats invalid CSI continuation as escaped code point plus plain text — and the line feed after it is Ctrl-J, the key it is in raw mode, where Ink calls it `enter`
 - `hooks-use-input`: useInput - flushes ESC[ prefix as literal input
-- `hooks-use-input`: useInput - handle meta + O with pending flush
-
-**A sequence cut short by a byte that cannot continue it is discarded
-like one that times out, and that byte is read fresh** (2)
-
-- `input-parser`: does not consume a following escape as SS3 final byte — `ESC O ESC [ A` is ArrowUp; Ink reads Alt-O first
-- `input-parser`: treats invalid CSI continuation as escaped code point plus plain text — `ESC [` and a line feed is Ctrl-J; Ink reads `[` first
 
 **Dropped terminal form: rxvt's `$` and `^` finals** (3). `$` is an
 intermediate byte (ECMA-48 §5.4), so `CSI 3 $` runs on to the next final

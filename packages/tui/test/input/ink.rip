@@ -5,7 +5,7 @@
 # them and lists what is left out.
 
 import { test, ok, eq } from 'rip/testing'
-import { ESC, CSI, SS3, open, bytes, key, typed, paste, FOCUS, BLUR, mouse, reply, ink, holds, differs } from './harness.rip'
+import { ESC, CSI, SS3, open, bytes, waits, key, typed, paste, FOCUS, BLUR, mouse, reply, ink, holds, differs } from './harness.rip'
 
 BEL =! '\x07'
 DEL =! '\x7f'
@@ -15,8 +15,9 @@ END   =! "#{CSI}201~"
 ESCAPE =! key 'Escape', '', ESC
 
 # The decisions the stated differences rest on.
-DISCARD =! 'a partial sequence that times out is discarded, never typed: on a slow link Ink types the tail of an arrow key as text'
-ABORTED =! 'a sequence cut short by a byte that cannot continue it is discarded like one that times out, and that byte is read fresh'
+DISCARD =! 'a sequence that holds a byte past its introducer has a second of patience, and is then discarded, never typed: Ink types it as text after its one short timeout, which on a slow link is the tail of an arrow key'
+BARE    =! 'a bare `ESC [` at the timeout is Alt and `[`, as ESC and any other character is Alt and that character; Ink types the `[` with no modifier'
+ABORTED =! 'a bare `ESC [` before a byte that cannot continue it is Alt and `[`, where Ink types the `[` with no modifier, and the line feed after it is Ctrl-J, the key it is in raw mode, where Ink calls it enter'
 RXVT    =! 'rxvt\'s `$` and `^` finals are a dropped terminal form: `$` is an intermediate byte (ECMA-48 5.4), so the sequence runs on to the next final byte and is a sequence this package has no key for'
 CYGWIN  =! 'the Linux console and Cygwin `CSI [ A` function keys are a dropped terminal form: `[` is a final byte (ECMA-48 5.4), so `CSI [` is a whole sequence with no key, and what follows is typed'
 DOUBLE  =! 'a doubled ESC as Meta is a dropped terminal form: the first ESC, followed by a byte that cannot continue it, is the Escape key, and the second starts the sequence it introduces'
@@ -69,59 +70,65 @@ table 'input-parser', [
   ['preserves modified SS3 keys and following text', "#{SS3}2Phello", [ink('f1', 's', "#{SS3}2P"), ...typed('hello')]]
   ['preserves modified SS3 keys and following text', "#{SS3}1;5Ahello", [up('c', "#{SS3}1;5A"), ...typed('hello')]]
   ['preserves modified SS3 keys and following text', "#{ESC}#{SS3}5Dhello", [ESCAPE, ink('left', 'c', "#{SS3}5D"), ...typed('hello')], [ink('left', 'cm', "#{ESC}#{SS3}5D"), ...typed('hello')], DOUBLE]
-  ['holds modified SS3 sequences until their final byte arrives', timed(({ feed, clock }) ->
+  ['holds modified SS3 sequences until their final byte arrives', timed(({ feed, parser }) ->
     eq feed("#{SS3}1"), []
-    eq clock.waiting, 1
+    ok waits parser
     eq feed(';5'), []
     eq feed('A'), [up('c', "#{SS3}1;5A")]
-    eq clock.waiting, 0
+    ok not waits parser
   ), [up('c', "#{SS3}1;5A")]]
-  ['does not consume a following escape as SS3 final byte', "#{SS3}#{CSI}A", [up()], [ink('o', 'sm', SS3), up()], ABORTED]
+  ['does not consume a following escape as SS3 final byte', "#{SS3}#{CSI}A", [ink('o', 'sm', SS3), up()]]
   ['parses meta+CSI sequence with double escape', "#{ESC}#{CSI}A", [ESCAPE, up()], [up('m', "#{ESC}#{CSI}A")], DOUBLE]
   ['parses escaped printable code points', "#{ESC}x#{ESC}1", [ink('x', 'm', "#{ESC}x"), ink('1', 'm', "#{ESC}1")]]
   ['parses escaped supplementary code points', "#{ESC}😀", [ink('😀', 'm')]]
   ['preserves legacy ESC[[... sequences in a mixed chunk', "#{CSI}[A#{CSI}[5~", typed('A5~'), [ink('f1', '', "#{CSI}[A"), ink('pageup', '', "#{CSI}[5~")], CYGWIN]
   ['preserves legacy ESC[[... sequences across chunks', ["#{CSI}[", "A#{CSI}[5~"], typed('A5~'), [ink('f1', '', "#{CSI}[A"), ink('pageup', '', "#{CSI}[5~")], CYGWIN]
   ['parses legacy and standard CSI sequences mixed together', "#{CSI}[A#{CSI}B#{CSI}[6~#{CSI}1;5D", [...typed('A'), down(), ...typed('6~'), ink('left', 'c', "#{CSI}1;5D")], [ink('f1', '', "#{CSI}[A"), down(), ink('pagedown', '', "#{CSI}[6~"), ink('left', 'c', "#{CSI}1;5D")], CYGWIN]
-  ['holds incomplete CSI sequence until final byte arrives', timed(({ feed, clock }) ->
+  ['holds incomplete CSI sequence until final byte arrives', timed(({ feed, parser }) ->
     eq feed(CSI), []
-    eq clock.waiting, 1
+    ok waits parser
     eq feed('1;5'), []
     eq feed('A'), [up('c', "#{CSI}1;5A")]
   ), [up('c', "#{CSI}1;5A")]]
   ['holds incomplete legacy ESC[[... sequence until final byte arrives', ["#{CSI}[", '5', '~'], typed('5~'), [ink('pageup', '', "#{CSI}[5~")], CYGWIN]
   ['holds incomplete SS3 sequence until final byte arrives', [SS3, 'A'], [up('', "#{SS3}A")]]
   ['holds incomplete double-escape CSI sequence until final byte arrives', ["#{ESC}#{CSI}", 'A'], [ESCAPE, up()], [up('m', "#{ESC}#{CSI}A")], DOUBLE]
-  ['keeps pending plain escape and can flush it', timed(({ feed, clock, late }) ->
+  ['keeps pending plain escape and can flush it', timed(({ feed, clock, late, parser }) ->
     eq feed(ESC), []
-    eq clock.waiting, 1
+    ok waits parser
     clock.tick 50
     eq late, [ESCAPE]
-    eq clock.waiting, 0
+    ok not waits parser
   ), [ESCAPE]]
+  ['keeps pending plain escape and can flush it', timed(({ feed, parser }) ->
+    eq feed(ESC), []
+    eq parser.flush(), [ESCAPE]
+    ok not waits parser
+    parser.flush()
+  ), []]
   ['flushes pending CSI prefix as literal input', timed(({ feed, clock, late, parser }) ->
     eq feed(CSI), []
-    eq clock.waiting, 1
+    ok waits parser
     clock.tick 50
-    eq late, []
-    eq [clock.waiting, parser.pending], [0, 0]
+    eq late, [key('[', 'a', CSI)]
+    eq [clock.waiting, parser.pending, parser.holding], [0, 0, null]
     feed 'A'
-  ), typed('A'), [key('[', '', CSI), ...typed('A')], DISCARD]
+  ), [key('[', 'a', CSI), ...typed('A')], [key('[', '', CSI), ...typed('A')], BARE]
   ['reset clears pending input state', timed(({ feed, clock, parser }) ->
     eq feed(CSI), []
     parser.reset()
     eq [clock.waiting, parser.pending], [0, 0]
     feed 'A'
   ), typed('A')]
-  ['treats invalid CSI continuation as escaped code point plus plain text', "#{CSI}\n", [key('j', 'c', '\n')], [key('[', '', CSI), ink('enter', '', '\n')], ABORTED]
+  ['treats invalid CSI continuation as escaped code point plus plain text', "#{CSI}\n", [key('[', 'a', CSI), key('j', 'c', '\n')], [key('[', '', CSI), ink('enter', '', '\n')], ABORTED]
   ['parses mixed text and many key events in one read', "start#{CSI}A mid #{SS3}H end#{CSI}[5~", [...typed('start'), up(), ...typed(' mid '), ink('home', '', "#{SS3}H"), ...typed(' end'), ...typed('5~')], [...typed('start'), up(), ...typed(' mid '), ink('home', '', "#{SS3}H"), ...typed(' end'), ink('pageup', '', "#{CSI}[5~")], CYGWIN]
-  ['flushes pending SS3 prefix as literal input', timed(({ feed, clock, late }) ->
+  ['flushes pending SS3 prefix as literal input', timed(({ feed, clock, late, parser }) ->
     eq feed(SS3), []
-    eq clock.waiting, 1
+    ok waits parser
     clock.tick 50
-    eq late, []
+    eq late, [ink('o', 'sm', SS3)]
     feed 'x'
-  ), typed('x'), [ink('o', 'sm', SS3), ...typed('x')], DISCARD]
+  ), [ink('o', 'sm', SS3), ...typed('x')]]
   ['flushes pending legacy CSI prefix as literal input', timed(({ feed, clock }) ->
     eq feed("#{CSI}["), []
     eq clock.waiting, 0
@@ -132,9 +139,9 @@ table 'input-parser', [
   ['emits double escape as single event for non-control character', "#{ESC}#{ESC}x", [ESCAPE, ink('x', 'm', "#{ESC}x")], [ink('escape', 'm', "#{ESC}#{ESC}"), ...typed('x')], DOUBLE]
   ['empty chunk produces no events', [''], []]
   ['empty chunk does not disturb pending state', [CSI, '', 'A'], [up()]]
-  ['plain text followed by incomplete escape holds escape as pending', timed(({ feed, clock }) ->
+  ['plain text followed by incomplete escape holds escape as pending', timed(({ feed, clock, parser }) ->
     eq feed("hello#{ESC}"), typed('hello')
-    eq clock.waiting, 1
+    ok waits parser
     clock.tick 50
   ), [...typed('hello'), ESCAPE]]
 
@@ -159,9 +166,9 @@ table 'input-parser', [
   ['paste content with escape sequences is delivered verbatim', "#{START}hello#{CSI}Aworld#{END}", [paste("hello#{CSI}Aworld")]]
   ['emits normal events before and after bracketed paste', "before#{START}pasted#{END}after", [...typed('before'), paste('pasted'), ...typed('after')]]
   ['emits multiple paste events in one chunk', "#{START}first#{END}mid#{START}second#{END}", [paste('first'), ...typed('mid'), paste('second')]]
-  ['holds incomplete bracketed paste as pending', timed(({ feed, clock }) ->
+  ['holds incomplete bracketed paste as pending', timed(({ feed, parser }) ->
     eq feed("#{START}hello"), []
-    eq clock.waiting, 0
+    ok not waits parser
     eq feed(" world#{END}"), [paste('hello world')]
   ), [paste('hello world')]]
   ['assembles bracketed paste from chunk-by-chunk delivery', [START, 'hello', END], [paste('hello')]]
@@ -169,17 +176,22 @@ table 'input-parser', [
   ['handles pasteStart split before the tilde (\\u001B[200 without ~)', ["#{CSI}200", "~hello#{END}"], [paste('hello')]]
   ['handles pasteStart split before the tilde (\\u001B[200 without ~)', timed(({ feed, clock }) ->
     eq feed("#{CSI}200"), []
-    eq clock.waiting, 1
-    clock.tick 50
+    clock.tick 999
     feed "~hello#{END}"
-  ), typed('~hello'), [paste('hello')], 'one rule for every partial sequence: a paste marker cut before its `~` and left past the timeout is discarded like any other, where Ink arms no timer for this one prefix and waits without end']
-  ['hasPendingEscape returns true for length-3 pasteStart prefix (\\u001B[2)', timed(({ feed, clock }) ->
+  ), [paste('hello')]]
+  ['handles pasteStart split before the tilde (\\u001B[200 without ~)', timed(({ feed, clock, parser }) ->
+    eq feed("#{CSI}200"), []
+    ok waits parser
+    clock.tick 1000
+    feed "~hello#{END}"
+  ), typed('~hello'), [paste('hello')], 'one rule for every sequence that holds a parameter: a paste marker cut before its `~` has a second of patience like any other and is then discarded, where Ink arms no timer for this one prefix and waits without end']
+  ['hasPendingEscape returns true for length-3 pasteStart prefix (\\u001B[2)', timed(({ feed, parser }) ->
     eq feed("#{CSI}2"), []
-    eq clock.waiting, 1
+    ok waits parser
   ), []]
-  ['hasPendingEscape returns true for length-4 pasteStart prefix (\\u001B[20)', timed(({ feed, clock }) ->
+  ['hasPendingEscape returns true for length-4 pasteStart prefix (\\u001B[20)', timed(({ feed, parser }) ->
     eq feed("#{CSI}20"), []
-    eq clock.waiting, 1
+    ok waits parser
   ), []]
   ['paste event delivers backspace chars verbatim without splitting', "#{START}#{DEL}#{BS}#{DEL}#{END}", [paste(DEL + BS + DEL)]]
 ]
@@ -332,9 +344,12 @@ table 'kitty-keyboard', [
   ['kitty protocol - auto detection handles Uint8Array query response', bytes("#{CSI}?1u"), [reply('keyboard', { flags: 1 })]]
   ['kitty protocol - auto detection preserves split UTF-8 input bytes', [Uint8Array.new([0xf0, 0x9f]), Uint8Array.new([0x92, 0xa9])], typed('💩')]
   ['kitty protocol - auto detection handles split responses with surrounding input', ["before#{CSI}?", '0uafter'], [...typed('before'), reply('keyboard', { flags: 0 }), ...typed('after')]]
-  ['kitty protocol - auto detection timeout preserves query prefix without digits', timed(({ feed, clock }) ->
+  ['kitty protocol - auto detection timeout preserves query prefix without digits', timed(({ feed, clock, parser }) ->
     feed "#{CSI}?"
     clock.tick 250
+    eq parser.holding, 'sequence'
+    clock.tick 750
+    eq parser.holding, null
   ), [], typed('[?'), DISCARD]
   ['kitty protocol - auto detection does not treat query response without digits as a response', "#{CSI}?u", []]
   ['kitty protocol - auto detection does not treat invalid query-like sequence as a response', "#{CSI}?1x", []]
@@ -367,11 +382,11 @@ table 'hooks-use-input', [
   ['useInput - flushes ESC[ prefix as literal input', timed(({ feed, clock }) ->
     feed CSI
     clock.tick 50
-  ), [], [key('[', '', CSI)], DISCARD]
+  ), [key('[', 'a', CSI)], [key('[', '', CSI)], BARE]
   ['useInput - handle meta + O with pending flush', timed(({ feed, clock }) ->
     feed SS3
     clock.tick 50
-  ), [], [ink('o', 'sm', SS3)], DISCARD]
+  ), [ink('o', 'sm', SS3)]]
   ['useInput - handle tab', '\t', [ink('tab')]]
   ['useInput - handle meta + tab', "#{ESC}\t", [ink('tab', 'm')]]
   ['useInput - handle shift + tab', "#{CSI}Z", [ink('tab', 's')]]

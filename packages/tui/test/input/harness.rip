@@ -11,13 +11,14 @@ export SS3 =! '\x1bO'
 # ── A clock with no timers ────────────────────────────────────────────────────
 
 # `tick ms` moves time and runs what came due, in order. `waiting` is
-# how many timers are armed: Ink's `hasPendingEscape()` is `waiting > 0`.
+# how many timers are armed, and `next` how long the soonest has to run.
 export class Clock
   constructor: ->
     @time = 0
     @due = []
 
   get waiting: -> @due.length
+  get next: -> if @due.length then Math.min(...@due.map (entry) => entry.at - @time) else null
 
   after: (ms, fn) ->
     entry = { at: @time + ms, fn }
@@ -50,6 +51,10 @@ export decode =! (...chunks) ->
   all
 
 export bytes =! (text) -> TextEncoder.new().encode text
+
+# Ink's `hasPendingEscape()`: a sequence is held that time can end. An
+# open paste is not one in Ink; here it has a patience of its own.
+export waits =! (parser) -> parser.holding in ['escape', 'sequence', 'string']
 
 # One spelling of a value whatever order its keys were written in.
 export canon =! (value) ->
