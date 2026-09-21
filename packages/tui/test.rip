@@ -230,6 +230,34 @@ test "a style with no meaning on its node is refused: a box's on text, text's on
   finally
     restore()
 
+test "a refused style names the node it was written on: its tag, its id or data-part, and the way to it", ->
+  { doc, restore } = install()
+  try
+    # A node is styled before it is attached, so a first write has no
+    # ancestors to name; a later one has.
+    loose = doc.createElement 'span'
+    loose.set 'data-part', 'label'
+    throws (-> loose.set 'colr', 'red'), "did you mean 'color'? (on span[data-part=label])"
+    list = doc.createElement 'div'
+    list.set 'id', 'list'
+    doc.body.appendChild list
+    list.appendChild loose
+    throws (-> loose.set 'overflow', 'hidden'), "text is cut by `wrap`, or by the box it is in (on div > div#list > span[data-part=label])"
+    throws (-> list.set 'width', 'wide'), "'fit-content' or 'stretch' (on div > div#list)"
+    throws (-> list.set 'color', 'nope'), '(on div > div#list)'
+    throws (-> list.setAttribute 'style', 'color: red'), 'an object (on div > div#list)'
+    throws (-> list.className = 'card'), 'with props (on div > div#list)'
+    # A long way keeps its last four.
+    deep = list
+    for depth in [0...3]
+      deep = deep.appendChild doc.createElement 'div'
+    throws (-> deep.set 'gap', 'auto'), "(on … > div#list > div > div > div)"
+    inner = doc.createElement 'span'
+    inner.styles.width = 3
+    throws (-> loose.appendChild inner), 'styled by color and weight only (on div > div#list > span[data-part=label] > span)'
+  finally
+    restore()
+
 test "a tag with no terminal meaning is refused", ->
   Web = component
     render

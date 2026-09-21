@@ -4,37 +4,6 @@ Open work only, in the order it should be done. Delete a line when it
 lands or moves into docs/tests. The design and the order of the larger
 steps are in [PLAN.md](PLAN.md).
 
-## 1. Wrong or silent
-
-- [ ] An error for a style — at the write or from layout — names the
-      node it was written on.
-- [ ] PLAN §5 lists every stated divergence from Yoga, each with a pin:
-      the rounding, the baseline child, **the owner's size in the cache
-      key** (a `{width: 0, padding: '5%'}` box comes out 10×1 here and
-      10×10 in Yoga, which reuses a measure taken under another owner
-      width), **a first flex basis that stands for one pass** (a
-      `flexBasis: '50%'` child laid out at 100 then 200 gives 100 here
-      and 50 in Yoga), and **the float tolerance** (Yoga's float32
-      `17.9 − 16 < 1.9` reports an overflow in an auto-sized wrapping
-      container that doubles within a tolerance do not).
-
-## 2. Tests the seeded bugs slipped past
-
-Each of these survived a single-line bug seeded into the engine. Add
-the test, re-seed the bug, and see it caught.
-
-- [ ] An absolute node with an aspect ratio other than 1.
-- [ ] A measure function on a node with padding and border; a measured
-      size with a fraction rounds up (port Yoga's
-      `YGRoundingMeasureFuncTest.cpp`).
-- [ ] Negative padding clamps to zero; `overflow: 'scroll'` while
-      measuring a basis; the gap count at the wrap limit; the
-      lone-flexible-child shortcut with a shrink of zero.
-- [ ] Port Yoga's hand-written JavaScript tests that the shim can carry
-      (`YGMeasureTest`, `YGMeasureCacheTest`, `YGDirtiedTest`,
-      `YGHasNewLayout`, `YGFlexBasisAuto`, `YGAlignBaseline`,
-      `YGComputedMargin` / `Padding` / `Border`, `YGHadOverflow`).
-
 ## 3. Reading `layout.rip`
 
 - [ ] Comment every field of `Lay` and `Flex`; name the five pass
@@ -91,12 +60,6 @@ the test, re-seed the bug, and see it caught.
       `backgroundColor: ''`). `'default'` for both `color` and
       `backgroundColor`; then the pinned Ink case in
       `test/ink/background.rip` follows Ink.
-- [ ] Yoga resolves a percent `minWidth` / `maxWidth` of a row's child
-      against the wrong reference (a `minWidth: '50%'` child of a
-      10-wide box comes out 50 wide at 100 columns). Ink marks its own
-      tests for it as failing, and this engine is at parity with Yoga.
-      Decide whether to stay at parity or be right, and pin the choice
-      in PLAN §5.
 - [ ] The style tables never evict, and a cell holds a style id in
       sixteen bits: an app that animates `'#rrggbb'` colors reaches the
       limit and is refused. Reclaim ids no cell uses.

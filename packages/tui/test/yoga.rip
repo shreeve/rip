@@ -87,8 +87,22 @@ def cut(file, item)
 # its absolute position, so neighbors never overlap and never gap — on
 # a terminal a shared row is one box drawn over another. The second
 # child starts on row 65.
+#
+# percentage_flex_basis_main_min_width: a 200-wide row whose children
+# grow 1 and 4 from bases of 30 and 20 under `minWidth: '60%'` and
+# `'20%'`. A min, in points or in percent, bounds a child's basis before
+# the line's space is shared, in Yoga and here: with `minWidth: 120` and
+# `40` both engines share 40 cells from 120 and 40, and answer 128 and
+# 72. Yoga resolves a PERCENT min at that step against the container's
+# owner, not the container; this root has no owner, the percents bound
+# nothing, and the 120 and 80 upstream recorded from Chrome come out. The
+# same row under a 1000-wide owner comes out 600 and 200 in Yoga, inside
+# its 200 cells. Here a percent min or max is the same length wherever it
+# is read (`test/layout.rip` holds the rule), so the percent row answers
+# as the point row does.
 DIVERGES =! Map.new [
   ['rounding_fractial_input_3', { 'root_child1.getComputedTop()': 65 }]
+  ['percentage_flex_basis_main_min_width', { 'root_child0.getComputedWidth()': 128, 'root_child1.getComputedLeft()': 128, 'root_child1.getComputedWidth()': 72 }]
 ]
 
 # `expect` numbers each call, so a mismatch can be traced back to the
