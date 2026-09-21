@@ -138,7 +138,7 @@ memory, and the frame after a sweep is an ordinary diff.
 
 A frame paints and compares its damage and nothing else: the cells a
 change may have recolored. A text that keeps its size owes its own
-box; a border or a background, the box; a color written on a box, a
+words; a border or a background, the box; a color written on a box, a
 clip, or a content offset, everything under it; a layout, each box that
 moved, where it was and where it is; a node taken out, where it was.
 Whatever lies over or under those cells is painted again inside them,
@@ -214,7 +214,7 @@ view.app.count.value = 7    # public state is set from outside
 view.frame()                # "count 7"
 view.ansi                   # that frame with its escape sequences
 view.bytes                  # what a terminal was sent for it: the 7, and the moves to reach it
-view.damage                 # the cells that frame painted and compared: 7, the text's box
+view.damage                 # the cells that frame painted and compared: 7, the text's words
 view.resize 20, 5           # the next frame is drawn whole, 20 by 5
 view.close()                # unmount, and give the process its `document` slot back
 ```

@@ -529,10 +529,10 @@ export class Damage
     cells
 
 # A node's bounds (`bl`, `bt`, `br`, `bb`) are the cells it and everything
-# under it can ink, in tree coordinates before any offset above it: its
-# box, a leaf's words where they spill out of theirs, and its children's
-# bounds as its own content offset shifts them — held to its box on an
-# axis it clips. A change marks the node and every ancestor (`stain`,
+# under it can ink, in tree coordinates before any offset above it: a
+# box's rectangle, and its children's bounds as its own content offset
+# shifts them — held to its box on an axis it clips; a leaf's words,
+# which need not fill its box and may spill out of it. A change marks the node and every ancestor (`stain`,
 # document.rip), and only marked nodes are surveyed: a clean subtree
 # answers from the bounds it holds. What changed owes its cells as they
 # will be painted: a box that moved, or took another border or
@@ -547,13 +547,17 @@ survey! =! (node, dx, dy, damage) ->
   r = l + rect.w
   b = t + rect.h
   if node.nodeType is 3 or node.tagName is 'span'
+    # A leaf inks its words and no more of its box: each row from the
+    # box's left, as far as the widest reaches.
     stain = 3
+    r = l
+    b = t
     flow = node.flow ?? refresh node
     if flow.count
       snug = flow.fits rect.w
       flow.wrap rect.w, flow.mode unless snug
-      r = Math.max r, l + (if snug then flow.wide else flow.reach)
-      b = Math.max b, t + (if snug then 1 else flow.rows)
+      r = l + (if snug then flow.wide else flow.reach)
+      b = t + (if snug then 1 else flow.rows)
   else
     s = node.styles
     damage.box l + dx, t + dy, r + dx, b + dy if stain is 2 and (s.borderStyle? or s.backgroundColor?)

@@ -1397,7 +1397,7 @@ def owing(App, body)
   finally
     view.close()
 
-test "a text of unchanged size owes its own box; a first frame and a resized one owe every cell", ->
+test "a text of unchanged size owes its own words; a first frame and a resized one owe every cell", ->
   Board = component
     @count := 41
     render
@@ -1641,7 +1641,7 @@ test "a node moved to another parent is owed where that parent's offset puts it"
     eq view.frame().trimEnd(), "\n\nnote"
     [from, to] = document.body.firstChild.childNodes.filter (node) -> node.tagName is 'div'
     to.appendChild from.firstChild
-    eq draw(), 8 + 8
+    eq draw(), 4 + 4
     eq view.frame().trimEnd(), "note"
 
 test "a box that turns into a contents node, or back, owes what its children ink without it", ->
@@ -1678,6 +1678,31 @@ test "a contents node's color reaches the children it lends, and owes their cell
     app.tone.value = 'green'
     eq draw(), 4
     eq view.ansi.split('\n')[1].trimEnd(), "\x1b[32mlent\x1b[0m"
+
+test "a text owes the cells its words ink, however far layout stretches its box", ->
+  Flank = component
+    @tick := 0
+    render
+      Box flexDirection: 'row', height: 8
+        Text "#{'|/-\\'[@tick %% 4]}"
+        Box width: 20, height: 8, borderStyle: 'single'
+        Box flexDirection: 'column'
+          Text "clock #{10 + @tick}"
+          Text ""
+          Text wrap: 'truncate-end', width: 6
+            "cut #{@tick} short"
+        Text width: 3, inverse: @tick %% 2 is 1
+          ""
+  owing Flank, (app, draw, view) ->
+    draw()
+    eq document.body.firstChild.firstChild.rect.h, 8
+    # One span a row: the spinner to the clock on the first, the cut
+    # line on the third, and none of the six rows under them; a text of
+    # no words inks nothing.
+    app.tick.value = 1
+    eq draw(), 29 + 6
+    app.tick.value = 2
+    eq draw(), 29 + 6
 
 test "a node out of the tree owes nothing, whatever is done to it", ->
   Pair = component
@@ -1792,7 +1817,7 @@ test "a sweep as a paint starts owes every cell", ->
     view.frame()
     view.app.words.value = "two"
     view.frame()
-    eq view.damage, 40
+    eq view.damage, 3
     # 25,000 clusters arrive between two frames: past the mark, and half again.
     view.app.words.value = (cluster n for n in [0...25000]).join ''
     view.frame()
