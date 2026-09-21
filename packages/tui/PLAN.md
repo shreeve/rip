@@ -283,7 +283,11 @@ byte as upstream wrote them, against a test-only shim shaped like the
 `yoga-layout` API (`test/yoga-shim.rip`, `rip test/yoga.rip`).
 
 - **All 543 run and none is skipped.** Yoga's 37 hand-written aspect
-  ratio cases are ported beside them (`test/yoga-aspect.rip`). Real
+  ratio cases are ported beside them (`test/yoga-aspect.rip`), and 53
+  of its hand-written cases for measure functions, the measure cache,
+  measure modes, rounding, dirtying, and computed edges
+  (`test/yoga-hand.rip`; `test/yoga/SOURCE.md` says which are left out
+  and why). Real
   `yoga-layout` 3.2.1, the release Ink ships, passes 537 of the 543
   through the same runner: it predates the intrinsic keywords and one
   alignment fix.
@@ -307,8 +311,7 @@ Build order, so categories go green one at a time: node + shim +
 rounding + fixed sizes + padding / border / margin → grow / shrink /
 min / max → justify / align / auto margins → reverse directions →
 wrap / align-content / gap → percent → absolute → `display: none` and
-measure functions → cache and dirty (port Yoga's 11 hand-written
-dirtied / new-layout / measure-cache tests).
+measure functions → cache and dirty.
 
 ### Stated divergences from Yoga
 
@@ -366,6 +369,16 @@ layout equals a fresh one — where Yoga's cache breaks it.
    `test/layout.rip`, and Ink's "set min width in percent" in
    `test/ink/width-height.rip`, which holds to the frame Ink's authors
    ask for.
+7. **The cache compares exactly.** Yoga reuses a measurement for an
+   offer that rounds to the same point, or that equals the measured
+   size within a tolerance. A tolerance is not transitive, and a stale
+   fraction would round a text box differently from the box a fresh
+   layout gives, so an answer here is reused only for the very numbers
+   it was computed from. The boxes are the same; a leaf can be measured
+   once more than Yoga measures it. Pin:
+   `remeasure_with_already_measured_value_smaller_but_still_float_equal`
+   in `test/yoga-hand.rip`, which holds 2 measurements where upstream
+   asserts 1.
 
 ## 6. Paint (`paint.rip`, `text.rip`, `screen.rip`)
 
@@ -679,7 +692,7 @@ Each step is its own branch and PR under the repo's landing rules.
 
 | Step | Contents | Exit |
 |---|---|---|
-| 1 | Layout soundness: an incremental layout equals a fresh one, one float tolerance, values refused where they are written (TODO §1–§2) | The reviewers' fuzzers and the differential against compiled Yoga find nothing new; every seeded bug is caught |
+| 1 | Layout soundness: an incremental layout equals a fresh one, one float tolerance, values refused where they are written | The reviewers' fuzzers and the differential against compiled Yoga find nothing new; every seeded bug is caught |
 | 2 | Text and the painter: wrap / truncate, grapheme clusters, `overflow: 'hidden'` clipping, per-edge borders, background fills, content offset | Ported Ink paint cases pass |
 | 3 | Damage tracking: paint and diff only what moved (§6) | A small update's paint and diff fall with the damage, measured in `bench/` |
 | 4 | Input, focus, cursor, capture and bubble phases; then mouse and the enhanced keyboard as opt-ins; then text selection with clipboard copy (OSC 52), since mouse capture takes the terminal's own selection away | Ported parser cases pass; select-list, text-input, and wheel-scrolled list examples |

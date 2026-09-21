@@ -1,6 +1,8 @@
 Rip TUI's layout engine (layout.rip) is a port of the flexbox algorithm
-of Yoga (https://github.com/facebook/yoga), and test/yoga/ holds Yoga's
-generated tests unmodified. Yoga is distributed under this license:
+of Yoga (https://github.com/facebook/yoga); test/yoga/ holds Yoga's
+generated tests unmodified, and test/yoga-aspect.rip and
+test/yoga-hand.rip are ports of Yoga's hand-written tests. Yoga is
+distributed under this license:
 
 MIT License
 

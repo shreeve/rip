@@ -4,23 +4,6 @@ Open work only, in the order it should be done. Delete a line when it
 lands or moves into docs/tests. The design and the order of the larger
 steps are in [PLAN.md](PLAN.md).
 
-## 2. Tests the seeded bugs slipped past
-
-Each of these survived a single-line bug seeded into the engine. Add
-the test, re-seed the bug, and see it caught.
-
-- [ ] An absolute node with an aspect ratio other than 1.
-- [ ] A measure function on a node with padding and border; a measured
-      size with a fraction rounds up (port Yoga's
-      `YGRoundingMeasureFuncTest.cpp`).
-- [ ] Negative padding clamps to zero; `overflow: 'scroll'` while
-      measuring a basis; the gap count at the wrap limit; the
-      lone-flexible-child shortcut with a shrink of zero.
-- [ ] Port Yoga's hand-written JavaScript tests that the shim can carry
-      (`YGMeasureTest`, `YGMeasureCacheTest`, `YGDirtiedTest`,
-      `YGHasNewLayout`, `YGFlexBasisAuto`, `YGAlignBaseline`,
-      `YGComputedMargin` / `Padding` / `Border`, `YGHadOverflow`).
-
 ## 3. Reading `layout.rip`
 
 - [ ] Comment every field of `Lay` and `Flex`; name the five pass

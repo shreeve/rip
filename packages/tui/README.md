@@ -168,5 +168,7 @@ text engine — sanitizing, cluster widths, every wrap and truncate mode
 — and `test/layout.rip` the layout engine's own pins. `test/yoga.rip` runs Yoga's
 543 generated layout cases, vendored unmodified under `test/yoga/`
 (MIT, © Meta Platforms), against the engine through a shim of the
-`yoga-layout` API, and `test/yoga-aspect.rip` is a port of Yoga's 37
-hand-written aspect ratio cases.
+`yoga-layout` API. `test/yoga-aspect.rip` is a port of Yoga's 37
+hand-written aspect ratio cases, and `test/yoga-hand.rip` of 53 more:
+measure functions, the measure cache, measure modes, rounding a
+measured size, dirtying, and computed edges.
