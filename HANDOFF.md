@@ -118,10 +118,14 @@ on:
   ascend. `for own k, v of obj`, `for x, i in list`.
 - A trailing `for` auto-collects an array (`(f x for x in xs)`); end a
   procedure with a bare `return` or give it a bang name to opt out.
-  Chained `for` clauses NEST, last clause outermost, and build a
-  nested array; a later clause that reads an earlier clause's variable
-  rejects. For one flat list use one `for` per comprehension, outer
-  loop last, and `.flat()` (TODO.md holds the open decision).
+  Chained `for` clauses NEST, as CoffeeScript's do: a comprehension is
+  a postfix `for` on an expression, so `v for a in as for b in bs` is
+  `(v for a in as) for b in bs` — the LAST clause is the outer loop and
+  the result is a nested array. They do not flatten the way Python's
+  bracketed clause list does. A later clause that reads an earlier
+  clause's variable would read it unbound, and rejects. For one flat
+  list use one `for` per comprehension, outer loop last, and `.flat()`:
+  `((item for item in xs) for xs in lists).flat()`.
 - A tail `try` wraps in an IIFE: assign first, then `try`. `yield*`
   is spelled `(yield)*`. `on`, `off`, `yes`, `no`, `by`, `then`, `own`
   are reserved words.
@@ -165,8 +169,7 @@ Verified at main `9868a69f`, 2026-09-18:
 - **Compiler and language.** 1714 commits; the language suite (3225
   tests) and the fast loop (6773 tests) pass on main, and the required
   `test` and `browser` jobs passed on the last landed pull requests
-  (#327, #328). What chained `for` clauses
-  should mean is an open decision in TODO.md. Candidate features (a fresh-binding `own` declaration)
+  (#327, #328). Candidate features (a fresh-binding `own` declaration)
   are in ROADMAP.md as evidence-backed but not accepted.
 - **VARIANT.** `docs/VARIANTS.md` is the contract for reading and
   writing DuckDB `VARIANT` documents from SQL, Rip and the harbor REPL;
