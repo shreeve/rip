@@ -1472,6 +1472,18 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     expect(code).toContain('declare __offers: {};');
   });
 
+  test("a generic provider's record carries its parameter, and an accept from it reads at the constraint", () => {
+    const code = ts([
+      'Select<T extends { id: number }> = component',
+      '  offer @options: T[] := []',
+      'Row = component',
+      '  accept options from Select',
+      '',
+    ].join('\n')).code;
+    expect(code).toContain('declare __offers: { options: { value: T[]; read(): T[]; touch?(): void } };');
+    expect(code).toContain("declare options: NonNullable<InstanceType<typeof Select>['__offers']>['options'];");
+  });
+
   test('methods and hooks are REAL class methods with annotations — never declares', () => {
     const code = ts(FIXTURE).code;
     expect(code).toContain('bump(n: number): number {');

@@ -506,12 +506,18 @@ function __findContext(fn, provider, key) {
       ? `${fn}: a context read names its provider — ${fn}(Provider, ${JSON.stringify(provider)})`
       : `${fn}: the provider named for ${JSON.stringify(key)} is not a component`);
   }
+  // A hot swap re-points a living instance at its definition's next
+  // class, one instance at a time, so mid-round a part's fresh instance
+  // can name the new class while the provider above it still wears the
+  // old one. The two share the compiler's `__hmrId`, HMR's own word for
+  // the same definition; a production class carries none.
+  const hmrId = typeof provider.__hmrId === 'string' ? provider.__hmrId : null;
   let component = __currentComponent;
   // Cycle guard: a corrupted _parent chain must not hang the lookup.
   const visited = new Set();
   while (component && !visited.has(component)) {
     visited.add(component);
-    if (component instanceof provider) {
+    if (component instanceof provider || (hmrId !== null && component.constructor?.__hmrId === hmrId)) {
       return component._context !== undefined && component._context.has(key)
         ? { found: true, value: component._context.get(key) }
         : { found: false, provider: component };

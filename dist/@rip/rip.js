@@ -25915,11 +25915,12 @@ function __findContext(fn, provider, key) {
   if (typeof provider !== "function") {
     throw new Error(key === undefined ? `${fn}: a context read names its provider — ${fn}(Provider, ${JSON.stringify(provider)})` : `${fn}: the provider named for ${JSON.stringify(key)} is not a component`);
   }
+  const hmrId = typeof provider.__hmrId === "string" ? provider.__hmrId : null;
   let component = __currentComponent;
   const visited = new Set;
   while (component && !visited.has(component)) {
     visited.add(component);
-    if (component instanceof provider) {
+    if (component instanceof provider || hmrId !== null && component.constructor?.__hmrId === hmrId) {
       return component._context !== undefined && component._context.has(key) ? { found: true, value: component._context.get(key) } : { found: false, provider: component };
     }
     component = component._parent;
