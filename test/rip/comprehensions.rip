@@ -533,6 +533,41 @@ test 'comprehension two-variable range binds the index', "([v, i] for v, i in [1
 test 'comprehension bigint bounds', "(String(i) for i in [1n..3n])", ['1', '2', '3']
 test 'comprehension nested literal ranges', "([i, j] for j in [1..2] for i in [1..2])", [[[1, 1], [1, 2]], [[2, 1], [2, 2]]]
 
+# Chained clauses NEST: `v for a in as for b in bs` is
+# `(v for a in as) for b in bs`, so the LAST clause is the outer loop and
+# the result is a nested array. A later clause that reads a name only an
+# earlier clause binds therefore reads it unbound, and rejects; a name
+# the enclosing scope binds is an ordinary read.
+test 'chained independent clauses nest with the last clause outermost', '''
+  seen = []
+  seen.push(a + b) for a in [1, 2] for b in [10, 20]
+  seen
+''', [11, 12, 21, 22]
+test 'a chained comprehension equals its parenthesized spelling', '''
+  chained = (x * y for x in [1, 2] for y in [1, 10])
+  nested = ((x * y for x in [1, 2]) for y in [1, 10])
+  JSON.stringify(chained) is JSON.stringify(nested)
+''', true
+fail 'a later clause cannot read an earlier clause variable', "(item for xs in [[1, 2], [3]] for item in xs)", "reads 'xs', which only the clause written before it binds"
+fail 'a later clause cannot read an earlier variable through a call', "(x for xs in [[1]] for x in f(xs))", "reads 'xs', which only the clause written before it binds"
+fail 'a later clause guard cannot read an earlier clause variable', "(v for a in [1] for v in [2] when a > 0)", "reads 'a', which only the clause written before it binds"
+fail 'a third clause cannot read a second clause variable', "(v for a in [1] for b in [2] for v in [b])", "reads 'b', which only the clause written before it binds"
+fail 'a chained statement clause cannot read an earlier clause variable', '''
+  seen = []
+  seen.push(x) for xs in [[1, 2]] for x in xs
+''', "reads 'xs', which only the clause written before it binds"
+test 'a later clause may read a name the enclosing scope binds', '''
+  xs = [7, 8]
+  JSON.stringify (n for xs2 in [[1]] for n in xs)
+''', '[[7],[8]]'
+test 'a member property named like an earlier variable is not a read', '''
+  box = { a: [5] }
+  JSON.stringify (v for a in [1] for v in box.a)
+''', '[[5]]'
+test 'one flat list: one for per comprehension, outer loop last, then flat', '''
+  ((item for item in xs) for xs in [[1, 2], [3]]).flat()
+''', [1, 2, 3]
+
 test 'comprehension range bounds evaluate once each', '''
   calls = 0
   top = -> calls++; 3

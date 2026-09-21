@@ -7101,8 +7101,47 @@ class Emitter {
     this.inCtrl(() => this.comprehensionCoreCtrl(node, ind, keySpec));
   }
 
+  // The bare identifiers an expression reads in ITS OWN scope: a
+  // member's property name and an object key are not reads, a call's
+  // head is, and a nested function keeps its own.
+  bareReads(n, out = new Set()) {
+    if (typeof n === 'string') { out.add(n); return out; }
+    if (!isNode(n) || isFunc(n) || isDefHead(n[0]) || n[0] === 'class') return out;
+    const head = n[0];
+    if ((head === '.' || head === '?.') && n.length === 3) return this.bareReads(n[1], out);
+    if ((head === ':' || head === 'void-pair') && n.length === 3) return this.bareReads(n[2], out);
+    if (typeof head === 'string') { if (this.semanticKindOf(n) === 'call') out.add(head); }
+    else this.bareReads(head, out);
+    for (let k = 1; k < n.length; k++) this.bareReads(n[k], out);
+    return out;
+  }
+
   comprehensionCoreCtrl(node, ind, keySpec) {
     const [, expr, [clause], guards] = node;
+    // Chained clauses nest: `v for a in as for b in bs` parses as
+    // `(v for a in as) for b in bs`, so the LAST clause is the outer
+    // loop. A later clause that reads a name only an earlier clause binds
+    // therefore reads it unbound — the spelling of someone expecting the
+    // clauses to flatten in written order. Independent clauses build the
+    // nested array they say.
+    if (isNode(expr) && isComprehensionNode(expr) && !expr.parenthesized && this.lockedHead(expr, 'comprehension')) {
+      const earlier = [];
+      for (let c = expr; isNode(c) && isComprehensionNode(c) && !c.parenthesized && this.lockedHead(c, 'comprehension'); c = c[1]) {
+        earlier.push(...this.loopBindingNames(c));
+      }
+      const reads = new Set();
+      this.bareReads(clause[2], reads);
+      this.bareReads(clause[3], reads);
+      for (const g of guards) this.bareReads(g, reads);
+      const own = new Set(this.loopBindingNames(node));
+      const unbound = earlier.find((name) => reads.has(name) && !own.has(name) && !this.inScope(name));
+      if (unbound !== undefined) {
+        throw this.positionedError(node,
+          `emitter: this clause reads '${unbound}', which only the clause written before it binds — chained clauses nest with the ` +
+          `LAST one outermost, so '${unbound}' is unbound here. For one flat list, write one \`for\` per comprehension, ` +
+          'outer loop last, and `.flat()` the result');
+      }
+    }
     const emitValue = () => this.mark(node, 'value', () => this.expr(expr));
     const keyExpr = keySpec?.expr ?? keySpec;
     const pad = '  '.repeat(ind);
