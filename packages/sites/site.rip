@@ -428,6 +428,16 @@ STATUS_CODE: Record<number, string> =
 
 export type ErrorBody = { error: string, code: string, fields?: Record<string, string> }
 
+type Thrown =
+  status?: number
+  api?: boolean
+  code?: string
+  notice?: string
+  message?: string
+  field?: string
+  errors?: Record<string, string>
+  issues?: { field?: string, message?: string }[]
+
 # One JSON error envelope for every thrown error, flat: { error, code,
 # fields? }. `error` is the message, `code` is always present, and a
 # refused field is always reported the same way, one or many — `fields`
@@ -438,28 +448,30 @@ export type ErrorBody = { error: string, code: string, fields?: Record<string, s
 # status. `notice` (notice!) is explicitly user-facing and is always the
 # message. Any other 5xx or raw throw (no/invalid status) is masked to a
 # generic status message so internal details never leak, and carries no
-# fields. (`err` is an arbitrary thrown value — untyped by nature, like
-# a catch binding.)
-export errorEnvelope: (err: unknown) => { status: number, body: ErrorBody } = (err: any) ->
-  raw = err?.status
+# fields. (`err` is an arbitrary thrown value, `unknown` like a strict
+# catch binding; `Thrown` is what the body looks for on it, every field
+# tested before it is trusted.)
+export errorEnvelope = (err: unknown): { status: number, body: ErrorBody } ->
+  thrown = err as Thrown | null
+  raw = thrown?.status
   status = if Number.isInteger(raw) and 400 <= raw <= 599 then raw else 500
-  coded = err?.api is true and typeof err.code is 'string'
+  coded = thrown?.api is true and typeof thrown.code is 'string'
   message =
-    if err?.notice then err.notice
-    else if coded or status < 500 then err.message or STATUS_TEXT[status] or 'Error'
+    if thrown?.notice then thrown.notice
+    else if coded or status < 500 then thrown.message or STATUS_TEXT[status] or 'Error'
     else STATUS_TEXT[status] or 'Internal Server Error'
   body: ErrorBody =
     error: message
-    code:  if coded then err.code else STATUS_CODE[status] ?? "http_#{status}"
+    code:  if coded then thrown.code else STATUS_CODE[status] ?? "http_#{status}"
   fields = null
   if status < 500
-    fields = err?.errors
-    if not fields? and err?.issues?
+    fields = thrown?.errors
+    if not fields? and thrown?.issues?
       fields = {}
-      fields[i.field] = i.message for i in err.issues when i.field and i.message
-    if not fields? and typeof err?.field is 'string'
+      fields[i.field] = i.message for i in thrown.issues when i.field and i.message
+    if not fields? and typeof thrown?.field is 'string'
       fields = {}
-      fields[err.field] = err.message
+      fields[thrown.field] = thrown.message
   if fields? and Object.keys(fields).length
     body.code   = 'invalid_field' unless coded
     body.fields = fields
