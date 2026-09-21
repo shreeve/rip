@@ -72,7 +72,7 @@ test! "the default clock is the runtime's timers, and `late` is handed what time
   late = []
   parser = Parser.new { escape: 5, late: (events) -> late.push ...events }
   eq parser.feed(ESC), []
-  await Promise.new (done) -> setTimeout done, 40
+  sleep! 40
   eq late, [ESCAPE]
 
 test "a reset forgets what is held, a pending Escape with it, and disarms the timer", ->
