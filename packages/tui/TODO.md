@@ -30,6 +30,10 @@ steps are in [PLAN.md](PLAN.md).
 - [ ] A whole frame pays for spans it does not need: every grid write
       reads its row's span, about a tenth of the paint of a screen of
       bordered boxes (`bun run frame`, panels).
+- [ ] A frame taller than the terminal that changes height shifts
+      every row shown, and is painted whole. Keeping those rows means
+      scrolling the terminal by the rows gained, which needs the diff
+      to address rows by more than the top row it holds.
 - [ ] 100% churn of the 40×8 table is about 340 µs of CPU an update
       over the 300 updates of `bun run tui`, and about 170 µs over
       12,000: the run ends while the damage path is still being

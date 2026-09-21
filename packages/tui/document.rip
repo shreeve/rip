@@ -205,9 +205,10 @@ export class Node
 
   # Tell the document a frame is owed: `moved` when boxes may move,
   # false when only cells recolor. A move dirties this node and every
-  # ancestor, which is what layout reads to know its cached answer for
-  # them is stale; a dirty node's ancestors are dirty already, so the
-  # climb stops at the first one that is.
+  # ancestor, which is where layout looks for what changed; whether an
+  # ancestor's cached answer still stands is layout's to say (a change
+  # under a layout boundary stops there). A dirty node's ancestors are
+  # dirty already, so the climb stops at the first one that is.
   changed!: (moved) ->
     if moved
       node = this
