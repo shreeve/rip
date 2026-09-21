@@ -138,7 +138,7 @@ B  =! 5
 BL =! 6
 L  =! 7
 
-PARTS =! ['topLeft', 'top', 'topRight', 'right', 'bottomRight', 'bottom', 'bottomLeft', 'left']
+export PARTS =! ['topLeft', 'top', 'topRight', 'right', 'bottomRight', 'bottom', 'bottomLeft', 'left']
 
 BORDERS =! {
   single: '┌─┐│┘─└│', double: '╔═╗║╝═╚║', round: '╭─╮│╯─╰│', bold: '┏━┓┃┛━┗┃'
@@ -149,12 +149,13 @@ frames =! Map.new()
 probe =! Flow.new()
 
 # The eight cells of a border style: one of the names, or an object that
-# gives each part a glyph of its own, one cell wide. An object is read
-# every time it is asked for and remembered by its eight glyphs, never
-# by itself, so one that is changed after it was written is seen — and
-# refused, where what it holds is no glyph. A glyph obeys the rule text
-# does: one that `sanitize` would alter, a control character above all,
-# never reaches the terminal.
+# gives each part a glyph of its own, one cell wide. A node keeps a copy
+# of the object as it stood when the style was set (document.rip), so
+# every cell of a border is drawn from the same eight glyphs, and one
+# changed in place afterwards is not seen until it is set again. The
+# cells are remembered by the glyphs, never by the object. A glyph obeys
+# the rule text does: one that `sanitize` would alter, a control
+# character above all, never reaches the terminal.
 glyphsOf =! (style, key = 'borderStyle') ->
   custom = style and typeof style is 'object'
   unless custom or (typeof style is 'string' and Object.hasOwn BORDERS, style)

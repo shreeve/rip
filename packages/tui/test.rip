@@ -851,21 +851,39 @@ test "a border glyph obeys the rule text does: a control character is refused by
     restore()
 
 # The document hears a style that is written, never an object changed in
-# place, so such a change owes no cells: it shows when the box is next
-# drawn — here by a frame of another width, which is drawn whole.
-test "a border object is read every time it is drawn: a change to it is seen, and a bad one refused", ->
+# place: a box keeps the eight glyphs its border had when it was set, so
+# a frame that owes half of the box draws the glyphs of the other half.
+test "a border object is copied when it is set: a change in place is not seen until it is set again", ->
   frame = { topLeft: '1', top: '2', topRight: '3', right: '4', bottomRight: '5', bottom: '6', bottomLeft: '7', left: '8' }
   Framed = component
+    @word := 'ab'
     render
-      Box width: 4, borderStyle: frame
-        Text "ab"
-  mounted Framed, (app, show) ->
-    eq show(4), "1223\n8ab4\n7665"
-    frame.top = '='
-    eq show(4), "1223\n8ab4\n7665"
-    eq show(5), "1==3\n8ab4\n7665"
+      Box flexDirection: 'column', alignItems: 'flex-start'
+        Box width: 4, borderStyle: frame
+          Text "ab"
+        Box position: 'absolute', top: 0, left: 1
+          Text "#{@word}"
+  view = mount Framed, cols: 8, rows: 6
+  try
+    eq view.frame(), "1ab3\n8ab4\n7665"
+    frame.top = frame.bottom = '='
+    # The words over the top edge change, and owe two cells of it.
+    view.app.word.value = 'c'
+    eq view.frame(), "1c23\n8ab4\n7665"
+    view.resize 9, 6
+    eq view.frame(), "1c23\n8ab4\n7665"
+    box = document.body.firstChild.firstChild
+    box.set 'borderStyle', frame
+    eq view.frame(), "1c=3\n8ab4\n7==5"
+    eq view.damage, 4 * 3
+    box.set 'borderStyle', { ...frame }
+    view.frame()
+    eq view.damage, 0
     frame.top = '\x07'
-    throws (-> show 4), 'borderStyle: top: "\\u0007" is not a border glyph'
+    throws (-> box.set 'borderStyle', frame), 'borderStyle: top: "\\u0007" is not a border glyph'
+    eq view.frame(), "1c=3\n8ab4\n7==5"
+  finally
+    view.close()
 
 # ==[ The component model on a terminal ]==
 

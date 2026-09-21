@@ -6,7 +6,7 @@
 
 import { __setChildFailureReporter } from '../../src/runtime/components.js'
 import { admit, blame } from './layout.rip'
-import { allow, Damage } from './paint.rip'
+import { allow, Damage, PARTS } from './paint.rip'
 import { sanitize, refresh } from './text.rip'
 
 # Styles that move boxes, and styles that only recolor cells.
@@ -253,6 +253,13 @@ export class Element extends Node
     else if meant and key is 'link'
       throw Error.new "rip/tui: 'link' has no meaning on a box — it makes a hyperlink of a text's words"
     value = undefined if value is '' or value is null or (value is false and not STANDING.has key)
+    # A border written as an object is kept as a copy of its eight
+    # glyphs: an object changed in place says nothing until it is set
+    # again, and then it is another border only if a glyph differs.
+    if key is 'borderStyle' and value and typeof value is 'object'
+      held = @styles[key]
+      return if held and PARTS.every (part) -> held[part] is value[part]
+      value = Object.freeze { ...value }
     return if @styles[key] is value
     # A value is refused here, on the line that wrote it, and not from
     # inside a later frame.

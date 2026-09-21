@@ -96,9 +96,9 @@ colored panel sits on the panel's color, and text that spills out of
 a colored box is bare once it leaves it. `color`, `bold`, `dimColor`,
 and the other text attributes written on a box do pass down to the
 text inside it, and text nested in text adds to what the outer text
-says. A custom `borderStyle` object is read when it is written, and
-the document hears the write: an object changed in place afterwards
-shows when its box is next drawn, and owes no frame.
+says. A custom `borderStyle` object is copied when it is written: the
+box keeps those eight glyphs, and an object changed in place afterwards
+shows nowhere until it is written again.
 `overflow: 'hidden'` clips everything drawn inside the box, an
 absolute child included.
 
@@ -220,8 +220,8 @@ view.close()                # unmount, and give the process its `document` slot 
 ```
 
 Nothing is drawn until `frame` asks, so a frame that fails — a layout
-that never settles, a border glyph gone bad — throws from `frame`, to
-the test that asked for it. `bytes` is the difference from the frame
+that never settles — throws from `frame`, to the test that asked for
+it. `bytes` is the difference from the frame
 before, exactly as `run` writes it; a frame that changes no cell sends
 nothing. With `rows`, a frame taller than the terminal shows its
 bottom, as it does on a terminal; without, the terminal is as tall as
