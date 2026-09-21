@@ -848,6 +848,18 @@ test! 'foreground flags reject invalid modes and pictures before startup', ->
   ok rawPicture.stderr.toString().includes 'only applies with --access-log=pretty'
 
 test! 'foreground raw stdout is pure NDJSON and off opens no subscription', ->
+  expected = TextDecoder.new().decode(Uint8Array.new([...helloLine(), ...accessLine(sequence: '1')]))
+  # A child's stream read as it arrives, so a wait can watch what the
+  # process has written so far.
+  collect = (stream) ->
+    sink = { text: '', done: null }
+    sink.done = do ->
+      decoder = TextDecoder.new()
+      for chunk as! stream
+        sink.text += decoder.decode chunk, { stream: true }
+      sink.text += decoder.decode()
+      return
+    sink
   run = (mode) ->
     dir = mkdtempSync join(tmpdir(), 'rip-monitor-mode-')
     socket = join dir, 'janus.sock'
@@ -881,20 +893,24 @@ test! 'foreground raw stdout is pure NDJSON and off opens no subscription', ->
         stdin: 'ignore'
         stdout: 'pipe'
         stderr: 'pipe'
-      output = Response.new(proc.stdout).text()
-      diagnostic = Response.new(proc.stderr).text()
+      output = collect proc.stdout
+      diagnostic = collect proc.stderr
+      # The startup report is the manager's last startup act, written
+      # after registration and after the subscription is opened. Signal
+      # only once it has been read: a manager stopped before it reaches
+      # that write prints no report, and the record a subscription
+      # forwards needs the same patience.
       if mode is 'raw'
-        waitFor! -> accessCount is 1
-        sleep! 25
+        waitFor! -> diagnostic.text.includes('rip-sites: cart  ') and output.text.length >= expected.length
       else
-        waitFor! -> registered
-        sleep! 25
+        waitFor! -> output.text.includes 'https://cart.local/'
       signal = if mode is 'off' then 'SIGINT' else 'SIGTERM'
       proc.kill signal
       code = await proc.exited
-      diagnosticText = await diagnostic
-      eq code, (if signal is 'SIGINT' then 130 else 143), diagnosticText
-      { output: await output, diagnostic: diagnosticText, accessCount }
+      await output.done
+      await diagnostic.done
+      eq code, (if signal is 'SIGINT' then 130 else 143), diagnostic.text
+      { output: output.text, diagnostic: diagnostic.text, accessCount }
     finally
       try proc?.kill('SIGKILL')
       await proc.exited if proc?
@@ -902,7 +918,7 @@ test! 'foreground raw stdout is pure NDJSON and off opens no subscription', ->
       rmSync dir, { recursive: true, force: true }
 
   raw = run! 'raw'
-  eq raw.output, TextDecoder.new().decode(Uint8Array.new([...helloLine(), ...accessLine(sequence: '1')]))
+  eq raw.output, expected
   eq raw.accessCount, 1
   ok raw.diagnostic.includes 'rip-sites: cart  https://cart.test/\n'
 
