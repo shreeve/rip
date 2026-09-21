@@ -1433,15 +1433,10 @@ settleMain! =! (node, lay, f, insideMain, ownerW) ->
   else if f.consumed < 0
     f.free = -f.consumed
 
-# Step 9: one dimension of the node's size — what it was given, or what
-# its lines need, its own edges among them.
-outerSize =! (lay, axis, mode, given, needed, inner, inside, ownerSize, ownerW) ->
-  if mode is MAX_CONTENT or (mode is FIT_CONTENT and lay.overflow isnt SCROLL)
-    bound lay, axis, needed, ownerSize, ownerW
-  else if mode is FIT_CONTENT
-    fmax fmin(inner + inside, boundWithin(lay, axis, needed, ownerSize, ownerW)), inside
-  else
-    bound lay, axis, given, ownerSize, ownerW
+# Step 9, for a node that scrolls: what its lines need, and no more than
+# the limit it was offered.
+scrolled =! (lay, axis, needed, inner, inside, ownerSize, ownerW) ->
+  fmax fmin(inner + inside, boundWithin(lay, axis, needed, ownerSize, ownerW)), inside
 
 # Lines were stacked from the start edge, so wrap-reverse mirrors them.
 # Step 10: a reversed axis positioned its children from its far edge, so
@@ -1476,18 +1471,19 @@ compute! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
     for edge in [0...4]
       lay.padding[edge] = paddingAt lay, edge, ownerW
       lay.border[edge] = lay.v[BORDER + edge]
-  marginRow = marginAxis lay, ROW, ownerW
-  marginColumn = marginAxis lay, COLUMN, ownerW
+  # The offer, less the node's own margin.
+  wide = availW - marginAxis lay, ROW, ownerW
+  tall = availH - marginAxis lay, COLUMN, ownerW
   if lay.leaf
-    measureLeaf node, lay, availW - marginRow, availH - marginColumn, modeW, modeH, ownerW, ownerH
+    measureLeaf node, lay, wide, tall, modeW, modeH, ownerW, ownerH
     return
   list = lay.kids
   # Yoga's child count takes in the hidden, so a box whose children are
   # all hidden is laid out as a container: one line with nothing on it.
   if lay.count is 0
-    measureEmpty lay, availW - marginRow, availH - marginColumn, modeW, modeH, ownerW, ownerH
+    measureEmpty lay, wide, tall, modeW, modeH, ownerW, ownerH
     return
-  return if not perform and measureFixed lay, availW - marginRow, availH - marginColumn, modeW, modeH, ownerW, ownerH
+  return if not perform and measureFixed lay, wide, tall, modeW, modeH, ownerW, ownerH
 
   f = lay.flex ?= Flex.new()
   axes lay, f, modeW, modeH, ownerW, ownerH
@@ -1500,8 +1496,8 @@ compute! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
   leadingCross = insideAt lay, START[cross], ownerW
   insideRow = if row then insideMain else insideCross
   insideColumn = if row then insideCross else insideMain
-  f.innerW = innerSize lay, WIDTH, availW - marginRow - insideRow, insideRow, ownerW, ownerW
-  f.innerH = innerSize lay, HEIGHT, availH - marginColumn - insideColumn, insideColumn, ownerH, ownerW
+  f.innerW = innerSize lay, WIDTH, wide - insideRow, insideRow, ownerW, ownerW
+  f.innerH = innerSize lay, HEIGHT, tall - insideColumn, insideColumn, ownerH, ownerW
   f.innerMain = if row then f.innerW else f.innerH
   f.innerCross = if row then f.innerH else f.innerW
   # A child's percent min and max resolve against the space inside THIS
@@ -1554,10 +1550,15 @@ compute! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
   # Step 8: the lines against each other.
   alignLines lay, f, lines, totalCross, leadingCross, insideCross, ownerCross, ownerW if perform and (f.wrap or baselined lay)
 
-  givenMain = if row then availW - marginRow else availH - marginColumn
-  givenCross = if row then availH - marginColumn else availW - marginRow
-  lay.measured[DIM[axis]] = outerSize lay, axis, f.modeMain, givenMain, widest, f.innerMain, insideMain, f.ownerMain, ownerW
-  lay.measured[DIM[cross]] = outerSize lay, cross, f.modeCross, givenCross, totalCross + insideCross, f.innerCross, insideCross, ownerCross, ownerW
+  # Step 9: this node's size — what it was given, or what its lines need,
+  # its own edges among them.
+  mainSize = if f.modeMain isnt STRETCH_FIT then widest else if row then wide else tall
+  crossSize = if f.modeCross isnt STRETCH_FIT then totalCross + insideCross else if row then tall else wide
+  lay.measured[DIM[axis]] = bound lay, axis, mainSize, f.ownerMain, ownerW
+  lay.measured[DIM[cross]] = bound lay, cross, crossSize, ownerCross, ownerW
+  if lay.overflow is SCROLL
+    lay.measured[DIM[axis]] = scrolled lay, axis, widest, f.innerMain, insideMain, f.ownerMain, ownerW if f.modeMain is FIT_CONTENT
+    lay.measured[DIM[cross]] = scrolled lay, cross, crossSize, f.innerCross, insideCross, ownerCross, ownerW if f.modeCross is FIT_CONTENT
   return unless perform
   mirror lay, f
 
