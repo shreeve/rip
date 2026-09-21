@@ -3,9 +3,8 @@
 # tree renders to a string for tests.
 
 import { install } from './document.rip'
-import { layout } from './layout.rip'
 import { Grid, paint } from './paint.rip'
-import { Screen } from './screen.rip'
+import { Screen, settle } from './screen.rip'
 
 # ── Widgets ───────────────────────────────────────────────────────────────────
 # A box is a div and text is a span. Every prop a widget does not
@@ -47,22 +46,51 @@ export run =! (App, options = {}) ->
   cols = view.cols
   rows = view.rows
   resized = ->
+    return if view.cols is cols and view.rows is rows
     cols = view.cols
     rows = view.rows
     view.front = null
     doc.owe true
   interrupted = -> quit()
-  finish = null
-  done = Promise.new (resolve) -> finish = resolve
-  app = App.new(options.props ?? {})
-  live = { app, view, out, doc, restore, resized, interrupted, finish }
+  settled = {}
+  done = Promise.new (resolve, reject) ->
+    settled.resolve = resolve
+    settled.reject = reject
+  # `live` stands before the app is constructed, so a `quit` from an
+  # effect that runs during construction is heard.
+  live = { app: null, view, out, doc, restore, resized, interrupted, settled, closing: false }
   out.write "\x1b[?25l"
-  app.mount doc.body
-  view.frame()
+  try
+    live.app = App.new(options.props ?? {})
+    live.app.mount doc.body
+    view.frame()
+  catch error
+    close false
+    throw error
+  # A frame that fails later is drawn from a timer, with no caller to
+  # throw to: the terminal is given back first, and `done` rejects.
+  view.failed = (error) ->
+    close false
+    settled.reject error
   doc.onOwe = -> view.book()
   out.on? 'resize', resized
   process.on 'SIGINT', interrupted
-  { app, done, quit, flush: (-> view.frame() if doc.stale) }
+  { app: live.app, done, quit, flush: (-> view.frame() if doc.stale) }
+
+# Give the terminal and the process back: the cursor, the listeners, the
+# `document` slot. `drawn` leaves the last frame in the scrollback; a
+# failure leaves whatever reached the screen.
+close =! (drawn) ->
+  { app, view, out, doc, restore, resized, interrupted } = live
+  live = null
+  doc.onOwe = null
+  try
+    if drawn then view.leave() else out.write "\x1b[?25h"
+    app?.unmount()
+  finally
+    out.off? 'resize', resized
+    process.off 'SIGINT', interrupted
+    restore()
 
 # Unmount the running app, leave its last frame on screen, and give the
 # process its `document` slot back. The work waits for the turn to end,
@@ -72,15 +100,13 @@ export quit =! (result) ->
   return unless live and not live.closing
   live.closing = true
   queueMicrotask ->
-    { app, view, out, doc, restore, resized, interrupted, finish } = live
-    doc.onOwe = null
-    view.leave()
-    app.unmount()
-    out.off? 'resize', resized
-    process.off 'SIGINT', interrupted
-    restore()
-    live = null
-    finish result
+    return unless live
+    { settled } = live
+    try
+      close true
+      settled.resolve result
+    catch error
+      settled.reject error
 
 # The frame `App` draws in `cols` columns, as text — plain by default,
 # with escape sequences when `ansi` is set.
@@ -89,13 +115,7 @@ export renderToString =! (App, options = {}) ->
   try
     app = App.new(options.props ?? {})
     app.mount doc.body
-    # A binding that reads a node's box changes the tree it measured, so
-    # layout repeats until a pass moves nothing.
-    passes = 0
-    while doc.moved
-      throw Error.new 'rip/tui: layout did not settle — a binding keeps changing the box it reads' if (passes += 1) > 8
-      doc.moved = false
-      layout doc.body, options.cols ?? 80, options.rows ?? null
+    settle doc, options.cols ?? 80, options.rows ?? null
     grid = Grid.new options.cols ?? 80, doc.body.rect.h
     paint grid, doc.body
     text = grid.toString options.ansi ?? false

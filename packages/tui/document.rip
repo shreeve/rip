@@ -7,8 +7,16 @@
 import { __setChildFailureReporter } from '../../src/runtime/components.js'
 
 # Styles that move boxes, and styles that only recolor cells.
-LAYOUT =! ['flexDirection', 'flexGrow', 'gap', 'width', 'height', 'borderStyle', 'hidden',
-  'padding', 'paddingX', 'paddingY', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight']
+LAYOUT =! [
+  'flexDirection', 'flexWrap', 'flexGrow', 'flexShrink', 'flexBasis', 'flex'
+  'alignItems', 'alignSelf', 'alignContent', 'justifyContent'
+  'gap', 'rowGap', 'columnGap'
+  'width', 'height', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight', 'aspectRatio', 'boxSizing'
+  'padding', 'paddingX', 'paddingY', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight'
+  'margin', 'marginX', 'marginY', 'marginTop', 'marginBottom', 'marginLeft', 'marginRight'
+  'position', 'top', 'right', 'bottom', 'left'
+  'display', 'hidden', 'borderStyle'
+]
 PAINT =! ['color', 'backgroundColor', 'borderColor', 'bold', 'dim', 'italic', 'underline', 'inverse']
 
 KIND =! Map.new()
@@ -63,6 +71,7 @@ export class Node
     @list = null
     @rect = NOWHERE
     @cell = null
+    @dirty = true
 
   # The children as an array, rebuilt only after the list changed.
   get childNodes: ->
@@ -89,6 +98,10 @@ export class Node
     if before then before.nextSibling = node else @firstChild = node
     if ref then ref.previousSibling = node else @lastChild = node
     node.parentNode = this
+    if @tagName is 'span' and node.tagName is 'span'
+      for own key of node.styles
+        if KIND.get(key) is 'layout'
+          throw Error.new "rip/tui: '#{key}' has no meaning on text nested in text — it is a run of words, styled by color and weight only"
     node.adopt @ownerDocument
     @list = null
     @changed true
@@ -126,8 +139,17 @@ export class Node
     @cell?.write @rect
 
   # Tell the document a frame is owed: `moved` when boxes may move,
-  # false when only cells recolor.
-  changed!: (moved) -> @ownerDocument?.owe moved
+  # false when only cells recolor. A move dirties this node and every
+  # ancestor, which is what layout reads to know its cached answer for
+  # them is stale; a dirty node's ancestors are dirty already, so the
+  # climb stops at the first one that is.
+  changed!: (moved) ->
+    if moved
+      node = this
+      while node and not node.dirty
+        node.dirty = true
+        node = node.parentNode
+    @ownerDocument?.owe moved
 
 export class Element extends Node
   constructor: (@tagName) ->
@@ -143,6 +165,13 @@ export class Element extends Node
       return
     kind = KIND.get key
     throw unknown(key, @tagName) unless kind
+    # Text is drawn glyph by glyph: it has no inside to pad or frame, and
+    # text nested in text is a run of words, not a box to size or place.
+    if @tagName is 'span' and value? and value isnt false and value isnt ''
+      if key is 'borderStyle' or key.startsWith('padding')
+        throw Error.new "rip/tui: '#{key}' has no meaning on text — put the text in a box and style the box"
+      if kind is 'layout' and @parentNode?.tagName is 'span'
+        throw Error.new "rip/tui: '#{key}' has no meaning on text nested in text — it is a run of words, styled by color and weight only"
     value = undefined if value is '' or value is null or value is false
     return if @styles[key] is value
     if value is undefined then delete @styles[key] else @styles[key] = value
@@ -150,7 +179,10 @@ export class Element extends Node
 
   setAttribute!: (key, value) ->
     throw Error.new "rip/tui: a string `style` has no terminal meaning on <#{@tagName}> — pass the styles as props, or `style:` an object" if key is 'style'
-    @set key, value
+    # A boolean attribute written on a raw tag arrives as presence, the
+    # empty string (`div hidden: true`); on the style road an empty
+    # string clears a key, so the two are told apart here.
+    @set key, (if value is '' then true else value)
 
   removeAttribute!: (key) -> @set key, undefined unless key is 'style'
   toggleAttribute!: (key, force) -> @set key, (if force then true else undefined)

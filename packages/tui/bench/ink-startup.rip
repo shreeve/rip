@@ -15,7 +15,7 @@ loaded = performance.now()
 
 out = terminal 200, 60
 App = -> React.createElement ink.Text, { color: 'green' }, 'ready'
-ink['render'] React.createElement(App), {
+ink.render React.createElement(App), {
   stdout: out
   patchConsole: false
   exitOnCtrlC: false

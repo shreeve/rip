@@ -56,11 +56,24 @@ box is a text leaf, and text nested in text restyles its own words.
 
 | Moves boxes | Recolors cells |
 |---|---|
-| `flexDirection` (`'row'`, default column), `flexGrow`, `gap` | `color`, `backgroundColor`, `borderColor` — a name (`red`, `greenBright`, `gray`) or `'#rrggbb'` |
-| `width`, `height` | `bold`, `dim`, `italic`, `underline`, `inverse` |
-| `padding`, `paddingX`, `paddingY`, `paddingTop` … `paddingLeft` | |
+| `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `flex` | `color`, `backgroundColor`, `borderColor` — a name (`red`, `greenBright`, `gray`) or `'#rrggbb'` |
+| `alignItems`, `alignSelf`, `alignContent`, `justifyContent` | `bold`, `dim`, `italic`, `underline`, `inverse` |
+| `gap`, `rowGap`, `columnGap` | |
+| `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` — a number, `'50%'`, or `'auto'` | |
+| `padding`, `margin`, and their `X`, `Y`, `Top`, `Right`, `Bottom`, `Left` forms; a margin may be `'auto'` | |
+| `position` (`'relative'`, `'absolute'`, `'static'`) with `top`, `right`, `bottom`, `left` | |
+| `aspectRatio`, `boxSizing`, `display` (`'flex'`, `'none'`, `'contents'`), `hidden` | |
 | `borderStyle`: `single`, `round`, `double`, `bold` | |
-| `hidden` | |
+
+Layout is flexbox as Yoga lays it out — the defaults are Yoga's
+(`flexDirection: 'column'`, `flexShrink: 0`, `alignItems: 'stretch'`),
+and the engine is held to Yoga's own generated suite: all 543 cases
+run, with one stated divergence (every edge rounds from its absolute
+position, so neighbors never overlap or gap). An absolute node
+positions against its nearest ancestor that is not `position:
+'static'`, which is how a badge or a dialog written deep in the tree
+reaches an outer box. An `aspectRatio` counts cells, which are about
+twice as tall as wide: a box that looks square asks for about 2.
 
 `style:` takes the same keys as an object. `role` and `aria-*` are kept
 on the node. Anything else is refused by name — an unknown style with
@@ -92,9 +105,8 @@ State a test changes redraws on the next call.
 
 ## What is here, and what is planned
 
-[PLAN.md](PLAN.md) is the design and the order of work: the full
-flexbox held to Yoga's generated suite, wrapping and clipping, damage
-tracking, key input and focus, mouse, the app lifecycle, scrollback
+[PLAN.md](PLAN.md) is the design and the order of work: text wrapping
+and clipping, damage tracking, key input and focus, mouse, the app lifecycle, scrollback
 output, and the published comparison with Ink. `bench/` holds the
 harness and both contenders (`bun run ink`, `bun run tui`).
 
@@ -112,7 +124,11 @@ A two-pane test run drawn live, each change one diffed write.
 bun run test
 ```
 
-The suite covers the document's contract and its refusals, layout and
+`test.rip` covers the document's contract and its refusals, layout and
 cell rounding, `if` / `else` and keyed `for` on a terminal, nested text
 styles, `ref:` metrics, the grid diff replayed through a terminal, and
-a running app from first frame to `quit`.
+a running app from first frame to `quit`. `test/yoga.rip` runs Yoga's
+543 generated layout cases, vendored unmodified under `test/yoga/`
+(MIT, © Meta Platforms), against the engine through a shim of the
+`yoga-layout` API, and `test/yoga-aspect.rip` is a port of Yoga's 37
+hand-written aspect ratio cases.

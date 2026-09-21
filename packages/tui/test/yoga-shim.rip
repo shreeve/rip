@@ -1,0 +1,254 @@
+# The `yoga-layout` surface Yoga's generated tests call, over this
+# package's own nodes. A shim node wraps one `Element`; a setter turns
+# Yoga's enum or value into the layout style vocabulary and writes it
+# onto that element; `calculateLayout` runs `layout`; a getter reads the
+# element's rounded box back in Yoga's terms, relative to the parent.
+#
+# The shim decides nothing about layout. A Yoga value with no spelling
+# in the vocabulary throws by name rather than being dropped.
+
+import { Element } from '../document.rip'
+import { layout } from '../layout.rip'
+
+# Yoga's enums, with the numbers of `yoga-layout`'s YGEnums.ts.
+export Align =! Object.freeze { Auto: 0, FlexStart: 1, Center: 2, FlexEnd: 3, Stretch: 4, Baseline: 5, SpaceBetween: 6, SpaceAround: 7, SpaceEvenly: 8, Start: 9, End: 10 }
+export BoxSizing =! Object.freeze { BorderBox: 0, ContentBox: 1 }
+export Direction =! Object.freeze { Inherit: 0, LTR: 1, RTL: 2 }
+export Display =! Object.freeze { Flex: 0, None: 1, Contents: 2, Grid: 3 }
+export Edge =! Object.freeze { Left: 0, Top: 1, Right: 2, Bottom: 3, Start: 4, End: 5, Horizontal: 6, Vertical: 7, All: 8 }
+export Errata =! Object.freeze { None: 0, StretchFlexBasis: 1, AbsolutePositionWithoutInsetsExcludesPadding: 2, AbsolutePercentAgainstInnerSize: 4, MinSizeUndefinedInsteadOfAuto: 8, FlexFirstPassUsesRunningTotals: 16, All: 2147483647, Classic: 2147483646 }
+export ExperimentalFeature =! Object.freeze { WebFlexBasis: 0, FixFlexBasisFitContent: 1 }
+export FlexDirection =! Object.freeze { Column: 0, ColumnReverse: 1, Row: 2, RowReverse: 3 }
+export Gutter =! Object.freeze { Column: 0, Row: 1, All: 2 }
+export Justify =! Object.freeze { Auto: 0, FlexStart: 1, Center: 2, FlexEnd: 3, SpaceBetween: 4, SpaceAround: 5, SpaceEvenly: 6, Stretch: 7, Start: 8, End: 9 }
+export MeasureMode =! Object.freeze { Undefined: 0, Exactly: 1, AtMost: 2 }
+export Overflow =! Object.freeze { Visible: 0, Hidden: 1, Scroll: 2 }
+export PositionType =! Object.freeze { Static: 0, Relative: 1, Absolute: 2 }
+export Unit =! Object.freeze { Undefined: 0, Point: 1, Percent: 2, Auto: 3, MaxContent: 4, FitContent: 5, Stretch: 6 }
+export Wrap =! Object.freeze { NoWrap: 0, Wrap: 1, WrapReverse: 2 }
+
+# The vocabulary word for each enum number. A number past the end of a
+# list (Align.Start, Justify.Stretch, Display.Grid) has no word.
+ALIGN =! ['auto', 'flex-start', 'center', 'flex-end', 'stretch', 'baseline', 'space-between', 'space-around', 'space-evenly']
+JUSTIFY =! [null, 'flex-start', 'center', 'flex-end', 'space-between', 'space-around', 'space-evenly']
+DIRECTION =! ['column', 'column-reverse', 'row', 'row-reverse']
+WRAP =! ['nowrap', 'wrap', 'wrap-reverse']
+POSITION =! ['static', 'relative', 'absolute']
+DISPLAY =! ['flex', 'none', 'contents']
+OVERFLOW =! ['visible', 'hidden', 'scroll']
+SIZING =! ['border-box', 'content-box']
+
+# The four longhands of each edged style, in Edge order: left, top,
+# right, bottom.
+LONGHANDS =! {
+  margin: ['marginLeft', 'marginTop', 'marginRight', 'marginBottom']
+  padding: ['paddingLeft', 'paddingTop', 'paddingRight', 'paddingBottom']
+  border: ['borderLeftWidth', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth']
+  position: ['left', 'top', 'right', 'bottom']
+}
+
+# Which Yoga edge wins each physical side, first defined first, under
+# left-to-right layout: Start is the left side and End is the right.
+WINNERS =! [
+  [Edge.Start, Edge.Left, Edge.Horizontal, Edge.All]
+  [Edge.Top, Edge.Vertical, Edge.All]
+  [Edge.End, Edge.Right, Edge.Horizontal, Edge.All]
+  [Edge.Bottom, Edge.Vertical, Edge.All]
+]
+
+show =! (value) -> if typeof value is 'string' then "'#{value}'" else String value
+
+word =! (list, method, value) ->
+  found = list[value]
+  throw Error.new "yoga-shim: #{method}(#{show value}) has no spelling in the layout vocabulary" unless found?
+  found
+
+number =! (method, value) ->
+  return undefined if value is undefined or Number.isNaN value
+  throw Error.new "yoga-shim: #{method}(#{show value}) takes a number" unless typeof value is 'number'
+  value
+
+# A length as the vocabulary writes it: a number, 'N%', 'auto' where the
+# style allows it, or an intrinsic sizing keyword. Yoga stores a keyword
+# and resolves it to no length at all (StyleSizeLength::resolve), so a
+# keyword-sized node sizes as an `auto` one does; the engine reads it
+# the same way.
+length =! (method, value, auto) ->
+  return undefined if value is undefined or Number.isNaN value
+  return value if typeof value is 'number'
+  return value if auto and (value is 'auto' or value is 'max-content' or value is 'fit-content' or value is 'stretch')
+  return value if typeof value is 'string' and /^-?\d+(\.\d+)?%$/.test value
+  throw Error.new "yoga-shim: #{method}(#{show value}) has no spelling in the layout vocabulary"
+
+made =! []
+
+class YogaNode
+  constructor: ->
+    @el = Element.new 'div'
+    @parent = null
+    @children = []
+    @edges = { margin: [], padding: [], border: [], position: [] }
+    @gutters = []
+    made.push this
+
+  write: (key, value) ->
+    if value is undefined then delete @el.styles[key] else @el.styles[key] = value
+    @el.changed true
+
+  # Record one Yoga edge, then rewrite all four longhands from whichever
+  # recorded edge wins each side.
+  edge: (style, method, which, value) ->
+    throw Error.new "yoga-shim: #{method}(#{show which}, …) names no edge" unless Number.isInteger(which) and 0 <= which <= 8
+    held = @edges[style]
+    held[which] = value
+    for key, side in LONGHANDS[style]
+      winner = WINNERS[side].find (e) -> held[e] isnt undefined
+      @write key, (if winner? then held[winner] else undefined)
+
+  setWidth: (value) -> @write 'width', length('setWidth', value, true)
+  setHeight: (value) -> @write 'height', length('setHeight', value, true)
+  setMinWidth: (value) -> @write 'minWidth', length('setMinWidth', value, false)
+  setMinHeight: (value) -> @write 'minHeight', length('setMinHeight', value, false)
+  setMaxWidth: (value) -> @write 'maxWidth', length('setMaxWidth', value, false)
+  setMaxHeight: (value) -> @write 'maxHeight', length('setMaxHeight', value, false)
+  setAspectRatio: (value) -> @write 'aspectRatio', number('setAspectRatio', value)
+
+  setFlexDirection: (value) -> @write 'flexDirection', word(DIRECTION, 'setFlexDirection', value)
+  setFlexWrap: (value) -> @write 'flexWrap', word(WRAP, 'setFlexWrap', value)
+  setFlexGrow: (value) -> @write 'flexGrow', number('setFlexGrow', value)
+  setFlexShrink: (value) -> @write 'flexShrink', number('setFlexShrink', value)
+  setFlexBasis: (value) -> @write 'flexBasis', length('setFlexBasis', value, true)
+
+  setAlignItems: (value) -> @write 'alignItems', word(ALIGN, 'setAlignItems', value)
+  setAlignSelf: (value) -> @write 'alignSelf', word(ALIGN, 'setAlignSelf', value)
+  setAlignContent: (value) -> @write 'alignContent', word(ALIGN, 'setAlignContent', value)
+  setJustifyContent: (value) -> @write 'justifyContent', word(JUSTIFY, 'setJustifyContent', value)
+
+  setPositionType: (value) -> @write 'position', word(POSITION, 'setPositionType', value)
+  setDisplay: (value) -> @write 'display', word(DISPLAY, 'setDisplay', value)
+  setOverflow: (value) -> @write 'overflow', word(OVERFLOW, 'setOverflow', value)
+  setBoxSizing: (value) -> @write 'boxSizing', word(SIZING, 'setBoxSizing', value)
+
+  setMargin: (which, value) -> @edge 'margin', 'setMargin', which, length('setMargin', value, true)
+  setPadding: (which, value) -> @edge 'padding', 'setPadding', which, length('setPadding', value, false)
+  setBorder: (which, value) -> @edge 'border', 'setBorder', which, number('setBorder', value)
+  setPosition: (which, value) -> @edge 'position', 'setPosition', which, length('setPosition', value, true)
+  setPositionAuto: (which) -> @edge 'position', 'setPositionAuto', which, 'auto'
+
+  # A row or column gutter wins over Gutter.All, so both longhands are
+  # rewritten from what is recorded.
+  setGap: (which, value) ->
+    throw Error.new "yoga-shim: setGap(#{show which}, …) names no gutter" unless which is Gutter.Column or which is Gutter.Row or which is Gutter.All
+    @gutters[which] = length 'setGap', value, false
+    @write 'columnGap', @gutters[Gutter.Column] ?? @gutters[Gutter.All]
+    @write 'rowGap', @gutters[Gutter.Row] ?? @gutters[Gutter.All]
+
+  # The engine calls `el.measure(width, widthMode, height, heightMode)`
+  # with MeasureMode numbers and reads `{ width, height }` back.
+  setMeasureFunc: (fn) ->
+    throw Error.new 'yoga-shim: setMeasureFunc takes a function' unless typeof fn is 'function'
+    throw Error.new 'yoga-shim: setMeasureFunc on a node with children' if @children.length
+    @el.measure = fn
+    @el.changed true
+
+  insertChild: (child, index) ->
+    throw Error.new 'yoga-shim: insertChild of a node that already has a parent' if child.parent
+    throw Error.new 'yoga-shim: insertChild into a node with a measure function' if @el.measure
+    throw Error.new "yoga-shim: insertChild at #{index} of #{@children.length}" unless Number.isInteger(index) and 0 <= index <= @children.length
+    @el.insertBefore child.el, (@children[index]?.el ?? null)
+    @children.splice index, 0, child
+    child.parent = this
+
+  calculateLayout: (width, height, direction) ->
+    throw Error.new 'yoga-shim: calculateLayout on a node that has a parent' if @parent
+    throw Error.new 'yoga-shim: calculateLayout(…, Direction.RTL) — layout is left-to-right only' if direction is Direction.RTL
+    layout @el, (width ?? null), (height ?? null)
+
+  # Yoga reports a box relative to its parent; a node's `rect` is absolute.
+  # Adding 0 turns a negative zero into the 0 that `toBe` compares equal.
+  getComputedLeft: -> @el.rect.x - (if @parent then @parent.el.rect.x else 0) + 0
+  getComputedTop: -> @el.rect.y - (if @parent then @parent.el.rect.y else 0) + 0
+  getComputedWidth: -> @el.rect.w + 0
+  getComputedHeight: -> @el.rect.h + 0
+
+  free: ->
+  freeRecursive: ->
+
+class YogaConfig
+  constructor: -> @web = false
+  # Yoga's web defaults: a node made under them starts as a row whose
+  # lines stretch and whose children may shrink (Node's constructor and
+  # kWebDefaultFlexShrink upstream). They are starting styles, so a case
+  # that writes one of them replaces it.
+  setUseWebDefaults: (flag) -> @web = Boolean flag
+  free: ->
+
+create =! (config) ->
+  node = YogaNode.new()
+  if config?.web
+    node.write 'flexDirection', 'row'
+    node.write 'alignContent', 'stretch'
+    node.write 'flexShrink', 1
+  node
+
+Yoga =! Object.freeze {
+  Node: Object.freeze { create }
+  Config: Object.freeze { create: -> YogaConfig.new() }
+}
+
+export default Yoga
+
+# The nodes created since the last `forget`, for a runner that wants to
+# show the tree a case built.
+export roots =! -> made.filter (node) -> not node.parent
+export forget =! -> made.length = 0
+
+# One line per node: its styles as written, and its box in Yoga's terms.
+export describe =! (node, depth = 0) ->
+  pad = '  '.repeat depth
+  box = "#{node.getComputedLeft()},#{node.getComputedTop()} #{node.getComputedWidth()}x#{node.getComputedHeight()}"
+  styles = JSON.stringify node.el.styles
+  lines = ["#{pad}[#{box}] #{styles}#{if node.el.measure then ' +measure' else ''}"]
+  lines.push ...describe(kid, depth + 1) for kid in node.children
+  lines
+
+# Yoga's test helper (javascript/tests/tools/utils.ts), bound by a case
+# to `{ text, flexDirection }`: text measured at 10 units per character
+# wide and 10 per line tall, wrapping on spaces. A word wider than the
+# line takes a line of its own; in a row container the line is never
+# narrower than the longest word.
+export intrinsicSizeMeasureFunc =! (width, widthMode, height, heightMode) ->
+  text = @text
+  flexDirection = @flexDirection
+  words = text.split ' '
+  perChar = 10
+  measuredWidth = switch widthMode
+    when MeasureMode.Exactly then width
+    when MeasureMode.AtMost then Math.min width, text.length * perChar
+    else text.length * perChar
+
+  tall = ->
+    return perChar if text.length * perChar <= measuredWidth
+    longest = Math.max(...words.map((w) -> w.length)) * perChar
+    maxLine = if flexDirection is FlexDirection.Column then measuredWidth else Math.max longest, measuredWidth
+    lines = 1
+    current = 0
+    for w in words
+      wide = w.length * perChar
+      if wide > maxLine
+        lines++ if current > 0
+        lines++
+        current = 0
+      else if current + wide <= maxLine
+        current += perChar + wide
+      else
+        lines++
+        current = perChar + wide
+    (if current is 0 then lines - 1 else lines) * perChar
+
+  measuredHeight = switch heightMode
+    when MeasureMode.Exactly then height
+    when MeasureMode.AtMost then Math.min height, tall()
+    else tall()
+
+  { width: measuredWidth, height: measuredHeight }

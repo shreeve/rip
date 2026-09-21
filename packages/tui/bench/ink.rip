@@ -16,17 +16,13 @@
 # ==============================================================================
 
 import React from 'react'
-import * as ink from 'ink'
+import { render as draw, Box, Text, Static } from 'ink'
 import { EventEmitter } from 'node:events'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { terminal, measure, report } from './harness.rip'
 
 h =! React.createElement
-Box =! ink.Box
-Text =! ink.Text
-Static =! ink.Static
-draw =! ink['render']
 
 COLUMNS =! 200
 ROWS =! 60

@@ -1,0 +1,161 @@
+# An incremental layout equals a fresh one. Random trees are laid out,
+# then mutated — a style, a text, a child removed or grown, the width —
+# and laid out again; after every step the rounded boxes must equal
+# those of a twin tree built from the same description and laid out
+# once, and no node may be left dirty. Seeds are fixed, so a failure
+# names the round that reproduces it.
+#
+#   rip test/fuzz.rip              the checked-in seeds
+#   rip test/fuzz.rip 7 2000       one seed, more rounds
+
+import { test, ok } from 'rip/testing'
+import { Element, Text } from '../document.rip'
+import { layout } from '../layout.rip'
+
+SEEDS =! [1, 7, 13, 21, 42]
+ROUNDS =! 1000
+STEPS =! 8
+
+STYLES =! {
+  flexDirection: ['row', 'column', 'row-reverse', 'column-reverse', undefined]
+  flexWrap: ['wrap', 'nowrap', 'wrap-reverse', undefined]
+  flexGrow: [0, 1, 2, undefined]
+  flexShrink: [0, 1, undefined]
+  flexBasis: [0, 10, '50%', 'auto', undefined]
+  width: [5, 20, 40, '50%', '100%', 'auto', undefined, undefined]
+  height: [1, 3, 10, '50%', undefined, undefined]
+  minWidth: [3, '20%', undefined, undefined]
+  maxWidth: [10, 30, '80%', undefined, undefined]
+  minHeight: [2, undefined, undefined]
+  maxHeight: [4, 8, undefined, undefined]
+  aspectRatio: [1, 2, undefined, undefined, undefined]
+  padding: [1, 2, '5%', undefined, undefined]
+  paddingX: [1, 3, undefined, undefined]
+  paddingTop: [1, undefined, undefined]
+  margin: [1, 'auto', '3%', undefined, undefined]
+  marginLeft: [2, 'auto', undefined, undefined]
+  marginY: [1, undefined, undefined]
+  borderStyle: ['single', undefined, undefined]
+  gap: [1, 2, '10%', undefined, undefined]
+  rowGap: [1, undefined, undefined]
+  alignItems: ['flex-start', 'center', 'flex-end', 'stretch', 'baseline', undefined]
+  alignSelf: ['auto', 'flex-start', 'center', 'flex-end', 'stretch', 'baseline', undefined, undefined]
+  alignContent: ['flex-start', 'center', 'flex-end', 'stretch', 'space-between', 'space-around', 'space-evenly', undefined]
+  justifyContent: ['flex-start', 'center', 'flex-end', 'space-between', 'space-around', 'space-evenly', undefined]
+  position: ['static', 'relative', 'absolute', 'absolute', undefined, undefined, undefined]
+  left: [1, '10%', undefined, undefined]
+  top: [1, undefined, undefined]
+  right: [2, undefined, undefined, undefined]
+  bottom: [1, '5%', undefined, undefined, undefined]
+  display: ['none', 'flex', 'contents', 'contents', undefined, undefined, undefined]
+  boxSizing: ['content-box', 'border-box', undefined]
+  hidden: [true, undefined, undefined, undefined, undefined, undefined]
+}
+KEYS =! Object.keys STYLES
+WORDS =! ['a', 'hello', 'hello world', 'two\nlines here', '', 'x'.repeat(30)]
+
+seed = 1
+rnd = ->
+  seed = (seed * 1664525 + 1013904223) % 4294967296
+  seed / 4294967296
+pick = (list) -> list[Math.floor rnd() * list.length]
+
+# A tree as plain data, so the same description builds the live tree
+# and its twin.
+spec = (depth) ->
+  return { tag: 'span', styles: {}, text: pick(WORDS), kids: [] } if depth > 0 and rnd() < 0.3
+  styles = {}
+  for n in [0...Math.floor rnd() * 6]
+    key = pick KEYS
+    styles[key] = pick STYLES[key]
+  list = []
+  if depth < 4
+    list.push spec(depth + 1) for n in [0...Math.floor rnd() * 4]
+  { tag: 'div', styles, text: null, kids: list }
+
+build = (s, bind) ->
+  node = Element.new s.tag
+  for own key, value of s.styles
+    node.styles[key] = value unless value is undefined
+  if s.tag is 'span'
+    node.appendChild Text.new s.text
+  else
+    node.appendChild build(kid, bind) for kid in s.kids
+  s.node = node if bind
+  node
+
+all = (s, out) ->
+  out.push s
+  all kid, out for kid in s.kids
+  out
+
+mutate = (root) ->
+  s = pick all root, []
+  roll = rnd()
+  if s.tag is 'span'
+    s.text = pick WORDS
+    s.node.firstChild.data = s.text
+  else if roll < 0.6
+    key = pick KEYS
+    value = pick STYLES[key]
+    if value is undefined
+      delete s.styles[key]
+      delete s.node.styles[key]
+    else
+      s.styles[key] = value
+      s.node.styles[key] = value
+    s.node.changed true
+  else if roll < 0.8 and s.kids.length
+    [gone] = s.kids.splice Math.floor(rnd() * s.kids.length), 1
+    s.node.removeChild gone.node
+  else
+    fresh = spec 3
+    at = Math.floor rnd() * (s.kids.length + 1)
+    before = s.kids[at]?.node ?? null
+    s.kids.splice at, 0, fresh
+    s.node.insertBefore build(fresh, true), before
+  return
+
+boxes = (node, out) ->
+  r = node.rect
+  out.push "#{r.x},#{r.y},#{r.w},#{r.h}"
+  kid = node.firstChild
+  while kid
+    boxes kid, out if kid.nodeType is 1
+    kid = kid.nextSibling
+  out
+
+dirtyLeft = (node) ->
+  return true if node.dirty
+  kid = node.firstChild
+  while kid
+    return true if dirtyLeft kid
+    kid = kid.nextSibling
+  false
+
+def run(start, rounds)
+  seed = start
+  for round in [0...rounds]
+    root = spec 0
+    live = build root, true
+    width = 60
+    layout live, width
+    for step in [0...STEPS]
+      if rnd() < 0.2 then width = 30 + Math.floor rnd() * 60 else mutate root
+      layout live, width
+      twin = build root, false
+      layout twin, width
+      ok not dirtyLeft(live), "seed #{start} round #{round} step #{step}: a node is still dirty after layout"
+      got = boxes(live, []).join ' '
+      want = boxes(twin, []).join ' '
+      ok got is want, "seed #{start} round #{round} step #{step}: incremental #{got} — fresh #{want}"
+
+console.log "\nIncremental layout equals fresh layout"
+
+picked = Number process.argv[2]
+if picked
+  rounds = Number(process.argv[3] ?? ROUNDS)
+  test "seed #{picked}, #{rounds} rounds of #{STEPS} mutations", -> run picked, rounds
+else
+  for start in SEEDS
+    test "seed #{start}, #{ROUNDS} rounds of #{STEPS} mutations", -> run start, ROUNDS
