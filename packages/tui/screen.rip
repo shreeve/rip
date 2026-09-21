@@ -1,0 +1,58 @@
+# The screen: owed frames become one write each. A frame is laid out
+# only when a box may have moved, painted into the spare grid, and sent
+# as the difference from the grid the terminal already shows, inside a
+# synchronized update so the terminal never shows half of it.
+
+import { layout } from './layout.rip'
+import { Grid, paint, diff } from './paint.rip'
+
+PACE =! 8   # the least milliseconds between two frames
+
+export class Screen
+  constructor: (@doc, @out) ->
+    @front = null
+    @spare = null
+    @booked = false
+    @last = 0
+
+  get cols: -> @out.columns ?? 80
+  get rows: -> @out.rows ?? 24
+
+  # Draw what is owed, now.
+  frame!: ->
+    @booked = false
+    @last = performance.now()
+    # A binding that reads a node's box changes the tree it measured, so
+    # layout repeats until a pass moves nothing.
+    passes = 0
+    while @doc.moved
+      throw Error.new 'rip/tui: layout did not settle — a binding keeps changing the box it reads' if (passes += 1) > 8
+      @doc.moved = false
+      layout @doc.body, @cols
+    @doc.stale = false
+    tall = @doc.body.rect.h
+    shown = Math.min tall, @rows
+    back = @spare
+    if back and back.cols is @cols and back.rows is shown
+      back.top = tall - shown
+      back.clear()
+    else
+      back = Grid.new @cols, shown, tall - shown
+    paint back, @doc.body
+    bytes = diff @front, back
+    @spare = @front
+    @front = back
+    @out.write "\x1b[?2026h#{bytes}\x1b[?2026l" if bytes
+
+  # Draw what is owed, once this turn's writes are in and no sooner than
+  # the pace allows.
+  book!: ->
+    return if @booked
+    @booked = true
+    wait = PACE - (performance.now() - @last)
+    if wait > 0 then setTimeout (=> @frame()), wait else queueMicrotask (=> @frame())
+
+  # Leave the last frame in the scrollback, the cursor on the line below.
+  leave!: ->
+    @frame() if @doc.stale
+    @out.write '\n'.repeat(@front?.rows ?? 0) + "\x1b[?25h"

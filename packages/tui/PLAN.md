@@ -176,10 +176,12 @@ stores numerics, and marks the node layout-dirty or paint-dirty. The
 style object is a class with table-generated prototype accessors, not
 a Proxy.
 
-A failed child construction surfaces only as a `console.error` and a
-`rip:child-error` comment, so the host owns the console while the
-screen is live and the test driver asserts the tree holds no such
-comment.
+The runtime contains a child that fails to construct: it reports the
+error through `console.error` and leaves a `rip:child-error` comment
+where the child would be. On a terminal that is a silent hole in the
+screen, so the document holds the reported error and throws it from
+the marker comment's creation — `run` and `renderToString` fail with
+the original error.
 
 ## 5. Layout (`layout.rip`)
 
@@ -542,6 +544,20 @@ In the counter scenario four functions of the ANSI tokenizer
 take over half of the whole run. One changed digit in a 1,000-element
 tree costs Ink about 4 ms because every frame re-tokenizes and
 re-joins the styled text of the entire screen.
+
+**First contact.** The skeleton (full relayout and full repaint every
+frame, no damage tracking, no layout cache) on the same scenarios,
+`bun run tui`:
+
+| Scenario | Ink | Rip TUI skeleton |
+|---|---|---|
+| One counter in a 1,000-element tree | 3.8 ms, 347 bytes, 3 writes | 0.20 ms, 33 bytes, 1 write |
+| 40×8 table, 10% churn | 2.8 ms, 3,109 bytes | 0.54 ms, 262 bytes |
+| 40×8 table, 100% churn | 3.9 ms, 3,852 bytes | 0.49 ms, 1,985 bytes |
+
+These rank the two and are not README numbers: the terminal reducer
+that proves both sides drew the same screen lands with the published
+bench (PR 6).
 
 What this settles:
 

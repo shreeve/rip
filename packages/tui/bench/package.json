@@ -6,6 +6,7 @@
   "description": "Head-to-head terminal UI comparison \u2014 Ink and React are quarantined here, never in rip/tui",
   "scripts": {
     "ink": "NODE_ENV=production rip ink.rip",
+    "tui": "rip tui.rip",
     "profile": "rip profile.rip"
   },
   "dependencies": {

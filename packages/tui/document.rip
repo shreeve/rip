@@ -1,0 +1,257 @@
+# The terminal document: the node surface a compiled render block calls.
+# A node is one object for the tree, the layout, and the paint — it
+# carries its links, its terminal styles, and its computed box. Every
+# mutation arrives through a method here, so the document always knows
+# what changed. A member the terminal cannot honor throws by name.
+
+# Styles that move boxes, and styles that only recolor cells.
+LAYOUT =! ['flexDirection', 'flexGrow', 'gap', 'width', 'height', 'borderStyle', 'hidden',
+  'padding', 'paddingX', 'paddingY', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight']
+PAINT =! ['color', 'backgroundColor', 'borderColor', 'bold', 'dim', 'italic', 'underline', 'inverse']
+
+KIND =! Map.new()
+KIND.set key, 'layout' for key in LAYOUT
+KIND.set key, 'paint' for key in PAINT
+
+# Attributes the runtime or an accessible component writes, which carry
+# no terminal style: kept on the node, never rejected.
+kept =! (key) -> key is 'data-part' or key is 'id' or key is 'role' or key.startsWith('aria-')
+
+distance =! (a, b) ->
+  row = (i for i in [0..b.length])
+  for i in [1..a.length]
+    corner = row[0]
+    row[0] = i
+    for j in [1..b.length]
+      above = row[j]
+      row[j] = Math.min row[j] + 1, row[j - 1] + 1, corner + (if a[i - 1] is b[j - 1] then 0 else 1)
+      corner = above
+  row[b.length]
+
+nearest =! (key) ->
+  best = null
+  score = 3
+  for [name] in KIND
+    d = distance key.toLowerCase(), name.toLowerCase()
+    if d < score
+      best = name
+      score = d
+  best
+
+unknown =! (key, tag) ->
+  hint = nearest key
+  Error.new "rip/tui: '#{key}' is not a terminal style of <#{tag}>" + (if hint then " — did you mean '#{hint}'?" else '')
+
+# A reactive cell over a node's box, minted on the first `box` read, so
+# a node nobody measures carries none.
+watch =! (node) ->
+  box := node.rect
+  { read: (-> box), write: ((next) -> box = next) }
+
+export NOWHERE =! Object.freeze { x: 0, y: 0, w: 0, h: 0 }
+
+export class Node
+  constructor: (@nodeType) ->
+    @ownerDocument = null
+    @parentNode = null
+    @firstChild = null
+    @lastChild = null
+    @nextSibling = null
+    @previousSibling = null
+    @list = null
+    @rect = NOWHERE
+    @cell = null
+
+  # The children as an array, rebuilt only after the list changed.
+  get childNodes: ->
+    unless @list
+      @list = []
+      kid = @firstChild
+      while kid
+        @list.push kid
+        kid = kid.nextSibling
+    @list
+
+  appendChild: (node) -> @insertBefore node, null
+
+  insertBefore: (node, ref) ->
+    if node.nodeType is 11
+      @insertBefore kid, ref for kid in [...node.childNodes]
+      return node
+    throw Error.new 'rip/tui: a node cannot be inserted into itself' if node is this
+    throw Error.new 'rip/tui: insertBefore names a reference that is not a child' if ref and ref.parentNode isnt this
+    node.parentNode?.removeChild node
+    before = if ref then ref.previousSibling else @lastChild
+    node.previousSibling = before
+    node.nextSibling = ref
+    if before then before.nextSibling = node else @firstChild = node
+    if ref then ref.previousSibling = node else @lastChild = node
+    node.parentNode = this
+    node.adopt @ownerDocument
+    @list = null
+    @changed true
+    node
+
+  removeChild: (node) ->
+    throw Error.new 'rip/tui: removeChild names a node that is not a child' unless node.parentNode is this
+    before = node.previousSibling
+    after = node.nextSibling
+    if before then before.nextSibling = after else @firstChild = after
+    if after then after.previousSibling = before else @lastChild = before
+    node.parentNode = node.previousSibling = node.nextSibling = null
+    @list = null
+    @changed true
+    node
+
+  remove!: -> @parentNode?.removeChild this
+
+  adopt!: (doc) ->
+    return if @ownerDocument is doc
+    @ownerDocument = doc
+    kid = @firstChild
+    while kid
+      kid.adopt doc
+      kid = kid.nextSibling
+
+  # The rounded box the last layout gave this node. Reading it inside a
+  # binding or an effect subscribes to every later layout.
+  get box: -> (@cell ?= watch this).read()
+
+  place!: (x, y, w, h) ->
+    rect = @rect
+    return if rect.x is x and rect.y is y and rect.w is w and rect.h is h
+    @rect = Object.freeze { x, y, w, h }
+    @cell?.write @rect
+
+  # Tell the document a frame is owed: `moved` when boxes may move,
+  # false when only cells recolor.
+  changed!: (moved) -> @ownerDocument?.owe moved
+
+export class Element extends Node
+  constructor: (@tagName) ->
+    super 1
+    @styles = {}
+    @attributes = null
+    @listeners = null
+    @road = null
+
+  set: (key, value) ->
+    if kept key
+      (@attributes ?= Map.new()).set key, value
+      return
+    kind = KIND.get key
+    throw unknown(key, @tagName) unless kind
+    value = undefined if value is '' or value is null or value is false
+    return if @styles[key] is value
+    if value is undefined then delete @styles[key] else @styles[key] = value
+    @changed kind is 'layout'
+
+  setAttribute!: (key, value) ->
+    throw Error.new "rip/tui: a string `style` has no terminal meaning on <#{@tagName}> — pass the styles as props, or `style:` an object" if key is 'style'
+    @set key, value
+
+  removeAttribute!: (key) -> @set key, undefined unless key is 'style'
+  toggleAttribute!: (key, force) -> @set key, (if force then true else undefined)
+  getAttribute: (key) -> @attributes?.get(key) ?? @styles[key] ?? null
+
+  # `style:` with an object lands here key by key (`el.style[key] = value`).
+  get style: -> @road ?= Road.new this
+
+  get className: -> ''
+  set className: (value) -> throw Error.new "rip/tui: a class has no terminal meaning on <#{@tagName}> — style the node with props"
+
+  addEventListener!: (type, handler) -> ((@listeners ?= {})[type] ?= []).push handler
+  removeEventListener!: (type, handler) ->
+    held = @listeners?[type]
+    @listeners[type] = held.filter((h) -> h isnt handler) if held
+
+  dispatchEvent: (event) ->
+    event.target ?= this
+    node = this
+    while node and not event.cancelBubble
+      if node.listeners?[event.type]
+        event.currentTarget = node
+        handler.call node, event for handler in [...node.listeners[event.type]]
+      node = node.parentNode
+    not event.defaultPrevented
+
+# The object behind `el.style`: one accessor per terminal style, each a
+# thin door onto the node's own `set`.
+class Road
+  constructor: (@node) ->
+
+for [key] in KIND
+  do (key) ->
+    Object.defineProperty Road.prototype, key,
+      get: -> @node.styles[key]
+      set: (value) -> @node.set key, value
+
+export class Text extends Node
+  constructor: (data) ->
+    super 3
+    @text = String data
+
+  get data: -> @text
+  set data: (value) ->
+    value = String value
+    return if value is @text
+    moved = Bun.stringWidth(value) isnt Bun.stringWidth(@text) or value.includes('\n') or @text.includes('\n')
+    @text = value
+    @changed moved
+
+export class Document
+  constructor: ->
+    @body = Element.new 'div'
+    @body.adopt this
+    @moved = true
+    @stale = true
+    @onOwe = null
+    @failure = null
+
+  createElement: (tag) ->
+    throw Error.new "rip/tui: <#{tag}> has no terminal meaning — a box is a div and text is a span" unless tag is 'div' or tag is 'span'
+    Element.new tag
+  createElementNS: (namespace, tag) -> throw Error.new "rip/tui: <#{tag}> has no terminal meaning — a box is a div and text is a span"
+  createTextNode: (data) -> Text.new data
+  # The runtime contains a child that failed to construct: it reports
+  # the error and leaves a marker comment where the child would be. On a
+  # terminal that is a silent hole in the screen, so the failure the
+  # report carried is thrown from here, the marker's own creation.
+  createComment: (data) ->
+    if @failure and String(data).startsWith('rip:child-error')
+      failure = @failure
+      @failure = null
+      throw failure
+    Node.new 8
+  createDocumentFragment: -> Node.new 11
+
+  get head: -> throw Error.new 'rip/tui: a transition (~name) has no terminal meaning'
+  querySelector: -> throw Error.new 'rip/tui: a selector has no terminal meaning — mount onto a node'
+
+  owe!: (moved) ->
+    @moved = true if moved
+    was = @stale
+    @stale = true
+    @onOwe?() unless was
+
+# Put the document where compiled render blocks look for it, and hand
+# back the way to take it out again. A foreign `document` is refused.
+export install =! ->
+  if globalThis.document?
+    throw Error.new 'rip/tui: a `document` is already installed in this process — a terminal app and a DOM cannot share one'
+  doc = Document.new()
+  held = { Node: globalThis.Node, SVGElement: globalThis.SVGElement, report: console.error }
+  console.error = (first, ...rest) ->
+    if typeof first is 'string' and first.startsWith('[Rip] ') and rest[0] instanceof Error
+      doc.failure = rest[0]
+    else
+      held.report.call console, first, ...rest
+  globalThis.document = doc
+  globalThis.Node = Node
+  globalThis.SVGElement = class SVGElement
+  restore = ->
+    console.error = held.report
+    delete globalThis.document
+    if held.Node then globalThis.Node = held.Node else delete globalThis.Node
+    if held.SVGElement then globalThis.SVGElement = held.SVGElement else delete globalThis.SVGElement
+  { doc, restore }
