@@ -1,0 +1,385 @@
+# A frame painted from its damage equals a frame painted whole. A random
+# tree is mounted and changed a few steps at a time — a text rewritten at
+# its size or another; a color, a border, a background, a clip, a content
+# offset or a layout style set or taken away; a node hidden, shown,
+# inserted, removed, reordered or moved to another parent; the terminal
+# resized — and drawn after every step. Trees carry absolute boxes laid
+# over their neighbors, boxes smaller than their children, wide
+# characters and clusters, and text with no background over boxes that
+# have one. A second kind of round drives a component instead: a keyed
+# list whose rows are inserted, removed, reordered, hidden and recolored
+# through its state, inside a box that clips and scrolls.
+#
+# After every frame two things must hold. The grid the screen keeps is,
+# cell for cell — character, style, width — the grid a whole paint of
+# the same tree gives. And the bytes the terminal was sent, replayed
+# over what it showed before, show that frame: every cell's glyph, its
+# colors and attributes, and its link.
+#
+# Every round draws from its own seed, so a failure replays alone:
+#
+#   rip test/damage.rip              the checked-in seeds
+#   rip test/damage.rip 7            seed 7, every round
+#   rip test/damage.rip 7 12         seed 7, round 12 only, narrated
+
+import { test, ok } from 'rip/testing'
+import { mount, Box, Text } from 'rip/tui'
+import { Grid, paint } from '../paint.rip'
+import { clusterWidth } from '../text.rip'
+
+SEEDS =! [1, 7, 13, 21, 42, 99]
+ROUNDS =! 150
+STEPS =! 25
+
+wide = (...codes) -> String.fromCodePoint ...codes
+WORDS =! [
+  'a', 'hello', 'hello world', 'two\nlines here', '', 'x'.repeat(14), 'abcde', 'fghij', 'ab de', '  ', 'the quick brown fox'
+  wide(0x4E2D) + 'on', wide(0x65E5, 0x672C, 0x8A9E) + ' ' + wide(0x65E5, 0x672C), 'a' + wide(0x4E2D) + 'b ' + wide(0x4E2D, 0x4E2D)
+  wide(0x1F468, 0x200D, 0x1F469, 0x200D, 0x1F467) + ' ok', 'e' + wide(0x301) + ' ' + wide(0x1F1FA, 0x1F1F8) + 'x'
+  wide(0x4E2D).repeat(5), 'q' + wide(0x1F6D9) + wide(0xE0B0) + 'r'
+]
+COLORS =! ['red', 'green', 'blue', '#303030', 'default', undefined, undefined]
+FLAG =! [true, undefined, undefined]
+
+PAINTED =! {
+  color: COLORS, backgroundColor: COLORS, bold: FLAG, dimColor: FLAG, inverse: FLAG
+  italic: FLAG, underline: FLAG, strikethrough: FLAG
+}
+BOX =! {
+  ...PAINTED
+  flexDirection: ['row', 'column', 'row-reverse', undefined]
+  flexWrap: ['wrap', undefined, undefined]
+  flexGrow: [1, undefined], flexShrink: [1, undefined]
+  width: [1, 3, 6, 10, 20, '50%', undefined, undefined], height: [0, 1, 2, 4, undefined, undefined, undefined]
+  padding: [1, undefined, undefined], paddingX: [2, undefined, undefined]
+  margin: [1, -1, undefined, undefined], marginLeft: [-2, 2, undefined, undefined], marginTop: [-1, undefined, undefined]
+  gap: [1, undefined], alignItems: ['center', 'flex-end', undefined], justifyContent: ['center', 'flex-end', 'space-between', undefined]
+  borderStyle: ['single', 'round', 'double', undefined, undefined]
+  borderTop: [false, undefined, undefined], borderLeft: [false, undefined, undefined], borderRight: [false, undefined, undefined]
+  borderColor: COLORS, borderTopColor: COLORS, borderDimColor: FLAG, borderBackgroundColor: COLORS
+  overflow: ['hidden', undefined, undefined], overflowX: ['hidden', 'visible', undefined], overflowY: ['hidden', undefined]
+  contentOffsetX: [1, 2, -1, 0.5, undefined, undefined], contentOffsetY: [1, 3, -1, undefined, undefined]
+  position: ['absolute', 'absolute', 'relative', undefined, undefined]
+  top: [0, 1, 3, -1, undefined], left: [0, 2, 5, -1, undefined], right: [0, 1, undefined], bottom: [0, undefined]
+  display: ['none', 'contents', 'contents', 'flex', undefined, undefined, undefined], hidden: [true, undefined, undefined]
+}
+SPAN =! {
+  ...PAINTED
+  wrap: ['wrap', 'hard', 'truncate', 'truncate-start', 'truncate-middle', undefined]
+  link: ['https://example.com/a', 'https://example.com/b', undefined, undefined]
+  width: [1, 2, 4, 8, undefined, undefined], height: [1, undefined, undefined], flexShrink: [1, undefined]
+  position: ['absolute', undefined, undefined, undefined], top: [0, 2, undefined], left: [1, 4, undefined]
+  display: ['none', undefined, undefined], hidden: [true, undefined, undefined]
+}
+RUN =! { ...PAINTED, link: SPAN.link }
+
+state = 1
+rnd = ->
+  state = (state * 1664525 + 1013904223) % 4294967296
+  state / 4294967296
+pick = (list) -> list[Math.floor rnd() * list.length]
+
+# ── The terminal ──────────────────────────────────────────────────────────────
+
+SEQUENCE =! /\x1b\[([?0-9;]*)([A-Za-z])|\x1b\]8;;([^\x1b]*)\x1b\\/y
+segmenter =! Intl.Segmenter.new()
+
+# As much of a terminal as a frame's bytes need: the cursor, the colors
+# and attributes in force, the link that is open, and cells that hold a
+# glyph with all three. A glyph written over half of a wide one leaves
+# the other half unknown, so a frame that counts on the terminal to tidy
+# it is caught.
+class Terminal
+  constructor: ->
+    @rows = []
+    @row = @col = 0
+    @sgr = ''
+    @link = null
+
+  write!: (glyph, span) ->
+    line = @rows[@row] ?= []
+    line[@col - 1] = '?' if line[@col] is ''
+    line[@col + span] = '?' if line[@col + span] is ''
+    line[@col] = "#{glyph}|#{@sgr}|#{@link ?? ''}"
+    line[@col + 1] = '' if span is 2
+    @col += span
+
+  feed: (bytes) ->
+    at = 0
+    while at < bytes.length
+      if bytes[at] is '\x1b'
+        SEQUENCE.lastIndex = at
+        [all, params, verb, url] = SEQUENCE.exec bytes
+        count = parseInt(params) or 1
+        switch verb
+          when 'A' then @row -= count
+          when 'B' then @row += count
+          when 'G' then @col = count - 1
+          when 'm' then @sgr = params.replace /^0;?/, ''
+          when 'J'
+            @rows.length = @row + 1
+            @rows[@row]?.length = @col
+        @link = (url or null) if url?
+        at += all.length
+      else if bytes[at] is '\n' or bytes[at] is '\r'
+        @row += 1 if bytes[at] is '\n'
+        @col = 0
+        at += 1
+      else
+        to = at
+        to += 1 while to < bytes.length and bytes[to] isnt '\x1b' and bytes[to] isnt '\n' and bytes[to] isnt '\r'
+        for part as segmenter.segment bytes.slice(at, to)
+          @write part.segment, clusterWidth part.segment
+        at = to
+    this
+
+  cell: (row, col) ->
+    held = @rows[row]?[col]
+    if held is undefined or held is ' ||' then ' ||' else held
+
+# ── Trees ─────────────────────────────────────────────────────────────────────
+
+dress! = (node, pool, count) ->
+  for n in [0...count]
+    key = pick Object.keys pool
+    try node.set key, pick pool[key]
+
+leaf = (depth) ->
+  node = document.createElement 'span'
+  dress node, (if depth then RUN else SPAN), Math.floor rnd() * 3
+  node.appendChild document.createTextNode pick WORDS
+  if depth < 2 and rnd() < 0.3
+    node.appendChild leaf depth + 1
+    node.appendChild document.createTextNode pick WORDS if rnd() < 0.5
+  node
+
+make = (depth) ->
+  roll = rnd()
+  return leaf 0 if depth > 0 and roll < 0.4
+  return document.createTextNode pick WORDS if depth > 0 and roll < 0.5
+  node = document.createElement 'div'
+  dress node, BOX, Math.floor rnd() * 5
+  if depth < 4
+    for n in [0...1 + Math.floor rnd() * 4]
+      node.appendChild make depth + 1
+  node
+
+within = (node, root) ->
+  while node
+    return true if node is root
+    node = node.parentNode
+  false
+
+collect! = (node, out) ->
+  out.push node
+  kid = node.firstChild
+  while kid
+    collect kid, out
+    kid = kid.nextSibling
+
+# One random change to the tree under `host`, and what it was.
+change = (host, view) ->
+  nodes = []
+  collect host, nodes
+  boxes = nodes.filter (node) -> node.tagName is 'div'
+  texts = nodes.filter (node) -> node.nodeType is 3
+  spans = nodes.filter (node) -> node.tagName is 'span'
+  roll = rnd()
+  roll = 0.62 if nodes.length > 70
+  if roll < 0.22 and texts.length
+    node = pick texts
+    was = node.data
+    kind = rnd()
+    if kind < 0.4 and was.length
+      at = Math.floor rnd() * was.length
+      node.data = was.slice(0, at) + pick(['x', 'Y', '0', ' ']) + was.slice(at + 1)
+    else if kind < 0.6
+      node.data = was + pick ['!', ' more', wide(0x4E2D)]
+    else
+      node.data = pick WORDS
+    return "text #{JSON.stringify was} -> #{JSON.stringify node.data}"
+  if roll < 0.5
+    node = pick (if rnd() < 0.6 then boxes else if spans.length then spans else boxes)
+    pool = if node.tagName is 'div' then BOX else if node.parentNode.tagName is 'span' then RUN else SPAN
+    key = pick Object.keys pool
+    key = pick ['color', 'backgroundColor', 'contentOffsetX', 'contentOffsetY', 'hidden', 'borderStyle', 'overflow'] if node.tagName is 'div' and rnd() < 0.4
+    value = pick pool[key]
+    try
+      node.set key, value
+    catch error
+      return "refused #{key}"
+    return "#{node.tagName} #{key} = #{JSON.stringify value}"
+  if roll < 0.62
+    parent = pick boxes
+    before = if rnd() < 0.6 then pick([...parent.childNodes, null]) else null
+    parent.insertBefore make(2), before
+    return 'insert'
+  if roll < 0.74 and nodes.length > 1
+    node = pick nodes.slice 1
+    node.remove()
+    return "remove #{node.tagName ?? 'text'}"
+  if roll < 0.86 and nodes.length > 1
+    node = pick nodes.slice 1
+    parent = if node.parentNode.tagName is 'span' then node.parentNode else pick boxes
+    return 'move refused' if within parent, node
+    before = pick [...parent.childNodes, null]
+    return 'move refused' if before is node
+    parent.insertBefore node, before
+    return "move #{node.tagName ?? 'text'}"
+  if roll < 0.89
+    view.resize pick([30, 40, 60]), pick([6, 20, 40])
+    return 'resize'
+  'nothing'
+
+# ── A component ───────────────────────────────────────────────────────────────
+
+Board = component
+  @items := []
+  @offset := 0
+  @tone := 'green'
+  @shut := false
+  render
+    Box flexDirection: 'column', width: 24
+      Text bold: true
+        "board #{@items.length}"
+      Box flexDirection: 'column', height: 5, overflow: 'hidden', contentOffsetY: @offset, color: @tone, borderStyle: 'single'
+        for item in @items
+          Box key: item.id, flexDirection: 'row', hidden: item.hidden, backgroundColor: item.back
+            Text
+              "#{item.id}: #{item.text}"
+      if @shut
+        Text inverse: true
+          "shut"
+      else
+        Box position: 'absolute', top: 2, left: 6, backgroundColor: 'red'
+          Text
+            "over #{@offset}"
+
+serial = 0
+row = ->
+  serial += 1
+  { id: serial, text: pick(WORDS), hidden: rnd() < 0.15, back: pick(COLORS) }
+
+shuffle = (view) ->
+  app = view.app
+  items = [...app.items.value]
+  roll = rnd()
+  if roll < 0.25
+    items.splice Math.floor(rnd() * (items.length + 1)), 0, row()
+    app.items.value = items
+    return 'insert row'
+  if roll < 0.4 and items.length
+    items.splice Math.floor(rnd() * items.length), 1
+    app.items.value = items
+    return 'remove row'
+  if roll < 0.55 and items.length > 1
+    items.push items.splice(Math.floor(rnd() * items.length), 1)[0]
+    app.items.value = (if rnd() < 0.5 then items.reverse() else items)
+    return 'reorder rows'
+  if roll < 0.7 and items.length
+    at = Math.floor rnd() * items.length
+    items[at] = { ...row(), id: items[at].id }
+    app.items.value = items
+    return 'rewrite row'
+  if roll < 0.85
+    app.offset.value = Math.floor rnd() * 6
+    return "scroll to #{app.offset.value}"
+  if roll < 0.93
+    app.tone.value = pick ['green', 'red', 'default']
+    return "tone #{app.tone.value}"
+  app.shut.value = not app.shut.value
+  'shut'
+
+# ── Rounds ────────────────────────────────────────────────────────────────────
+
+Host = component
+  render
+    Box flexDirection: 'column'
+
+# The tree, a node to a line: its styles or its text, its box, and the
+# bounds the painter holds for it.
+sketch = (node, indent, out) ->
+  { x, y, w, h } = node.rect
+  out.push "#{indent}#{node.tagName ?? 'text'} #{JSON.stringify node.styles ?? node.data} #{x},#{y} #{w}×#{h} bounds #{node.bl},#{node.bt}..#{node.br},#{node.bb}"
+  kid = node.firstChild
+  while kid
+    sketch kid, indent + '  ', out unless kid.nodeType is 8
+    kid = kid.nextSibling
+  out
+
+# The first way the frame the screen keeps is not the tree painted whole.
+unlike = (front) ->
+  fresh = Grid.new front.cols, front.rows, front.top
+  paint fresh, document.body
+  for at in [0...front.ch.length]
+    unless front.ch[at] is fresh.ch[at] and front.style[at] is fresh.style[at] and front.wide[at] is fresh.wide[at]
+      return "row #{Math.floor at / front.cols} column #{at % front.cols} holds #{front.ch[at]}/#{front.style[at]}/#{front.wide[at]}, and a whole paint #{fresh.ch[at]}/#{fresh.style[at]}/#{fresh.wide[at]}\n#{front.toString()}\n--\n#{fresh.toString()}"
+  null
+
+# The first cell the terminal shows that is not the frame's.
+unsent = (shown, front) ->
+  frame = Terminal.new().feed front.toString true
+  return 'the cursor is not back at the top left' unless shown.row is 0 and shown.col is 0
+  for line in [0...Math.max front.rows, shown.rows.length]
+    for col in [0...front.cols]
+      return "row #{line} column #{col} shows #{JSON.stringify shown.cell line, col}, and the frame holds #{JSON.stringify frame.cell line, col}" unless shown.cell(line, col) is frame.cell(line, col)
+  null
+
+# Frames drawn, and those painted from damage that was neither nothing
+# nor everything — the frames that can tell the two paints apart.
+frames = 0
+partial = 0
+
+round = (start, number, narrate) ->
+  state = start * 7919 + number * 104729 + 1
+  rnd() for n in [0...3]
+  listed = number % 4 is 3
+  view = mount (if listed then Board else Host), cols: pick([30, 40, 60]), rows: pick([6, 20, 40])
+  shown = Terminal.new()
+  try
+    host = document.body.firstChild
+    # A frame of another height is painted whole, so most hosts keep theirs.
+    host.set 'height', pick [12, 16, 20, undefined]
+    unless listed
+      host.appendChild make 1 for n in [0..2 + Math.floor rnd() * 4]
+    for step in [0..STEPS]
+      did = []
+      if step
+        for n in [0..Math.floor rnd() * 3]
+          did.push (if listed then shuffle view else change host, view)
+      console.log "  step #{step}: #{did.join ', '}" if narrate
+      view.frame()
+      shown.feed view.bytes
+      front = view.held.view.front
+      failure = unlike(front) ?? unsent(shown, front)
+      if failure
+        return "seed #{start} round #{number} step #{step} (#{did.join ', '}): #{failure}\n#{sketch(document.body, '  ', []).join '\n'}\n  replay: rip test/damage.rip #{start} #{number}"
+      console.log "    #{view.damage} cells owed" if narrate
+      frames += 1
+      partial += 1 if 0 < view.damage < front.cols * front.rows
+  finally
+    view.close()
+  null
+
+def run(start, from, to, narrate)
+  frames = partial = 0
+  for number in [from...to]
+    failure = round start, number, narrate
+    if failure
+      console.log failure
+      ok false, failure.split('\n')[0]
+      return
+  ok partial * 3 > frames or to - from is 1, "only #{partial} of #{frames} frames were painted from their damage"
+  console.log "    #{partial} of #{frames} frames painted from their damage"
+
+console.log "\nA frame painted from its damage equals a frame painted whole"
+
+picked = Number process.argv[2]
+only = process.argv[3]
+if picked and only?
+  test "seed #{picked}, round #{only}", -> run picked, Number(only), Number(only) + 1, true
+else if picked
+  test "seed #{picked}, #{ROUNDS} rounds of #{STEPS} steps", -> run picked, 0, ROUNDS, false
+else
+  for start in SEEDS
+    test "seed #{start}, #{ROUNDS} rounds of #{STEPS} steps", -> run start, 0, ROUNDS, false

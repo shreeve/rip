@@ -45,7 +45,16 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 5. The painter and the screen
 
-- [ ] Damage tracking: paint and diff only what moved (PLAN §6).
+- [ ] A frame of another height is painted whole, so an inline app
+      whose last row comes and goes owes every cell each time. Keep the
+      rows that stay, and owe the ones that came or went.
+- [ ] A whole frame pays for spans it does not need: every grid write
+      reads its row's span, about a tenth of the paint of a screen of
+      bordered boxes (`bun run frame`, panels).
+- [ ] 100% churn of the 40×8 table is about 340 µs of CPU an update
+      over the 300 updates of `bun run tui`, and about 170 µs over
+      12,000: the run ends while the damage path is still being
+      compiled. Warm the bench longer, or make the path smaller.
 
 ## 6. Compiler-side, filed separately
 

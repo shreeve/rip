@@ -6,7 +6,7 @@
 
 import { __setChildFailureReporter } from '../../src/runtime/components.js'
 import { admit, blame } from './layout.rip'
-import { allow } from './paint.rip'
+import { allow, Damage } from './paint.rip'
 import { sanitize, refresh } from './text.rip'
 
 # Styles that move boxes, and styles that only recolor cells.
@@ -92,6 +92,8 @@ export class Node
     @rect = NOWHERE
     @cell = null
     @dirty = true
+    @stain = 3                       # what the painter has yet to survey (paint.rip)
+    @bl = @bt = @br = @bb = 0        # the bounds of everything inked from here down
 
   # The children as an array, rebuilt only after the list changed.
   get childNodes: ->
@@ -124,12 +126,14 @@ export class Node
         if KIND.get(key) is 'layout'
           throw blame Error.new("rip/tui: '#{key}' has no meaning on text nested in text — it is a run of words, styled by color and weight only"), node
     node.adopt @ownerDocument
+    node.mark 3
     @list = null
     @changed true
     node
 
   removeChild: (node) ->
     throw Error.new 'rip/tui: removeChild names a node that is not a child' unless node.parentNode is this
+    node.mark 3
     before = node.previousSibling
     after = node.nextSibling
     if before then before.nextSibling = after else @firstChild = after
@@ -156,8 +160,37 @@ export class Node
   place!: (x, y, w, h) ->
     rect = @rect
     return if rect.x is x and rect.y is y and rect.w is w and rect.h is h
+    @mark 2
     @rect = Object.freeze { x, y, w, h }
     @cell?.write @rect
+
+  # Tell the painter this node is about to change, BEFORE it does: the
+  # cells it inked are owed as they stand, and the node and every
+  # ancestor are marked for the survey that finds what it inks next.
+  # `level` 2 is a box whose own rectangle is all that changes, 3 is
+  # everything under it — and a box that clips, since its rectangle is
+  # the clip its children are held to; `still` says it will ink no cell
+  # it did not, so there is nothing to survey. A run of words is drawn by
+  # the leaf it is in, and a `contents` node inks nothing itself: what it
+  # says reaches the children it lends its parent.
+  mark!: (level, still = false) ->
+    node = this
+    node = node.parentNode while node.parentNode?.tagName is 'span'
+    s = node.styles
+    level = 3 if s and (s.overflow? or s.overflowX? or s.overflowY?)
+    if level is 3 and s?.display is 'contents'
+      kid = node.firstChild
+      while kid
+        kid.mark 3
+        kid = kid.nextSibling
+      return
+    @ownerDocument?.damage.old node, level is 3 or not s or node.tagName is 'span'
+    return if still
+    node.stain = level if level > node.stain
+    node = node.parentNode
+    while node
+      node.stain ||= 1
+      node = node.parentNode
 
   # Tell the document a frame is owed: `moved` when boxes may move,
   # false when only cells recolor. A move dirties this node and every
@@ -217,7 +250,11 @@ export class Element extends Node
     if value isnt undefined
       admit key, value if kind is 'layout'
       allow key, value
+    # A border or a background recolors the box; any other style can
+    # reach everything under it.
+    @mark (if key.startsWith('border') or key is 'backgroundColor' then 2 else 3)
     if value is undefined then delete @styles[key] else @styles[key] = value
+    @mark 3 if key is 'display'
     @changed kind is 'layout'
 
   setAttribute!: (key, value) ->
@@ -290,10 +327,14 @@ export class Text extends Node
     leaf = leaf.parentNode while leaf.parentNode?.tagName is 'span'
     moved = true
     moved = refresh(leaf).moved if leaf.flow and leaf.lay and not leaf.dirty
+    # One line that fits its box inks cells of that box and no others,
+    # and the box lies within the bounds already owed.
+    leaf.mark 3, not moved and leaf.rect.h > 0 and leaf.flow.fits leaf.rect.w
     @changed moved
 
 export class Document
   constructor: ->
+    @damage = Damage.new()
     @body = Element.new 'div'
     @body.adopt this
     @moved = true
