@@ -748,6 +748,12 @@ describe('the static render DSL: emission pins', () => {
     expect(code).toContain("__effect(() => { this._el0.value = this.name.value ?? ''; });");
   });
 
+  test('a string or template value takes no empty-field fallback: it is never nullish, and `??` after one is TS2869', () => {
+    const { code } = compile('P = component\n  zoom := 2\n  render\n    input type: "range", value: "#{zoom}"\n');
+    expect(code).toContain('__effect(() => { this._el0.value = `${this.zoom.value}`; });');
+    expect(code).not.toContain("?? ''");
+  });
+
   test('a bare identifier that resolves to nothing sets the attribute it names', () => {
     // Legal idioms stay legal.
     expect(compile('P = component\n  render\n    form novalidate\n').code)

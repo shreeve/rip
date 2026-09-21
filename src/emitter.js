@@ -7960,6 +7960,12 @@ class Emitter {
     return containsAwait(sexpr, this.stores);
   }
 
+  static isStringLiteral(sexpr) {
+    if (Array.isArray(sexpr)) return String(sexpr[0]) === 'str';
+    const first = String(sexpr)[0];
+    return first === '"' || first === "'" || first === '`';
+  }
+
   // the implicit `it`: a ZERO-param arrow whose body
   // references the bare identifier `it` binds it as the single
   // parameter (`xs.map -> it * 2` → `function(it) { return it * 2 }`).
@@ -12681,8 +12687,10 @@ class Emitter {
           site([lhsStart, this.b.offset]);
           this.b.emit(' = ');
           this.renderExpr(value);
-          // A nullish `value` is the empty field, never the word.
-          if (key === 'value') this.b.emit(" ?? ''");
+          // A nullish `value` is the empty field, never the word. A string
+          // or template literal is never nullish, and `??` after one is
+          // TS2869 on bytes the author never wrote.
+          if (key === 'value' && !Emitter.isStringLiteral(value)) this.b.emit(" ?? ''");
           this.b.emit(';');
         }, value);
         continue;

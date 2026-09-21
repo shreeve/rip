@@ -14720,6 +14720,12 @@ ${pad ?? ""}`);
   containsAwait(sexpr) {
     return containsAwait(sexpr, this.stores);
   }
+  static isStringLiteral(sexpr) {
+    if (Array.isArray(sexpr))
+      return String(sexpr[0]) === "str";
+    const first = String(sexpr)[0];
+    return first === '"' || first === "'" || first === "`";
+  }
   static containsBareIt(n) {
     if (n === "it")
       return true;
@@ -18244,7 +18250,7 @@ ${this.replayPad}}` : " }");
           site([lhsStart, this.b.offset]);
           this.b.emit(" = ");
           this.renderExpr(value);
-          if (key === "value")
+          if (key === "value" && !Emitter.isStringLiteral(value))
             this.b.emit(" ?? ''");
           this.b.emit(";");
         }, value);
