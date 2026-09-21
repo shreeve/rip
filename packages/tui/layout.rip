@@ -573,6 +573,12 @@ export admit! =! (key, value) ->
   RANKS.fill 0
   style PROBE, key, value
 
+# Whether a slot from `from` up to `to` holds a percent.
+percents =! (lay, from, to) ->
+  for slot in [from...to]
+    return true if lay.u[slot] is PERCENT
+  false
+
 # Parse a node's styles into its record, one written key at a time. With
 # `scan`, note in `differs` whether anything came out different; a record
 # known to be new or changed is not worth the comparison.
@@ -711,72 +717,6 @@ vanish! =! (node, x, y) ->
 away =! (node, x, y) ->
   rect = node.rect
   not node.dirty and not node.lay and rect.x is x and rect.y is y and rect.w is 0 and rect.h is 0
-
-percents =! (lay, from, to) ->
-  for slot in [from...to]
-    return true if lay.u[slot] is PERCENT
-  false
-
-# Whether what a container computes can depend on the ORDER it is asked
-# in, and so on which earlier asks a cached answer stood in for. Two
-# things make it so. A baseline row reads its children's lines and
-# positions, which earlier visits leave behind. And a child's written
-# `flexBasis` stands from the first ask of a pass (see `basisOf`), which
-# matters unless every ask finds the same basis: the container's main
-# size is a number on every visit (`solidW` / `solidH`), so no ask
-# measures content instead; the basis is a number clear of percent
-# padding, so it is the same number whatever the size; and the lone-
-# child shortcut, which sets a basis of zero, would set the very number
-# written. Such a container, and every ancestor, is computed on every
-# visit of a pass — never answered from an earlier pass — so its asks
-# come in the order, and with the inputs, of a fresh layout.
-orderSensitive =! (lay) ->
-  return true if baselined lay
-  solid = if lay.direction >= ROW then lay.solidW else lay.solidH
-  for kid, i in lay.kids
-    k = kid.lay
-    unit = k.u[BASIS]
-    continue if k.position is ABSOLUTE or (unit isnt POINT and unit isnt PERCENT)
-    return true unless solid and unit is POINT and not k.insidePercent
-    return true if k.grow isnt 0 and k.shrink isnt 0 and (k.v[BASIS] isnt 0 or insideAxis(k, lay.direction, NaN) isnt 0)
-  false
-
-# Whether every offer `lay` makes its child `k` on a dimension is a
-# number: the child's own size is one, or `lay` is always offered one
-# itself and passes it on — which it does not to an absolute child, nor
-# along the axis it scrolls (see `basisOf`).
-offered =! (lay, k, dim) ->
-  return true if k.u[SIZE + dim] is POINT and k.v[SIZE + dim] >= 0
-  return false if k.position is ABSOLUTE or (lay.overflow is SCROLL and DIM[lay.direction] is dim)
-  if dim is WIDTH then lay.solidW else lay.solidH
-
-# Give `node` its `solidW` and `solidH`, and carry what follows from them
-# down: its own order-sensitivity, and its children's flags in turn. Its
-# remembered answers go, since some were computed under the other rule.
-firm! =! (node, solidW, solidH) ->
-  lay = node.lay
-  lay.solidW = solidW
-  lay.solidH = solidH
-  lay.used = 0
-  lay.entry.live = false
-  return if lay.leaf
-  lay.noCache = orderSensitive lay
-  for kid, i in lay.kids
-    k = kid.lay
-    wide = offered lay, k, WIDTH
-    tall = offered lay, k, HEIGHT
-    firm kid, wide, tall if k.solidW isnt wide or k.solidH isnt tall
-    lay.noCache = true if k.noCache
-
-# Everything under a baseline row is read by it, to any depth, so none of
-# it answers from an earlier pass either. A node is `underBaseline` when
-# an ancestor is such a row; its children are when it is, or is one.
-carryBaseline! =! (node, value) ->
-  lay = node.lay
-  lay.underBaseline = value
-  below = value or baselined lay
-  for kid, i in lay.kids
-    carryBaseline kid, below if kid.lay.underBaseline isnt below
 
 # Whether a hidden child would flex were it shown: Yoga's lone-flexible-
 # child shortcut counts `display: none` children, so one of these among
@@ -951,32 +891,7 @@ measureEmpty! =! (lay, availW, availH, modeW, modeH, ownerW, ownerH) ->
   lay.measured[WIDTH] = bound lay, ROW, wide, ownerW, ownerW
   lay.measured[HEIGHT] = bound lay, COLUMN, tall, ownerH, ownerW
 
-fixed =! (size, mode) -> mode is STRETCH_FIT or (mode is FIT_CONTENT and (size <= 0 or near size, 0))
-
-# A measure-only visit whose size is already decided skips the children.
-measureFixed =! (lay, availW, availH, modeW, modeH, ownerW, ownerH) ->
-  return false unless fixed(availW, modeW) and fixed(availH, modeH)
-  wide = if isNaN(availW) or (modeW is FIT_CONTENT and availW < 0) then 0 else availW
-  tall = if isNaN(availH) or (modeH is FIT_CONTENT and availH < 0) then 0 else availH
-  lay.measured[WIDTH] = bound lay, ROW, wide, ownerW, ownerW
-  lay.measured[HEIGHT] = bound lay, COLUMN, tall, ownerH, ownerW
-  true
-
 # ── Flex basis ────────────────────────────────────────────────────────────────
-
-# Where a child starts before its line moves it: its margin plus its
-# relative offset, on all four edges (Node.cpp setPosition). A static
-# node has no offset; left wins over right and top over bottom.
-seat! =! (lay, ownerW, ownerH) ->
-  dx = 0
-  dy = 0
-  if lay.position isnt STATIC
-    dx = if insetSet lay, LEFT then insetAt lay, LEFT, ownerW else -insetAt lay, RIGHT, ownerW
-    dy = if insetSet lay, TOP then insetAt lay, TOP, ownerH else -insetAt lay, BOTTOM, ownerH
-  lay.pos[LEFT] = marginAt(lay, LEFT, ownerW) + dx
-  lay.pos[RIGHT] = marginAt(lay, RIGHT, ownerW) + dx
-  lay.pos[TOP] = marginAt(lay, TOP, ownerW) + dy
-  lay.pos[BOTTOM] = marginAt(lay, BOTTOM, ownerW) + dy
 
 # One child's flex basis (computeFlexBasisForChild): its `flexBasis`, else
 # its main size, else its measured content.
@@ -1085,6 +1000,38 @@ basisAll =! (node, lay, f, modeW, modeH, perform) ->
     if kid is only then k.basis = 0 else basisOf lay, f, kid, modeW, modeH
     total += k.basis + marginAxis(k, f.axis, f.innerW)
   total
+
+# ── Baselines ─────────────────────────────────────────────────────────────────
+
+# The baseline of a node: its first line's baseline child's, down from
+# the node's top, or the node's own bottom (Baseline.cpp). Yoga reads the
+# children's lines and positions whether or not this pass has set them;
+# until it has, they read here as a fresh layout finds them: one line,
+# at the top.
+baselineOf =! (node) ->
+  lay = node.lay
+  lined = lay.linePass is generation
+  pick = null
+  for kid, i in lay.kids
+    k = kid.lay
+    break if lined and k.lineAt > 0
+    continue if k.position is ABSOLUTE
+    if alignOf(lay, k) is BASELINE
+      pick = kid
+      break
+    pick = kid unless pick
+  return (if lay.visitPass is generation then lay.measured[HEIGHT] else NaN) unless pick
+  baselineOf(pick) + (if lay.layoutPass is generation then pick.lay.pos[TOP] else 0)
+
+# A row aligns on baselines when it or any in-flow child asks to — a
+# hidden child among them, which Yoga's `isBaselineLayout` counts.
+baselined =! (lay) ->
+  return false if lay.direction < ROW
+  return true if lay.alignItems is BASELINE or lay.hiddenBaseline
+  for kid, i in lay.kids
+    k = kid.lay
+    return true if k.position isnt ABSOLUTE and k.alignSelf is BASELINE
+  false
 
 # ── Lines ─────────────────────────────────────────────────────────────────────
 
@@ -1224,35 +1171,19 @@ distribute =! (node, lay, f, perform) ->
       visit kid, kidCross, kidMain, kidModeCross, kidModeMain, f.innerW, f.innerH, final
   delta
 
-# The baseline of a node: its first line's baseline child's, down from
-# the node's top, or the node's own bottom (Baseline.cpp). Yoga reads the
-# children's lines and positions whether or not this pass has set them;
-# until it has, they read here as a fresh layout finds them: one line,
-# at the top.
-baselineOf =! (node) ->
-  lay = node.lay
-  lined = lay.linePass is generation
-  pick = null
-  for kid, i in lay.kids
-    k = kid.lay
-    break if lined and k.lineAt > 0
-    continue if k.position is ABSOLUTE
-    if alignOf(lay, k) is BASELINE
-      pick = kid
-      break
-    pick = kid unless pick
-  return (if lay.visitPass is generation then lay.measured[HEIGHT] else NaN) unless pick
-  baselineOf(pick) + (if lay.layoutPass is generation then pick.lay.pos[TOP] else 0)
-
-# A row aligns on baselines when it or any in-flow child asks to — a
-# hidden child among them, which Yoga's `isBaselineLayout` counts.
-baselined =! (lay) ->
-  return false if lay.direction < ROW
-  return true if lay.alignItems is BASELINE or lay.hiddenBaseline
-  for kid, i in lay.kids
-    k = kid.lay
-    return true if k.position isnt ABSOLUTE and k.alignSelf is BASELINE
-  false
+# Where a child starts before its line moves it: its margin plus its
+# relative offset, on all four edges (Node.cpp setPosition). A static
+# node has no offset; left wins over right and top over bottom.
+seat! =! (lay, ownerW, ownerH) ->
+  dx = 0
+  dy = 0
+  if lay.position isnt STATIC
+    dx = if insetSet lay, LEFT then insetAt lay, LEFT, ownerW else -insetAt lay, RIGHT, ownerW
+    dy = if insetSet lay, TOP then insetAt lay, TOP, ownerH else -insetAt lay, BOTTOM, ownerH
+  lay.pos[LEFT] = marginAt(lay, LEFT, ownerW) + dx
+  lay.pos[RIGHT] = marginAt(lay, RIGHT, ownerW) + dx
+  lay.pos[TOP] = marginAt(lay, TOP, ownerW) + dy
+  lay.pos[BOTTOM] = marginAt(lay, BOTTOM, ownerW) + dy
 
 # Place a line's children along the main axis, and find the line's main
 # and cross extent (justifyMainAxis).
@@ -1458,6 +1389,18 @@ alignLines! =! (node, lay, f, lines, totalCross, leadingCross, insideCross, owne
 
 # ── The algorithm ─────────────────────────────────────────────────────────────
 
+# A measure-only visit whose size the offer decides — exactly this, or
+# at most nothing — skips the children.
+fixed =! (size, mode) -> mode is STRETCH_FIT or (mode is FIT_CONTENT and (size <= 0 or near size, 0))
+
+measureFixed =! (lay, availW, availH, modeW, modeH, ownerW, ownerH) ->
+  return false unless fixed(availW, modeW) and fixed(availH, modeH)
+  wide = if isNaN(availW) or (modeW is FIT_CONTENT and availW < 0) then 0 else availW
+  tall = if isNaN(availH) or (modeH is FIT_CONTENT and availH < 0) then 0 else availH
+  lay.measured[WIDTH] = bound lay, ROW, wide, ownerW, ownerW
+  lay.measured[HEIGHT] = bound lay, COLUMN, tall, ownerH, ownerW
+  true
+
 # Step 1: the axes, and how the space along each was offered.
 axes! =! (lay, f, modeW, modeH, ownerW, ownerH) ->
   row = lay.direction >= ROW
@@ -1633,8 +1576,6 @@ compute! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
 
 # ── Absolute children ─────────────────────────────────────────────────────────
 
-# Position an absolute child on one axis: by its insets against the
-# containing block, else where its parent's justify or align puts it.
 # The size of `lay` as an absolute child's position reads it. The block
 # is computing, so its size is `measured`; a parent under it has been
 # laid out, and `measured` may hold a later measure-only answer.
@@ -1647,6 +1588,8 @@ extent =! (lay, block, dim) ->
 inset0 =! (lay, block, edge) ->
   if lay is block then lay.padding[edge] + lay.border[edge] else insideAt lay, edge, lay.ownerW
 
+# Position an absolute child on one axis: by its insets against the
+# containing block, else where its parent's justify or align puts it.
 anchor! =! (block, parent, kid, axis, main, blockW, blockH) ->
   c = block.lay
   q = parent.lay
@@ -1793,6 +1736,72 @@ fits =! (mode, size, offered, lastMode, lastOffered, answer) ->
 reusable =! (lay, entry, availW, availH, modeW, modeH, ownerW, ownerH, marginRow, marginColumn) ->
   return false unless entry.live and sameOwner lay, entry, ownerW, ownerH
   fits(modeW, availW - marginRow, availW, entry.modeW, entry.availW, entry.w) and fits(modeH, availH - marginColumn, availH, entry.modeH, entry.availH, entry.h)
+
+# The flags `visit` reads, which `sync` keeps for a dirty node and `pass`
+# for the root: `noCache`, from `orderSensitive`; the `solid` pair it
+# rests on, from `offered` and `firm`; `underBaseline`, from
+# `carryBaseline`.
+#
+# Whether what a container computes can depend on the ORDER it is asked
+# in, and so on which earlier asks a cached answer stood in for. Two
+# things make it so. A baseline row reads its children's lines and
+# positions, which earlier visits leave behind. And a child's written
+# `flexBasis` stands from the first ask of a pass (see `basisOf`), which
+# matters unless every ask finds the same basis: the container's main
+# size is a number on every visit (`solidW` / `solidH`), so no ask
+# measures content instead; the basis is a number clear of percent
+# padding, so it is the same number whatever the size; and the lone-
+# child shortcut, which sets a basis of zero, would set the very number
+# written. Such a container, and every ancestor, is computed on every
+# visit of a pass — never answered from an earlier pass — so its asks
+# come in the order, and with the inputs, of a fresh layout.
+orderSensitive =! (lay) ->
+  return true if baselined lay
+  solid = if lay.direction >= ROW then lay.solidW else lay.solidH
+  for kid, i in lay.kids
+    k = kid.lay
+    unit = k.u[BASIS]
+    continue if k.position is ABSOLUTE or (unit isnt POINT and unit isnt PERCENT)
+    return true unless solid and unit is POINT and not k.insidePercent
+    return true if k.grow isnt 0 and k.shrink isnt 0 and (k.v[BASIS] isnt 0 or insideAxis(k, lay.direction, NaN) isnt 0)
+  false
+
+# Whether every offer `lay` makes its child `k` on a dimension is a
+# number: the child's own size is one, or `lay` is always offered one
+# itself and passes it on — which it does not to an absolute child, nor
+# along the axis it scrolls (see `basisOf`).
+offered =! (lay, k, dim) ->
+  return true if k.u[SIZE + dim] is POINT and k.v[SIZE + dim] >= 0
+  return false if k.position is ABSOLUTE or (lay.overflow is SCROLL and DIM[lay.direction] is dim)
+  if dim is WIDTH then lay.solidW else lay.solidH
+
+# Give `node` its `solidW` and `solidH`, and carry what follows from them
+# down: its own order-sensitivity, and its children's flags in turn. Its
+# remembered answers go, since some were computed under the other rule.
+firm! =! (node, solidW, solidH) ->
+  lay = node.lay
+  lay.solidW = solidW
+  lay.solidH = solidH
+  lay.used = 0
+  lay.entry.live = false
+  return if lay.leaf
+  lay.noCache = orderSensitive lay
+  for kid, i in lay.kids
+    k = kid.lay
+    wide = offered lay, k, WIDTH
+    tall = offered lay, k, HEIGHT
+    firm kid, wide, tall if k.solidW isnt wide or k.solidH isnt tall
+    lay.noCache = true if k.noCache
+
+# Everything under a baseline row is read by it, to any depth, so none of
+# it answers from an earlier pass either. A node is `underBaseline` when
+# an ancestor is such a row; its children are when it is, or is one.
+carryBaseline! =! (node, value) ->
+  lay = node.lay
+  lay.underBaseline = value
+  below = value or baselined lay
+  for kid, i in lay.kids
+    carryBaseline kid, below if kid.lay.underBaseline isnt below
 
 # Size `node`, from its cache when the offer is one it has answered since
 # it was last dirty (calculateLayoutInternal). A node keeps one layout

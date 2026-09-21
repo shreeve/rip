@@ -6,9 +6,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 3. Reading `layout.rip`
 
-- [ ] Reading order: the cache flags sit 900 lines before "The cache";
-      `baselined`, `percents`, `seat!`, `measureFixed` sit away from
-      their sections.
 - [ ] Say in the header why `for kid, i in` keeps an unused `i` (it
       compiles to a counted loop), or the loops get "cleaned".
 - [ ] Remove what no suite reaches: `edges`,
