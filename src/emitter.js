@@ -11955,6 +11955,7 @@ class Emitter {
     // The lines below replay later, under the self of wherever they land,
     // so the spelling is taken at replay.
     const held = this.projectionHost;
+    this.threadProjectionHost(held);
     const host = () => held !== null && held.startsWith('this.') ? `${self()}.${held.slice(5)}` : held;
     line(() => this.b.emit(held !== null
       ? `{ const ${prevV} = ${host()}._beginProjection(${self()}); try {`
@@ -13120,6 +13121,23 @@ class Emitter {
     return name;
   }
 
+  // A child component opens its receiver's projection by name. A
+  // receiver held on the component is reached through `ctx` from any
+  // factory; one that is a LOCAL of a factory (a component constructed
+  // per row) is out of scope in the sibling methods walked inside its
+  // projection. So every factory between this child and the receiver's
+  // owner takes the receiver as a parameter after the loop names, the
+  // way they thread: its call site, inside the enclosing factory,
+  // passes the name that is in scope there.
+  threadProjectionHost(held) {
+    if (held === null || held.startsWith('this.')) return;
+    for (let rec = this.rstate.sink; rec && rec.hostParams !== undefined && !rec.vars.has(held); rec = rec.parent) {
+      if (rec.hostParams.includes(held)) continue;
+      rec.hostParams.push(held);
+      rec.paramNames.push(held);
+    }
+  }
+
   walkFactory(part, kind, originNode, loopEntry = null) {
     const R = this.rstate;
     const parent = R.sink;
@@ -13170,6 +13188,10 @@ class Emitter {
       // load-bearing: reversed, nested-loop parameters bind CROSSWISE
       // — the inner item arrives in the outer-row slot.
       paramNames: [...ownVars, ...outerVars],
+      // Projection receivers threaded in after the loop names
+      // (threadProjectionHost) — filled while the body walks, read by
+      // the call sites and emitFactory once it has.
+      hostParams: [],
       frameVar: '__fr', ownerVar: '__o',
       creates: [], setups: [], vars: new Set(),
       locals: new Set(), localDecls: new Map(),
@@ -13367,7 +13389,20 @@ class Emitter {
     this._chainMarkNode = prevChain;
     const hasRef = thenRec.refs.length > 0 || (elseRec !== null && elseRec.refs.length > 0);
     const sink = this.rstate.sink;
-    const outer = sink.loopStack.flatMap((v) => [v.itemVar, v.indexVar]);
+    // Both branches are called with one argument list, so each takes
+    // every receiver either one threads, in one order.
+    if (elseRec !== null) {
+      for (const [from, to] of [[thenRec, elseRec], [elseRec, thenRec]]) {
+        for (const held of from.hostParams) {
+          if (to.hostParams.includes(held)) continue;
+          to.hostParams.push(held);
+          to.paramNames.push(held);
+        }
+      }
+      elseRec.hostParams.sort((a, b) => thenRec.hostParams.indexOf(a) - thenRec.hostParams.indexOf(b));
+      elseRec.paramNames.splice(elseRec.paramNames.length - elseRec.hostParams.length, elseRec.hostParams.length, ...elseRec.hostParams);
+    }
+    const outer = [...sink.loopStack.flatMap((v) => [v.itemVar, v.indexVar]), ...thenRec.hostParams];
     sink.setups.push({
       kind: 'raw',
       // A directive above the render conditional rides its setup line —
@@ -13508,7 +13543,7 @@ class Emitter {
     }
     const hasRef = rec.refs.length > 0;
     const sink = this.rstate.sink;
-    const outer = sink.loopStack.flatMap((v) => [v.itemVar, v.indexVar]);
+    const outer = [...sink.loopStack.flatMap((v) => [v.itemVar, v.indexVar]), ...rec.hostParams];
     sink.setups.push({
       kind: 'raw',
       node, // a directive above the render loop rides its setup line
@@ -13826,6 +13861,9 @@ class Emitter {
         if (t !== null) paramTypes.set(entry.itemVar, t);
         paramTypes.set(entry.indexVar, 'number');
       }
+      // A threaded projection receiver is scaffold state, like the
+      // block's node slots.
+      for (const host of rec.hostParams) paramTypes.set(host, 'any');
     }
     // A loop variable's DECLARATION is the `for` head's own occurrence of
     // it; the factory parameter that carries it marks that span, so a
@@ -13870,7 +13908,7 @@ class Emitter {
     const ownEntry = rec.kind === 'loop' ? rec.loopStack.at(-1) : null;
     const thunkName = ownEntry !== null ? this.tsIterThunkName(ownEntry) : null;
     if (thunkName !== null) {
-      const outerNames = rec.paramNames.slice(2);
+      const outerNames = rec.paramNames.slice(2, rec.paramNames.length - rec.hostParams.length);
       let text;
       this.withRecordContext(rec, () => {
         text = this.capturedExprText(() => this.expr(ownEntry.iter), { source: this.b.source });

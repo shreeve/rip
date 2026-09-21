@@ -1503,6 +1503,117 @@ describe('child components: the instantiation protocol', () => {
     }
   });
 
+  test('a block inside a per-row component\'s projection receives that component — a nested loop, a nested branch, and both at depth', () => {
+    // The receiver of a projection is a component member on the class
+    // path (`ctx._inst0`), but a component constructed per row is a
+    // LOCAL of its row's factory. A factory walked inside that
+    // projection is a sibling method, so the receiver threads in after
+    // the loop names, and each row's blocks open ITS row's component.
+    const WRAP = 'Wrap = component\n  render\n    div\n      slot\n';
+    const mountApp = (body) => {
+      const { code } = compile(`${WRAP}App = component\n  @on := true\n  render\n${body}`, { runtimeDelivery: 'none' });
+      expect(() => new Function(code)).not.toThrow();
+      const names = Object.keys(RT);
+      const { App } = new Function(...names, `${code}\nreturn { App };`)(...names.map((name) => RT[name]));
+      const target = document.createElement('main');
+      const app = new App({});
+      app.mount(target);
+      return { app, target, code };
+    };
+    const W = (inner) => `<div data-part="Wrap">${inner}</div>`;
+
+    const loop = mountApp(`    Wrap
+      for r in [1, 2]
+        Wrap
+          for c in [1, 2]
+            Wrap
+              "#{r}.#{c}"
+`);
+    try {
+      expect(loop.code).toContain('ctx.create_block_1, null, r, i, _inst3)');
+      expect(loop.code).toContain('create_block_1(ctx, c, j, r, i, _inst3) {');
+      expect(loop.code).toContain('_inst3 = ___inst3;');
+      expect(serialize(loop.target)).toBe(`<main>${W(
+        `${W(`${W('1.1')}${W('1.2')}<!--for-->`)}${W(`${W('2.1')}${W('2.2')}<!--for-->`)}<!--for-->`)}</main>`);
+    } finally {
+      loop.app.unmount();
+    }
+
+    const branch = mountApp(`    Wrap
+      for r in [1, 2]
+        Wrap
+          if @on
+            Wrap
+              "row #{r}"
+`);
+    try {
+      expect(branch.code).toContain('ctx.create_block_1(ctx, r, i, _inst3)');
+      expect(serialize(branch.target)).toContain(W('row 1'));
+      expect(serialize(branch.target)).toContain(W('row 2'));
+      branch.app.on.value = false;
+      expect(serialize(branch.target)).not.toContain('row 1');
+      branch.app.on.value = true;
+      expect(serialize(branch.target)).toContain(W('row 2'));
+    } finally {
+      branch.app.unmount();
+    }
+
+    // Both branches of a conditional are called with one argument list:
+    // a receiver only the ELSE branch needs still reaches both.
+    const either = mountApp(`    Wrap
+      for r in [1, 2]
+        Wrap
+          if @on
+            "plain #{r}"
+          else
+            Wrap
+              "boxed #{r}"
+`);
+    try {
+      expect(either.code).toContain('create_block_1(ctx, r, i, _inst3) {');
+      expect(either.code).toContain('create_block_2(ctx, r, i, _inst3) {');
+      expect(serialize(either.target)).toContain('plain 2');
+      either.app.on.value = false;
+      expect(serialize(either.target)).toContain(W('boxed 1'));
+      expect(serialize(either.target)).toContain(W('boxed 2'));
+    } finally {
+      either.app.unmount();
+    }
+
+    // A block that constructs no child inside the projection takes no
+    // receiver: its header is the loop names alone.
+    const plain = mountApp(`    Wrap
+      for r in [1, 2]
+        Wrap
+          if @on
+            "text #{r}"
+`);
+    try {
+      expect(plain.code).toContain('create_block_1(ctx, r, i) {');
+    } finally {
+      plain.app.unmount();
+    }
+
+    // Depth: the branch threads the row's component on to the loop
+    // inside it, and that loop's own per-row component becomes the
+    // receiver of the innermost loop.
+    const deep = mountApp(`    Wrap
+      for r in [1, 2]
+        Wrap
+          if @on
+            for c in ['a', 'b']
+              Wrap
+                for d in [7]
+                  Wrap
+                    "#{r}#{c}#{d}"
+`);
+    try {
+      for (const leaf of ['1a7', '1b7', '2a7', '2b7']) expect(serialize(deep.target)).toContain(W(leaf));
+    } finally {
+      deep.app.unmount();
+    }
+  });
+
   test('failed factory children transfer ownership to their placeholders across keyed moves, removal, and branch replacement', () => {
     const source = `failedRoots = []
 Bad = component

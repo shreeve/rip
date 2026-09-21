@@ -17604,6 +17604,7 @@ ${pad ?? ""}`);
     const line = (fn) => this.renderLine(markNode, fn, false);
     const self = () => this.renderSelf ?? "this";
     const held = this.projectionHost;
+    this.threadProjectionHost(held);
     const host = () => held !== null && held.startsWith("this.") ? `${self()}.${held.slice(5)}` : held;
     line(() => this.b.emit(held !== null ? `{ const ${prevV} = ${host()}._beginProjection(${self()}); try {` : `{ const ${prevV} = ${this.runtimeName("__pushComponent")}(${self()}); try {`));
     line(() => this.b.emit("try {"));
@@ -18447,6 +18448,16 @@ ${this.replayPad}}` : " }");
     used.add(name);
     return name;
   }
+  threadProjectionHost(held) {
+    if (held === null || held.startsWith("this."))
+      return;
+    for (let rec = this.rstate.sink;rec && rec.hostParams !== undefined && !rec.vars.has(held); rec = rec.parent) {
+      if (rec.hostParams.includes(held))
+        continue;
+      rec.hostParams.push(held);
+      rec.paramNames.push(held);
+    }
+  }
   walkFactory(part, kind, originNode, loopEntry = null) {
     const R = this.rstate;
     const parent = R.sink;
@@ -18478,6 +18489,7 @@ ${this.replayPad}}` : " }");
       parent,
       self: "ctx",
       paramNames: [...ownVars, ...outerVars],
+      hostParams: [],
       frameVar: "__fr",
       ownerVar: "__o",
       creates: [],
@@ -18639,7 +18651,19 @@ ${this.replayPad}}` : " }");
     this._chainMarkNode = prevChain;
     const hasRef = thenRec.refs.length > 0 || elseRec !== null && elseRec.refs.length > 0;
     const sink = this.rstate.sink;
-    const outer = sink.loopStack.flatMap((v) => [v.itemVar, v.indexVar]);
+    if (elseRec !== null) {
+      for (const [from, to] of [[thenRec, elseRec], [elseRec, thenRec]]) {
+        for (const held of from.hostParams) {
+          if (to.hostParams.includes(held))
+            continue;
+          to.hostParams.push(held);
+          to.paramNames.push(held);
+        }
+      }
+      elseRec.hostParams.sort((a, b) => thenRec.hostParams.indexOf(a) - thenRec.hostParams.indexOf(b));
+      elseRec.paramNames.splice(elseRec.paramNames.length - elseRec.hostParams.length, elseRec.hostParams.length, ...elseRec.hostParams);
+    }
+    const outer = [...sink.loopStack.flatMap((v) => [v.itemVar, v.indexVar]), ...thenRec.hostParams];
     sink.setups.push({
       kind: "raw",
       node: markNode,
@@ -18737,7 +18761,7 @@ ${this.replayPad}}` : " }");
     }
     const hasRef = rec.refs.length > 0;
     const sink = this.rstate.sink;
-    const outer = sink.loopStack.flatMap((v) => [v.itemVar, v.indexVar]);
+    const outer = [...sink.loopStack.flatMap((v) => [v.itemVar, v.indexVar]), ...rec.hostParams];
     sink.setups.push({
       kind: "raw",
       node,
@@ -19036,6 +19060,8 @@ ${this.replayPad}}` : " }");
           paramTypes.set(entry.itemVar, t);
         paramTypes.set(entry.indexVar, "number");
       }
+      for (const host of rec.hostParams)
+        paramTypes.set(host, "any");
     }
     const declSpans = new Map;
     for (const entry of rec.loopStack) {
@@ -19082,7 +19108,7 @@ ${this.replayPad}}` : " }");
     const ownEntry = rec.kind === "loop" ? rec.loopStack.at(-1) : null;
     const thunkName = ownEntry !== null ? this.tsIterThunkName(ownEntry) : null;
     if (thunkName !== null) {
-      const outerNames = rec.paramNames.slice(2);
+      const outerNames = rec.paramNames.slice(2, rec.paramNames.length - rec.hostParams.length);
       let text;
       this.withRecordContext(rec, () => {
         text = this.capturedExprText(() => this.expr(ownEntry.iter), { source: this.b.source });
