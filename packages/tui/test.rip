@@ -8,7 +8,7 @@ import * as mod from 'rip/tui'
 import { install } from './document.rip'
 import { layout } from './layout.rip'
 import { Grid, paint, diff, tally as styleCount } from './paint.rip'
-import { tally as clusterCount } from './text.rip'
+import { tally as clusterCount, clusterWidth } from './text.rip'
 import { __setChildFailureReporter } from '../../src/runtime/components.js'
 import { EventEmitter } from 'node:events'
 import { readFileSync } from 'fs'
@@ -47,7 +47,8 @@ def background(params, held)
 # grid of characters and a grid of backgrounds. The terminal erases with
 # the background color (bce), as xterm and Ghostty do: a line feed on the
 # last row scrolls, and the row it makes — like every cell an erase
-# clears — takes the background then in force.
+# clears — takes the background then in force. A wide character takes
+# two cells.
 def screenOf(sent, columns, rows, from = 0)
   lines = (Array(columns).fill(' ') for i in [0...rows])
   backs = (Array(columns).fill(null) for i in [0...rows])
@@ -87,9 +88,10 @@ def screenOf(sent, columns, rows, from = 0)
       i += 1
     else
       glyph = String.fromCodePoint text.codePointAt(i)
-      lines[row][col] = glyph
-      backs[row][col] = held
-      col += 1
+      for part in [glyph, ''].slice 0, clusterWidth glyph
+        lines[row][col] = part
+        backs[row][col] = held
+        col += 1
       i += glyph.length
   { lines, backs }
 
@@ -864,18 +866,40 @@ test "a border glyph obeys the rule text does: a control character is refused by
   finally
     restore()
 
-test "a border object is read every time it is drawn: a change to it is seen, and a bad one refused", ->
+# The document hears a style that is written, never an object changed in
+# place: a box keeps the eight glyphs its border had when it was set, so
+# a frame that owes half of the box draws the glyphs of the other half.
+test "a border object is copied when it is set: a change in place is not seen until it is set again", ->
   frame = { topLeft: '1', top: '2', topRight: '3', right: '4', bottomRight: '5', bottom: '6', bottomLeft: '7', left: '8' }
   Framed = component
+    @word := 'ab'
     render
-      Box width: 4, borderStyle: frame
-        Text "ab"
-  mounted Framed, (app, show) ->
-    eq show(4), "1223\n8ab4\n7665"
-    frame.top = '='
-    eq show(4), "1==3\n8ab4\n7665"
+      Box flexDirection: 'column', alignItems: 'flex-start'
+        Box width: 4, borderStyle: frame
+          Text "ab"
+        Box position: 'absolute', top: 0, left: 1
+          Text "#{@word}"
+  view = mount Framed, cols: 8, rows: 6
+  try
+    eq view.frame(), "1ab3\n8ab4\n7665"
+    frame.top = frame.bottom = '='
+    # The words over the top edge change, and owe two cells of it.
+    view.app.word.value = 'c'
+    eq view.frame(), "1c23\n8ab4\n7665"
+    view.resize 9, 6
+    eq view.frame(), "1c23\n8ab4\n7665"
+    box = document.body.firstChild.firstChild
+    box.set 'borderStyle', frame
+    eq view.frame(), "1c=3\n8ab4\n7==5"
+    eq view.damage, 4 * 3
+    box.set 'borderStyle', { ...frame }
+    view.frame()
+    eq view.damage, 0
     frame.top = '\x07'
-    throws (-> show 4), 'borderStyle: top: "\\u0007" is not a border glyph'
+    throws (-> box.set 'borderStyle', frame), 'borderStyle: top: "\\u0007" is not a border glyph'
+    eq view.frame(), "1c=3\n8ab4\n7==5"
+  finally
+    view.close()
 
 # ==[ The component model on a terminal ]==
 
@@ -992,6 +1016,15 @@ test "the cell after a cluster of several code points is reached by an absolute 
   plain = Grid.new 8, 1
   plain.write 0, 0, "a日本bc", 0
   eq diff(null, plain), "\x1b[J\x1b[1Ga日本bc\r"
+
+test "an unassigned code point earns the column move after it, and a private use one does not", ->
+  grid = Grid.new 8, 1
+  grid.write 0, 0, "a\u{1F6D9}bc", 0
+  eq diff(null, grid), "\x1b[J\x1b[1Ga\u{1F6D9}\x1b[3Gbc\r"
+  eq grid.toString(), "a\u{1F6D9}bc"
+  arrow = Grid.new 8, 1
+  arrow.write 0, 0, "a\uE0B0bc", 0
+  eq diff(null, arrow), "\x1b[J\x1b[1Ga\uE0B0bc\r"
 
 test "a wide character takes two cells", ->
   grid = Grid.new 6, 1
@@ -1368,3 +1401,517 @@ test! "a quit from a mounted app closes the mount and resolves done", ->
   eq await view.done, 'left'
   eq typeof document, 'undefined'
   throws (-> view.frame()), 'this mount is closed'
+
+# ==[ Damage: a frame paints and compares the cells a change owes ]==
+
+console.log "\nDamage"
+
+# The frame the screen keeps is the tree painted whole: glyph, colors
+# and link, cell for cell.
+def wholly(view)
+  front = view.held.view.front
+  whole = Grid.new front.cols, front.rows, front.top
+  paint whole, document.body
+  eq view.ansi, whole.toString true
+
+# Mount `App` on a terminal of 40 by 12 and hand `body(app, draw, view)`
+# a `draw` that draws the next frame, holds it to the whole paint and to
+# the bytes sent so far, replayed, and answers the cells the frame owed.
+def owing(App, body)
+  view = mount App, cols: 40, rows: 12
+  sent = []
+  try
+    draw = ->
+      text = view.frame()
+      sent.push view.bytes
+      wholly view
+      eq replay(sent, view.held.view.front.cols, 12), text.trimEnd()
+      view.damage
+    body view.app, draw, view
+  finally
+    view.close()
+
+test "a text of unchanged size owes its own words; a first frame and a resized one owe every cell", ->
+  Board = component
+    @count := 41
+    render
+      Box flexDirection: 'column', height: 3
+        Text "header line"
+        Box flexDirection: 'row', gap: 2
+          Text "left"
+          Text "count #{@count}"
+        Text "footer"
+  owing Board, (app, draw, view) ->
+    eq draw(), 40 * 3
+    app.count.value = 42
+    eq draw(), 8
+    eq draw(), 0
+    view.resize 30, 12
+    eq draw(), 30 * 3
+    app.count.value = 43
+    eq draw(), 8
+
+test "a frame that gains or loses its last rows owes the rows that come, and keeps the rows that stay", ->
+  Log = component
+    @lines := ['one', 'two']
+    render
+      Box flexDirection: 'column', alignItems: 'flex-start', color: 'green'
+        for line in @lines
+          Text key: line, wrap: 'truncate'
+            "#{line}"
+  owing Log, (app, draw, view) ->
+    eq draw(), 40 * 2
+    app.lines.value = ['one', 'two', 'three']
+    eq draw(), 40
+    eq view.bytes, "\x1b[?2026h\n\n\x1b[1G\x1b[32mthree\x1b[0m\x1b[2A\r\x1b[?2026l"
+    app.lines.value = ['one', 'two', 'three', 'four', 'six']
+    eq draw(), 40 * 2
+    # The rows that go are erased, and a row that stays is compared
+    # where its words changed.
+    app.lines.value = ['one', 'six']
+    eq draw(), 3
+    eq view.bytes, "\x1b[?2026h\n\x1b[1G\x1b[32msix\x1b[0m\n\r\x1b[J\x1b[2A\r\x1b[?2026l"
+    app.lines.value = []
+    eq draw(), 0
+    eq view.frame(), ''
+    app.lines.value = ['back']
+    eq draw(), 40
+    eq view.frame().trimEnd(), 'back'
+    # A frame taller than the terminal shows its bottom rows: one more
+    # shifts every row it shows.
+    app.lines.value = (String n for n in [1..12])
+    draw()
+    app.lines.value = (String n for n in [1..13])
+    eq draw(), 40 * 12
+
+test "a border or a background owes the box, and a color that passes down owes everything under it", ->
+  Panel = component
+    @edge := 'red'
+    @back := undefined
+    @tone := undefined
+    render
+      Box flexDirection: 'row', height: 4, alignItems: 'flex-start'
+        Box width: 10, height: 3, borderStyle: 'single', borderColor: @edge, backgroundColor: @back
+          Text "words"
+        Box width: 4, flexDirection: 'row', color: @tone
+          Text width: 6
+            "spills"
+        Text " beside"
+  owing Panel, (app, draw) ->
+    draw()
+    app.edge.value = 'blue'
+    eq draw(), 30
+    app.back.value = 'blue'
+    eq draw(), 30
+    # The words are wider than their box, and take its color all the same.
+    app.tone.value = 'green'
+    eq draw(), 6
+    app.tone.value = undefined
+    eq draw(), 6
+
+test "a box that moves or resizes owes where it was and where it is, and a box that inks nothing owes nothing", ->
+  Row = component
+    @wide := 4
+    render
+      Box flexDirection: 'column', height: 3
+        Text "above"
+        Box flexDirection: 'row'
+          Box width: @wide, backgroundColor: 'blue'
+            Text "ab"
+          Text "tail"
+        Text "below"
+  owing Row, (app, draw) ->
+    draw()
+    app.wide.value = 6
+    eq draw(), 10
+    app.wide.value = 3
+    eq draw(), 10
+
+test "a node inserted, removed, reordered or hidden owes its box and the boxes that move for it", ->
+  Rows = component
+    @items := ['a', 'b', 'c', 'd']
+    @gone := false
+    render
+      Box flexDirection: 'column', height: 8, alignItems: 'flex-start'
+        Text "first"
+        for item in @items
+          Text key: item, hidden: @gone and item is 'a'
+            "row #{item}"
+        Text "last"
+  owing Rows, (app, draw) ->
+    draw()
+    app.items.value = ['a', 'c', 'd']
+    eq draw(), 5 + 5 + 5 + 4
+    app.items.value = ['a', 'c', 'x', 'd']
+    eq draw(), 5 + 5 + 4
+    app.items.value = ['c', 'a', 'x', 'd']
+    eq draw(), 5 + 5
+    app.gone.value = true
+    eq draw(), 5 + 5 + 5 + 4
+    app.gone.value = false
+    eq draw(), 5 + 5 + 5 + 4
+
+test "a content offset owes the box that clips, and no layout", ->
+  List = component
+    @offset := 0
+    render
+      Box flexDirection: 'row', height: 5
+        Box flexDirection: 'column', width: 10, height: 3, overflow: 'hidden', contentOffsetY: @offset
+          for n in [1, 2, 3, 4, 5, 6]
+            Text key: n
+              "line #{n}"
+        Text "beside"
+  owing List, (app, draw) ->
+    draw()
+    document.moved = false
+    app.offset.value = 2
+    eq draw(), 30
+    eq document.moved, false
+    # With nothing to clip them the rows ink outside the box, and are owed
+    # there: two above the screen, four on it.
+    document.body.firstChild.firstChild.set 'overflow', undefined
+    eq draw(), 40
+
+test "what lies over or under a change is painted again inside it: an overlay, and text with no background", ->
+  Layers = component
+    @count := 1
+    @back := 'blue'
+    render
+      Box flexDirection: 'column', height: 4
+        Box backgroundColor: @back, width: 12, height: 2
+          Text "count #{@count} of 9"
+        Box position: 'absolute', top: 0, left: 4, backgroundColor: 'red'
+          Text "TOP"
+  owing Layers, (app, draw, view) ->
+    draw()
+    app.count.value = 2
+    eq draw(), 12
+    eq view.frame().trimEnd(), "counTOP of 9"
+    app.back.value = 'green'
+    eq draw(), 24
+    eq view.ansi.split('\n')[0].trimEnd(), "\x1b[42mcoun\x1b[0;41mTOP\x1b[0;42m of 9\x1b[0m"
+
+test "no span cuts a wide glyph: one on the terminal, or one the words under a change put there", ->
+  Wide = component
+    @at := 1
+    @shown := true
+    render
+      Box flexDirection: 'column', height: 3
+        Text "日本語"
+        if @shown
+          Box position: 'absolute', top: 0, left: @at
+            Text "x"
+  owing Wide, (app, draw, view) ->
+    draw()
+    eq view.frame().trimEnd(), " x本語"
+    # The overlay leaves half of a glyph it blanked: the words beneath
+    # owe the whole of it, and the run it is in.
+    app.at.value = 5
+    eq draw(), 6
+    eq view.frame().trimEnd(), "日本 x"
+    # …and arrives on half of one the terminal shows.
+    app.at.value = 3
+    eq draw(), 6
+    eq view.frame().trimEnd(), "日 x語"
+    app.shown.value = false
+    eq draw(), 6
+    eq view.frame().trimEnd(), "日本語"
+
+test "words that spill out of their box are owed where they were drawn", ->
+  Spill = component
+    @words := "aaabbbccc"
+    render
+      Box flexDirection: 'row', height: 4
+        Text width: 3, height: 1
+          "#{@words}"
+        Text " beside"
+  owing Spill, (app, draw, view) ->
+    draw()
+    eq view.frame().trimEnd(), "aaa beside\nbbb\nccc"
+    app.words.value = "aaa"
+    eq draw(), 9
+    eq view.frame().trimEnd(), "aaa beside"
+
+test "words of one length that take other rows owe them, with no layout to say so", ->
+  Turn = component
+    @words := "aaaabbbb"
+    render
+      Box flexDirection: 'row', height: 4
+        Text width: 4, height: 1
+          "#{@words}"
+  owing Turn, (app, draw, view) ->
+    draw()
+    document.moved = false
+    app.words.value = "a bbbb c"
+    eq document.moved, false
+    eq draw(), 12
+    eq view.frame().trimEnd(), "a\nbbbb\n c"
+
+test "a box that clips one axis owes its children where they leave it on the other", ->
+  Slot = component
+    @label := "ab"
+    render
+      Box flexDirection: 'row', width: 12, height: 4, alignItems: 'flex-start'
+        Box flexGrow: 1, flexShrink: 1, flexBasis: 0, height: 1, overflowX: 'hidden', flexDirection: 'row'
+          Text width: 12
+            "abcdefghijkl\nmnopqrstuvwx"
+        Text "#{@label}"
+  owing Slot, (app, draw, view) ->
+    draw()
+    eq view.frame().trimEnd(), "abcdefghijab\nmnopqrstuv"
+    # The label takes two columns from the box, on the row below it too.
+    app.label.value = "abcd"
+    eq draw(), 12 + 10
+    eq view.frame().trimEnd(), "abcdefghabcd\nmnopqrst"
+
+test "a node moved to another parent is owed where that parent's offset puts it", ->
+  Shelves = component
+    render
+      Box height: 5
+        Box position: 'absolute', top: 0, left: 0, width: 8, height: 4, contentOffsetY: -2
+          Text "note"
+        Box position: 'absolute', top: 0, left: 0, width: 8, height: 4
+  owing Shelves, (app, draw, view) ->
+    draw()
+    eq view.frame().trimEnd(), "\n\nnote"
+    [from, to] = document.body.firstChild.childNodes.filter (node) -> node.tagName is 'div'
+    to.appendChild from.firstChild
+    eq draw(), 4 + 4
+    eq view.frame().trimEnd(), "note"
+
+test "a box that turns into a contents node, or back, owes what its children ink without it", ->
+  Shell = component
+    @display := 'flex'
+    render
+      Box flexDirection: 'column', height: 5, alignItems: 'flex-start'
+        Text "top"
+        Box display: @display, height: 1, contentOffsetY: 3
+          Text "one"
+          Text "two"
+  owing Shell, (app, draw, view) ->
+    draw()
+    eq view.frame().trimEnd(), "top"
+    # The box scrolled its rows off the top of the screen; without it
+    # they ink where layout put them. Its bounds reach up over "top".
+    app.display.value = 'contents'
+    eq draw(), 3 + 3 + 3
+    eq view.frame().trimEnd(), "top\none\ntwo"
+    app.display.value = 'flex'
+    eq draw(), 3 + 3 + 3
+    eq view.frame().trimEnd(), "top"
+
+test "a contents node's color reaches the children it lends, and owes their cells", ->
+  Lent = component
+    @tone := 'red'
+    render
+      Box flexDirection: 'column', height: 3, alignItems: 'flex-start'
+        Text "plain"
+        Box display: 'contents', color: @tone
+          Text "lent"
+  owing Lent, (app, draw, view) ->
+    draw()
+    app.tone.value = 'green'
+    eq draw(), 4
+    eq view.ansi.split('\n')[1].trimEnd(), "\x1b[32mlent\x1b[0m"
+
+test "a text owes the cells its words ink, however far layout stretches its box", ->
+  Flank = component
+    @tick := 0
+    render
+      Box flexDirection: 'row', height: 8
+        Text "#{'|/-\\'[@tick %% 4]}"
+        Box width: 20, height: 8, borderStyle: 'single'
+        Box flexDirection: 'column'
+          Text "clock #{10 + @tick}"
+          Text ""
+          Text wrap: 'truncate-end', width: 6
+            "cut #{@tick} short"
+        Text width: 3, inverse: @tick %% 2 is 1
+          ""
+  owing Flank, (app, draw, view) ->
+    draw()
+    eq document.body.firstChild.firstChild.rect.h, 8
+    # One span a row: the spinner to the clock on the first, the cut
+    # line on the third, and none of the six rows under them; a text of
+    # no words inks nothing.
+    app.tick.value = 1
+    eq draw(), 29 + 6
+    app.tick.value = 2
+    eq draw(), 29 + 6
+
+test "a span that would cut a wide glyph takes its run in, so a stack of staggered layers settles in two paints", ->
+  Stack = component
+    @tick := 0
+    render
+      Box height: 2
+        for n in [0...4]
+          Text key: n, position: 'absolute', left: 4 - n, top: 0
+            "\u4E2D\u4E2D\u4E2D\u4E2D\u4E2D\u4E2D\u4E2D\u4E2D"
+        Text position: 'absolute', top: 0, left: 9
+          "#{@tick %% 10}"
+  owing Stack, (app, draw, view) ->
+    draw()
+    app.tick.value = 1
+    eq draw(), 19
+    eq document.damage.passes, 2
+    app.tick.value = 2
+    eq draw(), 19
+    eq document.damage.passes, 2
+  # Each layer is cut only once the one drawn after it is taken in: two
+  # runs, then the whole row, and the fourth paint settles.
+  Chain = component
+    @tick := 0
+    render
+      Box height: 2
+        for n in [0...6]
+          Text key: n, position: 'absolute', left: 15 - 3 * n, top: 0
+            "\u4E2D\u4E2D"
+        Text position: 'absolute', top: 0, left: 1
+          "#{@tick %% 10}"
+  owing Chain, (app, draw, view) ->
+    draw()
+    app.tick.value = 1
+    eq draw(), 40
+    eq document.damage.passes, 4
+
+test "a survey that fails is made again: what it did not reach is still owed", ->
+  Two = component
+    @word := 'ab'
+    render
+      Box flexDirection: 'column', height: 3, alignItems: 'flex-start'
+        Text "#{@word} first"
+        Text "#{@word} second"
+  owing Two, (app, draw, view) ->
+    draw()
+    app.word.value = 'abcd'
+    first = document.body.firstChild.firstChild
+    flow = first.flow
+    first.flow = Object.assign Object.create(flow), { fits: -> throw Error.new 'no survey' }
+    throws (-> view.frame()), 'no survey'
+    first.flow = flow
+    document.owe false
+    draw()
+    eq view.frame().trimEnd(), "abcd first\nabcd second"
+
+test "a node out of the tree owes nothing, whatever is done to it", ->
+  Pair = component
+    render
+      Box flexDirection: 'column', height: 6, alignItems: 'flex-start'
+        Box backgroundColor: 'blue', height: 3
+          Text "soon gone"
+        Text "kept"
+  owing Pair, (app, draw, view) ->
+    draw()
+    gone = document.body.firstChild.firstChild
+    gone.remove()
+    eq draw(), 9 * 3 + 4
+    gone.set 'backgroundColor', 'red'
+    gone.firstChild.firstChild.data = 'words that are longer, and nowhere'
+    eq draw(), 0
+    eq view.bytes, ''
+    document.body.firstChild.appendChild gone
+    draw()
+    eq view.frame().trimEnd(), "kept\nwords that are longer, and nowhere"
+
+test "a contents text lends its words to its parent: each is a leaf, marked and measured as one", ->
+  Lender = component
+    @n := 1
+    @display := 'contents'
+    render
+      Box flexDirection: 'row', height: 2, alignItems: 'flex-start'
+        Text display: @display, color: 'red'
+          "count #{@n}"
+        Text "after"
+  owing Lender, (app, draw, view) ->
+    draw()
+    eq view.ansi.split('\n')[0].trimEnd(), "\x1b[31mcount 1\x1b[0mafter"
+    app.n.value = 2
+    eq draw(), 7
+    # Longer words move their neighbor: the text under a contents one
+    # answers for its own size.
+    app.n.value = 22
+    eq draw(), 8 + 5
+    eq view.frame().trimEnd(), "count 22after"
+    app.display.value = undefined
+    draw()
+    app.display.value = 'contents'
+    draw()
+    eq view.frame().trimEnd(), "count 22after"
+
+test "words that grow under a contents node, or under a box while it is hidden, are surveyed", ->
+  Nested = component
+    @word := 'lent'
+    @shut := false
+    render
+      Box flexDirection: 'column', height: 3, alignItems: 'flex-start'
+        Box display: 'contents'
+          Box hidden: @shut
+            Text
+              "#{@word}"
+  owing Nested, (app, draw, view) ->
+    draw()
+    app.word.value = 'lent and longer'
+    eq draw(), 15
+    app.shut.value = true
+    eq draw(), 15
+    app.word.value = 'lent, longer, and shown'
+    eq draw(), 0
+    app.shut.value = false
+    eq draw(), 23
+    eq view.frame().trimEnd(), 'lent, longer, and shown'
+
+test "a sweep between frames leaves the next frame an ordinary one", ->
+  Lit = component
+    @tint := 0
+    render
+      Box flexDirection: 'column', height: 3, alignItems: 'flex-start'
+        Text "still"
+        Text color: "##{@tint.toString(16).padStart 6, '0'}"
+          "lit"
+  view = mount Lit, cols: 40, rows: 12
+  try
+    view.frame()
+    swept = 0
+    tint = 0
+    while tint < 70000
+      before = styleCount()
+      view.app.tint.value = tint += 1
+      view.frame()
+      continue unless styleCount() < before
+      # The grid the terminal shows is renumbered where it stands: the
+      # frame the sweep followed and the one after it are whole, and the
+      # second owed the recolored words and no more.
+      swept += 1
+      wholly view
+      view.app.tint.value = tint += 1
+      view.frame()
+      wholly view
+      eq view.damage, 3
+      ok not view.bytes.includes('still'), 'the frame after a sweep redrew what had not changed'
+    ok swept >= 2, "#{swept} sweeps"
+  finally
+    view.close()
+
+test "a sweep as a paint starts owes every cell", ->
+  cluster = (n) -> String.fromCodePoint(0x61 + n % 26, 0x300 + Math.floor(n / 26) % 112, 0x300 + Math.floor(n / 2912) % 112)
+  Flood = component
+    @words := "few"
+    render
+      Box flexDirection: 'column', height: 6
+        Text "still"
+        Text wrap: 'truncate'
+          "#{@words}"
+  view = mount Flood, cols: 40, rows: 12
+  try
+    view.frame()
+    view.app.words.value = "two"
+    view.frame()
+    eq view.damage, 3
+    # 25,000 clusters arrive between two frames: past the mark, and half again.
+    view.app.words.value = (cluster n for n in [0...25000]).join ''
+    view.frame()
+    eq view.damage, 40 * 6
+    ok view.bytes.includes('still'), 'the frame was not drawn from nothing'
+    wholly view
+  finally
+    view.close()

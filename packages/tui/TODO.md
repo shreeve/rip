@@ -27,12 +27,17 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 5. The painter and the screen
 
-- [ ] A single code point the width tables do not know gets no column
-      move after it, as a cluster of several does: U+1F6D9, unassigned
-      in Unicode 17, is one cell here, and a terminal that draws it wide
-      puts the rest of its run a cell off. Decide whether a code point
-      outside the tables earns the move.
-- [ ] Damage tracking: paint and diff only what moved (PLAN §6).
+- [ ] A whole frame pays for spans it does not need: every grid write
+      reads its row's span, about a tenth of the paint of a screen of
+      bordered boxes (`bun run frame`, panels).
+- [ ] A frame taller than the terminal that changes height shifts
+      every row shown, and is painted whole. Keeping those rows means
+      scrolling the terminal by the rows gained, which needs the diff
+      to address rows by more than the top row it holds.
+- [ ] 100% churn of the 40×8 table is about 340 µs of CPU an update
+      over the 300 updates of `bun run tui`, and about 170 µs over
+      12,000: the run ends while the damage path is still being
+      compiled. Warm the bench longer, or make the path smaller.
 
 ## 6. Compiler-side, filed separately
 

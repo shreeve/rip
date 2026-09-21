@@ -1,0 +1,121 @@
+# ==============================================================================
+# tui bench — what one frame costs: paint and diff, the state change left out
+#
+#   cd packages/tui/bench
+#   bun run frame            # every scenario
+#   rip frame.rip one        # one scenario
+#
+# Each update sets one state, and only the frame it owes is timed: no
+# layout runs (every text keeps its size), so a frame is a paint, a diff
+# and a write — but for the log, whose last row comes and goes and is
+# laid out each time. Every scenario runs twice — owing each frame whole
+# (`damage: false`), then owing its damage — and `cells` is what one
+# damaged frame painted and compared.
+# ==============================================================================
+
+import { run, quit, mount, Box, Text } from 'rip/tui'
+import { terminal } from './harness.rip'
+
+COLUMNS =! 200
+ROWS =! 60
+
+ROWS50 =! (r for r in [0...50])
+COLS10 =! (c for c in [0...10])
+ROWS60 =! (r for r in [0...60])
+COLS20 =! (c for c in [0...20])
+ROWS20 =! (r for r in [0...20])
+ROWS40 =! (r for r in [0...40])
+
+# One counter in a tree of about 1,000 elements.
+Counter = component
+  @tick := 0
+  render
+    Box flexDirection: 'column'
+      for r in ROWS50
+        Box key: r, flexDirection: 'row'
+          for c in COLS10
+            Box key: c, width: 18
+              Text
+                if r is 25 and c is 5 then "count #{@tick %% 1000}" else "cell #{r}.#{c}"
+
+# A table that fills the 200 × 60 screen: one cell changes, or every one.
+def table(all)
+  component
+    @tick := 0
+    render
+      Box flexDirection: 'column'
+        for r in ROWS60
+          Box key: r, flexDirection: 'row'
+            for c in COLS20
+              Box key: c, width: 10
+                Text color: 'green'
+                  if all or (r is 30 and c is 10) then "v#{100 + @tick %% 900}" else "w#{r}.#{c}"
+
+# Bordered boxes on backgrounds, holding wide characters: one text changes.
+Panels = component
+  @tick := 0
+  render
+    Box flexDirection: 'column'
+      for r in ROWS20
+        Box key: r, flexDirection: 'row'
+          for c in COLS10
+            Box key: c, width: 20, borderStyle: 'round', backgroundColor: 'blue'
+              Text color: 'white'
+                if r is 10 and c is 5 then "日本 #{100 + @tick %% 900}" else "日本語 #{r}.#{c}"
+
+# A log of 40 lines whose last line comes and goes: the frame's height
+# changes with every update.
+Log = component
+  @tick := 0
+  render
+    Box flexDirection: 'column'
+      for r in ROWS40
+        Text key: r, color: 'green'
+          "#{String(r).padStart 3} the quick brown fox jumps over the lazy dog, and the dog lets it"
+      if @tick %% 2
+        Text
+          "tail #{100 + @tick %% 900}"
+
+SCENARIOS =! [
+  ['counter', 'one cell of a 1,000-element tree', Counter]
+  ['one',     'one cell of a 200×60 table',       table(false)]
+  ['all',     'every cell of a 200×60 table',     table(true)]
+  ['panels',  'one of 200 bordered wide panels',  Panels]
+  ['log',     'a last row that comes and goes',   Log]
+]
+
+# The median microseconds of `updates` frames, and the bytes of one.
+def timed(App, damage, updates)
+  out = terminal COLUMNS, ROWS
+  running = run App, stdout: out, damage: damage
+  times = []
+  for n in [0...updates + 300]
+    running.app.tick.value = n + 1
+    t0 = performance.now()
+    running.flush()
+    times.push performance.now() - t0 if n >= 300
+    out.bytes = 0 if n is 299
+  quit()
+  await running.done
+  times.sort (x, y) -> x - y
+  { p50: 1000 * times[times.length >> 1], p99: 1000 * times[Math.floor times.length * 0.99], bytes: out.bytes / updates }
+
+def bench(only, updates = 3000)
+  p "\nRip TUI — one frame, #{COLUMNS}×#{ROWS}, µs"
+  p "  #{'scenario'.padEnd(34)} #{'whole p50'.padStart(10)} #{'p99'.padStart(8)} #{'damaged p50'.padStart(12)} #{'p99'.padStart(8)} #{'bytes'.padStart(7)} #{'cells'.padStart(7)}"
+  for [key, label, App] in SCENARIOS
+    continue if only and only isnt key
+    whole = timed! App, false, updates
+    owed = timed! App, true, updates
+    raise "#{label}: a damaged frame is #{owed.bytes} bytes and a whole one #{whole.bytes}" unless owed.bytes is whole.bytes
+    view = mount App, cols: COLUMNS, rows: ROWS
+    view.frame()
+    view.app.tick.value = 1
+    view.frame()
+    cells = view.damage
+    view.close()
+    p "  #{label.padEnd(34)} #{whole.p50.toFixed(1).padStart(10)} #{whole.p99.toFixed(1).padStart(8)} #{owed.p50.toFixed(1).padStart(12)} #{owed.p99.toFixed(1).padStart(8)} #{owed.bytes.toFixed(0).padStart(7)} #{String(cells).padStart(7)}"
+
+if import.meta.main
+  bench! process.argv[2], Number(process.argv[3] ?? 3000)
+  process.exit 0

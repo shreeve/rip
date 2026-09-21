@@ -6,6 +6,9 @@
 # a style is a small record interned to an id, and its escape sequence is
 # built once. Text arrives as a flow's units and rows (text.rip), so a
 # line is drawn from offsets and no string is cut per frame.
+#
+# A frame paints and compares only its damage: the cells some change may
+# have recolored, a span of columns on each row.
 
 import { kids } from './layout.rip'
 import { CLUSTER, glyph, crowded, evict, sanitize, Flow, refresh, MODES, A0, A1, B0, B1, DOTS, ROW } from './text.rip'
@@ -50,10 +53,17 @@ SWITCHES =! ['bold', 'dimColor', 'italic', 'underline', 'inverse', 'strikethroug
 CODES =! [1, 2, 3, 4, 7, 9]
 DIM =! 2
 
-ids =! Map.new()
-records =! [{ fg: null, bg: null, flags: 0, link: null, sgr: '', key: 'null|null|0' }]
+ids =! Map.new()   # foreground → background → flags and link → id
+records =! [{ fg: null, bg: null, flags: 0, link: null, sgr: '', key: 0 }]
 blends =! Map.new()
-ids.set records[0].key, 0
+
+# The ids of one foreground on one background. A color is a string the
+# app wrote once, so a style is found with no key built from its parts.
+shelf =! (fg, bg) ->
+  tones = ids.get(fg) ?? (ids.set(fg, Map.new()); ids.get fg)
+  tones.get(bg) ?? (tones.set(bg, Map.new()); tones.get bg)
+
+shelf(null, null).set 0, 0
 
 # The styles held, for the tests to count.
 export tally =! -> records.length
@@ -61,9 +71,9 @@ export tally =! -> records.length
 # The id of a style, minted on first sight; it stands until a sweep. A
 # link is part of the style, so two grids differ where a link does.
 export intern =! (fg, bg, flags, link = null) ->
-  key = "#{fg}|#{bg}|#{flags}"
-  key += "|#{link}" if link
-  id = ids.get key
+  held = shelf fg, bg
+  key = if link then "#{flags}|#{link}" else flags
+  id = held.get key
   return id if id?
   parts = []
   for code, n in CODES
@@ -74,7 +84,7 @@ export intern =! (fg, bg, flags, link = null) ->
     parts.push sgr
   throw Error.new "rip/tui: more than #{LIMIT} distinct styles are in use — a cell holds a style id in sixteen bits" if records.length >= LIMIT
   records.push { fg, bg, flags, link, sgr: parts.join(';'), key }
-  ids.set key, records.length - 1
+  held.set key, records.length - 1
   records.length - 1
 
 # The style a node's own props describe, over the style it inherits.
@@ -129,7 +139,7 @@ B  =! 5
 BL =! 6
 L  =! 7
 
-PARTS =! ['topLeft', 'top', 'topRight', 'right', 'bottomRight', 'bottom', 'bottomLeft', 'left']
+export PARTS =! ['topLeft', 'top', 'topRight', 'right', 'bottomRight', 'bottom', 'bottomLeft', 'left']
 
 BORDERS =! {
   __proto__: null
@@ -141,12 +151,13 @@ frames =! Map.new()
 probe =! Flow.new()
 
 # The eight cells of a border style: one of the names, or an object that
-# gives each part a glyph of its own, one cell wide. An object is read
-# every time it is asked for and remembered by its eight glyphs, never
-# by itself, so one that is changed after it was written is seen — and
-# refused, where what it holds is no glyph. A glyph obeys the rule text
-# does: one that `sanitize` would alter, a control character above all,
-# never reaches the terminal.
+# gives each part a glyph of its own, one cell wide. A node keeps a copy
+# of the object as it stood when the style was set (document.rip), so
+# every cell of a border is drawn from the same eight glyphs, and one
+# changed in place afterwards is not seen until it is set again. The
+# cells are remembered by the glyphs, never by the object. A glyph obeys
+# the rule text does: one that `sanitize` would alter, a control
+# character above all, never reaches the terminal.
 glyphsOf =! (style, key = 'borderStyle') ->
   custom = style and typeof style is 'object'
   unless custom or (typeof style is 'string' and BORDERS[style])
@@ -224,12 +235,19 @@ export class Grid
   # `top` is the tree row shown on the grid's first row: a frame taller
   # than the screen shows its bottom. Every write is held to the clip —
   # columns [left, right), grid rows [over, under) — which starts as the
-  # whole grid.
+  # whole grid, and on each row to the columns [lo, hi) a frame owes,
+  # which are the whole row unless a paint is handed its damage. `drawn`
+  # is how many rows of it the terminal holds.
   constructor: (@cols, @rows, @top = 0) ->
+    @drawn = @rows
     size = @cols * @rows
     @ch = Uint32Array.new size
     @style = Uint16Array.new size
     @wide = Uint8Array.new size
+    @lo = Int32Array.new @rows
+    @hi = Int32Array.new(@rows).fill @cols
+    @cut = false
+    @late = false
     @clear()
 
   clear!: ->
@@ -238,6 +256,28 @@ export class Grid
     @wide.fill 1
     @epoch = epoch
     @clip 0, -FAR, @cols, FAR
+
+  # Blank the cells a frame owes, and no others.
+  wipe!: ->
+    @epoch = epoch
+    @clip 0, -FAR, @cols, FAR
+    for row in [0...@rows] when @lo[row] < @hi[row]
+      from = row * @cols + @lo[row]
+      to = row * @cols + @hi[row]
+      @ch.fill SPACE, from, to
+      @style.fill 0, from, to
+      @wide.fill 1, from, to
+
+  # This grid at another height: the rows that stay, over blank ones.
+  tall: (rows) ->
+    grid = Grid.new @cols, rows, @top
+    kept = @cols * Math.min rows, @rows
+    grid.ch.set @ch.subarray 0, kept
+    grid.style.set @style.subarray 0, kept
+    grid.wide.set @wide.subarray 0, kept
+    grid.epoch = @epoch
+    grid.drawn = @drawn
+    grid
 
   # Hold the writes that follow to a rectangle of tree coordinates.
   clip!: (left, top, right, bottom) ->
@@ -275,14 +315,14 @@ export class Grid
   # One cell wide glyph at (x, y).
   put!: (x, y, cell, id) ->
     y -= @top
-    @set y * @cols + x, x, cell, 1, id if y >= @over and y < @under and x >= @left and x < @right
+    @set y * @cols + x, x, cell, 1, id if y >= @over and y < @under and x >= @left and x < @right and x >= @lo[y] and x < @hi[y]
 
   # `count` cells of one glyph, rightward from (x, y).
   run!: (x, y, cell, count, id) ->
     y -= @top
     return if y < @over or y >= @under
-    stop = if x + count < @right then x + count else @right
-    x = @left if x < @left
+    stop = Math.min x + count, @right, @hi[y]
+    x = Math.max x, @left, @lo[y]
     while x < stop
       @set y * @cols + x, x, cell, 1, id
       x += 1
@@ -297,6 +337,10 @@ export class Grid
       from += @left - x
       x = @left
     to -= end - @right if end > @right
+    if x < @lo[y]
+      from += @lo[y] - x
+      x = @lo[y]
+    to = from + @hi[y] - x if x + to - from > @hi[y]
     at = y * @cols + x
     while from < to
       @set at, x, text.charCodeAt(from), 1, id
@@ -307,10 +351,16 @@ export class Grid
 
   # Units [from, to) of a flow rightward from (x, y). A wide cluster cut
   # by a clip edge leaves a space in its style on each cell of it that
-  # shows; a cluster of no width has no cell. Answers the column after
-  # the last.
+  # shows; a cluster of no width has no cell. One the clip leaves whole
+  # and the owed columns would cut is owed whole, and the run it is in
+  # with it — so the layers of a stack are taken in together, not a
+  # glyph a paint: the row's span widens, and `cut` asks for the paint
+  # again. A paint that is `late` owes the whole row, which nothing
+  # cuts. Answers the column after the last.
   units: (x, y, flow, from, to, id) ->
     y -= @top
+    start = x
+    torn = false
     spans = flow.spans
     cells = flow.cells
     shown = y >= @over and y < @under
@@ -319,12 +369,19 @@ export class Grid
       span = spans[from]
       if shown and span
         if x >= @left and x + span <= @right
-          @set row + x, x, cells[from], span, id
+          if x >= @lo[y] and x + span <= @hi[y]
+            @set row + x, x, cells[from], span, id
+          else if x + span > @lo[y] and x < @hi[y]
+            torn = true
         else if x + span > @left and x < @right
-          for col in [(if x > @left then x else @left)...(if x + span < @right then x + span else @right)]
+          for col in [Math.max(x, @left, @lo[y])...Math.min(x + span, @right, @hi[y])]
             @set row + col, col, SPACE, 1, id
       x += span
       from += 1
+    if torn
+      @cut = true
+      @lo[y] = if @late then 0 else Math.min @lo[y], Math.max(start, @left)
+      @hi[y] = if @late then @cols else Math.max @hi[y], Math.min(x, @right)
     x
 
   # One line of any text at (x, y). Answers the column after the last.
@@ -336,13 +393,15 @@ export class Grid
   # under it. A wide glyph the rectangle's side cuts is blanked.
   fill!: (x, y, w, h, id) ->
     y -= @top
-    left = if x > @left then x else @left
-    right = if x + w < @right then x + w else @right
-    return if left >= right
+    w = if x + w < @right then x + w else @right
+    x = @left if x < @left
     for row in [(if y > @over then y else @over)...(if y + h < @under then y + h else @under)]
+      left = if @lo[row] > x then @lo[row] else x
+      right = if @hi[row] < w then @hi[row] else w
+      continue if left >= right
       at = row * @cols
       @blank at + left if @wide[at + left] is 0
-      @blank at + right if right < @cols and @wide[at + right] is 0
+      @blank at + right if right < @hi[row] and @wide[at + right] is 0
       @ch.fill SPACE, at + left, at + right
       @style.fill id, at + left, at + right
       @wide.fill 1, at + left, at + right
@@ -370,6 +429,168 @@ export class Grid
       line += "\x1b[0m" if ansi and records[held].sgr
       lines.push (if ansi then line else line.trimEnd())
     lines.join '\n'
+
+# ── Damage ────────────────────────────────────────────────────────────────────
+
+# The cells a frame owes: on each row of the grid the terminal shows, one
+# span of columns [lo, hi) — the union of every box some change may have
+# recolored, as it was painted and as it will be. A document owns one. A
+# node says what it inked (`old`) before anything about it changes, and
+# what it inks once the frame is laid out is asked of it then (`survey`).
+# `whole` owes every cell: a first frame, a frame of another width or
+# another top row, a frame after a sweep. A frame of another height
+# keeps what the rows that stay owe, and owes each row that comes.
+#
+# A paint is held to the spans and the diff reads nothing else, so the
+# spare grid is a scratch: only its owed cells are blanked, painted and
+# compared, and the diff copies the cells that differ into the grid the
+# terminal shows, which stays whole. No second grid is kept in step, and
+# nothing is copied but what changed. A whole frame swaps the two.
+#
+# What is painted inside the spans must equal what a whole paint puts
+# there, and a wide glyph is the one thing that reaches across an edge:
+# written over by half, it blanks its other half. So no span may cut a
+# glyph that some node's words put down: `Grid.units` widens the span to
+# take its run in and asks for the paint again. That covers the frame on the
+# terminal too — a glyph there was put down by a node that changed, whose
+# bounds are owed whole, or by one that puts it down again.
+export class Damage
+  constructor: ->
+    @whole = true
+    @cols = @rows = @top = 0
+    @passes = 0   # the paints the last frame took, for the tests to count
+    @lo = @hi = null
+
+  # Take the shape of `grid`, owing all of it or none.
+  shape!: (grid, whole) ->
+    unless @lo?.length is grid.rows
+      @lo = Int32Array.new grid.rows
+      @hi = Int32Array.new grid.rows
+    @cols = grid.cols
+    @rows = grid.rows
+    @top = grid.top
+    @whole = whole
+    @lo.fill (if whole then 0 else @cols)
+    @hi.fill (if whole then @cols else 0)
+
+  # Take another height: a row that stays owes what it did, and a row
+  # that comes is owed whole.
+  fit!: (rows) ->
+    return if rows is @rows
+    lo = Int32Array.new rows
+    hi = Int32Array.new(rows).fill @cols
+    lo.set @lo.subarray 0, Math.min(rows, @rows)
+    hi.set @hi.subarray 0, Math.min(rows, @rows)
+    @lo = lo
+    @hi = hi
+    @rows = rows
+
+  # Owe a box of tree coordinates.
+  box!: (left, top, right, bottom) ->
+    return if @whole
+    left = 0 if left < 0
+    right = @cols if right > @cols
+    return if left >= right
+    row = if top > @top then top - @top else 0
+    end = if bottom - @top < @rows then bottom - @top else @rows
+    while row < end
+      @lo[row] = left if left < @lo[row]
+      @hi[row] = right if right > @hi[row]
+      row += 1
+
+  # Whether a box of tree coordinates holds a cell that is owed.
+  hits: (left, top, right, bottom) ->
+    row = if top > @top then top - @top else 0
+    end = if bottom - @top < @rows then bottom - @top else @rows
+    while row < end
+      return true if @lo[row] < right and @hi[row] > left
+      row += 1
+    false
+
+  # Owe what `node` inked in the frame on the terminal: a box (`deep`
+  # false) its own rectangle, where a border or a background made it ink
+  # any; anything else the bounds the last survey left on it, shifted by
+  # the content offsets above it. A node under a hidden one inked
+  # nothing: the node that hid it owed its bounds. Nor did a node out of
+  # the tree, whose removal owed them.
+  old!: (node, deep) ->
+    return if @whole
+    dx = dy = 0
+    up = node
+    loop
+      if s = up.styles
+        return if s.hidden or s.display is 'none'
+        if up isnt node and s.display isnt 'contents'
+          dx -= Math.trunc s.contentOffsetX if s.contentOffsetX
+          dy -= Math.trunc s.contentOffsetY if s.contentOffsetY
+      break unless up.parentNode
+      up = up.parentNode
+    return unless up is node.ownerDocument.body
+    rect = node.rect
+    if deep
+      @box node.bl + dx, node.bt + dy, node.br + dx, node.bb + dy
+    else if node.styles.borderStyle? or node.styles.backgroundColor?
+      @box rect.x + dx, rect.y + dy, rect.x + rect.w + dx, rect.y + rect.h + dy
+
+  # The cells owed.
+  count: ->
+    cells = 0
+    for row in [0...@rows] when @lo[row] < @hi[row]
+      cells += @hi[row] - @lo[row]
+    cells
+
+# A node's bounds (`bl`, `bt`, `br`, `bb`) are the cells it and everything
+# under it can ink, in tree coordinates before any offset above it: a
+# box's rectangle, and its children's bounds as its own content offset
+# shifts them — held to its box on an axis it clips; a leaf's words,
+# which need not fill its box and may spill out of it. A change marks the node and every ancestor (`stain`,
+# document.rip), and only marked nodes are surveyed: a clean subtree
+# answers from the bounds it holds. What changed owes its cells as they
+# will be painted: a box that moved, or took another border or
+# background, (2) its rectangle where it inks one; anything else (3)
+# its bounds.
+survey! =! (node, dx, dy, damage) ->
+  stain = node.stain
+  rect = node.rect
+  l = rect.x
+  t = rect.y
+  r = l + rect.w
+  b = t + rect.h
+  if node.nodeType is 3 or node.tagName is 'span'
+    # A leaf inks its words and no more of its box: each row from the
+    # box's left, as far as the widest reaches.
+    stain = 3
+    r = l
+    b = t
+    flow = node.flow ?? refresh node
+    if flow.count
+      snug = flow.fits rect.w
+      flow.wrap rect.w, flow.mode unless snug
+      r = l + (if snug then flow.wide else flow.reach)
+      b = t + (if snug then 1 else flow.rows)
+  else
+    s = node.styles
+    damage.box l + dx, t + dy, r + dx, b + dy if stain is 2 and (s.borderStyle? or s.backgroundColor?)
+    ox = if s.contentOffsetX then Math.trunc s.contentOffsetX else 0
+    oy = if s.contentOffsetY then Math.trunc s.contentOffsetY else 0
+    clipX = (s.overflowX ?? s.overflow) is 'hidden'
+    clipY = (s.overflowY ?? s.overflow) is 'hidden'
+    for kid, n in kids(node)
+      survey kid, dx - ox, dy - oy, damage if kid.stain
+      unless clipX
+        l = kid.bl - ox if kid.bl - ox < l
+        r = kid.br - ox if kid.br - ox > r
+      unless clipY
+        t = kid.bt - oy if kid.bt - oy < t
+        b = kid.bb - oy if kid.bb - oy > b
+  node.bl = l
+  node.bt = t
+  node.br = r
+  node.bb = b
+  damage.box l + dx, t + dy, r + dx, b + dy if stain is 3
+  # Last, so a survey that fails leaves every node above it to be
+  # surveyed again.
+  node.stain = 0
 
 # ── Tree → grid ───────────────────────────────────────────────────────────────
 
@@ -511,6 +732,11 @@ draw! =! (grid, node, inherited, dx, dy, left, top, right, bottom) ->
   dx -= Math.trunc s.contentOffsetX if s.contentOffsetX
   dy -= Math.trunc s.contentOffsetY if s.contentOffsetY
   for kid, n in kids(node)
+    # A child whose bounds lie outside the clip or hold no owed cell is
+    # passed over with everything under it.
+    if patch
+      continue if kid.br + dx <= left or kid.bl + dx >= right or kid.bb + dy <= top or kid.bt + dy >= bottom
+      continue unless patch.whole or patch.hits kid.bl + dx, kid.bt + dy, kid.br + dx, kid.bb + dy
     own = id
     # A `display: contents` node draws no box, but what it says about
     # color and weight still reaches the children it lends its parent.
@@ -523,9 +749,46 @@ lent =! (node, owner, id) ->
   return id if node is owner or not node
   styleOf node, lent(node.parentNode, owner, id)
 
-export paint! =! (grid, node) ->
-  sweep grid if full 1.5
-  draw grid, node, 0, 0, 0, 0, -FAR, grid.cols, FAR
+patch = null   # the damage the paint under way is held to
+PASSES =! 4    # the most paints one frame may take
+
+# Paint the tree onto a grid. With no `damage` that is every node, onto
+# a grid the caller cleared. With it, `grid` is a scratch for the frame
+# that follows `front`, the grid on the terminal: what changed is
+# surveyed, the owed cells are blanked, and the walk passes over every
+# subtree that holds none of them. Everything is owed when `front` is
+# not a frame of this shape and these tables.
+export paint! =! (grid, node, damage = null, front = null) ->
+  patch = damage
+  early = full 1.5
+  unless damage
+    sweep grid if early
+    draw grid, node, 0, 0, 0, 0, -FAR, grid.cols, FAR
+    grid.clip 0, -FAR, grid.cols, FAR
+    return
+  same = front and front.cols is grid.cols and front.rows is grid.rows and front.top is grid.top and front.epoch is epoch
+  damage.shape grid, true if damage.whole or early or not same
+  damage.fit grid.rows
+  survey node, 0, 0, damage if node.stain
+  # Past half the grid a whole frame is the cheaper one: no subtree is
+  # tested against the spans, and the grids swap where cells are copied.
+  damage.shape grid, true if damage.count() * 2 > grid.cols * grid.rows
+  grid.lo = damage.lo
+  grid.hi = damage.hi
+  if damage.whole
+    grid.clear()
+    sweep grid if early
+  # A span that would cut a wide glyph takes its run in, twice, and then
+  # the whole row: the fourth paint finds nothing to cut.
+  damage.passes = 0
+  loop
+    grid.cut = false
+    grid.late = damage.passes > 1
+    grid.wipe() unless damage.whole
+    draw grid, node, 0, 0, 0, 0, grid.top, grid.cols, grid.top + grid.rows
+    damage.passes += 1
+    break unless grid.cut
+    throw Error.new "rip/tui: a paint did not settle in #{PASSES} passes — a wide glyph is cut by a row that is owed whole" if damage.passes >= PASSES
   grid.clip 0, -FAR, grid.cols, FAR
 
 # ── Sweep ─────────────────────────────────────────────────────────────────────
@@ -558,7 +821,7 @@ sweep! =! (grid) ->
   blends.clear()
   for record, n in kept
     records.push record
-    ids.set record.key, n
+    shelf(record.fg, record.bg).set record.key, n
   evict grid.ch
   frames.clear()
 
@@ -577,7 +840,10 @@ shows =! (front, back, drawn, row, i) ->
 # relative, so the frame can sit anywhere in the scrollback; a line feed
 # is the move down, since it alone makes a row that does not exist yet.
 # `front` is null before the first frame, and a frame of another width
-# or of another epoch is drawn from nothing.
+# or of another epoch is drawn from nothing. Only the columns `back` was
+# painted in are read, and under a `damage` that is not whole every cell
+# that differs is copied into `front`, which is then the frame on the
+# terminal and the grid a sweep renumbers.
 #
 # A line feed at the bottom of the screen scrolls, and a terminal with
 # background color erase fills the row it makes with the background then
@@ -587,23 +853,27 @@ shows =! (front, back, drawn, row, i) ->
 # A terminal may not agree how wide a cluster of several code points is
 # (a joined emoji, a flag, a base with its marks), and would put all that
 # follows on its row a cell off. The cell after one is therefore reached
-# by an absolute column move. One code point, wide or not, is left to
-# the width every terminal gives it.
+# by an absolute column move, as is the cell after a code point this
+# engine's Unicode leaves unassigned — both are cluster cells (text.rip).
+# Any other code point, wide or not, is left to the width every terminal
+# gives it.
 #
 # A hyperlink is open only while the cells it covers are written: it is
 # closed before every cursor move and at the end of every run, so no
 # move and no write ever happens inside one.
-export diff =! (front, back) ->
+export diff =! (front, back, damage = null) ->
   reuse = front? and front.cols is back.cols and front.epoch is back.epoch
+  keep = reuse and damage? and not damage.whole
   out = if reuse then '' else "\x1b[J"
-  drawn = if reuse then front.rows else 0
+  drawn = if reuse then front.drawn else 0
   at = 0
   held = 0
   url = null      # the link of the style held, and the link open on the terminal
   linked = null
   for row in [0...back.rows]
-    col = 0
-    while col < back.cols
+    col = back.lo[row]
+    end = back.hi[row]
+    while col < end
       if shows front, back, drawn, row, row * back.cols + col
         col += 1
         continue
@@ -622,7 +892,7 @@ export diff =! (front, back) ->
       at = row
       out += "\x1b[#{col + 1}G"
       loose = false
-      while col < back.cols
+      while col < end
         i = row * back.cols + col
         # A continuation cell goes with its glyph; it never ends a run.
         break if back.wide[i] isnt 0 and shows front, back, drawn, row, i
@@ -638,6 +908,10 @@ export diff =! (front, back) ->
           out += hop linked = url if url isnt linked
           out += if cell < CLUSTER then String.fromCodePoint(cell) else glyph cell
           loose = cell >= CLUSTER
+        if keep
+          front.ch[i] = back.ch[i]
+          front.style[i] = back.style[i]
+          front.wide[i] = back.wide[i]
         col += 1
       out += hop linked = null if linked
   out += "\x1b[0m" if records[held].sgr
@@ -648,5 +922,7 @@ export diff =! (front, back) ->
     out += "\r\x1b[J"
   out += "\x1b[#{at}A" if at > 0
   out += '\r' if out
-  sweep back if full 1
+  shown = if keep then front else back
+  shown.drawn = back.rows
+  sweep shown if full 1
   out

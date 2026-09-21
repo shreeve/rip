@@ -6,7 +6,7 @@
 
 import { __setChildFailureReporter } from '../../src/runtime/components.js'
 import { admit, blame } from './layout.rip'
-import { allow } from './paint.rip'
+import { allow, Damage, PARTS } from './paint.rip'
 import { sanitize, refresh } from './text.rip'
 
 # Styles that move boxes, and styles that only recolor cells.
@@ -80,6 +80,13 @@ watch =! (node) ->
 
 export NOWHERE =! Object.freeze { x: 0, y: 0, w: 0, h: 0 }
 
+# The leaf that draws `node`'s words: the outermost text it is a run of.
+# A `contents` text is no leaf — it lends its words to its parent, each
+# a leaf of its own.
+leafOf =! (node) ->
+  node = node.parentNode while node.parentNode?.tagName is 'span' and node.parentNode.styles.display isnt 'contents'
+  node
+
 export class Node
   constructor: (@nodeType) ->
     @ownerDocument = null
@@ -92,6 +99,8 @@ export class Node
     @rect = NOWHERE
     @cell = null
     @dirty = true
+    @stain = 3                       # what the painter has yet to survey (paint.rip)
+    @bl = @bt = @br = @bb = 0        # the bounds of everything inked from here down
     @lay = null       # layout's record of the node
     @measure = null   # a function that sizes it, where one is set
 
@@ -126,12 +135,14 @@ export class Node
         if KIND.get(key) is 'layout'
           throw blame Error.new("rip/tui: '#{key}' has no meaning on text nested in text — it is a run of words, styled by color and weight only"), node
     node.adopt @ownerDocument
+    node.mark 3
     @list = null
     @changed true
     node
 
   removeChild: (node) ->
     throw Error.new 'rip/tui: removeChild names a node that is not a child' unless node.parentNode is this
+    node.mark 3
     before = node.previousSibling
     after = node.nextSibling
     if before then before.nextSibling = after else @firstChild = after
@@ -158,14 +169,46 @@ export class Node
   place!: (x, y, w, h) ->
     rect = @rect
     return if rect.x is x and rect.y is y and rect.w is w and rect.h is h
+    @mark 2
     @rect = Object.freeze { x, y, w, h }
     @cell?.write @rect
 
+  # Tell the painter this node is about to change, BEFORE it does: the
+  # cells it inked are owed as they stand, and the node and every
+  # ancestor are marked for the survey that finds what it inks next.
+  # `level` 2 is a box whose own rectangle is all that changes, 3 is
+  # everything under it — and a box that clips, since its rectangle is
+  # the clip its children are held to; `still` says it will ink no cell
+  # it did not, so there is nothing to survey. A run of words is drawn by
+  # the leaf it is in, and a `contents` node inks nothing itself: what it
+  # says reaches the children it lends its parent.
+  mark!: (level, still = false) ->
+    node = leafOf this
+    s = node.styles
+    level = 3 if s and (s.overflow? or s.overflowX? or s.overflowY?)
+    if level is 3 and s?.display is 'contents'
+      kid = node.firstChild
+      while kid
+        kid.mark 3
+        kid = kid.nextSibling
+      return
+    @ownerDocument?.damage.old node, level is 3 or not s or node.tagName is 'span'
+    return if still
+    node.stain = level if level > node.stain
+    # A stained box's ancestors are stained already, so the climb stops
+    # at the first one — but passes a `contents` node, which no survey
+    # visits: its stain says nothing of the boxes above it.
+    node = node.parentNode
+    while node and (not node.stain or node.styles?.display is 'contents')
+      node.stain ||= 1
+      node = node.parentNode
+
   # Tell the document a frame is owed: `moved` when boxes may move,
   # false when only cells recolor. A move dirties this node and every
-  # ancestor, which is what layout reads to know its cached answer for
-  # them is stale; a dirty node's ancestors are dirty already, so the
-  # climb stops at the first one that is.
+  # ancestor, which is where layout looks for what changed; whether an
+  # ancestor's cached answer still stands is layout's to say (a change
+  # under a layout boundary stops there). A dirty node's ancestors are
+  # dirty already, so the climb stops at the first one that is.
   changed!: (moved) ->
     if moved
       node = this
@@ -213,13 +256,24 @@ export class Element extends Node
     else if meant and key is 'link'
       throw Error.new "rip/tui: 'link' has no meaning on a box — it makes a hyperlink of a text's words"
     value = undefined if value is '' or value is null or (value is false and not STANDING.has key)
+    # A border written as an object is kept as a copy of its eight
+    # glyphs: an object changed in place says nothing until it is set
+    # again, and then it is another border only if a glyph differs.
+    if key is 'borderStyle' and value and typeof value is 'object'
+      held = @styles[key]
+      return if held and PARTS.every (part) -> held[part] is value[part]
+      value = Object.freeze { ...value }
     return if @styles[key] is value
     # A value is refused here, on the line that wrote it, and not from
     # inside a later frame.
     if value isnt undefined
       admit key, value if kind is 'layout'
       allow key, value
+    # A border or a background recolors the box; any other style can
+    # reach everything under it.
+    @mark (if key.startsWith('border') or key is 'backgroundColor' then 2 else 3)
     if value is undefined then delete @styles[key] else @styles[key] = value
+    @mark 3 if key is 'display'
     @changed kind is 'layout'
 
   setAttribute!: (key, value) ->
@@ -288,14 +342,17 @@ export class Text extends Node
     value = sanitize value
     return if value is @text
     @text = value
-    leaf = this
-    leaf = leaf.parentNode while leaf.parentNode?.tagName is 'span'
+    leaf = leafOf this
     moved = true
     moved = refresh(leaf).moved if leaf.flow and leaf.lay and not leaf.dirty
+    # One line that fits its box inks cells of that box and no others,
+    # and the box lies within the bounds already owed.
+    leaf.mark 3, not moved and leaf.rect.h > 0 and leaf.flow.fits leaf.rect.w
     @changed moved
 
 export class Document
   constructor: ->
+    @damage = Damage.new()
     @body = Element.new 'div'
     @body.adopt this
     @moved = true

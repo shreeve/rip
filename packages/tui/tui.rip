@@ -45,6 +45,7 @@ open =! (App, options, out, terminal) ->
   throw Error.new 'rip/tui: an app is already mounted in this process — `quit` or `close` it first' if live
   { doc, restore } = install()
   view = Screen.new doc, out
+  view.whole = options.damage is false
   cols = view.cols
   rows = view.rows
   resized = ->
@@ -99,6 +100,9 @@ class Mount
   # sent to draw it: the difference from the frame before.
   get ansi: -> @held.view.front?.toString(true) ?? ''
   get bytes: -> @held.out.sent
+
+  # The cells the last frame owed: those it painted and compared.
+  get damage: -> @held.view.owed
 
   # Draw what the app shows and hand the frame back as plain text.
   frame: ->

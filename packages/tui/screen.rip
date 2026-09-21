@@ -1,7 +1,8 @@
 # The screen: owed frames become one write each. A frame is laid out
-# only when a box may have moved, painted into the spare grid, and sent
-# as the difference from the grid the terminal already shows, inside a
-# synchronized update so the terminal never shows half of it.
+# only when a box may have moved; the cells it owes — the document's
+# damage — are painted into the spare grid and sent as their difference
+# from the grid the terminal already shows, inside a synchronized update
+# so the terminal never shows half of it.
 
 import { layout } from './layout.rip'
 import { Grid, paint, diff } from './paint.rip'
@@ -28,6 +29,8 @@ export class Screen
     @booked = false
     @last = 0
     @failed = null
+    @whole = false   # owe every cell of every frame, for a test to compare against
+    @owed = 0        # the cells the last frame owed
 
   get cols: -> @out.columns ?? 80
   get rows: -> @out.rows ?? 24
@@ -41,15 +44,22 @@ export class Screen
     tall = @doc.body.rect.h
     shown = Math.min tall, @rows
     back = @spare
-    if back and back.cols is @cols and back.rows is shown
-      back.top = tall - shown
-      back.clear()
-    else
-      back = Grid.new @cols, shown, tall - shown
-    paint back, @doc.body
-    bytes = diff @front, back
-    @spare = @front
-    @front = back
+    back = Grid.new @cols, shown unless back and back.cols is @cols and back.rows is shown
+    back.top = tall - shown
+    damage = @doc.damage
+    damage.whole = true if @whole
+    # A frame of another height, its top row the same, keeps the rows
+    # that stay.
+    front = @front
+    @front = front.tall shown if front and not damage.whole and front.rows isnt shown and front.cols is @cols and front.top is back.top
+    paint back, @doc.body, damage, @front
+    bytes = diff @front, back, damage
+    @owed = damage.count()
+    # A whole frame is the spare grid entire; any other was copied into
+    # the front one as it was compared.
+    @spare = if damage.whole then @front else back
+    @front = back if damage.whole
+    damage.shape @front, false
     @out.write "\x1b[?2026h#{bytes}\x1b[?2026l" if bytes
 
   # Draw what is owed, once this turn's writes are in and no sooner than

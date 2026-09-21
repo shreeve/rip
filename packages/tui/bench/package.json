@@ -7,6 +7,7 @@
   "scripts": {
     "ink": "NODE_ENV=production rip ink.rip",
     "tui": "rip tui.rip",
+    "frame": "rip frame.rip",
     "profile": "rip profile.rip"
   },
   "dependencies": {

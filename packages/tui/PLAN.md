@@ -128,15 +128,15 @@ write by hand; hot loops use the indexed `for x, i in` form).
 
 | Module | Job | Code lines |
 |---|---|---|
-| `tui.rip` | Entry: `run`, `mount`, `renderToString`, `screen`, widgets; to come: `focus`, `clock` | 109, about 220 when complete |
-| `document.rip` | Terminal document: nodes, tree links, events, style road | 244 |
-| `layout.rip` | Flexbox, containing blocks, baseline, cache, edge rounding | 1,437 |
-| `text.rip` | Sanitize, grapheme clusters, width, wrap, truncate | 312 |
-| `paint.rip` | Cell grids, styles, clip, borders, backgrounds, diff; to come: damage | 400, about 550 |
-| `screen.rip` | Frames and pacing; to come: alternate screen, `Static`, non-TTY | 53, about 250 |
+| `tui.rip` | Entry: `run`, `mount`, `renderToString`, `screen`, widgets; to come: `focus`, `clock` | 111, about 220 when complete |
+| `document.rip` | Terminal document: nodes, tree links, events, style road, damage marks | 278 |
+| `layout.rip` | Flexbox, containing blocks, baseline, cache, edge rounding | 1,461 |
+| `text.rip` | Sanitize, grapheme clusters, width, wrap, truncate | 421 |
+| `paint.rip` | Cell grids, styles, clip, borders, backgrounds, damage, diff | 597 |
+| `screen.rip` | Frames and pacing; to come: alternate screen, `Static`, non-TTY | 56, about 250 |
 | `input.rip` | To come: key tokenizer and decoder, paste, mouse, keyboard negotiation | about 250 |
 | `terminal.rip` | To come: setup / teardown, signals, suspend, console capture | about 170 |
-| | **Total** | **2,555 built; about 3,400 complete** |
+| | **Total** | **2,924 built; about 3,650 complete** |
 
 Lines are counted as §2 counts them: non-blank and non-comment.
 
@@ -434,17 +434,53 @@ next drawn. A grid left out of a sweep says so by its epoch and is
 drawn from nothing. Frames that are never diffed (`renderToString`)
 are swept as a paint starts.
 
-**Damage** is a `[lo, hi)` span per row, the union of a node's old and
-new boxes. Paint walks the tree clipped to the damage and skips
-subtrees that do not intersect. The saving is the skipped walk, not
-the diff. Clip is four integers passed down the recursion. Z-order is
-tree order with absolute nodes deferred into a stable list.
+**Damage** is a `[lo, hi)` span per row of the grid on the terminal:
+the union of what every changed node inked and what it will. Every
+change passes through a setter, and the setter says so BEFORE the node
+changes (`Node.mark`): the cells it inked are owed as they stand, and
+the node and its ancestors are marked for a survey. What a node inks
+is not its box — words spill out of theirs, children overflow, a
+content offset shifts them, an absolute child sits anywhere — so each
+node holds the bounds of everything inked from it down, in its own
+coordinates, held to its box on an axis it clips. Before a paint, the
+survey walks the marked paths only, renews those bounds, and owes what
+changed as it will be painted.
+
+| Change | Owes |
+|---|---|
+| A text of unchanged size, one line that fits its box | Its leaf's bounds, and no survey |
+| Any other text; a style of a text | The leaf's bounds, before and after |
+| A border or a background | The box, where it has either |
+| Any other style of a box: a color or weight that passes down, a clip, a content offset, a layout style | The bounds of everything under it, before and after |
+| A box that layout moves or resizes (`Node.place`) | The box where it was and where it is, where it inks one; its bounds if it clips; every box under it that moves says the same |
+| A node inserted, removed, or moved | Its bounds where it was, and where it is |
+| A node hidden or shown | Its bounds; while hidden, nothing |
+| A `contents` node | Whatever it says is said of the children it lends |
+| A frame of another height, its top row the same | What the rows that stay owe, and every cell of a row that comes; the rows that go are erased |
+| A first frame, a resize, a frame of another top row, a sweep as a paint starts, damage past half the grid | Every cell |
+
+The paint is held to the spans — each grid write is cut to its row's
+span — and walks the tree in order, passing over every child whose
+bounds hold no owed cell or lie outside the clip, so whatever lies over
+or under a change is painted again inside it, and text with no
+background finds the cell beneath it freshly painted. The spare grid is
+a scratch: only owed cells are blanked, painted, and compared, and the
+diff copies each cell that differs into the grid the terminal shows,
+which stays whole; a whole frame swaps the two. Nothing else reaches
+across a span's edge but a wide glyph, which blanks its other half when
+half of it is written over; so a glyph that a span would cut widens the
+span to the run of words it is in, and the paint runs again — twice at
+most, then once more with the row owed whole, which nothing cuts. The diff reads the same cells in the
+same order a whole diff would find changed, so the bytes are the same.
+Clip is four integers passed down the recursion. Z-order is tree order.
 
 **Emit.** Diff dirty rows, group runs, move with the cheapest of CUF /
 CHA / CUP (inline mode uses relative vertical moves only), rewrite a
 row when more than about half changed, build one string, make one
 `write`, inside synchronized output (DEC 2026). After a cell of more
-than one code point, an absolute column move keeps a width
+than one code point, or of one that Unicode leaves unassigned (a later
+terminal may draw it wide; a private use glyph is one cell and gets no
+move), an absolute column move keeps a width
 disagreement with the terminal to that glyph (measured: a CJK-heavy
 80×40 frame is 5,008 bytes this way and 12,648 with a move after
 every wide cell). A line feed is never written with a background
@@ -609,8 +645,8 @@ run App
 
 - `run(App, {altScreen, mouse, keyboard, stdin, stdout})` →
   `{app, done, quit, flush}`; `suspend(fn)`; `print(text)`.
-- `mount(App, {cols, rows, props})` → `{app, frame, ansi, bytes,
-  resize, close, done}` is the test driver (§10), and
+- `mount(App, {cols, rows, props, damage})` → `{app, frame, ansi, bytes,
+  damage, resize, close, done}` is the test driver (§10), and
   `renderToString(App, {cols, rows, props, ansi})` is a mount, one
   frame, and a close.
 - `screen` (`cols`, `rows`, `interactive`) and `focus` (`active`,
@@ -644,6 +680,13 @@ run App
   text 57 (minus ANSI), wrap and width 32, dimensions 29, content
   offset 23, position 13, render-to-string 37, log-update 34, resize
   10, synchronized write 5, static 5, wide-character regressions 10.
+- **Damage:** `test/damage.rip` changes random trees a step at a time
+  — texts, styles, clips, offsets, nodes inserted, removed, moved,
+  hidden, a keyed list driven through its component, resizes — and
+  after every frame holds the grid painted from its damage to the same
+  tree painted whole, cell for cell, and the bytes sent, replayed over
+  what the terminal showed, to that frame: glyphs, colors, links.
+  `test.rip` holds each kind of change to the cells it owes.
 - **Input:** about 100 ported parser cases, plus focus and dispatch.
 - **The test driver is public,** because users' tests are a contract
   too. `mount(App, {cols, rows, props})` is `run` without a terminal:
@@ -653,9 +696,10 @@ run App
   public state a test sets, and draws only when asked: `frame()` lays
   out, paints, and answers the frame as plain text; `ansi` is that
   frame with its escape sequences; `bytes` is what the terminal was
-  sent for it, the difference from the frame before, which is what a
-  test of damage tracking reads; `resize(cols, rows)` draws the next
-  frame whole; `close()` unmounts and restores the globals. A frame
+  sent for it, the difference from the frame before; `damage` is the
+  cells it painted and compared, which is what a test of damage
+  tracking reads, and `damage: false` owes every cell of every frame;
+  `resize(cols, rows)` draws the next frame whole; `close()` unmounts and restores the globals. A frame
   that fails throws from `frame`, to the test that asked. A `quit`
   from the app closes the mount and resolves `done`. Simulated input
   joins it with §7.
@@ -733,6 +777,28 @@ frame, no damage tracking, no layout cache) on the same scenarios,
 These rank the two and are not README numbers: the terminal reducer
 that proves both sides drew the same screen lands with the published
 bench (PR 6).
+
+**One frame, whole and damaged.** `bun run frame` times the frame
+alone — paint, diff, write; the state change left out, no layout owed —
+twice for each scenario: owing every cell (`damage: false`), and owing
+its damage. Median microseconds on a 200×60 terminal, and the cells the
+damaged frame painted and compared; the bytes are the same either way,
+and the run refuses to report if they are not:
+
+| Scenario | Whole | Damaged | Cells |
+|---|---|---|---|
+| One cell of a 1,000-element tree | 65 | 1.1 | 7 |
+| One cell of a full 200×60 table | 125 | 0.8 | 4 |
+| Every cell of that table | 160 | 165 | 12,000 |
+| One of 200 bordered panels of wide text | 90 | 0.9 | 8 |
+| A 40-line log whose last row comes and goes, laid out each time | 57 | 24 | 200 |
+
+A small update's paint and diff fall with its damage, and a frame that
+changes everything costs what a whole one does. Under `bun run tui` the
+counter in a 1,000-element tree is about 15 µs of CPU an update. 100%
+churn of the 40×8 table is about 170 µs over a long run (`rip tui.rip
+table100 40`, 12,000 updates) and about 340 µs over the 300 updates of
+a default run, which end while the engine is still compiling the path.
 
 What this settles:
 
