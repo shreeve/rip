@@ -1,14 +1,16 @@
 # Input: the bytes a terminal sends become events.
 #
-#   parser = Parser.new { escape: 50, clock, late, paste }
+#   parser = Parser.new { escape: 50, patience: 1000, clock, late, paste }
 #   events = parser.feed chunk      # a string or a Uint8Array
+#   events = parser.flush()         # every wait run out, now
+#   parser.holding                  # null, 'escape', 'sequence', 'string', 'paste'
 #
 # `feed` answers the events the chunk completed; a sequence cut by the
 # end of a read is held for the next one, and a character of UTF-8 cut
-# the same way comes out whole. The one event time completes — the
-# Escape key — has no chunk to be answered from, and is handed to `late`
-# as a list. `clock` is `{ after(ms, fn) -> cancel }`, the runtime's
-# timers unless a test brings its own.
+# the same way comes out whole. What time completes has no chunk to be
+# answered from, and is handed to `late` as a list. `clock` is
+# `{ after(ms, fn) -> cancel }`, the runtime's timers unless a test
+# brings its own. `reset` forgets everything held, in silence.
 #
 #   { type: 'key', key, ctrlKey, shiftKey, altKey, metaKey, repeat, sequence }
 #   { type: 'paste', text }
@@ -28,17 +30,31 @@
 # cells counted from zero; a wheel has `deltaX` and `deltaY` and no
 # button (-1), as a move with none held has.
 #
-# Time has one rule. An ESC with nothing after it for `escape`
-# milliseconds is the Escape key. Any other sequence still partial then
-# is DISCARDED, never typed, as is one cut short by a byte that cannot
-# continue it. Bytes that arrive after the timeout are read as what they
+# Time has three rules, by what a person can have typed.
+#
+#   1. ESC with nothing after it for `escape` milliseconds is the Escape
+#      key.
+#   2. ESC and an introducer — `[ O ] P _ ^ X` — with nothing after it
+#      for `escape` milliseconds is Alt and that character, as ESC and
+#      any other character is at once. A person types Esc and then O; no
+#      terminal leaves a bare introducer hanging. Before a byte that
+#      cannot continue it, a bare `ESC [` or `ESC O` is the same.
+#   3. A sequence that holds a byte past its introducer, a string with
+#      content, and an open paste were not typed by a person, and have
+#      `patience` milliseconds for their next byte, so a slow link
+#      completes them. Past it the sequence or string is DISCARDED,
+#      never typed — as one cut short by a byte that cannot continue it
+#      is — and the paste ends as what was collected.
+#
+# Every read that holds a character starts the wait again; an empty one
+# does not. Bytes that arrive after a wait ran out are read as what they
 # are alone: the parser cannot know they belonged to what it gave up on.
 #
 # Every byte is read once, and what is held is bounded: a CSI or SS3
 # sequence to LONGEST characters (a longer one is swallowed to its final
-# byte and discarded), an OSC, DCS or APC string to nothing at all, and
-# a paste to `paste` characters an event (a longer one arrives in
-# pieces, in order). Nothing a terminal sends makes `feed` throw.
+# byte and discarded), an OSC, DCS, APC, PM or SOS string to nothing at
+# all, and a paste to `paste` characters an event (a longer one arrives
+# in pieces, in order). Nothing a terminal sends makes `feed` throw.
 
 ESC =! '\x1b'
 END =! '\x1b[201~'     # xterm ctlseqs, "Bracketed Paste Mode"
@@ -49,11 +65,15 @@ PIECE   =! 1 << 22     # characters of one paste event
 GROUND   =! 0
 ESCAPE   =! 1          # after ESC
 SEQUENCE =! 2          # after ESC [ or ESC O
-STRING   =! 3          # after ESC ] or ESC P or ESC _
+STRING   =! 3          # after ESC and one of ] P _ ^ X
 ENDING   =! 4          # after an ESC inside a string
 PASTE    =! 5          # after CSI 200 ~
 
+HOLDING =! [null, 'escape', 'sequence', 'string', 'string', 'paste']
+RUN     =! 1024        # the reads of a paste joined into one string
+
 STREAM =! { stream: true }
+WHOLE  =! { ignoreBOM: true }   # a byte-order mark is a character, not the decoder's to take
 TIMERS =! { after: (ms, fn) -> (timer = setTimeout fn, ms; -> clearTimeout timer) }
 
 BODY =! /^[\d;:]*$/
@@ -67,6 +87,11 @@ STOP =! /[\x07\x1b]/g
 # and CSI 1 ; mod P modified. E is the keypad's 5, which DOM names
 # Clear, and Z is xterm's back-tab.
 FINAL =! { A: 'ArrowUp', B: 'ArrowDown', C: 'ArrowRight', D: 'ArrowLeft', E: 'Clear', F: 'End', H: 'Home', P: 'F1', Q: 'F2', R: 'F3', S: 'F4', Z: 'Tab' }
+
+# The finals of SS3 alone: the keypad in application mode (DECKPAM;
+# xterm ctlseqs, "VT220-Style Function Keys"), each key typing what it
+# shows.
+PAD =! { M: 'Enter', X: '=', j: '*', k: '+', l: ',', m: '-', n: '.', o: '/', p: '0', q: '1', r: '2', s: '3', t: '4', u: '5', v: '6', w: '7', x: '8', y: '9' }
 
 # CSI number ~. 7 and 8 are the Home and End kitty also lists; the
 # function keys skip 16, 22, 27 and 30, as xterm's do; 57427 is kitty's
@@ -132,9 +157,10 @@ keyOf =! (code, mods, shifted) ->
   String.fromCodePoint code
 
 # CSI < b ; x ; y M or m (xterm ctlseqs, "Extended coordinates"). The
-# low two bits of b are the button, 3 meaning none; 4, 8 and 16 are
-# shift, alt and ctrl; 32 is motion; 64 a wheel, whose low bits are up,
-# down, left, right; 128 the buttons past the third.
+# low two bits of b are the button; 4, 8 and 16 are shift, alt and
+# ctrl; 32 is motion; 64 a wheel, whose low bits are up, down, left,
+# right; 128 xterm's buttons 8 to 11, DOM's 3 to 6. Low bits of 3 are
+# "no button" only under neither flag.
 mouse =! (fields, final, out) ->
   return unless fields.length is 3 and (final is 'M' or final is 'm')
   bits = num fields[0]
@@ -143,7 +169,7 @@ mouse =! (fields, final, out) ->
   return unless bits >= 0 and x >= 0 and y >= 0
   wheel = (bits & 64) isnt 0
   action = if wheel then 'wheel' else if bits & 32 then 'move' else if final is 'M' then 'down' else 'up'
-  button = if wheel or (bits & 3) is 3 then -1 else (bits & 3) + (if bits & 128 then 3 else 0)
+  button = if wheel then -1 else if bits & 128 then (bits & 3) + 3 else if (bits & 3) is 3 then -1 else bits & 3
   event = { type: 'mouse', action, button, x: Math.max(0, x - 1), y: Math.max(0, y - 1) }
   if wheel
     step = if bits & 1 then 1 else -1
@@ -178,32 +204,60 @@ cursor =! (fields, out) ->
 # ── The parser ────────────────────────────────────────────────────────────────
 
 export class Parser
-  constructor: ({ escape = 50, clock = TIMERS, late = null, paste = PIECE } = {}) ->
+  constructor: ({ escape = 50, patience = 1000, clock = TIMERS, late = null, paste = PIECE } = {}) ->
     @wait = escape
+    @long = patience
     @clock = clock
     @late = late
     @most = paste
     @stop = null
     @reset()
 
-  # Forget what is held, and disarm the timer.
+  # Forget what is held — a pending Escape with it — and disarm the timer.
   reset!: ->
     @stop?()
     @stop = null
     @state = GROUND
-    @seq = ''       # the sequence so far, from its ESC
+    @seq = ''       # the sequence so far, from its ESC; of a string, its introducer until it has content
     @bell = false   # the string is an OSC, which BEL ends too
-    @parts = []     # the paste so far, but for `tail`
-    @size = 0       # the characters in `parts`
+    @runs = []      # the paste so far, RUN reads to a string
+    @parts = []     # its reads since the last run, but for `tail`
+    @size = 0       # the characters in both
+    @cut = false    # a piece of this paste has gone out
     @tail = ''      # its last characters, which may begin the terminator
     @half = ''      # a high surrogate that ended a string chunk
-    @utf8 = TextDecoder.new()
+    @bytes = false  # the last read was bytes, so the decoder may hold half a character
+    @utf8 = TextDecoder.new 'utf-8', WHOLE
 
   # The characters held.
   get pending: -> @seq.length + @size + @tail.length + @half.length
 
+  # What is held, for whoever must decide whether to wait for it.
+  get holding: -> HOLDING[@state]
+
+  # Every wait run out, now — for a suspend, a blur, a shutdown. The
+  # events are answered, not handed to `late`, and half a character held
+  # is let go.
+  flush: ->
+    out = []
+    @settle out
+    @half = ''
+    @utf8.decode()
+    out
+
+  # A read of the other kind finds what the last one left in halves
+  # broken: bytes that end inside a character are U+FFFD to a string
+  # that follows, and half a surrogate pair is nothing to bytes.
   feed: (chunk) ->
-    text = if typeof chunk is 'string' then @whole chunk else @utf8.decode chunk, STREAM
+    if typeof chunk is 'string'
+      chunk = @utf8.decode() + chunk if @bytes
+      @bytes = false
+      text = @whole chunk
+    else
+      @half = ''
+      @bytes = true
+      text = @utf8.decode chunk, STREAM
+    return [] unless text
     if @tail
       text = @tail + text
       @tail = ''
@@ -217,18 +271,36 @@ export class Parser
         when STRING   then at = @string text, at
         when ENDING   then at = @ending text, at
         else               at = @paste text, at, out
-    # A sequence held at the end of a read has `wait` milliseconds for
-    # its next byte. A paste has no timer: only its terminator ends it.
+    # What a person can have typed — ESC, or ESC and an introducer, which
+    # is when `seq` is one or two characters — waits `wait`; anything
+    # else held waits `long`.
     @stop?()
-    @stop = if @state is GROUND or @state is PASTE then null else @clock.after @wait, => @expire()
+    @stop = if @state is GROUND then null else @clock.after (if @seq.length in [1, 2] then @wait else @long), => @expire()
     out
 
   expire!: ->
-    lone = @state is ESCAPE
+    out = []
+    @settle out
+    @late? out if out.length
+
+  # What is held when its wait runs out: ESC alone is the Escape key, a
+  # bare introducer is Alt and its character, an open paste ends as what
+  # was collected, and anything else is discarded.
+  settle!: (out) ->
+    @stop?()
     @stop = null
+    state = @state
+    held = @seq
     @state = GROUND
     @seq = ''
-    @late? [press 'Escape', ESC, 0, false] if lone
+    if state is ESCAPE
+      out.push press 'Escape', ESC, 0, false
+    else if held.length is 2
+      @ground held, 1, out, 2
+    else if state is PASTE
+      @take @tail, 0, @tail.length, out
+      @tail = ''
+      @piece out
 
   # A string chunk that ends between the halves of a surrogate pair:
   # the first half waits for the second, as a decoder's bytes do.
@@ -263,11 +335,11 @@ export class Parser
       out.push press glyph, sequence, (if code >= 65 and code <= 90 then mods | 1 else mods), false
     at + size
 
-  # The character after an ESC. `[` and `O` open CSI and SS3; `]`, `P`
-  # and `_` open the strings a terminal answers queries with (OSC, DCS,
-  # APC), so Alt with those five is not reported by a plain terminal. A
-  # second ESC cannot continue the first, which is therefore the Escape
-  # key: a doubled ESC is not read as Meta.
+  # The character after an ESC. `[` and `O` open CSI and SS3, and `]`,
+  # `P`, `_`, `^` and `X` the strings OSC, DCS, APC, PM and SOS; each is
+  # also what Alt with that key sends, which is what it is if nothing
+  # follows. A second ESC cannot continue the first, which is therefore
+  # the Escape key: a doubled ESC is not read as Meta.
   escape: (text, at, out) ->
     code = text.charCodeAt at
     switch code
@@ -278,10 +350,10 @@ export class Parser
         @state = SEQUENCE
         @seq = if code is 0x5b then '\x1b[' else '\x1bO'
         return at + 1
-      when 0x5d, 0x50, 0x5f
+      when 0x5d, 0x50, 0x5f, 0x5e, 0x58
         @state = STRING
         @bell = code is 0x5d
-        @seq = ''
+        @seq = ESC + text[at]
         return at + 1
     @state = GROUND
     @seq = ''
@@ -289,9 +361,10 @@ export class Parser
 
   # The body of a CSI or SS3 sequence (ECMA-48 5.4): parameter and
   # intermediate bytes, 0x20 to 0x3F, then a final byte, 0x40 to 0x7E.
-  # Any other byte cuts the sequence short: it is discarded, and that
-  # byte is read fresh. Past LONGEST nothing more is kept, and the
-  # sequence is swallowed to its final byte.
+  # Any other byte cuts the sequence short and is read fresh: a bare
+  # introducer was Alt and its character, and a sequence that held more
+  # is discarded. Past LONGEST nothing more is kept, and the sequence is
+  # swallowed to its final byte.
   sequence: (text, at, out) ->
     to = at
     to += 1 while (code = text.charCodeAt to) >= 0x20 and code <= 0x3f
@@ -302,13 +375,16 @@ export class Parser
     held = @seq
     @state = GROUND
     @seq = ''
-    return to unless code >= 0x40 and code <= 0x7e
+    unless code >= 0x40 and code <= 0x7e
+      @ground held, 1, out, 2 if held.length is 2 and to is at
+      return to
     @decode held + text.slice(at, to + 1), out if to + 1 - at < room
     to + 1
 
   # A string is swallowed and nothing of it is kept. ST (ESC \) ends it,
   # and BEL ends an OSC (xterm ctlseqs, "Operating System Commands").
   string: (text, at) ->
+    @seq = ''
     STOP.lastIndex = at
     while found = STOP.exec text
       if text.charCodeAt(found.index) is 0x1b
@@ -348,19 +424,32 @@ export class Parser
 
   # The paste takes `text` from `from` to `to`. A piece is cut at the
   # same character however the paste was read, and never between the
-  # halves of a surrogate pair.
+  # halves of a surrogate pair. A paste read a character at a time is
+  # not an entry a read: every RUN reads are joined into one string.
   take!: (text, from, to, out) ->
     while @size + to - from >= @most
       cut = from + @most - @size
       cut -= 1 if @size + cut - from > 1 and text.charCodeAt(cut - 1) >= 0xd800 and text.charCodeAt(cut - 1) <= 0xdbff
       @parts.push text.slice from, cut
-      @piece out
+      @emit out
+      @cut = true
       from = cut
+    return unless to > from
     @parts.push text.slice from, to
     @size += to - from
+    return unless @parts.length >= RUN
+    @runs.push @parts.join ''
+    @parts = []
 
+  # The end of a paste: what is left of it, or all of it — so a paste of
+  # nothing is an event, and a paste of the cap exactly is one.
   piece!: (out) ->
-    out.push { type: 'paste', text: @parts.join '' }
+    @emit out if @size or not @cut
+    @cut = false
+
+  emit!: (out) ->
+    out.push { type: 'paste', text: @runs.join('') + @parts.join('') }
+    @runs = []
     @parts = []
     @size = 0
 
@@ -388,7 +477,8 @@ export class Parser
     mods = Math.max 0, (num(mod[0]) or 1) - 1
     # CSI row ; column R is the cursor's place, and CSI 1 ; mod R with
     # mod from 2 to 16 is xterm's modified F3: a cursor on row 1 in
-    # those columns reads as the key, which is why DECXCPR exists.
+    # those columns reads as the key. The package's own cursor probe is
+    # therefore DECXCPR, CSI ? 6 n, whose reply `answer` reads.
     if final is 'R' and not ss3 and fields.length is 2 and mod.length is 1 and not (code is 1 and mods >= 1 and mods <= 15)
       cursor fields, out
       return
@@ -397,9 +487,7 @@ export class Parser
     kind = num mod[1]
     return if kind is 3
     key = null
-    if ss3
-      key = if final is 'M' then 'Enter' else FINAL[final]   # SS3 M: the keypad's Enter
-    else if final is 'u'
+    if final is 'u' and not ss3
       # CSI code : shifted : base ; mods : event ; text u (kitty, "Key
       # codes", "Text as code points"). The text is what the key typed,
       # a key event per code point. The base-layout key is read past:
@@ -410,21 +498,25 @@ export class Parser
         typed = true
       return if typed
       key = keyOf code, mods, num first[1]
-    else if final is '~'
+    else if final is '~' and not ss3
       if code is 200
         @state = PASTE
         return
       # CSI 27 ; mod ; code ~ is xterm's modifyOtherKeys, which tmux
       # forwards under `extended-keys`.
       key = if code is 27 then keyOf(num(fields[2]), mods) else TILDE[code]
-    else if (final is 'I' or final is 'O') and not body
+    else if (final is 'I' or final is 'O') and not body and not ss3
       out.push { type: (if final is 'I' then 'focus' else 'blur') }   # xterm ctlseqs, "FocusIn/FocusOut"
       return
     else
-      key = FINAL[final]
+      key = (if ss3 then PAD[final]) ?? FINAL[final]
+      # A final's first parameter is 1 or nothing — or, alone, the
+      # modifier itself, from 2 to 16: xterm's old form
+      # (modifyCursorKeys: 0), where CSI 5 A and SS3 5 A are Ctrl-Up.
+      if fields.length is 1 and first.length is 1 and code >= 2 and code <= 16
+        mods = code - 1
+      else if fields[0] isnt '' and fields[0] isnt '1'
+        return
+      mods |= 1 if final is 'Z'
     return unless key
-    # The modifier as the only parameter is xterm's old form
-    # (modifyCursorKeys: 0): CSI 5 A and SS3 5 A are Ctrl-Up.
-    mods = code - 1 if final isnt '~' and final isnt 'u' and fields.length is 1 and code > 1
-    mods |= 1 if final is 'Z'
     out.push press key, seq, mods, kind is 2
