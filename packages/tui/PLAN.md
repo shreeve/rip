@@ -45,7 +45,7 @@ together:
 | Row | Ink + Yoga | Rip TUI (budget) |
 |---|---|---|
 | Framework only | Ink `src/` ≈ 7,250 | ≈ 1,900 |
-| Framework + layout algorithm | + `yoga/algorithm/` 4,679 ≈ 12,000 | ≈ 3,600 |
+| Framework + layout algorithm | + `yoga/algorithm/` 4,679 ≈ 12,000 | ≈ 3,700 |
 | Full runtime closure | + React, react-reconciler, 23 npm deps | + Rip runtime 2,262 |
 
 The honest headline is **roughly 3× smaller**, not more. Raw totals
@@ -71,20 +71,29 @@ concepts each one needs, and public export count (Ink: 6 components,
 A smaller number means nothing if it comes from missing features. The
 README carries this matrix.
 
-| Must match in v0.1 | Disclosed gaps in v0.1 | Never |
-|---|---|---|
-| Flexbox layout incl. baseline and static position, borders, backgrounds | Screen-reader output mode (`role` / `aria-*` are accepted from the start, §13) | React devtools |
-| `overflow: hidden` clipping | Mouse (§13) | Concurrent rendering, Suspense |
-| Wrap and truncate modes | Kitty keyboard negotiation (CSI-u is decoded) | |
-| `Static` scrollback output | Windows — unclaimed and untested, as for Rip itself (§13) | |
-| Inline and alternate-screen rendering | String `Transform` (replaced, see §6) | |
-| Synchronized, diffed, coalesced output | Animation helper | |
-| Non-TTY / CI output, `NO_COLOR`, color depth | OSC 8 hyperlinks beyond a `link` prop | |
-| Console capture while rendering | List virtualization | |
-| Error display with terminal restore | | |
-| `renderToString` and a test driver | | |
-| Node metrics (`useBoxMetrics` equivalent) | | |
-| Key input, paste, focus, cursor placement | | |
+| Must match in v0.1 | Beyond Ink in v0.1 | Disclosed gaps in v0.1 | Never |
+|---|---|---|---|
+| Flexbox layout incl. baseline and static position, borders, backgrounds | Mouse, opt-in: `@click`, `@wheel` (§7) | Screen-reader output mode (`role` / `aria-*` are accepted from the start, §13) | React devtools |
+| `overflow: hidden` clipping | Keys bubble from the focused node, with preventable default actions | Windows — unclaimed and untested, as for Rip itself (§13) | Concurrent rendering, Suspense |
+| Scrolling by content offset (`contentOffsetX` / `contentOffsetY`) | Tree-order focus | List virtualization | |
+| Wrap and truncate modes | Node-relative cursor placement | Aspect ratio (§5) | |
+| `Static` scrollback output | A text change of unchanged size runs no layout | | |
+| Inline and alternate-screen rendering | | | |
+| Synchronized, diffed, coalesced output | | | |
+| Non-TTY / CI output, `NO_COLOR`, color depth | | | |
+| Console capture while rendering | | | |
+| Error display with terminal restore | | | |
+| `renderToString` and a test driver | | | |
+| Node metrics (`useBoxMetrics` equivalent) | | | |
+| Key input, paste, focus, cursor placement | | | |
+| Enhanced keyboard (kitty protocol), opt-in | | | |
+| Animation clock (`useAnimation` equivalent) | | | |
+| Hyperlinks: a `link` prop (OSC 8) | | | |
+
+Ink's string `Transform` has no counterpart because it has no job
+here: a text transform is an ordinary expression in the binding
+(`"#{name.toUpperCase()}"`), and per-cell restyling is a style
+callback (§6).
 
 ## 3. Architecture
 
@@ -108,15 +117,15 @@ write by hand; hot loops use the indexed `for x, i in` form).
 
 | Module | Job | Budget |
 |---|---|---|
-| `tui.rip` | Entry: `run`, `screen`, `focus`, widgets | 200 |
+| `tui.rip` | Entry: `run`, `screen`, `focus`, `clock`, widgets | 230 |
 | `document.rip` | Terminal document: nodes, tree links, events, style road | 250 |
 | `layout.rip` | Flexbox, containing blocks, baseline, cache, dirty propagation, edge rounding | 1,700 |
 | `paint.rip` | Cell buffers, styles, clip, borders, damage, diff, emit | 650 |
 | `text.rip` | Sanitize, graphemes, width, wrap, truncate | 170 |
 | `screen.rip` | Inline / alternate, `Static`, resize, non-TTY, scheduler | 290 |
-| `input.rip` | Key tokenizer and decoder, paste | 170 |
+| `input.rip` | Key tokenizer and decoder, paste, mouse reports, keyboard negotiation | 250 |
 | `terminal.rip` | Setup / teardown, signals, suspend, console capture | 170 |
-| | **Total** | **≈ 3,600** |
+| | **Total** | **≈ 3,700** |
 
 Also at the package root: `test.rip`, `demo.rip`, `bench.rip`,
 `bench/` (its own `package.json` quarantining Ink, React, and
@@ -343,8 +352,7 @@ an `isActive` flag, and a text input cannot keep Tab.
 
 The event mirrors DOM `KeyboardEvent`: `key`, `ctrlKey`, `shiftKey`,
 `altKey`, `metaKey`, `repeat`, `sequence`. Events: `@keydown`,
-`@paste`, `@focus`, `@blur`, `@resize`. `@click` and `@wheel` are
-reserved.
+`@paste`, `@focus`, `@blur`, `@resize`, `@click`, `@wheel`.
 
 **Parser.** One module: a CSI / SS3 tokenizer with a pending buffer
 across reads, one table for finals, xterm modifier parameters, ESC +
@@ -354,6 +362,30 @@ sequence that times out is discarded, never typed** — on a slow SSH
 link Ink turns an arrow key into the literal text `[A`. About 100 of
 Ink's 156 parser cases port as a table; the rest pin dropped terminal
 forms (rxvt, Cygwin, double-ESC meta).
+
+**Enhanced keyboard** is opt-in (`run App, keyboard: 'enhanced'`).
+Setup asks the terminal for the kitty protocol's disambiguation flag
+and teardown withdraws it; the decoder is always on, so a terminal
+already in that mode works without the option. It buys what ordinary
+terminals cannot report: Shift-Enter distinct from Enter (multi-line
+input), Ctrl-I distinct from Tab, and an Escape that needs no timer.
+Support is probed with a `CSI ? u` query followed by a device
+attributes query; whichever reply arrives first decides, so no timer
+is involved. tmux strips the protocol, and the app runs on ordinary
+reports there.
+
+**Mouse** is opt-in (`run App, mouse: true`), because capture takes
+over the terminal's own text selection. SGR mouse reports decode to
+`@click` and `@wheel` events carrying `x` and `y` relative to the
+target. The target is found by a hit test over the rounded boxes in
+reverse paint order, honoring clips and the absolute-node list; the
+event then bubbles like any other, and a click on a focusable node
+focuses it as a preventable default. Ink has no mouse support.
+
+**Scrolling** is Ink's content offset: `contentOffsetX` /
+`contentOffsetY` shift a node's children under `overflow: hidden`. It
+is a paint-only change, so a scroll runs no layout. A wheel handler
+that adjusts the offset is the whole scrolled-list pattern.
 
 **Focus** follows tree order, computed by a walk on Tab (Ink uses
 registration order). Attributes: `focusable`, `autofocus`, `disabled`.
@@ -402,12 +434,20 @@ App = component
 run App
 ```
 
-- `run(App, {altScreen, stdin, stdout})` → `{done, quit, flush}`;
+- `run(App, {altScreen, mouse, keyboard, stdin, stdout})` →
+  `{done, quit, flush}`;
   `suspend(fn)`; `print(text)`; `renderToString(App, {cols, rows})`.
 - `screen` (`cols`, `rows`, `interactive`) and `focus` (`active`,
   `next`, `prev`, `to`) are **getter-backed objects**. An imported
   `:=` cell is not unwrapped across modules, so raw cells are never
   exported.
+- `clock(interval)` is the animation helper: a getter-backed object
+  with `frame`, `time`, and `delta`, driven by one shared timer per
+  interval that runs only while a mounted component reads it and never
+  when output is not interactive. A spinner is
+  `frames[tick.frame % frames.length]`. The frame scheduler already
+  coalesces every change into one paint, so the helper is a
+  convenience, not a requirement.
 - Widgets: `Box`, `Text`, `Spacer`, `Newline`, `Static`. Raw `div` and
   `span` are the documented zero-overhead primitives.
 - Metrics: `div ref: el` then `w ~= el?.box.w ?? 0`. The node's `box`
@@ -462,9 +502,9 @@ Each step is its own branch and PR under the repo's landing rules.
 | 0 | Bench harness, Ink baselines, a profile of where Ink spends a frame (reconcile, Yoga, output, write) | Baseline numbers checked in; the riskiest assumption — that knowing the changed node beats Ink's pipeline — is confirmed or the order below changes |
 | 1 | Walking skeleton: scoped `document`, row / column + grow + padding + border layout, grid paint with diff, `renderToString`, counter and two-pane examples | Keyed `for`, `if` / `else`, fragments, rest-prop styles, and `ref:` metrics all work end to end |
 | 2 | Full layout engine, cache, dirty boundaries, vendored Yoga suite and skip list | ≥ 480 in-scope cases pass; RTL experiment recorded |
-| 3 | Text, width, wrap / truncate, clipping, borders, backgrounds | Ported Ink paint cases pass |
-| 4 | Input, focus, cursor | Ported parser cases pass; select-list and text-input examples |
-| 5 | Lifecycle, inline `Static`, non-TTY, console capture, resize | Crash, signal, and suspend restore the terminal under test |
+| 3 | Text, width, wrap / truncate, clipping, content offset, borders, backgrounds | Ported Ink paint cases pass |
+| 4 | Input, focus, cursor, mouse, enhanced keyboard | Ported parser cases pass; select-list, text-input, and wheel-scrolled list examples |
+| 5 | Lifecycle, inline `Static`, non-TTY, console capture, resize, animation clock | Crash, signal, and suspend restore the terminal under test |
 | 6 | Four Ink examples side by side (counter, borders, use-focus, static), README, published bench | Every README number reproduces with `bun run bench` |
 
 **Decided — the skeleton precedes the full layout engine.** Layout is
@@ -479,7 +519,6 @@ start. Each row is a rule the v0.1 code follows.
 | Deferred | Rule followed from the start | Cost to add later |
 |---|---|---|
 | Screen-reader output | `role` and every `aria-*` attribute are accepted and stored on the node, never rejected as unknown keys, so components are written accessibly from day one. The hardware cursor follows focus (§7). | One tree walk that serializes roles, states, and labels as linear text — the counterpart of Ink's `renderNodeToScreenReaderOutput`. |
-| Mouse | Events are DOM-shaped and bubble; every node keeps its rounded absolute box and clip; absolute nodes sit in one ordered list. `@click` and `@wheel` are reserved names. Mouse reports already tokenize as CSI. | A report decoder (about 30 lines), a hit test in reverse paint order, and an opt-in mode toggle — opt-in because capture disables the terminal's own text selection. |
 | Windows | Rip itself claims only macOS and Linux (CI is Linux). All platform code lives in `terminal.rip`. Resize comes from the stream's `resize` event, never the SIGWINCH signal. Suspend is guarded by platform. The painter never writes the last cell of the last row. Nothing rejects `win32`. | A CI lane and whatever it finds. |
 | Error overview | Uncaught errors and the runtime's component error hook (`__setErrorHandler`) route through one reporter that restores the terminal first. | A prettier reporter: source excerpt and mapped stack. |
 | `display: contents`, content-box, RTL | The layout seams in §5. | Local changes behind each seam. |
