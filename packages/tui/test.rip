@@ -1758,6 +1758,25 @@ test "a span that would cut a wide glyph takes its run in, so a stack of stagger
     eq draw(), 40
     eq document.damage.passes, 4
 
+test "a survey that fails is made again: what it did not reach is still owed", ->
+  Two = component
+    @word := 'ab'
+    render
+      Box flexDirection: 'column', height: 3, alignItems: 'flex-start'
+        Text "#{@word} first"
+        Text "#{@word} second"
+  owing Two, (app, draw, view) ->
+    draw()
+    app.word.value = 'abcd'
+    first = document.body.firstChild.firstChild
+    flow = first.flow
+    first.flow = Object.assign Object.create(flow), { fits: -> throw Error.new 'no survey' }
+    throws (-> view.frame()), 'no survey'
+    first.flow = flow
+    document.owe false
+    draw()
+    eq view.frame().trimEnd(), "abcd first\nabcd second"
+
 test "a node out of the tree owes nothing, whatever is done to it", ->
   Pair = component
     render

@@ -549,7 +549,6 @@ export class Damage
 # its bounds.
 survey! =! (node, dx, dy, damage) ->
   stain = node.stain
-  node.stain = 0
   rect = node.rect
   l = rect.x
   t = rect.y
@@ -587,6 +586,9 @@ survey! =! (node, dx, dy, damage) ->
   node.br = r
   node.bb = b
   damage.box l + dx, t + dy, r + dx, b + dy if stain is 3
+  # Last, so a survey that fails leaves every node above it to be
+  # surveyed again.
+  node.stain = 0
 
 # ── Tree → grid ───────────────────────────────────────────────────────────────
 
