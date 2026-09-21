@@ -395,8 +395,8 @@ switch verb
       app = requestAgent! 'rip-sites', 'GET', "/1.0/apps/#{encodeURIComponent(noun)}", null, { start: true }
       abort "rip-sites: #{app.name} has no URL" unless app.url
       url = app.url
-    result = Bun.spawnSync ['open', url], { stdout: 'ignore', stderr: 'pipe' }
-    abort "rip-sites: cannot open #{url}: #{result.stderr.toString().trim()}" unless result.exitCode is 0
+    opened = Bun.spawnSync ['open', url], { stdout: 'ignore', stderr: 'pipe' }
+    abort "rip-sites: cannot open #{url}: #{opened.stderr.toString().trim()}" unless opened.exitCode is 0
     printJson({ url }) if json
 
   when 'logs'

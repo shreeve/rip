@@ -549,7 +549,8 @@ registration order:
 
 `use(path, middleware)` accepts the same path grammar for matching, but its
 parameters are not projected into `@req.param()`. Only the selected route
-binds route parameters.
+binds route parameters. Registration calls return nothing: `use`, `prefix`,
+and `resetGlobals` are void, and `prefix` discards what its block returns.
 
 Behind Janus, `@req.site` is the trusted tenant selected from the registered
 site pattern. The framework never derives a tenant from an untrusted `Host`

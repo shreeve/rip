@@ -55,7 +55,7 @@ _openapiInfo: Record<string, any>     = { title: 'Rip API', version: '0.0.0' }
 _routeIndex                      = null  # method → { statics, dynamics }; built lazily, cleared on registration
 _composeEpoch: number                 = 0     # bumped when use/before/after mutate the chain inputs
 
-export resetGlobals = ->
+export def resetGlobals!
   _errorHandler        = null
   _notFoundHandler     = null
   _rawFilter           = null
@@ -612,7 +612,7 @@ compileMiddlewarePattern = (path) ->
   source = source.replace /(?<![\\*])\*(?!\*)/g, '.*'
   RegExp.new("^#{source}(?:/|$)")
 
-export use = (pathOrMw, mw = null) ->
+def use!(pathOrMw, mw = null)
   _composeEpoch++
   if typeof pathOrMw is 'function' and not mw?
     _middlewares.push { fn: pathOrMw }
@@ -621,7 +621,9 @@ export use = (pathOrMw, mw = null) ->
   else
     throw TypeError.new 'use() takes a middleware function or an absolute path and middleware function'
 
-export prefix = (base, fn) ->
+export { use }
+
+export def prefix!(base, fn)
   old = _prefix
   _prefix = "#{_prefix}#{base}"
   try
@@ -953,9 +955,9 @@ def bail(): never
   # (authenticated-but-refused) stays with `error! '…', 403`.
   throw Object.assign(Error.new('Unauthorized'), { status: 401 })
 
-# Declaration form does not take `export` inline (the overload list
-# must sit in the same block as its implementation), so the three
-# error helpers export here.
+# A def with an overload list does not take `export` inline (the list
+# must sit in the same block as its implementation), so `error` exports
+# through a list, as `use` does, and its two companions ride along.
 export { error, notice, bail }
 
 # ==============================================================================
