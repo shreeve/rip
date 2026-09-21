@@ -241,6 +241,32 @@ refused by name until the first is closed — close in a `finally`.
 `renderToString App, cols: 40` is a mount, one frame, and a close; it
 takes `props`, and `ansi: true` keeps the escape sequences.
 
+## Input events
+
+`input.rip` turns the bytes a terminal sends into events — `key`,
+`paste`, `focus` / `blur`, `mouse`, `reply`. It stands alone: `run`
+does not read stdin, and wiring the two is step 4 of [PLAN.md](PLAN.md)
+§12. What a text input can rely on is settled:
+
+- **Typed text is one `key` event per code point**, never per grapheme
+  cluster: a cluster can be cut between two reads, and only code points
+  decode the same however the bytes arrive. A family emoji is five
+  events. So insert `key` as it comes, and re-segment the buffer into
+  clusters (`Intl.Segmenter`) for the cursor and for Backspace; never
+  treat one event as one cell or one deletion.
+- A key that types has a `key` of exactly one code point. Every other
+  `key` is a DOM name of two or more characters — `'Enter'`,
+  `'ArrowUp'`, `'F5'` — so `Array.from(event.key).length is 1` is the
+  test for text, with `ctrlKey`, `altKey` and `metaKey` false.
+- A paste is one `paste` event with its text as the terminal sent it,
+  newlines as carriage returns where the terminal sends them so. It is
+  never key events.
+- Key releases are dropped: they need the kitty protocol's event-type
+  reports, which the package never asks for. A held key is `repeat:
+  true` where the terminal says so.
+- A lone Escape arrives 50 ms after the key, since ESC also opens every
+  sequence; under the enhanced keyboard it arrives at once.
+
 ## What is here, and what is planned
 
 [PLAN.md](PLAN.md) is the design and the order of work: key input and
@@ -273,7 +299,12 @@ driver, and what each kind of change owes a frame, by its cells.
 frame painted from its damage to the same tree painted whole, cell for
 cell, and to the bytes sent, replayed. `test/text.rip` holds the
 text engine — sanitizing, cluster widths, every wrap and truncate mode
-— and `test/layout.rip` the layout engine's own pins. `test/yoga.rip` runs Yoga's
+— and `test/layout.rip` the layout engine's own pins. `test/input.rip`
+holds the terminal input parser: 244 of Ink's input cases as a table
+(`test/input/SOURCE.md` says which and why not the rest), every
+sequence cut at every byte, its three waits on a clock moved by hand,
+paste, mouse, replies, and 295,000 random bytes in random cuts that
+never throw and decode the same whole or cut. `test/yoga.rip` runs Yoga's
 543 generated layout cases, vendored unmodified under `test/yoga/`
 (MIT, © Meta Platforms), against the engine through a shim of the
 `yoga-layout` API. `test/yoga-aspect.rip` is a port of Yoga's 37

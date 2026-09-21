@@ -1,0 +1,961 @@
+# ==============================================================================
+# tui input tests — bytes from a terminal in, events out
+#
+#   rip test/input.rip
+#
+# Ink's parser, keypress, and kitty cases come first, ported as tables
+# (test/input/ink.rip; test/input/SOURCE.md counts them). Then what this
+# package pins for itself: every key form it reads, the three patiences
+# and the discard rule, every table row cut at every byte, paste, UTF-8,
+# mouse, replies, the bounds on what is held, the cost of hostile input,
+# and a fuzz that holds split invariance.
+# ==============================================================================
+
+import { test, eq, ok } from 'rip/testing'
+import { Parser } from '../input.rip'
+import { ESC, CSI, SS3, open, decode, bytes, canon, brief, key, typed, paste, FOCUS, BLUR, mouse, reply, tally, ROWS } from './input/harness.rip'
+import './input/ink.rip'
+
+BEL =! '\x07'
+ST  =! "#{ESC}\\"
+START =! "#{CSI}200~"
+END   =! "#{CSI}201~"
+ESCAPE =! key 'Escape', '', ESC
+
+# A row of this file: held like a ported one, and cut at every byte by
+# the split tests below.
+row =! (whole, events) ->
+  events = ((if event.type is 'key' and not event.sequence? then { ...event, sequence: whole } else event) for event in events)
+  ROWS.push { whole, events }
+  got = decode whole
+  raise "#{brief whole} gave #{brief got}, not #{brief events}" unless canon(got) is canon(events)
+
+# xterm's modifier parameter is one more than its bits: shift 1, alt 2,
+# ctrl 4, meta 8 (ctlseqs, "PC-Style Function Keys").
+flags =! (bits) ->
+  (if bits & 4 then 'c' else '') + (if bits & 1 then 's' else '') + (if bits & 2 then 'a' else '') + (if bits & 8 then 'm' else '')
+
+# ==[ Ink's count ]==
+
+console.log "\nInk's cases, counted"
+
+test "the ported titles are the ones SOURCE.md counts", ->
+  eq tally, {
+    'input-parser':               { held: 43, differs: 20 }
+    'parse-keypress':             { held: 22, differs: 3 }
+    'kitty-keyboard':             { held: 66, differs: 6 }
+    'hooks-use-input':            { held: 27, differs: 5 }
+    'hooks-use-input-kitty':      { held: 23, differs: 1 }
+    'hooks-use-input-navigation': { held: 14, differs: 4 }
+    'hooks-use-paste':            { held: 3, differs: 0 }
+    'input-keypad-enter':         { held: 2, differs: 0 }
+    'input-buffered-ctrl-c':      { held: 5, differs: 0 }
+  }
+
+# ==[ The parser's surface ]==
+
+console.log "\nSurface"
+
+test "a parser takes a string or bytes and answers the events the chunk completed", ->
+  parser = Parser.new()
+  eq parser.feed('a'), typed('a')
+  eq parser.feed(bytes 'b'), typed('b')
+  eq parser.feed(''), []
+  eq parser.feed(Uint8Array.new 0), []
+  eq parser.pending, 0
+
+test "every key event has the fields of a DOM KeyboardEvent, in one order", ->
+  for event in decode "a#{CSI}1;5A#{CSI}97;5:2u\r#{ESC}x"
+    eq Object.keys(event), ['type', 'key', 'ctrlKey', 'shiftKey', 'altKey', 'metaKey', 'repeat', 'sequence']
+
+test! "the default clock is the runtime's timers, and `late` is handed what time completed", ->
+  late = []
+  parser = Parser.new { escape: 5, late: (events) -> late.push ...events }
+  eq parser.feed(ESC), []
+  sleep! 40
+  eq late, [ESCAPE]
+
+test "a reset forgets what is held, a pending Escape with it, and disarms the timer", ->
+  { parser, clock, feed, late } = open()
+  for held in [ESC, "#{CSI}1;", SS3, "#{ESC}]0;title", "#{START}half a paste", "#{START}text#{CSI}20"]
+    feed held
+    parser.reset()
+    eq [clock.waiting, parser.pending], [0, 0]
+    eq feed('a'), typed('a')
+  feed Uint8Array.new [0xf0, 0x9f]
+  parser.reset()
+  eq feed(Uint8Array.new [0x61]), typed('a')
+  feed '\ud83d'
+  parser.reset()
+  eq feed('a'), typed('a')
+  clock.tick 1000
+  eq late, []
+
+test "a parser with no `late` lets a timeout pass in silence", ->
+  clock = { fire: null, after: (ms, fn) -> (clock.fire = fn; -> clock.fire = null) }
+  parser = Parser.new { clock }
+  parser.feed ESC
+  clock.fire()
+  eq parser.feed('a'), typed('a')
+
+# ==[ Keys ]==
+
+console.log "\nKeys"
+
+test "C0 controls are Ctrl with a letter, but for the four keys that own a code", ->
+  # The classic ambiguities, each answered as Ink answers it: Ctrl-I is
+  # Tab, Ctrl-M is Enter, Ctrl-[ is Escape, and Ctrl-H is Backspace, as
+  # 0x7F is. Only the enhanced keyboard tells them apart.
+  for code in [0..31] when code isnt 0x1b
+    want = switch code
+      when 0 then key ' ', 'c'
+      when 8 then key 'Backspace'
+      when 9 then key 'Tab'
+      when 13 then key 'Enter'
+      else key String.fromCharCode(code + (if code <= 26 then 96 else 64)), 'c'
+    row String.fromCharCode(code), [want]
+    row ESC + String.fromCharCode(code), [{ ...want, altKey: true }]
+  row '\x7f', [key 'Backspace']
+  row "#{ESC}\x7f", [key 'Backspace', 'a']
+
+test "a line feed is Ctrl-J, the key it is in raw mode, where Enter sends a carriage return", ->
+  eq decode('\n'), [key 'j', 'c', '\n']
+
+test "ESC and a character is Alt and that character", ->
+  row "#{ESC}a", [key 'a', 'a']
+  row "#{ESC}A", [key 'A', 'sa']
+  row "#{ESC} ", [key ' ', 'a']
+  row "#{ESC}\\", [key '\\', 'a']
+  row "#{ESC}Q", [key 'Q', 'sa']
+  row "#{ESC}~", [key '~', 'a']
+  row "#{ESC}日", [key '日', 'a']
+
+test "a capital of ASCII carries shift, and no other character does", ->
+  eq decode('aZ!É'), [key('a', '', 'a'), key('Z', 's', 'Z'), key('!', '', '!'), key('É', '', 'É')]
+
+test "C1 controls are not keys, and open and end nothing", ->
+  eq decode("a\x80\x9b\x9fb"), typed('ab')
+  eq decode("#{ESC}\x9bA"), typed('A')
+  # A terminal in UTF-8 sends its sequences in seven bits (xterm sends
+  # eight-bit controls only under S8C1T, which no UTF-8 terminal
+  # honors), so U+009B is not CSI and U+009C does not end a string; and
+  # the bare bytes 0x9B and 0x9C are not UTF-8 at all.
+  eq decode("\x9b1;5A"), typed('1;5A')
+  eq decode(Uint8Array.new [0x9b, 0x41]), typed('\ufffdA')
+  eq decode("#{ESC}]0;t\x9cx#{BEL}y"), typed('y')
+  eq decode(Uint8Array.new [0x1b, 0x5d, 0x30, 0x9c, 0x78, 0x07, 0x79]), typed('y')
+
+test "one table of finals serves CSI and SS3", ->
+  for final, name of { A: 'ArrowUp', B: 'ArrowDown', C: 'ArrowRight', D: 'ArrowLeft', E: 'Clear', F: 'End', H: 'Home', P: 'F1', Q: 'F2', R: 'F3', S: 'F4' }
+    row "#{CSI}#{final}", [key name]
+    row "#{SS3}#{final}", [key name]
+    row "#{CSI}1;5#{final}", [key name, 'c']
+    row "#{SS3}1;5#{final}", [key name, 'c']
+  row "#{CSI}Z", [key 'Tab', 's']
+  row "#{CSI}1;5Z", [key 'Tab', 'cs']
+
+test "SS3 is not CSI: the application keypad is SS3 alone, and a focus report is CSI alone", ->
+  # xterm ctlseqs, "VT220-Style Function Keys": under DECKPAM the keypad
+  # sends SS3 j to y for `*+,-./` and the digits, SS3 X for `=`, and
+  # SS3 M for Enter. Each types what the key shows.
+  row "#{SS3}M", [key 'Enter']
+  row "#{SS3}X", [key '=']
+  row "#{SS3}#{String.fromCharCode 0x6a + n}", [key glyph] for glyph, n in '*+,-./0123456789'
+  row "#{SS3}5p", [key '0', 'c']
+  row "#{CSI}M", []
+  row "#{CSI}X", []
+  row "#{CSI}p", []
+  row "#{CSI}j", []
+  row "#{SS3}I", []
+  row "#{SS3}O", []
+  row "#{SS3}200~", []
+
+test "xterm's modifier parameter decodes on every form that carries it", ->
+  for mod in [2..16]
+    row "#{CSI}1;#{mod}A", [key 'ArrowUp', flags(mod - 1)]
+    row "#{CSI}3;#{mod}~", [key 'Delete', flags(mod - 1)]
+    row "#{CSI}15;#{mod}~", [key 'F5', flags(mod - 1)]
+    row "#{CSI}1;#{mod}R", [key 'F3', flags(mod - 1)]
+  row "#{CSI}1;1A", [key 'ArrowUp']
+  row "#{CSI}1;A", [key 'ArrowUp']
+
+test "the modifier as the only parameter is xterm's old form (modifyCursorKeys: 0)", ->
+  row "#{CSI}5A", [key 'ArrowUp', 'c']
+  row "#{SS3}5D", [key 'ArrowLeft', 'c']
+  row "#{SS3}2P", [key 'F1', 's']
+  row "#{CSI}16A", [key 'ArrowUp', 'csam']
+  # A first parameter that is neither 1 nor a modifier is no key's.
+  row "#{CSI}17A", []
+  row "#{CSI}0A", []
+  row "#{CSI}5;3A", []
+  row "#{CSI}2;5A", []
+  row "#{CSI}1:2;5A", []
+  row "#{CSI}5:2A", []
+  row "#{CSI}170671659::5R", []
+  row "#{CSI}170671659::5A", []
+
+test "the editing keys and the function keys in each form a terminal sends", ->
+  for code, name of { 1: 'Home', 2: 'Insert', 3: 'Delete', 4: 'End', 5: 'PageUp', 6: 'PageDown', 7: 'Home', 8: 'End' }
+    row "#{CSI}#{code}~", [key name]
+  for code, n in [11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 23, 24, 25, 26, 28, 29, 31, 32, 33, 34]
+    row "#{CSI}#{code}~", [key "F#{n + 1}"]
+  for n in [13..35]
+    row "#{CSI}#{57363 + n}u", [key "F#{n}"]
+  row "#{CSI}9~", []
+  row "#{CSI}16~", []
+
+test "kitty's functional keys take DOM's names", ->
+  names = 'CapsLock ScrollLock NumLock PrintScreen Pause ContextMenu'.split ' '
+  row "#{CSI}#{57358 + n}u", [key name] for name, n in names
+  pad = '0 1 2 3 4 5 6 7 8 9 . / * - + Enter = , ArrowLeft ArrowRight ArrowUp ArrowDown PageUp PageDown Home End Insert Delete Clear'.split ' '
+  row "#{CSI}#{57399 + n}u", [key name] for name, n in pad
+  media = 'MediaPlay MediaPause MediaPlayPause MediaReverse MediaStop MediaFastForward MediaRewind MediaTrackNext MediaTrackPrevious MediaRecord AudioVolumeDown AudioVolumeUp AudioVolumeMute'.split ' '
+  row "#{CSI}#{57428 + n}u", [key name] for name, n in media
+  held = 'Shift Control Alt Meta Hyper Meta Shift Control Alt Meta Hyper Meta AltGraph'.split ' '
+  row "#{CSI}#{57441 + n}u", [key name] for name, n in held
+  row "#{CSI}57454u", []
+  row "#{CSI}57364u", []
+
+test "the enhanced keyboard tells apart what a plain terminal cannot", ->
+  row "#{CSI}13;2u", [key 'Enter', 's']
+  row "#{CSI}105;5u", [key 'i', 'c']
+  row "#{CSI}9;5u", [key 'Tab', 'c']
+  row "#{CSI}27u", [key 'Escape']
+  row "#{CSI}91;3u", [key '[', 'a']
+  row "#{CSI}127;5u", [key 'Backspace', 'c']
+
+test "a kitty key is its text, else its shifted key under shift, else its own code", ->
+  row "#{CSI}97;2;65u", [key 'A', 's']
+  row "#{CSI}97:65;2u", [key 'A', 's']
+  row "#{CSI}49:33;2u", [key '!', 's']
+  row "#{CSI}49:33;5u", [key '1', 'c']
+  row "#{CSI}49;6u", [key '1', 'cs']
+  row "#{CSI}97;6u", [key 'A', 'cs']
+  row "#{CSI}233;2u", [key 'é', 's']
+  # The base-layout key is read past: `key` is what the layout types, as
+  # DOM's is.
+  row "#{CSI}1089::99;5u", [key 'с', 'c']
+  # A control character is never typed, whatever field carries it.
+  row "#{CSI}97;1;27u", [key 'a']
+  row "#{CSI}97;1;27:98u", [key 'b']
+  row "#{CSI}97:27;2u", [key 'A', 's']
+  row "#{CSI}0u", []
+  row "#{CSI};5u", []
+  row "#{CSI}u", []
+
+test "kitty's modifiers: super and meta are DOM's Meta; hyper and the locks have no field", ->
+  for [mod, want] in [[2, 's'], [3, 'a'], [5, 'c'], [9, 'm'], [17, ''], [33, 'm'], [65, ''], [129, ''], [256, 'csam']]
+    row "#{CSI}98;#{mod}u", [key (if want.includes 's' then 'B' else 'b'), want]
+
+test "xterm's modify-other-keys form, which tmux forwards", ->
+  row "#{CSI}27;2;13~", [key 'Enter', 's']
+  row "#{CSI}27;5;13~", [key 'Enter', 'c']
+  row "#{CSI}27;5;9~", [key 'Tab', 'c']
+  row "#{CSI}27;5;105~", [key 'i', 'c']
+  row "#{CSI}27;6;65~", [key 'A', 'cs']
+  row "#{CSI}27;3;127~", [key 'Backspace', 'a']
+  row "#{CSI}27;5;44~", [key ',', 'c']
+  row "#{CSI}27;5~", []
+  row "#{CSI}27~", []
+  row "#{CSI}27;5;1114112~", []
+  row "#{CSI}27;5;7~", []
+  # The third parameter is that form's alone.
+  row "#{CSI}27;5;13A", []
+  row "#{CSI}3;5;13~", []
+  row "#{CSI}1;5;13A", []
+  row "#{CSI}97;5;98;99u", []
+
+test "a release is dropped in every form, and a repeat is flagged", ->
+  row "#{CSI}97;1:3u", []
+  row "#{CSI}1;1:3A", []
+  row "#{CSI}3;5:3~", []
+  row "#{CSI}57441;2:3u", []
+  row "#{CSI}97;1:2u", [key 'a', 'r']
+  row "#{CSI}1;5:2A", [key 'ArrowUp', 'cr']
+  # A release with text types nothing either.
+  row "#{CSI}97;1:3;97u", []
+
+test "a sequence with no key is no event, and what follows it is read", ->
+  for unknown in ["#{CSI}a", "#{CSI}2^", "#{CSI}1;2$y", "#{CSI} q", "#{CSI}>0;276;0c", "#{CSI}=1u", "#{CSI}1 A", "#{CSI}?1;2$y", "#{SS3}a", "#{CSI}201~", "#{CSI}1;5I"]
+    row "#{unknown}x", typed('x')
+
+# ==[ Time: three patiences, and the discard rule ]==
+
+console.log "\nTime"
+
+test "an ESC with nothing after it for the timeout is the Escape key, and not before", ->
+  { feed, clock, late } = open()
+  eq feed(ESC), []
+  clock.tick 49
+  eq late, []
+  clock.tick 1
+  eq late, [ESCAPE]
+  eq clock.waiting, 0
+
+test "the timeout is the `escape` option, and the patience the `patience` option", ->
+  { feed, clock, late } = open { escape: 10, patience: 200 }
+  feed ESC
+  clock.tick 9
+  eq late, []
+  clock.tick 1
+  eq late, [ESCAPE]
+  feed "#{CSI}1;"
+  eq clock.next, 200
+  feed "5A#{START}text"
+  eq clock.next, 200
+
+test "which wait is armed follows what is held", ->
+  { feed, clock, parser } = open()
+  steps = [
+    ['hello', null, null], ["#{CSI}A", null, null], ["#{ESC}x#{START}text#{END}", null, null]
+    [ESC, 'escape', 50], ['[', 'sequence', 50], ['1', 'sequence', 1000], [';5', 'sequence', 1000], ["A#{SS3}", 'sequence', 50]
+    ['1', 'sequence', 1000], ["A#{ESC}]", 'string', 50], ['0;title', 'string', 1000], [ESC, 'string', 1000], ["\\#{ESC}P", 'string', 50]
+    ["#{ESC}\\#{ESC}^#{ESC}", 'string', 1000], ["\\#{START}", 'paste', 1000], ["half#{CSI}20", 'paste', 1000], ["1~#{ESC}", 'escape', 50], ['a', null, null]
+  ]
+  for [sent, holding, wait] in steps
+    feed sent
+    eq [parser.holding, clock.next], [holding, wait], JSON.stringify sent
+
+test "every chunk of a sequence that trickles in starts its wait again", ->
+  { feed, clock, late, all } = open()
+  for piece in [ESC, '[', '1', ';', '5', 'A']
+    feed piece
+    clock.tick 49
+  for piece in ["#{CSI}1", ';', '5', 'A']
+    feed piece
+    clock.tick 999
+  eq late, []
+  eq all, [key('ArrowUp', 'c', "#{CSI}1;5A"), key('ArrowUp', 'c', "#{CSI}1;5A")]
+  eq clock.waiting, 0
+
+test "an empty read, or one that is half a character, does not start the wait again", ->
+  { feed, clock, late } = open()
+  feed ESC
+  clock.tick 25
+  feed ''
+  feed Uint8Array.new 0
+  feed Uint8Array.new [0xc3]
+  clock.tick 25
+  eq late, [ESCAPE]
+  eq feed(Uint8Array.new [0xa9]), typed('é')
+
+test "a bare introducer at the timeout is Alt and its character, as ESC and any character is", ->
+  # `ESC [`, `ESC O`, `ESC ]`, `ESC P`, `ESC _`, `ESC ^` and `ESC X` open
+  # CSI, SS3, OSC, DCS, APC, PM and SOS — and are what Alt with each of
+  # those keys sends. A person types Esc and then O; no terminal leaves
+  # an introducer with nothing after it.
+  for [opener, mods] in [['[', 'a'], ['O', 'sa'], [']', 'a'], ['P', 'sa'], ['_', 'a'], ['^', 'a'], ['X', 'sa']]
+    { feed, clock, late, parser } = open()
+    eq feed(ESC + opener), []
+    clock.tick 49
+    eq late, [], opener
+    clock.tick 1
+    eq late, [key opener, mods, ESC + opener]
+    eq [parser.holding, parser.pending, clock.waiting], [null, 0, 0]
+    eq feed('a'), typed('a')
+
+test "a bare `ESC [` or `ESC O` before a byte that cannot continue it is Alt and that character", ->
+  eq decode("#{CSI}\r"), [key('[', 'a', CSI), key('Enter', '', '\r')]
+  eq decode("#{SS3}#{CSI}A"), [key('O', 'sa', SS3), key('ArrowUp', '', "#{CSI}A")]
+  eq decode("#{CSI}é"), [key('[', 'a', CSI), ...typed('é')]
+  eq decode("#{CSI}1\r"), [key('Enter', '', '\r')]
+  eq decode("#{SS3}1;#{CSI}A"), [key('ArrowUp', '', "#{CSI}A")]
+
+PARTIAL =! ["#{CSI}1", "#{CSI}1;", "#{CSI}1;5", "#{CSI}<0;10", "#{CSI}?", "#{CSI}97;5", "#{SS3}1;", "#{CSI}200", "#{CSI}3$", "#{ESC}]11;rgb:00", "#{ESC}]0;x#{ESC}", "#{ESC}P1+r", "#{ESC}_G", "#{ESC}^x", "#{ESC}Xx"]
+
+test "a sequence that holds a byte past its introducer has a second of patience, and is then discarded, never typed", ->
+  for partial in PARTIAL
+    { feed, clock, late, parser } = open()
+    eq feed(partial), [], JSON.stringify partial
+    clock.tick 999
+    ok parser.holding?, JSON.stringify partial
+    clock.tick 1
+    eq late, [], JSON.stringify partial
+    eq [parser.holding, parser.pending, clock.waiting], [null, 0, 0]
+    eq feed('a'), typed('a')
+
+test "bytes that come late to a sequence, within its patience, complete it", ->
+  { feed, clock, all } = open()
+  feed "#{CSI}<0;10"
+  clock.tick 50
+  feed ';10M'
+  eq all, [mouse 'down', 0, 9, 9]
+  { feed, clock, all } = open()
+  feed "#{ESC}]52;c;"
+  clock.tick 999
+  feed "QUJD#{BEL}x"
+  eq all, typed('x')
+
+# What a link slower than every patience does, stated. The parser cannot
+# know that bytes arriving late belong to a sequence it gave up on, so
+# they are read as what they are alone.
+test "ESC, the timeout, then `[A`: Escape, and then the keys `[` and `A`", ->
+  { feed, clock, all } = open()
+  feed ESC
+  clock.tick 50
+  feed '[A'
+  eq all, [ESCAPE, ...typed('[A')]
+
+test "`ESC [`, the timeout, then `A`: Alt-[, and then the key A", ->
+  { feed, clock, all } = open()
+  feed CSI
+  clock.tick 50
+  feed 'A'
+  eq all, [key('[', 'a', CSI), ...typed('A')]
+
+test "`ESC [ 1 ;`, its patience, then `5A`: the partial is discarded, and the keys are `5` and `A`", ->
+  { feed, clock, all } = open()
+  feed "#{CSI}1;"
+  clock.tick 1000
+  feed '5A'
+  eq all, typed('5A')
+
+test "ESC twice is Escape twice: the first at once, the second at the timeout", ->
+  { feed, clock, all } = open()
+  eq feed(ESC + ESC), [ESCAPE]
+  clock.tick 50
+  eq all, [ESCAPE, ESCAPE]
+
+test "a paste with no terminator ends when nothing arrives for its patience, as what was collected", ->
+  { feed, clock, late, all, parser } = open()
+  feed "#{START}abc"
+  clock.tick 999
+  eq feed("#{CSI}A"), []
+  clock.tick 999
+  eq late, []
+  clock.tick 1
+  eq late, [paste "abc#{CSI}A"]
+  eq [parser.holding, parser.pending, clock.waiting], [null, 0, 0]
+  feed 'x'
+  eq all, [paste("abc#{CSI}A"), ...typed('x')]
+  # Five characters are held back in case they begin the terminator, so
+  # the read itself lets one piece go and time the rest.
+  { feed, clock, late } = open { paste: 4 }
+  eq feed("#{START}abcdefghij"), [paste 'abcd']
+  clock.tick 1000
+  eq late, [paste('efgh'), paste('ij')]
+
+test "a flush is every patience run out now: Escape, Alt and a bare introducer, an open paste; any other partial is discarded", ->
+  for [held, want] in [['', []], ['a', []], [ESC, [ESCAPE]], [CSI, [key('[', 'a', CSI)]], [SS3, [key('O', 'sa', SS3)]], ["#{CSI}1;", []], ["#{ESC}]0;title", []], ["#{ESC}]0;title#{ESC}", []], ["#{START}text#{CSI}20", [paste "text#{CSI}20"]]]
+    { feed, clock, late, parser } = open()
+    feed held
+    eq parser.flush(), want, JSON.stringify held
+    eq [parser.holding, parser.pending, clock.waiting], [null, 0, 0]
+    eq parser.flush(), []
+    eq feed('a'), typed('a')
+    clock.tick 5000
+    eq late, []
+
+test "a flush lets go of half a character too", ->
+  { feed, parser } = open()
+  feed Uint8Array.new [0xf0, 0x9f]
+  eq parser.flush(), []
+  eq feed(Uint8Array.new [0x61]), typed('a')
+  feed '\ud83d'
+  eq parser.flush(), []
+  eq feed('\ude00a'), typed('a')
+
+test "`holding` names what is held", ->
+  for [held, want] in [['', null], ['abc', null], [ESC, 'escape'], [CSI, 'sequence'], ["#{SS3}1", 'sequence'], ["#{ESC}]", 'string'], ["#{ESC}P1+r#{ESC}", 'string'], [START, 'paste'], ["#{START}#{END}", null], [Uint8Array.new([0xf0]), null]]
+    { feed, parser } = open()
+    feed held
+    eq parser.holding, want, JSON.stringify held
+
+# ==[ Every row, cut at every byte ]==
+
+console.log "\nSplits"
+
+test "every row, cut in two at every byte with time passing short of the timeout, decodes as it does whole", ->
+  tried = 0
+  for { whole, events } in ROWS
+    sent = bytes whole
+    continue if sent.length < 2
+    for cut in [1...sent.length]
+      { feed, clock, late, all } = open()
+      feed sent.subarray 0, cut
+      clock.tick 49
+      feed sent.subarray cut
+      tried += 1
+      raise "#{brief whole} cut at byte #{cut} gave #{brief all}, not #{brief events}" unless canon(all) is canon(events) and late.length is 0
+  ok tried > 3000, "#{tried} cuts"
+
+# A cut that leaves a sequence holding a byte past its introducer, a
+# string with content, or an open paste has the long patience, and one
+# that leaves nothing held has no wait at all: either way the second
+# half may come 999 ms late. (A cut after a lone ESC or a bare
+# introducer has the short wait, which the test after next holds.)
+test "every row, cut at every byte inside a sequence with time passing short of its patience, decodes as it does whole", ->
+  inside = 0
+  for { whole, events } in ROWS
+    sent = bytes whole
+    for cut in [1...sent.length]
+      { feed, clock, late, all, parser } = open()
+      feed sent.subarray 0, cut
+      continue if clock.next is 50
+      inside += 1 if parser.holding?
+      clock.tick 999
+      feed sent.subarray cut
+      raise "#{brief whole} cut at byte #{cut}, 999 ms apart, gave #{brief all}, not #{brief events}" unless canon(all) is canon(events) and late.length is 0
+  ok inside > 2500, "#{inside} cuts inside a sequence"
+
+test "every row, a byte at a time, decodes as it does whole", ->
+  for { whole, events } in ROWS
+    { feed, clock, all } = open()
+    for byte in bytes whole
+      feed Uint8Array.new [byte]
+      clock.tick 10
+    raise "#{brief whole} a byte at a time gave #{brief all}, not #{brief events}" unless canon(all) is canon(events)
+
+# A row that is one sequence — ESC and a character, a CSI, or an SS3 —
+# cut at each character with every patience running out in the cut. The
+# head is the Escape key if it is ESC alone, Alt and the introducer if
+# it is a bare one, and nothing otherwise; the tail is what it is alone:
+# the character without Alt, or text.
+ONE =! /^\x1b(?:\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x5a\x5c-\x7e]|O[\d;]*[\x40-\x7e]|[^\[O\]P_^X\x1b])$/u
+
+test "every sequence, cut at every character with its patience running out, yields Escape, Alt, or nothing, then its tail as typed", ->
+  tried = 0
+  for { whole, events } in ROWS when ONE.test(whole) and not whole.startsWith("#{CSI}200~")
+    glyphs = Array.from whole
+    for cut in [1...glyphs.length]
+      { feed, clock, late, all } = open()
+      head = glyphs.slice(0, cut).join('')
+      eq feed(head), []
+      clock.tick 1000
+      gone = if cut is 1 then [ESCAPE] else if cut is 2 then [key(glyphs[1], (if glyphs[1] is 'O' then 'sa' else 'a'), head)] else []
+      eq late, gone, "#{JSON.stringify whole} cut at #{cut}"
+      tail = glyphs.slice(cut).join('')
+      feed tail
+      want = if glyphs.length is 2 then [{ ...events[0], altKey: false, sequence: tail }] else typed(tail)
+      tried += 1
+      raise "#{brief whole} cut at #{cut} past its patience gave #{brief all}, not #{brief [...gone, ...want]}" unless canon(all) is canon([...gone, ...want])
+  ok tried > 1500, "#{tried} cuts"
+
+# ==[ Paste ]==
+
+console.log "\nPaste"
+
+test "a paste arrives whole however many reads it takes, and the keys around it are keys", ->
+  whole = "ab#{START}line one\nline two\ttab#{END}cd"
+  want = [...typed('ab'), paste('line one\nline two\ttab'), ...typed('cd')]
+  row whole, want
+  { feed, all } = open()
+  feed glyph for glyph in whole
+  eq all, want
+
+test "the text of a paste is not read as keys", ->
+  row "#{START}\x03\r#{CSI}A#{ESC}x#{CSI}<0;1;1M#{CSI}?1u#{ESC}]0;t#{BEL}\x7f#{END}", [paste "\x03\r#{CSI}A#{ESC}x#{CSI}<0;1;1M#{CSI}?1u#{ESC}]0;t#{BEL}\x7f"]
+
+test "nothing in the text is mistaken for the end of the paste but the whole terminator", ->
+  text = "a#{CSI}201b[201~c201~d#{START}e#{ESC}#{ESC}[201#{ESC}[20#{CSI}201 ~"
+  row "#{START}#{text}#{END}x", [paste(text), ...typed('x')]
+  # The terminator right after a lookalike of its own head.
+  row "#{START}#{ESC}#{END}", [paste ESC]
+  row "#{START}#{CSI}#{END}", [paste CSI]
+  row "#{START}#{CSI}201#{END}", [paste "#{CSI}201"]
+
+test "time short of its patience does not end a paste, nor a terminator that arrives in halves", ->
+  { feed, clock, late, all } = open()
+  feed "#{START}half"
+  clock.tick 999
+  feed " and half#{CSI}20"
+  clock.tick 999
+  feed '1~'
+  eq all, [paste 'half and half']
+  eq late, []
+
+test "a paste longer than the cap arrives in pieces, in order, however it is cut", ->
+  text = 'abcdefghijklmnopqrst'
+  want = [paste('abcdefgh'), paste('ijklmnop'), paste('qrst'), ...typed('x')]
+  { feed, all } = open { paste: 8 }
+  feed "#{START}#{text}#{END}x"
+  eq all, want
+  { feed, all, parser } = open { paste: 8 }
+  for glyph in "#{START}#{text}#{END}x"
+    feed glyph
+    ok parser.pending <= 8 + 5, "held #{parser.pending}"
+  eq all, want
+  # A paste of the cap exactly is one event, and of twice it two.
+  { feed, all } = open { paste: 8 }
+  feed "#{START}abcdefgh#{END}#{START}abcdefghijklmnop#{END}#{START}#{END}"
+  eq all, [paste('abcdefgh'), paste('abcdefgh'), paste('ijklmnop'), paste('')]
+
+test "a paste read a character at a time holds a bounded list, not an entry a read", ->
+  { feed, all, parser } = open()
+  feed START
+  feed 'x' for n in [0...50000]
+  ok parser.parts.length + parser.runs.length < 2048, "#{parser.parts.length} parts and #{parser.runs.length} runs"
+  feed END
+  eq all, [paste 'x'.repeat 50000]
+
+test "a paste of UTF-8 cut inside a character arrives whole", ->
+  sent = bytes "#{START}日本語 😀#{END}"
+  for cut in [1...sent.length]
+    { feed, all } = open()
+    feed sent.subarray 0, cut
+    feed sent.subarray cut
+    eq all, [paste '日本語 😀'], "cut at #{cut}"
+
+# ==[ UTF-8 ]==
+
+console.log "\nUTF-8"
+
+FAMILY =! '👨‍👩‍👧'
+
+test "text is one key event per code point", ->
+  # Not per grapheme cluster: a cluster can be cut between two reads, so
+  # only code points decode the same however the bytes are split, short
+  # of holding every keystroke back to see what follows it. Joined in
+  # order they are the text, cluster and all.
+  eq decode('é'), [key('e', '', 'e'), key('́', '', '́')]
+  eq decode(FAMILY).length, 5
+  eq (event.key for event in decode "日本 #{FAMILY}").join(''), "日本 #{FAMILY}"
+
+test "a character cut between two reads comes out whole, at every byte", ->
+  for glyph in ['é', '日', '😀', FAMILY, 'é', "#{ESC}é", "#{ESC}😀"]
+    sent = bytes glyph
+    whole = decode glyph
+    for cut in [1...sent.length]
+      eq decode(sent.subarray(0, cut), sent.subarray(cut)), whole, "#{glyph} cut at #{cut}"
+
+test "a surrogate pair cut between two strings comes out whole, and a lone surrogate is no key", ->
+  eq decode('\ud83d', '\ude00'), typed('😀')
+  eq decode("#{ESC}\ud83d", '\ude00'), [key '😀', 'a', "#{ESC}😀"]
+  eq decode('\ud83dx'), typed('x')
+  eq decode('\ud83d', 'x'), typed('x')
+  eq decode('\ude00x'), typed('x')
+  eq decode('a\ud83d😀'), typed('a😀')
+
+test "a byte-order mark is a character, at the start of the stream as anywhere", ->
+  { feed, parser } = open()
+  eq feed(Uint8Array.new [0xef, 0xbb, 0xbf, 0x61]), typed('\ufeffa')
+  parser.reset()
+  eq feed(Uint8Array.new [0xef, 0xbb, 0xbf, 0x61]), typed('\ufeffa')
+
+test "a string after half a character of bytes finds it broken, and bytes after half a surrogate pair drop it", ->
+  eq decode(Uint8Array.new([0xf0, 0x9f]), 'a'), typed('\ufffda')
+  eq decode(Uint8Array.new([0xf0, 0x9f]), 'a', Uint8Array.new([0x98, 0x80])), typed('\ufffda\ufffd\ufffd')
+  eq decode('\ud83d', bytes('a')), typed('a')
+  eq decode('\ud83d', bytes('a'), '\ude00b'), typed('ab')
+
+test "bytes that are not UTF-8 are the replacement character, as a terminal shows them", ->
+  eq decode(Uint8Array.new [0xff]), typed('�')
+  eq decode(Uint8Array.new([0xc3]), Uint8Array.new([0x61])), typed('�a')
+  eq decode(Uint8Array.new [0x80, 0x41]), typed('�A')
+
+# ==[ Mouse ]==
+
+console.log "\nMouse"
+
+test "an SGR report is a press, a release, a move or a wheel, at cells counted from zero", ->
+  row "#{CSI}<0;1;1M", [mouse 'down', 0, 0, 0]
+  row "#{CSI}<0;1;1m", [mouse 'up', 0, 0, 0]
+  row "#{CSI}<1;10;20M", [mouse 'down', 1, 9, 19]
+  row "#{CSI}<2;80;24m", [mouse 'up', 2, 79, 23]
+  row "#{CSI}<32;5;6M", [mouse 'move', 0, 4, 5]
+  row "#{CSI}<34;5;6M", [mouse 'move', 2, 4, 5]
+  row "#{CSI}<35;5;6M", [mouse 'move', -1, 4, 5]
+  # 128 and the low bits are xterm's buttons 8 to 11, DOM's 3 to 6: low
+  # bits of 3 mean "no button" only without the 64 and 128 flags.
+  row "#{CSI}<128;5;6M", [mouse 'down', 3, 4, 5]
+  row "#{CSI}<129;5;6m", [mouse 'up', 4, 4, 5]
+  row "#{CSI}<130;5;6M", [mouse 'down', 5, 4, 5]
+  row "#{CSI}<131;1;1M", [mouse 'down', 6, 0, 0]
+  row "#{CSI}<163;1;1M", [mouse 'move', 6, 0, 0]
+  row "#{CSI}<3;1;1M", [mouse 'down', -1, 0, 0]
+
+test "the wheel is a delta, down and right positive as DOM's are, and has no button", ->
+  row "#{CSI}<64;3;4M", [mouse 'wheel', -1, 2, 3, '', { deltaX: 0, deltaY: -1 }]
+  row "#{CSI}<65;3;4M", [mouse 'wheel', -1, 2, 3, '', { deltaX: 0, deltaY: 1 }]
+  row "#{CSI}<66;3;4M", [mouse 'wheel', -1, 2, 3, '', { deltaX: -1, deltaY: 0 }]
+  row "#{CSI}<67;3;4M", [mouse 'wheel', -1, 2, 3, '', { deltaX: 1, deltaY: 0 }]
+  row "#{CSI}<69;3;4M", [mouse 'wheel', -1, 2, 3, 's', { deltaX: 0, deltaY: 1 }]
+
+test "a report carries shift (4), alt (8) and ctrl (16)", ->
+  row "#{CSI}<4;1;1M", [mouse 'down', 0, 0, 0, 's']
+  row "#{CSI}<8;1;1M", [mouse 'down', 0, 0, 0, 'a']
+  row "#{CSI}<16;1;1M", [mouse 'down', 0, 0, 0, 'c']
+  row "#{CSI}<30;1;1M", [mouse 'down', 2, 0, 0, 'sac']
+  row "#{CSI}<60;7;8M", [mouse 'move', 0, 6, 7, 'sac']
+
+test "a report that is malformed is no event", ->
+  row "#{CSI}<0;1M", []
+  row "#{CSI}<;;M", []
+  row "#{CSI}<0;99999999999;1M", []
+  row "#{CSI}<0;1;1;1M", []
+  row "#{CSI}<0;1;1A", []
+  row "#{CSI}0;1;1M", []
+  row "#{CSI}<0;0;0M", [mouse 'down', 0, 0, 0]
+  # X10 reports (CSI M and three raw bytes) are never asked for: the
+  # introducer is a sequence with no key, and the bytes are typed.
+  row "#{CSI}M !!", typed(' !!')
+
+# ==[ Replies and focus ]==
+
+console.log "\nReplies"
+
+test "the keyboard reply, the attributes reply and the cursor reply are events of their own", ->
+  row "#{CSI}?0u", [reply 'keyboard', { flags: 0 }]
+  row "#{CSI}?31u", [reply 'keyboard', { flags: 31 }]
+  row "#{CSI}?62;1;2;4c", [reply 'attributes', { params: [62, 1, 2, 4] }]
+  row "#{CSI}?1;2c", [reply 'attributes', { params: [1, 2] }]
+  row "#{CSI}?c", [reply 'attributes', { params: [] }]
+  row "#{CSI}24;80R", [reply 'cursor', { x: 79, y: 23 }]
+  row "#{CSI}?24;80R", [reply 'cursor', { x: 79, y: 23 }]
+  row "#{CSI}?24;80;1R", [reply 'cursor', { x: 79, y: 23 }]
+
+test "the secondary attributes reply is dropped: the package never asks for it", ->
+  row "#{CSI}>0;276;0c", []
+  row "#{CSI}>c", []
+
+test "a reply is never a key", ->
+  row "#{CSI}?97u", [reply 'keyboard', { flags: 97 }]
+  row "#{CSI}?97;5u", []
+  row "#{CSI}?u", []
+  row "#{CSI}?1A", []
+  row "#{CSI}?3~", []
+  row "#{CSI}>1u", []
+  row "#{CSI}?1;5R", [reply 'cursor', { x: 4, y: 0 }]
+
+test "a cursor on row one is told from a modified F3 by its column, and DECXCPR has no such doubt", ->
+  # xterm sends a modified F3 as CSI 1 ; mod R with mod from 2 to 16
+  # (ctlseqs, "PC-Style Function Keys"), which is also the report of a
+  # cursor on row 1 in columns 2 to 16. Those fifteen are read as the
+  # key, so this package's own cursor probe is DECXCPR, CSI ? 6 n, whose
+  # reply carries the `?` and is no key's.
+  row "#{CSI}1;1R", [reply 'cursor', { x: 0, y: 0 }]
+  row "#{CSI}1;2R", [key 'F3', 's']
+  row "#{CSI}1;16R", [key 'F3', 'csam']
+  row "#{CSI}1;17R", [reply 'cursor', { x: 16, y: 0 }]
+  row "#{CSI}2;5R", [reply 'cursor', { x: 4, y: 1 }]
+  row "#{CSI}1;5:2R", [key 'F3', 'cr']
+  row "#{CSI}R", [key 'F3']
+  row "#{CSI}1;2;3R", []
+  row "#{CSI}5R", [key 'F3', 'c']
+  row "#{CSI}2;R", []
+  row "#{CSI}0;5R", []
+
+test "the terminal gaining and losing focus", ->
+  row "#{CSI}I", [FOCUS]
+  row "#{CSI}O", [BLUR]
+  row "#{CSI}1I", []
+  row "#{CSI}?I", []
+
+test "a string the terminal sends — OSC, DCS, APC — is swallowed whole, and holds nothing", ->
+  row "#{ESC}]11;rgb:0000/0000/0000#{BEL}x", typed('x')
+  row "#{ESC}]11;rgb:0000/0000/0000#{ST}x", typed('x')
+  row "#{ESC}P1+r544e=787465726d#{ST}x", typed('x')
+  row "#{ESC}_Gi=1;OK#{ST}x", typed('x')
+  # BEL ends an OSC alone (xterm ctlseqs, "Operating System Commands").
+  row "#{ESC}Pa#{BEL}b#{ST}x", typed('x')
+  # An ESC that is not the terminator's ends the string and starts over.
+  row "#{ESC}]0;title#{CSI}Ax", [key('ArrowUp', '', "#{CSI}A"), ...typed('x')]
+  row "#{ESC}]0;title#{ESC}#{ESC}\\x", [key('Escape', '', ESC), key('\\', 'a', ST), ...typed('x')]
+  { feed, parser } = open()
+  feed "#{ESC}]52;c;"
+  feed 'QUJD'.repeat 10000 for round in [0...20]
+  eq parser.pending, 0
+  eq feed("#{BEL}x"), typed('x')
+
+# ==[ Bounds ]==
+
+console.log "\nBounds"
+
+test "a sequence of 1024 characters is read, and a longer one is discarded whole, holding no more", ->
+  # A key with the text of 339 code points is 1024 characters: CSI, the
+  # five of `97;1;`, three a code point less one colon, and `u`.
+  text = ('97' for n in [0...339]).join ':'
+  row "#{CSI}97;1;#{text}u", (key 'a' for n in [0...339])
+  row "#{CSI}097;1;#{text}ux", typed('x')
+  { feed, parser, all } = open()
+  feed CSI
+  for round in [0...200]
+    feed '1;'.repeat 500
+    ok parser.pending <= 1025, "held #{parser.pending}"
+  feed 'A'
+  eq parser.pending, 0
+  feed 'x'
+  eq all, typed('x')
+  eq decode("#{CSI}#{'1'.repeat 1000000}Ax"), typed('x')
+  eq decode("#{SS3}#{'1'.repeat 1000000}Ax"), typed('x')
+
+test "a number of ten digits or more is no number", ->
+  row "#{CSI}1;9999999999A", [key 'ArrowUp']
+  row "#{CSI}9999999999u", []
+  row "#{CSI}97;1;9999999999u", [key 'a']
+  row "#{CSI}?9999999999u", []
+
+# ==[ Cost ]==
+
+console.log "\nCost"
+
+test "hostile input is read once: eight times the input costs about eight times as long", ->
+  # A parser that scans what it holds again on every read takes 64 times
+  # as long for 8 times the reads; a linear one about 8. The bound sits
+  # between, and each size takes its best of five, so a busy machine
+  # moves both numbers and not the ratio. A machine busy enough to stall
+  # one size alone gets two more tries: a quadratic reader is over the
+  # bound every time.
+  best = (first, chunk, count) ->
+    least = Infinity
+    for round in [0...5]
+      { parser } = open()
+      began = performance.now()
+      parser.feed first
+      parser.feed chunk for n in [0...count]
+      least = Math.min least, performance.now() - began
+    least
+  cases = [
+    ['an unterminated CSI', CSI, '1;']
+    ['an unterminated OSC', "#{ESC}]", 'ab']
+    ['an unterminated paste', START, 'x'.repeat 16]
+    ['a paste of near-terminators', START, "#{CSI}201"]
+    ['sequences cut in two', '', "#{CSI}1;"]
+    ['lone escapes', '', ESC]
+    ['text', '', 'hello']
+    ['bytes of UTF-8 cut inside a character', '', Uint8Array.new [0x9f, 0x98, 0x80, 0xf0]]
+    ['mouse reports in one read each', '', "#{CSI}<35;10;10M".repeat 20]
+  ]
+  for [name, first, chunk] in cases
+    for attempt in [0...3]
+      small = best first, chunk, 5000
+      large = best first, chunk, 40000
+      break if large < 24 * Math.max(small, 0.05)
+    ok large < 24 * Math.max(small, 0.05), "#{name}: 5,000 reads took #{small.toFixed 2} ms and 40,000 took #{large.toFixed 2} ms"
+  for unit in ['a', "#{CSI}A", "#{CSI}1;", ESC, "#{CSI}<0;1;1M", 'é', "#{START}x#{END}", "#{ESC}]x"]
+    for attempt in [0...3]
+      small = best '', unit.repeat(20000), 1
+      large = best '', unit.repeat(160000), 1
+      break if large < 24 * Math.max(small, 0.05)
+    ok large < 24 * Math.max(small, 0.05), "#{JSON.stringify unit} × 20,000 took #{small.toFixed 2} ms and × 160,000 took #{large.toFixed 2} ms"
+
+# ==[ Fuzz ]==
+
+console.log "\nFuzz"
+
+NAMED =! /^[A-Z][A-Za-z0-9]+$/
+integer =! (n) -> Number.isSafeInteger(n)
+
+# What every event must be, whatever bytes made it.
+sound =! (event) ->
+  switch event.type
+    when 'key'
+      eq Object.keys(event), ['type', 'key', 'ctrlKey', 'shiftKey', 'altKey', 'metaKey', 'repeat', 'sequence']
+      glyphs = Array.from event.key
+      code = event.key.codePointAt 0
+      types = glyphs.length is 1 and code >= 0x20 and not (code >= 0x7f and code <= 0x9f) and not (code >= 0xd800 and code <= 0xdfff)
+      ok types or NAMED.test(event.key), "the key #{JSON.stringify event.key}"
+      ok typeof event[flag] is 'boolean', flag for flag in ['ctrlKey', 'shiftKey', 'altKey', 'metaKey', 'repeat']
+      ok typeof event.sequence is 'string' and event.sequence.length > 0 and event.sequence.length <= 1024, 'the sequence'
+    when 'paste'
+      eq Object.keys(event), ['type', 'text']
+      ok typeof event.text is 'string'
+    when 'focus', 'blur'
+      eq Object.keys(event), ['type']
+    when 'mouse'
+      ok event.action in ['down', 'up', 'move', 'wheel'], "the action #{event.action}"
+      ok integer(event.button) and event.button >= -1 and event.button <= 6, "the button #{event.button}"
+      ok integer(event.x) and integer(event.y) and event.x >= 0 and event.y >= 0, "the cell #{event.x}, #{event.y}"
+      ok typeof event[flag] is 'boolean', flag for flag in ['ctrlKey', 'shiftKey', 'altKey']
+      wheel = event.action is 'wheel'
+      ok wheel is ('deltaX' of event) and wheel is ('deltaY' of event), 'the deltas'
+      ok Math.abs(event.deltaX) + Math.abs(event.deltaY) is 1 if event.action is 'wheel'
+    when 'reply'
+      switch event.kind
+        when 'keyboard' then ok integer(event.flags) and event.flags >= 0
+        when 'attributes' then ok Array.isArray(event.params) and event.params.every(integer)
+        when 'cursor' then ok integer(event.x) and integer(event.y) and event.x >= 0 and event.y >= 0
+        else raise "a reply of kind #{event.kind}"
+    else raise "an event of type #{event.type}"
+
+POOL =! [0x1b, 0x1b, 0x1b, 0x1b, 0x5b, 0x5b, 0x5b, 0x4f, 0x5d, 0x50, 0x5f, 0x5c, 0x07, 0x3c, 0x3f, 0x3e, 0x3b, 0x3b, 0x3b, 0x3a, 0x30, 0x31, 0x32, 0x35, 0x37, 0x39, 0x4d, 0x6d, 0x75, 0x7e, 0x52, 0x63, 0x49, 0x41, 0x5a, 0x24, 0x20, 0x00, 0x03, 0x0d, 0x7f, 0x80, 0x9b, 0xc3, 0xa9, 0xe6, 0x97, 0xa5, 0xf0, 0x9f, 0x98, 0x80, 0xff, 0x61]
+PARTS =! [START, END, "#{CSI}200", "#{CSI}201", "#{CSI}<0;", "#{CSI}<65;3;4M", "#{CSI}<131;", "#{CSI}1;5R", "#{CSI}I", "#{SS3}", "#{ESC}^", "#{CSI}?", "#{CSI}?1u", "#{CSI}1;5", "#{CSI}97;", "#{CSI}27;5;", '57414', '1114112', '55296', "#{ESC}]0;", ST, '😀', 'é']
+
+# The events of `chunks` and of the timeout after them.
+drain =! (chunks, options) ->
+  { feed, clock, all } = open options
+  feed chunk for chunk in chunks
+  clock.tick 5000
+  all
+
+test "random bytes in random cuts never throw, make only sound events, and decode the same however they are cut", ->
+  rounds = fed = made = 0
+  kinds = {}
+  # The seed is a local of its own: a closure that assigns a `for`
+  # variable writes a copy, and the generator would stand still.
+  for start in [3, 17, 2024]
+    seed = start
+    rand = ->
+      seed = (seed * 1664525 + 1013904223) % 4294967296
+      seed / 4294967296
+    pick = (list) -> list[Math.floor rand() * list.length]
+    for round in [0...4000]
+      sent = []
+      for n in [0...1 + Math.floor(rand() * 24)]
+        if rand() < 0.25 then sent.push ...bytes(pick PARTS) else sent.push pick POOL
+      sent = Uint8Array.new sent
+      once = drain [sent], { paste: 16 }
+      sound event for event in once
+      fed += sent.length
+      made += once.length
+      kinds[event.type] = (kinds[event.type] ?? 0) + 1 for event in once
+      pieces = []
+      from = 0
+      while from < sent.length
+        to = Math.min sent.length, from + 1 + Math.floor(rand() * 6)
+        pieces.push sent.subarray from, to
+        from = to
+      cut = drain pieces, { paste: 16 }
+      raise "seed #{seed} round #{round}: #{JSON.stringify Array.from sent} whole gave #{canon once}, and cut as #{JSON.stringify (piece.length for piece in pieces)} gave #{canon cut}" unless canon(once) is canon(cut)
+      # The same input as a string, whole and cut between any two code
+      # units, a surrogate pair included. (A string is not held to the
+      # bytes: bytes that end inside a character are held for the rest
+      # of it, and the string already says U+FFFD there.)
+      text = TextDecoder.new().decode sent
+      told = drain [text], { paste: 16 }
+      units = []
+      from = 0
+      while from < text.length
+        to = Math.min text.length, from + 1 + Math.floor(rand() * 4)
+        units.push text.slice from, to
+        from = to
+      said = drain units, { paste: 16 }
+      raise "seed #{seed} round #{round}: #{JSON.stringify text} whole gave #{canon told}, and cut as #{JSON.stringify units} gave #{canon said}" unless canon(told) is canon(said)
+      rounds += 1
+  eq rounds, 12000
+  # A fuzz that feeds nothing passes everything: hold it to its volume.
+  ok fed > 100000 and made > 50000, "#{fed} bytes made #{made} events"
+  ok kinds[kind] > 100, "#{kinds[kind] ?? 0} #{kind} events" for kind in ['key', 'paste', 'mouse', 'reply', 'focus']
+
+test "random sequences from the table, joined and cut at random, decode to their events joined", ->
+  # A row that ends part way through a sequence would take the next
+  # row's bytes into it, so only rows that leave an `x` an `x` are joined.
+  rows = ROWS.filter (entry) -> entry.whole.length > 0 and canon(decode "#{entry.whole}x") is canon([...entry.events, ...typed('x')])
+  ok rows.length > 500, "#{rows.length} rows"
+  seed = 99
+  rand = ->
+    seed = (seed * 1664525 + 1013904223) % 4294967296
+    seed / 4294967296
+  fed = made = 0
+  drawn = Set.new()
+  for round in [0...3000]
+    joined = ''
+    want = []
+    for n in [0...1 + Math.floor(rand() * 6)]
+      picked = rows[Math.floor rand() * rows.length]
+      joined += picked.whole
+      drawn.add picked
+      want.push ...picked.events
+    sent = bytes joined
+    pieces = []
+    from = 0
+    while from < sent.length
+      to = Math.min sent.length, from + 1 + Math.floor(rand() * 8)
+      pieces.push sent.subarray from, to
+      from = to
+    got = drain pieces
+    fed += sent.length
+    made += got.length
+    raise "round #{round}: #{JSON.stringify joined} gave #{canon got}, not #{canon want}" unless canon(got) is canon(want)
+  # A generator that stands still draws one row three thousand times.
+  ok fed > 30000 and made > 10000 and drawn.size > 500, "#{fed} bytes made #{made} events from #{drawn.size} rows"
