@@ -4004,13 +4004,13 @@ class Emitter {
     // already binds the name through its own keyword — the hoist line
     // must never re-declare it (`def f` then `f = 2` is a plain
     // reassignment of the function binding, not a second `let f`).
-    // The scope's statement level only (one block unwrap for the
-    // body-node callers): block-NESTED declarations are block-scoped
-    // JS and never collide with a function-scoped `let`.
-    const scopeStmts = nodes.length === 1 && isBlock(nodes[0]) ? nodes[0].slice(1) : nodes;
-    for (const x of Emitter.declaredNames(scopeStmts)) targets.delete(x);
+    // The scope's statement level only: block-NESTED declarations are
+    // block-scoped JS and never collide with a function-scoped `let`.
+    // `nodes` IS that level — a lone block in it is a parenthesized
+    // sequence, an expression, never the body to unwrap.
+    for (const x of Emitter.declaredNames(nodes)) targets.delete(x);
     for (const x of extraDeclared) targets.delete(x);
-    for (const s of scopeStmts) {
+    for (const s of nodes) {
       if (this.isModuleImport(s)) for (const x of Emitter.importedNames([s])) targets.delete(x);
     }
     // Component member names never hoist: a bare write inside a
@@ -4118,8 +4118,11 @@ class Emitter {
   // and shadowing is not modeled — every over-count lands on `nested`
   // or an earlier read, which only forfeits declare-in-place coverage,
   // never correctness.
-  captureScan(nodes) {
-    const stmts = nodes.length === 1 && isBlock(nodes[0]) ? nodes[0].slice(1) : nodes;
+  captureScan(stmts) {
+    // `stmts` IS the scope's statement list. A lone block in it is a
+    // parenthesized sequence — it lowers to a comma expression, where a
+    // `let` is invalid JS — so its elements are never statements of
+    // this scope and never declare in place.
     const top = new Set(stmts.filter(isNode));
     const facts = new Map();
     // inFn levels: 0 — the scope's own straight line; 1 — inside a
@@ -4302,9 +4305,8 @@ class Emitter {
     // LIVE statement (erased type declarations don't return).
     let tail = null;
     if (tailIsExpression) {
-      const stmts = rawStmts.length === 1 && isBlock(rawStmts[0]) ? rawStmts[0].slice(1) : rawStmts;
-      for (let i = stmts.length - 1; i >= 0; i--) {
-        if (!Emitter.isErasedStmt(stmts[i])) { tail = stmts[i]; break; }
+      for (let i = rawStmts.length - 1; i >= 0; i--) {
+        if (!Emitter.isErasedStmt(rawStmts[i])) { tail = rawStmts[i]; break; }
       }
     }
     const ownerToDecl = new Map();
@@ -5818,7 +5820,7 @@ class Emitter {
       else sub.implicitReturn(stmt, 0);
       bodyText = `{ ${sub.b.code} }`;
     } else {
-      const { entries, names: scoped } = sub.scopedHoist([bodyNode], names);
+      const { entries, names: scoped } = sub.scopedHoist(stmts, names);
       for (const n of sub.pushReactiveFrame(stmts, scoped, names)) scoped.add(n);
       sub.scopes.push(scoped);
       sub.b.emit('{\n');
@@ -7887,7 +7889,7 @@ class Emitter {
       this.tsReturnAnnotation(node, isAsync, isVoid, isGen);
       this.b.emit(' ');
       const stmts = this.liveStmts(isBlock(node[3]) ? node[3].slice(1) : [node[3]], { forwards: true });
-      const { entries, names } = this.scopedHoist([node[3]], node[2]);
+      const { entries, names } = this.scopedHoist(isBlock(node[3]) ? node[3].slice(1) : [node[3]], node[2]);
       for (const n of this.pushReactiveFrame(stmts, names, node[2], node)) names.add(n);
       this.scopes.push(names);
       // def bodies implicitly return their last expression, same as
