@@ -6,9 +6,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 3. Reading `layout.rip`
 
-- [ ] Split `style!` (71 lines; name the ranks) and `compute!` (143
-      lines; steps 2 and 9 are each written twice); comment the module
-      globals as out-parameters and say why.
 - [ ] Reading order: the cache flags sit 900 lines before "The cache";
       `baselined`, `percents`, `seat!`, `measureFixed` sit away from
       their sections.

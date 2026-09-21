@@ -131,6 +131,13 @@ OVERFLOWS  =! { 'visible': 0, 'hidden': 1, 'scroll': SCROLL }
 DISPLAYS   =! { 'flex': BOX, 'none': NONE, 'contents': CONTENTS }
 SIZINGS    =! { 'border-box': 0, 'content-box': CONTENT_BOX }
 
+# How specific a written key is. A slot keeps what the most specific key
+# wrote to it, in whatever order the keys come.
+YIELDS =! 0  # to any other: `flexBasis: 'auto'`, a border side left on
+BROAD  =! 1  # every side at once, or a key alone in its slot
+NARROW =! 2  # an axis, a part of `flex`, a border side switched off
+EXACT  =! 3  # one side
+
 MEASURES  =! 8                 # the measure-only answers a node keeps
 PLAIN     =! Object.freeze {}  # the styles of a node that has none
 CHILDLESS =! Object.freeze []  # the children of a leaf
@@ -273,10 +280,15 @@ PROBE =! Lay.new()
 PROBE.v = Float64Array.new BLANK_V
 PROBE.u = Uint8Array.new BLANK_U
 
-generation = 0
-rootNode = null
-differs = false
-outMode = 0
+# Module state. The hot path allocates nothing, so a function with two
+# answers leaves them here, as out-parameters, and its caller reads them
+# on its next line. An assignment inside a function writes these very
+# bindings: Rip declares a name once, in the outermost scope that assigns
+# it.
+generation = 0   # the number of the pass under way, which the pass stamps record
+rootNode = null  # the node `layout` was handed, while its pass runs
+differs = false  # out of `parse`: whether any slot came out different
+outMode = 0      # out of `constrain`: the offer, as the child's max leaves it
 outSize = 0
 
 # ── Numbers ───────────────────────────────────────────────────────────────────
@@ -466,83 +478,88 @@ word =! (table, key, value) ->
   throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not one of #{Object.keys(table).join ', '}" if code is undefined
   code
 
-# One written style into the record. A key layout does not read — a
-# color, say — is none of its business.
+# One length into all four sides of an edged family, and into two slots.
+sides! =! (lay, family, value, key) ->
+  put lay, family + side, value, BROAD, key for side in [0...4]
+
+both! =! (lay, slot, other, value, rank, key) ->
+  put lay, slot, value, rank, key
+  put lay, other, value, rank, key
+
+# A border side switched on or off.
+switched! =! (lay, side, key, value) ->
+  borderAt lay, BORDER + side, 0, (if flag(key, value) then YIELDS else NARROW), key
+
+# `flex: n` grows by n from a zero basis; a negative one shrinks. An
+# `auto` basis leaves that zero standing.
+factors! =! (lay, key, value) ->
+  amount key, value, -Infinity
+  scalar lay, GROW, (if value > 0 then value else 0), BROAD
+  scalar lay, SHRINK, (if value < 0 then -value else 0), BROAD
+  put lay, BASIS, 0, BROAD, key if value > 0
+
+# A ratio of zero, below zero, or without end is no ratio (Style.h
+# setAspectRatio).
+aspect! =! (lay, value) ->
+  throw Error.new "rip/tui: aspectRatio: #{JSON.stringify value} is not a number — write width over height, as 2 or 0.5" unless typeof value is 'number' and not isNaN value
+  scalar lay, RATIO, (if value > 0 and value isnt Infinity then value else NaN), BROAD
+
+# One written style into the record, a key to a line: one switch is the
+# whole dispatch, since a second costs a style-heavy tree a twentieth of
+# its first layout. A key layout does not read — a color, say — is none
+# of its business.
 style! =! (lay, key, value) ->
   switch key
-    when 'margin'
-      put lay, MARGIN + side, value, 1, key for side in [0...4]
-    when 'marginX'
-      put lay, MARGIN + LEFT, value, 2, key
-      put lay, MARGIN + RIGHT, value, 2, key
-    when 'marginY'
-      put lay, MARGIN + TOP, value, 2, key
-      put lay, MARGIN + BOTTOM, value, 2, key
-    when 'marginLeft' then put lay, MARGIN + LEFT, value, 3, key
-    when 'marginTop' then put lay, MARGIN + TOP, value, 3, key
-    when 'marginRight' then put lay, MARGIN + RIGHT, value, 3, key
-    when 'marginBottom' then put lay, MARGIN + BOTTOM, value, 3, key
-    when 'padding'
-      put lay, PADDING + side, value, 1, key for side in [0...4]
-    when 'paddingX'
-      put lay, PADDING + LEFT, value, 2, key
-      put lay, PADDING + RIGHT, value, 2, key
-    when 'paddingY'
-      put lay, PADDING + TOP, value, 2, key
-      put lay, PADDING + BOTTOM, value, 2, key
-    when 'paddingLeft' then put lay, PADDING + LEFT, value, 3, key
-    when 'paddingTop' then put lay, PADDING + TOP, value, 3, key
-    when 'paddingRight' then put lay, PADDING + RIGHT, value, 3, key
-    when 'paddingBottom' then put lay, PADDING + BOTTOM, value, 3, key
-    when 'borderStyle'
-      borderAt lay, BORDER + side, 1, 1, key for side in [0...4]
-    when 'borderLeft' then borderAt lay, BORDER + LEFT, 0, (if flag(key, value) then 0 else 2), key
-    when 'borderTop' then borderAt lay, BORDER + TOP, 0, (if flag(key, value) then 0 else 2), key
-    when 'borderRight' then borderAt lay, BORDER + RIGHT, 0, (if flag(key, value) then 0 else 2), key
-    when 'borderBottom' then borderAt lay, BORDER + BOTTOM, 0, (if flag(key, value) then 0 else 2), key
-    when 'borderLeftWidth' then borderAt lay, BORDER + LEFT, value, 3, key
-    when 'borderTopWidth' then borderAt lay, BORDER + TOP, value, 3, key
-    when 'borderRightWidth' then borderAt lay, BORDER + RIGHT, value, 3, key
-    when 'borderBottomWidth' then borderAt lay, BORDER + BOTTOM, value, 3, key
-    when 'left' then put lay, INSET + LEFT, value, 1, key
-    when 'top' then put lay, INSET + TOP, value, 1, key
-    when 'right' then put lay, INSET + RIGHT, value, 1, key
-    when 'bottom' then put lay, INSET + BOTTOM, value, 1, key
-    when 'width' then put lay, SIZE, value, 1, key
-    when 'height' then put lay, SIZE + HEIGHT, value, 1, key
-    when 'minWidth' then put lay, MIN, value, 1, key
-    when 'minHeight' then put lay, MIN + HEIGHT, value, 1, key
-    when 'maxWidth' then put lay, MAX, value, 1, key
-    when 'maxHeight' then put lay, MAX + HEIGHT, value, 1, key
-    when 'gap'
-      put lay, GAP, value, 1, key
-      put lay, GAP + HEIGHT, value, 1, key
-    when 'columnGap' then put lay, GAP, value, 2, key
-    when 'rowGap' then put lay, GAP + HEIGHT, value, 2, key
-    # `flex: n` grows by n from a zero basis; a negative one shrinks. An
-    # `auto` basis leaves that zero standing.
-    when 'flex'
-      amount key, value, -Infinity
-      scalar lay, GROW, (if value > 0 then value else 0), 1
-      scalar lay, SHRINK, (if value < 0 then -value else 0), 1
-      put lay, BASIS, 0, 1, key if value > 0
-    when 'flexGrow' then scalar lay, GROW, amount(key, value, 0), 2
-    when 'flexShrink' then scalar lay, SHRINK, amount(key, value, 0), 2
-    when 'flexBasis' then put lay, BASIS, value, (if value is 'auto' then 0 else 2), key
-    # A ratio of zero, below zero, or without end is no ratio (Style.h
-    # setAspectRatio).
-    when 'aspectRatio'
-      throw Error.new "rip/tui: aspectRatio: #{JSON.stringify value} is not a number — write width over height, as 2 or 0.5" unless typeof value is 'number' and not isNaN value
-      scalar lay, RATIO, (if value > 0 and value isnt Infinity then value else NaN), 1
-    when 'flexDirection' then scalar lay, DIRECTION, word(DIRECTIONS, key, value), 1
-    when 'flexWrap' then scalar lay, WRAPPING, word(WRAPS, key, value), 1
-    when 'justifyContent' then scalar lay, JUSTIFY, word(JUSTIFIES, key, value), 1
-    when 'alignItems' then scalar lay, ITEMS, word(ALIGN_ITEMS, key, value), 1
-    when 'alignSelf' then scalar lay, SELF, word(ALIGN_SELF, key, value), 1
-    when 'alignContent' then scalar lay, LINES, word(ALIGN_CONTENT, key, value), 1
-    when 'position' then scalar lay, POSITION, word(POSITIONS, key, value), 1
-    when 'overflow' then scalar lay, OVERFLOW, word(OVERFLOWS, key, value), 1
-    when 'boxSizing' then scalar lay, SIZING, word(SIZINGS, key, value), 1
+    when 'margin' then sides lay, MARGIN, value, key
+    when 'marginX' then both lay, MARGIN + LEFT, MARGIN + RIGHT, value, NARROW, key
+    when 'marginY' then both lay, MARGIN + TOP, MARGIN + BOTTOM, value, NARROW, key
+    when 'marginLeft' then put lay, MARGIN + LEFT, value, EXACT, key
+    when 'marginTop' then put lay, MARGIN + TOP, value, EXACT, key
+    when 'marginRight' then put lay, MARGIN + RIGHT, value, EXACT, key
+    when 'marginBottom' then put lay, MARGIN + BOTTOM, value, EXACT, key
+    when 'padding' then sides lay, PADDING, value, key
+    when 'paddingX' then both lay, PADDING + LEFT, PADDING + RIGHT, value, NARROW, key
+    when 'paddingY' then both lay, PADDING + TOP, PADDING + BOTTOM, value, NARROW, key
+    when 'paddingLeft' then put lay, PADDING + LEFT, value, EXACT, key
+    when 'paddingTop' then put lay, PADDING + TOP, value, EXACT, key
+    when 'paddingRight' then put lay, PADDING + RIGHT, value, EXACT, key
+    when 'paddingBottom' then put lay, PADDING + BOTTOM, value, EXACT, key
+    when 'borderStyle' then borderAt lay, BORDER + side, 1, BROAD, key for side in [0...4]
+    when 'borderLeft' then switched lay, LEFT, key, value
+    when 'borderTop' then switched lay, TOP, key, value
+    when 'borderRight' then switched lay, RIGHT, key, value
+    when 'borderBottom' then switched lay, BOTTOM, key, value
+    when 'borderLeftWidth' then borderAt lay, BORDER + LEFT, value, EXACT, key
+    when 'borderTopWidth' then borderAt lay, BORDER + TOP, value, EXACT, key
+    when 'borderRightWidth' then borderAt lay, BORDER + RIGHT, value, EXACT, key
+    when 'borderBottomWidth' then borderAt lay, BORDER + BOTTOM, value, EXACT, key
+    when 'left' then put lay, INSET + LEFT, value, BROAD, key
+    when 'top' then put lay, INSET + TOP, value, BROAD, key
+    when 'right' then put lay, INSET + RIGHT, value, BROAD, key
+    when 'bottom' then put lay, INSET + BOTTOM, value, BROAD, key
+    when 'width' then put lay, SIZE + WIDTH, value, BROAD, key
+    when 'height' then put lay, SIZE + HEIGHT, value, BROAD, key
+    when 'minWidth' then put lay, MIN + WIDTH, value, BROAD, key
+    when 'minHeight' then put lay, MIN + HEIGHT, value, BROAD, key
+    when 'maxWidth' then put lay, MAX + WIDTH, value, BROAD, key
+    when 'maxHeight' then put lay, MAX + HEIGHT, value, BROAD, key
+    when 'gap' then both lay, GAP + WIDTH, GAP + HEIGHT, value, BROAD, key
+    when 'columnGap' then put lay, GAP + WIDTH, value, NARROW, key
+    when 'rowGap' then put lay, GAP + HEIGHT, value, NARROW, key
+    when 'flex' then factors lay, key, value
+    when 'flexGrow' then scalar lay, GROW, amount(key, value, 0), NARROW
+    when 'flexShrink' then scalar lay, SHRINK, amount(key, value, 0), NARROW
+    when 'flexBasis' then put lay, BASIS, value, (if value is 'auto' then YIELDS else NARROW), key
+    when 'aspectRatio' then aspect lay, value
+    when 'flexDirection' then scalar lay, DIRECTION, word(DIRECTIONS, key, value), BROAD
+    when 'flexWrap' then scalar lay, WRAPPING, word(WRAPS, key, value), BROAD
+    when 'justifyContent' then scalar lay, JUSTIFY, word(JUSTIFIES, key, value), BROAD
+    when 'alignItems' then scalar lay, ITEMS, word(ALIGN_ITEMS, key, value), BROAD
+    when 'alignSelf' then scalar lay, SELF, word(ALIGN_SELF, key, value), BROAD
+    when 'alignContent' then scalar lay, LINES, word(ALIGN_CONTENT, key, value), BROAD
+    when 'position' then scalar lay, POSITION, word(POSITIONS, key, value), BROAD
+    when 'overflow' then scalar lay, OVERFLOW, word(OVERFLOWS, key, value), BROAD
+    when 'boxSizing' then scalar lay, SIZING, word(SIZINGS, key, value), BROAD
     # `display` and `hidden` decide whether a node is laid out at all, so
     # `boxOf` reads them; here they are only held to their words.
     when 'display' then word DISPLAYS, key, value
@@ -1441,9 +1458,82 @@ alignLines! =! (node, lay, f, lines, totalCross, leadingCross, insideCross, owne
 
 # ── The algorithm ─────────────────────────────────────────────────────────────
 
+# Step 1: the axes, and how the space along each was offered.
+axes! =! (lay, f, modeW, modeH, ownerW, ownerH) ->
+  row = lay.direction >= ROW
+  f.axis = lay.direction
+  f.cross = crossAxis f.axis
+  f.row = row
+  f.wrap = lay.wrap isnt NOWRAP
+  f.ownerMain = if row then ownerW else ownerH
+  f.modeMain = if row then modeW else modeH
+  f.modeCross = if row then modeH else modeW
+
+# Step 2: the space inside one dimension, held within the node's own min
+# and max.
+innerSize =! (lay, dim, space, inside, ownerSize, ownerW) ->
+  return space if isNaN space
+  return fmax space, 0 unless lay.limited
+  least = sizeAt lay, MIN + dim, ownerSize, ownerW
+  most = sizeAt lay, MAX + dim, ownerSize, ownerW
+  fmax fmin(space, (if isNaN most then Infinity else most - inside)), (if isNaN least then 0 else least - inside)
+
+# Step 5: a line's free space. A main size that is only a limit is
+# settled by the line itself, inside the node's min and max.
+settleMain! =! (node, lay, f, insideMain, ownerW) ->
+  contentSized = false
+  if f.modeMain isnt STRETCH_FIT
+    least = sizeAt(lay, MIN + DIM[f.axis], f.ownerMain, ownerW) - insideMain
+    most = sizeAt(lay, MAX + DIM[f.axis], f.ownerMain, ownerW) - insideMain
+    if f.consumed < least
+      f.innerMain = least
+    else if f.consumed > most
+      f.innerMain = most
+    else
+      # With nothing to grow, the space used is the space needed.
+      f.innerMain = f.consumed if f.grow is 0 or (if node is rootNode then 0 else lay.grow) is 0
+      contentSized = true
+  if not contentSized and not isNaN f.innerMain
+    f.free = f.innerMain - f.consumed
+  else if f.consumed < 0
+    f.free = -f.consumed
+
+# Step 9: one dimension of the node's size — what it was given, or what
+# its lines need, its own edges among them.
+outerSize =! (lay, axis, mode, given, needed, inner, inside, ownerSize, ownerW) ->
+  if mode is MAX_CONTENT or (mode is FIT_CONTENT and lay.overflow isnt SCROLL)
+    bound lay, axis, needed, ownerSize, ownerW
+  else if mode is FIT_CONTENT
+    fmax fmin(inner + inside, boundWithin(lay, axis, needed, ownerSize, ownerW)), inside
+  else
+    bound lay, axis, given, ownerSize, ownerW
+
+# Lines were stacked from the start edge, so wrap-reverse mirrors them.
+# Step 10: a reversed axis positioned its children from its far edge, so
+# give each its near one too.
+mirror! =! (lay, f) ->
+  axis = f.axis
+  cross = f.cross
+  mainDimension = DIM[axis]
+  crossDimension = DIM[cross]
+  if lay.wrap is WRAP_REVERSE
+    start = START[cross]
+    for kid, i in lay.kids
+      k = kid.lay
+      k.pos[start] = lay.measured[crossDimension] - k.pos[start] - k.measured[crossDimension] if k.position isnt ABSOLUTE
+  reversedMain = axis is ROW_REVERSE or axis is COLUMN_REVERSE
+  reversedCross = cross is ROW_REVERSE or cross is COLUMN_REVERSE
+  if reversedMain or reversedCross
+    for kid, i in lay.kids
+      k = kid.lay
+      continue if k.position is ABSOLUTE
+      k.pos[END[axis]] = lay.measured[mainDimension] - k.measured[mainDimension] - k.pos[START[axis]] if reversedMain
+      k.pos[END[cross]] = lay.measured[crossDimension] - k.measured[crossDimension] - k.pos[START[cross]] if reversedCross
+
 # Size `node` under the offer, and with `perform` place its children
-# (calculateLayoutImpl). The available sizes include the node's margin;
-# the owner sizes are what its percents resolve against.
+# (calculateLayoutImpl, whose step numbers these are). The available
+# sizes include the node's margin; the owner sizes are what its percents
+# resolve against.
 compute! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
   lay = node.lay
   # Padding without a percent was resolved when the styles were parsed.
@@ -1464,41 +1554,21 @@ compute! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
     return
   return if not perform and measureFixed lay, availW - marginRow, availH - marginColumn, modeW, modeH, ownerW, ownerH
 
-  # Step 1: the axes, and what this node's own edges take.
   f = lay.flex ?= Flex.new()
-  axis = mainAxis lay
-  cross = crossAxis axis
-  row = axis >= ROW
-  f.axis = axis
-  f.cross = cross
-  f.row = row
-  f.wrap = lay.wrap isnt NOWRAP
-  ownerMain = if row then ownerW else ownerH
+  axes lay, f, modeW, modeH, ownerW, ownerH
+  axis = f.axis
+  cross = f.cross
+  row = f.row
   ownerCross = if row then ownerH else ownerW
-  f.ownerMain = ownerMain
   insideMain = insideAxis lay, axis, ownerW
   insideCross = insideAxis lay, cross, ownerW
   leadingCross = insideAt lay, START[cross], ownerW
   insideRow = if row then insideMain else insideCross
   insideColumn = if row then insideCross else insideMain
-  f.modeMain = if row then modeW else modeH
-  f.modeCross = if row then modeH else modeW
-
-  # Step 2: the space inside, held within this node's own min and max.
-  innerW = availW - marginRow - insideRow
-  unless isNaN innerW
-    least = sizeAt lay, MIN + WIDTH, ownerW, ownerW
-    most = sizeAt lay, MAX + WIDTH, ownerW, ownerW
-    innerW = fmax fmin(innerW, (if isNaN most then Infinity else most - insideRow)), (if isNaN least then 0 else least - insideRow)
-  innerH = availH - marginColumn - insideColumn
-  unless isNaN innerH
-    least = sizeAt lay, MIN + HEIGHT, ownerH, ownerW
-    most = sizeAt lay, MAX + HEIGHT, ownerH, ownerW
-    innerH = fmax fmin(innerH, (if isNaN most then Infinity else most - insideColumn)), (if isNaN least then 0 else least - insideColumn)
-  f.innerW = innerW
-  f.innerH = innerH
-  f.innerMain = if row then innerW else innerH
-  f.innerCross = if row then innerH else innerW
+  f.innerW = innerSize lay, WIDTH, availW - marginRow - insideRow, insideRow, ownerW, ownerW
+  f.innerH = innerSize lay, HEIGHT, availH - marginColumn - insideColumn, insideColumn, ownerH, ownerW
+  f.innerMain = if row then f.innerW else f.innerH
+  f.innerCross = if row then f.innerH else f.innerW
   # A child's percent min and max resolve against the space inside THIS
   # node wherever they are read, as its percent size does. Yoga reads
   # them against this node's owner when lines are broken and space is
@@ -1519,33 +1589,14 @@ compute! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
   totalCross = 0
   widest = 0
   crossGap = gapAt lay, cross, f.innerCross
-  innerMain = f.innerMain
   f.from = 0
   lay.linePass = generation
   while f.from < list.length or lines is 0
     breakLine lay, f, lines
-    skipped = not perform and f.modeCross is STRETCH_FIT
-
-    # Step 5: the free space. A main size that is only a limit is settled
-    # by the line itself, inside this node's min and max.
-    contentSized = false
-    if f.modeMain isnt STRETCH_FIT
-      least = sizeAt(lay, MIN + DIM[axis], ownerMain, ownerW) - insideMain
-      most = sizeAt(lay, MAX + DIM[axis], ownerMain, ownerW) - insideMain
-      if f.consumed < least
-        innerMain = least
-      else if f.consumed > most
-        innerMain = most
-      else
-        # With nothing to grow, the space used is the space needed.
-        innerMain = f.consumed if f.grow is 0 or (if node is rootNode then 0 else lay.grow) is 0
-        contentSized = true
-      f.innerMain = innerMain
-    if not contentSized and not isNaN innerMain
-      f.free = innerMain - f.consumed
-    else if f.consumed < 0
-      f.free = -f.consumed
-    unless skipped
+    settleMain node, lay, f, insideMain, ownerW
+    # With the cross size exact and nothing to place, no child needs
+    # measuring, and the flex step is skipped.
+    unless not perform and f.modeCross is STRETCH_FIT
       before = f.free
       freeze lay, f
       f.free = before - distribute(node, lay, f, perform)
@@ -1568,39 +1619,12 @@ compute! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
   # Step 8: the lines against each other.
   alignLines node, lay, f, lines, totalCross, leadingCross, insideCross, ownerCross, ownerW if perform and (f.wrap or baselined lay)
 
-  # Step 9: this node's size — what it was given, or what its lines need.
-  lay.measured[WIDTH] = bound lay, ROW, availW - marginRow, ownerW, ownerW
-  lay.measured[HEIGHT] = bound lay, COLUMN, availH - marginColumn, ownerH, ownerW
-  mainDimension = DIM[axis]
-  crossDimension = DIM[cross]
-  scrolls = lay.overflow is SCROLL
-  if f.modeMain is MAX_CONTENT or (f.modeMain is FIT_CONTENT and not scrolls)
-    lay.measured[mainDimension] = bound lay, axis, widest, ownerMain, ownerW
-  else if f.modeMain is FIT_CONTENT
-    lay.measured[mainDimension] = fmax fmin(f.innerMain + insideMain, boundWithin(lay, axis, widest, ownerMain, ownerW)), insideMain
-  if f.modeCross is MAX_CONTENT or (f.modeCross is FIT_CONTENT and not scrolls)
-    lay.measured[crossDimension] = bound lay, cross, totalCross + insideCross, ownerCross, ownerW
-  else if f.modeCross is FIT_CONTENT
-    lay.measured[crossDimension] = fmax fmin(f.innerCross + insideCross, boundWithin(lay, cross, totalCross + insideCross, ownerCross, ownerW)), insideCross
+  givenMain = if row then availW - marginRow else availH - marginColumn
+  givenCross = if row then availH - marginColumn else availW - marginRow
+  lay.measured[DIM[axis]] = outerSize lay, axis, f.modeMain, givenMain, widest, f.innerMain, insideMain, f.ownerMain, ownerW
+  lay.measured[DIM[cross]] = outerSize lay, cross, f.modeCross, givenCross, totalCross + insideCross, f.innerCross, insideCross, ownerCross, ownerW
   return unless perform
-
-  # Lines were stacked from the start edge, so wrap-reverse mirrors them.
-  if lay.wrap is WRAP_REVERSE
-    start = START[cross]
-    for kid, i in list
-      k = kid.lay
-      k.pos[start] = lay.measured[crossDimension] - k.pos[start] - k.measured[crossDimension] if k.position isnt ABSOLUTE
-
-  # Step 10: a reversed axis positioned its children from its far edge, so
-  # give each its near one too.
-  reversedMain = axis is ROW_REVERSE or axis is COLUMN_REVERSE
-  reversedCross = cross is ROW_REVERSE or cross is COLUMN_REVERSE
-  if reversedMain or reversedCross
-    for kid, i in list
-      k = kid.lay
-      continue if k.position is ABSOLUTE
-      k.pos[END[axis]] = lay.measured[mainDimension] - k.measured[mainDimension] - k.pos[START[axis]] if reversedMain
-      k.pos[END[cross]] = lay.measured[crossDimension] - k.measured[crossDimension] - k.pos[START[cross]] if reversedCross
+  mirror lay, f
 
   # Step 11: absolute descendants belong to their containing block — the
   # nearest ancestor that is not static, or the root.
