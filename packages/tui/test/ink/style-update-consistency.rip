@@ -1,0 +1,56 @@
+# Ink's test/style-update-consistency.tsx, ported.
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop: the
+# styles Ink spreads into the inner box are a `style:` object here, and
+# the rerender swaps it for another. The expected frame is the one
+# published Ink draws fresh from the second set of styles, which is what
+# Ink's test holds the rerendered frame to; `mounted` holds it to this
+# package's fresh frame as well.
+#
+#   rip test/ink/style-update-consistency.rip
+
+import { test, eq } from 'rip/testing'
+import { Box, Text, mounted } from './harness.rip'
+
+console.log "\nStyle Update Consistency"
+
+View =! component
+  @look := {}
+  render
+    Box width: 30, height: 12, flexDirection: 'column'
+      Box style: @look
+        Text "Alpha"
+        Text "Beta"
+      Text "End"
+
+# A frame of the view: what stands above `End`, and blank rows to 12.
+rows = (...above) -> [...above, 'End', ...Array(11 - above.length).fill('')]
+
+EDGE =! '─'.repeat 28
+CASES =! [
+  # Published Ink 7.1.1 rerenders this one to "AlphaBeta"; the frame is
+  # the fresh one Ink's test asks for.
+  ['column gap override removal', { gap: 2, columnGap: 4 }, { gap: 2 }, rows('Alpha  Beta')]
+  ['row gap override removal', { gap: 2, rowGap: 4 }, { gap: 2 }, rows('Alpha  Beta')]
+  ['gap removal', { gap: 3 }, {}, rows('AlphaBeta')]
+  ['position offset removal', { position: 'relative', left: 2, top: 1 }, {}, rows('AlphaBeta')]
+  ['absolute to flow', { position: 'absolute', left: 2, top: 1 }, {}, rows('AlphaBeta')]
+  ['border removal', { borderStyle: 'single' }, {}, rows('AlphaBeta')]
+  ['border side restoration', { borderStyle: 'single', borderLeft: false }, { borderStyle: 'single' },
+    rows("┌#{EDGE}┐", "│AlphaBeta#{' '.repeat 19}│", "└#{EDGE}┘")]
+  ['alignSelf removal', { alignSelf: 'flex-end' }, {}, rows('AlphaBeta')]
+  ['flexBasis removal', { flexBasis: 12 }, {}, rows('AlphaBeta')]
+  ['maxHeight removal', { maxHeight: 1 }, {}, rows('AlphaBeta')]
+  ['height removal', { height: 4 }, {}, rows('AlphaBeta')]
+  ['width removal', { width: 12 }, {}, rows('AlphaBeta')]
+  ['minWidth removal', { minWidth: 12 }, {}, rows('AlphaBeta')]
+  ['maxWidth removal', { maxWidth: 4 }, {}, rows('AlphaBeta')]
+  ['aspectRatio removal', { aspectRatio: 2, width: 12 }, { width: 12 }, rows('AlphaBeta')]
+]
+
+for [name, before, after, frame] in CASES
+  test "rerender matches fresh layout after #{name}", ->
+    rerender = (draw) ->
+      draw()
+      eq draw(look: after).plain, frame
+    mounted View, { look: before }, rerender, 30

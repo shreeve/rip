@@ -56,7 +56,7 @@ box is a text leaf, and text nested in text restyles its own words.
 
 | Moves boxes | Recolors cells |
 |---|---|
-| `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `flex` | `color`, `backgroundColor` — a name (`red`, `greenBright`, `gray`) or `'#rrggbb'` |
+| `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `flex` | `color`, `backgroundColor` — a name (`red`, `greenBright`, `gray`), `'#rrggbb'`, `'rgb(r, g, b)'`, `'ansi256(n)'`, or `'default'` for the terminal's own |
 | `alignItems`, `alignSelf`, `alignContent`, `justifyContent` | `bold`, `dimColor`, `italic`, `underline`, `strikethrough`, `inverse` |
 | `gap`, `rowGap`, `columnGap` | `borderColor`, `borderDimColor`, `borderBackgroundColor`, and each per edge (`borderTopColor` …) |
 | `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` — a number, `'50%'`, or `'auto'` | |
@@ -65,7 +65,7 @@ box is a text leaf, and text nested in text restyles its own words.
 | `aspectRatio`, `boxSizing`, `display` (`'flex'`, `'none'`, `'contents'`), `hidden` | |
 | `borderStyle`: `single`, `double`, `round`, `bold`, `singleDouble`, `doubleSingle`, `classic`, `arrow`, or an object of eight glyphs; `borderTop` / `borderRight` / `borderBottom` / `borderLeft: false` drops an edge | `contentOffsetX`, `contentOffsetY` — shift a box's children; a scroll is a repaint and runs no layout |
 | `overflow`, `overflowX`, `overflowY`: `'visible'` or `'hidden'` (clips to the padding box) | |
-| On `Text`: `wrap` — `'wrap'` (the default: words wrap, and a word longer than the line breaks), `'hard'`, `'truncate'` / `'truncate-end'`, `'truncate-start'`, `'truncate-middle'` (with `…`) | |
+| On `Text`: `wrap` — `'wrap'` (the default: words wrap, and a word longer than the line breaks), `'hard'`, `'truncate'` / `'truncate-end'`, `'truncate-start'`, `'truncate-middle'` (with `…`) | On `Text`: `link` — a URL; the words are a hyperlink (OSC 8) |
 
 Text is measured by grapheme cluster — a flag, a family emoji, a letter
 with its combining marks each take the cells a terminal gives them —
@@ -73,6 +73,18 @@ and control characters are stripped when the text is set: styling
 comes from props, never from escape sequences inside a string: an
 escape sequence in a text is removed whole, as a terminal would
 swallow it, so a filename or a log line cannot repaint the screen.
+
+A cluster is as wide as `string-width` 8 says, the measure Ink lays
+text out by, and a terminal may count differently. Thai `กำ` (U+0E01
+U+0E33) is one cluster and one cell by that rule, where
+`Bun.stringWidth` says two; Devanagari `कि` (U+0915 U+093F) is two
+cells by that rule and one by `Bun.stringWidth`. After every cluster
+of several code points the painter places the cursor by column, so a
+terminal that disagrees misdraws that one glyph and nothing after it.
+A single code point is left to the width every terminal gives it, with
+no move after it: one the width tables do not know — U+1F6D9,
+unassigned in Unicode 17, is one cell here and in `Bun.stringWidth` —
+puts the rest of its run a cell off on a terminal that draws it wide.
 
 A `backgroundColor` on a box fills it inside its border, and that is
 all it does: text with no background of its own takes the background
@@ -84,6 +96,40 @@ text inside it, and text nested in text adds to what the outer text
 says. A custom `borderStyle` object is read when it is written.
 `overflow: 'hidden'` clips everything drawn inside the box, an
 absolute child included.
+
+`'default'` is the terminal's own color, for `color` and for
+`backgroundColor`, and it is a color like any other. Text with
+`backgroundColor: 'default'` sits on the terminal's background even
+inside a colored box (SGR 49), where text with no background takes
+the box's; `color: 'default'` is the terminal's foreground (SGR 39)
+under an ancestor that set another; and a box with
+`backgroundColor: 'default'` covers what lies under it with the
+terminal's background.
+
+`link` makes a hyperlink of a text's words (OSC 8), and text nested
+in it is part of the link unless it names its own:
+
+```coffee
+Text
+  "see "
+  Text link: 'https://example.com/docs', underline: true
+    "the docs"
+```
+
+A link that wraps is a link on every row, and the `…` of a cut line is
+inside it. The sequence is closed before every cursor move and at the
+end of every write, so a terminal is never left inside a link. A URL
+is refused where it is written unless every character is printable
+ASCII — nothing in it can end the escape sequence early — so pass
+others through `encodeURI`. `link` on a box is refused, and the plain
+frame of `renderToString` carries no link.
+
+Every distinct style and every cluster of several code points is kept
+in a table, and a cell holds a style in sixteen bits. The tables are
+swept between frames once they pass 32,768 styles or 16,384 clusters:
+whatever no cell on the screen holds is let go, so an app that animates
+`'#rrggbb'` colors, or streams text in every script, runs on in bounded
+memory, and the frame after a sweep is an ordinary diff.
 
 Layout is flexbox as Yoga lays it out — the defaults are Yoga's
 (`flexDirection: 'column'`, `flexShrink: 0`, `alignItems: 'stretch'`,
@@ -135,9 +181,37 @@ frame is refused after 32 passes with no answer.
 
 ## Testing an app
 
-`renderToString App, cols: 40` mounts the app on a private document and
-returns the frame as text; `ansi: true` keeps the escape sequences.
-State a test changes redraws on the next call.
+`mount` is `run` without a terminal: it mounts the app once, hands it
+back, and draws a frame when the test asks for one.
+
+```coffee
+import { mount } from 'rip/tui'
+
+view = mount Counter, cols: 40, rows: 10, props: { count: 3 }
+view.frame()                # "count 3" — lay out, paint, the frame as plain text
+view.app.count.value = 7    # public state is set from outside
+view.frame()                # "count 7"
+view.ansi                   # that frame with its escape sequences
+view.bytes                  # what a terminal was sent for it: the 7, and the moves to reach it
+view.resize 20, 5           # the next frame is drawn whole, 20 by 5
+view.close()                # unmount, and give the process its `document` slot back
+```
+
+Nothing is drawn until `frame` asks, so a frame that fails — a layout
+that never settles, a border glyph gone bad — throws from `frame`, to
+the test that asked for it. `bytes` is the difference from the frame
+before, exactly as `run` writes it; a frame that changes no cell sends
+nothing. With `rows`, a frame taller than the terminal shows its
+bottom, as it does on a terminal; without, the terminal is as tall as
+the frame. A `quit` from the app closes the mount and resolves
+`view.done` with its value.
+
+The terminal document is a global of the process, so one app is
+mounted at a time: a second `mount`, `run`, or `renderToString` is
+refused by name until the first is closed — close in a `finally`.
+
+`renderToString App, cols: 40` is a mount, one frame, and a close; it
+takes `props`, and `ansi: true` keeps the escape sequences.
 
 ## What is here, and what is planned
 
@@ -162,8 +236,10 @@ bun run test
 
 `test.rip` covers the document's contract and its refusals, layout and
 cell rounding, `if` / `else` and keyed `for` on a terminal, nested text
-styles, `ref:` metrics, the grid diff replayed through a terminal, and
-a running app from first frame to `quit`. `test/text.rip` holds the
+styles, hyperlinks byte for byte, `ref:` metrics, the grid diff replayed
+through a terminal, 70,000 colors and 300,000 clusters through the
+swept tables, a running app from first frame to `quit`, and the `mount`
+driver. `test/text.rip` holds the
 text engine — sanitizing, cluster widths, every wrap and truncate mode
 — and `test/layout.rip` the layout engine's own pins. `test/yoga.rip` runs Yoga's
 543 generated layout cases, vendored unmodified under `test/yoga/`

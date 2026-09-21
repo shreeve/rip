@@ -8,17 +8,20 @@
 # line is drawn from offsets and no string is cut per frame.
 
 import { kids } from './layout.rip'
-import { CLUSTER, glyph, sanitize, Flow, refresh, MODES, A0, A1, B0, B1, DOTS, ROW } from './text.rip'
+import { CLUSTER, glyph, crowded, evict, sanitize, Flow, refresh, MODES, A0, A1, B0, B1, DOTS, ROW } from './text.rip'
 
 # ── Styles ────────────────────────────────────────────────────────────────────
 
+# `default` is the terminal's own color, SGR 39 and 49: a color like any
+# other, so it stands against an ancestor's color and against the
+# background a run of text lands on.
 NAMED =! {
-  black: 0, red: 1, green: 2, yellow: 3, blue: 4, magenta: 5, cyan: 6, white: 7
+  black: 0, red: 1, green: 2, yellow: 3, blue: 4, magenta: 5, cyan: 6, white: 7, default: 9
   gray: 60, grey: 60, blackBright: 60, redBright: 61, greenBright: 62, yellowBright: 63
   blueBright: 64, magentaBright: 65, cyanBright: 66, whiteBright: 67
 }
 
-COLORS =! "a name (red, greenBright, gray), '#rrggbb', 'rgb(r, g, b)' or 'ansi256(n)'"
+COLORS =! "a name (red, greenBright, gray, default), '#rrggbb', 'rgb(r, g, b)' or 'ansi256(n)'"
 
 # The SGR parameters for a color, on the foreground (30) or background
 # (40); null for a value that is no color.
@@ -38,6 +41,7 @@ tint =! (color, base) ->
   null
 
 LIMIT =! 65536   # style ids a cell's sixteen bits can hold
+SWEEP =! 32768   # styles held before those no cell uses are let go
 
 # A style's switches, each one bit of its flags, and the SGR parameter of
 # each.
@@ -46,13 +50,18 @@ CODES =! [1, 2, 3, 4, 7, 9]
 DIM =! 2
 
 ids =! Map.new()
-records =! [{ fg: null, bg: null, flags: 0, sgr: '' }]
+records =! [{ fg: null, bg: null, flags: 0, link: null, sgr: '', key: 'null|null|0' }]
 blends =! Map.new()
-ids.set 'null|null|0', 0
+ids.set records[0].key, 0
 
-# The id of a style, minted on first sight.
-export intern =! (fg, bg, flags) ->
+# The styles held, for the tests to count.
+export tally =! -> records.length
+
+# The id of a style, minted on first sight; it stands until a sweep. A
+# link is part of the style, so two grids differ where a link does.
+export intern =! (fg, bg, flags, link = null) ->
   key = "#{fg}|#{bg}|#{flags}"
+  key += "|#{link}" if link
   id = ids.get key
   return id if id?
   parts = []
@@ -63,7 +72,7 @@ export intern =! (fg, bg, flags) ->
     throw Error.new "rip/tui: #{JSON.stringify color} is not a color — write #{COLORS}" unless sgr
     parts.push sgr
   throw Error.new "rip/tui: more than #{LIMIT} distinct styles are in use — a cell holds a style id in sixteen bits" if records.length >= LIMIT
-  records.push { fg, bg, flags, sgr: parts.join(';') }
+  records.push { fg, bg, flags, link, sgr: parts.join(';'), key }
   ids.set key, records.length - 1
   records.length - 1
 
@@ -75,7 +84,7 @@ export intern =! (fg, bg, flags) ->
 # on (`over`) — so words that spill out of a blue box are blue only
 # where the box is, and a tip drawn over a red row sits on red whatever
 # box it was written in. Inside one text a background is the text's
-# own: `words` says so, and a nested run keeps it.
+# own: `words` says so, and a nested run keeps it, as it keeps a link.
 styleOf =! (node, inherited, words) ->
   s = node.styles
   base = records[inherited]
@@ -84,14 +93,19 @@ styleOf =! (node, inherited, words) ->
     flags |= (1 << n) if s[name]
   back = if words then s.backgroundColor ?? base.bg else base.bg
   # Most nodes say nothing about color or weight, and keep the id as it is.
-  return inherited if flags is base.flags and not s.color? and back is base.bg
-  intern s.color ?? base.fg, back, flags
+  return inherited if flags is base.flags and not s.color? and back is base.bg and not s.link?
+  intern s.color ?? base.fg, back, flags, s.link ?? base.link
 
-# The escape sequence that leaves style `from` for style `to`.
+# The escape sequence that leaves style `from` for style `to`. A style
+# that is a link and nothing more has none of its own.
 shift =! (from, to) ->
   next = records[to].sgr
-  return "\x1b[0m" unless next
+  return (if records[from].sgr then "\x1b[0m" else '') unless next
   if records[from].sgr then "\x1b[0;#{next}m" else "\x1b[#{next}m"
+
+# The escape sequence that makes what follows a hyperlink to `url`
+# (OSC 8), or with null ends the one that is open.
+hop =! (url) -> "\x1b]8;;#{url ?? ''}\x1b\\"
 
 # Text drawn with no background of its own keeps the one beneath it.
 over =! (id, beneath) ->
@@ -99,7 +113,7 @@ over =! (id, beneath) ->
   under = records[beneath]
   return id if top.bg? or not under.bg?
   key = (id << 16) | beneath
-  blends.get(key) ?? (blends.set(key, intern(top.fg, under.bg, top.flags)); blends.get(key))
+  blends.get(key) ?? (blends.set(key, intern(top.fg, under.bg, top.flags, top.link)); blends.get(key))
 
 # ── Borders ───────────────────────────────────────────────────────────────────
 
@@ -156,6 +170,7 @@ CLIP   =! 3
 OFFSET =! 4
 BORDER =! 5
 WRAP   =! 6
+LINK   =! 7
 
 CHECKS =! Map.new()
 CHECKS.set name, SWITCH for name in SWITCHES
@@ -169,6 +184,7 @@ CHECKS.set key, CLIP for key in ['overflow', 'overflowX', 'overflowY']
 CHECKS.set key, OFFSET for key in ['contentOffsetX', 'contentOffsetY']
 CHECKS.set 'borderStyle', BORDER
 CHECKS.set 'wrap', WRAP
+CHECKS.set 'link', LINK
 
 # Refuse a value the painter cannot use, where it is written and by the
 # key it was written to — layout's `admit`, for the styles that recolor
@@ -188,12 +204,19 @@ export allow! =! (key, value) ->
     when BORDER then glyphsOf value, key
     when WRAP
       throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not one of #{Object.keys(MODES).join ', '}" unless Object.hasOwn MODES, value
+    # A link goes to the terminal inside an escape sequence, so it is
+    # refused, never repaired, unless every character is printable ASCII —
+    # what OSC 8 asks of a URI, and what cannot end the sequence early.
+    when LINK
+      throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not a link — write a URL in printable ASCII, the rest percent-encoded (encodeURI)" unless typeof value is 'string' and /^[\x20-\x7e]+$/.test value
 
 # ── Grid ──────────────────────────────────────────────────────────────────────
 
 SPACE =! 32
 DOT   =! 0x2026
 FAR   =! 1073741823
+
+epoch = 0   # sweeps so far; a grid's ids are of the tables its epoch names
 
 export class Grid
   # `top` is the tree row shown on the grid's first row: a frame taller
@@ -211,6 +234,7 @@ export class Grid
     @ch.fill SPACE
     @style.fill 0
     @wide.fill 1
+    @epoch = epoch
     @clip 0, -FAR, @cols, FAR
 
   # Hold the writes that follow to a rectangle of tree coordinates.
@@ -322,20 +346,26 @@ export class Grid
       @wide.fill 1, at + left, at + right
 
   # The grid as text: one string per row, trailing blanks trimmed.
-  # With `ansi`, each run of a style carries its escape sequence.
+  # With `ansi`, each run of a style carries its escape sequence, and a
+  # link is closed on the row it opens on.
   toString: (ansi = false) ->
     lines = []
     for row in [0...@rows]
       line = ''
       held = 0
+      url = null
       for col in [0...@cols]
         at = row * @cols + col
         continue if @wide[at] is 0
         if ansi and @style[at] isnt held
           line += shift held, @style[at]
           held = @style[at]
+          if records[held].link isnt url
+            url = records[held].link
+            line += hop url
         line += glyph @ch[at]
-      line += "\x1b[0m" if ansi and held
+      line += hop null if url
+      line += "\x1b[0m" if ansi and records[held].sgr
       lines.push (if ansi then line else line.trimEnd())
     lines.join '\n'
 
@@ -416,6 +446,7 @@ shadeAt =! (flow, unit) ->
 words! =! (grid, node, inherited, x, y) ->
   flow = node.flow ?? refresh node
   return if flow.count is 0
+  flow.renew()
   shades.length = 0
   own = inherited
   if node.nodeType is 3
@@ -490,9 +521,44 @@ lent =! (node, owner, id) ->
   return id if node is owner or not node
   styleOf node, lent(node.parentNode, owner, id)
 
-export paint! =! (grid, node, inherited = 0) ->
-  draw grid, node, inherited, 0, 0, 0, -FAR, grid.cols, FAR
+export paint! =! (grid, node) ->
+  sweep grid if full 1.5
+  draw grid, node, 0, 0, 0, 0, -FAR, grid.cols, FAR
   grid.clip 0, -FAR, grid.cols, FAR
+
+# ── Sweep ─────────────────────────────────────────────────────────────────────
+
+# The style table and the cluster table grow with every new color and
+# every new cluster, and a cell has sixteen bits for a style. Between
+# frames — never inside one, where ids are in hand — a table that has
+# grown past its mark is swept: every style and cluster that no cell of
+# `grid` holds is let go, and the cells that stay are renumbered. The
+# sweep follows a `diff`, whose grid is the one the terminal shows, so
+# the next diff stands; frames that are never diffed are swept as a
+# `paint` starts, once a table is half as far past its mark again. Any
+# other grid is left with ids of tables that are gone, which its epoch
+# says: `diff` draws from nothing over one, and `clear` makes it whole.
+# A flow renews its own cells (text.rip).
+full =! (slack) -> records.length > SWEEP * slack or crowded slack
+
+sweep! =! (grid) ->
+  grid.epoch = epoch += 1
+  moved = Uint16Array.new records.length
+  kept = [records[0]]
+  style = grid.style
+  for id, at in style when id
+    unless moved[id]
+      moved[id] = kept.length
+      kept.push records[id]
+    style[at] = moved[id]
+  records.length = 0
+  ids.clear()
+  blends.clear()
+  for record, n in kept
+    records.push record
+    ids.set record.key, n
+  evict grid.ch
+  frames.clear()
 
 # ── Grid → bytes ──────────────────────────────────────────────────────────────
 
@@ -509,7 +575,7 @@ shows =! (front, back, drawn, row, i) ->
 # relative, so the frame can sit anywhere in the scrollback; a line feed
 # is the move down, since it alone makes a row that does not exist yet.
 # `front` is null before the first frame, and a frame of another width
-# is drawn from nothing.
+# or of another epoch is drawn from nothing.
 #
 # A line feed at the bottom of the screen scrolls, and a terminal with
 # background color erase fills the row it makes with the background then
@@ -521,12 +587,18 @@ shows =! (front, back, drawn, row, i) ->
 # follows on its row a cell off. The cell after one is therefore reached
 # by an absolute column move. One code point, wide or not, is left to
 # the width every terminal gives it.
+#
+# A hyperlink is open only while the cells it covers are written: it is
+# closed before every cursor move and at the end of every run, so no
+# move and no write ever happens inside one.
 export diff =! (front, back) ->
-  reuse = front? and front.cols is back.cols
+  reuse = front? and front.cols is back.cols and front.epoch is back.epoch
   out = if reuse then '' else "\x1b[J"
   drawn = if reuse then front.rows else 0
   at = 0
   held = 0
+  url = null      # the link of the style held, and the link open on the terminal
+  linked = null
   for row in [0...back.rows]
     col = 0
     while col < back.cols
@@ -541,6 +613,7 @@ export diff =! (front, back) ->
           if held and records[held].bg?
             out += "\x1b[0m"
             held = 0
+            url = null
           out += '\n'.repeat down
       else if row < at
         out += "\x1b[#{at - row}A"
@@ -553,14 +626,19 @@ export diff =! (front, back) ->
         break if back.wide[i] isnt 0 and shows front, back, drawn, row, i
         if back.wide[i] isnt 0
           cell = back.ch[i]
-          out += "\x1b[#{col + 1}G" if loose
+          if loose
+            out += hop linked = null if linked
+            out += "\x1b[#{col + 1}G"
           if back.style[i] isnt held
             out += shift held, back.style[i]
             held = back.style[i]
+            url = records[held].link
+          out += hop linked = url if url isnt linked
           out += if cell < CLUSTER then String.fromCodePoint(cell) else glyph cell
           loose = cell >= CLUSTER
         col += 1
-  out += "\x1b[0m" if held
+      out += hop linked = null if linked
+  out += "\x1b[0m" if records[held].sgr
   if drawn > back.rows
     out += '\n'.repeat(back.rows - at) if back.rows > at
     out += "\x1b[#{at - back.rows}A" if at > back.rows
@@ -568,4 +646,5 @@ export diff =! (front, back) ->
     out += "\r\x1b[J"
   out += "\x1b[#{at}A" if at > 0
   out += '\r' if out
+  sweep back if full 1
   out

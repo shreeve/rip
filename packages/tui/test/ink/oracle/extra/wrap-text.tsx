@@ -5,14 +5,36 @@
 // a <Text wrap={mode}> inside a <Box width={width}>, held to the literal
 // Ink's test holds the function to. Titles are Ink's.
 // A style that spans a newline is given as a `color` prop, where Ink's
-// test writes the escape sequence into the text.
+// test writes the escape sequence into the text. The one case that
+// draws a tree of its own, a rerender, goes through Ink's synchronous
+// `render`, where Ink's test awaits its concurrent renderer.
 
 import React from 'react';
 import test from 'ava';
-import {Box, Text} from '../src/index.js';
+import {Box, Text, render} from '../src/index.js';
 import {renderToString} from './helpers/render-to-string.js';
+import createStdout from './helpers/create-stdout.js';
 
 type Wrap = 'wrap' | 'truncate' | 'truncate-end' | 'truncate-middle' | 'truncate-start';
+
+test('changing text wrapping recalculates the container height', t => {
+	function Example({truncate}: {readonly truncate: boolean}) {
+		return (
+			<Box width={7} borderStyle="single">
+				<Text wrap={truncate ? 'truncate' : 'wrap'}>abcdefghij</Text>
+			</Box>
+		);
+	}
+
+	const stdout = createStdout();
+	const {rerender, unmount} = render(<Example truncate={false} />, {stdout, debug: true});
+	t.is(stdout.get(), '┌─────┐\n│abcde│\n│fghij│\n└─────┘');
+	rerender(<Example truncate />);
+	t.is(stdout.get(), '┌─────┐\n│abcd…│\n└─────┘');
+	rerender(<Example truncate={false} />);
+	t.is(stdout.get(), '┌─────┐\n│abcde│\n│fghij│\n└─────┘');
+	unmount();
+});
 
 const wrapped = (text: string, width: number, wrap: Wrap, color?: string) =>
 	renderToString(

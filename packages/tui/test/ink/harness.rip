@@ -5,16 +5,17 @@
 # `flexShrink: 1`) and its <Text> shrinks too; this package's widgets
 # keep Yoga's defaults (a column, `flexShrink: 0`). Ink's trees are
 # ported prop for prop, so the widgets here spell Ink's defaults out and
-# forward everything else as written. A prop the test writes wins.
+# forward everything else as written. A prop the test writes wins, and
+# one it takes away on a rerender leaves Ink's default.
 
-import { renderToString, Spacer } from 'rip/tui'
+import { mount, renderToString, Spacer } from 'rip/tui'
 import * as cells from './cells.rip'
 
 export Box = component extends div
   @flexDirection := 'row'
   @flexShrink := 1
   render
-    div flexDirection: @flexDirection, flexShrink: @flexShrink
+    div flexDirection: @flexDirection ?? 'row', flexShrink: @flexShrink ?? 1
       slot
 
 # Text nested in text is a run of words and takes no layout, so only the
@@ -44,6 +45,67 @@ export plain =! (App, cols = 100) ->
 
 export styled =! (App, cols = 100) ->
   cells.styled renderToString(App, { cols, ansi: true })
+
+MOVE =! /\x1b\[([?0-9;]*)([A-Za-z])/y
+
+# The rows a terminal shows once it is sent `bytes`, given the `rows` it
+# showed before: as much of a terminal as a frame's difference needs —
+# up, down, a column, an erase below, line feeds — with styles let by.
+# Every frame leaves the cursor where it found it, at the top left.
+replay =! (rows, bytes) ->
+  row = col = at = 0
+  while at < bytes.length
+    if bytes[at] is '\x1b'
+      MOVE.lastIndex = at
+      [all, count, verb] = MOVE.exec bytes
+      count = parseInt(count) or 1
+      switch verb
+        when 'A' then row -= count
+        when 'B' then row += count
+        when 'G' then col = count - 1
+        when 'J'
+          rows.length = row + 1
+          rows[row]?.length = col
+      at += all.length
+    else if bytes[at] is '\n' or bytes[at] is '\r'
+      row += 1 if bytes[at] is '\n'
+      col = 0
+      at += 1
+    else
+      glyph = String.fromCodePoint bytes.codePointAt(at)
+      (rows[row] ?= [])[col] = glyph
+      col += 1
+      at += glyph.length
+  (Array.from(rows[r] ?? [], (ch) -> ch ?? ' ').join('').trimEnd() for r in [0...rows.length]).join('\n').trimEnd()
+
+# Ink's `rerender`: the tree stays mounted and takes other props. `body`
+# is handed `draw`, which sets the props it is given on the mounted app
+# and reads the next frame both ways, `{ plain, styled }`. Two rules are
+# held for every frame of every case. The bytes a terminal was sent for
+# it, replayed over the frame before, show it. And it is the frame a
+# fresh mount draws from the same props, which is the rule of Ink's
+# style-update-consistency.tsx.
+export mounted =! (App, props, body, cols = 100) ->
+  given = { ...props }
+  drawn = []
+  shown = []
+  view = mount App, { cols, props: { ...props } }
+  try
+    body (next = {}) ->
+      for own key, value of next
+        view.app[key].value = value
+        given[key] = value
+      text = view.frame()
+      sent = replay shown, view.bytes
+      throw Error.new "the bytes sent show #{JSON.stringify sent}, and the frame is #{JSON.stringify text}" unless sent is text.trimEnd()
+      drawn.push [{ ...given }, view.ansi]
+      { plain: cells.plain(text), styled: cells.styled(view.ansi) }
+  finally
+    view.close()
+  for [held, ansi] in drawn
+    fresh = renderToString App, { cols, props: held, ansi: true }
+    throw Error.new "the updated frame #{JSON.stringify ansi} is not the fresh one #{JSON.stringify fresh}, at #{JSON.stringify held}" unless fresh is ansi
+  return
 
 # Where this package draws a frame differently from Ink ON PURPOSE, or
 # where Ink's own test asks for a frame no build of Ink draws. The case

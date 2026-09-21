@@ -130,7 +130,7 @@ test "do not wrap text with BEL-terminated OSC hyperlinks", ->
         Text wrap: 'wrap'
           "\u001b]8;;https://example.com\u0007Click here\u001b]8;;\u0007"
   # Ink's test compares the frame's text, escape sequences taken out.
-  # Ink keeps the hyperlink around this text; hyperlinks are not built here.
+  # Ink keeps the hyperlink around this text; here a hyperlink is the `link` prop, never an escape sequence in the text.
   eq plain(App), ["Click here"]
 
 test "do not wrap text with ST-terminated OSC hyperlinks", ->
@@ -140,7 +140,7 @@ test "do not wrap text with ST-terminated OSC hyperlinks", ->
         Text wrap: 'wrap'
           "\u001b]8;;https://example.com\u001b\\Click here\u001b]8;;\u001b\\"
   # Ink's test compares the frame's text, escape sequences taken out.
-  # Ink keeps the hyperlink around this text; hyperlinks are not built here.
+  # Ink keeps the hyperlink around this text; here a hyperlink is the `link` prop, never an escape sequence in the text.
   eq plain(App), ["Click here"]
 
 test "do not wrap text with non-hyperlink OSC sequences", ->
@@ -159,7 +159,7 @@ test "hard-wrap single-word BEL-terminated OSC hyperlink", ->
         Text wrap: 'wrap'
           "\u001b]8;;https://example.com\u0007abcdefghij\u001b]8;;\u0007"
   # Ink's test compares the frame's text, escape sequences taken out.
-  # Ink keeps the hyperlink around this text; hyperlinks are not built here.
+  # Ink keeps the hyperlink around this text; here a hyperlink is the `link` prop, never an escape sequence in the text.
   eq plain(App), ["abcde", "fghij"]
 
 test "hard-wrap single-word ST-terminated OSC hyperlink", ->
@@ -169,7 +169,7 @@ test "hard-wrap single-word ST-terminated OSC hyperlink", ->
         Text wrap: 'wrap'
           "\u001b]8;;https://example.com\u001b\\abcdefghij\u001b]8;;\u001b\\"
   # Ink's test compares the frame's text, escape sequences taken out.
-  # Ink keeps the hyperlink around this text; hyperlinks are not built here.
+  # Ink keeps the hyperlink around this text; here a hyperlink is the `link` prop, never an escape sequence in the text.
   eq plain(App), ["abcde", "fghij"]
 
 test "ignore empty text node", ->
@@ -256,3 +256,12 @@ test "vertical spacer", ->
     "Bottom"
   ]
 
+# Ink writes the hyperlink into the text with `ansiEscapes.link`; here it
+# is the `link` prop. The frame reader refuses a hyperlink left open at
+# the end of a row, which is what Ink's test looks for.
+test "link ansi escapes are closed properly", ->
+  App = component
+    render
+      Text link: 'https://example.com'
+        "Example"
+  eq styled(App), ["«link https://example.com»Example"]

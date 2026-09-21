@@ -42,7 +42,7 @@ export const describe = (node: unknown): Tree[] => {
 
 	const props: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(rest)) {
-		props[key] = typeof value === 'function' ? '[function]' : value;
+		props[key] = typeof value === 'function' ? '[function]' : React.isValidElement(value) ? '[element]' : value;
 	}
 
 	if (element.key !== null && element.key !== undefined) props.key = element.key;

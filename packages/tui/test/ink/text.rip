@@ -175,7 +175,7 @@ test "preserve OSC hyperlink sequences in text", ->
       Box
         Text "\u001b]8;;https://example.com\u0007link\u001b]8;;\u0007"
   # Ink's test compares the frame's text, escape sequences taken out.
-  # Ink keeps the hyperlink around this text; hyperlinks are not built here.
+  # Ink keeps the hyperlink around this text; here a hyperlink is the `link` prop, never an escape sequence in the text.
   eq plain(App), ["link"]
 
 test "preserve OSC hyperlink sequences with ST terminator in text", ->
@@ -184,7 +184,7 @@ test "preserve OSC hyperlink sequences with ST terminator in text", ->
       Box
         Text "\u001b]8;;https://example.com\u001b\\link\u001b]8;;\u001b\\"
   # Ink's test compares the frame's text, escape sequences taken out.
-  # Ink keeps the hyperlink around this text; hyperlinks are not built here.
+  # Ink keeps the hyperlink around this text; here a hyperlink is the `link` prop, never an escape sequence in the text.
   eq plain(App), ["link"]
 
 test "preserve C1 OSC sequences in text", ->
@@ -193,7 +193,7 @@ test "preserve C1 OSC sequences in text", ->
       Box
         Text "\u009d8;;https://example.com\u0007link\u009d8;;\u0007"
   # Ink's test compares the frame's text, escape sequences taken out.
-  # Ink keeps the hyperlink around this text; hyperlinks are not built here.
+  # Ink keeps the hyperlink around this text; here a hyperlink is the `link` prop, never an escape sequence in the text.
   eq plain(App), ["link"]
 
 test "preserve C1 OSC hyperlink sequences with ST terminator in text", ->
@@ -202,7 +202,7 @@ test "preserve C1 OSC hyperlink sequences with ST terminator in text", ->
       Box
         Text "\u009d8;;https://example.com\u001b\\link\u009d8;;\u001b\\"
   # Ink's test compares the frame's text, escape sequences taken out.
-  # Ink keeps the hyperlink around this text; hyperlinks are not built here.
+  # Ink keeps the hyperlink around this text; here a hyperlink is the `link` prop, never an escape sequence in the text.
   eq plain(App), ["link"]
 
 test "preserve colors encoded with colon parameters", ->
@@ -251,7 +251,7 @@ test "strip tmux DCS passthrough wrappers without leaking payload", ->
       Box
         Text "\u001bPtmux;\u001b\u001b]8;;https://example.com\u0007\u001b\\link\u001bPtmux;\u001b\u001b]8;;\u0007\u001b\\"
   # Ink's test compares the frame's text, escape sequences taken out.
-  # Ink keeps the hyperlink around this text; hyperlinks are not built here.
+  # Ink keeps the hyperlink around this text; here a hyperlink is the `link` prop, never an escape sequence in the text.
   eq plain(App), ["link"]
 
 test "strip tmux DCS passthrough wrappers with ST-terminated OSC payload", ->
@@ -260,7 +260,7 @@ test "strip tmux DCS passthrough wrappers with ST-terminated OSC payload", ->
       Box
         Text "\u001bPtmux;\u001b\u001b]8;;https://example.com\u001b\u001b\\\u001b\\link\u001bPtmux;\u001b\u001b]8;;\u001b\u001b\\\u001b\\"
   # Ink's test compares the frame's text, escape sequences taken out.
-  # Ink keeps the hyperlink around this text; hyperlinks are not built here.
+  # Ink keeps the hyperlink around this text; here a hyperlink is the `link` prop, never an escape sequence in the text.
   eq plain(App), ["link"]
 
 test "strip C1 DCS control strings as complete units", ->
@@ -350,7 +350,7 @@ test "strip incomplete OSC control strings to avoid payload leaks", ->
       Box
         Text "A\u001b]8;;https://example.comlink"
   # Ink's test compares the frame's text, escape sequences taken out.
-  # Ink keeps the hyperlink around this text; hyperlinks are not built here.
+  # Ink keeps the hyperlink around this text; here a hyperlink is the `link` prop, never an escape sequence in the text.
   eq plain(App), ["A"]
 
 test "strip incomplete C1 OSC control strings to avoid payload leaks", ->
@@ -359,7 +359,7 @@ test "strip incomplete C1 OSC control strings to avoid payload leaks", ->
       Box
         Text "A\u009d8;;https://example.comlink"
   # Ink's test compares the frame's text, escape sequences taken out.
-  # Ink keeps the hyperlink around this text; hyperlinks are not built here.
+  # Ink keeps the hyperlink around this text; here a hyperlink is the `link` prop, never an escape sequence in the text.
   eq plain(App), ["A"]
 
 test "strip incomplete ESC control sequences with intermediates to avoid payload leaks", ->

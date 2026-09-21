@@ -1,7 +1,8 @@
 # Ink's paint-side tests, ported: text and wrapping, borders,
 # backgrounds, clipping, content offsets, and the layout props as they
-# reach the screen. One file per Ink test file, one tally for all of
-# them; test/ink/SOURCE.md says where the expectations come from.
+# reach the screen. One file per Ink test file, with the rerender cases
+# of those files in update.rip, and one tally for all of them;
+# test/ink/SOURCE.md says where the expectations come from.
 #
 #   rip test/ink.rip
 
@@ -35,3 +36,6 @@ import './ink/flex-align-items.rip'
 import './ink/flex-align-self.rip'
 import './ink/flex-justify-content.rip'
 import './ink/render-to-string.rip'
+import './ink/update.rip'
+import './ink/style-update-consistency.rip'
+import './ink/reconciler.rip'
