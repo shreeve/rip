@@ -8,6 +8,7 @@ import * as mod from 'rip/tui'
 import { install } from './document.rip'
 import { layout } from './layout.rip'
 import { Grid, paint, diff } from './paint.rip'
+import { __setChildFailureReporter } from '../../src/runtime/components.js'
 import { EventEmitter } from 'node:events'
 import { readFileSync } from 'fs'
 import { join } from 'path'
@@ -110,6 +111,41 @@ test "an unknown style is refused by name, with the nearest real one", ->
       Box flexDirecton: 'row'
   throws (-> renderToString Typo), "'flexDirecton' is not a terminal style of <div> — did you mean 'flexDirection'?"
   eq typeof document, 'undefined'
+
+test "a child that fails to construct fails the mount, through the runtime's reporter", ->
+  Typo = component
+    render
+      Box flexDirecton: 'row'
+  held = console.error
+  printed = []
+  console.error = (label) -> printed.push label
+  try
+    throws (-> renderToString Typo), "'flexDirecton' is not a terminal style"
+  finally
+    console.error = held
+  eq printed, []
+
+test "restore hands the runtime its own reporter back", ->
+  renderToString (component
+    render
+      Text "ok")
+  printed = []
+  held = console.error
+  console.error = (label) -> printed.push label
+  try
+    reporter = __setChildFailureReporter (->)
+    __setChildFailureReporter reporter
+    reporter 'Kid', Error.new('boom')
+  finally
+    console.error = held
+  eq printed, ['[Rip] Kid construction failed:']
+
+test "an unknown border style is refused when the frame is drawn", ->
+  Wavy = component
+    render
+      Box borderStyle: 'wavy'
+        Text "never drawn"
+  throws (-> renderToString Wavy), "'wavy' is not a border style"
 
 test "a tag with no terminal meaning is refused", ->
   Web = component

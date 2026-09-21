@@ -6,8 +6,7 @@
 #   rip tui.rip counter      # one scenario
 #
 # The same fake terminal, the same trees, the same awaited loop: each
-# update sets one state and flushes the frame it owes. Rows are raw
-# `div`s, the zero-overhead primitive; cells are `Box` and `Text`.
+# update sets one state and flushes the frame it owes.
 # ==============================================================================
 
 import { run, quit, Box, Text } from 'rip/tui'
@@ -27,7 +26,7 @@ CounterTree = component
   render
     Box flexDirection: 'column'
       for r in ROWS50
-        div key: r, flexDirection: 'row'
+        Box key: r, flexDirection: 'row'
           for c in COLS10
             Box key: c, width: 18
               Text
@@ -40,7 +39,7 @@ def churnTable(share)
     render
       Box flexDirection: 'column'
         for r in ROWS40
-          div key: r, flexDirection: 'row'
+          Box key: r, flexDirection: 'row'
             for c in COLS8
               Box key: c, width: 12
                 Text color: 'green'

@@ -4,6 +4,8 @@
 # mutation arrives through a method here, so the document always knows
 # what changed. A member the terminal cannot honor throws by name.
 
+import { __setChildFailureReporter } from '../../src/runtime/components.js'
+
 # Styles that move boxes, and styles that only recolor cells.
 LAYOUT =! ['flexDirection', 'flexGrow', 'gap', 'width', 'height', 'borderStyle', 'hidden',
   'padding', 'paddingX', 'paddingY', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight']
@@ -206,23 +208,13 @@ export class Document
     @moved = true
     @stale = true
     @onOwe = null
-    @failure = null
 
   createElement: (tag) ->
     throw Error.new "rip/tui: <#{tag}> has no terminal meaning — a box is a div and text is a span" unless tag is 'div' or tag is 'span'
     Element.new tag
   createElementNS: (namespace, tag) -> throw Error.new "rip/tui: <#{tag}> has no terminal meaning — a box is a div and text is a span"
   createTextNode: (data) -> Text.new data
-  # The runtime contains a child that failed to construct: it reports
-  # the error and leaves a marker comment where the child would be. On a
-  # terminal that is a silent hole in the screen, so the failure the
-  # report carried is thrown from here, the marker's own creation.
-  createComment: (data) ->
-    if @failure and String(data).startsWith('rip:child-error')
-      failure = @failure
-      @failure = null
-      throw failure
-    Node.new 8
+  createComment: -> Node.new 8
   createDocumentFragment: -> Node.new 11
 
   get head: -> throw Error.new 'rip/tui: a transition (~name) has no terminal meaning'
@@ -236,21 +228,23 @@ export class Document
 
 # Put the document where compiled render blocks look for it, and hand
 # back the way to take it out again. A foreign `document` is refused.
+#
+# The runtime contains a child that fails to construct: it reports the
+# error and leaves a marker comment where the child would be. On a
+# terminal that is a silent hole in the screen, so while this document
+# is installed the report is a throw, and the mount fails with the
+# child's own error.
 export install =! ->
   if globalThis.document?
     throw Error.new 'rip/tui: a `document` is already installed in this process — a terminal app and a DOM cannot share one'
   doc = Document.new()
-  held = { Node: globalThis.Node, SVGElement: globalThis.SVGElement, report: console.error }
-  console.error = (first, ...rest) ->
-    if typeof first is 'string' and first.startsWith('[Rip] ') and rest[0] instanceof Error
-      doc.failure = rest[0]
-    else
-      held.report.call console, first, ...rest
+  held = { Node: globalThis.Node, SVGElement: globalThis.SVGElement }
+  held.reporter = __setChildFailureReporter (name, error) -> throw error
   globalThis.document = doc
   globalThis.Node = Node
   globalThis.SVGElement = class SVGElement
   restore = ->
-    console.error = held.report
+    __setChildFailureReporter held.reporter
     delete globalThis.document
     if held.Node then globalThis.Node = held.Node else delete globalThis.Node
     if held.SVGElement then globalThis.SVGElement = held.SVGElement else delete globalThis.SVGElement
