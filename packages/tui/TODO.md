@@ -55,8 +55,6 @@ the test, re-seed the bug, and see it caught.
       of a subtree between parents, sibling reorders; print the failing
       tree; stop at the first failure; say in the header that
       `rip test/fuzz.rip 7 413` replays seed 7 through round 412.
-- [ ] The static-ancestor test can fail: today the row's corner is also
-      the outer box's, so `position: 'relative'` draws the same frame.
 - [ ] Port Yoga's hand-written JavaScript tests that the shim can carry
       (`YGMeasureTest`, `YGMeasureCacheTest`, `YGDirtiedTest`,
       `YGHasNewLayout`, `YGFlexBasisAuto`, `YGAlignBaseline`,
@@ -108,7 +106,6 @@ the test, re-seed the bug, and see it caught.
 - [ ] The style tables never evict, and a cell holds a style id in
       sixteen bits: an app that animates `'#rrggbb'` colors reaches the
       limit and is refused. Reclaim ids no cell uses.
-
 - [ ] A layout error names the node it came from.
 - [ ] `overflow: 'hidden'` clips (text wider than its box draws past it
       today); the per-edge border switches; then the document accepts
