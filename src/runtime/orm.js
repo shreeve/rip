@@ -3200,8 +3200,9 @@ SchemaDef.prototype.insertMany = async function (rows) {
   for (const row of canonicalRows) {
     const slots = [];
     for (const n of colNames) {
-      slots.push('?');
-      values.push(serialize(row[n] ?? null, norm.fields.get(n)));
+      const field = norm.fields.get(n);
+      slots.push(placeholderFor(field));
+      values.push(serialize(row[n] ?? null, field));
     }
     tuples.push('(' + slots.join(', ') + ')');
   }

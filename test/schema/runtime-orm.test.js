@@ -292,6 +292,21 @@ describe('orm: paired reference — CRUD and the query builder', () => {
     ]);
   });
 
+  // insertMany writes each row's variant field through the same cast, a
+  // row that leaves the field out included: a NULL passes through it.
+  test('variant: insertMany binds every row through ?::JSON', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT INTO "docs"/, rows(['id'], [1], [2], [3]));
+      const Doc = k.__schema(model('Doc', field('meta', 'variant', { optional: true }), field('rank', 'integer')));
+      await Doc.insertMany([{ meta: { name: 'Ada' }, rank: 1 }, { meta: 'Bob', rank: 2 }, { rank: 3 }]);
+      return null;
+    });
+    expect(r.calls.map((c) => c.sql)).toEqual([
+      'INSERT INTO "docs" ("meta", "rank") VALUES (?::JSON, ?), (?::JSON, ?), (?::JSON, ?) RETURNING *',
+    ]);
+    expect(r.calls[0].params).toEqual(['{"name":"Ada"}', 1, '"Bob"', 2, null, 3]);
+  });
+
   test('order: structured forms quote and validate; the string form stays verbatim', async () => {
     const r = await paired(async (k, adapter) => {
       adapter.on(/^SELECT \* FROM "users"/, rows(['id'], [1]));
