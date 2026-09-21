@@ -20,11 +20,15 @@ import { refresh, MODES } from './text.rip'
 
 # ── Vocabulary ────────────────────────────────────────────────────────────────
 
-# Physical edges index every four-slot array.
+# Physical edges index every four-slot array, and the two dimensions
+# every pair.
 LEFT   =! 0
 TOP    =! 1
 RIGHT  =! 2
 BOTTOM =! 3
+
+WIDTH  =! 0
+HEIGHT =! 1
 
 # Flex axes index the edge tables below; an axis of ROW or more is
 # horizontal.
@@ -40,7 +44,7 @@ START =! [TOP, BOTTOM, LEFT, RIGHT]
 END   =! [BOTTOM, TOP, RIGHT, LEFT]
 LEAD  =! [TOP, TOP, LEFT, LEFT]
 TRAIL =! [BOTTOM, BOTTOM, RIGHT, RIGHT]
-DIM   =! [1, 1, 0, 0]
+DIM   =! [HEIGHT, HEIGHT, WIDTH, WIDTH]
 
 # How a size is offered, numbered as a measure function sees it: no
 # limit, exactly this, or at most this.
@@ -76,12 +80,14 @@ WRAPPING  =! 29
 JUSTIFY   =! 30
 ITEMS     =! 31
 SELF      =! 32
-CONTENT   =! 33
+LINES     =! 33
 POSITION  =! 34
 OVERFLOW  =! 35
 SIZING    =! 36
 SLOTS     =! 37
 
+# The words of a slot, one group for each key. `justifyContent` and the
+# three aligns share a numbering.
 ALIGN_AUTO    =! 0
 FLEX_START    =! 1
 CENTER        =! 2
@@ -92,34 +98,42 @@ SPACE_BETWEEN =! 6
 SPACE_AROUND  =! 7
 SPACE_EVENLY  =! 8
 
+# `position`
 STATIC   =! 0
+RELATIVE =! 1
 ABSOLUTE =! 2
-SCROLL   =! 2
-NOWRAP   =! 0
 
-# What box a node makes: its own, none at all, or none of its own while
-# its children join its parent's.
-FLEX     =! 0
-NONE     =! 1
-CONTENTS =! 2
+# `flexWrap`
+NOWRAP       =! 0
+WRAP         =! 1
 WRAP_REVERSE =! 2
 
+# `overflow`, where only scrolling changes a layout, and `boxSizing`
+SCROLL      =! 2
+CONTENT_BOX =! 1
+
+# `display` and `hidden`, as the box a node makes: its own, none at all,
+# or none of its own while its children join its parent's.
+BOX      =! 0
+NONE     =! 1
+CONTENTS =! 2
+
 DIRECTIONS =! { 'column': COLUMN, 'column-reverse': COLUMN_REVERSE, 'row': ROW, 'row-reverse': ROW_REVERSE }
-WRAPS      =! { 'nowrap': NOWRAP, 'wrap': 1, 'wrap-reverse': WRAP_REVERSE }
+WRAPS      =! { 'nowrap': NOWRAP, 'wrap': WRAP, 'wrap-reverse': WRAP_REVERSE }
 # Each align key takes its own words: only a child can defer (`auto`),
 # only items sit on a baseline, only lines are spaced.
 ALIGN_ITEMS   =! { 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'stretch': STRETCH, 'baseline': BASELINE }
 ALIGN_SELF    =! { 'auto': ALIGN_AUTO, 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'stretch': STRETCH, 'baseline': BASELINE }
 ALIGN_CONTENT =! { 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'stretch': STRETCH, 'space-between': SPACE_BETWEEN, 'space-around': SPACE_AROUND, 'space-evenly': SPACE_EVENLY }
 JUSTIFIES  =! { 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'space-between': SPACE_BETWEEN, 'space-around': SPACE_AROUND, 'space-evenly': SPACE_EVENLY }
-POSITIONS  =! { 'static': STATIC, 'relative': 1, 'absolute': ABSOLUTE }
+POSITIONS  =! { 'static': STATIC, 'relative': RELATIVE, 'absolute': ABSOLUTE }
 OVERFLOWS  =! { 'visible': 0, 'hidden': 1, 'scroll': SCROLL }
-DISPLAYS   =! { 'flex': FLEX, 'none': NONE, 'contents': CONTENTS }
-SIZINGS    =! { 'border-box': 0, 'content-box': 1 }
+DISPLAYS   =! { 'flex': BOX, 'none': NONE, 'contents': CONTENTS }
+SIZINGS    =! { 'border-box': 0, 'content-box': CONTENT_BOX }
 
-MEASURES =! 8
-PLAIN    =! Object.freeze {}
-CHILDLESS =! Object.freeze []
+MEASURES  =! 8                 # the measure-only answers a node keeps
+PLAIN     =! Object.freeze {}  # the styles of a node that has none
+CHILDLESS =! Object.freeze []  # the children of a leaf
 
 # One remembered answer: the offer, and the size it produced.
 class Entry
@@ -170,8 +184,8 @@ BLANK_V =! Float64Array.new(SLOTS).fill(NaN).fill(0, BORDER, BORDER + 4).fill 0,
 BLANK_V[RATIO] = NaN
 BLANK_V[JUSTIFY] = FLEX_START
 BLANK_V[ITEMS] = STRETCH
-BLANK_V[CONTENT] = FLEX_START
-BLANK_V[POSITION] = 1
+BLANK_V[LINES] = FLEX_START
+BLANK_V[POSITION] = RELATIVE
 BLANK_U =! Uint8Array.new(SLOTS).fill POINT, BORDER, BORDER + 4
 
 # Scratch for one parse: the record as it stood, and each slot's rank.
@@ -206,7 +220,7 @@ class Lay
     @alignItems = STRETCH
     @alignSelf = ALIGN_AUTO
     @alignContent = FLEX_START
-    @position = 1
+    @position = RELATIVE
     @overflow = 0
     @grow = 0
     @shrink = 0
@@ -495,16 +509,16 @@ style! =! (lay, key, value) ->
     when 'right' then put lay, INSET + RIGHT, value, 1, key
     when 'bottom' then put lay, INSET + BOTTOM, value, 1, key
     when 'width' then put lay, SIZE, value, 1, key
-    when 'height' then put lay, SIZE + 1, value, 1, key
+    when 'height' then put lay, SIZE + HEIGHT, value, 1, key
     when 'minWidth' then put lay, MIN, value, 1, key
-    when 'minHeight' then put lay, MIN + 1, value, 1, key
+    when 'minHeight' then put lay, MIN + HEIGHT, value, 1, key
     when 'maxWidth' then put lay, MAX, value, 1, key
-    when 'maxHeight' then put lay, MAX + 1, value, 1, key
+    when 'maxHeight' then put lay, MAX + HEIGHT, value, 1, key
     when 'gap'
       put lay, GAP, value, 1, key
-      put lay, GAP + 1, value, 1, key
+      put lay, GAP + HEIGHT, value, 1, key
     when 'columnGap' then put lay, GAP, value, 2, key
-    when 'rowGap' then put lay, GAP + 1, value, 2, key
+    when 'rowGap' then put lay, GAP + HEIGHT, value, 2, key
     # `flex: n` grows by n from a zero basis; a negative one shrinks. An
     # `auto` basis leaves that zero standing.
     when 'flex'
@@ -525,7 +539,7 @@ style! =! (lay, key, value) ->
     when 'justifyContent' then scalar lay, JUSTIFY, word(JUSTIFIES, key, value), 1
     when 'alignItems' then scalar lay, ITEMS, word(ALIGN_ITEMS, key, value), 1
     when 'alignSelf' then scalar lay, SELF, word(ALIGN_SELF, key, value), 1
-    when 'alignContent' then scalar lay, CONTENT, word(ALIGN_CONTENT, key, value), 1
+    when 'alignContent' then scalar lay, LINES, word(ALIGN_CONTENT, key, value), 1
     when 'position' then scalar lay, POSITION, word(POSITIONS, key, value), 1
     when 'overflow' then scalar lay, OVERFLOW, word(OVERFLOWS, key, value), 1
     when 'boxSizing' then scalar lay, SIZING, word(SIZINGS, key, value), 1
@@ -574,15 +588,15 @@ parse! =! (lay, s, scan) ->
   lay.justify = lay.v[JUSTIFY]
   lay.alignItems = lay.v[ITEMS]
   lay.alignSelf = lay.v[SELF]
-  lay.alignContent = lay.v[CONTENT]
+  lay.alignContent = lay.v[LINES]
   lay.position = lay.v[POSITION]
   lay.overflow = lay.v[OVERFLOW]
-  lay.contentBox = lay.v[SIZING] is 1
+  lay.contentBox = lay.v[SIZING] is CONTENT_BOX
   # What the axis resolvers answer without resolving anything.
   lay.marginPercent = percents lay, MARGIN, PADDING
   lay.insidePercent = percents lay, PADDING, BORDER
   lay.limitPercent = percents lay, MIN, BASIS
-  lay.limited = lay.u[MIN] isnt NIL or lay.u[MIN + 1] isnt NIL or lay.u[MAX] isnt NIL or lay.u[MAX + 1] isnt NIL
+  lay.limited = lay.u[MIN + WIDTH] isnt NIL or lay.u[MIN + HEIGHT] isnt NIL or lay.u[MAX + WIDTH] isnt NIL or lay.u[MAX + HEIGHT] isnt NIL
   lay.marginRow = marginAt(lay, LEFT, NaN) + marginAt(lay, RIGHT, NaN)
   lay.marginColumn = marginAt(lay, TOP, NaN) + marginAt(lay, BOTTOM, NaN)
   lay.insideRow = insideAt(lay, LEFT, NaN) + insideAt(lay, RIGHT, NaN)
@@ -620,7 +634,7 @@ boxOf =! (node) ->
   s = node.styles
   try
     return NONE if s.hidden isnt undefined and flag 'hidden', s.hidden
-    if s.display is undefined then FLEX else word DISPLAYS, 'display', s.display
+    if s.display is undefined then BOX else word DISPLAYS, 'display', s.display
   catch error
     throw blame error, node
 
@@ -633,7 +647,7 @@ flatten! =! (node, out) ->
       out.push kid
     else if kid.nodeType is 1
       box = boxOf kid
-      if box is FLEX then out.push kid else if box is CONTENTS then flatten kid, out
+      if box is BOX then out.push kid else if box is CONTENTS then flatten kid, out
     kid = kid.nextSibling
 
 # The children layout sees: elements and text, never anchors or the
@@ -717,7 +731,7 @@ orderSensitive =! (lay) ->
 offered =! (lay, k, dim) ->
   return true if k.u[SIZE + dim] is POINT and k.v[SIZE + dim] >= 0
   return false if k.position is ABSOLUTE or (lay.overflow is SCROLL and DIM[lay.direction] is dim)
-  if dim is 0 then lay.solidW else lay.solidH
+  if dim is WIDTH then lay.solidW else lay.solidH
 
 # Give `node` its `solidW` and `solidH`, and carry what follows from them
 # down: its own order-sensitivity, and its children's flags in turn. Its
@@ -732,8 +746,8 @@ firm! =! (node, solidW, solidH) ->
   lay.noCache = orderSensitive lay
   for kid, i in lay.kids
     k = kid.lay
-    wide = offered lay, k, 0
-    tall = offered lay, k, 1
+    wide = offered lay, k, WIDTH
+    tall = offered lay, k, HEIGHT
     firm kid, wide, tall if k.solidW isnt wide or k.solidH isnt tall
     lay.noCache = true if k.noCache
 
@@ -767,7 +781,7 @@ gather =! (node, host, lay, list) ->
   kid = node.firstChild
   while kid
     if kid.nodeType is 3 or kid.nodeType is 1
-      box = if kid.nodeType is 1 then boxOf kid else FLEX
+      box = if kid.nodeType is 1 then boxOf kid else BOX
       if box is CONTENTS
         lay.boxless += 1
         # A `contents` node makes no box and keeps no record, so one that
@@ -867,8 +881,8 @@ sync =! (node) ->
     lay.noCache = orderSensitive lay
     for kid, i in list
       k = kid.lay
-      wide = offered lay, k, 0
-      tall = offered lay, k, 1
+      wide = offered lay, k, WIDTH
+      tall = offered lay, k, HEIGHT
       firm kid, wide, tall if k.solidW isnt wide or k.solidH isnt tall
       lay.noCache = true if k.noCache
       carryBaseline kid, below if k.underBaseline isnt below
@@ -894,8 +908,8 @@ measureLeaf! =! (node, lay, availW, availH, modeW, modeH, ownerW, ownerH) ->
   insideW = p[LEFT] + p[RIGHT] + b[LEFT] + b[RIGHT]
   insideH = p[TOP] + p[BOTTOM] + b[TOP] + b[BOTTOM]
   if modeW is STRETCH_FIT and modeH is STRETCH_FIT
-    lay.measured[0] = bound lay, ROW, availW, ownerW, ownerW
-    lay.measured[1] = bound lay, COLUMN, availH, ownerH, ownerW
+    lay.measured[WIDTH] = bound lay, ROW, availW, ownerW, ownerW
+    lay.measured[HEIGHT] = bound lay, COLUMN, availH, ownerH, ownerW
     return
   innerW = if isNaN availW then availW else fmax 0, availW - insideW
   if node.measure
@@ -908,8 +922,8 @@ measureLeaf! =! (node, lay, availW, availH, modeW, modeH, ownerW, ownerH) ->
     flow.measure innerW, modeW is MAX_CONTENT
     wide = flow.w
     tall = flow.h
-  lay.measured[0] = bound lay, ROW, (if modeW is STRETCH_FIT then availW else wide + insideW), ownerW, ownerW
-  lay.measured[1] = bound lay, COLUMN, (if modeH is STRETCH_FIT then availH else tall + insideH), ownerH, ownerW
+  lay.measured[WIDTH] = bound lay, ROW, (if modeW is STRETCH_FIT then availW else wide + insideW), ownerW, ownerW
+  lay.measured[HEIGHT] = bound lay, COLUMN, (if modeH is STRETCH_FIT then availH else tall + insideH), ownerH, ownerW
 
 # A box with no children is its padding and border, or what it is given.
 measureEmpty! =! (lay, availW, availH, modeW, modeH, ownerW, ownerH) ->
@@ -917,8 +931,8 @@ measureEmpty! =! (lay, availW, availH, modeW, modeH, ownerW, ownerH) ->
   b = lay.border
   wide = if modeW is STRETCH_FIT then availW else p[LEFT] + p[RIGHT] + b[LEFT] + b[RIGHT]
   tall = if modeH is STRETCH_FIT then availH else p[TOP] + p[BOTTOM] + b[TOP] + b[BOTTOM]
-  lay.measured[0] = bound lay, ROW, wide, ownerW, ownerW
-  lay.measured[1] = bound lay, COLUMN, tall, ownerH, ownerW
+  lay.measured[WIDTH] = bound lay, ROW, wide, ownerW, ownerW
+  lay.measured[HEIGHT] = bound lay, COLUMN, tall, ownerH, ownerW
 
 fixed =! (size, mode) -> mode is STRETCH_FIT or (mode is FIT_CONTENT and (size <= 0 or near size, 0))
 
@@ -927,8 +941,8 @@ measureFixed =! (lay, availW, availH, modeW, modeH, ownerW, ownerH) ->
   return false unless fixed(availW, modeW) and fixed(availH, modeH)
   wide = if isNaN(availW) or (modeW is FIT_CONTENT and availW < 0) then 0 else availW
   tall = if isNaN(availH) or (modeH is FIT_CONTENT and availH < 0) then 0 else availH
-  lay.measured[0] = bound lay, ROW, wide, ownerW, ownerW
-  lay.measured[1] = bound lay, COLUMN, tall, ownerH, ownerW
+  lay.measured[WIDTH] = bound lay, ROW, wide, ownerW, ownerW
+  lay.measured[HEIGHT] = bound lay, COLUMN, tall, ownerH, ownerW
   true
 
 # ── Flex basis ────────────────────────────────────────────────────────────────
@@ -956,8 +970,8 @@ basisOf! =! (lay, f, kid, modeW, modeH) ->
   height = f.innerH
   mainSize = if row then width else height
   written = basisAt k, f.axis, mainSize, width
-  rowSet = definite k, 0, width
-  colSet = definite k, 1, height
+  rowSet = definite k, WIDTH, width
+  colSet = definite k, HEIGHT, height
   if not isNaN(written) and not isNaN(mainSize)
     # The first basis found stands (CalculateLayout.cpp:273): one found
     # while the main size was still unknown — from content, or from a
@@ -969,9 +983,9 @@ basisOf! =! (lay, f, kid, modeW, modeH) ->
     k.basis = fmax written, insideAxis(k, f.axis, width) if isNaN k.basis
     return
   if row and rowSet
-    k.basis = fmax sizeAt(k, SIZE, width, width), insideAxis(k, ROW, width)
+    k.basis = fmax sizeAt(k, SIZE + WIDTH, width, width), insideAxis(k, ROW, width)
   else if not row and colSet
-    k.basis = fmax sizeAt(k, SIZE + 1, height, width), insideAxis(k, COLUMN, width)
+    k.basis = fmax sizeAt(k, SIZE + HEIGHT, height, width), insideAxis(k, COLUMN, width)
   else
     kidW = NaN
     kidH = NaN
@@ -980,10 +994,10 @@ basisOf! =! (lay, f, kid, modeW, modeH) ->
     marginRow = marginAxis k, ROW, width
     marginColumn = marginAxis k, COLUMN, width
     if rowSet
-      kidW = sizeAt(k, SIZE, width, width) + marginRow
+      kidW = sizeAt(k, SIZE + WIDTH, width, width) + marginRow
       kidModeW = STRETCH_FIT
     if colSet
-      kidH = sizeAt(k, SIZE + 1, height, width) + marginColumn
+      kidH = sizeAt(k, SIZE + HEIGHT, height, width) + marginColumn
       kidModeH = STRETCH_FIT
     # A scrolling container leaves its scroll axis unlimited.
     scrolls = lay.overflow is SCROLL
@@ -1210,7 +1224,7 @@ baselineOf =! (node) ->
       pick = kid
       break
     pick = kid unless pick
-  return (if lay.visitPass is generation then lay.measured[1] else NaN) unless pick
+  return (if lay.visitPass is generation then lay.measured[HEIGHT] else NaN) unless pick
   baselineOf(pick) + (if lay.layoutPass is generation then pick.lay.pos[TOP] else 0)
 
 # A row aligns on baselines when it or any in-flow child asks to — a
@@ -1285,7 +1299,7 @@ justify! =! (node, lay, f, ownerW, perform) ->
       f.mainDim += k.measured[mainDimension] + marginAxis(k, axis, f.innerW)
       if onBaseline
         up = baselineOf(kid) + marginAt(k, TOP, f.innerW)
-        down = k.measured[1] + marginAxis(k, COLUMN, f.innerW) - up
+        down = k.measured[HEIGHT] + marginAxis(k, COLUMN, f.innerW) - up
         ascent = fmax ascent, up
         descent = fmax descent, down
       else
@@ -1392,7 +1406,7 @@ alignLines! =! (node, lay, f, lines, totalCross, leadingCross, insideCross, owne
         tall = fmax tall, k.measured[crossDimension] + marginAxis(k, cross, f.innerW) if k.measured[crossDimension] >= 0
         if alignOf(lay, k) is BASELINE
           up = baselineOf(list[to]) + marginAt(k, TOP, f.innerW)
-          down = k.measured[1] + marginAxis(k, COLUMN, f.innerW) - up
+          down = k.measured[HEIGHT] + marginAxis(k, COLUMN, f.innerW) - up
           ascent = fmax ascent, up
           descent = fmax descent, down
           tall = fmax tall, ascent + descent
@@ -1417,9 +1431,9 @@ alignLines! =! (node, lay, f, lines, totalCross, leadingCross, insideCross, owne
         # A child measured against the container is laid out again at
         # its own line's size.
         unless definite k, crossDimension, f.innerCross
-          kidW = if row then k.measured[0] + marginAxis(k, axis, f.innerW) else perLine + tall
-          kidH = if row then perLine + tall else k.measured[1] + marginAxis(k, cross, f.innerW)
-          unless near(kidW, k.measured[0]) and near(kidH, k.measured[1])
+          kidW = if row then k.measured[WIDTH] + marginAxis(k, axis, f.innerW) else perLine + tall
+          kidH = if row then perLine + tall else k.measured[HEIGHT] + marginAxis(k, cross, f.innerW)
+          unless near(kidW, k.measured[WIDTH]) and near(kidH, k.measured[HEIGHT])
             visit kid, kidW, kidH, STRETCH_FIT, STRETCH_FIT, f.innerW, f.innerH, true
       else if align is BASELINE
         k.pos[TOP] = lead + ascent - baselineOf(kid) + insetAt(k, TOP, f.innerCross)
@@ -1473,13 +1487,13 @@ compute! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
   # Step 2: the space inside, held within this node's own min and max.
   innerW = availW - marginRow - insideRow
   unless isNaN innerW
-    least = sizeAt lay, MIN, ownerW, ownerW
-    most = sizeAt lay, MAX, ownerW, ownerW
+    least = sizeAt lay, MIN + WIDTH, ownerW, ownerW
+    most = sizeAt lay, MAX + WIDTH, ownerW, ownerW
     innerW = fmax fmin(innerW, (if isNaN most then Infinity else most - insideRow)), (if isNaN least then 0 else least - insideRow)
   innerH = availH - marginColumn - insideColumn
   unless isNaN innerH
-    least = sizeAt lay, MIN + 1, ownerH, ownerW
-    most = sizeAt lay, MAX + 1, ownerH, ownerW
+    least = sizeAt lay, MIN + HEIGHT, ownerH, ownerW
+    most = sizeAt lay, MAX + HEIGHT, ownerH, ownerW
     innerH = fmax fmin(innerH, (if isNaN most then Infinity else most - insideColumn)), (if isNaN least then 0 else least - insideColumn)
   f.innerW = innerW
   f.innerH = innerH
@@ -1555,8 +1569,8 @@ compute! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
   alignLines node, lay, f, lines, totalCross, leadingCross, insideCross, ownerCross, ownerW if perform and (f.wrap or baselined lay)
 
   # Step 9: this node's size — what it was given, or what its lines need.
-  lay.measured[0] = bound lay, ROW, availW - marginRow, ownerW, ownerW
-  lay.measured[1] = bound lay, COLUMN, availH - marginColumn, ownerH, ownerW
+  lay.measured[WIDTH] = bound lay, ROW, availW - marginRow, ownerW, ownerW
+  lay.measured[HEIGHT] = bound lay, COLUMN, availH - marginColumn, ownerH, ownerW
   mainDimension = DIM[axis]
   crossDimension = DIM[cross]
   scrolls = lay.overflow is SCROLL
@@ -1601,7 +1615,7 @@ compute! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
 # is computing, so its size is `measured`; a parent under it has been
 # laid out, and `measured` may hold a later measure-only answer.
 extent =! (lay, block, dim) ->
-  if lay is block then lay.measured[dim] else if dim is 0 then lay.width else lay.height
+  if lay is block then lay.measured[dim] else if dim is WIDTH then lay.width else lay.height
 
 # …and its padding plus border on one edge, by the same rule: the block
 # resolved its own this visit; a parent's is resolved against the owner
@@ -1614,7 +1628,7 @@ anchor! =! (block, parent, kid, axis, main, blockW, blockH) ->
   q = parent.lay
   k = kid.lay
   dim = DIM[axis]
-  ref = if dim is 0 then blockW else blockH
+  ref = if dim is WIDTH then blockW else blockH
   lead = LEAD[axis]
   trail = TRAIL[axis]
   start = START[axis]
@@ -1655,15 +1669,15 @@ absolute! =! (block, parent, kid, blockW, blockH, widthMode) ->
   kidH = NaN
   marginRow = marginAxis k, ROW, blockW
   marginColumn = marginAxis k, COLUMN, blockW
-  if definite k, 0, blockW
-    kidW = sizeAt(k, SIZE, blockW, blockW) + marginRow
+  if definite k, WIDTH, blockW
+    kidW = sizeAt(k, SIZE + WIDTH, blockW, blockW) + marginRow
   else if insetSet(k, LEFT) and insetSet(k, RIGHT)
-    kidW = c.measured[0] - (c.border[LEFT] + c.border[RIGHT]) - (insetAt(k, LEFT, blockW) + insetAt(k, RIGHT, blockW))
+    kidW = c.measured[WIDTH] - (c.border[LEFT] + c.border[RIGHT]) - (insetAt(k, LEFT, blockW) + insetAt(k, RIGHT, blockW))
     kidW = bound k, ROW, kidW, blockW, blockW
-  if definite k, 1, blockH
-    kidH = sizeAt(k, SIZE + 1, blockH, blockW) + marginColumn
+  if definite k, HEIGHT, blockH
+    kidH = sizeAt(k, SIZE + HEIGHT, blockH, blockW) + marginColumn
   else if insetSet(k, TOP) and insetSet(k, BOTTOM)
-    kidH = c.measured[1] - (c.border[TOP] + c.border[BOTTOM]) - (insetAt(k, TOP, blockH) + insetAt(k, BOTTOM, blockH))
+    kidH = c.measured[HEIGHT] - (c.border[TOP] + c.border[BOTTOM]) - (insetAt(k, TOP, blockH) + insetAt(k, BOTTOM, blockH))
     kidH = bound k, COLUMN, kidH, blockH, blockW
   # With one size known, an aspect ratio gives the other.
   unless isNaN k.ratio
@@ -1679,8 +1693,8 @@ absolute! =! (block, parent, kid, blockW, blockH, widthMode) ->
       kidW = blockW
       modeW = FIT_CONTENT
     visit kid, kidW, kidH, modeW, modeH, blockW, blockH, false
-    kidW = k.measured[0] + marginAxis(k, ROW, blockW)
-    kidH = k.measured[1] + marginAxis(k, COLUMN, blockW)
+    kidW = k.measured[WIDTH] + marginAxis(k, ROW, blockW)
+    kidH = k.measured[HEIGHT] + marginAxis(k, COLUMN, blockW)
   visit kid, kidW, kidH, STRETCH_FIT, STRETCH_FIT, blockW, blockH, true
   anchor block, parent, kid, axis, true, blockW, blockH
   anchor block, parent, kid, cross, false, blockW, blockH
@@ -1698,8 +1712,8 @@ absolutes =! (block, parent, widthMode, left, top) ->
     k = kid.lay
     if k.position is ABSOLUTE
       found = true
-      blockW = c.measured[0] - (c.border[LEFT] + c.border[RIGHT])
-      blockH = c.measured[1] - (c.border[TOP] + c.border[BOTTOM])
+      blockW = c.measured[WIDTH] - (c.border[LEFT] + c.border[RIGHT])
+      blockH = c.measured[HEIGHT] - (c.border[TOP] + c.border[BOTTOM])
       absolute block, parent, kid, blockW, blockH, widthMode
       # A position from insets is relative to the block; any other is
       # relative to the parent. A reversed parent axis set the far edge.
@@ -1709,7 +1723,7 @@ absolutes =! (block, parent, widthMode, left, top) ->
       for turn in [0...2]
         if axis is ROW_REVERSE or axis is COLUMN_REVERSE
           dim = DIM[axis]
-          against = if (if dim is 0 then acrossSet else downSet) then c else q
+          against = if (if dim is WIDTH then acrossSet else downSet) then c else q
           k.pos[END[axis]] = extent(against, c, dim) - k.measured[dim] - k.pos[START[axis]]
         axis = crossAxis axis
       k.pos[LEFT] -= left if acrossSet
@@ -1785,8 +1799,8 @@ visit! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
         hit = entry
         break
   if hit
-    lay.measured[0] = hit.w
-    lay.measured[1] = hit.h
+    lay.measured[WIDTH] = hit.w
+    lay.measured[HEIGHT] = hit.h
   else
     compute node, availW, availH, modeW, modeH, ownerW, ownerH, perform
     lay.settlePass = generation if perform
@@ -1802,14 +1816,14 @@ visit! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
     entry.modeH = modeH
     entry.ownerW = ownerW
     entry.ownerH = ownerH
-    entry.w = lay.measured[0]
-    entry.h = lay.measured[1]
+    entry.w = lay.measured[WIDTH]
+    entry.h = lay.measured[HEIGHT]
   if perform
     # A leaf can answer a layout from a measure-only entry, so a changed
     # size — not only a computed one — is what rounding must see.
-    lay.settlePass = generation if lay.width isnt lay.measured[0] or lay.height isnt lay.measured[1]
-    lay.width = lay.measured[0]
-    lay.height = lay.measured[1]
+    lay.settlePass = generation if lay.width isnt lay.measured[WIDTH] or lay.height isnt lay.measured[HEIGHT]
+    lay.width = lay.measured[WIDTH]
+    lay.height = lay.measured[HEIGHT]
     lay.ownerW = ownerW
     lay.layoutPass = generation
     node.dirty = false
@@ -1907,24 +1921,24 @@ pass! =! (root, ownerW, ownerH) ->
   lay = root.lay
   # The root is offered a number where the space has one, which can
   # change from pass to pass with nothing dirty.
-  solidW = not isNaN(ownerW) or (lay.u[SIZE] is POINT and lay.v[SIZE] >= 0)
-  solidH = not isNaN(ownerH) or (lay.u[SIZE + 1] is POINT and lay.v[SIZE + 1] >= 0)
+  solidW = not isNaN(ownerW) or (lay.u[SIZE + WIDTH] is POINT and lay.v[SIZE + WIDTH] >= 0)
+  solidH = not isNaN(ownerH) or (lay.u[SIZE + HEIGHT] is POINT and lay.v[SIZE + HEIGHT] >= 0)
   firm root, solidW, solidH if lay.solidW isnt solidW or lay.solidH isnt solidH
   wide = ownerW
   modeW = if isNaN ownerW then MAX_CONTENT else STRETCH_FIT
-  if definite lay, 0, ownerW
-    wide = sizeAt(lay, SIZE, ownerW, ownerW) + marginAxis(lay, ROW, ownerW)
+  if definite lay, WIDTH, ownerW
+    wide = sizeAt(lay, SIZE + WIDTH, ownerW, ownerW) + marginAxis(lay, ROW, ownerW)
     modeW = STRETCH_FIT
-  else unless isNaN sizeAt lay, MAX, ownerW, ownerW
-    wide = sizeAt lay, MAX, ownerW, ownerW
+  else unless isNaN sizeAt lay, MAX + WIDTH, ownerW, ownerW
+    wide = sizeAt lay, MAX + WIDTH, ownerW, ownerW
     modeW = FIT_CONTENT
   tall = ownerH
   modeH = if isNaN ownerH then MAX_CONTENT else STRETCH_FIT
-  if definite lay, 1, ownerH
-    tall = sizeAt(lay, SIZE + 1, ownerH, ownerW) + marginAxis(lay, COLUMN, ownerW)
+  if definite lay, HEIGHT, ownerH
+    tall = sizeAt(lay, SIZE + HEIGHT, ownerH, ownerW) + marginAxis(lay, COLUMN, ownerW)
     modeH = STRETCH_FIT
-  else unless isNaN sizeAt lay, MAX + 1, ownerH, ownerW
-    tall = sizeAt lay, MAX + 1, ownerH, ownerW
+  else unless isNaN sizeAt lay, MAX + HEIGHT, ownerH, ownerW
+    tall = sizeAt lay, MAX + HEIGHT, ownerH, ownerW
     modeH = FIT_CONTENT
   visit root, wide, tall, modeW, modeH, ownerW, ownerH, true
   seat lay, ownerW, ownerH
