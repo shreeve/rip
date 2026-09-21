@@ -10,12 +10,12 @@ import { terminal } from './harness.rip'
 
 began = performance.now()
 React = import!('react').default
-ink = import!('ink')
+{ render: draw, Text } = import!('ink')
 loaded = performance.now()
 
 out = terminal 200, 60
-App = -> React.createElement ink.Text, { color: 'green' }, 'ready'
-ink.render React.createElement(App), {
+App = -> React.createElement Text, { color: 'green' }, 'ready'
+draw React.createElement(App), {
   stdout: out
   patchConsole: false
   exitOnCtrlC: false

@@ -163,6 +163,18 @@ test "role and aria-* are kept on the node, never refused", ->
   finally
     restore()
 
+test "a node is inserted neither into itself nor before itself", ->
+  { doc, restore } = install()
+  try
+    box = doc.createElement 'div'
+    kid = doc.createElement 'div'
+    box.appendChild kid
+    throws (-> box.insertBefore box, null), 'into itself'
+    throws (-> box.insertBefore kid, kid), 'before itself'
+    eq box.childNodes.length, 1
+  finally
+    restore()
+
 test "a string style and a class are refused", ->
   { doc, restore } = install()
   try
@@ -422,7 +434,7 @@ test! "a quit from an effect that runs during construction is heard", ->
   eq await run(Early, stdout: terminal(30, 8)).done, 'at once'
   eq typeof document, 'undefined'
 
-test! "a frame that fails later rejects done and gives the terminal back", ->
+test! "a bad layout value is refused on the line that writes it, and the app runs on", ->
   out = terminal 30, 8
   Turns = component
     @how := 'center'
@@ -430,13 +442,26 @@ test! "a frame that fails later rejects done and gives the terminal back", ->
       Box justifyContent: @how
         Text "x"
   running = run Turns, stdout: out
-  running.app.how.value = 'centre'
+  throws (-> running.app.how.value = 'centre'), '"centre" is not one of'
+  ok document?, 'the app is still mounted'
+  quit()
+  await running.done
+
+test! "a frame that fails later rejects done and gives the terminal back", ->
+  out = terminal 30, 8
+  Tinted = component
+    @ink := 'green'
+    render
+      Text color: @ink
+        "x"
+  running = run Tinted, stdout: out
+  running.app.ink.value = 'grean'
   failure = null
   try
     await running.done
   catch error
     failure = error
-  ok failure?.message.includes('"centre" is not one of'), "done rejected with #{failure?.message}"
+  ok failure?.message.includes("'grean' is not a color"), "done rejected with #{failure?.message}"
   eq typeof document, 'undefined'
   ok out.sent.join('').endsWith("\x1b[?25h"), 'the cursor is shown again'
 

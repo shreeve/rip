@@ -10,6 +10,18 @@ contract, and a red-team critique) over the Ink 7.1.1 and Yoga source
 checkouts. Where the reviews disagreed with the first sketch, the
 review won; those points are marked **Decided**.
 
+## Sources
+
+Everything here is built from public, permissively licensed sources:
+Ink (MIT) and Yoga (MIT), the xterm control-sequence reference, the
+kitty keyboard protocol documentation, and the terminal emulators'
+own published behavior. No reconstructed, leaked, or otherwise
+proprietary source — including any recovered internal fork of Ink —
+is read as a reference for any part of this package, at any time.
+Feature lists and well-known terminal techniques are fair to discuss;
+that code is not fair to read. The package stays clean and
+publishable.
+
 ## 1. Thesis
 
 Ink is React driving a fake DOM, Yoga (C++ compiled to WebAssembly)
@@ -195,8 +207,8 @@ rounding test expects 33/34/33 where an integer distributor gives
 
 **Decided — the layout cache is part of v0.1.** Flexbox visits a node
 for measure, flex, and stretch; without a cache the cost multiplies
-with nesting depth. One layout entry plus about four measure entries
-per node.
+with nesting depth. One layout entry plus up to eight measure entries
+per node, as Yoga keeps.
 
 **Scope** (Ink's `styles.ts` is the floor): direction, wrap, grow,
 shrink, basis, align-items / self / content including **baseline**,
@@ -228,18 +240,19 @@ Also in scope, each behind one seam:
 | Aspect ratio | Yoga's handling, ported. A ratio counts CELLS, which are about twice as tall as wide, so a box that looks square asks for about 2. |
 | Intrinsic keywords | `max-content`, `fit-content`, and `stretch` as a size resolve as Yoga resolves them: to no length, so the node sizes as an `auto` one does. |
 
-**Designed for, implemented later:** right-to-left. One resolver maps
-flex direction and start / end edges through a `direction` argument,
-fixed to LTR; reverse directions need the same machinery.
+**Not laid out:** right-to-left. `row-reverse` and `column-reverse`
+already flip an axis, which is the machinery a right-to-left pass
+would reuse.
 
 **Dropped:** auto-min-size, errata and experimental flags.
 
 **Parity target:** classic Yoga behavior as its generated tests encode
 it (running totals, no auto-min), not the CSS specification.
 
-**Algorithm:** one recursive
-`layout(node, availW, availH, modeW, modeH, ownerW, ownerH, perform)`
-with `perform = false` meaning measure only. Leaf measure → inner
+**Algorithm:** `visit(node, availW, availH, modeW, modeH, ownerW,
+ownerH, perform)` is the cache's door — it answers from a stored entry
+or calls `compute!` — and `perform = false` means measure only. Leaf
+measure → inner
 available size → flex basis → line building → free space → two-pass
 freeze loop for grow / shrink under min / max → justify and auto
 margins → cross-axis align and stretch → align-content → final size →
@@ -252,8 +265,12 @@ container is measured at exact width.
 - *Same-size fast path.* A changed text node is re-measured under its
   last constraints; an unchanged size marks paint-dirty only and runs
   no layout. A counter ticking from 41 to 42 costs zero layout.
-- *Layout boundary.* Dirty propagation stops at the first ancestor
-  whose width and height are both definite, and relayout starts there.
+- *Layout boundary — not built.* A change dirties every ancestor up to
+  the root, and each one recomputes; its other children answer from
+  the cache, at about three visits apiece. A widened text in a flat
+  column of 2,000 costs 6,001 visits, and a chain of 14 definite-size
+  boxes recomputes all 14. Stopping at the first ancestor whose width
+  and height are both definite is open work (TODO §4).
 
 ### Acceptance: Yoga's own suite
 
@@ -277,17 +294,15 @@ byte as upstream wrote them, against a test-only shim shaped like the
   the reason beside it, and fails on a pinned answer that never runs.
 - Every case has a right-to-left half. **Decided — RTL is deferred.**
   One mechanical gate stops each case before its RTL pass and the
-  report says "LTR half". Layout-side RTL is cheap at any time because
-  of the direction seam above; the expensive part of RTL in a terminal
-  is bidirectional text, which no layout decision made here makes
-  harder. When the direction argument is wired through, the RTL halves
-  are 543 more cases waiting in the same files.
+  report says "LTR half". The expensive part of RTL in a terminal is
+  bidirectional text, which no layout decision made here makes harder;
+  the RTL halves are 543 more cases waiting in the same files.
 - `misc/` is gitignored, so **the suite is vendored as-is** under
   `test/yoga/`, excluded from published `files`.
 - **License:** Yoga and Ink are MIT. Vendored tests keep their headers
   and ship with Yoga's `LICENSE`. An engine that follows
   `CalculateLayout.cpp` structurally is a derivative work, so the MIT
-  notice ships in the package itself.
+  notice ships in the package itself (`NOTICE`, listed in `files`).
 
 Build order, so categories go green one at a time: node + shim +
 rounding + fixed sizes + padding / border / margin → grow / shrink /
@@ -356,7 +371,9 @@ the non-TTY final frame.
 
 **Events replace hooks.** A key goes to `focus.active ?? root`,
 bubbles to `document`, and honors `stopPropagation` and
-`preventDefault`. Tab / Shift-Tab (focus), Ctrl-C (exit), and Ctrl-Z
+`preventDefault`. A listener may ask for the capture phase, which runs
+root to target before the bubble, so a dialog takes a key before the
+node under it does. Tab / Shift-Tab (focus), Ctrl-C (exit), and Ctrl-Z
 (suspend) are default actions that run only when not prevented. In
 Ink every `useInput` handler receives every key and gates itself with
 an `isActive` flag, and a text input cannot keep Tab.
@@ -585,15 +602,17 @@ What this settles:
 
 Each step is its own branch and PR under the repo's landing rules.
 
-| PR | Contents | Exit |
+| Step | Contents | Exit |
 |---|---|---|
-| 0 | Bench harness, Ink baselines, a profile of where Ink spends a frame (`bench/`) | The baseline and the frame profile are recorded in §11 |
-| 1 | Walking skeleton: scoped `document`, row / column + grow + padding + border layout, grid paint with diff, `renderToString`, counter and two-pane examples | Keyed `for`, `if` / `else`, fragments, rest-prop styles, and `ref:` metrics all work end to end |
-| 2 | Full layout engine, cache, dirty boundaries, vendored Yoga suite | All 543 generated cases and the 37 aspect ratio cases pass; an incremental layout equals a fresh one under fuzz |
-| 3 | Text, width, wrap / truncate, clipping, content offset, borders, backgrounds | Ported Ink paint cases pass |
-| 4 | Input, focus, cursor, mouse, enhanced keyboard | Ported parser cases pass; select-list, text-input, and wheel-scrolled list examples |
-| 5 | Lifecycle, inline `Static`, non-TTY, console capture, resize, animation clock | Crash, signal, and suspend restore the terminal under test |
-| 6 | Four Ink examples side by side (counter, borders, use-focus, static), README, published bench | Every README number reproduces with `bun run bench` |
+| 1 | Layout soundness: an incremental layout equals a fresh one, one float tolerance, values refused where they are written (TODO §1–§2) | The reviewers' fuzzers and the differential against compiled Yoga find nothing new; every seeded bug is caught |
+| 2 | Text and the painter: wrap / truncate, grapheme clusters, `overflow: 'hidden'` clipping, per-edge borders, background fills, content offset | Ported Ink paint cases pass |
+| 3 | Damage tracking: paint and diff only what moved (§6) | A small update's paint and diff fall with the damage, measured in `bench/` |
+| 4 | Input, focus, cursor, capture and bubble phases; then mouse and the enhanced keyboard as opt-ins; then text selection with clipboard copy (OSC 52), since mouse capture takes the terminal's own selection away | Ported parser cases pass; select-list, text-input, and wheel-scrolled list examples |
+| 5 | Lifecycle, inline `Static`, non-TTY, console capture, resize, animation clock, progress reporting (OSC 9;4) | Crash, signal, and suspend restore the terminal under test |
+| 6 | Four Ink examples side by side (counter, borders, use-focus, static), README, published bench with a terminal reducer proving both sides drew the same screen | Every README number reproduces with `bun run bench` |
+
+Hardware scroll regions (DECSTBM) are a bench experiment for long
+scrolling views, never a commitment.
 
 **Decided — the skeleton precedes the full layout engine.** Layout is
 the most mechanical part (a reference exists); the component model in
@@ -609,7 +628,7 @@ start. Each row is a rule the v0.1 code follows.
 | Screen-reader output | `role` and every `aria-*` attribute are accepted and stored on the node, never rejected as unknown keys, so components are written accessibly from day one. The hardware cursor follows focus (§7). | One tree walk that serializes roles, states, and labels as linear text — the counterpart of Ink's `renderNodeToScreenReaderOutput`. |
 | Windows | Rip itself claims only macOS and Linux (CI is Linux). All platform code lives in `terminal.rip`. Resize comes from the stream's `resize` event, never the SIGWINCH signal. Suspend is guarded by platform. The painter never writes the last cell of the last row. Nothing rejects `win32`. | A CI lane and whatever it finds. |
 | Error overview | Uncaught errors and the runtime's component error hook (`__setErrorHandler`) route through one reporter that restores the terminal first. | A prettier reporter: source excerpt and mapped stack. |
-| Right-to-left | The direction resolver in §5. | A flip of one argument, plus bidirectional text. |
+| Right-to-left | The reverse directions already flip an axis (§5). | A flip per direction, the 543 RTL halves, and bidirectional text. |
 
 ## 14. Decisions
 

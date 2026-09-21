@@ -5,6 +5,7 @@
 # what changed. A member the terminal cannot honor throws by name.
 
 import { __setChildFailureReporter } from '../../src/runtime/components.js'
+import { admit } from './layout.rip'
 
 # Styles that move boxes, and styles that only recolor cells.
 LAYOUT =! [
@@ -90,6 +91,7 @@ export class Node
       @insertBefore kid, ref for kid in [...node.childNodes]
       return node
     throw Error.new 'rip/tui: a node cannot be inserted into itself' if node is this
+    throw Error.new 'rip/tui: a node cannot be inserted before itself' if node is ref
     throw Error.new 'rip/tui: insertBefore names a reference that is not a child' if ref and ref.parentNode isnt this
     node.parentNode?.removeChild node
     before = if ref then ref.previousSibling else @lastChild
@@ -174,6 +176,9 @@ export class Element extends Node
         throw Error.new "rip/tui: '#{key}' has no meaning on text nested in text — it is a run of words, styled by color and weight only"
     value = undefined if value is '' or value is null or value is false
     return if @styles[key] is value
+    # A layout value is refused here, on the line that wrote it, and not
+    # from inside a later frame.
+    admit key, value if kind is 'layout' and value isnt undefined
     if value is undefined then delete @styles[key] else @styles[key] = value
     @changed kind is 'layout'
 

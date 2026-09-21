@@ -104,7 +104,11 @@ WRAP_REVERSE =! 2
 
 DIRECTIONS =! { 'column': COLUMN, 'column-reverse': COLUMN_REVERSE, 'row': ROW, 'row-reverse': ROW_REVERSE }
 WRAPS      =! { 'nowrap': NOWRAP, 'wrap': 1, 'wrap-reverse': WRAP_REVERSE }
-ALIGNS     =! { 'auto': ALIGN_AUTO, 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'stretch': STRETCH, 'baseline': BASELINE, 'space-between': SPACE_BETWEEN, 'space-around': SPACE_AROUND, 'space-evenly': SPACE_EVENLY }
+# Each align key takes its own words: only a child can defer (`auto`),
+# only items sit on a baseline, only lines are spaced.
+ALIGN_ITEMS   =! { 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'stretch': STRETCH, 'baseline': BASELINE }
+ALIGN_SELF    =! { 'auto': ALIGN_AUTO, 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'stretch': STRETCH, 'baseline': BASELINE }
+ALIGN_CONTENT =! { 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'stretch': STRETCH, 'space-between': SPACE_BETWEEN, 'space-around': SPACE_AROUND, 'space-evenly': SPACE_EVENLY }
 JUSTIFIES  =! { 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'space-between': SPACE_BETWEEN, 'space-around': SPACE_AROUND, 'space-evenly': SPACE_EVENLY }
 POSITIONS  =! { 'static': STATIC, 'relative': 1, 'absolute': ABSOLUTE }
 OVERFLOWS  =! { 'visible': 0, 'hidden': 1, 'scroll': SCROLL }
@@ -118,14 +122,15 @@ CHILDLESS =! Object.freeze []
 # One remembered answer: the offer, and the size it produced.
 class Entry
   constructor: ->
-    @availW = -1
-    @availH = -1
+    @live = false
+    @availW = NaN
+    @availH = NaN
     @modeW = MAX_CONTENT
     @modeH = MAX_CONTENT
     @ownerW = NaN
     @ownerH = NaN
-    @w = -1
-    @h = -1
+    @w = NaN
+    @h = NaN
 
 # What one container knows while it lays its lines out. A node's layout
 # never re-enters itself, so the record lives on the node and is reused.
@@ -171,6 +176,10 @@ HELD   =! Float64Array.new SLOTS
 HELD_U =! Uint8Array.new SLOTS
 RANKS  =! Uint8Array.new SLOTS
 
+# A percent as it is written: digits, an optional fraction, a percent
+# sign, and nothing else.
+PERCENTAGE =! /^-?(\d+(\.\d+)?|\.\d+)%$/
+
 # A new record holds what parsing no styles at all gives, so a node
 # without styles is never parsed; it reads the blank lengths themselves,
 # and takes its own copy on its first parse.
@@ -203,18 +212,24 @@ class Lay
     @owned = false
     @noCache = false
     @pinned = false
+    @solidW = false
+    @solidH = false
     @textW = 0
     @textH = 0
     @kids = CHILDLESS
     @count = 0
     @filled = 0
     @boxless = 0
+    @hiddenFlex = false
+    @hiddenBaseline = false
     @padding = [0, 0, 0, 0]
     @border = [0, 0, 0, 0]
     @pos = [0, 0, 0, 0]
     @measured = [NaN, NaN]
     @width = 0
     @height = 0
+    @ownerW = NaN
+    @asRoot = false
     @basis = NaN
     @basisGen = 0
     @lineGen = 0
@@ -229,6 +244,11 @@ class Lay
     @used = 0
     @flex = null
 
+# The record `admit` writes a value into to see whether it parses.
+PROBE =! Lay.new()
+PROBE.v = Float64Array.new BLANK_V
+PROBE.u = Uint8Array.new BLANK_U
+
 generation = 0
 rootNode = null
 differs = false
@@ -242,8 +262,17 @@ outSize = 0
 fmax =! (a, b) -> if isNaN a then b else if isNaN b then a else if a > b then a else b
 fmin =! (a, b) -> if isNaN a then b else if isNaN b then a else if a < b then a else b
 
-# Equal within Yoga's tolerance; two undefined numbers are equal.
+# Equal within Yoga's tolerance (`inexactEquals`); two undefined numbers
+# are equal. Yoga works in float32, where a share that lands on a limit,
+# or a percent of a size, comes out as the very number it meets. In
+# doubles it can miss by one part in 1e16, so wherever the algorithm
+# DECIDES by comparing two sizes — a line break, a frozen share, a size
+# already settled — it decides with this tolerance. The cache does not
+# (see `same`).
 near =! (a, b) -> if isNaN a then isNaN b else Math.abs(a - b) < 0.0001
+
+# Greater by more than the tolerance.
+above =! (a, b) -> a > b and not near a, b
 
 # ── Style resolvers ───────────────────────────────────────────────────────────
 # Every read of a style goes through one of these, one family each.
@@ -357,28 +386,36 @@ constrain! =! (lay, axis, axisSize, widthSize, mode, size) ->
 # Yoga has no layout for: each resolves as undefined, which is how `auto`
 # lays out (StyleSizeLength.h resolve).
 put! =! (lay, slot, value, rank, key) ->
-  return if rank < RANKS[slot]
-  RANKS[slot] = rank
   unit = NIL
   number = NaN
+  auto = slot < PADDING or (slot >= INSET and slot < MIN) or slot is BASIS
+  sized = slot >= SIZE and slot <= BASIS
   if typeof value is 'number'
-    unless isNaN value
-      unit = POINT
-      number = value
-  else if value is 'auto' or (slot >= SIZE and slot <= BASIS and (value is 'max-content' or value is 'fit-content' or value is 'stretch'))
-    unit = AUTO
-  else if typeof value is 'string' and value.endsWith('%') and not isNaN(parseFloat value)
+    unit = POINT
+    number = value
+  else if typeof value is 'string' and PERCENTAGE.test value
     unit = PERCENT
-    number = parseFloat value
-  else if value?
-    throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not a length — write a number, 'N%', or 'auto'"
+    number = Number value.slice 0, -1
+  else if (auto and value is 'auto') or (sized and (value is 'max-content' or value is 'fit-content' or value is 'stretch'))
+    unit = AUTO
+  else
+    words = ['a number', "'N%'"]
+    words.push "'auto'" if auto
+    words.push "'max-content'", "'fit-content'", "'stretch'" if sized
+    throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not a length — write #{words.slice(0, -1).join ', '} or #{words[words.length - 1]}"
+  if unit isnt AUTO
+    throw Error.new "rip/tui: #{key}: #{value} is not a length — a length is a finite number" unless Number.isFinite number
+    throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is below zero — a size is zero or more" if sized and number < 0
+  return if rank < RANKS[slot]
+  RANKS[slot] = rank
   lay.u[slot] = unit
   lay.v[slot] = number
 
 # A border width: a number where a test writes one, one cell where a
 # `borderStyle` draws, none on a side switched off. A side left on writes
 # nothing a `borderStyle` does not outrank.
-borderAt! =! (lay, slot, width, rank) ->
+borderAt! =! (lay, slot, width, rank, key) ->
+  throw Error.new "rip/tui: #{key}: #{JSON.stringify width} is not a border width — write a finite number" unless Number.isFinite width
   return if rank < RANKS[slot]
   RANKS[slot] = rank
   lay.u[slot] = POINT
@@ -389,6 +426,16 @@ scalar! =! (lay, slot, value, rank) ->
   return if rank < RANKS[slot]
   RANKS[slot] = rank
   lay.v[slot] = value
+
+# A flex factor: a finite number, and no less than `least`.
+amount =! (key, value, least) ->
+  throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not a number — write a finite number#{if least is 0 then ', zero or more' else ''}" unless Number.isFinite(value) and value >= least
+  value
+
+# A switch: true or false, never a word that only looks like one.
+flag =! (key, value) ->
+  throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not true or false" unless value is true or value is false
+  value
 
 word =! (table, key, value) ->
   code = table[value]
@@ -424,15 +471,15 @@ style! =! (lay, key, value) ->
     when 'paddingRight' then put lay, PADDING + RIGHT, value, 3, key
     when 'paddingBottom' then put lay, PADDING + BOTTOM, value, 3, key
     when 'borderStyle'
-      borderAt lay, BORDER + side, 1, 1 for side in [0...4]
-    when 'borderLeft' then borderAt lay, BORDER + LEFT, 0, (if value is false then 2 else 0)
-    when 'borderTop' then borderAt lay, BORDER + TOP, 0, (if value is false then 2 else 0)
-    when 'borderRight' then borderAt lay, BORDER + RIGHT, 0, (if value is false then 2 else 0)
-    when 'borderBottom' then borderAt lay, BORDER + BOTTOM, 0, (if value is false then 2 else 0)
-    when 'borderLeftWidth' then borderAt lay, BORDER + LEFT, value, 3
-    when 'borderTopWidth' then borderAt lay, BORDER + TOP, value, 3
-    when 'borderRightWidth' then borderAt lay, BORDER + RIGHT, value, 3
-    when 'borderBottomWidth' then borderAt lay, BORDER + BOTTOM, value, 3
+      borderAt lay, BORDER + side, 1, 1, key for side in [0...4]
+    when 'borderLeft' then borderAt lay, BORDER + LEFT, 0, (if flag(key, value) then 0 else 2), key
+    when 'borderTop' then borderAt lay, BORDER + TOP, 0, (if flag(key, value) then 0 else 2), key
+    when 'borderRight' then borderAt lay, BORDER + RIGHT, 0, (if flag(key, value) then 0 else 2), key
+    when 'borderBottom' then borderAt lay, BORDER + BOTTOM, 0, (if flag(key, value) then 0 else 2), key
+    when 'borderLeftWidth' then borderAt lay, BORDER + LEFT, value, 3, key
+    when 'borderTopWidth' then borderAt lay, BORDER + TOP, value, 3, key
+    when 'borderRightWidth' then borderAt lay, BORDER + RIGHT, value, 3, key
+    when 'borderBottomWidth' then borderAt lay, BORDER + BOTTOM, value, 3, key
     when 'left' then put lay, INSET + LEFT, value, 1, key
     when 'top' then put lay, INSET + TOP, value, 1, key
     when 'right' then put lay, INSET + RIGHT, value, 1, key
@@ -451,30 +498,47 @@ style! =! (lay, key, value) ->
     # `flex: n` grows by n from a zero basis; a negative one shrinks. An
     # `auto` basis leaves that zero standing.
     when 'flex'
+      amount key, value, -Infinity
       scalar lay, GROW, (if value > 0 then value else 0), 1
       scalar lay, SHRINK, (if value < 0 then -value else 0), 1
       put lay, BASIS, 0, 1, key if value > 0
-    when 'flexGrow' then scalar lay, GROW, (if isNaN value then 0 else value), 2
-    when 'flexShrink' then scalar lay, SHRINK, (if isNaN value then 0 else value), 2
+    when 'flexGrow' then scalar lay, GROW, amount(key, value, 0), 2
+    when 'flexShrink' then scalar lay, SHRINK, amount(key, value, 0), 2
     when 'flexBasis' then put lay, BASIS, value, (if value is 'auto' then 0 else 2), key
     # A ratio of zero, below zero, or without end is no ratio (Style.h
     # setAspectRatio).
-    when 'aspectRatio' then scalar lay, RATIO, (if typeof value is 'number' and value > 0 and value isnt Infinity then value else NaN), 1
+    when 'aspectRatio'
+      throw Error.new "rip/tui: aspectRatio: #{JSON.stringify value} is not a number — write width over height, as 2 or 0.5" unless typeof value is 'number' and not isNaN value
+      scalar lay, RATIO, (if value > 0 and value isnt Infinity then value else NaN), 1
     when 'flexDirection' then scalar lay, DIRECTION, word(DIRECTIONS, key, value), 1
     when 'flexWrap' then scalar lay, WRAPPING, word(WRAPS, key, value), 1
     when 'justifyContent' then scalar lay, JUSTIFY, word(JUSTIFIES, key, value), 1
-    when 'alignItems' then scalar lay, ITEMS, word(ALIGNS, key, value), 1
-    when 'alignSelf' then scalar lay, SELF, word(ALIGNS, key, value), 1
-    when 'alignContent' then scalar lay, CONTENT, word(ALIGNS, key, value), 1
+    when 'alignItems' then scalar lay, ITEMS, word(ALIGN_ITEMS, key, value), 1
+    when 'alignSelf' then scalar lay, SELF, word(ALIGN_SELF, key, value), 1
+    when 'alignContent' then scalar lay, CONTENT, word(ALIGN_CONTENT, key, value), 1
     when 'position' then scalar lay, POSITION, word(POSITIONS, key, value), 1
     when 'overflow' then scalar lay, OVERFLOW, word(OVERFLOWS, key, value), 1
     when 'boxSizing' then scalar lay, SIZING, word(SIZINGS, key, value), 1
+    # `display` and `hidden` decide whether a node is laid out at all, so
+    # `boxOf` reads them; here they are only held to their words.
+    when 'display' then word DISPLAYS, key, value
+    when 'hidden' then flag key, value
 
-# Parse a node's styles into its record, one written key at a time, and
-# note whether anything came out different.
-parse! =! (lay, s) ->
-  HELD.set lay.v
-  HELD_U.set lay.u
+# Refuse a value layout cannot use, by the error a layout would throw, so
+# a style can fail where it is written. A key layout does not read, and
+# a style taken away, are none of its business.
+export admit! =! (key, value) ->
+  return if value is undefined
+  RANKS.fill 0
+  style PROBE, key, value
+
+# Parse a node's styles into its record, one written key at a time. With
+# `scan`, note in `differs` whether anything came out different; a record
+# known to be new or changed is not worth the comparison.
+parse! =! (lay, s, scan) ->
+  if scan
+    HELD.set lay.v
+    HELD_U.set lay.u
   if lay.v is BLANK_V
     lay.v = Float64Array.new BLANK_V
     lay.u = Uint8Array.new BLANK_U
@@ -489,8 +553,9 @@ parse! =! (lay, s) ->
     if lay.u[MAX + dim] isnt NIL and lay.u[MAX + dim] is lay.u[MIN + dim] and near(lay.v[MAX + dim], lay.v[MIN + dim])
       lay.u[SIZE + dim] = lay.u[MAX + dim]
       lay.v[SIZE + dim] = lay.v[MAX + dim]
-  for slot in [0...SLOTS]
-    differs = true if lay.u[slot] isnt HELD_U[slot] or not near(lay.v[slot], HELD[slot])
+  if scan
+    for slot in [0...SLOTS]
+      differs = true if lay.u[slot] isnt HELD_U[slot] or not same(lay.v[slot], HELD[slot])
   lay.grow = lay.v[GROW]
   lay.shrink = lay.v[SHRINK]
   lay.ratio = lay.v[RATIO]
@@ -519,7 +584,8 @@ parse! =! (lay, s) ->
 
 boxOf =! (node) ->
   s = node.styles
-  if s.hidden then NONE else if s.display is undefined then FLEX else word DISPLAYS, 'display', s.display
+  return NONE if s.hidden isnt undefined and flag 'hidden', s.hidden
+  if s.display is undefined then FLEX else word DISPLAYS, 'display', s.display
 
 # Collect the layout children under `node` into `out`: a `contents` child
 # stands aside for its own children, to any depth.
@@ -554,38 +620,39 @@ export textOf =! (node) ->
   out
 
 # Padding plus border on each edge: [top, right, bottom, left]. A clean
-# node answers with what layout resolved; any other resolves its points.
+# node resolves its percents against the owner width it was laid out
+# under — `lay.padding` holds whatever the last visit resolved, which a
+# measure-only visit may have made after the layout. Any other node
+# resolves its points.
 export edges =! (node) ->
   lay = node.lay
+  ref = NaN
   if lay and not node.dirty
-    p = lay.padding
-    b = lay.border
-    return [p[TOP] + b[TOP], p[RIGHT] + b[RIGHT], p[BOTTOM] + b[BOTTOM], p[LEFT] + b[LEFT]]
-  lay = Lay.new()
-  parse lay, node.styles ?? PLAIN
-  [insideAt(lay, TOP, NaN), insideAt(lay, RIGHT, NaN), insideAt(lay, BOTTOM, NaN), insideAt(lay, LEFT, NaN)]
+    ref = lay.ownerW
+  else
+    lay = Lay.new()
+    parse lay, node.styles ?? PLAIN, false
+  [insideAt(lay, TOP, ref), insideAt(lay, RIGHT, ref), insideAt(lay, BOTTOM, ref), insideAt(lay, LEFT, ref)]
 
-# Clear the dirty mark on `node` and everything under it. Layout never
-# visits the inside of a text leaf, and a node left dirty would stop its
-# next change from climbing to the root.
-scrub! =! (node) ->
-  node.dirty = false
-  kid = node.firstChild
-  while kid
-    scrub kid if kid.dirty
-    kid = kid.nextSibling
-
-# A hidden subtree has no box: every node in it sits empty at its
-# parent's corner, and none stays dirty, since layout never visits them.
+# Layout never visits a hidden subtree or the inside of a text leaf, so
+# such a node is put away whole: no dirty mark, which would stop its next
+# change from climbing to the root; no record, so whatever happened to it
+# meanwhile is read from scratch when layout takes it up again; and an
+# empty box at (x, y) — the hiding parent's corner, or the origin inside
+# a leaf, which is where a fresh layout leaves them.
 vanish! =! (node, x, y) ->
   node.dirty = false
-  node.place x, y, 0, 0
-  # Shown again, it must be rounded again even where it sat before.
-  node.lay.atX = NaN if node.lay
+  node.lay = null
+  node.place x, y, 0, 0 unless node.nodeType is 8
   kid = node.firstChild
   while kid
-    vanish kid, x, y if kid.nodeType is 1 or kid.nodeType is 3
+    vanish kid, x, y
     kid = kid.nextSibling
+
+# Whether a node put away at (x, y) is still as `vanish` left it.
+away =! (node, x, y) ->
+  rect = node.rect
+  not node.dirty and not node.lay and rect.x is x and rect.y is y and rect.w is 0 and rect.h is 0
 
 percents =! (lay, from, to) ->
   for slot in [from...to]
@@ -599,29 +666,59 @@ percents =! (lay, from, to) ->
 leansOnOwner =! (lay) ->
   return true if lay.marginPercent or lay.insidePercent or lay.limitPercent
   for kid, i in lay.kids
-    return true if kid.lay.limitPercent
+    return true if kid.lay.limitPercent or (kid.lay.contentBox and kid.lay.insidePercent)
   false
 
 # Whether what a container computes can depend on the ORDER it is asked
 # in, and so on which earlier asks a cached answer stood in for. Two
-# things make it so. A child's written `flexBasis` stands from the first
-# ask of a pass (see `basisOf`), and that first value can differ from a
-# later one unless the container's main size is a plain number and the
-# basis a number clear of percent padding. And a baseline row reads its
-# children's lines and positions, which earlier visits leave behind.
-# Such a container, and every ancestor, is computed on every visit of a
-# pass — never answered from an earlier pass — so its asks come in the
-# order, and with the inputs, of a fresh layout.
+# things make it so. A baseline row reads its children's lines and
+# positions, which earlier visits leave behind. And a child's written
+# `flexBasis` stands from the first ask of a pass (see `basisOf`), which
+# matters unless every ask finds the same basis: the container's main
+# size is a number on every visit (`solidW` / `solidH`), so no ask
+# measures content instead; the basis is a number clear of percent
+# padding, so it is the same number whatever the size; and the lone-
+# child shortcut, which sets a basis of zero, would set the very number
+# written. Such a container, and every ancestor, is computed on every
+# visit of a pass — never answered from an earlier pass — so its asks
+# come in the order, and with the inputs, of a fresh layout.
 orderSensitive =! (lay) ->
   return true if baselined lay
-  slot = SIZE + DIM[lay.direction]
-  plain = lay.u[slot] is POINT and lay.v[slot] >= 0
+  solid = if lay.direction >= ROW then lay.solidW else lay.solidH
   for kid, i in lay.kids
     k = kid.lay
     unit = k.u[BASIS]
     continue if k.position is ABSOLUTE or (unit isnt POINT and unit isnt PERCENT)
-    return true unless plain and unit is POINT and not k.insidePercent
+    return true unless solid and unit is POINT and not k.insidePercent
+    return true if k.grow isnt 0 and k.shrink isnt 0 and (k.v[BASIS] isnt 0 or insideAxis(k, lay.direction, NaN) isnt 0)
   false
+
+# Whether every offer `lay` makes its child `k` on a dimension is a
+# number: the child's own size is one, or `lay` is always offered one
+# itself and passes it on — which it does not to an absolute child, nor
+# along the axis it scrolls (see `basisOf`).
+offered =! (lay, k, dim) ->
+  return true if k.u[SIZE + dim] is POINT and k.v[SIZE + dim] >= 0
+  return false if k.position is ABSOLUTE or (lay.overflow is SCROLL and DIM[lay.direction] is dim)
+  if dim is 0 then lay.solidW else lay.solidH
+
+# Give `node` its `solidW` and `solidH`, and carry what follows from them
+# down: its own order-sensitivity, and its children's flags in turn. Its
+# remembered answers go, since some were computed under the other rule.
+firm! =! (node, solidW, solidH) ->
+  lay = node.lay
+  lay.solidW = solidW
+  lay.solidH = solidH
+  lay.used = 0
+  lay.entry.live = false
+  return if lay.leaf
+  lay.noCache = orderSensitive lay
+  for kid, i in lay.kids
+    k = kid.lay
+    wide = offered lay, k, 0
+    tall = offered lay, k, 1
+    firm kid, wide, tall if k.solidW isnt wide or k.solidH isnt tall
+    lay.noCache = true if k.noCache
 
 # Everything under a baseline row is read by it, to any depth, so none of
 # it answers from an earlier pass either. `pinned` holds for a node whose
@@ -633,6 +730,16 @@ hold! =! (node, value) ->
   below = value or baselined lay
   for kid, i in lay.kids
     hold kid, below if kid.lay.pinned isnt below
+
+# Whether a hidden child would flex were it shown: Yoga's lone-flexible-
+# child shortcut counts `display: none` children, so one of these among
+# them means no child is alone (computeFlexBasisForChildren).
+flexes =! (s) ->
+  return false if s.position is 'absolute'
+  flex = s.flex
+  grow = s.flexGrow ?? (if flex > 0 then flex else 0)
+  shrink = s.flexShrink ?? (if flex < 0 then -flex else 0)
+  grow isnt 0 or shrink isnt 0
 
 # Rebuild `owner`'s layout children from the children of `node` — `owner`
 # itself, or a `contents` node under it, which makes no box and leaves
@@ -647,22 +754,27 @@ gather =! (node, owner, lay, list) ->
       box = if kid.nodeType is 1 then boxOf kid else FLEX
       if box is CONTENTS
         lay.boxless += 1
-        # Rounding places it again wherever `owner` moves or is laid out;
-        # placing a dirty one here covers the pass where neither happens.
-        if kid.dirty
-          kid.place owner.rect.x, owner.rect.y, 0, 0
-          kid.lay.atX = NaN if kid.lay
-          kid.dirty = false
+        # A `contents` node makes no box and keeps no record, so one that
+        # makes a box again is read from scratch. Rounding places it
+        # wherever `owner` moves or is laid out; placing it here covers
+        # the pass where neither happens.
+        kid.dirty = false
+        kid.lay = null
+        kid.place owner.rect.x, owner.rect.y, 0, 0
         changed = true if gather kid, owner, lay, list
       else
         lay.count += 1
         if box is NONE
           lay.boxless += 1
-          vanish kid, owner.rect.x, owner.rect.y if kid.dirty
+          lay.hiddenFlex = true if flexes kid.styles
+          lay.hiddenBaseline = true if kid.styles.alignSelf is 'baseline' and kid.styles.position isnt 'absolute'
+          vanish kid, owner.rect.x, owner.rect.y unless away kid, owner.rect.x, owner.rect.y
         else
           changed = true if list[lay.filled] isnt kid
           list[lay.filled] = kid
           lay.filled += 1
+    else
+      kid.dirty = false
     kid = kid.nextSibling
   changed
 
@@ -672,9 +784,16 @@ gather =! (node, owner, lay, list) ->
 # so its cached layout stands.
 sync =! (node) ->
   lay = node.lay
-  return false if lay and not node.dirty
-  changed = not lay
+  # The root is laid out by rules of its own — it never grows, and it is
+  # a containing block whatever its position — and no cache key says so.
+  # A node whose record was made on the other side of that line reads as
+  # changed.
+  turned = lay and lay.asRoot isnt (node is rootNode)
+  return false if lay and not node.dirty and not turned
+  changed = not lay or turned
   lay = node.lay = Lay.new() unless lay
+  lay.asRoot = node is rootNode
+  node.dirty = true if turned
   styles = node.styles ?? PLAIN
   bare = true
   for key of styles
@@ -682,7 +801,7 @@ sync =! (node) ->
     break
   unless bare and lay.bare
     differs = false
-    parse lay, styles
+    parse lay, styles, not changed
     changed = true if differs
   lay.bare = bare
   leaf = node.nodeType is 3 or node.tagName is 'span' or typeof node.measure is 'function'
@@ -708,16 +827,20 @@ sync =! (node) ->
       lay.textH = tall
     kid = node.firstChild
     while kid
-      scrub kid if kid.dirty
+      vanish kid, 0, 0 unless away kid, 0, 0
       kid = kid.nextSibling
   else
     list = if lay.kids is CHILDLESS then (lay.kids = []) else lay.kids
     count = lay.count
+    hiddenFlex = lay.hiddenFlex
+    hiddenBaseline = lay.hiddenBaseline
     lay.count = 0
     lay.filled = 0
     lay.boxless = 0
+    lay.hiddenFlex = false
+    lay.hiddenBaseline = false
     changed = true if gather node, node, lay, list
-    changed = true if list.length isnt lay.filled or count isnt lay.count
+    changed = true if list.length isnt lay.filled or count isnt lay.count or hiddenFlex isnt lay.hiddenFlex or hiddenBaseline isnt lay.hiddenBaseline
     list.length = lay.filled
     for kid, i in list
       changed = true if sync kid
@@ -726,8 +849,12 @@ sync =! (node) ->
     below = lay.pinned or baselined lay
     lay.noCache = orderSensitive lay
     for kid, i in list
-      lay.noCache = true if kid.lay.noCache
-      hold kid, below if kid.lay.pinned isnt below
+      k = kid.lay
+      wide = offered lay, k, 0
+      tall = offered lay, k, 1
+      firm kid, wide, tall if k.solidW isnt wide or k.solidH isnt tall
+      lay.noCache = true if k.noCache
+      hold kid, below if k.pinned isnt below
   lay.owned = leansOnOwner lay
   node.dirty = false unless changed
   changed
@@ -769,7 +896,7 @@ measureEmpty! =! (lay, availW, availH, modeW, modeH, ownerW, ownerH) ->
   lay.measured[0] = bound lay, ROW, wide, ownerW, ownerW
   lay.measured[1] = bound lay, COLUMN, tall, ownerH, ownerW
 
-fixed =! (size, mode) -> mode is STRETCH_FIT or (mode is FIT_CONTENT and size <= 0)
+fixed =! (size, mode) -> mode is STRETCH_FIT or (mode is FIT_CONTENT and (size <= 0 or near size, 0))
 
 # A measure-only visit whose size is already decided skips the children.
 measureFixed =! (lay, availW, availH, modeW, modeH, ownerW, ownerH) ->
@@ -883,7 +1010,7 @@ basisAll =! (node, lay, f, modeW, modeH, perform) ->
   # A lone child that both grows and shrinks takes the whole line, so its
   # content need not be measured: its basis is zero.
   only = null
-  if f.modeMain is STRETCH_FIT
+  if f.modeMain is STRETCH_FIT and not lay.hiddenFlex
     for kid, i in list
       k = kid.lay
       if flexible k
@@ -926,9 +1053,11 @@ breakLine! =! (lay, f, lineAt) ->
       at += 1
       continue
     hypothetical = boundWithin(k, axis, k.basis, f.ownerMain, f.ownerW) + marginAxis(k, axis, f.innerW) + (if f.items then gap else 0)
-    break if f.wrap and f.items and f.consumed + hypothetical > f.innerMain
+    # An item that goes to the next line has already lent this one its
+    # auto margins (FlexLine.cpp counts them before it breaks).
     f.autos += 1 if marginAuto k, START[axis]
     f.autos += 1 if marginAuto k, END[axis]
+    break if f.wrap and f.items and above f.consumed + hypothetical, f.innerMain
     k.lineAt = lineAt
     f.consumed += hypothetical
     if flexible k
@@ -959,14 +1088,14 @@ freeze! =! (lay, f) ->
       if scaled isnt 0 and not isNaN scaled
         size = base + f.free / f.shrink * scaled
         held = bound k, axis, size, f.innerMain, f.innerW
-        if not isNaN(size) and not isNaN(held) and size isnt held
+        if not isNaN(size) and not isNaN(held) and not near size, held
           delta += held - base
           f.shrink += k.shrink * k.basis
     else if f.free > 0
       if k.grow isnt 0
         size = base + f.free / f.grow * k.grow
         held = bound k, axis, size, f.innerMain, f.innerW
-        if not isNaN(size) and not isNaN(held) and size isnt held
+        if not isNaN(size) and not isNaN(held) and not near size, held
           delta += held - base
           f.grow -= k.grow
   f.free -= delta
@@ -996,7 +1125,12 @@ distribute =! (node, lay, f, perform) ->
         size = bound k, axis, share, f.innerMain, f.innerW
     else if f.free > 0
       if k.grow isnt 0
-        size = bound k, axis, base + f.free / f.grow * k.grow, f.innerMain, f.innerW
+        # With every grower frozen at its max the total is zero, give or
+        # take a rounding. Yoga divides by it and the max holds the
+        # result; a total rounded below zero must end there too.
+        share = if Math.abs(f.grow) < 1e-6 then Infinity else base + f.free / f.grow * k.grow
+        size = bound k, axis, share, f.innerMain, f.innerW
+        size = base if size is Infinity
     delta += size - base
 
     marginMain = marginAxis k, axis, f.innerW
@@ -1052,13 +1186,14 @@ baselineOf =! (node) ->
       pick = kid
       break
     pick = kid unless pick
-  return lay.measured[1] unless pick
+  return (if lay.gen is generation then lay.measured[1] else NaN) unless pick
   baselineOf(pick) + (if lay.doneGen is generation then pick.lay.pos[TOP] else 0)
 
-# A row aligns on baselines when it or any in-flow child asks to.
+# A row aligns on baselines when it or any in-flow child asks to — a
+# hidden child among them, which Yoga's `isBaselineLayout` counts.
 baselined =! (lay) ->
   return false if lay.direction < ROW
-  return true if lay.alignItems is BASELINE
+  return true if lay.alignItems is BASELINE or lay.hiddenBaseline
   for kid, i in lay.kids
     k = kid.lay
     return true if k.position isnt ABSOLUTE and k.alignSelf is BASELINE
@@ -1100,7 +1235,7 @@ justify! =! (node, lay, f, ownerW, perform) ->
       lead = f.free / (f.items + 1)
       between += lead
     else if how is SPACE_AROUND
-      lead = 0.5 * f.free / f.items
+      lead = if f.items then 0.5 * f.free / f.items else 0
       between += lead * 2
   f.mainDim = leadingInside + lead
   f.crossDim = 0
@@ -1284,7 +1419,9 @@ compute! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
     measureLeaf node, lay, availW - marginRow, availH - marginColumn, modeW, modeH, ownerW, ownerH
     return
   list = lay.kids
-  if list.length is 0
+  # Yoga's child count takes in the hidden, so a box whose children are
+  # all hidden is laid out as a container: one line with nothing on it.
+  if lay.count is 0
     measureEmpty lay, availW - marginRow, availH - marginColumn, modeW, modeH, ownerW, ownerH
     return
   return if not perform and measureFixed lay, availW - marginRow, availH - marginColumn, modeW, modeH, ownerW, ownerH
@@ -1332,7 +1469,7 @@ compute! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
   # absolute children too, as Yoga's child count does.
   total = basisAll node, lay, f, modeW, modeH, perform
   total += gapAt(lay, axis, f.innerMain) * (lay.count - 1) if lay.count > 1
-  f.overflows = f.modeMain isnt MAX_CONTENT and total > f.innerMain
+  f.overflows = f.modeMain isnt MAX_CONTENT and above total, f.innerMain
   f.modeMain = STRETCH_FIT if f.wrap and f.overflows and f.modeMain is FIT_CONTENT
 
   # Steps 4 to 7, a line at a time.
@@ -1343,7 +1480,7 @@ compute! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
   innerMain = f.innerMain
   f.from = 0
   lay.lineGen = generation
-  while f.from < list.length
+  while f.from < list.length or lines is 0
     breakLine lay, f, lines
     skipped = not perform and f.modeCross is STRETCH_FIT
 
@@ -1432,6 +1569,18 @@ compute! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
 
 # Position an absolute child on one axis: by its insets against the
 # containing block, else where its parent's justify or align puts it.
+# The size of `lay` as an absolute child's position reads it. The block
+# is computing, so its size is `measured`; a parent under it has been
+# laid out, and `measured` may hold a later measure-only answer.
+extent =! (lay, block, dim) ->
+  if lay is block then lay.measured[dim] else if dim is 0 then lay.width else lay.height
+
+# …and its padding plus border on one edge, by the same rule: the block
+# resolved its own this visit; a parent's is resolved against the owner
+# width it was laid out under.
+inset0 =! (lay, block, edge) ->
+  if lay is block then lay.padding[edge] + lay.border[edge] else insideAt lay, edge, lay.ownerW
+
 pin! =! (block, parent, kid, axis, main, blockW, blockH) ->
   c = block.lay
   q = parent.lay
@@ -1456,14 +1605,16 @@ pin! =! (block, parent, kid, axis, main, blockW, blockH) ->
   unless main
     how = (if how is FLEX_END then FLEX_START else if how is CENTER then CENTER else FLEX_END) if q.wrap is WRAP_REVERSE
   centered = if main then how is CENTER or how is SPACE_AROUND or how is SPACE_EVENLY else how is CENTER
+  near0 = inset0 q, c, start
+  far0 = inset0 q, c, end
+  size = extent q, c, dim
   if how is FLEX_END
-    k.pos[start] = q.measured[dim] - k.measured[dim] - (q.border[end] + q.padding[end] + marginAt(k, end, blockW))
+    k.pos[start] = size - k.measured[dim] - (far0 + marginAt(k, end, blockW))
   else if centered
-    room = q.measured[dim] - q.border[start] - q.border[end] - q.padding[start] - q.padding[end]
     outer = k.measured[dim] + marginAxis(k, axis, blockW)
-    k.pos[start] = (room - outer) / 2 + q.border[start] + q.padding[start] + marginAt(k, start, blockW)
+    k.pos[start] = (size - near0 - far0 - outer) / 2 + near0 + marginAt(k, start, blockW)
   else
-    k.pos[start] = q.border[start] + q.padding[start] + marginAt(k, start, blockW)
+    k.pos[start] = near0 + marginAt(k, start, blockW)
 
 # Size an absolute child — from its own size, else from opposing insets,
 # else from its content — lay it out, and position it on both axes.
@@ -1531,7 +1682,7 @@ absolutes =! (block, parent, widthMode, left, top) ->
         if axis is ROW_REVERSE or axis is COLUMN_REVERSE
           dim = DIM[axis]
           against = if (if dim is 0 then acrossSet else downSet) then c else q
-          k.pos[END[axis]] = against.measured[dim] - k.measured[dim] - k.pos[START[axis]]
+          k.pos[END[axis]] = extent(against, c, dim) - k.measured[dim] - k.pos[START[axis]]
         axis = crossAxis axis
       k.pos[LEFT] -= left if acrossSet
       k.pos[TOP] -= top if downSet
@@ -1542,32 +1693,37 @@ absolutes =! (block, parent, widthMode, left, top) ->
 
 # ── The cache ─────────────────────────────────────────────────────────────────
 
+# The cache compares EXACTLY. The algorithm's own comparisons carry a
+# tolerance (see `near`), and a tolerance is not transitive: two offers
+# the key called equal could still fall on either side of a line break.
+# An answer is reused only for the very numbers it was computed from.
+same =! (a, b) -> a is b or (isNaN(a) and isNaN(b))
+
 # Yoga keys a cached answer by the offer alone. The owner's size joins
 # the key here for a node that leans on it, so an answer is never one a
 # different owner was given.
 sameOwner =! (lay, entry, ownerW, ownerH) ->
-  not lay.owned or (near(entry.ownerW, ownerW) and near(entry.ownerH, ownerH))
+  not lay.owned or (same(entry.ownerW, ownerW) and same(entry.ownerH, ownerH))
 
 holds =! (lay, entry, availW, availH, modeW, modeH, ownerW, ownerH) ->
-  entry.modeW is modeW and entry.modeH is modeH and near(entry.availW, availW) and near(entry.availH, availH) and sameOwner(lay, entry, ownerW, ownerH)
+  entry.live and entry.modeW is modeW and entry.modeH is modeH and same(entry.availW, availW) and same(entry.availH, availH) and sameOwner(lay, entry, ownerW, ownerH)
 
 # Whether one axis of a remembered measurement answers a new offer
 # (Cache.cpp): the same offer; an exact size equal to the answer; an
 # unlimited answer that fits the new limit; or a tighter limit the
 # answer still fits. Yoga calls two offers the same when they ROUND the
-# same; here they must be equal, because an exact offer is its own
-# answer, and a stale fraction would round a text box differently from
-# the box a fresh layout gives.
+# same, and sizes equal within a tolerance; here both are exact, because
+# an exact offer is its own answer, and a stale fraction would round a
+# text box differently from the box a fresh layout gives.
 fits =! (mode, size, offered, lastMode, lastOffered, answer) ->
-  return true if lastMode is mode and near(lastOffered, offered)
-  return true if mode is STRETCH_FIT and near(size, answer)
+  return true if lastMode is mode and same(lastOffered, offered)
+  return true if mode is STRETCH_FIT and size is answer
   return false unless mode is FIT_CONTENT
-  return true if lastMode is MAX_CONTENT and (size >= answer or near(size, answer))
-  lastMode is FIT_CONTENT and lastOffered > size and (answer <= size or near(size, answer))
+  return true if lastMode is MAX_CONTENT and size >= answer
+  lastMode is FIT_CONTENT and lastOffered > size and answer <= size
 
 reusable =! (lay, entry, availW, availH, modeW, modeH, ownerW, ownerH, marginRow, marginColumn) ->
-  return false if entry.w < 0 or entry.h < 0
-  return false unless sameOwner lay, entry, ownerW, ownerH
+  return false unless entry.live and sameOwner lay, entry, ownerW, ownerH
   fits(modeW, availW - marginRow, availW, entry.modeW, entry.availW, entry.w) and fits(modeH, availH - marginColumn, availH, entry.modeH, entry.availH, entry.h)
 
 # Size `node`, from its cache when the offer is one it has answered since
@@ -1577,8 +1733,7 @@ visit! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
   lay = node.lay
   if (node.dirty or lay.noCache or (lay.pinned and not lay.leaf)) and lay.gen isnt generation
     lay.used = 0
-    lay.entry.w = -1
-    lay.entry.availW = -1
+    lay.entry.live = false
   hit = null
   if lay.leaf
     marginRow = marginAxis lay, ROW, ownerW
@@ -1610,6 +1765,7 @@ visit! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
       lay.used = 0 if lay.used is MEASURES
       entry = (lay.measures ?= [])[lay.used] ?= Entry.new()
       lay.used += 1
+    entry.live = true
     entry.availW = availW
     entry.availH = availH
     entry.modeW = modeW
@@ -1624,6 +1780,7 @@ visit! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
     lay.ran = generation if lay.width isnt lay.measured[0] or lay.height isnt lay.measured[1]
     lay.width = lay.measured[0]
     lay.height = lay.measured[1]
+    lay.ownerW = ownerW
     lay.doneGen = generation
     node.dirty = false
   lay.gen = generation
@@ -1653,7 +1810,7 @@ ghosts! =! (node, x, y) ->
     if kid.nodeType is 1
       box = boxOf kid
       if box is NONE
-        vanish kid, x, y
+        vanish kid, x, y unless away kid, x, y
       else if box is CONTENTS
         kid.place x, y, 0, 0
         ghosts kid, x, y
@@ -1679,6 +1836,10 @@ settle! =! (node, left, top) ->
   y0 = snap y, false, text
   x1 = snap x + wide, raggedW, text and not raggedW
   y1 = snap y + tall, raggedH, text and not raggedH
+  # A box that is not a number — a measure function that answered with
+  # none, a size without end — is refused here, by name, before a painter
+  # is handed it.
+  throw Error.new "rip/tui: layout gave <#{node.tagName ?? 'text'}> a box that is not finite (#{x0}, #{y0}, #{x1 - x0} × #{y1 - y0})" unless Number.isFinite x0 + y0 + x1 + y1
   node.place x0, y0, x1 - x0, y1 - y0
   for kid, i in lay.kids
     settle kid, x, y
@@ -1686,16 +1847,25 @@ settle! =! (node, left, top) ->
 
 # ── Entry ─────────────────────────────────────────────────────────────────────
 
-# Lay the tree out in a space `availableWidth` by `availableHeight`, where
-# null is unlimited. The root takes its own size if it has one, else its
-# max as a limit, else the space (calculateLayout).
-export layout =! (root, availableWidth, availableHeight = null) ->
-  ownerW = availableWidth ?? NaN
-  ownerH = availableHeight ?? NaN
-  generation += 1
-  rootNode = root
+# Drop every record under `node`, so the next layout reads the tree from
+# scratch.
+forget! =! (node) ->
+  node.lay = null
+  kid = node.firstChild
+  while kid
+    forget kid
+    kid = kid.nextSibling
+
+# One pass over the tree. The root takes its own size if it has one, else
+# its max as a limit, else the space (calculateLayout).
+pass! =! (root, ownerW, ownerH) ->
   sync root
   lay = root.lay
+  # The root is offered a number where the space has one, which can
+  # change from pass to pass with nothing dirty.
+  solidW = not isNaN(ownerW) or (lay.u[SIZE] is POINT and lay.v[SIZE] >= 0)
+  solidH = not isNaN(ownerH) or (lay.u[SIZE + 1] is POINT and lay.v[SIZE + 1] >= 0)
+  firm root, solidW, solidH if lay.solidW isnt solidW or lay.solidH isnt solidH
   wide = ownerW
   modeW = if isNaN ownerW then MAX_CONTENT else STRETCH_FIT
   if definite lay, 0, ownerW
@@ -1715,5 +1885,25 @@ export layout =! (root, availableWidth, availableHeight = null) ->
   visit root, wide, tall, modeW, modeH, ownerW, ownerH, true
   seat lay, ownerW, ownerH
   settle root, 0, 0
+
+# Lay the tree out in a space `availableWidth` by `availableHeight`, where
+# null is unlimited. A pass that throws — a style with no meaning, a
+# measure function that fails — stops with records half brought up to
+# date, so none of them is kept.
+export layout =! (root, availableWidth, availableHeight = null) ->
+  generation += 1
+  rootNode = root
+  try
+    pass root, availableWidth ?? NaN, availableHeight ?? NaN
+  catch error
+    rootNode = null
+    forget root
+    throw error
   rootNode = null
+  # A root that sits inside a larger tree holds boxes measured from its
+  # own corner. Its ancestors are owed a layout that puts them back.
+  outer = root.parentNode
+  while outer and not outer.dirty
+    outer.dirty = true
+    outer = outer.parentNode
   root.rect

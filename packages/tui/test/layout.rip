@@ -1,0 +1,383 @@
+# Pins for the layout engine: answers that are easy to get wrong, changes
+# that are easy to lose, and values that must fail by name. Trees are
+# built straight from the document's nodes and laid out by `layout`;
+# `settled` lays a live tree out and holds it to a twin cloned from it
+# and laid out once.
+#
+#   rip test/layout.rip
+
+import { test, eq, ok, throws } from 'rip/testing'
+import { Element, Text, Node } from '../document.rip'
+import { layout, edges, admit } from '../layout.rip'
+
+div = (styles = {}, kids = []) ->
+  node = Element.new 'div'
+  node.styles[key] = value for own key, value of styles
+  node.appendChild kid for kid in kids
+  node
+
+span = (text, styles = {}) ->
+  node = Element.new 'span'
+  node.styles[key] = value for own key, value of styles
+  node.appendChild Text.new text
+  node
+
+clone = (node) ->
+  return Text.new node.data if node.nodeType is 3
+  return Node.new 8 if node.nodeType is 8
+  copy = Element.new node.tagName
+  copy.styles[key] = value for own key, value of node.styles
+  copy.measure = node.measure if node.measure
+  kid = node.firstChild
+  while kid
+    copy.appendChild clone kid
+    kid = kid.nextSibling
+  copy
+
+boxes = (node, out = []) ->
+  box = node.rect
+  out.push "#{box.x},#{box.y} #{box.w}x#{box.h}"
+  kid = node.firstChild
+  while kid
+    boxes kid, out
+    kid = kid.nextSibling
+  out
+
+dirty = (node) ->
+  return true if node.dirty
+  kid = node.firstChild
+  while kid
+    return true if dirty kid
+    kid = kid.nextSibling
+  false
+
+# Lay `live` out, and hold every box in it to a fresh twin's.
+settled = (live, wide, tall = null) ->
+  layout live, wide, tall
+  twin = clone live
+  layout twin, wide, tall
+  eq boxes(live).join(' | '), boxes(twin).join(' | ')
+  ok not dirty(live), 'a node is still dirty after layout'
+
+at = (node) -> "#{node.rect.x},#{node.rect.y} #{node.rect.w}x#{node.rect.h}"
+
+# ==[ An incremental layout equals a fresh one ]==
+
+console.log "\nIncremental layout"
+
+test "a relayout with no change moves nothing: a baseline row reads only what this pass measured", ->
+  tall = div { height: 1, aspectRatio: 2 }, [div()]
+  root = div {}, [div({ flexDirection: 'row' }, [div({ alignSelf: 'baseline' }), tall])]
+  layout root, 60
+  first = boxes(root).join ' | '
+  layout root, 60
+  eq boxes(root).join(' | '), first
+  settled root, 60
+
+test "a change inside a hidden subtree shows when the subtree does", ->
+  words = span 'a'
+  inner = div { width: 4, height: 1 }
+  panel = div {}, [words, inner]
+  root = div {}, [panel, div({ height: 1 })]
+  settled root, 40
+  panel.set 'hidden', true
+  settled root, 40
+  words.firstChild.data = 'a\nb\nc'
+  inner.set 'height', 5
+  settled root, 40
+  panel.set 'hidden', false
+  settled root, 40
+  eq root.rect.h, 9
+
+test "a bare text rewritten while its panel is hidden is measured again when it shows", ->
+  count = Text.new 'count 1'
+  panel = div {}, [count]
+  root = div {}, [div({ height: 1 }), panel, span('footer')]
+  settled root, 40
+  panel.toggleAttribute 'hidden', true
+  settled root, 40
+  count.data = 'count 1\ncount 2'
+  settled root, 40
+  panel.toggleAttribute 'hidden', false
+  settled root, 40
+  eq panel.rect.h, 2
+
+test "a node that was `display: contents` lays its children out again when it makes a box", ->
+  grown = div { height: 2 }
+  wrap = div {}, [grown]
+  root = div {}, [wrap, div({ height: 1 })]
+  settled root, 40
+  wrap.set 'display', 'contents'
+  settled root, 40
+  grown.set 'height', 5
+  settled root, 40
+  wrap.set 'display', undefined
+  settled root, 40
+  eq wrap.rect.h, 5
+
+test "display flex → contents → flex leaves no stale child position", ->
+  kid = div { width: 3, height: 1 }
+  wrap = div { paddingLeft: 4 }, [kid]
+  root = div { flexDirection: 'row' }, [div({ width: 10, height: 1 }), wrap]
+  settled root, 40
+  eq kid.rect.x, 14
+  wrap.set 'display', 'contents'
+  settled root, 40
+  eq kid.rect.x, 10
+  wrap.set 'display', 'flex'
+  settled root, 40
+  eq kid.rect.x, 14
+
+test "an absolute node under a static chain follows its parent's laid-out size, not a later measurement", ->
+  pinned = div { position: 'absolute', width: 2, height: 2 }
+  chain = div { position: 'static', flexGrow: 1, justifyContent: 'flex-end' }, [pinned]
+  root = div {}, [div({ position: 'static', width: 50, minHeight: 10 }, [chain])]
+  settled root, 100, 40
+  settled root, 100, 30
+  eq pinned.rect.y, 8
+
+test "edges answers the padding the node was laid out with", ->
+  make = ->
+    padded = div { width: 10, height: 1, paddingLeft: '10%' }
+    root = div { flexDirection: 'row', alignItems: 'flex-start' }, [div({ flexDirection: 'row' }, [div({ width: 30, height: 1 }), padded])]
+    { root, padded }
+  live = make()
+  layout live.root, 100
+  layout live.root, 90
+  fresh = make()
+  layout fresh.root, 90
+  eq edges(live.padded), edges(fresh.padded)
+
+test "an offer of −1 is an offer like any other", ->
+  inner = div { height: 3 }
+  root = div { flexDirection: 'row', alignItems: 'flex-start' }, [div({ width: 1, marginLeft: -2 }, [inner])]
+  settled root, 80
+  inner.set 'height', 6
+  settled root, 80
+  eq root.rect.h, 6
+  words = span 'x'
+  root = div { flexDirection: 'row', alignItems: 'flex-start' }, [div({ width: 5, height: 1 }), div({ width: 0, marginLeft: -1 }, [words])]
+  settled root, 80
+  words.firstChild.data = 'x\ny'
+  settled root, 80
+  eq root.rect.h, 2
+
+test "the cache answers only the very offer it was made for", ->
+  words = span 'hello'
+  root = div {}, [div({}, [div({ flex: 2 }, [div({ paddingTop: '10%', margin: '3%', width: 40 }, [div({}, [words])])])])]
+  settled root, 77, 5
+  settled root, 23, 5
+  root = div {}, [div({ margin: '3%', flexDirection: 'row-reverse' }, [div({ flexWrap: 'wrap' }, [div({}, [div({ minWidth: 3 })]), div({ paddingTop: 1 })])])]
+  settled root, 60
+  settled root, 86
+
+test "a content-box child's percent padding ties its container to the owner's width", ->
+  kid = div { boxSizing: 'content-box', padding: '10%', maxWidth: 20, width: 45, height: 2 }
+  row = div { width: 50, height: 10, flexDirection: 'row' }, [kid, div({ flexGrow: 1, height: 2 })]
+  root = div { alignItems: 'flex-start' }, [row]
+  settled root, 100
+  settled root, 200
+  settled root, 100
+
+test "a style that throws leaves nothing behind: the corrected tree lays out as a fresh one", ->
+  kid = div { width: 10, height: 2 }
+  root = div { alignItems: 'flex-start' }, [kid]
+  settled root, 40
+  kid.styles.width = 20
+  kid.styles.height = 'abc'
+  kid.changed true
+  throws (-> layout root, 40), 'height: "abc" is not a length'
+  delete kid.styles.height
+  kid.changed true
+  settled root, 40
+  eq at(kid), '0,0 20x0'
+
+test "a subtree laid out as a root, then under its parent", ->
+  words = span 'one'
+  part = div {}, [words]
+  root = div {}, [part, div({ height: 2 })]
+  settled root, 40
+  words.firstChild.data = 'one\ntwo\nthree'
+  layout part, 40
+  settled root, 40
+  eq root.rect.h, 5
+
+test "a root that becomes a child, and a child that becomes a root, forget what the root's rules gave them", ->
+  part = div { width: 20, flexGrow: 1, rowGap: '10%' }, [div({ flexGrow: 1, height: 10 }), div({ height: 10 })]
+  settled part, 20
+  settled div({ flexDirection: 'row', alignItems: 'flex-start', width: 20 }, [part]), 20
+  corner = div { position: 'absolute', right: 0, bottom: 0, width: 2, height: 1 }
+  block = div { position: 'static', width: 20, height: 5 }, [corner]
+  settled block, 20
+  eq at(corner), '18,4 2x1'
+  outer = div { width: 40, height: 10, alignItems: 'flex-start' }, [block]
+  settled outer, 40
+  eq at(corner), '38,9 2x1'
+  block.remove()
+  settled block, 20
+  eq at(corner), '18,4 2x1'
+
+test "nodes that make no box hold no stale one", ->
+  ghost = div { display: 'contents' }
+  root = div {}, [div({ height: 3 }), div({ height: 2 }, [ghost])]
+  settled root, 40
+  root.insertBefore ghost, root.firstChild
+  settled root, 40
+  eq at(ghost), '0,0 0x0'
+  moved = div { width: 5, height: 2 }
+  words = span 'hi'
+  root = div {}, [div({ height: 3 }), moved, words]
+  settled root, 40
+  words.appendChild moved
+  settled root, 40
+  eq at(moved), '0,0 0x0'
+  bare = Text.new 'bare'
+  root.appendChild bare
+  settled root, 40
+  words.appendChild bare
+  settled root, 40
+  words.set 'hidden', true
+  settled root, 40
+  words.set 'hidden', false
+  settled root, 40
+  eq at(bare), '0,0 0x0'
+
+test "a comment anchor is cleaned like any node", ->
+  anchor = Node.new 8
+  hidden = Node.new 8
+  root = div {}, [anchor, div({ height: 1 }), div({ hidden: true }, [hidden])]
+  layout root, 10
+  ok not anchor.dirty
+  ok not hidden.dirty
+
+# ==[ Plain trees ]==
+
+console.log "\nPlain trees"
+
+test "a share that lands on a min, a max, or a floor is not frozen short of it", ->
+  shrunk = div { height: 25, minHeight: 11, flexShrink: 1 }
+  layout div({}, [div({ height: 30 }), shrunk]), 100, 41
+  eq shrunk.rect.h, 11
+  grown = div { height: 1, flexGrow: 7, maxHeight: '100%' }
+  layout div({}, [grown]), 100, 30
+  eq grown.rect.h, 30
+  narrow = div { maxWidth: 10, flexGrow: 1 }
+  wide = div { maxWidth: 30, flexGrow: 0.2 }
+  layout div({ flexDirection: 'row' }, [narrow, wide]), 200
+  eq narrow.rect.w, 10
+  eq wide.rect.w, 30
+
+test "a grower frozen at its max keeps it when space is left over", ->
+  capped = div { maxHeight: 60, flex: 1 }
+  layout div({}, [capped]), 40, 100
+  eq capped.rect.h, 60
+
+test "two halves of a fractional width share one line", ->
+  row = div { width: 12, paddingLeft: 0.3, flexDirection: 'row', flexWrap: 'wrap' }, [div({ width: '50%', height: 1 }), div({ width: '50%', height: 1 })]
+  layout row, null
+  eq row.rect.h, 1
+
+test "space-around on a line with no in-flow item divides nothing", ->
+  root = div { justifyContent: 'space-around', minHeight: 5 }, [div({ position: 'absolute', width: 2, height: 1 })]
+  layout root, 80
+  eq at(root), '0,0 80x5'
+  eq at(root.firstChild), '0,2 2x1'
+
+test "a box that is not finite is refused by name", ->
+  leaf = div()
+  leaf.measure = -> { width: Infinity, height: 1 }
+  throws (-> layout div({ alignItems: 'flex-start' }, [leaf]), 20), 'a box that is not finite'
+
+test "an item that wraps to the next line has lent its auto margins to the line it left", ->
+  first = div { width: 30, height: 1 }
+  root = div { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', width: 50 }, [first, div({ width: 30, height: 1, marginLeft: 'auto' })]
+  layout root, null
+  eq first.rect.x, 0
+
+test "a hidden flexible child keeps a lone flexible child from the zero-basis shortcut", ->
+  # Alone, the child is given the whole line and its content is never
+  # measured; Yoga counts the hidden sibling, and measures it.
+  asked = (flexGrow) ->
+    calls = 0
+    lone = div { flexGrow: 1, flexShrink: 1 }
+    lone.measure = ->
+      calls += 1
+      { width: 5, height: 2 }
+    layout div({ height: 10 }, [lone, div({ height: 4 }), div({ flexGrow, hidden: true })]), 20
+    eq lone.rect.h, 6
+    calls
+  eq asked(0), 0
+  ok asked(1) > 0
+
+test "a box whose children are all hidden is still a container, bounded line by line as Yoga bounds it", ->
+  root = div {}, [div({ minWidth: 100, maxWidth: 60 }, [div({ hidden: true })])]
+  layout root, null
+  eq root.rect.w, 60
+  eq root.firstChild.rect.w, 100
+
+# ==[ Styles ]==
+
+console.log "\nStyles"
+
+test "flex: n grows by n from a zero basis; a negative one shrinks", ->
+  a = div { flex: 1 }, [span('tall\ntall\ntall')]
+  b = div { flex: 3 }
+  layout div({ height: 8 }, [a, b]), 20
+  eq "#{a.rect.h} #{b.rect.h}", '2 6'
+  squeezed = div { flex: -1, height: 8 }
+  layout div({ height: 10 }, [div({ height: 6 }), squeezed]), 20
+  eq squeezed.rect.h, 4
+
+test "flexGrow, flexShrink, and flexBasis each outrank flex, whichever is written first", ->
+  for styles in [{ flex: 1, flexGrow: 3 }, { flexGrow: 3, flex: 1 }]
+    a = div styles
+    b = div { flex: 1 }
+    layout div({ height: 8 }, [a, b]), 20
+    eq "#{a.rect.h} #{b.rect.h}", '6 2'
+  a = div { flex: 1, flexBasis: 4 }
+  b = div { flex: 1 }
+  layout div({ height: 10 }, [a, b]), 20
+  eq "#{a.rect.h} #{b.rect.h}", '7 3'
+  a = div { flex: -1, flexShrink: 0, height: 8 }
+  layout div({ height: 10 }, [div({ height: 6 }), a]), 20
+  eq a.rect.h, 8
+
+test "a shorthand yields to its longhands", ->
+  inner = div()
+  outer = div { padding: 1, paddingX: 3, paddingLeft: 5, margin: 2, marginY: 0, marginTop: 4, width: 30, height: 10 }, [inner]
+  layout div({ alignItems: 'flex-start' }, [outer]), 60
+  eq at(outer), '2,4 30x10'
+  eq at(inner), '7,5 22x0'
+  eq edges(outer), [1, 3, 1, 5]
+
+test "a value layout cannot use is refused by name, for the key it was written to", ->
+  refused = [
+    ['flexGrow', 'lots', 'flexGrow: "lots" is not a number']
+    ['flexGrow', -1, 'flexGrow: -1 is not a number']
+    ['flex', '1 1 auto', 'flex: "1 1 auto" is not a number']
+    ['aspectRatio', '2', 'aspectRatio: "2" is not a number']
+    ['alignItems', 'space-between', 'alignItems: "space-between" is not one of flex-start, center, flex-end, stretch, baseline']
+    ['alignContent', 'baseline', 'alignContent: "baseline" is not one of']
+    ['alignSelf', 'space-around', 'alignSelf: "space-around" is not one of auto,']
+    ['padding', 'auto', "padding: \"auto\" is not a length — write a number or 'N%'"]
+    ['gap', 'auto', "gap: \"auto\" is not a length — write a number or 'N%'"]
+    ['minWidth', 'auto', 'minWidth: "auto" is not a length']
+    ['width', '50px%', 'width: "50px%" is not a length']
+    ['width', '1e2%', 'width: "1e2%" is not a length']
+    ['width', -5, 'width: -5 is below zero']
+    ['maxHeight', '-5%', 'maxHeight: "-5%" is below zero']
+    ['width', NaN, 'width: NaN is not a length']
+    ['margin', Infinity, 'margin: Infinity is not a length']
+    ['hidden', 'false', 'hidden: "false" is not true or false']
+    ['display', 'block', 'display: "block" is not one of']
+  ]
+  for [key, value, message] in refused
+    throws (-> admit key, value), message
+    node = div()
+    node.styles[key] = value
+    throws (-> layout div({}, [node]), 20), message
+
+test "a value layout can use is admitted, and so is a key that is not layout's", ->
+  admitted = [['margin', 'auto'], ['marginLeft', -3], ['left', 'auto'], ['width', '50%'], ['width', '12.5%'], ['width', 'auto'],
+    ['flexBasis', 'auto'], ['aspectRatio', 0], ['hidden', true], ['display', 'contents'], ['alignSelf', 'auto'], ['color', 'red'], ['width', undefined]]
+  eq admit(key, value), undefined for [key, value] in admitted
