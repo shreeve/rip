@@ -18,7 +18,6 @@ steps are in [PLAN.md](PLAN.md).
       then both borders — and `insideAxis` sums edge by edge.
       Fractional edges part the two by one rounding, so one sum for
       both moves floats: decide which order stands.
-- [ ] Cite Yoga's functions, not C++ line numbers.
 - [ ] Declare `lay` and `measure` in `Node`'s constructor; take `cols`
       and `rows` at `layout`'s door, as the rest of the package names
       them.

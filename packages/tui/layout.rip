@@ -5,7 +5,8 @@
 # The algorithm follows Yoga's `CalculateLayout.cpp` step by step, with
 # `AbsoluteLayout.cpp`, `FlexLine.cpp`, `Baseline.cpp`, `Cache.cpp` and
 # `PixelGrid.cpp` (MIT, © Meta Platforms, Inc. and affiliates), and
-# targets what Yoga's generated tests encode under its default config.
+# targets what Yoga's generated tests encode under its default config. A
+# name in parentheses is the Yoga function a passage follows.
 # An undefined number is NaN throughout, as it is in Yoga. Sizes and
 # positions stay floats until one pass rounds absolute edges, so
 # neighbors never gap or overlap: three equal shares of 100 come out
@@ -387,8 +388,8 @@ alignOf =! (lay, kid) ->
 
 flexible =! (lay) -> lay.position isnt ABSOLUTE and (lay.grow isnt 0 or lay.shrink isnt 0)
 
-# A value held inside min and max (BoundAxis.h). A negative min or max
-# bounds nothing.
+# A value held inside min and max (boundAxisWithinMinAndMax). A negative
+# min or max bounds nothing.
 boundWithin =! (lay, axis, value, axisSize, widthSize) ->
   return value unless lay.limited
   dim = DIM[axis]
@@ -402,8 +403,9 @@ boundWithin =! (lay, axis, value, axisSize, widthSize) ->
 bound =! (lay, axis, value, axisSize, widthSize) ->
   fmax boundWithin(lay, axis, value, axisSize, widthSize), insideAxis(lay, axis, widthSize)
 
-# An offer held under the child's max size; an unlimited offer with a
-# max becomes an at-most one. Answers in `outMode` and `outSize`.
+# An offer held under the child's max size (constrainMaxSizeForMode); an
+# unlimited offer with a max becomes an at-most one. Answers in `outMode`
+# and `outSize`.
 constrain! =! (lay, axis, axisSize, widthSize, mode, size) ->
   unless lay.limited
     outMode = mode
@@ -425,7 +427,7 @@ constrain! =! (lay, axis, axisSize, widthSize, mode, size) ->
 # this one has written it: a longhand outranks its axis shorthand, which
 # outranks the all-sides one. The intrinsic sizing keywords are sizes
 # Yoga has no layout for: each resolves as undefined, which is how `auto`
-# lays out (StyleSizeLength.h resolve).
+# lays out (StyleSizeLength::resolve).
 put! =! (lay, slot, value, rank, key) ->
   unit = NIL
   number = NaN
@@ -503,8 +505,8 @@ factors! =! (lay, key, value) ->
   scalar lay, SHRINK, (if value < 0 then -value else 0), BROAD
   put lay, BASIS, 0, BROAD, key if value > 0
 
-# A ratio of zero, below zero, or without end is no ratio (Style.h
-# setAspectRatio).
+# A ratio of zero, below zero, or without end is no ratio
+# (Style::setAspectRatio).
 aspect! =! (lay, value) ->
   throw Error.new "rip/tui: aspectRatio: #{JSON.stringify value} is not a number — write width over height, as 2 or 0.5" unless typeof value is 'number' and not isNaN value
   scalar lay, RATIO, (if value > 0 and value isnt Infinity then value else NaN), BROAD
@@ -600,7 +602,7 @@ parse! =! (lay, s, scan) ->
   RANKS.fill 0
   for key, value of s
     style lay, key, value unless value is undefined
-  # A max equal to its min IS the size (Node.cpp processDimensions).
+  # A max equal to its min IS the size (Node::processDimensions).
   for dim in [0...2]
     if lay.u[MAX + dim] isnt NIL and lay.u[MAX + dim] is lay.u[MIN + dim] and near(lay.v[MAX + dim], lay.v[MIN + dim])
       lay.u[SIZE + dim] = lay.u[MAX + dim]
@@ -877,7 +879,8 @@ measureLeaf! =! (node, lay, availW, availH, modeW, modeH, ownerW, ownerH) ->
     tall = flow.h
   measuredAs lay, (if modeW is STRETCH_FIT then availW else wide + insideW), (if modeH is STRETCH_FIT then availH else tall + insideH), ownerW, ownerH
 
-# A box with no children is its padding and border, or what it is given.
+# A box with no children is its padding and border, or what it is given
+# (measureNodeWithoutChildren).
 measureEmpty! =! (lay, availW, availH, modeW, modeH, ownerW, ownerH) ->
   wide = if modeW is STRETCH_FIT then availW else insideLeaf lay, LEFT, RIGHT
   tall = if modeH is STRETCH_FIT then availH else insideLeaf lay, TOP, BOTTOM
@@ -897,13 +900,13 @@ basisOf! =! (lay, f, kid, modeW, modeH) ->
   rowSet = definite k, WIDTH, width
   colSet = definite k, HEIGHT, height
   if not isNaN(written) and not isNaN(mainSize)
-    # The first basis found stands (CalculateLayout.cpp:273): one found
-    # while the main size was still unknown — from content, or from a
-    # definite size — is kept once the size is known, which is what
-    # keeps a `flexBasis: 0` child of a content-sized container as tall
-    # as its content. It stands for one pass: `basisAll` starts every
-    # child over, and a container where the order of asks can matter is
-    # never answered from the cache (see `orderSensitive`).
+    # The first basis found stands, as it does in Yoga: one found while
+    # the main size was still unknown — from content, or from a definite
+    # size — is kept once the size is known, which is what keeps a
+    # `flexBasis: 0` child of a content-sized container as tall as its
+    # content. It stands for one pass: `basisAll` starts every child
+    # over, and a container where the order of asks can matter is never
+    # answered from the cache (see `orderSensitive`).
     k.basis = fmax written, insideAxis(k, f.axis, width) if isNaN k.basis
     return
   if row and rowSet
@@ -996,10 +999,10 @@ basisAll =! (lay, f, modeW, modeH, perform) ->
 # ── Baselines ─────────────────────────────────────────────────────────────────
 
 # The baseline of a node: its first line's baseline child's, down from
-# the node's top, or the node's own bottom (Baseline.cpp). Yoga reads the
-# children's lines and positions whether or not this pass has set them;
-# until it has, they read here as a fresh layout finds them: one line,
-# at the top.
+# the node's top, or the node's own bottom (calculateBaseline). Yoga
+# reads the children's lines and positions whether or not this pass has
+# set them; until it has, they read here as a fresh layout finds them:
+# one line, at the top.
 baselineOf =! (node) ->
   lay = node.lay
   lined = lay.linePass is generation
@@ -1034,8 +1037,8 @@ reach! =! (f, kid, k) ->
 
 # ── Lines ─────────────────────────────────────────────────────────────────────
 
-# Take children from `f.from` until the line is full (FlexLine.cpp). A
-# line is a run of the child list; absolute children ride along unseen.
+# Take children from `f.from` until the line is full (calculateFlexLine).
+# A line is a run of the child list; absolute children ride along unseen.
 breakLine! =! (lay, f, lineAt) ->
   list = lay.kids
   axis = f.axis
@@ -1055,7 +1058,7 @@ breakLine! =! (lay, f, lineAt) ->
       continue
     hypothetical = boundWithin(k, axis, k.basis, f.roomMain, f.innerW) + marginAxis(k, axis, f.innerW) + (if f.items then gap else 0)
     # An item that goes to the next line has already lent this one its
-    # auto margins (FlexLine.cpp counts them before it breaks).
+    # auto margins (calculateFlexLine counts them before it breaks).
     f.autos += 1 if marginAuto k, START[axis]
     f.autos += 1 if marginAuto k, END[axis]
     break if f.wrap and f.items and above f.consumed + hypothetical, f.innerMain
@@ -1072,10 +1075,11 @@ breakLine! =! (lay, f, lineAt) ->
   # shrink total too, which is never above zero.
   f.grow = 1 if f.grow > 0 and f.grow < 1
 
-# First pass of two over a line's free space: find the children whose min
-# or max stops them, and take their clamped sizes out of the space and
-# their factors out of the totals. Each share divides by the running
-# totals, which is Yoga's default config (FlexFirstPassUsesRunningTotals).
+# First pass of two over a line's free space
+# (distributeFreeSpaceFirstPass): find the children whose min or max
+# stops them, and take their clamped sizes out of the space and their
+# factors out of the totals. Each share divides by the running totals,
+# which is Yoga's default config (FlexFirstPassUsesRunningTotals).
 freeze! =! (lay, f) ->
   list = lay.kids
   axis = f.axis
@@ -1101,9 +1105,9 @@ freeze! =! (lay, f) ->
           f.grow -= k.grow
   f.free -= delta
 
-# Second pass: give every child its main size and lay it out, or only
-# measure it when a stretch pass will lay it out after. Answers the space
-# the line handed out.
+# Second pass (distributeFreeSpaceSecondPass): give every child its main
+# size and lay it out, or only measure it when a stretch pass will lay it
+# out after. Answers the space the line handed out.
 distribute =! (lay, f, perform) ->
   list = lay.kids
   axis = f.axis
@@ -1171,7 +1175,7 @@ distribute =! (lay, f, perform) ->
   delta
 
 # Where a child starts before its line moves it: its margin plus its
-# relative offset, on all four edges (Node.cpp setPosition). A static
+# relative offset, on all four edges (Node::setPosition). A static
 # node has no offset; left wins over right and top over bottom.
 seat! =! (lay, ownerW, ownerH) ->
   dx = 0
@@ -1298,7 +1302,7 @@ alignLine! =! (lay, f, leadingCross, containerCross, lineTop) ->
     k.pos[start] += lineTop + lead
 
 # Spread the lines over the cross axis, and set every child against its
-# own line (CalculateLayout.cpp step 8).
+# own line (calculateLayoutImpl, step 8).
 alignLines! =! (lay, f, lines, totalCross, leadingCross, insideCross, ownerCross, ownerW) ->
   list = lay.kids
   axis = f.axis
@@ -1357,7 +1361,7 @@ alignLines! =! (lay, f, lines, totalCross, leadingCross, insideCross, ownerCross
       align = alignOf lay, k
       if align is FLEX_START
         # Yoga adds the child's inset here and not its margin
-        # (CalculateLayout.cpp:2416, computeFlexStartPosition).
+        # (Style::computeFlexStartPosition).
         k.pos[start] = lead + insetAt(k, START[cross], f.innerW)
       else if align is FLEX_END
         k.pos[start] = lead + tall - marginAt(k, END[cross], f.innerW) - k.measured[crossDimension]
@@ -1379,7 +1383,7 @@ alignLines! =! (lay, f, lines, totalCross, leadingCross, insideCross, ownerCross
 # ── The algorithm ─────────────────────────────────────────────────────────────
 
 # A measure-only visit whose size the offer decides — exactly this, or
-# at most nothing — skips the children.
+# at most nothing — skips the children (measureNodeWithFixedSize).
 fixed =! (size, mode) -> mode is STRETCH_FIT or (mode is FIT_CONTENT and (size <= 0 or near size, 0))
 
 measureFixed =! (lay, availW, availH, modeW, modeH, ownerW, ownerH) ->
@@ -1401,7 +1405,7 @@ axes! =! (lay, f, modeW, modeH, ownerW, ownerH) ->
   f.modeCross = if row then modeH else modeW
 
 # Step 2: the space inside one dimension, held within the node's own min
-# and max.
+# and max (calculateAvailableInnerDimension).
 innerSize =! (lay, dim, space, inside, ownerSize, ownerW) ->
   return space if isNaN space
   return fmax space, 0 unless lay.limited
@@ -1503,7 +1507,7 @@ compute! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
   # A child's percent min and max resolve against the space inside THIS
   # node wherever they are read, as its percent size does. Yoga reads
   # them against this node's owner when lines are broken and space is
-  # shared (FlexLine.cpp, mainAxisOwnerSize), and against the space
+  # shared (calculateFlexLine's mainAxisOwnerSize), and against the space
   # inside everywhere else. `innerMain` moves once a line settles a main
   # size that was only a limit; `roomMain` stays.
   f.roomMain = f.innerMain
@@ -1576,8 +1580,9 @@ extent =! (lay, block, dim) ->
 inset0 =! (lay, block, edge) ->
   if lay is block then lay.padding[edge] + lay.border[edge] else insideAt lay, edge, lay.ownerW
 
-# Position an absolute child on one axis: by its insets against the
-# containing block, else where its parent's justify or align puts it.
+# Position an absolute child on one axis (positionAbsoluteChild): by its
+# insets against the containing block, else where its parent's justify or
+# align puts it.
 anchor! =! (block, parent, kid, axis, main, blockW, blockH) ->
   c = block.lay
   q = parent.lay
@@ -1614,7 +1619,8 @@ anchor! =! (block, parent, kid, axis, main, blockW, blockH) ->
     k.pos[start] = near0 + marginAt(k, start, blockW)
 
 # Size an absolute child — from its own size, else from opposing insets,
-# else from its content — lay it out, and position it on both axes.
+# else from its content — lay it out, and position it on both axes
+# (layoutAbsoluteChild).
 absolute! =! (block, parent, kid, blockW, blockH, widthMode) ->
   c = block.lay
   k = kid.lay
@@ -1706,14 +1712,15 @@ answers =! (lay, entry, availW, availH, modeW, modeH, ownerW, ownerH) ->
   entry.live and entry.modeW is modeW and entry.modeH is modeH and same(entry.availW, availW) and same(entry.availH, availH) and sameOwner(lay, entry, ownerW, ownerH)
 
 # Whether one axis of a remembered measurement answers a new offer
-# (Cache.cpp): the same offer; an exact size equal to the answer; an
-# unlimited answer that fits the new limit; or a tighter limit the
-# answer still fits. An answer WIDER than the limit it was given — text
-# whose widest cluster does not fit the offer — says nothing of an exact
-# size equal to it: its height is that of the narrower wrap. Yoga calls two offers the same when they ROUND the
-# same, and sizes equal within a tolerance; here both are exact, because
-# an exact offer is its own answer, and a stale fraction would round a
-# text box differently from the box a fresh layout gives.
+# (canUseCachedMeasurement): the same offer; an exact size equal to the
+# answer; an unlimited answer that fits the new limit; or a tighter limit
+# the answer still fits. An answer WIDER than the limit it was given —
+# text whose widest cluster does not fit the offer — says nothing of an
+# exact size equal to it: its height is that of the narrower wrap. Yoga
+# calls two offers the same when they ROUND the same, and sizes equal
+# within a tolerance; here both are exact, because an exact offer is its
+# own answer, and a stale fraction would round a text box differently
+# from the box a fresh layout gives.
 fits =! (mode, size, offered, lastMode, lastOffered, answer) ->
   return true if lastMode is mode and same(lastOffered, offered)
   return true if mode is STRETCH_FIT and size is answer and (lastMode isnt FIT_CONTENT or answer <= lastOffered)
@@ -1852,9 +1859,9 @@ visit! =! (node, availW, availH, modeW, modeH, ownerW, ownerH, perform) ->
 
 # ── Rounding ──────────────────────────────────────────────────────────────────
 
-# A float snapped to the cell grid (PixelGrid.cpp): to the nearest cell,
-# or always up or always down when forced; a value within tolerance of a
-# cell is that cell either way.
+# A float snapped to the cell grid (roundValueToPixelGrid): to the
+# nearest cell, or always up or always down when forced; a value within
+# tolerance of a cell is that cell either way.
 snap =! (value, up, down) ->
   part = value % 1
   part += 1 if part < 0
@@ -1881,7 +1888,8 @@ ghosts! =! (node, x, y) ->
         ghosts kid, x, y
     kid = kid.nextSibling
 
-# Round every box from its absolute float edges and hand it to the node.
+# Round every box from its absolute float edges and hand it to the node
+# (roundLayoutResultsToPixelGrid).
 # Text never rounds smaller: its corner rounds down and a fractional
 # size rounds up. And text sits where its offset rounds down to from its
 # parent's rounded corner (`cornerX`, `cornerY`), as Yoga places it: its
