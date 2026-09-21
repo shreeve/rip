@@ -187,8 +187,11 @@ export class Node
     @ownerDocument?.damage.old node, level is 3 or not s or node.tagName is 'span'
     return if still
     node.stain = level if level > node.stain
+    # A stained box's ancestors are stained already, so the climb stops
+    # at the first one — but passes a `contents` node, which no survey
+    # visits: its stain says nothing of the boxes above it.
     node = node.parentNode
-    while node
+    while node and (not node.stain or node.styles?.display is 'contents')
       node.stain ||= 1
       node = node.parentNode
 

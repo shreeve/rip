@@ -1646,6 +1646,28 @@ test "a contents node's color reaches the children it lends, and owes their cell
     eq draw(), 4
     eq view.ansi.split('\n')[1].trimEnd(), "\x1b[32mlent\x1b[0m"
 
+test "words that grow under a contents node, or under a box while it is hidden, are surveyed", ->
+  Nested = component
+    @word := 'lent'
+    @shut := false
+    render
+      Box flexDirection: 'column', height: 3, alignItems: 'flex-start'
+        Box display: 'contents'
+          Box hidden: @shut
+            Text
+              "#{@word}"
+  owing Nested, (app, draw, view) ->
+    draw()
+    app.word.value = 'lent and longer'
+    eq draw(), 15
+    app.shut.value = true
+    eq draw(), 15
+    app.word.value = 'lent, longer, and shown'
+    eq draw(), 0
+    app.shut.value = false
+    eq draw(), 23
+    eq view.frame().trimEnd(), 'lent, longer, and shown'
+
 test "a sweep between frames leaves the next frame an ordinary one", ->
   Lit = component
     @tint := 0
