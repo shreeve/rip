@@ -10,6 +10,18 @@ contract, and a red-team critique) over the Ink 7.1.1 and Yoga source
 checkouts. Where the reviews disagreed with the first sketch, the
 review won; those points are marked **Decided**.
 
+## Sources
+
+Everything here is built from public, permissively licensed sources:
+Ink (MIT) and Yoga (MIT), the xterm control-sequence reference, the
+kitty keyboard protocol documentation, and the terminal emulators'
+own published behavior. No reconstructed, leaked, or otherwise
+proprietary source — including any recovered internal fork of Ink —
+is read as a reference for any part of this package, at any time.
+Feature lists and well-known terminal techniques are fair to discuss;
+that code is not fair to read. The package stays clean and
+publishable.
+
 ## 1. Thesis
 
 Ink is React driving a fake DOM, Yoga (C++ compiled to WebAssembly)
@@ -359,7 +371,9 @@ the non-TTY final frame.
 
 **Events replace hooks.** A key goes to `focus.active ?? root`,
 bubbles to `document`, and honors `stopPropagation` and
-`preventDefault`. Tab / Shift-Tab (focus), Ctrl-C (exit), and Ctrl-Z
+`preventDefault`. A listener may ask for the capture phase, which runs
+root to target before the bubble, so a dialog takes a key before the
+node under it does. Tab / Shift-Tab (focus), Ctrl-C (exit), and Ctrl-Z
 (suspend) are default actions that run only when not prevented. In
 Ink every `useInput` handler receives every key and gates itself with
 an `isActive` flag, and a text input cannot keep Tab.
@@ -588,15 +602,17 @@ What this settles:
 
 Each step is its own branch and PR under the repo's landing rules.
 
-| PR | Contents | Exit |
+| Step | Contents | Exit |
 |---|---|---|
-| 0 | Bench harness, Ink baselines, a profile of where Ink spends a frame (`bench/`) | The baseline and the frame profile are recorded in §11 |
-| 1 | Walking skeleton: scoped `document`, row / column + grow + padding + border layout, grid paint with diff, `renderToString`, counter and two-pane examples | Keyed `for`, `if` / `else`, fragments, rest-prop styles, and `ref:` metrics all work end to end |
-| 2 | Full layout engine, cache, dirty boundaries, vendored Yoga suite | All 543 generated cases and the 37 aspect ratio cases pass; an incremental layout equals a fresh one under fuzz |
-| 3 | Text, width, wrap / truncate, clipping, content offset, borders, backgrounds | Ported Ink paint cases pass |
-| 4 | Input, focus, cursor, mouse, enhanced keyboard | Ported parser cases pass; select-list, text-input, and wheel-scrolled list examples |
-| 5 | Lifecycle, inline `Static`, non-TTY, console capture, resize, animation clock | Crash, signal, and suspend restore the terminal under test |
-| 6 | Four Ink examples side by side (counter, borders, use-focus, static), README, published bench | Every README number reproduces with `bun run bench` |
+| 1 | Layout soundness: an incremental layout equals a fresh one, one float tolerance, values refused where they are written (TODO §1–§2) | The reviewers' fuzzers and the differential against compiled Yoga find nothing new; every seeded bug is caught |
+| 2 | Text and the painter: wrap / truncate, grapheme clusters, `overflow: 'hidden'` clipping, per-edge borders, background fills, content offset | Ported Ink paint cases pass |
+| 3 | Damage tracking: paint and diff only what moved (§6) | A small update's paint and diff fall with the damage, measured in `bench/` |
+| 4 | Input, focus, cursor, capture and bubble phases; then mouse and the enhanced keyboard as opt-ins; then text selection with clipboard copy (OSC 52), since mouse capture takes the terminal's own selection away | Ported parser cases pass; select-list, text-input, and wheel-scrolled list examples |
+| 5 | Lifecycle, inline `Static`, non-TTY, console capture, resize, animation clock, progress reporting (OSC 9;4) | Crash, signal, and suspend restore the terminal under test |
+| 6 | Four Ink examples side by side (counter, borders, use-focus, static), README, published bench with a terminal reducer proving both sides drew the same screen | Every README number reproduces with `bun run bench` |
+
+Hardware scroll regions (DECSTBM) are a bench experiment for long
+scrolling views, never a commitment.
 
 **Decided — the skeleton precedes the full layout engine.** Layout is
 the most mechanical part (a reference exists); the component model in
