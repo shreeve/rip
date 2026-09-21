@@ -6,6 +6,48 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 1. Wrong or silent
 
+An incremental layout must equal a fresh one. Ten ways it does not,
+each with a runnable repro from the cache review (the scripts and a
+wider fuzz generator are kept with the review):
+
+- [ ] **A relayout with no change moves boxes.** A baseline row reads
+      `measured` of a node not yet visited this pass: NaN on a fresh
+      tree, last pass's value on a relayout. `lineAt` and `pos` are
+      guarded by pass stamps; `measured` is not.
+- [ ] **Changes inside a hidden or `display: contents` subtree are lost
+      when it shows again.** `vanish`, `scrub`, and the contents arm of
+      `gather` clear `dirty` without syncing, so stale records pass
+      `sync`'s early return. A text that grows while its panel is
+      hidden keeps its old height.
+- [ ] **A cached layout leaves `measured` holding a measure-only
+      answer,** and `pin` reads it: an absolute node under a static
+      chain lands at y = −2 where a fresh layout gives 8 after the root
+      shrinks. `edges()` goes stale the same way through `lay.padding`.
+- [ ] **The cache's reset marker −1 is a real offer:** a box with
+      `marginLeft: -1` comes out −1 wide, and its text stays dirty.
+- [ ] **The cache key is tolerant where the algorithm is exact.** An
+      offer of 0.9999999999999996 hits an entry made for 1, but the
+      line break compared exactly; `fixed` has the same mismatch at
+      zero. One rule for both sides.
+- [ ] `leansOnOwner` misses a content-box child whose percent padding
+      resolves against the owner's width.
+- [ ] **A style that throws leaves the record half-written:** `parse`
+      overwrites `lay.v` before the throw, so the corrected style looks
+      unchanged and the old layout stands.
+- [ ] A subtree laid out as a root and then under a parent (or the
+      reverse) keeps answers the root special cases made; the cache key
+      does not know which it was.
+- [ ] Boxless nodes keep stale boxes: an empty `display: contents` node
+      moved to a new parent, a box or text moved into a span, a text
+      in a span hidden and shown. Comment nodes are created dirty and
+      never cleaned.
+- [ ] `insertBefore(x, x)` makes a node its own sibling and layout
+      hangs — refuse it.
+- [ ] The fuzz changes the height as well as the width, moves subtrees,
+      reorders siblings, replaces text nodes, hides then mutates then
+      shows, sets a style to the value it has, checks text nodes and
+      not only elements, and carries wrapping measure functions.
+
 - [ ] **`justifyContent: 'space-around'` on a line with no in-flow
       item divides by zero** and turns the whole tree's boxes to
       Infinity or NaN (`layout root, 80` with `{justifyContent:
@@ -62,8 +104,10 @@ steps are in [PLAN.md](PLAN.md).
       fixed width.
 - [ ] PLAN: "about four measure entries" (eight); "one recursive
       `layout(node, …)`" (`visit` and `compute!`); "dirty propagation
-      stops at a boundary" (it climbs to the root — say what the engine
-      really skips); the MIT notice does not ship in `files`; three
+      stops at a boundary" — it climbs to the root and every ancestor
+      recomputes (a chain of 14 definite-size boxes recomputes all 14;
+      a changed text in a flat column of 2,000 costs 6,001 visits).
+      Say what the engine really skips, or build the boundary; the MIT notice does not ship in `files`; three
       passages describe a `direction` argument that does not exist.
 
 ## 2. Tests the seeded bugs slipped past
