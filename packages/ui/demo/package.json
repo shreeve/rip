@@ -1,4 +1,6 @@
 {
   "name": "rip-ui-demo",
-  "rip": { "strict": true }
+  "rip": {
+    "strict": true
+  }
 }
