@@ -127,6 +127,8 @@ test "hostile text is read once, not once per introducer: eight times the text c
   # A quadratic reader takes 64 times as long for 8 times the text; a
   # linear one about 8. The bound sits between, and each size takes its
   # best of five, so a busy machine moves both numbers and not the ratio.
+  # A machine busy enough to stall one size alone gets two more tries: a
+  # quadratic reader is over the bound every time.
   best = (text) ->
     least = Infinity
     for round in [0...5]
@@ -135,8 +137,10 @@ test "hostile text is read once, not once per introducer: eight times the text c
       least = Math.min least, performance.now() - began
     least
   for unit in [at(0x9D), ESC + ']', ESC + '[1', ESC, ESC + 'a' + at(0x85)]
-    small = best unit.repeat(40000)
-    large = best unit.repeat(320000)
+    for attempt in [0...3]
+      small = best unit.repeat(40000)
+      large = best unit.repeat(320000)
+      break if large < 24 * Math.max(small, 0.05)
     ok large < 24 * Math.max(small, 0.05), "#{JSON.stringify unit} × 40,000 took #{small.toFixed 2} ms and × 320,000 took #{large.toFixed 2} ms"
 
 test "text that is not ASCII keeps every code point it came with", ->
