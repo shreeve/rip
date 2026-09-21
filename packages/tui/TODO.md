@@ -60,11 +60,6 @@ steps are in [PLAN.md](PLAN.md).
       `backgroundColor: ''`). `'default'` for both `color` and
       `backgroundColor`; then the pinned Ink case in
       `test/ink/background.rip` follows Ink.
-- [ ] **A test driver for updates.** `renderToString` mounts fresh on
-      every call, so 45 of Ink's cases — a mounted tree re-rendered with
-      new props — have no way to run. A public driver that mounts once,
-      hands back the app, and draws frames on demand (PLAN §10); then
-      port those cases.
 - [ ] The style tables never evict, and a cell holds a style id in
       sixteen bits: an app that animates `'#rrggbb'` colors reaches the
       limit and is refused. Reclaim ids no cell uses.

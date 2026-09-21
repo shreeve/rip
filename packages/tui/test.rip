@@ -3,7 +3,7 @@
 # ==============================================================================
 
 import { test, eq, ok, throws } from 'rip/testing'
-import { run, quit, renderToString, screen, Box, Text, Spacer } from 'rip/tui'
+import { run, quit, mount, renderToString, screen, Box, Text, Spacer } from 'rip/tui'
 import * as mod from 'rip/tui'
 import { install } from './document.rip'
 import { layout } from './layout.rip'
@@ -118,30 +118,24 @@ def words(doc, styles, text, inner = null)
 
 tick = -> Promise.new (resolve) -> setTimeout resolve, 20
 
-# Mount `App` on a fresh document, hand `body(app, show, doc)` the
-# instance and a way to draw it, and always give the document back.
+# Mount `App`, hand `body(app, show, doc, view)` the instance, a way to
+# draw it at a width, its document, and the mount, and always close it.
 def mounted(App, body)
-  { doc, restore } = install()
+  view = mount App, cols: 20
   try
-    app = App.new({})
-    app.mount doc.body
     show = (cols = 20) ->
-      doc.moved = doc.stale = false
-      { h } = layout doc.body, cols
-      grid = Grid.new cols, Math.max(h, 1)
-      paint grid, doc.body
-      grid.toString()
-    body app, show, doc
-    app.unmount()
+      view.resize cols
+      view.frame()
+    body view.app, show, document, view
   finally
-    restore()
+    view.close()
 
 # ==[ Package surface ]==
 
 console.log "\nPackage"
 
 test "module exports the entry surface and nothing else", ->
-  eq Object.keys(mod).sort(), ['Box', 'Spacer', 'Text', 'quit', 'renderToString', 'run', 'screen']
+  eq Object.keys(mod).sort(), ['Box', 'Spacer', 'Text', 'mount', 'quit', 'renderToString', 'run', 'screen']
 
 test "declares no dependencies", ->
   pkg = JSON.parse readFileSync(join(import.meta.dir, 'package.json'), 'utf8')
@@ -326,6 +320,20 @@ test "a style object takes the same road as props", ->
       Box style: { borderStyle: 'single', width: 6 }
         Text "hi"
   eq renderToString(Styled, cols: 10), "┌────┐\n│hi  │\n└────┘"
+
+test "a style object taken away takes its keys with it, and leaves the props", ->
+  Dressed = component
+    @look := { borderStyle: 'single', paddingLeft: 1 }
+    render
+      div width: 6, style: @look
+        span "hi"
+  mounted Dressed, (app, show) ->
+    eq show(), "┌────┐\n│ hi │\n└────┘"
+    app.look.value = { borderStyle: 'single' }
+    eq show(), "┌────┐\n│hi  │\n└────┘"
+    app.look.value = undefined
+    eq show(), "hi"
+    eq document.body.firstChild.styles, { width: 6 }
 
 # ==[ Layout ]==
 
@@ -868,11 +876,9 @@ test "no background is held across a line feed, so a row scrolled in at the bott
           Text "row 1"
         Box backgroundColor: 'blue', height: 1
           Text "row 2"
-  mounted Bars, (app, show, doc) ->
-    { h } = layout doc.body, 24
-    grid = Grid.new 24, h
-    paint grid, doc.body
-    bytes = diff null, grid
+  mounted Bars, (app, show, doc, view) ->
+    show 24
+    { bytes } = view
     held = null
     at = 0
     feeds = 0
@@ -1008,3 +1014,117 @@ test! "a running app redraws only the cells that changed, and quit gives the pro
   quit 'bye'
   eq await running.done, 'bye'
   eq typeof document, 'undefined'
+
+# ==[ The test driver ]==
+
+console.log "\nMount"
+
+Tally =! component
+  @count := 0
+  @tint := undefined
+  render
+    Box borderStyle: 'single', width: 14
+      Text color: @tint
+        "count #{@count}"
+
+test "a mount draws when asked: state set through `app` is in the next frame, plain and styled", ->
+  view = mount Tally, cols: 30, props: { count: 3 }
+  try
+    eq view.ansi, '', 'nothing is drawn before the first frame'
+    eq view.frame(), "┌────────────┐\n│count 3     │\n└────────────┘"
+    view.app.count.value = 7
+    view.app.tint.value = 'green'
+    eq view.frame().split('\n')[1], "│count 7     │"
+    eq view.ansi.split('\n')[1].trimEnd(), "│\x1b[32mcount 7\x1b[0m     │"
+  finally
+    view.close()
+
+test "bytes are what a terminal was sent: each frame's difference from the one before", ->
+  view = mount Tally, cols: 30, rows: 8
+  try
+    sent = []
+    first = view.frame()
+    sent.push view.bytes
+    ok view.bytes.startsWith("\x1b[?2026h\x1b[J") and view.bytes.endsWith("\x1b[?2026l"), JSON.stringify view.bytes
+    eq replay(sent, 30, 8), first
+    view.app.count.value = 7
+    second = view.frame()
+    sent.push view.bytes
+    ok view.bytes.includes('7') and not view.bytes.includes('count'), "the update rewrote more than the changed cell: #{JSON.stringify view.bytes}"
+    eq replay(sent, 30, 8), second
+    view.app.count.value = 7
+    view.frame()
+    eq view.bytes, '', 'a frame that changes no cell sends nothing'
+  finally
+    view.close()
+
+test "a mount's terminal has a size: a tall frame shows its bottom, and a resize draws the next frame whole", ->
+  Sized = component
+    render
+      Box flexDirection: 'column'
+        Text "#{screen.cols} wide"
+        Text "two"
+        Text "three"
+  view = mount Sized, cols: 30, rows: 2
+  try
+    eq view.frame(), "two\nthree"
+    view.resize 30, 3
+    eq view.frame(), "30 wide\ntwo\nthree"
+    ok view.bytes.includes("\x1b[J") and view.bytes.includes('two'), 'a taller terminal is drawn whole, the rows it showed included'
+    view.resize 9
+    eq view.frame(), "9 wide\ntwo\nthree"
+    eq [screen.cols, screen.rows], [9, 3]
+  finally
+    view.close()
+
+test "one app is mounted at a time: a second is refused by name, and close gives the process back", ->
+  held = { Node: globalThis.Node, SVGElement: globalThis.SVGElement }
+  view = mount Tally
+  ok document? and globalThis.Node isnt held.Node, 'the globals stand for the life of the mount'
+  throws (-> mount Tally), 'an app is already mounted in this process'
+  throws (-> renderToString Tally), 'an app is already mounted in this process'
+  throws (-> run Tally, stdout: terminal()), 'an app is already mounted in this process'
+  eq view.frame().split('\n')[1], "│count 0     │", 'a refusal leaves the mount as it was'
+  view.close()
+  view.close()
+  eq typeof document, 'undefined'
+  ok globalThis.Node is held.Node and globalThis.SVGElement is held.SVGElement
+  throws (-> view.frame()), 'this mount is closed'
+  mount(Tally).close()
+
+test "a mount that fails to construct gives the process back", ->
+  Bad = component
+    render
+      Box justifyContent: 'centre'
+  throws (-> mount Bad), '"centre" is not one of'
+  eq typeof document, 'undefined'
+  mount(Tally).close()
+
+test "a frame that fails later throws from `frame`, to the test that asked for it", ->
+  Restless = component
+    @grows := false
+    el := null
+    render
+      Box flexDirection: 'row'
+        div ref: el, width: (if @grows then (el?.box.w ?? 0) + 1 else 5)
+  view = mount Restless
+  try
+    view.frame()
+    view.app.grows.value = true
+    throws (-> view.frame()), 'layout did not settle'
+  finally
+    view.close()
+  eq typeof document, 'undefined'
+
+test! "a quit from a mounted app closes the mount and resolves done", ->
+  Leaver = component
+    @over := false
+    ~> quit 'left' if @over
+    render
+      Text "here"
+  view = mount Leaver
+  eq view.frame(), "here"
+  view.app.over.value = true
+  eq await view.done, 'left'
+  eq typeof document, 'undefined'
+  throws (-> view.frame()), 'this mount is closed'

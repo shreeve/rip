@@ -12,10 +12,11 @@
 
 ## What runs
 
-`rip test/ink.rip` runs 434 tests: 423 ported cases and 11 self-tests of
+`rip test/ink.rip` runs 487 tests: 476 ported cases and 11 self-tests of
 `cells.rip` (`cells-check.rip`). Of the ported cases:
 
-- 406 hold the frame to Ink's, row for row;
+- 459 hold the frame to Ink's, row for row — 53 of them Ink's
+  `rerender` cases, which hold every frame of a mounted tree;
 - 16 are **stated differences**, pinned through `differs` in
   `harness.rip`: the frame must equal this package's stated frame and
   must not equal Ink's, with the decision in a sentence, so a pin the
@@ -43,6 +44,19 @@ expectation, so each case is exact on the frame's height, as Ink's
 it cannot show, and trailing default-style spaces are trimmed. Nothing
 else is trimmed.
 
+Ink's `rerender` cases — a tree drawn, given other props while it stays
+mounted, and drawn again — run through `mounted` in `harness.rip`, over
+the package's `mount` driver. A prop Ink's test component takes is a
+public state of the ported component, a `rerender` is a write to it,
+and every frame is read as `plain` or `styled` and held to Ink's. Two
+rules more are held for every such frame, whatever the case asserts:
+the bytes the terminal was sent for it, replayed over the frame before,
+show that frame; and a fresh mount with the same props draws the same
+frame, which is the rule Ink's `style-update-consistency.tsx` states.
+The rerender cases of the files in the table below are in `update.rip`,
+each under the name of its Ink file; `style-update-consistency` and
+`reconciler` have files of their own.
+
 ## Where an expected frame comes from
 
 Published Ink 7.1.1, installed under `packages/tui/bench`, is the
@@ -60,12 +74,17 @@ comment at the literal says which when it is not the first:
    `contentOffsetY` case (`content-offset`, `clip-wide-background`, part
    of `rendering-regressions`), the combining-mark and wide-character
    overlap fixes, tab expansion, per-line truncation, zero-width boxes,
-   `absolute-truncation` (published Ink throws on it), and four cases
-   Ink itself marks `test.failing`, which state the frame Ink's authors
-   want and no build of Ink draws (three are pinned as stated
-   differences; `width-height`'s "set min width in percent" holds to
-   the frame Ink asks for, since a percent min resolves here against
-   the box it is in).
+   `absolute-truncation` (published Ink throws on it), the rerender
+   cases in which a prop taken away gives way to another or to the
+   default (`removing marginLeft restores marginX` and its kin in
+   `padding` and `gap`, `display`, `flexDirection`, `flexWrap`, the
+   wrap mode of `wrap-text`, and the first of
+   `style-update-consistency`), where published Ink keeps the layout
+   of the prop it lost, and four cases Ink itself marks `test.failing`,
+   which state the frame Ink's authors want and no build of Ink draws
+   (three are pinned as stated differences; `width-height`'s "set min
+   width in percent" holds to the frame Ink asks for, since a percent
+   min resolves here against the box it is in).
 3. **The frame published Ink drew, where Ink's test checks only part
    of it** (it looks for an escape code, or counts rows). The comment
    says so.
@@ -88,7 +107,9 @@ comment at the literal says which when it is not the first:
 
 `wrap-text.tsx` calls Ink's `wrapText` function and cannot load against
 the published build, so `oracle/extra/wrap-text.tsx` asks the same
-questions through components and `wrap-text.rip` ports that. Its
+questions through components and `wrap-text.rip` ports that; the one
+case of that file that draws a tree of its own, a rerender, is asked
+through Ink's synchronous `render` and ported in `update.rip`. Its
 "keeps styles that span a newline" case holds a color and then a
 hyperlink to the rule in Ink's file; the color is ported, as a `color`
 prop, and the hyperlink half is not ported: hyperlinks are not built.
@@ -119,84 +140,56 @@ offsets fall back to zero.
 
 | Ink test file | cases | ported | left out |
 |---|---:|---:|---:|
-| `components` | 93 | 27 | 66 |
-| `text` | 57 | 46 | 11 |
-| `wrap-text` | 17 | 11 | 6 |
+| `components` | 93 | 30 | 63 |
+| `text` | 57 | 49 | 8 |
+| `wrap-text` | 17 | 12 | 5 |
 | `text-width` | 18 | 18 | 0 |
 | `truncate-width` | 9 | 9 | 0 |
 | `absolute-truncation` | 4 | 4 | 0 |
 | `styled-combining-marks` | 9 | 9 | 0 |
-| `borders` | 52 | 46 | 6 |
+| `borders` | 52 | 48 | 4 |
 | `border-backgrounds` | 5 | 5 | 0 |
-| `background` | 32 | 24 | 8 |
+| `background` | 32 | 25 | 7 |
 | `overflow` | 44 | 39 | 5 |
 | `content-offset` | 23 | 23 | 0 |
 | `clip-wide-background` | 10 | 10 | 0 |
 | `overlap-wide-background` | 7 | 7 | 0 |
 | `rendering-regressions` | 2 | 2 | 0 |
-| `width-height` | 29 | 24 | 5 |
-| `position` | 13 | 8 | 5 |
-| `display` | 6 | 2 | 4 |
-| `margin` | 15 | 12 | 3 |
-| `padding` | 16 | 12 | 4 |
-| `gap` | 8 | 3 | 5 |
+| `width-height` | 29 | 27 | 2 |
+| `position` | 13 | 12 | 1 |
+| `display` | 6 | 4 | 2 |
+| `margin` | 15 | 13 | 2 |
+| `padding` | 16 | 14 | 2 |
+| `gap` | 8 | 5 | 3 |
 | `flex` | 8 | 8 | 0 |
-| `flex-direction` | 10 | 6 | 4 |
-| `flex-wrap` | 8 | 6 | 2 |
-| `flex-align-content` | 13 | 9 | 4 |
+| `flex-direction` | 10 | 7 | 3 |
+| `flex-wrap` | 8 | 8 | 0 |
+| `flex-align-content` | 13 | 12 | 1 |
 | `flex-align-items` | 9 | 9 | 0 |
 | `flex-align-self` | 9 | 9 | 0 |
 | `flex-justify-content` | 12 | 12 | 0 |
 | `render-to-string` | 37 | 23 | 14 |
-| **total** | **575** | **423** | **152** |
+| `style-update-consistency` | 15 | 15 | 0 |
+| `reconciler` | 12 | 8 | 4 |
+| **total** | **602** | **476** | **126** |
 
 A case counts once per title Ink registers, loops included. Files
 finished by hand after the draft: `absolute-truncation` (written by
 hand), `content-offset`, `overflow`, `render-to-string`,
 `styled-combining-marks`, `text-width`, `wrap-text`, the comments in
 `clip-wide-background` and `rendering-regressions`, and every `differs`
-pin that stands where the draft has an `eq`.
+pin that stands where the draft has an `eq`. The rerender files —
+`update`, `style-update-consistency`, `reconciler` — are written by
+hand from the oracle's record: the draft draws one component per frame,
+and a rerender is one component drawn again.
 
 ## Cases left out
 
-**A rerender of a mounted tree, and nothing else: an update driver that keeps a tree mounted can take these** (33)
+**A rerender of a mounted tree that is out of scope for another reason** (15)
 
-- `borders`: render border after update
-- `borders`: render border edge changes after update when borderStyle is unchanged
-- `background`: Box background updates on rerender
-- `text`: text with empty-to-nonempty sibling does not wrap
-- `text`: remeasure text when text is changed
-- `text`: remeasure text when text nodes are changed
-- `width-height`: clears maxWidth on rerender
-- `width-height`: clears maxHeight on rerender
-- `width-height`: clears aspectRatio on rerender
-- `position`: clears top offset on rerender
-- `position`: clears percentage top and left offsets on rerender
-- `position`: clears percentage top and left offsets when props are omitted on rerender
-- `position`: clears bottom and right offsets on rerender
-- `display`: removing display="none" restores the default layout
-- `display`: removing display="flex" restores the default layout
-- `margin`: removing marginLeft restores marginX on rerender
-- `padding`: removing paddingLeft restores paddingX on rerender
-- `padding`: removing paddingX restores padding on rerender
-- `gap`: removing columnGap restores gap on rerender
-- `gap`: removing rowGap restores gap on rerender
-- `flex-direction`: setting direction to undefined restores the default row layout
-- `flex-wrap`: setting wrap to undefined restores nowrap
-- `flex-wrap`: setting wrap-reverse to undefined restores nowrap
-- `flex-align-content`: clears alignContent on rerender to default flex-start
-- `flex-align-content`: clears alignContent from stretch on rerender to default flex-start
-- `flex-align-content`: clears alignContent when prop is omitted on rerender
-- `components`: remeasure text dimensions on text change
-- `components`: static output stops accumulating after Static unmounts (#904)
-- `components`: separate Ink instances do not clobber each other’s staticNode
-- `components`: unmounting a <Static> ancestor in concurrent mode does not crash
-- `components`: replace child node with text
-- `components`: reset prop when it’s removed from the element
-- `wrap-text`: changing text wrapping recalculates the container height
-
-**A rerender of a mounted tree that is also out of scope for another reason** (12)
-
+- `components`: static output stops accumulating after Static unmounts (#904) — `<Static>`
+- `components`: separate Ink instances do not clobber each other’s staticNode — `<Static>`
+- `components`: unmounting a <Static> ancestor in concurrent mode does not crash — `<Static>`
 - `background`: Box preserves child state when adding a background color — a component with hooks
 - `background`: Box preserves child state when removing a background color — a component with hooks
 - `components`: static padding is not emitted again when there are no new items — `<Static>`
@@ -210,19 +203,14 @@ pin that stands where the draft has an `eq`.
 - `components`: remounting <Static> via key change emits the new items (root-level — removeChildFromContainer) — `<Static>`
 - `components`: render only new items in static output on final render — `<Static>`
 
-**Concurrent rendering: the `- concurrent` twin of a case that is ported** (38)
+**Concurrent rendering: the `- concurrent` twin of a case that is ported** (43)
 
-`borders` 3, `background` 3, `overflow` 4, `text` 6, `width-height` 2, `position` 1, `display` 2, `margin` 2, `padding` 2, `gap` 3, `flex-direction` 2, `flex-align-content` 1, `components` 7
+`borders` 4, `background` 4, `overflow` 4, `text` 8, `width-height` 2, `position` 1, `display` 2, `margin` 2, `padding` 2, `gap` 3, `flex-direction` 2, `flex-align-content` 1, `components` 8
 
-**Concurrent rendering, of a case that is itself left out** (7)
+**Concurrent rendering, of a case that is itself left out** (2)
 
-- `borders`: render border after update - concurrent — a rerender of a mounted tree
-- `background`: Box background updates on rerender - concurrent — a rerender of a mounted tree
-- `text`: remeasure text when text is changed - concurrent — a rerender of a mounted tree
-- `text`: remeasure text when text nodes are changed - concurrent — a rerender of a mounted tree
 - `components`: transform children - concurrent — `<Transform>`
 - `components`: static output - concurrent — `<Static>`
-- `components`: remeasure text dimensions on text change - concurrent — a rerender of a mounted tree
 
 **`<Static>`** (7)
 
@@ -251,6 +239,13 @@ pin that stands where the draft has an `eq`.
 
 - `wrap-text`: truncated multi-line text keeps a C1 OSC hyperlink that spans a newline
 - `components`: link ansi escapes are closed properly
+
+**Suspense** (4)
+
+- `reconciler`: Suspense hides nested text while showing its fallback
+- `reconciler`: resuming Suspense preserves display none
+- `reconciler`: support suspense
+- `reconciler`: support suspense with concurrent mode
 
 **Screen-reader output** (1)
 
@@ -322,7 +317,7 @@ pin that stands where the draft has an `eq`.
 - **The app lifecycle, the terminal, and log-update internals:** `alternate-screen-example`, `clear-rerender`, `exit`, `exit-keyboard`, `log-update`, `log-update-blank-growth`, `render`, `render-callback`, `suspend-terminal`, `suspension-exit`, `suspension-handle`, `suspension-input-disable`, `suspension-output`, `suspension-resize`, `terminal-resize`, `write-synchronized`.
 - **Escape and control sequences embedded in text:** `ansi-newlines`, `ansi-tokenizer`, `c1-rendering`, `colon-colors`, `sanitize-ansi`, `text-controls`.
 - **`<Static>` and `<Transform>`:** `component-regressions`, `issue-973-static-commit`, `squash-text-nodes`, `static-abandoned-render`, `static-blank-lines`, `static-runtime-blank-lines`, `static-string-replacement`, `static-trailing-layout`.
-- **Error boundaries, Suspense, the reconciler, and rerenders:** `error-overview`, `errors`, `reconciler`, `style-update-consistency`, `styles`.
+- **Error boundaries and Ink's style table:** `error-overview`, `errors`, `styles`.
 - **measureElement, useBoxMetrics, and Ink's `measureText` function:** `measure-element`, `measure-text`, `use-box-metrics`.
 - **Screen-reader output:** `screen-reader`.
 - **Ink's own build, color parser, and tooling:** `build-output`, `colorize`, `is-devtools-reachable`.

@@ -179,6 +179,7 @@ export class Element extends Node
     @attributes = null
     @listeners = null
     @road = null
+    @styled = null
 
   # A style that is refused is refused by name, and the error says which
   # node it was written on.
@@ -224,7 +225,14 @@ export class Element extends Node
     # string clears it, as it does on the style road.
     @set key, (if value is '' and PRESENT.has(key) then true else value)
 
-  removeAttribute!: (key) -> @set key, undefined unless key is 'style'
+  # A `style:` object taken away takes every key it wrote with it.
+  removeAttribute!: (key) ->
+    if key is 'style'
+      @set name, undefined for name in [...(@styled ?? [])]
+      @styled = null
+    else
+      @set key, undefined
+
   toggleAttribute!: (key, force) -> @set key, (if force then true else if STANDING.has(key) then false else undefined)
   getAttribute: (key) -> @attributes?.get(key) ?? @styles[key] ?? null
 
@@ -251,13 +259,15 @@ export class Element extends Node
 
 # The object behind `el.style`: every key written to it goes through the
 # node's own `set`, so a key that is no terminal style is refused by
-# name on this road as on the other. The runtime writes a handful of
-# keys here once per change; a node's hot path is `setAttribute`.
+# name on this road as on the other, and is remembered for the day the
+# object is taken away. The runtime writes a handful of keys here once
+# per change; a node's hot path is `setAttribute`.
 road =! (node) ->
   Proxy.new {},
     get: (target, key) -> node.styles[key]
     set: (target, key, value) ->
       node.set key, value
+      (node.styled ?= Set.new()).add key
       true
 
 export class Text extends Node

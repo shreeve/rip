@@ -129,15 +129,15 @@ write by hand; hot loops use the indexed `for x, i in` form).
 
 | Module | Job | Code lines |
 |---|---|---|
-| `tui.rip` | Entry: `run`, `screen`, widgets; to come: `focus`, `clock` | 90, about 200 when complete |
-| `document.rip` | Terminal document: nodes, tree links, events, style road | 236 |
+| `tui.rip` | Entry: `run`, `mount`, `renderToString`, `screen`, widgets; to come: `focus`, `clock` | 109, about 220 when complete |
+| `document.rip` | Terminal document: nodes, tree links, events, style road | 244 |
 | `layout.rip` | Flexbox, containing blocks, baseline, cache, edge rounding | 1,437 |
 | `text.rip` | Sanitize, grapheme clusters, width, wrap, truncate | 312 |
 | `paint.rip` | Cell grids, styles, clip, borders, backgrounds, diff; to come: damage | 400, about 550 |
 | `screen.rip` | Frames and pacing; to come: alternate screen, `Static`, non-TTY | 53, about 250 |
 | `input.rip` | To come: key tokenizer and decoder, paste, mouse, keyboard negotiation | about 250 |
 | `terminal.rip` | To come: setup / teardown, signals, suspend, console capture | about 170 |
-| | **Total** | **2,528 built; about 3,400 complete** |
+| | **Total** | **2,555 built; about 3,400 complete** |
 
 Lines are counted as §2 counts them: non-blank and non-comment.
 
@@ -165,11 +165,13 @@ the terminal cannot honor throws a named error.
 
 `div` is a box and `span` is text. Comments are zero-size anchors.
 
-**Decided — install is scoped.** `run` installs the globals and
-teardown restores them. The install is idempotent for this package's
-own document and throws when a foreign `document` exists
-(`packages/email` installs one transiently; an isomorphic npm library
-probing `typeof document` is a documented hazard).
+**Decided — install is scoped.** `run` and `mount` install the
+globals for the life of the app, and `quit` or `close` restores them.
+The globals are the process's, so one app is mounted at a time: a
+second `run`, `mount`, or `renderToString` is refused by name, and the
+install throws when a foreign `document` exists (`packages/email`
+installs one transiently; an isomorphic npm library probing
+`typeof document` is a documented hazard).
 
 **Decided — styles travel as attributes through rest forwarding.**
 
@@ -188,14 +190,16 @@ costs 22.2 ms and 74.4 MB. One `node.set(key, value)` serves
 values (effects re-fire with identical values), expands shorthands,
 stores numerics, and marks the node layout-dirty or paint-dirty. The
 style object is a class with table-generated prototype accessors, not
-a Proxy.
+a Proxy. The node remembers the keys a `style:` object wrote, so an
+object taken away (`removeAttribute('style')`) takes them with it and
+leaves the props.
 
 The runtime contains a child that fails to construct: it reports the
 error and leaves a `rip:child-error` comment where the child would be.
 On a terminal that is a silent hole in the screen, so `install` swaps
 the runtime's child-failure reporter (`__setChildFailureReporter`) for
-one that throws, and `restore` puts the previous one back — `run` and
-`renderToString` fail with the child's own error.
+one that throws, and `restore` puts the previous one back — `run`,
+`mount`, and `renderToString` fail with the child's own error.
 
 ## 5. Layout (`layout.rip`)
 
@@ -419,12 +423,16 @@ stripped, tabs expanded). For text that arrives pre-colored, an opt-in
 paint path. Ink's string `Transform` is replaced by a per-cell style
 callback.
 
-**Held to Ink's own tests.** `test/ink/` ports 386 of Ink's paint
+**Held to Ink's own tests.** `test/ink/` ports 476 of Ink's paint
 cases — borders, backgrounds, overflow, text, wrapping, truncation,
 widths, content offset, position, display, the flex files — with
 every expected frame taken from published Ink 7.1.1 as an oracle, or
 from Ink's test source where its main branch is ahead. Plain frames
 compare as text and colors as styled cells, never as escape bytes.
+53 of them are Ink's `rerender` cases, drawn through `mount` (§10): a
+tree stays mounted, takes other props, and draws again, and each
+updated frame is also held to a fresh mount's frame and to the bytes
+a terminal was sent for it, replayed.
 The cases run through widgets that spell out Ink's defaults (a row
 that shrinks), since this package keeps Yoga's. Where a frame differs
 from Ink's test on purpose, the case still runs, pinned to this
@@ -562,8 +570,11 @@ run App
 ```
 
 - `run(App, {altScreen, mouse, keyboard, stdin, stdout})` →
-  `{done, quit, flush}`;
-  `suspend(fn)`; `print(text)`; `renderToString(App, {cols, rows})`.
+  `{app, done, quit, flush}`; `suspend(fn)`; `print(text)`.
+- `mount(App, {cols, rows, props})` → `{app, frame, ansi, bytes,
+  resize, close, done}` is the test driver (§10), and
+  `renderToString(App, {cols, rows, props, ansi})` is a mount, one
+  frame, and a close.
 - `screen` (`cols`, `rows`, `interactive`) and `focus` (`active`,
   `next`, `prev`, `to`) are **getter-backed objects**. An imported
   `:=` cell is not unwrapped across modules, so raw cells are never
@@ -596,8 +607,20 @@ run App
   offset 23, position 13, render-to-string 37, log-update 34, resize
   10, synchronized write 5, static 5, wide-character regressions 10.
 - **Input:** about 100 ported parser cases, plus focus and dispatch.
-- The test driver (`renderToString` plus simulated input) is public,
-  because users' tests are a contract too.
+- **The test driver is public,** because users' tests are a contract
+  too. `mount(App, {cols, rows, props})` is `run` without a terminal:
+  the same install, the same `Screen`, the same close, drawing to a
+  terminal of `cols` by `rows` that only keeps what it is sent (with
+  no `rows` it is as tall as the frame). It hands back the app, whose
+  public state a test sets, and draws only when asked: `frame()` lays
+  out, paints, and answers the frame as plain text; `ansi` is that
+  frame with its escape sequences; `bytes` is what the terminal was
+  sent for it, the difference from the frame before, which is what a
+  test of damage tracking reads; `resize(cols, rows)` draws the next
+  frame whole; `close()` unmounts and restores the globals. A frame
+  that fails throws from `frame`, to the test that asked. A `quit`
+  from the app closes the mount and resolves `done`. Simulated input
+  joins it with §7.
 
 ## 11. Benchmark (`bench.rip`, `bench/`)
 
