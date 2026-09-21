@@ -445,7 +445,8 @@ diff copies each cell that differs into the grid the terminal shows,
 which stays whole; a whole frame swaps the two. Nothing else reaches
 across a span's edge but a wide glyph, which blanks its other half when
 half of it is written over; so a glyph that a span would cut widens the
-span, and the paint runs again. The diff reads the same cells in the
+span to the run of words it is in, and the paint runs again — twice at
+most, then once more with the row owed whole, which nothing cuts. The diff reads the same cells in the
 same order a whole diff would find changed, so the bytes are the same.
 Clip is four integers passed down the recursion. Z-order is tree order.
 

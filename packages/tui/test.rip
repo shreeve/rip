@@ -1570,16 +1570,17 @@ test "no span cuts a wide glyph: one on the terminal, or one the words under a c
   owing Wide, (app, draw, view) ->
     draw()
     eq view.frame().trimEnd(), " x本語"
-    # The overlay leaves half of a glyph it blanked: the words beneath owe the whole of it.
+    # The overlay leaves half of a glyph it blanked: the words beneath
+    # owe the whole of it, and the run it is in.
     app.at.value = 5
     eq draw(), 6
     eq view.frame().trimEnd(), "日本 x"
     # …and arrives on half of one the terminal shows.
     app.at.value = 3
-    eq draw(), 4
+    eq draw(), 6
     eq view.frame().trimEnd(), "日 x語"
     app.shown.value = false
-    eq draw(), 2
+    eq draw(), 6
     eq view.frame().trimEnd(), "日本語"
 
 test "words that spill out of their box are owed where they were drawn", ->
@@ -1703,6 +1704,41 @@ test "a text owes the cells its words ink, however far layout stretches its box"
     eq draw(), 29 + 6
     app.tick.value = 2
     eq draw(), 29 + 6
+
+test "a span that would cut a wide glyph takes its run in, so a stack of staggered layers settles in two paints", ->
+  Stack = component
+    @tick := 0
+    render
+      Box height: 2
+        for n in [0...4]
+          Text key: n, position: 'absolute', left: 4 - n, top: 0
+            "\u4E2D\u4E2D\u4E2D\u4E2D\u4E2D\u4E2D\u4E2D\u4E2D"
+        Text position: 'absolute', top: 0, left: 9
+          "#{@tick %% 10}"
+  owing Stack, (app, draw, view) ->
+    draw()
+    app.tick.value = 1
+    eq draw(), 19
+    eq document.damage.passes, 2
+    app.tick.value = 2
+    eq draw(), 19
+    eq document.damage.passes, 2
+  # Each layer is cut only once the one drawn after it is taken in: two
+  # runs, then the whole row, and the fourth paint settles.
+  Chain = component
+    @tick := 0
+    render
+      Box height: 2
+        for n in [0...6]
+          Text key: n, position: 'absolute', left: 15 - 3 * n, top: 0
+            "\u4E2D\u4E2D"
+        Text position: 'absolute', top: 0, left: 1
+          "#{@tick %% 10}"
+  owing Chain, (app, draw, view) ->
+    draw()
+    app.tick.value = 1
+    eq draw(), 40
+    eq document.damage.passes, 4
 
 test "a node out of the tree owes nothing, whatever is done to it", ->
   Pair = component

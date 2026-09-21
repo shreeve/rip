@@ -244,6 +244,7 @@ export class Grid
     @lo = Int32Array.new @rows
     @hi = Int32Array.new(@rows).fill @cols
     @cut = false
+    @late = false
     @clear()
 
   clear!: ->
@@ -348,11 +349,15 @@ export class Grid
   # Units [from, to) of a flow rightward from (x, y). A wide cluster cut
   # by a clip edge leaves a space in its style on each cell of it that
   # shows; a cluster of no width has no cell. One the clip leaves whole
-  # and the owed columns would cut is owed whole: the row's span takes it
-  # in, and `cut` asks for the paint again. Answers the column after the
-  # last.
+  # and the owed columns would cut is owed whole, and the run it is in
+  # with it — so the layers of a stack are taken in together, not a
+  # glyph a paint: the row's span widens, and `cut` asks for the paint
+  # again. A paint that is `late` owes the whole row, which nothing
+  # cuts. Answers the column after the last.
   units: (x, y, flow, from, to, id) ->
     y -= @top
+    start = x
+    torn = false
     spans = flow.spans
     cells = flow.cells
     shown = y >= @over and y < @under
@@ -364,14 +369,16 @@ export class Grid
           if x >= @lo[y] and x + span <= @hi[y]
             @set row + x, x, cells[from], span, id
           else if x + span > @lo[y] and x < @hi[y]
-            @lo[y] = x if x < @lo[y]
-            @hi[y] = x + span if x + span > @hi[y]
-            @cut = true
+            torn = true
         else if x + span > @left and x < @right
           for col in [Math.max(x, @left, @lo[y])...Math.min(x + span, @right, @hi[y])]
             @set row + col, col, SPACE, 1, id
       x += span
       from += 1
+    if torn
+      @cut = true
+      @lo[y] = if @late then 0 else Math.min @lo[y], Math.max(start, @left)
+      @hi[y] = if @late then @cols else Math.max @hi[y], Math.min(x, @right)
     x
 
   # One line of any text at (x, y). Answers the column after the last.
@@ -441,13 +448,14 @@ export class Grid
 # there, and a wide glyph is the one thing that reaches across an edge:
 # written over by half, it blanks its other half. So no span may cut a
 # glyph that some node's words put down: `Grid.units` widens the span to
-# take it in and asks for the paint again. That covers the frame on the
+# take its run in and asks for the paint again. That covers the frame on the
 # terminal too — a glyph there was put down by a node that changed, whose
 # bounds are owed whole, or by one that puts it down again.
 export class Damage
   constructor: ->
     @whole = true
     @cols = @rows = @top = 0
+    @passes = 0   # the paints the last frame took, for the tests to count
     @lo = @hi = null
 
   # Take the shape of `grid`, owing all of it or none.
@@ -737,6 +745,7 @@ lent =! (node, owner, id) ->
   styleOf node, lent(node.parentNode, owner, id)
 
 patch = null   # the damage the paint under way is held to
+PASSES =! 4    # the most paints one frame may take
 
 # Paint the tree onto a grid. With no `damage` that is every node, onto
 # a grid the caller cleared. With it, `grid` is a scratch for the frame
@@ -764,11 +773,17 @@ export paint! =! (grid, node, damage = null, front = null) ->
   if damage.whole
     grid.clear()
     sweep grid if early
+  # A span that would cut a wide glyph takes its run in, twice, and then
+  # the whole row: the fourth paint finds nothing to cut.
+  damage.passes = 0
   loop
     grid.cut = false
+    grid.late = damage.passes > 1
     grid.wipe() unless damage.whole
     draw grid, node, 0, 0, 0, 0, grid.top, grid.cols, grid.top + grid.rows
+    damage.passes += 1
     break unless grid.cut
+    throw Error.new "rip/tui: a paint did not settle in #{PASSES} passes — a wide glyph is cut by a row that is owed whole" if damage.passes >= PASSES
   grid.clip 0, -FAR, grid.cols, FAR
 
 # ── Sweep ─────────────────────────────────────────────────────────────────────
