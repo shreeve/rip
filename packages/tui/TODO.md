@@ -54,9 +54,5 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 6. Compiler-side, filed separately
 
-- A loop variable named like a tag (`i`, `a`, `b`, `p`) at the end of a
-  render line takes the indented children beneath it.
-- A bound effect that awaits marks its enclosing function `async`.
-- `rip -t` prints a stack trace for a lexer error.
 - A typed vocabulary for non-HTML hosts, so `rip check` and the editor
   accept terminal props (PLAN §14).
