@@ -1426,7 +1426,7 @@ describe('child components: the instantiation protocol', () => {
     expect(code).toContain('} else if (this._inst1._mountCreate()) {');
     expect(code).toContain('this._el2 = this._inst1._root;');
     expect(code).toContain('(this._children || (this._children = [])).push(this._inst1);');
-    expect(code).toContain("console.error('[Rip] Kid construction failed:', __childErr);");
+    expect(code).toContain("__reportChildFailure('Kid', __childErr);");
     expect(code).toContain("this._el2 = document.createComment('rip:child-error: Kid');");
     expect(code).toContain('} finally { __popComponent(__prev); } }');
     expect(code).toContain('this._el0.appendChild(this._el2);');
@@ -1704,7 +1704,7 @@ App = component
   test('the construction-failure identity threads the MEMBER name for nested declarations ', () => {
     const { code } = compile('A = component\n  Badge = component\n    render\n      span "b"\n  render\n    div\n      Badge\n');
     expect(code).toContain("document.createComment('rip:child-init-failed: Badge')");
-    expect(code).toContain("console.error('[Rip] Badge construction failed:', __childErr);");
+    expect(code).toContain("__reportChildFailure('Badge', __childErr);");
   });
 
   test('a child component as a render root returns its element; the parent data-part never lands on the child\'s DOM', () => {

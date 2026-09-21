@@ -12085,7 +12085,7 @@ class Emitter {
     line(() => this.b.emit('}'));
     if (projection !== null) line(() => this.b.emit('}'));
     line(() => this.b.emit(`} catch (${errV}) {`));
-    line(() => this.b.emit(`  console.error('[Rip] ${name} construction failed:', ${errV});`));
+    line(() => this.b.emit(`  ${this.runtimeName('__reportChildFailure')}('${name}', ${errV});`));
     line(() => this.b.emit(`  ${instVar} = null;`));
     line(() => this.b.emit(`  ${elVar} = document.createComment('rip:child-error: ${name}');`));
     line(() => this.b.emit('}'));
@@ -18096,14 +18096,15 @@ const RUNTIME_TABLE = [
     names: ['setContext', 'getContext', 'hasContext', '__Component',
             '__pushComponent', '__popComponent', '__clsx', '__style', '__lis', '__reconcile',
             '__transition', '__handleComponentError', '__gateBind', '__detach',
+            '__reportChildFailure',
             // The owner-seam names factory emission spells —
             // re-exported by the components module so reactive-only
             // programs' injected bytes stay untouched.
             '__ownerFrame', '__pushOwner', '__popOwner', '__detachRef'],
     generatedNames: ['setContext', 'getContext', '__Component',
                      '__pushComponent', '__popComponent', '__clsx', '__style', '__reconcile',
-                     '__transition', '__gateBind', '__detach', '__ownerFrame', '__pushOwner',
-                     '__popOwner', '__detachRef'],
+                     '__transition', '__gateBind', '__detach', '__reportChildFailure',
+                     '__ownerFrame', '__pushOwner', '__popOwner', '__detachRef'],
     types: {
       // The one entry that types every merged `class:` value — the
       // face's __RipClassValue alias arms alongside it (the tail's

@@ -510,7 +510,7 @@ let Deck = class extends __Component {
       this._el2 = document.createComment('rip:child-error: Chip');
     }
     } catch (__childErr) {
-      console.error('[Rip] Chip construction failed:', __childErr);
+      __reportChildFailure('Chip', __childErr);
       this._inst1 = null;
       this._el2 = document.createComment('rip:child-error: Chip');
     }
@@ -530,7 +530,7 @@ let Deck = class extends __Component {
       this._el4 = document.createComment('rip:child-error: Chip');
     }
     } catch (__childErr) {
-      console.error('[Rip] Chip construction failed:', __childErr);
+      __reportChildFailure('Chip', __childErr);
       this._inst3 = null;
       this._el4 = document.createComment('rip:child-error: Chip');
     }
@@ -551,7 +551,7 @@ let Deck = class extends __Component {
       this._el6 = document.createComment('rip:child-error: Chip');
     }
     } catch (__childErr) {
-      console.error('[Rip] Chip construction failed:', __childErr);
+      __reportChildFailure('Chip', __childErr);
       this._inst5 = null;
       this._el6 = document.createComment('rip:child-error: Chip');
     }
@@ -571,7 +571,7 @@ let Deck = class extends __Component {
       this._el8 = document.createComment('rip:child-error: Chip');
     }
     } catch (__childErr) {
-      console.error('[Rip] Chip construction failed:', __childErr);
+      __reportChildFailure('Chip', __childErr);
       this._inst7 = null;
       this._el8 = document.createComment('rip:child-error: Chip');
     }
@@ -626,7 +626,7 @@ let Deck = class extends __Component {
           _el12 = document.createComment('rip:child-error: Chip');
         }
         } catch (__childErr) {
-          console.error('[Rip] Chip construction failed:', __childErr);
+          __reportChildFailure('Chip', __childErr);
           _inst11 = null;
           _el12 = document.createComment('rip:child-error: Chip');
         }
@@ -735,7 +735,7 @@ let Holder = class extends __Component {
     }
     }
     } catch (__childErr) {
-      console.error('[Rip] Frame construction failed:', __childErr);
+      __reportChildFailure('Frame', __childErr);
       this._inst0 = null;
       this._el1 = document.createComment('rip:child-error: Frame');
     }

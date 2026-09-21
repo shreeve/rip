@@ -28,7 +28,7 @@ const NAMES = [
   '__schema', 'SchemaError', 'registerCoercer',
   '__Component', '__pushComponent', '__popComponent', 'setContext',
   'getContext', 'hasContext', '__clsx', '__lis', '__reconcile',
-  '__transition', '__handleComponentError', '__detach', '__ownerFrame',
+  '__transition', '__handleComponentError', '__reportChildFailure', '__detach', '__ownerFrame',
   '__pushOwner', '__popOwner', '__detachRef',
 ];
 

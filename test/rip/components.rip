@@ -3505,7 +3505,7 @@ code 'slot under a child component forwards the received children', '''
         this._el1 = document.createComment('rip:child-error: Section');
       }
       } catch (__childErr) {
-        console.error('[Rip] Section construction failed:', __childErr);
+        __reportChildFailure('Section', __childErr);
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-error: Section');
       }
@@ -3578,7 +3578,7 @@ code 'a member named slot under a child component keeps its text reading', '''
       }
       }
       } catch (__childErr) {
-        console.error('[Rip] Section construction failed:', __childErr);
+        __reportChildFailure('Section', __childErr);
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-error: Section');
       }
@@ -4051,7 +4051,7 @@ code 'child component with static props', '''
         this._el2 = document.createComment('rip:child-error: Child');
       }
       } catch (__childErr) {
-        console.error('[Rip] Child construction failed:', __childErr);
+        __reportChildFailure('Child', __childErr);
         this._inst1 = null;
         this._el2 = document.createComment('rip:child-error: Child');
       }
@@ -4107,7 +4107,7 @@ code 'child component with reactive prop (signal pass-through)', '''
         this._el2 = document.createComment('rip:child-error: Child');
       }
       } catch (__childErr) {
-        console.error('[Rip] Child construction failed:', __childErr);
+        __reportChildFailure('Child', __childErr);
         this._inst1 = null;
         this._el2 = document.createComment('rip:child-error: Child');
       }
@@ -4167,7 +4167,7 @@ code 'child component with children (slot)', '''
       }
       }
       } catch (__childErr) {
-        console.error('[Rip] Child construction failed:', __childErr);
+        __reportChildFailure('Child', __childErr);
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-error: Child');
       }
@@ -4229,7 +4229,7 @@ code 'child component with props and children', '''
       }
       }
       } catch (__childErr) {
-        console.error('[Rip] Child construction failed:', __childErr);
+        __reportChildFailure('Child', __childErr);
         this._inst1 = null;
         this._el2 = document.createComment('rip:child-error: Child');
       }
@@ -4280,7 +4280,7 @@ code 'boolean prop shorthand — single bare identifier', '''
         this._el1 = document.createComment('rip:child-error: Btn');
       }
       } catch (__childErr) {
-        console.error('[Rip] Btn construction failed:', __childErr);
+        __reportChildFailure('Btn', __childErr);
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-error: Btn');
       }
@@ -4336,7 +4336,7 @@ code 'boolean prop shorthand — multiple bare identifiers with text child', '''
       }
       }
       } catch (__childErr) {
-        console.error('[Rip] Btn construction failed:', __childErr);
+        __reportChildFailure('Btn', __childErr);
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-error: Btn');
       }
@@ -4392,7 +4392,7 @@ code 'boolean prop shorthand — mixed with @event and key:value', '''
       }
       }
       } catch (__childErr) {
-        console.error('[Rip] Btn construction failed:', __childErr);
+        __reportChildFailure('Btn', __childErr);
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-error: Btn');
       }
@@ -4449,7 +4449,7 @@ code 'boolean prop shorthand — explicit value still wins', '''
       }
       }
       } catch (__childErr) {
-        console.error('[Rip] Btn construction failed:', __childErr);
+        __reportChildFailure('Btn', __childErr);
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-error: Btn');
       }
@@ -4502,7 +4502,7 @@ code 'bare component reference (no args)', '''
         this._el2 = document.createComment('rip:child-error: Counter');
       }
       } catch (__childErr) {
-        console.error('[Rip] Counter construction failed:', __childErr);
+        __reportChildFailure('Counter', __childErr);
         this._inst1 = null;
         this._el2 = document.createComment('rip:child-error: Counter');
       }
