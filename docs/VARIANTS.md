@@ -241,7 +241,7 @@ into it is NULL. The cast is what says "this text is a document".
 ### In Rip through a model
 
 Hand the field an object. The model stringifies it and binds it through
-`?::JSON`, in `create!`, `save!`, `upsert!` and `updateAll!`:
+`?::JSON`, in `create!`, `save!`, `upsert!`, `updateAll!` and `insertMany!`:
 
 ```rip
 Report.create! { doc: { patient: { firstName: 'Dot', age: 5 } } }
