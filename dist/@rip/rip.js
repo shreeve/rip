@@ -31203,7 +31203,7 @@ function createApply(opts) {
   let report = opts.report ?? function(...args) {
     return console.log(...args);
   };
-  let absorb = async function(paths, candidate = null) {
+  let absorb = async function(paths, candidate) {
     if (!(Array.isArray(paths) && paths.length > 0)) {
       return "ignore";
     }

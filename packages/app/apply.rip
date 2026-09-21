@@ -16,12 +16,12 @@ import type { Renderer, CompiledModules } from './renderer.rip'
 export type ApplyVerdict = 'reload' | 'css' | 'update' | 'ignore'
 
 export type Apply =
-  absorb: (paths: string[], candidate?: CompiledModules | null) => Promise<ApplyVerdict>
+  absorb: (paths: string[], candidate?: CompiledModules) => Promise<ApplyVerdict>
 
 export type ApplyOpts =
   # Renderer seam still speaks narrow/escape/noop; absorb maps to update/ignore.
   renderer: Pick<Renderer, 'remountDirty'>
-  escape: (paths: string[], candidate?: CompiledModules | null) => Promise<void | 'reload'>
+  escape: (paths: string[], candidate?: CompiledModules) => Promise<void | 'reload'>
   report?: (...args: unknown[]) => void
 
 export def createApply(opts: ApplyOpts): Apply
@@ -33,7 +33,7 @@ export def createApply(opts: ApplyOpts): Apply
     throw TypeError.new 'Rip App: createApply requires an escape remount'
   report = opts.report ?? (...args) -> console.log ...args
 
-  absorb = (paths, candidate = null) ->
+  absorb = (paths: string[], candidate?: CompiledModules) ->
     unless Array.isArray(paths) and paths.length > 0
       return 'ignore'
     css = (p for p in paths when typeof p is 'string' and p.endsWith '.css')
