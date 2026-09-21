@@ -507,9 +507,3 @@ start. Each row is a rule the v0.1 code follows.
 - tmux strips kitty sequences and delays ESC by 500 ms by default.
 - A cell diff can write more bytes than a line diff; measured in PR 0.
 - A global `document` is visible to every module in the process.
-
-## 16. Found along the way
-
-- A parenthesized sequence opening with an assignment —
-  `(was = dirty; dirty = false; was)` — emits invalid JavaScript
-  (`return (let was = …)`). Filed separately as a compiler fix.
