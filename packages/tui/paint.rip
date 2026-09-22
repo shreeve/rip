@@ -11,6 +11,7 @@
 # have recolored, a span of columns on each row.
 
 import { kids, layout } from './layout.rip'
+import { visible } from './focus.rip'
 import { CLUSTER, glyph, crowded, evict, sanitize, Flow, refresh, MODES, A0, A1, B0, B1, DOTS, ROW } from './text.rip'
 
 # ── Styles ────────────────────────────────────────────────────────────────────
@@ -140,8 +141,6 @@ export intern =! (fg, bg, flags, link = null) ->
   key = if link then "#{flags}|#{link}" else flags
   id = held.get key
   return id if id?
-  for [color, base] in [[fg, 30], [bg, 40]] when color?
-    throw Error.new "rip/tui: #{JSON.stringify color} is not a color — write #{COLORS}" unless tint color, base
   throw Error.new "rip/tui: more than #{LIMIT} distinct styles are in use — a cell holds a style id in sixteen bits" if records.length >= LIMIT
   records.push { fg, bg, flags, link, sgr: dress(fg, bg, flags), key }
   held.set key, records.length - 1
@@ -207,8 +206,8 @@ BORDERS =! {
   singleDouble: '╓─╖║╜─╙║', doubleSingle: '╒═╕│╛═╘│', classic: '+-+|+-+|', arrow: '↘↓↙←↖↑↗→'
 }
 
-frames =! Map.new()
-probe =! Flow.new()
+outlines =! Map.new()
+gauge =! Flow.new()
 
 # The eight cells of a border style: one of the names, or an object that
 # gives each part a glyph of its own, one cell wide. A node keeps a copy
@@ -223,16 +222,16 @@ glyphsOf =! (style, key = 'borderStyle') ->
   unless custom or (typeof style is 'string' and BORDERS[style])
     throw Error.new "rip/tui: #{key}: #{JSON.stringify style} is not one of #{Object.keys(BORDERS).join ', '}, or an object of #{PARTS.join ', '}"
   name = if custom then "#{style.topLeft}\n#{style.top}\n#{style.topRight}\n#{style.right}\n#{style.bottomRight}\n#{style.bottom}\n#{style.bottomLeft}\n#{style.left}" else style
-  cells = frames.get name
+  cells = outlines.get name
   return cells if cells
   cells = Uint32Array.new 8
   for part, n in PARTS
     text = if custom then style[part] else String.fromCodePoint BORDERS[style].codePointAt(n)
-    probe.set (if typeof text is 'string' then text else ''), null
-    unless typeof text is 'string' and sanitize(text) is text and probe.count is 1 and probe.span(0) is 1
+    gauge.set (if typeof text is 'string' then text else ''), null
+    unless typeof text is 'string' and sanitize(text) is text and gauge.count is 1 and gauge.span(0) is 1
       throw Error.new "rip/tui: #{key}: #{part}: #{JSON.stringify text} is not a border glyph — write one printing character, one cell wide"
-    cells[n] = probe.code 0
-  frames.set name, cells
+    cells[n] = gauge.code 0
+  outlines.set name, cells
   cells
 
 # ── Values ────────────────────────────────────────────────────────────────────
@@ -446,8 +445,8 @@ export class Grid
 
   # One line of any text at (x, y). Answers the column after the last.
   write: (x, y, text, id) ->
-    probe.set text, null
-    if probe.ascii then @ascii(x, y, text, 0, text.length, id) else @units(x, y, probe, 0, probe.count, id)
+    gauge.set text, null
+    if gauge.ascii then @ascii(x, y, text, 0, text.length, id) else @units(x, y, gauge, 0, gauge.count, id)
 
   # A rectangle of spaces in one style: a background covers what lies
   # under it. A wide glyph the rectangle's side cuts is blanked.
@@ -615,7 +614,7 @@ export class Damage
     up = node
     loop
       if s = up.styles
-        return if s.hidden or s.display is 'none'
+        return unless visible s
         if up isnt node and s.display isnt 'contents'
           dx -= Math.trunc s.contentOffsetX if s.contentOffsetX
           dy -= Math.trunc s.contentOffsetY if s.contentOffsetY
@@ -695,7 +694,7 @@ survey! =! (node, dx, dy, damage) ->
 # between the top and bottom edges that show. Each edge takes its own
 # color, background and dimming, else the border's. A frame wholly
 # outside the clip, or too small to hold its edges, draws nothing.
-frame! =! (grid, s, x, y, w, h) ->
+border! =! (grid, s, x, y, w, h) ->
   cells = glyphsOf s.borderStyle
   top = if s.borderTop is false then 0 else 1
   bottom = if s.borderBottom is false then 0 else 1
@@ -791,6 +790,28 @@ words! =! (grid, node, inherited, x, y) ->
     grid.put col, y + n, DOT, id
     stretch grid, flow, col + 1, y + n, table[at + B0], table[at + B1]
 
+# The cells a box's border takes on one side: one where an edge is drawn.
+export edge =! (s, side) -> if s.borderStyle? and s[side] isnt false then 1 else 0
+
+# The clip a box hands what is under it — the clip it was handed,
+# narrowed to its padding box on each axis it hides — answered in `clipped`
+# (left, top, right, bottom), so no call makes an array. The one rule of
+# where a box's children may show: the painter, the hit test (mouse.rip)
+# and the cursor (screen.rip) all read it.
+export clipped = Int32Array.new 4
+export clipOf! =! (s, x, y, w, h, left, top, right, bottom) ->
+  if (s.overflowX ?? s.overflow) is 'hidden'
+    left = Math.max left, x + edge(s, 'borderLeft')
+    right = Math.min right, x + w - edge(s, 'borderRight')
+  if (s.overflowY ?? s.overflow) is 'hidden'
+    top = Math.max top, y + edge(s, 'borderTop')
+    bottom = Math.min bottom, y + h - edge(s, 'borderBottom')
+  clipped[0] = left
+  clipped[1] = top
+  clipped[2] = right
+  clipped[3] = bottom
+  return
+
 # One node and everything under it. (dx, dy) is how far content offsets
 # above have shifted it from where layout put it, and the four integers
 # are the clip: the padding boxes of the `overflow: 'hidden'` ancestors,
@@ -811,19 +832,18 @@ draw! =! (grid, node, inherited, dx, dy, left, top, right, bottom) ->
     grid.clip left, top, right, bottom
     if s.backgroundColor?
       # The background fills inside the border (Ink's `renderBackground`).
-      l = if edged and s.borderLeft isnt false then 1 else 0
-      t = if edged and s.borderTop isnt false then 1 else 0
-      r = if edged and s.borderRight isnt false then 1 else 0
-      b = if edged and s.borderBottom isnt false then 1 else 0
+      l = edge s, 'borderLeft'
+      t = edge s, 'borderTop'
+      r = edge s, 'borderRight'
+      b = edge s, 'borderBottom'
       grid.fill x + l, y + t, rect.w - l - r, rect.h - t - b, intern(null, s.backgroundColor, 0)
-    frame grid, s, x, y, rect.w, rect.h if edged
+    border grid, s, x, y, rect.w, rect.h if edged
   if s.overflow? or s.overflowX? or s.overflowY?
-    if (s.overflowX ?? s.overflow) is 'hidden'
-      left = Math.max left, x + (if edged and s.borderLeft isnt false then 1 else 0)
-      right = Math.min right, x + rect.w - (if edged and s.borderRight isnt false then 1 else 0)
-    if (s.overflowY ?? s.overflow) is 'hidden'
-      top = Math.max top, y + (if edged and s.borderTop isnt false then 1 else 0)
-      bottom = Math.min bottom, y + rect.h - (if edged and s.borderBottom isnt false then 1 else 0)
+    clipOf s, x, y, rect.w, rect.h, left, top, right, bottom
+    left = clipped[0]
+    top = clipped[1]
+    right = clipped[2]
+    bottom = clipped[3]
     return if left >= right or top >= bottom
   dx -= Math.trunc s.contentOffsetX if s.contentOffsetX
   dy -= Math.trunc s.contentOffsetY if s.contentOffsetY
@@ -846,7 +866,7 @@ lent =! (node, owner, id) ->
   styleOf node, lent(node.parentNode, owner, id)
 
 patch = null   # the damage the paint under way is held to
-PASSES =! 4    # the most paints one frame may take
+PAINTS =! 4    # the most paints one frame may take
 
 # Paint the tree onto a grid. With no `damage` that is every node, onto
 # a grid the caller cleared. With it, `grid` is a scratch for the frame
@@ -884,7 +904,7 @@ export paint! =! (grid, node, damage = null, front = null) ->
     draw grid, node, 0, 0, 0, 0, grid.top, grid.cols, grid.top + grid.rows
     damage.passes += 1
     break unless grid.cut
-    throw Error.new "rip/tui: a paint did not settle in #{PASSES} passes — a wide glyph is cut by a row that is owed whole" if damage.passes >= PASSES
+    throw Error.new "rip/tui: a paint did not settle in #{PAINTS} passes — a wide glyph is cut by a row that is owed whole" if damage.passes >= PAINTS
   grid.clip 0, -FAR, grid.cols, FAR
 
 # ── Sweep ─────────────────────────────────────────────────────────────────────
@@ -919,7 +939,7 @@ sweep! =! (grid) ->
     records.push record
     shelf(record.fg, record.bg).set record.key, n
   evict grid.ch
-  frames.clear()
+  outlines.clear()
 
 # ── Grid → bytes ──────────────────────────────────────────────────────────────
 

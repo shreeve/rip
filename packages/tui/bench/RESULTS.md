@@ -34,11 +34,11 @@ Median of 7 fresh processes each; ✓ both first frames read the same.
 
 | | Ink + Yoga | Rip TUI |
 |---|--:|--:|
-| Framework only | Ink `src/` 6,760 | 4,252 |
-| Framework + layout algorithm | + Yoga 3.2.1 `yoga/algorithm/` 3,042 = 9,802 | 4,252 (layout.rip is 1,466 of it) |
-| Full runtime closure | + React, react-reconciler, scheduler and 33 more packages (36 in all) | + Rip runtime 1,598 (reactive.js, components.js) = 5,850 |
+| Framework only | Ink `src/` 6,760 | 4,269 |
+| Framework + layout algorithm | + Yoga 3.2.1 `yoga/algorithm/` 3,042 = 9,802 | 4,269 (layout.rip is 1,466 of it) |
+| Full runtime closure | + React, react-reconciler, scheduler and 33 more packages (36 in all) | + Rip runtime 1,598 (reactive.js, components.js) = 5,867 |
 
-Framework against framework, Ink is 1.6× the lines of Rip TUI; with the layout algorithm on both sides, Ink + Yoga 3.2.1 (the version Ink 7.1.1 ships) is 2.3×. Rip TUI's files: tui.rip 311, document.rip 388, focus.rip 63, layout.rip 1,466, text.rip 421, paint.rip 701, screen.rip 173, terminal.rip 203, input.rip 315, mouse.rip 211.
+Framework against framework, Ink is 1.6× the lines of Rip TUI; with the layout algorithm on both sides, Ink + Yoga 3.2.1 (the version Ink 7.1.1 ships) is 2.3×. Rip TUI's files: tui.rip 307, document.rip 390, focus.rip 64, layout.rip 1,466, text.rip 421, paint.rip 713, screen.rip 177, terminal.rip 205, input.rip 315, mouse.rip 211.
 
 ## One frame, whole and damaged
 

@@ -794,11 +794,32 @@ test "a cursor is refused unless it is `{ x, y }` in whole cells", ->
   mounted Trio, {}, (view) ->
     node = find 'a'
     throws (-> node.set 'cursor', { x: 1 }), 'cursor'
-    throws (-> node.set 'cursor', { x: -1, y: 0 }), 'cursor'
     throws (-> node.set 'cursor', { x: 0.5, y: 0 }), 'cursor'
     throws (-> node.set 'cursor', 'here'), 'cursor'
     node.set 'cursor', { x: 0, y: 0 }
     node.set 'cursor', undefined
+
+test "a cursor outside its node's box is kept and hidden, as one a clip hides is: a stale place moves the cursor away, never the app", ->
+  Edge = component
+    render
+      Box flexDirection: 'row'
+        Box id: 'e', width: 5, focusable: true, autofocus: true
+          Text "child"
+  mounted Edge, {}, (view) ->
+    node = find 'e'
+    node.set 'cursor', { x: 0, y: 0 }
+    view.frame()
+    ok view.cursor?, 'a place inside the box is shown'
+    node.set 'cursor', { x: node.rect.w, y: 0 }
+    view.frame()
+    ok view.cursor?, 'the cell after the last column is a place: an insertion point'
+    for place in [{ x: -1, y: 0 }, { x: 0, y: -3 }, { x: node.rect.w + 1, y: 0 }, { x: 0, y: node.rect.h }]
+      node.set 'cursor', place
+      view.frame()
+      eq view.cursor, null, "#{JSON.stringify place} is hidden"
+    node.set 'cursor', { x: 0, y: 0 }
+    view.frame()
+    ok view.cursor?, 'and shown again when the place is back in the box'
 
 test! "on quit the cursor returns to the line below the frame and is shown", ->
   Parked = component
@@ -1109,6 +1130,12 @@ holds =! (node) ->
     at = at.parentNode
   false
 
+# Every element of the tree, in tree order.
+every =! (node, out = []) ->
+  out.push node if node.nodeType is 1
+  every kid, out for kid in node.childNodes
+  out
+
 ordered =! (node, out = []) ->
   return out if blocked node
   out.push node if node.focusable
@@ -1137,7 +1164,7 @@ test "random trees under random change: focus is always a node that can hold it,
     seed = (seed * 1664525 + 1013904223) % 4294967296
     seed / 4294967296
   pick = (list) -> list[Math.floor rand() * list.length]
-  counts = { steps: 0, inserted: 0, removed: 0, moved: 0, switched: 0, tabs: 0, calls: 0, focuses: 0, blurs: 0, cleared: 0, cycles: 0, visited: 0, mutated: 0, heard: 0, claimed: 0 }
+  counts = { steps: 0, agreed: 0, inserted: 0, removed: 0, moved: 0, switched: 0, tabs: 0, calls: 0, focuses: 0, blurs: 0, cleared: 0, cycles: 0, visited: 0, mutated: 0, heard: 0, claimed: 0 }
   for round in [0...120]
     view = mount Bare, cols: 20
     try
@@ -1251,6 +1278,13 @@ test "random trees under random change: focus is always a node that can hold it,
         say "#{idOf now} has focus and cannot hold it" if now and not holds now
         say "the events say #{idOf holder} has focus, and the document says #{idOf now}" unless holder is now
         say "focus.active is #{idOf focus.active}, not #{idOf now}" unless focus.active is now
+        # Focus is recorded three times — the document's active node, its
+        # reactive `activeElement`, and each node's own `focused` — and
+        # every step must leave all three in step, for every node.
+        say "document.activeElement is #{idOf document.activeElement}, not #{idOf now}" unless document.activeElement is now
+        for node in every document.body when node.focused isnt (node is now)
+          say "#{idOf node}.focused reads #{node.focused} while #{idOf now} has focus"
+        counts.agreed += 1
         counts.cleared += 1 if had and not now
         counts.claimed += 1 if now and not had and act < 0.45
         # A cycle: Tab from here reaches every node that can hold focus
@@ -1269,5 +1303,5 @@ test "random trees under random change: focus is always a node that can hold it,
     finally
       view.close()
   # A fuzz that does nothing passes everything: hold it to its volume.
-  floors = { steps: 9600, inserted: 1100, removed: 550, moved: 550, switched: 1600, tabs: 1100, calls: 1100, focuses: 1500, blurs: 1500, cleared: 300, cycles: 440, visited: 950, mutated: 600, heard: 2600, claimed: 60 }
+  floors = { steps: 9600, agreed: 9500, inserted: 1100, removed: 550, moved: 550, switched: 1600, tabs: 1100, calls: 1100, focuses: 1500, blurs: 1500, cleared: 300, cycles: 440, visited: 950, mutated: 600, heard: 2600, claimed: 60 }
   ok counts[name] >= floor, "#{name}: #{counts[name]} is under the floor of #{floor} — #{JSON.stringify counts}" for own name, floor of floors

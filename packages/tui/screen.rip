@@ -11,13 +11,13 @@
 # record of it: a frame first takes the cursor back to the top-left,
 # then draws, then parks it again, all in the one write.
 
-import { tend } from './focus.rip'
+import { tend, visible } from './focus.rip'
 import { failed } from './document.rip'
 import { layout } from './layout.rip'
-import { Grid, paint, diff, overlay, still, rowsToString } from './paint.rip'
+import { Grid, paint, diff, overlay, still, rowsToString, clipped, clipOf } from './paint.rip'
 
 PACE =! 8     # the least milliseconds between two frames
-PASSES =! 32  # the most layouts one frame may take to settle
+LAYOUTS =! 32  # the most layouts one frame may take to settle
 
 # Whether every node above `node`, up to `body`, is shown.
 showing =! (node, body) ->
@@ -25,38 +25,46 @@ showing =! (node, body) ->
     node = node.parentNode
     return false unless node
     return true if node is body
-    s = node.styles
-    return false if s.hidden is true or s.display is 'none'
+    return false unless visible node.styles
 
 # Lay the document out until a pass moves nothing. A binding that reads
 # a node's box changes the tree it measured, so one change can take a
 # pass per reader in a chain; readers that never agree are refused.
-settle =! (doc, cols) ->
+converge! =! (doc, cols) ->
   passes = 0
   while doc.moved
-    if (passes += 1) > PASSES
-      throw Error.new "rip/tui: layout did not settle in #{PASSES} passes — a binding keeps changing the box it reads, so no size satisfies it"
+    if (passes += 1) > LAYOUTS
+      throw Error.new "rip/tui: layout did not settle in #{LAYOUTS} passes — a binding keeps changing the box it reads, so no size satisfies it"
     doc.moved = false
     layout doc.body, cols
   return
 
 export class Screen
-  constructor: (@doc, @out) ->
+  # `whole` owes every cell of every frame, for a test to compare
+  # against; `interactive` says frames go to a terminal someone is
+  # watching (terminal.rip) — off one, frames are kept and only text is
+  # written; `alt` is the alternate screen, whose top-left the frame's
+  # is, where nothing is written above and `leave` moves nowhere;
+  # `origin` is the terminal row the frame's top-left is on. `after`
+  # and `failed` are hooks a caller installs: run after every frame,
+  # and told of a frame that fails with no caller to throw to.
+  constructor: (@doc, @out, { whole = false, interactive = true, alt = false, origin = 0 } = {}) ->
     @front = null
     @spare = null
     @booked = false
     @last = 0
     @failed = null
-    @whole = false   # owe every cell of every frame, for a test to compare against
+    @whole = whole
     @owed = 0        # the cells the last frame owed
     @parked = null   # where the cursor is shown, `{ x, y }` on the grid, or null while it is hidden
-    @origin = 0      # the terminal row the frame's top-left is on: what the cursor probe answers, and lower once a frame scrolls the terminal
-    @alt = false     # the alternate screen: the frame's top-left is the screen's, nothing is written above, and `leave` moves nowhere
-    @interactive = true   # whether frames go to a terminal someone is watching (terminal.rip); off one, frames are kept and only text is written
+    @origin = origin   # what the cursor probe answers, and lower once a frame scrolls the terminal
+    @alt = alt
+    @interactive = interactive
     @selection = { from: -1, to: -1 }   # the selected cells (mouse.rip), none while `from` is under zero
     @after = null    # run after every frame: the pointer looks again at what is under it
     @statics = []          # the `Static` containers mounted (tui.rip), in the order they arrived
     @written = WeakSet.new()   # the items written above the frame
+    @tail = WeakMap.new()      # each container's last item written, where the next look starts
     @scrollback = ''       # everything written above the frame so far, as it was written
     @lead = ''             # what the next frame's write begins with: the rows written above the frame
     @osc = ''              # the progress report the next frame's write carries
@@ -106,20 +114,32 @@ export class Screen
     @batching = true
     try
       for el in @statics
+        # Items arrive at the end, so the look starts after the last one
+        # written; an item that went away sends it back to the front.
+        last = @tail.get el
+        kid = if last and last.parentNode is el then last.nextSibling else el.firstChild
         fresh = []
-        for kid in el.childNodes when kid.nodeType is 1
-          if @written.has kid then (kid.set 'display', 'none' if kid.styles.display isnt 'none') else fresh.push kid
+        while kid
+          fresh.push kid if kid.nodeType is 1 and not @written.has kid
+          kid = kid.nextSibling
         continue unless fresh.length and showing el, @doc.body
         grid = still el, @cols
         @above rowsToString(grid, @interactive) + '\n' if grid.rows
-        @written.add kid for kid in fresh
+        # Written, an item is put away at once and stays away whatever its
+        # own component writes (document.rip), so no later look revisits it.
+        for kid in fresh
+          @written.add kid
+          kid.still = true
+          kid.set 'display', 'none'
+        @tail.set el, fresh[fresh.length - 1]
     finally
       @batching = false
 
   # Progress on the terminal's own indicator (OSC 9;4, ConEmu's
   # sequence, which Windows Terminal, Ghostty, kitty and iTerm2 honor):
   # a number from 0 to 1, 'error', 'indeterminate', or null to clear,
-  # sent with the next frame's write. Nothing off a terminal.
+  # sent with the next frame's write, and only where the frames are
+  # watched (`interactive`), as a mount's are.
   progress!: (value) ->
     state = if value is null then '0'
     else if value is 'error' then '2'
@@ -146,7 +166,7 @@ export class Screen
     @last = performance.now()
     failed @doc
     tend @doc
-    settle @doc, @cols
+    converge @doc, @cols
     @doc.stale = false
     tall = @doc.body.rect.h
     shown = Math.min tall, @rows
@@ -192,20 +212,23 @@ export class Screen
     return null unless node?.cursor
     x = node.rect.x + node.cursor.x
     y = node.rect.y + node.cursor.y
+    # A place is a cell the node inks — its box, and words of its own
+    # that spill past it — as the hit test has it (mouse.rip); the cell
+    # after the last column is a place too, an insertion point.
+    return null unless x >= node.bl and x <= node.br and y >= node.bt and y < node.bb
     up = node
     while up = up.parentNode
       s = up.styles
+      # A `contents` node lends its children to its parent and is never
+      # drawn: its offsets and clip count for nothing, as the painter and
+      # the hit test (mouse.rip) have it.
+      continue if s.display is 'contents'
       x -= Math.trunc s.contentOffsetX if s.contentOffsetX
       y -= Math.trunc s.contentOffsetY if s.contentOffsetY
       continue unless s.overflow? or s.overflowX? or s.overflowY?
       rect = up.rect
-      edged = s.borderStyle?
-      if (s.overflowX ?? s.overflow) is 'hidden'
-        return null if x < rect.x + (if edged and s.borderLeft isnt false then 1 else 0)
-        return null if x >= rect.x + rect.w - (if edged and s.borderRight isnt false then 1 else 0)
-      if (s.overflowY ?? s.overflow) is 'hidden'
-        return null if y < rect.y + (if edged and s.borderTop isnt false then 1 else 0)
-        return null if y >= rect.y + rect.h - (if edged and s.borderBottom isnt false then 1 else 0)
+      clipOf s, rect.x, rect.y, rect.w, rect.h, -Infinity, -Infinity, Infinity, Infinity
+      return null if x < clipped[0] or x >= clipped[2] or y < clipped[1] or y >= clipped[3]
     y -= @front.top
     if x >= 0 and x < @front.cols and y >= 0 and y < @front.rows then { x, y } else null
 

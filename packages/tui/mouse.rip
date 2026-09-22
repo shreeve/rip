@@ -9,7 +9,8 @@
 # puts on the clipboard.
 
 import { Event } from './document.rip'
-import { open, take, tend } from './focus.rip'
+import { open, take, tend, visible } from './focus.rip'
+import { clipped, clipOf } from './paint.rip'
 import { glyph } from './text.rip'
 
 # ── Hit test ──────────────────────────────────────────────────────────────────
@@ -40,22 +41,21 @@ hit =! (node, x, y, dx, dy, left, top, right, bottom) ->
     return node
   s = node.styles
   lent = s.display is 'contents'
-  edged = s.borderStyle?
   unless lent
-    if (s.overflowX ?? s.overflow) is 'hidden'
-      left = Math.max left, nx + (if edged and s.borderLeft isnt false then 1 else 0)
-      right = Math.min right, nx + rect.w - (if edged and s.borderRight isnt false then 1 else 0)
-    if (s.overflowY ?? s.overflow) is 'hidden'
-      top = Math.max top, ny + (if edged and s.borderTop isnt false then 1 else 0)
-      bottom = Math.min bottom, ny + rect.h - (if edged and s.borderBottom isnt false then 1 else 0)
+    if s.overflow? or s.overflowX? or s.overflowY?
+      clipOf s, nx, ny, rect.w, rect.h, left, top, right, bottom
+      left = clipped[0]
+      top = clipped[1]
+      right = clipped[2]
+      bottom = clipped[3]
     dx -= Math.trunc s.contentOffsetX if s.contentOffsetX
     dy -= Math.trunc s.contentOffsetY if s.contentOffsetY
   unless x < left or x >= right or y < top or y >= bottom
     kid = node.lastChild
     while kid
       ks = kid.styles
-      shown = kid.nodeType is 3 or (kid.nodeType is 1 and not (ks.hidden is true or ks.display is 'none'))
-      if shown and (ks?.display is 'contents' or not (x < kid.bl + dx or x >= kid.br + dx or y < kid.bt + dy or y >= kid.bb + dy))
+      seen = kid.nodeType is 3 or (kid.nodeType is 1 and visible ks)
+      if seen and (ks?.display is 'contents' or not (x < kid.bl + dx or x >= kid.br + dx or y < kid.bt + dy or y >= kid.bb + dy))
         deep = hit kid, x, y, dx, dy, left, top, right, bottom
         return deep if deep
       kid = kid.previousSibling

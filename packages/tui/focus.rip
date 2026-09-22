@@ -11,10 +11,15 @@
 # focused node that cannot hold focus loses it to nothing, and a node
 # that arrived with `autofocus` takes it if nothing has it.
 
+# Whether styles `s` show the node and everything under it: neither
+# `hidden` nor `display: 'none'`. The one spelling of it (paint, mouse,
+# screen read it too).
+export visible =! (s) -> not (s.hidden is true or s.display is 'none')
+
 # Whether `node` shuts the keyboard out of itself and all under it.
 shut =! (node) ->
   s = node.styles
-  node.disabled or (s? and (s.hidden is true or s.display is 'none'))
+  node.disabled or (s? and not visible s)
 
 # Whether `node` can hold `doc`'s focus.
 export open =! (node, doc) ->
