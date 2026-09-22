@@ -735,7 +735,9 @@ already in that mode works without the option. Three rules for an app:
 reads stdin through it, and `mount` sends a test's bytes through it. A
 `key` becomes a `keydown`, a `paste` a `paste`, and the terminal's
 `focus` / `blur` reports `screen.focused`. What a text input can rely
-on: `screen.cols` and `screen.rows` are reactive reads of the terminal's size, 80 × 24 before `run`.
+on: `screen.cols` and `screen.rows` are reactive reads of the terminal's
+size, 80 × 24 before `run` and where the stream reports none — a 0
+included, as a pty whose size was never set reports.
 
 - **Typed text is one `key` event per code point**, never per grapheme
   cluster: a cluster can be cut between two reads, and only code points

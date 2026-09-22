@@ -1098,6 +1098,23 @@ test! "`screen.interactive` reads true on a terminal, false on a stdout that is 
   eq screen.interactive, true
   view.close()
 
+test! "a stdout whose columns or rows are 0, as a pty whose size was never set reports, is read as 80 by 24, as one that reports nothing is", ->
+  for [columns, rows] in [[0, 0], [0, 10], [40, 0], [undefined, undefined]]
+    for Out in [Terminal, Pipe]
+      out = Out.new()
+      out.columns = columns
+      out.rows = rows
+      running = run Echo, stdin: Stdin.new(), stdout: out
+      eq [Out.name, columns, rows, screen.cols, screen.rows], [Out.name, columns, rows, columns or 80, rows or 24]
+      quit()
+      await running.done
+      eq out.text, 'x\n', "#{Out.name} #{columns}x#{rows}" if Out is Pipe
+  view = mount Echo, cols: 0, rows: 0
+  try
+    eq [screen.cols, screen.rows, view.frame()], [80, 24, 'x']
+  finally
+    view.close()
+
 test! "the last frame is written once through a real pipe", ->
   child = Child.new 'pipe'
   { code, out, err } = child.finish!

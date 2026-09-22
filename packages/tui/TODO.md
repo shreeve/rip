@@ -73,10 +73,6 @@ steps are in [PLAN.md](PLAN.md).
       caller's own: a test whose app is still live when it fails hands
       its own report to that stream. `test/terminal.rip` quits after
       every test for that; the other suites do not.
-- [ ] A stdout whose `columns` is 0 — a pty whose size was never set,
-      as `script` makes with no terminal behind it — draws frames of no
-      cells, where an undefined `columns` is read as 80 (`screen.rip`)
-      and Ink reads 0 as 80 too.
 
 ## 8. Compiler-side, filed separately
 
