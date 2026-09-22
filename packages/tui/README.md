@@ -235,7 +235,9 @@ back on every way out, by one road:
   `truecolor` 24-bit, `TERM` `256color` 256, and any other terminal
   16. A 24-bit color is drawn as the nearest of xterm's 256 — a color
   on the cube as that point — and below that as the nearest of xterm's
-  16.
+  16. A mount is at full depth whatever the environment says, and
+  `mount App, colors: 16` (or `256`, `0`) draws it as `run` draws on a
+  terminal of that depth, so a test sees the app there.
 - **Console.** While the app runs, every console method that writes
   (`log`, `table`, `group`, `trace`, `assert`, `count`, `time*`, …)
   clears the frame, writes where it always went, and draws the frame
@@ -408,7 +410,7 @@ back, and draws a frame when the test asks for one.
 ```coffee
 import { mount } from 'rip/tui'
 
-view = mount Counter, cols: 40, rows: 10, props: { count: 3 }   # mouse:, keyboard:, selection: as `run` takes them
+view = mount Counter, cols: 40, rows: 10, props: { count: 3 }   # mouse:, keyboard:, selection:, pace: as `run` takes them; colors: 0, 16 or 256
 view.frame()                # "count 3" — lay out, paint, the frame as plain text
 view.app.count.value = 7    # public state is set from outside
 view.frame()                # "count 7"
@@ -467,7 +469,7 @@ mounted at a time: a second `mount`, `run`, or `renderToString` is
 refused by name until the first is closed — close in a `finally`.
 
 `renderToString App, cols: 40` is a mount, one frame, and a close; it
-takes `props`, and `ansi: true` keeps the escape sequences. The rows
+takes `props` and `colors`, and `ansi: true` keeps the escape sequences. The rows
 the app's `Static` items wrote come first, then the frame. A child that
 fails to construct — at the mount, from a key, or from a state set by
 the test — fails the mount, the key, or the next frame with the child's

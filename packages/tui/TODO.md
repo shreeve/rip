@@ -80,9 +80,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 9. Found by the live test runner
 
-- [ ] `mount` always draws at full color depth, so a test cannot see an
-      app at 16 colors or at none: the runner's named colors for a
-      terminal of 16, and its rows with no color at all, are unpinned.
 - [ ] A row `Box` of several `Text`s wraps at a narrow width; the row
       that holds is one `Text` of nested styled runs with `wrap:
       'truncate'`, which the runner found by trial. The README's text

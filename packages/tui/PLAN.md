@@ -1117,10 +1117,11 @@ run App
   `print.err(text)` the same on stderr with the frame cleared on stdout
   first; with no app mounted the text goes to the stream as it is.
 - `mount(App, {cols, rows, props, damage, mouse, keyboard, selection,
-  pace})` → `{app, frame, ansi, bytes, damage, scrollback, stderr, resize,
+  pace, colors})` → `{app, frame, ansi, bytes, damage, scrollback, stderr, resize,
   close, done}`, and for input `{press, type, paste, send, tick,
-  focused, cursor}`, is the test driver (§10), and
-  `renderToString(App, {cols, rows, props, ansi})` is a mount, one
+  focused, cursor}`, is the test driver (§10), with `colors` the depth
+  it draws at (0, 16, 256, or 16777216 by default), and
+  `renderToString(App, {cols, rows, props, colors, ansi})` is a mount, one
   frame, and a close, answering the rows `Static` wrote and then the
   frame.
 - `screen` (`cols`, `rows`, `focused`, `keyboard`, and `selection`, the

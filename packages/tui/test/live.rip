@@ -44,14 +44,15 @@ BUN_FAILURE =! [
 
 # A board over the four lanes, `memory` its last run (null for a first
 # run), and `hear`, which feeds it an event with the lanes' clock at
-# `at` milliseconds and moves the board's clock a tick. The mount is
-# closed when `body` is done, or when the promise it returns settles.
-board =! (memory, body) ->
+# `at` milliseconds and moves the board's clock a tick, on a terminal of
+# `colors`. The mount is closed when `body` is done, or when the promise
+# it returns settles.
+board =! (memory, body, colors = 16777216) ->
   planned = { lanes: LANES(), excluded: [], skipped: [] }
   planned.skipped = planned.lanes.filter (it) -> it.skip
   clockAt = { now: 0 }
   tally = Tally.new planned, { root: '/repo', cores: 10, jobs: 2, ci: false }, memory, -> clockAt.now
-  view = mount Board, cols: 100, rows: 30, pace: PACE, props: { tally }
+  view = mount Board, cols: 100, rows: 30, pace: PACE, colors: colors, props: { tally }
   hear = (at, ...events) ->
     clockAt.now = at
     tally.hear event for event in events
@@ -145,6 +146,55 @@ test "the strip holds one cell per lane in the order they start, and the footer 
     eq frame[1], ' ⠸✗●⊘'
     eq cells.styled(view.ansi)[1], ' «#22d3ee»⠸«#f87171 bold»✗«#4ade80»●«#facc15»⊘'
     eq frame[frame.length - 1], ' 1 passed · 1 failed · 1 skipped · 548 tests             q quit · f failures · ↑↓ choose · ⏎ output'
+
+# Every SGR parameter `text` sends.
+params =! (text) -> Array.from(text.matchAll(/\x1b\[([0-9;]*)m/g), (m) -> m[1].split(';')).flat()
+
+# The lanes of a run with a skip, a pass, a failure, and a lane in flight
+# past its last duration: every color the board draws with but green's
+# blend, which a terminal of 16 has none of.
+colored =! (depth, body) ->
+  board MEMORY(), (({ view, hear, lanes }) ->
+    hear 0, { type: 'plan' }, { type: 'finish', result: { lane: lanes[3], status: 'skip', ms: 0, why: lanes[3].skip, output: '' } }, { type: 'start', lane: lanes[0] }, { type: 'start', lane: lanes[2] }
+    hear 700, { type: 'finish', result: { lane: lanes[2], status: 'pass', ms: 700, ran: 548, output: '548 tests: 548 passed, 0 failed' } }, { type: 'start', lane: lanes[1] }
+    hear 5000, { type: 'finish', result: { lane: lanes[1], status: 'fail', ms: 4300, why: 'exit 1', output: BUN_FAILURE } }
+    hear 60000
+    body view), depth
+
+test "on a terminal of 16 colors every color is one of the named: the strip, the bars, the card and the scrollback rows", ->
+  colored 16, (view) ->
+    frame = cells.styled view.ansi
+    eq frame[1], ' «cyan»⠼«red bold»✗«green»●«yellow»⊘'
+    ok frame[2].startsWith(' «red»████'), 'the whole run, red once a lane fails'
+    ok frame[4].startsWith(' «cyan»⠼«» root (extended tier)  «yellow»████'), "a lane past its last duration, yellow for amber: #{frame[4]}"
+    ok frame[5].startsWith('«red»╭'), 'the card'
+    eq cells.styled(view.scrollback), [
+      '«yellow»⊘«» «yellow»packages/tray«»         «yellow»skipped:«» «yellow»`swift`«» «yellow»is«» «yellow»not«» «yellow»on«» «yellow»PATH'
+      '«green»✓«» packages/time          548 tests    «dim»0.7s«»  «gray»▏«»           «green»−0.1s'
+      '«red bold»✗«» «red bold»packages/sites«»                      «dim»4.3s«»  «red»exit«» «red»1'
+      ''
+    ]
+    sent = params view.ansi + view.scrollback
+    ok sent.length and not sent.some((p) -> p is '38' or p is '48'), 'no color of the 256 or of 24 bits'
+
+test "on a terminal of no color nothing is sent but the text and the card's link, and it reads as it does in color", ->
+  colored 0, (view) ->
+    eq params(view.ansi + view.scrollback), []
+    eq view.ansi.replace(/\x1b\]8;;[^\x1b]*\x1b\\/g, ''), view.frame(), "the frame, the link's escape aside"
+    ok not view.scrollback.includes('\x1b'), 'the scrollback, plain'
+    eq cells.plain(view.scrollback), [
+      '⊘ packages/tray         skipped: `swift` is not on PATH'
+      '✓ packages/time          548 tests    0.7s  ▏           −0.1s'
+      '✗ packages/sites                      4.3s  exit 1'
+      ''
+    ]
+    eq rows(view.frame()).slice(0, 5), [
+      ' rip test:all 3 lanes · 2 at a time · 10 cores                                                 1:00'
+      ' ⠼✗●⊘'
+      ' ████████████████████████████████████████████████████████████████████████████████████████████  100%'
+      ''
+      ' ⠼ root (extended tier)  ████████████████████████████████████████  60.0s / ~50s'
+    ]
 
 test "the terminal's progress indicator follows the run's share, weighed by the last run, and says error once a lane fails", ->
   board MEMORY(), ({ view, hear, lanes }) ->
