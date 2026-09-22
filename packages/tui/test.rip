@@ -2130,6 +2130,33 @@ test "rowsToString is the grid's serializer, plain and with escape sequences", -
   finally
     view.close()
 
+test "a Static under an if that swaps is built once for the new branch, its items written once, and the branch let go leaves no container behind", ->
+  Swap = component
+    @which := 'a'
+    render
+      Box flexDirection: 'column'
+        if @which is 'a'
+          Static
+            for name in ['one', 'two']
+              Text key: name, "a #{name}"
+        else
+          Static
+            for name in ['three']
+              Text key: name, "b #{name}"
+        Text "live #{@which}"
+  view = mount Swap, cols: 20
+  try
+    eq view.frame(), 'live a'
+    eq [view.scrollback, view.held.view.statics.length], ["a one\na two\n", 1]
+    view.app.which.value = 'b'
+    eq view.frame(), 'live b'
+    eq [view.scrollback, view.held.view.statics.length], ["a one\na two\nb three\n", 1], 'the new container stands alone'
+    view.app.which.value = 'a'
+    eq view.frame(), 'live a'
+    eq [view.scrollback, view.held.view.statics.length], ["a one\na two\nb three\na one\na two\n", 1], 'a branch built again is new: its items are written again, once'
+  finally
+    view.close()
+
 test! "examples/log.rip runs headless: the steps scroll into the scrollback as the clock moves, the spinner turns, the warning is printed, and it quits when done or on q", ->
   view = mount BuildLog, cols: 60, rows: 10
   try

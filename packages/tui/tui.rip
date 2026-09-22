@@ -45,15 +45,11 @@ export Newline = component
 # alternate screen it writes nothing (screen.rip).
 export Static = component extends div
   el := null
-  # The node and the screen are taken as plain values: a cleanup that
-  # read the `el` cell would subscribe whatever disposes this component
-  # to it, and the detach that clears the cell would run that again.
   ~>
     return unless el and live
-    node = el
     view = live.view
-    view.statics.push node
-    -> view.statics = view.statics.filter (other) -> other isnt node
+    view.statics.push el
+    -> view.statics = view.statics.filter (other) -> other isnt el
   render
     div ref: el, display: 'none'
       slot
