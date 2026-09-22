@@ -117,7 +117,7 @@ export class Event
 
 paths =! []   # the path of each dispatch under way, kept for the next
 depth = 0
-moves = 0     # `mousemove` listeners registered, so a motion nobody hears allocates no event (mouse.rip)
+moves = 0     # `mousemove` listeners registered on the installed document's nodes, so a motion nobody hears allocates no event (mouse.rip)
 
 export moving =! -> moves > 0
 
@@ -551,6 +551,7 @@ export install =! ->
   if globalThis.document?
     throw Error.new 'rip/tui: a `document` is already installed in this process — a terminal app and a DOM cannot share one'
   doc = Document.new()
+  moves = 0
   held = { Node: globalThis.Node, SVGElement: globalThis.SVGElement }
   held.reporter = __setChildFailureReporter (name, error) -> doc.failed ?= error
   globalThis.document = doc

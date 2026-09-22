@@ -16,6 +16,7 @@
 import { test, eq, ok, throws } from 'rip/testing'
 import { run, quit, mount, screen, focus, Box, Text } from 'rip/tui'
 import { intern } from '../paint.rip'
+import { Target } from '../document.rip'
 import { Terminal, Stdin, find, idOf, count, differs, tally } from './events/harness.rip'
 
 CSI   =! '\x1b['
@@ -505,13 +506,23 @@ test "a motion that keeps its target dispatches nothing without a mousemove list
     trail = []
     for type in ['mouseenter', 'mouseleave']
       document.addEventListener type, ((event) -> trail.push event.type), true
-    view.send move(1, 0) + move(2, 0) + move(3, 0)
+    view.send move(1, 0)
     eq trail, ['mouseenter', 'mouseenter', 'mouseenter'], 'the body, the column, the row: once each'
-
-    moves = []
-    document.addEventListener 'mousemove', (event) -> moves.push event
-    view.send move(4, 0) + move(5, 0)
-    eq [moves.length, moves[0] isnt moves[1], trail.length], [2, true, 3]
+    # Every dispatch, whether or not anyone listens.
+    dispatched = 0
+    sent = Target.prototype.dispatchEvent
+    Target.prototype.dispatchEvent = (event) ->
+      dispatched += 1
+      sent.call this, event
+    try
+      view.send move(2, 0) + move(3, 0)
+      eq dispatched, 0, 'no listener, no event'
+      moves = []
+      document.addEventListener 'mousemove', (event) -> moves.push event
+      view.send move(4, 0) + move(5, 0)
+      eq [dispatched, moves.length, moves[0] isnt moves[1], trail.length], [2, 2, true, 3]
+    finally
+      Target.prototype.dispatchEvent = sent
 
 # ==[ Modes ]==
 
