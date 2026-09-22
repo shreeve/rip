@@ -87,8 +87,8 @@ export watch =! (first) ->
   { read: (-> held), write: ((next) -> held = next) }
 
 # A cursor as a node keeps it: `{ x, y }` in whole cells from its corner.
-# One outside the node's box is kept and not shown (screen.rip), as one
-# a clip hides is not: a state that is stale for a frame moves the
+# One outside what the node inks is kept and not shown (screen.rip), as
+# one a clip hides is not: a state that is stale for a frame moves the
 # cursor away, never the app.
 spot =! (value) ->
   return null unless value

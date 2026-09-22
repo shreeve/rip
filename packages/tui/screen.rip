@@ -11,10 +11,10 @@
 # record of it: a frame first takes the cursor back to the top-left,
 # then draws, then parks it again, all in the one write.
 
-import { tend } from './focus.rip'
+import { tend, visible } from './focus.rip'
 import { failed } from './document.rip'
 import { layout } from './layout.rip'
-import { Grid, paint, diff, overlay, still, rowsToString } from './paint.rip'
+import { Grid, paint, diff, overlay, still, rowsToString, clipped, clipOf } from './paint.rip'
 
 PACE =! 8     # the least milliseconds between two frames
 PASSES =! 32  # the most layouts one frame may take to settle
@@ -25,8 +25,7 @@ showing =! (node, body) ->
     node = node.parentNode
     return false unless node
     return true if node is body
-    s = node.styles
-    return false if s.hidden is true or s.display is 'none'
+    return false unless visible node.styles
 
 # Lay the document out until a pass moves nothing. A binding that reads
 # a node's box changes the tree it measured, so one change can take a
@@ -202,25 +201,25 @@ export class Screen
   place: ->
     node = @doc.active
     return null unless node?.cursor
-    { x: cx, y: cy } = node.cursor
-    # The cell after the last column is a place: an insertion point.
-    return null unless cx >= 0 and cy >= 0 and cx <= node.rect.w and cy < node.rect.h
-    x = node.rect.x + cx
-    y = node.rect.y + cy
+    x = node.rect.x + node.cursor.x
+    y = node.rect.y + node.cursor.y
+    # A place is a cell the node inks — its box, and words of its own
+    # that spill past it — as the hit test has it (mouse.rip); the cell
+    # after the last column is a place too, an insertion point.
+    return null unless x >= node.bl and x <= node.br and y >= node.bt and y < node.bb
     up = node
     while up = up.parentNode
       s = up.styles
+      # A `contents` node lends its children to its parent and is never
+      # drawn: its offsets and clip count for nothing, as the painter and
+      # the hit test (mouse.rip) have it.
+      continue if s.display is 'contents'
       x -= Math.trunc s.contentOffsetX if s.contentOffsetX
       y -= Math.trunc s.contentOffsetY if s.contentOffsetY
       continue unless s.overflow? or s.overflowX? or s.overflowY?
       rect = up.rect
-      edged = s.borderStyle?
-      if (s.overflowX ?? s.overflow) is 'hidden'
-        return null if x < rect.x + (if edged and s.borderLeft isnt false then 1 else 0)
-        return null if x >= rect.x + rect.w - (if edged and s.borderRight isnt false then 1 else 0)
-      if (s.overflowY ?? s.overflow) is 'hidden'
-        return null if y < rect.y + (if edged and s.borderTop isnt false then 1 else 0)
-        return null if y >= rect.y + rect.h - (if edged and s.borderBottom isnt false then 1 else 0)
+      clipOf s, rect.x, rect.y, rect.w, rect.h, -Infinity, -Infinity, Infinity, Infinity
+      return null if x < clipped[0] or x >= clipped[2] or y < clipped[1] or y >= clipped[3]
     y -= @front.top
     if x >= 0 and x < @front.cols and y >= 0 and y < @front.rows then { x, y } else null
 

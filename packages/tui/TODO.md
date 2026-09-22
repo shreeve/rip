@@ -6,15 +6,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 1. The closing audit — code
 
-- [ ] The clip and offset arithmetic is copied into `paint.rip:820`,
-      `mouse.rip:44` and `screen.rip:200` — sixteen border-inset
-      expressions, six content-offset pairs — and "is this subtree
-      shown" is spelled five ways (`focus.rip:17`, `screen.rip:29`,
-      `mouse.rip:57`, `paint.rip:618`, `layout.rip:688`), one of them
-      (`s.hidden` truthy against `is true`) differently. One `clipOf`
-      and `offsetOf` in `paint.rip` and one `shown` in `focus.rip`,
-      imported; and a fuzz that holds `locate(x, y)` to the node whose
-      `draw` last wrote that cell.
 - [ ] Focus is recorded three times — `doc.active`, `doc.lit`,
       `node.glow` — kept in step only by `take` (`focus.rip:52`). A
       fuzz of focus, blur, remove and disable holding `activeElement
