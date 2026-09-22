@@ -105,7 +105,10 @@ Run one with `rip examples/ink/counter.rip`.
 the same tree, node for node, against the same fake 200×60 terminal —
 each in a fresh process, five times, and writes
 [bench/RESULTS.md](bench/RESULTS.md):
-every number reproduces with `bun run bench`.
+every number reproduces with `bun run bench`. The line count needs Ink's
+source at `misc/ink` and a Yoga checkout at 3.2.1, the version Ink 7.1.1
+ships — `misc/yoga`, or the checkout `YOGA_SRC` names — and `bun run
+lines` refuses any other version, so the count is of the Yoga Ink runs on.
 Ink is measured as a careful React app is written:
 React's production build, memoized rows, `interactive: true`,
 incremental rendering on, its frame throttle lifted, every update

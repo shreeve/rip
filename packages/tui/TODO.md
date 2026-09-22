@@ -6,10 +6,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 2. The closing audit — docs
 
-- [ ] `bun run bench` refuses without a Yoga checkout at the
-      `yoga-layout` version Ink ships (3.2.1), and `misc/yoga` is
-      `main`. README and PLAN §11 say `YOGA_SRC` and the version; step
-      6's exit holds only then.
 - [ ] README's prose quotes numbers `bench/RESULTS.md` does not: a
       select-list key 8 µs, a no-op 0.3, 55 at a hundred items
       (RESULTS: 5.5, 0.2, 42); motion 0.5 µs and a click 1 µs "on
