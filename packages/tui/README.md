@@ -450,7 +450,10 @@ the frame. `damage` counts the cells the frame owed, which is how a
 test holds an update to a small repaint; `mount App, damage: false`
 (and `run`) owes every cell of every frame, for a frame to compare
 against. A `quit` from the app closes the mount and resolves
-`view.done` with its value.
+`view.done` with its value, and first draws the last frame, as `run`
+does: what the quitting turn added to `Static` is in `view.scrollback`,
+and what it changed is in `view.ansi`, with no `frame()` asked for. A
+`close()` by hand draws nothing.
 
 `bytes`, `damage` and `cursor` describe the last `frame()`: a frame that
 draws nothing leaves `bytes` empty and `damage` 0, and the OSC 52 write

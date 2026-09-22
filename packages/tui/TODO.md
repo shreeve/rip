@@ -80,10 +80,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 9. Found by the live test runner
 
-- [ ] A mount closed by `quit` draws no last frame, where `run` does:
-      what the quitting turn added to `Static`, or changed in the
-      frame, reaches neither `view.scrollback` nor the frame unless the
-      test calls `view.frame()` before the quit lands.
 - [ ] `mount` always draws at full color depth, so a test cannot see an
       app at 16 colors or at none: the runner's named colors for a
       terminal of 16, and its rows with no color at all, are unpinned.

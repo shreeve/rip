@@ -1502,6 +1502,29 @@ test! "a quit from a mounted app closes the mount and resolves done", ->
   eq typeof document, 'undefined'
   throws (-> view.frame()), 'this mount is closed'
 
+test! "a mount closed by quit draws its last frame, as run does: the quitting turn's Static items reach the scrollback and its change the frame; a close by hand draws nothing", ->
+  Finisher = component
+    @done := []
+    @over := false
+    ~> quit() if @over
+    render
+      Box flexDirection: 'column'
+        Static
+          for name in @done
+            Text key: name, "✓ #{name}"
+        Text "#{if @over then 'all done' else 'working'}"
+  view = mount Finisher, cols: 20
+  eq view.frame(), 'working'
+  view.app.done.value = ['one']
+  view.app.over.value = true
+  await view.done
+  eq [view.scrollback, bare(view.ansi)], ["✓ one\n", 'all done']
+  view = mount Finisher, cols: 20
+  eq view.frame(), 'working'
+  view.app.done.value = ['two']
+  view.close()
+  eq [view.scrollback, bare(view.ansi)], ['', 'working'], 'a close by hand leaves the frame as the test last drew it'
+
 # ==[ Damage: a frame paints and compares the cells a change owes ]==
 
 console.log "\nDamage"
