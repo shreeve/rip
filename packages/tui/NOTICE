@@ -29,8 +29,9 @@ SOFTWARE.
 
 The text wrapping and truncation rules, the border and background
 painting, and the tests under test/ink/ follow Ink
-(https://github.com/vadimdemedes/ink). Ink is distributed under this
-license:
+(https://github.com/vadimdemedes/ink), and the four .tsx files under
+examples/ink/ are Ink's own examples, copied unmodified beside their
+ports. Ink is distributed under this license:
 
 MIT License
 

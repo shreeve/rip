@@ -1,0 +1,32 @@
+# Ink's use-focus example: three items, Tab and Shift-Tab move focus
+# between them, Escape lets it go. Ink's use-focus.tsx is beside this
+# file; its `useFocus` hook is a focusable node here, styled by its
+# own `focused`, and Ink's Escape is a listener on the root box, which
+# hears every key a focused item is sent.
+#
+#   rip examples/ink/use-focus.rip
+
+import { run, focus, Box, Text } from 'rip/tui'
+
+Item = component
+  @label := ''
+  el := null
+
+  render
+    span ref: el, focusable: true
+      "#{@label} "
+      if el?.focused
+        Text color: 'green', "(focused)"
+
+export Focus = component
+  reset: (event) -> focus.to null if event.key is 'Escape'
+
+  render
+    Box flexDirection: 'column', padding: 1, @keydown: @reset
+      Box marginBottom: 1
+        Text "Press Tab to focus next element, Shift+Tab to focus previous element, Esc to reset focus."
+      Item label: 'First'
+      Item label: 'Second'
+      Item label: 'Third'
+
+run Focus if import.meta.main

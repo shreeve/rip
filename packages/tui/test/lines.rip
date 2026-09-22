@@ -1,0 +1,39 @@
+# The line counts of the examples ported from Ink (examples/ink/), by
+# the rule PLAN §2 counts by: non-blank, non-comment lines. A line is
+# a comment when it is nothing else — `//` or a `/* … */` block in
+# TypeScript, `#` in Rip — and a line of code that ends in a comment
+# counts. The README carries the table this prints.
+#
+#   rip test/lines.rip
+
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
+export EXAMPLES =! ['counter', 'borders', 'use-focus', 'static']
+
+# The code lines of the source at `path`.
+export count =! (path) ->
+  inside = false   # of a block comment
+  lines = 0
+  for line in readFileSync(path, 'utf8').split '\n'
+    text = line.trim()
+    if inside
+      inside = not text.includes '*/'
+      continue
+    continue if text is '' or text.startsWith('#') or text.startsWith('//')
+    if text.startsWith '/*'
+      inside = not text.includes '*/'
+      continue
+    lines += 1
+  lines
+
+# Each example's counts, Ink's tsx against the rip.
+export table =! ->
+  dir = join(import.meta.dir, '..', 'examples', 'ink')
+  for name in EXAMPLES
+    { name, ink: count(join dir, "#{name}.tsx"), rip: count(join dir, "#{name}.rip") }
+
+if import.meta.main
+  console.log "| Example | Ink | Rip TUI |\n|---|---|---|"
+  for row in table()
+    console.log "| `#{row.name}` | #{row.ink} | #{row.rip} |"
