@@ -50,7 +50,7 @@ bun install                # once, at the repository root
 rip examples/counter.rip   # from packages/tui: ↑ and ↓ count, Ctrl-C quits
 ```
 
-`run` returns `{ app, done, quit, flush }`; `done` resolves with the
+`run` returns `{ app, done, quit, flush }`, and `run App, props: {…}` hands the component its initial public state, as `mount` does; `done` resolves with the
 value given to `quit`. Ctrl-C quits. The last frame stays in the
 scrollback and the cursor lands on the line below it.
 
@@ -257,8 +257,8 @@ scrollback (below).
 | `position` (`'relative'`, `'absolute'`, `'static'`) with `top`, `right`, `bottom`, `left` | |
 | `aspectRatio`, `boxSizing`, `display` (`'flex'`, `'none'`, `'contents'`), `hidden` | |
 | `borderStyle`: `single`, `double`, `round`, `bold`, `singleDouble`, `doubleSingle`, `classic`, `arrow`, or an object of eight glyphs; `borderTop` / `borderRight` / `borderBottom` / `borderLeft: false` drops an edge | `contentOffsetX`, `contentOffsetY` — shift a box's children; a scroll is a repaint and runs no layout |
-| `overflow`, `overflowX`, `overflowY`: `'visible'` or `'hidden'` (clips to the padding box) | |
-| On `Text`: `wrap` — `'wrap'` (the default: words wrap, and a word longer than the line breaks), `'hard'`, `'truncate'` / `'truncate-end'`, `'truncate-start'`, `'truncate-middle'` (with `…`) | On `Text`: `link` — a URL; the words are a hyperlink (OSC 8) |
+| `overflow`, `overflowX`, `overflowY`: `'visible'` or `'hidden'` (clips to the padding box; a box that scrolls its children keeps to its parent's size with `flexShrink: 1`, since the default is 0) | |
+| On `Text`: `wrap` — `'wrap'` (the default: words wrap, and a word longer than the line breaks), `'hard'`, `'truncate'` / `'truncate-end'`, `'truncate-start'`, `'truncate-middle'` (with `…`) There is no no-wrap mode: to keep a line on one row and scroll it, give the text a `width` wider than any line and shift it with `contentOffsetX` (`truncate` cuts at the box's width before the offset shifts it). | On `Text`: `link` — a URL; the words are a hyperlink (OSC 8) |
 
 Text is measured by grapheme cluster — a flag, a family emoji, a letter
 with its combining marks each take the cells a terminal gives them —
@@ -439,6 +439,13 @@ test holds an update to a small repaint; `mount App, damage: false`
 against. A `quit` from the app closes the mount and resolves
 `view.done` with its value.
 
+`bytes`, `damage` and `cursor` describe the last `frame()`: a frame that
+draws nothing leaves `bytes` empty and `damage` 0, and the OSC 52 write
+of a release sits in `bytes` until the next frame. `send` coordinates
+are the terminal's: once `Static` or `print` has written rows above the
+frame, the frame's row `r` is terminal row `min(rows written, rows −
+frame height) + r`.
+
 The terminal document is a global of the process, so one app is
 mounted at a time: a second `mount`, `run`, or `renderToString` is
 refused by name until the first is closed — close in a `finally`.
@@ -513,7 +520,7 @@ prevented:
 
 | Key | Does | Keep the key with |
 |---|---|---|
-| Tab, Shift-Tab (no Ctrl, Alt or Meta) | focus to the next or the previous node | `event.preventDefault()` — a text input that takes Tab |
+| Tab, Shift-Tab — a Shift-Tab arrives as `Tab` with `shiftKey` (no Ctrl, Alt or Meta) | focus to the next or the previous node | `event.preventDefault()` — a text input that takes Tab |
 | Ctrl-C | `quit()` | `event.preventDefault()` — an app that asks before it leaves |
 | Escape | nothing: closing a dialog or clearing an input is the app's | |
 
@@ -727,7 +734,7 @@ already in that mode works without the option. Three rules for an app:
 reads stdin through it, and `mount` sends a test's bytes through it. A
 `key` becomes a `keydown`, a `paste` a `paste`, and the terminal's
 `focus` / `blur` reports `screen.focused`. What a text input can rely
-on:
+on: `screen.cols` and `screen.rows` are reactive reads of the terminal's size, 80 × 24 before `run`.
 
 - **Typed text is one `key` event per code point**, never per grapheme
   cluster: a cluster can be cut between two reads, and only code points

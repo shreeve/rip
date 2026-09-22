@@ -6,16 +6,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 2. The closing audit — docs
 
-- [ ] README idioms an app needs and cannot find: there is no no-wrap
-      mode (a `width` wider than any line, then `contentOffsetX`;
-      `truncate` cuts before the offset shifts); `screen.cols` and
-      `screen.rows` are never named; `run App, props:`; `bytes`,
-      `damage` and `cursor` describe the last `frame()` only, and a
-      release's OSC 52 is in `bytes` until the next; `send` coordinates
-      are the terminal's, shifted by the rows `Static` and `print`
-      wrote above; Shift-Tab arrives as `Tab` with `shiftKey`; a text
-      that changes size runs a whole layout (about 0.5 ms at 4,000
-      nodes); the `flexShrink: 0` default beside `overflow`.
 - [ ] Stale comments: `terminal.rip:204` says an unanswered probe is
       "taken to be the bottom" where the origin is `Infinity` and
       reports are dropped; `screen.rip`'s progress comment says never
