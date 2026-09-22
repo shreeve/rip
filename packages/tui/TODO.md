@@ -77,10 +77,3 @@ steps are in [PLAN.md](PLAN.md).
 - A spelling for a capture listener in a render block. The package reads
   a type that ends in `Capture` (`@keydownCapture:`), since `@name:` is
   always `addEventListener(name, handler)` with no third argument.
-
-## 9. Found by the live test runner
-
-- [ ] A row `Box` of several `Text`s wraps at a narrow width; the row
-      that holds is one `Text` of nested styled runs with `wrap:
-      'truncate'`, which the runner found by trial. The README's text
-      section does not say so.

@@ -268,6 +268,28 @@ scrollback (below).
 | `overflow`, `overflowX`, `overflowY`: `'visible'` or `'hidden'` (clips to the padding box; a box that scrolls its children keeps to its parent's size with `flexShrink: 1`, since the default is 0) | |
 | On `Text`: `wrap` — `'wrap'` (the default: words wrap, and a word longer than the line breaks), `'hard'`, `'truncate'` / `'truncate-end'`, `'truncate-start'`, `'truncate-middle'` (with `…`) There is no no-wrap mode: to keep a line on one row and scroll it, give the text a `width` wider than any line and shift it with `contentOffsetX` (`truncate` cuts at the box's width before the offset shifts it). | On `Text`: `link` — a URL; the words are a hyperlink (OSC 8) |
 
+A row of runs in several styles — a mark, a name, a count — is one
+`Text` with a `Text` nested for each run, and `wrap: 'truncate'` keeps
+it to one row, cut with `…` where its box is too narrow for it:
+
+```coffee
+Row = component
+  render
+    Text wrap: 'truncate'
+      Text color: 'green', "✓ "
+      Text bold: true, "packages/time"
+      Text dimColor: true, "  548 tests  0.7s"
+```
+
+At 18 columns that is `✓ packages/time  …`. A row `Box` of the same
+three `Text`s is a flex row of three items instead: too narrow for them
+it spills past its box, and with `flexShrink: 1` on each it wraps each
+text in a column of its own. There is no `Line` widget for this: it
+would be `Text wrap: 'truncate'` by another name, and the runs are
+already the text's own children. `scripts/test-live.rip` draws every
+row of its board this way, from runs it computes: a `for` of nested
+`Text`s, each with the run's style as `style:`.
+
 Text is measured by grapheme cluster — a flag, a family emoji, a letter
 with its combining marks each take the cells a terminal gives them —
 and control characters are stripped when the text is set: styling

@@ -258,8 +258,9 @@ export PAINT =! { dim: ((text) -> tint 2, text), red: ((text) -> tint 31, text) 
 
 # ── The board ─────────────────────────────────────────────────────────────────
 
-# One row of styled runs of text: runs nested in one text, which a
-# terminal too narrow for the row cuts short with `…` instead of wrapping.
+# One row of styled runs of text, as packages/tui's README writes a row:
+# the runs nested in one text, which a terminal too narrow for the row
+# cuts short with `…` instead of wrapping. The runs are `seg`s.
 Line = component
   @segs := []
   render

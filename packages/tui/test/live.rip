@@ -328,7 +328,7 @@ test "a complete run is remembered for the next: each passing lane's time, its c
   finally
     rmSync root, { recursive: true, force: true }
 
-test "a terminal under 70 columns keeps each lane in flight to its spinner, name and time, and one under 40 drops the strip", ->
+test "a terminal under 70 columns keeps each lane in flight to its spinner, name and time, one under 40 drops the strip, and a row too wide is cut short, never wrapped", ->
   board MEMORY(), ({ view, hear, lanes }) ->
     hear 0, { type: 'plan' }, { type: 'start', lane: lanes[0] }
     hear 12000
@@ -340,6 +340,8 @@ test "a terminal under 70 columns keeps each lane in flight to its spinner, name
     frame = rows view.frame()
     ok frame[1].includes('%'), 'the whole run is the second row'
     ok not frame.some((row) -> row.includes '··⊘'), 'and the strip is gone'
+    eq frame.length, 5, 'every row one row: the header, the bar, a blank row, the lane, the footer'
+    eq frame[4], ' 0 passed · 0 failed · 0 skipped · …', 'the footer, too wide, is cut short with …'
 
 test! "q quits the board mid-run, with no exit code of its own", ->
   board! MEMORY(), ({ view, hear, lanes }) ->
