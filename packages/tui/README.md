@@ -536,13 +536,14 @@ disabled loses focus to nothing — the next Tab starts from the top —
 and hears `blur`. `autofocus: true` is a claim made once, when the node
 arrives, as HTML's is: the first such node in tree order takes focus if
 nothing has it, and never takes it from a node that does. A node that
-is disabled, or not `focusable`, when its claim is settled never claims
-again — enable it and it waits for Tab or `focus()` — where Ink's
+is disabled when its claim is settled never claims again — enable it
+and it waits for Tab or `focus()` — where Ink's
 `useFocus({autoFocus, isActive})` takes focus whenever it becomes
-active. Inside a `focus` or `blur` listener every read agrees with the
-event: `document.activeElement`, `focus.active` and `el.focused` say
-the node has focus as it hears `focus`, and that nothing has it as it
-hears `blur`.
+active; `autofocus` on a node that is not `focusable` is refused by
+name when its claim is settled. Inside a `focus` or `blur` listener
+every read agrees with the event: `document.activeElement`,
+`focus.active` and `el.focused` say the node has focus as it hears
+`focus`, and that nothing has it as it hears `blur`.
 
 ```coffee
 el.focus()                 # take focus, if the node can hold it

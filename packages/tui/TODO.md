@@ -53,9 +53,6 @@ steps are in [PLAN.md](PLAN.md).
       closes leaves the keyboard with the root element until Tab; giving
       focus back to the node that had it before the dialog took it — and
       holding Tab inside a dialog while it is open — is undecided.
-- [ ] `autofocus` on a node that is not `focusable` claims nothing, in
-      silence: the two switches arrive in either order, so neither write
-      can refuse the other's absence.
 - [ ] Tab walks the tree from the focused node, passing over shut
       subtrees whole: unmeasured on a tree of 10,000 nodes.
 - [ ] A select list that marks its choice with one binding an item

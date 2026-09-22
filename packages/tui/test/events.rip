@@ -570,16 +570,60 @@ test "claims are settled in tree order, whatever order they were made in", ->
     find('b').set 'autofocus', true
     eq idOf(view.focused), 'b'
 
-test "`autofocus` on a node that cannot take focus claims nothing", ->
+test "`autofocus` on a disabled node claims nothing", ->
   Cannot = component
     render
       Box
-        Box id: 'a', autofocus: true
-          Text "a"
+        Box id: 'a', disabled: true
+          Box id: 'inner', autofocus: true
+            Text "a"
         Box id: 'b', focusable: true, autofocus: true, disabled: true
           Text "b"
+        Box id: 'c', autofocus: true, disabled: true
+          Text "c"
   mounted Cannot, {}, (view) ->
     eq view.focused, null
+
+test "`autofocus` on a node that is not `focusable` is refused by name where the claim is settled, whichever switch came first", ->
+  Unfit = component
+    @late := false
+    render
+      Box flexDirection: 'column'
+        Box id: 'plain', autofocus: true
+          Text "plain"
+        if @late
+          Box id: 'late', autofocus: true
+            Text "late"
+  refused = "rip/tui: autofocus on <div> that is not focusable — write focusable: true"
+  view = mount Unfit, cols: 20
+  try
+    throws (-> view.frame()), "#{refused} (on div > div[data-part=Box] > div#plain[data-part=Box])"
+    eq view.focused, null, 'the claim was settled when it was refused'
+    view.app.late.value = true
+    throws (-> view.focused), "#{refused} (on div > div[data-part=Box] > div#late[data-part=Box])"
+  finally
+    view.close()
+  Fit = component
+    render
+      Box flexDirection: 'column'
+        Box id: 'first', autofocus: true, focusable: true
+          Text "first"
+        Box id: 'second', focusable: true, autofocus: true
+          Text "second"
+  mounted Fit, {}, (view) ->
+    eq idOf(view.focused), 'first'
+    for order in [['autofocus', 'focusable'], ['focusable', 'autofocus']]
+      focus.to null
+      node = document.createElement 'div'
+      node.set 'id', order[0]
+      node.set key, true for key in order
+      document.body.firstChild.appendChild node
+      eq idOf(view.focused), order[0], order.join ' then '
+    node = document.createElement 'div'
+    node.set 'id', 'unfit'
+    document.body.firstChild.appendChild node
+    node.set 'autofocus', true
+    throws (-> view.frame()), "#{refused} (on div > div[data-part=Box] > div#unfit)"
 
 test "`screen.focused` follows the terminal's focus reports", ->
   Shown = component
@@ -1190,7 +1234,7 @@ test "random trees under random change: focus is always a node that can hold it,
         node.set 'focusable', true if rand() < 0.7
         node.set 'disabled', true if rand() < 0.08
         node.set 'hidden', true if rand() < 0.06
-        node.set 'autofocus', true if rand() < 0.15
+        node.set 'autofocus', true if rand() < 0.15 and node.focusable
         hear = (event) ->
           trail.push "#{idOf node} #{event.eventPhase}"
           if meddle and event.eventPhase > 1

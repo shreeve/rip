@@ -194,7 +194,7 @@ the terminal cannot honor throws a named error.
 | Text `data` setter (same-value short-circuit, marks dirty) | | `value`, `checked`, `innerHTML`, `textContent` |
 | `setAttribute`, `removeAttribute`, `toggleAttribute` | | `querySelector`, `document.head` (transitions) |
 | `addEventListener`, `removeEventListener`, `dispatchEvent` on every node and on the document: capture, target and bubble phases, `target`, `currentTarget`, `eventPhase`, `stopPropagation`, `preventDefault` (§7) | | Unknown style keys, with a suggestion |
-| `focus()`, `blur()`, `focused`, `document.activeElement`; the attributes `focusable`, `autofocus`, `disabled`, `cursor` (§7) | | A `cursor` that is not `{ x, y }` in whole cells; a switch that is not true or false |
+| `focus()`, `blur()`, `focused`, `document.activeElement`; the attributes `focusable`, `autofocus`, `disabled`, `cursor` (§7) | | A `cursor` that is not `{ x, y }` in whole cells; a switch that is not true or false; `autofocus` on a node that is not `focusable` |
 | Globals: `document`, `Node` (base class of every node), an `SVGElement` stub | | |
 
 `div` is a box and `span` is text. Comments are zero-size anchors.
@@ -894,7 +894,10 @@ and a focusable node inside a focusable node is reached after it.
   `tend` gives focus to the first claimant in tree order that can hold
   it, if nothing has it, and drops every claim either way: a node that
   arrives never takes focus from a node that has it (a dialog calls
-  `focus()`), and a claim is not made again when focus is let go.
+  `focus()`), and a claim is not made again when focus is let go. A
+  claim on a node that is not `focusable` is refused by name as it is
+  settled, since the two switches arrive in either order; one on a
+  disabled node claims nothing.
 - **`focus` and `blur` pair up.** The node that had focus hears `blur`
   before the one that takes it hears `focus`; a listener of the blur
   that moves focus itself has the last word. The state is written
