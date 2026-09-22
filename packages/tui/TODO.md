@@ -44,8 +44,6 @@ steps are in [PLAN.md](PLAN.md).
       the reconciler's keyed `for` walks the list again. An append
       costs 151 µs over 1,000, 173 over 4,000, 274 over 8,000
       (`rip bench/tui.rip static N`).
-- [ ] `Static`'s items are elements; a bare text under `Static` is
-      never hidden and is painted again with every batch.
 
 ## 6. Input and focus
 

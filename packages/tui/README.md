@@ -785,7 +785,9 @@ An item is laid out at the terminal's width, with the items that arrive
 in the same frame, in tree order; `Static`'s own props — `padding`,
 `margin`, `backgroundColor` — go around each such batch. Once written,
 an item is done: a change to its state or its removal from the list
-changes nothing on the terminal. An item under a hidden ancestor waits
+changes nothing on the terminal. An item is an element: a bare text
+under `Static` is refused by name as it is put there — wrap it in
+`Text`. An item under a hidden ancestor waits
 until it is shown. Off a terminal the rows go out as plain text as they
 arrive; on the alternate screen nothing is written above. `examples/log.rip`
 is a build log this way, with a spinner and a progress bar for the

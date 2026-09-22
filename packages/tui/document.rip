@@ -251,6 +251,10 @@ export class Node extends Target
     if before then before.nextSibling = node else @firstChild = node
     if ref then ref.previousSibling = node else @lastChild = node
     node.parentNode = this
+    # `Static` writes elements once and puts them away; a text is no
+    # element to put away, so it would be painted again with every batch.
+    if node.nodeType is 3 and @attributes?.get('data-part') is 'Static'
+      throw blame Error.new("rip/tui: a bare text under Static is no item it can write once — wrap it in Text"), node
     if @tagName is 'span' and node.tagName is 'span'
       for own key, value of node.styles when value isnt undefined
         if KIND.get(key) is 'layout'

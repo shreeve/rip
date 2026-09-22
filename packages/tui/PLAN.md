@@ -562,7 +562,9 @@ of their own, and written through `Screen.above` — the frame's rows
 cleared, the rows written where they were, the frame drawn again whole
 below, in the frame's one write, the frame's origin moved down by the
 rows written — and then hidden, so the live frame never holds them and
-what happens to them later is nobody's. `print` takes the same road
+what happens to them later is nobody's. An item is an element, since
+only an element can be put away: a bare text under `Static` is refused
+by name as it is inserted. `print` takes the same road
 with a line of text, and console capture (§8) will. On the alternate
 screen `Static` is a documented no-op and nothing accumulates.
 

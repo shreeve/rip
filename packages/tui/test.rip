@@ -2155,6 +2155,39 @@ test "renderToString is the rows written above and then the frame, plain or with
   eq renderToString(Only, cols: 20), "a\nb"
   eq renderToString(Only, cols: 20, ansi: true), "\x1b[31ma\x1b[0m\n\x1b[31mb\x1b[0m"
 
+test "a bare text under Static is refused by name as it is put there, where a Text item is written once", ->
+  refused = "rip/tui: a bare text under Static is no item it can write once — wrap it in Text"
+  Loose = component
+    render
+      Box flexDirection: 'column'
+        Static
+          "loose"
+        Text "live"
+  throws (-> mount(Loose, cols: 20).close()), "#{refused} (on div[data-part=Static] > text)"
+  Late = component
+    @steps := []
+    render
+      Box flexDirection: 'column'
+        Static
+          for step in @steps
+            "#{step}"
+        Text "live"
+  view = mount Late, cols: 20
+  try
+    eq view.frame(), 'live'
+    throws (-> view.app.steps.value = ['a']), "#{refused} (on div > div[data-part=Box] > div[data-part=Static] > text)"
+  finally
+    view.close()
+  view = mount Journal, cols: 20, props: { done: ['a'] }
+  try
+    view.frame()
+    view.app.done.value = ['a', 'b']
+    view.frame()
+    view.frame()
+    eq view.scrollback, "a\nb\n"
+  finally
+    view.close()
+
 test "print writes above the frame, ending its line; print.err the same on stderr, the frame cleared on stdout first", ->
   view = mount Journal, cols: 20
   try
