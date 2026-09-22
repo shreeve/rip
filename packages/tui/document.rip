@@ -348,6 +348,7 @@ export class Element extends Node
     @attributes = null
     @road = null
     @styled = null
+    @still = false     # written above the frame by `Static` (screen.rip): its display stays none
     @focusable = @autofocus = @disabled = false
     @cursor = null
     @glow = null
@@ -361,6 +362,7 @@ export class Element extends Node
       throw blame error, this
 
   put: (key, value) ->
+    value = 'none' if key is 'display' and @still
     if kept key
       (@attributes ?= Map.new()).set key, value
       return

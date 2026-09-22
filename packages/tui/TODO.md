@@ -6,10 +6,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 1. The closing audit — code
 
-- [ ] `Screen.still` (`screen.rip:104`) walks every `Static` container
-      and every child on every frame, so N appends cost O(N²): 149 µs
-      each over 1,000 and 348 over 8,000 (`rip bench/tui.rip static 8`).
-      Keep a per-container cursor of the children already written.
 - [ ] The clip and offset arithmetic is copied into `paint.rip:820`,
       `mouse.rip:44` and `screen.rip:200` — sixteen border-inset
       expressions, six content-offset pairs — and "is this subtree
@@ -126,7 +122,10 @@ steps are in [PLAN.md](PLAN.md).
       compiled. Warm the bench longer, or make the path smaller.
 - [ ] A `Static` batch lays its container out as a root, and the
       body's next layout puts the container away again by visiting
-      every item under it: a walk as long as the list, per batch.
+      every item under it: a walk as long as the list, per batch, and
+      the reconciler's keyed `for` walks the list again. An append
+      costs 151 µs over 1,000, 173 over 4,000, 274 over 8,000
+      (`rip bench/tui.rip static N`).
 - [ ] `Static`'s items are elements; a bare text under `Static` is
       never hidden and is painted again with every batch.
 - [ ] A line that ends exactly at a space at the cell width keeps that

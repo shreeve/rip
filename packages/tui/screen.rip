@@ -57,6 +57,7 @@ export class Screen
     @after = null    # run after every frame: the pointer looks again at what is under it
     @statics = []          # the `Static` containers mounted (tui.rip), in the order they arrived
     @written = WeakSet.new()   # the items written above the frame
+    @tail = WeakMap.new()      # each container's last item written, where the next look starts
     @scrollback = ''       # everything written above the frame so far, as it was written
     @lead = ''             # what the next frame's write begins with: the rows written above the frame
     @osc = ''              # the progress report the next frame's write carries
@@ -106,13 +107,24 @@ export class Screen
     @batching = true
     try
       for el in @statics
+        # Items arrive at the end, so the look starts after the last one
+        # written; an item that went away sends it back to the front.
+        last = @tail.get el
+        kid = if last and last.parentNode is el then last.nextSibling else el.firstChild
         fresh = []
-        for kid in el.childNodes when kid.nodeType is 1
-          if @written.has kid then (kid.set 'display', 'none' if kid.styles.display isnt 'none') else fresh.push kid
+        while kid
+          fresh.push kid if kid.nodeType is 1 and not @written.has kid
+          kid = kid.nextSibling
         continue unless fresh.length and showing el, @doc.body
         grid = still el, @cols
         @above rowsToString(grid, @interactive) + '\n' if grid.rows
-        @written.add kid for kid in fresh
+        # Written, an item is put away at once and stays away whatever its
+        # own component writes (document.rip), so no later look revisits it.
+        for kid in fresh
+          @written.add kid
+          kid.still = true
+          kid.set 'display', 'none'
+        @tail.set el, fresh[fresh.length - 1]
     finally
       @batching = false
 

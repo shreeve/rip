@@ -142,6 +142,33 @@ def mounted(App, body)
 
 console.log "\nPackage"
 
+test "a Static container is looked at from its last written item: an item taken away sends the look back to the front, and nothing is written twice", ->
+  Log = component
+    @items := ['a', 'b']
+    render
+      Box flexDirection: 'column'
+        Static
+          for item in @items
+            Text key: item, "done #{item}"
+        Text "live"
+  view = mount Log, cols: 20
+  try
+    view.frame()
+    eq view.scrollback, "done a\ndone b\n"
+    view.app.items.value = ['a', 'b', 'c']
+    view.frame()
+    eq view.scrollback, "done a\ndone b\ndone c\n"
+    view.app.items.value = ['a', 'b']          # the last written item goes away
+    view.frame()
+    view.app.items.value = ['a', 'b', 'd']     # the look starts over and finds only what is not written
+    view.frame()
+    eq view.scrollback, "done a\ndone b\ndone c\ndone d\n"
+    view.app.items.value = ['a', 'b', 'd']
+    view.frame()
+    eq view.scrollback, "done a\ndone b\ndone c\ndone d\n", 'nothing is written twice'
+  finally
+    view.close()
+
 test "module exports the entry surface and nothing else", ->
   eq Object.keys(mod).sort(), ['Box', 'Newline', 'Spacer', 'Static', 'Text', 'clock', 'focus', 'mount', 'print', 'quit', 'renderToString', 'run', 'screen', 'suspend']
 
