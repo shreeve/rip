@@ -47,6 +47,50 @@ run App
 value given to `quit`. Ctrl-C quits. The last frame stays in the
 scrollback and the cursor lands on the line below it.
 
+## Running
+
+`run App, options` takes the terminal for the app's life and gives it
+back on every way out, by one road:
+
+- **Exit.** `quit()`, Ctrl-C, a listener that throws, a frame that
+  fails, or a script whose loop drains: the last frame stays in the
+  scrollback, the cursor lands below it, and stdin, the terminal's
+  modes and the process's handlers are as they were. A failure leaves
+  what reached the screen, and `done` rejects with it.
+- **Signals.** SIGINT, SIGTERM and SIGHUP give the terminal back and
+  exit with 128 plus the signal's number. An uncaught error or an
+  unhandled rejection gives it back, prints the error, and exits 1; a
+  `process.exit` with the app live gives it back on the way.
+- **Suspend.** Ctrl-Z gives the terminal back and stops the process as
+  the shell would; `fg` draws the app again, whole, at the terminal's
+  size now. It is a default action of `keydown`, preventable like
+  Ctrl-C. `suspend fn` is the same road without the signal — the
+  terminal is `fn`'s until it settles:
+
+  ```coffee
+  import { suspend } from 'rip/tui'
+  suspend! -> Bun.spawn(['vim', path], stdio: ['inherit', 'inherit', 'inherit']).exited
+  ```
+
+  A key that arrives meanwhile is nobody's; a `quit` meanwhile closes
+  the app without taking the terminal back.
+- **Alternate screen.** `run App, altScreen: true` draws on the
+  terminal's alternate screen from its top-left; every way out leaves
+  it after the last frame, so the frame vanishes and the shell's own
+  screen comes back where it was. `Static` is nothing there.
+- **CI and pipes.** On a stdout that is no terminal, or with `CI` set,
+  nothing is asked of the terminal and the last frame alone is
+  written, as text, at exit; `screen.interactive` reads false.
+- **Colors.** The depth is read once at `run` — `NO_COLOR`,
+  `FORCE_COLOR` 0 to 3, else `COLORTERM` and `TERM` — and
+  `screen.colors` reads it: 0, 16, 256 or 16777216. A 24-bit color is
+  drawn as the nearest the terminal has.
+- **Console.** While the app runs, `console.log` and its four siblings
+  clear the frame, write the line where it always went, and draw the
+  frame again below it, so logs scroll into the scrollback above the
+  app; on the alternate screen they are kept and replayed at exit.
+  `run App, console: false` leaves the console alone.
+
 ## Widgets and styles
 
 A box is a `div` and text is a `span`. `Box`, `Text`, and `Spacer` are
@@ -596,7 +640,13 @@ mode and under a frame taller than the terminal, the events and their
 road, the modes' bytes on every way out, the probe and both answers,
 the selection's cells, overlay, damage and clipboard bytes, and a fuzz
 of random trees and random cells where the hit target must be the node
-the painter put there. `test/yoga.rip` runs Yoga's
+the painter put there. `test/terminal.rip` holds every way out to one
+rule — Ink's suspend, exit, error, console and CI cases
+(`test/terminal/SOURCE.md`), the signals and the crash in a spawned
+process, Ctrl-Z and `suspend` byte for byte, the alternate screen, a
+stdout that is no terminal, the color depth, the console, and a fuzz
+of keys, resizes, logs and suspends that holds the terminal's modes
+to what the app believes after every step. `test/yoga.rip` runs Yoga's
 543 generated layout cases, vendored unmodified under `test/yoga/`
 (MIT, © Meta Platforms), against the engine through a shim of the
 `yoga-layout` API. `test/yoga-aspect.rip` is a port of Yoga's 37

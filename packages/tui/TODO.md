@@ -53,13 +53,6 @@ steps are in [PLAN.md](PLAN.md).
 - [ ] A select list that marks its choice with one binding an item
       (`inverse: n is at`) pays for every item on every arrow key: about
       55 µs at a hundred items where ten cost 8 (`bun run keys`).
-- [ ] `run`'s stdin and mode handling — raw mode, bracketed paste,
-      focus reports, the mouse modes, the cursor probe, the kitty
-      query and its pushed flag — is `listen`, `answer` and `close` in
-      `tui.rip`; it moves into `terminal.rip`'s setup and teardown with
-      the lifecycle (PLAN §8), where Ctrl-Z and the signals need it:
-      a suspend must pop the flag and withdraw the mouse, and a resume
-      ask for both again.
 - [ ] After a resize the frame's row is asked of the terminal again
       from what was the top-left; a terminal whose reflow moves the
       cursor off that row places clicks wrongly until the next resize.
@@ -70,7 +63,20 @@ steps are in [PLAN.md](PLAN.md).
 - [ ] `mouseenter` and `mouseleave` carry the terminal's cell and the
       other target, not `x`, `y` from the corner of each node they reach.
 
-## 7. Compiler-side, filed separately
+## 7. The terminal
+
+- [ ] The last frame written on a stdout that is no terminal is the
+      grid's own text: clipped to the stream's `rows` (24 when it says
+      nothing), and at a forced depth padded to its width, since a row
+      with a background cannot be trimmed blind. `rowsToString` (PLAN
+      §6) is the serializer it should share with `Static`.
+- [ ] A log while the console is captured is written to the run's
+      stdout, as Ink writes it, even when that is a stream of the
+      caller's own: a test whose app is still live when it fails hands
+      its own report to that stream. `test/terminal.rip` quits after
+      every test for that; the other suites do not.
+
+## 8. Compiler-side, filed separately
 
 - A typed vocabulary for non-HTML hosts, so `rip check` and the editor
   accept terminal props (PLAN §14).
