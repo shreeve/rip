@@ -595,7 +595,7 @@ test "a wide character cut by a clip edge is a space in its style", ->
           Text backgroundColor: 'blue'
             "日本語"
   eq renderToString(Cut, cols: 6), "日"
-  eq renderToString(Cut, cols: 6, ansi: true), "\x1b[44m日 \x1b[0m   "
+  eq renderToString(Cut, cols: 6, ansi: true), "\x1b[44m日 \x1b[0m"
 
 test "content offsets shift a box's children, and owe a paint but no layout", ->
   Scrolled = component
@@ -672,7 +672,7 @@ test "text's own background fills its glyph cells and no more", ->
       Box width: 8
         Text backgroundColor: 'yellow'
           "ab"
-  eq renderToString(Marked, cols: 8, ansi: true), "\x1b[43mab\x1b[0m      "
+  eq renderToString(Marked, cols: 8, ansi: true), "\x1b[43mab\x1b[0m"
 
 test "'default' is the terminal's own color: it stands against an ancestor's color and the background beneath", ->
   Bare = component
@@ -710,7 +710,7 @@ test "a link wraps its words in OSC 8, nested text inherits it, and a plain fram
             "docs"
           Text link: 'https://example.com/other'
             "!"
-  eq renderToString(Linked, cols: 16, ansi: true), "see #{OPEN 'https://example.com/a?b=1;c'}the \x1b[1mdocs\x1b[0m#{OPEN 'https://example.com/other'}!#{SHUT}   "
+  eq renderToString(Linked, cols: 16, ansi: true), "see #{OPEN 'https://example.com/a?b=1;c'}the \x1b[1mdocs\x1b[0m#{OPEN 'https://example.com/other'}!#{SHUT}"
   eq renderToString(Linked, cols: 16), "see the docs!"
   # Over a box's background the words keep their link and the box does not take it.
   Panel = component
@@ -732,7 +732,7 @@ test "a link that wraps is closed on every row and opened again on the next, its
           "abcdefgh"
   eq renderToString(Long, cols: 5, ansi: true).split('\n'), [
     "#{OPEN 'https://example.com'}ab cd#{SHUT}"
-    "\x1b[31m#{OPEN 'https://example.com'} ef\x1b[0m#{SHUT}  "
+    "\x1b[31m#{OPEN 'https://example.com'} ef#{SHUT}\x1b[0m"
     "#{OPEN 'https://example.com'}abcd…#{SHUT}"
   ]
 
@@ -852,7 +852,7 @@ test "a border that straddles a clip edge is cut there, column by column", ->
         Box width: 4, height: 3, marginLeft: 3, borderStyle: 'single', flexShrink: 0
           Text "ab"
   rows = renderToString(Straddle, cols: 10, ansi: true).split '\n'
-  eq rows, ["   ┌──    ", "   │ab    ", "   └──    "]
+  eq rows, ["   ┌──", "   │ab", "   └──"]
   Under = component
     render
       Box width: 6, height: 2, overflowY: 'hidden'
@@ -2080,7 +2080,7 @@ test "an item under a hidden ancestor waits, and is written once shown", ->
 
 test "renderToString is the rows written above and then the frame, plain or with escape sequences", ->
   eq renderToString(Journal, cols: 20, props: { done: ['a', 'b'] }), "a\nb\nlive"
-  eq renderToString(Journal, cols: 20, props: { done: ['a', 'b'], live: '' }), "a\nb\n"
+  eq renderToString(Journal, cols: 20, props: { done: ['a', 'b'], live: '' }), "a\nb", 'an empty text is no row'
   Only = component
     render
       Static
@@ -2236,12 +2236,15 @@ test "the frame catches up when the timer is late, and the interval defaults to 
 test "a clock never runs where the output is not interactive", ->
   fake = timers()
   Quiet = component
+    @shown := false
     tick = clock 70, fake
     render
-      Text "#{tick.frame}"
+      Text (if @shown then "#{tick.frame}" else 'still')
   view = mount Quiet, cols: 20
   try
     view.held.view.interactive = false
+    eq view.frame(), 'still'
+    view.app.shown.value = true
     eq view.frame(), '0'
     eq fake.afters, 0
   finally

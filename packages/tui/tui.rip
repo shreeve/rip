@@ -3,7 +3,8 @@
 # into events; `mount` does the same off any terminal, draws when a test
 # asks, and takes the test's keys by the same road.
 
-import { install, failed, Event } from './document.rip'
+import { __effect } from '../../src/runtime/reactive.js'
+import { install, failed, watch, Event } from './document.rip'
 import { tend, take, advance } from './focus.rip'
 import { Parser } from './input.rip'
 import { Screen } from './screen.rip'
@@ -33,19 +34,110 @@ export Newline = component
   render
     span "\n".repeat(@count)
 
-# Items written once above the live frame, into the scrollback.
+# Items written once above the live frame, into the scrollback, and
+# never painted in the frame: `Static` around a keyed `for`. Each item
+# is painted when it first appears, at the terminal's width, with the
+# items that appear in the same frame, in tree order; a change to it or
+# its removal afterwards changes nothing written. The box's own styles
+# — padding, margins, a background — go around each batch. On the
+# alternate screen it writes nothing (screen.rip).
 export Static = component extends div
+  el := null
+  # The node and the screen are taken as plain values: a cleanup that
+  # read the `el` cell would subscribe whatever disposes this component
+  # to it, and the detach that clears the cell would run that again.
+  ~>
+    return unless el and live
+    node = el
+    view = live.view
+    view.statics.push node
+    -> view.statics = view.statics.filter (other) -> other isnt node
   render
-    div display: 'none'
+    div ref: el, display: 'none'
       slot
 
-# Text written above the live frame; `print.err` the same on stderr.
-export print =! (text) ->
-print.err = (text) ->
+# Text written above the live frame, its line ended, by the road a
+# `Static` item takes (`Screen.above`); `print.err` writes it to stderr,
+# with the frame cleared on stdout first. With no app mounted the text
+# goes to the stream as it is.
+export print =! (text, err = null) ->
+  text = String text
+  text += '\n' unless text.endsWith '\n'
+  return (err ?? process.stdout).write text unless live
+  live.view.above text, err
+print.err = (text) -> print text, live?.out.err ?? process.stderr
 
 # ── Animation ─────────────────────────────────────────────────────────────────
 
-export clock =! (interval = 100, timers = null) -> { frame: 0, time: 0, delta: 0 }
+# The timers a clock runs on outside a test: the process's own, which
+# never keep it alive by themselves.
+TIMERS =! { now: (-> performance.now()), after: (ms, fn) -> (timer = setTimeout fn, ms; timer.unref?(); -> clearTimeout timer) }
+
+# A clock: `frame`, `time` and `delta` as reactive reads, moved by one
+# timer for its interval. The timer runs only while a component that
+# holds the clock is mounted and something has read it — on the mount's
+# own clock under `mount`, so `view.tick` moves it — and never off a
+# terminal. A component holds the clock it makes in its body
+# (`tick = clock 80`) and lets go when it unmounts, which stops the
+# timer once no holder is left; a clock made outside any component is
+# held for good, and its timer stops when the app closes.
+class Tick
+  constructor: (@interval) ->
+    @cell = watch { frame: 0, time: 0, delta: 0 }
+    @holders = 0
+    @cancel = null   # the running timer's cancel, while it runs
+    @timers = null   # a timer source given by hand, a test's
+    @source = null
+    @began = @last = 0
+
+  get frame: -> @read().frame
+  get time: -> @read().time
+  get delta: -> @read().delta
+
+  read: ->
+    @start() if not @cancel and @holders and live and live.view.interactive isnt false
+    @cell.read()
+
+  start!: ->
+    @source = @timers ?? live.clock ?? TIMERS
+    @began = @last = @source.now()
+    @cancel = @source.after @interval, => @beat()
+
+  # The timer is set again before the cells are written, so a reader
+  # that runs again on the write finds it running.
+  beat!: ->
+    @cancel = null
+    unless @holders and live
+      @stop()
+      return
+    @cancel = @source.after @interval, => @beat()
+    now = @source.now()
+    @cell.write Object.freeze { frame: Math.floor((now - @began) / @interval), time: now - @began, delta: now - @last }
+    @last = now
+
+  stop!: ->
+    @cancel?()
+    @cancel = null
+    @cell.write { frame: 0, time: 0, delta: 0 }
+
+  release!: ->
+    @holders -= 1
+    @stop() unless @holders
+
+clocks =! Map.new()
+
+# The clock for `interval` milliseconds (100 by default, and where the
+# interval is no number); `timers` is a `{ now, after }` of a test's
+# own to run it on.
+export clock =! (interval = 100, timers = null) ->
+  interval = if Number.isFinite(interval) then Math.max(1, interval) else 100
+  tick = clocks.get interval
+  clocks.set interval, tick = Tick.new interval unless tick
+  tick.timers = timers if timers
+  __effect ->
+    tick.holders += 1
+    -> tick.release()
+  tick
 
 # ── The mounted app ───────────────────────────────────────────────────────────
 
@@ -62,7 +154,9 @@ class Viewport
   get focused: -> shown
   get keyboard: -> keyboard
   get selection: -> selected
-  progress: (value) ->
+  # Progress on the terminal's own indicator: 0 to 1, 'error',
+  # 'indeterminate', or null to clear (screen.rip).
+  progress: (value) -> live?.view.progress value
 
 # The terminal's size, whether it is the window the user is in (its
 # focus reports), and whether its keyboard is enhanced, as reactive
@@ -200,11 +294,15 @@ act! =! (held, event) ->
   else if event.key is 'c' and event.ctrlKey and not (event.altKey or event.metaKey)
     quit()
 
-# A clock a test moves by hand, for the parser's waits.
+# A clock a test moves by hand, for the parser's waits and the
+# animation clocks: `tick` runs what falls due in order, the time
+# standing at each as it runs.
 class Clock
   constructor: ->
     @time = 0
     @due = []
+
+  now: -> @time
 
   after: (ms, fn) ->
     entry = { at: @time + ms, fn }
@@ -212,10 +310,15 @@ class Clock
     => @due = @due.filter (other) -> other isnt entry
 
   tick!: (ms) ->
-    @time += ms
-    ready = @due.filter((entry) => entry.at <= @time).sort (a, b) -> a.at - b.at
-    @due = @due.filter (entry) => entry.at > @time
-    entry.fn() for entry in ready
+    stop = @time + ms
+    loop
+      next = null
+      next = entry for entry in @due when entry.at <= stop and (not next or entry.at < next.at)
+      break unless next
+      @due = @due.filter (entry) -> entry isnt next
+      @time = next.at
+      next.fn()
+    @time = stop
 
 # Put `App` on a terminal document of its own, to be drawn to `out`.
 # The document is a global of the process, so one app is mounted at a
@@ -307,7 +410,7 @@ class Mount
   # What was written above the frame so far, as it was written, and
   # what stderr was sent.
   get scrollback: -> @held.view.scrollback
-  get stderr: -> @held.err.sent
+  get stderr: -> @held.out.err.sent
 
   # The cells the last frame owed: those it painted and compared.
   get damage: -> @held.view.owed
@@ -352,12 +455,12 @@ class Mount
   close!: -> close false if live is @held
 
 # Mount `App` once on a terminal of `cols` by `rows` that only keeps
-# what it is sent. With no `rows` it is as tall as the frame.
+# what it is sent, with a stderr of the same kind. With no `rows` it is
+# as tall as the frame.
 export mount =! (App, options = {}) ->
   out = { columns: options.cols ?? 80, rows: options.rows ?? Infinity, sent: '', write: (text) -> @sent += text }
-  held = open App, options, out, false, null, Clock.new()
-  held.err = { sent: '', write: (text) -> @sent += text }
-  Mount.new held
+  out.err = { sent: '', write: (text) -> @sent += text }
+  Mount.new open(App, options, out, false, null, Clock.new())
 
 # Give the terminal and the process back: the cursor, the listeners, the
 # `document` slot. `drawn` leaves the last frame in the scrollback; a
@@ -404,12 +507,21 @@ export quit =! (result) ->
   queueMicrotask ->
     close true, null, result if live is held
 
-# The frame `App` draws in `cols` columns, as text — plain by default,
-# with escape sequences when `ansi` is set: mount, one frame, close.
+# Text with its escape sequences taken out, and each row's trailing
+# blanks with them.
+SGR =! /\x1b\[[0-9;]*m|\x1b\]8;;[^\x1b]*\x1b\\/g
+bare =! (text) -> (line.replace(SGR, '').trimEnd() for line in text.split '\n').join '\n'
+
+# What `App` draws in `cols` columns, as text — plain by default, with
+# escape sequences when `ansi` is set: mount, one frame, close. The
+# rows its `Static` items wrote come first, then the frame.
 export renderToString =! (App, options = {}) ->
   view = mount App, options
   try
     text = view.frame()
-    if options.ansi then view.ansi else text
+    above = view.scrollback
+    above = above.slice 0, -1 if above.endsWith('\n') and not view.held.view.front.rows
+    above = bare above unless options.ansi
+    above + (if options.ansi then view.ansi else text)
   finally
     view.close()

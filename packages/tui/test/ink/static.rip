@@ -23,7 +23,9 @@ console.log "\nStatic"
 # Ink's debug output is every static item written so far and then the
 # live frame, which is what a terminal shows: the scrollback, then the
 # frame.
-shown =! (view) -> cells.plain view.scrollback + view.frame()
+shown =! (view) ->
+  frame = view.frame()
+  cells.plain view.scrollback + frame
 
 mounted =! (App, options, body) ->
   view = mount App, { cols: 100, ...options }

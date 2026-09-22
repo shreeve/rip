@@ -203,7 +203,7 @@ test "on the grid a baseless mark draws nothing: no cell is its own, and none is
   grid.write 0, 0, "#{ACUTE}Xy", red
   eq Array.from(grid.wide), [1, 1, 1, 1]
   eq grid.toString(), 'Xy'
-  eq grid.toString(true), "#{ESC}[31mXy#{ESC}[0m  "
+  eq grid.toString(true), "#{ESC}[31mXy#{ESC}[0m"
 
 test "a cluster is as wide as string-width 8 says: a spacing mark takes a cell, a mark above takes none", ->
   bengali = [0x9AC, 0x9BE, 0x982, 0x9B2, 0x9BE].map(at).join ''
