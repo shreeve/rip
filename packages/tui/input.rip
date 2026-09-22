@@ -74,7 +74,9 @@ RUN     =! 1024        # the reads of a paste joined into one string
 
 STREAM =! { stream: true }
 WHOLE  =! { ignoreBOM: true }   # a byte-order mark is a character, not the decoder's to take
-TIMERS =! { after: (ms, fn) -> (timer = setTimeout fn, ms; -> clearTimeout timer) }
+# The timers the package runs on outside a test: the process's own, which
+# never keep it alive by themselves (the clock in tui.rip reads them too).
+export TIMERS =! { now: (-> performance.now()), after: (ms, fn) -> (timer = setTimeout fn, ms; timer.unref?(); -> clearTimeout timer) }
 
 BODY =! /^[\d;:]*$/
 STOP =! /[\x07\x1b]/g
@@ -245,7 +247,7 @@ export class Parser
   # is let go.
   flush: ->
     out = []
-    @settle out
+    @lapse out
     @half = ''
     @utf8.decode()
     out
@@ -285,13 +287,13 @@ export class Parser
 
   expire!: ->
     out = []
-    @settle out
+    @lapse out
     @late? out if out.length
 
   # What is held when its wait runs out: ESC alone is the Escape key, a
   # bare introducer is Alt and its character, an open paste ends as what
   # was collected, and anything else is discarded.
-  settle!: (out) ->
+  lapse!: (out) ->
     @stop?()
     @stop = null
     state = @state

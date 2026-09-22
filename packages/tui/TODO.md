@@ -6,13 +6,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 1. The closing audit — code
 
-- [ ] One word, several meanings: `settle` (screen, layout, input,
-      tui), `probe` (terminal, layout, paint), `frame` (`Screen`, the
-      border in paint, `Tick`), `refresh` (a text flow; tui's whole
-      redraw, also named `held.redraw`), `watched` (tui's alias of
-      terminal's `interactive`, beside terminal's own `watched`);
-      `PASSES` is 32 in screen and 4 in paint; `TIMERS` is defined in
-      tui and in input. Rename the local ones; export one `TIMERS`.
 - [ ] `Screen` is built and then has `whole`, `interactive`, `alt`,
       `origin`, `after` and `failed` set from `tui.rip:276`, and its
       constructor initialises the same fields to values always

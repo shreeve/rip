@@ -59,7 +59,7 @@ export depth =! (out) ->
 
 # Whether the app is on a terminal someone is watching: what `run`
 # read of its stdout, on the screen (`Screen.interactive`).
-watched =! (held) -> held.terminal and held.view.interactive
+awake =! (held) -> held.terminal and held.view.interactive
 
 # A stream that keeps nothing: where frames go while the terminal is
 # another's, so the screen sees the size and writes nothing.
@@ -93,7 +93,7 @@ export setup! =! (held) ->
   return if held.up or not held.terminal
   held.up = true
   { out, stdin, view } = held
-  if watched held
+  if awake held
     out.write HIDE
     if stdin?.isTTY and typeof stdin.setRawMode is 'function'
       stdin.setRawMode true
@@ -127,7 +127,7 @@ down =! (held, drawn) ->
     catch caught
       error ?= caught
   { out, stdin, view } = held
-  if watched held
+  if awake held
     step -> held.pointer?.clear()
     if held.raw
       step -> out.write (if held.pushed then POP else '') + (if held.mouse then track(held.mouse, false) else '') + WITHDRAW
@@ -252,7 +252,7 @@ export reply =! (held, event) ->
 # change books one as ever, and the resume draws whole.
 pause! =! (held) ->
   held.suspended = true
-  held.view.out = Quiet.new held.out if watched held
+  held.view.out = Quiet.new held.out if awake held
 
 # Take the terminal again — unless the app was closed meanwhile — ask
 # the questions again, forget the press whose release was never seen
@@ -279,7 +279,7 @@ resume! =! (held) ->
 # and nothing changes hands. Refused while one is under way.
 export handover =! (held, fn) ->
   throw Error.new 'rip/tui: the terminal is already suspended — resume before suspending again' if held.suspended
-  if watched(held) and (error = down held, true)
+  if awake(held) and (error = down held, true)
     setup held
     throw error
   pause held
@@ -301,7 +301,7 @@ export handover =! (held, fn) ->
 # the app is closed before it wakes. Nothing on a stdout that is no
 # terminal, on Windows, or while a hand-over is under way.
 export stop! =! (held) ->
-  return unless watched(held) and process.platform isnt 'win32' and not held.suspended
+  return unless awake(held) and process.platform isnt 'win32' and not held.suspended
   down held, true
   pause held
   held.hold = setInterval (->), 0x7fffffff

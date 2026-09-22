@@ -6,11 +6,11 @@
 import { __effect } from '../../src/runtime/reactive.js'
 import { install, failed, watch, Event } from './document.rip'
 import { tend, take, advance } from './focus.rip'
-import { Parser } from './input.rip'
+import { Parser, TIMERS } from './input.rip'
 import { Screen } from './screen.rip'
 import { Pointer } from './mouse.rip'
 import { palette } from './paint.rip'
-import { guard, setup, probe, reply, teardown, handover, stop as halt, ask, interactive as watched, depth as depthOf } from './terminal.rip'
+import { guard, setup, probe, reply, teardown, handover, stop as halt, ask, interactive as attended, depth as depthOf } from './terminal.rip'
 
 # ── Widgets ───────────────────────────────────────────────────────────────────
 # A box is a div and text is a span. Every prop a widget does not
@@ -67,9 +67,6 @@ print.err = (text) -> print text, live?.err ?? process.stderr
 
 # ── Animation ─────────────────────────────────────────────────────────────────
 
-# The timers a clock runs on outside a test: the process's own, which
-# never keep it alive by themselves.
-TIMERS =! { now: (-> performance.now()), after: (ms, fn) -> (timer = setTimeout fn, ms; timer.unref?(); -> clearTimeout timer) }
 
 # A clock: `frame`, `time` and `delta` as reactive reads, moved by one
 # timer for its interval. The timer runs only while a component that
@@ -275,7 +272,7 @@ open =! (App, options, out, terminal, stdin = null, clock = undefined) ->
   { doc, restore } = install()
   view = Screen.new doc, out
   view.whole = options.damage is false
-  view.interactive = not terminal or watched out
+  view.interactive = not terminal or attended out
   view.alt = terminal and view.interactive and options.altScreen is true
   # On a terminal the frame sits wherever the cursor was, which the
   # probe answers; until then, and where nothing answers, at the bottom.
@@ -289,7 +286,7 @@ open =! (App, options, out, terminal, stdin = null, clock = undefined) ->
   palette depth
   held = null
   # The next frame is drawn whole, at the size the terminal has now.
-  refresh = ->
+  redraw = ->
     cols = view.cols
     rows = view.rows
     held.pointer?.clear()
@@ -298,13 +295,13 @@ open =! (App, options, out, terminal, stdin = null, clock = undefined) ->
   # A resize reflows the terminal, so where the frame sits is asked again.
   resized = ->
     return if view.cols is cols and view.rows is rows
-    refresh()
+    redraw()
     ask held if held.mouse and held.raw and not view.alt
   settled = {}
   done = Promise.new (resolve, reject) ->
     settled.resolve = resolve
     settled.reject = reject
-  live = held = { app: null, view, out, err: options.stderr ?? out.err ?? process.stderr, doc, restore, resized, redraw: refresh, done, settled, terminal, depth, console: options.console isnt false, closing: false, over: false, parser: null, stdin, read: null, clock, mouse, pointer: null, probing: keys is 'enhanced', asked: false, enhanced: false, pushed: false, raw: false, up: false, entered: false, suspended: false, wake: null, hold: null, handlers: null, was: null, logs: [], close: (drawn, error = null) -> close drawn, error if live is held }
+  live = held = { app: null, view, out, err: options.stderr ?? out.err ?? process.stderr, doc, restore, resized, redraw, done, settled, terminal, depth, console: options.console isnt false, closing: false, over: false, parser: null, stdin, read: null, clock, mouse, pointer: null, probing: keys is 'enhanced', asked: false, enhanced: false, pushed: false, raw: false, up: false, entered: false, suspended: false, wake: null, hold: null, handlers: null, was: null, logs: [], close: (drawn, error = null) -> close drawn, error if live is held }
   held.parser = Parser.new { clock, late: (events) -> receive held, events }
   held.read = (chunk) -> receive held, held.parser.feed chunk
   if mouse

@@ -17,7 +17,7 @@ import { layout } from './layout.rip'
 import { Grid, paint, diff, overlay, still, rowsToString, clipped, clipOf } from './paint.rip'
 
 PACE =! 8     # the least milliseconds between two frames
-PASSES =! 32  # the most layouts one frame may take to settle
+LAYOUTS =! 32  # the most layouts one frame may take to settle
 
 # Whether every node above `node`, up to `body`, is shown.
 showing =! (node, body) ->
@@ -30,11 +30,11 @@ showing =! (node, body) ->
 # Lay the document out until a pass moves nothing. A binding that reads
 # a node's box changes the tree it measured, so one change can take a
 # pass per reader in a chain; readers that never agree are refused.
-settle =! (doc, cols) ->
+converge =! (doc, cols) ->
   passes = 0
   while doc.moved
-    if (passes += 1) > PASSES
-      throw Error.new "rip/tui: layout did not settle in #{PASSES} passes — a binding keeps changing the box it reads, so no size satisfies it"
+    if (passes += 1) > LAYOUTS
+      throw Error.new "rip/tui: layout did not settle in #{LAYOUTS} passes — a binding keeps changing the box it reads, so no size satisfies it"
     doc.moved = false
     layout doc.body, cols
   return
@@ -157,7 +157,7 @@ export class Screen
     @last = performance.now()
     failed @doc
     tend @doc
-    settle @doc, @cols
+    converge @doc, @cols
     @doc.stale = false
     tall = @doc.body.rect.h
     shown = Math.min tall, @rows

@@ -208,8 +208,8 @@ BORDERS =! {
   singleDouble: '╓─╖║╜─╙║', doubleSingle: '╒═╕│╛═╘│', classic: '+-+|+-+|', arrow: '↘↓↙←↖↑↗→'
 }
 
-frames =! Map.new()
-probe =! Flow.new()
+outlines =! Map.new()
+gauge =! Flow.new()
 
 # The eight cells of a border style: one of the names, or an object that
 # gives each part a glyph of its own, one cell wide. A node keeps a copy
@@ -224,16 +224,16 @@ glyphsOf =! (style, key = 'borderStyle') ->
   unless custom or (typeof style is 'string' and BORDERS[style])
     throw Error.new "rip/tui: #{key}: #{JSON.stringify style} is not one of #{Object.keys(BORDERS).join ', '}, or an object of #{PARTS.join ', '}"
   name = if custom then "#{style.topLeft}\n#{style.top}\n#{style.topRight}\n#{style.right}\n#{style.bottomRight}\n#{style.bottom}\n#{style.bottomLeft}\n#{style.left}" else style
-  cells = frames.get name
+  cells = outlines.get name
   return cells if cells
   cells = Uint32Array.new 8
   for part, n in PARTS
     text = if custom then style[part] else String.fromCodePoint BORDERS[style].codePointAt(n)
-    probe.set (if typeof text is 'string' then text else ''), null
-    unless typeof text is 'string' and sanitize(text) is text and probe.count is 1 and probe.span(0) is 1
+    gauge.set (if typeof text is 'string' then text else ''), null
+    unless typeof text is 'string' and sanitize(text) is text and gauge.count is 1 and gauge.span(0) is 1
       throw Error.new "rip/tui: #{key}: #{part}: #{JSON.stringify text} is not a border glyph — write one printing character, one cell wide"
-    cells[n] = probe.code 0
-  frames.set name, cells
+    cells[n] = gauge.code 0
+  outlines.set name, cells
   cells
 
 # ── Values ────────────────────────────────────────────────────────────────────
@@ -447,8 +447,8 @@ export class Grid
 
   # One line of any text at (x, y). Answers the column after the last.
   write: (x, y, text, id) ->
-    probe.set text, null
-    if probe.ascii then @ascii(x, y, text, 0, text.length, id) else @units(x, y, probe, 0, probe.count, id)
+    gauge.set text, null
+    if gauge.ascii then @ascii(x, y, text, 0, text.length, id) else @units(x, y, gauge, 0, gauge.count, id)
 
   # A rectangle of spaces in one style: a background covers what lies
   # under it. A wide glyph the rectangle's side cuts is blanked.
@@ -696,7 +696,7 @@ survey! =! (node, dx, dy, damage) ->
 # between the top and bottom edges that show. Each edge takes its own
 # color, background and dimming, else the border's. A frame wholly
 # outside the clip, or too small to hold its edges, draws nothing.
-frame! =! (grid, s, x, y, w, h) ->
+border! =! (grid, s, x, y, w, h) ->
   cells = glyphsOf s.borderStyle
   top = if s.borderTop is false then 0 else 1
   bottom = if s.borderBottom is false then 0 else 1
@@ -839,7 +839,7 @@ draw! =! (grid, node, inherited, dx, dy, left, top, right, bottom) ->
       r = edge s, 'borderRight'
       b = edge s, 'borderBottom'
       grid.fill x + l, y + t, rect.w - l - r, rect.h - t - b, intern(null, s.backgroundColor, 0)
-    frame grid, s, x, y, rect.w, rect.h if edged
+    border grid, s, x, y, rect.w, rect.h if edged
   if s.overflow? or s.overflowX? or s.overflowY?
     clipOf s, x, y, rect.w, rect.h, left, top, right, bottom
     left = clipped[0]
@@ -868,7 +868,7 @@ lent =! (node, owner, id) ->
   styleOf node, lent(node.parentNode, owner, id)
 
 patch = null   # the damage the paint under way is held to
-PASSES =! 4    # the most paints one frame may take
+PAINTS =! 4    # the most paints one frame may take
 
 # Paint the tree onto a grid. With no `damage` that is every node, onto
 # a grid the caller cleared. With it, `grid` is a scratch for the frame
@@ -906,7 +906,7 @@ export paint! =! (grid, node, damage = null, front = null) ->
     draw grid, node, 0, 0, 0, 0, grid.top, grid.cols, grid.top + grid.rows
     damage.passes += 1
     break unless grid.cut
-    throw Error.new "rip/tui: a paint did not settle in #{PASSES} passes — a wide glyph is cut by a row that is owed whole" if damage.passes >= PASSES
+    throw Error.new "rip/tui: a paint did not settle in #{PAINTS} passes — a wide glyph is cut by a row that is owed whole" if damage.passes >= PAINTS
   grid.clip 0, -FAR, grid.cols, FAR
 
 # ── Sweep ─────────────────────────────────────────────────────────────────────
@@ -941,7 +941,7 @@ sweep! =! (grid) ->
     records.push record
     shelf(record.fg, record.bg).set record.key, n
   evict grid.ch
-  frames.clear()
+  outlines.clear()
 
 # ── Grid → bytes ──────────────────────────────────────────────────────────────
 
