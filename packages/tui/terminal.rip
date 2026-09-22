@@ -1,0 +1,13 @@
+# The terminal, for the app's life: what `run` asks of it and gives
+# back — raw mode, the modes, the probes, the cursor, the alternate
+# screen, the signals, the console — as one `setup` / `teardown` pair
+# that every way out shares.
+
+export setup! =! (held) -> throw Error.new 'rip/tui: the terminal lifecycle is not built'
+export probe! =! (held) -> throw Error.new 'rip/tui: the terminal lifecycle is not built'
+export answer =! (held, event) -> throw Error.new 'rip/tui: the terminal lifecycle is not built'
+export teardown =! (held, drawn) -> throw Error.new 'rip/tui: the terminal lifecycle is not built'
+export handover =! (held, fn) -> throw Error.new 'rip/tui: the terminal lifecycle is not built'
+export stop! =! (held) -> throw Error.new 'rip/tui: the terminal lifecycle is not built'
+export interactive =! (out) -> true
+export colors =! (out) -> 3

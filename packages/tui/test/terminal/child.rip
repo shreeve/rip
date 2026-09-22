@@ -1,0 +1,41 @@
+# A small app under `run`, spawned by test/terminal.rip to take one way
+# out for real — a signal, an uncaught error, a `process.exit`, a loop
+# that drains, a stop and a continue — on a stdout that says it is a
+# terminal and writes through to the process's own, so whoever spawned
+# this reads every byte, and on the harness's stdin. The argument is
+# the way out; `pipe` and `ci` run on the process's stdout as it is.
+
+import { run, quit, Box, Text } from 'rip/tui'
+import { Stdin } from '../events/harness.rip'
+
+way = process.argv[2]
+tty = { isTTY: true, columns: 40, rows: 10, write: (text) -> process.stdout.write text }
+stdin = Stdin.new()
+
+App = component
+  @count := 0
+  render
+    Box focusable: true, autofocus: true
+      Text "count #{@count}"
+
+options = { stdin, stdout: (if way is 'pipe' then process.stdout else tty), mouse: true }
+running = run App, options
+running.done.then (-> console.log 'exited'), (error) -> console.log "errored: #{error.message}"
+
+switch way
+  when 'throw' then setTimeout (-> raise 'a timer failed'), 20
+  when 'reject' then setTimeout (-> Promise.reject Error.new 'a promise failed'), 20
+  when 'exit' then setTimeout (-> process.exit 7), 20
+  when 'stop'
+    timer = setInterval (->), 1000
+    process.on 'SIGCONT', -> setTimeout (-> clearInterval timer; quit()), 40
+    setTimeout (-> stdin.key '\x1a'), 20
+  when 'pipe', 'ci'
+    timer = setInterval ->
+      running.app.count.value += 1
+      return unless running.app.count.value is 5
+      clearInterval timer
+      quit()
+    , 30
+  when 'drain' then null
+  else setInterval (->), 1000

@@ -365,6 +365,11 @@ close =! (drawn, error = null, result = undefined) ->
   step restore
   if error then settled.reject error else settled.resolve result
 
+# Hand the terminal to `fn` — an editor, a shell — and take it back
+# once `fn` settles: the road Ctrl-Z takes, without the signal.
+export suspend =! (fn) ->
+  throw Error.new 'rip/tui: no app is running — `suspend` hands over the terminal `run` holds'
+
 # Unmount the mounted app, leave its last frame on screen, and give the
 # process its `document` slot back. The work waits for the turn to end,
 # so a `quit` called from inside an effect still draws what that same

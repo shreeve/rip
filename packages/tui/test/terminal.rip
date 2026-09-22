@@ -1,0 +1,1095 @@
+# ==============================================================================
+# tui terminal tests — every way out, the signals, suspend and resume, the
+# alternate screen, output that is no terminal, colors, and the console
+#
+#   rip test/terminal.rip
+#
+# Ink's suspend, exit, error, console and CI cases come first
+# (test/terminal/SOURCE.md counts them). Then what this package pins for
+# itself: one setup and one teardown shared by every way out, and what
+# each leaves; the signals and the crash, taken for real in a spawned
+# process; Ctrl-Z and `suspend`, the bytes and the raw-mode calls in
+# order; the alternate screen; a stdout that is no terminal; the color
+# depth and what a color becomes at each; the console while an app
+# runs; and a fuzz that holds the terminal's modes to what the app
+# believes after every step.
+# ==============================================================================
+
+import { test, eq, ok, throws } from 'rip/testing'
+import { run, quit, suspend, mount, renderToString, screen, Box, Text } from 'rip/tui'
+import { Terminal, Stdin, count, differs, tally } from './events/harness.rip'
+import { join } from 'path'
+
+CSI   =! '\x1b['
+HIDE  =! "#{CSI}?25l"
+SHOW  =! "#{CSI}?25h"
+ASK   =! "#{CSI}?2004h#{CSI}?1004h"             # bracketed paste, focus reports (xterm ctlseqs)
+ON    =! HIDE + ASK                              # what `run` opens a terminal with
+OFF   =! "#{CSI}?1004l#{CSI}?2004l"             # and withdraws, before the cursor is shown
+MOUSE =! "#{CSI}?1002h#{CSI}?1006h"             # button-event tracking, SGR reports
+QUIET =! "#{CSI}?1006l#{CSI}?1002l"
+PROBE =! "#{CSI}?6n"                            # DECXCPR: where is the cursor
+QUERY =! "#{CSI}?u#{CSI}c"                      # kitty's "is the protocol here", then primary device attributes
+PUSH  =! "#{CSI}>1u"                            # kitty: push the disambiguation flag
+POP   =! "#{CSI}<u"
+KITTY =! "#{CSI}?0u"                            # what a terminal that speaks kitty answers
+ENTER =! "#{CSI}?1049h#{CSI}H"                  # the alternate screen, and its top-left
+LEAVE =! "#{CSI}?1049l"
+BEGIN =! "#{CSI}?2026h"                         # a synchronized update
+END   =! "#{CSI}?2026l"
+
+report =! (bits, x, y, final = 'M') -> "#{CSI}<#{bits};#{x + 1};#{y + 1}#{final}"
+down   =! (x, y) -> report 0, x, y
+up     =! (x, y) -> report 0, x, y, 'm'
+
+# What is written apart from escape sequences.
+plain =! (text) -> text.replace(/\x1b\[[?<>0-9;]*[A-Za-z]/g, '').replace /\x1b\][^\x1b]*\x1b\\/g, ''
+
+# A stream that is no terminal, and keeps what it is sent.
+class Pipe
+  constructor: (@columns = 40, @rows = 10) ->
+    @sent = []
+  write: (text) ->
+    @sent.push text
+    true
+  get text: -> @sent.join ''
+
+Echo =! component
+  @keys := []
+  @label := 'x'
+  render
+    Box focusable: true, autofocus: true, @keydown: ((event) => @keys.push event.key)
+      Text "#{@label}"
+
+# Throws on X, so a listener that throws is one key away.
+Ways =! component
+  @heard := []
+  render
+    Box focusable: true, autofocus: true, @keydown: ((event) => if event.key is 'X' then raise 'a listener failed' else @heard.push event.key), @click: (=> @heard.push 'click')
+      Text "w"
+
+# The console, as the test sees it: each method replaced by a recorder
+# for the test's turn, so what passes through the package's patch, and
+# what reaches the console once the app is closed, are both read.
+recorded =! (body) ->
+  held = {}
+  printed = []
+  for name in ['log', 'info', 'debug', 'warn', 'error']
+    held[name] = console[name]
+    console[name] = ((name) -> (...args) -> printed.push [name, args.join ' '])(name)
+  try
+    body! printed
+  finally
+    console[name] = fn for name, fn of held
+
+# ── Every way out ─────────────────────────────────────────────────────────────
+
+# The process's handlers the run may add, counted before and after.
+HANDLED =! ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGCONT', 'uncaughtException', 'unhandledRejection', 'beforeExit', 'exit']
+listeners =! -> (process.listenerCount name for name in HANDLED)
+
+# What a way out must leave: the terminal's modes off, its keyboard
+# stack popped, its cursor shown; stdin cooked, paused and let go; no
+# handler of the run's on the process; the `document` slot free.
+every =! (name, term, stdin, before) ->
+  ok not term.modes.has(mode), "#{name}: mode #{mode} was left on" for mode in [2004, 1004, 1002, 1003, 1006, 1049]
+  ok term.shown, "#{name}: the cursor was left hidden"
+  eq term.kitty, 0, "#{name}: the keyboard stack"
+  eq [stdin.raw, stdin.listenerCount('data'), typeof document], [false, 0, 'undefined'], name
+  eq stdin.calls.slice(-3), ['raw off', 'pause', 'unref'], name
+  eq listeners(), before, "#{name}: a handler was left on the process"
+
+# ── A process of its own ──────────────────────────────────────────────────────
+
+ROOT =! join(import.meta.dir, '../../..')
+LIMIT =! 20000   # ms a child may take before it is killed
+
+# test/terminal/child.rip run through the checkout's own loader, its
+# stdout read as it comes. A child that outlives the limit is continued
+# (a stopped one takes nothing else) and killed, never left behind.
+class Child
+  constructor: (way, env = {}) ->
+    @out = ''
+    @proc = Bun.spawn ['bun', "--preload=#{join ROOT, 'src/loader.js'}", join(ROOT, 'src/cli/run.js'), join(import.meta.dir, 'terminal/child.rip'), way], { cwd: import.meta.dir, env: { ...process.env, CI: 'false', RIP_STDLIB_ANCHOR: join(import.meta.dir, 'terminal'), ...env }, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' }
+    @timer = setTimeout (=> @kill()), LIMIT
+    @pumping = @pump()
+
+  pump!: ->
+    reader = @proc.stdout.getReader()
+    decoder = TextDecoder.new()
+    loop
+      { done, value } = reader.read!
+      break if done
+      @out += decoder.decode value, { stream: true }
+
+  kill!: ->
+    @proc.kill 'SIGCONT'
+    @proc.kill 'SIGKILL'
+
+  # Wait for `text` to arrive on stdout.
+  seen: (text) ->
+    start = performance.now()
+    until @out.includes text
+      raise "the child never wrote #{JSON.stringify text}; it wrote #{JSON.stringify @out}" if performance.now() - start > LIMIT
+      sleep! 5
+    return
+
+  signal: (name) -> @proc.kill name
+
+  # The exit code, the whole of stdout, and stderr.
+  finish: ->
+    code = await @proc.exited
+    clearTimeout @timer
+    err = Response.new(@proc.stderr).text!
+    await @pumping
+    { code, out: @out, err }
+
+# ==[ Ink's cases ]==
+
+console.log "\nInk: suspend-terminal"
+
+test! "suspendTerminal hands the terminal to the callback, then restores Ink", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Echo, stdin: stdin, stdout: term
+  raw = null
+  suspend! ->
+    raw = stdin.raw
+    ok term.since(0).includes(SHOW), 'the cursor is shown for the callback'
+  count 'suspend-terminal', 'suspendTerminal hands the terminal to the callback, then restores Ink', 'held'
+  eq [raw, stdin.raw], [false, true]
+  mark = term.sent.findIndex (write) -> write.includes SHOW
+  ok term.since(mark + 1).includes(HIDE), 'the cursor is hidden again after'
+  quit()
+  await running.done
+
+test! "suspendTerminal restores the terminal even if the callback throws", ->
+  stdin = Stdin.new()
+  running = run Echo, stdin: stdin, stdout: Terminal.new()
+  threw = false
+  try
+    suspend! -> raise 'the callback failed'
+  catch error
+    threw = error.message is 'the callback failed'
+  count 'suspend-terminal', 'suspendTerminal restores the terminal even if the callback throws', 'held'
+  eq [threw, stdin.raw], [true, true]
+  quit()
+  await running.done
+
+test! "suspendTerminal keeps Ink off the terminal while suspended", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Echo, stdin: stdin, stdout: term
+  writes = null
+  suspend! ->
+    before = term.sent.length
+    running.app.label.value = 'changed'
+    sleep! 20
+    writes = term.sent.length - before
+  count 'suspend-terminal', 'suspendTerminal keeps Ink off the terminal while suspended', 'held'
+  eq writes, 0
+  sleep! 20
+  ok term.text.endsWith('changed'), "the change is drawn on resume: #{JSON.stringify term.text}"
+  quit()
+  await running.done
+
+test! "suspendTerminal runs the callback but skips the handoff when not interactive", ->
+  pipe = Pipe.new()
+  running = run Echo, stdin: Stdin.new(), stdout: pipe
+  ran = false
+  suspend! -> ran = true
+  count 'suspend-terminal', 'suspendTerminal runs the callback but skips the handoff when not interactive', 'held'
+  eq [ran, pipe.text.includes(SHOW)], [true, false]
+  quit()
+  await running.done
+
+test! "suspendTerminal rejects a nested suspend while already suspended", ->
+  running = run Echo, stdin: Stdin.new(), stdout: Terminal.new()
+  refused = null
+  suspend! ->
+    try
+      suspend! -> null
+    catch error
+      refused = error.message
+  count 'suspend-terminal', 'suspendTerminal rejects a nested suspend while already suspended', 'held'
+  ok /already suspended/.test(refused), refused
+  quit()
+  await running.done
+
+test! "suspendTerminal hands the terminal to a child process, then redraws (PTY)", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Echo, stdin: stdin, stdout: term
+  suspend! ->
+    term.write 'CHILD_OUTPUT\n'
+  sleep! 20
+  count 'suspend-terminal', 'suspendTerminal hands the terminal to a child process, then redraws (PTY)', 'held'
+  output = term.since 0
+  ok output.includes('CHILD_OUTPUT') and output.includes(SHOW)
+  after = output.slice output.lastIndexOf('CHILD_OUTPUT') + 'CHILD_OUTPUT'.length
+  ok plain(after).includes('x') and after.includes(HIDE), JSON.stringify after
+  eq term.text, "x\nCHILD_OUTPUT\nx", 'the frame stands again below what the child wrote'
+  quit()
+  await running.done
+
+test! "suspendTerminal exits and re-enters the alternate screen", ->
+  term = Terminal.new()
+  running = run Echo, stdin: Stdin.new(), stdout: term, altScreen: true
+  left = null
+  at = 0
+  suspend! ->
+    left = term.since(0).includes LEAVE
+    at = term.sent.length
+  count 'suspend-terminal', 'suspendTerminal exits and re-enters the alternate screen', 'held'
+  eq [left, term.since(at).includes(ENTER)], [true, true]
+  quit()
+  await running.done
+
+test! "suspendTerminal rolls back so a later suspend works if handover throws", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Echo, stdin: stdin, stdout: term
+  once = true
+  cooked = stdin.setRawMode
+  stdin.setRawMode = (raw) ->
+    if once and not raw
+      once = false
+      raise 'EIO: setRawMode'
+    cooked.call stdin, raw
+  first = null
+  try
+    suspend! -> null
+  catch error
+    first = error.message
+  second = false
+  suspend! -> second = true
+  count 'suspend-terminal', 'suspendTerminal rolls back so a later suspend works if handover throws', 'held'
+  eq [first, second, stdin.raw], ['EIO: setRawMode', true, true]
+  quit()
+  await running.done
+  eq stdin.raw, false
+
+console.log "\nInk: suspension-exit"
+
+test! "resuming after unmount does not re-enable terminal input (callback: true)", ->
+  stdin = Stdin.new()
+  running = run Echo, stdin: stdin, stdout: Terminal.new()
+  suspend! ->
+    quit()
+    await running.done
+  count 'suspension-exit', 'resuming after unmount does not re-enable terminal input (callback: true)', 'held'
+  eq [stdin.raw, stdin.listenerCount('data'), stdin.calls.slice(-3)], [false, 0, ['raw off', 'pause', 'unref']]
+
+console.log "\nInk: suspension-output"
+
+test! "non-interactive suspension keeps the latest rendered frame", ->
+  pipe = Pipe.new()
+  running = run Echo, stdin: Stdin.new(), stdout: pipe
+  running.app.label.value = 'before'
+  suspend! ->
+    running.app.label.value = 'after'
+    sleep! 20
+  quit()
+  await running.done
+  count 'suspension-output', 'non-interactive suspension keeps the latest rendered frame', 'held'
+  eq pipe.text, 'after\n'
+
+console.log "\nInk: suspension-resize"
+
+for columns in [80, 120]
+  test! "resize to #{columns} columns does not write while suspended", ->
+    term = Terminal.new 100, 10
+    running = run Echo, stdin: Stdin.new(), stdout: term
+    running.app.label.value = 'hello'
+    sleep! 20
+    before = 0
+    suspend! ->
+      before = term.sent.length
+      term.columns = columns
+      term.emit 'resize'
+      eq term.sent.slice(before), []
+    sleep! 20
+    count 'suspension-resize', "resize to #{columns} columns does not write while suspended", 'held'
+    ok term.since(before).includes('hello'), JSON.stringify term.since before
+    eq screen.cols, columns
+    quit()
+    await running.done
+
+console.log "\nInk: kitty-negotiation"
+
+test! "suspension cancels pending keyboard negotiation", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Echo, stdin: stdin, stdout: term, keyboard: 'enhanced', altScreen: true
+  at = 0
+  suspend! ->
+    before = term.sent.length
+    stdin.key KITTY
+    sleep! 30
+    eq term.sent.slice(before), [], "an answer while suspended is nobody's"
+    at = term.sent.length
+  differs 'kitty-negotiation', 'suspension cancels pending keyboard negotiation', [term.since(at).includes(PUSH), term.since(at).includes(QUERY)], [false, true], [false, false], 'the question is asked again on resume, so a terminal that answers it then is pushed to; Ink cancels the negotiation for the rest of the run'
+  quit()
+  await running.done
+
+test! "unmount while suspended does not pop the primary keyboard stack", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Echo, stdin: stdin, stdout: term, keyboard: 'enhanced'
+  stdin.key KITTY
+  suspend! ->
+    quit()
+    await running.done
+  count 'kitty-negotiation', 'unmount while suspended does not pop the primary keyboard stack', 'held'
+  eq [term.since(0).split(PUSH).length - 1, term.since(0).split(POP).length - 1, term.kitty], [1, 1, 0]
+
+console.log "\nInk: exit"
+
+test! "exit normally without unmount() or exit(): the loop drains, and the app is closed", ->
+  child = Child.new 'drain'
+  { code, out } = child.finish!
+  count 'exit', 'exit normally without unmount() or exit()', 'held'
+  count 'exit', 'exit when app finishes execution', 'held'
+  eq code, 0
+  ok out.endsWith("#{QUIET}#{OFF}\n#{SHOW}exited\n"), JSON.stringify out.slice -60
+
+test! "exit on unmount(), on exit(), with raw mode: `quit` closes the app and resolves `done`", ->
+  stdin = Stdin.new()
+  running = run Echo, stdin: stdin, stdout: Terminal.new()
+  quit()
+  eq await running.done, undefined
+  count 'exit', 'exit on unmount()', 'held'
+  count 'exit', 'exit on exit()', 'held'
+  count 'exit', 'exit on exit() with raw mode', 'held'
+  count 'exit', 'exit on unmount() with raw mode', 'held'
+  eq [stdin.raw, typeof document], [false, 'undefined']
+
+test! "exit on exit() with a result value, and with an object result", ->
+  running = run Echo, stdin: Stdin.new(), stdout: Terminal.new()
+  quit 'hello from ink'
+  eq await running.done, 'hello from ink'
+  count 'exit', 'exit on exit() with result value', 'held'
+  running = run Echo, stdin: Stdin.new(), stdout: Terminal.new()
+  quit { message: 'hello from ink object' }
+  eq await running.done, { message: 'hello from ink object' }
+  count 'exit', 'exit on exit() with object result', 'held'
+
+test "exit with thrown error", ->
+  Thrower = component
+    ~> raise 'errored'
+    render
+      Text "never"
+  stdin = Stdin.new()
+  throws (-> run Thrower, stdin: stdin, stdout: Terminal.new()), 'errored'
+  count 'exit', 'exit with thrown error', 'held'
+  eq [stdin.raw, typeof document], [false, 'undefined']
+
+console.log "\nInk: errors"
+
+test! "clean up raw mode when error is thrown", ->
+  child = Child.new 'throw'
+  { code, out, err } = child.finish!
+  count 'errors', 'clean up raw mode when error is thrown', 'held'
+  eq code, 1
+  ok err.includes('a timer failed'), err
+  ok out.endsWith("#{QUIET}#{OFF}\n#{SHOW}"), JSON.stringify out.slice -60
+
+console.log "\nInk: render"
+
+for option in ['omitted', 'undefined']
+  test! "intercept console methods with #{option} patchConsole option", ->
+    Hello = component
+      render
+        Text "Hello World"
+    recorded! (printed) ->
+      term = Terminal.new()
+      options = { stdin: Stdin.new(), stdout: term }
+      options.console = undefined if option is 'undefined'
+      running = run Hello, options
+      console.log 'First log'
+      eq term.text, "First log\nHello World"
+      quit()
+      await running.done
+      console.log 'Second log'
+      count 'render', "intercept console methods with #{option} patchConsole option", 'held'
+      eq [term.text, printed], ["First log\nHello World", [['log', 'Second log']]]
+
+console.log "\nInk: components"
+
+test! "render only last frame when run in CI", ->
+  child = Child.new 'ci', { CI: 'true' }
+  { code, out } = child.finish!
+  count 'components', 'render only last frame when run in CI', 'held'
+  eq code, 0
+  ok not out.includes("count #{n}"), "count #{n} was written" for n in [0, 1, 2, 3, 4]
+  eq out, "count 5\nexited\n"
+
+test! "render all frames if CI environment variable equals false", ->
+  child = Child.new 'ci', { CI: 'false' }
+  { code, out } = child.finish!
+  count 'components', 'render all frames if CI environment variable equals false', 'held'
+  eq code, 0
+  ok out.includes("count #{n}"), "count #{n} was not written" for n in [0, 1, 2, 3, 4, 5]
+
+test "the ported titles are the ones SOURCE.md counts", ->
+  eq tally, {
+    'suspend-terminal':   { held: 8, differs: 0 }
+    'suspension-exit':    { held: 1, differs: 0 }
+    'suspension-output':  { held: 1, differs: 0 }
+    'suspension-resize':  { held: 2, differs: 0 }
+    'kitty-negotiation':  { held: 1, differs: 1 }
+    'exit':               { held: 9, differs: 0 }
+    'errors':             { held: 1, differs: 0 }
+    'render':             { held: 2, differs: 0 }
+    'components':         { held: 2, differs: 0 }
+  }
+
+# ==[ Setup and teardown ]==
+
+console.log "\nSetup and teardown"
+
+test! "every way out — quit, Ctrl-C, a listener that throws, a suspend then quit — inline and on the alternate screen, leaves the terminal, stdin and the process as they were", ->
+  ways = [
+    ['quit', (stdin) -> quit()]
+    ['Ctrl-C', (stdin) -> stdin.key '\x03']
+    ['a listener that throws', (stdin) -> stdin.key 'X']
+    ['a suspend, then quit', (stdin) -> suspend -> quit()]
+  ]
+  for alt in [false, true]
+    for [way, leave] in ways
+      name = "#{way}#{if alt then ' on the alternate screen' else ''}"
+      before = listeners()
+      stdin = Stdin.new()
+      term = Terminal.new()
+      running = run Ways, stdin: stdin, stdout: term, mouse: true, keyboard: 'enhanced', altScreen: alt
+      stdin.key KITTY
+      eq [term.kitty, stdin.raw, term.modes.has(1049)], [1, true, alt], name
+      leave stdin
+      try
+        await running.done
+      catch error
+        eq error.message, 'a listener failed', name
+      every name, term, stdin, before
+      eq term.text, (if alt then '' else 'w'), "#{name}: what the screen shows"
+      eq term.cursor, { x: 0, y: (if alt or way is 'a listener that throws' then 0 else 1) }, "#{name}: where the cursor lands"
+
+test! "the run's handlers stand on the process only while it runs, and a second run sees no stale one", ->
+  before = listeners()
+  running = run Echo, stdin: Stdin.new(), stdout: Terminal.new()
+  eq listeners(), (n + 1 for n in before.slice(0, 3)).concat(before.slice(3, 4), (n + 1 for n in before.slice(4)))
+  quit()
+  await running.done
+  eq listeners(), before
+  running = run Echo, stdin: Stdin.new(), stdout: Terminal.new()
+  eq process.listenerCount('SIGTERM'), before[1] + 1
+  quit()
+  await running.done
+  eq listeners(), before
+
+test! "a teardown is taken once: a quit while suspended withdraws nothing twice, and a close after a close writes nothing", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Echo, stdin: stdin, stdout: term, mouse: true
+  suspend! ->
+    quit()
+    await running.done
+  eq [term.since(0).split(OFF).length - 1, term.since(0).split(QUIET).length - 1, stdin.calls.filter((call) -> call is 'raw off').length], [1, 1, 1]
+  mark = term.sent.length
+  running.quit()
+  sleep! 0
+  eq term.sent.length, mark
+
+test "a teardown after a setup that failed halfway takes the steps that were taken and no other", ->
+  before = listeners()
+  stdin = Stdin.new()
+  stdin.setRawMode = -> raise 'EBADF: setRawMode'
+  term = Terminal.new()
+  throws (-> run Echo, stdin: stdin, stdout: term, mouse: true, altScreen: true), 'EBADF'
+  eq [stdin.calls, stdin.listenerCount('data'), typeof document], [[], 0, 'undefined']
+  ok not term.since(0).includes('1002') and not term.since(0).includes('1049'), JSON.stringify term.since 0
+  ok term.shown, 'the cursor is shown again'
+  eq listeners(), before
+
+# ==[ Signals ]==
+
+console.log "\nSignals"
+
+for [name, code] in [['SIGTERM', 143], ['SIGHUP', 129], ['SIGINT', 130]]
+  test! "#{name} gives the terminal back — the mouse, the modes, the cursor below the frame — and exits #{code}", ->
+    child = Child.new 'signal'
+    child.seen! END
+    child.signal name
+    result = child.finish!
+    eq result.code, code
+    ok result.out.endsWith("#{QUIET}#{OFF}\n#{SHOW}"), JSON.stringify result.out.slice -60
+    eq result.err, ''
+
+test! "an uncaught error gives the terminal back, prints the error, and exits 1", ->
+  child = Child.new 'throw'
+  { code, out, err } = child.finish!
+  eq code, 1
+  ok err.includes('a timer failed') and err.includes('child.rip'), err
+  ok out.endsWith("#{QUIET}#{OFF}\n#{SHOW}"), JSON.stringify out.slice -60
+
+test! "an unhandled rejection is the same way out", ->
+  child = Child.new 'reject'
+  { code, out, err } = child.finish!
+  eq code, 1
+  ok err.includes('a promise failed'), err
+  ok out.endsWith("#{QUIET}#{OFF}\n#{SHOW}"), JSON.stringify out.slice -60
+
+test! "a `process.exit` with the app live tears the terminal down on the way, and keeps its code", ->
+  child = Child.new 'exit'
+  { code, out } = child.finish!
+  eq code, 7
+  ok out.endsWith("#{QUIET}#{OFF}\n#{SHOW}"), JSON.stringify out.slice -60
+
+# ==[ Suspend and resume ]==
+
+console.log "\nSuspend and resume"
+
+Keys =! component
+  @keys := []
+  render
+    Box focusable: true, autofocus: true, @keydown: ((event) => @keys.push event.key), @click: (=> @keys.push 'click')
+      Text "k"
+
+test! "suspend gives the terminal back — the flag popped, the mouse, paste and focus modes withdrawn, the cursor shown below the frame, stdin cooked — and takes it back: raw mode, the modes, the flag, the origin asked again, then a whole frame", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Keys, stdin: stdin, stdout: term, mouse: true, keyboard: 'enhanced'
+  stdin.key KITTY
+  stdin.key "#{CSI}?1;1R" + down(0, 0)
+  mark = term.sent.length
+  at = 0
+  suspend! ->
+    eq term.since(mark), "#{POP}#{QUIET}#{OFF}\n#{SHOW}"
+    eq [stdin.calls.slice(-3), stdin.raw, stdin.listenerCount('data'), term.cursor, term.kitty], [['raw off', 'pause', 'unref'], false, 0, { x: 0, y: 1 }, 0]
+    at = term.sent.length
+  ok term.since(at).startsWith("#{HIDE}#{ASK}#{MOUSE}#{PUSH}#{PROBE}"), JSON.stringify term.since at
+  eq [stdin.calls.slice(-3), stdin.raw, stdin.listenerCount('data'), term.kitty], [['raw on', 'ref', 'resume'], true, 1, 1]
+  eq term.queries, ['cursor', 'keyboard', 'attributes', 'cursor'], 'the row is asked again; the keyboard, decided, is not'
+  sleep! 20
+  ok term.since(at).includes(BEGIN), 'a frame is drawn again'
+  eq term.text, "k\nk", 'the frame stands again below the one left in the scrollback'
+  stdin.key "#{CSI}?2;1R" + up(0, 1)
+  eq running.app.keys.value, [], 'the press before the suspend is forgotten: its release is no click'
+  quit()
+  await running.done
+
+test! "Ctrl-Z is a default action of keydown: the terminal is given back and the process stopped; SIGCONT takes it back", ->
+  stopped = 0
+  handler = ->
+    stopped += 1
+    process.kill process.pid, 'SIGCONT'
+  process.on 'SIGTSTP', handler
+  try
+    stdin = Stdin.new()
+    term = Terminal.new()
+    running = run Keys, stdin: stdin, stdout: term
+    mark = term.sent.length
+    stdin.key '\x1a'
+    eq term.since(mark), "#{OFF}\n#{SHOW}"
+    eq stdin.raw, false
+    at = term.sent.length
+    sleep! 50
+    eq stopped, 1
+    ok term.since(at).startsWith(ON), JSON.stringify term.since at
+    eq [stdin.raw, term.text], [true, "k\nk"]
+    stdin.key 'a'
+    eq running.app.keys.value, ['a']
+    quit()
+    await running.done
+  finally
+    process.off 'SIGTSTP', handler
+
+test! "preventDefault on Ctrl-Z keeps the app on the terminal, and Ctrl-Z under mount is nothing", ->
+  stopped = 0
+  handler = -> stopped += 1
+  process.on 'SIGTSTP', handler
+  try
+    Holds = component
+      render
+        Box focusable: true, autofocus: true, @keydown: ((event) -> event.preventDefault() if event.key is 'z' and event.ctrlKey)
+          Text "h"
+    stdin = Stdin.new()
+    term = Terminal.new()
+    running = run Holds, stdin: stdin, stdout: term
+    mark = term.sent.length
+    stdin.key '\x1a'
+    sleep! 20
+    eq [term.sent.length, stdin.raw, stopped], [mark, true, 0]
+    quit()
+    await running.done
+    view = mount Keys
+    view.press 'z', ctrl: true
+    sleep! 20
+    eq [stopped, view.app.keys.value], [0, ['z']]
+    view.close()
+  finally
+    process.off 'SIGTSTP', handler
+
+test! "a key that arrives while suspended is nobody's, a resize writes nothing, and a log passes straight through", ->
+  recorded! (printed) ->
+    stdin = Stdin.new()
+    term = Terminal.new()
+    running = run Keys, stdin: stdin, stdout: term
+    at = 0
+    suspend! ->
+      at = term.sent.length
+      stdin.key 'a'
+      term.columns = 60
+      term.emit 'resize'
+      console.log 'while suspended'
+      eq term.sent.slice(at), ['while suspended\n']
+    eq [running.app.keys.value, screen.cols], [[], 60]
+    sleep! 20
+    eq term.text, "k\nwhile suspended\nk"
+    stdin.key 'b'
+    eq running.app.keys.value, ['b']
+    quit()
+    await running.done
+    eq printed, []
+
+test! "a suspend with no app running is refused by name", ->
+  refused = null
+  try
+    suspend! -> null
+  catch error
+    refused = error.message
+  ok /no app/.test(refused), refused
+
+test! "a stop and a continue, for real: the child gives the terminal back and stops itself; SIGCONT takes it back, and it quits clean", ->
+  child = Child.new 'stop'
+  child.seen! "#{QUIET}#{OFF}\n#{SHOW}"
+  sleep! 30
+  child.signal 'SIGCONT'
+  { code, out, err } = child.finish!
+  eq [code, err], [0, '']
+  first = out.indexOf "#{QUIET}#{OFF}\n#{SHOW}"
+  rest = out.slice first + "#{QUIET}#{OFF}\n#{SHOW}".length
+  ok rest.startsWith("#{HIDE}#{ASK}#{MOUSE}#{PROBE}"), JSON.stringify rest.slice 0, 60
+  ok rest.includes('count 0'), 'the frame is drawn again'
+  ok rest.endsWith("#{QUIET}#{OFF}\n#{SHOW}exited\n"), JSON.stringify rest.slice -60
+
+# ==[ The alternate screen ]==
+
+console.log "\nThe alternate screen"
+
+test! "altScreen enters the alternate screen after the modes, at its top-left, with no cursor probe: the frame is absolute", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Echo, stdin: stdin, stdout: term, mouse: true, keyboard: 'enhanced', altScreen: true
+  ok term.since(0).startsWith(ON + MOUSE + ENTER + QUERY), JSON.stringify term.since 0
+  eq [term.queries, term.modes.has(1049), term.lines[0]?.join(''), term.y], [['keyboard', 'attributes'], true, 'x', 0]
+  eq screen.interactive, true
+  quit()
+  await running.done
+
+test! "quit leaves the alternate screen after the last frame is drawn, and the frame vanishes with it: the screen shows what it did before, the cursor where it was", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  term.write 'prompt$ '
+  running = run Echo, stdin: stdin, stdout: term, mouse: true, altScreen: true
+  running.app.label.value = 'last'
+  mark = term.sent.length
+  quit()
+  await running.done
+  out = term.since mark
+  ok out.startsWith("#{QUIET}#{OFF}#{BEGIN}"), JSON.stringify out
+  ok out.endsWith("#{END}#{SHOW}#{LEAVE}"), JSON.stringify out
+  ok out.includes('last'), 'the last frame is drawn, on the alternate screen'
+  eq [term.text, term.cursor, term.modes.has(1049)], ['prompt$', { x: 8, y: 0 }, false]
+
+test! "a resize under the alternate screen repaints whole, with no probe", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Echo, stdin: stdin, stdout: term, mouse: true, altScreen: true
+  mark = term.sent.length
+  term.columns = 60
+  term.emit 'resize'
+  sleep! 20
+  ok term.since(mark).includes("#{BEGIN}#{CSI}J"), JSON.stringify term.since mark
+  eq [term.queries, screen.cols, term.lines[0]?.join('')], [[], 60, 'x']
+  quit()
+  await running.done
+
+test! "a mouse report under the alternate screen lands on the row it names: the origin is the top", ->
+  stdin = Stdin.new()
+  running = run Ways, stdin: stdin, stdout: Terminal.new(), mouse: true, altScreen: true
+  stdin.key down(0, 0) + up(0, 0)
+  eq running.app.heard.value, ['click']
+  quit()
+  await running.done
+
+test! "a log under the alternate screen is kept, and replayed once the screen is left", ->
+  recorded! (printed) ->
+    stdin = Stdin.new()
+    term = Terminal.new()
+    err = Pipe.new()
+    running = run Echo, stdin: stdin, stdout: term, stderr: err, altScreen: true
+    mark = term.sent.length
+    console.log 'one'
+    console.error 'two'
+    console.warn 'three'
+    eq [term.sent.length, err.sent, term.lines[0]?.join('')], [mark, [], 'x']
+    quit()
+    await running.done
+    ok term.since(mark).endsWith("#{SHOW}#{LEAVE}one\n"), JSON.stringify term.since mark
+    eq [err.sent, term.text, printed], [['two\n', 'three\n'], 'one', []]
+
+test! "altScreen on a stdout that is no terminal is nothing", ->
+  pipe = Pipe.new()
+  running = run Echo, stdin: Stdin.new(), stdout: pipe, altScreen: true
+  quit()
+  await running.done
+  eq pipe.text, 'x\n'
+
+# ==[ Output that is no terminal ]==
+
+console.log "\nOutput that is no terminal"
+
+test! "on a stdout that is no terminal nothing is asked — no modes, no cursor, no probe, no raw mode even on a stdin that is one — the frames are kept, and the last is written once at exit", ->
+  pipe = Pipe.new()
+  stdin = Stdin.new()
+  running = run Echo, stdin: stdin, stdout: pipe, mouse: true, keyboard: 'enhanced'
+  eq [stdin.calls, stdin.listenerCount('data'), pipe.sent, screen.interactive, screen.cols], [[], 0, [], false, 40]
+  for label in ['one', 'two', 'three']
+    running.app.label.value = label
+    sleep! 20
+  eq pipe.sent, []
+  quit 'done'
+  eq await running.done, 'done'
+  eq pipe.sent, ['three\n']
+  stdin.key 'a'
+  eq running.app.keys.value, []
+
+test! "CI set makes a terminal stdout the same, and CI=false does not", ->
+  process.env.CI = '1'
+  try
+    stdin = Stdin.new()
+    term = Terminal.new()
+    running = run Echo, stdin: stdin, stdout: term
+    eq [screen.interactive, stdin.calls, term.sent], [false, [], []]
+    quit()
+    await running.done
+    eq term.sent, ['x\n']
+    process.env.CI = 'false'
+    term = Terminal.new()
+    running = run Echo, stdin: Stdin.new(), stdout: term
+    eq screen.interactive, true
+    ok term.since(0).startsWith(ON)
+    quit()
+    await running.done
+  finally
+    delete process.env.CI
+
+test! "`screen.interactive` reads true on a terminal, false on a stdout that is no terminal, and true under mount", ->
+  running = run Echo, stdin: Stdin.new(), stdout: Terminal.new()
+  eq screen.interactive, true
+  quit()
+  await running.done
+  running = run Echo, stdin: Stdin.new(), stdout: Pipe.new()
+  eq screen.interactive, false
+  quit()
+  await running.done
+  view = mount Echo
+  eq screen.interactive, true
+  view.close()
+
+test! "the last frame is written once through a real pipe", ->
+  child = Child.new 'pipe'
+  { code, out, err } = child.finish!
+  eq [code, err, out], [0, '', "count 5\nexited\n"]
+
+# ==[ Colors ]==
+
+console.log "\nColors"
+
+# `screen.colors` after a run under `env`, on `out`.
+depthUnder =! (env, out = Terminal.new()) ->
+  held = {}
+  for name in ['NO_COLOR', 'FORCE_COLOR', 'TERM', 'COLORTERM']
+    held[name] = process.env[name]
+    delete process.env[name]
+  process.env[name] = value for name, value of env
+  try
+    running = run Echo, stdin: Stdin.new(), stdout: out
+    depth = screen.colors
+    quit()
+    await running.done
+    depth
+  finally
+    for name, value of held
+      if value? then process.env[name] = value else delete process.env[name]
+
+test! "the depth is read once at run: NO_COLOR is none, FORCE_COLOR is its number, else TERM and COLORTERM decide; a dumb terminal, or no terminal, has none unless forced", ->
+  rows = [
+    [{ NO_COLOR: '1' }, 0]
+    [{ NO_COLOR: '', COLORTERM: 'truecolor' }, 0]
+    [{ NO_COLOR: '1', FORCE_COLOR: '3' }, 0]
+    [{ FORCE_COLOR: '0' }, 0]
+    [{ FORCE_COLOR: '1' }, 16]
+    [{ FORCE_COLOR: '2' }, 256]
+    [{ FORCE_COLOR: '3' }, 16777216]
+    [{ FORCE_COLOR: 'true', TERM: 'dumb' }, 16]
+    [{ TERM: 'xterm-256color' }, 256]
+    [{ TERM: 'xterm-256color', COLORTERM: 'truecolor' }, 16777216]
+    [{ TERM: 'xterm', COLORTERM: '24bit' }, 16777216]
+    [{ TERM: 'xterm' }, 16]
+    [{}, 16]
+    [{ TERM: 'dumb' }, 0]
+  ]
+  for [env, want] in rows
+    depth = depthUnder! env
+    eq depth, want, JSON.stringify env
+  depth = depthUnder! { TERM: 'xterm-256color' }, Pipe.new()
+  eq depth, 0, 'a pipe'
+  depth = depthUnder! { FORCE_COLOR: '2' }, Pipe.new()
+  eq depth, 256, 'a pipe, forced'
+
+Tinted =! component
+  render
+    Box flexDirection: 'row'
+      Text color: '#ff0000', backgroundColor: '#0000ff', bold: true
+        "r"
+      Text color: 'green'
+        "g"
+      Text color: '#808080'
+        "h"
+
+# The frame `run` draws under `env`, on a terminal, with its escapes.
+paintedUnder =! (env) ->
+  held = {}
+  for name in ['NO_COLOR', 'FORCE_COLOR', 'TERM', 'COLORTERM']
+    held[name] = process.env[name]
+    delete process.env[name]
+  process.env[name] = value for name, value of env
+  try
+    term = Terminal.new()
+    running = run Tinted, stdin: Stdin.new(), stdout: term
+    quit()
+    await running.done
+    term.since 0
+  finally
+    for name, value of held
+      if value? then process.env[name] = value else delete process.env[name]
+
+test! "a 24-bit color is sent as it is at full depth, as the nearest of the 256 at that depth, as the nearest of the 16 below it, and nothing is sent at none", ->
+  full = paintedUnder! { FORCE_COLOR: '3' }
+  ok full.includes("#{CSI}1;38;2;255;0;0;48;2;0;0;255mr") and full.includes("#{CSI}0;32mg") and full.includes("#{CSI}0;38;2;128;128;128mh"), JSON.stringify full
+  eq screen.colors, 16777216
+  cube = paintedUnder! { FORCE_COLOR: '2' }
+  ok cube.includes("#{CSI}1;38;5;196;48;5;21mr") and cube.includes("#{CSI}0;32mg") and cube.includes("#{CSI}0;38;5;244mh"), JSON.stringify cube
+  named = paintedUnder! { FORCE_COLOR: '1' }
+  ok named.includes("#{CSI}1;31;44mr") and named.includes("#{CSI}0;32mg") and named.includes("#{CSI}0;37mh"), JSON.stringify named
+  none = paintedUnder! { NO_COLOR: '1' }
+  ok not /\x1b\[[0-9;]*m/.test(none), JSON.stringify none
+  ok plain(none).includes('rgh'), JSON.stringify none
+
+test "mount and renderToString stay at full depth whatever the environment says", ->
+  held = process.env.NO_COLOR
+  process.env.NO_COLOR = '1'
+  try
+    ok renderToString(Tinted, cols: 10, ansi: true).includes('38;2;255;0;0')
+    eq screen.colors, 16777216
+  finally
+    if held? then process.env.NO_COLOR = held else delete process.env.NO_COLOR
+
+# ==[ The console ]==
+
+console.log "\nThe console"
+
+Field =! component
+  render
+    Box focusable: true, autofocus: true, cursor: { x: 1, y: 0 }
+      Text "field"
+
+test! "a log during a run clears the frame, writes the line as it was, and draws the frame again below it, the cursor parked where it was", ->
+  recorded! (printed) ->
+    stdin = Stdin.new()
+    term = Terminal.new()
+    running = run Field, stdin: stdin, stdout: term
+    eq term.cursor, { x: 1, y: 0 }
+    mark = term.sent.length
+    console.log 'hello', 42
+    out = term.since mark
+    ok out.startsWith("#{HIDE}\r#{CSI}Jhello 42\n#{BEGIN}#{CSI}J"), JSON.stringify out
+    ok out.endsWith("#{CSI}2G#{SHOW}#{END}"), JSON.stringify out
+    eq [term.text, term.cursor, printed], ["hello 42\nfield", { x: 1, y: 1 }, []]
+    console.info 'two'
+    console.debug 'three'
+    eq term.text, "hello 42\ntwo\nthree\nfield"
+    quit()
+    await running.done
+
+test! "warn and error go to stderr, the frame cleared for them and drawn again", ->
+  recorded! (printed) ->
+    term = Terminal.new()
+    err = Pipe.new()
+    running = run Echo, stdin: Stdin.new(), stdout: term, stderr: err
+    mark = term.sent.length
+    console.error 'bad', { n: 1 }
+    console.warn 'worse'
+    eq err.sent, ['bad { n: 1 }\n', 'worse\n']
+    ok term.since(mark).startsWith("#{HIDE}\r#{CSI}J#{BEGIN}"), JSON.stringify term.since mark
+    eq [term.text, printed], ['x', []]
+    quit()
+    await running.done
+
+test! "the console is the process's own again on every way out, and a log with the app closed passes straight through", ->
+  recorded! (printed) ->
+    stdin = Stdin.new()
+    term = Terminal.new()
+    running = run Ways, stdin: stdin, stdout: term
+    patched = console.log
+    stdin.key 'X'
+    try
+      await running.done
+    catch error
+      null
+    ok console.log isnt patched, 'the patch is gone'
+    mark = term.sent.length
+    console.log 'after'
+    eq [printed, term.sent.length], [[['log', 'after']], mark]
+
+test! "console: false leaves the console alone", ->
+  recorded! (printed) ->
+    term = Terminal.new()
+    running = run Echo, stdin: Stdin.new(), stdout: term, console: false
+    mark = term.sent.length
+    console.log 'through'
+    eq [printed, term.sent.length, term.text], [[['log', 'through']], mark, 'x']
+    quit()
+    await running.done
+
+test! "with the mouse on, a log asks where the frame went", ->
+  recorded! (printed) ->
+    term = Terminal.new()
+    running = run Echo, stdin: Stdin.new(), stdout: term, mouse: true
+    eq term.queries, ['cursor']
+    console.log 'scrolls'
+    ok term.since(0).endsWith(PROBE), JSON.stringify term.since(0).slice -30
+    eq term.queries, ['cursor', 'cursor']
+    quit()
+    await running.done
+
+test! "a log on a stdout that is no terminal passes straight through", ->
+  recorded! (printed) ->
+    pipe = Pipe.new()
+    running = run Echo, stdin: Stdin.new(), stdout: pipe
+    console.log 'plain'
+    eq [printed, pipe.sent], [[['log', 'plain']], []]
+    quit()
+    await running.done
+
+# ==[ Fuzz ]==
+
+console.log "\nFuzz"
+
+ROUNDS =! 40
+STEPS =! 20
+
+# A seeded generator, so a failure names its seed.
+rnd = null
+seeded =! (seed) ->
+  state = seed >>> 0
+  ->
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0
+    state / 4294967296
+
+pick =! (list) -> list[Math.floor rnd() * list.length]
+
+Fuzzed =! component
+  @keys := []
+  @label := 'f'
+  render
+    Box focusable: true, autofocus: true, @keydown: ((event) => if event.key is 'X' then raise 'a listener failed' else @keys.push event.key)
+      Text "#{@label}"
+
+# The modes a run believes it holds, against the terminal's.
+same =! (name, term, stdin, believe) ->
+  got = { raw: stdin.raw, paste: term.modes.has(2004), focus: term.modes.has(1004), mouse: term.modes.has(1006), kitty: term.kitty is 1, alt: term.modes.has(1049), cursor: term.shown }
+  eq got, believe, name
+
+test! "random keys, resizes, logs and suspends, then a random way out: the terminal's modes are what the app believes after every step, and every exit leaves everything off, the cursor shown, below the frame", ->
+  seed = Math.floor Math.random() * 1000000
+  rnd = seeded seed
+  steps = 0
+  exits = 0
+  suspends = 0
+  logs = 0
+  ignored = 0
+  recorded! (printed) ->
+    for round in [0...ROUNDS]
+      alt = rnd() < 0.3
+      mouse = pick [false, true, 'all']
+      enhanced = rnd() < 0.5
+      term = Terminal.new()
+      stdin = Stdin.new()
+      before = listeners()
+      running = run Fuzzed, stdin: stdin, stdout: term, mouse: mouse, keyboard: (if enhanced then 'enhanced' else 'basic'), altScreen: alt
+      logged = []
+      believe = { raw: true, paste: true, focus: true, mouse: mouse isnt false, kitty: false, alt, cursor: false }
+      if enhanced and rnd() < 0.6
+        stdin.key KITTY
+        believe.kitty = true
+      name = "seed #{seed}, round #{round}"
+      same name, term, stdin, believe
+      for n in [0...STEPS]
+        steps += 1
+        switch pick ['key', 'key', 'resize', 'log', 'suspend']
+          when 'key'
+            key = pick ['a', 'b', '\t', "#{CSI}A"]
+            stdin.key key
+          when 'resize'
+            term.columns = pick [30, 40, 60]
+            term.emit 'resize'
+          when 'log'
+            logs += 1
+            console.log "log #{n}"
+            logged.push "log #{n}"
+            unless alt
+              ok term.text.includes("log #{n}") and term.text.endsWith('f'), "#{name}: after a log the screen shows #{JSON.stringify term.text}"
+          when 'suspend'
+            suspends += 1
+            heard = running.app.keys.value.length
+            suspend! ->
+              same "#{name}, suspended", term, stdin, { raw: false, paste: false, focus: false, mouse: false, kitty: false, alt: false, cursor: true }
+              if rnd() < 0.5
+                stdin.key 'a'
+                ignored += 1
+              term.emit 'resize' if rnd() < 0.5
+              at = term.sent.length
+              if rnd() < 0.5
+                console.log 'aside'
+                logged.push 'aside'
+              eq term.sent.slice(at).filter((write) -> write isnt 'aside\n'), [], "#{name}: nothing is written while suspended"
+            eq running.app.keys.value.length, heard, "#{name}: a key while suspended reached the app"
+        same "#{name}, step #{n}", term, stdin, believe
+      way = pick ['quit', 'Ctrl-C', 'throw', 'suspend and quit']
+      switch way
+        when 'quit' then quit()
+        when 'Ctrl-C' then stdin.key '\x03'
+        when 'throw' then stdin.key 'X'
+        when 'suspend and quit' then suspend -> quit()
+      try
+        await running.done
+      catch error
+        eq error.message, 'a listener failed', name
+      exits += 1
+      every "#{name}, #{way}", term, stdin, before
+      if alt
+        if logged.length
+          ok term.text.endsWith(logged[logged.length - 1]), "#{name}, #{way}: the logs are replayed once the alternate screen is left: #{JSON.stringify term.text}"
+        else
+          eq [term.text, term.cursor], ['', { x: 0, y: 0 }], "#{name}, #{way}: the alternate screen is left as it was found"
+      else
+        ok term.text.endsWith('f'), "#{name}, #{way}: the last frame stands"
+        eq term.cursor.y, (if way is 'throw' then term.lines.length - 1 else term.lines.length), "#{name}, #{way}: the cursor is below the frame"
+    eq printed, []
+  ok steps >= ROUNDS * STEPS, "#{steps} steps"
+  ok exits is ROUNDS, "#{exits} exits"
+  ok suspends >= 80, "#{suspends} suspends"
+  ok logs >= 80, "#{logs} logs"
+  ok ignored >= 20, "#{ignored} keys ignored while suspended"
