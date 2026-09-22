@@ -60,11 +60,13 @@ together, counted by `bench/lines.rip` and quoted from
 | Row | Ink + Yoga | Rip TUI |
 |---|---|---|
 | Framework only | Ink `src/` 6,760 | 4,252 |
-| Framework + layout algorithm | + `yoga/algorithm/` 3,492 = 10,252 | 4,252 (`layout.rip` is 1,466 of it) |
+| Framework + layout algorithm | + Yoga 3.2.1 `yoga/algorithm/` 3,042 = 9,802 | 4,252 (`layout.rip` is 1,466 of it) |
 | Full runtime closure | + React, react-reconciler, scheduler and 33 more packages | + Rip runtime 1,598 (`reactive.js`, `components.js`) = 5,850 |
 
-The honest headline is **2.4× smaller** with the layout algorithm on
-both sides, and 1.6× framework against framework: not the 3× the
+Yoga is counted at 3.2.1, the version Ink 7.1.1 ships (`lines.rip`
+refuses any other). The honest headline is **2.3× smaller** with the
+layout algorithm on both sides, and 1.6× framework against framework:
+not the 3× the
 budget aimed at, since the package ships the mouse, the enhanced
 keyboard, text selection, hyperlinks, and the terminal's progress
 indicator, which Ink does not. Raw totals overstate Ink + Yoga by
@@ -1286,7 +1288,9 @@ styled cells with a cursor that scrolls into a scrollback it keeps —
 relative and absolute cursor moves, erase in display and in line, SGR
 through `test/ink/cells.rip`'s reader, line feeds, DEC private modes,
 the queries both sides make — and refuses any sequence outside that
-list. The screen after every update, scrollback included, is read in
+list: another private mode, another escape, a control character
+(`pinned` in `harness.rip` holds it to that before every run). The
+screen after every update, scrollback included, is read in
 `cells.rip`'s notation under its blank rule (a space shows nothing of
 its foreground, bold, dim or italic; a row's trailing default spaces
 are trimmed; trailing blank rows are dropped) and digested. A scenario

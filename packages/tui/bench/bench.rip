@@ -6,6 +6,7 @@
 #   bun run bench            # five runs a side; writes RESULTS.md
 #   rip bench.rip --runs 3   # fewer runs
 #   rip bench.rip counter    # one scenario, printed, RESULTS.md left alone
+#   rip bench.rip --lines    # the lines of code alone, into RESULTS.md
 #
 # Each side of each scenario runs in a fresh process — so neither's JIT
 # state or heap taints the other — `runs` times, and the table holds
@@ -24,7 +25,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { cpus, totalmem, release, loadavg } from 'node:os'
-import { SCENARIOS, differ } from './harness.rip'
+import { SCENARIOS, differ, pinned } from './harness.rip'
 
 HERE =! dirname(fileURLToPath(import.meta.url))
 ROOT =! join(HERE, '../../..')
@@ -125,6 +126,7 @@ def prove(key, inks, tuis)
   return "update #{at}: the screens hash differently but read the same cells" unless cell
   "update #{at}, row #{cell.row}, column #{cell.col}: Ink #{JSON.stringify cell.a}, Rip TUI #{JSON.stringify cell.b}"
 
+LINES =! "`bun run lines` (lines.rip): non-blank, non-comment lines by test/lines.rip's rule; Ink's `src/` and Yoga's `yoga/algorithm/`, at the version Ink installs, against the files this package ships."
 HEAD =! '| Scenario | Ink cpu µs | p50 ms | p99 ms | bytes | writes | Rip TUI cpu µs | p50 ms | p99 ms | bytes | writes | Same screen |'
 RULE =! '|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|:--|'
 
@@ -193,6 +195,18 @@ def main()
   for arg, i in args
     if arg is '--runs' then runs = Number args[i + 1]
     else if not args[i - 1]?.startsWith('--') then only = arg
+  pinned()
+  if args.includes '--lines'
+    counted = printed! 'lines.rip', [], true
+    path = join HERE, 'RESULTS.md'
+    parts = readFileSync(path, 'utf8').split /^(?=## )/m
+    at = parts.findIndex (part) -> part.startsWith '## Lines of code'
+    throw Error.new 'RESULTS.md has no lines section to regenerate' if at < 0
+    parts[at] = "## Lines of code\n\n#{LINES}\n\n#{counted}\n\n"
+    writeFileSync path, parts.join ''
+    console.log "\n#{counted}\n"
+    note 'the lines section of bench/RESULTS.md regenerated'
+    return
   began = load()
   date = Date.new().toISOString().slice 0, 10
   { text, refused } = scenarios! only, runs
@@ -206,7 +220,7 @@ def main()
   cold = startup!
   sections.push "## Cold start\n\n#{cold}"
   counted = printed! 'lines.rip', [], true
-  sections.push "## Lines of code\n\n`bun run lines` (lines.rip): non-blank, non-comment lines by test/lines.rip's rule; Ink's `src/` and Yoga's `yoga/algorithm/` against the files this package ships.\n\n#{counted}"
+  sections.push "## Lines of code\n\n#{LINES}\n\n#{counted}"
   framed = printed! 'frame.rip'
   sections.push "## One frame, whole and damaged\n\n`bun run frame` (frame.rip): the frame alone — paint, diff, write; the state change left out, no layout owed — owing every cell, then owing its damage; median microseconds, the bytes of one, and the cells the damaged frame painted and compared.\n\n#{framed}"
   keyed = printed! 'keys.rip'
