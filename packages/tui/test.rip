@@ -3,11 +3,11 @@
 # ==============================================================================
 
 import { test, eq, ok, throws } from 'rip/testing'
-import { run, quit, mount, renderToString, screen, Box, Text, Spacer } from 'rip/tui'
+import { run, quit, mount, renderToString, screen, print, clock, Box, Text, Spacer, Static, Newline } from 'rip/tui'
 import * as mod from 'rip/tui'
 import { install } from './document.rip'
 import { layout } from './layout.rip'
-import { Grid, paint, diff, tally as styleCount } from './paint.rip'
+import { Grid, paint, diff, rowsToString, tally as styleCount } from './paint.rip'
 import { tally as clusterCount, clusterWidth } from './text.rip'
 import { __setChildFailureReporter } from '../../src/runtime/components.js'
 import { EventEmitter } from 'node:events'
@@ -138,7 +138,7 @@ def mounted(App, body)
 console.log "\nPackage"
 
 test "module exports the entry surface and nothing else", ->
-  eq Object.keys(mod).sort(), ['Box', 'Spacer', 'Text', 'focus', 'mount', 'quit', 'renderToString', 'run', 'screen']
+  eq Object.keys(mod).sort(), ['Box', 'Newline', 'Spacer', 'Static', 'Text', 'clock', 'focus', 'mount', 'print', 'quit', 'renderToString', 'run', 'screen']
 
 test "declares no dependencies", ->
   pkg = JSON.parse readFileSync(join(import.meta.dir, 'package.json'), 'utf8')
@@ -1934,5 +1934,372 @@ test "a sweep as a paint starts owes every cell", ->
     eq view.damage, 40 * 6
     ok view.bytes.includes('still'), 'the frame was not drawn from nothing'
     wholly view
+  finally
+    view.close()
+
+# ==[ Static, print ]==
+
+console.log "\nScrollback"
+
+# A log of finished steps above a live line.
+Journal =! component
+  @done := []
+  @live := 'live'
+  render
+    Box flexDirection: 'column'
+      Static
+        for step in @done
+          Text key: step, step
+      Text "#{@live}"
+
+test "a static item is written in the frame's write: the frame's rows cleared, the item's rows, the frame drawn again below", ->
+  view = mount Journal, cols: 20, rows: 10
+  try
+    eq view.frame(), 'live'
+    eq view.bytes, "\x1b[?2026h\x1b[J\x1b[1Glive\r\x1b[?2026l"
+    view.app.done.value = ['step one']
+    eq view.frame(), 'live', 'the live frame does not grow'
+    eq view.bytes, "\x1b[?2026h\x1b[Jstep one\n\x1b[J\x1b[1Glive\r\x1b[?2026l"
+    eq view.scrollback, "step one\n"
+    view.app.done.value = ['step one', 'two', 'three']
+    view.frame()
+    eq view.bytes, "\x1b[?2026h\x1b[Jtwo\nthree\n\x1b[J\x1b[1Glive\r\x1b[?2026l", 'two new items are written in order, in one write'
+    eq view.scrollback, "step one\ntwo\nthree\n"
+    eq replay([view.bytes], 20, 10), "two\nthree\nlive"
+  finally
+    view.close()
+
+test "an item is painted once, at the terminal's width: a change to it or its removal writes nothing, and the frame stays", ->
+  Steps = component
+    @done := ['a']
+    @tint := undefined
+    render
+      Box flexDirection: 'column'
+        Static
+          for step in @done
+            Text key: step, color: @tint, wrap: 'truncate'
+              "#{step} #{'x'.repeat 30}"
+        Text "live"
+  view = mount Steps, cols: 20
+  try
+    eq view.frame(), 'live'
+    eq view.scrollback, "a xxxxxxxxxxxxxxxxx…\n"
+    view.app.tint.value = 'red'
+    view.frame()
+    eq view.bytes, '', 'a written item that changes writes nothing'
+    eq view.scrollback, "a xxxxxxxxxxxxxxxxx…\n"
+    view.app.done.value = ['a', 'b']
+    view.frame()
+    eq view.scrollback, "a xxxxxxxxxxxxxxxxx…\n\x1b[31mb xxxxxxxxxxxxxxxxx…\x1b[0m\n", 'the new item is written in its color, the old one not again'
+    view.app.done.value = ['b']
+    view.frame()
+    eq view.bytes, '', 'a removal writes nothing'
+    eq view.damage, 0
+  finally
+    view.close()
+
+test "the mouse lands right after a static write: the frame's origin moves down by the rows written", ->
+  hits = []
+  Rows = component
+    @done := []
+    render
+      Box flexDirection: 'column'
+        Static
+          for step in @done
+            Text key: step, step
+        for n in [0, 1]
+          Text key: n, @click: (-> hits.push n)
+            "row #{n}"
+  view = mount Rows, cols: 20, rows: 10, mouse: true
+  try
+    view.frame()
+    view.send "\x1b[<0;1;2M\x1b[<0;1;2m"
+    eq hits, [1]
+    view.app.done.value = ['one', 'two']
+    view.frame()
+    view.send "\x1b[<0;1;4M\x1b[<0;1;4m"
+    eq hits, [1, 1], 'the frame sits two rows lower'
+    view.send "\x1b[<0;1;2M\x1b[<0;1;2m"
+    eq hits, [1, 1], 'a click on a written row hits nothing'
+  finally
+    view.close()
+
+test "under the alternate screen a static item writes nothing and paints nothing", ->
+  view = mount Journal, cols: 20
+  try
+    view.held.view.alt = true
+    view.app.done.value = ['x']
+    eq view.frame(), 'live'
+    ok not view.bytes.includes('x'), JSON.stringify view.bytes
+    eq view.scrollback, ''
+  finally
+    view.close()
+
+test "off a terminal, items are written as plain text as they arrive", ->
+  Tinted = component
+    @done := []
+    render
+      Box flexDirection: 'column'
+        Static
+          for step in @done
+            Text key: step, color: 'red', step
+        Text "live"
+  view = mount Tinted, cols: 20
+  try
+    view.held.view.interactive = false
+    view.app.done.value = ['x']
+    view.frame()
+    ok view.bytes.startsWith("x\n"), JSON.stringify view.bytes
+    eq view.scrollback, "x\n"
+  finally
+    view.close()
+
+test "an item under a hidden ancestor waits, and is written once shown", ->
+  Folded = component
+    @open := false
+    render
+      Box flexDirection: 'column'
+        Box display: (if @open then undefined else 'none')
+          Static
+            for step in ['x']
+              Text key: step, step
+        Text "live"
+  view = mount Folded, cols: 20
+  try
+    view.frame()
+    eq view.scrollback, ''
+    view.app.open.value = true
+    view.frame()
+    eq view.scrollback, "x\n"
+    view.app.open.value = false
+    view.app.open.value = true
+    view.frame()
+    eq view.scrollback, "x\n"
+  finally
+    view.close()
+
+test "renderToString is the rows written above and then the frame, plain or with escape sequences", ->
+  eq renderToString(Journal, cols: 20, props: { done: ['a', 'b'] }), "a\nb\nlive"
+  eq renderToString(Journal, cols: 20, props: { done: ['a', 'b'], live: '' }), "a\nb\n"
+  Only = component
+    render
+      Static
+        for step in ['a', 'b']
+          Text key: step, color: 'red', step
+  eq renderToString(Only, cols: 20), "a\nb"
+  eq renderToString(Only, cols: 20, ansi: true), "\x1b[31ma\x1b[0m\n\x1b[31mb\x1b[0m"
+
+test "print writes above the frame, ending its line; print.err the same on stderr, the frame cleared on stdout first", ->
+  view = mount Journal, cols: 20
+  try
+    view.frame()
+    print 'warning'
+    view.frame()
+    eq view.bytes, "\x1b[?2026h\x1b[Jwarning\n\x1b[J\x1b[1Glive\r\x1b[?2026l"
+    print 'two\nlines\n'
+    view.frame()
+    eq view.bytes, "\x1b[?2026h\x1b[Jtwo\nlines\n\x1b[J\x1b[1Glive\r\x1b[?2026l"
+    print.err 'oops'
+    ok view.bytes.endsWith("\x1b[J"), 'the frame is cleared at once'
+    eq view.stderr, "oops\n"
+    view.frame()
+    eq view.bytes, "\x1b[?2026h\x1b[J\x1b[1Glive\r\x1b[?2026l", 'the frame is drawn again below'
+    eq view.scrollback, "warning\ntwo\nlines\noops\n"
+  finally
+    view.close()
+
+test "rowsToString is the grid's serializer, plain and with escape sequences", ->
+  view = mount Journal, cols: 20, props: { live: 'here' }
+  try
+    view.frame()
+    front = view.held.view.front
+    eq rowsToString(front), 'here'
+    eq rowsToString(front, true), front.toString true
+  finally
+    view.close()
+
+test "Newline breaks a line inside text, `count` times", ->
+  One = component
+    render
+      Text
+        "Hello"
+        Newline
+        "World"
+  eq renderToString(One, cols: 20), "Hello\nWorld"
+  Two = component
+    render
+      Text
+        "Hello"
+        Newline count: 2
+        "World"
+  eq renderToString(Two, cols: 20), "Hello\n\nWorld"
+
+# ==[ The clock ]==
+
+console.log "\nClock"
+
+# A timer source a test drives by hand and counts: `tick` jumps its
+# time and runs what fell due, in order.
+def timers()
+  fake = { time: 0, due: [], afters: 0, cancels: 0 }
+  fake.now = -> fake.time
+  fake.after = (ms, fn) ->
+    fake.afters += 1
+    entry = { at: fake.time + ms, fn }
+    fake.due.push entry
+    ->
+      fake.cancels += 1
+      fake.due = fake.due.filter (other) -> other isnt entry
+  fake.tick = (ms) ->
+    fake.time += ms
+    ready = fake.due.filter((entry) -> entry.at <= fake.time).sort (a, b) -> a.at - b.at
+    fake.due = fake.due.filter (entry) -> entry.at > fake.time
+    entry.fn() for entry in ready
+  fake
+
+test "a clock a component holds but never reads costs no timer", ->
+  fake = timers()
+  Holder = component
+    tick = clock 30, fake
+    render
+      Text "still"
+  view = mount Holder, cols: 20
+  try
+    eq view.frame(), 'still'
+    eq fake.afters, 0
+  finally
+    view.close()
+  eq fake.cancels, 0
+
+test "two components reading one interval share one timer, which runs while a reader remains and stops at close", ->
+  fake = timers()
+  Spin = component
+    tick = clock 40, fake
+    render
+      Text "#{tick.frame}"
+  Pair = component
+    @second := true
+    render
+      Box flexDirection: 'row'
+        Spin
+        if @second
+          Spin
+  view = mount Pair, cols: 20
+  try
+    eq view.frame(), '00'
+    eq fake.afters, 1, 'one timer for two readers'
+    fake.tick 80
+    eq view.frame(), '22', 'the frame is the time elapsed over the interval, however late the tick'
+    eq fake.afters, 2, 'the one timer is set again after the tick'
+    view.app.second.value = false
+    eq view.frame(), '2'
+    eq fake.cancels, 0, 'the timer stays while a reader remains'
+    fake.tick 40
+    eq view.frame(), '3'
+  finally
+    view.close()
+  eq fake.cancels, 1, 'the timer stops at close'
+  eq fake.due, [], 'nothing is left to run'
+
+test "`tick` moves the mount's clock: frame counts intervals, time the milliseconds, delta the time since the last tick", ->
+  Watch = component
+    tick = clock 50
+    render
+      Text "#{tick.frame},#{tick.time},#{tick.delta}"
+  view = mount Watch, cols: 20
+  try
+    eq view.frame(), '0,0,0'
+    view.tick 50
+    eq view.frame(), '1,50,50'
+    view.tick 120
+    eq view.frame(), '3,150,50'
+    view.tick 30
+    eq view.frame(), '4,200,50', 'the parser and the clock share one time'
+  finally
+    view.close()
+
+test "the frame catches up when the timer is late, and the interval defaults to 100 where none is given or the one given is no number", ->
+  fake = timers()
+  Late = component
+    tick = clock 60, fake
+    render
+      Text "#{tick.frame}"
+  view = mount Late, cols: 20
+  try
+    view.frame()
+    fake.tick 250
+    eq view.frame(), '4'
+  finally
+    view.close()
+  ok clock(NaN) is clock(100) and clock() is clock(100) and clock(Infinity) is clock(100)
+
+test "a clock never runs where the output is not interactive", ->
+  fake = timers()
+  Quiet = component
+    tick = clock 70, fake
+    render
+      Text "#{tick.frame}"
+  view = mount Quiet, cols: 20
+  try
+    view.held.view.interactive = false
+    eq view.frame(), '0'
+    eq fake.afters, 0
+  finally
+    view.close()
+
+# ==[ Progress ]==
+
+console.log "\nProgress"
+
+test "progress goes out with the next frame's write: a percent, error, indeterminate, and the clear", ->
+  view = mount Journal, cols: 20
+  try
+    view.frame()
+    screen.progress 0.5
+    view.frame()
+    eq view.bytes, "\x1b[?2026h\x1b]9;4;1;50\x1b\\\x1b[?2026l"
+    screen.progress 'error'
+    view.frame()
+    eq view.bytes, "\x1b[?2026h\x1b]9;4;2\x1b\\\x1b[?2026l"
+    screen.progress 'indeterminate'
+    view.app.live.value = 'busy'
+    view.frame()
+    eq view.bytes, "\x1b[?2026h\x1b[1Gbusy\r\x1b]9;4;3\x1b\\\x1b[?2026l", 'one write carries the cells and the progress'
+    screen.progress null
+    view.frame()
+    eq view.bytes, "\x1b[?2026h\x1b]9;4;0\x1b\\\x1b[?2026l"
+    screen.progress 1
+    screen.progress 0.333
+    view.frame()
+    eq view.bytes, "\x1b[?2026h\x1b]9;4;1;33\x1b\\\x1b[?2026l", 'the last value set before the write is the one sent'
+    throws (-> screen.progress 2), "progress: 2 is not a number from 0 to 1, 'error', 'indeterminate' or null"
+  finally
+    view.close()
+
+test "the clear on the way out is answered once a progress was reported, and not otherwise", ->
+  view = mount Journal, cols: 20
+  try
+    view.frame()
+    eq view.held.view.clearProgress(), ''
+    screen.progress null
+    view.frame()
+    eq view.bytes, '', 'a clear with nothing reported is nothing'
+    screen.progress 0.25
+    view.frame()
+    eq view.held.view.clearProgress(), "\x1b]9;4;0\x1b\\"
+    eq view.held.view.clearProgress(), ''
+  finally
+    view.close()
+
+test "progress is nothing off a terminal, and with no app mounted", ->
+  screen.progress 0.5
+  view = mount Journal, cols: 20
+  try
+    view.held.view.interactive = false
+    view.frame()
+    screen.progress 0.5
+    view.frame()
+    ok not view.bytes.includes("\x1b]9;4"), JSON.stringify view.bytes
+    eq view.held.view.clearProgress(), ''
   finally
     view.close()

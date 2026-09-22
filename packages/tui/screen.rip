@@ -44,6 +44,17 @@ export class Screen
     @origin = 0      # the terminal row the frame's top-left is on: what the cursor probe answers, and lower once a frame scrolls the terminal
     @selection = { from: -1, to: -1 }   # the selected cells (mouse.rip), none while `from` is under zero
     @after = null    # run after every frame: the pointer looks again at what is under it
+    @statics = Set.new()   # the `Static` containers mounted (tui.rip), in the order they arrived
+    @scrollback = ''       # everything written above the frame so far, as it was written
+
+  # Write `text` above the live frame.
+  above!: (text, err = null) ->
+
+  # Report progress on the terminal's own indicator.
+  progress!: (value) ->
+
+  # The bytes that clear a reported progress, once.
+  clearProgress: -> ''
 
   get cols: -> @out.columns ?? 80
   get rows: -> @out.rows ?? 24

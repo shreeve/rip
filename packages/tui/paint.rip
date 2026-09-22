@@ -431,6 +431,15 @@ export class Grid
       lines.push (if ansi then line else line.trimEnd())
     lines.join '\n'
 
+# The one serializer of a painted grid: `renderToString`, a `Static`
+# item and the frame written off a terminal (terminal.rip) all read
+# their rows through it.
+export rowsToString =! (grid, ansi = false) -> grid.toString ansi
+
+# Paint `node` alone, as a root laid out at `cols`, onto a grid of its
+# own: the rows a `Static` batch writes to the scrollback (screen.rip).
+export still =! (node, cols) -> Grid.new cols, 0
+
 # The selection (mouse.rip): the cells `from` to `to` in reading order,
 # each counted as row × columns + column of tree cells, shown inverse.
 # Only the cells the paint owed are flipped: the rest show as they
