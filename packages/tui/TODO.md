@@ -6,10 +6,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 1. The closing audit — code
 
-- [ ] `Screen` is built and then has `whole`, `interactive`, `alt`,
-      `origin`, `after` and `failed` set from `tui.rip:276`, and its
-      constructor initialises the same fields to values always
-      overwritten. Take them as options.
 - [ ] Void functions unmarked: `close` and `quit` (tui), `settle`
       (screen), `name`, `mouse`, `answer`, `cursor` (input), `put`
       (document).

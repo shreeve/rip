@@ -270,14 +270,12 @@ open =! (App, options, out, terminal, stdin = null, clock = undefined) ->
   keys = options.keyboard ?? 'basic'
   throw Error.new "rip/tui: keyboard: #{JSON.stringify keys} is not 'basic' or 'enhanced'" unless keys is 'basic' or keys is 'enhanced'
   { doc, restore } = install()
-  view = Screen.new doc, out
-  view.whole = options.damage is false
-  view.interactive = not terminal or attended out
-  view.alt = terminal and view.interactive and options.altScreen is true
+  attending = not terminal or attended out
+  alternate = terminal and attending and options.altScreen is true
   # On a terminal the frame sits wherever the cursor was, which the
   # probe answers; until then, and where nothing answers, at the bottom.
   # The alternate screen's is its top.
-  view.origin = if terminal and not view.alt then Infinity else 0
+  view = Screen.new doc, out, { whole: options.damage is false, interactive: attending, alt: alternate, origin: (if terminal and not alternate then Infinity else 0) }
   cols = view.cols
   rows = view.rows
   interactive = view.interactive

@@ -40,18 +40,26 @@ converge =! (doc, cols) ->
   return
 
 export class Screen
-  constructor: (@doc, @out) ->
+  # `whole` owes every cell of every frame, for a test to compare
+  # against; `interactive` says frames go to a terminal someone is
+  # watching (terminal.rip) — off one, frames are kept and only text is
+  # written; `alt` is the alternate screen, whose top-left the frame's
+  # is, where nothing is written above and `leave` moves nowhere;
+  # `origin` is the terminal row the frame's top-left is on. `after`
+  # and `failed` are hooks a caller installs: run after every frame,
+  # and told of a frame that fails with no caller to throw to.
+  constructor: (@doc, @out, { whole = false, interactive = true, alt = false, origin = 0 } = {}) ->
     @front = null
     @spare = null
     @booked = false
     @last = 0
     @failed = null
-    @whole = false   # owe every cell of every frame, for a test to compare against
+    @whole = whole
     @owed = 0        # the cells the last frame owed
     @parked = null   # where the cursor is shown, `{ x, y }` on the grid, or null while it is hidden
-    @origin = 0      # the terminal row the frame's top-left is on: what the cursor probe answers, and lower once a frame scrolls the terminal
-    @alt = false     # the alternate screen: the frame's top-left is the screen's, nothing is written above, and `leave` moves nowhere
-    @interactive = true   # whether frames go to a terminal someone is watching (terminal.rip); off one, frames are kept and only text is written
+    @origin = origin   # what the cursor probe answers, and lower once a frame scrolls the terminal
+    @alt = alt
+    @interactive = interactive
     @selection = { from: -1, to: -1 }   # the selected cells (mouse.rip), none while `from` is under zero
     @after = null    # run after every frame: the pointer looks again at what is under it
     @statics = []          # the `Static` containers mounted (tui.rip), in the order they arrived
