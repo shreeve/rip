@@ -22,7 +22,9 @@ ASKS     =! { '?u': 'keyboard', 'c': 'attributes', '?6n': 'cursor' }
 # terminal shows until it is told otherwise); `queries` is what it was
 # asked, in order; `kitty` is how deep its keyboard stack is pushed;
 # `clipboard` is what OSC 52 last put there; `scrolled` counts the rows
-# pushed into the scrollback; `sent` is every write.
+# pushed into the scrollback; `sent` is every write. The alternate screen
+# (1049) is a second buffer: entering it saves the lines and the cursor,
+# leaving it brings them back.
 export class Terminal extends EventEmitter
   constructor: (@columns = 40, @rows = 10) ->
     super()
@@ -35,6 +37,7 @@ export class Terminal extends EventEmitter
     @kitty = 0
     @clipboard = null
     @scrolled = 0
+    @saved = null
 
   get shown: -> @modes.has 25
   get cursor: -> if @shown then { x: @x, y: @y } else null
@@ -90,12 +93,22 @@ export class Terminal extends EventEmitter
     if params[0] is '?'
       for mode in params.slice(1).split ';'
         if verb is 'h' then @modes.add +mode else @modes.delete +mode
+        if +mode is 1049 and verb is 'h'
+          @saved = { lines: @lines, x: @x, y: @y }
+          @lines = []
+        else if +mode is 1049 and @saved
+          { lines: @lines, x: @x, y: @y } = @saved
+          @saved = null
       return
     n = parseInt(params) or 1
     switch verb
       when 'A' then @y = Math.max 0, @y - n
       when 'B' then @y = Math.min @rows - 1, @y + n
       when 'G' then @x = n - 1
+      when 'H'
+        [row, col] = params.split ';'
+        @y = (parseInt(row) or 1) - 1
+        @x = (parseInt(col) or 1) - 1
       when 'J'
         @lines.length = @y + 1
         @lines[@y]?.length = @x

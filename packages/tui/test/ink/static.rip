@@ -1,0 +1,622 @@
+# Ink's Static and stdout-hook tests, ported: the trees of
+# test/static-blank-lines.tsx, static-string-replacement.tsx,
+# static-trailing-layout.tsx, static-runtime-blank-lines.tsx and
+# issue-973-static-commit.tsx, the Static cases of components.tsx,
+# render-to-string.tsx and background.tsx, and the useStdout /
+# useStderr cases of cursor.tsx (test/events/SOURCE.md names them).
+#
+# Each test keeps Ink's title and draws Ink's tree, prop for prop. A
+# `<Static items>` with a render function is `Static` around a keyed
+# `for`. SOURCE.md says where each expected frame comes from and which
+# of Ink's cases are left out.
+#
+#   rip test/ink/static.rip
+
+import { test, eq, ok } from 'rip/testing'
+import { mount, print, Static } from 'rip/tui'
+import { Box, Text, plain, styled, differs } from './harness.rip'
+import { Terminal } from '../events/harness.rip'
+import * as cells from './cells.rip'
+
+console.log "\nStatic"
+
+# Ink's debug output is every static item written so far and then the
+# live frame, which is what a terminal shows: the scrollback, then the
+# frame.
+shown =! (view) ->
+  frame = view.frame()
+  cells.plain view.scrollback + frame
+
+mounted =! (App, options, body) ->
+  view = mount App, { cols: 100, ...options }
+  try
+    body view
+  finally
+    view.close()
+
+# ── static-blank-lines.tsx ────────────────────────────────────────────────────
+
+# Published Ink draws "after" where one blank row is expected.
+for height in [0, 1, 2, 3]
+  test "Static preserves #{height} blank rows before dynamic output", ->
+    App = component
+      render
+        Box flexDirection: 'column'
+          Static
+            for item in ['blank']
+              Box key: item, height: height
+          Text "after"
+    Expected = component
+      render
+        Box flexDirection: 'column'
+          Box height: height
+          Text "after"
+    expected = plain Expected, 80
+    eq expected, cells.plain('\n'.repeat(height) + 'after')
+    eq plain(App, 80), expected
+
+# What published Ink draws, by content: for " " it draws "after".
+WHITESPACE =! { undefined: 'after', '""': 'after', '" "': '\nafter', '"\\n"': '\n\nafter' }
+
+for content in [undefined, '', ' ', '\n']
+  test "Static preserves whitespace content #{JSON.stringify content}", ->
+    App = component
+      render
+        Box flexDirection: 'column'
+          Static
+            for key in ['item']
+              Box key: key
+                Text "#{content ?? ''}"
+          Text "after"
+    Expected = component
+      render
+        Box flexDirection: 'column'
+          Text "#{content ?? ''}"
+          Text "after"
+    eq plain(App, 80), plain(Expected, 80)
+    eq plain(App, 80), cells.plain(WHITESPACE[JSON.stringify content])
+
+test "empty Static does not insert a blank row", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Static
+          for item in []
+            Text key: item, item
+        Text "after"
+  eq plain(App, 80), ["after"]
+
+# ── static-string-replacement.tsx ─────────────────────────────────────────────
+
+# Ink's layout effect writes its state before the first frame is read;
+# an effect here runs as the component is made, before any frame.
+
+# Published Ink draws "Old\nLive" and "Old\nNew\nLive": its
+# renderToString keeps a Static its layout effect took away.
+for replace in [false, true]
+  test "renderToString reflects a layout-effect Static #{if replace then 'replacement' else 'removal'}", ->
+    Example = component
+      updated := false
+      ~> updated = true
+      render
+        Box flexDirection: 'column'
+          if not updated or replace
+            Static
+              for item in [(if updated then 'New' else 'Old')]
+                Text key: item, item
+          Text "Live"
+    eq plain(Example, 80), cells.plain(if replace then 'New\nLive' else 'Live')
+
+test "layout-effect appends to the same Static retain earlier items", ->
+  Example = component
+    items := ['First']
+    ~> items = ['First', 'Second']
+    render
+      Static
+        for item in items
+          Text key: item, item
+  eq plain(Example, 80), ["First", "Second"]
+
+test "replacement Static survives cleanup in static-only output", ->
+  cleanups = 0
+  Example = component
+    updated := false
+    ~>
+      updated = true
+      -> cleanups += 1
+    render
+      Static
+        for item in [(if updated then 'New' else 'Old')]
+          Text key: item, item
+  # Published Ink draws "Old\nNew".
+  eq plain(Example, 80), ["New"]
+  eq cleanups, 1
+
+# ── static-trailing-layout.tsx ────────────────────────────────────────────────
+
+# Published Ink draws "A" for one trailing row.
+for height in [0, 1, 2]
+  test "renderToString preserves #{height} trailing dynamic rows after Static", ->
+    App = component
+      render
+        Box flexDirection: 'column'
+          Static
+            for item in ['A']
+              Text key: item, item
+          Box height: height
+    eq plain(App, 80), cells.plain "A#{'\n'.repeat height}"
+
+# Published Ink draws "A" and "A\nB", a row short.
+TRAILING =! { '""': '', '"A"': 'A\n', '"A\\nB"': 'A\nB\n' }
+
+for staticText in ['', 'A', 'A\nB']
+  test "blank dynamic rows agree with ordinary layout after Static #{JSON.stringify staticText}", ->
+    App = component
+      render
+        Box flexDirection: 'column'
+          Static
+            for item in ['item']
+              Text key: item
+                staticText
+          Box height: 1
+    Expected = component
+      render
+        Box flexDirection: 'column'
+          Text staticText
+          Box height: 1
+    eq plain(App, 80), plain(Expected, 80)
+    eq plain(App, 80), cells.plain(TRAILING[JSON.stringify staticText])
+
+test "hidden dynamic content does not add a separator to Static output", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Static
+          for item in ['A']
+            Text key: item, item
+        Box display: 'none', height: 1
+          Text "Hidden"
+  eq plain(App, 80), ["A"]
+
+# ── static-runtime-blank-lines.tsx ────────────────────────────────────────────
+
+# Published Ink shows "after" for one blank row.
+for height in [0, 1, 2]
+  test "runtime Static preserves #{height} blank rows in debug output", ->
+    App = component
+      render
+        Box flexDirection: 'column'
+          Static
+            for item in ['blank']
+              Box key: item, height: height
+          Text "after"
+    mounted App, {}, (view) ->
+      eq shown(view), cells.plain('\n'.repeat(height) + 'after')
+
+# Every frame here is drawn incrementally; Ink's flag has no counterpart.
+# Published Ink shows ["first", "last", "updated", ""]: the blank row
+# is lost.
+for incremental in [false, true]
+  test "a blank Static append survives a later live update (incremental: #{incremental})", ->
+    View = component
+      @items := ['first']
+      @label := 'live'
+      render
+        Box flexDirection: 'column'
+          Static
+            for item in @items
+              Box key: item, height: (if item is 'blank' then 1 else undefined)
+                if item isnt 'blank'
+                  Text item
+          Text "#{@label}"
+    mounted View, { rows: 8 }, (view) ->
+      term = Terminal.new 100, 8
+      draw = ->
+        view.frame()
+        term.write view.bytes
+      draw()
+      view.app.items.value = ['first', 'blank']
+      draw()
+      view.app.items.value = ['first', 'blank', 'last']
+      draw()
+      view.app.label.value = 'updated'
+      draw()
+      eq term.text.split('\n').slice(0, 4), ['first', '', 'last', 'updated']
+
+# ── issue-973-static-commit.tsx ───────────────────────────────────────────────
+
+# Ink's fixture: a live region stands, a static item taller than the
+# terminal arrives beside it, then a live-only update follows; the
+# erase of that update must not take the static item's last row.
+test "#973: static item taller than viewport keeps its last line", ->
+  rows = 6
+  Commit = component
+    @phase := 'mount'
+    render
+      Box flexDirection: 'column'
+        Static
+          for item in (if @phase is 'mount' then [] else [("line #{n}" for n in [1..rows]).join '\n'])
+            Text key: item, item
+        Box flexDirection: 'column'
+          Text (if @phase is 'nudge' then 'INPUT BOX' else 'input box')
+  mounted Commit, { rows }, (view) ->
+    term = Terminal.new 100, rows
+    for phase in ['mount', 'live', 'nudge']
+      view.app.phase.value = phase
+      view.frame()
+      term.write view.bytes
+    seen = term.text.split('\n').filter (line) -> line.length
+    ok seen.includes('line 6'), "the last static line must stay visible, got #{JSON.stringify seen}"
+    ok seen.includes('INPUT BOX'), "the live region must render, got #{JSON.stringify seen}"
+    ok not term.sent.join('').includes("\x1b[H"), 'the terminal was never homed and erased'
+
+# ── components.tsx ────────────────────────────────────────────────────────────
+
+test "static output", ->
+  App = component
+    render
+      Box
+        Static paddingBottom: 1
+          for letter in ['A', 'B', 'C']
+            Text key: letter, letter
+        Box marginTop: 1
+          Text "X"
+  eq plain(App), ["A", "B", "C", "", "", "X"]
+
+test "static padding is not emitted again when there are no new items", ->
+  Test = component
+    @status := 'Waiting'
+    @items := ['A']
+    render
+      Box flexDirection: 'column'
+        Static padding: 1
+          for item in @items
+            Text key: item, item
+        Text "#{@status}"
+  # Published Ink draws the padding again with every frame:
+  # "\n A\n\n\n\nWaiting", "\n A\n\n\n\n\n\nReady" and
+  # "\n A\n\n\n\n\n\n\n B\n\n\n\nDone".
+  mounted Test, {}, (view) ->
+    eq shown(view), cells.plain "\n A\n\nWaiting"
+    view.app.status.value = 'Ready'
+    eq shown(view), cells.plain "\n A\n\nReady"
+    view.app.status.value = 'Done'
+    view.app.items.value = ['A', 'B']
+    eq shown(view), cells.plain "\n A\n\n\n B\n\nDone"
+
+# Ink's debug write is every item so far; what reaches the terminal for
+# a frame is its new items, and the earlier ones are not written again.
+test "skip previous output when rendering new static output", ->
+  Dynamic = component
+    @items := ['A']
+    render
+      Static
+        for item in @items
+          Text key: item, item
+  mounted Dynamic, {}, (view) ->
+    view.frame()
+    eq view.scrollback, "A\n"
+    view.app.items.value = ['A', 'B']
+    view.frame()
+    eq view.scrollback, "A\nB\n"
+    ok not view.bytes.includes('A'), "the frame wrote A again: #{JSON.stringify view.bytes}"
+
+test "static output stops accumulating after Static unmounts (#904)", ->
+  App = component
+    @show := true
+    render
+      Box
+        if @show
+          Static
+            for item in ['A', 'B']
+              Text key: item, item
+        Text "Dynamic"
+  mounted App, {}, (view) ->
+    eq shown(view), ['A', 'B', 'Dynamic']
+    view.app.show.value = false
+    eq view.frame(), 'Dynamic'
+    written = view.scrollback
+    for n in [0...10]
+      view.frame()
+    eq view.scrollback, written
+    eq view.frame(), 'Dynamic'
+
+test "fullStaticOutput is reset when <Static> unmounts so stale items are not replayed", ->
+  App = component
+    @show := true
+    @dynamicLabel := 'd1'
+    render
+      Box
+        if @show
+          Static
+            for item in ['HISTORY-A', 'HISTORY-B']
+              Text key: item, item
+        Text "#{@dynamicLabel}"
+  mounted App, {}, (view) ->
+    eq shown(view), ['HISTORY-A', 'HISTORY-B', 'd1']
+    written = view.scrollback
+    view.app.show.value = false
+    view.app.dynamicLabel.value = 'd2'
+    eq view.frame(), 'd2'
+    eq view.scrollback, written
+    ok not view.bytes.includes('HISTORY'), "a stale item was written again: #{JSON.stringify view.bytes}"
+
+# Published Ink writes HISTORY-X again with every frame after the unmount.
+test "unmounting an ancestor of <Static> clears staticNode and does not crash the renderer", ->
+  Wrapper = component
+    render
+      Box
+        slot
+  App = component
+    @showWrapper := true
+    @label := 'live-1'
+    render
+      Box
+        if @showWrapper
+          Wrapper
+            Static
+              for item in ['HISTORY-X']
+                Text key: item, item
+        Text "#{@label}"
+  mounted App, {}, (view) ->
+    eq shown(view), ['HISTORY-X', 'live-1']
+    written = view.scrollback
+    view.app.showWrapper.value = false
+    view.app.label.value = 'live-2'
+    eq view.frame(), 'live-2'
+    eq view.scrollback, written
+    view.app.label.value = 'live-3'
+    eq view.frame(), 'live-3'
+    eq view.scrollback, written
+
+# Published Ink writes ROOT-HISTORY again after the unmount.
+test "removing a <Static> ancestor that is a direct child of the root does not crash", ->
+  App = component
+    @showWrapper := true
+    @label := 'root-1'
+    render
+      Box flexDirection: 'column'
+        if @showWrapper
+          Box
+            Static
+              for item in ['ROOT-HISTORY']
+                Text key: item, item
+        Text "#{@label}"
+  mounted App, {}, (view) ->
+    eq shown(view), ['ROOT-HISTORY', 'root-1']
+    written = view.scrollback
+    view.app.showWrapper.value = false
+    view.app.label.value = 'root-2'
+    eq view.frame(), 'root-2'
+    eq view.scrollback, written
+
+# The items of the first Static stay in the terminal's scrollback, where
+# Ink's debug replay forgets them; the rows from the remount on are held.
+test "remounting <Static> via key change emits the new items (nested under <Box>)", ->
+  App = component
+    @session := 1
+    render
+      Box
+        if @session is 1
+          Static
+            for item in ['old-A', 'old-B']
+              Text key: item, item
+        else
+          Static
+            for item in ['new-C', 'new-D']
+              Text key: item, item
+        Text "dynamic"
+  mounted App, {}, (view) ->
+    eq shown(view), ['old-A', 'old-B', 'dynamic']
+    view.app.session.value = 2
+    eq shown(view).slice(2), ['new-C', 'new-D', 'dynamic']
+
+test "remounting <Static> via key change emits the new items (root-level — removeChildFromContainer)", ->
+  App = component
+    @session := 1
+    render
+      Box flexDirection: 'column'
+        if @session is 1
+          Static
+            for item in ['old-A', 'old-B']
+              Text key: item, item
+        else
+          Static
+            for item in ['new-C', 'new-D']
+              Text key: item, item
+  mounted App, {}, (view) ->
+    eq shown(view), ['old-A', 'old-B', '']
+    view.app.session.value = 2
+    eq shown(view).slice(2), ['new-C', 'new-D', '']
+
+test "render only new items in static output on final render", ->
+  Dynamic = component
+    @items := []
+    render
+      Static
+        for item in @items
+          Text key: item, item
+  mounted Dynamic, {}, (view) ->
+    view.frame()
+    eq view.scrollback, ''
+    view.app.items.value = ['A']
+    view.frame()
+    eq view.scrollback, "A\n"
+    view.app.items.value = ['A', 'B']
+    view.frame()
+    eq view.scrollback, "A\nB\n"
+    ok view.bytes.includes('B') and not view.bytes.includes('A'), "the last frame wrote #{JSON.stringify view.bytes}"
+
+# Off a terminal, an item is written as plain text with the frame that
+# finds it, and the live frame is not drawn there (terminal.rip).
+test "static output is written immediately in non-interactive mode", ->
+  App = component
+    @items := ['A']
+    render
+      Box
+        Static
+          for item in @items
+            Text key: item, item
+        Text "Dynamic"
+  mounted App, {}, (view) ->
+    view.held.view.interactive = false
+    view.frame()
+    ok view.bytes.startsWith("A\n"), JSON.stringify view.bytes
+    view.app.items.value = ['A', 'B']
+    view.frame()
+    ok view.bytes.startsWith("B\n"), JSON.stringify view.bytes
+    eq view.scrollback, "A\nB\n"
+
+# ── render-to-string.tsx ──────────────────────────────────────────────────────
+
+# Published Ink throws on this tree: a negative count in its output.
+test "skip Static content inside a hidden ancestor", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Box display: 'none'
+          Static
+            for item in ['Hidden']
+              Box key: item, borderStyle: 'single'
+                Text item
+        Text "Visible"
+  eq plain(App, 80), ["Visible"]
+
+test "render Static component with items", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Static
+          for item in ['A', 'B', 'C']
+            Text key: item, item
+        Text "Dynamic"
+  eq plain(App, 80), ["A", "B", "C", "Dynamic"]
+
+# Published Ink draws "\n A": one item, one column of margin.
+test "Static preserves its margins and all items", ->
+  App = component
+    render
+      Static marginTop: 1, marginBottom: 1, marginLeft: 2
+        for item in ['A', 'B']
+          Text key: item, item
+  eq plain(App, 80), ["", "  A", "  B", ""]
+
+test "render static-only output has no trailing newline", ->
+  App = component
+    render
+      Static
+        for item in ['A', 'B']
+          Text key: item, item
+  eq plain(App, 80), ["A", "B"]
+
+test "render static + dynamic output has exactly one newline between parts", ->
+  App = component
+    render
+      Box flexDirection: 'column'
+        Static
+          for item in ['A', 'B']
+            Text key: item, item
+        Text "Dynamic"
+  eq plain(App, 80), ["A", "B", "Dynamic"]
+
+# ── background.tsx ────────────────────────────────────────────────────────────
+
+# Published Ink colors the two padding cells and not the A.
+test "Static background color is inherited by its text", ->
+  App = component
+    render
+      Static width: 3, backgroundColor: 'blue'
+        for item in ['A']
+          Text key: item, item
+  differs styled(App), ['«on blue»A  '], ['«on blue»A  ', ''],
+    "the live frame is empty, so nothing follows the item; Ink's root keeps one row for its absolute Static"
+
+# ── cursor.tsx: useStdout().write and useStderr().write ───────────────────────
+
+# `print` writes above the live frame and `print.err` the same on
+# stderr; Ink's `useCursor` places the cursor, which a node's `cursor`
+# does here. Ink's effect runs after the first frame; an effect here
+# runs as the component is made, and `ready` stands for that turn where
+# a case reads the frames after it.
+
+Hook =! (write) ->
+  component
+    ~> write()
+    render
+      Box focusable: true, autofocus: true, cursor: { x: 2, y: 0 }
+        Text "Hello"
+
+test "cursor remains visible after useStdout().write()", ->
+  mounted Hook(-> print 'from stdout hook'), {}, (view) ->
+    view.frame()
+    ok view.bytes.includes('from stdout hook'), JSON.stringify view.bytes
+    ok view.bytes.lastIndexOf("\x1b[?25h") > view.bytes.lastIndexOf("\x1b[?25l"), "the cursor is left hidden: #{JSON.stringify view.bytes}"
+
+test "cursor remains visible after useStderr().write()", ->
+  mounted Hook(-> print.err 'from stderr hook'), {}, (view) ->
+    view.frame()
+    eq view.stderr, "from stderr hook\n"
+    ok view.bytes.lastIndexOf("\x1b[?25h") > view.bytes.lastIndexOf("\x1b[?25l"), "the cursor is left hidden: #{JSON.stringify view.bytes}"
+
+Debug =! (write) ->
+  component
+    @ready := false
+    ~> write() if @ready
+    render
+      Text "Hello"
+
+test "debug mode: useStdout().write() replays latest frame", ->
+  mounted Debug(-> print 'from stdout hook'), {}, (view) ->
+    term = Terminal.new 100, 24
+    view.frame()
+    term.write view.bytes
+    view.app.ready.value = true
+    view.frame()
+    term.write view.bytes
+    eq term.text, "from stdout hook\nHello"
+    ok view.bytes.includes('Hello'), 'the frame was drawn again below the line'
+
+test "debug mode: useStdout().write() does not leak into stderr", ->
+  mounted Debug(-> print 'from stdout hook'), {}, (view) ->
+    view.frame()
+    view.app.ready.value = true
+    view.frame()
+    eq view.stderr, ''
+
+test "debug mode: useStderr().write() replays latest frame without empty writes", ->
+  mounted Debug(-> print.err 'from stderr hook'), {}, (view) ->
+    term = Terminal.new 100, 24
+    view.frame()
+    term.write view.bytes
+    view.app.ready.value = true
+    view.frame()
+    term.write view.bytes
+    eq view.stderr, "from stderr hook\n"
+    eq term.text, 'Hello'
+    ok view.bytes.includes('Hello'), 'the frame was drawn again after the clear'
+    ok not view.bytes.includes('from stderr hook'), 'stderr text reached stdout'
+
+Rerendered =! (write) ->
+  component
+    text := 'Initial'
+    ~> text = 'Updated'
+    ~> write() if text is 'Updated'
+    render
+      Text text
+
+test "debug mode: useStdout().write() replays rerendered frame", ->
+  mounted Rerendered(-> print 'from stdout hook'), {}, (view) ->
+    term = Terminal.new 100, 24
+    view.frame()
+    term.write view.bytes
+    eq term.text, "from stdout hook\nUpdated"
+    ok not view.bytes.includes('Initial'), 'the frame before the write was drawn'
+
+test "debug mode: useStderr().write() replays rerendered frame", ->
+  mounted Rerendered(-> print.err 'from stderr hook'), {}, (view) ->
+    term = Terminal.new 100, 24
+    view.frame()
+    term.write view.bytes
+    eq view.stderr, "from stderr hook\n"
+    eq term.text, 'Updated'
+    ok not view.bytes.includes('Initial') and not view.bytes.includes('from stderr hook'), JSON.stringify view.bytes

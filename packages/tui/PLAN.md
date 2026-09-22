@@ -131,17 +131,17 @@ write by hand; hot loops use the indexed `for x, i in` form).
 
 | Module | Job | Code lines |
 |---|---|---|
-| `tui.rip` | Entry: `run`, `mount` and its input, `renderToString`, `screen`, `focus`, widgets; stdin, the modes, the probes, the delivery of events, the default actions; to come: `clock` | 249, about 285 when complete |
+| `tui.rip` | Entry: `run`, `mount` and its input, `renderToString`, `suspend`, `screen`, `focus`, widgets, `print`, `clock`; the delivery of events, the default actions | 310 |
 | `document.rip` | Terminal document: nodes, tree links, the event and its dispatch, style road, keyboard traits, damage marks | 388 |
 | `focus.rip` | Who can hold focus, tree order, taking it, settling it | 62 |
 | `layout.rip` | Flexbox, containing blocks, baseline, cache, edge rounding | 1,466 |
 | `text.rip` | Sanitize, grapheme clusters, width, wrap, truncate | 421 |
-| `paint.rip` | Cell grids, styles, clip, borders, backgrounds, the selection overlay, damage, diff | 650 |
-| `screen.rip` | Frames, pacing, the cursor, where the frame sits; to come: alternate screen, `Static`, non-TTY | 105, about 300 |
+| `paint.rip` | Cell grids, styles at the terminal's depth, clip, borders, backgrounds, the selection overlay, damage, diff, a subtree painted once | 694 |
+| `screen.rip` | Frames, pacing, the cursor, where the frame sits, the write above the frame (`Static`, `print`, the console), progress, the alternate screen | 173 |
 | `input.rip` | Key tokenizer and decoder, paste, mouse, replies | 315 |
 | `mouse.rip` | Hit test, the mouse events, hover, selection and the clipboard | 211 |
-| `terminal.rip` | To come: setup / teardown, signals, suspend, console capture | about 170 |
-| | **Total** | **3,868 built; about 4,280 complete** |
+| `terminal.rip` | Setup / teardown: raw mode, the modes, the probes, the cursor, the alternate screen, the signals, suspend and resume, the console, the depth read | 181 |
+| | **Total** | **4,222 built; about 4,250 complete** |
 
 Lines are counted as §2 counts them: non-blank and non-comment. Events,
 focus, the cursor and stdin are 285 of them (85 in `tui.rip`, 99 in
@@ -552,8 +552,15 @@ a win: both disagree with some terminals and with tmux.
 **Inline rendering is its own design item.** Drawing below the prompt
 uses relative cursor moves and clips the live region to the terminal
 height, showing the bottom. `Static` paints an item once above the
-live region, invalidates the front buffer, and detaches its nodes; on
-the alternate screen it is a documented no-op and nothing accumulates.
+live region: the items a container gained since the last frame are
+laid out together as a root at the terminal's width, painted to a grid
+of their own, and written through `Screen.above` — the frame's rows
+cleared, the rows written where they were, the frame drawn again whole
+below, in the frame's one write, the frame's origin moved down by the
+rows written — and then hidden, so the live frame never holds them and
+what happens to them later is nobody's. `print` takes the same road
+with a line of text, and console capture (§8) will. On the alternate
+screen `Static` is a documented no-op and nothing accumulates.
 
 **Resize** is coalesced to one frame: reallocate, then erase and paint
 (alternate screen) or move up by the estimated reflowed rows, erase
@@ -561,8 +568,10 @@ down, and repaint (inline). **Non-TTY and CI** write static output
 immediately and the final frame once, with no cursor control, and
 honor `NO_COLOR` / `FORCE_COLOR` and color depth.
 
-One serializer, `rowsToString`, serves `renderToString`, `Static`, and
-the non-TTY final frame.
+One serializer, `rowsToString` (`Grid.toString` under its own name,
+paint.rip), serves `renderToString`, `Static`, and the non-TTY final
+frame; with escape sequences it leaves a row's trailing default-style
+blanks off, as the plain form does.
 
 ## 7. Input, focus, cursor (`input.rip`, `document.rip`)
 
@@ -616,8 +625,7 @@ a dialog takes a key before the node under it does. In Ink every
   listener therefore hears Ctrl-C before it quits, where Ink exits
   before any handler runs. **Escape has none** — closing a dialog or
   clearing an input is the app's — where Ink takes focus away on every
-  Escape. Ctrl-Z (suspend) joins them with the lifecycle (§8): the seam
-  is `act` in `tui.rip`.
+  Escape. Ctrl-Z stops the process (§8).
 - **Each key is a turn of its own.** The keys of one read are
   dispatched one after another with no batch around them, so a key that
   opens a dialog is followed by a key that reaches the dialog. Once the
@@ -701,7 +709,7 @@ in `test/input/`, 205 held to Ink's answer under one mapping to DOM
 names and 39 stated differences; `test/input/SOURCE.md` lists them and
 the 12 left out.
 
-**Enhanced keyboard** (built: `tui.rip`) is opt-in (`run App, keyboard:
+**Enhanced keyboard** (built: `terminal.rip`) is opt-in (`run App, keyboard:
 'enhanced'`; the default is `'basic'`, and any other value is refused
 by name). Setup asks the terminal for the kitty protocol's
 disambiguation flag and teardown withdraws it; the decoder is always
@@ -733,7 +741,7 @@ forwards xterm's modify-other-keys form (`CSI 27 ; mod ; code ~`), which
 the decoder reads; and the 500 ms `escape-time` that delays a lone
 Escape for every terminal program, which is the user's to lower.
 
-**Mouse** (built: `mouse.rip`, the modes and the probe in `tui.rip`) is
+**Mouse** (built: `mouse.rip`, the modes and the probe in `terminal.rip`) is
 opt-in (`run App, mouse: true`), because capture takes over the
 terminal's own text selection. `true` asks for button-event tracking
 (`CSI ? 1002 h`) and SGR reports (`CSI ? 1006 h`): presses, releases,
@@ -755,9 +763,9 @@ a shell's prompt integration is not it. Until the answer, and on a
 terminal that never answers, the frame is taken to sit at the bottom.
 `mount` has no terminal: its frame is at row 0. A report names a
 terminal cell; the tree cell is `(x, y - origin + top)`, `top` being the
-tree row the grid shows first. The lifecycle's resume (§8) asks again
-the same way once the modes are sent again (`ask` in `tui.rip`), and
-the alternate screen sets the origin to 0 with no probe.
+tree row the grid shows first. A resume (§8) asks again the same way
+once the modes are sent again (`ask` in `terminal.rip`), and the
+alternate screen sets the origin to 0 with no probe.
 
 The target is found by a hit test that walks the tree as the painter
 does, backwards: the children of a box from last to first, then the box
@@ -921,7 +929,7 @@ hardware cursor. A cursor belongs to a node, so in a frame taller than
 the terminal it stays with its row of the tree, where Ink counts `y`
 from the top of what is shown.
 
-**stdin** (built: `tui.rip`; the lifecycle's in full with §8). `run
+**stdin** (built: `terminal.rip`; every way out is §8's). `run
 App, stdin:` reads a stdin that is a terminal and can be set raw: raw
 mode, `ref`, `resume`, one `data` listener feeding the `Parser`, and
 bracketed paste (`CSI ? 2004 h`) and focus reports (`CSI ? 1004 h`)
@@ -942,22 +950,120 @@ no keys from the terminal the process is on.
 
 ## 8. Lifecycle (`terminal.rip`)
 
-One idempotent `setup()` / `teardown()` pair is shared by exit,
-signals, crash, `suspend`, and Ctrl-Z / SIGCONT. What `tui.rip`'s
-`listen` and `close` do for stdin and the two modes (§7) is the first
-of it, and moves there. The host owns raw
-mode and bracketed paste for the app's lifetime; there is no
-ref-counting.
+One idempotent `setup` / `teardown` pair is shared by `quit`, Ctrl-C,
+a listener that throws, a frame that fails, SIGINT / SIGTERM / SIGHUP,
+an uncaught error or an unhandled rejection, `process.exit`, a loop
+that drains, Ctrl-Z / SIGCONT and `suspend`. `setup` hides the
+cursor, sets stdin raw and reads it, asks for bracketed paste, focus
+reports and the mouse modes, pushes the kitty flag again where the
+keyboard was decided, enters the alternate screen, captures the
+console, and puts the handlers on the process; `teardown` pops the
+flag if it was pushed, withdraws the modes, draws what is owed and
+leaves the cursor below the last frame — or, on a failure, shows it
+where it is — leaves the alternate screen, flushes the parser, gives
+stdin back cooked, paused and unref'd, takes the handlers off, and
+gives the console back. Every step is taken whatever the others do,
+each pair is taken once until the other, and a `setup` that fails
+halfway is torn down by the steps that were taken. The host owns raw
+mode and the modes for the app's life; there is no ref-counting. The
+probes are asked once the app stands, so a constructor that throws
+leaves no answer for the shell.
 
-Verified on Bun 1.4.2: an unhandled SIGTERM skips exit hooks, so
-SIGINT / SIGTERM / SIGHUP get explicit handlers that restore and exit
-with 128 + n; Bun restores termios on exit but not the cursor,
-alternate screen, or paste mode; `console.log` bypasses
-`process.stdout.write`, so the `console.*` methods are captured, not
-the stream. Inline mode clears, writes the log line, and repaints; the
-alternate screen buffers logs and replays them at exit.
+**Signals.** An unhandled SIGTERM skips Bun's exit hooks, so SIGINT,
+SIGTERM and SIGHUP have handlers that close the app — its last frame
+drawn, `done` resolved — and exit with 128 + n; a `done` an app
+awaits never settles after a signal exit, since the process is gone
+before any continuation runs. A signal that arrives while the process
+is stopped stays pending until it is continued, and then the continue
+and the signal, in either order, end the same way, the app's exit
+hook run. With raw mode on, Ctrl-C arrives as a key and its default
+action is `quit`. An uncaught error or an unhandled rejection closes
+the app with the error — `done` rejects — and leaves the error to the
+listeners after this package's, which the runtime already called
+once: its own, which prints it with its frames remapped
+(`src/cli/run.js`) and exits 1, or the app's; with none, it is printed
+and the exit is 1. `beforeExit` closes a live app as `quit` would, so
+a script whose loop drains ends with its last frame in the scrollback;
+`exit` tears down an app still live when `process.exit` is called
+with it on the terminal. The seven handlers belong to the app's life,
+never to the terminal's state: put on the process as `open` takes the
+app, ahead of the runtime's own and any the app adds, and taken off
+as the first step of `teardown`, whatever the terminal's state is
+then — never under `mount`.
 
-An uncaught error restores the terminal, prints the stack, and exits 1.
+**Suspend.** Ctrl-Z is a default action of `keydown`, preventable
+like Ctrl-C: teardown with the cursor below the last frame, then
+SIGTSTP to the whole process group — what the terminal's driver does
+for a cooked Ctrl-Z, and under `rip app.rip` the group holds the
+launcher too, so the shell sees one stopped job. The signal is sent
+only when the app reads the process's own stdin: with any other
+stream — a test's fake, a `stdout:` given with no stdin — Ctrl-Z
+takes the same road and sends nothing, since a stream of one's own is
+not the terminal's job, and whoever gave it continues the app with
+SIGCONT to the process. While stopped, a timer is held so the loop
+does not drain on the continue and close the app before it wakes.
+SIGCONT sets up again, asks the questions again — the frame's row
+with the mouse, the keyboard if it was still undecided — forgets the
+press whose release was never seen (`Pointer.reset`) and the bytes
+held mid-sequence (`parser.reset`), and draws whole at whatever size
+the terminal has now; the keys left in the read with the Ctrl-Z are
+nobody's. `suspend(fn)`
+is the same road without the signal: teardown, `await fn()`, setup,
+whole frame — for an editor or a shell that takes the terminal for a
+while. Meanwhile a booked frame goes nowhere, a key is nobody's, a
+resize writes nothing, and a log is the console's own. A nested
+suspend is refused; a teardown that fails is set up again and thrown
+before `fn` runs; a `quit` while suspended closes the app without
+taking the terminal back. On a stdout nobody is watching, `fn` runs
+and nothing changes hands.
+
+**Alternate screen.** `run App, altScreen: true` enters `CSI ? 1049 h`
+after the modes and homes the cursor: the frame's top-left is the
+screen's, the origin is 0 with no probe, a resize repaints whole with
+no probe, and `Static` is a documented no-op. Every way out leaves it
+with `CSI ? 1049 l` after the last frame is drawn, so the frame
+vanishes with the screen and the shell's own comes back where it was.
+A suspend leaves it and a resume enters it again.
+
+**Non-TTY and CI.** When stdout is no terminal, or `CI` is set to
+anything but `''`, `'0'` or `'false'`, `screen.interactive` reads
+false (`Screen.interactive`): no modes, no cursor bytes, no probe, no
+raw mode even on a stdin that is a terminal; frames are laid out and
+kept, a `Static` item and a `print` are written as they arrive, and
+the last frame is written once at exit through `rowsToString` — with
+its escapes when a depth is forced. `altScreen` and the console
+capture are nothing there.
+
+**Colors.** The depth is read once at `run` and exposed as
+`screen.colors` (0, 16, 256 or 16777216), in this order: `NO_COLOR`
+set to anything but `''` is none (no-color.org); `FORCE_COLOR` `0` or
+`false` is none, `''` or `true` the 16, a number that depth up to 3,
+any other word the 16 (supports-color's reading); output nobody is
+watching (no TTY, or CI) or `TERM=dumb` is none; `COLORTERM`
+`truecolor` / `24bit` is 24-bit; `TERM` `*256color*` is 256; else 16.
+The painter emits every style at that depth (`paint.rip`), from one
+table of xterm's own 256 values: a 24-bit color becomes the nearest of
+xterm's 256 by RGB distance (a color on the cube is sent as that
+point), and below that the nearest of xterm's 16 — so a mid-gray is
+bright black, never white; at none, no style sends anything. The cost
+is paid per style interned, not per cell. `mount` and `renderToString`
+stay at full depth.
+
+**Console.** `console.log` bypasses `process.stdout.write`, so while
+an app runs on a terminal its writing methods — `log`, `table`,
+`group`, `trace`, `assert`, `count`, `time` and the rest — are
+replaced by a `node:console` `Console` whose two sinks relay, and
+given back at teardown. A line takes the road a `Static` item takes
+(`Screen.above`, §6): inline, the frame is cleared from its top-left,
+the line written to the stream it always went to, and the frame drawn
+again below it, all in the next frame's write, which the line books —
+so logs scroll into the scrollback above the app, and the frame's row
+moves down by the lines written, with no probe; a line for stderr has
+its clear written at once and the frame follows. On the alternate
+screen lines are kept and replayed once the screen is left; a log
+while suspended, or with the app closed, is the console's own. `run
+App, console: false` leaves the console alone. The progress indicator
+(§9) is cleared on every way out, after the last frame.
 
 ## 9. Public surface
 
@@ -980,24 +1086,34 @@ App = component
 run App
 ```
 
-- `run(App, {stdin, stdout, damage, mouse, keyboard, selection})` →
-  `{app, done, quit, flush}`. To come: `altScreen`; `suspend(fn)`;
-  `print(text)`.
+- `run(App, {stdin, stdout, stderr, damage, mouse, keyboard, selection,
+  altScreen, console})` → `{app, done, quit, flush}`, and `suspend(fn)`
+  hands the terminal to `fn` and takes it back (§8).
+- `print(text)` writes text above the live frame, its line ended, and
+  `print.err(text)` the same on stderr with the frame cleared on stdout
+  first; with no app mounted the text goes to the stream as it is.
 - `mount(App, {cols, rows, props, damage, mouse, keyboard, selection})`
-  → `{app, frame, ansi, bytes, damage, resize, close, done}`, and for
-  input `{press, type, paste, send, tick, focused, cursor}`, is the test
-  driver (§10), and `renderToString(App, {cols, rows, props, ansi})` is
-  a mount, one frame, and a close.
+  → `{app, frame, ansi, bytes, damage, scrollback, stderr, resize,
+  close, done}`, and for input `{press, type, paste, send, tick,
+  focused, cursor}`, is the test driver (§10), and
+  `renderToString(App, {cols, rows, props, ansi})` is a mount, one
+  frame, and a close, answering the rows `Static` wrote and then the
+  frame.
 - `screen` (`cols`, `rows`, `focused`, `keyboard`, and `selection`, the
-  selected text; to come: `interactive`) and `focus` (`active`,
-  `next()`, `previous()`, `to(node)`, with `to(null)` letting go) are
-  **getter-backed objects**. An imported
-  `:=` cell is not unwrapped across modules, so raw cells are never
-  exported.
+  selected text; `interactive` and `colors`, §8; `progress(value)`, the
+  terminal's own indicator through OSC 9;4 — 0 to 1, `'error'`,
+  `'indeterminate'`, null — sent with the next frame's write and
+  cleared on every way out) and `focus` (`active`, `next()`,
+  `previous()`, `to(node)`, with `to(null)` letting go) are
+  **getter-backed objects**. An imported `:=` cell is not unwrapped
+  across modules, so raw cells are never exported.
 - `clock(interval)` is the animation helper: a getter-backed object
   with `frame`, `time`, and `delta`, driven by one shared timer per
-  interval that runs only while a mounted component reads it and never
-  when output is not interactive. A spinner is
+  interval. A component holds the clock it makes in its body
+  (`tick = clock 80`), and the timer runs only while a holder is
+  mounted and has read it, never when output is not interactive, and
+  on the mount's own clock under `mount`, which `view.tick` moves along
+  with the parser's waits. A spinner is
   `frames[tick.frame % frames.length]`. The frame scheduler already
   coalesces every change into one paint, so the helper is a
   convenience, not a requirement.
@@ -1081,6 +1197,24 @@ run App
   and the hit target must be the node the painter says owns the cell
   (a text where its words reach, painted after that owner), held to a
   floor of clicks, targets and covered cells.
+- **Terminal:** `test/terminal.rip` — Ink's suspend, exit, error,
+  console and CI titles (`test/terminal/SOURCE.md` counts them); then
+  every way out — `quit`, Ctrl-C, a listener that throws, a suspend
+  then a quit, inline and on the alternate screen — held to one rule
+  for the modes, the keyboard stack, the cursor, stdin and the
+  process's handlers; SIGTERM, SIGHUP, SIGINT, an uncaught error, an
+  unhandled rejection, a `process.exit` and a loop that drains, each
+  in a spawned `rip` whose stdout claims to be a terminal, by exit code
+  and by its last bytes; `suspend`'s bytes and raw-mode calls in
+  order, Ctrl-Z through a SIGTSTP handler of the test's own and, for
+  real, a child that stops itself and is continued; the alternate
+  screen's entry, exit after the last frame, resize and mouse origin;
+  a stdout that is no terminal, and `CI`; the depth under every
+  environment and a 24-bit color at each; the console's bytes; and a
+  fuzz of random keys, resizes, logs, suspends and ways out on fake
+  streams, the terminal's modes held to what the app believes after
+  every step and every exit to everything off, held to floors of
+  steps, exits, suspends and logs.
 - **The test driver is public,** because users' tests are a contract
   too. `mount(App, {cols, rows, props})` is `run` without a terminal:
   the same install, the same `Screen`, the same close, drawing to a

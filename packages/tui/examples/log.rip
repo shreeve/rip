@@ -1,0 +1,39 @@
+# A build log: each finished step scrolls into the scrollback above a
+# live line that spins and fills a bar for the step under way, a
+# warning is printed above the frame on the way, the terminal's own
+# progress indicator follows, and the app quits when the last step is
+# done — or on q.
+#
+#   rip examples/log.rip
+
+import { run, quit, screen, print, clock, Box, Text, Static } from 'rip/tui'
+
+STEPS =! ['resolve', 'fetch', 'compile', 'link', 'bundle', 'sign']
+SPIN  =! '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+PACE  =! 700   # milliseconds a step takes
+
+export Log = component
+  tick = clock 80
+  step ~= Math.min STEPS.length, Math.floor(tick.time / PACE)
+  done ~= STEPS.slice 0, step
+  bar ~= '█'.repeat(step * 2) + '░'.repeat((STEPS.length - step) * 2)
+
+  ~> print "warning: #{STEPS[2]} took the slow road" if step is 3
+  ~> screen.progress (if step < STEPS.length then step / STEPS.length else null)
+  ~> quit() if step is STEPS.length
+
+  render
+    Box flexDirection: 'column', focusable: true, autofocus: true, @keydown: ((event) -> quit() if event.key is 'q')
+      Static
+        for name in done
+          Text key: name, color: 'green'
+            "✓ #{name}"
+      if step < STEPS.length
+        Box flexDirection: 'row', gap: 1
+          Text color: 'cyan', "#{SPIN[tick.frame % SPIN.length]}"
+          Text "#{STEPS[step]}"
+          Text dimColor: true, "[#{bar}] #{step}/#{STEPS.length}"
+      else
+        Text color: 'green', bold: true, "all done"
+
+run Log if import.meta.main

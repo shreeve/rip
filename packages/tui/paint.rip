@@ -10,7 +10,7 @@
 # A frame paints and compares only its damage: the cells some change may
 # have recolored, a span of columns on each row.
 
-import { kids } from './layout.rip'
+import { kids, layout } from './layout.rip'
 import { CLUSTER, glyph, crowded, evict, sanitize, Flow, refresh, MODES, A0, A1, B0, B1, DOTS, ROW } from './text.rip'
 
 # ── Styles ────────────────────────────────────────────────────────────────────
@@ -44,6 +44,70 @@ tint =! (color, base) ->
     return (if m[1] > 255 then null else "#{base + 8};5;#{Number m[1]}")
   null
 
+# The depth colors are sent at, 0 to 3 — none, the 16 named, the 256,
+# 24-bit — what `run` reads of the terminal once (terminal.rip). Below
+# full depth a 24-bit color is sent as the nearest of xterm's 256 by
+# RGB distance — a color on the cube is that point — and below that as
+# the nearest of xterm's 16, one of the 256 the same way. The table is
+# xterm's own: its 16 defaults, the 6×6×6 cube at 0, 95, 135, 175, 215
+# and 255, and the 24 grays from 8 by tens. The cost is paid once per
+# style interned, never per cell. At none, no style sends anything.
+depth = 3
+
+XTERM =! do ->
+  table = for hex in ['000000', 'cd0000', '00cd00', 'cdcd00', '0000ee', 'cd00cd', '00cdcd', 'e5e5e5', '7f7f7f', 'ff0000', '00ff00', 'ffff00', '5c5cff', 'ff00ff', '00ffff', 'ffffff']
+    n = parseInt hex, 16
+    [n >> 16, (n >> 8) & 255, n & 255]
+  levels = [0, 95, 135, 175, 215, 255]
+  for r in levels
+    for g in levels
+      table.push [r, g, b] for b in levels
+  table.push [8 + 10 * i, 8 + 10 * i, 8 + 10 * i] for i in [0...24]
+  table
+
+# The entry of the table from `from` to `to` nearest (r, g, b).
+nearest =! (r, g, b, from, to) ->
+  best = from
+  least = Infinity
+  for i in [from...to]
+    [tr, tg, tb] = XTERM[i]
+    far = (r - tr) * (r - tr) + (g - tg) * (g - tg) + (b - tb) * (b - tb)
+    if far < least
+      least = far
+      best = i
+  best
+
+# The SGR offset of one of the 16: 0 to 7, or 60 up for the bright.
+named =! (n) -> if n < 8 then n else n + 52
+
+# A color's parameters at the depth in force.
+lower =! (sgr, base) ->
+  return sgr if depth is 3
+  if m = /^\d8;2;(\d+);(\d+);(\d+)$/.exec sgr
+    return "#{base + 8};5;#{nearest +m[1], +m[2], +m[3], 16, 256}" if depth is 2
+    return String base + named nearest(+m[1], +m[2], +m[3], 0, 16)
+  return sgr if depth is 2
+  if m = /^\d8;5;(\d+)$/.exec sgr
+    [r, g, b] = XTERM[+m[1]]
+    return String base + named nearest(r, g, b, 0, 16)
+  sgr
+
+# A style's escape parameters: its switches, then its colors.
+dress =! (fg, bg, flags) ->
+  return '' unless depth
+  parts = []
+  for code, n in CODES
+    parts.push code if flags & (1 << n)
+  for [color, base] in [[fg, 30], [bg, 40]] when color?
+    parts.push lower tint(color, base), base
+  parts.join ';'
+
+# Set the depth: every style interned so far is dressed again.
+export palette! =! (n) ->
+  return if n is depth
+  depth = n
+  record.sgr = dress record.fg, record.bg, record.flags for record in records
+
 LIMIT =! 65536   # style ids a cell's sixteen bits can hold
 SWEEP =! 32768   # styles held before those no cell uses are let go
 
@@ -76,15 +140,10 @@ export intern =! (fg, bg, flags, link = null) ->
   key = if link then "#{flags}|#{link}" else flags
   id = held.get key
   return id if id?
-  parts = []
-  for code, n in CODES
-    parts.push code if flags & (1 << n)
   for [color, base] in [[fg, 30], [bg, 40]] when color?
-    sgr = tint color, base
-    throw Error.new "rip/tui: #{JSON.stringify color} is not a color — write #{COLORS}" unless sgr
-    parts.push sgr
+    throw Error.new "rip/tui: #{JSON.stringify color} is not a color — write #{COLORS}" unless tint color, base
   throw Error.new "rip/tui: more than #{LIMIT} distinct styles are in use — a cell holds a style id in sixteen bits" if records.length >= LIMIT
-  records.push { fg, bg, flags, link, sgr: parts.join(';'), key }
+  records.push { fg, bg, flags, link, sgr: dress(fg, bg, flags), key }
   held.set key, records.length - 1
   records.length - 1
 
@@ -408,16 +467,20 @@ export class Grid
       @wide.fill 1, at + left, at + right
 
   # The grid as text: one string per row, trailing blanks trimmed.
-  # With `ansi`, each run of a style carries its escape sequence, and a
-  # link is closed on the row it opens on.
+  # With `ansi`, each run of a style carries its escape sequence, a
+  # link is closed on the row it opens on, and the blanks left off a
+  # row's end are those of the default style.
   toString: (ansi = false) ->
     lines = []
     for row in [0...@rows]
       line = ''
       held = 0
       url = null
-      for col in [0...@cols]
-        at = row * @cols + col
+      from = row * @cols
+      stop = @cols
+      stop -= 1 while ansi and stop > 0 and @ch[from + stop - 1] is SPACE and @style[from + stop - 1] is 0 and @wide[from + stop - 1] is 1
+      for col in [0...stop]
+        at = from + col
         continue if @wide[at] is 0
         if ansi and @style[at] isnt held
           line += shift held, @style[at]
@@ -430,6 +493,23 @@ export class Grid
       line += "\x1b[0m" if ansi and records[held].sgr
       lines.push (if ansi then line else line.trimEnd())
     lines.join '\n'
+
+# The one serializer of a painted grid: `renderToString`, a `Static`
+# item and the frame written off a terminal (terminal.rip) all read
+# their rows through it.
+export rowsToString =! (grid, ansi = false) -> grid.toString ansi
+
+# Paint `node` alone, as a root laid out at `cols`, onto a grid of its
+# own, as tall as the node and the margins above and below it: the rows
+# a `Static` batch writes to the scrollback (screen.rip).
+export still =! (node, cols) ->
+  layout node, cols
+  rect = node.rect
+  s = node.styles
+  below = s.marginBottom ?? s.marginY ?? s.margin
+  grid = Grid.new cols, rect.y + rect.h + (if typeof below is 'number' and below > 0 then Math.round below else 0)
+  paint grid, node
+  grid
 
 # The selection (mouse.rip): the cells `from` to `to` in reading order,
 # each counted as row × columns + column of tree cells, shown inverse.

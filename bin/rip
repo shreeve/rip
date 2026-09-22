@@ -8,6 +8,7 @@
 import { readFileSync, writeFileSync, existsSync, statSync, rmSync, mkdirSync, readdirSync, realpathSync } from 'fs';
 import { spawn, spawnSync } from 'child_process';
 import { randomBytes } from 'crypto';
+import os from 'os';
 import { join, dirname, resolve, relative, sep, delimiter } from 'path';
 import { fileURLToPath } from 'url';
 import packageJson from '../package.json' with { type: 'json' };
@@ -566,7 +567,7 @@ const run = (path, argv) => {
   watchdog.unref();
   return new Promise(() => {
     child.once('error', () => process.exit(1));
-    child.once('exit', (code) => process.exit(code ?? 1));
+    child.once('exit', (code, signal) => process.exit(code ?? (signal ? 128 + os.constants.signals[signal] : 1)));
   });
 };
 

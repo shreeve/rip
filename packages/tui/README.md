@@ -47,6 +47,66 @@ run App
 value given to `quit`. Ctrl-C quits. The last frame stays in the
 scrollback and the cursor lands on the line below it.
 
+## Running
+
+`run App, options` takes the terminal for the app's life and gives it
+back on every way out, by one road:
+
+- **Exit.** `quit()`, Ctrl-C, a listener that throws, a frame that
+  fails, or a script whose loop drains: the last frame stays in the
+  scrollback, the cursor lands below it, and stdin, the terminal's
+  modes and the process's handlers are as they were. A failure leaves
+  what reached the screen, and `done` rejects with it.
+- **Signals.** SIGINT, SIGTERM and SIGHUP give the terminal back and
+  exit with 128 plus the signal's number; a `done` an app awaits never
+  settles after a signal exit, since the process is gone before any
+  continuation runs. An uncaught error or an unhandled rejection gives
+  the terminal back, rejects `done` with the error, and leaves it to
+  the runtime — which prints it and exits 1 — or to the app's own
+  handler, once; a `process.exit` with the app live gives the terminal
+  back on the way.
+- **Suspend.** Ctrl-Z gives the terminal back and stops the job as the
+  terminal would — the whole process group, so under `rip app.rip` the
+  shell sees one stopped job; `fg` draws the app again, whole, at the
+  terminal's size now, whether or not the app has a timer. It is a
+  default action of `keydown`, preventable like Ctrl-C. The stop
+  signal is sent only when the app reads the process's own stdin: with
+  any other stream — a test's, or a `stdout:` given with no stdin —
+  Ctrl-Z takes the same road and sends nothing, since a stream of one's
+  own is not the terminal's job, and whoever gave it continues the app
+  with `process.kill process.pid, 'SIGCONT'`. `suspend fn` is the same
+  road without the signal — the terminal is `fn`'s until it settles:
+
+  ```coffee
+  import { suspend } from 'rip/tui'
+  suspend! -> Bun.spawn(['vim', path], stdio: ['inherit', 'inherit', 'inherit']).exited
+  ```
+
+  A key that arrives meanwhile is nobody's; a `quit` meanwhile closes
+  the app without taking the terminal back.
+- **Alternate screen.** `run App, altScreen: true` draws on the
+  terminal's alternate screen from its top-left; every way out leaves
+  it after the last frame, so the frame vanishes and the shell's own
+  screen comes back where it was. `Static` is nothing there.
+- **CI and pipes.** On a stdout that is no terminal, or with `CI` set,
+  nothing is asked of the terminal and the last frame alone is
+  written, as text, at exit; `screen.interactive` reads false.
+- **Colors.** The depth is read once at `run` and `screen.colors`
+  reads it: 0, 16, 256 or 16777216. `NO_COLOR` set to anything but the
+  empty string is none; `FORCE_COLOR` `0` or `false` is none, empty or
+  `true` the 16, a number that depth up to 3, any other word the 16;
+  otherwise a pipe, CI or a dumb terminal is none, `COLORTERM`
+  `truecolor` 24-bit, `TERM` `256color` 256, and any other terminal
+  16. A 24-bit color is drawn as the nearest of xterm's 256 — a color
+  on the cube as that point — and below that as the nearest of xterm's
+  16.
+- **Console.** While the app runs, every console method that writes
+  (`log`, `table`, `group`, `trace`, `assert`, `count`, `time*`, …)
+  clears the frame, writes where it always went, and draws the frame
+  again below, so logs scroll into the scrollback above the app; on the
+  alternate screen they are kept and replayed at exit. `run App,
+  console: false` leaves the console alone.
+
 ## Widgets and styles
 
 A box is a `div` and text is a `span`. `Box`, `Text`, and `Spacer` are
@@ -54,6 +114,8 @@ four-line components over them, and the raw tags are the zero-overhead
 spelling of the same nodes. Every prop a widget does not declare is a
 terminal style, forwarded to its node as written; bare text under a
 box is a text leaf, and text nested in text restyles its own words.
+`Newline count: n` is `n` line breaks inside text, and `Static` is the
+scrollback (below).
 
 | Moves boxes | Recolors cells |
 |---|---|
@@ -227,6 +289,8 @@ view.send '\x1b[1;5A'       # raw bytes, through the parser: keys, mouse reports
 view.tick 50                # move the parser's clock: a lone ESC is Escape after 50 ms
 view.focused                # the node that has focus, or null
 view.cursor                 # where the last frame parked the cursor, { x, y }, or null while hidden
+view.scrollback             # what `Static` and `print` wrote above the frame so far, as it was written
+view.stderr                 # what `print.err` wrote
 view.close()                # unmount, and give the process its `document` slot back
 ```
 
@@ -250,7 +314,8 @@ mounted at a time: a second `mount`, `run`, or `renderToString` is
 refused by name until the first is closed — close in a `finally`.
 
 `renderToString App, cols: 40` is a mount, one frame, and a close; it
-takes `props`, and `ansi: true` keeps the escape sequences. A child that
+takes `props`, and `ansi: true` keeps the escape sequences. The rows
+the app's `Static` items wrote come first, then the frame. A child that
 fails to construct — at the mount, from a key, or from a state set by
 the test — fails the mount, the key, or the next frame with the child's
 own error, and a `done` is settled by `close` as well as by `quit`.
@@ -546,6 +611,69 @@ on:
 - A lone Escape arrives 50 ms after the key, since ESC also opens every
   sequence; under the enhanced keyboard it arrives at once.
 
+## Static output
+
+A log of finished work belongs in the scrollback, not in the frame.
+`Static` around a keyed `for` writes each item once, above the live
+frame, when it first appears — and never paints it in the frame, so
+the frame stays the size of what is live.
+
+```coffee
+import { run, quit, print, Box, Text, Static } from 'rip/tui'
+
+Build = component
+  @done := []          # the steps finished so far
+  @step := 'compile'
+  render
+    Box flexDirection: 'column'
+      Static
+        for name in @done
+          Text key: name, color: 'green', "✓ #{name}"
+      Text "… #{@step}"
+
+build = run Build
+build.app.done.value = ['resolve', 'fetch']   # two rows into the scrollback, the frame drawn again below
+print 'warning: fetch took the slow road'     # a line above the frame, the same way; print.err for stderr
+```
+
+An item is laid out at the terminal's width, with the items that arrive
+in the same frame, in tree order; `Static`'s own props — `padding`,
+`margin`, `backgroundColor` — go around each such batch. Once written,
+an item is done: a change to its state or its removal from the list
+changes nothing on the terminal. An item under a hidden ancestor waits
+until it is shown. Off a terminal the rows go out as plain text as they
+arrive; on the alternate screen nothing is written above. `examples/log.rip`
+is a build log this way, with a spinner and a progress bar for the
+step under way.
+
+## Animation
+
+`clock(interval)` is `{ frame, time, delta }` as reactive reads, moved
+by one timer per interval: `frame` counts the intervals since the
+timer started, `time` the milliseconds, `delta` the milliseconds since
+the last tick. A spinner is `frames[tick.frame % frames.length]`.
+
+```coffee
+Spinner = component
+  tick = clock 80
+  render
+    Text color: 'cyan', "#{'⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'[tick.frame % 10]}"
+```
+
+The component that makes the clock in its body holds it, and every
+component holding one interval shares its timer, which runs only while
+one of them is mounted and has read it, and never off a terminal. Under
+`mount` the clock runs on the mount's own time, so `view.tick 80` moves
+the spinner a frame, as it moves the parser's waits.
+
+## Progress
+
+`screen.progress value` puts the app's progress on the terminal's own
+indicator — the taskbar, the tab — through OSC 9;4, which Windows
+Terminal, Ghostty, kitty and iTerm2 honor: a number from 0 to 1,
+`'error'`, `'indeterminate'`, or `null` to clear. It goes out with the
+next frame's write, and is cleared on every way out.
+
 ## What is here, and what is planned
 
 [PLAN.md](PLAN.md) is the design and the order of work: the app
@@ -572,7 +700,9 @@ cell rounding, `if` / `else` and keyed `for` on a terminal, nested text
 styles, hyperlinks byte for byte, `ref:` metrics, the grid diff replayed
 through a terminal, 70,000 colors and 300,000 clusters through the
 swept tables, a running app from first frame to `quit`, the `mount`
-driver, and what each kind of change owes a frame, by its cells.
+driver, what each kind of change owes a frame, by its cells, the bytes
+of a `Static` write and of `print`, the mouse after one, the clock's
+one timer and where it stops, and the progress sequence.
 `test/damage.rip` changes random trees a step at a time and holds every
 frame painted from its damage to the same tree painted whole, cell for
 cell, and to the bytes sent, replayed. `test/text.rip` holds the
@@ -596,7 +726,15 @@ mode and under a frame taller than the terminal, the events and their
 road, the modes' bytes on every way out, the probe and both answers,
 the selection's cells, overlay, damage and clipboard bytes, and a fuzz
 of random trees and random cells where the hit target must be the node
-the painter put there. `test/yoga.rip` runs Yoga's
+the painter put there. `test/ink/static.rip` holds Ink's `Static` cases
+and its `useStdout` / `useStderr` cases through `print`
+(`test/ink/SOURCE.md`). `test/terminal.rip` holds every way out to one
+rule — Ink's suspend, exit, error, console and CI cases
+(`test/terminal/SOURCE.md`), the signals and the crash in a spawned
+process, Ctrl-Z and `suspend` byte for byte, the alternate screen, a
+stdout that is no terminal, the color depth, the console, and a fuzz
+of keys, resizes, logs and suspends that holds the terminal's modes
+to what the app believes after every step. `test/yoga.rip` runs Yoga's
 543 generated layout cases, vendored unmodified under `test/yoga/`
 (MIT, © Meta Platforms), against the engine through a shim of the
 `yoga-layout` API. `test/yoga-aspect.rip` is a port of Yoga's 37

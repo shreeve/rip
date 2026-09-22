@@ -12,12 +12,15 @@
 
 ## What runs
 
-`rip test/ink.rip` runs 490 tests: 478 ported cases and 12 self-tests of
-`cells.rip` (`cells-check.rip`). Of the ported cases:
+`rip test/ink.rip` runs 540 tests: 521 ported paint-side cases, the 7
+`useStdout` / `useStderr` cases of `cursor.tsx` (`static.rip`, counted
+in `test/events/SOURCE.md`'s table), and 12 self-tests of `cells.rip`
+(`cells-check.rip`). Of the paint-side cases:
 
-- 459 hold the frame to Ink's, row for row — 53 of them Ink's
-  `rerender` cases, which hold every frame of a mounted tree;
-- 18 are **stated differences**, pinned through `differs` in
+- 501 hold the frame to Ink's, row for row — 53 of them Ink's
+  `rerender` cases, which hold every frame of a mounted tree, and 16
+  the `Static` cases that draw a mounted tree frame by frame;
+- 19 are **stated differences**, pinned through `differs` in
   `harness.rip`: the frame must equal this package's stated frame and
   must not equal Ink's, with the decision in a sentence, so a pin the
   package outgrows fails. They are listed below;
@@ -115,6 +118,21 @@ comment at the literal says which when it is not the first:
    the `link` prop where Ink's writes it into the text, and `cells.rip`
    reads OSC 8 and refuses a hyperlink left open at the end of a row.
 
+Ink's `<Static items={xs}>{fn}</Static>` is `Static` around a keyed
+`for` here (`static.rip`), and Ink's `style` prop on it is the same
+props on `Static`. Ink's `renderToString` answers the static output and
+then the live frame, and so does this package's, so the
+`renderToString` cases run through `plain` and `styled` unchanged. Ink's
+`render` cases read its debug output, which is every static item so far
+and then the frame; here that is what the terminal shows, the scrollback
+and then the frame (`shown` in `static.rip`), and a case that asks
+whether a stale item was written again holds the scrollback still. A
+case that reconstructs a terminal of some height replays the bytes
+through `test/events/harness.rip`'s terminal. The published build
+draws several of these frames a row short, keeps a `Static` that a
+layout effect replaced, or writes a removed `Static`'s items again with
+every frame, and the comments at those literals say what it draws.
+
 `wrap-text.tsx` calls Ink's `wrapText` function and cannot load against
 the published build, so `oracle/extra/wrap-text.tsx` asks the same
 questions through components and `wrap-text.rip` ports that; the one
@@ -143,6 +161,7 @@ and `link`, and the hyperlink half is a stated difference.
 - `width-height`: set max width in percent
 - `flex-justify-content`: row - align two text nodes with equal space around them
 - `flex-justify-content`: column - align two text nodes with equal space around them
+- `background`: Static background color is inherited by its text
 
 and the refusal test, `content-offset`: contentOffsetX/Y - non-finite
 offsets fall back to zero.
@@ -151,7 +170,7 @@ offsets fall back to zero.
 
 | Ink test file | cases | ported | left out |
 |---|---:|---:|---:|
-| `components` | 93 | 31 | 62 |
+| `components` | 93 | 42 | 51 |
 | `text` | 57 | 49 | 8 |
 | `wrap-text` | 17 | 13 | 4 |
 | `text-width` | 18 | 18 | 0 |
@@ -160,7 +179,7 @@ offsets fall back to zero.
 | `styled-combining-marks` | 9 | 9 | 0 |
 | `borders` | 52 | 48 | 4 |
 | `border-backgrounds` | 5 | 5 | 0 |
-| `background` | 32 | 25 | 7 |
+| `background` | 32 | 26 | 6 |
 | `overflow` | 44 | 39 | 5 |
 | `content-offset` | 23 | 23 | 0 |
 | `clip-wide-background` | 10 | 10 | 0 |
@@ -179,14 +198,20 @@ offsets fall back to zero.
 | `flex-align-items` | 9 | 9 | 0 |
 | `flex-align-self` | 9 | 9 | 0 |
 | `flex-justify-content` | 12 | 12 | 0 |
-| `render-to-string` | 37 | 23 | 14 |
+| `render-to-string` | 37 | 28 | 9 |
 | `style-update-consistency` | 15 | 15 | 0 |
 | `reconciler` | 12 | 8 | 4 |
-| **total** | **602** | **478** | **124** |
+| `static-blank-lines` | 9 | 9 | 0 |
+| `static-string-replacement` | 4 | 4 | 0 |
+| `static-trailing-layout` | 7 | 7 | 0 |
+| `static-runtime-blank-lines` | 8 | 5 | 3 |
+| `static-abandoned-render` | 1 | 0 | 1 |
+| `issue-973-static-commit` | 1 | 1 | 0 |
+| **total** | **632** | **521** | **111** |
 
 A case counts once per title Ink registers, loops included. Files
-finished by hand after the draft: `absolute-truncation` (written by
-hand), `content-offset`, `overflow`, `render-to-string`,
+finished by hand after the draft: `absolute-truncation` and `static`
+(written by hand), `content-offset`, `overflow`, `render-to-string`,
 `styled-combining-marks`, `text-width`, `wrap-text`, the hyperlink case
 of `components`, the comments in
 `clip-wide-background` and `rendering-regressions`, and every `differs`
@@ -197,42 +222,28 @@ and a rerender is one component drawn again.
 
 ## Cases left out
 
-**A rerender of a mounted tree that is out of scope for another reason** (15)
+**A rerender of a mounted tree that is out of scope for another reason** (6)
 
-- `components`: static output stops accumulating after Static unmounts (#904) — `<Static>`
-- `components`: separate Ink instances do not clobber each other’s staticNode — `<Static>`
-- `components`: unmounting a <Static> ancestor in concurrent mode does not crash — `<Static>`
+- `components`: separate Ink instances do not clobber each other’s staticNode — one app is mounted at a time
+- `components`: updating <Static> in one instance after another instance mounted <Static> sets the dirty flag on the correct root — one app is mounted at a time
+- `components`: unmounting a <Static> ancestor in concurrent mode does not crash — concurrent rendering
+- `components`: unmounting a <Static> ancestor in screen-reader mode does not replay stale output — screen-reader output
 - `background`: Box preserves child state when adding a background color — a component with hooks
 - `background`: Box preserves child state when removing a background color — a component with hooks
-- `components`: static padding is not emitted again when there are no new items — `<Static>`
-- `components`: skip previous output when rendering new static output — `<Static>`
-- `components`: fullStaticOutput is reset when <Static> unmounts so stale items are not replayed — `<Static>`
-- `components`: unmounting an ancestor of <Static> clears staticNode and does not crash the renderer — `<Static>`
-- `components`: removing a <Static> ancestor that is a direct child of the root does not crash — `<Static>`
-- `components`: updating <Static> in one instance after another instance mounted <Static> sets the dirty flag on the correct root — `<Static>`
-- `components`: unmounting a <Static> ancestor in screen-reader mode does not replay stale output — screen-reader output
-- `components`: remounting <Static> via key change emits the new items (nested under <Box>) — `<Static>`
-- `components`: remounting <Static> via key change emits the new items (root-level — removeChildFromContainer) — `<Static>`
-- `components`: render only new items in static output on final render — `<Static>`
 
-**Concurrent rendering: the `- concurrent` twin of a case that is ported** (43)
+**Concurrent rendering: the `- concurrent` twin of a case that is ported** (44)
 
-`borders` 4, `background` 4, `overflow` 4, `text` 8, `width-height` 2, `position` 1, `display` 2, `margin` 2, `padding` 2, `gap` 3, `flex-direction` 2, `flex-align-content` 1, `components` 8
+`borders` 4, `background` 4, `overflow` 4, `text` 8, `width-height` 2, `position` 1, `display` 2, `margin` 2, `padding` 2, `gap` 3, `flex-direction` 2, `flex-align-content` 1, `components` 9
 
-**Concurrent rendering, of a case that is itself left out** (2)
+**Concurrent rendering, of a case that is itself left out** (1)
 
 - `components`: transform children - concurrent — `<Transform>`
-- `components`: static output - concurrent — `<Static>`
 
-**`<Static>`** (7)
+**The final frame written off a terminal at exit: terminal.rip** (3)
 
-- `background`: Static background color is inherited by its text
-- `render-to-string`: skip Static content inside a hidden ancestor
-- `render-to-string`: render Static component with items
-- `render-to-string`: Static preserves its margins and all items
-- `render-to-string`: render static-only output has no trailing newline
-- `render-to-string`: render static + dynamic output has exactly one newline between parts
-- `components`: static output
+- `static-runtime-blank-lines`: runtime Static preserves 0 blank rows in non-interactive output
+- `static-runtime-blank-lines`: runtime Static preserves 1 blank rows in non-interactive output
+- `static-runtime-blank-lines`: runtime Static preserves 2 blank rows in non-interactive output
 
 **`<Transform>`** (10)
 
@@ -247,8 +258,9 @@ and a rerender is one component drawn again.
 - `components`: <Transform> with null children
 - `render-to-string`: runs effect cleanup when a transform throws
 
-**Suspense** (4)
+**Suspense** (5)
 
+- `static-abandoned-render`: abandoned transition render does not replace committed Static
 - `reconciler`: Suspense hides nested text while showing its fallback
 - `reconciler`: resuming Suspense preserves display none
 - `reconciler`: support suspense
@@ -274,7 +286,7 @@ and a rerender is one component drawn again.
 
 - `render-to-string`: text outside Text component throws
 
-**Input, the app lifecycle, the alternate screen, or CI output: no frame to compare** (27)
+**Input, the app lifecycle, the alternate screen, or CI output: no frame to compare** (26)
 
 - `components`: disable raw mode when all input components are unmounted
 - `components`: do not disable raw mode when swapping components that use useInput
@@ -302,7 +314,6 @@ and a rerender is one component drawn again.
 - `components`: alternate screen - content is rendered between enter and exit
 - `components`: alternate screen - ignored when isTTY is false
 - `components`: alternate screen - ignored when isTTY is false even if interactive is true
-- `components`: static output is written immediately in non-interactive mode
 
 **An empty `render` block has no spelling in Rip** (1)
 
@@ -323,7 +334,7 @@ and a rerender is one component drawn again.
 - **Input, focus, hooks, the cursor, and the kitty keyboard protocol:** `cursor`, `cursor-exit-position`, `cursor-helpers`, `focus`, `focus-empty-id-regression`, `focus-order`, `focus-strict-mode`, `hooks`, `hooks-use-input`, `hooks-use-input-kitty`, `hooks-use-input-navigation`, `hooks-use-paste`, `input-buffered-ctrl-c`, `input-keypad-enter`, `input-parser`, `kitty-keyboard`, `kitty-negotiation`, `parse-keypress`, `rerender-input`, `use-animation`.
 - **The app lifecycle, the terminal, and log-update internals:** `alternate-screen-example`, `clear-rerender`, `exit`, `exit-keyboard`, `log-update`, `log-update-blank-growth`, `render`, `render-callback`, `suspend-terminal`, `suspension-exit`, `suspension-handle`, `suspension-input-disable`, `suspension-output`, `suspension-resize`, `terminal-resize`, `write-synchronized`.
 - **Escape and control sequences embedded in text:** `ansi-newlines`, `ansi-tokenizer`, `c1-rendering`, `colon-colors`, `sanitize-ansi`, `text-controls`.
-- **`<Static>` and `<Transform>`:** `component-regressions`, `issue-973-static-commit`, `squash-text-nodes`, `static-abandoned-render`, `static-blank-lines`, `static-runtime-blank-lines`, `static-string-replacement`, `static-trailing-layout`.
+- **`<Transform>`:** `component-regressions`, `squash-text-nodes`.
 - **Error boundaries and Ink's style table:** `error-overview`, `errors`, `styles`.
 - **measureElement, useBoxMetrics, and Ink's `measureText` function:** `measure-element`, `measure-text`, `use-box-metrics`.
 - **Screen-reader output:** `screen-reader`.

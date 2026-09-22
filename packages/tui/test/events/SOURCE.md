@@ -38,7 +38,9 @@ pins. Of Ink's 194 titles in the fourteen files, 164 are ported:
   `harness.rip`: the answer must equal this package's stated one and
   must not equal Ink's, with the decision in a sentence, so a pin the
   package outgrows fails. They are listed below;
-- 30 are left out, each with its reason.
+- 23 are left out, each with its reason, and 7 more — `cursor.tsx`'s
+  `useStdout().write` and `useStderr().write` cases — are ported in
+  `test/ink/static.rip`, where `print` is pinned.
 
 `test/events.rip` holds `harness.rip`'s tally of titles to these
 counts, file by file, so the table cannot drift from what runs. A case
@@ -182,7 +184,7 @@ outside a paste, the Linux console's `CSI [`, `SS3 Z`), one of
 - `hooks-use-input`: useInput - discrete priority keeps states in sync with useTransition during rapid input
 - `cursor`: cursor position does not leak from suspended concurrent render to fallback
 
-**Writing beside the frame (`useStdout().write`, `useStderr().write`, Ink's debug writer): `print` is step 5 of PLAN §12** (7)
+**Writing beside the frame (`useStdout().write`, `useStderr().write`, Ink's debug writer): ported in `test/ink/static.rip`, through `print` and `print.err`** (7)
 
 - `cursor`: cursor remains visible after useStdout().write()
 - `cursor`: cursor remains visible after useStderr().write()

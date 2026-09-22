@@ -14,10 +14,19 @@
 import { tend } from './focus.rip'
 import { failed } from './document.rip'
 import { layout } from './layout.rip'
-import { Grid, paint, diff, overlay } from './paint.rip'
+import { Grid, paint, diff, overlay, still, rowsToString } from './paint.rip'
 
 PACE =! 8     # the least milliseconds between two frames
 PASSES =! 32  # the most layouts one frame may take to settle
+
+# Whether every node above `node`, up to `body`, is shown.
+showing =! (node, body) ->
+  loop
+    node = node.parentNode
+    return false unless node
+    return true if node is body
+    s = node.styles
+    return false if s.hidden is true or s.display is 'none'
 
 # Lay the document out until a pass moves nothing. A binding that reads
 # a node's box changes the tree it measured, so one change can take a
@@ -42,14 +51,97 @@ export class Screen
     @owed = 0        # the cells the last frame owed
     @parked = null   # where the cursor is shown, `{ x, y }` on the grid, or null while it is hidden
     @origin = 0      # the terminal row the frame's top-left is on: what the cursor probe answers, and lower once a frame scrolls the terminal
+    @alt = false     # the alternate screen: the frame's top-left is the screen's, nothing is written above, and `leave` moves nowhere
+    @interactive = true   # whether frames go to a terminal someone is watching (terminal.rip); off one, frames are kept and only text is written
     @selection = { from: -1, to: -1 }   # the selected cells (mouse.rip), none while `from` is under zero
     @after = null    # run after every frame: the pointer looks again at what is under it
+    @statics = []          # the `Static` containers mounted (tui.rip), in the order they arrived
+    @written = WeakSet.new()   # the items written above the frame
+    @scrollback = ''       # everything written above the frame so far, as it was written
+    @lead = ''             # what the next frame's write begins with: the rows written above the frame
+    @osc = ''              # the progress report the next frame's write carries
+    @reported = false      # whether a progress is on the terminal's indicator
+    @batching = false      # whether `still` is writing what the containers hold
 
   get cols: -> @out.columns ?? 80
   get rows: -> @out.rows ?? 24
 
+  # Write `text` above the live frame — a `Static` batch, a `print` line,
+  # a console line (terminal.rip) — in the frame's own write: the
+  # frame's rows are cleared, the text is written where they were, and
+  # the frame is drawn again below it, whole, all in the next frame's
+  # write, which the text books. With `err`, the clear goes out at once
+  # and the text to `err`, and the frame follows on the next write. The
+  # frame's row moves down by the lines written. Off a terminal the
+  # text goes as it is; on the alternate screen nothing is written
+  # above.
+  above!: (text, err = null) ->
+    return unless text
+    @still() unless @batching   # what `Static` holds goes first
+    @scrollback += text
+    unless @interactive
+      (err ?? @out).write text
+      return
+    return if @alt
+    clear = @unpark() + "\x1b[J"
+    if err
+      @out.write clear
+      err.write text
+    else
+      @lead += clear + text
+    @spare = @front if @front
+    @front = null
+    @origin += text.split('\n').length - 1
+    @doc.owe false
+
+  # Write what the `Static` containers hold that was not written yet:
+  # each container's new items are laid out together, as a root at the
+  # terminal's width, painted once and written above the frame. Every
+  # item written before is hidden first — again, if its own component
+  # showed it — so no batch holds one twice and a later change to it is
+  # nobody's; the container itself is hidden, so the live frame never
+  # holds any of them. A container under a hidden ancestor waits.
+  still!: ->
+    return if @alt or @batching
+    @batching = true
+    try
+      for el in @statics
+        fresh = []
+        for kid in el.childNodes when kid.nodeType is 1
+          if @written.has kid then (kid.set 'display', 'none' if kid.styles.display isnt 'none') else fresh.push kid
+        continue unless fresh.length and showing el, @doc.body
+        grid = still el, @cols
+        @above rowsToString(grid, @interactive) + '\n' if grid.rows
+        @written.add kid for kid in fresh
+    finally
+      @batching = false
+
+  # Progress on the terminal's own indicator (OSC 9;4, ConEmu's
+  # sequence, which Windows Terminal, Ghostty, kitty and iTerm2 honor):
+  # a number from 0 to 1, 'error', 'indeterminate', or null to clear,
+  # sent with the next frame's write. Nothing off a terminal.
+  progress!: (value) ->
+    state = if value is null then '0'
+    else if value is 'error' then '2'
+    else if value is 'indeterminate' then '3'
+    else if typeof value is 'number' and value >= 0 and value <= 1 then "1;#{Math.round value * 100}"
+    else throw Error.new "rip/tui: progress: #{JSON.stringify value} is not a number from 0 to 1, 'error', 'indeterminate' or null"
+    return if not @interactive or (state is '0' and not @reported)
+    @reported = state isnt '0'
+    @osc = "\x1b]9;4;#{state}\x1b\\"
+    @doc.owe false
+
+  # The bytes that clear the indicator, once a progress was reported:
+  # for every way out (tui.rip's close).
+  clearProgress: ->
+    return '' unless @reported
+    @reported = false
+    @osc = ''
+    "\x1b]9;4;0\x1b\\"
+
   # Draw what is owed, now.
   frame!: ->
+    @still()
     @booked = false
     @last = performance.now()
     failed @doc
@@ -78,14 +170,17 @@ export class Screen
     @front = back if damage.whole
     damage.shape @front, false
     @after?()
+    return unless @interactive
     spot = @place()
-    return unless bytes or spot?.x isnt @parked?.x or spot?.y isnt @parked?.y
-    bytes = @unpark() + bytes
+    return unless bytes or @lead or @osc or spot?.x isnt @parked?.x or spot?.y isnt @parked?.y
+    bytes = @lead + @unpark() + bytes
+    @lead = ''
     @parked = spot
     if spot
       bytes += "\x1b[#{spot.y}B" if spot.y
       bytes += "\x1b[#{spot.x + 1}G\x1b[?25h"
-    @out.write "\x1b[?2026h#{bytes}\x1b[?2026l"
+    @out.write "\x1b[?2026h#{bytes}#{@osc}\x1b[?2026l"
+    @osc = ''
 
   # The cell the focused node's cursor lands on, on the grid the terminal
   # shows, or null: its rounded corner plus what it declares, moved by
@@ -132,8 +227,10 @@ export class Screen
     if wait > 0 then setTimeout (=> @drawBooked()), wait else queueMicrotask (=> @drawBooked())
 
   # A booked frame has no caller to throw to, so its failure goes to
-  # whoever runs the app.
+  # whoever runs the app. One drawn by hand meanwhile, or a close, has
+  # taken the booking.
   drawBooked!: ->
+    return unless @booked
     try
       @frame()
     catch error
@@ -146,4 +243,4 @@ export class Screen
     try
       @frame() if @doc.stale
     finally
-      @out.write @unpark() + '\n'.repeat(@front?.rows ?? 0) + "\x1b[?25h"
+      @out.write @unpark() + '\n'.repeat(if @alt then 0 else @front?.rows ?? 0) + "\x1b[?25h"
