@@ -277,6 +277,51 @@ test! "in inline mode the frame's top row is where the cursor was, which the pro
   quit()
   await running.done
 
+test! "a resize asks again from nothing: the answer after it places the frame wherever the reflow left it", ->
+  stdin = Stdin.new()
+  term = Terminal.new 40, 10
+  term.write '\n\n'
+  running = run Rows, stdin: stdin, stdout: term, mouse: true
+  heard.length = 0
+  listen 'mousedown'
+  stdin.key "#{CSI}?3;1R"
+  stdin.key down(0, 3) + up(0, 3)
+  term.columns = 20
+  term.emit 'resize'
+  running.flush()
+  stdin.key "#{CSI}?6;1R"   # the reflow left the frame's top-left on row 5
+  stdin.key down(0, 6) + up(0, 6)
+  eq heard, [['mousedown', 'r1', 0, 0], ['mousedown', 'r1', 0, 0]]
+  quit()
+  await running.done
+
+test! "a cursor report nobody asked for — unmarked, or marked when no probe is outstanding — never moves the frame", ->
+  stdin = Stdin.new()
+  term = Terminal.new 40, 10
+  term.write '\n\n\n\n\n'
+  running = run Rows, stdin: stdin, stdout: term, mouse: true
+  heard.length = 0
+  listen 'mousedown'
+  stdin.key "#{CSI}?6;1R"
+  stdin.key "#{CSI}2;1R#{CSI}?2;1R"
+  stdin.key down(0, 6) + up(0, 6)
+  eq heard, [['mousedown', 'r1', 0, 0]]
+  quit()
+  await running.done
+
+test! "outside the rows the frame shows, a press, a release and a wheel are nothing", ->
+  stdin = Stdin.new()
+  term = Terminal.new 40, 10
+  term.write '\n\n\n\n\n'
+  running = run Rows, stdin: stdin, stdout: term, mouse: true
+  heard.length = 0
+  listen 'mousedown', 'mouseup', 'click', 'wheel'
+  stdin.key "#{CSI}?6;1R"
+  stdin.key down(0, 2) + up(0, 2) + wheel(0, 9, 'up') + down(0, 6) + up(0, 9)
+  eq heard, [['mousedown', 'r1', 0, 0]]
+  quit()
+  await running.done
+
 test "a frame taller than the terminal shows its bottom, and a click lands on the row shown", ->
   view = mount Rows, cols: 40, rows: 4, mouse: true, props: { n: 10 }
   try
@@ -412,6 +457,17 @@ test "each report is a turn of its own: a mousedown listener that takes its targ
     click view, 3, 2
     eq heard, [['mousedown', 'word', 1, 0], ['mouseup', 'inner', 1, 0]]
 
+test "one press is tracked at a time, the last: a press of another button ends it with no click for either, and `reset` forgets a press whose release is never seen", ->
+  mounted Nest, {}, (view) ->
+    listen 'mousedown', 'mouseup', 'click'
+    view.send down(3, 2, 0) + down(3, 2, 2) + up(3, 2, 0) + up(3, 2, 2)
+    eq heard, [['mousedown', 'word', 1, 0], ['mousedown', 'word', 1, 0], ['mouseup', 'word', 1, 0], ['mouseup', 'word', 1, 0]]
+    heard.length = 0
+    view.send down 3, 2
+    view.held.pointer.reset()
+    view.send up 3, 2
+    eq heard, [['mousedown', 'word', 1, 0], ['mouseup', 'word', 1, 0]]
+
 test "mouse: true and mouse: 'all' are the modes asked for; any other value is refused by name, and nothing is left installed", ->
   throws (-> mount Keys, mouse: 'sometimes'), "rip/tui: mouse: \"sometimes\" is not true, false or 'all'"
   throws (-> mount Keys, keyboard: 'kitty'), "rip/tui: keyboard: \"kitty\" is not 'basic' or 'enhanced'"
@@ -480,7 +536,7 @@ HoverRow =! component
 
 Hover =! component
   render
-    Box flexDirection: 'column'
+    Box id: 'column', flexDirection: 'column'
       for r in THREE
         HoverRow key: r, n: r
 
@@ -523,6 +579,84 @@ test "a motion that keeps its target dispatches nothing without a mousemove list
       eq [dispatched, moves.length, moves[0] isnt moves[1], trail.length], [2, 2, true, 3]
     finally
       Target.prototype.dispatchEvent = sent
+
+HoverList =! component
+  @top := 0
+  render
+    Box id: 'list', flexDirection: 'column', height: 3, overflow: 'hidden', contentOffsetY: @top, @wheel: ((event) => @top = Math.max 0, Math.min(3, @top + event.deltaY))
+      for r in SIX
+        HoverRow key: r, n: r
+
+test "what is under a resting pointer changes with the frame: a wheel scroll leaves the row that moved away and enters the one that came", ->
+  mounted HoverList, { mouse: 'all' }, (view) ->
+    trail = []
+    for type in ['mouseenter', 'mouseleave']
+      document.addEventListener type, ((event) -> trail.push "#{event.type[5]} #{who event.target}"), true
+    view.send move 2, 1
+    eq trail, ['e body', 'e list', 'e h1']
+    trail.length = 0
+    view.send wheel 2, 1, 'down'
+    view.frame()
+    eq trail, ['l h1', 'e h2']
+    view.frame()
+    ok view.ansi.includes("#{CSI}7mrow 2 here") and not view.ansi.includes("7mrow 1"), JSON.stringify view.ansi
+
+Cond =! component
+  @show := true
+  render
+    Box id: 'root', flexDirection: 'column'
+      if @show
+        Box id: 'gone', @mousemove: (->)
+          Text id: 'tgone', "gone"
+      Text id: 'stay', "stay"
+
+test "a node taken out while hovered is left — heard by its own listeners, since nothing is above it — what stands under the pointer is entered, and the nodes above hear nothing twice", ->
+  mounted Cond, { mouse: 'all' }, (view) ->
+    trail = []
+    for type in ['mouseenter', 'mouseleave']
+      document.addEventListener type, ((event) -> trail.push "#{event.type[5]} #{who event.target} #{who event.relatedTarget}"), true
+    for id in ['gone', 'tgone']
+      find(id).addEventListener 'mouseleave', (event) -> trail.push "own l #{who event.target} #{who event.relatedTarget}"
+    view.send move 1, 0
+    eq trail, ['e body null', 'e root null', 'e gone null', 'e tgone null']
+    trail.length = 0
+    view.app.show.value = false
+    view.frame()
+    eq trail, ['own l tgone stay', 'own l gone stay', 'e stay tgone']
+    trail.length = 0
+    view.send move 2, 0
+    eq trail, []
+
+test "a mousemove listener on a subtree taken out counts for nothing, and a crossing nobody would hear makes no event", ->
+  mounted Cond, { mouse: 'all' }, (view) ->
+    view.send move 1, 0
+    view.app.show.value = false
+    view.frame()
+    dispatched = 0
+    sent = Target.prototype.dispatchEvent
+    Target.prototype.dispatchEvent = (event) ->
+      dispatched += 1
+      sent.call this, event
+    try
+      view.send move(2, 0) + move(3, 0)
+      eq dispatched, 0
+      view.send move(3, 5) + move(3, 0)
+      eq dispatched, 0, 'left the frame and came back, and nobody listens for enter or leave'
+    finally
+      Target.prototype.dispatchEvent = sent
+
+test "under mouse: true the pointer's place is unknown after a release: the row a drag ends on is left", ->
+  mounted Hover, { selection: false }, (view) ->
+    trail = []
+    document.addEventListener 'mouseleave', ((event) -> trail.push "l #{who event.target}"), true
+    view.send down(1, 0) + move(1, 1, 0)
+    view.frame()
+    ok view.ansi.includes("#{CSI}7mrow 1 here"), JSON.stringify view.ansi
+    trail.length = 0
+    view.send up 1, 1
+    eq trail, ['l h1', 'l column', 'l body']
+    view.frame()
+    ok not view.ansi.includes('7m'), JSON.stringify view.ansi
 
 # ==[ Modes ]==
 
@@ -588,9 +722,9 @@ test "a throw while the app mounts withdraws the mouse modes with the rest", ->
       Box justifyContent: 'centre'
   stdin = Stdin.new()
   term = Terminal.new()
-  throws (-> run Bad, stdin: stdin, stdout: term, mouse: true), '"centre" is not one of'
-  eq term.since(0), "#{ON}#{MOUSE}#{PROBE}#{QUIET}#{OFF}#{CSI}?25h"
-  eq typeof document, 'undefined'
+  throws (-> run Bad, stdin: stdin, stdout: term, mouse: true, keyboard: 'enhanced'), '"centre" is not one of'
+  eq term.since(0), "#{ON}#{MOUSE}#{QUIET}#{OFF}#{CSI}?25h", 'the questions are asked once the app stands, so no answer reaches the shell'
+  eq [term.queries, typeof document], [[], 'undefined']
 
 test! "a resize asks where the cursor is again, from the frame's top-left", ->
   stdin = Stdin.new()
@@ -803,6 +937,55 @@ test "the selection stands through the app's own redraws, Escape included, and a
     view.frame()
     eq screen.selection, ''
     ok not view.ansi.includes('7m'), JSON.stringify view.ansi
+
+Tall =! component
+  @tall := 6
+  rows ~= (r for r in [0...@tall])
+  render
+    Box flexDirection: 'column'
+      for r in rows
+        Text key: r, "row #{r} text"
+
+test "a selection whose rows are all gone is none, and one whose rows remain stands", ->
+  mounted Tall, {}, (view) ->
+    drag view, 0, 5, 3, 5
+    eq screen.selection, 'row'
+    view.app.tall.value = 3
+    view.frame()
+    eq [screen.selection, view.held.view.selection.from], ['', -1]
+    view.app.tall.value = 6
+    view.frame()
+    ok not view.ansi.includes('7m'), JSON.stringify view.ansi
+    drag view, 0, 1, 3, 4
+    view.app.tall.value = 3
+    view.frame()
+    eq screen.selection, 'row 1 text\nrow 2 text\nrow 3 text\nrow'
+    ok view.ansi.includes("#{CSI}7mrow 1 text"), JSON.stringify view.ansi
+
+test "`screen.selection` is a reactive read: a binding that shows it redraws when the text is copied", ->
+  Shows = component
+    render
+      Box flexDirection: 'column'
+        Text "hello world"
+        Text "sel=[#{screen.selection}]"
+  mounted Shows, {}, (view) ->
+    drag view, 0, 0, 4, 0
+    eq view.frame(), 'hello world\nsel=[hello]'
+    click view, 0, 1
+    eq view.frame(), 'hello world\nsel=[]'
+
+test! "quit while a selection stands leaves no inverse cell in the scrollback", ->
+  stdin = Stdin.new()
+  term = Terminal.new 40, 10
+  running = run Lines, stdin: stdin, stdout: term, mouse: true
+  stdin.key "#{CSI}?1;1R"
+  stdin.key down(2, 0) + move(4, 1, 0) + up(4, 1)
+  running.flush()
+  eq term.clipboard, 'llo world\nfoo b'
+  mark = term.sent.length
+  quit()
+  await running.done
+  ok term.since(mark).includes('Gllo world') and not term.since(mark).includes('7m'), JSON.stringify term.since mark
 
 test! "on a terminal the clipboard receives the text", ->
   stdin = Stdin.new()

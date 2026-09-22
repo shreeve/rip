@@ -117,9 +117,6 @@ export class Event
 
 paths =! []   # the path of each dispatch under way, kept for the next
 depth = 0
-moves = 0     # `mousemove` listeners registered on the installed document's nodes, so a motion nobody hears allocates no event (mouse.rip)
-
-export moving =! -> moves > 0
 
 # Call `node`'s listeners under `key`. A list is replaced, never changed,
 # when a listener comes or goes, so the one in hand is the list as the
@@ -148,14 +145,12 @@ export class Target
     held = (@listeners ?= {})[type]
     return if held?.includes handler
     @listeners[type] = if held then [...held, handler] else [handler]
-    moves += 1 if type.startsWith 'mousemove'
 
   removeEventListener!: (type, handler, options) ->
     type += 'Capture' if options is true or options?.capture
     held = @listeners?[type]
     return unless held?.includes handler
     @listeners[type] = held.filter (other) -> other isnt handler
-    moves -= 1 if type.startsWith 'mousemove'
 
   # The path is the tree as the dispatch begins, as DOM's is: root to
   # target in the capture phase, the target, and back up if the event
@@ -551,7 +546,6 @@ export install =! ->
   if globalThis.document?
     throw Error.new 'rip/tui: a `document` is already installed in this process — a terminal app and a DOM cannot share one'
   doc = Document.new()
-  moves = 0
   held = { Node: globalThis.Node, SVGElement: globalThis.SVGElement }
   held.reporter = __setChildFailureReporter (name, error) -> doc.failed ?= error
   globalThis.document = doc

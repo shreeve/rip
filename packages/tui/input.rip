@@ -18,7 +18,7 @@
 #   { type: 'mouse', action, button, x, y, shiftKey, altKey, ctrlKey }
 #   { type: 'reply', kind: 'keyboard', flags }
 #   { type: 'reply', kind: 'attributes', params }
-#   { type: 'reply', kind: 'cursor', x, y }
+#   { type: 'reply', kind: 'cursor', x, y, marked }   # `marked` under DECXCPR's `?`
 #
 # A key event mirrors DOM's KeyboardEvent. `key` is DOM's name for a key
 # that types nothing ('Enter', 'ArrowUp', 'F5'), and ONE code point for
@@ -193,13 +193,18 @@ answer =! (fields, final, out) ->
       params = (num field for field in fields when field)
       out.push { type: 'reply', kind: 'attributes', params } if params.every (param) -> param >= 0
     when 'R'
-      cursor fields, out
+      cursor fields, out, true
   return
 
-cursor =! (fields, out) ->
+# The plain form is a key's reply to `CSI 6 n`, which the package never
+# sends; only the `?` form is an answer to its own probe.
+cursor =! (fields, out, marked = false) ->
   y = num fields[0]
   x = num fields[1]
-  out.push { type: 'reply', kind: 'cursor', x: x - 1, y: y - 1 } if x >= 1 and y >= 1
+  return unless x >= 1 and y >= 1
+  event = { type: 'reply', kind: 'cursor', x: x - 1, y: y - 1 }
+  event.marked = true if marked
+  out.push event
 
 # ── The parser ────────────────────────────────────────────────────────────────
 

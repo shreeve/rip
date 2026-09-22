@@ -43,6 +43,7 @@ export class Screen
     @parked = null   # where the cursor is shown, `{ x, y }` on the grid, or null while it is hidden
     @origin = 0      # the terminal row the frame's top-left is on: what the cursor probe answers, and lower once a frame scrolls the terminal
     @selection = { from: -1, to: -1 }   # the selected cells (mouse.rip), none while `from` is under zero
+    @after = null    # run after every frame: the pointer looks again at what is under it
 
   get cols: -> @out.columns ?? 80
   get rows: -> @out.rows ?? 24
@@ -76,6 +77,7 @@ export class Screen
     @spare = if damage.whole then @front else back
     @front = back if damage.whole
     damage.shape @front, false
+    @after?()
     spot = @place()
     return unless bytes or spot?.x isnt @parked?.x or spot?.y isnt @parked?.y
     bytes = @unpark() + bytes
