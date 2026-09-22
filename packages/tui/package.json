@@ -21,6 +21,7 @@
     "screen.rip",
     "terminal.rip",
     "input.rip",
+    "mouse.rip",
     "README.md",
     "NOTICE"
   ]

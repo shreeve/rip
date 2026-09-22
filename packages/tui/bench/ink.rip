@@ -1,31 +1,36 @@
 # ==============================================================================
-# tui bench — Ink baselines
+# tui bench — Ink on every scenario
 #
 #   cd packages/tui/bench
 #   bun install              # Ink and React live HERE, not in rip/tui
-#   bun run ink              # every scenario, incremental rendering off and on
+#   bun run bench            # both sides, every scenario, the proof, RESULTS.md
+#   bun run ink              # Ink alone, incremental rendering off and on
 #   rip ink.rip counter      # one scenario
 #   rip ink.rip counter 5    # one scenario, five times the updates
 #   bun run profile          # where an Ink frame goes (profile.rip)
 #
 # Ink runs interactive against a fake terminal, its frame throttle
-# lifted (maxFps 1000), and every update awaits the frame it causes, so
-# a number is the cost of one update and not of a 30 fps timer. React
-# loads its production build: the scripts set NODE_ENV, and a run
-# without it is refused, since a development React would flatter us.
+# lifted (maxFps 1000), and every update awaits the frame it causes —
+# the write that ends Ink's synchronized update — so a number is the
+# cost of one update and not of a 30 fps timer. React loads its
+# production build: the scripts set NODE_ENV, and a run without it is
+# refused, since a development React would flatter us. Colors are
+# forced to 24-bit so chalk draws them off a terminal, as rip/tui does.
 # ==============================================================================
 
-import React from 'react'
-import { render as draw, Box, Text, Static } from 'ink'
 import { EventEmitter } from 'node:events'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { terminal, measure, report } from './harness.rip'
+import { terminal, measure, report, reduce, emit, scenario, SCENARIOS, COLUMNS, ROWS, widthAt } from './harness.rip'
+
+throw Error.new "Ink must be measured on React's production build — use `bun run ink`, or set NODE_ENV=production" unless process.env.NODE_ENV is 'production'
+process.env.FORCE_COLOR = '3'
+delete process.env.NO_COLOR
+delete process.env.CI
+
+React = import!('react').default
+{ render: draw, Box, Text, Static } = import!('ink')
 
 h =! React.createElement
-
-COLUMNS =! 200
-ROWS =! 60
+ESU =! '\x1b[?2026l'
 
 def quietInput()
   stdin = EventEmitter.new()
@@ -40,9 +45,10 @@ def quietInput()
   stdin
 
 # Mount `App` (a component taking `{tick}`) and return a `step` that
-# sets the tick and resolves once Ink has written the frame.
-def mount(App, out, incremental)
-  framed = null
+# applies update i — the tick set, or the terminal resized — and
+# resolves once Ink has written the frame: the write that ends its
+# synchronized update.
+def mount(App, out, incremental, drive)
   setTick = null
   Root = ->
     [tick, set] = React.useState 0
@@ -56,15 +62,14 @@ def mount(App, out, incremental)
     interactive: true
     maxFps: 1000
     incrementalRendering: incremental
-    onRender: ->
-      done = framed
-      framed = null
-      done?()
   }
   step = (i) ->
     Promise.new (resolve) ->
-      framed = resolve
-      setTick i + 1
+      out.hook = (text) ->
+        return unless text is ESU
+        out.hook = null
+        resolve()
+      if drive is 'resize' then out.resize widthAt(i) else setTick i + 1
   { app, step }
 
 # ── Scenarios ─────────────────────────────────────────────────────────────────
@@ -73,6 +78,8 @@ def mount(App, out, incremental)
 # memoized, so an unchanged prop skips its subtree.
 Cell =! React.memo ({label, width, color}) ->
   h Box, { width }, h(Text, { color }, label)
+
+Row =! React.memo ({label}) -> h Text, null, label
 
 # One counter in a tree of about 1,000 elements: 50 rows of 10 boxed
 # labels, one of which shows the tick.
@@ -107,6 +114,14 @@ def scrolledList(count)
     h Box, { height: 40, overflow: 'hidden', flexDirection: 'column' },
       h(Box, { flexDirection: 'column', flexShrink: 0, marginTop: -(tick % (count - 40)) }, ...items)
 
+# A 50-row list that takes a new row at its top each update and lets
+# the last one go: every row moves down by one.
+Inserting = ({tick}) ->
+  rows = for i in [0...50]
+    id = tick - i
+    h Row, { key: id, label: "row #{id} — the quick brown fox jumps over the lazy dog" }
+  h Box, { flexDirection: 'column' }, ...rows
+
 # One line appended to scrollback per update, above a live status line.
 StaticLog = ({tick}) ->
   lines = (i for i in [0...tick])
@@ -114,55 +129,74 @@ StaticLog = ({tick}) ->
     h(Static, { items: lines }, (i) -> h(Text, { key: i }, "done #{i}")),
     h(Text, null, "working on #{tick}")
 
-SCENARIOS =! [
-  ['counter',   'counter in a 1,000-element tree', CounterTree,        300, 30]
-  ['table10',   '40×8 table, 10% churn',           churnTable(0.1),    300, 30]
-  ['table100',  '40×8 table, 100% churn',          churnTable(1),      300, 30]
-  ['list',      '2,000-row list, scroll by one',   scrolledList(2000),  60, 5]
-  ['static',    '1,000 scrollback appends',        StaticLog,         1000, 10]
-]
+# Twelve rows of four cells a quarter of the width each — 30 cells at
+# 120 columns, 20 at 80, whole either way — holding a sentence that
+# wraps differently at every width the terminal takes.
+Wrapped = ->
+  rows = for r in [0...12]
+    cells = for c in [0...4]
+      h Box, { key: c, width: '25%' },
+        h(Text, null, "row #{r} cell #{c}: the quick brown fox jumps over the lazy dog and keeps going")
+    h Box, { key: r }, ...cells
+  h Box, { flexDirection: 'column' }, ...rows
 
-# Cold start: a fresh process per sample, median of seven. Times are
-# milliseconds from process start, so the Rip loader's compile of the
-# entry file is inside the number, as it is for any Rip program.
-def startup()
-  here = dirname(fileURLToPath(import.meta.url))
-  root = join(here, '../../..')
-  samples = for i in [0...7]
-    child = Bun.spawnSync {
-      cmd: ['bun', "--preload=#{join(root, 'src/loader.js')}", join(root, 'src/cli/run.js'), join(here, 'ink-startup.rip')]
-      cwd: here
-      env: { ...process.env, NODE_ENV: 'production' }
-      stdout: 'pipe'
-      stderr: 'pipe'
-    }
-    throw Error.new "the startup sample exited #{child.exitCode}: #{child.stderr.toString()}" unless child.exitCode is 0
-    JSON.parse child.stdout.toString().trim().split('\n').pop()
-  median = (pick) ->
-    sorted = samples.map(pick).sort (a, b) -> a - b
-    sorted[sorted.length >> 1]
-  p "\nInk 7.1.1 — cold start, median of #{samples.length} fresh processes"
-  p "  import ink + react   #{median((s) -> s.loaded - s.began).toFixed(1).padStart(7)} ms"
-  p "  first frame written  #{median((s) -> s.framed - s.loaded).toFixed(1).padStart(7)} ms after import"
-  p "  process start → frame #{median((s) -> s.framed).toFixed(1).padStart(6)} ms"
+# 10,000 nodes — 50 rows of 100 two-column cells, a box and a text
+# each — under a root whose top padding toggles, so every node moves.
+Relayout = ({tick}) ->
+  rows = React.useMemo (->
+    for r in [0...50]
+      cells = for c in [0...100]
+        h Cell, { key: c, width: 2, label: 'ab' }
+      h Box, { key: r }, ...cells
+  ), []
+  h Box, { flexDirection: 'column', paddingTop: tick % 2 }, ...rows
+
+# A 20 × 8 table of CJK and emoji cells, every one changing each update.
+GLYPHS =! ['漢字', '🍎🍊', '日本語', '🚀✨', '中文', '🐍🦀', '한국어', '🌍🌙']
+WideTable = ({tick}) ->
+  rows = for r in [0...20]
+    cells = for c in [0...8]
+      h Cell, { key: c, width: 10, color: 'green', label: "#{GLYPHS[(r + c) % 8]}#{(tick + r + c) % 10}" }
+    h Box, { key: r }, ...cells
+  h Box, { flexDirection: 'column' }, ...rows
+
+APPS =! {
+  counter: CounterTree
+  table10: churnTable(0.1)
+  table100: churnTable(1)
+  list2k: scrolledList(2000)
+  list10k: scrolledList(10000)
+  insert: Inserting
+  static: StaticLog
+  resize: Wrapped
+  relayout: Relayout
+  wide: WideTable
+}
+
+# One scenario, measured: the result, with the screen after every
+# update as a digest — or, with `at`, the cells after update `at`.
+def bench(key, incremental, scale = 1, at = null)
+  { label, updates, warmup, cols, drive } = scenario key
+  out = terminal cols ?? COLUMNS, ROWS
+  { app, step } = mount APPS[key], out, incremental, drive
+  result = measure! label, out, updates * scale, warmup, step
+  app.unmount()
+  if at? then { key, at, cells: reduce(out, at) } else { key, ...result, digests: reduce(out) }
 
 def run(only, scale = 1)
   for incremental in [false, true]
     results = []
-    for [key, label, App, updates, warmup] in SCENARIOS
+    for { key } in SCENARIOS
       continue if only and only isnt key
-      out = terminal COLUMNS, ROWS
-      { app, step } = mount App, out, incremental
-      results.push measure!(label, out, updates * scale, warmup, step)
-      app.unmount()
+      results.push bench!(key, incremental, scale)
     report "Ink 7.1.1 — incremental rendering #{if incremental then 'on' else 'off'}, #{COLUMNS}×#{ROWS}", results
 
 if import.meta.main
-  unless process.env.NODE_ENV is 'production'
-    throw Error.new "Ink must be measured on React's production build — use `bun run ink`, or set NODE_ENV=production"
-  if process.argv[2] is 'startup'
-    startup()
+  args = process.argv.slice 2
+  if args[1] is '--json'
+    emit bench!(args[0], true)
+  else if args[1] is '--at'
+    emit bench!(args[0], true, 1, Number(args[2]))
   else
-    run! process.argv[2], Number(process.argv[3] ?? 1)
-    startup() unless process.argv[2]
+    run! args[0], Number(args[1] ?? 1)
   process.exit 0

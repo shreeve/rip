@@ -1,26 +1,37 @@
 # ==============================================================================
-# tui bench — Ink cold start, one fresh process per sample (see ink.rip)
+# tui bench — Ink cold start, one fresh process per sample (bench.rip)
 #
-# Prints three times in milliseconds since process start: when this
+# Prints three times in milliseconds since process start — when this
 # module began, when Ink and React had loaded, and when the first frame
-# had been written.
+# had been written (the write that ends Ink's synchronized update) —
+# and the screen that frame left, read by the reducer.
 # ==============================================================================
 
-import { terminal } from './harness.rip'
+import { terminal, reduce, emit } from './harness.rip'
 
+process.env.FORCE_COLOR = '3'
 began = performance.now()
 React = import!('react').default
 { render: draw, Text } = import!('ink')
 loaded = performance.now()
 
 out = terminal 200, 60
+framed = null
+written = Promise.new (resolve) ->
+  out.hook = (text) ->
+    return unless text is '\x1b[?2026l'
+    framed = performance.now()
+    out.hook = null
+    resolve()
 App = -> React.createElement Text, { color: 'green' }, 'ready'
-draw React.createElement(App), {
+app = draw React.createElement(App), {
   stdout: out
   patchConsole: false
   exitOnCtrlC: false
   interactive: true
-  onRender: ->
-    p JSON.stringify { began, loaded, framed: performance.now() }
-    process.exit 0
 }
+await written
+out.mark()
+app.unmount()
+emit { began, loaded, framed, cells: reduce(out, 0) }
+process.exit 0
