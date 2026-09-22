@@ -1,0 +1,97 @@
+# A file browser: a scrolling list of the current directory on the left,
+# the chosen file's head on the right. Tab moves between the panes, the
+# arrows and PageUp / PageDown move within one, Enter opens a directory,
+# Backspace goes up, q quits. Try a narrow terminal, then a wide one.
+#
+#   rip examples/files.rip [directory]
+
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { join, resolve, dirname, basename } from 'node:path'
+import { run, quit, screen, Box, Text, Spacer } from 'rip/tui'
+
+HEAD =! 200   # lines of a file worth showing
+
+entries = (dir) ->
+  names = try readdirSync(dir).sort() catch then []
+  rows = for name in names when not name.startsWith '.'
+    dirs = try statSync(join dir, name).isDirectory() catch then false
+    { name, dirs }
+  [{ name: '..', dirs: true }, ...rows.filter((r) -> r.dirs), ...rows.filter((r) -> not r.dirs)]
+
+head = (path) ->
+  try
+    text = readFileSync path, 'utf8'
+    lines = text.split '\n'
+    lines = [...lines.slice(0, HEAD), "… #{lines.length - HEAD} more lines"] if lines.length > HEAD
+    lines
+  catch error
+    ["(#{error.code ?? error.message})"]
+
+Browser = component
+  @dir := resolve process.argv[2] ?? '.'
+  rows ~= entries @dir
+  at := 0
+  top := 0                            # first row shown in the list
+  lineTop := 0                        # first line shown in the preview
+  list := null
+  view := null
+
+  chosen ~= rows[at]
+  path ~= join @dir, chosen.name
+  lines ~= if chosen.dirs then ("#{if r.dirs then '/' else ' '} #{r.name}" for r in entries path) else head path
+
+  # The list keeps the cursor row in view; the panes are as tall as the
+  # terminal leaves them.
+  tall ~= Math.max 3, screen.rows - 4
+  ~> top = at if at < top
+  ~> top = at - tall + 1 if at >= top + tall
+  ~> (at = 0; top = 0; lineTop = 0) if @dir
+
+  pick: (event) ->
+    switch event.key
+      when 'ArrowDown' then at = Math.min at + 1, rows.length - 1
+      when 'ArrowUp'   then at = Math.max at - 1, 0
+      when 'PageDown'  then at = Math.min at + tall, rows.length - 1
+      when 'PageUp'    then at = Math.max at - tall, 0
+      when 'Home'      then at = 0
+      when 'End'       then at = rows.length - 1
+      when 'Enter'     then @dir = path if chosen.dirs
+      when 'Backspace' then @dir = dirname @dir
+
+  read: (event) ->
+    switch event.key
+      when 'ArrowDown' then lineTop = Math.min lineTop + 1, Math.max 0, lines.length - tall
+      when 'ArrowUp'   then lineTop = Math.max lineTop - 1, 0
+      when 'PageDown'  then lineTop = Math.min lineTop + tall, Math.max 0, lines.length - tall
+      when 'PageUp'    then lineTop = Math.max lineTop - tall, 0
+
+  any: (event) ->
+    quit() if event.key is 'q'
+
+  # The two panes: as tall as the terminal leaves them, clipped, each
+  # scrolled by its own offset.
+  pane ~= { flexDirection: 'column', height: tall + 2, overflow: 'hidden', borderStyle: 'round' }
+  paneLeft ~= { ...pane, width: 32, contentOffsetY: top, borderColor: (if list?.focused then 'cyan' else 'gray') }
+  paneRight ~= { ...pane, flexGrow: 1, paddingX: 1, contentOffsetY: lineTop, borderColor: (if view?.focused then 'cyan' else 'gray') }
+
+  render
+    Box flexDirection: 'column', @keydown: @any
+      Box flexDirection: 'row', gap: 1
+        div ref: list, focusable: true, autofocus: true, @keydown: @pick, style: paneLeft
+          for row, n in rows
+            Text key: row.name, inverse: n is at, color: (if row.dirs then 'blue' else undefined)
+              "#{if row.dirs then '/' else ' '} #{row.name}".padEnd(30)
+        div ref: view, focusable: true, @keydown: @read, style: paneRight
+          for line, n in lines
+            Text key: n, wrap: 'truncate', dimColor: chosen.dirs
+              line
+      Box flexDirection: 'row', paddingX: 1
+        Text color: 'cyan', bold: true
+          basename(@dir) + '/'
+        Text dimColor: true
+          "  #{chosen.name}  #{at + 1}/#{rows.length}"
+        Spacer
+        Text dimColor: true
+          "Tab panes · ↑↓ PgUp PgDn · Enter open · Backspace up · q quit"
+
+run Browser
