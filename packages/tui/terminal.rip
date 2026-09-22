@@ -153,19 +153,30 @@ export teardown =! (held, drawn) ->
 
 # ── Signals, the crash, the exit ──────────────────────────────────────────────
 
-# A signal gives the terminal back and exits with 128 plus its number;
-# an uncaught error or an unhandled rejection gives it back and hands
-# the error to whoever else handles it — the runtime, which prints it
-# with its frames remapped — or prints it and exits 1 itself; the loop
-# draining closes the app as `quit` would; a `process.exit` with the
-# app live gives the terminal back on the way.
+# A signal closes the app — its last frame drawn, the terminal given
+# back, `done` resolved — and exits with 128 plus its number, so a
+# `done` an app awaits never settles: the process is gone before any
+# continuation runs. A signal that arrives while the process is
+# stopped stays pending until it is continued (POSIX; a shell sends
+# the continue itself), and then the continue and the signal, in
+# either order, end the same way, the app's own exit hook run. An
+# uncaught error or an unhandled rejection closes the app with the
+# error — `done` rejects, and nobody need be awaiting it — then leaves
+# the error to the listeners after this one, which the runtime already
+# called once: its own, which prints the error with its frames
+# remapped and exits 1, or the app's; with none, it is printed here
+# and the exit is 1. The loop draining closes the app as `quit` would;
+# a `process.exit` with the app live gives the terminal back on the
+# way. Every step is taken whatever the others do: none of these
+# throws.
 handlers =! (held) ->
   gone = (code) ->
     held.close true
     process.exit code
   crash = (name, error) ->
-    held.close true
-    return if process.emit name, error
+    held.done.catch -> null
+    held.close true, error
+    return if process.listenerCount name
     console.error error
     process.exit 1
   {

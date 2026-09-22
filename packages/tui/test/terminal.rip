@@ -1049,6 +1049,39 @@ test! "warn and error go to stderr, the frame cleared for them and drawn again",
     quit()
     await running.done
 
+test! "an uncaught error closes the app with it — `done` rejects — and is left to the listeners after this package's, once; a signal closes the app and exits with 128 plus its number, `done` resolved", ->
+  before = listeners()
+  seen = []
+  user = (error) -> seen.push error.message
+  exits = []
+  held = process.exit
+  process.exit = (code) -> exits.push code
+  try
+    for name in ['uncaughtException', 'unhandledRejection']
+      process.on name, user
+      stdin = Stdin.new()
+      term = Terminal.new()
+      running = run Echo, stdin: stdin, stdout: term
+      failure = null
+      running.done.catch (error) -> failure = error.message
+      process.emit name, Error.new "a #{name}"
+      sleep! 0
+      eq [seen, failure, exits, listeners()], [["a #{name}"], "a #{name}", [], before.map((n, i) -> if HANDLED[i] is name then n + 1 else n)], name
+      every name, term, stdin, before.map (n, i) -> if HANDLED[i] is name then n + 1 else n
+      process.off name, user
+      seen.length = 0
+    term = Terminal.new()
+    running = run Echo, stdin: Stdin.new(), stdout: term
+    result = 'pending'
+    running.done.then (-> result = 'resolved'), (-> result = 'rejected')
+    process.emit 'SIGTERM'
+    sleep! 0
+    eq [exits, result, listeners()], [[143], 'resolved', before]
+    ok term.text.endsWith('x') and term.shown, 'the last frame stands, the cursor shown'
+  finally
+    process.exit = held
+    process.off name, user for name in ['uncaughtException', 'unhandledRejection']
+
 test! "the console is the process's own again on every way out, and a log with the app closed passes straight through", ->
   recorded! (printed) ->
     stdin = Stdin.new()

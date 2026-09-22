@@ -307,7 +307,7 @@ open =! (App, options, out, terminal, stdin = null, clock = undefined) ->
   done = Promise.new (resolve, reject) ->
     settled.resolve = resolve
     settled.reject = reject
-  live = held = { app: null, view, out, err: options.stderr ?? out.err ?? process.stderr, doc, restore, resized, redraw: refresh, done, settled, terminal, depth, console: options.console isnt false, closing: false, over: false, parser: null, stdin, read: null, clock, mouse, pointer: null, probing: keys is 'enhanced', asked: false, enhanced: false, pushed: false, raw: false, up: false, entered: false, suspended: false, wake: null, handlers: null, was: null, logs: [], close: (drawn) -> close drawn if live is held }
+  live = held = { app: null, view, out, err: options.stderr ?? out.err ?? process.stderr, doc, restore, resized, redraw: refresh, done, settled, terminal, depth, console: options.console isnt false, closing: false, over: false, parser: null, stdin, read: null, clock, mouse, pointer: null, probing: keys is 'enhanced', asked: false, enhanced: false, pushed: false, raw: false, up: false, entered: false, suspended: false, wake: null, handlers: null, was: null, logs: [], close: (drawn, error = null) -> close drawn, error if live is held }
   held.parser = Parser.new { clock, late: (events) -> receive held, events }
   held.read = (chunk) -> receive held, held.parser.feed chunk
   if mouse
