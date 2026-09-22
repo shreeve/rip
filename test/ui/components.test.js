@@ -1730,6 +1730,103 @@ describe('child components: the instantiation protocol', () => {
     }
   });
 
+  test('a child whose construction throws while holding projected blocks is contained at its construct site: the report is its own error, and the mount stands', () => {
+    const source = `Kid = component
+  render
+    b "kid"
+Wrap = component
+  render
+    div
+      slot
+Broken = component
+  render
+    div title: missing
+      slot
+App = component
+  items := ['a']
+  show := true
+  name := 'n'
+  render
+    div
+      Wrap title: nosuchname
+        for item, i in items
+          span key: i, "#{item}"
+        if show
+          em "shown"
+        span "#{name}"
+      Broken
+        Kid
+        for item, i in items
+          span key: i, "#{item}"
+      strong "kept"
+`;
+    const { code } = compile(source, { runtimeDelivery: 'none' });
+    const names = Object.keys(RT);
+    const { App } = new Function(...names, `${code}\nreturn { App };`)(...names.map((name) => RT[name]));
+    const target = document.createElement('main');
+    const app = new App({});
+    const prior = console.error;
+    const reported = [];
+    console.error = (label, error) => reported.push([label, error]);
+    try {
+      app.mount(target);
+      const stood = '<main><div data-part="App"><!--rip:child-error: Wrap--><!--rip:child-error: Broken--><strong>kept</strong></div></main>';
+      expect(serialize(target)).toBe(stood);
+      app.items.value = ['a', 'b'];
+      app.show.value = false;
+      app.name.value = 'm';
+      expect(serialize(target)).toBe(stood);
+      app.unmount();
+    } finally {
+      console.error = prior;
+    }
+    expect(reported.map(([label, error]) => [label, error?.constructor, error?.message])).toEqual([
+      ['[Rip] Wrap construction failed:', ReferenceError, 'nosuchname is not defined'],
+      ['[Rip] Broken construction failed:', ReferenceError, 'missing is not defined'],
+    ]);
+  });
+
+  test('a child whose _init a boundary contained holds no projected blocks: the mount stands on the init placeholder', () => {
+    const source = `caught = []
+Bad = component
+  x := nosuchname
+  render
+    div
+      slot
+App = component
+  items := ['a']
+  onError = (failure) -> caught.push failure
+  render
+    div
+      Bad
+        for item, i in items
+          span key: i, "#{item}"
+`;
+    const { code } = compile(source, { runtimeDelivery: 'none' });
+    const names = Object.keys(RT);
+    const { App, caught } = new Function(...names, `${code}\nreturn { App, caught };`)(...names.map((name) => RT[name]));
+    const target = document.createElement('main');
+    const app = new App({});
+    const prior = console.error;
+    const printed = [];
+    console.error = (...args) => printed.push(args);
+    try {
+      app.mount(target);
+    } finally {
+      console.error = prior;
+    }
+    try {
+      expect(printed).toEqual([]);
+      expect(caught).toHaveLength(1);
+      expect(caught[0].error).toBeInstanceOf(ReferenceError);
+      expect(serialize(target)).toBe('<main><div data-part="App"><!--rip:child-init-failed: Bad--></div></main>');
+      app.items.value = ['a', 'b'];
+      expect(serialize(target)).toBe('<main><div data-part="App"><!--rip:child-init-failed: Bad--></div></main>');
+    } finally {
+      app.unmount();
+    }
+  });
+
   test('failed factory children transfer ownership to their placeholders across keyed moves, removal, and branch replacement', () => {
     const source = `failedRoots = []
 Bad = component
