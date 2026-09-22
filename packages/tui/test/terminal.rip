@@ -1123,22 +1123,31 @@ depthUnder =! (env, out = Terminal.new()) ->
     for name, value of held
       if value? then process.env[name] = value else delete process.env[name]
 
-test! "the depth is read once at run: NO_COLOR is none, FORCE_COLOR is its number, else TERM and COLORTERM decide; a dumb terminal, or no terminal, has none unless forced", ->
+test! "the depth is read once at run: NO_COLOR set and not empty is none; FORCE_COLOR 0 or false none, empty or true the 16, a number that depth up to 3, any other word the 16; else no terminal or a dumb one has none, and TERM and COLORTERM decide", ->
   rows = [
     [{ NO_COLOR: '1' }, 0]
-    [{ NO_COLOR: '', COLORTERM: 'truecolor' }, 0]
+    [{ NO_COLOR: '' }, 16]
+    [{ NO_COLOR: '', COLORTERM: 'truecolor' }, 16777216]
     [{ NO_COLOR: '1', FORCE_COLOR: '3' }, 0]
     [{ FORCE_COLOR: '0' }, 0]
+    [{ FORCE_COLOR: 'false' }, 0]
+    [{ FORCE_COLOR: '' }, 16]
+    [{ FORCE_COLOR: 'true' }, 16]
+    [{ FORCE_COLOR: 'yes' }, 16]
     [{ FORCE_COLOR: '1' }, 16]
     [{ FORCE_COLOR: '2' }, 256]
     [{ FORCE_COLOR: '3' }, 16777216]
+    [{ FORCE_COLOR: '4' }, 16777216]
+    [{ FORCE_COLOR: '256' }, 16777216]
     [{ FORCE_COLOR: 'true', TERM: 'dumb' }, 16]
     [{ TERM: 'xterm-256color' }, 256]
+    [{ TERM: 'screen-256color' }, 256]
     [{ TERM: 'xterm-256color', COLORTERM: 'truecolor' }, 16777216]
     [{ TERM: 'xterm', COLORTERM: '24bit' }, 16777216]
     [{ TERM: 'xterm' }, 16]
     [{}, 16]
     [{ TERM: 'dumb' }, 0]
+    [{ TERM: 'dumb', COLORTERM: 'truecolor' }, 0]
   ]
   for [env, want] in rows
     depth = depthUnder! env
@@ -1182,10 +1191,73 @@ test! "a 24-bit color is sent as it is at full depth, as the nearest of the 256 
   cube = paintedUnder! { FORCE_COLOR: '2' }
   ok cube.includes("#{CSI}1;38;5;196;48;5;21mr") and cube.includes("#{CSI}0;32mg") and cube.includes("#{CSI}0;38;5;244mh"), JSON.stringify cube
   named = paintedUnder! { FORCE_COLOR: '1' }
-  ok named.includes("#{CSI}1;91;104mr") and named.includes("#{CSI}0;32mg") and named.includes("#{CSI}0;37mh"), JSON.stringify named
+  ok named.includes("#{CSI}1;91;44mr") and named.includes("#{CSI}0;32mg") and named.includes("#{CSI}0;90mh"), JSON.stringify named
   none = paintedUnder! { NO_COLOR: '1' }
   ok not /\x1b\[[0-9;]*m/.test(none), JSON.stringify none
   ok plain(none).includes('rgh'), JSON.stringify none
+
+# xterm's sixteen, then points the cube, the grays and the palette
+# disagree on: each as the nearest of the 256, and of the 16.
+POINTS =! [
+  ['#000000', 16, 30], ['#cd0000', 160, 31], ['#00cd00', 40, 32], ['#cdcd00', 184, 33]
+  ['#0000ee', 21, 34], ['#cd00cd', 164, 35], ['#00cdcd', 44, 36], ['#e5e5e5', 254, 37]
+  ['#7f7f7f', 244, 90], ['#ff0000', 196, 91], ['#00ff00', 46, 92], ['#ffff00', 226, 93]
+  ['#5c5cff', 63, 94], ['#ff00ff', 201, 95], ['#00ffff', 51, 96], ['#ffffff', 231, 97]
+  ['#808080', 244, 90], ['#5f5f5f', 59, 90], ['#bcbcbc', 250, 37], ['#eeeeee', 255, 37]
+  ['#f8f8f8', 231, 97], ['#ff5f00', 202, 91], ['#875faf', 97, 90], ['#870000', 88, 31]
+  ['#5f0000', 52, 30], ['#d7d7d7', 188, 37], ['#afafaf', 145, 90], ['#404040', 238, 90]
+  ['#585858', 240, 90], ['#767676', 243, 90], ['#4d4d4d', 239, 90], ['#8a8a8a', 245, 90]
+]
+
+Swatches =! component
+  render
+    Box flexDirection: 'column'
+      for point in POINTS
+        Text key: point[0], color: point[0], "x"
+
+# The SGR parameters before each swatch, in order, under `env`.
+swatchesUnder =! (env) ->
+  held = {}
+  for name in ['NO_COLOR', 'FORCE_COLOR', 'TERM', 'COLORTERM']
+    held[name] = process.env[name]
+    delete process.env[name]
+  process.env[name] = value for name, value of env
+  try
+    term = Terminal.new 40, 40
+    running = run Swatches, stdin: Stdin.new(), stdout: term
+    quit()
+    await running.done
+    Array.from term.since(0).matchAll(/\x1b\[0?;?([0-9;]+)mx/g), (m) -> m[1]
+  finally
+    for name, value of held
+      if value? then process.env[name] = value else delete process.env[name]
+
+test! "every color is the nearest of xterm's own table: its sixteen, a color on the cube as that point, a gray as the nearest gray or cube point, and below that the nearest of the sixteen — mid-grays bright black, never white", ->
+  at256 = swatchesUnder! { FORCE_COLOR: '2' }
+  eq at256, ("38;5;#{n}" for [hex, n] in POINTS)
+  at16 = swatchesUnder! { FORCE_COLOR: '1' }
+  eq at16, (String(n) for [hex, c, n] in POINTS)
+  ansi = swatchesUnder! { FORCE_COLOR: '1', COLORTERM: 'truecolor' }
+  eq ansi, at16, 'FORCE_COLOR is read before the terminal'
+
+test! "an ansi256 color below the 256 is the nearest of the sixteen by its own RGB", ->
+  Indexed = component
+    render
+      Box flexDirection: 'row'
+        Text color: 'ansi256(244)', "a"
+        Text color: 'ansi256(196)', "b"
+        Text color: 'ansi256(21)', "c"
+        Text color: 'ansi256(7)', "d"
+  held = process.env.FORCE_COLOR
+  process.env.FORCE_COLOR = '1'
+  try
+    term = Terminal.new()
+    running = run Indexed, stdin: Stdin.new(), stdout: term
+    quit()
+    await running.done
+    eq Array.from(term.since(0).matchAll(/\x1b\[0?;?([0-9;]+)m[abcd]/g), (m) -> m[1]), ['90', '91', '34', '37']
+  finally
+    if held? then process.env.FORCE_COLOR = held else delete process.env.FORCE_COLOR
 
 test "mount and renderToString stay at full depth whatever the environment says", ->
   held = process.env.NO_COLOR

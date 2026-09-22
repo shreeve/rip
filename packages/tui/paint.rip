@@ -46,39 +46,51 @@ tint =! (color, base) ->
 
 # The depth colors are sent at, 0 to 3 — none, the 16 named, the 256,
 # 24-bit — what `run` reads of the terminal once (terminal.rip). Below
-# full depth a 24-bit color is sent as the nearest of the 256: the
-# 6×6×6 cube, or the 24 grays for a gray; at 16 one of the 256 is sent
-# as the nearest named one, bright where it is at full intensity
-# (xterm's palette). At none, no style sends anything.
+# full depth a 24-bit color is sent as the nearest of xterm's 256 by
+# RGB distance — a color on the cube is that point — and below that as
+# the nearest of xterm's 16, one of the 256 the same way. The table is
+# xterm's own: its 16 defaults, the 6×6×6 cube at 0, 95, 135, 175, 215
+# and 255, and the 24 grays from 8 by tens. The cost is paid once per
+# style interned, never per cell. At none, no style sends anything.
 depth = 3
 
-cube =! (r, g, b) ->
-  if r is g and g is b
-    return 16 if r < 8
-    return 231 if r > 248
-    return 232 + Math.round((r - 8) / 247 * 24)
-  16 + 36 * Math.round(r / 255 * 5) + 6 * Math.round(g / 255 * 5) + Math.round(b / 255 * 5)
+XTERM =! do ->
+  table = for hex in ['000000', 'cd0000', '00cd00', 'cdcd00', '0000ee', 'cd00cd', '00cdcd', 'e5e5e5', '7f7f7f', 'ff0000', '00ff00', 'ffff00', '5c5cff', 'ff00ff', '00ffff', 'ffffff']
+    n = parseInt hex, 16
+    [n >> 16, (n >> 8) & 255, n & 255]
+  levels = [0, 95, 135, 175, 215, 255]
+  for r in levels
+    for g in levels
+      table.push [r, g, b] for b in levels
+  table.push [8 + 10 * i, 8 + 10 * i, 8 + 10 * i] for i in [0...24]
+  table
 
-named =! (n) ->
-  return n if n < 8
-  return n + 52 if n < 16
-  if n >= 232
-    r = g = b = ((n - 232) * 10 + 8) / 255
-  else
-    r = Math.floor((n - 16) / 36) / 5
-    g = Math.floor((n - 16) % 36 / 6) / 5
-    b = (n - 16) % 6 / 5
-  bright = Math.max(r, g, b) * 2
-  return 0 if bright is 0
-  code = (Math.round(b) << 2) | (Math.round(g) << 1) | Math.round(r)
-  if bright is 2 then code + 60 else code
+# The entry of the table from `from` to `to` nearest (r, g, b).
+nearest =! (r, g, b, from, to) ->
+  best = from
+  least = Infinity
+  for i in [from...to]
+    [tr, tg, tb] = XTERM[i]
+    far = (r - tr) * (r - tr) + (g - tg) * (g - tg) + (b - tb) * (b - tb)
+    if far < least
+      least = far
+      best = i
+  best
+
+# The SGR offset of one of the 16: 0 to 7, or 60 up for the bright.
+named =! (n) -> if n < 8 then n else n + 52
 
 # A color's parameters at the depth in force.
 lower =! (sgr, base) ->
   return sgr if depth is 3
-  sgr = "#{base + 8};5;#{cube +m[1], +m[2], +m[3]}" if m = /^\d8;2;(\d+);(\d+);(\d+)$/.exec sgr
+  if m = /^\d8;2;(\d+);(\d+);(\d+)$/.exec sgr
+    return "#{base + 8};5;#{nearest +m[1], +m[2], +m[3], 16, 256}" if depth is 2
+    return String base + named nearest(+m[1], +m[2], +m[3], 0, 16)
   return sgr if depth is 2
-  if m = /^\d8;5;(\d+)$/.exec sgr then String(base + named(+m[1])) else sgr
+  if m = /^\d8;5;(\d+)$/.exec sgr
+    [r, g, b] = XTERM[+m[1]]
+    return String base + named nearest(r, g, b, 0, 16)
+  sgr
 
 # A style's escape parameters: its switches, then its colors.
 dress =! (fg, bg, flags) ->

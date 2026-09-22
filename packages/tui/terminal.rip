@@ -36,14 +36,20 @@ export interactive =! (out) ->
   out?.isTTY is true and not (ci? and ci isnt '' and ci isnt '0' and ci isnt 'false')
 
 # The depth `out` is drawn at, 0 to 3 — no color, the 16 named, the
-# 256, 24-bit — read once at `run`: NO_COLOR is none; FORCE_COLOR is
-# its digit, or 16 colors for any other value; else COLORTERM's
-# truecolor is 24-bit, TERM's 256color is 256, a dumb terminal or a
-# stdout nobody is watching has none, and any other terminal has 16.
+# 256, 24-bit — read once at `run`, in this order: NO_COLOR set to
+# anything but '' is none (no-color.org); FORCE_COLOR '0' or 'false'
+# is none, '' or 'true' the 16, a number that depth up to 3, any other
+# word the 16 (supports-color's reading); a stdout nobody is watching,
+# or a dumb terminal, has none; COLORTERM's truecolor is 24-bit;
+# TERM's 256color is 256; any other terminal has 16.
 export depth =! (out) ->
   env = process.env
-  return 0 if env.NO_COLOR?
-  return (if /^[0-3]$/.test env.FORCE_COLOR then +env.FORCE_COLOR else 1) if env.FORCE_COLOR?
+  return 0 if env.NO_COLOR
+  if env.FORCE_COLOR?
+    forced = env.FORCE_COLOR
+    return 0 if forced is '0' or forced is 'false'
+    return Math.min(+forced, 3) if /^\d+$/.test forced
+    return 1
   return 0 unless interactive(out) and env.TERM isnt 'dumb'
   return 3 if /truecolor|24bit/i.test env.COLORTERM ?? ''
   return 2 if /256color/i.test env.TERM ?? ''
