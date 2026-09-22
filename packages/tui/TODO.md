@@ -6,12 +6,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 2. The closing audit — docs
 
-- [ ] PLAN names what no code does: an opt-in `ansi(str)` helper and a
-      per-cell style callback (§2, §6); frames "deferred while
-      `write()` reports backpressure" (§3); the error overview "through
-      `__setErrorHandler`" (§14); a `yoga-layout` differential runner
-      ("537 of 543", §5); a smoke test "under `script -q /dev/null`"
-      with "no pty dependency" (§10). Strike each, or name what is.
 - [ ] PLAN §3's module table (tui 310, focus 62, paint 694, terminal
       181; "4,222 built") against the counting rule (311, 63, 701, 203;
       4,252); §10's per-file Ink counts and "478" against SOURCE.md's

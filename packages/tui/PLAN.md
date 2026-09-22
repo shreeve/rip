@@ -110,8 +110,8 @@ README carries this matrix.
 
 Ink's string `Transform` has no counterpart because it has no job
 here: a text transform is an ordinary expression in the binding
-(`"#{name.toUpperCase()}"`), and per-cell restyling is a style
-callback (§6).
+(`"#{name.toUpperCase()}"`), and a run that needs a style of its
+own is its own `span` (§6).
 
 ## 3. Architecture
 
@@ -124,7 +124,7 @@ component effects ──► node setters ──► dirty marks ──► frame f
 ```
 
 One flush per reactive batch: a microtask, a minimum interval of about
-8 ms, deferred while `write()` reports backpressure. Each key of a
+8 ms. Each key of a
 stdin read is a reactive turn of its own — the tree a key meets is the
 tree the key before it left — and a read is still one frame, because a
 change books a frame and does not draw one. Rip flushes effects
@@ -349,10 +349,7 @@ byte as upstream wrote them, against a test-only shim shaped like the
   of its hand-written cases for measure functions, the measure cache,
   measure modes, rounding, dirtying, and computed edges
   (`test/yoga-hand.rip`; `test/yoga/SOURCE.md` says which are left out
-  and why). Real
-  `yoga-layout` 3.2.1, the release Ink ships, passes 537 of the 543
-  through the same runner: it predates the intrinsic keywords and one
-  alignment fix.
+  and why).
 - **Two cases answer differently on purpose, pinned, not skipped**
   (divergences 1 and 6 below). The runner holds each differing
   expectation to this engine's exact answer, with the reason beside
@@ -526,10 +523,9 @@ are benchmarked, since a cell diff can emit more than a line diff.
 **Decided — styling is structural only.** Raw ANSI inside text is what
 forces Ink's 509-line tokenizer and repeated re-tokenizing. Text is
 sanitized once in the `data` setter (escape and control characters
-stripped, tabs expanded). For text that arrives pre-colored, an opt-in
-`ansi(str)` helper parses SGR into styled spans once, outside the
-paint path. Ink's string `Transform` is replaced by a per-cell style
-callback.
+stripped, tabs expanded). Text that arrives pre-colored is sanitized like any
+other — its escapes are stripped — and a run that needs a style of its
+own is its own `span`.
 
 **Held to Ink's own tests.** `test/ink/` ports 478 of Ink's paint
 cases — borders, backgrounds, overflow, text, wrapping, truncation,
@@ -1140,9 +1136,9 @@ run App
 ## 10. Testing
 
 - `test.rip` on `rip/testing`, importing `rip/tui`, opening with a
-  "Package surface" section. Streams and the clock are injectable; no
-  pty dependency. One end-to-end smoke test runs under
-  `script -q /dev/null`.
+  "Package surface" section. Streams and the clock are injectable. Job
+  control — Ctrl-Z, `fg`, a signal while stopped — runs under
+  `test/terminal/ptyrun.py`, a pty shell the suite spawns (Python 3).
 - **Layout:** the Yoga suite and the ported aspect ratio cases (§5).
 - **Paint:** about 400 Ink cases ported as literal expected strings
   plus a plain cell dump — borders 52, backgrounds 35, overflow 44,
@@ -1445,7 +1441,7 @@ start. Each row is a rule the v0.1 code follows.
 |---|---|---|
 | Screen-reader output | `role` and every `aria-*` attribute are accepted and stored on the node, never rejected as unknown keys, so components are written accessibly from day one. The hardware cursor follows focus (§7). | One tree walk that serializes roles, states, and labels as linear text — the counterpart of Ink's `renderNodeToScreenReaderOutput`. |
 | Windows | Rip itself claims only macOS and Linux (CI is Linux). All platform code lives in `terminal.rip`. Resize comes from the stream's `resize` event, never the SIGWINCH signal. Suspend is guarded by platform. The painter never writes the last cell of the last row. Nothing rejects `win32`. | A CI lane and whatever it finds. |
-| Error overview | Uncaught errors and the runtime's component error hook (`__setErrorHandler`) route through one reporter that restores the terminal first. | A prettier reporter: source excerpt and mapped stack. |
+| Error overview | An uncaught error, and a child that fails to construct (the runtime's `__setChildFailureReporter`), give the terminal back first and reach the listeners after the package's, once (§8). | A prettier reporter: source excerpt and mapped stack. |
 | Right-to-left | The reverse directions already flip an axis (§5). | A flip per direction, the 543 RTL halves, and bidirectional text. |
 
 ## 14. Decisions
