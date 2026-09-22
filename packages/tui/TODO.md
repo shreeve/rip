@@ -44,22 +44,9 @@ steps are in [PLAN.md](PLAN.md).
       the reconciler's keyed `for` walks the list again. An append
       costs 151 µs over 1,000, 173 over 4,000, 274 over 8,000
       (`rip bench/tui.rip static N`).
-- [ ] `Static`'s items are elements; a bare text under `Static` is
-      never hidden and is painted again with every batch.
-- [ ] A line that ends exactly at a space at the cell width keeps that
-      space at the head of the next line: `Box width: 5` holding
-      `Text "abcde fgh"` draws `"abcde\n fgh"` where Ink draws
-      `"abcde\nfgh"` (PLAN §11).
 
 ## 6. Input and focus
 
-- [ ] Focus that a removed node held goes to nothing. A dialog that
-      closes leaves the keyboard with the root element until Tab; giving
-      focus back to the node that had it before the dialog took it — and
-      holding Tab inside a dialog while it is open — is undecided.
-- [ ] `autofocus` on a node that is not `focusable` claims nothing, in
-      silence: the two switches arrive in either order, so neither write
-      can refuse the other's absence.
 - [ ] Tab walks the tree from the focused node, passing over shut
       subtrees whole: unmeasured on a tree of 10,000 nodes.
 - [ ] A select list that marks its choice with one binding an item
@@ -82,10 +69,6 @@ steps are in [PLAN.md](PLAN.md).
       caller's own: a test whose app is still live when it fails hands
       its own report to that stream. `test/terminal.rip` quits after
       every test for that; the other suites do not.
-- [ ] A stdout whose `columns` is 0 — a pty whose size was never set,
-      as `script` makes with no terminal behind it — draws frames of no
-      cells, where an undefined `columns` is read as 80 (`screen.rip`)
-      and Ink reads 0 as 80 too.
 
 ## 8. Compiler-side, filed separately
 

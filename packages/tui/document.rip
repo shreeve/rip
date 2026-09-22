@@ -4,8 +4,8 @@
 # mutation arrives through a method here, so the document always knows
 # what changed. A member the terminal cannot honor throws by name.
 # Events are dispatched here as DOM dispatches them, and what a node is
-# to the keyboard — `focusable`, `autofocus`, `disabled`, `cursor` — is
-# kept here; who has focus is focus.rip's.
+# to the keyboard — `focusable`, `autofocus`, `disabled`, `modal`,
+# `cursor` — is kept here; who has focus is focus.rip's.
 
 import { __setChildFailureReporter } from '../../src/runtime/components.js'
 import { admit, blame } from './layout.rip'
@@ -42,7 +42,7 @@ STANDING =! Set.new ['borderTop', 'borderBottom', 'borderLeft', 'borderRight',
 
 # What a node is to the keyboard, which moves no box and recolors no
 # cell: kept on the node as fields of their own.
-TRAITS =! Set.new ['focusable', 'autofocus', 'disabled', 'cursor']
+TRAITS =! Set.new ['focusable', 'autofocus', 'disabled', 'modal', 'cursor']
 
 KIND =! Map.new()
 KIND.set key, 'layout' for key in LAYOUT
@@ -251,6 +251,10 @@ export class Node extends Target
     if before then before.nextSibling = node else @firstChild = node
     if ref then ref.previousSibling = node else @lastChild = node
     node.parentNode = this
+    # `Static` writes elements once and puts them away; a text is no
+    # element to put away, so it would be painted again with every batch.
+    if node.nodeType is 3 and @attributes?.get('data-part') is 'Static'
+      throw blame Error.new("rip/tui: a bare text under Static is no item it can write once — wrap it in Text"), node
     if @tagName is 'span' and node.tagName is 'span'
       for own key, value of node.styles when value isnt undefined
         if KIND.get(key) is 'layout'
@@ -349,7 +353,7 @@ export class Element extends Node
     @road = null
     @styled = null
     @still = false     # written above the frame by `Static` (screen.rip): its display stays none
-    @focusable = @autofocus = @disabled = false
+    @focusable = @autofocus = @disabled = @modal = false
     @cursor = null
     @glow = null
 
@@ -410,8 +414,8 @@ export class Element extends Node
     @mark 3 if key is 'display'
     @changed kind is 'layout'
 
-  # `focusable`, `autofocus` and `disabled` are switches, and `cursor` a
-  # place. A frame is owed when the change can move focus or the cursor:
+  # `focusable`, `autofocus`, `disabled` and `modal` are switches, and
+  # `cursor` a place. A frame is owed when the change can move focus or the cursor:
   # a claim, a node that may not hold the focus it has, the focused
   # node's own cursor.
   trait!: (key, value) ->
@@ -507,6 +511,7 @@ class Document extends Target
     @damage = Damage.new()
     @active = null        # the node that has focus, until the next `tend` finds it cannot
     @claims = []          # nodes that arrived with `autofocus`, unsettled
+    @prior = WeakMap.new()   # the holder each node took focus from, to give it back to (focus.rip)
     @failed = null        # the error of a child that failed to construct, until it is thrown
     @lit = watch null
     @body = Element.new 'div'

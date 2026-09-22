@@ -8,8 +8,15 @@
 # disabled — and so does where it sits: a keyed list reordered takes a
 # node out and puts it back in one turn. So nothing is decided when the
 # tree changes. `tend` settles it before every key and every frame: a
-# focused node that cannot hold focus loses it to nothing, and a node
-# that arrived with `autofocus` takes it if nothing has it.
+# focused node that has left the tree gives focus back to the holder it
+# took it from, one that is hidden or disabled loses it to nothing, and
+# a node that arrived with `autofocus` takes it if nothing has it — or
+# from a holder outside the `modal` box it arrived in.
+#
+# A `modal` box holds Tab: from a node inside one, Tab and Shift-Tab go
+# round the nearest one and never leave it.
+
+import { blame } from './layout.rip'
 
 # Whether styles `s` show the node and everything under it: neither
 # `hidden` nor `display: 'none'`. The one spelling of it (paint, mouse,
@@ -29,6 +36,27 @@ export open =! (node, doc) ->
     return true if node is doc.body
     node = node.parentNode
   false
+
+# Whether `node` is in `doc`'s tree.
+placed =! (node, doc) ->
+  while node
+    return true if node is doc.body
+    node = node.parentNode
+  false
+
+# Whether `node` is `above` or under it.
+within =! (node, above) ->
+  while node
+    return true if node is above
+    node = node.parentNode
+  false
+
+# The nearest `modal` box that holds `node`, itself included, or null.
+modalOf =! (node) ->
+  while node
+    return node if node.modal
+    node = node.parentNode
+  null
 
 # The node after `node` in tree order and the one before it, under
 # `root`, passing over everything under a node that is shut.
@@ -54,7 +82,12 @@ deepest =! (node) ->
 # DOM's do: inside the blur nothing has focus, and inside the focus the
 # node has it — so a listener that throws leaves the state whole. A
 # listener of the blur that moves focus itself has the last word.
-export take! =! (doc, node) ->
+#
+# The node that takes focus remembers the holder it took it from, or —
+# where both are inside one `modal` box — the one that holder
+# remembered, so a box keeps the holder it was entered from however
+# Tab goes round it. Focus given back (`home`) is remembered by no one.
+export take! =! (doc, node, home = false) ->
   was = doc.active
   return if was is node
   doc.owe false if was?.cursor or node?.cursor
@@ -64,37 +97,64 @@ export take! =! (doc, node) ->
     was.glow?.write false
     was.dispatchEvent { type: 'blur', bubbles: false }
   if node and not doc.active
+    unless home
+      bound = modalOf node
+      from = if was and bound and bound is modalOf(was) then doc.prior.get(was) else was
+      if from then doc.prior.set(node, from) else doc.prior.delete(node)
     doc.active = node
     doc.lit.write node
     node.glow?.write true
     node.dispatchEvent { type: 'focus', bubbles: false }
 
-# Settle what the tree's changes left open.
+# Whether `node` or anything above it is `disabled`.
+barred =! (node) ->
+  while node
+    return true if node.disabled
+    node = node.parentNode
+  false
+
+# Settle what the tree's changes left open. A focused node that has
+# left the tree gives focus back to the holder it remembers, if that one
+# can hold it; one still in it, hidden or disabled, gives it to nothing.
+# A claim on a node that is not `focusable` is refused by name here, where both switches have
+# arrived in whichever order they were written; one on a disabled node
+# claims nothing.
 export tend! =! (doc) ->
-  take doc, null if doc.active and not open doc.active, doc
+  was = doc.active
+  if was and not open was, doc
+    back = if placed(was, doc) then null else doc.prior.get(was)
+    take doc, (if back and open(back, doc) then back else null), true
   return unless doc.claims.length
   claims = doc.claims
   doc.claims = []
-  node = if doc.active then null else doc.body
+  for node in claims when node.autofocus and not node.focusable and not barred node
+    throw blame Error.new("rip/tui: autofocus on <#{node.tagName}> that is not focusable — write focusable: true"), node
+  holder = doc.active
+  return if holder and not claims.some (claim) -> modalOf(claim)
+  node = doc.body
   while node
     if node.focusable and not shut(node) and claims.includes node
-      take doc, node
-      return
+      bound = modalOf node
+      if not holder or (bound and not within(holder, bound))
+        take doc, node
+        return
     node = after node, doc.body
 
 # Tab and Shift-Tab: the next node that can hold focus, in tree order
-# and round again. With none, focus stays where it is.
+# and round again — round the nearest `modal` box that holds the focused
+# node, or the whole tree. With none, focus stays where it is.
 export advance! =! (doc, back) ->
   tend doc
-  start = doc.active ?? doc.body
+  root = modalOf(doc.active) ?? doc.body
+  start = doc.active ?? root
   node = start
   round = false
   loop
-    node = if back then before(node, doc.body) else after(node, doc.body)
+    node = if back then before(node, root) else after(node, root)
     unless node
       return if round
       round = true
-      node = if back then deepest(doc.body) else doc.body
+      node = if back then deepest(root) else root
     return if node is start
     if node.focusable and not shut node
       take doc, node

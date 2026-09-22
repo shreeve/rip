@@ -27,6 +27,13 @@ showing =! (node, body) ->
     return true if node is body
     return false unless visible node.styles
 
+# A size a stream reports, or `none` where it reports none: anything but
+# a whole number of cells above zero is none — undefined, and the 0 of a
+# pty whose size was never set, as `script` makes with no terminal
+# behind it. Ink falls back the same way, to 80 by 24 where it finds no
+# other size. A mount's endless rows are a size.
+sized =! (value, none) -> if value > 0 and (Number.isInteger(value) or value is Infinity) then value else none
+
 # Lay the document out until a pass moves nothing. A binding that reads
 # a node's box changes the tree it measured, so one change can take a
 # pass per reader in a chain; readers that never agree are refused.
@@ -71,8 +78,8 @@ export class Screen
     @reported = false      # whether a progress is on the terminal's indicator
     @batching = false      # whether `still` is writing what the containers hold
 
-  get cols: -> @out.columns ?? 80
-  get rows: -> @out.rows ?? 24
+  get cols: -> sized @out.columns, 80
+  get rows: -> sized @out.rows, 24
 
   # Write `text` above the live frame — a `Static` batch, a `print` line,
   # a console line (terminal.rip) — in the frame's own write: the

@@ -147,9 +147,9 @@ Lines of code, by the rule above (`bun run lines`):
 
 | | Ink + Yoga | Rip TUI |
 |---|--:|--:|
-| Framework only | Ink `src/` 6,760 | 4,269 |
-| Framework + layout algorithm | + Yoga 3.2.1 `yoga/algorithm/` 3,042 = 9,802 | 4,269 (layout.rip is 1,466 of it) |
-| Full runtime closure | + React, react-reconciler, scheduler and 33 more packages | + Rip runtime 1,598 = 5,867 |
+| Framework only | Ink `src/` 6,760 | 4,308 |
+| Framework + layout algorithm | + Yoga 3.2.1 `yoga/algorithm/` 3,042 = 9,802 | 4,308 (layout.rip is 1,466 of it) |
+| Full runtime closure | + React, react-reconciler, scheduler and 33 more packages | + Rip runtime 1,601 = 5,909 |
 
 Ink + Yoga 3.2.1, the version Ink 7.1.1 ships, is 2.3× the lines of
 this package with the layout algorithm on both sides, 1.6× framework
@@ -531,18 +531,30 @@ Once the app is closing, what is left of the same read is dropped.
 `display: 'none'` take a node and everything under it out of reach. Tab
 follows the tree's order, found by a walk when Tab is pressed, so a
 list that is reordered is walked as it stands, and a focused node that a
-reorder moves keeps its focus. A focused node that is removed, hidden or
-disabled loses focus to nothing — the next Tab starts from the top —
-and hears `blur`. `autofocus: true` is a claim made once, when the node
-arrives, as HTML's is: the first such node in tree order takes focus if
-nothing has it, and never takes it from a node that does. A node that
-is disabled, or not `focusable`, when its claim is settled never claims
-again — enable it and it waits for Tab or `focus()` — where Ink's
+reorder moves keeps its focus. A focused node that is removed hears
+`blur` and gives focus back to the node it took focus from, if that one
+can still hold it, and to nothing if not; inside one `modal` box the
+node remembered is the one the box was entered from, however Tab went
+round it. A focused node that is hidden or disabled hears `blur` and
+loses focus to nothing — the next Tab starts from the top.
+
+`modal: true` on a box holds Tab: from a node inside it, Tab and
+Shift-Tab go round the nearest modal box and never leave it, and from
+outside every one they walk the whole tree. An `autofocus` claim inside
+a modal box takes focus even from a holder outside it, so a dialog
+takes the keyboard as it opens and gives it back as it is removed.
+
+`autofocus: true` is a claim made once, when the node arrives, as
+HTML's is: the first such node in tree order takes focus if nothing has
+it, and outside a modal box never takes it from a node that does. A
+node that is disabled when its claim is settled never claims again —
+enable it and it waits for Tab or `focus()` — where Ink's
 `useFocus({autoFocus, isActive})` takes focus whenever it becomes
-active. Inside a `focus` or `blur` listener every read agrees with the
-event: `document.activeElement`, `focus.active` and `el.focused` say
-the node has focus as it hears `focus`, and that nothing has it as it
-hears `blur`.
+active; `autofocus` on a node that is not `focusable` is refused by
+name when its claim is settled. Inside a `focus` or `blur` listener
+every read agrees with the event: `document.activeElement`,
+`focus.active` and `el.focused` say the node has focus as it hears
+`focus`, and that nothing has it as it hears `blur`.
 
 ```coffee
 el.focus()                 # take focus, if the node can hold it
@@ -734,7 +746,9 @@ already in that mode works without the option. Three rules for an app:
 reads stdin through it, and `mount` sends a test's bytes through it. A
 `key` becomes a `keydown`, a `paste` a `paste`, and the terminal's
 `focus` / `blur` reports `screen.focused`. What a text input can rely
-on: `screen.cols` and `screen.rows` are reactive reads of the terminal's size, 80 × 24 before `run`.
+on: `screen.cols` and `screen.rows` are reactive reads of the terminal's
+size, 80 × 24 before `run` and where the stream reports none — a 0
+included, as a pty whose size was never set reports.
 
 - **Typed text is one `key` event per code point**, never per grapheme
   cluster: a cluster can be cut between two reads, and only code points
@@ -784,7 +798,9 @@ An item is laid out at the terminal's width, with the items that arrive
 in the same frame, in tree order; `Static`'s own props — `padding`,
 `margin`, `backgroundColor` — go around each such batch. Once written,
 an item is done: a change to its state or its removal from the list
-changes nothing on the terminal. An item under a hidden ancestor waits
+changes nothing on the terminal. An item is an element: a bare text
+under `Static` is refused by name as it is put there — wrap it in
+`Text`. An item under a hidden ancestor waits
 until it is shown. Off a terminal the rows go out as plain text as they
 arrive; on the alternate screen nothing is written above. `examples/log.rip`
 is a build log this way, with a spinner and a progress bar for the
