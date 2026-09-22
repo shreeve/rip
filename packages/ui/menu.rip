@@ -1,0 +1,190 @@
+type Landing = 'popup' | 'first' | 'last'
+type Side = 'bottom' | 'top' | 'left' | 'right'
+type Align = 'start' | 'center' | 'end'
+
+export Menu = component
+  offer @open := false
+  offer triggerId := ''
+  offer popupId := ''
+  offer anchor := "--#{mint('anchor')}"
+  offer landing: Landing := 'popup'
+  render
+    slot
+
+# A click toggles through popovertarget, which makes the trigger the
+# popover's invoker: a click on it while open closes instead of
+# light-dismissing and reopening.
+export MenuTrigger = component extends button
+  accept open from Menu
+  accept triggerId from Menu
+  accept popupId from Menu
+  accept anchor from Menu
+  accept landing from Menu
+  id =! @rest.id ?? mint('trigger')
+  ~>
+    triggerId = id
+    -> triggerId = ''
+
+  keydown = (e: KeyboardEvent) ->
+    return if open
+    switch e.key
+      when 'ArrowDown', 'Enter', ' ' then landing = 'first'
+      when 'ArrowUp' then landing = 'last'
+      else return
+    e.preventDefault()
+    open = true
+
+  render
+    button
+      type: 'button'
+      id: id
+      popovertarget: popupId or undefined
+      style: { anchorName: anchor }
+      aria-haspopup: 'menu'
+      aria-expanded: if open then 'true' else 'false'
+      data-popup-open: open or undefined
+      @keydown: keydown
+      slot
+
+# The popup is anchored by name, since popovertarget anchors it only when
+# a click opened it. A popover's own inset centers it; inset auto also
+# zeroes the auto margins, so the caller's margin is the gap. Firefox and
+# WebKit hide a light-dismissed popover at once and the hide is not
+# cancelable, so only a close through the cell waits for the exit.
+export MenuPopup = component extends div
+  accept open from Menu
+  accept triggerId from Menu
+  accept popupId from Menu
+  accept anchor from Menu
+  accept landing from Menu
+  @side: Side := 'bottom'
+  @align: Align := 'start'
+  id =! @rest.id ?? mint('popup')
+  el: HTMLDivElement | null := null
+  ~>
+    popupId = id
+    -> popupId = ''
+
+  vertical ~= side is 'bottom' or side is 'top'
+  placement ~=
+    span = switch align
+      when 'start' then (if vertical then ' span-right' else ' span-bottom')
+      when 'end' then (if vertical then ' span-left' else ' span-top')
+      else ''
+    {
+      inset: 'auto'
+      positionAnchor: anchor
+      positionArea: side + span
+      positionTryFallbacks: (if vertical then 'flip-block' else 'flip-inline')
+    }
+
+  items = (popup: HTMLElement): HTMLElement[] ->
+    nodes: NodeListOf<HTMLElement> = popup.querySelectorAll('[role="menuitem"]')
+    Array.from(nodes).filter (node) -> not node.matches(':disabled')
+
+  # The cell follows a native hide from beforetoggle, since toggle is a
+  # task behind the state and a key in between would read the cell wrong,
+  # and a native show from toggle, since a showPopover() from a microtask
+  # lands inside the show and throws. A close waiting on its animations
+  # therefore cannot read the cell to learn of a show begun meanwhile.
+  shows = 0
+  before = (e: ToggleEvent) ->
+    if e.newState is 'open' then shows += 1 else open = false
+
+  after = (e: ToggleEvent) ->
+    popup = el
+    return unless e.newState is 'open' and popup
+    open = true
+    list = items(popup)
+    switch landing
+      when 'first' then (list[0] ?? popup).focus()
+      when 'last' then (list[list.length - 1] ?? popup).focus()
+      else popup.focus()
+    landing = 'popup'
+
+  keydown = (e: KeyboardEvent) ->
+    if e.key is 'Tab'
+      open = false
+      return
+    popup = el
+    return unless popup
+    list = items(popup)
+    at = list.indexOf(document.activeElement as HTMLElement)
+    to = switch e.key
+      when 'ArrowDown' then (if at < 0 then 0 else at + 1)
+      when 'ArrowUp' then (if at < 0 then list.length - 1 else at - 1)
+      when 'Home' then 0
+      when 'End' then list.length - 1
+      else null
+    return if to is null
+    e.preventDefault()
+    list[to %% list.length]?.focus()
+
+  ~>
+    popup = el
+    return unless popup
+    if open
+      queueMicrotask ->
+        return unless open and popup.isConnected and not popup.matches(':popover-open')
+        popup.showPopover()
+    else if popup.matches(':popover-open')
+      since = shows
+      queueMicrotask ->
+        exits = popup.getAnimations().map (a) -> a.finished
+        Promise.allSettled(exits).then -> popup.hidePopover() if shows is since and not open and popup.matches(':popover-open')
+
+  render
+    div
+      ref: el
+      id: id
+      popover: 'auto'
+      role: 'menu'
+      tabindex: -1
+      style: placement
+      aria-labelledby: triggerId or undefined
+      data-open: open or undefined
+      data-closed: not open or undefined
+      @beforetoggle: before
+      @toggle: after
+      @keydown: keydown
+      slot
+
+export MenuItem = component extends button
+  accept open from Menu
+  render
+    button
+      type: 'button'
+      role: 'menuitem'
+      tabindex: -1
+      @click: (-> open = false)
+      @pointermove: hover
+      @pointerleave: leave
+      slot
+
+# A link activates on Enter and not on Space, so Space clicks it.
+export MenuLink = component extends a
+  accept open from Menu
+  space = (e: KeyboardEvent) ->
+    return unless e.key is ' '
+    e.preventDefault()
+    (e.currentTarget as HTMLAnchorElement).click()
+  render
+    a
+      role: 'menuitem'
+      tabindex: -1
+      @click: (-> open = false)
+      @keydown: space
+      @pointermove: hover
+      @pointerleave: leave
+      slot
+
+# The pointer and the keys share one highlight: the focused item.
+hover = (e: PointerEvent) ->
+  item = e.currentTarget as HTMLElement
+  item.focus() unless document.activeElement is item
+leave = (e: PointerEvent) ->
+  popup = (e.currentTarget as HTMLElement).closest('[role="menu"]') as HTMLElement | null
+  popup?.focus()
+
+counter = 0
+mint = (part: string): string -> "rip-menu-#{part}-#{counter += 1}"

@@ -3,4 +3,5 @@ export type Entry = { href: RoutePath, name: string, description: string }
 export COMPONENTS = {
   dialog: { href: '/dialog', name: 'Dialog', description: 'A modal that opens on top of the entire page.' }
   drawer: { href: '/drawer', name: 'Drawer', description: 'A panel that slides in from an edge and swipes away.' }
+  menu:   { href: '/menu',   name: 'Menu',   description: 'A list of actions or links that opens under a button.' }
 } satisfies Record<string, Entry>

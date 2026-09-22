@@ -3,3 +3,4 @@
 export type { ClosedBy } from './dialog.rip'
 export { Dialog, DialogTrigger, DialogPopup, DialogTitle, DialogDescription, DialogClose } from './dialog.rip'
 export { Drawer, DrawerTrigger, DrawerPopup, DrawerTitle, DrawerDescription, DrawerClose } from './drawer.rip'
+export { Menu, MenuTrigger, MenuPopup, MenuItem, MenuLink } from './menu.rip'

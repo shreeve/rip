@@ -18,6 +18,7 @@
     "ui.rip",
     "dialog.rip",
     "drawer.rip",
+    "menu.rip",
     "README.md"
   ]
 }
