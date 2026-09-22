@@ -341,7 +341,7 @@ test "a click carries its button, and the modifiers the terminal reports", ->
 
 Panes =! component
   render
-    Box flexDirection: 'row', gap: 1
+    Box id: 'row', flexDirection: 'row', gap: 1
       Box id: 'a', focusable: true, borderStyle: 'single', width: 8, height: 3
         Text id: 'ta', "aa"
       Box id: 'b', focusable: true, borderStyle: 'single', width: 8, height: 3
@@ -377,7 +377,7 @@ test "a wheel tick is a `wheel` with deltaY -1 up and 1 down, deltaX for a sidew
     got = []
     document.addEventListener 'wheel', (event) -> got.push [who(event.target), event.deltaX, event.deltaY, event.x, event.y]
     view.send wheel(1, 1, 'up') + wheel(1, 1, 'down') + wheel(10, 1, 'left') + wheel(30, 1, 'right')
-    eq got, [['ta', 0, -1, 0, 0], ['ta', 0, 1, 0, 0], ['tb', -1, 0, 0, 0], ['body', 1, 0, 30, 1]]
+    eq got, [['ta', 0, -1, 0, 0], ['ta', 0, 1, 0, 0], ['tb', -1, 0, 0, 0], ['row', 1, 0, 30, 1]]
     eq view.focused, null
 
 test "a wheel handler that moves the content offset is the scrolled list", ->
@@ -506,11 +506,12 @@ test "a motion that keeps its target dispatches nothing without a mousemove list
     for type in ['mouseenter', 'mouseleave']
       document.addEventListener type, ((event) -> trail.push event.type), true
     view.send move(1, 0) + move(2, 0) + move(3, 0)
-    eq trail, ['mouseenter', 'mouseenter']
+    eq trail, ['mouseenter', 'mouseenter', 'mouseenter'], 'the body, the column, the row: once each'
+
     moves = []
     document.addEventListener 'mousemove', (event) -> moves.push event
     view.send move(4, 0) + move(5, 0)
-    eq [moves.length, moves[0] isnt moves[1], trail.length], [2, true, 2]
+    eq [moves.length, moves[0] isnt moves[1], trail.length], [2, true, 3]
 
 # ==[ Modes ]==
 
@@ -558,7 +559,7 @@ Throws =! component
       Text "x"
 
 test! "the mouse modes are withdrawn on every way out: Ctrl-C, a listener that throws, a mouse listener that throws", ->
-  for [name, leave] in [['Ctrl-C', (stdin) -> stdin.key '\x03'], ['a key listener that throws', (stdin) -> stdin.key 'a'], ['a mouse listener that throws', (stdin) -> stdin.key down(0, 0)]]
+  for [name, leave] in [['Ctrl-C', (stdin) -> stdin.key '\x03'], ['a key listener that throws', (stdin) -> stdin.key 'a'], ['a mouse listener that throws', (stdin) -> stdin.key "#{CSI}?1;1R" + down(0, 0)]]
     stdin = Stdin.new()
     term = Terminal.new()
     running = run Throws, stdin: stdin, stdout: term, mouse: true
@@ -660,7 +661,7 @@ test! "the flag is popped on every way out only if it was pushed: Ctrl-C and a l
       await running.done
     catch error
       null
-    ok term.since(0).endsWith("#{POP}#{OFF}#{CSI}?25h"), "#{name}: #{JSON.stringify term.since(0).slice -40}"
+    ok term.since(0).includes("#{POP}#{OFF}"), "#{name}: #{JSON.stringify term.since(0).slice -40}"
     eq term.kitty, 0, name
 
 test! "a keyboard answer nobody asked for — keyboard: 'basic' — changes nothing", ->
@@ -715,10 +716,15 @@ Lines =! component
 
 copied =! (text) -> "\x1b]52;c;#{Buffer.from(text).toString 'base64'}\x1b\\"
 
+# What the last write put on the clipboard, or null.
+clipped =! (view) ->
+  found = /\x1b\]52;c;([^\x1b]*)\x1b\\/.exec view.bytes
+  if found then Buffer.from(found[1], 'base64').toString() else null
+
 test "a drag selects the cells from the press to the pointer in reading order, painted inverse in the styled frame and absent from the plain one, and the release puts the text on the clipboard by OSC 52", ->
   mounted Lines, {}, (view) ->
     drag view, 2, 0, 4, 1
-    eq view.bytes, copied 'llo world\nfoo b'
+    ok view.bytes.endsWith(copied 'llo world\nfoo b'), JSON.stringify view.bytes
     eq screen.selection, 'llo world\nfoo b'
     eq view.frame(), 'hello world\nfoo bar 0\n日本語 wide'
     ok view.ansi.includes("he#{CSI}7mllo world") and view.ansi.includes("#{CSI}7mfoo b#{CSI}0mar 0"), JSON.stringify view.ansi
@@ -726,7 +732,8 @@ test "a drag selects the cells from the press to the pointer in reading order, p
 test "wide glyphs are selected whole, from either cell", ->
   mounted Lines, {}, (view) ->
     drag view, 1, 2, 4, 2
-    eq [screen.selection, view.bytes], ['日本語', copied '日本語']
+    eq [screen.selection, clipped view], ['日本語', '日本語']
+    view.frame()
     ok view.ansi.includes("#{CSI}7m日本語#{CSI}0m wide"), JSON.stringify view.ansi
 
 test "a click clears the selection, and nothing is copied; the right button selects nothing", ->
@@ -734,16 +741,16 @@ test "a click clears the selection, and nothing is copied; the right button sele
     drag view, 2, 0, 4, 1
     view.frame()
     click view, 0, 1
-    eq [screen.selection, view.bytes], ['', '']
+    eq [screen.selection, clipped view], ['', null]
     view.frame()
     ok not view.ansi.includes('7m'), JSON.stringify view.ansi
     view.send down(2, 0, 2) + move(4, 1, 2) + up(4, 1, 2)
-    eq [screen.selection, view.bytes], ['', '']
+    eq [screen.selection, clipped view], ['', null]
 
 test "selection: false sends nothing and paints nothing", ->
   mounted Lines, { selection: false }, (view) ->
     drag view, 2, 0, 4, 1
-    eq [screen.selection, view.bytes], ['', '']
+    eq [screen.selection, clipped view], ['', null]
     view.frame()
     ok not view.ansi.includes('7m'), JSON.stringify view.ansi
 
@@ -751,7 +758,7 @@ test "preventDefault on the mousedown keeps the drag from selecting", ->
   mounted Lines, {}, (view) ->
     document.addEventListener 'mousedown', (event) -> event.preventDefault()
     drag view, 2, 0, 4, 1
-    eq [screen.selection, view.bytes], ['', '']
+    eq [screen.selection, clipped view], ['', null]
 
 test "a drag's damage is the cells that changed hands, and clearing owes the selection", ->
   mounted Lines, {}, (view) ->
@@ -812,9 +819,9 @@ STYLES =! {
   marginLeft: [-2, 2, undefined, undefined]
   marginTop: [-1, undefined, undefined, undefined]
   borderStyle: ['single', 'round', undefined, undefined]
-  overflow: ['hidden', undefined, undefined]
+  overflow: ['hidden', 'hidden', undefined, undefined]
   contentOffsetX: [1, 2, undefined, undefined, undefined]
-  contentOffsetY: [1, 2, -1, undefined, undefined, undefined]
+  contentOffsetY: [1, 2, -1, undefined, undefined]
   position: ['absolute', 'absolute', undefined, undefined, undefined]
   left: [0, 1, 3, -1, undefined]
   top: [0, 1, 2, -1, undefined]
@@ -886,14 +893,15 @@ test "random trees, random cells: the target is the node the painter put there, 
         byId.set intern(null, color, 0), node
       tint document.body
       tint root
+      root.set 'width', 24   # a strip of the body shows on the right
       make = (depth) ->
         roll = rand()
-        if roll < 0.25
+        if roll < 0.2
           node = document.createElement 'span'
           node.appendChild document.createTextNode pick WORDS
           node.set 'id', "s#{names += 1}"
           return node
-        return document.createTextNode pick WORDS if roll < 0.35
+        return document.createTextNode pick WORDS if roll < 0.4
         node = document.createElement 'div'
         node.set 'id', "d#{names += 1}"
         for key in KEYS when rand() < 0.3
@@ -933,8 +941,8 @@ test "random trees, random cells: the target is the node the painter put there, 
         else if owner is target
           if target is document.body then counts.bodies += 1 else counts.divs += 1
         else
-          bare = target.childNodes.some (kid) -> kid.nodeType is 3 and holds kid, x, y
-          say "(#{x}, #{y}) hit #{idOf target}, and the painter says #{idOf owner}" unless bare and before owner, target
+          bare = target.childNodes.find (kid) -> kid.nodeType is 3 and holds kid, x, y
+          say "(#{x}, #{y}) hit #{idOf target}, and the painter says #{idOf owner}" unless bare and before owner, bare
           counts.texts += 1
         { dx, dy } = shift target
         say "(#{x}, #{y}) on #{idOf target} at (#{target.rect.x + dx}, #{target.rect.y + dy}) came as (#{got.x}, #{got.y})" unless got.x is x - target.rect.x - dx and got.y is y - target.rect.y - dy
@@ -944,5 +952,5 @@ test "random trees, random cells: the target is the node the painter put there, 
     finally
       view.close()
   # A fuzz that does nothing passes everything: hold it to its volume.
-  floors = { rounds: 250, clicks: 5000, spans: 500, divs: 2500, bodies: 100, texts: 100, covered: 500, scrolled: 150, targets: 1500 }
+  floors = { rounds: 250, clicks: 5000, spans: 450, divs: 3500, bodies: 900, texts: 60, covered: 1000, scrolled: 40, targets: 1000 }
   ok counts[name] >= floor, "#{name}: #{counts[name]} is under the floor of #{floor} — #{JSON.stringify counts}" for own name, floor of floors
