@@ -104,8 +104,9 @@ Run one with `rip examples/ink/counter.rip`.
 `bun run bench` in `bench/` runs both sides on the same scenarios —
 the same tree, node for node, against the same fake 200×60 terminal —
 each in a fresh process, five times, and writes
-[bench/RESULTS.md](bench/RESULTS.md); every number reproduces with
-`bun run bench`. Ink is measured as a careful React app is written:
+[bench/RESULTS.md](bench/RESULTS.md):
+every number reproduces with `bun run bench`.
+Ink is measured as a careful React app is written:
 React's production build, memoized rows, `interactive: true`,
 incremental rendering on, its frame throttle lifted, every update
 awaited to the write that ends its frame. A number is published only
