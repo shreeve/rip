@@ -6,14 +6,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 2. The closing audit — docs
 
-- [ ] README's prose quotes numbers `bench/RESULTS.md` does not: a
-      select-list key 8 µs, a no-op 0.3, 55 at a hundred items
-      (RESULTS: 5.5, 0.2, 42); motion 0.5 µs and a click 1 µs "on
-      1,576 elements" (2,403; 0.57, 1.06); "a row recolored in a
-      2,000-row clipped log, 7 µs against 85" (no such scenario); one
-      cell of a 200×60 table "about 125 µs" (143); `Static` "350 µs
-      over 8,000" (only the 1,000 row exists). Quote RESULTS.md or
-      drop.
 - [ ] PLAN names what no code does: an opt-in `ansi(str)` helper and a
       per-cell style callback (§2, §6); frames "deferred while
       `write()` reports backpressure" (§3); the error overview "through

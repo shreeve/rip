@@ -156,8 +156,8 @@ this package with the layout algorithm on both sides, 1.6× framework
 against framework. Two rows where the
 table is not one-sided: after a resize the frame is drawn from
 nothing, which is more bytes than Ink's incremental log writes; and a
-`Static` append grows with the items already written — about 150 µs
-averaged over 1,000 appends, 350 over 8,000 — where Ink's stays flat,
+`Static` append grows with the items already written — about 131 µs
+averaged over 1,000 appends, 270 over 8,000 (`rip bench/tui.rip static 8`) — where Ink's stays flat,
 so past a few thousand appends Ink is the faster side.
 
 ## Examples
@@ -342,10 +342,9 @@ bottom), a sweep as a paint starts, and damage past half the screen are
 painted whole. One changed cell of a full
 200×60 table — a text that keeps its size, which owes its words and no
 survey — is about 1 µs of paint and diff where the whole frame is about
-125 µs; a change that is surveyed costs a few more — a row recolored in
-a 2,000-row clipped log is about 7 µs where the whole frame is about
-85 µs — and the bytes are the same (Apple M5, Bun 1.4.2; `bun run
-frame` in `bench/` prints the first).
+143 µs; a last row that comes and goes, which owes a survey and its
+rows, about 23 µs where the whole frame is about 56 µs — and the bytes
+are the same (`bench/RESULTS.md`; `bun run frame` in `bench/`).
 
 Layout is flexbox as Yoga lays it out — the defaults are Yoga's
 (`flexDirection: 'column'`, `flexShrink: 0`, `alignItems: 'stretch'`,
@@ -600,10 +599,12 @@ read is one frame, however many keys
 it holds, and a key that changes nothing owes no frame and draws
 nothing. On the select list above with ten items, an arrow key — its
 bytes through the parser, the dispatch, the listener, the state change,
-and the frame of 12 cells and 55 bytes it causes — is about 8 µs, and a
-key no listener acts on about 0.3 µs; with a hundred items the arrow is
-about 55 µs, since each item's `inverse` is a binding that reads `at`
-(Apple M5, Bun 1.4.2; `bun run keys` in `bench/`).
+and the frame of 12 cells and 55 bytes it causes — is about 5.5 µs, and
+a key no listener acts on about 0.2 µs; with a hundred items the arrow
+is about 42 µs, since each item's `inverse` is a binding that reads
+`at` (`bench/RESULTS.md`; `bun run keys` in `bench/`). Those keys move
+texts that keep their size; a text that changes size runs a layout of
+the whole tree, about 0.5 ms at 4,000 nodes.
 
 Ctrl-Z is [PLAN.md](PLAN.md)'s lifecycle step.
 
@@ -671,8 +672,8 @@ left. Motion is cheap. A report that keeps its target dispatches
 nothing — no event is made unless a listener would hear it, for
 `mousemove`, `mouseenter` and `mouseleave` alike — and draws nothing;
 one that crosses from one row to the next costs the two rows' cells. On
-a tree of 1,576 elements a motion report is about 0.5 µs and a click
-about 1 µs, parser included (`bun run hit` in `bench/`). In inline mode
+a tree of 2,403 nodes a motion report is about 0.6 µs and a click about
+1.1 µs, parser included (`bench/RESULTS.md`; `bun run hit` in `bench/`). In inline mode
 the frame is not at the terminal's first row, so with the mouse the
 package asks the terminal where its cursor is (`CSI ? 6 n`) once the app
 stands and after every resize, and lowers the answer when a frame
