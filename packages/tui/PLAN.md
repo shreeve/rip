@@ -14,7 +14,8 @@ review won; those points are marked **Decided**.
 
 Everything here is built from public, permissively licensed sources:
 Ink (MIT) and Yoga (MIT), the xterm control-sequence reference, the
-kitty keyboard protocol documentation, and the terminal emulators'
+kitty keyboard protocol documentation, the DOM Standard for how an
+event is dispatched and what focus means, and the terminal emulators'
 own published behavior. No reconstructed, leaked, or otherwise
 proprietary source — including any recovered internal fork of Ink —
 is read as a reference for any part of this package, at any time.
@@ -117,10 +118,12 @@ component effects ──► node setters ──► dirty marks ──► frame f
 ```
 
 One flush per reactive batch: a microtask, a minimum interval of about
-8 ms, deferred while `write()` reports backpressure. Input dispatch
-wraps each stdin chunk in one batch, so one chunk is one frame. Rip
-flushes effects synchronously per write outside a batch, so coalescing
-is the host's job and is not optional.
+8 ms, deferred while `write()` reports backpressure. Each key of a
+stdin read is a reactive turn of its own — the tree a key meets is the
+tree the key before it left — and a read is still one frame, because a
+change books a frame and does not draw one. Rip flushes effects
+synchronously per write outside a batch, so coalescing is the host's
+job and is not optional.
 
 Flat package, the `packages/barcodes` shape. All modules are Rip,
 including hot paths (the emitted loops are the JavaScript one would
@@ -128,17 +131,30 @@ write by hand; hot loops use the indexed `for x, i in` form).
 
 | Module | Job | Code lines |
 |---|---|---|
-| `tui.rip` | Entry: `run`, `mount`, `renderToString`, `screen`, widgets; to come: `focus`, `clock` | 111, about 220 when complete |
-| `document.rip` | Terminal document: nodes, tree links, events, style road, damage marks | 278 |
-| `layout.rip` | Flexbox, containing blocks, baseline, cache, edge rounding | 1,461 |
+| `tui.rip` | Entry: `run`, `mount` and its input, `renderToString`, `screen`, `focus`, widgets; stdin, the delivery of events, the default actions; to come: `clock` | 196, about 230 when complete |
+| `document.rip` | Terminal document: nodes, tree links, the event and its dispatch, style road, keyboard traits, damage marks | 377 |
+| `focus.rip` | Who can hold focus, tree order, taking it, settling it | 62 |
+| `layout.rip` | Flexbox, containing blocks, baseline, cache, edge rounding | 1,466 |
 | `text.rip` | Sanitize, grapheme clusters, width, wrap, truncate | 421 |
-| `paint.rip` | Cell grids, styles, clip, borders, backgrounds, damage, diff | 597 |
-| `screen.rip` | Frames and pacing; to come: alternate screen, `Static`, non-TTY | 56, about 250 |
+| `paint.rip` | Cell grids, styles, clip, borders, backgrounds, damage, diff | 639 |
+| `screen.rip` | Frames, pacing, the cursor; to come: alternate screen, `Static`, non-TTY | 95, about 290 |
 | `input.rip` | Key tokenizer and decoder, paste, mouse, replies; to come: keyboard negotiation | 312 |
 | `terminal.rip` | To come: setup / teardown, signals, suspend, console capture | about 170 |
-| | **Total** | **3,236 built; about 3,650 complete** |
+| | **Total** | **3,568 built; about 3,970 complete** |
 
-Lines are counted as §2 counts them: non-blank and non-comment.
+Lines are counted as §2 counts them: non-blank and non-comment. Events,
+focus, the cursor and stdin are 285 of them (85 in `tui.rip`, 99 in
+`document.rip`, 62 in `focus.rip`, 39 in `screen.rip`); what Ink spends
+on the same — `use-input`, `use-paste`, `use-focus`,
+`use-focus-manager`, `use-cursor`, their three contexts,
+`cursor-helpers`, and `App.tsx`, which holds its focus list, raw mode
+and input loop — is 1,082 by the same count.
+
+Focus has a module of its own because it is one idea with one reader's
+worth of rules — who can hold it, in what order, when it is settled —
+and three modules ask it: `document.rip` (`take`, `open`), `screen.rip`
+(`tend`), and `tui.rip` (`tend`, `take`, `advance`). The event and its
+dispatch stay in `document.rip`, beside the nodes whose links they walk.
 
 Also at the package root: `test.rip`, `demo.rip`, `bench.rip`,
 `bench/` (its own `package.json` quarantining Ink, React, and
@@ -159,7 +175,8 @@ the terminal cannot honor throws a named error.
 | `appendChild`, `insertBefore` (flattening fragments), `removeChild`, `remove`, `parentNode`, `childNodes`, `nextSibling`, `nodeType` | | `className` writes, string `style` |
 | Text `data` setter (same-value short-circuit, marks dirty) | | `value`, `checked`, `innerHTML`, `textContent` |
 | `setAttribute`, `removeAttribute`, `toggleAttribute` | | `querySelector`, `document.head` (transitions) |
-| `addEventListener`, `removeEventListener`, `dispatchEvent` with bubbling and `target` | | Unknown style keys, with a suggestion |
+| `addEventListener`, `removeEventListener`, `dispatchEvent` on every node and on the document: capture, target and bubble phases, `target`, `currentTarget`, `eventPhase`, `stopPropagation`, `preventDefault` (§7) | | Unknown style keys, with a suggestion |
+| `focus()`, `blur()`, `focused`, `document.activeElement`; the attributes `focusable`, `autofocus`, `disabled`, `cursor` (§7) | | A `cursor` that is not `{ x, y }` in whole cells; a switch that is not true or false |
 | Globals: `document`, `Node` (base class of every node), an `SVGElement` stub | | |
 
 `div` is a box and `span` is text. Comments are zero-size anchors.
@@ -539,18 +556,65 @@ the non-TTY final frame.
 
 ## 7. Input, focus, cursor (`input.rip`, `document.rip`)
 
-**Events replace hooks.** A key goes to `focus.active ?? root`,
-bubbles to `document`, and honors `stopPropagation` and
-`preventDefault`. A listener may ask for the capture phase, which runs
-root to target before the bubble, so a dialog takes a key before the
-node under it does. Tab / Shift-Tab (focus), Ctrl-C (exit), and Ctrl-Z
-(suspend) are default actions that run only when not prevented. In
-Ink every `useInput` handler receives every key and gates itself with
-an `isActive` flag, and a text input cannot keep Tab.
+**Events replace hooks** (built: `document.rip`, `tui.rip`). A key is
+a `keydown` sent to `focus.active`, or to `document.body` while nothing
+has focus, as DOM sends it — never to the app's first element, which
+would change target as a sibling came before it and leave a second root
+unheard. So an app-wide handler is a listener on the document, or one
+on a root box that holds focus (Ink's `useInput` in a root component
+ports as the second). It runs the capture phase from the document down,
+then the target, then bubbles back up to the document, and honors
+`stopPropagation`, `stopImmediatePropagation` and `preventDefault`, so
+a dialog takes a key before the node under it does. In Ink every
+`useInput` handler receives every key and gates itself with an
+`isActive` flag, and a text input cannot keep Tab.
 
-The event mirrors DOM `KeyboardEvent`: `key`, `ctrlKey`, `shiftKey`,
-`altKey`, `metaKey`, `repeat`, `sequence`. Events: `@keydown`,
-`@paste`, `@focus`, `@blur`, `@resize`, `@click`, `@wheel`.
+- **The event** is one object per key, handed to every listener: DOM
+  `KeyboardEvent`'s `key`, `ctrlKey`, `shiftKey`, `altKey`, `metaKey`,
+  `repeat`, and `sequence`, as the parser decoded them, under `type:
+  'keydown'`, with DOM `Event`'s `target`, `currentTarget`, `eventPhase`
+  (1, 2, 3), `bubbles`, `defaultPrevented`.
+- **The path is the tree as the dispatch begins,** as DOM's is: a
+  listener that moves or removes the target changes nothing of who
+  hears that key. It is an array kept per depth of dispatch (a listener
+  may move focus, which dispatches `blur` and `focus` inside the key's
+  own dispatch), and a node's listeners are a list that is replaced,
+  never changed, when one comes or goes — so a dispatch copies nothing
+  and allocates nothing per node. As the DOM Standard has it, a
+  listener is not invoked once the stop flag is set — a capture
+  listener at the target that stops the event stops the target's
+  bubble listeners too — one handler under one type and phase is one
+  listener, and an event dispatched again starts with its flags clear.
+- **Capture is spelled by the type.** The compiler writes `@name:
+  handler` as `addEventListener('name', handler)` and has no spelling
+  for a third argument, so a type that ends in `Capture` is the capture
+  phase of the type before it: `@keydownCapture: handler`, which rest
+  forwarding carries to a widget's node like any other. On a node in
+  hand, `addEventListener(type, handler, true)` and `{ capture: true }`
+  are the same listener.
+- **Events:** `@keydown`; `@paste` (`text`), sent where a key is, and
+  never as keys; `@focus` / `@blur`, to the node that takes or loses
+  focus, which do not bubble, as DOM's do not, and are heard above in
+  the capture phase; a component's `emit`, whose `CustomEvent` travels
+  the same road with its `detail`. The terminal's own focus reports are
+  no event: `screen.focused` is a reactive read. There is no `@resize`:
+  `screen.cols` / `screen.rows` are reactive reads, and a node's `box`
+  is one. `@click` and `@wheel` are the mouse's, below.
+- **Default actions** run after the listeners, for a key none prevented:
+  Tab and Shift-Tab with no Ctrl, Alt or Meta move focus; Ctrl-C is
+  `quit()`. Ink's `exitOnCtrlC: false` is `preventDefault()`, and a
+  listener therefore hears Ctrl-C before it quits, where Ink exits
+  before any handler runs. **Escape has none** — closing a dialog or
+  clearing an input is the app's — where Ink takes focus away on every
+  Escape. Ctrl-Z (suspend) joins them with the lifecycle (§8): the seam
+  is `act` in `tui.rip`.
+- **Each key is a turn of its own.** The keys of one read are
+  dispatched one after another with no batch around them, so a key that
+  opens a dialog is followed by a key that reaches the dialog. Once the
+  app is closing, what is left of a read is dropped.
+- A listener that throws under `run` has no caller to throw to: the
+  terminal is given back and `done` rejects, as for a frame that fails.
+  Under `mount` it throws to the test.
 
 **Parser** (`input.rip`, built). `Parser.new {escape, patience, clock,
 late, paste}` and `parser.feed chunk`, a string or a `Uint8Array`, answering
@@ -627,7 +691,7 @@ in `test/input/`, 205 held to Ink's answer under one mapping to DOM
 names and 39 stated differences; `test/input/SOURCE.md` lists them and
 the 12 left out.
 
-**Enhanced keyboard** is opt-in (`run App, keyboard: 'enhanced'`).
+**Enhanced keyboard** (step 4c) is opt-in (`run App, keyboard: 'enhanced'`).
 Setup asks the terminal for the kitty protocol's disambiguation flag
 and teardown withdraws it; the decoder is always on, so a terminal
 already in that mode works without the option. It buys what ordinary
@@ -647,8 +711,10 @@ terminal. The decoder also reads xterm's modify-other-keys form
 lone Escape for every terminal program and is the user's setting; the
 README names it.
 
-**Mouse** is opt-in (`run App, mouse: true`), because capture takes
-over the terminal's own text selection. SGR mouse reports decode to
+**Mouse** (step 4c) is opt-in (`run App, mouse: true`), because capture
+takes over the terminal's own text selection. The parser decodes the
+reports already, and `deliver` in `tui.rip` passes them by: the hit
+test, and `reply` events for the keyboard probe, join it there. SGR mouse reports decode to
 `@click` and `@wheel` events carrying `x` and `y` relative to the
 target. The target is found by a hit test over the rounded boxes in
 reverse paint order, honoring clips and the absolute-node list; the
@@ -662,19 +728,93 @@ margin, which is what the bench drives). It is a paint-only change,
 so a scroll runs no layout. A wheel handler
 that adjusts the offset is the whole scrolled-list pattern.
 
-**Focus** follows tree order, computed by a walk on Tab (Ink uses
-registration order). Attributes: `focusable`, `autofocus`, `disabled`.
-Removing the focused node clears focus.
+**Focus** (built: `focus.rip`) belongs to a node and follows tree
+order, found by a walk when Tab is pressed (Ink keeps the order its
+hooks registered in, and focuses by id). Any element takes
+`focusable`, `autofocus` and `disabled`, which are switches kept on the
+node, not styles. A node can hold focus while it is focusable, in the
+tree, and nothing from it up to the body is `disabled`, `hidden`, or
+`display: 'none'` — so `disabled` on a box is its descendants', which
+is Ink's `disableFocus()`. The walk passes over a shut subtree whole,
+and a focusable node inside a focusable node is reached after it.
 
-**Cursor.** A focused node declares `cursor: {x, y}` relative to its
-own box; the renderer adds the layout offset, parks the hardware
-cursor there after each frame, and hides it otherwise. IME popups and
-screen readers follow the hardware cursor.
+- **Nothing is decided when the tree changes.** A keyed list reordered
+  takes a node out and puts it back in one turn, and a focused node
+  must keep its focus through that. So `tend` settles focus before
+  every key, every frame, and every `view.focused`: a node that can no
+  longer hold focus loses it **to nothing** (Ink's tests ask the same:
+  the next Tab starts from the top), hearing `blur` once; and
+  `document.activeElement` / `focus.active` answer null from the moment
+  the node cannot hold it, without waiting for `tend`.
+- **`autofocus` is a claim made once,** when the node arrives in the
+  document or the switch is written on a node already there. The next
+  `tend` gives focus to the first claimant in tree order that can hold
+  it, if nothing has it, and drops every claim either way: a node that
+  arrives never takes focus from a node that has it (a dialog calls
+  `focus()`), and a claim is not made again when focus is let go.
+- **`focus` and `blur` pair up.** The node that had focus hears `blur`
+  before the one that takes it hears `focus`; a listener of the blur
+  that moves focus itself has the last word. The state is written
+  before each event is dispatched, so inside the blur nothing has focus
+  and inside the focus the node has it, on every read — and a listener
+  that throws leaves the state whole. `focus.active` settles claims as
+  `view.focused` does, so the three reads agree the moment an
+  `autofocus` node arrives; a read of either between a node's removal
+  and its return in one turn settles its loss, which `activeElement`
+  alone does not.
+- **A child that fails to construct** is reported to the document, not
+  thrown from the runtime's report: a throw there would leave the
+  child's siblings half mounted for the unmount to fail on. The mount,
+  the key, or the frame under way throws the child's own error once
+  the construction is done (`failed` in `document.rip`).
+- `node.focus()` on a node that cannot hold focus changes nothing, as
+  DOM's does; `node.focused` is a reactive read, minted on first use,
+  which is how a node styles itself by its focus through `ref:`.
+
+**Cursor** (built: `screen.rip`). A focused node declares `cursor:
+{x, y}`, whole cells from its own rounded corner, border and padding
+included, `x` in cells and not in characters. After each frame the
+renderer parks the hardware cursor there and shows it, and hides it
+otherwise. Content offsets above the node move it, and it is hidden
+where a clip above it (the padding box of an `overflow: 'hidden'`
+ancestor), the screen's edge, or the rows a tall frame does not show
+leave its cell out — `place` climbs from the node as `draw` descends to
+it. **The cursor has one record.** `diff` starts and ends every frame at
+the frame's top-left; `Screen.parked` is where the cursor was shown, in
+cells of the grid on the terminal, and a frame takes the cursor back to
+the top-left, draws, and parks it again in the one write. A frame that
+changes no cell and moves no cursor writes nothing; one that only moves
+the cursor writes only the moves. `leave` takes it back and lands on
+the line below the frame. IME popups and screen readers follow the
+hardware cursor. A cursor belongs to a node, so in a frame taller than
+the terminal it stays with its row of the tree, where Ink counts `y`
+from the top of what is shown.
+
+**stdin** (built: `tui.rip`; the lifecycle's in full with §8). `run
+App, stdin:` reads a stdin that is a terminal and can be set raw: raw
+mode, `ref`, `resume`, one `data` listener feeding the `Parser`, and
+bracketed paste (`CSI ? 2004 h`) and focus reports (`CSI ? 1004 h`)
+asked of the terminal. `close` withdraws both modes, then shows the
+cursor, flushes the parser, takes the listener off, and leaves stdin
+cooked, paused and unref'd, so it does not keep the process alive —
+on `quit`, Ctrl-C, a throw while the app mounts, a frame that fails, a
+listener that throws. Every step of `close` is taken whatever the
+others do, and `close` settles `done`: a raw mode that cannot be set
+fails the run with nothing left installed, a write that fails on the
+way out still gives stdin and the document back, and a frame that fails
+as `quit` draws it still shows the cursor. A `quit` closes the app it
+was called on and no other: an app closed by hand and replaced before
+the quit's turn is left alone, and its `done` resolves with nothing. Any other stdin is left alone: no raw mode, no
+modes asked, no listener, no throw. The default stdin is the process's,
+unless `stdout` is given and `stdin` is not: a stream of one's own takes
+no keys from the terminal the process is on.
 
 ## 8. Lifecycle (`terminal.rip`)
 
 One idempotent `setup()` / `teardown()` pair is shared by exit,
-signals, crash, `suspend`, and Ctrl-Z / SIGCONT. The host owns raw
+signals, crash, `suspend`, and Ctrl-Z / SIGCONT. What `tui.rip`'s
+`listen` and `close` do for stdin and the two modes (§7) is the first
+of it, and moves there. The host owns raw
 mode and bracketed paste for the app's lifetime; there is no
 ref-counting.
 
@@ -709,14 +849,17 @@ App = component
 run App
 ```
 
-- `run(App, {altScreen, mouse, keyboard, stdin, stdout})` →
-  `{app, done, quit, flush}`; `suspend(fn)`; `print(text)`.
+- `run(App, {stdin, stdout, damage})` → `{app, done, quit, flush}`. To
+  come: `altScreen`, `mouse`, `keyboard`; `suspend(fn)`; `print(text)`.
 - `mount(App, {cols, rows, props, damage})` → `{app, frame, ansi, bytes,
-  damage, resize, close, done}` is the test driver (§10), and
+  damage, resize, close, done}`, and for input `{press, type, paste,
+  send, tick, focused, cursor}`, is the test driver (§10), and
   `renderToString(App, {cols, rows, props, ansi})` is a mount, one
   frame, and a close.
-- `screen` (`cols`, `rows`, `interactive`) and `focus` (`active`,
-  `next`, `prev`, `to`) are **getter-backed objects**. An imported
+- `screen` (`cols`, `rows`, `focused`; to come: `interactive`,
+  `keyboard`) and `focus` (`active`, `next()`, `previous()`,
+  `to(node)`, with `to(null)` letting go) are **getter-backed
+  objects**. An imported
   `:=` cell is not unwrapped across modules, so raw cells are never
   exported.
 - `clock(interval)` is the animation helper: a getter-backed object
@@ -769,7 +912,24 @@ run App
   and a fuzz of random bytes in random cuts that never throws, makes
   only well-formed events, and decodes the same whole or cut, held to a
   floor of bytes fed and events made so it cannot pass by feeding
-  nothing. Focus and dispatch to come.
+  nothing.
+- **Events:** `test/events.rip` — 164 of Ink's 194 focus, input-hook,
+  cursor and exit titles through `mount` and `run`, 135 held and 29
+  stated differences (`test/events/SOURCE.md` lists them and the 30
+  left out); the hook files' rows are the ones `test/input` decodes
+  (`test/input/hooks.rip`), sent through a mounted app and held to what
+  its listeners hear. Then this package's pins: the three phases in
+  their exact order, propagation stopped at each, listeners that come
+  and go mid-dispatch, a path that stands while the tree changes, the
+  default actions and their prevention, focus order under a reordered
+  keyed list, what clears focus, `autofocus` on mount and on arrival,
+  the cursor under padding, borders, nested content offsets, a clip, a
+  wide glyph, a tall frame, and after `quit`; the exact bytes `run`
+  writes and the calls it makes on a stdin that remembers them, on every
+  way out; what a key costs, by its damage and by the frames it owes;
+  the README's select list and text input as they are printed there;
+  and a fuzz of focus under a changing tree, held to a floor of steps,
+  events and visits.
 - **The test driver is public,** because users' tests are a contract
   too. `mount(App, {cols, rows, props})` is `run` without a terminal:
   the same install, the same `Screen`, the same close, drawing to a
@@ -783,8 +943,17 @@ run App
   tracking reads, and `damage: false` owes every cell of every frame;
   `resize(cols, rows)` draws the next frame whole; `close()` unmounts and restores the globals. A frame
   that fails throws from `frame`, to the test that asked. A `quit`
-  from the app closes the mount and resolves `done`. Simulated input
-  joins it with §7.
+  from the app closes the mount and resolves `done`. Input takes the
+  road `run` reads stdin by, from `deliver` on: `press(key, {ctrl,
+  shift, alt, meta, repeat})` is one key, by DOM's name or a character
+  (bytes that begin with a control character are sent as bytes);
+  `type(text)` is text as a terminal sends it; `paste(text)` is one
+  paste; `send(bytes)` is raw bytes through the mount's own `Parser`,
+  whose waits run on a clock that `tick(ms)` moves, so a lone ESC is
+  Escape after `tick 50`. None of them draws. `focused` is the active
+  element, settled; `cursor` is where the last frame parked the
+  hardware cursor on the mount's terminal, `{x, y}`, or null while it
+  is hidden.
 
 ## 11. Benchmark (`bench.rip`, `bench/`)
 
@@ -881,6 +1050,13 @@ counter in a 1,000-element tree is about 15 µs of CPU an update. 100%
 churn of the 40×8 table is about 170 µs over a long run (`rip tui.rip
 table100 40`, 12,000 updates) and about 340 µs over the 300 updates of
 a default run, which end while the engine is still compiling the path.
+
+**One key.** `bun run keys` mounts the README's select list and sends
+it arrow keys as a terminal's bytes, timing each from `send` to the end
+of the frame it causes: about 8 µs with ten items (12 cells, 55 bytes)
+and about 55 µs with a hundred, where each item's `inverse` is a binding
+that reads the choice; a key no listener acts on owes no frame and is
+about 0.3 µs.
 
 What this settles:
 

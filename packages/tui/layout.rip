@@ -128,20 +128,18 @@ BOX      =! 0
 NONE     =! 1
 CONTENTS =! 2
 
-# A table of words has no prototype, so a name every object inherits —
-# `constructor`, `toString` — is no word of it.
-DIRECTIONS =! { __proto__: null, 'column': COLUMN, 'column-reverse': COLUMN_REVERSE, 'row': ROW, 'row-reverse': ROW_REVERSE }
-WRAPS      =! { __proto__: null, 'nowrap': NOWRAP, 'wrap': WRAP, 'wrap-reverse': WRAP_REVERSE }
+DIRECTIONS =! { 'column': COLUMN, 'column-reverse': COLUMN_REVERSE, 'row': ROW, 'row-reverse': ROW_REVERSE }
+WRAPS      =! { 'nowrap': NOWRAP, 'wrap': WRAP, 'wrap-reverse': WRAP_REVERSE }
 # Each align key takes its own words: only a child can defer (`auto`),
 # only items sit on a baseline, only lines are spaced.
-ALIGN_ITEMS   =! { __proto__: null, 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'stretch': STRETCH, 'baseline': BASELINE }
-ALIGN_SELF    =! { __proto__: null, 'auto': ALIGN_AUTO, 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'stretch': STRETCH, 'baseline': BASELINE }
-ALIGN_CONTENT =! { __proto__: null, 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'stretch': STRETCH, 'space-between': SPACE_BETWEEN, 'space-around': SPACE_AROUND, 'space-evenly': SPACE_EVENLY }
-JUSTIFIES  =! { __proto__: null, 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'space-between': SPACE_BETWEEN, 'space-around': SPACE_AROUND, 'space-evenly': SPACE_EVENLY }
-POSITIONS  =! { __proto__: null, 'static': STATIC, 'relative': RELATIVE, 'absolute': ABSOLUTE }
-OVERFLOWS  =! { __proto__: null, 'visible': 0, 'hidden': 1, 'scroll': SCROLL }
-DISPLAYS   =! { __proto__: null, 'flex': BOX, 'none': NONE, 'contents': CONTENTS }
-SIZINGS    =! { __proto__: null, 'border-box': 0, 'content-box': CONTENT_BOX }
+ALIGN_ITEMS   =! { 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'stretch': STRETCH, 'baseline': BASELINE }
+ALIGN_SELF    =! { 'auto': ALIGN_AUTO, 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'stretch': STRETCH, 'baseline': BASELINE }
+ALIGN_CONTENT =! { 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'stretch': STRETCH, 'space-between': SPACE_BETWEEN, 'space-around': SPACE_AROUND, 'space-evenly': SPACE_EVENLY }
+JUSTIFIES  =! { 'flex-start': FLEX_START, 'center': CENTER, 'flex-end': FLEX_END, 'space-between': SPACE_BETWEEN, 'space-around': SPACE_AROUND, 'space-evenly': SPACE_EVENLY }
+POSITIONS  =! { 'static': STATIC, 'relative': RELATIVE, 'absolute': ABSOLUTE }
+OVERFLOWS  =! { 'visible': 0, 'hidden': 1, 'scroll': SCROLL }
+DISPLAYS   =! { 'flex': BOX, 'none': NONE, 'contents': CONTENTS }
+SIZINGS    =! { 'border-box': 0, 'content-box': CONTENT_BOX }
 
 # How specific a written key is. A slot keeps what the most specific key
 # wrote to it, in whatever order the keys come.
@@ -504,8 +502,9 @@ flag =! (key, value) ->
   throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not true or false" unless value is true or value is false
   value
 
+# A name every object inherits — `constructor`, `toString` — is no word.
 word =! (table, key, value) ->
-  code = table[value]
+  code = table[value] if Object.hasOwn table, value
   throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not one of #{Object.keys(table).join ', '}" if code is undefined
   code
 

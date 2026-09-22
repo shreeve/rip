@@ -8,6 +8,7 @@
     "ink": "NODE_ENV=production rip ink.rip",
     "tui": "rip tui.rip",
     "frame": "rip frame.rip",
+    "keys": "rip keys.rip",
     "profile": "rip profile.rip"
   },
   "dependencies": {

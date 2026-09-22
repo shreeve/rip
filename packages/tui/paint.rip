@@ -19,7 +19,7 @@ import { CLUSTER, glyph, crowded, evict, sanitize, Flow, refresh, MODES, A0, A1,
 # other, so it stands against an ancestor's color and against the
 # background a run of text lands on.
 NAMED =! {
-  __proto__: null
+  __proto__: null      # `constructor` is no color
   black: 0, red: 1, green: 2, yellow: 3, blue: 4, magenta: 5, cyan: 6, white: 7, default: 9
   gray: 60, grey: 60, blackBright: 60, redBright: 61, greenBright: 62, yellowBright: 63
   blueBright: 64, magentaBright: 65, cyanBright: 66, whiteBright: 67

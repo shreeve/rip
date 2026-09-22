@@ -1,0 +1,780 @@
+# Ink's focus, input-hook, cursor and exit tests, ported through `mount`
+# and `run`. Each test keeps Ink's title under the name of its file.
+# Ink's hooks have no counterpart — a component here hears events on
+# its nodes, and focus belongs to a node — so every port draws Ink's
+# tree and asks Ink's question of this package's surface: a frame, the
+# active element, what a listener heard, where the cursor is. SOURCE.md
+# maps the vocabulary, counts the cases, and lists what is left out.
+
+import { test, eq, ok } from 'rip/testing'
+import { run, quit, mount, focus } from 'rip/tui'
+import { Box, Text } from '../ink/harness.rip'
+import { fill } from '../input/harness.rip'
+import { HOOKS } from '../input/hooks.rip'
+import { Terminal, Stdin, spell, find, idOf, count, differs, canon, brief } from './harness.rip'
+
+ESC =! '\x1b'
+CSI =! '\x1b['
+
+ESCAPE  =! 'Escape has no default action: it is the key a dialog closes on and a text input clears on, so what it does is the app\'s to say; Ink takes focus away on every Escape'
+HYPER   =! 'a key event has no field for hyper, as DOM\'s has none, so Hyper-Tab is Tab and moves focus; Ink reads the hyper bit and leaves focus where it is'
+HEARD   =! 'a listener hears Ctrl-C before the default action quits, since `preventDefault` is how an app keeps the key; Ink\'s `exitOnCtrlC` exits before any `useInput` handler is called'
+RELEASE =! 'key releases are dropped: the package has @keydown and no @keyup, and asks no terminal for release reports'
+
+# One test per Ink title, counted as held until a `differs` inside it
+# says otherwise.
+port =! (file, title, body) ->
+  test "#{file}: #{title}", ->
+    count file, title, 'held'
+    body()
+
+# The same for a case that waits: called as `later! file, title, -> …`.
+later =! (file, title, body) ->
+  test! "#{file}: #{title}", ->
+    count file, title, 'held'
+    body!
+
+# `body(view)` over a mounted `App`, closed whatever happens.
+mounted =! (App, options, body) ->
+  view = mount App, { cols: 100, ...options }
+  try
+    body view
+  finally
+    view.close()
+
+# ── focus.tsx ─────────────────────────────────────────────────────────────────
+
+console.log "\nInk: focus"
+
+# Ink's `useFocus({autoFocus, isActive})` is a node that is `focusable`,
+# with `autofocus` and `disabled`; `isFocused` is the node's `focused`.
+Item =! component
+  @label := ''
+  @autoFocus := false
+  @disabled := false
+  el := null
+  render
+    span ref: el, id: @label, focusable: true, autofocus: @autoFocus, disabled: @disabled
+      "#{@label} #{if el?.focused then '✔' else ''}"
+
+# Ink's `disableFocus()` is `disabled` on the box around everything.
+Test =! component
+  @showFirst := true
+  @disableFirst := false
+  @disableSecond := false
+  @disableThird := false
+  @autoFocus := false
+  @disabled := false
+  @unmountChildren := false
+  render
+    Box flexDirection: 'column', disabled: @disabled
+      if not @unmountChildren
+        if @showFirst
+          Item label: 'First', autoFocus: @autoFocus, disabled: @disableFirst
+        Item label: 'Second', autoFocus: @autoFocus, disabled: @disableSecond
+        Item label: 'Third', autoFocus: @autoFocus, disabled: @disableThird
+
+FIRST  =! "First ✔\nSecond\nThird"
+SECOND =! "First\nSecond ✔\nThird"
+THIRD  =! "First\nSecond\nThird ✔"
+NONE   =! "First\nSecond\nThird"
+
+# Ink's `rerender` with other props is a write to the mounted app.
+given =! (view, props) ->
+  view.app[name].value = value for own name, value of props
+  view.frame()
+
+for [name, input, ours, inks, why] in [
+  ['Tab', "#{CSI}9u", SECOND]
+  ['Shift+Tab', "#{CSI}9;2u", THIRD]
+  ['Tab repeat', "#{CSI}9;1:2u", SECOND]
+  ['Tab release', "#{CSI}9;1:3u", FIRST]
+  ['Ctrl+Tab', "#{CSI}9;5u", FIRST]
+  ['Alt+Tab', "#{CSI}9;3u", FIRST]
+  ['Super+Tab', "#{CSI}9;9u", FIRST]
+  ['Hyper+Tab', "#{CSI}9;17u", SECOND, FIRST, HYPER]
+  ['Escape', "#{CSI}27u", FIRST, NONE, ESCAPE]
+  ['Escape repeat', "#{CSI}27;1:2u", FIRST, NONE, ESCAPE]
+  ['Escape release', "#{CSI}27;1:3u", FIRST]
+  ['Shift+Escape', "#{CSI}27;2u", FIRST]
+  ['Ctrl+Escape', "#{CSI}27;5u", FIRST]
+  ['Alt+Escape', "#{CSI}27;3u", FIRST]
+  ['Super+Escape', "#{CSI}27;9u", FIRST]
+  ['Hyper+Escape', "#{CSI}27;17u", FIRST]
+]
+  port 'focus', "focus navigation handles kitty #{name}", ->
+    mounted Test, { props: { autoFocus: true } }, (view) ->
+      eq view.frame(), FIRST
+      view.send input
+      if why
+        differs 'focus', "focus navigation handles kitty #{name}", view.frame(), ours, inks, why
+      else
+        eq view.frame(), ours
+
+port 'focus', 'do not focus on register when auto focus is off', ->
+  mounted Test, {}, (view) ->
+    eq view.frame(), NONE
+    eq view.focused, null
+
+port 'focus', 'focus the first component to register', ->
+  mounted Test, { props: { autoFocus: true } }, (view) ->
+    eq view.frame(), FIRST
+
+# Focus is a node's, so there is no id to collide; what the case draws holds.
+port 'focus', 'generated focus IDs remain distinct when random values collide', ->
+  mounted Test, { props: { autoFocus: true } }, (view) ->
+    eq view.frame(), FIRST
+    view.send '\t'
+    eq view.frame(), SECOND
+    view.send '\t'
+    eq view.frame(), THIRD
+
+port 'focus', 'unfocus active component on Esc', ->
+  mounted Test, { props: { autoFocus: true } }, (view) ->
+    eq view.frame(), FIRST
+    view.send ESC
+    view.tick 50
+    differs 'focus', 'unfocus active component on Esc', view.frame(), FIRST, NONE, ESCAPE
+
+port 'focus', 'switch focus to first component on Tab', ->
+  mounted Test, {}, (view) ->
+    view.send '\t'
+    eq view.frame(), FIRST
+
+port 'focus', 'switch focus to the next component on Tab', ->
+  mounted Test, {}, (view) ->
+    view.send '\t'
+    view.send '\t'
+    eq view.frame(), SECOND
+
+port 'focus', 'switch focus to the first component if currently focused component is the last one on Tab', ->
+  mounted Test, { props: { autoFocus: true } }, (view) ->
+    view.send '\t'
+    view.send '\t'
+    eq view.frame(), THIRD
+    view.send '\t'
+    eq view.frame(), FIRST
+
+port 'focus', 'skip disabled component on Tab', ->
+  mounted Test, { props: { autoFocus: true, disableSecond: true } }, (view) ->
+    view.send '\t'
+    eq view.frame(), THIRD
+
+port 'focus', 'switch focus to the previous component on Shift+Tab', ->
+  mounted Test, { props: { autoFocus: true } }, (view) ->
+    view.send '\t'
+    eq view.frame(), SECOND
+    view.send "#{CSI}Z"
+    eq view.frame(), FIRST
+
+port 'focus', 'switch focus to the last component if currently focused component is the first one on Shift+Tab', ->
+  mounted Test, { props: { autoFocus: true } }, (view) ->
+    view.send "#{CSI}Z"
+    eq view.frame(), THIRD
+
+port 'focus', 'skip disabled component on Shift+Tab', ->
+  mounted Test, { props: { autoFocus: true, disableSecond: true } }, (view) ->
+    view.send "#{CSI}Z"
+    view.send "#{CSI}Z"
+    eq view.frame(), FIRST
+
+port 'focus', 'reset focus when focused component unregisters', ->
+  mounted Test, { props: { autoFocus: true } }, (view) ->
+    eq view.frame(), FIRST
+    eq given(view, showFirst: false), "Second\nThird"
+    eq view.focused, null
+
+port 'focus', 'focus first component after focused component unregisters', ->
+  mounted Test, { props: { autoFocus: true } }, (view) ->
+    view.frame()
+    eq given(view, showFirst: false), "Second\nThird"
+    view.send '\t'
+    eq view.frame(), "Second ✔\nThird"
+
+port 'focus', 'toggle focus management', ->
+  mounted Test, { props: { autoFocus: true } }, (view) ->
+    eq view.frame(), FIRST
+    eq given(view, disabled: true), NONE
+    view.send '\t'
+    eq view.frame(), NONE
+    given view, disabled: false
+    view.send '\t'
+    eq view.frame(), FIRST
+
+port 'focus', 'new components do not auto-focus while focus management is disabled', ->
+  Late = component
+    @disabled := false
+    @shown := false
+    render
+      Box flexDirection: 'column', disabled: @disabled
+        if @shown
+          Item label: 'New', autoFocus: true
+  mounted Late, {}, (view) ->
+    view.frame()
+    given view, disabled: true
+    eq given(view, shown: true), "New"
+    eq given(view, disabled: false), "New"
+    view.send '\t'
+    eq view.frame(), "New ✔"
+
+port 'focus', 'manually focus next component', ->
+  mounted Test, { props: { autoFocus: true } }, (view) ->
+    view.frame()
+    focus.next()
+    eq view.frame(), SECOND
+
+port 'focus', 'manually focus previous component', ->
+  mounted Test, { props: { autoFocus: true } }, (view) ->
+    view.frame()
+    focus.previous()
+    eq view.frame(), THIRD
+
+port 'focus', 'does not crash when focusing next on unmounted children', ->
+  mounted Test, { props: { autoFocus: true } }, (view) ->
+    view.frame()
+    given view, unmountChildren: true
+    focus.next()
+    eq view.frame(), ''
+
+port 'focus', 'does not crash when focusing previous on unmounted children', ->
+  mounted Test, { props: { autoFocus: true } }, (view) ->
+    view.frame()
+    given view, unmountChildren: true
+    focus.previous()
+    eq view.frame(), ''
+
+port 'focus', 'focuses first non-disabled component', ->
+  mounted Test, { props: { autoFocus: true, disableFirst: true, disableSecond: true } }, (view) ->
+    eq view.frame(), THIRD
+
+port 'focus', 'changing autoFocus does not reactivate disabled components', ->
+  mounted Test, { props: { disableFirst: true } }, (view) ->
+    eq view.frame(), NONE
+    eq given(view, autoFocus: true), SECOND
+    view.send "#{CSI}Z"
+    eq view.frame(), THIRD
+    given view, autoFocus: false
+    view.send '\t'
+    eq view.frame(), SECOND
+
+port 'focus', 'skips disabled elements when wrapping around', ->
+  mounted Test, { props: { autoFocus: true, disableFirst: true } }, (view) ->
+    view.frame()
+    view.send '\t'
+    view.send '\t'
+    eq view.frame(), SECOND
+
+port 'focus', 'skips disabled elements when wrapping around from the front', ->
+  mounted Test, { props: { autoFocus: true, disableThird: true } }, (view) ->
+    view.frame()
+    view.send "#{CSI}Z"
+    eq view.frame(), SECOND
+
+# Ink's `useFocus({id})` and `useFocusManager().activeId`: a node's `id`
+# and the active element's.
+Pair =! component
+  @auto := false
+  @second := true
+  @secondActive := true
+  render
+    Box flexDirection: 'column'
+      Item label: 'first', autoFocus: @auto
+      if @second
+        Item label: 'second', disabled: not @secondActive
+
+port 'focus', 'activeId from useFocusManager reflects currently focused component', ->
+  mounted Pair, {}, (view) ->
+    eq idOf(view.focused), null
+    view.send '\t'
+    eq idOf(view.focused), 'first'
+    view.send '\t'
+    eq idOf(view.focused), 'second'
+    ok view.focused is document.activeElement and view.focused is focus.active
+
+port 'focus', 'activeId resets to undefined on Esc', ->
+  mounted Pair, { props: { second: false } }, (view) ->
+    view.send '\t'
+    eq idOf(view.focused), 'first'
+    view.send ESC
+    view.tick 50
+    differs 'focus', 'activeId resets to undefined on Esc', idOf(view.focused), 'first', null, ESCAPE
+
+port 'focus', 'activeId is set immediately when component uses autoFocus', ->
+  mounted Pair, { props: { auto: true } }, (view) ->
+    eq idOf(view.focused), 'first'
+
+port 'focus', 'activeId updates when focus is changed programmatically', ->
+  mounted Pair, {}, (view) ->
+    eq idOf(view.focused), null
+    focus.to find 'second'
+    eq idOf(view.focused), 'second'
+    find('first').focus()
+    eq idOf(view.focused), 'first'
+
+port 'focus', 'programmatic focus skips inactive components until they are re-enabled', ->
+  mounted Pair, { props: { auto: true, secondActive: false } }, (view) ->
+    eq view.frame(), "first ✔\nsecond"
+    focus.to find 'second'
+    eq view.frame(), "first ✔\nsecond"
+    given view, secondActive: true
+    focus.to find 'second'
+    eq view.frame(), "first\nsecond ✔"
+
+port 'focus', 'activeId resets to undefined when focused component unmounts', ->
+  Swap = component
+    @first := true
+    render
+      Box flexDirection: 'column'
+        if @first
+          Item label: 'first', autoFocus: true
+        Item label: 'second'
+  mounted Swap, {}, (view) ->
+    eq idOf(view.focused), 'first'
+    given view, first: false
+    eq idOf(view.focused), null
+
+# ── focus-order.tsx ───────────────────────────────────────────────────────────
+
+console.log "\nInk: focus-order"
+
+Field =! component
+  @name := ''
+  @auto := false
+  el := null
+  render
+    span ref: el, id: @name, focusable: true, autofocus: @auto
+      "#{@name or 'empty'}: #{if el?.focused then 'focused' else 'blurred'}"
+
+Form =! component
+  @order := []
+  render
+    Box flexDirection: 'column'
+      for name, n in @order
+        Field key: "#{name}-#{n}", name: name
+
+Keyed =! component
+  @order := []
+  render
+    Box flexDirection: 'column'
+      for name in @order
+        Field key: name, name: name
+
+port 'focus-order', 'focus navigation keeps registration order after keyed reordering', ->
+  mounted Keyed, { props: { order: ['a', 'b', 'c'] } }, (view) ->
+    view.frame()
+    eq given(view, order: ['c', 'a', 'b']), "c: blurred\na: blurred\nb: blurred"
+    view.send '\t'
+    differs 'focus-order', 'focus navigation keeps registration order after keyed reordering', idOf(view.focused), 'c', 'a',
+      'focus follows tree order, found by a walk when Tab is pressed, so the first node on the screen is the first Tab reaches; Ink keeps the order its hooks registered in, which a reordered list leaves behind'
+
+BY_NODE =! 'focus belongs to a node and an `id` is only a name, so Tab reaches every focusable node, two of one name included; Ink focuses by id, and a second component of one id is never reached'
+
+# The ids Tab and then Shift-Tab reach, in order.
+visits =! (view, tabs, backs) ->
+  reached = []
+  for n in [0...tabs]
+    view.send '\t'
+    reached.push idOf view.focused
+  for n in [0...backs]
+    view.send "#{CSI}Z"
+    reached.push idOf view.focused
+  reached
+
+port 'focus-order', 'Tab visits a duplicated focus ID once and reaches the components after it', ->
+  mounted Form, { props: { order: ['a', 'x', 'x', 'b'] } }, (view) ->
+    differs 'focus-order', 'Tab visits a duplicated focus ID once and reaches the components after it', visits(view, 5, 4),
+      ['a', 'x', 'x', 'b', 'a', 'b', 'x', 'x', 'a'], ['a', 'x', 'b', 'a', 'x', 'a', 'b', 'x', 'a'], BY_NODE
+
+port 'focus-order', 'Tab visits a non-adjacent duplicated focus ID at its first registration', ->
+  mounted Form, { props: { order: ['x', 'a', 'x', 'b'] } }, (view) ->
+    differs 'focus-order', 'Tab visits a non-adjacent duplicated focus ID at its first registration', visits(view, 4, 4),
+      ['x', 'a', 'x', 'b', 'x', 'a', 'x', 'b'], ['x', 'a', 'b', 'x', 'b', 'a', 'x', 'b'], BY_NODE
+
+# ── focus-empty-id-regression.tsx ─────────────────────────────────────────────
+
+console.log "\nInk: focus-empty-id-regression"
+
+for method in ['programmatic', 'tab']
+  port 'focus-empty-id-regression', "empty focus ID reports focus after #{method} navigation", ->
+    mounted Form, { props: { order: [''] } }, (view) ->
+      eq view.frame(), "empty: blurred"
+      if method is 'tab' then view.send '\t' else focus.to document.body.firstChild.firstChild
+      eq idOf(view.focused), ''
+      eq view.frame(), "empty: focused"
+
+port 'focus-empty-id-regression', 'autofocus does not replace an already focused empty ID', ->
+  Both = component
+    render
+      Box flexDirection: 'column'
+        Field name: '', auto: true
+        Field name: 'second', auto: true
+  mounted Both, {}, (view) ->
+    eq idOf(view.focused), ''
+    eq view.frame(), "empty: focused\nsecond: blurred"
+
+# ── the hook tests: test/input/hooks.rip, dispatched ──────────────────────────
+
+# Every row test/input holds the parser to is sent through a mounted app,
+# and what its listeners hear is held to the same events: a key is a
+# `keydown`, a paste a `paste`, and a focus report, a mouse report and a
+# reply reach neither, as none reaches Ink's `useInput`. The listener
+# keeps every key, so Tab and Ctrl-C do nothing here.
+Probe =! component
+  render
+    Box
+      Text "probe"
+
+hear =! (sent) ->
+  heard = []
+  whole = null
+  mounted Probe, { cols: 20 }, (view) ->
+    note = (event) ->
+      event.preventDefault()
+      heard.push spell event
+    document.addEventListener 'keydown', note
+    document.addEventListener 'paste', note
+    if typeof sent is 'function'
+      sent { feed: ((chunk) -> view.send chunk), clock: { tick: (ms) -> view.tick ms } }
+    else
+      chunks = if Array.isArray(sent) then sent else [sent]
+      view.send chunk for chunk in chunks
+      whole = chunks.join ''
+  [heard, whole]
+
+audible =! (events, whole) -> fill(events, whole).filter (event) -> event.type is 'key' or event.type is 'paste'
+
+for [file, rows] in HOOKS when file isnt 'input-buffered-ctrl-c'
+  console.log "\nInk: #{file}, dispatched"
+  groups = {}
+  (groups[row[0]] ?= []).push row for row in rows
+  for own title, group of groups
+    port file, title, ->
+      for row in group
+        [heard, whole] = hear row[1]
+        if row.length is 3
+          eq heard, audible(row[2], whole), brief whole ?? title
+        else
+          differs file, title, heard, audible(row[2], whole), audible(row[3], whole), row[4]
+
+# The two cases of these files that ask which listener hears an event.
+port 'hooks-use-input', 'useInput - receives bracketed paste when no usePaste handler is active', ->
+  [heard] = hear "#{CSI}200~hello#{CSI}201~"
+  differs 'hooks-use-input', 'useInput - receives bracketed paste when no usePaste handler is active', heard,
+    [{ type: 'paste', text: 'hello' }], [{ type: 'key', key: 'hello', ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, repeat: false, sequence: 'hello' }],
+    'a paste is a `paste` event and never a key, whoever listens, so pasted text cannot be read as keystrokes; Ink hands it to `useInput` as typed input when no `usePaste` is mounted'
+
+port 'hooks-use-paste', 'usePaste - multiple simultaneous hooks both receive the same paste event', ->
+  got = []
+  Twice = component
+    render
+      Box @paste: ((event) -> got.push "outer #{event.text}")
+        Box focusable: true, autofocus: true, @paste: ((event) -> got.push "inner #{event.text}")
+          Text "x"
+  mounted Twice, {}, (view) ->
+    view.send "#{CSI}200~hello#{CSI}201~"
+    eq got, ['inner hello', 'outer hello']
+
+# ── input-buffered-ctrl-c.tsx ─────────────────────────────────────────────────
+
+console.log "\nInk: input-buffered-ctrl-c"
+
+# Ink's `inputs` log: `Ctrl+c` for the key, the character for any other.
+# Ink's `useInput` hears every key; here that is a listener on the root,
+# which holds focus.
+Logger =! component
+  @keep := false
+  @inputs := []
+  @pastes := []
+  heard: (event) ->
+    @inputs.push (if event.ctrlKey then "Ctrl+#{event.key}" else event.key)
+    event.preventDefault() if @keep
+  render
+    Box focusable: true, autofocus: true, @keydown: @heard, @paste: ((event) => @pastes.push event.text)
+      Text "log"
+
+for input in ['\x03', 'ab\x03', '\x03ab']
+  later! 'input-buffered-ctrl-c', "Ctrl+C exits when buffered with text: #{JSON.stringify input}", ->
+    view = mount Logger
+    exited = false
+    view.done.then -> exited = true
+    view.send input
+    sleep! 0
+    ok exited, 'the app did not exit'
+    differs 'input-buffered-ctrl-c', "Ctrl+C exits when buffered with text: #{JSON.stringify input}", view.app.inputs.value.includes('Ctrl+c'), true, false, HEARD
+
+later! 'input-buffered-ctrl-c', 'buffered Ctrl+C respects exitOnCtrlC: false', ->
+  view = mount Logger, props: { keep: true }
+  try
+    exited = false
+    view.done.then -> exited = true
+    view.send 'ab\x03cd'
+    sleep! 0
+    ok not exited, 'the app exited'
+    eq view.app.inputs.value, ['a', 'b', 'Ctrl+c', 'c', 'd']
+    eq view.app.pastes.value, []
+  finally
+    view.close()
+
+later! 'input-buffered-ctrl-c', 'buffered Ctrl+C respects bracketed paste', ->
+  view = mount Logger
+  try
+    exited = false
+    view.done.then -> exited = true
+    view.send "#{CSI}200~ab\x03cd#{CSI}201~"
+    sleep! 0
+    ok not exited, 'the app exited'
+    eq view.app.inputs.value, []
+    eq view.app.pastes.value, ['ab\x03cd']
+  finally
+    view.close()
+
+# ── exit-keyboard.tsx ─────────────────────────────────────────────────────────
+
+console.log "\nInk: exit-keyboard"
+
+# [name, input, exitOnCtrlC, Ink's shouldExit and inputReceived, ours, why]
+for [name, input, exits, inks, ours, why] in [
+  ['legacy Ctrl+C', '\x03', true, [true, false], [true, true], HEARD]
+  ['legacy Ctrl+C with an undefined exit option', '\x03', true, [true, false], [true, true], HEARD]
+  ['kitty Ctrl+C', "#{CSI}99;5u", true, [true, false], [true, true], HEARD]
+  ['kitty Ctrl+C repeat', "#{CSI}99;5:2u", true, [true, false], [true, true], HEARD]
+  ['kitty Ctrl+C release', "#{CSI}99;5:3u", true, [false, true], [false, false], RELEASE]
+  ['kitty Ctrl+C with automatic exit disabled', "#{CSI}99;5u", false, [false, true]]
+  ['kitty c without Ctrl', "#{CSI}99u", true, [false, true]]
+]
+  later! 'exit-keyboard', "automatic exit handles #{name}", ->
+    view = mount Logger, props: { keep: not exits }
+    try
+      exited = false
+      view.done.then -> exited = true
+      view.send input
+      sleep! 0
+      got = [exited, view.app.inputs.value.length > 0]
+      if why
+        differs 'exit-keyboard', "automatic exit handles #{name}", got, ours, inks, why
+      else
+        eq got, inks
+    finally
+      view.close()
+
+# ── rerender-input.tsx ────────────────────────────────────────────────────────
+
+console.log "\nInk: rerender-input"
+
+Labeled =! component
+  @label := 'a'
+  @keys := []
+  @pastes := []
+  render
+    Box focusable: true, autofocus: true, @keydown: ((event) => @keys.push event.key), @paste: ((event) => @pastes.push event.text)
+      Text "#{@label}"
+
+port 'rerender-input', 'rerender() keeps a pending Escape keypress', ->
+  mounted Labeled, {}, (view) ->
+    view.send ESC
+    eq given(view, label: 'b'), 'b'
+    view.tick 50
+    eq view.app.keys.value, ['Escape']
+
+port 'rerender-input', 'rerender() keeps an escape sequence that spans two reads', ->
+  mounted Labeled, {}, (view) ->
+    view.send CSI
+    given view, label: 'b'
+    view.send 'A'
+    eq view.app.keys.value, ['ArrowUp']
+
+port 'rerender-input', 'rerender() keeps a bracketed paste that spans two reads', ->
+  mounted Labeled, {}, (view) ->
+    view.send "#{CSI}200~part1"
+    given view, label: 'b'
+    view.send "part2#{CSI}201~"
+    eq view.app.pastes.value, ['part1part2']
+    eq view.app.keys.value, []
+
+later! 'rerender-input', 'rerender() does not detach and reattach the stdin readable listener', ->
+  stdin = Stdin.new()
+  removed = 0
+  stdin.on 'removeListener', (event) -> removed += 1 if event is 'data'
+  running = run Labeled, stdin: stdin, stdout: Terminal.new()
+  running.app.label.value = 'b'
+  running.flush()
+  eq [removed, stdin.listenerCount('data')], [0, 1]
+  quit()
+  await running.done
+
+# ── cursor.tsx ────────────────────────────────────────────────────────────────
+
+console.log "\nInk: cursor"
+
+# Ink's `useCursor().setCursorPosition({x, y})` places the cursor in the
+# output. Here a focused node declares `cursor`, in cells from its own
+# corner, so each port puts Ink's position on a focused box at the
+# output's origin.
+InputApp =! component
+  line := ''
+  heard: (event) ->
+    if event.key is 'Backspace' or event.key is 'Delete'
+      @line = @line.slice 0, -1
+    else if Array.from(event.key).length is 1 and not event.ctrlKey and not event.altKey and not event.metaKey
+      @line += event.key
+  render
+    Box focusable: true, autofocus: true, cursor: { x: 2 + line.length, y: 0 }, @keydown: @heard
+      Text "> #{line}"
+
+# A terminal `run` would have opened — the cursor hidden — drawn from a
+# mount: every frame's bytes are written to it, and the frame it shows
+# and the cursor it holds are held to the mount's.
+watched =! (App, options, body) ->
+  mounted App, options, (view) ->
+    term = Terminal.new options.cols ?? 100, options.rows ?? 10
+    term.write "#{CSI}?25l"
+    draw = (props = {}) ->
+      text = given view, props
+      term.write view.bytes
+      eq term.text, text.trimEnd()
+      eq term.cursor, view.cursor
+      text
+    body view, term, draw
+
+port 'cursor', 'cursor is shown at specified position after render', ->
+  watched InputApp, {}, (view, term, draw) ->
+    draw()
+    eq term.cursor, { x: 2, y: 0 }
+
+for incremental in [false, true]
+  port 'cursor', "memoized cursor survives sibling updates (incremental: #{incremental})", ->
+    Memo = component
+      @status := 'Waiting'
+      @finished := false
+      render
+        Box flexDirection: 'column'
+          if @finished
+            Text "Finished"
+          else
+            Box focusable: true, autofocus: true, cursor: { x: 2, y: 0 }
+              Text "Input"
+            Text "#{@status}"
+    watched Memo, {}, (view, term, draw) ->
+      draw()
+      eq term.cursor, { x: 2, y: 0 }
+      eq draw(status: 'Ready'), "Input\nReady"
+      eq term.cursor, { x: 2, y: 0 }
+      ok view.bytes.lastIndexOf("#{CSI}?25h") > view.bytes.lastIndexOf("#{CSI}?25l"), 'the last word on the cursor is to show it'
+      eq draw(finished: true), "Finished"
+      eq term.cursor, null
+      ok view.bytes.includes("#{CSI}?25l") and not view.bytes.includes("#{CSI}?25h"), 'the cursor is hidden and not shown again'
+
+port 'cursor', 'cursor is not hidden by useEffect after first render', ->
+  watched InputApp, {}, (view, term, draw) ->
+    draw()
+    all = term.since 0
+    ok all.lastIndexOf("#{CSI}?25h") > all.lastIndexOf("#{CSI}?25l"), 'the last word on the cursor is to show it'
+
+port 'cursor', 'cursor follows text input', ->
+  watched InputApp, {}, (view, term, draw) ->
+    draw()
+    view.send 'a'
+    eq draw(), "> a"
+    eq term.cursor, { x: 3, y: 0 }
+
+port 'cursor', 'cursor moves on space input even when output is identical', ->
+  watched InputApp, {}, (view, term, draw) ->
+    draw()
+    view.send 'a'
+    draw()
+    view.send ' '
+    draw()
+    ok view.bytes.length > 0, 'a space that changes no cell still moves the cursor'
+    eq view.bytes.replace(/\x1b\[[?0-9;]*[A-Za-z]|\r/g, ''), '', 'and draws no cell'
+    eq term.cursor, { x: 4, y: 0 }
+
+port 'cursor', 'cursor is cleared when component using useCursor unmounts', ->
+  Parent = component
+    showChild := true
+    render
+      Box @keydown: ((event) => @showChild = false if event.key is 'Enter')
+        if showChild
+          Box focusable: true, autofocus: true, cursor: { x: 5, y: 0 }
+            Text "child"
+        else
+          Text "no cursor"
+  watched Parent, {}, (view, term, draw) ->
+    draw()
+    eq term.cursor, { x: 5, y: 0 }
+    view.send '\r'
+    eq draw(), "no cursor"
+    eq term.cursor, null
+
+port 'cursor', 'screen does not scroll up on subsequent renders', ->
+  Lines = component
+    line := ''
+    render
+      Box flexDirection: 'column', focusable: true, autofocus: true, cursor: { x: 2 + line.length, y: 1 }, @keydown: ((event) => @line += event.key)
+        Text "Header"
+        Text "> #{line}"
+  watched Lines, { rows: 4 }, (view, term, draw) ->
+    draw()
+    eq term.cursor, { x: 2, y: 1 }
+    view.send 'x'
+    eq draw(), "Header\n> x"
+    ok view.bytes.indexOf("#{CSI}?25l") < view.bytes.indexOf('x'), 'the cursor is hidden before a cell is drawn'
+    eq [term.cursor, term.scrolled], [{ x: 3, y: 1 }, 0]
+
+Fullscreen =! component
+  @lines := [0, 1, 2, 3, 4]
+  @cursorY := 2
+  @marker := ''
+  render
+    Box flexDirection: 'column', focusable: true, autofocus: true, cursor: { x: 3, y: @cursorY }
+      for n in @lines
+        Text key: n
+          "Line #{n}#{if n is 1 then @marker else ''}"
+
+for mode in ['standard rendering', 'incremental rendering']
+  port 'cursor', "#{mode} - fullscreen: cursor lands on the requested row across rerender and cursor-only update", ->
+    watched Fullscreen, { rows: 5 }, (view, term, draw) ->
+      draw()
+      eq term.cursor, { x: 3, y: 2 }
+      ok draw(marker: '!').includes 'Line 1!'
+      eq term.cursor, { x: 3, y: 2 }
+      draw cursorY: 0
+      eq term.cursor, { x: 3, y: 0 }
+      ok not view.bytes.includes('Line'), "a cursor that moves alone redraws no cell: #{JSON.stringify view.bytes}"
+
+  port 'cursor', "#{mode} - fullscreen: cursor lands on the requested row on the sync path", ->
+    watched Fullscreen, { rows: 5, props: { lines: [0, 1, 2, 3, 4, 5] } }, (view, term, draw) ->
+      draw()
+      draw marker: '!'
+      differs 'cursor', "#{mode} - fullscreen: cursor lands on the requested row on the sync path", term.cursor, { x: 3, y: 1 }, { x: 3, y: 2 },
+        'a cursor belongs to a node, so it stays on the row of the tree it was declared on — `Line 2`, the second row of a frame that shows its bottom five; Ink counts `y` from the top of what the terminal shows, which is another line of the output once the frame outgrows the terminal'
+
+# ── cursor-exit-position.tsx ──────────────────────────────────────────────────
+
+console.log "\nInk: cursor-exit-position"
+
+Parked =! component
+  render
+    Box flexDirection: 'column', focusable: true, autofocus: true, cursor: { x: 2, y: 0 }
+      Text "Header"
+      Text "Footer"
+
+for incremental in [false, true]
+  later! 'cursor-exit-position', "unmount returns a positioned cursor below the frame (incremental: #{incremental})", ->
+    term = Terminal.new 100, 10
+    running = run Parked, stdin: Stdin.new(), stdout: term
+    eq term.cursor, { x: 2, y: 0 }
+    quit()
+    await running.done
+    term.write '$ command'
+    eq term.text, "Header\nFooter\n$ command"
+
+  later! 'cursor-exit-position', "done returns the cursor once without erasing output (incremental: #{incremental})", ->
+    term = Terminal.new 100, 10
+    running = run Parked, stdin: Stdin.new(), stdout: term
+    quit()
+    await running.done
+    eq [term.text, term.cursor], ["Header\nFooter", { x: 0, y: 2 }]
+    before = term.sent.length
+    quit()
+    sleep! 0
+    eq term.sent.length, before

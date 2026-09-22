@@ -23,3 +23,6 @@ notes.txt
 
 # Reference checkouts the benchmarks race against (test/compare.rip)
 /misc/
+
+# Worktrees the desktop app makes for agents
+/.claude/worktrees/

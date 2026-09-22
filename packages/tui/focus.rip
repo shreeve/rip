@@ -1,0 +1,96 @@
+# Focus: the one node the keyboard goes to. A document holds it as
+# `active`; a node can hold it while it is `focusable`, in the tree, and
+# nothing from it up to the body is `disabled`, `hidden` or out of
+# layout. The order Tab follows is the tree's, found by a walk when Tab
+# is pressed, so no list is kept and none goes stale.
+#
+# What a node can hold changes under it — it is taken out, hidden,
+# disabled — and so does where it sits: a keyed list reordered takes a
+# node out and puts it back in one turn. So nothing is decided when the
+# tree changes. `tend` settles it before every key and every frame: a
+# focused node that cannot hold focus loses it to nothing, and a node
+# that arrived with `autofocus` takes it if nothing has it.
+
+# Whether `node` shuts the keyboard out of itself and all under it.
+shut =! (node) ->
+  s = node.styles
+  node.disabled or (s? and (s.hidden is true or s.display is 'none'))
+
+# Whether `node` can hold `doc`'s focus.
+export open =! (node, doc) ->
+  return false unless node.focusable
+  while node
+    return false if shut node
+    return true if node is doc.body
+    node = node.parentNode
+  false
+
+# The node after `node` in tree order and the one before it, under
+# `root`, passing over everything under a node that is shut.
+after =! (node, root) ->
+  return node.firstChild if node.firstChild and not shut node
+  while node isnt root
+    return node.nextSibling if node.nextSibling
+    node = node.parentNode
+  null
+
+before =! (node, root) ->
+  return null if node is root
+  return node.parentNode unless node.previousSibling
+  deepest node.previousSibling
+
+deepest =! (node) ->
+  node = node.lastChild while node.lastChild and not shut node
+  node
+
+# Move focus to `node`, or to nothing. The node that had it hears `blur`
+# before the one that takes it hears `focus`, and neither bubbles, as
+# DOM's do not. Every read agrees with the event as it is heard, as
+# DOM's do: inside the blur nothing has focus, and inside the focus the
+# node has it — so a listener that throws leaves the state whole. A
+# listener of the blur that moves focus itself has the last word.
+export take! =! (doc, node) ->
+  was = doc.active
+  return if was is node
+  doc.owe false if was?.cursor or node?.cursor
+  if was
+    doc.active = null
+    doc.lit.write null
+    was.glow?.write false
+    was.dispatchEvent { type: 'blur', bubbles: false }
+  if node and not doc.active
+    doc.active = node
+    doc.lit.write node
+    node.glow?.write true
+    node.dispatchEvent { type: 'focus', bubbles: false }
+
+# Settle what the tree's changes left open.
+export tend! =! (doc) ->
+  take doc, null if doc.active and not open doc.active, doc
+  return unless doc.claims.length
+  claims = doc.claims
+  doc.claims = []
+  node = if doc.active then null else doc.body
+  while node
+    if node.focusable and not shut(node) and claims.includes node
+      take doc, node
+      return
+    node = after node, doc.body
+
+# Tab and Shift-Tab: the next node that can hold focus, in tree order
+# and round again. With none, focus stays where it is.
+export advance! =! (doc, back) ->
+  tend doc
+  start = doc.active ?? doc.body
+  node = start
+  round = false
+  loop
+    node = if back then before(node, doc.body) else after(node, doc.body)
+    unless node
+      return if round
+      round = true
+      node = if back then deepest(doc.body) else doc.body
+    return if node is start
+    if node.focusable and not shut node
+      take doc, node
+      return

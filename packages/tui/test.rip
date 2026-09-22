@@ -138,7 +138,7 @@ def mounted(App, body)
 console.log "\nPackage"
 
 test "module exports the entry surface and nothing else", ->
-  eq Object.keys(mod).sort(), ['Box', 'Spacer', 'Text', 'mount', 'quit', 'renderToString', 'run', 'screen']
+  eq Object.keys(mod).sort(), ['Box', 'Spacer', 'Text', 'focus', 'mount', 'quit', 'renderToString', 'run', 'screen']
 
 test "declares no dependencies", ->
   pkg = JSON.parse readFileSync(join(import.meta.dir, 'package.json'), 'utf8')
@@ -165,6 +165,27 @@ test "an unknown style is refused by name, with the nearest real one", ->
       Box flexDirecton: 'row'
   throws (-> renderToString Typo), "'flexDirecton' is not a terminal style of <div> — did you mean 'flexDirection'?"
   eq typeof document, 'undefined'
+
+test "a child that fails to construct after the mount fails the next frame, and the unmount is clean", ->
+  Later = component
+    @bad := false
+    render
+      Box
+        Text "x"
+        if @bad
+          Box flexDirecton: 'row'
+  printed = []
+  held = console.error
+  console.error = (label) -> printed.push label
+  try
+    view = mount Later
+    eq view.frame(), 'x'
+    view.app.bad.value = true
+    throws (-> view.frame()), "'flexDirecton' is not a terminal style"
+    view.close()
+  finally
+    console.error = held
+  eq printed, []
 
 test "a child that fails to construct fails the mount, through the runtime's reporter", ->
   Typo = component

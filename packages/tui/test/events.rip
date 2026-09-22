@@ -1,0 +1,1273 @@
+# ==============================================================================
+# tui event tests — keys to listeners, focus, the cursor, and stdin
+#
+#   rip test/events.rip
+#
+# Ink's focus, input-hook, cursor and exit cases come first, ported
+# through `mount` and `run` (test/events/ink.rip; test/events/SOURCE.md
+# counts them). Then what this package pins for itself: the three phases
+# of a dispatch in their exact order, propagation stopped at each,
+# default actions and their prevention, focus in tree order and what
+# clears it, the cursor's arithmetic, what `run` asks of stdin and the
+# terminal and gives back on every way out, what a key costs, and a fuzz
+# of focus under a changing tree.
+# ==============================================================================
+
+import { test, eq, ok, throws } from 'rip/testing'
+import { run, quit, mount, screen, focus, Box, Text } from 'rip/tui'
+import { Event } from '../document.rip'
+import { Terminal, Stdin, find, idOf, tally } from './events/harness.rip'
+import './events/ink.rip'
+
+ESC =! '\x1b'
+CSI =! '\x1b['
+
+ON  =! "#{CSI}?25l#{CSI}?2004h#{CSI}?1004h"   # what `run` opens a terminal with
+OFF =! "#{CSI}?1004l#{CSI}?2004l"             # and withdraws, before the cursor is shown
+
+mounted =! (App, options, body) ->
+  view = mount App, { cols: 40, ...options }
+  try
+    body view
+  finally
+    view.close()
+
+# ==[ Ink's count ]==
+
+console.log "\nInk's cases, counted"
+
+test "the ported titles are the ones SOURCE.md counts", ->
+  eq tally, {
+    'focus':                      { held: 40, differs: 5 }
+    'focus-order':                { held: 0, differs: 3 }
+    'focus-empty-id-regression':  { held: 3, differs: 0 }
+    'hooks-use-input':            { held: 27, differs: 6 }
+    'hooks-use-input-kitty':      { held: 23, differs: 1 }
+    'hooks-use-input-navigation': { held: 14, differs: 4 }
+    'hooks-use-paste':            { held: 4, differs: 0 }
+    'input-keypad-enter':         { held: 2, differs: 0 }
+    'input-buffered-ctrl-c':      { held: 2, differs: 3 }
+    'exit-keyboard':              { held: 2, differs: 5 }
+    'rerender-input':             { held: 4, differs: 0 }
+    'cursor':                     { held: 10, differs: 2 }
+    'cursor-exit-position':       { held: 4, differs: 0 }
+  }
+
+# ==[ Dispatch ]==
+
+console.log "\nDispatch"
+
+log = []
+note = (name) -> (event) -> log.push "#{name} #{event.eventPhase}"
+
+# Three boxes, one inside the other, each listening in both phases.
+Nest =! component
+  render
+    Box id: 'outer', @keydownCapture: note('outer capture'), @keydown: note('outer')
+      Box id: 'middle', @keydownCapture: note('middle capture'), @keydown: note('middle')
+        Box id: 'inner', focusable: true, autofocus: true, @keydownCapture: note('inner capture'), @keydown: note('inner')
+          Text "x"
+
+test "a key runs the capture phase root to target, then the target, then bubbles to the document", ->
+  mounted Nest, {}, (view) ->
+    log.length = 0
+    document.addEventListener 'keydown', note('document capture'), true
+    document.addEventListener 'keydown', note('document')
+    view.press 'a'
+    eq log, ['document capture 1', 'outer capture 1', 'middle capture 1', 'inner capture 2', 'inner 2', 'middle 3', 'outer 3', 'document 3']
+
+test "a capture listener is asked for by `@keydownCapture:`, by `true`, or by `{ capture: true }`, and taken away the same way", ->
+  mounted Nest, {}, (view) ->
+    outer = find 'outer'
+    heard = []
+    first = -> heard.push 'flag'
+    second = -> heard.push 'option'
+    outer.addEventListener 'keydown', first, true
+    outer.addEventListener 'keydown', second, { capture: true }
+    log.length = 0
+    view.press 'a'
+    eq heard, ['flag', 'option']
+    eq log.indexOf('outer capture 1') < log.indexOf('inner 2'), true
+    outer.removeEventListener 'keydown', first
+    view.press 'a'
+    eq heard, ['flag', 'option', 'flag', 'option'], 'a capture listener is not taken away as a bubble one'
+    outer.removeEventListener 'keydown', first, true
+    outer.removeEventListener 'keydown', second, { capture: true }
+    view.press 'a'
+    eq heard.length, 4
+
+test "one handler under one type and phase is one listener, and an event dispatched again starts clear", ->
+  mounted Nest, {}, (view) ->
+    inner = find 'inner'
+    heard = []
+    twice = -> heard.push 'x'
+    inner.addEventListener 'keydown', twice
+    inner.addEventListener 'keydown', twice
+    inner.addEventListener 'keydown', twice, true
+    view.press 'a'
+    eq heard, ['x', 'x'], 'once as a bubble listener, once as a capture listener'
+    event = Event.new 'keydown', { key: 'a' }
+    inner.addEventListener 'keydown', (event) ->
+      event.preventDefault()
+      event.stopPropagation()
+    eq inner.dispatchEvent(event), false
+    eq [event.defaultPrevented, event.cancelBubble], [true, true]
+    inner.removeEventListener 'keydown', twice
+    inner.removeEventListener 'keydown', twice, true
+    log.length = 0
+    inner.listeners.keydown = []
+    eq inner.dispatchEvent(event), true, 'the flags are cleared as the dispatch begins'
+    eq log, ['outer capture 1', 'middle capture 1', 'inner capture 2', 'middle 3', 'outer 3']
+
+# Stop the key at `where`, in `phase`, and answer who heard it.
+stopped =! (where, phase) ->
+  mounted Nest, {}, (view) ->
+    log.length = 0
+    find(where).addEventListener 'keydown', ((event) -> log.push 'stop'; event.stopPropagation()), phase is 'capture'
+    view.press 'a'
+  log.slice()
+
+test "stopPropagation ends the dispatch in the capture phase, at the target, and in the bubble phase", ->
+  eq stopped('outer', 'capture'), ['outer capture 1', 'stop']
+  eq stopped('middle', 'capture'), ['outer capture 1', 'middle capture 1', 'stop']
+  eq stopped('inner', 'capture'), ['outer capture 1', 'middle capture 1', 'inner capture 2', 'stop'], 'a stop at the target in the capture phase stops its bubble listeners too, as the DOM Standard has it'
+  eq stopped('inner', 'bubble'), ['outer capture 1', 'middle capture 1', 'inner capture 2', 'inner 2', 'stop']
+  eq stopped('middle', 'bubble'), ['outer capture 1', 'middle capture 1', 'inner capture 2', 'inner 2', 'middle 3', 'stop']
+
+test "stopPropagation lets the node's other listeners hear the event, and stopImmediatePropagation does not", ->
+  mounted Nest, {}, (view) ->
+    inner = find 'inner'
+    inner.addEventListener 'keydown', (event) -> event.stopImmediatePropagation()
+    inner.addEventListener 'keydown', -> log.push 'late'
+    log.length = 0
+    view.press 'a'
+    eq log, ['outer capture 1', 'middle capture 1', 'inner capture 2', 'inner 2']
+
+test "one event object is handed to every listener, with DOM's fields", ->
+  mounted Nest, {}, (view) ->
+    seen = []
+    targets = []
+    hear = (event) ->
+      seen.push event
+      targets.push [idOf(event.target), idOf(event.currentTarget)]
+    find('outer').addEventListener 'keydown', hear, true
+    find('inner').addEventListener 'keydown', hear
+    find('outer').addEventListener 'keydown', hear
+    view.press 'ArrowUp', ctrl: true, shift: true
+    eq seen.length, 3
+    ok seen[0] is seen[1] and seen[1] is seen[2], 'each listener was handed an event of its own'
+    eq targets, [['inner', 'outer'], ['inner', 'inner'], ['inner', 'outer']]
+    event = seen[0]
+    eq [event.type, event.key, event.ctrlKey, event.shiftKey, event.altKey, event.metaKey, event.repeat], ['keydown', 'ArrowUp', true, true, false, false, false]
+    eq [event.eventPhase, event.currentTarget, event.defaultPrevented, event.bubbles], [0, null, false, true], 'after the dispatch the event is at rest'
+
+test "the bytes of a key reach its listeners as `sequence`, and a held key as `repeat`", ->
+  mounted Nest, {}, (view) ->
+    seen = []
+    document.addEventListener 'keydown', (event) -> seen.push [event.key, event.sequence, event.repeat, event.altKey]
+    view.send "#{CSI}1;5A#{CSI}97;1:2u#{ESC}x"
+    eq seen, [['ArrowUp', "#{CSI}1;5A", false, false], ['a', "#{CSI}97;1:2u", true, false], ['x', "#{ESC}x", false, true]]
+
+test "with nothing focused a key goes to the body, as DOM sends it: the app's root element does not hear it, and the document does", ->
+  Plain = component
+    render
+      Box id: 'root', @keydown: note('root')
+        Text "x"
+  mounted Plain, {}, (view) ->
+    log.length = 0
+    document.addEventListener 'keydown', note('document')
+    document.body.addEventListener 'keydown', note('body')
+    view.press 'a'
+    eq log, ['body 2', 'document 3']
+    find('root').set 'focusable', true
+    find('root').focus()
+    view.press 'a'
+    eq log, ['body 2', 'document 3', 'root 2', 'body 3', 'document 3'], 'a root that holds focus hears every key nothing under it took'
+
+test "the path is the tree as the dispatch began: a listener that moves the target out changes nothing of who hears", ->
+  mounted Nest, {}, (view) ->
+    log.length = 0
+    find('outer').addEventListener 'keydown', (-> find('middle').remove()), true
+    view.press 'a'
+    eq log, ['outer capture 1', 'middle capture 1', 'inner capture 2', 'inner 2', 'middle 3', 'outer 3']
+    eq view.focused, null, 'the node that left the tree has lost focus by the next read'
+
+test "a listener added to a node during its turn is not called in that turn, and one taken away is not called", ->
+  mounted Nest, {}, (view) ->
+    inner = find 'inner'
+    heard = []
+    late = -> heard.push 'late'
+    gone = -> heard.push 'gone'
+    inner.addEventListener 'keydown', ->
+      inner.addEventListener 'keydown', late
+      inner.removeEventListener 'keydown', gone
+    inner.addEventListener 'keydown', gone
+    view.press 'a'
+    eq heard, []
+    view.press 'a'
+    eq heard, ['late']
+
+test "a dispatch inside a dispatch keeps both paths: focus moved by a listener fires its events at once", ->
+  mounted Nest, {}, (view) ->
+    log.length = 0
+    find('middle').set 'focusable', true
+    find('inner').addEventListener 'blur', note('blur')
+    find('middle').addEventListener 'focus', note('focus')
+    find('inner').addEventListener 'keydown', -> find('middle').focus()
+    view.press 'a'
+    eq log, ['outer capture 1', 'middle capture 1', 'inner capture 2', 'inner 2', 'blur 2', 'focus 2', 'middle 3', 'outer 3']
+
+test "a paste goes to the focused node as one `paste` event with its text, and bubbles", ->
+  got = []
+  Pasted = component
+    render
+      Box @paste: ((event) -> got.push ['outer', event.text, idOf event.target])
+        Box id: 'field', focusable: true, autofocus: true, @paste: ((event) -> got.push ['field', event.text, event.type])
+          Text "x"
+  mounted Pasted, {}, (view) ->
+    view.paste 'two\rlines'
+    view.send "#{CSI}200~from the terminal#{CSI}201~"
+    eq got, [['field', 'two\rlines', 'paste'], ['outer', 'two\rlines', 'field'], ['field', 'from the terminal', 'paste'], ['outer', 'from the terminal', 'field']]
+
+test "a component's `emit` bubbles through the same dispatch", ->
+  got = []
+  Child = component
+    render
+      Box focusable: true, autofocus: true, @keydown: (=> @emit 'chosen', 7)
+        Text "x"
+  Parent = component
+    render
+      Box @chosen: ((event) -> got.push [event.type, event.detail, event.eventPhase])
+        Child
+  mounted Parent, {}, (view) ->
+    view.press 'Enter'
+    eq got, [['chosen', 7, 3]]
+
+test "`press`, `type`, `paste` and `send` take one road: what a listener hears is the same", ->
+  mounted Nest, {}, (view) ->
+    seen = []
+    document.addEventListener 'keydown', (event) -> seen.push [event.key, event.shiftKey, event.ctrlKey]
+    view.press 'a'
+    view.type 'a'
+    view.send 'a'
+    view.press 'A', shift: true
+    view.type 'A'
+    view.press "#{CSI}1;5A"
+    view.press 'ArrowUp', ctrl: true
+    eq seen, [['a', false, false], ['a', false, false], ['a', false, false], ['A', true, false], ['A', true, false], ['ArrowUp', false, true], ['ArrowUp', false, true]]
+
+test "a lone ESC is the Escape key only once its wait has run out", ->
+  mounted Nest, {}, (view) ->
+    seen = []
+    document.addEventListener 'keydown', (event) -> seen.push event.key
+    view.send ESC
+    view.tick 49
+    eq seen, []
+    view.tick 1
+    eq seen, ['Escape']
+    view.send ESC
+    view.send '[A'
+    view.tick 1000
+    eq seen, ['Escape', 'ArrowUp']
+
+test "a close leaves no wait of the parser armed", ->
+  view = mount Nest
+  view.send ESC
+  eq view.held.clock.due.length, 1
+  view.close()
+  eq view.held.clock.due.length, 0
+
+# ==[ Default actions ]==
+
+console.log "\nDefault actions"
+
+Trio =! component
+  @keep := false
+  render
+    Box @keydown: ((event) => event.preventDefault() if @keep)
+      Box id: 'a', focusable: true
+        Text "a"
+      Box id: 'b', focusable: true
+        Text "b"
+      Box id: 'c', focusable: true
+        Text "c"
+
+test "Tab and Shift-Tab move focus, and a prevented one does not", ->
+  mounted Trio, {}, (view) ->
+    view.press 'Tab'
+    view.press 'Tab'
+    eq idOf(view.focused), 'b'
+    view.press 'Tab', shift: true
+    eq idOf(view.focused), 'a'
+    view.app.keep.value = true
+    view.press 'Tab'
+    view.send '\t'
+    view.send "#{CSI}Z"
+    eq idOf(view.focused), 'a'
+
+test "Tab under Ctrl, Alt or Meta is no focus key", ->
+  mounted Trio, {}, (view) ->
+    view.press 'Tab', ctrl: true
+    view.press 'Tab', alt: true
+    view.press 'Tab', meta: true
+    eq view.focused, null
+
+test! "Ctrl-C quits as `quit()` does, and a prevented one does not", ->
+  view = mount Trio
+  view.press 'c', ctrl: true
+  eq await view.done, undefined
+  eq typeof document, 'undefined'
+  kept = mount Trio, props: { keep: true }
+  try
+    kept.press 'Tab'
+    kept.send '\x03'
+    kept.press 'c', ctrl: true
+    sleep! 0
+    ok document?, 'a Ctrl-C the app kept closed it'
+    kept.press 'C', ctrl: true, shift: true
+    kept.press 'c', ctrl: true, alt: true
+  finally
+    kept.close()
+
+test! "a key that follows the one that quit, in the same read, is nobody's", ->
+  heard = []
+  Quits = component
+    render
+      Box focusable: true, autofocus: true, @keydown: ((event) -> heard.push event.key; quit 'done' if event.key is 'q')
+        Text "x"
+  view = mount Quits
+  try
+    view.send 'aqbc'
+    eq heard, ['a', 'q']
+    eq await view.done, 'done'
+  finally
+    view.close()
+
+test "Escape does nothing by default", ->
+  mounted Trio, {}, (view) ->
+    view.press 'Tab'
+    view.press 'Escape'
+    eq idOf(view.focused), 'a'
+    ok document?
+
+# ==[ Focus ]==
+
+console.log "\nFocus"
+
+Board =! component
+  @order := ['a', 'b', 'c', 'd']
+  @gone := null
+  @hidden := null
+  @off := null
+  @none := null
+  left ~= @order.filter (name) => name isnt @gone
+  render
+    Box flexDirection: 'column'
+      for name in left
+        Box key: name, id: name, focusable: true, hidden: name is @hidden, disabled: name is @off, display: (if name is @none then 'none' else 'flex')
+          Text "#{name}"
+
+# Every id Tab reaches from where focus is, until it comes back round.
+cycle =! (view, key = 'Tab', mods = {}) ->
+  reached = []
+  loop
+    view.press key, mods
+    id = idOf view.focused
+    break if id is null or id in reached
+    reached.push id
+  reached
+
+test "focus order is tree order, found when Tab is pressed: a keyed list reordered is walked as it stands", ->
+  mounted Board, {}, (view) ->
+    eq cycle(view), ['a', 'b', 'c', 'd']
+    view.app.order.value = ['d', 'b', 'a', 'c']
+    focus.to null
+    eq cycle(view), ['d', 'b', 'a', 'c']
+    focus.to null
+    eq cycle(view, 'Tab', shift: true), ['c', 'a', 'b', 'd']
+
+test "a focused node that a reorder moves keeps its focus, and hears neither blur nor focus", ->
+  mounted Board, {}, (view) ->
+    find('b').focus()
+    heard = []
+    find('b').addEventListener 'blur', -> heard.push 'blur'
+    find('b').addEventListener 'focus', -> heard.push 'focus'
+    view.app.order.value = ['d', 'c', 'b', 'a']
+    view.frame()
+    eq [idOf(view.focused), heard], ['b', []]
+    view.press 'Tab'
+    eq idOf(view.focused), 'a'
+
+test "a focused node that is removed, hidden, disabled or taken out of layout loses focus to nothing, and hears blur once", ->
+  for how in ['gone', 'hidden', 'off', 'none']
+    mounted Board, {}, (view) ->
+      heard = []
+      node = find 'b'
+      node.focus()
+      node.addEventListener 'blur', -> heard.push 'blur'
+      view.app[how].value = 'b'
+      eq [how, document.activeElement, focus.active], [how, null, null]
+      view.frame()
+      eq [how, view.focused, heard, node.focused], [how, null, ['blur'], false]
+      view.press 'Tab'
+      eq [how, idOf view.focused], [how, 'a'], 'Tab starts again from the top'
+
+test "hidden and disabled subtrees are passed over whole, and an ancestor's `disabled` is its descendants'", ->
+  Deep = component
+    @shut := 'hidden'
+    render
+      Box flexDirection: 'column'
+        Box id: 'one', focusable: true
+          Text "one"
+        Box id: 'group', hidden: @shut is 'hidden', disabled: @shut is 'disabled', display: (if @shut is 'none' then 'none' else 'flex')
+          Box id: 'two', focusable: true
+            Box id: 'three', focusable: true
+              Text "three"
+        Box id: 'four', focusable: true
+          Text "four"
+  for shut in ['hidden', 'disabled', 'none']
+    mounted Deep, { props: { shut } }, (view) ->
+      eq cycle(view), ['one', 'four']
+      focus.to null
+      eq cycle(view, 'Tab', shift: true), ['four', 'one']
+      find('three').focus()
+      focus.to find 'two'
+      eq idOf(view.focused), 'four', "a node under a #{shut} box took focus"
+      view.app.shut.value = ''
+      focus.to null
+      eq cycle(view), ['one', 'two', 'three', 'four'], 'a focusable node inside a focusable node is reached after it'
+
+test "`focus()` on a node that cannot take it changes nothing, and `blur()` on a node that does not hold it", ->
+  mounted Board, { props: { off: 'c' } }, (view) ->
+    find('a').focus()
+    find('c').focus()
+    document.body.focus()
+    document.createElement('div').focus()
+    eq idOf(view.focused), 'a'
+    find('b').blur()
+    eq idOf(view.focused), 'a'
+    find('a').blur()
+    eq view.focused, null
+
+test "focus and blur pair up, do not bubble, and are heard above in the capture phase", ->
+  heard = []
+  Pairs = component
+    render
+      Box @focus: (-> heard.push 'bubbled focus'), @blur: (-> heard.push 'bubbled blur'), @focusCapture: ((event) -> heard.push "capture focus #{idOf event.target}"), @blurCapture: ((event) -> heard.push "capture blur #{idOf event.target}")
+        Box id: 'a', focusable: true, @focus: (-> heard.push 'focus a'), @blur: (-> heard.push 'blur a')
+          Text "a"
+        Box id: 'b', focusable: true, @focus: (-> heard.push 'focus b'), @blur: (-> heard.push 'blur b')
+          Text "b"
+  mounted Pairs, {}, (view) ->
+    view.press 'Tab'
+    view.press 'Tab'
+    find('b').focus()
+    focus.to null
+    eq heard, ['capture focus a', 'focus a', 'capture blur a', 'blur a', 'capture focus b', 'focus b', 'capture blur b', 'blur b']
+
+test "inside `focus` and `blur` every read agrees with the event, as DOM's do", ->
+  seen = []
+  snap = (tag) -> -> seen.push [tag, idOf(document.activeElement), idOf(focus.active), find('a').focused, find('b').focused]
+  mounted Board, {}, (view) ->
+    find('a').focused
+    find('b').focused
+    find('a').addEventListener 'focus', snap 'focus a'
+    find('a').addEventListener 'blur', snap 'blur a'
+    find('b').addEventListener 'focus', snap 'focus b'
+    find('a').focus()
+    find('b').focus()
+    eq seen, [['focus a', 'a', 'a', true, false], ['blur a', null, null, false, false], ['focus b', 'b', 'b', false, true]]
+
+test "a `blur` listener that throws leaves the state whole: the reads agree, keys go where they say, and the next Tab is one blur and one focus", ->
+  mounted Board, {}, (view) ->
+    a = find 'a'
+    b = find 'b'
+    a.focus()
+    boom = -> raise 'blur boom'
+    a.addEventListener 'blur', boom
+    throws (-> b.focus()), 'blur boom'
+    a.removeEventListener 'blur', boom
+    eq [idOf(document.activeElement), idOf(focus.active), idOf(view.focused), a.focused, b.focused], [null, null, null, false, false]
+    heard = []
+    a.addEventListener 'keydown', -> heard.push 'a'
+    b.addEventListener 'keydown', -> heard.push 'b'
+    document.body.addEventListener 'keydown', -> heard.push 'body'
+    view.press 'x'
+    eq heard, ['body']
+    events = []
+    for node in [a, b]
+      node.addEventListener 'focus', ((event) -> events.push "focus #{idOf event.target}")
+      node.addEventListener 'blur', ((event) -> events.push "blur #{idOf event.target}")
+    view.press 'Tab'
+    view.press 'Tab'
+    eq events, ['focus a', 'blur a', 'focus b']
+
+test "`focus.active`, `document.activeElement` and `view.focused` agree the moment an `autofocus` node arrives", ->
+  Arrives = component
+    @more := false
+    render
+      Box flexDirection: 'column'
+        Text "x"
+        if @more
+          Box id: 'late', focusable: true, autofocus: true
+            Text "late"
+  mounted Arrives, {}, (view) ->
+    eq [focus.active, document.activeElement, view.focused], [null, null, null]
+    view.app.more.value = true
+    eq idOf(focus.active), 'late'
+    eq [idOf(document.activeElement), idOf(view.focused)], ['late', 'late']
+
+test "a node styles itself by `focused`, a reactive read, and `focus.active` is one too", ->
+  Lit = component
+    el := null
+    render
+      Box flexDirection: 'column'
+        div ref: el, id: 'field', focusable: true
+          Text inverse: el?.focused
+            "#{if el?.focused then 'on' else 'off'}"
+        Text "#{focus.active?.getAttribute('id') ?? 'nothing'} has focus"
+  mounted Lit, {}, (view) ->
+    eq view.frame(), "off\nnothing has focus"
+    view.press 'Tab'
+    eq view.frame(), "on\nfield has focus"
+    ok view.ansi.includes("#{CSI}7mon"), JSON.stringify view.ansi
+    view.press 'Tab'
+    eq view.frame(), "on\nfield has focus", 'Tab from the only node comes back to it'
+    find('field').blur()
+    eq view.frame(), "off\nnothing has focus"
+
+test "`autofocus` is a claim made once: on mount the first in tree order takes it, a later node takes it only if nothing holds it", ->
+  Claims = component
+    @more := false
+    @again := false
+    render
+      Box flexDirection: 'column'
+        Box id: 'plain', focusable: true
+          Text "plain"
+        Box id: 'first', focusable: true, autofocus: true
+          Text "first"
+        Box id: 'second', focusable: true, autofocus: true
+          Text "second"
+        if @more
+          Box id: 'later', focusable: true, autofocus: true
+            Text "later"
+        if @again
+          Box id: 'again', focusable: true, autofocus: true
+            Text "again"
+  mounted Claims, {}, (view) ->
+    eq idOf(view.focused), 'first'
+    view.app.more.value = true
+    eq idOf(view.focused), 'first', 'a node that arrives takes no focus from the one that holds it'
+    focus.to null
+    view.frame()
+    eq view.focused, null, 'a claim is made once, and is not made again when focus is let go'
+    view.app.again.value = true
+    eq idOf(view.focused), 'again', 'a node that arrives when nothing holds focus takes it'
+
+test "claims are settled in tree order, whatever order they were made in", ->
+  mounted Trio, {}, (view) ->
+    find('c').set 'autofocus', true
+    find('b').set 'autofocus', true
+    eq idOf(view.focused), 'b'
+
+test "`autofocus` on a node that cannot take focus claims nothing", ->
+  Cannot = component
+    render
+      Box
+        Box id: 'a', autofocus: true
+          Text "a"
+        Box id: 'b', focusable: true, autofocus: true, disabled: true
+          Text "b"
+  mounted Cannot, {}, (view) ->
+    eq view.focused, null
+
+test "`screen.focused` follows the terminal's focus reports", ->
+  Shown = component
+    render
+      Text "#{if screen.focused then 'here' else 'away'}"
+  mounted Shown, {}, (view) ->
+    eq view.frame(), 'here'
+    view.send "#{CSI}O"
+    eq view.frame(), 'away'
+    view.send "#{CSI}I"
+    eq view.frame(), 'here'
+
+# ==[ README ]==
+
+console.log "\nREADME"
+
+# The select list of README.md, "Input and focus", as it is written there.
+Select =! component
+  @items := []
+  @chosen := null
+  at := 0
+  el := null
+  move: (event) ->
+    switch event.key
+      when 'ArrowDown' then @at = (@at + 1) % @items.length
+      when 'ArrowUp'   then @at = (@at - 1 + @items.length) % @items.length
+      when 'Enter'     then @chosen = @items[@at]
+  render
+    div ref: el, focusable: true, autofocus: true, @keydown: @move, borderStyle: 'round', borderColor: (if el?.focused then 'cyan' else 'gray')
+      for item, n in @items
+        Text key: item, inverse: n is at
+          "#{item}"
+
+test "the README's select list: arrows move the choice, Enter takes it, and the border says who has focus", ->
+  mounted Select, { cols: 12, props: { items: ['tea', 'coffee', 'water'] } }, (view) ->
+    eq view.frame(), "╭──────────╮\n│tea       │\n│coffee    │\n│water     │\n╰──────────╯"
+    ok view.ansi.includes("#{CSI}36m╭") and /7mtea/.test(view.ansi), JSON.stringify view.ansi
+    view.press 'ArrowDown'
+    view.frame()
+    ok /7mcoffee/.test(view.ansi) and not /7mtea/.test(view.ansi), JSON.stringify view.ansi
+    view.press 'ArrowUp'
+    view.press 'ArrowUp'
+    view.press 'Enter'
+    eq view.app.chosen.value, 'water'
+    view.focused.blur()
+    view.frame()
+    ok view.ansi.includes("#{CSI}90m╭"), 'a border that lost focus is gray'
+
+# The text input of README.md: a key that types is one code point, and
+# the buffer is cut into clusters for the cursor and for Backspace.
+clusters =! Intl.Segmenter.new undefined, { granularity: 'grapheme' }
+Input =! component
+  @value := ''
+  typed: (event) ->
+    if event.key is 'Backspace'
+      parts = Array.from clusters.segment(@value), (part) -> part.segment
+      @value = parts.slice(0, -1).join ''
+    else if Array.from(event.key).length is 1 and not event.ctrlKey and not event.altKey and not event.metaKey
+      @value += event.key
+  render
+    Box focusable: true, autofocus: true, borderStyle: 'single', width: 20, cursor: { x: 1 + Bun.stringWidth(@value), y: 1 }, @keydown: @typed, @paste: ((event) => @value += event.text)
+      Text "#{@value}"
+
+test "the README's text input: code points in, clusters out, and the cursor after the last cell", ->
+  family = '\u{1F468}‍\u{1F469}‍\u{1F467}'
+  mounted Input, {}, (view) ->
+    view.type 'hi 你'
+    view.frame()
+    eq [view.app.value.value, view.cursor], ['hi 你', { x: 6, y: 1 }]
+    view.type family
+    eq Array.from(view.app.value.value).length, 9, 'a family emoji is five key events'
+    view.press 'Backspace'
+    eq view.app.value.value, 'hi 你', 'and one Backspace'
+    view.paste '!!'
+    view.press 'a', ctrl: true
+    view.press 'ArrowLeft'
+    view.frame()
+    eq [view.app.value.value, view.cursor], ['hi 你!!', { x: 8, y: 1 }]
+
+# ==[ Cursor ]==
+
+console.log "\nCursor"
+
+# Draw a frame, send its bytes to a terminal `run` would have opened, and
+# hold the terminal's cursor to the mount's.
+shown =! (view, term) ->
+  text = view.frame()
+  term.write view.bytes
+  eq term.text, text.trimEnd()
+  eq term.cursor, view.cursor
+  view.cursor
+
+hiddenTerminal =! (cols = 40, rows = 10) ->
+  term = Terminal.new cols, rows
+  term.write "#{CSI}?25l"
+  term
+
+test "a focused node's cursor is parked at its corner plus (x, y), under the padding and borders above it", ->
+  Padded = component
+    @x := 0
+    @y := 0
+    render
+      Box borderStyle: 'single', padding: 1, paddingLeft: 3
+        Text "title"
+        Box id: 'field', focusable: true, autofocus: true, borderStyle: 'round', paddingX: 2, cursor: { x: @x, y: @y }
+          Text "value"
+  mounted Padded, {}, (view) ->
+    term = hiddenTerminal()
+    eq shown(view, term), { x: 4, y: 3 }, 'the corner of the field: a border and 3 cells in, a border, a row of padding and a title down'
+    view.app.x.value = 3
+    view.app.y.value = 1
+    eq shown(view, term), { x: 7, y: 4 }
+    eq term.lines[4][7], 'v', 'x and y count from the field\'s own border, so its text begins at (3, 1)'
+
+test "only the focused node's cursor counts, and with none the cursor is hidden", ->
+  Two = component
+    render
+      Box flexDirection: 'column'
+        Box id: 'a', focusable: true, cursor: { x: 1, y: 0 }
+          Text "aaa"
+        Box id: 'b', focusable: true
+          Text "bbb"
+        Box id: 'c', focusable: true, cursor: { x: 2, y: 0 }
+          Text "ccc"
+  mounted Two, {}, (view) ->
+    term = hiddenTerminal()
+    eq shown(view, term), null
+    eq view.bytes.includes("#{CSI}?25"), false, 'a cursor that stays hidden is not hidden again'
+    view.press 'Tab'
+    eq shown(view, term), { x: 1, y: 0 }
+    view.press 'Tab'
+    eq shown(view, term), null
+    view.press 'Tab'
+    eq shown(view, term), { x: 2, y: 2 }
+    find('c').set 'cursor', null
+    eq shown(view, term), null
+
+test "content offsets above the node move its cursor, nested ones add up, and a clip that hides it hides the cursor", ->
+  Scrolled = component
+    @outer := 0
+    @inner := 0
+    @across := 0
+    render
+      Box height: 4, width: 12, overflow: 'hidden', borderStyle: 'single', contentOffsetY: @outer, contentOffsetX: @across
+        Box flexDirection: 'column', flexShrink: 0, contentOffsetY: @inner
+          Text "zero"
+          Text "one"
+          Box id: 'field', focusable: true, autofocus: true, flexShrink: 0, cursor: { x: 1, y: 0 }
+            Text "two"
+  mounted Scrolled, {}, (view) ->
+    term = hiddenTerminal()
+    eq shown(view, term), null, 'the field is on the row the bottom border is drawn over: clipped'
+    view.app.outer.value = 1
+    eq shown(view, term), { x: 2, y: 2 }
+    view.app.inner.value = 1
+    eq shown(view, term), { x: 2, y: 1 }
+    view.app.inner.value = 2
+    eq shown(view, term), null, 'scrolled onto the top border: the clip is the padding box, inside the border'
+    view.app.inner.value = 0
+    view.app.across.value = 1
+    eq shown(view, term), { x: 1, y: 2 }
+    view.app.across.value = 2
+    eq shown(view, term), null, 'scrolled under the left border'
+    view.app.across.value = -9
+    eq shown(view, term), null, 'and past the right one'
+
+test "x is in cells: a cursor after two wide glyphs is four cells in", ->
+  Wide = component
+    render
+      Box focusable: true, autofocus: true, cursor: { x: 4, y: 0 }
+        Text "你好!"
+  mounted Wide, {}, (view) ->
+    term = hiddenTerminal()
+    eq shown(view, term), { x: 4, y: 0 }
+    eq term.lines[0][4], '!'
+
+test "in a frame taller than the terminal the cursor is counted from the first row shown, and hidden on a row that is not", ->
+  Tall = component
+    @row := 5
+    render
+      Box flexDirection: 'column', focusable: true, autofocus: true, cursor: { x: 1, y: @row }
+        for n in [0, 1, 2, 3, 4, 5]
+          Text key: n
+            "row #{n}"
+  mounted Tall, { rows: 4 }, (view) ->
+    term = hiddenTerminal 40, 4
+    eq shown(view, term), { x: 1, y: 3 }
+    view.app.row.value = 2
+    eq shown(view, term), { x: 1, y: 0 }
+    view.app.row.value = 1
+    eq shown(view, term), null
+
+test "a cursor off the screen's right edge is hidden, and one a frame's diff crosses is put back", ->
+  Edge = component
+    @x := 39
+    @label := 'a'
+    render
+      Box flexDirection: 'column', width: 40
+        Text "#{@label}"
+        Box focusable: true, autofocus: true, cursor: { x: @x, y: 0 }
+          Text "field"
+  mounted Edge, {}, (view) ->
+    term = hiddenTerminal()
+    eq shown(view, term), { x: 39, y: 1 }
+    view.app.label.value = 'b'
+    eq shown(view, term), { x: 39, y: 1 }
+    eq term.text, "b\nfield"
+    view.app.x.value = 40
+    eq shown(view, term), null
+
+test "a cursor is refused unless it is `{ x, y }` in whole cells", ->
+  mounted Trio, {}, (view) ->
+    node = find 'a'
+    throws (-> node.set 'cursor', { x: 1 }), 'cursor'
+    throws (-> node.set 'cursor', { x: -1, y: 0 }), 'cursor'
+    throws (-> node.set 'cursor', { x: 0.5, y: 0 }), 'cursor'
+    throws (-> node.set 'cursor', 'here'), 'cursor'
+    node.set 'cursor', { x: 0, y: 0 }
+    node.set 'cursor', undefined
+
+test! "on quit the cursor returns to the line below the frame and is shown", ->
+  Parked = component
+    render
+      Box flexDirection: 'column', focusable: true, autofocus: true, cursor: { x: 3, y: 1 }
+        Text "one"
+        Text "two"
+        Text "three"
+  term = Terminal.new 40, 10
+  running = run Parked, stdin: Stdin.new(), stdout: term
+  eq term.cursor, { x: 3, y: 1 }
+  quit()
+  await running.done
+  eq [term.text, term.cursor], ["one\ntwo\nthree", { x: 0, y: 3 }]
+
+# ==[ stdin and the terminal ]==
+
+console.log "\nstdin"
+
+Echo =! component
+  @keys := []
+  @label := 'x'
+  render
+    Box focusable: true, autofocus: true, @keydown: ((event) => @keys.push event.key)
+      Text "#{@label}"
+
+test! "run sets raw mode, asks for bracketed paste and focus reports, and quit gives all of it back, in order", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Echo, stdin: stdin, stdout: term
+  ok term.since(0).startsWith(ON), JSON.stringify term.since 0
+  eq [stdin.calls, stdin.raw, stdin.listenerCount('data')], [['raw on', 'ref', 'resume'], true, 1]
+  ok term.modes.has(2004) and term.modes.has(1004) and not term.shown
+  stdin.key 'a'
+  stdin.key Buffer.from "#{CSI}A"
+  eq running.app.keys.value, ['a', 'ArrowUp']
+  mark = term.sent.length
+  quit()
+  await running.done
+  eq term.since(mark), "#{OFF}\n#{CSI}?25h"
+  eq [stdin.calls, stdin.raw, stdin.listenerCount('data')], [['raw on', 'ref', 'resume', 'raw off', 'pause', 'unref'], false, 0]
+  ok not term.modes.has(2004) and not term.modes.has(1004) and term.shown
+  stdin.key 'b'
+
+test! "Ctrl-C from stdin is the same way out", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Echo, stdin: stdin, stdout: term
+  mark = term.sent.length
+  stdin.key '\x03'
+  await running.done
+  eq term.since(mark), "#{OFF}\n#{CSI}?25h"
+  eq stdin.calls.slice(3), ['raw off', 'pause', 'unref']
+
+test "a throw while the app mounts gives back everything that was asked for", ->
+  Bad = component
+    render
+      Box justifyContent: 'centre'
+  stdin = Stdin.new()
+  term = Terminal.new()
+  throws (-> run Bad, stdin: stdin, stdout: term), '"centre" is not one of'
+  eq term.since(0), "#{ON}#{OFF}#{CSI}?25h"
+  eq [stdin.calls, stdin.listenerCount('data')], [['raw on', 'ref', 'resume', 'raw off', 'pause', 'unref'], 0]
+  eq typeof document, 'undefined'
+
+test! "a frame that fails later gives it back, and `done` rejects", ->
+  Restless = component
+    @grows := false
+    el := null
+    render
+      Box flexDirection: 'row'
+        div ref: el, width: (if @grows then (el?.box.w ?? 0) + 1 else 5)
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Restless, stdin: stdin, stdout: term
+  running.app.grows.value = true
+  failure = null
+  try
+    await running.done
+  catch error
+    failure = error
+  ok failure?.message.includes('layout did not settle'), "done rejected with #{failure?.message}"
+  ok term.since(0).endsWith("#{OFF}#{CSI}?25h"), JSON.stringify term.since(0).slice -40
+  eq [stdin.calls.slice(3), stdin.raw, stdin.listenerCount('data')], [['raw off', 'pause', 'unref'], false, 0]
+
+test! "a listener that throws gives it back, and `done` rejects with what it threw", ->
+  Throws = component
+    render
+      Box focusable: true, autofocus: true, @keydown: (-> raise 'a listener failed')
+        Text "x"
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Throws, stdin: stdin, stdout: term
+  stdin.key 'a'
+  failure = null
+  try
+    await running.done
+  catch error
+    failure = error
+  eq failure?.message, 'a listener failed'
+  ok term.since(0).endsWith("#{OFF}#{CSI}?25h"), JSON.stringify term.since(0).slice -40
+  eq [stdin.calls.slice(3), stdin.raw, typeof document], [['raw off', 'pause', 'unref'], false, 'undefined']
+
+test! "a stdin that is no terminal is left alone: no raw mode, no modes asked of the terminal, no listener, no throw", ->
+  stdin = Stdin.new false
+  term = Terminal.new()
+  running = run Echo, stdin: stdin, stdout: term
+  eq [stdin.calls, stdin.listenerCount('data')], [[], 0]
+  ok term.since(0).startsWith("#{CSI}?25l#{CSI}?2026h"), JSON.stringify term.since(0).slice 0, 30
+  quit()
+  await running.done
+  ok not term.since(0).includes('2004') and not term.since(0).includes('1004')
+  bare = { isTTY: true, on: (->), off: (->) }
+  again = run Echo, stdin: bare, stdout: Terminal.new()
+  quit()
+  await again.done
+
+test! "a `quit`, a `close` by hand, and a second mount in one turn: the quit is the first app's alone, and both `done`s settle", ->
+  first = mount Echo
+  quit 'first'
+  first.close()
+  second = mount Echo
+  sleep! 0
+  eq second.frame(), 'x', 'the second app is still mounted'
+  eq await first.done, undefined, 'an app closed by hand resolves with nothing'
+  settled = 'pending'
+  second.done.then -> settled = 'resolved'
+  sleep! 0
+  eq settled, 'pending'
+  second.close()
+  eq await second.done, undefined
+
+test! "a quit whose last owed frame fails still shows the cursor and withdraws the modes, and `done` rejects with the frame's error", ->
+  Restless = component
+    @grows := false
+    el := null
+    render
+      Box flexDirection: 'row', focusable: true, autofocus: true, cursor: { x: 1, y: 0 }
+        Text "field"
+        div ref: el, width: (if @grows then (el?.box.w ?? 0) + 1 else 5)
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Restless, stdin: stdin, stdout: term
+  eq term.cursor, { x: 1, y: 0 }
+  running.app.grows.value = true
+  quit()
+  failure = null
+  try
+    await running.done
+  catch error
+    failure = error
+  ok failure?.message.includes('layout did not settle'), "done rejected with #{failure?.message}"
+  ok term.since(0).endsWith("#{OFF}#{CSI}?25l\r\n#{CSI}?25h"), JSON.stringify term.since(0).slice -40
+  eq [term.cursor, term.modes.has(2004), term.modes.has(1004)], [{ x: 0, y: 1 }, false, false], 'the cursor is on the line below the frame, shown, and the modes are withdrawn'
+  eq [stdin.raw, stdin.listenerCount('data'), typeof document], [false, 0, 'undefined']
+
+test! "a stdin whose raw mode cannot be set fails the run and leaves nothing installed", ->
+  stdin = Stdin.new()
+  stdin.setRawMode = -> raise 'EBADF: setRawMode'
+  term = Terminal.new()
+  throws (-> run Echo, stdin: stdin, stdout: term), 'EBADF'
+  eq [typeof document, stdin.listenerCount('data'), stdin.calls], ['undefined', 0, []]
+  ok not term.since(0).includes('2004'), 'nothing was asked of the terminal'
+  again = mount Echo
+  again.close()
+
+test! "a terminal whose write fails at close still gives stdin and the document back, and `done` rejects", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Echo, stdin: stdin, stdout: term
+  term.write = -> raise 'EPIPE'
+  quit 'gone'
+  failure = null
+  try
+    await running.done
+  catch error
+    failure = error
+  eq [failure?.message, stdin.raw, stdin.listenerCount('data'), typeof document], ['EPIPE', false, 0, 'undefined']
+
+test! "a child that a key's change makes, and which fails to construct, fails the key with its own error, and leaves nothing half mounted", ->
+  Grows = component
+    @bad := false
+    render
+      Box focusable: true, autofocus: true, flexDirection: 'column', @keydown: ((event) => @bad = true if event.key is 'B')
+        Text "x"
+        if @bad
+          Box width: 'nonsense'
+            Text "bad"
+  printed = []
+  held = console.error
+  console.error = (...args) -> printed.push args.join ' '
+  try
+    view = mount Grows
+    throws (-> view.press 'B'), '"nonsense" is not a length'
+    ok document?, 'under mount the key throws to the test, and the app stands'
+    view.close()
+    stdin = Stdin.new()
+    term = Terminal.new()
+    running = run Grows, stdin: stdin, stdout: term
+    stdin.key 'B'
+    failure = null
+    try
+      await running.done
+    catch error
+      failure = error
+    ok failure?.message.includes('"nonsense" is not a length'), "done rejected with #{failure?.message}"
+    eq [typeof document, stdin.raw], ['undefined', false]
+  finally
+    console.error = held
+  eq printed, []
+
+test! "a lone ESC from stdin is Escape after the runtime's own 50 ms, and a quit forgets one still held", ->
+  stdin = Stdin.new()
+  running = run Echo, stdin: stdin, stdout: Terminal.new()
+  stdin.key ESC
+  eq running.app.keys.value, []
+  sleep! 80
+  eq running.app.keys.value, ['Escape']
+  stdin.key ESC
+  quit()
+  await running.done
+  sleep! 80
+  eq running.app.keys.value, ['Escape']
+
+# ==[ What a key costs ]==
+
+console.log "\nCost"
+
+Cells =! component
+  count := 0
+  render
+    Box flexDirection: 'column', focusable: true, autofocus: true, @keydown: ((event) => @count += 1 if event.key is '+')
+      Text "a line that stays"
+      Text "count #{count}"
+
+test "a key that changes nothing draws nothing, and one that changes a cell owes that cell's words", ->
+  mounted Cells, {}, (view) ->
+    view.frame()
+    view.press 'x'
+    view.press 'Tab'
+    view.frame()
+    eq [view.bytes, view.damage], ['', 0]
+    view.press '+'
+    view.frame()
+    eq view.damage, 7
+    ok view.bytes.includes('1') and not view.bytes.includes('count'), JSON.stringify view.bytes
+
+test! "under `run` a key that changes nothing books no frame and writes nothing", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Cells, stdin: stdin, stdout: term
+  mark = term.sent.length
+  owed = 0
+  book = document.onOwe
+  document.onOwe = ->
+    owed += 1
+    book()
+  stdin.key 'x'
+  stdin.key '\t'
+  sleep! 30
+  eq [term.sent.length, owed], [mark, 0]
+  stdin.key '+++'
+  sleep! 30
+  eq [term.sent.length, term.text], [mark + 1, "a line that stays\ncount 3"], 'one read is one frame'
+  quit()
+  await running.done
+
+test! "under `run` a cursor that moves alone — by focus, or by what the focused node declares — owes a frame of moves and no cell", ->
+  Fields = component
+    at := 0
+    render
+      Box flexDirection: 'column', @keydownCapture: ((event) => @at += 1 if event.key is 'ArrowRight')
+        Box focusable: true, autofocus: true, cursor: { x: at, y: 0 }
+          Text "one"
+        Box focusable: true, cursor: { x: 2, y: 0 }
+          Text "two"
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Fields, stdin: stdin, stdout: term
+  eq term.cursor, { x: 0, y: 0 }
+  mark = term.sent.length
+  stdin.key "#{CSI}C"
+  sleep! 30
+  eq term.cursor, { x: 1, y: 0 }
+  stdin.key '\t'
+  sleep! 30
+  eq term.cursor, { x: 2, y: 1 }
+  eq term.since(mark).replace(/\x1b\[[?0-9;]*[A-Za-z]|\r/g, ''), '', 'no cell was drawn'
+  quit()
+  await running.done
+
+# ==[ Fuzz ]==
+
+console.log "\nFuzz"
+
+# The rules of focus, written a second time and another way, for the
+# fuzz to hold the package to: a node can hold focus while it is
+# focusable and every node from it to the body is there, enabled and
+# shown; the order is the tree's, by a recursive walk.
+blocked =! (node) -> node.disabled or node.styles?.hidden is true or node.styles?.display is 'none'
+
+holds =! (node) ->
+  return false unless node.focusable
+  at = node
+  while at
+    return false if blocked at
+    return true if at is document.body
+    at = at.parentNode
+  false
+
+ordered =! (node, out = []) ->
+  return out if blocked node
+  out.push node if node.focusable
+  kid = node.firstChild
+  while kid
+    ordered kid, out if kid.nodeType is 1
+    kid = kid.nextSibling
+  out
+
+everything =! (node, out = []) ->
+  kid = node.firstChild
+  while kid
+    if kid.nodeType is 1
+      out.push kid
+      everything kid, out
+    kid = kid.nextSibling
+  out
+
+Bare =! component
+  render
+    Box id: 'root'
+
+test "random trees under random change: focus is always a node that can hold it, Tab walks the tree in order, focus and blur pair up, and a path is the tree as its dispatch began", ->
+  seed = 20260921
+  rand = ->
+    seed = (seed * 1664525 + 1013904223) % 4294967296
+    seed / 4294967296
+  pick = (list) -> list[Math.floor rand() * list.length]
+  counts = { steps: 0, inserted: 0, removed: 0, moved: 0, switched: 0, tabs: 0, calls: 0, focuses: 0, blurs: 0, cleared: 0, cycles: 0, visited: 0, mutated: 0, heard: 0, claimed: 0 }
+  for round in [0...120]
+    view = mount Bare, cols: 20
+    try
+      root = find 'root'
+      names = 0
+      holder = null      # the node the focus and blur events say has focus
+      trail = []         # who heard the key under way
+      meddle = null      # a change one listener makes mid-dispatch
+      say = (problem) -> raise "seed 20260921 round #{round} step #{counts.steps}: #{problem}"
+      # A node out of the tree hears its own blur and nothing above it
+      # does, so each node listens for itself.
+      gained = (event) ->
+        say "#{idOf event.target} heard focus while #{idOf holder} had not heard blur" if holder
+        holder = event.target
+        counts.focuses += 1
+      lost = (event) ->
+        say "#{idOf event.target} heard blur, and #{idOf holder} had focus" unless holder is event.target
+        holder = null
+        counts.blurs += 1
+      make = ->
+        node = document.createElement 'div'
+        node.set 'id', "n#{names += 1}"
+        node.set 'focusable', true if rand() < 0.7
+        node.set 'disabled', true if rand() < 0.08
+        node.set 'hidden', true if rand() < 0.06
+        node.set 'autofocus', true if rand() < 0.15
+        hear = (event) ->
+          trail.push "#{idOf node} #{event.eventPhase}"
+          if meddle and event.eventPhase > 1
+            todo = meddle
+            meddle = null
+            todo()
+        node.addEventListener 'keydown', hear, true
+        node.addEventListener 'keydown', hear
+        node.addEventListener 'focus', gained
+        node.addEventListener 'blur', lost
+        node
+      place = (node) ->
+        all = [root, ...everything(root)].filter (other) -> other isnt node and not inside other, node
+        parent = pick all
+        kids = parent.childNodes
+        parent.insertBefore node, (if kids.length and rand() < 0.7 then pick(kids) else null)
+      inside = (node, above) ->
+        while node
+          return true if node is above
+          node = node.parentNode
+        false
+      change = ->
+        all = everything root
+        kind = Math.floor rand() * 6
+        if kind is 0 or all.length < 6
+          place make()
+          counts.inserted += 1
+        else if kind is 1 and all.length > 3
+          pick(all).remove()
+          counts.removed += 1
+        else if kind is 2
+          node = pick all
+          node.remove()
+          place node
+          counts.moved += 1
+        else
+          node = pick all
+          key = pick ['focusable', 'disabled', 'hidden', 'display']
+          if key is 'display'
+            node.set 'display', (if node.styles.display is 'none' then 'flex' else 'none')
+          else
+            node.set key, not (if key is 'hidden' then node.styles.hidden is true else node[key])
+          counts.switched += 1
+      place make() for n in [0...8]
+      counts.claimed += 1 if view.focused
+      for step in [0...80]
+        counts.steps += 1
+        had = view.focused   # which settles any claim an arrival made
+        act = rand()
+        if act < 0.45
+          change()
+        else if act < 0.6
+          view.press 'Tab', shift: rand() < 0.5
+          counts.tabs += 1
+        else if act < 0.75
+          target = pick everything root
+          continue unless target
+          counts.calls += 1
+          if rand() < 0.6
+            target.focus()
+            say "focus() on #{idOf target}, which can#{if holds target then '' else 'not'} hold focus, left it with #{idOf view.focused}" unless (view.focused is target) is (holds(target) or had is target)
+          else
+            target.blur()
+            say "blur() on #{idOf target} left focus with it" if view.focused is target
+        else
+          # A key, with a listener that changes the tree on its way up: who
+          # hears it is settled as the dispatch begins.
+          view.frame() if rand() < 0.3
+          target = view.focused ?? document.body
+          want = []
+          at = target
+          while at and at isnt document.body
+            want.push at unless at is root
+            at = at.parentNode
+          expected = [...(("#{idOf node} #{if node is target then 2 else 1}") for node in want.slice().reverse()), ...(("#{idOf node} #{if node is target then 2 else 3}") for node in want)]
+          trail.length = 0
+          meddle = if rand() < 0.7 then change else null
+          counts.mutated += 1 if meddle and want.length
+          view.press 'x'
+          meddle = null
+          say "the key was heard by #{JSON.stringify trail}, and the path was #{JSON.stringify expected}" unless JSON.stringify(trail) is JSON.stringify(expected)
+          counts.heard += trail.length
+        # What holds after every step.
+        now = view.focused
+        say "#{idOf now} has focus and cannot hold it" if now and not holds now
+        say "the events say #{idOf holder} has focus, and the document says #{idOf now}" unless holder is now
+        say "focus.active is #{idOf focus.active}, not #{idOf now}" unless focus.active is now
+        counts.cleared += 1 if had and not now
+        counts.claimed += 1 if now and not had and act < 0.45
+        # A cycle: Tab from here reaches every node that can hold focus
+        # once, in tree order, and comes back.
+        continue unless step % 10 is 9
+        order = ordered document.body
+        continue unless order.length
+        from = if now then order.indexOf(now) else -1
+        back = rand() < 0.5
+        for n in [1..order.length]
+          view.press 'Tab', shift: back
+          due = if back then order[((if from < 0 then order.length else from) - n + order.length * 2) % order.length] else order[(from + n) % order.length]
+          say "#{if back then 'Shift-' else ''}Tab #{n} of #{order.length} reached #{idOf view.focused}, not #{idOf due}" unless view.focused is due
+          counts.visited += 1
+        counts.cycles += 1
+    finally
+      view.close()
+  # A fuzz that does nothing passes everything: hold it to its volume.
+  floors = { steps: 9600, inserted: 1100, removed: 550, moved: 550, switched: 1600, tabs: 1100, calls: 1100, focuses: 1500, blurs: 1500, cleared: 300, cycles: 440, visited: 950, mutated: 600, heard: 2600, claimed: 60 }
+  ok counts[name] >= floor, "#{name}: #{counts[name]} is under the floor of #{floor} — #{JSON.stringify counts}" for own name, floor of floors
