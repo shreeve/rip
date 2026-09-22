@@ -4,48 +4,119 @@
 
 > **Terminal user interfaces from Rip components — one reactive tree, a cell-rounded flexbox, and a diffed cell painter, zero dependencies.**
 
-A compiled `render` block already calls `document.createElement` and
-`insertBefore` directly and keeps one effect per dynamic binding, so a
-terminal needs no reconciler: `run` installs a terminal `document`,
-mounts the app onto it, and every later change arrives through a node
-setter the package owns. A node is one object for the tree, the layout,
-and the paint. Layout is flexbox in float math, rounded to cells once;
-paint fills a grid of typed arrays, and only the cells a change may
-have recolored; and each frame is sent as the difference from the grid
-the terminal already shows, in one write.
+Ink is React driving a fake DOM, Yoga laying it out through
+WebAssembly, and a string painter writing the result. Rip needs none
+of that between a component and the terminal. A compiled `render`
+block already calls `document.createElement` and `insertBefore`
+itself and keeps one effect per dynamic binding, so `run` installs a
+terminal `document`, mounts the app onto it, and every later change
+arrives through a setter the package owns, naming the node that
+changed: no reconciler, no tree diff. One object is the tree node,
+the layout node and the paint node. Layout is flexbox as Yoga lays it
+out, in float math rounded to cells once; paint fills a grid of typed
+arrays, and only the cells a change may have recolored; and each
+frame is sent as the difference from the grid the terminal already
+shows, in one write. The claim is three things: fewer lines than Ink
+and Yoga together, less time per update on the same Bun, and clearer
+programs. The four examples below show the third, and `bench/` is
+where the first two are measured, against Ink on the same Bun
+([PLAN.md](PLAN.md) §2 says what each means).
 
 **Runtime:** not browser-safe — it writes escape sequences to a
 terminal stream and measures text with `Bun.stringWidth`. Apps run
 through `rip app.rip`.
 
-## Quick Start
+## Quick start
+
+The smallest app that takes a key, `examples/counter.rip`:
 
 ```coffee
-import { run, quit, screen, Box, Text, Spacer } from 'rip/tui'
+import { run, Box, Text } from 'rip/tui'
 
-App = component
-  passed := 0
-
-  ~>
-    timer = setInterval (-> passed += 1), 100
-    -> clearInterval timer
-
-  ~> quit() if passed >= 50
-
+Counter = component
+  @count := 0
+  pressed: (event) ->
+    @count += 1 if event.key is 'ArrowUp'
+    @count -= 1 if event.key is 'ArrowDown'
   render
-    Box borderStyle: 'round', paddingX: 1, flexDirection: 'row', width: 40
-      Text color: 'green', bold: true
-        "#{passed} passed"
-      Spacer
-      Text dimColor: true
-        "#{screen.cols}×#{screen.rows}"
+    Box @keydown: @pressed, focusable: true, autofocus: true, borderStyle: 'round', paddingX: 1
+      Text color: 'green', "count #{@count}"
 
-run App
+run Counter
+```
+
+```bash
+bun install                # once, at the repository root
+rip examples/counter.rip   # from packages/tui: ↑ and ↓ count, Ctrl-C quits
 ```
 
 `run` returns `{ app, done, quit, flush }`; `done` resolves with the
 value given to `quit`. Ctrl-C quits. The last frame stays in the
 scrollback and the cursor lands on the line below it.
+
+## What it does
+
+Every row of the first two columns is built and under test;
+[TODO.md](TODO.md) lists the open work within them, most of it cost.
+
+| Matches Ink | Beyond Ink | Disclosed gaps | Never |
+|---|---|---|---|
+| Flexbox layout incl. baseline, static position, and aspect ratio; borders, backgrounds | Mouse, opt-in: click, wheel, hover, and a drag that selects text to the clipboard | Screen-reader output mode (`role` / `aria-*` are accepted and kept on the node) | React devtools |
+| `overflow: hidden` clipping | Keys bubble from the focused node, with preventable default actions | Windows — unclaimed and untested, as for Rip itself | Concurrent rendering, Suspense |
+| Scrolling by content offset (`contentOffsetX` / `contentOffsetY`) | Tree-order focus | List virtualization | |
+| Wrap and truncate modes | Node-relative cursor placement | | |
+| `Static` scrollback output | A text change of unchanged size runs no layout | | |
+| Inline and alternate-screen rendering | Hyperlinks as a prop: `link` on text (OSC 8), refused unless the URL is printable ASCII, never left open across a cursor move | | |
+| Synchronized, diffed, coalesced output | | | |
+| Non-TTY / CI output, `NO_COLOR`, color depth | | | |
+| Console capture while rendering | | | |
+| Error display with terminal restore | | | |
+| `renderToString` and a test driver | | | |
+| Node metrics (`useBoxMetrics` equivalent) | | | |
+| Key input, paste, focus, cursor placement | | | |
+| Enhanced keyboard (kitty protocol), opt-in | | | |
+| Animation clock (`useAnimation` equivalent) | | | |
+
+Ink's string `Transform` has no counterpart because it has no job
+here: a text transform is an ordinary expression in the binding
+(`"#{name.toUpperCase()}"`).
+
+## Side by side with Ink
+
+Four of Ink's own examples, ported program for program under
+`examples/ink/`, with Ink's `.tsx` beside each `.rip`. Each port draws
+the frames Ink 7.1.1 draws for the same example — `test/examples.rip`
+holds every one of them, and none differs — and `rip test/lines.rip`
+counts the lines: non-blank and non-comment, the rule
+[PLAN.md](PLAN.md) §2 states.
+
+| Example | Ink | Rip TUI | |
+|---|---|---|---|
+| `counter` | 15 | 6 | A number that climbs every 100 ms: a `clock` read in the text, where Ink has a state, an effect and a timer to clear. |
+| `borders` | 34 | 21 | The seven named border styles in two rows: Ink's tree, with the rows said, since `Box` is a column here as in Yoga and a row in Ink. |
+| `use-focus` | 26 | 19 | Three items Tab moves between: a `focusable` node styled by its own `focused`, where Ink registers a hook; Ink's Escape is a listener on the root box. |
+| `static` | 45 | 14 | Ten tests into the scrollback, one every 100 ms, above a live count: `Static` around a keyed `for`; the app quits with the tenth, where Ink's process ends when its last timer has run. |
+
+Run one with `rip examples/ink/counter.rip`.
+
+<!-- bench: the published comparison with Ink, PLAN.md §11, goes here -->
+
+## Examples
+
+Each runs with `rip examples/<name>.rip` from `packages/tui`.
+
+| Example | Shows |
+|---|---|
+| `counter.rip` | The quick start: a key changes state, the frame follows. |
+| `files.rip` | A file browser: two panes as tall as the terminal, clipped and scrolled by content offset; Tab and a click move between them; the wheel scrolls the pane under it; the row under the pointer is underlined (`mouse: 'all'`); Enter opens a directory, Backspace goes up, q quits. |
+| `log.rip` | A build log: finished steps into the scrollback through `Static`, a spinner and a bar on the `clock`, a warning above the frame through `print`, the terminal's own progress indicator, and a quit when the last step is done. |
+| `input.rip` | A single-line text field in 40 lines of code: the cursor placed by measured cells, so a wide glyph is two columns and a letter with its marks one; typing inserts at the cursor, the arrows, Home and End move it, Backspace and Delete take a cluster, a paste goes in whole, Enter prints the value above the field and clears it, Escape clears it. |
+| `ink/*.rip` | The four ports above, Ink's source beside each. |
+
+`log.rip`, `input.rip` and the ports export their component and run it
+only as the entry (`run App if import.meta.main`), which is how
+`test.rip` and `test/examples.rip` drive them headless through
+`mount`.
 
 ## Running
 
@@ -705,7 +776,12 @@ of a `Static` write and of `print`, the mouse after one, the clock's
 one timer and where it stops, and the progress sequence.
 `test/damage.rip` changes random trees a step at a time and holds every
 frame painted from its damage to the same tree painted whole, cell for
-cell, and to the bytes sent, replayed. `test/text.rip` holds the
+cell, and to the bytes sent, replayed. `test/examples.rip` drives the
+four ports under `examples/ink/` through `mount` and holds each frame
+to the one Ink draws for its example, holds the line table above to
+what `test/lines.rip` counts, and types, moves, deletes and pastes
+into `examples/input.rip`, holding the frame and the cursor after
+every key. `test/text.rip` holds the
 text engine — sanitizing, cluster widths, every wrap and truncate mode
 — and `test/layout.rip` the layout engine's own pins. `test/input.rip`
 holds the terminal input parser: 244 of Ink's input cases as a table
