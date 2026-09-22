@@ -198,7 +198,7 @@ export class Target
     event.currentTarget = null
     not event.defaultPrevented
 
-export NOWHERE =! Object.freeze { x: 0, y: 0, w: 0, h: 0 }
+NOWHERE =! Object.freeze { x: 0, y: 0, w: 0, h: 0 }
 
 # The leaf that draws `node`'s words: the outermost text it is a run of.
 # A `contents` text is no leaf — it lends its words to its parent, each
@@ -501,7 +501,7 @@ export failed! =! (doc) ->
   doc.failed = null
   throw error
 
-export class Document extends Target
+class Document extends Target
   constructor: ->
     super()
     @damage = Damage.new()

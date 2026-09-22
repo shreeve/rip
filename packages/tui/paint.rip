@@ -141,8 +141,6 @@ export intern =! (fg, bg, flags, link = null) ->
   key = if link then "#{flags}|#{link}" else flags
   id = held.get key
   return id if id?
-  for [color, base] in [[fg, 30], [bg, 40]] when color?
-    throw Error.new "rip/tui: #{JSON.stringify color} is not a color — write #{COLORS}" unless tint color, base
   throw Error.new "rip/tui: more than #{LIMIT} distinct styles are in use — a cell holds a style id in sixteen bits" if records.length >= LIMIT
   records.push { fg, bg, flags, link, sgr: dress(fg, bg, flags), key }
   held.set key, records.length - 1

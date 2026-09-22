@@ -10,7 +10,7 @@ import { Parser, TIMERS } from './input.rip'
 import { Screen } from './screen.rip'
 import { Pointer } from './mouse.rip'
 import { palette } from './paint.rip'
-import { guard, setup, probe, reply, teardown, handover, stop as halt, ask, interactive as attended, depth as depthOf } from './terminal.rip'
+import { guard, setup, probe, reply, teardown, handover, stepping, stop as halt, ask, interactive as attended, depth as depthOf } from './terminal.rip'
 
 # ── Widgets ───────────────────────────────────────────────────────────────────
 # A box is a div and text is a span. Every prop a widget does not
@@ -377,13 +377,16 @@ class Mount
   # is one paste; `send` is raw bytes through the parser, whose waits run
   # on a clock `tick` moves.
   press!: (key, mods = {}) ->
+    @driven()
     if key.charCodeAt(0) < 0x20 or key is '\x7f'
       @send key
       return
     receive @held, [{ type: 'key', key, ctrlKey: !!mods.ctrl, shiftKey: !!mods.shift, altKey: !!mods.alt, metaKey: !!mods.meta, repeat: !!mods.repeat, sequence: key }]
   type!: (text) -> @send text
-  paste!: (text) -> receive @held, [{ type: 'paste', text }]
-  send!: (bytes) -> receive @held, @held.parser.feed bytes
+  paste!: (text) -> @driven(); receive @held, [{ type: 'paste', text }]
+  send!: (bytes) -> @driven(); receive @held, @held.parser.feed bytes
+  # A closed mount takes no key, as it draws no frame.
+  driven!: -> throw Error.new 'rip/tui: this mount is closed — there is no app to drive' unless live is @held
   tick!: (ms) -> @held.clock.tick ms
 
   # Draw what the app shows and hand the frame back as plain text.
@@ -424,24 +427,22 @@ close! =! (drawn, error = null, result = undefined) ->
   keyboard = 'basic'
   doc.onOwe = null
   view.booked = false
-  step = (work) ->
-    try
-      work()
-    catch caught
-      error ?= caught
+  caught = { error }
+  step = stepping caught
   # A selection is the screen's, never the scrollback's.
   step -> pointer.clear() if pointer
   selected = ''
   if held.terminal
     step ->
-      caught = teardown held, drawn
-      error ?= caught
+      missed = teardown held, drawn
+      caught.error ?= missed
   step -> app?.unmount()
+  # The parser's wait is disarmed on every road, a mount's included.
   step -> held.parser.flush()
   step -> out.off? 'resize', resized
   step restore
   palette 3
-  if error then settled.reject error else settled.resolve result
+  if caught.error then settled.reject caught.error else settled.resolve result
 
 # Hand the terminal to `fn` — an editor, a shell — and take it back
 # once `fn` settles, with a whole frame: the road Ctrl-Z takes, without

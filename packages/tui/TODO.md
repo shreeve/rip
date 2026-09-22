@@ -6,14 +6,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 1. The closing audit — code
 
-- [ ] Exports nothing imports: `Document`, `NOWHERE` (document), `WIDE`
-      (text), `Quiet` (terminal). Guards that cannot fire:
-      `paint.rip:144`, `layout.rip:687`'s try, `terminal.rip:93`; the
-      80 × 24 fallbacks in `screen.rip:66` and `tui.rip:142`. `step`
-      written in both `tui.rip:432` and `terminal.rip:124`;
-      `parser.flush()` in both closes. `Mount.press`, `type`, `paste`
-      and `send` after a close drop in silence where `frame` throws —
-      one rule.
 - [ ] `Mount.held` is a public API with no doc: tests set
       `view.held.view.alt` fourteen times.
 

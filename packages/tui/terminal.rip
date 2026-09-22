@@ -63,7 +63,7 @@ awake =! (held) -> held.terminal and held.view.interactive
 
 # A stream that keeps nothing: where frames go while the terminal is
 # another's, so the screen sees the size and writes nothing.
-export class Quiet
+class Quiet
   constructor: (@out) ->
   get columns: -> @out.columns
   get rows: -> @out.rows
@@ -90,7 +90,7 @@ unguard! =! (held) ->
 # again where the keyboard was decided; the alternate screen entered;
 # the console captured. Nothing off a terminal, or under `mount`.
 export setup! =! (held) ->
-  return if held.up or not held.terminal
+  return if held.up
   held.up = true
   { out, stdin, view } = held
   if awake held
@@ -115,17 +115,22 @@ export setup! =! (held) ->
 # progress indicator cleared if one was reported; the alternate screen
 # left; the parser flushed; stdin cooked, paused and let go; the
 # console given back and the lines it kept replayed. On a stdout
+# One step of a way out: the work is done whatever an earlier step
+# raised, and the holder keeps the first error for the end.
+export stepping =! (holder) ->
+  (work) ->
+    try
+      work()
+    catch caught
+      holder.error ?= caught
+
 # nobody is watching, `drawn` writes the last frame once, as text.
 # Answers the first error a step raised, or null.
 down =! (held, drawn) ->
   return null unless held.up
   held.up = false
-  error = null
-  step = (work) ->
-    try
-      work()
-    catch caught
-      error ?= caught
+  caught = { error: null }
+  step = stepping caught
   { out, stdin, view } = held
   if awake held
     step -> held.pointer?.clear()
@@ -148,7 +153,7 @@ down =! (held, drawn) ->
     step -> view.frame() if view.doc.stale
     step -> out.write rowsToString(view.front, held.depth > 0) + '\n' if view.front
   step -> release held
-  error
+  caught.error
 
 # The way out: the handlers off the process first, then the terminal
 # given back, and a continue nobody waits for any more forgotten.

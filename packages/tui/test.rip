@@ -2427,3 +2427,15 @@ test "progress is nothing off a terminal, and with no app mounted", ->
     eq view.held.view.clearProgress(), ''
   finally
     view.close()
+
+test "a closed mount takes no key and draws no frame: press, paste and frame refuse by name", ->
+  Quiet = component
+    render
+      Text "still"
+  view = mount Quiet, cols: 10
+  view.frame()
+  view.close()
+  for drive in [(-> view.press 'a'), (-> view.paste 'x'), (-> view.send 'b'), (-> view.frame())]
+    refused = null
+    try drive() catch error then refused = error
+    ok refused?.message.includes('this mount is closed'), "refused: #{refused?.message}"
