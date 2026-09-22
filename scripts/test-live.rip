@@ -285,11 +285,12 @@ export PAINT =! { dim: ((text) -> tint 2, text), red: ((text) -> tint 31, text) 
 
 # ── The board ─────────────────────────────────────────────────────────────────
 
-# One row of styled runs of text.
+# One row of styled runs of text: runs nested in one text, which a
+# terminal too narrow for the row cuts short with `…` instead of wrapping.
 Line = component
   @segs := []
   render
-    Box flexDirection: 'row'
+    Text wrap: 'truncate'
       for piece, n in @segs
         Text key: n, style: piece.style, "#{piece.text}"
 
