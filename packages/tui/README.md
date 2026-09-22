@@ -422,10 +422,19 @@ target, bubble, `stopPropagation`, `preventDefault`.
 | Event | Sent to | Carries | Default action |
 |---|---|---|---|
 | `@mousedown`, `@mouseup` | the node under the pointer | `x`, `y` from the node's own corner; `screenX`, `screenY`, the terminal's cell; `button` (0 left, 1 middle, 2 right); `shiftKey`, `altKey`, `ctrlKey` | none; a prevented `mousedown` keeps the drag from selecting |
-| `@click` | the same, when the press and the release landed on one node with no motion between | the same | focus the nearest node from it up that can hold focus; a click on nothing focusable leaves focus where it is |
+| `@click` | the same, when the press and the release landed on one node with the same button and no motion between | the same | focus the nearest node from it up that can hold focus; a click on nothing focusable leaves focus where it is |
 | `@wheel` | the node under the pointer | the same, and `deltaY` (-1 up, 1 down, a tick), `deltaX` | none: the handler moves `contentOffsetY` |
-| `@mousemove` | the node under the pointer, only while some node listens | the same | none |
+| `@mousemove` | the node under the pointer, when a listener would hear it | the same | none |
 | `@mouseenter`, `@mouseleave` | every node the pointer entered or left, in DOM's order; neither bubbles | `screenX`, `screenY`, `relatedTarget` | none |
+
+The node under the pointer is the last painted one whose box holds the
+cell; a text is hit where its words reach, and a `Text` nested in a
+`Text` is a run of words of the outer one, which is the target (DOM
+would target the inner). The boxes are the last frame's and the tree is
+as it stands, so a node taken out since is never hit. Outside the rows
+the frame shows, a press, a release and a wheel are nothing. One press
+is tracked at a time, the last: a second button pressed while one is
+held ends the first press, and neither yields a click.
 
 A scrolled list is a wheel handler on the box that clips it:
 
@@ -451,26 +460,36 @@ Row = component extends span
       "#{@name}"
 ```
 
-Motion is cheap. A report that keeps its target dispatches nothing — no
-event is made unless a `mousemove` listener exists somewhere — and draws
-nothing; one that crosses from one row to the next costs the two rows'
-cells. Under `mouse: true` motion arrives only during a drag. On a tree
-of 1,576 elements a motion report is about 0.5 µs and a click about
-1 µs, parser included (`bun run hit` in `bench/`). In inline mode the
-frame is not at the terminal's first row, so with the mouse the package
-asks the terminal where its cursor is (`CSI ? 6 n`) as the app starts
-and after every resize, and lowers the answer when a frame scrolls the
-terminal; `examples/files.rip` is the whole idiom, list and preview.
+Hover needs `mouse: 'all'`: under `mouse: true` the terminal reports
+motion only while a button is held, so a release leaves every node the
+drag ended on, and the pointer is nowhere until the next press. What is
+under a resting pointer follows the frame: a wheel that scrolls rows
+under it leaves the row that moved away and enters the one that came,
+with no motion needed, and a row taken out of the tree while hovered is
+left. Motion is cheap. A report that keeps its target dispatches
+nothing — no event is made unless a listener would hear it, for
+`mousemove`, `mouseenter` and `mouseleave` alike — and draws nothing;
+one that crosses from one row to the next costs the two rows' cells. On
+a tree of 1,576 elements a motion report is about 0.5 µs and a click
+about 1 µs, parser included (`bun run hit` in `bench/`). In inline mode
+the frame is not at the terminal's first row, so with the mouse the
+package asks the terminal where its cursor is (`CSI ? 6 n`) once the app
+stands and after every resize, and lowers the answer when a frame
+scrolls the terminal; `examples/files.rip` is the whole idiom, list and
+preview.
 
 **Selection and the clipboard.** A drag with the left button selects
 the cells from the press to the pointer in reading order, as a terminal
 does, painted inverse. On release the text goes to the clipboard through
 OSC 52 — most terminals honor it, some ask first, and tmux needs
-`set-clipboard on` — and `screen.selection` reads it. A click clears
-it. `selection: false` turns it off for the app; `event.preventDefault()`
-on the `mousedown` keeps one drag from selecting, which is how a slider
-takes the drag for itself. Shift with a button is the terminal's own
-selection and never reaches the app.
+`set-clipboard on` — and `screen.selection`, a reactive read, is that
+text until the selection goes. A press clears it, so a click does; so
+do a resize, the rows under it all leaving the frame, and `quit`, which
+leaves no inverse cell in the scrollback. `selection: false` turns it
+off for the app; `event.preventDefault()` on the `mousedown` keeps one
+drag from selecting, which is how a slider takes the drag for itself.
+Shift with a button is the terminal's own selection and never reaches
+the app.
 
 **Testing.** `mount App, mouse: true` (or `'all'`) takes reports through
 `send` as a terminal sends them — `view.send '\x1b[<0;4;3M\x1b[<0;4;3m'`

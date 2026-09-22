@@ -60,10 +60,6 @@ steps are in [PLAN.md](PLAN.md).
       the lifecycle (PLAN §8), where Ctrl-Z and the signals need it:
       a suspend must pop the flag and withdraw the mouse, and a resume
       ask for both again.
-- [ ] A node removed or hidden under a resting pointer keeps its
-      `mouseenter`: the `mouseleave` comes with the next motion report,
-      as DOM's does. A list that re-renders its rows under the pointer
-      lights the row that arrives only when the pointer moves.
 - [ ] After a resize the frame's row is asked of the terminal again
       from what was the top-left; a terminal whose reflow moves the
       cursor off that row places clicks wrongly until the next resize.

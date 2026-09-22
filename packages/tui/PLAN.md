@@ -131,17 +131,17 @@ write by hand; hot loops use the indexed `for x, i in` form).
 
 | Module | Job | Code lines |
 |---|---|---|
-| `tui.rip` | Entry: `run`, `mount` and its input, `renderToString`, `screen`, `focus`, widgets; stdin, the modes, the keyboard probe, the delivery of events, the default actions; to come: `clock` | 231, about 265 when complete |
-| `document.rip` | Terminal document: nodes, tree links, the event and its dispatch, style road, keyboard traits, damage marks | 392 |
+| `tui.rip` | Entry: `run`, `mount` and its input, `renderToString`, `screen`, `focus`, widgets; stdin, the modes, the probes, the delivery of events, the default actions; to come: `clock` | 249, about 285 when complete |
+| `document.rip` | Terminal document: nodes, tree links, the event and its dispatch, style road, keyboard traits, damage marks | 388 |
 | `focus.rip` | Who can hold focus, tree order, taking it, settling it | 62 |
 | `layout.rip` | Flexbox, containing blocks, baseline, cache, edge rounding | 1,466 |
 | `text.rip` | Sanitize, grapheme clusters, width, wrap, truncate | 421 |
 | `paint.rip` | Cell grids, styles, clip, borders, backgrounds, the selection overlay, damage, diff | 650 |
-| `screen.rip` | Frames, pacing, the cursor, where the frame sits; to come: alternate screen, `Static`, non-TTY | 103, about 300 |
-| `input.rip` | Key tokenizer and decoder, paste, mouse, replies | 312 |
-| `mouse.rip` | Hit test, the mouse events, hover, selection and the clipboard | 180 |
+| `screen.rip` | Frames, pacing, the cursor, where the frame sits; to come: alternate screen, `Static`, non-TTY | 105, about 300 |
+| `input.rip` | Key tokenizer and decoder, paste, mouse, replies | 315 |
+| `mouse.rip` | Hit test, the mouse events, hover, selection and the clipboard | 211 |
 | `terminal.rip` | To come: setup / teardown, signals, suspend, console capture | about 170 |
-| | **Total** | **3,818 built; about 4,230 complete** |
+| | **Total** | **3,868 built; about 4,280 complete** |
 
 Lines are counted as §2 counts them: non-blank and non-comment. Events,
 focus, the cursor and stdin are 285 of them (85 in `tui.rip`, 99 in
@@ -150,8 +150,9 @@ on the same — `use-input`, `use-paste`, `use-focus`,
 `use-focus-manager`, `use-cursor`, their three contexts,
 `cursor-helpers`, and `App.tsx`, which holds its focus list, raw mode
 and input loop — is 1,082 by the same count. The mouse, hover, selection
-and the enhanced keyboard are 232 more (180 in `mouse.rip`, 37 in
-`tui.rip`, 11 in `paint.rip`, 4 in `screen.rip`); Ink has no mouse and
+and the enhanced keyboard are 285 more (211 in `mouse.rip`, 55 in
+`tui.rip`, 11 in `paint.rip`, 6 in `screen.rip`, 3 in `input.rip` and
+one less in `document.rip`); Ink has no mouse and
 no selection, and its keyboard negotiation — `kitty-keyboard.ts` and
 the three methods of `ink.tsx` that query, time out and enable — is
 about 80.
@@ -742,21 +743,33 @@ any-event tracking (1003) instead, which reports every motion, for
 hover. Both are withdrawn in reverse on every way out, before the paste
 and focus modes. In inline mode the frame's top row is not the
 terminal's row 0, so with the mouse the terminal is also asked where its
-cursor is (DECXCPR, `CSI ? 6 n`) right after the modes, while the cursor
-is at the frame's top-left: the reply is `Screen.origin`, lowered
-whenever a frame is taller than the rows left under it (the terminal
-scrolled), so no second probe is needed; a resize asks again, from the
-top-left. Until the reply, and on a terminal that never answers, the
-frame is taken to sit at the bottom. `mount` has no terminal: its frame
-is at row 0. A report names a terminal cell; the tree cell is `(x, y -
-origin + top)`, `top` being the tree row the grid shows first.
+cursor is (DECXCPR, `CSI ? 6 n`) — once the app stands, so a constructor
+that throws leaves no answer for the shell, and while the cursor is at
+the frame's top-left. The answer is `Screen.origin`, lowered whenever a
+frame is taller than the rows left under it (the terminal scrolled), so
+no second probe is needed; a resize forgets it and asks again from the
+top-left, since the reflow may have moved the frame either way. Only an
+answer to the package's own probe counts: the `?`-marked form, while a
+probe is outstanding — a plain `CSI row ; col R` left in the buffer by
+a shell's prompt integration is not it. Until the answer, and on a
+terminal that never answers, the frame is taken to sit at the bottom.
+`mount` has no terminal: its frame is at row 0. A report names a
+terminal cell; the tree cell is `(x, y - origin + top)`, `top` being the
+tree row the grid shows first. The lifecycle's resume (§8) asks again
+the same way once the modes are sent again (`ask` in `tui.rip`), and
+the alternate screen sets the origin to 0 with no probe.
 
 The target is found by a hit test that walks the tree as the painter
 does, backwards: the children of a box from last to first, then the box
 — so the last painted wins, absolute nodes in their tree position as
 `draw` paints them — a box hit where its rounded box holds the cell, a
-text where its words reach (the bounds the damage survey keeps), a bare
-text node as its parent element, as DOM targets it. Every clip is
+text where its words reach (the bounds the damage survey keeps) — a
+text nested in a text is a run of the outer one, which is the target,
+where DOM would target the inner — a bare text node as its parent
+element, as DOM targets it. The boxes and bounds are the last frame's
+and the tree is as it stands — a node taken out since is not there to
+hit, one hidden since is passed over, one that arrived has no box yet —
+which is the reading `Damage.old` makes of the same tree. Every clip is
 honored as `draw` honors it — an `overflow: 'hidden'` box holds its
 children to its padding box, and a child scrolled out by a content
 offset hits the box, not the child — and a `hidden` or `display: 'none'`
@@ -767,9 +780,10 @@ miss the cell is passed over whole, so the walk visits the path and the
 siblings along it and allocates nothing: on a tree of 1,576 elements a
 motion report costs about 0.5 µs through the parser, the hit test and
 the dispatch, and a click about 1 µs (Apple M5, Bun 1.4.2;
-`bun run hit` in `bench/`). Nothing hit is the body — a click on
-the terminal beside or below the frame reaches the app's root — and for
-hover nothing hit outside the frame's rows is nothing.
+`bun run hit` in `bench/`). Nothing hit is the body — a click beside
+the frame reaches the app's root — and outside the rows the frame shows
+a press, a release or a wheel is nothing, though a release still ends
+the press.
 
 Each report is a turn of its own and its event travels the road a key
 does, capture and bubble, with `stopPropagation` and `preventDefault`.
@@ -779,26 +793,38 @@ rounded corner as painted, `screenX`, `screenY` the terminal's cell,
 `shiftKey`, `altKey`, `ctrlKey`; `wheel` adds `deltaY` (-1 up, 1 down a
 tick) and `deltaX`. A `click` is a press and a release on the same
 target with the same button and no motion report between — a drag is
-never a click. Its default action focuses the nearest node from the
+never a click. One press is tracked at a time, the last: a second
+button pressed while one is held ends the first press, and neither
+yields a click; the pointer's `reset` forgets a press whose release
+will never be seen, for the lifecycle's suspend (§8). Its default
+action focuses the nearest node from the
 target up that can hold focus, preventable; a click on nothing
 focusable leaves focus where it is, where DOM would blur (a click on a
 label must not take the keyboard from an input). Wheel has no default:
 a handler that moves `contentOffsetY` is the scrolled list. Every
 motion report the terminal sends — a drag under `true`, all of them
-under `'all'` — is hit-tested; when the target changes, `mouseleave` is
-sent to every node from the old target up to their common ancestor and
-`mouseenter` to every node from under it down to the new one, in DOM's
-order, neither bubbling, carrying `screenX`, `screenY` and the other
-target as `relatedTarget`; a pointer past the frame's rows, or a
-terminal focus-out report, leaves every node. A motion that keeps its
-target dispatches nothing unless a `mousemove` listener is registered
-on the installed document (counted as they come and go), and then one
-`mousemove` at the target; a `mousemove` under `true` therefore arrives
-only during a drag. So the hover idiom — a row with `hovered := false`,
-`@mouseenter: -> hovered = true`, `@mouseleave: -> hovered = false`, and
-a style that reads it — costs the two rows' cells when the pointer
-crosses, and nothing while it rests. A report that arrives while the
-mouse is off is dropped, never typed. Ink has no mouse support.
+under `'all'` — is hit-tested, and so is the pointer's last place after
+every frame, since what is under a resting pointer moves with a scroll
+or a re-render. The pointer keeps the chain of nodes under it, target
+to body, in one array reused; when the target changes, `mouseleave` is
+sent to every node of the old chain not in the new, target first, and
+`mouseenter` to every node of the new chain not in the old, outermost
+first — DOM's order, and a node taken out of the tree meanwhile is left
+like any other, heard by its own listeners since nothing stands above
+it — neither bubbling, carrying `screenX`, `screenY` and the other
+target as `relatedTarget`. A pointer past the frame's rows, or a
+terminal focus-out report, leaves every node; so does a release under
+`true`, after which the terminal reports no motion and the pointer's
+place is unknown until the next press — hover needs `'all'`. No event
+is made that no listener would hear: `mousemove` when none is on the
+target or above it, `mouseenter` and `mouseleave` when none is on the
+node or captures above it, found by the walk up from the node, so a
+listener on a subtree taken out counts for nothing. So the hover idiom
+— a row with `hovered := false`, `@mouseenter: -> hovered = true`,
+`@mouseleave: -> hovered = false`, and a style that reads it — costs the
+two rows' cells when the pointer crosses, and nothing while it rests. A
+report that arrives while the mouse is off is dropped, never typed. Ink
+has no mouse support.
 
 **Selection** (built: `mouse.rip`, the overlay in `paint.rip`). With the
 mouse on, a drag with the left button selects the cells from the press
@@ -813,13 +839,18 @@ redraws keep the selection since a repainted cell is flipped again. The
 overlay is styling, so it shows in `view.ansi` and the bytes and never
 in `view.frame()`. On release the text — the front grid's rows, joined
 by a line feed, trailing blanks trimmed — is written to the clipboard
-as `OSC 52 ; c ; base64 ST`, and `screen.selection` reads it, `''` when
+as `OSC 52 ; c ; base64 ST`, and `screen.selection`, a reactive read
+written then and when the selection goes, is that text, `''` when
 nothing is selected. A press clears the selection, so a click clears
-it; Escape has no default action here either. `preventDefault` on the
-`mousedown` keeps the drag from selecting, as in DOM, which is how a
-slider takes a drag for itself; `selection: false` turns it off for the
-app; a resize clears it; and Shift with a button, which every terminal
-keeps for its own selection, never reaches the app.
+it; Escape has no default action here either. A selection is the
+screen's, never the scrollback's: `close` clears it before the last
+frame is left, and a selection whose rows have all left the frame is
+cleared after the frame that took them, while one that keeps a row
+stands. `preventDefault` on the `mousedown` keeps the drag from
+selecting, as in DOM, which is how a slider takes a drag for itself;
+`selection: false` turns it off for the app; a resize clears it; and
+Shift with a button, which every terminal keeps for its own selection,
+never reaches the app.
 
 **Scrolling** is Ink's content offset: `contentOffsetX` /
 `contentOffsetY` shift a node's children under `overflow: hidden`
