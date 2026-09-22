@@ -14,10 +14,8 @@ export default defineConfig({
     port,
   },
   use: { baseURL: live ?? `http://127.0.0.1:${port}`, ignoreHTTPSErrors: Boolean(live) },
-  // Firefox is the one engine that leaves focus where it is past a
-  // modal's last focusable (dialog.spec.mjs), so only it checks that
-  // branch of the spec. It is not installed on every developer's
-  // machine, so it joins under RIP_FIREFOX, which certification sets.
+  // Firefox is not installed on every developer's machine, so it joins
+  // under RIP_FIREFOX, which certification sets.
   projects: ['chromium', 'webkit', ...(process.env.RIP_FIREFOX ? ['firefox'] : [])]
     .map((browserName) => ({ name: browserName, use: { browserName } })),
 })

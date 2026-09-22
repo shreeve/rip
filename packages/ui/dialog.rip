@@ -22,7 +22,6 @@ export DialogTrigger = component extends button
 # waits a microtask. Firefox and WebKit hide a closed dialog at once, so
 # close() waits for the exit animations, and Escape closes through the cell.
 #
-# TODO: wrap Tab and Shift+Tab at the popup's ends (WAI-ARIA modal dialog pattern).
 # TODO: let the app see a close's reason and cancel it, for close confirmation.
 # TODO: tell the app when a close has finished, after the exit animations.
 export DialogPopup = component extends dialog
@@ -47,6 +46,25 @@ export DialogPopup = component extends dialog
     e.preventDefault()
     open = false unless dismiss is 'none'
 
+  # A sentinel at each end catches the browser's own move past the last
+  # stop or before the first, so a Tab the popup never sees, one inside a
+  # frame, wraps too. showModal focuses the leading sentinel, being the
+  # first focusable descendant, so opening moves focus on to the first stop.
+  before: HTMLElement | null := null
+  after: HTMLElement | null := null
+  opening = false
+  stops = (dialog: HTMLDialogElement): HTMLElement[] ->
+    nodes: NodeListOf<HTMLElement> = dialog.querySelectorAll('a[href], button, input, select, textarea, summary, details, iframe, object, embed, audio[controls], video[controls], [tabindex], [contenteditable]:not([contenteditable="false"])')
+    Array.from(nodes).filter (node) ->
+      node isnt before and node isnt after and node.tabIndex >= 0 and not node.matches(':disabled') and not node.closest('[inert]') and node.checkVisibility({ visibilityProperty: true })
+  toFirst = ->
+    return if opening or not el
+    stops(el)[0]?.focus()
+  toLast = ->
+    return if opening or not el
+    list = stops(el)
+    list[list.length - 1]?.focus()
+
   ~>
     dialog = el
     return unless dialog
@@ -56,9 +74,13 @@ export DialogPopup = component extends dialog
         # Safari rings the element showModal focuses even after a click, and
         # only refocusing it with focusVisible: false clears that.
         visible = document.activeElement?.matches(':focus-visible')
+        opening = true
         dialog.showModal()
+        opening = false
         focused = document.activeElement as HTMLElement | null
-        if focused and not visible and focused.matches(':focus-visible')
+        if focused is before
+          stops(dialog)[0]?.focus({ focusVisible: visible })
+        else if focused and not visible and focused.matches(':focus-visible')
           focused.blur()
           focused.focus({ focusVisible: false })
     else if dialog.open
@@ -78,7 +100,9 @@ export DialogPopup = component extends dialog
       @pointerup: release
       @cancel: cancel
       @close: (-> open = false)
+      span ref: before, tabindex: 0, aria-hidden: 'true', data-focus-guard: 'true', @focus: toLast
       slot
+      span ref: after, tabindex: 0, aria-hidden: 'true', data-focus-guard: 'true', @focus: toFirst
 
 export DialogTitle = component extends h2
   accept labelledBy from Dialog
@@ -112,6 +136,9 @@ counter = 0
 mint = (part: string): string -> "rip-dialog-#{part}-#{counter += 1}"
 
 # A modal doesn't stop the document's own scroll or overscroll bounce.
-scrollLock = CSSStyleSheet.new()
-scrollLock.replaceSync(':root:has(dialog:modal) { overflow: hidden; }')
-document.adoptedStyleSheets.push(scrollLock)
+styles = CSSStyleSheet.new()
+styles.replaceSync '''
+  :root:has(dialog:modal) { overflow: hidden; }
+  dialog > [data-focus-guard] { position: fixed; top: 0; left: 0; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+'''
+document.adoptedStyleSheets.push(styles)

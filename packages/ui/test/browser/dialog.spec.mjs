@@ -129,30 +129,46 @@ for (const how of ['mouse', 'keyboard']) {
   })
 }
 
-// Focus never reaches page content outside the modal. Past the last
-// focusable, Chromium and WebKit hand focus to the document (the
-// browser's own chrome in a real window) and the next Tab re-enters the
-// dialog; Firefox leaves it where it is. No engine wraps, and the
-// component ships no trap.
-test('focus stays contained: Tab past either end and a programmatic focus outside never leave the modal', async ({ page }) => {
+// The demo popup has one focusable, so the spec adds a frame with a
+// field of its own and a field ahead of the close part. The frame comes
+// first: a Tab inside it never reaches the popup, so the wrap out of it
+// rides the browser's own move onto the sentinel. Where focus lands
+// inside a frame it enters is the engine's own choice, so the spec places
+// it in the field itself before leaving.
+test('Tab wraps at the popup\'s ends, through a frame at one end, and a programmatic focus outside never leaves the modal', async ({ page }) => {
   const { trigger, close, fromParent } = await boot(page)
   await trigger.click()
   await expect.poll(() => isModal(page)).toBe(true)
-  const contained = () => page.evaluate(() => {
-    const active = document.activeElement
-    return active === document.body || document.querySelector('main dialog').contains(active)
+  await expect(close).toBeFocused()
+  await page.evaluate(() => {
+    const frame = document.createElement('iframe')
+    frame.title = 'Frame'
+    frame.srcdoc = '<input aria-label="Inner">'
+    const field = document.createElement('input')
+    field.setAttribute('aria-label', 'Note')
+    document.querySelector('main dialog').lastElementChild.before(frame, field)
   })
+  const field = page.getByRole('textbox', { name: 'Note' })
+  const frame = page.locator('main dialog iframe')
+  const inner = page.frameLocator('main dialog iframe').getByRole('textbox', { name: 'Inner' })
+  await expect(inner).toBeVisible()
   await close.focus()
-  for (let i = 0; i < 3; i++) {
-    await page.keyboard.press('Tab')
-    expect(await contained()).toBe(true)
-  }
-  for (let i = 0; i < 3; i++) {
-    await page.keyboard.press('Shift+Tab')
-    expect(await contained()).toBe(true)
-  }
+  await page.keyboard.press('Tab')
+  await expect(frame).toBeFocused()
+  await inner.focus()
+  await page.keyboard.press('Shift+Tab')
+  await expect(close).toBeFocused()
+  await page.keyboard.press('Shift+Tab')
+  await expect(field).toBeFocused()
+  await page.keyboard.press('Shift+Tab')
+  await expect(frame).toBeFocused()
+  await inner.focus()
+  await page.keyboard.press('Tab')
+  await expect(field).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(close).toBeFocused()
   await fromParent.focus()
-  expect(await contained()).toBe(true)
+  expect(await focusInside(page)).toBe(true)
   await expect(fromParent).not.toBeFocused()
 })
 
