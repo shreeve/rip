@@ -302,6 +302,7 @@ test! "a cursor report nobody asked for — unmarked, or marked when no probe is
   running = run Rows, stdin: stdin, stdout: term, mouse: true
   heard.length = 0
   listen 'mousedown'
+  stdin.key "#{CSI}2;1R"   # a shell's prompt integration left it in the buffer, before the answer
   stdin.key "#{CSI}?6;1R"
   stdin.key "#{CSI}2;1R#{CSI}?2;1R"
   stdin.key down(0, 6) + up(0, 6)
