@@ -42,6 +42,7 @@ export class Screen
     @owed = 0        # the cells the last frame owed
     @parked = null   # where the cursor is shown, `{ x, y }` on the grid, or null while it is hidden
     @origin = 0      # the terminal row the frame's top-left is on: what the cursor probe answers, and lower once a frame scrolls the terminal
+    @alt = false     # the alternate screen: the frame's top-left is the screen's, and `leave` moves nowhere
     @selection = { from: -1, to: -1 }   # the selected cells (mouse.rip), none while `from` is under zero
     @after = null    # run after every frame: the pointer looks again at what is under it
 
@@ -146,4 +147,4 @@ export class Screen
     try
       @frame() if @doc.stale
     finally
-      @out.write @unpark() + '\n'.repeat(@front?.rows ?? 0) + "\x1b[?25h"
+      @out.write @unpark() + '\n'.repeat(if @alt then 0 else @front?.rows ?? 0) + "\x1b[?25h"

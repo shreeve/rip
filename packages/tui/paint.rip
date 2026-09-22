@@ -44,6 +44,58 @@ tint =! (color, base) ->
     return (if m[1] > 255 then null else "#{base + 8};5;#{Number m[1]}")
   null
 
+# The depth colors are sent at, 0 to 3 — none, the 16 named, the 256,
+# 24-bit — what `run` reads of the terminal once (terminal.rip). Below
+# full depth a 24-bit color is sent as the nearest of the 256: the
+# 6×6×6 cube, or the 24 grays for a gray; at 16 one of the 256 is sent
+# as the nearest named one, bright where it is at full intensity
+# (xterm's palette). At none, no style sends anything.
+depth = 3
+
+cube =! (r, g, b) ->
+  if r is g and g is b
+    return 16 if r < 8
+    return 231 if r > 248
+    return 232 + Math.round((r - 8) / 247 * 24)
+  16 + 36 * Math.round(r / 255 * 5) + 6 * Math.round(g / 255 * 5) + Math.round(b / 255 * 5)
+
+named =! (n) ->
+  return n if n < 8
+  return n + 52 if n < 16
+  if n >= 232
+    r = g = b = ((n - 232) * 10 + 8) / 255
+  else
+    r = Math.floor((n - 16) / 36) / 5
+    g = Math.floor((n - 16) % 36 / 6) / 5
+    b = (n - 16) % 6 / 5
+  bright = Math.max(r, g, b) * 2
+  return 0 if bright is 0
+  code = (Math.round(b) << 2) | (Math.round(g) << 1) | Math.round(r)
+  if bright is 2 then code + 60 else code
+
+# A color's parameters at the depth in force.
+lower =! (sgr, base) ->
+  return sgr if depth is 3
+  sgr = "#{base + 8};5;#{cube +m[1], +m[2], +m[3]}" if m = /^\d8;2;(\d+);(\d+);(\d+)$/.exec sgr
+  return sgr if depth is 2
+  if m = /^\d8;5;(\d+)$/.exec sgr then String(base + named(+m[1])) else sgr
+
+# A style's escape parameters: its switches, then its colors.
+dress =! (fg, bg, flags) ->
+  return '' unless depth
+  parts = []
+  for code, n in CODES
+    parts.push code if flags & (1 << n)
+  for [color, base] in [[fg, 30], [bg, 40]] when color?
+    parts.push lower tint(color, base), base
+  parts.join ';'
+
+# Set the depth: every style interned so far is dressed again.
+export palette! =! (n) ->
+  return if n is depth
+  depth = n
+  record.sgr = dress record.fg, record.bg, record.flags for record in records
+
 LIMIT =! 65536   # style ids a cell's sixteen bits can hold
 SWEEP =! 32768   # styles held before those no cell uses are let go
 
@@ -76,15 +128,10 @@ export intern =! (fg, bg, flags, link = null) ->
   key = if link then "#{flags}|#{link}" else flags
   id = held.get key
   return id if id?
-  parts = []
-  for code, n in CODES
-    parts.push code if flags & (1 << n)
   for [color, base] in [[fg, 30], [bg, 40]] when color?
-    sgr = tint color, base
-    throw Error.new "rip/tui: #{JSON.stringify color} is not a color — write #{COLORS}" unless sgr
-    parts.push sgr
+    throw Error.new "rip/tui: #{JSON.stringify color} is not a color — write #{COLORS}" unless tint color, base
   throw Error.new "rip/tui: more than #{LIMIT} distinct styles are in use — a cell holds a style id in sixteen bits" if records.length >= LIMIT
-  records.push { fg, bg, flags, link, sgr: parts.join(';'), key }
+  records.push { fg, bg, flags, link, sgr: dress(fg, bg, flags), key }
   held.set key, records.length - 1
   records.length - 1
 

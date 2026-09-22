@@ -16,7 +16,7 @@ App = component
   @count := 0
   render
     Box focusable: true, autofocus: true
-      Text "count #{@count}"
+      Text "count:#{@count}"
 
 options = { stdin, stdout: (if way is 'pipe' then process.stdout else tty), mouse: true }
 running = run App, options

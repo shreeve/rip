@@ -8,6 +8,8 @@ import { tend, take, advance } from './focus.rip'
 import { Parser } from './input.rip'
 import { Screen } from './screen.rip'
 import { Pointer } from './mouse.rip'
+import { palette } from './paint.rip'
+import { Quiet, setup, probe, reply, teardown, handover, stop, ask, interactive as watched, depth as depthOf } from './terminal.rip'
 
 # ── Widgets ───────────────────────────────────────────────────────────────────
 # A box is a div and text is a span. Every prop a widget does not
@@ -34,7 +36,11 @@ rows := 24
 shown := true
 keyboard := 'basic'
 selected := ''
+interactive := true
+colors := 16777216
 live = null
+
+DEPTHS =! [0, 16, 256, 16777216]
 
 class Viewport
   get cols: -> cols
@@ -42,10 +48,14 @@ class Viewport
   get focused: -> shown
   get keyboard: -> keyboard
   get selection: -> selected
+  get interactive: -> interactive
+  get colors: -> colors
 
 # The terminal's size, whether it is the window the user is in (its
 # focus reports), and whether its keyboard is enhanced, as reactive
-# reads; and the text the mouse has selected, as it was copied.
+# reads; the text the mouse has selected, as it was copied; whether
+# frames go to a terminal someone is watching, and how many colors it
+# is drawn with, as `run` read them.
 export screen =! Viewport.new()
 
 # The node the keyboard goes to, a reactive read that settles what the
@@ -63,56 +73,6 @@ class Focus
 export focus =! Focus.new()
 
 # ── Input ─────────────────────────────────────────────────────────────────────
-
-ASK      =! "\x1b[?2004h\x1b[?1004h"   # bracketed paste, focus reports (xterm ctlseqs)
-WITHDRAW =! "\x1b[?1004l\x1b[?2004l"
-PROBE    =! "\x1b[?6n"                  # DECXCPR: which row the frame's top-left is on
-QUERY    =! "\x1b[?u\x1b[c"             # kitty's "is the protocol here", then primary device attributes
-PUSH     =! "\x1b[>1u"                  # kitty: push the disambiguation flag
-POP      =! "\x1b[<u"
-
-# The mouse modes: button-event tracking (1002), which reports presses,
-# releases, the wheel, and motion only while a button is held — what a
-# drag needs and nothing when idle — or any-event tracking (1003) for
-# `'all'`; and SGR reports (1006) either way.
-track =! (mouse, set) ->
-  moves = if mouse is 'all' then 1003 else 1002
-  if set then "\x1b[?#{moves}h\x1b[?1006h" else "\x1b[?1006l\x1b[?#{moves}l"
-
-# Give `held` its parser, and read `stdin` through it if it is a terminal
-# that can be set raw. Any other stdin — a pipe, none — is left alone:
-# no key arrives, and nothing is asked of the terminal. With the mouse
-# the terminal is asked for reports.
-listen! =! (held, stdin, clock) ->
-  held.parser = Parser.new { clock, late: (events) -> receive held, events }
-  return unless stdin?.isTTY and typeof stdin.setRawMode is 'function'
-  stdin.setRawMode true
-  # From here the stdin is the app's to give back.
-  held.stdin = stdin
-  held.read = (chunk) -> receive held, held.parser.feed chunk
-  stdin.ref?()
-  stdin.resume()
-  stdin.on 'data', held.read
-  held.out.write ASK + (if held.mouse then track(held.mouse, true) else '')
-
-# Ask the terminal where its cursor is, from the frame's top-left, where
-# the frame sits: unknown until the answer, and taken to be the bottom
-# meanwhile. A resume after a suspend asks again the same way, once the
-# modes are sent again; the alternate screen has no such row.
-ask! =! (held) ->
-  held.asked = true
-  held.view.origin = Infinity
-  held.out.write held.view.unpark() + PROBE
-
-# The questions whose answers arrive as input, asked once the app
-# stands, so a constructor that throws leaves no answer for the shell:
-# with the mouse, where the cursor is; with the enhanced keyboard,
-# whether the terminal speaks kitty's protocol, and its attributes,
-# which every terminal answers.
-probe! =! (held) ->
-  return unless held.stdin
-  ask held if held.mouse
-  held.out.write QUERY if held.probing
 
 # Hand the app what was read. A listener that throws under `run` — or
 # a child a key's change made, which failed to construct — has no
@@ -143,41 +103,23 @@ deliver! =! (held, events) ->
         shown = false
         held.pointer?.leave()
       when 'mouse' then held.pointer?.report event
-      when 'reply' then answer held, event
+      when 'reply' then keyboard = 'enhanced' if reply held, event
       when 'key', 'paste'
         tend held.doc
         sent = Event.new (if event.type is 'key' then 'keydown' else 'paste'), event
         act held, sent if (held.doc.active ?? held.doc.body).dispatchEvent(sent) and sent.type is 'keydown'
 
-# The terminal's answers. The cursor's row — an answer to the package's
-# own probe, marked as DECXCPR marks it, and only while one is
-# outstanding — is where the frame's top-left was when it was asked, and
-# lower if a frame has scrolled the terminal since. The keyboard is decided by whichever of the two queries is
-# answered first: kitty's own reply says the protocol is there, and the
-# flag is pushed; the attributes reply first says it is not — tmux
-# answers only that one — and nothing is pushed, whatever comes later.
-answer! =! (held, event) ->
-  switch event.kind
-    when 'cursor'
-      return unless event.marked and held.asked
-      held.asked = false
-      held.view.origin = Math.min held.view.origin, event.y
-    when 'keyboard', 'attributes'
-      return unless held.probing
-      held.probing = false
-      return unless event.kind is 'keyboard'
-      keyboard = 'enhanced'
-      return unless held.stdin
-      held.out.write PUSH
-      held.pushed = true
-
-# The default actions, which run for a key no listener prevented. Ctrl-Z
-# (suspend) joins them with the lifecycle, PLAN §8.
+# The default actions, which run for a key no listener prevented: Tab
+# and Shift-Tab move focus, Ctrl-C quits, Ctrl-Z stops the process
+# (terminal.rip).
 act! =! (held, event) ->
-  if event.key is 'Tab' and not (event.ctrlKey or event.altKey or event.metaKey)
+  return if event.altKey or event.metaKey
+  if event.key is 'Tab' and not event.ctrlKey
     advance held.doc, event.shiftKey
-  else if event.key is 'c' and event.ctrlKey and not (event.altKey or event.metaKey)
+  else if event.key is 'c' and event.ctrlKey
     quit()
+  else if event.key is 'z' and event.ctrlKey
+    stop held
 
 # A clock a test moves by hand, for the parser's waits.
 class Clock
@@ -200,7 +142,9 @@ class Clock
 # The document is a global of the process, so one app is mounted at a
 # time and a second is refused. `live` stands before the app is
 # constructed, so a `quit` from an effect that runs during construction
-# is heard.
+# is heard. A terminal is taken as terminal.rip takes it — unless `out`
+# is no terminal, or CI, in which case the frames are kept and only the
+# last is written, at the end, as text.
 open =! (App, options, out, terminal, stdin = null, clock = undefined) ->
   throw Error.new 'rip/tui: an app is already mounted in this process — `quit` or `close` it first' if live
   mouse = options.mouse ?? false
@@ -208,41 +152,52 @@ open =! (App, options, out, terminal, stdin = null, clock = undefined) ->
   keys = options.keyboard ?? 'basic'
   throw Error.new "rip/tui: keyboard: #{JSON.stringify keys} is not 'basic' or 'enhanced'" unless keys is 'basic' or keys is 'enhanced'
   { doc, restore } = install()
-  view = Screen.new doc, out
+  tty = terminal and watched out
+  view = Screen.new doc, (if terminal and not tty then Quiet.new out else out)
   view.whole = options.damage is false
+  view.alt = tty and options.altScreen is true
   # On a terminal the frame sits wherever the cursor was, which the
   # probe answers; until then, and where nothing answers, at the bottom.
-  view.origin = Infinity if terminal
+  # The alternate screen's is its top.
+  view.origin = if terminal and not view.alt then Infinity else 0
   cols = view.cols
   rows = view.rows
+  interactive = not terminal or tty
+  depth = if terminal then depthOf out else 3
+  colors = DEPTHS[depth]
+  palette depth
   held = null
-  # A resize reflows the terminal, so where the frame sits is asked again.
-  resized = ->
-    return if view.cols is cols and view.rows is rows
+  # The next frame is drawn whole, at the size the terminal has now.
+  refresh = ->
     cols = view.cols
     rows = view.rows
     held.pointer?.clear()
     view.front = null
-    ask held if held.mouse and held.stdin
     doc.owe true
+  # A resize reflows the terminal, so where the frame sits is asked again.
+  resized = ->
+    return if view.cols is cols and view.rows is rows
+    refresh()
+    ask held if held.mouse and held.raw and not held.alt
   settled = {}
   done = Promise.new (resolve, reject) ->
     settled.resolve = resolve
     settled.reject = reject
-  live = held = { app: null, view, out, doc, restore, resized, interrupted: (-> quit()), done, settled, terminal, closing: false, parser: null, stdin: null, read: null, clock, mouse, pointer: null, probing: keys is 'enhanced', asked: false, pushed: false }
+  live = held = { app: null, view, out, err: options.stderr ?? process.stderr, doc, restore, resized, redraw: refresh, done, settled, terminal, tty, alt: view.alt, depth, console: options.console isnt false, closing: false, over: false, parser: null, stdin, read: null, clock, mouse, pointer: null, probing: keys is 'enhanced', asked: false, enhanced: false, pushed: false, raw: false, up: false, entered: false, suspended: false, wake: null, handlers: null, was: null, logs: [], close: (drawn) -> close drawn if live is held }
+  held.parser = Parser.new { clock, late: (events) -> receive held, events }
+  held.read = (chunk) -> receive held, held.parser.feed chunk
   if mouse
     held.pointer = Pointer.new doc, view, out, mouse, options.selection isnt false, (text) -> selected = text
     view.after = -> held.pointer.rest()
   shown = true
   keyboard = 'basic'
   selected = ''
-  out.write "\x1b[?25l" if terminal
   try
-    listen live, stdin, clock
+    setup held if terminal
     live.app = App.new(options.props ?? {})
     live.app.mount doc.body
     failed doc
-    probe live
+    probe held if terminal
   catch error
     close false
     throw error
@@ -266,7 +221,6 @@ export run =! (App, options = {}) ->
   view.failed = (error) -> fail held, error
   doc.onOwe = -> view.book()
   out.on? 'resize', held.resized
-  process.on 'SIGINT', held.interrupted
   { app: held.app, done: held.done, quit, flush: (-> view.frame() if doc.stale) }
 
 # An app mounted off any terminal, for a test to drive: set its state
@@ -331,15 +285,17 @@ export mount =! (App, options = {}) ->
   out = { columns: options.cols ?? 80, rows: options.rows ?? Infinity, sent: '', write: (text) -> @sent += text }
   Mount.new open(App, options, out, false, null, Clock.new())
 
-# Give the terminal and the process back: the cursor, the listeners, the
-# `document` slot. `drawn` leaves the last frame in the scrollback; a
-# failure leaves whatever reached the screen. Every step is taken
-# whatever the others do, so a write that fails cannot leave stdin raw
-# or the document installed, and `done` is settled here — with `error`,
-# the first step that failed, or `result`.
+# Give the terminal and the process back: the terminal as terminal.rip
+# gives it back, the listeners, the `document` slot. `drawn` leaves the
+# last frame in the scrollback; a failure leaves whatever reached the
+# screen. Every step is taken whatever the others do, so a write that
+# fails cannot leave stdin raw or the document installed, and `done` is
+# settled here — with `error`, the first step that failed, or `result`.
 close =! (drawn, error = null, result = undefined) ->
-  { app, view, out, doc, restore, resized, interrupted, terminal, parser, stdin, read, settled, mouse, pointer, pushed } = live
+  held = live
+  { app, view, out, doc, restore, resized, pointer, settled } = held
   live = null
+  held.over = true
   keyboard = 'basic'
   doc.onOwe = null
   step = (work) ->
@@ -350,25 +306,23 @@ close =! (drawn, error = null, result = undefined) ->
   # A selection is the screen's, never the scrollback's.
   step -> pointer.clear() if pointer
   selected = ''
-  if terminal
-    step -> out.write (if pushed then POP else '') + (if mouse then track(mouse, false) else '') + WITHDRAW if stdin
-    step -> if drawn then view.leave() else out.write view.unpark() + "\x1b[?25h"
+  if held.terminal
+    step ->
+      caught = teardown held, drawn
+      error ?= caught
   step -> app?.unmount()
-  step -> parser?.flush()
-  if stdin
-    step -> stdin.off 'data', read
-    step -> stdin.setRawMode false
-    step -> stdin.pause()
-    step -> stdin.unref?()
+  step -> held.parser.flush()
   step -> out.off? 'resize', resized
-  step -> process.off 'SIGINT', interrupted
   step restore
+  palette 3
   if error then settled.reject error else settled.resolve result
 
 # Hand the terminal to `fn` — an editor, a shell — and take it back
-# once `fn` settles: the road Ctrl-Z takes, without the signal.
+# once `fn` settles, with a whole frame: the road Ctrl-Z takes, without
+# the signal. A key that arrives meanwhile is nobody's.
 export suspend =! (fn) ->
-  throw Error.new 'rip/tui: no app is running — `suspend` hands over the terminal `run` holds'
+  throw Error.new 'rip/tui: no app is running — `suspend` hands over the terminal `run` holds' unless live
+  handover live, fn
 
 # Unmount the mounted app, leave its last frame on screen, and give the
 # process its `document` slot back. The work waits for the turn to end,

@@ -17,6 +17,7 @@ import { join } from 'path'
 # A terminal that remembers what it was sent.
 def terminal(columns = 40, rows = 10)
   out = EventEmitter.new()
+  out.isTTY = true
   out.columns = columns
   out.rows = rows
   out.sent = []
@@ -138,7 +139,7 @@ def mounted(App, body)
 console.log "\nPackage"
 
 test "module exports the entry surface and nothing else", ->
-  eq Object.keys(mod).sort(), ['Box', 'Spacer', 'Text', 'focus', 'mount', 'quit', 'renderToString', 'run', 'screen']
+  eq Object.keys(mod).sort(), ['Box', 'Spacer', 'Text', 'focus', 'mount', 'quit', 'renderToString', 'run', 'screen', 'suspend']
 
 test "declares no dependencies", ->
   pkg = JSON.parse readFileSync(join(import.meta.dir, 'package.json'), 'utf8')

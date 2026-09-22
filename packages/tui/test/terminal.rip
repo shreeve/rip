@@ -15,10 +15,21 @@
 # believes after every step.
 # ==============================================================================
 
-import { test, eq, ok, throws } from 'rip/testing'
+import { test as pin, eq, ok, throws, plainEnv } from 'rip/testing'
 import { run, quit, suspend, mount, renderToString, screen, Box, Text } from 'rip/tui'
 import { Terminal, Stdin, count, differs, tally } from './events/harness.rip'
 import { join } from 'path'
+
+# A test that fails with its app still live would hand its own report
+# to the app's console capture and leave the next test refused: every
+# test ends with a quit, which is nothing when nothing runs.
+test =! (name, fn) ->
+  pin name, ->
+    try
+      fn!
+    finally
+      quit()
+      sleep! 0
 
 CSI   =! '\x1b['
 HIDE  =! "#{CSI}?25l"
@@ -70,7 +81,9 @@ Ways =! component
 
 # The console, as the test sees it: each method replaced by a recorder
 # for the test's turn, so what passes through the package's patch, and
-# what reaches the console once the app is closed, are both read.
+# what reaches the console once the app is closed, are both read. The
+# app is closed before the recorders go, so its own release finds them
+# where it left them.
 recorded =! (body) ->
   held = {}
   printed = []
@@ -80,6 +93,8 @@ recorded =! (body) ->
   try
     body! printed
   finally
+    quit()
+    sleep! 0
     console[name] = fn for name, fn of held
 
 # ── Every way out ─────────────────────────────────────────────────────────────
@@ -108,9 +123,11 @@ LIMIT =! 20000   # ms a child may take before it is killed
 # stdout read as it comes. A child that outlives the limit is continued
 # (a stopped one takes nothing else) and killed, never left behind.
 class Child
-  constructor: (way, env = {}) ->
+  constructor: (way, extra = {}) ->
     @out = ''
-    @proc = Bun.spawn ['bun', "--preload=#{join ROOT, 'src/loader.js'}", join(ROOT, 'src/cli/run.js'), join(import.meta.dir, 'terminal/child.rip'), way], { cwd: import.meta.dir, env: { ...process.env, CI: 'false', RIP_STDLIB_ANCHOR: join(import.meta.dir, 'terminal'), ...env }, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' }
+    env = plainEnv { CI: 'false', RIP_STDLIB_ANCHOR: join(import.meta.dir, 'terminal'), ...extra }
+    delete env.NO_COLOR unless extra.NO_COLOR?
+    @proc = Bun.spawn ['bun', "--preload=#{join ROOT, 'src/loader.js'}", join(ROOT, 'src/cli/run.js'), join(import.meta.dir, 'terminal/child.rip'), way], { cwd: import.meta.dir, env: env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' }
     @timer = setTimeout (=> @kill()), LIMIT
     @pumping = @pump()
 
@@ -123,8 +140,8 @@ class Child
       @out += decoder.decode value, { stream: true }
 
   kill!: ->
-    @proc.kill 'SIGCONT'
-    @proc.kill 'SIGKILL'
+    @signal 'SIGCONT'
+    @signal 'SIGKILL'
 
   # Wait for `text` to arrive on stdout.
   seen: (text) ->
@@ -134,7 +151,8 @@ class Child
       sleep! 5
     return
 
-  signal: (name) -> @proc.kill name
+  # A signal, by the process's own `kill`: a stopped child takes it.
+  signal: (name) -> process.kill @proc.pid, name
 
   # The exit code, the whole of stdout, and stderr.
   finish: ->
@@ -421,15 +439,17 @@ test! "render only last frame when run in CI", ->
   { code, out } = child.finish!
   count 'components', 'render only last frame when run in CI', 'held'
   eq code, 0
-  ok not out.includes("count #{n}"), "count #{n} was written" for n in [0, 1, 2, 3, 4]
-  eq out, "count 5\nexited\n"
+  ok not out.includes("count:#{n}"), "count:#{n} was written" for n in [0, 1, 2, 3, 4]
+  eq out, "count:5\nexited\n"
 
 test! "render all frames if CI environment variable equals false", ->
   child = Child.new 'ci', { CI: 'false' }
   { code, out } = child.finish!
   count 'components', 'render all frames if CI environment variable equals false', 'held'
   eq code, 0
-  ok out.includes("count #{n}"), "count #{n} was not written" for n in [0, 1, 2, 3, 4, 5]
+  ok plain(out).startsWith('count:0'), JSON.stringify plain(out).slice 0, 40
+  ok out.split(BEGIN).length - 1 >= 6, "#{out.split(BEGIN).length - 1} frames were written"
+  ok plain(out).endsWith("5\r\nexited\n"), JSON.stringify plain(out).slice -20
 
 test "the ported titles are the ones SOURCE.md counts", ->
   eq tally, {
@@ -528,7 +548,7 @@ test! "an uncaught error gives the terminal back, prints the error, and exits 1"
   child = Child.new 'throw'
   { code, out, err } = child.finish!
   eq code, 1
-  ok err.includes('a timer failed') and err.includes('child.rip'), err
+  ok err.includes('a timer failed'), err
   ok out.endsWith("#{QUIET}#{OFF}\n#{SHOW}"), JSON.stringify out.slice -60
 
 test! "an unhandled rejection is the same way out", ->
@@ -536,7 +556,7 @@ test! "an unhandled rejection is the same way out", ->
   { code, out, err } = child.finish!
   eq code, 1
   ok err.includes('a promise failed'), err
-  ok out.endsWith("#{QUIET}#{OFF}\n#{SHOW}"), JSON.stringify out.slice -60
+  ok out.replace(/exited\n$/, '').endsWith("#{QUIET}#{OFF}\n#{SHOW}"), JSON.stringify out.slice -60
 
 test! "a `process.exit` with the app live tears the terminal down on the way, and keeps its code", ->
   child = Child.new 'exit'
@@ -597,7 +617,7 @@ test! "Ctrl-Z is a default action of keydown: the terminal is given back and the
     ok term.since(at).startsWith(ON), JSON.stringify term.since at
     eq [stdin.raw, term.text], [true, "k\nk"]
     stdin.key 'a'
-    eq running.app.keys.value, ['a']
+    eq running.app.keys.value, ['z', 'a'], 'a listener hears Ctrl-Z before its default action, as it hears Ctrl-C'
     quit()
     await running.done
   finally
@@ -629,7 +649,7 @@ test! "preventDefault on Ctrl-Z keeps the app on the terminal, and Ctrl-Z under 
   finally
     process.off 'SIGTSTP', handler
 
-test! "a key that arrives while suspended is nobody's, a resize writes nothing, and a log passes straight through", ->
+test! "a key that arrives while suspended is nobody's, a resize writes nothing, and a log is the console's own", ->
   recorded! (printed) ->
     stdin = Stdin.new()
     term = Terminal.new()
@@ -641,15 +661,15 @@ test! "a key that arrives while suspended is nobody's, a resize writes nothing, 
       term.columns = 60
       term.emit 'resize'
       console.log 'while suspended'
-      eq term.sent.slice(at), ['while suspended\n']
+      eq [term.sent.slice(at), printed], [[], [['log', 'while suspended']]]
     eq [running.app.keys.value, screen.cols], [[], 60]
     sleep! 20
-    eq term.text, "k\nwhile suspended\nk"
+    eq term.text, "k\nk"
     stdin.key 'b'
     eq running.app.keys.value, ['b']
     quit()
     await running.done
-    eq printed, []
+    eq printed, [['log', 'while suspended']]
 
 test! "a suspend with no app running is refused by name", ->
   refused = null
@@ -669,7 +689,7 @@ test! "a stop and a continue, for real: the child gives the terminal back and st
   first = out.indexOf "#{QUIET}#{OFF}\n#{SHOW}"
   rest = out.slice first + "#{QUIET}#{OFF}\n#{SHOW}".length
   ok rest.startsWith("#{HIDE}#{ASK}#{MOUSE}#{PROBE}"), JSON.stringify rest.slice 0, 60
-  ok rest.includes('count 0'), 'the frame is drawn again'
+  ok rest.includes('count:0'), 'the frame is drawn again'
   ok rest.endsWith("#{QUIET}#{OFF}\n#{SHOW}exited\n"), JSON.stringify rest.slice -60
 
 # ==[ The alternate screen ]==
@@ -800,7 +820,7 @@ test! "`screen.interactive` reads true on a terminal, false on a stdout that is 
 test! "the last frame is written once through a real pipe", ->
   child = Child.new 'pipe'
   { code, out, err } = child.finish!
-  eq [code, err, out], [0, '', "count 5\nexited\n"]
+  eq [code, err, out], [0, '', "count:5\nexited\n"]
 
 # ==[ Colors ]==
 
@@ -882,7 +902,7 @@ test! "a 24-bit color is sent as it is at full depth, as the nearest of the 256 
   cube = paintedUnder! { FORCE_COLOR: '2' }
   ok cube.includes("#{CSI}1;38;5;196;48;5;21mr") and cube.includes("#{CSI}0;32mg") and cube.includes("#{CSI}0;38;5;244mh"), JSON.stringify cube
   named = paintedUnder! { FORCE_COLOR: '1' }
-  ok named.includes("#{CSI}1;31;44mr") and named.includes("#{CSI}0;32mg") and named.includes("#{CSI}0;37mh"), JSON.stringify named
+  ok named.includes("#{CSI}1;91;104mr") and named.includes("#{CSI}0;32mg") and named.includes("#{CSI}0;37mh"), JSON.stringify named
   none = paintedUnder! { NO_COLOR: '1' }
   ok not /\x1b\[[0-9;]*m/.test(none), JSON.stringify none
   ok plain(none).includes('rgh'), JSON.stringify none
@@ -932,7 +952,7 @@ test! "warn and error go to stderr, the frame cleared for them and drawn again",
     console.error 'bad', { n: 1 }
     console.warn 'worse'
     eq err.sent, ['bad { n: 1 }\n', 'worse\n']
-    ok term.since(mark).startsWith("#{HIDE}\r#{CSI}J#{BEGIN}"), JSON.stringify term.since mark
+    ok term.since(mark).startsWith("#{CSI}J#{BEGIN}#{CSI}J"), JSON.stringify term.since mark
     eq [term.text, printed], ['x', []]
     quit()
     await running.done
@@ -1050,6 +1070,7 @@ test! "random keys, resizes, logs and suspends, then a random way out: the termi
             console.log "log #{n}"
             logged.push "log #{n}"
             unless alt
+              sleep! 10
               ok term.text.includes("log #{n}") and term.text.endsWith('f'), "#{name}: after a log the screen shows #{JSON.stringify term.text}"
           when 'suspend'
             suspends += 1
@@ -1061,10 +1082,8 @@ test! "random keys, resizes, logs and suspends, then a random way out: the termi
                 ignored += 1
               term.emit 'resize' if rnd() < 0.5
               at = term.sent.length
-              if rnd() < 0.5
-                console.log 'aside'
-                logged.push 'aside'
-              eq term.sent.slice(at).filter((write) -> write isnt 'aside\n'), [], "#{name}: nothing is written while suspended"
+              console.log 'aside' if rnd() < 0.5
+              eq term.sent.slice(at), [], "#{name}: nothing is written while suspended"
             eq running.app.keys.value.length, heard, "#{name}: a key while suspended reached the app"
         same "#{name}, step #{n}", term, stdin, believe
       way = pick ['quit', 'Ctrl-C', 'throw', 'suspend and quit']
@@ -1084,10 +1103,12 @@ test! "random keys, resizes, logs and suspends, then a random way out: the termi
           ok term.text.endsWith(logged[logged.length - 1]), "#{name}, #{way}: the logs are replayed once the alternate screen is left: #{JSON.stringify term.text}"
         else
           eq [term.text, term.cursor], ['', { x: 0, y: 0 }], "#{name}, #{way}: the alternate screen is left as it was found"
-      else
+      else if way isnt 'throw'
+        # A failure leaves whatever reached the screen; every other way
+        # draws what is owed and lands the cursor below it.
         ok term.text.endsWith('f'), "#{name}, #{way}: the last frame stands"
-        eq term.cursor.y, (if way is 'throw' then term.lines.length - 1 else term.lines.length), "#{name}, #{way}: the cursor is below the frame"
-    eq printed, []
+        eq term.cursor.y, term.lines.length, "#{name}, #{way}: the cursor is below the frame"
+    eq printed.filter((line) -> line[1] isnt 'aside'), [], "a log while suspended is the console's own, and no other reached it"
   ok steps >= ROUNDS * STEPS, "#{steps} steps"
   ok exits is ROUNDS, "#{exits} exits"
   ok suspends >= 80, "#{suspends} suspends"

@@ -1,13 +1,307 @@
 # The terminal, for the app's life: what `run` asks of it and gives
 # back — raw mode, the modes, the probes, the cursor, the alternate
 # screen, the signals, the console — as one `setup` / `teardown` pair
-# that every way out shares.
+# that every way out shares: `quit`, Ctrl-C, a listener that throws, a
+# signal, a crash, `process.exit`, a loop that drains, Ctrl-Z and
+# `suspend`. Each takes every step whatever the others do, and each is
+# taken once until the other. The host owns the terminal for the app's
+# life: there is no share of raw mode to count (PLAN §8).
 
-export setup! =! (held) -> throw Error.new 'rip/tui: the terminal lifecycle is not built'
-export probe! =! (held) -> throw Error.new 'rip/tui: the terminal lifecycle is not built'
-export answer =! (held, event) -> throw Error.new 'rip/tui: the terminal lifecycle is not built'
-export teardown =! (held, drawn) -> throw Error.new 'rip/tui: the terminal lifecycle is not built'
-export handover =! (held, fn) -> throw Error.new 'rip/tui: the terminal lifecycle is not built'
-export stop! =! (held) -> throw Error.new 'rip/tui: the terminal lifecycle is not built'
-export interactive =! (out) -> true
-export colors =! (out) -> 3
+import { format } from 'node:util'
+import { diff } from './paint.rip'
+
+HIDE     =! "\x1b[?25l"
+SHOW     =! "\x1b[?25h"
+ASK      =! "\x1b[?2004h\x1b[?1004h"   # bracketed paste, focus reports (xterm ctlseqs)
+WITHDRAW =! "\x1b[?1004l\x1b[?2004l"
+PROBE    =! "\x1b[?6n"                  # DECXCPR: which row the frame's top-left is on
+QUERY    =! "\x1b[?u\x1b[c"             # kitty's "is the protocol here", then primary device attributes
+PUSH     =! "\x1b[>1u"                  # kitty: push the disambiguation flag
+POP      =! "\x1b[<u"
+ENTER    =! "\x1b[?1049h\x1b[H"         # the alternate screen, cleared, and its top-left
+LEAVE    =! "\x1b[?1049l"
+
+# The mouse modes: button-event tracking (1002), which reports presses,
+# releases, the wheel, and motion only while a button is held — what a
+# drag needs and nothing when idle — or any-event tracking (1003) for
+# `'all'`; and SGR reports (1006) either way.
+track =! (mouse, set) ->
+  moves = if mouse is 'all' then 1003 else 1002
+  if set then "\x1b[?#{moves}h\x1b[?1006h" else "\x1b[?1006l\x1b[?#{moves}l"
+
+# Whether frames go to a terminal someone is watching: a stdout that is
+# one, outside CI (`CI` set to anything but '', '0' or 'false').
+export interactive =! (out) ->
+  ci = process.env.CI
+  out?.isTTY is true and not (ci? and ci isnt '' and ci isnt '0' and ci isnt 'false')
+
+# The depth `out` is drawn at, 0 to 3 — no color, the 16 named, the
+# 256, 24-bit — read once at `run`: NO_COLOR is none; FORCE_COLOR is
+# its digit, or 16 colors for any other value; else COLORTERM's
+# truecolor is 24-bit, TERM's 256color is 256, a dumb terminal or a
+# stdout nobody is watching has none, and any other terminal has 16.
+export depth =! (out) ->
+  env = process.env
+  return 0 if env.NO_COLOR?
+  return (if /^[0-3]$/.test env.FORCE_COLOR then +env.FORCE_COLOR else 1) if env.FORCE_COLOR?
+  return 0 unless interactive(out) and env.TERM isnt 'dumb'
+  return 3 if /truecolor|24bit/i.test env.COLORTERM ?? ''
+  return 2 if /256color/i.test env.TERM ?? ''
+  1
+
+# A stream that keeps nothing: where frames go while the terminal is
+# another's, or is no terminal, so the screen sees the size and writes
+# nothing.
+export class Quiet
+  constructor: (@out) ->
+  get columns: -> @out.columns
+  get rows: -> @out.rows
+  write: -> true
+
+# ── Setup and teardown ────────────────────────────────────────────────────────
+
+# Take the terminal: the cursor hidden; stdin raw and read, with the
+# paste and focus modes and the mouse's asked for, and the flag pushed
+# again where the keyboard was decided; the alternate screen entered;
+# the console captured; the signals, the crash and the exit handled.
+# On a stdout that is no terminal, only the handlers.
+export setup! =! (held) ->
+  return if held.up
+  held.up = true
+  { out, stdin } = held
+  if held.tty
+    out.write HIDE
+    if stdin?.isTTY and typeof stdin.setRawMode is 'function'
+      stdin.setRawMode true
+      held.raw = true
+      stdin.ref?()
+      stdin.resume()
+      stdin.on 'data', held.read
+      held.pushed = held.enhanced
+      out.write ASK + (if held.mouse then track(held.mouse, true) else '') + (if held.pushed then PUSH else '')
+    if held.alt
+      out.write ENTER
+      held.entered = true
+    capture held if held.console
+  held.handlers ?= handlers held
+  process.on name, fn for name, fn of held.handlers
+
+# Give the terminal back, every step taken whatever the others do: the
+# flag popped if it was pushed; the mouse, paste and focus modes
+# withdrawn; the last frame drawn and left in the scrollback with the
+# cursor shown below it (`drawn`), or the cursor shown where it is; the
+# alternate screen left; the parser flushed; stdin cooked, paused and
+# let go; the handlers off the process; the console given back and the
+# lines it kept replayed. On a stdout that is no terminal, `drawn`
+# writes the last frame once, as text. Answers the first error a step
+# raised, or null.
+down =! (held, drawn) ->
+  return null unless held.up
+  held.up = false
+  error = null
+  step = (work) ->
+    try
+      work()
+    catch caught
+      error ?= caught
+  { out, stdin, view } = held
+  if held.tty
+    step -> held.pointer?.clear()
+    if held.raw
+      step -> out.write (if held.pushed then POP else '') + (if held.mouse then track(held.mouse, false) else '') + WITHDRAW
+      held.pushed = false
+    step -> if drawn then view.leave() else out.write view.unpark() + SHOW
+    if held.entered
+      held.entered = false
+      step -> out.write LEAVE
+    step -> held.parser.flush()
+    if held.raw
+      held.raw = false
+      step -> stdin.off 'data', held.read
+      step -> stdin.setRawMode false
+      step -> stdin.pause()
+      step -> stdin.unref?()
+  else if drawn
+    step -> view.leave()
+    step -> out.write view.front.toString(held.depth > 0) + '\n' if view.front
+  process.off name, fn for name, fn of held.handlers
+  step -> release held
+  error
+
+# The way out: the terminal given back, and a continue nobody waits
+# for any more forgotten.
+export teardown =! (held, drawn) ->
+  error = down held, drawn
+  process.off 'SIGCONT', held.wake if held.wake
+  held.wake = null
+  error
+
+# ── Signals, the crash, the exit ──────────────────────────────────────────────
+
+# A signal gives the terminal back and exits with 128 plus its number;
+# an uncaught error or an unhandled rejection gives it back and hands
+# the error to whoever else handles it — the runtime, which prints it
+# with its frames remapped — or prints it and exits 1 itself; the loop
+# draining closes the app as `quit` would; a `process.exit` with the
+# app live gives the terminal back on the way.
+handlers =! (held) ->
+  gone = (code) ->
+    held.close true
+    process.exit code
+  crash = (name, error) ->
+    held.close true
+    return if process.emit name, error
+    console.error error
+    process.exit 1
+  {
+    SIGINT: -> gone 130
+    SIGTERM: -> gone 143
+    SIGHUP: -> gone 129
+    uncaughtException: (error) -> crash 'uncaughtException', error
+    unhandledRejection: (error) -> crash 'unhandledRejection', error
+    beforeExit: -> held.close true
+    exit: -> held.close true
+  }
+
+# ── The probes and their answers ──────────────────────────────────────────────
+
+# Ask the terminal where its cursor is, from the frame's top-left, where
+# the frame sits: unknown until the answer, and taken to be the bottom
+# meanwhile.
+export ask! =! (held) ->
+  held.asked = true
+  held.view.origin = Infinity
+  held.out.write held.view.unpark() + PROBE
+
+# The questions whose answers arrive as input, asked once the app
+# stands — a constructor that throws leaves no answer for the shell —
+# and again on every resume: with the mouse, where the cursor is, on
+# the primary screen; with the enhanced keyboard, whether the terminal
+# speaks kitty's protocol, and its attributes, which every terminal
+# answers, until one of the two has decided it.
+export probe! =! (held) ->
+  return unless held.raw
+  ask held if held.mouse and not held.alt
+  held.out.write QUERY if held.probing
+
+# The terminal's answers. The cursor's row — an answer to the package's
+# own probe, marked as DECXCPR marks it, and only while one is
+# outstanding — is where the frame's top-left was when it was asked, and
+# lower if a frame has scrolled the terminal since. The keyboard is
+# decided by whichever of the two queries is answered first: kitty's own
+# reply says the protocol is there, and the flag is pushed; the
+# attributes reply first says it is not — tmux answers only that one —
+# and nothing is pushed, whatever comes later. True when the keyboard
+# was just decided enhanced.
+export reply =! (held, event) ->
+  switch event.kind
+    when 'cursor'
+      return false unless event.marked and held.asked
+      held.asked = false
+      held.view.origin = Math.min held.view.origin, event.y
+    when 'keyboard', 'attributes'
+      return false unless held.probing
+      held.probing = false
+      return false unless event.kind is 'keyboard'
+      held.enhanced = true
+      if held.raw
+        held.out.write PUSH
+        held.pushed = true
+      return true
+  false
+
+# ── Suspend and resume ────────────────────────────────────────────────────────
+
+# While the terminal is another's, frames go nowhere: a resize or a
+# change books one as ever, and the resume draws whole.
+pause! =! (held) ->
+  held.suspended = true
+  held.view.out = Quiet.new held.out if held.tty
+
+# Take the terminal again — unless the app was closed meanwhile — ask
+# the questions again, forget the press whose release was never seen
+# and the bytes held mid-sequence, and draw whole at whatever size the
+# terminal has now.
+resume! =! (held) ->
+  held.suspended = false
+  process.off 'SIGCONT', held.wake if held.wake
+  held.wake = null
+  return if held.over
+  held.view.out = held.out if held.tty
+  setup held
+  probe held
+  held.pointer?.reset()
+  held.parser.reset()
+  held.redraw()
+
+# Hand the terminal to `fn` and take it back once `fn` settles: the
+# road Ctrl-Z takes, without the signal. A step that fails on the way
+# out is thrown before `fn` runs, with the terminal taken again so a
+# later hand-over can try. On a stdout that is no terminal `fn` runs
+# and nothing changes hands. Refused while one is under way.
+export handover =! (held, fn) ->
+  throw Error.new 'rip/tui: the terminal is already suspended — resume before suspending again' if held.suspended
+  if held.tty and (error = down held, true)
+    setup held
+    throw error
+  pause held
+  try
+    fn!
+  finally
+    resume held
+
+# Ctrl-Z: give the terminal back, stop the process as the shell would
+# have, and take the terminal again on SIGCONT. Nothing on a stdout
+# that is no terminal, on Windows, or while a hand-over is under way.
+export stop! =! (held) ->
+  return unless held.tty and process.platform isnt 'win32' and not held.suspended
+  down held, true
+  pause held
+  held.wake = -> resume held
+  process.once 'SIGCONT', held.wake
+  process.kill process.pid, 'SIGTSTP'
+
+# ── The console ───────────────────────────────────────────────────────────────
+
+LEVELS =! { log: 'out', info: 'out', debug: 'out', warn: 'err', error: 'err' }
+
+# The console's methods bypass `process.stdout.write`, so they are
+# replaced for the run and given back at teardown, when a suspend
+# hands the terminal over as well. A line goes to the stream it always
+# went to: inline, the frame is cleared first and drawn again below the
+# line, so it scrolls into the scrollback above the app; on the
+# alternate screen it is kept, and replayed once the screen is left.
+capture! =! (held) ->
+  held.was = {}
+  for name, stream of LEVELS
+    held.was[name] = console[name]
+    console[name] = ((stream) -> (...args) -> relay held, held[stream], format(...args) + '\n')(stream)
+
+release! =! (held) ->
+  return unless held.was
+  console[name] = fn for name, fn of held.was
+  held.was = null
+  stream.write text for [stream, text] in held.logs
+  held.logs = []
+
+relay! =! (held, stream, text) ->
+  if held.alt
+    held.logs.push [stream, text]
+    return
+  view = held.view
+  spot = view.parked
+  held.out.write view.unpark() + "\x1b[J"
+  stream.write text
+  # With no frame to draw again, a whole one is booked: it lands below.
+  front = view.front
+  return unless front
+  front.lo.fill 0
+  front.hi.fill front.cols
+  bytes = diff null, front
+  view.parked = spot
+  if spot
+    bytes += "\x1b[#{spot.y}B" if spot.y
+    bytes += "\x1b[#{spot.x + 1}G" + SHOW
+  held.out.write "\x1b[?2026h#{bytes}\x1b[?2026l"
+  # The line scrolled the terminal: where the frame sits is asked again.
+  ask held if held.mouse and held.raw
