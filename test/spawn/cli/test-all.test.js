@@ -29,7 +29,7 @@ import { spawnSync } from '../../support/spawn.js';
 import { alive, until } from '../../support/wait.js';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { availableParallelism, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const ORCHESTRATOR = resolve(import.meta.dir, '../../../scripts/test-all.mjs');
@@ -299,6 +299,44 @@ describe('the lane orchestrator', () => {
     expect(readdirSync(join(root, 'test'))).toEqual(['root.test.js']); // a plan writes nothing
   });
 
+  // The plan's bytes are pinned whole, painted and plain: the header's
+  // budget, the skip line, the queue and the two argument lines. The
+  // budget is recomputed here from the cores this machine offers, by
+  // the rule the orchestrator documents, so the pin holds on any box.
+  test('the plan prints exactly its header, skips, queue and budget, plain and painted', () => {
+    const root = fixture({ zebra: GREEN, sites: GREEN, toolless: TOOLLESS });
+    const cores = availableParallelism();
+    const peak = Math.max(3, Math.round(cores * 1.4));
+    const lane = Math.max(1, Math.min(4, peak - 2));        // --jobs 2: one sibling, which fans out
+    const rootWorkers = Math.max(2, Math.min(cores, peak - lane));
+    const skip = '  ⊘ packages/toolless SKIPPED: `rip-no-such-tool-6f2a` is not on PATH or in node_modules/.bin';
+    const expected = (paint) => [
+      `[rip] test:all — 3 lanes, 2 at a time on ${cores} cores (root lane ${rootWorkers} workers, ${lane} per sibling lane), repo ${root}`,
+      paint('33', skip),
+      '▸ root (extended tier)',
+      '▸ packages/sites',
+      '▸ packages/zebra',
+      paint('2', `  · root lane: bun test --parallel=${rootWorkers} --timeout 60000`),
+      paint('2', `  · package lanes: bun run test  (RIP_LANE_WORKERS=${lane})`),
+      '',
+    ].join('\n');
+
+    const plain = orchestrate(root, {}, '--plan', '--jobs', '2');
+    expect(plain.status).toBe(0);
+    expect(plain.stdout).toBe(expected((_, s) => s));
+
+    const env = { ...process.env, CI: '', FORCE_COLOR: '1' };
+    delete env.NO_COLOR;
+    const painted = spawnSync(process.execPath, [ORCHESTRATOR, '--root', root, '--plan', '--jobs', '2'], {
+      encoding: 'utf8',
+      env,
+      keepForceColor: true,
+      ...BOUND,
+    });
+    expect(painted.status).toBe(0);
+    expect(painted.stdout).toBe(expected((code, s) => `\x1b[${code}m${s}\x1b[0m`));
+  });
+
   // A real run starts lanes in the planned order too (the plan is the
   // queue, not a separate listing). One lane at a time makes the start
   // order the output order.
@@ -380,5 +418,34 @@ describe('an interrupted run takes its lanes down', () => {
     const status = await exited;
     expect(status).toEqual({ code: 143, signal: null });
     rmSync(root, { recursive: true, force: true });
+  });
+
+  // `bun test --parallel` puts each worker in a process group of its own,
+  // and a worker whose coordinator dies is re-parented and runs on. The
+  // stand-in here is a lane that starts a detached child — a group, and
+  // a session, of its own — and parks beside it.
+  test('SIGTERM to the orchestrator stops every process under a lane, in whatever group it put itself', async () => {
+    const tree = {
+      script: `bun -e "const c = require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' }); require('fs').writeFileSync('lane.pid', process.pid + ' ' + c.pid); setInterval(() => {}, 1000)"`,
+    };
+    const root = fixture({ tree });
+    const pidFile = join(root, 'packages', 'tree', 'lane.pid');
+    const orchestrator = spawn(process.execPath, [ORCHESTRATOR, '--root', root, '--timeout', '120000'], {
+      stdio: 'ignore',
+      env: { ...process.env, CI: '', NO_COLOR: '1' },
+    });
+    expect(await until(() => existsSync(pidFile) && readFileSync(pidFile, 'utf8').includes(' '), 15000)).toBe(true);
+    const [lane, detached] = readFileSync(pidFile, 'utf8').split(' ').map(Number);
+    try {
+      expect(alive(detached)).toBe(true);
+      const exited = new Promise((resolve) => orchestrator.once('exit', (code, signal) => resolve({ code, signal })));
+      orchestrator.kill('SIGTERM');
+      expect(await until(() => !alive(lane) && !alive(detached), 5000)).toBe(true);
+      expect(await exited).toEqual({ code: 143, signal: null });
+    } finally {
+      // Nothing outlives the test, whatever it found.
+      for (const pid of [lane, detached]) { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } }
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

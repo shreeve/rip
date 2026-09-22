@@ -47,6 +47,7 @@ package-local `TODO.md` files (for example
 bun run test:rip       # language suite (PR code check)
 bun run test           # fast compiler/runtime suite
 bun run test:all       # exhaustive: extended tier + every package
+bun run test:tui       # the same lanes, drawn live on packages/tui
 rip check [paths...]   # headless TypeScript checking over Rip source
 bun run parser         # regenerate src/parser.js
 bun run corpus
@@ -65,6 +66,22 @@ emission instead of recompiling it. Any edit under `src/` invalidates
 every entry, and compile errors are never cached. `RIP_CACHE_DIR=<dir>`
 relocates the cache and `RIP_NO_CACHE=1` disables it. Entries unread for
 a week are pruned; `rm -rf .rip/cache` is the full reset.
+
+### The live runner
+
+`bun run test:tui` runs the lanes `test:all` runs, with the same
+scheduler, the same verdict and the same exit code, and draws them
+live: a cell per lane, a bar for the whole run with its ETA, a bar per
+lane in flight against its last duration, each finished lane scrolled
+into the scrollback as one aligned row, and a card for the first
+failure of each failing lane (`↑`/`↓` choose, Enter opens the lane's
+output, `f` shows only the failing lanes, `q` stops the run and every
+lane's process group). At the end each failing lane's output is printed
+as `test:all` prints it, then a summary card. Each complete run leaves
+the lanes' times and counts in `.rip/test-last.json` for the next run's
+bars and ETA. Piped, under `CI`, or with `--plan` it is `test:all`
+itself. It takes `test:all`'s flags; both front ends are
+`scripts/lanes.mjs` underneath.
 
 `test:all` needs `janus` on PATH for the Sites integration lane. Install
 [Janus](https://github.com/shreeve/janus#prebuilt-releases), or put a Janus

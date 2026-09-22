@@ -1,0 +1,305 @@
+# The repository's live test runner, scripts/test-live.rip, driven
+# headless through `mount`: the lanes' events are fed by hand as the
+# scheduler (scripts/lanes.mjs) would send them, the lanes' clock is a
+# number the test moves, and the board's clock moves with `view.tick`.
+# Every frame is the one a terminal would show at that moment.
+#
+#   rip test/live.rip
+
+import { test, eq, ok } from 'rip/testing'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { mount } from 'rip/tui'
+import * as cells from './ink/cells.rip'
+import { Board, Tally, blocks, firstFailure, recall, remember, PAINT } from '../../../scripts/test-live.rip'
+import { failureBlock } from '../../../scripts/lanes.mjs'
+
+# Four lanes as the scheduler plans them, the last one skipped, and what
+# a last run said of the first three: the root lane prints no line per
+# test, sites and time print one for each as they go.
+lane =! (label, skip) -> { label, cwd: '/repo', cmd: 'bun', args: [], skip }
+LANES =! -> [lane('root (extended tier)'), lane('packages/sites'), lane('packages/time'), lane('packages/tray', '`swift` is not on PATH')]
+MEMORY =! -> { wall: 60000, lanes: { 'root (extended tier)': { ms: 50000, ran: 7900, streamed: 0, spread: null }, 'packages/sites': { ms: 30000, ran: 145, streamed: 145, spread: 0.4 }, 'packages/time': { ms: 800, ran: 548, streamed: 548, spread: 0.5 } } }
+
+# bun's failure under a PTY, as a lane's captured output carries it.
+BUN_FAILURE =! [
+  '$ bun test suite.test.js'
+  'suite.test.js:'
+  "2 | test('adds', () => { expect(1 + 1).toBe(3) });"
+  '                                     ^'
+  'error: expect(received).toBe(expected)'
+  ''
+  'Expected: 3'
+  'Received: 2'
+  ''
+  '      at <anonymous> (/repo/packages/sites/suite.test.js:2:38)'
+  '✗ adds [0.12ms]'
+  ''
+  ' 0 pass'
+  ' 1 fail'
+  'Ran 1 test across 1 file. [2.00ms]'
+].join '\n'
+
+# A board over the four lanes, `memory` its last run (null for a first
+# run), and `hear`, which feeds it an event with the lanes' clock at
+# `at` milliseconds and moves the board's clock a tick. The mount is
+# closed when `body` is done, or when the promise it returns settles.
+board =! (memory, body) ->
+  planned = { lanes: LANES(), excluded: [], skipped: [] }
+  planned.skipped = planned.lanes.filter (it) -> it.skip
+  clockAt = { now: 0 }
+  tally = Tally.new planned, { root: '/repo', cores: 10, jobs: 2, ci: false }, memory, -> clockAt.now
+  view = mount Board, cols: 100, rows: 30, props: { tally }
+  hear = (at, ...events) ->
+    clockAt.now = at
+    tally.hear event for event in events
+    view.tick 100
+  closing = -> view.close()
+  try
+    result = body { view, tally, hear, lanes: planned.lanes }
+  catch error
+    closing()
+    throw error
+  return result.finally(closing) if result?.then
+  closing()
+  result
+
+# A frame's rows, with their trailing blanks cut.
+rows =! (text) -> (row.trimEnd() for row in text.split '\n')
+
+console.log "\nThe live test runner"
+
+test "blocks: a bar fills in eighths of a cell, and the track takes the rest", ->
+  eq blocks(0, 8), { done: '', rest: '────────' }
+  eq blocks(0.5, 8), { done: '████', rest: '────' }
+  eq blocks(0.24, 40), { done: '█████████▋', rest: '──────────────────────────────' }, '76.8 eighths round to 77: nine cells and five eighths'
+  eq blocks(1 / 64, 8), { done: '▏', rest: '───────' }
+  eq blocks(2, 4), { done: '████', rest: '' }, 'a fill past the whole is the whole'
+
+test "firstFailure: bun's error, expected and received above its failing line, and where; the rip harness's one line; a crash's last lines", ->
+  card = firstFailure BUN_FAILURE
+  eq [card.name, card.detail, card.place], ['adds', ['error: expect(received).toBe(expected)', 'Expected: 3', 'Received: 2'], { path: '/repo/packages/sites/suite.test.js', line: 2 }]
+  eq card.lines[card.at], '✗ adds [0.12ms]'
+  piped = firstFailure BUN_FAILURE.replace('✗ adds', '(fail) adds')
+  eq piped.name, 'adds', "a pipe's `(fail)` line is the same failure"
+  painted = firstFailure BUN_FAILURE.replace('✗ adds', '\x1b[0m\x1b[31m✗\x1b[0m\x1b[1m adds\x1b[0m')
+  eq painted.name, 'adds', 'a painted mark is read through its paint'
+  rip = firstFailure "  ✓ fine\n  ✗ stop exits: expected 0, got null\n2 tests: 1 passed, 1 failed"
+  eq [rip.name, rip.detail, rip.place], ['stop exits', ['expected 0, got null'], null]
+  crash = firstFailure "starting\nSegmentation fault\n\n"
+  eq [crash.name, crash.detail], [null, ['starting', 'Segmentation fault']]
+
+test "lanes in flight: a spinner, the name, a bar against the last run — by time, or by tests for a lane that prints one line each as it goes — and the header's clock", ->
+  board MEMORY(), ({ view, hear, lanes }) ->
+    hear 0, { type: 'plan' }, { type: 'finish', result: { lane: lanes[3], status: 'skip', ms: 0, why: lanes[3].skip, output: '' } }, { type: 'start', lane: lanes[0] }, { type: 'start', lane: lanes[1] }
+    hear 12000, { type: 'chunk', lane: lanes[1], data: Buffer.from('  ✓ one\n  \x1b[32m✓\x1b[0m two\r\n  ✓ th') }, { type: 'chunk', lane: lanes[1], data: Buffer.from('ree\n  … a line that is no test\n') }
+    frame = rows view.frame()
+    eq frame[0], ' rip test:all 3 lanes · 2 at a time · 10 cores                                                 0:12'
+    eq frame[4], ' ⠹ root (extended tier)  █████████▋──────────────────────────────  12.0s / ~50s', 'the second tick turns the first set to its third glyph'
+    eq frame[5], ' ⣟ packages/sites        ▉───────────────────────────────────────  3 / 145 tests', 'the second lane is on a set and a phase of its own, and three of 145 tests is seven eighths of its first cell'
+    eq frame[6], ' 0 passed · 0 failed · 1 skipped · 0 tests                                      q quit · f failures'
+    styledRow = cells.styled(view.ansi)[4]
+    ok styledRow.startsWith(' «#22d3ee»⠹«» root (extended tier)  «#2cd6d4»█████████▋«dim»────'), "the bar is 24% of the way from cyan to green: #{styledRow}"
+
+test "a lane past its last duration turns amber, and red past twice it; a first run sweeps a bar with nothing to fill it by", ->
+  board MEMORY(), ({ view, hear, lanes }) ->
+    hear 0, { type: 'plan' }, { type: 'start', lane: lanes[0] }
+    hear 60000
+    ok cells.styled(view.frame() and view.ansi)[4].includes('«#fbbf24»████'), 'amber past its last duration'
+    hear 101000
+    ok cells.styled(view.frame() and view.ansi)[4].includes('«#f87171»████'), 'red past twice it'
+  board null, ({ view, hear, lanes }) ->
+    hear 0, { type: 'plan' }, { type: 'start', lane: lanes[0] }
+    hear 3000
+    frame = rows view.frame()
+    eq frame[2], ' ' + '  ███'.padEnd(93) + '  0/3', 'the whole run: lanes finished of lanes to run'
+    eq frame[4], ' ⠹ root (extended tier)  ' + '  ███'.padEnd(40) + '  3.0s'
+
+test "a finished lane scrolls into the scrollback as one aligned row in its color, with a bar against the slowest lane and how far it moved from its last run", ->
+  board MEMORY(), ({ view, hear, lanes }) ->
+    hear 0, { type: 'plan' }, { type: 'finish', result: { lane: lanes[3], status: 'skip', ms: 0, why: lanes[3].skip, output: '' } }, { type: 'start', lane: lanes[0] }, { type: 'start', lane: lanes[2] }
+    hear 700, { type: 'finish', result: { lane: lanes[2], status: 'pass', ms: 700, ran: 548, output: '548 tests: 548 passed, 0 failed' } }, { type: 'start', lane: lanes[1] }
+    hear 5000, { type: 'finish', result: { lane: lanes[1], status: 'fail', ms: 4300, why: 'exit 1', output: BUN_FAILURE } }
+    view.frame()
+    eq cells.plain(view.scrollback), [
+      '⊘ packages/tray         skipped: `swift` is not on PATH'
+      '✓ packages/time          548 tests    0.7s  ▏           −0.1s'
+      '✗ packages/sites                      4.3s  exit 1'
+      ''
+    ]
+    eq cells.styled(view.scrollback), [
+      '«#facc15»⊘«» «#facc15»packages/tray«»         «#facc15»skipped:«» «#facc15»`swift`«» «#facc15»is«» «#facc15»not«» «#facc15»on«» «#facc15»PATH'
+      '«#4ade80»✓«» packages/time          548 tests    «dim»0.7s«»  «#64748b»▏«»           «#4ade80»−0.1s'
+      '«#f87171 bold»✗«» «#f87171 bold»packages/sites«»                      «dim»4.3s«»  «#f87171»exit«» «#f87171»1'
+      ''
+    ]
+
+test "the strip holds one cell per lane in the order they start, and the footer the totals", ->
+  board MEMORY(), ({ view, hear, lanes }) ->
+    hear 0, { type: 'plan' }, { type: 'finish', result: { lane: lanes[3], status: 'skip', ms: 0, why: lanes[3].skip, output: '' } }, { type: 'start', lane: lanes[0] }, { type: 'start', lane: lanes[2] }
+    hear 700, { type: 'finish', result: { lane: lanes[2], status: 'pass', ms: 700, ran: 548, output: '548 tests: 548 passed, 0 failed' } }, { type: 'start', lane: lanes[1] }
+    hear 5000, { type: 'finish', result: { lane: lanes[1], status: 'fail', ms: 4300, why: 'exit 1', output: BUN_FAILURE } }
+    frame = rows view.frame()
+    eq frame[1], ' ⠸✗●⊘'
+    eq cells.styled(view.ansi)[1], ' «#22d3ee»⠸«#f87171 bold»✗«#4ade80»●«#facc15»⊘'
+    eq frame[frame.length - 1], ' 1 passed · 1 failed · 1 skipped · 548 tests             q quit · f failures · ↑↓ choose · ⏎ output'
+
+test "the terminal's progress indicator follows the run's share, weighed by the last run, and says error once a lane fails", ->
+  board MEMORY(), ({ view, hear, lanes }) ->
+    hear 0, { type: 'plan' }, { type: 'start', lane: lanes[0] }, { type: 'start', lane: lanes[2] }
+    view.frame()
+    hear 20000, { type: 'finish', result: { lane: lanes[2], status: 'pass', ms: 700, ran: 548, output: '548 tests: ok' } }
+    view.frame()
+    ok view.bytes.includes('\x1b]9;4;1;26\x1b\\'), "20 s of the root lane's 50 and time's 0.8 whole, of 80.8"
+    hear 21000, { type: 'start', lane: lanes[1] }, { type: 'finish', result: { lane: lanes[1], status: 'fail', ms: 100, why: 'exit 1', output: BUN_FAILURE } }
+    view.frame()
+    ok view.bytes.includes('\x1b]9;4;2\x1b\\'), 'error once a lane fails'
+  board null, ({ view, hear, lanes }) ->
+    hear 0, { type: 'plan' }, { type: 'start', lane: lanes[2] }
+    hear 700, { type: 'finish', result: { lane: lanes[2], status: 'pass', ms: 700, ran: 548, output: '548 tests: ok' } }
+    view.frame()
+    ok view.bytes.includes('\x1b]9;4;1;33\x1b\\'), 'on a first run, the lanes finished of the lanes to run'
+
+test "a failing lane's card: the test, what it said, and where, as a link; ↑ and ↓ go between the cards; f shows the failing lanes in place of the lanes in flight", ->
+  board MEMORY(), ({ view, hear, lanes }) ->
+    hear 0, { type: 'plan' }, { type: 'start', lane: lanes[0] }, { type: 'start', lane: lanes[1] }
+    hear 4000, { type: 'finish', result: { lane: lanes[1], status: 'fail', ms: 4000, why: 'exit 1', output: BUN_FAILURE } }, { type: 'start', lane: lanes[2] }
+    hear 5000, { type: 'finish', result: { lane: lanes[2], status: 'timeout', ms: 1000, why: 'timed out after 1.0s', output: "  ✗ clocks: never settled\n" } }
+    frame = rows view.frame()
+    eq frame.slice(5, 12), [
+      '╭──────────────────────────────────────────────────────────────────────────────────────────────────╮'
+      '│ ✗ packages/sites  exit 1  1/2                                                                    │'
+      '│ adds                                                                                             │'
+      '│ error: expect(received).toBe(expected)                                                           │'
+      '│ Expected: 3                                                                                      │'
+      '│ Received: 2                                                                                      │'
+      '│ packages/sites/suite.test.js:2                                                                   │'
+    ]
+    ok cells.styled(view.ansi)[11].includes('«dim underline link file:///repo/packages/sites/suite.test.js»packages/sites/suite.test.js:2'), 'the place, under the root, is a link to the file'
+    view.press 'ArrowDown'
+    frame = rows view.frame()
+    eq frame.slice(6, 8), [
+      '│ ✗ packages/time  timed out after 1.0s  2/2                                                       │'
+      '│ clocks                                                                                           │'
+    ]
+    view.press 'ArrowDown'
+    eq rows(view.frame())[6], '│ ✗ packages/sites  exit 1  1/2                                                                    │', 'and round again'
+    view.press 'f'
+    frame = rows view.frame()
+    eq frame.slice(4, 6), [' › ✗ packages/sites        exit 1', '   ✗ packages/time         timed out after 1.0s']
+    view.press 'ArrowUp'
+    eq rows(view.frame()).slice(4, 6), ['   ✗ packages/sites        exit 1', ' › ✗ packages/time         timed out after 1.0s']
+    view.press 'f'
+    eq rows(view.frame())[4].slice(3, 23), 'root (extended tier)', 'f again: the lanes in flight'
+
+test "Enter opens the failing lane's captured output below the frame at its failure, the arrows move through it, Escape closes it", ->
+  board MEMORY(), ({ view, hear, lanes }) ->
+    hear 0, { type: 'plan' }, { type: 'start', lane: lanes[1] }
+    hear 4000, { type: 'finish', result: { lane: lanes[1], status: 'fail', ms: 4000, why: 'exit 1', output: BUN_FAILURE } }
+    view.press 'Enter'
+    frame = rows view.frame()
+    eq frame.length, 30, 'the pane takes the rows the rest of the frame leaves, and no more'
+    eq frame.slice(12, 16), [
+      '┌──────────────────────────────────────────────────────────────────────────────────────────────────┐'
+      '│  packages/sites · lines 2–15 of 15                                                               │'
+      '│ suite.test.js:                                                                                   │'
+      "│ 2 | test('adds', () => { expect(1 + 1).toBe(3) });                                               │"
+    ], 'opened at the failure, as far down as the output goes'
+    eq frame[frame.length - 1], ' 0 passed · 1 failed · 0 skipped · 0 tests'.padEnd(70) + '↑↓ PgUp PgDn scroll · ⏎ close', 'the keys the open output takes'
+    view.press 'Home'
+    eq rows(view.frame())[13], '│  packages/sites · lines 1–14 of 15                                                               │'
+    view.press 'ArrowDown'
+    eq rows(view.frame())[14], '│ suite.test.js:                                                                                   │'
+    view.press 'Escape'
+    frame = rows view.frame()
+    eq frame.length, 13, 'closed: the header, the strip, the bar, a blank row, the card and the footer'
+    eq frame[frame.length - 1], ' 0 passed · 1 failed · 0 skipped · 0 tests'.padEnd(57) + 'q quit · f failures · ↑↓ choose · ⏎ output'
+
+test! "the end: every failing lane's output printed above the frame as the plain runner prints it, then the end card, and the plain runner's exit code", ->
+  board! MEMORY(), ({ view, hear, lanes, tally }) ->
+    hear 0, { type: 'plan' }, { type: 'finish', result: { lane: lanes[3], status: 'skip', ms: 0, why: lanes[3].skip, output: '' } }, { type: 'start', lane: lanes[0] }, { type: 'start', lane: lanes[1] }
+    failing = { lane: lanes[1], status: 'fail', ms: 4000, why: 'exit 1', output: BUN_FAILURE }
+    hear 4000, { type: 'finish', result: failing }, { type: 'start', lane: lanes[2] }
+    passing = [{ lane: lanes[2], status: 'pass', ms: 700, ran: 548, output: '548 tests: ok' }, { lane: lanes[0], status: 'pass', ms: 45000, ran: 7938, output: 'Ran 7938 tests' }]
+    hear 4700, { type: 'finish', result: passing[0] }
+    hear 45000, { type: 'finish', result: passing[1] }, { type: 'end', summary: { results: [failing, ...passing], skipped: [lanes[3]], excluded: [], failed: [failing], wall: 45000, ranTotal: 8486, code: 1 } }
+    view.frame()
+    before = view.scrollback
+    ok cells.plain(before).some((row) -> row.startsWith '✓ root (extended tier) 7,938 tests'), 'the last lane is in the scrollback'
+    ok not before.includes('failures, then last 60 lines'), 'the run ends a tick after its last lane, once that lane is in the scrollback'
+    view.tick 100
+    frame = rows view.frame()
+    after = view.scrollback.slice before.length
+    ok after.startsWith(failureBlock(failing, PAINT) + '\n'), "the failing lane's block, byte for byte the plain runner's"
+    eq cells.plain(after.slice(failureBlock(failing, PAINT).length + 1)), [
+      '╭──────────────────────────────────────────────────────────────────────────────────────────────────╮'
+      '│ lanes   2 passed · 1 failed · 1 skipped                                                          │'
+      '│ tests   8,486                                                                                    │'
+      '│ wall    45.0s  last 60.0s, −15.0s                                                                │'
+      '│ lanes   49.7s of lane time · 1.1× parallel                                                       │'
+      '│ slowest root (extended tier)   45.0s  ████████████                                               │'
+      '│         packages/sites          4.0s  █▏                                                         │'
+      '│         packages/time           0.7s  ▏                                                          │'
+      '│                                                                                                  │'
+      '│ ✗ 1 of 3 lanes failed: packages/sites                                                            │'
+      '╰──────────────────────────────────────────────────────────────────────────────────────────────────╯'
+      ''
+    ]
+    eq frame, [
+      ' rip test:all 3 lanes · 2 at a time · 10 cores                                                 0:45'
+      ' ●✗●⊘'
+      ' ████████████████████████████████████████████████████████████████████████████████████████████  100%'
+      ' 2 passed · 1 failed · 1 skipped · 8,486 tests'
+    ]
+    eq (await view.done), 1
+    ok tally.closed
+
+test! "a green run's end card says so in its verdict, and exits 0", ->
+  board! MEMORY(), ({ view, hear, lanes }) ->
+    hear 0, { type: 'plan' }, { type: 'start', lane: lanes[2] }
+    passing = { lane: lanes[2], status: 'pass', ms: 700, ran: 548, output: '548 tests: ok' }
+    hear 700, { type: 'finish', result: passing }, { type: 'end', summary: { results: [passing], skipped: [], excluded: [], failed: [], wall: 700, ranTotal: 548, code: 0 } }
+    view.tick 100
+    view.frame()
+    card = cells.styled view.scrollback
+    ok card.some((row) -> row.includes '«#4ade80 bold»✓«» «#4ade80 bold»All«» «#4ade80 bold»1«» «#4ade80 bold»lanes«» «#4ade80 bold»green«»'), 'the verdict, bold green'
+    ok cells.plain(view.scrollback).some((row) -> row.includes '✓ All 1 lanes green · 548 tests · 0.7s')
+    eq (await view.done), 0
+
+test "a complete run is remembered for the next: each passing lane's time, its count, and how its lines arrived", ->
+  root = mkdtempSync join(tmpdir(), 'rip-live-')
+  try
+    eq recall(root), null, 'nothing before the first run'
+    board MEMORY(), ({ view, hear, lanes, tally }) ->
+      hear 0, { type: 'plan' }, { type: 'start', lane: lanes[2] }
+      hear 200, { type: 'chunk', lane: lanes[2], data: Buffer.from('  ✓ a\n') }
+      hear 600, { type: 'chunk', lane: lanes[2], data: Buffer.from('  ✓ b\n') }
+      passing = { lane: lanes[2], status: 'pass', ms: 800, ran: 2, output: '2 tests: ok' }
+      hear 800, { type: 'finish', result: passing }, { type: 'end', summary: { results: [passing], skipped: [], excluded: [], failed: [], wall: 800, ranTotal: 2, code: 0 } }
+      remember root, tally
+    memory = recall root
+    eq memory.wall, 800
+    eq memory.lanes['packages/time'], { ms: 800, ran: 2, streamed: 2, spread: 0.5 }
+    eq memory.lanes['root (extended tier)'], MEMORY().lanes['root (extended tier)'], 'a lane that did not pass keeps what the last run said'
+  finally
+    rmSync root, { recursive: true, force: true }
+
+test "a terminal under 70 columns keeps each lane in flight to its spinner, name and time, and one under 40 drops the strip", ->
+  board MEMORY(), ({ view, hear, lanes }) ->
+    hear 0, { type: 'plan' }, { type: 'start', lane: lanes[0] }
+    hear 12000
+    view.resize 60, 30
+    frame = rows view.frame()
+    eq frame[0], ' rip test:all 3 lanes'.padEnd(55) + '0:12'
+    eq frame[4], ' ⠹ root (extended tier)  12.0s'
+    view.resize 36, 30
+    frame = rows view.frame()
+    ok frame[1].includes('%'), 'the whole run is the second row'
+    ok not frame.some((row) -> row.includes '··⊘'), 'and the strip is gone'
+
+test! "q quits the board mid-run, with no exit code of its own", ->
+  board! MEMORY(), ({ view, hear, lanes }) ->
+    hear 0, { type: 'plan' }, { type: 'start', lane: lanes[0] }
+    view.press 'q'
+    eq (await view.done), undefined
