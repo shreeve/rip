@@ -30,24 +30,26 @@ its throttled log-update are not carried over.
 
 ## What runs
 
-Of the 46 titles in these files, 27 are ported and 19 are left out.
-`test/terminal.rip` holds `harness.rip`'s tally to these counts.
+Of the 70 titles in these files, 27 are held, 1 differs, and 42 are
+left out. A title is counted once per case Ink registers, so a `test(`
+site inside a loop counts once per turn of the loop; both columns are
+given. `test/terminal.rip` holds `harness.rip`'s tally to these counts.
 
-| Ink file | titles | held | differs | left out |
-|---|---|---|---|---|
-| `suspend-terminal` | 14 | 8 | 0 | 6 |
-| `suspension-exit` | 2 | 1 | 0 | 1 |
-| `suspension-output` | 3 | 1 | 0 | 2 |
-| `suspension-resize` | 2 | 2 | 0 | 0 |
-| `suspension-handle` | 2 | 0 | 0 | 2 |
-| `suspension-input-disable` | 6 | 0 | 0 | 6 |
-| `kitty-negotiation` (suspension rows) | 2 | 1 | 1 | 0 |
-| `exit` | 15 | 9 | 0 | 6 |
-| `errors` | 7 | 1 | 0 | 6 |
-| `error-overview` | 6 | 0 | 0 | 6 |
-| `alternate-screen-example` | 2 | 0 | 0 | 2 |
-| `render` (console rows) | 2 | 2 | 0 | 0 |
-| `components` (CI rows) | 2 | 2 | 0 | 0 |
+| Ink file | sites | titles | held | differs | left out |
+|---|---|---|---|---|---|
+| `suspend-terminal` | 11 | 14 | 8 | 0 | 6 |
+| `suspension-exit` | 1 | 2 | 1 | 0 | 1 |
+| `suspension-output` | 2 | 3 | 1 | 0 | 2 |
+| `suspension-resize` | 1 | 2 | 2 | 0 | 0 |
+| `suspension-handle` | 1 | 2 | 0 | 0 | 2 |
+| `suspension-input-disable` | 6 | 7 | 0 | 0 | 7 |
+| `kitty-negotiation` (suspension rows) | 2 | 2 | 1 | 1 | 0 |
+| `exit` | 15 | 15 | 9 | 0 | 6 |
+| `errors` | 8 | 8 | 1 | 0 | 7 |
+| `error-overview` | 7 | 7 | 0 | 0 | 7 |
+| `alternate-screen-example` | 2 | 2 | 0 | 0 | 2 |
+| `render` (console rows) | 1 | 2 | 2 | 0 | 0 |
+| `components` (CI rows) | 4 | 4 | 2 | 0 | 2 |
 
 The suspension rows of `kitty-negotiation` were left out of
 `test/mouse/SOURCE.md` for this file; `waitUntilExit preserves the
@@ -132,7 +134,7 @@ them and the exit code is the process's own.
   stderr writes — Ink's `useStdout().write`; a write to a stream is
   the stream's own here
 - `suspension-handle`: both — handles
-- `suspension-input-disable`: all six — Ink's input hooks each own a
+- `suspension-input-disable`: all seven — Ink's input hooks each own a
   share of raw mode and of bracketed paste, and a resume restores the
   shares that still have an owner; the host owns the terminal for the
   app's life here, with no share to disable (PLAN §8)
@@ -152,9 +154,17 @@ them and the exit code is the process's own.
   when render exits with an error and waitUntilExit is unused — `done`
   is always handed back, and a rejection nobody awaits is the caller's;
   waitUntilExit preserves the original component error —
-  `test/events.rip` pins that `done` rejects with what a listener threw
-- `error-overview`: all six — the deferred reporter; stacks are the
-  runtime's own (`src/cli/run.js`)
+  `test/events.rip` pins that `done` rejects with what a listener threw;
+  waitUntilExit preserves a component error from another realm — a
+  `vm` context; an error is whatever object was thrown here
+- `error-overview`: all seven, "does not emit duplicate key warnings
+  for repeated stack lines" among them — the deferred reporter; stacks
+  are the runtime's own (`src/cli/run.js`)
 - `alternate-screen-example`: both — the snake game's reducer, and a
-  fixture that prints its state; the alternate screen's bytes are
-  pinned by this package's own rows
+  fixture that prints its state; the alternate screen's bytes and the
+  leave order are pinned by this package's own rows ("The alternate
+  screen" in `test/terminal.rip`)
+- `components`: debug mode in CI does not replay final frame during
+  unmount teardown; debug mode in CI keeps final newline separation
+  after waitUntilExit — Ink's
+  `debug` option, which writes every frame whole, has no counterpart

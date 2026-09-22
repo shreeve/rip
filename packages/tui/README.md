@@ -58,14 +58,24 @@ back on every way out, by one road:
   modes and the process's handlers are as they were. A failure leaves
   what reached the screen, and `done` rejects with it.
 - **Signals.** SIGINT, SIGTERM and SIGHUP give the terminal back and
-  exit with 128 plus the signal's number. An uncaught error or an
-  unhandled rejection gives it back, prints the error, and exits 1; a
-  `process.exit` with the app live gives it back on the way.
-- **Suspend.** Ctrl-Z gives the terminal back and stops the process as
-  the shell would; `fg` draws the app again, whole, at the terminal's
-  size now. It is a default action of `keydown`, preventable like
-  Ctrl-C. `suspend fn` is the same road without the signal — the
-  terminal is `fn`'s until it settles:
+  exit with 128 plus the signal's number; a `done` an app awaits never
+  settles after a signal exit, since the process is gone before any
+  continuation runs. An uncaught error or an unhandled rejection gives
+  the terminal back, rejects `done` with the error, and leaves it to
+  the runtime — which prints it and exits 1 — or to the app's own
+  handler, once; a `process.exit` with the app live gives the terminal
+  back on the way.
+- **Suspend.** Ctrl-Z gives the terminal back and stops the job as the
+  terminal would — the whole process group, so under `rip app.rip` the
+  shell sees one stopped job; `fg` draws the app again, whole, at the
+  terminal's size now, whether or not the app has a timer. It is a
+  default action of `keydown`, preventable like Ctrl-C. The stop
+  signal is sent only when the app reads the process's own stdin: with
+  any other stream — a test's, or a `stdout:` given with no stdin —
+  Ctrl-Z takes the same road and sends nothing, since a stream of one's
+  own is not the terminal's job, and whoever gave it continues the app
+  with `process.kill process.pid, 'SIGCONT'`. `suspend fn` is the same
+  road without the signal — the terminal is `fn`'s until it settles:
 
   ```coffee
   import { suspend } from 'rip/tui'
@@ -81,15 +91,21 @@ back on every way out, by one road:
 - **CI and pipes.** On a stdout that is no terminal, or with `CI` set,
   nothing is asked of the terminal and the last frame alone is
   written, as text, at exit; `screen.interactive` reads false.
-- **Colors.** The depth is read once at `run` — `NO_COLOR`,
-  `FORCE_COLOR` 0 to 3, else `COLORTERM` and `TERM` — and
-  `screen.colors` reads it: 0, 16, 256 or 16777216. A 24-bit color is
-  drawn as the nearest the terminal has.
-- **Console.** While the app runs, `console.log` and its four siblings
-  clear the frame, write the line where it always went, and draw the
-  frame again below it, so logs scroll into the scrollback above the
-  app; on the alternate screen they are kept and replayed at exit.
-  `run App, console: false` leaves the console alone.
+- **Colors.** The depth is read once at `run` and `screen.colors`
+  reads it: 0, 16, 256 or 16777216. `NO_COLOR` set to anything but the
+  empty string is none; `FORCE_COLOR` `0` or `false` is none, empty or
+  `true` the 16, a number that depth up to 3, any other word the 16;
+  otherwise a pipe, CI or a dumb terminal is none, `COLORTERM`
+  `truecolor` 24-bit, `TERM` `256color` 256, and any other terminal
+  16. A 24-bit color is drawn as the nearest of xterm's 256 — a color
+  on the cube as that point — and below that as the nearest of xterm's
+  16.
+- **Console.** While the app runs, every console method that writes
+  (`log`, `table`, `group`, `trace`, `assert`, `count`, `time*`, …)
+  clears the frame, writes where it always went, and draws the frame
+  again below, so logs scroll into the scrollback above the app; on the
+  alternate screen they are kept and replayed at exit. `run App,
+  console: false` leaves the console alone.
 
 ## Widgets and styles
 

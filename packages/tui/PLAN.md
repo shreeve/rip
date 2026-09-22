@@ -970,24 +970,44 @@ probes are asked once the app stands, so a constructor that throws
 leaves no answer for the shell.
 
 **Signals.** An unhandled SIGTERM skips Bun's exit hooks, so SIGINT,
-SIGTERM and SIGHUP have handlers that tear down and exit with 128 + n;
-with raw mode on, Ctrl-C arrives as a key and its default action is
-`quit`. An uncaught error or an unhandled rejection tears down, then
-hands the error on to whoever else handles it — the runtime, which
-prints it with its frames remapped (`src/cli/run.js`) and exits 1 —
-or prints it and exits 1 itself. `beforeExit` closes a live app as
-`quit` would, so a script whose loop drains ends with its last frame
-in the scrollback; `exit` tears down an app still live when
-`process.exit` is called with it on the terminal. The handlers stand
-on the process only while the app runs.
+SIGTERM and SIGHUP have handlers that close the app — its last frame
+drawn, `done` resolved — and exit with 128 + n; a `done` an app
+awaits never settles after a signal exit, since the process is gone
+before any continuation runs. A signal that arrives while the process
+is stopped stays pending until it is continued, and then the continue
+and the signal, in either order, end the same way, the app's exit
+hook run. With raw mode on, Ctrl-C arrives as a key and its default
+action is `quit`. An uncaught error or an unhandled rejection closes
+the app with the error — `done` rejects — and leaves the error to the
+listeners after this package's, which the runtime already called
+once: its own, which prints it with its frames remapped
+(`src/cli/run.js`) and exits 1, or the app's; with none, it is printed
+and the exit is 1. `beforeExit` closes a live app as `quit` would, so
+a script whose loop drains ends with its last frame in the scrollback;
+`exit` tears down an app still live when `process.exit` is called
+with it on the terminal. The seven handlers belong to the app's life,
+never to the terminal's state: put on the process as `open` takes the
+app, ahead of the runtime's own and any the app adds, and taken off
+as the first step of `teardown`, whatever the terminal's state is
+then — never under `mount`.
 
 **Suspend.** Ctrl-Z is a default action of `keydown`, preventable
 like Ctrl-C: teardown with the cursor below the last frame, then
-SIGTSTP to the process itself; SIGCONT sets up again, asks the
-questions again — the frame's row with the mouse, the keyboard if it
-was still undecided — forgets the press whose release was never seen
-(`Pointer.reset`) and the bytes held mid-sequence (`parser.reset`),
-and draws whole at whatever size the terminal has now. `suspend(fn)`
+SIGTSTP to the whole process group — what the terminal's driver does
+for a cooked Ctrl-Z, and under `rip app.rip` the group holds the
+launcher too, so the shell sees one stopped job. The signal is sent
+only when the app reads the process's own stdin: with any other
+stream — a test's fake, a `stdout:` given with no stdin — Ctrl-Z
+takes the same road and sends nothing, since a stream of one's own is
+not the terminal's job, and whoever gave it continues the app with
+SIGCONT to the process. While stopped, a timer is held so the loop
+does not drain on the continue and close the app before it wakes.
+SIGCONT sets up again, asks the questions again — the frame's row
+with the mouse, the keyboard if it was still undecided — forgets the
+press whose release was never seen (`Pointer.reset`) and the bytes
+held mid-sequence (`parser.reset`), and draws whole at whatever size
+the terminal has now; the keys left in the read with the Ctrl-Z are
+nobody's. `suspend(fn)`
 is the same road without the signal: teardown, `await fn()`, setup,
 whole frame — for an editor or a shell that takes the terminal for a
 while. Meanwhile a booked frame goes nowhere, a key is nobody's, a
@@ -1015,19 +1035,25 @@ its escapes when a depth is forced. `altScreen` and the console
 capture are nothing there.
 
 **Colors.** The depth is read once at `run` and exposed as
-`screen.colors` (0, 16, 256 or 16777216): `NO_COLOR` set is none;
-`FORCE_COLOR` 0–3 is that depth, and any other value 16; else
-`COLORTERM` `truecolor` / `24bit` is 24-bit, `TERM` `256color` is
-256, a dumb terminal or output nobody is watching none, and any other
-terminal 16. The painter emits every style at that depth (`paint.rip`):
-a 24-bit color becomes the nearest of the 256 — the 6×6×6 cube, the
-24 grays for a gray — and one of the 256 the nearest of the 16, bright
-at full intensity; at none, no style sends anything. `mount` and
-`renderToString` stay at full depth.
+`screen.colors` (0, 16, 256 or 16777216), in this order: `NO_COLOR`
+set to anything but `''` is none (no-color.org); `FORCE_COLOR` `0` or
+`false` is none, `''` or `true` the 16, a number that depth up to 3,
+any other word the 16 (supports-color's reading); output nobody is
+watching (no TTY, or CI) or `TERM=dumb` is none; `COLORTERM`
+`truecolor` / `24bit` is 24-bit; `TERM` `*256color*` is 256; else 16.
+The painter emits every style at that depth (`paint.rip`), from one
+table of xterm's own 256 values: a 24-bit color becomes the nearest of
+xterm's 256 by RGB distance (a color on the cube is sent as that
+point), and below that the nearest of xterm's 16 — so a mid-gray is
+bright black, never white; at none, no style sends anything. The cost
+is paid per style interned, not per cell. `mount` and `renderToString`
+stay at full depth.
 
 **Console.** `console.log` bypasses `process.stdout.write`, so while
-an app runs on a terminal the five methods are replaced and given
-back at teardown. A line takes the road a `Static` item takes
+an app runs on a terminal its writing methods — `log`, `table`,
+`group`, `trace`, `assert`, `count`, `time` and the rest — are
+replaced by a `node:console` `Console` whose two sinks relay, and
+given back at teardown. A line takes the road a `Static` item takes
 (`Screen.above`, §6): inline, the frame is cleared from its top-left,
 the line written to the stream it always went to, and the frame drawn
 again below it, all in the next frame's write, which the line books —
