@@ -361,7 +361,7 @@ export class Element extends Node
     catch error
       throw blame error, this
 
-  put: (key, value) ->
+  put!: (key, value) ->
     value = 'none' if key is 'display' and @still
     if kept key
       (@attributes ?= Map.new()).set key, value

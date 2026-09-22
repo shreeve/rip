@@ -30,7 +30,7 @@ showing =! (node, body) ->
 # Lay the document out until a pass moves nothing. A binding that reads
 # a node's box changes the tree it measured, so one change can take a
 # pass per reader in a chain; readers that never agree are refused.
-converge =! (doc, cols) ->
+converge! =! (doc, cols) ->
   passes = 0
   while doc.moved
     if (passes += 1) > LAYOUTS

@@ -416,7 +416,7 @@ export mount =! (App, options = {}) ->
 # screen. Every step is taken whatever the others do, so a write that
 # fails cannot leave stdin raw or the document installed, and `done` is
 # settled here — with `error`, the first step that failed, or `result`.
-close =! (drawn, error = null, result = undefined) ->
+close! =! (drawn, error = null, result = undefined) ->
   held = live
   { app, view, out, doc, restore, resized, pointer, settled } = held
   live = null
@@ -454,7 +454,7 @@ export suspend =! (fn) ->
 # process its `document` slot back. The work waits for the turn to end,
 # so a `quit` called from inside an effect still draws what that same
 # change owed; an app closed by hand before then is left as it was.
-export quit =! (result) ->
+export quit! =! (result) ->
   return unless live and not live.closing
   held = live
   held.closing = true

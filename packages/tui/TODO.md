@@ -6,9 +6,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 1. The closing audit — code
 
-- [ ] Void functions unmarked: `close` and `quit` (tui), `settle`
-      (screen), `name`, `mouse`, `answer`, `cursor` (input), `put`
-      (document).
 - [ ] Exports nothing imports: `Document`, `NOWHERE` (document), `WIDE`
       (text), `Quiet` (terminal). Guards that cannot fire:
       `paint.rip:144`, `layout.rip:687`'s try, `terminal.rip:93`; the
