@@ -190,8 +190,11 @@ export class Screen
   place: ->
     node = @doc.active
     return null unless node?.cursor
-    x = node.rect.x + node.cursor.x
-    y = node.rect.y + node.cursor.y
+    { x: cx, y: cy } = node.cursor
+    # The cell after the last column is a place: an insertion point.
+    return null unless cx >= 0 and cy >= 0 and cx <= node.rect.w and cy < node.rect.h
+    x = node.rect.x + cx
+    y = node.rect.y + cy
     up = node
     while up = up.parentNode
       s = up.styles

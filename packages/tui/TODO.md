@@ -6,10 +6,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 1. The closing audit — code
 
-- [ ] A cursor written outside its node's box is refused at the write
-      (`document.rip:93`), so a cursor computed from state that is
-      stale for one frame kills the app, where a cursor clipped away is
-      hidden. Clamp it to the box, or hide it, and say which.
 - [ ] `document.rip:401` clears a style with `delete`, which puts the
       node into dictionary mode: every later style read on it misses
       V8's inline caches. Write `undefined`, and let `sync`'s bare check

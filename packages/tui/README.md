@@ -553,8 +553,12 @@ wide glyphs is measured, not counted. After every frame the hardware
 cursor is parked there and shown, where an input method and a screen
 reader look for it. Content offsets above the node move it, and a clip
 that leaves its cell out — or a frame taller than the terminal, whose
-top rows are not shown — hides it. On `quit` it returns to the line
-below the frame.
+top rows are not shown — hides it, as does a place outside the node's
+own box (past the cell after its last column, or off its rows), so a
+cursor computed from state that is stale for a frame disappears for
+that frame and the app goes on. Only a value that is no
+place at all — not `{ x, y }`, or not whole cells — is refused at the
+write. On `quit` it returns to the line below the frame.
 
 A text input inserts `event.key` when it is one code point, and cuts
 its buffer into clusters for Backspace and for the cursor's column (the

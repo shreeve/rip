@@ -87,9 +87,12 @@ export watch =! (first) ->
   { read: (-> held), write: ((next) -> held = next) }
 
 # A cursor as a node keeps it: `{ x, y }` in whole cells from its corner.
+# One outside the node's box is kept and not shown (screen.rip), as one
+# a clip hides is not: a state that is stale for a frame moves the
+# cursor away, never the app.
 spot =! (value) ->
   return null unless value
-  unless typeof value is 'object' and Number.isInteger(value.x) and Number.isInteger(value.y) and value.x >= 0 and value.y >= 0
+  unless typeof value is 'object' and Number.isInteger(value.x) and Number.isInteger(value.y)
     throw Error.new "rip/tui: cursor: #{JSON.stringify value} is not a place — write { x, y } in whole cells from the node's own corner"
   Object.freeze { x: value.x, y: value.y }
 

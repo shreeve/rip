@@ -794,11 +794,32 @@ test "a cursor is refused unless it is `{ x, y }` in whole cells", ->
   mounted Trio, {}, (view) ->
     node = find 'a'
     throws (-> node.set 'cursor', { x: 1 }), 'cursor'
-    throws (-> node.set 'cursor', { x: -1, y: 0 }), 'cursor'
     throws (-> node.set 'cursor', { x: 0.5, y: 0 }), 'cursor'
     throws (-> node.set 'cursor', 'here'), 'cursor'
     node.set 'cursor', { x: 0, y: 0 }
     node.set 'cursor', undefined
+
+test "a cursor outside its node's box is kept and hidden, as one a clip hides is: a stale place moves the cursor away, never the app", ->
+  Edge = component
+    render
+      Box flexDirection: 'row'
+        Box id: 'e', width: 5, focusable: true, autofocus: true
+          Text "child"
+  mounted Edge, {}, (view) ->
+    node = find 'e'
+    node.set 'cursor', { x: 0, y: 0 }
+    view.frame()
+    ok view.cursor?, 'a place inside the box is shown'
+    node.set 'cursor', { x: node.rect.w, y: 0 }
+    view.frame()
+    ok view.cursor?, 'the cell after the last column is a place: an insertion point'
+    for place in [{ x: -1, y: 0 }, { x: 0, y: -3 }, { x: node.rect.w + 1, y: 0 }, { x: 0, y: node.rect.h }]
+      node.set 'cursor', place
+      view.frame()
+      eq view.cursor, null, "#{JSON.stringify place} is hidden"
+    node.set 'cursor', { x: 0, y: 0 }
+    view.frame()
+    ok view.cursor?, 'and shown again when the place is back in the box'
 
 test! "on quit the cursor returns to the line below the frame and is shown", ->
   Parked = component
