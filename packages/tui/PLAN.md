@@ -1346,11 +1346,9 @@ What the table says, and where it does not flatter:
 - **Text wraps at a rounded width here and at Yoga's float width in
   Ink.** A cell `33%` of 120 columns is 39.6 to Ink's wrapper and 40
   cells to this package's, so a line that fills the cell exactly wraps
-  differently; and a line that fills its cell exactly at a space leaves
-  that space at the head of the next line here. The reducer refuses
-  such a tree (first differing cell: update 0, row 20, column 35), so
-  the resize scenario's cells are a quarter of 120 and of 80 columns,
-  whole either way. The second point is a text-engine defect, open.
+  differently. The reducer refuses such a tree (first differing cell:
+  update 0, row 20, column 35), so the resize scenario's cells are a
+  quarter of 120 and of 80 columns, whole either way.
 
 **Where an Ink frame goes** (share of in-frame CPU time, sampled;
 `bun run profile`, in RESULTS.md):

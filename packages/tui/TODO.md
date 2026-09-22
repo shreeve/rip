@@ -46,10 +46,6 @@ steps are in [PLAN.md](PLAN.md).
       (`rip bench/tui.rip static N`).
 - [ ] `Static`'s items are elements; a bare text under `Static` is
       never hidden and is painted again with every batch.
-- [ ] A line that ends exactly at a space at the cell width keeps that
-      space at the head of the next line: `Box width: 5` holding
-      `Text "abcde fgh"` draws `"abcde\n fgh"` where Ink draws
-      `"abcde\nfgh"` (PLAN §11).
 
 ## 6. Input and focus
 

@@ -256,8 +256,9 @@ test "words wrap at the width, and the space stays on the row it follows", ->
   eq rows('the quick brown fox', 10), ['the quick ', 'brown fox']
   eq rows('hello world', 7), ['hello ', 'world']
 
-test "a space that does not fit starts a row of its own", ->
+test "a space past the end of a row starts the next one, as Ink draws it at a whole width", ->
   eq rows('hello world', 5), ['hello', ' ', 'world']
+  eq rows('abcde fgh', 5), ['abcde', ' fgh']
 
 test "leading, trailing, and repeated spaces are kept", ->
   eq rows('  ab  cd  ', 4), ['  ab', '  cd', '  ']
