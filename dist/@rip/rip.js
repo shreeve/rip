@@ -25600,6 +25600,19 @@ function __computed(fn) {
   };
   return computed;
 }
+function __runCleanup(effect) {
+  const cleanup = effect._cleanup;
+  if (!cleanup)
+    return;
+  const prev = __currentEffect;
+  __currentEffect = null;
+  try {
+    cleanup();
+  } finally {
+    __currentEffect = prev;
+  }
+  effect._cleanup = null;
+}
 function __effect(fn) {
   let controller = null;
   let runId = 0;
@@ -25632,10 +25645,7 @@ function __effect(fn) {
         controller = null;
       }
       const myRun = ++runId;
-      if (effect._cleanup) {
-        effect._cleanup();
-        effect._cleanup = null;
-      }
+      __runCleanup(effect);
       for (const dep of effect.dependencies)
         dep.delete(effect);
       effect.dependencies.clear();
@@ -25685,10 +25695,7 @@ function __effect(fn) {
           controller.abort();
         } catch {}
       }
-      if (effect._cleanup) {
-        effect._cleanup();
-        effect._cleanup = null;
-      }
+      __runCleanup(effect);
       for (const dep of effect.dependencies)
         dep.delete(effect);
       effect.dependencies.clear();

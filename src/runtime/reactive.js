@@ -374,6 +374,23 @@ function __computed(fn) {
   return computed;
 }
 
+// Teardown never tracks. A cleanup runs with no effect current, so a
+// reactive read inside it subscribes nothing: not the effect that
+// disposed this one (a render swap disposing the block it owns), and
+// not the effect whose write flushed this re-run. Either subscription
+// would re-run that effect on the very write the teardown goes on to
+// make (a ref cell clearing on detach), rebuilding what it just built.
+// The slot clears only after the call returns; a cleanup that throws
+// stays installed.
+function __runCleanup(effect) {
+  const cleanup = effect._cleanup;
+  if (!cleanup) return;
+  const prev = __currentEffect;
+  __currentEffect = null;
+  try { cleanup(); } finally { __currentEffect = prev; }
+  effect._cleanup = null;
+}
+
 function __effect(fn) {
   let controller = null;
   let runId = 0; // increments per run; async resolutions check it to drop stale results
@@ -431,7 +448,7 @@ function __effect(fn) {
       // stale cleanup never overwrites the current run's cleanup.
       const myRun = ++runId;
 
-      if (effect._cleanup) { effect._cleanup(); effect._cleanup = null; }
+      __runCleanup(effect);
       for (const dep of effect.dependencies) dep.delete(effect);
       effect.dependencies.clear();
       effect.computedDeps.clear();
@@ -494,7 +511,7 @@ function __effect(fn) {
       if (controller) {
         try { controller.abort(); } catch {}
       }
-      if (effect._cleanup) { effect._cleanup(); effect._cleanup = null; }
+      __runCleanup(effect);
       for (const dep of effect.dependencies) dep.delete(effect);
       effect.dependencies.clear();
     }

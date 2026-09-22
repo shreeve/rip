@@ -636,6 +636,32 @@ describe('effect scheduling, batching, disposal', () => {
     })).toEqual(['run1', 'clean1', 'run2', 'clean2']);
   });
 
+  test('a cleanup never tracks: disposing from inside another effect subscribes that effect to nothing', () => {
+    expect(both((rt) => {
+      const a = rt.__state(0), trigger = rt.__state(0);
+      const disposeInner = rt.__effect(() => () => { a.value; });
+      let outerRuns = 0;
+      rt.__effect(() => { trigger.value; outerRuns++; if (trigger.read() === 1) disposeInner(); });
+      trigger.value = 1;                // the outer run disposes the inner; its cleanup reads `a`
+      const settled = outerRuns;
+      a.value = 5;                      // nobody subscribed: the outer does not re-run
+      return [settled, outerRuns];
+    })).toEqual([2, 2]);
+  });
+
+  test('a cleanup never tracks: a re-run flushed from inside another effect subscribes neither effect', () => {
+    expect(both((rt) => {
+      const d = rt.__state(0), third = rt.__state(0), trigger = rt.__state(0);
+      let innerRuns = 0, outerRuns = 0;
+      rt.__effect(() => { d.value; innerRuns++; return () => { third.value; }; });
+      rt.__effect(() => { trigger.value; outerRuns++; if (trigger.read() === 1) d.value = 1; });
+      trigger.value = 1;                // the outer's write re-runs the inner; the inner's cleanup reads `third`
+      const settled = [innerRuns, outerRuns];
+      third.value = 1;                  // nobody subscribed: neither the inner nor the outer re-runs
+      return [settled, innerRuns, outerRuns];
+    })).toEqual([[2, 2], 2, 2]);
+  });
+
   test('an effect disposed mid-flush by an earlier effect never runs (the zombie guard)', () => {
     expect(both((rt) => {
       const s = rt.__state(0);

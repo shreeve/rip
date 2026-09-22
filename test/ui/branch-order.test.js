@@ -15,7 +15,7 @@ import { createStash } from '../../packages/app/stash.rip';
 
 installRecordingDOM();
 const RT = { ...R, ...Cm };
-const NAMES = ['__Component', '__state', '__computed', '__effect', '__batch', '__ownerFrame', '__pushOwner', '__popOwner', '__pushComponent', '__popComponent', '__detach', '__transition', '__detachRef'];
+const NAMES = ['__Component', '__state', '__computed', '__effect', '__batch', '__ownerFrame', '__pushOwner', '__popOwner', '__pushComponent', '__popComponent', '__detach', '__transition', '__detachRef', '__reportChildFailure'];
 
 const load = (lines) => {
   const { code } = compile(lines.join('\n'), { runtimeDelivery: 'none' });
@@ -206,5 +206,49 @@ describe('the flush order, read off the runtime', () => {
     R.__batch(() => { a.value = 2; b.value = 2; });
     expect(log).toEqual(['second', 'first']);
     first(); second();
+  });
+});
+
+describe('a branch swap builds the incoming block once, whatever the leaving component\'s cleanup reads', () => {
+  // Disposing the leaving block runs its component's effect cleanups
+  // inside the branch effect's own run. A cleanup that reads the
+  // component's `ref:` cell subscribes nothing: the element detach that
+  // follows clears that cell, and a branch effect subscribed to it
+  // would re-enter and build the incoming block a second time,
+  // orphaning the first build's nodes.
+  const loadApp = (lines) => {
+    const { code } = compile(lines.join('\n'), { runtimeDelivery: 'none' });
+    return new Function(...NAMES, `${code}\nreturn { C, log };`)(...NAMES.map((n) => RT[n]));
+  };
+
+  test('a cleanup reading its `ref:` cell: the else branch is one node and nothing survives unmount', () => {
+    const { C, log } = loadApp([
+      'log = []',
+      'Inner = component',
+      '  el := null',
+      '  ~>',
+      '    log.push "setup"',
+      '    -> log.push "clean:#{el?.tagName}"',
+      '  render',
+      '    div ref: el, "inner"',
+      'C = component',
+      '  show := true',
+      '  render',
+      '    if show',
+      '      Inner()',
+      '    else',
+      '      span "off"',
+    ]);
+    const inst = mount(C, {});
+    expect(inst.__target.childNodes.length).toBe(2);         // the anchor and the Inner div
+    inst.show.value = false;
+    expect(log).toEqual(['setup', 'clean:div']);             // the cleanup ran once and saw its element
+    expect(inst.__target.childNodes.length).toBe(2);         // the anchor and ONE span
+    expect(branchEl(inst).childNodes[0].data).toBe('off');
+    inst.show.value = true;
+    expect(log).toEqual(['setup', 'clean:div', 'setup']);    // Inner built once more, not twice
+    expect(inst.__target.childNodes.length).toBe(2);
+    inst.unmount();
+    expect(inst.__target.childNodes.length).toBe(0);         // no orphan
   });
 });
