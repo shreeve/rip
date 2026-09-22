@@ -1244,6 +1244,56 @@ test! "under `run` a key that changes nothing books no frame and writes nothing"
   quit()
   await running.done
 
+frames =! (bytes) -> bytes.split('\x1b[?2026h').length - 1
+
+test "under `pace: 100` ten changes within 100 ms of the mount's clock are one frame, drawn when the clock reaches it", ->
+  view = mount Cells, pace: 100
+  try
+    eq view.bytes, '', 'the first frame is booked, as a change is'
+    view.tick 0
+    eq [frames(view.bytes), view.held.view.front.toString()], [1, "a line that stays\ncount 0"]
+    mark = view.bytes.length
+    for n in [1..10]
+      view.tick 9
+      view.press '+'
+    eq view.bytes.slice(mark), '', 'nothing is drawn before the pace allows'
+    view.tick 10
+    eq frames(view.bytes.slice(mark)), 1
+    ok view.bytes.slice(mark).includes('10'), JSON.stringify view.bytes
+    view.tick 500
+    eq frames(view.bytes.slice(mark)), 1, 'and nothing after it, with nothing owed'
+    view.press '+'
+    view.tick 0
+    eq frames(view.bytes.slice(mark)), 2, 'a change after a quiet interval is drawn at once'
+  finally
+    view.close()
+  view = mount Cells
+  try
+    view.frame()
+    mark = view.bytes.length
+    view.press '+'
+    view.tick 500
+    eq view.bytes.length, mark, 'with no pace, a mount draws when the test asks'
+  finally
+    view.close()
+  throws (-> mount Cells, pace: -1), 'pace: -1 is not a number of milliseconds'
+  throws (-> mount Cells, pace: '8'), 'pace: "8" is not a number of milliseconds'
+
+test! "`run App, pace: ms` draws the changes of the interval as one frame, no sooner than the interval after the last", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Cells, stdin: stdin, stdout: term, pace: 300
+  mark = term.sent.length
+  stdin.key '+'
+  sleep! 50
+  stdin.key '+'
+  sleep! 50
+  eq term.sent.length, mark, 'held for the pace'
+  sleep! 400
+  eq [term.sent.length, term.text], [mark + 1, "a line that stays\ncount 2"], 'the two changes, one frame'
+  quit()
+  await running.done
+
 test! "under `run` a cursor that moves alone — by focus, or by what the focused node declares — owes a frame of moves and no cell", ->
   Fields = component
     at := 0

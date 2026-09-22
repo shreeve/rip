@@ -799,6 +799,44 @@ test "a link wraps its words in OSC 8, nested text inherits it, and a plain fram
           "go"
   eq renderToString(Panel, cols: 4, ansi: true), "\x1b[44m#{OPEN 'https://example.com'}go\x1b[0;44m#{SHUT}  \x1b[0m"
 
+# The README's row of styled runs, as it is written there.
+ROW =! '''
+  Row = component
+    render
+      Text wrap: 'truncate'
+        Text color: 'green', "✓ "
+        Text bold: true, "packages/time"
+        Text dimColor: true, "  548 tests  0.7s"
+  '''
+
+test "a row of styled runs is one Text of nested runs, cut with … where it is too narrow, as the README writes it; a row Box of the same Texts spills past its box, or wraps each in a column", ->
+  ok readFileSync(join(import.meta.dir, 'README.md'), 'utf8').includes("```coffee\n#{ROW}\n```"), 'the README holds the pattern'
+  Row = component
+    render
+      Text wrap: 'truncate'
+        Text color: 'green', "✓ "
+        Text bold: true, "packages/time"
+        Text dimColor: true, "  548 tests  0.7s"
+  eq renderToString(Row, cols: 40), '✓ packages/time  548 tests  0.7s'
+  eq renderToString(Row, cols: 18), '✓ packages/time  …'
+  eq renderToString(Row, cols: 18, ansi: true), '\x1b[32m✓ \x1b[0;1mpackages/time\x1b[0;2m  …\x1b[0m', 'each run in its own style'
+  Spills = component
+    render
+      Box width: 18, borderStyle: 'round'
+        Box flexDirection: 'row'
+          Text color: 'green', "✓ "
+          Text bold: true, "packages/time"
+          Text dimColor: true, "  548 tests  0.7s"
+  eq renderToString(Spills, cols: 20).split('\n')[1], '│✓ packages/time  54', 'over its border, to the edge of the terminal'
+  Shrinks = component
+    render
+      Box width: 18, borderStyle: 'round'
+        Box flexDirection: 'row'
+          Text flexShrink: 1, color: 'green', "✓ "
+          Text flexShrink: 1, bold: true, "packages/time"
+          Text flexShrink: 1, dimColor: true, "  548 tests  0.7s"
+  eq renderToString(Shrinks, cols: 20).split('\n').length, 5, 'three rows inside the border'
+
 test "a link that wraps is closed on every row and opened again on the next, its '…' inside it", ->
   Long = component
     render
@@ -1501,6 +1539,29 @@ test! "a quit from a mounted app closes the mount and resolves done", ->
   eq await view.done, 'left'
   eq typeof document, 'undefined'
   throws (-> view.frame()), 'this mount is closed'
+
+test! "a mount closed by quit draws its last frame, as run does: the quitting turn's Static items reach the scrollback and its change the frame; a close by hand draws nothing", ->
+  Finisher = component
+    @done := []
+    @over := false
+    ~> quit() if @over
+    render
+      Box flexDirection: 'column'
+        Static
+          for name in @done
+            Text key: name, "✓ #{name}"
+        Text "#{if @over then 'all done' else 'working'}"
+  view = mount Finisher, cols: 20
+  eq view.frame(), 'working'
+  view.app.done.value = ['one']
+  view.app.over.value = true
+  await view.done
+  eq [view.scrollback, bare(view.ansi)], ["✓ one\n", 'all done']
+  view = mount Finisher, cols: 20
+  eq view.frame(), 'working'
+  view.app.done.value = ['two']
+  view.close()
+  eq [view.scrollback, bare(view.ansi)], ['', 'working'], 'a close by hand leaves the frame as the test last drew it'
 
 # ==[ Damage: a frame paints and compares the cells a change owes ]==
 
@@ -2227,6 +2288,26 @@ test "print writes above the frame, ending its line; print.err the same on stder
   finally
     view.close()
 
+test "a print from the turn that appends a Static item writes the item's row first: the scrollback is in the order of the program", ->
+  Steps = component
+    @done := []
+    ~> print "#{@done.length} done" if @done.length
+    render
+      Box flexDirection: 'column'
+        Static
+          for name in @done
+            Text key: name, "✓ #{name}"
+        Text "live"
+  view = mount Steps, cols: 20
+  try
+    view.frame()
+    view.app.done.value = ['one']
+    view.app.done.value = ['one', 'two']
+    view.frame()
+    eq view.scrollback, "✓ one\n1 done\n✓ two\n2 done\n"
+  finally
+    view.close()
+
 test "rowsToString is the grid's serializer, plain and with escape sequences", ->
   view = mount Journal, cols: 20, props: { live: 'here' }
   try
@@ -2274,9 +2355,9 @@ test! "examples/log.rip runs headless: the steps scroll into the scrollback as t
     view.tick 700 * 3
     later = view.frame()
     ok later.startsWith('⠧ link'), JSON.stringify later
-    # The warning's effect runs before the render block adds the step it
-    # is about, so it stands above that step.
-    eq bare(view.scrollback), "✓ resolve\n✓ fetch\nwarning: compile took the slow road\n✓ compile\n"
+    # The warning is printed in the turn that finishes the step it is
+    # about, and stands below that step.
+    eq bare(view.scrollback), "✓ resolve\n✓ fetch\n✓ compile\nwarning: compile took the slow road\n"
     ok view.bytes.includes("\x1b]9;4;1;50\x1b\\"), 'the terminal knows how far along'
     view.tick 700 * 3
     eq await view.done, undefined

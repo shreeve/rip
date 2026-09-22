@@ -215,6 +215,11 @@ back on every way out, by one road:
 
   A key that arrives meanwhile is nobody's; a `quit` meanwhile closes
   the app without taking the terminal back.
+- **Pace.** A change books a frame and every change until it is drawn
+  goes into it, and two frames are at least 8 ms apart. `run App,
+  pace: 100` sets that interval: an app fed by a stream that changes
+  its state a thousand times a second binds the state directly and
+  draws ten frames a second.
 - **Alternate screen.** `run App, altScreen: true` draws on the
   terminal's alternate screen from its top-left; every way out leaves
   it after the last frame, so the frame vanishes and the shell's own
@@ -230,7 +235,9 @@ back on every way out, by one road:
   `truecolor` 24-bit, `TERM` `256color` 256, and any other terminal
   16. A 24-bit color is drawn as the nearest of xterm's 256 — a color
   on the cube as that point — and below that as the nearest of xterm's
-  16.
+  16. A mount is at full depth whatever the environment says, and
+  `mount App, colors: 16` (or `256`, `0`) draws it as `run` draws on a
+  terminal of that depth, so a test sees the app there.
 - **Console.** While the app runs, every console method that writes
   (`log`, `table`, `group`, `trace`, `assert`, `count`, `time*`, …)
   clears the frame, writes where it always went, and draws the frame
@@ -260,6 +267,28 @@ scrollback (below).
 | `borderStyle`: `single`, `double`, `round`, `bold`, `singleDouble`, `doubleSingle`, `classic`, `arrow`, or an object of eight glyphs; `borderTop` / `borderRight` / `borderBottom` / `borderLeft: false` drops an edge | `contentOffsetX`, `contentOffsetY` — shift a box's children; a scroll is a repaint and runs no layout |
 | `overflow`, `overflowX`, `overflowY`: `'visible'` or `'hidden'` (clips to the padding box; a box that scrolls its children keeps to its parent's size with `flexShrink: 1`, since the default is 0) | |
 | On `Text`: `wrap` — `'wrap'` (the default: words wrap, and a word longer than the line breaks), `'hard'`, `'truncate'` / `'truncate-end'`, `'truncate-start'`, `'truncate-middle'` (with `…`) There is no no-wrap mode: to keep a line on one row and scroll it, give the text a `width` wider than any line and shift it with `contentOffsetX` (`truncate` cuts at the box's width before the offset shifts it). | On `Text`: `link` — a URL; the words are a hyperlink (OSC 8) |
+
+A row of runs in several styles — a mark, a name, a count — is one
+`Text` with a `Text` nested for each run, and `wrap: 'truncate'` keeps
+it to one row, cut with `…` where its box is too narrow for it:
+
+```coffee
+Row = component
+  render
+    Text wrap: 'truncate'
+      Text color: 'green', "✓ "
+      Text bold: true, "packages/time"
+      Text dimColor: true, "  548 tests  0.7s"
+```
+
+At 18 columns that is `✓ packages/time  …`. A row `Box` of the same
+three `Text`s is a flex row of three items instead: too narrow for them
+it spills past its box, and with `flexShrink: 1` on each it wraps each
+text in a column of its own. There is no `Line` widget for this: it
+would be `Text wrap: 'truncate'` by another name, and the runs are
+already the text's own children. `scripts/test-live.rip` draws every
+row of its board this way, from runs it computes: a `for` of nested
+`Text`s, each with the run's style as `style:`.
 
 Text is measured by grapheme cluster — a flag, a family emoji, a letter
 with its combining marks each take the cells a terminal gives them —
@@ -403,7 +432,7 @@ back, and draws a frame when the test asks for one.
 ```coffee
 import { mount } from 'rip/tui'
 
-view = mount Counter, cols: 40, rows: 10, props: { count: 3 }   # mouse:, keyboard:, selection: as `run` takes them
+view = mount Counter, cols: 40, rows: 10, props: { count: 3 }   # mouse:, keyboard:, selection:, pace: as `run` takes them; colors: 0, 16 or 256
 view.frame()                # "count 3" — lay out, paint, the frame as plain text
 view.app.count.value = 7    # public state is set from outside
 view.frame()                # "count 7"
@@ -430,7 +459,14 @@ default actions — and draws nothing: ask for the frame.
 
 Nothing is drawn until `frame` asks, so a frame that fails — a layout
 that never settles — throws from `frame`, to the test that asked for
-it. `bytes` is the difference from the frame
+it. `mount App, pace: 100` draws as `run` does instead: the first frame
+and every change after it are booked, no closer than the pace, on the
+mount's clock, and drawn as `view.tick` moves the clock to them, so ten
+changes within 100 ms of `tick` are one frame; a booked frame that
+fails throws from `tick`, and `bytes` holds every write since the test
+last asked for a `frame`.
+
+`bytes` is the difference from the frame
 before, exactly as `run` writes it; a frame that changes no cell sends
 nothing. With `rows`, a frame taller than the terminal shows its
 bottom, as it does on a terminal; without, the terminal is as tall as
@@ -438,7 +474,10 @@ the frame. `damage` counts the cells the frame owed, which is how a
 test holds an update to a small repaint; `mount App, damage: false`
 (and `run`) owes every cell of every frame, for a frame to compare
 against. A `quit` from the app closes the mount and resolves
-`view.done` with its value.
+`view.done` with its value, and first draws the last frame, as `run`
+does: what the quitting turn added to `Static` is in `view.scrollback`,
+and what it changed is in `view.ansi`, with no `frame()` asked for. A
+`close()` by hand draws nothing.
 
 `bytes`, `damage` and `cursor` describe the last `frame()`: a frame that
 draws nothing leaves `bytes` empty and `damage` 0, and the OSC 52 write
@@ -452,7 +491,7 @@ mounted at a time: a second `mount`, `run`, or `renderToString` is
 refused by name until the first is closed — close in a `finally`.
 
 `renderToString App, cols: 40` is a mount, one frame, and a close; it
-takes `props`, and `ansi: true` keeps the escape sequences. The rows
+takes `props` and `colors`, and `ansi: true` keeps the escape sequences. The rows
 the app's `Static` items wrote come first, then the frame. A child that
 fails to construct — at the mount, from a key, or from a state set by
 the test — fails the mount, the key, or the next frame with the child's
@@ -802,7 +841,11 @@ an item is done: a change to its state or its removal from the list
 changes nothing on the terminal. An item is an element: a bare text
 under `Static` is refused by name as it is put there — wrap it in
 `Text`. An item under a hidden ancestor waits
-until it is shown. Off a terminal the rows go out as plain text as they
+until it is shown. A `print`, or a console line, writes the items not
+yet written first — those the same turn added included, even from an
+effect that runs before the render block that adds them — so the
+scrollback is in the order of the program. Off a terminal the rows go
+out as plain text as they
 arrive; on the alternate screen nothing is written above. `examples/log.rip`
 is a build log this way, with a spinner and a progress bar for the
 step under way.

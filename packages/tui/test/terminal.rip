@@ -1286,6 +1286,27 @@ test "mount and renderToString stay at full depth whatever the environment says"
   finally
     if held? then process.env.NO_COLOR = held else delete process.env.NO_COLOR
 
+test "`mount App, colors: n` draws at that depth, as `run` draws on a terminal of it, and `screen.colors` reads it: one hex color as itself, the nearest of the 256, the nearest of the 16, and no escape at none", ->
+  Shade = component
+    render
+      Box flexDirection: 'row'
+        Text color: '#22d3ee', bold: true, "#{screen.colors}"
+        Text color: 'green', " g"
+  for [n, sgr] in [[16777216, '1;38;2;34;211;238'], [256, '1;38;5;45'], [16, '1;36'], [0, null]]
+    view = mount Shade, colors: n
+    try
+      eq view.frame(), "#{n} g"
+      if sgr
+        ok view.ansi.includes("#{CSI}#{sgr}m#{n}") and view.ansi.includes("#{CSI}0;32m g"), "#{n}: #{JSON.stringify view.ansi}"
+      else
+        ok not /\x1b\[[0-9;]*m/.test(view.ansi), JSON.stringify view.ansi
+    finally
+      view.close()
+  ok renderToString(Shade, colors: 16, ansi: true).includes("#{CSI}1;36m16"), 'renderToString takes it too'
+  ok renderToString(Tinted, cols: 10, ansi: true).includes('38;2;255;0;0'), 'and the next mount is at full depth again'
+  throws (-> mount Shade, colors: 8), 'colors: 8 is not 0, 16, 256 or 16777216'
+  eq typeof document, 'undefined', 'a refused depth installs nothing'
+
 # ==[ The console ]==
 
 console.log "\nThe console"

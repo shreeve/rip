@@ -11,12 +11,13 @@
 # record of it: a frame first takes the cursor back to the top-left,
 # then draws, then parks it again, all in the one write.
 
+import { __batch } from '../../src/runtime/reactive.js'
 import { tend, visible } from './focus.rip'
 import { failed } from './document.rip'
 import { layout } from './layout.rip'
 import { Grid, paint, diff, overlay, still, rowsToString, clipped, clipOf } from './paint.rip'
 
-PACE =! 8     # the least milliseconds between two frames
+export PACE =! 8   # the least milliseconds between two frames, unless the app sets its own
 LAYOUTS =! 32  # the most layouts one frame may take to settle
 
 # Whether every node above `node`, up to `body`, is shown.
@@ -52,14 +53,18 @@ export class Screen
   # watching (terminal.rip) — off one, frames are kept and only text is
   # written; `alt` is the alternate screen, whose top-left the frame's
   # is, where nothing is written above and `leave` moves nowhere;
-  # `origin` is the terminal row the frame's top-left is on. `after`
-  # and `failed` are hooks a caller installs: run after every frame,
-  # and told of a frame that fails with no caller to throw to.
-  constructor: (@doc, @out, { whole = false, interactive = true, alt = false, origin = 0 } = {}) ->
+  # `origin` is the terminal row the frame's top-left is on; `pace` is
+  # the least milliseconds between two frames, and `clock` a `{ now,
+  # after }` of a test's own that booked frames wait on. `after` and
+  # `failed` are hooks a caller installs: run after every frame, and
+  # told of a frame that fails with no caller to throw to.
+  constructor: (@doc, @out, { whole = false, interactive = true, alt = false, origin = 0, pace = PACE, clock = null } = {}) ->
     @front = null
     @spare = null
     @booked = false
-    @last = 0
+    @last = -Infinity
+    @pace = pace
+    @clock = clock
     @failed = null
     @whole = whole
     @owed = 0        # the cells the last frame owed
@@ -89,10 +94,15 @@ export class Screen
   # and the text to `err`, and the frame follows on the next write. The
   # frame's row moves down by the lines written. Off a terminal the
   # text goes as it is; on the alternate screen nothing is written
-  # above.
+  # above. What `Static` holds goes first, the items this turn added
+  # included: an effect that writes here runs before the render blocks
+  # its own write queued (they are deeper), so those run first, and the
+  # scrollback is in the order of the program.
   above!: (text, err = null) ->
     return unless text
-    @still() unless @batching   # what `Static` holds goes first
+    unless @batching
+      __batch ->   # an empty batch: its end runs the effects the turn queued
+      @still()
     @scrollback += text
     unless @interactive
       (err ?? @out).write text
@@ -170,7 +180,7 @@ export class Screen
   frame!: ->
     @still()
     @booked = false
-    @last = performance.now()
+    @last = @now()
     failed @doc
     tend @doc
     converge @doc, @cols
@@ -248,13 +258,18 @@ export class Screen
     up = if spot.y then "\x1b[#{spot.y}A" else ''
     "\x1b[?25l#{up}\r"
 
+  now: -> if @clock then @clock.now() else performance.now()
+
   # Draw what is owed, once this turn's writes are in and no sooner than
-  # the pace allows.
+  # the pace allows: every change meanwhile goes into that one frame. On
+  # a test's clock the frame waits for the clock to reach it.
   book!: ->
     return if @booked
     @booked = true
-    wait = PACE - (performance.now() - @last)
-    if wait > 0 then setTimeout (=> @drawBooked()), wait else queueMicrotask (=> @drawBooked())
+    wait = @pace - (@now() - @last)
+    if @clock then @clock.after Math.max(0, wait), (=> @drawBooked())
+    else if wait > 0 then setTimeout (=> @drawBooked()), wait
+    else queueMicrotask (=> @drawBooked())
 
   # A booked frame has no caller to throw to, so its failure goes to
   # whoever runs the app. One drawn by hand meanwhile, or a close, has

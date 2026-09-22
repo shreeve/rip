@@ -7,7 +7,7 @@ import { __effect } from '../../src/runtime/reactive.js'
 import { install, failed, watch, Event } from './document.rip'
 import { tend, take, advance } from './focus.rip'
 import { Parser, TIMERS } from './input.rip'
-import { Screen } from './screen.rip'
+import { Screen, PACE } from './screen.rip'
 import { Pointer } from './mouse.rip'
 import { palette } from './paint.rip'
 import { guard, setup, probe, reply, teardown, handover, stepping, stop as halt, ask, interactive as attended, depth as depthOf } from './terminal.rip'
@@ -269,17 +269,22 @@ open =! (App, options, out, terminal, stdin = null, clock = undefined) ->
   throw Error.new "rip/tui: mouse: #{JSON.stringify mouse} is not true, false or 'all'" unless mouse is true or mouse is false or mouse is 'all'
   keys = options.keyboard ?? 'basic'
   throw Error.new "rip/tui: keyboard: #{JSON.stringify keys} is not 'basic' or 'enhanced'" unless keys is 'basic' or keys is 'enhanced'
+  pace = options.pace ?? PACE
+  throw Error.new "rip/tui: pace: #{JSON.stringify pace} is not a number of milliseconds, 0 or more" unless typeof pace is 'number' and pace >= 0 and pace < Infinity
+  # A terminal's depth is its environment's; a mount's is the test's.
+  shades = if terminal then -1 else DEPTHS.indexOf options.colors ?? 16777216
+  throw Error.new "rip/tui: colors: #{JSON.stringify options.colors} is not 0, 16, 256 or 16777216" if shades < 0 and not terminal
   { doc, restore } = install()
   attending = not terminal or attended out
   alternate = terminal and attending and options.altScreen is true
   # On a terminal the frame sits wherever the cursor was, which the
   # probe answers; until then, and where nothing answers, at the bottom.
   # The alternate screen's is its top.
-  view = Screen.new doc, out, { whole: options.damage is false, interactive: attending, alt: alternate, origin: (if terminal and not alternate then Infinity else 0) }
+  view = Screen.new doc, out, { whole: options.damage is false, interactive: attending, alt: alternate, origin: (if terminal and not alternate then Infinity else 0), pace, clock: (if terminal then null else clock) }
   cols = view.cols
   rows = view.rows
   interactive = view.interactive
-  depth = if terminal then depthOf out else 3
+  depth = if terminal then depthOf out else shades
   colors = DEPTHS[depth]
   palette depth
   held = null
@@ -343,7 +348,10 @@ export run =! (App, options = {}) ->
 
 # An app mounted off any terminal, for a test to drive: set its state
 # through `app`, then draw. Nothing is drawn until `frame` asks, so a
-# frame that fails throws to the test that asked for it.
+# frame that fails throws to the test that asked for it — unless the
+# mount has a `pace`: then a change books a frame as under `run`, drawn
+# once `tick` moves the mount's clock to it, and a frame that fails
+# throws from that `tick`.
 class Mount
   constructor: (@held) ->
 
@@ -411,14 +419,19 @@ class Mount
 export mount =! (App, options = {}) ->
   out = { columns: options.cols ?? 80, rows: options.rows ?? Infinity, sent: '', write: (text) -> @sent += text }
   out.err = { sent: '', write: (text) -> @sent += text }
-  Mount.new open(App, options, out, false, null, Clock.new())
+  held = open App, options, out, false, null, Clock.new()
+  if options.pace?
+    held.doc.onOwe = -> held.view.book()
+    held.view.book()
+  Mount.new held
 
 # Give the terminal and the process back: the terminal as terminal.rip
 # gives it back, the listeners, the `document` slot. `drawn` leaves the
-# last frame in the scrollback; a failure leaves whatever reached the
-# screen. Every step is taken whatever the others do, so a write that
-# fails cannot leave stdin raw or the document installed, and `done` is
-# settled here — with `error`, the first step that failed, or `result`.
+# last frame in the scrollback — a mount's too, drawn with whatever the
+# closing turn owed; a failure leaves whatever reached the screen. Every
+# step is taken whatever the others do, so a write that fails cannot
+# leave stdin raw or the document installed, and `done` is settled here
+# — with `error`, the first step that failed, or `result`.
 close! =! (drawn, error = null, result = undefined) ->
   held = live
   { app, view, out, doc, restore, resized, pointer, settled } = held
@@ -436,6 +449,8 @@ close! =! (drawn, error = null, result = undefined) ->
     step ->
       missed = teardown held, drawn
       caught.error ?= missed
+  else if drawn
+    step -> view.frame() if doc.stale
   step -> app?.unmount()
   # The parser's wait is disarmed on every road, a mount's included.
   step -> held.parser.flush()
