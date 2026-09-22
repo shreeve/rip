@@ -972,11 +972,12 @@ test! "a log under the alternate screen is kept, and replayed once the screen is
     console.log 'one'
     console.error 'two'
     console.warn 'three'
+    console.table [{ a: 1 }]
     eq [term.sent.length, err.sent, term.lines[0]?.join('')], [mark, [], 'x']
     quit()
     await running.done
-    ok term.since(mark).endsWith("#{SHOW}#{LEAVE}one\n"), JSON.stringify term.since mark
-    eq [err.sent, term.text, printed], [['two\n', 'three\n'], 'one', []]
+    ok term.since(mark).endsWith("#{SHOW}#{LEAVE}one\n┌─────────┬───┐\n│ (index) │ a │\n├─────────┼───┤\n│    0    │ 1 │\n└─────────┴───┘\n"), JSON.stringify term.since mark
+    eq [err.sent, term.text.split('\n')[0], printed], [['two\n', 'three\n'], 'one', []]
 
 Steps =! component
   @done := []
@@ -1347,6 +1348,32 @@ test! "an uncaught error closes the app with it — `done` rejects — and is le
     process.exit = held
     process.off name, user for name in ['uncaughtException', 'unhandledRejection']
 
+test! "every console method that writes takes the road: a table, a group's indent, an assert and a trace to stderr, a count, a time", ->
+  recorded! (printed) ->
+    term = Terminal.new()
+    err = Pipe.new()
+    running = run Echo, stdin: Stdin.new(), stdout: term, stderr: err
+    console.table [{ a: 1 }]
+    console.group 'G'
+    console.log 'in'
+    console.groupEnd()
+    console.count 'c'
+    console.time 't'
+    console.timeEnd 't'
+    console.assert false, 'nope'
+    console.trace 'here'
+    running.flush()
+    ok term.text.startsWith("┌─────────┬───┐\n│ (index) │ a │\n├─────────┼───┤\n│    0    │ 1 │\n└─────────┴───┘\nG\n  in\nc: 1\nt: "), JSON.stringify term.text
+    ok term.text.endsWith('\nx'), 'the frame stands below'
+    eq err.sent.length, 2
+    eq err.sent[0], 'Assertion failed: nope\n'
+    ok err.sent[1].startsWith("Trace: here\n    at "), JSON.stringify err.sent[1]
+    ok err.sent[1].includes('test/terminal.rip'), 'the stack begins at the caller'
+    eq printed, []
+    quit()
+    await running.done
+    ok console.table isnt running.table and typeof console.table is 'function'
+
 test! "the console is the process's own again on every way out, and a log with the app closed passes straight through", ->
   recorded! (printed) ->
     stdin = Stdin.new()
@@ -1381,11 +1408,14 @@ test! "with the mouse on, the frame's row moves down by the lines a log writes, 
     stdin.key "#{CSI}?4;1R"
     console.log "two\nlines"
     running.flush()
-    eq term.queries, ['cursor']
-    stdin.key down(0, 5) + up(0, 5)
-    eq running.app.heard.value, ['click']
+    console.log 'three'
+    running.flush()
+    eq term.queries, ['cursor'], 'one probe, at the start; a log moves the row by what it wrote'
     stdin.key down(0, 3) + up(0, 3)
-    eq running.app.heard.value, ['click'], 'the row the frame was on is nothing now'
+    stdin.key down(0, 5) + up(0, 5)
+    eq running.app.heard.value, [], 'the rows the frame was on are nothing now'
+    stdin.key down(0, 6) + up(0, 6)
+    eq running.app.heard.value, ['click']
     quit()
     await running.done
 

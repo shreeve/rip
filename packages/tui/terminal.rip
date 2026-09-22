@@ -8,6 +8,8 @@
 # life: there is no share of raw mode to count (PLAN §8).
 
 import { format } from 'node:util'
+import { Console } from 'node:console'
+import { Writable } from 'node:stream'
 import { rowsToString } from './paint.rip'
 
 HIDE     =! "\x1b[?25l"
@@ -309,20 +311,30 @@ export stop! =! (held) ->
 
 # ── The console ───────────────────────────────────────────────────────────────
 
-LEVELS =! { log: 'out', info: 'out', debug: 'out', warn: 'err', error: 'err' }
+# A stream whose every write is a line above the frame, to `stream`.
+sink =! (held, stream) ->
+  Writable.new write: (chunk, encoding, next) ->
+    relay held, stream, String chunk
+    next()
 
-# The console's methods bypass `process.stdout.write`, so they are
-# replaced for the run and given back at teardown, when a suspend
-# hands the terminal over as well. A line goes to the stream it always
-# went to, by the road a `Static` item takes (`Screen.above`): inline,
-# the frame is cleared first and drawn again below the line, so it
-# scrolls into the scrollback above the app; on the alternate screen it
-# is kept, and replayed once the screen is left.
+# The console's methods bypass `process.stdout.write`, so every one
+# that writes — `log`, `table`, `group`, `trace`, `assert`, `count`,
+# `time` and the rest — is replaced for the run by a `Console` of the
+# runtime's own over two sinks, and given back at teardown, when a
+# suspend hands the terminal over as well. A line goes to the stream it
+# always went to, by the road a `Static` item takes (`Screen.above`):
+# inline, the frame is cleared first and drawn again below the line,
+# so it scrolls into the scrollback above the app; on the alternate
+# screen it is kept, and replayed once the screen is left. The
+# runtime's `trace` drops its label, so it is written here as Node
+# writes it: the label, then the stack from the caller down.
 capture! =! (held) ->
+  shadow = Console.new stdout: sink(held, held.out), stderr: sink(held, held.err), colorMode: false
+  shadow.trace = (...args) -> relay held, held.err, "Trace: #{format ...args}\n#{Error.new().stack.split('\n').slice(2).join '\n'}\n"
   held.was = {}
-  for name, stream of LEVELS
+  for name in Object.getOwnPropertyNames(shadow) when typeof shadow[name] is 'function' and typeof console[name] is 'function'
     held.was[name] = console[name]
-    console[name] = ((stream) -> (...args) -> relay held, held[stream], format(...args) + '\n')(stream)
+    console[name] = shadow[name]
 
 release! =! (held) ->
   return unless held.was
