@@ -1,0 +1,948 @@
+# ==============================================================================
+# tui mouse tests — reports to targets, the enhanced keyboard, selection
+#
+#   rip test/mouse.rip
+#
+# Ink's kitty negotiation cases come first (test/mouse/SOURCE.md counts
+# them). Then what this package pins for itself: the hit test over
+# nested, absolute, clipped, scrolled and hidden boxes and over words;
+# the mouse events and the road they travel; hover, and what a motion
+# report costs; the modes asked of the terminal and withdrawn on every
+# way out; the keyboard probe and what decides it; the selection, its
+# overlay, its damage and the clipboard; and a fuzz that holds the hit
+# test to the painter, cell by cell.
+# ==============================================================================
+
+import { test, eq, ok, throws } from 'rip/testing'
+import { run, quit, mount, screen, focus, Box, Text } from 'rip/tui'
+import { intern } from '../paint.rip'
+import { Terminal, Stdin, find, idOf, count, differs, tally } from './events/harness.rip'
+
+CSI   =! '\x1b['
+ON    =! "#{CSI}?25l#{CSI}?2004h#{CSI}?1004h"   # what `run` opens a terminal with
+OFF   =! "#{CSI}?1004l#{CSI}?2004l"             # and withdraws, before the cursor is shown
+MOUSE =! "#{CSI}?1002h#{CSI}?1006h"             # button-event tracking, SGR reports (xterm ctlseqs)
+ALL   =! "#{CSI}?1003h#{CSI}?1006h"             # any-event tracking
+QUIET =! "#{CSI}?1006l#{CSI}?1002l"
+STILL =! "#{CSI}?1006l#{CSI}?1003l"
+PROBE =! "#{CSI}?6n"                            # DECXCPR: where is the cursor
+QUERY =! "#{CSI}?u#{CSI}c"                      # kitty's "is the protocol here", then primary device attributes
+PUSH  =! "#{CSI}>1u"                            # kitty: push the disambiguation flag
+POP   =! "#{CSI}<u"
+KITTY =! "#{CSI}?0u"                            # what a terminal that speaks kitty answers
+DA1   =! "#{CSI}?62;22c"                        # what every terminal answers
+
+# SGR reports, at cells counted from zero (the terminal counts from one).
+report =! (bits, x, y, final = 'M') -> "#{CSI}<#{bits};#{x + 1};#{y + 1}#{final}"
+down   =! (x, y, button = 0) -> report button, x, y
+up     =! (x, y, button = 0) -> report button, x, y, 'm'
+move   =! (x, y, button = -1) -> report 32 + (if button < 0 then 3 else button), x, y
+wheel  =! (x, y, way) -> report { up: 64, down: 65, left: 66, right: 67 }[way], x, y
+click  =! (view, x, y) -> view.send down(x, y) + up(x, y)
+drag   =! (view, x0, y0, x1, y1) -> view.send down(x0, y0) + move(x1, y1, 0) + up(x1, y1)
+
+who =! (node) -> if node is document.body then 'body' else idOf node
+
+# What the document heard, spelled as `[type, target, x, y]`.
+heard = []
+hear =! (event) -> heard.push [event.type, who(event.target), event.x, event.y]
+listen =! (...types) -> document.addEventListener type, hear for type in types
+
+mounted =! (App, options, body) ->
+  view = mount App, { cols: 40, mouse: true, ...options }
+  try
+    view.frame()
+    heard.length = 0
+    body view
+  finally
+    view.close()
+
+Bare =! component
+  render
+    Box id: 'root'
+
+Keys =! component
+  @keys := []
+  render
+    Box focusable: true, autofocus: true, @keydown: ((event) => @keys.push (if event.ctrlKey then 'C-' else '') + event.key), @paste: ((event) => @keys.push "paste:#{event.text}")
+      Text "k"
+
+# ==[ Ink's rows ]==
+
+console.log "\nInk's kitty negotiation"
+
+test! "auto detection consumes responses without duplicating input", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Keys, stdin: stdin, stdout: term, keyboard: 'enhanced'
+  stdin.key "x#{KITTY}"
+  eq running.app.keys.value, ['x']
+  ok term.since(0).includes(PUSH), JSON.stringify term.since 0
+  count 'kitty-negotiation', 'auto detection consumes responses without duplicating input', 'held'
+  quit()
+  await running.done
+
+test! "pasted query responses remain input and do not enable the protocol", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Keys, stdin: stdin, stdout: term, keyboard: 'enhanced'
+  stdin.key "#{CSI}200~#{KITTY}#{CSI}201~"
+  ok not term.since(0).includes(PUSH), JSON.stringify term.since 0
+  eq screen.keyboard, 'basic'
+  differs 'kitty-negotiation', 'pasted query responses remain input and do not enable the protocol', running.app.keys.value, ["paste:#{KITTY}"], ['[?0u'],
+    "a paste is one paste event with its text as it came, ESC included; Ink types it as keys with the ESC dropped"
+  quit()
+  await running.done
+
+test! "writes enable sequence on init when mode is enabled — once the terminal has answered", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Keys, stdin: stdin, stdout: term, keyboard: 'enhanced'
+  before = term.since(0).includes PUSH
+  stdin.key KITTY
+  differs 'kitty-keyboard', 'kitty protocol - writes enable sequence on init when mode is enabled', [before, term.since(0).includes PUSH], [false, true], [true, true],
+    "the flag is pushed when the terminal says it speaks the protocol, never on trust; a terminal that does not answer is never pushed to"
+  quit()
+  await running.done
+
+test! "writes disable sequence on unmount", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Keys, stdin: stdin, stdout: term, keyboard: 'enhanced'
+  stdin.key KITTY
+  mark = term.sent.length
+  quit()
+  await running.done
+  ok term.since(mark).startsWith(POP), JSON.stringify term.since mark
+  count 'kitty-keyboard', 'kitty protocol - writes disable sequence on unmount', 'held'
+
+test "the ported titles are the ones SOURCE.md counts", ->
+  eq tally['kitty-negotiation'], { held: 1, differs: 1 }
+  eq tally['kitty-keyboard'], { held: 1, differs: 1 }
+
+# ==[ Hit test ]==
+
+console.log "\nHit test"
+
+Nest =! component
+  render
+    Box id: 'outer', flexDirection: 'column', borderStyle: 'round', padding: 1, width: 20
+      Box id: 'inner', width: 10, height: 2
+        Text id: 'word', "hi there"
+      Text id: 'line', "second line"
+
+test "a click lands on the deepest box whose rounded box holds the cell: a word hits its span, padding and the border hit the box, and nothing hits the body", ->
+  mounted Nest, {}, (view) ->
+    listen 'mousedown'
+    click view, 3, 2
+    click view, 11, 3
+    click view, 1, 1
+    click view, 0, 0
+    click view, 5, 4
+    click view, 15, 4
+    click view, 25, 0
+    eq heard, [
+      ['mousedown', 'word', 1, 0]
+      ['mousedown', 'inner', 9, 1]
+      ['mousedown', 'outer', 1, 1]
+      ['mousedown', 'outer', 0, 0]
+      ['mousedown', 'line', 3, 0]
+      ['mousedown', 'outer', 15, 4]
+      ['mousedown', 'body', 25, 0]
+    ]
+
+test "the coordinates are the target's: `x`, `y` from its own corner, `screenX`, `screenY` the terminal's cell", ->
+  mounted Nest, {}, (view) ->
+    got = null
+    document.addEventListener 'mousedown', (event) -> got = event
+    view.send down 4, 2
+    eq [got.x, got.y, got.screenX, got.screenY, got.button], [2, 0, 4, 2, 0]
+
+Layered =! component
+  render
+    Box id: 'stage', width: 20, height: 4
+      Box id: 'early', position: 'absolute', left: 0, top: 0, width: 10, height: 1
+      Box id: 'under', width: 10, height: 2
+      Box id: 'over', position: 'absolute', left: 5, top: 1, width: 10, height: 2
+
+test "the last painted wins: an absolute box over a sibling takes the cell, and a static sibling painted after an absolute one takes it too", ->
+  mounted Layered, {}, (view) ->
+    listen 'mousedown'
+    click view, 7, 1
+    click view, 2, 1
+    click view, 12, 2
+    click view, 2, 0
+    click view, 16, 3
+    eq heard, [
+      ['mousedown', 'over', 2, 0]
+      ['mousedown', 'under', 2, 1]
+      ['mousedown', 'over', 7, 1]
+      ['mousedown', 'under', 2, 0]
+      ['mousedown', 'stage', 16, 3]
+    ]
+
+SIX =! [0...6]
+
+Scrolled =! component
+  render
+    Box flexDirection: 'column'
+      Box id: 'clip', flexDirection: 'column', width: 10, height: 3, overflow: 'hidden', contentOffsetY: 2
+        for n in SIX
+          Text id: "row#{n}", key: n, "row #{n}"
+      Text id: 'after', "after"
+
+test "a clip box: the rows its offset shows are hit where they are painted, a cell past the words hits the box, and a row scrolled out never hits", ->
+  mounted Scrolled, {}, (view) ->
+    listen 'mousedown'
+    click view, 1, 0
+    click view, 7, 1
+    click view, 1, 2
+    click view, 1, 3
+    eq heard, [
+      ['mousedown', 'row2', 1, 0]
+      ['mousedown', 'clip', 7, 1]
+      ['mousedown', 'row4', 1, 0]
+      ['mousedown', 'after', 1, 0]
+    ]
+
+Veiled =! component
+  @veil := 'hidden'
+  render
+    Box id: 'base', width: 10, height: 2
+      Box id: 'veil', position: 'absolute', left: 0, top: 0, width: 10, height: 2, hidden: (@veil is 'hidden'), display: (if @veil is 'none' then 'none' else 'flex')
+
+test "a hidden or display: none subtree is never hit", ->
+  mounted Veiled, {}, (view) ->
+    listen 'mousedown'
+    click view, 3, 1
+    view.app.veil.value = 'none'
+    view.frame()
+    click view, 3, 1
+    view.app.veil.value = 'shown'
+    view.frame()
+    click view, 3, 1
+    eq heard, [['mousedown', 'base', 3, 1], ['mousedown', 'base', 3, 1], ['mousedown', 'veil', 3, 1]]
+
+test "a bare text node is hit as its parent element, as DOM targets it", ->
+  mounted Bare, {}, (view) ->
+    root = find 'root'
+    root.appendChild document.createTextNode 'plain words'
+    view.frame()
+    listen 'mousedown'
+    click view, 3, 0
+    eq heard, [['mousedown', 'root', 3, 0]]
+
+test "a click before any frame is dropped: nothing is shown to hit", ->
+  view = mount Nest, cols: 40, mouse: true
+  try
+    heard.length = 0
+    listen 'mousedown'
+    click view, 3, 2
+    eq heard, []
+  finally
+    view.close()
+
+Rows =! component
+  @n := 3
+  rows ~= (r for r in [0...@n])
+  render
+    Box flexDirection: 'column'
+      for r in rows
+        Text id: "r#{r}", key: r, "r#{r}"
+
+test! "in inline mode the frame's top row is where the cursor was, which the probe's answer says, and a frame that scrolls the terminal moves it up", ->
+  stdin = Stdin.new()
+  term = Terminal.new 40, 10
+  term.write '\n\n\n\n\n'   # the shell left the cursor on row 5
+  running = run Rows, stdin: stdin, stdout: term, mouse: true
+  heard.length = 0
+  listen 'mousedown'
+  eq term.queries, ['cursor']
+  stdin.key "#{CSI}?6;1R"
+  stdin.key down(1, 6) + up(1, 6)
+  eq heard, [['mousedown', 'r1', 1, 0]]
+  quit()
+  await running.done
+  # Eight rows from row 5 push the frame up by three: it sits at rows 2 to 9.
+  term = Terminal.new 40, 10
+  term.write '\n\n\n\n\n'
+  running = run Rows, stdin: stdin, stdout: term, mouse: true, props: { n: 8 }
+  heard.length = 0
+  listen 'mousedown'
+  stdin.key "#{CSI}?6;1R"
+  stdin.key down(0, 2) + up(0, 2)
+  stdin.key down(0, 9) + up(0, 9)
+  eq heard, [['mousedown', 'r0', 0, 0], ['mousedown', 'r7', 0, 0]]
+  quit()
+  await running.done
+
+test "a frame taller than the terminal shows its bottom, and a click lands on the row shown", ->
+  view = mount Rows, cols: 40, rows: 4, mouse: true, props: { n: 10 }
+  try
+    view.frame()
+    heard.length = 0
+    listen 'mousedown'
+    click view, 0, 0
+    click view, 0, 3
+    eq heard, [['mousedown', 'r6', 0, 0], ['mousedown', 'r9', 0, 0]]
+  finally
+    view.close()
+
+# ==[ Events ]==
+
+console.log "\nEvents"
+
+log = []
+note =! (name) -> (event) -> log.push "#{name} #{event.type} #{event.eventPhase}"
+
+test "a press is mousedown, then mouseup, then click, each run root to target and back to the document as a key is", ->
+  mounted Nest, {}, (view) ->
+    log.length = 0
+    for type in ['mousedown', 'mouseup', 'click']
+      document.addEventListener type, note('document'), true
+      document.addEventListener type, note('document')
+      find('outer').addEventListener type, note('outer'), true
+      find('outer').addEventListener type, note('outer')
+      find('word').addEventListener type, note('word')
+    click view, 3, 2
+    eq log, [
+      'document mousedown 1', 'outer mousedown 1', 'word mousedown 2', 'outer mousedown 3', 'document mousedown 3'
+      'document mouseup 1', 'outer mouseup 1', 'word mouseup 2', 'outer mouseup 3', 'document mouseup 3'
+      'document click 1', 'outer click 1', 'word click 2', 'outer click 3', 'document click 3'
+    ]
+
+test "stopPropagation ends a mouse event where it is asked for", ->
+  mounted Nest, {}, (view) ->
+    find('inner').addEventListener 'mousedown', (event) -> event.stopPropagation()
+    listen 'mousedown', 'mouseup'
+    find('inner').addEventListener 'mousedown', hear
+    click view, 3, 2
+    eq heard, [['mousedown', 'word', 1, 0], ['mouseup', 'word', 1, 0]]
+
+test "no click when the press and the release land on different targets, when motion came between, or when the buttons differ", ->
+  mounted Nest, {}, (view) ->
+    listen 'mousedown', 'mouseup', 'click'
+    view.send down(3, 2) + up(5, 4)
+    view.send down(3, 2) + move(4, 2, 0) + up(3, 2)
+    view.send down(3, 2) + up(3, 2, 2)
+    eq heard, [
+      ['mousedown', 'word', 1, 0], ['mouseup', 'line', 3, 0]
+      ['mousedown', 'word', 1, 0], ['mouseup', 'word', 1, 0]
+      ['mousedown', 'word', 1, 0], ['mouseup', 'word', 1, 0]
+    ]
+
+test "a click carries its button, and the modifiers the terminal reports", ->
+  mounted Nest, {}, (view) ->
+    got = []
+    document.addEventListener 'click', (event) -> got.push [event.button, event.shiftKey, event.altKey, event.ctrlKey]
+    view.send down(3, 2, 2) + up(3, 2, 2)
+    view.send report(16, 3, 2) + report(16, 3, 2, 'm')
+    eq got, [[2, false, false, false], [0, false, false, true]]
+
+Panes =! component
+  render
+    Box flexDirection: 'row', gap: 1
+      Box id: 'a', focusable: true, borderStyle: 'single', width: 8, height: 3
+        Text id: 'ta', "aa"
+      Box id: 'b', focusable: true, borderStyle: 'single', width: 8, height: 3
+        Text id: 'tb', "bb"
+      Box id: 'c', width: 8, height: 3
+        Box id: 'd', focusable: true, disabled: true, width: 4, height: 1
+          Text id: 'td', "dd"
+
+test "a click focuses the nearest focusable node that can hold focus, and leaves focus alone where there is none", ->
+  mounted Panes, {}, (view) ->
+    eq view.focused, null
+    click view, 1, 1
+    eq idOf(view.focused), 'a', 'a click on the words focuses the box around them'
+    click view, 9, 0
+    eq idOf(view.focused), 'b', 'a click on the border is a click on the box'
+    click view, 19, 0
+    eq idOf(view.focused), 'b', 'a disabled node cannot take it, and its box is not focusable'
+    click view, 30, 0
+    eq idOf(view.focused), 'b', 'a click on nothing focusable leaves focus where it is'
+
+test "preventDefault on the click keeps focus where it is", ->
+  mounted Panes, {}, (view) ->
+    find('b').addEventListener 'click', (event) -> event.preventDefault()
+    click view, 10, 1
+    eq view.focused, null
+    click view, 1, 1
+    eq idOf(view.focused), 'a'
+    click view, 10, 1
+    eq idOf(view.focused), 'a'
+
+test "a wheel tick is a `wheel` with deltaY -1 up and 1 down, deltaX for a sideways one, at the node under it, with no default action", ->
+  mounted Panes, {}, (view) ->
+    got = []
+    document.addEventListener 'wheel', (event) -> got.push [who(event.target), event.deltaX, event.deltaY, event.x, event.y]
+    view.send wheel(1, 1, 'up') + wheel(1, 1, 'down') + wheel(10, 1, 'left') + wheel(30, 1, 'right')
+    eq got, [['ta', 0, -1, 0, 0], ['ta', 0, 1, 0, 0], ['tb', -1, 0, 0, 0], ['body', 1, 0, 30, 1]]
+    eq view.focused, null
+
+test "a wheel handler that moves the content offset is the scrolled list", ->
+  List = component
+    @top := 0
+    render
+      Box id: 'list', flexDirection: 'column', height: 3, overflow: 'hidden', contentOffsetY: @top, @wheel: ((event) => @top = Math.max 0, Math.min(3, @top + event.deltaY))
+        for n in SIX
+          Text key: n, "item #{n}"
+  mounted List, {}, (view) ->
+    view.send wheel(2, 1, 'down') + wheel(2, 1, 'down')
+    eq view.frame(), 'item 2\nitem 3\nitem 4'
+    view.send wheel(2, 1, 'up')
+    eq view.frame(), 'item 1\nitem 2\nitem 3'
+
+test "a report that arrives while the mouse is off is dropped, and is never typed", ->
+  view = mount Keys, cols: 40
+  try
+    view.frame()
+    heard.length = 0
+    listen 'mousedown', 'mouseup', 'click', 'wheel'
+    view.send down(0, 0) + up(0, 0) + wheel(0, 0, 'up')
+    eq [heard, view.app.keys.value], [[], []]
+  finally
+    view.close()
+
+test "each report is a turn of its own: a mousedown listener that takes its target out leaves the mouseup to what is there", ->
+  mounted Nest, {}, (view) ->
+    listen 'mousedown', 'mouseup', 'click'
+    find('word').addEventListener 'mousedown', -> find('word').remove()
+    click view, 3, 2
+    eq heard, [['mousedown', 'word', 1, 0], ['mouseup', 'inner', 1, 0]]
+
+test "mouse: true and mouse: 'all' are the modes asked for; any other value is refused by name, and nothing is left installed", ->
+  throws (-> mount Keys, mouse: 'sometimes'), "rip/tui: mouse: \"sometimes\" is not true, false or 'all'"
+  throws (-> mount Keys, keyboard: 'kitty'), "rip/tui: keyboard: \"kitty\" is not 'basic' or 'enhanced'"
+  eq typeof document, 'undefined'
+
+# ==[ Hover ]==
+
+console.log "\nHover"
+
+test "a motion report is a `mousemove` at the node under the pointer, as the terminal reports it", ->
+  mounted Nest, { mouse: 'all' }, (view) ->
+    listen 'mousemove'
+    view.send move(3, 2) + move(5, 4, 0)
+    eq heard, [['mousemove', 'word', 1, 0], ['mousemove', 'line', 3, 0]]
+
+test "the pointer leaving one target for another is `mouseleave` up to their common ancestor and `mouseenter` down from it, as DOM has it: neither bubbles, and capture reaches them", ->
+  mounted Nest, { mouse: 'all' }, (view) ->
+    trail = []
+    for type in ['mouseenter', 'mouseleave']
+      document.addEventListener type, ((event) -> trail.push "#{event.type[5]} #{who event.target}"), true
+      document.addEventListener type, (event) -> trail.push "bubbled #{event.type}"
+    view.send move 3, 2
+    eq trail, ['e body', 'e outer', 'e inner', 'e word']
+    trail.length = 0
+    view.send move 5, 4
+    eq trail, ['l word', 'l inner', 'e line']
+    trail.length = 0
+    view.send move 1, 1
+    eq trail, ['l line']
+    trail.length = 0
+    view.send move 25, 0
+    eq trail, ['l outer']
+
+test "leaving the frame — past its last row, or the terminal's focus leaving — leaves every node under the pointer", ->
+  mounted Nest, { mouse: 'all' }, (view) ->
+    trail = []
+    for type in ['mouseenter', 'mouseleave']
+      document.addEventListener type, ((event) -> trail.push "#{event.type[5]} #{who event.target}"), true
+    view.send move 3, 2
+    trail.length = 0
+    view.send move 3, 9
+    eq trail, ['l word', 'l inner', 'l outer', 'l body']
+    trail.length = 0
+    view.send move 3, 2
+    eq trail, ['e body', 'e outer', 'e inner', 'e word']
+    trail.length = 0
+    view.send "#{CSI}O"
+    eq trail, ['l word', 'l inner', 'l outer', 'l body']
+
+test "enter and leave carry the terminal's cell and the other target, `relatedTarget`", ->
+  mounted Nest, { mouse: 'all' }, (view) ->
+    got = []
+    document.addEventListener 'mouseenter', ((event) -> got.push [event.type, who(event.target), who(event.relatedTarget), event.screenX, event.screenY]), true
+    document.addEventListener 'mouseleave', ((event) -> got.push [event.type, who(event.target), who(event.relatedTarget), event.screenX, event.screenY]), true
+    view.send move(3, 2) + move(5, 4)
+    eq got.slice(-3), [['mouseleave', 'word', 'line', 5, 4], ['mouseleave', 'inner', 'line', 5, 4], ['mouseenter', 'line', 'word', 5, 4]]
+
+THREE =! [0...3]
+
+HoverRow =! component
+  @n := 0
+  hovered := false
+  render
+    Text id: "h#{@n}", inverse: hovered, @mouseenter: (-> hovered = true), @mouseleave: (-> hovered = false)
+      "row #{@n} here"
+
+Hover =! component
+  render
+    Box flexDirection: 'column'
+      for r in THREE
+        HoverRow key: r, n: r
+
+test "the hover idiom: a row lit by `mouseenter` and put out by `mouseleave` costs the two rows' cells, and a motion that keeps its target costs nothing", ->
+  mounted Hover, { mouse: 'all' }, (view) ->
+    view.send move 1, 0
+    eq view.frame(), 'row 0 here\nrow 1 here\nrow 2 here', 'the overlay is a style'
+    ok view.ansi.startsWith("#{CSI}7mrow 0 here"), JSON.stringify view.ansi
+    eq view.damage, 10
+    view.send move 5, 0
+    eq [view.frame(), view.bytes, view.damage], ['row 0 here\nrow 1 here\nrow 2 here', '', 0], 'the same target: nothing dispatched, nothing drawn'
+    view.send move 1, 1
+    view.frame()
+    eq view.damage, 20
+    ok view.ansi.includes("#{CSI}7mrow 1 here") and not view.ansi.includes("7mrow 0"), JSON.stringify view.ansi
+    view.send move 1, 7
+    view.frame()
+    eq view.damage, 10
+    ok not view.ansi.includes('7m'), JSON.stringify view.ansi
+
+test "a motion that keeps its target dispatches nothing without a mousemove listener, and one event with", ->
+  mounted Hover, { mouse: 'all' }, (view) ->
+    trail = []
+    for type in ['mouseenter', 'mouseleave']
+      document.addEventListener type, ((event) -> trail.push event.type), true
+    view.send move(1, 0) + move(2, 0) + move(3, 0)
+    eq trail, ['mouseenter', 'mouseenter']
+    moves = []
+    document.addEventListener 'mousemove', (event) -> moves.push event
+    view.send move(4, 0) + move(5, 0)
+    eq [moves.length, moves[0] isnt moves[1], trail.length], [2, true, 2]
+
+# ==[ Modes ]==
+
+console.log "\nModes"
+
+test! "run with the mouse asks for button-event tracking and SGR reports after the paste and focus modes, then asks where the cursor is; quit withdraws them in reverse", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Keys, stdin: stdin, stdout: term, mouse: true
+  ok term.since(0).startsWith(ON + MOUSE + PROBE), JSON.stringify term.since 0
+  ok term.modes.has(1002) and term.modes.has(1006)
+  eq term.queries, ['cursor']
+  mark = term.sent.length
+  quit()
+  await running.done
+  eq term.since(mark), "#{QUIET}#{OFF}\n#{CSI}?25h"
+  ok not term.modes.has(1002) and not term.modes.has(1006)
+
+test! "mouse: 'all' asks for any-event tracking", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Keys, stdin: stdin, stdout: term, mouse: 'all'
+  ok term.since(0).startsWith(ON + ALL + PROBE), JSON.stringify term.since 0
+  mark = term.sent.length
+  quit()
+  await running.done
+  eq term.since(mark), "#{STILL}#{OFF}\n#{CSI}?25h"
+
+test! "without the option nothing is asked, and a stdin that is no terminal is asked nothing even with it", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Keys, stdin: stdin, stdout: term
+  quit()
+  await running.done
+  ok not term.since(0).includes('1006') and not term.since(0).includes('?6n'), JSON.stringify term.since 0
+  term = Terminal.new()
+  running = run Keys, stdin: Stdin.new(false), stdout: term, mouse: true, keyboard: 'enhanced'
+  quit()
+  await running.done
+  ok not term.since(0).includes('1006') and term.queries.length is 0, JSON.stringify term.since 0
+
+Throws =! component
+  render
+    Box focusable: true, autofocus: true, @keydown: (-> raise 'a listener failed'), @mousedown: (-> raise 'a mouse listener failed')
+      Text "x"
+
+test! "the mouse modes are withdrawn on every way out: Ctrl-C, a listener that throws, a mouse listener that throws", ->
+  for [name, leave] in [['Ctrl-C', (stdin) -> stdin.key '\x03'], ['a key listener that throws', (stdin) -> stdin.key 'a'], ['a mouse listener that throws', (stdin) -> stdin.key down(0, 0)]]
+    stdin = Stdin.new()
+    term = Terminal.new()
+    running = run Throws, stdin: stdin, stdout: term, mouse: true
+    leave stdin
+    try
+      await running.done
+    catch error
+      null
+    ok term.since(0).endsWith("#{QUIET}#{OFF}#{CSI}?25h"), "#{name}: #{JSON.stringify term.since(0).slice -40}"
+    ok not term.modes.has(1006), name
+
+test "a throw while the app mounts withdraws the mouse modes with the rest", ->
+  Bad = component
+    render
+      Box justifyContent: 'centre'
+  stdin = Stdin.new()
+  term = Terminal.new()
+  throws (-> run Bad, stdin: stdin, stdout: term, mouse: true), '"centre" is not one of'
+  eq term.since(0), "#{ON}#{MOUSE}#{PROBE}#{QUIET}#{OFF}#{CSI}?25h"
+  eq typeof document, 'undefined'
+
+test! "a resize asks where the cursor is again, from the frame's top-left", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Keys, stdin: stdin, stdout: term, mouse: true
+  mark = term.sent.length
+  term.columns = 60
+  term.emit 'resize'
+  ok term.since(mark).endsWith(PROBE), JSON.stringify term.since mark
+  eq term.queries, ['cursor', 'cursor']
+  quit()
+  await running.done
+
+# ==[ Negotiation ]==
+
+console.log "\nNegotiation"
+
+test! "keyboard: 'enhanced' sends the kitty query and then the attributes query after the modes; a kitty answer first pushes the flag once, and quit pops it before the modes", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Keys, stdin: stdin, stdout: term, keyboard: 'enhanced'
+  ok term.since(0).startsWith(ON + QUERY), JSON.stringify term.since 0
+  eq [term.queries, screen.keyboard, term.kitty], [['keyboard', 'attributes'], 'basic', 0]
+  stdin.key KITTY
+  eq [screen.keyboard, term.kitty], ['enhanced', 1]
+  stdin.key DA1
+  eq [screen.keyboard, term.kitty, term.since(0).split(PUSH).length - 1], ['enhanced', 1, 1], 'the attributes answer after the decision changes nothing'
+  mark = term.sent.length
+  quit()
+  await running.done
+  eq term.since(mark), "#{POP}#{OFF}\n#{CSI}?25h"
+  eq [term.kitty, screen.keyboard], [0, 'basic']
+
+test! "with the mouse too, the order is modes, mouse, cursor probe, queries", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Keys, stdin: stdin, stdout: term, mouse: true, keyboard: 'enhanced'
+  ok term.since(0).startsWith(ON + MOUSE + PROBE + QUERY), JSON.stringify term.since 0
+  stdin.key KITTY
+  mark = term.sent.length
+  quit()
+  await running.done
+  eq term.since(mark), "#{POP}#{QUIET}#{OFF}\n#{CSI}?25h"
+
+test! "the attributes answer first — tmux — decides basic: nothing is pushed, a kitty answer after it is ignored, and nothing is popped", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Keys, stdin: stdin, stdout: term, keyboard: 'enhanced'
+  stdin.key DA1
+  eq [screen.keyboard, term.kitty], ['basic', 0]
+  stdin.key KITTY
+  eq [screen.keyboard, term.kitty], ['basic', 0]
+  stdin.key "#{CSI}A"
+  eq running.app.keys.value, ['ArrowUp']
+  mark = term.sent.length
+  quit()
+  await running.done
+  eq term.since(mark), "#{OFF}\n#{CSI}?25h"
+
+test! "a terminal that answers neither runs on basic, and its keys arrive", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Keys, stdin: stdin, stdout: term, keyboard: 'enhanced'
+  stdin.key 'a'
+  eq [running.app.keys.value, screen.keyboard], [['a'], 'basic']
+  mark = term.sent.length
+  quit()
+  await running.done
+  eq term.since(mark), "#{OFF}\n#{CSI}?25h"
+
+test! "the flag is popped on every way out only if it was pushed: Ctrl-C and a listener that throws", ->
+  for [name, App, leave] in [['Ctrl-C', Keys, (stdin) -> stdin.key '\x03'], ['a listener that throws', Throws, (stdin) -> stdin.key 'a']]
+    stdin = Stdin.new()
+    term = Terminal.new()
+    running = run App, stdin: stdin, stdout: term, keyboard: 'enhanced'
+    stdin.key KITTY
+    leave stdin
+    try
+      await running.done
+    catch error
+      null
+    ok term.since(0).endsWith("#{POP}#{OFF}#{CSI}?25h"), "#{name}: #{JSON.stringify term.since(0).slice -40}"
+    eq term.kitty, 0, name
+
+test! "a keyboard answer nobody asked for — keyboard: 'basic' — changes nothing", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Keys, stdin: stdin, stdout: term
+  stdin.key KITTY
+  eq [screen.keyboard, term.kitty, term.queries], ['basic', 0, []]
+  quit()
+  await running.done
+
+Hint =! component
+  render
+    Text "keys: #{screen.keyboard}"
+
+test "`screen.keyboard` is a reactive read: a binding that reads it redraws when the terminal answers, and a mount answers the probe without a terminal to push to", ->
+  view = mount Hint, cols: 40, keyboard: 'enhanced'
+  try
+    eq view.frame(), 'keys: basic'
+    view.send KITTY
+    eq [screen.keyboard, view.frame(), view.bytes.includes(PUSH)], ['enhanced', 'keys: enhanced', false]
+  finally
+    view.close()
+  eq screen.keyboard, 'basic', 'close puts it back'
+  view = mount Hint, cols: 40, keyboard: 'enhanced'
+  try
+    eq view.frame(), 'keys: basic'
+    view.send DA1 + KITTY
+    eq view.frame(), 'keys: basic'
+  finally
+    view.close()
+
+test "the decoder is always on: a terminal already in kitty mode is read without the option, end to end", ->
+  view = mount Keys, cols: 40
+  try
+    view.send "#{CSI}97;5u#{CSI}13;2u"
+    eq [view.app.keys.value, screen.keyboard], [['C-a', 'Enter'], 'basic']
+  finally
+    view.close()
+
+# ==[ Selection ]==
+
+console.log "\nSelection"
+
+Lines =! component
+  @n := 0
+  render
+    Box flexDirection: 'column'
+      Text "hello world"
+      Text "foo bar #{@n}"
+      Text "日本語 wide"
+
+copied =! (text) -> "\x1b]52;c;#{Buffer.from(text).toString 'base64'}\x1b\\"
+
+test "a drag selects the cells from the press to the pointer in reading order, painted inverse in the styled frame and absent from the plain one, and the release puts the text on the clipboard by OSC 52", ->
+  mounted Lines, {}, (view) ->
+    drag view, 2, 0, 4, 1
+    eq view.bytes, copied 'llo world\nfoo b'
+    eq screen.selection, 'llo world\nfoo b'
+    eq view.frame(), 'hello world\nfoo bar 0\n日本語 wide'
+    ok view.ansi.includes("he#{CSI}7mllo world") and view.ansi.includes("#{CSI}7mfoo b#{CSI}0mar 0"), JSON.stringify view.ansi
+
+test "wide glyphs are selected whole, from either cell", ->
+  mounted Lines, {}, (view) ->
+    drag view, 1, 2, 4, 2
+    eq [screen.selection, view.bytes], ['日本語', copied '日本語']
+    ok view.ansi.includes("#{CSI}7m日本語#{CSI}0m wide"), JSON.stringify view.ansi
+
+test "a click clears the selection, and nothing is copied; the right button selects nothing", ->
+  mounted Lines, {}, (view) ->
+    drag view, 2, 0, 4, 1
+    view.frame()
+    click view, 0, 1
+    eq [screen.selection, view.bytes], ['', '']
+    view.frame()
+    ok not view.ansi.includes('7m'), JSON.stringify view.ansi
+    view.send down(2, 0, 2) + move(4, 1, 2) + up(4, 1, 2)
+    eq [screen.selection, view.bytes], ['', '']
+
+test "selection: false sends nothing and paints nothing", ->
+  mounted Lines, { selection: false }, (view) ->
+    drag view, 2, 0, 4, 1
+    eq [screen.selection, view.bytes], ['', '']
+    view.frame()
+    ok not view.ansi.includes('7m'), JSON.stringify view.ansi
+
+test "preventDefault on the mousedown keeps the drag from selecting", ->
+  mounted Lines, {}, (view) ->
+    document.addEventListener 'mousedown', (event) -> event.preventDefault()
+    drag view, 2, 0, 4, 1
+    eq [screen.selection, view.bytes], ['', '']
+
+test "a drag's damage is the cells that changed hands, and clearing owes the selection", ->
+  mounted Lines, {}, (view) ->
+    view.send down(0, 0) + move(5, 0, 0)
+    view.frame()
+    eq view.damage, 6
+    view.send move 8, 0, 0
+    view.frame()
+    eq view.damage, 3
+    view.send move 5, 0, 0
+    view.frame()
+    eq view.damage, 3
+    view.send up 5, 0
+    view.frame()
+    eq view.damage, 0
+    click view, 0, 2
+    view.frame()
+    eq view.damage, 6
+
+test "the selection stands through the app's own redraws, Escape included, and a resize clears it", ->
+  mounted Lines, {}, (view) ->
+    drag view, 0, 1, 4, 1
+    view.frame()
+    view.app.n.value = 7
+    eq view.frame(), 'hello world\nfoo bar 7\n日本語 wide'
+    ok view.ansi.includes("#{CSI}7mfoo b#{CSI}0mar 7"), JSON.stringify view.ansi
+    view.press 'Escape'
+    view.frame()
+    ok view.ansi.includes("#{CSI}7mfoo b"), 'Escape has no default action'
+    view.resize 30
+    view.frame()
+    eq screen.selection, ''
+    ok not view.ansi.includes('7m'), JSON.stringify view.ansi
+
+test! "on a terminal the clipboard receives the text", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Lines, stdin: stdin, stdout: term, mouse: true
+  stdin.key "#{CSI}?1;1R"
+  stdin.key down(2, 0) + move(4, 1, 0) + up(4, 1)
+  eq term.clipboard, 'llo world\nfoo b'
+  quit()
+  await running.done
+
+# ==[ Fuzz ]==
+
+console.log "\nFuzz"
+
+wide = (...codes) -> String.fromCodePoint ...codes
+WORDS =! ['a', 'hello', 'hello world', 'two\nlines', 'x'.repeat(14), 'abc de', wide(0x65E5, 0x672C, 0x8A9E) + ' ok', 'q' + wide(0x4E2D) + 'r', 'the quick brown fox jumps']
+STYLES =! {
+  flexDirection: ['row', 'column', 'row-reverse', undefined, undefined]
+  flexWrap: ['wrap', undefined, undefined]
+  width: [2, 4, 8, 12, '50%', undefined, undefined]
+  height: [1, 2, 3, 5, undefined, undefined]
+  padding: [1, undefined, undefined, undefined]
+  margin: [1, -1, undefined, undefined]
+  marginLeft: [-2, 2, undefined, undefined]
+  marginTop: [-1, undefined, undefined, undefined]
+  borderStyle: ['single', 'round', undefined, undefined]
+  overflow: ['hidden', undefined, undefined]
+  contentOffsetX: [1, 2, undefined, undefined, undefined]
+  contentOffsetY: [1, 2, -1, undefined, undefined, undefined]
+  position: ['absolute', 'absolute', undefined, undefined, undefined]
+  left: [0, 1, 3, -1, undefined]
+  top: [0, 1, 2, -1, undefined]
+  display: ['none', 'contents', undefined, undefined, undefined, undefined]
+  hidden: [true, undefined, undefined, undefined, undefined, undefined]
+}
+KEYS =! Object.keys STYLES
+
+# Every node under `node`, in tree order.
+all =! (node, into = []) ->
+  into.push node
+  kid = node.firstChild
+  while kid
+    all kid, into
+    kid = kid.nextSibling
+  into
+
+# How far the content offsets above `node` shift it (a `contents` node
+# has no box to scroll).
+shift =! (node) ->
+  dx = dy = 0
+  above = node.parentNode
+  while above
+    s = above.styles
+    if s and s.display isnt 'contents'
+      dx -= Math.trunc s.contentOffsetX if s.contentOffsetX
+      dy -= Math.trunc s.contentOffsetY if s.contentOffsetY
+    above = above.parentNode
+  { dx, dy }
+
+# Whether the cells `node` and everything under it can ink hold (x, y).
+holds =! (node, x, y) ->
+  { dx, dy } = shift node
+  x >= node.bl + dx and x < node.br + dx and y >= node.bt + dy and y < node.bb + dy
+
+# Whether `node`'s own rounded box holds (x, y).
+boxed =! (node, x, y) ->
+  { dx, dy } = shift node
+  r = node.rect
+  x >= r.x + dx and x < r.x + r.w + dx and y >= r.y + dy and y < r.y + r.h + dy
+
+under =! (node, above) ->
+  while node
+    return true if node is above
+    node = node.parentNode
+  false
+
+test "random trees, random cells: the target is the node the painter put there, and the coordinates are from its corner", ->
+  seed = 20260921
+  rand = ->
+    seed = (seed * 1664525 + 1013904223) % 4294967296
+    seed / 4294967296
+  pick = (list) -> list[Math.floor rand() * list.length]
+  counts = { rounds: 0, clicks: 0, spans: 0, divs: 0, bodies: 0, texts: 0, covered: 0, scrolled: 0, targets: 0 }
+  for round in [0...300]
+    view = mount Bare, cols: 30, mouse: true, selection: false
+    try
+      root = find 'root'
+      names = 0
+      colors = 0
+      byId = Map.new()
+      say = (problem) -> raise "seed 20260921 round #{round}: #{problem}"
+      # Every box is painted in a color of its own, border included, and
+      # no text has any: what a cell shows says which box painted it.
+      tint = (node) ->
+        color = "ansi256(#{colors += 1})"
+        node.set 'backgroundColor', color
+        node.set 'borderBackgroundColor', color
+        byId.set intern(null, color, 0), node
+      tint document.body
+      tint root
+      make = (depth) ->
+        roll = rand()
+        if roll < 0.25
+          node = document.createElement 'span'
+          node.appendChild document.createTextNode pick WORDS
+          node.set 'id', "s#{names += 1}"
+          return node
+        return document.createTextNode pick WORDS if roll < 0.35
+        node = document.createElement 'div'
+        node.set 'id', "d#{names += 1}"
+        for key in KEYS when rand() < 0.3
+          value = pick STYLES[key]
+          node.set key, value if value isnt undefined
+        tint node
+        if depth < 4
+          node.appendChild make depth + 1 for n in [0...Math.floor rand() * 4]
+        node
+      root.appendChild make 1 for n in [0...2 + Math.floor rand() * 3]
+      view.frame()
+      front = view.held.view.front
+      continue unless front.rows
+      counts.rounds += 1
+      nodes = all document.body
+      order = Map.new()
+      order.set node, n for node, n in nodes
+      before = (a, b) -> order.get(a) <= order.get(b)
+      got = null
+      document.addEventListener 'mousedown', (event) -> got = event
+      seen = Set.new()
+      for n in [0...20]
+        x = Math.floor rand() * 30
+        y = Math.floor rand() * front.rows
+        got = null
+        view.send down(x, y) + up(x, y)
+        say "no mousedown for (#{x}, #{y})" unless got
+        target = got.target
+        counts.clicks += 1
+        seen.add target
+        owner = byId.get front.style[y * 30 + x]
+        say "cell (#{x}, #{y}) shows a style no box painted" unless owner
+        if target.tagName is 'span'
+          say "(#{x}, #{y}) hit #{idOf target}, whose words do not reach it" unless holds target, x, y
+          say "(#{x}, #{y}) hit #{idOf target}, painted before #{idOf owner}" unless before owner, target
+          counts.spans += 1
+        else if owner is target
+          if target is document.body then counts.bodies += 1 else counts.divs += 1
+        else
+          bare = target.childNodes.some (kid) -> kid.nodeType is 3 and holds kid, x, y
+          say "(#{x}, #{y}) hit #{idOf target}, and the painter says #{idOf owner}" unless bare and before owner, target
+          counts.texts += 1
+        { dx, dy } = shift target
+        say "(#{x}, #{y}) on #{idOf target} at (#{target.rect.x + dx}, #{target.rect.y + dy}) came as (#{got.x}, #{got.y})" unless got.x is x - target.rect.x - dx and got.y is y - target.rect.y - dy
+        counts.covered += 1 if nodes.some (node) -> node.nodeType is 1 and node isnt target and not under(target, node) and boxed node, x, y
+        counts.scrolled += 1 if nodes.some (node) -> node isnt target and under(target, node) and node.styles?.overflow is 'hidden' and (node.styles.contentOffsetX or node.styles.contentOffsetY)
+      counts.targets += seen.size
+    finally
+      view.close()
+  # A fuzz that does nothing passes everything: hold it to its volume.
+  floors = { rounds: 250, clicks: 5000, spans: 500, divs: 2500, bodies: 100, texts: 100, covered: 500, scrolled: 150, targets: 1500 }
+  ok counts[name] >= floor, "#{name}: #{counts[name]} is under the floor of #{floor} — #{JSON.stringify counts}" for own name, floor of floors

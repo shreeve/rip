@@ -9,15 +9,19 @@ export { canon, brief }
 
 # ── A terminal with a cursor ──────────────────────────────────────────────────
 
-SEQUENCE =! /\x1b\[([?0-9;]*)([A-Za-z])/y
-LINK     =! /\x1b\]8;;[^\x1b]*\x1b\\/y
+SEQUENCE =! /\x1b\[([?<>0-9;]*)([A-Za-z])/y
+STRING   =! /\x1b\]([^\x1b]*)\x1b\\/y   # an OSC: a hyperlink, or the clipboard
+ASKS     =! { '?u': 'keyboard', 'c': 'attributes', '?6n': 'cursor' }
 
 # As much of a terminal as a frame, its cursor and its modes need: moves
 # up, down and to a column, an erase below, line feeds that scroll at the
-# last row, DEC private modes set and reset, and glyphs as wide as the
+# last row, DEC private modes set and reset, the three queries and the
+# kitty keyboard stack, the clipboard, and glyphs as wide as the
 # terminal draws them. `x`, `y` and `shown` are the hardware cursor;
 # `modes` holds the private modes in force (25 is the cursor, which a
-# terminal shows until it is told otherwise); `scrolled` counts the rows
+# terminal shows until it is told otherwise); `queries` is what it was
+# asked, in order; `kitty` is how deep its keyboard stack is pushed;
+# `clipboard` is what OSC 52 last put there; `scrolled` counts the rows
 # pushed into the scrollback; `sent` is every write.
 export class Terminal extends EventEmitter
   constructor: (@columns = 40, @rows = 10) ->
@@ -27,6 +31,9 @@ export class Terminal extends EventEmitter
     @lines = []
     @x = @y = 0
     @modes = Set.new [25]
+    @queries = []
+    @kitty = 0
+    @clipboard = null
     @scrolled = 0
 
   get shown: -> @modes.has 25
@@ -42,8 +49,9 @@ export class Terminal extends EventEmitter
     while at < text.length
       ch = text[at]
       if ch is '\x1b'
-        LINK.lastIndex = at
-        if found = LINK.exec text
+        STRING.lastIndex = at
+        if found = STRING.exec text
+          @clipboard = Buffer.from(found[1].slice(5), 'base64').toString() if found[1].startsWith '52;c;'
           at += found[0].length
           continue
         SEQUENCE.lastIndex = at
@@ -73,6 +81,12 @@ export class Terminal extends EventEmitter
     true
 
   control!: (params, verb) ->
+    if asked = ASKS[params + verb]
+      @queries.push asked
+      return
+    if verb is 'u'
+      @kitty += (if params[0] is '>' then 1 else -1)
+      return
     if params[0] is '?'
       for mode in params.slice(1).split ';'
         if verb is 'h' then @modes.add +mode else @modes.delete +mode

@@ -8,7 +8,7 @@
     ".": "./tui.rip"
   },
   "scripts": {
-    "test": "rip test.rip && rip test/text.rip && rip test/layout.rip && rip test/input.rip && rip test/events.rip && rip test/ink.rip && rip test/yoga.rip && rip test/yoga-aspect.rip && rip test/yoga-hand.rip && rip test/fuzz.rip && rip test/damage.rip",
+    "test": "rip test.rip && rip test/text.rip && rip test/layout.rip && rip test/input.rip && rip test/events.rip && rip test/mouse.rip && rip test/ink.rip && rip test/yoga.rip && rip test/yoga-aspect.rip && rip test/yoga-hand.rip && rip test/fuzz.rip && rip test/damage.rip",
     "demo": "rip demo.rip"
   },
   "files": [
