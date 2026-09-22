@@ -171,6 +171,7 @@ Each runs with `rip examples/<name>.rip` from `packages/tui`.
 | `log.rip` | A build log: finished steps into the scrollback through `Static`, a spinner and a bar on the `clock`, a warning above the frame through `print`, the terminal's own progress indicator, and a quit when the last step is done. |
 | `input.rip` | A single-line text field in 40 lines of code: the cursor placed by measured cells, so a wide glyph is two columns and a letter with its marks one; typing inserts at the cursor, the arrows, Home and End move it, Backspace and Delete take a cluster, a paste goes in whole, Enter prints the value above the field and clears it, Escape clears it. |
 | `ink/*.rip` | The four ports above, Ink's source beside each. |
+| [`scripts/test-live.rip`](../../scripts/test-live.rip) | The framework in daily use: the repository's own `bun run test:tui`, every lane of the test run drawn live — spinners and bars on one `clock`, finished lanes into the scrollback through `Static`, failure cards in rounded borders with `link` to the file, the terminal's progress indicator — and `test/live.rip` drives it headless through `mount`. |
 
 `log.rip`, `input.rip` and the ports export their component and run it
 only as the entry (`run App if import.meta.main`), which is how
@@ -873,7 +874,12 @@ four ports under `examples/ink/` through `mount` and holds each frame
 to the one Ink draws for its example, holds the line table above to
 what `test/lines.rip` counts, and types, moves, deletes and pastes
 into `examples/input.rip`, holding the frame and the cursor after
-every key. `test/text.rip` holds the
+every key. `test/live.rip` drives the repository's live test runner
+with a lane source fed by hand: the lanes in flight and their bars, the
+strip, the scrollback rows in their colors, the progress indicator, the
+failure cards and `f`, the output Enter opens, and the end — the
+failing output as the plain runner prints it, the end card, the exit
+code. `test/text.rip` holds the
 text engine — sanitizing, cluster widths, every wrap and truncate mode
 — and `test/layout.rip` the layout engine's own pins. `test/input.rip`
 holds the terminal input parser: 244 of Ink's input cases as a table
