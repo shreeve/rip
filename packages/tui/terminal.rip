@@ -280,12 +280,18 @@ export handover =! (held, fn) ->
   finally
     resume held
 
-# Ctrl-Z: give the terminal back, stop the process as the shell would
-# have, and take the terminal again on SIGCONT. A stopped app has no
-# timer and no stdin to keep the loop alive, so one is held until the
-# continue: without it the loop drains on the continue and the app is
-# closed before it wakes. Nothing on a stdout that is no terminal, on
-# Windows, or while a hand-over is under way.
+# Ctrl-Z: give the terminal back, stop the process as the terminal's
+# driver would have — the stop signal to the whole process group, which
+# under `rip app.rip` holds the launcher too, so the shell sees one
+# stopped job — and take the terminal again on SIGCONT. The signal is
+# sent only when the app reads the process's own stdin: a stream of
+# one's own — a test's, a `stdout:` given with no stdin — is not the
+# terminal's job, so Ctrl-Z takes the same road and sends nothing, and
+# whoever gave the stream continues the app with SIGCONT. A stopped app
+# has no timer and no stdin to keep the loop alive, so one is held
+# until the continue: without it the loop drains on the continue and
+# the app is closed before it wakes. Nothing on a stdout that is no
+# terminal, on Windows, or while a hand-over is under way.
 export stop! =! (held) ->
   return unless watched(held) and process.platform isnt 'win32' and not held.suspended
   down held, true
@@ -293,7 +299,7 @@ export stop! =! (held) ->
   held.hold = setInterval (->), 0x7fffffff
   held.wake = -> resume held
   process.once 'SIGCONT', held.wake
-  process.kill process.pid, 'SIGTSTP'
+  process.kill 0, 'SIGTSTP' if held.stdin is process.stdin
 
 # ── The console ───────────────────────────────────────────────────────────────
 

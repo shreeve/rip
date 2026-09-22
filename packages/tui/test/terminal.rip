@@ -624,57 +624,59 @@ test! "suspend gives the terminal back — the flag popped, the mouse, paste and
   quit()
   await running.done
 
-test! "Ctrl-Z is a default action of keydown: the terminal is given back and the process stopped; SIGCONT takes it back", ->
+test! "Ctrl-Z is a default action of keydown: the terminal is given back and the app waits for SIGCONT — on a stdin of its own no signal is sent, the keys left in the read are nobody's, and the handlers stay; the continue takes the terminal back, asks the row again, and draws whole", ->
   stopped = 0
-  handler = ->
-    stopped += 1
-    process.kill process.pid, 'SIGCONT'
+  handler = -> stopped += 1
   process.on 'SIGTSTP', handler
+  before = listeners()
   try
     stdin = Stdin.new()
     term = Terminal.new()
-    running = run Keys, stdin: stdin, stdout: term
+    running = run Keys, stdin: stdin, stdout: term, mouse: true
+    stdin.key "#{CSI}?1;1R"
+    live = listeners()
     mark = term.sent.length
-    stdin.key '\x1a'
-    eq term.since(mark), "#{OFF}\n#{SHOW}"
-    eq stdin.raw, false
+    stdin.key '\x1aab'
+    eq term.since(mark), "#{QUIET}#{OFF}\n#{SHOW}"
+    eq [stdin.raw, stdin.calls.slice(-3), running.app.keys.value], [false, ['raw off', 'pause', 'unref'], ['z']], 'a listener hears Ctrl-Z, as it hears Ctrl-C; what follows it in the read is dropped'
+    sleep! 20
+    eq [stopped, process.listenerCount('SIGCONT'), listeners().slice(0, 3)], [0, live[3] + 1, live.slice(0, 3)], "no stop signal for a stream of one's own; the continue is waited for; the signal handlers stand"
+    stdin.key 'c'
+    eq running.app.keys.value, ['z'], "a key while stopped is nobody's"
     at = term.sent.length
-    sleep! 50
-    eq stopped, 1
-    ok term.since(at).startsWith(ON), JSON.stringify term.since at
-    eq [stdin.raw, term.text], [true, "k\nk"]
-    stdin.key 'a'
-    eq running.app.keys.value, ['z', 'a'], 'a listener hears Ctrl-Z before its default action, as it hears Ctrl-C'
+    process.kill process.pid, 'SIGCONT'
+    sleep! 30
+    ok term.since(at).startsWith("#{HIDE}#{ASK}#{MOUSE}#{PROBE}"), JSON.stringify term.since at
+    ok term.since(at).includes("#{BEGIN}#{CSI}J"), 'the frame is drawn whole'
+    eq [stdin.raw, term.text, process.listenerCount('SIGCONT')], [true, "k\nk", live[3]]
+    stdin.key 'd'
+    eq running.app.keys.value, ['z', 'd']
     quit()
     await running.done
+    eq listeners(), before
   finally
     process.off 'SIGTSTP', handler
 
 test! "preventDefault on Ctrl-Z keeps the app on the terminal, and Ctrl-Z under mount is nothing", ->
-  stopped = 0
-  handler = -> stopped += 1
-  process.on 'SIGTSTP', handler
-  try
-    Holds = component
-      render
-        Box focusable: true, autofocus: true, @keydown: ((event) -> event.preventDefault() if event.key is 'z' and event.ctrlKey)
-          Text "h"
-    stdin = Stdin.new()
-    term = Terminal.new()
-    running = run Holds, stdin: stdin, stdout: term
-    mark = term.sent.length
-    stdin.key '\x1a'
-    sleep! 20
-    eq [term.sent.length, stdin.raw, stopped], [mark, true, 0]
-    quit()
-    await running.done
-    view = mount Keys
-    view.press 'z', ctrl: true
-    sleep! 20
-    eq [stopped, view.app.keys.value], [0, ['z']]
-    view.close()
-  finally
-    process.off 'SIGTSTP', handler
+  Holds = component
+    render
+      Box focusable: true, autofocus: true, @keydown: ((event) -> event.preventDefault() if event.key is 'z' and event.ctrlKey)
+        Text "h"
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Holds, stdin: stdin, stdout: term
+  mark = term.sent.length
+  live = process.listenerCount 'SIGCONT'
+  stdin.key '\x1a'
+  sleep! 20
+  eq [term.sent.length, stdin.raw, process.listenerCount('SIGCONT')], [mark, true, live]
+  quit()
+  await running.done
+  view = mount Keys
+  view.press 'z', ctrl: true
+  sleep! 20
+  eq [process.listenerCount('SIGCONT'), view.app.keys.value], [live, ['z']]
+  view.close()
 
 test! "a key that arrives while suspended is nobody's, a resize writes nothing, and a log is the console's own", ->
   recorded! (printed) ->
