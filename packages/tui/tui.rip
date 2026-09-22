@@ -206,12 +206,13 @@ fail! =! (held, error) ->
 # Each event is a turn of its own: the tree is as the key before left it.
 # A key goes to the focused node, or to the body while nothing has
 # focus, as DOM sends it; the document hears it either way. Once the app
-# is closing, what is left of a read is nobody's. A mouse report is the
+# is closing, or the terminal is another's, what is left of a read is
+# nobody's. A mouse report is the
 # pointer's to hit-test, and dropped while the mouse is off; a reply
 # answers a probe.
 deliver! =! (held, events) ->
   for event in events
-    return unless live is held and not held.closing
+    return unless live is held and not held.closing and not held.suspended
     switch event.type
       when 'focus' then shown = true
       when 'blur'
