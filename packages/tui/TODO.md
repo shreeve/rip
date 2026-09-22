@@ -4,6 +4,100 @@ Open work only, in the order it should be done. Delete a line when it
 lands or moves into docs/tests. The design and the order of the larger
 steps are in [PLAN.md](PLAN.md).
 
+## 1. The closing audit — code
+
+- [ ] A cursor written outside its node's box is refused at the write
+      (`document.rip:93`), so a cursor computed from state that is
+      stale for one frame kills the app, where a cursor clipped away is
+      hidden. Clamp it to the box, or hide it, and say which.
+- [ ] `document.rip:401` clears a style with `delete`, which puts the
+      node into dictionary mode: every later style read on it misses
+      V8's inline caches. Write `undefined`, and let `sync`'s bare check
+      tolerate it.
+- [ ] `Screen.still` (`screen.rip:104`) walks every `Static` container
+      and every child on every frame, so N appends cost O(N²): 149 µs
+      each over 1,000 and 348 over 8,000 (`rip bench/tui.rip static 8`).
+      Keep a per-container cursor of the children already written.
+- [ ] The clip and offset arithmetic is copied into `paint.rip:820`,
+      `mouse.rip:44` and `screen.rip:200` — sixteen border-inset
+      expressions, six content-offset pairs — and "is this subtree
+      shown" is spelled five ways (`focus.rip:17`, `screen.rip:29`,
+      `mouse.rip:57`, `paint.rip:618`, `layout.rip:688`), one of them
+      (`s.hidden` truthy against `is true`) differently. One `clipOf`
+      and `offsetOf` in `paint.rip` and one `shown` in `focus.rip`,
+      imported; and a fuzz that holds `locate(x, y)` to the node whose
+      `draw` last wrote that cell.
+- [ ] Focus is recorded three times — `doc.active`, `doc.lit`,
+      `node.glow` — kept in step only by `take` (`focus.rip:52`). A
+      fuzz of focus, blur, remove and disable holding `activeElement
+      is active` and `node.focused` for every node.
+- [ ] One word, several meanings: `settle` (screen, layout, input,
+      tui), `probe` (terminal, layout, paint), `frame` (`Screen`, the
+      border in paint, `Tick`), `refresh` (a text flow; tui's whole
+      redraw, also named `held.redraw`), `watched` (tui's alias of
+      terminal's `interactive`, beside terminal's own `watched`);
+      `PASSES` is 32 in screen and 4 in paint; `TIMERS` is defined in
+      tui and in input. Rename the local ones; export one `TIMERS`.
+- [ ] `Screen` is built and then has `whole`, `interactive`, `alt`,
+      `origin`, `after` and `failed` set from `tui.rip:276`, and its
+      constructor initialises the same fields to values always
+      overwritten. Take them as options.
+- [ ] Void functions unmarked: `close` and `quit` (tui), `settle`
+      (screen), `name`, `mouse`, `answer`, `cursor` (input), `put`
+      (document).
+- [ ] Exports nothing imports: `Document`, `NOWHERE` (document), `WIDE`
+      (text), `Quiet` (terminal). Guards that cannot fire:
+      `paint.rip:144`, `layout.rip:687`'s try, `terminal.rip:93`; the
+      80 × 24 fallbacks in `screen.rip:66` and `tui.rip:142`. `step`
+      written in both `tui.rip:432` and `terminal.rip:124`;
+      `parser.flush()` in both closes. `Mount.press`, `type`, `paste`
+      and `send` after a close drop in silence where `frame` throws —
+      one rule.
+- [ ] `Mount.held` is a public API with no doc: tests set
+      `view.held.view.alt` fourteen times.
+
+## 2. The closing audit — docs
+
+- [ ] `bun run bench` refuses without a Yoga checkout at the
+      `yoga-layout` version Ink ships (3.2.1), and `misc/yoga` is
+      `main`. README and PLAN §11 say `YOGA_SRC` and the version; step
+      6's exit holds only then.
+- [ ] README's prose quotes numbers `bench/RESULTS.md` does not: a
+      select-list key 8 µs, a no-op 0.3, 55 at a hundred items
+      (RESULTS: 5.5, 0.2, 42); motion 0.5 µs and a click 1 µs "on
+      1,576 elements" (2,403; 0.57, 1.06); "a row recolored in a
+      2,000-row clipped log, 7 µs against 85" (no such scenario); one
+      cell of a 200×60 table "about 125 µs" (143); `Static` "350 µs
+      over 8,000" (only the 1,000 row exists). Quote RESULTS.md or
+      drop.
+- [ ] PLAN names what no code does: an opt-in `ansi(str)` helper and a
+      per-cell style callback (§2, §6); frames "deferred while
+      `write()` reports backpressure" (§3); the error overview "through
+      `__setErrorHandler`" (§14); a `yoga-layout` differential runner
+      ("537 of 543", §5); a smoke test "under `script -q /dev/null`"
+      with "no pty dependency" (§10). Strike each, or name what is.
+- [ ] PLAN §3's module table (tui 310, focus 62, paint 694, terminal
+      181; "4,222 built") against the counting rule (311, 63, 701, 203;
+      4,252); §10's per-file Ink counts and "478" against SOURCE.md's
+      521; the progress markers "(built: …)" in §5–§8, "before PR 6",
+      "In scope for PR 2", "measured in PR 0"; README's "Ctrl-Z is
+      PLAN.md's lifecycle step" and "and what is planned".
+- [ ] README idioms an app needs and cannot find: there is no no-wrap
+      mode (a `width` wider than any line, then `contentOffsetX`;
+      `truncate` cuts before the offset shifts); `screen.cols` and
+      `screen.rows` are never named; `run App, props:`; `bytes`,
+      `damage` and `cursor` describe the last `frame()` only, and a
+      release's OSC 52 is in `bytes` until the next; `send` coordinates
+      are the terminal's, shifted by the rows `Static` and `print`
+      wrote above; Shift-Tab arrives as `Tab` with `shiftKey`; a text
+      that changes size runs a whole layout (about 0.5 ms at 4,000
+      nodes); the `flexShrink: 0` default beside `overflow`.
+- [ ] Stale comments: `terminal.rip:204` says an unanswered probe is
+      "taken to be the bottom" where the origin is `Infinity` and
+      reports are dropped; `screen.rip`'s progress comment says never
+      off a terminal, and it goes out under `mount`; `test/ink.rip`
+      prints "20 frames differ" where SOURCE.md says 19 and a refusal.
+
 ## 4. Layout cost
 
 - [ ] A boundary is a node whose answers CANNOT differ (PLAN §5). A
@@ -40,13 +134,13 @@ steps are in [PLAN.md](PLAN.md).
       compiled. Warm the bench longer, or make the path smaller.
 - [ ] A `Static` batch lays its container out as a root, and the
       body's next layout puts the container away again by visiting
-      every item under it: a walk as long as the list, per batch. The
-      1,000-append row of the bench (PLAN §11) is unmeasured.
+      every item under it: a walk as long as the list, per batch.
 - [ ] `Static`'s items are elements; a bare text under `Static` is
       never hidden and is painted again with every batch.
-- [ ] `print` and a `Static` item write nothing on the alternate
-      screen, where Ink keeps them for the way out; console capture
-      (PLAN §8) decides what a run there keeps.
+- [ ] A line that ends exactly at a space at the cell width keeps that
+      space at the head of the next line: `Box width: 5` holding
+      `Text "abcde fgh"` draws `"abcde\n fgh"` where Ink draws
+      `"abcde\nfgh"` (PLAN §11).
 
 ## 6. Input and focus
 
@@ -61,11 +155,11 @@ steps are in [PLAN.md](PLAN.md).
       subtrees whole: unmeasured on a tree of 10,000 nodes.
 - [ ] A select list that marks its choice with one binding an item
       (`inverse: n is at`) pays for every item on every arrow key: about
-      55 µs at a hundred items where ten cost 8 (`bun run keys`).
+      42 µs at a hundred items where ten cost 5.5 (`bun run keys`).
 - [ ] After a resize the frame's row is asked of the terminal again
       from what was the top-left; a terminal whose reflow moves the
       cursor off that row places clicks wrongly until the next resize.
-      The alternate screen (step 5) has no such row.
+      The alternate screen has no such row.
 - [ ] A selection is held to the rows the grid shows: in a frame
       taller than the terminal a drag past the top row selects nothing
       above it, and the tree rows scrolled out are not on the clipboard.
@@ -91,3 +185,7 @@ steps are in [PLAN.md](PLAN.md).
 - A spelling for a capture listener in a render block. The package reads
   a type that ends in `Capture` (`@keydownCapture:`), since `@name:` is
   always `addEventListener(name, handler)` with no third argument.
+- A name that is not defined, read as a prop of an element that holds a
+  keyed `for`, surfaces as a reconciler `TypeError` (`anchor.parentNode`,
+  `src/runtime/components.js:590`) with no node named, where the same
+  read on an element without the `for` surfaces as the `ReferenceError`.
