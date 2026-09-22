@@ -10,7 +10,7 @@
 # A frame paints and compares only its damage: the cells some change may
 # have recolored, a span of columns on each row.
 
-import { kids } from './layout.rip'
+import { kids, layout } from './layout.rip'
 import { CLUSTER, glyph, crowded, evict, sanitize, Flow, refresh, MODES, A0, A1, B0, B1, DOTS, ROW } from './text.rip'
 
 # ── Styles ────────────────────────────────────────────────────────────────────
@@ -455,16 +455,20 @@ export class Grid
       @wide.fill 1, at + left, at + right
 
   # The grid as text: one string per row, trailing blanks trimmed.
-  # With `ansi`, each run of a style carries its escape sequence, and a
-  # link is closed on the row it opens on.
+  # With `ansi`, each run of a style carries its escape sequence, a
+  # link is closed on the row it opens on, and the blanks left off a
+  # row's end are those of the default style.
   toString: (ansi = false) ->
     lines = []
     for row in [0...@rows]
       line = ''
       held = 0
       url = null
-      for col in [0...@cols]
-        at = row * @cols + col
+      from = row * @cols
+      stop = @cols
+      stop -= 1 while ansi and stop > 0 and @ch[from + stop - 1] is SPACE and @style[from + stop - 1] is 0 and @wide[from + stop - 1] is 1
+      for col in [0...stop]
+        at = from + col
         continue if @wide[at] is 0
         if ansi and @style[at] isnt held
           line += shift held, @style[at]
@@ -477,6 +481,23 @@ export class Grid
       line += "\x1b[0m" if ansi and records[held].sgr
       lines.push (if ansi then line else line.trimEnd())
     lines.join '\n'
+
+# The one serializer of a painted grid: `renderToString`, a `Static`
+# item and the frame written off a terminal (terminal.rip) all read
+# their rows through it.
+export rowsToString =! (grid, ansi = false) -> grid.toString ansi
+
+# Paint `node` alone, as a root laid out at `cols`, onto a grid of its
+# own, as tall as the node and the margins above and below it: the rows
+# a `Static` batch writes to the scrollback (screen.rip).
+export still =! (node, cols) ->
+  layout node, cols
+  rect = node.rect
+  s = node.styles
+  below = s.marginBottom ?? s.marginY ?? s.margin
+  grid = Grid.new cols, rect.y + rect.h + (if typeof below is 'number' and below > 0 then Math.round below else 0)
+  paint grid, node
+  grid
 
 # The selection (mouse.rip): the cells `from` to `to` in reading order,
 # each counted as row × columns + column of tree cells, shown inverse.

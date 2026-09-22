@@ -82,7 +82,7 @@ unknown =! (key, tag) ->
 
 # A reactive cell, minted on the first read of what it holds — a node's
 # box, whether it has focus — so a node nobody asks carries none.
-watch =! (first) ->
+export watch =! (first) ->
   held := first
   { read: (-> held), write: ((next) -> held = next) }
 
