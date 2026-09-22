@@ -1,0 +1,63 @@
+# A single-line text field. Typing inserts at the cursor, the arrows
+# move it, Home and End jump, Backspace and Delete take out the cluster
+# before it and under it, a paste goes in whole, Enter prints the value
+# above the field and clears it, Escape clears it, Ctrl-C quits. The
+# cursor is the terminal's own, placed by measured cells, so a wide
+# glyph moves it two columns and a letter with its marks one; a value
+# wider than the field is cut at its right edge.
+#
+#   rip examples/input.rip
+
+import { run, print, Box, Text } from 'rip/tui'
+
+clusters =! Intl.Segmenter.new undefined, { granularity: 'grapheme' }
+
+# The text as the clusters a terminal draws: what the cursor steps over
+# and what one Backspace takes out.
+split =! (text) -> Array.from clusters.segment(text), (part) -> part.segment
+
+export Input = component
+  @value := ''
+  at := 0                                   # the cursor, in clusters from the start
+  parts ~= split @value
+  column ~= Bun.stringWidth parts.slice(0, at).join ''
+
+  # Put `text` in at the cursor and leave the cursor after it; a mark
+  # that joins the cluster before it leaves the cursor on that cluster.
+  insert: (text) ->
+    before = parts.slice(0, at).join('') + text
+    @value = before + parts.slice(at).join ''
+    at = split(before).length
+
+  clear: ->
+    @value = ''
+    at = 0
+
+  pressed: (event) ->
+    switch event.key
+      when 'ArrowLeft'  then at = Math.max 0, at - 1
+      when 'ArrowRight' then at = Math.min parts.length, at + 1
+      when 'Home'       then at = 0
+      when 'End'        then at = parts.length
+      when 'Delete'     then @value = parts.toSpliced(at, 1).join ''
+      when 'Escape'     then @clear()
+      when 'Backspace'
+        if at > 0
+          at -= 1
+          @value = parts.toSpliced(at, 1).join ''
+      when 'Enter'
+        print @value if @value
+        @clear()
+      else
+        @insert event.key if Array.from(event.key).length is 1 and not event.ctrlKey and not event.altKey and not event.metaKey
+
+  pasted: (event) -> @insert event.text
+
+  render
+    Box focusable: true, autofocus: true, borderStyle: 'round', paddingX: 1, cursor: { x: 2 + column, y: 1 }, @keydown: @pressed, @paste: @pasted
+      if @value
+        Text wrap: 'truncate', "#{@value}"
+      else
+        Text dimColor: true, "type, then Enter"
+
+run Input if import.meta.main

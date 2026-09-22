@@ -1,0 +1,29 @@
+# Ink's borders example: the seven named border styles, in two rows.
+# Ink's borders.tsx is beside this file; its Box is a row where this
+# package's is a column, so the two rows say so.
+#
+#   rip examples/ink/borders.rip
+
+import { run, Box, Text } from 'rip/tui'
+
+export Borders = component
+  render
+    Box flexDirection: 'column', padding: 2
+      Box flexDirection: 'row'
+        Box borderStyle: 'single', marginRight: 2
+          Text "single"
+        Box borderStyle: 'double', marginRight: 2
+          Text "double"
+        Box borderStyle: 'round', marginRight: 2
+          Text "round"
+        Box borderStyle: 'bold'
+          Text "bold"
+      Box flexDirection: 'row', marginTop: 1
+        Box borderStyle: 'singleDouble', marginRight: 2
+          Text "singleDouble"
+        Box borderStyle: 'doubleSingle', marginRight: 2
+          Text "doubleSingle"
+        Box borderStyle: 'classic'
+          Text "classic"
+
+run Borders if import.meta.main

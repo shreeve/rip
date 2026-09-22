@@ -168,7 +168,9 @@ dispatch stay in `document.rip`, beside the nodes whose links they walk.
 
 Also at the package root: `test.rip`, `demo.rip`, `bench.rip`,
 `bench/` (its own `package.json` quarantining Ink, React, and
-`yoga-layout`), `README.md`.
+`yoga-layout`), `examples/` (`counter`, `files`, `log`, `input`, and
+under `examples/ink/` the four ports of §12 step 6 with Ink's source
+beside each), `README.md`.
 
 ## 4. The host contract (`document.rip`)
 

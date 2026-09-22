@@ -1,0 +1,14 @@
+# Ink's counter example: a number that climbs every 100 ms. Ctrl-C
+# quits. Ink's counter.tsx is beside this file.
+#
+#   rip examples/ink/counter.rip
+
+import { run, clock, Text } from 'rip/tui'
+
+export Counter = component
+  tick = clock 100
+
+  render
+    Text color: 'green', "#{tick.frame} tests passed"
+
+run Counter if import.meta.main
