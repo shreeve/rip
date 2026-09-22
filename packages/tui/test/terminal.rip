@@ -16,14 +16,18 @@
 # ==============================================================================
 
 import { test as pin, eq, ok, throws, plainEnv } from 'rip/testing'
-import { run, quit, suspend, mount, renderToString, screen, Box, Text } from 'rip/tui'
+import { run, quit, suspend, mount, renderToString, print, screen, Box, Text, Static } from 'rip/tui'
+import { Log } from '../examples/log.rip'
 import { Terminal, Stdin, count, differs, tally } from './events/harness.rip'
 import { join } from 'path'
 
 # A test that fails with its app still live would hand its own report
 # to the app's console capture and leave the next test refused: every
-# test ends with a quit, which is nothing when nothing runs.
+# async test ends with a quit, which is nothing when nothing runs. A
+# sync test is run as it is: its body is over before the next begins,
+# and a quit deferred past it would reach that next test's app.
 test =! (name, fn) ->
+  return pin name, fn unless fn.constructor.name is 'AsyncFunction'
   pin name, ->
     try
       fn!
@@ -48,6 +52,7 @@ ENTER =! "#{CSI}?1049h#{CSI}H"                  # the alternate screen, and its 
 LEAVE =! "#{CSI}?1049l"
 BEGIN =! "#{CSI}?2026h"                         # a synchronized update
 END   =! "#{CSI}?2026l"
+CLEARED =! "\x1b]9;4;0\x1b\\"                    # the progress indicator cleared (OSC 9;4)
 
 report =! (bits, x, y, final = 'M') -> "#{CSI}<#{bits};#{x + 1};#{y + 1}#{final}"
 down   =! (x, y) -> report 0, x, y
@@ -425,6 +430,7 @@ for option in ['omitted', 'undefined']
       options.console = undefined if option is 'undefined'
       running = run Hello, options
       console.log 'First log'
+      sleep! 20
       eq term.text, "First log\nHello World"
       quit()
       await running.done
@@ -520,6 +526,17 @@ test! "a teardown is taken once: a quit while suspended withdraws nothing twice,
   sleep! 0
   eq term.sent.length, mark
 
+test! "a frame booked before a quit is drawn by the close, and nothing is drawn after it", ->
+  term = Terminal.new()
+  running = run Echo, stdin: Stdin.new(), stdout: term
+  running.app.label.value = 'last'
+  quit()
+  await running.done
+  ok term.text.endsWith('last'), JSON.stringify term.text
+  mark = term.sent.length
+  sleep! 30
+  eq term.sent.length, mark
+
 test "a teardown after a setup that failed halfway takes the steps that were taken and no other", ->
   before = listeners()
   stdin = Stdin.new()
@@ -536,13 +553,13 @@ test "a teardown after a setup that failed halfway takes the steps that were tak
 console.log "\nSignals"
 
 for [name, code] in [['SIGTERM', 143], ['SIGHUP', 129], ['SIGINT', 130]]
-  test! "#{name} gives the terminal back — the mouse, the modes, the cursor below the frame — and exits #{code}", ->
+  test! "#{name} gives the terminal back — the mouse, the modes, the cursor below the frame, the progress cleared — and exits #{code}", ->
     child = Child.new 'signal'
-    child.seen! END
+    child.seen! "\x1b]9;4;1;50\x1b\\"
     child.signal name
     result = child.finish!
     eq result.code, code
-    ok result.out.endsWith("#{QUIET}#{OFF}\n#{SHOW}"), JSON.stringify result.out.slice -60
+    ok result.out.endsWith("#{QUIET}#{OFF}\n#{SHOW}#{CLEARED}"), JSON.stringify result.out.slice -60
     eq result.err, ''
 
 test! "an uncaught error gives the terminal back, prints the error, and exits 1", ->
@@ -759,6 +776,42 @@ test! "a log under the alternate screen is kept, and replayed once the screen is
     ok term.since(mark).endsWith("#{SHOW}#{LEAVE}one\n"), JSON.stringify term.since mark
     eq [err.sent, term.text, printed], [['two\n', 'three\n'], 'one', []]
 
+Steps =! component
+  @done := []
+  render
+    Box flexDirection: 'column'
+      Static
+        for name in @done
+          Text key: name, "✓ #{name}"
+      Text "live"
+
+test! "a Static item and a print under the alternate screen write nothing, above or in the frame, and the primary screen is as it was", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  term.write 'prompt$ '
+  running = run Steps, stdin: stdin, stdout: term, altScreen: true
+  running.app.done.value = ['one', 'two']
+  print 'aside'
+  running.flush()
+  sleep! 20
+  eq [term.text, term.saved.lines.length], ['live', 1]
+  ok not term.since(0).includes('one') and not term.since(0).includes('aside'), JSON.stringify term.since 0
+  quit()
+  await running.done
+  eq term.text, 'prompt$'
+
+test! "examples/log.rip under the alternate screen: the steps done are nothing, the live line turns, and the screen comes back as it was", ->
+  term = Terminal.new()
+  running = run Log, stdin: Stdin.new(), stdout: term, altScreen: true
+  sleep! 800
+  ok term.text.includes('fetch') and term.text.includes('1/6'), JSON.stringify term.text
+  ok not term.since(0).includes('✓ resolve'), 'the step done was written nowhere'
+  ok term.since(0).includes("\x1b]9;4;1;17\x1b\\"), 'the terminal knows how far along'
+  quit()
+  await running.done
+  eq [term.text, term.modes.has(1049)], ['', false]
+  ok term.since(0).endsWith(CLEARED + LEAVE), JSON.stringify term.since(0).slice -40
+
 test! "altScreen on a stdout that is no terminal is nothing", ->
   pipe = Pipe.new()
   running = run Echo, stdin: Stdin.new(), stdout: pipe, altScreen: true
@@ -784,6 +837,30 @@ test! "on a stdout that is no terminal nothing is asked — no modes, no cursor,
   eq pipe.sent, ['three\n']
   stdin.key 'a'
   eq running.app.keys.value, []
+
+test! "off a terminal a Static item and a print are written as they arrive, and the last frame once at exit", ->
+  pipe = Pipe.new()
+  running = run Steps, stdin: Stdin.new(), stdout: pipe
+  eq pipe.sent, []
+  running.app.done.value = ['one']
+  running.flush()
+  eq pipe.sent, ['✓ one\n']
+  print 'aside'
+  running.app.done.value = ['one', 'two']
+  running.flush()
+  eq pipe.sent, ['✓ one\n', 'aside\n', '✓ two\n']
+  quit()
+  await running.done
+  eq pipe.text, "✓ one\naside\n✓ two\nlive\n"
+
+test! "examples/log.rip off a terminal: the clock never runs, and the first line is written once at exit", ->
+  pipe = Pipe.new()
+  running = run Log, stdin: Stdin.new(), stdout: pipe
+  sleep! 200
+  eq pipe.sent, []
+  quit()
+  await running.done
+  eq pipe.text, "⠋ resolve [░░░░░░░░░░░░] 0/6\n"
 
 test! "CI set makes a terminal stdout the same, and CI=false does not", ->
   process.env.CI = '1'
@@ -926,7 +1003,7 @@ Field =! component
     Box focusable: true, autofocus: true, cursor: { x: 1, y: 0 }
       Text "field"
 
-test! "a log during a run clears the frame, writes the line as it was, and draws the frame again below it, the cursor parked where it was", ->
+test! "a log during a run clears the frame, writes the line as it was, and draws the frame again below it, the cursor parked where it was — one write, with the frame the line books", ->
   recorded! (printed) ->
     stdin = Stdin.new()
     term = Terminal.new()
@@ -934,12 +1011,16 @@ test! "a log during a run clears the frame, writes the line as it was, and draws
     eq term.cursor, { x: 1, y: 0 }
     mark = term.sent.length
     console.log 'hello', 42
+    eq term.sent.length, mark, 'nothing goes out until the frame'
+    sleep! 20
     out = term.since mark
-    ok out.startsWith("#{HIDE}\r#{CSI}Jhello 42\n#{BEGIN}#{CSI}J"), JSON.stringify out
+    eq term.sent.length, mark + 1, 'the clear, the line and the frame are one write'
+    ok out.startsWith("#{BEGIN}#{HIDE}\r#{CSI}Jhello 42\n#{CSI}J"), JSON.stringify out
     ok out.endsWith("#{CSI}2G#{SHOW}#{END}"), JSON.stringify out
     eq [term.text, term.cursor, printed], ["hello 42\nfield", { x: 1, y: 1 }, []]
     console.info 'two'
     console.debug 'three'
+    running.flush()
     eq term.text, "hello 42\ntwo\nthree\nfield"
     quit()
     await running.done
@@ -952,8 +1033,9 @@ test! "warn and error go to stderr, the frame cleared for them and drawn again",
     mark = term.sent.length
     console.error 'bad', { n: 1 }
     console.warn 'worse'
-    eq err.sent, ['bad { n: 1 }\n', 'worse\n']
-    ok term.since(mark).startsWith("#{CSI}J#{BEGIN}#{CSI}J"), JSON.stringify term.since mark
+    eq [err.sent, term.since(mark)], [['bad { n: 1 }\n', 'worse\n'], "#{CSI}J#{CSI}J"], 'the clear goes out at once, the line to stderr'
+    running.flush()
+    ok term.since(mark).startsWith("#{CSI}J#{CSI}J#{BEGIN}#{CSI}J"), JSON.stringify term.since mark
     eq [term.text, printed], ['x', []]
     quit()
     await running.done
@@ -984,14 +1066,19 @@ test! "console: false leaves the console alone", ->
     quit()
     await running.done
 
-test! "with the mouse on, a log asks where the frame went", ->
+test! "with the mouse on, the frame's row moves down by the lines a log writes, with no probe: a click lands where the frame is now", ->
   recorded! (printed) ->
+    stdin = Stdin.new()
     term = Terminal.new()
-    running = run Echo, stdin: Stdin.new(), stdout: term, mouse: true
+    running = run Ways, stdin: stdin, stdout: term, mouse: true
+    stdin.key "#{CSI}?4;1R"
+    console.log "two\nlines"
+    running.flush()
     eq term.queries, ['cursor']
-    console.log 'scrolls'
-    ok term.since(0).endsWith(PROBE), JSON.stringify term.since(0).slice -30
-    eq term.queries, ['cursor', 'cursor']
+    stdin.key down(0, 5) + up(0, 5)
+    eq running.app.heard.value, ['click']
+    stdin.key down(0, 3) + up(0, 3)
+    eq running.app.heard.value, ['click'], 'the row the frame was on is nothing now'
     quit()
     await running.done
 
@@ -1071,7 +1158,7 @@ test! "random keys, resizes, logs and suspends, then a random way out: the termi
             console.log "log #{n}"
             logged.push "log #{n}"
             unless alt
-              sleep! 10
+              running.flush()
               ok term.text.includes("log #{n}") and term.text.endsWith('f'), "#{name}: after a log the screen shows #{JSON.stringify term.text}"
           when 'suspend'
             suspends += 1

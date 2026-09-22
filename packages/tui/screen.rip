@@ -51,7 +51,8 @@ export class Screen
     @owed = 0        # the cells the last frame owed
     @parked = null   # where the cursor is shown, `{ x, y }` on the grid, or null while it is hidden
     @origin = 0      # the terminal row the frame's top-left is on: what the cursor probe answers, and lower once a frame scrolls the terminal
-    @alt = false     # the alternate screen: the frame's top-left is the screen's, and `leave` moves nowhere
+    @alt = false     # the alternate screen: the frame's top-left is the screen's, nothing is written above, and `leave` moves nowhere
+    @interactive = true   # whether frames go to a terminal someone is watching (terminal.rip); off one, frames are kept and only text is written
     @selection = { from: -1, to: -1 }   # the selected cells (mouse.rip), none while `from` is under zero
     @after = null    # run after every frame: the pointer looks again at what is under it
     @statics = []          # the `Static` containers mounted (tui.rip), in the order they arrived
@@ -65,19 +66,20 @@ export class Screen
   get cols: -> @out.columns ?? 80
   get rows: -> @out.rows ?? 24
 
-  # Write `text` above the live frame — a `Static` batch, a `print` line
-  # — in the frame's own write: the frame's rows are cleared, the text
-  # is written where they were, and the frame is drawn again below it,
-  # whole. Console capture (terminal.rip) takes this road for a
-  # console.log line during a run. With `err`, the clear goes out at
-  # once and the text to `err`, and the frame follows on the next
-  # write. Off a terminal the text goes as it is; on the alternate
-  # screen nothing is written above.
+  # Write `text` above the live frame — a `Static` batch, a `print` line,
+  # a console line (terminal.rip) — in the frame's own write: the
+  # frame's rows are cleared, the text is written where they were, and
+  # the frame is drawn again below it, whole, all in the next frame's
+  # write, which the text books. With `err`, the clear goes out at once
+  # and the text to `err`, and the frame follows on the next write. The
+  # frame's row moves down by the lines written. Off a terminal the
+  # text goes as it is; on the alternate screen nothing is written
+  # above.
   above!: (text, err = null) ->
     return unless text
     @still() unless @batching   # what `Static` holds goes first
     @scrollback += text
-    if @interactive is false
+    unless @interactive
       (err ?? @out).write text
       return
     return if @alt
@@ -109,7 +111,7 @@ export class Screen
           if @written.has kid then (kid.set 'display', 'none' if kid.styles.display isnt 'none') else fresh.push kid
         continue unless fresh.length and showing el, @doc.body
         grid = still el, @cols
-        @above rowsToString(grid, @interactive isnt false) + '\n' if grid.rows
+        @above rowsToString(grid, @interactive) + '\n' if grid.rows
         @written.add kid for kid in fresh
     finally
       @batching = false
@@ -124,7 +126,7 @@ export class Screen
     else if value is 'indeterminate' then '3'
     else if typeof value is 'number' and value >= 0 and value <= 1 then "1;#{Math.round value * 100}"
     else throw Error.new "rip/tui: progress: #{JSON.stringify value} is not a number from 0 to 1, 'error', 'indeterminate' or null"
-    return if @interactive is false or (state is '0' and not @reported)
+    return if not @interactive or (state is '0' and not @reported)
     @reported = state isnt '0'
     @osc = "\x1b]9;4;#{state}\x1b\\"
     @doc.owe false
@@ -168,6 +170,7 @@ export class Screen
     @front = back if damage.whole
     damage.shape @front, false
     @after?()
+    return unless @interactive
     spot = @place()
     return unless bytes or @lead or @osc or spot?.x isnt @parked?.x or spot?.y isnt @parked?.y
     bytes = @lead + @unpark() + bytes
@@ -224,8 +227,10 @@ export class Screen
     if wait > 0 then setTimeout (=> @drawBooked()), wait else queueMicrotask (=> @drawBooked())
 
   # A booked frame has no caller to throw to, so its failure goes to
-  # whoever runs the app.
+  # whoever runs the app. One drawn by hand meanwhile, or a close, has
+  # taken the booking.
   drawBooked!: ->
+    return unless @booked
     try
       @frame()
     catch error

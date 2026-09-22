@@ -5,7 +5,7 @@
 # this reads every byte, and on the harness's stdin. The argument is
 # the way out; `pipe` and `ci` run on the process's stdout as it is.
 
-import { run, quit, Box, Text } from 'rip/tui'
+import { run, quit, screen, Box, Text } from 'rip/tui'
 import { Stdin } from '../events/harness.rip'
 
 way = process.argv[2]
@@ -38,4 +38,6 @@ switch way
       quit()
     , 30
   when 'drain' then null
-  else setInterval (->), 1000
+  else
+    screen.progress 0.5
+    setInterval (->), 1000

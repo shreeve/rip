@@ -74,11 +74,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 7. The terminal
 
-- [ ] The last frame written on a stdout that is no terminal is the
-      grid's own text: clipped to the stream's `rows` (24 when it says
-      nothing), and at a forced depth padded to its width, since a row
-      with a background cannot be trimmed blind. `rowsToString` (PLAN
-      §6) is the serializer it should share with `Static`.
 - [ ] A log while the console is captured is written to the run's
       stdout, as Ink writes it, even when that is a stream of the
       caller's own: a test whose app is still live when it fails hands

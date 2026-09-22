@@ -131,17 +131,17 @@ write by hand; hot loops use the indexed `for x, i in` form).
 
 | Module | Job | Code lines |
 |---|---|---|
-| `tui.rip` | Entry: `run`, `mount` and its input, `renderToString`, `suspend`, `screen`, `focus`, widgets, `print`, `clock`; the delivery of events, the default actions | 309 |
+| `tui.rip` | Entry: `run`, `mount` and its input, `renderToString`, `suspend`, `screen`, `focus`, widgets, `print`, `clock`; the delivery of events, the default actions | 310 |
 | `document.rip` | Terminal document: nodes, tree links, the event and its dispatch, style road, keyboard traits, damage marks | 388 |
 | `focus.rip` | Who can hold focus, tree order, taking it, settling it | 62 |
 | `layout.rip` | Flexbox, containing blocks, baseline, cache, edge rounding | 1,466 |
 | `text.rip` | Sanitize, grapheme clusters, width, wrap, truncate | 421 |
 | `paint.rip` | Cell grids, styles at the terminal's depth, clip, borders, backgrounds, the selection overlay, damage, diff, a subtree painted once | 694 |
-| `screen.rip` | Frames, pacing, the cursor, where the frame sits, the write above the frame (`Static`, `print`, the console), progress, the alternate screen | 165 |
+| `screen.rip` | Frames, pacing, the cursor, where the frame sits, the write above the frame (`Static`, `print`, the console), progress, the alternate screen | 173 |
 | `input.rip` | Key tokenizer and decoder, paste, mouse, replies | 315 |
 | `mouse.rip` | Hit test, the mouse events, hover, selection and the clipboard | 211 |
-| `terminal.rip` | Setup / teardown: raw mode, the modes, the probes, the cursor, the alternate screen, the signals, suspend and resume, the console, the depth read | 192 |
-| | **Total** | **4,071 built; about 4,250 complete** |
+| `terminal.rip` | Setup / teardown: raw mode, the modes, the probes, the cursor, the alternate screen, the signals, suspend and resume, the console, the depth read | 181 |
+| | **Total** | **4,222 built; about 4,250 complete** |
 
 Lines are counted as §2 counts them: non-blank and non-comment. Events,
 focus, the cursor and stdin are 285 of them (85 in `tui.rip`, 99 in
@@ -1007,10 +1007,12 @@ A suspend leaves it and a resume enters it again.
 
 **Non-TTY and CI.** When stdout is no terminal, or `CI` is set to
 anything but `''`, `'0'` or `'false'`, `screen.interactive` reads
-false: no modes, no cursor bytes, no probe, no raw mode even on a
-stdin that is a terminal; frames are laid out and kept, and the last
-is written once at exit, as text — with its escapes when a depth is
-forced. `altScreen` and the console capture are nothing there.
+false (`Screen.interactive`): no modes, no cursor bytes, no probe, no
+raw mode even on a stdin that is a terminal; frames are laid out and
+kept, a `Static` item and a `print` are written as they arrive, and
+the last frame is written once at exit through `rowsToString` — with
+its escapes when a depth is forced. `altScreen` and the console
+capture are nothing there.
 
 **Colors.** The depth is read once at `run` and exposed as
 `screen.colors` (0, 16, 256 or 16777216): `NO_COLOR` set is none;
@@ -1025,13 +1027,17 @@ at full intensity; at none, no style sends anything. `mount` and
 
 **Console.** `console.log` bypasses `process.stdout.write`, so while
 an app runs on a terminal the five methods are replaced and given
-back at teardown. Inline, a line clears the frame from its top-left,
-writes the line to the stream it always went to, and draws the frame
-again below it, so logs scroll into the scrollback above the app — and
-with the mouse on, the frame's row is asked again; on the alternate
+back at teardown. A line takes the road a `Static` item takes
+(`Screen.above`, §6): inline, the frame is cleared from its top-left,
+the line written to the stream it always went to, and the frame drawn
+again below it, all in the next frame's write, which the line books —
+so logs scroll into the scrollback above the app, and the frame's row
+moves down by the lines written, with no probe; a line for stderr has
+its clear written at once and the frame follows. On the alternate
 screen lines are kept and replayed once the screen is left; a log
 while suspended, or with the app closed, is the console's own. `run
-App, console: false` leaves the console alone.
+App, console: false` leaves the console alone. The progress indicator
+(§9) is cleared on every way out, after the last frame.
 
 ## 9. Public surface
 

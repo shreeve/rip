@@ -8,7 +8,7 @@
 # life: there is no share of raw mode to count (PLAN §8).
 
 import { format } from 'node:util'
-import { diff } from './paint.rip'
+import { rowsToString } from './paint.rip'
 
 HIDE     =! "\x1b[?25l"
 SHOW     =! "\x1b[?25h"
@@ -49,9 +49,12 @@ export depth =! (out) ->
   return 2 if /256color/i.test env.TERM ?? ''
   1
 
+# Whether the app is on a terminal someone is watching: what `run`
+# read of its stdout, on the screen (`Screen.interactive`).
+watched =! (held) -> held.terminal and held.view.interactive
+
 # A stream that keeps nothing: where frames go while the terminal is
-# another's, or is no terminal, so the screen sees the size and writes
-# nothing.
+# another's, so the screen sees the size and writes nothing.
 export class Quiet
   constructor: (@out) ->
   get columns: -> @out.columns
@@ -68,8 +71,8 @@ export class Quiet
 export setup! =! (held) ->
   return if held.up
   held.up = true
-  { out, stdin } = held
-  if held.tty
+  { out, stdin, view } = held
+  if watched held
     out.write HIDE
     if stdin?.isTTY and typeof stdin.setRawMode is 'function'
       stdin.setRawMode true
@@ -79,7 +82,7 @@ export setup! =! (held) ->
       stdin.on 'data', held.read
       held.pushed = held.enhanced
       out.write ASK + (if held.mouse then track(held.mouse, true) else '') + (if held.pushed then PUSH else '')
-    if held.alt
+    if view.alt
       out.write ENTER
       held.entered = true
     capture held if held.console
@@ -90,11 +93,12 @@ export setup! =! (held) ->
 # flag popped if it was pushed; the mouse, paste and focus modes
 # withdrawn; the last frame drawn and left in the scrollback with the
 # cursor shown below it (`drawn`), or the cursor shown where it is; the
-# alternate screen left; the parser flushed; stdin cooked, paused and
-# let go; the handlers off the process; the console given back and the
-# lines it kept replayed. On a stdout that is no terminal, `drawn`
-# writes the last frame once, as text. Answers the first error a step
-# raised, or null.
+# progress indicator cleared if one was reported; the alternate screen
+# left; the parser flushed; stdin cooked, paused and let go; the
+# handlers off the process; the console given back and the lines it
+# kept replayed. On a stdout nobody is watching, `drawn` writes the
+# last frame once, as text. Answers the first error a step raised, or
+# null.
 down =! (held, drawn) ->
   return null unless held.up
   held.up = false
@@ -105,12 +109,13 @@ down =! (held, drawn) ->
     catch caught
       error ?= caught
   { out, stdin, view } = held
-  if held.tty
+  if watched held
     step -> held.pointer?.clear()
     if held.raw
       step -> out.write (if held.pushed then POP else '') + (if held.mouse then track(held.mouse, false) else '') + WITHDRAW
       held.pushed = false
     step -> if drawn then view.leave() else out.write view.unpark() + SHOW
+    step -> out.write osc if osc = view.clearProgress()
     if held.entered
       held.entered = false
       step -> out.write LEAVE
@@ -122,8 +127,8 @@ down =! (held, drawn) ->
       step -> stdin.pause()
       step -> stdin.unref?()
   else if drawn
-    step -> view.leave()
-    step -> out.write view.front.toString(held.depth > 0) + '\n' if view.front
+    step -> view.frame() if view.doc.stale
+    step -> out.write rowsToString(view.front, held.depth > 0) + '\n' if view.front
   process.off name, fn for name, fn of held.handlers
   step -> release held
   error
@@ -181,7 +186,7 @@ export ask! =! (held) ->
 # answers, until one of the two has decided it.
 export probe! =! (held) ->
   return unless held.raw
-  ask held if held.mouse and not held.alt
+  ask held if held.mouse and not held.view.alt
   held.out.write QUERY if held.probing
 
 # The terminal's answers. The cursor's row — an answer to the package's
@@ -216,7 +221,7 @@ export reply =! (held, event) ->
 # change books one as ever, and the resume draws whole.
 pause! =! (held) ->
   held.suspended = true
-  held.view.out = Quiet.new held.out if held.tty
+  held.view.out = Quiet.new held.out if watched held
 
 # Take the terminal again — unless the app was closed meanwhile — ask
 # the questions again, forget the press whose release was never seen
@@ -227,7 +232,7 @@ resume! =! (held) ->
   process.off 'SIGCONT', held.wake if held.wake
   held.wake = null
   return if held.over
-  held.view.out = held.out if held.tty
+  held.view.out = held.out
   setup held
   probe held
   held.pointer?.reset()
@@ -241,7 +246,7 @@ resume! =! (held) ->
 # and nothing changes hands. Refused while one is under way.
 export handover =! (held, fn) ->
   throw Error.new 'rip/tui: the terminal is already suspended — resume before suspending again' if held.suspended
-  if held.tty and (error = down held, true)
+  if watched(held) and (error = down held, true)
     setup held
     throw error
   pause held
@@ -254,7 +259,7 @@ export handover =! (held, fn) ->
 # have, and take the terminal again on SIGCONT. Nothing on a stdout
 # that is no terminal, on Windows, or while a hand-over is under way.
 export stop! =! (held) ->
-  return unless held.tty and process.platform isnt 'win32' and not held.suspended
+  return unless watched(held) and process.platform isnt 'win32' and not held.suspended
   down held, true
   pause held
   held.wake = -> resume held
@@ -268,9 +273,10 @@ LEVELS =! { log: 'out', info: 'out', debug: 'out', warn: 'err', error: 'err' }
 # The console's methods bypass `process.stdout.write`, so they are
 # replaced for the run and given back at teardown, when a suspend
 # hands the terminal over as well. A line goes to the stream it always
-# went to: inline, the frame is cleared first and drawn again below the
-# line, so it scrolls into the scrollback above the app; on the
-# alternate screen it is kept, and replayed once the screen is left.
+# went to, by the road a `Static` item takes (`Screen.above`): inline,
+# the frame is cleared first and drawn again below the line, so it
+# scrolls into the scrollback above the app; on the alternate screen it
+# is kept, and replayed once the screen is left.
 capture! =! (held) ->
   held.was = {}
   for name, stream of LEVELS
@@ -285,23 +291,8 @@ release! =! (held) ->
   held.logs = []
 
 relay! =! (held, stream, text) ->
-  if held.alt
+  view = held.view
+  if view.alt
     held.logs.push [stream, text]
     return
-  view = held.view
-  spot = view.parked
-  held.out.write view.unpark() + "\x1b[J"
-  stream.write text
-  # With no frame to draw again, a whole one is booked: it lands below.
-  front = view.front
-  return unless front
-  front.lo.fill 0
-  front.hi.fill front.cols
-  bytes = diff null, front
-  view.parked = spot
-  if spot
-    bytes += "\x1b[#{spot.y}B" if spot.y
-    bytes += "\x1b[#{spot.x + 1}G" + SHOW
-  held.out.write "\x1b[?2026h#{bytes}\x1b[?2026l"
-  # The line scrolled the terminal: where the frame sits is asked again.
-  ask held if held.mouse and held.raw
+  view.above text, (if stream is held.out then null else stream)

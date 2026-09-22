@@ -10,7 +10,7 @@ import { Parser } from './input.rip'
 import { Screen } from './screen.rip'
 import { Pointer } from './mouse.rip'
 import { palette } from './paint.rip'
-import { Quiet, setup, probe, reply, teardown, handover, stop as halt, ask, interactive as watched, depth as depthOf } from './terminal.rip'
+import { setup, probe, reply, teardown, handover, stop as halt, ask, interactive as watched, depth as depthOf } from './terminal.rip'
 
 # ── Widgets ───────────────────────────────────────────────────────────────────
 # A box is a div and text is a span. Every prop a widget does not
@@ -67,7 +67,7 @@ export print =! (text, err = null) ->
   text += '\n' unless text.endsWith '\n'
   return (err ?? process.stdout).write text unless live
   live.view.above text, err
-print.err = (text) -> print text, live?.out.err ?? process.stderr
+print.err = (text) -> print text, live?.err ?? process.stderr
 
 # ── Animation ─────────────────────────────────────────────────────────────────
 
@@ -276,17 +276,17 @@ open =! (App, options, out, terminal, stdin = null, clock = undefined) ->
   keys = options.keyboard ?? 'basic'
   throw Error.new "rip/tui: keyboard: #{JSON.stringify keys} is not 'basic' or 'enhanced'" unless keys is 'basic' or keys is 'enhanced'
   { doc, restore } = install()
-  tty = terminal and watched out
-  view = Screen.new doc, (if terminal and not tty then Quiet.new out else out)
+  view = Screen.new doc, out
   view.whole = options.damage is false
-  view.alt = tty and options.altScreen is true
+  view.interactive = not terminal or watched out
+  view.alt = terminal and view.interactive and options.altScreen is true
   # On a terminal the frame sits wherever the cursor was, which the
   # probe answers; until then, and where nothing answers, at the bottom.
   # The alternate screen's is its top.
   view.origin = if terminal and not view.alt then Infinity else 0
   cols = view.cols
   rows = view.rows
-  interactive = not terminal or tty
+  interactive = view.interactive
   depth = if terminal then depthOf out else 3
   colors = DEPTHS[depth]
   palette depth
@@ -302,12 +302,12 @@ open =! (App, options, out, terminal, stdin = null, clock = undefined) ->
   resized = ->
     return if view.cols is cols and view.rows is rows
     refresh()
-    ask held if held.mouse and held.raw and not held.alt
+    ask held if held.mouse and held.raw and not view.alt
   settled = {}
   done = Promise.new (resolve, reject) ->
     settled.resolve = resolve
     settled.reject = reject
-  live = held = { app: null, view, out, err: options.stderr ?? process.stderr, doc, restore, resized, redraw: refresh, done, settled, terminal, tty, alt: view.alt, depth, console: options.console isnt false, closing: false, over: false, parser: null, stdin, read: null, clock, mouse, pointer: null, probing: keys is 'enhanced', asked: false, enhanced: false, pushed: false, raw: false, up: false, entered: false, suspended: false, wake: null, handlers: null, was: null, logs: [], close: (drawn) -> close drawn if live is held }
+  live = held = { app: null, view, out, err: options.stderr ?? out.err ?? process.stderr, doc, restore, resized, redraw: refresh, done, settled, terminal, depth, console: options.console isnt false, closing: false, over: false, parser: null, stdin, read: null, clock, mouse, pointer: null, probing: keys is 'enhanced', asked: false, enhanced: false, pushed: false, raw: false, up: false, entered: false, suspended: false, wake: null, handlers: null, was: null, logs: [], close: (drawn) -> close drawn if live is held }
   held.parser = Parser.new { clock, late: (events) -> receive held, events }
   held.read = (chunk) -> receive held, held.parser.feed chunk
   if mouse
@@ -429,6 +429,7 @@ close =! (drawn, error = null, result = undefined) ->
   held.over = true
   keyboard = 'basic'
   doc.onOwe = null
+  view.booked = false
   step = (work) ->
     try
       work()
