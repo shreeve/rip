@@ -17830,12 +17830,37 @@ ${this.replayPad}}` : " }");
       line(() => this.b.emit(`{ const ${kidV} = ${instVar}._beginProjection(${self()}); try {`));
       const outerHost = this.projectionHost;
       this.projectionHost = instVar;
+      const from = rec.setups.length;
       let childrenVar;
       try {
         childrenVar = projection();
       } finally {
         this.projectionHost = outerHost;
       }
+      const guard = (setups) => ({
+        kind: "raw",
+        node: null,
+        fn: (pad) => {
+          this.b.emit(`${pad}if (${instVar}) {
+`);
+          this.replaySetups({ setups }, `${pad}  `);
+          this.b.emit(`${pad}}
+`);
+        }
+      });
+      let run = [];
+      for (const s of rec.setups.splice(from)) {
+        if (s.latch !== true) {
+          run.push(s);
+          continue;
+        }
+        if (run.length > 0)
+          rec.setups.push(guard(run));
+        run = [];
+        rec.setups.push(s);
+      }
+      if (run.length > 0)
+        rec.setups.push(guard(run));
       line(() => this.b.emit(`} finally { ${instVar}._endProjection(${kidV}); } }`));
       line(() => this.b.emit(`${instVar}._setChildren(${childrenVar});`));
     }
@@ -17907,6 +17932,7 @@ ${this.replayPad}}` : " }");
     }
     rec.setups.push({
       kind: "raw",
+      latch: true,
       fn: (pad) => {
         this.b.emit(pad);
         const emitLatch = () => {
@@ -26271,6 +26297,9 @@ function __lis(arr) {
   return result;
 }
 function __reconcile(anchor, state, items, ctx, factory, keyFn, ...outer) {
+  if (anchor == null) {
+    throw new Error("__reconcile: no anchor — the list's create phase never placed one");
+  }
   const parent = anchor.parentNode;
   if (!parent)
     return;

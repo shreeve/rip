@@ -12104,8 +12104,33 @@ class Emitter {
       line(() => this.b.emit(`{ const ${kidV} = ${instVar}._beginProjection(${self()}); try {`));
       const outerHost = this.projectionHost;
       this.projectionHost = instVar;
+      const from = rec.setups.length;
       let childrenVar;
       try { childrenVar = projection(); } finally { this.projectionHost = outerHost; }
+      // The projection's setups — its lists, its branches, its text
+      // bindings — run only while the child stands: a child whose
+      // construction failed is null at its construct site, and the
+      // nodes and anchors those setups drive may never have been made.
+      // Their error would mask the child's own. A projected child's
+      // latch is the exception, in its place: it guards itself, and a
+      // child the projection made must leave `mounting` to unmount.
+      const guard = (setups) => ({
+        kind: 'raw',
+        node: null,
+        fn: (pad) => {
+          this.b.emit(`${pad}if (${instVar}) {\n`);
+          this.replaySetups({ setups }, `${pad}  `);
+          this.b.emit(`${pad}}\n`);
+        },
+      });
+      let run = [];
+      for (const s of rec.setups.splice(from)) {
+        if (s.latch !== true) { run.push(s); continue; }
+        if (run.length > 0) rec.setups.push(guard(run));
+        run = [];
+        rec.setups.push(s);
+      }
+      if (run.length > 0) rec.setups.push(guard(run));
       line(() => this.b.emit(`} finally { ${instVar}._endProjection(${kidV}); } }`));
       line(() => this.b.emit(`${instVar}._setChildren(${childrenVar});`));
     }
@@ -12191,6 +12216,7 @@ class Emitter {
     // the placeholder rather than the detached failed root. ──
     rec.setups.push({
       kind: 'raw',
+      latch: true,
       fn: (pad) => {
         this.b.emit(pad);
         const emitLatch = () => {

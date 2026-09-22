@@ -260,6 +260,23 @@ test "a child that fails to construct fails the mount, through the runtime's rep
     console.error = held
   eq printed, []
 
+test "a child that fails to construct while holding a keyed for fails the mount with its own error", ->
+  Listed = component
+    @items := ['a']
+    render
+      Box flexDirection: 'column'
+        Box contentOffsetY: nosuchname
+          for item, n in @items
+            Text key: n, "#{item}"
+  held = console.error
+  printed = []
+  console.error = (label) -> printed.push label
+  try
+    throws (-> renderToString Listed), ReferenceError, 'nosuchname is not defined'
+  finally
+    console.error = held
+  eq printed, []
+
 test "restore hands the runtime its own reporter back", ->
   renderToString (component
     render

@@ -77,7 +77,3 @@ steps are in [PLAN.md](PLAN.md).
 - A spelling for a capture listener in a render block. The package reads
   a type that ends in `Capture` (`@keydownCapture:`), since `@name:` is
   always `addEventListener(name, handler)` with no third argument.
-- A name that is not defined, read as a prop of an element that holds a
-  keyed `for`, surfaces as a reconciler `TypeError` (`anchor.parentNode`,
-  `src/runtime/components.js:590`) with no node named, where the same
-  read on an element without the `for` surfaces as the `ReferenceError`.
