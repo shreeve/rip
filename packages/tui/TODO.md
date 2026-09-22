@@ -4,11 +4,6 @@ Open work only, in the order it should be done. Delete a line when it
 lands or moves into docs/tests. The design and the order of the larger
 steps are in [PLAN.md](PLAN.md).
 
-## 1. The closing audit — code
-
-- [ ] `Mount.held` is a public API with no doc: tests set
-      `view.held.view.alt` fourteen times.
-
 ## 2. The closing audit — docs
 
 - [ ] `bun run bench` refuses without a Yoga checkout at the

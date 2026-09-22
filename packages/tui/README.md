@@ -418,7 +418,8 @@ view.focused                # the node that has focus, or null
 view.cursor                 # where the last frame parked the cursor, { x, y }, or null while hidden
 view.scrollback             # what `Static` and `print` wrote above the frame so far, as it was written
 view.stderr                 # what `print.err` wrote
-view.close()                # unmount, and give the process its `document` slot back
+view.held                   # the mount's record, for a test that reaches past the driver: `doc`, `out`, `parser`, `clock`, and `view`, the Screen (`alt`, `interactive`, `origin`)
+view.close()                # unmount, and give the process its `document` slot back; a closed mount refuses to draw or be driven, by name
 ```
 
 Input takes the road `run` reads stdin by — the same dispatch, the same
