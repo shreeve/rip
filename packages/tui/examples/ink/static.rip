@@ -1,0 +1,25 @@
+# Ink's static example: a test finishes every 100 ms, ten in all, and
+# each scrolls into the scrollback above a live count. Ink's static.tsx
+# is beside this file; its process ends when its last timer has run,
+# and this one quits then, since `run` holds the terminal until it does.
+#
+#   rip examples/ink/static.rip
+
+import { run, quit, clock, Box, Text, Static } from 'rip/tui'
+
+export Example = component
+  tick = clock 100
+  tests ~= ({ id: n, title: "Test \##{n + 1}" } for n in [0...Math.min(tick.frame, 10)])
+
+  ~> quit() if tests.length is 10
+
+  render
+    Box flexDirection: 'column'
+      Static
+        for test in tests
+          Box key: test.id
+            Text color: 'green', "✔ #{test.title}"
+      Box marginTop: 1
+        Text dimColor: true, "Completed tests: #{tests.length}"
+
+run Example if import.meta.main

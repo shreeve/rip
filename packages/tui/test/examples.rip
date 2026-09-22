@@ -1,0 +1,190 @@
+# The examples, run headless through `mount`: the four ported from Ink
+# under examples/ink/, each held to the frames Ink 7.1.1 draws for its
+# own example (bench/ holds that Ink; the frames here were read from
+# it through a stdout of the test's own, at 100 columns, as Ink's test
+# helper draws — every frame is Ink's, none differs), and the text
+# field of examples/input.rip, its frame and its cursor after every
+# key.
+#
+#   rip test/examples.rip
+
+import { test, eq, ok } from 'rip/testing'
+import { mount } from 'rip/tui'
+import * as cells from './ink/cells.rip'
+import { table } from './lines.rip'
+import { Counter } from '../examples/ink/counter.rip'
+import { Borders } from '../examples/ink/borders.rip'
+import { Focus } from '../examples/ink/use-focus.rip'
+import { Example as Tests } from '../examples/ink/static.rip'
+import { Input } from '../examples/input.rip'
+
+mounted =! (App, options, body) ->
+  view = mount App, { cols: 100, ...options }
+  try
+    body view
+  finally
+    view.close()
+
+# Text with its escape sequences taken out.
+bare =! (text) -> text.replace /\x1b\[[0-9;]*m/g, ''
+
+console.log "\nInk's examples"
+
+test "counter: the count climbs every 100 ms, as Ink's does", ->
+  mounted Counter, {}, (view) ->
+    eq view.frame(), '0 tests passed'
+    eq cells.styled(view.ansi), ['«green»0«» «green»tests«» «green»passed']
+    view.tick 100
+    eq view.frame(), '1 tests passed'
+    view.tick 250
+    eq view.frame(), '3 tests passed'
+    eq view.damage, 14, 'a text of unchanged size owes its own words and no more'
+
+test "borders: the seven named styles in two rows, as Ink draws them", ->
+  mounted Borders, {}, (view) ->
+    eq view.frame(), [
+      ''
+      ''
+      '  ┌──────┐  ╔══════╗  ╭─────╮  ┏━━━━┓'
+      '  │single│  ║double║  │round│  ┃bold┃'
+      '  └──────┘  ╚══════╝  ╰─────╯  ┗━━━━┛'
+      ''
+      '  ╓────────────╖  ╒════════════╕  +-------+'
+      '  ║singleDouble║  │doubleSingle│  |classic|'
+      '  ╙────────────╜  ╘════════════╛  +-------+'
+      ''
+      ''
+    ].join '\n'
+
+test "use-focus: Tab and Shift-Tab move focus between the items, Escape lets it go, and the focused one says so in green", ->
+  mounted Focus, {}, (view) ->
+    lead = "\n Press Tab to focus next element, Shift+Tab to focus previous element, Esc to reset focus.\n\n"
+    rows = (first, second, third) -> lead + " First#{first}\n Second#{second}\n Third#{third}\n"
+    eq view.frame(), rows('', '', '')
+    eq view.focused, null
+    view.press 'Tab'
+    eq view.frame(), rows(' (focused)', '', '')
+    eq cells.styled(view.ansi)[3], ' First «green»(focused)'
+    ok view.focused, 'an item holds focus'
+    view.press 'Tab'
+    eq view.frame(), rows('', ' (focused)', '')
+    view.press 'Tab', shift: true
+    eq view.frame(), rows(' (focused)', '', '')
+    view.press 'Escape'
+    eq view.frame(), rows('', '', '')
+    eq view.focused, null
+    view.press 'Tab'
+    eq view.frame(), rows(' (focused)', '', ''), 'after Escape, Tab starts from the top'
+    view.press 'Tab'
+    view.press 'Tab'
+    view.press 'Tab'
+    eq view.frame(), rows(' (focused)', '', ''), 'Tab past the last item wraps to the first'
+
+test! "static: a test finishes every 100 ms into the scrollback above the live count, and the app ends with the tenth", ->
+  view = mount Tests, cols: 100
+  try
+    eq view.frame(), "\nCompleted tests: 0"
+    eq view.scrollback, ''
+    view.tick 100
+    eq view.frame(), "\nCompleted tests: 1"
+    eq bare(view.scrollback), "✔ Test #1\n"
+    eq cells.styled(view.scrollback), ['«green»✔«» «green»Test«» «green»#1', '']
+    view.tick 800
+    eq view.frame(), "\nCompleted tests: 9"
+    eq cells.styled(view.ansi), ['', '«dim»Completed«» «dim»tests:«» «dim»9']
+    eq bare(view.scrollback), ("✔ Test ##{n}\n" for n in [1..9]).join ''
+    view.tick 100
+    eq view.frame(), "\nCompleted tests: 10"
+    eq bare(view.scrollback), ("✔ Test ##{n}\n" for n in [1..10]).join ''
+    eq await view.done, undefined
+    eq typeof document, 'undefined', 'the app quit with the tenth test'
+  finally
+    view.close()
+
+test "the README's line table is what test/lines.rip counts", ->
+  eq table(), [
+    { name: 'counter',   ink: 15, rip: 6 }
+    { name: 'borders',   ink: 34, rip: 21 }
+    { name: 'use-focus', ink: 26, rip: 19 }
+    { name: 'static',    ink: 45, rip: 14 }
+  ]
+
+console.log "\nThe text field"
+
+test "input: typing inserts at the cursor, the arrows, Home and End move it, Backspace and Delete take a cluster, a paste goes in whole, Enter prints and clears, Escape clears", ->
+  mounted Input, { cols: 24 }, (view) ->
+    field = (text) -> "╭──────────────────────╮\n│ #{text}#{' '.repeat 20 - Bun.stringWidth text} │\n╰──────────────────────╯"
+    eq view.frame(), field('type, then Enter')
+    eq cells.styled(view.ansi)[1], '│ «dim»type,«» «dim»then«» «dim»Enter«»     │'
+    eq view.cursor, { x: 2, y: 1 }
+    view.type 'ab'
+    eq view.frame(), field('ab')
+    eq view.cursor, { x: 4, y: 1 }
+    view.press 'ArrowLeft'
+    view.type 'c'
+    eq view.frame(), field('acb')
+    eq view.cursor, { x: 4, y: 1 }
+    view.press 'Home'
+    view.frame()
+    eq view.cursor, { x: 2, y: 1 }
+    view.press 'ArrowLeft'
+    view.frame()
+    eq view.cursor, { x: 2, y: 1 }, 'the cursor stops at the start'
+    view.press 'End'
+    view.frame()
+    eq view.cursor, { x: 5, y: 1 }
+    view.press 'ArrowRight'
+    view.frame()
+    eq view.cursor, { x: 5, y: 1 }, 'and at the end'
+    view.press 'Backspace'
+    eq view.frame(), field('ac')
+    eq view.cursor, { x: 4, y: 1 }
+    view.press 'ArrowLeft'
+    view.press 'Delete'
+    eq view.frame(), field('a')
+    eq view.cursor, { x: 3, y: 1 }
+    view.press 'Delete'
+    eq view.frame(), field('a'), 'Delete at the end takes nothing'
+    view.paste '日本'
+    eq view.frame(), field('a日本')
+    eq view.cursor, { x: 7, y: 1 }, 'a wide glyph is two cells'
+    view.press 'ArrowLeft'
+    view.frame()
+    eq view.cursor, { x: 5, y: 1 }
+    view.press 'Enter'
+    eq view.frame(), field('type, then Enter')
+    eq view.scrollback, 'a日本\n'
+    eq view.cursor, { x: 2, y: 1 }
+    view.press 'Enter'
+    eq view.scrollback, 'a日本\n', 'an empty field prints nothing'
+    view.type 'xyz'
+    view.press 'Escape'
+    eq view.frame(), field('type, then Enter')
+    eq view.cursor, { x: 2, y: 1 }
+    view.press 'a', ctrl: true
+    view.press 'b', alt: true
+    view.press 'F5'
+    eq view.frame(), field('type, then Enter'), 'a chord and a named key type nothing'
+
+test "input: a cluster of several code points is one cursor step and one Backspace", ->
+  mounted Input, { cols: 24 }, (view) ->
+    view.type 'e\u0301x'
+    eq view.frame(), "╭──────────────────────╮\n│ e\u0301x                   │\n╰──────────────────────╯"
+    eq view.cursor, { x: 4, y: 1 }, 'a letter with its mark is one cell'
+    view.press 'ArrowLeft'
+    view.press 'ArrowLeft'
+    view.frame()
+    eq view.cursor, { x: 2, y: 1 }
+    view.press 'ArrowRight'
+    view.type '\u0308'
+    view.frame()
+    eq view.app.value.value, 'e\u0301\u0308x'
+    eq view.cursor, { x: 3, y: 1 }, 'a mark joins the cluster before the cursor and the cursor stays on it'
+    view.press 'End'
+    view.type '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}'
+    view.frame()
+    eq view.cursor, { x: 6, y: 1 }, 'a family emoji, five code points, is two cells'
+    view.press 'Backspace'
+    view.frame()
+    eq view.app.value.value, 'e\u0301\u0308x'
+    eq view.cursor, { x: 4, y: 1 }, 'and one Backspace'
