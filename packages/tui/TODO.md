@@ -47,10 +47,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 6. Input and focus
 
-- [ ] Focus that a removed node held goes to nothing. A dialog that
-      closes leaves the keyboard with the root element until Tab; giving
-      focus back to the node that had it before the dialog took it — and
-      holding Tab inside a dialog while it is open — is undecided.
 - [ ] Tab walks the tree from the focused node, passing over shut
       subtrees whole: unmeasured on a tree of 10,000 nodes.
 - [ ] A select list that marks its choice with one binding an item

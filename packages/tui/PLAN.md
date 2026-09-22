@@ -59,9 +59,9 @@ together, counted by `bench/lines.rip` and quoted from
 
 | Row | Ink + Yoga | Rip TUI |
 |---|---|---|
-| Framework only | Ink `src/` 6,760 | 4,269 |
-| Framework + layout algorithm | + Yoga 3.2.1 `yoga/algorithm/` 3,042 = 9,802 | 4,269 (`layout.rip` is 1,466 of it) |
-| Full runtime closure | + React, react-reconciler, scheduler and 33 more packages | + Rip runtime 1,598 (`reactive.js`, `components.js`) = 5,867 |
+| Framework only | Ink `src/` 6,760 | 4,308 |
+| Framework + layout algorithm | + Yoga 3.2.1 `yoga/algorithm/` 3,042 = 9,802 | 4,308 (`layout.rip` is 1,466 of it) |
+| Full runtime closure | + React, react-reconciler, scheduler and 33 more packages | + Rip runtime 1,598 (`reactive.js`, `components.js`) = 5,906 |
 
 Yoga is counted at 3.2.1, the version Ink 7.1.1 ships, at `misc/yoga` or the checkout `YOGA_SRC` names (`lines.rip` refuses any other). The honest headline is **2.3× smaller** with the
 layout algorithm on both sides, and 1.6× framework against framework:
@@ -138,20 +138,20 @@ write by hand; hot loops use the indexed `for x, i in` form).
 | Module | Job | Code lines |
 |---|---|---|
 | `tui.rip` | Entry: `run`, `mount` and its input, `renderToString`, `suspend`, `screen`, `focus`, widgets, `print`, `clock`; the delivery of events, the default actions | 307 |
-| `document.rip` | Terminal document: nodes, tree links, the event and its dispatch, style road, keyboard traits, damage marks | 390 |
-| `focus.rip` | Who can hold focus, tree order, taking it, settling it | 64 |
+| `document.rip` | Terminal document: nodes, tree links, the event and its dispatch, style road, keyboard traits, damage marks | 393 |
+| `focus.rip` | Who can hold focus, tree order, taking it, settling it, giving it back, `modal` | 99 |
 | `layout.rip` | Flexbox, containing blocks, baseline, cache, edge rounding | 1,466 |
 | `text.rip` | Sanitize, grapheme clusters, width, wrap, truncate | 421 |
 | `paint.rip` | Cell grids, styles at the terminal's depth, clip, borders, backgrounds, the selection overlay, damage, diff, a subtree painted once | 713 |
-| `screen.rip` | Frames, pacing, the cursor, where the frame sits, the write above the frame (`Static`, `print`, the console), progress, the alternate screen | 177 |
+| `screen.rip` | Frames, pacing, the cursor, where the frame sits, the write above the frame (`Static`, `print`, the console), progress, the alternate screen | 178 |
 | `input.rip` | Key tokenizer and decoder, paste, mouse, replies | 315 |
 | `mouse.rip` | Hit test, the mouse events, hover, selection and the clipboard | 211 |
 | `terminal.rip` | Setup / teardown: raw mode, the modes, the probes, the cursor, the alternate screen, the signals, suspend and resume, the console, the depth read | 205 |
-| | **Total** | **4,269** |
+| | **Total** | **4,308** |
 
 Lines are counted as §2 counts them: non-blank and non-comment. Events,
-focus, the cursor and stdin are 285 of them (85 in `tui.rip`, 99 in
-`document.rip`, 62 in `focus.rip`, 39 in `screen.rip`); what Ink spends
+focus, the cursor and stdin are 321 of them (85 in `tui.rip`, 100 in
+`document.rip`, 97 in `focus.rip`, 39 in `screen.rip`); what Ink spends
 on the same — `use-input`, `use-paste`, `use-focus`,
 `use-focus-manager`, `use-cursor`, their three contexts,
 `cursor-helpers`, and `App.tsx`, which holds its focus list, raw mode
@@ -194,7 +194,7 @@ the terminal cannot honor throws a named error.
 | Text `data` setter (same-value short-circuit, marks dirty) | | `value`, `checked`, `innerHTML`, `textContent` |
 | `setAttribute`, `removeAttribute`, `toggleAttribute` | | `querySelector`, `document.head` (transitions) |
 | `addEventListener`, `removeEventListener`, `dispatchEvent` on every node and on the document: capture, target and bubble phases, `target`, `currentTarget`, `eventPhase`, `stopPropagation`, `preventDefault` (§7) | | Unknown style keys, with a suggestion |
-| `focus()`, `blur()`, `focused`, `document.activeElement`; the attributes `focusable`, `autofocus`, `disabled`, `cursor` (§7) | | A `cursor` that is not `{ x, y }` in whole cells; a switch that is not true or false; `autofocus` on a node that is not `focusable` |
+| `focus()`, `blur()`, `focused`, `document.activeElement`; the attributes `focusable`, `autofocus`, `disabled`, `modal`, `cursor` (§7) | | A `cursor` that is not `{ x, y }` in whole cells; a switch that is not true or false; `autofocus` on a node that is not `focusable` |
 | Globals: `document`, `Node` (base class of every node), an `SVGElement` stub | | |
 
 `div` is a box and `span` is text. Comments are zero-size anchors.
@@ -876,8 +876,8 @@ that adjusts the offset is the whole scrolled-list pattern.
 **Focus** belongs to a node and follows tree
 order, found by a walk when Tab is pressed (Ink keeps the order its
 hooks registered in, and focuses by id). Any element takes
-`focusable`, `autofocus` and `disabled`, which are switches kept on the
-node, not styles. A node can hold focus while it is focusable, in the
+`focusable`, `autofocus`, `disabled` and `modal`, which are switches
+kept on the node, not styles. A node can hold focus while it is focusable, in the
 tree, and nothing from it up to the body is `disabled`, `hidden`, or
 `display: 'none'` — so `disabled` on a box is its descendants', which
 is Ink's `disableFocus()`. The walk passes over a shut subtree whole,
@@ -887,16 +887,29 @@ and a focusable node inside a focusable node is reached after it.
   takes a node out and puts it back in one turn, and a focused node
   must keep its focus through that. So `tend` settles focus before
   every key, every frame, and every `view.focused`: a node that can no
-  longer hold focus loses it **to nothing** (Ink's tests ask the same:
-  the next Tab starts from the top), hearing `blur` once; and
-  `document.activeElement` / `focus.active` answer null from the moment
-  the node cannot hold it, without waiting for `tend`.
+  longer hold focus hears `blur` once, and `document.activeElement` /
+  `focus.active` answer null from the moment the node cannot hold it,
+  without waiting for `tend`.
+- **Focus goes back where it was.** A focused node that has left the
+  tree gives focus to the holder it took focus from — kept in a
+  WeakMap on the document, and inside one `modal` box the holder the
+  box was entered from — if that one can still hold it, and to nothing
+  if not; focus given back is remembered by no one. A focused node
+  that is hidden or disabled, still in the tree, loses focus **to
+  nothing** (Ink's tests ask the same: the next Tab starts from the
+  top).
+- **A `modal` box holds Tab.** From a node inside one, Tab and
+  Shift-Tab go round the nearest modal box and never leave it; from
+  outside every one they walk the whole tree. A claim inside a modal
+  box takes focus even from a holder outside it, so a dialog with an
+  `autofocus` field takes the keyboard as it opens and gives it back
+  as it is removed.
 - **`autofocus` is a claim made once,** when the node arrives in the
   document or the switch is written on a node already there. The next
   `tend` gives focus to the first claimant in tree order that can hold
   it, if nothing has it, and drops every claim either way: a node that
-  arrives never takes focus from a node that has it (a dialog calls
-  `focus()`), and a claim is not made again when focus is let go. A
+  arrives outside a modal box never takes focus from a node that has
+  it, and a claim is not made again when focus is let go. A
   claim on a node that is not `focusable` is refused by name as it is
   settled, since the two switches arrive in either order; one on a
   disabled node claims nothing.

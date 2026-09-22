@@ -625,6 +625,119 @@ test "`autofocus` on a node that is not `focusable` is refused by name where the
     node.set 'autofocus', true
     throws (-> view.frame()), "#{refused} (on div > div[data-part=Box] > div#unfit)"
 
+# A list, and a dialog over it that holds Tab while it is open.
+Dialog =! component
+  @open := false
+  @hide := false
+  @inner := false
+  @off := null
+  @gone := null
+  @extra := false
+  left ~= ['one', 'two', 'three'].filter (name) => name isnt @gone
+  render
+    Box flexDirection: 'column'
+      Box id: 'list', flexDirection: 'column'
+        for name in left
+          Box key: name, id: name, focusable: true, disabled: name is @off
+            Text name
+        if @extra
+          Box id: 'extra', focusable: true, autofocus: true
+            Text "extra"
+      if @open
+        Box id: 'dialog', modal: true, hidden: @hide, flexDirection: 'column'
+          Box id: 'field', focusable: true, autofocus: true
+            Text "field"
+          Box id: 'ok', focusable: true
+            Text "ok"
+          if @inner
+            Box id: 'confirm', modal: true
+              Box id: 'yes', focusable: true, autofocus: true
+                Text "yes"
+              Box id: 'no', focusable: true
+                Text "no"
+          Box id: 'cancel', focusable: true
+            Text "cancel"
+
+# Who heard focus and blur, in order, among the nodes named.
+listen =! (events, ids) ->
+  for id in ids
+    node = find id
+    node.addEventListener 'focus', (event) -> events.push "focus #{idOf event.target}"
+    node.addEventListener 'blur', (event) -> events.push "blur #{idOf event.target}"
+
+test "a `modal` dialog with `autofocus` takes focus as it opens, holds Tab, and gives focus back to the node that had it as it is removed", ->
+  mounted Dialog, {}, (view) ->
+    view.press 'Tab'
+    view.press 'Tab'
+    eq idOf(view.focused), 'two'
+    events = []
+    listen events, ['one', 'two', 'three']
+    view.app.extra.value = true
+    view.app.open.value = true
+    listen events, ['field', 'ok', 'cancel']
+    eq idOf(view.focused), 'field', 'the claim of a node inside a modal box takes focus from a holder outside it, and one outside any takes none'
+    eq cycle(view), ['ok', 'cancel', 'field']
+    eq cycle(view, 'Tab', shift: true), ['field', 'cancel', 'ok']
+    eq idOf(view.focused), 'field'
+    events.length = 0
+    view.app.open.value = false
+    eq idOf(view.focused), 'two', 'focus is back where it was before the dialog took it, however Tab went round it'
+    eq events, ['blur field', 'focus two']
+    eq [idOf(focus.active), idOf(document.activeElement), find('two').focused], ['two', 'two', true]
+    view.app.gone.value = 'two'
+    eq idOf(view.focused), 'one', 'focus given back is remembered by no one: the node keeps the holder it took focus from'
+    eq cycle(view), ['three', 'extra', 'one'], 'with the dialog gone Tab walks the whole tree'
+    throws (-> find('one').set 'modal', 'yes'), 'rip/tui: modal: "yes" is not true or false'
+
+test "Tab from outside any modal box walks the whole tree, into a modal box, and is held there", ->
+  mounted Dialog, { props: { open: true } }, (view) ->
+    eq idOf(view.focused), 'field'
+    focus.to find 'one'
+    view.press 'Tab'
+    view.press 'Tab'
+    eq idOf(view.focused), 'three'
+    view.press 'Tab'
+    eq idOf(view.focused), 'field'
+    eq cycle(view), ['ok', 'cancel', 'field']
+    focus.to null
+    eq cycle(view, 'Tab', shift: true), ['cancel', 'ok', 'field'], 'Shift-Tab from nothing reaches the last node in tree order, inside the box'
+
+test "nested modal boxes: the innermost holds Tab and gives focus back as it goes; boxes that go together give back nothing", ->
+  mounted Dialog, {}, (view) ->
+    find('one').focus()
+    view.app.open.value = true
+    eq idOf(view.focused), 'field'
+    view.press 'Tab'
+    eq idOf(view.focused), 'ok'
+    view.app.inner.value = true
+    eq idOf(view.focused), 'yes', 'a claim inside the inner box takes focus from a holder outside it'
+    eq cycle(view), ['no', 'yes']
+    view.app.inner.value = false
+    eq idOf(view.focused), 'ok'
+    eq cycle(view), ['cancel', 'field', 'ok']
+    view.app.inner.value = true
+    eq idOf(view.focused), 'yes'
+    view.app.open.value = false
+    eq view.focused, null, 'the holder the inner box took focus from left the tree with it'
+
+test "focus given back falls to nothing when its holder was disabled or removed meanwhile; a dialog hidden, not removed, loses focus to nothing", ->
+  for how in ['off', 'gone', 'hide']
+    mounted Dialog, {}, (view) ->
+      find('two').focus()
+      view.app.open.value = true
+      eq [how, idOf view.focused], [how, 'field']
+      events = []
+      listen events, ['one', 'three', 'field', 'ok', 'cancel']
+      if how is 'hide' then view.app.hide.value = true else view.app[how].value = 'two'
+      eq [how, idOf view.focused], [how, 'field'] unless how is 'hide'
+      view.app.open.value = false unless how is 'hide'
+      eq [how, idOf(view.focused), events], [how, null, ['blur field']]
+  mounted Dialog, {}, (view) ->
+    view.app.open.value = true
+    eq idOf(view.focused), 'field'
+    view.app.open.value = false
+    eq view.focused, null, 'a dialog opened while nothing had focus gives back nothing'
+
 test "`screen.focused` follows the terminal's focus reports", ->
   Shown = component
     render
@@ -1189,6 +1302,13 @@ ordered =! (node, out = []) ->
     kid = kid.nextSibling
   out
 
+# The nearest `modal` box that holds `node`, itself included, or null.
+trap =! (node) ->
+  while node
+    return node if node.modal
+    node = node.parentNode
+  null
+
 everything =! (node, out = []) ->
   kid = node.firstChild
   while kid
@@ -1202,13 +1322,13 @@ Bare =! component
   render
     Box id: 'root'
 
-test "random trees under random change: focus is always a node that can hold it, Tab walks the tree in order, focus and blur pair up, and a path is the tree as its dispatch began", ->
+test "random trees under random change: focus is always a node that can hold it, Tab walks the tree in order and never leaves a modal box, a dialog's claim takes focus and its removal gives it back, focus and blur pair up, and a path is the tree as its dispatch began", ->
   seed = 20260921
   rand = ->
     seed = (seed * 1664525 + 1013904223) % 4294967296
     seed / 4294967296
   pick = (list) -> list[Math.floor rand() * list.length]
-  counts = { steps: 0, agreed: 0, inserted: 0, removed: 0, moved: 0, switched: 0, tabs: 0, calls: 0, focuses: 0, blurs: 0, cleared: 0, cycles: 0, visited: 0, mutated: 0, heard: 0, claimed: 0 }
+  counts = { steps: 0, agreed: 0, inserted: 0, removed: 0, moved: 0, switched: 0, tabs: 0, calls: 0, focuses: 0, blurs: 0, cleared: 0, cycles: 0, visited: 0, mutated: 0, heard: 0, claimed: 0, modals: 0, opened: 0, closed: 0, restored: 0, fell: 0, trapped: 0 }
   for round in [0...120]
     view = mount Bare, cols: 20
     try
@@ -1217,6 +1337,8 @@ test "random trees under random change: focus is always a node that can hold it,
       holder = null      # the node the focus and blur events say has focus
       trail = []         # who heard the key under way
       meddle = null      # a change one listener makes mid-dispatch
+      dialogs = []       # the modal boxes opened with a claim inside
+      opening = null     # the one opened this step, whose claim the step settles
       say = (problem) -> raise "seed 20260921 round #{round} step #{counts.steps}: #{problem}"
       # A node out of the tree hears its own blur and nothing above it
       # does, so each node listens for itself.
@@ -1235,6 +1357,9 @@ test "random trees under random change: focus is always a node that can hold it,
         node.set 'disabled', true if rand() < 0.08
         node.set 'hidden', true if rand() < 0.06
         node.set 'autofocus', true if rand() < 0.15 and node.focusable
+        if rand() < 0.1
+          node.set 'modal', true
+          counts.modals += 1
         hear = (event) ->
           trail.push "#{idOf node} #{event.eventPhase}"
           if meddle and event.eventPhase > 1
@@ -1258,7 +1383,7 @@ test "random trees under random change: focus is always a node that can hold it,
         false
       change = ->
         all = everything root
-        kind = Math.floor rand() * 6
+        kind = Math.floor rand() * 8
         if kind is 0 or all.length < 6
           place make()
           counts.inserted += 1
@@ -1270,6 +1395,25 @@ test "random trees under random change: focus is always a node that can hold it,
           node.remove()
           place node
           counts.moved += 1
+        else if kind is 6
+          # A dialog: a modal box with a focusable field that claims focus.
+          box = make()
+          box.set 'modal', true
+          box.appendChild make() for n in [0...Math.floor(rand() * 3)]
+          field = make()
+          field.set 'focusable', true
+          field.set 'autofocus', true
+          kids = box.childNodes
+          box.insertBefore field, (if kids.length then pick(kids) else null)
+          place box
+          dialogs.push box
+          opening = box
+          counts.opened += 1
+        else if kind is 7
+          up = dialogs.filter (box) -> inside box, document.body
+          if up.length
+            pick(up).remove()
+            counts.closed += 1
         else
           node = pick all
           key = pick ['focusable', 'disabled', 'hidden', 'display']
@@ -1283,12 +1427,17 @@ test "random trees under random change: focus is always a node that can hold it,
       for step in [0...80]
         counts.steps += 1
         had = view.focused   # which settles any claim an arrival made
+        opening = null
         act = rand()
         if act < 0.45
           change()
         else if act < 0.6
+          bound = trap had
           view.press 'Tab', shift: rand() < 0.5
           counts.tabs += 1
+          if bound
+            say "Tab from #{idOf had} left the modal box #{idOf bound} for #{idOf view.focused}" unless inside view.focused, bound
+            counts.trapped += 1
         else if act < 0.75
           target = pick everything root
           continue unless target
@@ -1331,21 +1480,38 @@ test "random trees under random change: focus is always a node that can hold it,
         counts.agreed += 1
         counts.cleared += 1 if had and not now
         counts.claimed += 1 if now and not had and act < 0.45
+        # A dialog that opened takes focus by the first claim in it, in
+        # tree order, that can hold focus — from whatever had it, since
+        # that is outside the box.
+        if opening
+          want = [opening, ...everything(opening)].find((node) -> node.autofocus and holds node) ?? had
+          say "the dialog #{idOf opening} opened and left focus with #{idOf now}, not #{idOf want}" unless now is want
+        # A holder that left the tree gives focus back to the holder it
+        # remembers, if that one can hold it, and to nothing if not.
+        if had and not inside had, document.body
+          back = document.prior.get had
+          want = if back and holds(back) then back else null
+          say "#{idOf had} left the tree and focus went to #{idOf now}, not #{idOf want}" unless now is want
+          if want then counts.restored += 1 else counts.fell += 1
         # A cycle: Tab from here reaches every node that can hold focus
-        # once, in tree order, and comes back.
+        # once, in tree order, and comes back — round the modal box that
+        # holds the focused node, and inside one once it is reached.
         continue unless step % 10 is 9
-        order = ordered document.body
-        continue unless order.length
-        from = if now then order.indexOf(now) else -1
+        at = now
+        presses = ordered(trap(at) ?? document.body).length
+        continue unless presses
         back = rand() < 0.5
-        for n in [1..order.length]
+        for n in [1..presses]
+          order = ordered(trap(at) ?? document.body)
+          from = if at then order.indexOf(at) else -1
+          due = if back then order[((if from < 0 then order.length else from) - 1 + order.length) % order.length] else order[(from + 1) % order.length]
           view.press 'Tab', shift: back
-          due = if back then order[((if from < 0 then order.length else from) - n + order.length * 2) % order.length] else order[(from + n) % order.length]
-          say "#{if back then 'Shift-' else ''}Tab #{n} of #{order.length} reached #{idOf view.focused}, not #{idOf due}" unless view.focused is due
+          say "#{if back then 'Shift-' else ''}Tab #{n} of #{presses} from #{idOf at} reached #{idOf view.focused}, not #{idOf due}" unless view.focused is due
+          at = due
           counts.visited += 1
         counts.cycles += 1
     finally
       view.close()
   # A fuzz that does nothing passes everything: hold it to its volume.
-  floors = { steps: 9600, agreed: 9500, inserted: 1100, removed: 550, moved: 550, switched: 1600, tabs: 1100, calls: 1100, focuses: 1500, blurs: 1500, cleared: 300, cycles: 440, visited: 950, mutated: 600, heard: 2600, claimed: 60 }
+  floors = { steps: 9600, agreed: 9500, inserted: 1100, removed: 550, moved: 550, switched: 1600, tabs: 1100, calls: 1100, focuses: 1500, blurs: 1500, cleared: 300, cycles: 440, visited: 950, mutated: 600, heard: 2600, claimed: 60, modals: 330, opened: 540, closed: 270, restored: 70, fell: 70, trapped: 320 }
   ok counts[name] >= floor, "#{name}: #{counts[name]} is under the floor of #{floor} — #{JSON.stringify counts}" for own name, floor of floors

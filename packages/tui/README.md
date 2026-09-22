@@ -147,9 +147,9 @@ Lines of code, by the rule above (`bun run lines`):
 
 | | Ink + Yoga | Rip TUI |
 |---|--:|--:|
-| Framework only | Ink `src/` 6,760 | 4,269 |
-| Framework + layout algorithm | + Yoga 3.2.1 `yoga/algorithm/` 3,042 = 9,802 | 4,269 (layout.rip is 1,466 of it) |
-| Full runtime closure | + React, react-reconciler, scheduler and 33 more packages | + Rip runtime 1,598 = 5,867 |
+| Framework only | Ink `src/` 6,760 | 4,308 |
+| Framework + layout algorithm | + Yoga 3.2.1 `yoga/algorithm/` 3,042 = 9,802 | 4,308 (layout.rip is 1,466 of it) |
+| Full runtime closure | + React, react-reconciler, scheduler and 33 more packages | + Rip runtime 1,598 = 5,906 |
 
 Ink + Yoga 3.2.1, the version Ink 7.1.1 ships, is 2.3× the lines of
 this package with the layout algorithm on both sides, 1.6× framework
@@ -531,13 +531,24 @@ Once the app is closing, what is left of the same read is dropped.
 `display: 'none'` take a node and everything under it out of reach. Tab
 follows the tree's order, found by a walk when Tab is pressed, so a
 list that is reordered is walked as it stands, and a focused node that a
-reorder moves keeps its focus. A focused node that is removed, hidden or
-disabled loses focus to nothing — the next Tab starts from the top —
-and hears `blur`. `autofocus: true` is a claim made once, when the node
-arrives, as HTML's is: the first such node in tree order takes focus if
-nothing has it, and never takes it from a node that does. A node that
-is disabled when its claim is settled never claims again — enable it
-and it waits for Tab or `focus()` — where Ink's
+reorder moves keeps its focus. A focused node that is removed hears
+`blur` and gives focus back to the node it took focus from, if that one
+can still hold it, and to nothing if not; inside one `modal` box the
+node remembered is the one the box was entered from, however Tab went
+round it. A focused node that is hidden or disabled hears `blur` and
+loses focus to nothing — the next Tab starts from the top.
+
+`modal: true` on a box holds Tab: from a node inside it, Tab and
+Shift-Tab go round the nearest modal box and never leave it, and from
+outside every one they walk the whole tree. An `autofocus` claim inside
+a modal box takes focus even from a holder outside it, so a dialog
+takes the keyboard as it opens and gives it back as it is removed.
+
+`autofocus: true` is a claim made once, when the node arrives, as
+HTML's is: the first such node in tree order takes focus if nothing has
+it, and outside a modal box never takes it from a node that does. A
+node that is disabled when its claim is settled never claims again —
+enable it and it waits for Tab or `focus()` — where Ink's
 `useFocus({autoFocus, isActive})` takes focus whenever it becomes
 active; `autofocus` on a node that is not `focusable` is refused by
 name when its claim is settled. Inside a `focus` or `blur` listener
