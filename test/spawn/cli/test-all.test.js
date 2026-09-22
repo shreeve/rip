@@ -419,4 +419,33 @@ describe('an interrupted run takes its lanes down', () => {
     expect(status).toEqual({ code: 143, signal: null });
     rmSync(root, { recursive: true, force: true });
   });
+
+  // `bun test --parallel` puts each worker in a process group of its own,
+  // and a worker whose coordinator dies is re-parented and runs on. The
+  // stand-in here is a lane that starts a detached child — a group, and
+  // a session, of its own — and parks beside it.
+  test('SIGTERM to the orchestrator stops every process under a lane, in whatever group it put itself', async () => {
+    const tree = {
+      script: `bun -e "const c = require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' }); require('fs').writeFileSync('lane.pid', process.pid + ' ' + c.pid); setInterval(() => {}, 1000)"`,
+    };
+    const root = fixture({ tree });
+    const pidFile = join(root, 'packages', 'tree', 'lane.pid');
+    const orchestrator = spawn(process.execPath, [ORCHESTRATOR, '--root', root, '--timeout', '120000'], {
+      stdio: 'ignore',
+      env: { ...process.env, CI: '', NO_COLOR: '1' },
+    });
+    expect(await until(() => existsSync(pidFile) && readFileSync(pidFile, 'utf8').includes(' '), 15000)).toBe(true);
+    const [lane, detached] = readFileSync(pidFile, 'utf8').split(' ').map(Number);
+    try {
+      expect(alive(detached)).toBe(true);
+      const exited = new Promise((resolve) => orchestrator.once('exit', (code, signal) => resolve({ code, signal })));
+      orchestrator.kill('SIGTERM');
+      expect(await until(() => !alive(lane) && !alive(detached), 5000)).toBe(true);
+      expect(await exited).toEqual({ code: 143, signal: null });
+    } finally {
+      // Nothing outlives the test, whatever it found.
+      for (const pid of [lane, detached]) { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } }
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

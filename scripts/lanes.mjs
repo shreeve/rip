@@ -314,12 +314,40 @@ const signal = (proc, sig) => {
   try { proc.kill(sig); } catch { /* already dead */ }
 };
 
+// Every process below `pids`, with the process group each leads. A
+// lane's descendants need not stay in its group: `bun test --parallel`
+// puts each worker in a group of its own, and a worker whose
+// coordinator is killed is re-parented and runs on. So an abort reads
+// the whole tree while the lanes are still its roots, and signals every
+// process in it and every group one of them leads. Synchronous, so an
+// exit handler can use it.
+const tree = (pids) => {
+  const r = spawnSync('ps', ['-Ao', 'pid=,ppid=,pgid='], { encoding: 'utf8' });
+  const rows = (r.stdout ?? '').trim().split('\n').map((line) => line.trim().split(/\s+/).map(Number));
+  const below = new Set(pids);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const [pid, ppid] of rows) {
+      if (below.has(ppid) && !below.has(pid)) { below.add(pid); grew = true; }
+    }
+  }
+  const leaders = rows.filter(([pid, , pgid]) => below.has(pid) && pid === pgid).map(([pid]) => pid);
+  return { pids: [...below], leaders };
+};
+
+const signalTree = (procs, sig) => {
+  const { pids, leaders } = tree(procs.map((proc) => proc.pid));
+  for (const pgid of leaders) { try { process.kill(-pgid, sig); } catch { /* gone */ } }
+  for (const pid of pids) { try { process.kill(pid, sig); } catch { /* gone */ } }
+};
+
 // Start the planned run: `usePty` gives each lane a PTY of `cols` by
 // `rows`, so runners see isTTY and paint; `hear` is told every event.
 // The run returns at once with `done`, which resolves with the summary,
-// and `abort`, which signals every lane in flight and its process group
-// with `sig` and, after `grace` milliseconds, SIGKILL; it resolves once
-// every lane has exited or been killed.
+// and `abort`, which signals every process under the lanes in flight,
+// and every process group one of them leads, with `sig` and, after
+// `grace` milliseconds, SIGKILL; it resolves once every lane has exited
+// or been killed.
 export const launch = (config, planned, { usePty, cols = 120, rows = 40 }, hear) => {
   const { lanes, excluded, skipped } = planned;
   const { jobs, timeoutMs, ci } = config;
@@ -452,10 +480,10 @@ export const launch = (config, planned, { usePty, cols = 120, rows = 40 }, hear)
   };
 
   const abort = (sig = 'SIGKILL', grace = 0) => {
-    for (const proc of live) signal(proc, sig);
+    if (live.size) signalTree([...live], sig);
     return new Promise((resolve) => {
       const deadline = setTimeout(() => {
-        for (const proc of live) signal(proc, 'SIGKILL');
+        if (live.size) signalTree([...live], 'SIGKILL');
         resolve();
       }, grace);
       deadline.unref?.();
