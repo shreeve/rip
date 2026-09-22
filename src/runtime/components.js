@@ -587,6 +587,12 @@ function __lis(arr) {
 }
 
 function __reconcile(anchor, state, items, ctx, factory, keyFn, ...outer) {
+  // The anchor is the comment the list's create phase placed; a list
+  // whose create phase never ran has none, and reconciling against
+  // nothing is a contract violation, not a list with no parent.
+  if (anchor == null) {
+    throw new Error('__reconcile: no anchor — the list\'s create phase never placed one');
+  }
   const parent = anchor.parentNode;
   if (!parent) return;
 
