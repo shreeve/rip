@@ -22,7 +22,8 @@
     "test:browser": "bun --cwd=test/browser run test:smoke",
     "test:live": "bun --cwd=test/browser run test:live",
     "test:rip": "bun test test/rip.test.js --timeout 15000",
-    "test:spawn": "bun test --timeout 15000 test/spawn"
+    "test:spawn": "bun test --timeout 15000 test/spawn",
+    "test:tui": "bun scripts/test-live.rip"
   },
   "bin": {
     "rip": "bin/rip"
