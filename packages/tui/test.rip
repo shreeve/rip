@@ -10,6 +10,7 @@ import { layout } from './layout.rip'
 import { Grid, paint, diff, rowsToString, tally as styleCount } from './paint.rip'
 import { tally as clusterCount, clusterWidth } from './text.rip'
 import { __setChildFailureReporter } from '../../src/runtime/components.js'
+import { Log as BuildLog } from './examples/log.rip'
 import { EventEmitter } from 'node:events'
 import { readFileSync } from 'fs'
 import { join } from 'path'
@@ -120,6 +121,9 @@ def words(doc, styles, text, inner = null)
   node
 
 tick = -> Promise.new (resolve) -> setTimeout resolve, 20
+
+# Text with its escape sequences taken out.
+bare = (text) -> text.replace /\x1b\[[0-9;]*m/g, ''
 
 # Mount `App`, hand `body(app, show, doc, view)` the instance, a way to
 # draw it at a width, its document, and the mount, and always close it.
@@ -1973,11 +1977,12 @@ test "an item is painted once, at the terminal's width: a change to it or its re
   Steps = component
     @done := ['a']
     @tint := undefined
+    @shape := undefined
     render
       Box flexDirection: 'column'
         Static
           for step in @done
-            Text key: step, color: @tint, wrap: 'truncate'
+            Text key: step, color: @tint, display: @shape, wrap: 'truncate'
               "#{step} #{'x'.repeat 30}"
         Text "live"
   view = mount Steps, cols: 20
@@ -1988,6 +1993,9 @@ test "an item is painted once, at the terminal's width: a change to it or its re
     view.frame()
     eq view.bytes, '', 'a written item that changes writes nothing'
     eq view.scrollback, "a xxxxxxxxxxxxxxxxx…\n"
+    view.app.shape.value = 'flex'
+    view.frame()
+    eq view.scrollback, "a xxxxxxxxxxxxxxxxx…\n", 'an item shown again by its own component is still written once'
     view.app.done.value = ['a', 'b']
     view.frame()
     eq view.scrollback, "a xxxxxxxxxxxxxxxxx…\n\x1b[31mb xxxxxxxxxxxxxxxxx…\x1b[0m\n", 'the new item is written in its color, the old one not again'
@@ -2104,7 +2112,10 @@ test "print writes above the frame, ending its line; print.err the same on stder
     eq view.stderr, "oops\n"
     view.frame()
     eq view.bytes, "\x1b[?2026h\x1b[J\x1b[1Glive\r\x1b[?2026l", 'the frame is drawn again below'
-    eq view.scrollback, "warning\ntwo\nlines\noops\n"
+    view.app.done.value = ['step']
+    print 'after the step'
+    view.frame()
+    eq view.scrollback, "warning\ntwo\nlines\noops\nstep\nafter the step\n", 'an item in the tree when print is called goes first'
   finally
     view.close()
 
@@ -2117,6 +2128,31 @@ test "rowsToString is the grid's serializer, plain and with escape sequences", -
     eq rowsToString(front, true), front.toString true
   finally
     view.close()
+
+test! "examples/log.rip runs headless: the steps scroll into the scrollback as the clock moves, the spinner turns, the warning is printed, and it quits when done or on q", ->
+  view = mount BuildLog, cols: 60, rows: 10
+  try
+    first = view.frame()
+    ok first.startsWith('⠋ resolve'), JSON.stringify first
+    view.tick 80
+    ok view.frame().startsWith('⠙ resolve'), 'the spinner turned'
+    view.tick 700 * 3
+    later = view.frame()
+    ok later.startsWith('⠧ link'), JSON.stringify later
+    # The warning's effect runs before the render block adds the step it
+    # is about, so it stands above that step.
+    eq bare(view.scrollback), "✓ resolve\n✓ fetch\nwarning: compile took the slow road\n✓ compile\n"
+    ok view.bytes.includes("\x1b]9;4;1;50\x1b\\"), 'the terminal knows how far along'
+    view.tick 700 * 3
+    eq await view.done, undefined
+    eq typeof document, 'undefined', 'the app quit when the last step was done'
+  finally
+    view.close()
+  view = mount BuildLog, cols: 60
+  view.frame()
+  view.press 'q'
+  await view.done
+  eq typeof document, 'undefined'
 
 test "Newline breaks a line inside text, `count` times", ->
   One = component

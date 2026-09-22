@@ -38,6 +38,15 @@ steps are in [PLAN.md](PLAN.md).
       over the 300 updates of `bun run tui`, and about 170 µs over
       12,000: the run ends while the damage path is still being
       compiled. Warm the bench longer, or make the path smaller.
+- [ ] A `Static` batch lays its container out as a root, and the
+      body's next layout puts the container away again by visiting
+      every item under it: a walk as long as the list, per batch. The
+      1,000-append row of the bench (PLAN §11) is unmeasured.
+- [ ] `Static`'s items are elements; a bare text under `Static` is
+      never hidden and is painted again with every batch.
+- [ ] `print` and a `Static` item write nothing on the alternate
+      screen, where Ink keeps them for the way out; console capture
+      (PLAN §8) decides what a run there keeps.
 
 ## 6. Input and focus
 

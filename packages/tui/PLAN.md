@@ -131,13 +131,13 @@ write by hand; hot loops use the indexed `for x, i in` form).
 
 | Module | Job | Code lines |
 |---|---|---|
-| `tui.rip` | Entry: `run`, `mount` and its input, `renderToString`, `screen`, `focus`, widgets; stdin, the modes, the probes, the delivery of events, the default actions; to come: `clock` | 249, about 285 when complete |
+| `tui.rip` | Entry: `run`, `mount` and its input, `renderToString`, `screen`, `focus`, widgets, `print`, `clock`; stdin, the modes, the probes, the delivery of events, the default actions | 331 |
 | `document.rip` | Terminal document: nodes, tree links, the event and its dispatch, style road, keyboard traits, damage marks | 388 |
 | `focus.rip` | Who can hold focus, tree order, taking it, settling it | 62 |
 | `layout.rip` | Flexbox, containing blocks, baseline, cache, edge rounding | 1,466 |
 | `text.rip` | Sanitize, grapheme clusters, width, wrap, truncate | 421 |
-| `paint.rip` | Cell grids, styles, clip, borders, backgrounds, the selection overlay, damage, diff | 650 |
-| `screen.rip` | Frames, pacing, the cursor, where the frame sits; to come: alternate screen, `Static`, non-TTY | 105, about 300 |
+| `paint.rip` | Cell grids, styles, clip, borders, backgrounds, the selection overlay, damage, diff, a subtree painted once | 662 |
+| `screen.rip` | Frames, pacing, the cursor, where the frame sits, the write above the frame (`Static`, `print`), progress; to come: alternate screen, non-TTY | 164, about 300 |
 | `input.rip` | Key tokenizer and decoder, paste, mouse, replies | 315 |
 | `mouse.rip` | Hit test, the mouse events, hover, selection and the clipboard | 211 |
 | `terminal.rip` | To come: setup / teardown, signals, suspend, console capture | about 170 |
@@ -552,8 +552,15 @@ a win: both disagree with some terminals and with tmux.
 **Inline rendering is its own design item.** Drawing below the prompt
 uses relative cursor moves and clips the live region to the terminal
 height, showing the bottom. `Static` paints an item once above the
-live region, invalidates the front buffer, and detaches its nodes; on
-the alternate screen it is a documented no-op and nothing accumulates.
+live region: the items a container gained since the last frame are
+laid out together as a root at the terminal's width, painted to a grid
+of their own, and written through `Screen.above` — the frame's rows
+cleared, the rows written where they were, the frame drawn again whole
+below, in the frame's one write, the frame's origin moved down by the
+rows written — and then hidden, so the live frame never holds them and
+what happens to them later is nobody's. `print` takes the same road
+with a line of text, and console capture (§8) will. On the alternate
+screen `Static` is a documented no-op and nothing accumulates.
 
 **Resize** is coalesced to one frame: reallocate, then erase and paint
 (alternate screen) or move up by the estimated reflowed rows, erase
@@ -561,8 +568,10 @@ down, and repaint (inline). **Non-TTY and CI** write static output
 immediately and the final frame once, with no cursor control, and
 honor `NO_COLOR` / `FORCE_COLOR` and color depth.
 
-One serializer, `rowsToString`, serves `renderToString`, `Static`, and
-the non-TTY final frame.
+One serializer, `rowsToString` (`Grid.toString` under its own name,
+paint.rip), serves `renderToString`, `Static`, and the non-TTY final
+frame; with escape sequences it leaves a row's trailing default-style
+blanks off, as the plain form does.
 
 ## 7. Input, focus, cursor (`input.rip`, `document.rip`)
 
@@ -981,23 +990,32 @@ run App
 ```
 
 - `run(App, {stdin, stdout, damage, mouse, keyboard, selection})` →
-  `{app, done, quit, flush}`. To come: `altScreen`; `suspend(fn)`;
-  `print(text)`.
+  `{app, done, quit, flush}`. To come: `altScreen`; `suspend(fn)`.
+- `print(text)` writes text above the live frame, its line ended, and
+  `print.err(text)` the same on stderr with the frame cleared on stdout
+  first; with no app mounted the text goes to the stream as it is.
 - `mount(App, {cols, rows, props, damage, mouse, keyboard, selection})`
-  → `{app, frame, ansi, bytes, damage, resize, close, done}`, and for
-  input `{press, type, paste, send, tick, focused, cursor}`, is the test
-  driver (§10), and `renderToString(App, {cols, rows, props, ansi})` is
-  a mount, one frame, and a close.
+  → `{app, frame, ansi, bytes, damage, scrollback, stderr, resize,
+  close, done}`, and for input `{press, type, paste, send, tick,
+  focused, cursor}`, is the test driver (§10), and
+  `renderToString(App, {cols, rows, props, ansi})` is a mount, one
+  frame, and a close, answering the rows `Static` wrote and then the
+  frame.
 - `screen` (`cols`, `rows`, `focused`, `keyboard`, and `selection`, the
-  selected text; to come: `interactive`) and `focus` (`active`,
-  `next()`, `previous()`, `to(node)`, with `to(null)` letting go) are
-  **getter-backed objects**. An imported
-  `:=` cell is not unwrapped across modules, so raw cells are never
-  exported.
+  selected text; `progress(value)`, the terminal's own indicator
+  through OSC 9;4 — 0 to 1, `'error'`, `'indeterminate'`, null — sent
+  with the next frame's write and cleared on every way out; to come:
+  `interactive`) and `focus` (`active`, `next()`, `previous()`,
+  `to(node)`, with `to(null)` letting go) are **getter-backed
+  objects**. An imported `:=` cell is not unwrapped across modules, so
+  raw cells are never exported.
 - `clock(interval)` is the animation helper: a getter-backed object
   with `frame`, `time`, and `delta`, driven by one shared timer per
-  interval that runs only while a mounted component reads it and never
-  when output is not interactive. A spinner is
+  interval. A component holds the clock it makes in its body
+  (`tick = clock 80`), and the timer runs only while a holder is
+  mounted and has read it, never when output is not interactive, and
+  on the mount's own clock under `mount`, which `view.tick` moves along
+  with the parser's waits. A spinner is
   `frames[tick.frame % frames.length]`. The frame scheduler already
   coalesces every change into one paint, so the helper is a
   convenience, not a requirement.
