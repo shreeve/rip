@@ -50,7 +50,7 @@ bun install                # once, at the repository root
 rip examples/counter.rip   # from packages/tui: ↑ and ↓ count, Ctrl-C quits
 ```
 
-`run` returns `{ app, done, quit, flush }`; `done` resolves with the
+`run` returns `{ app, done, quit, flush }`, and `run App, props: {…}` hands the component its initial public state, as `mount` does; `done` resolves with the
 value given to `quit`. Ctrl-C quits. The last frame stays in the
 scrollback and the cursor lands on the line below it.
 
@@ -105,7 +105,10 @@ Run one with `rip examples/ink/counter.rip`.
 the same tree, node for node, against the same fake 200×60 terminal —
 each in a fresh process, five times, and writes
 [bench/RESULTS.md](bench/RESULTS.md):
-every number reproduces with `bun run bench`.
+every number reproduces with `bun run bench`. The line count needs Ink's
+source at `misc/ink` and a Yoga checkout at 3.2.1, the version Ink 7.1.1
+ships — `misc/yoga`, or the checkout `YOGA_SRC` names — and `bun run
+lines` refuses any other version, so the count is of the Yoga Ink runs on.
 Ink is measured as a careful React app is written:
 React's production build, memoized rows, `interactive: true`,
 incremental rendering on, its frame throttle lifted, every update
@@ -144,17 +147,17 @@ Lines of code, by the rule above (`bun run lines`):
 
 | | Ink + Yoga | Rip TUI |
 |---|--:|--:|
-| Framework only | Ink `src/` 6,760 | 4,252 |
-| Framework + layout algorithm | + Yoga 3.2.1 `yoga/algorithm/` 3,042 = 9,802 | 4,252 (layout.rip is 1,466 of it) |
-| Full runtime closure | + React, react-reconciler, scheduler and 33 more packages | + Rip runtime 1,598 = 5,850 |
+| Framework only | Ink `src/` 6,760 | 4,269 |
+| Framework + layout algorithm | + Yoga 3.2.1 `yoga/algorithm/` 3,042 = 9,802 | 4,269 (layout.rip is 1,466 of it) |
+| Full runtime closure | + React, react-reconciler, scheduler and 33 more packages | + Rip runtime 1,598 = 5,867 |
 
 Ink + Yoga 3.2.1, the version Ink 7.1.1 ships, is 2.3× the lines of
 this package with the layout algorithm on both sides, 1.6× framework
 against framework. Two rows where the
 table is not one-sided: after a resize the frame is drawn from
 nothing, which is more bytes than Ink's incremental log writes; and a
-`Static` append grows with the items already written — about 150 µs
-averaged over 1,000 appends, 350 over 8,000 — where Ink's stays flat,
+`Static` append grows with the items already written — about 131 µs
+averaged over 1,000 appends, 270 over 8,000 (`rip bench/tui.rip static 8`) — where Ink's stays flat,
 so past a few thousand appends Ink is the faster side.
 
 ## Examples
@@ -254,8 +257,8 @@ scrollback (below).
 | `position` (`'relative'`, `'absolute'`, `'static'`) with `top`, `right`, `bottom`, `left` | |
 | `aspectRatio`, `boxSizing`, `display` (`'flex'`, `'none'`, `'contents'`), `hidden` | |
 | `borderStyle`: `single`, `double`, `round`, `bold`, `singleDouble`, `doubleSingle`, `classic`, `arrow`, or an object of eight glyphs; `borderTop` / `borderRight` / `borderBottom` / `borderLeft: false` drops an edge | `contentOffsetX`, `contentOffsetY` — shift a box's children; a scroll is a repaint and runs no layout |
-| `overflow`, `overflowX`, `overflowY`: `'visible'` or `'hidden'` (clips to the padding box) | |
-| On `Text`: `wrap` — `'wrap'` (the default: words wrap, and a word longer than the line breaks), `'hard'`, `'truncate'` / `'truncate-end'`, `'truncate-start'`, `'truncate-middle'` (with `…`) | On `Text`: `link` — a URL; the words are a hyperlink (OSC 8) |
+| `overflow`, `overflowX`, `overflowY`: `'visible'` or `'hidden'` (clips to the padding box; a box that scrolls its children keeps to its parent's size with `flexShrink: 1`, since the default is 0) | |
+| On `Text`: `wrap` — `'wrap'` (the default: words wrap, and a word longer than the line breaks), `'hard'`, `'truncate'` / `'truncate-end'`, `'truncate-start'`, `'truncate-middle'` (with `…`) There is no no-wrap mode: to keep a line on one row and scroll it, give the text a `width` wider than any line and shift it with `contentOffsetX` (`truncate` cuts at the box's width before the offset shifts it). | On `Text`: `link` — a URL; the words are a hyperlink (OSC 8) |
 
 Text is measured by grapheme cluster — a flag, a family emoji, a letter
 with its combining marks each take the cells a terminal gives them —
@@ -339,10 +342,9 @@ bottom), a sweep as a paint starts, and damage past half the screen are
 painted whole. One changed cell of a full
 200×60 table — a text that keeps its size, which owes its words and no
 survey — is about 1 µs of paint and diff where the whole frame is about
-125 µs; a change that is surveyed costs a few more — a row recolored in
-a 2,000-row clipped log is about 7 µs where the whole frame is about
-85 µs — and the bytes are the same (Apple M5, Bun 1.4.2; `bun run
-frame` in `bench/` prints the first).
+143 µs; a last row that comes and goes, which owes a survey and its
+rows, about 23 µs where the whole frame is about 56 µs — and the bytes
+are the same (`bench/RESULTS.md`; `bun run frame` in `bench/`).
 
 Layout is flexbox as Yoga lays it out — the defaults are Yoga's
 (`flexDirection: 'column'`, `flexShrink: 0`, `alignItems: 'stretch'`,
@@ -418,7 +420,8 @@ view.focused                # the node that has focus, or null
 view.cursor                 # where the last frame parked the cursor, { x, y }, or null while hidden
 view.scrollback             # what `Static` and `print` wrote above the frame so far, as it was written
 view.stderr                 # what `print.err` wrote
-view.close()                # unmount, and give the process its `document` slot back
+view.held                   # the mount's record, for a test that reaches past the driver: `doc`, `out`, `parser`, `clock`, and `view`, the Screen (`alt`, `interactive`, `origin`)
+view.close()                # unmount, and give the process its `document` slot back; a closed mount refuses to draw or be driven, by name
 ```
 
 Input takes the road `run` reads stdin by — the same dispatch, the same
@@ -435,6 +438,13 @@ test holds an update to a small repaint; `mount App, damage: false`
 (and `run`) owes every cell of every frame, for a frame to compare
 against. A `quit` from the app closes the mount and resolves
 `view.done` with its value.
+
+`bytes`, `damage` and `cursor` describe the last `frame()`: a frame that
+draws nothing leaves `bytes` empty and `damage` 0, and the OSC 52 write
+of a release sits in `bytes` until the next frame. `send` coordinates
+are the terminal's: once `Static` or `print` has written rows above the
+frame, the frame's row `r` is terminal row `min(rows written, rows −
+frame height) + r`.
 
 The terminal document is a global of the process, so one app is
 mounted at a time: a second `mount`, `run`, or `renderToString` is
@@ -510,7 +520,7 @@ prevented:
 
 | Key | Does | Keep the key with |
 |---|---|---|
-| Tab, Shift-Tab (no Ctrl, Alt or Meta) | focus to the next or the previous node | `event.preventDefault()` — a text input that takes Tab |
+| Tab, Shift-Tab — a Shift-Tab arrives as `Tab` with `shiftKey` (no Ctrl, Alt or Meta) | focus to the next or the previous node | `event.preventDefault()` — a text input that takes Tab |
 | Ctrl-C | `quit()` | `event.preventDefault()` — an app that asks before it leaves |
 | Escape | nothing: closing a dialog or clearing an input is the app's | |
 
@@ -553,8 +563,13 @@ wide glyphs is measured, not counted. After every frame the hardware
 cursor is parked there and shown, where an input method and a screen
 reader look for it. Content offsets above the node move it, and a clip
 that leaves its cell out — or a frame taller than the terminal, whose
-top rows are not shown — hides it. On `quit` it returns to the line
-below the frame.
+top rows are not shown — hides it, as does a place outside what the
+node inks (its box, and words of its own that spill past it; the cell
+after its last column counts, as an insertion point), so a cursor
+computed from state that is stale for a frame disappears for that frame
+and the app goes on. Only a value that is no
+place at all — not `{ x, y }`, or not whole cells — is refused at the
+write. On `quit` it returns to the line below the frame.
 
 A text input inserts `event.key` when it is one code point, and cuts
 its buffer into clusters for Backspace and for the cursor's column (the
@@ -591,10 +606,12 @@ read is one frame, however many keys
 it holds, and a key that changes nothing owes no frame and draws
 nothing. On the select list above with ten items, an arrow key — its
 bytes through the parser, the dispatch, the listener, the state change,
-and the frame of 12 cells and 55 bytes it causes — is about 8 µs, and a
-key no listener acts on about 0.3 µs; with a hundred items the arrow is
-about 55 µs, since each item's `inverse` is a binding that reads `at`
-(Apple M5, Bun 1.4.2; `bun run keys` in `bench/`).
+and the frame of 12 cells and 55 bytes it causes — is about 5.5 µs, and
+a key no listener acts on about 0.2 µs; with a hundred items the arrow
+is about 42 µs, since each item's `inverse` is a binding that reads
+`at` (`bench/RESULTS.md`; `bun run keys` in `bench/`). Those keys move
+texts that keep their size; a text that changes size runs a layout of
+the whole tree, about 0.5 ms at 4,000 nodes.
 
 Ctrl-Z is [PLAN.md](PLAN.md)'s lifecycle step.
 
@@ -662,8 +679,8 @@ left. Motion is cheap. A report that keeps its target dispatches
 nothing — no event is made unless a listener would hear it, for
 `mousemove`, `mouseenter` and `mouseleave` alike — and draws nothing;
 one that crosses from one row to the next costs the two rows' cells. On
-a tree of 1,576 elements a motion report is about 0.5 µs and a click
-about 1 µs, parser included (`bun run hit` in `bench/`). In inline mode
+a tree of 2,403 nodes a motion report is about 0.6 µs and a click about
+1.1 µs, parser included (`bench/RESULTS.md`; `bun run hit` in `bench/`). In inline mode
 the frame is not at the terminal's first row, so with the mouse the
 package asks the terminal where its cursor is (`CSI ? 6 n`) once the app
 stands and after every resize, and lowers the answer when a frame
@@ -717,7 +734,7 @@ already in that mode works without the option. Three rules for an app:
 reads stdin through it, and `mount` sends a test's bytes through it. A
 `key` becomes a `keydown`, a `paste` a `paste`, and the terminal's
 `focus` / `blur` reports `screen.focused`. What a text input can rely
-on:
+on: `screen.cols` and `screen.rows` are reactive reads of the terminal's size, 80 × 24 before `run`.
 
 - **Typed text is one `key` event per code point**, never per grapheme
   cluster: a cluster can be cut between two reads, and only code points
@@ -801,7 +818,7 @@ Terminal, Ghostty, kitty and iTerm2 honor: a number from 0 to 1,
 `'error'`, `'indeterminate'`, or `null` to clear. It goes out with the
 next frame's write, and is cleared on every way out.
 
-## What is here, and what is planned
+## What is here
 
 [PLAN.md](PLAN.md) is the design and the order of work. `bench/` holds
 the harness with its terminal reducer, both contenders (`bun run ink`,

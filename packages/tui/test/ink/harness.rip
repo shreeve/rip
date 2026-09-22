@@ -121,4 +121,4 @@ export differs =! (actual, ours, inks, why) ->
   throw Error.new "this frame equals Ink's — the stated difference is stale: #{why}" if got is JSON.stringify inks
   return
 
-process.on 'exit', -> console.log "#{stated} frames differ from Ink's tests by stated decision\n" if stated
+process.on 'exit', -> console.log "#{stated} cases answer other than Ink's tests expect, each by a stated difference or a refusal\n" if stated

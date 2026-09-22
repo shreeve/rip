@@ -142,6 +142,33 @@ def mounted(App, body)
 
 console.log "\nPackage"
 
+test "a Static container is looked at from its last written item: an item taken away sends the look back to the front, and nothing is written twice", ->
+  Log = component
+    @items := ['a', 'b']
+    render
+      Box flexDirection: 'column'
+        Static
+          for item in @items
+            Text key: item, "done #{item}"
+        Text "live"
+  view = mount Log, cols: 20
+  try
+    view.frame()
+    eq view.scrollback, "done a\ndone b\n"
+    view.app.items.value = ['a', 'b', 'c']
+    view.frame()
+    eq view.scrollback, "done a\ndone b\ndone c\n"
+    view.app.items.value = ['a', 'b']          # the last written item goes away
+    view.frame()
+    view.app.items.value = ['a', 'b', 'd']     # the look starts over and finds only what is not written
+    view.frame()
+    eq view.scrollback, "done a\ndone b\ndone c\ndone d\n"
+    view.app.items.value = ['a', 'b', 'd']
+    view.frame()
+    eq view.scrollback, "done a\ndone b\ndone c\ndone d\n", 'nothing is written twice'
+  finally
+    view.close()
+
 test "module exports the entry surface and nothing else", ->
   eq Object.keys(mod).sort(), ['Box', 'Newline', 'Spacer', 'Static', 'Text', 'clock', 'focus', 'mount', 'print', 'quit', 'renderToString', 'run', 'screen', 'suspend']
 
@@ -153,6 +180,34 @@ test "declares no dependencies", ->
 # ==[ Document ]==
 
 console.log "\nDocument"
+
+test "a cleared style keeps its slot as undefined, and a node whose every style is cleared is bare to layout and free to nest as text", ->
+  Bare = component
+    render
+      div
+        span "words"
+  view = mount Bare, cols: 20
+  try
+    view.frame()
+    box = document.body.firstChild
+    box.set 'paddingLeft', 2
+    view.frame()
+    eq box.styles.paddingLeft, 2
+    box.set 'paddingLeft', undefined
+    view.frame()
+    ok Object.hasOwn(box.styles, 'paddingLeft'), 'the slot stays'
+    eq box.styles.paddingLeft, undefined
+    ok box.lay.bare, 'layout reads the node as bare again'
+    # A span whose layout style was cleared may be nested in text: the
+    # cleared key is no style.
+    inner = document.createElement 'span'
+    inner.set 'marginLeft', 1
+    inner.set 'marginLeft', undefined
+    outer = box.firstChild
+    outer.appendChild inner
+    ok inner.parentNode is outer
+  finally
+    view.close()
 
 test "install is scoped: the process gets its document slot back", ->
   eq typeof document, 'undefined'
@@ -384,7 +439,9 @@ test "a style object taken away takes its keys with it, and leaves the props", -
     eq show(), "┌────┐\n│hi  │\n└────┘"
     app.look.value = undefined
     eq show(), "hi"
-    eq document.body.firstChild.styles, { width: 6 }
+    styles = document.body.firstChild.styles
+    eq styles.width, 6
+    eq [styles.borderStyle, styles.paddingLeft], [undefined, undefined]
 
 # ==[ Layout ]==
 
@@ -2370,3 +2427,15 @@ test "progress is nothing off a terminal, and with no app mounted", ->
     eq view.held.view.clearProgress(), ''
   finally
     view.close()
+
+test "a closed mount takes no key and draws no frame: press, paste and frame refuse by name", ->
+  Quiet = component
+    render
+      Text "still"
+  view = mount Quiet, cols: 10
+  view.frame()
+  view.close()
+  for drive in [(-> view.press 'a'), (-> view.paste 'x'), (-> view.send 'b'), (-> view.frame())]
+    refused = null
+    try drive() catch error then refused = error
+    ok refused?.message.includes('this mount is closed'), "refused: #{refused?.message}"

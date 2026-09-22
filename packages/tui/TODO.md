@@ -40,13 +40,16 @@ steps are in [PLAN.md](PLAN.md).
       compiled. Warm the bench longer, or make the path smaller.
 - [ ] A `Static` batch lays its container out as a root, and the
       body's next layout puts the container away again by visiting
-      every item under it: a walk as long as the list, per batch. The
-      1,000-append row of the bench (PLAN §11) is unmeasured.
+      every item under it: a walk as long as the list, per batch, and
+      the reconciler's keyed `for` walks the list again. An append
+      costs 151 µs over 1,000, 173 over 4,000, 274 over 8,000
+      (`rip bench/tui.rip static N`).
 - [ ] `Static`'s items are elements; a bare text under `Static` is
       never hidden and is painted again with every batch.
-- [ ] `print` and a `Static` item write nothing on the alternate
-      screen, where Ink keeps them for the way out; console capture
-      (PLAN §8) decides what a run there keeps.
+- [ ] A line that ends exactly at a space at the cell width keeps that
+      space at the head of the next line: `Box width: 5` holding
+      `Text "abcde fgh"` draws `"abcde\n fgh"` where Ink draws
+      `"abcde\nfgh"` (PLAN §11).
 
 ## 6. Input and focus
 
@@ -61,11 +64,11 @@ steps are in [PLAN.md](PLAN.md).
       subtrees whole: unmeasured on a tree of 10,000 nodes.
 - [ ] A select list that marks its choice with one binding an item
       (`inverse: n is at`) pays for every item on every arrow key: about
-      55 µs at a hundred items where ten cost 8 (`bun run keys`).
+      42 µs at a hundred items where ten cost 5.5 (`bun run keys`).
 - [ ] After a resize the frame's row is asked of the terminal again
       from what was the top-left; a terminal whose reflow moves the
       cursor off that row places clicks wrongly until the next resize.
-      The alternate screen (step 5) has no such row.
+      The alternate screen has no such row.
 - [ ] A selection is held to the rows the grid shows: in a frame
       taller than the terminal a drag past the top row selects nothing
       above it, and the tree rows scrolled out are not on the clipboard.
@@ -91,3 +94,7 @@ steps are in [PLAN.md](PLAN.md).
 - A spelling for a capture listener in a render block. The package reads
   a type that ends in `Capture` (`@keydownCapture:`), since `@name:` is
   always `addEventListener(name, handler)` with no third argument.
+- A name that is not defined, read as a prop of an element that holds a
+  keyed `for`, surfaces as a reconciler `TypeError` (`anchor.parentNode`,
+  `src/runtime/components.js:590`) with no node named, where the same
+  read on an element without the `for` surfaces as the `ReferenceError`.

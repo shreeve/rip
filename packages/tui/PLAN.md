@@ -59,12 +59,11 @@ together, counted by `bench/lines.rip` and quoted from
 
 | Row | Ink + Yoga | Rip TUI |
 |---|---|---|
-| Framework only | Ink `src/` 6,760 | 4,252 |
-| Framework + layout algorithm | + Yoga 3.2.1 `yoga/algorithm/` 3,042 = 9,802 | 4,252 (`layout.rip` is 1,466 of it) |
-| Full runtime closure | + React, react-reconciler, scheduler and 33 more packages | + Rip runtime 1,598 (`reactive.js`, `components.js`) = 5,850 |
+| Framework only | Ink `src/` 6,760 | 4,269 |
+| Framework + layout algorithm | + Yoga 3.2.1 `yoga/algorithm/` 3,042 = 9,802 | 4,269 (`layout.rip` is 1,466 of it) |
+| Full runtime closure | + React, react-reconciler, scheduler and 33 more packages | + Rip runtime 1,598 (`reactive.js`, `components.js`) = 5,867 |
 
-Yoga is counted at 3.2.1, the version Ink 7.1.1 ships (`lines.rip`
-refuses any other). The honest headline is **2.3× smaller** with the
+Yoga is counted at 3.2.1, the version Ink 7.1.1 ships, at `misc/yoga` or the checkout `YOGA_SRC` names (`lines.rip` refuses any other). The honest headline is **2.3× smaller** with the
 layout algorithm on both sides, and 1.6× framework against framework:
 not the 3× the
 budget aimed at, since the package ships the mouse, the enhanced
@@ -111,8 +110,8 @@ README carries this matrix.
 
 Ink's string `Transform` has no counterpart because it has no job
 here: a text transform is an ordinary expression in the binding
-(`"#{name.toUpperCase()}"`), and per-cell restyling is a style
-callback (§6).
+(`"#{name.toUpperCase()}"`), and a run that needs a style of its
+own is its own `span` (§6).
 
 ## 3. Architecture
 
@@ -125,7 +124,7 @@ component effects ──► node setters ──► dirty marks ──► frame f
 ```
 
 One flush per reactive batch: a microtask, a minimum interval of about
-8 ms, deferred while `write()` reports backpressure. Each key of a
+8 ms. Each key of a
 stdin read is a reactive turn of its own — the tree a key meets is the
 tree the key before it left — and a read is still one frame, because a
 change books a frame and does not draw one. Rip flushes effects
@@ -138,17 +137,17 @@ write by hand; hot loops use the indexed `for x, i in` form).
 
 | Module | Job | Code lines |
 |---|---|---|
-| `tui.rip` | Entry: `run`, `mount` and its input, `renderToString`, `suspend`, `screen`, `focus`, widgets, `print`, `clock`; the delivery of events, the default actions | 310 |
-| `document.rip` | Terminal document: nodes, tree links, the event and its dispatch, style road, keyboard traits, damage marks | 388 |
-| `focus.rip` | Who can hold focus, tree order, taking it, settling it | 62 |
+| `tui.rip` | Entry: `run`, `mount` and its input, `renderToString`, `suspend`, `screen`, `focus`, widgets, `print`, `clock`; the delivery of events, the default actions | 307 |
+| `document.rip` | Terminal document: nodes, tree links, the event and its dispatch, style road, keyboard traits, damage marks | 390 |
+| `focus.rip` | Who can hold focus, tree order, taking it, settling it | 64 |
 | `layout.rip` | Flexbox, containing blocks, baseline, cache, edge rounding | 1,466 |
 | `text.rip` | Sanitize, grapheme clusters, width, wrap, truncate | 421 |
-| `paint.rip` | Cell grids, styles at the terminal's depth, clip, borders, backgrounds, the selection overlay, damage, diff, a subtree painted once | 694 |
-| `screen.rip` | Frames, pacing, the cursor, where the frame sits, the write above the frame (`Static`, `print`, the console), progress, the alternate screen | 173 |
+| `paint.rip` | Cell grids, styles at the terminal's depth, clip, borders, backgrounds, the selection overlay, damage, diff, a subtree painted once | 713 |
+| `screen.rip` | Frames, pacing, the cursor, where the frame sits, the write above the frame (`Static`, `print`, the console), progress, the alternate screen | 177 |
 | `input.rip` | Key tokenizer and decoder, paste, mouse, replies | 315 |
 | `mouse.rip` | Hit test, the mouse events, hover, selection and the clipboard | 211 |
-| `terminal.rip` | Setup / teardown: raw mode, the modes, the probes, the cursor, the alternate screen, the signals, suspend and resume, the console, the depth read | 181 |
-| | **Total** | **4,222 built; about 4,250 complete** |
+| `terminal.rip` | Setup / teardown: raw mode, the modes, the probes, the cursor, the alternate screen, the signals, suspend and resume, the console, the depth read | 205 |
+| | **Total** | **4,269** |
 
 Lines are counted as §2 counts them: non-blank and non-comment. Events,
 focus, the cursor and stdin are 285 of them (85 in `tui.rip`, 99 in
@@ -350,10 +349,7 @@ byte as upstream wrote them, against a test-only shim shaped like the
   of its hand-written cases for measure functions, the measure cache,
   measure modes, rounding, dirtying, and computed edges
   (`test/yoga-hand.rip`; `test/yoga/SOURCE.md` says which are left out
-  and why). Real
-  `yoga-layout` 3.2.1, the release Ink ships, passes 537 of the 543
-  through the same runner: it predates the intrinsic keywords and one
-  alignment fix.
+  and why).
 - **Two cases answer differently on purpose, pinned, not skipped**
   (divergences 1 and 6 below). The runner holds each differing
   expectation to this engine's exact answer, with the reason beside
@@ -527,12 +523,11 @@ are benchmarked, since a cell diff can emit more than a line diff.
 **Decided — styling is structural only.** Raw ANSI inside text is what
 forces Ink's 509-line tokenizer and repeated re-tokenizing. Text is
 sanitized once in the `data` setter (escape and control characters
-stripped, tabs expanded). For text that arrives pre-colored, an opt-in
-`ansi(str)` helper parses SGR into styled spans once, outside the
-paint path. Ink's string `Transform` is replaced by a per-cell style
-callback.
+stripped, tabs expanded). Text that arrives pre-colored is sanitized like any
+other — its escapes are stripped — and a run that needs a style of its
+own is its own `span`.
 
-**Held to Ink's own tests.** `test/ink/` ports 478 of Ink's paint
+**Held to Ink's own tests.** `test/ink/` ports 521 of Ink's paint
 cases — borders, backgrounds, overflow, text, wrapping, truncation,
 widths, hyperlinks, content offset, position, display, the flex files
 — with every expected frame taken from published Ink 7.1.1 as an
@@ -584,7 +579,7 @@ blanks off, as the plain form does.
 
 ## 7. Input, focus, cursor (`input.rip`, `document.rip`)
 
-**Events replace hooks** (built: `document.rip`, `tui.rip`). A key is
+**Events replace hooks**. A key is
 a `keydown` sent to `focus.active`, or to `document.body` while nothing
 has focus, as DOM sends it — never to the app's first element, which
 would change target as a sibling came before it and leave a second root
@@ -718,7 +713,7 @@ in `test/input/`, 205 held to Ink's answer under one mapping to DOM
 names and 39 stated differences; `test/input/SOURCE.md` lists them and
 the 12 left out.
 
-**Enhanced keyboard** (built: `terminal.rip`) is opt-in (`run App, keyboard:
+**Enhanced keyboard** is opt-in (`run App, keyboard:
 'enhanced'`; the default is `'basic'`, and any other value is refused
 by name). Setup asks the terminal for the kitty protocol's
 disambiguation flag and teardown withdraws it; the decoder is always
@@ -750,7 +745,7 @@ forwards xterm's modify-other-keys form (`CSI 27 ; mod ; code ~`), which
 the decoder reads; and the 500 ms `escape-time` that delays a lone
 Escape for every terminal program, which is the user's to lower.
 
-**Mouse** (built: `mouse.rip`, the modes and the probe in `terminal.rip`) is
+**Mouse** is
 opt-in (`run App, mouse: true`), because capture takes over the
 terminal's own text selection. `true` asks for button-event tracking
 (`CSI ? 1002 h`) and SGR reports (`CSI ? 1006 h`): presses, releases,
@@ -843,7 +838,7 @@ two rows' cells when the pointer crosses, and nothing while it rests. A
 report that arrives while the mouse is off is dropped, never typed. Ink
 has no mouse support.
 
-**Selection** (built: `mouse.rip`, the overlay in `paint.rip`). With the
+**Selection**. With the
 mouse on, a drag with the left button selects the cells from the press
 to the pointer in reading order — linear, as a terminal selects: the
 first row from the press to its end, the rows between whole, the last
@@ -876,7 +871,7 @@ margin, which is what the bench drives). It is a paint-only change,
 so a scroll runs no layout. A wheel handler
 that adjusts the offset is the whole scrolled-list pattern.
 
-**Focus** (built: `focus.rip`) belongs to a node and follows tree
+**Focus** belongs to a node and follows tree
 order, found by a walk when Tab is pressed (Ink keeps the order its
 hooks registered in, and focuses by id). Any element takes
 `focusable`, `autofocus` and `disabled`, which are switches kept on the
@@ -919,7 +914,7 @@ and a focusable node inside a focusable node is reached after it.
   DOM's does; `node.focused` is a reactive read, minted on first use,
   which is how a node styles itself by its focus through `ref:`.
 
-**Cursor** (built: `screen.rip`). A focused node declares `cursor:
+**Cursor**. A focused node declares `cursor:
 {x, y}`, whole cells from its own rounded corner, border and padding
 included, `x` in cells and not in characters. After each frame the
 renderer parks the hardware cursor there and shows it, and hides it
@@ -938,7 +933,7 @@ hardware cursor. A cursor belongs to a node, so in a frame taller than
 the terminal it stays with its row of the tree, where Ink counts `y`
 from the top of what is shown.
 
-**stdin** (built: `terminal.rip`; every way out is §8's). `run
+**stdin** (every way out is §8's). `run
 App, stdin:` reads a stdin that is a terminal and can be set raw: raw
 mode, `ref`, `resume`, one `data` listener feeding the `Parser`, and
 bracketed paste (`CSI ? 2004 h`) and focus reports (`CSI ? 1004 h`)
@@ -1141,15 +1136,13 @@ run App
 ## 10. Testing
 
 - `test.rip` on `rip/testing`, importing `rip/tui`, opening with a
-  "Package surface" section. Streams and the clock are injectable; no
-  pty dependency. One end-to-end smoke test runs under
-  `script -q /dev/null`.
+  "Package surface" section. Streams and the clock are injectable. Job
+  control — Ctrl-Z, `fg`, a signal while stopped — runs under
+  `test/terminal/ptyrun.py`, a pty shell the suite spawns (Python 3).
 - **Layout:** the Yoga suite and the ported aspect ratio cases (§5).
-- **Paint:** about 400 Ink cases ported as literal expected strings
-  plus a plain cell dump — borders 52, backgrounds 35, overflow 44,
-  text 57 (minus ANSI), wrap and width 32, dimensions 29, content
-  offset 23, position 13, render-to-string 37, log-update 34, resize
-  10, synchronized write 5, static 5, wide-character regressions 10.
+- **Paint:** 521 of Ink's 632 titles ported (`test/ink/SOURCE.md` says
+  what is left out and why), every frame from published Ink 7.1.1 as the
+  oracle.
 - **Damage:** `test/damage.rip` changes random trees a step at a time
   — texts, styles, clips, offsets, nodes inserted, removed, moved,
   hidden, a keyed list driven through its component, resizes — and
@@ -1446,7 +1439,7 @@ start. Each row is a rule the v0.1 code follows.
 |---|---|---|
 | Screen-reader output | `role` and every `aria-*` attribute are accepted and stored on the node, never rejected as unknown keys, so components are written accessibly from day one. The hardware cursor follows focus (§7). | One tree walk that serializes roles, states, and labels as linear text — the counterpart of Ink's `renderNodeToScreenReaderOutput`. |
 | Windows | Rip itself claims only macOS and Linux (CI is Linux). All platform code lives in `terminal.rip`. Resize comes from the stream's `resize` event, never the SIGWINCH signal. Suspend is guarded by platform. The painter never writes the last cell of the last row. Nothing rejects `win32`. | A CI lane and whatever it finds. |
-| Error overview | Uncaught errors and the runtime's component error hook (`__setErrorHandler`) route through one reporter that restores the terminal first. | A prettier reporter: source excerpt and mapped stack. |
+| Error overview | An uncaught error, and a child that fails to construct (the runtime's `__setChildFailureReporter`), give the terminal back first and reach the listeners after the package's, once (§8). | A prettier reporter: source excerpt and mapped stack. |
 | Right-to-left | The reverse directions already flip an axis (§5). | A flip per direction, the 543 RTL halves, and bidirectional text. |
 
 ## 14. Decisions
@@ -1455,12 +1448,12 @@ start. Each row is a rule the v0.1 code follows.
    on raw tags and unknown rest props are errors in the TypeScript face
    only (`rip check`, the editor); they compile and run. The skeleton
    ships with that limit; a typed rest / attribute vocabulary for
-   non-HTML hosts lands in the compiler, as its own PR, before PR 6.
+   non-HTML hosts is filed separately (TODO §8).
    Declaring every prop on `Box` is rejected at a measured 9× mount
    cost.
 2. **Yoga's suite — decided.** Vendored as-is under `test/yoga/`.
 3. **RTL — decided.** Deferred behind the direction seam (§5).
-4. **Static position and baseline — decided.** In scope for PR 2 (§5).
+4. **Static position and baseline — decided.** In scope (§5).
 5. **Name.** `@rip/tui`, imported as `rip/tui`.
 
 ## 15. Risks
@@ -1470,5 +1463,5 @@ start. Each row is a rule the v0.1 code follows.
   sequences; mitigated by forced column moves, not solved.
 - Inline reflow after a resize can only be estimated.
 - tmux strips kitty sequences and delays ESC by 500 ms by default.
-- A cell diff can write more bytes than a line diff; measured in PR 0.
+- A cell diff can write more bytes than a line diff; the bench counts bytes per update.
 - A global `document` is visible to every module in the process.

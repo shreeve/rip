@@ -74,7 +74,9 @@ RUN     =! 1024        # the reads of a paste joined into one string
 
 STREAM =! { stream: true }
 WHOLE  =! { ignoreBOM: true }   # a byte-order mark is a character, not the decoder's to take
-TIMERS =! { after: (ms, fn) -> (timer = setTimeout fn, ms; -> clearTimeout timer) }
+# The timers the package runs on outside a test: the process's own, which
+# never keep it alive by themselves (the clock in tui.rip reads them too).
+export TIMERS =! { now: (-> performance.now()), after: (ms, fn) -> (timer = setTimeout fn, ms; timer.unref?(); -> clearTimeout timer) }
 
 BODY =! /^[\d;:]*$/
 STOP =! /[\x07\x1b]/g
@@ -109,7 +111,7 @@ TILDE =! {
 # DOM having none.
 NAMED =! { 8: 'Backspace', 9: 'Tab', 13: 'Enter', 27: 'Escape', 127: 'Backspace' }
 
-name =! (from, names) ->
+name! =! (from, names) ->
   NAMED[from + n] = key for key, n in names.split ' '
   return
 
@@ -161,7 +163,7 @@ keyOf =! (code, mods, shifted) ->
 # ctrl; 32 is motion; 64 a wheel, whose low bits are up, down, left,
 # right; 128 xterm's buttons 8 to 11, DOM's 3 to 6. Low bits of 3 are
 # "no button" only under neither flag.
-mouse =! (fields, final, out) ->
+mouse! =! (fields, final, out) ->
   return unless fields.length is 3 and (final is 'M' or final is 'm')
   bits = num fields[0]
   x = num fields[1]
@@ -184,7 +186,7 @@ mouse =! (fields, final, out) ->
 # (kitty, "Detection of support"), CSI ? … c (primary device
 # attributes), and CSI ? row ; column R (DECXCPR, the cursor report no
 # key can be mistaken for).
-answer =! (fields, final, out) ->
+answer! =! (fields, final, out) ->
   switch final
     when 'u'
       flags = num fields[0]
@@ -198,7 +200,7 @@ answer =! (fields, final, out) ->
 
 # The plain form is a key's reply to `CSI 6 n`, which the package never
 # sends; only the `?` form is an answer to its own probe.
-cursor =! (fields, out, marked = false) ->
+cursor! =! (fields, out, marked = false) ->
   y = num fields[0]
   x = num fields[1]
   return unless x >= 1 and y >= 1
@@ -245,7 +247,7 @@ export class Parser
   # is let go.
   flush: ->
     out = []
-    @settle out
+    @lapse out
     @half = ''
     @utf8.decode()
     out
@@ -285,13 +287,13 @@ export class Parser
 
   expire!: ->
     out = []
-    @settle out
+    @lapse out
     @late? out if out.length
 
   # What is held when its wait runs out: ESC alone is the Escape key, a
   # bare introducer is Alt and its character, an open paste ends as what
   # was collected, and anything else is discarded.
-  settle!: (out) ->
+  lapse!: (out) ->
     @stop?()
     @stop = null
     state = @state

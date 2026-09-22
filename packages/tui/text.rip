@@ -240,7 +240,7 @@ export A1   =! 1
 export B0   =! 2
 export B1   =! 3
 export DOTS =! 4
-export WIDE =! 5
+WIDE =! 5
 export ROW  =! 6
 
 ASKS =! 8   # the narrow offers a flow remembers its answers to

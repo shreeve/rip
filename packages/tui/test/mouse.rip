@@ -1070,7 +1070,7 @@ test "random trees, random cells: the target is the node the painter put there, 
     seed = (seed * 1664525 + 1013904223) % 4294967296
     seed / 4294967296
   pick = (list) -> list[Math.floor rand() * list.length]
-  counts = { rounds: 0, clicks: 0, spans: 0, divs: 0, bodies: 0, texts: 0, covered: 0, scrolled: 0, targets: 0 }
+  counts = { rounds: 0, clicks: 0, spans: 0, divs: 0, bodies: 0, texts: 0, covered: 0, scrolled: 0, targets: 0, cursors: 0 }
   for round in [0...300]
     view = mount Bare, cols: 30, mouse: true, selection: false
     try
@@ -1141,11 +1141,24 @@ test "random trees, random cells: the target is the node the painter put there, 
           counts.texts += 1
         { dx, dy } = shift target
         say "(#{x}, #{y}) on #{idOf target} at (#{target.rect.x + dx}, #{target.rect.y + dy}) came as (#{got.x}, #{got.y})" unless got.x is x - target.rect.x - dx and got.y is y - target.rect.y - dy
+        # The cursor's place is the hit test's cell: a cursor declared at
+        # the cell's place in the target lands on the cell (screen.rip). A
+        # `contents` node has no box of its own, so no cursor: it is the
+        # target only as the parent of a bare text.
+        if target.nodeType is 1 and target isnt document.body and target.styles.display isnt 'contents'
+          target.focusable = true
+          target.set 'cursor', { x: got.x, y: got.y }
+          target.focus()
+          view.frame()
+          say "(#{x}, #{y}) on #{idOf target}: a cursor at its place in the node is placed at #{JSON.stringify view.cursor}" unless view.cursor?.x is x and view.cursor?.y is y
+          target.set 'cursor', undefined
+          target.blur()
+          counts.cursors += 1
         counts.covered += 1 if nodes.some (node) -> node.nodeType is 1 and node isnt target and not under(target, node) and boxed node, x, y
         counts.scrolled += 1 if nodes.some (node) -> node isnt target and under(target, node) and node.styles?.overflow is 'hidden' and (node.styles.contentOffsetX or node.styles.contentOffsetY)
       counts.targets += seen.size
     finally
       view.close()
   # A fuzz that does nothing passes everything: hold it to its volume.
-  floors = { rounds: 250, clicks: 5000, spans: 450, divs: 3500, bodies: 900, texts: 60, covered: 1000, scrolled: 40, targets: 1000 }
+  floors = { rounds: 250, clicks: 5000, spans: 450, divs: 3500, bodies: 900, texts: 60, covered: 1000, scrolled: 40, targets: 1000, cursors: 3000 }
   ok counts[name] >= floor, "#{name}: #{counts[name]} is under the floor of #{floor} — #{JSON.stringify counts}" for own name, floor of floors

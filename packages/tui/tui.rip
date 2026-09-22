@@ -6,11 +6,11 @@
 import { __effect } from '../../src/runtime/reactive.js'
 import { install, failed, watch, Event } from './document.rip'
 import { tend, take, advance } from './focus.rip'
-import { Parser } from './input.rip'
+import { Parser, TIMERS } from './input.rip'
 import { Screen } from './screen.rip'
 import { Pointer } from './mouse.rip'
 import { palette } from './paint.rip'
-import { guard, setup, probe, reply, teardown, handover, stop as halt, ask, interactive as watched, depth as depthOf } from './terminal.rip'
+import { guard, setup, probe, reply, teardown, handover, stepping, stop as halt, ask, interactive as attended, depth as depthOf } from './terminal.rip'
 
 # ── Widgets ───────────────────────────────────────────────────────────────────
 # A box is a div and text is a span. Every prop a widget does not
@@ -67,9 +67,6 @@ print.err = (text) -> print text, live?.err ?? process.stderr
 
 # ── Animation ─────────────────────────────────────────────────────────────────
 
-# The timers a clock runs on outside a test: the process's own, which
-# never keep it alive by themselves.
-TIMERS =! { now: (-> performance.now()), after: (ms, fn) -> (timer = setTimeout fn, ms; timer.unref?(); -> clearTimeout timer) }
 
 # A clock: `frame`, `time` and `delta` as reactive reads, moved by one
 # timer for its interval. The timer runs only while a component that
@@ -273,14 +270,12 @@ open =! (App, options, out, terminal, stdin = null, clock = undefined) ->
   keys = options.keyboard ?? 'basic'
   throw Error.new "rip/tui: keyboard: #{JSON.stringify keys} is not 'basic' or 'enhanced'" unless keys is 'basic' or keys is 'enhanced'
   { doc, restore } = install()
-  view = Screen.new doc, out
-  view.whole = options.damage is false
-  view.interactive = not terminal or watched out
-  view.alt = terminal and view.interactive and options.altScreen is true
+  attending = not terminal or attended out
+  alternate = terminal and attending and options.altScreen is true
   # On a terminal the frame sits wherever the cursor was, which the
   # probe answers; until then, and where nothing answers, at the bottom.
   # The alternate screen's is its top.
-  view.origin = if terminal and not view.alt then Infinity else 0
+  view = Screen.new doc, out, { whole: options.damage is false, interactive: attending, alt: alternate, origin: (if terminal and not alternate then Infinity else 0) }
   cols = view.cols
   rows = view.rows
   interactive = view.interactive
@@ -289,7 +284,7 @@ open =! (App, options, out, terminal, stdin = null, clock = undefined) ->
   palette depth
   held = null
   # The next frame is drawn whole, at the size the terminal has now.
-  refresh = ->
+  redraw = ->
     cols = view.cols
     rows = view.rows
     held.pointer?.clear()
@@ -298,13 +293,13 @@ open =! (App, options, out, terminal, stdin = null, clock = undefined) ->
   # A resize reflows the terminal, so where the frame sits is asked again.
   resized = ->
     return if view.cols is cols and view.rows is rows
-    refresh()
+    redraw()
     ask held if held.mouse and held.raw and not view.alt
   settled = {}
   done = Promise.new (resolve, reject) ->
     settled.resolve = resolve
     settled.reject = reject
-  live = held = { app: null, view, out, err: options.stderr ?? out.err ?? process.stderr, doc, restore, resized, redraw: refresh, done, settled, terminal, depth, console: options.console isnt false, closing: false, over: false, parser: null, stdin, read: null, clock, mouse, pointer: null, probing: keys is 'enhanced', asked: false, enhanced: false, pushed: false, raw: false, up: false, entered: false, suspended: false, wake: null, hold: null, handlers: null, was: null, logs: [], close: (drawn, error = null) -> close drawn, error if live is held }
+  live = held = { app: null, view, out, err: options.stderr ?? out.err ?? process.stderr, doc, restore, resized, redraw, done, settled, terminal, depth, console: options.console isnt false, closing: false, over: false, parser: null, stdin, read: null, clock, mouse, pointer: null, probing: keys is 'enhanced', asked: false, enhanced: false, pushed: false, raw: false, up: false, entered: false, suspended: false, wake: null, hold: null, handlers: null, was: null, logs: [], close: (drawn, error = null) -> close drawn, error if live is held }
   held.parser = Parser.new { clock, late: (events) -> receive held, events }
   held.read = (chunk) -> receive held, held.parser.feed chunk
   if mouse
@@ -382,13 +377,16 @@ class Mount
   # is one paste; `send` is raw bytes through the parser, whose waits run
   # on a clock `tick` moves.
   press!: (key, mods = {}) ->
+    @driven()
     if key.charCodeAt(0) < 0x20 or key is '\x7f'
       @send key
       return
     receive @held, [{ type: 'key', key, ctrlKey: !!mods.ctrl, shiftKey: !!mods.shift, altKey: !!mods.alt, metaKey: !!mods.meta, repeat: !!mods.repeat, sequence: key }]
   type!: (text) -> @send text
-  paste!: (text) -> receive @held, [{ type: 'paste', text }]
-  send!: (bytes) -> receive @held, @held.parser.feed bytes
+  paste!: (text) -> @driven(); receive @held, [{ type: 'paste', text }]
+  send!: (bytes) -> @driven(); receive @held, @held.parser.feed bytes
+  # A closed mount takes no key, as it draws no frame.
+  driven!: -> throw Error.new 'rip/tui: this mount is closed — there is no app to drive' unless live is @held
   tick!: (ms) -> @held.clock.tick ms
 
   # Draw what the app shows and hand the frame back as plain text.
@@ -421,7 +419,7 @@ export mount =! (App, options = {}) ->
 # screen. Every step is taken whatever the others do, so a write that
 # fails cannot leave stdin raw or the document installed, and `done` is
 # settled here — with `error`, the first step that failed, or `result`.
-close =! (drawn, error = null, result = undefined) ->
+close! =! (drawn, error = null, result = undefined) ->
   held = live
   { app, view, out, doc, restore, resized, pointer, settled } = held
   live = null
@@ -429,24 +427,22 @@ close =! (drawn, error = null, result = undefined) ->
   keyboard = 'basic'
   doc.onOwe = null
   view.booked = false
-  step = (work) ->
-    try
-      work()
-    catch caught
-      error ?= caught
+  caught = { error }
+  step = stepping caught
   # A selection is the screen's, never the scrollback's.
   step -> pointer.clear() if pointer
   selected = ''
   if held.terminal
     step ->
-      caught = teardown held, drawn
-      error ?= caught
+      missed = teardown held, drawn
+      caught.error ?= missed
   step -> app?.unmount()
+  # The parser's wait is disarmed on every road, a mount's included.
   step -> held.parser.flush()
   step -> out.off? 'resize', resized
   step restore
   palette 3
-  if error then settled.reject error else settled.resolve result
+  if caught.error then settled.reject caught.error else settled.resolve result
 
 # Hand the terminal to `fn` — an editor, a shell — and take it back
 # once `fn` settles, with a whole frame: the road Ctrl-Z takes, without
@@ -459,7 +455,7 @@ export suspend =! (fn) ->
 # process its `document` slot back. The work waits for the turn to end,
 # so a `quit` called from inside an effect still draws what that same
 # change owed; an app closed by hand before then is left as it was.
-export quit =! (result) ->
+export quit! =! (result) ->
   return unless live and not live.closing
   held = live
   held.closing = true
