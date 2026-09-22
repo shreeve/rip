@@ -513,7 +513,8 @@ test! "a teardown is taken once: a quit while suspended withdraws nothing twice,
   suspend! ->
     quit()
     await running.done
-  eq [term.since(0).split(OFF).length - 1, term.since(0).split(QUIET).length - 1, stdin.calls.filter((call) -> call is 'raw off').length], [1, 1, 1]
+  eq [term.since(0).split(OFF).length - 1, term.since(0).split(QUIET).length - 1, term.since(0).split(SHOW).length - 1, stdin.calls.filter((call) -> call is 'raw off').length], [1, 1, 1, 1]
+  eq term.cursor, { x: 0, y: 1 }, 'the cursor landed below the frame once'
   mark = term.sent.length
   running.quit()
   sleep! 0
