@@ -951,7 +951,8 @@ test! "a quit whose last owed frame fails still shows the cursor and withdraws t
   catch error
     failure = error
   ok failure?.message.includes('layout did not settle'), "done rejected with #{failure?.message}"
-  ok term.shown and not term.modes.has(2004) and not term.modes.has(1004), 'the cursor is shown and the modes withdrawn'
+  ok term.since(0).endsWith("#{OFF}#{CSI}?25l\r\n#{CSI}?25h"), JSON.stringify term.since(0).slice -40
+  eq [term.cursor, term.modes.has(2004), term.modes.has(1004)], [{ x: 0, y: 1 }, false, false], 'the cursor is on the line below the frame, shown, and the modes are withdrawn'
   eq [stdin.raw, stdin.listenerCount('data'), typeof document], [false, 0, 'undefined']
 
 test! "a stdin whose raw mode cannot be set fails the run and leaves nothing installed", ->
