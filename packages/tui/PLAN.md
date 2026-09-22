@@ -61,7 +61,7 @@ together, counted by `bench/lines.rip` and quoted from
 |---|---|---|
 | Framework only | Ink `src/` 6,760 | 4,308 |
 | Framework + layout algorithm | + Yoga 3.2.1 `yoga/algorithm/` 3,042 = 9,802 | 4,308 (`layout.rip` is 1,466 of it) |
-| Full runtime closure | + React, react-reconciler, scheduler and 33 more packages | + Rip runtime 1,598 (`reactive.js`, `components.js`) = 5,906 |
+| Full runtime closure | + React, react-reconciler, scheduler and 33 more packages | + Rip runtime 1,601 (`reactive.js`, `components.js`) = 5,909 |
 
 Yoga is counted at 3.2.1, the version Ink 7.1.1 ships, at `misc/yoga` or the checkout `YOGA_SRC` names (`lines.rip` refuses any other). The honest headline is **2.3× smaller** with the
 layout algorithm on both sides, and 1.6× framework against framework:
