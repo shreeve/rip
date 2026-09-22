@@ -1,0 +1,65 @@
+# ==============================================================================
+# tui bench — what one mouse report costs on a tree of 1,576 elements
+#
+#   cd packages/tui/bench
+#   bun run hit
+#
+# A motion report that keeps its target (the parser and the hit test),
+# one that changes it (leave and enter), the same with a mousemove
+# listener, a click (down, up, click, focus), and the parser alone, to
+# subtract.
+# ==============================================================================
+
+import { mount, Box, Text } from 'rip/tui'
+
+ROWS =! (r for r in [0...75])
+COLS =! (c for c in [0...10])
+
+# 1 + 75 + 750 + 750 = 1,576 nodes
+Big = component
+  render
+    Box flexDirection: 'column'
+      for r in ROWS
+        Box key: r, flexDirection: 'row'
+          for c in COLS
+            Box key: c, width: 20
+              Text "cell #{r}.#{c}"
+
+CSI =! '\x1b['
+report =! (bits, x, y, final = 'M') -> "#{CSI}<#{bits};#{x + 1};#{y + 1}#{final}"
+
+count = 0
+countNodes = (node) ->
+  count += 1
+  kid = node.firstChild
+  while kid
+    countNodes kid
+    kid = kid.nextSibling
+
+view = mount Big, cols: 200, rows: 75, mouse: 'all'
+try
+  view.frame()
+  countNodes document.body
+  console.log "nodes: #{count}"
+  time = (label, times, work) ->
+    work() for n in [0...200]
+    start = performance.now()
+    work() for n in [0...times]
+    per = (performance.now() - start) / times * 1000
+    console.log "#{label}: #{per.toFixed 2} µs"
+
+  still = report 35, 7, 40
+  time 'motion report, same target', 20000, -> view.send still
+  # Alternate between two rows: every report changes the target.
+  flip = false
+  time 'motion report, target changes (leave + enter)', 20000, ->
+    flip = not flip
+    view.send report(35, 7, (if flip then 40 else 41))
+  document.addEventListener 'mousemove', ->
+  time 'motion report, same target, with a mousemove listener', 20000, -> view.send still
+  press = report(0, 150, 60) + report(0, 150, 60, 'm')
+  time 'click (down, up, click, focus)', 20000, -> view.send press
+  # The parser alone, to subtract.
+  time 'parser alone', 20000, -> view.held.parser.feed still
+finally
+  view.close()
