@@ -2227,6 +2227,26 @@ test "print writes above the frame, ending its line; print.err the same on stder
   finally
     view.close()
 
+test "a print from the turn that appends a Static item writes the item's row first: the scrollback is in the order of the program", ->
+  Steps = component
+    @done := []
+    ~> print "#{@done.length} done" if @done.length
+    render
+      Box flexDirection: 'column'
+        Static
+          for name in @done
+            Text key: name, "✓ #{name}"
+        Text "live"
+  view = mount Steps, cols: 20
+  try
+    view.frame()
+    view.app.done.value = ['one']
+    view.app.done.value = ['one', 'two']
+    view.frame()
+    eq view.scrollback, "✓ one\n1 done\n✓ two\n2 done\n"
+  finally
+    view.close()
+
 test "rowsToString is the grid's serializer, plain and with escape sequences", ->
   view = mount Journal, cols: 20, props: { live: 'here' }
   try
@@ -2274,9 +2294,9 @@ test! "examples/log.rip runs headless: the steps scroll into the scrollback as t
     view.tick 700 * 3
     later = view.frame()
     ok later.startsWith('⠧ link'), JSON.stringify later
-    # The warning's effect runs before the render block adds the step it
-    # is about, so it stands above that step.
-    eq bare(view.scrollback), "✓ resolve\n✓ fetch\nwarning: compile took the slow road\n✓ compile\n"
+    # The warning is printed in the turn that finishes the step it is
+    # about, and stands below that step.
+    eq bare(view.scrollback), "✓ resolve\n✓ fetch\n✓ compile\nwarning: compile took the slow road\n"
     ok view.bytes.includes("\x1b]9;4;1;50\x1b\\"), 'the terminal knows how far along'
     view.tick 700 * 3
     eq await view.done, undefined

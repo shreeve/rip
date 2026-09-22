@@ -814,7 +814,11 @@ an item is done: a change to its state or its removal from the list
 changes nothing on the terminal. An item is an element: a bare text
 under `Static` is refused by name as it is put there — wrap it in
 `Text`. An item under a hidden ancestor waits
-until it is shown. Off a terminal the rows go out as plain text as they
+until it is shown. A `print`, or a console line, writes the items not
+yet written first — those the same turn added included, even from an
+effect that runs before the render block that adds them — so the
+scrollback is in the order of the program. Off a terminal the rows go
+out as plain text as they
 arrive; on the alternate screen nothing is written above. `examples/log.rip`
 is a build log this way, with a spinner and a progress bar for the
 step under way.

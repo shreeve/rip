@@ -11,6 +11,7 @@
 # record of it: a frame first takes the cursor back to the top-left,
 # then draws, then parks it again, all in the one write.
 
+import { __batch } from '../../src/runtime/reactive.js'
 import { tend, visible } from './focus.rip'
 import { failed } from './document.rip'
 import { layout } from './layout.rip'
@@ -93,10 +94,15 @@ export class Screen
   # and the text to `err`, and the frame follows on the next write. The
   # frame's row moves down by the lines written. Off a terminal the
   # text goes as it is; on the alternate screen nothing is written
-  # above.
+  # above. What `Static` holds goes first, the items this turn added
+  # included: an effect that writes here runs before the render blocks
+  # its own write queued (they are deeper), so those run first, and the
+  # scrollback is in the order of the program.
   above!: (text, err = null) ->
     return unless text
-    @still() unless @batching   # what `Static` holds goes first
+    unless @batching
+      __batch ->
+      @still()
     @scrollback += text
     unless @interactive
       (err ?? @out).write text

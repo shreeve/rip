@@ -80,12 +80,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 9. Found by the live test runner
 
-- [ ] `print` writes above only the `Static` items already in the tree:
-      an effect that prints in the turn that appends an item runs
-      before the render block adds that item, so the item's row lands
-      below the printed text. The runner holds its ending back a tick
-      so its last lanes' rows are written before the failures it
-      prints.
 - [ ] A mount closed by `quit` draws no last frame, where `run` does:
       what the quitting turn added to `Static`, or changed in the
       frame, reaches neither `view.scrollback` nor the frame unless the

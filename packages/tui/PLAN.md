@@ -1112,7 +1112,8 @@ run App
 - `run(App, {stdin, stdout, stderr, damage, mouse, keyboard, selection,
   altScreen, console, pace})` → `{app, done, quit, flush}`, and `suspend(fn)`
   hands the terminal to `fn` and takes it back (§8).
-- `print(text)` writes text above the live frame, its line ended, and
+- `print(text)` writes text above the live frame, its line ended, after
+  every `Static` item not yet written, the turn's own included; and
   `print.err(text)` the same on stderr with the frame cleared on stdout
   first; with no app mounted the text goes to the stream as it is.
 - `mount(App, {cols, rows, props, damage, mouse, keyboard, selection,

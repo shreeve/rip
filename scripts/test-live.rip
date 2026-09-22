@@ -156,7 +156,6 @@ export class Tally
     @rows = cell []   # the scrollback's rows, in the order the lanes finished
     @start = cell null
     @end = cell null
-    @shown = false   # whether a frame has shown the summary yet
     @closed = false
     known = (record.ms for own label, record of @memory.lanes when record?.ms > 0)
     known.sort (x, y) -> x - y
@@ -389,15 +388,6 @@ export Board = component
         info: if counts then "#{commas entry.seen} / #{commas record.ran} tests" else if weight then "#{secs spent} / ~#{about weight}" else secs(spent)
       }
 
-  # The run ends a tick after its summary arrives, so the rows of the
-  # lanes that finished with it are in the tree before the run's end
-  # prints above them.
-  over ~=
-    frame
-    ended = summary? and @tally.shown
-    @tally.shown = summary?
-    ended
-
   wide ~= screen.cols >= 70
   name ~= Math.max 10, ...@tally.entries.map((entry) -> entry.lane.label.length)
   chosen ~= failures[Math.min(pick, failures.length - 1)] ?? null
@@ -463,7 +453,7 @@ export Board = component
   paneTitle ~= " #{chosen?.lane.label ?? ''} · lines #{top + 1}–#{Math.min(captured.length, top + tall)} of #{captured.length} "
 
   ~>
-    return unless over and not @tally.closed
+    return unless summary and not @tally.closed
     @tally.closed = true
     for lost in summary.failed
       print failureBlock(lost, PAINT)

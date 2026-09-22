@@ -254,7 +254,6 @@ test! "a green run's end card says so in its verdict, and exits 0", ->
     hear 0, { type: 'plan' }, { type: 'start', lane: lanes[2] }
     passing = { lane: lanes[2], status: 'pass', ms: 700, ran: 548, output: '548 tests: ok' }
     hear 700, { type: 'finish', result: passing }, { type: 'end', summary: { results: [passing], skipped: [], excluded: [], failed: [], wall: 700, ranTotal: 548, code: 0 } }
-    view.tick 100
     view.frame()
     card = cells.styled view.scrollback
     ok card.some((row) -> row.includes '«#4ade80 bold»✓«» «#4ade80 bold»All«» «#4ade80 bold»1«» «#4ade80 bold»lanes«» «#4ade80 bold»green«»'), 'the verdict, bold green'
