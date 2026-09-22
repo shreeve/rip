@@ -1,43 +1,52 @@
 # A small app under `run`, spawned by test/terminal.rip to take one way
 # out for real — a signal, an uncaught error, a `process.exit`, a loop
-# that drains, a stop and a continue — on a stdout that says it is a
-# terminal and writes through to the process's own, so whoever spawned
-# this reads every byte, and on the harness's stdin. The argument is
+# that drains — on a stdout that says it is a terminal and writes
+# through to the process's own, so whoever spawned this reads every
+# byte, and on the harness's stdin; or, as `tty`, on the process's own
+# streams under ptyrun.py's shell, with no timer, every key heard
+# written to stderr and the exit hook's code with it. The argument is
 # the way out; `pipe` and `ci` run on the process's stdout as it is.
 
-import { run, quit, screen, Box, Text } from 'rip/tui'
+import { run, quit, suspend, mount, screen, Box, Text } from 'rip/tui'
 import { Stdin } from '../events/harness.rip'
 
 way = process.argv[2]
 tty = { isTTY: true, columns: 40, rows: 10, write: (text) -> process.stdout.write text }
-stdin = Stdin.new()
+stdin = if way is 'tty' then process.stdin else Stdin.new()
 
 App = component
   @count := 0
   render
-    Box focusable: true, autofocus: true
+    Box focusable: true, autofocus: true, @keydown: ((event) -> process.stderr.write "key:#{event.key}\n" if way is 'tty')
       Text "count:#{@count}"
 
-options = { stdin, stdout: (if way is 'pipe' then process.stdout else tty), mouse: true }
-running = run App, options
-running.done.then (-> console.log 'exited'), (error) -> console.log "errored: #{error.message}"
-
-switch way
-  when 'throw' then setTimeout (-> raise 'a timer failed'), 20
-  when 'reject' then setTimeout (-> Promise.reject Error.new 'a promise failed'), 20
-  when 'exit' then setTimeout (-> process.exit 7), 20
-  when 'stop'
-    timer = setInterval (->), 1000
-    process.on 'SIGCONT', -> setTimeout (-> clearInterval timer; quit()), 40
-    setTimeout (-> stdin.key '\x1a'), 20
-  when 'pipe', 'ci'
-    timer = setInterval ->
-      running.app.count.value += 1
-      return unless running.app.count.value is 5
-      clearInterval timer
-      quit()
-    , 30
-  when 'drain' then null
-  else
-    screen.progress 0.5
-    setInterval (->), 1000
+if way is 'mountsuspend'
+  view = mount App
+  suspend! -> null
+  view.close()
+  setTimeout (-> raise 'a timer failed after the mount'), 20
+else
+  process.on 'exit', (code) -> process.stderr.write "exit hook code=#{code}\n" if way is 'tty'
+  process.on 'uncaughtException', ((error) -> process.stderr.write "handled once: #{error.message}\n"; process.exit 5) if way is 'userhandler'
+  options = { stdin, stdout: (if way is 'pipe' or way is 'tty' then process.stdout else tty), mouse: true }
+  running = run App, options
+  running.done.then (-> console.log 'exited'), (error) -> console.log "errored: #{error.message}"
+  switch way
+    when 'throw', 'userhandler' then setTimeout (-> raise 'a timer failed'), 20
+    when 'reject' then setTimeout (-> Promise.reject Error.new 'a promise failed'), 20
+    when 'exit' then setTimeout (-> process.exit 7), 20
+    when 'throwsuspend'
+      suspend! ->
+        setTimeout (-> raise 'a timer failed while suspended'), 20
+        sleep! 500
+    when 'pipe', 'ci'
+      timer = setInterval ->
+        running.app.count.value += 1
+        return unless running.app.count.value is 5
+        clearInterval timer
+        quit()
+      , 30
+    when 'drain', 'tty' then null
+    else
+      screen.progress 0.5
+      setInterval (->), 1000

@@ -20,6 +20,8 @@ import { run, quit, suspend, mount, renderToString, print, screen, Box, Text, St
 import { Log } from '../examples/log.rip'
 import { Terminal, Stdin, count, differs, tally } from './events/harness.rip'
 import { join } from 'path'
+import { tmpdir } from 'os'
+import { unlinkSync } from 'fs'
 
 # A test that fails with its app still live would hand its own report
 # to the app's console capture and leave the next test refused: every
@@ -166,6 +168,69 @@ class Child
     err = Response.new(@proc.stderr).text!
     await @pumping
     { code, out: @out, err }
+
+# test/terminal/child.rip's `tty` way as a job under ptyrun.py's shell:
+# a pty, a process group of its own, and the shell's own account of
+# every stop, continue and exit, as JSON lines. `steps` is what the
+# shell is scripted to do (ptyrun.py says how). A job that outlives the
+# limit is continued and killed, with its shell.
+class Pty
+  constructor: (steps, n = Pty.count += 1) ->
+    @keys = join tmpdir(), "rip-tui-#{process.pid}-#{n}.json"
+    Bun.write @keys, JSON.stringify steps
+    @events = []
+    @out = ''
+    @job = null
+    @proc = Bun.spawn ['python3', join(import.meta.dir, 'terminal/ptyrun.py'), join(import.meta.dir, 'terminal'), @keys, '--', join(ROOT, 'bin/rip'), 'child.rip', 'tty'], { cwd: import.meta.dir, env: { ...plainEnv({ CI: 'false', TERM: 'xterm-256color' }), NO_COLOR: undefined }, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' }
+    @timer = setTimeout (=> @kill()), LIMIT
+    @pumping = @pump()
+
+  pump!: ->
+    reader = @proc.stdout.getReader()
+    decoder = TextDecoder.new()
+    held = ''
+    loop
+      { done, value } = reader.read!
+      break if done
+      held += decoder.decode value, { stream: true }
+      lines = held.split '\n'
+      held = lines.pop()
+      for line in lines when line
+        event = JSON.parse line
+        @events.push event
+        @job = event.started if event.started?
+        @out += event.out if event.out?
+
+  kill!: ->
+    if @job
+      for signal in ['SIGCONT', 'SIGKILL']
+        try
+          process.kill -@job, signal
+        catch error
+          null
+    @proc.kill 'SIGKILL'
+
+  # The shell's events, without the output; and the output before the
+  # first event of `kind`.
+  get states: -> (event for event in @events when not event.out?)
+  before: (kind, nth = 1) ->
+    text = ''
+    for event in @events
+      if event[kind]?
+        nth -= 1
+        break if nth is 0
+      text += event.out if event.out?
+    text
+
+  finish: ->
+    code = await @proc.exited
+    clearTimeout @timer
+    err = Response.new(@proc.stderr).text!
+    await @pumping
+    unlinkSync @keys
+    { code, err, states: @states, out: @out }
+
+Pty.count = 0
 
 # ==[ Ink's cases ]==
 
@@ -512,6 +577,79 @@ test! "the run's handlers stand on the process only while the app is live, and a
   await running.done
   eq listeners(), before
 
+# Every state an app can be in, against every way out: the process's
+# listeners are as they were after each, and each way ends as it
+# should — a signal recorded as 128 + n with `done` resolved, a crash
+# seen once by the app's own handler with `done` rejected and no exit
+# recorded, an `exit` or a `quit` resolving `done`.
+test! "every state — running on a terminal, on a pipe, inside a suspend, stopped and continued, mounted, mounted after a suspend — against every way out: no listener left, and each way ends as it should", ->
+  before = listeners()
+  exits = []
+  held = process.exit
+  process.exit = (code) -> exits.push code
+  seen = []
+  user = (error) -> seen.push error.message
+  process.on 'uncaughtException', user
+  base = listeners()
+  Thrower = component
+    @heard := []
+    render
+      Box focusable: true, autofocus: true, @keydown: ((event) => if event.key is 'X' then raise 'a listener failed' else @heard.push event.key)
+        Text "t"
+  ways = ['quit', 'Ctrl-C', 'a listener that throws', 'SIGTERM', 'uncaughtException', 'exit']
+  for state in ['running on a terminal', 'running on a pipe', 'inside a suspend', 'stopped and continued', 'mounted', 'mounted after a suspend']
+    for way in ways.concat (if state.startsWith 'mounted' then ['close'] else [])
+      name = "#{state}, #{way}"
+      continue if state is 'inside a suspend' and way in ['Ctrl-C', 'a listener that throws']   # a key while suspended is nobody's
+      continue if state is 'running on a pipe' and way in ['Ctrl-C', 'a listener that throws']   # off a terminal no key is read
+      continue if state.startsWith('mounted') and way in ['Ctrl-C', 'a listener that throws', 'SIGTERM', 'uncaughtException', 'exit']   # no handler stands under mount: a throw is the test's, a signal the process's
+      stdin = Stdin.new()
+      term = Terminal.new()
+      pipe = Pipe.new()
+      if state.startsWith 'mounted'
+        view = mount Thrower
+        suspend! (-> null) if state is 'mounted after a suspend'
+        eq listeners(), base, name
+        if way is 'quit' then quit() else view.close()
+        await view.done
+        eq listeners(), base, name
+        continue
+      running = run Thrower, stdin: stdin, stdout: (if state is 'running on a pipe' then pipe else term)
+      settled = 'pending'
+      running.done.then (-> settled = 'resolved'), (-> settled = 'rejected')
+      if state is 'stopped and continued'
+        stdin.key '\x1a'
+        process.kill process.pid, 'SIGCONT'
+        sleep! 20
+        eq stdin.raw, true, "#{name}: continued"
+      leave = ->
+        switch way
+          when 'quit' then quit()
+          when 'Ctrl-C' then stdin.key '\x03'
+          when 'a listener that throws' then stdin.key 'X'
+          when 'SIGTERM' then process.emit 'SIGTERM'
+          when 'uncaughtException' then process.emit 'uncaughtException', Error.new "crashed #{name}"
+          # Only this package's exit handler — the first, since it is
+          # prepended — not the process's whole event, which the test
+          # reporter listens to as well.
+          when 'exit' then process.listeners('exit')[0] 0
+      if state is 'inside a suspend' then suspend! leave else leave()
+      sleep! 0
+      eq listeners(), base, name
+      eq typeof document, 'undefined', name
+      switch way
+        when 'SIGTERM'
+          eq [exits, settled], [[143], 'resolved'], name
+          exits.length = 0
+        when 'uncaughtException'
+          eq [seen, exits, settled], [["crashed #{name}"], [], 'rejected'], name
+          seen.length = 0
+        when 'a listener that throws' then eq settled, 'rejected', name
+        else eq [settled, exits], ['resolved', []], name
+  process.off 'uncaughtException', user
+  process.exit = held
+  eq listeners(), before
+
 test! "a suspend under mount hands nothing over and puts no handler on the process, before or after the close", ->
   before = listeners()
   view = mount Echo
@@ -584,6 +722,27 @@ test! "an unhandled rejection is the same way out", ->
   eq code, 1
   ok err.includes('a promise failed'), err
   ok out.replace(/exited\n$/, '').endsWith("#{QUIET}#{OFF}\n#{SHOW}"), JSON.stringify out.slice -60
+
+test! "an uncaught error while suspended: the app is closed, the error printed once, the cursor shown once, the exit 1", ->
+  child = Child.new 'throwsuspend'
+  { code, out, err } = child.finish!
+  eq code, 1
+  eq [err.split('a timer failed while suspended').length - 1, out.split(SHOW).length - 1], [1, 1]
+  ok not err.includes('Maximum call stack'), err
+  ok out.endsWith("#{QUIET}#{OFF}\n#{SHOW}"), JSON.stringify out.slice -80
+
+test! "an app's own uncaughtException handler sees the error once, with the terminal already given back, and its exit code stands", ->
+  child = Child.new 'userhandler'
+  { code, out, err } = child.finish!
+  eq [code, err], [5, 'handled once: a timer failed\n']
+  ok out.endsWith("#{QUIET}#{OFF}\n#{SHOW}"), JSON.stringify out.slice -80
+
+test! "a suspend under mount, then a close, leaves no handler behind: a later uncaught error is the runtime's, once", ->
+  child = Child.new 'mountsuspend'
+  { code, err } = child.finish!
+  eq code, 1
+  eq err.split('a timer failed after the mount').length - 1, 1
+  ok not err.includes('Maximum call stack'), err
 
 test! "a `process.exit` with the app live tears the terminal down on the way, and keeps its code", ->
   child = Child.new 'exit'
@@ -708,18 +867,50 @@ test! "a suspend with no app running is refused by name", ->
     refused = error.message
   ok /no app/.test(refused), refused
 
-test! "a stop and a continue, for real: the child gives the terminal back and stops itself; SIGCONT takes it back, and it quits clean", ->
-  child = Child.new 'stop'
-  child.seen! "#{QUIET}#{OFF}\n#{SHOW}"
-  sleep! 30
-  child.signal 'SIGCONT'
-  { code, out, err } = child.finish!
+# ==[ Job control ]==
+
+console.log "\nJob control"
+
+TORN =! "#{QUIET}#{OFF}\r\n#{SHOW}"   # the teardown as the pty shows it: a line feed comes back as CR LF
+
+test! "Ctrl-Z under `rip app.rip`: the terminal is given back and the job — the launcher and the app — is stopped, as the shell sees it", ->
+  job = Pty.new [[0, '?count:0'], [200, '\x1a'], [400, '%fg'], [200, '\x03'], [400, '']]
+  { code, err, states, out } = job.finish!
   eq [code, err], [0, '']
-  first = out.indexOf "#{QUIET}#{OFF}\n#{SHOW}"
-  rest = out.slice first + "#{QUIET}#{OFF}\n#{SHOW}".length
-  ok rest.startsWith("#{HIDE}#{ASK}#{MOUSE}#{PROBE}"), JSON.stringify rest.slice 0, 60
-  ok rest.includes('count:0'), 'the frame is drawn again'
-  ok rest.endsWith("#{QUIET}#{OFF}\n#{SHOW}exited\n"), JSON.stringify rest.slice -60
+  eq states.map((event) -> Object.keys(event)[0]), ['started', 'stopped', 'continued', 'exited', 'end'], JSON.stringify states
+  eq states[1], { stopped: 18 }, 'the job leader is stopped by SIGTSTP'
+  ok job.before('stopped').endsWith(TORN), JSON.stringify job.before('stopped').slice -60
+
+test! "fg: the app takes the terminal back, asks the row again, draws whole with no timer to keep it alive, and hears the next key", ->
+  job = Pty.new [[0, '?count:0'], [200, '\x1a'], [400, '%fg'], [400, 'x'], [300, '\x03'], [400, '']]
+  { code, states, out } = job.finish!
+  eq code, 0
+  eq states[2], { continued: 1 }
+  after = out.slice job.before('continued').length
+  ok after.startsWith("#{HIDE}#{ASK}#{MOUSE}#{PROBE}#{BEGIN}#{CSI}J#{CSI}1Gcount:0\r#{END}"), JSON.stringify after.slice 0, 80
+  ok after.includes('key:x') and out.includes('exit hook code=0'), JSON.stringify after
+
+test! "SIGTERM while stopped: pending until the continue, then the app is closed and the exit is 143, the app's exit hook run, no continuation of `done`", ->
+  job = Pty.new [[0, '?count:0'], [200, '\x1a'], [300, '@SIGTERM'], [300, '%fg'], [800, '']]
+  { code, states, out } = job.finish!
+  eq code, 0
+  ok states.some((event) -> event.stopped is 18), JSON.stringify states
+  ok states.some((event) -> event.exited is 143), JSON.stringify states
+  ok out.includes('exit hook code=143') and not out.includes('exited\r\n'), JSON.stringify out.slice -120
+  ok out.replace(/exit hook code=143\r\n$/, '').endsWith(TORN), JSON.stringify out.slice -80
+
+test! "keys in the read with Ctrl-Z are nobody's, and a key after the continue is heard", ->
+  job = Pty.new [[0, '?count:0'], [200, '\x1aab'], [400, '%fg'], [400, 'y'], [300, '\x03'], [400, '']]
+  { code, out } = job.finish!
+  eq code, 0
+  eq (out.match(/key:\w+/g) ?? []), ['key:z', 'key:y', 'key:c']
+
+test! "stopped and continued twice, then Ctrl-C: the shell sees two stops and two continues, and a clean exit", ->
+  job = Pty.new [[0, '?count:0'], [200, '\x1a'], [400, '%fg'], [400, '\x1a'], [400, '%fg'], [400, '\x03'], [400, '']]
+  { code, states } = job.finish!
+  eq code, 0
+  eq states.map((event) -> Object.keys(event)[0]), ['started', 'stopped', 'continued', 'stopped', 'continued', 'exited', 'end'], JSON.stringify states
+  eq states[5], { exited: 0 }
 
 # ==[ The alternate screen ]==
 
