@@ -86,7 +86,7 @@ README carries this matrix.
 
 | Must match in v0.1 | Beyond Ink in v0.1 | Disclosed gaps in v0.1 | Never |
 |---|---|---|---|
-| Flexbox layout incl. baseline, static position, and aspect ratio; borders, backgrounds | Mouse, opt-in: `@click`, `@wheel` (§7) | Screen-reader output mode (`role` / `aria-*` are accepted from the start, §13) | React devtools |
+| Flexbox layout incl. baseline, static position, and aspect ratio; borders, backgrounds | Mouse, opt-in: click, wheel, hover, and a drag that selects text to the clipboard (§7) | Screen-reader output mode (`role` / `aria-*` are accepted from the start, §13) | React devtools |
 | `overflow: hidden` clipping | Keys bubble from the focused node, with preventable default actions | Windows — unclaimed and untested, as for Rip itself (§13) | Concurrent rendering, Suspense |
 | Scrolling by content offset (`contentOffsetX` / `contentOffsetY`) | Tree-order focus | List virtualization | |
 | Wrap and truncate modes | Node-relative cursor placement | | |
@@ -131,16 +131,17 @@ write by hand; hot loops use the indexed `for x, i in` form).
 
 | Module | Job | Code lines |
 |---|---|---|
-| `tui.rip` | Entry: `run`, `mount` and its input, `renderToString`, `screen`, `focus`, widgets; stdin, the delivery of events, the default actions; to come: `clock` | 196, about 230 when complete |
-| `document.rip` | Terminal document: nodes, tree links, the event and its dispatch, style road, keyboard traits, damage marks | 377 |
+| `tui.rip` | Entry: `run`, `mount` and its input, `renderToString`, `screen`, `focus`, widgets; stdin, the modes, the probes, the delivery of events, the default actions; to come: `clock` | 249, about 285 when complete |
+| `document.rip` | Terminal document: nodes, tree links, the event and its dispatch, style road, keyboard traits, damage marks | 388 |
 | `focus.rip` | Who can hold focus, tree order, taking it, settling it | 62 |
 | `layout.rip` | Flexbox, containing blocks, baseline, cache, edge rounding | 1,466 |
 | `text.rip` | Sanitize, grapheme clusters, width, wrap, truncate | 421 |
-| `paint.rip` | Cell grids, styles, clip, borders, backgrounds, damage, diff | 639 |
-| `screen.rip` | Frames, pacing, the cursor; to come: alternate screen, `Static`, non-TTY | 95, about 290 |
-| `input.rip` | Key tokenizer and decoder, paste, mouse, replies; to come: keyboard negotiation | 312 |
+| `paint.rip` | Cell grids, styles, clip, borders, backgrounds, the selection overlay, damage, diff | 650 |
+| `screen.rip` | Frames, pacing, the cursor, where the frame sits; to come: alternate screen, `Static`, non-TTY | 105, about 300 |
+| `input.rip` | Key tokenizer and decoder, paste, mouse, replies | 315 |
+| `mouse.rip` | Hit test, the mouse events, hover, selection and the clipboard | 211 |
 | `terminal.rip` | To come: setup / teardown, signals, suspend, console capture | about 170 |
-| | **Total** | **3,568 built; about 3,970 complete** |
+| | **Total** | **3,868 built; about 4,280 complete** |
 
 Lines are counted as §2 counts them: non-blank and non-comment. Events,
 focus, the cursor and stdin are 285 of them (85 in `tui.rip`, 99 in
@@ -148,12 +149,21 @@ focus, the cursor and stdin are 285 of them (85 in `tui.rip`, 99 in
 on the same — `use-input`, `use-paste`, `use-focus`,
 `use-focus-manager`, `use-cursor`, their three contexts,
 `cursor-helpers`, and `App.tsx`, which holds its focus list, raw mode
-and input loop — is 1,082 by the same count.
+and input loop — is 1,082 by the same count. The mouse, hover, selection
+and the enhanced keyboard are 285 more (211 in `mouse.rip`, 55 in
+`tui.rip`, 11 in `paint.rip`, 6 in `screen.rip`, 3 in `input.rip` and
+one less in `document.rip`); Ink has no mouse and
+no selection, and its keyboard negotiation — `kitty-keyboard.ts` and
+the three methods of `ink.tsx` that query, time out and enable — is
+about 80.
 
 Focus has a module of its own because it is one idea with one reader's
 worth of rules — who can hold it, in what order, when it is settled —
-and three modules ask it: `document.rip` (`take`, `open`), `screen.rip`
-(`tend`), and `tui.rip` (`tend`, `take`, `advance`). The event and its
+and four modules ask it: `document.rip` (`take`, `open`), `screen.rip`
+(`tend`), `tui.rip` (`tend`, `take`, `advance`), and `mouse.rip` (`open`,
+`take`, the click's default action). The mouse is a module by the same
+rule: where a report lands, what it fires, and what a drag selects are
+one idea, and `tui.rip` hands it every report. The event and its
 dispatch stay in `document.rip`, beside the nodes whose links they walk.
 
 Also at the package root: `test.rip`, `demo.rip`, `bench.rip`,
@@ -691,35 +701,156 @@ in `test/input/`, 205 held to Ink's answer under one mapping to DOM
 names and 39 stated differences; `test/input/SOURCE.md` lists them and
 the 12 left out.
 
-**Enhanced keyboard** (step 4c) is opt-in (`run App, keyboard: 'enhanced'`).
-Setup asks the terminal for the kitty protocol's disambiguation flag
-and teardown withdraws it; the decoder is always on, so a terminal
-already in that mode works without the option. It buys what ordinary
-terminals cannot report: Shift-Enter distinct from Enter (multi-line
-input), Ctrl-I distinct from Tab, and an Escape that needs no timer.
-Support is probed with a `CSI ? u` query followed by a device
-attributes query; whichever reply arrives first decides, so no timer
-is involved. tmux answers only the second query, so the app runs on
-ordinary reports there: nothing hangs, and only the extra keys are
-lost. Three rules follow. An app never makes an enhanced-only key the
-sole way to do something (a chat input that takes Shift-Enter for a
-new line also takes Alt-Enter or Ctrl-J). `screen.keyboard` reads
-`'enhanced'` or `'basic'`, so an app shows the hint that matches the
-terminal. The decoder also reads xterm's modify-other-keys form
-(`CSI 27 ; mod ; code ~`), which tmux forwards when its
-`extended-keys` option is on. tmux's 500 ms `escape-time` delays a
-lone Escape for every terminal program and is the user's setting; the
-README names it.
+**Enhanced keyboard** (built: `tui.rip`) is opt-in (`run App, keyboard:
+'enhanced'`; the default is `'basic'`, and any other value is refused
+by name). Setup asks the terminal for the kitty protocol's
+disambiguation flag and teardown withdraws it; the decoder is always
+on, so a terminal already in that mode works without the option. It
+buys what ordinary terminals cannot report: Shift-Enter distinct from
+Enter (multi-line input), Ctrl-I distinct from Tab, and an Escape that
+needs no timer. Support is probed once the modes are written: `CSI ? u`
+(kitty, "Detection of support") followed at once by the primary device
+attributes query `CSI c`, which every terminal answers. Whichever reply
+arrives first decides, so no timer is involved: a `keyboard` reply
+pushes the flag with `CSI > 1 u` — the disambiguation flag alone, since
+the package drops releases and reads no alternate keys — and
+`screen.keyboard` reads `'enhanced'`; an `attributes` reply first leaves
+it `'basic'` and nothing is pushed, whatever comes later. tmux answers
+only the second query, so the app runs on ordinary reports there:
+nothing hangs, and only the extra keys are lost. A terminal that answers
+neither runs on basic for its life, and a reply nobody asked for (the
+option off) changes nothing. Every way out pops with `CSI < u`, before
+the modes are withdrawn, only if the flag was pushed. `screen.keyboard`
+is a reactive read, `'basic'` from the mount until the terminal says
+otherwise and again after `close`, so an app shows the hint that matches
+the terminal. Under `mount` a test answers the probe with `send`, and
+nothing is pushed since there is no terminal to push to. Three rules
+follow for an app. It never makes an enhanced-only key the sole way to
+do something (a chat input that takes Shift-Enter for a new line also
+takes Alt-Enter or Ctrl-J). It shows the hint `screen.keyboard` says.
+And it names tmux's two settings: `extended-keys`, under which tmux
+forwards xterm's modify-other-keys form (`CSI 27 ; mod ; code ~`), which
+the decoder reads; and the 500 ms `escape-time` that delays a lone
+Escape for every terminal program, which is the user's to lower.
 
-**Mouse** (step 4c) is opt-in (`run App, mouse: true`), because capture
-takes over the terminal's own text selection. The parser decodes the
-reports already, and `deliver` in `tui.rip` passes them by: the hit
-test, and `reply` events for the keyboard probe, join it there. SGR mouse reports decode to
-`@click` and `@wheel` events carrying `x` and `y` relative to the
-target. The target is found by a hit test over the rounded boxes in
-reverse paint order, honoring clips and the absolute-node list; the
-event then bubbles like any other, and a click on a focusable node
-focuses it as a preventable default. Ink has no mouse support.
+**Mouse** (built: `mouse.rip`, the modes and the probe in `tui.rip`) is
+opt-in (`run App, mouse: true`), because capture takes over the
+terminal's own text selection. `true` asks for button-event tracking
+(`CSI ? 1002 h`) and SGR reports (`CSI ? 1006 h`): presses, releases,
+the wheel, and motion only while a button is held, which is what a drag
+needs and costs nothing while the pointer idles; `'all'` asks for
+any-event tracking (1003) instead, which reports every motion, for
+hover. Both are withdrawn in reverse on every way out, before the paste
+and focus modes. In inline mode the frame's top row is not the
+terminal's row 0, so with the mouse the terminal is also asked where its
+cursor is (DECXCPR, `CSI ? 6 n`) — once the app stands, so a constructor
+that throws leaves no answer for the shell, and while the cursor is at
+the frame's top-left. The answer is `Screen.origin`, lowered whenever a
+frame is taller than the rows left under it (the terminal scrolled), so
+no second probe is needed; a resize forgets it and asks again from the
+top-left, since the reflow may have moved the frame either way. Only an
+answer to the package's own probe counts: the `?`-marked form, while a
+probe is outstanding — a plain `CSI row ; col R` left in the buffer by
+a shell's prompt integration is not it. Until the answer, and on a
+terminal that never answers, the frame is taken to sit at the bottom.
+`mount` has no terminal: its frame is at row 0. A report names a
+terminal cell; the tree cell is `(x, y - origin + top)`, `top` being the
+tree row the grid shows first. The lifecycle's resume (§8) asks again
+the same way once the modes are sent again (`ask` in `tui.rip`), and
+the alternate screen sets the origin to 0 with no probe.
+
+The target is found by a hit test that walks the tree as the painter
+does, backwards: the children of a box from last to first, then the box
+— so the last painted wins, absolute nodes in their tree position as
+`draw` paints them — a box hit where its rounded box holds the cell, a
+text where its words reach (the bounds the damage survey keeps) — a
+text nested in a text is a run of the outer one, which is the target,
+where DOM would target the inner — a bare text node as its parent
+element, as DOM targets it. The boxes and bounds are the last frame's
+and the tree is as it stands — a node taken out since is not there to
+hit, one hidden since is passed over, one that arrived has no box yet —
+which is the reading `Damage.old` makes of the same tree. Every clip is
+honored as `draw` honors it — an `overflow: 'hidden'` box holds its
+children to its padding box, and a child scrolled out by a content
+offset hits the box, not the child — and a `hidden` or `display: 'none'`
+subtree is not there. The tree is as it stands and the boxes are the
+last frame's: a node taken out since is not hit, one that arrived has
+no box yet, and before the first frame nothing is. A child whose bounds
+miss the cell is passed over whole, so the walk visits the path and the
+siblings along it and allocates nothing: on a tree of 1,576 elements a
+motion report costs about 0.5 µs through the parser, the hit test and
+the dispatch, and a click about 1 µs (Apple M5, Bun 1.4.2;
+`bun run hit` in `bench/`). Nothing hit is the body — a click beside
+the frame reaches the app's root — and outside the rows the frame shows
+a press, a release or a wheel is nothing, though a release still ends
+the press.
+
+Each report is a turn of its own and its event travels the road a key
+does, capture and bubble, with `stopPropagation` and `preventDefault`.
+`mousedown`, `mouseup` and `click` carry `x`, `y` from the target's
+rounded corner as painted, `screenX`, `screenY` the terminal's cell,
+`button` (0 left, 1 middle, 2 right, 3 to 6 xterm's 8 to 11) and
+`shiftKey`, `altKey`, `ctrlKey`; `wheel` adds `deltaY` (-1 up, 1 down a
+tick) and `deltaX`. A `click` is a press and a release on the same
+target with the same button and no motion report between — a drag is
+never a click. One press is tracked at a time, the last: a second
+button pressed while one is held ends the first press, and neither
+yields a click; the pointer's `reset` forgets a press whose release
+will never be seen, for the lifecycle's suspend (§8). Its default
+action focuses the nearest node from the
+target up that can hold focus, preventable; a click on nothing
+focusable leaves focus where it is, where DOM would blur (a click on a
+label must not take the keyboard from an input). Wheel has no default:
+a handler that moves `contentOffsetY` is the scrolled list. Every
+motion report the terminal sends — a drag under `true`, all of them
+under `'all'` — is hit-tested, and so is the pointer's last place after
+every frame, since what is under a resting pointer moves with a scroll
+or a re-render. The pointer keeps the chain of nodes under it, target
+to body, in one array reused; when the target changes, `mouseleave` is
+sent to every node of the old chain not in the new, target first, and
+`mouseenter` to every node of the new chain not in the old, outermost
+first — DOM's order, and a node taken out of the tree meanwhile is left
+like any other, heard by its own listeners since nothing stands above
+it — neither bubbling, carrying `screenX`, `screenY` and the other
+target as `relatedTarget`. A pointer past the frame's rows, or a
+terminal focus-out report, leaves every node; so does a release under
+`true`, after which the terminal reports no motion and the pointer's
+place is unknown until the next press — hover needs `'all'`. No event
+is made that no listener would hear: `mousemove` when none is on the
+target or above it, `mouseenter` and `mouseleave` when none is on the
+node or captures above it, found by the walk up from the node, so a
+listener on a subtree taken out counts for nothing. So the hover idiom
+— a row with `hovered := false`, `@mouseenter: -> hovered = true`,
+`@mouseleave: -> hovered = false`, and a style that reads it — costs the
+two rows' cells when the pointer crosses, and nothing while it rests. A
+report that arrives while the mouse is off is dropped, never typed. Ink
+has no mouse support.
+
+**Selection** (built: `mouse.rip`, the overlay in `paint.rip`). With the
+mouse on, a drag with the left button selects the cells from the press
+to the pointer in reading order — linear, as a terminal selects: the
+first row from the press to its end, the rows between whole, the last
+to the pointer — wide glyphs and clusters whole from either cell, held
+to the grid. The selected cells are painted `inverse` by an overlay the
+frame applies after the paint and before the diff, over the cells it
+owed, never a tree change: a drag owes only the cells that change hands
+(`view.damage` of extending by three cells is 3), and the app's own
+redraws keep the selection since a repainted cell is flipped again. The
+overlay is styling, so it shows in `view.ansi` and the bytes and never
+in `view.frame()`. On release the text — the front grid's rows, joined
+by a line feed, trailing blanks trimmed — is written to the clipboard
+as `OSC 52 ; c ; base64 ST`, and `screen.selection`, a reactive read
+written then and when the selection goes, is that text, `''` when
+nothing is selected. A press clears the selection, so a click clears
+it; Escape has no default action here either. A selection is the
+screen's, never the scrollback's: `close` clears it before the last
+frame is left, and a selection whose rows have all left the frame is
+cleared after the frame that took them, while one that keeps a row
+stands. `preventDefault` on the `mousedown` keeps the drag from
+selecting, as in DOM, which is how a slider takes a drag for itself;
+`selection: false` turns it off for the app; a resize clears it; and
+Shift with a button, which every terminal keeps for its own selection,
+never reaches the app.
 
 **Scrolling** is Ink's content offset: `contentOffsetX` /
 `contentOffsetY` shift a node's children under `overflow: hidden`
@@ -849,17 +980,18 @@ App = component
 run App
 ```
 
-- `run(App, {stdin, stdout, damage})` → `{app, done, quit, flush}`. To
-  come: `altScreen`, `mouse`, `keyboard`; `suspend(fn)`; `print(text)`.
-- `mount(App, {cols, rows, props, damage})` → `{app, frame, ansi, bytes,
-  damage, resize, close, done}`, and for input `{press, type, paste,
-  send, tick, focused, cursor}`, is the test driver (§10), and
-  `renderToString(App, {cols, rows, props, ansi})` is a mount, one
-  frame, and a close.
-- `screen` (`cols`, `rows`, `focused`; to come: `interactive`,
-  `keyboard`) and `focus` (`active`, `next()`, `previous()`,
-  `to(node)`, with `to(null)` letting go) are **getter-backed
-  objects**. An imported
+- `run(App, {stdin, stdout, damage, mouse, keyboard, selection})` →
+  `{app, done, quit, flush}`. To come: `altScreen`; `suspend(fn)`;
+  `print(text)`.
+- `mount(App, {cols, rows, props, damage, mouse, keyboard, selection})`
+  → `{app, frame, ansi, bytes, damage, resize, close, done}`, and for
+  input `{press, type, paste, send, tick, focused, cursor}`, is the test
+  driver (§10), and `renderToString(App, {cols, rows, props, ansi})` is
+  a mount, one frame, and a close.
+- `screen` (`cols`, `rows`, `focused`, `keyboard`, and `selection`, the
+  selected text; to come: `interactive`) and `focus` (`active`,
+  `next()`, `previous()`, `to(node)`, with `to(null)` letting go) are
+  **getter-backed objects**. An imported
   `:=` cell is not unwrapped across modules, so raw cells are never
   exported.
 - `clock(interval)` is the animation helper: a getter-backed object
@@ -930,6 +1062,25 @@ run App
   the README's select list and text input as they are printed there;
   and a fuzz of focus under a changing tree, held to a floor of steps,
   events and visits.
+- **Mouse:** `test/mouse.rip` — Ink's kitty negotiation titles through
+  `run` (`test/mouse/SOURCE.md` counts them); the hit test over nested,
+  absolute, clipped, scrolled and hidden boxes and over words, in
+  inline mode with the frame down the terminal and scrolled up by a
+  tall frame, and under a frame taller than the terminal; the order
+  and the road of `mousedown`, `mouseup`, `click` and `wheel`, the
+  click's rule and its default action; hover by DOM's enter and leave
+  order, what leaving the frame sends, and what a motion report costs
+  by dispatches counted, by damage and by bytes; the modes' exact
+  bytes on start and on every way out; the probe's order and both
+  answers, tmux's, neither, a late one, the pop only after a push, and
+  `screen.keyboard` redrawing a binding; the selection's cells, its
+  overlay in the styled frame and not the plain one, its damage, the
+  clipboard's bytes decoded, and what clears it; and a fuzz of random
+  trees — nested, absolute, clipped, scrolled, hidden, with bare text
+  — and random cells, where every box is painted in a color of its own
+  and the hit target must be the node the painter says owns the cell
+  (a text where its words reach, painted after that owner), held to a
+  floor of clicks, targets and covered cells.
 - **The test driver is public,** because users' tests are a contract
   too. `mount(App, {cols, rows, props})` is `run` without a terminal:
   the same install, the same `Screen`, the same close, drawing to a
@@ -1080,7 +1231,7 @@ Each step is its own branch and PR under the repo's landing rules.
 | 1 | Layout soundness: an incremental layout equals a fresh one, one float tolerance, values refused where they are written | The reviewers' fuzzers and the differential against compiled Yoga find nothing new; every seeded bug is caught |
 | 2 | Text and the painter: wrap / truncate, grapheme clusters, `overflow: 'hidden'` clipping, per-edge borders, background fills, content offset | Ported Ink paint cases pass |
 | 3 | Damage tracking: paint and diff only what moved (§6) | A small update's paint and diff fall with the damage, measured in `bench/` |
-| 4 | Input, focus, cursor, capture and bubble phases; then mouse and the enhanced keyboard as opt-ins; then text selection with clipboard copy (OSC 52), since mouse capture takes the terminal's own selection away | Ported parser cases pass; select-list, text-input, and wheel-scrolled list examples |
+| 4 | Input, focus, cursor, capture and bubble phases; then mouse and the enhanced keyboard as opt-ins; then text selection with clipboard copy (OSC 52), since mouse capture takes the terminal's own selection away | Ported parser cases pass; the select list and text input (README), and the wheel-scrolled, click-picked, hover-lit file browser (`examples/files.rip`) |
 | 5 | Lifecycle, inline `Static`, non-TTY, console capture, resize, animation clock, progress reporting (OSC 9;4) | Crash, signal, and suspend restore the terminal under test |
 | 6 | Four Ink examples side by side (counter, borders, use-focus, static), README, published bench with a terminal reducer proving both sides drew the same screen | Every README number reproduces with `bun run bench` |
 

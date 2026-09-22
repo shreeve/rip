@@ -9,6 +9,7 @@
     "tui": "rip tui.rip",
     "frame": "rip frame.rip",
     "keys": "rip keys.rip",
+    "hit": "rip hit.rip",
     "profile": "rip profile.rip"
   },
   "dependencies": {

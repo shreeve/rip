@@ -701,8 +701,8 @@ test "the keyboard reply, the attributes reply and the cursor reply are events o
   row "#{CSI}?1;2c", [reply 'attributes', { params: [1, 2] }]
   row "#{CSI}?c", [reply 'attributes', { params: [] }]
   row "#{CSI}24;80R", [reply 'cursor', { x: 79, y: 23 }]
-  row "#{CSI}?24;80R", [reply 'cursor', { x: 79, y: 23 }]
-  row "#{CSI}?24;80;1R", [reply 'cursor', { x: 79, y: 23 }]
+  row "#{CSI}?24;80R", [reply 'cursor', { x: 79, y: 23, marked: true }]
+  row "#{CSI}?24;80;1R", [reply 'cursor', { x: 79, y: 23, marked: true }]
 
 test "the secondary attributes reply is dropped: the package never asks for it", ->
   row "#{CSI}>0;276;0c", []
@@ -715,7 +715,7 @@ test "a reply is never a key", ->
   row "#{CSI}?1A", []
   row "#{CSI}?3~", []
   row "#{CSI}>1u", []
-  row "#{CSI}?1;5R", [reply 'cursor', { x: 4, y: 0 }]
+  row "#{CSI}?1;5R", [reply 'cursor', { x: 4, y: 0, marked: true }]
 
 test "a cursor on row one is told from a modified F3 by its column, and DECXCPR has no such doubt", ->
   # xterm sends a modified F3 as CSI 1 ; mod R with mod from 2 to 16

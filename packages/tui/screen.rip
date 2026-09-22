@@ -14,7 +14,7 @@
 import { tend } from './focus.rip'
 import { failed } from './document.rip'
 import { layout } from './layout.rip'
-import { Grid, paint, diff } from './paint.rip'
+import { Grid, paint, diff, overlay } from './paint.rip'
 
 PACE =! 8     # the least milliseconds between two frames
 PASSES =! 32  # the most layouts one frame may take to settle
@@ -41,6 +41,9 @@ export class Screen
     @whole = false   # owe every cell of every frame, for a test to compare against
     @owed = 0        # the cells the last frame owed
     @parked = null   # where the cursor is shown, `{ x, y }` on the grid, or null while it is hidden
+    @origin = 0      # the terminal row the frame's top-left is on: what the cursor probe answers, and lower once a frame scrolls the terminal
+    @selection = { from: -1, to: -1 }   # the selected cells (mouse.rip), none while `from` is under zero
+    @after = null    # run after every frame: the pointer looks again at what is under it
 
   get cols: -> @out.columns ?? 80
   get rows: -> @out.rows ?? 24
@@ -55,6 +58,7 @@ export class Screen
     @doc.stale = false
     tall = @doc.body.rect.h
     shown = Math.min tall, @rows
+    @origin = @rows - shown if @origin > @rows - shown
     back = @spare
     back = Grid.new @cols, shown unless back and back.cols is @cols and back.rows is shown
     back.top = tall - shown
@@ -65,6 +69,7 @@ export class Screen
     front = @front
     @front = front.tall shown if front and not damage.whole and front.rows isnt shown and front.cols is @cols and front.top is back.top
     paint back, @doc.body, damage, @front
+    overlay back, @selection.from, @selection.to if @selection.from >= 0
     bytes = diff @front, back, damage
     @owed = damage.count()
     # A whole frame is the spare grid entire; any other was copied into
@@ -72,6 +77,7 @@ export class Screen
     @spare = if damage.whole then @front else back
     @front = back if damage.whole
     damage.shape @front, false
+    @after?()
     spot = @place()
     return unless bytes or spot?.x isnt @parked?.x or spot?.y isnt @parked?.y
     bytes = @unpark() + bytes

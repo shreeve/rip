@@ -149,7 +149,8 @@ export class Target
   removeEventListener!: (type, handler, options) ->
     type += 'Capture' if options is true or options?.capture
     held = @listeners?[type]
-    @listeners[type] = held.filter((other) -> other isnt handler) if held
+    return unless held?.includes handler
+    @listeners[type] = held.filter (other) -> other isnt handler
 
   # The path is the tree as the dispatch begins, as DOM's is: root to
   # target in the capture phase, the target, and back up if the event

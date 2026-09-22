@@ -53,9 +53,22 @@ steps are in [PLAN.md](PLAN.md).
 - [ ] A select list that marks its choice with one binding an item
       (`inverse: n is at`) pays for every item on every arrow key: about
       55 µs at a hundred items where ten cost 8 (`bun run keys`).
-- [ ] `run`'s stdin and mode handling is `listen` and `close` in
+- [ ] `run`'s stdin and mode handling — raw mode, bracketed paste,
+      focus reports, the mouse modes, the cursor probe, the kitty
+      query and its pushed flag — is `listen`, `answer` and `close` in
       `tui.rip`; it moves into `terminal.rip`'s setup and teardown with
-      the lifecycle (PLAN §8), where Ctrl-Z and the signals need it.
+      the lifecycle (PLAN §8), where Ctrl-Z and the signals need it:
+      a suspend must pop the flag and withdraw the mouse, and a resume
+      ask for both again.
+- [ ] After a resize the frame's row is asked of the terminal again
+      from what was the top-left; a terminal whose reflow moves the
+      cursor off that row places clicks wrongly until the next resize.
+      The alternate screen (step 5) has no such row.
+- [ ] A selection is held to the rows the grid shows: in a frame
+      taller than the terminal a drag past the top row selects nothing
+      above it, and the tree rows scrolled out are not on the clipboard.
+- [ ] `mouseenter` and `mouseleave` carry the terminal's cell and the
+      other target, not `x`, `y` from the corner of each node they reach.
 
 ## 7. Compiler-side, filed separately
 

@@ -1,7 +1,9 @@
 # A file browser: a scrolling list of the current directory on the left,
 # the chosen file's head on the right. Tab moves between the panes, the
 # arrows and PageUp / PageDown move within one, Enter opens a directory,
-# Backspace goes up, q quits. Try a narrow terminal, then a wide one.
+# Backspace goes up, q quits. The wheel scrolls the pane under it, a
+# click picks a row and focuses its pane, and the row under the pointer
+# is underlined. Try a narrow terminal, then a wide one.
 #
 #   rip examples/files.rip [directory]
 
@@ -27,6 +29,17 @@ head = (path) ->
   catch error
     ["(#{error.code ?? error.message})"]
 
+# One row of the list: lit while the pointer is over it. Every prop it
+# does not declare — the click listener — reaches its span.
+Row = component extends span
+  @name := ''
+  @dirs := false
+  @current := false
+  hovered := false
+  render
+    span inverse: @current, underline: hovered, color: (if @dirs then 'blue' else undefined), @mouseenter: (-> hovered = true), @mouseleave: (-> hovered = false)
+      "#{if @dirs then '/' else ' '} #{@name}".padEnd(30)
+
 Browser = component
   @dir := resolve process.argv[2] ?? '.'
   rows ~= entries @dir
@@ -40,12 +53,14 @@ Browser = component
   path ~= join @dir, chosen.name
   lines ~= if chosen.dirs then ("#{if r.dirs then '/' else ' '} #{r.name}" for r in entries path) else head path
 
-  # The list keeps the cursor row in view; the panes are as tall as the
-  # terminal leaves them.
+  # The panes are as tall as the terminal leaves them.
   tall ~= Math.max 3, screen.rows - 4
-  ~> top = at if at < top
-  ~> top = at - tall + 1 if at >= top + tall
   ~> (at = 0; top = 0; lineTop = 0) if @dir
+
+  # Keep the cursor row in view.
+  keep: ->
+    top = at if at < top
+    top = at - tall + 1 if at >= top + tall
 
   pick: (event) ->
     switch event.key
@@ -57,6 +72,7 @@ Browser = component
       when 'End'       then at = rows.length - 1
       when 'Enter'     then @dir = path if chosen.dirs
       when 'Backspace' then @dir = dirname @dir
+    @keep()
 
   read: (event) ->
     switch event.key
@@ -64,6 +80,10 @@ Browser = component
       when 'ArrowUp'   then lineTop = Math.max lineTop - 1, 0
       when 'PageDown'  then lineTop = Math.min lineTop + tall, Math.max 0, lines.length - tall
       when 'PageUp'    then lineTop = Math.max lineTop - tall, 0
+
+  # The wheel scrolls the pane under it; a click picks a row.
+  roll: (event) -> top = Math.max 0, Math.min(top + event.deltaY, Math.max 0, rows.length - tall)
+  turn: (event) -> lineTop = Math.max 0, Math.min(lineTop + event.deltaY, Math.max 0, lines.length - tall)
 
   any: (event) ->
     quit() if event.key is 'q'
@@ -77,11 +97,10 @@ Browser = component
   render
     Box flexDirection: 'column', @keydown: @any
       Box flexDirection: 'row', gap: 1
-        div ref: list, focusable: true, autofocus: true, @keydown: @pick, style: paneLeft
+        div ref: list, focusable: true, autofocus: true, @keydown: @pick, @wheel: @roll, style: paneLeft
           for row, n in rows
-            Text key: row.name, inverse: n is at, color: (if row.dirs then 'blue' else undefined)
-              "#{if row.dirs then '/' else ' '} #{row.name}".padEnd(30)
-        div ref: view, focusable: true, @keydown: @read, style: paneRight
+            Row key: row.name, name: row.name, dirs: row.dirs, current: n is at, @click: (-> at = n)
+        div ref: view, focusable: true, @keydown: @read, @wheel: @turn, style: paneRight
           for line, n in lines
             Text key: n, wrap: 'truncate', dimColor: chosen.dirs
               line
@@ -94,4 +113,4 @@ Browser = component
         Text dimColor: true
           "Tab panes · ↑↓ PgUp PgDn · Enter open · Backspace up · q quit"
 
-run Browser
+run Browser, mouse: 'all'
