@@ -52,6 +52,7 @@ SWEEP =! 32768   # styles held before those no cell uses are let go
 SWITCHES =! ['bold', 'dimColor', 'italic', 'underline', 'inverse', 'strikethrough']
 CODES =! [1, 2, 3, 4, 7, 9]
 DIM =! 2
+INVERSE =! 16
 
 ids =! Map.new()   # foreground → background → flags and link → id
 records =! [{ fg: null, bg: null, flags: 0, link: null, sgr: '', key: 0 }]
@@ -429,6 +430,21 @@ export class Grid
       line += "\x1b[0m" if ansi and records[held].sgr
       lines.push (if ansi then line else line.trimEnd())
     lines.join '\n'
+
+# The selection (mouse.rip): the cells `from` to `to` in reading order,
+# each counted as row × columns + column of tree cells, shown inverse.
+# Only the cells the paint owed are flipped: the rest show as they
+# should already, flipped by the frame that owed them.
+export overlay! =! (grid, from, to) ->
+  cols = grid.cols
+  for row in [Math.floor(from / cols) .. Math.floor(to / cols)]
+    r = row - grid.top
+    continue if r < 0 or r >= grid.rows
+    lo = Math.max grid.lo[r], (if row * cols < from then from - row * cols else 0)
+    hi = Math.min grid.hi[r], (if (row + 1) * cols > to + 1 then to + 1 - row * cols else cols)
+    for col in [lo...hi]
+      held = records[grid.style[r * cols + col]]
+      grid.style[r * cols + col] = intern held.fg, held.bg, held.flags ^ INVERSE, held.link
 
 # ── Damage ────────────────────────────────────────────────────────────────────
 

@@ -1,0 +1,256 @@
+# The mouse: where a report lands, what it fires, and what a drag
+# selects. A report names a cell of the terminal; the frame's top-left
+# sits `origin` rows down the terminal and the grid shows tree rows from
+# `top` (screen.rip), so the tree cell is (x, y - origin + top). Its
+# target is found by a hit test that walks the tree as the painter does,
+# backwards — last painted wins, a clip holds its children, a hidden
+# subtree is not there — and the event then travels the road a key does.
+# Motion under a pressed button extends a selection, which the release
+# puts on the clipboard.
+
+import { Event, moving } from './document.rip'
+import { open, take, tend } from './focus.rip'
+import { glyph } from './text.rip'
+
+# ── Hit test ──────────────────────────────────────────────────────────────────
+
+# The node found, and the corner of its rounded box as painted.
+found = null
+foundX = foundY = 0
+
+# The node that painted tree cell (x, y) last, under `node`, or null: a
+# box whose rounded box holds the cell, or a text whose words reach it.
+# The tree is as it stands and the boxes are the last frame's, so a node
+# taken out since is not there to hit and one that arrived has no box
+# yet. (dx, dy) is how far content offsets above have shifted `node`, and
+# the four integers are the clip its ancestors hold it to, as `draw` has
+# them (paint.rip). A child whose bounds miss the cell is passed over
+# with everything under it — a `contents` child has no bounds of its own
+# and is looked into — so the walk visits the path and the siblings along
+# it, and allocates nothing.
+hit =! (node, x, y, dx, dy, left, top, right, bottom) ->
+  return null if x < left or x >= right or y < top or y >= bottom
+  rect = node.rect
+  nx = rect.x + dx
+  ny = rect.y + dy
+  if node.nodeType is 3 or node.tagName is 'span'
+    found = node
+    foundX = nx
+    foundY = ny
+    return node
+  s = node.styles
+  lent = s.display is 'contents'
+  edged = s.borderStyle?
+  unless lent
+    if (s.overflowX ?? s.overflow) is 'hidden'
+      left = Math.max left, nx + (if edged and s.borderLeft isnt false then 1 else 0)
+      right = Math.min right, nx + rect.w - (if edged and s.borderRight isnt false then 1 else 0)
+    if (s.overflowY ?? s.overflow) is 'hidden'
+      top = Math.max top, ny + (if edged and s.borderTop isnt false then 1 else 0)
+      bottom = Math.min bottom, ny + rect.h - (if edged and s.borderBottom isnt false then 1 else 0)
+    dx -= Math.trunc s.contentOffsetX if s.contentOffsetX
+    dy -= Math.trunc s.contentOffsetY if s.contentOffsetY
+  unless x < left or x >= right or y < top or y >= bottom
+    kid = node.lastChild
+    while kid
+      ks = kid.styles
+      shown = kid.nodeType is 3 or (kid.nodeType is 1 and not (ks.hidden is true or ks.display is 'none'))
+      if shown and (ks?.display is 'contents' or not (x < kid.bl + dx or x >= kid.br + dx or y < kid.bt + dy or y >= kid.bb + dy))
+        deep = hit kid, x, y, dx, dy, left, top, right, bottom
+        return deep if deep
+      kid = kid.previousSibling
+  return null if lent or x < nx or x >= nx + rect.w or y < ny or y >= ny + rect.h
+  found = node
+  foundX = nx
+  foundY = ny
+  node
+
+# Where a report landed, from its target's corner: one record, rewritten
+# by every `locate`.
+at =! { x: 0, y: 0 }
+
+# The target of terminal cell (sx, sy), or null outside the frame. A bare
+# text node is hit as its parent element, as DOM targets it. `at` is the
+# cell from the target's corner — from the body's where nothing is hit.
+locate =! (doc, view, sx, sy) ->
+  front = view.front
+  x = sx
+  y = sy - view.origin + front.top
+  found = null
+  node = hit doc.body, x, y, 0, 0, 0, front.top, front.cols, front.top + front.rows
+  if node?.nodeType is 3
+    node = node.parentNode
+    foundX = node.rect.x
+    foundY = node.rect.y
+    above = node.parentNode
+    while above
+      s = above.styles
+      if s.display isnt 'contents'
+        foundX -= Math.trunc s.contentOffsetX if s.contentOffsetX
+        foundY -= Math.trunc s.contentOffsetY if s.contentOffsetY
+      above = above.parentNode
+  unless node
+    foundX = doc.body.rect.x
+    foundY = doc.body.rect.y
+  at.x = x - foundX
+  at.y = y - foundY
+  node
+
+under =! (node, above) ->
+  while node
+    return true if node is above
+    node = node.parentNode
+  false
+
+# ── Selection ─────────────────────────────────────────────────────────────────
+
+# A selection is the cells `from` to `to` in reading order, each counted
+# as row × columns + column of tree cells, and none when `from` is
+# under zero. These three read one row of it: the columns [left, right).
+
+left =! (from, row, cols) -> if row * cols < from then from - row * cols else 0
+right =! (to, row, cols) -> if (row + 1) * cols > to + 1 then to + 1 - row * cols else cols
+
+# Owe the cells `from` to `to`, so the frame paints them.
+owe! =! (doc, view, from, to) ->
+  cols = view.front.cols
+  for row in [Math.floor(from / cols) .. Math.floor(to / cols)]
+    doc.damage.box left(from, row, cols), row, right(to, row, cols), row + 1
+
+# Make the selection `from` to `to`, or none with -1, owing only the
+# cells that change hands.
+select! =! (doc, view, from, to) ->
+  held = view.selection
+  return if held.from is from and held.to is to
+  if held.from >= 0 and from >= 0
+    owe doc, view, Math.min(held.from, from), Math.max(held.from, from) - 1 if held.from isnt from
+    owe doc, view, Math.min(held.to, to) + 1, Math.max(held.to, to) if held.to isnt to
+  else if held.from >= 0
+    owe doc, view, held.from, held.to
+  else
+    owe doc, view, from, to
+  held.from = from
+  held.to = to
+  doc.owe false
+
+# ── The pointer ───────────────────────────────────────────────────────────────
+
+export class Pointer
+  constructor: (@doc, @view, @out, @select) ->
+    @over = null       # the node under the pointer, for enter and leave
+    @pressed = null    # the target of the press under way
+    @button = -1       # and its button
+    @moved = false     # whether the pointer moved since the press
+    @anchor = -1       # the cell the press began on, while it may select
+    @last = null       # the last report, for a leave the terminal's focus causes
+
+  # One SGR report, as the parser decoded it (input.rip); each is a turn
+  # of its own. Before the first frame there is nothing to hit.
+  report!: (event) ->
+    doc = @doc
+    return unless @view.front
+    @last = event
+    switch event.action
+      when 'move' then @motion event
+      when 'wheel'
+        target = locate(doc, @view, event.x, event.y) ?? doc.body
+        target.dispatchEvent Event.new 'wheel', fields event
+      when 'down'
+        tend doc
+        target = locate(doc, @view, event.x, event.y) ?? doc.body
+        @pressed = target
+        @button = event.button
+        @moved = false
+        allowed = target.dispatchEvent Event.new 'mousedown', fields event
+        select doc, @view, -1, -1
+        @anchor = if allowed and @select and event.button is 0 then @cell event else -1
+      when 'up'
+        target = locate(doc, @view, event.x, event.y) ?? doc.body
+        target.dispatchEvent Event.new 'mouseup', fields event
+        if @pressed is target and @button is event.button and not @moved and target.dispatchEvent Event.new 'click', fields event
+          # The default action: focus the nearest node that can hold it.
+          node = target
+          node = node.parentNode while node and not open node, doc
+          take doc, node if node
+        @pressed = null
+        @anchor = -1
+        @copy() if @view.selection.from >= 0
+
+  # Motion: a drag extends the selection, a change of target is a leave
+  # and an enter, and the move itself is an event only if someone
+  # listens for one.
+  motion!: (event) ->
+    @moved = true if @pressed
+    @extend event if @anchor >= 0 and event.button is 0
+    target = locate @doc, @view, event.x, event.y
+    @cross target, event if target isnt @over
+    target.dispatchEvent Event.new 'mousemove', fields event if target and moving()
+
+  # The pointer has left the frame: the terminal's focus went elsewhere.
+  leave!: -> @cross null, @last if @over
+
+  # The pointer left `@over` for `target`: `mouseleave` from the old
+  # target up to their common ancestor, then `mouseenter` from under it
+  # down to the new one, as DOM orders them. Neither bubbles.
+  cross!: (target, event) ->
+    was = @over
+    @over = target
+    common = target
+    common = common.parentNode while common and not under was, common
+    node = was
+    while node and node isnt common
+      node.dispatchEvent Event.new 'mouseleave', { screenX: event.x, screenY: event.y, relatedTarget: target }, false
+      node = node.parentNode
+    enter target, common, event, was
+
+  # The tree cell a report names, held to the grid, as a selection counts it.
+  cell: (event) ->
+    grid = @view.front
+    row = Math.min Math.max(event.y - @view.origin, 0), grid.rows - 1
+    (row + grid.top) * grid.cols + Math.min event.x, grid.cols - 1
+
+  # The selection runs from the anchor to the pointer, whole glyphs.
+  extend!: (event) ->
+    grid = @view.front
+    head = @cell event
+    from = Math.min @anchor, head
+    to = Math.max @anchor, head
+    base = grid.top * grid.cols
+    from -= 1 while grid.wide[from - base] is 0
+    to += 1 while grid.wide[to - base + 1] is 0
+    select @doc, @view, from, to
+
+  # The selected text: the front grid's rows, wide glyphs whole, trailing
+  # blanks trimmed, rows joined by a line feed.
+  get text: ->
+    { from, to } = @view.selection
+    return '' if from < 0
+    grid = @view.front
+    cols = grid.cols
+    lines = []
+    for row in [Math.floor(from / cols) .. Math.floor(to / cols)]
+      r = row - grid.top
+      continue if r < 0 or r >= grid.rows
+      line = ''
+      for col in [left(from, row, cols)...right(to, row, cols)]
+        line += glyph grid.ch[r * cols + col] if grid.wide[r * cols + col]
+      lines.push line.trimEnd()
+    lines.join '\n'
+
+  # Put the selected text on the clipboard: OSC 52 (xterm ctlseqs).
+  copy!: -> @out.write "\x1b]52;c;#{Buffer.from(@text).toString 'base64'}\x1b\\"
+
+# `mouseenter` on every node from under `common` down to `node`.
+enter! =! (node, common, event, was) ->
+  return unless node and node isnt common
+  enter node.parentNode, common, event, was
+  node.dispatchEvent Event.new('mouseenter', { screenX: event.x, screenY: event.y, relatedTarget: was }, false)
+
+# What a mouse event carries: the cell from its target's corner, the
+# terminal's cell, the button, the modifiers, and a wheel's deltas.
+fields =! (event) ->
+  held = { x: at.x, y: at.y, screenX: event.x, screenY: event.y, button: event.button, shiftKey: event.shiftKey, altKey: event.altKey, ctrlKey: event.ctrlKey }
+  if event.deltaY?
+    held.deltaX = event.deltaX
+    held.deltaY = event.deltaY
+  held

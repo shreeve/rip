@@ -117,6 +117,9 @@ export class Event
 
 paths =! []   # the path of each dispatch under way, kept for the next
 depth = 0
+moves = 0     # `mousemove` listeners registered, so a motion nobody hears allocates no event (mouse.rip)
+
+export moving =! -> moves > 0
 
 # Call `node`'s listeners under `key`. A list is replaced, never changed,
 # when a listener comes or goes, so the one in hand is the list as the
@@ -145,11 +148,14 @@ export class Target
     held = (@listeners ?= {})[type]
     return if held?.includes handler
     @listeners[type] = if held then [...held, handler] else [handler]
+    moves += 1 if type.startsWith 'mousemove'
 
   removeEventListener!: (type, handler, options) ->
     type += 'Capture' if options is true or options?.capture
     held = @listeners?[type]
-    @listeners[type] = held.filter((other) -> other isnt handler) if held
+    return unless held?.includes handler
+    @listeners[type] = held.filter (other) -> other isnt handler
+    moves -= 1 if type.startsWith 'mousemove'
 
   # The path is the tree as the dispatch begins, as DOM's is: root to
   # target in the capture phase, the target, and back up if the event
