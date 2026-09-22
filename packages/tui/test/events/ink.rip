@@ -479,6 +479,8 @@ port 'hooks-use-paste', 'usePaste - multiple simultaneous hooks both receive the
 console.log "\nInk: input-buffered-ctrl-c"
 
 # Ink's `inputs` log: `Ctrl+c` for the key, the character for any other.
+# Ink's `useInput` hears every key; here that is a listener on the root,
+# which holds focus.
 Logger =! component
   @keep := false
   @inputs := []
@@ -487,7 +489,7 @@ Logger =! component
     @inputs.push (if event.ctrlKey then "Ctrl+#{event.key}" else event.key)
     event.preventDefault() if @keep
   render
-    Box @keydown: @heard, @paste: ((event) => @pastes.push event.text)
+    Box focusable: true, autofocus: true, @keydown: @heard, @paste: ((event) => @pastes.push event.text)
       Text "log"
 
 for input in ['\x03', 'ab\x03', '\x03ab']
@@ -564,7 +566,7 @@ Labeled =! component
   @keys := []
   @pastes := []
   render
-    Box @keydown: ((event) => @keys.push event.key), @paste: ((event) => @pastes.push event.text)
+    Box focusable: true, autofocus: true, @keydown: ((event) => @keys.push event.key), @paste: ((event) => @pastes.push event.text)
       Text "#{@label}"
 
 port 'rerender-input', 'rerender() keeps a pending Escape keypress', ->

@@ -557,14 +557,17 @@ the non-TTY final frame.
 ## 7. Input, focus, cursor (`input.rip`, `document.rip`)
 
 **Events replace hooks** (built: `document.rip`, `tui.rip`). A key is
-a `keydown` sent to `focus.active`, or to the app's root element — the
-first element the app renders — while nothing has focus, so a root
-`Box`'s `@keydown` hears every key no node took. It runs the capture
-phase from the document down, then the target, then bubbles back up to
-the document, and honors `stopPropagation`, `stopImmediatePropagation`
-and `preventDefault`, so a dialog takes a key before the node under it
-does. In Ink every `useInput` handler receives every key and gates
-itself with an `isActive` flag, and a text input cannot keep Tab.
+a `keydown` sent to `focus.active`, or to `document.body` while nothing
+has focus, as DOM sends it — never to the app's first element, which
+would change target as a sibling came before it and leave a second root
+unheard. So an app-wide handler is a listener on the document, or one
+on a root box that holds focus (Ink's `useInput` in a root component
+ports as the second). It runs the capture phase from the document down,
+then the target, then bubbles back up to the document, and honors
+`stopPropagation`, `stopImmediatePropagation` and `preventDefault`, so
+a dialog takes a key before the node under it does. In Ink every
+`useInput` handler receives every key and gates itself with an
+`isActive` flag, and a text input cannot keep Tab.
 
 - **The event** is one object per key, handed to every listener: DOM
   `KeyboardEvent`'s `key`, `ctrlKey`, `shiftKey`, `altKey`, `metaKey`,
@@ -577,7 +580,11 @@ itself with an `isActive` flag, and a text input cannot keep Tab.
   may move focus, which dispatches `blur` and `focus` inside the key's
   own dispatch), and a node's listeners are a list that is replaced,
   never changed, when one comes or goes — so a dispatch copies nothing
-  and allocates nothing per node.
+  and allocates nothing per node. As the DOM Standard has it, a
+  listener is not invoked once the stop flag is set — a capture
+  listener at the target that stops the event stops the target's
+  bubble listeners too — one handler under one type and phase is one
+  listener, and an event dispatched again starts with its flags clear.
 - **Capture is spelled by the type.** The compiler writes `@name:
   handler` as `addEventListener('name', handler)` and has no spelling
   for a third argument, so a type that ends in `Capture` is the capture
@@ -747,7 +754,19 @@ and a focusable node inside a focusable node is reached after it.
   `focus()`), and a claim is not made again when focus is let go.
 - **`focus` and `blur` pair up.** The node that had focus hears `blur`
   before the one that takes it hears `focus`; a listener of the blur
-  that moves focus itself has the last word.
+  that moves focus itself has the last word. The state is written
+  before each event is dispatched, so inside the blur nothing has focus
+  and inside the focus the node has it, on every read — and a listener
+  that throws leaves the state whole. `focus.active` settles claims as
+  `view.focused` does, so the three reads agree the moment an
+  `autofocus` node arrives; a read of either between a node's removal
+  and its return in one turn settles its loss, which `activeElement`
+  alone does not.
+- **A child that fails to construct** is reported to the document, not
+  thrown from the runtime's report: a throw there would leave the
+  child's siblings half mounted for the unmount to fail on. The mount,
+  the key, or the frame under way throws the child's own error once
+  the construction is done (`failed` in `document.rip`).
 - `node.focus()` on a node that cannot hold focus changes nothing, as
   DOM's does; `node.focused` is a reactive read, minted on first use,
   which is how a node styles itself by its focus through `ref:`.
@@ -779,7 +798,13 @@ asked of the terminal. `close` withdraws both modes, then shows the
 cursor, flushes the parser, takes the listener off, and leaves stdin
 cooked, paused and unref'd, so it does not keep the process alive —
 on `quit`, Ctrl-C, a throw while the app mounts, a frame that fails, a
-listener that throws. Any other stdin is left alone: no raw mode, no
+listener that throws. Every step of `close` is taken whatever the
+others do, and `close` settles `done`: a raw mode that cannot be set
+fails the run with nothing left installed, a write that fails on the
+way out still gives stdin and the document back, and a frame that fails
+as `quit` draws it still shows the cursor. A `quit` closes the app it
+was called on and no other: an app closed by hand and replaced before
+the quit's turn is left alone, and its `done` resolves with nothing. Any other stdin is left alone: no raw mode, no
 modes asked, no listener, no throw. The default stdin is the process's,
 unless `stdout` is given and `stdin` is not: a stream of one's own takes
 no keys from the terminal the process is on.

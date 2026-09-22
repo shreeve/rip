@@ -45,21 +45,24 @@ deepest =! (node) ->
 
 # Move focus to `node`, or to nothing. The node that had it hears `blur`
 # before the one that takes it hears `focus`, and neither bubbles, as
-# DOM's do not. A listener of the blur that moves focus itself has the
-# last word.
+# DOM's do not. Every read agrees with the event as it is heard, as
+# DOM's do: inside the blur nothing has focus, and inside the focus the
+# node has it — so a listener that throws leaves the state whole. A
+# listener of the blur that moves focus itself has the last word.
 export take! =! (doc, node) ->
   was = doc.active
   return if was is node
+  doc.owe false if was?.cursor or node?.cursor
   if was
     doc.active = null
+    doc.lit.write null
+    was.glow?.write false
     was.dispatchEvent { type: 'blur', bubbles: false }
-    was.glow?.write doc.active is was
   if node and not doc.active
     doc.active = node
+    doc.lit.write node
+    node.glow?.write true
     node.dispatchEvent { type: 'focus', bubbles: false }
-    node.glow?.write doc.active is node
-  doc.lit.write doc.active
-  doc.owe false if was?.cursor or node?.cursor
 
 # Settle what the tree's changes left open.
 export tend! =! (doc) ->

@@ -113,6 +113,7 @@ export class Event
   preventDefault!: -> @defaultPrevented = true
   stopPropagation!: -> @halt ||= 1
   stopImmediatePropagation!: -> @halt = 2
+  get cancelBubble: -> @halt > 0
 
 paths =! []   # the path of each dispatch under way, kept for the next
 depth = 0
@@ -137,9 +138,12 @@ export class Target
   constructor: ->
     @listeners = null
 
+  # One listener is one entry, as DOM has it: the same handler under the
+  # same type and phase is added once.
   addEventListener!: (type, handler, options) ->
     type += 'Capture' if options is true or options?.capture
     held = (@listeners ?= {})[type]
+    return if held?.includes handler
     @listeners[type] = if held then [...held, handler] else [handler]
 
   removeEventListener!: (type, handler, options) ->
@@ -150,9 +154,14 @@ export class Target
   # The path is the tree as the dispatch begins, as DOM's is: root to
   # target in the capture phase, the target, and back up if the event
   # bubbles, ending at the document. It is an array kept per depth of
-  # dispatch, so a key allocates its event and nothing per node.
+  # dispatch, so a key allocates its event and nothing per node. A stop
+  # ends the dispatch wherever it is asked for — a capture listener at
+  # the target stops the target's own bubble listeners too — and an
+  # event dispatched again starts with its flags clear.
   dispatchEvent: (event) ->
     event = Event.new event.type, event, event.bubbles ?? true unless event instanceof Event
+    event.halt = 0
+    event.defaultPrevented = false
     path = paths[depth] ?= []
     depth += 1
     try
@@ -171,7 +180,7 @@ export class Target
       unless event.halt
         event.eventPhase = 2
         call this, event, capture
-        call this, event, event.type unless event.halt > 1
+        call this, event, event.type unless event.halt
       if event.bubbles
         event.eventPhase = 3
         at = 1
@@ -476,12 +485,20 @@ export class Text extends Node
     leaf.mark 3, not moved and leaf.rect.h > 0 and leaf.flow.fits leaf.rect.w
     @changed moved
 
+# Throw the error of a child that failed to construct, if one did.
+export failed! =! (doc) ->
+  return unless doc.failed
+  error = doc.failed
+  doc.failed = null
+  throw error
+
 export class Document extends Target
   constructor: ->
     super()
     @damage = Damage.new()
     @active = null        # the node that has focus, until the next `tend` finds it cannot
     @claims = []          # nodes that arrived with `autofocus`, unsettled
+    @failed = null        # the error of a child that failed to construct, until it is thrown
     @lit = watch null
     @body = Element.new 'div'
     @body.host = this
@@ -519,14 +536,17 @@ export class Document extends Target
 # The runtime contains a child that fails to construct: it reports the
 # error and leaves a marker comment where the child would be. On a
 # terminal that is a silent hole in the screen, so while this document
-# is installed the report is a throw, and the mount fails with the
-# child's own error.
+# is installed the report is kept as `doc.failed`, and the mount, the
+# key, or the frame under way throws it as the child's own error once
+# the runtime has finished the construction the child was part of — a
+# throw from inside the report would leave the child's siblings half
+# mounted, and the unmount that follows would fail on them.
 export install =! ->
   if globalThis.document?
     throw Error.new 'rip/tui: a `document` is already installed in this process — a terminal app and a DOM cannot share one'
   doc = Document.new()
   held = { Node: globalThis.Node, SVGElement: globalThis.SVGElement }
-  held.reporter = __setChildFailureReporter (name, error) -> throw error
+  held.reporter = __setChildFailureReporter (name, error) -> doc.failed ?= error
   globalThis.document = doc
   globalThis.Node = Node
   globalThis.SVGElement = class SVGElement

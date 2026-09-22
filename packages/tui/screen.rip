@@ -12,6 +12,7 @@
 # then draws, then parks it again, all in the one write.
 
 import { tend } from './focus.rip'
+import { failed } from './document.rip'
 import { layout } from './layout.rip'
 import { Grid, paint, diff } from './paint.rip'
 
@@ -48,6 +49,7 @@ export class Screen
   frame!: ->
     @booked = false
     @last = performance.now()
+    failed @doc
     tend @doc
     settle @doc, @cols
     @doc.stale = false
@@ -132,7 +134,10 @@ export class Screen
       throw error unless @failed
       @failed error
 
-  # Leave the last frame in the scrollback, the cursor on the line below.
+  # Leave the last frame in the scrollback, the cursor on the line below
+  # and shown — whether or not the frame owed could be drawn.
   leave!: ->
-    @frame() if @doc.stale
-    @out.write @unpark() + '\n'.repeat(@front?.rows ?? 0) + "\x1b[?25h"
+    try
+      @frame() if @doc.stale
+    finally
+      @out.write @unpark() + '\n'.repeat(@front?.rows ?? 0) + "\x1b[?25h"

@@ -60,7 +60,7 @@ asked of it and a terminal that keeps its cursor (`harness.rip`).
 | `isFocused` | the node's `focused`, a reactive read through `ref:` |
 | `useFocusManager()`: `focusNext`, `focusPrevious`, `focus(id)`, `activeId` | `focus.next()`, `focus.previous()`, `focus.to(node)`, `focus.active` — a node, whose `id` is read where Ink reads `activeId` |
 | `disableFocus()` / `enableFocus()` | `disabled` on the box around the app: an ancestor's `disabled` is its descendants' |
-| `useInput(handler)` | a `keydown` listener; in the hook files' dispatch half, one on the document that keeps every key (`preventDefault`), so no default action runs |
+| `useInput(handler)` | a `keydown` listener on a root box that holds focus (`focusable`, `autofocus`), since a key nothing focuses goes to the body; in the hook files' dispatch half, one on the document that keeps every key (`preventDefault`), so no default action runs |
 | `usePaste(handler)` | a `paste` listener |
 | `input`, `key.*` | the event's fields, under the mapping of `test/input/SOURCE.md` |
 | `exitOnCtrlC: false` | a listener that calls `preventDefault()` on the key |

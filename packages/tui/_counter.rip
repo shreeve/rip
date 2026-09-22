@@ -1,0 +1,12 @@
+import { run, Box, Text } from 'rip/tui'
+
+Counter = component
+  @count := 0
+  pressed: (event) ->
+    @count += 1 if event.key is 'ArrowUp'
+    @count -= 1 if event.key is 'ArrowDown'
+  render
+    Box @keydown: @pressed, borderStyle: 'round', paddingX: 1
+      Text color: 'green', "count #{@count}"
+
+run Counter

@@ -15,6 +15,7 @@
 
 import { test, eq, ok, throws } from 'rip/testing'
 import { run, quit, mount, screen, focus, Box, Text } from 'rip/tui'
+import { Event } from '../document.rip'
 import { Terminal, Stdin, find, idOf, tally } from './events/harness.rip'
 import './events/ink.rip'
 
@@ -95,6 +96,29 @@ test "a capture listener is asked for by `@keydownCapture:`, by `true`, or by `{
     view.press 'a'
     eq heard.length, 4
 
+test "one handler under one type and phase is one listener, and an event dispatched again starts clear", ->
+  mounted Nest, {}, (view) ->
+    inner = find 'inner'
+    heard = []
+    twice = -> heard.push 'x'
+    inner.addEventListener 'keydown', twice
+    inner.addEventListener 'keydown', twice
+    inner.addEventListener 'keydown', twice, true
+    view.press 'a'
+    eq heard, ['x', 'x'], 'once as a bubble listener, once as a capture listener'
+    event = Event.new 'keydown', { key: 'a' }
+    inner.addEventListener 'keydown', (event) ->
+      event.preventDefault()
+      event.stopPropagation()
+    eq inner.dispatchEvent(event), false
+    eq [event.defaultPrevented, event.cancelBubble], [true, true]
+    inner.removeEventListener 'keydown', twice
+    inner.removeEventListener 'keydown', twice, true
+    log.length = 0
+    inner.listeners.keydown = []
+    eq inner.dispatchEvent(event), true, 'the flags are cleared as the dispatch begins'
+    eq log, ['outer capture 1', 'middle capture 1', 'inner capture 2', 'middle 3', 'outer 3']
+
 # Stop the key at `where`, in `phase`, and answer who heard it.
 stopped =! (where, phase) ->
   mounted Nest, {}, (view) ->
@@ -106,7 +130,7 @@ stopped =! (where, phase) ->
 test "stopPropagation ends the dispatch in the capture phase, at the target, and in the bubble phase", ->
   eq stopped('outer', 'capture'), ['outer capture 1', 'stop']
   eq stopped('middle', 'capture'), ['outer capture 1', 'middle capture 1', 'stop']
-  eq stopped('inner', 'capture'), ['outer capture 1', 'middle capture 1', 'inner capture 2', 'stop', 'inner 2']
+  eq stopped('inner', 'capture'), ['outer capture 1', 'middle capture 1', 'inner capture 2', 'stop'], 'a stop at the target in the capture phase stops its bubble listeners too, as the DOM Standard has it'
   eq stopped('inner', 'bubble'), ['outer capture 1', 'middle capture 1', 'inner capture 2', 'inner 2', 'stop']
   eq stopped('middle', 'bubble'), ['outer capture 1', 'middle capture 1', 'inner capture 2', 'inner 2', 'middle 3', 'stop']
 
@@ -144,7 +168,7 @@ test "the bytes of a key reach its listeners as `sequence`, and a held key as `r
     view.send "#{CSI}1;5A#{CSI}97;1:2u#{ESC}x"
     eq seen, [['ArrowUp', "#{CSI}1;5A", false, false], ['a', "#{CSI}97;1:2u", true, false], ['x', "#{ESC}x", false, true]]
 
-test "with nothing focused a key goes to the app's root element, and still reaches the document", ->
+test "with nothing focused a key goes to the body, as DOM sends it: the app's root element does not hear it, and the document does", ->
   Plain = component
     render
       Box id: 'root', @keydown: note('root')
@@ -152,8 +176,13 @@ test "with nothing focused a key goes to the app's root element, and still reach
   mounted Plain, {}, (view) ->
     log.length = 0
     document.addEventListener 'keydown', note('document')
+    document.body.addEventListener 'keydown', note('body')
     view.press 'a'
-    eq log, ['root 2', 'document 3']
+    eq log, ['body 2', 'document 3']
+    find('root').set 'focusable', true
+    find('root').focus()
+    view.press 'a'
+    eq log, ['body 2', 'document 3', 'root 2', 'body 3', 'document 3'], 'a root that holds focus hears every key nothing under it took'
 
 test "the path is the tree as the dispatch began: a listener that moves the target out changes nothing of who hears", ->
   mounted Nest, {}, (view) ->
@@ -290,6 +319,7 @@ test! "Ctrl-C quits as `quit()` does, and a prevented one does not", ->
   eq typeof document, 'undefined'
   kept = mount Trio, props: { keep: true }
   try
+    kept.press 'Tab'
     kept.send '\x03'
     kept.press 'c', ctrl: true
     sleep! 0
@@ -303,7 +333,7 @@ test! "a key that follows the one that quit, in the same read, is nobody's", ->
   heard = []
   Quits = component
     render
-      Box @keydown: ((event) -> heard.push event.key; quit 'done' if event.key is 'q')
+      Box focusable: true, autofocus: true, @keydown: ((event) -> heard.push event.key; quit 'done' if event.key is 'q')
         Text "x"
   view = mount Quits
   try
@@ -434,6 +464,58 @@ test "focus and blur pair up, do not bubble, and are heard above in the capture 
     find('b').focus()
     focus.to null
     eq heard, ['capture focus a', 'focus a', 'capture blur a', 'blur a', 'capture focus b', 'focus b', 'capture blur b', 'blur b']
+
+test "inside `focus` and `blur` every read agrees with the event, as DOM's do", ->
+  seen = []
+  snap = (tag) -> -> seen.push [tag, idOf(document.activeElement), idOf(focus.active), find('a').focused, find('b').focused]
+  mounted Board, {}, (view) ->
+    find('a').focused
+    find('b').focused
+    find('a').addEventListener 'focus', snap 'focus a'
+    find('a').addEventListener 'blur', snap 'blur a'
+    find('b').addEventListener 'focus', snap 'focus b'
+    find('a').focus()
+    find('b').focus()
+    eq seen, [['focus a', 'a', 'a', true, false], ['blur a', null, null, false, false], ['focus b', 'b', 'b', false, true]]
+
+test "a `blur` listener that throws leaves the state whole: the reads agree, keys go where they say, and the next Tab is one blur and one focus", ->
+  mounted Board, {}, (view) ->
+    a = find 'a'
+    b = find 'b'
+    a.focus()
+    boom = -> raise 'blur boom'
+    a.addEventListener 'blur', boom
+    throws (-> b.focus()), 'blur boom'
+    a.removeEventListener 'blur', boom
+    eq [idOf(document.activeElement), idOf(focus.active), idOf(view.focused), a.focused, b.focused], [null, null, null, false, false]
+    heard = []
+    a.addEventListener 'keydown', -> heard.push 'a'
+    b.addEventListener 'keydown', -> heard.push 'b'
+    document.body.addEventListener 'keydown', -> heard.push 'body'
+    view.press 'x'
+    eq heard, ['body']
+    events = []
+    for node in [a, b]
+      node.addEventListener 'focus', ((event) -> events.push "focus #{idOf event.target}")
+      node.addEventListener 'blur', ((event) -> events.push "blur #{idOf event.target}")
+    view.press 'Tab'
+    view.press 'Tab'
+    eq events, ['focus a', 'blur a', 'focus b']
+
+test "`focus.active`, `document.activeElement` and `view.focused` agree the moment an `autofocus` node arrives", ->
+  Arrives = component
+    @more := false
+    render
+      Box flexDirection: 'column'
+        Text "x"
+        if @more
+          Box id: 'late', focusable: true, autofocus: true
+            Text "late"
+  mounted Arrives, {}, (view) ->
+    eq [focus.active, document.activeElement, view.focused], [null, null, null]
+    view.app.more.value = true
+    eq idOf(focus.active), 'late'
+    eq [idOf(document.activeElement), idOf(view.focused)], ['late', 'late']
 
 test "a node styles itself by `focused`, a reactive read, and `focus.active` is one too", ->
   Lit = component
@@ -740,7 +822,7 @@ Echo =! component
   @keys := []
   @label := 'x'
   render
-    Box @keydown: ((event) => @keys.push event.key)
+    Box focusable: true, autofocus: true, @keydown: ((event) => @keys.push event.key)
       Text "#{@label}"
 
 test! "run sets raw mode, asks for bracketed paste and focus reports, and quit gives all of it back, in order", ->
@@ -805,7 +887,7 @@ test! "a frame that fails later gives it back, and `done` rejects", ->
 test! "a listener that throws gives it back, and `done` rejects with what it threw", ->
   Throws = component
     render
-      Box @keydown: (-> raise 'a listener failed')
+      Box focusable: true, autofocus: true, @keydown: (-> raise 'a listener failed')
         Text "x"
   stdin = Stdin.new()
   term = Terminal.new()
@@ -834,6 +916,99 @@ test! "a stdin that is no terminal is left alone: no raw mode, no modes asked of
   quit()
   await again.done
 
+test! "a `quit`, a `close` by hand, and a second mount in one turn: the quit is the first app's alone, and both `done`s settle", ->
+  first = mount Echo
+  quit 'first'
+  first.close()
+  second = mount Echo
+  sleep! 0
+  eq second.frame(), 'x', 'the second app is still mounted'
+  eq await first.done, undefined, 'an app closed by hand resolves with nothing'
+  settled = 'pending'
+  second.done.then -> settled = 'resolved'
+  sleep! 0
+  eq settled, 'pending'
+  second.close()
+  eq await second.done, undefined
+
+test! "a quit whose last owed frame fails still shows the cursor and withdraws the modes, and `done` rejects with the frame's error", ->
+  Restless = component
+    @grows := false
+    el := null
+    render
+      Box flexDirection: 'row', focusable: true, autofocus: true, cursor: { x: 1, y: 0 }
+        Text "field"
+        div ref: el, width: (if @grows then (el?.box.w ?? 0) + 1 else 5)
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Restless, stdin: stdin, stdout: term
+  eq term.cursor, { x: 1, y: 0 }
+  running.app.grows.value = true
+  quit()
+  failure = null
+  try
+    await running.done
+  catch error
+    failure = error
+  ok failure?.message.includes('layout did not settle'), "done rejected with #{failure?.message}"
+  ok term.shown and not term.modes.has(2004) and not term.modes.has(1004), 'the cursor is shown and the modes withdrawn'
+  eq [stdin.raw, stdin.listenerCount('data'), typeof document], [false, 0, 'undefined']
+
+test! "a stdin whose raw mode cannot be set fails the run and leaves nothing installed", ->
+  stdin = Stdin.new()
+  stdin.setRawMode = -> raise 'EBADF: setRawMode'
+  term = Terminal.new()
+  throws (-> run Echo, stdin: stdin, stdout: term), 'EBADF'
+  eq [typeof document, stdin.listenerCount('data'), stdin.calls], ['undefined', 0, []]
+  ok not term.since(0).includes('2004'), 'nothing was asked of the terminal'
+  again = mount Echo
+  again.close()
+
+test! "a terminal whose write fails at close still gives stdin and the document back, and `done` rejects", ->
+  stdin = Stdin.new()
+  term = Terminal.new()
+  running = run Echo, stdin: stdin, stdout: term
+  term.write = -> raise 'EPIPE'
+  quit 'gone'
+  failure = null
+  try
+    await running.done
+  catch error
+    failure = error
+  eq [failure?.message, stdin.raw, stdin.listenerCount('data'), typeof document], ['EPIPE', false, 0, 'undefined']
+
+test! "a child that a key's change makes, and which fails to construct, fails the key with its own error, and leaves nothing half mounted", ->
+  Grows = component
+    @bad := false
+    render
+      Box focusable: true, autofocus: true, flexDirection: 'column', @keydown: ((event) => @bad = true if event.key is 'B')
+        Text "x"
+        if @bad
+          Box width: 'nonsense'
+            Text "bad"
+  printed = []
+  held = console.error
+  console.error = (...args) -> printed.push args.join ' '
+  try
+    view = mount Grows
+    throws (-> view.press 'B'), '"nonsense" is not a length'
+    ok document?, 'under mount the key throws to the test, and the app stands'
+    view.close()
+    stdin = Stdin.new()
+    term = Terminal.new()
+    running = run Grows, stdin: stdin, stdout: term
+    stdin.key 'B'
+    failure = null
+    try
+      await running.done
+    catch error
+      failure = error
+    ok failure?.message.includes('"nonsense" is not a length'), "done rejected with #{failure?.message}"
+    eq [typeof document, stdin.raw], ['undefined', false]
+  finally
+    console.error = held
+  eq printed, []
+
 test! "a lone ESC from stdin is Escape after the runtime's own 50 ms, and a quit forgets one still held", ->
   stdin = Stdin.new()
   running = run Echo, stdin: stdin, stdout: Terminal.new()
@@ -854,7 +1029,7 @@ console.log "\nCost"
 Cells =! component
   count := 0
   render
-    Box flexDirection: 'column', @keydown: ((event) => @count += 1 if event.key is '+')
+    Box flexDirection: 'column', focusable: true, autofocus: true, @keydown: ((event) => @count += 1 if event.key is '+')
       Text "a line that stays"
       Text "count #{count}"
 
@@ -894,7 +1069,7 @@ test! "under `run` a cursor that moves alone — by focus, or by what the focuse
   Fields = component
     at := 0
     render
-      Box flexDirection: 'column', @keydown: ((event) => @at += 1 if event.key is 'ArrowRight')
+      Box flexDirection: 'column', @keydownCapture: ((event) => @at += 1 if event.key is 'ArrowRight')
         Box focusable: true, autofocus: true, cursor: { x: at, y: 0 }
           Text "one"
         Box focusable: true, cursor: { x: 2, y: 0 }
@@ -1056,7 +1231,7 @@ test "random trees under random change: focus is always a node that can hold it,
           # A key, with a listener that changes the tree on its way up: who
           # hears it is settled as the dispatch begins.
           view.frame() if rand() < 0.3
-          target = view.focused ?? root
+          target = view.focused ?? document.body
           want = []
           at = target
           while at and at isnt document.body

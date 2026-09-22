@@ -250,17 +250,23 @@ mounted at a time: a second `mount`, `run`, or `renderToString` is
 refused by name until the first is closed — close in a `finally`.
 
 `renderToString App, cols: 40` is a mount, one frame, and a close; it
-takes `props`, and `ansi: true` keeps the escape sequences.
+takes `props`, and `ansi: true` keeps the escape sequences. A child that
+fails to construct — at the mount, from a key, or from a state set by
+the test — fails the mount, the key, or the next frame with the child's
+own error, and a `done` is settled by `close` as well as by `quit`.
 
 ## Input and focus
 
 `run` reads the terminal's keys and hands each to the app as an event,
 the way a browser does. A key is a `keydown` sent to the node that has
-focus, or to the app's root element while nothing has it. It runs the
-capture phase from the document down to that node, then the node's own
+focus, or to `document.body` while nothing has it. It runs the capture
+phase from the document down to that node, then the node's own
 listeners, then bubbles back up to the document, and any listener may
 stop it there (`stopPropagation`) or keep its default action from
-running (`preventDefault`).
+running (`preventDefault`). A handler for every key the app is sent is
+one on the document, or one on a root box that holds focus, as the
+select list below does; a box under the body that nothing focuses hears
+no key, as a browser's would not.
 
 ```coffee
 Select = component
@@ -287,12 +293,15 @@ they came — and DOM's `Event` in how it travels: `target`,
 `currentTarget`, `eventPhase` (1 capture, 2 target, 3 bubble),
 `defaultPrevented`, `stopPropagation()`, `stopImmediatePropagation()`,
 `preventDefault()`. One event object is handed to every listener of a
-key. The path is the tree as the dispatch began, so a listener that
-changes the tree changes nothing of who hears that key.
+key, and one handler under one type and phase is one listener, however
+often it is added. The path is the tree as the dispatch began, so a
+listener that changes the tree changes nothing of who hears that key;
+a stop ends the dispatch wherever it is asked for, a capture listener
+on the target included.
 
 | Event | Sent to | Carries | Bubbles |
 |---|---|---|---|
-| `@keydown` | the focused node, or the root element | the key's fields | yes |
+| `@keydown` | the focused node, or `document.body` | the key's fields | yes |
 | `@paste` | the same | `text`, the whole paste; never key events | yes |
 | `@focus`, `@blur` | the node that takes or loses focus | | no, as DOM's do not; the capture phase reaches them |
 | a component's `emit 'name', detail` | the component's root | `detail` | yes |
@@ -323,8 +332,15 @@ list that is reordered is walked as it stands, and a focused node that a
 reorder moves keeps its focus. A focused node that is removed, hidden or
 disabled loses focus to nothing — the next Tab starts from the top —
 and hears `blur`. `autofocus: true` is a claim made once, when the node
-arrives: the first such node in tree order takes focus if nothing has
-it, and never takes it from a node that does.
+arrives, as HTML's is: the first such node in tree order takes focus if
+nothing has it, and never takes it from a node that does. A node that
+is disabled, or not `focusable`, when its claim is settled never claims
+again — enable it and it waits for Tab or `focus()` — where Ink's
+`useFocus({autoFocus, isActive})` takes focus whenever it becomes
+active. Inside a `focus` or `blur` listener every read agrees with the
+event: `document.activeElement`, `focus.active` and `el.focused` say
+the node has focus as it hears `focus`, and that nothing has it as it
+hears `blur`.
 
 ```coffee
 el.focus()                 # take focus, if the node can hold it
@@ -375,7 +391,9 @@ that is a terminal is set raw and asked for bracketed paste and focus
 reports for the life of the app, and all of it is given back on every
 way out — `quit`, Ctrl-C, a throw while the app mounts, a frame or a
 listener that fails — and stdin is left paused and unref'd, so it does
-not keep the process alive. A stdin that is no terminal (a pipe, CI) is
+not keep the process alive. A write to the terminal that fails on the way out, or a frame
+that fails as `quit` draws it, still gives the rest back, and `done`
+rejects with the error. A stdin that is no terminal (a pipe, CI) is
 left alone: no key arrives and nothing is asked of the terminal. One
 read is one frame, however many keys
 it holds, and a key that changes nothing owes no frame and draws
