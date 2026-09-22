@@ -784,7 +784,7 @@ sync =! (node, owner) ->
   node.dirty = true if turned
   styles = node.styles ?? PLAIN
   bare = true
-  for key of styles
+  for key, value of styles when value isnt undefined
     bare = false
     break
   unless bare and lay.bare

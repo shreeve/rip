@@ -6,10 +6,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 1. The closing audit — code
 
-- [ ] `document.rip:401` clears a style with `delete`, which puts the
-      node into dictionary mode: every later style read on it misses
-      V8's inline caches. Write `undefined`, and let `sync`'s bare check
-      tolerate it.
 - [ ] `Screen.still` (`screen.rip:104`) walks every `Static` container
       and every child on every frame, so N appends cost O(N²): 149 µs
       each over 1,000 and 348 over 8,000 (`rip bench/tui.rip static 8`).

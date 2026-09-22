@@ -252,7 +252,7 @@ export class Node extends Target
     if ref then ref.previousSibling = node else @lastChild = node
     node.parentNode = this
     if @tagName is 'span' and node.tagName is 'span'
-      for own key of node.styles
+      for own key, value of node.styles when value isnt undefined
         if KIND.get(key) is 'layout'
           throw blame Error.new("rip/tui: '#{key}' has no meaning on text nested in text — it is a run of words, styled by color and weight only"), node
     node.adopt @ownerDocument
@@ -401,7 +401,10 @@ export class Element extends Node
     # A border or a background recolors the box; any other style can
     # reach everything under it.
     @mark (if key.startsWith('border') or key is 'backgroundColor' then 2 else 3)
-    if value is undefined then delete @styles[key] else @styles[key] = value
+    # A cleared style keeps its slot, holding `undefined`: a `delete`
+    # would turn the node's styles into a dictionary and every later
+    # read of any style on it would miss the engine's inline caches.
+    @styles[key] = value
     @mark 3 if key is 'display'
     @changed kind is 'layout'
 

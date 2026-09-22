@@ -154,6 +154,34 @@ test "declares no dependencies", ->
 
 console.log "\nDocument"
 
+test "a cleared style keeps its slot as undefined, and a node whose every style is cleared is bare to layout and free to nest as text", ->
+  Bare = component
+    render
+      div
+        span "words"
+  view = mount Bare, cols: 20
+  try
+    view.frame()
+    box = document.body.firstChild
+    box.set 'paddingLeft', 2
+    view.frame()
+    eq box.styles.paddingLeft, 2
+    box.set 'paddingLeft', undefined
+    view.frame()
+    ok Object.hasOwn(box.styles, 'paddingLeft'), 'the slot stays'
+    eq box.styles.paddingLeft, undefined
+    ok box.lay.bare, 'layout reads the node as bare again'
+    # A span whose layout style was cleared may be nested in text: the
+    # cleared key is no style.
+    inner = document.createElement 'span'
+    inner.set 'marginLeft', 1
+    inner.set 'marginLeft', undefined
+    outer = box.firstChild
+    outer.appendChild inner
+    ok inner.parentNode is outer
+  finally
+    view.close()
+
 test "install is scoped: the process gets its document slot back", ->
   eq typeof document, 'undefined'
   { doc, restore } = install()
@@ -384,7 +412,9 @@ test "a style object taken away takes its keys with it, and leaves the props", -
     eq show(), "┌────┐\n│hi  │\n└────┘"
     app.look.value = undefined
     eq show(), "hi"
-    eq document.body.firstChild.styles, { width: 6 }
+    styles = document.body.firstChild.styles
+    eq styles.width, 6
+    eq [styles.borderStyle, styles.paddingLeft], [undefined, undefined]
 
 # ==[ Layout ]==
 
