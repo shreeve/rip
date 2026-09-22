@@ -77,3 +77,30 @@ steps are in [PLAN.md](PLAN.md).
 - A spelling for a capture listener in a render block. The package reads
   a type that ends in `Capture` (`@keydownCapture:`), since `@name:` is
   always `addEventListener(name, handler)` with no third argument.
+
+## 9. Found by the live test runner
+
+- [ ] Frames are paced by a fixed 8 ms. A lane that writes a thousand
+      chunks a second would draw a frame each 8 ms, so
+      `scripts/test-live.rip` keeps its run in a plain model that a
+      computed re-reads on each `tick.frame`, painting once a tick. An
+      app should set the least interval between frames (`run App,
+      pace: ms`, and `mount` honoring it through `view.tick`) and bind
+      its state directly.
+- [ ] `print` writes above only the `Static` items already in the tree:
+      an effect that prints in the turn that appends an item runs
+      before the render block adds that item, so the item's row lands
+      below the printed text. The runner holds its ending back a tick
+      so its last lanes' rows are written before the failures it
+      prints.
+- [ ] A mount closed by `quit` draws no last frame, where `run` does:
+      what the quitting turn added to `Static`, or changed in the
+      frame, reaches neither `view.scrollback` nor the frame unless the
+      test calls `view.frame()` before the quit lands.
+- [ ] `mount` always draws at full color depth, so a test cannot see an
+      app at 16 colors or at none: the runner's named colors for a
+      terminal of 16, and its rows with no color at all, are unpinned.
+- [ ] A row `Box` of several `Text`s wraps at a narrow width; the row
+      that holds is one `Text` of nested styled runs with `wrap:
+      'truncate'`, which the runner found by trial. The README's text
+      section does not say so.
