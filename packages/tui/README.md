@@ -211,7 +211,7 @@ back, and draws a frame when the test asks for one.
 ```coffee
 import { mount } from 'rip/tui'
 
-view = mount Counter, cols: 40, rows: 10, props: { count: 3 }
+view = mount Counter, cols: 40, rows: 10, props: { count: 3 }   # mouse:, keyboard:, selection: as `run` takes them
 view.frame()                # "count 3" — lay out, paint, the frame as plain text
 view.app.count.value = 7    # public state is set from outside
 view.frame()                # "count 7"
@@ -223,7 +223,7 @@ view.press 'Tab'            # one key, by DOM's name or a character
 view.press 'c', ctrl: true  # with `ctrl`, `shift`, `alt`, `meta`, `repeat`
 view.type 'hello'           # text as a terminal sends it: a key per code point
 view.paste 'two\rlines'     # one paste event
-view.send '\x1b[1;5A'       # raw bytes, through the parser
+view.send '\x1b[1;5A'       # raw bytes, through the parser: keys, mouse reports, the terminal's answers
 view.tick 50                # move the parser's clock: a lone ESC is Escape after 50 ms
 view.focused                # the node that has focus, or null
 view.cursor                 # where the last frame parked the cursor, { x, y }, or null while hidden
@@ -404,8 +404,100 @@ key no listener acts on about 0.3 µs; with a hundred items the arrow is
 about 55 µs, since each item's `inverse` is a binding that reads `at`
 (Apple M5, Bun 1.4.2; `bun run keys` in `bench/`).
 
-Mouse events (`@click`, `@wheel`), the enhanced keyboard, and Ctrl-Z are
-[PLAN.md](PLAN.md)'s next steps.
+Ctrl-Z is [PLAN.md](PLAN.md)'s lifecycle step.
+
+## Mouse
+
+The mouse is opt-in — `run App, mouse: true` — because reporting takes
+over the terminal's own text selection, so the package provides one
+(below). `true` asks the terminal for presses, releases, the wheel, and
+motion while a button is held; `mouse: 'all'` asks for every motion,
+for hover. Both are withdrawn on every way out with the other modes.
+Each report is hit-tested — the last painted node under the cell wins,
+a clip holds its children, a hidden subtree is not there, a word hits
+its `Text`, padding and a border hit the box, and nothing hits
+`document.body` — and the event travels the road a key does: capture,
+target, bubble, `stopPropagation`, `preventDefault`.
+
+| Event | Sent to | Carries | Default action |
+|---|---|---|---|
+| `@mousedown`, `@mouseup` | the node under the pointer | `x`, `y` from the node's own corner; `screenX`, `screenY`, the terminal's cell; `button` (0 left, 1 middle, 2 right); `shiftKey`, `altKey`, `ctrlKey` | none; a prevented `mousedown` keeps the drag from selecting |
+| `@click` | the same, when the press and the release landed on one node with no motion between | the same | focus the nearest node from it up that can hold focus; a click on nothing focusable leaves focus where it is |
+| `@wheel` | the node under the pointer | the same, and `deltaY` (-1 up, 1 down, a tick), `deltaX` | none: the handler moves `contentOffsetY` |
+| `@mousemove` | the node under the pointer, only while some node listens | the same | none |
+| `@mouseenter`, `@mouseleave` | every node the pointer entered or left, in DOM's order; neither bubbles | `screenX`, `screenY`, `relatedTarget` | none |
+
+A scrolled list is a wheel handler on the box that clips it:
+
+```coffee
+List = component
+  @items := []
+  top := 0
+  roll: (event) -> top = Math.max 0, Math.min(top + event.deltaY, @items.length - 3)
+  render
+    Box flexDirection: 'column', height: 3, overflow: 'hidden', contentOffsetY: top, @wheel: @roll
+      for item in @items
+        Text key: item, "#{item}"
+```
+
+A row lit while the pointer is over it, under `mouse: 'all'`:
+
+```coffee
+Row = component extends span
+  @name := ''
+  hovered := false
+  render
+    span underline: hovered, @mouseenter: (-> hovered = true), @mouseleave: (-> hovered = false)
+      "#{@name}"
+```
+
+Motion is cheap. A report that keeps its target dispatches nothing — no
+event is made unless a `mousemove` listener exists somewhere — and draws
+nothing; one that crosses from one row to the next costs the two rows'
+cells. Under `mouse: true` motion arrives only during a drag. On a tree
+of 1,576 elements a motion report is about 0.5 µs and a click about
+1 µs, parser included (`bun run hit` in `bench/`). In inline mode the
+frame is not at the terminal's first row, so with the mouse the package
+asks the terminal where its cursor is (`CSI ? 6 n`) as the app starts
+and after every resize, and lowers the answer when a frame scrolls the
+terminal; `examples/files.rip` is the whole idiom, list and preview.
+
+**Selection and the clipboard.** A drag with the left button selects
+the cells from the press to the pointer in reading order, as a terminal
+does, painted inverse. On release the text goes to the clipboard through
+OSC 52 — most terminals honor it, some ask first, and tmux needs
+`set-clipboard on` — and `screen.selection` reads it. A click clears
+it. `selection: false` turns it off for the app; `event.preventDefault()`
+on the `mousedown` keeps one drag from selecting, which is how a slider
+takes the drag for itself. Shift with a button is the terminal's own
+selection and never reaches the app.
+
+**Testing.** `mount App, mouse: true` (or `'all'`) takes reports through
+`send` as a terminal sends them — `view.send '\x1b[<0;4;3M\x1b[<0;4;3m'`
+is a click on column 3 of row 2, counted from zero — and `view.bytes`
+holds the OSC 52 write.
+
+## Enhanced keyboard
+
+`run App, keyboard: 'enhanced'` asks the terminal for the kitty keyboard
+protocol's disambiguation flag, which tells Shift-Enter from Enter and
+Ctrl-I from Tab, and makes a lone Escape arrive at once. Setup sends the
+kitty query and then the device attributes query; whichever answer
+comes first decides, with no timer: kitty's answer pushes the flag and
+`screen.keyboard` reads `'enhanced'`; the attributes answer first —
+tmux answers only that one — leaves `'basic'`. The flag is popped on
+every way out. The decoder always reads kitty's sequences, so a terminal
+already in that mode works without the option. Three rules for an app:
+
+1. Never make an enhanced-only key the sole way to do something: a chat
+   input that takes Shift-Enter for a new line also takes Alt-Enter or
+   Ctrl-J.
+2. Show the hint that matches `screen.keyboard`, a reactive read: a
+   binding that shows it redraws when the terminal answers.
+3. Under tmux, `set -s extended-keys on` forwards modified keys in
+   xterm's form, which the decoder reads, and `set -s escape-time 10`
+   stops tmux holding a lone Escape for 500 ms. Both are the user's
+   settings: name them where the app documents its keys.
 
 ## Input events
 
@@ -437,9 +529,8 @@ on:
 
 ## What is here, and what is planned
 
-[PLAN.md](PLAN.md) is the design and the order of work: mouse and the
-enhanced keyboard, the app lifecycle, scrollback output, and the
-published comparison with Ink. `bench/` holds the harness, both contenders
+[PLAN.md](PLAN.md) is the design and the order of work: the app
+lifecycle, scrollback output, and the published comparison with Ink. `bench/` holds the harness, both contenders
 (`bun run ink`, `bun run tui`), and the cost of one frame, whole and
 damaged (`bun run frame`), and of one key (`bun run keys`).
 
@@ -478,7 +569,15 @@ and exit cases through `mount` and `run` (`test/events/SOURCE.md`), the
 three phases of a dispatch in their exact order, what clears focus, the
 cursor's arithmetic replayed through a terminal that keeps its cursor,
 the bytes and the stdin calls of every way out of `run`, and 9,600
-random steps of focus under a changing tree. `test/yoga.rip` runs Yoga's
+random steps of focus under a changing tree. `test/mouse.rip` holds the
+mouse, hover, the enhanced keyboard and the selection: Ink's kitty
+negotiation cases (`test/mouse/SOURCE.md`), the hit test over nested,
+absolute, clipped, scrolled and hidden boxes and over words, in inline
+mode and under a frame taller than the terminal, the events and their
+road, the modes' bytes on every way out, the probe and both answers,
+the selection's cells, overlay, damage and clipboard bytes, and a fuzz
+of random trees and random cells where the hit target must be the node
+the painter put there. `test/yoga.rip` runs Yoga's
 543 generated layout cases, vendored unmodified under `test/yoga/`
 (MIT, © Meta Platforms), against the engine through a shim of the
 `yoga-layout` API. `test/yoga-aspect.rip` is a port of Yoga's 37
