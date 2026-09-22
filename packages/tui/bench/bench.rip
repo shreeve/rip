@@ -169,11 +169,12 @@ def startup()
 
 # ── The rest of the bench ─────────────────────────────────────────────────────
 
-# A bench script's own printout, as a code block.
-def printed(file, args = [])
+# A bench script's own printout, as a code block — or as it is, for
+# one that prints markdown.
+def printed(file, args = [], markdown = false)
   note "#{file} #{args.join ' '}".trim()
   { stdout } = spawn! file, args
-  "```\n#{stdout.trim()}\n```"
+  if markdown then stdout.trim() else "```\n#{stdout.trim()}\n```"
 
 # ── The report ────────────────────────────────────────────────────────────────
 
@@ -204,8 +205,8 @@ def main()
   sections.push "## Updates\n\nA 200×60 terminal (the resize scenario starts at 120 columns). Each side of each scenario in a fresh process, #{runs} runs; the median and ±half the spread. Ink: `interactive: true`, incremental rendering on, React's production build, memoized rows, its frame throttle lifted (maxFps 1000), every update awaited to the write that ends its synchronized update. Rip TUI: every update flushed. Bytes and writes are per update. *Same screen*: the reducer read both sides' screens after every update, scrollback included, and they matched cell for cell — the text, and the style of every cell that is not a blank (harness.rip states the blank rule).\n\n#{text}"
   cold = startup!
   sections.push "## Cold start\n\n#{cold}"
-  counted = printed! 'lines.rip'
-  sections.push "## Lines of code\n\n#{counted}"
+  counted = printed! 'lines.rip', [], true
+  sections.push "## Lines of code\n\n`bun run lines` (lines.rip): non-blank, non-comment lines by test/lines.rip's rule; Ink's `src/` and Yoga's `yoga/algorithm/` against the files this package ships.\n\n#{counted}"
   framed = printed! 'frame.rip'
   sections.push "## One frame, whole and damaged\n\n`bun run frame` (frame.rip): the frame alone — paint, diff, write; the state change left out, no layout owed — owing every cell, then owing its damage; median microseconds, the bytes of one, and the cells the damaged frame painted and compared.\n\n#{framed}"
   keyed = printed! 'keys.rip'

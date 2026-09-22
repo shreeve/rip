@@ -4,21 +4,22 @@
 #   cd packages/tui/bench
 #   bun run lines
 #
-# Non-blank, non-comment source lines; no tests, fixtures, examples or
-# benchmarks. Ink is its `src/` (.ts, .tsx) and Yoga its
-# `yoga/algorithm/` (.cpp, .h) — the algorithm alone, without the
-# bindings, the C API or the node — read from checkouts named by
-# INK_SRC and YOGA_SRC, or from misc/ink and misc/yoga at this
-# checkout's root; a checkout that is not Ink 7.1.1 is refused. Rip TUI
-# is the .rip files its package.json ships, and its runtime is what a
-# compiled component imports: src/runtime/reactive.js and components.js.
-# A comment is a line that is only one, or a `/* */` block; a `//` or
-# `#` after code on the same line leaves the line counted.
+# Non-blank, non-comment source lines, counted by test/lines.rip's
+# `count` — the rule the README's example table is counted by; no
+# tests, fixtures, examples or benchmarks. Ink is its `src/` (.ts,
+# .tsx) and Yoga its `yoga/algorithm/` (.cpp, .h) — the algorithm
+# alone, without the bindings, the C API or the node — read from
+# checkouts named by INK_SRC and YOGA_SRC, or from misc/ink and
+# misc/yoga at this checkout's root; a checkout that is not Ink 7.1.1
+# is refused. Rip TUI is the .rip files its package.json ships, and its
+# runtime is what a compiled component imports: src/runtime/reactive.js
+# and components.js.
 # ==============================================================================
 
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs'
 import { join, dirname, extname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { count } from '../test/lines.rip'
 
 HERE =! dirname(fileURLToPath(import.meta.url))
 ROOT =! join(HERE, '../../..')
@@ -33,46 +34,9 @@ def files(dir, exts)
     else found.push path if exts.includes extname(name)
   found
 
-# Non-blank, non-comment lines of a C-like source: `//` lines and
-# `/* */` blocks dropped, the rest counted.
-def clike(source)
-  count = 0
-  block = false
-  for line in source.split '\n'
-    rest = line
-    code = ''
-    loop
-      if block
-        end = rest.indexOf '*/'
-        break if end < 0
-        block = false
-        rest = rest.slice end + 2
-      else
-        open = rest.indexOf '/*'
-        slash = rest.indexOf '//'
-        if slash >= 0 and (open < 0 or slash < open)
-          code += rest.slice 0, slash
-          break
-        if open < 0
-          code += rest
-          break
-        code += rest.slice 0, open
-        block = true
-        rest = rest.slice open + 2
-    count += 1 if code.trim()
-  count
-
-# Non-blank, non-comment lines of Rip: `#` lines dropped.
-def rip(source)
-  count = 0
-  for line in source.split '\n'
-    text = line.trim()
-    count += 1 if text and not text.startsWith '#'
-  count
-
-def total(paths, counter)
+def total(paths)
   sum = 0
-  sum += counter readFileSync(path, 'utf8') for path in paths
+  sum += count path for path in paths
   sum
 
 n =! (value) -> value.toLocaleString 'en-US'
@@ -88,15 +52,15 @@ inkVersion = JSON.parse(readFileSync join(ink, 'package.json'), 'utf8').version
 throw Error.new "the Ink checkout at #{ink} is #{inkVersion}, not 7.1.1" unless inkVersion is '7.1.1'
 yoga = checkout 'YOGA_SRC', 'yoga', 'yoga/algorithm of Yoga'
 
-inkLines = total files(join(ink, 'src'), ['.ts', '.tsx']), clike
-yogaLines = total files(join(yoga, 'yoga/algorithm'), ['.cpp', '.h']), clike
+inkLines = total files(join(ink, 'src'), ['.ts', '.tsx'])
+yogaLines = total files(join(yoga, 'yoga/algorithm'), ['.cpp', '.h'])
 
 shipped = JSON.parse(readFileSync join(PACKAGE, 'package.json'), 'utf8').files.filter (name) -> name.endsWith '.rip'
 ours = {}
-ours[name] = rip readFileSync(join(PACKAGE, name), 'utf8') for name in shipped
+ours[name] = count join(PACKAGE, name) for name in shipped
 oursLines = Object.values(ours).reduce ((a, b) -> a + b), 0
 runtimeFiles = ['reactive.js', 'components.js']
-runtimeLines = total (join(ROOT, 'src/runtime', name) for name in runtimeFiles), clike
+runtimeLines = total (join(ROOT, 'src/runtime', name) for name in runtimeFiles)
 
 # Ink's production dependency closure, as installed here.
 seen = Set.new()
@@ -117,4 +81,4 @@ p "| Framework only | Ink `src/` #{n inkLines} | #{n oursLines} |"
 p "| Framework + layout algorithm | + Yoga `yoga/algorithm/` #{n yogaLines} = #{n inkLines + yogaLines} | #{n oursLines} (layout.rip is #{n ours['layout.rip']} of it) |"
 p "| Full runtime closure | + React, react-reconciler, scheduler and #{n deps - 3} more packages (#{n deps} in all) | + Rip runtime #{n runtimeLines} (#{runtimeFiles.join ', '}) = #{n oursLines + runtimeLines} |"
 p ""
-p "Framework against framework, Ink is #{frameworks.toFixed 1}× the lines of Rip TUI; with the layout algorithm on both sides, Ink + Yoga is #{withLayout.toFixed 1}×. Rip TUI's files: #{("#{name} #{n count}" for name, count of ours).join ', '}."
+p "Framework against framework, Ink is #{frameworks.toFixed 1}× the lines of Rip TUI; with the layout algorithm on both sides, Ink + Yoga is #{withLayout.toFixed 1}×. Rip TUI's files: #{("#{name} #{n lines}" for name, lines of ours).join ', '}."

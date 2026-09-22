@@ -99,7 +99,61 @@ counts the lines: non-blank and non-comment, the rule
 
 Run one with `rip examples/ink/counter.rip`.
 
-<!-- bench: the published comparison with Ink, PLAN.md §11, goes here -->
+## The numbers
+
+`bun run bench` in `bench/` runs both sides on the same scenarios —
+the same tree, node for node, against the same fake 200×60 terminal —
+each in a fresh process, five times, and writes
+[bench/RESULTS.md](bench/RESULTS.md); every number reproduces with
+`bun run bench`. Ink is measured as a careful React app is written:
+React's production build, memoized rows, `interactive: true`,
+incremental rendering on, its frame throttle lifted, every update
+awaited to the write that ends its frame. A number is published only
+when a terminal reducer (`bench/harness.rip`) has replayed what each
+side wrote and read the same screen after every update, scrollback
+included, cell for cell, text and style; a scenario whose screens
+differ is refused from the table with the first differing cell in its
+place. [PLAN.md](PLAN.md) §11 says how, and where the table does not
+flatter.
+
+CPU in microseconds per update, latency from the state change to the
+write in milliseconds (the median of five runs and half their spread),
+bytes and writes per update; Apple M5, Bun 1.4.2, Ink 7.1.1, React
+19.3.0:
+
+| Scenario | Ink cpu µs | p50 ms | p99 ms | bytes | writes | Rip TUI cpu µs | p50 ms | p99 ms | bytes | writes | Same screen |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|:--|
+| counter in a 1,000-element tree | 3638 ±163 | 2.99 ±0.13 | 3.93 | 347 | 3.0 | 18 ±1 | 0.00 ±0.00 | 0.02 | 33 | 1.0 | ✓ |
+| 40×8 table, 10% churn | 3413 ±89 | 2.39 ±0.12 | 3.41 | 5669 | 3.0 | 216 ±2 | 0.06 ±0.00 | 0.50 | 262 | 1.0 | ✓ |
+| 40×8 table, 100% churn | 4241 ±39 | 3.44 ±0.06 | 4.48 | 7052 | 3.0 | 343 ±7 | 0.12 ±0.01 | 0.82 | 1985 | 1.0 | ✓ |
+| 2,000-row list, scroll by one | 22346 ±614 | 19.93 ±0.60 | 21.86 | 2501 | 3.0 | 181 ±7 | 0.08 ±0.00 | 0.20 | 273 | 1.0 | ✓ |
+| 10,000-row list, scroll by one | 105608 ±230 | 97.19 ±0.51 | 102.29 | 2500 | 3.0 | 303 ±48 | 0.13 ±0.00 | 0.49 | 276 | 1.0 | ✓ |
+| insert at the top of a 50-row list | 2740 ±46 | 2.34 ±0.04 | 3.00 | 3155 | 3.0 | 422 ±16 | 0.09 ±0.00 | 0.22 | 344 | 1.0 | ✓ |
+| 1,000 scrollback appends | 334 ±8 | 0.11 ±0.00 | 0.57 | 55 | 5.0 | 147 ±1 | 0.05 ±0.00 | 0.11 | 57 | 1.0 | ✓ |
+| resize 120 → 80 → 120, 12×4 wrapped | 2049 ±96 | 0.99 ±0.01 | 1.81 | 4295 | 3.5 | 701 ±10 | 0.16 ±0.00 | 0.32 | 6635 | 1.0 | ✓ |
+| full relayout of 10,000 nodes | 7753 ±175 | 6.08 ±0.19 | 7.84 | 388 | 3.0 | 2325 ±41 | 1.37 ±0.06 | 2.49 | 380 | 1.0 | ✓ |
+| 20×8 table of CJK and emoji, churning | 2728 ±49 | 1.90 ±0.04 | 2.73 | 3791 | 3.0 | 414 ±5 | 0.19 ±0.00 | 0.56 | 990 | 1.0 | ✓ |
+
+| Cold start | import ms | first frame ms after import | process start → frame ms |
+|---|--:|--:|--:|
+| Ink 7.1.1 | 39.5 | 4.5 | 70.6 |
+| Rip TUI | 8.6 | 3.4 | 39.0 |
+
+Lines of code, by the rule above (`bun run lines`):
+
+| | Ink + Yoga | Rip TUI |
+|---|--:|--:|
+| Framework only | Ink `src/` 6,760 | 4,252 |
+| Framework + layout algorithm | + Yoga `yoga/algorithm/` 3,492 = 10,252 | 4,252 (layout.rip is 1,466 of it) |
+| Full runtime closure | + React, react-reconciler, scheduler and 33 more packages | + Rip runtime 1,598 = 5,850 |
+
+Ink + Yoga is 2.4× the lines of this package with the layout algorithm
+on both sides, 1.6× framework against framework. Two rows where the
+table is not one-sided: after a resize the frame is drawn from
+nothing, which is more bytes than Ink's incremental log writes; and a
+`Static` append grows with the items already written — about 150 µs
+averaged over 1,000 appends, 350 over 8,000 — where Ink's stays flat,
+so past a few thousand appends Ink is the faster side.
 
 ## Examples
 
@@ -747,10 +801,13 @@ next frame's write, and is cleared on every way out.
 
 ## What is here, and what is planned
 
-[PLAN.md](PLAN.md) is the design and the order of work: the app
-lifecycle, scrollback output, and the published comparison with Ink. `bench/` holds the harness, both contenders
-(`bun run ink`, `bun run tui`), and the cost of one frame, whole and
-damaged (`bun run frame`), and of one key (`bun run keys`).
+[PLAN.md](PLAN.md) is the design and the order of work. `bench/` holds
+the harness with its terminal reducer, both contenders (`bun run ink`,
+`bun run tui`), the runner that proves and publishes them (`bun run
+bench`, [bench/RESULTS.md](bench/RESULTS.md)), the lines of code (`bun
+run lines`), and the cost of one frame, whole and damaged (`bun run
+frame`), of one key (`bun run keys`), and of one mouse report (`bun run
+hit`).
 
 ## Demo
 

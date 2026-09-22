@@ -51,27 +51,32 @@ bench that reproduces it (`packages/AGENTS.md`, value 4).
 
 ### Lines of code
 
-Counted as non-blank, non-comment source lines, excluding tests,
+Counted as non-blank, non-comment source lines — `test/lines.rip`'s
+rule: a line is a comment when it is nothing else — excluding tests,
 fixtures, examples, and benchmarks. Three rows, always published
-together:
+together, counted by `bench/lines.rip` and quoted from
+`bench/RESULTS.md` (§11):
 
-| Row | Ink + Yoga | Rip TUI (budget) |
+| Row | Ink + Yoga | Rip TUI |
 |---|---|---|
-| Framework only | Ink `src/` ≈ 7,250 | ≈ 1,900 |
-| Framework + layout algorithm | + `yoga/algorithm/` 4,679 ≈ 12,000 | ≈ 3,400 |
-| Full runtime closure | + React, react-reconciler, 23 npm deps | + Rip runtime 2,262 |
+| Framework only | Ink `src/` 6,760 | 4,252 |
+| Framework + layout algorithm | + `yoga/algorithm/` 3,492 = 10,252 | 4,252 (`layout.rip` is 1,466 of it) |
+| Full runtime closure | + React, react-reconciler, scheduler and 33 more packages | + Rip runtime 1,598 (`reactive.js`, `components.js`) = 5,850 |
 
-The honest headline is **roughly 3× smaller**, not more. Raw totals
-(9,872 + 12,471) overstate Ink + Yoga by counting comments, bindings,
-and the C API.
+The honest headline is **2.4× smaller** with the layout algorithm on
+both sides, and 1.6× framework against framework: not the 3× the
+budget aimed at, since the package ships the mouse, the enhanced
+keyboard, text selection, hyperlinks, and the terminal's progress
+indicator, which Ink does not. Raw totals overstate Ink + Yoga by
+counting comments, bindings, and the C API, and are not quoted.
 
 ### Performance
 
-Measured by `bench.rip` against Ink on the same Bun, through a fake
-TTY stream, with final screens proven identical by a terminal reducer.
-Metrics: CPU time per update, p50/p99 set-to-write latency, bytes and
-writes per update, heap delta and GC count, cold start to first frame,
-import time, install size, dependency count.
+Measured by `bun run bench` (`bench/bench.rip`) against Ink on the same
+Bun, through a fake TTY stream, with the screen after every update
+proven identical by a terminal reducer (§11). Metrics: CPU time per
+update, p50/p99 set-to-write latency, bytes and writes per update,
+cold start to first frame, import time, dependency count.
 
 ### Clarity
 
@@ -166,9 +171,9 @@ rule: where a report lands, what it fires, and what a drag selects are
 one idea, and `tui.rip` hands it every report. The event and its
 dispatch stay in `document.rip`, beside the nodes whose links they walk.
 
-Also at the package root: `test.rip`, `demo.rip`, `bench.rip`,
-`bench/` (its own `package.json` quarantining Ink, React, and
-`yoga-layout`), `examples/` (`counter`, `files`, `log`, `input`, and
+Also at the package root: `test.rip`, `demo.rip`, `bench/` (its own
+`package.json` quarantining Ink, React, and `yoga-layout`; `bench.rip`
+runs both sides and writes `RESULTS.md`), `examples/` (`counter`, `files`, `log`, `input`, and
 under `examples/ink/` the four ports of §12 step 6 with Ink's source
 beside each), `README.md`.
 
@@ -1242,79 +1247,130 @@ run App
   hardware cursor on the mount's terminal, `{x, y}`, or null while it
   is hidden.
 
-## 11. Benchmark (`bench.rip`, `bench/`)
+## 11. Benchmark (`bench/`)
 
 Ink's own benchmarks record no metric and mostly measure React,
-because paint is throttled and piped output writes no frames. Ours:
+because paint is throttled and piped output writes no frames. Ours,
+`bun run bench` in `bench/`, runs every scenario on both sides and
+writes `bench/RESULTS.md`, the one source of every number this file
+and the README quote:
 
 | Scenario | Shows |
 |---|---|
-| One counter in a 1,000-node tree | Fine-grained update cost |
-| 10,000-row list through a 40-row viewport | Scrolling, large moves |
-| 80×40 table, 10% and 100% churn | Diff and emit |
-| Insert at the top of a list | Region moves |
+| One counter in a 1,000-element tree | Fine-grained update cost |
+| 40×8 table, 10% and 100% churn | Diff and emit |
+| 2,000- and 10,000-row lists through a 40-row viewport | Scrolling, large moves |
+| Insert at the top of a 50-row list | Region moves |
 | 1,000 `Static` appends | Scrollback path |
 | Resize 120 → 80 → 120 | Relayout and repaint |
 | Full relayout at 10,000 nodes | Layout engine vs WebAssembly |
 | Startup to first frame, import time | Cold path |
-| Wide-character and emoji text | Text path |
+| A 20×8 table of CJK and emoji, churning | Text path |
 
-Ink runs with `interactive: true`, with incremental rendering on and
-off, `CI` unset, on the same Bun, **on React's production build** (a
-run without `NODE_ENV=production` is refused), written the way a
-careful React app is (memoized cells and rows). Its frame throttle is
-lifted and every update awaits the frame it causes, so a number is
-the cost of one update.
+Both sides draw the same tree, node for node and string for string,
+against the same fake terminal (`bench/harness.rip`): 200×60, a write
+sink that counts and keeps every write. Ink runs with `interactive:
+true`, incremental rendering on, `CI` unset, on the same Bun, **on
+React's production build** (a run without `NODE_ENV=production` is
+refused), written the way a careful React app is (memoized cells and
+rows), colors forced to 24-bit for both. Its frame throttle is lifted
+and every update awaits the write that ends Ink's synchronized update,
+so a number is the cost of one update. Rip TUI sets one state, or
+resizes the terminal, and flushes the frame it owes. Each side of each
+scenario runs in a fresh process — neither's JIT state or heap taints
+the other — five times; the table holds the median and half the spread.
 
-### The Ink baseline
+**The reducer.** Every run keeps the bytes each update wrote, and
+afterwards replays them through `Terminal` (`harness.rip`): a screen of
+styled cells with a cursor that scrolls into a scrollback it keeps —
+relative and absolute cursor moves, erase in display and in line, SGR
+through `test/ink/cells.rip`'s reader, line feeds, DEC private modes,
+the queries both sides make — and refuses any sequence outside that
+list. The screen after every update, scrollback included, is read in
+`cells.rip`'s notation under its blank rule (a space shows nothing of
+its foreground, bold, dim or italic; a row's trailing default spaces
+are trimmed; trailing blank rows are dropped) and digested. A scenario
+is in the table only when every run of a side drew what its first
+did and the two sides' screens agree at every update, text and style,
+cell for cell; otherwise it is refused, and the first differing cell
+is printed in the numbers' place. That rule, not a trailing-space
+convention, is the whole normalization.
 
-`bench/` holds the harness (`harness.rip`), the Ink scenarios
-(`ink.rip`, `ink-startup.rip`), and the frame profiler
-(`profile.rip`). Reproduce with `cd bench && bun install`, then
-`bun run ink` and `bun run profile`. Ink 7.1.1, React 19.3.0, Bun
-1.4.2, Apple M5, a 200×60 terminal, incremental rendering on:
+### The results
 
-| Scenario | CPU per update | p50 / p99 latency | Bytes per update |
+`bench/RESULTS.md`, as `bun run bench` wrote it — Apple M5, Bun 1.4.2,
+Ink 7.1.1, React 19.3.0, a load average of 2.3 at the start — cpu in
+microseconds per update, latency from the state change to the write
+in milliseconds, bytes and writes per update:
+
+| Scenario | Ink cpu µs | p50 ms | p99 ms | bytes | writes | Rip TUI cpu µs | p50 ms | p99 ms | bytes | writes | Same screen |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|:--|
+| counter in a 1,000-element tree | 3638 ±163 | 2.99 ±0.13 | 3.93 | 347 | 3.0 | 18 ±1 | 0.00 ±0.00 | 0.02 | 33 | 1.0 | ✓ |
+| 40×8 table, 10% churn | 3413 ±89 | 2.39 ±0.12 | 3.41 | 5669 | 3.0 | 216 ±2 | 0.06 ±0.00 | 0.50 | 262 | 1.0 | ✓ |
+| 40×8 table, 100% churn | 4241 ±39 | 3.44 ±0.06 | 4.48 | 7052 | 3.0 | 343 ±7 | 0.12 ±0.01 | 0.82 | 1985 | 1.0 | ✓ |
+| 2,000-row list, scroll by one | 22346 ±614 | 19.93 ±0.60 | 21.86 | 2501 | 3.0 | 181 ±7 | 0.08 ±0.00 | 0.20 | 273 | 1.0 | ✓ |
+| 10,000-row list, scroll by one | 105608 ±230 | 97.19 ±0.51 | 102.29 | 2500 | 3.0 | 303 ±48 | 0.13 ±0.00 | 0.49 | 276 | 1.0 | ✓ |
+| insert at the top of a 50-row list | 2740 ±46 | 2.34 ±0.04 | 3.00 | 3155 | 3.0 | 422 ±16 | 0.09 ±0.00 | 0.22 | 344 | 1.0 | ✓ |
+| 1,000 scrollback appends | 334 ±8 | 0.11 ±0.00 | 0.57 | 55 | 5.0 | 147 ±1 | 0.05 ±0.00 | 0.11 | 57 | 1.0 | ✓ |
+| resize 120 → 80 → 120, 12×4 wrapped | 2049 ±96 | 0.99 ±0.01 | 1.81 | 4295 | 3.5 | 701 ±10 | 0.16 ±0.00 | 0.32 | 6635 | 1.0 | ✓ |
+| full relayout of 10,000 nodes | 7753 ±175 | 6.08 ±0.19 | 7.84 | 388 | 3.0 | 2325 ±41 | 1.37 ±0.06 | 2.49 | 380 | 1.0 | ✓ |
+| 20×8 table of CJK and emoji, churning | 2728 ±49 | 1.90 ±0.04 | 2.73 | 3791 | 3.0 | 414 ±5 | 0.19 ±0.00 | 0.56 | 990 | 1.0 | ✓ |
+
+| Cold start | import ms | first frame ms after import | process start → frame ms |
+|---|--:|--:|--:|
+| Ink 7.1.1 | 39.5 | 4.5 | 70.6 |
+| Rip TUI | 8.6 | 3.4 | 39.0 |
+
+Median of 7 fresh processes each; both first frames read the same.
+The lines of code are §2's table, from the same run.
+
+What the table says, and where it does not flatter:
+
+- **A scroll costs Ink a layout of the whole list.** Ink scrolls a
+  list by a negative margin under `overflow: hidden`, so Yoga lays out
+  every row each frame: 20 ms at 2,000 rows, 97 ms at 10,000. A content
+  offset here is a repaint of the viewport and owes no layout, so the
+  10,000-row scroll costs what the 2,000-row one does.
+- **Where Ink is close, the frame is the whole screen.** 100% churn of
+  the table, the emoji table, and the 10,000-node relayout are frames
+  that change every cell, and there the two are 8× to 12× apart, not
+  100×: the damage path has nothing to skip.
+- **The resize writes more bytes than Ink.** After a resize the frame
+  is drawn from nothing (6,635 bytes to Ink's 4,295), while Ink's
+  incremental log keeps the lines that did not change. It costs 3× less
+  CPU, and more bytes.
+- **`Static` appends grow with the list.** The cost of an append is not
+  flat: about 150 µs averaged over 1,000 appends, 210 over 4,000, 350
+  over 8,000 (`rip tui.rip static 8`), where Ink stays between 130 and
+  330 whatever the count. Each batch lays its container out as a root,
+  and the body's next layout visits every item under it: a walk as long
+  as the list, per batch (TODO.md §5). Past about 4,000 appends Ink is
+  the faster side.
+- **Text wraps at a rounded width here and at Yoga's float width in
+  Ink.** A cell `33%` of 120 columns is 39.6 to Ink's wrapper and 40
+  cells to this package's, so a line that fills the cell exactly wraps
+  differently; and a line that fills its cell exactly at a space leaves
+  that space at the head of the next line here. The reducer refuses
+  such a tree (first differing cell: update 0, row 20, column 35), so
+  the resize scenario's cells are a quarter of 120 and of 80 columns,
+  whole either way. The second point is a text-engine defect, open.
+
+**Where an Ink frame goes** (share of in-frame CPU time, sampled;
+`bun run profile`, in RESULTS.md):
+
+| Stage | counter | table 100% | list 2k |
 |---|---|---|---|
-| One counter in a 1,000-element tree | 3.8 ms | 3.1 / 4.9 ms | 347 (9,013 with incremental off) |
-| 40×8 table, 10% churn | 2.8 ms | 2.2 / 3.3 ms | 3,109 |
-| 40×8 table, 100% churn | 3.9 ms | 3.3 / 4.5 ms | 3,852 |
-| 2,000-row list, scroll by one | 22.0 ms | 20.7 / 22.9 ms | 2,501 |
-| 1,000 scrollback appends | 0.14 ms | 0.11 / 0.57 ms | 55 |
-| Cold start to first frame | 83 ms from process start; importing Ink and React is 47 ms of it | | |
-
-Every update costs three writes. Heap deltas swing with collector
-timing and are not quoted.
-
-**Where an Ink frame goes** (share of in-frame CPU time, sampled):
-
-| Stage | counter | table 100% | list |
-|---|---|---|---|
-| Text: measure, wrap, tokenize and re-join ANSI | 74% | 43% | 82% |
+| Text: measure, wrap, tokenize and re-join ANSI | 75% | 46% | 82% |
 | Layout: Yoga | 12% | 36% | 12% |
-| Reconcile: React and the host config | 5% | 14% | 3% |
-| Paint: the output grid, borders | 9% | 7% | 3% |
+| Reconcile: React and the host config | 4% | 12% | 2% |
+| Paint: the output grid, borders | 9% | 6% | 3% |
 | Emit: diff and write | under 1% | under 1% | under 1% |
 
 In the counter scenario four functions of the ANSI tokenizer
 (`diffAnsiCodes`, `tokenize`, `undoAnsiCodes`, `ansiCodesToString`)
 take over half of the whole run. One changed digit in a 1,000-element
-tree costs Ink about 4 ms because every frame re-tokenizes and
+tree costs Ink about 3.6 ms because every frame re-tokenizes and
 re-joins the styled text of the entire screen.
-
-**First contact.** The skeleton (full relayout and full repaint every
-frame, no damage tracking, no layout cache) on the same scenarios,
-`bun run tui`:
-
-| Scenario | Ink | Rip TUI skeleton |
-|---|---|---|
-| One counter in a 1,000-element tree | 3.8 ms, 347 bytes, 3 writes | 0.20 ms, 33 bytes, 1 write |
-| 40×8 table, 10% churn | 2.8 ms, 3,109 bytes | 0.54 ms, 262 bytes |
-| 40×8 table, 100% churn | 3.9 ms, 3,852 bytes | 0.49 ms, 1,985 bytes |
-
-These rank the two and are not README numbers: the terminal reducer
-that proves both sides drew the same screen lands with the published
-bench (PR 6).
 
 **One frame, whole and damaged.** `bun run frame` times the frame
 alone — paint, diff, write; the state change left out, no layout owed —
@@ -1325,25 +1381,23 @@ and the run refuses to report if they are not:
 
 | Scenario | Whole | Damaged | Cells |
 |---|---|---|---|
-| One cell of a 1,000-element tree | 65 | 1.1 | 7 |
-| One cell of a full 200×60 table | 125 | 0.8 | 4 |
-| Every cell of that table | 160 | 165 | 12,000 |
-| One of 200 bordered panels of wide text | 90 | 0.9 | 8 |
-| A 40-line log whose last row comes and goes, laid out each time | 57 | 24 | 200 |
+| One cell of a 1,000-element tree | 74 | 1.2 | 7 |
+| One cell of a full 200×60 table | 143 | 1.0 | 4 |
+| Every cell of that table | 181 | 185 | 12,000 |
+| One of 200 bordered panels of wide text | 91 | 1.1 | 8 |
+| A 40-line log whose last row comes and goes, laid out each time | 56 | 23 | 200 |
 
 A small update's paint and diff fall with its damage, and a frame that
-changes everything costs what a whole one does. Under `bun run tui` the
-counter in a 1,000-element tree is about 15 µs of CPU an update. 100%
-churn of the 40×8 table is about 170 µs over a long run (`rip tui.rip
-table100 40`, 12,000 updates) and about 340 µs over the 300 updates of
-a default run, which end while the engine is still compiling the path.
+changes everything costs what a whole one does.
 
 **One key.** `bun run keys` mounts the README's select list and sends
 it arrow keys as a terminal's bytes, timing each from `send` to the end
-of the frame it causes: about 8 µs with ten items (12 cells, 55 bytes)
-and about 55 µs with a hundred, where each item's `inverse` is a binding
-that reads the choice; a key no listener acts on owes no frame and is
-about 0.3 µs.
+of the frame it causes: about 5.5 µs with ten items (12 cells, 55
+bytes) and about 42 µs with a hundred, where each item's `inverse` is a
+binding that reads the choice; a key no listener acts on owes no frame
+and is about 0.2 µs. **One mouse report** (`bun run hit`): on a tree of
+2,403 nodes a motion report is about 0.6 µs and a click about 1 µs,
+parser included.
 
 What this settles:
 
@@ -1354,9 +1408,10 @@ What this settles:
 - **Knowing the changed node is the right bet.** The dominant costs
   are whole-screen work repeated per frame, which damage tracking and
   the same-size fast path never start.
-- **The order of work stands.** The skeleton (PR 1) proves the damage
-  path early; the text and paint step (PR 3) is where the measured
-  win lands and carries the bench for it.
+- **A number without the proof is not a number.** Two renderers that
+  agree on the bytes they were not asked for — the screen — can be
+  compared on the bytes they were; the reducer is what makes the
+  table a comparison and not a ranking.
 
 ## 12. Order of work
 
