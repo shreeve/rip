@@ -101,7 +101,7 @@ export class Screen
   above!: (text, err = null) ->
     return unless text
     unless @batching
-      __batch ->
+      __batch ->   # an empty batch: its end runs the effects the turn queued
       @still()
     @scrollback += text
     unless @interactive

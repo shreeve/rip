@@ -428,9 +428,10 @@ export mount =! (App, options = {}) ->
 # Give the terminal and the process back: the terminal as terminal.rip
 # gives it back, the listeners, the `document` slot. `drawn` leaves the
 # last frame in the scrollback — a mount's too, drawn with whatever the
-# closing turn owed; a failure leaves whatever reached the screen. Every step is taken whatever the others do, so a write that
-# fails cannot leave stdin raw or the document installed, and `done` is
-# settled here — with `error`, the first step that failed, or `result`.
+# closing turn owed; a failure leaves whatever reached the screen. Every
+# step is taken whatever the others do, so a write that fails cannot
+# leave stdin raw or the document installed, and `done` is settled here
+# — with `error`, the first step that failed, or `result`.
 close! =! (drawn, error = null, result = undefined) ->
   held = live
   { app, view, out, doc, restore, resized, pointer, settled } = held
