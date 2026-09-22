@@ -215,6 +215,11 @@ back on every way out, by one road:
 
   A key that arrives meanwhile is nobody's; a `quit` meanwhile closes
   the app without taking the terminal back.
+- **Pace.** A change books a frame and every change until it is drawn
+  goes into it, and two frames are at least 8 ms apart. `run App,
+  pace: 100` sets that interval: an app fed by a stream that changes
+  its state a thousand times a second binds the state directly and
+  draws ten frames a second.
 - **Alternate screen.** `run App, altScreen: true` draws on the
   terminal's alternate screen from its top-left; every way out leaves
   it after the last frame, so the frame vanishes and the shell's own
@@ -430,7 +435,14 @@ default actions — and draws nothing: ask for the frame.
 
 Nothing is drawn until `frame` asks, so a frame that fails — a layout
 that never settles — throws from `frame`, to the test that asked for
-it. `bytes` is the difference from the frame
+it. `mount App, pace: 100` draws as `run` does instead: the first frame
+and every change after it are booked, no closer than the pace, on the
+mount's clock, and drawn as `view.tick` moves the clock to them, so ten
+changes within 100 ms of `tick` are one frame; a booked frame that
+fails throws from `tick`, and `bytes` holds every write since the test
+last asked for a `frame`.
+
+`bytes` is the difference from the frame
 before, exactly as `run` writes it; a frame that changes no cell sends
 nothing. With `rows`, a frame taller than the terminal shows its
 bottom, as it does on a terminal; without, the terminal is as tall as

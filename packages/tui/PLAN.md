@@ -123,8 +123,9 @@ component effects ──► node setters ──► dirty marks ──► frame f
                         diff + emit (one write) ◄───────┘
 ```
 
-One flush per reactive batch: a microtask, a minimum interval of about
-8 ms. Each key of a
+One flush per reactive batch: a microtask, and a minimum interval
+between frames, 8 ms unless `run App, pace: ms` names another — every
+change inside the interval goes into the frame that ends it. Each key of a
 stdin read is a reactive turn of its own — the tree a key meets is the
 tree the key before it left — and a read is still one frame, because a
 change books a frame and does not draw one. Rip flushes effects
@@ -1109,13 +1110,13 @@ run App
 ```
 
 - `run(App, {stdin, stdout, stderr, damage, mouse, keyboard, selection,
-  altScreen, console})` → `{app, done, quit, flush}`, and `suspend(fn)`
+  altScreen, console, pace})` → `{app, done, quit, flush}`, and `suspend(fn)`
   hands the terminal to `fn` and takes it back (§8).
 - `print(text)` writes text above the live frame, its line ended, and
   `print.err(text)` the same on stderr with the frame cleared on stdout
   first; with no app mounted the text goes to the stream as it is.
-- `mount(App, {cols, rows, props, damage, mouse, keyboard, selection})`
-  → `{app, frame, ansi, bytes, damage, scrollback, stderr, resize,
+- `mount(App, {cols, rows, props, damage, mouse, keyboard, selection,
+  pace})` → `{app, frame, ansi, bytes, damage, scrollback, stderr, resize,
   close, done}`, and for input `{press, type, paste, send, tick,
   focused, cursor}`, is the test driver (§10), and
   `renderToString(App, {cols, rows, props, ansi})` is a mount, one

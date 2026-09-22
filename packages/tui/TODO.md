@@ -80,13 +80,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 9. Found by the live test runner
 
-- [ ] Frames are paced by a fixed 8 ms. A lane that writes a thousand
-      chunks a second would draw a frame each 8 ms, so
-      `scripts/test-live.rip` keeps its run in a plain model that a
-      computed re-reads on each `tick.frame`, painting once a tick. An
-      app should set the least interval between frames (`run App,
-      pace: ms`, and `mount` honoring it through `view.tick`) and bind
-      its state directly.
 - [ ] `print` writes above only the `Static` items already in the tree:
       an effect that prints in the turn that appends an item runs
       before the render block adds that item, so the item's row lands

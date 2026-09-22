@@ -1,8 +1,9 @@
 # The repository's live test runner, scripts/test-live.rip, driven
 # headless through `mount`: the lanes' events are fed by hand as the
 # scheduler (scripts/lanes.mjs) would send them, the lanes' clock is a
-# number the test moves, and the board's clock moves with `view.tick`.
-# Every frame is the one a terminal would show at that moment.
+# number the test moves, and the board is mounted at the runner's pace,
+# so its frames are drawn as `view.tick` moves its clock. Every frame is
+# the one a terminal would show at that moment.
 #
 #   rip test/live.rip
 
@@ -12,7 +13,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { mount } from 'rip/tui'
 import * as cells from './ink/cells.rip'
-import { Board, Tally, blocks, firstFailure, recall, remember, PAINT } from '../../../scripts/test-live.rip'
+import { Board, Tally, PACE, blocks, firstFailure, recall, remember, PAINT } from '../../../scripts/test-live.rip'
 import { failureBlock } from '../../../scripts/lanes.mjs'
 
 # Four lanes as the scheduler plans them, the last one skipped, and what
@@ -50,7 +51,7 @@ board =! (memory, body) ->
   planned.skipped = planned.lanes.filter (it) -> it.skip
   clockAt = { now: 0 }
   tally = Tally.new planned, { root: '/repo', cores: 10, jobs: 2, ci: false }, memory, -> clockAt.now
-  view = mount Board, cols: 100, rows: 30, props: { tally }
+  view = mount Board, cols: 100, rows: 30, pace: PACE, props: { tally }
   hear = (at, ...events) ->
     clockAt.now = at
     tally.hear event for event in events
@@ -148,18 +149,14 @@ test "the strip holds one cell per lane in the order they start, and the footer 
 test "the terminal's progress indicator follows the run's share, weighed by the last run, and says error once a lane fails", ->
   board MEMORY(), ({ view, hear, lanes }) ->
     hear 0, { type: 'plan' }, { type: 'start', lane: lanes[0] }, { type: 'start', lane: lanes[2] }
-    view.frame()
     hear 20000, { type: 'finish', result: { lane: lanes[2], status: 'pass', ms: 700, ran: 548, output: '548 tests: ok' } }
-    view.frame()
-    ok view.bytes.includes('\x1b]9;4;1;26\x1b\\'), "20 s of the root lane's 50 and time's 0.8 whole, of 80.8"
+    ok view.bytes.endsWith('\x1b]9;4;1;26\x1b\\\x1b[?2026l'), "20 s of the root lane's 50 and time's 0.8 whole, of 80.8"
     hear 21000, { type: 'start', lane: lanes[1] }, { type: 'finish', result: { lane: lanes[1], status: 'fail', ms: 100, why: 'exit 1', output: BUN_FAILURE } }
-    view.frame()
-    ok view.bytes.includes('\x1b]9;4;2\x1b\\'), 'error once a lane fails'
+    ok view.bytes.endsWith('\x1b]9;4;2\x1b\\\x1b[?2026l'), 'error once a lane fails'
   board null, ({ view, hear, lanes }) ->
     hear 0, { type: 'plan' }, { type: 'start', lane: lanes[2] }
     hear 700, { type: 'finish', result: { lane: lanes[2], status: 'pass', ms: 700, ran: 548, output: '548 tests: ok' } }
-    view.frame()
-    ok view.bytes.includes('\x1b]9;4;1;33\x1b\\'), 'on a first run, the lanes finished of the lanes to run'
+    ok view.bytes.endsWith('\x1b]9;4;1;33\x1b\\\x1b[?2026l'), 'on a first run, the lanes finished of the lanes to run'
 
 test "a failing lane's card: the test, what it said, and where, as a link; ↑ and ↓ go between the cards; f shows the failing lanes in place of the lanes in flight", ->
   board MEMORY(), ({ view, hear, lanes }) ->
@@ -224,15 +221,12 @@ test! "the end: every failing lane's output printed above the frame as the plain
     passing = [{ lane: lanes[2], status: 'pass', ms: 700, ran: 548, output: '548 tests: ok' }, { lane: lanes[0], status: 'pass', ms: 45000, ran: 7938, output: 'Ran 7938 tests' }]
     hear 4700, { type: 'finish', result: passing[0] }
     hear 45000, { type: 'finish', result: passing[1] }, { type: 'end', summary: { results: [failing, ...passing], skipped: [lanes[3]], excluded: [], failed: [failing], wall: 45000, ranTotal: 8486, code: 1 } }
-    view.frame()
-    before = view.scrollback
-    ok cells.plain(before).some((row) -> row.startsWith '✓ root (extended tier) 7,938 tests'), 'the last lane is in the scrollback'
-    ok not before.includes('failures, then last 60 lines'), 'the run ends a tick after its last lane, once that lane is in the scrollback'
-    view.tick 100
     frame = rows view.frame()
-    after = view.scrollback.slice before.length
-    ok after.startsWith(failureBlock(failing, PAINT) + '\n'), "the failing lane's block, byte for byte the plain runner's"
-    eq cells.plain(after.slice(failureBlock(failing, PAINT).length + 1)), [
+    block = failureBlock failing, PAINT
+    at = view.scrollback.indexOf block
+    ok cells.plain(view.scrollback.slice 0, at).some((row) -> row.startsWith '✓ root (extended tier) 7,938 tests'), 'the last lane is written above the end'
+    ok view.scrollback.slice(at).startsWith(block + '\n'), "the failing lane's block, byte for byte the plain runner's"
+    eq cells.plain(view.scrollback.slice(at + block.length + 1)), [
       '╭──────────────────────────────────────────────────────────────────────────────────────────────────╮'
       '│ lanes   2 passed · 1 failed · 1 skipped                                                          │'
       '│ tests   8,486                                                                                    │'

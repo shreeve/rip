@@ -36,7 +36,11 @@ import { configure, guardrails, planLanes, launch, failureBlock, stripAnsi, FAIL
 # so neighbors never pulse in lockstep.
 SPINS   =! ['⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏', '⣾⣽⣻⢿⡿⣟⣯⣷', '⠁⠂⠄⡀⢀⠠⠐⠈', '⢄⢂⢁⡁⡈⡐⡠', '⠈⠐⠠⢀⡀⠄⠂⠁']
 EIGHTHS =! ['', '▏', '▎', '▍', '▌', '▋', '▊', '▉']
-TICK    =! 100   # milliseconds between frames: the run paints at most once a tick
+TICK    =! 100   # milliseconds a spinner holds each glyph
+
+# The least milliseconds between two frames: every event meanwhile goes
+# into the next one.
+export PACE =! 100
 
 # Colors as true color, and as the sixteen where the terminal has no more.
 HUES  =! { cyan: '#22d3ee', green: '#4ade80', amber: '#fbbf24', red: '#f87171', slate: '#64748b', yellow: '#facc15' }
@@ -129,21 +133,29 @@ export firstFailure =! (output) ->
 
 # ── The run as it stands ──────────────────────────────────────────────────────
 
+# A reactive cell, for a model outside any component: `read` and
+# `write`, and a binding that read it follows the write.
+cell =! (first) ->
+  held := first
+  { read: (-> held), write: ((next) -> held = next) }
+
 # What the lanes' events have said so far, and what the last complete
-# run said: a model a frame reads, never a reactive one. Events land here
-# as they come and the board reads it once a tick, so a lane that writes
-# a thousand chunks a second costs no frame. `now` is the clock the
-# lanes' starts are read on.
+# run said. Each event writes the cells the board binds; the board draws
+# no more than once a pace however fast they come, so a lane that writes
+# a thousand chunks a second costs no more frames than one that writes
+# none. A lane's entry is replaced, never changed in place. `now` is the
+# clock the lanes' starts are read on.
 export class Tally
   constructor: (planned, config, memory = null, now = Date.now) ->
     @config = config
     @memory = memory ?? { wall: null, lanes: {} }
     @now = now
-    @entries = planned.lanes.map (lane, index) -> { lane, index, status: 'waiting', at: null, result: null, seen: 0, arrivals: 0, carry: '', decoder: TextDecoder.new(), card: null }
-    @byLabel = Map.new @entries.map((entry) -> [entry.lane.label, entry])
-    @finished = []   # the scrollback's rows, in the order the lanes finished
-    @began = null
-    @summary = null
+    @lanes = cell planned.lanes.map((lane, index) -> { lane, index, status: 'waiting', at: null, result: null, seen: 0, arrivals: 0, card: null })
+    @order = Map.new planned.lanes.map((lane, index) -> [lane.label, index])
+    @lines = planned.lanes.map -> { carry: '', decoder: TextDecoder.new() }   # each lane's line so far, which nothing draws
+    @rows = cell []   # the scrollback's rows, in the order the lanes finished
+    @start = cell null
+    @end = cell null
     @shown = false   # whether a frame has shown the summary yet
     @closed = false
     known = (record.ms for own label, record of @memory.lanes when record?.ms > 0)
@@ -151,36 +163,45 @@ export class Tally
     @median = if known.length then known[Math.floor known.length / 2] else null
     @slowest = if known.length then known[known.length - 1] else 0
 
+  get entries: -> @lanes.read()
+  get finished: -> @rows.read()
+  get began: -> @start.read()
+  get summary: -> @end.read()
+
   hear!: (event) ->
     switch event.type
-      when 'plan' then @began = @now()
-      when 'start'
-        entry = @byLabel.get event.lane.label
-        entry.status = 'running'
-        entry.at = @now()
-      when 'chunk' then @count @byLabel.get(event.lane.label), event.data
+      when 'plan' then @start.write @now()
+      when 'start' then @change event.lane.label, { status: 'running', at: @now() }
+      when 'chunk' then @count event.lane.label, event.data
       when 'finish' then @settle event.result
-      when 'end' then @summary = event.summary
+      when 'end' then @end.write event.summary
+
+  # A lane's entry, with `fields` over it.
+  change!: (label, fields) ->
+    list = [...@entries]
+    at = @order.get label
+    list[at] = { ...list[at], ...fields }
+    @lanes.write list
 
   # The lines a lane prints one per test — the rip harness's `✓` and `✗`,
   # bun's `(pass)` and `(fail)` — counted as they stream, a line at a
   # time, with when each arrived.
-  count!: (entry, data) ->
-    text = entry.carry + entry.decoder.decode(data, { stream: true })
+  count!: (label, data) ->
+    line = @lines[@order.get label]
+    text = line.carry + line.decoder.decode(data, { stream: true })
     parts = text.split /\r\n|\r|\n/
-    entry.carry = parts.pop()
-    for part in parts when /^\s*(?:✓|✗|\(pass\)|\(fail\)) /.test stripAnsi(part)
-      entry.seen += 1
-      entry.arrivals += @now() - entry.at
-    return
+    line.carry = parts.pop()
+    tests = 0
+    tests += 1 for part in parts when /^\s*(?:✓|✗|\(pass\)|\(fail\)) /.test stripAnsi(part)
+    return unless tests
+    entry = @entries[@order.get label]
+    @change label, { seen: entry.seen + tests, arrivals: entry.arrivals + tests * (@now() - entry.at) }
 
   settle!: (result) ->
-    entry = @byLabel.get result.lane.label
-    entry.status = result.status
-    entry.result = result
-    entry.card = firstFailure result.output if result.status is 'fail' or result.status is 'timeout'
+    failing = result.status is 'fail' or result.status is 'timeout'
+    @change result.lane.label, { status: result.status, result, card: (if failing then firstFailure(result.output) else null) }
     @slowest = Math.max @slowest, result.ms
-    @finished.push { result, slowest: @slowest, last: @memory.lanes[result.lane.label] ?? null }
+    @rows.write [...@rows.read(), { result, slowest: @slowest, last: @memory.lanes[result.lane.label] ?? null }]
 
   # A lane's last duration, or the middle of the known ones for a lane
   # with none; null on a first run.
@@ -210,53 +231,6 @@ export class Tally
       done += weight if entry.result
       done += Math.min(now - entry.at, weight) if entry.status is 'running'
     if total then done / total else null
-
-  # Everything a frame shows, as of now; `frame` turns the spinners. The
-  # summary shows a tick after it arrives, so the rows of the lanes that
-  # finished with it are in the tree before the run's end prints above
-  # them.
-  snapshot: (frame) ->
-    now = @now()
-    over = @summary? and @shown
-    @shown = @summary?
-    elapsed = if @began? then now - @began else 0
-    tally = { passed: 0, failed: 0, skipped: 0, tests: 0, finished: 0 }
-    for entry in @entries
-      switch entry.status
-        when 'pass'
-          tally.passed += 1
-          tally.tests += entry.result.ran ?? 0
-        when 'fail', 'timeout' then tally.failed += 1
-        when 'skip' then tally.skipped += 1
-    tally.finished = tally.passed + tally.failed
-    tally.total = @entries.filter((entry) -> not entry.lane.skip).length
-    share = @share now
-    running = for entry in @entries when entry.status is 'running'
-      spent = now - entry.at
-      weight = @estimate entry.lane.label
-      counts = @counted entry.lane.label
-      record = @memory.lanes[entry.lane.label]
-      {
-        label: entry.lane.label
-        spin: spinOf entry.index, frame
-        spent
-        over: if weight then spent / weight else 0
-        fill: if counts then entry.seen / record.ran else if weight then spent / weight else null
-        info: if counts then "#{commas entry.seen} / #{commas record.ran} tests" else if weight then "#{secs spent} / ~#{about weight}" else secs(spent)
-      }
-    {
-      frame
-      elapsed
-      share
-      eta: if share? and share >= 0.02 and share < 1 and elapsed > 2000 then elapsed * (1 - share) / share else null
-      cells: ({ status: entry.status, spin: spinOf(entry.index, frame) } for entry in @entries)
-      running
-      tally
-      failures: @failures
-      finished: @finished
-      summary: @summary
-      over
-    }
 
 # ── The memory of the last run ────────────────────────────────────────────────
 
@@ -372,59 +346,109 @@ export Board = component
   top := 0         # the first line of that output shown
   finale := false  # the end card is written above the frame
 
-  snap ~= @tally.snapshot tick.frame
+  # The time, as the clock moves it, is what the spinners, the bars and
+  # the clocks are drawn at; everything else is the tally's, as its
+  # events write it.
+  frame ~= tick.frame
+  now ~=
+    frame
+    @tally.now()
+  summary ~= @tally.summary
+  failures ~= @tally.failures
+  elapsed ~= if @tally.began? then now - @tally.began else 0
+  share ~= @tally.share now
+  eta ~= if share? and share >= 0.02 and share < 1 and elapsed > 2000 then elapsed * (1 - share) / share else null
+
+  # The lanes passed, failed, skipped and finished, of those to run, and
+  # the tests of the lanes that passed.
+  score ~=
+    t = { passed: 0, failed: 0, skipped: 0, tests: 0, total: 0 }
+    for entry in @tally.entries
+      t.total += 1 unless entry.lane.skip
+      switch entry.status
+        when 'pass'
+          t.passed += 1
+          t.tests += entry.result.ran ?? 0
+        when 'fail', 'timeout' then t.failed += 1
+        when 'skip' then t.skipped += 1
+    t.finished = t.passed + t.failed
+    t
+
+  running ~=
+    for entry in @tally.entries when entry.status is 'running'
+      spent = now - entry.at
+      weight = @tally.estimate entry.lane.label
+      counts = @tally.counted entry.lane.label
+      record = @tally.memory.lanes[entry.lane.label]
+      {
+        label: entry.lane.label
+        spin: spinOf entry.index, frame
+        spent
+        over: if weight then spent / weight else 0
+        fill: if counts then entry.seen / record.ran else if weight then spent / weight else null
+        info: if counts then "#{commas entry.seen} / #{commas record.ran} tests" else if weight then "#{secs spent} / ~#{about weight}" else secs(spent)
+      }
+
+  # The run ends a tick after its summary arrives, so the rows of the
+  # lanes that finished with it are in the tree before the run's end
+  # prints above them.
+  over ~=
+    frame
+    ended = summary? and @tally.shown
+    @tally.shown = summary?
+    ended
+
   wide ~= screen.cols >= 70
   name ~= Math.max 10, ...@tally.entries.map((entry) -> entry.lane.label.length)
-  chosen ~= snap.failures[Math.min(pick, snap.failures.length - 1)] ?? null
+  chosen ~= failures[Math.min(pick, failures.length - 1)] ?? null
 
   heading ~=
     config = @tally.config
-    blurb = if wide then "#{snap.tally.total} lanes · #{config.jobs} at a time · #{config.cores} cores" else "#{snap.tally.total} lanes"
+    blurb = if wide then "#{score.total} lanes · #{config.jobs} at a time · #{config.cores} cores" else "#{score.total} lanes"
     left = [seg(' rip ', { bold: true, color: hue('cyan') }), seg('test:all ', { bold: true }), seg(blurb, { dimColor: true })]
     used = left.reduce ((sum, piece) -> sum + piece.text.length), 0
-    stamp = clockOf snap.elapsed
+    stamp = clockOf elapsed
     [...left, seg(' '.repeat(Math.max 1, screen.cols - used - stamp.length - 1)), seg(stamp, { bold: true })]
 
-  strip ~= [seg(' '), ...snap.cells.map(cellSeg)]
+  strip ~= [seg(' '), ...@tally.entries.map((entry) -> cellSeg { status: entry.status, spin: spinOf(entry.index, frame) })]
 
   overall ~=
-    share = snap.share
-    eta = if snap.eta? then "  ETA #{clockOf snap.eta}" else ''
-    info = if share? then "#{String(Math.floor share * 100).padStart 3}%#{eta}" else "#{snap.tally.finished}/#{snap.tally.total}"
+    ahead = if eta? then "  ETA #{clockOf eta}" else ''
+    info = if share? then "#{String(Math.floor share * 100).padStart 3}%#{ahead}" else "#{score.finished}/#{score.total}"
     width = Math.max 10, screen.cols - info.length - 4
-    tone = if snap.tally.failed then hue('red') else if share? then fillHue(share, 0) else hue('cyan')
+    tone = if score.failed then hue('red') else if share? then fillHue(share, 0) else hue('cyan')
     if share?
       fill = blocks share, width
       [seg(' '), seg(fill.done, { color: tone }), seg(fill.rest, { dimColor: true }), seg("  #{info}")]
     else
-      [seg(' '), seg(sweep(snap.frame, width), { color: tone }), seg("  #{info}")]
+      [seg(' '), seg(sweep(frame, width), { color: tone }), seg("  #{info}")]
 
   flight ~=
-    for lane in snap.running
+    for lane in running
       label = lane.label.padEnd name
       unless wide
         [seg(" #{lane.spin} ", { color: hue('cyan') }), seg(label), seg("  #{secs lane.spent}", { dimColor: true })]
       else
         width = Math.max 10, Math.min(40, screen.cols - name - 28)
         tone = fillHue lane.fill ?? 0, lane.over
-        bar = if lane.fill? then blocks(lane.fill, width) else { done: sweep(snap.frame, width), rest: '' }
+        bar = if lane.fill? then blocks(lane.fill, width) else { done: sweep(frame, width), rest: '' }
         [seg(" #{lane.spin} ", { color: hue('cyan') }), seg(label), seg('  '), seg(bar.done, { color: tone }), seg(bar.rest, { dimColor: true }), seg("  #{lane.info}", { dimColor: true })]
 
   failing ~=
-    return [] if snap.summary
-    return [[seg('   no lane has failed', { dimColor: true })]] unless snap.failures.length
-    for entry, n in snap.failures
+    return [] if summary
+    return [[seg('   no lane has failed', { dimColor: true })]] unless failures.length
+    for entry, n in failures
       mark = if n is pick then '›' else ' '
       [seg(" #{mark} ", { color: hue('red'), bold: true }), seg("✗ #{entry.lane.label.padEnd name}", { color: hue('red'), bold: n is pick }), seg("  #{entry.result.why}", { dimColor: true })]
 
-  cardLines ~= if chosen and not snap.summary then cardRows(chosen, @tally.config.root, Math.min(pick, snap.failures.length - 1), snap.failures.length) else []
+  cardLines ~= if chosen and not summary then cardRows(chosen, @tally.config.root, Math.min(pick, failures.length - 1), failures.length) else []
 
   totals ~=
-    t = snap.tally
+    t = score
     runs = [seg(' '), seg("#{t.passed} passed", { color: hue('green') }), seg(' · ', { dimColor: true }), seg("#{t.failed} failed", (if t.failed then { color: hue('red'), bold: true } else { dimColor: true })), seg(' · ', { dimColor: true }), seg("#{t.skipped} skipped", (if t.skipped then { color: hue('yellow') } else { dimColor: true })), seg(' · ', { dimColor: true }), seg(plural(t.tests, 'test'))]
-    keys = if open then '↑↓ PgUp PgDn scroll · ⏎ close' else if snap.failures.length then 'q quit · f failures · ↑↓ choose · ⏎ output' else 'q quit · f failures'
+    keys = if open then '↑↓ PgUp PgDn scroll · ⏎ close' else if failures.length then 'q quit · f failures · ↑↓ choose · ⏎ output' else 'q quit · f failures'
     used = runs.reduce ((sum, piece) -> sum + piece.text.length), 0
-    runs.push seg(' '.repeat(Math.max 2, screen.cols - used - keys.length - 1)), seg(keys, { dimColor: true }) if wide and not snap.summary
+    runs.push seg(' '.repeat(Math.max 2, screen.cols - used - keys.length - 1)), seg(keys, { dimColor: true }) if wide and not summary
     runs
 
   # The output pane takes the rows the rest of the frame leaves — the
@@ -439,29 +463,29 @@ export Board = component
   paneTitle ~= " #{chosen?.lane.label ?? ''} · lines #{top + 1}–#{Math.min(captured.length, top + tall)} of #{captured.length} "
 
   ~>
-    return unless snap.over and not @tally.closed
+    return unless over and not @tally.closed
     @tally.closed = true
-    for lost in snap.summary.failed
+    for lost in summary.failed
       print failureBlock(lost, PAINT)
     open = false
     finale = true
-    quit snap.summary.code
+    quit summary.code
 
   # The terminal's own indicator: the run's share, or its lanes on a first
   # run, and 'error' once a lane fails; in whole percents, so it is sent
   # again only when it moves.
   indicator ~=
-    t = snap.tally
-    if snap.summary then null
+    t = score
+    if summary then null
     else if t.failed then 'error'
-    else Math.round((snap.share ?? t.finished / Math.max(1, t.total)) * 100) / 100
+    else Math.round((share ?? t.finished / Math.max(1, t.total)) * 100) / 100
   ~> screen.progress indicator
 
   scroll: (to) -> top = Math.max 0, Math.min(to, captured.length - tall)
 
   pressed: (event) ->
     return quit() if event.key is 'q'
-    count = snap.failures.length
+    count = failures.length
     if open
       switch event.key
         when 'ArrowUp' then @scroll top - 1
@@ -484,25 +508,25 @@ export Board = component
   render
     Box flexDirection: 'column', focusable: true, autofocus: true, @keydown: @pressed
       Static
-        for row in snap.finished
+        for row in @tally.finished
           Line key: row.result.lane.label, segs: laneRow(row, name, wide)
       Static
         if finale
           Box flexDirection: 'column', borderStyle: 'round', borderColor: hue('slate'), paddingX: 1
-            for runs, n in endRows(@tally, snap.summary)
+            for runs, n in endRows(@tally, summary)
               Line key: n, segs: runs
       Line segs: heading
       if screen.cols >= 40
         Line segs: strip
       Line segs: overall
-      unless snap.summary
+      unless summary
         Box height: 1
       if only
         for runs, n in failing
           Line key: n, segs: runs
       else
         for runs, n in flight
-          Line key: snap.running[n].label, segs: runs
+          Line key: running[n].label, segs: runs
       if cardLines.length
         Box flexDirection: 'column', borderStyle: 'round', borderColor: hue('red'), paddingX: 1
           for runs, n in cardLines
@@ -525,7 +549,7 @@ main! =! ->
   guardrails config
   planned = planLanes config
   tally = Tally.new planned, config, recall(config.root)
-  board = run Board, props: { tally }
+  board = run Board, pace: PACE, props: { tally }
   usePty = Bun.enableANSIColors and process.platform isnt 'win32'
   lanes = launch config, planned, { usePty, cols: process.stdout.columns or 120, rows: process.stdout.rows or 40 }, (event) -> tally.hear event
   # However the process leaves — a signal, a crash — no lane outlives it.
