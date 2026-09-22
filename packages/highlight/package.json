@@ -4,14 +4,14 @@
   "private": true,
   "type": "module",
   "description": "The highlight.js grammar for Rip — one shared definition consumed by Rip Print and the print editor extension",
+  "rip": {
+    "browser": true
+  },
   "exports": {
     ".": "./hljs-rip.js"
   },
   "scripts": {
     "test": "rip test.rip"
-  },
-  "rip": {
-    "browser": true
   },
   "files": [
     "hljs-rip.js",

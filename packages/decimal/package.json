@@ -4,14 +4,14 @@
   "private": true,
   "type": "module",
   "description": "Zero-dependency, BigInt-backed arbitrary-precision exact decimals — with explicit rounding and hard resource limits",
+  "rip": {
+    "browser": true
+  },
   "exports": {
     ".": "./decimal.rip"
   },
   "scripts": {
     "test": "rip test.rip"
-  },
-  "rip": {
-    "browser": true
   },
   "files": [
     "decimal.rip",

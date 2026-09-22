@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "QR, PDF417 and Code 128 generator and reader — packed-bitmap QR encoder, camera-budgeted decoder, ray-voted PDF417, scan-line Code 128, zero dependencies.",
+  "rip": {
+    "browser": true
+  },
   "exports": {
     ".": "./barcodes.rip",
     "./qr": "./qr.rip",
@@ -16,9 +19,6 @@
     "corpus": "rip test/corpus.rip",
     "bench": "rip test/bench.rip",
     "compare": "rip test/compare.rip"
-  },
-  "rip": {
-    "browser": true
   },
   "files": [
     "barcodes.rip",

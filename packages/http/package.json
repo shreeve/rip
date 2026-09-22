@@ -4,14 +4,14 @@
   "private": true,
   "type": "module",
   "description": "Zero-dependency HTTP client — ky-inspired convenience over native fetch",
+  "rip": {
+    "browser": true
+  },
   "exports": {
     ".": "./http.rip"
   },
   "scripts": {
     "test": "rip test.rip"
-  },
-  "rip": {
-    "browser": true
   },
   "files": [
     "http.rip",

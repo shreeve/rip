@@ -154,13 +154,13 @@ Keys in exactly this order for mold packages (omit what does not apply):
   "private": true,
   "type": "module",
   "description": "<pitch — same text as the README blockquote>",
+  "rip": { "browser": true },
   "exports": { ".": "./<name>.rip" },
   "scripts": {
     "test": "rip test.rip",
     "demo": "rip demo.rip",
     "bench": "rip bench.rip"
   },
-  "rip": { "browser": true },
   "files": ["<name>.rip", "README.md"]
 }
 ```

@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Dependency-free application data substrate — stash, source, routes, workspace, and apply",
+  "rip": {
+    "browser": true
+  },
   "exports": {
     ".": "./index.rip",
     "./rash": "./rash.rip"
@@ -14,8 +17,5 @@
   "files": [
     "*.rip",
     "README.md"
-  ],
-  "rip": {
-    "browser": true
-  }
+  ]
 }

@@ -4,14 +4,14 @@
   "private": true,
   "type": "module",
   "description": "Rip Style XML — XML ⇄ Rip object, with security defaults that match what you want for SOAP and EDI envelopes",
+  "rip": {
+    "browser": true
+  },
   "exports": {
     ".": "./rsx.rip"
   },
   "scripts": {
     "test": "rip test.rip"
-  },
-  "rip": {
-    "browser": true
   },
   "files": [
     "rsx.rip",

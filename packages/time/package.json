@@ -4,15 +4,15 @@
   "private": true,
   "type": "module",
   "description": "Tiny, immutable, US-English date/time library with timezones and durations — zero runtime dependencies",
+  "rip": {
+    "browser": true
+  },
   "exports": {
     ".": "./time.rip"
   },
   "scripts": {
     "test": "rip test.rip",
     "demo": "rip demo.rip"
-  },
-  "rip": {
-    "browser": true
   },
   "files": [
     "time.rip",

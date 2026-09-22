@@ -4,14 +4,14 @@
   "private": true,
   "type": "module",
   "description": "The validation and normalization vocabulary — 37 pure US-English normalizers, one registry, doubling as ~:name schema coercers",
+  "rip": {
+    "browser": true
+  },
   "exports": {
     ".": "./validate.rip"
   },
   "scripts": {
     "test": "rip test.rip"
-  },
-  "rip": {
-    "browser": true
   },
   "files": [
     "validate.rip",

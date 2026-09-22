@@ -4,15 +4,15 @@
   "private": true,
   "type": "module",
   "description": "Unstyled, composable UI components built on native browser features.",
+  "rip": {
+    "browser": true
+  },
   "exports": {
     ".": "./ui.rip"
   },
   "scripts": {
     "test": "playwright test --config test/browser/playwright.config.mjs",
     "demo": "rip sites run demo"
-  },
-  "rip": {
-    "browser": true
   },
   "files": [
     "ui.rip",
