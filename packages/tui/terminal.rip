@@ -207,8 +207,8 @@ handlers =! (held) ->
 # ── The probes and their answers ──────────────────────────────────────────────
 
 # Ask the terminal where its cursor is, from the frame's top-left, where
-# the frame sits: unknown until the answer, and taken to be the bottom
-# meanwhile.
+# the frame sits: unknown until the answer, and a mouse report that
+# arrives before it is nobody's (mouse.rip).
 export ask! =! (held) ->
   held.asked = true
   held.view.origin = Infinity

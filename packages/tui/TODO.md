@@ -6,12 +6,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 2. The closing audit — docs
 
-- [ ] Stale comments: `terminal.rip:204` says an unanswered probe is
-      "taken to be the bottom" where the origin is `Infinity` and
-      reports are dropped; `screen.rip`'s progress comment says never
-      off a terminal, and it goes out under `mount`; `test/ink.rip`
-      prints "20 frames differ" where SOURCE.md says 19 and a refusal.
-
 ## 4. Layout cost
 
 - [ ] A boundary is a node whose answers CANNOT differ (PLAN §5). A

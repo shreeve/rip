@@ -138,7 +138,8 @@ export class Screen
   # Progress on the terminal's own indicator (OSC 9;4, ConEmu's
   # sequence, which Windows Terminal, Ghostty, kitty and iTerm2 honor):
   # a number from 0 to 1, 'error', 'indeterminate', or null to clear,
-  # sent with the next frame's write. Nothing off a terminal.
+  # sent with the next frame's write, and only where the frames are
+  # watched (`interactive`), as a mount's are.
   progress!: (value) ->
     state = if value is null then '0'
     else if value is 'error' then '2'
