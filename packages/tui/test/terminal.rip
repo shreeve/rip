@@ -499,7 +499,7 @@ test! "every way out — quit, Ctrl-C, a listener that throws, a suspend then qu
       eq term.text, (if alt then '' else 'w'), "#{name}: what the screen shows"
       eq term.cursor, { x: 0, y: (if alt or way is 'a listener that throws' then 0 else 1) }, "#{name}: where the cursor lands"
 
-test! "the run's handlers stand on the process only while it runs, and a second run sees no stale one", ->
+test! "the run's handlers stand on the process only while the app is live, and a second run sees no stale one", ->
   before = listeners()
   running = run Echo, stdin: Stdin.new(), stdout: Terminal.new()
   eq listeners(), (n + 1 for n in before.slice(0, 3)).concat(before.slice(3, 4), (n + 1 for n in before.slice(4)))
@@ -510,6 +510,15 @@ test! "the run's handlers stand on the process only while it runs, and a second 
   eq process.listenerCount('SIGTERM'), before[1] + 1
   quit()
   await running.done
+  eq listeners(), before
+
+test! "a suspend under mount hands nothing over and puts no handler on the process, before or after the close", ->
+  before = listeners()
+  view = mount Echo
+  ran = false
+  suspend! -> ran = true
+  eq [ran, listeners()], [true, before]
+  view.close()
   eq listeners(), before
 
 test! "a teardown is taken once: a quit while suspended withdraws nothing twice, and a close after a close writes nothing", ->

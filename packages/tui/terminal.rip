@@ -63,13 +63,26 @@ export class Quiet
 
 # ── Setup and teardown ────────────────────────────────────────────────────────
 
+# The process's handlers — the signals, the crash, the exit — belong to
+# the app's life under `run`, never to the terminal's state: put on as
+# `open` takes the app, ahead of the runtime's own and any the app
+# adds, and taken off as the first step of `teardown`, whatever the
+# terminal's state is then.
+export guard! =! (held) ->
+  held.handlers = handlers held
+  process.prependListener name, fn for name, fn of held.handlers
+
+unguard! =! (held) ->
+  return unless held.handlers
+  process.off name, fn for name, fn of held.handlers
+  held.handlers = null
+
 # Take the terminal: the cursor hidden; stdin raw and read, with the
 # paste and focus modes and the mouse's asked for, and the flag pushed
 # again where the keyboard was decided; the alternate screen entered;
-# the console captured; the signals, the crash and the exit handled.
-# On a stdout that is no terminal, only the handlers.
+# the console captured. Nothing off a terminal, or under `mount`.
 export setup! =! (held) ->
-  return if held.up
+  return if held.up or not held.terminal
   held.up = true
   { out, stdin, view } = held
   if watched held
@@ -86,8 +99,6 @@ export setup! =! (held) ->
       out.write ENTER
       held.entered = true
     capture held if held.console
-  held.handlers ?= handlers held
-  process.on name, fn for name, fn of held.handlers
 
 # Give the terminal back, every step taken whatever the others do: the
 # flag popped if it was pushed; the mouse, paste and focus modes
@@ -95,10 +106,9 @@ export setup! =! (held) ->
 # cursor shown below it (`drawn`), or the cursor shown where it is; the
 # progress indicator cleared if one was reported; the alternate screen
 # left; the parser flushed; stdin cooked, paused and let go; the
-# handlers off the process; the console given back and the lines it
-# kept replayed. On a stdout nobody is watching, `drawn` writes the
-# last frame once, as text. Answers the first error a step raised, or
-# null.
+# console given back and the lines it kept replayed. On a stdout
+# nobody is watching, `drawn` writes the last frame once, as text.
+# Answers the first error a step raised, or null.
 down =! (held, drawn) ->
   return null unless held.up
   held.up = false
@@ -129,13 +139,13 @@ down =! (held, drawn) ->
   else if drawn
     step -> view.frame() if view.doc.stale
     step -> out.write rowsToString(view.front, held.depth > 0) + '\n' if view.front
-  process.off name, fn for name, fn of held.handlers
   step -> release held
   error
 
-# The way out: the terminal given back, and a continue nobody waits
-# for any more forgotten.
+# The way out: the handlers off the process first, then the terminal
+# given back, and a continue nobody waits for any more forgotten.
 export teardown =! (held, drawn) ->
+  unguard held
   error = down held, drawn
   process.off 'SIGCONT', held.wake if held.wake
   held.wake = null

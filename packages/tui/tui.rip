@@ -10,7 +10,7 @@ import { Parser } from './input.rip'
 import { Screen } from './screen.rip'
 import { Pointer } from './mouse.rip'
 import { palette } from './paint.rip'
-import { setup, probe, reply, teardown, handover, stop as halt, ask, interactive as watched, depth as depthOf } from './terminal.rip'
+import { guard, setup, probe, reply, teardown, handover, stop as halt, ask, interactive as watched, depth as depthOf } from './terminal.rip'
 
 # ── Widgets ───────────────────────────────────────────────────────────────────
 # A box is a div and text is a span. Every prop a widget does not
@@ -317,7 +317,9 @@ open =! (App, options, out, terminal, stdin = null, clock = undefined) ->
   keyboard = 'basic'
   selected = ''
   try
-    setup held if terminal
+    if terminal
+      guard held
+      setup held
     live.app = App.new(options.props ?? {})
     live.app.mount doc.body
     failed doc
