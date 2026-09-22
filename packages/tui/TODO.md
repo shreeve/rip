@@ -4,8 +4,6 @@ Open work only, in the order it should be done. Delete a line when it
 lands or moves into docs/tests. The design and the order of the larger
 steps are in [PLAN.md](PLAN.md).
 
-## 2. The closing audit — docs
-
 ## 4. Layout cost
 
 - [ ] A boundary is a node whose answers CANNOT differ (PLAN §5). A
