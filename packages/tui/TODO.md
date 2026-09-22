@@ -6,10 +6,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 1. The closing audit — code
 
-- [ ] Focus is recorded three times — `doc.active`, `doc.lit`,
-      `node.glow` — kept in step only by `take` (`focus.rip:52`). A
-      fuzz of focus, blur, remove and disable holding `activeElement
-      is active` and `node.focused` for every node.
 - [ ] One word, several meanings: `settle` (screen, layout, input,
       tui), `probe` (terminal, layout, paint), `frame` (`Screen`, the
       border in paint, `Tick`), `refresh` (a text flow; tui's whole
