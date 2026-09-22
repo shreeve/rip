@@ -5,12 +5,14 @@
   "type": "module",
   "description": "Head-to-head terminal UI comparison \u2014 Ink and React are quarantined here, never in rip/tui",
   "scripts": {
+    "bench": "rip bench.rip",
     "ink": "NODE_ENV=production rip ink.rip",
     "tui": "rip tui.rip",
     "frame": "rip frame.rip",
     "keys": "rip keys.rip",
     "hit": "rip hit.rip",
-    "profile": "rip profile.rip"
+    "profile": "rip profile.rip",
+    "lines": "rip lines.rip"
   },
   "dependencies": {
     "ink": "7.1.1",

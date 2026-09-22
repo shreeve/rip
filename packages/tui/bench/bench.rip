@@ -1,0 +1,241 @@
+# ==============================================================================
+# tui bench — both sides, every scenario, the proof, and RESULTS.md
+#
+#   cd packages/tui/bench
+#   bun install              # Ink and React live HERE, not in rip/tui
+#   bun run bench            # five runs a side; writes RESULTS.md
+#   rip bench.rip --runs 3   # fewer runs
+#   rip bench.rip counter    # one scenario, printed, RESULTS.md left alone
+#   rip bench.rip --lines    # the lines of code alone, into RESULTS.md
+#
+# Each side of each scenario runs in a fresh process — so neither's JIT
+# state or heap taints the other — `runs` times, and the table holds
+# the median and half the spread. Every run brings back the screen it
+# left after every update, as the reducer read it (harness.rip); the
+# runs of a side must agree with each other, and the two sides must
+# agree at every update, or the scenario is refused from the table and
+# the first differing cell is printed instead of its numbers. Then the
+# cold start, the lines of code (lines.rip), one frame (frame.rip), one
+# key (keys.rip), one mouse report (hit.rip) and where an Ink frame goes
+# (profile.rip), all into RESULTS.md: the one source of every number
+# README.md and PLAN.md quote.
+# ==============================================================================
+
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { cpus, totalmem, release, loadavg } from 'node:os'
+import { SCENARIOS, differ, pinned } from './harness.rip'
+
+HERE =! dirname(fileURLToPath(import.meta.url))
+ROOT =! join(HERE, '../../..')
+TIMEOUT =! 180_000
+STARTS =! 7
+
+ENV =! { ...process.env, NODE_ENV: 'production', FORCE_COLOR: '3' }
+delete ENV.NO_COLOR
+delete ENV.CI
+
+# ── Children ──────────────────────────────────────────────────────────────────
+
+children =! Set.new()
+for signal in ['SIGINT', 'SIGTERM']
+  process.on signal, ->
+    proc.kill 9 for proc in children
+    process.exit 1
+process.on 'exit', -> proc.kill 9 for proc in children
+
+# Run a bench file through this checkout's loader and hand back what it
+# printed. A child past the timeout is killed outright, by the spawn's
+# own timeout and by a timer of ours behind it.
+def spawn(file, args = [])
+  proc = Bun.spawn {
+    cmd: ['bun', "--preload=#{join ROOT, 'src/loader.js'}", join(ROOT, 'src/cli/run.js'), join(HERE, file), ...args]
+    cwd: HERE
+    env: ENV
+    stdout: 'pipe'
+    stderr: 'pipe'
+    timeout: TIMEOUT
+    killSignal: 'SIGKILL'
+  }
+  children.add proc
+  timer = setTimeout (-> proc.kill 9), TIMEOUT + 1000
+  try
+    [stdout, stderr] = Promise.all! [Response.new(proc.stdout).text(), Response.new(proc.stderr).text()]
+    code = await proc.exited
+    throw Error.new "#{file} #{args.join ' '} was killed after #{TIMEOUT / 1000} s" if proc.signalCode
+    throw Error.new "#{file} #{args.join ' '} exited #{code}:\n#{stderr}" unless code is 0
+    { stdout, stderr }
+  finally
+    clearTimeout timer
+    children.delete proc
+
+# The JSON a child printed as its last line.
+def json(file, args = [])
+  { stdout } = spawn! file, args
+  line = stdout.trim().split('\n').findLast (line) -> line.startsWith '{'
+  throw Error.new "#{file} #{args.join ' '} printed no JSON line:\n#{stdout}" unless line
+  JSON.parse line
+
+note =! (text) -> process.stderr.write "#{text}\n"
+
+# ── Arithmetic ────────────────────────────────────────────────────────────────
+
+median =! (xs) ->
+  sorted = xs.slice().sort (a, b) -> a - b
+  sorted[sorted.length >> 1]
+
+# Half the spread, so a number reads as `median ±spread`.
+spread =! (xs) -> (Math.max(...xs) - Math.min(...xs)) / 2
+
+# `median ±spread` of one field over the runs, to `digits`.
+stat =! (runs, field, digits, plusMinus = true) ->
+  xs = (run[field] for run in runs)
+  text = median(xs).toFixed digits
+  text += " ±#{spread(xs).toFixed digits}" if plusMinus
+  text
+
+# The first update at which two digest lists differ, or null.
+mismatch =! (a, b) ->
+  for i in [0...Math.max(a.length, b.length)]
+    return i unless a[i] is b[i]
+  null
+
+# ── The scenarios ─────────────────────────────────────────────────────────────
+
+# The runs of `key` on `file`, each a fresh process.
+def runsOf(file, key, runs)
+  results = []
+  for n in [0...runs]
+    results.push json!(file, [key, '--json'])
+  results
+
+# The proof for one scenario: every run of a side drew what its first
+# did, and the two sides drew the same screen after every update. A
+# failure says where, as the first differing cell.
+def prove(key, inks, tuis)
+  for [side, runs] in [['Ink', inks], ['Rip TUI', tuis]]
+    for run, n in runs when n
+      at = mismatch runs[0].digests, run.digests
+      return "#{side}'s run #{n + 1} drew a different screen from its run 1 at update #{at}" if at?
+  at = mismatch inks[0].digests, tuis[0].digests
+  return null unless at?
+  ink = json! 'ink.rip', [key, '--at', String at]
+  tui = json! 'tui.rip', [key, '--at', String at]
+  cell = differ ink.cells, tui.cells
+  return "update #{at}: the screens hash differently but read the same cells" unless cell
+  "update #{at}, row #{cell.row}, column #{cell.col}: Ink #{JSON.stringify cell.a}, Rip TUI #{JSON.stringify cell.b}"
+
+LINES =! "`bun run lines` (lines.rip): non-blank, non-comment lines by test/lines.rip's rule; Ink's `src/` and Yoga's `yoga/algorithm/`, at the version Ink installs, against the files this package ships."
+HEAD =! '| Scenario | Ink cpu µs | p50 ms | p99 ms | bytes | writes | Rip TUI cpu µs | p50 ms | p99 ms | bytes | writes | Same screen |'
+RULE =! '|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|:--|'
+
+side =! (runs) ->
+  [stat(runs, 'cpuMicros', 0), stat(runs, 'p50', 2), stat(runs, 'p99', 2, false), stat(runs, 'bytes', 0, false), stat(runs, 'writes', 1, false)]
+
+def scenarios(only, runs)
+  lines = [HEAD, RULE]
+  refused = []
+  for { key, label } in SCENARIOS
+    continue if only and only isnt key
+    note "#{label}: Ink × #{runs}"
+    inks = runsOf! 'ink.rip', key, runs
+    note "#{label}: Rip TUI × #{runs}"
+    tuis = runsOf! 'tui.rip', key, runs
+    fault = prove! key, inks, tuis
+    if fault
+      refused.push "- **#{label}** — #{fault}"
+      lines.push "| #{label} | — | — | — | — | — | — | — | — | — | — | ✗ refused |"
+    else
+      lines.push "| #{label} | #{side(inks).join ' | '} | #{side(tuis).join ' | '} | ✓ |"
+  text = lines.join '\n'
+  text += "\n\nRefused — the reducer read different screens, so no number is published:\n\n#{refused.join '\n'}" if refused.length
+  { text, refused: refused.length }
+
+# ── Cold start ────────────────────────────────────────────────────────────────
+
+def startup()
+  rows = []
+  cells = {}
+  for [side, file] in [['Ink 7.1.1', 'ink-startup.rip'], ['Rip TUI', 'tui-startup.rip']]
+    note "cold start: #{side} × #{STARTS}"
+    samples = []
+    for n in [0...STARTS]
+      samples.push json!(file)
+    cells[side] = samples[0].cells
+    pick = (fn) -> median(samples.map fn).toFixed 1
+    rows.push "| #{side} | #{pick (s) -> s.loaded - s.began} | #{pick (s) -> s.framed - s.loaded} | #{pick (s) -> s.framed} |"
+  cell = differ cells['Ink 7.1.1'], cells['Rip TUI']
+  same = if cell then "✗ refused — row #{cell.row}, column #{cell.col}: Ink #{JSON.stringify cell.a}, Rip TUI #{JSON.stringify cell.b}" else '✓ both first frames read the same'
+  "| | import ms | first frame ms after import | process start → frame ms |\n|---|--:|--:|--:|\n#{rows.join '\n'}\n\nMedian of #{STARTS} fresh processes each; #{same}."
+
+# ── The rest of the bench ─────────────────────────────────────────────────────
+
+# A bench script's own printout, as a code block — or as it is, for
+# one that prints markdown.
+def printed(file, args = [], markdown = false)
+  note "#{file} #{args.join ' '}".trim()
+  { stdout } = spawn! file, args
+  if markdown then stdout.trim() else "```\n#{stdout.trim()}\n```"
+
+# ── The report ────────────────────────────────────────────────────────────────
+
+version =! (name) -> JSON.parse(readFileSync join(HERE, 'node_modules', name, 'package.json'), 'utf8').version
+
+machine =! ->
+  cpu = cpus()
+  "#{cpu[0]?.model ?? process.arch}, #{cpu.length} cores, #{Math.round totalmem() / 2 ** 30} GB, #{process.platform} #{release()}"
+
+load =! -> (avg.toFixed 2 for avg in loadavg()).join ' / '
+
+def main()
+  args = process.argv.slice 2
+  runs = 5
+  only = null
+  for arg, i in args
+    if arg is '--runs' then runs = Number args[i + 1]
+    else if not args[i - 1]?.startsWith('--') then only = arg
+  pinned()
+  if args.includes '--lines'
+    counted = printed! 'lines.rip', [], true
+    path = join HERE, 'RESULTS.md'
+    parts = readFileSync(path, 'utf8').split /^(?=## )/m
+    at = parts.findIndex (part) -> part.startsWith '## Lines of code'
+    throw Error.new 'RESULTS.md has no lines section to regenerate' if at < 0
+    parts[at] = "## Lines of code\n\n#{LINES}\n\n#{counted}\n\n"
+    writeFileSync path, parts.join ''
+    console.log "\n#{counted}\n"
+    note 'the lines section of bench/RESULTS.md regenerated'
+    return
+  began = load()
+  date = Date.new().toISOString().slice 0, 10
+  { text, refused } = scenarios! only, runs
+  if only
+    console.log "\n#{text}\n"
+    return
+  sections = []
+  sections.push "# Rip TUI against Ink — `bun run bench`"
+  sections.push "Generated #{date} on #{machine()}; Bun #{Bun.version}, Ink #{version 'ink'}, React #{version 'react'}. Load average at the start: #{began}."
+  sections.push "## Updates\n\nA 200×60 terminal (the resize scenario starts at 120 columns). Each side of each scenario in a fresh process, #{runs} runs; the median and ±half the spread. Ink: `interactive: true`, incremental rendering on, React's production build, memoized rows, its frame throttle lifted (maxFps 1000), every update awaited to the write that ends its synchronized update. Rip TUI: every update flushed. Bytes and writes are per update. *Same screen*: the reducer read both sides' screens after every update, scrollback included, and they matched cell for cell — the text, and the style of every cell that is not a blank (harness.rip states the blank rule).\n\n#{text}"
+  cold = startup!
+  sections.push "## Cold start\n\n#{cold}"
+  counted = printed! 'lines.rip', [], true
+  sections.push "## Lines of code\n\n#{LINES}\n\n#{counted}"
+  framed = printed! 'frame.rip'
+  sections.push "## One frame, whole and damaged\n\n`bun run frame` (frame.rip): the frame alone — paint, diff, write; the state change left out, no layout owed — owing every cell, then owing its damage; median microseconds, the bytes of one, and the cells the damaged frame painted and compared.\n\n#{framed}"
+  keyed = printed! 'keys.rip'
+  sections.push "## One key\n\n`bun run keys` (keys.rip): the README's select list sent arrow keys as a terminal's bytes, from `send` to the end of the frame each causes.\n\n#{keyed}"
+  hit = printed! 'hit.rip'
+  sections.push "## One mouse report\n\n`bun run hit` (hit.rip): a motion report, a click, and the parser alone, on a tree of 2,403 nodes.\n\n#{hit}"
+  profiles = []
+  for key in ['counter', 'table100', 'list2k']
+    profiles.push printed!('profile.rip', [key])
+  sections.push "## Where an Ink frame goes\n\n`bun run profile` (profile.rip): one Ink scenario under Bun's sampling profiler, every sample charged to a stage of Ink's pipeline.\n\n#{profiles.join '\n\n'}"
+  sections.push "Load average at the end: #{load()}."
+  report = sections.join('\n\n') + '\n'
+  writeFileSync join(HERE, 'RESULTS.md'), report
+  console.log "\n#{report}"
+  note "written to bench/RESULTS.md#{if refused then " — #{refused} scenario#{if refused is 1 then '' else 's'} refused" else ''}"
+
+main!
+process.exit 0

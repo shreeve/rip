@@ -1,33 +1,85 @@
 # ==============================================================================
-# tui bench harness — the measuring half, shared by every contender
+# tui bench harness — the measuring half, shared by both contenders, and
+# the terminal reducer that proves they drew the same screen
 #
-# A contender is `{name, mount, update, unmount}` driven against a fake
-# terminal stream, so no real TTY is involved and both sides see the
-# same columns, rows, and write sink. One scenario run reports CPU time,
-# set-to-write latency, bytes and writes per update, and heap growth.
+# A contender is mounted against a fake terminal stream, so no real TTY
+# is involved and both sides see the same columns, rows and write sink.
+# The stream counts and keeps every write; `measure` drives the awaited
+# updates and marks where each one's writes end. Afterwards `reduce`
+# replays the kept bytes through `Terminal` — a screen of styled cells
+# with a cursor — and reads the screen after every update as a digest,
+# which bench.rip compares between the two sides. A number is published
+# only from a scenario whose digests agree at every update.
 # ==============================================================================
 
 import { EventEmitter } from 'node:events'
+import { PLAIN, apply, canon, show } from '../test/ink/cells.rip'
 
-# A write sink shaped like process.stdout. It counts, and keeps the
-# bytes only when asked, so a long run holds no output in memory.
-export def terminal(columns, rows, keep = false)
+# ── The scenarios ─────────────────────────────────────────────────────────────
+
+export COLUMNS =! 200
+export ROWS =! 60
+
+# Every scenario both sides run, in the order the table prints them:
+# the updates measured after the warmup, the columns the terminal starts
+# with, and what an update is — a tick set on the app, or the terminal
+# taking another width. Both sides and the runner read this table, so
+# neither can be measured over another's count.
+export SCENARIOS =! [
+  { key: 'counter',  label: 'counter in a 1,000-element tree',        updates: 300, warmup: 30 }
+  { key: 'table10',  label: '40×8 table, 10% churn',                  updates: 300, warmup: 30 }
+  { key: 'table100', label: '40×8 table, 100% churn',                 updates: 300, warmup: 30 }
+  { key: 'list2k',   label: '2,000-row list, scroll by one',          updates:  60, warmup:  6 }
+  { key: 'list10k',  label: '10,000-row list, scroll by one',         updates:  30, warmup:  3 }
+  { key: 'insert',   label: 'insert at the top of a 50-row list',     updates: 300, warmup: 30 }
+  { key: 'static',   label: '1,000 scrollback appends',               updates: 1000, warmup: 10 }
+  { key: 'resize',   label: 'resize 120 → 80 → 120, 12×4 wrapped',    updates:  60, warmup:  6, cols: 120, drive: 'resize' }
+  { key: 'relayout', label: 'full relayout of 10,000 nodes',          updates:  30, warmup:  3 }
+  { key: 'wide',     label: '20×8 table of CJK and emoji, churning',  updates: 300, warmup: 30 }
+]
+
+export scenario =! (key) ->
+  found = SCENARIOS.find (s) -> s.key is key
+  throw Error.new "no scenario is called #{JSON.stringify key}; the keys are #{(s.key for s in SCENARIOS).join ', '}" unless found
+  found
+
+# The width an update of the resize scenario takes the terminal to: it
+# starts at 120, so the first update narrows it.
+export widthAt =! (i) -> if i % 2 then 120 else 80
+
+# ── The stream ────────────────────────────────────────────────────────────────
+
+# A write sink shaped like process.stdout. It counts, keeps every write
+# and every resize in order, and marks where each update's writes end,
+# so the screens can be read back afterwards without a reducer's cost
+# inside the timed loop.
+export def terminal(columns, rows)
   out = EventEmitter.new()
   out.columns = columns
   out.rows = rows
   out.isTTY = true
   out.bytes = 0
   out.writes = 0
-  out.kept = []
+  out.first = { columns, rows }
+  out.kept = []       # every write, and every resize, in order
+  out.marks = []      # `kept.length` after each update
+  out.hook = null     # told every write, for a step that waits on one
   out.write = (data, encoding, done) ->
     done = encoding if typeof encoding is 'function'
-    text = String(data)
-    out.bytes += Buffer.byteLength(text)
+    text = String data
+    out.bytes += Buffer.byteLength text
     out.writes += 1
-    out.kept.push text if keep
+    out.kept.push text
     queueMicrotask done if typeof done is 'function'
+    out.hook?(text)
     true
-  out.getWindowSize = -> [columns, rows]
+  out.getWindowSize = -> [out.columns, out.rows]
+  out.mark = -> out.marks.push out.kept.length
+  out.resize = (columns, rows = out.rows) ->
+    out.columns = columns
+    out.rows = rows
+    out.kept.push { columns, rows }
+    out.emit 'resize'
   out
 
 def percentile(sorted, fraction)
@@ -35,10 +87,14 @@ def percentile(sorted, fraction)
   sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))]
 
 # Drive `updates` awaited updates through one contender. `step(i)`
-# applies update i and resolves when its frame has been written.
+# applies update i and resolves when its frame has been written; the
+# stream is marked after each, so the reducer can read the screen it
+# left. The mount's own frame is marked before the first.
 export def measure(label, out, updates, warmup, step)
+  out.mark()
   for i in [0...warmup]
     step! i
+    out.mark()
   Bun.gc true
   heap0 = process.memoryUsage().heapUsed
   bytes0 = out.bytes
@@ -49,6 +105,7 @@ export def measure(label, out, updates, warmup, step)
     t0 = performance.now()
     step! warmup + i
     waits.push performance.now() - t0
+    out.mark()
   cpu = process.cpuUsage cpu0
   heap = process.memoryUsage().heapUsed - heap0
   waits.sort (a, b) -> a - b
@@ -65,6 +122,308 @@ export def measure(label, out, updates, warmup, step)
 
 export def report(title, rows)
   p "\n#{title}"
-  p "  #{'scenario'.padEnd(34)} #{'cpu µs/upd'.padStart(11)} #{'p50 ms'.padStart(8)} #{'p99 ms'.padStart(8)} #{'bytes/upd'.padStart(10)} #{'writes/upd'.padStart(11)} #{'heap KB'.padStart(9)}"
+  p "  #{'scenario'.padEnd(40)} #{'cpu µs/upd'.padStart(11)} #{'p50 ms'.padStart(8)} #{'p99 ms'.padStart(8)} #{'bytes/upd'.padStart(10)} #{'writes/upd'.padStart(11)} #{'heap KB'.padStart(9)}"
   for r in rows
-    p "  #{r.label.padEnd(34)} #{r.cpuMicros.toFixed(0).padStart(11)} #{r.p50.toFixed(2).padStart(8)} #{r.p99.toFixed(2).padStart(8)} #{r.bytes.toFixed(0).padStart(10)} #{r.writes.toFixed(2).padStart(11)} #{r.heapKB.toFixed(0).padStart(9)}"
+    p "  #{r.label.padEnd(40)} #{r.cpuMicros.toFixed(0).padStart(11)} #{r.p50.toFixed(2).padStart(8)} #{r.p99.toFixed(2).padStart(8)} #{r.bytes.toFixed(0).padStart(10)} #{r.writes.toFixed(2).padStart(11)} #{r.heapKB.toFixed(0).padStart(9)}"
+
+# ── The reducer ───────────────────────────────────────────────────────────────
+
+CSI =! /\x1b\[([?<>=]?)([0-9;]*)([A-Za-z@`])/y
+OSC =! /\x1b\]([^\x07\x1b]*)(?:\x07|\x1b\\)/y
+graphemes =! Intl.Segmenter.new undefined, granularity: 'grapheme'
+
+# As much of a terminal as both contenders' frames need, seeded by the
+# cursor model of test/events/harness.rip and the styled cells of
+# test/ink/cells.rip: a screen of `rows` rows of cells that scrolls into
+# a scrollback it keeps, a cursor, the style in force, and the
+# sequences both sides send. Relative and absolute cursor moves (CUU,
+# CUD, CUF, CUB, CNL, CPL, CHA, CUP), erase in display and in line (ED,
+# EL — a blank left by an erase carries the background in force, as a
+# terminal with background color erase leaves it), SGR through
+# cells.rip's reader, a line feed that returns the carriage as a raw
+# terminal with ONLCR does and scrolls at the last row, the DEC private
+# modes both sides set (the cursor, synchronized output, paste, focus
+# and mouse reports, which change no cell, and the alternate screen),
+# the cursor saved and restored, the queries both sides make, the kitty
+# stack, and OSC strings. A sequence outside that list — another
+# private mode, another escape, a control character — is refused,
+# never skipped; `pinned` holds it to that.
+# Glyphs are as wide as `Bun.stringWidth` draws each grapheme; a mark of
+# no width joins the cell before it; a half of a wide glyph overwritten
+# takes the other half out; a glyph past the right edge wraps.
+#
+# The screen is read in cells.rip's notation by its blank rule — a
+# space shows nothing of its foreground, bold, dim or italic, and a
+# row's trailing default spaces are trimmed — with trailing blank rows
+# dropped. That is the normalization, and all of it: the comparison
+# holds every row written since the start, the scrollback included.
+export class Terminal
+  constructor: (@columns, @rows) ->
+    @lines = []      # every row since the start, the scrolled-off ones first
+    @notes = []      # each line in the notation, cached until it is written
+    @base = 0        # the index in `lines` of the terminal's top row
+    @x = @y = 0
+    @style = { ...PLAIN }
+    @saved = null
+    @alt = null      # the primary screen, kept while the alternate is shown
+
+  # Feed one kept write, or one kept resize.
+  feed!: (text) ->
+    unless typeof text is 'string'
+      @resize text.columns, text.rows
+      return
+    at = 0
+    while at < text.length
+      code = text.charCodeAt at
+      if code is 0x1b
+        at = @escape text, at
+      else if code is 0x0a
+        @x = 0
+        @down()
+        at += 1
+      else if code is 0x0d
+        @x = 0
+        at += 1
+      else if code < 0x20 or code is 0x7f
+        throw Error.new "the reducer was sent a control character it does not model: #{JSON.stringify text[at]}"
+      else
+        stop = at + 1
+        stop += 1 while stop < text.length and text.charCodeAt(stop) >= 0x20 and text.charCodeAt(stop) isnt 0x7f
+        @print text.slice(at, stop)
+        at = stop
+    return
+
+  escape: (text, at) ->
+    next = text[at + 1]
+    if next is '['
+      CSI.lastIndex = at
+      found = CSI.exec text
+      throw Error.new "the reducer was sent a control sequence it does not know: #{JSON.stringify text.slice at, at + 16}" unless found
+      @control found[1], found[2], found[3]
+      return at + found[0].length
+    if next is ']'
+      OSC.lastIndex = at
+      found = OSC.exec text
+      throw Error.new "the reducer was sent an unterminated OSC string: #{JSON.stringify text.slice at, at + 16}" unless found
+      @style = { ...@style, link: found[1].slice(found[1].indexOf(';', 2) + 1) or null } if found[1].startsWith '8;'
+      return at + found[0].length
+    switch next
+      when '7' then @saved = { x: @x, y: @y }
+      when '8' then { x: @x, y: @y } = @saved if @saved
+      when 'c'
+        @erase 2
+        @x = @y = 0
+        @style = { ...PLAIN }
+      else throw Error.new "the reducer was sent an escape it does not know: #{JSON.stringify text.slice at, at + 8}"
+    at + 2
+
+  control: (prefix, params, verb) ->
+    if prefix is '?'
+      throw Error.new "the reducer was sent CSI ?#{params}#{verb}, which it does not know" unless verb in ['h', 'l', 'n', 'u']
+      if verb is 'h' or verb is 'l'
+        @mode +mode, verb is 'h' for mode in params.split ';'
+      return
+    if prefix
+      throw Error.new "the reducer was sent CSI #{prefix}#{params}#{verb}, which it does not know" unless verb is 'u'
+      return
+    n = parseInt(params) or 1
+    switch verb
+      when 'A' then @y = Math.max 0, @y - n
+      when 'B' then @y = Math.min @rows - 1, @y + n
+      when 'C' then @x = Math.min @columns - 1, @x + n
+      when 'D' then @x = Math.max 0, @x - n
+      when 'E'
+        @y = Math.min @rows - 1, @y + n
+        @x = 0
+      when 'F'
+        @y = Math.max 0, @y - n
+        @x = 0
+      when 'G' then @x = Math.min @columns - 1, n - 1
+      when 'H', 'f'
+        [row, col] = params.split ';'
+        @y = Math.min @rows - 1, (parseInt(row) or 1) - 1
+        @x = Math.min @columns - 1, (parseInt(col) or 1) - 1
+      when 'J' then @erase parseInt(params) or 0
+      when 'K' then @clear @y, (if (parseInt(params) or 0) is 0 then @x else 0), (if (parseInt(params) or 0) is 1 then @x + 1 else @columns)
+      when 'm' then @style = apply @style, params
+      when 's' then @saved = { x: @x, y: @y }
+      when 'u' then { x: @x, y: @y } = @saved if @saved
+      when 'n', 'c' then null
+      else throw Error.new "the reducer was sent CSI #{params}#{verb}, which it does not know"
+    return
+
+  # The private modes both sides set: those that change no cell, and the
+  # alternate screen. Any other — autowrap, origin mode, a scroll region
+  # — would change what a terminal draws, and is refused.
+  mode: (mode, set) ->
+    throw Error.new "the reducer was sent DEC private mode #{mode}, which it does not model" unless mode in MODES
+    return unless mode is 1049
+    if set and not @alt
+      @alt = { lines: @lines, notes: @notes, base: @base, x: @x, y: @y }
+      @lines = []
+      @notes = []
+      @base = @x = @y = 0
+    else if not set and @alt
+      { lines: @lines, notes: @notes, base: @base, x: @x, y: @y } = @alt
+      @alt = null
+    return
+
+  # Erase in display: 0 from the cursor down, 1 up to it, 2 the screen,
+  # 3 the scrollback.
+  erase: (kind) ->
+    if kind is 3
+      @lines.splice 0, @base
+      @notes.splice 0, @base
+      @base = 0
+      return
+    from = if kind is 0 then @y else 0
+    to = if kind is 1 then @y else @rows - 1
+    for row in [from..to]
+      @clear row, (if row is @y and kind is 0 then @x else 0), (if row is @y and kind is 1 then @x + 1 else @columns)
+    return
+
+  # Blank the cells of `row` from `from` up to `to`, with the background
+  # in force.
+  clear: (row, from, to) ->
+    line = @lines[@base + row]
+    return unless line
+    blank = if @style.bg then { ...PLAIN, ch: ' ', bg: @style.bg } else undefined
+    if from is 0 and to >= line.length
+      line.length = 0
+      line.push blank for i in [0...@columns] if blank
+    else
+      to = Math.min to, line.length
+      @unpair line, from
+      @unpair line, to
+      line[i] = blank for i in [from...to]
+    @notes[@base + row] = undefined
+    return
+
+  # A wide glyph one half of which is `at` goes out whole.
+  unpair: (line, at) ->
+    if line[at]?.ch is '' and at > 0
+      line[at - 1] = undefined
+    else if line[at]?.wide is 2
+      line[at + 1] = undefined
+    return
+
+  down: ->
+    if @y is @rows - 1 then @base += 1 else @y += 1
+
+  print: (run) ->
+    for piece in graphemes.segment run
+      glyph = piece.segment
+      wide = Bun.stringWidth glyph
+      if wide is 0
+        @join glyph
+        continue
+      if @x + wide > @columns
+        @x = 0
+        @down()
+      line = @lines[@base + @y] ?= []
+      @unpair line, @x
+      @unpair line, @x + wide - 1
+      line[@x] = { ...@style, ch: glyph, wide }
+      line[@x + 1] = { ...@style, ch: '' } if wide is 2
+      @notes[@base + @y] = undefined
+      @x += wide
+    return
+
+  # A mark of no width joins the glyph before the cursor.
+  join: (glyph) ->
+    line = @lines[@base + @y]
+    at = @x - 1
+    at -= 1 if line?[at]?.ch is ''
+    return unless at >= 0 and line?[at]
+    line[at] = { ...line[at], ch: line[at].ch + glyph }
+    @notes[@base + @y] = undefined
+    return
+
+  # The terminal takes another size: what is past the new right edge is
+  # lost, as a terminal that does not reflow loses it.
+  resize: (columns, rows) ->
+    @columns = columns
+    @rows = rows
+    for line, i in @lines when line and line.length > columns
+      @unpair line, columns
+      line.length = columns
+      @notes[i] = undefined
+    @x = Math.min @x, columns - 1
+    @y = Math.min @y, rows - 1
+    return
+
+  # One row in the notation, from the cells.
+  note: (i) ->
+    @notes[i] ?= show canon([Array.from(@lines[i] ?? [], (cell) -> cell ?? BLANK)])[0]
+
+  # Every row since the start, in the notation, trailing blank rows
+  # dropped: what the comparison is made of.
+  screen: ->
+    rows = (@note i for i in [0...@lines.length])
+    rows.pop() while rows.length and rows[rows.length - 1] is ''
+    rows
+
+  # The same, each cell its own string, to find the first that differs.
+  cells: ->
+    rows = for i in [0...@lines.length]
+      (show [cell] for cell in canon([Array.from(@lines[i] ?? [], (cell) -> cell ?? BLANK)])[0])
+    rows.pop() while rows.length and rows[rows.length - 1].length is 0
+    rows
+
+  digest: -> String Bun.hash @screen().join('\n')
+
+BLANK =! { ...PLAIN, ch: ' ' }
+MODES =! [25, 1000, 1002, 1003, 1004, 1006, 1049, 2004, 2026]
+
+# The refusals, pinned: bench.rip runs this before a measurement, so a
+# reducer that had started to skip what it does not model could not
+# publish a ✓.
+export def pinned()
+  refused = (bytes) ->
+    try
+      Terminal.new(10, 4).feed bytes
+    catch error
+      return if error.message.includes 'the reducer was sent'
+      throw error
+    throw Error.new "the reducer took #{JSON.stringify bytes} without refusing it"
+  refused '\x1b[?7l'      # autowrap off
+  refused '\x1b[?6h'      # origin mode
+  refused '\x1b[?1;25h'   # a list with one it does not model
+  refused '\t'
+  refused '\b'
+  refused '\x07'
+  refused '\x1b[2;5r'     # a scroll region
+  refused '\x1b[3@'       # insert characters
+  refused '\x1bM'         # reverse index
+  refused '\x1b]8;;x'     # an unterminated OSC
+  term = Terminal.new 10, 4
+  term.feed "\x1b[?25l\x1b[?2026h\x1b[?2004h\x1b[?1004h\x1b[?1000;1006h\x1b[?1049h\x1b[32mhi\x1b[0m\x1b[?1049l\x1b[?2026l"
+  throw Error.new 'the reducer lost the primary screen across the alternate one' unless term.screen().length is 0
+  return
+
+# Replay what `out` kept through a reducer and read the screen after
+# every update: a digest each, or with `at`, the cells after update
+# `at`.
+export def reduce(out, at = null)
+  term = Terminal.new out.first.columns, out.first.rows
+  digests = []
+  fed = 0
+  for mark, k in out.marks
+    term.feed out.kept[i] for i in [fed...mark]
+    fed = mark
+    return term.cells() if at is k
+    digests.push term.digest()
+  digests
+
+# The first cell at which two screens read as cells differ, or null.
+export def differ(a, b)
+  for row in [0...Math.max(a.length, b.length)]
+    left = a[row] ?? []
+    right = b[row] ?? []
+    for col in [0...Math.max(left.length, right.length)]
+      return { row, col, a: left[col] ?? '', b: right[col] ?? '' } unless left[col] is right[col]
+  null
+
+# Print `result` as the last line of stdout, for bench.rip to read.
+export def emit(result)
+  console.log JSON.stringify result

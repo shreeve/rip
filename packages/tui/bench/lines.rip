@@ -1,0 +1,90 @@
+# ==============================================================================
+# tui bench — lines of code, by PLAN §2's rule
+#
+#   cd packages/tui/bench
+#   bun run lines
+#
+# Non-blank, non-comment source lines, counted by test/lines.rip's
+# `count` — the rule the README's example table is counted by; no
+# tests, fixtures, examples or benchmarks. Ink is its `src/` (.ts,
+# .tsx) and Yoga its `yoga/algorithm/` (.cpp, .h) — the algorithm
+# alone, without the bindings, the C API or the node — read from
+# checkouts named by INK_SRC and YOGA_SRC, or from misc/ink and
+# misc/yoga at this checkout's root; a checkout that is not Ink 7.1.1,
+# or not the Yoga version its yoga-layout installs here, is refused.
+# Rip TUI is the .rip files its package.json ships, and its
+# runtime is what a compiled component imports: src/runtime/reactive.js
+# and components.js.
+# ==============================================================================
+
+import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs'
+import { join, dirname, extname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { count } from '../test/lines.rip'
+
+HERE =! dirname(fileURLToPath(import.meta.url))
+ROOT =! join(HERE, '../../..')
+PACKAGE =! join(HERE, '..')
+
+# The files under `dir` with one of `exts`, recursively.
+def files(dir, exts)
+  found = []
+  for name in readdirSync(dir).sort()
+    path = join dir, name
+    if statSync(path).isDirectory() then found.push ...files(path, exts)
+    else found.push path if exts.includes extname(name)
+  found
+
+def total(paths)
+  sum = 0
+  sum += count path for path in paths
+  sum
+
+n =! (value) -> value.toLocaleString 'en-US'
+
+# Where a checkout is, or a refusal saying how to get one.
+def checkout(env, fallback, need)
+  dir = process.env[env] ?? join(ROOT, 'misc', fallback)
+  throw Error.new "#{need} is not at #{dir} — check it out there, or name it in #{env}" unless existsSync join(dir, need.split(' ')[0])
+  dir
+
+ink = checkout 'INK_SRC', 'ink', 'src of Ink 7.1.1'
+inkVersion = JSON.parse(readFileSync join(ink, 'package.json'), 'utf8').version
+throw Error.new "the Ink checkout at #{ink} is #{inkVersion}, not 7.1.1" unless inkVersion is '7.1.1'
+yoga = checkout 'YOGA_SRC', 'yoga', 'yoga/algorithm of Yoga'
+# Yoga's `javascript/` is the yoga-layout package, so its version names
+# the checkout; it must be the one Ink 7.1.1 installs here.
+yogaVersion = JSON.parse(readFileSync join(yoga, 'javascript/package.json'), 'utf8').version
+shipped = JSON.parse(readFileSync join(HERE, 'node_modules/yoga-layout/package.json'), 'utf8').version
+throw Error.new "the Yoga checkout at #{yoga} is #{yogaVersion}, and Ink 7.1.1 ships yoga-layout #{shipped} — check out v#{shipped} there, or name it in YOGA_SRC" unless yogaVersion is shipped
+
+inkLines = total files(join(ink, 'src'), ['.ts', '.tsx'])
+yogaLines = total files(join(yoga, 'yoga/algorithm'), ['.cpp', '.h'])
+
+shipped = JSON.parse(readFileSync join(PACKAGE, 'package.json'), 'utf8').files.filter (name) -> name.endsWith '.rip'
+ours = {}
+ours[name] = count join(PACKAGE, name) for name in shipped
+oursLines = Object.values(ours).reduce ((a, b) -> a + b), 0
+runtimeFiles = ['reactive.js', 'components.js']
+runtimeLines = total (join(ROOT, 'src/runtime', name) for name in runtimeFiles)
+
+# Ink's production dependency closure, as installed here.
+seen = Set.new()
+walk = (name) ->
+  return if seen.has name
+  seen.add name
+  manifest = JSON.parse readFileSync(join(HERE, 'node_modules', name, 'package.json'), 'utf8')
+  walk dep for dep of manifest.dependencies ?? {}
+walk 'ink'
+deps = seen.size - 1
+
+frameworks = inkLines / oursLines
+withLayout = (inkLines + yogaLines) / oursLines
+
+p "| | Ink + Yoga | Rip TUI |"
+p "|---|--:|--:|"
+p "| Framework only | Ink `src/` #{n inkLines} | #{n oursLines} |"
+p "| Framework + layout algorithm | + Yoga #{yogaVersion} `yoga/algorithm/` #{n yogaLines} = #{n inkLines + yogaLines} | #{n oursLines} (layout.rip is #{n ours['layout.rip']} of it) |"
+p "| Full runtime closure | + React, react-reconciler, scheduler and #{n deps - 3} more packages (#{n deps} in all) | + Rip runtime #{n runtimeLines} (#{runtimeFiles.join ', '}) = #{n oursLines + runtimeLines} |"
+p ""
+p "Framework against framework, Ink is #{frameworks.toFixed 1}× the lines of Rip TUI; with the layout algorithm on both sides, Ink + Yoga #{yogaVersion} (the version Ink 7.1.1 ships) is #{withLayout.toFixed 1}×. Rip TUI's files: #{("#{name} #{n lines}" for name, lines of ours).join ', '}."

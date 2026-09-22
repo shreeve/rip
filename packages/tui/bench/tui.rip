@@ -2,25 +2,36 @@
 # tui bench — Rip TUI on the scenarios ink.rip gives Ink
 #
 #   cd packages/tui/bench
-#   bun run tui              # every scenario the package can draw so far
+#   bun run bench            # both sides, every scenario, the proof, RESULTS.md
+#   bun run tui              # this side alone
 #   rip tui.rip counter      # one scenario
+#   rip tui.rip counter 5    # one scenario, five times the updates
 #
 # The same fake terminal, the same trees, the same awaited loop: each
-# update sets one state and flushes the frame it owes.
+# update sets one state, or resizes the terminal, and flushes the frame
+# it owes. Colors are forced to 24-bit, as they are for Ink.
 # ==============================================================================
 
-import { run, quit, Box, Text } from 'rip/tui'
-import { terminal, measure, report } from './harness.rip'
+import { run, quit, Box, Text, Static } from 'rip/tui'
+import { terminal, measure, report, reduce, emit, scenario, SCENARIOS, COLUMNS, ROWS, widthAt } from './harness.rip'
 
-COLUMNS =! 200
-ROWS =! 60
+process.env.FORCE_COLOR = '3'
+delete process.env.NO_COLOR
+delete process.env.CI
 
 ROWS50 =! (r for r in [0...50])
 COLS10 =! (c for c in [0...10])
 ROWS40 =! (r for r in [0...40])
 COLS8 =! (c for c in [0...8])
+ROWS20 =! (r for r in [0...20])
+ROWS12 =! (r for r in [0...12])
+COLS4 =! (c for c in [0...4])
+COLS100 =! (c for c in [0...100])
 
-# One counter in a tree of about 1,000 elements.
+# ── Scenarios ─────────────────────────────────────────────────────────────────
+
+# One counter in a tree of about 1,000 elements: 50 rows of 10 boxed
+# labels, one of which shows the tick.
 CounterTree = component
   @tick := 0
   render
@@ -45,26 +56,115 @@ def churnTable(share)
                 Text color: 'green'
                   "v#{if share is 1 then @tick else @tick - ((@tick - (r * 8 + c)) %% 10)}"
 
-SCENARIOS =! [
-  ['counter',  'counter in a 1,000-element tree', CounterTree,     300, 30]
-  ['table10',  '40×8 table, 10% churn',           churnTable(0.1), 300, 30]
-  ['table100', '40×8 table, 100% churn',          churnTable(1),   300, 30]
-]
+# A long list scrolled one row per update through a 40-row viewport:
+# the content offset of the clipped box, no layout owed.
+def scrolledList(count)
+  items = ("row #{i} — the quick brown fox jumps over the lazy dog" for i in [0...count])
+  component
+    @tick := 0
+    render
+      Box height: 40, overflow: 'hidden', flexDirection: 'column', contentOffsetY: @tick % (count - 40)
+        Box flexDirection: 'column'
+          for item in items
+            Text key: item, item
 
-def bench(only, scale = 1)
+# A 50-row list that takes a new row at its top each update and lets
+# the last one go: every row moves down by one.
+Inserting = component
+  @tick := 0
+  render
+    Box flexDirection: 'column'
+      for id in (@tick - i for i in ROWS50)
+        Text key: id, "row #{id} — the quick brown fox jumps over the lazy dog"
+
+# One line appended to scrollback per update, above a live status line.
+StaticLog = component
+  @tick := 0
+  render
+    Box flexDirection: 'column'
+      Static
+        for i in [0...@tick]
+          Text key: i, "done #{i}"
+      Text "working on #{@tick}"
+
+# Twelve rows of four cells a quarter of the width each — 30 cells at
+# 120 columns, 20 at 80, whole either way — holding a sentence that
+# wraps differently at every width the terminal takes.
+Wrapped = component
+  @tick := 0
+  render
+    Box flexDirection: 'column'
+      for r in ROWS12
+        Box key: r, flexDirection: 'row'
+          for c in COLS4
+            Box key: c, width: '25%'
+              Text "row #{r} cell #{c}: the quick brown fox jumps over the lazy dog and keeps going"
+
+# 10,000 nodes — 50 rows of 100 two-column cells, a box and a text
+# each — under a root whose top padding toggles, so every node moves.
+Relayout = component
+  @tick := 0
+  render
+    Box flexDirection: 'column', paddingTop: @tick % 2
+      for r in ROWS50
+        Box key: r, flexDirection: 'row'
+          for c in COLS100
+            Box key: c, width: 2
+              Text 'ab'
+
+# A 20 × 8 table of CJK and emoji cells, every one changing each update.
+GLYPHS =! ['漢字', '🍎🍊', '日本語', '🚀✨', '中文', '🐍🦀', '한국어', '🌍🌙']
+WideTable = component
+  @tick := 0
+  render
+    Box flexDirection: 'column'
+      for r in ROWS20
+        Box key: r, flexDirection: 'row'
+          for c in COLS8
+            Box key: c, width: 10
+              Text color: 'green'
+                "#{GLYPHS[(r + c) % 8]}#{(@tick + r + c) % 10}"
+
+APPS =! {
+  counter: CounterTree
+  table10: churnTable(0.1)
+  table100: churnTable(1)
+  list2k: scrolledList(2000)
+  list10k: scrolledList(10000)
+  insert: Inserting
+  static: StaticLog
+  resize: Wrapped
+  relayout: Relayout
+  wide: WideTable
+}
+
+# One scenario, measured: the result, with the screen after every
+# update as a digest — or, with `at`, the cells after update `at`.
+def bench(key, scale = 1, at = null)
+  { label, updates, warmup, cols, drive } = scenario key
+  out = terminal cols ?? COLUMNS, ROWS
+  running = run APPS[key], stdout: out
+  step = (i) ->
+    if drive is 'resize' then out.resize widthAt(i) else running.app.tick.value = i + 1
+    running.flush()
+  result = measure! label, out, updates * scale, warmup, step
+  quit()
+  await running.done
+  if at? then { key, at, cells: reduce(out, at) } else { key, ...result, digests: reduce(out) }
+
+def all(only, scale = 1)
   results = []
-  for [key, label, App, updates, warmup] in SCENARIOS
+  for { key } in SCENARIOS
     continue if only and only isnt key
-    out = terminal COLUMNS, ROWS
-    running = run App, stdout: out
-    step = (i) ->
-      running.app.tick.value = i + 1
-      running.flush()
-    results.push measure!(label, out, updates * scale, warmup, step)
-    quit()
-    await running.done
+    results.push bench!(key, scale)
   report "Rip TUI — #{COLUMNS}×#{ROWS}", results
 
 if import.meta.main
-  bench! process.argv[2], Number(process.argv[3] ?? 1)
+  args = process.argv.slice 2
+  if args[1] is '--json'
+    emit bench!(args[0])
+  else if args[1] is '--at'
+    emit bench!(args[0], 1, Number(args[2]))
+  else
+    all! args[0], Number(args[1] ?? 1)
   process.exit 0

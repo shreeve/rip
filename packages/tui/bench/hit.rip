@@ -1,5 +1,6 @@
 # ==============================================================================
 # tui bench — what one mouse report costs on a tree of 1,576 elements
+# (2,403 nodes with their text and the body's, the count it prints)
 #
 #   cd packages/tui/bench
 #   bun run hit

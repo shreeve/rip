@@ -1,0 +1,26 @@
+# ==============================================================================
+# tui bench — Rip TUI cold start, one fresh process per sample (bench.rip)
+#
+# Prints three times in milliseconds since process start — when this
+# module began, when rip/tui had loaded, and when the first frame had
+# been written — and the screen that frame left, read by the reducer.
+# ==============================================================================
+
+import { terminal, reduce, emit } from './harness.rip'
+
+process.env.FORCE_COLOR = '3'
+began = performance.now()
+{ run, quit, Text } = import!('rip/tui')
+loaded = performance.now()
+
+out = terminal 200, 60
+App = component
+  render
+    Text color: 'green', 'ready'
+running = run App, stdout: out
+framed = performance.now()
+out.mark()
+quit()
+await running.done
+emit { began, loaded, framed, cells: reduce(out, 0) }
+process.exit 0
