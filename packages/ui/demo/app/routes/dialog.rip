@@ -29,18 +29,18 @@ export DialogPage = component
                 class: 'rounded-lg border border-transparent bg-accent px-3 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover active:bg-accent-active'
                 'Close'
 
-      section class: 'mt-8 rounded-xl border border-surface p-5'
+      section class: 'mt-8 rounded-xl border border-surface bg-surface p-5'
         h2 class: 'text-xs-plus font-medium text-tertiary', 'Parent'
         p class: 'mt-2 text-sm text-secondary', 'The page binds the root with open <=> open.'
         div class: 'mt-4 flex items-center gap-4'
-          code class: 'rounded bg-surface px-2 py-1 font-mono text-sm', "open: #{open}"
+          code class: 'rounded bg-muted px-2 py-1 font-mono text-sm', "open: #{open}"
           button
             type: 'button'
             class: 'rounded-lg border border-input bg-input px-3 py-2 text-sm font-medium text-secondary hover:bg-input-hover active:bg-input-active'
             @click: (-> open = true)
             'Open from the Parent'
 
-      section class: 'mt-8 rounded-xl border border-surface p-5'
+      section class: 'mt-8 rounded-xl border border-surface bg-surface p-5'
         h2 class: 'text-xs-plus font-medium text-tertiary', 'Dismissal'
         p class: 'mt-2 text-sm text-secondary', 'The page passes closedby to the popup. Left out, the popup uses any: Escape and a click on the backdrop both close it.'
         div class: 'mt-4 flex flex-wrap items-center gap-2'

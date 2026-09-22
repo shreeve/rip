@@ -9,7 +9,8 @@
   --color-text-on-accent: var(--color-white);
 
   --color-bg-background:     var(--color-white);
-  --color-bg-surface:        var(--color-neutral-50);
+  --color-bg-surface:        var(--color-white);
+  --color-bg-muted:          var(--color-neutral-100);
   --color-bg-surface-hover:  oklch(from var(--color-bg-surface) calc(l - 0.015) c h);
   --color-bg-surface-active: oklch(from var(--color-bg-surface-hover) calc(l - 0.02) c h);
   --color-bg-input:          var(--color-white);
@@ -35,6 +36,7 @@ html[data-theme="dark"] {
 
   --color-bg-background:     var(--color-neutral-950);
   --color-bg-surface:        var(--color-neutral-900);
+  --color-bg-muted:          var(--color-neutral-800);
   --color-bg-surface-hover:  oklch(from var(--color-bg-surface) calc(l + 0.02) c h);
   --color-bg-surface-active: oklch(from var(--color-bg-surface-hover) calc(l + 0.04) c h);
   --color-bg-input:          var(--color-black);
@@ -64,6 +66,7 @@ html[data-theme="dark"] {
 
   --background-color-background:     var(--color-bg-background);
   --background-color-surface:        var(--color-bg-surface);
+  --background-color-muted:          var(--color-bg-muted);
   --background-color-surface-hover:  var(--color-bg-surface-hover);
   --background-color-surface-active: var(--color-bg-surface-active);
   --background-color-input:          var(--color-bg-input);
@@ -78,6 +81,8 @@ html[data-theme="dark"] {
   --border-color-input:   var(--color-border-input);
   --border-color-input-hover: var(--color-border-input-hover);
 
+  --outline-color-accent: var(--color-bg-accent);
+
   --ease-dialog: cubic-bezier(0.35, 0.91, 0.33, 0.97);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 }
@@ -89,5 +94,9 @@ html[data-theme="dark"] {
 
   button:not(:disabled) {
     @apply cursor-pointer;
+  }
+
+  *:focus-visible {
+    @apply outline-2 outline-offset-1 outline-accent;
   }
 }

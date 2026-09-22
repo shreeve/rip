@@ -16,7 +16,7 @@ export DrawerPage = component
           DrawerPopup
             side: 'right'
             class: [
-              'mr-0 ml-auto h-dvh max-h-none w-80 max-w-[calc(100vw-3rem)] translate-x-full translate-y-0 bg-background p-6 shadow-xl transition-[translate] duration-300 ease-drawer'
+              'mr-0 ml-auto h-dvh max-h-none w-80 max-w-[calc(100vw-3rem)] translate-x-full translate-y-0 bg-surface p-6 shadow-xl transition-[translate] duration-300 ease-drawer'
               'data-open:translate-x-0 data-open:duration-450 starting:data-open:translate-x-full'
               'backdrop:bg-backdrop backdrop:opacity-0 backdrop:duration-300 backdrop:ease-drawer data-open:backdrop:duration-450 data-open:backdrop:opacity-100 starting:data-open:backdrop:opacity-0'
             ]
@@ -27,11 +27,11 @@ export DrawerPage = component
                 class: 'rounded-lg border border-transparent bg-accent px-3 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover active:bg-accent-active'
                 'Close'
 
-      section class: 'mt-8 rounded-xl border border-surface p-5'
+      section class: 'mt-8 rounded-xl border border-surface bg-surface p-5'
         h2 class: 'text-xs-plus font-medium text-tertiary', 'Parent'
         p class: 'mt-2 text-sm text-secondary', 'The page binds the root with open <=> open.'
         div class: 'mt-4 flex items-center gap-4'
-          code class: 'rounded bg-surface px-2 py-1 font-mono text-sm', "open: #{open}"
+          code class: 'rounded bg-muted px-2 py-1 font-mono text-sm', "open: #{open}"
           button
             type: 'button'
             class: 'rounded-lg border border-input bg-input px-3 py-2 text-sm font-medium text-secondary hover:bg-input-hover active:bg-input-active'
