@@ -6,12 +6,6 @@ steps are in [PLAN.md](PLAN.md).
 
 ## 2. The closing audit — docs
 
-- [ ] PLAN §3's module table (tui 310, focus 62, paint 694, terminal
-      181; "4,222 built") against the counting rule (311, 63, 701, 203;
-      4,252); §10's per-file Ink counts and "478" against SOURCE.md's
-      521; the progress markers "(built: …)" in §5–§8, "before PR 6",
-      "In scope for PR 2", "measured in PR 0"; README's "Ctrl-Z is
-      PLAN.md's lifecycle step" and "and what is planned".
 - [ ] README idioms an app needs and cannot find: there is no no-wrap
       mode (a `width` wider than any line, then `contentOffsetX`;
       `truncate` cuts before the offset shifts); `screen.cols` and

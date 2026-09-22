@@ -147,9 +147,9 @@ Lines of code, by the rule above (`bun run lines`):
 
 | | Ink + Yoga | Rip TUI |
 |---|--:|--:|
-| Framework only | Ink `src/` 6,760 | 4,252 |
-| Framework + layout algorithm | + Yoga 3.2.1 `yoga/algorithm/` 3,042 = 9,802 | 4,252 (layout.rip is 1,466 of it) |
-| Full runtime closure | + React, react-reconciler, scheduler and 33 more packages | + Rip runtime 1,598 = 5,850 |
+| Framework only | Ink `src/` 6,760 | 4,269 |
+| Framework + layout algorithm | + Yoga 3.2.1 `yoga/algorithm/` 3,042 = 9,802 | 4,269 (layout.rip is 1,466 of it) |
+| Full runtime closure | + React, react-reconciler, scheduler and 33 more packages | + Rip runtime 1,598 = 5,867 |
 
 Ink + Yoga 3.2.1, the version Ink 7.1.1 ships, is 2.3× the lines of
 this package with the layout algorithm on both sides, 1.6× framework
@@ -811,7 +811,7 @@ Terminal, Ghostty, kitty and iTerm2 honor: a number from 0 to 1,
 `'error'`, `'indeterminate'`, or `null` to clear. It goes out with the
 next frame's write, and is cleared on every way out.
 
-## What is here, and what is planned
+## What is here
 
 [PLAN.md](PLAN.md) is the design and the order of work. `bench/` holds
 the harness with its terminal reducer, both contenders (`bun run ink`,
