@@ -35,7 +35,6 @@ export DrawerPopup = component extends DialogPopup
     s.translate = (if horizontal then "#{offset * toward}px 0" else "0 #{offset * toward}px") if offset
     s.transition = 'none' if swiping
     s
-
   down = (e: PointerEvent) ->
     drag = if onBackdrop(e) or (closedby ?? 'any') isnt 'any' then null else { id: e.pointerId, start: along(e), at: performance.now() }
   move = (e: PointerEvent) ->

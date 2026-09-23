@@ -19,8 +19,8 @@ export DialogTrigger = component extends button
       slot
 
 # showModal throws until the mounted tree reaches the document, so opening
-# waits a microtask. Firefox and WebKit hide a closed dialog at once, so
-# close() waits for the exit animations, and Escape closes through the cell.
+# waits a microtask. Firefox hides a closed dialog at once, so close()
+# waits for the exit animations, and Escape closes through the cell.
 #
 # TODO: let the app see a close's reason and cancel it, for close confirmation.
 # TODO: tell the app when a close has finished, after the exit animations.
@@ -30,6 +30,7 @@ export DialogPopup = component extends dialog
   accept describedBy from Dialog
   @closedby?: ClosedBy | undefined := 'any'
   el: HTMLDialogElement | null := null
+
   dismiss ~= closedby ?? 'any'
 
   # Safari ignores closedby, so backdrop presses and Escape under none are

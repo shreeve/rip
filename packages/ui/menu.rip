@@ -48,9 +48,9 @@ export MenuTrigger = component extends button
 
 # The popup is anchored by name, since popovertarget anchors it only when
 # a click opened it. A popover's own inset centers it; inset auto also
-# zeroes the auto margins, so the caller's margin is the gap. Firefox and
-# WebKit hide a light-dismissed popover at once and the hide is not
-# cancelable, so only a close through the cell waits for the exit.
+# zeroes the auto margins, so the caller's margin is the gap. Firefox
+# hides a light-dismissed popover at once and the hide is not cancelable,
+# so only a close through the cell waits for the exit.
 export MenuPopup = component extends div
   accept open from Menu
   accept triggerId from Menu
@@ -90,7 +90,6 @@ export MenuPopup = component extends div
   shows = 0
   before = (e: ToggleEvent) ->
     if e.newState is 'open' then shows += 1 else open = false
-
   after = (e: ToggleEvent) ->
     popup = el
     return unless e.newState is 'open' and popup
@@ -164,10 +163,12 @@ export MenuItem = component extends button
 # A link activates on Enter and not on Space, so Space clicks it.
 export MenuLink = component extends a
   accept open from Menu
+
   space = (e: KeyboardEvent) ->
     return unless e.key is ' '
     e.preventDefault()
     (e.currentTarget as HTMLAnchorElement).click()
+
   render
     a
       role: 'menuitem'
