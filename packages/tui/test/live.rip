@@ -104,6 +104,17 @@ test "lanes in flight: a spinner, the name, a bar against the last run — by ti
     styledRow = cells.styled(view.ansi)[4]
     ok styledRow.startsWith(' «#22d3ee»⠹«» root (extended tier)  «#2cd6d4»█████████▋«dim»────'), "the bar is 24% of the way from cyan to green: #{styledRow}"
 
+test "a lane that starts between two ticks has spent nothing yet: its bar is empty and its colors are colors", ->
+  board MEMORY(), ({ view, tally, hear, lanes }) ->
+    hear 0, { type: 'plan' }, { type: 'finish', result: { lane: lanes[3], status: 'skip', ms: 0, why: lanes[3].skip, output: '' } }, { type: 'start', lane: lanes[0] }
+    # The lanes' clock moves on and a lane starts before the board's next
+    # tick, so the board's time is older than the lane's start.
+    tally.now = -> 8000
+    tally.hear { type: 'start', lane: lanes[1] }
+    frame = rows view.frame()
+    ok frame.some((row) -> row.includes('packages/sites')), frame.join '\n'
+    ok not /#[0-9a-f]{7}/.test(view.ansi), 'no color of seven digits'
+
 test "a lane past its last duration turns amber, and red past twice it; a first run sweeps a bar with nothing to fill it by", ->
   board MEMORY(), ({ view, hear, lanes }) ->
     hear 0, { type: 'plan' }, { type: 'start', lane: lanes[0] }
