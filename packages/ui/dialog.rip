@@ -1,4 +1,4 @@
-export type ClosedBy = 'any' | 'closerequest' | 'none'
+export type DialogClosedBy = 'any' | 'closerequest' | 'none'
 
 export Dialog = component
   offer @open := false
@@ -28,7 +28,7 @@ export DialogPopup = component extends dialog
   accept open from Dialog
   accept labelledBy from Dialog
   accept describedBy from Dialog
-  @closedby?: ClosedBy | undefined := 'any'
+  @closedby?: DialogClosedBy | undefined := 'any'
   el: HTMLDialogElement | null := null
 
   dismiss ~= closedby ?? 'any'

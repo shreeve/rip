@@ -1,6 +1,8 @@
+import type { CSSProperties } from 'rip/app'
+
 type Landing = 'popup' | 'first' | 'last'
-type Side = 'bottom' | 'top' | 'left' | 'right'
-type Align = 'start' | 'center' | 'end'
+export type MenuSide = 'bottom' | 'top' | 'left' | 'right'
+export type MenuAlign = 'start' | 'center' | 'end'
 
 export Menu = component
   offer @open := false
@@ -48,17 +50,21 @@ export MenuTrigger = component extends button
 
 # The popup is anchored by name, since popovertarget anchors it only when
 # a click opened it. A popover's own inset centers it; inset auto also
-# zeroes the auto margins, so the caller's margin is the gap. Firefox
-# hides a light-dismissed popover at once and the hide is not cancelable,
-# so only a close through the cell waits for the exit.
+# zeroes the auto margins, so the margin on the trigger's side is the
+# offset, which a flip mirrors. A horizontal side with no room on either
+# side falls through to below, then above, by the package's two named
+# try rules, which read the offset and the alignment off the popup.
+# Firefox hides a light-dismissed popover at once and the hide is not
+# cancelable, so only a close through the cell waits for the exit.
 export MenuPopup = component extends div
   accept open from Menu
   accept triggerId from Menu
   accept popupId from Menu
   accept anchor from Menu
   accept landing from Menu
-  @side: Side := 'bottom'
-  @align: Align := 'start'
+  @side: MenuSide := 'bottom'
+  @align: MenuAlign := 'start'
+  @sideOffset: number := 0
   id =! @rest.id ?? mint('popup')
   el: HTMLDivElement | null := null
   ~>
@@ -67,16 +73,35 @@ export MenuPopup = component extends div
 
   vertical ~= side is 'bottom' or side is 'top'
   placement ~=
-    span = switch align
-      when 'start' then (if vertical then ' span-right' else ' span-bottom')
-      when 'end' then (if vertical then ' span-left' else ' span-top')
-      else ''
-    {
+    across = ACROSS[align]
+    style = {
       inset: 'auto'
       positionAnchor: anchor
-      positionArea: side + span
-      positionTryFallbacks: (if vertical then 'flip-block' else 'flip-inline')
-    }
+      positionArea: "#{side} #{if vertical then across.vertical else across.horizontal}"
+      positionTryFallbacks: (if vertical then 'flip-block' else 'flip-inline, --rip-menu-below, --rip-menu-above')
+      '--rip-menu-offset': "#{sideOffset}px"
+      '--rip-menu-across': across.vertical
+      '--transform-origin': origin
+    } as CSSProperties
+    style[FACING[side].margin] = "#{sideOffset}px"
+    style
+
+  # Nothing in CSS says which side a flip landed the popup on, and a
+  # fallback cannot set transform-origin, so the side is read from the
+  # computed area once shown, and again after resize and scroll while
+  # open. The browser settles a fallback in the rendering step after the
+  # frame that dispatches those events, so the read waits two frames.
+  # data-open waits for the side too, so an entry transition keyed on it
+  # starts with the origin in place, and the side outlives a close until
+  # the exit animations end, so the exit keeps it.
+  placed: MenuSide | '' := ''
+  place =! =>
+    popup = el
+    return unless popup and popup.matches(':popover-open')
+    word = getComputedStyle(popup).positionArea.split(' ').find (w) -> w in FACING
+    placed = (word as MenuSide | undefined) ?? side
+  moved =! => requestAnimationFrame -> requestAnimationFrame place
+  origin ~= FACING[placed or side].origin(ACROSS[align])
 
   items = (popup: HTMLElement): HTMLElement[] ->
     nodes: NodeListOf<HTMLElement> = popup.querySelectorAll('[role="menuitem"]')
@@ -89,11 +114,25 @@ export MenuPopup = component extends div
   # therefore cannot read the cell to learn of a show begun meanwhile.
   shows = 0
   before = (e: ToggleEvent) ->
-    if e.newState is 'open' then shows += 1 else open = false
+    if e.newState is 'open'
+      shows += 1
+      queueMicrotask place
+      addEventListener('resize', moved)
+      document.addEventListener('scroll', moved, true)
+    else
+      open = false
+      removeEventListener('resize', moved)
+      document.removeEventListener('scroll', moved, true)
   after = (e: ToggleEvent) ->
     popup = el
-    return unless e.newState is 'open' and popup
+    return unless popup
+    if e.newState is 'closed'
+      since = shows
+      exits = popup.getAnimations().map (a) -> a.finished
+      Promise.allSettled(exits).then -> placed = '' if shows is since
+      return
     open = true
+    place()
     list = items(popup)
     switch landing
       when 'first' then (list[0] ?? popup).focus()
@@ -141,7 +180,8 @@ export MenuPopup = component extends div
       tabindex: -1
       style: placement
       aria-labelledby: triggerId or undefined
-      data-open: open or undefined
+      data-side: placed or undefined
+      data-open: if open and placed then true else undefined
       data-closed: not open or undefined
       @beforetoggle: before
       @toggle: after
@@ -187,5 +227,33 @@ leave = (e: PointerEvent) ->
   popup = (e.currentTarget as HTMLElement).closest('[role="menu"]') as HTMLElement | null
   popup?.focus()
 
+# How an alignment reads along a vertical side, along a horizontal one,
+# and as the two words of a transform origin.
+ACROSS = {
+  start: { vertical: 'span-right', horizontal: 'span-bottom', x: 'left', y: 'top' }
+  center: { vertical: '', horizontal: '', x: 'center', y: 'center' }
+  end: { vertical: 'span-left', horizontal: 'span-top', x: 'right', y: 'bottom' }
+} as const
+
+# The margin that faces the trigger from each side, and the origin that
+# faces it.
+FACING = {
+  bottom: { margin: 'marginTop', origin: (a: Across) -> "#{a.x} top" }
+  top: { margin: 'marginBottom', origin: (a: Across) -> "#{a.x} bottom" }
+  left: { margin: 'marginRight', origin: (a: Across) -> "right #{a.y}" }
+  right: { margin: 'marginLeft', origin: (a: Across) -> "left #{a.y}" }
+} as const
+type Across = (typeof ACROSS)[MenuAlign]
+
 counter = 0
 mint = (part: string): string -> "rip-menu-#{part}-#{counter += 1}"
+
+# A try tactic cannot cross the axes without transposing the size, so the
+# cross-axis fallbacks are rules, with the offset and alignment as the
+# popup's own custom properties.
+styles = CSSStyleSheet.new()
+styles.replaceSync '''
+  @position-try --rip-menu-below { position-area: bottom var(--rip-menu-across,); margin: var(--rip-menu-offset) 0 0 0; }
+  @position-try --rip-menu-above { position-area: top var(--rip-menu-across,); margin: 0 0 var(--rip-menu-offset) 0; }
+'''
+document.adoptedStyleSheets.push(styles)

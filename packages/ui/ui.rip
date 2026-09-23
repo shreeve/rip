@@ -1,6 +1,8 @@
 # rip/ui — unstyled, composable UI components built on native browser features.
 
-export type { ClosedBy } from './dialog.rip'
+export type { DialogClosedBy } from './dialog.rip'
+export type { DrawerSide } from './drawer.rip'
+export type { MenuAlign, MenuSide } from './menu.rip'
 export { Dialog, DialogTrigger, DialogPopup, DialogTitle, DialogDescription, DialogClose } from './dialog.rip'
 export { Drawer, DrawerTrigger, DrawerPopup, DrawerTitle, DrawerDescription, DrawerClose } from './drawer.rip'
 export { Menu, MenuTrigger, MenuPopup, MenuItem, MenuLink } from './menu.rip'
