@@ -256,7 +256,7 @@ they're interned values available everywhere:
 |--------|---------|
 | `:redo` | Re-enter the current multiplexer (after reading more data) |
 | `:skip` | Skip the current item, continue to next |
-| `:else` | Fallback key in multiplexers — fires when no other key matches |
+| `:else` | Fallback key in multiplexers — fires when no other key matches and no more output arrives within `fast` seconds; its value acts like any key's (`:redo` keeps listening, `null` moves on) |
 | `:this` | In a multiplexer value, return the matched text itself |
 | `:pure` | Raw mode — no line terminator appended to sends |
 
