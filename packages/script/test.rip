@@ -420,7 +420,44 @@ test! ":else fires when nothing matches within the fast window", ->
       }
     ]
     eq hit, 'else'
-    ok back is :else
+    eq back, true
+
+# The shell commands below spell their prompts through printf's %s, so
+# the PTY's echo of the command line never contains the prompt text.
+TWO_QUESTIONS = "printf 'Q%s? ' 1; read a; SLEEP printf 'Q%s? ' 2; read b; printf '[%s|%s]%s%s\\n' \"$a\" \"$b\" EN D"
+
+test! "a callback's one-item reply re-enters the multiplexer, whatever its length", ->
+  withChat! (chat) ->
+    back = chat! [
+      /\$\s*/, TWO_QUESTIONS.replace('SLEEP ', '')
+      {
+        'Q1? ':  -> ['abc']
+        'Q2? ':  -> [:pure, "xyz\n"]
+        ']END':  :this
+      }
+    ]
+    ok back.endsWith('[abc|xyz]END')
+
+test! ":else: :redo keeps the multiplexer listening through a pause", ->
+  withChat! (chat) ->
+    back = chat! [
+      /\$\s*/, TWO_QUESTIONS.replace('SLEEP', 'sleep 1;')
+      *{
+        'Q1? ':  ['abc']
+        'Q2? ':  ['xyz']
+        ']END':  :this
+        :else:   :redo
+      }
+    ]
+    ok back.endsWith('[abc|xyz]END')
+
+test! ":else: null leaves the multiplexer when nothing matches", ->
+  withChat! (chat) ->
+    back = chat! [
+      /\$\s*/, 'echo ZZZ'
+      *{ NOMATCH: 'x', :else: null }
+    ]
+    eq back, null
 
 test! ":this returns the matched text itself", ->
   withChat! (chat) ->
