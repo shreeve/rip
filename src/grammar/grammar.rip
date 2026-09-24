@@ -956,8 +956,17 @@ grammar =
     o 'Expression'
     o 'Statement'
     o 'OFFER Expression' , '["offer", 2]' , 'offer: _, value'
-    o 'ACCEPT IDENTIFIER'                , '["accept", 2]'   , 'accept: _, name'
-    o 'ACCEPT IDENTIFIER FROM IDENTIFIER', '["accept", 2, 4]', 'accept: _, name, provider'
+    o 'ACCEPT IDENTIFIER'                  , '["accept", 2]'   , 'accept: _, name'
+    o 'ACCEPT IDENTIFIER FROM ProviderPath', '["accept", 2, 4]', 'accept: _, name, provider'
+  ]
+
+  # The provider an accept names: a component binding, or a member path
+  # into one (`accept open from Dialog.Root` reads a module namespace's
+  # part). Only plain property access — a call or an index has no
+  # provider reading, and rejects here rather than in the emitter.
+  ProviderPath: [
+    o 'IDENTIFIER'
+    o 'ProviderPath . Property', '[".", 1, 3]', 'member: operator, object, property'
   ]
 
   # Render block: the template DSL for fine-grained reactive DOM.

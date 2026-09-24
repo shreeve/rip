@@ -1285,6 +1285,8 @@ anchorStdlib(null);
 // the bound the fence exists to enforce still holds everywhere else.
 export const isStdlibPath = (fsPath) =>
   fsPath === realStdlibDir || fsPath.startsWith(realStdlibDir + path.sep);
+export const stdlibSpellingOf = (fsPath) =>
+  isStdlibPath(fsPath) ? 'rip/' + path.relative(realStdlibDir, fsPath).split(path.sep).join('/') : null;
 
 function stdlibRipTarget(spec) {
   if (!spec.startsWith('rip/')) return null;

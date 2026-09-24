@@ -1,4 +1,4 @@
-import { Drawer, DrawerClose, DrawerDescription, DrawerPopup, DrawerTitle, DrawerTrigger } from 'rip/ui'
+import { Drawer } from 'rip/ui'
 import { COMPONENTS } from '../components.rip'
 
 export DrawerPage = component
@@ -9,21 +9,21 @@ export DrawerPage = component
       p class: 'mt-2 text-secondary', COMPONENTS.drawer.description
 
       div class: 'mt-8 flex items-center justify-center rounded-xl border border-surface bg-surface py-16'
-        Drawer open <=> open
-          DrawerTrigger
+        Drawer.Root open <=> open
+          Drawer.Trigger
             class: 'rounded-lg border border-transparent bg-accent px-3 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover active:bg-accent-active'
             'Open Drawer'
-          DrawerPopup
+          Drawer.Popup
             side: 'right'
             class: [
               'mr-0 ml-auto h-dvh max-h-none w-80 max-w-[calc(100vw-3rem)] translate-x-full translate-y-0 bg-surface p-6 shadow-xl transition-[translate] duration-300 ease-drawer'
               'data-open:translate-x-0 data-open:duration-450 starting:data-open:translate-x-full'
               'backdrop:bg-backdrop backdrop:opacity-0 backdrop:duration-300 backdrop:ease-drawer data-open:backdrop:duration-450 data-open:backdrop:opacity-100 starting:data-open:backdrop:opacity-0'
             ]
-            DrawerTitle class: 'text-lg font-semibold', 'Settings'
-            DrawerDescription class: 'mt-2 text-secondary', 'Swipe the panel to the right to dismiss it, or use the button.'
+            Drawer.Title class: 'text-lg font-semibold', 'Settings'
+            Drawer.Description class: 'mt-2 text-secondary', 'Swipe the panel to the right to dismiss it, or use the button.'
             div class: 'mt-6 flex justify-end'
-              DrawerClose
+              Drawer.Close
                 class: 'rounded-lg border border-transparent bg-accent px-3 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover active:bg-accent-active'
                 'Close'
 

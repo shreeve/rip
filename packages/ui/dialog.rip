@@ -1,14 +1,14 @@
-export type DialogClosedBy = 'any' | 'closerequest' | 'none'
+export type ClosedBy = 'any' | 'closerequest' | 'none'
 
-export Dialog = component
+export Root = component
   offer @open := false
   offer labelledBy := ''
   offer describedBy := ''
   render
     slot
 
-export DialogTrigger = component extends button
-  accept open from Dialog
+export Trigger = component extends button
+  accept open from Root
   render
     button
       type: 'button'
@@ -24,11 +24,11 @@ export DialogTrigger = component extends button
 #
 # TODO: let the app see a close's reason and cancel it, for close confirmation.
 # TODO: tell the app when a close has finished, after the exit animations.
-export DialogPopup = component extends dialog
-  accept open from Dialog
-  accept labelledBy from Dialog
-  accept describedBy from Dialog
-  @closedby?: DialogClosedBy | undefined := 'any'
+export Popup = component extends dialog
+  accept open from Root
+  accept labelledBy from Root
+  accept describedBy from Root
+  @closedby?: ClosedBy | undefined := 'any'
   el: HTMLDialogElement | null := null
 
   dismiss ~= closedby ?? 'any'
@@ -105,8 +105,8 @@ export DialogPopup = component extends dialog
       slot
       span ref: after, tabindex: 0, aria-hidden: 'true', data-focus-guard: 'true', @focus: toFirst
 
-export DialogTitle = component extends h2
-  accept labelledBy from Dialog
+export Title = component extends h2
+  accept labelledBy from Root
   id =! @rest.id ?? mint('title')
   ~>
     labelledBy = id
@@ -115,8 +115,8 @@ export DialogTitle = component extends h2
     h2 id: id
       slot
 
-export DialogDescription = component extends p
-  accept describedBy from Dialog
+export Description = component extends p
+  accept describedBy from Root
   id =! @rest.id ?? mint('description')
   ~>
     describedBy = id
@@ -125,8 +125,8 @@ export DialogDescription = component extends p
     p id: id
       slot
 
-export DialogClose = component extends button
-  accept open from Dialog
+export Close = component extends button
+  accept open from Root
   render
     button
       type: 'button'

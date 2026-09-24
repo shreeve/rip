@@ -325,8 +325,10 @@ describe('package graph reconciliation', () => {
           "import { base } from '../base.rip'",
           'count := base * 10',
           'double ~= count * 2',
-          "S = schema\n  n! int",
-          'export read = -> { doubled: double, parsed: S.parse({ n: 1 }).n }',
+          // The registry is process-global and keyed by name, so the schema
+          // takes a name no other suite in the run registers.
+          "HeavyInput = schema\n  n! int",
+          'export read = -> { doubled: double, parsed: HeavyInput.parse({ n: 1 }).n }',
         ].join('\n'),
       }),
     });

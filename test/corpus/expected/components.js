@@ -777,3 +777,87 @@ let GatedOrder = class extends __Component {
     return null;
   }
 };
+let Parts = {Frame, FancyBtn};
+let Boxed = class extends __Component {
+  _init(__given) {
+  }
+  _create() {
+    { const __prev = __pushComponent(this); try {
+    try {
+    this._inst0 = new Parts.Frame({});
+    if (this._inst0 && this._inst0._initFailed) {
+      this._inst0 = null;
+      this._el1 = document.createComment('rip:child-init-failed: Parts.Frame');
+    } else {
+    { const __kid = this._inst0._beginProjection(this); try {
+    this._frag2 = document.createDocumentFragment();
+    { const __prev = this._inst0._beginProjection(this); try {
+    try {
+    this._inst3 = new Parts.FancyBtn({ label: "inner" });
+    if (this._inst3 && this._inst3._initFailed) {
+      this._inst3 = null;
+      this._el4 = document.createComment('rip:child-init-failed: Parts.FancyBtn');
+    } else if (this._inst3._mountCreate()) {
+      this._el4 = this._inst3._root;
+      (this._children || (this._children = [])).push(this._inst3);
+    } else {
+      this._inst3 = null;
+      this._el4 = document.createComment('rip:child-error: Parts.FancyBtn');
+    }
+    } catch (__childErr) {
+      __reportChildFailure('Parts.FancyBtn', __childErr);
+      this._inst3 = null;
+      this._el4 = document.createComment('rip:child-error: Parts.FancyBtn');
+    }
+    } finally { this._inst0._endProjection(__prev); } }
+    this._frag2.appendChild(this._el4);
+    { const __prev = this._inst0._beginProjection(this); try {
+    try {
+    this._inst5 = new Parts.FancyBtn({ label: "block", children: this.children });
+    if (this._inst5 && this._inst5._initFailed) {
+      this._inst5 = null;
+      this._el6 = document.createComment('rip:child-init-failed: Parts.FancyBtn');
+    } else if (this._inst5._mountCreate()) {
+      this._el6 = this._inst5._root;
+      (this._children || (this._children = [])).push(this._inst5);
+    } else {
+      this._inst5 = null;
+      this._el6 = document.createComment('rip:child-error: Parts.FancyBtn');
+    }
+    } catch (__childErr) {
+      __reportChildFailure('Parts.FancyBtn', __childErr);
+      this._inst5 = null;
+      this._el6 = document.createComment('rip:child-error: Parts.FancyBtn');
+    }
+    } finally { this._inst0._endProjection(__prev); } }
+    this._frag2.appendChild(this._el6);
+    } finally { this._inst0._endProjection(__kid); } }
+    this._inst0._setChildren(this._frag2);
+    if (this._inst0._mountCreate()) {
+      this._el1 = this._inst0._root;
+      (this._children || (this._children = [])).push(this._inst0);
+    } else {
+      this._inst0 = null;
+      this._el1 = document.createComment('rip:child-error: Parts.Frame');
+    }
+    }
+    } catch (__childErr) {
+      __reportChildFailure('Parts.Frame', __childErr);
+      this._inst0 = null;
+      this._el1 = document.createComment('rip:child-error: Parts.Frame');
+    }
+    } finally { __popComponent(__prev); } }
+    return this._el1;
+  }
+  _setup() {
+    if (this._inst3 && this._inst3._state === 'mounting') {
+      this._el4 = this._inst3._mountSetup(document.createComment('rip:child-error: Parts.FancyBtn'));
+    }
+    if (this._inst5 && this._inst5._state === 'mounting') {
+      this._el6 = this._inst5._mountSetup(document.createComment('rip:child-error: Parts.FancyBtn'));
+    }
+    if (this._inst0 && this._inst0._state === 'mounting') {
+      this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Parts.Frame'));
+    }
+  }
+};

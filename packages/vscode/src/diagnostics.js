@@ -323,6 +323,16 @@ export function mapTsDiagnostic(good, d) {
       }
     }
   }
+  // A tag whose target is no component: TS7009 (a `new` with no construct
+  // signature, under strict) or TS2351 (not constructable) stands on the
+  // whole construction, and re-anchors on the tag the emitter recorded.
+  if (d.code === 7009 || d.code === 2351) {
+    const row = (good.componentUses ?? []).find((r) => r.start >= span[0] && r.end <= span[1]);
+    if (row) {
+      span = [row.start, row.end];
+      message = `'${row.name}' is not a component, so it cannot be rendered as one`;
+    }
+  }
   return {
     severity: d.severity ?? 1,
     code: d.code,

@@ -157,3 +157,14 @@ GatedOrder = component
   order: { id: string } <~ @stash.orders(params.id)
   snapshot := order
   render null
+
+# Tags named through a member path.
+Parts = { Frame, FancyBtn }
+
+Boxed = component
+  render
+    Parts.Frame
+      Parts.FancyBtn label: "inner"
+      Parts.FancyBtn
+        label: "block"
+        slot

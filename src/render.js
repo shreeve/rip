@@ -64,10 +64,31 @@ const FOR_SOURCES = new Set(['FORIN', 'FOROF', 'FORAS', 'FORASAWAIT']);
 
 import { TEMPLATE_TAGS } from './dom.js';
 import { counter } from './counter.js';
+import { isIdentifierName } from './ident.js';
 
 const isHtmlTag = (name) => TEMPLATE_TAGS.has(String(name).split('#')[0]);
-const isComponentName = (name) => typeof name === 'string' && COMPONENT_RE.test(name);
+export const isComponentName = (name) => typeof name === 'string' && COMPONENT_RE.test(name);
 const isTemplateTag = (name) => isHtmlTag(name) || isComponentName(name);
+
+// A plain member path as its dotted text: property access only, rooted at
+// an identifier; null for any other node. `this` never roots one.
+export function memberPathText(node) {
+  if (!Array.isArray(node) || node[0] !== '.' || node.length !== 3 || typeof node[2] !== 'string') return null;
+  const segs = [node[2]];
+  let cur = node[1];
+  while (Array.isArray(cur)) {
+    if (cur[0] !== '.' || cur.length !== 3 || typeof cur[2] !== 'string') return null;
+    segs.push(cur[2]);
+    cur = cur[1];
+  }
+  if (typeof cur !== 'string' || cur === 'this' || !isIdentifierName(cur)) return null;
+  segs.push(cur);
+  return segs.reverse().join('.');
+}
+// A member path whose leaf is a component name; a lowercase leaf is a
+// member read, never a tag.
+export const componentPathText = (node) => Array.isArray(node) && isComponentName(node[2]) ? memberPathText(node) : null;
+export const componentPathRoot = (text) => text.split('.')[0];
 
 export function rewriteRender(tokens, mintId, fail) {
   let has = false;
@@ -582,12 +603,14 @@ export function rewriteRender(tokens, mintId, fail) {
 
       if (isTemplateElement) {
         // A `.class`/`#id` tail PROPERTY of a line-starting template
-        // tag counts as the bare tag itself.
+        // tag counts as the bare tag itself, and so does the component
+        // leaf of a line-starting member path (`UI.Menu.Popup`).
         let isClassOrIdTail = false;
         if (t.kind === 'PROPERTY' && out[out.length - 1]?.kind === '.') {
           let j = out.length;
           while (j >= 2 && out[j - 1].kind === '.' && out[j - 2].kind === 'PROPERTY') j -= 2;
-          if (j >= 2 && out[j - 1].kind === '.' && out[j - 2].kind === 'IDENTIFIER' && isTemplateTag(out[j - 2].value)) {
+          if (j >= 2 && out[j - 1].kind === '.' && out[j - 2].kind === 'IDENTIFIER' &&
+              (isTemplateTag(out[j - 2].value) || isComponentName(t.value))) {
             const before = out[j - 3]?.kind ?? null;
             if (before === null || ['INDENT', 'OUTDENT', 'TERMINATOR', 'RENDER'].includes(before)) {
               isClassOrIdTail = true;

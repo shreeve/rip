@@ -2522,3 +2522,125 @@ describe('member initialization order is observable source order', () => {
     expect([trace, x.b]).toEqual([['state', 'plain'], 2]);
   });
 });
+
+// A component tag may be a member path (`Menu.Trigger`): the leaf is a
+// component name, the root resolves as a bare tag's name does, and a
+// lowercase leaf is a member read.
+describe('component tags through a member path', () => {
+  const NS = [
+    'Root = component',
+    '  offer @open := true',
+    '  render',
+    '    slot',
+    'Item = component extends button',
+    '  accept open from Root',
+    '  render',
+    '    button @click: (-> open = false)',
+    '      slot',
+    'helper = -> "h"',
+    'Menu = { Root, Item, helper }',
+    'UI = { Menu }',
+  ].join('\n');
+  const page = (render) => `${NS}\nPage = component\n  flag := true\n  render\n${render}`;
+
+  test('a member tag with inline attributes and a text child constructs through the member, named by its path', () => {
+    const { code } = compile(page("    Menu.Root open <=> flag\n      Menu.Item class: 'btn', 'close'\n"));
+    expect(code).toContain('new Menu.Root({ __bind_open__: this.flag');
+    expect(code).toContain('new Menu.Item({ class: "btn" })');
+    expect(code).toContain("document.createComment('rip:child-error: Menu.Item')");
+    expect(code).toContain("__reportChildFailure('Menu.Item', ");
+    expect(code).not.toContain('.data = Menu.Item(');
+  });
+
+  test('a bare member line, indented attributes with children, and a deeper path all construct', () => {
+    const bare = compile(page('    div\n      Menu.Item\n')).code;
+    expect(bare).toContain('new Menu.Item({})');
+    const indented = compile(page("    Menu.Root\n      Menu.Item\n        class: 'btn'\n        span 'close'\n")).code;
+    expect(indented).toContain('new Menu.Item({ class: "btn" })');
+    expect(indented).toContain('._beginProjection(');
+    expect(indented).toContain('._setChildren(');
+    const deep = compile(page("    UI.Menu.Item 'x'\n")).code;
+    expect(deep).toContain('new UI.Menu.Item({');
+    expect(deep).toContain("__reportChildFailure('UI.Menu.Item', ");
+  });
+
+  test('a lowercase leaf is a member read: text, not a construction', () => {
+    const { code } = compile(page('    div\n      Menu.helper\n'));
+    expect(code).toContain('this._t0.data = Menu.helper;');
+    expect(code).not.toContain('new Menu.helper');
+  });
+
+  test('the member tag mounts: the bind reaches the root, the projection lands under it, and an accept through the member reads the root', () => {
+    const { code } = compile(page("    Menu.Root open <=> flag\n      Menu.Item class: 'btn', 'close'\n"), { runtimeDelivery: 'none' });
+    const names = Object.keys(RT);
+    const { Page, Menu } = new Function(...names, `${code}\nreturn { Page, Menu };`)(...names.map((name) => RT[name]));
+    const target = document.createElement('main');
+    const app = new Page({});
+    try {
+      app.mount(target);
+      const root = app._children.find((c) => c instanceof Menu.Root);
+      const item = app._children.find((c) => c instanceof Menu.Item);
+      expect(root).toBeDefined();
+      expect(item).toBeDefined();
+      expect(root.open).toBe(app.flag);
+      expect(item.open).toBe(root.open);
+      expect(item._parent).toBe(root);
+      const button = target.childNodes.find((n) => n.tagName === 'button');
+      expect(button).toBeDefined();
+      expect(serialize(target)).toContain('btn');
+      button.dispatchEvent({ type: 'click', target: button, bubbles: false });
+      expect(app.flag.value).toBe(false);
+    } finally {
+      app.unmount();
+    }
+  });
+
+  // A host or a provider named through a path roots at an import: the
+  // declaration file spells their types through it.
+  const LIB = "import * as Lib from './lib.rip'\n";
+
+  test('`component extends <Member>`: the host is named by its path, and the first class-scope construction of it takes rest', () => {
+    const { code } = compile(`${LIB}Wrap = component extends Lib.Item\n  render\n    Lib.Item data-wrap: 'y'\n      slot\n`);
+    expect(code).toContain("static __extends = 'Lib.Item';");
+    expect(code).toContain('new Lib.Item({ ...this._rest, "data-wrap": "y", children: this.children })');
+    expect(code).toContain('this._inheritedInst = this._inst0;');
+    emitFails(`${LIB}Wrap = component extends Lib.Item\n  render\n    div "x"\n`, /never constructs a 'Lib\.Item' at class scope/);
+  });
+
+  test('`accept … from <Member>` reads the provider through the member', () => {
+    const { code } = compile(`${LIB}Part = component\n  accept open from Lib.Root\n  render\n    span\n`);
+    expect(code).toContain("this.open = getContext(Lib.Root, 'open');");
+  });
+
+  test('a host or a provider named through a path rooted at a binding of the module rejects: the declaration file could not spell it', () => {
+    emitFails(`${NS}\nWrap = component extends Menu.Item\n  render\n    Menu.Item\n`, /'component extends Menu\.Item' roots at 'Menu', a binding of this module/);
+    emitFails(`${NS}\nPart = component\n  accept open from Menu.Root\n  render\n    span\n`, /accept reads from 'Menu\.Root', which roots at 'Menu', a binding of this module/);
+  });
+
+  test('a class static holding a component constructs through the static, never a text call', () => {
+    const src = [
+      'Trigger = component extends button',
+      '  render',
+      '    button',
+      '      slot',
+      'Menu = component',
+      '  render',
+      '    slot',
+      'Menu.Trigger = Trigger',
+      'Page = component',
+      '  render',
+      '    div',
+      "      Menu.Trigger class: 'btn', 'Open'",
+    ].join('\n');
+    const { code } = compile(src);
+    expect(code).toContain('new Menu.Trigger({ class: "btn" })');
+    expect(code).not.toContain('.data = Menu.Trigger(');
+  });
+
+  test('an unbound root, and a leaf that is no component name, reject at each of the three positions', () => {
+    emitFails("Page = component\n  render\n    Nope.Trigger class: 'x'\n", /component 'Nope\.Trigger' is not defined in this module/);
+    emitFails('Wrap = component extends Nope.Item\n  render\n    div\n', /'Nope\.Item' is neither/);
+    emitFails('Part = component\n  accept open from Nope.Root\n  render\n    span\n', /'Nope\.Root' is not one/);
+    emitFails(`${LIB}Part = component\n  accept open from Lib.helper\n  render\n    span\n`, /'Lib\.helper' is not one/);
+  });
+});

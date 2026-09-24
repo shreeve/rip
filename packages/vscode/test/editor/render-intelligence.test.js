@@ -16,7 +16,10 @@
 //
 // Same availability guard as the other live suites.
 import { test, expect, describe } from 'bun:test';
-import { tsgoAvailable, inWorkspace as inHarness, decodeSemanticTokens } from './support/harness.mjs';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { tsgoAvailable, inWorkspace as inHarness, inSession, decodeSemanticTokens } from './support/harness.mjs';
 
 // `traceTsgo` preloads the test-only tap (support/tsgo-trace.mjs) into
 // the server, and `api.tsgoNotifications()` reads back every
@@ -1006,6 +1009,207 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
       expect(required).toMatch(/^  sep: ';' \| ','$/m);
       expect(required).not.toContain('read()');
       expect(required).not.toContain('new (');
+    });
+  });
+});
+
+// A component named through a member path (`Menu.Popup`, the module
+// namespace shape) answers as the bare name does at every position the
+// path can stand in: the tag, the `extends` host, and the accept
+// provider. The part's own name hovers the signature and defines into
+// its module; the qualifier hovers as the module it is.
+describe.skipIf(!tsgoAvailable)('component member paths', () => {
+  const MENU = [
+    'export Root = component',                 // 0
+    '  offer @open := false',                  // 1
+    '  render',                                // 2
+    '    slot',                                // 3
+    'export Popup = component extends div',    // 4
+    '  accept open from Root',                 // 5
+    "  @side: 'top' | 'bottom' := 'bottom'",   // 6
+    '  render',                                // 7
+    '    div data-side: side',                 // 8
+    '      slot',                              // 9
+    '',
+  ].join('\n');
+  const APP = [
+    "import * as Menu from './menu.rip'",           // 0
+    '',
+    'export Wrap = component extends Menu.Popup',   // 2
+    '  accept open from Menu.Root',                 // 3
+    '  render',                                     // 4
+    '    Menu.Root',                                // 5
+    "      Menu.Popup side: 'top', class: 'x'",     // 6
+    "        span 'hi'",                            // 7
+    '',
+  ].join('\n');
+
+  test('hover: the tag, the host, and the provider answer through the member; the qualifier is the module', async () => {
+    await inWorkspace({ 'package.json': STRICT_PKG, 'menu.rip': MENU }, async (api) => {
+      await api.open('app.rip', APP);
+      const tag = await api.hover('app.rip', 6, 12);       // inside `Popup` on the tag
+      expect(tag?.contents?.value).toContain('```rip\ncomponent Popup extends div');
+      expect(tag?.contents?.value).toContain("side?: 'top' | 'bottom'");
+      const key = await api.hover('app.rip', 6, 18);       // inside `side:`
+      expect(key?.contents?.value).toContain('(property) side?:');
+      const root = await api.hover('app.rip', 5, 10);      // inside `Root` on the bare member line
+      expect(root?.contents?.value).toContain('component Root');
+      const host = await api.hover('app.rip', 2, 38);      // inside `Popup` after `extends Menu.`
+      expect(host?.contents?.value).toContain('component Popup extends div');
+      const provider = await api.hover('app.rip', 3, 25);  // inside `Root` after `from Menu.`
+      expect(provider?.contents?.value).toContain('Root');
+      const qualifier = await api.hover('app.rip', 6, 7);  // inside `Menu` on the tag
+      expect(qualifier?.contents?.value).toContain('module "./menu.rip"');
+      expect(api.diagnostics('app.rip').filter((d) => d.severity <= 2)).toEqual([]);
+    });
+  });
+
+  test('definition: the part lands on its declaration in the module from the tag, the host, and the provider', async () => {
+    await inWorkspace({ 'package.json': STRICT_PKG, 'menu.rip': MENU }, async (api) => {
+      await api.open('app.rip', APP);
+      const at = async (line, character) => {
+        const defs = await api.definition('app.rip', line, character);
+        const d = Array.isArray(defs) ? defs[0] : defs;
+        return `${d?.uri?.endsWith('/menu.rip')}:${d?.range?.start?.line}:${d?.range?.start?.character}`;
+      };
+      expect(await at(6, 12)).toBe('true:4:7');   // the tag → `Popup` on line 4 of menu.rip
+      expect(await at(2, 38)).toBe('true:4:7');   // the host
+      expect(await at(3, 25)).toBe('true:0:7');   // the provider → `Root`
+    });
+  });
+
+  // A namespace reached by NAME — `import { Menu } from './ui.rip'` over
+  // `export * as Menu`, the package-entry shape, and `rip/ui` itself —
+  // colors as a namespace at its reads, from the module's own record of
+  // what it re-exports, and hovers with the module spelled as the author
+  // would write it, never as the mirror's path. On the import line every
+  // name is `variable`, TypeScript's own convention.
+  test('a namespace imported by name colors as one at its reads and hovers as the module; the import line is uniform', async () => {
+    const files = { 'package.json': STRICT_PKG, 'menu.rip': MENU, 'ui.rip': "export * as Menu from './menu.rip'\n" };
+    const src = [
+      "import { Menu } from './ui.rip'",              // 0
+      "import { Dialog } from 'rip/ui'",              // 1
+      'export Wrap = component extends Menu.Popup',   // 2
+      '  accept open from Menu.Root',                 // 3
+      '  render',                                     // 4
+      '    Menu.Root',                                // 5
+      "      Menu.Popup side: 'top'",                 // 6
+      '        Dialog.Root',                          // 7
+      "import { Root } from './menu.rip'",            // 8
+      '',
+    ].join('\n');
+    await inWorkspace(files, async (api) => {
+      await api.open('app.rip', src);
+      const tokens = decodeSemanticTokens((await api.semanticTokens('app.rip'))?.data ?? [], src);
+      const at = (line, character) => tokens.find((t) => t.line === line && t.character === character);
+      for (const [line, character, word] of [[2, 32, 'Menu'], [3, 19, 'Menu'], [5, 4, 'Menu'], [6, 6, 'Menu'], [7, 8, 'Dialog']]) {
+        const q = at(line, character);
+        expect(q, `${word} at ${line}:${character}`).toBeDefined();
+        expect(q.type).toBe('#0');
+        expect(q.length).toBe(word.length);
+      }
+      // The import line: `variable` for every name, a namespace and a
+      // component alike, as TypeScript colors its own import lines.
+      for (const [line, character, word] of [[0, 9, 'Menu'], [1, 9, 'Dialog'], [8, 9, 'Root']]) {
+        const q = at(line, character);
+        expect(q, `${word} at ${line}:${character}`).toBeDefined();
+        expect(q.type).toBe('#8');
+        expect(q.length).toBe(word.length);
+      }
+      const local = await api.hover('app.rip', 5, 5);
+      expect(local?.contents?.value).toContain('module "./menu.rip"');
+      const stdlib = await api.hover('app.rip', 7, 9);
+      expect(stdlib?.contents?.value).toContain('module "rip/ui/dialog.rip"');
+      expect(stdlib?.contents?.value).not.toContain('__external__');
+    });
+  });
+
+  test('hover: a wrapper of a member-path host presents as `component Name extends Lib.Popup` with its own props, as a bare host does', async () => {
+    const src = [
+      "import * as Lib from './menu.rip'",             // 0
+      'export Wrap = component extends Lib.Popup',      // 1
+      '  @title?: string',                               // 2
+      '  render',                                        // 3
+      '    Lib.Popup',                                   // 4
+      '      slot',                                      // 5
+      'export Page = component',                         // 6
+      '  render',                                        // 7
+      "    Wrap title: 'a'",                             // 8
+      '',
+    ].join('\n');
+    await inWorkspace({ 'package.json': STRICT_PKG, 'menu.rip': MENU }, async (api) => {
+      await api.open('app.rip', src);
+      const use = await api.hover('app.rip', 8, 6);
+      expect(use?.contents?.value).toContain('```rip\ncomponent Wrap extends Lib.Popup');
+      expect(use?.contents?.value).toContain('title?: string');
+      expect(use?.contents?.value).not.toContain('__bind_');
+      expect(use?.contents?.value).not.toContain('ConstructorParameters');
+    });
+  });
+
+  // Inside the rip checkout itself the stdlib is the workspace's own
+  // packages tree, and tsgo names a stdlib module by the tsconfig map's
+  // spelling rather than a relative mirror path; the answer is the same
+  // either way, and the color does not depend on how the name resolved.
+  test('in the checkout, a name imported from rip/ui colors as a namespace at its reads and hovers as the stdlib module', async () => {
+    const root = fileURLToPath(new URL('../../../..', import.meta.url));
+    const rel = 'packages/ui/demo/app/routes/dialog.rip';
+    const src = readFileSync(join(root, rel), 'utf8');
+    await inSession(root, async (api) => {
+      await api.open(rel, src);
+      const tokens = decodeSemanticTokens((await api.semanticTokens(rel))?.data ?? [], src);
+      const declaration = tokens.find((t) => t.line === 0 && t.character === 9);
+      expect(declaration?.type).toBe('#8');
+      expect(declaration?.length).toBe('Dialog'.length);
+      const use = tokens.find((t) => t.line === 12 && t.character === 8);
+      expect(use?.type).toBe('#0');
+      const hover = await api.hover(rel, 0, 12);
+      expect(hover?.contents?.value).toContain('module "rip/ui/dialog.rip"');
+    });
+  }, 60_000);
+
+  test('a namespace qualifier inside a type annotation colors as one, like its reads in values', async () => {
+    const src = [
+      "import { Dialog } from 'rip/ui'",                          // 0
+      'export Page = component',                                  // 1
+      '  closedby: Dialog.ClosedBy | undefined := undefined',      // 2
+      '  render',                                                 // 3
+      '    Dialog.Popup closedby: closedby',                      // 4
+      '',
+    ].join('\n');
+    await inWorkspace({ 'package.json': STRICT_PKG }, async (api) => {
+      await api.open('app.rip', src);
+      const tokens = decodeSemanticTokens((await api.semanticTokens('app.rip'))?.data ?? [], src);
+      const at = (line, character) => tokens.find((t) => t.line === line && t.character === character);
+      expect(at(2, 12)?.type, 'Dialog in the annotation').toBe('#0');
+      expect(at(2, 19)?.type, 'ClosedBy in the annotation').toBe('#6');
+      expect(at(4, 4)?.type, 'Dialog on the tag').toBe('#0');
+    });
+  });
+
+  test('tokens: the part on a member tag takes the token a bare tag takes, and the qualifier is a namespace at every reference', async () => {
+    await inWorkspace({ 'package.json': STRICT_PKG, 'menu.rip': MENU }, async (api) => {
+      await api.open('app.rip', APP);
+      const tokens = decodeSemanticTokens((await api.semanticTokens('app.rip'))?.data ?? [], APP);
+      const at = (line, character) => tokens.find((t) => t.line === line && t.character === character);
+      const bare = at(5, 9);    // `Root` on line 5
+      const member = at(6, 11); // `Popup` on line 6
+      expect(bare).toBeDefined();
+      expect(member).toBeDefined();
+      expect(member.type).toBe(bare.type);
+      expect(member.length).toBe('Popup'.length);
+      // tsgo emits nothing for a namespace import; the server colors its
+      // reads from the compiler's record (the legend is tsgo's, `namespace`
+      // first) and its import line `variable`, as TypeScript does.
+      for (const [line, character] of [[2, 32], [3, 19], [5, 4], [6, 6]]) {
+        const q = at(line, character);
+        expect(q, `Menu at ${line}:${character}`).toBeDefined();
+        expect(q.type).toBe('#0');
+        expect(q.length).toBe('Menu'.length);
+      }
+      const declaration = at(0, 12);
+      expect(declaration, 'Menu at 0:12').toBeDefined();
+      expect(declaration.type).toBe('#8');
     });
   });
 });

@@ -8,7 +8,10 @@
     "browser": true
   },
   "exports": {
-    ".": "./ui.rip"
+    ".": "./ui.rip",
+    "./dialog.rip": "./dialog.rip",
+    "./drawer.rip": "./drawer.rip",
+    "./menu.rip": "./menu.rip"
   },
   "scripts": {
     "test": "playwright test --config test/browser/playwright.config.mjs",

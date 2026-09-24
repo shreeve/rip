@@ -1,4 +1,4 @@
-import { Drawer, DrawerPopup, DrawerTitle, DrawerTrigger } from 'rip/ui'
+import { Drawer } from 'rip/ui'
 import { COMPONENTS } from '../components.rip'
 import { Icon } from '../components/icon.rip'
 
@@ -23,18 +23,18 @@ export Layout = component
   render
     div class: 'grid h-dvh grid-rows-[auto_1fr] md:grid-cols-[260px_1fr]'
       header class: 'flex h-14 items-center gap-1 border-b border-surface px-2.5 md:h-15 md:border-r md:border-b-0 md:pl-5'
-        Drawer open <=> drawer
-          DrawerTrigger
+        Drawer.Root open <=> drawer
+          Drawer.Trigger
             class: 'flex size-8.5 items-center justify-center rounded-lg text-tertiary hover:bg-surface-hover hover:text-primary md:hidden'
             aria-label: 'Open navigation'
             Icon name: 'menu', classes: 'size-4.5'
-          DrawerPopup
+          Drawer.Popup
             class: [
               'm-0 h-dvh max-h-none w-65 max-w-none -translate-x-full translate-y-0 bg-surface p-2.5 shadow-xl transition-[translate] duration-300 ease-drawer'
               'data-open:translate-x-0 data-open:duration-450 starting:data-open:-translate-x-full'
               'backdrop:bg-backdrop backdrop:opacity-0 backdrop:duration-300 backdrop:ease-drawer data-open:backdrop:duration-450 data-open:backdrop:opacity-100 starting:data-open:backdrop:opacity-0'
             ]
-            DrawerTitle class: 'sr-only', 'Navigation'
+            Drawer.Title class: 'sr-only', 'Navigation'
             Nav
         a href: '/', class: 'flex-1 px-2 text-base font-semibold md:px-0', 'Rip UI'
         button

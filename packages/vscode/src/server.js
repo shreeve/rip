@@ -75,7 +75,7 @@ import {
 } from './translate.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
 import { scopeGateOf, typedExportsOf, typedImportsOf } from './scopes.js';
-import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfig, gitRootFor, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, scanExportNames, stubFacesFromScans, linkNestedNodeModules, configEarnsBoundary, appStashSpecFor, appRoutesFor, closureImportsOf, isStdlibPath, anchorStdlib, identifierRunAt } from './mirror.js';
+import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfig, gitRootFor, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, scanExportNames, stubFacesFromScans, linkNestedNodeModules, configEarnsBoundary, appStashSpecFor, appRoutesFor, closureImportsOf, isStdlibPath, anchorStdlib, identifierRunAt, ripSpecifierTarget, stdlibSpellingOf } from './mirror.js';
 
 // The compiler: in-repo development resolves the repository's src/;
 // the staged .vsix carries a copy at compiler/src/ (scripts/package.js).
@@ -972,6 +972,8 @@ function sourcePathOfMirror(mirrorFsPath) {
 // The enum names a compile declares, read off the binding inventory.
 const enumNamesOf = (result) =>
   (result.bindings ?? []).filter((b) => b.kind === 'enum').map((b) => b.name);
+const namespaceNamesOf = (result) => result.namespaceExports ?? [];
+const componentNamesOf = (result) => result.componentNames ?? [];
 
 function mirrorFromDisk(fsPath, source) {
   faceCache.delete(fsPath);
@@ -1016,6 +1018,8 @@ function mirrorFromDisk(fsPath, source) {
     // manifest written before this field existed is purged wholesale by
     // the cacheIdentity key, which a server change already moves.
     enumNames: enumNamesOf(result),
+    namespaceNames: namespaceNamesOf(result),
+    componentNames: componentNamesOf(result),
   };
   scheduleManifestSave();
   return { mirrorPath, imports };
@@ -1958,6 +1962,8 @@ async function refresh(document) {
     // cannot compute it from their own compile. An open buffer answers
     // from here; a disk file from its manifest entry.
     enumNames: enumNamesOf(result),
+    namespaceNames: namespaceNamesOf(result),
+    componentNames: componentNamesOf(result),
     // Generated spans of references to imported names, each with its
     // module — the editor resolves the specifier and asks that module
     // what kind the name is (see ripSemanticTokens).
@@ -1970,6 +1976,7 @@ async function refresh(document) {
     // compiler's own record — the tag word and the `ref` channel word
     // (RULINGS.md, the render rows; see the hover handler).
     intrinsics: result.intrinsics ?? [],
+    componentUses: result.componentUses ?? [],
     // SOURCE spans where hover may answer at all — the positive model
     // (hoverableSpans, translate.js): the author's own symbol tokens,
     // annotations, and import specifiers; every other byte declines.
@@ -2048,6 +2055,8 @@ async function refresh(document) {
           // the entry has to carry the names too, or closing this buffer
           // leaves importers uncorrected until the file next changes.
           enumNames: enumNamesOf(result),
+          namespaceNames: namespaceNamesOf(result),
+          componentNames: componentNamesOf(result),
         };
         scheduleManifestSave();
       }
@@ -3100,7 +3109,7 @@ function componentPropsAt(flat, open) {
     // Under `extends <Component>` the host's surface rides one group of
     // its own, the host's construction props less the declared keys; it
     // is the head's `extends`, and none of its rows are this component's.
-    const host = /^NonNullable<ConstructorParameters<typeof ([A-Za-z_$][\w$]*)>\[0\]>/.exec(flat.slice(at + 4, groupEnd));
+    const host = /^NonNullable<ConstructorParameters<typeof ([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)>\[0\]>/.exec(flat.slice(at + 4, groupEnd));
     if (host !== null) {
       extendsTag.tag = host[1];
       at = groupEnd + 1;
@@ -3481,6 +3490,7 @@ connection.onHover(presented('textDocument/hover', async (params) => {
   contents = presentComponentSignatureHover(contents) ?? contents;
   const atPropKey = (ctx.good.renderPairs ?? []).some((p) => ctx.offset >= p.key[0] && ctx.offset < p.key[1]);
   contents = presentPropSlotHover(contents, atPropKey) ?? contents;
+  contents = presentModuleAliasHover(ctx, contents) ?? contents;
   // The declaration's own kind. tsgo names the CELL the lowering binds
   // (`const count: number`), which describes the emission and not the
   // construct the author declared — the same leak the token audit refuses
@@ -4479,6 +4489,42 @@ function declaresEnum(fromDir, specifier, name) {
   return (cacheManifest.entries[abs]?.enumNames ?? []).includes(name);
 }
 
+// What the module `specifier` names, relative or stdlib, records `name`
+// as: 'namespace' (`export * as name`), 'component', or null. Answered as
+// declaresEnum is: an open buffer from its last good compile, a disk
+// file from its manifest entry.
+function importedKindOf(fromDir, specifier, name) {
+  if (fromDir === null) return null;
+  const abs = ripSpecifierTarget(specifier, fromDir);
+  if (abs === null) return null;
+  const record = states.get('file://' + abs)?.lastGood ?? cacheManifest.entries[abs] ?? null;
+  if (record === null) return null;
+  if ((record.namespaceNames ?? []).includes(name)) return 'namespace';
+  if ((record.componentNames ?? []).includes(name)) return 'component';
+  return null;
+}
+
+// tsgo spells a module alias by its mirror path; the mirror never surfaces,
+// so the module reads as the stdlib name or a path relative to the file.
+function presentModuleAliasHover(ctx, contents) {
+  const value = contents?.value;
+  if (typeof value !== 'string') return null;
+  const m = /^(```(?:typescript|ts)\n\(alias\) module ")([^"\n]+)("\n)/.exec(value);
+  // A name that is not a relative path is already the author's spelling
+  // (a stdlib name resolved by the tsconfig's own map).
+  if (!m || ctx.good.dir === null || !/^\.\.?\//.test(m[2])) return null;
+  let mirrorFile;
+  try { mirrorFile = fileURLToPath(ctx.state.tsUri); } catch { return null; }
+  const source = sourcePathOfMirror(path.resolve(path.dirname(mirrorFile), `${m[2]}.ts`));
+  if (source === null) return null;
+  let spelled = stdlibSpellingOf(source);
+  if (spelled === null) {
+    spelled = path.relative(ctx.good.dir, source).split(path.sep).join('/');
+    if (!spelled.startsWith('.')) spelled = `./${spelled}`;
+  }
+  return { ...contents, value: `${m[1]}${spelled}${m[3]}${value.slice(m[0].length)}` };
+}
+
 function ripSemanticTokens(ctx, data) {
   const mapSpan = exactSpanMapper(ctx.good.mappings);
   const roIndex = semanticTokensLegend?.tokenModifiers?.indexOf('readonly') ?? -1;
@@ -4526,7 +4572,23 @@ function ripSemanticTokens(ctx, data) {
   // which references are imports and from where; the module answers.
   // Only `./`-relative `.rip` specifiers resolve, matching the closure's
   // own rule (mirror.js): a package import is TypeScript's to classify.
-  for (const [genStart, , importedName, specifier] of (ctx.good.importedRefs ?? [])) {
+  // tsgo emits no token on an import line, nor for a binding that resolves
+  // to a module (the classifier has no word for a source file). TypeScript's
+  // own convention stands: a name on an import line is `variable`, one
+  // color whatever it names, and a READ takes its kind — for a module
+  // namespace (`export * as`) or a component, what the declaring module's
+  // record says. The one correction that ADDS tokens, and only at spans
+  // the compiler recorded as the binding's.
+  const namespaceType = semanticTokensLegend?.tokenTypes?.indexOf('namespace') ?? -1;
+  const silentRefs = []; // [genStart, genEnd, type] — tokens to add where tsgo emitted none
+  for (const [genStart, genEnd, importedName, specifier, site] of (ctx.good.importedRefs ?? [])) {
+    if (site === 'declaration') {
+      if (variableType >= 0) silentRefs.push([genStart, genEnd, variableType]);
+      continue;
+    }
+    const kind = importedName === '*' ? 'namespace' : importedKindOf(ctx.good.dir, specifier, importedName);
+    if (kind === 'namespace' && namespaceType >= 0) { silentRefs.push([genStart, genEnd, namespaceType]); continue; }
+    if (kind === 'component' && classType >= 0) { silentRefs.push([genStart, genEnd, classType]); continue; }
     if (declaresEnum(ctx.good.dir, specifier, importedName)) enumStarts.add(genStart);
   }
   const tokens = new Map(); // start → { start, length, type, modifiers }
@@ -4567,6 +4629,20 @@ function ripSemanticTokens(ctx, data) {
     } else if (!existing) {
       tokens.set(key, { start: curStart, length, type, modifiers });
     }
+  }
+  // A fresh mapper: the one above has walked past the import lines, and
+  // it answers in ascending order only. A recorded name has an exact row,
+  // so nothing falls back.
+  const mapSilent = exactSpanMapper(ctx.good.mappings);
+  for (const [genStart, genEnd, type] of silentRefs.sort((a, b) => a[0] - b[0])) {
+    const length = genEnd - genStart;
+    const srcStart = mapSilent(genStart, genEnd);
+    if (srcStart === null) continue;
+    const curStart = ctx.align.toCurrent(srcStart);
+    const curEnd = ctx.align.toCurrent(srcStart + length, { exclusiveEnd: true });
+    if (curStart === null || curEnd !== curStart + length) continue;
+    const key = curStart * 0x100000 + length;
+    if (!tokens.has(key)) tokens.set(key, { start: curStart, length, type, modifiers: 0 });
   }
   const builder = new SemanticTokensBuilder();
   for (const t of [...tokens.values()].sort((a, b) => a.start - b.start)) {

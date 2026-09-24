@@ -1,33 +1,32 @@
-import type { MenuAlign, MenuSide } from 'rip/ui'
-import { Dialog, DialogClose, DialogPopup, DialogTitle, DialogTrigger, Menu, MenuItem, MenuLink, MenuPopup, MenuTrigger } from 'rip/ui'
+import { Dialog, Menu } from 'rip/ui'
 import { COMPONENTS } from '../components.rip'
 
 export MenuPage = component
   open := false
   selected := ''
-  side: MenuSide := 'bottom'
-  align: MenuAlign := 'start'
+  side: Menu.Side := 'bottom'
+  align: Menu.Align := 'start'
   render
     div class: 'mx-auto max-w-2xl px-5 py-8 md:px-8 md:py-10'
       h1 class: 'text-2xl font-semibold', COMPONENTS.menu.name
       p class: 'mt-2 text-secondary', COMPONENTS.menu.description
 
       div class: 'mt-8 flex items-center justify-center rounded-xl border border-surface bg-surface py-16'
-        Menu open <=> open
-          MenuTrigger
+        Menu.Root open <=> open
+          Menu.Trigger
             class: 'rounded-lg border border-transparent bg-accent px-3 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover active:bg-accent-active'
             'Open Menu'
-          MenuPopup
+          Menu.Popup
             side: side
             align: align
             sideOffset: 6
             class: [
-              'w-56 origin-(--transform-origin) scale-95 rounded-xl border border-surface bg-surface p-1 opacity-0 shadow-xl transition transition-discrete duration-150 ease-dialog outline-none'
+              'w-56 origin-(--transform-origin) scale-95 rounded-xl border border-surface bg-surface p-1 opacity-0 shadow-lg/6 transition transition-discrete duration-150 ease-dialog outline-none'
               'data-open:scale-100 data-open:opacity-100 data-open:duration-250 starting:data-open:scale-95 starting:data-open:opacity-0'
             ]
-            MenuLink href: '/dialog', class: 'flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-secondary outline-none focus:bg-surface-hover focus:text-primary', 'Dialog'
-            MenuItem class: 'flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-secondary outline-none focus:bg-surface-hover focus:text-primary', @click: (-> selected = 'Settings'), 'Settings'
-            MenuItem class: 'flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-secondary outline-none focus:bg-surface-hover focus:text-primary', @click: (-> selected = 'Sign Out'), 'Sign Out'
+            Menu.Link href: '/dialog', class: 'flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-secondary outline-none focus:bg-surface-hover focus:text-primary', 'Dialog'
+            Menu.Item class: 'flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-secondary outline-none focus:bg-surface-hover focus:text-primary', @click: (-> selected = 'Settings'), 'Settings'
+            Menu.Item class: 'flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-secondary outline-none focus:bg-surface-hover focus:text-primary', @click: (-> selected = 'Sign Out'), 'Sign Out'
 
       section class: 'mt-8 rounded-xl border border-surface bg-surface p-5'
         h2 class: 'text-xs-plus font-medium text-tertiary', 'Parent'
@@ -45,7 +44,7 @@ export MenuPage = component
         h2 class: 'text-xs-plus font-medium text-tertiary', 'Placement'
         p class: 'mt-2 text-sm text-secondary', 'The page passes side, align, and sideOffset to the popup. The browser flips the side when the popup does not fit, and the popup says where it landed in data-side.'
         div class: 'mt-4 flex flex-wrap items-center gap-2'
-          for option in ['bottom', 'top', 'left', 'right'] as MenuSide[]
+          for option in ['bottom', 'top', 'left', 'right'] as Menu.Side[]
             button
               type: 'button'
               aria-pressed: if side is option then 'true' else 'false'
@@ -53,7 +52,7 @@ export MenuPage = component
               @click: (-> side = option)
               "side: #{option}"
         div class: 'mt-2 flex flex-wrap items-center gap-2'
-          for option in ['start', 'center', 'end'] as MenuAlign[]
+          for option in ['start', 'center', 'end'] as Menu.Align[]
             button
               type: 'button'
               aria-pressed: if align is option then 'true' else 'false'
@@ -65,30 +64,30 @@ export MenuPage = component
         h2 class: 'text-xs-plus font-medium text-tertiary', 'Inside a dialog'
         p class: 'mt-2 text-sm text-secondary', 'A menu rendered inside a modal dialog opens in the top layer above it, and Escape closes the menu before the dialog.'
         div class: 'mt-4'
-          Dialog
-            DialogTrigger
+          Dialog.Root
+            Dialog.Trigger
               class: 'rounded-lg border border-input bg-input px-3 py-2 text-sm font-medium text-secondary hover:bg-input-hover active:bg-input-active'
               'Open Dialog'
-            DialogPopup
+            Dialog.Popup
               class: [
                 'm-auto w-96 scale-95 rounded-xl bg-surface p-6 opacity-0 shadow-xl transition-[opacity,scale] duration-150 ease-dialog'
                 'data-open:duration-250 data-open:scale-100 data-open:opacity-100 starting:data-open:scale-95 starting:data-open:opacity-0'
                 'backdrop:bg-backdrop backdrop:opacity-0 backdrop:duration-150 backdrop:ease-dialog data-open:backdrop:duration-250 data-open:backdrop:opacity-100 starting:data-open:backdrop:opacity-0'
               ]
-              DialogTitle class: 'text-lg font-semibold', 'Account'
+              Dialog.Title class: 'text-lg font-semibold', 'Account'
               div class: 'mt-6 flex items-center justify-between'
-                Menu
-                  MenuTrigger
+                Menu.Root
+                  Menu.Trigger
                     class: 'rounded-lg border border-input bg-input px-3 py-2 text-sm font-medium text-secondary hover:bg-input-hover active:bg-input-active'
                     'Open Inner Menu'
-                  MenuPopup
+                  Menu.Popup
                     sideOffset: 6
                     class: [
-                      'w-56 origin-(--transform-origin) scale-95 rounded-xl border border-surface bg-surface p-1 opacity-0 shadow-xl transition transition-discrete duration-150 ease-dialog outline-none'
+                      'w-56 origin-(--transform-origin) scale-95 rounded-xl border border-surface bg-surface p-1 opacity-0 shadow-lg/6 transition transition-discrete duration-150 ease-dialog outline-none'
                       'data-open:scale-100 data-open:opacity-100 data-open:duration-250 starting:data-open:scale-95 starting:data-open:opacity-0'
                     ]
-                    MenuItem class: 'flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-secondary outline-none focus:bg-surface-hover focus:text-primary', @click: (-> selected = 'Inner Settings'), 'Inner Settings'
-                    MenuItem class: 'flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-secondary outline-none focus:bg-surface-hover focus:text-primary', @click: (-> selected = 'Inner Sign Out'), 'Inner Sign Out'
-                DialogClose
+                    Menu.Item class: 'flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-secondary outline-none focus:bg-surface-hover focus:text-primary', @click: (-> selected = 'Inner Settings'), 'Inner Settings'
+                    Menu.Item class: 'flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-secondary outline-none focus:bg-surface-hover focus:text-primary', @click: (-> selected = 'Inner Sign Out'), 'Inner Sign Out'
+                Dialog.Close
                   class: 'rounded-lg border border-transparent bg-accent px-3 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover active:bg-accent-active'
                   'Close'

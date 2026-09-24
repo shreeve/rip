@@ -365,6 +365,12 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // symbol) and the `ref` channel word, each carrying the tag, its
     // namespace, and for `ref` the cell's name. TS face only.
     intrinsics: emitted.intrinsics ?? [],
+    // SOURCE span and spelling of every component tag's constructor reference.
+    componentUses: emitted.componentUses ?? [],
+    // The names this module publishes as namespaces (`export * as X`).
+    namespaceExports: emitted.namespaceExports ?? [],
+    // The module-scope component bindings.
+    componentNames: emitted.componentNames ?? [],
     // Generated spans of every reference to an IMPORTED binding, each with
     // its original exported name and module. One file's compile cannot
     // know an imported name's kind — the editor resolves the specifier and

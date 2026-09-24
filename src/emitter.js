@@ -28,6 +28,7 @@ import { tagPostfixConditionals } from './lexer.js';
 import { rewriteTypes } from './types.js';
 import { identifierRunAt, isIdentifierName } from './ident.js';
 import { implicitBlocks, implicitObjects, implicitCalls } from './implicit.js';
+import { isComponentName, componentPathText, memberPathText, componentPathRoot } from './render.js';
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './ts/types.js';
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute, suggestAttribute } from './dom.js';
 import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls, CLSX_TYPE, STYLE_FN_TYPE } from './ts/dom-types.js';
@@ -369,7 +370,6 @@ const isBlock = (x) => isNode(x) && x[0] === 'block';
 // letter distinguishes `Counter` from ALLCAPS constants) are
 // component references.
 const isHtmlTag = (name) => TEMPLATE_TAGS.has(String(name).split('#')[0]);
-const isComponentName = (name) => typeof name === 'string' && /^[A-Z][A-Za-z0-9]*[a-z][A-Za-z0-9]*$/.test(name);
 // A REAL comprehension node — the loop-spec list (a plain array of
 // ['for-…'] arrays) is a shape no user call constructs; a call of a
 // function NAMED comprehension must keep its call reading everywhere.
@@ -416,6 +416,8 @@ export function resolveEnumMembers(items) {
     return { item, name: null, value: undefined };
   });
 }
+
+export const bareSpecifier = (s) => String(s).replace(/^['"`]|['"`]$/g, '');
 
 export function moduleSourceText(s) {
   const inner = String(s).slice(1, -1).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -526,6 +528,18 @@ class Emitter {
     // row carries what the served answer is built from — the tag, its
     // namespace, and for `ref` the cell's name. TS face only.
     this.intrinsics = [];
+    // SOURCE span and spelling of every component tag's constructor
+    // reference, where a construction of a non-component reports
+    // (mapTsDiagnostic). TS face only.
+    this.componentUses = [];
+    // The names this module publishes with `export * as`: tsgo emits no
+    // token for a binding that resolves to a module, so an importer's
+    // editor colors it from this record.
+    this.namespaceExports = [];
+    // The module-scope component bindings, for the same reason: tsgo emits
+    // no token for an import specifier, so an importer's editor colors an
+    // imported component from this record.
+    this.componentNames = [];
     // Per render pair: the key's and the pair's SOURCE spans, and the
     // road's relation sites in GENERATED coordinates — the diagnostics
     // road's anchor table (WHERE A PAIR'S DIAGNOSTIC LANDS, below).
@@ -2679,7 +2693,7 @@ class Emitter {
     const id = this.stores.idOf(s.node);
     const r = id !== null ? this.stores.role(id, 'annotation') : null;
     const src = r?.sourceStart != null && this.b.source !== null ? this.b.source.slice(r.sourceStart, r.sourceEnd) : null;
-    if (src === null || s.text.includes(src)) { this.b.emit(s.text); return; }
+    if (src === null || s.text.includes(src)) { this.noteImportedTypeWords(s.text); return; }
     const words = new Map();
     for (const m of src.matchAll(/[A-Za-z_$][\w$]*/g)) if (!words.has(m[0])) words.set(m[0], [r.sourceStart + m.index, r.sourceStart + m.index + m[0].length]);
     let cursor = 0;
@@ -2687,10 +2701,29 @@ class Emitter {
       const at = words.get(m[0]);
       if (!at) continue;
       this.b.emit(s.text.slice(cursor, m.index));
-      this.b.markSpan(id, 'identifier', at[0], at[1], () => this.b.emit(m[0]));
+      this.b.markSpan(id, 'identifier', at[0], at[1], () => this.noteImportedTypeWords(m[0]));
       cursor = m.index + m[0].length;
     }
     this.b.emit(s.text.slice(cursor));
+  }
+
+  // Type text whose words that ROOT a path and name an import join the
+  // imported-reference channel: an annotation's words are reads whatever
+  // line declares around them, and a qualifier there (`Dialog.ClosedBy`)
+  // colors as the namespace it is only through that record.
+  noteImportedTypeWords(text) {
+    const was = this.declaringName;
+    this.declaringName = false;
+    try {
+      let at = 0;
+      for (const token of typeIdentifierTokens(text)) {
+        if ((token.start > 0 && text[token.start - 1] === '.') || this.importSpecOf(token.value) === null) continue;
+        this.b.emit(text.slice(at, token.start));
+        this.noteNameSpan(token.value);
+        at = token.end;
+      }
+      this.b.emit(text.slice(at));
+    } finally { this.declaringName = was; }
   }
 
   // TS-only member declares at the class top: one `declare name: T;`
@@ -2759,7 +2792,13 @@ class Emitter {
       line(() => {
         this.b.emit('private static __ripHost() { return new ');
         if (info.hostSpan !== null && info.hostNodeId !== null) {
-          this.b.markSpan(info.hostNodeId, 'identifier', info.hostSpan[0], info.hostSpan[1], () => this.b.emit(info.extendsComponent));
+          let at = info.hostSpan[0];
+          info.extendsComponent.split('.').forEach((seg, i) => {
+            if (i > 0) { this.b.emit('.'); at += 1; }
+            const start = at;
+            at += seg.length;
+            this.b.markSpan(info.hostNodeId, 'identifier', start, at, () => (i === 0 ? this.noteNameSpan(seg) : this.b.emit(seg)));
+          });
         } else {
           this.b.emit(info.extendsComponent);
         }
@@ -5015,7 +5054,7 @@ class Emitter {
   // would have to reference for the import to be needed at runtime.
   static specifierLocal(s) { return isNode(s) ? s[1] : s; }
 
-  emitSpecifiers(list) {
+  emitSpecifiers(list, specifier = null) {
     // A type-only name stays in the FACE — it is a real type there, and
     // dropping it would strand every annotation that uses it — but never
     // reaches the JS, where importing a name the module does not export
@@ -5026,12 +5065,30 @@ class Emitter {
     let erased = 0;
     list.forEach((s) => {
       const gone = this.typeOnlyImports.has(Emitter.specifierLocal(s));
+      // The declaration joins the imported-reference channel, marked as one:
+      // the editor colors an import line uniformly, and a read by kind.
+      const note = (start, imported) => {
+        if (this.ts && specifier !== null) this.importedRefs.push([start, this.b.offset, imported, specifier, 'declaration']);
+      };
+      // The names are declarations, never reads: an import statement
+      // emitted after other statements would otherwise record its local as
+      // a reference to itself.
       const one = () => {
-        if (isNode(s)) {
-          this.emitPrimitive(s[0]);
-          this.b.emit(' as ');
-          this.emitPrimitive(s[1]);
-        } else this.emitPrimitive(s);
+        const was = this.declaringName;
+        this.declaringName = true;
+        try {
+          if (isNode(s)) {
+            this.emitPrimitive(s[0]);
+            this.b.emit(' as ');
+            const start = this.b.offset;
+            this.emitPrimitive(s[1]);
+            note(start, s[0]);
+          } else {
+            const start = this.b.offset;
+            this.emitPrimitive(s);
+            note(start, s);
+          }
+        } finally { this.declaringName = was; }
       };
       if (gone) {
         if (!this.ts) return;                  // the shipping emission: gone
@@ -5071,10 +5128,17 @@ class Emitter {
       const emitSpec = (fn) => (role === null ? fn() : this.mark(node, role, fn));
       if (spec === '{}') this.b.emit('{}');
       else if (typeof spec === 'string') emitSpec(() => this.b.emit(spec));
-      else if (spec[0] === '*') emitSpec(() => this.b.emit(`* as ${spec[1]}`));
+      else if (spec[0] === '*') {
+        emitSpec(() => {
+          this.b.emit('* as ');
+          const start = this.b.offset;
+          this.b.emit(spec[1]);
+          if (this.ts && node !== null) this.importedRefs.push([start, this.b.offset, '*', bareSpecifier(node[node.length - 1]), 'declaration']);
+        });
+      }
       else {
         this.b.emit('{ ');
-        emitSpec(() => this.emitSpecifiers(spec));
+        emitSpec(() => this.emitSpecifiers(spec, node !== null ? bareSpecifier(node[node.length - 1]) : null));
         this.b.emit(' }');
       }
     });
@@ -5272,7 +5336,7 @@ class Emitter {
           this.b.emit('export ');
           this.mark(node, 'typeOnly', () => this.b.emit('type'));
           this.b.emit(' { ');
-          this.emitSpecifiers(node[1]);
+          this.emitSpecifiers(node[1], bareSpecifier(node[2]));
           this.b.emit(' } from ');
           const specStart = this.b.offset;
           this.mark(node, 'source', () => this.b.emit(this.moduleSource(node[2])));
@@ -5287,6 +5351,7 @@ class Emitter {
         if (node.length === 3) {
           this.b.emit('export * as ');
           this.mark(node, 'alias', () => this.b.emit(node[2]));
+          this.namespaceExports.push(node[2]);
           this.b.emit(' from ');
         } else {
           this.b.emit('export * from ');
@@ -5302,7 +5367,7 @@ class Emitter {
         if (node[1] === '{}') this.b.emit('{}');
         else {
           this.b.emit('{ ');
-          this.emitSpecifiers(node[1]);
+          this.emitSpecifiers(node[1], bareSpecifier(node[2]));
           this.b.emit(' }');
         }
         this.b.emit(' from ');
@@ -9429,19 +9494,27 @@ class Emitter {
     let extendsTag = null;
     let extendsComponent = null;
     if (parent !== null) {
-      const p = typeof parent === 'string' ? parent : null;
+      const p = typeof parent === 'string' ? parent : memberPathText(parent);
+      const root = p !== null ? componentPathRoot(p) : null;
       if (p !== null && isHtmlTag(p) && !p.includes('#')) {
         extendsTag = p;
-      } else if (p !== null && isComponentName(p) && (this.inScope(p) || this.moduleBound.has(p))) {
+      } else if (p !== null && isComponentName(p.slice(p.lastIndexOf('.') + 1)) && (this.inScope(root) || this.moduleBound.has(root))) {
         if (p === this._componentName) {
           throw this.positionedError(node,
             `emitter: component '${p}' cannot extend itself — the render would construct it without end`);
+        }
+        // The declaration file spells the host through the path, and it
+        // declares imports and components, never a plain value.
+        if (root !== p && this.importSpecOf(root) === null) {
+          throw this.positionedError(node,
+            `emitter: 'component extends ${p}' roots at '${root}', a binding of this module — a host named through a ` +
+            'path must root at an import (`import * as Ns …`), since a declaration file spells the host through it');
         }
         extendsComponent = p;
       } else {
         throw this.positionedError(node,
           `emitter: 'component extends' takes an HTML tag or a component bound in this module — rest props forward ` +
-          `onto the first one the render creates; '${typeof parent === 'string' ? parent : '…'}' is neither`);
+          `onto the first one the render creates; '${p ?? '…'}' is neither`);
       }
     }
     const extendsHost = extendsTag ?? extendsComponent;
@@ -9601,14 +9674,23 @@ class Emitter {
             `emitter: accept names its provider — \`accept ${stmt[1]} from <Component>\` reads the nearest ` +
             'ancestor instance of that component', node);
         }
-        const provider = stmt[2];
-        if (!(isComponentName(provider) && (this.inScope(provider) || this.moduleBound.has(provider)))) {
+        const provider = typeof stmt[2] === 'string' ? stmt[2] : memberPathText(stmt[2]);
+        const root = provider !== null ? componentPathRoot(provider) : null;
+        if (!(provider !== null && isComponentName(provider.slice(provider.lastIndexOf('.') + 1)) &&
+              (this.inScope(root) || this.moduleBound.has(root)))) {
           throw this.positionedError(stmt,
-            `emitter: accept reads from a component bound in this module — '${provider}' is not one`, node);
+            `emitter: accept reads from a component bound in this module — '${provider ?? '…'}' is not one`, node);
+        }
+        // As a host's: the declaration file spells the member through the path.
+        if (root !== provider && this.importSpecOf(root) === null) {
+          throw this.positionedError(stmt,
+            `emitter: accept reads from '${provider}', which roots at '${root}', a binding of this module — a provider ` +
+            'named through a path must root at an import (`import * as Ns …`), since a declaration file spells the ' +
+            'member through it', node);
         }
         declare(stmt[1], 'accept', stmt, true);
         acceptedVars.push(stmt[1]);
-        acceptProviders.set(stmt[1], provider);
+        acceptProviders.set(stmt[1], stmt[2]);
         return;
       }
       if (this.isGateDecl(stmt)) {
@@ -9976,6 +10058,7 @@ class Emitter {
         else this.b.emit(`'${extendsComponent}'`);
         this.b.emit(';\n');
       }
+      if (this.scopes.length === 1 && typeof this._componentName === 'string') this.componentNames.push(this._componentName);
       // HMR identity/signature — module-scope named components only.
       // Gated on `hmr`: off keeps production bytes unchanged.
       if (this.hmr && this.modulePath && this.scopes.length === 1 && typeof this._componentName === 'string') {
@@ -10100,7 +10183,11 @@ class Emitter {
           // wrote after `from`, so the name there hovers, defines, renames,
           // and colors as the component it names.
           this.b.emit(` = ${this.runtimeName('getContext')}(`);
-          this.mark(stmt, 'provider', () => this.noteNameSpan(acceptProviders.get(name)));
+          this.mark(stmt, 'provider', () => {
+            const provider = acceptProviders.get(name);
+            if (typeof provider === 'string') this.noteNameSpan(provider);
+            else this.expr(provider);
+          });
           this.b.emit(`, '${name}')`);
         });
       };
@@ -10953,6 +11040,11 @@ class Emitter {
         `emitter: bare \`@${sexpr[2]}\` is not rendered as text — use \`= @${sexpr[2]}\` to render it`);
     }
 
+    const memberTag = componentPathText(sexpr);
+    if (memberTag !== null) return this.renderChildComponent(sexpr, { text: memberTag, node: sexpr }, []);
+    const memberHead = isNode(head) ? componentPathText(head) : null;
+    if (memberHead !== null) return this.renderChildComponent(sexpr, { text: memberHead, node: head }, sexpr.slice(1));
+
     // Tag with classes: `div.card` / `.card` chains. A render local
     // or loop variable shadows the tag reading (`code.value` after
     // `code = obj` reads the local).
@@ -11567,6 +11659,14 @@ class Emitter {
     const R = this.rstate;
     const rec = R.sink;
     const markNode = isNode(node) ? node : null;
+    // A member path arrives as { text, node }: the root resolves as a bare
+    // name does, and the dotted text names the child wherever a name would.
+    const ref = typeof name === 'string' ? null : name;
+    if (ref !== null) name = ref.text;
+    const root = ref !== null ? componentPathRoot(ref.text) : name;
+    const noteUse = (span) => {
+      if (this.ts && span !== null) this.componentUses.push({ start: span[0], end: span[1], name });
+    };
     // The component's own name at a USE site answers: the constructor
     // reference emits it verbatim, so tsgo describes the component's
     // construct signature there, and the editor re-dresses that answer
@@ -11581,20 +11681,32 @@ class Emitter {
     // declaration is usable here
     // placeholder at mount); module bindings and imports emit bare.
     let ctorRef;
-    if (this.renderVarKind(name) !== null) {
-      ctorRef = () => this.emitPrimitive(name);
+    if (ref !== null) {
+      if (this.renderVarKind(root) === null && this.resolveBareRead(root) === null &&
+          !this.inScope(root) && !(this.moduleBound !== undefined && this.moduleBound.has(root))) {
+        throw this.positionedError(markNode ?? node,
+          `emitter: component '${name}' is not defined in this module — a child component's path starts at a module ` +
+          `binding, an import, or a component member, and '${root}' is none of these`, this.rstate.node);
+      }
+      const pathId = this.stores.idOf(ref.node) ?? null;
+      ctorRef = () => {
+        noteUse(pathId !== null ? this.stores.selfSpan(pathId) : null);
+        this.renderExpr(ref.node);
+      };
+    } else if (this.renderVarKind(name) !== null) {
+      ctorRef = () => noteUse(this.emitPrimitive(name));
     } else {
       const r = this.resolveBareRead(name);
       if (r === 'member' || r === 'member-reactive') {
         ctorRef = () => {
           this.b.emit(`${this.renderSelf ?? 'this'}.`);
-          this.emitPrimitive(name);
+          noteUse(this.emitPrimitive(name));
           if (r === 'member-reactive') this.b.emit('.value');
         };
       } else if (r === 'reactive') {
-        ctorRef = () => { this.emitPrimitive(name); this.b.emit('.value'); };
+        ctorRef = () => { noteUse(this.emitPrimitive(name)); this.b.emit('.value'); };
       } else if (this.inScope(name) || (this.moduleBound !== undefined && this.moduleBound.has(name))) {
-        ctorRef = () => this.emitPrimitive(name);
+        ctorRef = () => noteUse(this.emitPrimitive(name));
       } else {
         throw this.positionedError(markNode ?? node,
           `emitter: component '${name}' is not defined in this module — a child component must be a module binding, ` +
@@ -11613,7 +11725,7 @@ class Emitter {
     // own keys, and bound as the instance later rest writes route
     // through (the fixed bindInheritedTarget rule, for a part).
     const isHost = R.frame.extendsComponent === name && rec.kind === 'class' && R.frame.inheritedBound !== true &&
-      this.renderVarKind(name) === null && this.resolveBareRead(name) === null;
+      this.renderVarKind(root) === null && this.resolveBareRead(root) === null;
     if (isHost) R.frame.inheritedBound = true;
 
     // ── The argument walk: props, event bindings, children ──
@@ -19253,7 +19365,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // was written (reactiveDecl) rather than reconstructed by scanning rows: the
   // emitter knows the offset as it emits, so no lookup, and no ambiguity about
   // which row is the name's.
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, componentUses: emitter.componentUses, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

@@ -66,6 +66,7 @@ const REGION_SHAPES = [
   new RegExp(String.raw`^${ID}(: \S[^;]*)?;$`, 'su'),      // the field a promoted param or a constructor-body `@x =` declares (bare when the assignment's own inference is the honest type)
   /^\[key: `_\$\{string\}`\]: any;$/u,                    // the component slot-namespace index signature (M12-E)
   /^private$/u,                                            // the lowering's own methods (_init/_create/_setup), no consumer's surface
+  new RegExp(String.raw`^private static __ripHost\(\) \{ return new ${ID}(\.${ID})*\(null!\); \}$`, 'u'), // the extends host referenced under the head's own bytes, a bare name or a member path
   /^constructor\(props\??: \{ .*\{ super\(props\); \}$/su, // the component props ctor (M12-E)
   /^as any\)?$/u,                                          // scaffold/handler quieting casts (M12-E)
   /^\) as any$/u,                                          // handler cast's TS-only close (arrow-safe grouping)
@@ -437,6 +438,7 @@ describe('scratch captures leave no trace in the real emission', () => {
     expect(faced.importedRefs.map(([start, end, importedName, specifier]) => ({
       localText: faced.code.slice(start, end), importedName, specifier,
     }))).toEqual([
+      { localText: 'Shade', importedName: 'Color', specifier: './colors.rip' },
       { localText: 'Shade', importedName: 'Color', specifier: './colors.rip' },
     ]);
   });
@@ -1442,6 +1444,28 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
  '  offer theme := "dark"',
  '',
   ].join('\n');
+
+  test('a component named through a member path: the accept indexes the provider through it, the host is referenced through it, and every tag records its site', () => {
+    const src = [
+      "import * as Ns from './ns.rip'",
+      'Root = component',
+      '  offer open := false',
+      '  render',
+      '    slot',
+      'Part = component extends Ns.Root',
+      '  accept open from Ns.Root',
+      '  render',
+      '    Ns.Root',
+      '      Root',
+      '',
+    ].join('\n');
+    const r = ts(src);
+    expect(r.code).toContain("declare open: NonNullable<InstanceType<typeof Ns.Root>['__offers']>['open'];");
+    expect(r.code).toContain('private static __ripHost() { return new Ns.Root(null!); }');
+    const uses = r.componentUses.map((u) => [src.slice(u.start, u.end), u.name]);
+    expect(uses).toEqual([['Ns.Root', 'Ns.Root'], ['Root', 'Root']]);
+    expect(compile(src, { runtimeDelivery: 'none' }).componentUses).toEqual([]);
+  });
 
   test('every member kind declares: state/prop containers, computed readonly, readonly/plain/accept raw', () => {
     const code = ts(FIXTURE).code;

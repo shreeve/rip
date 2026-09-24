@@ -1,10 +1,10 @@
 import type { CSSProperties } from 'rip/app'
 
 type Landing = 'popup' | 'first' | 'last'
-export type MenuSide = 'bottom' | 'top' | 'left' | 'right'
-export type MenuAlign = 'start' | 'center' | 'end'
+export type Side = 'bottom' | 'top' | 'left' | 'right'
+export type Align = 'start' | 'center' | 'end'
 
-export Menu = component
+export Root = component
   offer @open := false
   offer triggerId := ''
   offer popupId := ''
@@ -16,12 +16,12 @@ export Menu = component
 # A click toggles through popovertarget, which makes the trigger the
 # popover's invoker: a click on it while open closes instead of
 # light-dismissing and reopening.
-export MenuTrigger = component extends button
-  accept open from Menu
-  accept triggerId from Menu
-  accept popupId from Menu
-  accept anchor from Menu
-  accept landing from Menu
+export Trigger = component extends button
+  accept open from Root
+  accept triggerId from Root
+  accept popupId from Root
+  accept anchor from Root
+  accept landing from Root
   id =! @rest.id ?? mint('trigger')
   ~>
     triggerId = id
@@ -56,14 +56,14 @@ export MenuTrigger = component extends button
 # try rules, which read the offset and the alignment off the popup.
 # Firefox hides a light-dismissed popover at once and the hide is not
 # cancelable, so only a close through the cell waits for the exit.
-export MenuPopup = component extends div
-  accept open from Menu
-  accept triggerId from Menu
-  accept popupId from Menu
-  accept anchor from Menu
-  accept landing from Menu
-  @side: MenuSide := 'bottom'
-  @align: MenuAlign := 'start'
+export Popup = component extends div
+  accept open from Root
+  accept triggerId from Root
+  accept popupId from Root
+  accept anchor from Root
+  accept landing from Root
+  @side: Side := 'bottom'
+  @align: Align := 'start'
   @sideOffset: number := 0
   id =! @rest.id ?? mint('popup')
   el: HTMLDivElement | null := null
@@ -94,12 +94,12 @@ export MenuPopup = component extends div
   # data-open waits for the side too, so an entry transition keyed on it
   # starts with the origin in place, and the side outlives a close until
   # the exit animations end, so the exit keeps it.
-  placed: MenuSide | '' := ''
+  placed: Side | '' := ''
   place =! =>
     popup = el
     return unless popup and popup.matches(':popover-open')
     word = getComputedStyle(popup).positionArea.split(' ').find (w) -> w in FACING
-    placed = (word as MenuSide | undefined) ?? side
+    placed = (word as Side | undefined) ?? side
   moved =! => requestAnimationFrame -> requestAnimationFrame place
   origin ~= FACING[placed or side].origin(ACROSS[align])
 
@@ -188,8 +188,8 @@ export MenuPopup = component extends div
       @keydown: keydown
       slot
 
-export MenuItem = component extends button
-  accept open from Menu
+export Item = component extends button
+  accept open from Root
   render
     button
       type: 'button'
@@ -201,8 +201,8 @@ export MenuItem = component extends button
       slot
 
 # A link activates on Enter and not on Space, so Space clicks it.
-export MenuLink = component extends a
-  accept open from Menu
+export Link = component extends a
+  accept open from Root
 
   space = (e: KeyboardEvent) ->
     return unless e.key is ' '
@@ -243,7 +243,7 @@ FACING = {
   left: { margin: 'marginRight', origin: (a: Across) -> "right #{a.y}" }
   right: { margin: 'marginLeft', origin: (a: Across) -> "left #{a.y}" }
 } as const
-type Across = (typeof ACROSS)[MenuAlign]
+type Across = (typeof ACROSS)[Align]
 
 counter = 0
 mint = (part: string): string -> "rip-menu-#{part}-#{counter += 1}"

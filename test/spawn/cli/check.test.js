@@ -464,6 +464,32 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
   // it as a provider is the miss the runtime throws at mount. Each miss is
   // one report, on the accept's name, in the words the runtime would use,
   // whether or not the component has a companion interface to repeat it.
+  // Under strict only: gradual holds TS7009 with the implicit-any family,
+  // and the runtime reports the failed child at mount.
+  test('a tag that names no component reports on the tag, in rip words, under strict', async () => {
+    const dir = workspace({
+      'app.rip': [
+        'Plain = (props: {}) -> 1',
+        'Menu = { Trigger: (props: {}) -> 1 }',
+        'export Page = component',
+        '  render',
+        '    div',
+        "      Plain class: 'x'",
+        "      Menu.Trigger class: 'x'",
+        '',
+      ].join('\n'),
+    }, { strict: true });
+    try {
+      const { stdout, status } = await check(dir);
+      expect(status).toBe(1);
+      const errors = stdout.split('\n').filter((l) => /^app\.rip:\d+:\d+ - error/.test(l)).map((l) => l.replace(/ - error TS\d+:/, ''));
+      expect(errors).toEqual([
+        "app.rip:6:7 'Plain' is not a component, so it cannot be rendered as one",
+        "app.rip:7:7 'Menu.Trigger' is not a component, so it cannot be rendered as one",
+      ]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   test('an accept is typed from what its provider offers, and a miss names the provider once, on the name', async () => {
     const dir = workspace({
       'app.rip': [

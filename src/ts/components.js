@@ -38,6 +38,7 @@
 
 import { tidyType, normalizeTypeText, renderParams, optionalReader } from './types.js';
 import { attributeNamesFor, BOOLEAN_ATTRS } from '../dom.js';
+import { isComponentName, componentPathText } from '../render.js';
 import { CAMEL, CLASS_TYPE, STYLE_TYPE, CSS_PROPERTIES_TEXT } from './dom-types.js';
 
 // Same spellings as src/emitter.js COMPONENT_HOOKS (emission owns the
@@ -113,6 +114,8 @@ function lineOwnedKeys(stmts, host, isComponent) {
   if (!render || !isBlock(render[1])) return owned;
   const headOf = (n) => {
     if (typeof n === 'string') return n;
+    const path = componentPathText(n);
+    if (path !== null) return path;
     if (isNode(n) && n[0] === '.' && typeof n[1] === 'string') return n[1];
     return null;
   };
@@ -141,12 +144,13 @@ function lineOwnedKeys(stmts, host, isComponent) {
   // on the way down; a construct (if/for/switch) is not descended.
   const walk = (items) => {
     for (const item of items) {
-      const head = headOf(isNode(item) ? item[0] : item);
+      // A bare member path is its own head; a call's head is its callee.
+      const head = headOf(isNode(item) && item[0] !== '.' ? item[0] : item);
       if (head !== null && (isComponent ? head === host : tagOf(head) === host)) {
         if (isNode(item)) keysOf(item);
         return true;
       }
-      if (isNode(item) && head !== null && !/^[A-Z]/.test(tagOf(head) ?? '')) {
+      if (isNode(item) && head !== null && !/^[A-Z]/.test(tagOf(head) ?? '') && componentPathText(item[0]) === null) {
         for (const arg of item.slice(1)) if (isNode(arg) && arg[0] === '->' && isBlock(arg[2]) && walk(arg[2].slice(1))) return true;
       }
     }
@@ -169,7 +173,7 @@ export function componentTypeInfo(stores, source, node, behavior = null, { spell
   // The host: a tag, or a component the render constructs (JS emission
   // has already refused anything else; a component's name is capitalized
   // and no tag's is).
-  const extendsComponent = typeof parent === 'string' && /^[A-Z]/.test(parent) ? parent : null;
+  const extendsComponent = typeof parent === 'string' && /^[A-Z]/.test(parent) ? parent : componentPathText(parent);
   const extendsTag = typeof parent === 'string' && extendsComponent === null ? parent : null;
   const stmts = isBlock(body) ? body.slice(1) : [];
   const members = [];
@@ -210,7 +214,7 @@ export function componentTypeInfo(stores, source, node, behavior = null, { spell
       members.push({
         node: stmt, name: stmt[1], kind: 'accept', isPublic: false,
         optional: false, hasDefault: false, annotation: null,
-        nameNode: stmt, nameRole: 'name', provider: typeof stmt[2] === 'string' ? stmt[2] : null,
+        nameNode: stmt, nameRole: 'name', provider: typeof stmt[2] === 'string' ? stmt[2] : componentPathText(stmt[2]),
       });
       return;
     }
