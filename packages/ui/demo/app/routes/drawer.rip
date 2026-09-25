@@ -27,8 +27,8 @@ export DrawerPage = component
             closedby: closedby
             class: [
               PANEL[side]
-              'bg-surface p-6 shadow-xl transition-[translate] duration-300 ease-drawer data-open:duration-450'
-              'backdrop:bg-backdrop backdrop:opacity-0 backdrop:duration-300 backdrop:ease-drawer data-open:backdrop:duration-450 data-open:backdrop:opacity-100 starting:data-open:backdrop:opacity-0'
+              'bg-surface p-6 shadow-xl transition-[translate] duration-300 ease-out-slow data-open:duration-450'
+              'backdrop:bg-backdrop backdrop:opacity-0 backdrop:duration-300 backdrop:ease-out-slow data-open:backdrop:duration-450 data-open:backdrop:opacity-100 starting:data-open:backdrop:opacity-0'
             ]
             Drawer.Title class: 'text-lg font-semibold', 'Settings'
             Drawer.Description class: 'mt-2 text-secondary', 'Swipe the panel toward its side to dismiss it, or use the button.'

@@ -22,8 +22,8 @@ export MenuPage = component
             align: align
             sideOffset: sideOffset
             class: [
-              'w-56 origin-(--transform-origin) scale-95 rounded-xl border border-surface bg-surface p-1 opacity-0 shadow-lg/6 transition transition-discrete duration-150 ease-dialog outline-none'
-              'data-open:scale-100 data-open:opacity-100 data-open:duration-250 starting:data-open:scale-95 starting:data-open:opacity-0'
+              'w-56 origin-(--transform-origin) scale-95 rounded-xl border border-surface bg-surface p-1 opacity-0 shadow-lg/6 transition transition-discrete duration-100 ease-out-quint outline-none'
+              'data-open:scale-100 data-open:opacity-100 data-open:duration-150 starting:data-open:scale-95 starting:data-open:opacity-0'
             ]
             Menu.Link href: '/dialog', class: ITEM, 'Dialog'
             Menu.Item class: ITEM, @click: (-> selected = 'Settings'), 'Settings'
@@ -50,9 +50,9 @@ export MenuPage = component
             Button variant: 'secondary', 'Open Dialog'
           Dialog.Popup
             class: [
-              'm-auto w-96 scale-95 rounded-xl bg-surface p-6 opacity-0 shadow-xl transition-[opacity,scale] duration-150 ease-dialog'
+              'm-auto w-96 scale-95 rounded-xl bg-surface p-6 opacity-0 shadow-xl transition-[opacity,scale] duration-150 ease-out-quint'
               'data-open:duration-250 data-open:scale-100 data-open:opacity-100 starting:data-open:scale-95 starting:data-open:opacity-0'
-              'backdrop:bg-backdrop backdrop:opacity-0 backdrop:duration-150 backdrop:ease-dialog data-open:backdrop:duration-250 data-open:backdrop:opacity-100 starting:data-open:backdrop:opacity-0'
+              'backdrop:bg-backdrop backdrop:opacity-0 backdrop:duration-150 backdrop:ease-out-quint data-open:backdrop:duration-250 data-open:backdrop:opacity-100 starting:data-open:backdrop:opacity-0'
             ]
             Dialog.Title class: 'text-lg font-semibold', 'Account'
             div class: 'mt-6 flex items-center justify-between'
@@ -62,8 +62,8 @@ export MenuPage = component
                 Menu.Popup
                   sideOffset: 6
                   class: [
-                    'w-56 origin-(--transform-origin) scale-95 rounded-xl border border-surface bg-surface p-1 opacity-0 shadow-lg/6 transition transition-discrete duration-150 ease-dialog outline-none'
-                    'data-open:scale-100 data-open:opacity-100 data-open:duration-250 starting:data-open:scale-95 starting:data-open:opacity-0'
+                    'w-56 origin-(--transform-origin) scale-95 rounded-xl border border-surface bg-surface p-1 opacity-0 shadow-lg/6 transition transition-discrete duration-100 ease-out-quint outline-none'
+                    'data-open:scale-100 data-open:opacity-100 data-open:duration-150 starting:data-open:scale-95 starting:data-open:opacity-0'
                   ]
                   Menu.Item class: ITEM, @click: (-> selected = 'Inner Settings'), 'Inner Settings'
                   Menu.Item class: ITEM, @click: (-> selected = 'Inner Sign Out'), 'Inner Sign Out'

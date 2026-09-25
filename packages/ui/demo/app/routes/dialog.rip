@@ -15,9 +15,9 @@ export DialogPage = component
           Dialog.Popup
             closedby: closedby
             class: [
-              'm-auto w-96 scale-95 rounded-xl bg-surface p-6 opacity-0 shadow-xl transition-[opacity,scale] duration-150 ease-dialog'
+              'm-auto w-96 scale-95 rounded-xl bg-surface p-6 opacity-0 shadow-xl transition-[opacity,scale] duration-150 ease-out-quint'
               'data-open:duration-250 data-open:scale-100 data-open:opacity-100 starting:data-open:scale-95 starting:data-open:opacity-0'
-              'backdrop:bg-backdrop backdrop:opacity-0 backdrop:duration-150 backdrop:ease-dialog data-open:backdrop:duration-250 data-open:backdrop:opacity-100 starting:data-open:backdrop:opacity-0'
+              'backdrop:bg-backdrop backdrop:opacity-0 backdrop:duration-150 backdrop:ease-out-quint data-open:backdrop:duration-250 data-open:backdrop:opacity-100 starting:data-open:backdrop:opacity-0'
             ]
             Dialog.Title class: 'text-lg font-semibold', 'Notifications'
             Dialog.Description class: 'mt-2 text-secondary', 'You are all caught up. Good job!'
