@@ -269,6 +269,15 @@ These are load-bearing invariants, not folklore:
    adopted this one's root rebinds in turn. A patch of an adopting part
    itself keeps the host in place for the same reason: it releases
    without detaching and skips the reinsertion.
+9. **A changed module's importers patch with it.** A parent's `@event`
+   binding on a child component is a listener the parent's own
+   `_create` adds to the child's root, and a child's patch replaces
+   that root. The binding survives a child edit only because the
+   applier patches every module the loader's invalidation walk reaches,
+   the child first and each importer after it, so the parent's rebuild
+   attaches the listener to the new root. A patch of a child alone
+   (`__hmrPatch` on the child instance with its importers untouched)
+   leaves the binding on the detached root.
 
 ---
 
