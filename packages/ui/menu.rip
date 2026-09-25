@@ -100,6 +100,7 @@ export Popup = component extends div
     return unless popup and popup.matches(':popover-open')
     word = getComputedStyle(popup).positionArea.split(' ').find (w) -> w in FACING
     placed = (word as Side | undefined) ?? side
+
   moved =! => requestAnimationFrame -> requestAnimationFrame place
   origin ~= FACING[placed or side].origin(ACROSS[align])
 
@@ -113,7 +114,7 @@ export Popup = component extends div
   # lands inside the show and throws. A close waiting on its animations
   # therefore cannot read the cell to learn of a show begun meanwhile.
   shows = 0
-  before = (e: ToggleEvent) ->
+  onBeforeToggle = (e: ToggleEvent) ->
     if e.newState is 'open'
       shows += 1
       queueMicrotask place
@@ -123,7 +124,8 @@ export Popup = component extends div
       open = false
       removeEventListener('resize', moved)
       document.removeEventListener('scroll', moved, true)
-  after = (e: ToggleEvent) ->
+
+  onToggle = (e: ToggleEvent) ->
     popup = el
     return unless popup
     if e.newState is 'closed'
@@ -183,8 +185,8 @@ export Popup = component extends div
       data-side: placed or undefined
       data-open: if open and placed then true else undefined
       data-closed: not open or undefined
-      @beforetoggle: before
-      @toggle: after
+      @beforetoggle: onBeforeToggle
+      @toggle: onToggle
       @keydown: keydown
       slot
 
