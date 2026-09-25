@@ -28,7 +28,7 @@ import { tagPostfixConditionals } from './lexer.js';
 import { rewriteTypes } from './types.js';
 import { identifierRunAt, isIdentifierName } from './ident.js';
 import { implicitBlocks, implicitObjects, implicitCalls } from './implicit.js';
-import { isComponentName, componentPathText, memberPathText, componentPathRoot } from './render.js';
+import { isComponentName, componentPathText, memberPathText, componentPathRoot, restReadKeys } from './render.js';
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './ts/types.js';
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute, suggestAttribute } from './dom.js';
 import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls, CLSX_TYPE, STYLE_FN_TYPE } from './ts/dom-types.js';
@@ -9949,7 +9949,10 @@ class Emitter {
     // The provided `rest` view is no declared member, but its reads mint a
     // kind of their own: `(rest)`, the view of the undeclared caller props.
     if (extendsHost !== null) memberKinds.set('rest', { label: 'rest', optional: false });
-    const frame = { members, memberReactive, memberKinds, name: this._componentName, extendsTag, extendsComponent, plainWrites: new Map(), renderPlainReads: new Set() };
+    // The keys the body reads back through `@rest`: a read of `class`
+    // or `style` takes that key out of the host line's automatic merge.
+    const restReads = extendsHost !== null ? restReadKeys(stmts) : new Set();
+    const frame = { members, memberReactive, memberKinds, name: this._componentName, extendsTag, extendsComponent, restReads, plainWrites: new Map(), renderPlainReads: new Set() };
     const ind = this.ind;
     const pad = '  '.repeat(ind + 1);
     const ipad = pad + '  ';
@@ -11164,16 +11167,67 @@ class Emitter {
   // A key the element's own line sets is the line's: rest never
   // writes it, at mount or on a later update, as under a component
   // host. Listeners are not keys here — the line's and the caller's
-  // both run.
+  // both run. `class` and `style` merge instead (mergesRestKey).
   isInheritedTarget(tag) {
     const R = this.rstate;
     return R.frame.extendsTag === tag && R.sink.kind === 'class' && R.frame.inheritedBound !== true;
+  }
+
+  // On the inherited element, the line's `class` and `style` merge with
+  // the caller's unless the body reads that key back through `@rest`,
+  // which makes the key the author's: their list or object decides.
+  // Automatic mode ends the line's class write with the rest view's
+  // `class` read and merges the caller's style by key through the
+  // runtime, as an effect either way, since the caller's value may be
+  // reactive or arrive through `_updateProp` (a rest write touches the
+  // view). The key stays in `_inheritedOwn`: rest never writes it on
+  // its own road, so the element has one class writer and one style
+  // writer.
+  mergesRestKey(el, key) {
+    const R = this.rstate;
+    return R.frame.extendsTag !== null && R.frame.inheritedEl === el && !R.frame.restReads.has(key);
+  }
+
+  // The rest view's read of a merging key, as `@rest.<key>` lowers it.
+  emitRestRead(key) {
+    this.b.emit(`${this.renderSelf ?? 'this'}.rest.value.${key}`);
+  }
+
+  // Under `extends <Component>`, the same two keys merge on the value
+  // the host line passes down: `class` becomes `[line, @rest.class]`
+  // and `style` the runtime merge of the line's object with the
+  // caller's, and the host then merges that one value with its own line
+  // as it does any caller's. The value snapshots and re-pushes through
+  // the updater effect, since the rest read is reactive; a container
+  // never passes here, as the merge would hold it unread inside a list.
+  // Answers which merge the key takes, or null.
+  hostMergeKey(cleanKey) {
+    const R = this.rstate;
+    if (R.frame.extendsComponent === null) return null;
+    if (cleanKey === 'class' || cleanKey === 'className') return R.frame.restReads.has('class') ? null : 'class';
+    if (cleanKey === 'style') return R.frame.restReads.has('style') ? null : 'style';
+    return null;
+  }
+
+  emitHostMerge(merge, value) {
+    if (merge === 'class') {
+      this.b.emit('[');
+      this.renderExpr(value);
+      this.b.emit(', ');
+      this.emitRestRead('class');
+      this.b.emit(']');
+    } else {
+      this.b.emit(`${this.renderSelf ?? 'this'}._mergeRestStyle(`);
+      this.renderExpr(value);
+      this.b.emit(')');
+    }
   }
 
   bindInheritedTarget(node, tag, el, own) {
     const R = this.rstate;
     if (!this.isInheritedTarget(tag)) return;
     R.frame.inheritedBound = true;
+    R.frame.inheritedEl = el;
     this.renderLine(node, () => this.b.emit(`this._inheritedEl = ${el}`));
     if (own.length > 0) {
       this.renderLine(node, () => this.b.emit(`this._inheritedOwn = new Set([${own.map((k) => JSON.stringify(k)).join(', ')}])`));
@@ -11277,6 +11331,7 @@ class Emitter {
     this.renderChildren(el, args, node);
     if (isSvg) R.svgDepth--;
     if (classes.length > 0) {
+      if (this.mergesRestKey(el, 'class')) R.pendingClassArgs.push(() => this.emitRestRead('class'));
       if (R.pendingClassArgs.length === 1) {
         this.renderLine(node, () => this.b.emit(isSvg
           ? `${el}.setAttribute('class', '${classes.join(' ')}')`
@@ -11337,6 +11392,7 @@ class Emitter {
     if (isSvg) R.svgDepth++;
     this.renderChildren(el, children, node);
     if (isSvg) R.svgDepth--;
+    if (this.mergesRestKey(el, 'class')) R.pendingClassArgs.push(() => this.emitRestRead('class'));
     const parts = R.pendingClassArgs;
     // This element's merging pairs recorded their key spans here —
     // claim them against this write (the static walk's merge does the
@@ -11876,6 +11932,13 @@ class Emitter {
         props.push({ pair, key, fn: () => this.renderExpr(value) });
         return;
       }
+      const merge = isHost ? this.hostMergeKey(cleanKey) : null;
+      if (merge !== null) {
+        this.checkCrossScopeLocals(value, pair);
+        props.push({ pair, key, fn: () => this.emitHostMerge(merge, value) });
+        updaters.push({ pair, key, value, merge });
+        return;
+      }
       this.addChildProp(props, updaters, pair, key, cleanKey, value);
     };
 
@@ -12285,7 +12348,12 @@ class Emitter {
     });
     line(() => this.b.emit(`  ${elVar} = ${instVar}._root;`));
     if (isHost) {
-      const own = [...seenKeys.keys()].filter((k) => k !== 'children').map((k) => JSON.stringify(k)).join(', ');
+      // `class` and `className` are one key: the line passing either owns
+      // both, or the rest road would push a caller's other spelling past
+      // the merged value the updater just passed.
+      const ownKeys = new Set([...seenKeys.keys()].filter((k) => k !== 'children'));
+      if (ownKeys.has('class') || ownKeys.has('className')) { ownKeys.add('class'); ownKeys.add('className'); }
+      const own = [...ownKeys].map((k) => JSON.stringify(k)).join(', ');
       line(() => this.b.emit(`  ${self()}._inheritedInst = ${instVar};`));
       line(() => this.b.emit(`  ${self()}._inheritedOwn = new Set([${own}]);`));
     }
@@ -12388,11 +12456,12 @@ class Emitter {
         this.b.emit('\n');
       },
     });
-    for (const { pair, key, value } of updaters) {
+    for (const { pair, key, value, merge = null } of updaters) {
       const cleanKey = key.startsWith('"') && key.endsWith('"') ? key.slice(1, -1) : key;
       this.renderEffect(pair, () => {
         this.b.emit(`if (${instVar}) ${instVar}._updateProp('${cleanKey}', `);
-        this.renderExpr(value);
+        if (merge !== null) this.emitHostMerge(merge, value);
+        else this.renderExpr(value);
         this.b.emit(');');
       }, value);
     }
@@ -12800,9 +12869,10 @@ class Emitter {
           // value's own stands there too; the diagnostics road tells
           // them apart by the complaint's family.
           R.pendingClassArgs.push(() => site(this.renderExpr(value)));
-        } else if (this.renderReactive(value)) {
+        } else if (this.renderReactive(value) || this.mergesRestKey(el, 'class')) {
           const isSvg = R.svgDepth > 0;
           const recv = this.tsElReceiver(el);
+          const merges = this.mergesRestKey(el, 'class');
           this.renderEffect(pair, () => {
             const clsx = this.runtimeName('__clsx');
             recv.emit();
@@ -12818,6 +12888,7 @@ class Emitter {
             }
             // The `__clsx` argument (see the merge road above).
             site(this.renderExpr(value));
+            if (merges) { this.b.emit(', '); this.emitRestRead('class'); }
             this.b.emit(isSvg ? '));' : ');');
           }, value);
         } else {
@@ -12968,6 +13039,7 @@ class Emitter {
       // call stands beside it to read it off.
       if (key === 'style') {
         const recv = this.tsElReceiver(el);
+        const merges = this.mergesRestKey(el, 'style');
         const write = () => {
           this.b.emit('{ const __v');
           site([this.b.offset - 3, this.b.offset]);
@@ -12986,9 +13058,11 @@ class Emitter {
           this.renderExpr(value);
           this.b.emit(`; ${this.runtimeName('__style')}(`);
           recv.emit();
-          this.b.emit(', __v); }');
+          // The merge reads the rest view's `style` inside the effect and
+          // refuses a key both sides set.
+          this.b.emit(merges ? `, ${this.renderSelf ?? 'this'}._mergeRestStyle(__v)); }` : ', __v); }');
         };
-        if (this.renderReactive(value)) this.renderEffect(pair, write, value);
+        if (merges || this.renderReactive(value)) this.renderEffect(pair, write, value);
         else this.renderLine(pair, write, false);
         if (this.ts && recv.surfaced && rec !== null) {
           this.intrinsics.push({ start: rec.key[0], end: rec.key[1], kind: 'attr', name: key, type: 'string | __RipCSSProperties | undefined' });

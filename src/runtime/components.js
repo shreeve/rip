@@ -973,12 +973,17 @@ const __BOOLEAN_ATTRS = new Set([
   'shadowrootclonable', 'shadowrootserializable',
 ]);
 
+// `class` and `className` are one attribute: the rest map holds the
+// caller's value under `class` whichever spelling passed it, and the
+// view answers both spellings from that one key.
+const __restKey = (key) => (key === 'className' ? 'class' : key);
+
 // What `@rest` reads: the rest map with every shared container read
 // through, so a read answers the value and tracks the container. The
 // map itself keeps the containers — the forwarding roads bind to them.
 const __restView = (rest) => new Proxy(rest, {
   get(map, key) {
-    const held = map[key];
+    const held = map[typeof key === 'string' ? __restKey(key) : key];
     return held != null && typeof held === 'object' && typeof held.read === 'function' ? held.value : held;
   },
 });
@@ -1007,7 +1012,7 @@ function __splitProps(ctor, props) {
     }
     if (declared.includes(key)) continue;
     if (extendsTag !== null) {
-      (rest ??= {})[key] = props[key];
+      (rest ??= {})[__restKey(key)] = props[key];
       continue;
     }
     throw new Error(
@@ -1234,6 +1239,7 @@ class __Component {
     if (key === 'asChild') {
       throw new Error(`${this.constructor.name || 'component'}: asChild is fixed at construction and takes no update`);
     }
+    key = __restKey(key);
     this._rest || (this._rest = {});
     if (value == null) delete this._rest[key];
     else this._rest[key] = value;
@@ -1253,6 +1259,28 @@ class __Component {
     if (this._state === 'failed' || this._state === 'unmounted') return;
     if (!this._inheritedEl || !this._rest) return;
     for (const key in this._rest) this._applyInheritedProp(this._inheritedEl, key, this._rest[key]);
+  }
+  // The host line's style merged with the caller's, by key: the caller's
+  // keys the line does not set ride alongside the line's, and a key both
+  // set throws naming the part and the key, never resolved by
+  // precedence. A string on either side, when both are set, has no keys
+  // to merge by and is refused the same way. Runs inside the line's
+  // style effect, so the read of the view re-runs it on every rest
+  // write.
+  _mergeRestStyle(own) {
+    const rest = this.rest.value.style;
+    if (rest == null) return own;
+    if (own == null) return rest;
+    const name = this.constructor.name || 'component';
+    if (typeof own !== 'object' || typeof rest !== 'object') {
+      throw new Error(`${name}: style merges by key, and a string style has none — the host line's style and the caller's must both be objects`);
+    }
+    for (const key of Object.keys(rest)) {
+      if (Object.hasOwn(own, key)) {
+        throw new Error(`${name}: style key '${key}' is set by the host line and by the caller — a shared key is refused, never resolved by precedence`);
+      }
+    }
+    return { ...own, ...rest };
   }
   // The host is the inherited element, or under `extends <Component>`
   // the host instance the render constructed with rest spread into its

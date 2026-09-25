@@ -34,5 +34,5 @@ export Choice = component extends Button
       variant: 'secondary'
       size: 'sm'
       aria-pressed: if pressed then 'true' else 'false'
-      classes: 'aria-pressed:bg-surface-active aria-pressed:text-primary'
+      class: 'aria-pressed:bg-surface-active aria-pressed:text-primary'
       slot

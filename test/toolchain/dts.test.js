@@ -539,13 +539,29 @@ describe('component declarations: the class shape, the props surface, the extend
     expect(d.match(/rest: \{ readonly value: \{([^]*?)\[key:/)[1]).not.toContain('infer __V');
   });
 
-  test("extends: a key the host line sets leaves the props surface, unless the body reads it back through `@rest`", () => {
-    const d = compile("Btn = component extends button\n  render\n    button#go.primary type: 'button'\n      title: 't'\n      @click: (-> null)\n      slot\n").declarations;
+  test("extends: a key the host line sets leaves the props surface, unless the body reads it back through `@rest`; class and style merge and stay", () => {
+    const d = compile("Btn = component extends button\n  render\n    button#go.primary type: 'button'\n      title: 't'\n      style: { color: 'red' }\n      @click: (-> null)\n      slot\n").declarations;
     const ctorOf = (text, name) => { const at = text.indexOf('new (props?:'); return text.slice(at, text.indexOf(`): ${name}`, at)); };
     const hasKey = (text, key) => new RegExp(`[ ;{]${key}\\?:`).test(text);
     const props = ctorOf(d, 'Btn');
-    for (const key of ['type', 'title', 'id', 'class', 'className']) expect(hasKey(props, key)).toBe(false);
-    expect(hasKey(props, 'disabled')).toBe(true);
+    for (const key of ['type', 'title', 'id']) expect(hasKey(props, key)).toBe(false);
+    for (const key of ['disabled', 'class', 'className', 'style']) expect(hasKey(props, key)).toBe(true);
+    // A literal line style takes its keys off the caller's object and admits no string.
+    expect(props).toContain("style?: (Omit<({ [K in Exclude<keyof CSSStyleProperties, keyof CSSStyleDeclarationBase>]?:");
+    expect(props).toMatch(/style\?: \(Omit<\([^]*?\), 'color'>\) extends infer __V/);
+    expect(props).not.toMatch(/'color'>\) \| string/);
+    // A computed line style keeps the whole vocabulary: its keys are the runtime's to check.
+    const computed = compile("Btn = component extends button\n  place := { top: '1px' }\n  render\n    button style: place\n      slot\n").declarations;
+    expect(ctorOf(computed, 'Btn')).toMatch(/style\?: \(\([^]*?\) \| string\) extends infer __V/);
+    // A body that reads `@rest.style` owns the merge, so the surface subtracts nothing.
+    const manual = compile("Btn = component extends button\n  own := { color: 'red' }\n  render\n    button style: (@rest.style ?? own)\n      slot\n").declarations;
+    expect(ctorOf(manual, 'Btn')).not.toContain('Omit<');
+    // A `{ style } = @rest` pattern is a read; an object beside `@rest` in
+    // a call or an array is not.
+    const pattern = compile("Btn = component extends button\n  m: -> { style } = @rest\n  render\n    button style: { color: 'red' }\n      slot\n").declarations;
+    expect(ctorOf(pattern, 'Btn')).not.toContain('Omit<');
+    const beside = compile("f = (a, b) -> a\nBtn = component extends button\n  m: -> f { style: 1 }, @rest\n  n: -> [{ style: 1 }, @rest]\n  render\n    button style: { color: 'red' }\n      slot\n").declarations;
+    expect(ctorOf(beside, 'Btn')).toMatch(/style\?: \(Omit<\([^]*?\), 'color'>\) extends infer __V/);
     // The rest view keeps every attribute: the line reads through it.
     expect(hasKey(d.match(/rest: \{ readonly value: \{([^]*?)\[key:/)[1], 'type')).toBe(true);
     const read = compile("Titled = component extends h2\n  id =! @rest.id ?? 'm'\n  render\n    h2 id: id\n      slot\n").declarations;
@@ -558,6 +574,14 @@ describe('component declarations: the class shape, the props surface, the extend
     // A component host constructed inside an element body binds too.
     const hosted = compile("Btn = component extends button\n  render\n    button\n      slot\nWrap = component extends Btn\n  render\n    div\n      Btn title: 't'\n        slot\n").declarations;
     expect(hosted).toContain("Omit<__P, 'children' | 'title' | `__bind_${string}__`>");
+    // A wrapper's line passing class or style keeps both on its surface; a
+    // literal line style subtracts its keys and admits no string.
+    const styled = compile("Btn = component extends button\n  render\n    button\n      slot\nWrap = component extends Btn\n  render\n    Btn class: 'w', style: { margin: '1px' }, title: 't'\n      slot\n").declarations;
+    expect(styled).toContain("Omit<__P, 'children' | 'title' | 'style' | `__bind_${string}__`> : never) : never) & { style?: (Omit<(");
+    expect(styled).toMatch(/, 'margin'>\) extends infer __V \? __V \| \{ value: __V \| undefined; read\(\): __V \| undefined; touch\?\(\): void \} : never \}/);
+    expect(styled).not.toContain("'class' | ");
+    const manualWrap = compile("Btn = component extends button\n  render\n    button\n      slot\nWrap = component extends Btn\n  render\n    Btn class: [@rest.class, 'w'], style: (@rest.style ?? { margin: '1px' })\n      slot\n").declarations;
+    expect(manualWrap).toContain("Omit<__P, 'children' | `__bind_${string}__`>");
   });
 
   test('extends a component: the props surface is the host\'s less the declared keys, and the rest view holds that object', () => {

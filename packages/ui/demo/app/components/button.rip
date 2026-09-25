@@ -4,7 +4,6 @@ type Size = 'sm' | 'md'
 export Button = component extends button
   @variant?: Variant := 'primary'
   @size?: Size := 'md'
-  @classes?: string
   render
     button
       type: 'button'
@@ -16,6 +15,5 @@ export Button = component extends button
           'py-1.5': size is 'sm'
           'py-2': size is 'md'
         }
-        classes
       ]
       slot

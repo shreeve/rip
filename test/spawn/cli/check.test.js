@@ -459,6 +459,60 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  test('class and style merge on a tag host: a caller passes either, less a literal line style\'s keys, and a wrapper inherits the surface', async () => {
+    const dir = workspace({
+      'app.rip': [
+        'Btn = component extends button',
+        '  render',
+        "    button.base type: 'button', style: { color: 'red' }",
+        '      slot',
+        'Anchor = component extends div',
+        "  place := { top: '1px' }",
+        '  render',
+        '    div style: place',
+        '      slot',
+        'Manual = component extends button',
+        "  own := { color: 'red' }",
+        '  render',
+        '    button style: (@rest.style ?? own)',
+        '      slot',
+        'Wrap = component extends Btn',
+        '  render',
+        "    Btn title: 'w'",
+        '      slot',
+        'export Page = component',
+        '  render',
+        '    div',
+        "      Btn class: 'x', 'fine: class merges'",
+        "      Btn className: ['y', { z: true }], 'fine: className merges'",
+        "      Btn style: { margin: '1px' }, 'fine: a key the line does not set'",
+        "      Btn style: { color: 'blue' }, 'refused: the line sets color'",
+        "      Btn style: 'color: blue', 'refused: a string merges by no key'",
+        "      Anchor style: { top: '2px' }, 'fine at the face: a computed line style is the runtime\\'s to check'",
+        "      Manual style: { color: 'blue' }, 'fine: the body reads @rest.style'",
+        "      Wrap class: 'w', 'fine: through the host'",
+        "      Wrap style: { color: 'blue' }, 'refused: through the host'",
+        "      Styled class: 'x', 'fine: merges through the wrapper line'",
+        "      Styled className: 'y', 'fine: the other spelling'",
+        "      Styled style: { padding: '1px' }, 'fine: neither line sets padding'",
+        "      Styled style: { margin: '2px' }, 'refused: the wrapper line sets margin'",
+        "      Styled style: 'color: blue', 'refused: a string merges by no key'",
+        "      Styled title: 't', 'fine: the wrapper line does not set title'",
+        'Styled = component extends Btn',
+        '  render',
+        "    Btn class: 'styled', style: { margin: '1px' }",
+        '      slot',
+        '',
+      ].join('\n'),
+    });
+    try {
+      const { stdout, status } = await check(dir);
+      expect(status).toBe(1);
+      const errors = stdout.split('\n').filter((l) => /^app\.rip:\d+:\d+ - error TS/.test(l)).map((l) => l.replace(/^app\.rip:(\d+):\d+ - error (TS\d+):.*$/, '$1 $2'));
+      expect(errors).toEqual(['25 TS2353', '26 TS2322', '30 TS2353', '34 TS2353', '35 TS2322']);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   // An accept is typed from what its provider OFFERS, never from what it
   // has: `Part` carries a member named `open` (its own accept), and naming
   // it as a provider is the miss the runtime throws at mount. Each miss is

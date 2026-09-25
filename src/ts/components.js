@@ -38,7 +38,7 @@
 
 import { tidyType, normalizeTypeText, renderParams, optionalReader } from './types.js';
 import { attributeNamesFor, BOOLEAN_ATTRS } from '../dom.js';
-import { isComponentName, componentPathText } from '../render.js';
+import { isComponentName, componentPathText, restReadKeys } from '../render.js';
 import { CAMEL, CLASS_TYPE, STYLE_TYPE, CSS_PROPERTIES_TEXT } from './dom-types.js';
 
 // Same spellings as src/emitter.js COMPONENT_HOOKS (emission owns the
@@ -100,72 +100,101 @@ const yieldsIn = (x) => {
 // `spellable`, when given, decides which module names a `typeof`
 // spelling may root at — the declaration road passes the names its own
 // file binds; a refused root types the member `any`.
-// The keys the host's own render line sets, less any the body reads
-// back through `@rest.<key>`: the runtime never writes those from rest
-// (the line's), so the props surface leaves them out and a caller's
-// value for one is refused rather than dropped. The host line is the
-// first class-scope element of the tag, or construction of the
-// component, in the render, the emitter's own binding rule; a branch
-// or loop body never binds.
-function lineOwnedKeys(stmts, host, isComponent) {
-  const owned = new Set();
-  if (host === null) return owned;
+// A render item's head: a tag word (selector included), a component
+// path, or the tag under a `.( … )` dynamic class.
+const headOf = (n) => {
+  if (typeof n === 'string') return n;
+  const path = componentPathText(n);
+  if (path !== null) return path;
+  if (isNode(n) && n[0] === '.' && typeof n[1] === 'string') return n[1];
+  return null;
+};
+const tagOf = (head) => head === null ? null : head.split(/[#.]/)[0];
+// The host line: the first class-scope element of the tag, or
+// construction of the component, in the render — the emitter's own
+// binding rule; a branch or loop body never binds. Null when the render
+// has none (the JS emission has already refused that).
+function hostLine(stmts, host, isComponent) {
+  if (host === null) return null;
   const render = stmts.find((st) => isNode(st) && st[0] === 'render');
-  if (!render || !isBlock(render[1])) return owned;
-  const headOf = (n) => {
-    if (typeof n === 'string') return n;
-    const path = componentPathText(n);
-    if (path !== null) return path;
-    if (isNode(n) && n[0] === '.' && typeof n[1] === 'string') return n[1];
-    return null;
-  };
-  const tagOf = (head) => head === null ? null : head.split(/[#.]/)[0];
-  const keysOf = (node) => {
-    const head = headOf(node[0]);
-    if (!isComponent) {
-      if (head.includes('#')) owned.add('id');
-      if (head.includes('.') || (isNode(node[0]) && node[0][0] === '.')) { owned.add('class'); owned.add('className'); }
-    }
-    const take = (obj) => {
-      for (const pair of obj.slice(1)) {
-        if (!isNode(pair) || pair.length !== 3 || typeof pair[1] !== 'string') continue;
-        const key = pair[1].replace(/^"|"$/g, '');
-        if (key === 'ref' || key === 'key' || key.startsWith('__')) continue;
-        owned.add(key);
-      }
-    };
-    for (const arg of node.slice(1)) {
-      if (isNode(arg) && arg[0] === 'object') take(arg);
-      else if (isNode(arg) && arg[0] === '->' && isBlock(arg[2])) for (const child of arg[2].slice(1)) if (isNode(child) && child[0] === 'object') take(child);
-    }
-    if (owned.has('class') || owned.has('className')) { owned.add('class'); owned.add('className'); }
-  };
+  if (!render || !isBlock(render[1])) return null;
   // Class scope: the render's statements, and the bodies of elements
   // on the way down; a construct (if/for/switch) is not descended.
   const walk = (items) => {
     for (const item of items) {
       // A bare member path is its own head; a call's head is its callee.
       const head = headOf(isNode(item) && item[0] !== '.' ? item[0] : item);
-      if (head !== null && (isComponent ? head === host : tagOf(head) === host)) {
-        if (isNode(item)) keysOf(item);
-        return true;
-      }
+      if (head !== null && (isComponent ? head === host : tagOf(head) === host)) return isNode(item) ? item : null;
       if (isNode(item) && head !== null && !/^[A-Z]/.test(tagOf(head) ?? '') && componentPathText(item[0]) === null) {
-        for (const arg of item.slice(1)) if (isNode(arg) && arg[0] === '->' && isBlock(arg[2]) && walk(arg[2].slice(1))) return true;
+        for (const arg of item.slice(1)) {
+          if (!isNode(arg) || arg[0] !== '->' || !isBlock(arg[2])) continue;
+          const found = walk(arg[2].slice(1));
+          if (found !== undefined) return found;
+        }
       }
     }
-    return false;
+    return undefined;
   };
-  walk(render[1].slice(1));
-  const reads = new Set();
-  const scan = (n) => {
-    if (!isNode(n)) return;
-    if (n[0] === '.' && isNode(n[1]) && n[1][0] === '.' && n[1][1] === 'this' && n[1][2] === 'rest' && typeof n[2] === 'string') reads.add(n[2]);
-    for (const c of n) scan(c);
+  return walk(render[1].slice(1)) ?? null;
+}
+
+// The pairs a host line spells: on the line or in its body.
+const linePairs = (line) => {
+  const pairs = [];
+  const take = (obj) => {
+    for (const pair of obj.slice(1)) {
+      if (!isNode(pair) || pair.length !== 3 || typeof pair[1] !== 'string') continue;
+      pairs.push([pair[1].replace(/^"|"$/g, ''), pair[2]]);
+    }
   };
-  for (const st of stmts) scan(st);
-  for (const key of reads) { owned.delete(key); if (key === 'class' || key === 'className') { owned.delete('class'); owned.delete('className'); } }
+  for (const arg of line.slice(1)) {
+    if (isNode(arg) && arg[0] === 'object') take(arg);
+    else if (isNode(arg) && arg[0] === '->' && isBlock(arg[2])) for (const child of arg[2].slice(1)) if (isNode(child) && child[0] === 'object') take(child);
+  }
+  return pairs;
+};
+
+// The keys the host's own render line sets, less any the body reads
+// back through `@rest.<key>`: the runtime never writes those from rest
+// (the line's), so the props surface leaves them out and a caller's
+// value for one is refused rather than dropped. Under a tag host the
+// merging keys (`class`, `className`, `style`) stay on the surface
+// whatever the line sets; propsTypeSegments reads them past this set.
+function lineOwnedKeys(line, isComponent, reads) {
+  const owned = new Set();
+  if (line === null) return owned;
+  if (!isComponent) {
+    const head = headOf(line[0]) ?? '';
+    if (head.includes('#')) owned.add('id');
+    if (head.includes('.') || (isNode(line[0]) && line[0][0] === '.')) { owned.add('class'); owned.add('className'); }
+  }
+  for (const [key] of linePairs(line)) {
+    if (key === 'ref' || key === 'key' || key.startsWith('__')) continue;
+    owned.add(key);
+  }
+  if (owned.has('class') || owned.has('className')) { owned.add('class'); owned.add('className'); }
+  for (const key of reads) owned.delete(key);
   return owned;
+}
+
+// The host line's `style:` value when the emitter can read it: the keys
+// of an object literal spelled with plain keys and no spread, or a
+// string literal. Any other value is computed, and its keys are the
+// runtime's to check at each write.
+function lineStyleLiteral(line) {
+  if (line === null) return null;
+  const pair = linePairs(line).find(([key]) => key === 'style');
+  if (!pair) return null;
+  const value = pair[1];
+  if (isNode(value) && value[0] === 'str') return { kind: 'string', keys: [] };
+  if (typeof value === 'string' && /^["']/.test(value)) return { kind: 'string', keys: [] };
+  if (!isNode(value) || value[0] !== 'object') return null;
+  const keys = [];
+  for (const p of value.slice(1)) {
+    if (!isNode(p) || p.length !== 3 || typeof p[1] !== 'string') return null;
+    keys.push(p[1].replace(/^"|"$/g, ''));
+  }
+  return { kind: 'object', keys };
 }
 
 export function componentTypeInfo(stores, source, node, behavior = null, { spellable = null } = {}) {
@@ -316,11 +345,18 @@ export function componentTypeInfo(stores, source, node, behavior = null, { spell
   // typeof).
   const siblings = new Set(members.map((m) => m.name));
   for (const m of members) { m.siblings = siblings; m.behavior = behavior; m.spellable = spellable; }
-  const lineOwned = lineOwnedKeys(stmts, extendsTag ?? extendsComponent, extendsComponent !== null);
+  const restReads = restReadKeys(stmts);
+  const line = hostLine(stmts, extendsTag ?? extendsComponent, extendsComponent !== null);
+  const lineOwned = lineOwnedKeys(line, extendsComponent !== null, restReads);
+  // The line's style as the merge knows it: under either host, in
+  // automatic mode (no `@rest.style` read), a literal the surface can
+  // subtract from the caller's object. Null otherwise.
+  const lineStyle = (extendsTag ?? extendsComponent) !== null && !restReads.has('style') ? lineStyleLiteral(line) : null;
   return {
     extendsTag,
     extendsComponent,
     lineOwned,
+    lineStyle,
     behavior,
     members,
     roleText,
@@ -867,11 +903,25 @@ export const restAliasName = (tag) => `__RipRest_${tag.replace(/[^A-Za-z0-9_]/g,
 // distributes through a conditional over an inferred parameter.
 // Spelled inline on both roads: the host name is the only reference,
 // and a declaration file resolves it through its own import or binding.
+// `class`, `className`, and `style` merge with what the line passes, so
+// the line setting one keeps it on the surface. A literal line style
+// takes its keys off the caller's object and admits no string, spelled
+// as the tag surface spells it; the host's own line keys stay the
+// host's to refuse at its write. A literal string on the line admits no
+// caller style at all.
 export const restOfComponentText = (info) => {
   const own = new Set(['children', ...(info.lineOwned ?? [])]);
   for (const m of publicProps(info)) own.add(m.name);
+  own.delete('class'); own.delete('className');
+  const lineStyle = info.lineStyle ?? null;
+  if (lineStyle === null || lineStyle.kind === 'object') own.delete('style');
+  let style = '';
+  if (lineStyle !== null && lineStyle.kind === 'object' && lineStyle.keys.length > 0) {
+    own.add('style');
+    style = ` & { style?: ${valueOrContainer(`Omit<${CSS_PROPERTIES_TEXT}, ${lineStyle.keys.map((k) => `'${k}'`).join(' | ')}>`)} }`;
+  }
   const keys = [...[...own].map((k) => `'${k}'`), '`__bind_${string}__`'].join(' | ');
-  return `(NonNullable<ConstructorParameters<typeof ${info.extendsComponent}>[0]> extends infer __P ? (__P extends unknown ? Omit<__P, ${keys}> : never) : never)`;
+  return `(NonNullable<ConstructorParameters<typeof ${info.extendsComponent}>[0]> extends infer __P ? (__P extends unknown ? Omit<__P, ${keys}> : never) : never)${style}`;
 };
 // Every DOM-lib global the minted declaration text can spell: `Node`
 // in the children union, the tag map under `extends`. A declaration
@@ -923,8 +973,21 @@ export function propsTypeSegments(info, { road = 'dts' } = {}) {
     // The passthrough object (restPassthroughEntries), less any key a
     // declared prop already owns.
     for (const [key, t] of restPassthroughEntries(info.extendsTag, road)) {
-      if (used.has(key) || info.lineOwned?.has(key)) continue;
-      segs.push({ text: `; ${keyText(key)}?: ${valueOrContainer(t)}` });
+      if (used.has(key)) continue;
+      // `class`, `className`, and `style` merge with the line's, so the
+      // line setting one never leaves it out. A literal line style takes
+      // its keys off the caller's object, since a shared key is refused,
+      // and admits no string, since a string merges by no key; a literal
+      // string on the line admits no caller style at all.
+      const merges = key === 'class' || key === 'className' || key === 'style';
+      if (!merges && info.lineOwned?.has(key)) continue;
+      let type = t;
+      if (key === 'style' && info.lineStyle != null) {
+        if (info.lineStyle.kind === 'string') continue;
+        const props = road === 'face' ? '__RipCSSProperties' : CSS_PROPERTIES_TEXT;
+        type = info.lineStyle.keys.length === 0 ? props : `Omit<${props}, ${info.lineStyle.keys.map((k) => `'${k}'`).join(' | ')}>`;
+      }
+      segs.push({ text: `; ${keyText(key)}?: ${valueOrContainer(type)}` });
     }
     // The mode that renders the projected element as the host: a plain
     // boolean, fixed at construction, so no container arm.

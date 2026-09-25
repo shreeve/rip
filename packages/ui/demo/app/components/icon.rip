@@ -6,10 +6,9 @@ export type IconName =
   | 'moon'
   | 'sun'
 
-export Icon = component
+export Icon = component extends svg
   @name: IconName
   @strokeWidth?: number := 2
-  @classes?: string
   render
     svg
       viewBox: '0 0 24 24'
@@ -19,7 +18,6 @@ export Icon = component
       stroke-linecap: 'round'
       stroke-linejoin: 'round'
       aria-hidden: 'true'
-      class: classes
       switch name
         when 'menu'
           path d: 'M4 5h16'

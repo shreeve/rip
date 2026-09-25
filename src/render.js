@@ -650,3 +650,33 @@ export function rewriteRender(tokens, mintId, fail) {
   for (let i = 0; i < out.length; i++) tokens[i] = out[i];
   return tokens;
 }
+
+// The keys a component body reads back through the rest view:
+// `@rest.<key>`, `@rest['key']`, and a `{ key } = @rest` pattern.
+// `class` and `className` are one attribute and count as each other.
+// Both roads read this set: the emitter's host-line merge, where a read
+// of `class` or `style` puts that key in the author's hands, and the
+// type face's props surface, where a read of any other key keeps it
+// passable though the line sets it.
+// The forms that destructure a pattern from a value: `=`, `:=`, and
+// `=!`. A call or an array carrying an object beside `@rest` is not a
+// read of the object's keys.
+const PATTERN_OPS = new Set(['=', 'state', 'readonly']);
+export function restReadKeys(stmts) {
+  const reads = new Set();
+  const isNode = Array.isArray;
+  const isRestView = (n) => isNode(n) && n[0] === '.' && n[1] === 'this' && n[2] === 'rest';
+  const unquote = (k) => k.replace(/^"|"$/g, '');
+  const scan = (n) => {
+    if (!isNode(n)) return;
+    if (n[0] === '.' && isRestView(n[1]) && typeof n[2] === 'string') reads.add(n[2]);
+    else if (n[0] === '[]' && isRestView(n[1]) && typeof n[2] === 'string' && /^".*"$/.test(n[2])) reads.add(unquote(n[2]));
+    else if (PATTERN_OPS.has(n[0]) && n.length === 3 && isNode(n[1]) && n[1][0] === 'object' && isRestView(n[2])) {
+      for (const pair of n[1].slice(1)) if (isNode(pair) && typeof pair[1] === 'string') reads.add(unquote(pair[1]));
+    }
+    for (const c of n) scan(c);
+  };
+  for (const st of stmts) scan(st);
+  if (reads.has('class') || reads.has('className')) { reads.add('class'); reads.add('className'); }
+  return reads;
+}
