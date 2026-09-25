@@ -24,6 +24,7 @@ Select = component
       when 'ArrowDown' then @at = (@at + 1) % @items.length
       when 'ArrowUp'   then @at = (@at - 1 + @items.length) % @items.length
       when 'Enter'     then @chosen = @items[@at]
+
   render
     div ref: el, focusable: true, autofocus: true, @keydown: @move, borderStyle: 'round', borderColor: (if el?.focused then 'cyan' else 'gray')
       for item, n in @items

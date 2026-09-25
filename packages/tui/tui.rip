@@ -50,6 +50,7 @@ export Static = component extends div
     view = live.view
     view.statics.push el
     -> view.statics = view.statics.filter (other) -> other isnt el
+
   render
     div ref: el, display: 'none'
       slot

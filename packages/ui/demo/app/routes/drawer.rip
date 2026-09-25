@@ -1,39 +1,45 @@
 import { Drawer } from 'rip/ui'
 import { COMPONENTS } from '../components.rip'
+import { Button } from '../components/button.rip'
+import { Choice, Controls, Page, Row, Stage } from '../components/page.rip'
+
+# Each slide also sets the other axis to zero: WebKit does not substitute
+# an unset registered property's initial value inside @starting-style.
+PANEL: Record<Drawer.Side, string> = {
+  left:   'mr-auto ml-0 h-dvh max-h-none w-80 max-w-[calc(100vw-3rem)] -translate-x-full translate-y-0 data-open:translate-x-0 starting:data-open:-translate-x-full'
+  right:  'mr-0 ml-auto h-dvh max-h-none w-80 max-w-[calc(100vw-3rem)] translate-x-full translate-y-0 data-open:translate-x-0 starting:data-open:translate-x-full'
+  top:    'mt-0 mb-auto w-dvw max-w-none h-80 max-h-[calc(100dvh-3rem)] -translate-y-full translate-x-0 data-open:translate-y-0 starting:data-open:-translate-y-full'
+  bottom: 'mt-auto mb-0 w-dvw max-w-none h-80 max-h-[calc(100dvh-3rem)] translate-y-full translate-x-0 data-open:translate-y-0 starting:data-open:translate-y-full'
+}
 
 export DrawerPage = component
   open := false
+  side: Drawer.Side := 'right'
+  closedby: Drawer.ClosedBy | undefined := undefined
   render
-    div class: 'mx-auto max-w-2xl px-5 py-8 md:px-8 md:py-10'
-      h1 class: 'text-2xl font-semibold', COMPONENTS.drawer.name
-      p class: 'mt-2 text-secondary', COMPONENTS.drawer.description
-
-      div class: 'mt-8 flex items-center justify-center rounded-xl border border-surface bg-surface py-16'
+    Page title: COMPONENTS.drawer.name, description: COMPONENTS.drawer.description
+      Stage
         Drawer.Root open <=> open
-          Drawer.Trigger
-            class: 'rounded-lg border border-transparent bg-accent px-3 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover active:bg-accent-active'
-            'Open Drawer'
+          Drawer.Trigger asChild
+            Button 'Open Drawer'
           Drawer.Popup
-            side: 'right'
+            side: side
+            closedby: closedby
             class: [
-              'mr-0 ml-auto h-dvh max-h-none w-80 max-w-[calc(100vw-3rem)] translate-x-full translate-y-0 bg-surface p-6 shadow-xl transition-[translate] duration-300 ease-drawer'
-              'data-open:translate-x-0 data-open:duration-450 starting:data-open:translate-x-full'
+              PANEL[side]
+              'bg-surface p-6 shadow-xl transition-[translate] duration-300 ease-drawer data-open:duration-450'
               'backdrop:bg-backdrop backdrop:opacity-0 backdrop:duration-300 backdrop:ease-drawer data-open:backdrop:duration-450 data-open:backdrop:opacity-100 starting:data-open:backdrop:opacity-0'
             ]
             Drawer.Title class: 'text-lg font-semibold', 'Settings'
-            Drawer.Description class: 'mt-2 text-secondary', 'Swipe the panel to the right to dismiss it, or use the button.'
+            Drawer.Description class: 'mt-2 text-secondary', 'Swipe the panel toward its side to dismiss it, or use the button.'
             div class: 'mt-6 flex justify-end'
-              Drawer.Close
-                class: 'rounded-lg border border-transparent bg-accent px-3 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover active:bg-accent-active'
-                'Close'
+              Drawer.Close asChild
+                Button 'Close'
 
-      section class: 'mt-8 rounded-xl border border-surface bg-surface p-5'
-        h2 class: 'text-xs-plus font-medium text-tertiary', 'Parent'
-        p class: 'mt-2 text-sm text-secondary', 'The page binds the root with open <=> open.'
-        div class: 'mt-4 flex items-center gap-4'
-          code class: 'rounded bg-muted px-2 py-1 font-mono text-sm', "open: #{open}"
-          button
-            type: 'button'
-            class: 'rounded-lg border border-input bg-input px-3 py-2 text-sm font-medium text-secondary hover:bg-input-hover active:bg-input-active'
-            @click: (-> open = true)
-            'Open from the Parent'
+      Controls
+        Row name: 'side'
+          for option in ['left', 'right', 'top', 'bottom'] satisfies Drawer.Side[]
+            Choice pressed: side is option, @click: (-> side = option), option
+        Row name: 'closedby'
+          for option in [undefined, 'any', 'closerequest', 'none'] satisfies (Drawer.ClosedBy | undefined)[]
+            Choice pressed: closedby is option, @click: (-> closedby = option), option ?? 'not passed'

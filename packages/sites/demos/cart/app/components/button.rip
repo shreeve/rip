@@ -3,7 +3,6 @@ export Button = component extends button
   @outline?: boolean
   @link?: boolean
   @loading?: boolean
-
   render
     button
       aria-busy: loading
@@ -19,7 +18,6 @@ export Button = component extends button
 export ButtonLink = component extends a
   @variant?: 'primary' | 'secondary' := 'primary'
   @outline?: boolean
-
   render
     a
       role: 'button'

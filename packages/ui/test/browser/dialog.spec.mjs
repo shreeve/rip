@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { boot, focusInside, isModal } from './support.mjs'
+import { boot, focusInside, isModal, pick } from './support.mjs'
 
 test('the trigger opens a modal dialog, focus lands inside, and the state shows on both parts', async ({ page }) => {
   const { trigger, popup } = await boot(page)
@@ -12,7 +12,6 @@ test('the trigger opens a modal dialog, focus lands inside, and the state shows 
   await expect(popup).not.toHaveAttribute('data-closed')
   await expect(trigger).toHaveAttribute('data-popup-open', 'true')
   await expect(trigger).toHaveAttribute('aria-expanded', 'true')
-  await expect(page.getByText('open: true')).toBeVisible()
 })
 
 // The demo scrolls inside main, which a modal already holds still, so
@@ -48,7 +47,6 @@ test('Escape closes it, the cell follows, and focus returns to the trigger', asy
   await expect.poll(() => isModal(page)).toBe(true)
   await page.keyboard.press('Escape')
   await expect.poll(() => isModal(page)).toBe(false)
-  await expect(page.getByText('open: false')).toBeVisible()
   await expect(popup).not.toHaveAttribute('data-open')
   await expect(popup).toHaveAttribute('data-closed', 'true')
   await expect(trigger).toHaveAttribute('aria-expanded', 'false')
@@ -83,11 +81,11 @@ for (const native of [true, false]) {
     await expect.poll(() => isModal(page)).toBe(true)
     await page.mouse.click(left / 2, top / 2)
     await expect.poll(() => isModal(page)).toBe(false)
-    await expect(page.getByText('open: false')).toBeVisible()
+    await expect(trigger).not.toHaveAttribute('data-popup-open')
   })
 }
 
-const pass = (page, value) => page.getByRole('button', { name: `closedby: ${value}`, exact: true }).click()
+const pass = (page, value) => pick(page, 'closedby', value)
 
 test('the popup carries the closedby the page passes, and any when it passes none', async ({ page }) => {
   const { popup } = await boot(page)
@@ -136,7 +134,8 @@ for (const how of ['mouse', 'keyboard']) {
 // inside a frame it enters is the engine's own choice, so the spec places
 // it in the field itself before leaving.
 test('Tab wraps at the popup\'s ends, through a frame at one end, and a programmatic focus outside never leaves the modal', async ({ page }) => {
-  const { trigger, close, fromParent } = await boot(page)
+  const { trigger, close } = await boot(page)
+  const outside = page.getByRole('group', { name: 'closedby' }).getByRole('button', { name: 'any', exact: true })
   await trigger.click()
   await expect.poll(() => isModal(page)).toBe(true)
   await expect(close).toBeFocused()
@@ -167,19 +166,9 @@ test('Tab wraps at the popup\'s ends, through a frame at one end, and a programm
   await expect(field).toBeFocused()
   await page.keyboard.press('Tab')
   await expect(close).toBeFocused()
-  await fromParent.focus()
+  await outside.focus()
   expect(await focusInside(page)).toBe(true)
-  await expect(fromParent).not.toBeFocused()
-})
-
-test('the parent drives the cell through the binding, and the close part closes', async ({ page }) => {
-  const { fromParent, close } = await boot(page)
-  await fromParent.click()
-  await expect.poll(() => isModal(page)).toBe(true)
-  await expect(page.getByText('open: true')).toBeVisible()
-  await close.click()
-  await expect.poll(() => isModal(page)).toBe(false)
-  await expect(page.getByText('open: false')).toBeVisible()
+  await expect(outside).not.toBeFocused()
 })
 
 test('the popup is named by its title and described by its description', async ({ page }) => {

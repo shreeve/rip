@@ -7,7 +7,6 @@ import { run, clock, Text } from 'rip/tui'
 
 export Counter = component
   tick = clock 100
-
   render
     Text color: 'green', "#{tick.frame} tests passed"
 

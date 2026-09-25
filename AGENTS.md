@@ -312,6 +312,7 @@ alters surface syntax updates ALL THREE in the same change.
   why a trade-off was taken. Never narrate what code obviously does,
   never reference project history or future plans. A comment that
   states a stale fact is a bug (rule 8 applies to comments).
+- **A component body packs its declarations and paragraphs its logic.** A one-line prop, state, offer, accept, or computed runs straight into the member below it and into `render`. A method, an effect, or any member with an indented body is followed by a blank line, so `render` takes a blank after logic and none after declarations.
 - **Names come from the established vocabulary**: SourceFile, TokenTape,
   NodeStore, RoleStore, MappingStore, CodeBuilder, semanticKind, role,
   `_` (structural constant), grammarRef (null for literal-sourced

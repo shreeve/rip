@@ -42,6 +42,27 @@ Orders = component
 
 The `open <=> confirming` binding is optional. A dialog nobody observes is the same tree with no props on the root.
 
+## Your own element as a part
+
+Every part that renders a tag takes `asChild`: it then renders the one element you project as its host instead of creating its own, so your `Button` component is the trigger, with the part's attributes, listeners, and state on your element.
+
+```coffee
+import { Dialog } from 'rip/ui'
+import { Button } from './button.rip'
+
+Orders = component
+  render
+    Dialog.Root
+      Dialog.Trigger asChild
+        Button 'Delete order'
+      Dialog.Popup class: 'rounded-lg p-6 backdrop:bg-black/40'
+        Dialog.Title 'Delete this order?'
+        Dialog.Close asChild
+          Button variant: 'secondary', 'Cancel'
+```
+
+The body must be exactly one element, a component counting through its root element; anything else throws at mount naming the part. The part's own attributes win where both set one (`type` on a trigger), and the element carries the part's `data-part`. Props you pass the part beyond its own (`id`, `aria-label`) still reach the element, and a `class` passed there replaces the element's own, so style the element on your component. A `style` object the part sets replaces the element's too: `Menu.Trigger` sets the anchor style, so a menu trigger's element keeps its styling in classes. (Without `asChild`, a `class` or `style` you pass a part merges with the part's own on the element it creates, and a style key the part also sets throws naming the part and the key.) `Dialog.Popup` and `Menu.Popup` take the mode by the same mechanism but are not exercised under it.
+
 ## Dialog
 
 Native first: `Dialog.Popup` is a `<dialog>` opened with `showModal`, which gives the top layer, modality, an inert background, Escape, focus containment, and focus restore to the trigger. No JavaScript positioning ships. No engine wraps Tab inside a modal, so the popup wraps it, the WAI-ARIA modal dialog pattern: a hidden sentinel `<span>` is the popup's first child and another its last, and when the browser's own Tab or Shift+Tab lands on one, it sends focus to the popup's first or last focusable. A focusable is a link with an `href`, a button, an input, a select, a textarea, a summary, a details, an iframe, an object, an embed, media with controls, an editable element, or an element with a `tabindex` of zero or more, rendered, visible, not disabled, and not inert. An iframe is one stop: a Tab inside it never reaches the popup, but the browser's own move out of it lands on a sentinel, so a frame at either end wraps too. The sentinels carry `aria-hidden` and `data-focus-guard`, and the package's own stylesheet hides them. On open, `showModal` focuses the leading sentinel as the first focusable descendant, and the popup moves focus on to the first focusable. A focusable inside a nested shadow root is never a landing spot, since the popup does not see into one, though the sentinels still catch the exit.
@@ -73,7 +94,7 @@ The keyboard is the WAI-ARIA menu button pattern. On the trigger, Enter, Space, 
 
 - `Menu.Root` — the root. Owns `open` (default `false`) and renders only its children.
 - `Menu.Trigger` — a `<button>` with `popovertarget`, `aria-haspopup="menu"`, `aria-expanded`, and `data-popup-open` while open, with a minted id or the `id` you pass. Its `style` is the anchor name, so `style` does not pass through.
-- `Menu.Popup` — a `<div popover="auto" role="menu" tabindex="-1">` labelled by the trigger, with a minted id or the `id` you pass. Carries `data-open` while open and `data-closed` otherwise, and `data-side` with the side it landed on. Takes `side` (`'bottom'` by default, or `'top'`, `'left'`, `'right'`; the type is `Menu.Side`), `align` (`'start'` by default, or `'center'`, `'end'`; `Menu.Align`), and `sideOffset`, the distance from the trigger in pixels (`0` by default), which a flip carries to the other side. Its `style` is the placement, so `style` does not pass through, and a margin class on it has no part in the placement.
+- `Menu.Popup` — a `<div popover="auto" role="menu" tabindex="-1">` labelled by the trigger, with a minted id or the `id` you pass. Carries `data-open` while open and `data-closed` otherwise, and `data-side` with the side it landed on. Takes `side` (`'bottom'` by default, or `'top'`, `'left'`, `'right'`; the type is `Menu.Side`), `align` (`'start'` by default, or `'center'`, `'end'`; `Menu.Align`), and `sideOffset`, the distance from the trigger in pixels (`0` by default), which a flip carries to the other side. Its `style` is the placement, so a `style` you pass merges beside it and may not set a key the placement sets (the anchor, area, and fallbacks, `inset`, the offset margin, and the `--rip-menu-*` and `--transform-origin` variables), and a margin class on it has no part in the placement.
 - `Menu.Item` — a `<button role="menuitem">` that closes the menu on click; the `@click` you pass runs too.
 - `Menu.Link` — an `<a role="menuitem">` with the `href` you pass, that closes the menu on click. A link activates on Enter and not on Space, so the part clicks it on Space.
 

@@ -3998,7 +3998,7 @@ code 'component extends: inherits tag, rest props forwarded', '''
     _create() {
       this._el0 = document.createElement('fieldset');
       this._el0.setAttribute('data-part', 'Test');
-      this._el1 = document.createElement('input');
+      this._el1 = this._asChild ? this._adoptChild() : document.createElement('input');
       this._inheritedEl = this._el1;
       this._applyRestToInheritedEl();
       this._el0.appendChild(this._el1);
@@ -4006,6 +4006,229 @@ code 'component extends: inherits tag, rest props forwarded', '''
     }
   };
   '''
+
+# Under `asChild` the host line adopts the projected element and the
+# slot's append is skipped, since the slot is the host; a second element
+# of the tag takes the plain line.
+code 'component extends: the host line forks on asChild and the slot append is guarded', '''
+  export Trigger = component extends button
+    render
+      button type: 'button'
+        slot
+        button "inner"
+  ''', '''
+  export const Trigger = class extends __Component {
+    static __extends = 'button';
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = this._asChild ? this._adoptChild() : document.createElement('button');
+      this._inheritedEl = this._el0;
+      this._inheritedOwn = new Set(["type"]);
+      this._applyRestToInheritedEl();
+      this._el0.setAttribute('data-part', 'Trigger');
+      this._el0.setAttribute('type', "button");
+      this._slot1 = this.children instanceof Node ? this.children : (this.children != null ? document.createTextNode(String(this.children)) : document.createComment(''));
+      if (!this._asChild) this._el0.appendChild(this._slot1);
+      this._el2 = document.createElement('button');
+      this._t0 = document.createTextNode("inner");
+      this._el2.appendChild(this._t0);
+      this._el0.appendChild(this._el2);
+      return this._el0;
+    }
+  };
+  '''
+
+# On the host line of a tag-extending component, `class` and `style`
+# merge with the caller's instead of shutting rest out: the class write
+# ends with the rest view's `class` read and the style write merges by
+# key through the runtime, each as an effect (a rest write touches the
+# view), while both keys stay in _inheritedOwn so rest never writes
+# them on its own road. Reading `@rest.class` or `@rest.style` anywhere
+# in the body makes that key the author's: no append, no merge.
+code 'component extends: the host line merges class and style with the caller\'s', '''
+  export Btn = component extends button
+    @tone := 'plain'
+    render
+      button.base type: 'button', class: { loud: tone is 'loud' }, style: { color: 'red' }
+        slot
+  ''', '''
+  export const Btn = class extends __Component {
+    static __props = ['tone'];
+    static __extends = 'button';
+    _init(__given) {
+      this.tone = __state(__given.__bind_tone__ ?? __given.tone ?? "plain");
+    }
+    _create() {
+      this._el0 = this._asChild ? this._adoptChild() : document.createElement('button');
+      this._inheritedEl = this._el0;
+      this._inheritedOwn = new Set(["class", "type", "style", "className"]);
+      this._applyRestToInheritedEl();
+      this._el0.setAttribute('data-part', 'Btn');
+      this._el0.setAttribute('type', "button");
+      this._slot1 = this.children instanceof Node ? this.children : (this.children != null ? document.createTextNode(String(this.children)) : document.createComment(''));
+      if (!this._asChild) this._el0.appendChild(this._slot1);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { { const __v = {color: "red"}; __style(this._el0, this._mergeRestStyle(__v)); } });
+      __effect(() => { this._el0.className = __clsx('base', {loud: (this.tone.value === "loud")}, this.rest.value.class); });
+    }
+  };
+  '''
+
+code 'component extends: a static class pair and style on the host line become effects that merge', '''
+  export Tag = component extends span
+    render
+      span class: 'chip', style: { top: 0 }
+        slot
+  ''', '''
+  export const Tag = class extends __Component {
+    static __extends = 'span';
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = this._asChild ? this._adoptChild() : document.createElement('span');
+      this._inheritedEl = this._el0;
+      this._inheritedOwn = new Set(["class", "style", "className"]);
+      this._applyRestToInheritedEl();
+      this._el0.setAttribute('data-part', 'Tag');
+      this._slot1 = this.children instanceof Node ? this.children : (this.children != null ? document.createTextNode(String(this.children)) : document.createComment(''));
+      if (!this._asChild) this._el0.appendChild(this._slot1);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._el0.className = __clsx("chip", this.rest.value.class); });
+      __effect(() => { { const __v = {top: 0}; __style(this._el0, this._mergeRestStyle(__v)); } });
+    }
+  };
+  '''
+
+code 'component extends: a body that reads @rest.class owns the class list — no automatic append', '''
+  export Btn = component extends button
+    render
+      button.base class: @rest.class
+        slot
+  ''', '''
+  export const Btn = class extends __Component {
+    static __extends = 'button';
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = this._asChild ? this._adoptChild() : document.createElement('button');
+      this._inheritedEl = this._el0;
+      this._inheritedOwn = new Set(["class", "className"]);
+      this._applyRestToInheritedEl();
+      this._el0.setAttribute('data-part', 'Btn');
+      this._slot1 = this.children instanceof Node ? this.children : (this.children != null ? document.createTextNode(String(this.children)) : document.createComment(''));
+      if (!this._asChild) this._el0.appendChild(this._slot1);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._el0.className = __clsx('base', this.rest.value.class); });
+    }
+  };
+  '''
+
+code 'component extends: a body that reads @rest.style owns the style object — no merge', '''
+  export Btn = component extends button
+    own := { color: 'red' }
+    render
+      button style: (@rest.style ?? own)
+        slot
+  ''', '''
+  export const Btn = class extends __Component {
+    static __extends = 'button';
+    _init(__given) {
+      this.own = __state({color: "red"});
+    }
+    _create() {
+      this._el0 = this._asChild ? this._adoptChild() : document.createElement('button');
+      this._inheritedEl = this._el0;
+      this._inheritedOwn = new Set(["style"]);
+      this._applyRestToInheritedEl();
+      this._el0.setAttribute('data-part', 'Btn');
+      this._slot1 = this.children instanceof Node ? this.children : (this.children != null ? document.createTextNode(String(this.children)) : document.createComment(''));
+      if (!this._asChild) this._el0.appendChild(this._slot1);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { { const __v = (this.rest.value.style ?? this.own.value); __style(this._el0, __v); } });
+    }
+  };
+  '''
+
+# Under `extends <Component>` the wrapper's line merges the same two
+# keys on the value it passes down: `class` as the line's list with the
+# caller's appended and `style` through the runtime merge, re-pushed by
+# the updater effect on every rest write; the host then merges that one
+# value with its own line as it does any caller's.
+code 'component extends a component: the wrapper line merges class and style with the caller\'s', '''
+  import { Base } from './base.rip'
+  export Wrap = component extends Base
+    tone := 'plain'
+    render
+      Base class: ['wrap', { loud: tone is 'loud' }], style: { margin: '1px' }
+        slot
+  ''', '''
+  import { Base } from './base.rip';
+  export const Wrap = class extends __Component {
+    static __extends = 'Base';
+    _init(__given) {
+      this.tone = __state("plain");
+    }
+    _create() {
+      { const __prev = __pushComponent(this); try {
+      try {
+      this._inst0 = new Base({ ...this._rest, class: [["wrap", {loud: (this.tone.value === "loud")}], this.rest.value.class], style: this._mergeRestStyle({margin: "1px"}), children: this.children });
+      if (this._inst0 && this._inst0._initFailed) {
+        this._inst0 = null;
+        this._el1 = document.createComment('rip:child-init-failed: Base');
+      } else if (this._inst0._mountCreate()) {
+        this._el1 = this._inst0._root;
+        this._inheritedInst = this._inst0;
+        this._inheritedOwn = new Set(["class", "style", "className"]);
+        (this._children || (this._children = [])).push(this._inst0);
+      } else {
+        this._inst0 = null;
+        this._el1 = document.createComment('rip:child-error: Base');
+      }
+      } catch (__childErr) {
+        __reportChildFailure('Base', __childErr);
+        this._inst0 = null;
+        this._el1 = document.createComment('rip:child-error: Base');
+      }
+      } finally { __popComponent(__prev); } }
+      return this._el1;
+    }
+    _setup() {
+      if (this._inst0 && this._inst0._state === 'mounting') {
+        this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Base'));
+      }
+      __effect(() => { if (this._inst0) this._inst0._updateProp('class', [["wrap", {loud: (this.tone.value === "loud")}], this.rest.value.class]); });
+      __effect(() => { if (this._inst0) this._inst0._updateProp('style', this._mergeRestStyle({margin: "1px"})); });
+    }
+  };
+  '''
+
+fail 'asChild is reserved on an extends component', '''
+  Btn = component extends button
+    @asChild?: boolean
+    render
+      button
+        slot
+''', "emitter: a component that extends a host cannot declare a prop named 'asChild'"
+
+test 'asChild rides rest and is read as the mode; a component with no host has no flag', '''
+  A = component extends button
+    render
+      button
+        slot
+  B = component
+    render
+      div
+  [A.new({ asChild: true })._asChild, A.new({})._asChild, A.new({ asChild: true }).rest.value.asChild, B.new({})._asChild]
+''', [true, false, true, undefined]
 
 # ==============================================================================
 # Member initializer hoist — parenthetical multi-statement

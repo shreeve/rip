@@ -27,7 +27,7 @@ export Layout = component
           Drawer.Trigger
             class: 'flex size-8.5 items-center justify-center rounded-lg text-tertiary hover:bg-surface-hover hover:text-primary md:hidden'
             aria-label: 'Open navigation'
-            Icon name: 'menu', classes: 'size-4.5'
+            Icon name: 'menu', class: 'size-4.5'
           Drawer.Popup
             class: [
               'm-0 h-dvh max-h-none w-65 max-w-none -translate-x-full translate-y-0 bg-surface p-2.5 shadow-xl transition-[translate] duration-300 ease-drawer'
@@ -42,7 +42,7 @@ export Layout = component
           class: 'flex size-8.5 items-center justify-center rounded-lg text-tertiary hover:bg-surface-hover hover:text-primary'
           aria-label: if theme is 'dark' then 'Switch to the light theme' else 'Switch to the dark theme'
           @click: switchTheme
-          Icon name: (if theme is 'dark' then 'sun' else 'moon'), classes: 'size-4.5'
+          Icon name: if theme is 'dark' then 'sun' else 'moon', class: 'size-4.5'
       aside class: 'hidden min-h-0 flex-col overflow-y-auto border-r border-surface p-2.5 md:flex'
         Nav
       main class: 'min-h-0 overflow-y-auto md:col-start-2 md:row-span-2 md:row-start-1'

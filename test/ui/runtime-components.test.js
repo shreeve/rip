@@ -2285,3 +2285,373 @@ describe('the component language surface (M12-B graduated boundary)', () => {
     expect(compile('x < ~load()').code).toBe('x < (~load());');
   });
 });
+
+// `asChild` on an extends component: the projected element renders as
+// the host. Compiled parts drive it, since the mode is the host line's
+// fork; hmr builds, since the rebind is the patch machinery.
+describe('asChild: the projected element is the host', () => {
+  const load = (src, names) => {
+    const { code } = fullCompile(src, { path: 'aschild.rip', runtimeDelivery: 'none', hmr: true });
+    const body = code.replace(/^export /gm, '');
+    const keys = Object.keys(RT);
+    return new Function(...keys, `${body}\nreturn { ${names} };`)(...keys.map((n) => RT[n]));
+  };
+  const PART = `export Part = component extends button
+  open := false
+  el: HTMLElement | null := null
+  render
+    button
+      ref: el
+      type: 'button'
+      aria-expanded: if open then 'true' else 'false'
+      @click: (-> open = true)
+      slot
+`;
+  const BUTTON = (cls) => `export Button = component extends button
+  @variant := 'primary'
+  render
+    button class: '${cls}', data-variant: variant
+      slot
+`;
+  const APP = (cls) => `${PART}
+${BUTTON(cls)}
+export App = component
+  clicks := 0
+  render
+    div
+      Part asChild, id: 'x', title: 't', @click: (-> clicks += 1)
+        Button variant: 'ghost', 'Go'
+`;
+  const mountApp = (cls = 'a') => {
+    const mod = load(APP(cls), 'App, Part, Button');
+    const target = document.createElement('main');
+    const app = new mod.App({});
+    app.mount(target);
+    const [button, part] = app._children;
+    return { mod, target, app, button, part };
+  };
+
+  test('the host is the child component\'s root: the line\'s keys, its listener, the ref, the stamp, and rest all land there; the caller\'s listener adds; the bare word is the mode', () => {
+    const { target, app, button, part } = mountApp();
+    const host = part._inheritedEl;
+    expect(host).toBe(button._root);
+    expect(part._root).toBe(host);
+    expect(part.el.value).toBe(host);
+    expect(serialize(target)).toBe('<main><div data-part="App"><button class="a" data-part="Part" id="x" title="t" type="button" data-variant="ghost" aria-expanded="false">Go</button></div></main>');
+    expect(host.childNodes.map((n) => n.nodeType)).toEqual([3]);
+    host.dispatchEvent({ type: 'click', bubbles: false });
+    expect(host.getAttribute('aria-expanded')).toBe('true');
+    expect(app.clicks.value).toBe(1);
+    expect(host.getAttribute('asChild')).toBeNull();
+    expect(part._rest.asChild).toBe(true);
+    expect(part._asChild).toBe(true);
+  });
+
+  test('the line\'s keys stay the line\'s under the mode: a rest value for one is refused at mount and on update', () => {
+    const { Part } = load(PART, 'Part');
+    const span = document.createElement('span');
+    const part = new Part({ asChild: true, children: span, type: 'submit' });
+    part.mount(document.createElement('main'));
+    expect(span.getAttribute('type')).toBe('button');
+    part._updateProp('type', 'reset');
+    expect(span.getAttribute('type')).toBe('button');
+    part._updateProp('title', 'later');
+    expect(span.getAttribute('title')).toBe('later');
+  });
+
+  test('without the mode the same part builds its own tag and projects the child into it: byte-identical DOM to the rule before the mode', () => {
+    const { App, Part } = load(`${PART}
+${BUTTON('a')}
+export App = component
+  render
+    div
+      Part id: 'x'
+        Button 'Go'
+`, 'App, Part');
+    const target = document.createElement('main');
+    new App({}).mount(target);
+    expect(serialize(target)).toBe('<main><div data-part="App"><button id="x" data-part="Part" type="button" aria-expanded="false"><button class="a" data-part="Button" data-variant="primary">Go</button></button></div></main>');
+    expect(new Part({}).rest.value.asChild).toBeUndefined();
+  });
+
+  test('one element or a throw naming the part: a fragment, text, a comment, and no body are refused at mount', () => {
+    const { Part } = load(PART, 'Part');
+    const mount = (children) => () => new Part({ asChild: true, children }).mount(document.createElement('main'));
+    const frag = document.createDocumentFragment();
+    frag.appendChild(document.createElement('i'));
+    frag.appendChild(document.createElement('b'));
+    expect(mount(frag)).toThrow('Part: asChild renders the projected element as the host, so the body must be exactly one element — got a fragment of 2 nodes');
+    expect(mount(document.createTextNode('x'))).toThrow('got text');
+    expect(mount(document.createComment('rip:child-error: Button'))).toThrow('got a comment');
+    expect(mount(undefined)).toThrow('got nothing');
+    // The failed mount rolled back: the instance is terminal.
+    const failed = new Part({ asChild: true });
+    expect(() => failed.mount(document.createElement('main'))).toThrow('got nothing');
+    expect(failed._state).toBe('failed');
+  });
+
+  test('asChild is fixed at construction: a container or a non-boolean is refused there, an update is refused, and a declared prop of the name rejects at compile', () => {
+    const { Part } = load(PART, 'Part');
+    expect(() => new Part({ asChild: RT.__state(true) })).toThrow('Part: asChild takes true or nothing, fixed at construction — got a reactive value');
+    expect(() => new Part({ asChild: 'yes' })).toThrow('got string yes');
+    const part = new Part({ asChild: true, children: document.createElement('span') });
+    part.mount(document.createElement('main'));
+    expect(() => part._updateProp('asChild', false)).toThrow('Part: asChild is fixed at construction and takes no update');
+    expect(() => fullCompile('P = component extends button\n  @asChild?: boolean\n  render\n    button\n      slot\n', { path: 'p.rip', runtimeDelivery: 'none' }))
+      .toThrow("cannot declare a prop named 'asChild'");
+  });
+
+  test('a rebuilt child rebinds: the part\'s writers leave the old element and land on the new one, the ref follows, and the cascade reaches a part adopted above', () => {
+    const { target, app, button, part } = mountApp('a');
+    const host = part._inheritedEl;
+    host.dispatchEvent({ type: 'click', bubbles: false });
+    expect(host.getAttribute('aria-expanded')).toBe('true');
+    const next = load(APP('b'), 'App, Part, Button');
+    expect(RT.__hmrClassify(button.constructor, next.Button)).toBe('patch');
+    RT.__hmrPatch(button, next.Button);
+    const host2 = button._root;
+    expect(host2).not.toBe(host);
+    expect(part._inheritedEl).toBe(host2);
+    expect(part._root).toBe(host2);
+    expect(part.el.value).toBe(host2);
+    expect(serialize(target)).toBe('<main><div data-part="App"><button class="b" data-part="Part" data-variant="ghost" id="x" title="t" type="button" aria-expanded="true">Go</button></div></main>');
+    // The setup effect writes the new element only; the old one is inert.
+    part.open.value = false;
+    expect(host2.getAttribute('aria-expanded')).toBe('false');
+    expect(host.getAttribute('aria-expanded')).toBe('true');
+    // The line's listener moved with the view.
+    host2.dispatchEvent({ type: 'click', bubbles: false });
+    expect(host2.getAttribute('aria-expanded')).toBe('true');
+    // One rest writer per key, none leaked on the old element: a later
+    // rest update reaches the new host alone.
+    part._updateProp('title', 'moved');
+    expect(host2.getAttribute('title')).toBe('moved');
+    expect(host.getAttribute('title')).toBe('t');
+    expect(part._state).toBe('mounted');
+    // Two parts on one element: the outer part adopted the inner's root,
+    // and a rebuild of the child reaches both.
+    const nested = load(`${PART}
+${BUTTON('a')}
+export Outer = component extends button
+  render
+    button data-outer: 'y'
+      slot
+export App = component
+  render
+    div
+      Outer asChild: true
+        Part asChild: true
+          Button 'Go'
+`, 'App, Part, Button, Outer');
+    const target2 = document.createElement('main');
+    const app2 = new nested.App({});
+    app2.mount(target2);
+    const [button2, part2, outer] = app2._children;
+    expect(outer._inheritedEl).toBe(button2._root);
+    expect(part2._inheritedEl).toBe(button2._root);
+    RT.__hmrPatch(button2, next.Button);
+    expect(part2._inheritedEl).toBe(button2._root);
+    expect(outer._inheritedEl).toBe(button2._root);
+    expect(serialize(target2)).toBe('<main><div data-part="App"><button class="b" data-part="Outer" data-variant="primary" type="button" aria-expanded="false" data-outer="y">Go</button></div></main>');
+  });
+
+  test('a patch of the adopting part itself keeps the host in place and adopts it again', () => {
+    const { mod, target, button, part } = mountApp('a');
+    const host = part._inheritedEl;
+    const next = load(APP('a').replace("type: 'button'", "type: 'button'\n      data-v: '2'"), 'App, Part, Button');
+    expect(RT.__hmrClassify(mod.Part, next.Part)).toBe('patch');
+    RT.__hmrPatch(part, next.Part);
+    expect(part._inheritedEl).toBe(host);
+    expect(button._root).toBe(host);
+    expect(host.parentNode).toBe(target.childNodes[0]);
+    expect(host.getAttribute('data-v')).toBe('2');
+    expect(target.childNodes[0].childNodes.length).toBe(1);
+  });
+});
+
+// On the host line of a tag-extending component, `class` and `style`
+// merge with the caller's: the emitted class effect ends with the rest
+// view's `class` read, and the style effect merges by key through
+// `_mergeRestStyle`, which refuses a key both sides set. Reading the
+// key back through `@rest` hands it to the author.
+describe('extends: the host line merges class and style with the caller\'s', () => {
+  const load = (src, names) => {
+    const { code } = fullCompile(src, { path: 'merge.rip', runtimeDelivery: 'none' });
+    const body = code.replace(/^export /gm, '');
+    const keys = Object.keys(RT);
+    return new Function(...keys, `${body}\nreturn { ${names} };`)(...keys.map((n) => RT[n]));
+  };
+  const mount = (Cls, props) => {
+    const inst = new Cls(props);
+    const target = document.createElement('main');
+    inst.mount(target);
+    return { inst, el: inst._inheritedEl, target };
+  };
+  const BTN = `export Btn = component extends button
+  @tone := 'plain'
+  render
+    button.base type: 'button', class: { loud: tone is 'loud' }, style: { color: 'red' }
+      slot
+`;
+
+  test("a caller's class lands after the line's, static or reactive, and an update through _updateProp('class') applies", () => {
+    const { Btn } = load(BTN, 'Btn');
+    const fixed = mount(Btn, { class: 'mt-4' });
+    expect(fixed.el.className).toBe('base mt-4');
+    expect(fixed.inst._inheritedOwn.has('class')).toBe(true);
+    fixed.inst.tone.value = 'loud';
+    expect(fixed.el.className).toBe('base loud mt-4');
+    fixed.inst._updateProp('class', ['mb-2', { hidden: false, shown: true }]);
+    expect(fixed.el.className).toBe('base loud mb-2 shown');
+    fixed.inst._updateProp('class', null);
+    expect(fixed.el.className).toBe('base loud');
+    const live = RT.__state('one');
+    const reactive = mount(Btn, { class: live });
+    expect(reactive.el.className).toBe('base one');
+    live.value = 'two';
+    expect(reactive.el.className).toBe('base two');
+  });
+
+  test("a style key from each side lands; a shared key against a literal line style throws naming the part and the key, at mount and on update", () => {
+    const { Btn } = load(BTN, 'Btn');
+    const { inst, el } = mount(Btn, { style: { margin: '1px' } });
+    expect(el.style.color).toBe('red');
+    expect(el.style.margin).toBe('1px');
+    inst._updateProp('style', { padding: '2px' });
+    expect(el.style.padding).toBe('2px');
+    expect(el.style.margin).toBe('');
+    expect(el.style.color).toBe('red');
+    inst._updateProp('style', null);
+    expect(el.style.padding).toBe('');
+    expect(el.style.color).toBe('red');
+    expect(() => mount(Btn, { style: { color: 'blue' } }))
+      .toThrow("Btn: style key 'color' is set by the host line and by the caller — a shared key is refused, never resolved by precedence");
+    expect(() => inst._updateProp('style', { color: 'blue' })).toThrow("Btn: style key 'color' is set by the host line and by the caller");
+    expect(() => mount(Btn, { style: 'color: blue' })).toThrow('Btn: style merges by key, and a string style has none');
+  });
+
+  test('a shared key against a computed line style throws naming the part and the key; the rest of the object merges', () => {
+    const { Anchor } = load(`export Anchor = component extends div
+  place := { top: '1px' }
+  render
+    div style: place
+      slot
+`, 'Anchor');
+    const { inst, el } = mount(Anchor, { style: { left: '2px' } });
+    expect(el.style.top).toBe('1px');
+    expect(el.style.left).toBe('2px');
+    inst.place.value = { top: '3px', right: '0' };
+    expect(el.style.top).toBe('3px');
+    expect(el.style.right).toBe('0');
+    expect(el.style.left).toBe('2px');
+    expect(() => mount(Anchor, { style: { top: '9px' } }))
+      .toThrow("Anchor: style key 'top' is set by the host line and by the caller — a shared key is refused, never resolved by precedence");
+    const failed = new Anchor({ style: { top: '9px' } });
+    expect(() => failed.mount(document.createElement('main'))).toThrow("style key 'top'");
+    expect(failed._state).toBe('failed');
+    // The line's computed value moving onto a caller's key is the same refusal.
+    expect(() => { inst.place.value = { left: '4px' }; }).toThrow("Anchor: style key 'left' is set by the host line and by the caller");
+  });
+
+  test('a caller\'s class or style on a line that sets neither still rides the rest road', () => {
+    const { Plain } = load(`export Plain = component extends span
+  render
+    span title: 't'
+      slot
+`, 'Plain');
+    const { inst, el } = mount(Plain, { class: 'a', style: { color: 'red' } });
+    expect(el.className).toBe('a');
+    expect(el.style.color).toBe('red');
+    inst._updateProp('class', 'b');
+    inst._updateProp('style', { color: 'blue' });
+    expect(el.className).toBe('b');
+    expect(el.style.color).toBe('blue');
+  });
+
+  test("a wrapper's line merges the same keys on the value it passes down, and the host merges that with its own; a shared key is loud on either line", () => {
+    const BASE = `export Base = component extends button
+  render
+    button.base style: { color: 'red' }
+      slot
+`;
+    const { Wrap } = load(`${BASE}
+export Wrap = component extends Base
+  tone := 'plain'
+  render
+    Base class: ['wrap', { loud: tone is 'loud' }], style: { margin: '1px' }
+      slot
+`, 'Wrap');
+    // `className` is the same key as `class` in the rest map.
+    const { inst, target } = mount(Wrap, { className: 'mine', style: { padding: '2px' } });
+    const host = inst._inheritedInst._inheritedEl;
+    expect(host.className).toBe('base wrap mine');
+    expect([host.style.color, host.style.margin, host.style.padding]).toEqual(['red', '1px', '2px']);
+    inst.tone.value = 'loud';
+    inst._updateProp('class', 'yours');
+    inst._updateProp('style', { top: '1px' });
+    expect(host.className).toBe('base wrap loud yours');
+    expect([host.style.padding, host.style.top, host.style.margin]).toEqual(['', '1px', '1px']);
+    expect(inst.rest.value.className).toBe('yours');
+    // A key the wrapper's line sets: the wrapper's merge throws while its
+    // construction evaluates, which the child road reports naming the part
+    // and the key and leaves the failure comment in the host's place.
+    const failures = [];
+    const prev = RT.__setChildFailureReporter((name, e) => failures.push([name, e.message]));
+    try {
+      const t2 = document.createElement('main');
+      new Wrap({ style: { margin: '9px' } }).mount(t2);
+      expect(serialize(t2)).toBe('<main><!--rip:child-error: Base--></main>');
+      expect(failures).toEqual([['Base', "Wrap: style key 'margin' is set by the host line and by the caller — a shared key is refused, never resolved by precedence"]]);
+    } finally { RT.__setChildFailureReporter(prev); }
+    // A key the host's line sets: the host's own merge throws at its write.
+    expect(() => new Wrap({ style: { color: 'blue' } }).mount(document.createElement('main')))
+      .toThrow("Base: style key 'color' is set by the host line and by the caller");
+    expect(() => inst._updateProp('style', { margin: '3px' })).toThrow("Wrap: style key 'margin' is set by the host line and by the caller");
+    // The wrapper's line owns both spellings whichever it uses: a caller's
+    // `class` against a line `className` reaches the merge, never the rest road.
+    const { Spelled } = load(`${BASE}
+export Spelled = component extends Base
+  render
+    Base className: 'wrap'
+      slot
+`, 'Spelled');
+    const s = mount(Spelled, { class: 'mine' });
+    const shost = s.inst._inheritedInst._inheritedEl;
+    expect(shost.className).toBe('base wrap mine');
+    s.inst._updateProp('class', 'yours');
+    expect(shost.className).toBe('base wrap yours');
+    // Manual mode on a wrapper: the list and object pass exactly as spelled.
+    const { Manual } = load(`${BASE}
+export Manual = component extends Base
+  render
+    Base class: [@rest.class, 'last'], style: (@rest.style ?? { margin: '2px' })
+      slot
+`, 'Manual');
+    const m = mount(Manual, { class: 'mine', style: { padding: '1px' } });
+    const mhost = m.inst._inheritedInst._inheritedEl;
+    expect(mhost.className).toBe('base mine last');
+    expect(mhost.style.margin).toBeFalsy();
+    expect(mhost.style.padding).toBe('1px');
+    m.inst._updateProp('style', null);
+    expect(mhost.style.margin).toBe('2px');
+  });
+
+  test('manual mode: a body that reads @rest.class or @rest.style owns that key — the author\'s list and object stand alone', () => {
+    const { Btn } = load(`export Btn = component extends button
+  own := { color: 'red' }
+  render
+    button.base class: [@rest.class, 'last'], style: (@rest.style ?? own)
+      slot
+`, 'Btn');
+    const { inst, el } = mount(Btn, { class: 'mine', style: { color: 'blue' } });
+    expect(el.className).toBe('base mine last');
+    expect(el.style.color).toBe('blue');
+    inst._updateProp('class', 'yours');
+    expect(el.className).toBe('base yours last');
+    inst._updateProp('style', null);
+    expect(el.style.color).toBe('red');
+    const bare = mount(Btn, {});
+    expect(bare.el.className).toBe('base last');
+    expect(bare.el.style.color).toBe('red');
+  });
+});

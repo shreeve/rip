@@ -1,0 +1,38 @@
+import { Button } from './button.rip'
+
+export Page = component
+  @title: string
+  @description: string
+  render
+    div class: 'mx-auto flex max-w-2xl flex-col gap-8 px-5 py-8 md:px-8 md:py-10'
+      div
+        h1 class: 'text-2xl font-semibold', title
+        p class: 'mt-2 text-secondary', description
+      slot
+
+export Stage = component
+  render
+    div class: 'flex items-center justify-center rounded-xl border border-surface bg-surface py-16'
+      slot
+
+export Controls = component
+  render
+    section class: 'flex flex-col gap-4 rounded-xl border border-surface bg-surface p-5'
+      slot
+
+export Row = component
+  @name: string
+  render
+    div role: 'group', aria-label: name, class: 'flex flex-wrap items-center gap-2'
+      span class: 'w-24 shrink-0 font-mono text-sm text-secondary', name
+      slot
+
+export Choice = component extends Button
+  @pressed: boolean
+  render
+    Button
+      variant: 'secondary'
+      size: 'sm'
+      aria-pressed: if pressed then 'true' else 'false'
+      class: 'aria-pressed:bg-surface-active aria-pressed:text-primary'
+      slot

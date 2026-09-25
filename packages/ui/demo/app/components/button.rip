@@ -1,0 +1,19 @@
+type Variant = 'primary' | 'secondary'
+type Size = 'sm' | 'md'
+
+export Button = component extends button
+  @variant?: Variant := 'primary'
+  @size?: Size := 'md'
+  render
+    button
+      type: 'button'
+      class: [
+        'rounded-lg border px-3 text-sm font-medium'
+        {
+          'border-transparent bg-accent text-on-accent hover:bg-accent-hover active:bg-accent-active': variant is 'primary'
+          'border-input bg-input text-secondary hover:bg-input-hover active:bg-input-active': variant is 'secondary'
+          'py-1.5': size is 'sm'
+          'py-2': size is 'md'
+        }
+      ]
+      slot

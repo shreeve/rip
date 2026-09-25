@@ -111,6 +111,7 @@ export Title = component extends h2
   ~>
     labelledBy = id
     -> labelledBy = ''
+
   render
     h2 id: id
       slot
@@ -121,6 +122,7 @@ export Description = component extends p
   ~>
     describedBy = id
     -> describedBy = ''
+
   render
     p id: id
       slot

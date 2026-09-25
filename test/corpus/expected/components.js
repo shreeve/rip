@@ -755,7 +755,7 @@ let FancyBtn = class extends __Component {
     this.label = __state(__given.__bind_label__ ?? __given.label ?? "go");
   }
   _create() {
-    this._el0 = document.createElement('button');
+    this._el0 = this._asChild ? this._adoptChild() : document.createElement('button');
     this._inheritedEl = this._el0;
     this._applyRestToInheritedEl();
     this._el0.setAttribute('data-part', 'FancyBtn');

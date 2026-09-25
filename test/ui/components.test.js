@@ -2432,7 +2432,7 @@ describe('`extends <tag>`: the rest-forwarding surface', () => {
   test('static __extends + the inherited-target binding lines (\'s order: create, inherited, data-part)', () => {
     const { code } = compile('Btn = component extends button\n  @label := "b"\n  render\n    button\n      = @label\n');
     expect(code).toContain("static __extends = 'button';");
-    const created = code.indexOf("this._el0 = document.createElement('button');");
+    const created = code.indexOf("this._el0 = this._asChild ? this._adoptChild() : document.createElement('button');");
     const bound = code.indexOf('this._inheritedEl = this._el0;');
     const applied = code.indexOf('this._applyRestToInheritedEl();');
     const part = code.indexOf("setAttribute('data-part', 'Btn')");

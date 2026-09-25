@@ -3335,6 +3335,35 @@ function rewriteRender(tokens, mintId, fail) {
     tokens[i] = out[i];
   return tokens;
 }
+var PATTERN_OPS = new Set(["=", "state", "readonly"]);
+function restReadKeys(stmts) {
+  const reads = new Set;
+  const isNode = Array.isArray;
+  const isRestView = (n) => isNode(n) && n[0] === "." && n[1] === "this" && n[2] === "rest";
+  const unquote = (k) => k.replace(/^"|"$/g, "");
+  const scan = (n) => {
+    if (!isNode(n))
+      return;
+    if (n[0] === "." && isRestView(n[1]) && typeof n[2] === "string")
+      reads.add(n[2]);
+    else if (n[0] === "[]" && isRestView(n[1]) && typeof n[2] === "string" && /^".*"$/.test(n[2]))
+      reads.add(unquote(n[2]));
+    else if (PATTERN_OPS.has(n[0]) && n.length === 3 && isNode(n[1]) && n[1][0] === "object" && isRestView(n[2])) {
+      for (const pair of n[1].slice(1))
+        if (isNode(pair) && typeof pair[1] === "string")
+          reads.add(unquote(pair[1]));
+    }
+    for (const c of n)
+      scan(c);
+  };
+  for (const st of stmts)
+    scan(st);
+  if (reads.has("class") || reads.has("className")) {
+    reads.add("class");
+    reads.add("className");
+  }
+  return reads;
+}
 
 // src/implicit.js
 function applyInsertions(tokens, collect, mintId) {
@@ -9068,7 +9097,8 @@ var COMPONENT_RUNTIME_FIELDS = new Set([
   "_initFailed",
   "_hmrOrphans",
   "_hmrReleasing",
-  "_hmrPropKeys"
+  "_hmrPropKeys",
+  "_asChild"
 ]);
 var BINOPS = new Set(["+", "-", "*", "/", "%", "**", "<", ">", "<=", ">=", "==", "!=", "&&", "||", "??", "<<", ">>", ">>>", "&", "^", "|"]);
 var ASSIGNS = new Set(["=", "void-assign", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??=", "<<=", ">>=", ">>>=", "&=", "^=", "|="]);
@@ -16158,6 +16188,9 @@ ${pad ?? ""}`);
       }
       members.set("rest", "rest");
       memberReactive.add("rest");
+      if (declaredProps.includes("asChild")) {
+        throw this.positionedError(seen.get("asChild"), "emitter: a component that extends a host cannot declare a prop named 'asChild' — `asChild` at a " + "call site renders the projected element as the host, and the key is reserved beside key, ref, and children", node);
+      }
     }
     if (this.scopes.length === 1 && typeof this._componentName === "string") {
       const prior = this.moduleComponentNames.get(this._componentName);
@@ -16185,7 +16218,8 @@ ${pad ?? ""}`);
     }
     if (extendsHost !== null)
       memberKinds.set("rest", { label: "rest", optional: false });
-    const frame = { members, memberReactive, memberKinds, name: this._componentName, extendsTag, extendsComponent, plainWrites: new Map, renderPlainReads: new Set };
+    const restReads = extendsHost !== null ? restReadKeys(stmts) : new Set;
+    const frame = { members, memberReactive, memberKinds, name: this._componentName, extendsTag, extendsComponent, restReads, plainWrites: new Map, renderPlainReads: new Set };
     const ind = this.ind;
     const pad = "  ".repeat(ind + 1);
     const ipad = pad + "  ";
@@ -17142,11 +17176,46 @@ ${pad ?? ""}`);
     }
     return t;
   }
+  isInheritedTarget(tag) {
+    const R = this.rstate;
+    return R.frame.extendsTag === tag && R.sink.kind === "class" && R.frame.inheritedBound !== true;
+  }
+  mergesRestKey(el, key) {
+    const R = this.rstate;
+    return R.frame.extendsTag !== null && R.frame.inheritedEl === el && !R.frame.restReads.has(key);
+  }
+  emitRestRead(key) {
+    this.b.emit(`${this.renderSelf ?? "this"}.rest.value.${key}`);
+  }
+  hostMergeKey(cleanKey) {
+    const R = this.rstate;
+    if (R.frame.extendsComponent === null)
+      return null;
+    if (cleanKey === "class" || cleanKey === "className")
+      return R.frame.restReads.has("class") ? null : "class";
+    if (cleanKey === "style")
+      return R.frame.restReads.has("style") ? null : "style";
+    return null;
+  }
+  emitHostMerge(merge, value) {
+    if (merge === "class") {
+      this.b.emit("[");
+      this.renderExpr(value);
+      this.b.emit(", ");
+      this.emitRestRead("class");
+      this.b.emit("]");
+    } else {
+      this.b.emit(`${this.renderSelf ?? "this"}._mergeRestStyle(`);
+      this.renderExpr(value);
+      this.b.emit(")");
+    }
+  }
   bindInheritedTarget(node, tag, el, own) {
     const R = this.rstate;
-    if (R.frame.extendsTag !== tag || R.sink.kind !== "class" || R.frame.inheritedBound === true)
+    if (!this.isInheritedTarget(tag))
       return;
     R.frame.inheritedBound = true;
+    R.frame.inheritedEl = el;
     this.renderLine(node, () => this.b.emit(`this._inheritedEl = ${el}`));
     if (own.length > 0) {
       this.renderLine(node, () => this.b.emit(`this._inheritedOwn = new Set([${own.map((k) => JSON.stringify(k)).join(", ")}])`));
@@ -17197,11 +17266,16 @@ ${pad ?? ""}`);
     const isSvg = R.svgDepth > 0 || SVG_ONLY_TAGS.has(tag);
     if (isSvg)
       R.svgEls.add(el);
+    const adopts = this.isInheritedTarget(tag);
     this.renderLine(node, () => {
+      const self = this.renderSelf ?? "this";
+      this.b.emit(`${el} = `);
+      if (adopts)
+        this.b.emit(`${self}._asChild ? ${self}._adoptChild() : `);
       if (isSvg)
-        this.b.emit(`${el} = document.createElementNS('${Emitter.SVG_NS}', `);
+        this.b.emit(`document.createElementNS('${Emitter.SVG_NS}', `);
       else
-        this.b.emit(`${el} = document.createElement(`);
+        this.b.emit(`document.createElement(`);
       const span = this.emitQuotedPrimitive(tag);
       if (span !== null && surfaceableTag(tag, isSvg)) {
         this.intrinsics.push({ start: span[0], end: span[1], kind: "tag", tag, svg: isSvg });
@@ -17238,6 +17312,8 @@ ${pad ?? ""}`);
     if (isSvg)
       R.svgDepth--;
     if (classes.length > 0) {
+      if (this.mergesRestKey(el, "class"))
+        R.pendingClassArgs.push(() => this.emitRestRead("class"));
       if (R.pendingClassArgs.length === 1) {
         this.renderLine(node, () => this.b.emit(isSvg ? `${el}.setAttribute('class', '${classes.join(" ")}')` : `${el}.className = '${classes.join(" ")}'`));
       } else {
@@ -17295,6 +17371,8 @@ ${pad ?? ""}`);
     this.renderChildren(el, children, node);
     if (isSvg)
       R.svgDepth--;
+    if (this.mergesRestKey(el, "class"))
+      R.pendingClassArgs.push(() => this.emitRestRead("class"));
     const parts = R.pendingClassArgs;
     const keys = R.pendingClassKeys ?? [];
     if (parts.length > 0) {
@@ -17348,6 +17426,12 @@ ${pad ?? ""}`);
       this._textOwner = prevOwner;
     }
   }
+  renderAppend(el, v) {
+    this.renderLine(null, () => {
+      const guard = v === this.rstate.frame?.asChildSlot ? `if (!${this.renderSelf ?? "this"}._asChild) ` : "";
+      this.b.emit(`${guard}${el}.appendChild(${v})`);
+    });
+  }
   renderChildrenOf(el, args, owner) {
     for (let k = 0;k < args.length; k++) {
       const arg = args[k];
@@ -17365,14 +17449,14 @@ ${pad ?? ""}`);
               const v = this.renderNode(child);
               if (v == null)
                 continue;
-              this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
+              this.renderAppend(el, v);
             }
           }
         } else if (block) {
           if (!this.renderOwnLineWord(el, block, [block], 0, owner)) {
             const v = this.renderNode(block);
             if (v != null)
-              this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
+              this.renderAppend(el, v);
           }
         }
         continue;
@@ -17405,12 +17489,12 @@ ${pad ?? ""}`);
         }
         if (isHtmlTag2(base || "div")) {
           const v = this.renderNode(arg);
-          this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
+          this.renderAppend(el, v);
           continue;
         }
         if (isComponentName(base) && base === arg) {
           const v = this.renderChildComponent(arg, arg, []);
-          this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
+          this.renderAppend(el, v);
           continue;
         }
         if (/^[A-Za-z_$][\w$]*$/.test(arg) && this.resolveBareRead(arg) === null && !this.inScope(arg)) {
@@ -17448,7 +17532,7 @@ ${pad ?? ""}`);
       }
       if (arg != null) {
         const v = this.renderNode(arg);
-        this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
+        this.renderAppend(el, v);
       }
     }
   }
@@ -17527,6 +17611,8 @@ ${pad ?? ""}`);
     }
     this.claimSlot(markNode);
     const v = this.newRenderVar("slot");
+    if (this.rstate.frame.extendsTag !== null && this.rstate.sink.kind === "class")
+      this.rstate.frame.asChildSlot = v;
     const slotSpan = this.ts ? this.wordSpanIn("slot", markNode ?? this.rstate.node) : null;
     this.renderLine(markNode, () => {
       const c = this.childrenReadText();
@@ -17665,6 +17751,13 @@ ${pad ?? ""}`);
         }
         this.checkCrossScopeLocals(value, pair);
         props.push({ pair, key, fn: () => this.renderExpr(value) });
+        return;
+      }
+      const merge = isHost ? this.hostMergeKey(cleanKey) : null;
+      if (merge !== null) {
+        this.checkCrossScopeLocals(value, pair);
+        props.push({ pair, key, fn: () => this.emitHostMerge(merge, value) });
+        updaters.push({ pair, key, value, merge });
         return;
       }
       this.addChildProp(props, updaters, pair, key, cleanKey, value);
@@ -17985,7 +18078,12 @@ ${this.replayPad}}` : " }");
     });
     line(() => this.b.emit(`  ${elVar} = ${instVar}._root;`));
     if (isHost) {
-      const own = [...seenKeys.keys()].filter((k) => k !== "children").map((k) => JSON.stringify(k)).join(", ");
+      const ownKeys = new Set([...seenKeys.keys()].filter((k) => k !== "children"));
+      if (ownKeys.has("class") || ownKeys.has("className")) {
+        ownKeys.add("class");
+        ownKeys.add("className");
+      }
+      const own = [...ownKeys].map((k) => JSON.stringify(k)).join(", ");
       line(() => this.b.emit(`  ${self()}._inheritedInst = ${instVar};`));
       line(() => this.b.emit(`  ${self()}._inheritedOwn = new Set([${own}]);`));
     }
@@ -18071,11 +18169,14 @@ ${this.replayPad}}` : " }");
 `);
       }
     });
-    for (const { pair, key, value } of updaters) {
+    for (const { pair, key, value, merge = null } of updaters) {
       const cleanKey = key.startsWith('"') && key.endsWith('"') ? key.slice(1, -1) : key;
       this.renderEffect(pair, () => {
         this.b.emit(`if (${instVar}) ${instVar}._updateProp('${cleanKey}', `);
-        this.renderExpr(value);
+        if (merge !== null)
+          this.emitHostMerge(merge, value);
+        else
+          this.renderExpr(value);
         this.b.emit(");");
       }, value);
     }
@@ -18325,9 +18426,10 @@ ${this.replayPad}}` : " }");
             (R.pendingClassKeys ??= []).push([extent[0], extent[0] + key.length]);
           }
           R.pendingClassArgs.push(() => site(this.renderExpr(value)));
-        } else if (this.renderReactive(value)) {
+        } else if (this.renderReactive(value) || this.mergesRestKey(el, "class")) {
           const isSvg = R.svgDepth > 0;
           const recv = this.tsElReceiver(el);
+          const merges = this.mergesRestKey(el, "class");
           this.renderEffect(pair, () => {
             const clsx = this.runtimeName("__clsx");
             recv.emit();
@@ -18342,6 +18444,10 @@ ${this.replayPad}}` : " }");
               this.b.emit(` = ${clsx}(`);
             }
             site(this.renderExpr(value));
+            if (merges) {
+              this.b.emit(", ");
+              this.emitRestRead("class");
+            }
             this.b.emit(isSvg ? "));" : ");");
           }, value);
         } else {
@@ -18457,6 +18563,7 @@ ${this.replayPad}}` : " }");
       }
       if (key === "style") {
         const recv = this.tsElReceiver(el);
+        const merges = this.mergesRestKey(el, "style");
         const write = () => {
           this.b.emit("{ const __v");
           site([this.b.offset - 3, this.b.offset]);
@@ -18475,9 +18582,9 @@ ${this.replayPad}}` : " }");
           this.renderExpr(value);
           this.b.emit(`; ${this.runtimeName("__style")}(`);
           recv.emit();
-          this.b.emit(", __v); }");
+          this.b.emit(merges ? `, ${this.renderSelf ?? "this"}._mergeRestStyle(__v)); }` : ", __v); }");
         };
-        if (this.renderReactive(value))
+        if (merges || this.renderReactive(value))
           this.renderEffect(pair, write, value);
         else
           this.renderLine(pair, write, false);
@@ -26746,9 +26853,10 @@ var __BOOLEAN_ATTRS = new Set([
   "shadowrootclonable",
   "shadowrootserializable"
 ]);
+var __restKey = (key) => key === "className" ? "class" : key;
 var __restView = (rest) => new Proxy(rest, {
   get(map, key) {
-    const held = map[key];
+    const held = map[typeof key === "string" ? __restKey(key) : key];
     return held != null && typeof held === "object" && typeof held.read === "function" ? held.value : held;
   }
 });
@@ -26768,12 +26876,35 @@ function __splitProps(ctor, props) {
     if (declared.includes(key))
       continue;
     if (extendsTag !== null) {
-      (rest ??= {})[key] = props[key];
+      (rest ??= {})[__restKey(key)] = props[key];
       continue;
     }
     throw new Error(`${ctor.name || "component"}: unknown prop '${key}' — declared props are ` + `[${declared.join(", ")}]`);
   }
   return rest;
+}
+function __asChildOf(ctor, rest) {
+  const value = rest?.asChild;
+  if (value == null || value === false)
+    return false;
+  if (value === true)
+    return true;
+  const shape = typeof value === "object" && typeof value.read === "function" ? "a reactive value" : `${typeof value} ${String(value)}`;
+  throw new Error(`${ctor.name || "component"}: asChild takes true or nothing, fixed at construction — got ${shape}`);
+}
+function __projected(children) {
+  return children != null && typeof children === "object" && typeof children.read === "function" ? children.value : children;
+}
+function __describeProjection(node) {
+  if (node == null)
+    return "nothing";
+  if (node.nodeType === 3)
+    return "text";
+  if (node.nodeType === 8)
+    return "a comment";
+  if (node.nodeType === 11)
+    return `a fragment of ${node.childNodes.length} nodes`;
+  return typeof node === "object" ? "an object that is not a node" : `${typeof node} ${String(node)}`;
 }
 
 class __Component {
@@ -26822,6 +26953,7 @@ class __Component {
     if (this.constructor.__extends != null) {
       this._rest = rest ?? {};
       this.rest = __state(__restView(this._rest));
+      this._asChild = __asChildOf(this.constructor, this._rest);
     }
     this._frame = __ownerFrame({ nested: false });
     const prevC = __pushComponent(this);
@@ -26855,9 +26987,33 @@ class __Component {
     const current = this.children;
     if (current != null && typeof current === "object" && typeof current.read === "function" && "value" in current) {
       current.value = value;
-      return;
+    } else {
+      this.children = value;
     }
-    this.children = value;
+    if (this._asChild && this._state === "mounted")
+      this._rehost();
+  }
+  _adoptChild() {
+    const child = __projected(this.children);
+    if (child != null && child.nodeType === 1)
+      return child;
+    throw new Error(`${this.constructor.name || "component"}: asChild renders the projected element as the host, so the body must ` + `be exactly one element — got ${__describeProjection(child)}`);
+  }
+  _rehost() {
+    const prev = this._inheritedEl;
+    this._hmrRelease(false);
+    if (!this._hmrRebind())
+      return;
+    if (!this._mountCreate())
+      return;
+    this._mountSetup();
+    this._rehostAbove(prev);
+  }
+  _rehostAbove(prev) {
+    const above = this._parent;
+    if (prev == null || this._root === prev || !above?._asChild || above._state !== "mounted" || above._inheritedEl !== prev)
+      return;
+    above._setChildren(this._root);
   }
   _updateProp(name, value) {
     if (this._state === "failed" || this._state === "unmounted")
@@ -26882,6 +27038,10 @@ class __Component {
       return;
     if (this._state === "failed" || this._state === "unmounted")
       return;
+    if (key === "asChild") {
+      throw new Error(`${this.constructor.name || "component"}: asChild is fixed at construction and takes no update`);
+    }
+    key = __restKey(key);
     this._rest || (this._rest = {});
     if (value == null)
       delete this._rest[key];
@@ -26903,10 +27063,27 @@ class __Component {
     for (const key in this._rest)
       this._applyInheritedProp(this._inheritedEl, key, this._rest[key]);
   }
+  _mergeRestStyle(own) {
+    const rest = this.rest.value.style;
+    if (rest == null)
+      return own;
+    if (own == null)
+      return rest;
+    const name = this.constructor.name || "component";
+    if (typeof own !== "object" || typeof rest !== "object") {
+      throw new Error(`${name}: style merges by key, and a string style has none — the host line's style and the caller's must both be objects`);
+    }
+    for (const key of Object.keys(rest)) {
+      if (Object.hasOwn(own, key)) {
+        throw new Error(`${name}: style key '${key}' is set by the host line and by the caller — a shared key is refused, never resolved by precedence`);
+      }
+    }
+    return { ...own, ...rest };
+  }
   _applyInheritedProp(host, key, value) {
     if (this._state === "failed" || this._state === "unmounted")
       return;
-    if (!host || key === "key" || key === "ref" || key === "children" || key.startsWith("__bind_"))
+    if (!host || key === "key" || key === "ref" || key === "children" || key === "asChild" || key.startsWith("__bind_"))
       return;
     if (this._inheritedOwn?.has(key))
       return;
@@ -27179,7 +27356,7 @@ class __Component {
     this._detachDOM(report, removeDOM);
     this._target = null;
   }
-  _hmrRelease() {
+  _hmrRelease(removeDOM = true) {
     const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
     try {
       if (this.beforeUnmount)
@@ -27194,7 +27371,7 @@ class __Component {
     } finally {
       this._hmrReleasing = false;
     }
-    this._detachDOM(report, true);
+    this._detachDOM(report, removeDOM);
     this._frame = __ownerFrame({ nested: false });
     this._state = "new";
   }
@@ -27239,6 +27416,7 @@ class __Component {
     if (this.constructor.__extends != null) {
       this._rest = rest ?? {};
       this.rest.value = __restView(this._rest);
+      this._asChild = __asChildOf(this.constructor, this._rest);
     }
   }
   _hmrDrainOrphans(report) {
@@ -27264,7 +27442,8 @@ class __Component {
     const first = nodes?.[0] ?? this._root;
     const insertParent = first?.parentNode ?? null;
     const insertBefore = nodes?.length ? nodes[nodes.length - 1].nextSibling : this._root ? this._root.nextSibling : null;
-    this._hmrRelease();
+    const keepsHost = this._asChild === true;
+    this._hmrRelease(!keepsHost);
     if (!this._hmrRebind())
       return this;
     if (typeof this._create !== "function") {
@@ -27274,32 +27453,34 @@ class __Component {
     }
     if (!this._mountCreate())
       return this;
-    try {
-      let parent = insertParent && insertParent.nodeType !== 11 ? insertParent : null;
-      if (parent && parent.isConnected === false)
-        parent = null;
-      if (!parent && typeof target === "string" && typeof document !== "undefined") {
-        parent = document.querySelector(target);
-      } else if (!parent && target && target.nodeType !== 11 && target.isConnected !== false) {
-        parent = target;
-      } else if (!parent && typeof document !== "undefined") {
-        parent = document.querySelector("#content") || document.querySelector("#app");
-      }
-      if (parent) {
-        const before = insertBefore && (typeof parent.contains !== "function" || parent.contains(insertBefore)) ? insertBefore : null;
-        if (this._nodes) {
-          for (const n of this._nodes)
-            parent.insertBefore(n, before);
-        } else if (this._root) {
-          parent.insertBefore(this._root, before);
+    if (!keepsHost)
+      try {
+        let parent = insertParent && insertParent.nodeType !== 11 ? insertParent : null;
+        if (parent && parent.isConnected === false)
+          parent = null;
+        if (!parent && typeof target === "string" && typeof document !== "undefined") {
+          parent = document.querySelector(target);
+        } else if (!parent && target && target.nodeType !== 11 && target.isConnected !== false) {
+          parent = target;
+        } else if (!parent && typeof document !== "undefined") {
+          parent = document.querySelector("#content") || document.querySelector("#app");
         }
-        this._target = parent.nodeType === 11 ? null : parent;
+        if (parent) {
+          const before = insertBefore && (typeof parent.contains !== "function" || parent.contains(insertBefore)) ? insertBefore : null;
+          if (this._nodes) {
+            for (const n of this._nodes)
+              parent.insertBefore(n, before);
+          } else if (this._root) {
+            parent.insertBefore(this._root, before);
+          }
+          this._target = parent.nodeType === 11 ? null : parent;
+        }
+      } catch (error) {
+        this._failMount(error);
+        return this;
       }
-    } catch (error) {
-      this._failMount(error);
-      return this;
-    }
     this._mountSetup();
+    this._rehostAbove(first);
     return this;
   }
   mount(target) {
