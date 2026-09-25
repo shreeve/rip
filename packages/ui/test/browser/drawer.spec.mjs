@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { isModal } from './support.mjs'
+import { isModal, pick } from './support.mjs'
 
 const entries = [
   { name: 'the demo drawer', path: '/drawer', popup: 'main dialog', trigger: 'Open Drawer', from: '100%' },
@@ -48,7 +48,7 @@ test('a swipe toward the drawer\'s side dismisses it, and a short one settles ba
   await settled()
   await swipe(box.width / 2)
   await expect.poll(() => isModal(page)).toBe(false)
-  await expect(page.getByText('open: false')).toBeVisible()
+  await expect(trigger).not.toHaveAttribute('data-popup-open')
 })
 
 // The layout's navigation drawer at phone width holds links, so a swipe
@@ -70,12 +70,34 @@ test('a swipe that starts on a link dismisses the drawer without following the l
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Rip UI')
 })
 
-test('the parent drives the cell through the binding, and the close part closes', async ({ page }) => {
+test('the side control moves the panel to that edge, and the close part closes', async ({ page }) => {
   await page.goto('/drawer')
-  await page.getByRole('button', { name: 'Open from the Parent' }).click()
-  await expect.poll(() => isModal(page)).toBe(true)
-  await expect(page.getByText('open: true')).toBeVisible()
-  await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Close', exact: true }).click()
-  await expect.poll(() => isModal(page)).toBe(false)
-  await expect(page.getByText('open: false')).toBeVisible()
+  const trigger = page.getByRole('button', { name: 'Open Drawer' })
+  const popup = page.locator('main dialog')
+  const close = page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Close', exact: true })
+  for (const [side, from] of [['left', '-100%'], ['top', '0px -100%'], ['bottom', '0px 100%'], ['right', '100%']]) {
+    await pick(page, 'side', side)
+    await popup.evaluate((el) => {
+      window.entering = new Promise((resolve) => {
+        new MutationObserver((_, observer) => {
+          if (!el.open) return
+          observer.disconnect()
+          requestAnimationFrame(() => resolve(el.getAnimations().map((a) => a.effect.getKeyframes()[0].translate)))
+        }).observe(el, { attributeFilter: ['open'] })
+      })
+    })
+    await trigger.click()
+    await expect.poll(() => isModal(page)).toBe(true)
+    await expect(popup).toHaveAttribute('data-side', side)
+    expect(await page.evaluate(() => window.entering)).toEqual([from])
+    const inner = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }))
+    const box = await popup.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)).then(() => el.getBoundingClientRect().toJSON()))
+    if (side === 'left') expect(box.left).toBe(0)
+    if (side === 'right') expect(Math.abs(box.right - inner.width)).toBeLessThan(1)
+    if (side === 'top') expect(box.top).toBe(0)
+    if (side === 'bottom') expect(Math.abs(box.bottom - inner.height)).toBeLessThan(1)
+    await close.click()
+    await expect.poll(() => isModal(page)).toBe(false)
+    await expect(popup).toBeHidden()
+  }
 })

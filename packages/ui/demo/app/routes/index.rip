@@ -1,11 +1,10 @@
 import { COMPONENTS } from '../components.rip'
+import { Page } from '../components/page.rip'
 
 export Home = component
   render
-    div class: 'mx-auto max-w-2xl px-5 py-8 md:px-8 md:py-10'
-      h1 class: 'text-2xl font-semibold', 'Rip UI'
-      p class: 'mt-2 text-secondary', 'Unstyled, composable UI components built on native browser features.'
-      ul class: 'mt-8 grid gap-4'
+    Page title: 'Rip UI', description: 'Unstyled, composable UI components built on native browser features.'
+      ul class: 'grid gap-4'
         for entry in Object.values(COMPONENTS)
           li
             a href: entry.href, class: 'block rounded-xl border border-surface bg-surface p-5 hover:bg-surface-hover'

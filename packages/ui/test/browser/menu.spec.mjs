@@ -1,10 +1,10 @@
 import { expect, test } from '@playwright/test'
-import { isModal } from './support.mjs'
+import { isModal, pick } from './support.mjs'
 
 const parts = (page) => ({
   trigger: page.getByRole('button', { name: 'Open Menu' }),
   popup: page.locator('main [role="menu"]').first(),
-  fromParent: page.getByRole('button', { name: 'Open from the Parent' }),
+  selected: page.getByRole('group', { name: 'selected', exact: true }),
   item: (name) => page.getByRole('menuitem', { name, exact: true }),
 })
 // The popover's own show and hide run listeners with the stack empty,
@@ -50,7 +50,6 @@ test('the trigger opens a popover menu under itself, focus lands on the popup, a
   await expect(popup).not.toHaveAttribute('data-closed')
   await expect(trigger).toHaveAttribute('data-popup-open', 'true')
   await expect(trigger).toHaveAttribute('aria-expanded', 'true')
-  await expect(page.getByText('open: true')).toBeVisible()
   await anchored(page)
 })
 
@@ -72,7 +71,6 @@ test('ArrowDown on the trigger opens with the first item focused, the arrows wra
   await expect(item('Settings')).toBeFocused()
   await page.keyboard.press('Escape')
   await expect.poll(() => isOpen(page)).toBe(false)
-  await expect(page.getByText('open: false')).toBeVisible()
   await expect(popup).not.toHaveAttribute('data-open')
   await expect(popup).toHaveAttribute('data-closed', 'true')
   await expect(trigger).toHaveAttribute('aria-expanded', 'false')
@@ -97,14 +95,15 @@ test('ArrowUp on the trigger opens with the last item focused; Enter and Space o
 })
 
 test('Enter on an item selects it and closes; Space on a link follows it', async ({ page }) => {
-  const { trigger, item } = await boot(page)
+  const { trigger, item, selected } = await boot(page)
+  await expect(selected).toHaveText(/none$/)
   await trigger.focus()
   await page.keyboard.press('ArrowDown')
   await expect(item('Dialog')).toBeFocused()
   await page.keyboard.press('ArrowDown')
   await expect(item('Settings')).toBeFocused()
   await page.keyboard.press('Enter')
-  await expect(page.getByText('selected: Settings')).toBeVisible()
+  await expect(selected).toHaveText(/Settings$/)
   await expect.poll(() => isOpen(page)).toBe(false)
   await expect(trigger).toBeFocused()
   await page.keyboard.press('ArrowDown')
@@ -114,37 +113,32 @@ test('Enter on an item selects it and closes; Space on a link follows it', async
   expect(await page.evaluate(() => document.querySelector(':popover-open'))).toBeNull()
 })
 
-test('a click outside closes it, and a click on the trigger while open closes it instead of reopening, however it was opened', async ({ page }) => {
-  const { trigger, fromParent } = await boot(page)
+test('a click outside closes it, and a click on the trigger while open closes it instead of reopening', async ({ page }) => {
+  const { trigger } = await boot(page)
   await trigger.click()
   await expect.poll(() => isOpen(page)).toBe(true)
   await page.getByRole('heading', { level: 1 }).click()
   await expect.poll(() => isOpen(page)).toBe(false)
-  await expect(page.getByText('open: false')).toBeVisible()
+  await expect(trigger).not.toHaveAttribute('data-popup-open')
   await trigger.click()
   await expect.poll(() => isOpen(page)).toBe(true)
   await trigger.click()
   await expect.poll(() => isOpen(page)).toBe(false)
   await page.waitForTimeout(300)
   expect(await isOpen(page)).toBe(false)
-  await expect(page.getByText('open: false')).toBeVisible()
-  await fromParent.click()
-  await expect.poll(() => isOpen(page)).toBe(true)
-  await trigger.click()
-  await expect.poll(() => isOpen(page)).toBe(false)
-  await page.waitForTimeout(300)
-  expect(await isOpen(page)).toBe(false)
+  await expect(trigger).not.toHaveAttribute('data-popup-open')
 })
 
 test('Tab closes it and moves focus on past the menu', async ({ page }) => {
-  const { trigger, item, fromParent } = await boot(page)
+  const { trigger, item } = await boot(page)
+  const next = page.getByRole('group', { name: 'side' }).getByRole('button', { name: 'bottom', exact: true })
   await trigger.focus()
   await page.keyboard.press('ArrowDown')
   await expect(item('Dialog')).toBeFocused()
   await page.keyboard.press('Tab')
-  await expect(fromParent).toBeFocused()
+  await expect(next).toBeFocused()
   await expect.poll(() => isOpen(page)).toBe(false)
-  await expect(page.getByText('open: false')).toBeVisible()
+  await expect(trigger).not.toHaveAttribute('data-popup-open')
 })
 
 test('the pointer highlights by focusing the item under it, and leaving the item hands focus back to the popup', async ({ page }) => {
@@ -158,17 +152,6 @@ test('the pointer highlights by focusing the item under it, and leaving the item
   await expect(item('Sign Out')).toBeFocused()
   await trigger.hover()
   await expect.poll(() => focusedRole(page)).toBe('menu')
-})
-
-test('the parent drives the cell through the binding, and the popup is anchored under the trigger without a click', async ({ page }) => {
-  const { fromParent } = await boot(page)
-  await fromParent.click()
-  await expect.poll(() => isOpen(page)).toBe(true)
-  await expect(page.getByText('open: true')).toBeVisible()
-  await anchored(page)
-  await page.keyboard.press('Escape')
-  await expect.poll(() => isOpen(page)).toBe(false)
-  await expect(page.getByText('open: false')).toBeVisible()
 })
 
 // A viewport too short for the popup below the trigger makes the
@@ -211,7 +194,6 @@ test('a popup that cannot fit below flips above, says so in data-side, and scale
   expect(await popup.evaluate((el) => el.style.getPropertyValue('--transform-origin'))).toBe('left top')
 })
 
-const pick = (page, kind, value) => page.getByRole('button', { name: `${kind}: ${value}`, exact: true }).click()
 const boxes = async (page) => {
   const { trigger, popup } = parts(page)
   await settled(popup)
@@ -348,7 +330,7 @@ test('closing by an item keeps the popover shown through its exit transition', a
 // With no transition there is no animation to wait on, so every close
 // hides at once and nothing is in flight between one step and the next.
 test('with transitions off, every way of opening and closing works, and none throws', async ({ page }) => {
-  const { trigger, popup, item, fromParent } = await boot(page)
+  const { trigger, popup, item, selected } = await boot(page)
   await popup.evaluate((el) => { el.style.transition = 'none' })
   await trigger.click()
   await expect.poll(() => isOpen(page)).toBe(true)
@@ -361,27 +343,23 @@ test('with transitions off, every way of opening and closing works, and none thr
   await expect(item('Settings')).toBeFocused()
   await page.keyboard.press('Enter')
   await expect.poll(() => isOpen(page)).toBe(false)
-  await expect(page.getByText('selected: Settings')).toBeVisible()
-  await fromParent.click()
-  await expect.poll(() => isOpen(page)).toBe(true)
-  await trigger.click()
-  await expect.poll(() => isOpen(page)).toBe(false)
+  await expect(selected).toHaveText(/Settings$/)
   await trigger.click()
   await expect.poll(() => isOpen(page)).toBe(true)
   await page.getByRole('heading', { level: 1 }).click()
   await expect.poll(() => isOpen(page)).toBe(false)
-  await expect(page.getByText('open: false')).toBeVisible()
+  await expect(trigger).not.toHaveAttribute('data-popup-open')
 })
 
 test('inside a modal dialog the menu opens above it, an item is clickable, and Escape closes the menu before the dialog', async ({ page }) => {
-  const { item } = await boot(page)
+  const { item, selected } = await boot(page)
   await page.getByRole('button', { name: 'Open Dialog' }).click()
   await expect.poll(() => isModal(page)).toBe(true)
   const inner = page.getByRole('button', { name: 'Open Inner Menu' })
   await inner.click()
   await expect(page.getByRole('menu', { name: 'Open Inner Menu' })).toBeVisible()
   await item('Inner Settings').click()
-  await expect(page.getByText('selected: Inner Settings')).toBeVisible()
+  await expect(selected).toHaveText(/Inner Settings$/)
   await expect(page.getByRole('menu', { name: 'Open Inner Menu' })).toBeHidden()
   expect(await isModal(page)).toBe(true)
   await inner.click()
