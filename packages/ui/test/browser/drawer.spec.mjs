@@ -143,11 +143,10 @@ test('the side control moves the panel to that edge, and the close part closes',
     expect(await page.evaluate(() => window.entering)).toEqual([from])
     const inner = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }))
     const box = await popup.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)).then(() => el.getBoundingClientRect().toJSON()))
-    // The panel bleeds 3rem past its edge, so the edge itself sits 48px outside the viewport.
-    if (side === 'left') expect(box.left).toBe(-48)
-    if (side === 'right') expect(Math.abs(box.right - inner.width - 48)).toBeLessThan(1)
-    if (side === 'top') expect(box.top).toBe(-48)
-    if (side === 'bottom') expect(Math.abs(box.bottom - inner.height - 48)).toBeLessThan(1)
+    if (side === 'left') expect(box.left).toBe(0)
+    if (side === 'right') expect(Math.abs(box.right - inner.width)).toBeLessThan(1)
+    if (side === 'top') expect(box.top).toBe(0)
+    if (side === 'bottom') expect(Math.abs(box.bottom - inner.height)).toBeLessThan(1)
     await close.click()
     await expect.poll(() => isModal(page)).toBe(false)
     await expect(popup).toBeHidden()
@@ -212,6 +211,21 @@ test('a pull into the screen moves the panel by less than the pull, and it sprin
   expect(pulled).toBeGreaterThan(5)
   expect(pulled).toBeLessThan(48)
   expect(await drawer.evaluate((el) => el.style.getPropertyValue('--swipe-progress'))).toBe('0')
+  // The gap the pull opens is painted by the panel's own bleed, and the
+  // join between them, which a pull lands on a fraction of a pixel, shows
+  // no seam: every pixel column from inside the panel across the gap is
+  // the panel's background, not the backdrop over the page.
+  const edge = await drawer.evaluate((el) => el.getBoundingClientRect().right)
+  const x0 = Math.floor(edge) - 4
+  const png = (await page.screenshot({ clip: { x: x0, y: box.y + box.height / 2, width: rest + box.width - x0, height: 1 } })).toString('base64')
+  const columns = await page.evaluate((src) => new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => { const c = document.createElement('canvas'); c.width = img.width; c.height = 1; const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0); const d = ctx.getImageData(0, 0, img.width, 1).data; const out = []; for (let i = 0; i < img.width; i++) out.push([d[i * 4], d[i * 4 + 1], d[i * 4 + 2]]); resolve(out) }
+    img.src = 'data:image/png;base64,' + src
+  }), png)
+  const panel = await drawer.evaluate((el) => getComputedStyle(el).backgroundColor.match(/\d+/g).slice(0, 3).map(Number))
+  expect(columns.length).toBeGreaterThan(4)
+  for (const column of columns) expect(column).toEqual(panel)
   await page.mouse.up()
   await expect.poll(() => drawer.evaluate((el) => el.style.translate)).toBe('')
   await expect.poll(async () => Math.abs((await drawer.boundingBox()).x - rest)).toBeLessThan(1)

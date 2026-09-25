@@ -69,7 +69,7 @@ export Popup = component extends Dialog.Popup
     before = last
     last = { offset, at: performance.now() }
   extent = (dialog: HTMLDialogElement): number -> if horizontal then dialog.offsetWidth else dialog.offsetHeight
-  # Square-root resistance keeps a long pull within a panel's bleed.
+  # Square-root resistance keeps a long pull within the bleed below.
   resist = (x: number): number -> Math.sqrt(x)
   up = (e: PointerEvent) ->
     return unless drag
@@ -102,3 +102,21 @@ export Popup = component extends Dialog.Popup
       @pointercancel: settle
       @dragstart: refuseDrag
       slot
+
+# A pull into the screen moves the panel off its edge, so each side bleeds
+# 3rem past it in the panel's own background, further than the resistance
+# lets a pull travel. A modal dialog's own overflow would clip the bleed,
+# so the popup is overflow visible; a taller body scrolls in a container
+# of its own. The bleed starts a pixel inside the panel: a pull lands the
+# edge on a fraction of a pixel, and two edges meeting there would each
+# cover it in part and let the backdrop through as a seam.
+styles = CSSStyleSheet.new()
+styles.replaceSync '''
+  dialog[data-side] { overflow: visible; }
+  dialog[data-side]::after { content: ''; position: absolute; background: inherit; }
+  dialog[data-side="left"]::after { inset: 0 calc(100% - 1px) 0 auto; width: calc(3rem + 1px); }
+  dialog[data-side="right"]::after { inset: 0 auto 0 calc(100% - 1px); width: calc(3rem + 1px); }
+  dialog[data-side="top"]::after { inset: auto 0 calc(100% - 1px) 0; height: calc(3rem + 1px); }
+  dialog[data-side="bottom"]::after { inset: calc(100% - 1px) 0 auto 0; height: calc(3rem + 1px); }
+'''
+document.adoptedStyleSheets.push(styles)

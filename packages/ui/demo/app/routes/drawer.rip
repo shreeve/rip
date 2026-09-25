@@ -5,13 +5,11 @@ import { Controls, Page, Stage } from '../components/page.rip'
 
 # Each slide also sets the other axis to zero: WebKit does not substitute
 # an unset registered property's initial value inside @starting-style.
-# Each panel bleeds 3rem past its edge, padded to match, so a pull into
-# the screen reveals panel rather than the page behind it.
 PANEL: Record<Drawer.Side, string> = {
-  left:   'mr-auto -ml-12 h-dvh max-h-none w-[calc(20rem+3rem)] max-w-[calc(100vw-3rem+3rem)] pl-[calc(1.5rem+3rem)] -translate-x-full translate-y-0 data-open:translate-x-0 starting:data-open:-translate-x-full'
-  right:  '-mr-12 ml-auto h-dvh max-h-none w-[calc(20rem+3rem)] max-w-[calc(100vw-3rem+3rem)] pr-[calc(1.5rem+3rem)] translate-x-full translate-y-0 data-open:translate-x-0 starting:data-open:translate-x-full'
-  top:    '-mt-12 mb-auto w-dvw max-w-none h-[calc(20rem+3rem)] max-h-[calc(100dvh-3rem+3rem)] pt-[calc(1.5rem+3rem)] -translate-y-full translate-x-0 data-open:translate-y-0 starting:data-open:-translate-y-full'
-  bottom: 'mt-auto -mb-12 w-dvw max-w-none h-[calc(20rem+3rem)] max-h-[calc(100dvh-3rem+3rem)] pb-[calc(1.5rem+3rem)] translate-y-full translate-x-0 data-open:translate-y-0 starting:data-open:translate-y-full'
+  left:   'mr-auto ml-0 h-dvh max-h-none w-80 max-w-[calc(100vw-3rem)] -translate-x-full translate-y-0 data-open:translate-x-0 starting:data-open:-translate-x-full'
+  right:  'mr-0 ml-auto h-dvh max-h-none w-80 max-w-[calc(100vw-3rem)] translate-x-full translate-y-0 data-open:translate-x-0 starting:data-open:translate-x-full'
+  top:    'mt-0 mb-auto w-dvw max-w-none h-80 max-h-[calc(100dvh-3rem)] -translate-y-full translate-x-0 data-open:translate-y-0 starting:data-open:-translate-y-full'
+  bottom: 'mt-auto mb-0 w-dvw max-w-none h-80 max-h-[calc(100dvh-3rem)] translate-y-full translate-x-0 data-open:translate-y-0 starting:data-open:translate-y-full'
 }
 
 export DrawerPage = component
