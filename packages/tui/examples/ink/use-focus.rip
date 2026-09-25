@@ -11,7 +11,6 @@ import { run, focus, Box, Text } from 'rip/tui'
 Item = component
   @label := ''
   el := null
-
   render
     span ref: el, focusable: true
       "#{@label} "

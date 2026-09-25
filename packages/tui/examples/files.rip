@@ -93,7 +93,6 @@ Browser = component
   pane ~= { flexDirection: 'column', height: tall + 2, overflow: 'hidden', borderStyle: 'round' }
   paneLeft ~= { ...pane, width: 32, contentOffsetY: top, borderColor: (if list?.focused then 'cyan' else 'gray') }
   paneRight ~= { ...pane, flexGrow: 1, paddingX: 1, contentOffsetY: lineTop, borderColor: (if view?.focused then 'cyan' else 'gray') }
-
   render
     Box flexDirection: 'column', @keydown: @any
       Box flexDirection: 'row', gap: 1

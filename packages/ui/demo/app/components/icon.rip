@@ -10,7 +10,6 @@ export Icon = component
   @name: IconName
   @strokeWidth?: number := 2
   @classes?: string
-
   render
     svg
       viewBox: '0 0 24 24'

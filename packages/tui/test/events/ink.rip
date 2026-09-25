@@ -488,6 +488,7 @@ Logger =! component
   heard: (event) ->
     @inputs.push (if event.ctrlKey then "Ctrl+#{event.key}" else event.key)
     event.preventDefault() if @keep
+
   render
     Box focusable: true, autofocus: true, @keydown: @heard, @paste: ((event) => @pastes.push event.text)
       Text "log"
@@ -617,6 +618,7 @@ InputApp =! component
       @line = @line.slice 0, -1
     else if Array.from(event.key).length is 1 and not event.ctrlKey and not event.altKey and not event.metaKey
       @line += event.key
+
   render
     Box focusable: true, autofocus: true, cursor: { x: 2 + line.length, y: 0 }, @keydown: @heard
       Text "> #{line}"

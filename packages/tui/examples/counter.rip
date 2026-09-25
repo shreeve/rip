@@ -5,6 +5,7 @@ Counter = component
   pressed: (event) ->
     @count += 1 if event.key is 'ArrowUp'
     @count -= 1 if event.key is 'ArrowDown'
+
   render
     Box @keydown: @pressed, focusable: true, autofocus: true, borderStyle: 'round', paddingX: 1
       Text color: 'green', "count #{@count}"

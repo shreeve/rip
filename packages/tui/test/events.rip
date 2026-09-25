@@ -764,6 +764,7 @@ Select =! component
       when 'ArrowDown' then @at = (@at + 1) % @items.length
       when 'ArrowUp'   then @at = (@at - 1 + @items.length) % @items.length
       when 'Enter'     then @chosen = @items[@at]
+
   render
     div ref: el, focusable: true, autofocus: true, @keydown: @move, borderStyle: 'round', borderColor: (if el?.focused then 'cyan' else 'gray')
       for item, n in @items
@@ -796,6 +797,7 @@ Input =! component
       @value = parts.slice(0, -1).join ''
     else if Array.from(event.key).length is 1 and not event.ctrlKey and not event.altKey and not event.metaKey
       @value += event.key
+
   render
     Box focusable: true, autofocus: true, borderStyle: 'single', width: 20, cursor: { x: 1 + Bun.stringWidth(@value), y: 1 }, @keydown: @typed, @paste: ((event) => @value += event.text)
       Text "#{@value}"
