@@ -47,7 +47,7 @@ html[data-theme="dark"] {
   --color-bg-accent-active:  oklch(from var(--color-bg-accent-hover) calc(l - 0.05) c h);
   --color-bg-backdrop:       color-mix(in oklab, var(--color-black) 40%, transparent);
 
-  --color-border-surface: var(--color-neutral-800);
+  --color-border-surface: color-mix(in oklch, var(--color-neutral-700), var(--color-neutral-800));
   --color-border-input:   oklch(from var(--color-border-surface) calc(l + 0.04) c h);
 }
 

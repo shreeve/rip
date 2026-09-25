@@ -36,7 +36,7 @@ export DrawerPage = component
               Drawer.Close asChild
                 Button 'Close'
 
-      Controls.Panel
+      Controls.Panel title: 'Drawer.Popup'
         Controls.Row name: 'side'
           for option in ['left', 'right', 'top', 'bottom'] satisfies Drawer.Side[]
             Controls.Choice pressed: side is option, @click: (-> side = option), option

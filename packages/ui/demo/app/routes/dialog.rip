@@ -25,7 +25,7 @@ export DialogPage = component
               Dialog.Close asChild
                 Button 'Close'
 
-      Controls.Panel
+      Controls.Panel title: 'Dialog.Popup'
         Controls.Row name: 'closedby'
           for option in [undefined, 'any', 'closerequest', 'none'] satisfies (Dialog.ClosedBy | undefined)[]
             Controls.Choice pressed: closedby is option, @click: (-> closedby = option), option ?? 'not passed'

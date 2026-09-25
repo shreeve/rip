@@ -16,15 +16,17 @@ export Stage = component
       slot
 
 Panel = component
+  @title: string
   render
-    section class: 'grid grid-cols-[auto_1fr] gap-x-6 gap-y-4 rounded-xl border border-surface bg-surface p-5'
+    section class: 'grid grid-cols-1 gap-x-10 divide-y sm:grid-cols-[minmax(9rem,auto)_1fr] divide-surface overflow-hidden rounded-xl border border-surface bg-surface'
+      h2 class: 'col-span-full bg-muted px-4 py-3 text-sm font-medium text-secondary', title
       slot
 
 Row = component
   @name: string
   render
-    div role: 'group', aria-label: name, class: 'col-span-2 grid grid-cols-subgrid items-baseline'
-      span class: 'font-mono text-sm font-medium text-secondary', name
+    div role: 'group', aria-label: name, class: 'col-span-full grid grid-cols-subgrid items-baseline gap-y-2 px-4 py-3'
+      span class: 'font-mono text-xs-plus font-medium text-secondary', name
       div class: 'flex flex-wrap items-center gap-2'
         slot
 

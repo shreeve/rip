@@ -29,7 +29,7 @@ export MenuPage = component
             Menu.Item class: ITEM, @click: (-> selected = 'Settings'), 'Settings'
             Menu.Item class: ITEM, @click: (-> selected = 'Sign Out'), 'Sign Out'
 
-      Controls.Panel
+      Controls.Panel title: 'Menu.Popup'
         Controls.Row name: 'side'
           for option in ['bottom', 'top', 'left', 'right'] satisfies Menu.Side[]
             Controls.Choice pressed: side is option, @click: (-> side = option), option
@@ -39,6 +39,8 @@ export MenuPage = component
         Controls.Row name: 'sideOffset'
           for option in [0, 6, 12]
             Controls.Choice pressed: sideOffset is option, @click: (-> sideOffset = option), "#{option}"
+
+      Controls.Panel title: 'Last action'
         Controls.Row name: 'selected'
           span class: 'text-sm font-medium text-secondary', selected or 'none'
 
