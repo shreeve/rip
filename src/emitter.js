@@ -540,6 +540,13 @@ class Emitter {
     // no token for an import specifier, so an importer's editor colors an
     // imported component from this record.
     this.componentNames = [];
+    // Exported object literals whose every pair's value is a bare name
+    // (`export Controls = { Panel, Row: Panel }`), as [name, values].
+    // Filtered against componentNames once the module is emitted — a
+    // component may be declared below the object that holds it — into
+    // partNames: the objects an importer's tag qualifies through, which
+    // tsgo tokens as the variables their declarations made.
+    this.exportedObjects = [];
     // Per render pair: the key's and the pair's SOURCE spans, and the
     // road's relation sites in GENERATED coordinates — the diagnostics
     // road's anchor table (WHERE A PAIR'S DIAGNOSTIC LANDS, below).
@@ -5431,6 +5438,10 @@ class Emitter {
           // the whole emitted declaration; a void export's
           // voidMarker role covers it the same way.
           if (spec[0] === 'void-assign') this.registerVoidValue(spec[2], spec);
+          if (spec[0] === '=' && typeof spec[1] === 'string') {
+            const values = Emitter.plainObjectValues(spec[2]);
+            if (values !== null) this.exportedObjects.push([spec[1], values]);
+          }
           this.b.emit('export ');
           this.mark(spec, 'voidMarker', () => this.mark(spec, 'annotation', () => this.mark(spec, '$self', () => {
             this.b.emit('const ');
@@ -8060,6 +8071,22 @@ class Emitter {
         : Emitter.containsBareIt(pair));
     }
     return n.some((item) => Emitter.containsBareIt(item));
+  }
+
+  // The bare names a non-empty object literal holds, one per pair —
+  // shorthand or `key: Name` — or null when any pair is anything else
+  // (a spread, a method, a computed or interpolated key, a value that
+  // is not a bare name): such an object holds something no tag
+  // constructs through.
+  static plainObjectValues(node) {
+    if (!isNode(node) || node[0] !== 'object' || node.length < 2) return null;
+    const values = [];
+    for (const pair of node.slice(1)) {
+      if (!isNode(pair) || (pair[0] !== null && pair[0] !== ':')) return null;
+      if (typeof pair[1] !== 'string' || typeof pair[2] !== 'string') return null;
+      values.push(pair[2]);
+    }
+    return values;
   }
 
   // Generator marking, symmetric with containsAwait.
@@ -19469,7 +19496,12 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // was written (reactiveDecl) rather than reconstructed by scanning rows: the
   // emitter knows the offset as it emits, so no lookup, and no ambiguity about
   // which row is the name's.
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, componentUses: emitter.componentUses, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
+  // The exported objects whose every value is one of this module's own
+  // components — the qualifiers an importer's tag constructs through.
+  const partNames = emitter.exportedObjects
+    .filter(([, values]) => values.every((value) => emitter.componentNames.includes(value)))
+    .map(([name]) => name);
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, componentUses: emitter.componentUses, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

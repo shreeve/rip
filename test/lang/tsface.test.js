@@ -442,6 +442,59 @@ describe('scratch captures leave no trace in the real emission', () => {
       { localText: 'Shade', importedName: 'Color', specifier: './colors.rip' },
     ]);
   });
+
+  // The record an importer's editor colors a qualifier from: the names a
+  // tag constructs through — a module namespace, or an exported object
+  // literal whose every value is one of the module's own components.
+  test('partNames records an exported object of the module\'s own components', () => {
+    const faced = ts([
+      'Panel = component',
+      '  render',
+      '    div',
+      '',
+      'Row = component',
+      '  render',
+      '    div',
+      '',
+      'export Controls = { Panel, Row: Panel }',
+      'export Quoted = { "Panel": Panel }',
+      'export Stacked = {',
+      '  Panel',
+      '  Row',
+      '}',
+      'export * as Menu from "./menu.rip"',
+      '',
+    ].join('\n'));
+    expect(faced.componentNames).toEqual(['Panel', 'Row']);
+    expect(faced.namespaceExports).toEqual(['Menu']);
+    expect(faced.partNames).toEqual(['Controls', 'Quoted', 'Stacked']);
+  });
+
+  test('a component declared below the object that exports it still qualifies', () => {
+    const faced = ts('export Controls = { Panel }\n\nPanel = component\n  render\n    div\n');
+    expect(faced.partNames).toEqual(['Controls']);
+  });
+
+  test('partNames excludes an object holding anything but the module\'s own components', () => {
+    const faced = ts([
+      "import { Button } from './button.rip'",
+      '',
+      'Panel = component',
+      '  render',
+      '    div',
+      '',
+      'export Mixed = { Panel, a: 1 }',
+      'export Spread = { Panel, ...Mixed }',
+      'export Imported = { Button }',
+      'export Plain = { a: 1 }',
+      'export Empty = {}',
+      'Private = { Panel }',
+      'export { Private }',
+      '',
+    ].join('\n'));
+    expect(faced.componentNames).toEqual(['Panel']);
+    expect(faced.partNames).toEqual([]);
+  });
 });
 
 // ── 2/3. emission pins per surface ───────────────────────────────────

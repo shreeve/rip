@@ -371,6 +371,10 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     namespaceExports: emitted.namespaceExports ?? [],
     // The module-scope component bindings.
     componentNames: emitted.componentNames ?? [],
+    // The exported object literals whose every value is one of those
+    // components (`export Controls = { Panel, Row }`) — a tag qualifies
+    // through such an object as it does through a module namespace.
+    partNames: emitted.partNames ?? [],
     // Generated spans of every reference to an IMPORTED binding, each with
     // its original exported name and module. One file's compile cannot
     // know an imported name's kind — the editor resolves the specifier and
