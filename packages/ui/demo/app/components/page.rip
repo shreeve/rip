@@ -24,7 +24,7 @@ export Row = component
   @name: string
   render
     div role: 'group', aria-label: name, class: 'flex flex-wrap items-center gap-2'
-      span class: 'w-24 shrink-0 font-mono text-sm text-secondary', name
+      span class: 'w-24 shrink-0 font-mono text-sm font-medium text-secondary', name
       slot
 
 export Choice = component extends Button

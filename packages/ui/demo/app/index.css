@@ -53,6 +53,7 @@ html[data-theme="dark"] {
 
 @theme {
   --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, monospace;
 
   --text-xs-plus: 0.8125rem;
   --text-xs-plus--line-height: calc(1.1 / 0.8125);
