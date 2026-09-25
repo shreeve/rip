@@ -3,14 +3,13 @@ import { COMPONENTS } from '../components.rip'
 import { Button } from '../components/button.rip'
 import { Controls, Page, Stage } from '../components/page.rip'
 
-ITEM = 'flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-secondary outline-none focus:bg-surface-hover focus:text-primary'
-
 export MenuPage = component
   open := false
   selected := ''
   side: Menu.Side := 'bottom'
   align: Menu.Align := 'start'
   sideOffset := 6
+  item =! 'flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-secondary outline-none focus:bg-surface-hover focus:text-primary active:bg-surface-hover active:text-primary'
   render
     Page title: COMPONENTS.menu.name, description: COMPONENTS.menu.description
       Stage
@@ -25,9 +24,9 @@ export MenuPage = component
               'w-56 origin-(--transform-origin) scale-95 rounded-xl border border-surface bg-surface p-1 opacity-0 shadow-lg/6 transition transition-discrete duration-100 ease-out-quint outline-none'
               'data-open:scale-100 data-open:opacity-100 data-open:duration-150 starting:data-open:scale-95 starting:data-open:opacity-0'
             ]
-            Menu.Link href: '/dialog', class: ITEM, 'Dialog'
-            Menu.Item class: ITEM, @click: (-> selected = 'Settings'), 'Settings'
-            Menu.Item class: ITEM, @click: (-> selected = 'Sign Out'), 'Sign Out'
+            Menu.Link href: '/dialog', class: item, 'Dialog'
+            Menu.Item class: item, @click: (-> selected = 'Settings'), 'Settings'
+            Menu.Item class: item, @click: (-> selected = 'Sign Out'), 'Sign Out'
 
       Controls.Panel title: 'Menu.Popup'
         Controls.Row name: 'side'
@@ -65,7 +64,7 @@ export MenuPage = component
                     'w-56 origin-(--transform-origin) scale-95 rounded-xl border border-surface bg-surface p-1 opacity-0 shadow-lg/6 transition transition-discrete duration-100 ease-out-quint outline-none'
                     'data-open:scale-100 data-open:opacity-100 data-open:duration-150 starting:data-open:scale-95 starting:data-open:opacity-0'
                   ]
-                  Menu.Item class: ITEM, @click: (-> selected = 'Inner Settings'), 'Inner Settings'
-                  Menu.Item class: ITEM, @click: (-> selected = 'Inner Sign Out'), 'Inner Sign Out'
+                  Menu.Item class: item, @click: (-> selected = 'Inner Settings'), 'Inner Settings'
+                  Menu.Item class: item, @click: (-> selected = 'Inner Sign Out'), 'Inner Sign Out'
               Dialog.Close asChild
                 Button 'Close'
