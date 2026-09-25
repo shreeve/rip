@@ -15,19 +15,20 @@ export Stage = component
     div class: 'flex items-center justify-center rounded-xl border border-surface bg-surface py-16'
       slot
 
-export Controls = component
+Panel = component
   render
-    section class: 'flex flex-col gap-4 rounded-xl border border-surface bg-surface p-5'
+    section class: 'grid grid-cols-[auto_1fr] gap-x-6 gap-y-4 rounded-xl border border-surface bg-surface p-5'
       slot
 
-export Row = component
+Row = component
   @name: string
   render
-    div role: 'group', aria-label: name, class: 'flex flex-wrap items-center gap-2'
-      span class: 'w-24 shrink-0 font-mono text-sm font-medium text-secondary', name
-      slot
+    div role: 'group', aria-label: name, class: 'col-span-2 grid grid-cols-subgrid items-baseline'
+      span class: 'font-mono text-sm font-medium text-secondary', name
+      div class: 'flex flex-wrap items-center gap-2'
+        slot
 
-export Choice = component extends Button
+Choice = component extends Button
   @pressed: boolean
   render
     Button
@@ -36,3 +37,5 @@ export Choice = component extends Button
       aria-pressed: if pressed then 'true' else 'false'
       class: 'aria-pressed:bg-surface-active aria-pressed:text-primary'
       slot
+
+export Controls = { Panel, Row, Choice }

@@ -1,7 +1,7 @@
 import { Dialog } from 'rip/ui'
 import { COMPONENTS } from '../components.rip'
 import { Button } from '../components/button.rip'
-import { Choice, Controls, Page, Row, Stage } from '../components/page.rip'
+import { Controls, Page, Stage } from '../components/page.rip'
 
 export DialogPage = component
   open := false
@@ -25,7 +25,7 @@ export DialogPage = component
               Dialog.Close asChild
                 Button 'Close'
 
-      Controls
-        Row name: 'closedby'
+      Controls.Panel
+        Controls.Row name: 'closedby'
           for option in [undefined, 'any', 'closerequest', 'none'] satisfies (Dialog.ClosedBy | undefined)[]
-            Choice pressed: closedby is option, @click: (-> closedby = option), option ?? 'not passed'
+            Controls.Choice pressed: closedby is option, @click: (-> closedby = option), option ?? 'not passed'

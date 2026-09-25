@@ -1,7 +1,7 @@
 import { Dialog, Menu } from 'rip/ui'
 import { COMPONENTS } from '../components.rip'
 import { Button } from '../components/button.rip'
-import { Choice, Controls, Page, Row, Stage } from '../components/page.rip'
+import { Controls, Page, Stage } from '../components/page.rip'
 
 ITEM = 'flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-secondary outline-none focus:bg-surface-hover focus:text-primary'
 
@@ -29,17 +29,17 @@ export MenuPage = component
             Menu.Item class: ITEM, @click: (-> selected = 'Settings'), 'Settings'
             Menu.Item class: ITEM, @click: (-> selected = 'Sign Out'), 'Sign Out'
 
-      Controls
-        Row name: 'side'
+      Controls.Panel
+        Controls.Row name: 'side'
           for option in ['bottom', 'top', 'left', 'right'] satisfies Menu.Side[]
-            Choice pressed: side is option, @click: (-> side = option), option
-        Row name: 'align'
+            Controls.Choice pressed: side is option, @click: (-> side = option), option
+        Controls.Row name: 'align'
           for option in ['start', 'center', 'end'] satisfies Menu.Align[]
-            Choice pressed: align is option, @click: (-> align = option), option
-        Row name: 'sideOffset'
+            Controls.Choice pressed: align is option, @click: (-> align = option), option
+        Controls.Row name: 'sideOffset'
           for option in [0, 6, 12]
-            Choice pressed: sideOffset is option, @click: (-> sideOffset = option), "#{option}"
-        Row name: 'selected'
+            Controls.Choice pressed: sideOffset is option, @click: (-> sideOffset = option), "#{option}"
+        Controls.Row name: 'selected'
           span class: 'text-sm font-medium text-secondary', selected or 'none'
 
       Stage

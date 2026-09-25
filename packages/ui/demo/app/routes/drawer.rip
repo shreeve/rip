@@ -1,7 +1,7 @@
 import { Drawer } from 'rip/ui'
 import { COMPONENTS } from '../components.rip'
 import { Button } from '../components/button.rip'
-import { Choice, Controls, Page, Row, Stage } from '../components/page.rip'
+import { Controls, Page, Stage } from '../components/page.rip'
 
 # Each slide also sets the other axis to zero: WebKit does not substitute
 # an unset registered property's initial value inside @starting-style.
@@ -36,10 +36,10 @@ export DrawerPage = component
               Drawer.Close asChild
                 Button 'Close'
 
-      Controls
-        Row name: 'side'
+      Controls.Panel
+        Controls.Row name: 'side'
           for option in ['left', 'right', 'top', 'bottom'] satisfies Drawer.Side[]
-            Choice pressed: side is option, @click: (-> side = option), option
-        Row name: 'closedby'
+            Controls.Choice pressed: side is option, @click: (-> side = option), option
+        Controls.Row name: 'closedby'
           for option in [undefined, 'any', 'closerequest', 'none'] satisfies (Drawer.ClosedBy | undefined)[]
-            Choice pressed: closedby is option, @click: (-> closedby = option), option ?? 'not passed'
+            Controls.Choice pressed: closedby is option, @click: (-> closedby = option), option ?? 'not passed'
