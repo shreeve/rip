@@ -26,13 +26,36 @@ export Popup = component extends Dialog.Popup
   drag: { id: number, start: number, at: number } | null = null
   offset := 0
   swiping := false
+  # Both custom properties ride on the dialog because ::backdrop inherits
+  # them from it. Strength is the time the remaining travel would take at
+  # the release speed, 80ms to 360ms as 0.1 to 1.
+  progress := 0
+  strength := 1
+  last = { offset: 0, at: 0 }
+  before = { offset: 0, at: 0 }
+  ~>
+    strength = 1 if open
+    return
   swipeStyle ~=
-    s = { touchAction: (if horizontal then 'pan-y' else 'pan-x') } as CSSProperties
+    s = { touchAction: (if horizontal then 'pan-y' else 'pan-x'), '--swipe-strength': strength } as CSSProperties
     s.translate = (if horizontal then "#{offset * toward}px 0" else "0 #{offset * toward}px") if offset
     s.transition = 'none' if swiping
+    s['--swipe-progress'] = progress if swiping
     s
+  # With a mouse, a press on text selects it, as it would anywhere.
+  ignores = (e: PointerEvent): boolean ->
+    return true if (e.target as Element).closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [data-swipe-ignore]')
+    e.pointerType is 'mouse' and overText(e.target as Element, e.clientX, e.clientY)
+  overText = (el: Element, x: number, y: number): boolean ->
+    range = document.createRange()
+    for node in el.childNodes when node.nodeType is Node.TEXT_NODE
+      range.selectNodeContents(node)
+      for r in range.getClientRects()
+        return true if x >= r.left and x <= r.right and y >= r.top and y <= r.bottom
+    false
   down = (e: PointerEvent) ->
-    drag = if onBackdrop(e) or (closedby ?? 'any') isnt 'any' then null else { id: e.pointerId, start: along(e), at: performance.now() }
+    drag = if onBackdrop(e) or (closedby ?? 'any') isnt 'any' or ignores(e) then null else { id: e.pointerId, start: along(e), at: performance.now() }
+    last = before = { offset: 0, at: performance.now() } if drag
   move = (e: PointerEvent) ->
     return unless drag and e.pointerId is drag.id
     travel = (along(e) - drag.start) * toward
@@ -40,18 +63,31 @@ export Popup = component extends Dialog.Popup
       return if Math.abs(travel) < 8
       swiping = true
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-    offset = Math.max(0, travel)
+    size = extent(e.currentTarget as HTMLDialogElement)
+    offset = if travel >= 0 then travel else -resist(-travel)
+    progress = Math.min(1, Math.max(0, offset) / size)
+    before = last
+    last = { offset, at: performance.now() }
+  extent = (dialog: HTMLDialogElement): number -> if horizontal then dialog.offsetWidth else dialog.offsetHeight
+  # Square-root resistance keeps a long pull within a panel's bleed.
+  resist = (x: number): number -> Math.sqrt(x)
   up = (e: PointerEvent) ->
     return unless drag
-    dialog = e.currentTarget as HTMLDialogElement
-    size = if horizontal then dialog.offsetWidth else dialog.offsetHeight
-    speed = offset / (performance.now() - drag.at)
-    open = false if swiping and (offset > size / 4 or speed > 0.4)
+    size = extent(e.currentTarget as HTMLDialogElement)
+    now = performance.now()
+    # A flick is the gesture's average speed, so one sample's jitter is never one.
+    average = offset / Math.max(50, now - drag.at)
+    if swiping and (average >= 0.5 or offset > Math.max(size / 2, 10))
+      release = if now - last.at > 80 then 0 else (last.offset - before.offset) / Math.max(16, last.at - before.at)
+      speed = Math.min(4, if release > 0 then release else average)
+      strength = if speed <= 0.2 then 1 else 0.1 + 0.9 * (Math.min(360, Math.max(80, (size - offset) / speed)) - 80) / 280
+      open = false
     settle()
   settle = ->
     drag = null
     swiping = false
     offset = 0
+    progress = 0
   refuseDrag = (e: DragEvent) -> e.preventDefault() if drag
 
   render
