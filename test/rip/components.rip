@@ -3998,7 +3998,7 @@ code 'component extends: inherits tag, rest props forwarded', '''
     _create() {
       this._el0 = document.createElement('fieldset');
       this._el0.setAttribute('data-part', 'Test');
-      this._el1 = document.createElement('input');
+      this._el1 = this._asChild ? this._adoptChild() : document.createElement('input');
       this._inheritedEl = this._el1;
       this._applyRestToInheritedEl();
       this._el0.appendChild(this._el1);
@@ -4006,6 +4006,57 @@ code 'component extends: inherits tag, rest props forwarded', '''
     }
   };
   '''
+
+# Under `asChild` the host line adopts the projected element and the
+# slot's append is skipped, since the slot is the host; a second element
+# of the tag takes the plain line.
+code 'component extends: the host line forks on asChild and the slot append is guarded', '''
+  export Trigger = component extends button
+    render
+      button type: 'button'
+        slot
+        button "inner"
+  ''', '''
+  export const Trigger = class extends __Component {
+    static __extends = 'button';
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = this._asChild ? this._adoptChild() : document.createElement('button');
+      this._inheritedEl = this._el0;
+      this._inheritedOwn = new Set(["type"]);
+      this._applyRestToInheritedEl();
+      this._el0.setAttribute('data-part', 'Trigger');
+      this._el0.setAttribute('type', "button");
+      this._slot1 = this.children instanceof Node ? this.children : (this.children != null ? document.createTextNode(String(this.children)) : document.createComment(''));
+      if (!this._asChild) this._el0.appendChild(this._slot1);
+      this._el2 = document.createElement('button');
+      this._t0 = document.createTextNode("inner");
+      this._el2.appendChild(this._t0);
+      this._el0.appendChild(this._el2);
+      return this._el0;
+    }
+  };
+  '''
+
+fail 'asChild is reserved on an extends component', '''
+  Btn = component extends button
+    @asChild?: boolean
+    render
+      button
+        slot
+''', "emitter: a component that extends a host cannot declare a prop named 'asChild'"
+
+test 'asChild rides rest and is read as the mode; a component with no host has no flag', '''
+  A = component extends button
+    render
+      button
+        slot
+  B = component
+    render
+      div
+  [A.new({ asChild: true })._asChild, A.new({})._asChild, A.new({ asChild: true }).rest.value.asChild, B.new({})._asChild]
+''', [true, false, true, undefined]
 
 # ==============================================================================
 # Member initializer hoist — parenthetical multi-statement

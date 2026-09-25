@@ -259,6 +259,16 @@ These are load-bearing invariants, not folklore:
    gone before the rebuilt view can claim it. The pool drains at the end
    of the parent's setup and on any teardown, so a claim can only land
    during the rebuild and nothing outlives it.
+8. **A rebuilt child rebinds the part that adopted it.** Under
+   `asChild` a part's host is its child's root element, so a child's
+   patch replaces the part's host. After its own setup the child hands
+   the new root to the adopting part through `_setChildren`, and the
+   part rehosts: released as a patch releases it but with the DOM kept,
+   since the host's place is the child's, then rebuilt by the ordinary
+   create/setup path, which adopts the new element; a part above that
+   adopted this one's root rebinds in turn. A patch of an adopting part
+   itself keeps the host in place for the same reason: it releases
+   without detaching and skips the reinsertion.
 
 ---
 

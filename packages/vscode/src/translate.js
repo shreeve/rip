@@ -1007,6 +1007,7 @@ export function exactSpanMapper(mappings) {
 const RUNTIME_PRIVATE = new Set([
   '_init', '_teardown', '_mountSetup', '_mountCreate', '_beginMount', '_failMount', '_hmrRerender',
   '_setRestProp', '_updateProp', '_applyInheritedProp', '_applyPlainInheritedProp', '_applyRestToInheritedEl',
+  '_adoptChild',
 ]);
 export function isScaffoldingLabel(label, source = '') {
   if (/^__/.test(label) || /^_ref\d*$/.test(label)) return true;

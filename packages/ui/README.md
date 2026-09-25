@@ -42,6 +42,27 @@ Orders = component
 
 The `open <=> confirming` binding is optional. A dialog nobody observes is the same tree with no props on the root.
 
+## Your own element as a part
+
+Every part that renders a tag takes `asChild`: it then renders the one element you project as its host instead of creating its own, so your `Button` component is the trigger, with the part's attributes, listeners, and state on your element.
+
+```coffee
+import { Dialog } from 'rip/ui'
+import { Button } from './button.rip'
+
+Orders = component
+  render
+    Dialog.Root
+      Dialog.Trigger asChild
+        Button 'Delete order'
+      Dialog.Popup class: 'rounded-lg p-6 backdrop:bg-black/40'
+        Dialog.Title 'Delete this order?'
+        Dialog.Close asChild
+          Button variant: 'secondary', 'Cancel'
+```
+
+The body must be exactly one element, a component counting through its root element; anything else throws at mount naming the part. The part's own attributes win where both set one (`type` on a trigger), and the element carries the part's `data-part`. Props you pass the part beyond its own (`id`, `aria-label`) still reach the element, and a `class` passed there replaces the element's own, so style the element on your component. A `style` object the part sets replaces the element's too: `Menu.Trigger` sets the anchor style, so a menu trigger's element keeps its styling in classes. `Dialog.Popup` and `Menu.Popup` take the mode by the same mechanism but are not exercised under it.
+
 ## Dialog
 
 Native first: `Dialog.Popup` is a `<dialog>` opened with `showModal`, which gives the top layer, modality, an inert background, Escape, focus containment, and focus restore to the trigger. No JavaScript positioning ships. No engine wraps Tab inside a modal, so the popup wraps it, the WAI-ARIA modal dialog pattern: a hidden sentinel `<span>` is the popup's first child and another its last, and when the browser's own Tab or Shift+Tab lands on one, it sends focus to the popup's first or last focusable. A focusable is a link with an `href`, a button, an input, a select, a textarea, a summary, a details, an iframe, an object, an embed, media with controls, an editable element, or an element with a `tabindex` of zero or more, rendered, visible, not disabled, and not inert. An iframe is one stop: a Tab inside it never reaches the popup, but the browser's own move out of it lands on a sentinel, so a frame at either end wraps too. The sentinels carry `aria-hidden` and `data-focus-guard`, and the package's own stylesheet hides them. On open, `showModal` focuses the leading sentinel as the first focusable descendant, and the popup moves focus on to the first focusable. A focusable inside a nested shadow root is never a landing spot, since the popup does not see into one, though the sentinels still catch the exit.

@@ -2285,3 +2285,186 @@ describe('the component language surface (M12-B graduated boundary)', () => {
     expect(compile('x < ~load()').code).toBe('x < (~load());');
   });
 });
+
+// `asChild` on an extends component: the projected element renders as
+// the host. Compiled parts drive it, since the mode is the host line's
+// fork; hmr builds, since the rebind is the patch machinery.
+describe('asChild: the projected element is the host', () => {
+  const load = (src, names) => {
+    const { code } = fullCompile(src, { path: 'aschild.rip', runtimeDelivery: 'none', hmr: true });
+    const body = code.replace(/^export /gm, '');
+    const keys = Object.keys(RT);
+    return new Function(...keys, `${body}\nreturn { ${names} };`)(...keys.map((n) => RT[n]));
+  };
+  const PART = `export Part = component extends button
+  open := false
+  el: HTMLElement | null := null
+  render
+    button
+      ref: el
+      type: 'button'
+      aria-expanded: if open then 'true' else 'false'
+      @click: (-> open = true)
+      slot
+`;
+  const BUTTON = (cls) => `export Button = component extends button
+  @variant := 'primary'
+  render
+    button class: '${cls}', data-variant: variant
+      slot
+`;
+  const APP = (cls) => `${PART}
+${BUTTON(cls)}
+export App = component
+  clicks := 0
+  render
+    div
+      Part asChild, id: 'x', title: 't', @click: (-> clicks += 1)
+        Button variant: 'ghost', 'Go'
+`;
+  const mountApp = (cls = 'a') => {
+    const mod = load(APP(cls), 'App, Part, Button');
+    const target = document.createElement('main');
+    const app = new mod.App({});
+    app.mount(target);
+    const [button, part] = app._children;
+    return { mod, target, app, button, part };
+  };
+
+  test('the host is the child component\'s root: the line\'s keys, its listener, the ref, the stamp, and rest all land there; the caller\'s listener adds; the bare word is the mode', () => {
+    const { target, app, button, part } = mountApp();
+    const host = part._inheritedEl;
+    expect(host).toBe(button._root);
+    expect(part._root).toBe(host);
+    expect(part.el.value).toBe(host);
+    expect(serialize(target)).toBe('<main><div data-part="App"><button class="a" data-part="Part" id="x" title="t" type="button" data-variant="ghost" aria-expanded="false">Go</button></div></main>');
+    expect(host.childNodes.map((n) => n.nodeType)).toEqual([3]);
+    host.dispatchEvent({ type: 'click', bubbles: false });
+    expect(host.getAttribute('aria-expanded')).toBe('true');
+    expect(app.clicks.value).toBe(1);
+    expect(host.getAttribute('asChild')).toBeNull();
+    expect(part._rest.asChild).toBe(true);
+    expect(part._asChild).toBe(true);
+  });
+
+  test('the line\'s keys stay the line\'s under the mode: a rest value for one is refused at mount and on update', () => {
+    const { Part } = load(PART, 'Part');
+    const span = document.createElement('span');
+    const part = new Part({ asChild: true, children: span, type: 'submit' });
+    part.mount(document.createElement('main'));
+    expect(span.getAttribute('type')).toBe('button');
+    part._updateProp('type', 'reset');
+    expect(span.getAttribute('type')).toBe('button');
+    part._updateProp('title', 'later');
+    expect(span.getAttribute('title')).toBe('later');
+  });
+
+  test('without the mode the same part builds its own tag and projects the child into it: byte-identical DOM to the rule before the mode', () => {
+    const { App, Part } = load(`${PART}
+${BUTTON('a')}
+export App = component
+  render
+    div
+      Part id: 'x'
+        Button 'Go'
+`, 'App, Part');
+    const target = document.createElement('main');
+    new App({}).mount(target);
+    expect(serialize(target)).toBe('<main><div data-part="App"><button id="x" data-part="Part" type="button" aria-expanded="false"><button class="a" data-part="Button" data-variant="primary">Go</button></button></div></main>');
+    expect(new Part({}).rest.value.asChild).toBeUndefined();
+  });
+
+  test('one element or a throw naming the part: a fragment, text, a comment, and no body are refused at mount', () => {
+    const { Part } = load(PART, 'Part');
+    const mount = (children) => () => new Part({ asChild: true, children }).mount(document.createElement('main'));
+    const frag = document.createDocumentFragment();
+    frag.appendChild(document.createElement('i'));
+    frag.appendChild(document.createElement('b'));
+    expect(mount(frag)).toThrow('Part: asChild renders the projected element as the host, so the body must be exactly one element — got a fragment of 2 nodes');
+    expect(mount(document.createTextNode('x'))).toThrow('got text');
+    expect(mount(document.createComment('rip:child-error: Button'))).toThrow('got a comment');
+    expect(mount(undefined)).toThrow('got nothing');
+    // The failed mount rolled back: the instance is terminal.
+    const failed = new Part({ asChild: true });
+    expect(() => failed.mount(document.createElement('main'))).toThrow('got nothing');
+    expect(failed._state).toBe('failed');
+  });
+
+  test('asChild is fixed at construction: a container or a non-boolean is refused there, an update is refused, and a declared prop of the name rejects at compile', () => {
+    const { Part } = load(PART, 'Part');
+    expect(() => new Part({ asChild: RT.__state(true) })).toThrow('Part: asChild takes true or nothing, fixed at construction — got a reactive value');
+    expect(() => new Part({ asChild: 'yes' })).toThrow('got string yes');
+    const part = new Part({ asChild: true, children: document.createElement('span') });
+    part.mount(document.createElement('main'));
+    expect(() => part._updateProp('asChild', false)).toThrow('Part: asChild is fixed at construction and takes no update');
+    expect(() => fullCompile('P = component extends button\n  @asChild?: boolean\n  render\n    button\n      slot\n', { path: 'p.rip', runtimeDelivery: 'none' }))
+      .toThrow("cannot declare a prop named 'asChild'");
+  });
+
+  test('a rebuilt child rebinds: the part\'s writers leave the old element and land on the new one, the ref follows, and the cascade reaches a part adopted above', () => {
+    const { target, app, button, part } = mountApp('a');
+    const host = part._inheritedEl;
+    host.dispatchEvent({ type: 'click', bubbles: false });
+    expect(host.getAttribute('aria-expanded')).toBe('true');
+    const next = load(APP('b'), 'App, Part, Button');
+    expect(RT.__hmrClassify(button.constructor, next.Button)).toBe('patch');
+    RT.__hmrPatch(button, next.Button);
+    const host2 = button._root;
+    expect(host2).not.toBe(host);
+    expect(part._inheritedEl).toBe(host2);
+    expect(part._root).toBe(host2);
+    expect(part.el.value).toBe(host2);
+    expect(serialize(target)).toBe('<main><div data-part="App"><button class="b" data-part="Part" data-variant="ghost" id="x" title="t" type="button" aria-expanded="true">Go</button></div></main>');
+    // The setup effect writes the new element only; the old one is inert.
+    part.open.value = false;
+    expect(host2.getAttribute('aria-expanded')).toBe('false');
+    expect(host.getAttribute('aria-expanded')).toBe('true');
+    // The line's listener moved with the view.
+    host2.dispatchEvent({ type: 'click', bubbles: false });
+    expect(host2.getAttribute('aria-expanded')).toBe('true');
+    // One rest writer per key, none leaked on the old element: a later
+    // rest update reaches the new host alone.
+    part._updateProp('title', 'moved');
+    expect(host2.getAttribute('title')).toBe('moved');
+    expect(host.getAttribute('title')).toBe('t');
+    expect(part._state).toBe('mounted');
+    // Two parts on one element: the outer part adopted the inner's root,
+    // and a rebuild of the child reaches both.
+    const nested = load(`${PART}
+${BUTTON('a')}
+export Outer = component extends button
+  render
+    button data-outer: 'y'
+      slot
+export App = component
+  render
+    div
+      Outer asChild: true
+        Part asChild: true
+          Button 'Go'
+`, 'App, Part, Button, Outer');
+    const target2 = document.createElement('main');
+    const app2 = new nested.App({});
+    app2.mount(target2);
+    const [button2, part2, outer] = app2._children;
+    expect(outer._inheritedEl).toBe(button2._root);
+    expect(part2._inheritedEl).toBe(button2._root);
+    RT.__hmrPatch(button2, next.Button);
+    expect(part2._inheritedEl).toBe(button2._root);
+    expect(outer._inheritedEl).toBe(button2._root);
+    expect(serialize(target2)).toBe('<main><div data-part="App"><button class="b" data-part="Outer" data-variant="primary" type="button" aria-expanded="false" data-outer="y">Go</button></div></main>');
+  });
+
+  test('a patch of the adopting part itself keeps the host in place and adopts it again', () => {
+    const { mod, target, button, part } = mountApp('a');
+    const host = part._inheritedEl;
+    const next = load(APP('a').replace("type: 'button'", "type: 'button'\n      data-v: '2'"), 'App, Part, Button');
+    expect(RT.__hmrClassify(mod.Part, next.Part)).toBe('patch');
+    RT.__hmrPatch(part, next.Part);
+    expect(part._inheritedEl).toBe(host);
+    expect(button._root).toBe(host);
+    expect(host.parentNode).toBe(target.childNodes[0]);
+    expect(host.getAttribute('data-v')).toBe('2');
+    expect(target.childNodes[0].childNodes.length).toBe(1);
+  });
+});

@@ -1,5 +1,6 @@
 import { Dialog, Menu } from 'rip/ui'
 import { COMPONENTS } from '../components.rip'
+import { Button } from '../components/button.rip'
 import { Choice, Controls, Page, Row, Stage } from '../components/page.rip'
 
 ITEM = 'flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-secondary outline-none focus:bg-surface-hover focus:text-primary'
@@ -14,9 +15,8 @@ export MenuPage = component
     Page title: COMPONENTS.menu.name, description: COMPONENTS.menu.description
       Stage
         Menu.Root open <=> open
-          Menu.Trigger
-            class: 'rounded-lg border border-transparent bg-accent px-3 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover active:bg-accent-active'
-            'Open Menu'
+          Menu.Trigger asChild
+            Button 'Open Menu'
           Menu.Popup
             side: side
             align: align
@@ -44,9 +44,8 @@ export MenuPage = component
 
       Stage
         Dialog.Root
-          Dialog.Trigger
-            class: 'rounded-lg border border-input bg-input px-3 py-2 text-sm font-medium text-secondary hover:bg-input-hover active:bg-input-active'
-            'Open Dialog'
+          Dialog.Trigger asChild
+            Button variant: 'secondary', 'Open Dialog'
           Dialog.Popup
             class: [
               'm-auto w-96 scale-95 rounded-xl bg-surface p-6 opacity-0 shadow-xl transition-[opacity,scale] duration-150 ease-dialog'
@@ -56,9 +55,8 @@ export MenuPage = component
             Dialog.Title class: 'text-lg font-semibold', 'Account'
             div class: 'mt-6 flex items-center justify-between'
               Menu.Root
-                Menu.Trigger
-                  class: 'rounded-lg border border-input bg-input px-3 py-2 text-sm font-medium text-secondary hover:bg-input-hover active:bg-input-active'
-                  'Open Inner Menu'
+                Menu.Trigger asChild
+                  Button variant: 'secondary', 'Open Inner Menu'
                 Menu.Popup
                   sideOffset: 6
                   class: [
@@ -67,6 +65,5 @@ export MenuPage = component
                   ]
                   Menu.Item class: ITEM, @click: (-> selected = 'Inner Settings'), 'Inner Settings'
                   Menu.Item class: ITEM, @click: (-> selected = 'Inner Sign Out'), 'Inner Sign Out'
-              Dialog.Close
-                class: 'rounded-lg border border-transparent bg-accent px-3 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover active:bg-accent-active'
-                'Close'
+              Dialog.Close asChild
+                Button 'Close'

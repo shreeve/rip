@@ -1,3 +1,5 @@
+import { Button } from './button.rip'
+
 export Page = component
   @title: string
   @description: string
@@ -25,14 +27,12 @@ export Row = component
       span class: 'w-24 shrink-0 font-mono text-sm text-secondary', name
       slot
 
-export Choice = component extends button
+export Choice = component extends Button
   @pressed: boolean
   render
-    button
-      type: 'button'
+    Button
+      variant: 'secondary'
+      size: 'sm'
       aria-pressed: if pressed then 'true' else 'false'
-      class: [
-        'rounded-lg border border-input bg-input px-3 py-1.5 text-sm font-medium text-secondary'
-        'hover:bg-input-hover active:bg-input-active aria-pressed:bg-surface-active aria-pressed:text-primary'
-      ]
+      classes: 'aria-pressed:bg-surface-active aria-pressed:text-primary'
       slot

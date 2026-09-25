@@ -10,7 +10,9 @@
 //                               and `static __extends` opens the rest
 //                               seam — undeclared props collect into the
 //                               reactive `rest` view and forward onto
-//                               the inherited element)
+//                               the inherited element; `asChild: true`
+//                               there makes the projected element the
+//                               inherited element)
 //   __pushComponent(c)        - make c the current component; returns prev
 //   __popComponent(prev)      - restore the previous component
 //   setContext(key, value)    - provide a context value on the current
@@ -1016,6 +1018,32 @@ function __splitProps(ctor, props) {
   return rest;
 }
 
+// `asChild` on an extends component: the projected element renders as
+// the host. It rides the rest map so a component host forwards it to
+// the part it constructs, and the part that binds a tag reads it here.
+// The mode is fixed at construction: true or nothing, never a container.
+function __asChildOf(ctor, rest) {
+  const value = rest?.asChild;
+  if (value == null || value === false) return false;
+  if (value === true) return true;
+  const shape = typeof value === 'object' && typeof value.read === 'function' ? 'a reactive value' : `${typeof value} ${String(value)}`;
+  throw new Error(`${ctor.name || 'component'}: asChild takes true or nothing, fixed at construction — got ${shape}`);
+}
+
+// What `children` projects: the container's value when a declared
+// `@children` holds one, else the node itself.
+function __projected(children) {
+  return children != null && typeof children === 'object' && typeof children.read === 'function' ? children.value : children;
+}
+
+function __describeProjection(node) {
+  if (node == null) return 'nothing';
+  if (node.nodeType === 3) return 'text';
+  if (node.nodeType === 8) return 'a comment';
+  if (node.nodeType === 11) return `a fragment of ${node.childNodes.length} nodes`;
+  return typeof node === 'object' ? 'an object that is not a node' : `${typeof node} ${String(node)}`;
+}
+
 class __Component {
   constructor(props = {}) {
     // A living child released by its parent's HMR refresh answers the
@@ -1083,6 +1111,7 @@ class __Component {
       // BEFORE _init so member initializers and effects can read it.
       this._rest = rest ?? {};
       this.rest = __state(__restView(this._rest));
+      this._asChild = __asChildOf(this.constructor, this._rest);
     }
     // The instance's owner frame: NON-nested (cross-component
     // teardown is the _children cascade, never frame nesting), alive
@@ -1128,9 +1157,38 @@ class __Component {
     const current = this.children;
     if (current != null && typeof current === 'object' && typeof current.read === 'function' && 'value' in current) {
       current.value = value;
-      return;
+    } else {
+      this.children = value;
     }
-    this.children = value;
+    if (this._asChild && this._state === 'mounted') this._rehost();
+  }
+  // Under `asChild` the host line reads the projected element in place
+  // of a fresh tag, so every line after it writes there. Exactly one
+  // element qualifies; a component child qualifies through its root.
+  _adoptChild() {
+    const child = __projected(this.children);
+    if (child != null && child.nodeType === 1) return child;
+    throw new Error(
+      `${this.constructor.name || 'component'}: asChild renders the projected element as the host, so the body must ` +
+      `be exactly one element — got ${__describeProjection(child)}`,
+    );
+  }
+  // The view moves onto a new host: released as a patch releases it,
+  // the DOM kept since the host's place is the child's, and rebuilt by
+  // the ordinary create/setup path, which adopts the new element. A
+  // part above that adopted this one's root rebinds in turn.
+  _rehost() {
+    const prev = this._inheritedEl;
+    this._hmrRelease(false);
+    if (!this._hmrRebind()) return;
+    if (!this._mountCreate()) return;
+    this._mountSetup();
+    this._rehostAbove(prev);
+  }
+  _rehostAbove(prev) {
+    const above = this._parent;
+    if (prev == null || this._root === prev || !above?._asChild || above._state !== 'mounted' || above._inheritedEl !== prev) return;
+    above._setChildren(this._root);
   }
   // The first-class prop updater: the child
   // emission's prop-updater effects call this instead of guessing at
@@ -1173,6 +1231,9 @@ class __Component {
   _setRestProp(key, value) {
     if (key.startsWith('__bind_')) return;
     if (this._state === 'failed' || this._state === 'unmounted') return;
+    if (key === 'asChild') {
+      throw new Error(`${this.constructor.name || 'component'}: asChild is fixed at construction and takes no update`);
+    }
     this._rest || (this._rest = {});
     if (value == null) delete this._rest[key];
     else this._rest[key] = value;
@@ -1199,7 +1260,7 @@ class __Component {
   // either host: rest never writes it, at mount or on an update.
   _applyInheritedProp(host, key, value) {
     if (this._state === 'failed' || this._state === 'unmounted') return;
-    if (!host || key === 'key' || key === 'ref' || key === 'children' || key.startsWith('__bind_')) return;
+    if (!host || key === 'key' || key === 'ref' || key === 'children' || key === 'asChild' || key.startsWith('__bind_')) return;
     if (this._inheritedOwn?.has(key)) return;
     // Each key holds at most ONE live writer: overwriting or deleting
     // a rest key disposes the previous container writer FIRST — and
@@ -1452,7 +1513,7 @@ class __Component {
   // disposal — divert into the orphan pool while the release runs, so
   // the rebuilt view can adopt them (`__hmrAdopt`); whatever it does
   // not adopt drains once the rebuild settles.
-  _hmrRelease() {
+  _hmrRelease(removeDOM = true) {
     const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
     try {
       if (this.beforeUnmount) this.beforeUnmount();
@@ -1464,7 +1525,7 @@ class __Component {
     } finally {
       this._hmrReleasing = false;
     }
-    this._detachDOM(report, true);
+    this._detachDOM(report, removeDOM);
     this._frame = __ownerFrame({ nested: false });
     this._state = 'new';
   }
@@ -1514,6 +1575,7 @@ class __Component {
     if (this.constructor.__extends != null) {
       this._rest = rest ?? {};
       this.rest.value = __restView(this._rest);
+      this._asChild = __asChildOf(this.constructor, this._rest);
     }
   }
   _hmrDrainOrphans(report) {
@@ -1539,8 +1601,11 @@ class __Component {
     const insertBefore = nodes?.length
       ? nodes[nodes.length - 1].nextSibling
       : (this._root ? this._root.nextSibling : null);
+    // An adopting part's root is the child's element: it stays where
+    // the child put it, and the rebuild adopts it again in place.
+    const keepsHost = this._asChild === true;
 
-    this._hmrRelease();
+    this._hmrRelease(!keepsHost);
     if (!this._hmrRebind()) return this;
 
     if (typeof this._create !== 'function') {
@@ -1550,7 +1615,7 @@ class __Component {
     }
     if (!this._mountCreate()) return this;
 
-    try {
+    if (!keepsHost) try {
       // Resolve a CONNECTED parent. `mount()` often records a staging
       // DocumentFragment as `_target`; after the renderer commits that
       // fragment into #content, the fragment is empty and must not be
@@ -1583,6 +1648,7 @@ class __Component {
     }
 
     this._mountSetup();
+    this._rehostAbove(first);
     return this;
   }
   mount(target) {

@@ -926,6 +926,9 @@ export function propsTypeSegments(info, { road = 'dts' } = {}) {
       if (used.has(key) || info.lineOwned?.has(key)) continue;
       segs.push({ text: `; ${keyText(key)}?: ${valueOrContainer(t)}` });
     }
+    // The mode that renders the projected element as the host: a plain
+    // boolean, fixed at construction, so no container arm.
+    segs.push({ text: '; asChild?: boolean' });
     segs.push({ text: `; ${REST_TEMPLATES}` });
   }
   segs.push({ text: ' }' });

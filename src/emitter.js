@@ -50,7 +50,7 @@ const COMPONENT_HOOKS = new Set(['beforeMount', 'mounted', 'beforeUnmount', 'unm
 const COMPONENT_RUNTIME_FIELDS = new Set([
   '_state', '_frame', '_parent', '_children', '_root', '_nodes', '_target',
   '_context', '_rest', '_restWriters', '_restHandlers', '_inheritedEl', '_inheritedInst', '_inheritedOwn',
-  '_refCleanups', '_initFailed', '_hmrOrphans', '_hmrReleasing', '_hmrPropKeys',
+  '_refCleanups', '_initFailed', '_hmrOrphans', '_hmrReleasing', '_hmrPropKeys', '_asChild',
 ]);
 
 const BINOPS = new Set(['+', '-', '*', '/', '%', '**', '<', '>', '<=', '>=', '==', '!=', '&&', '||', '??', '<<', '>>', '>>>', '&', '^', '|']);
@@ -9888,6 +9888,14 @@ class Emitter {
       }
       members.set('rest', 'rest');
       memberReactive.add('rest');
+      // `asChild` is the caller's word for rendering the projected
+      // element as the host; a declared prop of that name would take it
+      // off the rest map before the host line could read it.
+      if (declaredProps.includes('asChild')) {
+        throw this.positionedError(seen.get('asChild'),
+          "emitter: a component that extends a host cannot declare a prop named 'asChild' — `asChild` at a " +
+          'call site renders the projected element as the host, and the key is reserved beside key, ref, and children', node);
+      }
     }
 
     // ── Emission ──
@@ -11157,9 +11165,14 @@ class Emitter {
   // writes it, at mount or on a later update, as under a component
   // host. Listeners are not keys here — the line's and the caller's
   // both run.
+  isInheritedTarget(tag) {
+    const R = this.rstate;
+    return R.frame.extendsTag === tag && R.sink.kind === 'class' && R.frame.inheritedBound !== true;
+  }
+
   bindInheritedTarget(node, tag, el, own) {
     const R = this.rstate;
-    if (R.frame.extendsTag !== tag || R.sink.kind !== 'class' || R.frame.inheritedBound === true) return;
+    if (!this.isInheritedTarget(tag)) return;
     R.frame.inheritedBound = true;
     this.renderLine(node, () => this.b.emit(`this._inheritedEl = ${el}`));
     if (own.length > 0) {
@@ -11211,9 +11224,16 @@ class Emitter {
     }
     const isSvg = R.svgDepth > 0 || SVG_ONLY_TAGS.has(tag);
     if (isSvg) R.svgEls.add(el);
+    // The inherited target under `asChild` is the projected element,
+    // handed back by the runtime in place of a fresh tag; every line
+    // after this one writes to whichever element the fork chose.
+    const adopts = this.isInheritedTarget(tag);
     this.renderLine(node, () => {
-      if (isSvg) this.b.emit(`${el} = document.createElementNS('${Emitter.SVG_NS}', `);
-      else this.b.emit(`${el} = document.createElement(`);
+      const self = this.renderSelf ?? 'this';
+      this.b.emit(`${el} = `);
+      if (adopts) this.b.emit(`${self}._asChild ? ${self}._adoptChild() : `);
+      if (isSvg) this.b.emit(`document.createElementNS('${Emitter.SVG_NS}', `);
+      else this.b.emit(`document.createElement(`);
       // The TAG word's face position is a string literal — no symbol
       // to hover — so its span joins the intrinsics channel and the
       // editor serves the ruled answer from the record (a selector-
@@ -11375,6 +11395,13 @@ class Emitter {
     try { this.renderChildrenOf(el, args, owner); } finally { this._textOwner = prevOwner; }
   }
 
+  renderAppend(el, v) {
+    this.renderLine(null, () => {
+      const guard = v === this.rstate.frame?.asChildSlot ? `if (!${this.renderSelf ?? 'this'}._asChild) ` : '';
+      this.b.emit(`${guard}${el}.appendChild(${v})`);
+    });
+  }
+
   renderChildrenOf(el, args, owner) {
     for (let k = 0; k < args.length; k++) {
       const arg = args[k];
@@ -11398,13 +11425,13 @@ class Emitter {
             } else if (!this.renderOwnLineWord(el, child, block, j, owner)) {
               const v = this.renderNode(child);
               if (v == null) continue;
-              this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
+              this.renderAppend(el, v);
             }
           }
         } else if (block) {
           if (!this.renderOwnLineWord(el, block, [block], 0, owner)) {
             const v = this.renderNode(block);
-            if (v != null) this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
+            if (v != null) this.renderAppend(el, v);
           }
         }
         continue;
@@ -11442,12 +11469,12 @@ class Emitter {
         }
         if (isHtmlTag(base || 'div')) {
           const v = this.renderNode(arg);
-          this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
+          this.renderAppend(el, v);
           continue;
         }
         if (isComponentName(base) && base === arg) {
           const v = this.renderChildComponent(arg, arg, []);
-          this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
+          this.renderAppend(el, v);
           continue;
         }
         if (/^[A-Za-z_$][\w$]*$/.test(arg) && this.resolveBareRead(arg) === null && !this.inScope(arg)) {
@@ -11485,7 +11512,7 @@ class Emitter {
       }
       if (arg != null) {
         const v = this.renderNode(arg);
-        this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
+        this.renderAppend(el, v);
       }
     }
   }
@@ -11625,6 +11652,9 @@ class Emitter {
     }
     this.claimSlot(markNode);
     const v = this.newRenderVar('slot');
+    // Under `asChild` the projected element is the host, so the slot
+    // has no place to go: its append is guarded (renderAppend).
+    if (this.rstate.frame.extendsTag !== null && this.rstate.sink.kind === 'class') this.rstate.frame.asChildSlot = v;
     const slotSpan = this.ts ? this.wordSpanIn('slot', markNode ?? this.rstate.node) : null;
     this.renderLine(markNode, () => {
       const c = this.childrenReadText();

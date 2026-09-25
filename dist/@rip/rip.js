@@ -9068,7 +9068,8 @@ var COMPONENT_RUNTIME_FIELDS = new Set([
   "_initFailed",
   "_hmrOrphans",
   "_hmrReleasing",
-  "_hmrPropKeys"
+  "_hmrPropKeys",
+  "_asChild"
 ]);
 var BINOPS = new Set(["+", "-", "*", "/", "%", "**", "<", ">", "<=", ">=", "==", "!=", "&&", "||", "??", "<<", ">>", ">>>", "&", "^", "|"]);
 var ASSIGNS = new Set(["=", "void-assign", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??=", "<<=", ">>=", ">>>=", "&=", "^=", "|="]);
@@ -16158,6 +16159,9 @@ ${pad ?? ""}`);
       }
       members.set("rest", "rest");
       memberReactive.add("rest");
+      if (declaredProps.includes("asChild")) {
+        throw this.positionedError(seen.get("asChild"), "emitter: a component that extends a host cannot declare a prop named 'asChild' — `asChild: true` at a " + "call site renders the projected element as the host, and the key is reserved beside key, ref, and children", node);
+      }
     }
     if (this.scopes.length === 1 && typeof this._componentName === "string") {
       const prior = this.moduleComponentNames.get(this._componentName);
@@ -17142,9 +17146,13 @@ ${pad ?? ""}`);
     }
     return t;
   }
+  isInheritedTarget(tag) {
+    const R = this.rstate;
+    return R.frame.extendsTag === tag && R.sink.kind === "class" && R.frame.inheritedBound !== true;
+  }
   bindInheritedTarget(node, tag, el, own) {
     const R = this.rstate;
-    if (R.frame.extendsTag !== tag || R.sink.kind !== "class" || R.frame.inheritedBound === true)
+    if (!this.isInheritedTarget(tag))
       return;
     R.frame.inheritedBound = true;
     this.renderLine(node, () => this.b.emit(`this._inheritedEl = ${el}`));
@@ -17197,11 +17205,16 @@ ${pad ?? ""}`);
     const isSvg = R.svgDepth > 0 || SVG_ONLY_TAGS.has(tag);
     if (isSvg)
       R.svgEls.add(el);
+    const adopts = this.isInheritedTarget(tag);
     this.renderLine(node, () => {
+      const self = this.renderSelf ?? "this";
+      this.b.emit(`${el} = `);
+      if (adopts)
+        this.b.emit(`${self}._asChild ? ${self}._adoptChild() : `);
       if (isSvg)
-        this.b.emit(`${el} = document.createElementNS('${Emitter.SVG_NS}', `);
+        this.b.emit(`document.createElementNS('${Emitter.SVG_NS}', `);
       else
-        this.b.emit(`${el} = document.createElement(`);
+        this.b.emit(`document.createElement(`);
       const span = this.emitQuotedPrimitive(tag);
       if (span !== null && surfaceableTag(tag, isSvg)) {
         this.intrinsics.push({ start: span[0], end: span[1], kind: "tag", tag, svg: isSvg });
@@ -17348,6 +17361,12 @@ ${pad ?? ""}`);
       this._textOwner = prevOwner;
     }
   }
+  renderAppend(el, v) {
+    this.renderLine(null, () => {
+      const guard = v === this.rstate.frame?.asChildSlot ? `if (!${this.renderSelf ?? "this"}._asChild) ` : "";
+      this.b.emit(`${guard}${el}.appendChild(${v})`);
+    });
+  }
   renderChildrenOf(el, args, owner) {
     for (let k = 0;k < args.length; k++) {
       const arg = args[k];
@@ -17365,14 +17384,14 @@ ${pad ?? ""}`);
               const v = this.renderNode(child);
               if (v == null)
                 continue;
-              this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
+              this.renderAppend(el, v);
             }
           }
         } else if (block) {
           if (!this.renderOwnLineWord(el, block, [block], 0, owner)) {
             const v = this.renderNode(block);
             if (v != null)
-              this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
+              this.renderAppend(el, v);
           }
         }
         continue;
@@ -17405,12 +17424,12 @@ ${pad ?? ""}`);
         }
         if (isHtmlTag2(base || "div")) {
           const v = this.renderNode(arg);
-          this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
+          this.renderAppend(el, v);
           continue;
         }
         if (isComponentName(base) && base === arg) {
           const v = this.renderChildComponent(arg, arg, []);
-          this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
+          this.renderAppend(el, v);
           continue;
         }
         if (/^[A-Za-z_$][\w$]*$/.test(arg) && this.resolveBareRead(arg) === null && !this.inScope(arg)) {
@@ -17448,7 +17467,7 @@ ${pad ?? ""}`);
       }
       if (arg != null) {
         const v = this.renderNode(arg);
-        this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
+        this.renderAppend(el, v);
       }
     }
   }
@@ -17527,6 +17546,8 @@ ${pad ?? ""}`);
     }
     this.claimSlot(markNode);
     const v = this.newRenderVar("slot");
+    if (this.rstate.frame.extendsTag !== null && this.rstate.sink.kind === "class")
+      this.rstate.frame.asChildSlot = v;
     const slotSpan = this.ts ? this.wordSpanIn("slot", markNode ?? this.rstate.node) : null;
     this.renderLine(markNode, () => {
       const c = this.childrenReadText();
@@ -26775,6 +26796,29 @@ function __splitProps(ctor, props) {
   }
   return rest;
 }
+function __asChildOf(ctor, rest) {
+  const value = rest?.asChild;
+  if (value == null || value === false)
+    return false;
+  if (value === true)
+    return true;
+  const shape = typeof value === "object" && typeof value.read === "function" ? "a reactive value" : `${typeof value} ${String(value)}`;
+  throw new Error(`${ctor.name || "component"}: asChild takes true or nothing, fixed at construction — got ${shape}`);
+}
+function __projected(children) {
+  return children != null && typeof children === "object" && typeof children.read === "function" ? children.value : children;
+}
+function __describeProjection(node) {
+  if (node == null)
+    return "nothing";
+  if (node.nodeType === 3)
+    return "text";
+  if (node.nodeType === 8)
+    return "a comment";
+  if (node.nodeType === 11)
+    return `a fragment of ${node.childNodes.length} nodes`;
+  return typeof node === "object" ? "a value that is no node" : `${typeof node} ${String(node)}`;
+}
 
 class __Component {
   constructor(props = {}) {
@@ -26822,6 +26866,7 @@ class __Component {
     if (this.constructor.__extends != null) {
       this._rest = rest ?? {};
       this.rest = __state(__restView(this._rest));
+      this._asChild = __asChildOf(this.constructor, this._rest);
     }
     this._frame = __ownerFrame({ nested: false });
     const prevC = __pushComponent(this);
@@ -26855,9 +26900,33 @@ class __Component {
     const current = this.children;
     if (current != null && typeof current === "object" && typeof current.read === "function" && "value" in current) {
       current.value = value;
-      return;
+    } else {
+      this.children = value;
     }
-    this.children = value;
+    if (this._asChild && this._state === "mounted")
+      this._rehost();
+  }
+  _adoptChild() {
+    const child = __projected(this.children);
+    if (child != null && child.nodeType === 1)
+      return child;
+    throw new Error(`${this.constructor.name || "component"}: asChild renders the projected element as the host, so the body must ` + `be exactly one element — got ${__describeProjection(child)}`);
+  }
+  _rehost() {
+    const prev = this._inheritedEl;
+    this._hmrRelease(false);
+    if (!this._hmrRebind())
+      return;
+    if (!this._mountCreate())
+      return;
+    this._mountSetup();
+    this._rehostAbove(prev);
+  }
+  _rehostAbove(prev) {
+    const above = this._parent;
+    if (prev == null || this._root === prev || !above?._asChild || above._state !== "mounted" || above._inheritedEl !== prev)
+      return;
+    above._setChildren(this._root);
   }
   _updateProp(name, value) {
     if (this._state === "failed" || this._state === "unmounted")
@@ -26882,6 +26951,9 @@ class __Component {
       return;
     if (this._state === "failed" || this._state === "unmounted")
       return;
+    if (key === "asChild") {
+      throw new Error(`${this.constructor.name || "component"}: asChild is fixed at construction and takes no update`);
+    }
     this._rest || (this._rest = {});
     if (value == null)
       delete this._rest[key];
@@ -26906,7 +26978,7 @@ class __Component {
   _applyInheritedProp(host, key, value) {
     if (this._state === "failed" || this._state === "unmounted")
       return;
-    if (!host || key === "key" || key === "ref" || key === "children" || key.startsWith("__bind_"))
+    if (!host || key === "key" || key === "ref" || key === "children" || key === "asChild" || key.startsWith("__bind_"))
       return;
     if (this._inheritedOwn?.has(key))
       return;
@@ -27179,7 +27251,7 @@ class __Component {
     this._detachDOM(report, removeDOM);
     this._target = null;
   }
-  _hmrRelease() {
+  _hmrRelease(removeDOM = true) {
     const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
     try {
       if (this.beforeUnmount)
@@ -27194,7 +27266,7 @@ class __Component {
     } finally {
       this._hmrReleasing = false;
     }
-    this._detachDOM(report, true);
+    this._detachDOM(report, removeDOM);
     this._frame = __ownerFrame({ nested: false });
     this._state = "new";
   }
@@ -27239,6 +27311,7 @@ class __Component {
     if (this.constructor.__extends != null) {
       this._rest = rest ?? {};
       this.rest.value = __restView(this._rest);
+      this._asChild = __asChildOf(this.constructor, this._rest);
     }
   }
   _hmrDrainOrphans(report) {
@@ -27264,7 +27337,8 @@ class __Component {
     const first = nodes?.[0] ?? this._root;
     const insertParent = first?.parentNode ?? null;
     const insertBefore = nodes?.length ? nodes[nodes.length - 1].nextSibling : this._root ? this._root.nextSibling : null;
-    this._hmrRelease();
+    const keepsHost = this._asChild === true;
+    this._hmrRelease(!keepsHost);
     if (!this._hmrRebind())
       return this;
     if (typeof this._create !== "function") {
@@ -27274,32 +27348,34 @@ class __Component {
     }
     if (!this._mountCreate())
       return this;
-    try {
-      let parent = insertParent && insertParent.nodeType !== 11 ? insertParent : null;
-      if (parent && parent.isConnected === false)
-        parent = null;
-      if (!parent && typeof target === "string" && typeof document !== "undefined") {
-        parent = document.querySelector(target);
-      } else if (!parent && target && target.nodeType !== 11 && target.isConnected !== false) {
-        parent = target;
-      } else if (!parent && typeof document !== "undefined") {
-        parent = document.querySelector("#content") || document.querySelector("#app");
-      }
-      if (parent) {
-        const before = insertBefore && (typeof parent.contains !== "function" || parent.contains(insertBefore)) ? insertBefore : null;
-        if (this._nodes) {
-          for (const n of this._nodes)
-            parent.insertBefore(n, before);
-        } else if (this._root) {
-          parent.insertBefore(this._root, before);
+    if (!keepsHost)
+      try {
+        let parent = insertParent && insertParent.nodeType !== 11 ? insertParent : null;
+        if (parent && parent.isConnected === false)
+          parent = null;
+        if (!parent && typeof target === "string" && typeof document !== "undefined") {
+          parent = document.querySelector(target);
+        } else if (!parent && target && target.nodeType !== 11 && target.isConnected !== false) {
+          parent = target;
+        } else if (!parent && typeof document !== "undefined") {
+          parent = document.querySelector("#content") || document.querySelector("#app");
         }
-        this._target = parent.nodeType === 11 ? null : parent;
+        if (parent) {
+          const before = insertBefore && (typeof parent.contains !== "function" || parent.contains(insertBefore)) ? insertBefore : null;
+          if (this._nodes) {
+            for (const n of this._nodes)
+              parent.insertBefore(n, before);
+          } else if (this._root) {
+            parent.insertBefore(this._root, before);
+          }
+          this._target = parent.nodeType === 11 ? null : parent;
+        }
+      } catch (error) {
+        this._failMount(error);
+        return this;
       }
-    } catch (error) {
-      this._failMount(error);
-      return this;
-    }
     this._mountSetup();
+    this._rehostAbove(first);
     return this;
   }
   mount(target) {

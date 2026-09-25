@@ -1,5 +1,6 @@
 import { Dialog } from 'rip/ui'
 import { COMPONENTS } from '../components.rip'
+import { Button } from '../components/button.rip'
 import { Choice, Controls, Page, Row, Stage } from '../components/page.rip'
 
 export DialogPage = component
@@ -9,9 +10,8 @@ export DialogPage = component
     Page title: COMPONENTS.dialog.name, description: COMPONENTS.dialog.description
       Stage
         Dialog.Root open <=> open
-          Dialog.Trigger
-            class: 'rounded-lg border border-transparent bg-accent px-3 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover active:bg-accent-active'
-            'Open Dialog'
+          Dialog.Trigger asChild
+            Button 'Open Dialog'
           Dialog.Popup
             closedby: closedby
             class: [
@@ -22,9 +22,8 @@ export DialogPage = component
             Dialog.Title class: 'text-lg font-semibold', 'Notifications'
             Dialog.Description class: 'mt-2 text-secondary', 'You are all caught up. Good job!'
             div class: 'mt-6 flex justify-end'
-              Dialog.Close
-                class: 'rounded-lg border border-transparent bg-accent px-3 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover active:bg-accent-active'
-                'Close'
+              Dialog.Close asChild
+                Button 'Close'
 
       Controls
         Row name: 'closedby'
