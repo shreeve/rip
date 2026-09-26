@@ -621,3 +621,33 @@ code 'attributes on a default-plus-named import', "import d, { a } from './d.jso
 code 'attributes on a default-plus-namespace import', "import d, * as ns from './d.json' with { type: 'json' }", 'import d, * as ns from \'./d.json\' with {type: "json"};'
 fail 'an import attribute is a string-literal pair', "import d from './d.json' with { type: t }", 'string-literal pair'
 fail 'attributes cannot ride a type-only import', "import type { T } from './d.json' with { type: 'json' }", "Unexpected 'with'"
+
+fail 'an import binding is read-only: a plain write rejects', '''
+  import * as Far from './lib.rip'
+  Far = 2
+''', "cannot assign to imported 'Far'"
+
+fail 'an import binding is read-only: a compound write rejects', '''
+  import { Beacon } from './lib.rip'
+  Beacon += 1
+''', "cannot assign to imported 'Beacon'"
+
+fail 'an import binding is read-only: a destructuring write rejects', '''
+  import { Beacon } from './lib.rip'
+  [Beacon] = [2]
+''', "cannot assign to imported 'Beacon'"
+
+fail 'an import binding is read-only inside a closure too', '''
+  import * as Far from './lib.rip'
+  f = -> Far = 2
+''', "cannot assign to imported 'Far'"
+
+code 'a parameter shadows an import, and the write is the parameter', '''
+  import * as Far from './lib.rip'
+  g = (Far) -> Far = 2
+''', '''
+  import * as Far from './lib.rip';
+  let g = function(Far) {
+    return (Far = 2);
+  };
+'''

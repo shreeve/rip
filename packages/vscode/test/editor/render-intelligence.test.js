@@ -649,7 +649,7 @@ describe.skipIf(!tsgoAvailable)('intrinsic-element intelligence', () => {
       // reads as the full signature; cut, the head still says what it
       // is and the item reads as the component alone. Never the rows.
       const resolvedButton = await api.resolve(buttonItem);
-      expect(resolvedButton.detail).toMatch(/^component Button( extends button props: \{ variant\?: 'primary' \| 'secondary' \})?$/);
+      expect(resolvedButton.detail).toMatch(/^component Button( extends button props: \{ variant\?: 'primary' \| 'secondary'; asChild\?: boolean \})?$/);
       // A construct detail tsgo delivers whole reads as the full signature
       // — asked at the item's own use, where its detail is its own.
       const atTag = await api.completion('form.rip', 5, 8);              // inside `Tag`
@@ -1158,12 +1158,22 @@ describe.skipIf(!tsgoAvailable)('component member paths', () => {
     await inSession(root, async (api) => {
       await api.open(rel, src);
       const tokens = decodeSemanticTokens((await api.semanticTokens(rel))?.data ?? [], src);
-      const declaration = tokens.find((t) => t.line === 0 && t.character === 9);
+      // The page is edited for its own reasons; the anchors follow its
+      // text, and a missing anchor fails as one, never as a token mismatch.
+      const lines = src.split('\n');
+      const anchor = (needle, word) => {
+        const line = lines.findIndex((l) => l.includes(needle));
+        expect(line, `${rel} has no line containing ${JSON.stringify(needle)}`).toBeGreaterThanOrEqual(0);
+        return { line, character: lines[line].indexOf(word) };
+      };
+      const imported = anchor("import { Dialog } from 'rip/ui'", 'Dialog');
+      const read = anchor('Dialog.Root', 'Dialog');
+      const declaration = tokens.find((t) => t.line === imported.line && t.character === imported.character);
       expect(declaration?.type).toBe('#8');
       expect(declaration?.length).toBe('Dialog'.length);
-      const use = tokens.find((t) => t.line === 12 && t.character === 8);
+      const use = tokens.find((t) => t.line === read.line && t.character === read.character);
       expect(use?.type).toBe('#0');
-      const hover = await api.hover(rel, 0, 12);
+      const hover = await api.hover(rel, imported.line, imported.character + 3);
       expect(hover?.contents?.value).toContain('module "rip/ui/dialog.rip"');
     });
   }, 60_000);

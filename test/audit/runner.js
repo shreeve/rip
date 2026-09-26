@@ -253,7 +253,7 @@ import { makeParserLexer, tokenize, ALIASES } from '../../src/lexer.js';
 import { identifierRuns, isIdentifierName } from '../../src/ident.js';
 import { renderTypeDecl } from '../../src/ts/types.js';
 import { judge } from './contract.js';
-import { lineStartsOf, SUPPRESSED_TS_CODES, sourceOffsetToGeneratedExact, generatedSpanToSource, offsetToPosition, flattenHover } from '../../packages/vscode/src/translate.js';
+import { lineStartsOf, SUPPRESSED_TS_CODES, sourceOffsetToGeneratedExact, generatedSpanToSource, offsetToPosition, flattenHover, exactSpanMapper } from '../../packages/vscode/src/translate.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '../..');
@@ -1520,8 +1520,13 @@ class FaceOracle {
 // A silent DRIFT guard rides along: `delivered ⊆ classified` holds by
 // construction (the server derives its tokens from tsgo classifying the same
 // face), so it is near-tautological — its only teeth are catching THIS
-// standalone FaceOracle's tsgo drifting from the server's. `unclassified`
-// counts violators; it surfaces only if nonzero, never as an always-ok line.
+// standalone FaceOracle's tsgo drifting from the server's. The one delivery
+// the face never classifies is an import binding's declaration and reads:
+// tsgo emits no token for a namespace head or an imported component, and the
+// server mints those by rule from the face's importedRefs (tokens.js). Their
+// positions are classified by the rule, not the face, and are not drift.
+// `unclassified` counts violators; it surfaces only if nonzero, never as an
+// always-ok line.
 
 // rip DECLARATION keywords whose spelling is ALSO a common property name, so a
 // source-word count cannot tell the keyword from the identifier (`type X =` vs
@@ -1592,7 +1597,7 @@ const PRIMITIVE_TYPE_WORDS = new Set([
 // `export`-prefixed DECLARATIONS (`export add = …`) are deliberately NOT
 // spanned: their names are ordinary population members, and an excuse
 // covering them could silently absorb a dropped token.
-function faceSurvival(src, code, mappings, faceDecoded, serverTokens, bindingNames, excused = {}, attrNames = []) {
+function faceSurvival(src, code, mappings, faceDecoded, serverTokens, bindingNames, excused = {}, attrNames = [], importedRefs = []) {
   // Render ATTRIBUTE names, as face offsets from the compiler's own
   // channel: the server SUPPRESSES their tokens by ruling — a plain prop
   // must read like its two-way-bound neighbor, whose minted key cannot
@@ -1744,9 +1749,15 @@ function faceSurvival(src, code, mappings, faceDecoded, serverTokens, bindingNam
     const nm = code.slice(off, off + t.length);
     if (keep(nm)) classifiedNames.add(nm);
   }
+  const mapMinted = exactSpanMapper(mappings);
+  const mintedAt = new Set();
+  for (const [genStart, genEnd] of importedRefs) {
+    const at = mapMinted(genStart, genEnd);
+    if (at !== null) mintedAt.add(at);
+  }
   let unclassified = 0;
-  for (const nm of deliveredAt.values()) {
-    if (!classifiedNames.has(nm)) unclassified++;
+  for (const [off, nm] of deliveredAt) {
+    if (!mintedAt.has(off) && !classifiedNames.has(nm)) unclassified++;
   }
 
   const byName = new Map();
@@ -2493,6 +2504,10 @@ if (RUN_GRAMMAR) {
   const sigilReadDrift = [], bareProvided = [];
   const coverageSeen = new Set();   // `${fixture} ${member}` listed reads the corpus still writes
   const fixtureRows = [];
+  // Fixtures another fixture imports: a module that exists to be imported
+  // reduces nothing of its own, and removing it breaks its importer, so
+  // the retirement census never names it.
+  const importedFixtures = new Map(); // imported fixture → the fixture that imports it
   for (const f of fixtures) {
     const grammarBucket = fixDirOf(f) === FIX;
     const mine = new Set();
@@ -2517,6 +2532,7 @@ if (RUN_GRAMMAR) {
         fixtureRows.push({ f, ok: false, failed: bad ? `at ${at.line + 1}:${at.character + 1} — ${firstLine(bad.message)}` : '— the parser returned no tree' });
         continue;
       }
+      for (const m of text.matchAll(/(?:from|import)\s+['"]\.\/([^'"]+\.rip)['"]/g)) importedFixtures.set(m[1], f);
       walkPairs(tree.sexpr, []);
       {
         const { sigil, bare } = memberReadCensus(tree.sexpr);
@@ -2572,7 +2588,8 @@ if (RUN_GRAMMAR) {
       continue;
     }
     const u = uniqueOf(r.f);
-    console.log(`    ${green('✓')} ${pad(r.f, NAME_W + 2)} ${dim(`${String(r.reduced).padStart(3)} rules · `)}${(u ? dim : yellow)(`${String(u).padStart(3)} unique`)}`);
+    const importer = importedFixtures.get(r.f);
+    console.log(`    ${green('✓')} ${pad(r.f, NAME_W + 2)} ${dim(`${String(r.reduced).padStart(3)} rules · `)}${(u || importer ? dim : yellow)(`${String(u).padStart(3)} unique`)}${importer ? dim(` · imported by ${importer}`) : ''}`);
   }
   // A failed claims fixture already printed its own ✗ row above, so this line
   // counts only the ones that parsed — it can never stand in front of a
@@ -2629,8 +2646,11 @@ if (RUN_GRAMMAR) {
     // contribution, and listing it as removable-at-no-cost would answer a
     // question nobody asked over the one the ✗ row just raised.
     const judged = fixtureRows.filter((r) => r.ok && r.grammarBucket);
-    const removable = judged.filter((r) => uniqueOf(r.f) === 0).map((r) => r.f);
-    out(`    ${(removable.length ? dim : green)(String(judged.length - removable.length))} ${dim('/')} ${dim(String(judged.length))} ${dim('fixtures reduce a production no other does')}`
+    const contributing = judged.filter((r) => uniqueOf(r.f) > 0);
+    const imported = judged.filter((r) => uniqueOf(r.f) === 0 && importedFixtures.has(r.f)).map((r) => r.f);
+    const removable = judged.filter((r) => uniqueOf(r.f) === 0 && !importedFixtures.has(r.f)).map((r) => r.f);
+    out(`    ${(removable.length ? dim : green)(String(contributing.length))} ${dim('/')} ${dim(String(judged.length))} ${dim('fixtures reduce a production no other does')}`
+      + (imported.length ? `${dim(' · ')}${dim(`${imported.length} imported by another fixture, kept for it: ${imported.join(', ')}`)}` : '')
       + (removable.length ? `${dim(' · ')}${yellow(`removable at zero coverage loss: ${removable.join(', ')}`)}` : ''));
   }
   // The list is the ANSWER to the number above it — which productions the
@@ -4200,8 +4220,8 @@ if (RUN_HOVER || RUN_TOKENS) {
       const full = fixPath(f);
       if (!await compiles(full)) continue;   // a fixture with no face has nothing to survive
       try {
-        const { code, mappings, bindingNames, attrNames } = compile(fs.readFileSync(full, 'utf8'), { path: full, runtimeDelivery: 'inline', face: 'ts' });
-        FACES.set(f, { code, mappings, bindingNames, attrNames });
+        const { code, mappings, bindingNames, attrNames, importedRefs } = compile(fs.readFileSync(full, 'utf8'), { path: full, runtimeDelivery: 'inline', face: 'ts' });
+        FACES.set(f, { code, mappings, bindingNames, attrNames, importedRefs });
         fs.writeFileSync(path.join(FACE_DIR, f.replace(/\.rip$/, '.rip.ts')), code);
       } catch (e) {
         // compiles() (subprocess `bin/rip --ts`) passed but the in-process
@@ -4283,8 +4303,8 @@ if (RUN_HOVER || RUN_TOKENS) {
       const dec = await faces[lane].faceTokens(f);
       const { code } = FACES.get(f);
       // probe.tokens is the REAL server's delivered output — the survival oracle.
-      const { mappings: faceMappings, bindingNames, attrNames } = FACES.get(f);
-      survival = faceSurvival(src, code, faceMappings, dec, probe.tokens, bindingNames, SURVIVAL_EXCUSED?.[f] ?? {}, attrNames ?? []);
+      const { mappings: faceMappings, bindingNames, attrNames, importedRefs } = FACES.get(f);
+      survival = faceSurvival(src, code, faceMappings, dec, probe.tokens, bindingNames, SURVIVAL_EXCUSED?.[f] ?? {}, attrNames ?? [], importedRefs ?? []);
     }
 
     return {

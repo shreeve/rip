@@ -3,6 +3,8 @@
 # ── Definition + typed props + render structure ──
 # The TSX twin covers the JSX-analogous surface only (CORPUS.md, Oracles); gates, offer/accept, and the `<=>` channel have no honest TSX spelling and are absent from it.
 
+import * as Far from './13-components-lib.rip'
+
 export Badge = component
   @label: string
   @tone?: 'info' | 'warn' := 'info'
@@ -219,7 +221,15 @@ Stepper = component
       Step label: 'wrap'
         Step label: 'inner', 'in'
 
+# ── accept through a namespace: the provider path roots at an import ──
+
+Relay = component
+  accept signal from Far.Beacon
+
+  render
+    span 'relay'
+
 console.log('components:', typeof Badge, typeof Field, typeof Roster, typeof Panel, typeof Spinner)
 console.log('generics:', typeof Chip, typeof Options, typeof Picker, typeof Quiet, typeof Terse, typeof Held, typeof Teaser, typeof Anchor, typeof Gauge)
 console.log('use shapes:', typeof Step, typeof Stepper)
-console.log('rip-native constructs:', (typeof Routed is 'function'), (typeof Give is 'function'), (typeof Take is 'function'))
+console.log('rip-native constructs:', (typeof Routed is 'function'), (typeof Give is 'function'), (typeof Take is 'function'), (typeof Relay is 'function'))

@@ -9369,6 +9369,7 @@ class Emitter {
     this.componentUses = [];
     this.namespaceExports = [];
     this.componentNames = [];
+    this.exportedObjects = [];
     this.renderPairs = [];
     this.browserModule = browserModule;
     this.hmr = hmr === true;
@@ -9601,6 +9602,15 @@ class Emitter {
         return false;
     }
     return false;
+  }
+  checkImportWrite(node, target) {
+    const names = typeof target === "string" ? [target] : Emitter.isPattern(target) ? this.patternNames(target) : [];
+    for (const name of names) {
+      const spec = this.importSpecOf(name);
+      if (spec === null)
+        continue;
+      throw this.positionedError(node, `emitter: cannot assign to imported '${name}' — an import binding (from '${spec.specifier}') is read-only ` + `for the whole module; bind a local to it ('local = ${name}') or have the module export writable state`);
+    }
   }
   checkExportedConstWrite(node, target) {
     const names = typeof target === "string" ? [target] : Emitter.isPattern(target) ? this.patternNames(target) : [];
@@ -12115,9 +12125,10 @@ class Emitter {
           this.statement(imp, 0);
         this.emitDataConst();
         const rest = all.slice(lead);
-        let entries = this.ambientHoistFilter(this.hoistTargets(rest, [], Emitter.importedNames(all.slice(0, lead))));
+        const imported = Emitter.importedNames(all.filter((n) => this.isModuleImport(n)));
+        let entries = this.ambientHoistFilter(this.hoistTargets(rest, [], imported));
         this.attachSchemaConsts(entries);
-        const names = new Set([...entries.map(([n]) => n), ...Emitter.importedNames(all.slice(0, lead))]);
+        const names = new Set([...entries.map(([n]) => n), ...imported]);
         for (const n of this.pushReactiveFrame(all, names))
           names.add(n);
         this.moduleBound = Emitter.moduleBoundNames(rest);
@@ -12234,9 +12245,10 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
   programPlain(sexpr, stmts) {
     this.mark(sexpr, "$self", () => {
       this.emitDataConst();
-      let entries = this.ambientHoistFilter(this.hoistTargets(stmts));
+      const imported = Emitter.importedNames(stmts.filter((n) => this.isModuleImport(n)));
+      let entries = this.ambientHoistFilter(this.hoistTargets(stmts, [], imported));
       this.attachSchemaConsts(entries);
-      const names = new Set(entries.map(([n]) => n));
+      const names = new Set([...entries.map(([n]) => n), ...imported]);
       for (const n of this.pushReactiveFrame(stmts, names))
         names.add(n);
       this.moduleBound = Emitter.moduleBoundNames(stmts);
@@ -12619,6 +12631,11 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
         } else if (isNode(spec) && (spec[0] === "=" || spec[0] === "void-assign")) {
           if (spec[0] === "void-assign")
             this.registerVoidValue(spec[2], spec);
+          if (spec[0] === "=" && typeof spec[1] === "string") {
+            const values = Emitter.plainObjectValues(spec[2]);
+            if (values !== null)
+              this.exportedObjects.push([spec[1], values]);
+          }
           this.b.emit("export ");
           this.mark(spec, "voidMarker", () => this.mark(spec, "annotation", () => this.mark(spec, "$self", () => {
             this.b.emit("const ");
@@ -13314,6 +13331,7 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
             this.braceBlock(body, ind);
           } else if (Emitter.isPattern(binding)) {
             this.checkExportedConstWrite(part, binding);
+            this.checkImportWrite(part, binding);
             const param = this.loopTempName("_err");
             this.b.emit(` catch (${param}`);
             this.tsScaffoldAny();
@@ -14437,6 +14455,7 @@ ${pad ?? ""}`);
             this.returnBlock(body, ind);
           } else if (Emitter.isPattern(binding)) {
             this.checkExportedConstWrite(part, binding);
+            this.checkImportWrite(part, binding);
             const param = this.loopTempName("_err");
             this.b.emit(` catch (${param}`);
             this.tsScaffoldAny();
@@ -14842,6 +14861,19 @@ ${pad ?? ""}`);
       return n.slice(1).some((pair) => isNode(pair) && pair[0] === ":" && pair.length === 3 ? Emitter.containsBareIt(pair[2]) || typeof pair[1] !== "string" && Emitter.containsBareIt(pair[1]) : Emitter.containsBareIt(pair));
     }
     return n.some((item) => Emitter.containsBareIt(item));
+  }
+  static plainObjectValues(node) {
+    if (!isNode(node) || node[0] !== "object" || node.length < 2)
+      return null;
+    const values = [];
+    for (const pair of node.slice(1)) {
+      if (!isNode(pair) || pair[0] !== null && pair[0] !== ":")
+        return null;
+      if (typeof pair[1] !== "string" || typeof pair[2] !== "string")
+        return null;
+      values.push(pair[2]);
+    }
+    return values;
   }
   static containsYield(sexpr) {
     return containsYield(sexpr);
@@ -15427,6 +15459,7 @@ ${pad ?? ""}`);
     }
     if (!this.inPattern)
       this.checkExportedConstWrite(node, node[1]);
+    this.checkImportWrite(node, node[1]);
     this.checkMemberWrite(node, node[1]);
     if (node[0] === "void-assign")
       this.registerVoidValue(node[2], node);
@@ -21135,6 +21168,7 @@ ${this.replayPad}}` : " }");
   }
   middleRestAssign(node, ind) {
     this.checkExportedConstWrite(node, node[1]);
+    this.checkImportWrite(node, node[1]);
     const els = node[1].slice(1);
     const at = els.findIndex((e) => isNode(e) && e[0] === "..." && e.length === 2);
     const heads = els.slice(0, at);
@@ -21692,6 +21726,7 @@ ${"  ".repeat(ind)}`);
       throw this.positionedError(node, `emitter: cannot assign to readonly '${node[1]}' — a '=!' binding never changes after its declaration`);
     }
     this.checkExportedConstWrite(node, node[1]);
+    this.checkImportWrite(node, node[1]);
     this.checkMemberWrite(node, node[1]);
     if (isNode(node[1]) && Emitter.optionalGuard(node[1]) !== null) {
       throw this.positionedError(node, "emitter: an optional chain cannot be an update target — no reference exists for `obj?.x++`; " + "guard it explicitly (`obj.x++ if obj?`)");
@@ -22028,6 +22063,7 @@ ${"  ".repeat(ind)}`);
   }
   compoundTarget(node, target, ind) {
     this.checkExportedConstWrite(node, target);
+    this.checkImportWrite(node, target);
     if (this.repeatSafeValue(target)) {
       this.mark(node, "target", () => this.withTarget(() => this.expr(target)));
       return target;
@@ -22294,6 +22330,7 @@ ${"  ".repeat(ind)}`);
   synthCompound(node, open, mid, close) {
     const t = node[1];
     this.checkExportedConstWrite(node, t);
+    this.checkImportWrite(node, t);
     if (isNode(t) && (t[0] === "." || t[0] === "[]") && t.length === 3) {
       const plan = this.refPlans.get(node) ?? { recv: null, obj: null, key: null };
       if (plan.obj === null && !this.repeatSafeValue(t[1])) {
@@ -23479,7 +23516,8 @@ export {};
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd]
     });
   }
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, componentUses: emitter.componentUses, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
+  const partNames = emitter.exportedObjects.filter(([, values]) => values.every((value) => emitter.componentNames.includes(value))).map(([name]) => name);
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, componentUses: emitter.componentUses, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
 }
 
 // src/sourcemap.js
@@ -23694,6 +23732,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     componentUses: emitted.componentUses ?? [],
     namespaceExports: emitted.namespaceExports ?? [],
     componentNames: emitted.componentNames ?? [],
+    partNames: emitted.partNames ?? [],
     importedRefs: emitted.importedRefs,
     imports: emitted.imports,
     trivia: result.trivia ?? [],

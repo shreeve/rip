@@ -6729,6 +6729,55 @@ code '`extends` and `accept … from` name a component through a member path roo
   };
 '''
 
+code 'an import that follows a statement binds for the whole module: a host and a provider still root at it', '''
+  ready = true
+  import * as Ns from './ns.rip'
+  Part = component extends Ns.Root
+    accept open from Ns.Root
+    render
+      Ns.Root
+        slot
+''', '''
+  let ready = true;
+  import * as Ns from './ns.rip';
+
+  let Part = class extends __Component {
+    static __extends = 'Ns.Root';
+    _init(__given) {
+      this.open = getContext(Ns.Root, 'open');
+    }
+    _create() {
+      { const __prev = __pushComponent(this); try {
+      try {
+      this._inst0 = new Ns.Root({ ...this._rest, children: this.children });
+      if (this._inst0 && this._inst0._initFailed) {
+        this._inst0 = null;
+        this._el1 = document.createComment('rip:child-init-failed: Ns.Root');
+      } else if (this._inst0._mountCreate()) {
+        this._el1 = this._inst0._root;
+        this._inheritedInst = this._inst0;
+        this._inheritedOwn = new Set([]);
+        (this._children || (this._children = [])).push(this._inst0);
+      } else {
+        this._inst0 = null;
+        this._el1 = document.createComment('rip:child-error: Ns.Root');
+      }
+      } catch (__childErr) {
+        __reportChildFailure('Ns.Root', __childErr);
+        this._inst0 = null;
+        this._el1 = document.createComment('rip:child-error: Ns.Root');
+      }
+      } finally { __popComponent(__prev); } }
+      return this._el1;
+    }
+    _setup() {
+      if (this._inst0 && this._inst0._state === 'mounting') {
+        this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Ns.Root'));
+      }
+    }
+  };
+'''
+
 fail 'a host named through a path roots at an import, never a binding of the module', '''
   Root = component
     render
