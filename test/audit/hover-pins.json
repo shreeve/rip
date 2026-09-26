@@ -115,7 +115,7 @@
       },
       {
         "name": "Anchor",
-        "expect": "component Anchor extends a props: { label: string }"
+        "expect": "component Anchor extends a props: { label: string asChild?: boolean }"
       },
       {
         "name": "Gauge",
@@ -279,7 +279,7 @@
         "line": 71,
         "character": 6,
         "token": "Field",
-        "expect": "component Field extends input props: { label?: string value?: string error?: string }",
+        "expect": "component Field extends input props: { label?: string value?: string error?: string asChild?: boolean }",
         "rule": "component name at a use site",
         "why": "the component's signature, served — the use-site name's exact row reaches tsgo's construct signature and presentComponentSignatureHover re-dresses it: bind twins, children, and the extends passthrough out, container unions collapsed value-first"
       },
