@@ -1,0 +1,7 @@
+# 13-components-lib.rip — the module the 13-family imports: a component that offers, so an accept can name it through the namespace.
+
+export Beacon = component
+  offer signal := 'on'
+
+  render
+    div 'beacon'

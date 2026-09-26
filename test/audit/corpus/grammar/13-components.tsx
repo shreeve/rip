@@ -213,4 +213,4 @@ function Stepper() {
 console.log('components:', typeof Badge, typeof Field, typeof Roster, typeof Panel, typeof Spinner)
 console.log('generics:', typeof Chip, typeof Options, typeof Picker, typeof Quiet, typeof Terse, typeof Held, typeof Teaser, typeof Anchor, typeof Gauge)
 console.log('use shapes:', typeof Step, typeof Stepper)
-console.log('rip-native constructs:', true, true, true)
+console.log('rip-native constructs:', true, true, true, true)
