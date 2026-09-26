@@ -2504,6 +2504,10 @@ if (RUN_GRAMMAR) {
   const sigilReadDrift = [], bareProvided = [];
   const coverageSeen = new Set();   // `${fixture} ${member}` listed reads the corpus still writes
   const fixtureRows = [];
+  // Fixtures another fixture imports: a module that exists to be imported
+  // reduces nothing of its own, and removing it breaks its importer, so
+  // the retirement census never names it.
+  const importedFixtures = new Map(); // imported fixture → the fixture that imports it
   for (const f of fixtures) {
     const grammarBucket = fixDirOf(f) === FIX;
     const mine = new Set();
@@ -2528,6 +2532,7 @@ if (RUN_GRAMMAR) {
         fixtureRows.push({ f, ok: false, failed: bad ? `at ${at.line + 1}:${at.character + 1} — ${firstLine(bad.message)}` : '— the parser returned no tree' });
         continue;
       }
+      for (const m of text.matchAll(/(?:from|import)\s+['"]\.\/([^'"]+\.rip)['"]/g)) importedFixtures.set(m[1], f);
       walkPairs(tree.sexpr, []);
       {
         const { sigil, bare } = memberReadCensus(tree.sexpr);
@@ -2583,7 +2588,8 @@ if (RUN_GRAMMAR) {
       continue;
     }
     const u = uniqueOf(r.f);
-    console.log(`    ${green('✓')} ${pad(r.f, NAME_W + 2)} ${dim(`${String(r.reduced).padStart(3)} rules · `)}${(u ? dim : yellow)(`${String(u).padStart(3)} unique`)}`);
+    const importer = importedFixtures.get(r.f);
+    console.log(`    ${green('✓')} ${pad(r.f, NAME_W + 2)} ${dim(`${String(r.reduced).padStart(3)} rules · `)}${(u || importer ? dim : yellow)(`${String(u).padStart(3)} unique`)}${importer ? dim(` · imported by ${importer}`) : ''}`);
   }
   // A failed claims fixture already printed its own ✗ row above, so this line
   // counts only the ones that parsed — it can never stand in front of a
@@ -2640,8 +2646,11 @@ if (RUN_GRAMMAR) {
     // contribution, and listing it as removable-at-no-cost would answer a
     // question nobody asked over the one the ✗ row just raised.
     const judged = fixtureRows.filter((r) => r.ok && r.grammarBucket);
-    const removable = judged.filter((r) => uniqueOf(r.f) === 0).map((r) => r.f);
-    out(`    ${(removable.length ? dim : green)(String(judged.length - removable.length))} ${dim('/')} ${dim(String(judged.length))} ${dim('fixtures reduce a production no other does')}`
+    const contributing = judged.filter((r) => uniqueOf(r.f) > 0);
+    const imported = judged.filter((r) => uniqueOf(r.f) === 0 && importedFixtures.has(r.f)).map((r) => r.f);
+    const removable = judged.filter((r) => uniqueOf(r.f) === 0 && !importedFixtures.has(r.f)).map((r) => r.f);
+    out(`    ${(removable.length ? dim : green)(String(contributing.length))} ${dim('/')} ${dim(String(judged.length))} ${dim('fixtures reduce a production no other does')}`
+      + (imported.length ? `${dim(' · ')}${dim(`${imported.length} imported by another fixture, kept for it: ${imported.join(', ')}`)}` : '')
       + (removable.length ? `${dim(' · ')}${yellow(`removable at zero coverage loss: ${removable.join(', ')}`)}` : ''));
   }
   // The list is the ANSWER to the number above it — which productions the
