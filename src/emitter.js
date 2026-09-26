@@ -4785,13 +4785,16 @@ class Emitter {
         for (const imp of all.slice(0, lead)) this.statement(imp, 0);
         this.emitDataConst();
         const rest = all.slice(lead);
-        // Leading-import names join the hoist exclusion (one binding
-        // per name — a later assignment writes the import binding,
-        // never a second `let`) and the redeclaration check (the
-        // whole program is one scope; the emission split is layout).
-        let entries = this.ambientHoistFilter(this.hoistTargets(rest, [], Emitter.importedNames(all.slice(0, lead))));
+        // Every import's names — leading or not, since an import binds
+        // for the whole module wherever it sits — join the hoist
+        // exclusion (one binding per name — a later assignment writes
+        // the import binding, never a second `let`) and the module
+        // scope, which is what `inScope` answers for an extends host or
+        // an accept provider. The emission split is layout.
+        const imported = Emitter.importedNames(all.filter((n) => this.isModuleImport(n)));
+        let entries = this.ambientHoistFilter(this.hoistTargets(rest, [], imported));
         this.attachSchemaConsts(entries);
-        const names = new Set([...entries.map(([n]) => n), ...Emitter.importedNames(all.slice(0, lead))]);
+        const names = new Set([...entries.map(([n]) => n), ...imported]);
         for (const n of this.pushReactiveFrame(all, names)) names.add(n);
         this.moduleBound = Emitter.moduleBoundNames(rest);
         this.moduleClassNames = Emitter.classDeclNames(rest);
@@ -4930,9 +4933,12 @@ class Emitter {
   programPlain(sexpr, stmts) {
     this.mark(sexpr, '$self', () => {
       this.emitDataConst();
-      let entries = this.ambientHoistFilter(this.hoistTargets(stmts));
+      // No leading import, but an import may still follow a statement,
+      // and it binds for the whole module.
+      const imported = Emitter.importedNames(stmts.filter((n) => this.isModuleImport(n)));
+      let entries = this.ambientHoistFilter(this.hoistTargets(stmts, [], imported));
       this.attachSchemaConsts(entries);
-      const names = new Set(entries.map(([n]) => n));
+      const names = new Set([...entries.map(([n]) => n), ...imported]);
       for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
       this.moduleBound = Emitter.moduleBoundNames(stmts);
       this.moduleClassNames = Emitter.classDeclNames(stmts);
