@@ -1142,6 +1142,23 @@ class Emitter {
   // build), and no emission of a write to a const is correct anyway.
   // Member and index targets are untouched — those mutate the exported
   // VALUE, which a const binding permits.
+  // An import binding is read-only for the whole module: JavaScript throws
+  // on the write at runtime, which is the loud error in the wrong place.
+  // A name or a pattern, the same as an exported const; a nearer binding
+  // of the name (a parameter, a local) shadows the import and writes freely.
+  checkImportWrite(node, target) {
+    const names = typeof target === 'string'
+      ? [target]
+      : (Emitter.isPattern(target) ? this.patternNames(target) : []);
+    for (const name of names) {
+      const spec = this.importSpecOf(name);
+      if (spec === null) continue;
+      throw this.positionedError(node,
+        `emitter: cannot assign to imported '${name}' — an import binding (from '${spec.specifier}') is read-only ` +
+        `for the whole module; bind a local to it ('local = ${name}') or have the module export writable state`);
+    }
+  }
+
   checkExportedConstWrite(node, target) {
     const names = typeof target === 'string'
       ? [target]
@@ -6404,7 +6421,7 @@ class Emitter {
             // the handler's first statement (paren-wrapped for both
             // pattern kinds). The names hoist at the enclosing scope —
             // for BOTH kinds, which is why the write check runs here.
-            this.checkExportedConstWrite(part, binding);
+            this.checkExportedConstWrite(part, binding); this.checkImportWrite(part, binding);
             // The scaffold parameter is minted, never `error`: the
             // handler body may READ an outer `error`, which a fixed
             // parameter would shadow. Face-only `any` on it (tsScaffoldAny's
@@ -7626,7 +7643,7 @@ class Emitter {
             this.b.emit(' catch ');
             this.returnBlock(body, ind);
           } else if (Emitter.isPattern(binding)) {
-            this.checkExportedConstWrite(part, binding);
+            this.checkExportedConstWrite(part, binding); this.checkImportWrite(part, binding);
             // The statement path's catch-pattern lowering, value-side:
             // minted parameter, face-only `any` on it for the same reason.
             const param = this.loopTempName('_err');
@@ -8845,7 +8862,7 @@ class Emitter {
         + 'it binds its source once and reads by index, which has no expression form; '
         + 'move the assignment to its own line');
     }
-    if (!this.inPattern) this.checkExportedConstWrite(node, node[1]);
+    if (!this.inPattern) this.checkExportedConstWrite(node, node[1]); this.checkImportWrite(node, node[1]);
     this.checkMemberWrite(node, node[1]);
     // A void definition (`save! = ->`, head 'void-assign') validates its
     // function value and emits as a plain '='; the value's body owns
@@ -16422,7 +16439,7 @@ class Emitter {
     // This lowering is dispatched AHEAD of the guarded assign path and
     // writes each name raw, so the exported-const check has to run here
     // too — `[...rest, flag] = src` reaches no other guard.
-    this.checkExportedConstWrite(node, node[1]);
+    this.checkExportedConstWrite(node, node[1]); this.checkImportWrite(node, node[1]);
     const els = node[1].slice(1);
     const at = els.findIndex((e) => isNode(e) && e[0] === '...' && e.length === 2);
     const heads = els.slice(0, at);
@@ -17205,7 +17222,7 @@ class Emitter {
       throw this.positionedError(node,
         `emitter: cannot assign to readonly '${node[1]}' — a '=!' binding never changes after its declaration`);
     }
-    this.checkExportedConstWrite(node, node[1]);
+    this.checkExportedConstWrite(node, node[1]); this.checkImportWrite(node, node[1]);
     this.checkMemberWrite(node, node[1]);
     // An optional chain is not a JavaScript assignment reference —
     // `obj?.x++` has no valid emission; guard the update explicitly.
@@ -17642,7 +17659,7 @@ class Emitter {
   // single-evaluation contract. Returns the node the READ spelling
   // embeds. Minted names come from the used-name registry.
   compoundTarget(node, target, ind) {
-    this.checkExportedConstWrite(node, target);
+    this.checkExportedConstWrite(node, target); this.checkImportWrite(node, target);
     if (this.repeatSafeValue(target)) {
       this.mark(node, 'target', () => this.withTarget(() => this.expr(target)));
       return target;
@@ -17966,7 +17983,7 @@ class Emitter {
   // control transfer in the source function's own context.
   synthCompound(node, open, mid, close) {
     const t = node[1];
-    this.checkExportedConstWrite(node, t);
+    this.checkExportedConstWrite(node, t); this.checkImportWrite(node, t);
     if (isNode(t) && (t[0] === '.' || t[0] === '[]') && t.length === 3) {
       const plan = this.refPlans.get(node) ?? { recv: null, obj: null, key: null };
       if (plan.obj === null && !this.repeatSafeValue(t[1])) {

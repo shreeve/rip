@@ -9603,6 +9603,15 @@ class Emitter {
     }
     return false;
   }
+  checkImportWrite(node, target) {
+    const names = typeof target === "string" ? [target] : Emitter.isPattern(target) ? this.patternNames(target) : [];
+    for (const name of names) {
+      const spec = this.importSpecOf(name);
+      if (spec === null)
+        continue;
+      throw this.positionedError(node, `emitter: cannot assign to imported '${name}' — an import binding (from '${spec.specifier}') is read-only ` + `for the whole module; bind a local to it ('local = ${name}') or have the module export writable state`);
+    }
+  }
   checkExportedConstWrite(node, target) {
     const names = typeof target === "string" ? [target] : Emitter.isPattern(target) ? this.patternNames(target) : [];
     for (const name of names) {
@@ -13322,6 +13331,7 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
             this.braceBlock(body, ind);
           } else if (Emitter.isPattern(binding)) {
             this.checkExportedConstWrite(part, binding);
+            this.checkImportWrite(part, binding);
             const param = this.loopTempName("_err");
             this.b.emit(` catch (${param}`);
             this.tsScaffoldAny();
@@ -14445,6 +14455,7 @@ ${pad ?? ""}`);
             this.returnBlock(body, ind);
           } else if (Emitter.isPattern(binding)) {
             this.checkExportedConstWrite(part, binding);
+            this.checkImportWrite(part, binding);
             const param = this.loopTempName("_err");
             this.b.emit(` catch (${param}`);
             this.tsScaffoldAny();
@@ -15448,6 +15459,7 @@ ${pad ?? ""}`);
     }
     if (!this.inPattern)
       this.checkExportedConstWrite(node, node[1]);
+    this.checkImportWrite(node, node[1]);
     this.checkMemberWrite(node, node[1]);
     if (node[0] === "void-assign")
       this.registerVoidValue(node[2], node);
@@ -21156,6 +21168,7 @@ ${this.replayPad}}` : " }");
   }
   middleRestAssign(node, ind) {
     this.checkExportedConstWrite(node, node[1]);
+    this.checkImportWrite(node, node[1]);
     const els = node[1].slice(1);
     const at = els.findIndex((e) => isNode(e) && e[0] === "..." && e.length === 2);
     const heads = els.slice(0, at);
@@ -21713,6 +21726,7 @@ ${"  ".repeat(ind)}`);
       throw this.positionedError(node, `emitter: cannot assign to readonly '${node[1]}' — a '=!' binding never changes after its declaration`);
     }
     this.checkExportedConstWrite(node, node[1]);
+    this.checkImportWrite(node, node[1]);
     this.checkMemberWrite(node, node[1]);
     if (isNode(node[1]) && Emitter.optionalGuard(node[1]) !== null) {
       throw this.positionedError(node, "emitter: an optional chain cannot be an update target — no reference exists for `obj?.x++`; " + "guard it explicitly (`obj.x++ if obj?`)");
@@ -22049,6 +22063,7 @@ ${"  ".repeat(ind)}`);
   }
   compoundTarget(node, target, ind) {
     this.checkExportedConstWrite(node, target);
+    this.checkImportWrite(node, target);
     if (this.repeatSafeValue(target)) {
       this.mark(node, "target", () => this.withTarget(() => this.expr(target)));
       return target;
@@ -22315,6 +22330,7 @@ ${"  ".repeat(ind)}`);
   synthCompound(node, open, mid, close) {
     const t = node[1];
     this.checkExportedConstWrite(node, t);
+    this.checkImportWrite(node, t);
     if (isNode(t) && (t[0] === "." || t[0] === "[]") && t.length === 3) {
       const plan = this.refPlans.get(node) ?? { recv: null, obj: null, key: null };
       if (plan.obj === null && !this.repeatSafeValue(t[1])) {

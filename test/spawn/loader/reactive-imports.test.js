@@ -148,16 +148,20 @@ describeExtended('a reactive import — what the checker says', () => {
     expect(r.status).toBe(0);
   });
 
-  // The bare WRITE needs no compiler work: it is refused twice over, here and
-  // again by the bundler at build time. Pinned so a future change that made an
-  // import assignable would have to argue with this line first.
-  test('a bare write is refused — TS2632, before the bundler ever sees it', () => {
+  // The bare WRITE is refused by the emitter, positioned at the write, before
+  // the checker (TS2632) or the bundler would refuse it later and further from
+  // the author. Pinned so a future change that made an import assignable would
+  // have to argue with this line first.
+  test('a bare write is refused by the emitter, before the checker or the bundler ever sees it', () => {
     write('w.rip', [
       "import { count } from './store.rip'",
       'count = 5',
       '',
     ].join('\n'));
-    expect(check('w.rip').stdout).toContain('TS2632');
+    const r = check('w.rip');
+    expect(r.stdout).toContain("cannot assign to imported 'count'");
+    expect(r.stdout).toContain('w.rip:2:1');
+    expect(r.status).toBe(1);
   });
 
   // THE HOVER, which is the surface the ruling actually names — and it holds
