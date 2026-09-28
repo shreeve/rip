@@ -1307,6 +1307,30 @@ test "`mount App, colors: n` draws at that depth, as `run` draws on a terminal o
   throws (-> mount Shade, colors: 8), 'colors: 8 is not 0, 16, 256 or 16777216'
   eq typeof document, 'undefined', 'a refused depth installs nothing'
 
+test "a translucent background blends in 24-bit and is lowered after: red at 128 over blue is #80007f, the 90th of the 256 and magenta of the 16", ->
+  Veiled = component
+    render
+      Box width: 4, height: 1, backgroundColor: '#0000ff'
+        Text color: '#ffffff', "ab"
+        Box position: 'absolute', left: 0, top: 0, width: 3, height: 1, backgroundColor: '#ff000080'
+  eq renderToString(Veiled, cols: 4, ansi: true, colors: 256), "#{CSI}38;5;210;48;5;90mab #{CSI}0;48;5;21m #{CSI}0m"
+  eq renderToString(Veiled, cols: 4, ansi: true, colors: 16), "#{CSI}90;45mab #{CSI}0;44m #{CSI}0m"
+  eq renderToString(Veiled, cols: 4, ansi: true, colors: 0).trimEnd(), "ab"
+  # Red, white and blue are entries of every palette, so they say
+  # nothing of the order. A green at 128 over a steel blue is #559e82,
+  # the 72nd of the 256 and gray of the 16; the nearest entries to the
+  # two, blended, are the 66th and green. A blend is kept from one
+  # mount to the next, so the lower depths draw first, each blending
+  # fresh.
+  Off = component
+    render
+      Box width: 4, height: 1, backgroundColor: '#8cb1c7'
+        Text color: '#ffffff', "ab"
+        Box position: 'absolute', left: 0, top: 0, width: 3, height: 1, backgroundColor: '#1e8c3e80'
+  eq renderToString(Off, cols: 4, ansi: true, colors: 256), "#{CSI}38;5;115;48;5;72mab #{CSI}0;48;5;110m #{CSI}0m"
+  eq renderToString(Off, cols: 4, ansi: true, colors: 16), "#{CSI}90;100mab #{CSI}0;100m #{CSI}0m"
+  eq renderToString(Off, cols: 4, ansi: true), "#{CSI}38;2;142;197;158;48;2;85;158;130mab #{CSI}0;48;2;140;177;199m #{CSI}0m"
+
 # ==[ The console ]==
 
 console.log "\nThe console"

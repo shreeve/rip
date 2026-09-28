@@ -9,7 +9,7 @@ import { tend, take, advance } from './focus.rip'
 import { Parser, TIMERS } from './input.rip'
 import { Screen, PACE } from './screen.rip'
 import { Pointer } from './mouse.rip'
-import { palette } from './paint.rip'
+import { palette, backdrop, BACKDROP } from './paint.rip'
 import { guard, setup, probe, reply, teardown, handover, stepping, stop as halt, ask, interactive as attended, depth as depthOf } from './terminal.rip'
 
 # ── Widgets ───────────────────────────────────────────────────────────────────
@@ -339,6 +339,9 @@ open =! (App, options, out, terminal, stdin = null, clock = undefined) ->
   # A terminal's depth is its environment's; a mount's is the test's.
   shades = if terminal then -1 else DEPTHS.indexOf options.colors ?? 16777216
   throw Error.new "rip/tui: colors: #{JSON.stringify options.colors} is not 0, 16, 256 or 16777216" if shades < 0 and not terminal
+  # What the terminal's own colors are taken to be under a translucent
+  # background (paint.rip); refused before anything is installed.
+  backdrop options.backdrop ?? BACKDROP
   { doc, restore } = install()
   attending = not terminal or attended out
   alternate = terminal and attending and options.altScreen is true
@@ -522,6 +525,7 @@ close! =! (drawn, error = null, result = undefined) ->
   step -> out.off? 'resize', resized
   step restore
   palette 3
+  backdrop BACKDROP
   if caught.error then settled.reject caught.error else settled.resolve result
 
 # Hand the terminal to `fn` — an editor, a shell — and take it back

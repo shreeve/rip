@@ -855,6 +855,91 @@ test "a background covers what lies under it", ->
         Box position: 'absolute', left: 3, top: 0, width: 2, height: 1, backgroundColor: 'red'
   eq renderToString(Covered, cols: 8, ansi: true), "日 \x1b[41m  \x1b[0m 日"
 
+test "a translucent background is a veil: each cell keeps its glyph and its switches, its color and its background take the veil, its link is dropped, and beyond the veil nothing changes", ->
+  veiled = (color) ->
+    Veiled = component
+      render
+        Box width: 4, height: 1, backgroundColor: '#0000ff'
+          Text color: '#ffffff', "ab"
+          Box position: 'absolute', left: 0, top: 0, width: 3, height: 1, backgroundColor: color
+    renderToString Veiled, cols: 4, ansi: true
+  # Red at 128 over blue is #80007f; white under it is #ff7f7f, and so
+  # is the space, which has no color of its own and dims from the
+  # backdrop's white. The fourth cell is the blue it was. A `fill`
+  # here would lose the glyphs.
+  eq veiled('#ff000080'), "\x1b[38;2;255;127;127;48;2;128;0;127mab \x1b[0;48;2;0;0;255m \x1b[0m"
+  eq veiled('rgba(255, 0, 0, 0.5)'), veiled('#ff000080')
+  eq veiled('#f008'), veiled('#ff000088')
+  Kept = component
+    render
+      Box width: 4, height: 1
+        Text bold: true, link: 'https://example.com', "ab"
+        Box position: 'absolute', left: 0, top: 0, width: 2, height: 1, backgroundColor: '#00000088'
+  eq renderToString(Kept, cols: 4, ansi: true), "\x1b[1;38;2;119;119;119;48;2;0;0;0mab\x1b[0m"
+  # A border's translucent background, and a text's, blend the same way
+  # with the cell beneath, as an opaque one takes its place.
+  Edged = component
+    render
+      Box width: 4, height: 3, backgroundColor: '#0000ff'
+        Box position: 'absolute', left: 0, top: 0, width: 4, height: 3, borderStyle: 'single', borderBackgroundColor: '#ff000080'
+          Text backgroundColor: 'rgba(255, 0, 0, 0.5)', color: '#ffffff', "ab"
+  eq renderToString(Edged, cols: 4, ansi: true).split('\n'), [
+    "\x1b[48;2;128;0;127m┌──┐\x1b[0m"
+    "\x1b[48;2;128;0;127m│\x1b[0;38;2;255;255;255;48;2;128;0;127mab\x1b[0;48;2;128;0;127m│\x1b[0m"
+    "\x1b[48;2;128;0;127m└──┘\x1b[0m"
+  ]
+
+test "a blend rounds each channel to the nearest: 34.98 is 35, and 4.67 is 5", ->
+  Light = component
+    render
+      Box width: 4, height: 1, backgroundColor: '#0a0a0a'
+        Box position: 'absolute', left: 0, top: 0, width: 2, height: 1, backgroundColor: '#ffffff1a'
+  eq renderToString(Light, cols: 4, ansi: true), "\x1b[38;2;255;255;255;48;2;35;35;35m  \x1b[0;48;2;10;10;10m  \x1b[0m"
+  # Black at 136 dims #dddddd to 103.13 and #0a0a0a to 4.67: the
+  # glyph's color is blended, not only the background.
+  Dim = component
+    render
+      Box width: 4, height: 1, backgroundColor: '#0a0a0a'
+        Text color: '#dddddd', "ab"
+        Box position: 'absolute', left: 0, top: 0, width: 4, height: 1, backgroundColor: '#00000088'
+  eq renderToString(Dim, cols: 4, ansi: true), "\x1b[38;2;103;103;103;48;2;5;5;5mab\x1b[0;38;2;119;119;119;48;2;5;5;5m  \x1b[0m"
+
+test "text with no color dims from the backdrop's color under a veil, and a cell with no background has the veil laid on the backdrop's", ->
+  Plain = component
+    render
+      Box width: 4, height: 1
+        Text "hi"
+        Box position: 'absolute', left: 0, top: 0, width: 4, height: 1, backgroundColor: '#00000088'
+  eq renderToString(Plain, cols: 4, ansi: true), "\x1b[38;2;119;119;119;48;2;0;0;0mhi  \x1b[0m"
+  Lit = component
+    render
+      Box width: 2, height: 1, backgroundColor: '#ffffff1a'
+  eq renderToString(Lit, cols: 2, ansi: true), "\x1b[38;2;255;255;255;48;2;26;26;26m  \x1b[0m"
+  eq renderToString(Lit, cols: 2, ansi: true, backdrop: { color: '#ffffff', backgroundColor: '#ffffff' }), "\x1b[38;2;255;255;255;48;2;255;255;255m  \x1b[0m"
+  eq renderToString(Plain, cols: 4, ansi: true, backdrop: { color: 'black', backgroundColor: 'rgb(255, 255, 255)' }), "\x1b[38;2;0;0;0;48;2;119;119;119mhi  \x1b[0m"
+  # The next mount is on the default backdrop again.
+  eq renderToString(Lit, cols: 2, ansi: true), "\x1b[38;2;255;255;255;48;2;26;26;26m  \x1b[0m"
+  throws (-> mount Lit, backdrop: '#ffffff'), 'backdrop: "#ffffff" is not a backdrop — write { color, backgroundColor }'
+  throws (-> mount Lit, backdrop: { color: '#ffffff', backgroundColor: '#00000080' }), "backdrop: backgroundColor: \"#00000080\" is not an opaque color — write a name, '#rrggbb', 'rgb(r, g, b)' or 'ansi256(n)'"
+  throws (-> mount Lit, backdrop: { color: 'default', backgroundColor: '#000000' }), 'backdrop: color: "default" is not an opaque color'
+  eq typeof document, 'undefined', 'a refused backdrop installs nothing'
+
+test "a foreground is opaque, and a background's alpha is two hex digits or a fraction from 0 to 1", ->
+  { doc, restore } = install()
+  try
+    box = doc.createElement 'div'
+    words = doc.createElement 'span'
+    throws (-> words.set 'color', '#ffffff80'), "color: \"#ffffff80\" is not a color a foreground can take — a foreground is opaque; write a name, '#rrggbb', 'rgb(r, g, b)', 'ansi256(n)' or 'default', and a translucent color as a backgroundColor"
+    throws (-> box.set 'borderColor', 'rgba(0, 0, 0, 0.5)'), 'borderColor: "rgba(0, 0, 0, 0.5)" is not a color a foreground can take'
+    throws (-> box.set 'backgroundColor', 'rgba(0, 0, 0, 2)'), "backgroundColor: \"rgba(0, 0, 0, 2)\" is not a color — write a name (red, greenBright, gray, default), '#rrggbb', 'rgb(r, g, b)' or 'ansi256(n)', or '#rrggbbaa' or 'rgba(r, g, b, a)' with a from 0 to 1 for one that lets what is under it show"
+    throws (-> box.set 'backgroundColor', '#12345'), 'backgroundColor: "#12345" is not a color'
+    throws (-> box.set 'backgroundColor', 'rgb(0, 0, 0, 0.5)'), 'backgroundColor: "rgb(0, 0, 0, 0.5)" is not a color'
+    box.set 'borderBackgroundColor', '#ff000080'
+    box.set 'backgroundColor', 'rgba(0, 0, 0, .5)'
+    words.set 'color', 'rgba(0, 0, 0, 1)'
+  finally
+    restore()
+
 test "text's own background fills its glyph cells and no more", ->
   Marked = component
     render
@@ -1927,6 +2012,30 @@ test "what lies over or under a change is painted again inside it: an overlay, a
     app.back.value = 'green'
     eq draw(), 24
     eq view.ansi.split('\n')[0].trimEnd(), "\x1b[42mcoun\x1b[0;41mTOP\x1b[0;42m of 9\x1b[0m"
+
+test "a change under a veil owes its own cells, and the veil is laid on those cells alone", ->
+  Scrim = component
+    @count := 1
+    render
+      Box flexDirection: 'column', height: 3
+        Text color: '#dddddd', "count #{@count}"
+        Box position: 'absolute', top: 0, left: 0, width: 40, height: 3, backgroundColor: '#00000088'
+  owing Scrim, (app, draw, view) ->
+    draw()
+    eq view.ansi.split('\n')[0], "\x1b[38;2;103;103;103;48;2;0;0;0mcount 1\x1b[0;38;2;119;119;119;48;2;0;0;0m#{' '.repeat 33}\x1b[0m"
+    # The words are wiped and painted again, and the veil over the row
+    # is held to them. The cells that stay are never read again, so a
+    # veil laid on them shows nowhere — but it would dim each of them
+    # once more, and intern a darker style every frame until they
+    # saturate. A change under a scrim interns nothing.
+    held = styleCount()
+    app.count.value = 2
+    eq draw(), 7
+    eq styleCount(), held
+    eq view.frame().trimEnd(), "count 2"
+    app.count.value = 3
+    draw()
+    eq styleCount(), held
 
 test "no span cuts a wide glyph: one on the terminal, or one the words under a change put there", ->
   Wide = component
