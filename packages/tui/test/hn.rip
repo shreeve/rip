@@ -1,8 +1,12 @@
-# The Hacker News example's data layer, offline: the errors and their
-# copy, the item validator, the live transport against a loopback
+# The Hacker News example, offline. The data layer: the errors and
+# their copy, the item validator, the live transport against a loopback
 # server, the timeout and retry policy on a hand clock, the item cache,
 # the parent walk, the comment tree, the formatting of HN's text, and
-# the saved and history files in a temp directory.
+# the saved and history files in a temp directory. Then the app itself
+# through `mount` at 100 by 30 over the fake, with the clock and the
+# browser in the test's hands: every view's rows, the keys, the mouse,
+# the overlays, the theme and its wipe, the files, and the loading,
+# failing and cancelled requests.
 #
 #   rip test/hn.rip
 
@@ -10,10 +14,15 @@ import { test, eq, ok, throws } from 'rip/testing'
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { mount, screen } from 'rip/tui'
+import * as cells from './ink/cells.rip'
 import { Api, HnError, HnRequestError, HnStatusError, HnTimeoutError, HnDecodeError, HnItemGone, hnErrorMessage, DELAYS, decodeItem, fetcher, timed, retrying, flattenTree } from '../examples/hn/api.rip'
 import { Fake, NOW } from '../examples/hn/fake.rip'
 import { relativeTime, hostname, decodeEntities, htmlToText, extractLinks, parseHnItemLink } from '../examples/hn/format.rip'
 import { Store, HISTORY_CAP, configDir } from '../examples/hn/store.rip'
+import { App } from '../examples/hn/hn.rip'
+import { FRAMES, INDEXES, ALPHAS, COUNT, colorsOver } from '../examples/hn/spinner.rip'
+import { DARK, LIGHT, opaque } from '../examples/hn/theme.rip'
 
 # ---------------------------------------------------------------------
 # Harness
@@ -594,3 +603,734 @@ test! "store: a malformed file is an empty list, and entries of another shape ar
     eq store.history(), []
     writeFileSync join(dir, 'history.json'), 'not json'
     eq store.history(), []
+
+console.log "\nhn: the spinner"
+
+test "the scanner's first twelve frames, their ramp indexes and their alphas are opentui-spinner's; frame 3 is the ramp then the inactive color faded over the strip", ->
+  eq COUNT, 54
+  eq FRAMES.slice(0, 12), ['■⬝⬝⬝⬝⬝⬝⬝', '■■⬝⬝⬝⬝⬝⬝', '■■■⬝⬝⬝⬝⬝', '■■■■⬝⬝⬝⬝', '■■■■■⬝⬝⬝', '■■■■■■⬝⬝', '⬝■■■■■■⬝', '⬝⬝■■■■■■', '⬝⬝■■■■■■', '⬝⬝⬝■■■■■', '⬝⬝⬝⬝■■■■', '⬝⬝⬝⬝⬝■■■']
+  eq INDEXES[3], [3, 2, 1, 0, -1, -1, -1, -1]
+  eq INDEXES[8], [7, 6, 5, 4, 3, 2, 1, 0], 'the hold at the end counts on from the ramp'
+  eq INDEXES[17], [-1, -1, -1, -1, -1, -1, 0, 1], 'the way back is mirrored'
+  eq ALPHAS.slice(0, 12).map((alpha) -> Math.round(alpha * 10000) / 10000), [0, 0.1429, 0.2857, 0.4286, 0.5714, 0.7143, 0.8571, 1, 1, 0.8889, 0.7778, 0.6667]
+  eq FRAMES[23], '■■■■■■⬝⬝'
+  eq FRAMES.slice(30).every((frame) -> frame is '⬝⬝⬝⬝⬝⬝⬝⬝'), true
+  eq Math.round(ALPHAS[53] * 10000) / 10000, 0.0333
+  # #2a1500 at 0.4286 over #0e0e0e: 42·0.4286 + 14·0.5714 = 26, 21·… + 14·… = 17, 14·… = 8.
+  eq colorsOver('#0e0e0e')[3], ['#aa4400', '#dd5500', '#ffaa66', '#ff6600', '#1a1108', '#1a1108', '#1a1108', '#1a1108']
+  eq colorsOver('#0e0e0e'), colorsOver('#0e0e0e'), 'one palette per background'
+  eq [opaque(DARK.body), opaque(LIGHT.body), opaque('#ffffff1a')], ['#080808', '#f6f6ef', '#1a1a1a']
+
+# ---------------------------------------------------------------------
+# The app
+# ---------------------------------------------------------------------
+
+# The app over `fake`, mounted at 100 by 30 with the mouse on, the real
+# retry policy with no waits, a temp store, a browser that records what
+# it was asked to open, and a clock the test moves; `body` gets the
+# mount, the fake and those hands, and the mount is closed and the
+# store removed after it. The first frame is drawn and the fake settled
+# before `body` runs, unless `raw`.
+reader! =! (fake, body, options = {}) ->
+  api = Api.new { getJson: retrying(fake.transport().getJson, options.delays ?? [0, 0], (-> Promise.resolve())) }
+  dir = mkdtempSync join(tmpdir(), 'rip-hn-')
+  options.seed? dir
+  store = Store.new dir
+  opened = []
+  clockAt = { now: NOW * 1000 }
+  view = mount App, cols: 100, rows: 30, mouse: 'all', props: { api, store, open: ((url) -> opened.push url), now: (-> clockAt.now), origin: (-> { x: 0, y: 0 }) }
+  try
+    unless options.raw
+      view.frame()
+      settle! fake
+      view.frame()
+    body! { view, fake, store, dir, opened, clockAt, app: view.app }
+  finally
+    view.close()
+    rmSync dir, { recursive: true, force: true }
+
+# A frame's rows, each with its trailing blanks cut, and the same with
+# its styles in the notation of test/ink/cells.rip.
+lines =! (view) -> (row.trimEnd() for row in view.frame().split '\n')
+styled =! (view) -> cells.styled(view.frame() and view.ansi)
+
+# Mouse reports at a column and a row counted from zero: a press and
+# its release, and one tick of the wheel.
+click =! (view, col, row, button = 0) -> view.send "\x1b[<#{button};#{col + 1};#{row + 1}M\x1b[<#{button};#{col + 1};#{row + 1}m"
+wheel =! (view, col, row, down = true) -> view.send "\x1b[<#{if down then 65 else 64};#{col + 1};#{row + 1}M"
+hover =! (view, col, row) -> view.send "\x1b[<35;#{col + 1};#{row + 1}M"
+
+# The story rows of a frame: the frame's rows with the scrollbar's
+# column cut, since the bar's glyph is not the row's.
+BAR =! /[█▀▄]$/
+plain =! (row) -> row.replace(BAR, '').trimEnd()
+
+# The head rows of a thread: those with a gutter mark.
+heads =! (view) -> (plain(row) for row in lines(view) when /^ +[│▶] \S/.test row)
+
+TABS   =! '  1 Top   2 New   3 Best   4 Ask   5 Show   6 Jobs'.padEnd(79) + '[H]istory   [S]aved'
+RULE   =! '─'.repeat 100
+BRAND  =! '  Y   HackerNews  · TUI'
+STATUS =! ' j/k move · c/⏎ open · s save · q quit'.padEnd(93) + '? help'
+DETAIL =! ' j/k move · space collapse · ⏎ links · h/esc back'.padEnd(93) + '? help'
+
+console.log "\nhn: the list"
+
+test! "the list at 100 by 30: the brand row, the tabs, the rules, the story rows with their ranks running on from 1, the status hints, and the selected row's colors", ->
+  reader! Fake.new(), ({ view }) ->
+    frame = lines view
+    eq frame[1], BRAND
+    eq frame[3], TABS
+    eq frame[4], RULE
+    eq plain(frame[5]), '   1. Show HN: A Hacker News reader for the terminal, in 900 lines (github.com)'
+    eq plain(frame[6]), '      ▲ 312  by shreeve  3h ago  | 8 comments'
+    eq plain(frame[9]), '   3. The unreasonable effectiveness of flexbox in a terminal (example.com)'
+    eq plain(frame[10]), '      ▲ 1204  by alice  45m ago  | 0 comments'
+    eq plain(frame[12]), '      ▲ 97  by bob  1d ago  | 1 comment', 'one comment is singular'
+    eq frame[28], RULE
+    eq frame[29], STATUS
+    eq frame.length, 30
+    ranks = (Number(m[1]) for row in frame when m = /^ +(\d+)\. /.exec row)
+    eq ranks, [1..12], 'the null story is dropped and the ranks close up'
+    look = styled view
+    ok look[3].includes('«on #ff6600» «#000000 on #ff6600»1«on #ff6600» «#000000 on #ff6600»Top«on #ff6600» '), "the active tab: #{look[3]}"
+    ok look[5].includes('«#ff6600 on #212121»1.«on #212121» «#ffffff on #212121 bold»Show'), "the selected row's rank and title on the highlight: #{look[5]}"
+    ok look[7].includes('«#666666 on #080808»2.«on #080808» «#dddddd on #080808»Ask'), "an unselected row: #{look[7]}"
+    ok look[5].endsWith('«#555555 on #1a1a1a»█'), "the scrollbar's thumb on its track: #{look[5].slice -40}"
+
+test! "the cursor moves by j and k, stops at both ends, and G jumps to the last story, which is scrolled into view at the bottom edge", ->
+  reader! Fake.new(), ({ view, app }) ->
+    view.press 'k'
+    eq app.listCursor.value, 0
+    view.press 'j'
+    look = styled view
+    ok look[7].includes('on #212121') and not look[5].includes('on #212121'), 'the highlight moved to rank 2'
+    view.press 'j' for n in [1..40]
+    eq app.listCursor.value, 28, 'the cursor stops at the last story'
+    view.press 'k'
+    view.press 'G'
+    eq app.listCursor.value, 28
+    frame = lines view
+    eq plain(frame[26]), '  29. Generated story 32 (example.com)', "the last story's title is at the bottom edge"
+    eq plain(frame[27]), '      ▲ 32  by user1032  1d ago  | 0 comments'
+
+test! "gg goes to the top when the two presses are within 500 ms, and not when they are not", ->
+  reader! Fake.new(), ({ view, app, clockAt }) ->
+    view.press 'G'
+    view.press 'g'
+    clockAt.now += 600
+    view.press 'g'
+    eq app.listCursor.value, 28, 'too slow'
+    clockAt.now += 100
+    view.press 'g'
+    eq app.listCursor.value, 0
+
+test! "Ctrl-d, Ctrl-u, PageDown and PageUp move by a page of eleven stories, and the cursor's row stays in view with the least scroll", ->
+  reader! Fake.new(), ({ view, app }) ->
+    view.press 'd', ctrl: true
+    eq app.listCursor.value, 11
+    frame = lines view
+    eq plain(frame[26]), '  12. Generated story 15 (example.com)', 'the twelfth story lands at the bottom edge'
+    view.press 'u', ctrl: true
+    eq app.listCursor.value, 0
+    eq plain(lines(view)[5]), '   1. Show HN: A Hacker News reader for the terminal, in 900 lines (github.com)'
+    view.press 'PageDown'
+    eq app.listCursor.value, 11
+    view.press 'PageUp'
+    eq app.listCursor.value, 0
+
+test! "the tabs: l and h cycle through top new best ask show job history saved and wrap, Tab and Shift-Tab do the same with the default kept from the root, 1 to 6 jump, and every switch resets the cursor", ->
+  reader! Fake.new(), ({ view, app, fake }) ->
+    view.press 'j'
+    view.press 'l'
+    settle! fake
+    eq app.category.value, 'new'
+    eq app.listCursor.value, 0
+    frame = lines view
+    ok styled(view)[3].includes('«on #ff6600» «#000000 on #ff6600»2«on #ff6600» «#000000 on #ff6600»New«on #ff6600» '), 'New is the active tab'
+    eq plain(frame[5]), '   1. Generated story 44 (example.com)'
+    view.press 'h'
+    view.press 'h'
+    eq app.category.value, 'saved'
+    view.press 'h'
+    eq app.category.value, 'history'
+    view.press 'Tab'
+    eq app.category.value, 'saved'
+    eq view.focused?.tagName, 'div', 'focus stays on the root'
+    view.press 'Tab', shift: true
+    eq app.category.value, 'history'
+    view.press '4'
+    settle! fake
+    eq app.category.value, 'ask'
+    frame = lines view
+    eq plain(frame[5]), '   1. Ask HN: What are you reading this fall?'
+    eq frame[7], ''
+    view.press 'Enter'
+    settle! fake
+    view.press 'S'
+    eq [app.category.value, app.view.value.kind], ['saved', 'list']
+    view.press 'H'
+    eq app.category.value, 'history'
+
+console.log "\nhn: the thread"
+
+test! "Enter and c open the story's thread: the header loses its tabs, the story strip shows its title, meta and url, the status hints change, and the story is in history.json", ->
+  for key in ['Enter', 'c']
+    reader! Fake.new(), ({ view, app, fake, dir }) ->
+      view.press key
+      settle! fake
+      frame = lines view
+      eq frame[1], BRAND
+      eq frame[2], RULE
+      eq frame[4], ' Show HN: A Hacker News reader for the terminal, in 900 lines'
+      eq frame[5], ' ▲ 312 by shreeve  3h ago  | 8 comments  · github.com'
+      eq frame[6], ' https://github.com/shreeve/rip/tree/main/packages/tui/examples/hn'
+      eq frame[8], RULE
+      eq frame[29], DETAIL
+      eq (entry.id for entry in JSON.parse readFileSync(join(dir, 'history.json'), 'utf8')), [1001]
+
+test! "the thread's rows in reading order with their depths and gutter colors; the dead, deleted and null replies are left out; a body keeps its paragraphs and its code", ->
+  reader! Fake.new(), ({ view, fake }) ->
+    view.press 'Enter'
+    settle! fake
+    view.resize 100, 40
+    eq heads(view), [' ▶ alice · 2h ago', '   │ bob · 1h ago', '     │ carol · 30m ago', ' │ frank · 1h ago', '   │ gina · 10m ago']
+    look = styled view
+    ok look[11].includes('«#ff6600 on #212121»▶'), "depth 0 in the first gutter color, on the highlight: #{look[11]}"
+    ok look[15].includes('«#ffaa44 on #080808»│'), "depth 1: #{look[15]}"
+    ok look[20].includes('«#ffd58a on #080808»│'), "depth 2: #{look[20]}"
+    frame = lines view
+    eq frame[16], '   Agreed. Rust & Rip both "just work".'
+    eq frame[17], ''
+    eq frame[18], '   Second paragraph.'
+    eq frame[21], '     Deep reply with emphasis and `code`.'
+    text = frame.join '\n'
+    ok not text.includes('spam') and not text.includes('buy now'), 'the dead reply is gone'
+
+test! "space collapses the comment under the cursor with the count of the replies it hides, and again expands it; a leaf collapses to 0 replies", ->
+  reader! Fake.new(), ({ view, fake }) ->
+    view.press 'Enter'
+    settle! fake
+    view.resize 100, 40
+    view.press ' '
+    eq heads(view), [' ▶ alice · 2h ago · [+] 2 replies', ' │ frank · 1h ago', '   │ gina · 10m ago']
+    ok not lines(view).some((row) -> row.includes 'Nice. Compare'), 'the body is hidden too'
+    view.press ' '
+    eq heads(view).length, 5
+    view.press 'j'
+    view.press ' '
+    eq heads(view)[1], '   ▶ bob · 1h ago · [+] 1 reply'
+    view.press ' '
+    view.press 'j'
+    view.press ' '
+    eq heads(view)[2], '     ▶ carol · 30m ago · [+] 0 replies'
+
+# The bar hides on the frame that takes the rows out; the framework
+# flushes that box read after the layout pass, not inside it.
+test! "a thread taller than the pane has a scrollbar, and collapsing it until it fits hides the bar on that frame", ->
+  reader! Fake.new(), ({ view, fake }) ->
+    view.press 'Enter'
+    settle! fake
+    ok lines(view)[11].endsWith('█'), 'the thread does not fit: a bar'
+    view.press ' '
+    frame = lines view
+    eq heads(view)[0], ' ▶ alice · 2h ago · [+] 2 replies'
+    ok not frame.some((row) -> BAR.test row), "it fits: no bar\n#{frame.join '\n'}"
+
+test! "G, gg and the half page in the thread: a page is a quarter of the pane's rows, and the cursor's comment stays in view", ->
+  reader! Fake.new(), ({ view, app, fake, clockAt }) ->
+    view.press 'Enter'
+    settle! fake
+    view.press 'G'
+    eq app.detailCursor.value, 4
+    ok heads(view).includes('   ▶ gina · 10m ago'), 'gina is selected and in view'
+    view.press 'g'
+    clockAt.now += 100
+    view.press 'g'
+    eq app.detailCursor.value, 0
+    eq heads(view)[0], ' ▶ alice · 2h ago'
+    view.press 'd', ctrl: true
+    eq app.detailCursor.value, Math.min(4, Math.floor(19 / 4)), 'a quarter of the 19-row pane'
+    view.press 'u', ctrl: true
+    eq app.detailCursor.value, 0
+
+test! "replies load to depth 8, so a chain of eleven is nine rows, and the gutter colors cycle every six", ->
+  reader! Fake.new(), ({ view, app, fake }) ->
+    view.press 'j' for n in [1..8]
+    view.press 'Enter'
+    settle! fake
+    view.resize 100, 40
+    eq app.view.value.story.id, 1012
+    found = heads view
+    eq found.length, 9
+    eq found[8], '                 │ deep8 · 1h ago'
+    look = styled(view).filter (row) -> row.includes 'deep6'
+    ok look[0].includes('«#ff6600 on #080808»│'), "depth 6 is the first color again: #{look[0]}"
+
+console.log "\nhn: links"
+
+test! "Enter on a comment lists its links in a popup titled by their count: j, k, g and G move, o opens the link in the browser, and Escape closes it", ->
+  reader! Fake.new(), ({ view, app, fake, opened }) ->
+    view.press 'Enter'
+    settle! fake
+    view.press 'Enter'
+    frame = lines view
+    ok frame.some((row) -> row.includes '╭─ Links (2) ─'), 'the title in the border'
+    ok frame.some((row) -> row.indexOf('▶ 1. the reading thread') is 19), 'the cursor row, indented inside the panel'
+    ok frame.some((row) -> row.indexOf('https://news.ycombinator.com/item?id=1002') is 23), 'its url under it'
+    ok frame.some((row) -> row.indexOf('2. the docs') is 21)
+    ok frame.some((row) -> row.includes 'j/k move · ⏎ open · o browser · esc close')
+    view.press 'j'
+    eq app.linkAt.value, 1
+    ok lines(view).some((row) -> row.includes '▶ 2. the docs')
+    view.press 'g'
+    eq app.linkAt.value, 0
+    view.press 'G'
+    eq app.linkAt.value, 1
+    view.press 'o'
+    eq opened, ['https://example.com/docs']
+    ok app.links.value?, 'an external open keeps the popup'
+    view.press 'Escape'
+    eq app.links.value, null
+
+test! "a link into a comment resolves to its story and lands the cursor on it with ↩ 1; h goes back to the thread as it was left, and Escape from there to the list", ->
+  reader! Fake.new(), ({ view, app, fake }) ->
+    view.press 'Enter'
+    settle! fake
+    view.press 'j' for n in [1..3]
+    view.press 'Enter'
+    view.press 'Enter'
+    settle! fake
+    eq app.view.value.story.id, 1002
+    frame = lines view
+    ok frame[1].endsWith('↩ 1'), frame[1]
+    eq frame[1].length, 99
+    ok heads(view).includes('   ▶ hank · 3h ago'), "the linked comment is selected: #{heads(view).join ' / '}"
+    view.press 'h'
+    settle! fake
+    eq [app.view.value.story.id, app.detailCursor.value, app.stack.value.length], [1001, 3, 0]
+    ok not lines(view)[1].includes('↩')
+    view.press 'Escape'
+    eq app.view.value.kind, 'list'
+
+test! "an anchor link into the same story pushes a new thread with the cursor on the anchored comment", ->
+  reader! Fake.new(), ({ view, app, fake }) ->
+    view.press 'Enter'
+    settle! fake
+    view.press 'j' for n in [1..3]
+    view.press 'Enter'
+    view.press 'G'
+    view.press 'Enter'
+    settle! fake
+    eq [app.view.value.story.id, app.stack.value.length], [1001, 1]
+    ok heads(view).includes('   ▶ gina · 10m ago')
+    ok lines(view)[1].endsWith('↩ 1')
+
+test! "a link to nothing viewable is the not-found view, where r asks nothing", ->
+  reader! Fake.new(), ({ view, app, fake }) ->
+    view.press 'Enter'
+    settle! fake
+    view.press 'j' for n in [1..3]
+    view.press 'Enter'
+    view.press 'j'
+    view.press 'Enter'
+    settle! fake
+    frame = lines view
+    eq frame[12], ' '.repeat(45) + '¯\\_(ツ)_/¯'
+    eq frame[14], ' '.repeat(43) + 'Post not found'
+    eq frame[16], ' '.repeat(18) + "This link points to a post that doesn't exist (or was deleted)."
+    eq frame[18], ' '.repeat(43) + 'esc to go back'
+    eq frame[29], ' h/esc go back · q quit'.padEnd(93) + '? help'
+    was = fake.log.length
+    view.press 'r'
+    settle! fake
+    eq fake.log.length, was
+    view.press 'Escape'
+    eq [app.view.value.kind, app.view.value.story.id], ['detail', 1001]
+
+test! "a link whose story fails to load is an error view with the error's copy, and r retries it in place: the retry replaces the error, and h then goes back to the thread", ->
+  reader! Fake.new(), ({ view, app, fake }) ->
+    fake.fail 'item/1003.json', 503, 503, 503
+    view.press 'Enter'
+    settle! fake
+    view.press 'j' for n in [1..3]
+    view.press 'Enter'
+    view.press 'j'
+    view.press 'j'
+    view.press 'Enter'
+    settle! fake
+    frame = lines view
+    eq frame[12], ' '.repeat(47) + '(×_×)'
+    eq frame[14], ' '.repeat(38) + "Couldn't open that post"
+    eq frame[16], ' '.repeat(35) + 'Hacker News returned HTTP 503.'
+    eq frame[18], ' '.repeat(36) + 'r to retry · esc to go back'
+    eq frame[29], ' r retry · h/esc go back · q quit'.padEnd(93) + '? help'
+    view.press 'r'
+    settle! fake
+    eq [app.view.value.kind, app.view.value.story.id, app.stack.value.length], ['detail', 1003, 1]
+    view.press 'h'
+    eq [app.view.value.story.id, app.stack.value.length], [1001, 0]
+
+test! "Escape while a link resolves cancels it: the spinner goes, the thread stays, and the answer that comes later opens nothing", ->
+  reader! Fake.new(), ({ view, app, fake }) ->
+    view.press 'Enter'
+    settle! fake
+    view.press 'j' for n in [1..3]
+    gate = fake.hold 'item/2102.json'
+    view.press 'Enter'
+    settle! fake
+    view.press 'Enter'
+    eq app.resolving.value, true
+    ok /^ [■⬝]{8} j\/k move/.test(lines(view)[29]), 'the status bar spins'
+    view.press 'Escape'
+    eq app.resolving.value, false
+    ok /^ j\/k move/.test(lines(view)[29])
+    gate.release()
+    settle! fake
+    eq app.view.value.story.id, 1001
+
+test! "the popup prefetches its internal links into the cache, four at a time, so Enter on one is instant; moving the cursor restarts nothing, and closing the popup stops the hops", ->
+  reader! Fake.new(), ({ view, app, fake }) ->
+    view.press 'Enter'
+    settle! fake
+    view.press 'j' for n in [1..3]
+    view.press 'Enter'
+    settle! fake
+    eq (fake.requests(path) for path in ['item/2102.json', 'item/2101.json', 'item/1002.json']), [1, 1, 1], 'the walk ran'
+    view.press 'j'
+    view.press 'k'
+    settle! fake
+    eq (fake.requests(path) for path in ['item/2102.json', 'item/2101.json', 'item/1002.json']), [1, 1, 1]
+    was = fake.log.length
+    view.press 'Enter'
+    settle! fake
+    eq [app.view.value.story.id, fake.log.length], [1002, was], 'served from the cache'
+  reader! Fake.new(), ({ view, app, fake }) ->
+    view.press 'Enter'
+    settle! fake
+    view.press 'j' for n in [1..3]
+    gate = fake.hold 'item/2101.json'
+    view.press 'Enter'
+    settle! fake
+    view.press 'Escape'
+    was = fake.log.length
+    gate.release()
+    settle! fake
+    eq fake.log.length, was, 'no hop after the held one'
+
+console.log "\nhn: the mouse"
+
+test! "a right press opens the context menu at the press, kept on the screen and off its last row, with the item under the pointer selected; k and Enter take an item, Escape and a press outside close it, and the save label follows the file", ->
+  reader! Fake.new(), ({ view, app, opened }) ->
+    click view, 95, 26, 2
+    eq app.listCursor.value, 10, 'the press selects rank 11 first'
+    frame = lines view
+    eq (frame[n].slice(77) for n in [24..28]), ['┌─────────────────────┐', '│ ☆ Save              │', '│ Open URL in browser │', '│ Open comments       │', '└─────────────────────┘']
+    eq app.menu.value.cursor, 1, 'the pointer rests on the second item'
+    ok styled(view)[26].includes('«#000000 on #aaaaaa»Open'), "the cursor item in the hover colors: #{styled(view)[26].slice -120}"
+    ok styled(view)[25].includes('«#ffffff on #1a1a1a»☆'), "the others in the menu's own: #{styled(view)[25].slice -120}"
+    view.press 'k'
+    view.press 'j'
+    view.press 'Enter'
+    eq opened, ['https://example.com/1014']
+    eq app.menu.value, null
+    ok styled(view)[25].includes('«#666666 on #212121»11.'), "the row is visited: #{styled(view)[25]}"
+    click view, 2, 5, 2
+    frame = lines view
+    eq frame[5].slice(2, 25), '┌─────────────────────┐', 'a press near the corner places the menu at the press'
+    view.press 'Escape'
+    eq app.menu.value, null
+    click view, 2, 5, 2
+    view.frame()
+    click view, 60, 20
+    eq app.menu.value, null, 'a press outside closes it'
+    click view, 2, 5, 2
+    view.frame()
+    view.press 'Enter'
+    eq app.savedIds.value.has(1001), true
+    click view, 2, 5, 2
+    eq lines(view)[6].slice(2, 25), '│ ★ Unsave            │'
+    hover view, 10, 8
+    eq app.menu.value.cursor, 2, 'the pointer over an item selects it'
+
+test! "a key goes to the menu before the popup: with both open, Escape closes the menu and leaves the popup, and the next Escape closes the popup", ->
+  reader! Fake.new(), ({ view, app }) ->
+    click view, 2, 5, 2
+    app.links.value = [{ text: 'a link', url: 'https://example.com/' }]
+    view.press 'Escape'
+    eq [app.menu.value, app.links.value?.length], [null, 1]
+    view.press 'Escape'
+    eq app.links.value, null
+
+test! "a press selects a row, a press on the selected row opens it, and a second press within 400 ms opens it too; a comment's head press selects and toggles it; two body presses within 400 ms list its links", ->
+  reader! Fake.new(), ({ view, app, fake, clockAt }) ->
+    click view, 10, 9
+    eq [app.listCursor.value, app.view.value.kind], [2, 'list']
+    view.frame()
+    click view, 10, 9
+    eq app.view.value.story.id, 1005
+    view.press 'Escape'
+    view.frame()
+    click view, 10, 5
+    clockAt.now += 100
+    view.frame()
+    click view, 10, 5
+    eq app.view.value.story.id, 1001, 'a double press opens an unselected row'
+    settle! fake
+    view.frame()
+    click view, 5, 15
+    eq [app.detailCursor.value, app.collapsed.value.has(2002)], [1, true]
+    view.frame()
+    click view, 5, 12
+    clockAt.now += 500
+    view.frame()
+    click view, 5, 12
+    eq [app.detailCursor.value, app.links.value], [0, null], 'two slow presses only select'
+    clockAt.now += 100
+    view.frame()
+    click view, 5, 12
+    eq app.links.value?.length, 2, 'a quick second press lists the links'
+
+test! "the wheel scrolls the list a row a tick without moving the cursor, clamps at the top, and a cursor move then reveals the cursor's row", ->
+  reader! Fake.new(), ({ view, app }) ->
+    wheel view, 10, 10
+    wheel view, 10, 10
+    wheel view, 10, 10
+    frame = lines view
+    eq plain(frame[5]), '      ▲ 88  by reader42  5h ago  | 2 comments', "three rows up: the byline of rank 2 is the first row"
+    eq [app.listCursor.value, app.listTop.value], [0, 3]
+    view.press 'j'
+    eq app.listCursor.value, 1
+    eq plain(lines(view)[5]), '   2. Ask HN: What are you reading this fall?', "the cursor's row is aligned to the top"
+    wheel view, 10, 10, false for n in [1..5]
+    eq app.listTop.value, 0
+
+console.log "\nhn: the theme, the help, the files"
+
+test! "t toggles the theme, and the wipe sweeps it in from the origin: the frame a beat later shows the new theme at the origin, a glow band on the accent, and the old frame beyond, and after half a second the wipe is gone and a frame costs what it did", ->
+  reader! Fake.new(), ({ view, app }) ->
+    ok styled(view)[1].includes('«#000000 on #ff6600 bold»Y'), 'dark to begin with'
+    view.press 't'
+    eq app.theme.value.name, 'light'
+    view.tick 16
+    look = styled view
+    ok look[1].startsWith('«on #ff6600» «on #ffffff» «#000000 on #ffffff bold»Y'), "the light tile at the origin: #{look[1]}"
+    ok look[1].includes('«#000000 on #ff6600 bold»H'), "the glow band: #{look[1]}"
+    ok look[1].includes('on #0e0e0e bold»') and look[1].includes('kerNews'), "the old frame beyond the front: #{look[1]}"
+    eq view.damage, 3000, 'a whole frame while the wipe runs'
+    view.tick 600
+    look = styled view
+    eq app.wipe.value, null
+    eq screen.post, null
+    ok look[1].includes('«#000000 on #ffffff bold»Y') and look[1].includes('«#000000 on #ff6600 bold»HackerNews'), "light throughout: #{look[1]}"
+    ok look[7].includes('on #f6f6ef'), "the light body: #{look[7]}"
+    view.press 'j'
+    view.frame()
+    ok view.damage < 3000, 'a partial frame again'
+    view.press 't'
+    view.tick 600
+    view.frame()
+    ok styled(view)[1].includes('«#000000 on #ff6600 bold»Y'), 'dark again'
+
+test! "? opens the help over a scrim that dims the rows beneath, with the view's groups and the keys padded to the longest; j does nothing while it is open; Escape and ? close it; the thread's help says space", ->
+  reader! Fake.new(), ({ view, app, fake }) ->
+    view.press '?'
+    frame = lines view
+    ok frame[1].includes('╭─ Keyboard shortcuts ─'), frame[1]
+    ok frame[3].includes('Navigation')
+    ok frame[4].includes('  ' + 'j k  ↑ ↓'.padEnd(15) + '   move down / up'), frame[4]
+    ok frame[9].includes('  ' + '1 – 6'.padEnd(15) + '   jump to category'), frame[9]
+    ok frame[26].includes('esc / ? close')
+    eq frame[28].slice(20, 80), '╰' + '─'.repeat(58) + '╯'
+    look = styled view
+    ok look[7].includes('«#676767 on #040404»Ask'), "a row under the scrim, dimmed: #{look[7].slice 0, 120}"
+    view.press 'j'
+    eq app.listCursor.value, 0
+    view.press 'Escape'
+    eq app.help.value, false
+    view.press '?'
+    view.press '?'
+    eq app.help.value, false
+    view.press 'Enter'
+    settle! fake
+    view.press '?'
+    ok lines(view).some((row) -> row.includes '  ' + 'space'.padEnd(15) + '   collapse / expand')
+
+test! "s saves and unsaves the story under the cursor, newest first in saved.json; S lists the saved stories in that order; with none saved the tab says so", ->
+  reader! Fake.new(), ({ view, app, fake, dir, clockAt }) ->
+    t1 = clockAt.now
+    view.press 's'
+    eq plain(lines(view)[5]), '   1. ★ Show HN: A Hacker News reader for the terminal, in 900 lines (github.com)'
+    ok styled(view)[5].includes('«#ff6600 on #212121»★'), 'the star in the accent'
+    view.press 'j'
+    clockAt.now += 60000
+    t2 = clockAt.now
+    view.press 's'
+    eq readFileSync(join(dir, 'saved.json'), 'utf8'), JSON.stringify([{ id: 1002, savedAt: t2 }, { id: 1001, savedAt: t1 }], null, 2)
+    view.press 'S'
+    settle! fake
+    frame = lines view
+    eq plain(frame[5]), '   1. ★ Ask HN: What are you reading this fall?'
+    eq plain(frame[7]), '   2. ★ Show HN: A Hacker News reader for the terminal, in 900 lines (github.com)'
+    ok styled(view)[3].includes('«on #ff6600» «#000000 on #ff6600»[S]aved«on #ff6600» ')
+    view.press 's'
+    settle! fake
+    frame = lines view
+    eq plain(frame[5]), '   1. ★ Show HN: A Hacker News reader for the terminal, in 900 lines (github.com)'
+    eq JSON.parse(readFileSync(join(dir, 'saved.json'), 'utf8')).length, 1
+    view.press 's'
+    settle! fake
+    eq lines(view)[16], ' '.repeat(29) + "No saved posts yet. Press 's' on a story."
+
+test! "the stories opened are in the history, newest first and dimmed; H lists them with its own hints, x clears them there and nowhere else", ->
+  reader! Fake.new(), ({ view, app, fake, dir }) ->
+    view.press 'Enter'
+    settle! fake
+    view.press 'Escape'
+    view.press 'j'
+    view.press 'j'
+    view.press 'Enter'
+    settle! fake
+    view.press 'Escape'
+    view.press 'x'
+    eq JSON.parse(readFileSync(join(dir, 'history.json'), 'utf8')).length, 2, 'x on the top tab does nothing'
+    look = styled view
+    ok look[5].includes('«#666666 on #080808»Show') and look[6].includes('«#666666 on #080808»▲'), "a visited row is dim throughout: #{look[5]}"
+    view.press 'H'
+    settle! fake
+    frame = lines view
+    eq plain(frame[5]), '   1. The unreasonable effectiveness of flexbox in a terminal (example.com)'
+    eq plain(frame[7]), '   2. Show HN: A Hacker News reader for the terminal, in 900 lines (github.com)'
+    eq frame[29], ' j/k move · c/⏎ open · x clear history · q quit'.padEnd(93) + '? help'
+    view.press 'x'
+    settle! fake
+    eq lines(view)[16], ' '.repeat(25) + 'No history yet. Posts you open will show up here.'
+    eq readFileSync(join(dir, 'history.json'), 'utf8'), '[]'
+
+test! "the files are read as they are: a saved.json of mixed shapes lists its one good entry, and a history past the cap is cut to 1000", ->
+  seed = (dir) ->
+    writeFileSync join(dir, 'saved.json'), '[{"id":1001,"savedAt":1},{"id":"x"},5,null]'
+    writeFileSync join(dir, 'history.json'), JSON.stringify(({ id: n, viewedAt: n } for n in [1..1005]))
+  reader! Fake.new(), (({ view, app, fake }) ->
+    view.press 'S'
+    settle! fake
+    frame = lines view
+    eq plain(frame[5]), '   1. ★ Show HN: A Hacker News reader for the terminal, in 900 lines (github.com)'
+    eq frame[7], ''
+    eq app.history.value.length, 1000), { seed }
+
+console.log "\nhn: loading, failing and cancelled requests"
+
+test! "while the feed loads the list is a centered loader with its message and the status bar spins; released, the list is shown; a thread loads the same way", ->
+  fake = Fake.new()
+  gate = fake.hold 'topstories.json'
+  reader! fake, (({ view, app }) ->
+    view.frame()
+    settle! fake
+    frame = lines view
+    eq frame[15], ' '.repeat(46) + '■⬝⬝⬝⬝⬝⬝⬝'
+    eq frame[17], ' '.repeat(42) + 'Loading stories…'
+    ok /^ [■⬝]{8} j\/k move · c\/⏎ open · s save · q quit/.test(frame[29]), frame[29]
+    gate.release()
+    settle! fake
+    eq plain(lines(view)[5]), '   1. Show HN: A Hacker News reader for the terminal, in 900 lines (github.com)'
+    held = fake.hold 'item/2001.json'
+    view.press 'Enter'
+    settle! fake
+    frame = lines view
+    eq frame[10], ' ■⬝⬝⬝⬝⬝⬝⬝ Loading comments…'
+    ok /^ [■⬝]{8} j\/k move · space/.test(frame[29])
+    held.release()
+    settle! fake
+    eq heads(view)[0], ' ▶ alice · 2h ago'), { raw: true }
+
+test! "a feed that answers 500 once is asked again and shown", ->
+  reader! Fake.new(), ({ view, app, fake }) ->
+    fake.fail 'beststories.json', 500
+    view.press '3'
+    settle! fake
+    eq plain(lines(view)[5]), '   1. Bun 1.4 released (bun.sh)'
+    eq fake.requests('beststories.json'), 2
+
+test! "a feed that answers 404 is not asked again: the error view with its copy and hints, and r asks once more and recovers", ->
+  reader! Fake.new(), ({ view, app, fake }) ->
+    fake.fail 'jobstories.json', 404
+    view.press '6'
+    settle! fake
+    frame = lines view
+    eq frame[13], ' '.repeat(47) + '(×_×)'
+    eq frame[15], ' '.repeat(39) + "Couldn't load stories"
+    eq frame[17], ' '.repeat(35) + 'Hacker News returned HTTP 404.'
+    eq frame[19], ' '.repeat(45) + 'r to retry'
+    eq frame[29], ' r retry · q quit'.padEnd(93) + '? help'
+    eq fake.requests('jobstories.json'), 1
+    view.press 'r'
+    settle! fake
+    eq plain(lines(view)[5]), '   1. Acme (YC S21) is hiring a terminal engineer (acme.example)'
+    eq fake.requests('jobstories.json'), 2
+
+test! "a feed left for another is aborted, and a transport that ignores the abort still lands nothing: the stale answer never shows", ->
+  reader! Fake.new(), ({ view, app, fake }) ->
+    gate = fake.hold 'newstories.json'
+    view.press '2'
+    settle! fake
+    view.press '1'
+    settle! fake
+    ok fake.log.includes('abort newstories.json'), fake.log.join ', '
+    eq plain(lines(view)[5]), '   1. Show HN: A Hacker News reader for the terminal, in 900 lines (github.com)'
+  reader! Fake.new(deaf: true), ({ view, app, fake }) ->
+    gate = fake.hold 'newstories.json'
+    view.press '2'
+    settle! fake
+    view.press '1'
+    settle! fake
+    gate.release()
+    settle! fake
+    eq app.category.value, 'top'
+    eq plain(lines(view)[5]), '   1. Show HN: A Hacker News reader for the terminal, in 900 lines (github.com)'
+    ok not lines(view).some((row) -> row.includes 'Generated story 44'), 'the stale feed never landed'
+
+test! "a thread whose replies all fail says so with r, r loads them again since the failure was evicted, and r on a loaded thread asks nothing", ->
+  reader! Fake.new(), ({ view, app, fake }) ->
+    fake.fail 'item/2201.json', 'network', 'network', 'network'
+    view.press 'j' for n in [1..3]
+    view.press 'Enter'
+    settle! fake
+    eq app.view.value.story.id, 1006
+    eq lines(view)[10], " Couldn't load comments — press r to retry."
+    view.press 'r'
+    settle! fake
+    eq heads(view), [' ▶ ivy · 20h ago']
+    was = fake.log.length
+    view.press 'r'
+    settle! fake
+    eq fake.log.length, was
+
+test! "o and y open the story's url and its HN page in the browser: from the list they mark the story viewed, from the thread they do not, and s from the thread stars the title", ->
+  reader! Fake.new(), ({ view, app, fake, opened }) ->
+    view.press 'o'
+    eq opened, ['https://github.com/shreeve/rip/tree/main/packages/tui/examples/hn']
+    ok styled(view)[5].includes('«#666666 on #212121 bold»Show'), "visited: #{styled(view)[5]}"
+    view.press 'y'
+    eq opened[1], 'https://news.ycombinator.com/item?id=1001'
+    view.press 'j'
+    view.press 'Enter'
+    settle! fake
+    view.press 'o'
+    view.press 'y'
+    eq opened.slice(2), ['https://news.ycombinator.com/item?id=1002']
+    eq app.history.value.length, 2
+    view.press 's'
+    eq lines(view)[4], ' ★ Ask HN: What are you reading this fall?'
+
+test! "q quits, with an overlay open too, and so does Ctrl-C", ->
+  for keys in [['q'], ['Enter', '?', 'q']]
+    reader! Fake.new(), ({ view, fake }) ->
+      view.press key for key in keys
+      eq (await view.done), undefined
+      eq typeof document, 'undefined'
+  reader! Fake.new(), ({ view }) ->
+    view.press 'c', ctrl: true
+    eq (await view.done), undefined
+    eq typeof document, 'undefined'
+  return

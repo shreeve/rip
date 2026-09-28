@@ -171,12 +171,28 @@ Each runs with `rip examples/<name>.rip` from `packages/tui`.
 | `log.rip` | A build log: finished steps into the scrollback through `Static`, a spinner and a bar on the `clock`, a warning above the frame through `print`, the terminal's own progress indicator, and a quit when the last step is done. |
 | `input.rip` | A single-line text field in 40 lines of code: the cursor placed by measured cells, so a wide glyph is two columns and a letter with its marks one; typing inserts at the cursor, the arrows, Home and End move it, Backspace and Delete take a cluster, a paste goes in whole, Enter prints the value above the field and clears it, Escape clears it. |
 | `ink/*.rip` | The four ports above, Ink's source beside each. |
+| `hn/hn.rip` | A Hacker News reader, the port of hntui (below). |
 | [`scripts/test-live.rip`](../../scripts/test-live.rip) | The framework in daily use: the repository's own `bun run test:tui`, every lane of the test run drawn live — spinners and bars on one `clock`, finished lanes into the scrollback through `Static`, failure cards in rounded borders with `link` to the file, the terminal's progress indicator — and `test/live.rip` drives it headless through `mount`. |
 
 `log.rip`, `input.rip` and the ports export their component and run it
 only as the entry (`run App if import.meta.main`), which is how
 `test.rip` and `test/examples.rip` drive them headless through
 `mount`.
+
+`examples/hn/` is a port of [hntui](https://github.com/ahmd-sh/hntui),
+a Hacker News reader written on OpenTUI and React, with its keys, texts
+and colors kept (NOTICE): the six feeds, saved stories and history in
+`~/.config/rip-hn`, a story's thread with its links followed in-app, a
+context menu on a right press, a help overlay over a translucent
+scrim, two themes with a wipe between them on `screen.post`, and a
+Knight Rider loader on the `clock`. The list and the thread are
+clipped boxes scrolled by content offset with a `Scrollbar` beside
+them, the cursor's row kept in view by `reveal`, and the wheel moves
+the offset a row a tick. `bun run hn` runs it against the live API,
+and `HN_DEMO=1 bun run hn` offline, on the deterministic fake that
+`test/hn.rip` drives it through — at 100 by 30 through `mount`, every
+view, key, press and request, the fake's clock and the browser in the
+test's hands.
 
 ## Running
 
