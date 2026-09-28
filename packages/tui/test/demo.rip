@@ -1,22 +1,22 @@
 # The examples, run headless through `mount`: the four ported from Ink
-# under examples/ink/, each held to the frames Ink 7.1.1 draws for its
+# under demo/ink/, each held to the frames Ink 7.1.1 draws for its
 # own example (bench/ holds that Ink; the frames here were read from
 # it through a stdout of the test's own, at 100 columns, as Ink's test
 # helper draws — every frame is Ink's, none differs), and the text
-# field of examples/input.rip, its frame and its cursor after every
+# field of demo/input.rip, its frame and its cursor after every
 # key.
 #
-#   rip test/examples.rip
+#   rip test/demo.rip
 
 import { test, eq, ok } from 'rip/testing'
 import { mount } from 'rip/tui'
 import * as cells from './ink/cells.rip'
 import { table } from './lines.rip'
-import { Counter } from '../examples/ink/counter.rip'
-import { Borders } from '../examples/ink/borders.rip'
-import { Focus } from '../examples/ink/use-focus.rip'
-import { Example as Tests } from '../examples/ink/static.rip'
-import { Input } from '../examples/input.rip'
+import { Counter } from '../demo/ink/counter.rip'
+import { Borders } from '../demo/ink/borders.rip'
+import { Focus } from '../demo/ink/use-focus.rip'
+import { Example as Tests } from '../demo/ink/static.rip'
+import { Input } from '../demo/input.rip'
 
 mounted =! (App, options, body) ->
   view = mount App, { cols: 100, ...options }

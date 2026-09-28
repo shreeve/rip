@@ -94,7 +94,7 @@ seed =! (fake) ->
   put 'showstories.json', [1001]
   put 'jobstories.json', [1008]
 
-  story 1001, 'shreeve', 3 * h, 312, 'Show HN: A Hacker News reader for the terminal, in 900 lines', { descendants: 8, kids: [2001, 2005, 2008], url: 'https://github.com/shreeve/rip/tree/main/packages/tui/examples/hn' }
+  story 1001, 'shreeve', 3 * h, 312, 'Show HN: A Hacker News reader for the terminal, in 900 lines', { descendants: 8, kids: [2001, 2005, 2008], url: 'https://github.com/shreeve/rip/tree/main/packages/tui/demo/hn' }
   story 1002, 'reader42', 5 * h, 88, 'Ask HN: What are you reading this fall?', { descendants: 2, kids: [2101], text: '<p>Books, papers, anything long-form.' }
   story 1003, 'flaky', 4 * h, 40, 'A post behind a flaky server'
   story 1004, 'gone', 6 * h, 0, '[deleted]', { deleted: true }

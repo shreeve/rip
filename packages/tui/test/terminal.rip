@@ -17,7 +17,7 @@
 
 import { test as pin, eq, ok, throws, plainEnv } from 'rip/testing'
 import { run, quit, suspend, mount, renderToString, print, screen, Box, Text, Static } from 'rip/tui'
-import { Log } from '../examples/log.rip'
+import { Log } from '../demo/log.rip'
 import { Terminal, Stdin, count, differs, tally } from './events/harness.rip'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -1003,7 +1003,7 @@ test! "a Static item and a print under the alternate screen write nothing, above
   await running.done
   eq term.text, 'prompt$'
 
-test! "examples/log.rip under the alternate screen: the steps done are nothing, the live line turns, and the screen comes back as it was", ->
+test! "demo/log.rip under the alternate screen: the steps done are nothing, the live line turns, and the screen comes back as it was", ->
   term = Terminal.new()
   running = run Log, stdin: Stdin.new(), stdout: term, altScreen: true
   sleep! 800
@@ -1056,7 +1056,7 @@ test! "off a terminal a Static item and a print are written as they arrive, and 
   await running.done
   eq pipe.text, "✓ one\naside\n✓ two\nlive\n"
 
-test! "examples/log.rip off a terminal: the clock never runs, and the first line is written once at exit", ->
+test! "demo/log.rip off a terminal: the clock never runs, and the first line is written once at exit", ->
   pipe = Pipe.new()
   running = run Log, stdin: Stdin.new(), stdout: pipe
   sleep! 200

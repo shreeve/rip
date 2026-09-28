@@ -4,7 +4,7 @@
 # own `focused`, and Ink's Escape is a listener on the root box, which
 # hears every key a focused item is sent.
 #
-#   rip examples/ink/use-focus.rip
+#   rip demo/ink/use-focus.rip
 
 import { run, focus, Box, Text } from 'rip/tui'
 

@@ -6,7 +6,7 @@
 # glyph moves it two columns and a letter with its marks one; a value
 # wider than the field is cut at its right edge.
 #
-#   rip examples/input.rip
+#   rip demo/input.rip
 
 import { run, print, Box, Text } from 'rip/tui'
 

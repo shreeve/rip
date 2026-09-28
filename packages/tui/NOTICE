@@ -30,7 +30,7 @@ SOFTWARE.
 The text wrapping and truncation rules, the border and background
 painting, and the tests under test/ink/ follow Ink
 (https://github.com/vadimdemedes/ink), and the four .tsx files under
-examples/ink/ are Ink's own examples, copied unmodified beside their
+demo/ink/ are Ink's own examples, copied unmodified beside their
 ports. Ink is distributed under this license:
 
 MIT License
@@ -45,7 +45,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
-The Hacker News reader under examples/hn/ is a port of hntui
+The Hacker News reader under demo/hn/ is a port of hntui
 (https://github.com/ahmd-sh/hntui): its data layer, formatting rules,
 saved and history files, keys, texts and colors follow hntui's, and
 test/hn.rip carries hntui's own tests. hntui is distributed under this
@@ -74,7 +74,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 
-The scanner spinner of examples/hn/ — its frames, ramp colors, holds
+The scanner spinner of demo/hn/ — its frames, ramp colors, holds
 and fade — follows the example of opentui-spinner
 (https://github.com/msmps/opentui-spinner). opentui-spinner is
 distributed under this license:

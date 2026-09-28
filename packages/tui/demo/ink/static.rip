@@ -3,7 +3,7 @@
 # is beside this file; its process ends when its last timer has run,
 # and this one quits then, since `run` holds the terminal until it does.
 #
-#   rip examples/ink/static.rip
+#   rip demo/ink/static.rip
 
 import { run, quit, clock, Box, Text, Static } from 'rip/tui'
 

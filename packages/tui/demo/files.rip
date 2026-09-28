@@ -5,7 +5,7 @@
 # click picks a row and focuses its pane, and the row under the pointer
 # is underlined. Try a narrow terminal, then a wide one.
 #
-#   rip examples/files.rip [directory]
+#   rip demo/files.rip [directory]
 
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve, dirname, basename } from 'node:path'

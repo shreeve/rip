@@ -10,7 +10,7 @@ import { layout } from './layout.rip'
 import { Grid, paint, diff, rowsToString, intern, recolor, tally as styleCount } from './paint.rip'
 import { tally as clusterCount, clusterWidth } from './text.rip'
 import { __setChildFailureReporter } from '../../src/runtime/components.js'
-import { Log as BuildLog } from './examples/log.rip'
+import { Log as BuildLog } from './demo/log.rip'
 import { EventEmitter } from 'node:events'
 import { readFileSync } from 'fs'
 import { join } from 'path'
@@ -2630,7 +2630,7 @@ test "a Static under an if that swaps is built once for the new branch, its item
   finally
     view.close()
 
-test! "examples/log.rip runs headless: the steps scroll into the scrollback as the clock moves, the spinner turns, the warning is printed, and it quits when done or on q", ->
+test! "demo/log.rip runs headless: the steps scroll into the scrollback as the clock moves, the spinner turns, the warning is printed, and it quits when done or on q", ->
   view = mount BuildLog, cols: 60, rows: 10
   try
     first = view.frame()
