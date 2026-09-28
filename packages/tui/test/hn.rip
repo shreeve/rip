@@ -1,0 +1,596 @@
+# The Hacker News example's data layer, offline: the errors and their
+# copy, the item validator, the live transport against a loopback
+# server, the timeout and retry policy on a hand clock, the item cache,
+# the parent walk, the comment tree, the formatting of HN's text, and
+# the saved and history files in a temp directory.
+#
+#   rip test/hn.rip
+
+import { test, eq, ok, throws } from 'rip/testing'
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { Api, HnError, HnRequestError, HnStatusError, HnTimeoutError, HnDecodeError, HnItemGone, hnErrorMessage, DELAYS, decodeItem, fetcher, timed, retrying, flattenTree } from '../examples/hn/api.rip'
+import { Fake, NOW } from '../examples/hn/fake.rip'
+import { relativeTime, hostname, decodeEntities, htmlToText, extractLinks, parseHnItemLink } from '../examples/hn/format.rip'
+import { Store, HISTORY_CAP, configDir } from '../examples/hn/store.rip'
+
+# ---------------------------------------------------------------------
+# Harness
+# ---------------------------------------------------------------------
+
+# Waits for the fake to go quiet: nothing in flight but what is parked
+# on a hold or a hang, and no new request between two turns.
+settle =! (fake) ->
+  loop
+    before = fake.log.length
+    sleep! 0
+    sleep! 0
+    break if fake.inflight - fake.waiting is 0 and fake.log.length is before
+  return
+
+# The error `promise` rejects with, which must be a `want` when given.
+rejects =! (promise, want = null) ->
+  try
+    await promise
+  catch error
+    return error if not want or error instanceof want
+    throw Error.new "expected #{want.name}, got #{error?.constructor?.name}: #{error?.message}"
+  throw Error.new "expected a rejection#{if want then ' with ' + want.name else ''}"
+
+# What `promise` settles to, as `{ value }` or `{ error }`, so a test
+# that expects a value can hold the promise across the clock's ticks.
+settled =! (promise) -> promise.then ((value) -> { value }), ((error) -> { error })
+
+# A clock the test moves: `after` and `wait` stand in for the policy's
+# timers, `waits` records each backoff asked for, and `tick` fires what
+# is due and lets the promises behind it run.
+handClock =! ->
+  clock = { now: 0, timers: [], waits: [] }
+  clock.after = (ms, fn) ->
+    timer = { at: clock.now + ms, fn }
+    clock.timers.push timer
+    -> timer.fn = null
+  clock.wait = (ms) ->
+    clock.waits.push ms
+    gate = Promise.withResolvers()
+    clock.timers.push { at: clock.now + ms, fn: gate.resolve }
+    gate.promise
+  clock.tick = (ms) ->
+    clock.now += ms
+    due = clock.timers.filter (timer) -> timer.at <= clock.now
+    clock.timers = clock.timers.filter (timer) -> timer.at > clock.now
+    timer.fn?() for timer in due.sort((a, b) -> a.at - b.at)
+    sleep! 0 for n in [1..6]
+    return
+  clock
+
+# The retry policy with no waiting, over a fake.
+instant =! (fake) -> retrying fake.transport().getJson, [0, 0], (-> Promise.resolve())
+
+# hntui's own canned transport: six pins port over it verbatim.
+DB =! {
+  'item/1.json': { id: 1, type: 'story', title: 'Root story', kids: [2, 4] }
+  'item/2.json': { id: 2, type: 'comment', parent: 1, text: 'child' }
+  'item/3.json': { id: 3, type: 'comment', parent: 2, text: 'grandchild' }
+  'item/4.json': { id: 4, type: 'comment', parent: 1, deleted: true }
+  'item/5.json': { id: 5, type: 'story', title: 'Deleted story', deleted: true }
+  'item/9.json': { id: 'not-a-number', type: 'story' }
+}
+canned =! (log = []) ->
+  getJson: (path) ->
+    log.push path
+    Promise.resolve DB[path] ?? null
+
+ids =! (rows) -> (row.node.item.id for row in rows)
+
+console.log "\nhn: errors and decode"
+
+test "hnErrorMessage: one line of copy per HnError, and anything else is refused as a bug", ->
+  eq hnErrorMessage(HnRequestError.new 'x', 1), "Couldn't reach Hacker News — check your connection."
+  eq hnErrorMessage(HnTimeoutError.new 'x'), 'Hacker News took too long to respond.'
+  eq hnErrorMessage(HnStatusError.new 'x', 503), 'Hacker News returned HTTP 503.'
+  eq hnErrorMessage(HnDecodeError.new 'x', 'bad'), "Hacker News sent a response the app couldn't understand."
+  throws (-> hnErrorMessage Error.new 'plain'), TypeError, 'not an HnError'
+  throws (-> hnErrorMessage HnItemGone.new 7), TypeError
+
+test "the errors are Errors with their name, their path and their message", ->
+  error = HnStatusError.new 'item/1.json', 503
+  ok error instanceof Error and error instanceof HnError and error instanceof HnStatusError
+  eq [error.name, error.path, error.status, error.message], ['HnStatusError', 'item/1.json', 503, 'HTTP 503: item/1.json']
+  gone = HnItemGone.new 7
+  ok gone instanceof Error and not (gone instanceof HnError)
+  eq [gone.name, gone.id, gone.message], ['HnItemGone', 7, 'item 7 is gone']
+
+test "decodeItem: null stays null, a non-object is refused before any field, and a field present with the wrong type names itself", ->
+  eq decodeItem(null, 'p'), null
+  throws (-> decodeItem 5, 'p'), HnDecodeError, 'expected an object'
+  throws (-> decodeItem [1], 'p'), HnDecodeError, 'expected an object'
+  throws (-> decodeItem { id: 'not-a-number', type: 'story' }, 'p'), HnDecodeError, 'id: expected a number, got "not-a-number"'
+  throws (-> decodeItem { id: 1, type: 'user' }, 'p'), HnDecodeError, 'type: expected one of story, comment, job, poll, pollopt, got "user"'
+  throws (-> decodeItem { id: 1, type: 'story', by: null }, 'p'), HnDecodeError, 'by: expected a string, got null'
+  throws (-> decodeItem { id: 1, type: 'story', kids: [1, 'x'] }, 'p'), HnDecodeError, 'kids: expected an array of numbers'
+  error = try decodeItem({ id: 1, type: 'story', score: '5' }, 'item/1.json') catch e then e
+  eq [error.path, error.issue], ['item/1.json', 'score: expected a number, got "5"']
+
+test "decodeItem: the known keys are copied, kids is a fresh array, and unknown keys such as parts are dropped", ->
+  raw = { id: 1, type: 'poll', by: 'pg', time: 5, kids: [2], parts: [3], score: 9, extra: true }
+  item = decodeItem raw, 'p'
+  eq item, { id: 1, type: 'poll', by: 'pg', time: 5, score: 9, kids: [2] }
+  ok item.kids isnt raw.kids
+  eq decodeItem({ id: 2, type: 'comment', text: undefined }, 'p'), { id: 2, type: 'comment' }, 'an undefined field is absent'
+
+console.log "\nhn: the live transport, against a loopback server"
+
+test! "fetcher: a 200 is its JSON, a 404 is HnStatusError, a bad body is HnRequestError, and a closed port is HnRequestError", ->
+  server = Bun.serve
+    port: 0
+    fetch: (req) ->
+      switch URL.new(req.url).pathname
+        when '/v0/ok.json' then Response.json { a: 1 }
+        when '/v0/bad.json' then Response.new '{oops', headers: { 'content-type': 'application/json' }
+        else Response.new 'nope', status: 404
+  try
+    get = fetcher "http://127.0.0.1:#{server.port}/v0"
+    eq (get! 'ok.json'), { a: 1 }
+    error = rejects! get('missing.json'), HnStatusError
+    eq [error.status, error.path], [404, 'missing.json']
+    error = rejects! get('bad.json'), HnRequestError
+    eq error.path, 'bad.json'
+    ok error.cause instanceof Error, 'the JSON failure is the cause'
+  finally
+    server.stop true
+  error = rejects! get('ok.json'), HnRequestError
+  ok error.cause instanceof Error, "a refused connection is the cause: #{error.cause}"
+
+test! "fetcher: an abort passes through as the signal's own error, not as a request failure", ->
+  server = Bun.serve
+    port: 0
+    fetch: ->
+      sleep! 50
+      Response.json 1
+  try
+    controller = AbortController.new()
+    get = fetcher "http://127.0.0.1:#{server.port}/v0"
+    p = get 'slow.json', controller.signal
+    controller.abort()
+    error = rejects! p
+    eq error.name, 'AbortError'
+  finally
+    server.stop true
+
+console.log "\nhn: the policy on a hand clock"
+
+test! "retrying: a 503 twice then a 200 resolves after three requests, waiting 250 then 500 ms", ->
+  fake = Fake.new()
+  clock = handClock()
+  fake.fail 'topstories.json', 503, 503
+  get = retrying fake.transport().getJson, DELAYS, clock.wait
+  outcome = settled get('topstories.json')
+  settle! fake
+  eq clock.waits, [250]
+  clock.tick! 250
+  settle! fake
+  eq clock.waits, [250, 500]
+  clock.tick! 500
+  settle! fake
+  found = await outcome
+  eq found.error, undefined, found.error?.message
+  eq found.value.slice(0, 3), [1001, 1002, 1005]
+  eq fake.requests('topstories.json'), 3
+
+test! "retrying: a 503 three times is HnStatusError 503, after three requests", ->
+  fake = Fake.new()
+  clock = handClock()
+  fake.fail 'topstories.json', 503, 503, 503
+  get = retrying fake.transport().getJson, DELAYS, clock.wait
+  outcome = rejects get('topstories.json'), HnStatusError
+  settle! fake
+  clock.tick! 250
+  settle! fake
+  clock.tick! 500
+  settle! fake
+  error = await outcome
+  eq [error.status, fake.requests('topstories.json'), clock.waits], [503, 3, [250, 500]]
+
+test! "retrying: a 404 is never retried — one request, HnStatusError 404", ->
+  fake = Fake.new()
+  clock = handClock()
+  fake.fail 'jobstories.json', 404
+  get = retrying fake.transport().getJson, DELAYS, clock.wait
+  error = rejects! get('jobstories.json'), HnStatusError
+  eq [error.status, fake.requests('jobstories.json'), clock.waits], [404, 1, []]
+
+test! "retrying: a network failure three times is HnRequestError", ->
+  fake = Fake.new()
+  fake.fail 'topstories.json', 'network', 'network', 'network'
+  error = rejects! instant(fake)('topstories.json'), HnRequestError
+  eq [error.path, fake.requests('topstories.json')], ['topstories.json', 3]
+
+test! "retrying: a 500 once then a 200 is exactly two requests", ->
+  fake = Fake.new()
+  fake.fail 'beststories.json', 500
+  get = instant fake
+  eq (get! 'beststories.json'), [1007, 1005, 1001]
+  eq fake.requests('beststories.json'), 2
+
+test! "timed: a request that hangs is aborted at the timeout and is HnTimeoutError, three attempts in all", ->
+  fake = Fake.new()
+  clock = handClock()
+  fake.fail 'jobstories.json', 'hang', 'hang', 'hang'
+  get = retrying timed(fake.transport().getJson, 5000, clock.after), DELAYS, clock.wait
+  outcome = rejects get('jobstories.json'), HnTimeoutError
+  settle! fake
+  eq fake.waiting, 1
+  clock.tick! 5000
+  settle! fake
+  eq clock.waits, [250]
+  clock.tick! 250
+  settle! fake
+  clock.tick! 5000
+  settle! fake
+  clock.tick! 500
+  settle! fake
+  clock.tick! 5000
+  settle! fake
+  error = await outcome
+  eq error.path, 'jobstories.json'
+  eq fake.requests('jobstories.json'), 3
+  eq fake.log.filter((entry) -> entry is 'abort jobstories.json').length, 3
+  eq [fake.inflight, fake.waiting], [0, 0]
+
+test! "timed: an answer inside the timeout cancels the timer, and a caller's abort reaches the request", ->
+  fake = Fake.new()
+  clock = handClock()
+  get = timed fake.transport().getJson, 5000, clock.after
+  eq (get! 'askstories.json'), [1002]
+  eq clock.timers.filter((timer) -> timer.fn).length, 0, 'the timer is cancelled'
+  fake.fail 'askstories.json', 'hang'
+  controller = AbortController.new()
+  outcome = rejects get('askstories.json', controller.signal)
+  settle! fake
+  controller.abort()
+  error = await outcome
+  eq error.name, 'AbortError'
+  eq fake.log.at(-1), 'abort askstories.json'
+
+test! "retrying: an abort during the backoff is the signal's error, and no further request starts", ->
+  fake = Fake.new()
+  clock = handClock()
+  fake.fail 'topstories.json', 503
+  controller = AbortController.new()
+  get = retrying fake.transport().getJson, DELAYS, clock.wait
+  outcome = rejects get('topstories.json', controller.signal)
+  settle! fake
+  eq clock.waits, [250]
+  controller.abort()
+  error = await outcome
+  eq error.name, 'AbortError'
+  clock.tick! 250
+  settle! fake
+  eq fake.requests('topstories.json'), 1
+
+console.log "\nhn: the item cache"
+
+test! "resolveStory: a grandchild comment walks up to the root story and focuses itself", ->
+  api = Api.new canned()
+  found = api.resolveStory! { id: 3 }
+  eq [found.story.id, found.focusId], [1, 3]
+
+test! "resolveStory: an explicit #anchor wins over the walked-from comment", ->
+  found = Api.new(canned()).resolveStory! { id: 1, anchorId: 2 }
+  eq [found.story.id, found.focusId], [1, 2]
+
+test! "resolveStory: an unknown id is HnItemGone", ->
+  error = rejects! Api.new(canned()).resolveStory({ id: 404 }), HnItemGone
+  eq error.id, 404
+
+test! "resolveStory: a deleted story is HnItemGone", ->
+  rejects! Api.new(canned()).resolveStory({ id: 5 }), HnItemGone
+
+test! "resolveStory: a deleted comment still walks through to its living root", ->
+  found = Api.new(canned()).resolveStory! { id: 4 }
+  eq [found.story.id, found.focusId], [1, 4]
+
+test! "fetchItem: a payload that violates the schema is HnDecodeError", ->
+  error = rejects! Api.new(canned()).fetchItem(9), HnDecodeError
+  eq error.path, 'item/9.json'
+
+test! "fetchItem: three sequential gets of one id hit the transport once", ->
+  log = []
+  api = Api.new canned(log)
+  api.fetchItem! 1
+  api.fetchItem! 1
+  api.fetchItem! 1
+  eq log.filter((path) -> path is 'item/1.json').length, 1
+
+test! "fetchItem: two concurrent gets share one request and see the same item", ->
+  fake = Fake.new()
+  api = Api.new fake.transport()
+  first = api.fetchItem 1001
+  second = api.fetchItem 1001
+  found = Promise.all! [first, second]
+  eq fake.requests('item/1001.json'), 1
+  eq found[0], found[1]
+  eq found[0].title, 'Show HN: A Hacker News reader for the terminal, in 900 lines'
+
+test! "fetchItem: a failure is evicted, so the next get issues a new request and can succeed", ->
+  fake = Fake.new()
+  api = Api.new fake.transport()
+  fake.fail 'item/1001.json', 'network'
+  rejects! api.fetchItem(1001), HnRequestError
+  eq fake.requests('item/1001.json'), 1
+  item = api.fetchItem! 1001
+  eq [item.id, fake.requests('item/1001.json'), api.cache.size], [1001, 2, 1]
+
+test! "fetchItem: a null is a success and is cached", ->
+  fake = Fake.new()
+  api = Api.new fake.transport()
+  eq (api.fetchItem! 1099), null
+  eq (api.fetchItem! 1099), null
+  eq fake.requests('item/1099.json'), 1
+
+test! "fetchItem: a caller that aborts stops waiting, and the shared entry still lands in the cache whole", ->
+  fake = Fake.new()
+  api = Api.new fake.transport()
+  gate = fake.hold 'item/1001.json'
+  controller = AbortController.new()
+  outcome = rejects api.fetchItem(1001, controller.signal)
+  settle! fake
+  controller.abort()
+  error = await outcome
+  eq error.name, 'AbortError'
+  gate.release()
+  settle! fake
+  eq (api.fetchItem! 1001).id, 1001
+  eq fake.requests('item/1001.json'), 1
+  error = rejects! api.fetchItem(1001, controller.signal)
+  eq error.name, 'AbortError', 'an already-aborted signal is refused at once'
+
+console.log "\nhn: feeds and pools"
+
+test! "fetchIds: null is an empty feed, and a payload that is not a list of numbers is HnDecodeError", ->
+  fake = Fake.new()
+  api = Api.new fake.transport()
+  eq (api.fetchIds! 'top').length, 40
+  eq (api.fetchIds! 'nosuch'), []
+  fake.fail 'topstories.json', { payload: { a: 1 } }, { payload: [1, 'x'] }
+  error = rejects! api.fetchIds('top'), HnDecodeError
+  eq [error.path, error.issue], ['topstories.json', 'expected an array of ids']
+  rejects! api.fetchIds('top'), HnDecodeError
+
+test! "fetchItems: order kept, a null and a decode failure dropped, a deleted item kept", ->
+  eq (Api.new(canned()).fetchItems! [5, 1, 404, 2, 9]).map((item) -> item.id), [5, 1, 2]
+
+test! "fetchItems: at most ten requests are in flight at once", ->
+  fake = Fake.new()
+  api = Api.new fake.transport()
+  found = api.fetchItems! [1013..1037]
+  eq found.length, 25
+  eq fake.peak, 10
+
+test! "fetchItems: an abort mid-pool starts no further request and rejects with the signal's error", ->
+  fake = Fake.new()
+  api = Api.new fake.transport()
+  controller = AbortController.new()
+  outcome = rejects api.fetchItems([1013..1037], controller.signal)
+  eq fake.log.length, 10, 'the first ten start at once'
+  controller.abort()
+  error = await outcome
+  eq error.name, 'AbortError'
+  settle! fake
+  eq fake.log.length, 10
+  eq api.cache.size, 10, 'the ten in flight still fill the cache'
+
+console.log "\nhn: the parent walk"
+
+test! "resolveStory: 3063 reaches its story in 64 hops with itself as the focus, and 3064 is gone at the 65th", ->
+  fake = Fake.new()
+  api = Api.new fake.transport()
+  found = api.resolveStory! { id: 3063 }
+  eq [found.story.id, found.focusId], [1001, 3063]
+  error = rejects! api.resolveStory({ id: 3064 }), HnItemGone
+  eq error.id, 3064
+
+test! "resolveStory: a comment with no parent, a missing first item, and a deleted story are gone; a transport error is not", ->
+  fake = Fake.new()
+  api = Api.new fake.transport()
+  rejects! api.resolveStory({ id: 2301 }), HnItemGone
+  rejects! api.resolveStory({ id: 999999 }), HnItemGone
+  rejects! api.resolveStory({ id: 1004 }), HnItemGone
+  fake.fail 'item/1003.json', 503
+  error = rejects! api.resolveStory({ id: 1003 }), HnStatusError
+  eq error.status, 503
+  eq (api.resolveStory! { id: 1003 }).story.id, 1003, 'the failure was evicted'
+
+test! "resolveStory: a story is its own answer with no focus, and an anchor is not validated", ->
+  api = Api.new Fake.new().transport()
+  eq (api.resolveStory! { id: 1001 }), { story: (api.fetchItem! 1001), focusId: undefined }
+  eq (api.resolveStory! { id: 1001, anchorId: 5 }).focusId, 5
+  eq (api.resolveStory! { id: 2102 }).story.id, 1002
+
+test! "resolveStory: an abort mid-walk stops the hops", ->
+  fake = Fake.new()
+  api = Api.new fake.transport()
+  gate = fake.hold 'item/3050.json'
+  controller = AbortController.new()
+  outcome = rejects api.resolveStory({ id: 3060 }, controller.signal)
+  settle! fake
+  eq fake.requests('item/3050.json'), 1
+  controller.abort()
+  gate.release()
+  error = await outcome
+  eq error.name, 'AbortError'
+  settle! fake
+  eq fake.requests('item/3049.json'), 0
+
+console.log "\nhn: the comment tree"
+
+test! "loadComments and flattenTree: the rows of 1001 in reading order with their depths; the dead, deleted and null replies are left out", ->
+  api = Api.new Fake.new().transport()
+  story = api.fetchItem! 1001
+  tree = api.loadComments! story.kids
+  rows = flattenTree tree, Set.new()
+  eq ids(rows), [2001, 2002, 2003, 2008, 2009]
+  eq (row.depth for row in rows), [0, 1, 2, 0, 1]
+  eq (row.hiddenChildren for row in rows), [0, 0, 0, 0, 0]
+
+test! "flattenTree: a collapsed node counts the loaded replies it hides and skips them", ->
+  api = Api.new Fake.new().transport()
+  tree = api.loadComments! [2001, 2005, 2008]
+  rows = flattenTree tree, Set.new([2001])
+  eq ids(rows), [2001, 2008, 2009]
+  eq rows[0].hiddenChildren, 2
+  eq (row.hiddenChildren for row in flattenTree(tree, Set.new([2002]))), [0, 1, 0, 0]
+  eq (row.hiddenChildren for row in flattenTree(tree, Set.new([2003]))), [0, 0, 0, 0, 0]
+  eq ids(flattenTree(tree, Set.new([2001, 2008]))), [2001, 2008]
+
+test! "loadTree: replies load to depth 8, so a chain of eleven gives nine rows", ->
+  api = Api.new Fake.new().transport()
+  rows = flattenTree (api.loadComments! [4000]), Set.new()
+  eq ids(rows), [4000..4008]
+  eq (row.depth for row in rows), [0..8]
+
+test! "loadTree: a reply that fails to load is left out with its replies, and the parent's row stays", ->
+  fake = Fake.new()
+  api = Api.new fake.transport()
+  fake.fail 'item/2002.json', 'network'
+  rows = flattenTree (api.loadComments! [2001, 2005, 2008]), Set.new()
+  eq ids(rows), [2001, 2008, 2009]
+  eq fake.requests('item/2003.json'), 0
+
+test! "loadComments: an abort after the first level issues no request for the next, and rejects", ->
+  fake = Fake.new()
+  api = Api.new fake.transport()
+  gate = fake.hold 'item/2001.json'
+  controller = AbortController.new()
+  outcome = rejects api.loadComments([2001, 2005, 2008], controller.signal)
+  settle! fake
+  eq fake.requests('item/2001.json'), 1
+  controller.abort()
+  gate.release()
+  error = await outcome
+  eq error.name, 'AbortError'
+  settle! fake
+  eq fake.requests('item/2002.json'), 0
+
+test! "prefetch: the internal links of a comment resolve into the cache, and a failure is ignored", ->
+  fake = Fake.new()
+  api = Api.new fake.transport()
+  fake.fail 'item/1003.json', 503
+  api.prefetch! [{ id: 2102 }, { id: 999999 }, { id: 1003 }]
+  eq (fake.requests(path) for path in ['item/2102.json', 'item/2101.json', 'item/1002.json']), [1, 1, 1]
+  eq (api.resolveStory! { id: 2102 }).story.id, 1002
+  eq fake.requests('item/1002.json'), 1, 'the walk is served from the cache'
+
+console.log "\nhn: format"
+
+test "parseHnItemLink: /item?id=N with an optional #M anchor is internal; every other url is not", ->
+  eq parseHnItemLink('https://news.ycombinator.com/item?id=8863'), { id: 8863, anchorId: undefined }
+  eq parseHnItemLink('https://news.ycombinator.com/item?id=8863#8917'), { id: 8863, anchorId: 8917 }
+  eq parseHnItemLink('http://www.news.ycombinator.com/item?id=1'), { id: 1, anchorId: undefined }
+  eq parseHnItemLink('https://news.ycombinator.com/item?id=42&p=2').id, 42
+  eq parseHnItemLink('https://news.ycombinator.com/user?id=pg'), null
+  eq parseHnItemLink('https://news.ycombinator.com/newest'), null
+  eq parseHnItemLink('https://example.com/item?id=1'), null
+  eq parseHnItemLink('https://hn.algolia.com/item?id=1'), null
+  eq parseHnItemLink('https://news.ycombinator.com/item'), null
+  eq parseHnItemLink('https://news.ycombinator.com/item?id=abc'), null
+  eq parseHnItemLink('https://news.ycombinator.com/item?id=-5'), null
+  eq parseHnItemLink('https://news.ycombinator.com/item?id=7#up_8'), { id: 7, anchorId: undefined }
+  eq parseHnItemLink('not a url'), null
+
+test "relativeTime: seconds, minutes, hours, days, months and years at their boundaries; no time is no age", ->
+  at = (age) -> relativeTime NOW - age, NOW * 1000
+  eq [relativeTime(0, NOW * 1000), relativeTime(undefined, NOW * 1000)], ['', '']
+  eq [at(59), at(60), at(3599), at(3600), at(86399), at(86400)], ['59s ago', '1m ago', '59m ago', '1h ago', '23h ago', '1d ago']
+  eq [at(29 * 86400), at(30 * 86400), at(364 * 86400), at(365 * 86400)], ['29d ago', '1mo ago', '12mo ago', '1y ago']
+  eq at(-30), '-30s ago', 'a time in the future is a negative age'
+
+test "hostname: the host without www., and '' for no url or a bad one", ->
+  eq hostname('https://www.example.com/flexbox-terminal'), 'example.com'
+  eq hostname('https://blog.example.org/diff-grid'), 'blog.example.org'
+  eq [hostname(''), hostname(undefined), hostname('not a url')], ['', '', '']
+
+test "decodeEntities: the named entities, then decimal, then hex references, in that order", ->
+  eq decodeEntities('&amp; &lt; &gt; &quot; &#x27; &#39; &#x2F; &#47; &nbsp; &#65; &#x41;'), '& < > " \' \' / /   A A'
+  eq decodeEntities('&amp;#39;'), "'", 'a doubly-encoded reference decodes twice'
+  eq decodeEntities('&amp;lt;'), '&lt;', 'a doubly-encoded named entity decodes once'
+  eq decodeEntities('&AMP; &bogus;'), '&AMP; &bogus;', 'the named pass is case-sensitive'
+
+test "extractLinks: each anchor once by url, the url standing in for an empty text, nested tags stripped", ->
+  html = '<a href="https://a.example/?a=1&amp;b=2">One</a> <a href="https://a.example/?a=1&amp;b=2">Dup</a> <a href="https://b.example/"></a> <a href="https://c.example/" rel="nofollow"><i>Nested</i> <b>tags</b></a>'
+  eq extractLinks(html), [
+    { text: 'One', url: 'https://a.example/?a=1&b=2' }
+    { text: 'https://b.example/', url: 'https://b.example/' }
+    { text: 'Nested tags', url: 'https://c.example/' }
+  ]
+  eq [extractLinks(''), extractLinks(undefined)], [[], []]
+
+test "htmlToText: paragraphs, breaks, unwrapped italics, links with their href, fenced pre blocks, backticked code, other tags dropped, then decoded and trimmed", ->
+  eq htmlToText('<p>First<p>Second<br>line<br/>more'), 'First\n\nSecond\nline\nmore'
+  eq htmlToText('Deep reply with <i>emphasis</i> and <code>code</code>.'), 'Deep reply with emphasis and `code`.'
+  eq htmlToText('See <a href="https://x.example/?a=1&amp;b=2" rel="nofollow">the docs</a>.'), 'See the docs (https://x.example/?a=1&b=2).'
+  eq htmlToText('Run:<pre><code>a\nb</code></pre>done'), 'Run:\na\nb\ndone'
+  eq htmlToText('Agreed. Rust &amp; Rip both &quot;just work&quot;.<p>Second paragraph.'), 'Agreed. Rust & Rip both "just work".\n\nSecond paragraph.'
+  eq htmlToText('<b>bold</b> <span class="x">span</span>'), 'bold span'
+  eq [htmlToText(''), htmlToText(undefined)], ['', '']
+
+console.log "\nhn: the store"
+
+# A Store over a temp directory, removed when `body` is done.
+withStore =! (body) ->
+  dir = mkdtempSync join(tmpdir(), 'rip-hn-')
+  try
+    body! Store.new(dir), dir
+  finally
+    rmSync dir, { recursive: true, force: true }
+
+test "configDir: HN_CONFIG_DIR, or ~/.config/rip-hn", ->
+  eq configDir({ HN_CONFIG_DIR: '/tmp/x' }), '/tmp/x'
+  ok configDir({}).endsWith(join('.config', 'rip-hn'))
+
+test! "store: nothing saved and no history before any write, and no file is made by a read", ->
+  withStore! (store, dir) ->
+    eq [store.saved(), store.history()], [[], []]
+    throws (-> readFileSync join(dir, 'saved.json')), Error
+
+test! "store: toggling a save prepends it, writes the file byte for byte, and toggling again removes it", ->
+  withStore! (store, dir) ->
+    t1 = NOW * 1000
+    t2 = t1 + 60000
+    eq store.toggleSaved(1001, t1), [{ id: 1001, savedAt: t1 }]
+    eq store.toggleSaved(1002, t2), [{ id: 1002, savedAt: t2 }, { id: 1001, savedAt: t1 }]
+    eq readFileSync(join(dir, 'saved.json'), 'utf8'), JSON.stringify([{ id: 1002, savedAt: t2 }, { id: 1001, savedAt: t1 }], null, 2)
+    eq store.saved(), [{ id: 1002, savedAt: t2 }, { id: 1001, savedAt: t1 }]
+    eq store.toggleSaved(1002, t2 + 1), [{ id: 1001, savedAt: t1 }]
+    eq Store.new(dir).saved(), [{ id: 1001, savedAt: t1 }], 'a fresh store reads the same file'
+
+test! "store: a view moves its id to the front of the history, once, and clearing empties the file", ->
+  withStore! (store, dir) ->
+    t = NOW * 1000
+    store.markViewed 1001, t
+    store.markViewed 1005, t + 1
+    eq store.markViewed(1001, t + 2), [{ id: 1001, viewedAt: t + 2 }, { id: 1005, viewedAt: t + 1 }]
+    eq readFileSync(join(dir, 'history.json'), 'utf8'), JSON.stringify([{ id: 1001, viewedAt: t + 2 }, { id: 1005, viewedAt: t + 1 }], null, 2)
+    eq store.clearHistory(), []
+    eq readFileSync(join(dir, 'history.json'), 'utf8'), '[]'
+    eq store.history(), []
+
+test! "store: the history is capped at 1000 on read and on write", ->
+  withStore! (store, dir) ->
+    writeFileSync join(dir, 'history.json'), JSON.stringify(({ id: n, viewedAt: n } for n in [1..1005]))
+    eq store.history().length, HISTORY_CAP
+    eq store.history()[999].id, 1000
+    entries = store.markViewed 5000, 1
+    eq [entries.length, entries[0].id, entries[999].id], [HISTORY_CAP, 5000, 999]
+    eq JSON.parse(readFileSync(join(dir, 'history.json'), 'utf8')).length, HISTORY_CAP
+
+test! "store: a malformed file is an empty list, and entries of another shape are dropped", ->
+  withStore! (store, dir) ->
+    writeFileSync join(dir, 'saved.json'), '[{"id":1001,"savedAt":1},{"id":"x"},5,null,{"id":2,"viewedAt":3}]'
+    eq store.saved(), [{ id: 1001, savedAt: 1 }]
+    writeFileSync join(dir, 'history.json'), '{"not":"a list"}'
+    eq store.history(), []
+    writeFileSync join(dir, 'history.json'), 'not json'
+    eq store.history(), []
