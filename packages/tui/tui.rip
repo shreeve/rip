@@ -3,7 +3,7 @@
 # into events; `mount` does the same off any terminal, draws when a test
 # asks, and takes the test's keys by the same road.
 
-import { __effect } from '../../src/runtime/reactive.js'
+import { __effect, __batch } from '../../src/runtime/reactive.js'
 import { install, failed, watch, Event } from './document.rip'
 import { tend, take, advance } from './focus.rip'
 import { Parser, TIMERS } from './input.rip'
@@ -519,7 +519,10 @@ close! =! (drawn, error = null, result = undefined) ->
       caught.error ?= missed
   else if drawn
     step -> view.frame() if doc.stale
-  step -> app?.unmount()
+  # What the teardown writes — a clock's last holder letting go resets
+  # it — is flushed once the app is down, so no effect of its runs
+  # against an app that is gone.
+  step -> __batch -> app?.unmount()
   # The parser's wait is disarmed on every road, a mount's included.
   step -> held.parser.flush()
   step -> out.off? 'resize', resized

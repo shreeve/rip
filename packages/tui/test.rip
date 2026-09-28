@@ -1291,6 +1291,31 @@ test "a ref reads its node's box, and the read follows layout", ->
     show 40
     eq seen, [0, 5, 9]
 
+# A box read that hides the scrollbar, flushed inside the pass that
+# wrote the box, would change the tree under layout: the row taken out
+# would be painted from the children the pass gathered before it left,
+# with no words in it.
+test "a box read that changes the tree is flushed after the pass that wrote the box: a scrollbar hidden by the height it measures, as a row leaves", ->
+  Sized = component
+    @items := ['a', 'b', 'c', 'd']
+    inner := null
+    tall ~= inner?.box.h ?? 0
+    render
+      Box flexDirection: 'row', height: 3
+        div flexGrow: 1, flexDirection: 'column', overflow: 'hidden'
+          div ref: inner, flexDirection: 'column'
+            for item in @items
+              Text key: item
+                Text bold: true, "#{item}"
+        Scrollbar total: tall, shown: 3
+  view = mount Sized, cols: 4, rows: 3
+  try
+    eq view.frame(), "a  █\nb  █\nc", 'four rows in three: the bar shows'
+    view.app.items.value = ['a', 'd']
+    eq view.frame(), "a\nd\n", 'two rows fit: the bar hides, and the row taken out is gone'
+  finally
+    view.close()
+
 # ==[ The live screen ]==
 
 console.log "\nScreen"
@@ -2707,6 +2732,27 @@ test "a clock a component holds but never reads costs no timer", ->
   finally
     view.close()
   eq fake.cancels, 0
+
+# The last holder letting go resets the clock; an effect of the closing
+# app that read it would run on the reset, against no app.
+test "an effect that reads a clock does not run as the app closes: what the teardown writes is flushed once the app is down", ->
+  seen = []
+  Held = component
+    tick = clock 40
+    ~>
+      seen.push tick.time
+      return
+    render
+      Text "#{tick.frame}"
+  view = mount Held, cols: 20
+  try
+    view.frame()
+    view.tick 80
+    view.frame()
+    eq seen, [0, 40, 80]
+  finally
+    view.close()
+  eq seen, [0, 40, 80], 'nothing ran at close'
 
 test "two components reading one interval share one timer, which runs while a reader remains and stops at close", ->
   fake = timers()

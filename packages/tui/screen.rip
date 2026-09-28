@@ -37,14 +37,16 @@ sized =! (value, none) -> if value > 0 and (Number.isInteger(value) or value is 
 
 # Lay the document out until a pass moves nothing. A binding that reads
 # a node's box changes the tree it measured, so one change can take a
-# pass per reader in a chain; readers that never agree are refused.
+# pass per reader in a chain; readers that never agree are refused. The
+# boxes a pass writes are read after the pass: a change they cause is
+# made to the tree the next pass reads, never to the one under layout.
 converge! =! (doc, cols) ->
   passes = 0
   while doc.moved
     if (passes += 1) > LAYOUTS
       throw Error.new "rip/tui: layout did not settle in #{LAYOUTS} passes — a binding keeps changing the box it reads, so no size satisfies it"
     doc.moved = false
-    layout doc.body, cols
+    __batch -> layout doc.body, cols
   return
 
 export class Screen
