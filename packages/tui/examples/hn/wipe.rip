@@ -1,0 +1,107 @@
+# The theme wipe: a wave out of a point on a screen edge, and every
+# cell shows the new theme as the front passes it. It rewrites each
+# frame after the paint (`screen.post`): the frame the terminal showed
+# when the wipe began is kept as a snapshot, the tree draws in the new
+# theme underneath, and until the front reaches a cell the snapshot's
+# cell is put back; the cells just behind the front glow on the accent.
+# Half a second, eased out, a frame every 16 ms while it runs. A
+# snapshot is of one grid: a resize, a frame at another top row, or a
+# sweep of the style tables (which renumbers every id) ends the wipe,
+# and the next frame shows the new theme whole.
+
+import { screen, clock, Box } from 'rip/tui'
+import { recolor } from '../../paint.rip'
+
+export DURATION =! 500
+export EDGE     =! 1.5    # cells behind the front that glow
+export X_SCALE  =! 0.55   # a cell is about twice as tall as wide
+
+# A point on a random edge of `cols` by `rows`: top, right, bottom, left.
+export edgePoint =! (cols, rows, random = Math.random) ->
+  edge = Math.floor random() * 4
+  x = if edge is 1 then cols - 1 else if edge is 3 then 0 else random() * (cols - 1)
+  y = if edge is 0 then 0 else if edge is 2 then rows - 1 else random() * (rows - 1)
+  { x, y }
+
+# The wipe runs while this is mounted: `accent` is the glow, `origin`
+# a `{ x, y }` to start from (a random edge point when null), and
+# `done` is called once the last frame is drawn, or the wipe is ended.
+# A new `seq` restarts it from the frame on screen.
+export Wipe = component
+  @seq := 0
+  @accent := '#ff6600'
+  @origin := null
+  @done := null
+  tick = clock 16
+  snap = null      # the front grid as the wipe began, its distances, and the farthest
+  glow = Map.new() # style id → the same on the accent
+  over = false     # ended early: the grid changed under the snapshot
+  seen = null      # the seq the wipe under way is of
+  began = 0        # the clock as it began
+  at = 0           # milliseconds since then
+
+  ~>
+    seq = @seq
+    time = tick.time
+    unless seq is seen
+      seen = seq
+      began = time
+      snap = null
+      glow = Map.new()
+      over = false
+    at = time - began
+    if at >= DURATION or over
+      screen.post = null
+      @done?()
+    else
+      screen.post = (back, front) => @step back, front
+    return
+
+  # The front is what the terminal shows: the frame before the theme
+  # changed. A front of another epoch than the back's is of tables a
+  # sweep has renumbered, so there is nothing to snapshot.
+  take: (back, front) ->
+    unless front and front.cols is back.cols and front.rows is back.rows and front.top is back.top and front.epoch is back.epoch
+      over = true
+      return
+    { cols, rows, top, epoch } = front
+    from = @origin ?? edgePoint(cols, rows)
+    dist = Float32Array.new cols * rows
+    far = 0
+    for y in [0...rows]
+      for x in [0...cols]
+        dx = (x - from.x) * X_SCALE
+        dy = y - from.y
+        d = Math.sqrt dx * dx + dy * dy
+        dist[y * cols + x] = d
+        far = d if d > far
+    snap = { ch: front.ch.slice(), style: front.style.slice(), wide: front.wide.slice(), cols, rows, top, epoch, dist, far }
+    return
+
+  step: (back, front) ->
+    @take back, front unless snap
+    return if over
+    unless back.cols is snap.cols and back.rows is snap.rows and back.top is snap.top and back.epoch is snap.epoch
+      over = true
+      return
+    t = Math.min 1, at / DURATION
+    eased = 1 - (1 - t) * (1 - t)
+    radius = eased * (snap.far + EDGE)
+    { dist } = snap
+    for n in [0...dist.length]
+      d = dist[n]
+      continue if d <= radius - EDGE
+      if d <= radius
+        id = back.style[n]
+        lit = glow.get id
+        glow.set id, lit = recolor(id, @accent) unless lit?
+        back.style[n] = lit
+      else
+        back.ch[n] = snap.ch[n]
+        back.style[n] = snap.style[n]
+        back.wide[n] = snap.wide[n]
+    back.mend()
+    return
+
+  render
+    Box hidden: true

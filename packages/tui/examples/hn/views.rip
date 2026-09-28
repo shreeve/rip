@@ -1,0 +1,152 @@
+# What the screen is made of, each drawn from what the app hands it:
+# the header with its brand and tabs, the status bar, a story's row in
+# the list, a comment in the thread, and the centered message of an
+# empty or failed view. Every one takes the theme as `t`, and answers
+# a press through the listener its parent gave it.
+
+import { Box, Text, Spacer } from 'rip/tui'
+import { relativeTime, hostname, htmlToText } from './format.rip'
+import { DARK } from './theme.rip'
+import { Loader } from './spinner.rip'
+
+export FEEDS =! Object.freeze [
+  Object.freeze { key: 'top', label: 'Top' }
+  Object.freeze { key: 'new', label: 'New' }
+  Object.freeze { key: 'best', label: 'Best' }
+  Object.freeze { key: 'ask', label: 'Ask' }
+  Object.freeze { key: 'show', label: 'Show' }
+  Object.freeze { key: 'job', label: 'Jobs' }
+]
+
+# The brand row, and the tabs in the list view: a tab's press selects
+# its category, the Y tile's is the home press. `depth` is how many
+# views are stacked under the current one.
+export Header = component
+  @t := DARK
+  @category := 'top'
+  @tabs := true
+  @depth := 0
+  @onSelect := null
+  @onHome := null
+  render
+    Box flexDirection: 'column', flexShrink: 0, height: (if @tabs then 5 else 3), paddingTop: 1, paddingX: 1, backgroundColor: @t.strip, borderStyle: 'single', borderTop: false, borderLeft: false, borderRight: false, borderColor: @t.border
+      Box flexDirection: 'row', flexShrink: 0, height: 1, alignItems: 'center', gap: 2
+        Text backgroundColor: @t.brandTileBg, color: @t.brandTileFg, bold: true, @mousedown: (-> @onHome?()), " Y "
+        Text color: @t.brandText, bold: true, "HackerNews"
+        Text color: @t.brandSubtle, "· TUI"
+        Spacer
+        if @depth > 0
+          Text color: @t.brandSubtle, "↩ #{@depth}"
+      if @tabs
+        Box flexDirection: 'row', flexShrink: 0, height: 1, marginTop: 1, gap: 1
+          for feed, n in FEEDS
+            Box key: feed.key, flexShrink: 0, backgroundColor: (if feed.key is @category then @t.tabActiveBg else undefined), @mousedown: (-> @onSelect? feed.key)
+              Text color: (if feed.key is @category then @t.tabActiveFg else @t.tabInactiveFg), " #{n + 1} #{feed.label} "
+          Spacer
+          Box flexShrink: 0, backgroundColor: (if @category is 'history' then @t.tabActiveBg else undefined), @mousedown: (-> @onSelect? 'history')
+            Text color: (if @category is 'history' then @t.tabActiveFg else @t.tabInactiveFg), " [H]istory "
+          Box flexShrink: 0, backgroundColor: (if @category is 'saved' then @t.tabActiveBg else undefined), @mousedown: (-> @onSelect? 'saved')
+            Text color: (if @category is 'saved' then @t.tabActiveFg else @t.tabInactiveFg), " [S]aved "
+
+# The bottom strip: the loader while something loads, the hints for
+# the view (or a message that overrides them), `demo` under HN_DEMO,
+# and `? help`.
+export StatusBar = component
+  @t := DARK
+  @view := 'list'
+  @category := 'top'
+  @loading := false
+  @message := null
+  @demo := false
+  hints ~=
+    if @view is 'list'
+      if @category is 'history' then 'j/k move · c/⏎ open · x clear history · q quit' else 'j/k move · c/⏎ open · s save · q quit'
+    else
+      'j/k move · space collapse · ⏎ links · h/esc back'
+  render
+    Box flexDirection: 'row', flexShrink: 0, height: 2, paddingX: 1, gap: 1, alignItems: 'center', backgroundColor: @t.strip, borderStyle: 'single', borderBottom: false, borderLeft: false, borderRight: false, borderColor: @t.border
+      if @loading
+        Loader bg: @t.strip
+      Text color: @t.statusHint, "#{@message ?? hints}"
+      Spacer
+      if @demo
+        Text color: @t.textDim, "demo"
+      Text color: @t.statusHint, "? help"
+
+# One story in the list: two rows, cut where the terminal is too
+# narrow. A visited story is dim throughout; the highlight and the bold
+# still mark the selected one. The press listener its parent gives it
+# reaches its root.
+export StoryRow = component extends div
+  @t := DARK
+  @rank := 1
+  @item := null
+  @selected := false
+  @saved := false
+  @visited := false
+  @now := 0
+  host ~= hostname @item.url
+  count ~= @item.descendants ?? 0
+  titleFg ~= if @visited then @t.textVisited else if @selected then @t.text else @t.textBody
+  rankFg ~= if @visited then @t.textVisited else if @selected then @t.accent else @t.textDim
+  voteFg ~= if @visited then @t.textVisited else @t.accent
+  dimFg ~= if @visited then @t.textVisited else @t.textDim
+  mutedFg ~= if @visited then @t.textVisited else @t.textMuted
+  render
+    div flexDirection: 'column', paddingX: 1, backgroundColor: (if @selected then @t.rowHighlight else undefined)
+      Text wrap: 'truncate'
+        Text color: rankFg, "#{String(@rank).padStart 3}. "
+        Text color: @t.accent, "#{if @saved then '★ ' else ''}"
+        Text color: titleFg, bold: @selected, "#{@item.title ?? '(untitled)'}"
+        Text color: dimFg, "#{if host then " (#{host})" else ''}"
+      Text wrap: 'truncate'
+        Text color: @t.textDim, "     "
+        Text color: voteFg, "▲ #{@item.score ?? 0}"
+        Text color: dimFg, "  by "
+        Text color: mutedFg, "#{@item.by ?? '?'}"
+        Text color: dimFg, "  #{relativeTime @item.time, @now}  | "
+        Text color: mutedFg, "#{count} comment#{if count is 1 then '' else 's'}"
+
+# One comment of the thread: the head row with the gutter mark in its
+# depth's color, the author and the age, and the count of replies a
+# collapsed one hides; then the body, unless collapsed. The head and
+# the body each answer their own press.
+export CommentNode = component extends div
+  @t := DARK
+  @node := null
+  @depth := 0
+  @collapsed := false
+  @selected := false
+  @hiddenChildren := 0
+  @now := 0
+  @onHead := null
+  @onBody := null
+  body ~= htmlToText @node.item.text
+  gutter ~= @t.commentDepth[@depth % @t.commentDepth.length]
+  replies ~= if @collapsed then " · [+] #{@hiddenChildren} repl#{if @hiddenChildren is 1 then 'y' else 'ies'}" else ''
+  render
+    div flexDirection: 'column', marginLeft: @depth * 2, marginTop: 1, backgroundColor: (if @selected then @t.rowHighlight else undefined)
+      Text @mousedown: ((event) -> @onHead? event)
+        Text color: gutter, "#{if @selected then '▶ ' else '│ '}"
+        Text color: @t.accent, "#{@node.item.by ?? '?'}"
+        Text color: @t.textDim, " · #{relativeTime @node.item.time, @now}"
+        Text color: @t.textMuted, "#{replies}"
+      if not @collapsed and body
+        Text color: @t.textBody, @mousedown: ((event) -> @onBody? event), "#{body}"
+
+# A centered state that fills the body: art, a title, and the lines
+# that say what to do.
+export Message = component
+  @t := DARK
+  @art := ''
+  @title := ''
+  @subtitle := ''
+  @hint := ''
+  render
+    Box flexGrow: 1, flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1
+      Text color: @t.accent, "#{@art}"
+      Text color: @t.text, bold: true, "#{@title}"
+      if @subtitle
+        Text color: @t.statusHint, "#{@subtitle}"
+      if @hint
+        Text color: @t.statusHint, "#{@hint}"
