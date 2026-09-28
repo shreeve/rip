@@ -387,6 +387,37 @@ test "a refused style names the node it was written on: its tag, its id or data-
   finally
     restore()
 
+test "zIndex is refused by name: the root's last child is on top, for the paint and for the hit test, absolute or not", ->
+  refused = "'zIndex' has no terminal meaning — a node paints over the nodes before it in tree order; put an overlay last"
+  { doc, restore } = install()
+  try
+    throws (-> doc.createElement('div').set 'zIndex', 1), refused
+  finally
+    restore()
+  Raised = component
+    render
+      Box zIndex: 2
+        Text "x"
+  throws (-> renderToString Raised), "#{refused} (on div)"
+  hits = []
+  Stacked = component
+    render
+      Box width: 6, height: 2
+        Box position: 'absolute', left: 0, top: 0, @mousedown: (-> hits.push 'first')
+          Text "aaaa"
+        Box width: 3, height: 1, @mousedown: (-> hits.push 'plain')
+          Text "bb"
+        Box position: 'absolute', left: 1, top: 0, @mousedown: (-> hits.push 'last')
+          Text "c"
+  view = mount Stacked, cols: 6, rows: 2, mouse: true
+  try
+    eq view.frame().trimEnd(), 'bcaa'
+    for col in [0, 1, 3]
+      view.send "\x1b[<0;#{col + 1};1M\x1b[<0;#{col + 1};1m"
+    eq hits, ['plain', 'last', 'first']
+  finally
+    view.close()
+
 test "a tag with no terminal meaning is refused", ->
   Web = component
     render
