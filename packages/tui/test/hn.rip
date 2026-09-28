@@ -1172,6 +1172,24 @@ test! "t toggles the theme, and the wipe sweeps it in from the origin: the frame
     view.frame()
     ok styled(view)[1].includes('«#000000 on #ff6600 bold»Y'), 'dark again'
 
+# The Wipe is the clock's only holder and lets go of it from the beat
+# that ends it, so the clock stops inside its own flush: the next wipe
+# must still read a fresh clock (tui.rip's `Tick`).
+test! "t three times 700 ms apart: every wipe ends within its half second of its t, the second and the third as the first", ->
+  reader! Fake.new(), ({ view, app }) ->
+    ends = for n in [1..3]
+      view.press 't'
+      beats = 0
+      until app.wipe.value is null or beats > 60
+        view.tick 16
+        view.frame()
+        beats += 1
+      view.tick 700 - beats * 16
+      view.frame()
+      beats * 16
+    ok ends.every((ms) -> ms <= 520), "each wipe ends within 520 ms of its t: #{ends}"
+    eq app.theme.value.name, 'light'
+
 test! "? opens the help over a scrim that dims the rows beneath, with the view's groups and the keys padded to the longest; j does nothing while it is open; Escape and ? close it; the thread's help says space", ->
   reader! Fake.new(), ({ view, app, fake }) ->
     view.press '?'
