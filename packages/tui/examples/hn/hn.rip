@@ -18,7 +18,9 @@ import { App } from './app.rip'
 
 export { App }
 
-if import.meta.main
-  demo = process.env.HN_DEMO is '1'
-  api = if demo then Api.new({ getJson: retrying timed(Fake.demo().transport().getJson) }) else Api.new(live())
+main =! ->
+  demo =! process.env.HN_DEMO is '1'
+  api =! if demo then Api.new({ getJson: retrying timed(Fake.demo().transport().getJson) }) else Api.new(live())
   run App, altScreen: true, mouse: 'all', props: { api, store: Store.new(configDir()), open: openUrl, now: Date.now, demo }
+
+main() if import.meta.main
