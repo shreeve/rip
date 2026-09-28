@@ -29,7 +29,7 @@ export Header = component
   @onSelect := null
   @onHome := null
   render
-    Box flexDirection: 'column', flexShrink: 0, height: (if @tabs then 5 else 3), paddingTop: 1, paddingX: 1, backgroundColor: @t.strip, borderStyle: 'single', borderTop: false, borderLeft: false, borderRight: false, borderColor: @t.border
+    Box flexDirection: 'column', flexShrink: 0, height: (if @tabs then 5 else 3), paddingTop: 1, paddingX: 1, backgroundColor: @t.strip, borderStyle: 'single', borderTop: false, borderLeft: false, borderRight: false, borderColor: @t.border, borderBackgroundColor: @t.strip
       Box flexDirection: 'row', flexShrink: 0, height: 1, alignItems: 'center', gap: 2
         Text backgroundColor: @t.brandTileBg, color: @t.brandTileFg, bold: true, @mousedown: (-> @onHome?()), " Y "
         Text color: @t.brandText, bold: true, "HackerNews"
@@ -64,7 +64,7 @@ export StatusBar = component
     else
       'j/k move · space collapse · ⏎ links · h/esc back'
   render
-    Box flexDirection: 'row', flexShrink: 0, height: 2, paddingX: 1, gap: 1, alignItems: 'center', backgroundColor: @t.strip, borderStyle: 'single', borderBottom: false, borderLeft: false, borderRight: false, borderColor: @t.border
+    Box flexDirection: 'row', flexShrink: 0, height: 2, paddingX: 1, gap: 1, alignItems: 'center', backgroundColor: @t.strip, borderStyle: 'single', borderBottom: false, borderLeft: false, borderRight: false, borderColor: @t.border, borderBackgroundColor: @t.strip
       if @loading
         Loader bg: @t.strip
       Text color: @t.statusHint, "#{@message ?? hints}"
