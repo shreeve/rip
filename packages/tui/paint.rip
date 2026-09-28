@@ -111,9 +111,20 @@ hex =! (rgb) -> '#' + (0x1000000 | (rgb[0] << 16) | (rgb[1] << 8) | rgb[2]).toSt
 
 # `top` laid on the opaque `under`, straight alpha, each channel rounded
 # to the nearest: `(s·a + d·(255 − a)) / 255`.
-blend =! (top, under) ->
+blended =! (top, under) ->
   a = top[3]
   [Math.round((top[0] * a + under[0] * (255 - a)) / 255), Math.round((top[1] * a + under[1] * (255 - a)) / 255), Math.round((top[2] * a + under[2] * (255 - a)) / 255), 255]
+
+# The same on colors as written, as the lowercase `#rrggbb`: `top` is
+# laid on the opaque `under` at its own alpha, or at `alpha` (0 to 1)
+# when given — a foreground faded by hand over the background it sits
+# on, since a foreground takes no alpha.
+export blend =! (top, under, alpha = null) ->
+  above = rgbOf top
+  below = rgbOf under
+  throw Error.new "rip/tui: blend: #{JSON.stringify top} over #{JSON.stringify under} — write two colors, #{COLORS}, the under one opaque" unless above and below and below[3] is 255
+  above = [above[0], above[1], above[2], alpha * 255] if alpha?
+  hex blended(above, below)
 
 # What a color the terminal owns is taken to be, since the painter
 # cannot read it: text with no color, or `'default'`, dims from `fg`
@@ -146,7 +157,7 @@ dress =! (fg, bg, flags) ->
   parts.push lower tint(fg, 30), 30 if fg?
   if bg?
     rgb = rgbOf bg
-    parts.push lower tint((if rgb and rgb[3] < 255 then hex blend(rgb, behind.bg) else bg), 40), 40
+    parts.push lower tint((if rgb and rgb[3] < 255 then hex blended(rgb, behind.bg) else bg), 40), 40
   parts.join ';'
 
 # Set the depth: every style interned so far is dressed again.
@@ -266,7 +277,7 @@ over =! (id, beneath) ->
 
 mix =! (top, under) ->
   return intern top.fg, under.bg, top.flags, top.link if top.alpha is 0
-  intern top.fg, hex(blend rgbOf(top.bg), ground under), top.flags, top.link
+  intern top.fg, hex(blended rgbOf(top.bg), ground under), top.flags, top.link
 
 # The channels a style's background shows: its own when opaque, the
 # backdrop's when it has none or the terminal's, and a translucent one
@@ -274,7 +285,7 @@ mix =! (top, under) ->
 ground =! (record) ->
   rgb = if record.bg? then rgbOf record.bg else null
   return behind.bg unless rgb
-  if rgb[3] is 255 then rgb else blend rgb, behind.bg
+  if rgb[3] is 255 then rgb else blended rgb, behind.bg
 
 # The style of a cell under a veil: its glyph's color and its background
 # each blended with the veil's, its switches kept, its link dropped — a
@@ -287,7 +298,7 @@ veiled =! (id, beneath) ->
   return held if held?
   top = rgbOf records[id].bg
   under = records[beneath]
-  held = intern hex(blend top, rgbOf(under.fg) ?? behind.fg), hex(blend top, ground under), under.flags, null
+  held = intern hex(blended top, rgbOf(under.fg) ?? behind.fg), hex(blended top, ground under), under.flags, null
   veils.set key, held
   held
 
