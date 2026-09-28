@@ -869,7 +869,7 @@ test! "replies load to depth 8, so a chain of eleven is nine rows, and the gutte
 
 console.log "\nhn: links"
 
-test! "Enter on a comment lists its links in a popup titled by their count: j, k, g and G move, o opens the link in the browser, and Escape closes it", ->
+test! "Enter on a comment lists its links in a popup titled by their count: j, k, g and G move, o opens the link in the browser, and Escape or Backspace closes it", ->
   reader! Fake.new(), ({ view, app, fake, opened }) ->
     view.press 'Enter'
     settle! fake
@@ -892,6 +892,11 @@ test! "Enter on a comment lists its links in a popup titled by their count: j, k
     ok app.links.value?, 'an external open keeps the popup'
     view.press 'Escape'
     eq app.links.value, null
+    view.press 'Enter'
+    ok app.links.value?, 'opened again'
+    view.press 'Backspace'
+    eq app.links.value, null, 'Backspace closes it too'
+    eq app.view.value.kind, 'detail', 'and goes no further back'
 
 test! "a link into a comment resolves to its story and lands the cursor on it with ↩ 1; h goes back to the thread as it was left, and Escape from there to the list", ->
   reader! Fake.new(), ({ view, app, fake }) ->
@@ -1033,7 +1038,7 @@ test! "the popup prefetches its internal links into the cache, four at a time, s
 
 console.log "\nhn: the mouse"
 
-test! "a right press opens the context menu at the press, kept on the screen and off its last row, with the item under the pointer selected; k and Enter take an item, Escape and a press outside close it, and the save label follows the file", ->
+test! "a right press opens the context menu at the press, kept on the screen and off its last row, with the item under the pointer selected; k and Enter take an item, Escape and a press outside close it, a press on its frame does not, and the save label follows the file", ->
   reader! Fake.new(), ({ view, app, opened }) ->
     click view, 95, 26, 2
     eq app.listCursor.value, 10, 'the press selects rank 11 first'
@@ -1057,6 +1062,14 @@ test! "a right press opens the context menu at the press, kept on the screen and
     view.frame()
     click view, 60, 20
     eq app.menu.value, null, 'a press outside closes it'
+    click view, 2, 5, 2
+    view.frame()
+    click view, 10, 5
+    ok app.menu.value?, 'a press on the top border keeps it open'
+    click view, 24, 7
+    ok app.menu.value?, 'and one on the right border'
+    view.press 'Escape'
+    eq app.menu.value, null
     click view, 2, 5, 2
     view.frame()
     view.press 'Enter'
