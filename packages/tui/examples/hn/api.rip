@@ -1,0 +1,272 @@
+# The Hacker News data layer: the errors a request can end in, the live
+# transport and its policy (a timeout per attempt, retries for what is
+# transient), the item validator, and `Api` over any transport — the
+# item cache, feeds, the parent walk of a link, and the comment tree.
+#
+# A transport is `{ getJson: (path, signal) -> Promise }`. The policy
+# functions compose over one, so a test wraps the fake in the real
+# policy with its own clock injected.
+
+# ---------------------------------------------------------------------
+# Errors
+# ---------------------------------------------------------------------
+
+export class HnError extends Error
+  constructor: (message, @path) ->
+    super message
+    @name = @constructor.name
+
+export class HnRequestError extends HnError
+  constructor: (@path, @cause) -> super "request failed: #{@path}", @path
+
+export class HnStatusError extends HnError
+  constructor: (@path, @status) -> super "HTTP #{@status}: #{@path}", @path
+
+export class HnTimeoutError extends HnError
+  constructor: (@path) -> super "timed out: #{@path}", @path
+
+export class HnDecodeError extends HnError
+  constructor: (@path, @issue) -> super "#{@path}: #{@issue}", @path
+
+# Not an API failure: a link resolved to nothing viewable.
+export class HnItemGone extends Error
+  constructor: (@id) ->
+    super "item #{@id} is gone"
+    @name = 'HnItemGone'
+
+# The copy a person can act on, one per HnError; anything else is a bug.
+export hnErrorMessage =! (error) ->
+  switch error?.constructor
+    when HnRequestError then "Couldn't reach Hacker News — check your connection."
+    when HnTimeoutError then 'Hacker News took too long to respond.'
+    when HnStatusError  then "Hacker News returned HTTP #{error.status}."
+    when HnDecodeError  then "Hacker News sent a response the app couldn't understand."
+    else raise TypeError, "hnErrorMessage: not an HnError: #{error?.name}"
+
+# ---------------------------------------------------------------------
+# Transport and policy
+# ---------------------------------------------------------------------
+
+export BASE    =! 'https://hacker-news.firebaseio.com/v0'
+export TIMEOUT =! 5000
+export DELAYS  =! [250, 500]   # exponential from 250 ms, twice
+
+later =! (ms, fn) ->
+  id = setTimeout fn, ms
+  -> clearTimeout id
+
+# `promise`, or the signal's AbortError the moment it aborts: the caller
+# stops waiting and the work runs on (a shared cache entry stays whole).
+export abortable =! (promise, signal) ->
+  return promise unless signal
+  return Promise.reject signal.reason if signal.aborted
+  gate = Promise.withResolvers()
+  stop = -> gate.reject signal.reason
+  signal.addEventListener 'abort', stop, once: true
+  promise.finally(-> signal.removeEventListener 'abort', stop).catch(-> null)
+  Promise.race [promise, gate.promise]
+
+# One GET against `base`: the JSON, or HnRequestError / HnStatusError;
+# an abort passes through as the signal's own error.
+export fetcher =! (base = BASE) ->
+  (path, signal = null) ->
+    try
+      res = fetch! "#{base}/#{path}", { signal }
+    catch error
+      throw error if signal?.aborted
+      throw HnRequestError.new path, error
+    throw HnStatusError.new path, res.status unless res.ok
+    try
+      return res.json!
+    catch error
+      throw error if signal?.aborted
+      throw HnRequestError.new path, error
+
+# Each attempt, body included, gets `ms`; one that runs out is aborted
+# and is HnTimeoutError. `after(ms, fn)` returns a canceller (a test's
+# clock stands in for the real one).
+export timed =! (get, ms = TIMEOUT, after = later) ->
+  (path, signal = null) ->
+    signal?.throwIfAborted()
+    controller = AbortController.new()
+    expired = false
+    cancel = after ms, ->
+      expired = true
+      controller.abort()
+    relay = -> controller.abort signal.reason
+    signal?.addEventListener 'abort', relay, once: true
+    try
+      return get! path, controller.signal
+    catch error
+      throw HnTimeoutError.new path if expired
+      throw error
+    finally
+      cancel()
+      signal?.removeEventListener 'abort', relay
+
+# Transient failures (network, timeout, 5xx) are tried again after each
+# delay in turn; a 4xx, a decode issue or an abort never is.
+export retrying =! (get, delays = DELAYS, wait = sleep) ->
+  (path, signal = null) ->
+    attempt = 0
+    loop
+      try
+        return get! path, signal
+      catch error
+        transient = error instanceof HnRequestError or error instanceof HnTimeoutError or (error instanceof HnStatusError and error.status >= 500)
+        throw error unless transient and attempt < delays.length
+      abortable! wait(delays[attempt]), signal
+      attempt += 1
+
+export live =! (base = BASE) -> { getJson: retrying(timed(fetcher(base))) }
+
+# ---------------------------------------------------------------------
+# Decode
+# ---------------------------------------------------------------------
+
+TYPES  =! ['story', 'comment', 'job', 'poll', 'pollopt']
+FIELDS =! { by: 'string', time: 'number', text: 'string', dead: 'boolean', deleted: 'boolean', parent: 'number', url: 'string', score: 'number', title: 'string', descendants: 'number' }
+
+# An item as the wire sends it, checked field by field into a fresh
+# object of the known keys; `null` is HN's "nothing under this id".
+# The shape is refused before any field is looked at, and an optional
+# field that is present must have its type — `null` is not optional.
+export decodeItem =! (raw, path) ->
+  bad = (issue) -> throw HnDecodeError.new path, issue
+  return null if raw is null
+  bad 'expected an object' unless raw? and typeof raw is 'object' and not Array.isArray raw
+  bad "id: expected a number, got #{JSON.stringify raw.id}" unless typeof raw.id is 'number'
+  bad "type: expected one of #{TYPES.join ', '}, got #{JSON.stringify raw.type}" unless raw.type in TYPES
+  item = { id: raw.id, type: raw.type }
+  for own key, kind of FIELDS when raw[key] isnt undefined
+    bad "#{key}: expected a #{kind}, got #{JSON.stringify raw[key]}" unless typeof raw[key] is kind
+    item[key] = raw[key]
+  if raw.kids isnt undefined
+    bad 'kids: expected an array of numbers' unless Array.isArray(raw.kids) and raw.kids.every((kid) -> typeof kid is 'number')
+    item.kids = [...raw.kids]
+  item
+
+# ---------------------------------------------------------------------
+# Api
+# ---------------------------------------------------------------------
+
+export PAGE_SIZE =! 30
+export MAX_DEPTH =! 8
+
+comment =! (item) -> item.type is 'comment' or item.type is 'pollopt'
+
+# `work` over `list`, at most `width` in flight, results in list order;
+# once `signal` aborts no further item starts.
+pool =! (list, width, signal, work) ->
+  out = Array list.length
+  next = 0
+  lane = ->
+    while next < list.length and not signal?.aborted
+      at = next
+      next += 1
+      out[at] = work! list[at]
+    return
+  Promise.all! (lane() for n in [1..Math.max(1, Math.min(width, list.length))])
+  out
+
+export class Api
+  constructor: (@transport) ->
+    @cache = Map.new()   # id → the promise of its decoded item (or null)
+
+  fetchIds: (feed, signal = null) ->
+    path = "#{feed}stories.json"
+    raw = @transport.getJson! path, signal
+    return [] if raw is null
+    throw HnDecodeError.new path, 'expected an array of ids' unless Array.isArray(raw) and raw.every((id) -> typeof id is 'number')
+    raw
+
+  # Concurrent gets share one request; a failure is evicted so the next
+  # get refetches. The request carries no caller's signal — a caller
+  # that aborts stops waiting, and the answer still lands in the cache.
+  fetchItem: (id, signal = null) ->
+    return Promise.reject signal.reason if signal?.aborted
+    held = @cache.get id
+    unless held
+      path = "item/#{id}.json"
+      held = @transport.getJson(path, null).then (raw) -> decodeItem raw, path
+      @cache.set id, held
+      held.then null, (=> @cache.delete id if @cache.get(id) is held)
+    abortable held, signal
+
+  # The items of `ids` in that order, at most `width` in flight; a
+  # failure or a null is left out.
+  fetchItems: (ids, signal = null, width = 10) ->
+    one = (id) =>
+      try
+        @fetchItem! id, signal
+      catch
+        null
+    found = pool! ids, width, signal, one
+    signal?.throwIfAborted()
+    (item for item in found when item)
+
+  # The story an `/item?id=N` link lands in: from a comment, the parent
+  # walk up to the root, through deleted comments (they keep `parent`)
+  # and at most 64 hops; an explicit anchor wins as the comment to
+  # focus. A deleted or dead story is gone. Transport errors propagate.
+  resolveStory: (ref, signal = null) ->
+    first = @fetchItem! ref.id, signal
+    throw HnItemGone.new ref.id unless first
+    from = if comment(first) then first.id else undefined
+    at = first
+    hops = 0
+    while comment at
+      hops += 1
+      throw HnItemGone.new ref.id if not at.parent? or hops > 64
+      up = @fetchItem! at.parent, signal
+      throw HnItemGone.new ref.id unless up
+      at = up
+    throw HnItemGone.new ref.id if at.deleted or at.dead
+    { story: at, focusId: ref.anchorId ?? from }
+
+  # A comment and its replies; one that fails to load, or is deleted or
+  # dead, is left out with its replies. Children load while depth < deepest.
+  loadTree: (id, depth, signal = null, deepest = MAX_DEPTH) ->
+    item = null
+    try
+      item = @fetchItem! id, signal
+    catch error
+      throw error if signal?.aborted
+    return null if not item or item.deleted or item.dead
+    kids = item.kids ?? []
+    children = []
+    if depth < deepest and kids.length
+      loaded = Promise.all! (@loadTree(kid, depth + 1, signal, deepest) for kid in kids)
+      children = (node for node in loaded when node)
+    { item, children }
+
+  loadComments: (kids, signal = null, deepest = MAX_DEPTH) ->
+    nodes = Promise.all! (@loadTree(kid, 0, signal, deepest) for kid in kids)
+    signal?.throwIfAborted()
+    (node for node in nodes when node)
+
+  # Resolve internal links into the cache, four at a time, so a later
+  # open is instant. Failures are ignored.
+  prefetch: (refs, signal = null) ->
+    one = (ref) =>
+      try
+        @resolveStory! ref, signal
+      catch
+        null
+    pool! refs, 4, signal, one
+    return
+
+# The rows of a tree in reading order as `{ node, depth, hiddenChildren }`;
+# a collapsed node counts the loaded replies it hides and skips them.
+export flattenTree =! (tree, collapsed) ->
+  out = []
+  walk = (nodes, depth) ->
+    for node in nodes
+      shut = collapsed.has node.item.id
+      out.push { node, depth, hiddenChildren: (if shut then countAll(node) else 0) }
+      walk node.children, depth + 1 unless shut
+    return
+  walk tree, 0
+  out
+
+countAll =! (node) -> node.children.reduce ((n, child) -> n + countAll(child)), node.children.length

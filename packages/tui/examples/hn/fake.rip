@@ -1,0 +1,135 @@
+# A deterministic Hacker News in memory, for the tests and `HN_DEMO=1`:
+# the feeds, a comment tree of known shape, items that are null, deleted
+# or dead, a parent chain of 71 comments, a comment whose links point
+# back into HN, and the knobs a test turns — a fault per request, a
+# response held until released, latency, and a log of every request.
+
+import { abortable, HnRequestError, HnStatusError } from './api.rip'
+
+export NOW =! 1790000000   # the fake's clock, in seconds
+
+export class Fake
+  constructor: (options = {}) ->
+    @db = Map.new()           # path → raw JSON as the wire would send it (not validated)
+    @latency = options.latency ?? 0
+    @deaf = options.deaf ?? false   # ignore aborts: pins the caller's own stale guard
+    @log = []                 # 'item/1001.json', 'abort topstories.json', in order
+    @faults = Map.new()       # path → outcomes, one per request: a status number,
+                              # 'network', 'hang', or { payload }
+    @holds = Map.new()        # path → gate for the next request
+    @inflight = 0
+    @peak = 0
+    @waiting = 0              # requests parked on a hold or a hang
+    seed this
+
+  requests: (path) -> (entry for entry in @log when entry is path).length
+
+  fail: (path, ...outcomes) -> @faults.set path, [...(@faults.get(path) ?? []), ...outcomes]
+
+  hold: (path) ->
+    gate = Promise.withResolvers()
+    @holds.set path, gate
+    { release: (-> gate.resolve()), fail: ((error) -> gate.reject error) }
+
+  transport: -> { getJson: (path, signal) => @answer path, signal }
+
+  answer: (path, signal) ->
+    @log.push path
+    signal?.throwIfAborted()
+    @inflight += 1
+    @peak = Math.max @peak, @inflight
+    listen = if signal and not @deaf then signal else null
+    heard = => @log.push "abort #{path}"
+    listen?.addEventListener 'abort', heard, once: true
+    try
+      sleep! @latency                       # always a macrotask, even at 0: makes `peak` real
+      gate = @holds.get path
+      if gate
+        @holds.delete path
+        @waiting += 1
+        try
+          abortable! gate.promise, listen
+        finally
+          @waiting -= 1
+      outcome = @faults.get(path)?.shift()
+      if typeof outcome is 'number'
+        throw HnStatusError.new path, outcome
+      else if outcome is 'network'
+        throw HnRequestError.new path, TypeError.new('fetch failed')
+      else if outcome is 'hang'
+        @waiting += 1
+        try
+          abortable! Promise.withResolvers().promise, listen
+        finally
+          @waiting -= 1
+      else if outcome?.payload isnt undefined
+        return structuredClone outcome.payload
+      return if @db.has(path) then structuredClone(@db.get path) else null
+    finally
+      @inflight -= 1
+      listen?.removeEventListener 'abort', heard
+
+  # The offline demo: latency, a feed that fails once, a feed that hangs.
+  @demo: ->
+    fake = Fake.new latency: 250
+    fake.fail 'beststories.json', 503
+    fake.fail 'jobstories.json', 'hang', 'hang', 'hang'
+    fake
+
+HN =! 'https://news.ycombinator.com/item?id='
+
+# Times are `NOW - age`. Hosts pin the `www.` strip.
+seed =! (fake) ->
+  put = (path, value) -> fake.db.set path, value
+  story = (id, who, age, score, title, extra = {}) -> put "item/#{id}.json", { id, type: 'story', by: who, time: NOW - age, score, title, ...extra }
+  reply = (id, who, age, parent, text, extra = {}) -> put "item/#{id}.json", { id, type: 'comment', by: who, time: NOW - age, parent, text, ...extra }
+  m = 60
+  h = 3600
+  d = 86400
+
+  put 'topstories.json', [1001, 1002, 1005, 1099, 1006, 1007, 1008, 1010, 1011, 1012, ...[1013..1042]]
+  put 'newstories.json', [1044, 1045, 1046]
+  put 'beststories.json', [1007, 1005, 1001]
+  put 'askstories.json', [1002]
+  put 'showstories.json', [1001]
+  put 'jobstories.json', [1008]
+
+  story 1001, 'shreeve', 3 * h, 312, 'Show HN: A Hacker News reader for the terminal, in 900 lines', { descendants: 8, kids: [2001, 2005, 2008], url: 'https://github.com/shreeve/rip/tree/main/packages/tui/examples/hn' }
+  story 1002, 'reader42', 5 * h, 88, 'Ask HN: What are you reading this fall?', { descendants: 2, kids: [2101], text: '<p>Books, papers, anything long-form.' }
+  story 1003, 'flaky', 4 * h, 40, 'A post behind a flaky server'
+  story 1004, 'gone', 6 * h, 0, '[deleted]', { deleted: true }
+  story 1005, 'alice', 45 * m, 1204, 'The unreasonable effectiveness of flexbox in a terminal', { url: 'https://www.example.com/flexbox-terminal' }
+  story 1006, 'bob', 1 * d, 97, 'Diffing a cell grid in one write per frame', { descendants: 1, kids: [2201], url: 'https://blog.example.org/diff-grid' }
+  story 1007, 'bunfan', 12 * h, 845, 'Bun 1.4 released', { url: 'https://bun.sh/blog/bun-v1.4' }
+  put 'item/1008.json', { id: 1008, type: 'job', by: 'acme', time: NOW - 2 * d, score: 1, title: 'Acme (YC S21) is hiring a terminal engineer', url: 'https://acme.example/jobs' }
+  story 1010, 'dvorak', 7 * h, 156, 'Why terminals still use escape sequences', { url: 'https://terminal.example.net/escapes' }
+  story 1011, 'erin', 9 * h, 73, 'A flexbox layout engine in 1,500 lines', { url: 'https://layout.example.io/flexbox' }
+  story 1012, 'deep', 11 * h, 61, 'A thread that goes deep', { descendants: 11, kids: [4000] }
+  for id in [1013..1046]
+    story id, "user#{id}", (id - 1000) * h, id - 1000, "Generated story #{id - 1000}", { url: "https://example.com/#{id}" }
+  put 'item/1099.json', null
+
+  reply 2001, 'alice', 2 * h, 1001, "Nice. Compare <a href=\"#{HN}1002\">the reading thread</a> and <a href=\"https://example.com/docs\">the docs</a>.", { kids: [2002, 2004] }
+  reply 2002, 'bob', 1 * h, 2001, 'Agreed. Rust &amp; Rip both &quot;just work&quot;.<p>Second paragraph.', { kids: [2003] }
+  reply 2003, 'carol', 30 * m, 2002, 'Deep reply with <i>emphasis</i> and <code>code</code>.'
+  put 'item/2004.json', { id: 2004, type: 'comment', time: NOW - 1 * h, parent: 2001, deleted: true }
+  put 'item/2005.json', { id: 2005, type: 'comment', by: 'spam', time: NOW - 1 * h, parent: 1001, text: 'buy now', dead: true }
+  reply 2008, 'frank', 90 * m, 1001, "Related: <a href=\"#{HN}2102\">a reply in the reading thread</a>, <a href=\"#{HN}999999\">a post that is gone</a>, <a href=\"#{HN}1003\">a flaky post</a>, and <a href=\"#{HN}1001#2009\">the reply below</a>.", { kids: [2009, 2010] }
+  reply 2009, 'gina', 10 * m, 2008, 'Replying below.'
+  put 'item/2010.json', null
+
+  reply 2101, 'reader42', 4 * h, 1002, 'Mostly papers.', { kids: [2102] }
+  reply 2102, 'hank', 3 * h, 2101, 'Which ones?'
+  reply 2201, 'ivy', 20 * h, 1006, 'One write per frame is the whole trick.'
+  put 'item/2301.json', { id: 2301, type: 'comment', by: 'orphan', time: NOW - 1 * h, text: 'No parent.' }
+
+  # A chain of 71 under 1001: 3063 resolves in 64 hops, 3064 is gone at 65.
+  reply 3000, 'chain', 1 * h, 1001, 'Hop 0.'
+  reply 3000 + k, 'chain', 1 * h, 3000 + k - 1, "Hop #{k}." for k in [1..70]
+
+  # A linear chain under 1012: nine rows at depths 0 to 8.
+  reply 4000 + k, "deep#{k}", 1 * h, (if k is 0 then 1012 else 4000 + k - 1), "Depth #{k}.", { kids: [4000 + k + 1] } for k in [0..9]
+  reply 4010, 'deep10', 1 * h, 4009, 'Depth 10.'
+
+  put 'item/9.json', { id: 'not-a-number', type: 'story' }
+  return
