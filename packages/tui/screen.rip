@@ -74,6 +74,7 @@ export class Screen
     @interactive = interactive
     @selection = { from: -1, to: -1 }   # the selected cells (mouse.rip), none while `from` is under zero
     @after = null    # run after every frame: the pointer looks again at what is under it
+    @post = null     # rewrites each frame, painted and not yet diffed: `(back, front) ->` on the two grids
     @statics = []          # the `Static` containers mounted (tui.rip), in the order they arrived
     @written = WeakSet.new()   # the items written above the frame
     @tail = WeakMap.new()      # each container's last item written, where the next look starts
@@ -192,13 +193,17 @@ export class Screen
     back = Grid.new @cols, shown unless back and back.cols is @cols and back.rows is shown
     back.top = tall - shown
     damage = @doc.damage
-    damage.whole = true if @whole
+    # A rewrite changes cells no change in the tree owes, so while one
+    # is set every frame is painted and compared whole; the diff still
+    # sends only the cells that differ.
+    damage.whole = true if @whole or @post
     # A frame of another height, its top row the same, keeps the rows
     # that stay.
     front = @front
     @front = front.tall shown if front and not damage.whole and front.rows isnt shown and front.cols is @cols and front.top is back.top
     paint back, @doc.body, damage, @front
     overlay back, @selection.from, @selection.to if @selection.from >= 0
+    @post? back, @front
     bytes = diff @front, back, damage
     @owed = damage.count()
     # A whole frame is the spare grid entire; any other was copied into

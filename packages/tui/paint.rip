@@ -29,21 +29,15 @@ NAMED =! {
 COLORS =! "a name (red, greenBright, gray, default), '#rrggbb', 'rgb(r, g, b)' or 'ansi256(n)'"
 
 # The SGR parameters for a color, on the foreground (30) or background
-# (40); null for a value that is no color.
+# (40); null for a value that is no color. An alpha is not read here: a
+# translucent background is laid on the backdrop before it is dressed.
 tint =! (color, base) ->
   return null unless typeof color is 'string'
   return String base + NAMED[color] if NAMED[color] isnt undefined
-  if /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test color
-    hex = color.slice 1
-    hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2] if hex.length is 3
-    n = parseInt hex, 16
-    return "#{base + 8};2;#{n >> 16};#{(n >> 8) & 255};#{n & 255}"
-  if m = /^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/.exec color
-    return null if m[1] > 255 or m[2] > 255 or m[3] > 255
-    return "#{base + 8};2;#{Number m[1]};#{Number m[2]};#{Number m[3]}"
   if m = /^ansi256\(\s*(\d+)\s*\)$/.exec color
     return (if m[1] > 255 then null else "#{base + 8};5;#{Number m[1]}")
-  null
+  rgb = rgbOf color
+  if rgb then "#{base + 8};2;#{rgb[0]};#{rgb[1]};#{rgb[2]}" else null
 
 # The depth colors are sent at, 0 to 3 — none, the 16 named, the 256,
 # 24-bit — what `run` reads of the terminal once (terminal.rip). Below
@@ -56,8 +50,8 @@ tint =! (color, base) ->
 depth = 3
 
 XTERM =! do ->
-  table = for hex in ['000000', 'cd0000', '00cd00', 'cdcd00', '0000ee', 'cd00cd', '00cdcd', 'e5e5e5', '7f7f7f', 'ff0000', '00ff00', 'ffff00', '5c5cff', 'ff00ff', '00ffff', 'ffffff']
-    n = parseInt hex, 16
+  table = for six in ['000000', 'cd0000', '00cd00', 'cdcd00', '0000ee', 'cd00cd', '00cdcd', 'e5e5e5', '7f7f7f', 'ff0000', '00ff00', 'ffff00', '5c5cff', 'ff00ff', '00ffff', 'ffffff']
+    n = parseInt six, 16
     [n >> 16, (n >> 8) & 255, n & 255]
   levels = [0, 95, 135, 175, 215, 255]
   for r in levels
@@ -81,6 +75,53 @@ nearest =! (r, g, b, from, to) ->
 # The SGR offset of one of the 16: 0 to 7, or 60 up for the bright.
 named =! (n) -> if n < 8 then n else n + 52
 
+# A color's channels, `[r, g, b, a]` with each 0 to 255: a name by
+# xterm's table, `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()`,
+# `rgba(r, g, b, a)` with `a` from 0 to 1, or `ansi256(n)`. Null for
+# `'default'`, the terminal's own, which has no channels of its own;
+# undefined for a value that is no color.
+rgbOf =! (color) ->
+  return undefined unless typeof color is 'string'
+  n = NAMED[color]
+  if n isnt undefined
+    return null if n is 9
+    [r, g, b] = XTERM[if n < 8 then n else n - 52]
+    return [r, g, b, 255]
+  if m = /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec color
+    digits = m[1]
+    digits = (c + c for c in digits).join '' if digits.length < 5
+    n = parseInt digits.slice(0, 6), 16
+    return [n >> 16, (n >> 8) & 255, n & 255, (if digits.length is 8 then parseInt(digits.slice(6), 16) else 255)]
+  if m = /^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/.exec color
+    return undefined if m[1] > 255 or m[2] > 255 or m[3] > 255
+    return [+m[1], +m[2], +m[3], 255]
+  if m = /^rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+(?:\.\d+)?|\.\d+)\s*\)$/.exec color
+    return undefined if m[1] > 255 or m[2] > 255 or m[3] > 255 or m[4] > 1
+    return [+m[1], +m[2], +m[3], Math.round(m[4] * 255)]
+  if m = /^ansi256\(\s*(\d+)\s*\)$/.exec color
+    return undefined if m[1] > 255
+    [r, g, b] = XTERM[+m[1]]
+    return [r, g, b, 255]
+  undefined
+
+# The lowercase `#rrggbb` of channels, so a blended color is one string
+# and the styles of it are found by value.
+hex =! (rgb) -> '#' + (0x1000000 | (rgb[0] << 16) | (rgb[1] << 8) | rgb[2]).toString(16).slice 1
+
+# `top` laid on the opaque `under`, straight alpha, each channel rounded
+# to the nearest: `(s·a + d·(255 − a)) / 255`.
+blend =! (top, under) ->
+  a = top[3]
+  [Math.round((top[0] * a + under[0] * (255 - a)) / 255), Math.round((top[1] * a + under[1] * (255 - a)) / 255), Math.round((top[2] * a + under[2] * (255 - a)) / 255), 255]
+
+# What a color the terminal owns is taken to be, since the painter
+# cannot read it: text with no color, or `'default'`, dims from `fg`
+# under a translucent background, and a cell with no background, or
+# `'default'`, has one laid on `bg`. Both are opaque channels.
+behind = { fg: [255, 255, 255, 255], bg: [0, 0, 0, 255] }
+
+export BACKDROP =! Object.freeze { color: '#ffffff', backgroundColor: '#000000' }
+
 # A color's parameters at the depth in force.
 lower =! (sgr, base) ->
   return sgr if depth is 3
@@ -93,14 +134,18 @@ lower =! (sgr, base) ->
     return String base + named nearest(r, g, b, 0, 16)
   sgr
 
-# A style's escape parameters: its switches, then its colors.
+# A style's escape parameters: its switches, then its colors. A
+# translucent background is sent as the color it makes on the backdrop,
+# once per style: on a cell nothing else colored, that is what shows.
 dress =! (fg, bg, flags) ->
   return '' unless depth
   parts = []
   for code, n in CODES
     parts.push code if flags & (1 << n)
-  for [color, base] in [[fg, 30], [bg, 40]] when color?
-    parts.push lower tint(color, base), base
+  parts.push lower tint(fg, 30), 30 if fg?
+  if bg?
+    rgb = rgbOf bg
+    parts.push lower tint((if rgb and rgb[3] < 255 then hex blend(rgb, behind.bg) else bg), 40), 40
   parts.join ';'
 
 # Set the depth: every style interned so far is dressed again.
@@ -108,6 +153,21 @@ export palette! =! (n) ->
   return if n is depth
   depth = n
   record.sgr = dress record.fg, record.bg, record.flags for record in records
+
+# Set the backdrop, `{ color, backgroundColor }`, each an opaque color:
+# every style is dressed again on it, and every blend is made again.
+export backdrop! =! (colors) ->
+  unless colors and typeof colors is 'object' and typeof colors.color is 'string' and typeof colors.backgroundColor is 'string'
+    throw Error.new "rip/tui: backdrop: #{JSON.stringify colors} is not a backdrop — write { color, backgroundColor }, what the terminal's own are taken to be under a translucent background"
+  fg = rgbOf colors.color
+  bg = rgbOf colors.backgroundColor
+  for [key, rgb] in [['color', fg], ['backgroundColor', bg]] when not rgb or rgb[3] isnt 255
+    throw Error.new "rip/tui: backdrop: #{key}: #{JSON.stringify colors[key]} is not an opaque color — write a name, '#rrggbb', 'rgb(r, g, b)' or 'ansi256(n)'"
+  return if hex(fg) is hex(behind.fg) and hex(bg) is hex(behind.bg)
+  behind = { fg, bg }
+  record.sgr = dress record.fg, record.bg, record.flags for record in records
+  blends.clear()
+  veils.clear()
 
 LIMIT =! 65536   # style ids a cell's sixteen bits can hold
 SWEEP =! 32768   # styles held before those no cell uses are let go
@@ -120,8 +180,16 @@ DIM =! 2
 INVERSE =! 16
 
 ids =! Map.new()   # foreground → background → flags and link → id
-records =! [{ fg: null, bg: null, flags: 0, link: null, sgr: '', key: 0 }]
-blends =! Map.new()
+records =! [{ fg: null, bg: null, flags: 0, link: null, sgr: '', key: 0, alpha: 0 }]
+blends =! Map.new()   # text over a cell: (id, beneath) → id
+veils =! Map.new()    # a veil over a cell: (id, beneath) → id
+
+# A style's background's alpha: 0 with none, 255 for an opaque color
+# and for `'default'`, else as written.
+alphaOf =! (bg) ->
+  return 0 unless bg?
+  rgb = rgbOf bg
+  if rgb then rgb[3] else 255
 
 # The ids of one foreground on one background. A color is a string the
 # app wrote once, so a style is found with no key built from its parts.
@@ -142,7 +210,7 @@ export intern =! (fg, bg, flags, link = null) ->
   id = held.get key
   return id if id?
   throw Error.new "rip/tui: more than #{LIMIT} distinct styles are in use — a cell holds a style id in sixteen bits" if records.length >= LIMIT
-  records.push { fg, bg, flags, link, sgr: dress(fg, bg, flags), key }
+  records.push { fg, bg, flags, link, sgr: dress(fg, bg, flags), key, alpha: alphaOf bg }
   held.set key, records.length - 1
   records.length - 1
 
@@ -177,13 +245,50 @@ shift =! (from, to) ->
 # (OSC 8), or with null ends the one that is open.
 hop =! (url) -> "\x1b]8;;#{url ?? ''}\x1b\\"
 
-# Text drawn with no background of its own keeps the one beneath it.
+# The id of style `id` on background `bg`, its color, weight and link
+# kept: what a rewrite of a frame (screen.rip's `post`) tints cells with.
+export recolor =! (id, bg) ->
+  held = records[id]
+  intern held.fg, bg, held.flags, held.link
+
+# Text drawn with no background of its own keeps the one beneath it,
+# and text with a translucent one lays it on the one beneath. Over a
+# cell with no background either is as dressed: the color on the
+# backdrop, which is what the terminal's own is taken to be.
 over =! (id, beneath) ->
   top = records[id]
+  return id if top.alpha is 255
   under = records[beneath]
-  return id if top.bg? or not under.bg?
+  return id unless under.bg?
   key = (id << 16) | beneath
-  blends.get(key) ?? (blends.set(key, intern(top.fg, under.bg, top.flags, top.link)); blends.get(key))
+  blends.get(key) ?? (blends.set(key, mix(top, under)); blends.get(key))
+
+mix =! (top, under) ->
+  return intern top.fg, under.bg, top.flags, top.link if top.alpha is 0
+  intern top.fg, hex(blend rgbOf(top.bg), ground under), top.flags, top.link
+
+# The channels a style's background shows: its own when opaque, the
+# backdrop's when it has none or the terminal's, and a translucent one
+# laid on the backdrop.
+ground =! (record) ->
+  rgb = if record.bg? then rgbOf record.bg else null
+  return behind.bg unless rgb
+  if rgb[3] is 255 then rgb else blend rgb, behind.bg
+
+# The style of a cell under a veil: its glyph's color and its background
+# each blended with the veil's, its switches kept, its link dropped — a
+# link under a scrim is not there to be clicked. Text with no color
+# dims from the backdrop's. Kept apart from `blends`: the same pair of
+# ids is text over a cell there, and here a veil over one.
+veiled =! (id, beneath) ->
+  key = (id << 16) | beneath
+  held = veils.get key
+  return held if held?
+  top = rgbOf records[id].bg
+  under = records[beneath]
+  held = intern hex(blend top, rgbOf(under.fg) ?? behind.fg), hex(blend top, ground under), under.flags, null
+  veils.set key, held
+  held
 
 # ── Borders ───────────────────────────────────────────────────────────────────
 
@@ -243,20 +348,25 @@ OFFSET =! 4
 BORDER =! 5
 WRAP   =! 6
 LINK   =! 7
+TITLE  =! 8
+ALIGN  =! 9
+SHADE  =! 10
 
 CHECKS =! Map.new()
 CHECKS.set name, SWITCH for name in SWITCHES
 for side in ['', 'Top', 'Bottom', 'Left', 'Right']
   CHECKS.set "border#{side}Color", COLOR
-  CHECKS.set "border#{side}BackgroundColor", COLOR
+  CHECKS.set "border#{side}BackgroundColor", SHADE
   CHECKS.set "border#{side}DimColor", SWITCH
 CHECKS.set 'color', COLOR
-CHECKS.set 'backgroundColor', COLOR
+CHECKS.set 'backgroundColor', SHADE
 CHECKS.set key, CLIP for key in ['overflow', 'overflowX', 'overflowY']
 CHECKS.set key, OFFSET for key in ['contentOffsetX', 'contentOffsetY']
 CHECKS.set 'borderStyle', BORDER
 CHECKS.set 'wrap', WRAP
 CHECKS.set 'link', LINK
+CHECKS.set 'borderTitle', TITLE
+CHECKS.set 'borderTitleAlign', ALIGN
 
 # Refuse a value the painter cannot use, where it is written and by the
 # key it was written to — layout's `admit`, for the styles that recolor
@@ -267,8 +377,14 @@ export allow! =! (key, value) ->
   switch check
     when SWITCH
       throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not true or false" unless value is true or value is false
+    # A foreground is opaque: what would show through a glyph is the
+    # background it sits on, and that is where an alpha goes.
     when COLOR
-      throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not a color — write #{COLORS}" unless tint value, 30
+      rgb = rgbOf value
+      throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not a color — write #{COLORS}" if rgb is undefined
+      throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not a color a foreground can take — a foreground is opaque; write a name, '#rrggbb', 'rgb(r, g, b)', 'ansi256(n)' or 'default', and a translucent color as a backgroundColor" if rgb and rgb[3] isnt 255
+    when SHADE
+      throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not a color — write #{COLORS}, or '#rrggbbaa' or 'rgba(r, g, b, a)' with a from 0 to 1 for one that lets what is under it show" if rgbOf(value) is undefined
     when CLIP
       throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not one of visible, hidden" unless value is 'visible' or value is 'hidden'
     when OFFSET
@@ -281,6 +397,12 @@ export allow! =! (key, value) ->
     # what OSC 8 asks of a URI, and what cannot end the sequence early.
     when LINK
       throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not a link — write a URL in printable ASCII, the rest percent-encoded (encodeURI)" unless typeof value is 'string' and /^[\x20-\x7e]+$/.test value
+    # A title is inlaid in one row of a border, so it is one line, and
+    # one `sanitize` would leave as it is.
+    when TITLE
+      throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not a title — write one line of printable text" unless typeof value is 'string' and sanitize(value) is value and not /[\t\n]/.test value
+    when ALIGN
+      throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not one of left, center, right" unless value is 'left' or value is 'center' or value is 'right'
 
 # ── Grid ──────────────────────────────────────────────────────────────────────
 
@@ -370,6 +492,31 @@ export class Grid
     span = @wide[at]
     @ch.fill SPACE, at, at + span
     @wide.fill 1, at, at + span
+
+  # Make every wide glyph whole again after cells were written from
+  # two grids at once (screen.rip's `post`): a lead whose continuation
+  # cells are not its own, or that reaches past its row, and a
+  # continuation with no lead before it, each become a space in their
+  # style. One scan per row.
+  mend!: ->
+    for row in [0...@rows]
+      col = row * @cols
+      end = col + @cols
+      while col < end
+        span = @wide[col]
+        if span is 1
+          col += 1
+          continue
+        if span > 1 and col + span <= end
+          whole = true
+          for next in [col + 1...col + span]
+            whole = false if @wide[next] isnt 0
+          if whole
+            col += span
+            continue
+        @ch[col] = SPACE
+        @wide[col] = 1
+        col += 1
 
   # One cell wide glyph at (x, y).
   put!: (x, y, cell, id) ->
@@ -464,6 +611,31 @@ export class Grid
       @ch.fill SPACE, at + left, at + right
       @style.fill id, at + left, at + right
       @wide.fill 1, at + left, at + right
+
+  # A rectangle of a translucent style: a veil laid on what lies under
+  # it. Each cell keeps its glyph and takes the style `veiled` gives it
+  # under this one. A wide glyph the rectangle's side cuts is blanked, as
+  # `fill` blanks it. The cells under a veil run in long stretches of one
+  # style, so the last pair is kept in hand and most cells cost a compare.
+  veil!: (x, y, w, h, id) ->
+    y -= @top
+    w = if x + w < @right then x + w else @right
+    x = @left if x < @left
+    last = -1
+    got = 0
+    for row in [(if y > @over then y else @over)...(if y + h < @under then y + h else @under)]
+      left = if @lo[row] > x then @lo[row] else x
+      right = if @hi[row] < w then @hi[row] else w
+      continue if left >= right
+      at = row * @cols
+      @blank at + left if @wide[at + left] is 0
+      @blank at + right if right < @hi[row] and @wide[at + right] is 0
+      for i in [at + left...at + right]
+        beneath = @style[i]
+        unless beneath is last
+          last = beneath
+          got = veiled id, beneath
+        @style[i] = got
 
   # The grid as text: one string per row, trailing blanks trimmed.
   # With `ansi`, each run of a style carries its escape sequence, a
@@ -708,6 +880,7 @@ border! =! (grid, s, x, y, w, h) ->
     grid.put x, y, cells[TL], id if left
     grid.run x + left, y, cells[T], w - left - right, id
     grid.put x + w - 1, y, cells[TR], id if right
+    inlay grid, s, x, y, w, id if s.borderTitle?
   if bottom
     id = if s.borderBottomColor? or s.borderBottomBackgroundColor? or s.borderBottomDimColor? then intern(s.borderBottomColor ?? s.borderColor ?? null, s.borderBottomBackgroundColor ?? s.borderBackgroundColor ?? null, (if s.borderBottomDimColor ?? s.borderDimColor then DIM else 0)) else plain
     grid.put x, y + h - 1, cells[BL], id if left
@@ -721,6 +894,31 @@ border! =! (grid, s, x, y, w, h) ->
     id = if s.borderRightColor? or s.borderRightBackgroundColor? or s.borderRightDimColor? then intern(s.borderRightColor ?? s.borderColor ?? null, s.borderRightBackgroundColor ?? s.borderBackgroundColor ?? null, (if s.borderRightDimColor ?? s.borderDimColor then DIM else 0)) else plain
     for row in [y + top...y + h - bottom]
       grid.put x + w - 1, row, cells[R], id
+
+# A title inlaid in the top edge, in the edge's own style, over the
+# edge's glyphs: the corner and one edge glyph stay on each side, so the
+# room is `w - 4` cells, and a title wider than the room is cut with
+# '…' by cells. It starts at the edge's third column, or is centered
+# (never nearer than the third column), or ends before the third-last.
+# An edge with no room draws no title. The title writes through `set`,
+# so an edge style with no background takes the background beneath.
+inlay! =! (grid, s, x, y, w, id) ->
+  room = w - 4
+  return if room < 1
+  gauge.set s.borderTitle, null
+  wide = gauge.wide
+  count = gauge.count
+  cut = wide > room
+  if cut
+    wide = count = 0
+    while wide + gauge.span(count) < room
+      wide += gauge.span count
+      count += 1
+  shown = wide + (if cut then 1 else 0)
+  align = s.borderTitleAlign
+  at = x + (if align is 'center' then Math.max(2, (w - shown) >> 1) else if align is 'right' then w - 2 - shown else 2)
+  end = if gauge.ascii then grid.ascii(at, y, s.borderTitle, 0, count, id) else grid.units(at, y, gauge, 0, count, id)
+  grid.put end, y, DOT, id if cut
 
 # The style of each text node under a leaf, in tree order — the order a
 # flow numbers its runs in. Nested spans restyle their own words.
@@ -836,7 +1034,11 @@ draw! =! (grid, node, inherited, dx, dy, left, top, right, bottom) ->
       t = edge s, 'borderTop'
       r = edge s, 'borderRight'
       b = edge s, 'borderBottom'
-      grid.fill x + l, y + t, rect.w - l - r, rect.h - t - b, intern(null, s.backgroundColor, 0)
+      back = intern null, s.backgroundColor, 0
+      if records[back].alpha is 255
+        grid.fill x + l, y + t, rect.w - l - r, rect.h - t - b, back
+      else
+        grid.veil x + l, y + t, rect.w - l - r, rect.h - t - b, back
     border grid, s, x, y, rect.w, rect.h if edged
   if s.overflow? or s.overflowX? or s.overflowY?
     clipOf s, x, y, rect.w, rect.h, left, top, right, bottom
@@ -935,6 +1137,7 @@ sweep! =! (grid) ->
   records.length = 0
   ids.clear()
   blends.clear()
+  veils.clear()
   for record, n in kept
     records.push record
     shelf(record.fg, record.bg).set record.key, n

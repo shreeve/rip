@@ -9,7 +9,7 @@ import { tend, take, advance } from './focus.rip'
 import { Parser, TIMERS } from './input.rip'
 import { Screen, PACE } from './screen.rip'
 import { Pointer } from './mouse.rip'
-import { palette } from './paint.rip'
+import { palette, backdrop, BACKDROP } from './paint.rip'
 import { guard, setup, probe, reply, teardown, handover, stepping, stop as halt, ask, interactive as attended, depth as depthOf } from './terminal.rip'
 
 # ── Widgets ───────────────────────────────────────────────────────────────────
@@ -29,6 +29,58 @@ export Text = component extends span
 export Spacer = component
   render
     div flexGrow: 1
+
+# The rows of a scrollbar's column, joined by line breaks, from half
+# cells as OpenTUI draws them: the thumb is `view / total` of the
+# `2 · tall` half cells, one at least, floored; it starts where the
+# offset stands in `total − view`, rounded over the half cells it does
+# not fill, so its foot meets the track's foot at the last offset. A
+# cell the thumb fills is `█`, one it starts in at the top `▀`, else
+# `▄`, and the rest are spaces on the track.
+column =! (total, view, offset, tall) ->
+  for [name, value] in [['total', total], ['shown', view], ['offset', offset]]
+    throw Error.new "rip/tui: Scrollbar: #{name}: #{value} is not a number of rows, 0 or more" unless Number.isFinite(value) and value >= 0
+  return '' if total <= view or tall < 1
+  size = Math.max 1, Math.floor(2 * tall * view / total)
+  from = Math.round Math.min(offset, total - view) / (total - view) * (2 * tall - size)
+  to = from + size
+  glyphs = for row in [0...tall]
+    lo = if from > row * 2 then from else row * 2
+    hi = if to < row * 2 + 2 then to else row * 2 + 2
+    if hi - lo >= 2 then '█' else if hi > lo then (if lo is row * 2 then '▀' else '▄') else ' '
+  glyphs.join '\n'
+
+# A one-column track and thumb for a box that scrolls its children with
+# `contentOffsetY`: `total` rows of content, `shown` rows the box shows,
+# `offset` the box's content offset, and `height` the track's rows,
+# `shown` unless given. Nothing is drawn while everything fits, and the
+# neighbours take the column.
+export Scrollbar = component
+  @total := 0
+  @shown := 0
+  @offset := 0
+  @height := null
+  @trackColor := '#252527'
+  @thumbColor := '#9a9ea3'
+  thumb ~= column @total, @shown, @offset, @height ?? @shown
+  render
+    div width: 1, flexShrink: 0, backgroundColor: @trackColor, hidden: @total <= @shown
+      span color: @thumbColor, thumb
+
+# The content offset that brings rows [start, end) into a box `view`
+# rows tall, from `offset` — as OpenTUI scrolls a child into view: rows
+# past both ends move nothing; rows that start above and fit, or end
+# below and do not, align to the top; rows that start above and do not
+# fit, or end below and fit, align to the bottom; rows in view move
+# nothing.
+export reveal =! (start, end, offset, view) ->
+  size = end - start
+  above = start < offset
+  below = end > offset + view
+  return offset if above and below
+  return start if (above and size < view) or (below and size > view)
+  return end - view if (above and size > view) or (below and size < view)
+  offset
 
 # `count` line breaks inside text.
 export Newline = component
@@ -159,6 +211,18 @@ class Viewport
   # Progress on the terminal's own indicator: 0 to 1, 'error',
   # 'indeterminate', or null to clear (screen.rip).
   progress: (value) -> live?.view.progress value
+  # A function that rewrites each frame after it is painted and before
+  # it is diffed, `(back, front) ->` on the two grids (screen.rip), or
+  # null. Every set owes a whole frame, so a clock that sets it each
+  # beat drives the frames it rewrites, and an unset draws one more,
+  # which leaves nothing of the rewrite on the terminal.
+  get post: -> live?.view.post ?? null
+  set post: (fn) ->
+    throw Error.new 'rip/tui: no app is running — screen.post rewrites the frames run draws' unless live
+    throw Error.new "rip/tui: screen.post: #{JSON.stringify fn} is not a function — write (back, front) ->, or null to stop rewriting" unless fn is null or typeof fn is 'function'
+    live.view.post = fn
+    live.doc.damage.whole = true
+    live.doc.owe false
 
 # The terminal's size, whether it is the window the user is in (its
 # focus reports), and whether its keyboard is enhanced, as reactive
@@ -275,6 +339,9 @@ open =! (App, options, out, terminal, stdin = null, clock = undefined) ->
   # A terminal's depth is its environment's; a mount's is the test's.
   shades = if terminal then -1 else DEPTHS.indexOf options.colors ?? 16777216
   throw Error.new "rip/tui: colors: #{JSON.stringify options.colors} is not 0, 16, 256 or 16777216" if shades < 0 and not terminal
+  # What the terminal's own colors are taken to be under a translucent
+  # background (paint.rip); refused before anything is installed.
+  backdrop options.backdrop ?? BACKDROP
   { doc, restore } = install()
   attending = not terminal or attended out
   alternate = terminal and attending and options.altScreen is true
@@ -458,6 +525,7 @@ close! =! (drawn, error = null, result = undefined) ->
   step -> out.off? 'resize', resized
   step restore
   palette 3
+  backdrop BACKDROP
   if caught.error then settled.reject caught.error else settled.resolve result
 
 # Hand the terminal to `fn` — an editor, a shell — and take it back
