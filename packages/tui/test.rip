@@ -3,7 +3,7 @@
 # ==============================================================================
 
 import { test, eq, ok, throws } from 'rip/testing'
-import { run, quit, mount, renderToString, screen, print, clock, Box, Text, Spacer, Static, Newline } from 'rip/tui'
+import { run, quit, mount, renderToString, screen, print, clock, Box, Text, Spacer, Scrollbar, Static, Newline } from 'rip/tui'
 import * as mod from 'rip/tui'
 import { install } from './document.rip'
 import { layout } from './layout.rip'
@@ -170,7 +170,7 @@ test "a Static container is looked at from its last written item: an item taken 
     view.close()
 
 test "module exports the entry surface and nothing else", ->
-  eq Object.keys(mod).sort(), ['Box', 'Newline', 'Spacer', 'Static', 'Text', 'clock', 'focus', 'mount', 'print', 'quit', 'renderToString', 'run', 'screen', 'suspend']
+  eq Object.keys(mod).sort(), ['Box', 'Newline', 'Scrollbar', 'Spacer', 'Static', 'Text', 'clock', 'focus', 'mount', 'print', 'quit', 'renderToString', 'run', 'screen', 'suspend']
 
 test "declares no dependencies", ->
   pkg = JSON.parse readFileSync(join(import.meta.dir, 'package.json'), 'utf8')
@@ -501,6 +501,49 @@ test "a spacer takes the free space", ->
         Spacer
         Text "R"
   eq renderToString(Ends, cols: 20), "L          R"
+
+# A thumb sized by `round` reads `▄███` at offset 10; one started by
+# `floor` reads `.▄██▀.....` at offset 5; one drawn while everything
+# fits takes the column from its neighbour.
+test "a scrollbar is one column of half cells: the thumb is shown/total of the track, floored, one half cell at least, and starts where the offset stands, rounded; nothing while everything fits", ->
+  Bar = component
+    @offset := 0
+    @total := 30
+    render
+      Box flexDirection: 'row', height: 10
+        Box flexGrow: 1
+        Scrollbar total: @total, shown: 10, offset: @offset
+  column = (offset, total = 30) ->
+    lines = renderToString(Bar, cols: 5, props: { offset, total }).split '\n'
+    (line.padEnd(5)[4].replace(' ', '.') for line in lines).join ''
+  eq column(0), '███.......'
+  eq column(10), '...▄██▀...', 'the start rounds: 7 of 14'
+  eq column(20), '.......███'
+  eq column(5), '..███.....', 'the size floors: 6 of 20, from 4'
+  eq column(0, 10), '..........', 'nothing scrolls, so no column'
+  view = mount Bar, cols: 5, props: { total: 10 }
+  try
+    view.frame()
+    eq document.body.firstChild.firstChild.rect.w, 5, 'the neighbour takes the column'
+    view.app.total.value = 30
+    view.frame()
+    eq document.body.firstChild.firstChild.rect.w, 4
+  finally
+    view.close()
+  Solo = component
+    render
+      Scrollbar total: 30, shown: 10
+  rows = renderToString(Solo, cols: 1, ansi: true).split '\n'
+  eq rows[0], "\x1b[38;2;154;158;163;48;2;37;37;39m█\x1b[0m", 'the thumb in its color on the track'
+  eq rows[9], "\x1b[38;2;154;158;163;48;2;37;37;39m \x1b[0m", 'a track row is a space on the track'
+  Tall = component
+    render
+      Scrollbar total: 30, shown: 10, height: 5, trackColor: 'blue', thumbColor: 'white'
+  eq renderToString(Tall, cols: 1, ansi: true).split('\n'), ["\x1b[37;44m█\x1b[0m", "\x1b[37;44m▀\x1b[0m", "\x1b[37;44m \x1b[0m", "\x1b[37;44m \x1b[0m", "\x1b[37;44m \x1b[0m"], 'a height of its own: 3 of 10 half cells'
+  Bad = component
+    render
+      Scrollbar total: -1, shown: 10
+  throws (-> renderToString Bad), 'Scrollbar: total: -1 is not a number of rows, 0 or more'
 
 test "padding and a border inset the content", ->
   Card = component

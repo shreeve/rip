@@ -253,7 +253,12 @@ spelling of the same nodes. Every prop a widget does not declare is a
 terminal style, forwarded to its node as written; bare text under a
 box is a text leaf, and text nested in text restyles its own words.
 `Newline count: n` is `n` line breaks inside text, and `Static` is the
-scrollback (below).
+scrollback (below). `Scrollbar total:, shown:, offset:` is a one-column
+track and thumb for a box that scrolls with `contentOffsetY`: nothing
+while everything fits, else the thumb is `shown / total` of the track in
+half cells (`█`, `▀`, `▄`), one at least, and meets the track's foot at
+the last offset; `height:` is the track's rows (`shown` unless given),
+`trackColor:` and `thumbColor:` its colors.
 
 | Moves boxes | Recolors cells |
 |---|---|
