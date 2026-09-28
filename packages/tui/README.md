@@ -253,13 +253,21 @@ spelling of the same nodes. Every prop a widget does not declare is a
 terminal style, forwarded to its node as written; bare text under a
 box is a text leaf, and text nested in text restyles its own words.
 `Newline count: n` is `n` line breaks inside text, and `Static` is the
-scrollback (below).
+scrollback (below). `Scrollbar total:, shown:, offset:` is a one-column
+track and thumb for a box that scrolls with `contentOffsetY`: nothing
+while everything fits, else the thumb is `shown / total` of the track in
+half cells (`█`, `▀`, `▄`), one at least, and meets the track's foot at
+the last offset; `height:` is the track's rows (`shown` unless given),
+`trackColor:` and `thumbColor:` its colors. `reveal start, end, offset,
+shown` is the offset that brings rows `[start, end)` into a box `shown`
+rows tall: rows that start above it or end below it are aligned to the
+nearer edge, rows in view and rows past both ends move nothing.
 
 | Moves boxes | Recolors cells |
 |---|---|
 | `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `flex` | `color`, `backgroundColor` — a name (`red`, `greenBright`, `gray`), `'#rrggbb'`, `'rgb(r, g, b)'`, `'ansi256(n)'`, or `'default'` for the terminal's own |
 | `alignItems`, `alignSelf`, `alignContent`, `justifyContent` | `bold`, `dimColor`, `italic`, `underline`, `strikethrough`, `inverse` |
-| `gap`, `rowGap`, `columnGap` | `borderColor`, `borderDimColor`, `borderBackgroundColor`, and each per edge (`borderTopColor` …) |
+| `gap`, `rowGap`, `columnGap` | `borderColor`, `borderDimColor`, `borderBackgroundColor`, and each per edge (`borderTopColor` …); `borderTitle` — one line inlaid in the top edge from its third column, in the edge's style, cut with `…` where the edge is too short, and `borderTitleAlign`: `'left'`, `'center'`, `'right'` |
 | `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` — a number, `'50%'`, or `'auto'` | |
 | `padding`, `margin`, and their `X`, `Y`, `Top`, `Right`, `Bottom`, `Left` forms; a margin may be `'auto'` | |
 | `position` (`'relative'`, `'absolute'`, `'static'`) with `top`, `right`, `bottom`, `left` | |
@@ -869,6 +877,21 @@ component holding one interval shares its timer, which runs only while
 one of them is mounted and has read it, and never off a terminal. Under
 `mount` the clock runs on the mount's own time, so `view.tick 80` moves
 the spinner a frame, as it moves the parser's waits.
+
+`screen.post = (back, front) -> …` rewrites a frame after it is
+painted and before it is diffed: `back` is the grid about to be sent
+and `front` the one the terminal shows, each three typed arrays of
+`cols` by `rows` cells — `ch`, the code point or cluster id, `style`,
+the interned style id, and `wide`, the width, 0 on a cell a wide glyph
+continues into. While it is set every frame is painted and compared
+whole, and the diff still sends only the cells that differ; every set
+owes a whole frame, so a `clock` that sets it each beat drives the
+frames it rewrites, and `null` unsets it and owes one more whole frame,
+which leaves nothing of the rewrite on the terminal. Anything but a
+function or `null` is refused, as is a set with no app running. Beside
+it, `paint.rip` exports `recolor id, bg`, the id of a style on another
+background, and `grid.mend()` makes every wide glyph whole again after
+cells were mixed from two grids.
 
 ## Progress
 

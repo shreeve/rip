@@ -177,6 +177,12 @@ shift =! (from, to) ->
 # (OSC 8), or with null ends the one that is open.
 hop =! (url) -> "\x1b]8;;#{url ?? ''}\x1b\\"
 
+# The id of style `id` on background `bg`, its color, weight and link
+# kept: what a rewrite of a frame (screen.rip's `post`) tints cells with.
+export recolor =! (id, bg) ->
+  held = records[id]
+  intern held.fg, bg, held.flags, held.link
+
 # Text drawn with no background of its own keeps the one beneath it.
 over =! (id, beneath) ->
   top = records[id]
@@ -243,6 +249,8 @@ OFFSET =! 4
 BORDER =! 5
 WRAP   =! 6
 LINK   =! 7
+TITLE  =! 8
+ALIGN  =! 9
 
 CHECKS =! Map.new()
 CHECKS.set name, SWITCH for name in SWITCHES
@@ -257,6 +265,8 @@ CHECKS.set key, OFFSET for key in ['contentOffsetX', 'contentOffsetY']
 CHECKS.set 'borderStyle', BORDER
 CHECKS.set 'wrap', WRAP
 CHECKS.set 'link', LINK
+CHECKS.set 'borderTitle', TITLE
+CHECKS.set 'borderTitleAlign', ALIGN
 
 # Refuse a value the painter cannot use, where it is written and by the
 # key it was written to — layout's `admit`, for the styles that recolor
@@ -281,6 +291,12 @@ export allow! =! (key, value) ->
     # what OSC 8 asks of a URI, and what cannot end the sequence early.
     when LINK
       throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not a link — write a URL in printable ASCII, the rest percent-encoded (encodeURI)" unless typeof value is 'string' and /^[\x20-\x7e]+$/.test value
+    # A title is inlaid in one row of a border, so it is one line, and
+    # one `sanitize` would leave as it is.
+    when TITLE
+      throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not a title — write one line of printable text" unless typeof value is 'string' and sanitize(value) is value and not /[\t\n]/.test value
+    when ALIGN
+      throw Error.new "rip/tui: #{key}: #{JSON.stringify value} is not one of left, center, right" unless value is 'left' or value is 'center' or value is 'right'
 
 # ── Grid ──────────────────────────────────────────────────────────────────────
 
@@ -370,6 +386,31 @@ export class Grid
     span = @wide[at]
     @ch.fill SPACE, at, at + span
     @wide.fill 1, at, at + span
+
+  # Make every wide glyph whole again after cells were written from
+  # two grids at once (screen.rip's `post`): a lead whose continuation
+  # cells are not its own, or that reaches past its row, and a
+  # continuation with no lead before it, each become a space in their
+  # style. One scan per row.
+  mend!: ->
+    for row in [0...@rows]
+      col = row * @cols
+      end = col + @cols
+      while col < end
+        span = @wide[col]
+        if span is 1
+          col += 1
+          continue
+        if span > 1 and col + span <= end
+          whole = true
+          for next in [col + 1...col + span]
+            whole = false if @wide[next] isnt 0
+          if whole
+            col += span
+            continue
+        @ch[col] = SPACE
+        @wide[col] = 1
+        col += 1
 
   # One cell wide glyph at (x, y).
   put!: (x, y, cell, id) ->
@@ -708,6 +749,7 @@ border! =! (grid, s, x, y, w, h) ->
     grid.put x, y, cells[TL], id if left
     grid.run x + left, y, cells[T], w - left - right, id
     grid.put x + w - 1, y, cells[TR], id if right
+    inlay grid, s, x, y, w, id if s.borderTitle?
   if bottom
     id = if s.borderBottomColor? or s.borderBottomBackgroundColor? or s.borderBottomDimColor? then intern(s.borderBottomColor ?? s.borderColor ?? null, s.borderBottomBackgroundColor ?? s.borderBackgroundColor ?? null, (if s.borderBottomDimColor ?? s.borderDimColor then DIM else 0)) else plain
     grid.put x, y + h - 1, cells[BL], id if left
@@ -721,6 +763,31 @@ border! =! (grid, s, x, y, w, h) ->
     id = if s.borderRightColor? or s.borderRightBackgroundColor? or s.borderRightDimColor? then intern(s.borderRightColor ?? s.borderColor ?? null, s.borderRightBackgroundColor ?? s.borderBackgroundColor ?? null, (if s.borderRightDimColor ?? s.borderDimColor then DIM else 0)) else plain
     for row in [y + top...y + h - bottom]
       grid.put x + w - 1, row, cells[R], id
+
+# A title inlaid in the top edge, in the edge's own style, over the
+# edge's glyphs: the corner and one edge glyph stay on each side, so the
+# room is `w - 4` cells, and a title wider than the room is cut with
+# '…' by cells. It starts at the edge's third column, or is centered
+# (never nearer than the third column), or ends before the third-last.
+# An edge with no room draws no title. The title writes through `set`,
+# so an edge style with no background takes the background beneath.
+inlay! =! (grid, s, x, y, w, id) ->
+  room = w - 4
+  return if room < 1
+  gauge.set s.borderTitle, null
+  wide = gauge.wide
+  count = gauge.count
+  cut = wide > room
+  if cut
+    wide = count = 0
+    while wide + gauge.span(count) < room
+      wide += gauge.span count
+      count += 1
+  shown = wide + (if cut then 1 else 0)
+  align = s.borderTitleAlign
+  at = x + (if align is 'center' then Math.max(2, (w - shown) >> 1) else if align is 'right' then w - 2 - shown else 2)
+  end = if gauge.ascii then grid.ascii(at, y, s.borderTitle, 0, count, id) else grid.units(at, y, gauge, 0, count, id)
+  grid.put end, y, DOT, id if cut
 
 # The style of each text node under a leaf, in tree order — the order a
 # flow numbers its runs in. Nested spans restyle their own words.

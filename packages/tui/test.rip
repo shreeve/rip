@@ -3,11 +3,11 @@
 # ==============================================================================
 
 import { test, eq, ok, throws } from 'rip/testing'
-import { run, quit, mount, renderToString, screen, print, clock, Box, Text, Spacer, Static, Newline } from 'rip/tui'
+import { run, quit, mount, renderToString, screen, print, clock, reveal, Box, Text, Spacer, Scrollbar, Static, Newline } from 'rip/tui'
 import * as mod from 'rip/tui'
 import { install } from './document.rip'
 import { layout } from './layout.rip'
-import { Grid, paint, diff, rowsToString, tally as styleCount } from './paint.rip'
+import { Grid, paint, diff, rowsToString, intern, recolor, tally as styleCount } from './paint.rip'
 import { tally as clusterCount, clusterWidth } from './text.rip'
 import { __setChildFailureReporter } from '../../src/runtime/components.js'
 import { Log as BuildLog } from './examples/log.rip'
@@ -170,7 +170,7 @@ test "a Static container is looked at from its last written item: an item taken 
     view.close()
 
 test "module exports the entry surface and nothing else", ->
-  eq Object.keys(mod).sort(), ['Box', 'Newline', 'Spacer', 'Static', 'Text', 'clock', 'focus', 'mount', 'print', 'quit', 'renderToString', 'run', 'screen', 'suspend']
+  eq Object.keys(mod).sort(), ['Box', 'Newline', 'Scrollbar', 'Spacer', 'Static', 'Text', 'clock', 'focus', 'mount', 'print', 'quit', 'renderToString', 'reveal', 'run', 'screen', 'suspend']
 
 test "declares no dependencies", ->
   pkg = JSON.parse readFileSync(join(import.meta.dir, 'package.json'), 'utf8')
@@ -317,6 +317,12 @@ test "a paint value is refused where it is written, by key, with the words the k
     throws (-> words.set 'link', "https://example.com/\u009c"), 'is not a link'
     throws (-> words.set 'link', 'https://example.com/日本'), 'is not a link'
     throws (-> words.set 'link', 42), 'link: 42 is not a link'
+    throws (-> box.set 'borderTitle', "a\nb"), 'borderTitle: "a\\nb" is not a title — write one line of printable text'
+    throws (-> box.set 'borderTitle', "a\tb"), 'borderTitle: "a\\tb" is not a title'
+    throws (-> box.set 'borderTitle', "a\x1b[31mb"), 'is not a title'
+    throws (-> box.set 'borderTitle', 7), 'borderTitle: 7 is not a title'
+    throws (-> box.set 'borderTitleAlign', 'middle'), 'borderTitleAlign: "middle" is not one of left, center, right'
+    throws (-> words.set 'borderTitle', 'x'), "'borderTitle' has no meaning on text"
     eq [box.styles, words.styles], [{}, {}]
     box.set key, value for key, value of { color: '#0af', backgroundColor: 'ansi256(208)', borderColor: 'rgb(0, 128, 255)', borderTop: false, overflowX: 'hidden', contentOffsetX: 3 }
     eq box.styles.borderTop, false
@@ -380,6 +386,37 @@ test "a refused style names the node it was written on: its tag, its id or data-
     throws (-> loose.appendChild inner), 'styled by color and weight only (on div > div#list > span[data-part=label] > span)'
   finally
     restore()
+
+test "zIndex is refused by name: the root's last child is on top, for the paint and for the hit test, absolute or not", ->
+  refused = "'zIndex' has no terminal meaning — a node paints over the nodes before it in tree order; put an overlay last"
+  { doc, restore } = install()
+  try
+    throws (-> doc.createElement('div').set 'zIndex', 1), refused
+  finally
+    restore()
+  Raised = component
+    render
+      Box zIndex: 2
+        Text "x"
+  throws (-> renderToString Raised), "#{refused} (on div)"
+  hits = []
+  Stacked = component
+    render
+      Box width: 6, height: 2
+        Box position: 'absolute', left: 0, top: 0, @mousedown: (-> hits.push 'first')
+          Text "aaaa"
+        Box width: 3, height: 1, @mousedown: (-> hits.push 'plain')
+          Text "bb"
+        Box position: 'absolute', left: 1, top: 0, @mousedown: (-> hits.push 'last')
+          Text "c"
+  view = mount Stacked, cols: 6, rows: 2, mouse: true
+  try
+    eq view.frame().trimEnd(), 'bcaa'
+    for col in [0, 1, 3]
+      view.send "\x1b[<0;#{col + 1};1M\x1b[<0;#{col + 1};1m"
+    eq hits, ['plain', 'last', 'first']
+  finally
+    view.close()
 
 test "a tag with no terminal meaning is refused", ->
   Web = component
@@ -495,6 +532,57 @@ test "a spacer takes the free space", ->
         Spacer
         Text "R"
   eq renderToString(Ends, cols: 20), "L          R"
+
+# A thumb sized by `round` reads `▄███` at offset 10; one started by
+# `floor` reads `.▄██▀.....` at offset 5; one drawn while everything
+# fits takes the column from its neighbour.
+test "a scrollbar is one column of half cells: the thumb is shown/total of the track, floored, one half cell at least, and starts where the offset stands, rounded; nothing while everything fits", ->
+  Bar = component
+    @offset := 0
+    @total := 30
+    render
+      Box flexDirection: 'row', height: 10
+        Box flexGrow: 1
+        Scrollbar total: @total, shown: 10, offset: @offset
+  column = (offset, total = 30) ->
+    lines = renderToString(Bar, cols: 5, props: { offset, total }).split '\n'
+    (line.padEnd(5)[4].replace(' ', '.') for line in lines).join ''
+  eq column(0), '███.......'
+  eq column(10), '...▄██▀...', 'the start rounds: 7 of 14'
+  eq column(20), '.......███'
+  eq column(5), '..███.....', 'the size floors: 6 of 20, from 4'
+  eq column(0, 10), '..........', 'nothing scrolls, so no column'
+  view = mount Bar, cols: 5, props: { total: 10 }
+  try
+    view.frame()
+    eq document.body.firstChild.firstChild.rect.w, 5, 'the neighbour takes the column'
+    view.app.total.value = 30
+    view.frame()
+    eq document.body.firstChild.firstChild.rect.w, 4
+  finally
+    view.close()
+  Solo = component
+    render
+      Scrollbar total: 30, shown: 10
+  rows = renderToString(Solo, cols: 1, ansi: true).split '\n'
+  eq rows[0], "\x1b[38;2;154;158;163;48;2;37;37;39m█\x1b[0m", 'the thumb in its color on the track'
+  eq rows[9], "\x1b[38;2;154;158;163;48;2;37;37;39m \x1b[0m", 'a track row is a space on the track'
+  Tall = component
+    render
+      Scrollbar total: 30, shown: 10, height: 5, trackColor: 'blue', thumbColor: 'white'
+  eq renderToString(Tall, cols: 1, ansi: true).split('\n'), ["\x1b[37;44m█\x1b[0m", "\x1b[37;44m▀\x1b[0m", "\x1b[37;44m \x1b[0m", "\x1b[37;44m \x1b[0m", "\x1b[37;44m \x1b[0m"], 'a height of its own: 3 of 10 half cells'
+  Bad = component
+    render
+      Scrollbar total: -1, shown: 10
+  throws (-> renderToString Bad), 'Scrollbar: total: -1 is not a number of rows, 0 or more'
+
+test "reveal answers the offset that brings rows into a box's view, as OpenTUI scrolls a child into view", ->
+  eq reveal(3, 5, 0, 10), 0, 'in view: no move'
+  eq reveal(2, 4, 5, 10), 2, 'starts above and fits: the top'
+  eq reveal(12, 14, 0, 10), 4, 'ends below and fits: the bottom'
+  eq reveal(0, 20, 5, 10), 5, 'past both ends: no move'
+  eq reveal(0, 15, 6, 10), 5, 'starts above and does not fit: the bottom'
+  eq reveal(4, 20, 0, 10), 4, 'ends below and does not fit: the top'
 
 test "padding and a border inset the content", ->
   Card = component
@@ -719,6 +807,28 @@ test "every border style of Ink's, and a style of one's own", ->
   eq framed('classic'), "+--+\n|ab|\n+--+"
   eq framed('arrow'), "↘↓↓↙\n→ab←\n↗↑↑↖"
   eq framed({ topLeft: '1', top: '2', topRight: '3', right: '4', bottomRight: '5', bottom: '6', bottomLeft: '7', left: '8' }), "1223\n8ab4\n7665"
+
+# A title that started at the edge's second column, one measured by
+# `.length`, or one hidden or cut with no '…' would each fail a row here.
+test "a border title is inlaid in the top edge from its third column, in the edge's style, cut with … by cells where the edge is too short", ->
+  titled = (w, title, align, styles = {}) ->
+    Titled = component
+      render
+        Box width: w, borderStyle: 'round', borderTitle: title, borderTitleAlign: align, style: styles
+          Text "ab"
+    renderToString Titled, cols: 20
+  eq titled(12, ' Keys '), "╭─ Keys ───╮\n│ab        │\n╰──────────╯"
+  eq titled(13, ' Keys ', 'center').split('\n')[0], "╭── Keys ───╮", '3.5 floors to 3'
+  eq titled(12, ' Keys ', 'right').split('\n')[0], "╭─── Keys ─╮"
+  eq titled(8, ' Keys ').split('\n')[0], "╭─ Ke…─╮"
+  eq titled(8, '日本語').split('\n')[0], "╭─日…──╮", 'cut by cells'
+  eq titled(4, ' Keys ').split('\n')[0], "╭──╮", 'no room is no title'
+  eq titled(12, ' Keys ', 'left', { borderTop: false }).split('\n')[0], "│ab        │"
+  Green = component
+    render
+      Box width: 12, borderStyle: 'round', borderColor: 'green', borderTitle: ' Keys '
+        Text "ab"
+  eq renderToString(Green, cols: 12, ansi: true).split('\n')[0], "\x1b[32m╭─ Keys ───╮\x1b[0m", 'one run in the edge style'
 
 test "each border edge takes its own color and dimming, else the border's", ->
   Tinted = component
@@ -1170,6 +1280,27 @@ test "a wide character takes two cells", ->
   eq grid.toString(), '日本'
   eq Array.from(grid.wide), [2, 0, 2, 0, 1, 1]
 
+test "mend makes every wide glyph whole again: a lead whose continuation is gone, a continuation whose lead is gone, and a lead past its row each become a space", ->
+  grid = Grid.new 8, 1
+  grid.write 0, 0, '日本ab', 0
+  # Cells mixed in from another grid: over 日's continuation, an orphan
+  # continuation after `b`, and a lead in the last column.
+  grid.ch[1] = 88
+  grid.wide[1] = 1
+  grid.wide[5] = 0
+  grid.ch[7] = 0x672C
+  grid.wide[7] = 2
+  grid.mend()
+  eq Array.from(grid.wide), [1, 1, 2, 0, 1, 1, 1, 1]
+  eq grid.toString(), ' X本a'
+
+test "recolor is a style's id on another background, its color, weight and link kept", ->
+  id = intern 'red', null, 1, 'https://example.com'
+  grid = Grid.new 1, 1
+  grid.put 0, 0, 120, recolor(id, 'blue')
+  eq grid.toString(true), "\x1b[1;31;44m#{OPEN 'https://example.com'}x#{SHUT}\x1b[0m"
+  ok recolor(recolor(id, 'blue'), null) is id, 'the same record is the same id'
+
 # A screen's two grids over a mounted document, as screen.rip keeps
 # them: `frame()` answers the bytes of the next frame, `front()` the grid
 # those bytes leave on the terminal.
@@ -1469,6 +1600,45 @@ test "bytes are what a terminal was sent: each frame's difference from the one b
   finally
     view.close()
 
+# A rewrite run after the diff would show in the frame and not in the
+# bytes; an unset that owed no whole frame would leave the X on the
+# terminal.
+test "screen.post rewrites the frame after the paint and before the diff, every frame whole while it is set, and one more whole frame when it is unset", ->
+  Pair = component
+    @count := 41
+    render
+      Box flexDirection: 'column'
+        Text "count #{@count}"
+        Text "second"
+  view = mount Pair, cols: 10, rows: 2
+  try
+    eq view.frame(), "count 41\nsecond"
+    view.app.count.value = 42
+    eq view.frame(), "count 42\nsecond"
+    eq view.damage, 8, 'no whole frame while post is unset'
+    fronts = []
+    screen.post = (back, front) ->
+      fronts.push front.toString().split('\n')[0]
+      back.ch[0] = 88
+    eq view.frame(), "Xount 42\nsecond"
+    ok view.bytes.includes('X'), "the rewrite is in the bytes: #{JSON.stringify view.bytes}"
+    eq view.damage, 20, 'a set owes a whole frame'
+    eq fronts, ['count 42'], 'front is the grid the terminal shows'
+    view.app.count.value = 43
+    eq view.frame(), "Xount 43\nsecond"
+    eq view.damage, 20, 'every frame is whole while it is set'
+    screen.post = null
+    eq view.frame(), "count 43\nsecond", 'the unset frame draws what the tree says'
+    eq view.damage, 20, 'an unset owes one whole frame'
+    view.app.count.value = 44
+    view.frame()
+    eq view.damage, 8, 'and no more'
+    throws (-> screen.post = 3), 'screen.post: 3 is not a function'
+    eq screen.post, null
+  finally
+    view.close()
+  throws (-> screen.post = (->)), 'no app is running — screen.post rewrites the frames run draws'
+
 test "a mount's terminal has a size: a tall frame shows its bottom, and a resize draws the next frame whole", ->
   Sized = component
     render
@@ -1650,9 +1820,10 @@ test "a border or a background owes the box, and a color that passes down owes e
     @edge := 'red'
     @back := undefined
     @tone := undefined
+    @title := undefined
     render
       Box flexDirection: 'row', height: 4, alignItems: 'flex-start'
-        Box width: 10, height: 3, borderStyle: 'single', borderColor: @edge, backgroundColor: @back
+        Box width: 10, height: 3, borderStyle: 'single', borderColor: @edge, backgroundColor: @back, borderTitle: @title
           Text "words"
         Box width: 4, flexDirection: 'row', color: @tone
           Text width: 6
@@ -1663,6 +1834,11 @@ test "a border or a background owes the box, and a color that passes down owes e
     app.edge.value = 'blue'
     eq draw(), 30
     app.back.value = 'blue'
+    eq draw(), 30
+    # A title is part of the border: it owes the box, as the edges do.
+    app.title.value = ' t '
+    eq draw(), 30
+    app.title.value = undefined
     eq draw(), 30
     # The words are wider than their box, and take its color all the same.
     app.tone.value = 'green'

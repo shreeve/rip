@@ -30,6 +30,7 @@ PAINT =! [
   'borderColor', 'borderTopColor', 'borderBottomColor', 'borderLeftColor', 'borderRightColor'
   'borderDimColor', 'borderTopDimColor', 'borderBottomDimColor', 'borderLeftDimColor', 'borderRightDimColor'
   'borderBackgroundColor', 'borderTopBackgroundColor', 'borderBottomBackgroundColor', 'borderLeftBackgroundColor', 'borderRightBackgroundColor'
+  'borderTitle', 'borderTitleAlign'
 ]
 
 # Switches that stand unless they are turned off, so `false` is a value
@@ -374,6 +375,9 @@ export class Element extends Node
       @trait key, value
       return
     kind = KIND.get key
+    # Paint is in tree order and the hit test walks it backwards, so the
+    # last child of the root is on top for both, absolute or not.
+    throw Error.new "rip/tui: 'zIndex' has no terminal meaning — a node paints over the nodes before it in tree order; put an overlay last" if key is 'zIndex'
     throw unknown(key, @tagName) unless kind
     # Text is drawn glyph by glyph: it has no inside to pad, frame, clip or
     # scroll, and text nested in text is a run of words, not a box to size
