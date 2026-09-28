@@ -40,11 +40,12 @@ WORDS =! [
   wide(0x4E2D).repeat(5), 'q' + wide(0x1F6D9) + wide(0xE0B0) + 'r'
 ]
 COLORS =! ['red', 'green', 'blue', '#303030', 'default', undefined, undefined]
+BACKS =! [...COLORS, '#ff000080', 'rgba(0, 0, 0, 0.5)', '#ffffff1a']   # a background may be translucent; a color may not
 FLAG =! [true, undefined, undefined]
 HEIGHTS =! [12, 16, undefined, undefined, undefined, undefined]   # of the host, which is the frame's
 
 PAINTED =! {
-  color: COLORS, backgroundColor: COLORS, bold: FLAG, dimColor: FLAG, inverse: FLAG
+  color: COLORS, backgroundColor: BACKS, bold: FLAG, dimColor: FLAG, inverse: FLAG
   italic: FLAG, underline: FLAG, strikethrough: FLAG
 }
 BOX =! {
@@ -58,7 +59,7 @@ BOX =! {
   gap: [1, undefined], alignItems: ['center', 'flex-end', undefined], justifyContent: ['center', 'flex-end', 'space-between', undefined]
   borderStyle: ['single', 'round', 'double', undefined, undefined]
   borderTop: [false, undefined, undefined], borderLeft: [false, undefined, undefined], borderRight: [false, undefined, undefined]
-  borderColor: COLORS, borderTopColor: COLORS, borderDimColor: FLAG, borderBackgroundColor: COLORS
+  borderColor: COLORS, borderTopColor: COLORS, borderDimColor: FLAG, borderBackgroundColor: BACKS
   overflow: ['hidden', undefined, undefined], overflowX: ['hidden', 'visible', undefined], overflowY: ['hidden', undefined]
   contentOffsetX: [1, 2, -1, 0.5, undefined, undefined], contentOffsetY: [1, 3, -1, undefined, undefined]
   position: ['absolute', 'absolute', 'relative', undefined, undefined]

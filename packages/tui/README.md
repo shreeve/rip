@@ -257,7 +257,7 @@ scrollback (below).
 
 | Moves boxes | Recolors cells |
 |---|---|
-| `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `flex` | `color`, `backgroundColor` — a name (`red`, `greenBright`, `gray`), `'#rrggbb'`, `'rgb(r, g, b)'`, `'ansi256(n)'`, or `'default'` for the terminal's own |
+| `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `flex` | `color`, `backgroundColor` — a name (`red`, `greenBright`, `gray`), `'#rrggbb'`, `'rgb(r, g, b)'`, `'ansi256(n)'`, or `'default'` for the terminal's own; a background may be translucent, `'#rrggbbaa'` or `'rgba(r, g, b, a)'`, laid over what is under each cell as it is painted |
 | `alignItems`, `alignSelf`, `alignContent`, `justifyContent` | `bold`, `dimColor`, `italic`, `underline`, `strikethrough`, `inverse` |
 | `gap`, `rowGap`, `columnGap` | `borderColor`, `borderDimColor`, `borderBackgroundColor`, and each per edge (`borderTopColor` …) |
 | `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` — a number, `'50%'`, or `'auto'` | |
@@ -332,6 +332,23 @@ the box's; `color: 'default'` is the terminal's foreground (SGR 39)
 under an ancestor that set another; and a box with
 `backgroundColor: 'default'` covers what lies under it with the
 terminal's background.
+
+A translucent background is a veil over what is under it. A box with
+`backgroundColor: '#00000088'` laid over a panel keeps every glyph
+under it, dims each glyph's color and background with its own, keeps
+bold and the other switches, and drops a link, which is not there to
+be clicked through a scrim; text with a translucent background lays
+it on the cell it lands on and keeps its own color. Each channel is
+the veil's at its alpha over the cell's, rounded to the nearest:
+`'#ff000080'` over `'#0000ff'` is `#80007f`. A cell with no
+background, or the terminal's own, is taken to show the backdrop, and
+text with no color to be the backdrop's: `run App, backdrop: { color:
+'#ffffff', backgroundColor: '#000000' }` is the default, since the
+painter cannot read the terminal's, and either may be any opaque
+color. The blend is made in 24-bit and then drawn at the depth the
+terminal has, so at 256 or 16 colors the nearest of them is chosen
+after the blend, and at none the glyphs still show. A foreground
+takes no alpha: `color: '#ffffff80'` is refused by name.
 
 `link` makes a hyperlink of a text's words (OSC 8), and text nested
 in it is part of the link unless it names its own:
@@ -432,7 +449,7 @@ back, and draws a frame when the test asks for one.
 ```coffee
 import { mount } from 'rip/tui'
 
-view = mount Counter, cols: 40, rows: 10, props: { count: 3 }   # mouse:, keyboard:, selection:, pace: as `run` takes them; colors: 0, 16 or 256
+view = mount Counter, cols: 40, rows: 10, props: { count: 3 }   # mouse:, keyboard:, selection:, pace:, backdrop: as `run` takes them; colors: 0, 16 or 256
 view.frame()                # "count 3" — lay out, paint, the frame as plain text
 view.app.count.value = 7    # public state is set from outside
 view.frame()                # "count 7"
