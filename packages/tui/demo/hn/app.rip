@@ -583,7 +583,7 @@ export App = component
                   StoryRow key: item.id, t: theme, rank: n + 1, item: item, selected: n is listCursor, saved: savedIds.has(item.id), visited: viewedIds.has(item.id), now: stamp, @mousedown: ((event) -> @rowPressed n, event)
               Scrollbar total: items.length * 2, shown: listTall, offset: listTop, trackColor: theme.scrollTrack, thumbColor: theme.scrollThumb
         else if view.kind is 'detail'
-          Box flexDirection: 'column', flexShrink: 0, padding: 1, backgroundColor: theme.strip, borderStyle: 'single', borderTop: false, borderLeft: false, borderRight: false, borderColor: theme.border
+          Box flexDirection: 'column', flexShrink: 0, padding: 1, backgroundColor: theme.strip, borderStyle: 'single', borderTop: false, borderLeft: false, borderRight: false, borderColor: theme.border, borderBackgroundColor: theme.strip
             Text color: theme.text, bold: true, "#{if savedIds.has story.id then '★ ' else ''}#{story.title ?? '(untitled)'}"
             Text
               Text color: theme.stripAccent, "▲ #{story.score ?? 0}"

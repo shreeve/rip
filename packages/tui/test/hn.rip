@@ -1164,6 +1164,7 @@ test! "t toggles the theme, and the wipe sweeps it in from the origin: the frame
     eq screen.post, null
     ok look[1].includes('«#000000 on #ffffff bold»Y') and look[1].includes('«#000000 on #ff6600 bold»HackerNews'), "light throughout: #{look[1]}"
     ok look[7].includes('on #f6f6ef'), "the light body: #{look[7]}"
+    ok look[4].includes('«#f6f6ef on #ff6600»─') and look[28].includes('«#f6f6ef on #ff6600»─'), "the strips' edges are drawn on the strip, not on what lies beneath: #{look[4]}"
     view.press 'j'
     view.frame()
     ok view.damage < 3000, 'a partial frame again'
