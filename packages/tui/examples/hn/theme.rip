@@ -1,0 +1,92 @@
+# hntui's two themes, value for value: the translucent ones stay as
+# written (`#0a0a0acc`, `#ffffff1a`), since a background may carry an
+# alpha and is laid over what is under each cell; `opaque` is what such a
+# color makes on the black backdrop the app runs on, for the one place
+# a color must be opaque — the loader's faded cells, which blend by hand.
+
+export DARK =! Object.freeze {
+  name: 'dark'
+  body: '#0a0a0acc'
+  strip: '#0e0e0e'
+  border: '#2a2a2a'
+  brandTileBg: '#ff6600'
+  brandTileFg: '#000000'
+  brandText: '#ff6600'
+  brandSubtle: '#888888'
+  tabActiveBg: '#ff6600'
+  tabActiveFg: '#000000'
+  tabInactiveFg: '#cccccc'
+  statusHint: '#888888'
+  text: '#ffffff'
+  textBody: '#dddddd'
+  textMuted: '#aaaaaa'
+  textDim: '#666666'
+  textVisited: '#666666'
+  accent: '#ff6600'
+  stripAccent: '#ff6600'
+  link: '#4488ff'
+  rowHighlight: '#ffffff1a'
+  menuBg: '#1a1a1a'
+  menuHoverFg: '#000000'
+  scrollTrack: '#1a1a1a'
+  scrollThumb: '#555555'
+  commentDepth: Object.freeze ['#ff6600', '#ffaa44', '#ffd58a', '#88ccff', '#aa88ff', '#ff88cc']
+}
+
+export LIGHT =! Object.freeze {
+  name: 'light'
+  body: '#f6f6ef'
+  strip: '#ff6600'
+  border: '#f6f6ef'
+  brandTileBg: '#ffffff'
+  brandTileFg: '#000000'
+  brandText: '#000000'
+  brandSubtle: '#5a2200'
+  tabActiveBg: '#ffffff'
+  tabActiveFg: '#000000'
+  tabInactiveFg: '#000000'
+  statusHint: '#000000'
+  text: '#000000'
+  textBody: '#000000'
+  textMuted: '#000000'
+  textDim: '#000000'
+  textVisited: '#828282'
+  accent: '#ff6600'
+  stripAccent: '#000000'
+  link: '#4488ff'
+  rowHighlight: '#ffffff'
+  menuBg: '#f6f6ef'
+  menuHoverFg: '#ffffff'
+  scrollTrack: '#ffffff'
+  scrollThumb: '#828282'
+  commentDepth: Object.freeze ['#ff6600', '#cc5200', '#993d00', '#0066cc', '#6633aa', '#aa3366']
+}
+
+# The scrim under the links popup and the help, hntui's own value.
+export SCRIM =! '#00000088'
+
+# The backdrop the app runs on: what the terminal's own colors are
+# taken to be under a translucent background.
+export BACKDROP =! Object.freeze { color: '#ffffff', backgroundColor: '#000000' }
+
+# `#rrggbb` or `#rrggbbaa` as [r, g, b, a], each 0 to 255.
+export rgba =! (color) ->
+  hex = color.slice 1
+  parts = (parseInt(hex.slice(k, k + 2), 16) for k in [0, 2, 4])
+  parts.push (if hex.length is 8 then parseInt(hex.slice(6, 8), 16) else 255)
+  parts
+
+hex2 =! (n) -> Math.round(n).toString(16).padStart 2, '0'
+
+# `top` at `alpha` (0 to 1) over the opaque `under`, rounded to the
+# nearest per channel, as `#rrggbb`.
+export blend =! (top, under, alpha) ->
+  above = rgba top
+  below = rgba under
+  '#' + (hex2(above[k] * alpha + below[k] * (1 - alpha)) for k in [0, 1, 2]).join ''
+
+# The opaque color `color` makes on the backdrop.
+export opaque =! (color) ->
+  parts = rgba color
+  return color if parts[3] is 255
+  blend color, BACKDROP.backgroundColor, parts[3] / 255

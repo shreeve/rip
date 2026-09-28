@@ -1,0 +1,77 @@
+# The scanner loader (after opentui-spinner's Knight Rider example, see
+# NOTICE): eight cells, a lit run of six that sweeps right, holds nine
+# frames, sweeps back, and holds thirty — 54 frames at 40 ms. A lit
+# cell is `■` in a ramp color by its distance behind the head; every
+# other cell is `⬝` in the inactive color at the frame's alpha, which
+# fades in while the run moves and out while it holds. A foreground
+# takes no alpha here, so the faded color is blended over the
+# background the loader sits on, once per background.
+
+import { clock, Text } from 'rip/tui'
+import { blend } from './theme.rip'
+
+export WIDTH      =! 8
+export HOLD_START =! 30
+export HOLD_END   =! 9
+export RAMP       =! Object.freeze ['#ff6600', '#ffaa66', '#dd5500', '#aa4400', '#773300', '#442200']
+export INACTIVE   =! '#2a1500'
+export INTERVAL   =! 40
+export COUNT      =! WIDTH + HOLD_END + (WIDTH - 1) + HOLD_START
+
+# Where the head is at frame `f`, whether it holds, and how far along
+# the move or the hold is.
+state =! (f) ->
+  if f < WIDTH
+    { active: f, holding: false, progress: f, total: WIDTH, forward: true }
+  else if f < WIDTH + HOLD_END
+    { active: WIDTH - 1, holding: true, progress: f - WIDTH, total: HOLD_END, forward: true }
+  else if f < WIDTH + HOLD_END + WIDTH - 1
+    back = f - WIDTH - HOLD_END
+    { active: WIDTH - 2 - back, holding: false, progress: back, total: WIDTH - 1, forward: false }
+  else
+    { active: 0, holding: true, progress: f - WIDTH - HOLD_END - (WIDTH - 1), total: HOLD_START, forward: false }
+
+# The ramp index of cell `c` at frame `f`: 0 at the head, up the ramp
+# behind it, and -1 (or past the ramp) for an unlit cell.
+index =! (f, c) ->
+  { active, holding, progress, forward } = state f
+  d = if forward then active - c else c - active
+  return d + progress if holding
+  return d if d > 0 and d < RAMP.length
+  return 0 if d is 0
+  -1
+
+# The inactive color's alpha at frame `f`.
+alpha =! (f) ->
+  { holding, progress, total } = state f
+  if holding then Math.max(0, 1 - Math.min(progress / total, 1)) else Math.min(progress / Math.max(1, total - 1), 1)
+
+lit =! (f, c) -> 0 <= index(f, c) < RAMP.length
+
+export INDEXES =! ((index(f, c) for c in [0...WIDTH]) for f in [0...COUNT])
+export ALPHAS  =! (alpha(f) for f in [0...COUNT])
+export FRAMES  =! (((if lit(f, c) then '■' else '⬝') for c in [0...WIDTH]).join('') for f in [0...COUNT])
+
+palettes =! Map.new()
+
+# The color of every cell of every frame, over `bg`: a lit cell's ramp
+# color, else the inactive color faded over `bg`.
+export colorsOver =! (bg) ->
+  held = palettes.get bg
+  return held if held
+  held = for f in [0...COUNT]
+    for c in [0...WIDTH]
+      if lit(f, c) then RAMP[INDEXES[f][c]] else blend(INACTIVE, bg, ALPHAS[f])
+  palettes.set bg, held
+  held
+
+# The loader: one text of eight runs, a frame every 40 ms, on `bg`.
+export Loader = component
+  @bg := '#000000'
+  tick = clock INTERVAL
+  frame ~= tick.frame % COUNT
+  colors ~= colorsOver @bg
+  render
+    Text
+      for c in [0...WIDTH]
+        Text key: c, color: colors[frame][c], "#{FRAMES[frame][c]}"

@@ -1,0 +1,605 @@
+# The Hacker News reader: the feeds and the saved and history lists,
+# a story's thread with its links, and the three overlays. One
+# component holds the model — the feed, the view and the stack under
+# it, the cursors, the overlays — and every key comes to its root; the
+# views draw what it holds. Data comes through `api` (an `Api` over any
+# transport), the files through `store`, the browser through `open`,
+# and the clock through `now`, so a test hands in a fake of each.
+#
+# Scrolling is the view's own: a list is a clipped box with a content
+# offset and a scrollbar, the cursor's move reveals its row, and the
+# wheel moves the offset one row a tick. Nothing but the root takes a
+# key.
+
+import { quit, screen, reveal, Box, Text, Scrollbar } from 'rip/tui'
+import { Api, live, HnItemGone, hnErrorMessage, PAGE_SIZE, flattenTree } from './api.rip'
+import { Store, configDir } from './store.rip'
+import { openUrl } from './open.rip'
+import { relativeTime, hostname, htmlToText, extractLinks, parseHnItemLink } from './format.rip'
+import { DARK, LIGHT, opaque } from './theme.rip'
+import { Loader } from './spinner.rip'
+import { Wipe } from './wipe.rip'
+import { FEEDS, Header, StatusBar, StoryRow, CommentNode, Message } from './views.rip'
+import { DOUBLE, LinksPopup, HelpOverlay, ContextMenu } from './overlays.rip'
+
+export ALL =! Object.freeze ['top', 'new', 'best', 'ask', 'show', 'job', 'history', 'saved']
+export GG  =! 500   # milliseconds between two g presses that are gg
+
+HN =! 'https://news.ycombinator.com/item?id='
+
+shelved =! (category) -> category is 'saved' or category is 'history'
+
+export App = component
+  @api =! Api.new live()
+  @store =! Store.new configDir()
+  @open =! openUrl
+  @now =! Date.now
+  @origin =! null      # the wipe's starting point, `-> { x, y }`; null is a random edge point
+  @demo =! false
+
+  # The feed and what it holds.
+  category := 'top'
+  refresh := 0
+  feed ~= if shelved category then 'top' else category
+  ids := []
+  idsError := null
+  idsLoading := true
+  feedItems := []
+  feedLoading := false
+  visibleKey ~= ids.slice(0, PAGE_SIZE).join ','
+
+  # The files, read once; every change is written through the store.
+  saved := @store.saved()
+  history := @store.history()
+  savedIds ~= Set.new (entry.id for entry in saved)
+  viewedIds ~= Set.new (entry.id for entry in history)
+
+  # The saved or history tab's stories, fetched while that tab shows.
+  shelfKey ~= if category is 'saved' then (entry.id for entry in saved).join(',') else if category is 'history' then (entry.id for entry in history.slice 0, PAGE_SIZE).join(',') else ''
+  shelf := []
+  shelfLoading := false
+
+  items ~= if shelved category then shelf else feedItems
+  listLoading ~= if shelved category then shelfLoading else idsLoading or feedLoading
+
+  # The view, the stack of threads under it, and the cursors.
+  view := { kind: 'list' }
+  stack := []
+  listCursor := 0
+  detailCursor := 0
+  collapsed := Set.new()
+  pendingFocus := null
+  commentsRefresh := 0
+  comments := null         # the thread, null while it loads
+  story ~= if view.kind is 'detail' then view.story else null
+  flat ~= flattenTree comments ?? [], collapsed
+  commentsLoading ~= story? and not comments?
+
+  # The overlays, a resolve in flight, the theme and its wipe.
+  links := null
+  linkAt := 0
+  menu := null
+  help := false
+  resolving := false
+  theme := DARK
+  wipe := null
+  stamp := @now()          # when the ages were last taken
+  resolver = null          # the AbortController of the resolve in flight
+  lastG = 0
+  rowPress = 0             # when a story row was last pressed
+  bodyPress = { id: 0, at: 0 }   # the comment whose body was last pressed, and when
+
+  # The scroll of each view: the offset, the clipped pane, and the box
+  # the comments stand in. `held` is the offsets outside the graph, so
+  # the wheel's move never reveals the cursor again.
+  listTop := 0
+  detailTop := 0
+  listPane := null
+  detailPane := null
+  commentBox := null
+  held = { list: 0, detail: 0 }
+  listTall ~= listPane?.box.h ?? 0
+  detailTall ~= detailPane?.box.h ?? 0
+  bodyBg ~= opaque theme.body
+
+  # ── Data ──────────────────────────────────────────────────────────────
+  # Each effect reads its dependencies before the first await, and its
+  # signal is aborted when a newer run supersedes it, so nothing a
+  # superseded run learns is written.
+
+  ~>
+    source = feed
+    refresh
+    signal = getEffectSignal()
+    ids = []
+    idsError = null
+    idsLoading = true
+    try
+      found = @api.fetchIds! source, signal
+      ids = found unless signal.aborted
+    catch error
+      idsError = error unless signal.aborted
+    idsLoading = false unless signal.aborted
+    return
+
+  ~>
+    key = visibleKey
+    signal = getEffectSignal()
+    feedItems = []
+    unless key
+      feedLoading = false
+      return
+    feedLoading = true
+    found = try @api.fetchItems!((Number(id) for id in key.split ','), signal) catch then null
+    return if signal.aborted
+    feedItems = found ?? []
+    feedLoading = false
+    stamp = @now()
+    return
+
+  ~>
+    key = shelfKey
+    signal = getEffectSignal()
+    shelf = []
+    unless key
+      shelfLoading = false
+      return
+    shelfLoading = true
+    wanted = (Number(id) for id in key.split ',')
+    found = try @api.fetchItems!(wanted, signal) catch then null
+    return if signal.aborted
+    byId = Map.new ([item.id, item] for item in found ?? [])
+    shelf = (byId.get(id) for id in wanted when byId.has id)
+    shelfLoading = false
+    stamp = @now()
+    return
+
+  ~>
+    current = story
+    commentsRefresh
+    signal = getEffectSignal()
+    comments = null
+    return unless current
+    tree = try @api.loadComments!(current.kids ?? [], signal) catch then null
+    return if signal.aborted
+    comments = tree ?? []
+    stamp = @now()
+    return
+
+  # The internal links of an open popup resolve into the cache, so a
+  # later ⏎ is instant; closing the popup stops the hops.
+  ~>
+    list = links
+    signal = getEffectSignal()
+    return unless list
+    refs = []
+    for link in list
+      ref = parseHnItemLink link.url
+      refs.push ref if ref
+    return unless refs.length
+    try @api.prefetch!(refs, signal) catch then null
+    return
+
+  # ── Cursors ───────────────────────────────────────────────────────────
+
+  ~> listCursor = Math.max(0, items.length - 1) if listCursor >= items.length
+  ~> detailCursor = Math.max(0, flat.length - 1) if not commentsLoading and detailCursor >= flat.length
+
+  # After an internal link, the cursor lands on the linked comment once
+  # the thread is in — best effort: it may be gone or too deep.
+  ~>
+    wanted = pendingFocus
+    return if not wanted? or commentsLoading
+    at = flat.findIndex (row) -> row.node.item.id is wanted
+    detailCursor = at if at >= 0
+    pendingFocus = null
+    return
+
+  # The cursor's row is revealed, and the offset kept within the
+  # content, as the cursor or the layout moves. The story rows are two
+  # rows each; a comment's rows are its box as the last layout gave it.
+  ~>
+    at = listCursor
+    tall = listTall
+    total = items.length * 2
+    return unless tall > 0
+    @scrollList reveal(at * 2, at * 2 + 2, held.list, tall), total, tall
+
+  ~>
+    at = detailCursor
+    rows = flat
+    pane = detailPane
+    box = commentBox
+    tall = detailTall
+    return unless tall > 0 and pane and box
+    within = Math.max 0, box.box.y + box.box.h - pane.box.y
+    row = (kid for kid in box.childNodes when kid.nodeType is 1)[at]
+    return @scrollDetail(held.detail, within, tall) unless row and rows.length
+    start = row.box.y - pane.box.y
+    return unless row.box.h > 0
+    @scrollDetail reveal(start, start + row.box.h, held.detail, tall), within, tall
+
+  scrollList: (to, total, tall) ->
+    held.list = Math.max 0, Math.min(to, total - tall)
+    listTop = held.list
+    return
+
+  scrollDetail: (to, total, tall) ->
+    held.detail = Math.max 0, Math.min(to, total - tall)
+    detailTop = held.detail
+    return
+
+  # The wheel scrolls the pane under it, a row a tick, and moves no cursor.
+  rollList: (event) -> @scrollList held.list + event.deltaY, items.length * 2, listTall
+  rollDetail: (event) ->
+    box = commentBox
+    pane = detailPane
+    return unless box and pane
+    @scrollDetail held.detail + event.deltaY, box.box.y + box.box.h - pane.box.y, detailTall
+
+  # Rows the half-page keys move by: a page of two-row stories, or of
+  # comments at about four rows each; a full viewport, as hntui counts.
+  pageSize: (kind) ->
+    tall = if kind is 'list' then listTall else detailTall
+    Math.max 1, Math.floor((tall or 20) / (if kind is 'list' then 2 else 4))
+
+  # ── The files ─────────────────────────────────────────────────────────
+
+  toggleSave: (id) -> saved = @store.toggleSaved id, @now()
+  markViewed: (id) -> history = @store.markViewed id, @now()
+  clearHistory: -> history = @store.clearHistory()
+
+  # ── The view stack ────────────────────────────────────────────────────
+
+  switchCategory: (next) ->
+    category = next
+    listCursor = 0
+    @scrollList 0, 0, 0
+
+  cycle: (step) ->
+    at = ALL.indexOf category
+    @switchCategory ALL[(at + step + ALL.length) % ALL.length]
+
+  cancelResolve: ->
+    resolver?.abort()
+    resolver = null
+    resolving = false
+
+  # From the list a thread starts fresh; from a thread, the one left is
+  # pushed with its cursor and its collapsed comments, to come back to.
+  enterDetail: (item, focusId = null) ->
+    @cancelResolve()
+    @markViewed item.id
+    stack = [...stack, { story: view.story, cursor: detailCursor, collapsed }] if view.kind is 'detail'
+    view = { kind: 'detail', story: item }
+    detailCursor = 0
+    collapsed = Set.new()
+    pendingFocus = focusId
+    @scrollDetail 0, 0, 0
+
+  # Back one level: the thread under this one, as it was left, or the list.
+  popView: ->
+    @cancelResolve()
+    pendingFocus = null
+    top = stack[stack.length - 1]
+    unless top
+      view = { kind: 'list' }
+      return
+    stack = stack.slice 0, -1
+    view = { kind: 'detail', story: top.story }
+    detailCursor = top.cursor
+    collapsed = top.collapsed
+    @scrollDetail 0, 0, 0
+
+  goHome: ->
+    @cancelResolve()
+    pendingFocus = null
+    stack = []
+    view = { kind: 'list' }
+
+  home: ->
+    if view.kind isnt 'list' then @goHome()
+    else if shelved category then listCursor = 0
+    else refresh += 1
+
+  # A retry from an error view replaces it; only a thread left behind
+  # is pushed.
+  showResolveError: (ref, error) ->
+    stack = [...stack, { story: view.story, cursor: detailCursor, collapsed }] if view.kind is 'detail'
+    view = { kind: 'error', ref, error }
+
+  startResolve: (ref) ->
+    @cancelResolve()
+    resolving = true
+    resolver = AbortController.new()
+    @resolve ref, resolver
+    return
+
+  resolve!: (ref, controller) ->
+    try
+      found = @api.resolveStory! ref, controller.signal
+      return if controller.signal.aborted
+      resolver = null
+      resolving = false
+      @enterDetail found.story, found.focusId
+    catch error
+      return if controller.signal.aborted
+      resolver = null
+      resolving = false
+      @showResolveError ref, error
+
+  # An internal link closes the popup and resolves in-app; any other
+  # opens in the browser, and the popup stays.
+  openLink: (link) ->
+    ref = parseHnItemLink link.url
+    unless ref
+      @open link.url
+      return
+    links = null
+    @startResolve ref
+
+  openHnPage: (id) -> @open HN + id
+
+  openLinksFor: (row) ->
+    found = extractLinks row.node.item.text
+    return unless found.length
+    links = found
+    linkAt = 0
+
+  toggleCollapse: (id) ->
+    next = Set.new collapsed
+    if next.has id then next.delete id else next.add id
+    collapsed = next
+
+  toggleTheme: ->
+    next = if theme.name is 'dark' then LIGHT else DARK
+    wipe = { seq: (wipe?.seq ?? 0) + 1, accent: next.accent, origin: @origin?() ?? null }
+    theme = next
+
+  # The browser takes the story's url, and the history takes the story.
+  visit: (item) ->
+    @markViewed item.id
+    @open item.url
+
+  openMenuFor: (item, x, y) ->
+    entries = [{ label: (if savedIds.has item.id then '★ Unsave' else '☆ Save'), action: (=> @toggleSave item.id) }]
+    entries.push { label: 'Open URL in browser', action: (=> @visit item) } if item.url
+    entries.push { label: 'Open comments', action: (=> @enterDetail item) }
+    menu = { x, y, items: entries, cursor: 0 }
+
+  # ── The mouse ─────────────────────────────────────────────────────────
+
+  # A right press selects and opens the menu; a left press on the
+  # selected row, or a second press within DOUBLE ms, opens the story,
+  # and any other selects.
+  rowPressed: (n, event) ->
+    item = items[n]
+    return unless item
+    if event.button is 2
+      listCursor = n
+      @openMenuFor item, event.screenX, event.screenY
+      return
+    at = @now()
+    if n is listCursor or at - rowPress < DOUBLE then @enterDetail item else listCursor = n
+    rowPress = at
+
+  headPressed: (n) ->
+    detailCursor = n
+    @toggleCollapse flat[n].node.item.id
+
+  # A second press on the same body within DOUBLE ms lists its links.
+  bodyPressed: (n) ->
+    at = @now()
+    id = flat[n].node.item.id
+    if bodyPress.id is id and at - bodyPress.at < DOUBLE then @openLinksFor flat[n] else detailCursor = n
+    bodyPress = { id, at }
+
+  takeMenuItem: (n) ->
+    item = menu?.items[n]
+    item.action() if item and not item.disabled
+    menu = null
+
+  # ── Keys ──────────────────────────────────────────────────────────────
+  # In hntui's order: quit, then an open overlay takes every key, then
+  # Escape cancels a resolve, then the global keys, then the view's.
+
+  pressed: (event) ->
+    key = event.key
+    if key is 'q' or (key is 'c' and event.ctrlKey)
+      quit()
+      return
+    helpKey = key is '?' or (key is '/' and event.shiftKey)
+    if help
+      help = false if key is 'Escape' or key is 'Backspace' or helpKey
+      return
+    return @menuKey key if menu
+    return @popupKey key if links
+    if resolving and (key is 'Escape' or key is 'Backspace')
+      @cancelResolve()
+      return
+    if helpKey
+      help = true
+    else if key is 't'
+      @toggleTheme()
+    else if key is 'S'
+      @goHome()
+      @switchCategory 'saved'
+    else if key is 'H'
+      @goHome()
+      @switchCategory 'history'
+    else if view.kind is 'list'
+      @listKey key, event
+    else if view.kind is 'error'
+      @errorKey key
+    else
+      @detailKey key, event
+    return
+
+  menuKey: (key) ->
+    switch key
+      when 'j', 'ArrowDown' then menu = { ...menu, cursor: Math.min(menu.items.length - 1, menu.cursor + 1) }
+      when 'k', 'ArrowUp' then menu = { ...menu, cursor: Math.max(0, menu.cursor - 1) }
+      when 'Enter' then @takeMenuItem menu.cursor
+      when 'Escape', 'Backspace' then menu = null
+    return
+
+  popupKey: (key) ->
+    switch key
+      when 'j', 'ArrowDown' then linkAt = Math.min links.length - 1, linkAt + 1
+      when 'k', 'ArrowUp' then linkAt = Math.max 0, linkAt - 1
+      when 'G' then linkAt = links.length - 1
+      when 'g' then linkAt = 0
+      when 'Enter' then @openLink links[linkAt]
+      when 'o' then @open links[linkAt].url
+      when 'Escape', 'Backspace' then links = null
+    return
+
+  moveList: (to) -> listCursor = Math.max 0, Math.min(to, items.length - 1)
+  moveDetail: (to) -> detailCursor = Math.max 0, Math.min(to, flat.length - 1)
+
+  # A second g within GG ms is gg; the window is shared by both views.
+  gg: (move) ->
+    at = @now()
+    move 0 if at - lastG < GG
+    lastG = at
+
+  listKey: (key, event) ->
+    page = @pageSize 'list'
+    current = items[listCursor]
+    switch key
+      when 'j', 'ArrowDown' then @moveList listCursor + 1
+      when 'k', 'ArrowUp' then @moveList listCursor - 1
+      when 'G' then @moveList items.length - 1
+      when 'g' then @gg (to) => @moveList to
+      when 'PageDown' then @moveList listCursor + page
+      when 'PageUp' then @moveList listCursor - page
+      when 'd' then @moveList(listCursor + page) if event.ctrlKey
+      when 'u' then @moveList(listCursor - page) if event.ctrlKey
+      when 'c', 'Enter' then @enterDetail current if current
+      when 'h', 'ArrowLeft' then @cycle -1
+      when 'l', 'ArrowRight' then @cycle 1
+      when 'Tab'
+        event.preventDefault()
+        @cycle (if event.shiftKey then -1 else 1)
+      when 'o' then @visit current if current?.url
+      when 'y'
+        if current
+          @markViewed current.id
+          @openHnPage current.id
+      when 's' then @toggleSave current.id if current
+      when 'x' then @clearHistory() if category is 'history'
+      when '1', '2', '3', '4', '5', '6' then @switchCategory FEEDS[Number(key) - 1].key
+      when 'r' then refresh += 1 unless shelved category
+    return
+
+  errorKey: (key) ->
+    switch key
+      when 'h', 'ArrowLeft', 'Backspace', 'Escape' then @popView()
+      when 'r' then @startResolve view.ref unless view.error instanceof HnItemGone
+    return
+
+  detailKey: (key, event) ->
+    page = @pageSize 'detail'
+    current = flat[detailCursor]
+    switch key
+      when 'j', 'ArrowDown' then @moveDetail detailCursor + 1
+      when 'k', 'ArrowUp' then @moveDetail detailCursor - 1
+      when 'G' then @moveDetail flat.length - 1
+      when 'g' then @gg (to) => @moveDetail to
+      when 'PageDown' then @moveDetail detailCursor + page
+      when 'PageUp' then @moveDetail detailCursor - page
+      when 'd' then @moveDetail(detailCursor + page) if event.ctrlKey
+      when 'u' then @moveDetail(detailCursor - page) if event.ctrlKey
+      when ' ' then @toggleCollapse current.node.item.id if current
+      when 'Enter' then @openLinksFor current if current
+      when 'o' then @open view.story.url if view.story.url
+      when 'y' then @openHnPage view.story.id
+      when 's' then @toggleSave view.story.id
+      when 'r' then commentsRefresh += 1 if not commentsLoading and flat.length is 0 and (view.story.descendants ?? 0) > 0
+      when 'h', 'ArrowLeft', 'Backspace', 'Escape' then @popView()
+    return
+
+  # ── What the views show ───────────────────────────────────────────────
+
+  feedFailed ~= view.kind is 'list' and idsError? and not shelved(category)
+  gone ~= view.kind is 'error' and view.error instanceof HnItemGone
+  message ~=
+    if view.kind is 'error'
+      if gone then 'h/esc go back · q quit' else 'r retry · h/esc go back · q quit'
+    else if feedFailed
+      'r retry · q quit'
+    else
+      null
+  statusLoading ~= (if view.kind is 'list' then listLoading else if view.kind is 'detail' then commentsLoading else false) or resolving
+  emptyMessage ~=
+    if category is 'saved' then "No saved posts yet. Press 's' on a story."
+    else if category is 'history' then 'No history yet. Posts you open will show up here.'
+    else if ids.length > 0 then "Couldn't load stories — press r to retry."
+    else 'No stories'
+  loadingMessage ~= if category is 'saved' then 'Loading saved posts…' else if category is 'history' then 'Loading history…' else 'Loading stories…'
+  storyHost ~= hostname story?.url
+  storyText ~= htmlToText story?.text
+  commentsEmpty ~= if (story?.descendants ?? 0) > 0 then "Couldn't load comments — press r to retry." else 'No comments yet.'
+  commentsTotal ~= if commentBox and detailPane then Math.max(0, commentBox.box.y + commentBox.box.h - detailPane.box.y) else 0
+
+  render
+    Box width: '100%', height: screen.rows, flexDirection: 'column', focusable: true, autofocus: true, @keydown: @pressed
+      Header t: theme, category: category, tabs: view.kind is 'list', depth: stack.length, onSelect: ((key) => @switchCategory key), onHome: (=> @home())
+      Box flexGrow: 1, flexShrink: 1, flexBasis: 0, flexDirection: 'column', backgroundColor: theme.body
+        if view.kind is 'list'
+          if feedFailed
+            Message t: theme, art: '(×_×)', title: "Couldn't load stories", subtitle: hnErrorMessage(idsError), hint: 'r to retry'
+          else if items.length is 0
+            Box flexGrow: 1, flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1
+              if listLoading
+                Loader bg: bodyBg
+                Text color: theme.statusHint, "#{loadingMessage}"
+              else
+                Text color: theme.statusHint, "#{emptyMessage}"
+          else
+            Box flexGrow: 1, flexShrink: 1, flexBasis: 0, flexDirection: 'row'
+              div ref: listPane, flexGrow: 1, flexShrink: 1, flexDirection: 'column', overflow: 'hidden', contentOffsetY: listTop, @wheel: @rollList
+                for item, n in items
+                  StoryRow key: item.id, t: theme, rank: n + 1, item: item, selected: n is listCursor, saved: savedIds.has(item.id), visited: viewedIds.has(item.id), now: stamp, @mousedown: ((event) -> @rowPressed n, event)
+              Scrollbar total: items.length * 2, shown: listTall, offset: listTop, trackColor: theme.scrollTrack, thumbColor: theme.scrollThumb
+        else if view.kind is 'detail'
+          Box flexDirection: 'column', flexShrink: 0, padding: 1, backgroundColor: theme.strip, borderStyle: 'single', borderTop: false, borderLeft: false, borderRight: false, borderColor: theme.border
+            Text color: theme.text, bold: true, "#{if savedIds.has story.id then '★ ' else ''}#{story.title ?? '(untitled)'}"
+            Text
+              Text color: theme.stripAccent, "▲ #{story.score ?? 0}"
+              Text color: theme.textDim, " by "
+              Text color: theme.textMuted, "#{story.by ?? '?'}"
+              Text color: theme.textDim, "  #{relativeTime story.time, stamp}  | "
+              Text color: theme.textMuted, "#{story.descendants ?? 0} comments"
+              Text color: theme.textDim, "#{if storyHost then "  · #{storyHost}" else ''}"
+            if story.url
+              Text color: theme.link, @mousedown: (-> @open story.url), "#{story.url}"
+          Box flexGrow: 1, flexShrink: 1, flexBasis: 0, flexDirection: 'row'
+            div ref: detailPane, flexGrow: 1, flexShrink: 1, flexDirection: 'column', overflow: 'hidden', contentOffsetY: detailTop, @wheel: @rollDetail
+              if storyText
+                Box paddingX: 1, paddingTop: 1
+                  Text color: theme.textBody, "#{storyText}"
+              div ref: commentBox, paddingX: 1, paddingTop: 1, flexDirection: 'column'
+                if commentsLoading
+                  Box flexDirection: 'row', alignItems: 'center', gap: 1
+                    Loader bg: bodyBg
+                    Text color: theme.statusHint, "Loading comments…"
+                else if flat.length is 0
+                  Text color: theme.statusHint, "#{commentsEmpty}"
+                else
+                  for row, n in flat
+                    CommentNode key: row.node.item.id, t: theme, node: row.node, depth: row.depth, collapsed: collapsed.has(row.node.item.id), selected: n is detailCursor, hiddenChildren: row.hiddenChildren, now: stamp, onHead: (-> @headPressed n), onBody: (-> @bodyPressed n)
+            Scrollbar total: commentsTotal, shown: detailTall, offset: detailTop, trackColor: theme.scrollTrack, thumbColor: theme.scrollThumb
+        else if gone
+          Message t: theme, art: '¯\\_(ツ)_/¯', title: 'Post not found', subtitle: "This link points to a post that doesn't exist (or was deleted).", hint: 'esc to go back'
+        else
+          Message t: theme, art: '(×_×)', title: "Couldn't open that post", subtitle: hnErrorMessage(view.error), hint: 'r to retry · esc to go back'
+      StatusBar t: theme, view: (if view.kind is 'detail' then 'detail' else 'list'), category: category, loading: statusLoading, message: message, demo: @demo
+      if wipe
+        Wipe seq: wipe.seq, accent: wipe.accent, origin: wipe.origin, done: (-> wipe = null)
+      if links
+        LinksPopup t: theme, links: links, cursor: linkAt, now: @now, onSelect: ((n) -> linkAt = n), onActivate: ((n) -> @openLink links[n]), onClose: (-> links = null)
+      if help
+        HelpOverlay t: theme, view: (if view.kind is 'list' then 'list' else 'detail'), onClose: (-> help = false)
+      if menu
+        ContextMenu t: theme, x: menu.x, y: menu.y, items: menu.items, cursor: menu.cursor, onSelect: ((n) -> menu = { ...menu, cursor: n }), onActivate: ((n) -> @takeMenuItem n), onClose: (-> menu = null)

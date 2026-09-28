@@ -1,0 +1,50 @@
+# Saved stories and view history, as `saved.json` and `history.json` in
+# the config directory: `HN_CONFIG_DIR`, or `~/.config/rip-hn`. Both
+# files are lists of `{ id, <stamp> }`, newest first, written as
+# `JSON.stringify(entries, null, 2)`. A read tolerates a missing or
+# malformed file; a write throws, for the caller to show.
+
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { homedir } from 'node:os'
+
+export HISTORY_CAP =! 1000
+
+export configDir =! (env = process.env) -> env.HN_CONFIG_DIR or join(homedir(), '.config', 'rip-hn')
+
+export class Store
+  constructor: (@dir) ->
+
+  # The `{ id, <stamp> }` entries of `name`; a missing or unreadable
+  # file, or one of another shape, is an empty list, and an entry of
+  # another shape is dropped.
+  read: (name, stamp) ->
+    data = try JSON.parse(readFileSync(join(@dir, name), 'utf8')) catch then null
+    return [] unless Array.isArray data
+    (entry for entry in data when entry and typeof entry.id is 'number' and typeof entry[stamp] is 'number')
+
+  write: (name, entries) ->
+    mkdirSync @dir, recursive: true
+    writeFileSync join(@dir, name), JSON.stringify(entries, null, 2)
+    return
+
+  saved: -> @read 'saved.json', 'savedAt'
+  history: -> @read('history.json', 'viewedAt').slice 0, HISTORY_CAP
+
+  # The saved list with `id` added at the front, or removed when it is
+  # there; written, and returned.
+  toggleSaved: (id, at) ->
+    entries = @saved()
+    entries = if entries.some((entry) -> entry.id is id) then entries.filter((entry) -> entry.id isnt id) else [{ id, savedAt: at }, ...entries]
+    @write 'saved.json', entries
+    entries
+
+  # The history with `id` at the front, once, capped; written, and returned.
+  markViewed: (id, at) ->
+    entries = [{ id, viewedAt: at }, ...@history().filter((entry) -> entry.id isnt id)].slice 0, HISTORY_CAP
+    @write 'history.json', entries
+    entries
+
+  clearHistory: ->
+    @write 'history.json', []
+    []

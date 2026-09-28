@@ -1,0 +1,75 @@
+# The text Hacker News sends, made readable: ages, hosts, entities, the
+# HTML of a comment, its links, and which of those point back into HN.
+
+# `sec` is a unix time in seconds, `nowMs` the clock in milliseconds; a
+# missing or zero time is no age at all.
+export relativeTime =! (sec, nowMs) ->
+  return '' unless sec
+  diff = Math.floor nowMs / 1000 - sec
+  return "#{diff}s ago" if diff < 60
+  return "#{Math.floor diff / 60}m ago" if diff < 3600
+  return "#{Math.floor diff / 3600}h ago" if diff < 86400
+  return "#{Math.floor diff / 86400}d ago" if diff < 86400 * 30
+  return "#{Math.floor diff / 2592000}mo ago" if diff < 86400 * 365
+  "#{Math.floor diff / 31536000}y ago"
+
+# The host of `url` without a leading `www.`; '' for no url or a bad one.
+export hostname =! (url) ->
+  return '' unless url
+  try URL.new(url).hostname.replace(/^www\./, '') catch then ''
+
+ENTITIES =! { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#x27;': "'", '&#39;': "'", '&#x2F;': '/', '&#47;': '/', '&nbsp;': ' ' }
+
+# Three passes in this order: the named entities, decimal references,
+# then hex references. A doubly-encoded `&amp;#39;` therefore reads as
+# a quote while `&amp;lt;` stays `&lt;`, and a code point past the BMP
+# is truncated by fromCharCode.
+export decodeEntities =! (text) ->
+  text
+    .replace(/&(amp|lt|gt|quot|nbsp|#x27|#39|#x2F|#47);/g, (m) -> ENTITIES[m] ?? m)
+    .replace(/&#(\d+);/g, (_, n) -> String.fromCharCode parseInt(n, 10))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) -> String.fromCharCode parseInt(n, 16))
+
+# The plain text of a comment's HTML. Anchors keep their href in
+# parentheses, still encoded at that step and decoded with the rest.
+export htmlToText =! (html) ->
+  return '' unless html
+  decodeEntities(
+    html
+      .replace(/<p>/gi, '\n\n')
+      .replace(/<\/p>/gi, '')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<i>(.*?)<\/i>/gi, '$1')
+      .replace(/<a\s+href="([^"]+)"[^>]*>(.*?)<\/a>/gi, '$2 ($1)')
+      .replace(/<pre><code>([\s\S]*?)<\/code><\/pre>/gi, '\n$1\n')
+      .replace(/<code>(.*?)<\/code>/gi, '`$1`')
+      .replace(/<[^>]+>/g, '')
+  ).trim()
+
+# Every anchor of `html` as `{ text, url }`, the first of each url
+# kept, with the url standing in for an empty text.
+export extractLinks =! (html) ->
+  return [] unless html
+  out = []
+  seen = Set.new()
+  for m in html.matchAll /<a\s+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi
+    url = decodeEntities m[1]
+    continue if seen.has url
+    seen.add url
+    text = decodeEntities(m[2].replace(/<[^>]+>/g, '')).trim()
+    out.push { text: text or url, url }
+  out
+
+# A link into HN itself, `/item?id=N` with an optional `#M` comment
+# anchor, as `{ id, anchorId }`; anything else is null. `id` may name a
+# story or a comment. A non-numeric anchor leaves the link internal.
+export parseHnItemLink =! (url) ->
+  parsed = try URL.new(url) catch then null
+  return null unless parsed
+  host = parsed.hostname.replace /^www\./, ''
+  return null unless host is 'news.ycombinator.com' and parsed.pathname is '/item'
+  id = Number parsed.searchParams.get('id')
+  return null unless Number.isInteger(id) and id > 0
+  anchor = Number parsed.hash.slice(1)
+  anchorId = if parsed.hash.length > 1 and Number.isInteger(anchor) and anchor > 0 then anchor else undefined
+  { id, anchorId }
