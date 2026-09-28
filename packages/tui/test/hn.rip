@@ -913,8 +913,8 @@ test! "a link into a comment resolves to its story and lands the cursor on it wi
     view.press 'Escape'
     eq app.view.value.kind, 'list'
 
-test! "an anchor link into the same story pushes a new thread with the cursor on the anchored comment", ->
-  reader! Fake.new(), ({ view, app, fake }) ->
+test! "an anchor link into the same story pushes a new thread with the cursor on the anchored comment, and the focus is spent: gg then space keep the cursor where it is; an anchor to no comment leaves it at the top", ->
+  reader! Fake.new(), ({ view, app, fake, clockAt }) ->
     view.press 'Enter'
     settle! fake
     view.press 'j' for n in [1..3]
@@ -925,6 +925,19 @@ test! "an anchor link into the same story pushes a new thread with the cursor on
     eq [app.view.value.story.id, app.stack.value.length], [1001, 1]
     ok heads(view).includes('   ▶ gina · 10m ago')
     ok lines(view)[1].endsWith('↩ 1')
+    eq app.pendingFocus.value, null, 'the thread was in, so the focus was applied at once'
+    view.press 'g'
+    clockAt.now += 100
+    view.press 'g'
+    eq app.detailCursor.value, 0
+    view.press ' '
+    eq app.detailCursor.value, 0, 'collapsing alice does not drag the cursor back to gina'
+    eq heads(view)[0], ' ▶ alice · 2h ago · [+] 2 replies'
+    app.links.value = [{ text: 'gone', url: 'https://news.ycombinator.com/item?id=1001#9999' }]
+    app.linkAt.value = 0
+    view.press 'Enter'
+    settle! fake
+    eq [app.view.value.story.id, app.stack.value.length, app.detailCursor.value, app.pendingFocus.value], [1001, 2, 0, null]
 
 test! "a link to nothing viewable is the not-found view, where r asks nothing", ->
   reader! Fake.new(), ({ view, app, fake }) ->
