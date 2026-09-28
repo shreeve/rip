@@ -77,3 +77,10 @@ steps are in [PLAN.md](PLAN.md).
 - A spelling for a capture listener in a render block. The package reads
   a type that ends in `Capture` (`@keydownCapture:`), since `@name:` is
   always `addEventListener(name, handler)` with no third argument.
+- The runtime drops ANY write to a state made during that state's own
+  notify — from any effect the flush runs, not only from the one that
+  reads it — with no error and no trace: a cleanup that resets a cell
+  as the flush unmounts its holder, or a handler an effect calls that
+  writes the cell back, leaves the cell as the beat wrote it (the
+  clock's `stale` is the workaround). Worth a runtime rule: reject the
+  write loudly, or queue it after the flush.

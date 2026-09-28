@@ -8,7 +8,7 @@
 # background the loader sits on, once per background.
 
 import { clock, Text } from 'rip/tui'
-import { blend } from './theme.rip'
+import { blend } from '../../paint.rip'
 
 export WIDTH      =! 8
 export HOLD_START =! 30

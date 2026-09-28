@@ -1,8 +1,10 @@
 # hntui's two themes, value for value: the translucent ones stay as
 # written (`#0a0a0acc`, `#ffffff1a`), since a background may carry an
 # alpha and is laid over what is under each cell; `opaque` is what such a
-# color makes on the black backdrop the app runs on, for the one place
-# a color must be opaque — the loader's faded cells, which blend by hand.
+# color makes on the backdrop the app runs on, for the one place a color
+# must be opaque — the loader's faded cells, which blend by hand.
+
+import { blend, BACKDROP } from '../../paint.rip'
 
 export DARK =! Object.freeze {
   name: 'dark'
@@ -65,28 +67,5 @@ export LIGHT =! Object.freeze {
 # The scrim under the links popup and the help, hntui's own value.
 export SCRIM =! '#00000088'
 
-# The backdrop the app runs on: what the terminal's own colors are
-# taken to be under a translucent background.
-export BACKDROP =! Object.freeze { color: '#ffffff', backgroundColor: '#000000' }
-
-# `#rrggbb` or `#rrggbbaa` as [r, g, b, a], each 0 to 255.
-export rgba =! (color) ->
-  hex = color.slice 1
-  parts = (parseInt(hex.slice(k, k + 2), 16) for k in [0, 2, 4])
-  parts.push (if hex.length is 8 then parseInt(hex.slice(6, 8), 16) else 255)
-  parts
-
-hex2 =! (n) -> Math.round(n).toString(16).padStart 2, '0'
-
-# `top` at `alpha` (0 to 1) over the opaque `under`, rounded to the
-# nearest per channel, as `#rrggbb`.
-export blend =! (top, under, alpha) ->
-  above = rgba top
-  below = rgba under
-  '#' + (hex2(above[k] * alpha + below[k] * (1 - alpha)) for k in [0, 1, 2]).join ''
-
 # The opaque color `color` makes on the backdrop.
-export opaque =! (color) ->
-  parts = rgba color
-  return color if parts[3] is 255
-  blend color, BACKDROP.backgroundColor, parts[3] / 255
+export opaque =! (color) -> blend color, BACKDROP.backgroundColor

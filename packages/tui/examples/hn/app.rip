@@ -137,14 +137,14 @@ export App = component
     stamp = @now()
     return
 
+  # The loading flag is raised before the rows are taken away, so the
+  # cursor's clamp waits for the rows that come back.
   ~>
     key = shelfKey
     signal = getEffectSignal()
+    shelfLoading = key isnt ''
     shelf = []
-    unless key
-      shelfLoading = false
-      return
-    shelfLoading = true
+    return unless key
     wanted = (Number(id) for id in key.split ',')
     found = try @api.fetchItems!(wanted, signal) catch then null
     return if signal.aborted
@@ -182,17 +182,29 @@ export App = component
 
   # ── Cursors ───────────────────────────────────────────────────────────
 
-  ~> listCursor = Math.max(0, items.length - 1) if listCursor >= items.length
+  # A list fetched again — the saved tab after a toggle, the history
+  # after a story is opened — is empty while it loads and keeps its
+  # cursor for the rows that come back, clamped to them.
+  ~> listCursor = Math.max(0, items.length - 1) if not listLoading and listCursor >= items.length
   ~> detailCursor = Math.max(0, flat.length - 1) if not commentsLoading and detailCursor >= flat.length
 
-  # After an internal link, the cursor lands on the linked comment once
-  # the thread is in — best effort: it may be gone or too deep.
+  # After an internal link into a thread still loading, the cursor lands
+  # on the linked comment once the thread is in. `pendingFocus` is only
+  # ever written while the thread loads: the runtime drops a write to a
+  # state from inside that state's own flush, so a focus this effect
+  # could apply at once would never be cleared, and every later change
+  # to the rows would apply it again.
   ~>
     wanted = pendingFocus
     return if not wanted? or commentsLoading
-    at = flat.findIndex (row) -> row.node.item.id is wanted
-    detailCursor = at if at >= 0
+    @focusComment wanted
     pendingFocus = null
+    return
+
+  # The cursor on the comment `id`, best effort: it may be gone or too deep.
+  focusComment: (id) ->
+    at = flat.findIndex (row) -> row.node.item.id is id
+    detailCursor = at if at >= 0
     return
 
   # The cursor's row is revealed, and the offset kept within the
@@ -237,11 +249,12 @@ export App = component
     return unless box and pane
     @scrollDetail held.detail + event.deltaY, box.box.y + box.box.h - pane.box.y, detailTall
 
-  # Rows the half-page keys move by: a page of two-row stories, or of
-  # comments at about four rows each; a full viewport, as hntui counts.
-  pageSize: (kind) ->
+  # Rows the page keys move by: `share` of the pane's rows, in two-row
+  # stories or in comments at about four rows each — the whole pane for
+  # PageDown and PageUp, half of it for Ctrl-d and Ctrl-u.
+  pageSize: (kind, share = 1) ->
     tall = if kind is 'list' then listTall else detailTall
-    Math.max 1, Math.floor((tall or 20) / (if kind is 'list' then 2 else 4))
+    Math.max 1, Math.floor((tall or 20) * share / (if kind is 'list' then 2 else 4))
 
   # ── The files ─────────────────────────────────────────────────────────
 
@@ -267,6 +280,8 @@ export App = component
 
   # From the list a thread starts fresh; from a thread, the one left is
   # pushed with its cursor and its collapsed comments, to come back to.
+  # A thread already in — the same story, by an anchor — takes the
+  # focus at once; one still loading takes it as it lands.
   enterDetail: (item, focusId = null) ->
     @cancelResolve()
     @markViewed item.id
@@ -274,7 +289,8 @@ export App = component
     view = { kind: 'detail', story: item }
     detailCursor = 0
     collapsed = Set.new()
-    pendingFocus = focusId
+    pendingFocus = if focusId? and commentsLoading then focusId else null
+    @focusComment focusId if focusId? and not commentsLoading
     @scrollDetail 0, 0, 0
 
   # Back one level: the thread under this one, as it was left, or the list.
@@ -448,7 +464,7 @@ export App = component
       when 'j', 'ArrowDown' then linkAt = Math.min links.length - 1, linkAt + 1
       when 'k', 'ArrowUp' then linkAt = Math.max 0, linkAt - 1
       when 'G' then linkAt = links.length - 1
-      when 'g' then linkAt = 0
+      when 'g' then @gg (to) => linkAt = to
       when 'Enter' then @openLink links[linkAt]
       when 'o' then @open links[linkAt].url
       when 'Escape', 'Backspace' then links = null
@@ -457,7 +473,8 @@ export App = component
   moveList: (to) -> listCursor = Math.max 0, Math.min(to, items.length - 1)
   moveDetail: (to) -> detailCursor = Math.max 0, Math.min(to, flat.length - 1)
 
-  # A second g within GG ms is gg; the window is shared by both views.
+  # A second g within GG ms is gg; the window is shared by the views
+  # and the popup.
   gg: (move) ->
     at = @now()
     move 0 if at - lastG < GG
@@ -465,6 +482,7 @@ export App = component
 
   listKey: (key, event) ->
     page = @pageSize 'list'
+    half = @pageSize 'list', 0.5
     current = items[listCursor]
     switch key
       when 'j', 'ArrowDown' then @moveList listCursor + 1
@@ -473,8 +491,8 @@ export App = component
       when 'g' then @gg (to) => @moveList to
       when 'PageDown' then @moveList listCursor + page
       when 'PageUp' then @moveList listCursor - page
-      when 'd' then @moveList(listCursor + page) if event.ctrlKey
-      when 'u' then @moveList(listCursor - page) if event.ctrlKey
+      when 'd' then @moveList(listCursor + half) if event.ctrlKey
+      when 'u' then @moveList(listCursor - half) if event.ctrlKey
       when 'c', 'Enter' then @enterDetail current if current
       when 'h', 'ArrowLeft' then @cycle -1
       when 'l', 'ArrowRight' then @cycle 1
@@ -500,6 +518,7 @@ export App = component
 
   detailKey: (key, event) ->
     page = @pageSize 'detail'
+    half = @pageSize 'detail', 0.5
     current = flat[detailCursor]
     switch key
       when 'j', 'ArrowDown' then @moveDetail detailCursor + 1
@@ -508,8 +527,8 @@ export App = component
       when 'g' then @gg (to) => @moveDetail to
       when 'PageDown' then @moveDetail detailCursor + page
       when 'PageUp' then @moveDetail detailCursor - page
-      when 'd' then @moveDetail(detailCursor + page) if event.ctrlKey
-      when 'u' then @moveDetail(detailCursor - page) if event.ctrlKey
+      when 'd' then @moveDetail(detailCursor + half) if event.ctrlKey
+      when 'u' then @moveDetail(detailCursor - half) if event.ctrlKey
       when ' ' then @toggleCollapse current.node.item.id if current
       when 'Enter' then @openLinksFor current if current
       when 'o' then @open view.story.url if view.story.url
@@ -538,6 +557,7 @@ export App = component
     else 'No stories'
   loadingMessage ~= if category is 'saved' then 'Loading saved posts…' else if category is 'history' then 'Loading history…' else 'Loading stories…'
   storyHost ~= hostname story?.url
+  storyCount ~= story?.descendants ?? 0
   storyText ~= htmlToText story?.text
   commentsEmpty ~= if (story?.descendants ?? 0) > 0 then "Couldn't load comments — press r to retry." else 'No comments yet.'
   commentsTotal ~= if commentBox and detailPane then Math.max(0, commentBox.box.y + commentBox.box.h - detailPane.box.y) else 0
@@ -570,7 +590,7 @@ export App = component
               Text color: theme.textDim, " by "
               Text color: theme.textMuted, "#{story.by ?? '?'}"
               Text color: theme.textDim, "  #{relativeTime story.time, stamp}  | "
-              Text color: theme.textMuted, "#{story.descendants ?? 0} comments"
+              Text color: theme.textMuted, "#{storyCount} comment#{if storyCount is 1 then '' else 's'}"
               Text color: theme.textDim, "#{if storyHost then "  · #{storyHost}" else ''}"
             if story.url
               Text color: theme.link, @mousedown: (-> @open story.url), "#{story.url}"

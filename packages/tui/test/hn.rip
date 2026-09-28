@@ -725,18 +725,22 @@ test! "gg goes to the top when the two presses are within 500 ms, and not when t
     view.press 'g'
     eq app.listCursor.value, 0
 
-test! "Ctrl-d, Ctrl-u, PageDown and PageUp move by a page of eleven stories, and the cursor's row stays in view with the least scroll", ->
+test! "PageDown and PageUp move by a page of eleven stories, Ctrl-d and Ctrl-u by half a page, five, and the cursor's row stays in view with the least scroll", ->
   reader! Fake.new(), ({ view, app }) ->
-    view.press 'd', ctrl: true
+    view.press 'PageDown'
     eq app.listCursor.value, 11
     frame = lines view
     eq plain(frame[26]), '  12. Generated story 15 (example.com)', 'the twelfth story lands at the bottom edge'
-    view.press 'u', ctrl: true
+    view.press 'PageUp'
     eq app.listCursor.value, 0
     eq plain(lines(view)[5]), '   1. Show HN: A Hacker News reader for the terminal, in 900 lines (github.com)'
-    view.press 'PageDown'
-    eq app.listCursor.value, 11
-    view.press 'PageUp'
+    view.press 'd', ctrl: true
+    eq app.listCursor.value, 5, 'half of the 22-row pane, at two rows a story'
+    view.press 'd', ctrl: true
+    eq app.listCursor.value, 10
+    view.press 'u', ctrl: true
+    eq app.listCursor.value, 5
+    view.press 'u', ctrl: true
     eq app.listCursor.value, 0
 
 test! "the tabs: l and h cycle through top new best ask show job history saved and wrap, Tab and Shift-Tab do the same with the default kept from the root, 1 to 6 jump, and every switch resets the cursor", ->
@@ -837,7 +841,7 @@ test! "a thread taller than the pane has a scrollbar, and collapsing it until it
     eq heads(view)[0], ' ▶ alice · 2h ago · [+] 2 replies'
     ok not frame.some((row) -> BAR.test row), "it fits: no bar\n#{frame.join '\n'}"
 
-test! "G, gg and the half page in the thread: a page is a quarter of the pane's rows, and the cursor's comment stays in view", ->
+test! "G, gg and the half page in the thread: half the pane's rows at four rows a comment, and the cursor's comment stays in view", ->
   reader! Fake.new(), ({ view, app, fake, clockAt }) ->
     view.press 'Enter'
     settle! fake
@@ -850,7 +854,11 @@ test! "G, gg and the half page in the thread: a page is a quarter of the pane's 
     eq app.detailCursor.value, 0
     eq heads(view)[0], ' ▶ alice · 2h ago'
     view.press 'd', ctrl: true
-    eq app.detailCursor.value, Math.min(4, Math.floor(19 / 4)), 'a quarter of the 19-row pane'
+    eq app.detailCursor.value, Math.floor(19 / 2 / 4), 'half of the 19-row pane: two comments'
+    view.press 'PageDown'
+    eq app.detailCursor.value, 4, 'a whole page, four, clamped to the last'
+    view.press 'u', ctrl: true
+    eq app.detailCursor.value, 2
     view.press 'u', ctrl: true
     eq app.detailCursor.value, 0
 
@@ -869,8 +877,8 @@ test! "replies load to depth 8, so a chain of eleven is nine rows, and the gutte
 
 console.log "\nhn: links"
 
-test! "Enter on a comment lists its links in a popup titled by their count: j, k, g and G move, o opens the link in the browser, and Escape closes it", ->
-  reader! Fake.new(), ({ view, app, fake, opened }) ->
+test! "Enter on a comment lists its links in a popup titled by their count: j, k, gg and G move, o opens the link in the browser, and Escape or Backspace closes it", ->
+  reader! Fake.new(), ({ view, app, fake, opened, clockAt }) ->
     view.press 'Enter'
     settle! fake
     view.press 'Enter'
@@ -884,14 +892,25 @@ test! "Enter on a comment lists its links in a popup titled by their count: j, k
     eq app.linkAt.value, 1
     ok lines(view).some((row) -> row.includes '▶ 2. the docs')
     view.press 'g'
+    eq app.linkAt.value, 1, 'one g is not gg'
+    clockAt.now += 100
+    view.press 'g'
     eq app.linkAt.value, 0
     view.press 'G'
     eq app.linkAt.value, 1
+    clockAt.now += 600
+    view.press 'g'
+    eq app.linkAt.value, 1, 'a g 600 ms after the last is a first g'
     view.press 'o'
     eq opened, ['https://example.com/docs']
     ok app.links.value?, 'an external open keeps the popup'
     view.press 'Escape'
     eq app.links.value, null
+    view.press 'Enter'
+    ok app.links.value?, 'opened again'
+    view.press 'Backspace'
+    eq app.links.value, null, 'Backspace closes it too'
+    eq app.view.value.kind, 'detail', 'and goes no further back'
 
 test! "a link into a comment resolves to its story and lands the cursor on it with ↩ 1; h goes back to the thread as it was left, and Escape from there to the list", ->
   reader! Fake.new(), ({ view, app, fake }) ->
@@ -913,8 +932,8 @@ test! "a link into a comment resolves to its story and lands the cursor on it wi
     view.press 'Escape'
     eq app.view.value.kind, 'list'
 
-test! "an anchor link into the same story pushes a new thread with the cursor on the anchored comment", ->
-  reader! Fake.new(), ({ view, app, fake }) ->
+test! "an anchor link into the same story pushes a new thread with the cursor on the anchored comment, and the focus is spent: gg then space keep the cursor where it is; an anchor to no comment leaves it at the top", ->
+  reader! Fake.new(), ({ view, app, fake, clockAt }) ->
     view.press 'Enter'
     settle! fake
     view.press 'j' for n in [1..3]
@@ -925,6 +944,19 @@ test! "an anchor link into the same story pushes a new thread with the cursor on
     eq [app.view.value.story.id, app.stack.value.length], [1001, 1]
     ok heads(view).includes('   ▶ gina · 10m ago')
     ok lines(view)[1].endsWith('↩ 1')
+    eq app.pendingFocus.value, null, 'the thread was in, so the focus was applied at once'
+    view.press 'g'
+    clockAt.now += 100
+    view.press 'g'
+    eq app.detailCursor.value, 0
+    view.press ' '
+    eq app.detailCursor.value, 0, 'collapsing alice does not drag the cursor back to gina'
+    eq heads(view)[0], ' ▶ alice · 2h ago · [+] 2 replies'
+    app.links.value = [{ text: 'gone', url: 'https://news.ycombinator.com/item?id=1001#9999' }]
+    app.linkAt.value = 0
+    view.press 'Enter'
+    settle! fake
+    eq [app.view.value.story.id, app.stack.value.length, app.detailCursor.value, app.pendingFocus.value], [1001, 2, 0, null]
 
 test! "a link to nothing viewable is the not-found view, where r asks nothing", ->
   reader! Fake.new(), ({ view, app, fake }) ->
@@ -1020,7 +1052,7 @@ test! "the popup prefetches its internal links into the cache, four at a time, s
 
 console.log "\nhn: the mouse"
 
-test! "a right press opens the context menu at the press, kept on the screen and off its last row, with the item under the pointer selected; k and Enter take an item, Escape and a press outside close it, and the save label follows the file", ->
+test! "a right press opens the context menu at the press, kept on the screen and off its last row, with the item under the pointer selected; k and Enter take an item, Escape and a press outside close it, a press on its frame does not, and the save label follows the file", ->
   reader! Fake.new(), ({ view, app, opened }) ->
     click view, 95, 26, 2
     eq app.listCursor.value, 10, 'the press selects rank 11 first'
@@ -1044,6 +1076,14 @@ test! "a right press opens the context menu at the press, kept on the screen and
     view.frame()
     click view, 60, 20
     eq app.menu.value, null, 'a press outside closes it'
+    click view, 2, 5, 2
+    view.frame()
+    click view, 10, 5
+    ok app.menu.value?, 'a press on the top border keeps it open'
+    click view, 24, 7
+    ok app.menu.value?, 'and one on the right border'
+    view.press 'Escape'
+    eq app.menu.value, null
     click view, 2, 5, 2
     view.frame()
     view.press 'Enter'
@@ -1132,6 +1172,24 @@ test! "t toggles the theme, and the wipe sweeps it in from the origin: the frame
     view.frame()
     ok styled(view)[1].includes('«#000000 on #ff6600 bold»Y'), 'dark again'
 
+# The Wipe is the clock's only holder and lets go of it from the beat
+# that ends it, so the clock stops inside its own flush: the next wipe
+# must still read a fresh clock (tui.rip's `Tick`).
+test! "t three times 700 ms apart: every wipe ends within its half second of its t, the second and the third as the first", ->
+  reader! Fake.new(), ({ view, app }) ->
+    ends = for n in [1..3]
+      view.press 't'
+      beats = 0
+      until app.wipe.value is null or beats > 60
+        view.tick 16
+        view.frame()
+        beats += 1
+      view.tick 700 - beats * 16
+      view.frame()
+      beats * 16
+    ok ends.every((ms) -> ms <= 520), "each wipe ends within 520 ms of its t: #{ends}"
+    eq app.theme.value.name, 'light'
+
 test! "? opens the help over a scrim that dims the rows beneath, with the view's groups and the keys padded to the longest; j does nothing while it is open; Escape and ? close it; the thread's help says space", ->
   reader! Fake.new(), ({ view, app, fake }) ->
     view.press '?'
@@ -1181,6 +1239,56 @@ test! "s saves and unsaves the story under the cursor, newest first in saved.jso
     view.press 's'
     settle! fake
     eq lines(view)[16], ' '.repeat(29) + "No saved posts yet. Press 's' on a story."
+
+test! "a save toggled in the Saved tab keeps the cursor on its row, clamped to the last; a story opened from History keeps the cursor on its row when it comes back", ->
+  reader! Fake.new(), ({ view, app, fake }) ->
+    view.press 's'
+    view.press 'j'
+    view.press 's'
+    view.press 'j'
+    view.press 's'
+    view.press 'S'
+    settle! fake
+    eq (item.id for item in app.items.value), [1005, 1002, 1001]
+    view.press 'j'
+    view.press 's'
+    settle! fake
+    eq [(item.id for item in app.items.value), app.listCursor.value], [[1005, 1001], 1], 'the row under the cursor is gone and the cursor stays on its row'
+    view.press 's'
+    settle! fake
+    eq [(item.id for item in app.items.value), app.listCursor.value], [[1005], 0], 'clamped to the last row'
+    view.press '1'
+    settle! fake
+    view.press 'Enter'
+    settle! fake
+    view.press 'Escape'
+    view.press 'j'
+    view.press 'Enter'
+    settle! fake
+    view.press 'Escape'
+    view.press 'H'
+    settle! fake
+    eq (item.id for item in app.items.value), [1002, 1001]
+    view.press 'j'
+    view.press 'Enter'
+    settle! fake
+    eq app.view.value.story.id, 1001
+    view.press 'Escape'
+    settle! fake
+    eq [(item.id for item in app.items.value), app.listCursor.value], [[1001, 1002], 1], 'the story opened is first now, and the cursor is on its row'
+
+test! "the strip counts its comments as the rows do: one is '1 comment'", ->
+  reader! Fake.new(), ({ view, app, fake }) ->
+    at = app.items.value.findIndex (item) -> item.id is 1006
+    ok at > 0
+    view.press 'j' for n in [1..at]
+    row = plain lines(view)[6 + at * 2]
+    ok row.includes('| 1 comment') and not row.includes('1 comments'), "the row: #{row}"
+    view.press 'Enter'
+    settle! fake
+    eq app.view.value.story.id, 1006
+    row = lines(view)[5]
+    ok row.includes('| 1 comment  · blog.example.org'), row
 
 test! "the stories opened are in the history, newest first and dimmed; H lists them with its own hints, x clears them there and nowhere else", ->
   reader! Fake.new(), ({ view, app, fake, dir }) ->
