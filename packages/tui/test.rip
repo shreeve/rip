@@ -2754,6 +2754,58 @@ test "an effect that reads a clock does not run as the app closes: what the tear
     view.close()
   eq seen, [0, 40, 80], 'nothing ran at close'
 
+# The runtime drops a write to a state made while that state's own
+# effects run, so the reset `stop` writes is lost when the last holder
+# lets go from an effect a beat ran: the cell keeps that beat.
+test "a clock let go inside a beat reads 0 to its next holder, mounted later or swapped in by the same beat", ->
+  firsts = []
+  Holder = component
+    @label := ''
+    @done := null
+    tick = clock 16
+    seen = false
+    ~>
+      time = tick.time
+      unless seen
+        seen = true
+        firsts.push [@label, time]
+      @done?() if time >= 48
+      return
+    render
+      Text "#{tick.frame}"
+  Parent = component
+    shown := true
+    label := 'first'
+    swap := false    # `done` puts another holder in the ending one's place
+    other := false
+    render
+      Box
+        if shown and other
+          Holder label: label, done: -> if swap then other = not other else shown = false
+        else if shown
+          Holder label: label, done: -> if swap then other = not other else shown = false
+  view = mount Parent, cols: 10
+  try
+    view.frame()
+    view.tick 16 for n in [1..4]
+    view.frame()
+    eq view.app.shown.value, false, 'the holder is gone'
+    view.app.label.value = 'second'
+    view.app.shown.value = true
+    view.frame()
+    eq firsts, [['first', 0], ['second', 0]], 'the second holder reads 0, not the beat the first let go on'
+    view.tick 16
+    eq view.frame(), '1', 'and the clock runs again from there'
+    view.app.label.value = 'third'
+    view.app.swap.value = true
+    view.tick 32
+    eq view.frame(), '0'
+    eq firsts, [['first', 0], ['second', 0], ['third', 0]], 'a holder put in place by the beat that ended the last one reads 0 too'
+    view.tick 16
+    eq view.frame(), '1'
+  finally
+    view.close()
+
 test "two components reading one interval share one timer, which runs while a reader remains and stops at close", ->
   fake = timers()
   Spin = component

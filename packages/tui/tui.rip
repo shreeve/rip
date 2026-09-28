@@ -128,15 +128,24 @@ print.err = (text) -> print text, live?.err ?? process.stderr
 # terminal. A component holds the clock it makes in its body
 # (`tick = clock 80`) and lets go when it unmounts, which stops the
 # timer once no holder is left; a clock made outside any component is
-# held for good, and its timer stops when the app closes.
+# held for good, and its timer stops when the app closes. A stopped
+# clock reads 0, whatever its cell holds: the runtime drops a write to
+# a state made while that state's own effects run, so the reset `stop`
+# writes is lost when the last holder lets go from an effect a beat ran
+# — the Wipe ending itself — and the cell keeps that beat until the next
+# run's first one lands. `stale` says so, and `read` answers zeros
+# meanwhile; the write is kept for the readers it does reach.
+ZERO =! Object.freeze { frame: 0, time: 0, delta: 0 }
+
 class Tick
   constructor: (@interval) ->
-    @cell = watch { frame: 0, time: 0, delta: 0 }
+    @cell = watch ZERO
     @holders = 0
     @cancel = null   # the running timer's cancel, while it runs
     @timers = null   # a timer source given by hand, a test's
     @source = null
     @began = @last = 0
+    @stale = false   # the cell holds a beat of a run that has stopped
 
   get frame: -> @read().frame
   get time: -> @read().time
@@ -144,7 +153,8 @@ class Tick
 
   read: ->
     @start() if not @cancel and @holders and live and live.view.interactive isnt false
-    @cell.read()
+    beat = @cell.read()
+    if @stale then ZERO else beat
 
   start!: ->
     @source = @timers ?? live.clock ?? TIMERS
@@ -160,13 +170,15 @@ class Tick
       return
     @cancel = @source.after @interval, => @beat()
     now = @source.now()
+    @stale = false
     @cell.write Object.freeze { frame: Math.floor((now - @began) / @interval), time: now - @began, delta: now - @last }
     @last = now
 
   stop!: ->
     @cancel?()
     @cancel = null
-    @cell.write { frame: 0, time: 0, delta: 0 }
+    @stale = true
+    @cell.write ZERO
 
   release!: ->
     @holders -= 1
