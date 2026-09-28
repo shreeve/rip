@@ -317,6 +317,12 @@ test "a paint value is refused where it is written, by key, with the words the k
     throws (-> words.set 'link', "https://example.com/\u009c"), 'is not a link'
     throws (-> words.set 'link', 'https://example.com/日本'), 'is not a link'
     throws (-> words.set 'link', 42), 'link: 42 is not a link'
+    throws (-> box.set 'borderTitle', "a\nb"), 'borderTitle: "a\\nb" is not a title — write one line of printable text'
+    throws (-> box.set 'borderTitle', "a\tb"), 'borderTitle: "a\\tb" is not a title'
+    throws (-> box.set 'borderTitle', "a\x1b[31mb"), 'is not a title'
+    throws (-> box.set 'borderTitle', 7), 'borderTitle: 7 is not a title'
+    throws (-> box.set 'borderTitleAlign', 'middle'), 'borderTitleAlign: "middle" is not one of left, center, right'
+    throws (-> words.set 'borderTitle', 'x'), "'borderTitle' has no meaning on text"
     eq [box.styles, words.styles], [{}, {}]
     box.set key, value for key, value of { color: '#0af', backgroundColor: 'ansi256(208)', borderColor: 'rgb(0, 128, 255)', borderTop: false, overflowX: 'hidden', contentOffsetX: 3 }
     eq box.styles.borderTop, false
@@ -719,6 +725,28 @@ test "every border style of Ink's, and a style of one's own", ->
   eq framed('classic'), "+--+\n|ab|\n+--+"
   eq framed('arrow'), "↘↓↓↙\n→ab←\n↗↑↑↖"
   eq framed({ topLeft: '1', top: '2', topRight: '3', right: '4', bottomRight: '5', bottom: '6', bottomLeft: '7', left: '8' }), "1223\n8ab4\n7665"
+
+# A title that started at the edge's second column, one measured by
+# `.length`, or one hidden or cut with no '…' would each fail a row here.
+test "a border title is inlaid in the top edge from its third column, in the edge's style, cut with … by cells where the edge is too short", ->
+  titled = (w, title, align, styles = {}) ->
+    Titled = component
+      render
+        Box width: w, borderStyle: 'round', borderTitle: title, borderTitleAlign: align, style: styles
+          Text "ab"
+    renderToString Titled, cols: 20
+  eq titled(12, ' Keys '), "╭─ Keys ───╮\n│ab        │\n╰──────────╯"
+  eq titled(13, ' Keys ', 'center').split('\n')[0], "╭── Keys ───╮", '3.5 floors to 3'
+  eq titled(12, ' Keys ', 'right').split('\n')[0], "╭─── Keys ─╮"
+  eq titled(8, ' Keys ').split('\n')[0], "╭─ Ke…─╮"
+  eq titled(8, '日本語').split('\n')[0], "╭─日…──╮", 'cut by cells'
+  eq titled(4, ' Keys ').split('\n')[0], "╭──╮", 'no room is no title'
+  eq titled(12, ' Keys ', 'left', { borderTop: false }).split('\n')[0], "│ab        │"
+  Green = component
+    render
+      Box width: 12, borderStyle: 'round', borderColor: 'green', borderTitle: ' Keys '
+        Text "ab"
+  eq renderToString(Green, cols: 12, ansi: true).split('\n')[0], "\x1b[32m╭─ Keys ───╮\x1b[0m", 'one run in the edge style'
 
 test "each border edge takes its own color and dimming, else the border's", ->
   Tinted = component
@@ -1650,9 +1678,10 @@ test "a border or a background owes the box, and a color that passes down owes e
     @edge := 'red'
     @back := undefined
     @tone := undefined
+    @title := undefined
     render
       Box flexDirection: 'row', height: 4, alignItems: 'flex-start'
-        Box width: 10, height: 3, borderStyle: 'single', borderColor: @edge, backgroundColor: @back
+        Box width: 10, height: 3, borderStyle: 'single', borderColor: @edge, backgroundColor: @back, borderTitle: @title
           Text "words"
         Box width: 4, flexDirection: 'row', color: @tone
           Text width: 6
@@ -1663,6 +1692,11 @@ test "a border or a background owes the box, and a color that passes down owes e
     app.edge.value = 'blue'
     eq draw(), 30
     app.back.value = 'blue'
+    eq draw(), 30
+    # A title is part of the border: it owes the box, as the edges do.
+    app.title.value = ' t '
+    eq draw(), 30
+    app.title.value = undefined
     eq draw(), 30
     # The words are wider than their box, and take its color all the same.
     app.tone.value = 'green'

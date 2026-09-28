@@ -30,6 +30,7 @@ PAINT =! [
   'borderColor', 'borderTopColor', 'borderBottomColor', 'borderLeftColor', 'borderRightColor'
   'borderDimColor', 'borderTopDimColor', 'borderBottomDimColor', 'borderLeftDimColor', 'borderRightDimColor'
   'borderBackgroundColor', 'borderTopBackgroundColor', 'borderBottomBackgroundColor', 'borderLeftBackgroundColor', 'borderRightBackgroundColor'
+  'borderTitle', 'borderTitleAlign'
 ]
 
 # Switches that stand unless they are turned off, so `false` is a value
