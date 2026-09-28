@@ -258,7 +258,10 @@ track and thumb for a box that scrolls with `contentOffsetY`: nothing
 while everything fits, else the thumb is `shown / total` of the track in
 half cells (`█`, `▀`, `▄`), one at least, and meets the track's foot at
 the last offset; `height:` is the track's rows (`shown` unless given),
-`trackColor:` and `thumbColor:` its colors.
+`trackColor:` and `thumbColor:` its colors. `reveal start, end, offset,
+shown` is the offset that brings rows `[start, end)` into a box `shown`
+rows tall: rows that start above it or end below it are aligned to the
+nearer edge, rows in view and rows past both ends move nothing.
 
 | Moves boxes | Recolors cells |
 |---|---|

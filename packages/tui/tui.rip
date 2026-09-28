@@ -67,6 +67,21 @@ export Scrollbar = component
     div width: 1, flexShrink: 0, backgroundColor: @trackColor, hidden: @total <= @shown
       span color: @thumbColor, thumb
 
+# The content offset that brings rows [start, end) into a box `view`
+# rows tall, from `offset` — as OpenTUI scrolls a child into view: rows
+# past both ends move nothing; rows that start above and fit, or end
+# below and do not, align to the top; rows that start above and do not
+# fit, or end below and fit, align to the bottom; rows in view move
+# nothing.
+export reveal =! (start, end, offset, view) ->
+  size = end - start
+  above = start < offset
+  below = end > offset + view
+  return offset if above and below
+  return start if (above and size < view) or (below and size > view)
+  return end - view if (above and size > view) or (below and size < view)
+  offset
+
 # `count` line breaks inside text.
 export Newline = component
   @count := 1

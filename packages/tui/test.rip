@@ -3,7 +3,7 @@
 # ==============================================================================
 
 import { test, eq, ok, throws } from 'rip/testing'
-import { run, quit, mount, renderToString, screen, print, clock, Box, Text, Spacer, Scrollbar, Static, Newline } from 'rip/tui'
+import { run, quit, mount, renderToString, screen, print, clock, reveal, Box, Text, Spacer, Scrollbar, Static, Newline } from 'rip/tui'
 import * as mod from 'rip/tui'
 import { install } from './document.rip'
 import { layout } from './layout.rip'
@@ -170,7 +170,7 @@ test "a Static container is looked at from its last written item: an item taken 
     view.close()
 
 test "module exports the entry surface and nothing else", ->
-  eq Object.keys(mod).sort(), ['Box', 'Newline', 'Scrollbar', 'Spacer', 'Static', 'Text', 'clock', 'focus', 'mount', 'print', 'quit', 'renderToString', 'run', 'screen', 'suspend']
+  eq Object.keys(mod).sort(), ['Box', 'Newline', 'Scrollbar', 'Spacer', 'Static', 'Text', 'clock', 'focus', 'mount', 'print', 'quit', 'renderToString', 'reveal', 'run', 'screen', 'suspend']
 
 test "declares no dependencies", ->
   pkg = JSON.parse readFileSync(join(import.meta.dir, 'package.json'), 'utf8')
@@ -544,6 +544,14 @@ test "a scrollbar is one column of half cells: the thumb is shown/total of the t
     render
       Scrollbar total: -1, shown: 10
   throws (-> renderToString Bad), 'Scrollbar: total: -1 is not a number of rows, 0 or more'
+
+test "reveal answers the offset that brings rows into a box's view, as OpenTUI scrolls a child into view", ->
+  eq reveal(3, 5, 0, 10), 0, 'in view: no move'
+  eq reveal(2, 4, 5, 10), 2, 'starts above and fits: the top'
+  eq reveal(12, 14, 0, 10), 4, 'ends below and fits: the bottom'
+  eq reveal(0, 20, 5, 10), 5, 'past both ends: no move'
+  eq reveal(0, 15, 6, 10), 5, 'starts above and does not fit: the bottom'
+  eq reveal(4, 20, 0, 10), 4, 'ends below and does not fit: the top'
 
 test "padding and a border inset the content", ->
   Card = component
