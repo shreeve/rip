@@ -878,6 +878,21 @@ one of them is mounted and has read it, and never off a terminal. Under
 `mount` the clock runs on the mount's own time, so `view.tick 80` moves
 the spinner a frame, as it moves the parser's waits.
 
+`screen.post = (back, front) -> …` rewrites a frame after it is
+painted and before it is diffed: `back` is the grid about to be sent
+and `front` the one the terminal shows, each three typed arrays of
+`cols` by `rows` cells — `ch`, the code point or cluster id, `style`,
+the interned style id, and `wide`, the width, 0 on a cell a wide glyph
+continues into. While it is set every frame is painted and compared
+whole, and the diff still sends only the cells that differ; every set
+owes a whole frame, so a `clock` that sets it each beat drives the
+frames it rewrites, and `null` unsets it and owes one more whole frame,
+which leaves nothing of the rewrite on the terminal. Anything but a
+function or `null` is refused, as is a set with no app running. Beside
+it, `paint.rip` exports `recolor id, bg`, the id of a style on another
+background, and `grid.mend()` makes every wide glyph whole again after
+cells were mixed from two grids.
+
 ## Progress
 
 `screen.progress value` puts the app's progress on the terminal's own

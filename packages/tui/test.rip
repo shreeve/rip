@@ -7,7 +7,7 @@ import { run, quit, mount, renderToString, screen, print, clock, reveal, Box, Te
 import * as mod from 'rip/tui'
 import { install } from './document.rip'
 import { layout } from './layout.rip'
-import { Grid, paint, diff, rowsToString, tally as styleCount } from './paint.rip'
+import { Grid, paint, diff, rowsToString, intern, recolor, tally as styleCount } from './paint.rip'
 import { tally as clusterCount, clusterWidth } from './text.rip'
 import { __setChildFailureReporter } from '../../src/runtime/components.js'
 import { Log as BuildLog } from './examples/log.rip'
@@ -1249,6 +1249,27 @@ test "a wide character takes two cells", ->
   eq grid.toString(), '日本'
   eq Array.from(grid.wide), [2, 0, 2, 0, 1, 1]
 
+test "mend makes every wide glyph whole again: a lead whose continuation is gone, a continuation whose lead is gone, and a lead past its row each become a space", ->
+  grid = Grid.new 8, 1
+  grid.write 0, 0, '日本ab', 0
+  # Cells mixed in from another grid: over 日's continuation, an orphan
+  # continuation after `b`, and a lead in the last column.
+  grid.ch[1] = 88
+  grid.wide[1] = 1
+  grid.wide[5] = 0
+  grid.ch[7] = 0x672C
+  grid.wide[7] = 2
+  grid.mend()
+  eq Array.from(grid.wide), [1, 1, 2, 0, 1, 1, 1, 1]
+  eq grid.toString(), ' X本a'
+
+test "recolor is a style's id on another background, its color, weight and link kept", ->
+  id = intern 'red', null, 1, 'https://example.com'
+  grid = Grid.new 1, 1
+  grid.put 0, 0, 120, recolor(id, 'blue')
+  eq grid.toString(true), "\x1b[1;31;44m#{OPEN 'https://example.com'}x#{SHUT}\x1b[0m"
+  ok recolor(recolor(id, 'blue'), null) is id, 'the same record is the same id'
+
 # A screen's two grids over a mounted document, as screen.rip keeps
 # them: `frame()` answers the bytes of the next frame, `front()` the grid
 # those bytes leave on the terminal.
@@ -1547,6 +1568,45 @@ test "bytes are what a terminal was sent: each frame's difference from the one b
     eq view.bytes, '', 'a frame that changes no cell sends nothing'
   finally
     view.close()
+
+# A rewrite run after the diff would show in the frame and not in the
+# bytes; an unset that owed no whole frame would leave the X on the
+# terminal.
+test "screen.post rewrites the frame after the paint and before the diff, every frame whole while it is set, and one more whole frame when it is unset", ->
+  Pair = component
+    @count := 41
+    render
+      Box flexDirection: 'column'
+        Text "count #{@count}"
+        Text "second"
+  view = mount Pair, cols: 10, rows: 2
+  try
+    eq view.frame(), "count 41\nsecond"
+    view.app.count.value = 42
+    eq view.frame(), "count 42\nsecond"
+    eq view.damage, 8, 'no whole frame while post is unset'
+    fronts = []
+    screen.post = (back, front) ->
+      fronts.push front.toString().split('\n')[0]
+      back.ch[0] = 88
+    eq view.frame(), "Xount 42\nsecond"
+    ok view.bytes.includes('X'), "the rewrite is in the bytes: #{JSON.stringify view.bytes}"
+    eq view.damage, 20, 'a set owes a whole frame'
+    eq fronts, ['count 42'], 'front is the grid the terminal shows'
+    view.app.count.value = 43
+    eq view.frame(), "Xount 43\nsecond"
+    eq view.damage, 20, 'every frame is whole while it is set'
+    screen.post = null
+    eq view.frame(), "count 43\nsecond", 'the unset frame draws what the tree says'
+    eq view.damage, 20, 'an unset owes one whole frame'
+    view.app.count.value = 44
+    view.frame()
+    eq view.damage, 8, 'and no more'
+    throws (-> screen.post = 3), 'screen.post: 3 is not a function'
+    eq screen.post, null
+  finally
+    view.close()
+  throws (-> screen.post = (->)), 'no app is running — screen.post rewrites the frames run draws'
 
 test "a mount's terminal has a size: a tall frame shows its bottom, and a resize draws the next frame whole", ->
   Sized = component

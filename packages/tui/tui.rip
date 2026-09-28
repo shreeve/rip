@@ -211,6 +211,18 @@ class Viewport
   # Progress on the terminal's own indicator: 0 to 1, 'error',
   # 'indeterminate', or null to clear (screen.rip).
   progress: (value) -> live?.view.progress value
+  # A function that rewrites each frame after it is painted and before
+  # it is diffed, `(back, front) ->` on the two grids (screen.rip), or
+  # null. Every set owes a whole frame, so a clock that sets it each
+  # beat drives the frames it rewrites, and an unset draws one more,
+  # which leaves nothing of the rewrite on the terminal.
+  get post: -> live?.view.post ?? null
+  set post: (fn) ->
+    throw Error.new 'rip/tui: no app is running — screen.post rewrites the frames run draws' unless live
+    throw Error.new "rip/tui: screen.post: #{JSON.stringify fn} is not a function — write (back, front) ->, or null to stop rewriting" unless fn is null or typeof fn is 'function'
+    live.view.post = fn
+    live.doc.damage.whole = true
+    live.doc.owe false
 
 # The terminal's size, whether it is the window the user is in (its
 # focus reports), and whether its keyboard is enhanced, as reactive

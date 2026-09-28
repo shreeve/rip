@@ -177,6 +177,12 @@ shift =! (from, to) ->
 # (OSC 8), or with null ends the one that is open.
 hop =! (url) -> "\x1b]8;;#{url ?? ''}\x1b\\"
 
+# The id of style `id` on background `bg`, its color, weight and link
+# kept: what a rewrite of a frame (screen.rip's `post`) tints cells with.
+export recolor =! (id, bg) ->
+  held = records[id]
+  intern held.fg, bg, held.flags, held.link
+
 # Text drawn with no background of its own keeps the one beneath it.
 over =! (id, beneath) ->
   top = records[id]
@@ -380,6 +386,31 @@ export class Grid
     span = @wide[at]
     @ch.fill SPACE, at, at + span
     @wide.fill 1, at, at + span
+
+  # Make every wide glyph whole again after cells were written from
+  # two grids at once (screen.rip's `post`): a lead whose continuation
+  # cells are not its own, or that reaches past its row, and a
+  # continuation with no lead before it, each become a space in their
+  # style. One scan per row.
+  mend!: ->
+    for row in [0...@rows]
+      col = row * @cols
+      end = col + @cols
+      while col < end
+        span = @wide[col]
+        if span is 1
+          col += 1
+          continue
+        if span > 1 and col + span <= end
+          whole = true
+          for next in [col + 1...col + span]
+            whole = false if @wide[next] isnt 0
+          if whole
+            col += span
+            continue
+        @ch[col] = SPACE
+        @wide[col] = 1
+        col += 1
 
   # One cell wide glyph at (x, y).
   put!: (x, y, cell, id) ->
