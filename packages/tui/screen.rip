@@ -40,6 +40,12 @@ sized =! (value, none) -> if value > 0 and (Number.isInteger(value) or value is 
 # pass per reader in a chain; readers that never agree are refused. The
 # boxes a pass writes are read after the pass: a change they cause is
 # made to the tree the next pass reads, never to the one under layout.
+# Made inside the pass, a change under a boundary `halt` has yet to pop
+# is wiped as it pops it: the mark climbs through the boundary while it
+# is clean, then the pop's visit clears it, and the next pass's `sync`
+# stops there. The pin is test/hn.rip's "a thread taller than the pane
+# has a scrollbar…": the first frame of a thread has no bar without the
+# batch, and a collapse then paints from a tree the pass never gathered.
 converge! =! (doc, cols) ->
   passes = 0
   while doc.moved

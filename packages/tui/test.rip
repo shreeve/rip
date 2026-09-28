@@ -1291,31 +1291,6 @@ test "a ref reads its node's box, and the read follows layout", ->
     show 40
     eq seen, [0, 5, 9]
 
-# A box read that hides the scrollbar, flushed inside the pass that
-# wrote the box, would change the tree under layout: the row taken out
-# would be painted from the children the pass gathered before it left,
-# with no words in it.
-test "a box read that changes the tree is flushed after the pass that wrote the box: a scrollbar hidden by the height it measures, as a row leaves", ->
-  Sized = component
-    @items := ['a', 'b', 'c', 'd']
-    inner := null
-    tall ~= inner?.box.h ?? 0
-    render
-      Box flexDirection: 'row', height: 3
-        div flexGrow: 1, flexDirection: 'column', overflow: 'hidden'
-          div ref: inner, flexDirection: 'column'
-            for item in @items
-              Text key: item
-                Text bold: true, "#{item}"
-        Scrollbar total: tall, shown: 3
-  view = mount Sized, cols: 4, rows: 3
-  try
-    eq view.frame(), "a  █\nb  █\nc", 'four rows in three: the bar shows'
-    view.app.items.value = ['a', 'd']
-    eq view.frame(), "a\nd\n", 'two rows fit: the bar hides, and the row taken out is gone'
-  finally
-    view.close()
-
 # ==[ The live screen ]==
 
 console.log "\nScreen"

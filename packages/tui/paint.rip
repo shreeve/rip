@@ -10,6 +10,7 @@
 # A frame paints and compares only its damage: the cells some change may
 # have recolored, a span of columns on each row.
 
+import { __batch } from '../../src/runtime/reactive.js'
 import { kids, layout } from './layout.rip'
 import { visible } from './focus.rip'
 import { CLUSTER, glyph, crowded, evict, sanitize, Flow, refresh, MODES, A0, A1, B0, B1, DOTS, ROW } from './text.rip'
@@ -672,9 +673,12 @@ export rowsToString =! (grid, ansi = false) -> grid.toString ansi
 
 # Paint `node` alone, as a root laid out at `cols`, onto a grid of its
 # own, as tall as the node and the margins above and below it: the rows
-# a `Static` batch writes to the scrollback (screen.rip).
+# a `Static` batch writes to the scrollback (screen.rip). The boxes the
+# layout writes are read after it, as `converge` reads them (screen.rip):
+# a change they cause is made to the tree the next layout reads, never
+# to the one under layout.
 export still =! (node, cols) ->
-  layout node, cols
+  __batch -> layout node, cols
   rect = node.rect
   s = node.styles
   below = s.marginBottom ?? s.marginY ?? s.margin
