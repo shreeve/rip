@@ -1,7 +1,7 @@
 # Ink's counter example: a number that climbs every 100 ms. Ctrl-C
 # quits. Ink's counter.tsx is beside this file.
 #
-#   rip examples/ink/counter.rip
+#   rip demo/ink/counter.rip
 
 import { run, clock, Text } from 'rip/tui'
 

@@ -4,7 +4,7 @@
 # progress indicator follows, and the app quits when the last step is
 # done — or on q.
 #
-#   rip examples/log.rip
+#   rip demo/log.rip
 
 import { run, quit, screen, print, clock, Box, Text, Static } from 'rip/tui'
 

@@ -1,4 +1,4 @@
-# The line counts of the examples ported from Ink (examples/ink/), by
+# The line counts of the examples ported from Ink (demo/ink/), by
 # the rule PLAN §2 counts by: non-blank, non-comment lines. A line is
 # a comment when it is nothing else — `//` or a `/* … */` block in
 # TypeScript, `#` in Rip — and a line of code that ends in a comment
@@ -29,7 +29,7 @@ export count =! (path) ->
 
 # Each example's counts, Ink's tsx against the rip.
 export table =! ->
-  dir = join(import.meta.dir, '..', 'examples', 'ink')
+  dir = join(import.meta.dir, '..', 'demo', 'ink')
   for name in EXAMPLES
     { name, ink: count(join dir, "#{name}.tsx"), rip: count(join dir, "#{name}.rip") }
 

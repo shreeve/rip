@@ -28,7 +28,7 @@ through `rip app.rip`.
 
 ## Quick start
 
-The smallest app that takes a key, `examples/counter.rip`:
+The smallest app that takes a key, `demo/counter.rip`:
 
 ```coffee
 import { run, Box, Text } from 'rip/tui'
@@ -47,7 +47,7 @@ run Counter
 
 ```bash
 bun install                # once, at the repository root
-rip examples/counter.rip   # from packages/tui: ↑ and ↓ count, Ctrl-C quits
+rip demo/counter.rip   # from packages/tui: ↑ and ↓ count, Ctrl-C quits
 ```
 
 `run` returns `{ app, done, quit, flush }`, and `run App, props: {…}` hands the component its initial public state, as `mount` does; `done` resolves with the
@@ -84,8 +84,8 @@ here: a text transform is an ordinary expression in the binding
 ## Side by side with Ink
 
 Four of Ink's own examples, ported program for program under
-`examples/ink/`, with Ink's `.tsx` beside each `.rip`. Each port draws
-the frames Ink 7.1.1 draws for the same example — `test/examples.rip`
+`demo/ink/`, with Ink's `.tsx` beside each `.rip`. Each port draws
+the frames Ink 7.1.1 draws for the same example — `test/demo.rip`
 holds every one of them, and none differs — and `rip test/lines.rip`
 counts the lines: non-blank and non-comment, the rule
 [PLAN.md](PLAN.md) §2 states.
@@ -97,7 +97,7 @@ counts the lines: non-blank and non-comment, the rule
 | `use-focus` | 26 | 19 | Three items Tab moves between: a `focusable` node styled by its own `focused`, where Ink registers a hook; Ink's Escape is a listener on the root box. |
 | `static` | 45 | 14 | Ten tests into the scrollback, one every 100 ms, above a live count: `Static` around a keyed `for`; the app quits with the tenth, where Ink's process ends when its last timer has run. |
 
-Run one with `rip examples/ink/counter.rip`.
+Run one with `rip demo/ink/counter.rip`.
 
 ## The numbers
 
@@ -162,7 +162,7 @@ so past a few thousand appends Ink is the faster side.
 
 ## Examples
 
-Each runs with `rip examples/<name>.rip` from `packages/tui`.
+Each runs with `rip demo/<name>.rip` from `packages/tui`.
 
 | Example | Shows |
 |---|---|
@@ -176,10 +176,10 @@ Each runs with `rip examples/<name>.rip` from `packages/tui`.
 
 `log.rip`, `input.rip` and the ports export their component and run it
 only as the entry (`run App if import.meta.main`), which is how
-`test.rip` and `test/examples.rip` drive them headless through
+`test.rip` and `test/demo.rip` drive them headless through
 `mount`.
 
-`examples/hn/` is a port of [hntui](https://github.com/ahmd-sh/hntui),
+`demo/hn/` is a port of [hntui](https://github.com/ahmd-sh/hntui),
 a Hacker News reader written on OpenTUI and React, with its keys, texts
 and colors kept (NOTICE): the six feeds, saved stories and history in
 `~/.config/rip-hn`, a story's thread with its links followed in-app, a
@@ -777,7 +777,7 @@ a tree of 2,403 nodes a motion report is about 0.6 µs and a click about
 the frame is not at the terminal's first row, so with the mouse the
 package asks the terminal where its cursor is (`CSI ? 6 n`) once the app
 stands and after every resize, and lowers the answer when a frame
-scrolls the terminal; `examples/files.rip` is the whole idiom, list and
+scrolls the terminal; `demo/files.rip` is the whole idiom, list and
 preview.
 
 **Selection and the clipboard.** A drag with the left button selects
@@ -887,7 +887,7 @@ yet written first — those the same turn added included, even from an
 effect that runs before the render block that adds them — so the
 scrollback is in the order of the program. Off a terminal the rows go
 out as plain text as they
-arrive; on the alternate screen nothing is written above. `examples/log.rip`
+arrive; on the alternate screen nothing is written above. `demo/log.rip`
 is a build log this way, with a spinner and a progress bar for the
 step under way.
 
@@ -968,11 +968,11 @@ of a `Static` write and of `print`, the mouse after one, the clock's
 one timer and where it stops, and the progress sequence.
 `test/damage.rip` changes random trees a step at a time and holds every
 frame painted from its damage to the same tree painted whole, cell for
-cell, and to the bytes sent, replayed. `test/examples.rip` drives the
-four ports under `examples/ink/` through `mount` and holds each frame
+cell, and to the bytes sent, replayed. `test/demo.rip` drives the
+four ports under `demo/ink/` through `mount` and holds each frame
 to the one Ink draws for its example, holds the line table above to
 what `test/lines.rip` counts, and types, moves, deletes and pastes
-into `examples/input.rip`, holding the frame and the cursor after
+into `demo/input.rip`, holding the frame and the cursor after
 every key. `test/live.rip` drives the repository's live test runner
 with a lane source fed by hand: the lanes in flight and their bars, the
 strip, the scrollback rows in their colors, the progress indicator, the

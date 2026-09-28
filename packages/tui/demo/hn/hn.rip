@@ -3,8 +3,8 @@
 # followed in-app, two themes with a wipe between them, the mouse.
 # `?` lists the keys; q quits.
 #
-#   rip examples/hn/hn.rip              # against the live API
-#   HN_DEMO=1 rip examples/hn/hn.rip    # offline, on the deterministic fake
+#   rip demo/hn/hn.rip              # against the live API
+#   HN_DEMO=1 rip demo/hn/hn.rip    # offline, on the deterministic fake
 #
 # HN_CONFIG_DIR is where saved.json and history.json go, else
 # ~/.config/rip-hn.

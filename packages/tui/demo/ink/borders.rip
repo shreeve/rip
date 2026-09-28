@@ -2,7 +2,7 @@
 # Ink's borders.tsx is beside this file; its Box is a row where this
 # package's is a column, so the two rows say so.
 #
-#   rip examples/ink/borders.rip
+#   rip demo/ink/borders.rip
 
 import { run, Box, Text } from 'rip/tui'
 

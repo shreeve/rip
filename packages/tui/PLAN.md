@@ -173,10 +173,10 @@ rule: where a report lands, what it fires, and what a drag selects are
 one idea, and `tui.rip` hands it every report. The event and its
 dispatch stay in `document.rip`, beside the nodes whose links they walk.
 
-Also at the package root: `test.rip`, `demo.rip`, `bench/` (its own
+Also at the package root: `test.rip`, `demo/panes.rip`, `bench/` (its own
 `package.json` quarantining Ink, React, and `yoga-layout`; `bench.rip`
-runs both sides and writes `RESULTS.md`), `examples/` (`counter`, `files`, `log`, `input`, and
-under `examples/ink/` the four ports of §12 step 6 with Ink's source
+runs both sides and writes `RESULTS.md`), `demo/` (`counter`, `files`, `log`, `input`, and
+under `demo/ink/` the four ports of §12 step 6 with Ink's source
 beside each), `README.md`.
 
 ## 4. The host contract (`document.rip`)
@@ -1438,7 +1438,7 @@ Each step is its own branch and PR under the repo's landing rules.
 | 1 | Layout soundness: an incremental layout equals a fresh one, one float tolerance, values refused where they are written | The reviewers' fuzzers and the differential against compiled Yoga find nothing new; every seeded bug is caught |
 | 2 | Text and the painter: wrap / truncate, grapheme clusters, `overflow: 'hidden'` clipping, per-edge borders, background fills, content offset | Ported Ink paint cases pass |
 | 3 | Damage tracking: paint and diff only what moved (§6) | A small update's paint and diff fall with the damage, measured in `bench/` |
-| 4 | Input, focus, cursor, capture and bubble phases; then mouse and the enhanced keyboard as opt-ins; then text selection with clipboard copy (OSC 52), since mouse capture takes the terminal's own selection away | Ported parser cases pass; the select list and text input (README), and the wheel-scrolled, click-picked, hover-lit file browser (`examples/files.rip`) |
+| 4 | Input, focus, cursor, capture and bubble phases; then mouse and the enhanced keyboard as opt-ins; then text selection with clipboard copy (OSC 52), since mouse capture takes the terminal's own selection away | Ported parser cases pass; the select list and text input (README), and the wheel-scrolled, click-picked, hover-lit file browser (`demo/files.rip`) |
 | 5 | Lifecycle, inline `Static`, non-TTY, console capture, resize, animation clock, progress reporting (OSC 9;4) | Crash, signal, and suspend restore the terminal under test |
 | 6 | Four Ink examples side by side (counter, borders, use-focus, static), README, published bench with a terminal reducer proving both sides drew the same screen | Every README number reproduces with `bun run bench` |
 

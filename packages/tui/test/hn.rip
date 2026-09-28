@@ -16,13 +16,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { mount, screen } from 'rip/tui'
 import * as cells from './ink/cells.rip'
-import { Api, HnError, HnRequestError, HnStatusError, HnTimeoutError, HnDecodeError, HnItemGone, hnErrorMessage, DELAYS, decodeItem, fetcher, timed, retrying, flattenTree } from '../examples/hn/api.rip'
-import { Fake, NOW } from '../examples/hn/fake.rip'
-import { relativeTime, hostname, decodeEntities, htmlToText, extractLinks, parseHnItemLink } from '../examples/hn/format.rip'
-import { Store, HISTORY_CAP, configDir } from '../examples/hn/store.rip'
-import { App } from '../examples/hn/hn.rip'
-import { FRAMES, INDEXES, ALPHAS, COUNT, colorsOver } from '../examples/hn/spinner.rip'
-import { DARK, LIGHT, opaque } from '../examples/hn/theme.rip'
+import { Api, HnError, HnRequestError, HnStatusError, HnTimeoutError, HnDecodeError, HnItemGone, hnErrorMessage, DELAYS, decodeItem, fetcher, timed, retrying, flattenTree } from '../demo/hn/api.rip'
+import { Fake, NOW } from '../demo/hn/fake.rip'
+import { relativeTime, hostname, decodeEntities, htmlToText, extractLinks, parseHnItemLink } from '../demo/hn/format.rip'
+import { Store, HISTORY_CAP, configDir } from '../demo/hn/store.rip'
+import { App } from '../demo/hn/hn.rip'
+import { FRAMES, INDEXES, ALPHAS, COUNT, colorsOver } from '../demo/hn/spinner.rip'
+import { DARK, LIGHT, opaque } from '../demo/hn/theme.rip'
 
 # ---------------------------------------------------------------------
 # Harness
@@ -788,7 +788,7 @@ test! "Enter and c open the story's thread: the header loses its tabs, the story
       eq frame[2], RULE
       eq frame[4], ' Show HN: A Hacker News reader for the terminal, in 900 lines'
       eq frame[5], ' ▲ 312 by shreeve  3h ago  | 8 comments  · github.com'
-      eq frame[6], ' https://github.com/shreeve/rip/tree/main/packages/tui/examples/hn'
+      eq frame[6], ' https://github.com/shreeve/rip/tree/main/packages/tui/demo/hn'
       eq frame[8], RULE
       eq frame[29], DETAIL
       eq (entry.id for entry in JSON.parse readFileSync(join(dir, 'history.json'), 'utf8')), [1001]
@@ -1417,7 +1417,7 @@ test! "a thread whose replies all fail says so with r, r loads them again since 
 test! "o and y open the story's url and its HN page in the browser: from the list they mark the story viewed, from the thread they do not, and s from the thread stars the title", ->
   reader! Fake.new(), ({ view, app, fake, opened }) ->
     view.press 'o'
-    eq opened, ['https://github.com/shreeve/rip/tree/main/packages/tui/examples/hn']
+    eq opened, ['https://github.com/shreeve/rip/tree/main/packages/tui/demo/hn']
     ok styled(view)[5].includes('«#666666 on #212121 bold»Show'), "visited: #{styled(view)[5]}"
     view.press 'y'
     eq opened[1], 'https://news.ycombinator.com/item?id=1001'
