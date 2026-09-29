@@ -101,13 +101,15 @@ export App = component
 
   # The scroll of each view: the offset, the clipped pane, and the box
   # the comments stand in. `held` is the offsets outside the graph, so
-  # the wheel's move never reveals the cursor again.
+  # the wheel's move never reveals the cursor again; `owed` is a reveal
+  # asked before its rows had a layout, for the layout that comes.
   listTop := 0
   detailTop := 0
   listPane := null
   detailPane := null
   commentBox := null
   held = { list: 0, detail: 0 }
+  owed = { list: null, detail: null }
   listTall ~= listPane?.box.h ?? 0
   detailTall ~= detailPane?.box.h ?? 0
   bodyBg ~= opaque theme.body
@@ -225,29 +227,68 @@ export App = component
     detailCursor = at if at >= 0
     return
 
-  # The cursor's row is revealed, and the offset kept within the
-  # content, as the cursor or the layout moves. The story rows are two
-  # rows each; a comment's rows are its box as the last layout gave it.
+  # The cursor's row is revealed as the cursor or the rows move, from
+  # the layout as it last stood — `rect`, read outside the graph — so a
+  # resize reveals nothing, as hntui's scroll box does: the effects on
+  # the layout keep the offset within the content and move it no
+  # further, unless a reveal is owed, asked before its rows had a
+  # layout, which they pay with the one that comes. The story rows are
+  # two rows each; a comment's rows are its box.
   ~>
     at = listCursor
+    total = items.length * 2
+    owed.list = if @revealList at, total then null else at
+
+  ~>
     tall = listTall
     total = items.length * 2
     return unless tall > 0
-    @scrollList reveal(at * 2, at * 2 + 2, held.list, tall), total, tall
+    at = owed.list
+    if at?
+      owed.list = null if @revealList at, total
+    else
+      @scrollList held.list, total, tall
+    return
 
   ~>
     at = detailCursor
     rows = flat
+    owed.detail = if @revealDetail at, rows then null else { at, rows }
+
+  ~>
     pane = detailPane
     box = commentBox
     tall = detailTall
     return unless tall > 0 and pane and box
     within = Math.max 0, box.box.y + box.box.h - pane.box.y
+    ask = owed.detail
+    if ask
+      owed.detail = null if @revealDetail ask.at, ask.rows
+    else
+      @scrollDetail held.detail, within, tall
+    return
+
+  # Each reveal is true when the last layout had what it needed.
+  revealList: (at, total) ->
+    tall = listPane?.rect.h ?? 0
+    return false unless tall > 0
+    @scrollList reveal(at * 2, at * 2 + 2, held.list, tall), total, tall
+    true
+
+  revealDetail: (at, rows) ->
+    pane = detailPane
+    box = commentBox
+    tall = pane?.rect.h ?? 0
+    return false unless tall > 0 and box
+    within = Math.max 0, box.rect.y + box.rect.h - pane.rect.y
     row = (kid for kid in box.childNodes when kid.nodeType is 1)[at]
-    return @scrollDetail(held.detail, within, tall) unless row and rows.length
-    start = row.box.y - pane.box.y
-    return unless row.box.h > 0
-    @scrollDetail reveal(start, start + row.box.h, held.detail, tall), within, tall
+    unless row and rows.length
+      @scrollDetail held.detail, within, tall
+      return true
+    return false unless row.rect.h > 0
+    start = row.rect.y - pane.rect.y
+    @scrollDetail reveal(start, start + row.rect.h, held.detail, tall), within, tall
+    true
 
   scrollList: (to, total, tall) ->
     held.list = Math.max 0, Math.min(to, total - tall)

@@ -1222,6 +1222,36 @@ test! "the wheel scrolls the list a row a tick without moving the cursor, clamps
 
 console.log "\nhn: the theme, the help, the files"
 
+test! "a resize reveals nothing: the wheel's offset stands through a resize, as hntui's scroll box keeps it, and a pane grown past the content only clamps it, not to the cursor", ->
+  reader! Fake.new(), ({ view, app }) ->
+    wheel view, 10, 10 for n in [1..5]
+    eq app.listTop.value, 5
+    view.resize 160, 45
+    eq plain(lines(view)[5]), '      ▲ 1204  by alice  45m ago  | 0 comments', 'the first row shown is the one the wheel left there'
+    eq [app.listTop.value, app.listCursor.value], [5, 0]
+    wheel view, 10, 10 for n in [1..10]
+    view.frame()
+    eq app.listTop.value, 15, 'the offset runs to the end of the content at 45 rows'
+    view.resize 100, 10
+    view.frame()
+    eq app.listTop.value, 15, 'a shrink leaves it'
+    view.resize 100, 60
+    view.frame()
+    eq [app.listTop.value, app.listCursor.value], [5, 0], 'a pane of 53 rows over 58 clamps the offset to 5, and the cursor stays off the screen'
+  reader! Fake.new(), ({ view, app, fake }) ->
+    view.press 'Enter'
+    settle! fake
+    view.frame()
+    wheel view, 10, 15 for n in [1..3]
+    view.frame()
+    eq app.detailTop.value, 3
+    view.resize 100, 20
+    view.frame()
+    eq [app.detailTop.value, app.detailCursor.value], [3, 0], 'the thread of 22 rows in a pane of 9 keeps its offset'
+    view.resize 160, 45
+    view.frame()
+    eq app.detailTop.value, 0, 'at 160 columns the thread wraps to 19 rows and fits the pane of 34: the offset is clamped to 0'
+
 test! "t toggles the theme, and the wipe sweeps it in from the origin: the frame a beat later shows the new theme at the origin, a glow band on the accent, and the old frame beyond, and after half a second the wipe is gone and a frame costs what it did", ->
   reader! Fake.new(), ({ view, app }) ->
     ok styled(view)[1].includes('«#000000 on #ff6600 bold»Y'), 'dark to begin with'
