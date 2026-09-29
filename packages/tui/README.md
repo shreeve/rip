@@ -188,7 +188,9 @@ scrim, two themes with a wipe between them on `screen.post`, and a
 Knight Rider loader on the `clock`. The list and the thread are
 clipped boxes scrolled by content offset with a `Scrollbar` beside
 them, the cursor's row kept in view by `reveal`, and the wheel moves
-the offset a row a tick. `bun run hn` runs it against the live API,
+the offset a row a tick; a story row is cut at the edge where hntui's
+wraps, so a story is always two rows and the pages and the reveal
+count on it. `bun run hn` runs it against the live API,
 and `HN_DEMO=1 bun run hn` offline, on the deterministic fake that
 `test/hn.rip` drives it through — at 100 by 30 through `mount`, every
 view, key, press and request, the fake's clock and the browser in the
