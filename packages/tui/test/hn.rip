@@ -715,6 +715,22 @@ test! "the list at 100 by 30: the brand row, the tabs, the rules, the story rows
     ok look[7].includes('«#666666 on #080808»2.«on #080808» «#dddddd on #080808»Ask'), "an unselected row: #{look[7]}"
     ok look[5].endsWith('«#555555 on #1a1a1a»█'), "the scrollbar's thumb on its track: #{look[5].slice -40}"
 
+test! "the ages follow the clock: five hours on, a key takes them again, so does a press, and with neither the clock does once a minute", ->
+  later = '      ▲ 312  by shreeve  8h ago  | 8 comments'
+  reader! Fake.new(), ({ view, clockAt }) ->
+    eq plain(lines(view)[6]), '      ▲ 312  by shreeve  3h ago  | 8 comments'
+    clockAt.now += 5 * 3600 * 1000
+    view.press 'j'
+    eq plain(lines(view)[6]), later
+  reader! Fake.new(), ({ view, clockAt }) ->
+    clockAt.now += 5 * 3600 * 1000
+    click view, 10, 7
+    eq plain(lines(view)[6]), later
+  reader! Fake.new(), ({ view, clockAt }) ->
+    clockAt.now += 5 * 3600 * 1000
+    view.tick 60000
+    eq plain(lines(view)[6]), later
+
 test! "the cursor moves by j and k, stops at both ends, and G jumps to the last story, which is scrolled into view at the bottom edge", ->
   reader! Fake.new(), ({ view, app }) ->
     view.press 'k'
