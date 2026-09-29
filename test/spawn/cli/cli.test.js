@@ -48,6 +48,29 @@ describe('cli: compile surface', () => {
     expect(r.stdout).toContain('x = 1;');
   });
 
+  test('stdin and -e strip a pasted block\'s common indentation, a shallower line keeps its own, and a file is never dedented', () => {
+    const block = 'for term in [1, 2]\n  if term > 1\n    console.log term\n  else\n    console.log 0\n';
+    const pasted = block.split('\n').map((line) => (line === '' ? '' : `      ${line}`)).join('\n');
+    const tabbed = block.split('\n').map((line) => (line === '' ? '' : `\t${line}`)).join('\n');
+    const trimmed = rip(['-c'], { input: block });
+    expect(trimmed.status).toBe(0);
+    expect(rip(['-c'], { input: pasted }).stdout).toBe(trimmed.stdout);
+    expect(rip(['-c'], { input: tabbed }).stdout).toBe(trimmed.stdout);
+    const ran = rip([], { input: pasted });
+    expect(ran.status).toBe(0);
+    expect(ran.stdout).toBe('0\n2\n');
+    const evaled = rip(['-e', '    x = 40\n    console.log x + 2']);
+    expect(evaled.status).toBe(0);
+    expect(evaled.stdout).toContain('42');
+    const shallower = rip(['-c'], { input: '    x = 1\n  y = 2\n' });
+    expect(shallower.status).not.toBe(0);
+    expect(shallower.stderr).toContain("<stdin>:1:3: Unexpected 'indent'");
+    write('pasted.rip', pasted);
+    const file = rip(['-c', 'pasted.rip']);
+    expect(file.status).not.toBe(0);
+    expect(file.stderr).toContain("Unexpected 'indent'");
+  });
+
   test('-o writes the file and prints nothing', () => {
     write('bump.rip', source);
     const r = rip(['-o', 'bump.js', 'bump.rip']);
