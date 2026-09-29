@@ -29,6 +29,12 @@ HN =! 'https://news.ycombinator.com/item?id='
 
 shelved =! (category) -> category is 'saved' or category is 'history'
 
+# A shifted letter is its lowercase, as OpenTUI reports it to hntui —
+# so J moves, Q quits with Caps Lock on — but for the three bindings
+# that are shifts.
+SHIFTS =! Set.new ['G', 'S', 'H']
+unshifted =! (key) -> if key.length is 1 and key >= 'A' and key <= 'Z' and not SHIFTS.has(key) then key.toLowerCase() else key
+
 export App = component
   @api =! Api.new live()
   @store =! Store.new configDir()
@@ -451,7 +457,7 @@ export App = component
   # Escape cancels a resolve, then the global keys, then the view's.
 
   pressed: (event) ->
-    key = event.key
+    key = unshifted event.key
     storeError = null
     stamp = @now()
     if key is 'q' or (key is 'c' and event.ctrlKey)

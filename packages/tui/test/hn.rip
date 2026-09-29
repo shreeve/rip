@@ -1514,6 +1514,23 @@ test! "o and y open the story's url and its HN page in the browser: from the lis
     view.press 's'
     eq lines(view)[4], ' ★ Ask HN: What are you reading this fall?'
 
+test! "a shifted letter is its lowercase: J moves, T toggles the theme and Q quits; G, S and H keep their own bindings", ->
+  reader! Fake.new(), ({ view, app, fake }) ->
+    view.press 'J'
+    eq app.listCursor.value, 1
+    view.press 'T'
+    eq app.theme.value.name, 'light'
+    view.press 'G'
+    eq app.listCursor.value, 28
+    view.press 'S'
+    eq app.category.value, 'saved'
+    view.press 'H'
+    eq app.category.value, 'history'
+    settle! fake
+    view.press 'Q'
+    eq (await view.done), undefined
+    eq typeof document, 'undefined'
+
 test! "q quits, with an overlay open too, and so does Ctrl-C", ->
   for keys in [['q'], ['Enter', '?', 'q']]
     reader! Fake.new(), ({ view, fake }) ->
