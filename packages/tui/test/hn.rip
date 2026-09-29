@@ -811,6 +811,20 @@ test! "the tabs: l and h cycle through top new best ask show job history saved a
 
 console.log "\nhn: the thread"
 
+# The ids effect empties the list before it raises the loading flag,
+# so the cursor's clamp sees no rows and no load and goes to 0.
+test! "r on a feed and the Y tile fetch it again and reset the cursor to 0, as hntui does", ->
+  reader! Fake.new(), ({ view, app, fake }) ->
+    view.press 'j' for n in [1..5]
+    eq app.listCursor.value, 5
+    view.press 'r'
+    settle! fake
+    eq [app.listCursor.value, app.items.value.length, fake.requests('topstories.json')], [0, 29, 2]
+    view.press 'j' for n in [1..3]
+    click view, 2, 1
+    settle! fake
+    eq [app.listCursor.value, app.items.value.length, fake.requests('topstories.json')], [0, 29, 3]
+
 test! "Enter and c open the story's thread: the header loses its tabs, the story strip shows its title, meta and url, the status hints change, and the story is in history.json", ->
   for key in ['Enter', 'c']
     reader! Fake.new(), ({ view, app, fake, dir }) ->
