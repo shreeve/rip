@@ -11,9 +11,9 @@
 # wheel moves the offset one row a tick. Nothing but the root takes a
 # key.
 
-import { quit, screen, reveal, Box, Text, Scrollbar } from 'rip/tui'
+import { quit, screen, reveal, clock, Box, Text, Scrollbar } from 'rip/tui'
 import { Api, live, HnItemGone, hnErrorMessage, PAGE_SIZE, flattenTree } from './api.rip'
-import { Store, configDir } from './store.rip'
+import { Store, configDir, toggleSaved, addViewed } from './store.rip'
 import { openUrl } from './open.rip'
 import { relativeTime, hostname, htmlToText, extractLinks, parseHnItemLink } from './format.rip'
 import { DARK, LIGHT, opaque } from './theme.rip'
@@ -28,6 +28,12 @@ export GG  =! 500   # milliseconds between two g presses that are gg
 HN =! 'https://news.ycombinator.com/item?id='
 
 shelved =! (category) -> category is 'saved' or category is 'history'
+
+# A shifted letter is its lowercase, as OpenTUI reports it to hntui —
+# so J moves, Q quits with Caps Lock on — but for the three bindings
+# that are shifts.
+SHIFTS =! Set.new ['G', 'S', 'H']
+unshifted =! (key) -> if key.length is 1 and key >= 'A' and key <= 'Z' and not SHIFTS.has(key) then key.toLowerCase() else key
 
 export App = component
   @api =! Api.new live()
@@ -48,9 +54,12 @@ export App = component
   feedLoading := false
   visibleKey ~= ids.slice(0, PAGE_SIZE).join ','
 
-  # The files, read once; every change is written through the store.
+  # The files, read once and kept here; every change is written through
+  # the store, and a write that fails leaves the list changed and its
+  # failure in the status bar until the next key.
   saved := @store.saved()
   history := @store.history()
+  storeError := null
   savedIds ~= Set.new (entry.id for entry in saved)
   viewedIds ~= Set.new (entry.id for entry in history)
 
@@ -84,20 +93,23 @@ export App = component
   theme := DARK
   wipe := null
   stamp := @now()          # when the ages were last taken
+  ages = clock 60000       # the ages are taken again on its beat
   resolver = null          # the AbortController of the resolve in flight
   lastG = 0
-  rowPress = 0             # when a story row was last pressed
+  rowPress = { n: -1, at: 0 }    # the story row last pressed, and when
   bodyPress = { id: 0, at: 0 }   # the comment whose body was last pressed, and when
 
   # The scroll of each view: the offset, the clipped pane, and the box
   # the comments stand in. `held` is the offsets outside the graph, so
-  # the wheel's move never reveals the cursor again.
+  # the wheel's move never reveals the cursor again; `owed` is a reveal
+  # asked before its rows had a layout, for the layout that comes.
   listTop := 0
   detailTop := 0
   listPane := null
   detailPane := null
   commentBox := null
   held = { list: 0, detail: 0 }
+  owed = { list: null, detail: null }
   listTall ~= listPane?.box.h ?? 0
   detailTall ~= detailPane?.box.h ?? 0
   bodyBg ~= opaque theme.body
@@ -180,6 +192,14 @@ export App = component
     try @api.prefetch!(refs, signal) catch then null
     return
 
+  # The ages follow the clock, as hntui's do on every render: every key
+  # and every press takes them again, and once a minute the clock does,
+  # so a resting screen stays true.
+  ~>
+    ages.frame
+    stamp = @now()
+    return
+
   # ── Cursors ───────────────────────────────────────────────────────────
 
   # A list fetched again — the saved tab after a toggle, the history
@@ -207,29 +227,68 @@ export App = component
     detailCursor = at if at >= 0
     return
 
-  # The cursor's row is revealed, and the offset kept within the
-  # content, as the cursor or the layout moves. The story rows are two
-  # rows each; a comment's rows are its box as the last layout gave it.
+  # The cursor's row is revealed as the cursor or the rows move, from
+  # the layout as it last stood — `rect`, read outside the graph — so a
+  # resize reveals nothing, as hntui's scroll box does: the effects on
+  # the layout keep the offset within the content and move it no
+  # further, unless a reveal is owed, asked before its rows had a
+  # layout, which they pay with the one that comes. The story rows are
+  # two rows each; a comment's rows are its box.
   ~>
     at = listCursor
+    total = items.length * 2
+    owed.list = if @revealList at, total then null else at
+
+  ~>
     tall = listTall
     total = items.length * 2
     return unless tall > 0
-    @scrollList reveal(at * 2, at * 2 + 2, held.list, tall), total, tall
+    at = owed.list
+    if at?
+      owed.list = null if @revealList at, total
+    else
+      @scrollList held.list, total, tall
+    return
 
   ~>
     at = detailCursor
     rows = flat
+    owed.detail = if @revealDetail at, rows then null else { at, rows }
+
+  ~>
     pane = detailPane
     box = commentBox
     tall = detailTall
     return unless tall > 0 and pane and box
     within = Math.max 0, box.box.y + box.box.h - pane.box.y
+    ask = owed.detail
+    if ask
+      owed.detail = null if @revealDetail ask.at, ask.rows
+    else
+      @scrollDetail held.detail, within, tall
+    return
+
+  # Each reveal is true when the last layout had what it needed.
+  revealList: (at, total) ->
+    tall = listPane?.rect.h ?? 0
+    return false unless tall > 0
+    @scrollList reveal(at * 2, at * 2 + 2, held.list, tall), total, tall
+    true
+
+  revealDetail: (at, rows) ->
+    pane = detailPane
+    box = commentBox
+    tall = pane?.rect.h ?? 0
+    return false unless tall > 0 and box
+    within = Math.max 0, box.rect.y + box.rect.h - pane.rect.y
     row = (kid for kid in box.childNodes when kid.nodeType is 1)[at]
-    return @scrollDetail(held.detail, within, tall) unless row and rows.length
-    start = row.box.y - pane.box.y
-    return unless row.box.h > 0
-    @scrollDetail reveal(start, start + row.box.h, held.detail, tall), within, tall
+    unless row and rows.length
+      @scrollDetail held.detail, within, tall
+      return true
+    return false unless row.rect.h > 0
+    start = row.rect.y - pane.rect.y
+    @scrollDetail reveal(start, start + row.rect.h, held.detail, tall), within, tall
+    true
 
   scrollList: (to, total, tall) ->
     held.list = Math.max 0, Math.min(to, total - tall)
@@ -258,9 +317,26 @@ export App = component
 
   # ── The files ─────────────────────────────────────────────────────────
 
-  toggleSave: (id) -> saved = @store.toggleSaved id, @now()
-  markViewed: (id) -> history = @store.markViewed id, @now()
-  clearHistory: -> history = @store.clearHistory()
+  # A write that fails is shown, once per failure, as the status bar's
+  # message; the list it was to hold stands, as hntui's does.
+  keep: (name, entries) ->
+    try
+      @store.write name, entries
+    catch error
+      storeError = "can't write #{@store.label name}: #{error.code ?? error.message}"
+    return
+
+  toggleSave: (id) ->
+    saved = toggleSaved saved, id, @now()
+    @keep 'saved.json', saved
+
+  markViewed: (id) ->
+    history = addViewed history, id, @now()
+    @keep 'history.json', history
+
+  clearHistory: ->
+    history = []
+    @keep 'history.json', history
 
   # ── The view stack ────────────────────────────────────────────────────
 
@@ -281,12 +357,14 @@ export App = component
   # From the list a thread starts fresh; from a thread, the one left is
   # pushed with its cursor and its collapsed comments, to come back to.
   # A thread already in — the same story, by an anchor — takes the
-  # focus at once; one still loading takes it as it lands.
+  # focus at once; one still loading takes it as it lands. The view is
+  # set before the history takes the story: the thread opens whatever
+  # the file does.
   enterDetail: (item, focusId = null) ->
     @cancelResolve()
-    @markViewed item.id
     stack = [...stack, { story: view.story, cursor: detailCursor, collapsed }] if view.kind is 'detail'
     view = { kind: 'detail', story: item }
+    @markViewed item.id
     detailCursor = 0
     collapsed = Set.new()
     pendingFocus = if focusId? and commentsLoading then focusId else null
@@ -386,8 +464,8 @@ export App = component
   # ── The mouse ─────────────────────────────────────────────────────────
 
   # A right press selects and opens the menu; a left press on the
-  # selected row, or a second press within DOUBLE ms, opens the story,
-  # and any other selects.
+  # selected row, or a second press on the same row within DOUBLE ms,
+  # opens the story, and any other selects.
   rowPressed: (n, event) ->
     item = items[n]
     return unless item
@@ -396,8 +474,8 @@ export App = component
       @openMenuFor item, event.screenX, event.screenY
       return
     at = @now()
-    if n is listCursor or at - rowPress < DOUBLE then @enterDetail item else listCursor = n
-    rowPress = at
+    if n is listCursor or (rowPress.n is n and at - rowPress.at < DOUBLE) then @enterDetail item else listCursor = n
+    rowPress = { n, at }
 
   headPressed: (n) ->
     detailCursor = n
@@ -420,7 +498,9 @@ export App = component
   # Escape cancels a resolve, then the global keys, then the view's.
 
   pressed: (event) ->
-    key = event.key
+    key = unshifted event.key
+    storeError = null
+    stamp = @now()
     if key is 'q' or (key is 'c' and event.ctrlKey)
       quit()
       return
@@ -543,7 +623,9 @@ export App = component
   feedFailed ~= view.kind is 'list' and idsError? and not shelved(category)
   gone ~= view.kind is 'error' and view.error instanceof HnItemGone
   message ~=
-    if view.kind is 'error'
+    if storeError
+      storeError
+    else if view.kind is 'error'
       if gone then 'h/esc go back · q quit' else 'r retry · h/esc go back · q quit'
     else if feedFailed
       'r retry · q quit'
@@ -563,7 +645,7 @@ export App = component
   commentsTotal ~= if commentBox and detailPane then Math.max(0, commentBox.box.y + commentBox.box.h - detailPane.box.y) else 0
 
   render
-    Box width: '100%', height: screen.rows, flexDirection: 'column', focusable: true, autofocus: true, @keydown: @pressed
+    Box width: '100%', height: screen.rows, flexDirection: 'column', focusable: true, autofocus: true, @keydown: @pressed, @mousedownCapture: (-> stamp = @now())
       Header t: theme, category: category, tabs: view.kind is 'list', depth: stack.length, onSelect: ((key) => @switchCategory key), onHome: (=> @home())
       Box flexGrow: 1, flexShrink: 1, flexBasis: 0, flexDirection: 'column', backgroundColor: theme.body
         if view.kind is 'list'

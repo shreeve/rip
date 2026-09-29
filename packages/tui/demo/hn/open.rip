@@ -1,10 +1,11 @@
-# Opening a url in the person's browser: `open` on macOS, `xdg-open`
-# elsewhere, detached from this process with its output discarded. An
-# empty url is a no-op. The app takes this as its `open` prop, so a
-# test substitutes a function that records the url instead.
+# Opening a url in the person's browser: `open` on macOS, `cmd /c start`
+# on Windows, `xdg-open` elsewhere, detached from this process with its
+# output discarded. An empty url is a no-op. The app takes this as its
+# `open` prop, so a test substitutes a function that records the url
+# instead.
 
 export openUrl =! (url) ->
   return unless url
-  cmd = if process.platform is 'darwin' then ['open', url] else ['xdg-open', url]
+  cmd = if process.platform is 'darwin' then ['open', url] else if process.platform is 'win32' then ['cmd', '/c', 'start', '', url] else ['xdg-open', url]
   Bun.spawn(cmd, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore').unref()
   return

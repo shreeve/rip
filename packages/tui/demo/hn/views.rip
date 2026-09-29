@@ -49,8 +49,8 @@ export Header = component
             Text color: (if @category is 'saved' then @t.tabActiveFg else @t.tabInactiveFg), " [S]aved "
 
 # The bottom strip: the loader while something loads, the hints for
-# the view (or a message that overrides them), `demo` under HN_DEMO,
-# and `? help`.
+# the view (or a message that overrides them, cut to the row), `demo`
+# under HN_DEMO, and `? help`.
 export StatusBar = component
   @t := DARK
   @view := 'list'
@@ -67,7 +67,7 @@ export StatusBar = component
     Box flexDirection: 'row', flexShrink: 0, height: 2, paddingX: 1, gap: 1, alignItems: 'center', backgroundColor: @t.strip, borderStyle: 'single', borderBottom: false, borderLeft: false, borderRight: false, borderColor: @t.border, borderBackgroundColor: @t.strip
       if @loading
         Loader bg: @t.strip
-      Text color: @t.statusHint, "#{@message ?? hints}"
+      Text color: @t.statusHint, wrap: 'truncate', "#{@message ?? hints}"
       Spacer
       if @demo
         Text color: @t.textDim, "demo"

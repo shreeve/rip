@@ -12,14 +12,14 @@
 
 import { test, eq, ok, throws } from 'rip/testing'
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { tmpdir, homedir } from 'node:os'
 import { join } from 'node:path'
 import { mount, screen } from 'rip/tui'
 import * as cells from './ink/cells.rip'
 import { Api, HnError, HnRequestError, HnStatusError, HnTimeoutError, HnDecodeError, HnItemGone, hnErrorMessage, DELAYS, decodeItem, fetcher, timed, retrying, flattenTree } from '../demo/hn/api.rip'
 import { Fake, NOW } from '../demo/hn/fake.rip'
 import { relativeTime, hostname, decodeEntities, htmlToText, extractLinks, parseHnItemLink } from '../demo/hn/format.rip'
-import { Store, HISTORY_CAP, configDir } from '../demo/hn/store.rip'
+import { Store, HISTORY_CAP, configDir, toggleSaved, addViewed } from '../demo/hn/store.rip'
 import { App } from '../demo/hn/hn.rip'
 import { FRAMES, INDEXES, ALPHAS, COUNT, colorsOver } from '../demo/hn/spinner.rip'
 import { DARK, LIGHT, opaque } from '../demo/hn/theme.rip'
@@ -564,36 +564,51 @@ test! "store: nothing saved and no history before any write, and no file is made
     eq [store.saved(), store.history()], [[], []]
     throws (-> readFileSync join(dir, 'saved.json')), Error
 
-test! "store: toggling a save prepends it, writes the file byte for byte, and toggling again removes it", ->
+test! "store: toggling a save prepends it, the write puts the file down byte for byte, and toggling again removes it", ->
   withStore! (store, dir) ->
     t1 = NOW * 1000
     t2 = t1 + 60000
-    eq store.toggleSaved(1001, t1), [{ id: 1001, savedAt: t1 }]
-    eq store.toggleSaved(1002, t2), [{ id: 1002, savedAt: t2 }, { id: 1001, savedAt: t1 }]
+    one = toggleSaved [], 1001, t1
+    eq one, [{ id: 1001, savedAt: t1 }]
+    two = toggleSaved one, 1002, t2
+    eq two, [{ id: 1002, savedAt: t2 }, { id: 1001, savedAt: t1 }]
+    store.write 'saved.json', two
     eq readFileSync(join(dir, 'saved.json'), 'utf8'), JSON.stringify([{ id: 1002, savedAt: t2 }, { id: 1001, savedAt: t1 }], null, 2)
-    eq store.saved(), [{ id: 1002, savedAt: t2 }, { id: 1001, savedAt: t1 }]
-    eq store.toggleSaved(1002, t2 + 1), [{ id: 1001, savedAt: t1 }]
-    eq Store.new(dir).saved(), [{ id: 1001, savedAt: t1 }], 'a fresh store reads the same file'
+    eq store.saved(), two
+    eq toggleSaved(two, 1002, t2 + 1), [{ id: 1001, savedAt: t1 }]
+    eq Store.new(dir).saved(), two, 'a fresh store reads the same file'
 
-test! "store: a view moves its id to the front of the history, once, and clearing empties the file", ->
+test! "store: a view moves its id to the front of the history, once, and an empty list written empties the file", ->
   withStore! (store, dir) ->
     t = NOW * 1000
-    store.markViewed 1001, t
-    store.markViewed 1005, t + 1
-    eq store.markViewed(1001, t + 2), [{ id: 1001, viewedAt: t + 2 }, { id: 1005, viewedAt: t + 1 }]
+    entries = addViewed [], 1001, t
+    entries = addViewed entries, 1005, t + 1
+    entries = addViewed entries, 1001, t + 2
+    eq entries, [{ id: 1001, viewedAt: t + 2 }, { id: 1005, viewedAt: t + 1 }]
+    store.write 'history.json', entries
     eq readFileSync(join(dir, 'history.json'), 'utf8'), JSON.stringify([{ id: 1001, viewedAt: t + 2 }, { id: 1005, viewedAt: t + 1 }], null, 2)
-    eq store.clearHistory(), []
+    store.write 'history.json', []
     eq readFileSync(join(dir, 'history.json'), 'utf8'), '[]'
     eq store.history(), []
 
-test! "store: the history is capped at 1000 on read and on write", ->
+test! "store: the history is capped at 1000 on read and on a view", ->
   withStore! (store, dir) ->
     writeFileSync join(dir, 'history.json'), JSON.stringify(({ id: n, viewedAt: n } for n in [1..1005]))
     eq store.history().length, HISTORY_CAP
     eq store.history()[999].id, 1000
-    entries = store.markViewed 5000, 1
+    entries = addViewed store.history(), 5000, 1
     eq [entries.length, entries[0].id, entries[999].id], [HISTORY_CAP, 5000, 999]
+    store.write 'history.json', entries
     eq JSON.parse(readFileSync(join(dir, 'history.json'), 'utf8')).length, HISTORY_CAP
+
+test! "store: a write under a path that is a file throws with the write's own code, and label shows the home directory as ~", ->
+  withStore! (store, dir) ->
+    writeFileSync join(dir, 'file'), 'x'
+    blocked = Store.new join(dir, 'file')
+    error = try (blocked.write 'saved.json', []; null) catch e then e
+    eq error?.code, 'ENOTDIR'
+    eq blocked.label('saved.json'), join(dir, 'file', 'saved.json')
+    eq Store.new(join(homedir(), 'x')).label('history.json'), '~/x/history.json'
 
 test! "store: a malformed file is an empty list, and entries of another shape are dropped", ->
   withStore! (store, dir) ->
@@ -630,12 +645,14 @@ test "the scanner's first twelve frames, their ramp indexes and their alphas are
 # it was asked to open, and a clock the test moves; `body` gets the
 # mount, the fake and those hands, and the mount is closed and the
 # store removed after it. The first frame is drawn and the fake settled
-# before `body` runs, unless `raw`.
+# before `body` runs, unless `raw`. `seed` gets the temp directory to
+# put files in first, and `at` names the store's directory under it,
+# which is the temp directory itself by default.
 reader! =! (fake, body, options = {}) ->
   api = Api.new { getJson: retrying(fake.transport().getJson, options.delays ?? [0, 0], (-> Promise.resolve())) }
   dir = mkdtempSync join(tmpdir(), 'rip-hn-')
   options.seed? dir
-  store = Store.new dir
+  store = Store.new options.at?(dir) ?? dir
   opened = []
   clockAt = { now: NOW * 1000 }
   view = mount App, cols: 100, rows: 30, mouse: 'all', props: { api, store, open: ((url) -> opened.push url), now: (-> clockAt.now), origin: (-> { x: 0, y: 0 }) }
@@ -697,6 +714,22 @@ test! "the list at 100 by 30: the brand row, the tabs, the rules, the story rows
     ok look[5].includes('«#ff6600 on #212121»1.«on #212121» «#ffffff on #212121 bold»Show'), "the selected row's rank and title on the highlight: #{look[5]}"
     ok look[7].includes('«#666666 on #080808»2.«on #080808» «#dddddd on #080808»Ask'), "an unselected row: #{look[7]}"
     ok look[5].endsWith('«#555555 on #1a1a1a»█'), "the scrollbar's thumb on its track: #{look[5].slice -40}"
+
+test! "the ages follow the clock: five hours on, a key takes them again, so does a press, and with neither the clock does once a minute", ->
+  later = '      ▲ 312  by shreeve  8h ago  | 8 comments'
+  reader! Fake.new(), ({ view, clockAt }) ->
+    eq plain(lines(view)[6]), '      ▲ 312  by shreeve  3h ago  | 8 comments'
+    clockAt.now += 5 * 3600 * 1000
+    view.press 'j'
+    eq plain(lines(view)[6]), later
+  reader! Fake.new(), ({ view, clockAt }) ->
+    clockAt.now += 5 * 3600 * 1000
+    click view, 10, 7
+    eq plain(lines(view)[6]), later
+  reader! Fake.new(), ({ view, clockAt }) ->
+    clockAt.now += 5 * 3600 * 1000
+    view.tick 60000
+    eq plain(lines(view)[6]), later
 
 test! "the cursor moves by j and k, stops at both ends, and G jumps to the last story, which is scrolled into view at the bottom edge", ->
   reader! Fake.new(), ({ view, app }) ->
@@ -777,6 +810,20 @@ test! "the tabs: l and h cycle through top new best ask show job history saved a
     eq app.category.value, 'history'
 
 console.log "\nhn: the thread"
+
+# The ids effect empties the list before it raises the loading flag,
+# so the cursor's clamp sees no rows and no load and goes to 0.
+test! "r on a feed and the Y tile fetch it again and reset the cursor to 0, as hntui does", ->
+  reader! Fake.new(), ({ view, app, fake }) ->
+    view.press 'j' for n in [1..5]
+    eq app.listCursor.value, 5
+    view.press 'r'
+    settle! fake
+    eq [app.listCursor.value, app.items.value.length, fake.requests('topstories.json')], [0, 29, 2]
+    view.press 'j' for n in [1..3]
+    click view, 2, 1
+    settle! fake
+    eq [app.listCursor.value, app.items.value.length, fake.requests('topstories.json')], [0, 29, 3]
 
 test! "Enter and c open the story's thread: the header loses its tabs, the story strip shows its title, meta and url, the status hints change, and the story is in history.json", ->
   for key in ['Enter', 'c']
@@ -1131,6 +1178,34 @@ test! "a press selects a row, a press on the selected row opens it, and a second
     click view, 5, 12
     eq app.links.value?.length, 2, 'a quick second press lists the links'
 
+test! "a double press is per row: a press on one story then one on another within 400 ms selects the second and opens nothing, and a press on it then opens it; the links popup does the same", ->
+  reader! Fake.new(), ({ view, app, clockAt }) ->
+    click view, 10, 7
+    eq [app.listCursor.value, app.view.value.kind], [1, 'list']
+    clockAt.now += 100
+    view.frame()
+    click view, 10, 11
+    eq [app.listCursor.value, app.view.value.kind], [3, 'list'], 'the second row is selected, not opened'
+    clockAt.now += 100
+    view.frame()
+    click view, 10, 11
+    eq app.view.value.story.id, app.items.value[3].id
+  reader! Fake.new(), ({ view, app, fake, opened, clockAt }) ->
+    view.press 'Enter'
+    settle! fake
+    view.press 'Enter'
+    frame = lines view
+    row1 = frame.findIndex (row) -> row.includes '1. the reading thread'
+    row2 = frame.findIndex (row) -> row.includes '2. the docs'
+    click view, 25, row2
+    eq app.linkAt.value, 1
+    clockAt.now += 100
+    view.frame()
+    click view, 25, row1
+    eq [app.linkAt.value, app.links.value?.length, app.resolving.value, opened], [0, 2, false, []], 'the first link is selected, not followed'
+    settle! fake
+    eq app.view.value.story.id, 1001
+
 test! "the wheel scrolls the list a row a tick without moving the cursor, clamps at the top, and a cursor move then reveals the cursor's row", ->
   reader! Fake.new(), ({ view, app }) ->
     wheel view, 10, 10
@@ -1146,6 +1221,36 @@ test! "the wheel scrolls the list a row a tick without moving the cursor, clamps
     eq app.listTop.value, 0
 
 console.log "\nhn: the theme, the help, the files"
+
+test! "a resize reveals nothing: the wheel's offset stands through a resize, as hntui's scroll box keeps it, and a pane grown past the content only clamps it, not to the cursor", ->
+  reader! Fake.new(), ({ view, app }) ->
+    wheel view, 10, 10 for n in [1..5]
+    eq app.listTop.value, 5
+    view.resize 160, 45
+    eq plain(lines(view)[5]), '      ▲ 1204  by alice  45m ago  | 0 comments', 'the first row shown is the one the wheel left there'
+    eq [app.listTop.value, app.listCursor.value], [5, 0]
+    wheel view, 10, 10 for n in [1..10]
+    view.frame()
+    eq app.listTop.value, 15, 'the offset runs to the end of the content at 45 rows'
+    view.resize 100, 10
+    view.frame()
+    eq app.listTop.value, 15, 'a shrink leaves it'
+    view.resize 100, 60
+    view.frame()
+    eq [app.listTop.value, app.listCursor.value], [5, 0], 'a pane of 53 rows over 58 clamps the offset to 5, and the cursor stays off the screen'
+  reader! Fake.new(), ({ view, app, fake }) ->
+    view.press 'Enter'
+    settle! fake
+    view.frame()
+    wheel view, 10, 15 for n in [1..3]
+    view.frame()
+    eq app.detailTop.value, 3
+    view.resize 100, 20
+    view.frame()
+    eq [app.detailTop.value, app.detailCursor.value], [3, 0], 'the thread of 22 rows in a pane of 9 keeps its offset'
+    view.resize 160, 45
+    view.frame()
+    eq app.detailTop.value, 0, 'at 160 columns the thread wraps to 19 rows and fits the pane of 34: the offset is clamped to 0'
 
 test! "t toggles the theme, and the wipe sweeps it in from the origin: the frame a beat later shows the new theme at the origin, a glow band on the accent, and the old frame beyond, and after half a second the wipe is gone and a frame costs what it did", ->
   reader! Fake.new(), ({ view, app }) ->
@@ -1330,6 +1435,27 @@ test! "the files are read as they are: a saved.json of mixed shapes lists its on
 
 console.log "\nhn: loading, failing and cancelled requests"
 
+test! "a config dir that is a file stops nothing: s stars the row and the status bar says the write failed until the next key, Enter opens the thread, and H lists the story for this session", ->
+  seed = (dir) -> writeFileSync join(dir, 'file'), 'x'
+  at = (dir) -> configDir { HN_CONFIG_DIR: join(dir, 'file') }
+  reader! Fake.new(), (({ view, app, fake, dir }) ->
+    view.press 's'
+    eq plain(lines(view)[5]), '   1. ★ Show HN: A Hacker News reader for the terminal, in 900 lines (github.com)'
+    eq app.message.value, "can't write #{join dir, 'file', 'saved.json'}: ENOTDIR"
+    ok lines(view)[29].startsWith(" can't write "), "the status bar: #{lines(view)[29]}"
+    view.press 'j'
+    eq lines(view)[29], STATUS, 'the next key clears it'
+    view.press 'k'
+    view.press 'Enter'
+    settle! fake
+    eq lines(view)[4], ' ★ Show HN: A Hacker News reader for the terminal, in 900 lines'
+    eq app.message.value, "can't write #{join dir, 'file', 'history.json'}: ENOTDIR"
+    view.press 'Escape'
+    view.press 'H'
+    settle! fake
+    eq plain(lines(view)[5]), '   1. ★ Show HN: A Hacker News reader for the terminal, in 900 lines (github.com)'
+    eq (entry.id for entry in app.history.value), [1001]), { seed, at }
+
 test! "while the feed loads the list is a centered loader with its message and the status bar spins; released, the list is shown; a thread loads the same way", ->
   fake = Fake.new()
   gate = fake.hold 'topstories.json'
@@ -1431,6 +1557,23 @@ test! "o and y open the story's url and its HN page in the browser: from the lis
     eq app.history.value.length, 2
     view.press 's'
     eq lines(view)[4], ' ★ Ask HN: What are you reading this fall?'
+
+test! "a shifted letter is its lowercase: J moves, T toggles the theme and Q quits; G, S and H keep their own bindings", ->
+  reader! Fake.new(), ({ view, app, fake }) ->
+    view.press 'J'
+    eq app.listCursor.value, 1
+    view.press 'T'
+    eq app.theme.value.name, 'light'
+    view.press 'G'
+    eq app.listCursor.value, 28
+    view.press 'S'
+    eq app.category.value, 'saved'
+    view.press 'H'
+    eq app.category.value, 'history'
+    settle! fake
+    view.press 'Q'
+    eq (await view.done), undefined
+    eq typeof document, 'undefined'
 
 test! "q quits, with an overlay open too, and so does Ctrl-C", ->
   for keys in [['q'], ['Enter', '?', 'q']]
