@@ -1148,6 +1148,34 @@ test! "a press selects a row, a press on the selected row opens it, and a second
     click view, 5, 12
     eq app.links.value?.length, 2, 'a quick second press lists the links'
 
+test! "a double press is per row: a press on one story then one on another within 400 ms selects the second and opens nothing, and a press on it then opens it; the links popup does the same", ->
+  reader! Fake.new(), ({ view, app, clockAt }) ->
+    click view, 10, 7
+    eq [app.listCursor.value, app.view.value.kind], [1, 'list']
+    clockAt.now += 100
+    view.frame()
+    click view, 10, 11
+    eq [app.listCursor.value, app.view.value.kind], [3, 'list'], 'the second row is selected, not opened'
+    clockAt.now += 100
+    view.frame()
+    click view, 10, 11
+    eq app.view.value.story.id, app.items.value[3].id
+  reader! Fake.new(), ({ view, app, fake, opened, clockAt }) ->
+    view.press 'Enter'
+    settle! fake
+    view.press 'Enter'
+    frame = lines view
+    row1 = frame.findIndex (row) -> row.includes '1. the reading thread'
+    row2 = frame.findIndex (row) -> row.includes '2. the docs'
+    click view, 25, row2
+    eq app.linkAt.value, 1
+    clockAt.now += 100
+    view.frame()
+    click view, 25, row1
+    eq [app.linkAt.value, app.links.value?.length, app.resolving.value, opened], [0, 2, false, []], 'the first link is selected, not followed'
+    settle! fake
+    eq app.view.value.story.id, 1001
+
 test! "the wheel scrolls the list a row a tick without moving the cursor, clamps at the top, and a cursor move then reveals the cursor's row", ->
   reader! Fake.new(), ({ view, app }) ->
     wheel view, 10, 10

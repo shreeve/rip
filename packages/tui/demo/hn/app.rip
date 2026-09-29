@@ -89,7 +89,7 @@ export App = component
   stamp := @now()          # when the ages were last taken
   resolver = null          # the AbortController of the resolve in flight
   lastG = 0
-  rowPress = 0             # when a story row was last pressed
+  rowPress = { n: -1, at: 0 }    # the story row last pressed, and when
   bodyPress = { id: 0, at: 0 }   # the comment whose body was last pressed, and when
 
   # The scroll of each view: the offset, the clipped pane, and the box
@@ -408,8 +408,8 @@ export App = component
   # ── The mouse ─────────────────────────────────────────────────────────
 
   # A right press selects and opens the menu; a left press on the
-  # selected row, or a second press within DOUBLE ms, opens the story,
-  # and any other selects.
+  # selected row, or a second press on the same row within DOUBLE ms,
+  # opens the story, and any other selects.
   rowPressed: (n, event) ->
     item = items[n]
     return unless item
@@ -418,8 +418,8 @@ export App = component
       @openMenuFor item, event.screenX, event.screenY
       return
     at = @now()
-    if n is listCursor or at - rowPress < DOUBLE then @enterDetail item else listCursor = n
-    rowPress = at
+    if n is listCursor or (rowPress.n is n and at - rowPress.at < DOUBLE) then @enterDetail item else listCursor = n
+    rowPress = { n, at }
 
   headPressed: (n) ->
     detailCursor = n

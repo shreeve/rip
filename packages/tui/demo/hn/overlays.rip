@@ -11,7 +11,8 @@ export DOUBLE =! 400   # milliseconds within which a second press is a double
 
 # The links of a comment: a numbered row per link with its url under
 # it, the cursor's row lit. A press on the cursor's row, or a second
-# press on one within DOUBLE ms, opens it; any other press selects.
+# press on the same row within DOUBLE ms, opens it; any other press
+# selects.
 export LinksPopup = component
   @t := DARK
   @links := []
@@ -20,12 +21,12 @@ export LinksPopup = component
   @onSelect := null
   @onActivate := null
   @onClose := null
-  last = 0
+  last = { n: -1, at: 0 }   # the row last pressed, and when
 
   pressed: (n) ->
     at = @now()
-    if n is @cursor or at - last < DOUBLE then @onActivate? n else @onSelect? n
-    last = at
+    if n is @cursor or (last.n is n and at - last.at < DOUBLE) then @onActivate? n else @onSelect? n
+    last = { n, at }
 
   render
     Box position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: SCRIM, @mousedown: (-> @onClose?())
