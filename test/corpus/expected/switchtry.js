@@ -13,7 +13,7 @@ switch (n) {
     break;
 }
 let big = 0;
-if ((n > 10)) {
+if (n > 10) {
   big = 1;
 } else {
   big = 0;

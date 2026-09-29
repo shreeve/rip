@@ -6570,6 +6570,21 @@ class Emitter {
     }
   }
 
+  // The tests of one `when` of a subjectless switch, as an `if`
+  // condition: one test stands bare; several are ORed, each in its own
+  // parentheses so a test of lower precedence keeps its meaning.
+  whenTests(conditions) {
+    if (conditions.length === 1) {
+      this.expr(conditions[0]);
+      return;
+    }
+    conditions.forEach((c, k) => {
+      this.b.emit(k > 0 ? ') || (' : '(');
+      this.expr(c);
+    });
+    this.b.emit(')');
+  }
+
   switchStatement(node, ind) {
     const [, subject, cases, dflt] = node;
     const pad = '  '.repeat(ind);
@@ -6602,17 +6617,15 @@ class Emitter {
         }
         this.b.emit(`${pad}}`);
       } else {
-        // Subjectless switch lowers to an if/else chain with
-        // double-parenthesized conditions.
+        // Subjectless switch lowers to an if/else chain: a `when` of one
+        // test is that test, and a `when` of several ORs them, each in
+        // its own parentheses.
         cases.forEach((when, i) => {
           const [, conditions, body] = when;
           if (i > 0) this.b.emit(' else ');
-          this.b.emit('if ((');
-          conditions.forEach((c, k) => {
-            if (k > 0) this.b.emit(') || (');
-            this.expr(c);
-          });
-          this.b.emit(')) ');
+          this.b.emit('if (');
+          this.whenTests(conditions);
+          this.b.emit(') ');
           this.braceBlock(body, ind);
         });
         if (dflt !== null) {
@@ -7715,13 +7728,9 @@ class Emitter {
         cases.forEach((when, i) => {
           const [, conditions, body] = when;
           if (i > 0) this.b.emit(' else ');
-          this.b.emit('if ((');
-          const conds = Array.isArray(conditions) ? conditions : [conditions];
-          conds.forEach((c, k) => {
-            if (k > 0) this.b.emit(') || (');
-            this.expr(c);
-          });
-          this.b.emit(')) ');
+          this.b.emit('if (');
+          this.whenTests(Array.isArray(conditions) ? conditions : [conditions]);
+          this.b.emit(') ');
           this.returnBlock(body, ind);
         });
         if (dflt !== null) {

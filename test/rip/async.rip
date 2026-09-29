@@ -622,7 +622,7 @@ code "switch-as-if expr await emits await before IIFE", '''
       when a then fetch!
       else 0
   ''', '''
-  let x = await (async () => { if ((a)) {
+  let x = await (async () => { if (a) {
     return await fetch();
   } else {
     return 0;
@@ -708,7 +708,7 @@ code "switch-as-if condition await emits async IIFE", '''
       when isReady!() then 'yes'
       else 'no'
   ''', '''
-  let x = await (async () => { if ((await isReady())) {
+  let x = await (async () => { if (await isReady()) {
     return "yes";
   } else {
     return "no";
