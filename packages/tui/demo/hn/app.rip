@@ -13,7 +13,7 @@
 
 import { quit, screen, reveal, Box, Text, Scrollbar } from 'rip/tui'
 import { Api, live, HnItemGone, hnErrorMessage, PAGE_SIZE, flattenTree } from './api.rip'
-import { Store, configDir } from './store.rip'
+import { Store, configDir, toggleSaved, addViewed } from './store.rip'
 import { openUrl } from './open.rip'
 import { relativeTime, hostname, htmlToText, extractLinks, parseHnItemLink } from './format.rip'
 import { DARK, LIGHT, opaque } from './theme.rip'
@@ -48,9 +48,12 @@ export App = component
   feedLoading := false
   visibleKey ~= ids.slice(0, PAGE_SIZE).join ','
 
-  # The files, read once; every change is written through the store.
+  # The files, read once and kept here; every change is written through
+  # the store, and a write that fails leaves the list changed and its
+  # failure in the status bar until the next key.
   saved := @store.saved()
   history := @store.history()
+  storeError := null
   savedIds ~= Set.new (entry.id for entry in saved)
   viewedIds ~= Set.new (entry.id for entry in history)
 
@@ -258,9 +261,26 @@ export App = component
 
   # ── The files ─────────────────────────────────────────────────────────
 
-  toggleSave: (id) -> saved = @store.toggleSaved id, @now()
-  markViewed: (id) -> history = @store.markViewed id, @now()
-  clearHistory: -> history = @store.clearHistory()
+  # A write that fails is shown, once per failure, as the status bar's
+  # message; the list it was to hold stands, as hntui's does.
+  keep: (name, entries) ->
+    try
+      @store.write name, entries
+    catch error
+      storeError = "can't write #{@store.label name}: #{error.code ?? error.message}"
+    return
+
+  toggleSave: (id) ->
+    saved = toggleSaved saved, id, @now()
+    @keep 'saved.json', saved
+
+  markViewed: (id) ->
+    history = addViewed history, id, @now()
+    @keep 'history.json', history
+
+  clearHistory: ->
+    history = []
+    @keep 'history.json', history
 
   # ── The view stack ────────────────────────────────────────────────────
 
@@ -281,12 +301,14 @@ export App = component
   # From the list a thread starts fresh; from a thread, the one left is
   # pushed with its cursor and its collapsed comments, to come back to.
   # A thread already in — the same story, by an anchor — takes the
-  # focus at once; one still loading takes it as it lands.
+  # focus at once; one still loading takes it as it lands. The view is
+  # set before the history takes the story: the thread opens whatever
+  # the file does.
   enterDetail: (item, focusId = null) ->
     @cancelResolve()
-    @markViewed item.id
     stack = [...stack, { story: view.story, cursor: detailCursor, collapsed }] if view.kind is 'detail'
     view = { kind: 'detail', story: item }
+    @markViewed item.id
     detailCursor = 0
     collapsed = Set.new()
     pendingFocus = if focusId? and commentsLoading then focusId else null
@@ -421,6 +443,7 @@ export App = component
 
   pressed: (event) ->
     key = event.key
+    storeError = null
     if key is 'q' or (key is 'c' and event.ctrlKey)
       quit()
       return
@@ -543,7 +566,9 @@ export App = component
   feedFailed ~= view.kind is 'list' and idsError? and not shelved(category)
   gone ~= view.kind is 'error' and view.error instanceof HnItemGone
   message ~=
-    if view.kind is 'error'
+    if storeError
+      storeError
+    else if view.kind is 'error'
       if gone then 'h/esc go back · q quit' else 'r retry · h/esc go back · q quit'
     else if feedFailed
       'r retry · q quit'

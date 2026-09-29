@@ -1,16 +1,25 @@
 # Saved stories and view history, as `saved.json` and `history.json` in
 # the config directory: `HN_CONFIG_DIR`, or `~/.config/rip-hn`. Both
 # files are lists of `{ id, <stamp> }`, newest first, written as
-# `JSON.stringify(entries, null, 2)`. A read tolerates a missing or
-# malformed file; a write throws, for the caller to show.
+# `JSON.stringify(entries, null, 2)`. The lists are the app's, kept in
+# memory and changed by the functions below; the store reads them once
+# and writes each change. A read tolerates a missing or malformed
+# file; a write throws, for the caller to show.
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 
 export HISTORY_CAP =! 1000
 
 export configDir =! (env = process.env) -> env.HN_CONFIG_DIR or join(homedir(), '.config', 'rip-hn')
+
+# The saved list with `id` added at the front, or removed when it is there.
+export toggleSaved =! (entries, id, at) ->
+  if entries.some((entry) -> entry.id is id) then entries.filter((entry) -> entry.id isnt id) else [{ id, savedAt: at }, ...entries]
+
+# The history with `id` at the front, once, capped.
+export addViewed =! (entries, id, at) -> [{ id, viewedAt: at }, ...entries.filter((entry) -> entry.id isnt id)].slice 0, HISTORY_CAP
 
 export class Store
   constructor: (@dir) ->
@@ -23,28 +32,18 @@ export class Store
     return [] unless Array.isArray data
     (entry for entry in data when entry and typeof entry.id is 'number' and typeof entry[stamp] is 'number')
 
+  # The directory is made only when nothing stands at its path, so a
+  # file there fails the write itself, with the write's own code.
   write: (name, entries) ->
-    mkdirSync @dir, recursive: true
+    mkdirSync @dir, recursive: true unless existsSync @dir
     writeFileSync join(@dir, name), JSON.stringify(entries, null, 2)
     return
 
+  # The path of `name`, with the home directory as `~`, for a message.
+  label: (name) ->
+    path = join @dir, name
+    home = homedir()
+    if path.startsWith(home + '/') then '~' + path.slice(home.length) else path
+
   saved: -> @read 'saved.json', 'savedAt'
   history: -> @read('history.json', 'viewedAt').slice 0, HISTORY_CAP
-
-  # The saved list with `id` added at the front, or removed when it is
-  # there; written, and returned.
-  toggleSaved: (id, at) ->
-    entries = @saved()
-    entries = if entries.some((entry) -> entry.id is id) then entries.filter((entry) -> entry.id isnt id) else [{ id, savedAt: at }, ...entries]
-    @write 'saved.json', entries
-    entries
-
-  # The history with `id` at the front, once, capped; written, and returned.
-  markViewed: (id, at) ->
-    entries = [{ id, viewedAt: at }, ...@history().filter((entry) -> entry.id isnt id)].slice 0, HISTORY_CAP
-    @write 'history.json', entries
-    entries
-
-  clearHistory: ->
-    @write 'history.json', []
-    []

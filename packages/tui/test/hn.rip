@@ -12,14 +12,14 @@
 
 import { test, eq, ok, throws } from 'rip/testing'
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { tmpdir, homedir } from 'node:os'
 import { join } from 'node:path'
 import { mount, screen } from 'rip/tui'
 import * as cells from './ink/cells.rip'
 import { Api, HnError, HnRequestError, HnStatusError, HnTimeoutError, HnDecodeError, HnItemGone, hnErrorMessage, DELAYS, decodeItem, fetcher, timed, retrying, flattenTree } from '../demo/hn/api.rip'
 import { Fake, NOW } from '../demo/hn/fake.rip'
 import { relativeTime, hostname, decodeEntities, htmlToText, extractLinks, parseHnItemLink } from '../demo/hn/format.rip'
-import { Store, HISTORY_CAP, configDir } from '../demo/hn/store.rip'
+import { Store, HISTORY_CAP, configDir, toggleSaved, addViewed } from '../demo/hn/store.rip'
 import { App } from '../demo/hn/hn.rip'
 import { FRAMES, INDEXES, ALPHAS, COUNT, colorsOver } from '../demo/hn/spinner.rip'
 import { DARK, LIGHT, opaque } from '../demo/hn/theme.rip'
@@ -564,36 +564,51 @@ test! "store: nothing saved and no history before any write, and no file is made
     eq [store.saved(), store.history()], [[], []]
     throws (-> readFileSync join(dir, 'saved.json')), Error
 
-test! "store: toggling a save prepends it, writes the file byte for byte, and toggling again removes it", ->
+test! "store: toggling a save prepends it, the write puts the file down byte for byte, and toggling again removes it", ->
   withStore! (store, dir) ->
     t1 = NOW * 1000
     t2 = t1 + 60000
-    eq store.toggleSaved(1001, t1), [{ id: 1001, savedAt: t1 }]
-    eq store.toggleSaved(1002, t2), [{ id: 1002, savedAt: t2 }, { id: 1001, savedAt: t1 }]
+    one = toggleSaved [], 1001, t1
+    eq one, [{ id: 1001, savedAt: t1 }]
+    two = toggleSaved one, 1002, t2
+    eq two, [{ id: 1002, savedAt: t2 }, { id: 1001, savedAt: t1 }]
+    store.write 'saved.json', two
     eq readFileSync(join(dir, 'saved.json'), 'utf8'), JSON.stringify([{ id: 1002, savedAt: t2 }, { id: 1001, savedAt: t1 }], null, 2)
-    eq store.saved(), [{ id: 1002, savedAt: t2 }, { id: 1001, savedAt: t1 }]
-    eq store.toggleSaved(1002, t2 + 1), [{ id: 1001, savedAt: t1 }]
-    eq Store.new(dir).saved(), [{ id: 1001, savedAt: t1 }], 'a fresh store reads the same file'
+    eq store.saved(), two
+    eq toggleSaved(two, 1002, t2 + 1), [{ id: 1001, savedAt: t1 }]
+    eq Store.new(dir).saved(), two, 'a fresh store reads the same file'
 
-test! "store: a view moves its id to the front of the history, once, and clearing empties the file", ->
+test! "store: a view moves its id to the front of the history, once, and an empty list written empties the file", ->
   withStore! (store, dir) ->
     t = NOW * 1000
-    store.markViewed 1001, t
-    store.markViewed 1005, t + 1
-    eq store.markViewed(1001, t + 2), [{ id: 1001, viewedAt: t + 2 }, { id: 1005, viewedAt: t + 1 }]
+    entries = addViewed [], 1001, t
+    entries = addViewed entries, 1005, t + 1
+    entries = addViewed entries, 1001, t + 2
+    eq entries, [{ id: 1001, viewedAt: t + 2 }, { id: 1005, viewedAt: t + 1 }]
+    store.write 'history.json', entries
     eq readFileSync(join(dir, 'history.json'), 'utf8'), JSON.stringify([{ id: 1001, viewedAt: t + 2 }, { id: 1005, viewedAt: t + 1 }], null, 2)
-    eq store.clearHistory(), []
+    store.write 'history.json', []
     eq readFileSync(join(dir, 'history.json'), 'utf8'), '[]'
     eq store.history(), []
 
-test! "store: the history is capped at 1000 on read and on write", ->
+test! "store: the history is capped at 1000 on read and on a view", ->
   withStore! (store, dir) ->
     writeFileSync join(dir, 'history.json'), JSON.stringify(({ id: n, viewedAt: n } for n in [1..1005]))
     eq store.history().length, HISTORY_CAP
     eq store.history()[999].id, 1000
-    entries = store.markViewed 5000, 1
+    entries = addViewed store.history(), 5000, 1
     eq [entries.length, entries[0].id, entries[999].id], [HISTORY_CAP, 5000, 999]
+    store.write 'history.json', entries
     eq JSON.parse(readFileSync(join(dir, 'history.json'), 'utf8')).length, HISTORY_CAP
+
+test! "store: a write under a path that is a file throws with the write's own code, and label shows the home directory as ~", ->
+  withStore! (store, dir) ->
+    writeFileSync join(dir, 'file'), 'x'
+    blocked = Store.new join(dir, 'file')
+    error = try (blocked.write 'saved.json', []; null) catch e then e
+    eq error?.code, 'ENOTDIR'
+    eq blocked.label('saved.json'), join(dir, 'file', 'saved.json')
+    eq Store.new(join(homedir(), 'x')).label('history.json'), '~/x/history.json'
 
 test! "store: a malformed file is an empty list, and entries of another shape are dropped", ->
   withStore! (store, dir) ->
@@ -630,12 +645,14 @@ test "the scanner's first twelve frames, their ramp indexes and their alphas are
 # it was asked to open, and a clock the test moves; `body` gets the
 # mount, the fake and those hands, and the mount is closed and the
 # store removed after it. The first frame is drawn and the fake settled
-# before `body` runs, unless `raw`.
+# before `body` runs, unless `raw`. `seed` gets the temp directory to
+# put files in first, and `at` names the store's directory under it,
+# which is the temp directory itself by default.
 reader! =! (fake, body, options = {}) ->
   api = Api.new { getJson: retrying(fake.transport().getJson, options.delays ?? [0, 0], (-> Promise.resolve())) }
   dir = mkdtempSync join(tmpdir(), 'rip-hn-')
   options.seed? dir
-  store = Store.new dir
+  store = Store.new options.at?(dir) ?? dir
   opened = []
   clockAt = { now: NOW * 1000 }
   view = mount App, cols: 100, rows: 30, mouse: 'all', props: { api, store, open: ((url) -> opened.push url), now: (-> clockAt.now), origin: (-> { x: 0, y: 0 }) }
@@ -1329,6 +1346,27 @@ test! "the files are read as they are: a saved.json of mixed shapes lists its on
     eq app.history.value.length, 1000), { seed }
 
 console.log "\nhn: loading, failing and cancelled requests"
+
+test! "a config dir that is a file stops nothing: s stars the row and the status bar says the write failed until the next key, Enter opens the thread, and H lists the story for this session", ->
+  seed = (dir) -> writeFileSync join(dir, 'file'), 'x'
+  at = (dir) -> configDir { HN_CONFIG_DIR: join(dir, 'file') }
+  reader! Fake.new(), (({ view, app, fake, dir }) ->
+    view.press 's'
+    eq plain(lines(view)[5]), '   1. ★ Show HN: A Hacker News reader for the terminal, in 900 lines (github.com)'
+    eq app.message.value, "can't write #{join dir, 'file', 'saved.json'}: ENOTDIR"
+    ok lines(view)[29].startsWith(" can't write "), "the status bar: #{lines(view)[29]}"
+    view.press 'j'
+    eq lines(view)[29], STATUS, 'the next key clears it'
+    view.press 'k'
+    view.press 'Enter'
+    settle! fake
+    eq lines(view)[4], ' ★ Show HN: A Hacker News reader for the terminal, in 900 lines'
+    eq app.message.value, "can't write #{join dir, 'file', 'history.json'}: ENOTDIR"
+    view.press 'Escape'
+    view.press 'H'
+    settle! fake
+    eq plain(lines(view)[5]), '   1. ★ Show HN: A Hacker News reader for the terminal, in 900 lines (github.com)'
+    eq (entry.id for entry in app.history.value), [1001]), { seed, at }
 
 test! "while the feed loads the list is a centered loader with its message and the status bar spins; released, the list is shown; a thread loads the same way", ->
   fake = Fake.new()
