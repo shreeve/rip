@@ -507,6 +507,7 @@ function generateMarkdownHtml(fileName, markdown, options = {}) {
   code { font-family: 'SF Mono', 'Fira Code', monospace; font-size: .875em; background: var(--code-bg); padding: 2px 5px; border-radius: 4px; }
   pre { background: var(--pre-bg); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; overflow-x: auto; }
   pre code { background: none; padding: 0; font-size: .8125rem; }
+  ul, ol { padding-left: 1.5em; } li + li { margin-top: .25em; } li > ul, li > ol { margin: .25em 0 0; }
   blockquote { border-left: 3px solid var(--border); padding-left: 1rem; color: var(--muted); }
   img { max-width: 100%; border-radius: 6px; }
   table { border-collapse: collapse; width: 100%; }
