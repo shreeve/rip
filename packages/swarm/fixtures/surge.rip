@@ -1,0 +1,16 @@
+# One worker surges: 12 tasks, the third sleeps while every other one
+# returns at once, so whichever worker takes it sits at one job while
+# the other runs ahead — the shape that makes a relative bar step back.
+
+import { swarm, init, retry, todo } from 'rip/swarm'
+
+setup = ->
+  unless retry()
+    init()
+    todo i for i in [1..12]
+  {}
+
+perform = (task, ctx) ->
+  Bun.sleep! 400 if task.split('/').pop() is '3'
+
+swarm { setup, perform }

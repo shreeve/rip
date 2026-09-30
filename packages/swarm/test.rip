@@ -247,6 +247,20 @@ test "non-quiet runs render the ANSI frame, bars, and summary", ->
   ok /[ ]jobs @ [\d.]+\/sec/.test(out), 'per-worker stats'
   ok /\d+\.\d{2} secs for 12 jobs by 2 workers @ [\d.]+ jobs\/sec/.test(out)
 
+test "a worker's bar never shrinks: it holds its widest while the leader surges, and moves only forward", ->
+  dir = fresh()
+  r = run dir, 'surge.rip', '-w', '2', '-b', '20', '-c', '#'
+  eq r.status, 0
+  # every worker-bar write: the row it lands on and the # cells it draws
+  widths = {}
+  for m in [...r.stdout.matchAll(/\x1b\[(\d+);\d+H\x1b\[48;2;83;131;236m(#*)\x1b\[49m/g)]
+    row = m[1]
+    cols = m[2].length
+    ok cols >= (widths[row] ?? 0), "row #{row} drew #{cols} cells after #{widths[row]}"
+    widths[row] = cols
+  ok Object.keys(widths).length is 2, "two worker rows drew bars: #{Object.keys(widths)}"
+  ok Object.values(widths).some((w) -> w is 20), "the leader's bar ends full: #{JSON.stringify widths}"
+
 # ==[ args() ]==
 
 console.log "\nargs()"
