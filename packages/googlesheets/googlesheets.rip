@@ -205,7 +205,17 @@ export authorize = (opts = {}) ->
     return token
 
   console.log 'Refreshing access token…'
-  data = exchangeRefresh! creds, token.refresh_token
+  data = null
+  try
+    data = exchangeRefresh! creds, token.refresh_token
+  catch error
+    # A refresh token Google no longer honors — expired (an OAuth app still
+    # in testing status issues tokens that last seven days), revoked, or
+    # issued to another client — answers invalid_grant; a fresh consent is
+    # the only way back, so the browser login runs again.
+    throw error unless /invalid_grant/.test(error?.message or '')
+    console.log 'refresh token expired or revoked — starting browser login…'
+    return login! opts
   token.access_token = data.access_token
   token.expiration_time_millis = Date.now() + (data.expires_in or 3600) * 1000
   token.refresh_token = data.refresh_token if data.refresh_token
