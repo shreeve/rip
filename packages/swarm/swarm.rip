@@ -109,6 +109,7 @@ fgw =! fg("fff")
 # ==============================================================================
 
 char = wide = len = null
+high = {}   # slot -> the widest bar drawn for it this run
 
 drawFrame! = (workers) ->
   len = String(workers).length
@@ -128,13 +129,16 @@ draw! = (state) ->
   ppct = (done + died) / jobs
   most = Math.max(...Object.values(info), 1)
 
-  # worker bars: `most` sits in the denominator, so a bar can shrink
-  # between frames when the leader surges — repaint the tail so stale
-  # glyphs never overstate a worker's share
+  # worker bars: a bar is the worker's count against the leader's,
+  # scaled by the run's progress, and `most` in the denominator means
+  # the leader's surge would pull every other bar back a step. A bar
+  # never shrinks: it holds its widest until its own count carries it
+  # past, so the rows only ever move forward
   write fgw
   for slot, count of info
     tpct = count / most
-    cols = Math.floor(ppct * tpct * wide)
+    cols = Math.max(high[slot] ?? 0, Math.floor(ppct * tpct * wide))
+    high[slot] = cols
     write go(parseInt(slot) + 1, len + 5) + bg("5383ec") + char.repeat(cols) + bg() + " ".repeat(wide - cols)
 
   # summary bar: one atomic write — round the green and yellow segment
@@ -240,6 +244,7 @@ export swarm! = (opts = {}) ->
   inflight = {}  # slot -> taskPath (track in-flight tasks for crash recovery)
   lastTask = {}  # slot -> last completed task name (for display)
 
+  high = {}
   redraw! = -> draw({ live, done, died, jobs, workers, info }) unless quiet
 
   # signal handlers
