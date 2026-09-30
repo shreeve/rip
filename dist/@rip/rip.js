@@ -13451,6 +13451,17 @@ ${pad}`);
       arm(dflt);
     }
   }
+  whenTests(conditions) {
+    if (conditions.length === 1) {
+      this.expr(conditions[0]);
+      return;
+    }
+    conditions.forEach((c, k) => {
+      this.b.emit(k > 0 ? ") || (" : "(");
+      this.expr(c);
+    });
+    this.b.emit(")");
+  }
   switchStatement(node, ind) {
     const [, subject, cases, dflt] = node;
     const pad = "  ".repeat(ind);
@@ -13490,13 +13501,9 @@ ${pad}`);
           const [, conditions, body] = when;
           if (i > 0)
             this.b.emit(" else ");
-          this.b.emit("if ((");
-          conditions.forEach((c, k) => {
-            if (k > 0)
-              this.b.emit(") || (");
-            this.expr(c);
-          });
-          this.b.emit(")) ");
+          this.b.emit("if (");
+          this.whenTests(conditions);
+          this.b.emit(") ");
           this.braceBlock(body, ind);
         });
         if (dflt !== null) {
@@ -14528,14 +14535,9 @@ ${pad ?? ""}`);
           const [, conditions, body] = when;
           if (i > 0)
             this.b.emit(" else ");
-          this.b.emit("if ((");
-          const conds = Array.isArray(conditions) ? conditions : [conditions];
-          conds.forEach((c, k) => {
-            if (k > 0)
-              this.b.emit(") || (");
-            this.expr(c);
-          });
-          this.b.emit(")) ");
+          this.b.emit("if (");
+          this.whenTests(Array.isArray(conditions) ? conditions : [conditions]);
+          this.b.emit(") ");
           this.returnBlock(body, ind);
         });
         if (dflt !== null) {
