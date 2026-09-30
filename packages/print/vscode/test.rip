@@ -61,6 +61,11 @@ test "extension code loads the generated CJS copy, never the ESM grammar", ->
   ok printer.includes("require('../lib/hljs-rip')")
   ok not printer.includes('packages/highlight')
 
+test "a markdown page indents its lists inside the text column, since the page's reset zeroes the browser's own list padding", ->
+  html = generateMarkdownHtml '- one\n- two\n', 'x.md'
+  ok html.includes('ul, ol { padding-left: 1.5em; }')
+  ok html.includes('*, *::before, *::after { margin: 0; padding: 0;')
+
 test "extension.js registers exactly the contributed commands", ->
   source = readFileSync join(import.meta.dir, 'src', 'extension.js'), 'utf8'
   ok source.includes("registerCommand('rip-print.printFile'")
