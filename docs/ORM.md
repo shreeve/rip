@@ -82,6 +82,11 @@ form (a nested schema, `json`, `any`) and a nested schema itself are
 `JSON` documents. An unknown type name is a loud error, never a silent
 `VARCHAR`.
 
+An `email` value is trimmed and lower-cased before it validates, so
+`" Ann@Example.COM"` is stored, compared and kept unique as
+`ann@example.com` with no hook or transform. Values in a query are
+taken as given: look an email up by its normalized form.
+
 A `variant` field holds a document the engine stores typed: the app
 reads and writes it as a value — an object, an array, a string, a
 number, a boolean — and gets the same value back, and SQL reaches into
