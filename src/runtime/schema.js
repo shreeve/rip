@@ -86,6 +86,14 @@ const types = {
   any:      () => true,
 };
 
+// Built-in types whose values normalize before they validate. An email
+// is matched without regard to case or surrounding space, so every
+// email field holds it trimmed and lower-cased.
+const normalizers = {
+  __proto__: null,
+  email: (v) => (typeof v === 'string' ? v.trim().toLowerCase() : v),
+};
+
 // Strict coercion tables for the `~type` marker — "coerce, then
 // validate". Deliberately narrow: `~integer` rejects "12.5" and NaN,
 // `~boolean` accepts exactly six tokens, `~date` accepts ISO-8601
@@ -193,6 +201,7 @@ function nestedDef(typeName) {
 function validateValue(v, typeName, opts) {
   const prim = types[typeName];
   if (prim) {
+    if (normalizers[typeName]) v = normalizers[typeName](v);
     return prim(v) ? { value: v } : { errors: [{ field: '', error: 'type', message: 'must be ' + typeName }] };
   }
   const subDef = SchemaRegistry.get(typeName);
@@ -908,7 +917,7 @@ class SchemaDef {
     const errors = collect ? [] : null;
     for (const [n, f] of norm.fields) {
       if (skip && skip.has(n)) continue;
-      const v = data == null ? undefined : data[n];
+      let v = data == null ? undefined : data[n];
       if (v === undefined || v === null) {
         if (f.required) {
           if (!collect) return false;
@@ -981,7 +990,7 @@ class SchemaDef {
           }
           continue;
         }
-        if (res.value !== v) data[n] = res.value;
+        if (res.value !== v) data[n] = v = res.value;
       }
       const c = f.constraints;
       if (c) {

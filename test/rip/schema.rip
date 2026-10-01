@@ -661,6 +661,28 @@ test ":input .parse returns cleaned value", '''
   out.email
   ''', "a@b.c"
 
+test "email: trimmed and lower-cased before it validates", '''
+  Signup = schema
+    email!   email
+    backup   email
+    others   email[]
+  out = Signup.parse({email: "  Ann.Lee@Example.COM ", backup: "X@Y.Z", others: [" B@C.D", "e@f.g"]})
+  [out.email, out.backup, out.others]
+  ''', ["ann.lee@example.com", "x@y.z", ["b@c.d", "e@f.g"]]
+
+test "email: constraints see the normalized value", '''
+  Staff = schema
+    email! email, /@ola\.example$/, ..24
+  [Staff.ok({email: " NURSE@OLA.EXAMPLE "}), Staff.ok({email: "nurse@bay.example"})]
+  ''', [true, false]
+
+test "email: still refuses what is not an email", '''
+  Signup = schema
+    email! email
+  r = Signup.safe({email: "  not an email "})
+  [r.ok, r.errors[0].error]
+  ''', [false, "type"]
+
 # Phase 2 — type slot is optional; bare modifier means `string`.
 # These forms were previously invalid ("Schema field X is missing a type").
 
