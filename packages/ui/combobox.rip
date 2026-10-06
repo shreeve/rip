@@ -278,8 +278,10 @@ export List = component extends div
 # The pointer highlights an option only when it moved to a new position:
 # a list that scrolls or re-renders under a still pointer fires enter,
 # and WebKit a move with no motion, but never a move to somewhere new.
-# A press never takes focus from the input, so a click keeps the next
-# keystroke typing, and tabindex keeps a button host out of the tab order.
+# A touch highlights its option as it lands, since a finger never moves
+# there first. A press never takes focus from the input, so a click keeps
+# the next keystroke typing, and tabindex keeps a button host out of the
+# tab order.
 export Item = component extends div
   accept open from Root
   accept active from Root
@@ -291,7 +293,11 @@ export Item = component extends div
     pointer = { x: e.clientX, y: e.clientY }
     active = id unless active is id
 
-  onPress = (e: Event) -> e.preventDefault()
+  onPointerdown = (e: PointerEvent) ->
+    e.preventDefault()
+    active = id if e.pointerType is 'touch'
+
+  onMousedown = (e: Event) -> e.preventDefault()
 
   render
     div
@@ -301,8 +307,8 @@ export Item = component extends div
       aria-selected: if active is id then 'true' else 'false'
       data-highlighted: (active is id) or undefined
       @pointermove: onPointermove
-      @pointerdown: onPress
-      @mousedown: onPress
+      @pointerdown: onPointerdown
+      @mousedown: onMousedown
       @click: (-> open = false)
       slot
 

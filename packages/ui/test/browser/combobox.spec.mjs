@@ -195,6 +195,22 @@ test('the pointer highlights an option only when it moves: a keyboard scroll und
   await expect.poll(() => active(input)).toBeNull()
 })
 
+test('a touch press highlights its option before the release clicks it, and a touch move highlights nothing', async ({ page }) => {
+  const { input, popup } = await boot(page)
+  await input.fill('a')
+  await expect(options(popup)).toHaveCount(12)
+  await settled(popup)
+  const ids = await options(popup).evaluateAll((els) => els.map((el) => el.id))
+  const touch = (el, type) => el.dispatchEvent(new PointerEvent(type, { pointerType: 'touch', bubbles: true, cancelable: true, clientX: 1, clientY: 1 }))
+  await options(popup).nth(2).evaluate(touch, 'pointermove')
+  await page.waitForTimeout(50)
+  expect(await active(input)).toBeNull()
+  await options(popup).nth(2).evaluate(touch, 'pointerdown')
+  await expect.poll(() => active(input)).toBe(ids[2])
+  await expect(options(popup).nth(2)).toHaveAttribute('data-highlighted', 'true')
+  await expect(input).toBeFocused()
+})
+
 test('an inline list has no popup: the input reports expanded, Enter adds and hands the highlight to the option now in its place, a click keeps focus in the input, and Escape clears the filter', async ({ page }) => {
   await boot(page)
   const input = page.getByRole('combobox', { name: 'Filter fruit' })
