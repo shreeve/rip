@@ -50,7 +50,7 @@ const COMPONENT_HOOKS = new Set(['beforeMount', 'mounted', 'beforeUnmount', 'unm
 const COMPONENT_RUNTIME_FIELDS = new Set([
   '_state', '_frame', '_parent', '_children', '_root', '_nodes', '_target',
   '_context', '_rest', '_restWriters', '_restHandlers', '_inheritedEl', '_inheritedInst', '_inheritedOwn',
-  '_refCleanups', '_initFailed', '_hmrOrphans', '_hmrReleasing', '_hmrPropKeys', '_asChild',
+  '_refCleanups', '_initFailed', '_hmrOrphans', '_hmrReleasing', '_hmrPropKeys', '_hmrResetPending', '_hmrReset', '_asChild',
 ]);
 
 const BINOPS = new Set(['+', '-', '*', '/', '%', '**', '<', '>', '<=', '>=', '==', '!=', '&&', '||', '??', '<<', '>>', '>>>', '&', '^', '|']);
@@ -9522,7 +9522,7 @@ class Emitter {
   // never reaches here.
   emitComponentHmrMeta(pad, {
     bindingName, declaredProps, stateVars, derivedVars, gateVars,
-    extendsTag, methods, hooks, hasRender,
+    extendsTag, methods, hooks, hasRender, initNames,
   }) {
     const sortNames = (names) => [...names].sort();
     const props = sortNames(declaredProps);
@@ -9534,9 +9534,69 @@ class Emitter {
     const shape = Emitter.hmrFingerprint({ props, state, computed, gates, extends: extendsTag });
     const impl = Emitter.hmrFingerprint({ methods: methodNames, hooks: hookNames, render: hasRender });
     const id = `${this.modulePath}#${bindingName}`;
-    const sig = { shape, impl, state, computed, props, gates, extends: extendsTag };
+    // `inits` fingerprints each `:=` initializer's COMPILED text, the
+    // text its `__hmrInit` thunk re-states, so whitespace and quote
+    // style never reset a slot. Source order, which is reset order.
+    const inits = {};
+    this.scopes.push(initNames);
+    this.rframes.push({ reactive: new Set(), bound: initNames });
+    try {
+      for (const m of stateVars) {
+        if (m.value === undefined) continue;
+        inits[m.name] = Emitter.hmrFingerprint(this.capturedExprText(() => this.componentInitValue(m.value)));
+      }
+    } finally {
+      this.rframes.pop();
+      this.scopes.pop();
+    }
+    const sig = { shape, impl, state, computed, props, gates, extends: extendsTag, inits };
     this.b.emit(`${pad}static __hmrId = ${JSON.stringify(id)};\n`);
     this.b.emit(`${pad}static __hmrSig = ${JSON.stringify(sig)};\n`);
+  }
+
+  componentInitValue(value) {
+    const wrap = Emitter.needsGrouping(value, 'operand');
+    if (wrap) this.b.emit('(');
+    this.expr(value);
+    if (wrap) this.b.emit(')');
+  }
+
+  // static __hmrInit — one thunk per `:=` slot with an initializer,
+  // called with the instance as `this`, so a patch can re-run a changed
+  // initializer without re-running `_init`. A public slot's thunk
+  // spells the default alone: whether the construction site supplies
+  // the value is the runtime's to know. Each thunk is its own function
+  // scope, so the inner assignment targets `_init` hoists at its top
+  // hoist here per slot — collected before the names enter scope, since
+  // a name bound in an enclosing scope is never hoisted again. Emitted
+  // after `_init`, whose hoist line consumes the scope's pending
+  // annotations first. Same gate as emitComponentHmrMeta.
+  emitComponentHmrInit(pad, { stateVars, initNames }) {
+    const slots = [];
+    for (const m of stateVars) {
+      if (m.value === undefined) continue;
+      slots.push({ m, entries: this.scopedHoist([m.value], [], { declareInPlace: false }).entries });
+    }
+    if (slots.length === 0) return;
+    this.b.emit(`${pad}static __hmrInit = {\n`);
+    this.scopes.push(initNames);
+    this.rframes.push({ reactive: new Set(), bound: initNames });
+    try {
+      for (const { m, entries } of slots) {
+        this.b.emit(`${pad}  ${m.name}() { `);
+        if (entries.length) {
+          this.hoistLine(entries);
+          this.b.emit(' ');
+        }
+        this.b.emit('return ');
+        this.mark(m.node, 'value', () => this.withExpression(() => this.componentInitValue(m.value)));
+        this.b.emit('; },\n');
+      }
+    } finally {
+      this.rframes.pop();
+      this.scopes.pop();
+    }
+    this.b.emit(`${pad}};\n`);
   }
 
   // ["component", parent, ["block", …]] — the declaration. Expression
@@ -10131,7 +10191,8 @@ class Emitter {
       if (this.scopes.length === 1 && typeof this._componentName === 'string') this.componentNames.push(this._componentName);
       // HMR identity/signature — module-scope named components only.
       // Gated on `hmr`: off keeps production bytes unchanged.
-      if (this.hmr && this.modulePath && this.scopes.length === 1 && typeof this._componentName === 'string') {
+      const hmrMeta = this.hmr && this.modulePath && this.scopes.length === 1 && typeof this._componentName === 'string';
+      if (hmrMeta) {
         this.emitComponentHmrMeta(pad, {
           bindingName: this._componentName,
           declaredProps,
@@ -10142,6 +10203,7 @@ class Emitter {
           methods,
           hooks,
           hasRender: renderNode !== null,
+          initNames,
         });
       }
       if (tsInfo !== null) this.tsComponentCtor(tsInfo, pad);
@@ -10426,6 +10488,8 @@ class Emitter {
         this.scopes.pop();
         this.b.emit(`${pad}}\n`);
       }
+
+      if (hmrMeta) this.emitComponentHmrInit(pad, { stateVars, initNames });
 
       // Refresh computed bodies on patch without re-running `_init`
       // (which would mint duplicate state containers).

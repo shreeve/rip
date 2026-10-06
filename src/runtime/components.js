@@ -29,8 +29,12 @@
 //   __hmrLookup(id)           - registry entry or undefined
 //   __hmrRegisterDefinition(c)- record/replace a component definition
 //   __hmrClassify(old, next)  - 'patch' | 'migrate' | 'remount'
+//   __hmrInitDiff(old, next)  - `:=` slots whose compiled initializer changed
 //   __hmrPreserveState(a, b)  - copy intersecting __hmrSig.state .value
-//   __hmrPatch(inst, NewCtor) - prototype swap + _hmrRerender
+//                               (a slot whose initializer changed keeps
+//                               the new instance's value)
+//   __hmrPatch(inst, NewCtor) - prototype swap + _hmrRerender; changed
+//                               initializers re-run on the instance
 //   __hmrMigrateRemount(...)  - new instance + preserve (app remounts)
 //   __hmrSnapshotUi()         - focus/selection/scroll snapshot
 //   __hmrRestoreUi(snap)      - restore a snapshot
@@ -195,6 +199,16 @@ function __hmrMigrateDiff(oldSig, newSig) {
   return { kept, added, removed };
 }
 
+// `:=` slots both signatures declare whose compiled initializer differs,
+// in the new signature's declaration order. A slot that gained or lost
+// its initializer is not among them: there is no prior text to differ
+// from, or nothing left to run.
+function __hmrInitDiff(oldSig, newSig) {
+  const prev = oldSig?.inits ?? {};
+  const next = newSig?.inits ?? {};
+  return Object.keys(next).filter((name) => Object.hasOwn(prev, name) && prev[name] !== next[name]);
+}
+
 // Thin HMR tooling seam: CustomEvent on window + a ring buffer tests can
 // read. Never required for correctness.
 const __hmrEventLog = [];
@@ -225,13 +239,17 @@ function __hmrPreserveState(oldInstance, newInstance) {
   const nextNames = newSig?.state;
   const diff = __hmrMigrateDiff(oldSig, newSig);
   if (!Array.isArray(retained) || !Array.isArray(nextNames)) {
-    __hmrEmit('migrate', { id: newInstance?.constructor?.__hmrId ?? null, ...diff, copied: [] });
-    return diff;
+    __hmrEmit('migrate', { id: newInstance?.constructor?.__hmrId ?? null, ...diff, copied: [], reset: [] });
+    return { ...diff, copied: [], reset: [] };
   }
   const keep = new Set(retained);
+  // The new instance's `_init` already ran a changed initializer; the
+  // old value must not overwrite it.
+  const reset = __hmrInitDiff(oldSig, newSig);
+  const skip = new Set(reset);
   const copied = [];
   for (const name of nextNames) {
-    if (!keep.has(name)) continue;
+    if (!keep.has(name) || skip.has(name)) continue;
     const prev = oldInstance[name];
     const next = newInstance[name];
     if (
@@ -244,8 +262,8 @@ function __hmrPreserveState(oldInstance, newInstance) {
     }
   }
   const id = newInstance?.constructor?.__hmrId ?? oldInstance?.constructor?.__hmrId ?? null;
-  __hmrEmit('migrate', { id, ...diff, copied });
-  return { ...diff, copied };
+  __hmrEmit('migrate', { id, ...diff, copied, reset });
+  return { ...diff, copied, reset };
 }
 
 // Focus survives a refresh by LOCATOR, never by node identity: the
@@ -355,6 +373,7 @@ function __hmrSwapDefinition(instance, NewCtor) {
   if (typeof oldId === 'string' && oldId) {
     __hmrRegistry.get(oldId)?.instances.delete(instance);
   }
+  instance._hmrResetPending = __hmrInitDiff(instance.constructor?.__hmrSig, NewCtor.__hmrSig);
   Object.setPrototypeOf(instance, NewCtor.prototype);
   Object.defineProperty(instance, 'constructor', {
     value: NewCtor, writable: true, configurable: true,
@@ -370,7 +389,7 @@ function __hmrPatch(instance, NewCtor) {
   const oldId = instance.constructor?.__hmrId;
   __hmrSwapDefinition(instance, NewCtor);
   instance._hmrRerender();
-  __hmrEmit('patch', { id: NewCtor.__hmrId ?? oldId ?? null });
+  __hmrEmit('patch', { id: NewCtor.__hmrId ?? oldId ?? null, reset: instance._hmrReset ?? [] });
   return instance;
 }
 
@@ -1578,10 +1597,12 @@ class __Component {
   // False when the rebind failed and the instance was torn down.
   _hmrRebind() {
     const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
+    this._hmrReset = [];
     const prevC = __pushComponent(this);
     const prevO = __pushOwner(this._frame);
     try {
       if (typeof this._hmrRefreshComputeds === 'function') this._hmrRefreshComputeds();
+      this._hmrApplyResets();
       if (typeof this._hmrBindEffects === 'function') this._hmrBindEffects();
     } catch (e) {
       __popOwner(prevO);
@@ -1593,6 +1614,37 @@ class __Component {
     __popOwner(prevO);
     __popComponent(prevC);
     return true;
+  }
+  // A `:=` slot whose compiled initializer changed re-runs it on the
+  // living instance, in declaration order: after the computeds refresh,
+  // so a slot that reads a computed above it reads the new body, and
+  // before the effects bind, so each new effect observes the value
+  // once. Every other slot, and every `_init` member, keeps its value.
+  // A public slot the construction site supplies keeps the parent's
+  // value; the default is dead in that instance. An initializer that
+  // yields a container cannot replace the slot in place, so it fails
+  // the rebind.
+  _hmrApplyResets() {
+    const names = this._hmrResetPending ?? [];
+    this._hmrResetPending = null;
+    if (names.length === 0) return;
+    const thunks = this.constructor.__hmrInit ?? {};
+    const given = new Set(typeof this._hmrPropKeys === 'string' ? this._hmrPropKeys.split(',') : []);
+    const props = new Set(this.constructor.__props ?? []);
+    __batch(() => {
+      for (const name of names) {
+        if (props.has(name) && (given.has(name) || given.has(`__bind_${name}__`))) continue;
+        const thunk = thunks[name];
+        const slot = this[name];
+        if (typeof thunk !== 'function' || slot == null || typeof slot !== 'object' || !('value' in slot)) continue;
+        const value = thunk.call(this);
+        if (value != null && typeof value === 'object' && typeof value.read === 'function') {
+          throw new Error(`${this.constructor.name || 'component'}: the initializer of '${name}' yields a reactive container, which cannot replace the living slot`);
+        }
+        slot.value = value;
+        this._hmrReset.push(name);
+      }
+    });
   }
   // An adopted child takes the rebuilt parent's props the way `_init`
   // read them: a container (a bind channel, or a bare reactive member
@@ -1751,6 +1803,6 @@ export {
   __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach,
   __reportChildFailure, __setChildFailureReporter,
   __ownerFrame, __pushOwner, __popOwner, __detachRef, __claimGateConstructor,
-  __hmrRegistry, __hmrLookup, __hmrEntries, __hmrRegisterDefinition, __hmrClassify, __hmrMigrateDiff,
+  __hmrRegistry, __hmrLookup, __hmrEntries, __hmrRegisterDefinition, __hmrClassify, __hmrMigrateDiff, __hmrInitDiff,
   __hmrPreserveState, __hmrEmit, __hmrEvents, __hmrPatch, __hmrMigrateRemount, __hmrSnapshotUi, __hmrRestoreUi,
 };

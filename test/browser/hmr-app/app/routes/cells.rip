@@ -1,0 +1,17 @@
+# Cells — a changed `:=` initializer reaches the one slot it names on the
+# living instance. `#write` sets all three cells, so the spec can tell the
+# reset cell from the kept ones; `#made` is a plain `_init` member whose
+# identity a patch keeps.
+export Cells = component
+  a := 1
+  b := 2
+  c := 3
+  made = { stamp: Date.now().toString(36) }
+
+  render
+    h1#title 'cells'
+    button#write @click: (-> a = 10; b = 20; c = 30), 'write'
+    span#a "#{a}"
+    span#b "#{b}"
+    span#c "#{c}"
+    span#made made.stamp

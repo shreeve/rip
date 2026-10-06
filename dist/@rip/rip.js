@@ -9098,6 +9098,8 @@ var COMPONENT_RUNTIME_FIELDS = new Set([
   "_hmrOrphans",
   "_hmrReleasing",
   "_hmrPropKeys",
+  "_hmrResetPending",
+  "_hmrReset",
   "_asChild"
 ]);
 var BINOPS = new Set(["+", "-", "*", "/", "%", "**", "<", ">", "<=", ">=", "==", "!=", "&&", "||", "??", "<<", ">>", ">>>", "&", "^", "|"]);
@@ -15884,7 +15886,8 @@ ${pad ?? ""}`);
     extendsTag,
     methods,
     hooks,
-    hasRender
+    hasRender,
+    initNames
   }) {
     const sortNames = (names) => [...names].sort();
     const props = sortNames(declaredProps);
@@ -15896,10 +15899,63 @@ ${pad ?? ""}`);
     const shape = Emitter.hmrFingerprint({ props, state, computed, gates, extends: extendsTag });
     const impl = Emitter.hmrFingerprint({ methods: methodNames, hooks: hookNames, render: hasRender });
     const id = `${this.modulePath}#${bindingName}`;
-    const sig = { shape, impl, state, computed, props, gates, extends: extendsTag };
+    const inits = {};
+    this.scopes.push(initNames);
+    this.rframes.push({ reactive: new Set, bound: initNames });
+    try {
+      for (const m of stateVars) {
+        if (m.value === undefined)
+          continue;
+        inits[m.name] = Emitter.hmrFingerprint(this.capturedExprText(() => this.componentInitValue(m.value)));
+      }
+    } finally {
+      this.rframes.pop();
+      this.scopes.pop();
+    }
+    const sig = { shape, impl, state, computed, props, gates, extends: extendsTag, inits };
     this.b.emit(`${pad}static __hmrId = ${JSON.stringify(id)};
 `);
     this.b.emit(`${pad}static __hmrSig = ${JSON.stringify(sig)};
+`);
+  }
+  componentInitValue(value) {
+    const wrap = Emitter.needsGrouping(value, "operand");
+    if (wrap)
+      this.b.emit("(");
+    this.expr(value);
+    if (wrap)
+      this.b.emit(")");
+  }
+  emitComponentHmrInit(pad, { stateVars, initNames }) {
+    const slots = [];
+    for (const m of stateVars) {
+      if (m.value === undefined)
+        continue;
+      slots.push({ m, entries: this.scopedHoist([m.value], [], { declareInPlace: false }).entries });
+    }
+    if (slots.length === 0)
+      return;
+    this.b.emit(`${pad}static __hmrInit = {
+`);
+    this.scopes.push(initNames);
+    this.rframes.push({ reactive: new Set, bound: initNames });
+    try {
+      for (const { m, entries } of slots) {
+        this.b.emit(`${pad}  ${m.name}() { `);
+        if (entries.length) {
+          this.hoistLine(entries);
+          this.b.emit(" ");
+        }
+        this.b.emit("return ");
+        this.mark(m.node, "value", () => this.withExpression(() => this.componentInitValue(m.value)));
+        this.b.emit(`; },
+`);
+      }
+    } finally {
+      this.rframes.pop();
+      this.scopes.pop();
+    }
+    this.b.emit(`${pad}};
 `);
   }
   componentExpr(node) {
@@ -16339,7 +16395,8 @@ ${pad ?? ""}`);
       }
       if (this.scopes.length === 1 && typeof this._componentName === "string")
         this.componentNames.push(this._componentName);
-      if (this.hmr && this.modulePath && this.scopes.length === 1 && typeof this._componentName === "string") {
+      const hmrMeta = this.hmr && this.modulePath && this.scopes.length === 1 && typeof this._componentName === "string";
+      if (hmrMeta) {
         this.emitComponentHmrMeta(pad, {
           bindingName: this._componentName,
           declaredProps,
@@ -16349,7 +16406,8 @@ ${pad ?? ""}`);
           extendsTag: extendsHost,
           methods,
           hooks,
-          hasRender: renderNode !== null
+          hasRender: renderNode !== null,
+          initNames
         });
       }
       if (tsInfo !== null)
@@ -16591,6 +16649,8 @@ ${pad ?? ""}`);
         this.b.emit(`${pad}}
 `);
       }
+      if (hmrMeta)
+        this.emitComponentHmrInit(pad, { stateVars, initNames });
       if (this.hmr && derivedVars.length > 0) {
         this.b.emit(`${pad}_hmrRefreshComputeds() {
 `);
@@ -26137,6 +26197,7 @@ __export(exports_components, {
   __hmrEmit: () => __hmrEmit,
   __hmrEntries: () => __hmrEntries,
   __hmrEvents: () => __hmrEvents,
+  __hmrInitDiff: () => __hmrInitDiff,
   __hmrLookup: () => __hmrLookup,
   __hmrMigrateDiff: () => __hmrMigrateDiff,
   __hmrMigrateRemount: () => __hmrMigrateRemount,
@@ -26240,6 +26301,11 @@ function __hmrMigrateDiff(oldSig, newSig) {
   const removed = prev.filter((name) => !nextSet.has(name));
   return { kept, added, removed };
 }
+function __hmrInitDiff(oldSig, newSig) {
+  const prev = oldSig?.inits ?? {};
+  const next = newSig?.inits ?? {};
+  return Object.keys(next).filter((name) => Object.hasOwn(prev, name) && prev[name] !== next[name]);
+}
 var __hmrEventLog = [];
 var __HMR_EVENT_CAP = 64;
 function __hmrEmit(type, detail = {}) {
@@ -26264,13 +26330,15 @@ function __hmrPreserveState(oldInstance, newInstance) {
   const nextNames = newSig?.state;
   const diff = __hmrMigrateDiff(oldSig, newSig);
   if (!Array.isArray(retained) || !Array.isArray(nextNames)) {
-    __hmrEmit("migrate", { id: newInstance?.constructor?.__hmrId ?? null, ...diff, copied: [] });
-    return diff;
+    __hmrEmit("migrate", { id: newInstance?.constructor?.__hmrId ?? null, ...diff, copied: [], reset: [] });
+    return { ...diff, copied: [], reset: [] };
   }
   const keep = new Set(retained);
+  const reset = __hmrInitDiff(oldSig, newSig);
+  const skip = new Set(reset);
   const copied = [];
   for (const name of nextNames) {
-    if (!keep.has(name))
+    if (!keep.has(name) || skip.has(name))
       continue;
     const prev = oldInstance[name];
     const next = newInstance[name];
@@ -26280,8 +26348,8 @@ function __hmrPreserveState(oldInstance, newInstance) {
     }
   }
   const id = newInstance?.constructor?.__hmrId ?? oldInstance?.constructor?.__hmrId ?? null;
-  __hmrEmit("migrate", { id, ...diff, copied });
-  return { ...diff, copied };
+  __hmrEmit("migrate", { id, ...diff, copied, reset });
+  return { ...diff, copied, reset };
 }
 var __HMR_IDENTITY_PROPS = ["name", "type", "placeholder"];
 function __hmrIdentityOf(el) {
@@ -26381,6 +26449,7 @@ function __hmrSwapDefinition(instance, NewCtor) {
   if (typeof oldId === "string" && oldId) {
     __hmrRegistry.get(oldId)?.instances.delete(instance);
   }
+  instance._hmrResetPending = __hmrInitDiff(instance.constructor?.__hmrSig, NewCtor.__hmrSig);
   Object.setPrototypeOf(instance, NewCtor.prototype);
   Object.defineProperty(instance, "constructor", {
     value: NewCtor,
@@ -26397,7 +26466,7 @@ function __hmrPatch(instance, NewCtor) {
   const oldId = instance.constructor?.__hmrId;
   __hmrSwapDefinition(instance, NewCtor);
   instance._hmrRerender();
-  __hmrEmit("patch", { id: NewCtor.__hmrId ?? oldId ?? null });
+  __hmrEmit("patch", { id: NewCtor.__hmrId ?? oldId ?? null, reset: instance._hmrReset ?? [] });
   return instance;
 }
 function __hmrPropKeys(props) {
@@ -27436,11 +27505,13 @@ class __Component {
   }
   _hmrRebind() {
     const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
+    this._hmrReset = [];
     const prevC = __pushComponent(this);
     const prevO = __pushOwner(this._frame);
     try {
       if (typeof this._hmrRefreshComputeds === "function")
         this._hmrRefreshComputeds();
+      this._hmrApplyResets();
       if (typeof this._hmrBindEffects === "function")
         this._hmrBindEffects();
     } catch (e) {
@@ -27453,6 +27524,31 @@ class __Component {
     __popOwner(prevO);
     __popComponent(prevC);
     return true;
+  }
+  _hmrApplyResets() {
+    const names = this._hmrResetPending ?? [];
+    this._hmrResetPending = null;
+    if (names.length === 0)
+      return;
+    const thunks = this.constructor.__hmrInit ?? {};
+    const given = new Set(typeof this._hmrPropKeys === "string" ? this._hmrPropKeys.split(",") : []);
+    const props = new Set(this.constructor.__props ?? []);
+    __batch(() => {
+      for (const name of names) {
+        if (props.has(name) && (given.has(name) || given.has(`__bind_${name}__`)))
+          continue;
+        const thunk = thunks[name];
+        const slot = this[name];
+        if (typeof thunk !== "function" || slot == null || typeof slot !== "object" || !("value" in slot))
+          continue;
+        const value = thunk.call(this);
+        if (value != null && typeof value === "object" && typeof value.read === "function") {
+          throw new Error(`${this.constructor.name || "component"}: the initializer of '${name}' yields a reactive container, which cannot replace the living slot`);
+        }
+        slot.value = value;
+        this._hmrReset.push(name);
+      }
+    });
   }
   _hmrApplyProps(props) {
     const rest = __splitProps(this.constructor, props);

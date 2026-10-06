@@ -310,9 +310,12 @@ Workspace changes. Signature classify selects **patch**, **migrate**, or
   `_create`/`_setup` (state-preserving view remount, not surgical morph). The
   rebuilt view adopts its living children: a construction matching exactly
   one released child by definition and prop keys keeps that child's instance
-  and state, wired to the new props.
+  and state, wired to the new props. A `:=` slot whose compiled initializer
+  changed re-runs that initializer alone on the living instance; the `patch`
+  event names the reset slots.
 - **Migrate** — compatible named-state shape change: remount floor with
-  intersecting `:=` slots preserved (`__hmrPreserveState`).
+  intersecting `:=` slots preserved (`__hmrPreserveState`); a kept slot whose
+  initializer changed takes the new instance's value.
 - **Remount** — incompatible shape: replace the narrowest dirty route/layout
   chain while preserving the stash and ancestor layouts.
 
