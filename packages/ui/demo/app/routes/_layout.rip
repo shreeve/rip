@@ -21,31 +21,32 @@ export Layout = component
     localStorage.setItem('theme', theme)
 
   render
-    div class: 'grid h-dvh grid-rows-[auto_1fr] md:grid-cols-[260px_1fr]'
-      header class: 'flex h-14 items-center gap-1 border-b border-surface px-2.5 md:h-15 md:border-r md:border-b-0 md:pl-5'
-        Drawer.Root open <=> drawer
-          Drawer.Trigger
-            class: 'flex size-8.5 items-center justify-center rounded-lg text-tertiary hover:bg-surface-hover hover:text-primary md:hidden'
-            aria-label: 'Open navigation'
-            Icon name: 'menu', class: 'size-4.5'
-          Drawer.Popup
-            class: [
-              'm-0 h-dvh max-h-none w-65 max-w-none -translate-x-full translate-y-0 bg-surface p-2.5 shadow-xl transition-[translate] duration-[calc(var(--swipe-strength,1)*400ms)] ease-out-slow'
-              'data-open:translate-x-0 data-open:duration-450 starting:data-open:-translate-x-full'
-              'backdrop:bg-backdrop backdrop:opacity-0 backdrop:duration-[calc(var(--swipe-strength,1)*400ms)] backdrop:ease-out-slow data-open:backdrop:duration-450 data-open:backdrop:opacity-[calc(1-var(--swipe-progress,0))] starting:data-open:backdrop:opacity-0 data-swiping:backdrop:duration-0'
-            ]
-            Drawer.Title class: 'sr-only', 'Navigation'
-            Nav
-        a href: '/', class: 'flex-1 px-2 text-base font-semibold md:px-0', 'Rip UI'
-        button
-          type: 'button'
-          class: 'flex size-8.5 items-center justify-center rounded-lg text-tertiary hover:bg-surface-hover hover:text-primary'
-          aria-label: if theme is 'dark' then 'Switch to the light theme' else 'Switch to the dark theme'
-          @click: switchTheme
-          Icon name: if theme is 'dark' then 'sun' else 'moon', class: 'size-4.5'
-      aside class: 'hidden min-h-0 flex-col overflow-y-auto border-r border-surface p-2.5 md:flex'
-        Nav
-      main class: 'min-h-0 overflow-y-auto md:col-start-2 md:row-span-2 md:row-start-1'
+    div class: 'md:grid md:grid-cols-[260px_1fr]'
+      div class: 'sticky top-0 z-10 bg-background md:flex md:h-dvh md:flex-col md:border-r md:border-surface'
+        header class: 'flex h-14 items-center gap-1 border-b border-surface px-2.5 md:h-15 md:border-b-0 md:pl-5'
+          Drawer.Root open <=> drawer
+            Drawer.Trigger
+              class: 'flex size-8.5 items-center justify-center rounded-lg text-tertiary hover:bg-surface-hover hover:text-primary md:hidden'
+              aria-label: 'Open navigation'
+              Icon name: 'menu', class: 'size-4.5'
+            Drawer.Popup
+              class: [
+                'm-0 h-dvh max-h-none w-65 max-w-none -translate-x-full translate-y-0 bg-surface p-2.5 shadow-xl transition-[translate] duration-[calc(var(--swipe-strength,1)*400ms)] ease-out-slow'
+                'data-open:translate-x-0 data-open:duration-450 starting:data-open:-translate-x-full'
+                'backdrop:bg-backdrop backdrop:opacity-0 backdrop:duration-[calc(var(--swipe-strength,1)*400ms)] backdrop:ease-out-slow data-open:backdrop:duration-450 data-open:backdrop:opacity-[calc(1-var(--swipe-progress,0))] starting:data-open:backdrop:opacity-0 data-swiping:backdrop:duration-0'
+              ]
+              Drawer.Title class: 'sr-only', 'Navigation'
+              Nav
+          a href: '/', class: 'flex-1 px-2 text-base font-semibold md:px-0', 'Rip UI'
+          button
+            type: 'button'
+            class: 'flex size-8.5 items-center justify-center rounded-lg text-tertiary hover:bg-surface-hover hover:text-primary'
+            aria-label: if theme is 'dark' then 'Switch to the light theme' else 'Switch to the dark theme'
+            @click: switchTheme
+            Icon name: if theme is 'dark' then 'sun' else 'moon', class: 'size-4.5'
+        aside class: 'hidden min-h-0 flex-1 flex-col overflow-y-auto p-2.5 md:flex'
+          Nav
+      main
         div id: 'content'
 
 Nav = component
