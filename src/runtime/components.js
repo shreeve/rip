@@ -102,7 +102,7 @@
 // context and error boundaries would silently break. Loading a second
 // copy therefore rejects LOUDLY with instructions.
 
-import { __batch, __state, __computed, __effect, __ownerFrame, __pushOwner, __popOwner, __detachRef } from './reactive.js';
+import { __batch, __state, __computed, __effect, __ownerFrame, __pushOwner, __popOwner, __detachRef, __untracked } from './reactive.js';
 
 const __RIP_COMPONENTS_SENTINEL = Symbol.for('rip.runtime.components');
 if (globalThis[__RIP_COMPONENTS_SENTINEL]) {
@@ -470,10 +470,15 @@ function __claimGateConstructor() {
 // its real top-level nodes are tracked on the component instance
 // (_nodes) and removed there. A detached node (parentNode null) is a
 // harmless no-op.
+// A removal fires listeners on the node it removes (a focused field's
+// focusout), inside whatever effect is detaching it, so they run
+// untracked: a read in one subscribes nothing.
 function __detach(node) {
   if (!node || node.nodeType === 11) return;
-  if (typeof node.remove === 'function') node.remove();
-  else if (node.parentNode) node.parentNode.removeChild(node);
+  __untracked(() => {
+    if (typeof node.remove === 'function') node.remove();
+    else if (node.parentNode) node.parentNode.removeChild(node);
+  });
 }
 
 function __pushComponent(component) {
@@ -1506,8 +1511,13 @@ class __Component {
     this._inheritedInst = null;
     this._inheritedOwn = null;
   }
+  // Untracked throughout: the hooks and the DOM events a detach fires
+  // run while the effect that swapped this view away is still current.
   _teardown({ state, hooks, removeDOM }) {
     if (this._state === 'failed' || this._state === 'unmounted') return;
+    __untracked(() => this._teardownUntracked({ state, hooks, removeDOM }));
+  }
+  _teardownUntracked({ state, hooks, removeDOM }) {
     if (this.constructor.__hmrId) __hmrUnregisterInstance(this);
     this._state = state;
     const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
@@ -1542,6 +1552,9 @@ class __Component {
   // the rebuilt view can adopt them (`__hmrAdopt`); whatever it does
   // not adopt drains once the rebuild settles.
   _hmrRelease(removeDOM = true) {
+    __untracked(() => this._hmrReleaseUntracked(removeDOM));
+  }
+  _hmrReleaseUntracked(removeDOM) {
     const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
     try {
       if (this.beforeUnmount) this.beforeUnmount();

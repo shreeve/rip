@@ -23978,6 +23978,10 @@ var types = {
   variant: (v) => v !== undefined,
   any: () => true
 };
+var normalizers = {
+  __proto__: null,
+  email: (v) => typeof v === "string" ? v.trim().toLowerCase() : v
+};
 var COERCERS = {
   integer(v) {
     if (typeof v === "number")
@@ -24056,6 +24060,8 @@ function nestedDef(typeName) {
 function validateValue(v, typeName, opts) {
   const prim = types[typeName];
   if (prim) {
+    if (normalizers[typeName])
+      v = normalizers[typeName](v);
     return prim(v) ? { value: v } : { errors: [{ field: "", error: "type", message: "must be " + typeName }] };
   }
   const subDef = SchemaRegistry.get(typeName);
@@ -24683,7 +24689,7 @@ class SchemaDef {
     for (const [n, f] of norm.fields) {
       if (skip && skip.has(n))
         continue;
-      const v = data == null ? undefined : data[n];
+      let v = data == null ? undefined : data[n];
       if (v === undefined || v === null) {
         if (f.required) {
           if (!collect)
@@ -24767,7 +24773,7 @@ class SchemaDef {
           continue;
         }
         if (res.value !== v)
-          data[n] = res.value;
+          data[n] = v = res.value;
       }
       const c = f.constraints;
       if (c) {
@@ -25597,6 +25603,7 @@ __export(exports_reactive, {
   __setEffectErrorReporter: () => __setEffectErrorReporter,
   __setErrorHandler: () => __setErrorHandler,
   __state: () => __state,
+  __untracked: () => __untracked,
   getEffectSignal: () => getEffectSignal
 });
 var __RIP_REACTIVE_SENTINEL = Symbol.for("rip.runtime.reactive");
@@ -25887,17 +25894,20 @@ function __computed(fn) {
   };
   return computed;
 }
+function __untracked(fn) {
+  const prev = __currentEffect;
+  __currentEffect = null;
+  try {
+    return fn();
+  } finally {
+    __currentEffect = prev;
+  }
+}
 function __runCleanup(effect) {
   const cleanup = effect._cleanup;
   if (!cleanup)
     return;
-  const prev = __currentEffect;
-  __currentEffect = null;
-  try {
-    cleanup();
-  } finally {
-    __currentEffect = prev;
-  }
+  __untracked(cleanup);
   effect._cleanup = null;
 }
 function __effect(fn) {
@@ -26456,10 +26466,12 @@ function __claimGateConstructor() {
 function __detach(node) {
   if (!node || node.nodeType === 11)
     return;
-  if (typeof node.remove === "function")
-    node.remove();
-  else if (node.parentNode)
-    node.parentNode.removeChild(node);
+  __untracked(() => {
+    if (typeof node.remove === "function")
+      node.remove();
+    else if (node.parentNode)
+      node.parentNode.removeChild(node);
+  });
 }
 function __pushComponent(component) {
   const prev = __currentComponent;
@@ -27363,6 +27375,9 @@ class __Component {
   _teardown({ state, hooks, removeDOM }) {
     if (this._state === "failed" || this._state === "unmounted")
       return;
+    __untracked(() => this._teardownUntracked({ state, hooks, removeDOM }));
+  }
+  _teardownUntracked({ state, hooks, removeDOM }) {
     if (this.constructor.__hmrId)
       __hmrUnregisterInstance(this);
     this._state = state;
@@ -27398,6 +27413,9 @@ class __Component {
     this._target = null;
   }
   _hmrRelease(removeDOM = true) {
+    __untracked(() => this._hmrReleaseUntracked(removeDOM));
+  }
+  _hmrReleaseUntracked(removeDOM) {
     const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
     try {
       if (this.beforeUnmount)

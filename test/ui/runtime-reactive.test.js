@@ -58,15 +58,15 @@ describe('module shape', () => {
     // error display (the loader remaps async effect stacks through
     // it) and deliberately absent from RUNTIME_TABLE — user programs
     // never reference it, so delivery never injects it.
-    // The owner-frame seam (__ownerFrame/__pushOwner/__popOwner) and
-    // __detachRef are component-machinery-facing exports, deliberately
-    // absent from RUNTIME_TABLE until an emission spells them in
-    // generated output ( render factories).
+    // The owner-frame seam (__ownerFrame/__pushOwner/__popOwner),
+    // __detachRef, and __untracked are component-machinery-facing
+    // exports, deliberately absent from RUNTIME_TABLE until an emission
+    // spells them in generated output (render factories).
     expect(Object.keys(v4mod).sort()).toEqual([
  '__batch', '__catchErrors', '__computed', '__detachRef', '__effect',
  '__handleError', '__ownerFrame', '__popOwner', '__pushOwner',
  '__readonly', '__setEffectErrorReporter', '__setErrorHandler', '__state',
- 'getEffectSignal',
+ '__untracked', 'getEffectSignal',
     ]);
   });
 
