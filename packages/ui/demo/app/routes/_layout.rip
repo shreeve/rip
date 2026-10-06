@@ -11,7 +11,7 @@ export Layout = component
   ~> document.documentElement.setAttribute('data-theme', theme)
 
   mounted: ->
-    @router.onNavigate -> drawer = false
+    @router.onNavigate(-> drawer = false)
     matchMedia('(min-width: 48rem)').addEventListener('change', (e) -> drawer = false if e.matches)
 
   preferred = (): Theme -> if localStorage.getItem('theme') is 'dark' then 'dark' else 'light'

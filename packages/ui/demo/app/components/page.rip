@@ -11,9 +11,16 @@ export Page = component
       slot
 
 export Stage = component
+  @title?: string
+  @description?: string
   render
-    div class: 'flex items-center justify-center rounded-xl border border-surface bg-surface py-16'
-      slot
+    section class: { 'mt-1': Boolean(title) }
+      if title
+        h2 class: 'text-lg font-semibold', title
+      if description
+        p class: 'mt-2 text-secondary text-sm-plus', description
+      div class: ['flex items-center justify-center rounded-xl border border-surface bg-surface py-16', { 'mt-4': Boolean(title or description) }]
+        slot
 
 Panel = component
   @title: string

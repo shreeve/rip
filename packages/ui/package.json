@@ -9,6 +9,7 @@
   },
   "exports": {
     ".": "./ui.rip",
+    "./combobox.rip": "./combobox.rip",
     "./dialog.rip": "./dialog.rip",
     "./drawer.rip": "./drawer.rip",
     "./menu.rip": "./menu.rip"
@@ -19,6 +20,8 @@
   },
   "files": [
     "ui.rip",
+    "anchored.rip",
+    "combobox.rip",
     "dialog.rip",
     "drawer.rip",
     "menu.rip",

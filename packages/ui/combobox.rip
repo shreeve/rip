@@ -1,0 +1,322 @@
+import type { Align, Side } from './anchored.rip'
+import { anchored, facing, landed } from './anchored.rip'
+
+export type { Align, Side } from './anchored.rip'
+
+# Choosing an option is an event, never a stored value: an item's click
+# runs and the popup closes, and the input's text is left alone. The
+# options are read off the list, so the parts never hold an items array
+# and the application owns filtering, loading, and what an option does.
+export Root = component
+  offer @open := false
+  offer @value := ''
+  offer active := ''
+  offer inputId := ''
+  offer listId := ''
+  offer popupId := ''
+  offer labelId := ''
+  offer anchor := "--#{mint('anchor')}"
+  offer pointer := { x: NaN, y: NaN }
+  render
+    slot
+
+export Label = component extends label
+  accept inputId from Root
+  accept labelId from Root
+  id =! @rest.id ?? mint('label')
+  ~>
+    labelId = id
+    -> labelId = ''
+
+  render
+    label id: id, for: (inputId or undefined)
+      slot
+
+# Focus stays here; the highlight is aria-activedescendant. Focus alone
+# never opens the popup.
+export Input = component extends input
+  accept open from Root
+  accept value from Root
+  accept active from Root
+  accept inputId from Root
+  accept listId from Root
+  accept popupId from Root
+  accept anchor from Root
+  @el?: HTMLInputElement | null := null
+  id =! @rest.id ?? mint('input')
+  ~>
+    inputId = id
+    -> inputId = ''
+
+  expanded ~= if popupId then open else true
+
+  showable = (): boolean -> Boolean(popupId) and (Boolean(value.trim()) or options(document.getElementById(listId)).length > 0)
+
+  highlight = (option: HTMLElement | undefined) ->
+    return unless option
+    active = option.id
+    option.scrollIntoView({ block: 'nearest' })
+
+  step = (dir: number): boolean ->
+    open = true if showable()
+    list = options(document.getElementById(listId))
+    at = list.findIndex((o) -> o.id is active)
+    highlight(list[if at < 0 then (if dir > 0 then 0 else list.length - 1) else (at + dir) %% list.length])
+    true
+
+  jump = (end: 0 | -1): boolean ->
+    highlight(options(document.getElementById(listId)).at(end))
+    true
+
+  # A click is what Enter does, so the keyboard and the pointer are one
+  # path.
+  enter = (): boolean ->
+    list = options(document.getElementById(listId))
+    target = (if active then document.getElementById(active) else null) ?? (if list.length is 1 then list[0] else null)
+    if target
+      target.click()
+      return true
+    open = false
+    false
+
+  escape = (): boolean ->
+    if popupId and open
+      open = false
+    else if value
+      value = ''
+      active = ''
+    else
+      return false
+    true
+
+  onKeydown = (e: KeyboardEvent) ->
+    return if e.isComposing or e.ctrlKey or e.altKey or e.metaKey or e.shiftKey
+    handled = switch e.key
+      when 'ArrowDown' then step(1)
+      when 'ArrowUp' then step(-1)
+      when 'PageDown' then jump(-1)
+      when 'PageUp' then jump(0)
+      when 'Enter' then enter()
+      when 'Escape' then escape()
+      else false
+    e.preventDefault() if handled
+
+  onInput = (e: Event) ->
+    value = (e.target as HTMLInputElement).value
+    active = ''
+    open = Boolean(popupId and value.trim())
+
+  onClick = -> open = true if showable()
+
+  # Focus leaving for anywhere but the popup closes it, which is what Tab
+  # does, with the browser's own move left alone.
+  onFocusout = (e: FocusEvent) ->
+    return unless popupId and open
+    popup = document.getElementById(popupId)
+    return if popup and e.relatedTarget instanceof Node and popup.contains(e.relatedTarget)
+    open = false
+
+  render
+    input
+      ref: el
+      id: id
+      type: 'text'
+      value: value
+      autocomplete: 'off'
+      role: 'combobox'
+      aria-autocomplete: 'list'
+      aria-haspopup: 'listbox'
+      aria-expanded: if expanded then 'true' else 'false'
+      aria-controls: listId or undefined
+      aria-activedescendant: active or undefined
+      data-popup-open: (popupId and open) or undefined
+      style: { anchorName: anchor }
+      @input: onInput
+      @keydown: onKeydown
+      @click: onClick
+      @focusout: onFocusout
+
+# A manual popover: the top layer and anchor positioning are the
+# platform's, while every close goes through the cell, since an auto
+# popover light-dismisses under a click on its own input. A press outside
+# the popup and the input closes it. Nothing closes on scroll; the anchor
+# follows. The side is read from the computed area once shown and again
+# after resize and scroll, as the menu's is.
+export Popup = component extends div
+  accept open from Root
+  accept active from Root
+  accept inputId from Root
+  accept popupId from Root
+  accept anchor from Root
+  @side: Side := 'bottom'
+  @align: Align := 'center'
+  @sideOffset: number := 0
+  id =! @rest.id ?? mint('popup')
+  el: HTMLDivElement | null := null
+  ~>
+    popupId = id
+    -> popupId = ''
+
+  placement ~= anchored(anchor, side, align, sideOffset, origin)
+  placed: Side | '' := ''
+  place =! =>
+    popup = el
+    return unless popup and popup.matches(':popover-open')
+    placed = landed(popup, side)
+
+  moved =! => requestAnimationFrame(-> requestAnimationFrame(place))
+  origin ~= facing(placed or side, align)
+
+  onPointerdown =! (e: PointerEvent) =>
+    target = e.target as Node | null
+    return if el?.contains(target) or document.getElementById(inputId)?.contains(target)
+    open = false
+
+  ~>
+    active = '' unless open
+    return
+
+  ~>
+    return unless open
+    document.addEventListener('pointerdown', onPointerdown)
+    addEventListener('resize', moved)
+    document.addEventListener('scroll', moved, true)
+    ->
+      document.removeEventListener('pointerdown', onPointerdown)
+      removeEventListener('resize', moved)
+      document.removeEventListener('scroll', moved, true)
+
+  # A close waiting on its animations cannot read the cell to learn of a
+  # show begun meanwhile, so shows are counted.
+  shows = 0
+  onBeforeToggle = (e: ToggleEvent) ->
+    if e.newState is 'open'
+      shows += 1
+      queueMicrotask(place)
+    else
+      open = false
+
+  onToggle = (e: ToggleEvent) ->
+    popup = el
+    return unless popup
+    if e.newState is 'closed'
+      since = shows
+      exits = popup.getAnimations().map((a) -> a.finished)
+      Promise.allSettled(exits).then(-> placed = '' if shows is since)
+      return
+    open = true
+    place()
+
+  ~>
+    popup = el
+    return unless popup
+    if open
+      queueMicrotask ->
+        return unless open and popup.isConnected and not popup.matches(':popover-open')
+        popup.showPopover()
+    else if popup.matches(':popover-open')
+      since = shows
+      queueMicrotask ->
+        exits = popup.getAnimations().map((a) -> a.finished)
+        Promise.allSettled(exits).then(-> popup.hidePopover() if shows is since and not open and popup.matches(':popover-open'))
+
+  render
+    div
+      ref: el
+      id: id
+      popover: 'manual'
+      role: 'presentation'
+      style: placement
+      data-side: placed or undefined
+      data-open: if open and placed then true else undefined
+      data-closed: not open or undefined
+      @beforetoggle: onBeforeToggle
+      @toggle: onToggle
+      slot
+
+# The highlight remembers its place, so an option that leaves the list
+# hands it to the option now there, or the last, or nothing when the list
+# empties. Leaving the list with the pointer clears it; leaving an option
+# does not, since a list scrolling under a still pointer fires that too.
+export List = component extends div
+  accept active from Root
+  accept listId from Root
+  accept labelId from Root
+  id =! @rest.id ?? mint('list')
+  el: HTMLDivElement | null := null
+  at = -1
+  ~>
+    listId = id
+    -> listId = ''
+
+  ~>
+    current = active
+    at = options(el).findIndex((o) -> o.id is current)
+    return
+
+  ~>
+    list = el
+    return unless list
+    observer = MutationObserver.new ->
+      return unless active and not document.getElementById(active)
+      left = options(list)
+      active = left[Math.min(at, left.length - 1)]?.id ?? ''
+    observer.observe(list, { childList: true, subtree: true })
+    -> observer.disconnect()
+
+  onPointerleave = (e: PointerEvent) -> active = '' unless e.pointerType is 'touch'
+
+  render
+    div
+      ref: el
+      id: id
+      role: 'listbox'
+      aria-labelledby: labelId or undefined
+      @pointerleave: onPointerleave
+      slot
+
+# The pointer highlights an option only when it moved to a new position:
+# a list that scrolls or re-renders under a still pointer fires enter,
+# and WebKit a move with no motion, but never a move to somewhere new.
+# A press never takes focus from the input, so a click keeps the next
+# keystroke typing, and tabindex keeps a button host out of the tab order.
+export Item = component extends div
+  accept open from Root
+  accept active from Root
+  accept pointer from Root
+  id =! @rest.id ?? mint('item')
+
+  onPointermove = (e: PointerEvent) ->
+    return if e.pointerType is 'touch' or (e.clientX is pointer.x and e.clientY is pointer.y)
+    pointer = { x: e.clientX, y: e.clientY }
+    active = id unless active is id
+
+  onPress = (e: Event) -> e.preventDefault()
+
+  render
+    div
+      id: id
+      role: 'option'
+      tabindex: -1
+      aria-selected: if active is id then 'true' else 'false'
+      data-highlighted: (active is id) or undefined
+      @pointermove: onPointermove
+      @pointerdown: onPress
+      @mousedown: onPress
+      @click: (-> open = false)
+      slot
+
+# A live region announces only while it stays mounted and its text
+# changes, so the part is rendered always and told what to say.
+export Status = component extends div
+  render
+    div role: 'status', aria-live: 'polite', aria-atomic: 'true'
+      slot
+
+options = (list: HTMLElement | null): HTMLElement[] ->
+  return [] unless list
+  nodes: NodeListOf<HTMLElement> = list.querySelectorAll('[role="option"]')
+  Array.from(nodes)
+
+counter = 0
+mint = (part: string): string -> "rip-combobox-#{part}-#{counter += 1}"

@@ -1,5 +1,6 @@
 # rip/ui — unstyled, composable UI components built on native browser features.
 
+export * as Combobox from './combobox.rip'
 export * as Dialog from './dialog.rip'
 export * as Drawer from './drawer.rip'
 export * as Menu from './menu.rip'

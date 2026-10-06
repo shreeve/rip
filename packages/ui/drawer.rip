@@ -54,13 +54,13 @@ export Popup = component extends Dialog.Popup
   # Square-root resistance keeps a long pull within the bleed below.
   resist = (x: number): number -> Math.sqrt(x)
 
-  down = (e: PointerEvent) ->
-    drag = if onBackdrop(e) or (closedby ?? 'any') isnt 'any' or ignores(e) then null else { id: e.pointerId, start: along(e), at: performance.now() }
+  onPointerdown = (e: PointerEvent) ->
+    drag = if hitsBackdrop(e) or (closedby ?? 'any') isnt 'any' or ignores(e) then null else { id: e.pointerId, start: along(e), at: performance.now() }
     last = before = { offset: 0, at: performance.now() } if drag
 
   # Capture past the slop so a swipe from a link doesn't follow it; the
   # browser's own link or image drag would cancel the pointer sequence.
-  move = (e: PointerEvent) ->
+  onPointermove = (e: PointerEvent) ->
     return unless drag and e.pointerId is drag.id
     travel = (along(e) - drag.start) * toward
     unless swiping
@@ -74,7 +74,7 @@ export Popup = component extends Dialog.Popup
     last = { offset, at: performance.now() }
 
   # A flick is the gesture's average speed, so one sample's jitter is never one.
-  up = (e: PointerEvent) ->
+  onPointerup = (e: PointerEvent) ->
     return unless drag
     size = extent(e.currentTarget as HTMLDialogElement)
     now = performance.now()
@@ -104,7 +104,7 @@ export Popup = component extends Dialog.Popup
     offset = 0
     progress = 0
 
-  refuseDrag = (e: DragEvent) -> e.preventDefault() if drag
+  onDragstart = (e: DragEvent) -> e.preventDefault() if drag
 
   render
     Dialog.Popup
@@ -112,15 +112,15 @@ export Popup = component extends Dialog.Popup
       style: swipeStyle
       data-side: side
       data-swiping: swiping or undefined
-      @pointerdown: down
-      @pointermove: move
-      @pointerup: up
+      @pointerdown: onPointerdown
+      @pointermove: onPointermove
+      @pointerup: onPointerup
       @pointercancel: settle
-      @dragstart: refuseDrag
+      @dragstart: onDragstart
       slot
 
 # A press lands on the backdrop when it hits the dialog itself outside its box.
-onBackdrop = (e: PointerEvent): boolean ->
+hitsBackdrop = (e: PointerEvent): boolean ->
   return false unless e.target is e.currentTarget
   r = (e.currentTarget as HTMLDialogElement).getBoundingClientRect()
   e.clientX < r.left or e.clientX > r.right or e.clientY < r.top or e.clientY > r.bottom
@@ -133,12 +133,12 @@ onBackdrop = (e: PointerEvent): boolean ->
 # edge on a fraction of a pixel, and two edges meeting there would each
 # cover it in part and let the backdrop through as a seam.
 styles = CSSStyleSheet.new()
-styles.replaceSync '''
+styles.replaceSync('''
   dialog[data-part="Popup"][data-side] { overflow: visible; }
   dialog[data-part="Popup"][data-side]::after { content: ''; position: absolute; background: inherit; }
   dialog[data-part="Popup"][data-side="left"]::after { inset: 0 calc(100% - 1px) 0 auto; width: calc(3rem + 1px); }
   dialog[data-part="Popup"][data-side="right"]::after { inset: 0 auto 0 calc(100% - 1px); width: calc(3rem + 1px); }
   dialog[data-part="Popup"][data-side="top"]::after { inset: auto 0 calc(100% - 1px) 0; height: calc(3rem + 1px); }
   dialog[data-part="Popup"][data-side="bottom"]::after { inset: calc(100% - 1px) 0 auto 0; height: calc(3rem + 1px); }
-'''
+''')
 document.adoptedStyleSheets.push(styles)
