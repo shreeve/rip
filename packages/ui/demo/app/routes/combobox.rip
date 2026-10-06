@@ -69,9 +69,9 @@ Basic = component
   render
     div
       Combobox.Root value <=> term
-        Combobox.Label class: 'mb-2 block text-sm leading-none font-medium text-secondary', 'Fruit'
+        Combobox.Label class: 'mb-2 block text-sm-plus leading-none font-medium text-secondary md:text-sm', 'Fruit'
         Combobox.Input
-          class: 'h-10 w-72 rounded-lg border border-input bg-input px-3 text-sm shadow-xs outline-none hover:border-input-hover focus:border-accent focus:ring focus:ring-accent'
+          class: 'h-11 w-72 rounded-lg border border-input bg-input px-3.5 text-base shadow-xs outline-none hover:border-input-hover focus:border-accent focus:ring focus:ring-accent md:h-10 md:px-3 md:text-sm-plus'
           placeholder: 'Search fruit'
         Combobox.Popup
           side: side
@@ -119,9 +119,9 @@ Search = component
   render
     div
       Combobox.Root value <=> term
-        Combobox.Label class: 'mb-2 block text-sm leading-none font-medium text-secondary', 'Fruit search'
+        Combobox.Label class: 'mb-2 block text-sm-plus leading-none font-medium text-secondary md:text-sm', 'Fruit search'
         Combobox.Input
-          class: 'h-10 w-72 rounded-lg border border-input bg-input px-3 text-sm shadow-xs outline-none hover:border-input-hover focus:border-accent focus:ring focus:ring-accent'
+          class: 'h-11 w-72 rounded-lg border border-input bg-input px-3.5 text-base shadow-xs outline-none hover:border-input-hover focus:border-accent focus:ring focus:ring-accent md:h-10 md:px-3 md:text-sm-plus'
           placeholder: 'Search fruit'
           @input: onInput
         Combobox.Popup
@@ -149,7 +149,7 @@ Picker = component
     div class: 'w-72'
       Combobox.Root value <=> filter
         Combobox.Input
-          class: 'h-10 w-72 rounded-lg border border-input bg-input px-3 text-sm shadow-xs outline-none hover:border-input-hover focus:border-accent focus:ring focus:ring-accent'
+          class: 'h-11 w-72 rounded-lg border border-input bg-input px-3.5 text-base shadow-xs outline-none hover:border-input-hover focus:border-accent focus:ring focus:ring-accent md:h-10 md:px-3 md:text-sm-plus'
           placeholder: 'Filter fruit'
           aria-label: 'Filter fruit'
         Combobox.Status
