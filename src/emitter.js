@@ -3338,12 +3338,13 @@ class Emitter {
   // modes make that layout decision from the same map.
   // The imported bindings that are TYPE-ONLY: named in an import and
   // then never referenced by the running program. Most type syntax is
-  // erased into the side tables before the s-expression tree, but three
+  // erased into the side tables before the s-expression tree, but a few
   // shapes carry their type TEXT in the tree as plain strings — a
   // typed-var's annotation slot, a def-sig's return slot, a type-decl's
-  // whole declaration — and the walk must step over those slots, or
-  // `(n: T)` counts as a value use of T and vetoes the very elision the
-  // annotation calls for. No cross-module
+  // whole declaration, a cast's or a satisfies' type slot — and the walk
+  // must step over those slots, or `(n: T)` and `v as T` count as value
+  // uses of T and veto the very elision the type position calls for.
+  // No cross-module
   // resolution is needed, and none would help: whether the exporting
   // module spells the name as a type is its business, while whether
   // THIS file needs it at runtime is answerable here.
@@ -3384,6 +3385,7 @@ class Emitter {
       if (x[0] === 'typed-var' && x.length === 3) { walk(x[1]); return; }
       if (x[0] === 'def-sig') { walk(x[2]); return; }
       if (x[0] === 'type-decl') return;
+      if ((x[0] === 'cast' || x[0] === 'satisfies') && x.length === 3) { walk(x[1]); return; }
       for (const c of x) walk(c);
     };
     walk(sexpr);

@@ -27,6 +27,7 @@ const build = (files, entry) => {
 
 const LIB = [
   'export type Shape = { form?: string }',
+  'export type Form = { name?: string }',
   'export val = 41',
   "console.log('lib ran')",
 ].join('\n') + '\n';
@@ -107,6 +108,34 @@ test("a module whose whole clause is types still RUNS the module it imported", a
     console.log = realLog;
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('a type used only as a cast or satisfies target elides; a value use keeps the name', async () => {
+  // A cast and a satisfies carry their type text in the tree as a plain
+  // string, like a typed-var's annotation slot, so a value-tree walk
+  // that does not step over the slot mistakes the type for a use.
+  const { dir, url } = build({
+    'lib.rip': LIB,
+    'use.rip': [
+      "import { val, Shape, Form } from './lib.rip'",
+      'export cast = {} as Shape',
+      'export checked = {} satisfies Form',
+      'answer = val as number',
+      'export seen = answer',
+    ].join('\n') + '\n',
+  }, 'use.rip');
+  try {
+    const mod = await import(url);
+    expect(mod.cast).toEqual({});
+    expect(mod.checked).toEqual({});
+    expect(mod.seen).toBe(41);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  const src = [
+    "import { val, Shape } from './lib.rip'",
+    'cast = val as Shape',
+    'export kept = Shape',
+  ].join('\n') + '\n';
+  expect(compile(src, { runtimeDelivery: 'none' }).code).toContain("import { val, Shape } from './lib.rip';");
 });
 
 // ─── `import type` — the author-declared whole-statement erasure ─────

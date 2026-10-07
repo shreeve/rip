@@ -11181,6 +11181,10 @@ class Emitter {
       }
       if (x[0] === "type-decl")
         return;
+      if ((x[0] === "cast" || x[0] === "satisfies") && x.length === 3) {
+        walk(x[1]);
+        return;
+      }
       for (const c of x)
         walk(c);
     };
@@ -12574,7 +12578,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
         {
           const specStart = this.b.offset;
           this.mark(node, "source", () => this.b.emit(this.moduleSource(node[1])));
-          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(node[1]) });
+          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(node[1]), namespace: node.length === 3 ? node[2] : undefined });
         }
         this.b.emit(";");
       } else if (head === "export-from") {
