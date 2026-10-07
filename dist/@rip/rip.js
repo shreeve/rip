@@ -6636,7 +6636,7 @@ ${baseline}`).join(`
           push("FORAS", word, start, pos);
         }
         seenFor = null;
-      } else if (word === "as" && (seenImport || seenExport) && (prev?.kind === "DEFAULT" || prev?.kind === "IMPORT_ALL" || prev?.kind === "EXPORT_ALL" || prev?.kind === "IDENTIFIER")) {
+      } else if (word === "as" && (seenImport || seenExport) && (prev?.kind === "DEFAULT" || prev?.kind === "IMPORT_ALL" || prev?.kind === "EXPORT_ALL" || prev?.kind === "IDENTIFIER" && parens[parens.length - 1]?.specifiers === true)) {
         push("AS", word, start, pos);
       } else if (word === "with" && seenImport && (prev?.kind === "STRING" || prev?.kind === "STRING_END")) {
         push("WITH", word, start, pos);

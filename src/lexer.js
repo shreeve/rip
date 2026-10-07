@@ -1527,9 +1527,12 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         }
         seenFor = null;
       } else if (word === 'as' && (seenImport || seenExport) &&
-                 (prev?.kind === 'DEFAULT' || prev?.kind === 'IMPORT_ALL' || prev?.kind === 'EXPORT_ALL' || prev?.kind === 'IDENTIFIER')) {
+                 (prev?.kind === 'DEFAULT' || prev?.kind === 'IMPORT_ALL' || prev?.kind === 'EXPORT_ALL' ||
+                  (prev?.kind === 'IDENTIFIER' && parens[parens.length - 1]?.specifiers === true))) {
         // Contextual: only inside a module line, after a specifier
-        // — `as = 2` elsewhere stays an identifier.
+        // — `as = 2` elsewhere stays an identifier. A name renames
+        // only inside the specifier braces; in an export's value the
+        // name is an operand and its `as` is the cast.
         push('AS', word, start, pos);
       } else if (word === 'with' && seenImport && (prev?.kind === 'STRING' || prev?.kind === 'STRING_END')) {
         // Contextual: import attributes, after the module source
