@@ -23,8 +23,10 @@ rules don't cover comes up, decide with these, in this order:
    beats a pristine two-file split (decimal's coercer merge). Flat
    layout until structure is *earned* — a directory exists only for a
    structural reason (dependency quarantine, plugin resolution, native
-   host, multi-surface ownership), never as invocation sugar or
-   symmetry.
+   host, multi-surface ownership, a family of same-kind modules behind
+   one entry), never as invocation sugar or symmetry. The test is that
+   the directory names a shape the package already has, not one it
+   might grow into.
 3. **POLS — the principle of least surprise.** `rip test.rip` cannot
    be shadowed by a future CLI subcommand; a boring top-left logo
    renders identically everywhere; automatic where the user should
@@ -67,7 +69,8 @@ packages/<name>/
 Runnable package verbs are root-level `<verb>.rip` files invoked as
 `rip <verb>.rip` — the extension can never collide with a CLI
 subcommand (`rip test`, `rip schema`). A directory appears only for a
-structural reason (its own package.json quarantining bench-only deps),
+structural reason (its own package.json quarantining bench-only deps; a
+family of same-kind modules behind one entry, as ui's `components/`),
 never as an invocation convenience.
 
 Package binaries have exactly ONE shape for mold CLIs: the entry `.rip`
@@ -125,7 +128,7 @@ one-file mold trees. Prefer the package README (and any package-local
 | `sites` | System edge / manager / workers / demos — see [docs/SERVER.md](../docs/SERVER.md) |
 | `app` | Multi-module application substrate (`index.rip` + surface modules, `test/`) |
 | `email` | Library beside its CLI and the CLI's preview app (`preview/`), a host-heavy `test/` |
-| `ui` | One file per component behind the entry, beside its demo app (`demo/`) and the real-browser specs that drive it (`test/browser/`) |
+| `ui` | One module per component under `components/`, published through the entry, beside its demo app (`demo/`), the real-browser specs that drive it (`test/browser/`), and the engine repros they pin (`repro/`) |
 | `tray` | Rip provider + macOS SwiftUI host (`macos/`) |
 | `ai` | MCP server entry plus `lib/` |
 | `highlight` | Single highlight.js grammar module (`.js` entry, not `.rip`) |

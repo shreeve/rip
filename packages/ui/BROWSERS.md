@@ -13,7 +13,7 @@ Safari on a device and Playwright's WebKit are recorded separately and neither s
 - **Bug:** [WebKit 324348](https://bugs.webkit.org/show_bug.cgi?id=324348) (resolved: a Safari 27 regression, fixed in trunk and on a Safari branch; Safari 27.0.1 still carries it).
 - **Repro:** [`repro/anchor-in-modal.html`](repro/anchor-in-modal.html). Each case scrolls to the bottom and reports the popover's error; 0 is correct.
 - **Pin:** `an anchored popover inside a modal is off by the page scroll in WebKit, and placed elsewhere`.
-- **Affects:** every anchored popup inside a `Dialog.Popup` or `Drawer.Popup` on a scrolled page: the Combobox popup and the Menu, which both place through [`anchored.rip`](anchored.rip). The popup opens off-screen, so it looks as if it never opened.
+- **Affects:** every anchored popup inside a `Dialog.Popup` or `Drawer.Popup` on a scrolled page: the Combobox popup and the Menu, which both place through [`components/anchored.rip`](components/anchored.rip). The popup opens off-screen, so it looks as if it never opened.
 - **Workaround:** none yet.
 
 ## A closed dialog or a hidden popover drops at once
@@ -24,7 +24,7 @@ Safari on a device and Playwright's WebKit are recorded separately and neither s
 - **Repro:** [`repro/dialog-close-transition.html`](repro/dialog-close-transition.html) and [`repro/popover-light-dismiss.html`](repro/popover-light-dismiss.html). Each samples the element's computed `display` after the close; `block` at +0ms is an element kept through its exit.
 - **Pin:** `a closed dialog with discrete transitions is kept through them in Chromium and dropped at once elsewhere` and `a hidden popover with discrete transitions is kept in Chromium and dropped at once elsewhere, by script and by light dismiss, and no engine lets the light dismiss be canceled`.
 - **Affects:** `Dialog.Popup`, `Drawer.Popup`, and `Menu.Popup` exits.
-- **Workaround:** the popup stays open until its own animations finish, then calls `close()` or `hidePopover()`, in [`dialog.rip`](dialog.rip) and [`menu.rip`](menu.rip). A light dismiss of the Menu has no exit transition on these engines; only a close through the cell waits.
+- **Workaround:** the popup stays open until its own animations finish, then calls `close()` or `hidePopover()`, in [`components/dialog.rip`](components/dialog.rip) and [`components/menu.rip`](components/menu.rip). A light dismiss of the Menu has no exit transition on these engines; only a close through the cell waits.
 
 ## @starting-style does not substitute an unset registered property's initial value
 
@@ -44,7 +44,7 @@ Safari on a device and Playwright's WebKit are recorded separately and neither s
 - **Repro:** [`repro/dialog-closedby.html`](repro/dialog-closedby.html). The page says whether `closedBy` exists on the prototype, and logs the `cancel` and `close` events a press causes.
 - **Pin:** `closedby is honored: Escape under none is refused and a backdrop press under any closes`.
 - **Affects:** `Dialog.Popup` and `Drawer.Popup`.
-- **Workaround:** the popup closes itself on a press that starts and ends on the backdrop while `closedby` is `any`, and cancels Escape itself while it is `none`, in [`dialog.rip`](dialog.rip). Both go once every supported engine honors the attribute.
+- **Workaround:** the popup closes itself on a press that starts and ends on the backdrop while `closedby` is `any`, and cancels Escape itself while it is `none`, in [`components/dialog.rip`](components/dialog.rip). Both go once every supported engine honors the attribute.
 
 ## The element showModal focuses shows a ring after a mouse click
 
@@ -54,7 +54,7 @@ Safari on a device and Playwright's WebKit are recorded separately and neither s
 - **Repro:** [`repro/modal-focus-ring.html`](repro/modal-focus-ring.html). Open the modal with a click, then with Enter; the page reports whether the focused button matches `:focus-visible`.
 - **Pin:** `the element showModal focuses after a mouse click shows a ring in WebKit and none elsewhere, and a ring everywhere after Enter`.
 - **Affects:** `Dialog.Popup` and `Drawer.Popup` on open.
-- **Workaround:** the popup refocuses the element with `focusVisible: false` when the opener was not focus-visible, in [`dialog.rip`](dialog.rip).
+- **Workaround:** the popup refocuses the element with `focusVisible: false` when the opener was not focus-visible, in [`components/dialog.rip`](components/dialog.rip).
 
 ## A scroll under a still pointer fires a pointermove
 
@@ -64,7 +64,7 @@ Safari on a device and Playwright's WebKit are recorded separately and neither s
 - **Repro:** [`repro/pointer-under-scroll.html`](repro/pointer-under-scroll.html). Rest the mouse over the list; it scrolls by itself and the page counts the events the rows receive.
 - **Pin:** `a scroll under a still pointer fires enter on the row now under it, and in WebKit a move with no motion`.
 - **Affects:** `Combobox.Item` and `Menu.Item`, which highlight the option under the pointer.
-- **Workaround:** an item highlights on a pointer move only when the move reports a position other than the last one, in [`combobox.rip`](combobox.rip).
+- **Workaround:** an item highlights on a pointer move only when the move reports a position other than the last one, in [`components/combobox.rip`](components/combobox.rip).
 
 ## Safari on iOS tints the strip under its bottom bar from the modal's ::backdrop
 

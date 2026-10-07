@@ -1119,7 +1119,7 @@ describe.skipIf(!tsgoAvailable)('component member paths', () => {
       const local = await api.hover('app.rip', 5, 5);
       expect(local?.contents?.value).toContain('module "./menu.rip"');
       const stdlib = await api.hover('app.rip', 7, 9);
-      expect(stdlib?.contents?.value).toContain('module "rip/ui/dialog.rip"');
+      expect(stdlib?.contents?.value).toContain('module "rip/ui/components/dialog.rip"');
       expect(stdlib?.contents?.value).not.toContain('__external__');
     });
   });
@@ -1174,7 +1174,7 @@ describe.skipIf(!tsgoAvailable)('component member paths', () => {
       const use = tokens.find((t) => t.line === read.line && t.character === read.character);
       expect(use?.type).toBe('#0');
       const hover = await api.hover(rel, imported.line, imported.character + 3);
-      expect(hover?.contents?.value).toContain('module "rip/ui/dialog.rip"');
+      expect(hover?.contents?.value).toContain('module "rip/ui/components/dialog.rip"');
     });
   }, 60_000);
 

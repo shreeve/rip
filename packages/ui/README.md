@@ -6,11 +6,11 @@
 
 Each component is a module namespace, one export per part, unstyled, composed by the application, with state exposed as data attributes. A root owns its state cell and offers it; the parts projected into it accept it and write it; a parent binds the cell with `<=>` only when it needs to observe or drive it. Each part `extends` the tag it renders, so the application's classes and attributes land on the real element, and a part built on another part `extends` that part, so the same attributes pass through it.
 
-**Runtime:** browser-safe (`rip.browser: true`). `ui.rip` is the entry, publishing each component's module as one name (`export * as Dialog from './dialog.rip'`), so `import { Dialog } from 'rip/ui'` gives the parts as `Dialog.Root`, `Dialog.Trigger`, and the types as `Dialog.ClosedBy`. Each module is also a package subpath, `rip/ui/combobox.rip`, `rip/ui/dialog.rip`, `rip/ui/drawer.rip`, `rip/ui/menu.rip`, so an application can wrap a component as its own namespace: a module that re-exports the library's parts and declares the one part it changes, since a module's own export shadows a star re-export's.
+**Runtime:** browser-safe (`rip.browser: true`). `ui.rip` is the entry, publishing each component's module as one name (`export * as Dialog from './components/dialog.rip'`), so `import { Dialog } from 'rip/ui'` gives the parts as `Dialog.Root`, `Dialog.Trigger`, and the types as `Dialog.ClosedBy`. Each module is also a package subpath, `rip/ui/components/combobox.rip`, `rip/ui/components/dialog.rip`, `rip/ui/components/drawer.rip`, `rip/ui/components/menu.rip`, so an application can wrap a component as its own namespace: a module that re-exports the library's parts and declares the one part it changes, since a module's own export shadows a star re-export's.
 
 ```coffee
 import { Dialog } from 'rip/ui'
-export * from 'rip/ui/dialog.rip'
+export * from 'rip/ui/components/dialog.rip'
 
 export Popup = component extends Dialog.Popup
   @title?: string
