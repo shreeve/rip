@@ -5389,7 +5389,7 @@ class Emitter {
         {
           const specStart = this.b.offset;
           this.mark(node, 'source', () => this.b.emit(this.moduleSource(node[1])));
-          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(node[1]) });
+          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(node[1]), namespace: node.length === 3 ? node[2] : undefined });
         }
         this.b.emit(';');
       } else if (head === 'export-from') {

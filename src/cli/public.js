@@ -70,7 +70,37 @@ export function publicEntriesOf(pkgDir) {
     const index = path.join(pkgDir, 'index.rip');
     if (fs.existsSync(index)) out.push(index);
   }
-  return { entries: [...new Set(out)], patterns, outside };
+  // A namespace re-export, `export * as Name from './m.rip'`, publishes
+  // every export of m.rip under one name, so m.rip is an entry as if the
+  // manifest named it, followed from every entry transitively. A
+  // specifier that is not a relative `.rip` is another package's surface.
+  const entries = [];
+  const seen = new Set();
+  const queue = [...out];
+  while (queue.length) {
+    const file = queue.shift();
+    if (seen.has(file)) continue;
+    seen.add(file);
+    entries.push(file);
+    for (const target of namespaceTargetsOf(file)) {
+      if (target !== pkgDir && !target.startsWith(pkgDir + path.sep)) { outside.push(path.relative(pkgDir, target)); continue; }
+      if (fs.existsSync(target)) queue.push(target);
+    }
+  }
+  return { entries, patterns, outside };
+}
+
+function namespaceTargetsOf(file) {
+  let compiled;
+  try { compiled = compile(fs.readFileSync(file, 'utf8'), { path: file, face: 'ts' }); } catch { return []; }
+  const targets = [];
+  for (const edge of compiled.imports ?? []) {
+    if (!edge.namespace) continue;
+    const specifier = edge.specifier.slice(1, -1);
+    if (!/^\.\.?\//.test(specifier) || !specifier.endsWith('.rip')) continue;
+    targets.push(path.resolve(path.dirname(file), specifier));
+  }
+  return targets;
 }
 
 // Whether an entry compiles, and why not when it does not. The names it

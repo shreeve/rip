@@ -1459,6 +1459,41 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
   // workspace and breaks for the very consumer this audit speaks for. It is
   // reported rather than skipped, because a manifest that names an entry has
   // named it, and silence would read as a package with no surface.
+  // A namespace re-export publishes a module's whole surface under one
+  // name, and a namespace binding is always typed, since its type is the
+  // module. The audit follows the star into the module, so an entry made
+  // of namespace re-exports reports the members, and an any among them.
+  test('--public follows `export * as` into its module and reports the members', async () => {
+    const clean = workspace({
+      'index.rip': "export * as Lib from './lib.rip'\n",
+      'lib.rip': 'export def fine(n: number): string\n  "#{n}"\n',
+    });
+    fs.writeFileSync(path.join(clean, 'package.json'),
+      JSON.stringify({ name: 'ns-clean', exports: { '.': './index.rip' } }, null, 2));
+    const leaky = workspace({
+      'index.rip': "export * as Lib from './lib.rip'\n",
+      'lib.rip': 'export def fine(n: number): string\n  "#{n}"\n\nexport leak = (x) -> x\n',
+    });
+    fs.writeFileSync(path.join(leaky, 'package.json'),
+      JSON.stringify({ name: 'ns-leaky', exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const ok = await check(clean, ['--public']);
+      expect(ok.stdout).toMatch(/\u2713 Lib/);
+      expect(ok.stdout).toMatch(/\u2713 fine/);
+      expect(ok.stdout).toContain('2/2 exports fully typed (100.0%)');
+      expect(ok.status).toBe(0);
+
+      const bad = await check(leaky, ['--public']);
+      expect(bad.stdout).toMatch(/\u2713 fine/);
+      expect(bad.stdout).toContain('leak');
+      expect(bad.stdout).toContain('/3 exports fully typed');
+      expect(bad.status).toBe(1);
+    } finally {
+      fs.rmSync(clean, { recursive: true, force: true });
+      fs.rmSync(leaky, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   test('--public reports a manifest that publishes from outside the package', async () => {
     const dir = workspace({
       'package.json': JSON.stringify({ name: '@q4/outside', exports: { '.': '../shared/api.rip' } }),
