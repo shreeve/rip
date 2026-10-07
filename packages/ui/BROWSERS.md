@@ -10,7 +10,7 @@ Safari on a device and Playwright's WebKit are recorded separately and neither s
 
 - **Behavior:** a popover positioned by CSS anchor positioning, anchored to an element inside a modal `<dialog>`, lands above its anchor by exactly the page's scroll offset, whether the popover is inside the dialog or outside it. The same pair on the page, with no dialog, is placed correctly. Turning off the dialog's `overflow: hidden` on the document does not change it. Chromium places it correctly.
 - **Measured on:** Safari 27 on iOS and Safari 27.0.1 on macOS, with the page and the demo; Playwright's WebKit 26.5. Correct on Chromium 151 and Firefox 153.
-- **Bug:** not filed.
+- **Bug:** [WebKit 324348](https://bugs.webkit.org/show_bug.cgi?id=324348) (resolved: a Safari 27 regression, fixed in trunk and on a Safari branch; Safari 27.0.1 still carries it).
 - **Repro:** [`repro/anchor-in-modal.html`](repro/anchor-in-modal.html). Each case scrolls to the bottom and reports the popover's error; 0 is correct.
 - **Pin:** `an anchored popover inside a modal is off by the page scroll in WebKit, and placed elsewhere`.
 - **Affects:** every anchored popup inside a `Dialog.Popup` or `Drawer.Popup` on a scrolled page: the Combobox popup and the Menu, which both place through [`anchored.rip`](anchored.rip). The popup opens off-screen, so it looks as if it never opened.
@@ -20,7 +20,7 @@ Safari on a device and Playwright's WebKit are recorded separately and neither s
 
 - **Behavior:** `close()` on a modal dialog, and `hidePopover()` or a light dismiss on a popover, remove the element from rendering in the same frame, even with discrete transitions on `display` and `overlay`, so no exit transition plays. Chromium keeps the element rendered through those transitions. A light dismiss's `beforetoggle` is not cancelable on any engine, so a light dismiss cannot be deferred the way a close by script can.
 - **Measured on:** the dialog on Safari 27 on iOS, simulator and device, and on Safari 27 on macOS; the dialog and the popover on Playwright's WebKit 26.5. Dropped on Firefox 153. Kept on Chromium 151 and on Safari 26.6 on macOS.
-- **Bug:** not filed.
+- **Bug:** [WebKit 311648](https://bugs.webkit.org/show_bug.cgi?id=311648) (resolved: Safari 27 turns display transitions off for popovers and dialogs on purpose until the top-layer exit is standardized) and [WebKit 276727](https://bugs.webkit.org/show_bug.cgi?id=276727) (open: the `overlay` property and the top-layer exit algorithm); for Firefox, [Mozilla 1841456](https://bugzilla.mozilla.org/show_bug.cgi?id=1841456) (open: the `overlay` property) and [Mozilla 1971162](https://bugzilla.mozilla.org/show_bug.cgi?id=1971162) (unconfirmed: popover exit animations).
 - **Repro:** [`repro/dialog-close-transition.html`](repro/dialog-close-transition.html) and [`repro/popover-light-dismiss.html`](repro/popover-light-dismiss.html). Each samples the element's computed `display` after the close; `block` at +0ms is an element kept through its exit.
 - **Pin:** `a closed dialog with discrete transitions is kept through them in Chromium and dropped at once elsewhere` and `a hidden popover with discrete transitions is kept in Chromium and dropped at once elsewhere, by script and by light dismiss, and no engine lets the light dismiss be canceled`.
 - **Affects:** `Dialog.Popup`, `Drawer.Popup`, and `Menu.Popup` exits.
@@ -30,7 +30,7 @@ Safari on a device and Playwright's WebKit are recorded separately and neither s
 
 - **Behavior:** inside `@starting-style`, a `var()` reference to a registered custom property that the element does not set is not replaced by the property's `initial-value`. The declaration is invalid at computed-value time and computes as `unset`, so a `translate` built from two such properties starts the transition from `none`: a slide to a resting position of zero runs invisibly, and one to any other position slides in from the origin instead of from the starting value. Setting the property on the element avoids it. Chromium substitutes the initial value.
 - **Measured on:** Safari 27 on iOS and Playwright's WebKit 26.5. Correct on Chromium 151 and Firefox 153.
-- **Bug:** not filed.
+- **Bug:** [WebKit 295797](https://bugs.webkit.org/show_bug.cgi?id=295797) (open).
 - **Repro:** [`repro/starting-style-registered-property.html`](repro/starting-style-registered-property.html). The page reports the transition's starting value; `200px` is correct, and WebKit reports `none` with `--ty` unset.
 - **Pin:** `inside @starting-style, WebKit computes an unset registered property to nothing and other engines to its initial value`.
 - **Affects:** a drawer slide built from Tailwind's `translate-x-*` or `translate-y-*` utilities, which reads both axes' registered properties.
@@ -50,7 +50,7 @@ Safari on a device and Playwright's WebKit are recorded separately and neither s
 
 - **Behavior:** after a mouse click opens a modal, the element `showModal()` focuses matches `:focus-visible` in WebKit, so it draws a focus ring a click should not produce. Chromium carries the click's state over and draws none. After a keyboard open both draw one.
 - **Measured on:** Playwright's WebKit 26.5 and Safari 27.0.1 on macOS. Correct on Chromium 151 and Firefox 153.
-- **Bug:** not filed.
+- **Bug:** [WebKit 247416](https://bugs.webkit.org/show_bug.cgi?id=247416) (open).
 - **Repro:** [`repro/modal-focus-ring.html`](repro/modal-focus-ring.html). Open the modal with a click, then with Enter; the page reports whether the focused button matches `:focus-visible`.
 - **Pin:** `the element showModal focuses after a mouse click shows a ring in WebKit and none elsewhere, and a ring everywhere after Enter`.
 - **Affects:** `Dialog.Popup` and `Drawer.Popup` on open.
@@ -60,7 +60,7 @@ Safari on a device and Playwright's WebKit are recorded separately and neither s
 
 - **Behavior:** when content scrolls under a pointer that has not moved, by script, by wheel, or by `scrollIntoView`, every engine fires `pointerover` and `pointerenter` on the element now under it. WebKit also fires a `pointermove` at the pointer's unchanged position, and delivers all three well after the scroll rather than in the next frame.
 - **Measured on:** Playwright's WebKit 26.5. Chromium 151 and Firefox 153 fire no move.
-- **Bug:** not filed.
+- **Bug:** none to file. WebKit dispatches the move on purpose, from a timer after a scroll, so hover follows the content (`EventHandler::dispatchFakeMouseMoveEventSoon`).
 - **Repro:** [`repro/pointer-under-scroll.html`](repro/pointer-under-scroll.html). Rest the mouse over the list; it scrolls by itself and the page counts the events the rows receive.
 - **Pin:** `a scroll under a still pointer fires enter on the row now under it, and in WebKit a move with no motion`.
 - **Affects:** `Combobox.Item` and `Menu.Item`, which highlight the option under the pointer.
