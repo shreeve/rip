@@ -6,10 +6,14 @@
 // Stdlib namespace: `rip/<pkg>` resolves to the packages/<pkg> of the
 // checkout enclosing the ENTRY being run — no node_modules, no
 // per-project install: whoever has rip has the whole stdlib. Each
-// package's manifest is honored: the exports map (string or
-// import/default conditions, and every "./subpath" key becomes
-// `rip/<pkg>/<subpath>`), then main, then <pkg>.rip / index.rip.
+// package's manifest names its entry: the exports map (string or
+// import/default conditions), then main, then <pkg>.rip / index.rip.
 // Packages with no resolvable entry (editor extensions) are skipped.
+// Every other `.rip` file a package holds is served by its path,
+// `rip/<pkg>/<path>.rip`, the same inventory the sites publication
+// ships to the browser, so a subpath means the same file on both
+// sides; an exports "./subpath" key names or renames a target and wins
+// over the path.
 //
 // Global-install fallback: bare specifiers can also resolve from bun's
 // global node_modules (`bun add -g <pkg>`), which Bun's own resolver
@@ -20,7 +24,7 @@
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { builtinModules } from 'module';
 import { homedir } from 'os';
-import { basename, dirname, join } from 'path';
+import { basename, dirname, join, relative, sep } from 'path';
 import { enclosingStdlib } from './checkout.js';
 
 // The stdlib THIS PROCESS serves. `rip <file>` names the entry's
@@ -42,7 +46,28 @@ const packagesDir =
   ?? join(import.meta.dir, '..', 'packages');
 const globalDir = join(process.env.BUN_INSTALL ?? join(homedir(), '.bun'), 'install', 'global', 'node_modules');
 
-const packageEntries = (pkgDir, name) => {
+// The files a package serves by path: every `.rip` under it except its
+// node_modules, test, bench, and demo trees and the root verb files,
+// the walk the sites publication makes (packages/sites/bundle.rip).
+const SKIP_DIRS = new Set(['node_modules', 'test', 'bench', 'demo']);
+const VERB_FILES = new Set(['test.rip', 'demo.rip', 'bench.rip']);
+const ripFilesUnder = (dir) => {
+  const out = [];
+  const walk = (at, depth) => {
+    let entries;
+    try { entries = readdirSync(at, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      if (entry.name.startsWith('.') || SKIP_DIRS.has(entry.name)) continue;
+      const full = join(at, entry.name);
+      if (entry.isDirectory()) walk(full, depth + 1);
+      else if (entry.name.endsWith('.rip') && !(depth === 0 && VERB_FILES.has(entry.name))) out.push(full);
+    }
+  };
+  walk(dir, 0);
+  return out.sort();
+};
+
+const packageEntries = (pkgDir, name, byPath = false) => {
   const entries = [];
   let manifest;
   try { manifest = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')); } catch { return entries; }
@@ -66,12 +91,19 @@ const packageEntries = (pkgDir, name) => {
   }
   root ??= [manifest.main, `${basename(pkgDir)}.rip`, 'index.rip', 'index.js'].map((f) => f && join(pkgDir, f)).find((p) => p && existsSync(p)) ?? null;
   if (root) entries.push([name, root]);
+  if (byPath) {
+    const named = new Set(entries.map(([sub]) => sub));
+    for (const file of ripFilesUnder(pkgDir)) {
+      const sub = `${name}/${relative(pkgDir, file).split(sep).join('/')}`;
+      if (!named.has(sub)) entries.push([sub, file]);
+    }
+  }
   return entries;
 };
 
 const stdlibEntries = () => {
   const entries = [];
-  for (const name of readdirSync(packagesDir)) entries.push(...packageEntries(join(packagesDir, name), name));
+  for (const name of readdirSync(packagesDir)) entries.push(...packageEntries(join(packagesDir, name), name, true));
   return entries;
 };
 
