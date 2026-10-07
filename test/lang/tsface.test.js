@@ -90,11 +90,11 @@ const REGION_SHAPES = [
   /^stash = __ripAmbientStash\(0 as any as .*\);$/su,           // the stash ambience member (class road)
   /^declare function __ripAmbientStash<T>\(v: T\): T;$/u, // the ambience helper declare
   /^declare function __ripSourceKey<const T extends \(.*\)>\(s: T\): T;$/su, // the stash-key helper declare
-  /^__ripNarrow\(.*\);$/su,                                // branch-narrowing assertions (statement form) a block's effect opens with
+  /^__ripNarrow\(.*\);$/su,                                // branch-narrowing assertions (statement form) a block's c() and effects open with
   /^\(__ripNarrow\(.*\),$/su,                              // the expression form's opener (a loop's batched reconcile)
   /^\)+$/u,                                                // the expression form's closers
   /^create_block_\d+_iter\(ctx: this.*\) \{ return .*; \}$/su, // a render loop's iterable thunk (the element type a call iterable reaches through)
-  /^declare function __ripNarrow<T>\(v: T\): asserts v is NonNullable<T>;$/u, // the narrowing helper declare
+  /^declare function __ripNarrow\(c: unknown\): asserts c;$/u, // the narrowing helper declare
 ];
 
 describe('the strip gate: TS face minus recorded regions === JS mode, byte-for-byte', () => {
@@ -2307,7 +2307,7 @@ describe('branch narrowing: a block\'s effects open with the assertion that narr
       expect(faced.code).toContain(`${guard.trim()}\n              const show = !!(ctx.session.value.user.address);`);
       expect(faced.code).toContain(`__effect(() => { ${guard}__ripNarrow(ctx.session.value.user.address); _t4.data = ctx.session.value.user.address.city; })`);
       expect(faced.code).toContain('__effect(() => { _t5.data = ctx.session.value.user.email; })');
-      expect(faced.code).toContain('declare function __ripNarrow<T>(v: T): asserts v is NonNullable<T>;');
+      expect(faced.code).toContain('declare function __ripNarrow(c: unknown): asserts c;');
       expect(plain.code).not.toContain('__ripNarrow');
     }
   });
@@ -2349,7 +2349,7 @@ describe('branch narrowing: a block\'s effects open with the assertion that narr
     expect(plain.narrowedDecls).toEqual([]);
   });
 
-  test('a call, an index, an optional link, or a loop variable at the root proves nothing', () => {
+  test('a call, an index, an optional link, or a comparison the checker does not narrow on proves nothing', () => {
     const src = [
       'C = component',
       '  @store: any',
@@ -2361,13 +2361,135 @@ describe('branch narrowing: a block\'s effects open with the assertion that narr
       '      span @store.items[0].x',
       '    if @store.a?.b',
       '      span @store.a?.b.c',
+      '    if @store.n > 3',
+      '      span @store.n',
+      '    if @store.a == @store.b',
+      '      span @store.a',
+      '    if this',
+      '      span @store.x',
       '    for row in rows',
-      '      if row.current',
-      '        span row.current.email',
+      "      switch row.kind",
+      "        when /^x/ then span row.name",
       '',
     ].join('\n');
     const faced = ts(src, { path: 'narrow-neg.rip' });
     expect(faced.code).not.toContain('__ripNarrow');
+  });
+
+  // A loop variable is a factory parameter: a row re-binds through p(),
+  // which disposes the row's frame and re-tests every branch before an
+  // arm exists again, so a claim about it holds in each arm exactly as a
+  // member's does.
+  test('a guarded member path on a loop variable narrows the arm: c(), the effects, and the child prop expression', () => {
+    const src = [
+      'Timer = component',
+      '  @duration: number',
+      '  render',
+      "    div \"#{duration}\"",
+      'C = component',
+      '  @steps: { name: string, timer?: number }[]',
+      '  render',
+      '    for step in steps',
+      '      if step.timer then Timer duration: step.timer',
+      '',
+    ].join('\n');
+    const faced = ts(src, { path: 'narrow-loop-path.rip' });
+    const plain = js(src, { path: 'narrow-loop-path.rip' });
+    expect(stripFace(faced.code, faced.tsRegions)).toBe(plain.code);
+    expect(faced.code).toContain('const show = !!(step.timer);');
+    expect(faced.code).toContain('      c() {\n        __ripNarrow(step.timer);\n        { const __prev = __pushComponent(ctx); try {\n        try {\n        _inst2 = new Timer({ duration: step.timer });');
+    expect(faced.code).toContain("__effect(() => { __ripNarrow(step.timer); if (_inst2) _inst2._updateProp('duration', step.timer); });");
+    expect(plain.code).not.toContain('__ripNarrow');
+  });
+
+  test('a switch on a discriminant asserts each arm\'s test — an `or` of them for a test list — at the top of the arm\'s c() and effects; the default asserts nothing', () => {
+    const src = [
+      "type A = { kind: 'a', x: number }",
+      "type B = { kind: 'b', y: string }",
+      "type D = { kind: 'c' | 'd', z: boolean }",
+      'type Item = A | B | D',
+      'CardA = component',
+      '  @item: A',
+      '  render',
+      '    div "#{item.x}"',
+      'CardB = component',
+      '  @item: B',
+      '  render',
+      '    div item.y',
+      'List = component',
+      '  @items: Item[]',
+      '  render',
+      '    for it in items',
+      '      switch it.kind',
+      "        when 'a' then CardA item: it",
+      "        when 'b' then CardB item: it",
+      "        when 'c', 'd' then span \"#{it.z}\"",
+      '        else span "other"',
+      '',
+    ].join('\n');
+    const faced = ts(src, { path: 'narrow-switch.rip' });
+    const plain = js(src, { path: 'narrow-switch.rip' });
+    expect(stripFace(faced.code, faced.tsRegions)).toBe(plain.code);
+    expect(faced.code).toContain('c() {\n        __ripNarrow((it.kind === "a"));\n');
+    expect(faced.code).toContain('_inst2 = new CardA({ item: it });');
+    expect(faced.code).toContain('__effect(() => { __ripNarrow((it.kind === "a")); if (_inst2) _inst2._updateProp(\'item\', it); });');
+    expect(faced.code).toContain('c() {\n        __ripNarrow((it.kind === "b"));\n');
+    expect(faced.code).toContain('__effect(() => { __ripNarrow((it.kind === "b")); if (_inst5) _inst5._updateProp(\'item\', it); });');
+    expect(faced.code).toContain('c() {\n        __ripNarrow(((it.kind === "c") || (it.kind === "d")));\n');
+    expect(faced.code).toContain('__effect(() => { __ripNarrow(((it.kind === "c") || (it.kind === "d"))); _t0.data = `${it.z}`; });');
+    // Three arms, each asserting in c() and in its one effect; the
+    // default arm held no test and asserts nothing.
+    expect(faced.code.match(/__ripNarrow\(\(/g)).toHaveLength(6);
+    expect(plain.code).not.toContain('__ripNarrow');
+  });
+
+  test('a guarded cell read inside a child prop EXPRESSION narrows in c() beside the bare pass\'s container wrap', () => {
+    const src = [
+      'Child = component',
+      '  @kit: { workflow: string }',
+      '  @workflow: string',
+      '  render',
+      '    div workflow',
+      'C = component',
+      '  @name: string',
+      '  kit: { workflow: string } | null := null',
+      '  render',
+      "    if kit then Child kit: kit, workflow: \"#{kit.workflow}:#{name}\"",
+      '',
+    ].join('\n');
+    const faced = ts(src, { path: 'narrow-expr.rip' });
+    const plain = js(src, { path: 'narrow-expr.rip' });
+    expect(stripFace(faced.code, faced.tsRegions)).toBe(plain.code);
+    expect(faced.code).toContain('c() {\n        __ripNarrow(ctx.kit.value);\n');
+    expect(faced.code).toContain('_inst1 = new Child({ kit: __ripNarrowed(ctx.kit), workflow: `${ctx.kit.value.workflow}:${ctx.name.value}` });');
+    expect(faced.code).toContain('__effect(() => { __ripNarrow(ctx.kit.value); if (_inst1) _inst1._updateProp(\'workflow\', `${ctx.kit.value.workflow}:${ctx.name.value}`); });');
+    // Both reads of `kit` under the branch record as narrowed: the pass
+    // and the expression's.
+    const lineOf = (d) => src.slice(0, d.start).split('\n').length;
+    const at = faced.narrowedDecls.map((d) => `${lineOf(d)}:${src.slice(d.start, d.end)}`).sort();
+    expect(at).toEqual(['10:kit', '10:kit', '10:kit']);
+    expect(plain.code).not.toContain('__ripNarrow');
+  });
+
+  test('a loop variable claim drops where an inner loop rebinds or renames its root, and holds where the name passes through', () => {
+    const src = [
+      'C = component',
+      '  @rows: { current: { email: string } | null, subs: { name: string }[] }[]',
+      '  render',
+      '    for row in rows',
+      '      if row.current',
+      '        span row.current.email',
+      '        for sub in row.subs',
+      '          li "#{sub.name} #{row.current.email}"',
+      '        for row in row.subs',
+      '          li row.name',
+      '',
+    ].join('\n');
+    const faced = ts(src, { path: 'narrow-loop-shadow.rip' });
+    expect(faced.code).toContain('__effect(() => { __ripNarrow(row.current); _t0.data = row.current.email; })');
+    expect(faced.code).toContain('__ripNarrow(row.current); _t1.data = `${sub.name} ${row.current.email}`;');
+    expect(faced.code).toContain('__effect(() => { _t2.data = row.name; })');
+    expect(faced.code).not.toContain('__ripNarrow(row_.current)');
   });
   test('a loop variable that rebinds the chain\'s root drops the chain for the row record only', () => {
     const src = [

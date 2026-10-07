@@ -287,6 +287,82 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
+  // A render branch narrows what it tested, on the face, inside every
+  // function body of the arm it guards — each arm is its own block factory,
+  // and TypeScript carries no narrowing across that boundary on its own. The
+  // checker is the artifact: the clean half holds only if the assertions
+  // reach c() and the effects; the negative half proves the arm still checks
+  // (a wrong card for the arm, an unguarded optional member).
+  test('a switch arm, a guarded cell in a prop expression, and a guarded member path check narrowed under strict', async () => {
+    const cards = [
+      "type A = { kind: 'a', x: number }",
+      "type B = { kind: 'b', y: string }",
+      'type Item = A | B',
+      'CardA = component',
+      '  @item: A',
+      '  render',
+      '    div "#{item.x}"',
+      'CardB = component',
+      '  @item: B',
+      '  render',
+      '    div item.y',
+      'Timer = component',
+      '  @duration: number',
+      '  render',
+      '    div "#{duration}"',
+      'workflowFor = (w: string, n: string): string -> "#{w}:#{n}"',
+      'Child = component',
+      '  @kit: { workflow: string }',
+      '  @workflow: string',
+      '  render',
+      '    div workflow',
+    ];
+    const clean = workspace({
+      'narrow.rip': [
+        ...cards,
+        'export List = component',
+        '  @items: Item[]',
+        '  @steps: { name: string, timer?: number }[]',
+        '  @name: string',
+        '  kit: { workflow: string } | null := null',
+        '  render',
+        '    for it in items',
+        '      switch it.kind',
+        "        when 'a' then CardA item: it",
+        "        when 'b' then CardB item: it",
+        '    if kit then Child kit: kit, workflow: workflowFor(kit.workflow, name)',
+        '    for step in steps',
+        '      if step.timer then Timer duration: step.timer',
+      ].join('\n') + '\n',
+    }, { strict: true });
+    const wrong = workspace({
+      'wrong.rip': [
+        ...cards,
+        'export List = component',
+        '  @items: Item[]',
+        '  @steps: { name: string, timer?: number }[]',
+        '  render',
+        '    for it in items',
+        '      switch it.kind',
+        "        when 'a' then CardB item: it",
+        '    for step in steps',
+        '      Timer duration: step.timer',
+      ].join('\n') + '\n',
+    }, { strict: true });
+    try {
+      const ok = await check(clean);
+      expect(ok.stdout).toContain('No type errors');
+      expect(ok.status).toBe(0);
+      const bad = JSON.parse((await check(wrong, ['--json'])).stdout);
+      // The arm's `it` is narrowed to A, which CardB refuses; the bare
+      // `step.timer` stays `number | undefined`.
+      expect(bad.map((d) => [d.code, d.line])).toEqual([[2322, 28], [2345, 30]]);
+    } finally {
+      fs.rmSync(clean, { recursive: true, force: true });
+      fs.rmSync(wrong, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   // Every component member form checks its initializer, and every wrong-typed
   // member WRITE inside a method reaches the source. Two mechanisms hold this
   // up and each has its own spelling below.

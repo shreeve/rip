@@ -18337,7 +18337,7 @@ ${this.replayPad}}` : " }");
     if (!this.ts)
       return emitRef;
     return () => {
-      const narrowed = this.activeNarrowed().some((c) => c === name || isNode(c) && c[0] === "." && c[1] === "this" && c.length === 3 && c[2] === name);
+      const narrowed = this.activeNarrowed().some(({ node }) => node === name || isNode(node) && node[0] === "." && node[1] === "this" && node.length === 3 && node[2] === name);
       if (!narrowed)
         return emitRef();
       this._needsNarrowedHelper = true;
@@ -19032,19 +19032,47 @@ ${this.replayPad}}` : " }");
     if (isNode(cond) && cond[0] === "&&" && cond.length === 3) {
       return [...this.narrowConjuncts(cond[1]), ...this.narrowConjuncts(cond[2])];
     }
-    if (typeof cond === "string") {
-      return this.renderVarKind(cond) !== null || this.bareRewrite(cond) === null ? [] : [cond];
+    const roots = [];
+    return this.collectClaimRoots(cond, roots) ? [{ node: cond, roots }] : [];
+  }
+  collectClaimRoots(x, roots) {
+    if (isNode(x) && x[0] === "||" && x.length === 3) {
+      return this.collectClaimRoots(x[1], roots) && this.collectClaimRoots(x[2], roots);
     }
-    if (!Emitter.isDotChain(cond))
-      return [];
-    let root = cond;
+    if (isNode(x) && (x[0] === "==" || x[0] === "!=") && x.length === 3) {
+      if (Emitter.isNarrowLiteral(x[2]))
+        return this.collectClaimRoots(x[1], roots);
+      if (Emitter.isNarrowLiteral(x[1]))
+        return this.collectClaimRoots(x[2], roots);
+      return false;
+    }
+    if (typeof x !== "string" && !Emitter.isDotChain(x))
+      return false;
+    let root = x;
     while (isNode(root))
       root = root[1];
     if (root === "this")
-      return [cond];
-    if (this.renderVarKind(root) !== null || this.bareRewrite(root) === null)
-      return [];
-    return [cond];
+      return isNode(x);
+    if (!isIdentifierName(root) || this.renderVarKind(root) === "local")
+      return false;
+    const entry = this.loopEntryOf(root);
+    if (entry === null && this.bareRewrite(root) === null)
+      return false;
+    roots.push({ name: root, owner: entry === null ? null : entry.owner, which: entry === null ? null : entry.itemVar === root ? "item" : "index" });
+    return true;
+  }
+  static isNarrowLiteral(x) {
+    if (isNode(x))
+      return x[0] === "-" && x.length === 2 && typeof x[1] === "string" && /^\d/.test(x[1]);
+    return typeof x === "string" && (/^["'\d]/.test(x) || x === "true" || x === "false" || x === "null" || x === "undefined");
+  }
+  loopEntryOf(name) {
+    const stack = this.rstate?.sink.loopStack ?? [];
+    for (let i = stack.length - 1;i >= 0; i--) {
+      if (stack[i].itemVar === name || stack[i].indexVar === name)
+        return stack[i];
+    }
+    return null;
   }
   static isDotChain(n) {
     if (!isNode(n) || n[0] !== "." || n.length !== 3 || typeof n[2] !== "string" || n[2][0] === '"')
@@ -19060,23 +19088,25 @@ ${this.replayPad}}` : " }");
     const rec = this.renderRecord;
     if (!this.ts || !rec || !(rec.narrowed?.length > 0))
       return [];
-    return rec.narrowed.filter((c) => {
-      let root = c;
-      while (isNode(root))
-        root = root[1];
-      return root === "this" || !(rec.bindings.has(root) || rec.locals.has(root));
-    });
+    return rec.narrowed.filter((claim) => claim.roots.every(({ name, owner, which }) => {
+      if (rec.locals.has(name))
+        return false;
+      if (owner === null)
+        return !rec.bindings.has(name);
+      const entry = rec.loopStack.find((e) => e.owner === owner);
+      return entry !== undefined && (which === "item" ? entry.itemVar : entry.indexVar) === name;
+    }));
   }
   hasNarrow() {
     return this.activeNarrowed().length > 0;
   }
   narrowedReadNames() {
     const names = new Set;
-    for (const c of this.activeNarrowed()) {
-      if (typeof c === "string")
-        names.add(c);
-      else if (c[0] === "." && c[1] === "this" && c.length === 3 && typeof c[2] === "string")
-        names.add(c[2]);
+    for (const { node, roots } of this.activeNarrowed()) {
+      if (typeof node === "string" && roots[0].owner === null)
+        names.add(node);
+      else if (isNode(node) && node[0] === "." && node[1] === "this" && node.length === 3 && typeof node[2] === "string")
+        names.add(node[2]);
     }
     return names;
   }
@@ -19092,7 +19122,7 @@ ${this.replayPad}}` : " }");
           if (i > 0)
             this.b.emit(" ");
           this.b.emit(form === "statement" ? "__ripNarrow(" : "(__ripNarrow(");
-          this.renderExpr(c);
+          this.renderExpr(c.node);
           this.b.emit(form === "statement" ? ");" : "),");
         });
         if (trailing)
@@ -19635,7 +19665,20 @@ ${this.replayPad}}` : " }");
 `);
         this.b.emit(`${p3}c() {
 `);
-        this.replayCreates(rec, p4);
+        if (this.hasNarrow())
+          this.b.tsOnly(() => {
+            this.b.emit(p4);
+            this.narrowGuard("statement", { trailing: false });
+            this.b.emit(`
+`);
+          });
+        const prevReads = this._narrowedReads;
+        this._narrowedReads = this.narrowedReadNames();
+        try {
+          this.replayCreates(rec, p4);
+        } finally {
+          this._narrowedReads = prevReads;
+        }
         const fragChildren = this.rstate.fragChildren.get(rec.root);
         const firstNode = fragChildren !== undefined ? fragChildren[0] : rec.root;
         this.b.emit(p4);
@@ -23513,7 +23556,7 @@ declare function __ripSourceKey<const T extends ((${stashKeys}) | \`\${${stashKe
   }
   if (emitter._needsNarrowHelper === true) {
     builder.tsOnly(() => builder.emit(`
-declare function __ripNarrow<T>(v: T): asserts v is NonNullable<T>;
+declare function __ripNarrow(c: unknown): asserts c;
 `));
   }
   if (emitter._needsNarrowedHelper === true) {
