@@ -5356,13 +5356,17 @@ describeExtended.concurrent('rip check: intrinsic-element typing over the real s
     // would cost the file every other diagnostic. Every road — the
     // inline bare word, the bare word on its own line under the
     // element, and the pair — answers at its own bytes, beside the rest.
-    const dir = workspace({ 'app.rip': comp(['input readOnly', "input readOnly: true", 'img alt: 42', 'span countt', 'input', '  readOnly']) });
+    // A boolean name on a tag that does not take it (`disabled` on a
+    // span) is the same rejection on the boolean road, static and
+    // reactive alike.
+    const dir = workspace({ 'app.rip': comp(['input readOnly', "input readOnly: true", 'img alt: 42', 'span countt', 'input', '  readOnly', 'span disabled: true', "span disabled: @q is 'x'"]) });
     try {
-      expect(await diagsOf(dir)).toEqual([[2345, 5, 13], [2345, 6, 13], [2345, 7, 11], [2345, 8, 12], [2345, 10, 9]]);
+      expect(await diagsOf(dir)).toEqual([[2345, 5, 13], [2345, 6, 13], [2345, 7, 11], [2345, 8, 12], [2345, 10, 9], [2345, 11, 12], [2345, 12, 12]]);
       const out = (await check(dir, ['--json'])).stdout;
       expect(out.match(/did you mean 'readonly'\?/g)).toHaveLength(3);
       // Nothing near it: the reading it took, and the two ways out.
       expect(out).toContain('a bare word sets the boolean attribute it names');
+      expect(out.match(/'disabled' is not a known attribute of <span> — HTML attribute names are the spec's own, lowercase/g)).toHaveLength(2);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 

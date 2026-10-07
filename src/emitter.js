@@ -11726,38 +11726,47 @@ class Emitter {
   // to a runtime ReferenceError, and `notAnAttr: 'x'` to markup, both
   // silently. A gate here would be the one name question the untyped
   // road answers, and it would answer the least costly one. What the
-  // ts face gets instead is the author's span on the emitted name, so
-  // the surface's complaint lands on the word, and a recorded row that
-  // re-words it (the pair road keeps the same row).
+  // ts face gets instead is the author's span on the emitted name —
+  // the call's own complaint lands on the word, and the editor reaches
+  // the word's records through it — and the rows the pair road keeps
+  // for a key: the attribute row the hover reads, then, for a name
+  // outside the vocabulary, the row that re-words the rejection.
   renderBareAttribute(el, name, siblings, k, owner) {
     const tag = this.renderTagOf(el);
-    let unknownAt = null;
-    if (this.ts && !knownBareAttribute(tag, name)) {
-      const at = this.bareChildSpan(siblings, k, owner);
-      if (at !== null) {
-        unknownAt = at;
-        this.intrinsics.push({
-          start: at[0], end: at[1], kind: 'unknown-attr', tag, name,
-          message: this.unknownAttrMessage(tag, name, { bare: true, svg: this.rstate?.svgEls?.has(el) === true }),
-        });
-      }
-    }
+    const recv = this.tsElReceiver(el);
+    const at = this.ts ? this.bareChildSpan(siblings, k, owner) : null;
+    const ownerId = at === null ? null : this.stores.idOf(owner);
     // The empty string is the boolean-attribute serialization (the
     // docs spell it) — setAttribute(name, true) wrote name="true",
     // which is the same DOM state but not the documented markup, and
     // for a non-boolean known attribute wrote a literal "true" value.
     // '' satisfies the widened attribute type, so no quieting cast
     // rides.
-    const recv = this.tsElReceiver(el);
-    const ownerId = unknownAt === null ? null : this.stores.idOf(owner);
     this.renderLine(null, () => {
       recv.emit();
+      // The method the attribute row points at stands one byte past
+      // the dot the call opens with.
+      const gen = this.b.offset + 1;
       this.b.emit('.setAttribute(');
+      if (at !== null && recv.surfaced) {
+        // The word answers the type its road admits: presence, spelled
+        // outright, for a boolean name; for any other, the value the
+        // instantiated call takes.
+        this.intrinsics.push(Emitter.BOOLEAN_ATTRS.has(name)
+          ? { start: at[0], end: at[1], kind: 'attr', name, type: 'boolean | undefined' }
+          : { start: at[0], end: at[1], kind: 'attr', name, gen });
+      }
+      if (at !== null && !knownBareAttribute(tag, name)) {
+        this.intrinsics.push({
+          start: at[0], end: at[1], kind: 'unknown-attr', tag, name,
+          message: this.unknownAttrMessage(tag, name, { bare: true, svg: this.rstate?.svgEls?.has(el) === true }),
+        });
+      }
       // The name is a bare WORD in source and a string literal in the
-      // emission: a caller-supplied span is the only way the call's own
-      // complaint reaches the bytes the author wrote.
+      // emission: a caller-supplied span is the only way the word's
+      // position reaches the bytes the lowering wrote.
       if (ownerId !== null) {
-        this.b.markSpan(ownerId, 'identifier', unknownAt[0], unknownAt[1], () => this.emitQuotedPrimitive(name));
+        this.b.markSpan(ownerId, 'identifier', at[0], at[1], () => this.emitQuotedPrimitive(name));
       } else this.emitQuotedPrimitive(name);
       this.b.emit(", '')");
     });
@@ -13106,11 +13115,19 @@ class Emitter {
         // reactive value, a guarded set under a static one) would
         // otherwise describe one key two ways. The span is the key's own
         // CLAIM, so a value repeating the key (`disabled: @rest.disabled`)
-        // still lands on the key.
+        // still lands on the key. A boolean name the tag does not take
+        // keeps the re-wording row behind it, as every other road does.
         const emitBooleanKey = () => {
           const span = claimingKey(() => this.emitKeyAs(storedKey, key));
           if (this.ts && recv.surfaced && span !== null) {
             this.intrinsics.push({ start: span[0], end: span[1], kind: 'attr', name: key, type: 'boolean | undefined' });
+            const attrTag = this.renderTagOf(el);
+            if (!knownBareAttribute(attrTag, key)) {
+              this.intrinsics.push({
+                start: span[0], end: span[1], kind: 'unknown-attr', tag: attrTag, name: key,
+                message: this.unknownAttrMessage(attrTag, key, { bare: false, svg: this.rstate?.svgEls?.has(el) === true }),
+              });
+            }
           }
         };
         if (this.renderReactive(value)) {
