@@ -50,9 +50,9 @@ export Trigger = component extends button
       slot
 
 # The popup is anchored by name, since popovertarget anchors it only when
-# a click opened it. Firefox hides a light-dismissed popover at once and
-# the hide is not cancelable, so only a close through the cell waits for
-# the exit.
+# a click opened it. A light dismiss cannot be canceled, and not every
+# engine keeps a hidden popover rendered through a discrete transition
+# (BROWSERS.md), so only a close through the cell waits for the exit.
 export Popup = component extends div
   accept open from Root
   accept triggerId from Root

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Safari's bottom bar under a modal dialog</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 16px -apple-system, system-ui, sans-serif;
+        background: #fff;
+      }
+      button {
+        margin: 0 6px 6px 0;
+        padding: 8px 10px;
+        font: inherit;
+      }
+      dialog {
+        padding: 16px;
+        border: 0;
+        opacity: 0;
+        transition: opacity 3s linear;
+      }
+      dialog[open][data-open] {
+        opacity: 1;
+      }
+      dialog::backdrop {
+        background: rgb(0 0 0 / 0.4);
+        opacity: 0;
+        transition: opacity 3s linear;
+      }
+      dialog[open][data-open]::backdrop {
+        opacity: 1;
+      }
+      dialog.fades[open][data-open]::backdrop {
+        transition-duration: 250ms;
+      }
+      @starting-style {
+        dialog[open][data-open] {
+          opacity: 0;
+        }
+        dialog.fades[open][data-open]::backdrop {
+          opacity: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <p>On iOS, watch the strip under Safari's bottom bar. While the modal is open, Safari fills it with a color it guesses from the <code>::backdrop</code>. Close fades both out over 3s, then calls <code>close()</code>.</p>
+
+    <button onclick="run(true)">::backdrop fades in</button>
+    <button onclick="run(false)">::backdrop at full color</button>
+
+    <dialog id="d">
+      Modal.
+      <button onclick="shut()">close</button>
+    </dialog>
+
+    <script>
+      const dialog = document.getElementById('d')
+
+      function run(fades) {
+        dialog.className = fades ? 'fades' : ''
+        dialog.setAttribute('data-open', '')
+        dialog.showModal()
+      }
+
+      function shut() {
+        dialog.removeAttribute('data-open')
+        setTimeout(() => dialog.close(), 3000)
+      }
+    </script>
+  </body>
+</html>

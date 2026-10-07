@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>The focus ring after showModal</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 16px -apple-system, system-ui, sans-serif;
+      }
+      button {
+        padding: 8px 10px;
+        font: inherit;
+      }
+      #log {
+        padding: 8px;
+        font: 14px monospace;
+        white-space: pre-wrap;
+      }
+      dialog {
+        width: 240px;
+        margin: auto;
+        padding: 16px;
+      }
+      dialog button {
+        display: block;
+        margin-top: 12px;
+      }
+      :focus-visible {
+        outline: 3px solid #f0f;
+      }
+    </style>
+  </head>
+  <body>
+    <p>Open the modal with a mouse click, then with the keyboard. <code>showModal()</code> focuses the dialog's first button; the log says whether that button matches <code>:focus-visible</code>. After a click it should not; after Enter it should.</p>
+
+    <button id="open" onclick="run()">open</button>
+
+    <pre id="log">open the modal</pre>
+
+    <dialog id="d">
+      <button id="first">first</button>
+      <button onclick="d.close()">close</button>
+    </dialog>
+
+    <script>
+      const dialog = document.getElementById('d')
+      let result = Promise.resolve(null)
+
+      // Opens the modal; `result` then resolves with what showModal focused
+      // and whether it shows a ring.
+      function run() {
+        dialog.showModal()
+        result = frames(2).then(() => {
+          const focused = document.activeElement
+          const r = { engine: engine(), focused: focused?.id ?? null, ring: focused?.matches(':focus-visible') ?? false }
+          document.getElementById('log').textContent = `(${r.engine}) focused=${r.focused} :focus-visible=${r.ring}`
+          return r
+        })
+        return result
+      }
+
+      function frames(n) {
+        return new Promise((resolve) => {
+          const tick = () => (n-- > 0 ? requestAnimationFrame(tick) : resolve())
+          tick()
+        })
+      }
+
+      function engine() {
+        return (navigator.userAgent.match(/Version\/[\d.]+|Chrome\/\d+|Firefox\/\d+/) ?? ['?'])[0]
+      }
+    </script>
+  </body>
+</html>

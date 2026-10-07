@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>A light-dismissed popover and discrete transitions</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 16px -apple-system, system-ui, sans-serif;
+        min-height: 150vh;
+      }
+      button {
+        padding: 8px 10px;
+        font: inherit;
+      }
+      #log {
+        padding: 8px;
+        font: 14px monospace;
+        white-space: pre-wrap;
+      }
+      [popover] {
+        inset: auto;
+        top: 120px;
+        left: 16px;
+        width: 220px;
+        padding: 16px;
+        border: 0;
+        background: rgb(255 0 0);
+        color: #fff;
+        opacity: 0;
+        transition: opacity 2s linear, display 2s allow-discrete, overlay 2s allow-discrete;
+      }
+      [popover]:popover-open {
+        opacity: 1;
+      }
+      @starting-style {
+        [popover]:popover-open {
+          opacity: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <p>Show the popover, then tap outside it, or hide it by script. The log samples its computed display while the 2s exit fade would run. "block" at +0ms is a popover kept through the fade.</p>
+
+    <button onclick="show()">show</button>
+    <button onclick="hide()">hidePopover()</button>
+
+    <pre id="log">show it, then tap outside</pre>
+
+    <div id="p" popover>popover: tap outside</div>
+
+    <script>
+      const popover = document.getElementById('p')
+      const SAMPLES = [0, 300, 1000, 1700, 2500]
+      let result = Promise.resolve(null)
+
+      // Shows the popover; `result` then resolves with the samples taken
+      // after whatever hides it next.
+      function show() {
+        if (popover.matches(':popover-open')) return
+        result = new Promise((resolve) => {
+          const lines = []
+          const samples = []
+          let cancelable = null
+          popover.addEventListener('beforetoggle', function before(e) {
+            if (e.newState !== 'closed') return
+            popover.removeEventListener('beforetoggle', before)
+            cancelable = e.cancelable
+          })
+          popover.addEventListener('toggle', function toggled(e) {
+            if (e.newState !== 'closed') return
+            popover.removeEventListener('toggle', toggled)
+            lines.push(`hidden (${engine()}) beforetoggle cancelable=${cancelable}`)
+            for (const ms of SAMPLES) {
+              setTimeout(() => {
+                const style = getComputedStyle(popover)
+                samples.push({ ms, display: style.display, opacity: Number(style.opacity).toFixed(2) })
+                lines.push(`+${ms}ms display=${style.display} opacity=${Number(style.opacity).toFixed(2)}`)
+                document.getElementById('log').textContent = lines.join('\n')
+                if (samples.length === SAMPLES.length) resolve({ engine: engine(), cancelable, samples })
+              }, ms)
+            }
+          })
+        })
+        popover.showPopover()
+        document.getElementById('log').textContent = 'shown: tap outside, or hide it by script'
+      }
+
+      function hide() {
+        if (popover.matches(':popover-open')) popover.hidePopover()
+      }
+
+      function engine() {
+        return (navigator.userAgent.match(/Version\/[\d.]+|Chrome\/\d+|Firefox\/\d+/) ?? ['?'])[0]
+      }
+    </script>
+  </body>
+</html>

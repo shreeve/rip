@@ -277,7 +277,8 @@ export List = component extends div
 
 # The pointer highlights an option only when it moved to a new position:
 # a list that scrolls or re-renders under a still pointer fires enter,
-# and WebKit a move with no motion, but never a move to somewhere new.
+# and WebKit a move with no motion (BROWSERS.md), but never a move to
+# somewhere new.
 # A touch highlights its option as it lands, since a finger never moves
 # there first. A press never takes focus from the input, so a click keeps
 # the next keystroke typing, and tabindex keeps a button host out of the

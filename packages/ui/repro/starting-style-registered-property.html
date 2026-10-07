@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>@starting-style and an unset registered property</title>
+    <style>
+      @property --tx {
+        syntax: '<length>';
+        inherits: false;
+        initial-value: 0px;
+      }
+      @property --ty {
+        syntax: '<length>';
+        inherits: false;
+        initial-value: 0px;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 16px -apple-system, system-ui, sans-serif;
+      }
+      button {
+        padding: 8px 10px;
+        font: inherit;
+      }
+      #log {
+        padding: 4px;
+        background: #ff0;
+        font: 13px monospace;
+        white-space: pre-wrap;
+      }
+      .box {
+        width: 120px;
+        height: 40px;
+        margin-top: 16px;
+        background: #08f;
+        --tx: 60px;
+        translate: var(--tx) var(--ty);
+        transition: translate 4s linear;
+      }
+      .box.y-set {
+        --ty: 0px;
+      }
+      @starting-style {
+        .box {
+          --tx: 200px;
+          translate: var(--tx) var(--ty);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <p>A box rests 60px from the left and slides in from 200px. The slide's starting value reads <code>translate: var(--tx) var(--ty)</code> inside <code>@starting-style</code>, with <code>--ty</code> registered and unset, or set to 0px. A slide that starts at 200px is correct; one that starts at 0px substituted nothing for <code>--ty</code>.</p>
+
+    <button onclick="run(false)">--ty unset</button>
+    <button onclick="run(true)">--ty set to 0px</button>
+
+    <pre id="log">tap a case</pre>
+    <div id="stage"></div>
+
+    <script>
+      // Resolves with where the slide started once the box has laid out.
+      function run(ySet) {
+        const stage = document.getElementById('stage')
+        const box = Object.assign(document.createElement('div'), { className: ySet ? 'box y-set' : 'box' })
+        stage.replaceChildren(box)
+        return frames(2).then(() => report(ySet, box))
+      }
+
+      // The transition's first keyframe is its starting value; the computed
+      // translate two frames in is within 1% of it, for an engine that does
+      // not report keyframes.
+      function report(ySet, box) {
+        const transition = box.getAnimations()[0]
+        const from = transition?.effect.getKeyframes()[0]?.translate
+        const now = getComputedStyle(box).translate
+        const startX = from === 'none' ? 0 : Math.round(parseFloat(from ?? now))
+        const result = { case: ySet ? 'set' : 'unset', engine: engine(), from: from ?? null, now, startX }
+        document.getElementById('log').textContent =
+          `--ty ${result.case} (${result.engine})\n` +
+          `slide starts from: ${from ?? `(not reported) ${now}`}\n` +
+          `translate now: ${now}`
+        return result
+      }
+
+      function frames(n) {
+        return new Promise((resolve) => {
+          const tick = () => (n-- > 0 ? requestAnimationFrame(tick) : resolve())
+          tick()
+        })
+      }
+
+      function engine() {
+        return (navigator.userAgent.match(/Version\/[\d.]+|Chrome\/\d+|Firefox\/\d+/) ?? ['?'])[0]
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pointer events when a list scrolls under a still pointer</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 16px -apple-system, system-ui, sans-serif;
+      }
+      #log {
+        padding: 8px;
+        font: 14px monospace;
+        white-space: pre-wrap;
+      }
+      #list {
+        height: 200px;
+        overflow: auto;
+        border: 1px solid #888;
+      }
+      #list div {
+        padding: 8px;
+        border-bottom: 1px solid #eee;
+      }
+    </style>
+  </head>
+  <body>
+    <p>Rest the mouse over the list and hold it still: a second later the list scrolls by itself. The log counts the pointer events the rows receive from that scroll, with the pointer never moving. An enter is expected on the row now under the pointer; a move is not.</p>
+
+    <div id="list"></div>
+
+    <pre id="log">rest the pointer over the list</pre>
+
+    <script>
+      const list = document.getElementById('list')
+      let events = []
+      let rest = null
+      let timer = null
+      let busy = false
+
+      for (let i = 0; i < 40; i++) {
+        const row = Object.assign(document.createElement('div'), { textContent: `row ${i}` })
+        for (const type of ['pointerenter', 'pointerover', 'pointermove']) {
+          row.addEventListener(type, (e) => events.push({ type, row: i, x: e.clientX, y: e.clientY }))
+        }
+        list.append(row)
+      }
+
+      // A move that reports the resting position, as WebKit sends after the
+      // scroll, does not rearm the scroll.
+      list.addEventListener('pointermove', (e) => {
+        if (busy || (rest && e.clientX === rest.x && e.clientY === rest.y)) return
+        rest = { x: e.clientX, y: e.clientY }
+        clearTimeout(timer)
+        timer = setTimeout(run, 1000)
+      })
+
+      // Scrolls the list under the resting pointer and resolves with the
+      // events that follow within 600ms, counted by type, and whether any
+      // move reported a position other than the resting one.
+      function run() {
+        busy = true
+        events = []
+        list.scrollTop += 100
+        return wait(600).then(() => {
+          busy = false
+          const count = (type) => events.filter((e) => e.type === type).length
+          const moved = events.some((e) => e.type === 'pointermove' && rest && (e.x !== rest.x || e.y !== rest.y))
+          const result = { engine: engine(), enter: count('pointerenter'), over: count('pointerover'), move: count('pointermove'), moved }
+          document.getElementById('log').textContent =
+            `after the scroll (${result.engine})\n` +
+            `pointerenter=${result.enter} pointerover=${result.over} pointermove=${result.move}\n` +
+            `a move reported motion: ${moved}`
+          return result
+        })
+      }
+
+      // WebKit delivers the events a scroll causes well after the scroll.
+      function wait(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms))
+      }
+
+      function engine() {
+        return (navigator.userAgent.match(/Version\/[\d.]+|Chrome\/\d+|Firefox\/\d+/) ?? ['?'])[0]
+      }
+    </script>
+  </body>
+</html>

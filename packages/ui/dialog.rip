@@ -19,8 +19,9 @@ export Trigger = component extends button
       slot
 
 # showModal throws until the mounted tree reaches the document, so opening
-# waits a microtask. Firefox hides a closed dialog at once, so close()
-# waits for the exit animations, and Escape closes through the cell.
+# waits a microtask. Not every engine keeps a closed dialog rendered through
+# a discrete transition (BROWSERS.md), so close() waits for the exit
+# animations, and Escape closes through the cell.
 #
 # TODO: let the app see a close's reason and cancel it, for close confirmation.
 # TODO: tell the app when a close has finished, after the exit animations.
@@ -33,8 +34,8 @@ export Popup = component extends dialog
 
   dismiss ~= closedby ?? 'any'
 
-  # Safari ignores closedby, so backdrop presses and Escape under none are
-  # handled here until it ships.
+  # Not every engine honors closedby (BROWSERS.md), so backdrop presses and
+  # Escape under none are handled here.
   pressed = false
   onPointerdown = (e: PointerEvent) -> pressed = hitsBackdrop(e)
   onPointerup = (e: PointerEvent) -> open = false if pressed and hitsBackdrop(e) and dismiss is 'any'
@@ -70,8 +71,9 @@ export Popup = component extends dialog
     if open
       queueMicrotask ->
         return unless open and not dialog.open and dialog.isConnected
-        # Safari rings the element showModal focuses even after a click, and
-        # only refocusing it with focusVisible: false clears that.
+        # WebKit rings the element showModal focuses even after a click
+        # (BROWSERS.md), and only refocusing it with focusVisible: false
+        # clears that.
         visible = document.activeElement?.matches(':focus-visible')
         opening = true
         dialog.showModal()

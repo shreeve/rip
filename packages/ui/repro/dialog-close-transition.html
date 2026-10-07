@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>A closing modal dialog and discrete transitions</title>
+    <style>
+      body {
+        margin: 0;
+        font: 16px -apple-system, system-ui, sans-serif;
+        background: #fff;
+      }
+      .cases {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 8px;
+        background: #eee;
+      }
+      button {
+        padding: 8px 10px;
+        font: inherit;
+      }
+      #log {
+        padding: 8px;
+        font: 14px monospace;
+        white-space: pre-wrap;
+      }
+      dialog {
+        position: fixed;
+        inset: 0;
+        width: 300px;
+        height: 300px;
+        margin: auto;
+        padding: 0;
+        border: 0;
+        background: rgb(255 0 0);
+        opacity: 0;
+        transition: opacity 2s linear;
+      }
+      dialog[open] {
+        opacity: 1;
+      }
+      @starting-style {
+        dialog[open] {
+          opacity: 0;
+        }
+      }
+      dialog.display {
+        transition: opacity 2s linear, display 2s allow-discrete;
+      }
+      dialog.both {
+        transition: opacity 2s linear, display 2s allow-discrete, overlay 2s allow-discrete;
+      }
+      dialog::backdrop {
+        background: transparent;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="cases">
+      <button onclick="run('display')">display</button>
+      <button onclick="run('both')">display + overlay</button>
+      <button onclick="run('neither')">neither</button>
+    </div>
+
+    <div id="log">Each case opens a red modal dialog that fades in, closes it 0.6s later, and logs its computed display while the 2s exit fade would run. "block" at +0ms is a dialog kept through the fade.</div>
+
+    <dialog id="d"></dialog>
+
+    <script>
+      const dialog = document.getElementById('d')
+      const SAMPLES = [0, 300, 1000, 1700, 2500]
+      let running = false
+
+      // Resolves with the samples taken after close(); a case that starts
+      // while another runs resolves null.
+      function run(kind) {
+        if (running) return Promise.resolve(null)
+        running = true
+        dialog.className = kind === 'neither' ? '' : kind
+        dialog.showModal()
+        const lines = [`closed ${kind} (${engine()})`]
+        const samples = []
+        return new Promise((resolve) => {
+          setTimeout(() => {
+            dialog.close()
+            for (const ms of SAMPLES) {
+              setTimeout(() => {
+                const style = getComputedStyle(dialog)
+                samples.push({ ms, display: style.display, opacity: Number(style.opacity).toFixed(2), modal: dialog.matches(':modal') })
+                lines.push(`+${ms}ms display=${style.display} opacity=${Number(style.opacity).toFixed(2)} modal=${dialog.matches(':modal')}`)
+                document.getElementById('log').textContent = lines.join('\n')
+                if (samples.length === SAMPLES.length) {
+                  running = false
+                  resolve({ case: kind, engine: engine(), samples })
+                }
+              }, ms)
+            }
+          }, 600)
+        })
+      }
+
+      function engine() {
+        return (navigator.userAgent.match(/Version\/[\d.]+|Chrome\/\d+|Firefox\/\d+/) ?? ['?'])[0]
+      }
+    </script>
+  </body>
+</html>
