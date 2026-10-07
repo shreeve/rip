@@ -71,7 +71,10 @@ Basic = component
       Combobox.Root value <=> term
         Combobox.Label class: 'mb-2 block text-sm-plus leading-none font-medium text-secondary md:text-sm', 'Fruit'
         Combobox.Input
-          class: 'h-11 w-72 rounded-lg border border-input bg-input px-3.5 text-base shadow-xs outline-none hover:border-input-hover focus:border-accent focus:ring focus:ring-accent md:h-10 md:px-3 md:text-sm-plus'
+          class: [
+            'h-11 w-72 rounded-lg border border-input bg-input px-3.5 text-base shadow-xs outline-none md:h-10 md:px-3 md:text-sm-plus'
+            'hover:border-input-hover focus:border-accent focus:ring focus:ring-accent'
+          ]
           placeholder: 'Search fruit'
         Combobox.Popup
           side: side
@@ -121,7 +124,10 @@ Search = component
       Combobox.Root value <=> term
         Combobox.Label class: 'mb-2 block text-sm-plus leading-none font-medium text-secondary md:text-sm', 'Fruit search'
         Combobox.Input
-          class: 'h-11 w-72 rounded-lg border border-input bg-input px-3.5 text-base shadow-xs outline-none hover:border-input-hover focus:border-accent focus:ring focus:ring-accent md:h-10 md:px-3 md:text-sm-plus'
+          class: [
+            'h-11 w-72 rounded-lg border border-input bg-input px-3.5 text-base shadow-xs outline-none md:h-10 md:px-3 md:text-sm-plus'
+            'hover:border-input-hover focus:border-accent focus:ring focus:ring-accent'
+          ]
           placeholder: 'Search fruit'
           @input: onInput
         Combobox.Popup
@@ -149,7 +155,10 @@ Picker = component
     div class: 'w-72'
       Combobox.Root value <=> filter
         Combobox.Input
-          class: 'h-11 w-72 rounded-lg border border-input bg-input px-3.5 text-base shadow-xs outline-none hover:border-input-hover focus:border-accent focus:ring focus:ring-accent md:h-10 md:px-3 md:text-sm-plus'
+          class: [
+            'h-11 w-72 rounded-lg border border-input bg-input px-3.5 text-base shadow-xs outline-none md:h-10 md:px-3 md:text-sm-plus'
+            'hover:border-input-hover focus:border-accent focus:ring focus:ring-accent'
+          ]
           placeholder: 'Filter fruit'
           aria-label: 'Filter fruit'
         Combobox.Status
@@ -169,7 +178,10 @@ Row = component extends button
   render
     button
       type: 'button'
-      class: ['flex w-full cursor-default items-center rounded-lg px-3 py-2 text-left text-sm font-medium data-highlighted:bg-surface-hover data-highlighted:text-primary', if accent then 'text-accent' else 'text-secondary']
+      class: [
+        'flex w-full cursor-default items-center rounded-lg px-3 py-2.5 text-left text-sm-plus font-medium data-highlighted:bg-surface-hover data-highlighted:text-primary md:py-2 md:text-sm'
+        if accent then 'text-accent' else 'text-secondary'
+      ]
       name
 
 FRUIT = [
