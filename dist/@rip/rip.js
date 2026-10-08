@@ -17640,11 +17640,17 @@ ${pad ?? ""}`);
   }
   renderBareAttribute(el, name, siblings, k, owner) {
     const tag = this.renderTagOf(el);
-    let unknownAt = null;
-    if (this.ts && !knownBareAttribute(tag, name)) {
-      const at = this.bareChildSpan(siblings, k, owner);
-      if (at !== null) {
-        unknownAt = at;
+    const recv = this.tsElReceiver(el);
+    const at = this.ts ? this.bareChildSpan(siblings, k, owner) : null;
+    const ownerId = at === null ? null : this.stores.idOf(owner);
+    this.renderLine(null, () => {
+      recv.emit();
+      const gen = this.b.offset + 1;
+      this.b.emit(".setAttribute(");
+      if (at !== null && recv.surfaced) {
+        this.intrinsics.push(Emitter.BOOLEAN_ATTRS.has(name) ? { start: at[0], end: at[1], kind: "attr", name, type: "boolean | undefined" } : { start: at[0], end: at[1], kind: "attr", name, gen });
+      }
+      if (at !== null && !knownBareAttribute(tag, name)) {
         this.intrinsics.push({
           start: at[0],
           end: at[1],
@@ -17654,14 +17660,8 @@ ${pad ?? ""}`);
           message: this.unknownAttrMessage(tag, name, { bare: true, svg: this.rstate?.svgEls?.has(el) === true })
         });
       }
-    }
-    const recv = this.tsElReceiver(el);
-    const ownerId = unknownAt === null ? null : this.stores.idOf(owner);
-    this.renderLine(null, () => {
-      recv.emit();
-      this.b.emit(".setAttribute(");
       if (ownerId !== null) {
-        this.b.markSpan(ownerId, "identifier", unknownAt[0], unknownAt[1], () => this.emitQuotedPrimitive(name));
+        this.b.markSpan(ownerId, "identifier", at[0], at[1], () => this.emitQuotedPrimitive(name));
       } else
         this.emitQuotedPrimitive(name);
       this.b.emit(", '')");
@@ -18624,6 +18624,17 @@ ${this.replayPad}}` : " }");
           const span = claimingKey(() => this.emitKeyAs(storedKey, key));
           if (this.ts && recv.surfaced && span !== null) {
             this.intrinsics.push({ start: span[0], end: span[1], kind: "attr", name: key, type: "boolean | undefined" });
+            const attrTag = this.renderTagOf(el);
+            if (!knownBareAttribute(attrTag, key)) {
+              this.intrinsics.push({
+                start: span[0],
+                end: span[1],
+                kind: "unknown-attr",
+                tag: attrTag,
+                name: key,
+                message: this.unknownAttrMessage(attrTag, key, { bare: false, svg: this.rstate?.svgEls?.has(el) === true })
+              });
+            }
           }
         };
         if (this.renderReactive(value)) {
@@ -32094,7 +32105,8 @@ function createModuleLoaderImpl({
   components: registry,
   embeddedPackages = {},
   debug = false,
-  hmr = false
+  hmr = false,
+  cache = null
 } = {}) {
   if (!registry || typeof registry.read !== "function") {
     throw new TypeError("rip: createModuleLoader requires a component registry");
@@ -32195,12 +32207,16 @@ function createModuleLoaderImpl({
       if (source === undefined) {
         throw new Error(`rip: '${path}' is not in the bundle`);
       }
-      const compiled = compile3(source, {
-        path,
-        runtimeDelivery: "import",
-        browserModule: true,
-        ...hmr ? { hmr: true } : null
-      });
+      let compiled = cache?.lookup(path, source);
+      if (!compiled) {
+        compiled = compile3(source, {
+          path,
+          runtimeDelivery: "import",
+          browserModule: true,
+          ...hmr ? { hmr: true } : null
+        });
+        cache?.record(path, source, compiled);
+      }
       let code = compiled.code;
       for (const span of [...compiled.imports].reverse()) {
         const target = resolvePath(span.specifier, path);
@@ -32278,6 +32294,155 @@ function createModuleLoaderImpl({
     }
   };
 }
+var compilerBuild = () => "2a7792b5d9ddd901";
+var CACHE_DATABASE = "rip-compiled-modules";
+var CACHE_MODULES = "modules";
+var CACHE_META = "meta";
+var CACHE_READ_MS = 250;
+var CACHE_IDLE_MS = 2592000000;
+var idbDone = (tx) => new Promise((resolve, reject) => {
+  tx.oncomplete = () => resolve();
+  tx.onabort = () => reject(tx.error ?? new Error("rip: compiled-module cache transaction aborted"));
+});
+function openModuleCache({ indexedDB = globalThis.indexedDB, now = Date.now, name = CACHE_DATABASE } = {}) {
+  if (!indexedDB || typeof indexedDB.open !== "function") {
+    throw new Error("rip: openModuleCache requires IndexedDB");
+  }
+  let opened = null;
+  const database = () => opened ??= new Promise((resolve, reject) => {
+    const request = indexedDB.open(name, 1);
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore(CACHE_MODULES, { keyPath: "path" });
+      request.result.createObjectStore(CACHE_META);
+    };
+    request.onsuccess = () => {
+      request.result.onversionchange = () => request.result.close();
+      resolve(request.result);
+    };
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => reject(new Error("rip: compiled-module cache is blocked by another page"));
+  });
+  return {
+    async read() {
+      const db = await database();
+      const at = now();
+      let last;
+      let entries = [];
+      const tx = db.transaction([CACHE_MODULES, CACHE_META], "readonly");
+      const opened = tx.objectStore(CACHE_META).get("opened");
+      opened.onsuccess = () => {
+        last = opened.result;
+      };
+      const all = tx.objectStore(CACHE_MODULES).getAll();
+      all.onsuccess = () => {
+        entries = all.result;
+      };
+      await idbDone(tx);
+      const idle = typeof last === "number" && at - last > CACHE_IDLE_MS;
+      const stamp = db.transaction([CACHE_MODULES, CACHE_META], "readwrite");
+      if (idle)
+        stamp.objectStore(CACHE_MODULES).clear();
+      stamp.objectStore(CACHE_META).put(at, "opened");
+      idbDone(stamp).catch(() => {});
+      return idle ? new Map : new Map(entries.map((entry) => [entry.path, entry]));
+    },
+    async write(puts, removes = []) {
+      const db = await database();
+      const tx = db.transaction(CACHE_MODULES, "readwrite");
+      const modules = tx.objectStore(CACHE_MODULES);
+      for (const entry of puts.values())
+        modules.put(entry);
+      for (const path of removes)
+        modules.delete(path);
+      await idbDone(tx);
+    }
+  };
+}
+var createCompiledCache = (store, { hmr, debug }) => {
+  const build = compilerBuild();
+  const base = import.meta.url;
+  let entries = new Map;
+  const pending = new Map;
+  let warned = false;
+  const warn = (what, error) => {
+    if (warned)
+      return;
+    warned = true;
+    console.warn(`[Rip] compiled-module cache ${what}; modules compile without it:`, String(error?.message ?? error));
+  };
+  const usable = (entry, source) => entry != null && entry.build === build && entry.base === base && entry.hmr === hmr && entry.source === source && typeof entry.code === "string" && Array.isArray(entry.imports) && (!debug || entry.map != null);
+  return {
+    async read() {
+      let timer;
+      const late = {};
+      const deadline = new Promise((resolve) => {
+        timer = setTimeout(() => resolve(late), CACHE_READ_MS);
+      });
+      try {
+        const read = await Promise.race([store.read(), deadline]);
+        if (read === late)
+          warn("read", `no answer within ${CACHE_READ_MS} ms`);
+        else
+          entries = read;
+      } catch (error) {
+        warn("read", error);
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    lookup(path, source) {
+      const entry = entries.get(path);
+      return usable(entry, source) ? entry : null;
+    },
+    record(path, source, compiled) {
+      const entry = {
+        path,
+        build,
+        base,
+        hmr,
+        source,
+        code: compiled.code,
+        imports: compiled.imports.map(({ start, end, specifier }) => ({ start, end, specifier })),
+        ...debug ? { map: compiled.map } : null
+      };
+      entries.set(path, entry);
+      pending.set(path, entry);
+    },
+    async flush(live = null) {
+      const puts = new Map(pending);
+      pending.clear();
+      const removes = live ? [...entries.keys()].filter((path) => !live.has(path)) : [];
+      for (const path of removes)
+        entries.delete(path);
+      if (!puts.size && !removes.length)
+        return;
+      try {
+        await store.write(puts, removes);
+      } catch (error) {
+        warn("write", error);
+      }
+    },
+    release() {
+      entries = new Map;
+    }
+  };
+};
+var moduleStoreFor = (cache) => {
+  if (cache === false)
+    return null;
+  if (cache === undefined) {
+    if (!compilerBuild() || typeof globalThis.indexedDB?.open !== "function")
+      return null;
+    return openModuleCache();
+  }
+  if (cache === null || typeof cache !== "object" || typeof cache.read !== "function" || typeof cache.write !== "function") {
+    throw new TypeError("rip: bootApp cache must be false or a store with read() and write()");
+  }
+  if (!compilerBuild()) {
+    throw new Error("rip: a compiled-module cache needs a stamped compiler build, and unbundled source carries none");
+  }
+  return cache;
+};
 var scopeNames = Object.keys(runtimes);
 var scopeValues = scopeNames.map((name) => runtimes[name]);
 var browserHost3 = () => {
@@ -32644,7 +32809,7 @@ async function fetchBundle(url, { fetchText = browserFetchText } = {}) {
     throw new Error(`rip: bundle '${url}' is not valid JSON: ${error.message}`);
   }
 }
-var createProgram = (initialSources, debug, { hmr = false } = {}) => {
+var createProgram = (initialSources, debug, { hmr = false, cache = null } = {}) => {
   let files = new Map(Object.entries(initialSources));
   const staged = new Map;
   const registry = {
@@ -32653,7 +32818,7 @@ var createProgram = (initialSources, debug, { hmr = false } = {}) => {
     getCompiled: (path) => staged.get(path),
     setCompiled: (path, module) => void staged.set(path, module)
   };
-  const loader = createModuleLoaderImpl({ components: registry, embeddedPackages, debug, hmr });
+  const loader = createModuleLoaderImpl({ components: registry, embeddedPackages, debug, hmr, cache });
   return {
     sources(nextSources) {
       files = new Map(Object.entries(nextSources));
@@ -32685,11 +32850,15 @@ var sibling = (url, name) => {
 async function bootApp(opts = {}) {
   if (!opts.bundle && !opts.url)
     throw new Error("rip: bootApp requires a bundle or a url");
-  const bundle = opts.bundle ?? await fetchBundle(opts.url, { fetchText: opts.fetchText });
-  const sources = publicationSources(bundle);
   const debug = opts.debug === true;
   const watch = opts.watch === true || opts.feed != null;
-  const program = createProgram(sources, debug, { hmr: watch });
+  const store = moduleStoreFor(opts.cache);
+  const cache = store ? createCompiledCache(store, { hmr: watch, debug }) : null;
+  const cacheRead = cache?.read();
+  const bundle = opts.bundle ?? await fetchBundle(opts.url, { fetchText: opts.fetchText });
+  const sources = publicationSources(bundle);
+  await cacheRead;
+  const program = createProgram(sources, debug, { hmr: watch, cache });
   const workspace = createWorkspace();
   const seedFor = (modules) => modules["seed.rip"]?.seed;
   const launchWith = (modules) => launch({
@@ -32712,6 +32881,9 @@ async function bootApp(opts = {}) {
     program.dispose();
     throw error;
   }
+  cache?.flush(new Set(Object.keys(sources)));
+  if (!watch)
+    cache?.release();
   let feed = null;
   let destroyed = false;
   const handle = {};
@@ -32817,6 +32989,7 @@ async function bootApp(opts = {}) {
       showHmrOverlay("compile", error);
       return "rejected";
     }
+    cache?.flush();
     const ordinaryReload = change.entries.some((entry) => !entry.path.endsWith(".rip") && (!entry.path.endsWith(".css") || entry.deletion));
     const route = current.router.current;
     const mounted = new Set([
@@ -32898,6 +33071,7 @@ export {
   embeddedPackages,
   fetchBundle,
   hmrOverlayElement,
+  openModuleCache,
   processRipScripts,
   runtimes,
   showHmrOverlay
