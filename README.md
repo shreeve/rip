@@ -67,6 +67,12 @@ every entry, and compile errors are never cached. `RIP_CACHE_DIR=<dir>`
 relocates the cache and `RIP_NO_CACHE=1` disables it. Entries unread for
 a week are pruned; `rm -rf .rip/cache` is the full reset.
 
+In the browser, `bootApp` keeps each module's compiled output in
+IndexedDB, one entry per module path, so a reload compiles only the
+modules whose source changed. `docs/WORKSPACE.md` ("Initial activation")
+has the validation rules and the trust trade-off;
+`bootApp({ cache: false })` turns it off.
+
 ### The live runner
 
 `bun run test:tui` runs the lanes `test:all` runs, with the same

@@ -226,6 +226,19 @@ describe('browser bundle artifact', () => {
   test('min loads standalone and compiles', () => {
     smokeCompile(minPath);
   });
+
+  test('both artifacts carry one stamped compiler build', () => {
+    const code = readFileSync(artifactPath, 'utf8');
+    const min = readFileSync(minPath, 'utf8');
+    for (const text of [code, min]) {
+      expect(text).not.toContain('RIP_COMPILER_BUILD');
+      expect(text).not.toContain('"unstamped"');
+    }
+    // The minifier renames the binding; the stamped literal survives.
+    const build = code.match(/compilerBuild = \(\) => "([0-9a-f]{16})"/)?.[1];
+    expect(build).toMatch(/^[0-9a-f]{16}$/);
+    expect(min).toContain(`"${build}"`);
+  });
 });
 
 describeExtended('browser bundle freshness', () => {
