@@ -160,20 +160,31 @@ const buildOpts = {
   plugins: [ripModules, nodeStubs, ideStubs],
 };
 
-const result = await Bun.build({ ...buildOpts, minify: false });
-if (!result.success) {
-  for (const log of result.logs) console.error(String(log));
-  process.exit(1);
-}
+const build = async (opts) => {
+  const out = await Bun.build({ ...buildOpts, ...opts });
+  if (!out.success) {
+    for (const log of out.logs) console.error(String(log));
+    process.exit(1);
+  }
+  return out.outputs[0].text();
+};
 
-const minResult = await Bun.build({ ...buildOpts, minify: true });
-if (!minResult.success) {
-  for (const log of minResult.logs) console.error(String(log));
-  process.exit(1);
-}
+// The compiler build id keys the page's compiled-module cache
+// (src/browser.js): a digest of the unstamped bundle, so any change to
+// what the bundle carries is a new build, and regenerating an unchanged
+// tree reproduces the same id.
+const unstamped = await build({ minify: false, define: { RIP_COMPILER_BUILD: '"unstamped"' } });
+const buildId = new Bun.CryptoHasher('sha256').update(unstamped).digest('hex').slice(0, 16);
+const define = { RIP_COMPILER_BUILD: JSON.stringify(buildId) };
 
-const code = await result.outputs[0].text();
-const minCode = await minResult.outputs[0].text();
+const code = await build({ minify: false, define });
+const minCode = await build({ minify: true, define });
+for (const [name, text] of [['rip.js', code], ['rip.min.js', minCode]]) {
+  if (!text.includes(`"${buildId}"`) || text.includes('RIP_COMPILER_BUILD')) {
+    console.error(`browser: ${name} does not carry compiler build ${buildId}`);
+    process.exit(1);
+  }
+}
 const minBytes = Buffer.from(minCode);
 const brBytes = brotliCompressSync(minBytes, {
   params: {

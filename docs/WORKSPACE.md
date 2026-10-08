@@ -97,6 +97,26 @@ compile or activation failure quarantines its candidate hash and leaves the
 last committed App running. A malformed or disconnected transition reloads
 when coherence cannot be proven.
 
+Compilation is memoized per module path in IndexedDB (`src/browser.js`,
+"Compiled-module cache"). An entry serves only when its exact source text,
+the stamped compiler build, the compiler script's URL, the hmr mode, and —
+under debug — a stored source map all match; any other entry is a miss that
+recompiles and overwrites the path's one entry, so the complete-program
+compile above holds with no stale output possible. Entries are written after
+launch and after each accepted live change; a boot removes entries whose path
+the publication no longer carries; a store unopened for 30 days is dropped
+whole. Compile errors are never stored. A store that cannot open, read, or
+write, or does not answer a read within 250 ms, leaves boot compiling as it
+would without one and logs one console warning. Unbundled source carries no
+compiler build, so no store opens there.
+
+`bootApp({ cache: false })` compiles every module; a store object with
+`read()` and `write()` replaces the default; any other value rejects. Entries
+are code the page evaluates from the origin's IndexedDB: a script that runs
+once on the origin can plant an entry for the current source, and it keeps
+running until that source changes. A page that must not let one injection
+outlive a reload boots with `cache: false`.
+
 `bundle.json.br` is a server-side precompressed representation of the exact
 JSON bytes. The browser requests `/bundle.json`; transparent HTTP content
 negotiation selects Brotli when the edge supports it.
@@ -260,8 +280,11 @@ The complete implementation is pinned by tests for:
 6. no ordinary asset bytes over WSS;
 7. last-known-good behavior after compile or activation failure;
 8. duplicate, missing, racing, and reconnect transitions;
-9. watch-off boot with no file-publication channel requirement; and
-10. real-browser Chromium and WebKit coverage.
+9. watch-off boot with no file-publication channel requirement;
+10. compiled-module cache hits, misses on every validator, overwrite,
+    sweep, idle drop, read deadline, store failure, and rejected options;
+    and
+11. real-browser Chromium and WebKit coverage.
 
 The Server/Manager half and browser half are separate test boundaries. The
 wire contract has one format; there is no compatibility adapter or dual

@@ -100,6 +100,7 @@ function createModuleLoaderImpl({
   embeddedPackages = {},
   debug = false,
   hmr = false,
+  cache = null,
 } = {}) {
   if (!registry || typeof registry.read !== 'function') {
     throw new TypeError('rip: createModuleLoader requires a component registry');
@@ -222,12 +223,16 @@ function createModuleLoaderImpl({
       if (source === undefined) {
         throw new Error(`rip: '${path}' is not in the bundle`);
       }
-      const compiled = compile(source, {
-        path,
-        runtimeDelivery: 'import',
-        browserModule: true,
-        ...(hmr ? { hmr: true } : null),
-      });
+      let compiled = cache?.lookup(path, source);
+      if (!compiled) {
+        compiled = compile(source, {
+          path,
+          runtimeDelivery: 'import',
+          browserModule: true,
+          ...(hmr ? { hmr: true } : null),
+        });
+        cache?.record(path, source, compiled);
+      }
       let code = compiled.code;
       for (const span of [...compiled.imports].reverse()) {
         const target = resolvePath(span.specifier, path);
@@ -300,6 +305,204 @@ function createModuleLoaderImpl({
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// Compiled-module cache
+// ---------------------------------------------------------------------------
+
+// A page reload hands the compiler the same Rip source it compiled last
+// time; the HTTP cache keeps the source bytes, not what they compiled to.
+// This cache keeps the compiler's output per module path, so an
+// unchanged module skips compilation and a changed one recompiles and
+// overwrites its entry: one entry per path, never one per version.
+//
+// An entry is used only when every input that shapes the output is
+// identical: the exact source text, the compiler build, the compiler
+// script's URL (emitted runtime imports derive from import.meta.url), the
+// hmr mode, and — under debug — a stored source map. Anything else is a
+// miss, so a stale entry can never run. Compile errors are never stored.
+//
+// The cache memoizes; it never decides. A store that cannot open, read,
+// or write — or reads slower than CACHE_READ_MS — leaves the page
+// compiling exactly as it would without one, and says so once on the
+// console: the failure is reported, never fatal, and no result differs.
+//
+// Trust: entries are code the page evaluates, held in the origin's
+// IndexedDB. A script that runs once on the origin can plant an entry for
+// the current source, and it keeps running until that source changes. A
+// page that must not extend one injection across reloads boots with
+// `cache: false`.
+
+// The compiler build this bundle carries, stamped by
+// scripts/browser-bundle.mjs as a digest of the bundle. Unbundled source
+// carries none, and no store opens without one: nothing else could tell
+// this compiler's output from another's.
+const compilerBuild = () => (typeof RIP_COMPILER_BUILD === 'string' ? RIP_COMPILER_BUILD : null);
+
+const CACHE_DATABASE = 'rip-compiled-modules';
+const CACHE_MODULES = 'modules';
+const CACHE_META = 'meta';
+// A read slower than this compiles without the cache: boot never waits
+// on a store that does not answer.
+const CACHE_READ_MS = 250;
+// A store unopened this long is dropped whole on the next visit: it only
+// reclaims space from an abandoned origin, since entries never go stale.
+const CACHE_IDLE_MS = 30 * 24 * 60 * 60 * 1000;
+
+// Requests chain inside event callbacks, never across awaits: a
+// transaction commits once a task ends with no request pending.
+const idbDone = tx => new Promise((resolve, reject) => {
+  tx.oncomplete = () => resolve();
+  tx.onabort = () => reject(tx.error ?? new Error('rip: compiled-module cache transaction aborted'));
+});
+
+// The IndexedDB store: `read()` resolves every entry keyed by path,
+// `write(puts, removes)` lands puts and removals in one transaction.
+export function openModuleCache({ indexedDB = globalThis.indexedDB, now = Date.now, name = CACHE_DATABASE } = {}) {
+  if (!indexedDB || typeof indexedDB.open !== 'function') {
+    throw new Error('rip: openModuleCache requires IndexedDB');
+  }
+  let opened = null;
+  const database = () => opened ??= new Promise((resolve, reject) => {
+    const request = indexedDB.open(name, 1);
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore(CACHE_MODULES, { keyPath: 'path' });
+      request.result.createObjectStore(CACHE_META);
+    };
+    request.onsuccess = () => {
+      // Another page upgrading the database must never wait on this one.
+      request.result.onversionchange = () => request.result.close();
+      resolve(request.result);
+    };
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => reject(new Error('rip: compiled-module cache is blocked by another page'));
+  });
+  return {
+    async read() {
+      const db = await database();
+      const at = now();
+      let last;
+      let entries = [];
+      const tx = db.transaction([CACHE_MODULES, CACHE_META], 'readonly');
+      const opened = tx.objectStore(CACHE_META).get('opened');
+      opened.onsuccess = () => { last = opened.result; };
+      const all = tx.objectStore(CACHE_MODULES).getAll();
+      all.onsuccess = () => { entries = all.result; };
+      await idbDone(tx);
+      const idle = typeof last === 'number' && at - last > CACHE_IDLE_MS;
+      // Stamping the visit (and dropping an idle store) takes the write
+      // lock, so it runs after the read rather than ahead of it; later
+      // writes queue behind it in creation order.
+      const stamp = db.transaction([CACHE_MODULES, CACHE_META], 'readwrite');
+      if (idle) stamp.objectStore(CACHE_MODULES).clear();
+      stamp.objectStore(CACHE_META).put(at, 'opened');
+      idbDone(stamp).catch(() => {
+        // An unstamped visit only ages the store; a failing store reports
+        // through the next write.
+      });
+      return idle ? new Map() : new Map(entries.map(entry => [entry.path, entry]));
+    },
+    async write(puts, removes = []) {
+      const db = await database();
+      const tx = db.transaction(CACHE_MODULES, 'readwrite');
+      const modules = tx.objectStore(CACHE_MODULES);
+      for (const entry of puts.values()) modules.put(entry);
+      for (const path of removes) modules.delete(path);
+      await idbDone(tx);
+    },
+  };
+}
+
+const createCompiledCache = (store, { hmr, debug }) => {
+  const build = compilerBuild();
+  const base = import.meta.url;
+  let entries = new Map();
+  const pending = new Map();
+  let warned = false;
+  const warn = (what, error) => {
+    if (warned) return;
+    warned = true;
+    console.warn(`[Rip] compiled-module cache ${what}; modules compile without it:`, String(error?.message ?? error));
+  };
+  const usable = (entry, source) =>
+    entry != null &&
+    entry.build === build &&
+    entry.base === base &&
+    entry.hmr === hmr &&
+    entry.source === source &&
+    typeof entry.code === 'string' &&
+    Array.isArray(entry.imports) &&
+    (!debug || entry.map != null);
+  return {
+    async read() {
+      let timer;
+      const late = {};
+      const deadline = new Promise(resolve => { timer = setTimeout(() => resolve(late), CACHE_READ_MS); });
+      try {
+        const read = await Promise.race([store.read(), deadline]);
+        if (read === late) warn('read', `no answer within ${CACHE_READ_MS} ms`);
+        else entries = read;
+      } catch (error) {
+        warn('read', error);
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    lookup(path, source) {
+      const entry = entries.get(path);
+      return usable(entry, source) ? entry : null;
+    },
+    record(path, source, compiled) {
+      const entry = {
+        path,
+        build,
+        base,
+        hmr,
+        source,
+        code: compiled.code,
+        imports: compiled.imports.map(({ start, end, specifier }) => ({ start, end, specifier })),
+        ...(debug ? { map: compiled.map } : null),
+      };
+      entries.set(path, entry);
+      pending.set(path, entry);
+    },
+    // Lands recorded entries; with `live`, also removes every path the
+    // complete publication no longer carries.
+    async flush(live = null) {
+      const puts = new Map(pending);
+      pending.clear();
+      const removes = live ? [...entries.keys()].filter(path => !live.has(path)) : [];
+      for (const path of removes) entries.delete(path);
+      if (!puts.size && !removes.length) return;
+      try {
+        await store.write(puts, removes);
+      } catch (error) {
+        warn('write', error);
+      }
+    },
+    // A program that compiles nothing more drops its copies.
+    release() {
+      entries = new Map();
+    },
+  };
+};
+
+// `cache` is false (compile every module), a store with read() and
+// write(), or absent for the IndexedDB default. Anything else rejects.
+const moduleStoreFor = cache => {
+  if (cache === false) return null;
+  if (cache === undefined) {
+    if (!compilerBuild() || typeof globalThis.indexedDB?.open !== 'function') return null;
+    return openModuleCache();
+  }
+  if (cache === null || typeof cache !== 'object' || typeof cache.read !== 'function' || typeof cache.write !== 'function') {
+    throw new TypeError('rip: bootApp cache must be false or a store with read() and write()');
+  }
+  if (!compilerBuild()) {
+    throw new Error('rip: a compiled-module cache needs a stamped compiler build, and unbundled source carries none');
+  }
+  return cache;
+};
 
 // ---------------------------------------------------------------------------
 // <script type="text/rip"> loading
@@ -730,7 +933,7 @@ export async function fetchBundle(url, { fetchText = browserFetchText } = {}) {
   }
 }
 
-const createProgram = (initialSources, debug, { hmr = false } = {}) => {
+const createProgram = (initialSources, debug, { hmr = false, cache = null } = {}) => {
   let files = new Map(Object.entries(initialSources));
   const staged = new Map();
   const registry = {
@@ -739,7 +942,7 @@ const createProgram = (initialSources, debug, { hmr = false } = {}) => {
     getCompiled: path => staged.get(path),
     setCompiled: (path, module) => void staged.set(path, module),
   };
-  const loader = createModuleLoaderImpl({ components: registry, embeddedPackages, debug, hmr });
+  const loader = createModuleLoaderImpl({ components: registry, embeddedPackages, debug, hmr, cache });
   return {
     sources(nextSources) {
       files = new Map(Object.entries(nextSources));
@@ -770,11 +973,16 @@ const sibling = (url, name) => {
 
 export async function bootApp(opts = {}) {
   if (!opts.bundle && !opts.url) throw new Error('rip: bootApp requires a bundle or a url');
-  const bundle = opts.bundle ?? await fetchBundle(opts.url, { fetchText: opts.fetchText });
-  const sources = publicationSources(bundle);
   const debug = opts.debug === true;
   const watch = opts.watch === true || opts.feed != null;
-  const program = createProgram(sources, debug, { hmr: watch });
+  // The read starts before the bundle fetch so it hides behind the network.
+  const store = moduleStoreFor(opts.cache);
+  const cache = store ? createCompiledCache(store, { hmr: watch, debug }) : null;
+  const cacheRead = cache?.read();
+  const bundle = opts.bundle ?? await fetchBundle(opts.url, { fetchText: opts.fetchText });
+  const sources = publicationSources(bundle);
+  await cacheRead;
+  const program = createProgram(sources, debug, { hmr: watch, cache });
   const workspace = app.createWorkspace();
   const seedFor = modules => modules['seed.rip']?.seed;
   const launchWith = modules => app.launch({
@@ -798,6 +1006,10 @@ export async function bootApp(opts = {}) {
     program.dispose();
     throw error;
   }
+  // Written after launch, so storing never delays the first render. Only a
+  // watching page compiles again; any other page drops its copies.
+  cache?.flush(new Set(Object.keys(sources)));
+  if (!watch) cache?.release();
   let feed = null;
   let destroyed = false;
   const handle = {};
@@ -910,6 +1122,7 @@ export async function bootApp(opts = {}) {
       showHmrOverlay('compile', error);
       return 'rejected';
     }
+    cache?.flush();
 
     // Every Rip entry has now passed complete candidate preflight. CSS can
     // refresh through normal HTTP; other assets and mounted-route deletion
