@@ -23978,6 +23978,10 @@ var types = {
   variant: (v) => v !== undefined,
   any: () => true
 };
+var normalizers = {
+  __proto__: null,
+  email: (v) => typeof v === "string" ? v.trim().toLowerCase() : v
+};
 var COERCERS = {
   integer(v) {
     if (typeof v === "number")
@@ -24056,6 +24060,8 @@ function nestedDef(typeName) {
 function validateValue(v, typeName, opts) {
   const prim = types[typeName];
   if (prim) {
+    if (normalizers[typeName])
+      v = normalizers[typeName](v);
     return prim(v) ? { value: v } : { errors: [{ field: "", error: "type", message: "must be " + typeName }] };
   }
   const subDef = SchemaRegistry.get(typeName);
@@ -24683,7 +24689,7 @@ class SchemaDef {
     for (const [n, f] of norm.fields) {
       if (skip && skip.has(n))
         continue;
-      const v = data == null ? undefined : data[n];
+      let v = data == null ? undefined : data[n];
       if (v === undefined || v === null) {
         if (f.required) {
           if (!collect)
@@ -24767,7 +24773,7 @@ class SchemaDef {
           continue;
         }
         if (res.value !== v)
-          data[n] = res.value;
+          data[n] = v = res.value;
       }
       const c = f.constraints;
       if (c) {
