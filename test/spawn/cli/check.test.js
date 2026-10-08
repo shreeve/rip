@@ -287,6 +287,82 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
+  // A render branch narrows what it tested, on the face, inside every
+  // function body of the arm it guards — each arm is its own block factory,
+  // and TypeScript carries no narrowing across that boundary on its own. The
+  // checker is the artifact: the clean half holds only if the assertions
+  // reach c() and the effects; the negative half proves the arm still checks
+  // (a wrong card for the arm, an unguarded optional member).
+  test('a switch arm, a guarded cell in a prop expression, and a guarded member path check narrowed under strict', async () => {
+    const cards = [
+      "type A = { kind: 'a', x: number }",
+      "type B = { kind: 'b', y: string }",
+      'type Item = A | B',
+      'CardA = component',
+      '  @item: A',
+      '  render',
+      '    div "#{item.x}"',
+      'CardB = component',
+      '  @item: B',
+      '  render',
+      '    div item.y',
+      'Timer = component',
+      '  @duration: number',
+      '  render',
+      '    div "#{duration}"',
+      'workflowFor = (w: string, n: string): string -> "#{w}:#{n}"',
+      'Child = component',
+      '  @kit: { workflow: string }',
+      '  @workflow: string',
+      '  render',
+      '    div workflow',
+    ];
+    const clean = workspace({
+      'narrow.rip': [
+        ...cards,
+        'export List = component',
+        '  @items: Item[]',
+        '  @steps: { name: string, timer?: number }[]',
+        '  @name: string',
+        '  kit: { workflow: string } | null := null',
+        '  render',
+        '    for it in items',
+        '      switch it.kind',
+        "        when 'a' then CardA item: it",
+        "        when 'b' then CardB item: it",
+        '    if kit then Child kit: kit, workflow: workflowFor(kit.workflow, name)',
+        '    for step in steps',
+        '      if step.timer then Timer duration: step.timer',
+      ].join('\n') + '\n',
+    }, { strict: true });
+    const wrong = workspace({
+      'wrong.rip': [
+        ...cards,
+        'export List = component',
+        '  @items: Item[]',
+        '  @steps: { name: string, timer?: number }[]',
+        '  render',
+        '    for it in items',
+        '      switch it.kind',
+        "        when 'a' then CardB item: it",
+        '    for step in steps',
+        '      Timer duration: step.timer',
+      ].join('\n') + '\n',
+    }, { strict: true });
+    try {
+      const ok = await check(clean);
+      expect(ok.stdout).toContain('No type errors');
+      expect(ok.status).toBe(0);
+      const bad = JSON.parse((await check(wrong, ['--json'])).stdout);
+      // The arm's `it` is narrowed to A, which CardB refuses; the bare
+      // `step.timer` stays `number | undefined`.
+      expect(bad.map((d) => [d.code, d.line])).toEqual([[2322, 28], [2345, 30]]);
+    } finally {
+      fs.rmSync(clean, { recursive: true, force: true });
+      fs.rmSync(wrong, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   // Every component member form checks its initializer, and every wrong-typed
   // member WRITE inside a method reaches the source. Two mechanisms hold this
   // up and each has its own spelling below.
@@ -1459,6 +1535,41 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
   // workspace and breaks for the very consumer this audit speaks for. It is
   // reported rather than skipped, because a manifest that names an entry has
   // named it, and silence would read as a package with no surface.
+  // A namespace re-export publishes a module's whole surface under one
+  // name, and a namespace binding is always typed, since its type is the
+  // module. The audit follows the star into the module, so an entry made
+  // of namespace re-exports reports the members, and an any among them.
+  test('--public follows `export * as` into its module and reports the members', async () => {
+    const clean = workspace({
+      'index.rip': "export * as Lib from './lib.rip'\n",
+      'lib.rip': 'export def fine(n: number): string\n  "#{n}"\n',
+    });
+    fs.writeFileSync(path.join(clean, 'package.json'),
+      JSON.stringify({ name: 'ns-clean', exports: { '.': './index.rip' } }, null, 2));
+    const leaky = workspace({
+      'index.rip': "export * as Lib from './lib.rip'\n",
+      'lib.rip': 'export def fine(n: number): string\n  "#{n}"\n\nexport leak = (x) -> x\n',
+    });
+    fs.writeFileSync(path.join(leaky, 'package.json'),
+      JSON.stringify({ name: 'ns-leaky', exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const ok = await check(clean, ['--public']);
+      expect(ok.stdout).toMatch(/\u2713 Lib/);
+      expect(ok.stdout).toMatch(/\u2713 fine/);
+      expect(ok.stdout).toContain('2/2 exports fully typed (100.0%)');
+      expect(ok.status).toBe(0);
+
+      const bad = await check(leaky, ['--public']);
+      expect(bad.stdout).toMatch(/\u2713 fine/);
+      expect(bad.stdout).toContain('leak');
+      expect(bad.stdout).toContain('/3 exports fully typed');
+      expect(bad.status).toBe(1);
+    } finally {
+      fs.rmSync(clean, { recursive: true, force: true });
+      fs.rmSync(leaky, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   test('--public reports a manifest that publishes from outside the package', async () => {
     const dir = workspace({
       'package.json': JSON.stringify({ name: '@q4/outside', exports: { '.': '../shared/api.rip' } }),
@@ -5245,13 +5356,17 @@ describeExtended.concurrent('rip check: intrinsic-element typing over the real s
     // would cost the file every other diagnostic. Every road — the
     // inline bare word, the bare word on its own line under the
     // element, and the pair — answers at its own bytes, beside the rest.
-    const dir = workspace({ 'app.rip': comp(['input readOnly', "input readOnly: true", 'img alt: 42', 'span countt', 'input', '  readOnly']) });
+    // A boolean name on a tag that does not take it (`disabled` on a
+    // span) is the same rejection on the boolean road, static and
+    // reactive alike.
+    const dir = workspace({ 'app.rip': comp(['input readOnly', "input readOnly: true", 'img alt: 42', 'span countt', 'input', '  readOnly', 'span disabled: true', "span disabled: @q is 'x'"]) });
     try {
-      expect(await diagsOf(dir)).toEqual([[2345, 5, 13], [2345, 6, 13], [2345, 7, 11], [2345, 8, 12], [2345, 10, 9]]);
+      expect(await diagsOf(dir)).toEqual([[2345, 5, 13], [2345, 6, 13], [2345, 7, 11], [2345, 8, 12], [2345, 10, 9], [2345, 11, 12], [2345, 12, 12]]);
       const out = (await check(dir, ['--json'])).stdout;
       expect(out.match(/did you mean 'readonly'\?/g)).toHaveLength(3);
       // Nothing near it: the reading it took, and the two ways out.
       expect(out).toContain('a bare word sets the boolean attribute it names');
+      expect(out.match(/'disabled' is not a known attribute of <span> — HTML attribute names are the spec's own, lowercase/g)).toHaveLength(2);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 120_000);
 

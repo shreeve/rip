@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>closedby on a modal dialog</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 16px -apple-system, system-ui, sans-serif;
+      }
+      button {
+        padding: 8px 10px;
+        font: inherit;
+      }
+      #log {
+        padding: 8px;
+        font: 14px monospace;
+        white-space: pre-wrap;
+      }
+      dialog {
+        width: 240px;
+        margin: auto;
+        padding: 16px;
+      }
+      dialog button {
+        display: block;
+        margin-top: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <p>Each case opens a modal dialog with <code>closedby</code> set. Press Escape, or tap the backdrop, and the log says what closed it. Under <code>none</code> neither should close it; under <code>closerequest</code> only Escape; under <code>any</code> both.</p>
+
+    <button onclick="run('none')">closedby="none"</button>
+    <button onclick="run('closerequest')">closedby="closerequest"</button>
+    <button onclick="run('any')">closedby="any"</button>
+
+    <pre id="log">closedBy in HTMLDialogElement.prototype: <span id="supported"></span></pre>
+
+    <dialog id="d">
+      closedby=<span id="v"></span>
+      <button onclick="d.close()">close</button>
+    </dialog>
+
+    <script>
+      const dialog = document.getElementById('d')
+      const supported = 'closedBy' in HTMLDialogElement.prototype
+      document.getElementById('supported').textContent = String(supported)
+
+      // Opens the dialog; the log then reports a cancel or a close as it
+      // happens. The dialog's `open` property says whether a press closed it.
+      function run(value) {
+        if (dialog.open) dialog.close()
+        dialog.setAttribute('closedby', value)
+        document.getElementById('v').textContent = value
+        document.getElementById('log').textContent = `closedBy supported: ${supported} (${engine()})\nopen with closedby="${value}"`
+        dialog.showModal()
+        return { engine: engine(), supported }
+      }
+
+      for (const type of ['cancel', 'close']) {
+        dialog.addEventListener(type, () => {
+          document.getElementById('log').textContent += `\n${type} fired`
+        })
+      }
+
+      function engine() {
+        return (navigator.userAgent.match(/Version\/[\d.]+|Chrome\/\d+|Firefox\/\d+/) ?? ['?'])[0]
+      }
+    </script>
+  </body>
+</html>

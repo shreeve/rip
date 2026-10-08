@@ -202,6 +202,43 @@ test.describe('refresh tiers', () => {
     }
   });
 
+  // Patch with a reset — a changed `:=` initializer re-runs for the one
+  // slot it names on the living instance; the other cells and the `_init`
+  // member keep what they hold, and whitespace alone resets nothing.
+  test('a changed initializer re-runs for its slot and leaves the rest of the instance alone', async ({ page }) => {
+    await boot(page);
+    await page.locator('#nav-cells').click();
+    await expect(page.locator('#content #title')).toHaveText('cells', { timeout: 15000 });
+    await page.locator('#write').click();
+    await expect(page.locator('#b')).toHaveText('20');
+    const made = await page.locator('#made').textContent();
+    const patchesAfter = (seen) => page.evaluate((n) =>
+      globalThis.__ripHmr.slice(n).filter((e) => e.type === 'patch').map((e) => e.reset), seen);
+
+    const edit = await editFile('app/routes/cells.rip', (src) => src.replace('  b := 2\n', '  b := 200\n'));
+
+    try {
+      await expect(page.locator('#b')).toHaveText('200', { timeout: 15000 });
+      await expect.poll(() => patchesAfter(0), { timeout: 10000 }).toContainEqual(['b']);
+      expect(await tiers(page)).not.toContain('remount');
+      await expect(page.locator('#a')).toHaveText('10');
+      await expect(page.locator('#c')).toHaveText('30');
+      await expect(page.locator('#made')).toHaveText(made);
+      expect(await sentinels(page)).toEqual({ page: 'alive', layout: 'alive' });
+
+      await page.locator('#write').click();
+      await expect(page.locator('#b')).toHaveText('20');
+      const seen = await page.evaluate(() => globalThis.__ripHmr.length);
+      writeFileSync(edit.abs, readFileSync(edit.abs, 'utf8').replace('b := 200', 'b :=   200'));
+      await expect.poll(() => patchesAfter(seen), { timeout: 15000 }).not.toEqual([]);
+      expect((await patchesAfter(seen)).every((reset) => reset.length === 0)).toBe(true);
+      await expect(page.locator('#b')).toHaveText('20');
+    } finally {
+      // The restore is itself a changed initializer: the cell reads 2 again.
+      await edit.restoreAndSettle(page.locator('#b'), '2');
+    }
+  });
+
   // Migrate — a changed `:=` name set: a fresh instance on the remount
   // floor, carrying the slots both versions share.
   test('an added state slot migrates, carrying the intersecting slots', async ({ page }) => {

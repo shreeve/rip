@@ -7,6 +7,7 @@ import {
   __hmrClassify,
   __hmrEmit,
   __hmrEvents,
+  __hmrInitDiff,
   __hmrLookup,
   __hmrMigrateDiff,
   __hmrPreserveState,
@@ -61,6 +62,7 @@ Row = component
     expect(off.code).not.toContain('__hmrId');
     expect(off.code).not.toContain('__hmrSig');
     expect(off.code).not.toContain('__hmrComponents');
+    expect(off.code).not.toContain('__hmrInit');
     expect(explicit.code).not.toContain('__hmrId');
     expect(explicit.code).toBe(off.code);
   });
@@ -105,6 +107,48 @@ export Sheet = component extends Popup
     const { code } = compileHmr(src, 'ui/sheet.rip');
     expect(code).toContain('"extends":"Popup"');
     expect(code).toContain('"props":["side"]');
+  });
+
+  const sigOf = (code) => JSON.parse(code.match(/static __hmrSig = ({.*?});/)[1]);
+
+  test('the signature fingerprints each `:=` initializer, and a thunk per slot re-states it', () => {
+    const { code } = compileHmr(SRC);
+    const sig = sigOf(code);
+    expect(Object.keys(sig.inits)).toEqual(['count']);
+    expect(sig.inits.count).toMatch(/^[0-9a-f]{8}$/);
+    expect(code).toContain('static __hmrInit = {\n    count() { return 0; },\n  };');
+    // A bare prop has no initializer to re-run.
+    expect(code).not.toContain('label()');
+  });
+
+  test('a changed initializer changes its own inits entry and nothing else', () => {
+    const a = sigOf(compileHmr(SRC, 'c.rip').code);
+    const b = sigOf(compileHmr(SRC.replace('count := 0', 'count := 12'), 'c.rip').code);
+    expect(b.inits.count).not.toBe(a.inits.count);
+    expect(b.shape).toBe(a.shape);
+    expect(b.impl).toBe(a.impl);
+    expect(b.state).toEqual(a.state);
+  });
+
+  test('whitespace and quote style change no inits entry', () => {
+    const src = `${SRC}  tone := 'dark'\n`.replace('  render', '  tone := \'dark\'\n  render').replace(/  tone := 'dark'\n$/, '');
+    const a = compileHmr(src, 'c.rip').code;
+    const b = compileHmr(src.replace("tone := 'dark'", 'tone :=   "dark"').replace('count := 0', 'count :=  0'), 'c.rip').code;
+    expect(a).toContain('tone() { return "dark"; },');
+    expect(b).toBe(a);
+  });
+
+  test('a thunk declares the inner names its initializer assigns', () => {
+    const src = SRC.replace('  render', '  pair := (a = count; a + 1)\n  render');
+    const { code } = compileHmr(src);
+    expect(code).toContain('pair() { let a; return (a = this.count.value, a + 1); },');
+  });
+
+  test('the thunks and the signature are in source order, not sorted', () => {
+    const src = SRC.replace('  count := 0', '  zed := 1\n  count := 0');
+    const { code } = compileHmr(src);
+    expect(Object.keys(sigOf(code).inits)).toEqual(['zed', 'count']);
+    expect(code.indexOf('zed() {')).toBeLessThan(code.indexOf('count() {'));
   });
 
   test('impl fingerprint changes when methods change; shape stays when state stays', () => {
@@ -170,7 +214,52 @@ describe('__hmrClassify', () => {
   });
 });
 
+describe('__hmrInitDiff', () => {
+  test('names the slots whose compiled initializer changed, in the new declaration order', () => {
+    expect(__hmrInitDiff(
+      { inits: { a: '1', b: '2', c: '3' } },
+      { inits: { c: '9', b: '2', a: '8' } },
+    )).toEqual(['c', 'a']);
+  });
+
+  test('a slot that gained or lost its initializer is not a reset', () => {
+    expect(__hmrInitDiff({ inits: { a: '1' } }, { inits: { a: '1', b: '2' } })).toEqual([]);
+    expect(__hmrInitDiff({ inits: { a: '1', b: '2' } }, { inits: { a: '1' } })).toEqual([]);
+    expect(__hmrInitDiff({ state: ['a'] }, { state: ['a'] })).toEqual([]);
+  });
+
+  test('a slot named after an Object.prototype member is judged by its own entry alone', () => {
+    expect(__hmrInitDiff({ inits: {} }, { inits: { toString: 'a', constructor: 'b' } })).toEqual([]);
+    expect(__hmrInitDiff({ inits: { toString: 'a' } }, { inits: { toString: 'c' } })).toEqual(['toString']);
+  });
+});
+
 describe('__hmrMigrateDiff / __hmrPreserveState', () => {
+  test('a kept slot whose initializer changed keeps the new instance\'s value and is reported as reset', () => {
+    class Old extends __Component {
+      _init() {
+        this.count = __state(7);
+        this.other = __state(1);
+      }
+    }
+    Old.__hmrId = 'test/migrate.rip#Old';
+    Old.__hmrSig = { state: ['count', 'other'], computed: [], props: [], gates: 0, extends: null, inits: { count: 'aaaaaaaa', other: 'bbbbbbbb' } };
+    class Next extends __Component {
+      _init() {
+        this.count = __state(5);
+        this.renamed = __state(1);
+      }
+    }
+    Next.__hmrId = 'test/migrate.rip#Old';
+    Next.__hmrSig = { state: ['count', 'renamed'], computed: [], props: [], gates: 0, extends: null, inits: { count: 'cccccccc', renamed: 'bbbbbbbb' } };
+    const prev = new Old({});
+    const next = new Next({});
+    const report = __hmrPreserveState(prev, next);
+    expect(next.count.value).toBe(5);
+    expect(report).toEqual({ kept: ['count'], added: ['renamed'], removed: ['other'], copied: [], reset: ['count'] });
+    expect(__hmrEvents().at(-1)).toMatchObject({ type: 'migrate', copied: [], reset: ['count'] });
+  });
+
   test('reports kept, added, and removed named state slots', () => {
     expect(__hmrMigrateDiff(
       { state: ['count', 'gone'] },
@@ -209,6 +298,7 @@ describe('__hmrMigrateDiff / __hmrPreserveState', () => {
     expect(report.added).toEqual(['extra']);
     expect(report.removed).toEqual(['gone']);
     expect(report.copied).toEqual(['count']);
+    expect(report.reset).toEqual([]);
     const events = __hmrEvents().slice(before);
     expect(events.some(e => e.type === 'migrate' && e.removed?.includes('gone'))).toBeTrue();
   });

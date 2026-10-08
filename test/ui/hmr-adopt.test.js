@@ -239,3 +239,47 @@ describe('child adoption across a parent patch', () => {
     expect(parent._hmrOrphans).toBeUndefined();
   });
 });
+
+// A changed `:=` initializer in the child's module resets the child's
+// slot exactly once per swap: on its own patch when the applier reaches
+// the child first, or on adoption when the parent's rebuild swaps it.
+describe('a child\'s changed initializer across adoption', () => {
+  const NEXT = BASE.replace('count := 0', 'count := 9').replace("h1 'v1'", "h1 'v2'");
+
+  test('a child patched before its parent is adopted without resetting again', () => {
+    const { target, parent, kid } = mountParent(BASE);
+    const Next = load(NEXT);
+    kid.count.value = 4;
+
+    componentRuntime.__hmrPatch(kid, Next.Kid);
+    expect(kid.count.value).toBe(9);
+    expect(componentRuntime.__hmrEvents().at(-1)).toMatchObject({ type: 'patch', reset: ['count'] });
+    kid.count.value = 4;
+
+    componentRuntime.__hmrPatch(parent, Next.C);
+
+    expect(parent._children[0]).toBe(kid);
+    expect(kid.count.value).toBe(4);
+    expect(serialize(target)).toContain('<h1>v2</h1>');
+    expect(serialize(target)).toContain('<b>4</b>');
+    expect(componentRuntime.__hmrEvents().at(-1)).toMatchObject({ type: 'patch', reset: [] });
+    parent.unmount();
+  });
+
+  test('a child swapped during adoption resets once, on the adopting rebuild', () => {
+    const { target, parent, kid } = mountParent(BASE);
+    const Next = load(NEXT);
+    kid.count.value = 4;
+    const countBox = kid.count;
+
+    componentRuntime.__hmrPatch(parent, Next.C);
+
+    expect(parent._children[0]).toBe(kid);
+    expect(kid).toBeInstanceOf(Next.Kid);
+    expect(kid.count).toBe(countBox);
+    expect(kid.count.value).toBe(9);
+    expect(kid._hmrResetPending).toBeNull();
+    expect(serialize(target)).toContain('<b>9</b>');
+    parent.unmount();
+  });
+});

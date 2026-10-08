@@ -1288,6 +1288,20 @@ export const isStdlibPath = (fsPath) =>
 export const stdlibSpellingOf = (fsPath) =>
   isStdlibPath(fsPath) ? 'rip/' + path.relative(realStdlibDir, fsPath).split(path.sep).join('/') : null;
 
+// A stdlib package serves every `.rip` under it by path, except its
+// node_modules, test, bench, and demo trees and the root verb files, the
+// inventory the runtime loader and the sites publication share; an
+// exports key names or renames a target and wins over the path.
+const PATH_SKIP_DIRS = new Set(['node_modules', 'test', 'bench', 'demo']);
+const PATH_VERB_FILES = new Set(['test.rip', 'demo.rip', 'bench.rip']);
+function pathServedFile(pkgDir, segments) {
+  if (segments.length === 0 || !segments.at(-1).endsWith('.rip')) return null;
+  if (segments.some((s) => s === '' || s.startsWith('.') || PATH_SKIP_DIRS.has(s))) return null;
+  if (segments.length === 1 && PATH_VERB_FILES.has(segments[0])) return null;
+  const file = path.join(pkgDir, ...segments);
+  return fs.existsSync(file) ? file : null;
+}
+
 function stdlibRipTarget(spec) {
   if (!spec.startsWith('rip/')) return null;
   const rest = spec.slice('rip/'.length);
@@ -1296,9 +1310,10 @@ function stdlibRipTarget(spec) {
   let manifest;
   try { manifest = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8')); } catch { return null; }
   const target = ripManifestTarget(manifest, '.' + (deeper.length ? '/' + deeper.join('/') : ''));
-  if (target === null) return null;
+  const file = target === null ? pathServedFile(pkgDir, deeper) : path.join(pkgDir, target);
+  if (file === null) return null;
   let real;
-  try { real = fs.realpathSync(path.join(pkgDir, target)); } catch { return null; }
+  try { real = fs.realpathSync(file); } catch { return null; }
   return real;
 }
 
@@ -1333,6 +1348,11 @@ export function stdlibRipPaths(workspaceRoot, fromConfigDirToMirrorRoot = '') {
       const face = mirrorRelForFsPath(real, workspaceRoot) + '.ts';
       paths[name] ??= [posix(path.join(fromConfigDirToMirrorRoot, face))];
     }
+    // The files the package serves by path: the face of any `.rip` under
+    // it, behind the exact names above.
+    let realDir;
+    try { realDir = fs.realpathSync(dir); } catch { continue; }
+    paths[`rip/${e.name}/*`] ??= [posix(path.join(fromConfigDirToMirrorRoot, mirrorRelForFsPath(realDir, workspaceRoot), '*.ts'))];
   }
   return paths;
 }

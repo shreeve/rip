@@ -1138,4 +1138,40 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       await client.stop();
     }
   }, 30000);
+
+  test('a bare attribute word under an element hovers the type its road admits; a misspelled one answers nothing beside its diagnostic', async () => {
+    const published = [];
+    const client = await startServer((p) => published.push(p));
+    try {
+      const src = [
+        'export Clip = component', // 0
+        '  render',               // 1
+        '    video',              // 2
+        '      controls: true',   // 3
+        '      playsinline',      // 4
+        '    input',              // 5
+        '      name',             // 6
+        '    input',              // 7
+        '      readOnly',         // 8
+        '',
+      ].join('\n');
+      const wait = nextDiagnostics(published, (p) => p.diagnostics.some((d) => d.code === 2345));
+      client.notify('textDocument/didOpen', {
+        textDocument: { uri, languageId: 'rip', version: 1, text: src },
+      });
+      const { diagnostics } = await wait();
+      expect(diagnostics.map((d) => [d.code, d.range.start.line, d.range.start.character, d.message])).toEqual([
+        [2345, 8, 6, "'readOnly' is not a known attribute of <input> — did you mean 'readonly'?"],
+      ]);
+      // The bare word answers exactly as the `name: true` key beside it.
+      expect((await hoverAt(client, 3, 8)).contents.value).toContain('(attribute) controls: boolean | undefined');
+      expect((await hoverAt(client, 4, 8)).contents.value).toContain('(attribute) playsinline: boolean | undefined');
+      // A non-boolean name reads the value type off the instantiated call.
+      expect((await hoverAt(client, 6, 7)).contents.value).toContain('(attribute) name: string | undefined');
+      // A rejected name declines, as a rejected pair key does.
+      expect(await hoverAt(client, 8, 8)).toBeNull();
+    } finally {
+      await client.stop();
+    }
+  }, 30000);
 });

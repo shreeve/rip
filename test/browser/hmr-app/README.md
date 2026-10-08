@@ -22,6 +22,7 @@ not coverage.
 | `app/routes/_layout.rip` | The ancestor a route remount must keep; `#brand`, `#hits` |
 | `app/routes/index.rip` | Tier target: `count` (`:=`), `counter` (`~=`), `#bump`, `#count` |
 | `app/routes/form.rip` | `#field` — focus and caret restoration |
+| `app/routes/cells.rip` | `#a`, `#b`, `#c`, `#write`, `#made` — a changed `:=` initializer resets its one slot |
 | `app/routes/idle.rip` | Never mounted during the noop gate |
 | `app/stash.rip` | `counter` — shared state a remount must not disturb |
 | `app/styles.css` | The soft-refresh target |
@@ -37,6 +38,7 @@ decide migrate; everything else patches. So one deliberate edit reaches each:
 | Tier | Edit |
 | --- | --- |
 | `patch` | Change render markup only — `h1#title 'home'` |
+| `patch` with `reset` | Change a `:=` initializer's value — `b := 2` in `cells.rip`; whitespace alone resets nothing |
 | `migrate` | Add or remove a `:=` slot — the intersecting slots are carried |
 | `remount` | Add or remove an `@prop`, a gate, or change `extends` |
 | `reload` | Edit `app/index.html` |

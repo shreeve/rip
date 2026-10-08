@@ -8,10 +8,7 @@
     "browser": true
   },
   "exports": {
-    ".": "./ui.rip",
-    "./dialog.rip": "./dialog.rip",
-    "./drawer.rip": "./drawer.rip",
-    "./menu.rip": "./menu.rip"
+    ".": "./ui.rip"
   },
   "scripts": {
     "test": "playwright test --config test/browser/playwright.config.mjs",
@@ -19,9 +16,7 @@
   },
   "files": [
     "ui.rip",
-    "dialog.rip",
-    "drawer.rip",
-    "menu.rip",
+    "components",
     "README.md"
   ]
 }

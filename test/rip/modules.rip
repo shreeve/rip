@@ -76,6 +76,9 @@ fail "nor as the namespace binding", 'import * as component from "lib"', "'compo
 
 # Export variable
 code "export var", "export x = 42", "export const x = 42;"
+code "export var cast after an identifier", "val = 1\nexport x = val as number", "let val = 1;\nexport const x = val;"
+code "export var satisfies after an identifier", "val = 1\nexport x = val satisfies number", "let val = 1;\nexport const x = val;"
+code "export default cast after an identifier", "val = 1\nexport default val as number", "let val = 1;\nexport default val;"
 
 # Export function
 code "export function", "export def add(a, b)\n  a + b", "export function add(a, b) {\n  return (a + b);\n};"

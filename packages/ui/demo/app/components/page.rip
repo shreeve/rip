@@ -11,9 +11,16 @@ export Page = component
       slot
 
 export Stage = component
+  @title?: string
+  @description?: string
   render
-    div class: 'flex items-center justify-center rounded-xl border border-surface bg-surface py-16'
-      slot
+    section class: { 'mt-1': Boolean(title) }
+      if title
+        h2 class: 'text-lg font-semibold', title
+      if description
+        p class: 'mt-2 text-secondary text-sm-plus', description
+      div class: ['flex items-center justify-center rounded-xl border border-surface bg-surface py-16', { 'mt-4': Boolean(title or description) }]
+        slot
 
 Panel = component
   @title: string
@@ -26,7 +33,7 @@ Row = component
   @name: string
   render
     div role: 'group', aria-label: name, class: 'col-span-full grid grid-cols-subgrid items-baseline gap-y-2 px-4 py-3'
-      span class: 'font-mono text-xs-plus font-medium text-secondary', name
+      span class: 'w-fit rounded-md bg-accent/10 px-1.5 py-0.5 font-mono text-xs-plus font-medium text-accent', name
       div class: 'flex flex-wrap items-center gap-2'
         slot
 

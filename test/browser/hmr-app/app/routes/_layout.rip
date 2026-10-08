@@ -8,6 +8,7 @@ export Layout = component
       strong#brand 'fixture'
       a#nav-form href: '/form', 'form'
       a#nav-idle href: '/idle', 'idle'
+      a#nav-cells href: '/cells', 'cells'
       span#hits "#{counter.hits}"
     main
       div id: 'content'

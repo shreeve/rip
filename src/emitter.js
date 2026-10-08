@@ -50,7 +50,7 @@ const COMPONENT_HOOKS = new Set(['beforeMount', 'mounted', 'beforeUnmount', 'unm
 const COMPONENT_RUNTIME_FIELDS = new Set([
   '_state', '_frame', '_parent', '_children', '_root', '_nodes', '_target',
   '_context', '_rest', '_restWriters', '_restHandlers', '_inheritedEl', '_inheritedInst', '_inheritedOwn',
-  '_refCleanups', '_initFailed', '_hmrOrphans', '_hmrReleasing', '_hmrPropKeys', '_asChild',
+  '_refCleanups', '_initFailed', '_hmrOrphans', '_hmrReleasing', '_hmrPropKeys', '_hmrResetPending', '_hmrReset', '_asChild',
 ]);
 
 const BINOPS = new Set(['+', '-', '*', '/', '%', '**', '<', '>', '<=', '>=', '==', '!=', '&&', '||', '??', '<<', '>>', '>>>', '&', '^', '|']);
@@ -3338,12 +3338,13 @@ class Emitter {
   // modes make that layout decision from the same map.
   // The imported bindings that are TYPE-ONLY: named in an import and
   // then never referenced by the running program. Most type syntax is
-  // erased into the side tables before the s-expression tree, but three
+  // erased into the side tables before the s-expression tree, but a few
   // shapes carry their type TEXT in the tree as plain strings — a
   // typed-var's annotation slot, a def-sig's return slot, a type-decl's
-  // whole declaration — and the walk must step over those slots, or
-  // `(n: T)` counts as a value use of T and vetoes the very elision the
-  // annotation calls for. No cross-module
+  // whole declaration, a cast's or a satisfies' type slot — and the walk
+  // must step over those slots, or `(n: T)` and `v as T` count as value
+  // uses of T and veto the very elision the type position calls for.
+  // No cross-module
   // resolution is needed, and none would help: whether the exporting
   // module spells the name as a type is its business, while whether
   // THIS file needs it at runtime is answerable here.
@@ -3384,6 +3385,7 @@ class Emitter {
       if (x[0] === 'typed-var' && x.length === 3) { walk(x[1]); return; }
       if (x[0] === 'def-sig') { walk(x[2]); return; }
       if (x[0] === 'type-decl') return;
+      if ((x[0] === 'cast' || x[0] === 'satisfies') && x.length === 3) { walk(x[1]); return; }
       for (const c of x) walk(c);
     };
     walk(sexpr);
@@ -5389,7 +5391,7 @@ class Emitter {
         {
           const specStart = this.b.offset;
           this.mark(node, 'source', () => this.b.emit(this.moduleSource(node[1])));
-          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(node[1]) });
+          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(node[1]), namespace: node.length === 3 ? node[2] : undefined });
         }
         this.b.emit(';');
       } else if (head === 'export-from') {
@@ -9522,7 +9524,7 @@ class Emitter {
   // never reaches here.
   emitComponentHmrMeta(pad, {
     bindingName, declaredProps, stateVars, derivedVars, gateVars,
-    extendsTag, methods, hooks, hasRender,
+    extendsTag, methods, hooks, hasRender, initNames,
   }) {
     const sortNames = (names) => [...names].sort();
     const props = sortNames(declaredProps);
@@ -9534,9 +9536,69 @@ class Emitter {
     const shape = Emitter.hmrFingerprint({ props, state, computed, gates, extends: extendsTag });
     const impl = Emitter.hmrFingerprint({ methods: methodNames, hooks: hookNames, render: hasRender });
     const id = `${this.modulePath}#${bindingName}`;
-    const sig = { shape, impl, state, computed, props, gates, extends: extendsTag };
+    // `inits` fingerprints each `:=` initializer's COMPILED text, the
+    // text its `__hmrInit` thunk re-states, so whitespace and quote
+    // style never reset a slot. Source order, which is reset order.
+    const inits = {};
+    this.scopes.push(initNames);
+    this.rframes.push({ reactive: new Set(), bound: initNames });
+    try {
+      for (const m of stateVars) {
+        if (m.value === undefined) continue;
+        inits[m.name] = Emitter.hmrFingerprint(this.capturedExprText(() => this.componentInitValue(m.value)));
+      }
+    } finally {
+      this.rframes.pop();
+      this.scopes.pop();
+    }
+    const sig = { shape, impl, state, computed, props, gates, extends: extendsTag, inits };
     this.b.emit(`${pad}static __hmrId = ${JSON.stringify(id)};\n`);
     this.b.emit(`${pad}static __hmrSig = ${JSON.stringify(sig)};\n`);
+  }
+
+  componentInitValue(value) {
+    const wrap = Emitter.needsGrouping(value, 'operand');
+    if (wrap) this.b.emit('(');
+    this.expr(value);
+    if (wrap) this.b.emit(')');
+  }
+
+  // static __hmrInit — one thunk per `:=` slot with an initializer,
+  // called with the instance as `this`, so a patch can re-run a changed
+  // initializer without re-running `_init`. A public slot's thunk
+  // spells the default alone: whether the construction site supplies
+  // the value is the runtime's to know. Each thunk is its own function
+  // scope, so the inner assignment targets `_init` hoists at its top
+  // hoist here per slot — collected before the names enter scope, since
+  // a name bound in an enclosing scope is never hoisted again. Emitted
+  // after `_init`, whose hoist line consumes the scope's pending
+  // annotations first. Same gate as emitComponentHmrMeta.
+  emitComponentHmrInit(pad, { stateVars, initNames }) {
+    const slots = [];
+    for (const m of stateVars) {
+      if (m.value === undefined) continue;
+      slots.push({ m, entries: this.scopedHoist([m.value], [], { declareInPlace: false }).entries });
+    }
+    if (slots.length === 0) return;
+    this.b.emit(`${pad}static __hmrInit = {\n`);
+    this.scopes.push(initNames);
+    this.rframes.push({ reactive: new Set(), bound: initNames });
+    try {
+      for (const { m, entries } of slots) {
+        this.b.emit(`${pad}  ${m.name}() { `);
+        if (entries.length) {
+          this.hoistLine(entries);
+          this.b.emit(' ');
+        }
+        this.b.emit('return ');
+        this.mark(m.node, 'value', () => this.withExpression(() => this.componentInitValue(m.value)));
+        this.b.emit('; },\n');
+      }
+    } finally {
+      this.rframes.pop();
+      this.scopes.pop();
+    }
+    this.b.emit(`${pad}};\n`);
   }
 
   // ["component", parent, ["block", …]] — the declaration. Expression
@@ -10131,7 +10193,8 @@ class Emitter {
       if (this.scopes.length === 1 && typeof this._componentName === 'string') this.componentNames.push(this._componentName);
       // HMR identity/signature — module-scope named components only.
       // Gated on `hmr`: off keeps production bytes unchanged.
-      if (this.hmr && this.modulePath && this.scopes.length === 1 && typeof this._componentName === 'string') {
+      const hmrMeta = this.hmr && this.modulePath && this.scopes.length === 1 && typeof this._componentName === 'string';
+      if (hmrMeta) {
         this.emitComponentHmrMeta(pad, {
           bindingName: this._componentName,
           declaredProps,
@@ -10142,6 +10205,7 @@ class Emitter {
           methods,
           hooks,
           hasRender: renderNode !== null,
+          initNames,
         });
       }
       if (tsInfo !== null) this.tsComponentCtor(tsInfo, pad);
@@ -10426,6 +10490,8 @@ class Emitter {
         this.scopes.pop();
         this.b.emit(`${pad}}\n`);
       }
+
+      if (hmrMeta) this.emitComponentHmrInit(pad, { stateVars, initNames });
 
       // Refresh computed bodies on patch without re-running `_init`
       // (which would mint duplicate state containers).
@@ -11660,38 +11726,47 @@ class Emitter {
   // to a runtime ReferenceError, and `notAnAttr: 'x'` to markup, both
   // silently. A gate here would be the one name question the untyped
   // road answers, and it would answer the least costly one. What the
-  // ts face gets instead is the author's span on the emitted name, so
-  // the surface's complaint lands on the word, and a recorded row that
-  // re-words it (the pair road keeps the same row).
+  // ts face gets instead is the author's span on the emitted name —
+  // the call's own complaint lands on the word, and the editor reaches
+  // the word's records through it — and the rows the pair road keeps
+  // for a key: the attribute row the hover reads, then, for a name
+  // outside the vocabulary, the row that re-words the rejection.
   renderBareAttribute(el, name, siblings, k, owner) {
     const tag = this.renderTagOf(el);
-    let unknownAt = null;
-    if (this.ts && !knownBareAttribute(tag, name)) {
-      const at = this.bareChildSpan(siblings, k, owner);
-      if (at !== null) {
-        unknownAt = at;
-        this.intrinsics.push({
-          start: at[0], end: at[1], kind: 'unknown-attr', tag, name,
-          message: this.unknownAttrMessage(tag, name, { bare: true, svg: this.rstate?.svgEls?.has(el) === true }),
-        });
-      }
-    }
+    const recv = this.tsElReceiver(el);
+    const at = this.ts ? this.bareChildSpan(siblings, k, owner) : null;
+    const ownerId = at === null ? null : this.stores.idOf(owner);
     // The empty string is the boolean-attribute serialization (the
     // docs spell it) — setAttribute(name, true) wrote name="true",
     // which is the same DOM state but not the documented markup, and
     // for a non-boolean known attribute wrote a literal "true" value.
     // '' satisfies the widened attribute type, so no quieting cast
     // rides.
-    const recv = this.tsElReceiver(el);
-    const ownerId = unknownAt === null ? null : this.stores.idOf(owner);
     this.renderLine(null, () => {
       recv.emit();
+      // The method the attribute row points at stands one byte past
+      // the dot the call opens with.
+      const gen = this.b.offset + 1;
       this.b.emit('.setAttribute(');
+      if (at !== null && recv.surfaced) {
+        // The word answers the type its road admits: presence, spelled
+        // outright, for a boolean name; for any other, the value the
+        // instantiated call takes.
+        this.intrinsics.push(Emitter.BOOLEAN_ATTRS.has(name)
+          ? { start: at[0], end: at[1], kind: 'attr', name, type: 'boolean | undefined' }
+          : { start: at[0], end: at[1], kind: 'attr', name, gen });
+      }
+      if (at !== null && !knownBareAttribute(tag, name)) {
+        this.intrinsics.push({
+          start: at[0], end: at[1], kind: 'unknown-attr', tag, name,
+          message: this.unknownAttrMessage(tag, name, { bare: true, svg: this.rstate?.svgEls?.has(el) === true }),
+        });
+      }
       // The name is a bare WORD in source and a string literal in the
-      // emission: a caller-supplied span is the only way the call's own
-      // complaint reaches the bytes the author wrote.
+      // emission: a caller-supplied span is the only way the word's
+      // position reaches the bytes the lowering wrote.
       if (ownerId !== null) {
-        this.b.markSpan(ownerId, 'identifier', unknownAt[0], unknownAt[1], () => this.emitQuotedPrimitive(name));
+        this.b.markSpan(ownerId, 'identifier', at[0], at[1], () => this.emitQuotedPrimitive(name));
       } else this.emitQuotedPrimitive(name);
       this.b.emit(", '')");
     });
@@ -12623,8 +12698,8 @@ class Emitter {
     return () => {
       // Read at emission, like narrowGuard: the record open then is the
       // block whose branches were tested.
-      const narrowed = this.activeNarrowed().some((c) => c === name ||
-        (isNode(c) && c[0] === '.' && c[1] === 'this' && c.length === 3 && c[2] === name));
+      const narrowed = this.activeNarrowed().some(({ node }) => node === name ||
+        (isNode(node) && node[0] === '.' && node[1] === 'this' && node.length === 3 && node[2] === name));
       if (!narrowed) return emitRef();
       this._needsNarrowedHelper = true;
       this.b.tsOnly(() => this.b.emit('__ripNarrowed('));
@@ -13040,11 +13115,19 @@ class Emitter {
         // reactive value, a guarded set under a static one) would
         // otherwise describe one key two ways. The span is the key's own
         // CLAIM, so a value repeating the key (`disabled: @rest.disabled`)
-        // still lands on the key.
+        // still lands on the key. A boolean name the tag does not take
+        // keeps the re-wording row behind it, as every other road does.
         const emitBooleanKey = () => {
           const span = claimingKey(() => this.emitKeyAs(storedKey, key));
           if (this.ts && recv.surfaced && span !== null) {
             this.intrinsics.push({ start: span[0], end: span[1], kind: 'attr', name: key, type: 'boolean | undefined' });
+            const attrTag = this.renderTagOf(el);
+            if (!knownBareAttribute(attrTag, key)) {
+              this.intrinsics.push({
+                start: span[0], end: span[1], kind: 'unknown-attr', tag: attrTag, name: key,
+                message: this.unknownAttrMessage(attrTag, key, { bare: false, svg: this.rstate?.svgEls?.has(el) === true }),
+              });
+            }
           }
         };
         if (this.renderReactive(value)) {
@@ -13612,25 +13695,63 @@ class Emitter {
   // through the branch factory handles them (the flat-chain fold has
   // no input shape here; a >4-length node would be one, and rejects
   // loudly if the grammar ever grew it).
-  // The chains a branch condition proves non-null for its body: the
-  // condition itself when it is a member or a plain `.` chain rooted
-  // at one (`found`, `session.user`, `@stash.user.profile`), and each
-  // such operand of a top-level `and`. Anything else — a call, an
-  // index, an optional link, a render local or loop variable at the
-  // root — proves nothing the face can spell.
+  // The claims a branch condition proves for its body — each top-level
+  // `and` operand the face can restate: a chain (`found`, `session.user`,
+  // `@stash.user.profile`, a loop variable's `step.timer`), an equality
+  // of a chain against a literal (a switch arm's `it.kind === "a"`), or
+  // an `or` of such claims (an arm's test list). Anything else — a call,
+  // an index, an optional link, a render local at the root, a comparison
+  // the checker does not narrow on — proves nothing the face can spell.
+  // A claim records each chain root's binding at the condition site (a
+  // loop variable's owning record, or null for a member), so a record
+  // that rebinds the name drops the claim instead of restating it
+  // against the wrong value (activeNarrowed).
   narrowConjuncts(cond) {
     if (isNode(cond) && cond[0] === '&&' && cond.length === 3) {
       return [...this.narrowConjuncts(cond[1]), ...this.narrowConjuncts(cond[2])];
     }
-    if (typeof cond === 'string') {
-      return this.renderVarKind(cond) !== null || this.bareRewrite(cond) === null ? [] : [cond];
+    const roots = [];
+    return this.collectClaimRoots(cond, roots) ? [{ node: cond, roots }] : [];
+  }
+
+  // Fills `roots` with the chain roots of a candidate claim; false where
+  // any part of it is not a shape a claim admits.
+  collectClaimRoots(x, roots) {
+    if (isNode(x) && x[0] === '||' && x.length === 3) {
+      return this.collectClaimRoots(x[1], roots) && this.collectClaimRoots(x[2], roots);
     }
-    if (!Emitter.isDotChain(cond)) return [];
-    let root = cond;
+    if (isNode(x) && (x[0] === '==' || x[0] === '!=') && x.length === 3) {
+      if (Emitter.isNarrowLiteral(x[2])) return this.collectClaimRoots(x[1], roots);
+      if (Emitter.isNarrowLiteral(x[1])) return this.collectClaimRoots(x[2], roots);
+      return false;
+    }
+    if (typeof x !== 'string' && !Emitter.isDotChain(x)) return false;
+    let root = x;
     while (isNode(root)) root = root[1];
-    if (root === 'this') return [cond];
-    if (this.renderVarKind(root) !== null || this.bareRewrite(root) === null) return [];
-    return [cond];
+    // A `this`-rooted chain needs no root record; bare `this` is no claim.
+    if (root === 'this') return isNode(x);
+    if (!isIdentifierName(root) || this.renderVarKind(root) === 'local') return false;
+    const entry = this.loopEntryOf(root);
+    if (entry === null && this.bareRewrite(root) === null) return false;
+    roots.push({ name: root, owner: entry === null ? null : entry.owner, which: entry === null ? null : entry.itemVar === root ? 'item' : 'index' });
+    return true;
+  }
+
+  // A literal a chain may be compared against in a claim: a string, a
+  // number (negated or not), or one of the keyword literals.
+  static isNarrowLiteral(x) {
+    if (isNode(x)) return x[0] === '-' && x.length === 2 && typeof x[1] === 'string' && /^\d/.test(x[1]);
+    return typeof x === 'string' && (/^["'\d]/.test(x) || x === 'true' || x === 'false' || x === 'null' || x === 'undefined');
+  }
+
+  // The loop-stack entry whose item or index variable `name` reads as
+  // at the current sink, innermost first; null for anything else.
+  loopEntryOf(name) {
+    const stack = this.rstate?.sink.loopStack ?? [];
+    for (let i = stack.length - 1; i >= 0; i--) {
+      if (stack[i].itemVar === name || stack[i].indexVar === name) return stack[i];
+    }
+    return null;
   }
 
   static isDotChain(n) {
@@ -13641,34 +13762,38 @@ class Emitter {
     return Emitter.isDotChain(o);
   }
 
-  // The TS-only narrowing a block's effect bodies open with: one
-  // `__ripNarrow(chain)` assertion per chain the enclosing branches
-  // tested, so every read of that chain in the same function body is
-  // non-null on the face by control flow — what the checker narrows on
-  // and what the editor's hover reports. Echoed: the chain's reads
-  // already publish at the branch condition. The runtime keeps the
-  // claim true: the flush runs an owner before anything it owns, so
-  // the swap disposes the block's effects before a binding under it
-  // re-runs, and a block leaving through a transition freezes its
-  // effects first (f()). A nested function body is not narrowed — a
-  // handler can fire after the flip while the leaving DOM lingers.
-  // The statement form spells `__ripNarrow(c); ` per chain; the
-  // expression form spells `(__ripNarrow(c), ` per chain for an arrow
+  // The TS-only narrowing a block's function bodies open with — its
+  // c() and each of its effects: one `__ripNarrow(claim)` assertion per
+  // claim the enclosing branches tested, so every read under it in the
+  // same function body is narrowed on the face by control flow — what
+  // the checker narrows on and what the editor's hover reports. Echoed:
+  // the claim's reads already publish at the branch condition. The
+  // runtime keeps the claim true: a block is built only after its
+  // condition held for the values it is called with, the flush runs an
+  // owner before anything it owns, so the swap disposes the block's
+  // effects before a binding under it re-runs, a row's re-bind disposes
+  // its frame and re-tests before any arm exists again, and a block
+  // leaving through a transition freezes its effects first (f()). A
+  // nested function body is not narrowed — a handler can fire after the
+  // flip while the leaving DOM lingers.
+  // The statement form spells `__ripNarrow(c); ` per claim; the
+  // expression form spells `(__ripNarrow(c), ` per claim for an arrow
   // whose body is the one expression that follows, and
   // narrowGuardClose closes what it opened.
-  // The chains the CURRENT record may assert: a chain whose bare root
-  // this record rebinds — a loop variable, a render local — would
-  // re-spell against the rebinding, so it drops here rather than
-  // asserting a claim about the wrong value. A `this`-rooted chain has
-  // no such hazard.
+  // The claims the CURRENT record may assert: a claim whose chain root
+  // this record spells differently — a member shadowed by a loop
+  // variable or a render local, a loop variable rebound by an inner
+  // loop or renamed out of its way — would re-spell against the wrong
+  // value, so it drops here. A `this`-rooted chain has no such hazard.
   activeNarrowed() {
     const rec = this.renderRecord;
     if (!this.ts || !rec || !(rec.narrowed?.length > 0)) return [];
-    return rec.narrowed.filter((c) => {
-      let root = c;
-      while (isNode(root)) root = root[1];
-      return root === 'this' || !(rec.bindings.has(root) || rec.locals.has(root));
-    });
+    return rec.narrowed.filter((claim) => claim.roots.every(({ name, owner, which }) => {
+      if (rec.locals.has(name)) return false;
+      if (owner === null) return !rec.bindings.has(name);
+      const entry = rec.loopStack.find((e) => e.owner === owner);
+      return entry !== undefined && (which === 'item' ? entry.itemVar : entry.indexVar) === name;
+    }));
   }
 
   hasNarrow() {
@@ -13679,9 +13804,9 @@ class Emitter {
   // and container passes record in narrowedDecls.
   narrowedReadNames() {
     const names = new Set();
-    for (const c of this.activeNarrowed()) {
-      if (typeof c === 'string') names.add(c);
-      else if (c[0] === '.' && c[1] === 'this' && c.length === 3 && typeof c[2] === 'string') names.add(c[2]);
+    for (const { node, roots } of this.activeNarrowed()) {
+      if (typeof node === 'string' && roots[0].owner === null) names.add(node);
+      else if (isNode(node) && node[0] === '.' && node[1] === 'this' && node.length === 3 && typeof node[2] === 'string') names.add(node[2]);
     }
     return names;
   }
@@ -13699,7 +13824,7 @@ class Emitter {
         chains.forEach((c, i) => {
           if (i > 0) this.b.emit(' ');
           this.b.emit(form === 'statement' ? '__ripNarrow(' : '(__ripNarrow(');
-          this.renderExpr(c);
+          this.renderExpr(c.node);
           this.b.emit(form === 'statement' ? ');' : '),');
         });
         if (trailing) this.b.emit(' ');
@@ -14296,7 +14421,10 @@ class Emitter {
         if (rec.isStatic) this.b.emit(`${p3}_s: true,\n`);
         // c(): build the block's nodes, detached.
         this.b.emit(`${p3}c() {\n`);
-        this.replayCreates(rec, p4);
+        if (this.hasNarrow()) this.b.tsOnly(() => { this.b.emit(p4); this.narrowGuard('statement', { trailing: false }); this.b.emit('\n'); });
+        const prevReads = this._narrowedReads;
+        this._narrowedReads = this.narrowedReadNames();
+        try { this.replayCreates(rec, p4); } finally { this._narrowedReads = prevReads; }
         const fragChildren = this.rstate.fragChildren.get(rec.root);
         const firstNode = fragChildren !== undefined ? fragChildren[0] : rec.root;
         // The handle's `_first`/`_t` slots write onto the object
@@ -19432,10 +19560,12 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
     builder.tsOnly(() => builder.emit(`\ndeclare function __ripSourceKey<const T extends ((${stashKeys}) | \`\${${stashKeys}}.\${string}\`)>(s: T): T;\n`));
   }
   // The narrowing assertion's ONE declaration per module — an
-  // assertion signature, so each `__ripNarrow(chain)` a block's effect
-  // opens with narrows that chain's reads by control flow.
+  // assertion signature over the condition itself, so each
+  // `__ripNarrow(claim)` a block's function body opens with narrows the
+  // claim's reads by control flow exactly as the tested `if` would: a
+  // chain to its truthy part, a discriminant equality to its arm.
   if (emitter._needsNarrowHelper === true) {
-    builder.tsOnly(() => builder.emit('\ndeclare function __ripNarrow<T>(v: T): asserts v is NonNullable<T>;\n'));
+    builder.tsOnly(() => builder.emit('\ndeclare function __ripNarrow(c: unknown): asserts c;\n'));
   }
   // The narrowed-container helper: a cell with the null dropped from its
   // value — what a child's required prop admits under a branch that tested

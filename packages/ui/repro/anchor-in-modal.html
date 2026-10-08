@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Anchor positioning inside a modal dialog</title>
+    <style>
+      body {
+        margin: 0;
+        font: 16px -apple-system, system-ui, sans-serif;
+      }
+      #log {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 1;
+        margin: 0;
+        padding: 4px;
+        background: #ff0;
+        font: 12px monospace;
+        white-space: pre-wrap;
+      }
+      .cases {
+        position: fixed;
+        top: 64px;
+        right: 4px;
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      button {
+        padding: 8px 10px;
+        font: 14px system-ui;
+      }
+      .spacer {
+        height: 300vh;
+        background: linear-gradient(#fff, #ddd);
+      }
+      input {
+        width: 220px;
+        padding: 8px;
+        font: 16px system-ui;
+      }
+      dialog {
+        padding: 24px;
+      }
+      dialog button {
+        display: block;
+        margin-top: 12px;
+      }
+      [popover] {
+        inset: auto;
+        width: 220px;
+        margin: 6px 0 0;
+        padding: 8px;
+        border: 1px solid #888;
+        background: #def;
+        position-area: bottom span-right;
+      }
+      #modal-anchor { anchor-name: --modal; }
+      #page-anchor { anchor-name: --page; }
+      #outside-anchor { anchor-name: --outside; }
+      #modal-popover { position-anchor: --modal; }
+      #page-popover { position-anchor: --page; }
+      #outside-popover { position-anchor: --outside; }
+    </style>
+  </head>
+  <body>
+    <pre id="log">Each case scrolls to the bottom, then shows a popover anchored below an input. "off by" is the popover's error; 0 is correct. The dialogs' close buttons return to the cases.</pre>
+
+    <div class="cases">
+      <button onclick="run('dialog')">in modal</button>
+      <button onclick="run('page')">on page</button>
+      <button onclick="run('outside')">modal, popover outside</button>
+    </div>
+
+    <div class="spacer"></div>
+
+    <p style="padding: 16px">
+      <input id="page-anchor" placeholder="page anchor">
+    </p>
+    <div id="page-popover" popover="manual">page popover</div>
+    <div class="spacer"></div>
+
+    <dialog id="modal">
+      <input id="modal-anchor" placeholder="modal anchor">
+      <div id="modal-popover" popover="manual">modal popover</div>
+      <button onclick="reset()">close</button>
+    </dialog>
+
+    <dialog id="outside">
+      <input id="outside-anchor" placeholder="modal anchor">
+      <button onclick="reset()">close</button>
+    </dialog>
+    <div id="outside-popover" popover="manual">outside popover</div>
+
+    <script>
+      // Each case: the dialog to open, if any, the anchor, and its popover.
+      const CASES = {
+        dialog: ['modal', 'modal-anchor', 'modal-popover'],
+        page: [null, 'page-anchor', 'page-popover'],
+        outside: ['outside', 'outside-anchor', 'outside-popover'],
+      }
+
+      // Resolves with the case's measurement once the popover has laid out.
+      function run(kind) {
+        reset()
+        const [dialog, anchor, popover] = CASES[kind].map((id) => id && document.getElementById(id))
+        scrollTo(0, document.documentElement.scrollHeight)
+        return frames(2)
+          .then(() => {
+            if (dialog) dialog.showModal()
+            else anchor.scrollIntoView({ block: 'center' })
+            popover.showPopover()
+            return frames(2)
+          })
+          .then(() => report(kind, anchor, popover))
+      }
+
+      function reset() {
+        for (const popover of document.querySelectorAll('[popover]')) {
+          if (popover.matches(':popover-open')) popover.hidePopover()
+        }
+        for (const dialog of document.querySelectorAll('dialog')) {
+          if (dialog.open) dialog.close()
+        }
+      }
+
+      // The popover sits 6px below its anchor when placed correctly.
+      function report(kind, anchor, popover) {
+        const a = anchor.getBoundingClientRect()
+        const p = popover.getBoundingClientRect()
+        const result = { case: kind, engine: engine(), scrollY: Math.round(scrollY), offBy: Math.round(p.top - a.bottom - 6) }
+        document.getElementById('log').textContent =
+          `${kind} (${result.engine})  scrollY=${result.scrollY}\n` +
+          `anchor.bottom=${Math.round(a.bottom)}  popover.top=${Math.round(p.top)}  off by ${result.offBy}`
+        return result
+      }
+
+      function frames(n) {
+        return new Promise((resolve) => {
+          const tick = () => (n-- > 0 ? requestAnimationFrame(tick) : resolve())
+          tick()
+        })
+      }
+
+      function engine() {
+        return (navigator.userAgent.match(/Version\/[\d.]+|Chrome\/\d+|Firefox\/\d+/) ?? ['?'])[0]
+      }
+    </script>
+  </body>
+</html>

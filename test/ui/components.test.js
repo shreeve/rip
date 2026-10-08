@@ -25,6 +25,7 @@ import parser from '../../src/parser.js';
 import { makeParserLexer, tokenize } from '../../src/lexer.js';
 import { emit } from '../../src/emitter.js';
 import { compile as fullCompile } from '../../src/compiler.js';
+import { decodeMappings } from '../../src/sourcemap.js';
 import { installRecordingDOM, serialize } from '../support/recording-dom.js';
 import * as reactiveRuntime from '../../src/runtime/reactive.js';
 import * as componentRuntime from '../../src/runtime/components.js';
@@ -834,6 +835,67 @@ describe('the static render DSL: emission pins', () => {
     expect(rows.map((r) => [src.slice(r.start, r.end), r.tag])).toEqual([['readOnly', 'input'], ['readOnly', 'input']]);
     expect(rows[0].start).toBeLessThan(rows[1].start);
     expect(rows[0].message).toBe("'readOnly' is not a known attribute of <input> — did you mean 'readonly'?");
+  });
+
+  test('a bare attribute word is a typed position: the ts face maps the word onto the emitted name and records the rows the pair road keeps', () => {
+    // The bare word is a boolean-attribute position exactly as `name: true`
+    // is, so the editor must answer at it: the word's span claims the
+    // emitted name literal (the position the editor maps through), and
+    // an attribute row carries the type the road admits — presence,
+    // outright, for a boolean name; the instantiated call's value type for
+    // any other. A name outside the vocabulary keeps its re-wording row
+    // BEHIND the attribute row, so the word hovers as the pair road's
+    // rejected key does and the diagnostic reads the re-wording.
+    const src = 'P = component\n  render\n    video\n      controls: true\n      playsinline\n    input\n      name\n    input\n      readOnly\n';
+    const out = fullCompile(src, { face: 'ts', runtimeDelivery: 'none', sourceMap: true });
+    // The bytes on both faces: the bare line carries no value, so no
+    // `satisfies` rides — the name alone checks, against the tag's union.
+    expect(out.code).toContain("if (true satisfies boolean | undefined) (this._el1 as __RipEl_video).setAttribute('controls', '');");
+    expect(out.code).toContain("(this._el1 as __RipEl_video).setAttribute('playsinline', '');");
+    expect(out.code).toContain("(this._el3 as __RipEl_input).setAttribute('readOnly', '');");
+    const js = fullCompile(src, { runtimeDelivery: 'none' }).code;
+    expect(js).toContain("this._el1.setAttribute('playsinline', '');");
+    expect(js).toContain("this._el3.setAttribute('readOnly', '');");
+    const rows = out.intrinsics.filter((r) => r.kind === 'attr' || r.kind === 'unknown-attr');
+    expect(rows.map((r) => [r.kind, src.slice(r.start, r.end), r.type ?? null])).toEqual([
+      ['attr', 'controls', 'boolean | undefined'],
+      ['attr', 'playsinline', 'boolean | undefined'],
+      ['attr', 'name', null],
+      ['attr', 'readOnly', null],
+      ['unknown-attr', 'readOnly', null],
+    ]);
+    // A row without a type points at the instantiated call the editor
+    // reads the value type off.
+    for (const r of rows.filter((r) => r.kind === 'attr' && r.type === undefined)) {
+      expect(out.code.slice(r.gen, r.gen + 'setAttribute'.length)).toBe('setAttribute');
+    }
+    expect(rows[4].message).toBe("'readOnly' is not a known attribute of <input> — did you mean 'readonly'?");
+    // The mapping: each generated name literal maps to its own bare word
+    // (the exact row stands inside the quotes, as a pair key's does).
+    const gen = out.code.split('\n');
+    const named = decodeMappings(out.map.mappings).filter((m) => m.nameIndex != null)
+      .map((m) => [gen[m.genLine].slice(m.genCol), m.srcLine, m.srcCol]);
+    const landing = (text) => {
+      const hits = named.filter(([g]) => g.startsWith(text));
+      expect(hits).toHaveLength(1);
+      return hits[0].slice(1);
+    };
+    expect(landing("playsinline'")).toEqual([4, 6]);
+    expect(landing("name'")).toEqual([6, 6]);
+    expect(landing("readOnly'")).toEqual([8, 6]);
+    // The JS face claims nothing: the records and the map are the ts face's.
+    expect(fullCompile(src, { runtimeDelivery: 'none' }).intrinsics.filter((r) => r.kind === 'attr')).toEqual([]);
+    // The pair road's boolean key keeps the same two rows for a boolean
+    // name the tag does not take, under both of its lowerings.
+    const pair = 'P = component\n  live := true\n  render\n    span\n      span disabled: true\n      span disabled: @live\n';
+    const pairRows = fullCompile(pair, { face: 'ts', runtimeDelivery: 'none' }).intrinsics
+      .filter((r) => r.kind === 'attr' || r.kind === 'unknown-attr');
+    expect(pairRows.map((r) => [r.kind, r.start, r.type ?? r.message])).toEqual([
+      ['attr', pair.indexOf('disabled'), 'boolean | undefined'],
+      ['unknown-attr', pair.indexOf('disabled'), "'disabled' is not a known attribute of <span> — HTML attribute names are the spec's own, lowercase; `data-`/`aria-` names take any suffix"],
+      ['attr', pair.lastIndexOf('disabled'), 'boolean | undefined'],
+      ['unknown-attr', pair.lastIndexOf('disabled'), "'disabled' is not a known attribute of <span> — HTML attribute names are the spec's own, lowercase; `data-`/`aria-` names take any suffix"],
+    ]);
   });
 
   test('bare `@click` validates: DOM event + method existence (#124 middle); explicit bindings stay unvalidated', () => {

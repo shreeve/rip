@@ -43,7 +43,7 @@ export MenuPage = component
         Controls.Row name: 'selected'
           span class: 'text-sm font-medium text-secondary', selected or 'none'
 
-      Stage
+      Stage title: 'In a dialog', description: 'The menu opens above the modal, and Escape closes it before the dialog.'
         Dialog.Root
           Dialog.Trigger asChild
             Button variant: 'secondary', 'Open Dialog'

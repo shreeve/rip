@@ -19,8 +19,9 @@ export Trigger = component extends button
       slot
 
 # showModal throws until the mounted tree reaches the document, so opening
-# waits a microtask. Firefox hides a closed dialog at once, so close()
-# waits for the exit animations, and Escape closes through the cell.
+# waits a microtask. Not every engine keeps a closed dialog rendered through
+# a discrete transition (BROWSERS.md), so close() waits for the exit
+# animations, and Escape closes through the cell.
 #
 # TODO: let the app see a close's reason and cancel it, for close confirmation.
 # TODO: tell the app when a close has finished, after the exit animations.
@@ -33,13 +34,13 @@ export Popup = component extends dialog
 
   dismiss ~= closedby ?? 'any'
 
-  # Safari ignores closedby, so backdrop presses and Escape under none are
-  # handled here until it ships.
+  # Not every engine honors closedby (BROWSERS.md), so backdrop presses and
+  # Escape under none are handled here.
   pressed = false
-  press = (e: PointerEvent) -> pressed = onBackdrop(e)
-  release = (e: PointerEvent) -> open = false if pressed and onBackdrop(e) and dismiss is 'any'
+  onPointerdown = (e: PointerEvent) -> pressed = hitsBackdrop(e)
+  onPointerup = (e: PointerEvent) -> open = false if pressed and hitsBackdrop(e) and dismiss is 'any'
 
-  cancel = (e: Event) ->
+  onCancel = (e: Event) ->
     e.preventDefault()
     open = false unless dismiss is 'none'
 
@@ -55,11 +56,11 @@ export Popup = component extends dialog
     Array.from(nodes).filter (node) ->
       node isnt before and node isnt after and node.tabIndex >= 0 and not node.matches(':disabled') and not node.closest('[inert]') and node.checkVisibility({ visibilityProperty: true })
 
-  toFirst = ->
+  onAfterFocus = ->
     return if opening or not el
     stops(el)[0]?.focus()
 
-  toLast = ->
+  onBeforeFocus = ->
     return if opening or not el
     list = stops(el)
     list[list.length - 1]?.focus()
@@ -70,8 +71,9 @@ export Popup = component extends dialog
     if open
       queueMicrotask ->
         return unless open and not dialog.open and dialog.isConnected
-        # Safari rings the element showModal focuses even after a click, and
-        # only refocusing it with focusVisible: false clears that.
+        # WebKit rings the element showModal focuses even after a click
+        # (BROWSERS.md), and only refocusing it with focusVisible: false
+        # clears that.
         visible = document.activeElement?.matches(':focus-visible')
         opening = true
         dialog.showModal()
@@ -84,8 +86,8 @@ export Popup = component extends dialog
           focused.focus({ focusVisible: false })
     else if dialog.open
       queueMicrotask ->
-        exits = dialog.getAnimations().map (a) -> a.finished
-        Promise.allSettled(exits).then -> dialog.close() if not open and dialog.open
+        exits = dialog.getAnimations().map((a) -> a.finished)
+        Promise.allSettled(exits).then(-> dialog.close() if not open and dialog.open)
 
   render
     dialog
@@ -95,13 +97,13 @@ export Popup = component extends dialog
       data-closed: not open or undefined
       aria-labelledby: labelledBy or undefined
       aria-describedby: describedBy or undefined
-      @pointerdown: press
-      @pointerup: release
-      @cancel: cancel
+      @pointerdown: onPointerdown
+      @pointerup: onPointerup
+      @cancel: onCancel
       @close: (-> open = false)
-      span ref: before, tabindex: 0, aria-hidden: 'true', data-focus-guard: 'true', @focus: toLast
+      span ref: before, tabindex: 0, aria-hidden: 'true', data-focus-guard: 'true', @focus: onBeforeFocus
       slot
-      span ref: after, tabindex: 0, aria-hidden: 'true', data-focus-guard: 'true', @focus: toFirst
+      span ref: after, tabindex: 0, aria-hidden: 'true', data-focus-guard: 'true', @focus: onAfterFocus
 
 export Title = component extends h2
   accept labelledBy from Root
@@ -137,15 +139,15 @@ counter = 0
 mint = (part: string): string -> "rip-dialog-#{part}-#{counter += 1}"
 
 # A press lands on the backdrop when it hits the dialog itself outside its box.
-onBackdrop = (e: PointerEvent): boolean ->
+hitsBackdrop = (e: PointerEvent): boolean ->
   return false unless e.target is e.currentTarget
   r = (e.currentTarget as HTMLDialogElement).getBoundingClientRect()
   e.clientX < r.left or e.clientX > r.right or e.clientY < r.top or e.clientY > r.bottom
 
 # A modal doesn't stop the document's own scroll or overscroll bounce.
 styles = CSSStyleSheet.new()
-styles.replaceSync '''
+styles.replaceSync('''
   :root:has(dialog:modal) { overflow: hidden; }
   dialog > [data-focus-guard] { position: fixed; top: 0; left: 0; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-'''
+''')
 document.adoptedStyleSheets.push(styles)

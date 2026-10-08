@@ -1,0 +1,208 @@
+import { Combobox, Dialog } from 'rip/ui'
+import { COMPONENTS } from '../components.rip'
+import { Button } from '../components/button.rip'
+import { Controls, Page, Stage } from '../components/page.rip'
+
+export ComboboxPage = component
+  side: Combobox.Side := 'bottom'
+  align: Combobox.Align := 'center'
+  sideOffset := 6
+  selected := ''
+  render
+    Page title: COMPONENTS.combobox.name, description: COMPONENTS.combobox.description
+      Stage
+        Basic
+          side: side
+          align: align
+          sideOffset: sideOffset
+          onSelect: (name) -> selected = name
+
+      Controls.Panel title: 'Combobox.Popup'
+        Controls.Row name: 'side'
+          for choice in ['bottom', 'top', 'left', 'right'] satisfies Combobox.Side[]
+            Controls.Choice pressed: side is choice, @click: (-> side = choice), choice
+        Controls.Row name: 'align'
+          for choice in ['start', 'center', 'end'] satisfies Combobox.Align[]
+            Controls.Choice pressed: align is choice, @click: (-> align = choice), choice
+        Controls.Row name: 'sideOffset'
+          for choice in [0, 6, 12]
+            Controls.Choice pressed: sideOffset is choice, @click: (-> sideOffset = choice), "#{choice}"
+
+      Controls.Panel title: 'Last action'
+        Controls.Row name: 'selected'
+          span class: 'text-sm font-medium text-secondary', selected or 'none'
+
+      Stage title: 'Async search', description: 'The matches arrive after the typing; the live region says so, and a trailing option is an action rather than a match.'
+        Search onSelect: (name) -> selected = name
+
+      Stage title: 'Inline list', description: 'The same tree without a popup: the input filters the list in place, and choosing keeps it open.'
+        Picker
+
+      Stage title: 'In a dialog', description: 'The popup opens above the modal, and Escape closes it before the dialog.'
+        Dialog.Root
+          Dialog.Trigger asChild
+            Button variant: 'secondary', 'Open Dialog'
+          Dialog.Popup
+            class: [
+              'm-auto w-96 scale-95 rounded-xl bg-surface p-6 opacity-0 shadow-xl transition-[opacity,scale] duration-150 ease-out-quint'
+              'data-open:duration-250 data-open:scale-100 data-open:opacity-100 starting:data-open:scale-95 starting:data-open:opacity-0'
+              'backdrop:bg-backdrop backdrop:opacity-0 backdrop:duration-150 backdrop:ease-out-quint data-open:backdrop:duration-250 data-open:backdrop:opacity-100 starting:data-open:backdrop:opacity-0'
+            ]
+            Dialog.Title class: 'text-lg font-semibold', 'Favorite'
+            div class: 'mt-6'
+              Basic
+                side: 'bottom'
+                align: 'center'
+                sideOffset: 6
+                onSelect: (name) -> selected = name
+            div class: 'mt-6 flex justify-end'
+              Dialog.Close asChild
+                Button 'Close'
+
+Basic = component
+  @side: Combobox.Side
+  @align: Combobox.Align
+  @sideOffset: number
+  @onSelect: ((name: string) => void)
+  term := ''
+  matches ~= FRUIT.filter((name) -> name.toLowerCase().includes(term.trim().toLowerCase()))
+  render
+    div
+      Combobox.Root value <=> term
+        Combobox.Label class: 'mb-2 block text-sm-plus leading-none font-medium text-secondary md:text-sm', 'Fruit'
+        Combobox.Input
+          class: [
+            'h-11 w-72 rounded-lg border border-input bg-input px-3.5 text-base shadow-xs outline-none md:h-10 md:px-3 md:text-sm-plus'
+            'hover:border-input-hover focus:border-accent focus:ring focus:ring-accent'
+          ]
+          placeholder: 'Search fruit'
+        Combobox.Popup
+          side: side
+          align: align
+          sideOffset: sideOffset
+          class: [
+            'w-[anchor-size(width)] origin-(--transform-origin) scale-95 rounded-xl border border-surface bg-surface opacity-0 shadow-lg/6 transition transition-discrete duration-100 ease-out-quint'
+            'data-open:scale-100 data-open:opacity-100 data-open:duration-150 starting:data-open:scale-95 starting:data-open:opacity-0'
+          ]
+          Combobox.Status
+            class: if matches.length is 0 then 'px-3 py-2.5 text-sm text-tertiary' else 'sr-only'
+            (if matches.length is 0 then 'No matching fruit' else '')
+          Combobox.List class: 'max-h-56 overflow-y-auto p-1 empty:hidden'
+            for name in matches
+              Combobox.Item asChild
+                Row name: name, @click: (-> onSelect(name))
+
+# The matches arrive on a timer, so the stage runs through the states of
+# a remote search (busy, then results or none) without a server, and a
+# trailing option is an action rather than a match.
+Search = component
+  @onSelect: ((name: string) => void)
+  term := ''
+  matches: string[] := []
+  loading := false
+  searched := false
+  timer?: ReturnType<typeof setTimeout> := undefined
+
+  search = ->
+    q = term.trim().toLowerCase()
+    matches = FRUIT.filter((name) -> name.toLowerCase().includes(q))
+    loading = false
+    searched = true
+
+  onInput = ->
+    clearTimeout(timer) if timer
+    if not term.trim()
+      matches = []
+      loading = false
+      searched = false
+      return
+    loading = true
+    timer = setTimeout((-> search()), 150)
+
+  render
+    div
+      Combobox.Root value <=> term
+        Combobox.Label class: 'mb-2 block text-sm-plus leading-none font-medium text-secondary md:text-sm', 'Fruit search'
+        Combobox.Input
+          class: [
+            'h-11 w-72 rounded-lg border border-input bg-input px-3.5 text-base shadow-xs outline-none md:h-10 md:px-3 md:text-sm-plus'
+            'hover:border-input-hover focus:border-accent focus:ring focus:ring-accent'
+          ]
+          placeholder: 'Search fruit'
+          @input: onInput
+        Combobox.Popup
+          sideOffset: 6
+          class: [
+            'w-[anchor-size(width)] origin-(--transform-origin) scale-95 rounded-xl border border-surface bg-surface opacity-0 shadow-lg/6 transition transition-discrete duration-100 ease-out-quint'
+            'data-open:scale-100 data-open:opacity-100 data-open:duration-150 starting:data-open:scale-95 starting:data-open:opacity-0'
+          ]
+          Combobox.Status
+            class: if matches.length is 0 then 'px-3 py-2.5 text-sm text-tertiary' else 'sr-only'
+            (if loading and not searched then 'Searching…' else if matches.length is 0 then 'No matching fruit' else '')
+          Combobox.List aria-busy: loading, class: 'max-h-56 overflow-y-auto p-1 empty:hidden'
+            for name in matches
+              Combobox.Item asChild
+                Row name: name, @click: (-> onSelect(name))
+            if term.trim()
+              Combobox.Item asChild
+                Row name: "Add “#{term.trim()}”", accent: true, @click: (-> onSelect("Add #{term.trim()}"))
+
+Picker = component
+  filter := ''
+  picked: string[] := []
+  left ~= FRUIT.filter((name) -> not picked.includes(name) and name.toLowerCase().includes(filter.trim().toLowerCase()))
+  render
+    div class: 'w-72'
+      Combobox.Root value <=> filter
+        Combobox.Input
+          class: [
+            'h-11 w-72 rounded-lg border border-input bg-input px-3.5 text-base shadow-xs outline-none md:h-10 md:px-3 md:text-sm-plus'
+            'hover:border-input-hover focus:border-accent focus:ring focus:ring-accent'
+          ]
+          placeholder: 'Filter fruit'
+          aria-label: 'Filter fruit'
+        Combobox.Status
+          class: if left.length is 0 then 'px-3 py-2.5 text-sm text-tertiary' else 'sr-only'
+          (if left.length is 0 then 'No fruit left' else '')
+        Combobox.List aria-label: 'Fruit', class: 'mt-2 max-h-56 overflow-y-auto rounded-xl border border-surface p-1 empty:hidden'
+          for name in left
+            Combobox.Item asChild
+              Row name: name, @click: (-> picked = [...picked, name])
+      div class: 'mt-3 flex min-h-8 flex-wrap gap-1', role: 'group', aria-label: 'picked'
+        for name in picked
+          span class: 'rounded-full bg-surface-active px-2.5 py-1 text-xs font-medium text-primary', name
+
+Row = component extends button
+  @name: string
+  @accent?: boolean
+  render
+    button
+      type: 'button'
+      class: [
+        'flex w-full cursor-default items-center rounded-lg px-3 py-2.5 text-left text-sm-plus font-medium data-highlighted:bg-surface-hover data-highlighted:text-primary md:py-2 md:text-sm'
+        if accent then 'text-accent' else 'text-secondary'
+      ]
+      name
+
+FRUIT = [
+  'Apple'
+  'Apricot'
+  'Banana'
+  'Blueberry'
+  'Cherry'
+  'Cranberry'
+  'Date'
+  'Fig'
+  'Grape'
+  'Grapefruit'
+  'Kiwi'
+  'Lemon'
+  'Lime'
+  'Mango'
+  'Melon'
+  'Orange'
+  'Papaya'
+  'Peach'
+  'Pear'
+  'Plum'
+]

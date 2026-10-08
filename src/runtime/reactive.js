@@ -374,20 +374,27 @@ function __computed(fn) {
   return computed;
 }
 
-// Teardown never tracks. A cleanup runs with no effect current, so a
-// reactive read inside it subscribes nothing: not the effect that
-// disposed this one (a render swap disposing the block it owns), and
-// not the effect whose write flushed this re-run. Either subscription
-// would re-run that effect on the very write the teardown goes on to
-// make (a ref cell clearing on detach), rebuilding what it just built.
-// The slot clears only after the call returns; a cleanup that throws
-// stays installed.
+// Runs fn with no effect current, so a reactive read inside it
+// subscribes nothing. Teardown runs under it, whatever reads during it:
+// a cleanup, a lifecycle hook, a DOM listener the detach fires. Any of
+// them subscribing the effect that disposed the view would re-run that
+// effect on a later write in the same teardown, mid-swap.
+function __untracked(fn) {
+  const prev = __currentEffect;
+  __currentEffect = null;
+  try { return fn(); } finally { __currentEffect = prev; }
+}
+
+// A cleanup subscribes nothing: not the effect that disposed this one
+// (a render swap disposing the block it owns), and not the effect whose
+// write flushed this re-run. Either subscription would re-run that
+// effect on the very write the teardown goes on to make (a ref cell
+// clearing on detach), rebuilding what it just built. The slot clears
+// only after the call returns; a cleanup that throws stays installed.
 function __runCleanup(effect) {
   const cleanup = effect._cleanup;
   if (!cleanup) return;
-  const prev = __currentEffect;
-  __currentEffect = null;
-  try { cleanup(); } finally { __currentEffect = prev; }
+  __untracked(cleanup);
   effect._cleanup = null;
 }
 
@@ -698,4 +705,4 @@ function __catchErrors(fn) {
   };
 }
 
-export { __state, __computed, __effect, __batch, __readonly, __setErrorHandler, __handleError, __catchErrors, getEffectSignal, __setEffectErrorReporter, __ownerFrame, __pushOwner, __popOwner, __detachRef };
+export { __state, __computed, __effect, __batch, __readonly, __setErrorHandler, __handleError, __catchErrors, getEffectSignal, __setEffectErrorReporter, __ownerFrame, __pushOwner, __popOwner, __detachRef, __untracked };

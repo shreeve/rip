@@ -6636,7 +6636,7 @@ ${baseline}`).join(`
           push("FORAS", word, start, pos);
         }
         seenFor = null;
-      } else if (word === "as" && (seenImport || seenExport) && (prev?.kind === "DEFAULT" || prev?.kind === "IMPORT_ALL" || prev?.kind === "EXPORT_ALL" || prev?.kind === "IDENTIFIER")) {
+      } else if (word === "as" && (seenImport || seenExport) && (prev?.kind === "DEFAULT" || prev?.kind === "IMPORT_ALL" || prev?.kind === "EXPORT_ALL" || prev?.kind === "IDENTIFIER" && parens[parens.length - 1]?.specifiers === true)) {
         push("AS", word, start, pos);
       } else if (word === "with" && seenImport && (prev?.kind === "STRING" || prev?.kind === "STRING_END")) {
         push("WITH", word, start, pos);
@@ -9098,6 +9098,8 @@ var COMPONENT_RUNTIME_FIELDS = new Set([
   "_hmrOrphans",
   "_hmrReleasing",
   "_hmrPropKeys",
+  "_hmrResetPending",
+  "_hmrReset",
   "_asChild"
 ]);
 var BINOPS = new Set(["+", "-", "*", "/", "%", "**", "<", ">", "<=", ">=", "==", "!=", "&&", "||", "??", "<<", ">>", ">>>", "&", "^", "|"]);
@@ -11179,6 +11181,10 @@ class Emitter {
       }
       if (x[0] === "type-decl")
         return;
+      if ((x[0] === "cast" || x[0] === "satisfies") && x.length === 3) {
+        walk(x[1]);
+        return;
+      }
       for (const c of x)
         walk(c);
     };
@@ -12572,7 +12578,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
         {
           const specStart = this.b.offset;
           this.mark(node, "source", () => this.b.emit(this.moduleSource(node[1])));
-          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(node[1]) });
+          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(node[1]), namespace: node.length === 3 ? node[2] : undefined });
         }
         this.b.emit(";");
       } else if (head === "export-from") {
@@ -15884,7 +15890,8 @@ ${pad ?? ""}`);
     extendsTag,
     methods,
     hooks,
-    hasRender
+    hasRender,
+    initNames
   }) {
     const sortNames = (names) => [...names].sort();
     const props = sortNames(declaredProps);
@@ -15896,10 +15903,63 @@ ${pad ?? ""}`);
     const shape = Emitter.hmrFingerprint({ props, state, computed, gates, extends: extendsTag });
     const impl = Emitter.hmrFingerprint({ methods: methodNames, hooks: hookNames, render: hasRender });
     const id = `${this.modulePath}#${bindingName}`;
-    const sig = { shape, impl, state, computed, props, gates, extends: extendsTag };
+    const inits = {};
+    this.scopes.push(initNames);
+    this.rframes.push({ reactive: new Set, bound: initNames });
+    try {
+      for (const m of stateVars) {
+        if (m.value === undefined)
+          continue;
+        inits[m.name] = Emitter.hmrFingerprint(this.capturedExprText(() => this.componentInitValue(m.value)));
+      }
+    } finally {
+      this.rframes.pop();
+      this.scopes.pop();
+    }
+    const sig = { shape, impl, state, computed, props, gates, extends: extendsTag, inits };
     this.b.emit(`${pad}static __hmrId = ${JSON.stringify(id)};
 `);
     this.b.emit(`${pad}static __hmrSig = ${JSON.stringify(sig)};
+`);
+  }
+  componentInitValue(value) {
+    const wrap = Emitter.needsGrouping(value, "operand");
+    if (wrap)
+      this.b.emit("(");
+    this.expr(value);
+    if (wrap)
+      this.b.emit(")");
+  }
+  emitComponentHmrInit(pad, { stateVars, initNames }) {
+    const slots = [];
+    for (const m of stateVars) {
+      if (m.value === undefined)
+        continue;
+      slots.push({ m, entries: this.scopedHoist([m.value], [], { declareInPlace: false }).entries });
+    }
+    if (slots.length === 0)
+      return;
+    this.b.emit(`${pad}static __hmrInit = {
+`);
+    this.scopes.push(initNames);
+    this.rframes.push({ reactive: new Set, bound: initNames });
+    try {
+      for (const { m, entries } of slots) {
+        this.b.emit(`${pad}  ${m.name}() { `);
+        if (entries.length) {
+          this.hoistLine(entries);
+          this.b.emit(" ");
+        }
+        this.b.emit("return ");
+        this.mark(m.node, "value", () => this.withExpression(() => this.componentInitValue(m.value)));
+        this.b.emit(`; },
+`);
+      }
+    } finally {
+      this.rframes.pop();
+      this.scopes.pop();
+    }
+    this.b.emit(`${pad}};
 `);
   }
   componentExpr(node) {
@@ -16339,7 +16399,8 @@ ${pad ?? ""}`);
       }
       if (this.scopes.length === 1 && typeof this._componentName === "string")
         this.componentNames.push(this._componentName);
-      if (this.hmr && this.modulePath && this.scopes.length === 1 && typeof this._componentName === "string") {
+      const hmrMeta = this.hmr && this.modulePath && this.scopes.length === 1 && typeof this._componentName === "string";
+      if (hmrMeta) {
         this.emitComponentHmrMeta(pad, {
           bindingName: this._componentName,
           declaredProps,
@@ -16349,7 +16410,8 @@ ${pad ?? ""}`);
           extendsTag: extendsHost,
           methods,
           hooks,
-          hasRender: renderNode !== null
+          hasRender: renderNode !== null,
+          initNames
         });
       }
       if (tsInfo !== null)
@@ -16591,6 +16653,8 @@ ${pad ?? ""}`);
         this.b.emit(`${pad}}
 `);
       }
+      if (hmrMeta)
+        this.emitComponentHmrInit(pad, { stateVars, initNames });
       if (this.hmr && derivedVars.length > 0) {
         this.b.emit(`${pad}_hmrRefreshComputeds() {
 `);
@@ -17576,11 +17640,17 @@ ${pad ?? ""}`);
   }
   renderBareAttribute(el, name, siblings, k, owner) {
     const tag = this.renderTagOf(el);
-    let unknownAt = null;
-    if (this.ts && !knownBareAttribute(tag, name)) {
-      const at = this.bareChildSpan(siblings, k, owner);
-      if (at !== null) {
-        unknownAt = at;
+    const recv = this.tsElReceiver(el);
+    const at = this.ts ? this.bareChildSpan(siblings, k, owner) : null;
+    const ownerId = at === null ? null : this.stores.idOf(owner);
+    this.renderLine(null, () => {
+      recv.emit();
+      const gen = this.b.offset + 1;
+      this.b.emit(".setAttribute(");
+      if (at !== null && recv.surfaced) {
+        this.intrinsics.push(Emitter.BOOLEAN_ATTRS.has(name) ? { start: at[0], end: at[1], kind: "attr", name, type: "boolean | undefined" } : { start: at[0], end: at[1], kind: "attr", name, gen });
+      }
+      if (at !== null && !knownBareAttribute(tag, name)) {
         this.intrinsics.push({
           start: at[0],
           end: at[1],
@@ -17590,14 +17660,8 @@ ${pad ?? ""}`);
           message: this.unknownAttrMessage(tag, name, { bare: true, svg: this.rstate?.svgEls?.has(el) === true })
         });
       }
-    }
-    const recv = this.tsElReceiver(el);
-    const ownerId = unknownAt === null ? null : this.stores.idOf(owner);
-    this.renderLine(null, () => {
-      recv.emit();
-      this.b.emit(".setAttribute(");
       if (ownerId !== null) {
-        this.b.markSpan(ownerId, "identifier", unknownAt[0], unknownAt[1], () => this.emitQuotedPrimitive(name));
+        this.b.markSpan(ownerId, "identifier", at[0], at[1], () => this.emitQuotedPrimitive(name));
       } else
         this.emitQuotedPrimitive(name);
       this.b.emit(", '')");
@@ -18273,7 +18337,7 @@ ${this.replayPad}}` : " }");
     if (!this.ts)
       return emitRef;
     return () => {
-      const narrowed = this.activeNarrowed().some((c) => c === name || isNode(c) && c[0] === "." && c[1] === "this" && c.length === 3 && c[2] === name);
+      const narrowed = this.activeNarrowed().some(({ node }) => node === name || isNode(node) && node[0] === "." && node[1] === "this" && node.length === 3 && node[2] === name);
       if (!narrowed)
         return emitRef();
       this._needsNarrowedHelper = true;
@@ -18560,6 +18624,17 @@ ${this.replayPad}}` : " }");
           const span = claimingKey(() => this.emitKeyAs(storedKey, key));
           if (this.ts && recv.surfaced && span !== null) {
             this.intrinsics.push({ start: span[0], end: span[1], kind: "attr", name: key, type: "boolean | undefined" });
+            const attrTag = this.renderTagOf(el);
+            if (!knownBareAttribute(attrTag, key)) {
+              this.intrinsics.push({
+                start: span[0],
+                end: span[1],
+                kind: "unknown-attr",
+                tag: attrTag,
+                name: key,
+                message: this.unknownAttrMessage(attrTag, key, { bare: false, svg: this.rstate?.svgEls?.has(el) === true })
+              });
+            }
           }
         };
         if (this.renderReactive(value)) {
@@ -18968,19 +19043,47 @@ ${this.replayPad}}` : " }");
     if (isNode(cond) && cond[0] === "&&" && cond.length === 3) {
       return [...this.narrowConjuncts(cond[1]), ...this.narrowConjuncts(cond[2])];
     }
-    if (typeof cond === "string") {
-      return this.renderVarKind(cond) !== null || this.bareRewrite(cond) === null ? [] : [cond];
+    const roots = [];
+    return this.collectClaimRoots(cond, roots) ? [{ node: cond, roots }] : [];
+  }
+  collectClaimRoots(x, roots) {
+    if (isNode(x) && x[0] === "||" && x.length === 3) {
+      return this.collectClaimRoots(x[1], roots) && this.collectClaimRoots(x[2], roots);
     }
-    if (!Emitter.isDotChain(cond))
-      return [];
-    let root = cond;
+    if (isNode(x) && (x[0] === "==" || x[0] === "!=") && x.length === 3) {
+      if (Emitter.isNarrowLiteral(x[2]))
+        return this.collectClaimRoots(x[1], roots);
+      if (Emitter.isNarrowLiteral(x[1]))
+        return this.collectClaimRoots(x[2], roots);
+      return false;
+    }
+    if (typeof x !== "string" && !Emitter.isDotChain(x))
+      return false;
+    let root = x;
     while (isNode(root))
       root = root[1];
     if (root === "this")
-      return [cond];
-    if (this.renderVarKind(root) !== null || this.bareRewrite(root) === null)
-      return [];
-    return [cond];
+      return isNode(x);
+    if (!isIdentifierName(root) || this.renderVarKind(root) === "local")
+      return false;
+    const entry = this.loopEntryOf(root);
+    if (entry === null && this.bareRewrite(root) === null)
+      return false;
+    roots.push({ name: root, owner: entry === null ? null : entry.owner, which: entry === null ? null : entry.itemVar === root ? "item" : "index" });
+    return true;
+  }
+  static isNarrowLiteral(x) {
+    if (isNode(x))
+      return x[0] === "-" && x.length === 2 && typeof x[1] === "string" && /^\d/.test(x[1]);
+    return typeof x === "string" && (/^["'\d]/.test(x) || x === "true" || x === "false" || x === "null" || x === "undefined");
+  }
+  loopEntryOf(name) {
+    const stack = this.rstate?.sink.loopStack ?? [];
+    for (let i = stack.length - 1;i >= 0; i--) {
+      if (stack[i].itemVar === name || stack[i].indexVar === name)
+        return stack[i];
+    }
+    return null;
   }
   static isDotChain(n) {
     if (!isNode(n) || n[0] !== "." || n.length !== 3 || typeof n[2] !== "string" || n[2][0] === '"')
@@ -18996,23 +19099,25 @@ ${this.replayPad}}` : " }");
     const rec = this.renderRecord;
     if (!this.ts || !rec || !(rec.narrowed?.length > 0))
       return [];
-    return rec.narrowed.filter((c) => {
-      let root = c;
-      while (isNode(root))
-        root = root[1];
-      return root === "this" || !(rec.bindings.has(root) || rec.locals.has(root));
-    });
+    return rec.narrowed.filter((claim) => claim.roots.every(({ name, owner, which }) => {
+      if (rec.locals.has(name))
+        return false;
+      if (owner === null)
+        return !rec.bindings.has(name);
+      const entry = rec.loopStack.find((e) => e.owner === owner);
+      return entry !== undefined && (which === "item" ? entry.itemVar : entry.indexVar) === name;
+    }));
   }
   hasNarrow() {
     return this.activeNarrowed().length > 0;
   }
   narrowedReadNames() {
     const names = new Set;
-    for (const c of this.activeNarrowed()) {
-      if (typeof c === "string")
-        names.add(c);
-      else if (c[0] === "." && c[1] === "this" && c.length === 3 && typeof c[2] === "string")
-        names.add(c[2]);
+    for (const { node, roots } of this.activeNarrowed()) {
+      if (typeof node === "string" && roots[0].owner === null)
+        names.add(node);
+      else if (isNode(node) && node[0] === "." && node[1] === "this" && node.length === 3 && typeof node[2] === "string")
+        names.add(node[2]);
     }
     return names;
   }
@@ -19028,7 +19133,7 @@ ${this.replayPad}}` : " }");
           if (i > 0)
             this.b.emit(" ");
           this.b.emit(form === "statement" ? "__ripNarrow(" : "(__ripNarrow(");
-          this.renderExpr(c);
+          this.renderExpr(c.node);
           this.b.emit(form === "statement" ? ");" : "),");
         });
         if (trailing)
@@ -19571,7 +19676,20 @@ ${this.replayPad}}` : " }");
 `);
         this.b.emit(`${p3}c() {
 `);
-        this.replayCreates(rec, p4);
+        if (this.hasNarrow())
+          this.b.tsOnly(() => {
+            this.b.emit(p4);
+            this.narrowGuard("statement", { trailing: false });
+            this.b.emit(`
+`);
+          });
+        const prevReads = this._narrowedReads;
+        this._narrowedReads = this.narrowedReadNames();
+        try {
+          this.replayCreates(rec, p4);
+        } finally {
+          this._narrowedReads = prevReads;
+        }
         const fragChildren = this.rstate.fragChildren.get(rec.root);
         const firstNode = fragChildren !== undefined ? fragChildren[0] : rec.root;
         this.b.emit(p4);
@@ -23449,7 +23567,7 @@ declare function __ripSourceKey<const T extends ((${stashKeys}) | \`\${${stashKe
   }
   if (emitter._needsNarrowHelper === true) {
     builder.tsOnly(() => builder.emit(`
-declare function __ripNarrow<T>(v: T): asserts v is NonNullable<T>;
+declare function __ripNarrow(c: unknown): asserts c;
 `));
   }
   if (emitter._needsNarrowedHelper === true) {
@@ -25603,6 +25721,7 @@ __export(exports_reactive, {
   __setEffectErrorReporter: () => __setEffectErrorReporter,
   __setErrorHandler: () => __setErrorHandler,
   __state: () => __state,
+  __untracked: () => __untracked,
   getEffectSignal: () => getEffectSignal
 });
 var __RIP_REACTIVE_SENTINEL = Symbol.for("rip.runtime.reactive");
@@ -25893,17 +26012,20 @@ function __computed(fn) {
   };
   return computed;
 }
+function __untracked(fn) {
+  const prev = __currentEffect;
+  __currentEffect = null;
+  try {
+    return fn();
+  } finally {
+    __currentEffect = prev;
+  }
+}
 function __runCleanup(effect) {
   const cleanup = effect._cleanup;
   if (!cleanup)
     return;
-  const prev = __currentEffect;
-  __currentEffect = null;
-  try {
-    cleanup();
-  } finally {
-    __currentEffect = prev;
-  }
+  __untracked(cleanup);
   effect._cleanup = null;
 }
 function __effect(fn) {
@@ -26133,6 +26255,7 @@ __export(exports_components, {
   __hmrEmit: () => __hmrEmit,
   __hmrEntries: () => __hmrEntries,
   __hmrEvents: () => __hmrEvents,
+  __hmrInitDiff: () => __hmrInitDiff,
   __hmrLookup: () => __hmrLookup,
   __hmrMigrateDiff: () => __hmrMigrateDiff,
   __hmrMigrateRemount: () => __hmrMigrateRemount,
@@ -26236,6 +26359,11 @@ function __hmrMigrateDiff(oldSig, newSig) {
   const removed = prev.filter((name) => !nextSet.has(name));
   return { kept, added, removed };
 }
+function __hmrInitDiff(oldSig, newSig) {
+  const prev = oldSig?.inits ?? {};
+  const next = newSig?.inits ?? {};
+  return Object.keys(next).filter((name) => Object.hasOwn(prev, name) && prev[name] !== next[name]);
+}
 var __hmrEventLog = [];
 var __HMR_EVENT_CAP = 64;
 function __hmrEmit(type, detail = {}) {
@@ -26260,13 +26388,15 @@ function __hmrPreserveState(oldInstance, newInstance) {
   const nextNames = newSig?.state;
   const diff = __hmrMigrateDiff(oldSig, newSig);
   if (!Array.isArray(retained) || !Array.isArray(nextNames)) {
-    __hmrEmit("migrate", { id: newInstance?.constructor?.__hmrId ?? null, ...diff, copied: [] });
-    return diff;
+    __hmrEmit("migrate", { id: newInstance?.constructor?.__hmrId ?? null, ...diff, copied: [], reset: [] });
+    return { ...diff, copied: [], reset: [] };
   }
   const keep = new Set(retained);
+  const reset = __hmrInitDiff(oldSig, newSig);
+  const skip = new Set(reset);
   const copied = [];
   for (const name of nextNames) {
-    if (!keep.has(name))
+    if (!keep.has(name) || skip.has(name))
       continue;
     const prev = oldInstance[name];
     const next = newInstance[name];
@@ -26276,8 +26406,8 @@ function __hmrPreserveState(oldInstance, newInstance) {
     }
   }
   const id = newInstance?.constructor?.__hmrId ?? oldInstance?.constructor?.__hmrId ?? null;
-  __hmrEmit("migrate", { id, ...diff, copied });
-  return { ...diff, copied };
+  __hmrEmit("migrate", { id, ...diff, copied, reset });
+  return { ...diff, copied, reset };
 }
 var __HMR_IDENTITY_PROPS = ["name", "type", "placeholder"];
 function __hmrIdentityOf(el) {
@@ -26377,6 +26507,7 @@ function __hmrSwapDefinition(instance, NewCtor) {
   if (typeof oldId === "string" && oldId) {
     __hmrRegistry.get(oldId)?.instances.delete(instance);
   }
+  instance._hmrResetPending = __hmrInitDiff(instance.constructor?.__hmrSig, NewCtor.__hmrSig);
   Object.setPrototypeOf(instance, NewCtor.prototype);
   Object.defineProperty(instance, "constructor", {
     value: NewCtor,
@@ -26393,7 +26524,7 @@ function __hmrPatch(instance, NewCtor) {
   const oldId = instance.constructor?.__hmrId;
   __hmrSwapDefinition(instance, NewCtor);
   instance._hmrRerender();
-  __hmrEmit("patch", { id: NewCtor.__hmrId ?? oldId ?? null });
+  __hmrEmit("patch", { id: NewCtor.__hmrId ?? oldId ?? null, reset: instance._hmrReset ?? [] });
   return instance;
 }
 function __hmrPropKeys(props) {
@@ -26462,10 +26593,12 @@ function __claimGateConstructor() {
 function __detach(node) {
   if (!node || node.nodeType === 11)
     return;
-  if (typeof node.remove === "function")
-    node.remove();
-  else if (node.parentNode)
-    node.parentNode.removeChild(node);
+  __untracked(() => {
+    if (typeof node.remove === "function")
+      node.remove();
+    else if (node.parentNode)
+      node.parentNode.removeChild(node);
+  });
 }
 function __pushComponent(component) {
   const prev = __currentComponent;
@@ -27369,6 +27502,9 @@ class __Component {
   _teardown({ state, hooks, removeDOM }) {
     if (this._state === "failed" || this._state === "unmounted")
       return;
+    __untracked(() => this._teardownUntracked({ state, hooks, removeDOM }));
+  }
+  _teardownUntracked({ state, hooks, removeDOM }) {
     if (this.constructor.__hmrId)
       __hmrUnregisterInstance(this);
     this._state = state;
@@ -27404,6 +27540,9 @@ class __Component {
     this._target = null;
   }
   _hmrRelease(removeDOM = true) {
+    __untracked(() => this._hmrReleaseUntracked(removeDOM));
+  }
+  _hmrReleaseUntracked(removeDOM) {
     const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
     try {
       if (this.beforeUnmount)
@@ -27424,11 +27563,13 @@ class __Component {
   }
   _hmrRebind() {
     const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
+    this._hmrReset = [];
     const prevC = __pushComponent(this);
     const prevO = __pushOwner(this._frame);
     try {
       if (typeof this._hmrRefreshComputeds === "function")
         this._hmrRefreshComputeds();
+      this._hmrApplyResets();
       if (typeof this._hmrBindEffects === "function")
         this._hmrBindEffects();
     } catch (e) {
@@ -27441,6 +27582,31 @@ class __Component {
     __popOwner(prevO);
     __popComponent(prevC);
     return true;
+  }
+  _hmrApplyResets() {
+    const names = this._hmrResetPending ?? [];
+    this._hmrResetPending = null;
+    if (names.length === 0)
+      return;
+    const thunks = this.constructor.__hmrInit ?? {};
+    const given = new Set(typeof this._hmrPropKeys === "string" ? this._hmrPropKeys.split(",") : []);
+    const props = new Set(this.constructor.__props ?? []);
+    __batch(() => {
+      for (const name of names) {
+        if (props.has(name) && (given.has(name) || given.has(`__bind_${name}__`)))
+          continue;
+        const thunk = thunks[name];
+        const slot = this[name];
+        if (typeof thunk !== "function" || slot == null || typeof slot !== "object" || !("value" in slot))
+          continue;
+        const value = thunk.call(this);
+        if (value != null && typeof value === "object" && typeof value.read === "function") {
+          throw new Error(`${this.constructor.name || "component"}: the initializer of '${name}' yields a reactive container, which cannot replace the living slot`);
+        }
+        slot.value = value;
+        this._hmrReset.push(name);
+      }
+    });
   }
   _hmrApplyProps(props) {
     const rest = __splitProps(this.constructor, props);
@@ -32128,7 +32294,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "5e096b9c01887e7f";
+var compilerBuild = () => "2a7792b5d9ddd901";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

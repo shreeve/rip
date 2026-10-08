@@ -307,7 +307,11 @@ alters surface syntax updates ALL THREE in the same change.
   the quarantined failed candidate, which leaves the last committed App live
   until a newer hash arrives. There is no `manifest.json`. Janus transports
   files and messages without Rip semantics; workers have no App or
-  generated-file routes.
+  generated-file routes. A package subpath is a file path under the
+  package on both sides, `rip/<pkg>/<path>.rip`, skipping the package's
+  test, bench, demo, and node_modules trees and its root verb files; an
+  exports key names or renames a target and wins over the path, and
+  names the surface `rip check --public` audits. It is not a gate.
 - **Comments explain non-obvious intent** — invariants, constraints,
   why a trade-off was taken. Never narrate what code obviously does,
   never reference project history or future plans. A comment that

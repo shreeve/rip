@@ -43,8 +43,10 @@ On a compatible edit the runtime:
 1. keeps the living instance and its state containers;
 2. does **not** re-run `_init`;
 3. disposes the owner frame (effects and cleanups);
-4. refreshes `~=` bodies and rebinds body `~>` effects
-   (`_hmrRefreshComputeds` / `_hmrBindEffects` on hmr builds);
+4. refreshes `~=` bodies, re-runs each `:=` initializer whose compiled
+   text changed (below), and rebinds body `~>` effects
+   (`_hmrRefreshComputeds` / `__hmrInit` / `_hmrBindEffects` on hmr
+   builds);
 5. rebuilds the view through `_create` / `_setup`, handing living
    children back to the constructions that match them (below);
 6. reinserts into a **connected** parent (never a spent staging
@@ -57,6 +59,23 @@ On a compatible edit the runtime:
 This matches the competitive bar set by React Fast Refresh: keep state,
 swap implementation, re-render. It is **not** surgical DOM morph
 (morphdom-style node reuse).
+
+**A changed initializer reaches the living slot.** An edit to a `:=`
+initializer re-runs that initializer alone, on the living instance, and
+writes the result into the slot's container. The signature carries a
+fingerprint of each slot's compiled initializer (`__hmrSig.inits`) and
+the class carries the compiled initializers as thunks (`__hmrInit`), so
+the decision is the compiler's: whitespace and quote style never reset
+a slot, a changed value does. Resets run in declaration order, after
+the computeds refresh — a slot that reads a computed above it reads the
+new body — and before the effects bind, so each recreated effect
+observes the value once. Every other slot keeps its written value, every
+`_init` member keeps its identity, and the `patch` event names the
+reset slots. A public slot the construction site supplies keeps the
+parent's value; its default is dead in that instance. A plain `=`
+member's initializer is `_init`'s, and `_init` never re-runs under
+patch. An initializer that yields a container cannot replace the living
+slot and fails the rebind, which takes the floor.
 
 **A rebuilt view adopts its living children.** The rebuild constructs
 the parent's children again, and those children are what the developer
@@ -188,8 +207,8 @@ signature, living instances.
 
 | Tier | When | Keeps | Rebuilds |
 |---|---|---|---|
-| **Patch** | Compatible implementation/render | Instance, `:=` / props, plain `_init` members, unambiguous living children | View + effects/computeds |
-| **Migrate** | Compatible named-state shape change | Intersecting `:=` slots (diagnostics for kept/added/removed) | New instance on remount floor when patch cannot apply |
+| **Patch** | Compatible implementation/render | Instance, `:=` / props, plain `_init` members, unambiguous living children | View + effects/computeds + `:=` slots whose initializer changed |
+| **Migrate** | Compatible named-state shape change | Intersecting `:=` slots whose initializer is unchanged (diagnostics for kept/added/removed/reset) | New instance on remount floor when patch cannot apply |
 | **Remount** | Incompatible contract / forced dirty chain | Ancestors above the dirty boundary; stash; UI restore | Narrowest dirty route/layout suffix |
 | **Reload** | Graph/runtime cannot isolate safely | Nothing in-page | Full document |
 
@@ -197,7 +216,8 @@ Every tier is chosen from signatures. No incompatible shape is silently
 accepted. Tooling sees thin events: `rip:hmr` / `__hmrEvents()` for
 `patch` | `migrate` | `remount` | `reject` | `noop` — `noop` names a
 publication whose dirty modules have no living instance, so nothing on
-the page was touched.
+the page was touched. `patch` and `migrate` carry `reset`, the `:=`
+slots whose initializer re-ran (empty when none did).
 
 A dirty module accounts for itself through its living instances: the
 ones in the mounted chain plus every registered instance under its id
@@ -290,6 +310,7 @@ These are load-bearing invariants, not folklore:
 | hot refresh | Framework-aware HMR that preserves compatible component state |
 | patch | State-preserving view remount on a living instance |
 | migrate | Preserve intersecting named `:=` slots across a replacement |
+| reset | Re-run one `:=` initializer on a living slot because its compiled text changed |
 | remount | Replace the narrowest dirty subtree; keep ancestors |
 | last-known-good (LKG) | Active successful App generation retained across a failed candidate |
 | quarantine | Rejected candidate hash retained so recovery can rebase or ignore duplicates |
@@ -351,7 +372,10 @@ Automated coverage includes:
     navigation renders into the live slot;
 14. focus and caret survive a render-only edit of the focused page;
 15. an edit to an unmounted route is a `noop` — confirmation stays, and
-    the route shows the new source when it mounts.
+    the route shows the new source when it mounts;
+16. a changed `:=` initializer resets its one slot on the living
+    instance, the other slots and the `_init` members keep their values,
+    and a whitespace-only edit resets nothing.
 
 Browser behavior requires a real browser harness
 (`test/browser`). Signature and registry decisions stay

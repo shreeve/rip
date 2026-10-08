@@ -1,8 +1,9 @@
-import type { CSSProperties } from 'rip/app'
+import type { Align, Side } from './anchored.rip'
+import { anchored, facing, landed } from './anchored.rip'
+
+export type { Align, Side } from './anchored.rip'
 
 type Landing = 'popup' | 'first' | 'last'
-export type Side = 'bottom' | 'top' | 'left' | 'right'
-export type Align = 'start' | 'center' | 'end'
 
 export Root = component
   offer @open := false
@@ -27,7 +28,7 @@ export Trigger = component extends button
     triggerId = id
     -> triggerId = ''
 
-  keydown = (e: KeyboardEvent) ->
+  onKeydown = (e: KeyboardEvent) ->
     return if open
     switch e.key
       when 'ArrowDown', 'Enter', ' ' then landing = 'first'
@@ -45,17 +46,13 @@ export Trigger = component extends button
       aria-haspopup: 'menu'
       aria-expanded: if open then 'true' else 'false'
       data-popup-open: open or undefined
-      @keydown: keydown
+      @keydown: onKeydown
       slot
 
 # The popup is anchored by name, since popovertarget anchors it only when
-# a click opened it. A popover's own inset centers it; inset auto also
-# zeroes the auto margins, so the margin on the trigger's side is the
-# offset, which a flip mirrors. A horizontal side with no room on either
-# side falls through to below, then above, by the package's two named
-# try rules, which read the offset and the alignment off the popup.
-# Firefox hides a light-dismissed popover at once and the hide is not
-# cancelable, so only a close through the cell waits for the exit.
+# a click opened it. A light dismiss cannot be canceled, and not every
+# engine keeps a hidden popover rendered through a discrete transition
+# (BROWSERS.md), so only a close through the cell waits for the exit.
 export Popup = component extends div
   accept open from Root
   accept triggerId from Root
@@ -71,26 +68,12 @@ export Popup = component extends div
     popupId = id
     -> popupId = ''
 
-  vertical ~= side is 'bottom' or side is 'top'
-  placement ~=
-    across = ACROSS[align]
-    style = {
-      inset: 'auto'
-      positionAnchor: anchor
-      positionArea: "#{side} #{if vertical then across.vertical else across.horizontal}"
-      positionTryFallbacks: (if vertical then 'flip-block' else 'flip-inline, --rip-menu-below, --rip-menu-above')
-      '--rip-menu-offset': "#{sideOffset}px"
-      '--rip-menu-across': across.vertical
-      '--transform-origin': origin
-    } as CSSProperties
-    style[FACING[side].margin] = "#{sideOffset}px"
-    style
+  placement ~= anchored(anchor, side, align, sideOffset, origin)
 
-  # Nothing in CSS says which side a flip landed the popup on, and a
-  # fallback cannot set transform-origin, so the side is read from the
-  # computed area once shown, and again after resize and scroll while
-  # open. The browser settles a fallback in the rendering step after the
-  # frame that dispatches those events, so the read waits two frames.
+  # A fallback cannot set transform-origin, so the side is read once
+  # shown, and again after resize and scroll while open. The browser
+  # settles a fallback in the rendering step after the frame that
+  # dispatches those events, so the read waits two frames.
   # data-open waits for the side too, so an entry transition keyed on it
   # starts with the origin in place, and the side outlives a close until
   # the exit animations end, so the exit keeps it.
@@ -98,15 +81,14 @@ export Popup = component extends div
   place =! =>
     popup = el
     return unless popup and popup.matches(':popover-open')
-    word = getComputedStyle(popup).positionArea.split(' ').find (w) -> w in FACING
-    placed = (word as Side | undefined) ?? side
+    placed = landed(popup, side)
 
-  moved =! => requestAnimationFrame -> requestAnimationFrame place
-  origin ~= FACING[placed or side].origin(ACROSS[align])
+  moved =! => requestAnimationFrame(-> requestAnimationFrame(place))
+  origin ~= facing(placed or side, align)
 
   items = (popup: HTMLElement): HTMLElement[] ->
     nodes: NodeListOf<HTMLElement> = popup.querySelectorAll('[role="menuitem"]')
-    Array.from(nodes).filter (node) -> not node.matches(':disabled')
+    Array.from(nodes).filter((node) -> not node.matches(':disabled'))
 
   # The cell follows a native hide from beforetoggle, since toggle is a
   # task behind the state and a key in between would read the cell wrong,
@@ -117,7 +99,7 @@ export Popup = component extends div
   onBeforeToggle = (e: ToggleEvent) ->
     if e.newState is 'open'
       shows += 1
-      queueMicrotask place
+      queueMicrotask(place)
       addEventListener('resize', moved)
       document.addEventListener('scroll', moved, true)
     else
@@ -130,8 +112,8 @@ export Popup = component extends div
     return unless popup
     if e.newState is 'closed'
       since = shows
-      exits = popup.getAnimations().map (a) -> a.finished
-      Promise.allSettled(exits).then -> placed = '' if shows is since
+      exits = popup.getAnimations().map((a) -> a.finished)
+      Promise.allSettled(exits).then(-> placed = '' if shows is since)
       return
     open = true
     place()
@@ -142,7 +124,7 @@ export Popup = component extends div
       else popup.focus()
     landing = 'popup'
 
-  keydown = (e: KeyboardEvent) ->
+  onKeydown = (e: KeyboardEvent) ->
     if e.key is 'Tab'
       open = false
       return
@@ -170,8 +152,8 @@ export Popup = component extends div
     else if popup.matches(':popover-open')
       since = shows
       queueMicrotask ->
-        exits = popup.getAnimations().map (a) -> a.finished
-        Promise.allSettled(exits).then -> popup.hidePopover() if shows is since and not open and popup.matches(':popover-open')
+        exits = popup.getAnimations().map((a) -> a.finished)
+        Promise.allSettled(exits).then(-> popup.hidePopover() if shows is since and not open and popup.matches(':popover-open'))
 
   render
     div
@@ -187,7 +169,7 @@ export Popup = component extends div
       data-closed: not open or undefined
       @beforetoggle: onBeforeToggle
       @toggle: onToggle
-      @keydown: keydown
+      @keydown: onKeydown
       slot
 
 export Item = component extends button
@@ -198,15 +180,15 @@ export Item = component extends button
       role: 'menuitem'
       tabindex: -1
       @click: (-> open = false)
-      @pointermove: hover
-      @pointerleave: leave
+      @pointermove: onPointermove
+      @pointerleave: onPointerleave
       slot
 
 # A link activates on Enter and not on Space, so Space clicks it.
 export Link = component extends a
   accept open from Root
 
-  space = (e: KeyboardEvent) ->
+  onKeydown = (e: KeyboardEvent) ->
     return unless e.key is ' '
     e.preventDefault()
     (e.currentTarget as HTMLAnchorElement).click()
@@ -216,46 +198,18 @@ export Link = component extends a
       role: 'menuitem'
       tabindex: -1
       @click: (-> open = false)
-      @keydown: space
-      @pointermove: hover
-      @pointerleave: leave
+      @keydown: onKeydown
+      @pointermove: onPointermove
+      @pointerleave: onPointerleave
       slot
 
 # The pointer and the keys share one highlight: the focused item.
-hover = (e: PointerEvent) ->
+onPointermove = (e: PointerEvent) ->
   item = e.currentTarget as HTMLElement
   item.focus() unless document.activeElement is item
-leave = (e: PointerEvent) ->
+onPointerleave = (e: PointerEvent) ->
   popup = (e.currentTarget as HTMLElement).closest('[role="menu"]') as HTMLElement | null
   popup?.focus()
 
-# How an alignment reads along a vertical side, along a horizontal one,
-# and as the two words of a transform origin.
-ACROSS = {
-  start: { vertical: 'span-right', horizontal: 'span-bottom', x: 'left', y: 'top' }
-  center: { vertical: '', horizontal: '', x: 'center', y: 'center' }
-  end: { vertical: 'span-left', horizontal: 'span-top', x: 'right', y: 'bottom' }
-} as const
-
-# The margin that faces the trigger from each side, and the origin that
-# faces it.
-FACING = {
-  bottom: { margin: 'marginTop', origin: (a: Across) -> "#{a.x} top" }
-  top: { margin: 'marginBottom', origin: (a: Across) -> "#{a.x} bottom" }
-  left: { margin: 'marginRight', origin: (a: Across) -> "right #{a.y}" }
-  right: { margin: 'marginLeft', origin: (a: Across) -> "left #{a.y}" }
-} as const
-type Across = (typeof ACROSS)[Align]
-
 counter = 0
 mint = (part: string): string -> "rip-menu-#{part}-#{counter += 1}"
-
-# A try tactic cannot cross the axes without transposing the size, so the
-# cross-axis fallbacks are rules, with the offset and alignment as the
-# popup's own custom properties.
-styles = CSSStyleSheet.new()
-styles.replaceSync '''
-  @position-try --rip-menu-below { position-area: bottom var(--rip-menu-across,); margin: var(--rip-menu-offset) 0 0 0; }
-  @position-try --rip-menu-above { position-area: top var(--rip-menu-across,); margin: 0 0 var(--rip-menu-offset) 0; }
-'''
-document.adoptedStyleSheets.push(styles)
