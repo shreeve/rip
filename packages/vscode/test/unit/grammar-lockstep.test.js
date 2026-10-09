@@ -198,3 +198,27 @@ describe('hyphenated attribute lockstep (grammar ⇄ compiler)', () => {
       .toContain("createElement('data')");
   });
 });
+
+
+describe('word-shaped operator lockstep (editor grammars)', () => {
+  const operatorRule = grammar.patterns.find((p) =>
+    typeof p.match === 'string' && p.match.includes('(is|isnt)'));
+  const hljs = readFileSync(
+    path.resolve(import.meta.dir, '..', '..', '..', 'highlight', 'hljs-rip.js'), 'utf8');
+
+  test('TextMate gives each word operator its symbol scope and wordlike, so it never reads as an identifier', () => {
+    expect(operatorRule.captures['6'].name)
+      .toBe('keyword.operator.comparison.rip keyword.operator.wordlike.rip');
+    expect(operatorRule.captures['7'].name)
+      .toBe('keyword.operator.logical.rip keyword.operator.wordlike.rip');
+    for (const [source, slot] of [['is', 6], ['isnt', 6], ['and', 7], ['or', 7], ['not', 7]]) {
+      const match = new RegExp(operatorRule.match).exec(source);
+      expect(match[slot]).toBe(source);
+    }
+  });
+
+  test('Vim and highlight.js class the five words as keywords', () => {
+    expect(vimSyntax).toMatch(/syn keyword ripKeyword\s+and or not is isnt/);
+    expect(hljs).toMatch(/'and', 'or', 'not', 'is', 'isnt'/);
+  });
+});

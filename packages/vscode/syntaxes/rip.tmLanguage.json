@@ -536,7 +536,7 @@
 
     {"comment": "=== KEYWORDS ==="},
     {
-      "comment": "expression operators — keyword.operator, never keyword.control: typeof/instanceof/delete/in/of match TS's taxonomy (and its colors). The wordy spellings take the scope of the symbol they lower to, so `is` reads like `===` and `and` like `&&`. for-loop in/of never reaches here (the for rule above owns them), and the constructor rule owns `new Foo` — this bare `new` keeps the same scope it carries there.",
+      "comment": "expression operators — keyword.operator, never keyword.control: typeof/instanceof/delete/in/of match TS's taxonomy (and its colors). The wordy spellings take the scope of the symbol they lower to, so `is` reads like `===` and `and` like `&&`. The five WORD-shaped ones (`is`, `isnt`, `and`, `or`, `not`) carry keyword.operator.wordlike beside that scope: Dark+ and its descendants paint keyword.operator as plain text, which a symbol survives (it is legible as punctuation uncolored) and a word does not — `not x` in plain text is two identifiers. Those themes paint wordlike in the same keyword color as keyword.operator.expression and keyword.operator.new, so the five read like typeof/in/of/new rather than like the names beside them. for-loop in/of never reaches here (the for rule above owns them), and the constructor rule owns `new Foo` — this bare `new` keeps the same scope it carries there.",
       "match": "\\b(?:(typeof)|(instanceof)|(delete)|(in)|(of)|(is|isnt)|(and|or|not)|(new))\\b",
       "captures": {
         "1": { "name": "keyword.operator.expression.typeof.rip" },
@@ -544,8 +544,8 @@
         "3": { "name": "keyword.operator.expression.delete.rip" },
         "4": { "name": "keyword.operator.expression.in.rip" },
         "5": { "name": "keyword.operator.expression.of.rip" },
-        "6": { "name": "keyword.operator.comparison.rip" },
-        "7": { "name": "keyword.operator.logical.rip" },
+        "6": { "name": "keyword.operator.comparison.rip keyword.operator.wordlike.rip" },
+        "7": { "name": "keyword.operator.logical.rip keyword.operator.wordlike.rip" },
         "8": { "name": "keyword.operator.new.rip" }
       }
     },
