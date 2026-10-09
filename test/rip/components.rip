@@ -1191,6 +1191,124 @@ code 'event handler with method reference', '''
   };
   '''
 
+code 'a `;` inside a handler arrow ends no line: the element keeps its children', '''
+  export A = component
+    add: -> 1
+    render
+      form @submit: ((e) -> e.preventDefault(); @add())
+        input
+  ''', '''
+  export const A = class extends __Component {
+    _init(__given) {
+    }
+    add() {
+      return 1;
+    }
+    _create() {
+      this._el0 = document.createElement('form');
+      this._el0.setAttribute('data-part', 'A');
+      this._el0.addEventListener('submit', (e_) => __batch(() => (e => {
+        e.preventDefault();
+        return this.add();
+      })(e_)));
+      this._el1 = document.createElement('input');
+      this._el0.appendChild(this._el1);
+      return this._el0;
+    }
+  };
+  '''
+
+code 'an @member call after a `;` inside a handler arrow is a call, never an event directive', '''
+  export A = component
+    go: -> 1
+    render
+      div
+        button @click: (-> stop(); @go())
+        p 'after'
+  ''', '''
+  export const A = class extends __Component {
+    _init(__given) {
+    }
+    go() {
+      return 1;
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._el1 = document.createElement('button');
+      this._el1.addEventListener('click', (e) => __batch(() => (() => {
+        stop();
+        return this.go();
+      })(e)));
+      this._el0.appendChild(this._el1);
+      this._el2 = document.createElement('p');
+      this._t0 = document.createTextNode("after");
+      this._el2.appendChild(this._t0);
+      this._el0.appendChild(this._el2);
+      return this._el0;
+    }
+  };
+  '''
+
+code 'a one-line arrow body owns its `;`: the element keeps its children', '''
+  export A = component
+    add: -> 1
+    render
+      form @submit: -> it.preventDefault(); @add()
+        input
+  ''', '''
+  export const A = class extends __Component {
+    _init(__given) {
+    }
+    add() {
+      return 1;
+    }
+    _create() {
+      this._el0 = document.createElement('form');
+      this._el0.setAttribute('data-part', 'A');
+      this._el0.addEventListener('submit', (e) => __batch(() => (it => {
+        it.preventDefault();
+        return this.add();
+      })(e)));
+      this._el1 = document.createElement('input');
+      this._el0.appendChild(this._el1);
+      return this._el0;
+    }
+  };
+  '''
+
+code 'an @member call after a `;` in a one-line arrow body is a call, never an event directive', '''
+  export A = component
+    go: -> 1
+    render
+      div
+        button @click: -> it.stopPropagation(); @go()
+        p 'after'
+  ''', '''
+  export const A = class extends __Component {
+    _init(__given) {
+    }
+    go() {
+      return 1;
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._el1 = document.createElement('button');
+      this._el1.addEventListener('click', (e) => __batch(() => (it => {
+        it.stopPropagation();
+        return this.go();
+      })(e)));
+      this._el0.appendChild(this._el1);
+      this._el2 = document.createElement('p');
+      this._t0 = document.createTextNode("after");
+      this._el2.appendChild(this._t0);
+      this._el0.appendChild(this._el2);
+      return this._el0;
+    }
+  };
+  '''
+
 code 'bare @click shorthand binds onClick to its element', '''
   export A = component
     onClick: -> p "clicked"

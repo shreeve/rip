@@ -2846,6 +2846,7 @@ var CLOSERS = new Set([
   "INTERPOLATION_END",
   "HEREGEX_END"
 ]);
+var GROUP_OPENER = { __proto__: null, ")": "(", CALL_END: "CALL_START", "]": "[", INDEX_END: "INDEX_START", "}": "{" };
 var COMPONENT_RE = /^[A-Z][A-Za-z0-9]*[a-z][A-Za-z0-9]*$/;
 var INLINE_CONTENT = new Set(["STRING", "STRING_START", "NUMBER", "BOOL", "IDENTIFIER", "PROPERTY", "@", "(", "[", "{"]);
 var LINE_BREAKS = new Set(["INDENT", "OUTDENT", "TERMINATOR"]);
@@ -2924,15 +2925,42 @@ function rewriteRender(tokens, mintId, fail) {
     }
     return k;
   };
+  const semicolonInArrowBody = (k) => {
+    let depth = 0;
+    for (let i = k - 1;i >= 0; i--) {
+      if (counter.on)
+        counter.n++;
+      const t = out[i];
+      if (CLOSERS.has(t.kind))
+        depth++;
+      else if (OPENERS.has(t.kind)) {
+        if (depth === 0)
+          return false;
+        depth--;
+      } else if ((t.kind === "->" || t.kind === "=>") && depth === 0) {
+        return true;
+      } else if (t.kind === "INDENT" || t.kind === "OUTDENT" || t.kind === "RENDER" || t.kind === "TERMINATOR" && t.value !== ";") {
+        return false;
+      }
+    }
+    return false;
+  };
   const startsWithTag = (current) => {
     let j = out.length;
     while (j > 0 && tokAt(out, j, current)?.kind === "OUTDENT") {
       j = skipBalancedPair(out, j - 1, "OUTDENT", "INDENT", current);
     }
+    const opener = GROUP_OPENER[current?.kind];
+    if (opener && j === out.length)
+      j = skipBalancedPair(out, j - 1, current.kind, opener, current);
     while (j > 0) {
       if (counter.on)
         counter.n++;
       const pt = out[j - 1].kind;
+      if (pt === "TERMINATOR" && out[j - 1].value === ";" && semicolonInArrowBody(j - 1)) {
+        j--;
+        continue;
+      }
       if (pt === "TERMINATOR" || pt === "RENDER")
         break;
       if (pt === "OUTDENT") {
@@ -2976,6 +3004,10 @@ function rewriteRender(tokens, mintId, fail) {
         if (depth === 0)
           return 1;
         depth--;
+      } else if (t === "TERMINATOR" && out[k].value === ";") {
+        if (depth === 0 && semicolonInArrowBody(k))
+          return 1;
+        continue;
       } else if (t === "TERMINATOR" || t === "RENDER" || t === "INDENT" || t === "OUTDENT") {
         break;
       }
@@ -32294,7 +32326,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "2a7792b5d9ddd901";
+var compilerBuild = () => "dbf99639bb5de536";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
