@@ -1195,7 +1195,7 @@ code 'a `;` inside a handler arrow ends no line: the element keeps its children'
   export A = component
     add: -> 1
     render
-      form @submit: ((e) -> e.preventDefault(); @add())
+      form @submit: (-> it.preventDefault(); @add())
         input
   ''', '''
   export const A = class extends __Component {
@@ -1207,10 +1207,10 @@ code 'a `;` inside a handler arrow ends no line: the element keeps its children'
     _create() {
       this._el0 = document.createElement('form');
       this._el0.setAttribute('data-part', 'A');
-      this._el0.addEventListener('submit', (e_) => __batch(() => (e => {
-        e.preventDefault();
+      this._el0.addEventListener('submit', (e) => __batch(() => (it => {
+        it.preventDefault();
         return this.add();
-      })(e_)));
+      })(e)));
       this._el1 = document.createElement('input');
       this._el0.appendChild(this._el1);
       return this._el0;
