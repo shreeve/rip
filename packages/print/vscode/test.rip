@@ -68,10 +68,10 @@ test "a markdown page indents its lists inside the text column, since the page's
 
 test "a markdown page reads as a page on screen and fills a Letter page when printed", ->
   html = generateMarkdownHtml 'x.md', '# T\n'
-  ok html.includes('html { font-size: 15px; }')
+  ok html.includes('html { font-size: 16px; }')
   ok html.includes('max-width: 8.5in; margin: 0 auto; padding: 0.5in;')
   ok html.includes('@page { size: letter; margin: 0.5in; }')
-  ok html.includes('html { font-size: 11pt; }')
+  ok html.includes('html { font-size: 12pt; }')
   ok html.includes('body { max-width: none; padding: 0;')
   ok html.includes('h1, h2, h3, h4 { break-after: avoid; }')
   ok html.includes('pre { white-space: pre-wrap; overflow-wrap: anywhere;')
