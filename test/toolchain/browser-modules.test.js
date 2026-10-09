@@ -259,6 +259,90 @@ describe('assembleBundle', () => {
     }
   });
 
+  test('a package contributes the modules its imports reach and nothing else under its root', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rip-pkg-'));
+    try {
+      const pkg = join(dir, 'kit');
+      mkdirSync(join(pkg, 'tmp-corpus'), { recursive: true });
+      mkdirSync(join(pkg, 'test'));
+      writeFileSync(join(pkg, 'package.json'), JSON.stringify({
+        name: 'rip/kit',
+        exports: { '.': './kit.rip', './tools': './tools.rip' },
+        rip: { browser: true },
+      }));
+      writeFileSync(join(pkg, 'kit.rip'), "import { a } from './lib/a.rip'\nexport ok = a");
+      mkdirSync(join(pkg, 'lib'));
+      writeFileSync(join(pkg, 'lib', 'a.rip'), "import { b } from '../b.rip'\nexport a = b");
+      writeFileSync(join(pkg, 'b.rip'), 'export b = 1');
+      writeFileSync(join(pkg, 'tools.rip'), 'export tools = 2');
+      writeFileSync(join(pkg, 'unreached.rip'), 'export unreached = 3');
+      writeFileSync(join(pkg, 'test.rip'), "import { readFileSync } from 'node:fs'");
+      writeFileSync(join(pkg, 'tmp-corpus', 'stray.rip'), "import { readFileSync } from 'node:fs'\nexport bytes = readFileSync('x')");
+      writeFileSync(join(pkg, 'test', 'helper.rip'), 'export helper = 4');
+      writeFileSync(join(pkg, 'escape.rip'), "import { x } from '../x.rip'\nexport escape = x");
+      writeFileSync(join(pkg, 'bare.rip'), "import { b } from './b'\nexport bare = b");
+
+      // The bare import admits the entry and its relative closure; the
+      // stray server-only file is never read, so it cannot fail assembly.
+      const bare = assembleBundle({
+        modules: { 'routes/index.rip': "import { ok } from 'rip/kit'\nexport value = ok" },
+        packagesDir: dir,
+      });
+      expect(Object.keys(bare.modules).sort()).toEqual([
+        'rip/kit/b.rip',
+        'rip/kit/kit.rip',
+        'rip/kit/lib/a.rip',
+        'routes/index.rip',
+      ]);
+      expect(bare.inputHashes.map(entry => entry.path).sort()).toEqual([
+        join(pkg, 'b.rip'),
+        join(pkg, 'kit.rip'),
+        join(pkg, 'lib', 'a.rip'),
+        join(pkg, 'package.json'),
+      ]);
+      expect(bare.watchRoots).toEqual([pkg]);
+
+      // A subpath admits exactly its own closure, and the published
+      // program resolves it by path with the entry under its canonical name.
+      const list = assembleRipBundle({
+        modules: { 'routes/index.rip': "import { tools } from 'rip/kit/tools'\nexport value = tools" },
+        packagesDir: dir,
+      });
+      expect(list.map(([path]) => path)).toEqual(['rip/kit/tools.rip', 'routes/index.rip']);
+
+      // A reached path under a skipped tree or a hidden segment, a missing
+      // file, and a relative import that leaves the package each reject at
+      // the import.
+      expect(() => assembleBundle({
+        modules: { 'routes/index.rip': "import { helper } from 'rip/kit/test/helper'" },
+        packagesDir: dir,
+      })).toThrow(/'rip\/kit\/test\/helper\.rip', which 'rip\/kit' does not serve/);
+      expect(() => assembleBundle({
+        modules: { 'routes/index.rip': "import { secret } from 'rip/kit/.private/secret'" },
+        packagesDir: dir,
+      })).toThrow(/'rip\/kit\/\.private\/secret\.rip', which 'rip\/kit' does not serve/);
+      expect(() => assembleBundle({
+        modules: { 'routes/index.rip': "import { nope } from 'rip/kit/nope'" },
+        packagesDir: dir,
+      })).toThrow(/'rip\/kit\/nope\.rip', which 'rip\/kit' does not hold/);
+      expect(() => assembleBundle({
+        modules: { 'routes/index.rip': "import { bare } from 'rip/kit/bare'" },
+        packagesDir: dir,
+      })).toThrow(/'rip\/kit\/bare\.rip' imports '\.\/b', which is not a Rip module — did you mean '\.\/b\.rip'\?/);
+      expect(() => assembleBundle({
+        modules: { 'routes/index.rip': "import { escape } from 'rip/kit/escape'" },
+        packagesDir: dir,
+      })).toThrow(/'rip\/kit\/escape\.rip' imports '\.\.\/x\.rip', which leaves package 'rip\/kit'/);
+      // Reached, the stray file fails as it should: by name, at its import.
+      expect(() => assembleBundle({
+        modules: { 'routes/index.rip': "import { bytes } from 'rip/kit/tmp-corpus/stray'" },
+        packagesDir: dir,
+      })).toThrow(/'rip\/kit\/tmp-corpus\/stray\.rip' imports 'node:fs'/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('a root-relative App id cannot collide with the embedded App package', () => {
     expect(() => assembleBundle({
       modules: { 'rip/app/index.rip': 'export page = 1' },

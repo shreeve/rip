@@ -10,10 +10,10 @@
 // import/default conditions), then main, then <pkg>.rip / index.rip.
 // Packages with no resolvable entry (editor extensions) are skipped.
 // Every other `.rip` file a package holds is served by its path,
-// `rip/<pkg>/<path>.rip`, the same inventory the sites publication
-// ships to the browser, so a subpath means the same file on both
-// sides; an exports "./subpath" key names or renames a target and wins
-// over the path.
+// `rip/<pkg>/<path>.rip`, the rule the sites publication resolves
+// browser imports by (packages/sites/bundle.rip), so a subpath means
+// the same file on both sides; an exports "./subpath" key names or
+// renames a target and wins over the path.
 //
 // Global-install fallback: bare specifiers can also resolve from bun's
 // global node_modules (`bun add -g <pkg>`), which Bun's own resolver
@@ -47,11 +47,13 @@ const packagesDir =
 const globalDir = join(process.env.BUN_INSTALL ?? join(homedir(), '.bun'), 'install', 'global', 'node_modules');
 
 // The files a package serves by path: every `.rip` under it except its
-// node_modules, test, bench, and demo trees and the root verb files,
-// the walk the sites publication makes (packages/sites/bundle.rip).
-const SKIP_DIRS = new Set(['node_modules', 'test', 'bench', 'demo']);
-const VERB_FILES = new Set(['test.rip', 'demo.rip', 'bench.rip']);
-const ripFilesUnder = (dir) => {
+// node_modules, test, bench, and demo trees and the root verb files.
+// The sites publication admits a path by the same two sets, and the
+// browser-safety gate (test/toolchain/browser-packages.test.js)
+// certifies a package over this enumeration.
+export const SKIP_DIRS = new Set(['node_modules', 'test', 'bench', 'demo']);
+export const VERB_FILES = new Set(['test.rip', 'demo.rip', 'bench.rip']);
+export const ripFilesUnder = (dir) => {
   const out = [];
   const walk = (at, depth) => {
     let entries;

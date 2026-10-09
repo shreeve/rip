@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { brotliCompressSync, brotliDecompressSync, constants as zlib } from 'node:zlib'
 import { rash, check } from 'rip/app/rash'
-import { packageInventory } from './bundle.rip'
 import { AccessClient, parseAccessPicture, pumpAccessOutput, writeAccessOutput } from './monitor.rip'
 import { janusErrorMessage, managerRequest, managerRuntime, resolveProject, unreachable, waitManagerStopped } from './control.rip'
 import { configureEdge, edgeControl, edgeFetch } from './edge.rip'
@@ -775,7 +774,7 @@ appHash = (entries, list, ship) ->
 
 # One publication shape for every builder: the hash and the documents
 # derived from it, with the ship set spliced into the inputs.
-appPublicationDocuments = (graph, list, ship, inputHashes, inventories, watchRoots) ->
+appPublicationDocuments = (graph, list, ship, inputHashes, watchRoots) ->
   hash = appHash graph.entries, list, ship
   inputHashes = withShipInputs inputHashes, ship
   {
@@ -785,7 +784,6 @@ appPublicationDocuments = (graph, list, ship, inputHashes, inventories, watchRoo
     ship
     inputs: inputHashes.map (entry) -> entry.path
     inputHashes
-    inventories
     watchRoots
     bundle: JSON.stringify({ hash, list })
     latest: JSON.stringify({ hash })
@@ -799,7 +797,7 @@ appDocuments = (project, graph, ship) ->
     appDir: project.root
     appRoot: project.appRoot
     packagesDir: join(ripRoot(), 'packages')
-  appPublicationDocuments graph, assembled.list, ship, assembled.inputHashes, assembled.inventories, [...assembled.watchRoots, shipDir()]
+  appPublicationDocuments graph, assembled.list, ship, assembled.inputHashes, [...assembled.watchRoots, shipDir()]
 
 # Watch-mode fallback when assemble/compile fails: publish the raw App
 # module snapshot (plus any prior package modules) so the browser can
@@ -813,7 +811,7 @@ publicationFromRawGraph = (graph, prior, ship) ->
   for own id, source of graph.modules
     sources.set id, source if typeof source is 'string'
   list = [...sources.entries()].sort (a, b) -> if a[0] < b[0] then -1 else if a[0] > b[0] then 1 else 0
-  appPublicationDocuments graph, list, ship, (prior?.inputHashes ?? []), (prior?.inventories ?? []), (prior?.watchRoots ?? [])
+  appPublicationDocuments graph, list, ship, (prior?.inputHashes ?? []), (prior?.watchRoots ?? [])
 
 # Reads the ship set itself — waiting out a torn one — unless the caller
 # already holds the set to publish with.
@@ -1571,7 +1569,6 @@ export main = (argv) ->
     appPublication = documents
     appGraph = documents.graph
     appInputsCheck = check (documents.inputHashes or []).map (entry) -> { id: entry.path, hash: entry.hash }
-    appInventoriesCheck = check (documents.inventories or []).map (entry) -> { id: entry.path, hash: entry.hash }
 
   # Disk-truth check: do the App tree AND the assembled inputs hash to
   # what we last published? Unreadable or torn files mean disk is
@@ -1579,12 +1576,7 @@ export main = (argv) ->
   appSettled = ->
     try
       return false unless appModules(project.appRoot, project.appChanges).check is appPublication.graph.check
-      return false unless diskInputsCheck(appPublication.inputs) is appInputsCheck
-      # Membership, not content: a .rip file ADDED to a package root after
-      # enumeration changes assembly output without touching any recorded
-      # per-file hash — only re-enumeration can see it.
-      current = (appPublication.inventories or []).map (entry) -> { id: entry.path, hash: packageInventory(entry.path).hash }
-      check(current) is appInventoriesCheck
+      diskInputsCheck(appPublication.inputs) is appInputsCheck
     catch
       false
 
@@ -1977,7 +1969,7 @@ export main = (argv) ->
     return null unless path?
     documents = JSON.parse readFileSync(path, 'utf8')
     ship = settleShipSet!
-    appPublicationDocuments documents.graph, documents.list, ship, (documents.inputHashes or []), (documents.inventories or []), (documents.watchRoots or [])
+    appPublicationDocuments documents.graph, documents.list, ship, (documents.inputHashes or []), (documents.watchRoots or [])
 
   migrationOutcome = (text) ->
     lines = String(text).split('\n').filter (line) -> line.startsWith('RIP_MIGRATION_OUTCOME=')
@@ -2121,7 +2113,7 @@ export main = (argv) ->
       appCandidate = if documents? then join(generations, "#{body.id}-app.json") else null
       durableWrite targetArtifact, readFileSync(candidateArtifact)
       durableWrite oldArtifact, readFileSync(appArtifact)
-      durableWrite appCandidate, JSON.stringify({ graph: documents.graph, list: documents.list, inputHashes: documents.inputHashes, inventories: documents.inventories, watchRoots: documents.watchRoots }) if appCandidate?
+      durableWrite appCandidate, JSON.stringify({ graph: documents.graph, list: documents.list, inputHashes: documents.inputHashes, watchRoots: documents.watchRoots }) if appCandidate?
       fsyncDirectory generations
       record =
         version: 1

@@ -197,7 +197,12 @@ no `Bun.*`, `node:*`, `process.*`, or `globalThis` in the source, and
 imports only of browser-safe modules (the schema runtime qualifies —
 decimal imports it for coercer registration). Absence of the flag means
 server-only — never write `"browser": false`. When claimed, pin it in
-`test.rip` (see time's "declares browser safety and earns it").
+`test.rip` (see time's "declares browser safety and earns it"). The claim
+covers every file the package serves by path, not only the entry:
+`test/toolchain/browser-packages.test.js` assembles each browser-safe
+package's whole served inventory into a browser publication, so a
+server-only import anywhere under the root fails there, never at a
+site's first import.
 
 Schema coercers register AUTOMATICALLY on the package's main import:
 pulling in the package makes its `~:name` coercers work with no bridge

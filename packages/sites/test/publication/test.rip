@@ -74,6 +74,22 @@ test! 'package and projection source reject malformed UTF-8 bytes', ->
   finally
     rmSync dir, { recursive: true, force: true }
 
+test! 'a package file no import reaches cannot fail a publication', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-publication-stray-')
+  try
+    packageRoot = join dir, 'safe'
+    mkdirSync join(packageRoot, 'tmp-corpus'), { recursive: true }
+    writeFileSync join(packageRoot, 'package.json'), '{"rip":{"browser":true},"exports":{".":"./safe.rip","./dom":"./dom.rip"}}\n'
+    writeFileSync join(packageRoot, 'safe.rip'), "export safe = 1\n"
+    writeFileSync join(packageRoot, 'dom.rip'), "export dom = 2\n"
+    writeFileSync join(packageRoot, 'tmp-corpus', 'debug.rip'), "import { readFileSync } from 'fs'\nexport bytes = readFileSync('x')\n"
+    list = assembleRipBundle
+      modules: { 'index.rip': "import { dom } from 'rip/safe/dom'\nexport answer = dom" }
+      packagesDir: dir
+    eq list.map((entry) -> entry[0]), ['index.rip', 'rip/safe/dom.rip']
+  finally
+    rmSync dir, { recursive: true, force: true }
+
 test! 'missing relative imports and cycles reject before publication', ->
   missing = null
   try

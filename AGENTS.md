@@ -311,7 +311,11 @@ alters surface syntax updates ALL THREE in the same change.
   package on both sides, `rip/<pkg>/<path>.rip`, skipping the package's
   test, bench, demo, and node_modules trees and its root verb files; an
   exports key names or renames a target and wins over the path, and
-  names the surface `rip check --public` audits. It is not a gate.
+  names the surface `rip check --public` audits. It is not a gate. A
+  publication carries the package modules its static imports reach and
+  nothing else under a package root; the whole served inventory of every
+  browser-safe package is certified by
+  `test/toolchain/browser-packages.test.js`.
 - **Comments explain non-obvious intent** — invariants, constraints,
   why a trade-off was taken. Never narrate what code obviously does,
   never reference project history or future plans. A comment that

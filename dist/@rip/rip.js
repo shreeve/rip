@@ -32222,7 +32222,7 @@ function createModuleLoaderImpl({
       const sub = bare[2] ? bare[2].endsWith(".rip") ? bare[2] : `${bare[2]}.rip` : "index.rip";
       const path = `${packageName}/${sub}`;
       if (!inBundle(path)) {
-        throw new Error(`rip: '${from}' imports '${spec}', but '${path}' is not in the bundle — ` + "only packages declaring browser safety travel to the browser");
+        throw new Error(`rip: '${from}' imports '${spec}', but '${path}' is not in the bundle`);
       }
       return { path };
     }
@@ -32326,7 +32326,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "dbf99639bb5de536";
+var compilerBuild = () => "2c7c1d07060b68c9";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

@@ -197,10 +197,7 @@ function createModuleLoaderImpl({
         : 'index.rip';
       const path = `${packageName}/${sub}`;
       if (!inBundle(path)) {
-        throw new Error(
-          `rip: '${from}' imports '${spec}', but '${path}' is not in the bundle — ` +
-          'only packages declaring browser safety travel to the browser',
-        );
+        throw new Error(`rip: '${from}' imports '${spec}', but '${path}' is not in the bundle`);
       }
       return { path };
     }
