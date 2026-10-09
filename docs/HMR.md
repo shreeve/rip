@@ -180,11 +180,14 @@ Defined in detail by [WORKSPACE.md](WORKSPACE.md). HMR-critical facts:
 
 - Watch changes are ordered `from → hash` with Rip source inline;
   ordinary assets stay on HTTP.
-- Manager may publish a candidate even when assemble/compile of the
-  complete program fails: coherent **bytes** reach the browser so the
-  client can quarantine. Validity is the browser’s job on the live path.
-- Compile/activation failure: candidate hash is **rejected**, LKG App
-  stays active, overlay shows, duplicate rejected delivery is ignored.
+- Manager publishes nothing while the complete program does not
+  assemble: the committed publication stays for every fresh boot, and an
+  `assembly { hash, failure }` frame at the live hash puts the assembler’s
+  own message in the overlay; `failure: null` clears it ahead of the next
+  change. Validity of a delivered change is the browser’s job.
+- Compile/activation failure of a delivered change: candidate hash is
+  **rejected**, LKG App stays active, overlay shows, duplicate rejected
+  delivery is ignored.
 - A newer **live** generation after quarantine applies **in place**.
   When `change.from` is the rejected hash, the browser rebases the
   delta onto the living LKG. Walking back to the same LKG hash still
@@ -444,17 +447,14 @@ Router  = remounts on route-table identity change only;
 
 Concrete compression candidates (open work, not a second product):
 
-- **One quarantine disposition** — Manager publish fallback, feed
-  `rejectedHash`, browser rejected set, and overlay clear-on-same-hash
-  should collapse toward a single candidate state machine.
+- **One quarantine disposition** — feed `rejectedHash`, browser
+  rejected set, and overlay clear-on-same-hash should collapse toward a
+  single candidate state machine.
 - **Router ignorance of content** — soft-skip in `rebuild` is correct;
   a sharper model makes content applies unable to request resolve at all.
 - **One “owner frame + view rebuild” primitive** — fewer emitter scars
   (`_hmrBindEffects` / `_hmrRefreshComputeds` / staging `_target`
   special cases) without changing the patch contract.
-- **Manager snapshot on assemble failure** — keep publishing coherent
-  bytes; tighten error-tolerant import closure so the fallback path is
-  as boring as the success path.
 
 Rewrite from green pins and this document, not from memory. Seam
 compression is justified when complexity hurts day-to-day work — not as

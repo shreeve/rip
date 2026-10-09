@@ -301,7 +301,10 @@ alters surface syntax updates ALL THREE in the same change.
   canonical `[modulePath, source]` Rip program. Individual file hashes remain
   private to Manager. Watch-mode Hub messages carry one
   `change { from, hash, list }`; `[path,source]` updates Rip source, `[path]`
-  invalidates an HTTP asset, and `[path,null]` deletes. Client apply verdicts
+  invalidates an HTTP asset, and `[path,null]` deletes. A program that does
+  not assemble publishes nothing: the committed publication stays, and one
+  `assembly { hash, failure }` at the live hash carries the Manager's
+  message to open tabs, `failure: null` clearing it. Client apply verdicts
   are **`reload` | `css` | `update` | `ignore`**. Reconnect subscribes before
   checking `latest.json`; a mismatched complete App hash reloads unless it is
   the quarantined failed candidate, which leaves the last committed App live

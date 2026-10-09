@@ -799,20 +799,6 @@ appDocuments = (project, graph, ship) ->
     packagesDir: join(ripRoot(), 'packages')
   appPublicationDocuments graph, assembled.list, ship, assembled.inputHashes, [...assembled.watchRoots, shipDir()]
 
-# Watch-mode fallback when assemble/compile fails: publish the raw App
-# module snapshot (plus any prior package modules) so the browser can
-# quarantine and show the compile overlay. Coherent bytes, not validity.
-# Hash covers graph.entries (Rip + CSS + assets), matching appDocuments.
-publicationFromRawGraph = (graph, prior, ship) ->
-  sources = Map.new()
-  if prior?.list?
-    for [id, source] in prior.list
-      sources.set id, source if typeof source is 'string'
-  for own id, source of graph.modules
-    sources.set id, source if typeof source is 'string'
-  list = [...sources.entries()].sort (a, b) -> if a[0] < b[0] then -1 else if a[0] > b[0] then 1 else 0
-  appPublicationDocuments graph, list, ship, (prior?.inputHashes ?? []), (prior?.watchRoots ?? [])
-
 # Reads the ship set itself — waiting out a torn one — unless the caller
 # already holds the set to publish with.
 buildAppDocuments = (project, ship = null) ->
@@ -1062,6 +1048,9 @@ export main = (argv) ->
   files = null
   appGraph = null
   appPublication = null
+  # The failure open tabs were last told about, null while the sources
+  # assemble; a retry that fails the same way sends nothing.
+  assemblyFailure = null
   appWatcher = null
   appTimer = null
   appDeadline = null
@@ -1588,8 +1577,8 @@ export main = (argv) ->
         # resume path reschedules it, and release appChain for the fence.
         appReconcile = true
         return
-      quarantined = refreshApp!
-      if quarantined
+      failing = refreshApp!
+      if failing
         # Assembly is failing; looping cannot converge and would spin a
         # full rebuild every 25ms. Leave the work owed — the sweep retries
         # on its own cadence until the sources assemble again.
@@ -1633,11 +1622,16 @@ export main = (argv) ->
       rebuilt = true
     { documents, rebuilt }
 
-  # Returns true when this round left work owed — it published (or kept)
-  # a quarantine because the sources do not assemble, or the browser
-  # runtime ship set on disk is torn or missing and the App published
-  # against the set it last shipped — so the caller retries on the sweep
-  # cadence instead of fixpoint-looping.
+  publishAssembly = (failure) ->
+    publish! 'assembly', { '@': ['/hub'], assembly: { hash: appPublication.hash, failure } }
+
+  # Returns true when this round left work owed — the sources do not
+  # assemble, or the browser runtime ship set on disk is torn or missing
+  # and the App published against the set it last shipped — so the caller
+  # retries on the sweep cadence instead of fixpoint-looping. A failed
+  # assembly commits nothing: the live publication stays on disk for every
+  # fresh boot, and open tabs hear the failure once, in the assembler's
+  # words, until the sources assemble again.
   refreshApp = ->
     owed = false
     ship = null
@@ -1648,28 +1642,28 @@ export main = (argv) ->
       ship = appPublication?.ship
       return true unless ship?.files?.length
       owed = true
-    assembleError = null
     try
       documents = buildAppDocuments! project, ship
     catch error
-      assembleError = error
-      graph = appModules project.appRoot, project.appChanges
-      documents = publicationFromRawGraph graph, appPublication, ship
+      failure = error?.message ?? String(error)
+      unless failure is assemblyFailure
+        assemblyFailure = failure
+        warn "rip-sites: App publication stays at #{appPublication.hash}; the sources do not assemble: #{failure}"
+        publishAssembly! failure
+      return true
+    if assemblyFailure?
+      assemblyFailure = null
+      publishAssembly! null
     ids = changedAppIds appPublication, documents
-    unless assembleError?
-      stabilized = stabilizeAppDocuments! documents
-      documents = stabilized.documents
-      ids = changedAppIds(appPublication, documents) if stabilized.rebuilt
-    else
-      warn "rip-sites: publishing App sources after assemble failure (browser will quarantine): #{String(assembleError)}"
+    stabilized = stabilizeAppDocuments! documents
+    documents = stabilized.documents
+    ids = changedAppIds(appPublication, documents) if stabilized.rebuilt
     if documents.hash is appPublication.hash
       # Output-neutral change (e.g. a package manifest edit that leaves
       # assembly identical): re-baseline from the consumed hashes so the
-      # settled check converges instead of livelocking. Never re-baseline
-      # the quarantine fallback — its inherited inputs describe the PRIOR
-      # successful assembly, not the state that just failed.
-      setAppPublication documents unless assembleError?
-      return assembleError? or owed
+      # settled check converges instead of livelocking.
+      setAppPublication documents
+      return owed
     priorShell = appPublication.graph.entries.some (entry) -> entry.id is 'index.html'
     nextShell = documents.graph.entries.some (entry) -> entry.id is 'index.html'
     if priorShell isnt nextShell
@@ -1683,7 +1677,7 @@ export main = (argv) ->
     # document reload activates it, and a tab that misses the frame sees
     # the new hash in latest.json on reconnect.
     if runtimeChanged then publishReload! else publishChange! change
-    assembleError? or owed
+    owed
 
   startAppWatcher = ->
     return unless args.watchApp and project.appRoot?

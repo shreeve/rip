@@ -773,7 +773,9 @@ export function showHmrOverlay(kind, error) {
 
   const title = kind === 'activate'
     ? 'Rip: update failed to activate'
-    : 'Rip: update failed to compile';
+    : kind === 'assemble'
+      ? 'Rip: App sources do not assemble'
+      : 'Rip: update failed to compile';
   const path = failurePath(error);
   const header = path ? `${title}\n${path}\n\n` : `${title}\n\n`;
   panel.textContent = header + failureText(error);
@@ -1167,7 +1169,13 @@ export async function bootApp(opts = {}) {
 
   if (watch) {
     const latestUrl = opts.latestUrl ?? opts.feed?.latestUrl ?? (opts.url ? sibling(opts.url, 'latest.json') : '/latest.json');
-    feed = app.connectFeed({ hash: () => workspace.hash(), apply: applyChange, reload }, {
+    // The Manager's verdict on the sources: nothing is staged, the live
+    // App keeps running, and the overlay carries the assembler's own words.
+    const assembly = ({ failure }) => {
+      if (failure == null) clearHmrOverlay();
+      else showHmrOverlay('assemble', failure);
+    };
+    feed = app.connectFeed({ hash: () => workspace.hash(), apply: applyChange, reload, assembly }, {
       ...(opts.feed ?? {}),
       latestUrl,
       report,

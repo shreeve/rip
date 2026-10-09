@@ -228,33 +228,33 @@ test! 'watch publication commits one App hash then batches confirmed changes', -
     eq assetChange.list, [['images/rip.png']]
     eq assetChange.hash, JSON.parse(readFileSync(join(dist, 'bundle.json'), 'utf8')).hash
 
-    # Assemble/compile failure still publishes coherent bytes so the browser
-    # can quarantine (WORKSPACE.md / docs/HMR.md). Dist and Hub advance.
+    # A program that does not assemble publishes nothing (WORKSPACE.md /
+    # docs/HMR.md): dist and latest keep the live publication for every
+    # fresh boot, and open tabs hear the failure once, in the assembler's
+    # words.
     stableBundle = JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')
     brokenSource = 'broken = ((\n'
     writeFileSync join(project, 'app', 'routes', 'index.rip'), brokenSource
     waitFor! -> batches.length is 5
-    brokenChange = batches[4][0].change
-    eq brokenChange.from, stableBundle.hash
-    eq brokenChange.list, [['routes/index.rip', brokenSource]]
-    brokenBundle = JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')
-    eq brokenChange.hash, brokenBundle.hash
-    ok brokenBundle.hash isnt stableBundle.hash
+    failure = batches[4][0].assembly
+    eq failure.hash, stableBundle.hash
+    ok failure.failure.includes("'routes/index.rip' failed to compile")
+    eq (JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')).hash, stableBundle.hash
+    eq (JSON.parse readFileSync(join(dist, 'latest.json'), 'utf8')).hash, stableBundle.hash
 
+    # An edit that leaves the sources unassemblable repeats the same
+    # failure and sends nothing; it waits for the program to assemble.
     writeFileSync join(project, 'app', 'styles.css'), 'body { color: crimson; }'
-    waitFor! -> batches.length is 6
-    cssChange = batches[5][0].change
-    eq cssChange.from, brokenBundle.hash
-    eq cssChange.list, [['styles.css']]
-    cssBundle = JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')
-    eq cssChange.hash, cssBundle.hash
+    sleep! 400
+    eq batches.length, 5
 
     recovered = "export Index = component\n  render\n    h1 'Recovered source'\n"
     writeFileSync join(project, 'app', 'routes', 'index.rip'), recovered
     waitFor! -> batches.length is 7
+    eq batches[5][0].assembly, { hash: stableBundle.hash, failure: null }
     recovery = batches[6][0].change
-    eq recovery.from, cssBundle.hash
-    eq recovery.list, [['routes/index.rip', recovered]]
+    eq recovery.from, stableBundle.hash
+    eq recovery.list, [['routes/index.rip', recovered], ['styles.css']]
     eq recovery.hash, (JSON.parse readFileSync(join(dist, 'bundle.json'), 'utf8')).hash
 
     proc.kill 'SIGTERM'

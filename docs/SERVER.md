@@ -188,7 +188,7 @@ postpone publication past 250ms. A slow sweep (default 2s,
 `RIP_APP_SWEEP_MS`) runs the same disk comparison with no event at all —
 covering the App tree and every assembled input (package sources outside
 the App root) against hashes of the bytes the assembly actually consumed —
-and retries work left owed by a failed publication or a quarantined
+and retries work left owed by a failed publication or a failed
 assembly. That is the recovery path for total notification loss, which
 every OS watcher admits (FSEvents drops and rescan flags, inotify queue
 overflow). Normally the sweep is a snapshot-compare no-op.
@@ -234,9 +234,24 @@ linked HTTP URL. HTML and unknown managed assets reload the page.
 
 `from` must equal the browser's current hash. A duplicate whose `hash` is
 already current is harmless. A gap, malformed transition, or ordering
-uncertainty reloads the page rather than attempting delta reconstruction. A
-compile or activation failure quarantines the candidate hash and leaves the
-last committed App live. The browser ignores that same rejected generation;
+uncertainty reloads the page rather than attempting delta reconstruction.
+
+A program that does not assemble publishes nothing. `bundle.json` and
+`latest.json` keep the committed publication, so every fresh boot gets an
+App that activates, and one message carries the Manager's verdict to open
+tabs:
+
+```json
+{ "assembly": { "hash": "APP123", "failure": "rip: 'routes/index.rip' failed to compile …" } }
+```
+
+`hash` is the live hash. The browser shows the failure over the running App
+and stages nothing. A retry that fails the same way sends nothing more, and a
+tab that connects meanwhile boots the committed App and hears nothing until
+the next verdict; the first assembly that succeeds sends
+`{ "hash": "APP123", "failure": null }` ahead of its change. A browser-side compile or activation failure of a
+delivered change quarantines the candidate hash and leaves the last
+committed App live. The browser ignores that same rejected generation;
 the first newer hash reloads and obtains a complete bundle.
 
 On reconnect, the browser subscribes before requesting `/latest.json`. Equal
