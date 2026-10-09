@@ -66,6 +66,22 @@ test "a markdown page indents its lists inside the text column, since the page's
   ok html.includes('ul, ol { padding-left: 1.5em; }')
   ok html.includes('*, *::before, *::after { margin: 0; padding: 0;')
 
+test "a markdown page reads as a page on screen and fills a Letter page when printed", ->
+  html = generateMarkdownHtml 'x.md', '# T\n'
+  ok html.includes('html { font-size: 16px; }')
+  ok html.includes('max-width: 8.5in; margin: 0 auto; padding: 0.75in;')
+  ok html.includes('@page { size: letter; margin: 0.75in; }')
+  ok html.includes('html { font-size: 14pt; }')
+  ok html.includes('body { max-width: none; padding: 0;')
+  ok html.includes('h1, h2, h3, h4 { break-after: avoid; }')
+  ok html.includes('pre { white-space: pre-wrap; overflow-wrap: anywhere;')
+
+test "the markdown page's CSS is print.rip's, line for line", ->
+  css = (text) ->
+    at = text.indexOf '*, *::before, *::after'
+    (line.trim() for line in text.slice(at, text.indexOf('</style>', at)).split('\n') when line.trim())
+  eq css(readFileSync(join(import.meta.dir, 'src', 'printer.js'), 'utf8')), css(readFileSync(join(import.meta.dir, '..', 'print.rip'), 'utf8'))
+
 test "extension.js registers exactly the contributed commands", ->
   source = readFileSync join(import.meta.dir, 'src', 'extension.js'), 'utf8'
   ok source.includes("registerCommand('rip-print.printFile'")
