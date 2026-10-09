@@ -105,7 +105,7 @@ export default __configs;
       // through the on-disk cache (src/cacher.js): a spawned
       // process re-reads the emission of an unchanged module instead
       // of recompiling it.
-      const { code, map, runtimes } = compileCached(source, { path: args.path, runtimeDelivery: 'import' });
+      const { code, map, runtimes } = await compileCached(source, { path: args.path, runtimeDelivery: 'import' });
       // The reporter must exist before the module's first effect can
       // run — awaited here, ahead of the module body's evaluation.
       if (runtimes.has('reactive')) await installReactiveReporter();

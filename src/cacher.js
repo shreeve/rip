@@ -17,9 +17,13 @@ import { mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFile
 import { join } from 'path';
 
 // The compiler loads on the first miss: a process whose every .rip is a
-// hit never parses parser.js and emitter.js at all.
+// hit never parses parser.js and emitter.js at all. It loads through
+// import(), never require(): a miss can arrive while compiler.js sits
+// fetched but unevaluated in the importer's own graph (a test that
+// imports compiler.js, then a .rip module), and Bun refuses to
+// require() a module in that state ("require() async module").
 let compiler = null;
-const compile = (source, options) => (compiler ??= require('./compiler.js').compile)(source, options);
+const compile = async (source, options) => (compiler ??= (await import('./compiler.js')).compile)(source, options);
 
 const root = join(import.meta.dir, '..');
 const disabled = /^(1|true|yes)$/i.test(process.env.RIP_NO_CACHE ?? '');
@@ -56,14 +60,14 @@ const write = (at, entry) => {
 
 const triple = ({ code, map, runtimes }) => ({ code, map, runtimes: new Set(runtimes) });
 
-export const compileCached = (source, { path, runtimeDelivery }) => {
-  if (disabled) return triple(compile(source, { path, runtimeDelivery }));
+export const compileCached = async (source, { path, runtimeDelivery }) => {
+  if (disabled) return triple(await compile(source, { path, runtimeDelivery }));
   fingerprint ??= computeFingerprint();
   const key = new Bun.CryptoHasher('sha256').update(`${fingerprint}\0${path}\0${runtimeDelivery}\0`).update(source).digest('hex');
   const at = join(dir, `${key}.json`);
   const hit = read(at);
   if (hit) return triple(hit);
-  const out = triple(compile(source, { path, runtimeDelivery }));
+  const out = triple(await compile(source, { path, runtimeDelivery }));
   write(at, { code: out.code, map: out.map, runtimes: [...out.runtimes] });
   return out;
 };
