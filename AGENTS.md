@@ -409,7 +409,14 @@ alters surface syntax updates ALL THREE in the same change.
  report it asserts is written after that. A test waits for the
  CONDITION its assertion needs (read the child's streams as they
  arrive), never a fixed sleep after an earlier readiness signal; a stub
- that answers late proves such a bet deterministically. If a logged
+ that answers late proves such a bet deterministically. A third was
+ not timing: a failure only the FIRST run after a `src/` edit shows is
+ a cold compile cache, since the fingerprint covers every `src/**/*.js`
+ and a rerun hits. `test/ui/branch-order.test.js` imports
+ `src/compiler.js` before a `.rip`, and the cacher's lazy `require()`
+ of a compiler that graph held unevaluated threw "require() async
+ module" on every miss. Reproduce such a failure with
+ `RIP_CACHE_DIR=$(mktemp -d)` before calling it load. If a logged
  run fails, capture the test NAME
  verbatim — identifying it matters more than the green rerun;
  `test:all` repeats each failing lane's `(fail)` and `✗` lines after

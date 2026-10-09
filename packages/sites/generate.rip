@@ -96,7 +96,7 @@ plugin =
     build.onLoad { filter: /\.rip$/ }, (args) ->
       bytes = readFileSync args.path
       record args.path, bytes
-      { code } = compiler(bytes.toString('utf8'), { path: args.path, runtimeDelivery: 'import' })
+      { code } = compiler!(bytes.toString('utf8'), { path: args.path, runtimeDelivery: 'import' })
       { contents: rewriteMeta(code, args.path), loader: 'js' }
     build.onLoad { filter: /\.[mc]?js$/ }, (args) ->
       bytes = readFileSync args.path

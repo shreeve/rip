@@ -3,7 +3,8 @@
 // from the entry rather than recompiled; the compiler fingerprint
 // invalidates; torn entries, a disabled cache, and an unwritable
 // directory all degrade to a plain compile; concurrent writers leave
-// one whole entry; a compile error is never cached.
+// one whole entry; a compile error is never cached; the compiler
+// loads only on a miss, whatever the importer's graph already holds.
 import { test, expect, beforeAll, afterAll, describe } from 'bun:test';
 import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
@@ -20,7 +21,7 @@ const EMIT = `
 const { compileCached } = await import(process.argv[2]);
 const { readFileSync } = await import('fs');
 const path = process.argv[3];
-const { code, map, runtimes } = compileCached(readFileSync(path, 'utf8'), { path, runtimeDelivery: 'import' });
+const { code, map, runtimes } = await compileCached(readFileSync(path, 'utf8'), { path, runtimeDelivery: 'import' });
 process.stdout.write(JSON.stringify({ code, map, runtimes: [...runtimes] }));
 `;
 
@@ -101,6 +102,52 @@ describe('compile cache: hit and miss', () => {
     expect(r.stdout).toBe('hi from cache\n');
     expect(r.stderr).toBe('');
     expect(existsSync(cacheDir)).toBeFalse();
+  });
+});
+
+describe('compile cache: loading the compiler', () => {
+  // The compiler loads on the first miss. A miss can arrive while
+  // compiler.js is fetched but not yet evaluated in the importer's own
+  // graph — Bun refuses require() of a module in that state, so an
+  // ordering like this one must still compile on an empty cache.
+  const writeOrdered = (name, body) => {
+    const at = join(dir, name);
+    writeFileSync(join(dir, 'answer.rip'), 'export answer = 6 * 7\n');
+    writeFileSync(at, `import { compile } from ${JSON.stringify(join(ROOT, 'src', 'compiler.js'))};\nimport { answer } from './answer.rip';\n${body}`);
+    return at;
+  };
+
+  test('a module that imports the compiler before a .rip runs on an empty cache', () => {
+    const cacheDir = fresh('cold-run');
+    const script = writeOrdered('ordered.js', 'console.log(typeof compile, answer);\n');
+    const r = run(script, withCache(cacheDir));
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe('function 42\n');
+    expect(jsonEntries(cacheDir)).toHaveLength(1);
+  });
+
+  test('a test file that imports the compiler before a .rip passes on an empty cache', () => {
+    const cacheDir = fresh('cold-test');
+    const file = writeOrdered('ordered.test.js', "import { test, expect } from 'bun:test';\ntest('ordered', () => expect([typeof compile, answer]).toEqual(['function', 42]));\n");
+    const r = spawnSync('bun', ['test', `--preload=${LOADER}`, file], { encoding: 'utf8', env: withCache(cacheDir), cwd: dir });
+    expect(r.stderr).not.toContain('Unhandled error');
+    expect(r.stderr).toContain(' 1 pass');
+    expect(r.stderr).toContain(' 0 fail');
+    expect(r.status).toBe(0);
+    expect(jsonEntries(cacheDir)).toHaveLength(1);
+  });
+  test('a process whose every .rip is a hit never loads the compiler', () => {
+    const cacheDir = fresh('lazy');
+    writeFileSync(join(dir, 'answer.rip'), 'export answer = 6 * 7\n');
+    const script = join(dir, 'lazy.js');
+    writeFileSync(script, "import { answer } from './answer.rip';\nconst loaded = Object.keys(require.cache).filter((k) => /\\/src\\/(compiler|parser|emitter)\\.js$/.test(k)).length;\nconsole.log(answer, loaded);\n");
+    const miss = run(script, withCache(cacheDir));
+    const hit = run(script, withCache(cacheDir));
+    expect(miss.stderr).toBe('');
+    expect(miss.stdout).toBe('42 3\n');
+    expect(hit.stderr).toBe('');
+    expect(hit.stdout).toBe('42 0\n');
   });
 });
 
