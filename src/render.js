@@ -43,6 +43,8 @@ const OPENERS = new Set(['(', '[', '{', 'CALL_START', 'INDEX_START', 'PARAM_STAR
   'PICK_START', 'OPTPICK_START', 'STRING_START', 'INTERPOLATION_START', 'HEREGEX_START']);
 const CLOSERS = new Set([')', ']', '}', 'CALL_END', 'INDEX_END', 'PARAM_END',
   'PICK_END', 'STRING_END', 'INTERPOLATION_END', 'HEREGEX_END']);
+// The opener each bracket closer pairs with, for skipping a whole group.
+const GROUP_OPENER = { __proto__: null, ')': '(', 'CALL_END': 'CALL_START', ']': '[', 'INDEX_END': 'INDEX_START', '}': '{' };
 
 // PascalCase component names (an interior lowercase letter
 // distinguishes `Counter` from ALLCAPS constants).
@@ -143,6 +145,29 @@ export function rewriteRender(tokens, mintId, fail) {
     return k;
   };
 
+  // Is the `;` at out[k] inside a one-line arrow body? An arrow's body
+  // runs to the end of its physical line, `;`-separated statements
+  // included (`-> a(); b()` is one function), so a `->`/`=>` earlier on
+  // the line at the same bracket depth owns the `;`.
+  const semicolonInArrowBody = (k) => {
+    let depth = 0;
+    for (let i = k - 1; i >= 0; i--) {
+      if (counter.on) counter.n++;
+      const t = out[i];
+      if (CLOSERS.has(t.kind)) depth++;
+      else if (OPENERS.has(t.kind)) {
+        if (depth === 0) return false;
+        depth--;
+      } else if ((t.kind === '->' || t.kind === '=>') && depth === 0) {
+        return true;
+      } else if (t.kind === 'INDENT' || t.kind === 'OUTDENT' || t.kind === 'RENDER' ||
+                 (t.kind === 'TERMINATOR' && t.value !== ';')) {
+        return false;
+      }
+    }
+    return false;
+  };
+
   // Does the current logical construct start with a template tag —
   // i.e. is the walk inside a tag-head argument list?
   const startsWithTag = (current) => {
@@ -150,9 +175,17 @@ export function rewriteRender(tokens, mintId, fail) {
     while (j > 0 && tokAt(out, j, current)?.kind === 'OUTDENT') {
       j = skipBalancedPair(out, j - 1, 'OUTDENT', 'INDENT', current);
     }
+    // A closer probes from before its opener: the group's insides — a
+    // `;` within `(-> a(); @b())` among them — never stand for the line.
+    const opener = GROUP_OPENER[current?.kind];
+    if (opener && j === out.length) j = skipBalancedPair(out, j - 1, current.kind, opener, current);
     while (j > 0) {
       if (counter.on) counter.n++;
       const pt = out[j - 1].kind;
+      if (pt === 'TERMINATOR' && out[j - 1].value === ';' && semicolonInArrowBody(j - 1)) {
+        j--;
+        continue;
+      }
       if (pt === 'TERMINATOR' || pt === 'RENDER') break;
       if (pt === 'OUTDENT') {
         j = skipBalancedPair(out, j - 2, 'OUTDENT', 'INDENT', current);
@@ -199,6 +232,12 @@ export function rewriteRender(tokens, mintId, fail) {
       else if (OPENERS.has(t)) {
         if (depth === 0) return 1;
         depth--;
+      } else if (t === 'TERMINATOR' && out[k].value === ';') {
+        // A `;` separates statements on one physical line; it ends no
+        // bracket group, so an opener before it still encloses the
+        // cursor — and a one-line arrow body that owns it does too.
+        if (depth === 0 && semicolonInArrowBody(k)) return 1;
+        continue;
       } else if (t === 'TERMINATOR' || t === 'RENDER' || t === 'INDENT' || t === 'OUTDENT') {
         break;
       }
