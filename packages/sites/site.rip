@@ -686,7 +686,7 @@ dispatchRequest = (req) ->
   c = createContext(req, match.params, url, pathname)
 
   # Run raw filter before body parsing (e.g., fix content-type)
-  _rawFilter?.(req) if method in ['POST', 'PUT', 'PATCH']
+  _rawFilter?!(req) if method in ['POST', 'PUT', 'PATCH']
 
   # Pre-parse body and query for sync read() — baked in, zero ceremony
   data = {}
@@ -832,7 +832,7 @@ export hub = (opts: {
     if auth is true
       bail! unless session.authenticated is true
     else if typeof auth is 'function'
-      bail! unless auth.call(@)
+      bail! unless auth.call!(@)
     kind = (@req.header('sec-websocket-frame') or '').toLowerCase()
     if kind is 'open' then return open.call(@)
     if kind is 'close' then return close.call(@)

@@ -372,7 +372,7 @@ export csrf: (opts: CsrfOptions) => Middleware = (opts: Partial<CsrfOptions> = {
   policy = cookieOptions name, opts, false
 
   (request, next) ->
-    return next! if exempt request
+    return next! if exempt! request
     raw = cookies(request)[name]
     parts = raw?.split('.') or []
     token = if parts.length is 2 and verify!(parts[0], parts[1], secret) then parts[0] else null

@@ -276,5 +276,13 @@ test! 'prototype-named cookies are data', ->
   eq response.status, 200
   ok response.headers.get('set-cookie').startsWith 'toString='
 
+test! 'an async exempt is awaited, never read as a truthy promise', ->
+  post = -> Request.new 'http://worker/state', { method: 'POST' }
+  reached = -> Response.new 'reached'
+  refused = csrf secret: 'csrf-secret', exempt: (-> Promise.resolve false)
+  eq (refused! post(), reached).status, 403
+  waived = csrf secret: 'csrf-secret', exempt: (-> Promise.resolve true)
+  eq (waived! post(), reached).status, 200
+
 test! 'signed sessions and CSRF remain request-local', -> runMode! false
 test! 'encrypted sessions remain opaque and authenticated', -> runMode! true

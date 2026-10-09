@@ -633,3 +633,23 @@ test! 'hub registers a Bam bridge that admits authenticated sessions', ->
     headers: { 'sec-websocket-frame': 'close', 'x-auth': 'yes' }
   })
   eq quiet.status, 204
+
+test! 'an async hub auth is awaited, never read as a truthy promise', ->
+  resetGlobals()
+  hub
+    bridge: 'hub'
+    auth: -> Promise.resolve(@req.header('x-auth') is 'yes')
+    open: -> { '+': ['/hub'] }
+  open = (headers) -> handle! Request.new('http://test/hub', {
+    method: 'POST'
+    headers: { 'sec-websocket-frame': 'open', ...headers }
+  })
+  eq (open! {}).status, 401
+  eq (open! { 'x-auth': 'yes' }).status, 200
+
+test! 'an async raw filter finishes before the body is parsed', ->
+  resetGlobals()
+  raw (incoming) -> Promise.resolve().then -> incoming.headers.set 'content-type', 'application/json'
+  post '/raw-async' -> { name: read('name') }
+  response = handle! request('POST', '/raw-async', { body: '{"name":"Amy"}' })
+  eq response.json!, { name: 'Amy' }
