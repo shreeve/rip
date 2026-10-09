@@ -419,6 +419,40 @@ test "every builtin directive exports name + check/apply/verify", ->
     testOk typeof m.apply is 'function', "#{name}.apply"
     testOk typeof m.verify is 'function', "#{name}.verify"
 
+# ==[ Directives: firewall check ]==
+
+console.log "\nDirectives: firewall check"
+
+# Drives firewall.check against scripted ufw/getent output. A command the
+# script does not list exits 2 with no output, as getent does for a
+# service it does not know.
+firewallRun = (op, rule, status, services = {}) ->
+  outputs =
+    'which ufw': ''
+    'ufw status': 'Status: active'
+    'ufw status verbose': status
+  outputs["getent services #{name}"] = line for own name, line of services
+  prev = setExec (argv) ->
+    text = outputs[argv.join ' ']
+    { exitCode: (if text? then 0 else 2), stdout: Buffer.from(text ?? ''), stderr: Buffer.from('') }
+  try
+    directives.firewall[op] null, { allow: [{ args: [rule] }] }
+  finally
+    setExec prev
+
+test "an allow rule present by name is ok", ->
+  eq firewallRun('check', 'OpenSSH', 'OpenSSH ALLOW IN Anywhere'), 'ok'
+
+test "an allow rule present by its resolved port is ok", ->
+  eq firewallRun('check', 'ssh', '22/tcp ALLOW IN Anywhere', { ssh: 'ssh 22/tcp' }), 'ok'
+
+test "an absent allow rule for a service getent does not know is drift", ->
+  eq firewallRun('check', 'nosuchservice', '22/tcp ALLOW IN Anywhere'), 'drift'
+
+test "verify passes a present allow rule and fails an absent one", ->
+  eq firewallRun('verify', 'ssh', '22/tcp ALLOW IN Anywhere', { ssh: 'ssh 22/tcp' }).map((r) -> r.status), ['pass', 'pass']
+  eq firewallRun('verify', 'nosuchservice', '22/tcp ALLOW IN Anywhere').map((r) -> r.status), ['pass', 'fail']
+
 # ==[ Injection safety across every directive ]==
 
 console.log "\nInjection safety across directives"
