@@ -6,6 +6,7 @@ Design proposals under discussion. The **Tags** column groups by area (`type-sys
 | ---: | ------------------------------------------------------------------------------------ | ---------------------- | ----------- |
 |    1 | [Split `rip/ui` into headless components and `rip/email`](#rfc-1-split-ripui-into-headless-components-and-ripemail) | `packaging`, `runtime` | 🟢 Implemented |
 |    2 | [Context names its provider: `accept name from Provider`](#rfc-2-context-names-its-provider-accept-name-from-provider) | `compiler`, `runtime`, `type-system` | 🟢 Implemented |
+|    3 | [A child notifies its parent through a callback prop](#rfc-3-a-child-notifies-its-parent-through-a-callback-prop) | `compiler`, `runtime`, `type-system` | 🟡 Proposed |
 
 ---
 
@@ -17,8 +18,8 @@ Design proposals under discussion. The **Tags** column groups by area (`type-sys
 
 ### Why
 
-- **The browser layer has no consumer and cannot get one.** Nothing outside the package imports `rip/ui/browser`. medlabs hand-copied a subset into `app/lib/aria.rip` because the package-wide `rip.browser` flag cannot be set on a package that also ships server-only Tailwind code, and the copy is already typed differently from the original.
-- **Tailwind serves nothing.** The only thing that puts it to work is the email `Tailwind` component, which no template uses; the medlabs layout writes style objects. The package's two dependencies exist for it, and its engine compiles at import, about 80 ms over bare Bun startup for every process that loads the email surface.
+- **The browser layer has no consumer and cannot get one.** Nothing outside the package imports `rip/ui/browser`. An application hand-copied a subset into its own library because the package-wide `rip.browser` flag cannot be set on a package that also ships server-only Tailwind code, and the copy is already typed differently from the original.
+- **Tailwind serves nothing.** The only thing that puts it to work is the email `Tailwind` component, which no template uses; the application layouts write style objects. The package's two dependencies exist for it, and its engine compiles at import, about 80 ms over bare Bun startup for every process that loads the email surface.
 - **The primitives work around a v3 defect.** Disposers are stored on elements under `__aria` properties so a re-invocation can tear down the prior one, which the code attributes to a v3 effect dropping its returned cleanup. A compiled probe and `src/runtime/reactive.js` show the v4 effect keeps it.
 
 ### The split
@@ -31,7 +32,7 @@ The compound model Radix and Base UI share: one exported part per concept, unsty
 
 **Native first.** A component uses the platform's own machinery, and a fallback is added only when a supported browser demonstrably lacks the feature. For `Dialog`: `showModal` gives the top layer, modality, an inert background, Escape, focus containment, and focus restore; light dismiss is `closedby`, whose support floor is ruled when `Popover` arrives; transitions are `@starting-style` with discrete transitions; scroll lock is a CSS rule on `body:has(dialog:modal)`. No JavaScript positioning, focus trap, or scroll lock ships.
 
-**Day one is `Dialog`.** No second component lands until its API has been used by the medlabs screen that needs it.
+**Day one is `Dialog`.** No second component lands until its API has been used by an application screen that needs it.
 
 **Demo and spec.** `packages/ui/demo/` is a Rip app, one route per component, styled with Tailwind classes through the vendored browser runtime, not exported. `packages/ui/test/browser/` holds Playwright specs against it on Chromium and WebKit, asserting platform facts: `dialog:modal` matches after the trigger is clicked, the active element is inside, Escape closes, focus returns to the trigger, Tab from the last focusable wraps. A spec needs both engines and a page that mounts the component from a bundle assembled from the demo's modules and the checkout's `dist/@rip`. Neither shape in `test/browser` is that: the smoke server holds inline fixture modules and the publication protocol, and the live harness stands up a full site behind a stub edge on Chromium only. The demo gets its own server of a few lines and its own Playwright config, sharing the installed Playwright and nothing else.
 
@@ -41,13 +42,13 @@ Templates are components, rendered to a string synchronously on Bun. The compile
 
 Styles are strings or objects. The object type is the one the compiler mints for a native tag's `style`, so a `CSSProperties` value passes straight through to a tag; the unitless list is spelled once here and once in the compiler with a lockstep test.
 
-**Day one is exactly what medlabs and the CLI import**: `Email`, `Head`, `Body`, `Preview`, `Container`, `Section`, `Heading`, `Text`, `Link`, `toEmail`, and the `CSSProperties` type, with the rules that make them correct: the XHTML transitional doctype, padding split onto the table cell for Outlook and Klaviyo, the body element carrying background with a zeroed margin, hrefs failing closed on unknown schemes, the plain-text twin, and the preview line.
+**Day one is exactly what the CLI and the application templates import**: `Email`, `Head`, `Body`, `Preview`, `Container`, `Section`, `Heading`, `Text`, `Link`, `toEmail`, and the `CSSProperties` type, with the rules that make them correct: the XHTML transitional doctype, padding split onto the table cell for Outlook and Klaviyo, the body element carrying background with a zeroed margin, hrefs failing closed on unknown schemes, the plain-text twin, and the preview line.
 
 **The CLI moves over unchanged**: `rip email dev` and `export`, the preview app under the edge, dark-mode simulation, text twin, source view.
 
 ### One change
 
-The deletion, both packages, and every outside reference land together: `test/toolchain/dependencies.test.js` asserts no dependencies on either package instead of the Tailwind budget; the approved skip for the old types test leaves `test/toolchain/skips.test.js`; `test/rip/email.rip` is repointed at `rip/email` and pruned to the day-one surface, and `test/rip/email-internals.rip` goes; the roadmap's UI lines are rewritten and its open item on per-package browser flags closed; the Tailwind lockstep notes in `AGENTS.md` and `scripts/tailwind-bundle.mjs` go. medlabs changes its two import specifiers to `rip/email` in the same change.
+The deletion, both packages, and every outside reference land together: `test/toolchain/dependencies.test.js` asserts no dependencies on either package instead of the Tailwind budget; the approved skip for the old types test leaves `test/toolchain/skips.test.js`; `test/rip/email.rip` is repointed at `rip/email` and pruned to the day-one surface, and `test/rip/email-internals.rip` goes; the roadmap's UI lines are rewritten and its open item on per-package browser flags closed; the Tailwind lockstep notes in `AGENTS.md` and `scripts/tailwind-bundle.mjs` go.
 
 ---
 
@@ -113,4 +114,87 @@ export Card = component
 
 ### One change
 
-The grammar production, the lexer's statement boundary for `offer`, and the emitter's two lowerings, the JS read and the face's declare; the offered-names record in `src/ts/components.js`, which `rip check --public` skips and the browser bundle stubs; the runtime's `getContext` and `hasContext` signatures, with every hand-written read in the tests naming its provider; the miss's wording in `mapTsDiagnostic`; `dialog.rip`, and `drawer.rip` reduced to aliases of the Dialog's root and parts with `side` on its popup; the components fixture in the corpus rewritten in the new spelling, its claims rows and error pins, and the ruling row unparked with its hover pin; the emitter-cases battery line and the runtime-components context scenario; `docs/TYPES.md`. medlabs offers and accepts nothing and needs no edit.
+The grammar production, the lexer's statement boundary for `offer`, and the emitter's two lowerings, the JS read and the face's declare; the offered-names record in `src/ts/components.js`, which `rip check --public` skips and the browser bundle stubs; the runtime's `getContext` and `hasContext` signatures, with every hand-written read in the tests naming its provider; the miss's wording in `mapTsDiagnostic`; `dialog.rip`, and `drawer.rip` reduced to aliases of the Dialog's root and parts with `side` on its popup; the components fixture in the corpus rewritten in the new spelling, its claims rows and error pins, and the ruling row unparked with its hover pin; the emitter-cases battery line and the runtime-components context scenario; `docs/TYPES.md`.
+
+---
+
+## RFC 3: A child notifies its parent through a callback prop
+
+> **Status: Proposed.**
+
+A component that has something to tell its parent declares a function-typed prop and calls it: `@onEnded?: (seconds: number) => void` in the head, `onEnded? seconds` in the body, `Timer duration: 3, onEnded: (seconds) -> …` at the use site. There is no event concept. `@emit` leaves the runtime, and `@name:` on a component means a DOM listener on the component's host element and nothing else, so it is refused on a component that extends no tag. The prop head learns to take a function type without wrapping parens.
+
+### Why
+
+- **Two ways exist.** A child can declare `@onEnded?: ((seconds: number) => void)` and call it, or write `@emit('ended', seconds)` and have the parent bind `@ended:`. The first is typed and declared; the second is neither, and application code holds both.
+- **`@emit` checks nothing.** `@donee:` on the parent, `@timerEnd:` on a relay, and `@emit('endd')` in the child all pass `rip check` under `rip.strict`, and the handler never runs: the listener is `addEventListener('donee', (e: any) => …)` and the base class declares `emit: (name: string, detail?: unknown)`. A payload has no type, and at a component site every handler casts `as any`, DOM names included, so `Picture src: x, @click: (e) -> e.clientX` on a component extending `img` reports TS7006 on `e`, where the same handler on a bare `img` types it.
+- **Events bubble through the DOM.** `emit` dispatches a `CustomEvent` with `bubbles: true` on the child's first node, and a parent's `@name:` listens on that node, so the event continues upward. Driven over the recording DOM with `Timer` in `Card` in `Wizard` in `Page`, one `ended` fired handlers bound on all four and on a plain `div` above them. A handler bound on `Card` for an event `Card` never emits receives whatever any descendant emits under that name, so a typed handler would hold a stranger's payload, the silent-miscompile class.
+- **The DOM vocabulary leaks into custom names.** `ended` is a media event, so a bare `Timer duration: 3, @ended` passes the check that refuses `@saved`, and the event word on that site hovers `HTMLElementEventMap['ended']`, an event the timer never dispatches.
+- **Callback props already do the job.** `Child onEnded: (n) -> n.nope()` errors with `nope` not on `number`, so the parent's lambda is typed from the declaration; omitting a required `@onDone: (() => void)` is an error; `onEnded? 3` compiles to `this.onEnded.value?.(3)` and an absent handler is a no-op; `Child onEnded: onEnded` forwards the parent's own prop; an unknown `onFoo:` is refused at the face on an `extends` component and thrown at construction on any other. Nothing bubbles and nothing needs a mounted root.
+- **The field agrees.** React and Solid have only callback props. Svelte 5 deprecated its dispatcher for them, citing boilerplate, `CustomEvent` objects built for events with no listener, no way to know which handlers were provided or to mark one required, and no way to guarantee a component does not emit a given event. Vue and Angular keep a declared channel, and both call the handler directly with the value and never bubble; Vue lets an undeclared listener fall through to the root element as a native one, which is the ambiguity above. Only Lit dispatches real DOM events, and nothing there checks a name at the use site.
+
+### The change
+
+**The prop head takes a function type bare.** `@onEnded?: (seconds: number) => void` parses. Today only `((seconds: number) => void)` does in a head, while a local and a parameter already take the bare form; a grammar fix, with no change to what the face sees.
+
+**`emit` leaves the runtime.** `@emit` inside a component body is a compile error at the word, naming the prop form.
+
+**`@name:` on a component is a DOM listener on its host.** A component that extends a tag keeps `@click:`, typed as a native site is, `HTMLElementEventMap['click'] & { target: <button>; currentTarget: <button> }`, which `Button` and `Menu.Item` gain in place of today's `any`; a name outside the DOM vocabulary is refused there. A component that extends no tag has no host, so any `@name:` on it is a compile error naming the prop form. The ui package's demo binds DOM events on components only where they extend a tag, so it pays nothing.
+
+**A missing required prop reads as one.** Omitting `@onDone: (() => void)` today reports TS2345 in the words of `__bind_onDone__`. `mapTsDiagnostic` words it `Child requires 'onDone'`, for every required prop.
+
+**Convention.** A callback prop is `on` plus a capitalized word, `onEnded`, `onPay`, unenforced, as React spells it. It is optional unless the component cannot work unanswered, called `onEnded? seconds` or `onDone?()`, and forwarded by naming the parent's own prop, `Timer duration: 3, onEnded: onTimerEnded`.
+
+A timer inside a card inside a wizard, the wizard telling its route when it is done:
+
+```
+# the route
+Wizard steps: steps, onDone: -> @router.push('/orders')
+
+# wizard.rip
+export Wizard = component
+  @steps: Step[]
+  @onDone?: () => void
+  step := 0
+  …
+  timerEnded = (index: number) ->
+    advance() if step is index
+
+  render
+    …
+        Card step: s, onTimerEnded: -> timerEnded(i)
+    …
+        Button @click: -> if step is last then onDone?() else advance()
+
+Card = component
+  @step: Step
+  @onTimerEnded?: () => void
+  render
+    …
+      if step.timer
+        Timer duration: step.timer, onEnded: onTimerEnded
+
+Timer = component
+  @duration: number
+  @onEnded?: () => void
+  …
+  finish = ->
+    running = false
+    onEnded?()
+```
+
+### Alternatives
+
+- **A declared event channel: `emit @ended: number`.** The Vue and Angular shape: a contextual keyword beside `offer` and `accept`, a minted method the body calls, a `__events` record on the face, a handler key the runtime validates, and `@ended:` at the use site beside `@click:`. That spelling is the whole gain. Everything else it would deliver, declaration, typing at both ends, optional or required, forwarding by name, no bubbling, is what callback props do now, and it would cost a keyword through the lexer, grammar, emitter, runtime, face, and three editor grammars, a second concept beside props, and every callback prop already written migrating the other way.
+- **Keep `emit`, typed by one overload per event.** The channel stays a DOM dispatch, so it still bubbles and still needs a mounted root, and the name still has no symbol.
+
+### Ruled
+
+- **A parent is the only listener.** Nothing outside the parent observes a callback. A deep descendant that must reach an ancestor relays through each parent's props, or writes an offered state the ancestor provides.
+- **A function prop is a prop.** It rides the sharing contract like any other: a bare member name passes its container, any other expression snapshots. Nothing is special about it.
+- **A prop named `onError` is a prop.** The boundary walk reads `onError` off each instance, so a prop of that name, the natural one for an error callback, is called as a boundary and declines only because its container is not callable. A hook is a prototype method and a prop an own property, and a component declaring both is already a duplicate at compile, so the walk reads the hook from the prototype and a prop never reaches it.
+- **Required stays rare.** `@onDone: () => void` with no `?` refuses a construction without it, as a bare prop does. The default is optional, since a `Timer` with no listener is a timer that counts down.
+
+### One change
+
+The prop-head production in `grammar.rip`; the emitter's `@emit` refusal, the hostless `@name:` refusal, and the host-typed cast at `extends` sites; the removal of `emit` from `src/runtime/components.js` and its pins in `test/ui`; the required-prop wording in `mapTsDiagnostic`; the boundary walk reading `onError` from the prototype, with its pin; the corpus fixture's claims rows and error pins; `docs/TYPES.md`.
