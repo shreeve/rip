@@ -31684,6 +31684,7 @@ function connectFeed(client, opts = {}) {
     return task;
   };
   let handleFrame = function(text, owner) {
+    let state, valid;
     if (owner !== connection)
       return;
     let frame = null;
@@ -31725,6 +31726,14 @@ function connectFeed(client, opts = {}) {
         } else {
           reload("server generation changed");
         }
+      } else if (object.assembly !== undefined && !Object.hasOwn(object, "<")) {
+        state = object.assembly;
+        valid = state != null && typeof state === "object" && validHash2(state.hash) && (state.failure === null || typeof state.failure === "string");
+        if (!valid) {
+          report("[Rip] publication feed received a malformed assembly frame:", state);
+          continue;
+        }
+        client.assembly?.({ hash: state.hash, failure: state.failure });
       }
     }
     return;
@@ -32222,7 +32231,7 @@ function createModuleLoaderImpl({
       const sub = bare[2] ? bare[2].endsWith(".rip") ? bare[2] : `${bare[2]}.rip` : "index.rip";
       const path = `${packageName}/${sub}`;
       if (!inBundle(path)) {
-        throw new Error(`rip: '${from}' imports '${spec}', but '${path}' is not in the bundle — ` + "only packages declaring browser safety travel to the browser");
+        throw new Error(`rip: '${from}' imports '${spec}', but '${path}' is not in the bundle`);
       }
       return { path };
     }
@@ -32326,7 +32335,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "dbf99639bb5de536";
+var compilerBuild = () => "94a9f837662b0724";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
@@ -32697,7 +32706,7 @@ function showHmrOverlay(kind, error) {
     "white-space:pre-wrap",
     "overflow-wrap:anywhere"
   ].join(";");
-  const title = kind === "activate" ? "Rip: update failed to activate" : "Rip: update failed to compile";
+  const title = kind === "activate" ? "Rip: update failed to activate" : kind === "assemble" ? "Rip: App sources do not assemble" : "Rip: update failed to compile";
   const path = failurePath(error);
   const header = path ? `${title}
 ${path}
@@ -33063,7 +33072,13 @@ async function bootApp(opts = {}) {
   };
   if (watch) {
     const latestUrl = opts.latestUrl ?? opts.feed?.latestUrl ?? (opts.url ? sibling(opts.url, "latest.json") : "/latest.json");
-    feed = connectFeed({ hash: () => workspace.hash(), apply: applyChange, reload }, {
+    const assembly = ({ failure }) => {
+      if (failure == null)
+        clearHmrOverlay();
+      else
+        showHmrOverlay("assemble", failure);
+    };
+    feed = connectFeed({ hash: () => workspace.hash(), apply: applyChange, reload, assembly }, {
       ...opts.feed ?? {},
       latestUrl,
       report

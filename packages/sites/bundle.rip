@@ -1,15 +1,17 @@
 # Rip Manager constructs the complete browser Rip program. It follows
-# compiler-recorded imports, admits only browser-safe packages, materializes
-# permitted schema projections, and keeps package manifests off the wire.
-import { readFileSync, readdirSync, existsSync } from 'node:fs'
+# compiler-recorded imports into App modules and browser-safe packages
+# alike, so a package contributes exactly the modules the program reaches;
+# materializes permitted schema projections; and keeps package manifests
+# off the wire.
+import { readFileSync, existsSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { rash } from 'rip/app/rash'
 import { compile } from '../../src/compiler.js'
 import { extractClientProjections } from '../../src/projections.js'
+import { SKIP_DIRS, VERB_FILES } from '../../src/resolver.js'
 
 RUNTIME_RE =! /(?:^|\/)src\/runtime\/(intrinsics|stdlib|schema|reactive|components)\.js$/
-VERB_FILES =! Set.new ['test.rip', 'demo.rip', 'bench.rip']
-SKIP_DIRS =! Set.new ['node_modules', 'test', 'bench', 'demo']
+BARE_PACKAGE_RE =! /^rip\/([\w-]+)(?:\/(.+))?$/
 
 unquote = (specifier) -> specifier.slice 1, -1
 
@@ -23,28 +25,16 @@ decodeRipBytes = (path, bytes) ->
 
 readRipSource = (path) -> decodeRipBytes path, readFileSync(path)
 
-ripFilesUnder = (dir) ->
-  out = []
-  walk = (at, depth) ->
-    for entry in readdirSync(at, { withFileTypes: true })
-      continue if entry.name.startsWith '.'
-      continue if SKIP_DIRS.has entry.name
-      full = join at, entry.name
-      if entry.isDirectory()
-        walk full, depth + 1
-      else if entry.name.endsWith('.rip') and not (depth is 0 and VERB_FILES.has(entry.name))
-        out.push full
-  walk dir, 0
-  out.sort()
-
-# Membership snapshot of a package root: which .rip files exist, not what
-# they contain. Content is certified per-file via inputHashes; this catches
-# a file ADDED to (or removed from) a package after enumeration — a change
-# no recorded per-file hash can reveal. The manager's settled check
-# re-computes this per watched root and compares.
-export packageInventory = (root) ->
-  files = ripFilesUnder root
-  { files, hash: rash TextEncoder.new().encode(JSON.stringify(files)) }
+# The paths a package serves: a `.rip` file outside its node_modules,
+# test, bench, and demo trees and not a root verb file — the rule
+# src/resolver.js enumerates by, so a subpath means the same file on the
+# server and in the browser.
+servedPackagePath = (relativePath) ->
+  segments = relativePath.split '/'
+  return false unless segments[-1].endsWith '.rip'
+  return false if segments.some (segment) -> not segment or segment is '.' or segment is '..' or segment.startsWith('.')
+  return false if segments.slice(0, -1).some (segment) -> SKIP_DIRS.has segment
+  not (segments.length is 1 and VERB_FILES.has(segments[0]))
 
 # Fresh per scan because the expression is global and validation must be
 # stateless. Captures an optional named-binding clause and relative `.rip`
@@ -126,7 +116,7 @@ export assembleBundle = ({ modules, packagesDir, moduleFiles = null, appDir = nu
   # the manager's settled check compares later disk state against these, so
   # they must never be re-read after the fact (a file changing between the
   # read and a re-hash would certify content that was never built).
-  bundle = { modules: { ...modules }, packages: {}, inputHashes: [], inventories: [], watchRoots: [] }
+  bundle = { modules: { ...modules }, packages: {}, inputHashes: [], watchRoots: [] }
   for path in Object.keys bundle.modules
     if path is 'rip/app' or path.startsWith('rip/app/')
       throw Error.new "rip: App module '#{path}' collides with embedded browser package 'rip/app'"
@@ -135,6 +125,9 @@ export assembleBundle = ({ modules, packagesDir, moduleFiles = null, appDir = nu
     projectionInputs = materializeSharedSchemas(bundle.modules, moduleFiles, appDir, appRoot) or []
     bundle.inputHashes.push ...projectionInputs
     bundle.watchRoots.push dirname(entry.path) for entry in projectionInputs
+
+  packageRoots = {}
+  admitted = Set.new()
 
   claimPackage = (name, importer) ->
     return if bundle.packages[name]?
@@ -154,27 +147,43 @@ export assembleBundle = ({ modules, packagesDir, moduleFiles = null, appDir = nu
     entryFor = (value) -> (if typeof value is 'string' then value else value?.default) ?? null
     packageExports = manifest.exports or {}
     entryTarget = entryFor(packageExports['.']) ?? 'index.rip'
-    exportsMap = {}
+    # A subpath resolves by path on both sides, so an exports key may name
+    # its own file and nothing else.
     for [key, value] in Object.entries packageExports
       continue if key is '.'
       target = entryFor value
-      exportsMap[key] = target.replace(/^\.\//, '') if target?.endsWith '.rip'
+      continue unless target?.endsWith '.rip'
+      requested = key.slice 2
+      canonicalTarget = if requested.endsWith('.rip') then requested else "#{requested}.rip"
+      unless target.replace(/^\.\//, '') is canonicalTarget
+        throw Error.new "rip: browser package '#{name}' export '#{key}' must target './#{canonicalTarget}'"
 
+    packageRoots[name] = root
     bundle.packages[name] =
       root: name
       entry: entryTarget.replace /^\.\//, ''
-      exports: exportsMap
+    return
 
-    inventory = packageInventory root
-    bundle.inventories.push { path: root, hash: inventory.hash }
-    for file in inventory.files
-      relativePath = file.slice root.length + 1
-      key = "#{name}/#{relativePath}"
-      if bundle.modules[key]?
-        throw Error.new "rip: App module '#{key}' collides with browser package '#{name}'"
-      fileBytes = readFileSync file
-      bundle.inputHashes.push { path: file, hash: rash fileBytes }
-      bundle.modules[key] = decodeRipBytes file, fileBytes
+  # One module enters per import that names it; nothing else under the
+  # package root is read, so a file no import reaches can neither enter
+  # nor fail a publication.
+  admitPackageModule = (name, relativePath, importer, specifier) ->
+    key = "#{name}/#{relativePath}"
+    return key if admitted.has key
+    unless relativePath.endsWith '.rip'
+      throw Error.new "rip: '#{importer}' imports '#{specifier}', which is not a Rip module — did you mean '#{specifier}.rip'?"
+    unless servedPackagePath relativePath
+      throw Error.new "rip: '#{importer}' imports '#{key}', which '#{name}' does not serve — hidden paths, the test, bench, demo, and node_modules trees, and the root verb files stay out of the browser"
+    unless existsSync join(packageRoots[name], relativePath)
+      throw Error.new "rip: '#{importer}' imports '#{key}', which '#{name}' does not hold"
+    file = join packageRoots[name], relativePath
+    if bundle.modules[key]?
+      throw Error.new "rip: App module '#{key}' collides with browser package '#{name}'"
+    fileBytes = readFileSync file
+    bundle.inputHashes.push { path: file, hash: rash fileBytes }
+    bundle.modules[key] = decodeRipBytes file, fileBytes
+    admitted.add key
+    key
 
   queue = Object.keys bundle.modules
   seen = Set.new()
@@ -200,13 +209,30 @@ export assembleBundle = ({ modules, packagesDir, moduleFiles = null, appDir = nu
       continue if specifier in ['rip/app', 'rip/app/rash']
       if specifier.startsWith 'rip/app/'
         throw Error.new "rip: '#{path}' imports '#{specifier}', which embedded package 'rip/app' does not export"
-      continue if specifier.startsWith('./') or specifier.startsWith('../') or bundle.modules[specifier]?
+      if specifier.startsWith('./') or specifier.startsWith('../')
+        # An App module's relative imports are validated over the complete
+        # program; a package module's name files under its own root.
+        continue unless admitted.has path
+        name = "rip/#{path.match(BARE_PACKAGE_RE)[1]}"
+        target = joinModulePath path, specifier
+        unless target? and target.startsWith "#{name}/"
+          throw Error.new "rip: '#{path}' imports '#{specifier}', which leaves package '#{name}'"
+        queue.push admitPackageModule(name, target.slice(name.length + 1), path, specifier)
+        continue
+      continue if bundle.modules[specifier]?
 
-      bare = specifier.match /^rip\/([\w-]+)(?:\/.+)?$/
+      bare = specifier.match BARE_PACKAGE_RE
       unless bare?
         throw Error.new "rip: '#{path}' imports '#{specifier}', which cannot travel to the browser — server-only and unknown modules stay on the server"
-      claimPackage "rip/#{bare[1]}", path
-      queue.push added for added in Object.keys(bundle.modules) when not seen.has(added)
+      name = "rip/#{bare[1]}"
+      claimPackage name, path
+      if bare[2]?
+        relativePath = if bare[2].endsWith('.rip') then bare[2] else "#{bare[2]}.rip"
+      else
+        relativePath = bundle.packages[name].entry
+        unless relativePath.endsWith '.rip'
+          throw Error.new "rip: browser package '#{name}' entry '#{relativePath}' is not Rip source"
+      queue.push admitPackageModule(name, relativePath, path, specifier)
 
   bundle
 
@@ -243,7 +269,7 @@ validateRipProgram = (modules) ->
       hint = if specifier.endsWith('.rip') then '' else " — did you mean '#{specifier}.rip'?"
       throw Error.new "rip: '#{from}' imports '#{specifier}', which is not in the bundle#{hint}"
 
-    bare = specifier.match /^rip\/([\w-]+)(?:\/(.+))?$/
+    bare = specifier.match BARE_PACKAGE_RE
     if bare?
       subpath = if bare[2]? then (if bare[2].endsWith('.rip') then bare[2] else "#{bare[2]}.rip") else 'index.rip'
       target = "rip/#{bare[1]}/#{subpath}"
@@ -287,19 +313,11 @@ export assembleRipPublication = (options = {}) ->
   for [name, packageInfo] in Object.entries assembled.packages
     entry = "#{packageInfo.root}/#{packageInfo.entry}"
     canonical = "#{packageInfo.root}/index.rip"
-    unless entry of modules
-      throw Error.new "rip: browser package '#{name}' entry '#{packageInfo.entry}' is not Rip source"
-    if entry isnt canonical
+    if entry isnt canonical and entry of modules
       if canonical of modules
         throw Error.new "rip: browser package '#{name}' entry '#{packageInfo.entry}' collides with canonical 'index.rip'"
       modules[canonical] = modules[entry]
       delete modules[entry]
-
-    for [subpath, target] in Object.entries packageInfo.exports
-      requested = subpath.slice 2
-      canonicalTarget = if requested.endsWith('.rip') then requested else "#{requested}.rip"
-      unless target is canonicalTarget
-        throw Error.new "rip: browser package '#{name}' export '#{subpath}' must target './#{canonicalTarget}'"
 
   validateRipProgram modules
   seenInputs = Map.new()
@@ -308,17 +326,10 @@ export assembleRipPublication = (options = {}) ->
   inputHashes = [...seenInputs.entries()]
     .map(([path, hash]) -> { path, hash })
     .sort (a, b) -> if a.path < b.path then -1 else if a.path > b.path then 1 else 0
-  seenInventories = Map.new()
-  for entry in assembled.inventories
-    seenInventories.set entry.path, entry.hash unless seenInventories.has entry.path
-  inventories = [...seenInventories.entries()]
-    .map(([path, hash]) -> { path, hash })
-    .sort (a, b) -> if a.path < b.path then -1 else if a.path > b.path then 1 else 0
   {
     list: Object.entries(modules).sort ([a], [b]) -> if a < b then -1 else if a > b then 1 else 0
     inputs: inputHashes.map (entry) -> entry.path
     inputHashes
-    inventories
     watchRoots: [...Set.new(assembled.watchRoots)].sort()
   }
 

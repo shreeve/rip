@@ -301,7 +301,10 @@ alters surface syntax updates ALL THREE in the same change.
   canonical `[modulePath, source]` Rip program. Individual file hashes remain
   private to Manager. Watch-mode Hub messages carry one
   `change { from, hash, list }`; `[path,source]` updates Rip source, `[path]`
-  invalidates an HTTP asset, and `[path,null]` deletes. Client apply verdicts
+  invalidates an HTTP asset, and `[path,null]` deletes. A program that does
+  not assemble publishes nothing: the committed publication stays, and one
+  `assembly { hash, failure }` at the live hash carries the Manager's
+  message to open tabs, `failure: null` clearing it. Client apply verdicts
   are **`reload` | `css` | `update` | `ignore`**. Reconnect subscribes before
   checking `latest.json`; a mismatched complete App hash reloads unless it is
   the quarantined failed candidate, which leaves the last committed App live
@@ -311,7 +314,11 @@ alters surface syntax updates ALL THREE in the same change.
   package on both sides, `rip/<pkg>/<path>.rip`, skipping the package's
   test, bench, demo, and node_modules trees and its root verb files; an
   exports key names or renames a target and wins over the path, and
-  names the surface `rip check --public` audits. It is not a gate.
+  names the surface `rip check --public` audits. It is not a gate. A
+  publication carries the package modules its static imports reach and
+  nothing else under a package root; the whole served inventory of every
+  browser-safe package is certified by
+  `test/toolchain/browser-packages.test.js`.
 - **Comments explain non-obvious intent** — invariants, constraints,
   why a trade-off was taken. Never narrate what code obviously does,
   never reference project history or future plans. A comment that

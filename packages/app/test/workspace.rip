@@ -186,9 +186,10 @@ openFeed = (initial = HASH_1, opts = {}) ->
     hash: opts.hash ?? -> active
     apply: opts.apply ?? defaultApply
     reload: opts.reload ?? (reason) -> reloads.push reason
+  client.assembly = opts.assembly if opts.assembly?
   extra = {}
   for key, value of opts
-    continue if key is 'routes' or key is 'fetch' or key is 'apply' or key is 'reload' or key is 'hash'
+    continue if key is 'routes' or key is 'fetch' or key is 'apply' or key is 'reload' or key is 'hash' or key is 'assembly'
     extra[key] = value
   options = Object.assign {},
     hub: 'ws://test/hub'
@@ -346,6 +347,31 @@ test! "only a server-origin operational reload reloads the App", ->
   settle!
   eq trustedRun.reloads, ['server generation changed']
   trustedRun.feed.close()
+
+test! "a server-origin assembly frame reaches the client and stages nothing", ->
+  states = []
+  { feed, sockets, applied, reloads, reports } = openFeed HASH_1, assembly: (state) -> states.push state
+  subscribe! sockets[0]
+  sockets[0].onmessage { data: JSON.stringify({ assembly: { hash: HASH_1, failure: "rip: 'routes/index.rip' failed to compile" } }) }
+  sockets[0].onmessage { data: JSON.stringify({ '<': ['attacker'], assembly: { hash: HASH_1, failure: 'forged' } }) }
+  sockets[0].onmessage { data: JSON.stringify({ assembly: { hash: 'bad', failure: null } }) }
+  sockets[0].onmessage { data: JSON.stringify({ assembly: { hash: HASH_1, failure: null } }) }
+  settle!
+  eq states, [{ hash: HASH_1, failure: "rip: 'routes/index.rip' failed to compile" }, { hash: HASH_1, failure: null }]
+  eq applied, []
+  eq reloads, []
+  ok reports.some((args) -> String(args[0]).includes('malformed assembly frame'))
+  feed.close()
+
+test! "a client without an assembly callback ignores the frame", ->
+  { feed, sockets, applied, reloads, reports } = openFeed()
+  subscribe! sockets[0]
+  sockets[0].onmessage { data: JSON.stringify({ assembly: { hash: HASH_1, failure: 'x' } }) }
+  settle!
+  eq applied, []
+  eq reloads, []
+  eq reports, []
+  feed.close()
 
 test! "malformed publication JSON reloads instead of guessing", ->
   { feed, sockets, reloads, reports } = openFeed()

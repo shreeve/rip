@@ -14,10 +14,16 @@ export type Feed =
 # it, so a synchronous answer is honored too.
 export type ApplyResult = boolean | 'rejected' | 'reload'
 
+# An assembly frame reports the Manager's verdict on the sources at the
+# live hash: a failure message while they do not assemble, null once they
+# do again. It stages nothing.
+export type AssemblyState = { hash: string, failure: string | null }
+
 export type PublicationClient =
   hash: () => string
   apply: (change: Record<string, unknown>) => ApplyResult | Promise<ApplyResult>
   reload: (reason?: string) => void
+  assembly?: (state: AssemblyState) => void
 
 type FeedSocket =
   send: (data: string) => void
@@ -223,6 +229,13 @@ export def connectFeed(client: PublicationClient, opts: ConnectFeedOpts = {}): F
         else if ready then enqueue object.change, owner else buffer.push object.change
       else if object.reload isnt undefined and not Object.hasOwn(object, '<')
         if rejectedHash? then beginProbe(owner, true) else reload 'server generation changed'
+      else if object.assembly isnt undefined and not Object.hasOwn(object, '<')
+        state = object.assembly
+        valid = state? and typeof state is 'object' and validHash(state.hash) and (state.failure is null or typeof state.failure is 'string')
+        unless valid
+          report '[Rip] publication feed received a malformed assembly frame:', state
+          continue
+        client.assembly? { hash: state.hash, failure: state.failure }
     return
 
   schedule = ->
