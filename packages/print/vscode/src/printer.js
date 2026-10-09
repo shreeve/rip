@@ -498,7 +498,7 @@ function generateMarkdownHtml(fileName, markdown, options = {}) {
   html { font-size: 16px; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
     font-size: 1rem; line-height: 1.6; color: var(--text); background: var(--bg);
-    max-width: 8.5in; margin: 0 auto; padding: 0.5in;
+    max-width: 8.5in; margin: 0 auto; padding: 0.75in;
     -webkit-font-smoothing: antialiased; }
   h1, h2, h3, h4 { margin: 1.75em 0 .5em; line-height: 1.3; }
   h1 { font-size: 1.75rem; } h2 { font-size: 1.375rem; } h3 { font-size: 1.125rem; }
@@ -515,9 +515,9 @@ function generateMarkdownHtml(fileName, markdown, options = {}) {
   th { font-weight: 600; background: var(--pre-bg); }
   hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
   body > :first-child { margin-top: 0; }
-  @page { size: letter; margin: 0.5in; }
+  @page { size: letter; margin: 0.75in; }
   @media print {
-    html { font-size: 12pt; }
+    html { font-size: 14pt; }
     body { max-width: none; padding: 0; background: #fff; color: #1a1a1a; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     h1, h2, h3, h4 { break-after: avoid; }
     pre, blockquote, img, tr { break-inside: avoid; }
