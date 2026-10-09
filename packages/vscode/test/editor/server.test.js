@@ -166,32 +166,32 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       for (const pid of children) process.kill(Number(pid), 'SIGKILL');
 
       // Rip's own diagnostics never depend on tsgo: an incomplete edit
-      // still publishes its rejection, promptly. (The tolerant compile
-      // carries the rejection through and the server publishes it at
-      // compile time; once the restart-once policy revives tsgo, mapped
-      // TS diagnostics may ride the SAME publish — so the assertion is
-      // presence of the rip rejection, not an exact count.)
-      wait = nextDiagnostics(published);
+      // still publishes its rejection, promptly. The tolerant compile
+      // carries the rejection through; once the restart-once policy
+      // revives tsgo, mapped TS diagnostics may ride the SAME publish, and
+      // the buffer publishes again after the pull — so the wait accepts
+      // the publish that carries the rejection, whichever it is.
+      const ripRejection = (p) => p.diagnostics.some((d) => d.source === 'rip' && /unclosed '\('/.test(d.message));
+      wait = nextDiagnostics(published, ripRejection);
       client.notify('textDocument/didChange', {
         textDocument: { uri, version: 2 },
         contentChanges: [{ text: GOOD + 'oops = (\n' }],
       });
-      const broken = await wait();
-      expect(broken.diagnostics.some((d) => d.source === 'rip' && /unclosed '\('/.test(d.message))).toBe(true);
+      expect(ripRejection(await wait())).toBe(true);
 
       // A valid edit after the crash: the restart-once policy brings
       // TS diagnostics back (the bad call maps onto .rip source again).
       // The misuse rides an ANNOTATED binding so the revived pipeline has
-      // a diagnostic the gradual gate publishes. Same caveat as above: the
-      // revival can land another diagnostic in this publish, so assert the
-      // mapped TS diagnostic is present rather than counting the batch.
-      wait = nextDiagnostics(published);
+      // a diagnostic the gradual gate publishes. The previous buffer's
+      // post-pull publish can still land after this edit is sent, so the
+      // wait accepts only the publish carrying the mapped TS diagnostic.
+      const mappedTs = (p) => p.diagnostics.some((d) => d.code === 2339);
+      wait = nextDiagnostics(published, mappedTs);
       client.notify('textDocument/didChange', {
         textDocument: { uri, version: 3 },
         contentChanges: [{ text: GOOD + 'n: number = 42\nbad = n.toUpperCase()\nconsole.log bad\n' }],
       });
-      const recovered = await wait();
-      expect(recovered.diagnostics.some((d) => d.code === 2339)).toBe(true);
+      expect(mappedTs(await wait())).toBe(true);
 
       // And hover answers (bounded — the request must not hang).
       const hover = await hoverAt(client, 1, 2);

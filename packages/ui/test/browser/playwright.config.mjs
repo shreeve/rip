@@ -20,6 +20,10 @@ export default defineConfig({
     cwd: fileURLToPath(new URL('../..', import.meta.url)),
     port,
   },
+  // A worker's first page compiles the demo in the browser behind a dev
+  // server that assembles the bundle serially; under a full test:all that
+  // takes longer than Playwright's 5s default.
+  expect: { timeout: 15000 },
   use: { baseURL: live ?? `http://127.0.0.1:${port}`, ignoreHTTPSErrors: Boolean(live) },
   projects: browsers.map((browserName) => ({ name: browserName, use: { browserName, launchOptions: launchOptions(browserName) } })),
 })

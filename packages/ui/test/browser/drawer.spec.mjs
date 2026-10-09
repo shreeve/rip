@@ -75,10 +75,15 @@ test('a touch swipe that starts on a link dismisses the drawer without following
   await page.goto('/')
   await page.getByRole('button', { name: 'Open navigation' }).click()
   await expect.poll(() => isModal(page)).toBe(true)
-  const link = page.getByRole('dialog', { name: 'Navigation' }).getByRole('link', { name: 'Dialog' })
+  const drawer = page.getByRole('dialog', { name: 'Navigation' })
+  const link = drawer.getByRole('link', { name: 'Dialog' })
   await link.evaluate((el) => Promise.all(el.closest('dialog').getAnimations().map((a) => a.finished)))
   const box = await link.boundingBox()
-  await touchSwipe(page, { x: box.x + box.width / 2, y: box.y + box.height / 2 }, { x: box.x + box.width / 2 - 100, y: box.y + box.height / 2 })
+  const panel = await drawer.boundingBox()
+  // Past half the panel, so the pull's distance decides and the finger's
+  // speed through the protocol never does.
+  const start = { x: box.x + box.width * 0.8, y: box.y + box.height / 2 }
+  await touchSwipe(page, start, { x: start.x - panel.width * 0.6, y: start.y })
   await expect.poll(() => isModal(page)).toBe(false)
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Rip UI')
 })
@@ -153,6 +158,24 @@ test('the side control moves the panel to that edge, and the close part closes',
   }
 })
 
+// The drawer clocks a gesture on performance.now() in its own handlers, so
+// one dispatched from inside the page runs in microseconds whatever the
+// protocol's latency: its release is a flick by construction, and a rest
+// is a real wait between the last move and the release.
+const pull = (drawer, { fraction, rest = 0 }) => drawer.evaluate(async (el, { fraction, rest }) => {
+  const r = el.getBoundingClientRect()
+  const y = r.top + r.height / 2
+  const from = r.left + 40
+  const fire = (type, x) => el.dispatchEvent(new PointerEvent(type, { pointerId: 1, pointerType: 'mouse', isPrimary: true, bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, button: type === 'pointermove' ? -1 : 0, buttons: type === 'pointerup' ? 0 : 1 }))
+  const total = r.width * fraction
+  fire('pointerdown', from)
+  for (let i = 1; i <= 8; i++) fire('pointermove', from + total * i / 8)
+  const mid = { progress: el.style.getPropertyValue('--swipe-progress'), backdrop: getComputedStyle(el, '::backdrop').opacity }
+  if (rest) await new Promise((resolve) => setTimeout(resolve, rest))
+  fire('pointerup', from + total)
+  return mid
+}, { fraction, rest })
+
 test('a swipe in progress reports its progress, and a dismissing release its strength', async ({ page }) => {
   await page.goto('/drawer')
   const trigger = page.getByRole('button', { name: 'Open Drawer' })
@@ -167,15 +190,10 @@ test('a swipe in progress reports its progress, and a dismissing release its str
     exit: getComputedStyle(el).transitionDuration,
   }))
   expect(await read()).toMatchObject({ progress: '', strength: '1', backdrop: '1', exit: '0.45s' })
-  const box = await drawer.boundingBox()
-  await page.mouse.move(box.x + 40, box.y + box.height / 2)
-  await page.mouse.down()
-  await page.mouse.move(box.x + 40 + box.width / 2, box.y + box.height / 2, { steps: 8 })
-  const mid = await read()
+  const mid = await pull(drawer, { fraction: 0.55 })
   expect(Number(mid.progress)).toBeGreaterThan(0.4)
   expect(Number(mid.progress)).toBeLessThan(0.6)
   expect(Math.abs(Number(mid.backdrop) - (1 - Number(mid.progress)))).toBeLessThan(0.02)
-  await page.mouse.up()
   await expect.poll(() => isModal(page)).toBe(false)
   const after = await read()
   expect(Number(after.strength)).toBeGreaterThan(0)
@@ -187,11 +205,7 @@ test('a swipe in progress reports its progress, and a dismissing release its str
   expect((await read()).strength).toBe('1')
   // A rest before the release makes it a slow one however it began.
   await drawer.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)))
-  await page.mouse.move(box.x + 40, box.y + box.height / 2)
-  await page.mouse.down()
-  await page.mouse.move(box.x + 40 + box.width * 0.6, box.y + box.height / 2, { steps: 8 })
-  await page.waitForTimeout(1200)
-  await page.mouse.up()
+  await pull(drawer, { fraction: 0.6, rest: 1200 })
   await expect.poll(() => isModal(page)).toBe(false)
   expect(await read()).toMatchObject({ strength: '1', exit: '0.4s' })
 })
