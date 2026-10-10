@@ -8,6 +8,7 @@ import {
   start, read, error, notice, bail, hub,
   ctx, session, env, subrequest, mark, errorEnvelope, openapi,
 } from 'rip/sites'
+import { sessions } from 'rip/sites/middleware'
 import { resolve, join } from 'node:path'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
@@ -196,6 +197,25 @@ test! 'use, before and after registered inside prefix scope to the prefix', ->
   eq seen, []
   eq (handle! request('GET', '/admin/reached')).text!, 'pattern route'
   eq seen, ['mw:/admin/reached', 'before:/admin/reached', 'after:/admin/reached']
+
+test! 'session reads and writes the request session inside middleware', ->
+  resetGlobals()
+  use sessions secret: 'framework-secret'
+  use '/private', (request, next) ->
+    return Response.new('unauthorized', { status: 401 }) unless session.user
+    session.visits = (session.visits or 0) + 1
+    next!
+  post '/login' ->
+    session.user = 'ann'
+    'in'
+  get '/private/whoami' -> { user: session.user, visits: session.visits }
+
+  eq (handle! request('GET', '/private/whoami')).status, 401
+  login = handle! request('POST', '/login')
+  cookie = login.headers.get('set-cookie').split(';')[0]
+  whoami = handle! request('GET', '/private/whoami', { headers: { cookie } })
+  eq whoami.status, 200
+  eq whoami.json!, { user: 'ann', visits: 1 }
 
 test! 'before and after filters compose around handlers and short-circuit', ->
   resetGlobals()

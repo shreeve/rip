@@ -730,6 +730,8 @@ use '/api/private', (request, next) ->
 
 Global and path-scoped middleware share one registration order. Calling
 `next!()` continues the chain; returning a `Response` short-circuits it.
+`session` reads and writes the request's session in any middleware
+registered after `sessions`.
 Inside a `prefix` block a pattern is beneath the prefix, and bare
 `use middleware` covers the prefix itself:
 

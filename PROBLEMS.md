@@ -319,12 +319,6 @@ $21.4M. `~integer` turns `"9007199254740993"` into `…992` silently;
 
 ## Rip Sites
 
-**W2 ✔ H — The README's middleware auth example locks every user out.**
-`use '/api/private', … unless session.user` returns 401 with a valid
-session cookie (`/whoami` on the same cookie returns the user).
-`session` reads the request context, which `dispatchRequest` sets up
-only after the middleware chain. packages/sites/README.md ~727.
-
 **W3 ✔ H — `read 'qty', [1, 99]` returns non-numeric strings.**
 `?qty=lots` → `"lots"`, `5.5` → `"5.5"`, `1e3` → `"1e3"`; `{min, max}`
 behaves the same. A non-integer falls back to a string-length check

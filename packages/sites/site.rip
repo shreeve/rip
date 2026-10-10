@@ -71,7 +71,7 @@ export def resetGlobals!
 
 # AsyncLocalStorage for request context (enables sync read() in handlers):
 # the request's Ctx and its merged body/query/params.
-export requestContext: AsyncLocalStorage<{ env?: Ctx, data: Record<string, unknown> | null }> = AsyncLocalStorage.new()
+export requestContext: AsyncLocalStorage<{ env?: Ctx, request?: Request, data: Record<string, unknown> | null }> = AsyncLocalStorage.new()
 
 # ==============================================================================
 # Router: Pattern Compiler
@@ -731,11 +731,16 @@ dispatchRequest = (req) ->
 
 # Web-standard middleware wraps routing. Passing a Request to next() replaces
 # the downstream request while preserving request-local middleware state.
+# Each step runs with its Request in the request context, so `session`
+# reads the session the sessions middleware attached before any handler
+# context exists.
 invokeMiddleware = (request) ->
   last = -1
   invoke = (index, currentRequest) ->
     throw Error.new('middleware called next() more than once') if index <= last
     last = index
+    requestContext.run { request: currentRequest, data: null }, -> step(index, currentRequest)
+  step = (index, currentRequest) ->
     if index < _middlewares.length
       entry = _middlewares[index]
       path = posix.normalize(URL.new(currentRequest.url).pathname)
@@ -880,18 +885,28 @@ export subrequest: <T>(data: Record<string, unknown> | null, fn: (this: Ctx) => 
   requestContext.run! { env: store.env, data }, ->
     fn.call!(store.env)
 
-# Session proxy — access session.foo anywhere (via AsyncLocalStorage)
+# Session proxy — access session.foo anywhere (via AsyncLocalStorage).
+# A handler reads its context's session; middleware, which runs before
+# that context exists, reads the session attached to its Request — the
+# same object the context adopts.
+currentSession = ->
+  store = requestContext.getStore()
+  if store?.env? then store.env.session else store?.request?[SESSION]
+
+writableSession = ->
+  store = requestContext.getStore()
+  return (store.env.session ?= {}) if store?.env?
+  return (store.request[SESSION] ?= {}) if store?.request?
+  throw Error.new 'session is only available during a request'
+
 export session: Record<string, unknown> = Proxy.new {},
   get: (_, key) ->
-    requestContext.getStore()?.env?.session?[String(key)]
+    currentSession()?[String(key)]
   set: (_, key, value) ->
-    ctx = requestContext.getStore()?.env or throw Error.new 'session is only available during a request'
-    ctx.session ?= {}
-    ctx.session[String(key)] = value
+    writableSession()[String(key)] = value
     true
   deleteProperty: (_, key) ->
-    ctx = requestContext.getStore()?.env or throw Error.new 'session is only available during a request'
-    delete ctx.session[String(key)] if ctx.session?
+    delete writableSession()[String(key)]
     true
 
 # Env proxy — access env.FOO anywhere (shortcut for process.env)
