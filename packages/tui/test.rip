@@ -2928,3 +2928,17 @@ test "a closed mount takes no key and draws no frame: press, paste and frame ref
     refused = null
     try drive() catch error then refused = error
     ok refused?.message.includes('this mount is closed'), "refused: #{refused?.message}"
+
+test "mount, renderToString and run reject an unknown option or a bad size", ->
+  Hello = component
+    render
+      Text "hi"
+  throws (-> renderToString Hello, colz: 10), "unknown option 'colz'"
+  throws (-> mount Hello, cols: -5), 'cols'
+  throws (-> mount Hello, cols: 2.5), 'cols'
+  throws (-> mount Hello, cols: '40'), 'cols'
+  throws (-> mount Hello, rows: -1), 'rows'
+  throws (-> run Hello, colz: 10), "unknown option 'colz'"
+  eq renderToString(Hello, cols: 10), 'hi'
+  view = mount Hello, cols: 10, rows: Infinity
+  view.close()

@@ -321,8 +321,6 @@ response parses "successfully".
 
 **P16 L — Barcode encoders ignore unknown options and disagree on errors.** `hieght:`, `colums:`, `eccc:` are accepted (rip/pdf rejects unknown keys); a QR miss throws `"finder"` while the others say "not found"; `encodeQR ''` encodes while Code 128 and PDF417 reject empty text.
 
-**P17 L — tui `run`/`mount`/`renderToString` options are not validated.** `cols: 0`, `cols: -5`, `colz: 10` render at 80 columns.
-
 **P18 L — rip-curl drops non-JSON bodies and malformed header lines.**
 
 **P19 L — rip/script ends on an unknown control symbol without error** (`:skp` aborts silently; `trace` accepts `[:bogus]`); the README trace omits the `\r` actually sent.
