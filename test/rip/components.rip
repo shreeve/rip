@@ -918,6 +918,56 @@ test 'onError on parent catches child error', '''
 # element flips them. Misresolving `a` silently creates an SVGAElement
 # whose href/click behavior is not an anchor's.
 
+# An object-literal `->` method and a class body rebind `this`: `@x`
+# there is the receiver's own property; `=>` keeps the component.
+code '@x in an object method or a class body is the receiver, not the component', '''
+  A = component
+    name := 'component'
+    make: ->
+      obj =
+        greet: -> @name
+        keep: => @name
+      class K
+        hi: -> @name
+      [obj, K]
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.name = __state("component");
+    }
+    make() {
+      let obj = {greet() {
+        return this.name;
+      },
+  keep: () => this.name.value};
+      class K {
+        hi() {
+          return this.name;
+        }
+      }
+      return [obj, K];
+    }
+  };
+  '''
+
+fail 'a bare member read inside an object method rejects', '''
+  A = component
+    name := 'component'
+    make: ->
+      obj =
+        greet: -> name
+      obj
+  ''', "component member 'name' is not reachable here"
+
+fail 'a bare member read inside a class body rejects', '''
+  A = component
+    name := 'component'
+    make: ->
+      class K
+        hi: -> name
+      K
+  ''', "component member 'name' is not reachable here"
+
 # A member or binding named like a tag, read through a property, is the
 # value — as a render local already is. An unbound name stays the tag.
 code 'a member named like a tag reads its value through a property', '''

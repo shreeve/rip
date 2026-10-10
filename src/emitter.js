@@ -862,6 +862,9 @@ class Emitter {
     // the extra per-component emission state (the declared name for
     // data-part, the render var counters).
     this.cframes = [];
+    // Component-frame depths at which an object-literal method or a
+    // class body rebinds `this` away from the innermost component.
+    this.thisBoundaries = [];
     // The binding name a component value takes (assignment threading —
     // the _schemaName pattern); drives the data-part attribute.
     this._componentName = null;
@@ -1738,6 +1741,7 @@ class Emitter {
   // The kind of `this.<name>` against the INNERMOST component — a
   // `this.`/`@` spelling never shadows (the receiver is explicit).
   thisMemberKindOf(name) {
+    if (this.thisRebound()) return null;
     for (let i = this.rframes.length - 1; i >= 0; i--) {
       const f = this.rframes[i];
       if (f.members !== undefined) return f.members.has(name) ? f.members.get(name) : null;
@@ -1861,12 +1865,27 @@ class Emitter {
   // explicit), and `this` always means the INNERMOST component — outer
   // frames never answer.
   memberIsReactive(name) {
+    if (this.thisRebound()) return false;
     const f = this.cframes[this.cframes.length - 1];
     return f !== undefined && f.memberReactive.has(name);
   }
 
   inComponent() {
     return this.cframes.length > 0;
+  }
+
+  // Inside an object-literal method or a class body, `this` is the
+  // object or instance, not the innermost component: `@x` reads the
+  // receiver's own property, and no component member is reachable
+  // through `this`.
+  thisRebound() {
+    const n = this.thisBoundaries.length;
+    return n > 0 && this.thisBoundaries[n - 1] === this.cframes.length && this.cframes.length > 0;
+  }
+
+  withThisBoundary(fn) {
+    this.thisBoundaries.push(this.cframes.length);
+    try { return fn(); } finally { this.thisBoundaries.pop(); }
   }
 
   // Emit an unwrapped reactive read: `count` → `count.value`. When the
@@ -1900,6 +1919,15 @@ class Emitter {
   // the name re-marks the same (nodeId, role) — an exact row on the
   // read site inside the role's cover row over the lowered form.
   memberRead(name, reactive) {
+    if (this.thisRebound()) {
+      const err = this.positionedError(name,
+        `emitter: component member '${name}' is not reachable here — inside an object-literal method or a class body \`this\` is the object, not the component; read it into a local outside, or write the pair with \`=>\` to keep the component`);
+      if (typeof err.start !== 'number' && this.b.currentMark) {
+        err.start = this.b.currentMark.sourceStart;
+        err.end = this.b.currentMark.sourceEnd;
+      }
+      throw err;
+    }
     const m = this.b.currentMark;
     const src = this.b.source;
     this.b.emit((this.renderSelf ?? 'this') + '.');
@@ -15885,7 +15913,7 @@ class Emitter {
               this.tsReturnAnnotation(pair[2], this.containsAwait(block), pair[0] === 'void-pair', Emitter.containsYield(block), pair);
               this.b.emit(' ');
               this.mark(pair, 'value', () => {
-                this.methodBlock(pair[2], block, objInd, { isConstructor: false, binds: [], methodName: pair[1], voidBody: pair[0] === 'void-pair' });
+                this.withThisBoundary(() => this.methodBlock(pair[2], block, objInd, { isConstructor: false, binds: [], methodName: pair[1], voidBody: pair[0] === 'void-pair' }));
               });
             }));
             return;
@@ -16138,7 +16166,7 @@ class Emitter {
       this.grouped(node, 'parent', parent, Emitter.needsGrouping(parent, 'head'));
     }
     this.b.emit(' {\n');
-    if (body != null) this.mark(node, 'body', () => this.classMembers(body, ind));
+    if (body != null) this.withThisBoundary(() => this.mark(node, 'body', () => this.classMembers(body, ind)));
     this.b.emit('  '.repeat(ind) + '}');
   }
 

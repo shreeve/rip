@@ -319,6 +319,6 @@ describe('generated-scope inventory', () => {
     // node head against '=>' — whose `this` an assignment describes,
     // not an emission of one; classMethodForm spells '->' as the kind
     // of the method pair a class-body `def` reads as.
-    expect(categories).toEqual({ diagnostic: 38, semantic: 20, type: 25 });
+    expect(categories).toEqual({ diagnostic: 39, semantic: 20, type: 25 });
   });
 });

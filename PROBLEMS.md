@@ -160,19 +160,6 @@ binding"; `on := true` → bare "Unexpected ':='" (`on` is reserved, `true`).
 custom element. Inline it competes with a text value, so it wants a
 decision: tag, or reject the tight-hyphen value.
 
-**T3 ✔ H — Object-literal and class methods inside a component method get `.value` appended to `this.X`.**
-```coffee
-A = component
-  name := 'component'
-  make: ->
-    obj =
-      name: 'object'
-      greet: -> "hi #{@name}"
-    obj.greet()          # "hi undefined" — emits this.name.value
-```
-A local `class` with `constructor: (@name) ->` writes `this.name` but
-reads `this.name.value`. Expected `hi object`, as at module level.
-
 **T4 H — Component methods are never bound, including `=>` members.**
 `format = (n) => "#{prefix}#{n}"` then `names.map(format)` emits an
 unbound prototype method → "Cannot read properties of undefined".
