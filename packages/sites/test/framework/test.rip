@@ -450,6 +450,37 @@ test! 'read with a numeric range answers a number in range or null', ->
   eq (handle! jsonRequest('POST', '/qty', { qty: 42 })).json!.qty, 42
   eq (handle! jsonRequest('POST', '/qty', { qty: 'xx' })).json!.qty, null
 
+test! 'read rejects a misspelled validator, a bad required value, and a broken body', ->
+  resetGlobals()
+  get '/typo' -> { v: read('email', 'emial') }
+  get '/id' -> { id: read('id', 'id!') }
+  post '/body' -> { name: read('name') }
+  post '/sub' -> subrequest!({ name: 'inner' }, -> read('name'))
+  warnings = captureWarnings! ->
+    typo = handle! request('GET', '/typo?email=a@b.co')
+    eq typo.status, 500
+  ok warnings.some((w) -> w.includes("unknown validator 'emial'")), warnings.join('\n')
+  bad = handle! request('GET', '/id?id=abc')
+  eq bad.status, 422
+  ok (bad.json!).error.includes('not a valid id')
+  eq (handle! request('GET', '/id')).status, 400
+  eq (handle! request('GET', '/id?id=7')).json!, { id: 7 }
+  broken = handle! request('POST', '/body', { body: '{"name": "Ada"', headers: { 'content-type': 'application/json' } })
+  eq broken.status, 400
+  eq (broken.json!).code, 'invalid_json'
+  eq (handle! jsonRequest('POST', '/body', { name: 'Ada' })).json!, { name: 'Ada' }
+  # a subrequest reads the data it was given, never the broken body
+  sub = handle! request('POST', '/sub', { body: '{"oops"', headers: { 'content-type': 'application/json' } })
+  eq [sub.status, sub.text!], [200, 'inner']
+
+test! 'read sees only fields the request carries, and a range takes whole numbers', ->
+  resetGlobals()
+  get '/own' -> { a: read('hasOwnProperty', /.+/), b: read('toString', [1, 100]), c: read('constructor'), d: read('n.toString') }
+  eq (handle! request('GET', '/own?n=1')).json!, { a: null, b: null, c: null, d: null }
+  post '/qty' -> { qty: read('qty', [1, 99]) }
+  eq (handle! jsonRequest('POST', '/qty', { qty: 5.5 })).json!.qty, null
+  eq (handle! jsonRequest('POST', '/qty', { qty: 5 })).json!.qty, 5
+
 test! 'read merges body, query, and path with request-local context', ->
   resetGlobals()
   post '/orders/:id' ->

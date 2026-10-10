@@ -262,22 +262,9 @@ $21.4M. `~integer` turns `"9007199254740993"` into `…992` silently;
 
 ## Rip Sites
 
-**W12 L — `read` with a numeric range accepts a non-integer JSON number.**
-`?qty=5.5` answers null, but a JSON body `{qty: 5.5}` answers 5.5.
-
-**W4 M — `read()` with a misspelled validator name.** `read 'email',
-'emial'` → `null` with 200; `'emial!'` → 400 "Missing required field";
-`'emial?'` → 422. `check()` in rip/validate throws "unknown validator".
-
-**W5 M — A required field with an invalid value is reported as missing.** `'id!'` with `id=abc` → 400 "Missing required field"; the `?` form reports 422 "not a valid".
-
-**W6 M — A malformed JSON body reads as empty.** `'{"name": "Ada"'` → 200 with null fields; routes with `input:` return 400 `invalid_json`.
-
 **W7 M — An async `prefix` block registers its routes without the prefix.** `prefix '/api', -> cfg = loadConfig!(); get '/ping' …` serves `/ping`, not `/api/ping`: `fn?.()` is not awaited and `finally` restores the prefix. `App(fn)` has the same `fn?.()`. Same class as #432.
 
 **W8 M — Coded 5xx messages reach the client.** `error! 'db password is hunter2', 500, 'db_down'` → body `{"error":"db password is hunter2"}`. The README says "Raw failures and 5xx details are masked"; the code says a coded error "ships as authored". One is wrong.
-
-**W9 L — Absent fields named after built-ins return them.** `read 'hasOwnProperty', /.+/` returns the native function source; `read 'toString', [1,100]` and `read 'constructor'` likewise.
 
 **W10 L — A numeric enumeration in `read()` becomes a range.** `read 'qty', [1, 2, 3]` rejects 3.
 
