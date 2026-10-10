@@ -1587,6 +1587,19 @@ class Emitter {
     return this.resolveBareRead(name) === 'reactive';
   }
 
+  // Does `name` resolve to ANY binding here — a reactive name, a plain
+  // binding or parameter, or a component member? The walk is
+  // resolveBareRead's, which answers null for a plain binding and for
+  // nothing alike.
+  bindsName(name) {
+    for (let i = this.rframes.length - 1; i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.reactive.has(name) || f.bound.has(name)) return true;
+      if (f.members !== undefined && f.members.has(name)) return true;
+    }
+    return false;
+  }
+
   // Does `name` name an ENUM here? The walk mirrors resolveBareRead, and
   // the `enums` test precedes `bound` within a frame because
   // declaredNames puts every enum in `bound` too — an inner frame's own
@@ -11190,12 +11203,12 @@ class Emitter {
     const memberHead = isNode(head) ? componentPathText(head) : null;
     if (memberHead !== null) return this.renderChildComponent(sexpr, { text: memberHead, node: head }, sexpr.slice(1));
 
-    // Tag with classes: `div.card` / `.card` chains. A render local
-    // or loop variable shadows the tag reading (`code.value` after
-    // `code = obj` reads the local).
+    // Tag with classes: `div.card` / `.card` chains. A render local,
+    // loop variable, member or binding shadows the tag reading
+    // (`summary.total` after `summary := {…}` reads the member).
     if (headStr === '.') {
       const { tag, classes, id } = Emitter.collectTemplateClasses(sexpr);
-      if (tag !== null && isHtmlTag(tag) && this.renderVarKind(tag) === null) {
+      if (tag !== null && isHtmlTag(tag) && this.renderVarKind(tag) === null && !this.bindsName(tag)) {
         return this.renderTag(sexpr, tag, classes, [], id);
       }
       // General member chain → text (static or live).
@@ -11243,7 +11256,7 @@ class Emitter {
         }
       }
       const { tag, classes, id } = Emitter.collectTemplateClasses(head);
-      if (tag !== null && isHtmlTag(tag) && this.renderVarKind(tag) === null) {
+      if (tag !== null && isHtmlTag(tag) && this.renderVarKind(tag) === null && (classes.length === 0 || !this.bindsName(tag))) {
         if (classes.length > 0 && classes[classes.length - 1] === '__clsx') {
           return this.renderDynamicTag(sexpr, tag, sexpr.slice(1), [], classes.slice(0, -1), id);
         }

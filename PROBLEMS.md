@@ -160,13 +160,6 @@ binding"; `on := true` → bare "Unexpected ':='" (`on` is reserved, `true`).
 custom element. Inline it competes with a text value, so it wants a
 decision: tag, or reject the tight-hyphen value.
 
-**T2 ✔ H — A member or module value named like a tag, read with a property, renders an element.**
-`summary := {total: 42}` then `p summary.total` renders
-`<p><summary class="total"></summary></p>`; likewise `p data.count`,
-`p title.length`. `p` + indented `= title.length` renders 5. Locals and
-loop variables already win (`li option.label`); members and module
-bindings do not (src/emitter.js ~11187, `renderVarKind` only).
-
 **T3 ✔ H — Object-literal and class methods inside a component method get `.value` appended to `this.X`.**
 ```coffee
 A = component

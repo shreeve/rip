@@ -918,6 +918,63 @@ test 'onError on parent catches child error', '''
 # element flips them. Misresolving `a` silently creates an SVGAElement
 # whose href/click behavior is not an anchor's.
 
+# A member or binding named like a tag, read through a property, is the
+# value — as a render local already is. An unbound name stays the tag.
+code 'a member named like a tag reads its value through a property', '''
+  A = component
+    summary := {total: 42}
+    render
+      p summary.total
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.summary = __state({total: 42});
+    }
+    _create() {
+      this._el0 = document.createElement('p');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode('');
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._t0.data = this.summary.value.total; });
+    }
+  };
+  '''
+
+code 'a module binding named like a tag reads its value; an unbound one is the tag', '''
+  title = "hello"
+  A = component
+    render
+      div
+        p title.length
+        p option.label
+  ''', '''
+  let title = "hello";
+  let A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._el1 = document.createElement('p');
+      this._t0 = document.createTextNode('');
+      this._el1.appendChild(this._t0);
+      this._el0.appendChild(this._el1);
+      this._el2 = document.createElement('p');
+      this._el3 = document.createElement('option');
+      this._el3.className = 'label';
+      this._el2.appendChild(this._el3);
+      this._el0.appendChild(this._el2);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._t0.data = title.length; });
+    }
+  };
+  '''
+
 # A render child line opening with a tight-hyphen word names a custom
 # element — one tag, never a subtraction; a keyed run stays an attribute.
 code 'a hyphenated tag at a child line start is a custom element', '''
