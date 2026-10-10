@@ -1113,8 +1113,21 @@ grammar =
     o 'Statement POST_UNLESS Expression' , '["if", ["!", 3], [1]]', 'if: _, condition(unary: operator, operand), _(then)'
     o 'Expression POST_UNLESS Expression', '["if", ["!", 3], [1]]', 'if: _, condition(unary: operator, operand), _(then)'
     # Postfix conditional WITH else — the Python-style ternary spelling
-    # (`b if c else d`); POST_UNLESS has no ELSE form.
+    # (`b if c else d`).
     o 'Expression[then] POST_IF Expression[condition] ELSE (INDENT Expression[else] OUTDENT | Expression[else])', '["?:", @condition, @then, @else]', 'ternary: operator, condition, then, else'
+    # A statement's postfix if-else: `return x if c else y` returns the
+    # ternary, the reading the same words have after any expression. The
+    # Return reduces before POST_IF (the guard form needs it to), so the
+    # value is lifted out here; a statement with no value has no else
+    # reading. Rule order keeps both rows over infix `c else y`
+    # (declared in expectedConflicts).
+    o 'Statement POST_IF Expression ELSE Expression', '$1[0] === "return" && $1.length === 2 ? ["return", ["?:", $3, $1[1], $5]] : (() => { throw Object.assign(new Error("a postfix if-else on a statement takes its value from the statement, and this one has no value — write the if as a block"), { start: locs[locs.length - 5].start, end: locs[locs.length - 1].end }); })()', '~ the returned ternary carries the statement and condition spans'
+    # POST_UNLESS has no ELSE form: `x unless c else y` would otherwise
+    # fold the else into the condition. It rejects, positioned. (An
+    # action with no `$n` reference reads as a template, whose bare
+    # digits are positions — the `$1` keeps these executable.)
+    o 'Statement POST_UNLESS Expression ELSE Expression' , '(() => { throw Object.assign(new Error("postfix \'unless\' has no else form — write `if c then … else …`, or put the else case first with postfix if"), { start: locs[locs.length - 5].start, end: locs[locs.length - 1].end }); })($1)', '~ rejects; builds no node'
+    o 'Expression POST_UNLESS Expression ELSE Expression', '(() => { throw Object.assign(new Error("postfix \'unless\' has no else form — write `if c then … else …`, or put the else case first with postfix if"), { start: locs[locs.length - 5].start, end: locs[locs.length - 1].end }); })($1)', '~ rejects; builds no node'
   ]
 
   # ============================================================================
@@ -1629,7 +1642,10 @@ kinds =
 #   Expression`) and loose `or` (`Operation → Expression ELSE
 #   Expression`) both complete. Rule order keeps the ternary, so
 #   `b if c else d` stays `c ? b : d` and infix else only fires
-#   where there is no POST_IF (`x = get() else error`).
+#   where there is no POST_IF (`x = get() else error`). The statement
+#   form (`return x if c else y`, the returned ternary) and the two
+#   POST_UNLESS forms (which reject) win the same way, so an else
+#   after a postfix condition never folds into it.
 # • Left-grouped then/else over infix else — after `a then b else c`
 #   (c an Expression, Return or STATEMENT), the three-operand form and
 #   the inner `b else c` both complete. Rule order keeps the
@@ -1663,6 +1679,9 @@ expectedConflicts = [
   ['reduce-reduce', 'Operation → Expression THEN STATEMENT over Statement → STATEMENT'                                                            ,  4]
   ['reduce-reduce', 'Operation → Expression ELSE STATEMENT over Statement → STATEMENT'                                                             ,  4]
   ['reduce-reduce', 'If → Expression POST_IF Expression ELSE Expression over Operation → Expression ELSE Expression'                              , 23]
+  ['reduce-reduce', 'If → Statement POST_IF Expression ELSE Expression over Operation → Expression ELSE Expression'                               , 23]
+  ['reduce-reduce', 'If → Statement POST_UNLESS Expression ELSE Expression over Operation → Expression ELSE Expression'                           , 23]
+  ['reduce-reduce', 'If → Expression POST_UNLESS Expression ELSE Expression over Operation → Expression ELSE Expression'                          , 23]
   ['reduce-reduce', 'Operation → Expression THEN Expression ELSE Expression over Operation → Expression ELSE Expression'                    , 23]
   ['reduce-reduce', 'Operation → Expression THEN Expression ELSE Return over Operation → Expression ELSE Return'                            , 44]
   ['reduce-reduce', 'Operation → Expression THEN Expression ELSE Return over Statement → Return'                                            ,  4]

@@ -28,17 +28,6 @@ Contents: [Language core](#language-core) ·
 
 ### Silent miscompiles
 
-**C3 ✔ H — `return X if C else Y` compiles to `if (C || Y) return X`.**
-`f = (b) -> return "yes" if b else "no"` returns `"yes"` for both `true`
-and `false`. The loose `else` (low-precedence or) is applied instead of
-the conditional. `f = -> "yes" if b else "no"` and `x = a if b else c`
-are correct.
-
-**C4 H — Postfix `unless … else` folds `else` into the condition.**
-`x = "a" unless b else "c"` (with `b = false`) emits
-`if (!(b || "c")) x = "a";`, so `x` stays undefined. The `if … else`
-twin compiles to a ternary.
-
 **C7 M — Class-body `x: 1`, `x: 0`, `x: ""`, `x: []`, `x: {}`, `x: true`, `x: null` silently drop the value.**
 ```coffee
 class A
