@@ -110,9 +110,6 @@ false. They read as one operator with two spellings.
 
 **C21 L — `for x in src() by step()` evaluates `step()` before `src()`.** Range loops keep source order (pinned).
 
-**C22 L — String repetition ignores interpolated strings.** `"ab" * 3`
-is `"ababab"`; `"#{a}-" * 3` compiles to a template literal times 3 → NaN.
-
 **C23 L — `not s =~ /e/` matches against the string `"false"`.** `not`
 binds tighter than `=~`, and `toMatchable` stringifies the boolean.
 

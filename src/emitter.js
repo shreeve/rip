@@ -15141,8 +15141,12 @@ class Emitter {
 
   // `*` with a string-LITERAL left operand is repetition — it emits
   // `lit.repeat(n)`, a call: the primary tier, never a spine member.
+  // Any string literal on the left: quoted, heredoc (backtick-delimited
+  // atoms) or interpolated (a `str` node).
   static isStrRepeat(x) {
-    return isNode(x) && x[0] === '*' && x.length === 3 && typeof x[1] === 'string' && x[1][0] === '"';
+    if (!isNode(x) || x[0] !== '*' || x.length !== 3) return false;
+    const l = x[1];
+    return typeof l === 'string' ? (l[0] === '"' || l[0] === '`') : (isNode(l) && l[0] === 'str');
   }
 
   // Does this expression's EMISSION begin with an object literal's
@@ -15665,7 +15669,7 @@ class Emitter {
     // rule is literal-only: a dynamic left operand keeps JS `*`.
     if (Emitter.isStrRepeat(node)) {
       this.mark(node, '$self', () => {
-        this.mark(node, 'left', () => this.b.emit(node[1]));
+        this.mark(node, 'left', () => (typeof node[1] === 'string' ? this.b.emit(node[1]) : this.expr(node[1])));
         this.b.emit('.repeat(');
         this.mark(node, 'right', () => this.expr(node[2]));
         this.b.emit(')');
