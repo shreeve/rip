@@ -6051,7 +6051,22 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
     const tag = String(root.value).split("#")[0];
     return TEMPLATE_TAGS.has(tag) || tag.includes("-");
   };
-  const customElementStart = (prev) => !prev || prev.kind === "INDENT" || prev.kind === "TERMINATOR" || prev.kind === "OUTDENT" || prev.kind === "RENDER";
+  const customElementStart = (prev) => {
+    if (!prev || prev.kind === "INDENT" || prev.kind === "TERMINATOR" || prev.kind === "OUTDENT" || prev.kind === "RENDER")
+      return true;
+    if (!pendingSpaced || prev.generated)
+      return false;
+    let j = tokens.length - 1;
+    while (j >= 1 && tokens[j].kind === "PROPERTY" && tokens[j - 1].kind === ".")
+      j -= 2;
+    const root = tokens[j];
+    if (j < tokens.length - 1 && (!root || root.kind === "INDENT" || root.kind === "TERMINATOR" || root.kind === "OUTDENT" || root.kind === "RENDER"))
+      return true;
+    if (root?.kind !== "IDENTIFIER")
+      return false;
+    const tag = String(root.value).split("#")[0];
+    return TEMPLATE_TAGS.has(tag) || tag.includes("-");
+  };
   const insideComponentBody = () => {
     let depth = 0;
     let min = 0;
@@ -32456,7 +32471,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "48baba26b1700bb6";
+var compilerBuild = () => "f496a8e80e90c312";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

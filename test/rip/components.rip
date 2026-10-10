@@ -1025,8 +1025,10 @@ code 'a module binding named like a tag reads its value; an unbound one is the t
   };
   '''
 
-# A render child line opening with a tight-hyphen word names a custom
-# element — one tag, never a subtraction; a keyed run stays an attribute.
+# A tight-hyphen word at a render child position — opening a line, or
+# spaced after a tag on its line — names a custom element: one tag, never
+# a subtraction. A keyed run stays an attribute; a spaced `a - b` and
+# `= a-b` stay arithmetic.
 code 'a hyphenated tag at a child line start is a custom element', '''
   A = component
     render
@@ -1054,6 +1056,39 @@ code 'a hyphenated tag at a child line start is a custom element', '''
       this._el3.className = 'primary-action';
       this._el0.appendChild(this._el3);
       this._el0.setAttribute('aria-busy', true);
+      return this._el0;
+    }
+  };
+  '''
+
+code 'a hyphenated word after a tag on its line nests a custom element', '''
+  A = component
+    render
+      div
+        p x-icon
+        p.card my-el "hi"
+        span aria-label: "x"
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._el1 = document.createElement('p');
+      this._el2 = document.createElement('x-icon');
+      this._el1.appendChild(this._el2);
+      this._el0.appendChild(this._el1);
+      this._el3 = document.createElement('p');
+      this._el4 = document.createElement('my-el');
+      this._t0 = document.createTextNode("hi");
+      this._el4.appendChild(this._t0);
+      this._el3.appendChild(this._el4);
+      this._el3.className = 'card';
+      this._el0.appendChild(this._el3);
+      this._el5 = document.createElement('span');
+      this._el5.setAttribute('aria-label', "x");
+      this._el0.appendChild(this._el5);
       return this._el0;
     }
   };

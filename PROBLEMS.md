@@ -143,11 +143,12 @@ binding"; `on := true` → bare "Unexpected ':='" (`on` is reserved, `true`).
 
 ## Templates, components, reactivity
 
-**T1 M — An inline custom-element child reads as subtraction.**
-`div x-icon` (the tag on the parent's line) emits
-`createTextNode(String(x - icon))`; on its own line `x-icon` is a
-custom element. Inline it competes with a text value, so it wants a
-decision: tag, or reject the tight-hyphen value.
+**T20 M — A hyphenated bare event shorthand compiles to subtraction.**
+`p @x-y` in a render block emits
+`addEventListener('x', (e) => (this.onX - y)(e))`: the shorthand takes
+`x` as the event and subtracts `y` from the handler. Custom event names
+are commonly hyphenated (`@sl-change`); reject the form or read the
+whole run as the event name.
 
 **T4 H — Component methods are never bound, including `=>` members.**
 `format = (n) => "#{prefix}#{n}"` then `names.map(format)` emits an

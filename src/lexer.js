@@ -709,10 +709,20 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     return TEMPLATE_TAGS.has(tag) || tag.includes('-');
   };
 
-  // A render child position at a line start, where a custom element's
-  // tag name may open the line.
-  const customElementStart = (prev) =>
-    !prev || prev.kind === 'INDENT' || prev.kind === 'TERMINATOR' || prev.kind === 'OUTDENT' || prev.kind === 'RENDER';
+  // A render child position where a custom element's tag name may
+  // stand: a line start, or the word spaced after a tag on its line
+  // (`div x-icon` nests the element, as `div span` does).
+  const customElementStart = (prev) => {
+    if (!prev || prev.kind === 'INDENT' || prev.kind === 'TERMINATOR' || prev.kind === 'OUTDENT' || prev.kind === 'RENDER') return true;
+    if (!pendingSpaced || prev.generated) return false;
+    let j = tokens.length - 1;
+    while (j >= 1 && tokens[j].kind === 'PROPERTY' && tokens[j - 1].kind === '.') j -= 2;
+    const root = tokens[j];
+    if (j < tokens.length - 1 && (!root || root.kind === 'INDENT' || root.kind === 'TERMINATOR' || root.kind === 'OUTDENT' || root.kind === 'RENDER')) return true;
+    if (root?.kind !== 'IDENTIFIER') return false;
+    const tag = String(root.value).split('#')[0];
+    return TEMPLATE_TAGS.has(tag) || tag.includes('-');
+  };
 
   const insideComponentBody = () => {
     let depth = 0;
