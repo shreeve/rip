@@ -307,11 +307,6 @@ element named `"2<"`; two roots, trailing junk, `'hello'` and `''` are
 accepted; duplicate attributes keep the last. A cut-off SOAP or EDI
 response parses "successfully".
 
-**P6 H — rsx `stringify` writes unvalidated names (markup injection).**
-`stringify 'a', {'@attrs': {'x" onload="evil': '1'}}` →
-`<a x" onload="evil="1"/>`; element names like `'<x>'` and `'1bad'` are
-accepted.
-
 **P7 H — x12 `set` accepts separator characters inside a value (segment injection).**
 `x.set "NM1-3", "SMITH*JOHN~DMG*D8*19800101"` adds a field and a new
 `DMG` segment on re-parse.

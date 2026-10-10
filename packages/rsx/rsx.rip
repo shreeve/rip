@@ -383,9 +383,19 @@ XML_TEXT_ESC = (s) ->
 XML_ATTR_ESC = (s) ->
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;')
 
+# The XML 1.0 `Name` production (spec §2.3), verbatim. Escaping cannot
+# repair a name the way it repairs a value, so a name outside it rejects:
+# `x" onload="evil` would otherwise inject an attribute.
+NAME_START =! ':A-Z_a-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u{10000}-\u{EFFFF}'
+XML_NAME   =! RegExp.new("^[#{NAME_START}][#{NAME_START}\\-.0-9\u00B7\u0300-\u036F\u203F-\u2040]*$", 'u')
+
+xmlName = (kind, name) ->
+  throw RsxError.new "invalid XML #{kind} name #{JSON.stringify(name)}" unless XML_NAME.test(name)
+  name
+
 formatAttrs = (attrs) ->
   return '' unless attrs and Object.keys(attrs).length > 0
-  parts = (" #{k}=\"#{XML_ATTR_ESC String(v)}\"" for own k, v of attrs)
+  parts = (" #{xmlName('attribute', k)}=\"#{XML_ATTR_ESC String(v)}\"" for own k, v of attrs)
   parts.join ''
 
 wrapCdata = (text) ->
@@ -394,6 +404,7 @@ wrapCdata = (text) ->
   "<![CDATA[#{safe}]]>"
 
 emitNode = (name, value, opts, depth) ->
+  xmlName 'element', name
   pad = (opts.indent or '').repeat depth
   if value is null or value is undefined
     return "#{pad}<#{name}/>"

@@ -385,3 +385,27 @@ test "SOAP-shaped envelope: parse, address payload, re-serialize with CDATA", ->
 test "CDATA split round trips through parse", ->
   emitted = stringify('p', 'x]]>y', cdata: ['p'])
   eq parse(emitted, trimText: false), { p: 'x]]>y' }
+
+# ==[ Stringify names ]==
+
+console.log "\nStringify names"
+
+rejectsName = (fn) ->
+  try
+    fn()
+    false
+  catch e
+    e instanceof RsxError and e.message.includes('invalid XML')
+
+test "stringify rejects an element or attribute name that is not an XML Name", ->
+  ok rejectsName(-> stringify 'a', {'@attrs': {'x" onload="evil': '1'}}), 'attribute injection'
+  ok rejectsName(-> stringify '<x>', 'v'), 'element name with markup'
+  ok rejectsName(-> stringify '1bad', 'v'), 'element name starting with a digit'
+  ok rejectsName(-> stringify 'a', {'b c': 'v'}), 'child name with a space'
+  ok rejectsName(-> stringify 'a', {'@attrs': {'': '1'}}), 'empty attribute name'
+
+test "stringify keeps valid names, namespaced and non-ASCII ones included", ->
+  eq stringify('soapenv:Envelope', {'ns1:Body': 'x'}), '<soapenv:Envelope><ns1:Body>x</ns1:Body></soapenv:Envelope>'
+  eq stringify('a', {'@attrs': {'data-id': '1', 'xml:lang': 'en'}}), '<a data-id="1" xml:lang="en"/>'
+  eq stringify('café', 'v'), '<café>v</café>'
+  eq stringify('_x.y-z', 'v'), '<_x.y-z>v</_x.y-z>'
