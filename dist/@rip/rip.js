@@ -6904,6 +6904,9 @@ ${baseline}`).join(`
         continue;
       }
     }
+    if (text.startsWith("!~", pos) && pendingSpaced && INDEXABLE.has(last()?.kind) && /\s/.test(text[pos + 2] ?? "")) {
+      fail("Rip has no '!~' operator — write `not (s =~ /re/)`", pos, pos + 2);
+    }
     const four = text.slice(pos, pos + 4);
     if (OPS4[four]) {
       push(OPS4[four], four, pos, pos + 4);
@@ -20374,7 +20377,10 @@ ${this.replayPad}}` : " }");
     return isNode(x) && (x[0] === "||" || x[0] === "&&" || x[0] === "??") && x.length === 3 && isNode(x[2]) && x[2][0] === "throw" && x[2].length === 2;
   }
   static isStrRepeat(x) {
-    return isNode(x) && x[0] === "*" && x.length === 3 && typeof x[1] === "string" && x[1][0] === '"';
+    if (!isNode(x) || x[0] !== "*" || x.length !== 3)
+      return false;
+    const l = x[1];
+    return typeof l === "string" ? l[0] === '"' || l[0] === "`" : isNode(l) && l[0] === "str";
   }
   static leadsWithObject(x) {
     let cur = x;
@@ -20775,7 +20781,7 @@ ${this.replayPad}}` : " }");
       return this.logicalChain(node);
     if (Emitter.isStrRepeat(node)) {
       this.mark(node, "$self", () => {
-        this.mark(node, "left", () => this.b.emit(node[1]));
+        this.mark(node, "left", () => typeof node[1] === "string" ? this.b.emit(node[1]) : this.expr(node[1]));
         this.b.emit(".repeat(");
         this.mark(node, "right", () => this.expr(node[2]));
         this.b.emit(")");
@@ -20941,10 +20947,10 @@ ${this.replayPad}}` : " }");
     if (node[0] === "delete" && typeof node[1] === "string" && this.isReactiveName(node[1])) {
       throw this.positionedError(node, `emitter: cannot delete the reactive variable '${node[1]}' — \`delete ${node[1]}.value\` would remove the container's accessor and silently kill the reactive`);
     }
-    if (node[0] === "delete" && !(isNode(node[1]) && (node[1][0] === "." || node[1][0] === "[]"))) {
+    if (node[0] === "delete" && !(isNode(node[1]) && [".", "[]", "?.", "optindex"].includes(node[1][0]))) {
       throw this.positionedError(node, "emitter: delete requires a property reference (delete obj.a / delete obj[k]) — deleting a plain binding is a strict-mode SyntaxError in modules");
     }
-    if (node[0] === "delete" && node[1][0] === "[]" && (isRange(node[1][2]) || Emitter.negativeLiteralKey(node[1][2]))) {
+    if (node[0] === "delete" && (node[1][0] === "[]" || node[1][0] === "optindex") && (isRange(node[1][2]) || Emitter.negativeLiteralKey(node[1][2]))) {
       throw this.positionedError(node, `emitter: delete cannot target a ${isRange(node[1][2]) ? "range" : "negative-literal index"} — it reads through a call (${isRange(node[1][2]) ? ".slice()" : ".at(-n)"}), so nothing would be deleted; use splice or a computed index`);
     }
     this.mark(node, "$self", () => {
@@ -21306,6 +21312,12 @@ ${this.replayPad}}` : " }");
           accessors.push({ pair, stmt, key: memberKey(pair[1]), form: form.form });
         }
         if (mName === "constructor" && !isStaticKey(pair[1])) {
+          if (hasConstructor) {
+            throw this.positionedError(pair, "emitter: a class has one constructor — JavaScript refuses a second at load", stmt);
+          }
+          if (isFunc(pair[2]) && (this.containsAwait(pair[2][2]) || Emitter.containsYield(pair[2][2]))) {
+            throw this.positionedError(pair, "emitter: a constructor cannot await or yield — JavaScript has no async or generator constructors (await in a static factory method instead)", stmt);
+          }
           hasConstructor = true;
           if (isFunc(pair[2])) {
             ctorParams = pair[2][1];
@@ -25765,6 +25777,10 @@ class SchemaDef {
   omit(...keys) {
     return derive(this, (src) => {
       const drop = new Set(flatten(keys));
+      for (const k of drop) {
+        if (!src.has(k))
+          throw new Error("omit: unknown field '" + k + "' on " + (this.name || "schema"));
+      }
       const out = new Map;
       for (const [k, v] of src)
         if (!drop.has(k))
@@ -25783,6 +25799,10 @@ class SchemaDef {
   required(...keys) {
     return derive(this, (src) => {
       const req = new Set(flatten(keys));
+      for (const k of req) {
+        if (!src.has(k))
+          throw new Error("required: unknown field '" + k + "' on " + (this.name || "schema"));
+      }
       const out = new Map;
       for (const [k, v] of src)
         out.set(k, { ...v, required: req.has(k) ? true : v.required });
@@ -28124,7 +28144,7 @@ function _isSourceFamily(value) {
   return value != null && typeof value === "function" && value[SOURCE_FAMILY] === true;
 }
 parseStaleTime = function(value) {
-  let amount, parts;
+  let amount, ms, parts;
   if (!(value != null))
     return 0;
   if (typeof value === "number") {
@@ -28139,7 +28159,7 @@ parseStaleTime = function(value) {
     parts = value.match(DURATION_RE);
     if (parts) {
       amount = parseFloat(parts[1]);
-      return (() => {
+      ms = (() => {
         switch (parts[2][0]) {
           case "s":
             return amount * 1000;
@@ -28155,6 +28175,8 @@ parseStaleTime = function(value) {
             return amount * 31536000000;
         }
       })();
+      if (Number.isFinite(ms))
+        return ms;
     }
   }
   throw new TypeError('Rip App: source staleTime must be a non-negative number, a duration such as "5 min", or "forever"');
@@ -28974,6 +28996,9 @@ makeProxy = function(target) {
     },
     deleteProperty(raw, prop) {
       let _ref2;
+      if (_isSourceCell(raw[prop])) {
+        throw new TypeError(`Rip App: cannot delete source key '${String(prop)}'; it is declared with source() in app/stash.rip — reset() it, or write it through its cell`);
+      }
       let had = Object.prototype.hasOwnProperty.call(raw, prop);
       let deleted = delete raw[prop];
       if ((_ref2 = raw[SIGNALS]?.get(prop)) != null)
@@ -32643,7 +32668,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "340cf30721324fe9";
+var compilerBuild = () => "17b6e262d11c71f7";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
