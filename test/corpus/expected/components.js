@@ -467,12 +467,13 @@ let Chart = class extends __Component {
   }
 };
 let Chip = class extends __Component {
-  static __props = ['label'];
+  static __props = ['label', 'onPick'];
   _init(__given) {
     this.label = __state(__given.__bind_label__ ?? __given.label ?? "c");
+    this.onPick = __state(__given.__bind_onPick__ ?? __given.onPick);
   }
   fire() {
-    return this.emit("pick", this.label.value);
+    return this.onPick.value?.(this.label.value);
   }
   _create() {
     this._el0 = document.createElement('span');
@@ -490,15 +491,15 @@ let Deck = class extends __Component {
   _init(__given) {
     this.name = __state("n");
   }
-  onPick(e) {
-    return (this.name.value = e.detail);
+  picked(label) {
+    return (this.name.value = label);
   }
   _create() {
     this._el0 = document.createElement('div');
     this._el0.setAttribute('data-part', 'Deck');
     { const __prev = __pushComponent(this); try {
     try {
-    this._inst1 = new Chip({ label: this.name });
+    this._inst1 = new Chip({ label: this.name, onPick: this.picked });
     if (this._inst1 && this._inst1._initFailed) {
       this._inst1 = null;
       this._el2 = document.createComment('rip:child-init-failed: Chip');
@@ -518,7 +519,7 @@ let Deck = class extends __Component {
     this._el0.appendChild(this._el2);
     { const __prev = __pushComponent(this); try {
     try {
-    this._inst3 = new Chip({ label: "static", compact: true });
+    this._inst3 = new Chip({ label: "static", compact: true, onPick: this.picked });
     if (this._inst3 && this._inst3._initFailed) {
       this._inst3 = null;
       this._el4 = document.createComment('rip:child-init-failed: Chip');
@@ -535,7 +536,6 @@ let Deck = class extends __Component {
       this._el4 = document.createComment('rip:child-error: Chip');
     }
     } finally { __popComponent(__prev); } }
-    if (this._inst3) (this._inst3._nodes?.[0] ?? this._el4).addEventListener('pick', (e) => __batch(() => (this.onPick)(e)));
     this._el0.appendChild(this._el4);
     { const __prev = __pushComponent(this); try {
     try {

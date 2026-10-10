@@ -236,7 +236,7 @@ const LITERAL_CLASSIFICATION = [
   generated("'await (async () => { throw '", 1, 'value throw carries source await and rejects captured control'),
   generated("'await (async () => {\\n'", 2, 'comprehensions carry source await and reject captured control'),
   excluded("'function '", 2, 'source def emission, including the TS signature face'),
-  excluded("'function'", 1, 'source thin-function emission'),
+  excluded("'function'", 2, 'source thin-function emission'),
   excluded("'function* '", 1, 'source generator-def emission'),
   excluded("'function*'", 1, 'source generator-function emission'),
   excluded("'=>'", 1, 'source fat-arrow emission'),
@@ -251,6 +251,7 @@ const LITERAL_CLASSIFICATION = [
   generated("`) => ${…}(() => `", 1, 'element listener arrow tail; handler control is validated before emission'),
   generated("`(this._refCleanups ??= []).push(() => ${…}(this.`", 1, 'emitter-owned ref cleanup; the ref NAME emits after it, through the primitive channel that gives the read its own source span'),
   excluded("`) as (e: ${…}) => unknown`", 1, 'TypeScript function type (the typed event-handler cast), erased from generated JavaScript'),
+  excluded("') => unknown'", 1, 'TypeScript function type (the typed event-handler cast whose type a site emits piecewise, mapping each copy of a user name), erased from generated JavaScript'),
   excluded("` as (e: ${…}) => unknown)`", 1, 'TypeScript function type (the typed bare-member handler cast), erased from generated JavaScript'),
   excluded("`${…} ${…}: function (this: `", 1, 'the face behavior object re-states a computed body already emitted through computedBody, whose await/yield rejections govern both; a TypeScript-only region, erased from generated JavaScript'),
   excluded("' = __computed(() => this.'", 1, 'the render-gate face twin restates the read pure gate analysis already admitted (a literal @stash path and a literal or params/query key — no control flow can appear); a TypeScript-only region, erased from generated JavaScript'),
@@ -319,6 +320,6 @@ describe('generated-scope inventory', () => {
     // node head against '=>' — whose `this` an assignment describes,
     // not an emission of one; classMethodForm spells '->' as the kind
     // of the method pair a class-body `def` reads as.
-    expect(categories).toEqual({ diagnostic: 38, semantic: 20, type: 25 });
+    expect(categories).toEqual({ diagnostic: 39, semantic: 20, type: 25 });
   });
 });

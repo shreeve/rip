@@ -1639,9 +1639,12 @@ export function rewriteTypes(tokens, mintId, text, fail) {
       // and the value is not a method. Initializer forms claim through
       // the statement-declaration branch above. Only type-shaped lines
       // claim — a value there (`x: f()`) stays an object pair and
-      // rejects loudly at the emitter.
+      // rejects loudly at the emitter. A component's `@name:` line is
+      // a prop and never a method pair (a class's `@name:` is a static
+      // method), so a depth-0 `=>` there is a function TYPE —
+      // `@onPick?: (item: Item) => void` — not an arrow value.
       if (frames.length === 0 && inClassBody() && namedColon &&
-          !methodValueAhead(tokens, i + 1)) {
+          ((isAtName && classBodyKind() === 'component') || !methodValueAhead(tokens, i + 1))) {
         let end = -1, depth = 0;
         for (let j = i + 1; j < tokens.length; j++) {
           if (counter.on) counter.n++;

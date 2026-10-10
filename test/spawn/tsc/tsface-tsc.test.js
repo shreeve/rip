@@ -215,9 +215,10 @@ const CLEAN_ROWS = [
     // companion interface used as an annotation type
  'Counter = component\n  count := 0\n  @title: string\n  @max?: number\n  @step: number := 1\n  total: number ~= count * 2\n  limit: number =! 100\n  note = "n"\n  bump = (n: number): number -> count += n\n  mounted = -> 1\nuse = (c: Counter) -> c.count.value\nconsole.log Counter, use',
     //  a two-component program — child props in all three prop
-    // classes, a child event binding, children through slot, extends —
-    // the composed face checks clean
- 'Chip = component\n  @label := "c"\n  fire = ->\n    @emit "pick", @label\n  render\n    span.chip\n      = @label\nDeck = component extends section\n  name := "n"\n  onPick = (e) -> 1\n  render\n    section.deck\n      Chip label: name, @pick: @onPick\n        "projected"\nconsole.log Chip, Deck',
+    // classes, a callback prop the child calls, a DOM listener on a
+    // hosted child, children through slot, extends — the composed face
+    // checks clean
+ 'Chip = component extends span\n  @label := "c"\n  @onPick?: (label: string) => void\n  fire = ->\n    onPick? label\n  render\n    span.chip\n      = @label\nDeck = component extends section\n  name := "n"\n  picked = (label: string) -> 1\n  onClick = (e: MouseEvent) -> 1\n  render\n    section.deck\n      Chip label: name, onPick: picked, @click: @onClick\n        "projected"\nconsole.log Chip, Deck',
     //  offer/accept + the dynamic render layer (swap/reconcile
     // scaffolding, bind, ref) stay quiet through the face
  'App = component\n  offer theme := "dark"\n  items := [1]\n  vis := true\n  sel := ""\n  el := null\n  onClick = -> vis = !vis\n  render\n    div\n      button @click\n      if vis\n        p "on"\n      ul\n        for item in items\n          li key: item\n            = item\n      input type: "text", value <=> sel\n      div ref: el\nSub = component\n  accept theme from App\n  render\n    span\n      = @theme\nconsole.log App, Sub',

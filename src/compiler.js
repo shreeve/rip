@@ -367,6 +367,7 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     intrinsics: emitted.intrinsics ?? [],
     // SOURCE span and spelling of every component tag's constructor reference.
     componentUses: emitted.componentUses ?? [],
+    componentProps: emitted.componentProps ?? {},
     // The names this module publishes as namespaces (`export * as X`).
     namespaceExports: emitted.namespaceExports ?? [],
     // The module-scope component bindings.

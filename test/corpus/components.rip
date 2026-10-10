@@ -103,27 +103,28 @@ Chart = component
       circle cx: "5", cy: "5", r: "4"
 
 # Composition: child components with the declared-prop contract
-# (container / static / snapshot+updater), boolean shorthand, an
-# explicit child event binding, keyed child rows, children through
+# (container / static / snapshot+updater), boolean shorthand, a
+# callback prop the child calls, keyed child rows, children through
 # slot, extends + rest. (The offer/accept spellings stay out of the
 # corpus — the token stream cannot carry the difference;
 # the sexpr spot tier and the paired scenarios hold them.)
 Chip = component
   @label := "c"
+  @onPick?: (label: string) => void
   fire = ->
-    @emit "pick", @label
+    onPick? label
   render
     span.chip
       = @label
 
 Deck = component
   name := "n"
-  onPick = (e) ->
-    name = e.detail
+  picked = (label: string) ->
+    name = label
   render
     div.deck
-      Chip label: name
-      Chip label: "static", compact, @pick: @onPick
+      Chip label: name, onPick: picked
+      Chip label: "static", compact, onPick: picked
       Chip label: (name + "!")
       Chip label <=> name
       ul

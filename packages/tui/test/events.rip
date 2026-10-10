@@ -229,19 +229,20 @@ test "a paste goes to the focused node as one `paste` event with its text, and b
     view.send "#{CSI}200~from the terminal#{CSI}201~"
     eq got, [['field', 'two\rlines', 'paste'], ['outer', 'two\rlines', 'field'], ['field', 'from the terminal', 'paste'], ['outer', 'from the terminal', 'field']]
 
-test "a component's `emit` bubbles through the same dispatch", ->
+test "a child notifies its parent through a callback prop, called from a listener", ->
   got = []
   Child = component
+    @onChosen?: (n: number) => void
     render
-      Box focusable: true, autofocus: true, @keydown: (=> @emit 'chosen', 7)
+      Box focusable: true, autofocus: true, @keydown: (=> onChosen? 7)
         Text "x"
   Parent = component
     render
-      Box @chosen: ((event) -> got.push [event.type, event.detail, event.eventPhase])
-        Child
+      Box
+        Child onChosen: ((n) -> got.push ['chosen', n])
   mounted Parent, {}, (view) ->
     view.press 'Enter'
-    eq got, [['chosen', 7, 3]]
+    eq got, [['chosen', 7]]
 
 test "`press`, `type`, `paste` and `send` take one road: what a listener hears is the same", ->
   mounted Nest, {}, (view) ->

@@ -34,7 +34,7 @@ import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttri
 import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls, CLSX_TYPE, STYLE_FN_TYPE } from './ts/dom-types.js';
 import { restAliasName, restPassthroughText, restOfComponentText, COMPONENT_FAILURE_TYPE,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
-  declaresContainer, ambientClassDeclares, plainBehaviorValued, stateBehaviorValued, OFFERS, offersRecordText,
+  declaresContainer, ambientClassDeclares, plainBehaviorValued, stateBehaviorValued, OFFERS, offersRecordText, HOST, hostTypeText, publicProps,
   propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType, restContainerType, MINTED,
   componentCtorMembers, componentCtorSegments, runtimeApiDeclares,
   syntacticLiteralType,
@@ -540,6 +540,9 @@ class Emitter {
     // no token for an import specifier, so an importer's editor colors an
     // imported component from this record.
     this.componentNames = [];
+    // Per module-scope component, the props a construction must pass —
+    // what a missing-prop diagnostic names (packages/vscode/src/diagnostics.js).
+    this.componentProps = {};
     // Exported object literals whose every pair's value is a bare name
     // (`export Controls = { Panel, Row: Panel }`), as [name, values].
     // Filtered against componentNames once the module is emitted — a
@@ -2787,6 +2790,10 @@ class Emitter {
     if (!hasChildren) line(() => this.b.emit('declare children?: __RipChildren;'));
     this._needsChildren = true;
     line(() => this.b.emit(`declare ${OFFERS}: ${offersRecordText(info)};`));
+    // The host record spells the host component's name as the rest line
+    // does, unmarked: the extends head's bytes belong to `__ripHost`,
+    // where the name hovers as the component.
+    line(() => this.b.emit(`declare ${HOST}: ${hostTypeText(info)};`));
     // The ambience helper the `stash` field infers through is declared
     // once at MODULE scope, from the emit() tail — keyed off the USE,
     // never off companion emission: expression-valued and function-
@@ -3112,7 +3119,13 @@ class Emitter {
     const start = this.b.offset;
     this.b.tsOnly(() => this.b.emit('('));
     fn();
-    this.b.tsOnly(() => this.b.emit(evTypeText === null ? ') as any' : `) as (e: ${evTypeText}) => unknown`));
+    // The type is text, or a function that emits it — a site whose type
+    // spells a user name maps each copy through the primitive channel.
+    this.b.tsOnly(() => {
+      if (evTypeText === null) this.b.emit(') as any');
+      else if (typeof evTypeText === 'function') { this.b.emit(') as (e: '); evTypeText(); this.b.emit(') => unknown'); }
+      else this.b.emit(`) as (e: ${evTypeText}) => unknown`);
+    });
     return evTypeText === null ? null : [start, this.b.offset];
   }
 
@@ -9723,10 +9736,10 @@ class Emitter {
       // runtime already rejects declared PROPS of these names at
       // construction, so the compile rejection closes the private-
       // member half of the same hazard).
-      if (name === 'mount' || name === 'unmount' || name === 'emit') {
+      if (name === 'mount' || name === 'unmount') {
         throw this.positionedError(stmt,
-          `emitter: component member '${name}' collides with the component runtime API — 'mount', 'unmount', ` +
-          "and 'emit' are __Component's own methods, and the machinery calls them on every instance (a " +
+          `emitter: component member '${name}' collides with the component runtime API — 'mount' and 'unmount' ` +
+          "are __Component's own methods, and the machinery calls them on every instance (a " +
           'same-named member would silently shadow them); rename the member', node);
       }
       seen.set(name, stmt);
@@ -10190,7 +10203,14 @@ class Emitter {
         else this.b.emit(`'${extendsComponent}'`);
         this.b.emit(';\n');
       }
-      if (this.scopes.length === 1 && typeof this._componentName === 'string') this.componentNames.push(this._componentName);
+      if (this.scopes.length === 1 && typeof this._componentName === 'string') {
+        this.componentNames.push(this._componentName);
+        if (tsInfo !== null) {
+          this.componentProps[this._componentName] = {
+            required: publicProps(tsInfo).filter((m) => !m.optional && !m.hasDefault).map((m) => m.name),
+          };
+        }
+      }
       // HMR identity/signature — module-scope named components only.
       // Gated on `hmr`: off keeps production bytes unchanged.
       const hmrMeta = this.hmr && this.modulePath && this.scopes.length === 1 && typeof this._componentName === 'string';
@@ -11868,8 +11888,9 @@ class Emitter {
   // Children build in the CURRENT scope and pass as ONE `children`
   // prop (duplicate `children:` keys would silently drop all but
   // the last). `@event:`
-  // pairs listen on the child's root element (`emit` bubbles
-  // CustomEvents through it). Construction failures degrade to a
+  // pairs listen on the element the child inherits through `extends`
+  // (a hostless child has no element that means the event, and a child
+  // notifies its parent through a callback prop). Construction failures degrade to a
   // comment placeholder and continue (#137's runtime contract); a
   // NAME that resolves to nothing rejects here — the compile-knowable
   // half. Class-mode instances ride `_children` (the unmount
@@ -11884,8 +11905,18 @@ class Emitter {
     const ref = typeof name === 'string' ? null : name;
     if (ref !== null) name = ref.text;
     const root = ref !== null ? componentPathRoot(ref.text) : name;
+    // The row carries the keys the site passes, a bind's minted key
+    // under the prop's own name, so a missing required prop is named
+    // from the record rather than from the checker's elided sentence.
+    let useSpan = null;
     const noteUse = (span) => {
-      if (this.ts && span !== null) this.componentUses.push({ start: span[0], end: span[1], name });
+      if (!this.ts || span === null) return;
+      useSpan = span;
+      const keys = props.map(({ key }) => {
+        const k = typeof key === 'string' && key.startsWith('"') && key.endsWith('"') ? key.slice(1, -1) : key;
+        return typeof k === 'string' && k.startsWith('__bind_') && k.endsWith('__') ? k.slice(7, -2) : k;
+      }).filter((k) => typeof k === 'string');
+      this.componentUses.push({ start: span[0], end: span[1], name, keys });
     };
     // The component's own name at a USE site answers: the constructor
     // reference emits it verbatim, so tsgo describes the component's
@@ -12510,13 +12541,43 @@ class Emitter {
       ? `} finally { ${host()}._endProjection(${prevV}); } }`
       : `} finally { ${this.runtimeName('__popComponent')}(${prevV}); } }`));
 
-    // Event bindings on the child's root; the listener
-    // param mints against the handler's reads.
+    // `@event:` on a child is a DOM listener on the element the child
+    // inherits through `extends`, admitting what a native site admits
+    // (a custom name is legal DOM, and a host document may read its own
+    // spellings — the TUI's `keydownCapture`), and nothing else: a child
+    // with no host has no element to listen on, which the face reports
+    // through the child's `__host` (an import's host is unknowable
+    // here) and the runtime rejects at the site. A child notifies its
+    // parent through a callback prop. The listener param mints against
+    // the handler's reads.
     for (const { pair, event, value } of eventBindings) {
-      // The event word's record (RULINGS.md, the event-word row): the
-      // child's root element is a runtime fact, so a known DOM event
-      // serves the bare map entry — no host claim — and any other name
-      // is the child's emit channel.
+      // The host is the child's declared `__host`. The `__hostOf` call
+      // asserts it by the direct index, which misses on a hostless
+      // child's `{}` whatever shape the handler takes; the handler's
+      // `target` and `currentTarget` are claimed through an Extract
+      // that resolves to never on that miss, so the site draws the one
+      // report. The event word's record serves the map entry
+      // (RULINGS.md, the event-word row).
+      // Every copy of the child's name in the casts maps to the
+      // constructor reference's span (primitiveReuse), so a rename of
+      // the child edits them with it; a member path spells as text.
+      const childName = () => {
+        if (ref === null && useSpan !== null) {
+          this.primitiveReuse = { name, span: useSpan };
+          this.emitPrimitive(name);
+        } else {
+          this.b.emit(name);
+        }
+      };
+      const hostRecord = () => { this.b.emit('NonNullable<InstanceType<typeof '); childName(); this.b.emit(`>['${HOST}']>`); };
+      const hostEl = () => { hostRecord(); this.b.emit("['el']"); };
+      const host = () => { this.b.emit('Extract<'); hostRecord(); this.b.emit(", { el: unknown }>['el']"); };
+      const known = this.ts && DOM_EVENTS.has(event)
+        ? () => {
+          this.b.emit(`HTMLElementEventMap['${event}'] & { target: `); host();
+          this.b.emit('; currentTarget: '); host(); this.b.emit(' }');
+        }
+        : null;
       if (this.ts) {
         const keyNode = isNode(pair) && isNode(pair[1]) ? pair[1] : null;
         const keyId = keyNode !== null ? (this.stores.idOf(keyNode) ?? null) : null;
@@ -12524,32 +12585,55 @@ class Emitter {
         if (keySpan !== null) {
           this.intrinsics.push({
             start: keySpan[0], end: keySpan[1], kind: 'event', name: event,
-            type: this.tsEventTypeText([event]) !== null ? `HTMLElementEventMap['${event}']` : null,
+            type: DOM_EVENTS.has(event) ? `HTMLElementEventMap['${event}']` : null,
             child: name,
           });
+        }
+      }
+      // The pair's relation site is the listener's host cast: a hostless
+      // child's `{}` misses inside it, and the diagnostics road re-anchors
+      // that miss on the key (packages/vscode/src/diagnostics.js).
+      let rec = null;
+      if (this.ts) {
+        const pid = this.stores.idOf(pair);
+        const extent = pid !== null ? this.stores.selfSpan(pid) : null;
+        const src = this.b.source;
+        if (extent !== null && src !== null) {
+          let ke = extent[0];
+          while (ke < extent[1] && !/[\s:]/.test(src[ke])) ke++;
+          if (ke > extent[0]) {
+            rec = { key: [extent[0], ke], pair: [extent[0], extent[1]], sites: [] };
+            this.renderPairs.push(rec);
+          }
         }
       }
       const evUsed = new Set();
       Emitter.collectLeafNames(value, evUsed);
       const ev = Emitter.mintName('e', evUsed);
-            this.renderLine(pair, () => {
+      this.renderLine(pair, () => {
         // The wrapper's own param is lowering plumbing — explicit
         // `any` (the handler EXPRESSION is where typing lands).
-        // The listener rides the child's first tracked node, not its
-        // _root: a multi-root child's _root is the fragment, emptied
-        // at insertion, and emit() dispatches on that same first node
-        // — the two sides of the seam name one target.
-        const target = `(${instVar}._nodes?.[0] ?? ${elVar})`;
+        const target = `${this.runtimeName('__hostOf')}(${instVar}, '${event}')`;
         if (!this.ts) {
           this.b.emit(`if (${instVar}) ${target}.addEventListener('${event}', (${ev}`);
         } else {
-          this.b.emit(`if (${instVar}) ${target}.addEventListener(`);
+          this.b.emit(`if (${instVar}) (${target}`);
+          const hostStart = this.b.offset;
+          this.b.emit(' as '); hostEl();
+          if (rec !== null) rec.sites.push([hostStart, this.b.offset]);
+          this.b.emit(').addEventListener(');
           this.emitQuotedPrimitive(event);
           this.b.emit(`, (${ev}`);
         }
         this.tsScaffoldAny();
         this.b.emit(`) => ${this.runtimeName('__batch')}(() => (`);
-        this.tsHandlerCast(() => this.withExpression(() => this.expr(value)));
+        // The same handler shapes a native site casts to the event's
+        // function type take the typed cast here (tsHandlerCast).
+        const evType = !this.ts ? null
+          : isFunc(value) && (value[1].length === 0 || (value[1].length === 1 && typeof value[1][0] === 'string'))
+            ? known
+            : isFunc(value) ? null : known;
+        this.tsHandlerCast(() => this.withExpression(() => this.expr(value)), evType);
         this.b.emit(`)(${ev})))`);
       });
     }
@@ -14856,7 +14940,7 @@ class Emitter {
     }
     if (ev === 'error') {
       throw this.positionedError(pair,
-        'emitter: bare `@error` is ambiguous with the onError lifecycle hook — write `@error: handler` to bind a DOM error listener explicitly');
+        'emitter: bare `@error` would bind `onError`, which is the error-boundary hook, not a handler — write `@error: handler` to bind a DOM error listener explicitly');
     }
     const method = value[2];
     if (!this.cframes[this.cframes.length - 1].members.has(method)) {
@@ -15010,6 +15094,7 @@ class Emitter {
   }
 
   chain(node) {
+    this.checkEmitRead(node);
     this.noteProvidedRead(node);
     const spine = [node];
     while (true) {
@@ -15210,6 +15295,24 @@ class Emitter {
   // the chain that reads it notes the kind once, at the name's own span.
   // The descent follows the chain driver's head slots, so a call whose
   // callee reads the name reaches the root the way the driver does.
+  // A child notifies its parent through a callback prop; nothing on the
+  // instance dispatches an event, so a chain rooted at `@emit` names no
+  // member unless the component declares one.
+  checkEmitRead(node) {
+    if (!(this.cframes?.length > 0) || this.thisMemberKindOf('emit') !== null) return;
+    // A call is `[callee, ...args]`; a member chain descends through
+    // its object slot. The root is whatever neither shape opens.
+    let root = node;
+    while (isNode(root)) {
+      if (isNode(root[0])) root = root[0];
+      else if ((root[0] === '.' || root[0] === '?.') && isNode(root[1])) root = root[1];
+      else break;
+    }
+    if (!isNode(root) || root[0] !== '.' || root[1] !== 'this' || root[2] !== 'emit') return;
+    throw this.positionedError(root,
+      'emitter: `@emit` is not a component member — a child notifies its parent through a callback prop: declare `@onSaved?: () => void` and call `onSaved?()`');
+  }
+
   noteProvidedRead(node) {
     if (!this.ts || !(this.cframes?.length > 0)) return;
     let root = node;
@@ -18575,14 +18678,14 @@ const RUNTIME_TABLE = [
     names: ['setContext', 'getContext', 'hasContext', '__Component',
             '__pushComponent', '__popComponent', '__clsx', '__style', '__lis', '__reconcile',
             '__transition', '__handleComponentError', '__gateBind', '__detach',
-            '__reportChildFailure',
+            '__reportChildFailure', '__hostOf',
             // The owner-seam names factory emission spells —
             // re-exported by the components module so reactive-only
             // programs' injected bytes stay untouched.
             '__ownerFrame', '__pushOwner', '__popOwner', '__detachRef'],
     generatedNames: ['setContext', 'getContext', '__Component',
                      '__pushComponent', '__popComponent', '__clsx', '__style', '__reconcile',
-                     '__transition', '__gateBind', '__detach', '__reportChildFailure',
+                     '__transition', '__gateBind', '__detach', '__reportChildFailure', '__hostOf',
                      '__ownerFrame', '__pushOwner', '__popOwner', '__detachRef'],
     types: {
       // The one entry that types every merged `class:` value — the
@@ -19663,7 +19766,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   const partNames = emitter.exportedObjects
     .filter(([, values]) => values.every((value) => emitter.componentNames.includes(value)))
     .map(([name]) => name);
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, componentUses: emitter.componentUses, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, componentUses: emitter.componentUses, componentProps: emitter.componentProps, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

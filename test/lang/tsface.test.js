@@ -1641,7 +1641,9 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     expect(code).toContain('interface Counter {');
     expect(code).toContain('  mount(target?: Node | string): Counter;');
     expect(code).toContain('  unmount(options?: { removeDOM?: boolean }): void;');
-    expect(code).toContain('  emit(name: string, detail?: unknown): void;');
+    expect(code).toContain('  unmount(options?: { removeDOM?: boolean }): void;');
+    expect(code).not.toContain('emit(');
+    expect(code).toContain('  __host?: {};');
     expect(code).toContain('  bump(n: number): number;');
     // An exported component exports its companion.
     expect(ts('export Chip = component\n  @label: string\n').code).toContain('export interface Chip {');

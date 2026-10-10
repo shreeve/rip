@@ -114,7 +114,7 @@ describe('module shape', () => {
  '__Component', '__claimGateConstructor', '__clsx', '__detach', '__detachRef', '__gateBind', '__handleComponentError',
  '__hmrClassify', '__hmrEmit', '__hmrEntries', '__hmrEvents', '__hmrInitDiff', '__hmrLookup', '__hmrMigrateDiff',
  '__hmrMigrateRemount', '__hmrPatch', '__hmrPreserveState', '__hmrRegisterDefinition', '__hmrRegistry',
- '__hmrRestoreUi', '__hmrSnapshotUi',
+ '__hmrRestoreUi', '__hmrSnapshotUi', '__hostOf',
  '__lis',
  '__ownerFrame', '__popComponent', '__popOwner', '__pushComponent', '__pushOwner',
  '__reconcile', '__reportChildFailure', '__setChildFailureReporter', '__style', '__transition',
@@ -1034,49 +1034,47 @@ describe('render helpers', () => {
     ])).toEqual([[0, 1, 2], [1, 2], [1, 3], [], [3]]);
   });
 
-  test("a multi-root component's emit dispatches on its first live node — bubbling reaches ancestors", () => {
+  test("__hostOf answers the element a child inherits through `extends`; a child with no host rejects naming the callback-prop channel", () => {
     expect(both((api) => {
-      const log = [];
-      const C = defineComponent(api, {
-        name: 'Multi', props: [],
+      const Hosted = defineComponent(api, {
+        name: 'Hosted', props: [],
         create() {
-          const root = document.createDocumentFragment();
-          const firstNode = document.createElement('i');
-          const secondNode = document.createElement('b');
-          root.appendChild(firstNode);
-          root.appendChild(secondNode);
-          this._nodes = [firstNode, secondNode];
-          return root;
+          const el = document.createElement('button');
+          this._inheritedEl = el;
+          return el;
         },
       });
-      const target = document.createElement('main');
-      // Dispatched on the fragment, the event bubbles nowhere: the
-      // fragment was emptied at insertion and sits outside the tree.
-      target.addEventListener('save', (e) => log.push(['target', e.detail]));
-      const inst = new C({});
-      inst.mount(target);
-      inst.emit('save', { x: 1 });
-      return log;
-    })).toEqual([[ 'target', { x: 1 } ]]);
-  });
-
-  test('emit dispatches a bubbling CustomEvent on the mounted root; detail carried; listeners up the tree fire', () => {
-    expect(both((api) => {
-      const log = [];
-      const C = defineComponent(api, {
-        name: 'C', props: [],
-        create() { return document.createElement('button'); },
+      Hosted.__extends = 'button';
+      const Bare = defineComponent(api, {
+        name: 'Bare', props: [],
+        create() { return document.createElement('div'); },
       });
+      // A component that extends a component: the host element is the
+      // inherited instance's, however deep the chain.
+      const Part = defineComponent(api, {
+        name: 'Part', props: [],
+        create() {
+          const inner = new Hosted({});
+          inner._mountCreate();
+          this._inheritedInst = inner;
+          return inner._root;
+        },
+      });
+      Part.__extends = Hosted;
       const target = document.createElement('main');
-      const outer = document.createElement('body');
-      outer.appendChild(target);
-      target.addEventListener('save', (e) => log.push(['target', e.detail]));
-      outer.addEventListener('save', (e) => log.push(['outer', e.detail]));
-      const inst = new C({});
-      inst.mount(target);
-      inst.emit('save', { x: 1 });
-      return log;
-    })).toEqual([[ 'target', { x: 1 } ], [ 'outer', { x: 1 } ]]);
+      const hosted = new Hosted({});
+      hosted.mount(target);
+      const bare = new Bare({});
+      bare.mount(target);
+      const part = new Part({});
+      part.mount(target);
+      const host = api.__hostOf(hosted, 'click');
+      return [host === hosted._inheritedEl, host.tagName, api.__hostOf(part, 'click') === part._inheritedInst._inheritedEl, caught(() => api.__hostOf(bare, 'click'))];
+    })).toEqual([true, 'button', true, ['throw', 'Error']]);
+    expect(() => both((api) => {
+      const Bare = defineComponent(api, { name: 'Bare', props: [], create() { return document.createElement('div'); } });
+      api.__hostOf(new Bare({}), 'click');
+    })).toThrow('Bare: @click: has no element to listen on — Bare extends no tag. A child notifies its parent through a callback prop: declare `@onClick?: () => void` and call `onClick?()`');
   });
 
   test('__transition drives the enter class sequence over rAF ticks and completes on transitionend', async () => {
@@ -1562,24 +1560,29 @@ describe('defect battery:  rejects remounting an unmounted instance;  remounts h
   });
 });
 
-describe('defect battery: emit outside the mounted window is loud in ;  drops it silently', () => {
-  const makeC = (api) => defineComponent(api, {
-    name: 'C', props: [],
-    create() { return document.createElement('button'); },
-  });
-
-  test('emit before mount and after unmount reject naming the window', () => {
-    const inst = new (makeC(RT))({});
-    expect(() => inst.emit('save')).toThrow("C: emit('save') outside the mounted window");
-    const target = document.createElement('main');
-    const mounted = new (makeC(RT))({});
-    mounted.mount(target);
-    const log = [];
-    target.addEventListener('save', () => log.push('heard'));
-    mounted.emit('save');
-    expect(log).toEqual(['heard']);
-    mounted.unmount();
-    expect(() => mounted.emit('save')).toThrow('outside the mounted window');
+describe('the error boundary is the class hook, never an instance member of its name', () => {
+  test('a prototype onError catches a child failure; an own onError (a callback prop) is not a boundary', () => {
+    const outcome = both((api) => {
+      const log = [];
+      const failing = () => defineComponent(api, {
+        name: 'Bad', props: [],
+        create() { throw new Error('boom'); },
+      });
+      const Hooked = defineComponent(api, {
+        name: 'Hooked', props: [],
+        hooks: { onError(failure) { log.push(['hook', failure.message]); } },
+      });
+      const Propped = defineComponent(api, {
+        name: 'Propped', props: [],
+        init() { this.onError = { value: (e) => log.push(['prop called', e]) }; },
+      });
+      const hooked = new Hooked({});
+      api.__handleComponentError(new Error('boom'), Object.assign(new (failing())({}), { _parent: hooked }));
+      const propped = new Propped({});
+      const bad = Object.assign(new (failing())({}), { _parent: propped });
+      return [log, caught(() => api.__handleComponentError(new Error('boom'), bad))];
+    });
+    expect(outcome).toEqual([[['hook', 'boom']], ['throw', 'Error']]);
   });
 });
 
@@ -1956,10 +1959,10 @@ describe('the extends rest seam (runtime-owned;  re-emits it per class — /#165
 // ════════════════════════════════════════════════════════════════════
 
 const REACTIVE_IMPORT = /^import \{ __state, __computed, __effect, __batch, __readonly, __setErrorHandler, __handleError, __catchErrors, getEffectSignal \} from ".*src\/runtime\/reactive\.js";$/;
-const COMPONENTS_IMPORT = /^import \{ setContext, getContext, hasContext, __Component, __pushComponent, __popComponent, __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __reportChildFailure, __ownerFrame, __pushOwner, __popOwner, __detachRef \} from ".*src\/runtime\/components\.js";$/;
+const COMPONENTS_IMPORT = /^import \{ setContext, getContext, hasContext, __Component, __pushComponent, __popComponent, __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __reportChildFailure, __hostOf, __ownerFrame, __pushOwner, __popOwner, __detachRef \} from ".*src\/runtime\/components\.js";$/;
 const ALL_COMPONENT_NAMES = ['setContext', 'getContext', 'hasContext', '__Component', '__pushComponent',
  '__popComponent', '__clsx', '__style', '__lis', '__reconcile', '__transition', '__handleComponentError', '__gateBind', '__detach',
- '__ownerFrame', '__pushOwner', '__popOwner', '__detachRef'];
+ '__hostOf', '__ownerFrame', '__pushOwner', '__popOwner', '__detachRef'];
 
 // A program that exercises the runtime for real without the language
 // surface: a hand-built component scope around the context API.
@@ -2005,7 +2008,7 @@ describe('runtime delivery: the components runtime', () => {
     expect(/^import /m.test(code)).toBe(false);
     expect(code.startsWith(
  'const { __state, __computed, __effect, __batch, __readonly, __setErrorHandler, __handleError, __catchErrors, getEffectSignal, ' +
- 'setContext, getContext, hasContext, __Component, __pushComponent, __popComponent, __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __reportChildFailure, __ownerFrame, __pushOwner, __popOwner, __detachRef } = (() => {',
+ 'setContext, getContext, hasContext, __Component, __pushComponent, __popComponent, __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __reportChildFailure, __hostOf, __ownerFrame, __pushOwner, __popOwner, __detachRef } = (() => {',
     )).toBe(true);
     expect(code).toContain('__RIP_REACTIVE_SENTINEL');
     expect(code).toContain('__RIP_COMPONENTS_SENTINEL');
