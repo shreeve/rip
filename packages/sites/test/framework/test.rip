@@ -8,6 +8,7 @@ import {
   start, read, error, notice, bail, hub,
   ctx, session, env, subrequest, mark, errorEnvelope, openapi,
 } from 'rip/sites'
+import { sessions } from 'rip/sites/middleware'
 import { resolve, join } from 'node:path'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
@@ -168,6 +169,66 @@ test! 'middleware can short-circuit and rejects duplicate next calls', ->
     eq response.status, 500
     eq response.json!, { error: 'Internal Server Error', code: 'internal_error' }
   ok warnings.some((message) -> message.includes('next() more than once'))
+
+test! 'use, before and after registered inside prefix scope to the prefix', ->
+  resetGlobals()
+  seen = []
+  prefix '/admin', ->
+    use '/secret', -> Response.new('denied', { status: 403 })
+    use (request, next) ->
+      seen.push "mw:#{URL.new(request.url).pathname}"
+      next!
+    before -> seen.push "before:#{@req.path}"
+    after -> seen.push "after:#{@req.path}"
+    get '/secret' -> 'admin secret'
+    get '/open' -> 'admin open'
+  get '/secret' -> 'public secret'
+  get '/public' -> 'public'
+  get '/administrator' -> 'not under the prefix'
+  get '/:section/reached' -> 'pattern route'
+
+  eq (handle! request('GET', '/admin/secret')).status, 403
+  eq (handle! request('GET', '/admin/open')).text!, 'admin open'
+  eq seen, ['mw:/admin/open', 'before:/admin/open', 'after:/admin/open']
+  seen.length = 0
+  eq (handle! request('GET', '/secret')).text!, 'public secret'
+  eq (handle! request('GET', '/public')).text!, 'public'
+  eq (handle! request('GET', '/administrator')).text!, 'not under the prefix'
+  eq seen, []
+  eq (handle! request('GET', '/admin/reached')).text!, 'pattern route'
+  eq seen, ['mw:/admin/reached', 'before:/admin/reached', 'after:/admin/reached']
+
+test! 'session reads and writes the request session inside middleware', ->
+  resetGlobals()
+  use sessions secret: 'framework-secret'
+  use '/private', (request, next) ->
+    return Response.new('unauthorized', { status: 401 }) unless session.user
+    session.visits = (session.visits or 0) + 1
+    next!
+  post '/login' ->
+    session.user = 'ann'
+    'in'
+  get '/private/whoami' -> { user: session.user, visits: session.visits }
+
+  eq (handle! request('GET', '/private/whoami')).status, 401
+  login = handle! request('POST', '/login')
+  cookie = login.headers.get('set-cookie').split(';')[0]
+  whoami = handle! request('GET', '/private/whoami', { headers: { cookie } })
+  eq whoami.status, 200
+  eq whoami.json!, { user: 'ann', visits: 1 }
+
+test! 'a session write in middleware before sessions rejects; a delete without a session is a no-op', ->
+  resetGlobals()
+  use (request, next) ->
+    delete session.gone
+    session.early = 1
+    next!
+  use sessions secret: 'framework-secret'
+  get '/early' -> 'never'
+  warnings = captureWarnings! ->
+    response = handle! request('GET', '/early')
+    eq response.status, 500
+  ok warnings.some((message) -> message.includes('register the sessions middleware before this one'))
 
 test! 'before and after filters compose around handlers and short-circuit', ->
   resetGlobals()
@@ -372,6 +433,22 @@ test 'error envelopes expose client details and mask server details', ->
   eq errorEnvelope(failure),
     status: 400
     body: { error: 'invalid input', code: 'invalid_field', fields: { email: 'email is required' } }
+
+test! 'read with a numeric range answers a number in range or null', ->
+  resetGlobals()
+  get '/qty' -> { qty: read('qty', [1, 99]) }
+  post '/qty' -> { qty: read('qty', [1, 99]) }
+  ask = (q) -> (handle! request('GET', "/qty?qty=#{q}")).json!.qty
+  eq ask!('5'), 5
+  eq ask!('+7'), 7
+  eq ask!('0'), null
+  eq ask!('100'), null
+  eq ask!('lots'), null
+  eq ask!('5.5'), null
+  eq ask!('1e3'), null
+  eq ask!('ab'), null
+  eq (handle! jsonRequest('POST', '/qty', { qty: 42 })).json!.qty, 42
+  eq (handle! jsonRequest('POST', '/qty', { qty: 'xx' })).json!.qty, null
 
 test! 'read merges body, query, and path with request-local context', ->
   resetGlobals()

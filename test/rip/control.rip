@@ -73,6 +73,58 @@ code "if-else stays inside implicit call", "f if a then b else c", "f(a ? b : c)
 
 test "postfix if else stays the ternary", "x = 0 if false else 2\nx", 2
 
+# `return X if C else Y` returns the ternary, as `X if C else Y` is one
+# anywhere else; a statement with no value has no else reading.
+test "return with postfix if else returns the ternary", '''
+  f = (b) -> return "yes" if b else "no"
+  g = (b) ->
+    return 1 if b else 2
+    3
+  [f(true), f(false), g(true), g(false)]
+''', ["yes", "no", 1, 2]
+
+code "return with postfix if else emits a returned ternary", "f = (b) ->\n  return x if b else y\n  z", '''
+  let f = function(b) {
+    return (b ? x : y);
+    return z;
+  };
+'''
+
+fail "a bare return with postfix if else rejects", "f = (b) ->\n  return if b else 2", "has no value"
+fail "break with postfix if else rejects", "for x in xs\n  break if x else 2", "has no value"
+
+# Postfix `unless` has no else form.
+fail "postfix unless else rejects", "x = 'a' unless b else 'c'", "postfix 'unless' has no else"
+fail "statement postfix unless else rejects", "f = (b) ->\n  return 1 unless b else 2", "postfix 'unless' has no else"
+
+# `then` and `else` are one left-associative level: a chain groups from
+# the left in either order, so `else` sees the whole `then` before it.
+test "then else chain groups left", '''
+  log = []
+  y = 0 then log.push("then") else log.push("else")
+  z = 1 then false else log.push("fallback")
+  [y, z, log]
+''', [0, 1, ["else", "fallback"]]
+
+code "then else chain groups left", "a then b else c", "(a && b) || c;"
+code "then then else chain groups left", "a then b then c else d", "(a && b && c) || d;"
+code "else then chain groups left", "a else b then c", "(a || b) && c;"
+code "then else then chain groups left", "a then b else c then d", "((a && b) || c) && d;"
+test "then else continue groups left", '''
+  out = []
+  for x in [0, 1, 2]
+    x then x > 1 else continue
+    out.push x
+  out
+''', [2]
+
+code "then else return groups left", "f = (x) ->\n  x then g() else return 1\n  2", '''
+  let f = function(x) {
+    if (!(x && g())) return 1;
+    return 2;
+  };
+'''
+
 # Loose then/else guards: same rewrite as `and return` / `or continue`
 code "then return assignment lowers to an if-guard", "f = (x) ->\n  y = x then return 22\n  y", '''
   let f = function(x) {

@@ -588,6 +588,12 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // stays a comment) and `.class-name` chains consume tight hyphens.
   let inRender = false;
   let renderDepth = 0;
+  // Inside render, a function body (`@click: ->` + INDENT) is code, not
+  // template: the indent depth that opened it, while it lasts.
+  let renderCodeFloor = null;
+  // The bracket depth at RENDER: a line inside a bracket opened within
+  // the render block continues a value, never a child list.
+  let renderParenDepth = 0;
   let nextId = 0; // stable token ids, creation order
   const pendingOrigin = []; // synthetic tokens awaiting the next real token's id
 
@@ -704,7 +710,60 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     if (!root || root.kind === 'INDENT' || root.kind === 'TERMINATOR' || root.kind === 'OUTDENT' || root.kind === 'RENDER') {
       return true; // bare `.cls-name` at a line start
     }
-    return root.kind === 'IDENTIFIER' && TEMPLATE_TAGS.has(String(root.value).split('#')[0]);
+    if (root.kind !== 'IDENTIFIER') return false;
+    const tag = String(root.value).split('#')[0];
+    return TEMPLATE_TAGS.has(tag) || tag.includes('-');
+  };
+
+  // A render child position where a custom element's tag name may
+  // stand: a line start, or the word spaced after a tag on its line
+  // (`div x-icon` nests the element, as `div span` does).
+  // Where a custom element's run ends, when the word just read (ending
+  // at `at`) opens one: a render child position, a tight hyphen, and a
+  // run that keys no pair (`aria-busy: true` stays the attribute).
+  const customElementEnd = (prev, at) => {
+    if (!inRender || text[at] !== '-' || !IDENT_START.test(text[at + 1] ?? '') || !customElementStart(prev)) return null;
+    let j = at;
+    while (text[j] === '-' && IDENT_START.test(text[j + 1] ?? '')) {
+      j++;
+      while (j < text.length && IDENT_PART.test(text[j])) j++;
+    }
+    return /^:(?![=:])|^[^\S\n]+:(?![=:])[^\S\n]/.test(text.slice(j)) ? null : j;
+  };
+
+  // Is tokens[k] an arrow opening a FUNCTION body inside render? An
+  // arrow straight after an element head (`div ->`, `Card ->`,
+  // `div.row ->`) opens the element's children, which are template; any
+  // other arrow (`@click: ->`, `(e) ->`, `f = ->`) opens code.
+  const codeArrowAt = (k) => {
+    const t = tokens[k];
+    if (!t || (t.kind !== '->' && t.kind !== '=>')) return false;
+    const before = tokens[k - 1];
+    return !(t.kind === '->' && before && (before.kind === 'IDENTIFIER' || before.kind === 'PROPERTY') && !before.generated);
+  };
+
+  const customElementStart = (prev) => {
+    if (renderCodeFloor !== null || parens.length > renderParenDepth) return false;
+    // A function arrow earlier on the line opens a one-line code body.
+    for (let k = tokens.length - 1; k >= 0; k--) {
+      const kind = tokens[k].kind;
+      if (kind === 'TERMINATOR' || kind === 'INDENT' || kind === 'OUTDENT' || kind === 'RENDER') break;
+      if (codeArrowAt(k)) return false;
+    }
+    if (prev?.kind === 'INDENT') {
+      // An indent after `title:` or `x =` continues that value.
+      const before = tokens[tokens.length - 2]?.kind;
+      return !(before === ':' || before === '=' || before === 'COMPOUND_ASSIGN' || before === ',');
+    }
+    if (!prev || prev.kind === 'TERMINATOR' || prev.kind === 'OUTDENT' || prev.kind === 'RENDER') return true;
+    if (!pendingSpaced || prev.generated) return false;
+    let j = tokens.length - 1;
+    while (j >= 1 && tokens[j].kind === 'PROPERTY' && tokens[j - 1].kind === '.') j -= 2;
+    const root = tokens[j];
+    if (j < tokens.length - 1 && (!root || root.kind === 'INDENT' || root.kind === 'TERMINATOR' || root.kind === 'OUTDENT' || root.kind === 'RENDER')) return true;
+    if (root?.kind !== 'IDENTIFIER') return false;
+    const tag = String(root.value).split('#')[0];
+    return TEMPLATE_TAGS.has(tag) || tag.includes('-');
   };
 
   const insideComponentBody = () => {
@@ -1143,6 +1202,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     const blockEnd = lastRealEnd();
     while (indents.length > frame.depth) {
       indents.pop();
+      if (renderCodeFloor !== null && indents.length < renderCodeFloor) renderCodeFloor = null;
       synth('OUTDENT', blockEnd);
     }
     clearTypeBodyBelowFloor();
@@ -1165,6 +1225,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         );
       }
       indents.pop();
+      if (renderCodeFloor !== null && indents.length < renderCodeFloor) renderCodeFloor = null;
       synth('OUTDENT', blockEnd);
     }
     clearTypeBodyBelowFloor();
@@ -1306,6 +1367,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         // this indent is type text (nested layout indents inherit
         // through the floor comparison).
         if (typeBodyFloor === null && typeBodyHead()) typeBodyFloor = indents.length + 1;
+        if (inRender && renderCodeFloor === null && codeArrowAt(tokens.length - 1)) renderCodeFloor = indents.length + 1;
         indents.push(prefix);
         // Anchor at the first real token of the deeper line, not the line
         // start — a block's $self span begins at its content.
@@ -1316,8 +1378,11 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         // except before continuation keywords, which extend the enclosing
         // statement (`else` → if, `catch`/`finally` → try), and never
         // doubled (a `;` may already have ended the statement).
+        // In render, a tight hyphen makes the word a custom element
+        // (`else-x`), never the continuation keyword.
         const continues = ['else', 'catch', 'finally'].some(
-          (w) => text.startsWith(w, pos) && !IDENT_PART.test(text[pos + w.length] ?? ''),
+          (w) => text.startsWith(w, pos) && !IDENT_PART.test(text[pos + w.length] ?? '') &&
+            !(inRender && text[pos + w.length] === '-' && IDENT_START.test(text[pos + w.length + 1] ?? '')),
         );
         if (tokens.length > 0 && lastNewlinePos >= 0 && !continues && last()?.kind !== 'TERMINATOR') {
           const nl = text[lastNewlinePos] === '\r' ? 2 : 1;
@@ -1326,7 +1391,10 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       }
       // A line back at (or above) the render statement's own depth
       // leaves the render block.
-      if (inRender && indents.length <= renderDepth) inRender = false;
+      if (inRender && indents.length <= renderDepth) {
+        inRender = false;
+        renderCodeFloor = null;
+      }
       atLineStart = false;
       pendingNewLine = true;
       if (seenFor !== null && parens.length <= seenFor) seenFor = null;
@@ -1441,6 +1509,13 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         push('PROPERTY', value, start, pos);
       } else if (keysColon || inPickKeyPos()) {
         push('PROPERTY', word, start, pos);
+      } else if (customElementEnd(prev, pos) !== null) {
+        // A tight-hyphen word at a render child position names a custom
+        // element (`x-icon`, `do-it`, `sl-button.primary`) — the platform
+        // requires the hyphen, so the run is ONE tag name, never a
+        // subtraction, whatever its first word spells.
+        pos = customElementEnd(prev, pos);
+        push('IDENTIFIER', text.slice(start, pos), start, pos);
       } else if (word !== 'default' && word !== 'as' && foreignModuleName(prev, afterWord)) {
         // A specifier's FOREIGN side names something in another module,
         // never a binding here — the imported name before `as`, the
@@ -1601,6 +1676,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         if (KEYWORDS[word] === 'RENDER') {
           inRender = true;
           renderDepth = indents.length;
+          renderParenDepth = parens.length;
         }
       } else if (RESERVED_WORDS.has(word)) {
         push('RESERVED', word, start, pos);

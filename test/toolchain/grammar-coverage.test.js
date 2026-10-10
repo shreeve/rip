@@ -21,6 +21,8 @@ const EXCLUDED = new Map([
   ['For → FOR Range Block', 'banned by design — the emitter rejects a for loop that binds no variable (loops.rip pins the rejection)'],
   ['For → FOR Range BY Expression Block', 'banned by design — the emitter rejects a for loop that binds no variable (loops.rip pins the rejection)'],
   ['ImportSpecifier → DEFAULT', 'no legal ES lowering — a bare default specifier binds nothing; the emitter rejects it, pointing at `import name from` and `default as name`'],
+  ['If → Statement POST_UNLESS Expression ELSE Expression', 'banned by design — postfix unless has no else form; the production exists to reject it rather than fold the else into the condition (control.rip pins the rejection)'],
+  ['If → Expression POST_UNLESS Expression ELSE Expression', 'banned by design — postfix unless has no else form; the production exists to reject it rather than fold the else into the condition (control.rip pins the rejection)'],
   ['ComponentLine → ACCEPT IDENTIFIER', 'an accept names its provider; the emitter rejects the bare form, pointing at `accept name from Component` (components.rip pins the rejection)'],
 ]);
 

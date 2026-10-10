@@ -145,6 +145,14 @@ let drop = function(n: number) {
 
 console.log('guards:', take(10), take(0), drop(10), drop(0))
 
+// `then … else` is one left-associative level: (a && b) || c
+console.log('chain:', ((0 && 'yes') || 'no'), ((ten && 0) || 'fallback'))
+let pick = function(n: number) {
+  if (!(n && n > 1)) return 'small'
+  return 'big'
+}
+console.log('pick:', pick(0), pick(1), pick(2))
+
 let keptAnd: number[] = []
 for (let n of [0, 1]) {
   if (n) continue
@@ -171,7 +179,13 @@ for (let n of [0, 1]) {
   keptElse.push(n)
 }
 
-console.log('continue:', keptAnd, keptOr, keptNull, keptThen, keptElse)
+let keptChain: number[] = []
+for (let n of [0, 1, 2]) {
+  if (!(n && n > 1)) continue
+  keptChain.push(n)
+}
+
+console.log('continue:', keptAnd, keptOr, keptNull, keptThen, keptElse, keptChain)
 
 // ── Arg lists: the indented block, the line-split tail, and spread args ──
 

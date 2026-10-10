@@ -26,7 +26,7 @@ import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './ts/sche
 import { Parser } from './parser.js';
 import { tagPostfixConditionals } from './lexer.js';
 import { rewriteTypes } from './types.js';
-import { identifierRunAt, isIdentifierName } from './ident.js';
+import { identifierRunAt, isIdentifierName, isCustomElementName } from './ident.js';
 import { implicitBlocks, implicitObjects, implicitCalls } from './implicit.js';
 import { isComponentName, componentPathText, memberPathText, componentPathRoot, restReadKeys } from './render.js';
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './ts/types.js';
@@ -369,7 +369,7 @@ const isBlock = (x) => isNode(x) && x[0] === 'block';
 // spec-derived vocabulary; PascalCase names (an interior lowercase
 // letter distinguishes `Counter` from ALLCAPS constants) are
 // component references.
-const isHtmlTag = (name) => TEMPLATE_TAGS.has(String(name).split('#')[0]);
+const isHtmlTag = (name) => { const tag = String(name).split('#')[0]; return TEMPLATE_TAGS.has(tag) || isCustomElementName(tag); };
 // A REAL comprehension node — the loop-spec list (a plain array of
 // ['for-…'] arrays) is a shape no user call constructs; a call of a
 // function NAMED comprehension must keep its call reading everywhere.
@@ -865,6 +865,9 @@ class Emitter {
     // the extra per-component emission state (the declared name for
     // data-part, the render var counters).
     this.cframes = [];
+    // Component-frame depths at which an object-literal method or a
+    // class body rebinds `this` away from the innermost component.
+    this.thisBoundaries = [];
     // The binding name a component value takes (assignment threading —
     // the _schemaName pattern); drives the data-part attribute.
     this._componentName = null;
@@ -1590,6 +1593,57 @@ class Emitter {
     return this.resolveBareRead(name) === 'reactive';
   }
 
+  // Does `name` resolve to ANY binding here — a reactive name, a plain
+  // binding or parameter, or a component member? The walk is
+  // resolveBareRead's, which answers null for a plain binding and for
+  // nothing alike.
+  // A hyphenated head names a custom element only on a CALL node: the
+  // compiler's own hyphenated heads (`do-iife`, `loop-n`, …) share the
+  // shape `[head, …]`, and the stores' semanticKind is what tells them
+  // apart.
+  callShapedTagHead(sexpr, tag) {
+    if (TEMPLATE_TAGS.has(tag)) return true;
+    const id = this.stores.idOf(sexpr);
+    return (id !== null ? this.stores.node(id)?.semanticKind : null) === 'call';
+  }
+
+  // A positioned render rejection whose node may be a bare string (a
+  // tag word carries no span of its own): the open mark positions it.
+  renderAmbiguity(node, message) {
+    const m = this.b.currentMark;
+    if (typeof node === 'string' && m) {
+      const hits = this.stores.primitiveSpans(node, m.sourceStart, m.sourceEnd);
+      if (hits.length === 1) return this.positionedErrorAt(hits[0].sourceStart, hits[0].sourceEnd, message);
+    }
+    const err = this.positionedError(node, message, this.rstate?.node);
+    if (typeof err.start !== 'number' && m) {
+      err.start = this.b.currentMark.sourceStart;
+      err.end = this.b.currentMark.sourceEnd;
+    }
+    return err;
+  }
+
+  // A member chain rooted at a name that is both a tag and a component
+  // member or module binding (`summary.total`, `i.icon`) reads either
+  // way; render locals and loop variables shadow the tag by rule, and
+  // everything else bound rejects rather than guess.
+  rejectBoundTagRoot(node, tag) {
+    if (this.bindsName(tag)) {
+      throw this.renderAmbiguity(node,
+        `emitter: '${tag}' names both an element and a binding here, so this chain could build a <${tag}> or read the binding — ` +
+        `put \`= …\` on its own line under the element for the value, or rename the binding to use the element`);
+    }
+  }
+
+  bindsName(name) {
+    for (let i = this.rframes.length - 1; i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.reactive.has(name) || f.bound.has(name)) return true;
+      if (f.members !== undefined && f.members.has(name)) return true;
+    }
+    return false;
+  }
+
   // Does `name` name an ENUM here? The walk mirrors resolveBareRead, and
   // the `enums` test precedes `bound` within a frame because
   // declaredNames puts every enum in `bound` too — an inner frame's own
@@ -1728,6 +1782,7 @@ class Emitter {
   // The kind of `this.<name>` against the INNERMOST component — a
   // `this.`/`@` spelling never shadows (the receiver is explicit).
   thisMemberKindOf(name) {
+    if (this.thisRebound()) return null;
     for (let i = this.rframes.length - 1; i >= 0; i--) {
       const f = this.rframes[i];
       if (f.members !== undefined) return f.members.has(name) ? f.members.get(name) : null;
@@ -1851,12 +1906,30 @@ class Emitter {
   // explicit), and `this` always means the INNERMOST component — outer
   // frames never answer.
   memberIsReactive(name) {
+    if (this.thisRebound()) return false;
     const f = this.cframes[this.cframes.length - 1];
     return f !== undefined && f.memberReactive.has(name);
   }
 
   inComponent() {
     return this.cframes.length > 0;
+  }
+
+  // Inside an object-literal method or a class body, `this` is the
+  // object or instance, not the innermost component: `@x` reads the
+  // receiver's own property, and no component member is reachable
+  // through `this`.
+  thisRebound() {
+    // A render factory spells the component as its ctx parameter, `this`
+    // included, so no boundary inside it moves the receiver.
+    if (this.renderSelf !== null) return false;
+    const n = this.thisBoundaries.length;
+    return n > 0 && this.thisBoundaries[n - 1] === this.cframes.length && this.cframes.length > 0;
+  }
+
+  withThisBoundary(fn) {
+    this.thisBoundaries.push(this.cframes.length);
+    try { return fn(); } finally { this.thisBoundaries.pop(); }
   }
 
   // Emit an unwrapped reactive read: `count` → `count.value`. When the
@@ -1890,6 +1963,15 @@ class Emitter {
   // the name re-marks the same (nodeId, role) — an exact row on the
   // read site inside the role's cover row over the lowered form.
   memberRead(name, reactive) {
+    if (this.thisRebound()) {
+      const err = this.positionedError(name,
+        `emitter: component member '${name}' is not reachable here — inside an object-literal method or a class body \`this\` is the object, not the component; read it into a local outside, or write the pair with \`=>\` to keep the component`);
+      if (typeof err.start !== 'number' && this.b.currentMark) {
+        err.start = this.b.currentMark.sourceStart;
+        err.end = this.b.currentMark.sourceEnd;
+      }
+      throw err;
+    }
     const m = this.b.currentMark;
     const src = this.b.source;
     this.b.emit((this.renderSelf ?? 'this') + '.');
@@ -5781,7 +5863,14 @@ class Emitter {
       // the face as the minted parameter carrying the declared `any`
       // boundary. That IS its answer: `(parameter) it: any`, the boundary
       // stated at the word (RULINGS.md, Schema).
-      fns.set(i, this.schemaFnCode(params, tokens));
+      const fn = this.schemaFnCode(params, tokens);
+      // A plain @ensure reads its check's result as truthy-or-not, so a
+      // check that awaits — compiled async, answering with a Promise —
+      // would always pass. Only @ensure! awaits.
+      if (e.tag === 'ensure' && !e.async && fn.code.startsWith('(async ')) {
+        Emitter.schemaFail(`@ensure: this check awaits, so it answers with a promise a plain @ensure reads as passing — declare it '@ensure!' to await it`, tokens[0]?.start ?? e.start);
+      }
+      fns.set(i, fn);
     }
     // The schema type story (face only): callable bodies gain
     // TS-only `this` parameters per their real calling convention
@@ -7602,7 +7691,9 @@ class Emitter {
       const l = isLoopNode(n) || isComprehensionNode(n) ? loops + 1 : loops;
       const s = head === 'switch' ? switches + 1 : switches;
       const inBlock = head === 'block' || head === 'program' || head === 'try';
-      for (let i = 1; i < n.length; i++) {
+      // A node's slot 0 is its head; a plain list (a switch's cases)
+      // has no head, and its first element is a child like the rest.
+      for (let i = typeof head === 'string' ? 1 : 0; i < n.length; i++) {
         const el = n[i];
         const ctrl = typeof el === 'string' ? (
           inBlock || ((head === '||' || head === '&&' || head === '??') && i === 2) ? el : null
@@ -11201,12 +11292,13 @@ class Emitter {
     const memberHead = isNode(head) ? componentPathText(head) : null;
     if (memberHead !== null) return this.renderChildComponent(sexpr, { text: memberHead, node: head }, sexpr.slice(1));
 
-    // Tag with classes: `div.card` / `.card` chains. A render local
-    // or loop variable shadows the tag reading (`code.value` after
-    // `code = obj` reads the local).
+    // Tag with classes: `div.card` / `.card` chains. A render local,
+    // loop variable, member or binding shadows the tag reading
+    // (`summary.total` after `summary := {…}` reads the member).
     if (headStr === '.') {
       const { tag, classes, id } = Emitter.collectTemplateClasses(sexpr);
       if (tag !== null && isHtmlTag(tag) && this.renderVarKind(tag) === null) {
+        this.rejectBoundTagRoot(sexpr, tag);
         return this.renderTag(sexpr, tag, classes, [], id);
       }
       // General member chain → text (static or live).
@@ -11234,7 +11326,7 @@ class Emitter {
     // rendered as text below; locals are plain identifiers, so a
     // `#id`-carrying head can never be one).
     if (headStr !== null && isHtmlTag(headStr.split('#')[0]) && sexpr.length >= 1 &&
-        this.renderVarKind(headStr) === null) {
+        this.renderVarKind(headStr) === null && this.callShapedTagHead(sexpr, headStr.split('#')[0])) {
       const [tagName, id] = headStr.split('#');
       return this.renderTag(sexpr, tagName || 'div', [], sexpr.slice(1), id);
     }
@@ -11255,6 +11347,7 @@ class Emitter {
       }
       const { tag, classes, id } = Emitter.collectTemplateClasses(head);
       if (tag !== null && isHtmlTag(tag) && this.renderVarKind(tag) === null) {
+        if (classes.length > 0) this.rejectBoundTagRoot(sexpr, tag);
         if (classes.length > 0 && classes[classes.length - 1] === '__clsx') {
           return this.renderDynamicTag(sexpr, tag, sexpr.slice(1), [], classes.slice(0, -1), id);
         }
@@ -11411,6 +11504,14 @@ class Emitter {
   // element with its tag-word intrinsics row, id, inherited-target
   // binding, and the data-part stamp. Returns { el, isSvg }.
   renderElementPrologue(node, tag) {
+    // `total-count` with every part bound reads as subtraction as well
+    // as a custom element; the lexer cannot see bindings, so the
+    // ambiguity rejects here rather than silently picking the tag.
+    if (isCustomElementName(tag) && tag.split('-').every((n) => this.renderVarKind(n) !== null || this.bindsName(n))) {
+      throw this.renderAmbiguity(node,
+        `emitter: '${tag}' reads as a custom element, but every part of it names a binding here, so it could be a subtraction — ` +
+        `write the arithmetic spaced or as \`= ${tag.split('-').join(' - ')}\`, or rename a binding to use the element`);
+    }
     const R = this.rstate;
     const el = this.newRenderVar();
     R.tags.set(el, tag);
@@ -15813,6 +15914,12 @@ class Emitter {
     if (node[0] === 'delete' && !(isNode(node[1]) && (node[1][0] === '.' || node[1][0] === '[]'))) {
       throw this.positionedError(node, "emitter: delete requires a property reference (delete obj.a / delete obj[k]) — deleting a plain binding is a strict-mode SyntaxError in modules");
     }
+    // A negative-literal index reads through `.at(-n)` and a range
+    // through `.slice()`: both are calls, so `delete` would answer true
+    // and remove nothing.
+    if (node[0] === 'delete' && node[1][0] === '[]' && (isRange(node[1][2]) || Emitter.negativeLiteralKey(node[1][2]))) {
+      throw this.positionedError(node, `emitter: delete cannot target a ${isRange(node[1][2]) ? 'range' : 'negative-literal index'} — it reads through a call (${isRange(node[1][2]) ? '.slice()' : '.at(-n)'}), so nothing would be deleted; use splice or a computed index`);
+    }
     this.mark(node, '$self', () => {
       this.mark(node, 'operator', () => this.b.emit(node[0]));
       // Word operators need the separating space (`typeof x`,
@@ -15945,7 +16052,7 @@ class Emitter {
             // A void-pair is a VOID method (`fn!: ->`): implicit
             // return suppressed; its voidMarker role covers the whole
             // emitted method.
-            this.mark(pair, 'voidMarker', () => this.mark(pair, '$self', () => {
+            this.mark(pair, 'voidMarker', () => this.mark(pair, '$self', () => this.withThisBoundary(() => {
               if (this.containsAwait(pair[2][2])) this.b.emit('async ');
               if (Emitter.containsYield(pair[2][2])) this.b.emit('*');
               this.mark(pair, 'key', () => this.b.emit(pair[1]));
@@ -15962,7 +16069,7 @@ class Emitter {
               this.mark(pair, 'value', () => {
                 this.methodBlock(pair[2], block, objInd, { isConstructor: false, binds: [], methodName: pair[1], voidBody: pair[0] === 'void-pair' });
               });
-            }));
+            })));
             return;
           }
           const dynamicKey = isNode(pair[1]) && pair[1][0] === 'dynamicKey';
@@ -16213,7 +16320,7 @@ class Emitter {
       this.grouped(node, 'parent', parent, Emitter.needsGrouping(parent, 'head'));
     }
     this.b.emit(' {\n');
-    if (body != null) this.mark(node, 'body', () => this.classMembers(body, ind));
+    if (body != null) this.withThisBoundary(() => this.mark(node, 'body', () => this.classMembers(body, ind)));
     this.b.emit('  '.repeat(ind) + '}');
   }
 
@@ -17526,7 +17633,12 @@ class Emitter {
         this.b.emit('.includes(');
         this.mark(node, 'left', () => this.expr(a));
         this.b.emit(') : (');
+        // The includes() slot is an argument; this one is an operand
+        // of JavaScript's `in`, so a lower-precedence left side groups.
+        const wrap = Emitter.needsGrouping(a, 'operand');
+        if (wrap) this.b.emit('(');
         this.expr(a);
+        if (wrap) this.b.emit(')');
         this.b.emit(' in ');
         this.mark(node, 'right', () => this.expr(b));
         this.b.emit(')');

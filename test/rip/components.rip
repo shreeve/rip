@@ -924,6 +924,431 @@ test 'onError on parent catches child error', '''
 # element flips them. Misresolving `a` silently creates an SVGAElement
 # whose href/click behavior is not an anchor's.
 
+# An object-literal `->` method and a class body rebind `this`: `@x`
+# there is the receiver's own property; `=>` keeps the component.
+code '@x in an object method or a class body is the receiver, not the component', '''
+  A = component
+    name := 'component'
+    make: ->
+      obj =
+        greet: -> @name
+        keep: => @name
+      class K
+        hi: -> @name
+      [obj, K]
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.name = __state("component");
+    }
+    make() {
+      let obj = {greet() {
+        return this.name;
+      },
+  keep: () => this.name.value};
+      class K {
+        hi() {
+          return this.name;
+        }
+      }
+      return [obj, K];
+    }
+  };
+  '''
+
+fail 'a bare member read inside an object method rejects', '''
+  A = component
+    name := 'component'
+    make: ->
+      obj =
+        greet: -> name
+      obj
+  ''', "component member 'name' is not reachable here"
+
+fail 'a member read in an object method parameter default rejects', '''
+  A = component
+    count := 1
+    make: ->
+      obj =
+        m: (a = count) -> a
+      obj
+  ''', "component member 'count' is not reachable here"
+
+test 'an object method inside a render loop reads members through the factory ctx', '''
+  A = component
+    count := 1
+    items := [1]
+    render
+      div
+        for item in items
+          span cfg: { m: -> count + item }
+  "compiled"
+  ''', "compiled"
+
+fail 'a bare member read inside a class body rejects', '''
+  A = component
+    name := 'component'
+    make: ->
+      class K
+        hi: -> name
+      K
+  ''', "component member 'name' is not reachable here"
+
+# A member chain rooted at a component member or module binding that is
+# also a tag name reads either way, so it rejects; render locals and loop
+# variables shadow the tag by rule, and an unbound name stays the tag.
+fail 'a member named like a tag in a chain rejects as ambiguous', '''
+  A = component
+    summary := {total: 42}
+    render
+      p summary.total
+  ''', "'summary' names both an element and a binding here"
+
+fail 'a module binding named like a tag in a chain rejects as ambiguous', '''
+  i = 1
+  A = component
+    render
+      i.fa.fa-check
+  ''', "'i' names both an element and a binding here"
+
+code 'an unbound tag-named chain is the tag', '''
+  A = component
+    render
+      p option.label
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('p');
+      this._el0.setAttribute('data-part', 'A');
+      this._el1 = document.createElement('option');
+      this._el1.className = 'label';
+      this._el0.appendChild(this._el1);
+      return this._el0;
+    }
+  };
+  '''
+
+# A tight-hyphen word at a render child position — opening a line, or
+# spaced after a tag on its line — names a custom element: one tag, never
+# a subtraction. A keyed run stays an attribute; a spaced `a - b` and
+# `= a-b` stay arithmetic.
+code 'a hyphenated tag at a child line start is a custom element', '''
+  A = component
+    render
+      div
+        x-icon
+        my-el "x"
+        sl-button.primary-action "Go"
+        aria-busy: true
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._el1 = document.createElement('x-icon');
+      this._el0.appendChild(this._el1);
+      this._el2 = document.createElement('my-el');
+      this._t0 = document.createTextNode("x");
+      this._el2.appendChild(this._t0);
+      this._el0.appendChild(this._el2);
+      this._el3 = document.createElement('sl-button');
+      this._t1 = document.createTextNode("Go");
+      this._el3.appendChild(this._t1);
+      this._el3.className = 'primary-action';
+      this._el0.appendChild(this._el3);
+      this._el0.setAttribute('aria-busy', true);
+      return this._el0;
+    }
+  };
+  '''
+
+code 'a hyphenated word after a tag on its line nests a custom element', '''
+  A = component
+    render
+      div
+        p x-icon
+        p.card my-el "hi"
+        span aria-label: "x"
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._el1 = document.createElement('p');
+      this._el2 = document.createElement('x-icon');
+      this._el1.appendChild(this._el2);
+      this._el0.appendChild(this._el1);
+      this._el3 = document.createElement('p');
+      this._el4 = document.createElement('my-el');
+      this._t0 = document.createTextNode("hi");
+      this._el4.appendChild(this._t0);
+      this._el3.appendChild(this._el4);
+      this._el3.className = 'card';
+      this._el0.appendChild(this._el3);
+      this._el5 = document.createElement('span');
+      this._el5.setAttribute('aria-label', "x");
+      this._el0.appendChild(this._el5);
+      return this._el0;
+    }
+  };
+  '''
+
+code 'a keyword-led custom element is one tag, and do-iife stays the iife', '''
+  A = component
+    name := "x"
+    render
+      div
+        do -> name.toUpperCase()
+        do-it "x"
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.name = __state("x");
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode('');
+      this._el0.appendChild(this._t0);
+      this._el1 = document.createElement('do-it');
+      this._t1 = document.createTextNode("x");
+      this._el1.appendChild(this._t1);
+      this._el0.appendChild(this._el1);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._t0.data = (() => this.name.value.toUpperCase())(); });
+    }
+  };
+  '''
+
+fail 'a custom element whose every part is bound rejects as ambiguous', '''
+  A = component
+    total := 1
+    count := 2
+    render
+      div
+        total-count
+  ''', "every part of it names a binding here"
+
+code 'a hyphen inside a render handler body stays subtraction', '''
+  A = component
+    total := 10
+    count := 2
+    render
+      div
+        button @click: ->
+          offset = 2
+          total-offset
+        button @click: -> label total-count
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.total = __state(10);
+      this.count = __state(2);
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._el1 = document.createElement('button');
+      this._el1.addEventListener('click', (e) => __batch(() => (() => {
+    let offset = 2;
+    return (this.total.value - offset);
+  })(e)));
+      this._el0.appendChild(this._el1);
+      this._el2 = document.createElement('button');
+      this._el2.addEventListener('click', (e) => __batch(() => (() => label(this.total.value - this.count.value))(e)));
+      this._el0.appendChild(this._el2);
+      return this._el0;
+    }
+  };
+  '''
+
+# Template or code: an element's children arrow (`div ->`) opens template,
+# where a hyphenated word is a custom element; a handler body, a bracket
+# opened in render, and an indented attribute value are code, where it is
+# arithmetic.
+code 'a hyphenated word under an element children arrow is a custom element', '''
+  A = component
+    render
+      div ->
+        x-icon
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._el1 = document.createElement('x-icon');
+      this._el0.appendChild(this._el1);
+      return this._el0;
+    }
+  };
+  '''
+
+code 'a hyphenated word on a line inside a render bracket is arithmetic', '''
+  A = component
+    a := 3
+    b := 1
+    render
+      p [
+        a-b
+      ].join()
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.a = __state(3);
+      this.b = __state(1);
+    }
+    _create() {
+      this._el0 = document.createElement('p');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode('');
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._t0.data = [(this.a.value - this.b.value)].join(); });
+    }
+  };
+  '''
+
+code 'a hyphenated word indented under an attribute value is arithmetic', '''
+  A = component
+    render
+      div title:
+        a-b
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      { const __v = (a - b); if (__v != null) this._el0.setAttribute('title', __v); }
+      return this._el0;
+    }
+  };
+  '''
+
+code 'a keyword glued to a hyphen in render is a custom element', '''
+  A = component
+    ok := true
+    render
+      div
+        if ok
+          span
+        else-x
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.ok = __state(true);
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._anchor1 = document.createComment('if');
+      this._el0.appendChild(this._anchor1);
+      this._el3 = document.createElement('else-x');
+      this._el0.appendChild(this._el3);
+      return this._el0;
+    }
+    _setup() {
+      {
+        const anchor = this._anchor1;
+        let currentBlock = null;
+        let showing = null;
+        __effect(() => {
+          const show = !!(this.ok.value);
+          const want = show ? 'then' : null;
+          if (want === showing) return;
+          if (currentBlock) {
+            const leaving = currentBlock;
+            if (leaving._t) { leaving.f(); __transition(leaving._first, leaving._t, 'leave', () => leaving.d(true)); }
+            else { leaving.d(true); }
+            currentBlock = null;
+          }
+          showing = want;
+          if (want === 'then') {
+            currentBlock = this.create_block_0(this);
+            currentBlock.c();
+            if (anchor.parentNode) currentBlock.m(anchor.parentNode, anchor.nextSibling);
+            currentBlock.p(this);
+            if (currentBlock._t) __transition(currentBlock._first, currentBlock._t, 'enter', undefined);
+          }
+        });
+        __ownerFrame().add(() => { if (currentBlock) { currentBlock.d(true); currentBlock = null; } });
+      }
+    }
+    create_block_0(ctx) {
+      let _el2;
+      return {
+        c() {
+          _el2 = document.createElement('span');
+          this._first = _el2;
+        },
+        m(target, anchor) {
+          if (target) target.insertBefore(_el2, anchor);
+        },
+        p(ctx) {
+        },
+        f() { },
+        d(detaching) {
+          if (detaching) __detach(_el2);
+        }
+      };
+    }
+  };
+  '''
+
+code 'a hyphenated word in an indented render handler body is arithmetic', '''
+  A = component
+    t := 1
+    o := 2
+    render
+      button @click: ->
+        t-o
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.t = __state(1);
+      this.o = __state(2);
+    }
+    _create() {
+      this._el0 = document.createElement('button');
+      this._el0.setAttribute('data-part', 'A');
+      this._el0.addEventListener('click', (e) => __batch(() => (() => (this.t.value - this.o.value))(e)));
+      return this._el0;
+    }
+  };
+  '''
+
+code 'a spaced hyphen at a child line start stays subtraction', '''
+  A = component
+    render
+      div
+        = a - b
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode(String(a - b));
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+  };
+  '''
+
 code 'top-level `a` is an HTML anchor, not an SVG element', '''
   A = component
     render

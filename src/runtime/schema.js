@@ -59,6 +59,16 @@ class SchemaError extends Error {
   }
 }
 
+// A declaration error found while validating — a plain @ensure whose
+// check answers with a promise. It escapes the catch that turns a
+// throwing check into a failed check: the schema, not the data, is wrong.
+class SchemaEnsureError extends TypeError {
+  constructor(message) {
+    super(message);
+    this.name = 'SchemaEnsureError';
+  }
+}
+
 function formatIssues(issues, name) {
   if (!issues || !issues.length) return 'SchemaError';
   const head = name ? name + ': ' : '';
@@ -756,8 +766,9 @@ class SchemaDef {
     for (const r of norm.ensures) {
       let ok = false;
       try {
-        ok = !!r.fn(data);
-      } catch {
+        ok = this._syncEnsureVerdict(r, data);
+      } catch (err) {
+        if (err instanceof SchemaEnsureError) throw err;
         errs.push({ field: r.field || '', error: 'ensure', message: r.message || 'ensure failed' });
         continue;
       }
@@ -766,6 +777,20 @@ class SchemaDef {
       }
     }
     return errs;
+  }
+
+  // A plain @ensure's verdict. A promise is always truthy, so a check
+  // that answers with one would pass without being consulted; it is a
+  // declaration error (only @ensure! awaits), raised loudly rather than
+  // read as a verdict.
+  _syncEnsureVerdict(r, data) {
+    const result = r.fn(data);
+    if (result !== null && typeof result === 'object' && typeof result.then === 'function') {
+      throw new SchemaEnsureError(
+        "schema '" + (this.name || 'anon') + "': @ensure \"" + (r.message || 'ensure') +
+        "\" answered with a promise, which a plain @ensure would read as passing — declare it '@ensure!' to await it");
+    }
+    return !!result;
   }
 
   // Async-aware pass: sync refinements first (cheap before expensive),
@@ -785,7 +810,12 @@ class SchemaDef {
         })());
       } else {
         let ok = false;
-        try { ok = !!r.fn(data); } catch { ok = false; }
+        try {
+          ok = this._syncEnsureVerdict(r, data);
+        } catch (err) {
+          if (err instanceof SchemaEnsureError) throw err;
+          ok = false;
+        }
         if (!ok) results.push({ idx, issue: issue() });
       }
     });
@@ -826,6 +856,22 @@ class SchemaDef {
     this._taCache = walk(this);
     this._taGen = registryGen;
     return this._taCache;
+  }
+
+  // Field types resolve at first validation, not at declaration: by
+  // then the module's later schemas have registered, so a forward
+  // reference resolves and a name that still resolves to nothing is a
+  // misspelling or a missing import. Memoized on the registry
+  // generation; only success is remembered.
+  _assertFieldTypes() {
+    if (this._ftGen === registryGen) return;
+    const issues = [];
+    for (const [n, f] of this._normalize().fields) {
+      if (f.typeName === 'literal-union' || types[f.typeName] || SchemaRegistry.has(f.typeName)) continue;
+      issues.push({ field: n, error: 'type', message: n + ": unknown type '" + f.typeName + "' (correct the spelling, or import the file that declares it)" });
+    }
+    if (issues.length) throw new SchemaError(issues, this.name, this.kind);
+    this._ftGen = registryGen;
   }
 
   // A schema that can reach ≥1 @ensure! is async-validating: sync
@@ -914,6 +960,7 @@ class SchemaDef {
   // so the async pipeline can await those children instead.
   _validateFields(data, collect, skip, opts) {
     const norm = this._normalize();
+    this._assertFieldTypes();
     const errors = collect ? [] : null;
     for (const [n, f] of norm.fields) {
       if (skip && skip.has(n)) continue;
@@ -1215,6 +1262,7 @@ class SchemaDef {
   // written order at every depth.
   async _validateFieldsAsync(working, failed, opts) {
     const norm = this._normalize();
+    this._assertFieldTypes();
     const errors = [];
     for (const [n, f] of norm.fields) {
       if (failed && failed.has(n)) continue;
@@ -1664,6 +1712,7 @@ function jSONSchemaBody(def, ctx) {
 
   // Fielded kinds: a field is required on the wire only when
   // `!`-marked AND defaultless (defaults apply before the check).
+  def._assertFieldTypes();
   const properties = {};
   const required = [];
   for (const [n, f] of norm.fields) {

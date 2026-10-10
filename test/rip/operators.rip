@@ -223,6 +223,13 @@ code "variable in variable uses runtime check", "val in list", "Array.isArray(li
 code "literal in literal dispatches through the helper", "'x' in ['a', 'b']", "((k, c) => Array.isArray(c) || typeof c === 'string' ? c.includes(k) : k in c)(\"x\", [\"a\", \"b\"]);"
 code "variable in literal dispatches through the helper", "val in ['a', 'b']", "((k, c) => Array.isArray(c) || typeof c === 'string' ? c.includes(k) : k in c)(val, [\"a\", \"b\"]);"
 
+# A low-precedence left operand keeps its grouping in the object arm of
+# the inline dispatch, where it sits beside JavaScript's own `in`.
+test "grouped or in a plain-name container", "k = 'x'\nd = 'y'\nb = {y: 1}\n(k or d) in b", false
+test "grouped comparison in a plain-name container", "a = 1\nc = 1\nb = {true: 1}\n(a == c) in b", true
+test "existence in a plain-name container", "a = 1\nb = {}\na? in b", false
+code "grouped or keeps its parens beside in", "(k or d) in b", "Array.isArray(b) || typeof b === 'string' ? b.includes(k || d) : ((k || d) in b);"
+
 # Object literal should still use JavaScript 'in'
 code "property in object literal", "'key' in {key: 1}", "\"key\" in {key: 1};"
 

@@ -56,6 +56,12 @@ let depth = score > 90 ? 'deep' :
 
 console.log('size:', size, 'depth:', depth)
 
+let sign = function(n: number) {
+  return n > 0 ? 'up' : 'down'
+}
+
+console.log('sign:', sign(1), sign(-1))
+
 // ── switch on a subject: single and multi-value whens, with and without else ──
 
 let grade = (() => {

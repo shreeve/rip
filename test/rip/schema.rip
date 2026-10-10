@@ -1844,8 +1844,9 @@ test "pragma cap surfaces as max issue at runtime", '''
 # A declared typeName that matches a registered :shape / :input / :model
 # validates the value against that schema recursively. Arrays of such
 # types validate each element. Enum-typed fields accept only members.
-# Unknown typenames remain permissive (forward references, unresolved
-# cross-file names).
+# A typename resolves when the schema first validates, so a forward
+# reference to a schema declared later in the module resolves; a name
+# still unresolved then throws, naming the field and the type.
 
 test "nested :shape field validates each property", '''
   Address = schema :shape
@@ -1953,12 +1954,42 @@ test "nested schemas survive .parse() (throws with prefixed path)", '''
     [e.name, e.issues[0].field]
   ''', ["SchemaError", "address.street"]
 
-test "unknown typename stays permissive (forward refs)", '''
+test "unknown typename throws at first validation, naming field and type", '''
   X = schema :shape
     thing! SomethingNotRegistered
-  r = X.safe({thing: {any: "value"}})
-  [r.ok, r.errors]
-  ''', [true, null]
+  try X.safe({thing: {any: "value"}}) catch e then [e.name, e.issues[0].field, e.issues[0].error, e.message.includes("SomethingNotRegistered")]
+  ''', ["SchemaError", "thing", "type", true]
+
+test "unknown typename throws even when the field is absent", '''
+  X = schema :input
+    name! strng
+    age?  intger
+  a = try X.safe({name: "Ann"}) catch e then e.issues.map((i) -> i.field)
+  b = try X.ok({name: "Ann"}) catch e then e.name
+  [a, b]
+  ''', [["name", "age"], "SchemaError"]
+
+test "unknown array element typename throws", '''
+  X = schema :shape
+    tags! Tagg[]
+  try X.safe({tags: [1]}) catch e then [e.issues[0].field, e.message.includes("Tagg")]
+  ''', ["tags", true]
+
+test "unknown typename throws from the async path", '''
+  X = schema :shape
+    addr! Adress
+  r = try X.safeAsync!({addr: 42}) catch e then [e.name, e.issues[0].field]
+  r
+  ''', ["SchemaError", "addr"]
+
+test "forward reference to a later schema resolves", '''
+  User = schema :shape
+    address! Address
+  Address = schema :shape
+    street! string
+  r = User.safe({address: {street: 5}})
+  [r.ok, r.errors[0].field]
+  ''', [false, "address.street"]
 
 test "nested :shape in optional field skips when missing", '''
   Address = schema :shape
@@ -3068,7 +3099,7 @@ test "markDirty() accepts snake_case alias and resolves to camelCase field", mod
 test "NaN-valued field doesn't trigger forever-dirty UPDATE on no-op save", modelHeader + '''
   Reading = schema :model
     label! string
-    value? float
+    value? any
   adapter.canned.__default = {columns: [{name: "id"}, {name: "label"}, {name: "value"}], data: [[1, "x", NaN]], rows: 1}
   r = Reading.find! 1
   adapter.calls = []
@@ -4891,6 +4922,30 @@ test "@ensure!: rejected async predicate counts as failure with declared message
   r = X.safeAsync! {n: 1}
   [r.ok, r.errors[0].message]
 ''', [false, "boom guard"]
+
+fail "@ensure: a check that awaits must be declared @ensure!", '''
+  check = (v) -> Promise.resolve(false)
+  X = schema :input
+    a! string
+    @ensure "must not pass", (u) -> check!(u.a)
+  '''
+
+test "@ensure: a plain check that returns a promise throws, never passes", '''
+  X = schema :input
+    a! string
+    @ensure "must not pass", (u) -> Promise.resolve(false)
+  sync = null
+  try
+    X.safe({a: "x"})
+  catch e
+    sync = e.message
+  async = null
+  try
+    X.safeAsync! {a: "x"}
+  catch e
+    async = e.message
+  [sync?.includes("@ensure!"), async?.includes("@ensure!")]
+''', [true, true]
 
 test "parseAsync works on plain sync schemas too (uniform surface)", '''
   X = schema

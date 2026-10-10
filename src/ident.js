@@ -27,6 +27,13 @@ export function isIdentifierName(value) {
   return true;
 }
 
+// A custom element's tag name: identifier runs joined by tight hyphens
+// (`x-icon`, `sl-button`). The platform requires the hyphen, and the
+// lexer mints such a name only at a render child position.
+export function isCustomElementName(value) {
+  return typeof value === 'string' && value.includes('-') && value.split('-').every(isIdentifierName);
+}
+
 // Every identifier-shaped run in a text — built from the SAME
 // IDENT_START/IDENT_PART classes (one identifier vocabulary in the
 // repository), for consumers that mint scaffold names against

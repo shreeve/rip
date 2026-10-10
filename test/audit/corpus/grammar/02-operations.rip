@@ -140,6 +140,13 @@ drop = (n: number) ->
 
 console.log('guards:', take(10), take(0), drop(10), drop(0))
 
+# `then … else` is one left-associative level: (a && b) || c
+console.log('chain:', (0 then 'yes' else 'no'), (ten then 0 else 'fallback'))
+pick = (n: number) ->
+  n then n > 1 else return 'small'
+  'big'
+console.log('pick:', pick(0), pick(1), pick(2))
+
 keptAnd: number[] = []
 for n in [0, 1]
   n and continue
@@ -161,7 +168,12 @@ for n in [0, 1]
   n else continue
   keptElse.push n
 
-console.log('continue:', keptAnd, keptOr, keptNull, keptThen, keptElse)
+keptChain: number[] = []
+for n in [0, 1, 2]
+  n then n > 1 else continue
+  keptChain.push n
+
+console.log('continue:', keptAnd, keptOr, keptNull, keptThen, keptElse, keptChain)
 
 # ── Arg lists: the indented block, the line-split tail, and spread args ──
 

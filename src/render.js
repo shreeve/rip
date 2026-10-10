@@ -66,9 +66,9 @@ const FOR_SOURCES = new Set(['FORIN', 'FOROF', 'FORAS', 'FORASAWAIT']);
 
 import { TEMPLATE_TAGS } from './dom.js';
 import { counter } from './counter.js';
-import { isIdentifierName } from './ident.js';
+import { isIdentifierName, isCustomElementName } from './ident.js';
 
-const isHtmlTag = (name) => TEMPLATE_TAGS.has(String(name).split('#')[0]);
+const isHtmlTag = (name) => { const tag = String(name).split('#')[0]; return TEMPLATE_TAGS.has(tag) || isCustomElementName(tag); };
 export const isComponentName = (name) => typeof name === 'string' && COMPONENT_RE.test(name);
 const isTemplateTag = (name) => isHtmlTag(name) || isComponentName(name);
 
