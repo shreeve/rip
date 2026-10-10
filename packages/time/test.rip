@@ -1128,3 +1128,40 @@ test "time.parts: null for impossible, unrecognized or non-string input", ->
   eq time.parts(42),             null
   eq time.parts(null),           null
   eq time.parts(undefined),      null
+
+# ==[ Units ]==
+
+console.log "\nUnits"
+
+rejects = (fn) ->
+  try
+    fn()
+    false
+  catch e
+    e instanceof RangeError and e.message.includes('unknown time unit')
+
+test "add and subtract take :quarter as three months and :date as days", ->
+  t = time.utc('2026-01-15T00:00:00Z')
+  eq t.add(1, :quarter).toISOString(), '2026-04-15T00:00:00.000Z'
+  eq t.add(2, 'Q').toISOString(), '2026-07-15T00:00:00.000Z'
+  eq t.subtract(1, 'quarters').toISOString(), '2025-10-15T00:00:00.000Z'
+  eq t.add(3, :date).toISOString(), '2026-01-18T00:00:00.000Z'
+  eq t.add(5).toISOString(), '2026-01-15T00:00:00.005Z'
+
+test "diff and duration take :quarter and :date", ->
+  a = time.utc('2026-07-15T00:00:00Z')
+  b = time.utc('2026-01-15T00:00:00Z')
+  eq a.diff(b, :quarter), 2
+  eq a.diff(b, :date), a.diff(b, :day)
+  eq time.duration(1, :quarter).asMilliseconds(), time.duration(3, :month).asMilliseconds()
+  eq time.duration(2, :date).asMilliseconds(), time.duration(2, :day).asMilliseconds()
+  eq time.duration({quarters: 1}).asMilliseconds(), time.duration(3, :month).asMilliseconds()
+  eq time.duration({quarters: 1, months: 1}).get(:month), 4
+  eq time.duration(7, :month).get(:quarter), 2
+
+test "an unknown unit rejects instead of acting as milliseconds", ->
+  t = time.utc('2026-01-15T00:00:00Z')
+  ok rejects(-> t.add(1, 'fortnight')), 'add fortnight'
+  ok rejects(-> t.diff(t, 'fortnight')), 'diff fortnight'
+  ok rejects(-> t.startOf('fortnight')), 'startOf fortnight'
+  ok rejects(-> time.duration(1, 'fortnight')), 'duration fortnight'

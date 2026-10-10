@@ -301,13 +301,6 @@ $21.4M. `~integer` turns `"9007199254740993"` into `…992` silently;
 
 ## Standard packages
 
-**P2 ✔ H — time `add`/`subtract` with `:quarter`, `:date`, an unknown unit or no unit adds one millisecond.**
-`time.utc('2026-01-15T00:00:00Z').add(1, :quarter)` →
-`…00.001Z`; also `'Q'`, `'fortnight'`, `undefined`. `diff(x, :date)`
-returns milliseconds; `time.duration(1, :quarter)` is NaN. The switch
-ends in `else 1` (packages/time/time.rip ~709). The README alias table
-includes `:quarter` and `:date`.
-
 **P4 H — testing `eq` passes on different Dates, Maps and Sets.**
 `eq new Date(0), new Date(1)`, `eq new Map([[1,2]]), new Map([[1,3]])`,
 `eq new Set([1]), new Set([2])` all pass (`deepEq` compares own
@@ -338,7 +331,7 @@ and exits 1 (`eq = arg.indexOf('=')`).
 
 **P10 M — fake `unique` dedupes by closure identity.** The README's inline `fake.unique -> fake.email()` creates a new closure per call, so it never dedupes, and its strong `Map` leaks one entry per call (packages/fake/fake.rip ~240).
 
-**P11 M — time accepts invalid input silently.** `time.duration('garbage')` → zero; a misspelled key (`minuts`) is ignored; `time.duration(NaN).humanize()` → "a month"; `set('fortnight', 3)` is a no-op; `time(true)` is a valid date; `age('2030-01-01', '2026-01-01')` → -4.
+**P11 M — time accepts invalid input silently.** `time.duration('garbage')` → zero; `time.duration(NaN).humanize()` → "a month"; `time(true)` is a valid date; `age('2030-01-01', '2026-01-01')` → -4.
 
 **P12 M — csv accepts bad input and loses data.** `CSV.write 'abc'` writes three lines; `sep: ''`, `mode: 'bogus'` and unknown options are ignored; with `headers: true` an extra field is dropped and duplicate headers collapse; single-column empty rows do not round-trip; the README's `CSV.writer(sep: '\t', excel: true)` passes an option the writer ignores.
 
