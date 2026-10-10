@@ -253,7 +253,7 @@ UNIT_ALIASES =!
   Q:    :quarter
   q:    :quarter
 
-UNITS =! new Set([:year, :quarter, :month, :week, :day, :date, :hour, :minute, :second, :millisecond])
+UNITS =! Set.new([:year, :quarter, :month, :week, :day, :date, :hour, :minute, :second, :millisecond])
 
 def prettyUnit(u)
   return :millisecond unless u?
