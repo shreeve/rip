@@ -3,7 +3,7 @@
   "version": "4.0.0",
   "private": true,
   "type": "module",
-  "description": "Small single-script CLI utilities for common tasks — zero dependencies",
+  "description": "Small single-script CLI utilities for common tasks — zero dependencies.",
   "bin": {
     "rip-curl": "./curl.rip"
   },

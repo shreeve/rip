@@ -5,8 +5,10 @@
 import { test, eq, ok } from 'rip/testing'
 import { CSV } from 'rip/csv'
 import * as mod from 'rip/csv'
-import { readFileSync, statSync } from 'fs'
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'fs'
 import { join } from 'path'
+import { tmpdir } from 'os'
+import { spawnSync } from 'child_process'
 
 # ==[ Package surface ]==
 
@@ -365,6 +367,40 @@ test "dx_codes round-trip", ->
   rows = CSV.read raw, excel: true, relax: true, strip: true
   eq rows[1][1], 'Z00.00, Z11.3'
   eq CSV.read(CSV.write(rows))[1][1], 'Z00.00, Z11.3'
+
+test "a quoted field followed by an empty last field keeps that field", ->
+  eq CSV.read('id,name,note\n1,"Smith, J",\n2,Bob,\n'), [['id','name','note'], ['1','Smith, J',''], ['2','Bob','']]
+  eq CSV.read('"a",'), [['a', '']]
+  eq CSV.read('"a",\r\n"b",\r\n'), [['a', ''], ['b', '']]
+  eq CSV.read(CSV.write([['1','Smith, J','']])), [['1','Smith, J','']]
+
+test "read rejects anything but a string", ->
+  for bad in [42, null, undefined, ['a,b'], {a: 1}]
+    threw = try
+      CSV.read bad
+      null
+    catch e
+      e
+    ok threw instanceof TypeError and threw.message.includes('expects a string'), "CSV.read #{JSON.stringify(bad)} rejects"
+  eq CSV.read(''), []
+
+test "the CLI rejects an unknown option and reports errors without a stack", ->
+  cli = (...args) -> spawnSync process.execPath, [join(import.meta.dir, '..', '..', 'bin', 'rip'), join(import.meta.dir, 'csv.rip'), ...args], encoding: 'utf8'
+  r = cli '--bogus', 'x.csv'
+  eq r.status, 1
+  ok r.stderr.includes("unknown option '--bogus'"), r.stderr
+  r = cli '/nonexistent-zzz.csv'
+  eq r.status, 1
+  ok r.stderr.startsWith('rip-csv: '), r.stderr
+  ok not r.stderr.includes('    at '), 'no stack trace'
+  dir = mkdtempSync join(tmpdir(), 'csv-cli-')
+  writeFileSync join(dir, 'bad.csv'), 'a,"b\n'
+  r = cli join(dir, 'bad.csv')
+  eq r.status, 1
+  ok r.stderr.startsWith('rip-csv: CSV: unclosed quote'), r.stderr
+  r = cli 'a.csv', 'b.csv', 'c.csv'
+  eq r.status, 1
+  ok r.stderr.includes('at most an input and an output'), r.stderr
 
 # ==[ File I/O ]==
 

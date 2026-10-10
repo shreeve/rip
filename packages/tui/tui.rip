@@ -406,11 +406,27 @@ open =! (App, options, out, terminal, stdin = null, clock = undefined) ->
     throw error
   live
 
+# Every option run, mount and renderToString read. A misspelled key
+# (`colz`) or a size that is no whole number (`cols: -5`) would otherwise
+# fall back to a default and draw at the wrong size silently. 0 is the
+# size a pty reports before it is set, and reads as the default.
+OPTIONS =! Set.new ['altScreen', 'ansi', 'backdrop', 'colors', 'cols', 'console', 'damage', 'keyboard', 'mouse', 'pace', 'props', 'rows', 'selection', 'stderr', 'stdin', 'stdout']
+
+checkOptions =! (options) ->
+  for own key of options when not OPTIONS.has(key)
+    throw TypeError.new "rip/tui: unknown option '#{key}'"
+  for key in ['cols', 'rows'] when options[key]?
+    size = options[key]
+    unless typeof size is 'number' and size >= 0 and (Number.isInteger(size) or (key is 'rows' and size is Infinity))
+      throw RangeError.new "rip/tui: #{key} must be a whole number#{if key is 'rows' then ' or Infinity' else ''}, got #{String(size)}"
+  options
+
 # Mount `App` on the terminal and keep it drawn until `quit`. Keys are
 # read from `stdin`, which is the process's own unless `stdout` is given
 # and `stdin` is not: a stream of one's own takes no keys from the
 # terminal the process happens to be on.
 export run =! (App, options = {}) ->
+  checkOptions options
   stdin = if options.stdin isnt undefined then options.stdin else if options.stdout then null else process.stdin
   held = open App, options, options.stdout ?? process.stdout, true, stdin
   { view, out, doc, settled } = held
@@ -497,6 +513,7 @@ class Mount
 # what it is sent, with a stderr of the same kind. With no `rows` it is
 # as tall as the frame.
 export mount =! (App, options = {}) ->
+  checkOptions options
   out = { columns: options.cols ?? 80, rows: options.rows ?? Infinity, sent: '', write: (text) -> @sent += text }
   out.err = { sent: '', write: (text) -> @sent += text }
   held = open App, options, out, false, null, Clock.new()

@@ -71,7 +71,7 @@ export def resetGlobals!
 
 # AsyncLocalStorage for request context (enables sync read() in handlers):
 # the request's Ctx and its merged body/query/params.
-export requestContext: AsyncLocalStorage<{ env?: Ctx, request?: Request, data: Record<string, unknown> | null }> = AsyncLocalStorage.new()
+export requestContext: AsyncLocalStorage<{ env?: Ctx, request?: Request, data: Record<string, unknown> | null, bodyInvalid?: boolean }> = AsyncLocalStorage.new()
 
 # ==============================================================================
 # Router: Pattern Compiler
@@ -501,14 +501,11 @@ smart = (fn) ->
 # flat envelope, each refused field's message under `fields`.
 # On success the parsed, defaulted, coerced value is `@input`. Uses
 # safeAsync so schemas with @ensure! async refinements work too.
+invalidBody = -> Object.assign Error.new('Invalid JSON body'), { status: 400, code: 'invalid_json', api: true }
+
 withInput = (schema, fn) ->
   (c) ->
-    if c._bodyInvalid
-      err = Error.new 'Invalid JSON body'
-      err.status = 400
-      err.code   = 'invalid_json'
-      err.api    = true
-      throw err
+    throw invalidBody() if c._bodyInvalid
     r = schema.safeAsync! (c._body ?? {})
     unless r.ok
       err = Error.new 'Validation failed'
@@ -726,7 +723,7 @@ dispatchRequest = (req) ->
   merged = { ...data, ...c.req.query(), ...match.params }
 
   # Run handler inside AsyncLocalStorage context
-  requestContext.run! { env: c, data: merged }, ->
+  requestContext.run! { env: c, data: merged, bodyInvalid: c._bodyInvalid is true }, ->
     runHandler!(c, match.route)
 
 # Web-standard middleware wraps routing. Passing a Request to next() replaces
@@ -1037,6 +1034,9 @@ type ReadFn =
 
 export read: ReadFn = (name?: string, type?: string | symbol | RegExp | any[] | Record<string, any>, miss?: unknown) ->
   store = requestContext.getStore() or throw Error.new 'no context for read()'
+  # A body that did not parse is not an empty one: every field read from
+  # this request would otherwise answer absent.
+  throw invalidBody() if store.bodyInvalid
 
   # missing value helper
   done = (must = false) ->
@@ -1046,11 +1046,12 @@ export read: ReadFn = (name?: string, type?: string | symbol | RegExp | any[] | 
 
   # get value from store — supports dotted paths for nested JSON bodies,
   # e.g. read 'patient.firstName' walks {patient: {firstName: ...}}
+  # Own fields only: an absent `toString` is absent, never the prototype's
+  # function, and a path that runs past a scalar reads as absent.
   v: unknown = store.data or {}
   if name?
     for part in name.split('.')
-      break unless v? and typeof v is 'object'
-      v = v[part]
+      v = if v? and typeof v is 'object' and Object.hasOwn(v, part) then v[part] else undefined
   # Symbols are the type vocabulary's native spelling — `read 'email', :email!`
   # and `read 'email', 'email!'` are the same call (suffixes ride the symbol).
   type = Symbol.keyFor(type) if typeof type is 'symbol'
@@ -1084,10 +1085,12 @@ export read: ReadFn = (name?: string, type?: string | symbol | RegExp | any[] | 
     # job — getValidator hands back the prepared face, so read adds
     # nothing here. The early trim above is NOT preparation: it feeds
     # the supplied/empty decision, which must precede validation.
-    f = getValidator(type)
+    # A misspelled validator is the route's bug, not the caller's input:
+    # it throws, as check() does, rather than reading every value as absent.
+    f = getValidator(type) or throw Error.new("read: unknown validator '#{type}'")
     supplied = v? and v isnt ''
-    v = if f then f(v) else null
-    if loud and supplied and not v?
+    v = f(v)
+    if (loud or must) and supplied and not v?
       throw Object.assign(Error.new("#{name} is not a valid #{type}"), { status: 422, field: name, invalid: true })
 
   # Regex: apply regex pattern
@@ -1102,7 +1105,7 @@ export read: ReadFn = (name?: string, type?: string | symbol | RegExp | any[] | 
     if typeof type[0] is 'number'
       [min, max] = type
       n = if typeof v is 'number' then v else if s =~ /^[-+]?\d+$/ then +s else NaN
-      v = if Number.isFinite(n) and not (min? and n < min) and not (max? and n > max) then n else null
+      v = if Number.isInteger(n) and not (min? and n < min) and not (max? and n > max) then n else null
     else
       v = if type.includes(s) then s else null
 

@@ -282,6 +282,8 @@ def readFull(str, cfg)
         c2 = str.charCodeAt(pos)
         if c2 is sepCode
           pos += sepLen
+          # a separator at the end of the line opens one last, empty field
+          row[fi++] = '' if pos >= len or str.charCodeAt(pos) is nlCode
         else if c2 is nlCode
           pos += crlfLen(str, pos)
           row.length = fi if fi < row.length
@@ -427,7 +429,8 @@ class Writer
 export CSV =
   # parse a CSV string into rows (arrays or objects)
   read: (str, opts = {}) ->
-    return [] unless str?.length
+    throw TypeError.new("CSV.read expects a string, got #{if str is null then 'null' else typeof str}") unless typeof str is 'string'
+    return [] unless str.length
     cfg = probe(str, opts)
     readFull(cfg.str, cfg)
 
@@ -492,20 +495,32 @@ if import.meta.main
       when '-e', '--excel' then readOpts.excel  = true
       when '-s', '--strip' then readOpts.strip  = true
       when '-z', '--zeros' then writeOpts.zeros = true
-      else files.push arg
+      else
+        if arg.startsWith('-') and arg isnt '-'
+          console.error "rip-csv: unknown option '#{arg}' (use --help for usage)"
+          exit 1
+        files.push arg
 
   unless files.length
-    p "csv: no input file specified (use --help for usage)"
+    console.error "rip-csv: no input file specified (use --help for usage)"
+    exit 1
+  if files.length > 2
+    console.error "rip-csv: takes at most an input and an output file (use --help for usage)"
     exit 1
 
   input  = files[0]
   output = files[1]
 
-  rows = CSV.read(Bun.file(input).text!, readOpts)
-  writer = Writer.new(writeOpts)
-
-  if output
-    Bun.write! output, writer.rows(rows)
-    p "#{rows.length} rows: #{input} -> #{output}"
-  else
-    process.stdout.write writer.rows(rows)
+  # A bad file or a malformed CSV is the user's input, not a crash:
+  # report the message alone.
+  try
+    rows = CSV.read(Bun.file(input).text!, readOpts)
+    writer = Writer.new(writeOpts)
+    if output
+      Bun.write! output, writer.rows(rows)
+      p "#{rows.length} rows: #{input} -> #{output}"
+    else
+      process.stdout.write writer.rows(rows)
+  catch error
+    console.error "rip-csv: #{error?.message ?? String(error)}"
+    exit 1

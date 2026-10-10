@@ -3,7 +3,7 @@
   "version": "4.0.0",
   "private": true,
   "type": "module",
-  "description": "Homoiconic interaction engine — the nested data structure IS the program, driving PTY, SSH, and TCP conversations",
+  "description": "Homoiconic interaction engine — the nested data structure IS the program, driving PTY, SSH, and TCP conversations.",
   "exports": {
     ".": "./script.rip"
   },

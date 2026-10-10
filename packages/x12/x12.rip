@@ -277,6 +277,17 @@ class X12
       val ?= ""
       how = null
 
+      # A value splits on its own level's separator (`NM1-3` takes
+      # `SMITH*JOHN` as two fields), but a separator from a level above —
+      # or the segment terminator, or a line break — would inject
+      # structure on re-parse, so it rejects.
+      above = [['segment terminator', @seg], ['line break', '\n'], ['line break', '\r']]
+      above.push ['field separator', @fld] if rep? or com?
+      above.push ['repetition separator', @rep] if com?
+      text = if Array.isArray(val) then val.join('') else String(val)
+      for [what, ch] in above when text.includes(ch)
+        throw Error.new "x12: the value for #{pos} contains the #{what} #{JSON.stringify(ch)}"
+
       if not rep? and not com?
         # replace fields
         val = val.join(@fld) if Array.isArray val

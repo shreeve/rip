@@ -3,7 +3,7 @@
   "version": "4.0.0",
   "private": true,
   "type": "module",
-  "description": "X12 EDI parser, editor, and query engine — path-based addressing over auto-detected separators, zero dependencies",
+  "description": "X12 EDI parser, editor, and query engine — path-based addressing over auto-detected separators, zero dependencies.",
   "exports": {
     ".": "./x12.rip"
   },

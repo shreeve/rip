@@ -273,6 +273,16 @@ test "strict inequality false", "1 !== 1", false
 
 code "triple equals compiles to strict", "a === b", "a === b;"
 code "triple not-equals compiles to strict", "a !== b", "a !== b;"
+test "an interpolated string repeats", 'a = "x"\n"#{a}-" * 3', "x-x-x-"
+code "an interpolated string repeats through .repeat", '"#{a}-" * n', '`${a}-`.repeat(n);'
+test "a heredoc string repeats", """
+  s = '''
+    ab
+    ''' * 2
+  s
+  """, "abab"
+fail "a spaced infix !~ rejects (Rip has no no-match operator)", 's = "abc"\ns !~ /a/', "Rip has no '!~' operator"
+test "a prefix !~ stays the indexOf idiom", '!~[1, 2].indexOf(3)', true
 code "string repeat compiles to repeat", '"-" * 40', '"-".repeat(40);'
 
 test "string repeat repeats", '"ab" * 3', "ababab"

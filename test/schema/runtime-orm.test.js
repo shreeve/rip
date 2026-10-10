@@ -2769,6 +2769,13 @@ describe('orm:  unit tier', () => {
     expect(() => orm4.connect({})).toThrow(/url is required/);
   });
 
+  test('schema.connect rejects a token and any option it does not read', () => {
+    // Harbor authenticates nobody, so a token would be sent nowhere.
+    expect(() => orm4.connect({ url: 'http://x.example:1', token: 's3cret' })).toThrow(/no token/);
+    expect(() => orm4.connect({ url: 'http://x.example:1', timeout: 5 })).toThrow(/unknown option 'timeout'/);
+    expect(typeof orm4.connect({ url: 'http://x.example:1', timeoutMs: 5 }).query).toBe('function');
+  });
+
   test("a per-schema `on:` adapter pins that model's SQL; the global adapter keeps the rest", async () => {
     await K4.scope(async () => {
       const global_ = recordingAdapter();

@@ -1,7 +1,7 @@
 {
   "name": "vscode-rip",
   "displayName": "Rip Language",
-  "description": "Rip language support — syntax highlighting, hover, diagnostics, completions, go-to-definition, references, rename, signature help, semantic tokens, code actions, outline, and document links through the Rip compiler and the TypeScript 7 LSP server",
+  "description": "Full IntelliSense for `.rip` files — syntax highlighting, hover, completions, refactoring, and live type-checking.",
   "version": "4.0.0",
   "publisher": "rip-lang",
   "license": "MIT",

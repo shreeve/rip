@@ -451,6 +451,10 @@ makeProxy = (target) ->
       true
 
     deleteProperty: (raw, prop) ->
+      # A source is declared in app/stash.rip and reset() restores what
+      # was declared; deleting one would take it out for good.
+      if _isSourceCell raw[prop]
+        throw TypeError.new "Rip App: cannot delete source key '#{String(prop)}'; it is declared with source() in app/stash.rip — reset() it, or write it through its cell"
       had = Object.prototype.hasOwnProperty.call raw, prop
       deleted = delete raw[prop]
       raw[SIGNALS]?.get(prop)?.value = undefined

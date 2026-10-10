@@ -881,14 +881,6 @@ duplicated descriptions should not be copied into new work:
   `INSTALL harbor; LOAD harbor; CALL harbor_serve(...)` extension instructions
   still present in [`packages/db/README.md`](packages/db/README.md) and
   `packages/db/example.rip` are retired.
-- [`packages/db/example.rip`](packages/db/example.rip) also imports a
-  module-level `query` export that does not exist, so it is not a runnable
-  current example. Use a client returned by `connect()`.
-- The money guidance in [`docs/ORM.md`](docs/ORM.md) says Harbor returns
-  `DECIMAL` values as floating-point JSON numbers. Current Harbor preserves
-  them as lossless strings with type metadata. Integer minor units can still
-  be a good application policy, but lossy Harbor transport is no longer the
-  reason for it.
 - Rip's migration client and Harbor's README say a per-request timeout of zero
   opts out of the deployment statement timeout. Current Harbor instead treats
   the deployment timeout as a hard ceiling and maps zero to that ceiling. A
@@ -898,15 +890,9 @@ duplicated descriptions should not be copied into new work:
 - Current Sites watch handling uses whole-state reconciliation. Exact watcher
   paths are relevance hints, despite exact-path rehash language still present
   in parts of [`packages/sites/README.md`](packages/sites/README.md).
-- A watch-time App assembly failure may publish coherent source for browser
-  quarantine. It is not universally true that every failed graph build leaves
-  publication untouched; that description applies to initial admission, not
-  the last-known-good live path.
 - A live successor after a quarantined App can apply in place. A document
   reload is required when recovery was missed and is discovered through
   reconnect, not for every successor hash.
-- Current API replacement uses the doorbell/lazy-boot protocol. Descriptions
-  that always boot a fresh pool before cutting the old one are outdated.
 - Pilot is deliberately TLS-free in current code. Harbor decision-record text
   suggesting that Pilot itself reaches HTTPS endpoints is stale.
 - The blanket `globalThis` ban in [`packages/AGENTS.md`](packages/AGENTS.md)

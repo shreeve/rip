@@ -1825,6 +1825,12 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     }
 
     // ── Operators and punctuation (longest match first) ──
+    // `s !~ /re/` (Ruby's no-match) would read as the call `s(!~/re/)`:
+    // an operand, a space, `!~`, a space. Rip has no `!~`; the prefix
+    // `!~x` (the indexOf idiom) stays legal.
+    if (text.startsWith('!~', pos) && pendingSpaced && INDEXABLE.has(last()?.kind) && /\s/.test(text[pos + 2] ?? '')) {
+      fail("Rip has no '!~' operator — write `not (s =~ /re/)`", pos, pos + 2);
+    }
     const four = text.slice(pos, pos + 4);
     if (OPS4[four]) {
       push(OPS4[four], four, pos, pos + 4);

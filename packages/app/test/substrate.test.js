@@ -652,3 +652,28 @@ describe('staleTime durations', () => {
     rejects(NaN);
   });
 });
+
+describe('stash source keys', () => {
+  test('deleting a source key rejects, through del() and delete alike, and the source survives reset', () => {
+    const stash = createStash({ user: source({ fetch: async () => ({ name: 'live' }) }), plain: 1 });
+    expect(() => stash.del('user')).toThrow(/cannot delete source key 'user'/);
+    expect(() => { delete stash.user; }).toThrow(/cannot delete source key 'user'/);
+    stash.reset();
+    expect(() => stash.source('user')).not.toThrow();
+    stash.del('plain');
+    expect(stash.plain).toBeUndefined();
+  });
+});
+
+describe('source staleTime', () => {
+  const declare = staleTime => () => source({ fetch: async () => 1, staleTime });
+  test('a duration that overflows to Infinity rejects, as the number Infinity does', () => {
+    expect(declare('1e999 years')).toThrow(/staleTime/);
+    expect(declare(Infinity)).toThrow(/staleTime/);
+  });
+  test('the duration grammar is case-sensitive, as the Duration type is', () => {
+    expect(declare('5 min')).not.toThrow();
+    expect(declare('5 MIN')).toThrow(/staleTime/);
+    expect(declare('forever')).not.toThrow();
+  });
+});

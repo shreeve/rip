@@ -62,7 +62,7 @@ and a path that does not reach a source key throws. `peek`, `reset`, and
 
 In checked projects the handle is typed. A path naming a top-level stash entry answers that entry's typed handle (`SourceHandleFor`: a keyed family's element type, anything else un-nulled, with the handle re-nulling as `value: T | null`), and a literal key passed to `@stash.source(...)` is CHECKED: a typo errors at the key, naming the stash's keys, while a dotted path under a real key stays legal (untyped handle) and a dynamic key always passes (docs/TYPES.md § Typed source handles). Direct `createStash` consumers get the exported vocabulary — `StashMethods<D>`, `SourceHandle<T>`, `SourceHandleFor<V>` — with a permissive string overload: only the compiler's face can spell the dotted-vs-typo distinction.
 
-`staleTime` takes milliseconds, a duration string (`'5 min'`, `'2h'`, `'1.5 days'` — seconds through years, case-insensitive), or `'forever'`; a spelling the duration grammar does not recognize rejects at declaration.
+`staleTime` takes milliseconds, a duration string (`'5 min'`, `'2h'`, `'1.5 days'` — seconds through years, lowercase, the spellings the `Duration` type lists), or `'forever'`; a spelling the duration grammar does not recognize, or one too large to be finite, rejects at declaration.
 
 Source kind follows JavaScript runtime arity exactly:
 

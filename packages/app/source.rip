@@ -84,13 +84,16 @@ parseStaleTime = (value) ->
     parts = value.match DURATION_RE
     if parts
       amount = parseFloat parts[1]
-      return switch parts[2][0]
+      ms = switch parts[2][0]
         when 's' then amount * 1000
         when 'm' then amount * 60000
         when 'h' then amount * 3600000
         when 'd' then amount * 86400000
         when 'w' then amount * 604800000
         when 'y' then amount * 31536000000
+      # `'1e999 years'` overflows to Infinity; "never stale" is spelled
+      # 'forever', as the number Infinity is refused above.
+      return ms if Number.isFinite(ms)
   throw TypeError.new 'Rip App: source staleTime must be a non-negative number, a duration such as "5 min", or "forever"'
 
 makeSourceCell = (fetchFn, staleTime, onSettle = null) ->

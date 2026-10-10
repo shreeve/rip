@@ -3,7 +3,7 @@
   "version": "4.0.0",
   "private": true,
   "type": "module",
-  "description": "Tiny Rip harness for first-party package test.rip files (test, eq, ok, throws)",
+  "description": "Tiny Rip harness for first-party package test.rip files (test, eq, ok, throws, plainEnv).",
   "exports": {
     ".": "./testing.rip",
     "./app": "./app.rip"

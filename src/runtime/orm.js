@@ -1001,7 +1001,6 @@ function jsonSchemaModelColumns(def, properties) {
 function defaultAdapter(overrides) {
   return harborAdapter({
     url: overrides?.url,
-    token: overrides?.token,
     // 0 unless the caller asked for something else — the knob has to be
     // reachable through schema.connect(), or an app cannot set a client
     // deadline at all. `undefined` (no opinion) is not `null` (opt out).
@@ -1061,10 +1060,19 @@ function adapterFor(def) {
 
 // Build a NEW adapter value without installing it globally — the
 // counterpart of `schema :model, on: analytics`.
+// Harbor authenticates nobody (duckdb.js: the socket's directory and a
+// loopback-only port are the access control), so a token has nowhere to
+// go; accepting one would read as protection that does not exist.
 function connect(opts) {
   const o = typeof opts === 'string' ? { url: opts } : (opts || {});
-  if (!o.url) throw new Error('schema.connect({url, token?, timeoutMs?}): a url is required');
-  return defaultAdapter({ url: o.url, token: o.token, timeoutMs: o.timeoutMs });
+  if ('token' in o) {
+    throw new Error('schema.connect(): harbor takes no token — it authenticates nobody; its socket directory and loopback-only port are the access control');
+  }
+  for (const k of Object.keys(o)) {
+    if (k !== 'url' && k !== 'timeoutMs') throw new Error("schema.connect({url, timeoutMs?}): unknown option '" + k + "'");
+  }
+  if (!o.url) throw new Error('schema.connect({url, timeoutMs?}): a url is required');
+  return defaultAdapter({ url: o.url, timeoutMs: o.timeoutMs });
 }
 
 // ── transactions ──────────────────────────────────────────────────────

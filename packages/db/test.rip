@@ -1820,6 +1820,11 @@ test "each subcommand has its own --help that exits 0", ->
     eq r.status, 0
     ok r.stdout.includes needle
 
+test "every help text ends its last line", ->
+  ok runDb('--help').stdout.endsWith('\n'), '--help'
+  for cmd in ['ping', 'status', 'dump', 'load', 'checkpoint', 'mcp']
+    ok runDb(cmd, '--help').stdout.endsWith('\n'), "#{cmd} --help"
+
 test "--help lists ping and status", ->
   r = runDb '--help'
   eq r.status, 0

@@ -297,7 +297,9 @@ fail "update of a computed rejects at compile", '''
   x++
 ''', "cannot assign to computed 'x'"
 
+test "delete takes an optional reference", 'o = {a: {b: 1}, k: 2}\nn = null\nk = "k"\nr = [delete o?.a.b, delete o?[k], delete n?.a]\n[r, o]', [[true, true, true], {a: {}}]
 fail "delete rejects a negative-literal index", "a = [1, 2, 3]\ndelete a[-1]", "delete cannot target a negative-literal index"
+fail "delete rejects an optional negative-literal index", "a = [1, 2, 3]\ndelete a?[-1]", "delete cannot target a negative-literal index"
 fail "delete rejects a range", "a = [1, 2, 3]\ndelete a[0..1]", "delete cannot target a range"
 test "delete with a computed negative index still deletes the property", "o = {'-1': 1}\nk = -1\ndelete o[k]\nObject.keys(o).length", 0
 

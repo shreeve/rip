@@ -226,7 +226,8 @@ REGEX_TIME =! ///
 # ==[ Unit Normalization ]==
 
 # Accept any of: `:year`, `'year'`, `'years'`, `'y'`, `'Y'`, `'yr'` → `:year`
-# Returns a canonical symbol. Unknown units pass through as the string.
+# Returns a canonical symbol; an unknown unit throws, so a typo never
+# quietly acts as milliseconds.
 UNIT_ALIASES =!
   y:    :year
   yr:   :year
@@ -252,11 +253,15 @@ UNIT_ALIASES =!
   Q:    :quarter
   q:    :quarter
 
+UNITS =! Set.new([:year, :quarter, :month, :week, :day, :date, :hour, :minute, :second, :millisecond])
+
 def prettyUnit(u)
   return :millisecond unless u?
-  return u if typeof u is 'symbol'
-  key = String(u).replace(/s$/, '')
-  UNIT_ALIASES[key] ?? Symbol.for(key.toLowerCase())
+  unit = if typeof u is 'symbol' then u else
+    key = String(u).replace(/s$/, '')
+    UNIT_ALIASES[key] ?? Symbol.for(key.toLowerCase())
+  throw RangeError.new("unknown time unit '#{if typeof u is 'symbol' then u.description else String(u)}'") unless UNITS.has(unit)
+  unit
 
 # ==[ Small Helpers ]==
 
@@ -700,9 +705,11 @@ export class Time
 
     if unit is :year
       return @set(:year, @$y + number)
+    if unit is :quarter
+      return @set(:month, @$M + number * 3)
     if unit is :month
       return @set(:month, @$M + number)
-    if unit is :day
+    if unit is :day or unit is :date
       return @_addDays(number)
     if unit is :week
       return @_addDays(number * 7)
@@ -711,8 +718,7 @@ export class Time
       when :hour        then MS_HOUR
       when :minute      then MS_MINUTE
       when :second      then MS_SECOND
-      when :millisecond then 1
-      else 1
+      else 1   # :millisecond
     ms = @$d.getTime() + (number * step)
     Time.new({ fromInstance: Date.new(ms), utc: @$u })
 
@@ -839,7 +845,7 @@ export class Time
       when :quarter then monthDiff(this, that) / 3
       when :month   then monthDiff(this, that)
       when :week    then (raw - zDelt) / MS_WEEK
-      when :day     then (raw - zDelt) / MS_DAY
+      when :day, :date then (raw - zDelt) / MS_DAY
       when :hour    then raw / MS_HOUR
       when :minute  then raw / MS_MINUTE
       when :second  then raw / MS_SECOND
@@ -990,6 +996,7 @@ MS_MONTH =! MS_YEAR / 12
 
 UNIT_TO_MS =!
   years:        MS_YEAR
+  quarters:     MS_MONTH * 3
   months:       MS_MONTH
   weeks:        MS_WEEK
   days:         MS_DAY
@@ -1001,8 +1008,8 @@ UNIT_TO_MS =!
 # Canonicalize any unit input ('y', :year, 'years', ...) to the plural string
 # key used by UNIT_TO_MS / the Duration component map.
 def durationUnit(u)
-  key = prettyUnit(u).description
-  "#{key}s"
+  unit = prettyUnit(u)
+  if unit is :date then 'days' else "#{unit.description}s"
 
 DURATION_REGEX_PARSE  =! /^(-|\+)?P(?:([-+]?[0-9,.]*)Y)?(?:([-+]?[0-9,.]*)M)?(?:([-+]?[0-9,.]*)W)?(?:([-+]?[0-9,.]*)D)?(?:T(?:([-+]?[0-9,.]*)H)?(?:([-+]?[0-9,.]*)M)?(?:([-+]?[0-9,.]*)S)?)?$/
 DURATION_REGEX_FORMAT =! /\[([^\]]+)\]|YYYY|YY|Y|MM|M|DD|D|HH|H|mm|m|ss|s|SSS/g
@@ -1037,7 +1044,11 @@ export class Duration
     # Object: { hours: 1, minutes: 30 } — normalize components via ms round-trip
     if typeof input is 'object' and not (input instanceof String)
       for own k, v of input
-        @$d[durationUnit(k)] = v
+        key = durationUnit(k)
+        # a quarter is three months (the component map has no quarters),
+        # so components accumulate rather than overwrite
+        if key is 'quarters' then [key, v] = ['months', v * 3]
+        @$d[key] = (@$d[key] ?? 0) + Number(v)
       @_calcMs()
       @_parseFromMs()
       return
@@ -1084,6 +1095,9 @@ export class Duration
       @$ms % 1000
     else if key is 'weeks'
       n = @$ms / UNIT_TO_MS[key]
+      if n < 0 then Math.ceil(n) else Math.floor(n)
+    else if key is 'quarters'
+      n = (@$d.months ?? 0) / 3
       if n < 0 then Math.ceil(n) else Math.floor(n)
     else
       @$d[key] ?? 0

@@ -34,9 +34,6 @@ expression position"; `r = x if a else y if b else z` chains to
 `a ? x : (b ? y : z)`. The returned-ternary production reduces at the
 first `else` operand.
 
-**C32 L — `delete a?.b` rejects as "deleting a plain binding".** JavaScript
-allows an optional-chain delete; the message names the wrong reason.
-
 **C7 M — Class-body `x: 1`, `x: 0`, `x: ""`, `x: []`, `x: {}`, `x: true`, `x: null` silently drop the value.**
 ```coffee
 class A
@@ -86,13 +83,6 @@ the callback. A top-level `f = -> continue` rejects correctly.
 `f = (a, ...b, c) -> c` and `{a, ...b, c} = o`. Array-pattern middle rest
 is lowered correctly.
 
-**C15 M — An await (or yield) in a constructor emits `async constructor()` (or `*constructor()`).** Getters and setters reject the same case, positioned.
-
-**C16 ✔ M — Duplicate constructors compile; the JavaScript fails at load.**
-A class with two `constructor: ->` members compiles with exit 0 and
-`rip check` reports nothing; Bun then throws "Cannot declare multiple
-constructors".
-
 ### Legal-looking code rejected, or inconsistent
 
 **C17 ✔ M — Inline `try` with a paren-less call before `catch`/`finally` fails to parse.**
@@ -117,14 +107,8 @@ false. They read as one operator with two spellings.
 
 **C21 L — `for x in src() by step()` evaluates `step()` before `src()`.** Range loops keep source order (pinned).
 
-**C22 L — String repetition ignores interpolated strings.** `"ab" * 3`
-is `"ababab"`; `"#{a}-" * 3` compiles to a template literal times 3 → NaN.
-
 **C23 L — `not s =~ /e/` matches against the string `"false"`.** `not`
 binds tighter than `=~`, and `toMatchable` stringifies the boolean.
-
-**C24 L — `s !~ /a/` silently compiles to `s(!(~/a/))`.** Users of `=~`
-reach for `!~`; it becomes a juxtaposed call instead of a rejection.
 
 **C25 L — Assorted rejections of legal-looking forms.**
 `a ? b ? c : d : e` (nested ternary); `unless a … else if c`;
@@ -145,8 +129,7 @@ reach for `!~`; it becomes a juxtaposed call instead of a rejection.
 
 **C30 L — Messages name things the user did not write.**
 `x = {:a}` → "@-keys are only supported in class bodies";
-`f! ?= -> 5` → "Unexpected '??='"; `delete a?.b` → "deleting a plain
-binding"; `on := true` → bare "Unexpected ':='" (`on` is reserved, `true`).
+`f! ?= -> 5` → "Unexpected '??='"; `on := true` → bare "Unexpected ':='" (`on` is reserved, `true`).
 
 ---
 
@@ -252,32 +235,15 @@ $21.4M. `~integer` turns `"9007199254740993"` into `…992` silently;
 
 **S6 M — A coercer that returns a Promise passes.** The field value becomes a Promise; registration rejects only functions declared async.
 
-**S7 L — `omit()` and `required()` accept unknown field names**; `pick()` rejects them.
-
-**S8 L — `schema.connect` advertises and silently drops `token`.** No Authorization header is sent; unknown options are not rejected.
-
 **S9 L — ORM wording.** `where({firstName: 'A', first_name: 'B'})` silently ANDs both (`create` rejects the conflict); `@ensure "bad", :nope, …` attributes the failure to a nonexistent field; `upsert on: [:email, :firstName]` calls an existing non-unique field "unknown".
 
 ---
 
 ## Rip Sites
 
-**W12 L — `read` with a numeric range accepts a non-integer JSON number.**
-`?qty=5.5` answers null, but a JSON body `{qty: 5.5}` answers 5.5.
-
-**W4 M — `read()` with a misspelled validator name.** `read 'email',
-'emial'` → `null` with 200; `'emial!'` → 400 "Missing required field";
-`'emial?'` → 422. `check()` in rip/validate throws "unknown validator".
-
-**W5 M — A required field with an invalid value is reported as missing.** `'id!'` with `id=abc` → 400 "Missing required field"; the `?` form reports 422 "not a valid".
-
-**W6 M — A malformed JSON body reads as empty.** `'{"name": "Ada"'` → 200 with null fields; routes with `input:` return 400 `invalid_json`.
-
 **W7 M — An async `prefix` block registers its routes without the prefix.** `prefix '/api', -> cfg = loadConfig!(); get '/ping' …` serves `/ping`, not `/api/ping`: `fn?.()` is not awaited and `finally` restores the prefix. `App(fn)` has the same `fn?.()`. Same class as #432.
 
 **W8 M — Coded 5xx messages reach the client.** `error! 'db password is hunter2', 500, 'db_down'` → body `{"error":"db password is hunter2"}`. The README says "Raw failures and 5xx details are masked"; the code says a coded error "ships as authored". One is wrong.
-
-**W9 L — Absent fields named after built-ins return them.** `read 'hasOwnProperty', /.+/` returns the native function source; `read 'toString', [1,100]` and `read 'constructor'` likewise.
 
 **W10 L — A numeric enumeration in `read()` becomes a range.** `read 'qty', [1, 2, 3]` rejects 3.
 
@@ -289,11 +255,9 @@ $21.4M. `~integer` turns `"9007199254740993"` into `…992` silently;
 
 **A1 M — Async callbacks escape the router's guards.** An async `onNavigate` that throws becomes an unhandled rejection (README: callbacks "cannot break it … by throwing"); an async redirect loop runs past the "ten nested navigations" guard.
 
-**A2 L — `stash.del` on a source key removes the source permanently.** `reset()` does not restore it; assignment to a source key is guarded, deletion is not.
-
 **A3 L — `createMutation` callbacks written with `->` inside a component get the wrong `this`.** The action `(x) -> @n + x` compiles to an arrow, but `onSuccess: (r) -> @n = r` compiles to a method on the options object, silently writing there. The `=>` warning is a source comment only.
 
-**A4 L — `staleTime` is case-sensitive, though the README says otherwise.** `'5 MIN'`, `'2H'`, `'Forever'` reject; `'1e999 years'` is accepted (Infinity) while the number `Infinity` rejects. Sites' `@cache` parses a different duration dialect.
+**A4 L — Sites' `@cache` parses a different duration dialect than App's `staleTime`.** App's grammar is lowercase and finite (`'5 min'`, `'2h'`); compare the two before an app moves a duration between them.
 
 **A5 L — Keyed sources share one cell between an object key and its JSON text** (`cellFor({a:1})` is `cellFor('{"a":1}')`).
 
@@ -301,73 +265,29 @@ $21.4M. `~integer` turns `"9007199254740993"` into `…992` silently;
 
 ## Standard packages
 
-**P1 ✔ H — csv drops a trailing empty field after a quoted field; write-then-read loses a column.**
-`CSV.read 'id,name,note\n1,"Smith, J",\n2,Bob,\n'` → row 1 has two
-fields. `CSV.read CSV.write [['1','Smith, J','']]` returns two columns.
-Cause: readFull's quoted-field branch (packages/csv/csv.rip ~293).
-
-**P2 ✔ H — time `add`/`subtract` with `:quarter`, `:date`, an unknown unit or no unit adds one millisecond.**
-`time.utc('2026-01-15T00:00:00Z').add(1, :quarter)` →
-`…00.001Z`; also `'Q'`, `'fortnight'`, `undefined`. `diff(x, :date)`
-returns milliseconds; `time.duration(1, :quarter)` is NaN. The switch
-ends in `else 1` (packages/time/time.rip ~709). The README alias table
-includes `:quarter` and `:date`.
-
-**P3 ✔ H — testing's README Quick Start fails, because csv accepts non-strings.**
-`throws (-> CSV.read(42)), TypeError, 'expects a string'` fails:
-`CSV.read 42` and `CSV.read null` return `[]` silently.
-
-**P4 H — testing `eq` passes on different Dates, Maps and Sets.**
-`eq new Date(0), new Date(1)`, `eq new Map([[1,2]]), new Map([[1,3]])`,
-`eq new Set([1]), new Set([2])` all pass (`deepEq` compares own
-enumerable keys). Also `throws 42` passes; `eq NaN, NaN` fails with
-"expected null, got null"; `eq {a: undefined}, {}` fails with "expected
-{}, got {}".
-
 **P5 H — rsx parses truncated or ill-formed XML without error.**
 `parse '<a><b>text'` → `{"a":{"b":{}}}`; `'<a>1 < 2</a>'` makes an
 element named `"2<"`; two roots, trailing junk, `'hello'` and `''` are
 accepted; duplicate attributes keep the last. A cut-off SOAP or EDI
 response parses "successfully".
 
-**P6 H — rsx `stringify` writes unvalidated names (markup injection).**
-`stringify 'a', {'@attrs': {'x" onload="evil': '1'}}` →
-`<a x" onload="evil="1"/>`; element names like `'<x>'` and `'1bad'` are
-accepted.
-
-**P7 H — x12 `set` accepts separator characters inside a value (segment injection).**
-`x.set "NM1-3", "SMITH*JOHN~DMG*D8*19800101"` adds a field and a new
-`DMG` segment on re-parse.
-
-**P8 H — rip-curl treats any argument containing `=` as a variable.**
-`rip packages/utils/curl.rip 'http://host/users?page=2'` prints usage
-and exits 1 (`eq = arg.indexOf('=')`).
-
 **P9 M — swarm's `-q` summary hides failures, and the exit code is 0 when tasks died.** The README Quick Start with `-w 4 -q` reports success while tasks sit in `.swarm/died/`.
 
 **P10 M — fake `unique` dedupes by closure identity.** The README's inline `fake.unique -> fake.email()` creates a new closure per call, so it never dedupes, and its strong `Map` leaks one entry per call (packages/fake/fake.rip ~240).
 
-**P11 M — time accepts invalid input silently.** `time.duration('garbage')` → zero; a misspelled key (`minuts`) is ignored; `time.duration(NaN).humanize()` → "a month"; `set('fortnight', 3)` is a no-op; `time(true)` is a valid date; `age('2030-01-01', '2026-01-01')` → -4.
+**P11 M — time accepts invalid input silently.** `time.duration('garbage')` → zero; `time.duration(NaN).humanize()` → "a month"; `time(true)` is a valid date; `age('2030-01-01', '2026-01-01')` → -4.
 
 **P12 M — csv accepts bad input and loses data.** `CSV.write 'abc'` writes three lines; `sep: ''`, `mode: 'bogus'` and unknown options are ignored; with `headers: true` an extra field is dropped and duplicate headers collapse; single-column empty rows do not round-trip; the README's `CSV.writer(sep: '\t', excel: true)` passes an option the writer ignores.
 
 **P13 M — x12 accepts bad input.** `X12.load!` of an empty file returns the default ISA envelope; `get "EB(0)-1"` → `""`; `set "EB(?)", 5` → null silently; `set "NM1(0)-3", "Q"` throws a raw TypeError (packages/x12/x12.rip ~304).
 
-**P14 M — rip-print's `min.js`/`min.css` exclusions never match.** The extension is the last dot segment, so `src/app.min.js` prints and `-x min.js` does not exclude it; unknown flags (`--darkk`) and `-x` without a value are ignored.
-
 **P15 M — rsx's rejections and mixed content disagree with its README.** The mismatched-close-tag and non-string errors carry no offset; `parse '</a>'` says "expected </>, got </a>"; `<p>hi <b>there</b> you</p>` drops the text though `textKey` is described as the mixed-content key.
 
 **P16 L — Barcode encoders ignore unknown options and disagree on errors.** `hieght:`, `colums:`, `eccc:` are accepted (rip/pdf rejects unknown keys); a QR miss throws `"finder"` while the others say "not found"; `encodeQR ''` encodes while Code 128 and PDF417 reject empty text.
 
-**P17 L — tui `run`/`mount`/`renderToString` options are not validated.** `cols: 0`, `cols: -5`, `colz: 10` render at 80 columns.
-
 **P18 L — rip-curl drops non-JSON bodies and malformed header lines.**
 
 **P19 L — rip/script ends on an unknown control symbol without error** (`:skp` aborts silently; `trace` accepts `[:bogus]`); the README trace omits the `\r` actually sent.
-
-**P20 L — validate `check` passes nullish and object input.** `check undefined, 'string'` → `""`; `check {a:1}, 'string'` → `"[object Object]"`.
-
-**P21 L — rip-csv treats unknown flags as filenames** (`--bogus` → ENOENT) and prints raw stack traces on parse errors; `rip-db --help` lacks a final newline.
 
 ---
 
@@ -385,23 +305,15 @@ and exits 1 (`eq = arg.indexOf('=')`).
 
 **D1 ✔ M — AGENTS.md rule 9 says a `main` ruleset requires the `test` and `browser` jobs; none exists.** `gh api repos/shreeve/rip/rulesets` → `[]`; branch protection → "Branch not protected". Nothing blocks merging a red PR, and GitHub refuses auto-merge for want of a required check.
 
-**D2 M — HANDOFF.md states two stale facts.** "`yield*` is spelled `(yield)*`" — `yield* g()` works and `(yield)* g()` compiles to multiplication; "A tail `try` wraps in an IIFE" — a function-tail `try` emits a plain try/return.
+**D3 M — packages/db still documents the retired Harbor extension.** README lines ~43–45 and ~153 and `example.rip` line 6 use `INSTALL`/`harbor_serve`; "Mental model" says Harbor runs inside DuckDB (ECOSYSTEM.md's Harbor caution, still true).
 
-**D3 M — packages/db still documents the retired Harbor extension.** README lines ~43–45 and ~153 and `example.rip` line 6 use `INSTALL`/`harbor_serve`; "Mental model" says Harbor runs inside DuckDB (ECOSYSTEM.md caution 1, still true).
+**D4 M — The migration timeout "zero means no limit" claim persists on the Rip side.** src/cli/migrate.js ~107 and docs/ORM.md's `timeoutMs: null` row; Harbor clamps zero to its cap (ECOSYSTEM.md's migration-timeout caution).
 
-**D4 M — The migration timeout "zero means no limit" claim persists on the Rip side.** src/cli/migrate.js ~107 and docs/ORM.md's `timeoutMs: null` row; Harbor clamps zero to its cap (ECOSYSTEM.md caution 4).
-
-**D5 L — packages/sites/README.md describes exact-path rehash and a reload on the next hash.** Lines ~1018–1022, ~1203, ~1290 (the Manager snapshots the whole tree) and ~1074 (feed.rip recovers in place); the watch-time assembly failure's Hub `assembly` message is undocumented (ECOSYSTEM.md cautions 5–7).
-
-**D6 L — ECOSYSTEM.md's own caution list is partly stale.** Cautions 2 (example.rip's `query` import), 3 (DECIMAL as floats) and 8 (always boot a fresh pool) are fixed; caution 6 no longer matches `refreshApp`.
-
-**D7 L — validate says 37 validators; there are 38** (README lines 5, 43, 58, 116 and package.json; `validatorNames().length` and the tests say 38).
+**D5 L — packages/sites/README.md describes exact-path rehash and a reload on the next hash.** Lines ~1018–1022, ~1203, ~1290 (the Manager snapshots the whole tree) and ~1074 (feed.rip recovers in place); the watch-time assembly failure's Hub `assembly` message is undocumented (ECOSYSTEM.md's Sites watch cautions).
 
 ---
 
 ## Package mold
-
-**M1 L — `description` differs from the README pitch.** By the missing period alone: app, csv, db, decimal, fake, highlight, http, print, rsx, script, stamp, swarm, testing, time, utils, validate, x12; different sentences: barcodes, sites, vim, vscode; testing's pitch also names `plainEnv`. packages/AGENTS.md says the frame is uniform "so a script can verify it"; no script does.
 
 **M2 L — barcodes and tui are neither mold nor listed as earned shapes.** barcodes has no `**Runtime:**` line, a `test/` tree and `"bench": "rip test/bench.rip"`; tui has `test/`, `bench/`, `demo/` and `## Quick start`.
 

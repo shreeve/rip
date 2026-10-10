@@ -1396,6 +1396,14 @@ fail "ensure: rejected on :mixin", '''
     @ensure "nope", (u) -> true
   '''
 
+test "pick, omit and required: an unknown field name throws", '''
+  S = schema :shape
+    a! string
+    b? string
+  msg = (f) -> try (f(); null) catch e then e.message
+  [msg(-> S.pick('c')), msg(-> S.omit('c')), msg(-> S.required('c')), Object.keys(S.omit('b').toJSONSchema().properties)]
+  ''', ["pick: unknown field 'c' on S", "omit: unknown field 'c' on S", "required: unknown field 'c' on S", ["a"]]
+
 test "ensure: dropped on .pick", '''
   X = schema :shape
     a!

@@ -984,37 +984,37 @@ if import.meta.main
 
   try
     if cmd is undefined or cmd is '--help' or cmd is '-h'
-      process.stdout.write USAGE
+      process.stdout.write "#{USAGE}\n"
     else if cmd is '--version' or cmd is '-v'
       process.stdout.write "rip-db v#{VERSION}\n"
     else if cmd is 'ping' or cmd is 'status'
-      if args.includes('--help') or args.includes('-h') then process.stdout.write HELP.ping
+      if args.includes('--help') or args.includes('-h') then process.stdout.write "#{HELP.ping}\n"
       else if args.length > 1 then die "usage: rip-db #{cmd}"
       else
         info = ping!
         console.log "ok  #{info.url}  database=#{info.database}"
     else if cmd is 'dump'
-      if args.includes('--help') or args.includes('-h') then process.stdout.write HELP.dump
+      if args.includes('--help') or args.includes('-h') then process.stdout.write "#{HELP.dump}\n"
       else if args.length > 2 then die 'usage: rip-db dump [ARCHIVE.tar.gz | DIRECTORY]'
       else console.log dump!(args[1] ?? null, makeDeps())
     else if cmd is 'load'
-      if args.includes('--help') or args.includes('-h') then process.stdout.write HELP.load
+      if args.includes('--help') or args.includes('-h') then process.stdout.write "#{HELP.load}\n"
       else if args.length isnt 2 then die 'usage: rip-db load ARCHIVE.tar.gz'
       else console.log load!(args[1], makeDeps())
     else if cmd is 'checkpoint'
       extra = args.slice(1)
-      if extra.includes('--help') or extra.includes('-h') then process.stdout.write HELP.checkpoint
+      if extra.includes('--help') or extra.includes('-h') then process.stdout.write "#{HELP.checkpoint}\n"
       else
         force = extra.includes('--force')
         for a in extra
           die "unknown argument: #{a}" unless a is '--force'
         console.log checkpoint!(force, makeDeps())
     else if cmd is 'mcp'
-      if args.includes('--help') or args.includes('-h') then process.stdout.write HELP.mcp
+      if args.includes('--help') or args.includes('-h') then process.stdout.write "#{HELP.mcp}\n"
       else startStdio!
     else
       process.stderr.write "rip-db: unknown subcommand '#{cmd}'\n\n"
-      process.stdout.write USAGE
+      process.stdout.write "#{USAGE}\n"
       process.exit 1
   catch e
     die e?.message or String(e)

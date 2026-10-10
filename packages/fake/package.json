@@ -3,7 +3,7 @@
   "version": "4.0.0",
   "private": true,
   "type": "module",
-  "description": "Fake data and Model.factory() — curated, valid-looking, seedable, zero dependencies",
+  "description": "Fake data and Model.factory() — curated, valid-looking, seedable, zero dependencies.",
   "exports": {
     ".": "./fake.rip"
   },

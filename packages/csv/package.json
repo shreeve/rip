@@ -3,7 +3,7 @@
   "version": "4.0.0",
   "private": true,
   "type": "module",
-  "description": "Fast, flexible CSV parser and writer — indexOf ratchet, auto-detect, zero dependencies",
+  "description": "Fast, flexible CSV parser and writer — indexOf ratchet, auto-detect, zero dependencies.",
   "exports": {
     ".": "./csv.rip"
   },

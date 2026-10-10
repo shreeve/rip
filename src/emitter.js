@@ -15141,8 +15141,12 @@ class Emitter {
 
   // `*` with a string-LITERAL left operand is repetition — it emits
   // `lit.repeat(n)`, a call: the primary tier, never a spine member.
+  // Any string literal on the left: quoted, heredoc (backtick-delimited
+  // atoms) or interpolated (a `str` node).
   static isStrRepeat(x) {
-    return isNode(x) && x[0] === '*' && x.length === 3 && typeof x[1] === 'string' && x[1][0] === '"';
+    if (!isNode(x) || x[0] !== '*' || x.length !== 3) return false;
+    const l = x[1];
+    return typeof l === 'string' ? (l[0] === '"' || l[0] === '`') : (isNode(l) && l[0] === 'str');
   }
 
   // Does this expression's EMISSION begin with an object literal's
@@ -15665,7 +15669,7 @@ class Emitter {
     // rule is literal-only: a dynamic left operand keeps JS `*`.
     if (Emitter.isStrRepeat(node)) {
       this.mark(node, '$self', () => {
-        this.mark(node, 'left', () => this.b.emit(node[1]));
+        this.mark(node, 'left', () => (typeof node[1] === 'string' ? this.b.emit(node[1]) : this.expr(node[1])));
         this.b.emit('.repeat(');
         this.mark(node, 'right', () => this.expr(node[2]));
         this.b.emit(')');
@@ -15910,14 +15914,16 @@ class Emitter {
     // `delete` is only valid on a property reference: strict mode (all
     // ES modules) makes `delete x` on a plain binding a load-time
     // SyntaxError — reject
-    // at the layer where the target shape is knowable.
-    if (node[0] === 'delete' && !(isNode(node[1]) && (node[1][0] === '.' || node[1][0] === '[]'))) {
+    // at the layer where the target shape is knowable. An optional
+    // reference (`delete o?.a`, `delete o?[k]`) is one: JavaScript
+    // answers true when the base is nullish.
+    if (node[0] === 'delete' && !(isNode(node[1]) && ['.', '[]', '?.', 'optindex'].includes(node[1][0]))) {
       throw this.positionedError(node, "emitter: delete requires a property reference (delete obj.a / delete obj[k]) — deleting a plain binding is a strict-mode SyntaxError in modules");
     }
     // A negative-literal index reads through `.at(-n)` and a range
     // through `.slice()`: both are calls, so `delete` would answer true
     // and remove nothing.
-    if (node[0] === 'delete' && node[1][0] === '[]' && (isRange(node[1][2]) || Emitter.negativeLiteralKey(node[1][2]))) {
+    if (node[0] === 'delete' && (node[1][0] === '[]' || node[1][0] === 'optindex') && (isRange(node[1][2]) || Emitter.negativeLiteralKey(node[1][2]))) {
       throw this.positionedError(node, `emitter: delete cannot target a ${isRange(node[1][2]) ? 'range' : 'negative-literal index'} — it reads through a call (${isRange(node[1][2]) ? '.slice()' : '.at(-n)'}), so nothing would be deleted; use splice or a computed index`);
     }
     this.mark(node, '$self', () => {
@@ -16427,6 +16433,12 @@ class Emitter {
         // A STATIC member named `constructor` is an ordinary static
         // method; only the instance one is the class constructor.
         if (mName === 'constructor' && !isStaticKey(pair[1])) {
+          if (hasConstructor) {
+            throw this.positionedError(pair, 'emitter: a class has one constructor — JavaScript refuses a second at load', stmt);
+          }
+          if (isFunc(pair[2]) && (this.containsAwait(pair[2][2]) || Emitter.containsYield(pair[2][2]))) {
+            throw this.positionedError(pair, 'emitter: a constructor cannot await or yield — JavaScript has no async or generator constructors (await in a static factory method instead)', stmt);
+          }
           hasConstructor = true;
           if (isFunc(pair[2])) { ctorParams = pair[2][1]; ctorBody = pair[2][2]; }
         } else if (!isStaticKey(pair[1]) && typeof mName === 'string') {

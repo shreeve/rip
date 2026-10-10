@@ -3,7 +3,7 @@
   "version": "4.0.0",
   "private": true,
   "type": "module",
-  "description": "Declarative host provisioning — no state file, no agent, no YAML",
+  "description": "Declarative host provisioning — no state file, no agent, no YAML.",
   "exports": {
     ".": "./stamp.rip"
   },
