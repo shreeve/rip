@@ -5,7 +5,9 @@ found while preparing [docs/REFERENCE-PLAN.md](docs/REFERENCE-PLAN.md).
 Open work only: delete an entry when its fix lands with a pin, as the
 rules ask (AGENTS.md rule 6). Every entry was reproduced on main
 (2026-10-09, after `97a1db09`) by a probe that ran the compiler or the
-package; entries marked **✔** were re-run independently. Repros are
+package; entries marked **✔** were re-run independently. A full re-verification
+pass on main (2026-10-10, after `d00d26b5`) reproduced every remaining
+entry; changes it found are noted on the entries. Repros are
 inline — run a `.rip` snippet with `bin/rip f.rip`, or compile it with
 `bin/rip -c f.rip` to see the JavaScript.
 
@@ -27,12 +29,6 @@ Contents: [Language core](#language-core) ·
 ## Language core
 
 ### Silent miscompiles
-
-**C31 L — A chained statement postfix if-else rejects with an unrelated message.**
-`return x if a else y if b else z` fails "'return' is not supported in
-expression position"; `r = x if a else y if b else z` chains to
-`a ? x : (b ? y : z)`. The returned-ternary production reduces at the
-first `else` operand.
 
 **C7 M — Class-body `x: 1`, `x: 0`, `x: ""`, `x: []`, `x: {}`, `x: true`, `x: null` silently drop the value.**
 ```coffee
@@ -64,12 +60,33 @@ which pins the bug rather than the correct behavior (rule 6).
 `x =! 1` then `[x] = [2]`, `{x} = o` or `x .= trim()` compile to writes
 to a `const` (caught only by Bun's bundler; a browser fails at runtime).
 `x ~= a + 1` then `[x] = [50]` fails at runtime. Plain, compound and `?=`
-writes reject, positioned.
+writes reject, positioned. Inside a component the same bypass reaches a
+member: `s =! 1` then `[s] = [5]` in a method writes it silently.
 
 **C11 M — An `@`-parameter assignment is placed before a later `super()`.**
 `constructor: (@a) -> v = a * 2; super(v)` in a subclass emits
 `this.a = a` first: runtime ReferenceError. Also with
 `if c then super(1) else super(2)`.
+
+**C33 ✔ H — A collecting loop whose tail `if`/`switch` has a `continue` or `break` arm collects nothing.**
+`r = for a in [5, 1, 7]` / `  if a is 1 then continue else a * 10` gives
+`[]` (expected `[50, 70]`): the emit is `if (a === 1) continue; else
+a * 10;` with no push. `then break else a` gives `[]` for `[5]`; a
+function-tail loop and a statement-`switch` body with a `break` arm do
+the same. The block form (`if a is 1` / `break` then `a`) collects.
+
+**C34 ✔ M — A spaced slash after a name becomes a regex call.**
+`x = w /2 + 1 /g` emits `w(/2 + 1 /g)` (TypeError at runtime when `w` is
+a number); `w /2 + h /2` rejects only because `2` is no regex flag.
+
+**C35 M — `in` on a Set or Map tests a property, not membership.**
+`1 in new Set([1])` is false and `'size' in s` true; the membership
+lowering knows arrays and strings only.
+
+**C36 M — A chained comprehension reads an outer binding instead of rejecting.**
+`(b for a in xs for b in a)` rejects ("chained clauses nest") unless an
+outer `a` exists; with `a = 1` in scope it compiles to `for (let b of a)`
+over the outer `a`.
 
 ### Legal-looking code emits invalid JavaScript
 
@@ -81,7 +98,14 @@ the callback. A top-level `f = -> continue` rejects correctly.
 
 **C14 M — A rest element in the middle of parameters or an object pattern emits invalid JavaScript.**
 `f = (a, ...b, c) -> c` and `{a, ...b, c} = o`. Array-pattern middle rest
-is lowered correctly.
+is lowered correctly in an assignment only: a parameter pattern
+`([a, ...b, c]) ->` and a loop variable `for [a, ...b, c] in xs` pass it
+through and Bun rejects it.
+
+**C37 M — A function-tail `switch` that yields rejects; a tail `if` or `try` does not.**
+The tail switch is always wrapped in an IIFE, so `yield` in an arm
+rejects ("cannot cross the IIFE boundary"); the same body as a tail `if`
+emits a plain `function*`.
 
 ### Legal-looking code rejected, or inconsistent
 
@@ -121,6 +145,16 @@ binds tighter than `=~`, and `toMatchable` stringifies the boolean.
 
 **C28 L — `window?` on an undeclared global throws ReferenceError.** It compiles to `window != null` (documented), unlike CoffeeScript's `typeof` guard.
 
+**C31 L — A chained statement postfix if-else rejects with an unrelated message.**
+`return x if a else y if b else z` fails "'return' is not supported in
+expression position"; `r = x if a else y if b else z` chains to
+`a ? x : (b ? y : z)`. The returned-ternary production reduces at the
+first `else` operand.
+
+**C38 L — Duplicate keys in an object literal and duplicate class methods compile silently.**
+`{a: 1, a: 2}` is `{a: 2}` and the last duplicate method wins, while a
+duplicate name in one pattern rejects.
+
 ### Error messages
 
 **C29 L — The unexpected token appears in its own "expected" list.**
@@ -153,14 +187,18 @@ classes bind `=>` members (`this.fmt = this.fmt.bind(this)`).
 emits no `touch`, so dependents (`count ~= todos.filter …`) and sibling
 text never update. `<=> user.name` does call `touch` (docs/TYPES.md
 says a bind into a chain calls it). Cause: `bindRootTouch`
-(src/emitter.js ~14797) returns null for loop variables.
+(src/emitter.js ~14981) returns null for loop variables. The rejection
+for `input value <=> s` (a bare loop variable) recommends binding "a
+chain into row data" — this broken path.
 
 **T6 M — Hyphenated or quoted event names miscompile.**
 `div @value-changed: go` listens for `value` and calls
 `(this.onValue - {changed: this.go})`; `@'value-changed': go` listens for
-an event literally named `"value-changed"` (quotes included);
-`sl-input @sl-change: go` rejects with an unrelated message. No spelling
-listens for `value-changed`.
+an event literally named `"value-changed"` (quotes included). No spelling
+listens for `value-changed`. **Regressed 2026-10-10:** `sl-input
+@sl-change: go` used to reject (with an unrelated message); since custom
+elements lex as tags (`21ad33e7`) it compiles silently to a listener for
+`sl` calling `this.onSl - {change: this.go}`. Same root as T20.
 
 **T7 H — An effect's last expression is silently registered as its cleanup.**
 ```coffee
@@ -197,9 +235,9 @@ dropped silently. There is no public batch API (packages use `__batch`).
 
 **T16 ✔ L — The `h1 @heading` hint is misleading.** "`@heading` is not a
 DOM event — use `= @heading` to render text…"; written literally as
-`h1 = @heading` it errors again ("render local 'h1' is never read"). The
-working forms are `h1 heading` or `h1` + indented `= @heading`, and no
-message names them. `h1 (@heading)` and `h1 this.heading` get "bare"
+`h1 = @heading` it now says "spell it `h1` + indented `= expr`" (partly
+fixed), but the first hint still leads there instead of naming a working
+form. `h1 (@heading)` and `h1 this.heading` get "bare"
 errors for spellings the user did not write.
 
 **T17 L — Destructuring writes bypass the "silently freezes the render" guard.** `[count] = [5]`, `{count} = {count: 5}`, `Object.assign this, count: 3` compile; `count++` and `this.count = 5` reject.
@@ -207,6 +245,27 @@ errors for spellings the user did not write.
 **T18 L — Reading a member declared below gives a raw runtime TypeError.** `a := b + 1` above `b := 1` fails at construction; doctrine ("a member may read any member written above it") suggests a positioned compile error naming both sites.
 
 **T19 M — Shallow reactivity has no diagnostics, and a new array of the same objects does not refresh rows.** `todos.push …` and `todo.done = true` change data, not DOM; `items = [...items]` after an in-place field write leaves rows stale (`__reconcile` skips `===` items).
+
+**T21 ✔ H — A computed written inside a component compiles.**
+`k := 0; c ~= k + 1; bump: -> c = 5` emits `this.c.value = 5`, a raw
+TypeError when called; `@c = 5`, `c++` and `[c] = [5]` too. At module
+level `c = 5` rejects with "cannot assign to computed 'c'".
+
+**T22 ✔ M — A render local that reads itself shadows the member: `count = count + 1` renders NaN.**
+With `count := 3`, render `count = count + 1` then `p count` emits
+`let count; count = count + 1;` and shows `NaN`.
+
+**T23 M — A bare `count++` in render writes state inside a render effect; `@count++` becomes an event listener.**
+`p` + indented `count++` emits `this._t0.data = this.count.value++` (runs
+on every render); `@count++` emits `addEventListener('count', …
+this.onCount++ …)`. `count += 1` in the same place rejects.
+
+**T24 M — A call or a string as a handler runs at the wrong time or never.**
+`@click: go()` emits `(this.go())(e)` — `go` runs on every click and the
+result is called; `@click: "go()"` emits `("go()")(e)`.
+
+**T25 M — A bare `@click` resolved to an unset callback prop throws on click.**
+With `@onClick := null`, `button @click` emits `(this.onClick.value)(e)`.
 
 ---
 
@@ -237,6 +296,23 @@ $21.4M. `~integer` turns `"9007199254740993"` into `…992` silently;
 
 **S9 L — ORM wording.** `where({firstName: 'A', first_name: 'B'})` silently ANDs both (`create` rejects the conflict); `@ensure "bad", :nope, …` attributes the failure to a nonexistent field; `upsert on: [:email, :firstName]` calls an existing non-unique field "unknown".
 
+**S11 H — A numeric enum gets a VARCHAR column and every loaded row becomes unsaveable.**
+`toSQL()` gives `"status" VARCHAR`; a loaded `'1'` stays a string, and
+`save!` after an unrelated change throws "expected one of: …"
+(reproduced with a recording adapter; confirm on a database).
+
+**S12 M — Assigning a misspelled field and saving saves nothing.**
+`u.firstNmae = 'Grace'; u.save!` issues no SQL and no error; `set!`
+throws. docs/ORM.md describes only the `set!` guard.
+
+**S13 L — Enum fields reject Rip symbols.** `role! Role, [:viewer]` then
+`parse({role: :admin})` → "expected one of: admin, viewer", though the
+default `[:viewer]` becomes `'viewer'` and `read()` accepts symbols.
+
+**S14 L — A range on a named-coercer field is skipped when the coercer's output is not a number.**
+`a! ~:pz2, 1..5` with a coercer returning a non-number passes (S3's class,
+reached through a coercer).
+
 ---
 
 ## Rip Sites
@@ -249,6 +325,15 @@ $21.4M. `~integer` turns `"9007199254740993"` into `…992` silently;
 
 **W11 L — Smaller Sites edges.** A handler returning a bigint, symbol or function sends an empty 204; `error 'x', '404'` and `error 'x', 302` become a masked 500; a JSON string body spreads into read data (`"hello"` → `read('0')` is `'h'`); an `input:` route given an array body loses the reason; `onError` returning a plain object works although the README requires a Response; the README says validators and `registerValidator` are re-exported, and they are not.
 
+**W13 M — `@cache` accepts an overflowing duration and emits broken headers.**
+`@cache '99999999999999 hours'` and `@cache 1e300` send
+`max-age=359999999999996400` / `max-age=1e+300` with `Expires: Invalid
+Date`.
+
+**W14 L — `read()` merges params over query over body, undocumented.**
+`POST /users/7?role=admin` with body `{role: 'user'}` reads `role` as
+`'admin'`; the README says only "merges".
+
 ---
 
 ## Rip App
@@ -260,6 +345,10 @@ $21.4M. `~integer` turns `"9007199254740993"` into `…992` silently;
 **A4 L — Sites' `@cache` parses a different duration dialect than App's `staleTime`.** App's grammar is lowercase and finite (`'5 min'`, `'2h'`); compare the two before an app moves a duration between them.
 
 **A5 L — Keyed sources share one cell between an object key and its JSON text** (`cellFor({a:1})` is `cellFor('{"a":1}')`).
+
+**A6 L — Keyed sources split one key by property order.**
+`cellFor({a:1,b:2})` and `cellFor({b:2,a:1})` are different cells (the
+flip side of A5).
 
 ---
 
@@ -277,7 +366,7 @@ response parses "successfully".
 
 **P11 M — time accepts invalid input silently.** `time.duration('garbage')` → zero; `time.duration(NaN).humanize()` → "a month"; `time(true)` is a valid date; `age('2030-01-01', '2026-01-01')` → -4.
 
-**P12 M — csv accepts bad input and loses data.** `CSV.write 'abc'` writes three lines; `sep: ''`, `mode: 'bogus'` and unknown options are ignored; with `headers: true` an extra field is dropped and duplicate headers collapse; single-column empty rows do not round-trip; the README's `CSV.writer(sep: '\t', excel: true)` passes an option the writer ignores.
+**P12 M — csv accepts bad input and loses data.** `CSV.write 'abc'` writes three lines; `CSV.write [['a','b']], sep: ''` writes `a""b`, which reads back as one field; `sep: ''`, `mode: 'bogus'` and unknown options are ignored; with `headers: true` an extra field is dropped and duplicate headers collapse; single-column empty rows do not round-trip; the README's `CSV.writer(sep: '\t', excel: true)` passes an option the writer ignores.
 
 **P13 M — x12 accepts bad input.** `X12.load!` of an empty file returns the default ISA envelope; `get "EB(0)-1"` → `""`; `set "EB(?)", 5` → null silently; `set "NM1(0)-3", "Q"` throws a raw TypeError (packages/x12/x12.rip ~304).
 
@@ -289,6 +378,24 @@ response parses "successfully".
 
 **P19 L — rip/script ends on an unknown control symbol without error** (`:skp` aborts silently; `trace` accepts `[:bogus]`); the README trace omits the `\r` actually sent.
 
+**P22 ✔ H — QR SVG encoding breaks for good after any `decodeQR` scan.**
+`try decodeQR {width: 50, height: 50, data: …}` then `encodeQR 'hello',
+'svg'` throws "Attempted to assign to readonly property" on every later
+SVG encode: `findRows` (packages/barcodes/qr.rip ~1649) writes `runs = 0`,
+which `=` resolves to the module-level SVG cache `runs` (~729).
+
+**P23 ✔ M — time `set` ignores `:quarter` and `:week`; `get(:week)` is undefined.**
+`time.utc('2024-01-31').set(:quarter, 2)` and `.set(:week, 2)` return the
+date unchanged, though prettyUnit accepts both (an unknown unit throws).
+
+**P24 L — time `set` rolls over where parsing rejects.** `set(:month, 13)`
+on 2024-01-31 gives 2025-02-28; parsing `2024-13-01` is invalid.
+
+**P25 L — rsx `maxBytes` compares UTF-16 length, not bytes.**
+
+**P26 L — validate's `ssn` and `state` check format only.** Area 000/666/9xx,
+group 00 and serial 0000 pass; `state` accepts `ZZ`. Tighten or document.
+
 ---
 
 ## Tooling
@@ -298,6 +405,9 @@ response parses "successfully".
 **X2 L — `rip -e` gives an unpositioned message for incomplete input** ("--eval input is incomplete" versus `1:5: unclosed '('` elsewhere).
 
 **X3 L — An unknown stdlib import from a file says "Cannot find package 'rip'"**; `-e` and the REPL say "Cannot resolve import 'rip/nope'". `if x 1` (missing `then`) errors at 1:1 with a ~60-token expected list.
+
+**X4 L — `rip check emptydir` exits 0.** "no .rip files found" passes CI;
+a missing path exits 2.
 
 ---
 
@@ -310,6 +420,11 @@ response parses "successfully".
 **D4 M — The migration timeout "zero means no limit" claim persists on the Rip side.** src/cli/migrate.js ~107 and docs/ORM.md's `timeoutMs: null` row; Harbor clamps zero to its cap (ECOSYSTEM.md's migration-timeout caution).
 
 **D5 L — packages/sites/README.md describes exact-path rehash and a reload on the next hash.** Lines ~1018–1022, ~1203, ~1290 (the Manager snapshots the whole tree) and ~1074 (feed.rip recovers in place); the watch-time assembly failure's Hub `assembly` message is undocumented (ECOSYSTEM.md's Sites watch cautions).
+
+**D8 L — README code examples escape the style gate.** Prefix `new` in
+packages/x12/README.md and packages/http/README.md, `await Bun.sleep` and
+`throw new Error` in packages/swarm/README.md; package-rip-style.test.js
+reads `.rip` files only.
 
 ---
 
@@ -347,20 +462,13 @@ operators, not spellings.
 
 ## Unconfirmed and design questions
 
-- `(b for a in xs for b in a)` with an outer `a = 1` compiles and reads the outer `a`: correct by nesting, but it misses the Python misreading the chained-comprehension check exists for.
-- At statement level `f a if b else c` evaluates `c` when `b` is false and discards it; it never calls `f`.
-- `x = w /2 + h /2` rejects as an invalid regex flag (inherited from CoffeeScript).
-- `a in someSet` tests a property, not membership — always false for a Set or Map.
-- Duplicate keys in an object literal and duplicate class methods compile silently, while duplicate pattern names reject; should the one-binding rule cover members?
-- `%%` and `//` throw on BigInt operands.
-- `@click: go()` calls `go` on every click and then throws; `@click: "go()"` can never be called and could reject at compile time.
-- Inside components `->` callbacks become arrows (deliberate, src/emitter.js ~17066) but this is not documented for users.
-- A bare `@click` resolved to an unset `@onClick := null` prop throws on click.
-- `read()` merges route params over query over body, so `POST ?role=admin` overrides a body `role`; the precedence is not documented.
-- `u.typo = 1; u.save!` saves nothing silently; only `set!` guards.
-- An enum with numeric values gets a `VARCHAR` column but parses to numbers (needs a database to confirm).
-- validate's `ssn` accepts issuance-impossible numbers (000-, 666-, group 00).
-- rsx `maxBytes` compares UTF-16 length, not bytes.
-- time `set(:month, 13)` rolls over while parsing never does.
-- READMEs use `new X12`, `new URLSearchParams()` and `await Bun.sleep`; the style test covers `.rip` files only.
-- `rip check emptydir` exits 0 with "no .rip files found".
+Re-checked 2026-10-10; confirmed defects were promoted to numbered
+entries above (C34–C36, C38, T24, T25, S11, S12, W14, P24–P26, X4, D8).
+What remains is design, to document or decide:
+
+- At statement level `f a if b else c` is the Python ternary `b ? f(a) :
+  c` (docs/REFERENCE-PLAN.md) — `f` is not called when `b` is false.
+- `%%` and `//` throw on BigInt operands (loudly): document, or lower
+  BigInt-aware.
+- Inside components `->` callbacks become arrows (src/emitter.js ~17288);
+  users learn it only from the generator-arrow error.
