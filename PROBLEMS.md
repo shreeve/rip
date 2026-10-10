@@ -39,11 +39,6 @@ are correct.
 `if (!(b || "c")) x = "a";`, so `x` stays undefined. The `if … else`
 twin compiles to a ternary.
 
-**C6 H — `delete` on a negative index or a slice silently does nothing.**
-`delete a[-1]` emits `delete a.at(-1)`; `delete b[1..2]` emits
-`delete b.slice(1, 3)`. Both return `true` and delete nothing. Assigning
-to `a[-1]` already rejects ("a call is not assignable").
-
 **C7 M — Class-body `x: 1`, `x: 0`, `x: ""`, `x: []`, `x: {}`, `x: true`, `x: null` silently drop the value.**
 ```coffee
 class A

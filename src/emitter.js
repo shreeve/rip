@@ -15719,6 +15719,12 @@ class Emitter {
     if (node[0] === 'delete' && !(isNode(node[1]) && (node[1][0] === '.' || node[1][0] === '[]'))) {
       throw this.positionedError(node, "emitter: delete requires a property reference (delete obj.a / delete obj[k]) — deleting a plain binding is a strict-mode SyntaxError in modules");
     }
+    // A negative-literal index reads through `.at(-n)` and a range
+    // through `.slice()`: both are calls, so `delete` would answer true
+    // and remove nothing.
+    if (node[0] === 'delete' && node[1][0] === '[]' && (isRange(node[1][2]) || Emitter.negativeLiteralKey(node[1][2]))) {
+      throw this.positionedError(node, `emitter: delete cannot target a ${isRange(node[1][2]) ? 'range' : 'negative-literal index'} — it reads through a call (${isRange(node[1][2]) ? '.slice()' : '.at(-n)'}), so nothing would be deleted; use splice or a computed index`);
+    }
     this.mark(node, '$self', () => {
       this.mark(node, 'operator', () => this.b.emit(node[0]));
       // Word operators need the separating space (`typeof x`,
