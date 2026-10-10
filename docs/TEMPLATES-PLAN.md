@@ -3,8 +3,8 @@
 This document plans the cleanup of Rip's template language (the `render`
 block of a component): what it means after the cleanup, which layer owns
 each decision, and the phases that get there. It is a plan, not a
-contract; nothing here is implemented. Status: **proposed** — the
-decisions in [Owner decisions](#owner-decisions) are open.
+contract; nothing here is implemented. Status: **proposed** — owner decisions are recorded in
+[Owner decisions](#owner-decisions); one sub-question is open.
 
 The evidence comes from a review of `main` (2026-10-10, after `d00d26b5`):
 an implementation map of every place that decides what a template token
@@ -85,7 +85,9 @@ binding-guessing block attachment).
 
 | Construct | Meaning |
 |---|---|
-| `tag`, `tag args…` | An element; tags come from `TEMPLATE_TAGS` only |
+| `tag`, `tag args…` | An element: a `TEMPLATE_TAGS` name, or a tight-hyphen custom element (`x-icon`) |
+| `tag.cls.cls2`, `tag#id` | Classes and id; a selector token holds letters, digits, `-`, `_` |
+| `.cls` / `#id` opening a line | An implicit `div` with that class or id |
 | `key: v` | Attribute or property on an element, prop on a component; `null` removes |
 | `aria-*`, `data-*` keys | Joined by `tagCompoundKeys` only |
 | `class:`, `style:` | Unchanged |
@@ -94,6 +96,8 @@ binding-guessing block attachment).
 | A bound word or expression | Text |
 | An unbound plain word | Boolean attribute (element) or prop (component) |
 | `@name: handler` | Listener; the value is a function, called with the event |
+| Bare `@name` | Listener calling `onName` (`@sl-change` calls `onSlChange`) |
+| `innerHTML:` | Raw HTML for trusted content |
 | `key <=> target` | Two-way binding |
 | `ref:` | Element reference |
 | `key:` | Reconcile key on the first element of a `for` body |
@@ -109,21 +113,25 @@ arguments of a template line, positions after `then`/`else` on an
 inline branch.
 
 **Characters.** `-` is subtraction in code; a tight `a-b:` key joins;
-a tight `word-word` in a template position rejects. `@word` is
-`this.word` in code; in a template position only `@word:` is legal.
-`/` is division. `#` is a comment; a tight `#` in render rejects. `.` is
-member access, and a line starting with `.` continues the previous one
-as in code. A bare word means: bound → value, tag → element, PascalCase
-→ component, else attribute; literals are text. `=` opens text at a
+a tight `word-word` in a template position is a custom element; in an
+event position it is part of the event name. `@word` is `this.word` in
+code; in a template position it is a listener (`@word:` explicit, bare
+`@word` calling `onWord`). `/` is division. `#` is an id tight after a
+tag or selector chain or opening a line; anywhere else a comment. `.` is
+a class tight after a tag or opening a line; anywhere else member
+access. A bare word means: bound → value, tag → element, uppercase
+initial → component, else attribute; literals are text. `=` opens text at a
 line head and declares a render local as `name =`. `:` separates a key;
 on a native element a function value for a non-`@` key or an `on*:` key
 rejects. `->` is always a function; as a template argument it rejects.
 `~` rejects in a template position.
 
-**Removed, each rejecting positioned with the explicit form:** `.card`,
-`.`, `. role:` lines; `.(…)`; `tag.cls` (decision 1); `#id` and
-`tag#id`; bare `@click`; event modifiers; tight hyphenated event names;
-custom elements; `tag ->`; `~fade`; `innerHTML:` (decision 9).
+**Removed, each rejecting positioned with the explicit form** (all have
+zero real uses): the bare `.` and `. role:` lines (write `div`);
+`.(…)` dynamic classes (write `class: [...]`); event modifiers; `tag ->`
+children arrows (an indented block is the children); `~fade`
+transitions. Selector classes that need `/`, `:` or `[` reject, pointing
+at `class: '…'`.
 
 ## Ownership
 
@@ -146,39 +154,54 @@ regeneration where it changes the surface.
 | Phase | Scope | Output change | Risk |
 |---|---|---|---|
 | P0 Safety nets | Byte pins for every heavily used construct; an identity scan (JS and typed face) over the repo and medlabs, with a recorded baseline; re-run every review probe | None | None |
-| P1 Remove token sugar | `~x`, `.(…)`, `.cls`/`.`/`. k:` lines, bare `@ev`, `tag ->`, `innerHTML:` | Corpus regions rewritten to explicit forms, enumerated | Low–medium |
-| P2 Render-agnostic scanner | Remove `#id`, custom elements, `else-x`, `tag.cls`; restore `.` continuation; tight-`#` rejection moves to the gate | Sites demos and corpus, enumerated | Medium |
+| P1 Remove unused sugar | `~x`, `.(…)`, bare `.`/`. k:` lines, `tag ->`, event modifiers | Corpus regions rewritten to explicit forms, enumerated | Low–medium |
+| P2 Render-agnostic scanner | Selector (`tag.cls`, `#id`), custom-element and event-name runs become one gate-owned token kind; `else-x` and the lexer render state go; `.` continuation restored in code | Corpus, enumerated | Medium |
 | P3 One template gate | One region, code/template classification, all position rejections | None in the scan | Medium–high |
 | P4 Binding-free block attachment | The block always belongs to the line head; delete `readsAsValue` | None in the scan | **High** — cold review before merge |
 | P5 Grammar homes | `= expr` and `<=>` productions; the sentinels leave the user namespace | Typed face and mapping, enumerated | Medium–high |
 | P6 One word classifier | Merge the four emitter paths; void elements, `Component.lower`, literal lines, `on*:` keys, write guards, `ref:` in `for` | None in the scan | Medium |
-| P7 Events and bindings | Quoted event names, DOM-event case check, handler literals, `<=>` into loop-row fields notifies | Enumerated | Low–medium |
+| P7 Events, bindings, text | Hyphenated event names and `onX` minting, DOM-event case check, literal handlers reject, `<=>` into loop-row fields notifies, `null`/`undefined` render as `""` (text slots and template interpolation) | Enumerated (text slots and interpolation change bytes) | Medium |
 | P8 Reference and certification | The template chapter of the reference; close PROBLEMS.md entries; full gates; cold review | — | — |
 
 Out of scope: reactivity semantics (T7, T8, T19), component method
-binding (T4), member initialization order (T18), null text (T13).
+binding (T4), member initialization order (T18).
 
 ## Owner decisions
 
-1. **`tag.class` selectors** (20 lines, sites demos). Recommend remove:
-   `.` gets one meaning and the Tailwind-shaped miscompiles go.
-2. **`#id` / `tag#id`** (zero uses). Recommend remove; `#` is always a
-   comment, and a tight `#` in render rejects.
-3. **`= expr`**. Recommend keep, as the one explicit text form.
-4. **Bare `@ev`** (zero uses). Recommend remove.
-5. **Handler semantics for `@x: f()`**. Recommend keep "the value is a
-   function expression called with the event" (a tui test relies on it)
-   and reject string and number handlers.
-6. **Hyphenated custom events**. Recommend one spelling,
-   `@'value-changed':` with the quotes stripped; camelCase events stay.
-7. **Component-name rule**. Recommend an uppercase initial means a
-   component, ALLCAPS included.
-8. **A render local shadowing a member** (`count = 5`). Recommend
-   reject.
-9. **`innerHTML:`** (zero uses; an XSS sink). Recommend remove.
-10. **Null text (T13)**. Recommend defer.
-11. **Custom elements** (zero uses). Recommend remove until an explicit
-    form is designed.
+Decided with the owner on 2026-10-10; the specification and phases above
+reflect them.
+
+1. **`tag.class` selectors stay** and are fixed: a selector is one token,
+   tight after a tag, holding letters, digits, `-` and `_` (`div.p-4`,
+   `div.col-span-2` work). A class that needs `/`, `:` or `[`
+   (`w-1/2`, `hover:bg-red`, `w-[10px]`) rejects, positioned, pointing at
+   `class: '…'`.
+2. **`#id` stays**: tight after a tag or selector chain, or opening a
+   line (`#main`). `#` anywhere else is a comment.
+3. **`= expr` stays** as the explicit text form.
+4. **Bare `@foo` stays** and calls `onFoo`. In an event position the name
+   runs through tight hyphens: `@sl-change` listens for `sl-change` and
+   calls `onSlChange`; `@sl-change: go` calls `go`. A spaced `@x - y` in
+   an event position rejects. *Open: whether bare `@name` accepts custom
+   (non-DOM) event names such as `@escape`.*
+5. **Handler values keep their meaning** — a function value called with
+   the event (`@keydown: note('outer')` stays legal). Literal handlers
+   (`@click: "go()"`, `@click: 5`, `@click: null`) reject.
+6. **Hyphenated event names work unquoted** (see 4); event names are
+   checked against the DOM event list case-insensitively, so
+   `@dblClick` rejects with "did you mean `@dblclick`".
+7. **An uppercase first letter means a component**, all-caps included
+   (`QR`, `URL`); no HTML or SVG tag starts uppercase.
+8. **A render local that reuses a member's name rejects**, positioned.
+9. **`innerHTML:` stays**, documented as a raw-HTML sink for trusted
+   content.
+10. **`null` and `undefined` never render as text.** Every template text
+    form (bare argument, own-line expression, `= expr`) renders them as
+    `""`, and so does a string interpolation inside a template
+    (`p "Hello #{nick}"` shows `Hello `). Strings outside templates are
+    unchanged; every other value renders as `String(value)`.
+11. **Custom elements stay**: a tight-hyphen word in a template position
+    is an element; in code it is subtraction. One gate decides which.
 
 ## Verification
 
