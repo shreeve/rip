@@ -86,13 +86,6 @@ the callback. A top-level `f = -> continue` rejects correctly.
 `f = (a, ...b, c) -> c` and `{a, ...b, c} = o`. Array-pattern middle rest
 is lowered correctly.
 
-**C15 M — An await (or yield) in a constructor emits `async constructor()` (or `*constructor()`).** Getters and setters reject the same case, positioned.
-
-**C16 ✔ M — Duplicate constructors compile; the JavaScript fails at load.**
-A class with two `constructor: ->` members compiles with exit 0 and
-`rip check` reports nothing; Bun then throws "Cannot declare multiple
-constructors".
-
 ### Legal-looking code rejected, or inconsistent
 
 **C17 ✔ M — Inline `try` with a paren-less call before `catch`/`finally` fails to parse.**

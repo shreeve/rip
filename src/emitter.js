@@ -16427,6 +16427,12 @@ class Emitter {
         // A STATIC member named `constructor` is an ordinary static
         // method; only the instance one is the class constructor.
         if (mName === 'constructor' && !isStaticKey(pair[1])) {
+          if (hasConstructor) {
+            throw this.positionedError(pair, 'emitter: a class has one constructor — JavaScript refuses a second at load', stmt);
+          }
+          if (isFunc(pair[2]) && (this.containsAwait(pair[2][2]) || Emitter.containsYield(pair[2][2]))) {
+            throw this.positionedError(pair, 'emitter: a constructor cannot await or yield — JavaScript has no async or generator constructors (await in a static factory method instead)', stmt);
+          }
           hasConstructor = true;
           if (isFunc(pair[2])) { ctorParams = pair[2][1]; ctorBody = pair[2][2]; }
         } else if (!isStaticKey(pair[1]) && typeof mName === 'string') {

@@ -632,3 +632,9 @@ test 'a conditional heritage extends the chosen class', '''
 ''', 'b'
 fail 'a parameter default cannot await in a class heritage', 'g = (a = class extends (f!)) -> a', 'a parameter cannot await or yield'
 
+# A class has one constructor; JavaScript refuses a second at load.
+fail "a second constructor rejects", "class A\n  constructor: -> @a = 1\n  constructor: -> @a = 2", "a class has one constructor"
+test "a static member named constructor is not the constructor", "class A\n  constructor: -> @a = 1\n  @constructor: -> 'static'\n[(new A).a, A.constructor()]", [1, "static"]
+fail "a constructor that awaits rejects", "class A\n  constructor: -> @x = f!()", "a constructor cannot await or yield"
+fail "a constructor that yields rejects", "class A\n  constructor: ->\n    yield 1", "a constructor cannot await or yield"
+test "a constructor may build an async function that awaits", "class A\n  constructor: -> @load = -> f!()\ntypeof (new A).load", "function"
