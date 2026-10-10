@@ -122,19 +122,30 @@ if args.includes('-h') or args.includes('--help')
     """
   process.exit(0)
 
+# One pass: every argument is a known flag, `-x` with its value, or a
+# path. An unknown option rejects rather than reading as nothing.
+FLAGS =! Set.new ['-d', '--dark', '-b', '--bypass']
+excludeExts = Set.new()
+paths = []
+i = 0
+while i < args.length
+  arg = args[i]
+  if arg is '-x'
+    value = args[i + 1]
+    unless value? and not value.startsWith('-')
+      console.error "rip-print: -x needs a comma list of extensions (rip-print -x lock,map src/)"
+      process.exit(1)
+    excludeExts.add ext.toLowerCase().replace(/^\./, '') for ext in value.split(',') when ext
+    i += 2
+    continue
+  if arg.startsWith('-') and not FLAGS.has(arg)
+    console.error "rip-print: unknown option '#{arg}' (rip-print -h lists them)"
+    process.exit(1)
+  paths.push arg unless FLAGS.has(arg)
+  i++
+
 dark   = args.includes('-d') or args.includes('--dark')
 bypass = args.includes('-b') or args.includes('--bypass')
-
-# Extract -x excludes
-excludeExts = Set.new()
-for arg, i in args
-  if arg is '-x' and args[i + 1]
-    for ext in args[i + 1].split(',')
-      excludeExts.add ext.toLowerCase().replace(/^\./, '')
-
-# Filter out flags, get paths
-xIdx = args.indexOf('-x')
-paths = args.filter (a, i) -> not a.startsWith('-') and (xIdx < 0 or i isnt xIdx + 1)
 paths = ['.'] if paths.length is 0
 
 # Default exclusions (binary, generated, etc.)
@@ -145,11 +156,18 @@ defaultExclude = Set.new [
   'gem', 'gz', 'zip', 'tar', 'br',
   'lock', 'db', 'sqlite3', 'sqlite',
   'map', 'min.js', 'min.css',
-  'vsix', 'DS_Store'
+  'vsix', 'ds_store'
 ]
 
 for ext in excludeExts
   defaultExclude.add ext
+
+# An exclusion names a whole suffix, so `min.js` matches `app.min.js`
+# (the last dot segment alone would read `js`).
+excludedSuffixes = [...defaultExclude].map (ext) -> ".#{ext}"
+excluded = (entry) ->
+  name = entry.toLowerCase()
+  excludedSuffixes.some (suffix) -> name.endsWith(suffix)
 
 # ==============================================================================
 # File discovery
@@ -173,8 +191,7 @@ def walkDir(dir, base = dir)
       continue if entry.startsWith('.') or skipDirs.has(entry)
       files = files.concat walkDir(full, base)
     else if stat.isFile()
-      ext = entry.split('.').pop()?.toLowerCase() or ''
-      continue if defaultExclude.has(ext)
+      continue if excluded(entry)
       continue if entry.startsWith('.')
       files.push relative(base, full) or full
   files.sort()

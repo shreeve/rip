@@ -317,8 +317,6 @@ response parses "successfully".
 
 **P13 M — x12 accepts bad input.** `X12.load!` of an empty file returns the default ISA envelope; `get "EB(0)-1"` → `""`; `set "EB(?)", 5` → null silently; `set "NM1(0)-3", "Q"` throws a raw TypeError (packages/x12/x12.rip ~304).
 
-**P14 M — rip-print's `min.js`/`min.css` exclusions never match.** The extension is the last dot segment, so `src/app.min.js` prints and `-x min.js` does not exclude it; unknown flags (`--darkk`) and `-x` without a value are ignored.
-
 **P15 M — rsx's rejections and mixed content disagree with its README.** The mismatched-close-tag and non-string errors carry no offset; `parse '</a>'` says "expected </>, got </a>"; `<p>hi <b>there</b> you</p>` drops the text though `textKey` is described as the mixed-content key.
 
 **P16 L — Barcode encoders ignore unknown options and disagree on errors.** `hieght:`, `colums:`, `eccc:` are accepted (rip/pdf rejects unknown keys); a QR miss throws `"finder"` while the others say "not found"; `encodeQR ''` encodes while Code 128 and PDF417 reject empty text.

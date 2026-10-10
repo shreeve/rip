@@ -301,6 +301,31 @@ test! "-x adds extensions to the exclusion set", ->
   ok not stdout.includes('util.js')
   ok not stdout.includes('page.html')
 
+test! "a minified file is excluded by its whole suffix, by default and by -x", ->
+  dir = scratch()
+  write dir, 'app.rip', ['x = 1']
+  write dir, 'app.min.js', ['x=1']
+  write dir, 'site.min.css', ['a{}']
+  write dir, 'app.gen.ts', ['let x = 1']
+  { stdout } = serve! ['.'], dir
+  ok stdout.includes('2 files\n'), stdout
+  ok not stdout.includes('app.min.js')
+  { stdout } = serve! ['-x', 'gen.ts', '.'], dir
+  ok stdout.includes('1 file\n'), stdout
+  ok not stdout.includes('app.gen.ts')
+
+test "an unknown option or a bare -x rejects", ->
+  r = run ['--darkk', '.']
+  eq r.status, 1
+  ok r.stderr.includes("unknown option '--darkk'"), r.stderr
+  r = run ['.', '-x']
+  eq r.status, 1
+  ok r.stderr.includes('-x needs'), r.stderr
+
+test! "-x may repeat; each value is an exclusion, never a path", ->
+  { stdout } = serve! ['-x', 'js', '-x', 'html', '.']
+  ok stdout.includes('2 files\n'), stdout
+
 test! "unknown extensions fall back to plaintext", ->
   dir = scratch()
   write dir, 'data.xyzzy', 'plain text\n'
