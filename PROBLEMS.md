@@ -319,12 +319,6 @@ $21.4M. `~integer` turns `"9007199254740993"` into `…992` silently;
 
 ## Rip Sites
 
-**W3 ✔ H — `read 'qty', [1, 99]` returns non-numeric strings.**
-`?qty=lots` → `"lots"`, `5.5` → `"5.5"`, `1e3` → `"1e3"`; `{min, max}`
-behaves the same. A non-integer falls back to a string-length check
-(site.rip ~1080). The README calls it a "numeric range"; the type pin
-says `number | null`.
-
 **W4 M — `read()` with a misspelled validator name.** `read 'email',
 'emial'` → `null` with 200; `'emial!'` → 400 "Missing required field";
 `'emial?'` → 422. `check()` in rip/validate throws "unknown validator".

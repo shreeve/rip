@@ -1088,21 +1088,14 @@ export read: ReadFn = (name?: string, type?: string | symbol | RegExp | any[] | 
     s = String(v ?? '')
     v = s.match(type)?[0] or null
 
-  # Array: [min, max] constraint or enumeration
+  # Array: [min, max] numeric range or enumeration. A range answers a
+  # number or null — never the string it was given.
   else if Array.isArray(type)
     s = String(v ?? '')
-    y: boolean = true
     if typeof type[0] is 'number'
       [min, max] = type
-      if typeof v is 'number' or (s =~ /^[-+]?\d+$/)
-        n = if typeof v is 'number' then v else +s
-        y = false if min? and n < min
-        y = false if max? and n > max
-        v = if y then n else null
-      else
-        y = false if min? and s.length < min
-        y = false if max? and s.length > max
-        v = if y then s else null
+      n = if typeof v is 'number' then v else if s =~ /^[-+]?\d+$/ then +s else NaN
+      v = if Number.isFinite(n) and not (min? and n < min) and not (max? and n > max) then n else null
     else
       v = if type.includes(s) then s else null
 

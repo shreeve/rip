@@ -421,6 +421,22 @@ test 'error envelopes expose client details and mask server details', ->
     status: 400
     body: { error: 'invalid input', code: 'invalid_field', fields: { email: 'email is required' } }
 
+test! 'read with a numeric range answers a number in range or null', ->
+  resetGlobals()
+  get '/qty' -> { qty: read('qty', [1, 99]) }
+  post '/qty' -> { qty: read('qty', [1, 99]) }
+  ask = (q) -> (handle! request('GET', "/qty?qty=#{q}")).json!.qty
+  eq ask!('5'), 5
+  eq ask!('+7'), 7
+  eq ask!('0'), null
+  eq ask!('100'), null
+  eq ask!('lots'), null
+  eq ask!('5.5'), null
+  eq ask!('1e3'), null
+  eq ask!('ab'), null
+  eq (handle! jsonRequest('POST', '/qty', { qty: 42 })).json!.qty, 42
+  eq (handle! jsonRequest('POST', '/qty', { qty: 'xx' })).json!.qty, null
+
 test! 'read merges body, query, and path with request-local context', ->
   resetGlobals()
   post '/orders/:id' ->
