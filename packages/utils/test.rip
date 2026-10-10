@@ -159,6 +159,17 @@ test! "CLI key=val interpolates dollar-brace and hash-brace forms", ->
   eq body.headers.authorization, 'Bearer secret'
   eq body.headers['x-alt'], 'secret'
 
+test! "a bare URL with a query string is the request, not a variable", ->
+  r = run! ["#{base}/echo?page=2"]
+  eq r.status, 0
+  body = JSON.parse(r.stdout)
+  eq [body.method, body.path], ['GET', '/echo']
+  r2 = run! ['token=abc', "#{base}/echo?x=" + '${token}']
+  eq r2.status, 0
+  eq JSON.parse(r2.stdout).method, 'GET'
+  r3 = run! ['msg=hello world', "GET #{base}/echo\nX: " + '${msg}']
+  eq JSON.parse(r3.stdout).headers.x, 'hello world'
+
 test! "CLI wins over .auth, .auth wins over .env, .env wins over process.env", ->
   dir = fresh()
   writeFileSync join(dir, '.auth'), "token=from-auth\nother=auth-only\n"

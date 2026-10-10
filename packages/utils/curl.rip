@@ -66,14 +66,17 @@ load = (path) ->
     obj[line.slice(0, eq)] = line.slice(eq + 1) if eq > 0
   obj
 
-# Parse args: key=value pairs are vars, non-key=val arg is the payload
+# Parse args: key=value pairs are vars, any other arg is the payload. A
+# URL or request line carries `=` in its query string, but what precedes
+# that `=` holds `:`, `/`, `?` or whitespace, which no variable name does;
+# a variable's value may hold anything.
 cli = {}
 payload = null
 
 for arg in args
   continue if arg in ['-v', '--version', '-h', '--help']
   eq = arg.indexOf('=')
-  if eq > 0
+  if eq > 0 and not /[\s:\/?]/.test(arg.slice(0, eq))
     cli[arg.slice(0, eq)] = arg.slice(eq + 1)
   else
     payload = arg
