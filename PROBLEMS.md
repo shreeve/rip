@@ -39,13 +39,6 @@ are correct.
 `if (!(b || "c")) x = "a";`, so `x` stays undefined. The `if … else`
 twin compiles to a ternary.
 
-**C5 H — `then … else` groups to the right although both are declared one left-associative level.**
-`y = 0 then log.push("then") else log.push("else")` emits
-`(y = 0) && (log.push("then") || log.push("else"))`; nothing is pushed.
-Expected `((y = 0) && …) || log.push("else")`. The reverse order
-(`y = a else b then c`) is left-associative. Cause: the ELSE lookahead
-sits at the higher `IF ELSE` precedence level in grammar.rip.
-
 **C6 H — `delete` on a negative index or a slice silently does nothing.**
 `delete a[-1]` emits `delete a.at(-1)`; `delete b[1..2]` emits
 `delete b.slice(1, 3)`. Both return `true` and delete nothing. Assigning

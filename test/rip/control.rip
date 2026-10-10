@@ -73,6 +73,34 @@ code "if-else stays inside implicit call", "f if a then b else c", "f(a ? b : c)
 
 test "postfix if else stays the ternary", "x = 0 if false else 2\nx", 2
 
+# `then` and `else` are one left-associative level: a chain groups from
+# the left in either order, so `else` sees the whole `then` before it.
+test "then else chain groups left", '''
+  log = []
+  y = 0 then log.push("then") else log.push("else")
+  z = 1 then false else log.push("fallback")
+  [y, z, log]
+''', [0, 1, ["else", "fallback"]]
+
+code "then else chain groups left", "a then b else c", "(a && b) || c;"
+code "then then else chain groups left", "a then b then c else d", "(a && b && c) || d;"
+code "else then chain groups left", "a else b then c", "(a || b) && c;"
+code "then else then chain groups left", "a then b else c then d", "((a && b) || c) && d;"
+test "then else continue groups left", '''
+  out = []
+  for x in [0, 1, 2]
+    x then x > 1 else continue
+    out.push x
+  out
+''', [2]
+
+code "then else return groups left", "f = (x) ->\n  x then g() else return 1\n  2", '''
+  let f = function(x) {
+    if (!(x && g())) return 1;
+    return 2;
+  };
+'''
+
 # Loose then/else guards: same rewrite as `and return` / `or continue`
 code "then return assignment lowers to an if-guard", "f = (x) ->\n  y = x then return 22\n  y", '''
   let f = function(x) {
