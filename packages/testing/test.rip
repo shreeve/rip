@@ -93,7 +93,29 @@ test "a custom message rides the throw", ->
 
 # ==[ throws ]==
 
+test "eq compares Dates, Maps and Sets by content", ->
+  eq Date.new(5), Date.new(5)
+  throws (-> eq(Date.new(0), Date.new(1))), 'expected'
+  throws (-> eq(Date.new(0), {})), 'expected'
+  eq Map.new([[1, {a: 2}]]), Map.new([[1, {a: 2}]])
+  throws (-> eq(Map.new([[1, 2]]), Map.new([[1, 3]]))), 'expected'
+  throws (-> eq(Map.new([[1, 2]]), Map.new([[2, 2]]))), 'expected'
+  eq Set.new([1, {b: 1}]), Set.new([{b: 1}, 1])
+  throws (-> eq(Set.new([1]), Set.new([2]))), 'expected'
+  throws (-> eq(Set.new([1, 2]), [1, 2])), 'expected'
+
+test "eq treats NaN as equal to NaN", ->
+  eq NaN, NaN
+  eq [NaN], [NaN]
+  throws (-> eq(NaN, 0)), 'expected 0'
+
+test "an eq failure whose sides print alike shows both distinctly", ->
+  throws (-> eq({a: undefined}, {})), 'expected {}, got { a: undefined }'
+
 console.log "\nthrows"
+
+test "throws rejects a target that is not a function", ->
+  throws (-> throws(42)), TypeError, 'expects a function'
 
 test "passes when the body throws, throws when it does not", ->
   throws -> raise 'x'

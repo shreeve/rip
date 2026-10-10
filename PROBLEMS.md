@@ -301,13 +301,6 @@ $21.4M. `~integer` turns `"9007199254740993"` into `…992` silently;
 
 ## Standard packages
 
-**P4 H — testing `eq` passes on different Dates, Maps and Sets.**
-`eq new Date(0), new Date(1)`, `eq new Map([[1,2]]), new Map([[1,3]])`,
-`eq new Set([1]), new Set([2])` all pass (`deepEq` compares own
-enumerable keys). Also `throws 42` passes; `eq NaN, NaN` fails with
-"expected null, got null"; `eq {a: undefined}, {}` fails with "expected
-{}, got {}".
-
 **P5 H — rsx parses truncated or ill-formed XML without error.**
 `parse '<a><b>text'` → `{"a":{"b":{}}}`; `'<a>1 < 2</a>'` makes an
 element named `"2<"`; two roots, trailing junk, `'hello'` and `''` are

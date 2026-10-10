@@ -6,12 +6,9 @@
 #   test "does the thing", ->
 #     eq CSV.read("a,b\n"), [['a','b']]
 #
-# The tally prints automatically when the process exits. A failed case
-# sets process.exitCode so CI sees a non-zero status.
-#
-# Keep this file tiny. Package tests should read like Rip, not like a
-# framework. The language battery keeps its own harness
-# (test/support/testing.js): test/code/fail/type over compiler snippets.
+# The tally prints at exit; a failed case sets process.exitCode for CI.
+# Keep this file tiny: package tests read like Rip, not a framework. The
+# language battery has its own harness (test/support/testing.js).
 # ==============================================================================
 
 RESET =! "\x1b[0m"
@@ -20,9 +17,8 @@ GREEN =! "\x1b[32m"
 RED   =! "\x1b[31m"
 DIM   =! "\x1b[2m"
 
-# Chrome paint only — never wrap values under test. Bun.enableANSIColors
-# is the single gate (TTY / NO_COLOR / FORCE_COLOR / CI). test:all gives
-# lanes a PTY so this is true there without FORCE_COLOR.
+# Chrome paint only, never values under test. Bun.enableANSIColors is the
+# one gate (TTY/NO_COLOR/FORCE_COLOR/CI); test:all lanes get a PTY.
 useColor =! !!Bun.enableANSIColors
 
 paint = (code, text) ->
@@ -55,12 +51,18 @@ export def test(name, fn)
     process.exitCode = 1
     console.log "  #{paint(RED, '✗')} #{name}: #{e.message}"
 
-# Structural deep equality: arrays ordered, object keys unordered,
-# scalars by identity. Not for BigInt/Map/cycles.
+# Structural deep equality: arrays ordered, object keys unordered, NaN is
+# NaN; Date, Map, Set (content off own keys) by content. No cycles.
 deepEq = (a, b) ->
-  return true if a is b
-  return false unless a? and b?
-  return false if typeof a isnt typeof b
+  return true if a is b or (Number.isNaN(a) and Number.isNaN(b))
+  return false unless a? and b? and typeof a is typeof b
+  for T in [Date, Map, Set] when a instanceof T or b instanceof T
+    return false unless a instanceof T and b instanceof T
+    return Object.is(a.getTime(), b.getTime()) if T is Date
+    return false unless a.size is b.size
+    return [...a].every(([k, v]) -> b.has(k) and deepEq(v, b.get(k))) if T is Map
+    rest = [...b]
+    return [...a].every (v) -> (i = rest.findIndex (w) -> deepEq(v, w)) >= 0 and rest.splice(i, 1)
   if Array.isArray(a)
     return false unless Array.isArray(b) and a.length is b.length
     for v, i in a
@@ -75,13 +77,14 @@ deepEq = (a, b) ->
     return true
   false
 
-# The message is CONTEXT, not a replacement — most often a failed
-# subprocess's stderr, which is the whole diagnosis. `ok` takes one, so
-# callers already pass one here (test/janus, packages/tray); it was being
-# accepted and silently dropped.
+# The message is CONTEXT beside expected/got, never a replacement — most
+# often a failed subprocess's stderr, which is the whole diagnosis.
 export def eq(a, b, message = null)
   unless deepEq(a, b)
-    detail = "expected #{JSON.stringify(b)}, got #{JSON.stringify(a)}"
+    [want, got] = [JSON.stringify(b), JSON.stringify(a)]
+    # JSON hides undefined, NaN and Map/Set content; say what differs
+    [want, got] = [Bun.inspect(b, compact: true), Bun.inspect(a, compact: true)] if want is got
+    detail = "expected #{want}, got #{got}"
     throw Error.new(if message? then "#{detail}: #{message}" else detail)
 
 export def ok(cond, message = 'assertion failed')
@@ -90,6 +93,7 @@ export def ok(cond, message = 'assertion failed')
 # `expected` refines the assertion: an Error class checks instanceof,
 # a string checks message containment, and both can be given in order.
 export def throws(fn, ...expected)
+  throw TypeError.new("throws expects a function, got #{typeof fn}") unless typeof fn is 'function'
   caught = null
   threw  = false
   try
