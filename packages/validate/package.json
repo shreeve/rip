@@ -3,7 +3,7 @@
   "version": "4.0.0",
   "private": true,
   "type": "module",
-  "description": "The validation and normalization vocabulary — 37 pure US-English normalizers, one registry, doubling as ~:name schema coercers",
+  "description": "The validation and normalization vocabulary — 38 pure US-English normalizers, one registry, doubling as ~:name schema coercers",
   "rip": {
     "browser": true
   },

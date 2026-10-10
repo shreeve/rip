@@ -385,17 +385,11 @@ and exits 1 (`eq = arg.indexOf('=')`).
 
 **D1 ✔ M — AGENTS.md rule 9 says a `main` ruleset requires the `test` and `browser` jobs; none exists.** `gh api repos/shreeve/rip/rulesets` → `[]`; branch protection → "Branch not protected". Nothing blocks merging a red PR, and GitHub refuses auto-merge for want of a required check.
 
-**D2 M — HANDOFF.md states two stale facts.** "`yield*` is spelled `(yield)*`" — `yield* g()` works and `(yield)* g()` compiles to multiplication; "A tail `try` wraps in an IIFE" — a function-tail `try` emits a plain try/return.
+**D3 M — packages/db still documents the retired Harbor extension.** README lines ~43–45 and ~153 and `example.rip` line 6 use `INSTALL`/`harbor_serve`; "Mental model" says Harbor runs inside DuckDB (ECOSYSTEM.md's Harbor caution, still true).
 
-**D3 M — packages/db still documents the retired Harbor extension.** README lines ~43–45 and ~153 and `example.rip` line 6 use `INSTALL`/`harbor_serve`; "Mental model" says Harbor runs inside DuckDB (ECOSYSTEM.md caution 1, still true).
+**D4 M — The migration timeout "zero means no limit" claim persists on the Rip side.** src/cli/migrate.js ~107 and docs/ORM.md's `timeoutMs: null` row; Harbor clamps zero to its cap (ECOSYSTEM.md's migration-timeout caution).
 
-**D4 M — The migration timeout "zero means no limit" claim persists on the Rip side.** src/cli/migrate.js ~107 and docs/ORM.md's `timeoutMs: null` row; Harbor clamps zero to its cap (ECOSYSTEM.md caution 4).
-
-**D5 L — packages/sites/README.md describes exact-path rehash and a reload on the next hash.** Lines ~1018–1022, ~1203, ~1290 (the Manager snapshots the whole tree) and ~1074 (feed.rip recovers in place); the watch-time assembly failure's Hub `assembly` message is undocumented (ECOSYSTEM.md cautions 5–7).
-
-**D6 L — ECOSYSTEM.md's own caution list is partly stale.** Cautions 2 (example.rip's `query` import), 3 (DECIMAL as floats) and 8 (always boot a fresh pool) are fixed; caution 6 no longer matches `refreshApp`.
-
-**D7 L — validate says 37 validators; there are 38** (README lines 5, 43, 58, 116 and package.json; `validatorNames().length` and the tests say 38).
+**D5 L — packages/sites/README.md describes exact-path rehash and a reload on the next hash.** Lines ~1018–1022, ~1203, ~1290 (the Manager snapshots the whole tree) and ~1074 (feed.rip recovers in place); the watch-time assembly failure's Hub `assembly` message is undocumented (ECOSYSTEM.md's Sites watch cautions).
 
 ---
 

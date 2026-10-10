@@ -2,7 +2,7 @@
 
 # Rip Validate
 
-> **The validation and normalization vocabulary — 37 pure US-English normalizers, one registry, doubling as ~:name schema coercers.**
+> **The validation and normalization vocabulary — 38 pure US-English normalizers, one registry, doubling as ~:name schema coercers.**
 
 One registry of pure, synchronous normalizers: every validator takes a
 value and returns its normalized form, or `null` on miss. The functions
@@ -40,7 +40,7 @@ registerValidator 'even', (v) ->
 
 ## Features
 
-- **37 built-in normalizers** across numbers, money, strings,
+- **38 built-in normalizers** across numbers, money, strings,
   names/addresses, dates, booleans, identity, network, and structured
   data
 - **Calendar-true dates** — pure calendar math with leap years; an
@@ -55,7 +55,7 @@ registerValidator 'even', (v) ->
 - **Raw set** — `array` / `hash` / `json` receive values untouched;
   everything else gets the string form
 
-## The vocabulary (37 names)
+## The vocabulary (38 names)
 
 | Family | Names |
 |---|---|
@@ -113,7 +113,7 @@ a name.
 bun run test
 ```
 
-The suite pins all 37 validators row by row (191 contracts), the
+The suite pins all 38 validators row by row (191 contracts), the
 registry's rejection paths, the utility functions, and the schema
 bridge — including fresh-process registration and collision loudness as
 real subprocesses.
