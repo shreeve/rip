@@ -28,13 +28,6 @@ Contents: [Language core](#language-core) ·
 
 ### Silent miscompiles
 
-**C2 ✔ H — Membership `in` drops the parentheses around a low-precedence left operand.**
-`p((k or d) in b)` with `k = "x"; d = "y"; b = {y: 1}` prints `x`: it
-emits `(k || d in b)`. Also `(a == c) in b` → `a === (c in b)` and
-`a? in b` → `a != null in b`. The `of` form is correct. Cause: the inline
-branch at src/emitter.js ~17425 uses `this.expr(a)` instead of
-`this.operand(...)`.
-
 **C3 ✔ H — `return X if C else Y` compiles to `if (C || Y) return X`.**
 `f = (b) -> return "yes" if b else "no"` returns `"yes"` for both `true`
 and `false`. The loose `else` (low-precedence or) is applied instead of

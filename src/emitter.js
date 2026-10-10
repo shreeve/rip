@@ -17432,7 +17432,12 @@ class Emitter {
         this.b.emit('.includes(');
         this.mark(node, 'left', () => this.expr(a));
         this.b.emit(') : (');
+        // The includes() slot is an argument; this one is an operand
+        // of JavaScript's `in`, so a lower-precedence left side groups.
+        const wrap = Emitter.needsGrouping(a, 'operand');
+        if (wrap) this.b.emit('(');
         this.expr(a);
+        if (wrap) this.b.emit(')');
         this.b.emit(' in ');
         this.mark(node, 'right', () => this.expr(b));
         this.b.emit(')');
