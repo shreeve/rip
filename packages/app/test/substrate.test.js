@@ -652,3 +652,15 @@ describe('staleTime durations', () => {
     rejects(NaN);
   });
 });
+
+describe('stash source keys', () => {
+  test('deleting a source key rejects, through del() and delete alike, and the source survives reset', () => {
+    const stash = createStash({ user: source({ fetch: async () => ({ name: 'live' }) }), plain: 1 });
+    expect(() => stash.del('user')).toThrow(/cannot delete source key 'user'/);
+    expect(() => { delete stash.user; }).toThrow(/cannot delete source key 'user'/);
+    stash.reset();
+    expect(() => stash.source('user')).not.toThrow();
+    stash.del('plain');
+    expect(stash.plain).toBeUndefined();
+  });
+});

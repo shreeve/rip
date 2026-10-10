@@ -272,8 +272,6 @@ $21.4M. `~integer` turns `"9007199254740993"` into `…992` silently;
 
 **A1 M — Async callbacks escape the router's guards.** An async `onNavigate` that throws becomes an unhandled rejection (README: callbacks "cannot break it … by throwing"); an async redirect loop runs past the "ten nested navigations" guard.
 
-**A2 L — `stash.del` on a source key removes the source permanently.** `reset()` does not restore it; assignment to a source key is guarded, deletion is not.
-
 **A3 L — `createMutation` callbacks written with `->` inside a component get the wrong `this`.** The action `(x) -> @n + x` compiles to an arrow, but `onSuccess: (r) -> @n = r` compiles to a method on the options object, silently writing there. The `=>` warning is a source comment only.
 
 **A4 L — `staleTime` is case-sensitive, though the README says otherwise.** `'5 MIN'`, `'2H'`, `'Forever'` reject; `'1e999 years'` is accepted (Infinity) while the number `Infinity` rejects. Sites' `@cache` parses a different duration dialect.
