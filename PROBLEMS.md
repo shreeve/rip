@@ -252,10 +252,6 @@ $21.4M. `~integer` turns `"9007199254740993"` into `…992` silently;
 
 **S6 M — A coercer that returns a Promise passes.** The field value becomes a Promise; registration rejects only functions declared async.
 
-**S7 L — `omit()` and `required()` accept unknown field names**; `pick()` rejects them.
-
-**S8 L — `schema.connect` advertises and silently drops `token`.** No Authorization header is sent; unknown options are not rejected.
-
 **S9 L — ORM wording.** `where({firstName: 'A', first_name: 'B'})` silently ANDs both (`create` rejects the conflict); `@ensure "bad", :nope, …` attributes the failure to a nonexistent field; `upsert on: [:email, :firstName]` calls an existing non-unique field "unknown".
 
 ---

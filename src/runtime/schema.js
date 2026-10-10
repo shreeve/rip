@@ -1560,6 +1560,9 @@ class SchemaDef {
   omit(...keys) {
     return derive(this, (src) => {
       const drop = new Set(flatten(keys));
+      for (const k of drop) {
+        if (!src.has(k)) throw new Error("omit: unknown field '" + k + "' on " + (this.name || 'schema'));
+      }
       const out = new Map();
       for (const [k, v] of src) if (!drop.has(k)) out.set(k, v);
       return out;
@@ -1577,6 +1580,9 @@ class SchemaDef {
   required(...keys) {
     return derive(this, (src) => {
       const req = new Set(flatten(keys));
+      for (const k of req) {
+        if (!src.has(k)) throw new Error("required: unknown field '" + k + "' on " + (this.name || 'schema'));
+      }
       const out = new Map();
       for (const [k, v] of src) out.set(k, { ...v, required: req.has(k) ? true : v.required });
       return out;
