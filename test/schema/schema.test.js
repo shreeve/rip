@@ -233,15 +233,21 @@ describe('schema runtime: the validation pipeline', () => {
   // exactly as any unknown name does — never resolve to the inherited
   // function (an unbound `valueOf` throws from the validator; `Object`
   // validates nothing) nor be CALLED to put a bare string where a
-  // subschema belongs.
+  // subschema belongs. An unknown name rejects at validation and at
+  // JSON Schema export alike.
   test('a field type named after an Object.prototype member is an unknown type, not a primitive', () => {
     const out = run(
       'S = schema\n  a? constructor\n  b? valueOf\n  c? toString',
-      `return [S.ok({a: 1, b: 1, c: 1}), S.toJSONSchema().properties];`,
+      `const fields = (f) => { try { f(); return null; } catch (e) { return [e.name, e.issues.map((i) => i.field)]; } };
+       return [fields(() => S.ok({a: 1, b: 1, c: 1})), fields(() => S.toJSONSchema())];`,
     );
-    const unknown = run('U = schema\n  a? stirng', `return [U.ok({a: 1}), U.toJSONSchema().properties.a];`);
-    expect(out[0]).toBe(unknown[0]);
-    expect(out[1]).toEqual({ a: unknown[1], b: unknown[1], c: unknown[1] });
+    const unknown = run(
+      'U = schema\n  a? stirng',
+      `const fields = (f) => { try { f(); return null; } catch (e) { return [e.name, e.issues.map((i) => i.field)]; } };
+       return [fields(() => U.ok({a: 1})), fields(() => U.toJSONSchema())];`,
+    );
+    expect(out).toEqual([['SchemaError', ['a', 'b', 'c']], ['SchemaError', ['a', 'b', 'c']]]);
+    expect(unknown).toEqual([['SchemaError', ['a']], ['SchemaError', ['a']]]);
   });
 
   test('SchemaError carries structured issues', () => {

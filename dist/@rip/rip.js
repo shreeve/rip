@@ -24790,6 +24790,19 @@ class SchemaDef {
     this._taGen = registryGen;
     return this._taCache;
   }
+  _assertFieldTypes() {
+    if (this._ftGen === registryGen)
+      return;
+    const issues = [];
+    for (const [n, f] of this._normalize().fields) {
+      if (f.typeName === "literal-union" || types[f.typeName] || SchemaRegistry.has(f.typeName))
+        continue;
+      issues.push({ field: n, error: "type", message: n + ": unknown type '" + f.typeName + "' (correct the spelling, or import the file that declares it)" });
+    }
+    if (issues.length)
+      throw new SchemaError(issues, this.name, this.kind);
+    this._ftGen = registryGen;
+  }
   _assertSyncValidatable(api) {
     if (!this._transitiveAsync())
       return;
@@ -24857,6 +24870,7 @@ class SchemaDef {
   }
   _validateFields(data, collect, skip, opts) {
     const norm = this._normalize();
+    this._assertFieldTypes();
     const errors = collect ? [] : null;
     for (const [n, f] of norm.fields) {
       if (skip && skip.has(n))
@@ -25164,6 +25178,7 @@ class SchemaDef {
   }
   async _validateFieldsAsync(working, failed, opts) {
     const norm = this._normalize();
+    this._assertFieldTypes();
     const errors = [];
     for (const [n, f] of norm.fields) {
       if (failed && failed.has(n))
@@ -25632,6 +25647,7 @@ function jSONSchemaBody(def, ctx) {
     });
     return { oneOf, discriminator: { propertyName: plan.disc } };
   }
+  def._assertFieldTypes();
   const properties = {};
   const required = [];
   for (const [n, f] of norm.fields) {
@@ -32357,7 +32373,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "d6aefa4796020d85";
+var compilerBuild = () => "f2b60ec3957ba480";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

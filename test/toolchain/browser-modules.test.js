@@ -411,7 +411,7 @@ describe('package graph reconciliation', () => {
           'double ~= count * 2',
           // The registry is process-global and keyed by name, so the schema
           // takes a name no other suite in the run registers.
-          "HeavyInput = schema\n  n! int",
+          "HeavyInput = schema\n  n! integer",
           'export read = -> { doubled: double, parsed: HeavyInput.parse({ n: 1 }).n }',
         ].join('\n'),
       }),

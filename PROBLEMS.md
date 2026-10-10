@@ -292,14 +292,6 @@ errors for spellings the user did not write.
 
 ## Schema and ORM
 
-**S2 ✔ H — Unknown field types validate nothing.**
-`name! strng`, `age! intger`, `addr! Adress` → `X.safe({name: 5,
-age: "x", addr: 42})` is `ok: true` in `:input`, `:shape` and `:model`;
-only `toSQL()` rejects. docs/ORM.md: "An unknown type name is a loud
-error". test/rip/schema.rip (~1956, "unknown typename stays permissive
-(forward refs)") pins the permissive behavior; a name still unresolved
-at parse time is not a forward reference.
-
 **S3 M — Constraints on non-matching types are silently ignored.**
 `n! integer, /^1/` accepts 5; `b! boolean, 1..5`, `d? date, 1..3`,
 `s! string, -5..3` are accepted. A default of the wrong type or out of
