@@ -26,7 +26,7 @@ import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './ts/sche
 import { Parser } from './parser.js';
 import { tagPostfixConditionals } from './lexer.js';
 import { rewriteTypes } from './types.js';
-import { identifierRunAt, isIdentifierName } from './ident.js';
+import { identifierRunAt, isIdentifierName, isCustomElementName } from './ident.js';
 import { implicitBlocks, implicitObjects, implicitCalls } from './implicit.js';
 import { isComponentName, componentPathText, memberPathText, componentPathRoot, restReadKeys } from './render.js';
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './ts/types.js';
@@ -369,7 +369,7 @@ const isBlock = (x) => isNode(x) && x[0] === 'block';
 // spec-derived vocabulary; PascalCase names (an interior lowercase
 // letter distinguishes `Counter` from ALLCAPS constants) are
 // component references.
-const isHtmlTag = (name) => TEMPLATE_TAGS.has(String(name).split('#')[0]);
+const isHtmlTag = (name) => { const tag = String(name).split('#')[0]; return TEMPLATE_TAGS.has(tag) || isCustomElementName(tag); };
 // A REAL comprehension node — the loop-spec list (a plain array of
 // ['for-…'] arrays) is a shape no user call constructs; a call of a
 // function NAMED comprehension must keep its call reading everywhere.

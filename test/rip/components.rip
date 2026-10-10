@@ -918,6 +918,59 @@ test 'onError on parent catches child error', '''
 # element flips them. Misresolving `a` silently creates an SVGAElement
 # whose href/click behavior is not an anchor's.
 
+# A render child line opening with a tight-hyphen word names a custom
+# element — one tag, never a subtraction; a keyed run stays an attribute.
+code 'a hyphenated tag at a child line start is a custom element', '''
+  A = component
+    render
+      div
+        x-icon
+        my-el "x"
+        sl-button.primary-action "Go"
+        aria-busy: true
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._el1 = document.createElement('x-icon');
+      this._el0.appendChild(this._el1);
+      this._el2 = document.createElement('my-el');
+      this._t0 = document.createTextNode("x");
+      this._el2.appendChild(this._t0);
+      this._el0.appendChild(this._el2);
+      this._el3 = document.createElement('sl-button');
+      this._t1 = document.createTextNode("Go");
+      this._el3.appendChild(this._t1);
+      this._el3.className = 'primary-action';
+      this._el0.appendChild(this._el3);
+      this._el0.setAttribute('aria-busy', true);
+      return this._el0;
+    }
+  };
+  '''
+
+code 'a spaced hyphen at a child line start stays subtraction', '''
+  A = component
+    render
+      div
+        = a - b
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode(String(a - b));
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+  };
+  '''
+
 code 'top-level `a` is an HTML anchor, not an SVG element', '''
   A = component
     render

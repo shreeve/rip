@@ -704,8 +704,15 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     if (!root || root.kind === 'INDENT' || root.kind === 'TERMINATOR' || root.kind === 'OUTDENT' || root.kind === 'RENDER') {
       return true; // bare `.cls-name` at a line start
     }
-    return root.kind === 'IDENTIFIER' && TEMPLATE_TAGS.has(String(root.value).split('#')[0]);
+    if (root.kind !== 'IDENTIFIER') return false;
+    const tag = String(root.value).split('#')[0];
+    return TEMPLATE_TAGS.has(tag) || tag.includes('-');
   };
+
+  // A render child position at a line start, where a custom element's
+  // tag name may open the line.
+  const customElementStart = (prev) =>
+    !prev || prev.kind === 'INDENT' || prev.kind === 'TERMINATOR' || prev.kind === 'OUTDENT' || prev.kind === 'RENDER';
 
   const insideComponentBody = () => {
     let depth = 0;
@@ -1604,6 +1611,24 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         }
       } else if (RESERVED_WORDS.has(word)) {
         push('RESERVED', word, start, pos);
+      } else if (inRender && customElementStart(last()) && text[pos] === '-' && IDENT_START.test(text[pos + 1] ?? '')) {
+        // A render child line opening with a tight-hyphen word names a
+        // custom element (`x-icon`, `sl-button.primary`) — the platform
+        // requires the hyphen, so the word is ONE tag name, never a
+        // subtraction. A run that keys a pair (`aria-busy: true`) stays
+        // the attribute reading.
+        let j = pos;
+        while (text[j] === '-' && IDENT_START.test(text[j + 1] ?? '')) {
+          j++;
+          while (j < text.length && IDENT_PART.test(text[j])) j++;
+        }
+        const keyed = /^:(?![=:])|^[^\S\n]+:(?![=:])[^\S\n]/.test(text.slice(j));
+        if (keyed) {
+          push('IDENTIFIER', word, start, pos);
+        } else {
+          pos = j;
+          push('IDENTIFIER', text.slice(start, pos), start, pos);
+        }
       } else {
         push('IDENTIFIER', word, start, pos);
       }

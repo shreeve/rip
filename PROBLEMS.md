@@ -154,18 +154,11 @@ binding"; `on := true` → bare "Unexpected ':='" (`on` is reserved, `true`).
 
 ## Templates, components, reactivity
 
-**T1 ✔ H — Custom elements (hyphenated tags) compile to subtraction.**
-```coffee
-A = component
-  render
-    div
-      x-icon
-```
-emits `document.createTextNode(String(x - icon))` (runtime: "x is not
-defined"; with `x` and `icon` bound, wrong text renders silently). Same
-for `my-el "x"`, `sl-button.primary "Go"`. src/emitter.js ~11122 says
-"Anything else is a TAG (custom elements included)"; the lexer splits
-`x-icon` into three tokens.
+**T1 M — An inline custom-element child reads as subtraction.**
+`div x-icon` (the tag on the parent's line) emits
+`createTextNode(String(x - icon))`; on its own line `x-icon` is a
+custom element. Inline it competes with a text value, so it wants a
+decision: tag, or reject the tight-hyphen value.
 
 **T2 ✔ H — A member or module value named like a tag, read with a property, renders an element.**
 `summary := {total: 42}` then `p summary.total` renders
