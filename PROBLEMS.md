@@ -325,8 +325,6 @@ response parses "successfully".
 
 **P19 L — rip/script ends on an unknown control symbol without error** (`:skp` aborts silently; `trace` accepts `[:bogus]`); the README trace omits the `\r` actually sent.
 
-**P21 L — rip-csv treats unknown flags as filenames** (`--bogus` → ENOENT) and prints raw stack traces on parse errors; `rip-db --help` lacks a final newline.
-
 ---
 
 ## Tooling
