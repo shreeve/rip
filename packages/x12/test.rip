@@ -329,6 +329,24 @@ test "zero indexes are rejected", ->
   throws (-> x.set('NM1-0', 'x')), 'zero index on field'
   throws (-> x.set('NM1-1.0', 'x')), 'zero index on component'
 
+test "set rejects a separator from above the target level (no injection)", ->
+  x = X12.new()
+  x.set 'NM1-1', 'IL'
+  throws (-> x.set('NM1-3', 'SMITH*JOHN~DMG*D8*19800101')), 'segment terminator'
+  throws (-> x.set('NM1-3', "SMITH\nDMG")), 'line break'
+  throws (-> x.set('NM1-3(2)', 'A*B')), 'field separator'
+  throws (-> x.set('NM1-3.1', 'A^B')), 'repetition separator'
+  throws (-> x.set('NM1-3.1', 'A*B')), 'field separator'
+  eq x.toArray().filter((r) -> r[0] is 'DMG'), []
+
+test "set still splits a value at its own level", ->
+  x = X12.new()
+  x.set 'NM1-3', 'SMITH*JOHN'
+  eq x.get('NM1-3'), 'SMITH'
+  eq x.get('NM1-4'), 'JOHN'
+  x.set 'NM1-5', 'A:B'
+  eq x.get('NM1-5.2'), 'B'
+
 # ==[ Data / update ]==
 
 console.log "\nData and update"

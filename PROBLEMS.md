@@ -307,10 +307,6 @@ element named `"2<"`; two roots, trailing junk, `'hello'` and `''` are
 accepted; duplicate attributes keep the last. A cut-off SOAP or EDI
 response parses "successfully".
 
-**P7 H — x12 `set` accepts separator characters inside a value (segment injection).**
-`x.set "NM1-3", "SMITH*JOHN~DMG*D8*19800101"` adds a field and a new
-`DMG` segment on re-parse.
-
 **P8 H — rip-curl treats any argument containing `=` as a variable.**
 `rip packages/utils/curl.rip 'http://host/users?page=2'` prints usage
 and exits 1 (`eq = arg.indexOf('=')`).
