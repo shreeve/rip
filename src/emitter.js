@@ -15914,14 +15914,16 @@ class Emitter {
     // `delete` is only valid on a property reference: strict mode (all
     // ES modules) makes `delete x` on a plain binding a load-time
     // SyntaxError — reject
-    // at the layer where the target shape is knowable.
-    if (node[0] === 'delete' && !(isNode(node[1]) && (node[1][0] === '.' || node[1][0] === '[]'))) {
+    // at the layer where the target shape is knowable. An optional
+    // reference (`delete o?.a`, `delete o?[k]`) is one: JavaScript
+    // answers true when the base is nullish.
+    if (node[0] === 'delete' && !(isNode(node[1]) && ['.', '[]', '?.', 'optindex'].includes(node[1][0]))) {
       throw this.positionedError(node, "emitter: delete requires a property reference (delete obj.a / delete obj[k]) — deleting a plain binding is a strict-mode SyntaxError in modules");
     }
     // A negative-literal index reads through `.at(-n)` and a range
     // through `.slice()`: both are calls, so `delete` would answer true
     // and remove nothing.
-    if (node[0] === 'delete' && node[1][0] === '[]' && (isRange(node[1][2]) || Emitter.negativeLiteralKey(node[1][2]))) {
+    if (node[0] === 'delete' && (node[1][0] === '[]' || node[1][0] === 'optindex') && (isRange(node[1][2]) || Emitter.negativeLiteralKey(node[1][2]))) {
       throw this.positionedError(node, `emitter: delete cannot target a ${isRange(node[1][2]) ? 'range' : 'negative-literal index'} — it reads through a call (${isRange(node[1][2]) ? '.slice()' : '.at(-n)'}), so nothing would be deleted; use splice or a computed index`);
     }
     this.mark(node, '$self', () => {

@@ -34,9 +34,6 @@ expression position"; `r = x if a else y if b else z` chains to
 `a ? x : (b ? y : z)`. The returned-ternary production reduces at the
 first `else` operand.
 
-**C32 L — `delete a?.b` rejects as "deleting a plain binding".** JavaScript
-allows an optional-chain delete; the message names the wrong reason.
-
 **C7 M — Class-body `x: 1`, `x: 0`, `x: ""`, `x: []`, `x: {}`, `x: true`, `x: null` silently drop the value.**
 ```coffee
 class A
@@ -132,8 +129,7 @@ binds tighter than `=~`, and `toMatchable` stringifies the boolean.
 
 **C30 L — Messages name things the user did not write.**
 `x = {:a}` → "@-keys are only supported in class bodies";
-`f! ?= -> 5` → "Unexpected '??='"; `delete a?.b` → "deleting a plain
-binding"; `on := true` → bare "Unexpected ':='" (`on` is reserved, `true`).
+`f! ?= -> 5` → "Unexpected '??='"; `on := true` → bare "Unexpected ':='" (`on` is reserved, `true`).
 
 ---
 
