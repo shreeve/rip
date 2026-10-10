@@ -1165,3 +1165,5 @@ test "an unknown unit rejects instead of acting as milliseconds", ->
   ok rejects(-> t.diff(t, 'fortnight')), 'diff fortnight'
   ok rejects(-> t.startOf('fortnight')), 'startOf fortnight'
   ok rejects(-> time.duration(1, 'fortnight')), 'duration fortnight'
+  ok rejects(-> time.duration({minuts: 1})), 'duration key minuts'
+  ok rejects(-> t.set('fortnight', 3)), 'set fortnight'
