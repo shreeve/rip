@@ -56,7 +56,7 @@ test "no dependencies of any kind (the stdlib ships with rip)", ->
 
 test "the description is the README pitch, byte for byte", ->
   readme = readFileSync join(import.meta.dir, 'README.md'), 'utf8'
-  ok readme.includes("> **#{pkg.description}.**")
+  ok readme.includes("> **#{pkg.description}**")
 
 test "does not claim browser safety (it spawns worker threads and moves files)", ->
   eq pkg.rip, undefined

@@ -58,7 +58,7 @@ test "no dependencies of any kind (the stdlib ships with rip)", ->
 
 test "the description is the README pitch, byte for byte", ->
   readme = readFileSync join(import.meta.dir, 'README.md'), 'utf8'
-  testOk readme.includes("> **#{pkg.description}.**")
+  testOk readme.includes("> **#{pkg.description}**")
 
 test "the stamp bin is stamp.rip itself, mapped as rip-stamp", ->
   eq pkg.bin, { 'rip-stamp': './stamp.rip' }

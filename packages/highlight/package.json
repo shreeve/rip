@@ -3,7 +3,7 @@
   "version": "4.0.0",
   "private": true,
   "type": "module",
-  "description": "The highlight.js grammar for Rip — one shared definition consumed by Rip Print and the print editor extension",
+  "description": "The highlight.js grammar for Rip — one shared definition consumed by Rip Print and the print editor extension.",
   "rip": {
     "browser": true
   },

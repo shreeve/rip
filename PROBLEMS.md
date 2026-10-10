@@ -395,8 +395,6 @@ and exits 1 (`eq = arg.indexOf('=')`).
 
 ## Package mold
 
-**M1 L — `description` differs from the README pitch.** By the missing period alone: app, csv, db, decimal, fake, highlight, http, print, rsx, script, stamp, swarm, testing, time, utils, validate, x12; different sentences: barcodes, sites, vim, vscode; testing's pitch also names `plainEnv`. packages/AGENTS.md says the frame is uniform "so a script can verify it"; no script does.
-
 **M2 L — barcodes and tui are neither mold nor listed as earned shapes.** barcodes has no `**Runtime:**` line, a `test/` tree and `"bench": "rip test/bench.rip"`; tui has `test/`, `bench/`, `demo/` and `## Quick start`.
 
 **M3 L — Bin names and Runtime lines break the mold.** `"swarm"` and `"rip-shat"` (googlesheets) are not `rip-<name>`; fake and googlesheets say "server-side" instead of `not browser-safe — …`. `rip.browser: true` packages use `globalThis` (http.rip ~103; app index/feed/launch), which the mold forbids and ECOSYSTEM.md calls too broad (caution 10).

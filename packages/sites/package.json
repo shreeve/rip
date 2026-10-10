@@ -3,7 +3,7 @@
   "version": "4.0.0",
   "private": true,
   "type": "module",
-  "description": "Rip Sites — Sinatra-style site framework — routes, smart responses, read() validation, and AsyncLocalStorage-powered request context for managed workers behind Janus (App + API)",
+  "description": "Routes, workers, and a browser App — behind one shared Caddy+Janus edge.",
   "exports": {
     ".": "./site.rip",
     "./middleware": "./middleware.rip",

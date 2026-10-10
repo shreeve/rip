@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "QR, PDF417 and Code 128 generator and reader — packed-bitmap QR encoder, camera-budgeted decoder, ray-voted PDF417, scan-line Code 128, zero dependencies.",
+  "description": "Generate and read QR, PDF417 and Code 128 barcodes, in the browser or on the server, with no dependencies.",
   "rip": {
     "browser": true
   },
