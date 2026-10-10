@@ -28,22 +28,6 @@ Contents: [Language core](#language-core) ·
 
 ### Silent miscompiles
 
-**C1 ✔ H — A `return`/`break` in the FIRST `when` of a value-position `switch` is captured by the generated IIFE.**
-```coffee
-f = (a) ->
-  x = switch a
-    when 1 then return 2
-    else 3
-  x + 100
-p f(1), f(5)        # prints 102 103, not 2 103
-```
-The same `return` in a later `when` or in `else` rejects ("cannot cross
-the IIFE boundary"). `break` in the first `when` inside a loop pushes
-`undefined` instead of leaving; `continue` emits invalid JavaScript.
-Cause: `findCapturedCtrl` (src/emitter.js ~7585) starts at index 1 of
-every array, so `cases[0]` is never inspected. Doctrine: control
-transfers keep their lexical target or reject.
-
 **C2 ✔ H — Membership `in` drops the parentheses around a low-precedence left operand.**
 `p((k or d) in b)` with `k = "x"; d = "y"; b = {y: 1}` prints `x`: it
 emits `(k || d in b)`. Also `(a == c) in b` → `a === (c in b)` and

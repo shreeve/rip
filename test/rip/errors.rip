@@ -249,6 +249,36 @@ fail "return inside a value-position if rejects", '''
     x
 ''', "cannot cross the IIFE boundary"
 
+fail "return in the first when of a value-position switch rejects", '''
+  f = (a) ->
+    x = switch a
+      when 1 then return 2
+      else 3
+    x + 100
+''', "cannot cross the IIFE boundary"
+
+# `break` in a `when` exits the switch, in value position as in
+# statement position, so it keeps its target inside the lowering.
+test "break in any when of a value-position switch exits the switch", '''
+  f = (xs) ->
+    for i in xs
+      x = switch i
+        when 1 then break
+        when 2 then break
+        else 3
+      x ?? "out"
+  f([1, 2, 5])
+''', ["out", "out", 3]
+
+fail "continue in the first when of a value-position switch rejects", '''
+  f = (xs) ->
+    for i in xs
+      x = switch i
+        when 1 then continue
+        else 3
+      x
+''', "cannot cross the IIFE boundary"
+
 test "return in a function-TAIL switch tunnels through the lowering", '''
   fn = (x) ->
     switch x

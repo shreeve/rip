@@ -7596,7 +7596,9 @@ class Emitter {
       const l = isLoopNode(n) || isComprehensionNode(n) ? loops + 1 : loops;
       const s = head === 'switch' ? switches + 1 : switches;
       const inBlock = head === 'block' || head === 'program' || head === 'try';
-      for (let i = 1; i < n.length; i++) {
+      // A node's slot 0 is its head; a plain list (a switch's cases)
+      // has no head, and its first element is a child like the rest.
+      for (let i = typeof head === 'string' ? 1 : 0; i < n.length; i++) {
         const el = n[i];
         const ctrl = typeof el === 'string' ? (
           inBlock || ((head === '||' || head === '&&' || head === '??') && i === 2) ? el : null
