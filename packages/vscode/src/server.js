@@ -1954,6 +1954,7 @@ async function refresh(document) {
     // (RULINGS.md, the render rows; see the hover handler).
     intrinsics: result.intrinsics ?? [],
     componentUses: result.componentUses ?? [],
+    componentProps: result.componentProps ?? {},
     // SOURCE spans where hover may answer at all — the positive model
     // (hoverableSpans, translate.js): the author's own symbol tokens,
     // annotations, and import specifiers; every other byte declines.
@@ -3319,10 +3320,11 @@ connection.onHover(presented('textDocument/hover', async (params) => {
       // The event word serves the handler's event type — the claim the
       // lowering's casts enforce (RULINGS.md, the event-word row) — in
       // the `(kind)` head form the other served rows use. Host
-      // elements read back in the `<tag>` shorthand; a component's
-      // root element is a runtime fact, so its known events carry no
-      // host claim, and a name outside the DOM vocabulary reads as the
-      // custom event it is. No prose in the fence: the grammar
+      // elements read back in the `<tag>` shorthand; on a component
+      // the word serves the bare map entry, the host claim riding the
+      // child's declared `__host` in the casts, and a name outside the
+      // DOM vocabulary on a native element reads as the custom event it
+      // is. No prose in the fence: the grammar
       // tokenizes the body as TypeScript, so an apostrophe would open
       // a string scope.
       body = intr.type === null

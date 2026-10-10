@@ -5376,7 +5376,7 @@ function rewriteTypes(tokens, mintId, text, fail) {
           continue;
         }
       }
-      if (frames.length === 0 && inClassBody() && namedColon && !methodValueAhead(tokens, i + 1)) {
+      if (frames.length === 0 && inClassBody() && namedColon && (isAtName && classBodyKind() === "component" || !methodValueAhead(tokens, i + 1))) {
         let end = -1, depth = 0;
         for (let j = i + 1;j < tokens.length; j++) {
           if (counter.on)
@@ -9095,6 +9095,11 @@ var OFFERS = "";
 var offersRecordText = () => {
   throw new Error("rip: component type story is unavailable in the browser");
 };
+var HOST = "";
+var hostTypeText = () => {
+  throw new Error("rip: component type story is unavailable in the browser");
+};
+var publicProps = () => [];
 var componentCtorMembers = () => [];
 var runtimeApiDeclares = () => [];
 var restAliasName = () => {
@@ -9403,6 +9408,7 @@ class Emitter {
     this.componentUses = [];
     this.namespaceExports = [];
     this.componentNames = [];
+    this.componentProps = {};
     this.exportedObjects = [];
     this.renderPairs = [];
     this.browserModule = browserModule;
@@ -10859,6 +10865,7 @@ class Emitter {
       line(() => this.b.emit("declare children?: __RipChildren;"));
     this._needsChildren = true;
     line(() => this.b.emit(`declare ${OFFERS}: ${offersRecordText(info)};`));
+    line(() => this.b.emit(`declare ${HOST}: ${hostTypeText(info)};`));
     const ambientLines = ambientClassDeclares(info);
     if (ambientLines.some((t) => t.includes("__ripAmbientStash(")))
       this._needsAmbienceHelper = true;
@@ -11051,7 +11058,16 @@ class Emitter {
     const start = this.b.offset;
     this.b.tsOnly(() => this.b.emit("("));
     fn();
-    this.b.tsOnly(() => this.b.emit(evTypeText === null ? ") as any" : `) as (e: ${evTypeText}) => unknown`));
+    this.b.tsOnly(() => {
+      if (evTypeText === null)
+        this.b.emit(") as any");
+      else if (typeof evTypeText === "function") {
+        this.b.emit(") as (e: ");
+        evTypeText();
+        this.b.emit(") => unknown");
+      } else
+        this.b.emit(`) as (e: ${evTypeText}) => unknown`);
+    });
     return evTypeText === null ? null : [start, this.b.offset];
   }
   tsComponentCtor(info, pad) {
@@ -16066,8 +16082,8 @@ ${pad ?? ""}`);
       if (name === "_init" || name === "_create" || name === "_setup" || /^create_block_\d+$/.test(name)) {
         throw this.positionedError(stmt, `emitter: component member '${name}' collides with the generated lifecycle machinery — '_init', ` + "'_create', '_setup', and 'create_block_N' are the class methods the component lowering emits (a " + "same-named member would silently replace the generated one at runtime); rename the member", node);
       }
-      if (name === "mount" || name === "unmount" || name === "emit") {
-        throw this.positionedError(stmt, `emitter: component member '${name}' collides with the component runtime API — 'mount', 'unmount', ` + "and 'emit' are __Component's own methods, and the machinery calls them on every instance (a " + "same-named member would silently shadow them); rename the member", node);
+      if (name === "mount" || name === "unmount") {
+        throw this.positionedError(stmt, `emitter: component member '${name}' collides with the component runtime API — 'mount' and 'unmount' ` + "are __Component's own methods, and the machinery calls them on every instance (a " + "same-named member would silently shadow them); rename the member", node);
       }
       seen.set(name, stmt);
       if (kind !== "hook") {
@@ -16429,8 +16445,14 @@ ${pad ?? ""}`);
         this.b.emit(`;
 `);
       }
-      if (this.scopes.length === 1 && typeof this._componentName === "string")
+      if (this.scopes.length === 1 && typeof this._componentName === "string") {
         this.componentNames.push(this._componentName);
+        if (tsInfo !== null) {
+          this.componentProps[this._componentName] = {
+            required: publicProps(tsInfo).filter((m) => !m.optional && !m.hasDefault).map((m) => m.name)
+          };
+        }
+      }
       const hmrMeta = this.hmr && this.modulePath && this.scopes.length === 1 && typeof this._componentName === "string";
       if (hmrMeta) {
         this.emitComponentHmrMeta(pad, {
@@ -17761,9 +17783,16 @@ ${pad ?? ""}`);
     if (ref !== null)
       name = ref.text;
     const root = ref !== null ? componentPathRoot(ref.text) : name;
+    let useSpan = null;
     const noteUse = (span) => {
-      if (this.ts && span !== null)
-        this.componentUses.push({ start: span[0], end: span[1], name });
+      if (!this.ts || span === null)
+        return;
+      useSpan = span;
+      const keys = props.map(({ key }) => {
+        const k = typeof key === "string" && key.startsWith('"') && key.endsWith('"') ? key.slice(1, -1) : key;
+        return typeof k === "string" && k.startsWith("__bind_") && k.endsWith("__") ? k.slice(7, -2) : k;
+      }).filter((k) => typeof k === "string");
+      this.componentUses.push({ start: span[0], end: span[1], name, keys });
     };
     let ctorRef;
     if (ref !== null) {
@@ -18236,6 +18265,35 @@ ${this.replayPad}}` : " }");
     line(() => this.b.emit("}"));
     line(() => this.b.emit(held !== null ? `} finally { ${host()}._endProjection(${prevV}); } }` : `} finally { ${this.runtimeName("__popComponent")}(${prevV}); } }`));
     for (const { pair, event, value } of eventBindings) {
+      const childName = () => {
+        if (ref === null && useSpan !== null) {
+          this.primitiveReuse = { name, span: useSpan };
+          this.emitPrimitive(name);
+        } else {
+          this.b.emit(name);
+        }
+      };
+      const hostRecord = () => {
+        this.b.emit("NonNullable<InstanceType<typeof ");
+        childName();
+        this.b.emit(`>['${HOST}']>`);
+      };
+      const hostEl = () => {
+        hostRecord();
+        this.b.emit("['el']");
+      };
+      const host = () => {
+        this.b.emit("Extract<");
+        hostRecord();
+        this.b.emit(", { el: unknown }>['el']");
+      };
+      const known = this.ts && DOM_EVENTS.has(event) ? () => {
+        this.b.emit(`HTMLElementEventMap['${event}'] & { target: `);
+        host();
+        this.b.emit("; currentTarget: ");
+        host();
+        this.b.emit(" }");
+      } : null;
       if (this.ts) {
         const keyNode = isNode(pair) && isNode(pair[1]) ? pair[1] : null;
         const keyId = keyNode !== null ? this.stores.idOf(keyNode) ?? null : null;
@@ -18246,26 +18304,48 @@ ${this.replayPad}}` : " }");
             end: keySpan[1],
             kind: "event",
             name: event,
-            type: this.tsEventTypeText([event]) !== null ? `HTMLElementEventMap['${event}']` : null,
+            type: DOM_EVENTS.has(event) ? `HTMLElementEventMap['${event}']` : null,
             child: name
           });
+        }
+      }
+      let rec = null;
+      if (this.ts) {
+        const pid = this.stores.idOf(pair);
+        const extent = pid !== null ? this.stores.selfSpan(pid) : null;
+        const src = this.b.source;
+        if (extent !== null && src !== null) {
+          let ke = extent[0];
+          while (ke < extent[1] && !/[\s:]/.test(src[ke]))
+            ke++;
+          if (ke > extent[0]) {
+            rec = { key: [extent[0], ke], pair: [extent[0], extent[1]], sites: [] };
+            this.renderPairs.push(rec);
+          }
         }
       }
       const evUsed = new Set;
       Emitter.collectLeafNames(value, evUsed);
       const ev = Emitter.mintName("e", evUsed);
       this.renderLine(pair, () => {
-        const target = `(${instVar}._nodes?.[0] ?? ${elVar})`;
+        const target = `${this.runtimeName("__hostOf")}(${instVar}, '${event}')`;
         if (!this.ts) {
           this.b.emit(`if (${instVar}) ${target}.addEventListener('${event}', (${ev}`);
         } else {
-          this.b.emit(`if (${instVar}) ${target}.addEventListener(`);
+          this.b.emit(`if (${instVar}) (${target}`);
+          const hostStart = this.b.offset;
+          this.b.emit(" as ");
+          hostEl();
+          if (rec !== null)
+            rec.sites.push([hostStart, this.b.offset]);
+          this.b.emit(").addEventListener(");
           this.emitQuotedPrimitive(event);
           this.b.emit(`, (${ev}`);
         }
         this.tsScaffoldAny();
         this.b.emit(`) => ${this.runtimeName("__batch")}(() => (`);
-        this.tsHandlerCast(() => this.withExpression(() => this.expr(value)));
+        const evType = !this.ts ? null : isFunc(value) && (value[1].length === 0 || value[1].length === 1 && typeof value[1][0] === "string") ? known : isFunc(value) ? null : known;
+        this.tsHandlerCast(() => this.withExpression(() => this.expr(value)), evType);
         this.b.emit(`)(${ev})))`);
       });
     }
@@ -20073,7 +20153,7 @@ ${this.replayPad}}` : " }");
       throw this.positionedError(pair, `emitter: \`@${ev}\` is not a DOM event — use \`= @${ev}\` to render text, or \`@${ev}: handler\` for an explicit handler`);
     }
     if (ev === "error") {
-      throw this.positionedError(pair, "emitter: bare `@error` is ambiguous with the onError lifecycle hook — write `@error: handler` to bind a DOM error listener explicitly");
+      throw this.positionedError(pair, "emitter: bare `@error` would bind `onError`, which is the error-boundary hook, not a handler — write `@error: handler` to bind a DOM error listener explicitly");
     }
     const method = value[2];
     if (!this.cframes[this.cframes.length - 1].members.has(method)) {
@@ -20185,6 +20265,7 @@ ${this.replayPad}}` : " }");
     return isNode(x) && this.chainHeadSlotOf(x) !== null;
   }
   chain(node) {
+    this.checkEmitRead(node);
     this.noteProvidedRead(node);
     const spine = [node];
     while (true) {
@@ -20329,6 +20410,22 @@ ${this.replayPad}}` : " }");
       this.notePlainRenderRead(node[2], true);
     }
     this.chain(node);
+  }
+  checkEmitRead(node) {
+    if (!(this.cframes?.length > 0) || this.thisMemberKindOf("emit") !== null)
+      return;
+    let root = node;
+    while (isNode(root)) {
+      if (isNode(root[0]))
+        root = root[0];
+      else if ((root[0] === "." || root[0] === "?.") && isNode(root[1]))
+        root = root[1];
+      else
+        break;
+    }
+    if (!isNode(root) || root[0] !== "." || root[1] !== "this" || root[2] !== "emit")
+      return;
+    throw this.positionedError(root, "emitter: `@emit` is not a component member — a child notifies its parent through a callback prop: declare `@onSaved?: () => void` and call `onSaved?()`");
   }
   noteProvidedRead(node) {
     if (!this.ts || !(this.cframes?.length > 0))
@@ -22799,6 +22896,7 @@ var RUNTIME_TABLE = [
       "__gateBind",
       "__detach",
       "__reportChildFailure",
+      "__hostOf",
       "__ownerFrame",
       "__pushOwner",
       "__popOwner",
@@ -22817,6 +22915,7 @@ var RUNTIME_TABLE = [
       "__gateBind",
       "__detach",
       "__reportChildFailure",
+      "__hostOf",
       "__ownerFrame",
       "__pushOwner",
       "__popOwner",
@@ -23669,7 +23768,7 @@ export {};
     });
   }
   const partNames = emitter.exportedObjects.filter(([, values]) => values.every((value) => emitter.componentNames.includes(value))).map(([name]) => name);
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, componentUses: emitter.componentUses, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, componentUses: emitter.componentUses, componentProps: emitter.componentProps, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
 }
 
 // src/sourcemap.js
@@ -23882,6 +23981,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     kinds: emitted.kinds,
     intrinsics: emitted.intrinsics ?? [],
     componentUses: emitted.componentUses ?? [],
+    componentProps: emitted.componentProps ?? {},
     namespaceExports: emitted.namespaceExports ?? [],
     componentNames: emitted.componentNames ?? [],
     partNames: emitted.partNames ?? [],
@@ -26297,6 +26397,7 @@ __export(exports_components, {
   __hmrRegistry: () => __hmrRegistry,
   __hmrRestoreUi: () => __hmrRestoreUi,
   __hmrSnapshotUi: () => __hmrSnapshotUi,
+  __hostOf: () => __hostOf,
   __lis: () => __lis,
   __ownerFrame: () => __ownerFrame,
   __popComponent: () => __popComponent,
@@ -26942,11 +27043,12 @@ function __handleComponentError(error, component) {
   const visited = new Set;
   while (current && !visited.has(current)) {
     visited.add(current);
-    if (current.onError) {
+    const hook = Object.getPrototypeOf(current)?.onError;
+    if (typeof hook === "function") {
       const prevC = __pushComponent(current);
       const prevO = __pushOwner(current._frame);
       try {
-        current.onError(failure, component);
+        hook.call(current, failure, component);
         return;
       } catch (_) {} finally {
         __popOwner(prevO);
@@ -27756,15 +27858,21 @@ class __Component {
     }
     this._teardown({ state: "unmounted", hooks: this._state === "mounted", removeDOM });
   }
-  emit(name, detail) {
-    if (this._state !== "mounted" || !this._root) {
-      throw new Error(`${this.constructor.name || "component"}: emit('${name}') outside the mounted window — ` + "emit dispatches on the live root; call after mount and before unmount");
-    }
-    (this._nodes?.[0] ?? this._root).dispatchEvent(new CustomEvent(name, { detail, bubbles: true }));
-  }
   static mount(target = "body") {
     return new this().mount(target);
   }
+}
+function __hostOf(inst, event) {
+  if (inst.constructor.__extends != null) {
+    let cur = inst;
+    while (cur._inheritedInst)
+      cur = cur._inheritedInst;
+    if (cur._inheritedEl)
+      return cur._inheritedEl;
+  }
+  const name = inst.constructor.name || "component";
+  const cap = event.charAt(0).toUpperCase() + event.slice(1);
+  throw new Error(`${name}: @${event}: has no element to listen on — ${name} extends no tag. ` + `A child notifies its parent through a callback prop: declare \`@on${cap}?: () => void\` and call \`on${cap}?()\``);
 }
 
 // packages/app/index.rip
@@ -32335,7 +32443,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "94a9f837662b0724";
+var compilerBuild = () => "c963f542315bb424";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

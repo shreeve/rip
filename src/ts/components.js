@@ -37,9 +37,9 @@
 // consumers, no drift.
 
 import { tidyType, normalizeTypeText, renderParams, optionalReader } from './types.js';
-import { attributeNamesFor, BOOLEAN_ATTRS } from '../dom.js';
+import { attributeNamesFor, BOOLEAN_ATTRS, SVG_ONLY_TAGS } from '../dom.js';
 import { isComponentName, componentPathText, restReadKeys } from '../render.js';
-import { CAMEL, CLASS_TYPE, STYLE_TYPE, CSS_PROPERTIES_TEXT } from './dom-types.js';
+import { CAMEL, CLASS_TYPE, STYLE_TYPE, CSS_PROPERTIES_TEXT, hostText } from './dom-types.js';
 
 // Same spellings as src/emitter.js COMPONENT_HOOKS (emission owns the
 // JS-face list; this file cannot import the emitter).
@@ -196,6 +196,22 @@ function lineStyleLiteral(line) {
   }
   return { kind: 'object', keys };
 }
+
+// A function type spelled bare (`(n: number) => void`) binds looser than
+// a union, so where the face composes one around a member's type (`T |
+// undefined`, the container arm) the type is grouped there, and nowhere
+// else: the annotation keeps the author's spelling for every other
+// reading, the hover included.
+const unionNeedsGroup = (text) => {
+  let depth = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '(' || c === '[' || c === '{' || c === '<') depth++;
+    else if (c === ')' || c === ']' || c === '}' || c === '>') depth--;
+    else if (depth === 0 && c === '=' && text[i + 1] === '>') return true;
+  }
+  return false;
+};
 
 export function componentTypeInfo(stores, source, node, behavior = null, { spellable = null } = {}) {
   const [, parent, body] = node;
@@ -693,11 +709,12 @@ const memberTypeSegments = (m, lead, info = null) => {
   // as `read()`'s return. Both spellings are the same annotation, so both
   // carry its span: an unmarked one falls to whatever cover encloses the
   // line, which in the companion interface is the whole component.
-  const readBack = (pre, post) => (t !== null
-    ? [{ text: pre }, { text: vt, node: m.node, role: 'annotation' }, { text: post }]
+  const readBack = (pre, post, group = false) => (t !== null
+    ? [{ text: `${pre}${group ? '(' : ''}` }, { text: vt, node: m.node, role: 'annotation' }, { text: `${group ? ')' : ''}${post}` }]
     : [{ text: `${pre}${vt}${post}` }]);
   if (containerish(m)) {
     const und = t !== null && widensToUndefined(m) ? ' | undefined' : '';
+    const group = und !== '' && unionNeedsGroup(t);
     // PUBLIC is the line, not the kind: a member the caller can reach
     // takes whatever container arrives on its bind channel, and a
     // defaulted prop (`@step: number = 1`) carries kind 'state' while
@@ -705,8 +722,8 @@ const memberTypeSegments = (m, lead, info = null) => {
     // is minted here and nowhere else.
     const notify = m.isPublic ? TAKEN : MINTED;
     return [
-      { text: `${lead}{ value` }, ...typed,
-      ...readBack(`${und}; read(): `, `${und}${notify} }`),
+      { text: `${lead}{ value` }, ...(group ? readBack(': ', '', true) : typed),
+      ...readBack(`${und}; read(): `, `${und}${notify} }`, group),
     ];
   }
   if (m.kind === 'computed' || m.kind === 'gate') {
@@ -807,7 +824,7 @@ export const readonlyCastType = (m) => `{ ${m.name}${segmentsText(memberTypeSegm
 export const isDeclarableMember = (m) => m.kind !== 'method' && m.kind !== 'hook';
 
 // ── the props surface ────────────────────────────────────────────────
-const publicProps = (info) =>
+export const publicProps = (info) =>
   info.members.filter((m) => m.isPublic && (containerish(m) || m.kind === 'readonly' || m.kind === 'plain'));
 
 const isRequiredProp = (m) => m.kind === 'prop' && m.annotation !== null && !m.optional;
@@ -909,6 +926,20 @@ export const restAliasName = (tag) => `__RipRest_${tag.replace(/[^A-Za-z0-9_]/g,
 // as the tag surface spells it; the host's own line keys stay the
 // host's to refuse at its write. A literal string on the line admits no
 // caller style at all.
+// The element a component inherits through `extends`, as a record:
+// `{ el: <the tag's interface> }`, the host component's own record for
+// a component that extends a component, and `{}` for one with no host.
+// A parent's `@event:` on the component indexes `el` to claim the
+// handler's `target`, so a listener on a hostless component is a miss
+// in `{}` — a record rather than an absent member because the class
+// road extends an `any` base, where an absent member indexes silently.
+export const HOST = '__host';
+export const hostTypeText = (info) => {
+  if (info.extendsTag !== null) return `{ el: ${hostText(info.extendsTag, SVG_ONLY_TAGS.has(info.extendsTag))} }`;
+  if (info.extendsComponent !== null) return `InstanceType<typeof ${info.extendsComponent}>['${HOST}']`;
+  return '{}';
+};
+
 export const restOfComponentText = (info) => {
   const own = new Set(['children', ...(info.lineOwned ?? [])]);
   for (const m of publicProps(info)) own.add(m.name);
@@ -929,7 +960,7 @@ export const restOfComponentText = (info) => {
 // so a consumer compiled with the language lib alone still resolves
 // every name the file uses; a new DOM global in the minted text joins
 // this list or the consumer's TS2304 is the only gate that sees it.
-export const DOM_LIB_GLOBALS = ['Node', 'HTMLElementTagNameMap', 'CSSStyleProperties', 'CSSStyleDeclarationBase'];
+export const DOM_LIB_GLOBALS = ['Node', 'HTMLElementTagNameMap', 'SVGElementTagNameMap', 'CSSStyleProperties', 'CSSStyleDeclarationBase'];
 
 export function propsTypeSegments(info, { road = 'dts' } = {}) {
   const props = publicProps(info);
@@ -948,12 +979,19 @@ export function propsTypeSegments(info, { road = 'dts' } = {}) {
       { text: m.name, node: m.nameNode, role: m.nameRole },
       { text: '?', node: m.node, role: 'optionalMarker' },
     );
-    const wide = t !== null && widensToUndefined(m) ? `${t} | undefined` : t;
+    const group = t !== null && unionNeedsGroup(t);
+    const grouped = group ? `(${t})` : t;
+    const wide = t !== null && widensToUndefined(m) ? `${grouped} | undefined` : t;
+    // On the props surface a container arm follows the type, so a
+    // function type groups there and only there.
     const typed = m.annotation !== null
       ? { text: `: ${t}`, node: m.node, role: 'annotation' }
       : { text: `: ${t}` };
+    const typedGrouped = m.annotation !== null
+      ? [{ text: ': (' }, { text: t, node: m.node, role: 'annotation' }, { text: ')' }]
+      : [{ text: `: ${grouped}` }];
     if (t === null) segs.push({ text: ': any' });
-    else if (containerish(m)) segs.push(typed, { text: ` | ${containerType(wide)}` });
+    else if (containerish(m)) segs.push(...(group ? typedGrouped : [typed]), { text: ` | ${containerType(wide)}` });
     else segs.push(typed);
     if (containerish(m)) {
       segs.push({ text: `; __bind_${m.name}__?: ${containerType(wide ?? 'any')}` });
@@ -998,11 +1036,13 @@ export function propsTypeSegments(info, { road = 'dts' } = {}) {
   if (info.extendsComponent !== null) segs.push({ text: ` & ${restOfComponentText(info)}` });
   for (const m of props.filter(isRequiredProp)) {
     const t = m.annotation;
+    const group = unionNeedsGroup(t);
     segs.push(
       { text: ' & ({ ' },
       { text: m.name, node: m.nameNode, role: m.nameRole },
-      { text: `: ${t}`, node: m.node, role: 'annotation' },
-      { text: ` | ${containerType(t)} } | { __bind_${m.name}__: ${containerType(t)} })` },
+      { text: `: ${group ? '(' : ''}` },
+      { text: t, node: m.node, role: 'annotation' },
+      { text: `${group ? ')' : ''} | ${containerType(t)} } | { __bind_${m.name}__: ${containerType(t)} })` },
     );
   }
   return segs;
@@ -1088,7 +1128,6 @@ export const AMBIENT_FIELDS = ['stash', 'router', 'params', 'query'];
 const RUNTIME_API = [
   { name: 'mount', params: 'target?: Node | string', returns: null },
   { name: 'unmount', params: 'options?: { removeDOM?: boolean }', returns: 'void' },
-  { name: 'emit', params: 'name: string, detail?: unknown', returns: 'void' },
 ];
 
 // The interface road's spelling: method members.
@@ -1338,6 +1377,7 @@ export function instanceTypeLines(info, selfType, { road = 'dts' } = {}) {
   // in the declarations (a .d.ts owes its reader a self-contained type).
   if (info.extendsTag !== null) lines.push({ segs: [{ text: `rest: ${restContainerType(road === 'face' ? restAliasName(info.extendsTag) : restPassthroughText(info.extendsTag))};` }] });
   else if (info.extendsComponent !== null) lines.push({ segs: [{ text: `rest: ${restContainerType(restOfComponentText(info))};` }] });
+  lines.push({ segs: [{ text: `${HOST}?: ${hostTypeText(info)};` }] });
   for (const text of runtimeApiMembers(selfType)) lines.push({ segs: [{ text }] });
   return lines;
 }

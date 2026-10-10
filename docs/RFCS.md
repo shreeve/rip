@@ -6,7 +6,7 @@ Design proposals under discussion. The **Tags** column groups by area (`type-sys
 | ---: | ------------------------------------------------------------------------------------ | ---------------------- | ----------- |
 |    1 | [Split `rip/ui` into headless components and `rip/email`](#rfc-1-split-ripui-into-headless-components-and-ripemail) | `packaging`, `runtime` | 🟢 Implemented |
 |    2 | [Context names its provider: `accept name from Provider`](#rfc-2-context-names-its-provider-accept-name-from-provider) | `compiler`, `runtime`, `type-system` | 🟢 Implemented |
-|    3 | [A child notifies its parent through a callback prop](#rfc-3-a-child-notifies-its-parent-through-a-callback-prop) | `compiler`, `runtime`, `type-system` | 🟡 Proposed |
+|    3 | [A child notifies its parent through a callback prop](#rfc-3-a-child-notifies-its-parent-through-a-callback-prop) | `compiler`, `runtime`, `type-system` | 🟢 Implemented |
 
 ---
 
@@ -120,7 +120,7 @@ The grammar production, the lexer's statement boundary for `offer`, and the emit
 
 ## RFC 3: A child notifies its parent through a callback prop
 
-> **Status: Proposed.**
+> **Status: Implemented.** Three things landed differently from the text below: the host rides every component's face as a record, `__host: { el: <tag interface> }` or `{}`, because the class road extends an `any` base, where an absent member indexes silently; a missing required prop is named from the emitter's records, the keys a construction passes against the props a module-scope component requires, because tsgo's sentence elides the arm that names it, so an imported component keeps the checker's words; and a component that declares its own `emit` member keeps it, since nothing on the base collides with the name now.
 
 A component that has something to tell its parent declares a function-typed prop and calls it: `@onEnded?: (seconds: number) => void` in the head, `onEnded? seconds` in the body, `Timer duration: 3, onEnded: (seconds) -> …` at the use site. There is no event concept. `@emit` leaves the runtime, and `@name:` on a component means a DOM listener on the component's host element and nothing else, so it is refused on a component that extends no tag. The prop head learns to take a function type without wrapping parens.
 
@@ -139,7 +139,7 @@ A component that has something to tell its parent declares a function-typed prop
 
 **`emit` leaves the runtime.** `@emit` inside a component body is a compile error at the word, naming the prop form.
 
-**`@name:` on a component is a DOM listener on its host.** A component that extends a tag keeps `@click:`, typed as a native site is, `HTMLElementEventMap['click'] & { target: <button>; currentTarget: <button> }`, which `Button` and `Menu.Item` gain in place of today's `any`; a name outside the DOM vocabulary is refused there. A component that extends no tag has no host, so any `@name:` on it is a compile error naming the prop form. The ui package's demo binds DOM events on components only where they extend a tag, so it pays nothing.
+**`@name:` on a component is a DOM listener on its host.** A component that extends a tag keeps `@click:`, typed as a native site is, `HTMLElementEventMap['click'] & { target: <button>; currentTarget: <button> }`, which `Button` and `Menu.Item` gain in place of today's `any`; a custom name is admitted there as on a native element, since a host document may read its own spellings. A component that extends no tag has no host, so any `@name:` on it is a compile error naming the prop form. The ui package's demo binds DOM events on components only where they extend a tag, so it pays nothing.
 
 **A missing required prop reads as one.** Omitting `@onDone: (() => void)` today reports TS2345 in the words of `__bind_onDone__`. `mapTsDiagnostic` words it `Child requires 'onDone'`, for every required prop.
 
