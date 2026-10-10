@@ -588,6 +588,9 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // stays a comment) and `.class-name` chains consume tight hyphens.
   let inRender = false;
   let renderDepth = 0;
+  // Inside render, a function body (`@click: ->` + INDENT) is code, not
+  // template: the indent depth that opened it, while it lasts.
+  let renderCodeFloor = null;
   let nextId = 0; // stable token ids, creation order
   const pendingOrigin = []; // synthetic tokens awaiting the next real token's id
 
@@ -713,6 +716,13 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // stand: a line start, or the word spaced after a tag on its line
   // (`div x-icon` nests the element, as `div span` does).
   const customElementStart = (prev) => {
+    if (renderCodeFloor !== null) return false;
+    // An arrow earlier on the line opens a one-line function body.
+    for (let k = tokens.length - 1; k >= 0; k--) {
+      const kind = tokens[k].kind;
+      if (kind === 'TERMINATOR' || kind === 'INDENT' || kind === 'OUTDENT' || kind === 'RENDER') break;
+      if (kind === '->' || kind === '=>') return false;
+    }
     if (!prev || prev.kind === 'INDENT' || prev.kind === 'TERMINATOR' || prev.kind === 'OUTDENT' || prev.kind === 'RENDER') return true;
     if (!pendingSpaced || prev.generated) return false;
     let j = tokens.length - 1;
@@ -1160,6 +1170,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     const blockEnd = lastRealEnd();
     while (indents.length > frame.depth) {
       indents.pop();
+      if (renderCodeFloor !== null && indents.length < renderCodeFloor) renderCodeFloor = null;
       synth('OUTDENT', blockEnd);
     }
     clearTypeBodyBelowFloor();
@@ -1182,6 +1193,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         );
       }
       indents.pop();
+      if (renderCodeFloor !== null && indents.length < renderCodeFloor) renderCodeFloor = null;
       synth('OUTDENT', blockEnd);
     }
     clearTypeBodyBelowFloor();
@@ -1323,6 +1335,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         // this indent is type text (nested layout indents inherit
         // through the floor comparison).
         if (typeBodyFloor === null && typeBodyHead()) typeBodyFloor = indents.length + 1;
+        if (inRender && renderCodeFloor === null && (last()?.kind === '->' || last()?.kind === '=>')) renderCodeFloor = indents.length + 1;
         indents.push(prefix);
         // Anchor at the first real token of the deeper line, not the line
         // start — a block's $self span begins at its content.
@@ -1343,7 +1356,10 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       }
       // A line back at (or above) the render statement's own depth
       // leaves the render block.
-      if (inRender && indents.length <= renderDepth) inRender = false;
+      if (inRender && indents.length <= renderDepth) {
+        inRender = false;
+        renderCodeFloor = null;
+      }
       atLineStart = false;
       pendingNewLine = true;
       if (seenFor !== null && parens.length <= seenFor) seenFor = null;

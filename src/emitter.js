@@ -1594,6 +1594,34 @@ class Emitter {
   // binding or parameter, or a component member? The walk is
   // resolveBareRead's, which answers null for a plain binding and for
   // nothing alike.
+  // A positioned render rejection whose node may be a bare string (a
+  // tag word carries no span of its own): the open mark positions it.
+  renderAmbiguity(node, message) {
+    const m = this.b.currentMark;
+    if (typeof node === 'string' && m) {
+      const hits = this.stores.primitiveSpans(node, m.sourceStart, m.sourceEnd);
+      if (hits.length === 1) return this.positionedErrorAt(hits[0].sourceStart, hits[0].sourceEnd, message);
+    }
+    const err = this.positionedError(node, message, this.rstate?.node);
+    if (typeof err.start !== 'number' && m) {
+      err.start = this.b.currentMark.sourceStart;
+      err.end = this.b.currentMark.sourceEnd;
+    }
+    return err;
+  }
+
+  // A member chain rooted at a name that is both a tag and a component
+  // member or module binding (`summary.total`, `i.icon`) reads either
+  // way; render locals and loop variables shadow the tag by rule, and
+  // everything else bound rejects rather than guess.
+  rejectBoundTagRoot(node, tag) {
+    if (this.bindsName(tag)) {
+      throw this.renderAmbiguity(node,
+        `emitter: '${tag}' names both an element and a binding here, so this chain could build a <${tag}> or read the binding — ` +
+        `put \`= …\` on its own line under the element for the value, or rename the binding to use the element`);
+    }
+  }
+
   bindsName(name) {
     for (let i = this.rframes.length - 1; i >= 0; i--) {
       const f = this.rframes[i];
@@ -11236,7 +11264,8 @@ class Emitter {
     // (`summary.total` after `summary := {…}` reads the member).
     if (headStr === '.') {
       const { tag, classes, id } = Emitter.collectTemplateClasses(sexpr);
-      if (tag !== null && isHtmlTag(tag) && this.renderVarKind(tag) === null && !this.bindsName(tag)) {
+      if (tag !== null && isHtmlTag(tag) && this.renderVarKind(tag) === null) {
+        this.rejectBoundTagRoot(sexpr, tag);
         return this.renderTag(sexpr, tag, classes, [], id);
       }
       // General member chain → text (static or live).
@@ -11284,7 +11313,8 @@ class Emitter {
         }
       }
       const { tag, classes, id } = Emitter.collectTemplateClasses(head);
-      if (tag !== null && isHtmlTag(tag) && this.renderVarKind(tag) === null && (classes.length === 0 || !this.bindsName(tag))) {
+      if (tag !== null && isHtmlTag(tag) && this.renderVarKind(tag) === null) {
+        if (classes.length > 0) this.rejectBoundTagRoot(sexpr, tag);
         if (classes.length > 0 && classes[classes.length - 1] === '__clsx') {
           return this.renderDynamicTag(sexpr, tag, sexpr.slice(1), [], classes.slice(0, -1), id);
         }
@@ -11441,6 +11471,14 @@ class Emitter {
   // element with its tag-word intrinsics row, id, inherited-target
   // binding, and the data-part stamp. Returns { el, isSvg }.
   renderElementPrologue(node, tag) {
+    // `total-count` with every part bound reads as subtraction as well
+    // as a custom element; the lexer cannot see bindings, so the
+    // ambiguity rejects here rather than silently picking the tag.
+    if (isCustomElementName(tag) && tag.split('-').every((n) => this.renderVarKind(n) !== null || this.bindsName(n))) {
+      throw this.renderAmbiguity(node,
+        `emitter: '${tag}' reads as a custom element, but every part of it names a binding here, so it could be a subtraction — ` +
+        `write the arithmetic spaced or as \`= ${tag.split('-').join(' - ')}\`, or rename a binding to use the element`);
+    }
     const R = this.rstate;
     const el = this.newRenderVar();
     R.tags.set(el, tag);

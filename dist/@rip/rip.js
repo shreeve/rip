@@ -5963,6 +5963,7 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
   let seenExport = false;
   let inRender = false;
   let renderDepth = 0;
+  let renderCodeFloor = null;
   let nextId = 0;
   const pendingOrigin = [];
   const fail = (message, at, end = at) => {
@@ -6052,6 +6053,15 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
     return TEMPLATE_TAGS.has(tag) || tag.includes("-");
   };
   const customElementStart = (prev) => {
+    if (renderCodeFloor !== null)
+      return false;
+    for (let k = tokens.length - 1;k >= 0; k--) {
+      const kind = tokens[k].kind;
+      if (kind === "TERMINATOR" || kind === "INDENT" || kind === "OUTDENT" || kind === "RENDER")
+        break;
+      if (kind === "->" || kind === "=>")
+        return false;
+    }
     if (!prev || prev.kind === "INDENT" || prev.kind === "TERMINATOR" || prev.kind === "OUTDENT" || prev.kind === "RENDER")
       return true;
     if (!pendingSpaced || prev.generated)
@@ -6432,6 +6442,8 @@ ${baseline}`).join(`
     const blockEnd = lastRealEnd();
     while (indents.length > frame.depth) {
       indents.pop();
+      if (renderCodeFloor !== null && indents.length < renderCodeFloor)
+        renderCodeFloor = null;
       synth("OUTDENT", blockEnd);
     }
     clearTypeBodyBelowFloor();
@@ -6445,6 +6457,8 @@ ${baseline}`).join(`
         fail(`dedent to ${JSON.stringify(prefix)} crosses the enclosing bracket's ` + `indentation floor ${JSON.stringify(indents[indents.length - 1])}`, lineStart);
       }
       indents.pop();
+      if (renderCodeFloor !== null && indents.length < renderCodeFloor)
+        renderCodeFloor = null;
       synth("OUTDENT", blockEnd);
     }
     clearTypeBodyBelowFloor();
@@ -6536,6 +6550,8 @@ ${baseline}`).join(`
       if (prefix !== current && prefix.startsWith(current)) {
         if (typeBodyFloor === null && typeBodyHead())
           typeBodyFloor = indents.length + 1;
+        if (inRender && renderCodeFloor === null && (last()?.kind === "->" || last()?.kind === "=>"))
+          renderCodeFloor = indents.length + 1;
         indents.push(prefix);
         synth("INDENT", pos);
       } else {
@@ -6547,8 +6563,10 @@ ${baseline}`).join(`
           push("TERMINATOR", text.slice(lastNewlinePos, lastNewlinePos + nl), lastNewlinePos, lastNewlinePos + nl, { generated: true });
         }
       }
-      if (inRender && indents.length <= renderDepth)
+      if (inRender && indents.length <= renderDepth) {
         inRender = false;
+        renderCodeFloor = null;
+      }
       atLineStart = false;
       pendingNewLine = true;
       if (seenFor !== null && parens.length <= seenFor)
@@ -10030,6 +10048,25 @@ class Emitter {
   }
   isReactiveName(name) {
     return this.resolveBareRead(name) === "reactive";
+  }
+  renderAmbiguity(node, message) {
+    const m = this.b.currentMark;
+    if (typeof node === "string" && m) {
+      const hits = this.stores.primitiveSpans(node, m.sourceStart, m.sourceEnd);
+      if (hits.length === 1)
+        return this.positionedErrorAt(hits[0].sourceStart, hits[0].sourceEnd, message);
+    }
+    const err = this.positionedError(node, message, this.rstate?.node);
+    if (typeof err.start !== "number" && m) {
+      err.start = this.b.currentMark.sourceStart;
+      err.end = this.b.currentMark.sourceEnd;
+    }
+    return err;
+  }
+  rejectBoundTagRoot(node, tag) {
+    if (this.bindsName(tag)) {
+      throw this.renderAmbiguity(node, `emitter: '${tag}' names both an element and a binding here, so this chain could build a <${tag}> or read the binding — ` + `put \`= …\` on its own line under the element for the value, or rename the binding to use the element`);
+    }
   }
   bindsName(name) {
     for (let i = this.rframes.length - 1;i >= 0; i--) {
@@ -17325,7 +17362,8 @@ ${pad ?? ""}`);
       return this.renderChildComponent(sexpr, { text: memberHead, node: head }, sexpr.slice(1));
     if (headStr === ".") {
       const { tag, classes, id } = Emitter.collectTemplateClasses(sexpr);
-      if (tag !== null && isHtmlTag2(tag) && this.renderVarKind(tag) === null && !this.bindsName(tag)) {
+      if (tag !== null && isHtmlTag2(tag) && this.renderVarKind(tag) === null) {
+        this.rejectBoundTagRoot(sexpr, tag);
         return this.renderTag(sexpr, tag, classes, [], id);
       }
       return this.renderTextExpr(sexpr);
@@ -17357,7 +17395,9 @@ ${pad ?? ""}`);
         }
       }
       const { tag, classes, id } = Emitter.collectTemplateClasses(head);
-      if (tag !== null && isHtmlTag2(tag) && this.renderVarKind(tag) === null && (classes.length === 0 || !this.bindsName(tag))) {
+      if (tag !== null && isHtmlTag2(tag) && this.renderVarKind(tag) === null) {
+        if (classes.length > 0)
+          this.rejectBoundTagRoot(sexpr, tag);
         if (classes.length > 0 && classes[classes.length - 1] === "__clsx") {
           return this.renderDynamicTag(sexpr, tag, sexpr.slice(1), [], classes.slice(0, -1), id);
         }
@@ -17482,6 +17522,9 @@ ${pad ?? ""}`);
     return [...keys];
   }
   renderElementPrologue(node, tag) {
+    if (isCustomElementName(tag) && tag.split("-").every((n) => this.renderVarKind(n) !== null || this.bindsName(n))) {
+      throw this.renderAmbiguity(node, `emitter: '${tag}' reads as a custom element, but every part of it names a binding here, so it could be a subtraction — ` + `write the arithmetic spaced or as \`= ${tag.split("-").join(" - ")}\`, or rename a binding to use the element`);
+    }
     const R = this.rstate;
     const el = this.newRenderVar();
     R.tags.set(el, tag);
@@ -32471,7 +32514,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "f496a8e80e90c312";
+var compilerBuild = () => "9677d930baa57bf0";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

@@ -968,59 +968,38 @@ fail 'a bare member read inside a class body rejects', '''
       K
   ''', "component member 'name' is not reachable here"
 
-# A member or binding named like a tag, read through a property, is the
-# value — as a render local already is. An unbound name stays the tag.
-code 'a member named like a tag reads its value through a property', '''
+# A member chain rooted at a component member or module binding that is
+# also a tag name reads either way, so it rejects; render locals and loop
+# variables shadow the tag by rule, and an unbound name stays the tag.
+fail 'a member named like a tag in a chain rejects as ambiguous', '''
   A = component
     summary := {total: 42}
     render
       p summary.total
+  ''', "'summary' names both an element and a binding here"
+
+fail 'a module binding named like a tag in a chain rejects as ambiguous', '''
+  i = 1
+  A = component
+    render
+      i.fa.fa-check
+  ''', "'i' names both an element and a binding here"
+
+code 'an unbound tag-named chain is the tag', '''
+  A = component
+    render
+      p option.label
   ''', '''
   let A = class extends __Component {
     _init(__given) {
-      this.summary = __state({total: 42});
     }
     _create() {
       this._el0 = document.createElement('p');
       this._el0.setAttribute('data-part', 'A');
-      this._t0 = document.createTextNode('');
-      this._el0.appendChild(this._t0);
-      return this._el0;
-    }
-    _setup() {
-      __effect(() => { this._t0.data = this.summary.value.total; });
-    }
-  };
-  '''
-
-code 'a module binding named like a tag reads its value; an unbound one is the tag', '''
-  title = "hello"
-  A = component
-    render
-      div
-        p title.length
-        p option.label
-  ''', '''
-  let title = "hello";
-  let A = class extends __Component {
-    _init(__given) {
-    }
-    _create() {
-      this._el0 = document.createElement('div');
-      this._el0.setAttribute('data-part', 'A');
-      this._el1 = document.createElement('p');
-      this._t0 = document.createTextNode('');
-      this._el1.appendChild(this._t0);
+      this._el1 = document.createElement('option');
+      this._el1.className = 'label';
       this._el0.appendChild(this._el1);
-      this._el2 = document.createElement('p');
-      this._el3 = document.createElement('option');
-      this._el3.className = 'label';
-      this._el2.appendChild(this._el3);
-      this._el0.appendChild(this._el2);
       return this._el0;
-    }
-    _setup() {
-      __effect(() => { this._t0.data = title.length; });
     }
   };
   '''
@@ -1089,6 +1068,48 @@ code 'a hyphenated word after a tag on its line nests a custom element', '''
       this._el5 = document.createElement('span');
       this._el5.setAttribute('aria-label', "x");
       this._el0.appendChild(this._el5);
+      return this._el0;
+    }
+  };
+  '''
+
+fail 'a custom element whose every part is bound rejects as ambiguous', '''
+  A = component
+    total := 1
+    count := 2
+    render
+      div
+        total-count
+  ''', "every part of it names a binding here"
+
+code 'a hyphen inside a render handler body stays subtraction', '''
+  A = component
+    total := 10
+    count := 2
+    render
+      div
+        button @click: ->
+          offset = 2
+          total-offset
+        button @click: -> label total-count
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.total = __state(10);
+      this.count = __state(2);
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._el1 = document.createElement('button');
+      this._el1.addEventListener('click', (e) => __batch(() => (() => {
+    let offset = 2;
+    return (this.total.value - offset);
+  })(e)));
+      this._el0.appendChild(this._el1);
+      this._el2 = document.createElement('button');
+      this._el2.addEventListener('click', (e) => __batch(() => (() => label(this.total.value - this.count.value))(e)));
+      this._el0.appendChild(this._el2);
       return this._el0;
     }
   };
