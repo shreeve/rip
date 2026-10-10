@@ -162,6 +162,16 @@ export function mapTsDiagnostic(good, d) {
   // key — the one re-anchor path, over the two records the emitter keeps
   // (recordedAnchor). Judged on the GENERATED span, exactly.
   if (span) span = recordedAnchor(good, s, e, d.code) ?? span;
+  // A listener on a child with no host: the listener's host cast indexes
+  // `el` in the child's `__host` record, TS-only bytes with no row of
+  // their own, so the miss stands inside a recorded relation site and
+  // anchors on its key.
+  const hostMiss = d.code === 2339 && /'el' does not exist on type '\{\}'/.test(d.message) &&
+    good.code.slice(good.code.lastIndexOf('\n', s) + 1, good.code.indexOf('\n', e)).includes("['__host']>['el']");
+  if (!span && hostMiss) {
+    const pair = good.renderPairs?.find((p) => p.sites.some(([a, b]) => a <= s && e <= b));
+    if (pair) span = [pair.key[0], pair.key[1]];
+  }
   // A generated span with no source mapping lives in a purely
   // synthetic region. A TYPE claim there is about bytes the author
   // never wrote — dropped. A SYNTAX-class error there still means the
@@ -295,6 +305,35 @@ export function mapTsDiagnostic(good, d) {
     // name the message quotes, so a property miss that merely shares
     // the span keeps its own voice.
     if (row && d.code === 2339 && d.message.includes(`'${row.name}'`)) return null;
+  }
+  // A LISTENER ON A CHILD WITH NO HOST. `@event:` on a component casts
+  // the listener's element to `el` in the child's `__host` record, which
+  // is `{}` for a component that extends nothing; tsgo reports the index
+  // miss inside the listener line, and the event word the emitter
+  // recorded is where the author reads it.
+  if (hostMiss) {
+    const row = (good.intrinsics ?? []).find((r) => r.kind === 'event' && r.child != null && r.start >= span[0] && r.end <= span[1]);
+    if (row) {
+      span = [row.start, row.end];
+      message = `${row.child} extends no tag, so \`@${row.name}:\` has no element to listen on — ` +
+        'a child notifies its parent through a callback prop';
+    }
+  }
+  // A REQUIRED PROP THE CONSTRUCTION OMITS. The props parameter spells a
+  // required prop as the two-arm union its bind channel admits, and
+  // tsgo's sentence elides the arm, so the miss is named from the
+  // records: the construction site carries the keys it passes, and a
+  // module-scope component carries the props it requires. An imported
+  // component keeps the checker's words, and so does a mismatch inside
+  // a prop's own value, which maps past the site's start.
+  if (d.code === 2345) {
+    const row = (good.componentUses ?? []).find((r) => r.start === span[0] && r.end <= span[1] && r.keys != null);
+    const required = row ? good.componentProps?.[row.name]?.required : undefined;
+    const missing = required ? required.filter((k) => !row.keys.includes(k)) : [];
+    if (missing.length > 0) {
+      span = [row.start, row.end];
+      message = `${row.name} requires ${missing.map((k) => `'${k}'`).join(', ')}`;
+    }
   }
   // AN ACCEPT ITS PROVIDER DOES NOT ANSWER. The face types an accept by
   // indexing the record of what the provider offers, so tsgo reports a

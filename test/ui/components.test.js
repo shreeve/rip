@@ -535,15 +535,15 @@ describe('the defect layer: every silent  class rejects loudly, positioned', () 
     emitFails('C = component\n  create_block_0 = -> 1\n  render\n    div "x"', /member 'create_block_0' collides/);
   });
 
-  test("the runtime API namespace: a member named mount/unmount/emit rejects in BOTH modes (the GPT addendum, F2)", () => {
+  test("the runtime API namespace: a member named mount/unmount rejects in BOTH modes (the GPT addendum, F2)", () => {
     // Such a member silently shadowed the prototype API in JS mode
-    // (the machinery calls mount/unmount/emit on every instance —
+    // (the machinery calls mount/unmount on every instance —
     // the unmount cascade would invoke the user's member), and the
     // typed artifacts declared the name twice (TS2300/TS2416 over
     // the whole component). The runtime already rejected declared
     // PROPS of these names at construction; the compile rejection
     // closes the private-member half of the same hazard.
-    for (const name of ['mount', 'unmount', 'emit']) {
+    for (const name of ['mount', 'unmount']) {
       emitFails(`C = component\n  ${name} := 1\n  render\n    div "x"`, /collides with the component runtime API/);
       emitFails(`C = component\n  ${name} = (x) -> x\n  render\n    div "x"`, /collides with the component runtime API/);
       // The face path rejects identically (JS mode is emitFails above).
@@ -904,7 +904,7 @@ describe('the static render DSL: emission pins', () => {
     // Bare: missing method.
     emitFails('P = component\n  render\n    button @click\n', /requires a component method `onClick`/);
     // Bare: the onError ambiguity.
-    emitFails('P = component\n  onError = -> 1\n  render\n    img @error\n', /ambiguous with the onError lifecycle hook/);
+    emitFails('P = component\n  onError = -> 1\n  render\n    img @error\n', /would bind `onError`, which is the error-boundary hook/);
     // Bare with the method present: batched member dispatch.
     expect(compile('P = component\n  onClick = -> 1\n  render\n    button @click\n').code)
       .toContain("this._el0.addEventListener('click', (e) => __batch(() => (this.onClick)(e)));");
@@ -2397,23 +2397,23 @@ App = component
   });
 
   test('props, events, and children mix in the indented body (\'s split)', () => {
-    const { code } = compile(`Card = component
+    const { code } = compile(`Card = component extends div
   @title := "t"
   render
     div
       slot
 App = component
-  onSave = (e) ->
+  onClick = (e) ->
     e
   render
     Card title: "t"
       compact
       p "child"
-      @save: @onSave
+      @click: @onClick
 `);
     expect(code).toContain('new Card({ title: "t", compact: true });');
     expect(code).toContain('this._inst0._setChildren(this._el2);');
-    expect(code).toContain("addEventListener('save'");
+    expect(code).toContain("addEventListener('click'");
   });
 
   test('nested child components inside children blocks recurse (a component child of a component)', () => {
@@ -2451,17 +2451,18 @@ App = component
   });
 });
 
-describe('child components: events — `emit` reaches the parent\'s `@event:` binding', () => {
-  test('an explicit `@save:` binding listens on the child\'s root (\'s exact line); bare directives keep the validation', () => {
-    const { code } = compile(`${KID}App = component
-  onSave = (e) ->
+describe('child components: events — `@event:` is a DOM listener on the child\'s host', () => {
+  const HOSTED = 'Kid = component extends button\n  @label := "k"\n  render\n    button\n      = @label\n';
+
+  test('an explicit `@click:` binding listens on the element the child inherits (\'s exact line); bare directives keep the validation', () => {
+    const { code } = compile(`${HOSTED}App = component
+  onClick = (e) ->
     e
   render
-    Kid @save: @onSave
+    Kid @click: @onClick
 `);
     expect(code).toContain(
-      "if (this._inst0) (this._inst0._nodes?.[0] ?? this._el1).addEventListener('save', (e) => __batch(() => (this.onSave)(e)));");
-    // Bare `@save` is not a DOM event — compile parity with the old runtime (p5).
+      "if (this._inst0) __hostOf(this._inst0, 'click').addEventListener('click', (e) => __batch(() => (this.onClick)(e)));");
     emitFails(`${KID}App = component
   onSave = (e) ->
     e
@@ -2470,21 +2471,52 @@ describe('child components: events — `emit` reaches the parent\'s `@event:` bi
 `, /`@save` is not a DOM event/);
   });
 
-  test('the listener param mints against the handler\'s reads ', () => {
-    const { code } = compile(`${KID}App = component
-  e := 1
+  test('a custom name on a hosted child listens on its host as it would on a native element, the handler untyped', () => {
+    const { code } = compile(`${HOSTED}App = component
+  onSave = (e) ->
+    e
   render
-    Kid @save: (=> e + 1)
-`);
-    expect(code).toMatch(/addEventListener\('save', \(e_\) => __batch\(\(\) => \(.*\)\(e_\)\)\)/);
+    Kid @save: @onSave
+`, { runtimeDelivery: 'none', face: 'ts' });
+    expect(code).toContain("(__hostOf(this._inst0, 'save') as NonNullable<InstanceType<typeof Kid>['__host']>['el']).addEventListener(");
+    expect(code).toContain("as any)");
   });
 
-  test('`@emit` is the child→parent channel (the M12-A runtime method); BARE `emit` stays a bare call — \'s own doomed shape, parity', () => {
-    const viaMember = compile('Kid = component\n  fire = ->\n    @emit "save", 1\n  render\n    div "k"\n').code;
-    expect(viaMember).toContain('return this.emit("save", 1);');
-    // the old runtime emits the bare call too — a dispatch-time ReferenceError in
-    // BOTH compilers (ordinary JS scope semantics; `emit` is not a
-    // member, and capturing it would shadow user module functions).
+  test('the listener param mints against the handler\'s reads ', () => {
+    const { code } = compile(`${HOSTED}App = component
+  e := 1
+  render
+    Kid @click: (=> e + 1)
+`);
+    expect(code).toMatch(/addEventListener\('click', \(e_\) => __batch\(\(\) => \(.*\)\(e_\)\)\)/);
+  });
+
+  test('the face: a child declares its host as a record, and a listener claims the handler\'s target as it', () => {
+    const ts = (src) => compile(src, { runtimeDelivery: 'none', face: 'ts' }).code;
+    const hosted = ts(`${HOSTED}Part = component extends Kid
+  render
+    Kid
+Bare = component
+  render
+    div "b"
+App = component
+  render
+    Kid @click: (e) -> e
+`);
+    expect(hosted).toContain("declare __host: { el: HTMLElementTagNameMap['button'] };");
+    expect(hosted).toContain("declare __host: InstanceType<typeof Kid>['__host'];");
+    expect(hosted).toContain('declare __host: {};');
+    expect(hosted).toContain("(__hostOf(this._inst0, 'click') as NonNullable<InstanceType<typeof Kid>['__host']>['el']).addEventListener(");
+    expect(hosted).toContain(
+      "as (e: HTMLElementEventMap['click'] & { target: Extract<NonNullable<InstanceType<typeof Kid>['__host']>, { el: unknown }>['el']; " +
+      "currentTarget: Extract<NonNullable<InstanceType<typeof Kid>['__host']>, { el: unknown }>['el'] }) => unknown)");
+  });
+
+  test('`@emit` names no member; a declared `emit` is the author\'s own; BARE `emit` stays a bare call', () => {
+    emitFails('Kid = component\n  fire = ->\n    @emit "save", 1\n  render\n    div "k"\n',
+      /`@emit` is not a component member — a child notifies its parent through a callback prop: declare `@onSaved\?: \(\) => void` and call `onSaved\?\(\)`/);
+    const own = compile('Kid = component\n  emit = (n) -> n\n  fire = ->\n    @emit 1\n  render\n    div "k"\n').code;
+    expect(own).toContain('return this.emit(1);');
     const bare = compile('Kid = component\n  fire = ->\n    emit "save", 1\n  render\n    div "k"\n').code;
     expect(bare).toContain('return emit("save", 1);');
   });

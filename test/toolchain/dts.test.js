@@ -458,7 +458,8 @@ describe('component declarations: the class shape, the props surface, the extend
     expect(d).toContain('  mounted(): any;');
     expect(d).toContain('  mount(target?: Node | string): Counter;');
     expect(d).toContain('  unmount(options?: { removeDOM?: boolean }): void;');
-    expect(d).toContain('  emit(name: string, detail?: unknown): void;');
+    expect(d).toContain('  __host?: {};');
+    expect(d).not.toContain('emit(');
     expect(d).toContain('declare let Counter: {');
     // The required prop's union arm and the bind slot.
     expect(d).toContain('& ({ title: string | { value: string; read(): string; touch?(): void } } | { __bind_title__: { value: string; read(): string; touch?(): void } })');

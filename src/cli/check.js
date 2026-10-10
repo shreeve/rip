@@ -827,6 +827,7 @@ while (queue.length) {
       // the mapper re-words, so batch and editor read one message.
       intrinsics: result.intrinsics ?? [],
       componentUses: result.componentUses ?? [],
+      componentProps: result.componentProps ?? {},
       kinds: result.kinds ?? [],
       // Display-side route-union prettifying (mapTsDiagnostic): the CLI
       // reads the same words the editor does.

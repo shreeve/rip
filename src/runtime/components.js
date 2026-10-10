@@ -1,7 +1,7 @@
 // The component runtime — the class components compile onto,
 // the component stack, context, and the render-DSL helpers.
 //
-//   __Component               - the base class (props/mount/unmount/emit;
+//   __Component               - the base class (props/mount/unmount;
 //                               an explicit `children:` prop rides the
 //                               constructor and a body projection lands
 //                               through _setChildren, built under the
@@ -63,6 +63,10 @@
 //                               injected presets
 //   __handleComponentError(e, c) - walk the parent chain to the nearest
 //                               onError boundary; rethrow past the root
+//   __hostOf(inst, event)     - the inherited element a parent's
+//                               `@event:` listens on; a component with
+//                               no host REJECTS (a callback prop is
+//                               the channel)
 //   __reportChildFailure(name, e) - the report for a child the construct
 //                               site contained (no boundary took its
 //                               error); prints and continues unless a
@@ -870,11 +874,15 @@ function __handleComponentError(error, component) {
   const visited = new Set();
   while (current && !visited.has(current)) {
     visited.add(current);
-    if (current.onError) {
+    // The hook is a class method; an instance's own `onError` is a prop
+    // of that name (a callback the parent supplied) and is never a
+    // boundary.
+    const hook = Object.getPrototypeOf(current)?.onError;
+    if (typeof hook === 'function') {
       const prevC = __pushComponent(current);
       const prevO = __pushOwner(current._frame);
       try {
-        current.onError(failure, component);
+        hook.call(current, failure, component);
         return;
       } catch (_) {
         // A throwing boundary declines this error; continue at its parent
@@ -896,7 +904,7 @@ function __handleComponentError(error, component) {
 // declared list itself validates ONCE per class: an
 // underscore-prefixed name would collide with instance internals
 // (_children, _parent, _frame, …) and a name the prototype chain
-// already answers (mount, unmount, emit, _init, a user method) would
+// already answers (mount, unmount, _init, a user method) would
 // shadow machinery — both reject at first construction, naming the
 // class and the name.
 const __validatedProps = new WeakSet();
@@ -1768,29 +1776,29 @@ class __Component {
     }
     this._teardown({ state: 'unmounted', hooks: this._state === 'mounted', removeDOM });
   }
-  // emit dispatches on the live root; outside that window the event
-  // could only vanish (no root before mount) or dispatch into a
-  // detached tree no listener observes (after unmount) — both reject
-  // loudly instead. The window is _root's
-  // lifetime, so the child protocol (a parent's create phase sets the
-  // child's _root) opens it exactly like a direct mount() does.
-  // A multi-root component's _root is the DocumentFragment, emptied
-  // the moment it was inserted — dispatching there, bubbles: true
-  // reaches nothing. The first tracked node is in the live tree, so
-  // both the direct listener (attached there by the parent's create
-  // phase) and every ancestor observe the event.
-  emit(name, detail) {
-    if (this._state !== 'mounted' || !this._root) {
-      throw new Error(
-        `${this.constructor.name || 'component'}: emit('${name}') outside the mounted window — ` +
-        'emit dispatches on the live root; call after mount and before unmount',
-      );
-    }
-    (this._nodes?.[0] ?? this._root).dispatchEvent(new CustomEvent(name, { detail, bubbles: true }));
-  }
   static mount(target = 'body') {
     return new this().mount(target);
   }
+}
+
+// A parent's `@event:` on a child component is a DOM listener on the
+// element the child inherits through `extends`: its own inherited
+// element, or, for a child that extends a component, the element at
+// the end of the chain of inherited instances. A child with no host has
+// no element that means the event, so the binding rejects at the site
+// naming the channel that does: a callback prop.
+function __hostOf(inst, event) {
+  if (inst.constructor.__extends != null) {
+    let cur = inst;
+    while (cur._inheritedInst) cur = cur._inheritedInst;
+    if (cur._inheritedEl) return cur._inheritedEl;
+  }
+  const name = inst.constructor.name || 'component';
+  const cap = event.charAt(0).toUpperCase() + event.slice(1);
+  throw new Error(
+    `${name}: @${event}: has no element to listen on — ${name} extends no tag. ` +
+    `A child notifies its parent through a callback prop: declare \`@on${cap}?: () => void\` and call \`on${cap}?()\``,
+  );
 }
 
 // The owner-seam names re-export here (beside their reactive home):
@@ -1801,7 +1809,7 @@ class __Component {
 export {
   __Component, __pushComponent, __popComponent, setContext, getContext, hasContext,
   __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach,
-  __reportChildFailure, __setChildFailureReporter,
+  __reportChildFailure, __setChildFailureReporter, __hostOf,
   __ownerFrame, __pushOwner, __popOwner, __detachRef, __claimGateConstructor,
   __hmrRegistry, __hmrLookup, __hmrEntries, __hmrRegisterDefinition, __hmrClassify, __hmrMigrateDiff, __hmrInitDiff,
   __hmrPreserveState, __hmrEmit, __hmrEvents, __hmrPatch, __hmrMigrateRemount, __hmrSnapshotUi, __hmrRestoreUi,

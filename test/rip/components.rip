@@ -747,6 +747,12 @@ fail 'an annotated offer is still a state declaration, not a readonly', '''
     offer limit: number =! 10
 ''', 'emitter: offer takes a state declaration'
 
+fail '@emit names no member: a child notifies its parent through a callback prop', '''
+  Timer = component
+    fire = -> @emit('ended')
+    render null
+''', 'emitter: `@emit` is not a component member'
+
 fail 'accept names its provider', '''
   Child = component
     accept active
@@ -5356,7 +5362,7 @@ code 'boolean prop shorthand — mixed with @event and key:value', '''
         this._el1 = document.createComment('rip:child-error: Btn');
       }
       } finally { __popComponent(__prev); } }
-      if (this._inst0) (this._inst0._nodes?.[0] ?? this._el1).addEventListener('click', (e) => __batch(() => (handler)(e)));
+      if (this._inst0) __hostOf(this._inst0, 'click').addEventListener('click', (e) => __batch(() => (handler)(e)));
       return this._el1;
     }
     _setup() {
