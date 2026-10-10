@@ -282,6 +282,8 @@ def readFull(str, cfg)
         c2 = str.charCodeAt(pos)
         if c2 is sepCode
           pos += sepLen
+          # a separator at the end of the line opens one last, empty field
+          row[fi++] = '' if pos >= len or str.charCodeAt(pos) is nlCode
         else if c2 is nlCode
           pos += crlfLen(str, pos)
           row.length = fi if fi < row.length
@@ -427,7 +429,8 @@ class Writer
 export CSV =
   # parse a CSV string into rows (arrays or objects)
   read: (str, opts = {}) ->
-    return [] unless str?.length
+    throw TypeError.new("CSV.read expects a string, got #{if str is null then 'null' else typeof str}") unless typeof str is 'string'
+    return [] unless str.length
     cfg = probe(str, opts)
     readFull(cfg.str, cfg)
 

@@ -366,6 +366,22 @@ test "dx_codes round-trip", ->
   eq rows[1][1], 'Z00.00, Z11.3'
   eq CSV.read(CSV.write(rows))[1][1], 'Z00.00, Z11.3'
 
+test "a quoted field followed by an empty last field keeps that field", ->
+  eq CSV.read('id,name,note\n1,"Smith, J",\n2,Bob,\n'), [['id','name','note'], ['1','Smith, J',''], ['2','Bob','']]
+  eq CSV.read('"a",'), [['a', '']]
+  eq CSV.read('"a",\r\n"b",\r\n'), [['a', ''], ['b', '']]
+  eq CSV.read(CSV.write([['1','Smith, J','']])), [['1','Smith, J','']]
+
+test "read rejects anything but a string", ->
+  for bad in [42, null, undefined, ['a,b'], {a: 1}]
+    threw = try
+      CSV.read bad
+      null
+    catch e
+      e
+    ok threw instanceof TypeError and threw.message.includes('expects a string'), "CSV.read #{JSON.stringify(bad)} rejects"
+  eq CSV.read(''), []
+
 # ==[ File I/O ]==
 
 console.log "\nFile I/O"

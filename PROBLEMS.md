@@ -301,21 +301,12 @@ $21.4M. `~integer` turns `"9007199254740993"` into `…992` silently;
 
 ## Standard packages
 
-**P1 ✔ H — csv drops a trailing empty field after a quoted field; write-then-read loses a column.**
-`CSV.read 'id,name,note\n1,"Smith, J",\n2,Bob,\n'` → row 1 has two
-fields. `CSV.read CSV.write [['1','Smith, J','']]` returns two columns.
-Cause: readFull's quoted-field branch (packages/csv/csv.rip ~293).
-
 **P2 ✔ H — time `add`/`subtract` with `:quarter`, `:date`, an unknown unit or no unit adds one millisecond.**
 `time.utc('2026-01-15T00:00:00Z').add(1, :quarter)` →
 `…00.001Z`; also `'Q'`, `'fortnight'`, `undefined`. `diff(x, :date)`
 returns milliseconds; `time.duration(1, :quarter)` is NaN. The switch
 ends in `else 1` (packages/time/time.rip ~709). The README alias table
 includes `:quarter` and `:date`.
-
-**P3 ✔ H — testing's README Quick Start fails, because csv accepts non-strings.**
-`throws (-> CSV.read(42)), TypeError, 'expects a string'` fails:
-`CSV.read 42` and `CSV.read null` return `[]` silently.
 
 **P4 H — testing `eq` passes on different Dates, Maps and Sets.**
 `eq new Date(0), new Date(1)`, `eq new Map([[1,2]]), new Map([[1,3]])`,
