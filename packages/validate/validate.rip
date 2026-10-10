@@ -325,7 +325,9 @@ export def validatorNames(): string[]
   Array.from(registry.keys()).sort()
 
 # Apply a validator to a value in hand. Raw validators receive the value
-# untouched; every other validator receives its string form.
+# untouched; every other validator receives its string form, and a value
+# with none — absent, an array, a plain object — answers null rather
+# than validating as "" or "[object Object]".
 type CheckFn =
   <K extends keyof Validated>(value: unknown, type: K): Validated[K] | null
   (value: unknown, type: string | symbol): unknown
@@ -334,4 +336,6 @@ export check: CheckFn = (value: unknown, type: string | symbol) ->
   type = nameOf type
   entry = registry.get type
   fail "unknown validator '#{type}'" unless entry
-  entry.fn if entry.raw then value else String(value ?? '')
+  return entry.fn(value) if entry.raw
+  return null if not value? or Array.isArray(value) or Object.getPrototypeOf(value) in [Object.prototype, null]
+  entry.fn String(value)

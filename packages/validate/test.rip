@@ -352,6 +352,17 @@ test "the row table: #{rows.length} contracts", ->
     unless JSON.stringify(got) is JSON.stringify(expected)
       throw Error.new "#{type} #{JSON.stringify(input)}: expected #{JSON.stringify(expected)}, got #{JSON.stringify(got)}"
 
+test "check answers null for an absent value or one with no scalar form", ->
+  eq check(undefined, 'string'), null
+  eq check(null, 'string'), null
+  eq check({a: 1}, 'string'), null
+  eq check({a: 1}, 'text'), null
+  eq check([1, 2], 'string'), null
+  eq check([3], 'id'), null
+  eq check('', 'string'), ''
+  eq check(5, 'int'), 5
+  eq check(true, 'bool'), true
+
 test "the raw set receives values untouched", ->
   eq check([1, 2], 'array'), [1, 2]
   eq check('x', 'array'), null
@@ -371,8 +382,7 @@ test "isRawType answers the raw flag; unknown names answer false", ->
 
 test "non-raw validators receive the string form", ->
   eq check(42, 'int'), 42
-  eq check(null, 'string'), ''
-  eq check([12345], 'id'), 12345
+  eq check('12345', 'id'), 12345
 
 test "blank strings normalize to blank, not to a miss, in the string family", ->
   eq check('', 'string'), ''
