@@ -281,6 +281,8 @@ test "a heredoc string repeats", """
     ''' * 2
   s
   """, "abab"
+fail "a spaced infix !~ rejects (Rip has no no-match operator)", 's = "abc"\ns !~ /a/', "Rip has no '!~' operator"
+test "a prefix !~ stays the indexOf idiom", '!~[1, 2].indexOf(3)', true
 code "string repeat compiles to repeat", '"-" * 40', '"-".repeat(40);'
 
 test "string repeat repeats", '"ab" * 3', "ababab"

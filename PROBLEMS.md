@@ -113,9 +113,6 @@ false. They read as one operator with two spellings.
 **C23 L — `not s =~ /e/` matches against the string `"false"`.** `not`
 binds tighter than `=~`, and `toMatchable` stringifies the boolean.
 
-**C24 L — `s !~ /a/` silently compiles to `s(!(~/a/))`.** Users of `=~`
-reach for `!~`; it becomes a juxtaposed call instead of a rejection.
-
 **C25 L — Assorted rejections of legal-looking forms.**
 `a ? b ? c : d : e` (nested ternary); `unless a … else if c`;
 `[a, ..., b] = c` (parameters accept the `...` marker); `a?[1..2]`
