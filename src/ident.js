@@ -29,7 +29,7 @@ export function isIdentifierName(value) {
 
 // A custom element's tag name: identifier runs joined by tight hyphens
 // (`x-icon`, `sl-button`). The platform requires the hyphen, and the
-// lexer mints such a name only at a render child's line start.
+// lexer mints such a name only at a render child position.
 export function isCustomElementName(value) {
   return typeof value === 'string' && value.includes('-') && value.split('-').every(isIdentifierName);
 }

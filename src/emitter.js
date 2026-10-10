@@ -1594,6 +1594,16 @@ class Emitter {
   // binding or parameter, or a component member? The walk is
   // resolveBareRead's, which answers null for a plain binding and for
   // nothing alike.
+  // A hyphenated head names a custom element only on a CALL node: the
+  // compiler's own hyphenated heads (`do-iife`, `loop-n`, …) share the
+  // shape `[head, …]`, and the stores' semanticKind is what tells them
+  // apart.
+  callShapedTagHead(sexpr, tag) {
+    if (TEMPLATE_TAGS.has(tag)) return true;
+    const id = this.stores.idOf(sexpr);
+    return (id !== null ? this.stores.node(id)?.semanticKind : null) === 'call';
+  }
+
   // A positioned render rejection whose node may be a bare string (a
   // tag word carries no span of its own): the open mark positions it.
   renderAmbiguity(node, message) {
@@ -1907,6 +1917,9 @@ class Emitter {
   // receiver's own property, and no component member is reachable
   // through `this`.
   thisRebound() {
+    // A render factory spells the component as its ctx parameter, `this`
+    // included, so no boundary inside it moves the receiver.
+    if (this.renderSelf !== null) return false;
     const n = this.thisBoundaries.length;
     return n > 0 && this.thisBoundaries[n - 1] === this.cframes.length && this.cframes.length > 0;
   }
@@ -11293,7 +11306,7 @@ class Emitter {
     // rendered as text below; locals are plain identifiers, so a
     // `#id`-carrying head can never be one).
     if (headStr !== null && isHtmlTag(headStr.split('#')[0]) && sexpr.length >= 1 &&
-        this.renderVarKind(headStr) === null) {
+        this.renderVarKind(headStr) === null && this.callShapedTagHead(sexpr, headStr.split('#')[0])) {
       const [tagName, id] = headStr.split('#');
       return this.renderTag(sexpr, tagName || 'div', [], sexpr.slice(1), id);
     }
@@ -15936,7 +15949,7 @@ class Emitter {
             // A void-pair is a VOID method (`fn!: ->`): implicit
             // return suppressed; its voidMarker role covers the whole
             // emitted method.
-            this.mark(pair, 'voidMarker', () => this.mark(pair, '$self', () => {
+            this.mark(pair, 'voidMarker', () => this.mark(pair, '$self', () => this.withThisBoundary(() => {
               if (this.containsAwait(pair[2][2])) this.b.emit('async ');
               if (Emitter.containsYield(pair[2][2])) this.b.emit('*');
               this.mark(pair, 'key', () => this.b.emit(pair[1]));
@@ -15951,9 +15964,9 @@ class Emitter {
               this.tsReturnAnnotation(pair[2], this.containsAwait(block), pair[0] === 'void-pair', Emitter.containsYield(block), pair);
               this.b.emit(' ');
               this.mark(pair, 'value', () => {
-                this.withThisBoundary(() => this.methodBlock(pair[2], block, objInd, { isConstructor: false, binds: [], methodName: pair[1], voidBody: pair[0] === 'void-pair' }));
+                this.methodBlock(pair[2], block, objInd, { isConstructor: false, binds: [], methodName: pair[1], voidBody: pair[0] === 'void-pair' });
               });
-            }));
+            })));
             return;
           }
           const dynamicKey = isNode(pair[1]) && pair[1][0] === 'dynamicKey';

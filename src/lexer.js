@@ -715,6 +715,19 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // A render child position where a custom element's tag name may
   // stand: a line start, or the word spaced after a tag on its line
   // (`div x-icon` nests the element, as `div span` does).
+  // Where a custom element's run ends, when the word just read (ending
+  // at `at`) opens one: a render child position, a tight hyphen, and a
+  // run that keys no pair (`aria-busy: true` stays the attribute).
+  const customElementEnd = (prev, at) => {
+    if (!inRender || text[at] !== '-' || !IDENT_START.test(text[at + 1] ?? '') || !customElementStart(prev)) return null;
+    let j = at;
+    while (text[j] === '-' && IDENT_START.test(text[j + 1] ?? '')) {
+      j++;
+      while (j < text.length && IDENT_PART.test(text[j])) j++;
+    }
+    return /^:(?![=:])|^[^\S\n]+:(?![=:])[^\S\n]/.test(text.slice(j)) ? null : j;
+  };
+
   const customElementStart = (prev) => {
     if (renderCodeFloor !== null) return false;
     // An arrow earlier on the line opens a one-line function body.
@@ -1474,6 +1487,13 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         push('PROPERTY', value, start, pos);
       } else if (keysColon || inPickKeyPos()) {
         push('PROPERTY', word, start, pos);
+      } else if (customElementEnd(prev, pos) !== null) {
+        // A tight-hyphen word at a render child position names a custom
+        // element (`x-icon`, `do-it`, `sl-button.primary`) — the platform
+        // requires the hyphen, so the run is ONE tag name, never a
+        // subtraction, whatever its first word spells.
+        pos = customElementEnd(prev, pos);
+        push('IDENTIFIER', text.slice(start, pos), start, pos);
       } else if (word !== 'default' && word !== 'as' && foreignModuleName(prev, afterWord)) {
         // A specifier's FOREIGN side names something in another module,
         // never a binding here — the imported name before `as`, the
@@ -1637,24 +1657,6 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         }
       } else if (RESERVED_WORDS.has(word)) {
         push('RESERVED', word, start, pos);
-      } else if (inRender && customElementStart(last()) && text[pos] === '-' && IDENT_START.test(text[pos + 1] ?? '')) {
-        // A render child line opening with a tight-hyphen word names a
-        // custom element (`x-icon`, `sl-button.primary`) — the platform
-        // requires the hyphen, so the word is ONE tag name, never a
-        // subtraction. A run that keys a pair (`aria-busy: true`) stays
-        // the attribute reading.
-        let j = pos;
-        while (text[j] === '-' && IDENT_START.test(text[j + 1] ?? '')) {
-          j++;
-          while (j < text.length && IDENT_PART.test(text[j])) j++;
-        }
-        const keyed = /^:(?![=:])|^[^\S\n]+:(?![=:])[^\S\n]/.test(text.slice(j));
-        if (keyed) {
-          push('IDENTIFIER', word, start, pos);
-        } else {
-          pos = j;
-          push('IDENTIFIER', text.slice(start, pos), start, pos);
-        }
       } else {
         push('IDENTIFIER', word, start, pos);
       }

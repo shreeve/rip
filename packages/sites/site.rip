@@ -893,10 +893,15 @@ currentSession = ->
   store = requestContext.getStore()
   if store?.env? then store.env.session else store?.request?[SESSION]
 
+# Middleware that runs before `sessions` has no session to write: the
+# sessions middleware would replace whatever it found with the cookie's
+# data, so the write rejects instead of vanishing.
 writableSession = ->
   store = requestContext.getStore()
   return (store.env.session ?= {}) if store?.env?
-  return (store.request[SESSION] ?= {}) if store?.request?
+  if store?.request?
+    return store.request[SESSION] if store.request[SESSION]?
+    throw Error.new 'session is not set up yet — register the sessions middleware before this one'
   throw Error.new 'session is only available during a request'
 
 export session: Record<string, unknown> = Proxy.new {},
@@ -906,7 +911,9 @@ export session: Record<string, unknown> = Proxy.new {},
     writableSession()[String(key)] = value
     true
   deleteProperty: (_, key) ->
-    delete writableSession()[String(key)]
+    current = currentSession()
+    delete current[String(key)] if current?
+    requestContext.getStore() or throw Error.new 'session is only available during a request'
     true
 
 # Env proxy — access env.FOO anywhere (shortcut for process.env)

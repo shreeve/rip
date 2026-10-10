@@ -6052,6 +6052,17 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
     const tag = String(root.value).split("#")[0];
     return TEMPLATE_TAGS.has(tag) || tag.includes("-");
   };
+  const customElementEnd = (prev, at) => {
+    if (!inRender || text[at] !== "-" || !IDENT_START.test(text[at + 1] ?? "") || !customElementStart(prev))
+      return null;
+    let j = at;
+    while (text[j] === "-" && IDENT_START.test(text[j + 1] ?? "")) {
+      j++;
+      while (j < text.length && IDENT_PART.test(text[j]))
+        j++;
+    }
+    return /^:(?![=:])|^[^\S\n]+:(?![=:])[^\S\n]/.test(text.slice(j)) ? null : j;
+  };
   const customElementStart = (prev) => {
     if (renderCodeFloor !== null)
       return false;
@@ -6652,6 +6663,9 @@ ${baseline}`).join(`
         push("PROPERTY", value, start, pos);
       } else if (keysColon || inPickKeyPos()) {
         push("PROPERTY", word, start, pos);
+      } else if (customElementEnd(prev, pos) !== null) {
+        pos = customElementEnd(prev, pos);
+        push("IDENTIFIER", text.slice(start, pos), start, pos);
       } else if (word !== "default" && word !== "as" && foreignModuleName(prev, afterWord)) {
         push("IDENTIFIER", word, start, pos);
       } else if (seenImport && word !== "default" && word !== "type" && reservedSpelling(word) && (specifierStart(prev) || prev?.kind === "AS" || prev?.kind === "IMPORT")) {
@@ -6759,20 +6773,6 @@ ${baseline}`).join(`
         }
       } else if (RESERVED_WORDS.has(word)) {
         push("RESERVED", word, start, pos);
-      } else if (inRender && customElementStart(last()) && text[pos] === "-" && IDENT_START.test(text[pos + 1] ?? "")) {
-        let j = pos;
-        while (text[j] === "-" && IDENT_START.test(text[j + 1] ?? "")) {
-          j++;
-          while (j < text.length && IDENT_PART.test(text[j]))
-            j++;
-        }
-        const keyed = /^:(?![=:])|^[^\S\n]+:(?![=:])[^\S\n]/.test(text.slice(j));
-        if (keyed) {
-          push("IDENTIFIER", word, start, pos);
-        } else {
-          pos = j;
-          push("IDENTIFIER", text.slice(start, pos), start, pos);
-        }
       } else {
         push("IDENTIFIER", word, start, pos);
       }
@@ -10049,6 +10049,12 @@ class Emitter {
   isReactiveName(name) {
     return this.resolveBareRead(name) === "reactive";
   }
+  callShapedTagHead(sexpr, tag) {
+    if (TEMPLATE_TAGS.has(tag))
+      return true;
+    const id = this.stores.idOf(sexpr);
+    return (id !== null ? this.stores.node(id)?.semanticKind : null) === "call";
+  }
   renderAmbiguity(node, message) {
     const m = this.b.currentMark;
     if (typeof node === "string" && m) {
@@ -10303,6 +10309,8 @@ class Emitter {
     return this.cframes.length > 0;
   }
   thisRebound() {
+    if (this.renderSelf !== null)
+      return false;
     const n = this.thisBoundaries.length;
     return n > 0 && this.thisBoundaries[n - 1] === this.cframes.length && this.cframes.length > 0;
   }
@@ -17376,7 +17384,7 @@ ${pad ?? ""}`);
         throw this.renderSpreadError(sexpr[1]);
       return this.renderTextExpr(sexpr[1] ?? "undefined", sexpr, true);
     }
-    if (headStr !== null && isHtmlTag2(headStr.split("#")[0]) && sexpr.length >= 1 && this.renderVarKind(headStr) === null) {
+    if (headStr !== null && isHtmlTag2(headStr.split("#")[0]) && sexpr.length >= 1 && this.renderVarKind(headStr) === null && this.callShapedTagHead(sexpr, headStr.split("#")[0])) {
       const [tagName, id] = headStr.split("#");
       return this.renderTag(sexpr, tagName || "div", [], sexpr.slice(1), id);
     }
@@ -20918,7 +20926,7 @@ ${this.replayPad}}` : " }");
           if (i > 0)
             this.b.emit(sep(i));
           if (isMethod[i]) {
-            this.mark(pair, "voidMarker", () => this.mark(pair, "$self", () => {
+            this.mark(pair, "voidMarker", () => this.mark(pair, "$self", () => this.withThisBoundary(() => {
               if (this.containsAwait(pair[2][2]))
                 this.b.emit("async ");
               if (Emitter.containsYield(pair[2][2]))
@@ -20932,9 +20940,9 @@ ${this.replayPad}}` : " }");
               this.tsReturnAnnotation(pair[2], this.containsAwait(block), pair[0] === "void-pair", Emitter.containsYield(block), pair);
               this.b.emit(" ");
               this.mark(pair, "value", () => {
-                this.withThisBoundary(() => this.methodBlock(pair[2], block, objInd, { isConstructor: false, binds: [], methodName: pair[1], voidBody: pair[0] === "void-pair" }));
+                this.methodBlock(pair[2], block, objInd, { isConstructor: false, binds: [], methodName: pair[1], voidBody: pair[0] === "void-pair" });
               });
-            }));
+            })));
             return;
           }
           const dynamicKey = isNode(pair[1]) && pair[1][0] === "dynamicKey";
@@ -32514,7 +32522,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "9677d930baa57bf0";
+var compilerBuild = () => "f5ad24a9024aace3";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

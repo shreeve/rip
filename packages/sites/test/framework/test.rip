@@ -217,6 +217,19 @@ test! 'session reads and writes the request session inside middleware', ->
   eq whoami.status, 200
   eq whoami.json!, { user: 'ann', visits: 1 }
 
+test! 'a session write in middleware before sessions rejects; a delete without a session is a no-op', ->
+  resetGlobals()
+  use (request, next) ->
+    delete session.gone
+    session.early = 1
+    next!
+  use sessions secret: 'framework-secret'
+  get '/early' -> 'never'
+  warnings = captureWarnings! ->
+    response = handle! request('GET', '/early')
+    eq response.status, 500
+  ok warnings.some((message) -> message.includes('register the sessions middleware before this one'))
+
 test! 'before and after filters compose around handlers and short-circuit', ->
   resetGlobals()
   order = []

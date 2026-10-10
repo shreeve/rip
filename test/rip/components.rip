@@ -959,6 +959,26 @@ fail 'a bare member read inside an object method rejects', '''
       obj
   ''', "component member 'name' is not reachable here"
 
+fail 'a member read in an object method parameter default rejects', '''
+  A = component
+    count := 1
+    make: ->
+      obj =
+        m: (a = count) -> a
+      obj
+  ''', "component member 'count' is not reachable here"
+
+test 'an object method inside a render loop reads members through the factory ctx', '''
+  A = component
+    count := 1
+    items := [1]
+    render
+      div
+        for item in items
+          span cfg: { m: -> count + item }
+  "compiled"
+  ''', "compiled"
+
 fail 'a bare member read inside a class body rejects', '''
   A = component
     name := 'component'
@@ -1069,6 +1089,35 @@ code 'a hyphenated word after a tag on its line nests a custom element', '''
       this._el5.setAttribute('aria-label', "x");
       this._el0.appendChild(this._el5);
       return this._el0;
+    }
+  };
+  '''
+
+code 'a keyword-led custom element is one tag, and do-iife stays the iife', '''
+  A = component
+    name := "x"
+    render
+      div
+        do -> name.toUpperCase()
+        do-it "x"
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.name = __state("x");
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode('');
+      this._el0.appendChild(this._t0);
+      this._el1 = document.createElement('do-it');
+      this._t1 = document.createTextNode("x");
+      this._el1.appendChild(this._t1);
+      this._el0.appendChild(this._el1);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._t0.data = (() => this.name.value.toUpperCase())(); });
     }
   };
   '''

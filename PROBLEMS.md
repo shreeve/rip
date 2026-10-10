@@ -28,6 +28,15 @@ Contents: [Language core](#language-core) ·
 
 ### Silent miscompiles
 
+**C31 L — A chained statement postfix if-else rejects with an unrelated message.**
+`return x if a else y if b else z` fails "'return' is not supported in
+expression position"; `r = x if a else y if b else z` chains to
+`a ? x : (b ? y : z)`. The returned-ternary production reduces at the
+first `else` operand.
+
+**C32 L — `delete a?.b` rejects as "deleting a plain binding".** JavaScript
+allows an optional-chain delete; the message names the wrong reason.
+
 **C7 M — Class-body `x: 1`, `x: 0`, `x: ""`, `x: []`, `x: {}`, `x: true`, `x: null` silently drop the value.**
 ```coffee
 class A
@@ -220,6 +229,12 @@ errors for spellings the user did not write.
 
 ## Schema and ORM
 
+**S10 L — An unknown field type throws SchemaError, the data-failure class.**
+A handler that maps SchemaError to 400 reports a declaration bug as a
+client error; the async-ensure misuse has its own SchemaEnsureError.
+An aliased import (`import {Address as Addr}`) as a field type fails
+with a hint to import a file that is already imported.
+
 **S3 M — Constraints on non-matching types are silently ignored.**
 `n! integer, /^1/` accepts 5; `b! boolean, 1..5`, `d? date, 1..3`,
 `s! string, -5..3` are accepted. A default of the wrong type or out of
@@ -246,6 +261,9 @@ $21.4M. `~integer` turns `"9007199254740993"` into `…992` silently;
 ---
 
 ## Rip Sites
+
+**W12 L — `read` with a numeric range accepts a non-integer JSON number.**
+`?qty=5.5` answers null, but a JSON body `{qty: 5.5}` answers 5.5.
 
 **W4 M — `read()` with a misspelled validator name.** `read 'email',
 'emial'` → `null` with 200; `'emial!'` → 400 "Missing required field";
