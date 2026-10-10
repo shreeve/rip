@@ -1164,6 +1164,166 @@ code 'a hyphen inside a render handler body stays subtraction', '''
   };
   '''
 
+# Template or code: an element's children arrow (`div ->`) opens template,
+# where a hyphenated word is a custom element; a handler body, a bracket
+# opened in render, and an indented attribute value are code, where it is
+# arithmetic.
+code 'a hyphenated word under an element children arrow is a custom element', '''
+  A = component
+    render
+      div ->
+        x-icon
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._el1 = document.createElement('x-icon');
+      this._el0.appendChild(this._el1);
+      return this._el0;
+    }
+  };
+  '''
+
+code 'a hyphenated word on a line inside a render bracket is arithmetic', '''
+  A = component
+    a := 3
+    b := 1
+    render
+      p [
+        a-b
+      ].join()
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.a = __state(3);
+      this.b = __state(1);
+    }
+    _create() {
+      this._el0 = document.createElement('p');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode('');
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._t0.data = [(this.a.value - this.b.value)].join(); });
+    }
+  };
+  '''
+
+code 'a hyphenated word indented under an attribute value is arithmetic', '''
+  A = component
+    render
+      div title:
+        a-b
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      { const __v = (a - b); if (__v != null) this._el0.setAttribute('title', __v); }
+      return this._el0;
+    }
+  };
+  '''
+
+code 'a keyword glued to a hyphen in render is a custom element', '''
+  A = component
+    ok := true
+    render
+      div
+        if ok
+          span
+        else-x
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.ok = __state(true);
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._anchor1 = document.createComment('if');
+      this._el0.appendChild(this._anchor1);
+      this._el3 = document.createElement('else-x');
+      this._el0.appendChild(this._el3);
+      return this._el0;
+    }
+    _setup() {
+      {
+        const anchor = this._anchor1;
+        let currentBlock = null;
+        let showing = null;
+        __effect(() => {
+          const show = !!(this.ok.value);
+          const want = show ? 'then' : null;
+          if (want === showing) return;
+          if (currentBlock) {
+            const leaving = currentBlock;
+            if (leaving._t) { leaving.f(); __transition(leaving._first, leaving._t, 'leave', () => leaving.d(true)); }
+            else { leaving.d(true); }
+            currentBlock = null;
+          }
+          showing = want;
+          if (want === 'then') {
+            currentBlock = this.create_block_0(this);
+            currentBlock.c();
+            if (anchor.parentNode) currentBlock.m(anchor.parentNode, anchor.nextSibling);
+            currentBlock.p(this);
+            if (currentBlock._t) __transition(currentBlock._first, currentBlock._t, 'enter', undefined);
+          }
+        });
+        __ownerFrame().add(() => { if (currentBlock) { currentBlock.d(true); currentBlock = null; } });
+      }
+    }
+    create_block_0(ctx) {
+      let _el2;
+      return {
+        c() {
+          _el2 = document.createElement('span');
+          this._first = _el2;
+        },
+        m(target, anchor) {
+          if (target) target.insertBefore(_el2, anchor);
+        },
+        p(ctx) {
+        },
+        f() { },
+        d(detaching) {
+          if (detaching) __detach(_el2);
+        }
+      };
+    }
+  };
+  '''
+
+code 'a hyphenated word in an indented render handler body is arithmetic', '''
+  A = component
+    t := 1
+    o := 2
+    render
+      button @click: ->
+        t-o
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.t = __state(1);
+      this.o = __state(2);
+    }
+    _create() {
+      this._el0 = document.createElement('button');
+      this._el0.setAttribute('data-part', 'A');
+      this._el0.addEventListener('click', (e) => __batch(() => (() => (this.t.value - this.o.value))(e)));
+      return this._el0;
+    }
+  };
+  '''
+
 code 'a spaced hyphen at a child line start stays subtraction', '''
   A = component
     render

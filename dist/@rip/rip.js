@@ -5964,6 +5964,7 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
   let inRender = false;
   let renderDepth = 0;
   let renderCodeFloor = null;
+  let renderParenDepth = 0;
   let nextId = 0;
   const pendingOrigin = [];
   const fail = (message, at, end = at) => {
@@ -6063,17 +6064,28 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
     }
     return /^:(?![=:])|^[^\S\n]+:(?![=:])[^\S\n]/.test(text.slice(j)) ? null : j;
   };
+  const codeArrowAt = (k) => {
+    const t = tokens[k];
+    if (!t || t.kind !== "->" && t.kind !== "=>")
+      return false;
+    const before = tokens[k - 1];
+    return !(t.kind === "->" && before && (before.kind === "IDENTIFIER" || before.kind === "PROPERTY") && !before.generated);
+  };
   const customElementStart = (prev) => {
-    if (renderCodeFloor !== null)
+    if (renderCodeFloor !== null || parens.length > renderParenDepth)
       return false;
     for (let k = tokens.length - 1;k >= 0; k--) {
       const kind = tokens[k].kind;
       if (kind === "TERMINATOR" || kind === "INDENT" || kind === "OUTDENT" || kind === "RENDER")
         break;
-      if (kind === "->" || kind === "=>")
+      if (codeArrowAt(k))
         return false;
     }
-    if (!prev || prev.kind === "INDENT" || prev.kind === "TERMINATOR" || prev.kind === "OUTDENT" || prev.kind === "RENDER")
+    if (prev?.kind === "INDENT") {
+      const before = tokens[tokens.length - 2]?.kind;
+      return !(before === ":" || before === "=" || before === "COMPOUND_ASSIGN" || before === ",");
+    }
+    if (!prev || prev.kind === "TERMINATOR" || prev.kind === "OUTDENT" || prev.kind === "RENDER")
       return true;
     if (!pendingSpaced || prev.generated)
       return false;
@@ -6561,14 +6573,14 @@ ${baseline}`).join(`
       if (prefix !== current && prefix.startsWith(current)) {
         if (typeBodyFloor === null && typeBodyHead())
           typeBodyFloor = indents.length + 1;
-        if (inRender && renderCodeFloor === null && (last()?.kind === "->" || last()?.kind === "=>"))
+        if (inRender && renderCodeFloor === null && codeArrowAt(tokens.length - 1))
           renderCodeFloor = indents.length + 1;
         indents.push(prefix);
         synth("INDENT", pos);
       } else {
         if (prefix !== current)
           dedentTo(prefix, lineStart);
-        const continues = ["else", "catch", "finally"].some((w) => text.startsWith(w, pos) && !IDENT_PART.test(text[pos + w.length] ?? ""));
+        const continues = ["else", "catch", "finally"].some((w) => text.startsWith(w, pos) && !IDENT_PART.test(text[pos + w.length] ?? "") && !(inRender && text[pos + w.length] === "-" && IDENT_START.test(text[pos + w.length + 1] ?? "")));
         if (tokens.length > 0 && lastNewlinePos >= 0 && !continues && last()?.kind !== "TERMINATOR") {
           const nl = text[lastNewlinePos] === "\r" ? 2 : 1;
           push("TERMINATOR", text.slice(lastNewlinePos, lastNewlinePos + nl), lastNewlinePos, lastNewlinePos + nl, { generated: true });
@@ -6770,6 +6782,7 @@ ${baseline}`).join(`
         if (KEYWORDS[word] === "RENDER") {
           inRender = true;
           renderDepth = indents.length;
+          renderParenDepth = parens.length;
         }
       } else if (RESERVED_WORDS.has(word)) {
         push("RESERVED", word, start, pos);
@@ -32522,7 +32535,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "f5ad24a9024aace3";
+var compilerBuild = () => "ce8219057f535d4b";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
