@@ -44,8 +44,8 @@ _: RegExpMatchArray | null            = null  # Match capture holder for Rip's =
 _errorHandler: ErrorHandler | null    = null  # Custom error handler
 _notFoundHandler: RouteHandler | null = null  # Custom 404 handler
 _rawFilter: Function | null           = null  # Raw request filter (before body parsing)
-_beforeFilters: Function[]            = []    # Before request filters
-_afterFilters: Function[]             = []    # After request filters
+_beforeFilters: { fn: Function, regex?: RegExp }[] = []  # Before request filters; regex scopes one registered inside prefix
+_afterFilters: { fn: Function, regex?: RegExp }[]  = []  # After request filters; regex scopes one registered inside prefix
 _routes: RouteRecord[]                        = []    # Route definitions
 _middlewares: { fn: Function, regex?: RegExp, path?: string }[] = []  # Global + path-scoped middleware, in registration order
 SESSION = :rip.server.session
@@ -374,7 +374,8 @@ compose = (beforeFilters, afterFilters, handler) ->
     try
       halted = false
       for filter in beforeFilters
-        result = filter.call!(c, c)
+        continue if filter.regex? and not filter.regex.test(c.req.path)
+        result = filter.fn.call!(c, c)
         if result instanceof Response
           c._response = result
           halted = true
@@ -386,8 +387,9 @@ compose = (beforeFilters, afterFilters, handler) ->
       caught = err
       c.error = err
     for filter in afterFilters
+      continue if filter.regex? and not filter.regex.test(c.req.path)
       try
-        filter.call!(c, c)
+        filter.fn.call!(c, c)
       catch afterError
         # An after filter is the request's error only when the request
         # had none; it never masks the handler's own throw.
@@ -617,7 +619,8 @@ export openapi = (info: Record<string, unknown> | null = null): { openapi: strin
 # same :param / * grammar as routes. Patterns are match-only: their :params
 # are never exposed to middleware or handlers. Global and scoped middleware
 # share ONE registration order; a scoped entry is skipped when the request
-# path is outside its pattern.
+# path is outside its pattern. Inside a prefix block both forms scope
+# beneath the prefix — a guard written there must never sit at the root.
 type Middleware = (request: Request, next: (request?: Request) => Promise<Response>) => Response | Promise<Response>
 
 compileMiddlewarePattern = (path) ->
@@ -631,9 +634,10 @@ def use(path: string, mw: Middleware): void
 def use!(pathOrMw, mw = null)
   _composeEpoch++
   if typeof pathOrMw is 'function' and not mw?
-    _middlewares.push { fn: pathOrMw }
+    _middlewares.push(if _prefix then { fn: pathOrMw, regex: compileMiddlewarePattern(_prefix), path: _prefix } else { fn: pathOrMw })
   else if typeof pathOrMw is 'string' and pathOrMw.startsWith('/') and typeof mw is 'function'
-    _middlewares.push { fn: mw, regex: compileMiddlewarePattern(pathOrMw), path: pathOrMw }
+    path = "#{_prefix}#{pathOrMw}"
+    _middlewares.push { fn: mw, regex: compileMiddlewarePattern(path), path }
   else
     throw TypeError.new 'use() takes a middleware function or an absolute path and middleware function'
 
@@ -652,13 +656,18 @@ export notFound: (handler: RouteHandler) => void = (handler) -> _notFoundHandler
 
 export raw: (fn: (req: Request) => unknown) => void = (fn) -> _rawFilter = fn
 
+# A filter registered inside a prefix block runs only for requests whose
+# path lies beneath the prefix, matched as `use` matches its pattern.
+scopedFilter = (fn: RouteHandler): { fn: Function, regex?: RegExp } ->
+  if _prefix then { fn, regex: compileMiddlewarePattern(_prefix) } else { fn }
+
 export before: (fn: RouteHandler) => void = (fn) ->
   _composeEpoch++
-  _beforeFilters.push fn
+  _beforeFilters.push scopedFilter(fn)
 
 export after: (fn: RouteHandler) => void = (fn) ->
   _composeEpoch++
-  _afterFilters.push fn
+  _afterFilters.push scopedFilter(fn)
 
 # ==============================================================================
 # Main Fetch Handler

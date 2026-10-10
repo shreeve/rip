@@ -319,15 +319,6 @@ $21.4M. `~integer` turns `"9007199254740993"` into `…992` silently;
 
 ## Rip Sites
 
-**W1 ✔ H — A guard registered with `use '/path'` inside `prefix` ignores the prefix, so it fails open.**
-```coffee
-prefix '/admin', ->
-  use '/secret', (request, next) -> Response.new('denied', { status: 403 })
-  get '/secret', -> 'admin secret'
-# GET /admin/secret → 200 "admin secret"; the guard sits at /secret
-```
-`before` inside `prefix` applies to every route (`/public` → 403).
-
 **W2 ✔ H — The README's middleware auth example locks every user out.**
 `use '/api/private', … unless session.user` returns 401 with a valid
 session cookie (`/whoami` on the same cookie returns the user).

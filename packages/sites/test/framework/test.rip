@@ -169,6 +169,34 @@ test! 'middleware can short-circuit and rejects duplicate next calls', ->
     eq response.json!, { error: 'Internal Server Error', code: 'internal_error' }
   ok warnings.some((message) -> message.includes('next() more than once'))
 
+test! 'use, before and after registered inside prefix scope to the prefix', ->
+  resetGlobals()
+  seen = []
+  prefix '/admin', ->
+    use '/secret', -> Response.new('denied', { status: 403 })
+    use (request, next) ->
+      seen.push "mw:#{URL.new(request.url).pathname}"
+      next!
+    before -> seen.push "before:#{@req.path}"
+    after -> seen.push "after:#{@req.path}"
+    get '/secret' -> 'admin secret'
+    get '/open' -> 'admin open'
+  get '/secret' -> 'public secret'
+  get '/public' -> 'public'
+  get '/administrator' -> 'not under the prefix'
+  get '/:section/reached' -> 'pattern route'
+
+  eq (handle! request('GET', '/admin/secret')).status, 403
+  eq (handle! request('GET', '/admin/open')).text!, 'admin open'
+  eq seen, ['mw:/admin/open', 'before:/admin/open', 'after:/admin/open']
+  seen.length = 0
+  eq (handle! request('GET', '/secret')).text!, 'public secret'
+  eq (handle! request('GET', '/public')).text!, 'public'
+  eq (handle! request('GET', '/administrator')).text!, 'not under the prefix'
+  eq seen, []
+  eq (handle! request('GET', '/admin/reached')).text!, 'pattern route'
+  eq seen, ['mw:/admin/reached', 'before:/admin/reached', 'after:/admin/reached']
+
 test! 'before and after filters compose around handlers and short-circuit', ->
   resetGlobals()
   order = []

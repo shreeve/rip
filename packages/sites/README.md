@@ -730,6 +730,14 @@ use '/api/private', (request, next) ->
 
 Global and path-scoped middleware share one registration order. Calling
 `next!()` continues the chain; returning a `Response` short-circuits it.
+Inside a `prefix` block a pattern is beneath the prefix, and bare
+`use middleware` covers the prefix itself:
+
+```coffee
+prefix '/admin', ->
+  use requireAdmin                   # /admin and everything beneath it
+  use '/billing', requireOwner       # /admin/billing, not /billing
+```
 
 Framework filters operate on the Rip request context:
 
@@ -744,7 +752,8 @@ after ->
   recordAudit! @req.path, @mark
 ```
 
-`before` and `after` apply to every matched route in registration order.
+`before` and `after` apply to every matched route in registration order;
+registered inside a `prefix` block, only to requests beneath the prefix.
 `raw` receives the Web `Request` before Rip parses its body. `App`, `env`,
 `resetGlobals`, and `requestContext` remain available for embedded runtimes,
 configuration, and isolated framework tests.
