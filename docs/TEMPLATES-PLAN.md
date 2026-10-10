@@ -160,7 +160,7 @@ regeneration where it changes the surface.
 | P4 Binding-free block attachment | The block always belongs to the line head; delete `readsAsValue` | None in the scan | **High** — cold review before merge |
 | P5 Grammar homes | `= expr` and `<=>` productions; the sentinels leave the user namespace | Typed face and mapping, enumerated | Medium–high |
 | P6 One word classifier | Merge the four emitter paths; void elements, `Component.lower`, literal lines, `on*:` keys, write guards, `ref:` in `for` | None in the scan | Medium |
-| P7 Events, bindings, text | Hyphenated event names and `onX` minting, DOM-event case check, literal handlers reject, `<=>` into loop-row fields notifies, `null`/`undefined` render as `""` (text slots and template interpolation) | Enumerated (text slots and interpolation change bytes) | Medium |
+| P7 Events, bindings, text | Hyphenated event names and `onX` minting, DOM-event case check, literal handlers reject, `<=>` into loop-row fields notifies, no "null"/"undefined" on the page (text, attributes, properties, template interpolation) | Enumerated (text slots and interpolation change bytes) | Medium |
 | P8 Reference and certification | The template chapter of the reference; close PROBLEMS.md entries; full gates; cold review | — | — |
 
 Out of scope: reactivity semantics (T7, T8, T19), component method
@@ -195,11 +195,15 @@ reflect them.
 8. **A render local that reuses a member's name rejects**, positioned.
 9. **`innerHTML:` stays**, documented as a raw-HTML sink for trusted
    content.
-10. **`null` and `undefined` never render as text.** Every template text
-    form (bare argument, own-line expression, `= expr`) renders them as
-    `""`, and so does a string interpolation inside a template
-    (`p "Hello #{nick}"` shows `Hello `). Strings outside templates are
-    unchanged; every other value renders as `String(value)`.
+10. **A template never shows "null" or "undefined" on the page.** Text
+    in every form (bare argument, own-line expression, `= expr`) renders
+    them as `""`; an attribute whose value is `null` or `undefined` is
+    removed; a property such as `value` or `textContent` receives `""`;
+    and every string interpolation inside a template — in text and in
+    attribute values (`title: "Hi #{name}"`) — renders them as `""`.
+    Every other value renders as `String(value)`. Strings outside
+    templates are unchanged; a string already built elsewhere arrives as
+    built.
 11. **Custom elements stay**: a tight-hyphen word in a template position
     is an element; in code it is subtraction. One gate decides which.
 
