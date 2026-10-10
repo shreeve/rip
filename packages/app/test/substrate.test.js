@@ -664,3 +664,16 @@ describe('stash source keys', () => {
     expect(stash.plain).toBeUndefined();
   });
 });
+
+describe('source staleTime', () => {
+  const declare = staleTime => () => source({ fetch: async () => 1, staleTime });
+  test('a duration that overflows to Infinity rejects, as the number Infinity does', () => {
+    expect(declare('1e999 years')).toThrow(/staleTime/);
+    expect(declare(Infinity)).toThrow(/staleTime/);
+  });
+  test('the duration grammar is case-sensitive, as the Duration type is', () => {
+    expect(declare('5 min')).not.toThrow();
+    expect(declare('5 MIN')).toThrow(/staleTime/);
+    expect(declare('forever')).not.toThrow();
+  });
+});

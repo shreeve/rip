@@ -274,7 +274,7 @@ $21.4M. `~integer` turns `"9007199254740993"` into `…992` silently;
 
 **A3 L — `createMutation` callbacks written with `->` inside a component get the wrong `this`.** The action `(x) -> @n + x` compiles to an arrow, but `onSuccess: (r) -> @n = r` compiles to a method on the options object, silently writing there. The `=>` warning is a source comment only.
 
-**A4 L — `staleTime` is case-sensitive, though the README says otherwise.** `'5 MIN'`, `'2H'`, `'Forever'` reject; `'1e999 years'` is accepted (Infinity) while the number `Infinity` rejects. Sites' `@cache` parses a different duration dialect.
+**A4 L — Sites' `@cache` parses a different duration dialect than App's `staleTime`.** App's grammar is lowercase and finite (`'5 min'`, `'2h'`); compare the two before an app moves a duration between them.
 
 **A5 L — Keyed sources share one cell between an object key and its JSON text** (`cellFor({a:1})` is `cellFor('{"a":1}')`).
 
