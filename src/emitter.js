@@ -5768,7 +5768,14 @@ class Emitter {
       // the face as the minted parameter carrying the declared `any`
       // boundary. That IS its answer: `(parameter) it: any`, the boundary
       // stated at the word (RULINGS.md, Schema).
-      fns.set(i, this.schemaFnCode(params, tokens));
+      const fn = this.schemaFnCode(params, tokens);
+      // A plain @ensure reads its check's result as truthy-or-not, so a
+      // check that awaits — compiled async, answering with a Promise —
+      // would always pass. Only @ensure! awaits.
+      if (e.tag === 'ensure' && !e.async && fn.code.startsWith('(async ')) {
+        Emitter.schemaFail(`@ensure: this check awaits, so it answers with a promise a plain @ensure reads as passing — declare it '@ensure!' to await it`, tokens[0]?.start ?? e.start);
+      }
+      fns.set(i, fn);
     }
     // The schema type story (face only): callable bodies gain
     // TS-only `this` parameters per their real calling convention

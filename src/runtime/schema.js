@@ -59,6 +59,16 @@ class SchemaError extends Error {
   }
 }
 
+// A declaration error found while validating — a plain @ensure whose
+// check answers with a promise. It escapes the catch that turns a
+// throwing check into a failed check: the schema, not the data, is wrong.
+class SchemaEnsureError extends TypeError {
+  constructor(message) {
+    super(message);
+    this.name = 'SchemaEnsureError';
+  }
+}
+
 function formatIssues(issues, name) {
   if (!issues || !issues.length) return 'SchemaError';
   const head = name ? name + ': ' : '';
@@ -756,8 +766,9 @@ class SchemaDef {
     for (const r of norm.ensures) {
       let ok = false;
       try {
-        ok = !!r.fn(data);
-      } catch {
+        ok = this._syncEnsureVerdict(r, data);
+      } catch (err) {
+        if (err instanceof SchemaEnsureError) throw err;
         errs.push({ field: r.field || '', error: 'ensure', message: r.message || 'ensure failed' });
         continue;
       }
@@ -766,6 +777,20 @@ class SchemaDef {
       }
     }
     return errs;
+  }
+
+  // A plain @ensure's verdict. A promise is always truthy, so a check
+  // that answers with one would pass without being consulted; it is a
+  // declaration error (only @ensure! awaits), raised loudly rather than
+  // read as a verdict.
+  _syncEnsureVerdict(r, data) {
+    const result = r.fn(data);
+    if (result !== null && typeof result === 'object' && typeof result.then === 'function') {
+      throw new SchemaEnsureError(
+        "schema '" + (this.name || 'anon') + "': @ensure \"" + (r.message || 'ensure') +
+        "\" answered with a promise, which a plain @ensure would read as passing — declare it '@ensure!' to await it");
+    }
+    return !!result;
   }
 
   // Async-aware pass: sync refinements first (cheap before expensive),
@@ -785,7 +810,12 @@ class SchemaDef {
         })());
       } else {
         let ok = false;
-        try { ok = !!r.fn(data); } catch { ok = false; }
+        try {
+          ok = this._syncEnsureVerdict(r, data);
+        } catch (err) {
+          if (err instanceof SchemaEnsureError) throw err;
+          ok = false;
+        }
         if (!ok) results.push({ idx, issue: issue() });
       }
     });

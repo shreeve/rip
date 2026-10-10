@@ -4892,6 +4892,30 @@ test "@ensure!: rejected async predicate counts as failure with declared message
   [r.ok, r.errors[0].message]
 ''', [false, "boom guard"]
 
+fail "@ensure: a check that awaits must be declared @ensure!", '''
+  check = (v) -> Promise.resolve(false)
+  X = schema :input
+    a! string
+    @ensure "must not pass", (u) -> check!(u.a)
+  '''
+
+test "@ensure: a plain check that returns a promise throws, never passes", '''
+  X = schema :input
+    a! string
+    @ensure "must not pass", (u) -> Promise.resolve(false)
+  sync = null
+  try
+    X.safe({a: "x"})
+  catch e
+    sync = e.message
+  async = null
+  try
+    X.safeAsync! {a: "x"}
+  catch e
+    async = e.message
+  [sync?.includes("@ensure!"), async?.includes("@ensure!")]
+''', [true, true]
+
 test "parseAsync works on plain sync schemas too (uniform surface)", '''
   X = schema
     name! string

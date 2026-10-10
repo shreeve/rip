@@ -12883,7 +12883,11 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
         continue;
       }
       const params = this.schemaBodyParams(e);
-      fns.set(i, this.schemaFnCode(params, tokens));
+      const fn = this.schemaFnCode(params, tokens);
+      if (e.tag === "ensure" && !e.async && fn.code.startsWith("(async ")) {
+        Emitter.schemaFail(`@ensure: this check awaits, so it answers with a promise a plain @ensure reads as passing — declare it '@ensure!' to await it`, tokens[0]?.start ?? e.start);
+      }
+      fns.set(i, fn);
     }
     const story = this.schemaStories?.get(node) ?? null;
     const nodeId = this.stores.idOf(node);
@@ -24104,6 +24108,13 @@ class SchemaError extends Error {
     this.schemaKind = schemaKind || null;
   }
 }
+
+class SchemaEnsureError extends TypeError {
+  constructor(message) {
+    super(message);
+    this.name = "SchemaEnsureError";
+  }
+}
 function formatIssues(issues, name) {
   if (!issues || !issues.length)
     return "SchemaError";
@@ -24693,8 +24704,10 @@ class SchemaDef {
     for (const r of norm.ensures) {
       let ok = false;
       try {
-        ok = !!r.fn(data);
-      } catch {
+        ok = this._syncEnsureVerdict(r, data);
+      } catch (err) {
+        if (err instanceof SchemaEnsureError)
+          throw err;
         errs.push({ field: r.field || "", error: "ensure", message: r.message || "ensure failed" });
         continue;
       }
@@ -24703,6 +24716,13 @@ class SchemaDef {
       }
     }
     return errs;
+  }
+  _syncEnsureVerdict(r, data) {
+    const result = r.fn(data);
+    if (result !== null && typeof result === "object" && typeof result.then === "function") {
+      throw new SchemaEnsureError("schema '" + (this.name || "anon") + `': @ensure "` + (r.message || "ensure") + `" answered with a promise, which a plain @ensure would read as passing — declare it '@ensure!' to await it`);
+    }
+    return !!result;
   }
   async _applyEnsuresAsync(data) {
     const norm = this._normalize();
@@ -24726,8 +24746,10 @@ class SchemaDef {
       } else {
         let ok = false;
         try {
-          ok = !!r.fn(data);
-        } catch {
+          ok = this._syncEnsureVerdict(r, data);
+        } catch (err) {
+          if (err instanceof SchemaEnsureError)
+            throw err;
           ok = false;
         }
         if (!ok)
@@ -32335,7 +32357,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "94a9f837662b0724";
+var compilerBuild = () => "d6aefa4796020d85";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

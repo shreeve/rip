@@ -292,17 +292,6 @@ errors for spellings the user did not write.
 
 ## Schema and ORM
 
-**S1 ✔ H — An `@ensure` whose check awaits always passes.**
-```coffee
-check = (v) -> Promise.resolve(false)
-X = schema :input
-  a! string
-  @ensure "must not pass", (u) -> check!(u.a)
-X.safe({a: "x"})          # ok: true — and safeAsync too
-```
-`_applyEnsures` (src/runtime/schema.js ~758) does `!!r.fn(data)`; a
-Promise is truthy. The same bug class as #432.
-
 **S2 ✔ H — Unknown field types validate nothing.**
 `name! strng`, `age! intger`, `addr! Adress` → `X.safe({name: 5,
 age: "x", addr: 42})` is `ok: true` in `:input`, `:shape` and `:model`;
