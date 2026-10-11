@@ -223,11 +223,6 @@ dropped silently. There is no public batch API (packages use `__batch`).
 
 **T19 M — Shallow reactivity has no diagnostics, and a new array of the same objects does not refresh rows.** `todos.push …` and `todo.done = true` change data, not DOM; `items = [...items]` after an in-place field write leaves rows stale (`__reconcile` skips `===` items).
 
-**T21 ✔ H — A computed written inside a component compiles.**
-`k := 0; c ~= k + 1; bump: -> c = 5` emits `this.c.value = 5`, a raw
-TypeError when called; `@c = 5`, `c++` and `[c] = [5]` too. At module
-level `c = 5` rejects with "cannot assign to computed 'c'".
-
 **T22 ✔ M — A render local that reads itself shadows the member: `count = count + 1` renders NaN.**
 With `count := 3`, render `count = count + 1` then `p count` emits
 `let count; count = count + 1;` and shows `NaN`.

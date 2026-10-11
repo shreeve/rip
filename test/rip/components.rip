@@ -7449,3 +7449,47 @@ fail 'accept names its provider by a plain member path, never a call', '''
   Part = component
     accept open from pick()
 '''
+
+# A computed member (`~=`) has no write, in any spelling — as a
+# module-level computed rejects `c = 5`.
+fail 'a component computed rejects a plain write', '''
+    Foo = component
+      k := 0
+      c ~= k + 1
+      bump: -> c = 5
+      render
+        p c
+''', "cannot assign to computed 'c'"
+fail 'a component computed rejects an @ write', '''
+    Foo = component
+      k := 0
+      c ~= k + 1
+      bump: -> @c = 5
+      render
+        p c
+''', "cannot assign to computed 'c'"
+fail 'a component computed rejects an update', '''
+    Foo = component
+      k := 0
+      c ~= k + 1
+      bump: -> c++
+      render
+        p c
+''', "cannot assign to computed 'c'"
+fail 'a component computed rejects a destructuring write', '''
+    Foo = component
+      k := 0
+      c ~= k + 1
+      bump: -> [c] = [5]
+      render
+        p c
+''', "cannot assign to computed 'c'"
+test 'a parameter named like a computed member shadows it', '''
+    Foo = component
+      k := 0
+      c ~= k + 1
+      bump: (c) -> c = 5
+      render
+        p c
+    typeof Foo
+''', 'function'

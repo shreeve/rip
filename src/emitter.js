@@ -1850,6 +1850,16 @@ class Emitter {
         'emitter: `@rest` is the runtime-owned view of the caller\'s undeclared props and is never assigned — ' +
         'set the attribute on the element in render, or declare the name as a prop the caller supplies');
     }
+    // A destructuring write lands on each name it binds: a computed
+    // among them is written as surely as by `c = …`.
+    if (Emitter.isPattern(target)) {
+      const names = [];
+      this.patternNames(target, names, true);
+      for (const n of names) {
+        if (this.memberKindOf(n) === 'computed') this.rejectComputedMemberWrite(node, n);
+      }
+      return;
+    }
     let name = null, kind = null;
     if (typeof target === 'string') {
       this.checkBareRest(node, target);
@@ -1860,6 +1870,7 @@ class Emitter {
       kind = this.thisMemberKindOf(name);
     }
     if (kind === null) return;
+    if (kind === 'computed') this.rejectComputedMemberWrite(node, name);
     if (kind === 'readonly') {
       throw this.positionedError(node,
         `emitter: cannot assign to readonly member '${name}' — a '=!' member never changes after _init; ` +
@@ -1869,6 +1880,14 @@ class Emitter {
       const f = this.cframes[this.cframes.length - 1];
       if (!f.plainWrites.has(name)) f.plainWrites.set(name, node);
     }
+  }
+
+  // A computed member (`~=`) derives from its dependencies: there is no
+  // write, and the runtime's read-only container would throw at the
+  // assignment, the loud error in the wrong place.
+  rejectComputedMemberWrite(node, name) {
+    throw this.positionedError(node,
+      `emitter: cannot assign to computed '${name}' — a '~=' member derives from its dependencies; write to those instead`);
   }
 
   // A render read of a plain ('=') member — the other half of the
