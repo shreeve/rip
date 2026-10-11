@@ -1180,3 +1180,8 @@ test "collecting loop tail try collects its handler's tail", "r = for x in [1, 2
 test "collecting loop tail handler-less try collects undefined on a throw", "r = for x in [1, 2, 3]\n  try\n    break if x is 3\n    throw new Error('t') if x is 2\n    x\nr", [1, undefined]
 test "collecting loop tail try with a pattern catch", "r = for x in [1, 2, 3]\n  try\n    continue if x is 2\n    throw {code: x} if x is 3\n    x\n  catch {code}\n    code * 10\nr", [1, 30]
 test "function-tail loop tail try keeps its return", "f = ->\n  for x in [1, 2, 3]\n    try\n      return 'early' if x is 2\n      continue if x is 1\n      x\nf()", 'early'
+# A finally runs after the branch's value is in hand: a throw or jump
+# there takes the iteration's value with it.
+test "collecting loop tail try whose finally throws collects the outer handler alone", "boom = (x) -> throw new Error('b')\nr = for x in [1, 2]\n  try\n    try\n      continue if x is 5\n      x\n    finally\n      boom(x) if x is 2\n  catch e\n    'caught'\nr", [1, 'caught']
+test "collecting loop tail try whose finally continues drops the value", "r = for x in [1, 2, 3]\n  try\n    continue if x is 9\n    x\n  finally\n    continue if x is 2\nr", [1, 3]
+test "collecting loop tail try whose finally breaks drops the value", "r = for x in [1, 2, 3]\n  try\n    continue if x is 9\n    x\n  finally\n    break if x is 2\nr", [1]

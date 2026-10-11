@@ -8100,7 +8100,18 @@ class Emitter {
       } else if (i === stmts.length - 1 && isNode(stmt) && stmt[0] === 'switch' && stmt.length === 4) {
         this.switchStatement(stmt, ind + 1, into);
       } else if (i === stmts.length - 1 && isNode(stmt) && stmt[0] === 'try') {
-        this.tryStatement(stmt, ind + 1, into);
+        if (stmt.slice(2).some((part) => isBlock(part))) {
+          // A finally runs after a branch's push and may throw or jump
+          // past it: the branches collect into a temp the loop takes only
+          // once the whole try completes.
+          const tmp = this.loopTempName('_try');
+          this.temps.used.add(tmp);
+          this.b.emit(`const ${tmp} = [];\n${pad}`);
+          this.tryStatement(stmt, ind + 1, tmp);
+          this.b.emit(`\n${pad}${into}.push(...${tmp});`);
+        } else {
+          this.tryStatement(stmt, ind + 1, into);
+        }
       } else {
         this.statement(stmt, ind + 1);
         if (isLoopNode(stmt)) this.b.emit(';');
