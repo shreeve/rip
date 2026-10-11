@@ -269,8 +269,8 @@ test "ternary then-branch with a prefix word", "b = 3\nok = true\nok ? typeof b 
 test "ternary then-branch ending in a keyword value", "a = 5\nok = true\nok ? a ?? null : 0", 5
 test "ternary tight hyphen and tight colon", "a = 5\nb = 3\nok = true\nok ? a-b: 0", 2
 test "ternary chained in the else branch", "a = 5\nb = 3\nok = false\nsure = true\nok ? a - b : sure ? b - a : 0", -2
-test "ternary nested in the then branch", "ok = true\nsure = false\nok ? sure ? 1 : 2 : 3", 2
-test "ternary nested in the then branch, outer false", "ok = false\nsure = false\nok ? sure ? 1 : 2 : 3", 3
+test "ternary nested in the then branch", "ok = true\nsure = true\nok ? sure ? 1 : 2 : 3", 1
+test "ternary nested in the then branch, outer false", "ok = false\nsure = true\nok ? sure ? 1 : 2 : 3", 3
 test "ternary as an object value before another pair", "a = 5\nb = 3\nok = true\no = {k: ok ? a - b : 0, m: 7}\n[o.k, o.m]", [2, 7]
 test "ternary as an implicit object value", "a = 5\nb = 3\nok = true\no =\n  k: ok ? a - b : 0\n  m: 7\n[o.k, o.m]", [2, 7]
 test "ternary as an implicit call argument", "a = 5\nb = 3\nok = true\nf = (x, y) -> [x, y]\nf ok ? a - b : 0, 7", [2, 7]
@@ -280,6 +280,14 @@ code "ternary then-branch subtraction", "ok ? a - b : c", "(ok ? (a - b) : c)"
 code "ternary nested in the then branch", "x = a ? b ? c : d : e", "let x = a ? (b ? c : d) : e;"
 code "ternary branch object keeps its pairs", "x = ok ? {b: 1} : c", "let x = ok ? {b: 1} : c;"
 code "ternary branch call keeps its pairs", "x = ok ? f(b: 1) : c", "let x = ok ? f({b: 1}) : c;"
+# A spaced `:word` inside a bracket in a branch reads as it does outside
+# any ternary — the claim belongs to the `?`'s own depth.
+code "ternary branch bracket reads a spaced symbol as outside", "x = ok ? f(a :b) : c", 'let x = ok ? f(a(Symbol.for("b"))) : c;'
+# A second colon after a finished ternary opens no object: it rejects.
+fail "a second colon after a ternary's else", "x = ok ? a : b : c", "1:14: Unexpected 'b'"
+fail "a second colon after a ternary whose then branch is an operation", "x = ok ? a - b : c : d", "1:18: Unexpected 'c'"
+fail "a symbol then a second colon after a ternary", "x = ok ? f :sym : c", "1:13: Unexpected 'sym'"
+code "a call's pairs after a ternary's else colon stay pairs", "x = ok ? a : f k: d", "let x = ok ? a : f({k: d});"
 
 # ==============================================================================
 # String Repeat — "str" * n (literal-only: a dynamic left operand keeps JS `*`)

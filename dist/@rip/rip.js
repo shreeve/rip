@@ -3803,6 +3803,7 @@ function collectObjects(tokens, mintId) {
   const stack = [];
   const insertions = [];
   const ternary = new TernaryClaims;
+  const claimedColons = new Set;
   let lastReal = null;
   let continuationComma = -1;
   const top = () => stack[stack.length - 1];
@@ -3943,8 +3944,10 @@ function collectObjects(tokens, mintId) {
     if (k === "TERNARY")
       ternary.step(k);
     if (k === ":") {
-      if (ternary.step(k))
+      if (ternary.step(k)) {
+        claimedColons.add(i);
         continue;
+      }
       if (prev?.kind === "DAMMIT")
         prev.kind = "VOID_MARKER";
       const bang = prev?.kind === "VOID_MARKER" ? 1 : 0;
@@ -3964,6 +3967,8 @@ function collectObjects(tokens, mintId) {
       if (f && (isBraceFrame(f) || f.kind === "INDENT" && (isBraceKind(under?.kind) || underContinuedList)) && !(callFrom != null && openCallBetween(callFrom, s)) && (startsLine || before?.kind === "," || isBraceKind(before?.kind) || tokens[s]?.kind === "{")) {
         continue;
       }
+      if (claimedColons.has(s - 1))
+        continue;
       stack.push({ kind: "object", at: s, sameLine: true, startsLine });
       insertions.push({
         at: s,
@@ -4157,7 +4162,6 @@ var CAST_LHS_ENDERS = new Set([
 ]);
 var TYPE_STARTERS = new Set([
   "IDENTIFIER",
-  "PROPERTY",
   "(",
   "CALL_START",
   "PARAM_START",
@@ -9461,7 +9465,7 @@ function isPostfixTernary(stores, x) {
   if (!isTernary(x))
     return false;
   const id = stores.idOf(x);
-  return (id !== null ? stores.node(id)?.semanticKind : null) === "ifelse";
+  return (id !== null ? stores.node(id)?.semanticKind : null) !== "ternary";
 }
 function isModuleImportNode(stores, x) {
   if (!isNode(x) || x[0] !== "import" || x.length < 2)
@@ -32670,7 +32674,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "c6b0fdc539a40fa6";
+var compilerBuild = () => "44a4b43e1118169c";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

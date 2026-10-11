@@ -424,6 +424,17 @@ export function moduleSourceText(s) {
   return `'${inner}'`;
 }
 
+// Both conditional spellings build ["?:", condition, then, else]; the
+// semantic kind tells the operator `c ? x : y` (`ternary`) from the
+// postfix `x if c else y` (`ifelse`, or the unkinded ternary a statement's
+// `return x if c else y` lifts). Only the postfix spelling chains and
+// hoists an assignment; the operator form emits as it parsed.
+function isPostfixTernary(stores, x) {
+  if (!isTernary(x)) return false;
+  const id = stores.idOf(x);
+  return (id !== null ? stores.node(id)?.semanticKind : null) !== 'ternary';
+}
+
 // Is this node a module IMPORT STATEMENT? Shape alone cannot say: a
 // dynamic `import(expr)` shares the head AND the length with a
 // side-effect `import './x.rip'` (both `["import", x]`), so the stores'
@@ -434,16 +445,6 @@ export function moduleSourceText(s) {
 //
 // Exported because the .d.ts emitter asks the same question, and asking
 // it from a private copy is how the two came to disagree.
-// Both conditional spellings build ["?:", condition, then, else]; the
-// semantic kind tells the postfix `x if c else y` (`ifelse`) from the
-// operator `c ? x : y` (`ternary`). Only the postfix chain re-associates
-// and hoists an assignment; the operator form emits as it parsed.
-function isPostfixTernary(stores, x) {
-  if (!isTernary(x)) return false;
-  const id = stores.idOf(x);
-  return (id !== null ? stores.node(id)?.semanticKind : null) === 'ifelse';
-}
-
 export function isModuleImportNode(stores, x) {
   if (!isNode(x) || x[0] !== 'import' || x.length < 2) return false;
   const id = stores.idOf(x);
@@ -8297,7 +8298,9 @@ class Emitter {
   //                 declaration), class expressions, update
   //                 statements (`(i++);`), delete statements
   //                 (`(delete a.b);`), ternaries unless the assignment
-  //                 hoist rewrites them into assignment statements.
+  //                 hoist rewrites them into assignment statements
+  //                 (`stores` tells the postfix spelling, which hoists,
+  //                 from the operator one).
   static needsGrouping(child, context, stores) {
     const tier = Emitter.jsTier(child);
     if (context === 'operand' || context === 'return') {

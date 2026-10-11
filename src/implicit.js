@@ -505,6 +505,7 @@ function collectObjects(tokens, mintId) {
   const stack = [];
   const insertions = []; // {at, token} against original indices
   const ternary = new TernaryClaims();
+  const claimedColons = new Set(); // indices of the colons ternaries claimed
   let lastReal = null;
   // Index of a comma that kept its property list open for an indented
   // continuation line; the very next INDENT consumes it.
@@ -685,7 +686,10 @@ function collectObjects(tokens, mintId) {
     if (k === 'TERNARY') ternary.step(k);
 
     if (k === ':') {
-      if (ternary.step(k)) continue;
+      if (ternary.step(k)) {
+        claimedColons.add(i);
+        continue;
+      }
       // A non-ternary colon whose key carries a trailing bang is a
       // VOID-METHOD pair (`fn!: ->`): this is the context that resolves
       // the scanner's DAMMIT into VOID_MARKER (a ternary's colon was
@@ -732,6 +736,12 @@ function collectObjects(tokens, mintId) {
           (startsLine || before?.kind === ',' || isBraceKind(before?.kind) || tokens[s]?.kind === '{')) {
         continue;
       }
+
+      // A key straight after a ternary's ELSE colon (`ok ? a : b : c`)
+      // is a second colon on a finished ternary, not an object: it opens
+      // none, and the stray `:` rejects at parse. `ok ? a : f k: d`
+      // (a call's pairs) and `ok ? a : {b: c}` stay legal.
+      if (claimedColons.has(s - 1)) continue;
 
       stack.push({ kind: 'object', at: s, sameLine: true, startsLine });
       insertions.push({

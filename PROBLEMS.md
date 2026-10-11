@@ -28,12 +28,6 @@ Contents: [Language core](#language-core) ·
 
 ### Silent miscompiles
 
-**C40 M — An unbraced object or pair after a ternary's else colon is taken silently.**
-`ok ? a : b : c` is `ok ? a : {b: c}`, `ok ? f :sym : c` is
-`ok ? f : {sym: c}`, and `ok ? a : f 1 : c` is `ok ? a : f({1: c})`. A
-second `:` after a finished ternary reads like a mistyped ternary and
-should reject.
-
 **C31 L — A chained statement postfix if-else rejects with an unrelated message.**
 `return x if a else y if b else z` fails "'return' is not supported in
 expression position"; `r = x if a else y if b else z` chains to
