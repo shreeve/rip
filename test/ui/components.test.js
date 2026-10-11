@@ -2972,17 +2972,21 @@ describe('selector shorthands', () => {
     expect(js(at('. role: "note"'))).toContain("setAttribute('role', \"note\")");
   });
 
-  test('a bound name heading a line is a value; a digit glued into its chain rejects, asking for spaces', () => {
+  test('a bound name heading a line is a value: its chain stays code, exactly as on any other line', () => {
     const loop = (body) => `Foo = component\n  items := [{w: 3, title: 't', parts: [1, 2]}]\n  render\n    div\n      for a in items\n        ${body}\n`;
-    lexFails(loop('a.w-1.toFixed(2)'), /`a` is bound here, so this line is a value and `-` in `w-1` is subtraction — write it with spaces/);
+    expect(js(loop('a.w-1.toFixed(2)'))).toContain('a.w - (1).toFixed(2)');
     expect(js(loop('a.parts[1]'))).toContain('_t0.data = a.parts[1]');
     expect(js(loop('a.title'))).toContain('_t0.data = a.title');
     expect(js(loop('a.w/2'))).toContain('a.w / 2');
-    expect(js(loop('(a.w-1.toFixed(2))'))).toContain('a.w - (1).toFixed(2)');
     expect(js(loop('p a.title'))).toContain('_t0.data = a.title');
     // A loop variable named like a tag, on its own line (packages/email's preview layout).
     const layout = js(`Foo = component\n  templates := [{path: 'x'}]\n  render\n    for template in templates\n      a\n        href: "/x"\n        template.path\n`);
     expect(layout).toContain('template.path');
+    // A member, a value block, an import: still code.
+    const member = `Foo = component\n  label := {w: 3, parts: [1]}\n  ok := true\n  render\n    div\n`;
+    expect(js(member + '      span\n        title:\n          label.w-1.toFixed(2)\n')).toContain('this.label.value.w - (1).toFixed(2)');
+    expect(js(member + '      x = if ok\n        label.w-1.toFixed(2)\n      else 0\n      p x\n')).toContain('this.label.value.w - (1).toFixed(2)');
+    expect(js(`import { label } from './x.js'\nFoo = component\n  render\n    div\n      label.parts[1]\n`)).toContain('label.parts[1]');
   });
 
   test('a line-start id rejects what an id cannot hold', () => {

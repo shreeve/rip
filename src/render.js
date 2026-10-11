@@ -576,6 +576,63 @@ export function rewriteRender(tokens, mintId, fail) {
     (memberFrames.length > 0 && memberFrames[memberFrames.length - 1].names.has(name)) ||
     moduleValues.has(name);
 
+  // Module-level names a template line head may read as a value: plain
+  // and reactive declarations and import bindings (readsAsValue keeps its
+  // own, narrower set for block attachment).
+  const moduleBindings = new Set(moduleValues);
+  for (let j = 0, depth = 0, importLine = false; j < tokens.length; j++) {
+    const k = tokens[j].kind;
+    if (k === 'INDENT') depth++;
+    else if (k === 'OUTDENT') depth--;
+    if (LINE_BREAKS.has(k)) { importLine = false; continue; }
+    if (depth !== 0) continue;
+    if (k === 'IMPORT' && startsLine(j)) importLine = true;
+    else if (importLine && k === 'IDENTIFIER') moduleBindings.add(tokens[j].value);
+    else if (k === 'IDENTIFIER' && (startsLine(j) || tokens[j - 1]?.kind === 'EXPORT') && /ASSIGN$|^=$/.test(tokens[j + 1]?.kind ?? '')) {
+      moduleBindings.add(tokens[j].value);
+    }
+  }
+  const boundHere = (name) => readsAsValue(name) || moduleBindings.has(name);
+
+  // The `.class` chain of an element heading its line, from the `.` at j:
+  // each class joins its tight `-` runs (a digit run, or a word after a
+  // digit run, too) into one name; anything else glued on rejects.
+  const joinSelectorClasses = (j) => {
+    while (tokens[j]?.kind === '.' && !tokens[j].spaced && tokens[j + 1]?.kind === 'PROPERTY' && !tokens[j + 1].spaced) {
+      const cls = tokens[j + 1];
+      let name = String(cls.value);
+      let k = j + 2;
+      let ok = true;
+      while (!name.includes('#')) {
+        const a = tokens[k];
+        const b = tokens[k + 1];
+        if (isHyphen(a) && !a.spaced && b && !b.spaced && (b.kind === 'NUMBER' || b.kind === 'IDENTIFIER' || b.kind === 'PROPERTY')) {
+          if (b.kind === 'NUMBER' && !/^[0-9]+$/.test(String(b.value))) ok = false;
+          name += '-' + String(b.value);
+          k += 2;
+        } else if (a && !a.spaced && (a.kind === 'IDENTIFIER' || a.kind === 'PROPERTY') && tokens[k - 1].kind === 'NUMBER') {
+          name += String(a.value);
+          k += 1;
+        } else break;
+      }
+      const next = tokens[k];
+      const glued = next && !next.spaced && !LINE_BREAKS.has(next.kind) &&
+        next.kind !== '.' && next.kind !== 'CALL_START' && next.kind !== '(' && next.kind !== ',';
+      if (glued && next.kind === ':' && (tokens[k + 1]?.spaced || LINE_BREAKS.has(tokens[k + 1]?.kind))) {
+        fail("an element's `.class` takes no `:` — an attribute goes after a space (`div.card title: …`)", next.start);
+      }
+      if (!ok || glued) {
+        let written = name;
+        for (let m = k; tokens[m] && !tokens[m].spaced && !LINE_BREAKS.has(tokens[m].kind) && tokens[m].kind !== 'STRING'; m++) {
+          written += String(tokens[m].value);
+        }
+        fail(`a class shorthand is letters, digits, \`-\` and \`_\` — write \`class: '${written}'\``, cls.start);
+      }
+      if (k > j + 2) tokens.splice(j + 1, k - (j + 1), { ...cls, value: name, end: tokens[k - 1].end });
+      j += 2;
+    }
+  };
+
   for (let i = 0; i < tokens.length; i++) {
     if (counter.on) counter.n++;
     let t = tokens[i];
@@ -670,27 +727,16 @@ export function rewriteRender(tokens, mintId, fail) {
       fail(`\`${String(t.value).split('#')[0]}\` here is a value, not an element — write it with spaces (\`${String(t.value).split('#')[0].split('-').join(' - ')}\`) for subtraction`, t.start);
     }
 
-    // A tag word heading a template line with a `.class` chain: bound (a
-    // loop variable, render local or member), the line is that value and
-    // the chain is member access — a digit the scanner joined into a
-    // class name (`a.w-1`) is subtraction written without spaces, and
-    // rejects; unbound, it is the element, and any class the scanner
-    // could not take rejects.
-    if (t.kind === 'IDENTIFIER' && !t.generated && atTemplateLineStart(out.length) && !inCode() &&
-        tokens[i + 1]?.kind === '.' && !tokens[i + 1].spaced) {
-      const chain = [];
-      for (let j = i + 1; tokens[j]?.kind === '.' && tokens[j + 1]?.kind === 'PROPERTY' && !tokens[j + 1].spaced; j += 2) {
-        chain.push(tokens[j + 1]);
-      }
-      if (readsAsValue(t.value)) {
-        const joined = chain.find((p) => /-[0-9]/.test(String(p.value)));
-        if (joined) {
-          fail(`\`${t.value}\` is bound here, so this line is a value and \`-\` in \`${joined.value}\` is subtraction — write it with spaces`, joined.start);
-        }
-      } else {
-        const faulted = chain.find((p) => p.selectorFault);
-        if (faulted) fail(faulted.selectorFault.message, faulted.selectorFault.at);
-      }
+    // A template line headed by an element's selector — a tag word no
+    // binding shadows, or a bare `.` with a glued class. The scanner joins
+    // letter runs into class names; the gate, which knows this line is an
+    // element, joins the rest (`p-4`, `col-span-2`, `w-2xl`) and rejects a
+    // class the shorthand cannot hold, pointing at `class: '…'`. A bound
+    // name heading a line is a value, and its chain stays code.
+    if (atTemplateLineStart(out.length) && !inCode()) {
+      const head = String(t.value ?? '').split('#')[0];
+      if (t.kind === 'IDENTIFIER' && !t.generated && isHtmlTag(head) && !boundHere(head)) joinSelectorClasses(i + 1);
+      else if (t.kind === '.' && tokens[i + 1]?.kind === 'PROPERTY' && !tokens[i + 1].spaced) joinSelectorClasses(i);
     }
 
     // An inline branch's element may be a custom element
