@@ -2853,6 +2853,30 @@ describe('the template gate', () => {
     expect(code).not.toContain('String(~fade)');
   });
 
+  test('values spanning lines are code: brackets, `key:` blocks and a value `if`\'s `else` line', () => {
+    const head = 'Bar = component\n  render span "b"\nFoo = component\n  ok := true\n  n := 1\n  a := 5\n  b := 2\n  render\n    div\n      ';
+    for (const body of [
+      'div title: (if ok\n        1\n      else a-b)',
+      'div title: [if ok\n        1\n      else a-b]',
+      'Bar title: (\n        if ok then a-b else 0\n      )',
+      'p f(\n        if ok then a-b else 0\n      )',
+      'div title: (switch n\n        when 1 then a-b\n        else 0)',
+      'Bar\n        title:\n          if ok then a-b else 0',
+      'div\n        title:\n          if ok then a-b else 0',
+      'Bar\n        title: if ok\n          1\n        else a-b',
+    ]) {
+      const code = js(head + body + '\n');
+      expect(code).toContain('this.a.value - this.b.value');
+      expect(code).not.toMatch(/[^.\w]a-b/);
+    }
+  });
+
+  test('a hyphen run the lexer joined at a value block\'s start rejects instead of emitting it raw', () => {
+    const head = 'Foo = component\n  ok := true\n  a := 5\n  b := 2\n  render\n    div\n      ';
+    lexFails(head + 'x = if ok\n        1\n      else\n        a-b\n      p x\n', /`a-b` here is a value, not an element — write it with spaces \(`a - b`\) for subtraction/);
+    lexFails(head + 'x = try\n        JSON.parse "1"\n      catch\n        a-b\n      p x\n', /`a-b` here is a value/);
+  });
+
   test('a lone `.` line with children is an implicit div', () => {
     const code = js('Foo = component\n  render\n    div\n      .\n        span "inside"\n');
     expect(code).toContain("createElement('span')");

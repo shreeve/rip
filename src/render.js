@@ -64,6 +64,8 @@ const MODIFIERS = new Set(['prevent', 'stop', 'once', 'self', 'capture', 'passiv
 const isHyphen = (t) => t?.kind === '-' || (t?.kind === 'MATH' && t.value === '-');
 // A line that continues the statement above it at the same indent.
 const VALUE_CONTINUATIONS = new Set(['ELSE', 'CATCH', 'FINALLY']);
+// Heads whose block a later `else`/`catch`/`finally` line continues.
+const BLOCK_VALUE_HEADS = new Set(['IF', 'UNLESS', 'TRY', 'SWITCH']);
 const LINE_BREAKS = new Set(['INDENT', 'OUTDENT', 'TERMINATOR']);
 const REACTIVE_DECLS = new Set(['REACTIVE_ASSIGN', 'COMPUTED_ASSIGN']);
 const PLAIN_ASSIGN = new Set(['=']);
@@ -370,8 +372,43 @@ export function rewriteRender(tokens, mintId, fail) {
   // arrow, an `= expr` text body, or a bracket group opened inside the
   // template? Template rewrites apply only where this answers false.
   const inCode = () =>
-    valueLine !== null || codeLevels.length > 0 || textFrames.length > 0 || explicitDepthAt() !== 0 ||
-    inArrowBodyOnLine();
+    frames[frames.length - 1] === true || valueLine !== null || codeLevels.length > 0 || textFrames.length > 0 ||
+    explicitDepthAt() !== 0 || inArrowBodyOnLine();
+
+  // Does the `else`/`catch`/`finally` about to be emitted continue a
+  // value's `if`/`try` (`title: if ok` / `1` / `else 2`)? Its owner opens
+  // the block just closed; a markup branch heads its line, while a value's
+  // follows a `:`, `=` or other operand on it.
+  const continuesValue = () => {
+    let k = out.length - 1;
+    if (out[k]?.kind !== 'OUTDENT') return false;
+    for (let depth = 0; k >= 0; k--) {
+      if (out[k].kind === 'OUTDENT') depth++;
+      else if (out[k].kind === 'INDENT' && --depth === 0) break;
+    }
+    let owner = -1;
+    for (let j = k - 1; j >= 0 && !['INDENT', 'OUTDENT', 'RENDER', 'TERMINATOR'].includes(out[j].kind); j--) {
+      if (BLOCK_VALUE_HEADS.has(out[j].kind)) owner = j;
+    }
+    if (owner <= 0) return false;
+    const before = out[owner - 1].kind;
+    return !['INDENT', 'OUTDENT', 'RENDER', 'TERMINATOR', 'ELSE'].includes(before);
+  };
+
+  // Does the bracket or block tokens[i] opens hold code? Inside code,
+  // everything is code. A block holds code after a function arrow, after
+  // `key:` or `=` (a value spanning lines), or on a render local's
+  // line; a bracket holds code unless it is an element's own argument
+  // list. Element children and markup control-flow blocks are template.
+  const opensCode = (i, t) => {
+    if (frames[frames.length - 1] === true || valueLine !== null || textFrames.length > 0) return true;
+    if (t.kind === 'INDENT') {
+      const p = tokens[i - 1];
+      if (p && (p.kind === '->' || p.kind === '=>')) return out[out.length - 1] === p && isCodeArrow(out.length - 1);
+      return p?.kind === ':' || p?.kind === '=' || p?.kind === 'COMPOUND_ASSIGN';
+    }
+    return !(t.kind === 'CALL_START' && isHeadCall(out.length));
+  };
 
   // Does a block opening after the current token belong to code? Asked
   // AFTER the token, since a closer that ends a bracket group
@@ -527,6 +564,8 @@ export function rewriteRender(tokens, mintId, fail) {
   const memberFrames = [];   // { level, names } per open component body
   const renderScopes = [];   // { level, names } per open render control-flow block
   const codeLevels = [];     // indent levels of open function bodies inside render
+  const frames = [];         // per open input bracket or block in render: true when it holds code
+  let pendingFrame;          // the frame the previous token opens (a boolean) or closes (null)
   let lineHead = null;       // kind of the current line's first token
   let valueLine = null;      // indent of an open render-local line (`x = …`): its value, blocks and
                              // `else`/`catch`/`finally` continuations included, is code
@@ -542,13 +581,24 @@ export function rewriteRender(tokens, mintId, fail) {
     let t = tokens[i];
     let next = tokens[i + 1] ?? null;
 
+    // A bracket or block takes effect after the token that opens it, so
+    // the opener itself is judged in its parent's context.
+    if (pendingFrame === null) frames.pop();
+    else if (pendingFrame !== undefined) frames.push(pendingFrame);
+    pendingFrame = undefined;
+    if (inRender) {
+      if (OPENERS.has(t.kind) || t.kind === 'INDENT') pendingFrame = opensCode(i, t);
+      else if ((CLOSERS.has(t.kind) || t.kind === 'OUTDENT') && frames.length > 0) pendingFrame = null;
+    }
+
     if (textFrames.length > 0) closeTextFrames(t);
 
     if (!LINE_BREAKS.has(t.kind) && startsLine(i)) {
       lineHead = t.kind;
       if (valueLine !== null && (currentIndent < valueLine ||
           (currentIndent === valueLine && !VALUE_CONTINUATIONS.has(t.kind)))) valueLine = null;
-      if (inRender && valueLine === null && t.kind === 'IDENTIFIER' && next?.kind === '=' && !inCode()) {
+      if (inRender && valueLine === null && !inCode() &&
+          ((t.kind === 'IDENTIFIER' && next?.kind === '=') || (VALUE_CONTINUATIONS.has(t.kind) && continuesValue()))) {
         valueLine = currentIndent;
       }
     }
@@ -556,6 +606,7 @@ export function rewriteRender(tokens, mintId, fail) {
 
     if (t.kind === 'RENDER') {
       inRender = true;
+      frames.length = 0;
       inlineRender = next !== null && next.kind !== 'INDENT';
       renderIndentLevel = currentIndent + 1;
       renderScopes.push({ level: renderIndentLevel, names: new Set() });
@@ -611,6 +662,12 @@ export function rewriteRender(tokens, mintId, fail) {
     if (!inRender) {
       out.push(t);
       continue;
+    }
+
+    // The lexer joins a tight hyphen run at a block's first word into one
+    // custom-element name; in code that name would be raw JavaScript.
+    if (t.kind === 'IDENTIFIER' && !t.generated && String(t.value).includes('-') && inCode()) {
+      fail(`\`${String(t.value).split('#')[0]}\` here is a value, not an element — write it with spaces (\`${String(t.value).split('#')[0].split('-').join(' - ')}\`) for subtraction`, t.start);
     }
 
     // An inline branch's element may be a custom element

@@ -2874,6 +2874,7 @@ var VALUE_STARTS = new Set([
 var MODIFIERS = new Set(["prevent", "stop", "once", "self", "capture", "passive"]);
 var isHyphen = (t) => t?.kind === "-" || t?.kind === "MATH" && t.value === "-";
 var VALUE_CONTINUATIONS = new Set(["ELSE", "CATCH", "FINALLY"]);
+var BLOCK_VALUE_HEADS = new Set(["IF", "UNLESS", "TRY", "SWITCH"]);
 var LINE_BREAKS = new Set(["INDENT", "OUTDENT", "TERMINATOR"]);
 var REACTIVE_DECLS = new Set(["REACTIVE_ASSIGN", "COMPUTED_ASSIGN"]);
 var PLAIN_ASSIGN = new Set(["="]);
@@ -3145,7 +3146,38 @@ function rewriteRender(tokens, mintId, fail) {
     }
     return false;
   };
-  const inCode = () => valueLine !== null || codeLevels.length > 0 || textFrames.length > 0 || explicitDepthAt() !== 0 || inArrowBodyOnLine();
+  const inCode = () => frames[frames.length - 1] === true || valueLine !== null || codeLevels.length > 0 || textFrames.length > 0 || explicitDepthAt() !== 0 || inArrowBodyOnLine();
+  const continuesValue = () => {
+    let k = out.length - 1;
+    if (out[k]?.kind !== "OUTDENT")
+      return false;
+    for (let depth = 0;k >= 0; k--) {
+      if (out[k].kind === "OUTDENT")
+        depth++;
+      else if (out[k].kind === "INDENT" && --depth === 0)
+        break;
+    }
+    let owner = -1;
+    for (let j = k - 1;j >= 0 && !["INDENT", "OUTDENT", "RENDER", "TERMINATOR"].includes(out[j].kind); j--) {
+      if (BLOCK_VALUE_HEADS.has(out[j].kind))
+        owner = j;
+    }
+    if (owner <= 0)
+      return false;
+    const before = out[owner - 1].kind;
+    return !["INDENT", "OUTDENT", "RENDER", "TERMINATOR", "ELSE"].includes(before);
+  };
+  const opensCode = (i, t) => {
+    if (frames[frames.length - 1] === true || valueLine !== null || textFrames.length > 0)
+      return true;
+    if (t.kind === "INDENT") {
+      const p = tokens[i - 1];
+      if (p && (p.kind === "->" || p.kind === "=>"))
+        return out[out.length - 1] === p && isCodeArrow(out.length - 1);
+      return p?.kind === ":" || p?.kind === "=" || p?.kind === "COMPOUND_ASSIGN";
+    }
+    return !(t.kind === "CALL_START" && isHeadCall(out.length));
+  };
   const blockInCode = (t) => {
     if (codeLevels.length > 0 || textFrames.length > 0)
       return true;
@@ -3286,6 +3318,8 @@ function rewriteRender(tokens, mintId, fail) {
   const memberFrames = [];
   const renderScopes = [];
   const codeLevels = [];
+  const frames = [];
+  let pendingFrame;
   let lineHead = null;
   let valueLine = null;
   let loopVars = null;
@@ -3295,13 +3329,24 @@ function rewriteRender(tokens, mintId, fail) {
       counter.n++;
     let t = tokens[i];
     let next = tokens[i + 1] ?? null;
+    if (pendingFrame === null)
+      frames.pop();
+    else if (pendingFrame !== undefined)
+      frames.push(pendingFrame);
+    pendingFrame = undefined;
+    if (inRender) {
+      if (OPENERS.has(t.kind) || t.kind === "INDENT")
+        pendingFrame = opensCode(i, t);
+      else if ((CLOSERS.has(t.kind) || t.kind === "OUTDENT") && frames.length > 0)
+        pendingFrame = null;
+    }
     if (textFrames.length > 0)
       closeTextFrames(t);
     if (!LINE_BREAKS.has(t.kind) && startsLine(i)) {
       lineHead = t.kind;
       if (valueLine !== null && (currentIndent < valueLine || currentIndent === valueLine && !VALUE_CONTINUATIONS.has(t.kind)))
         valueLine = null;
-      if (inRender && valueLine === null && t.kind === "IDENTIFIER" && next?.kind === "=" && !inCode()) {
+      if (inRender && valueLine === null && !inCode() && (t.kind === "IDENTIFIER" && next?.kind === "=" || VALUE_CONTINUATIONS.has(t.kind) && continuesValue())) {
         valueLine = currentIndent;
       }
     }
@@ -3309,6 +3354,7 @@ function rewriteRender(tokens, mintId, fail) {
       memberFrames.push({ level: currentIndent + 1, names: memberNames(i) });
     if (t.kind === "RENDER") {
       inRender = true;
+      frames.length = 0;
       inlineRender = next !== null && next.kind !== "INDENT";
       renderIndentLevel = currentIndent + 1;
       renderScopes.push({ level: renderIndentLevel, names: new Set });
@@ -3364,6 +3410,9 @@ function rewriteRender(tokens, mintId, fail) {
     if (!inRender) {
       out.push(t);
       continue;
+    }
+    if (t.kind === "IDENTIFIER" && !t.generated && String(t.value).includes("-") && inCode()) {
+      fail(`\`${String(t.value).split("#")[0]}\` here is a value, not an element — write it with spaces (\`${String(t.value).split("#")[0].split("-").join(" - ")}\`) for subtraction`, t.start);
     }
     if (t.kind === "IDENTIFIER" && (out[out.length - 1]?.kind === "THEN" || out[out.length - 1]?.kind === "ELSE") && isHyphen(tokens[i + 1]) && !tokens[i + 1].spaced && tokens[i + 2]?.kind === "IDENTIFIER" && !tokens[i + 2].spaced && atTemplateLineStart(out.length) && !inCode()) {
       let j = i + 1;
@@ -32847,7 +32896,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "77f56be7d4d217d7";
+var compilerBuild = () => "ddb9d13501936ca0";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
