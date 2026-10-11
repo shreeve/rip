@@ -4500,6 +4500,7 @@ var implicitCalls = (tokens, mintId) => applyInsertions(tokens, collectCalls, mi
 // src/types.js
 var POSTFIX_TYPE_KINDS = new Map([["as", "CAST"], ["satisfies", "SATISFIES"]]);
 var isPostfixTypeWord = (t) => t?.kind === "IDENTIFIER" && POSTFIX_TYPE_KINDS.has(t.value);
+var headsPostfixType = (prev, word, next) => isPostfixTypeWord(word) && next?.spaced === true && prev != null && prev.kind !== "." && prev.kind !== "?." && CAST_LHS_ENDERS.has(prev.kind);
 var CAST_LHS_ENDERS = new Set([
   "IDENTIFIER",
   "PROPERTY",
@@ -5224,7 +5225,7 @@ var syncTypeGenericMemo = (tokens, memo) => {
       memo.answers.set(memo.level, typeAliasEq(tokens, j));
     } else if (t.kind === "RESERVED" && t.value === "interface" && atStatementBoundary(tokens, j - 1)) {
       memo.answers.set(memo.level, true);
-    } else if (isPostfixTypeWord(t) && tokens[j - 1] && tokens[j - 1].kind !== "." && tokens[j - 1].kind !== "?." && CAST_LHS_ENDERS.has(tokens[j - 1].kind)) {
+    } else if (headsPostfixType(tokens[j - 1], t, tokens[j + 1])) {
       memo.answers.set(memo.level, true);
     }
   }
@@ -5599,7 +5600,7 @@ function rewriteTypes(tokens, mintId, text, fail) {
         continue;
       }
     }
-    if (isPostfixTypeWord(tok) && prev && prev.kind !== "." && prev.kind !== "?." && CAST_LHS_ENDERS.has(prev.kind) && tokens[i + 1] && (TYPE_STARTERS.has(tokens[i + 1].kind) || tokens[i + 1].kind === "+" && tokens[i + 2]?.kind === "NUMBER")) {
+    if (headsPostfixType(prev, tok, tokens[i + 1]) && (TYPE_STARTERS.has(tokens[i + 1].kind) || tokens[i + 1].kind === "+" && tokens[i + 2]?.kind === "NUMBER")) {
       const last = claim(POSTFIX_TYPE_KINDS.get(tok.value), tok, i + 1, { cast: true });
       if (last < 0) {
         fail(`'${tok.value}' takes a type — \`x ${tok.value} T\``, tok.start, tok.end);
@@ -10082,6 +10083,15 @@ class Emitter {
       return true;
     return this.stores.node(id)?.semanticKind === kind;
   }
+  isPostfixType(x) {
+    return Emitter.isPostfixTypeIn(this.stores, x);
+  }
+  static isPostfixTypeIn(stores, x) {
+    if (!isNode(x) || x[0] !== "cast" && x[0] !== "satisfies" || x.length !== 3)
+      return false;
+    const id = stores.idOf(x);
+    return id === null || stores.node(id)?.semanticKind === x[0];
+  }
   static pureSpine(x) {
     return typeof x === "string" || isNode(x) && typeof x[0] === "string" && SPINE_HEADS.has(x[0]) && !isRubyNew(x) && Emitter.pureSpine(x[1]);
   }
@@ -10758,7 +10768,7 @@ class Emitter {
       else if (h === "object")
         for (const pair of p.slice(1))
           this.patternMemberTargets(pair[0] === ":" ? pair[2] : pair[1], out);
-      else if (["rest", "...", "default", "=", "cast", "satisfies"].includes(h))
+      else if (["rest", "...", "default", "="].includes(h) || this.isPostfixType(p))
         this.patternMemberTargets(p[1], out);
     }
     return out;
@@ -11687,7 +11697,7 @@ class Emitter {
       return null;
     if (this.containsAwait(iter) || containsYield(iter))
       return null;
-    if (referencesNames(iter, rec.parent.locals))
+    if (referencesNames(iter, rec.parent.locals, this.stores))
       return null;
     const leaves = new Set;
     Emitter.collectLeafNames(iter, leaves);
@@ -11904,7 +11914,7 @@ class Emitter {
       }
       if (x[0] === "type-decl")
         return;
-      if ((x[0] === "cast" || x[0] === "satisfies") && x.length === 3) {
+      if (this.isPostfixType(x)) {
         walk(x[1]);
         return;
       }
@@ -12126,7 +12136,7 @@ class Emitter {
       this.patternNames(p[1], out, binding, p);
     else if (p[0] === "=")
       this.patternNames(p[1], out, binding, p);
-    else if (p[0] === "cast" || p[0] === "satisfies")
+    else if (this.isPostfixType(p))
       this.patternNames(p[1], out, binding, p);
     else if (p[0] === "typed-var")
       this.patternNames(p[1], out, binding, p);
@@ -14440,7 +14450,7 @@ ${pad}    ${into}.push(undefined);
             this.mark(node, "step", () => this.b.emit(`${idx}++`));
           } else {
             this.b.emit(`${idx} += `);
-            this.grouped(node, "step", step, Emitter.needsGrouping(step, "operand"));
+            this.grouped(node, "step", step, Emitter.needsGrouping(step, "operand", this.stores));
           }
         } else {
           const stp = this.loopTempName("_step");
@@ -14608,7 +14618,7 @@ ${"  ".repeat(ind)}`);
     const stmts = this.liveStmts(isBlock(body) ? body.slice(1) : [body]);
     this.emitTsTypeDecls(isBlock(body) ? body.slice(1) : [body], "");
     if (guard !== null) {
-      const wrap = Emitter.needsGrouping(guard, "operand") || isUpdate(guard);
+      const wrap = Emitter.needsGrouping(guard, "operand", this.stores) || isUpdate(guard);
       this.b.emit("if (");
       if (wrap)
         this.b.emit("(");
@@ -14766,7 +14776,7 @@ ${pad ?? ""}`);
           this.mark(node, "step", () => this.b.emit(`${idx}++`));
         } else {
           this.b.emit(`${idx} += `);
-          this.grouped(node, "step", step, Emitter.needsGrouping(step, "operand"));
+          this.grouped(node, "step", step, Emitter.needsGrouping(step, "operand", this.stores));
         }
       } else {
         const stp = this.loopTempName("_step");
@@ -14827,7 +14837,7 @@ ${pad ?? ""}`);
   }
   guardOpen(guard) {
     this.b.emit("if (");
-    const wrap = Emitter.needsGrouping(guard, "operand") || isUpdate(guard);
+    const wrap = Emitter.needsGrouping(guard, "operand", this.stores) || isUpdate(guard);
     if (wrap)
       this.b.emit("(");
     this.expr(guard);
@@ -14932,7 +14942,7 @@ ${pad ?? ""}`);
       }
       if (keyExpr === null) {
         this.b.emit(`${inner}${acc}.push(`);
-        const wrap = Emitter.needsGrouping(expr, "operand") || isUpdate(expr);
+        const wrap = Emitter.needsGrouping(expr, "operand", this.stores) || isUpdate(expr);
         if (wrap)
           this.b.emit("(");
         emitValue();
@@ -14944,7 +14954,7 @@ ${pad ?? ""}`);
         const kt = this.loopTempName("_k");
         const vt = this.loopTempName("_v");
         this.b.emit(`${inner}const ${kt} = ${this.runtimeName("__toPropertyKey")}(`);
-        const wrapKey = isNode(keyExpr) && (Emitter.needsGrouping(keyExpr, "operand") || isUpdate(keyExpr));
+        const wrapKey = isNode(keyExpr) && (Emitter.needsGrouping(keyExpr, "operand", this.stores) || isUpdate(keyExpr));
         const emitKey = () => {
           if (wrapKey)
             this.b.emit("(");
@@ -14961,7 +14971,7 @@ ${pad ?? ""}`);
         } else
           emitKey();
         this.b.emit(`), ${vt} = `);
-        const wrap = Emitter.needsGrouping(expr, "operand") || isUpdate(expr);
+        const wrap = Emitter.needsGrouping(expr, "operand", this.stores) || isUpdate(expr);
         if (wrap)
           this.b.emit("(");
         emitValue();
@@ -15075,7 +15085,7 @@ ${pad ?? ""}`);
     this.mark(node, "$self", () => this.ifTernary(node));
   }
   ifTernary(node) {
-    this.grouped(node, "condition", node[1], Emitter.needsGrouping(node[1], "operand") || isNode(node[1]) && (node[1][0] === "await" || node[1][0] === "yield"));
+    this.grouped(node, "condition", node[1], Emitter.needsGrouping(node[1], "operand", this.stores) || isNode(node[1]) && (node[1][0] === "await" || node[1][0] === "yield"));
     this.b.emit(" ? ");
     this.ternaryArm(node, "then", this.branchLive(node[2], true)[0]);
     this.b.emit(" : ");
@@ -15093,7 +15103,7 @@ ${pad ?? ""}`);
   }
   ternaryArm(node, role, stmt) {
     this.mark(node, role, () => {
-      const wrap = Emitter.needsGrouping(stmt, "operand") || isUpdate(stmt);
+      const wrap = Emitter.needsGrouping(stmt, "operand", this.stores) || isUpdate(stmt);
       if (wrap)
         this.b.emit("(");
       this.expr(stmt);
@@ -15119,7 +15129,7 @@ ${pad ?? ""}`);
   }
   returnifyIf(node, ind, effect = false) {
     this.b.emit("if (");
-    this.grouped(node, "condition", node[1], Emitter.needsGrouping(node[1], "operand"));
+    this.grouped(node, "condition", node[1], Emitter.needsGrouping(node[1], "operand", this.stores));
     this.b.emit(") ");
     this.mark(node, "then", () => this.returnBlock(node[2], ind, effect));
     if (node.length >= 4) {
@@ -15421,7 +15431,7 @@ ${pad ?? ""}`);
       }
       if (i === stmts.length - 1 && !Emitter.statementOnly(stmt) && !isLoopNode(stmt) && !Emitter.containsCtrl(stmt)) {
         this.b.emit(`${into}.push(`);
-        const wrap = Emitter.needsGrouping(stmt, "operand") || isUpdate(stmt);
+        const wrap = Emitter.needsGrouping(stmt, "operand", this.stores) || isUpdate(stmt);
         if (wrap)
           this.b.emit("(");
         this.expr(stmt);
@@ -15443,7 +15453,7 @@ ${pad ?? ""}`);
   }
   accumulateIf(node, ind, into) {
     this.b.emit("if (");
-    this.grouped(node, "condition", node[1], Emitter.needsGrouping(node[1], "operand"));
+    this.grouped(node, "condition", node[1], Emitter.needsGrouping(node[1], "operand", this.stores));
     this.b.emit(") ");
     this.mark(node, "then", () => this.accumulateBlock(node[2], ind, into));
     if (node.length >= 4) {
@@ -15604,7 +15614,7 @@ ${pad ?? ""}`);
       this.b.emit("return");
       if (node.length === 2) {
         this.b.emit(" ");
-        this.grouped(node, "value", node[1], Emitter.needsGrouping(node[1], "return"));
+        this.grouped(node, "value", node[1], Emitter.needsGrouping(node[1], "return", this.stores));
       }
     });
     this.b.emit(";");
@@ -15665,11 +15675,11 @@ ${pad ?? ""}`);
   static containsYield(sexpr) {
     return containsYield(sexpr);
   }
-  static jsTier(x) {
+  static jsTier(x, stores) {
     if (!isNode(x))
       return "primary";
-    if ((x[0] === "cast" || x[0] === "satisfies") && x.length === 3)
-      return Emitter.jsTier(x[1]);
+    if (Emitter.isPostfixTypeIn(stores, x))
+      return Emitter.jsTier(x[1], stores);
     if (isAssign(x))
       return "assign";
     if (isTernary(x) || isIf(x) && x.length <= 4 && Emitter.ifIsSimple(x))
@@ -15697,7 +15707,7 @@ ${pad ?? ""}`);
     return "primary";
   }
   static needsGrouping(child, context, stores) {
-    const tier = Emitter.jsTier(child);
+    const tier = Emitter.jsTier(child, stores);
     if (context === "operand" || context === "return") {
       if (tier === "unary") {
         return !(child[0] === "!" || child[0] === "typeof" || child[0] === "await" || child[0] === "dammit!" || child[0] === "dammit?" || isNode(child[0]) && child[0][0] === "dammit!");
@@ -15713,10 +15723,10 @@ ${pad ?? ""}`);
     return tier === "object" || isUpdate(child) || tier === "function" && child[0] === "->" || isNode(child) && (child[0] === "class" || child[0] === "component") || isTernary(child) && !Emitter.ternaryHoists(child, stores) || tier === "unary" && child[0] === "delete";
   }
   operand(node, role, child) {
-    this.grouped(node, role, child, Emitter.needsGrouping(child, "operand"));
+    this.grouped(node, role, child, Emitter.needsGrouping(child, "operand", this.stores));
   }
   head(node, role, child) {
-    this.grouped(node, role, child, Emitter.needsGrouping(child, "head"));
+    this.grouped(node, role, child, Emitter.needsGrouping(child, "head", this.stores));
   }
   static isIntegerLiteral(x) {
     return typeof x === "string" && x.charCodeAt(0) >= 48 && x.charCodeAt(0) <= 57 && /^[0-9][0-9_]*$/.test(x);
@@ -15865,7 +15875,7 @@ ${pad ?? ""}`);
       return this.comprehension(node, this.ind);
     if (head === "do-iife" && node.length === 2)
       return this.doIife(node);
-    if ((head === "cast" || head === "satisfies") && node.length === 3)
+    if (this.isPostfixType(node))
       return this.postfixType(node);
     if (head === "?" && node.length === 2)
       return this.existence(node);
@@ -16392,7 +16402,7 @@ ${pad ?? ""}`);
         typeArg();
         this.b.emit("(");
         this.mark(node, "value", () => this.withExpression(() => {
-          const wrap = Emitter.needsGrouping(value, "operand");
+          const wrap = Emitter.needsGrouping(value, "operand", this.stores);
           if (wrap)
             this.b.emit("(");
           this.expr(value);
@@ -16422,7 +16432,7 @@ ${pad ?? ""}`);
       this.rframes.pop();
       return;
     }
-    const wrap = Emitter.needsGrouping(value, "operand") || isObject(value);
+    const wrap = Emitter.needsGrouping(value, "operand", this.stores) || isObject(value);
     if (wrap)
       this.b.emit("(");
     this.expr(value);
@@ -16448,7 +16458,7 @@ ${pad ?? ""}`);
       this.mark(node, "operator", () => this.b.emit("="));
       this.b.emit(" ");
       this.mark(node, "value", () => this.withExpression(() => {
-        const wrap = Emitter.needsGrouping(value, "operand");
+        const wrap = Emitter.needsGrouping(value, "operand", this.stores);
         if (wrap)
           this.b.emit("(");
         this.expr(value);
@@ -16570,7 +16580,7 @@ ${pad ?? ""}`);
       if (!this.effectTailWrites(body))
         this.b.emit("return ");
       this.mark(node, "value", () => this.withExpression(() => {
-        const wrap = Emitter.needsGrouping(body, "operand") || isObject(body);
+        const wrap = Emitter.needsGrouping(body, "operand", this.stores) || isObject(body);
         if (wrap)
           this.b.emit("(");
         this.expr(body);
@@ -16748,7 +16758,7 @@ ${pad ?? ""}`);
 `);
   }
   componentInitValue(value) {
-    const wrap = Emitter.needsGrouping(value, "operand");
+    const wrap = Emitter.needsGrouping(value, "operand", this.stores);
     if (wrap)
       this.b.emit("(");
     this.expr(value);
@@ -17275,7 +17285,7 @@ ${pad ?? ""}`);
       };
       const memberValue = (stmt, value) => {
         this.mark(stmt, "value", () => this.withExpression(() => {
-          const wrap = Emitter.needsGrouping(value, "operand");
+          const wrap = Emitter.needsGrouping(value, "operand", this.stores);
           if (wrap)
             this.b.emit("(");
           this.expr(value);
@@ -17451,7 +17461,7 @@ ${pad ?? ""}`);
                 if (!this.effectTailWrites(single))
                   this.b.emit("return ");
                 this.mark(eff, "value", () => this.withExpression(() => {
-                  const wrap = Emitter.needsGrouping(single, "operand") || isObject(single);
+                  const wrap = Emitter.needsGrouping(single, "operand", this.stores) || isObject(single);
                   if (wrap)
                     this.b.emit("(");
                   this.expr(single);
@@ -17856,14 +17866,14 @@ ${pad ?? ""}`);
     const rec = this.rstate.sink;
     if (rec.kind !== "class" || rec.locals.size === 0)
       return;
-    if (referencesNames(expr, rec.locals)) {
+    if (referencesNames(expr, rec.locals, this.stores)) {
       throw this.positionedError(node ?? expr, "emitter: a render local cannot appear in a LIVE binding or a dynamic block head at the render top level — " + "locals live in _create() and reactive machinery lives in _setup() (a compiled read here would be a " + "mount-time ReferenceError); bind the value to a member instead", isNode(expr) ? expr : this.rstate.node);
     }
   }
   renderExpr(value) {
     let span = null;
     this.withExpression(() => {
-      const wrap = Emitter.needsGrouping(value, "operand");
+      const wrap = Emitter.needsGrouping(value, "operand", this.stores);
       if (wrap)
         this.b.emit("(");
       const start = this.b.offset;
@@ -19328,7 +19338,7 @@ ${this.replayPad}}` : " }");
       };
       if (isNode(key) && key[0] === "." && key[1] === "this" && typeof key[2] === "string") {
         const eventName = key[2];
-        if (this.rstate.sink.kind === "loop" && this.loopVarNames().size > 0 && referencesNames(value, this.loopVarNames())) {
+        if (this.rstate.sink.kind === "loop" && this.loopVarNames().size > 0 && referencesNames(value, this.loopVarNames(), this.stores)) {
           this.rstate.sink.forceNonStatic = true;
         }
         const evUsed = new Set;
@@ -19741,7 +19751,7 @@ ${this.replayPad}}` : " }");
       if (r.locals.size === 0)
         continue;
       const hidden = new Set([...r.locals].filter((n) => !visible(n)));
-      if (hidden.size > 0 && referencesNames(expr, hidden)) {
+      if (hidden.size > 0 && referencesNames(expr, hidden, this.stores)) {
         throw this.positionedError(node, "emitter: this expression reads a render local of an ENCLOSING render scope — each dynamic block (a " + "conditional branch, a loop body) is its own factory function, and render locals never cross that boundary " + "; declare the local " + "inside this block, or use a member", this.rstate.node);
       }
     }
@@ -20170,10 +20180,10 @@ ${this.replayPad}}` : " }");
       this.primitiveAvoid = prevAvoid;
     }
     if (keyExpr !== null) {
-      if (rec.locals.size > 0 && referencesNames(keyExpr, rec.locals)) {
+      if (rec.locals.size > 0 && referencesNames(keyExpr, rec.locals, this.stores)) {
         throw this.positionedError(node, "emitter: a `key:` expression must be evaluable in the loop HEADER scope — it reads a render local declared " + "inside the loop body, which lives in the row factory (derive the key from the item inline: `key: item.id`)");
       }
-      if (!referencesNames(keyExpr, new Set([itemVar, indexVar]))) {
+      if (!referencesNames(keyExpr, new Set([itemVar, indexVar]), this.stores)) {
         throw this.positionedError(node, `emitter: a loop key must derive from the row — this \`key:\` expression never reads '${itemVar}'` + `${vars.length === 2 ? ` or '${indexVar}'` : ""} (a row-independent key cannot identify rows)`);
       }
     }
@@ -20402,7 +20412,7 @@ ${this.replayPad}}` : " }");
         });
         try {
           this.withExpression(() => {
-            const wrap = Emitter.needsGrouping(keyExpr, "operand") || isObject(keyExpr);
+            const wrap = Emitter.needsGrouping(keyExpr, "operand", this.stores) || isObject(keyExpr);
             const gen = this.tsServedValue("__key", () => {
               if (wrap)
                 this.b.emit("(");
@@ -20787,7 +20797,7 @@ ${this.replayPad}}` : " }");
   }
   renderBind(el, pair, prop, value, objExpr, site) {
     this.checkBindTarget(pair, value);
-    if (this.rstate.sink.kind === "loop" && this.loopVarNames().size > 0 && referencesNames(value, this.loopVarNames())) {
+    if (this.rstate.sink.kind === "loop" && this.loopVarNames().size > 0 && referencesNames(value, this.loopVarNames(), this.stores)) {
       this.rstate.sink.forceNonStatic = true;
     }
     let inputType = null;
@@ -21071,7 +21081,7 @@ ${this.replayPad}}` : " }");
         f.savedTarget = this.inTarget;
         this.inTarget = false;
         if (isInner)
-          this.asReference(n[1], () => this.grouped(n, "object", n[1], Emitter.needsGrouping(n[1], "head") || Emitter.isIntegerLiteral(n[1])));
+          this.asReference(n[1], () => this.grouped(n, "object", n[1], Emitter.needsGrouping(n[1], "head", this.stores) || Emitter.isIntegerLiteral(n[1])));
         else
           f.role = this.beginMark(n, "object");
       } else if (fkind === "index") {
@@ -21287,7 +21297,7 @@ ${this.replayPad}}` : " }");
         this.b.emit(optional ? `((${p}) => ${p} == null ? undefined : ({` : `((${p}) => ({`);
         body(() => this.b.emit(p));
         this.b.emit("}))(");
-        this.withExpression(() => this.grouped(node, "source", source, Emitter.needsGrouping(source, "operand")));
+        this.withExpression(() => this.grouped(node, "source", source, Emitter.needsGrouping(source, "operand", this.stores)));
         this.b.emit(")");
       }
     });
@@ -21544,7 +21554,7 @@ ${this.replayPad}}` : " }");
     const spelled = row && row.sourceStart != null && this.b.source !== null ? this.b.source.slice(row.sourceStart, row.sourceEnd) : `${node[0] === "cast" ? "as" : "satisfies"} ${tidyType(node[2])}`;
     this.mark(node, "$self", () => {
       this.b.tsOnly(() => this.b.emit("("));
-      const wrapValue = Emitter.jsTier(node[1]) !== "primary";
+      const wrapValue = Emitter.jsTier(node[1], this.stores) !== "primary";
       if (wrapValue)
         this.b.tsOnly(() => this.b.emit("("));
       this.mark(node, "value", () => this.expr(node[1]));
@@ -21619,7 +21629,7 @@ ${this.replayPad}}` : " }");
             this.b.emit(item[1]);
             return;
           }
-          const wrap = !this.inPattern && !(isNode(item) && item[0] === "...") && Emitter.needsGrouping(item, "operand");
+          const wrap = !this.inPattern && !(isNode(item) && item[0] === "...") && Emitter.needsGrouping(item, "operand", this.stores);
           if (wrap)
             this.b.emit("(");
           this.expr(item);
@@ -21854,7 +21864,7 @@ ${this.replayPad}}` : " }");
     }
     if (parent != null) {
       this.b.emit(" extends ");
-      this.grouped(node, "parent", parent, Emitter.needsGrouping(parent, "head"));
+      this.grouped(node, "parent", parent, Emitter.needsGrouping(parent, "head", this.stores));
     }
     this.b.emit(` {
 `);
@@ -22402,7 +22412,7 @@ ${"  ".repeat(ind)}`);
           } else if (isCall && !operand.parenthesized && plainCallee) {
             this.call(operand);
           } else if (isCall && !operand.parenthesized) {
-            const selfGrouped = this.ts && isNode(callee) && (callee[0] === "cast" || callee[0] === "satisfies");
+            const selfGrouped = this.ts && this.isPostfixType(callee);
             this.mark(operand, "$self", () => {
               if (!selfGrouped)
                 this.b.emit("(");
@@ -22420,7 +22430,7 @@ ${"  ".repeat(ind)}`);
               });
             });
           } else {
-            const grouped = this.ts && (operand[0] === "cast" || operand[0] === "satisfies");
+            const grouped = this.ts && this.isPostfixType(operand);
             if (!grouped)
               this.b.emit("(");
             this.expr(operand);
@@ -22609,7 +22619,7 @@ ${"  ".repeat(ind)}`);
         const inline = !isVoid && stmts.length === 1 && hoist.length === 0 && !Emitter.statementOnly(stmts[0]) && !(isNode(stmts[0]) && (isDefHead(stmts[0][0]) || ["return", "if", "while", "block"].includes(stmts[0][0])));
         if (inline) {
           this.mark(node, "body", () => {
-            const wrap = Emitter.needsGrouping(stmts[0], "operand") || isObject(stmts[0]);
+            const wrap = Emitter.needsGrouping(stmts[0], "operand", this.stores) || isObject(stmts[0]);
             if (wrap)
               this.b.emit("(");
             this.expr(stmts[0]);
@@ -22758,7 +22768,7 @@ ${"  ".repeat(ind)}`);
     }
     this.b.emit("return ");
     this.withTailReturn(() => {
-      const wrap = Emitter.needsGrouping(stmt, "return");
+      const wrap = Emitter.needsGrouping(stmt, "return", this.stores);
       if (wrap)
         this.b.emit("(");
       this.expr(stmt);
@@ -22826,7 +22836,7 @@ ${"  ".repeat(ind)}`);
         this.b.emit(".includes(");
         this.mark(node, "left", () => this.expr(a));
         this.b.emit(") : (");
-        const wrap = Emitter.needsGrouping(a, "operand");
+        const wrap = Emitter.needsGrouping(a, "operand", this.stores);
         if (wrap)
           this.b.emit("(");
         this.expr(a);
@@ -22861,7 +22871,7 @@ ${"  ".repeat(ind)}`);
     const inner = chain[chain.length - 1];
     const hoists = Emitter.ternaryHoists(inner, this.stores);
     const branch = (owner, role, child) => {
-      this.grouped(owner, role, child, Emitter.needsGrouping(child, "operand") || isUpdate(child));
+      this.grouped(owner, role, child, Emitter.needsGrouping(child, "operand", this.stores) || isUpdate(child));
     };
     const condition = (owner) => this.grouped(owner, "condition", owner[1], isNode(owner[1]) && owner[1][0] === "?:");
     this.mark(node, "$self", () => {
@@ -22902,7 +22912,7 @@ ${"  ".repeat(ind)}`);
         }
         this.b.emit("${");
         this.mark(chunk, "$self", () => {
-          const wrap = Emitter.needsGrouping(chunk[0], "operand") || isUpdate(chunk[0]);
+          const wrap = Emitter.needsGrouping(chunk[0], "operand", this.stores) || isUpdate(chunk[0]);
           if (wrap)
             this.b.emit("(");
           this.expr(chunk[0]);
@@ -23066,7 +23076,7 @@ ${"  ".repeat(ind)}`);
           this.mark(guard, "left", () => this.expr(guard[1]));
         }
       };
-      const grouped = assign !== null || Emitter.jsTier(guard[1]) !== "primary";
+      const grouped = assign !== null || Emitter.jsTier(guard[1], this.stores) !== "primary";
       if (op === "||") {
         this.b.emit("!");
         if (grouped) {
@@ -23101,7 +23111,7 @@ ${"  ".repeat(ind)}`);
         if (isNode(ret) && ret.length > 1) {
           this.b.emit(" ");
           this.mark(ret, "value", () => {
-            if (ret[0] === "return" && Emitter.needsGrouping(ret[1], "return")) {
+            if (ret[0] === "return" && Emitter.needsGrouping(ret[1], "return", this.stores)) {
               this.b.emit("(");
               this.expr(ret[1]);
               this.b.emit(")");
@@ -23231,7 +23241,7 @@ ${"  ".repeat(ind)}`);
     }
     const id = isNode(cur) ? this.stores.idOf(cur) : null;
     const kind = id !== null ? this.stores.node(id)?.semanticKind : null;
-    const callHead = isNode(cur) && typeof cur[0] === "string" && /^[A-Za-z_$][\w$]*$/.test(cur[0]) && (kind === "call" || kind == null && Emitter.jsTier(cur) === "primary");
+    const callHead = isNode(cur) && typeof cur[0] === "string" && /^[A-Za-z_$][\w$]*$/.test(cur[0]) && (kind === "call" || kind == null && Emitter.jsTier(cur, this.stores) === "primary");
     if (!callHead) {
       throw this.positionedError(node, "emitter: `.=` re-binds its target to a METHOD CALL on itself — the right side must be a call chain (`x .= trim()`)");
     }
@@ -23259,7 +23269,7 @@ ${"  ".repeat(ind)}`);
     this.mark(node, "$self", () => {
       const tag = node[1];
       this.mark(node, "tag", () => {
-        if (Emitter.needsGrouping(tag, "head")) {
+        if (Emitter.needsGrouping(tag, "head", this.stores)) {
           this.b.emit("(");
           this.expr(tag);
           this.b.emit(")");
@@ -23751,7 +23761,7 @@ var runtimeText = (rt) => {
   return runtimeBodies.get(rt.key);
 };
 var runtimeRequires = (rt) => rt.requires == null ? [] : Array.isArray(rt.requires) ? rt.requires : [rt.requires];
-var referencesNames = (sexpr, names, isDecl = () => false) => {
+var referencesNames = (sexpr, names, stores, isDecl = () => false) => {
   if (names.size === 0)
     return false;
   const ref = (x) => typeof x === "string" && names.has(x);
@@ -23810,7 +23820,7 @@ var referencesNames = (sexpr, names, isDecl = () => false) => {
       return x.slice(2).some(walk);
     if (h === "typed-var" && x.length === 3)
       return isNode(x[1]) && walk(x[1]);
-    if ((h === "cast" || h === "satisfies") && x.length === 3)
+    if (Emitter.isPostfixTypeIn(stores, x))
       return walk(x[1]);
     if (h === "import" || h === "type-decl")
       return false;
@@ -23824,7 +23834,7 @@ var deliveryTrees = (emitter, sexpr) => {
     const isDecl = (x) => Emitter.isReactiveDeclIn(stores, x) || Emitter.isEffectDeclIn(stores, x) || Emitter.isReadonlyDeclIn(stores, x) || Emitter.isGateDeclIn(stores, x);
     const isTrigger = (x) => Emitter.isReactiveDeclIn(stores, x) || Emitter.isEffectDeclIn(stores, x);
     const isComponent = (x) => Emitter.isComponentDeclIn(stores, x);
-    trees.push({ tree, atoms, isDecl, isTrigger, isComponent });
+    trees.push({ tree, stores, atoms, isDecl, isTrigger, isComponent });
     const walk = (x) => {
       if (!isNode(x))
         return;
@@ -24223,7 +24233,7 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
   const runtimes = new Set;
   for (const rt of RUNTIME_TABLE) {
     const unboundSet = new Set(rt.names.filter((n) => !bound.has(n)));
-    if (trees.some(({ tree, isDecl, isTrigger, isComponent }) => rt.triggers?.(tree, { isTrigger, isComponent }) || referencesNames(tree, unboundSet, isDecl))) {
+    if (trees.some(({ tree, stores, isDecl, isTrigger, isComponent }) => rt.triggers?.(tree, { isTrigger, isComponent }) || referencesNames(tree, unboundSet, stores, isDecl))) {
       runtimes.add(rt.key);
     }
   }
@@ -33301,7 +33311,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "ff00567df641ed2f";
+var compilerBuild = () => "f1183a1fe39fa6e4";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
