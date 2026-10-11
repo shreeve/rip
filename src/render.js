@@ -56,6 +56,11 @@ const INLINE_CONTENT = new Set(['STRING', 'STRING_START', 'NUMBER', 'BOOL', 'IDE
 // The token shapes the value-name tracker reads: what ends a line, the
 // operators that declare a name, the line heads whose block is a render
 // factory of its own, and what ends a `for` line's variable list.
+// Tokens that begin an expression — after a spaced word, a juxtaposed call.
+const VALUE_STARTS = new Set(['IDENTIFIER', 'NUMBER', 'STRING', 'STRING_START', 'BOOL', 'NULL', 'UNDEFINED',
+  'REGEX', 'REGEX_START', '@', 'THIS', '[', '{', '(', 'PARAM_START', '->', '=>']);
+// The event-modifier names other template languages put after a dot.
+const MODIFIERS = new Set(['prevent', 'stop', 'once', 'self', 'capture', 'passive']);
 const LINE_BREAKS = new Set(['INDENT', 'OUTDENT', 'TERMINATOR']);
 const REACTIVE_DECLS = new Set(['REACTIVE_ASSIGN', 'COMPUTED_ASSIGN']);
 const PLAIN_ASSIGN = new Set(['=']);
@@ -231,8 +236,10 @@ export function rewriteRender(tokens, mintId, fail) {
       const t = out[k].kind;
       if (CLOSERS.has(t)) depth++;
       else if (OPENERS.has(t)) {
-        if (depth === 0) return 1;
-        depth--;
+        // An element's own argument list (`p(~fade, "x")`) is the same
+        // template position as its paren-less arguments.
+        if (depth === 0 && !(t === 'CALL_START' && isHeadCall(k))) return 1;
+        if (depth > 0) depth--;
       } else if (t === 'TERMINATOR' && out[k].value === ';') {
         // A `;` separates statements on one physical line; it ends no
         // bracket group, so an opener before it still encloses the
@@ -246,6 +253,55 @@ export function rewriteRender(tokens, mintId, fail) {
     return 0;
   };
 
+  // Does out[j] start a template line — after a line break, or after the
+  // `then`/`else` of a line an inline branch heads?
+  const atTemplateLineStart = (j) => {
+    const p = out[j - 1];
+    if (!p || p.kind === 'INDENT' || p.kind === 'OUTDENT' || p.kind === 'RENDER' || p.kind === 'TERMINATOR') return true;
+    if (p.kind !== 'THEN' && p.kind !== 'ELSE') return false;
+    let k = j - 1;
+    while (k > 0 && !['INDENT', 'OUTDENT', 'RENDER', 'TERMINATOR'].includes(out[k - 1].kind)) k--;
+    return ['IF', 'UNLESS', 'ELSE', 'LEADING_WHEN'].includes(out[k].kind);
+  };
+
+  // Is the CALL_START at out[k] an element's own argument list
+  // (`p(...)`, `div.card(...)`)? A line-start call of any other word
+  // (`basename(@dir) + '/'`) is a text expression.
+  const isHeadCall = (k) => {
+    let j = k - 1;
+    while (j >= 2 && out[j]?.kind === 'PROPERTY' && out[j - 1].kind === '.') j -= 2;
+    const head = out[j];
+    return head?.kind === 'IDENTIFIER' && !head.generated && isTemplateTag(head.value) &&
+      !readsAsValue(head.value) && atTemplateLineStart(j);
+  };
+
+  // Walk back from out[j] over one comma-separated argument, skipping
+  // bracket groups; the index of what bounds it: a top-level `,`, `:`
+  // or `=`, or -1 at the line start.
+  const argumentStart = (j) => {
+    let depth = 0;
+    for (let k = j; k >= 0; k--) {
+      const kind = out[k].kind;
+      if (CLOSERS.has(kind)) depth++;
+      else if (OPENERS.has(kind)) { if (depth === 0) return -1; depth--; }
+      else if (depth > 0) continue;
+      else if (kind === ',' || kind === ':' || kind === '=') return k;
+      else if (['INDENT', 'OUTDENT', 'RENDER', 'TERMINATOR'].includes(kind)) return -1;
+    }
+    return -1;
+  };
+
+  // Does out[from..to] hold a juxtaposed call (`wrap go`), whose
+  // arguments then run on past a following comma?
+  const hasJuxtaposedCall = (from, to) => {
+    for (let k = from; k < to; k++) {
+      const a = out[k];
+      const b = out[k + 1];
+      if ((a.kind === 'IDENTIFIER' || a.kind === 'PROPERTY') && a.spaced && VALUE_STARTS.has(b.kind)) return true;
+    }
+    return false;
+  };
+
   // ── The template gate ──
   // Is an arrow at out[k] a FUNCTION (its body is code) or an element's
   // children arrow (its body is template)? An arrow right after an
@@ -256,8 +312,22 @@ export function rewriteRender(tokens, mintId, fail) {
     const a = out[k];
     if (a.generated) return false;
     const prev = out[k - 1];
-    if (!prev) return true;
-    return !((prev.kind === 'IDENTIFIER' || prev.kind === 'PROPERTY' || prev.kind === ',') && !prev.generated);
+    if (!prev || prev.generated) return true;
+    // An arrow ending a value (`@click: debounce ->`, `x = wrap ->`) is
+    // a function argument; one ending the head or a bare word
+    // (`div ->`, `div hidden ->`) opens children.
+    if (prev.kind === 'IDENTIFIER' || prev.kind === 'PROPERTY') {
+      const s = argumentStart(k - 1);
+      return s >= 0 && out[s].kind !== ',';
+    }
+    // After a comma the arrow is the next argument: an element's
+    // children, unless a juxtaposed call in a value owns the comma
+    // (`@click: wrap go, ->`).
+    if (prev.kind === ',') {
+      const s = argumentStart(k - 2);
+      return s >= 0 && out[s].kind !== ',' && hasJuxtaposedCall(s + 1, k - 1);
+    }
+    return true;
   };
 
   // Does a function arrow earlier on this physical line own the rest of
@@ -314,6 +384,7 @@ export function rewriteRender(tokens, mintId, fail) {
     if (inCode()) return false;
     const pt = prev.kind;
     if ((pt === ',' || pt === 'IDENTIFIER' || pt === 'PROPERTY') && startsWithTag(current)) return true;
+    if (pt === 'CALL_START' && isHeadCall(out.length - 1)) return true;
     if ((pt === 'INDENT' || pt === 'TERMINATOR') && elementBodyLevels.includes(currentIndent)) return true;
     return false;
   };
@@ -493,9 +564,11 @@ export function rewriteRender(tokens, mintId, fail) {
       if (inRender && currentIndent < renderIndentLevel) inRender = false;
       continue;
     }
-    // An inline render's region is its own line: the first line break
-    // outside any bracket ends it, so later members are code.
-    if (inRender && inlineRender && (t.kind === 'TERMINATOR' && t.value !== ';') && explicitDepthAt() === 0) {
+    // An inline render's region is its line and the block under it: the
+    // first line break back at the render's own level, outside any
+    // bracket, ends it, so later members are code.
+    if (inRender && inlineRender && (t.kind === 'TERMINATOR' && t.value !== ';') &&
+        currentIndent < renderIndentLevel && explicitDepthAt() === 0) {
       inRender = false;
       inlineRender = false;
     }
@@ -673,6 +746,13 @@ export function rewriteRender(tokens, mintId, fail) {
       if (after?.kind !== ':' && isBareEventAttr(t)) {
         const ev = String(next.value);
         if (after?.kind === '.' && tokens[i + 3]?.kind === 'PROPERTY' && tokens[i + 4]?.kind === ':') {
+          const call = { prevent: 'e.preventDefault(); ', stop: 'e.stopPropagation(); ' }[tokens[i + 3].value] ?? '';
+          fail(`event modifiers are not supported — handle it in the listener: \`@${ev}: (e) -> ${call}…\``, after.start);
+        }
+        // `@click.prevent` with no `:` reads as the member chain
+        // `this.click.prevent` — unless `click` is no member and the
+        // property is a modifier, where it is a listener written wrong.
+        if (after?.kind === '.' && MODIFIERS.has(tokens[i + 3]?.value) && !readsAsValue(ev)) {
           const call = { prevent: 'e.preventDefault(); ', stop: 'e.stopPropagation(); ' }[tokens[i + 3].value] ?? '';
           fail(`event modifiers are not supported — handle it in the listener: \`@${ev}: (e) -> ${call}…\``, after.start);
         }

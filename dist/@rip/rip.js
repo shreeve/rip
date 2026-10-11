@@ -2852,6 +2852,26 @@ var CLOSERS = new Set([
 var GROUP_OPENER = { __proto__: null, ")": "(", CALL_END: "CALL_START", "]": "[", INDEX_END: "INDEX_START", "}": "{" };
 var COMPONENT_RE = /^[A-Z][A-Za-z0-9]*[a-z][A-Za-z0-9]*$/;
 var INLINE_CONTENT = new Set(["STRING", "STRING_START", "NUMBER", "BOOL", "IDENTIFIER", "PROPERTY", "@", "(", "[", "{"]);
+var VALUE_STARTS = new Set([
+  "IDENTIFIER",
+  "NUMBER",
+  "STRING",
+  "STRING_START",
+  "BOOL",
+  "NULL",
+  "UNDEFINED",
+  "REGEX",
+  "REGEX_START",
+  "@",
+  "THIS",
+  "[",
+  "{",
+  "(",
+  "PARAM_START",
+  "->",
+  "=>"
+]);
+var MODIFIERS = new Set(["prevent", "stop", "once", "self", "capture", "passive"]);
 var LINE_BREAKS = new Set(["INDENT", "OUTDENT", "TERMINATOR"]);
 var REACTIVE_DECLS = new Set(["REACTIVE_ASSIGN", "COMPUTED_ASSIGN"]);
 var PLAIN_ASSIGN = new Set(["="]);
@@ -3008,9 +3028,10 @@ function rewriteRender(tokens, mintId, fail) {
       if (CLOSERS.has(t))
         depth++;
       else if (OPENERS.has(t)) {
-        if (depth === 0)
+        if (depth === 0 && !(t === "CALL_START" && isHeadCall(k)))
           return 1;
-        depth--;
+        if (depth > 0)
+          depth--;
       } else if (t === "TERMINATOR" && out[k].value === ";") {
         if (depth === 0 && semicolonInArrowBody(k))
           return 1;
@@ -3021,14 +3042,68 @@ function rewriteRender(tokens, mintId, fail) {
     }
     return 0;
   };
+  const atTemplateLineStart = (j) => {
+    const p = out[j - 1];
+    if (!p || p.kind === "INDENT" || p.kind === "OUTDENT" || p.kind === "RENDER" || p.kind === "TERMINATOR")
+      return true;
+    if (p.kind !== "THEN" && p.kind !== "ELSE")
+      return false;
+    let k = j - 1;
+    while (k > 0 && !["INDENT", "OUTDENT", "RENDER", "TERMINATOR"].includes(out[k - 1].kind))
+      k--;
+    return ["IF", "UNLESS", "ELSE", "LEADING_WHEN"].includes(out[k].kind);
+  };
+  const isHeadCall = (k) => {
+    let j = k - 1;
+    while (j >= 2 && out[j]?.kind === "PROPERTY" && out[j - 1].kind === ".")
+      j -= 2;
+    const head = out[j];
+    return head?.kind === "IDENTIFIER" && !head.generated && isTemplateTag(head.value) && !readsAsValue(head.value) && atTemplateLineStart(j);
+  };
+  const argumentStart = (j) => {
+    let depth = 0;
+    for (let k = j;k >= 0; k--) {
+      const kind = out[k].kind;
+      if (CLOSERS.has(kind))
+        depth++;
+      else if (OPENERS.has(kind)) {
+        if (depth === 0)
+          return -1;
+        depth--;
+      } else if (depth > 0)
+        continue;
+      else if (kind === "," || kind === ":" || kind === "=")
+        return k;
+      else if (["INDENT", "OUTDENT", "RENDER", "TERMINATOR"].includes(kind))
+        return -1;
+    }
+    return -1;
+  };
+  const hasJuxtaposedCall = (from, to) => {
+    for (let k = from;k < to; k++) {
+      const a = out[k];
+      const b = out[k + 1];
+      if ((a.kind === "IDENTIFIER" || a.kind === "PROPERTY") && a.spaced && VALUE_STARTS.has(b.kind))
+        return true;
+    }
+    return false;
+  };
   const isCodeArrow = (k) => {
     const a = out[k];
     if (a.generated)
       return false;
     const prev = out[k - 1];
-    if (!prev)
+    if (!prev || prev.generated)
       return true;
-    return !((prev.kind === "IDENTIFIER" || prev.kind === "PROPERTY" || prev.kind === ",") && !prev.generated);
+    if (prev.kind === "IDENTIFIER" || prev.kind === "PROPERTY") {
+      const s = argumentStart(k - 1);
+      return s >= 0 && out[s].kind !== ",";
+    }
+    if (prev.kind === ",") {
+      const s = argumentStart(k - 2);
+      return s >= 0 && out[s].kind !== "," && hasJuxtaposedCall(s + 1, k - 1);
+    }
+    return true;
   };
   const inArrowBodyOnLine = () => {
     let depth = 0;
@@ -3077,6 +3152,8 @@ function rewriteRender(tokens, mintId, fail) {
       return false;
     const pt = prev.kind;
     if ((pt === "," || pt === "IDENTIFIER" || pt === "PROPERTY") && startsWithTag(current))
+      return true;
+    if (pt === "CALL_START" && isHeadCall(out.length - 1))
       return true;
     if ((pt === "INDENT" || pt === "TERMINATOR") && elementBodyLevels.includes(currentIndent))
       return true;
@@ -3245,7 +3322,7 @@ function rewriteRender(tokens, mintId, fail) {
         inRender = false;
       continue;
     }
-    if (inRender && inlineRender && (t.kind === "TERMINATOR" && t.value !== ";") && explicitDepthAt() === 0) {
+    if (inRender && inlineRender && (t.kind === "TERMINATOR" && t.value !== ";") && currentIndent < renderIndentLevel && explicitDepthAt() === 0) {
       inRender = false;
       inlineRender = false;
     }
@@ -3368,6 +3445,10 @@ function rewriteRender(tokens, mintId, fail) {
       if (after?.kind !== ":" && isBareEventAttr(t)) {
         const ev = String(next.value);
         if (after?.kind === "." && tokens[i + 3]?.kind === "PROPERTY" && tokens[i + 4]?.kind === ":") {
+          const call = { prevent: "e.preventDefault(); ", stop: "e.stopPropagation(); " }[tokens[i + 3].value] ?? "";
+          fail(`event modifiers are not supported — handle it in the listener: \`@${ev}: (e) -> ${call}…\``, after.start);
+        }
+        if (after?.kind === "." && MODIFIERS.has(tokens[i + 3]?.value) && !readsAsValue(ev)) {
           const call = { prevent: "e.preventDefault(); ", stop: "e.stopPropagation(); " }[tokens[i + 3].value] ?? "";
           fail(`event modifiers are not supported — handle it in the listener: \`@${ev}: (e) -> ${call}…\``, after.start);
         }
@@ -5907,6 +5988,8 @@ var ALIASES = {
   on: ["BOOL", "true"],
   off: ["BOOL", "false"]
 };
+var LINE_STARTS = new Set(["TERMINATOR", "INDENT", "OUTDENT", "RENDER"]);
+var BRANCH_HEADS = new Set(["IF", "UNLESS", "ELSE", "LEADING_WHEN"]);
 var TAGGABLE = new Set(["IDENTIFIER", "PROPERTY", ")", "CALL_END", "]", "INDEX_END"]);
 var OPS4 = { ">>>=": "COMPOUND_ASSIGN" };
 var OPS3 = {
@@ -6150,8 +6233,14 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
       const before = tokens[tokens.length - 2]?.kind;
       return !(before === ":" || before === "=" || before === "COMPOUND_ASSIGN" || before === ",");
     }
-    if (!prev || prev.kind === "TERMINATOR" || prev.kind === "OUTDENT" || prev.kind === "RENDER" || prev.kind === "THEN" || prev.kind === "ELSE")
+    if (!prev || prev.kind === "TERMINATOR" || prev.kind === "OUTDENT" || prev.kind === "RENDER")
       return true;
+    if (prev.kind === "THEN" || prev.kind === "ELSE") {
+      let k = tokens.length - 1;
+      while (k > 0 && !LINE_STARTS.has(tokens[k - 1].kind))
+        k--;
+      return BRANCH_HEADS.has(tokens[k].kind);
+    }
     if (!pendingSpaced || prev.generated)
       return false;
     let j = tokens.length - 1;
@@ -32713,7 +32802,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "06e00fe5a43f7e70";
+var compilerBuild = () => "4ede03b46486d009";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

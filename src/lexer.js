@@ -390,6 +390,8 @@ export const ALIASES = {
 // Value-ending token kinds that can HEAD a tagged template: a string
 // right against one of these (or bridged by `$`) is `tag\`…\``, never
 // a call argument.
+const LINE_STARTS = new Set(['TERMINATOR', 'INDENT', 'OUTDENT', 'RENDER']);
+const BRANCH_HEADS = new Set(['IF', 'UNLESS', 'ELSE', 'LEADING_WHEN']);
 const TAGGABLE = new Set(['IDENTIFIER', 'PROPERTY', ')', 'CALL_END', ']', 'INDEX_END']);
 
 // Four- through two-character operators, longest match first ('...'
@@ -755,9 +757,14 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       const before = tokens[tokens.length - 2]?.kind;
       return !(before === ':' || before === '=' || before === 'COMPOUND_ASSIGN' || before === ',');
     }
-    // A line start, or an inline branch's element (`if x then x-icon`).
-    if (!prev || prev.kind === 'TERMINATOR' || prev.kind === 'OUTDENT' || prev.kind === 'RENDER' ||
-        prev.kind === 'THEN' || prev.kind === 'ELSE') return true;
+    if (!prev || prev.kind === 'TERMINATOR' || prev.kind === 'OUTDENT' || prev.kind === 'RENDER') return true;
+    // An inline branch's element (`if x then x-icon`) — only on a line the
+    // branch heads; `= if ok then a-b` and `x = if ok then w-h` are code.
+    if (prev.kind === 'THEN' || prev.kind === 'ELSE') {
+      let k = tokens.length - 1;
+      while (k > 0 && !LINE_STARTS.has(tokens[k - 1].kind)) k--;
+      return BRANCH_HEADS.has(tokens[k].kind);
+    }
     if (!pendingSpaced || prev.generated) return false;
     let j = tokens.length - 1;
     while (j >= 1 && tokens[j].kind === 'PROPERTY' && tokens[j - 1].kind === '.') j -= 2;

@@ -243,6 +243,11 @@ With `count := 3`, render `count = count + 1` then `p count` emits
 `p` + indented `count++` emits `this._t0.data = this.count.value++` (runs
 on every render). `count += 1` in the same place rejects.
 
+**T26 M — A bare word before a children arrow becomes a call rendered as text.**
+`div hidden ->` + an indented `span "kid"` emits
+`createTextNode(String(hidden(() => span("kid"))))`; `div title: "t", ->`
+keeps its children.
+
 **T24 M — A call or a string as a handler runs at the wrong time or never.**
 `@click: go()` emits `(this.go())(e)` — `go` runs on every click and the
 result is called; `@click: "go()"` emits `("go()")(e)`.

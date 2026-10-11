@@ -2792,6 +2792,47 @@ describe('the template gate', () => {
     expect(bare.message).not.toContain('= @x');
   });
 
+  test('`then`/`else` in a value or text is code: a tight `a-b` there is subtraction', () => {
+    const head = 'Foo = component\n  ok := true\n  a := 5\n  b := 2\n  render\n    div\n      ';
+    expect(js(head + '= if ok then a-b else a\n')).toContain('(this.a.value - this.b.value)');
+    expect(js(head + 'span title: if ok then a-b else a\n')).toContain('(this.a.value - this.b.value)');
+    expect(js(head + 'x = if ok then a-b else 0\n      p x\n')).toContain('this.a.value - this.b.value');
+  });
+
+  test('an inline render with a block under it keeps the whole block as template', () => {
+    const code = js('Foo = component\n  n := 1\n  ok := true\n  render div\n    span "a"\n    = n\n    .card "c"\n    if ok\n      p ~fade, "x"\n  helper: -> log @click\n');
+    expect(code).toContain('String(this.n.value)');
+    expect(code).toContain("className = 'card'");
+    expect(code).toContain('__transition');
+    expect(code).not.toContain('String(~fade)');
+    expect(code).toContain('log(this.click)');
+  });
+
+  test("an element's own argument list is template position, like its paren-less arguments", () => {
+    const code = js('Foo = component\n  name := "a"\n  shown := true\n  render\n    input(value <=> name)\n    if shown\n      p(~fade, "x")\n');
+    expect(code).toContain('this.name.value = e.target.value');
+    expect(code).toContain('__transition');
+    expect(code).not.toContain('String(~fade)');
+    // A line-start call of a word that names no element is text.
+    const text = js('Foo = component\n  dir := "/a"\n  render\n    p\n      basename(@dir) + "/"\n');
+    expect(text).toContain('basename(this.dir.value) + "/"');
+  });
+
+  test('an arrow ending a handler value is a function argument: its body is code', () => {
+    const head = 'Foo = component\n  mask := 3\n  go: -> 1\n  render\n    ';
+    for (const call of ['debounce ->', 'debounce =>', 'wrap go, ->']) {
+      const code = js(head + 'button @click: ' + call + '\n      log ~mask\n    span "s"\n');
+      expect(code).toContain('log(~this.mask.value)');
+      expect(code).not.toContain('__transition__');
+    }
+  });
+
+  test('`@click.prevent` with no `:` on a non-member rejects as a modifier', () => {
+    lexFails('A = component\n  render\n    button @click.prevent\n', /event modifiers are not supported — handle it in the listener: `@click: \(e\) -> e\.preventDefault\(\); …`/);
+    const chain = js('A = component\n  click := {prevent: 1}\n  render\n    p @click.prevent\n');
+    expect(chain).toContain('this.click.value.prevent');
+  });
+
   test('a lone `.` line with children is an implicit div', () => {
     const code = js('Foo = component\n  render\n    div\n      .\n        span "inside"\n');
     expect(code).toContain("createElement('span')");
