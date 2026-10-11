@@ -1,0 +1,985 @@
+# ==============================================================================
+# Template contract — the forms real code writes
+# ==============================================================================
+#
+# Each row is modeled on lines in medlabs/app, packages/ui, tui, sites or
+# email, and pins its emission byte for byte. The template cleanup
+# (docs/TEMPLATES-PLAN.md) keeps every one of these unchanged unless a
+# phase names the change.
+
+import { code } from '../support/testing.js'
+
+code 'class: a plain string', '''
+  A = component
+    render
+      h1 class: 'text-xl font-bold', 'Orders'
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('h1');
+      this._el0.setAttribute('data-part', 'A');
+      this._el0.className = "text-xl font-bold";
+      this._t0 = document.createTextNode("Orders");
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+  };
+  '''
+
+code 'class: an array mixing strings, objects, conditionals and and-items', '''
+  A = component
+    @outline: boolean = false
+    open := false
+    render
+      div class: ['btn', {active: open}, (if outline then 'outline' else 'solid'), outline and 'ring']
+  ''', '''
+  let A = class extends __Component {
+    static __props = ['outline'];
+    _init(__given) {
+      this.outline = __given.outline ?? false;
+      this.open = __state(false);
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._el0.className = __clsx(["btn", {active: this.open.value}, (this.outline ? "outline" : "solid"), (this.outline && "ring")]); });
+    }
+  };
+  '''
+
+code 'class: an object', '''
+  A = component
+    flush := false
+    render
+      div class: { 'p-5': not flush }
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.flush = __state(false);
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._el0.className = __clsx({"p-5": !this.flush.value}); });
+    }
+  };
+  '''
+
+code 'attribute-only lines under an element, the text on the last line', '''
+  A = component
+    busy := false
+    render
+      button
+        type: 'submit'
+        disabled: busy
+        'aria-busy': busy or undefined
+        'Save'
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.busy = __state(false);
+    }
+    _create() {
+      this._el0 = document.createElement('button');
+      this._el0.setAttribute('data-part', 'A');
+      this._el0.setAttribute('type', "submit");
+      this._t0 = document.createTextNode("Save");
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._el0.toggleAttribute('disabled', !!this.busy.value); });
+      __effect(() => { { const __v = (this.busy.value || undefined); __v == null ? this._el0.removeAttribute('aria-busy') : this._el0.setAttribute('aria-busy', __v); } });
+    }
+  };
+  '''
+
+code 'aria-* and data-* keys, and attr: cond or undefined', '''
+  A = component
+    open := false
+    render
+      div aria-expanded: open, data-open: open or undefined, data-kind: 'menu'
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.open = __state(false);
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._el0.setAttribute('data-kind', "menu");
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { { const __v = this.open.value; __v == null ? this._el0.removeAttribute('aria-expanded') : this._el0.setAttribute('aria-expanded', __v); } });
+      __effect(() => { { const __v = (this.open.value || undefined); __v == null ? this._el0.removeAttribute('data-open') : this._el0.setAttribute('data-open', __v); } });
+    }
+  };
+  '''
+
+code 'style: an object', '''
+  A = component
+    anchor := 'x'
+    render
+      div style: { anchorName: anchor }
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.anchor = __state("x");
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { { const __v = {anchorName: this.anchor.value}; __style(this._el0, __v); } });
+    }
+  };
+  '''
+
+code '@event: a method name', '''
+  A = component
+    onInput: (e) -> e
+    render
+      input @input: onInput
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+    }
+    onInput(e) {
+      return e;
+    }
+    _create() {
+      this._el0 = document.createElement('input');
+      this._el0.setAttribute('data-part', 'A');
+      this._el0.addEventListener('input', (e) => __batch(() => this.onInput(e)));
+      return this._el0;
+    }
+  };
+  '''
+
+code '@event: a parenthesized arrow, and a bare arrow', '''
+  A = component
+    open := true
+    render
+      div
+        button @click: (-> open = false), 'Close'
+        input @focus: -> open = true
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.open = __state(true);
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._el1 = document.createElement('button');
+      this._el1.addEventListener('click', (e) => __batch(() => (() => (this.open.value = false))(e)));
+      this._t0 = document.createTextNode("Close");
+      this._el1.appendChild(this._t0);
+      this._el0.appendChild(this._el1);
+      this._el2 = document.createElement('input');
+      this._el2.addEventListener('focus', (e) => __batch(() => (() => (this.open.value = true))(e)));
+      this._el0.appendChild(this._el2);
+      return this._el0;
+    }
+  };
+  '''
+
+code '@event: a parenthesized arrow chaining statements with ;', '''
+  A = component
+    save: -> 1
+    render
+      form @submit: ((e) -> e.preventDefault(); save())
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+    }
+    save() {
+      return 1;
+    }
+    _create() {
+      this._el0 = document.createElement('form');
+      this._el0.setAttribute('data-part', 'A');
+      this._el0.addEventListener('submit', (e_) => __batch(() => (e => {
+        e.preventDefault();
+        return this.save();
+      })(e_)));
+      return this._el0;
+    }
+  };
+  '''
+
+code '<=> on value, and on a component prop', '''
+  import { Dialog } from 'rip/ui'
+  A = component
+    q := ''
+    open := false
+    render
+      div
+        input value <=> q
+        Dialog.Root open <=> open
+  ''', '''
+  import { Dialog } from 'rip/ui';
+  let A = class extends __Component {
+    _init(__given) {
+      this.q = __state("");
+      this.open = __state(false);
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._el1 = document.createElement('input');
+      this._el1.addEventListener('input', (e) => { this.q.value = e.target.value; });
+      this._el0.appendChild(this._el1);
+      { const __prev = __pushComponent(this); try {
+      try {
+      this._inst2 = new Dialog.Root({ __bind_open__: this.open });
+      if (this._inst2 && this._inst2._initFailed) {
+        this._inst2 = null;
+        this._el3 = document.createComment('rip:child-init-failed: Dialog.Root');
+      } else if (this._inst2._mountCreate()) {
+        this._el3 = this._inst2._root;
+        (this._children || (this._children = [])).push(this._inst2);
+      } else {
+        this._inst2 = null;
+        this._el3 = document.createComment('rip:child-error: Dialog.Root');
+      }
+      } catch (__childErr) {
+        __reportChildFailure('Dialog.Root', __childErr);
+        this._inst2 = null;
+        this._el3 = document.createComment('rip:child-error: Dialog.Root');
+      }
+      } finally { __popComponent(__prev); } }
+      this._el0.appendChild(this._el3);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._el1.value = this.q.value ?? ''; });
+      if (this._inst2 && this._inst2._state === 'mounting') {
+        this._el3 = this._inst2._mountSetup(document.createComment('rip:child-error: Dialog.Root'));
+      }
+    }
+  };
+  '''
+
+code 'ref: into a state cell', '''
+  A = component
+    el := null
+    render
+      input ref: el
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.el = __state(null);
+    }
+    _create() {
+      this._el0 = document.createElement('input');
+      this._el0.setAttribute('data-part', 'A');
+      this.el.value = this._el0;
+      (this._refCleanups ??= []).push(() => __detachRef(this.el, this._el0));
+      return this._el0;
+    }
+  };
+  '''
+
+code 'if / else if / else in render', '''
+  A = component
+    n := 0
+    render
+      div
+        if n is 0
+          p 'none'
+        else if n is 1
+          p 'one'
+        else
+          p 'many'
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.n = __state(0);
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._anchor1 = document.createComment('if');
+      this._el0.appendChild(this._anchor1);
+      return this._el0;
+    }
+    _setup() {
+      {
+        const anchor = this._anchor1;
+        let currentBlock = null;
+        let showing = null;
+        __effect(() => {
+          const show = !!((this.n.value === 0));
+          const want = show ? 'then' : 'else';
+          if (want === showing) return;
+          if (currentBlock) {
+            const leaving = currentBlock;
+            if (leaving._t) { leaving.f(); __transition(leaving._first, leaving._t, 'leave', () => leaving.d(true)); }
+            else { leaving.d(true); }
+            currentBlock = null;
+          }
+          showing = want;
+          if (want === 'then') {
+            currentBlock = this.create_block_0(this);
+            currentBlock.c();
+            if (anchor.parentNode) currentBlock.m(anchor.parentNode, anchor.nextSibling);
+            currentBlock.p(this);
+            if (currentBlock._t) __transition(currentBlock._first, currentBlock._t, 'enter', undefined);
+          }
+          if (want === 'else') {
+            currentBlock = this.create_block_1(this);
+            currentBlock.c();
+            if (anchor.parentNode) currentBlock.m(anchor.parentNode, anchor.nextSibling);
+            currentBlock.p(this);
+            if (currentBlock._t) __transition(currentBlock._first, currentBlock._t, 'enter', undefined);
+          }
+        });
+        __ownerFrame().add(() => { if (currentBlock) { currentBlock.d(true); currentBlock = null; } });
+      }
+    }
+    create_block_0(ctx) {
+      let _el2, _t0;
+      return {
+        c() {
+          _el2 = document.createElement('p');
+          _t0 = document.createTextNode("none");
+          _el2.appendChild(_t0);
+          this._first = _el2;
+        },
+        m(target, anchor) {
+          if (target) target.insertBefore(_el2, anchor);
+        },
+        p(ctx) {
+        },
+        f() { },
+        d(detaching) {
+          if (detaching) __detach(_el2);
+        }
+      };
+    }
+    create_block_1(ctx) {
+      let _anchor3;
+      let __fr;
+      return {
+        c() {
+          _anchor3 = document.createComment('if');
+          this._first = _anchor3;
+        },
+        m(target, anchor) {
+          if (target) target.insertBefore(_anchor3, anchor);
+        },
+        p(ctx) {
+          if (__fr) __fr.dispose();
+          const __o = __pushOwner(__fr = __ownerFrame());
+          try {
+            {
+              const anchor = _anchor3;
+              let currentBlock = null;
+              let showing = null;
+              __effect(() => {
+                const show = !!((ctx.n.value === 1));
+                const want = show ? 'then' : 'else';
+                if (want === showing) return;
+                if (currentBlock) {
+                  const leaving = currentBlock;
+                  if (leaving._t) { leaving.f(); __transition(leaving._first, leaving._t, 'leave', () => leaving.d(true)); }
+                  else { leaving.d(true); }
+                  currentBlock = null;
+                }
+                showing = want;
+                if (want === 'then') {
+                  currentBlock = ctx.create_block_2(ctx);
+                  currentBlock.c();
+                  if (anchor.parentNode) currentBlock.m(anchor.parentNode, anchor.nextSibling);
+                  currentBlock.p(ctx);
+                  if (currentBlock._t) __transition(currentBlock._first, currentBlock._t, 'enter', undefined);
+                }
+                if (want === 'else') {
+                  currentBlock = ctx.create_block_3(ctx);
+                  currentBlock.c();
+                  if (anchor.parentNode) currentBlock.m(anchor.parentNode, anchor.nextSibling);
+                  currentBlock.p(ctx);
+                  if (currentBlock._t) __transition(currentBlock._first, currentBlock._t, 'enter', undefined);
+                }
+              });
+              __ownerFrame().add(() => { if (currentBlock) { currentBlock.d(true); currentBlock = null; } });
+            }
+          } finally { __popOwner(__o); }
+        },
+        f() { if (__fr) { __fr.dispose(); __fr = null; } },
+        d(detaching) {
+          if (__fr) { __fr.dispose(); __fr = null; }
+          if (detaching) __detach(_anchor3);
+        }
+      };
+    }
+    create_block_2(ctx) {
+      let _el4, _t1;
+      return {
+        c() {
+          _el4 = document.createElement('p');
+          _t1 = document.createTextNode("one");
+          _el4.appendChild(_t1);
+          this._first = _el4;
+        },
+        m(target, anchor) {
+          if (target) target.insertBefore(_el4, anchor);
+        },
+        p(ctx) {
+        },
+        f() { },
+        d(detaching) {
+          if (detaching) __detach(_el4);
+        }
+      };
+    }
+    create_block_3(ctx) {
+      let _el5, _t2;
+      return {
+        c() {
+          _el5 = document.createElement('p');
+          _t2 = document.createTextNode("many");
+          _el5.appendChild(_t2);
+          this._first = _el5;
+        },
+        m(target, anchor) {
+          if (target) target.insertBefore(_el5, anchor);
+        },
+        p(ctx) {
+        },
+        f() { },
+        d(detaching) {
+          if (detaching) __detach(_el5);
+        }
+      };
+    }
+  };
+  '''
+
+code 'for in with an index, and key:', '''
+  A = component
+    rows := [1, 2]
+    render
+      ul
+        for r, i in rows
+          li key: r, "#{i}: #{r}"
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.rows = __state([1, 2]);
+    }
+    _create() {
+      this._el0 = document.createElement('ul');
+      this._el0.setAttribute('data-part', 'A');
+      this._anchor1 = document.createComment('for');
+      this._el0.appendChild(this._anchor1);
+      return this._el0;
+    }
+    _setup() {
+      {
+        const __s = { blocks: [], keys: [] };
+        __effect(() => {
+          __reconcile(this._anchor1, __s, this.rows.value, this, this.create_block_0, (r, i) => r);
+        });
+        __ownerFrame().add(() => { for (const __b of __s.blocks) { try { __b.d(true); } catch {} } __s.blocks = []; __s.keys = []; __s.items = []; });
+      }
+    }
+    create_block_0(ctx, r, i) {
+      let _el2, _t0;
+      let __fr;
+      return {
+        c() {
+          _el2 = document.createElement('li');
+          _t0 = document.createTextNode('');
+          _el2.appendChild(_t0);
+          this._first = _el2;
+        },
+        m(target, anchor) {
+          if (target) target.insertBefore(_el2, anchor);
+        },
+        p(ctx, __r, __i) {
+          r = __r; i = __i;
+          if (__fr) __fr.dispose();
+          const __o = __pushOwner(__fr = __ownerFrame());
+          try {
+            __effect(() => { _t0.data = `${i}: ${r}`; });
+          } finally { __popOwner(__o); }
+        },
+        d(detaching) {
+          if (__fr) { __fr.dispose(); __fr = null; }
+          if (detaching) __detach(_el2);
+        }
+      };
+    }
+  };
+  '''
+
+code 'switch / when in render', '''
+  A = component
+    name := 'a'
+    render
+      svg
+        switch name
+          when 'a'
+            path d: 'M0 0'
+          else
+            path d: 'M1 1'
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.name = __state("a");
+    }
+    _create() {
+      this._el0 = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      this._el0.setAttribute('data-part', 'A');
+      this._anchor1 = document.createComment('if');
+      this._el0.appendChild(this._anchor1);
+      return this._el0;
+    }
+    _setup() {
+      {
+        const anchor = this._anchor1;
+        let currentBlock = null;
+        let showing = null;
+        __effect(() => {
+          const show = !!((this.name.value === "a"));
+          const want = show ? 'then' : 'else';
+          if (want === showing) return;
+          if (currentBlock) {
+            const leaving = currentBlock;
+            if (leaving._t) { leaving.f(); __transition(leaving._first, leaving._t, 'leave', () => leaving.d(true)); }
+            else { leaving.d(true); }
+            currentBlock = null;
+          }
+          showing = want;
+          if (want === 'then') {
+            currentBlock = this.create_block_0(this);
+            currentBlock.c();
+            if (anchor.parentNode) currentBlock.m(anchor.parentNode, anchor.nextSibling);
+            currentBlock.p(this);
+            if (currentBlock._t) __transition(currentBlock._first, currentBlock._t, 'enter', undefined);
+          }
+          if (want === 'else') {
+            currentBlock = this.create_block_1(this);
+            currentBlock.c();
+            if (anchor.parentNode) currentBlock.m(anchor.parentNode, anchor.nextSibling);
+            currentBlock.p(this);
+            if (currentBlock._t) __transition(currentBlock._first, currentBlock._t, 'enter', undefined);
+          }
+        });
+        __ownerFrame().add(() => { if (currentBlock) { currentBlock.d(true); currentBlock = null; } });
+      }
+    }
+    create_block_0(ctx) {
+      let _el2;
+      return {
+        c() {
+          _el2 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          _el2.setAttribute('d', "M0 0");
+          this._first = _el2;
+        },
+        m(target, anchor) {
+          if (target) target.insertBefore(_el2, anchor);
+        },
+        p(ctx) {
+        },
+        f() { },
+        d(detaching) {
+          if (detaching) __detach(_el2);
+        }
+      };
+    }
+    create_block_1(ctx) {
+      let _el3;
+      return {
+        c() {
+          _el3 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          _el3.setAttribute('d', "M1 1");
+          this._first = _el3;
+        },
+        m(target, anchor) {
+          if (target) target.insertBefore(_el3, anchor);
+        },
+        p(ctx) {
+        },
+        f() { },
+        d(detaching) {
+          if (detaching) __detach(_el3);
+        }
+      };
+    }
+  };
+  '''
+
+code 'inline if then Element, and postfix if', '''
+  import { Alert } from './parts.rip'
+  A = component
+    error := null
+    status := 'ok'
+    render
+      div
+        if error then Alert variant: 'error', error
+        p class: 'status', status if status
+  ''', '''
+  import { Alert } from './parts.rip';
+  let A = class extends __Component {
+    _init(__given) {
+      this.error = __state(null);
+      this.status = __state("ok");
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._anchor1 = document.createComment('if');
+      this._el0.appendChild(this._anchor1);
+      this._anchor4 = document.createComment('if');
+      this._el0.appendChild(this._anchor4);
+      return this._el0;
+    }
+    _setup() {
+      {
+        const anchor = this._anchor1;
+        let currentBlock = null;
+        let showing = null;
+        __effect(() => {
+          const show = !!(this.error.value);
+          const want = show ? 'then' : null;
+          if (want === showing) return;
+          if (currentBlock) {
+            const leaving = currentBlock;
+            if (leaving._t) { leaving.f(); __transition(leaving._first, leaving._t, 'leave', () => leaving.d(true)); }
+            else { leaving.d(true); }
+            currentBlock = null;
+          }
+          showing = want;
+          if (want === 'then') {
+            currentBlock = this.create_block_0(this);
+            currentBlock.c();
+            if (anchor.parentNode) currentBlock.m(anchor.parentNode, anchor.nextSibling);
+            currentBlock.p(this);
+            if (currentBlock._t) __transition(currentBlock._first, currentBlock._t, 'enter', undefined);
+          }
+        });
+        __ownerFrame().add(() => { if (currentBlock) { currentBlock.d(true); currentBlock = null; } });
+      }
+      {
+        const anchor = this._anchor4;
+        let currentBlock = null;
+        let showing = null;
+        __effect(() => {
+          const show = !!(this.status.value);
+          const want = show ? 'then' : null;
+          if (want === showing) return;
+          if (currentBlock) {
+            const leaving = currentBlock;
+            if (leaving._t) { leaving.f(); __transition(leaving._first, leaving._t, 'leave', () => leaving.d(true)); }
+            else { leaving.d(true); }
+            currentBlock = null;
+          }
+          showing = want;
+          if (want === 'then') {
+            currentBlock = this.create_block_1(this);
+            currentBlock.c();
+            if (anchor.parentNode) currentBlock.m(anchor.parentNode, anchor.nextSibling);
+            currentBlock.p(this);
+            if (currentBlock._t) __transition(currentBlock._first, currentBlock._t, 'enter', undefined);
+          }
+        });
+        __ownerFrame().add(() => { if (currentBlock) { currentBlock.d(true); currentBlock = null; } });
+      }
+    }
+    create_block_0(ctx) {
+      let _inst2, _el3, _t0;
+      let _factoryChildren = [];
+      let __fr;
+      return {
+        c() {
+          { const __prev = __pushComponent(ctx); try {
+          try {
+          _inst2 = new Alert({ variant: "error" });
+          if (_inst2 && _inst2._initFailed) {
+            _inst2 = null;
+            _el3 = document.createComment('rip:child-init-failed: Alert');
+          } else {
+          { const __kid = _inst2._beginProjection(ctx); try {
+          _t0 = document.createTextNode('');
+          } finally { _inst2._endProjection(__kid); } }
+          _inst2._setChildren(_t0);
+          if (_inst2._mountCreate()) {
+            _el3 = _inst2._root;
+            _factoryChildren.push(_inst2);
+          } else {
+            _inst2 = null;
+            _el3 = document.createComment('rip:child-error: Alert');
+          }
+          }
+          } catch (__childErr) {
+            __reportChildFailure('Alert', __childErr);
+            _inst2 = null;
+            _el3 = document.createComment('rip:child-error: Alert');
+          }
+          } finally { __popComponent(__prev); } }
+          this._first = _el3;
+        },
+        m(target, anchor) {
+          if (target) target.insertBefore(_el3, anchor);
+        },
+        p(ctx) {
+          if (__fr) __fr.dispose();
+          const __o = __pushOwner(__fr = __ownerFrame());
+          try {
+            if (_inst2) {
+              __effect(() => { _t0.data = ctx.error.value; });
+            }
+            if (_inst2 && _inst2._state === 'mounting') {
+              _el3 = _inst2._mountSetup(document.createComment('rip:child-error: Alert'));
+              this._first = _el3;
+            }
+          } finally { __popOwner(__o); }
+        },
+        f() { if (__fr) { __fr.dispose(); __fr = null; } },
+        d(detaching) {
+          for (const __c of _factoryChildren) { try { __c.unmount?.({removeDOM: detaching}); } catch (__e) { console.error('[Rip] factory child unmount error:', __e); } }
+          _factoryChildren = [];
+          if (__fr) { __fr.dispose(); __fr = null; }
+          if (detaching) __detach(_el3);
+        }
+      };
+    }
+    create_block_1(ctx) {
+      let _el5, _t1;
+      let __fr;
+      return {
+        c() {
+          _el5 = document.createElement('p');
+          _el5.className = "status";
+          _t1 = document.createTextNode('');
+          _el5.appendChild(_t1);
+          this._first = _el5;
+        },
+        m(target, anchor) {
+          if (target) target.insertBefore(_el5, anchor);
+        },
+        p(ctx) {
+          if (__fr) __fr.dispose();
+          const __o = __pushOwner(__fr = __ownerFrame());
+          try {
+            __effect(() => { _t1.data = ctx.status.value; });
+          } finally { __popOwner(__o); }
+        },
+        f() { if (__fr) { __fr.dispose(); __fr = null; } },
+        d(detaching) {
+          if (__fr) { __fr.dispose(); __fr = null; }
+          if (detaching) __detach(_el5);
+        }
+      };
+    }
+  };
+  '''
+
+code 'a tag with a string argument, a bare string line, a bare expression line', '''
+  A = component
+    submitLabel := 'Go'
+    render
+      div
+        h2 'Title'
+        'plain text'
+        submitLabel
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.submitLabel = __state("Go");
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._el1 = document.createElement('h2');
+      this._t0 = document.createTextNode("Title");
+      this._el1.appendChild(this._t0);
+      this._el0.appendChild(this._el1);
+      this._t1 = document.createTextNode("plain text");
+      this._el0.appendChild(this._t1);
+      this._t2 = document.createTextNode('');
+      this._el0.appendChild(this._t2);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._t2.data = this.submitLabel.value; });
+    }
+  };
+  '''
+
+code 'optional chaining in text', '''
+  A = component
+    user := null
+    render
+      p user?.name
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.user = __state(null);
+    }
+    _create() {
+      this._el0 = document.createElement('p');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode('');
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._t0.data = this.user.value?.name; });
+    }
+  };
+  '''
+
+code 'a child component with props, a member path, slot and asChild', '''
+  import { Menu } from 'rip/ui'
+  import { Card } from './parts.rip'
+  A = component
+    render
+      div
+        Card title: 'T', compact
+          slot
+        Menu.Item asChild, onSelect: (-> 1)
+  ''', '''
+  import { Menu } from 'rip/ui';
+  import { Card } from './parts.rip';
+  let A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      { const __prev = __pushComponent(this); try {
+      try {
+      this._inst1 = new Card({ title: "T", compact: true, children: this.children });
+      if (this._inst1 && this._inst1._initFailed) {
+        this._inst1 = null;
+        this._el2 = document.createComment('rip:child-init-failed: Card');
+      } else if (this._inst1._mountCreate()) {
+        this._el2 = this._inst1._root;
+        (this._children || (this._children = [])).push(this._inst1);
+      } else {
+        this._inst1 = null;
+        this._el2 = document.createComment('rip:child-error: Card');
+      }
+      } catch (__childErr) {
+        __reportChildFailure('Card', __childErr);
+        this._inst1 = null;
+        this._el2 = document.createComment('rip:child-error: Card');
+      }
+      } finally { __popComponent(__prev); } }
+      this._el0.appendChild(this._el2);
+      { const __prev = __pushComponent(this); try {
+      try {
+      this._inst3 = new Menu.Item({ asChild: true, onSelect: (() => 1) });
+      if (this._inst3 && this._inst3._initFailed) {
+        this._inst3 = null;
+        this._el4 = document.createComment('rip:child-init-failed: Menu.Item');
+      } else if (this._inst3._mountCreate()) {
+        this._el4 = this._inst3._root;
+        (this._children || (this._children = [])).push(this._inst3);
+      } else {
+        this._inst3 = null;
+        this._el4 = document.createComment('rip:child-error: Menu.Item');
+      }
+      } catch (__childErr) {
+        __reportChildFailure('Menu.Item', __childErr);
+        this._inst3 = null;
+        this._el4 = document.createComment('rip:child-error: Menu.Item');
+      }
+      } finally { __popComponent(__prev); } }
+      this._el0.appendChild(this._el4);
+      return this._el0;
+    }
+    _setup() {
+      if (this._inst1 && this._inst1._state === 'mounting') {
+        this._el2 = this._inst1._mountSetup(document.createComment('rip:child-error: Card'));
+      }
+      if (this._inst3 && this._inst3._state === 'mounting') {
+        this._el4 = this._inst3._mountSetup(document.createComment('rip:child-error: Menu.Item'));
+      }
+    }
+  };
+  '''
+
+code 'bare boolean attributes', '''
+  A = component
+    render
+      form novalidate
+        input readonly
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('form');
+      this._el0.setAttribute('data-part', 'A');
+      this._el0.setAttribute('novalidate', '');
+      this._el1 = document.createElement('input');
+      this._el1.setAttribute('readonly', '');
+      this._el0.appendChild(this._el1);
+      return this._el0;
+    }
+  };
+  '''
+
+code '@member read in text and interpolation', '''
+  A = component
+    @count: number = 0
+    render
+      p "count #{@count}"
+  ''', '''
+  let A = class extends __Component {
+    static __props = ['count'];
+    _init(__given) {
+      this.count = __given.count ?? 0;
+    }
+    _create() {
+      this._el0 = document.createElement('p');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode('');
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._t0.data = `count ${this.count}`; });
+    }
+  };
+  '''
+
+code 'tag.class selectors', '''
+  A = component
+    render
+      div.cart-actions
+        span.badge 'x'
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._el1 = document.createElement('span');
+      this._t0 = document.createTextNode("x");
+      this._el1.appendChild(this._t0);
+      this._el1.className = 'badge';
+      this._el0.appendChild(this._el1);
+      this._el0.className = 'cart-actions';
+      return this._el0;
+    }
+  };
+  '''
+
