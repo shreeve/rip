@@ -1,6 +1,6 @@
 # ==============================================================================
 # script tests: helpers, control symbols, trace mode, the chat API, spawn
-# integration, multiplexer dispatch, timeouts, tcp, connect, and ssh
+# integration (exit! too), multiplexer dispatch, timeouts, tcp, connect, and ssh
 #
 # A 1:1 port of the v3 suites (basic.rip, ssh.rip) plus the added v4
 # coverage (Script.tcp, Script.connect, multiplexer value dispatch,
@@ -403,6 +403,39 @@ test! "spawn with onRecv callback", ->
   withChat! run, { onRecv: (data) -> chunks.push(data) }
   ok chunks.length > 0
 
+test! "exit! waits for the child to end and returns its status", ->
+  chat = Script.spawn! 'bash', ['--noprofile', '--norc'], { line: '\n', live: false, slow: 5 }
+  chat! [/\$\s*/, 'echo $((40+2))X; exit 3']
+  eq chat.exit!, 3
+  ok chat.buffer.includes('42X')  # the output after the last match is read
+
+test! "exit! gives 128 + the signal for a child a signal ended", ->
+  chat = Script.spawn! 'bash', ['--noprofile', '--norc'], { line: '\n', live: false, slow: 5 }
+  chat! [/\$\s*/, 'kill -9 $$']
+  eq chat.exit!, 137
+
+test! "exit! times out loudly while the child runs", ->
+  chat = Script.spawn! 'bash', ['--noprofile', '--norc'], { line: '\n', live: false, slow: 5 }
+  try
+    chat! [/\$\s*/, 'sleep 30']
+    err = null
+    try
+      chat.exit! 0.5
+    catch e
+      err = e
+    ok err?
+    ok err.message.startsWith('Timeout waiting for exit')
+  finally
+    chat.disconnect()
+
+test! "exit! with bomb: false returns :slow on timeout", ->
+  chat = Script.spawn! 'bash', ['--noprofile', '--norc'], { line: '\n', live: false, slow: 5, bomb: false }
+  try
+    chat! [/\$\s*/, 'sleep 30']
+    ok (chat.exit! 0.5) is :slow
+  finally
+    chat.disconnect()
+
 # ==[ Multiplexer dispatch ]==
 
 console.log "\nMultiplexer dispatch"
@@ -547,6 +580,26 @@ test! "tcp connects and converses over a raw socket", ->
     eq back, ['welcome>', '>']
     eq chat.last, '>'
     chat.disconnect()
+  finally
+    server.stop(true)
+
+test! "exit! returns null when the peer closes, after its last data", ->
+  server = Bun.listen
+    hostname: '127.0.0.1'
+    port: 0
+    socket:
+      open: (s) ->
+        s.write 'hello '
+        setTimeout (->
+          s.write 'LAST'
+          s.end()
+        ), 200
+      data: ->
+  try
+    chat = Script.tcp! '127.0.0.1', server.port, { live: false, slow: 5 }
+    Bun.sleep! 500  # the data is queued and the socket closed before a read
+    eq chat.exit!, null
+    eq chat.buffer, 'hello LAST'
   finally
     server.stop(true)
 

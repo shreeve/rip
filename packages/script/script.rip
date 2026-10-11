@@ -47,13 +47,14 @@ class SpawnTransport
             fn chunk
           else
             @queue.push chunk
+    @exited = @proc.exited  # its status, 128 + the signal for one that ended it
 
   write: (data) ->
     @proc.terminal.write data
 
   read: (timeout) ->
-    return null if @closed
     return @queue.shift() if @queue.length > 0
+    return null if @closed
     Promise.new (resolve) =>
       timer = setTimeout =>
         @waiting = null
@@ -75,6 +76,7 @@ class TcpTransport
     @queue   = []
     @waiting = null
     @closed  = false
+    @exited  = Promise.new (resolve) => @ended = resolve  # null when the socket closes
     @ready   = Promise.new (resolve, reject) =>
       Bun.connect
         hostname: host
@@ -93,16 +95,18 @@ class TcpTransport
               @queue.push chunk
           close: =>
             @closed = true
+            @ended null
           error: (socket, err) =>
             @closed = true
+            @ended null
             reject err
 
   write: (data) ->
     @socket.write data
 
   read: (timeout) ->
-    return null if @closed
     return @queue.shift() if @queue.length > 0
+    return null if @closed
     Promise.new (resolve) =>
       timer = setTimeout =>
         @waiting = null
@@ -121,6 +125,7 @@ class TcpTransport
 class TraceTransport
   constructor: ->
     @closed = false
+    @exited = Promise.resolve null
 
   write: (data) ->
     process.stdout.write "  SEND: #{JSON.stringify(data)}\n"
@@ -180,6 +185,31 @@ class Engine
     process.stdout.write(text) if @echo
     @opts.onSend?(text)
     text
+
+  # -- Wait for the other side to end on its own --
+  #
+  # A spawned process's exit gives its status (128 + the signal for one
+  # that ended it), a socket the peer closes gives null. What it sends
+  # meanwhile and last is read as any data is (live, onRecv, the buffer);
+  # then the transport is closed. The timeout, in seconds, defaults to
+  # slow, and acts as a read's does.
+
+  exit: (timeout = @slow) ->
+    ended  = false
+    status = null
+    @transport.exited.then (s) ->
+      ended  = true
+      status = s
+    deadline = Date.now() + timeout * 1000
+    until ended
+      if Date.now() > deadline
+        raise "Timeout waiting for exit\nBuffer: #{JSON.stringify(@buff)}" if @bomb
+        return :slow
+      @read! true
+    loop
+      break if (@read! true) is :fast
+    @transport.close()
+    status
 
   # -- Disconnect --
 
@@ -414,6 +444,7 @@ def createChat(engine)
   fn = (list) -> engine.chat(list)
   fn.send       = (text) -> engine.send(text)
   fn.read       = (fast) -> engine.read(fast)
+  fn.exit       = (timeout) -> engine.exit(timeout)
   fn.disconnect = ->        engine.disconnect()
   Object.defineProperty fn, 'buffer', get: -> engine.buff
   Object.defineProperty fn, 'last',   get: -> engine.last
