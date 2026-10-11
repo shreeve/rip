@@ -2924,16 +2924,52 @@ describe('selector shorthands', () => {
     lexFails(at('div.hover:bg-red "x"'), /write `class: 'hover:bg-red'`/);
     lexFails(at('div.w-[10px] "x"'), /write `class: 'w-\[10px\]'`/);
     lexFails(at('div.mt-2.5 "x"'), /write `class: 'mt-2.5'`/);
-    lexFails(at('b#1 "hello"'), /an id shorthand starts with a letter — write `id: '1'`/);
+    lexFails(at('b#1 "hello"'), /an id shorthand is a name starting with a letter — write `id: '1'`/);
     lexFails(at('div#a#b "x"'), /an element has one id/);
     lexFails(at('div.card#a.big#b "x"'), /an element has one id/);
   });
 
   test('a `#word` glued to a value rejects; spaced, it is a comment', () => {
-    lexFails(at('span title: name#t'), /`#t` is glued to a value: an id follows an element's tag, and a comment needs a space before `#`/);
+    lexFails(at('span title: name#t'), /`#t` is no element id here: an id follows the HTML tag or `\.class` that starts its line \(otherwise write `id: 't'`\), and a comment needs a space before `#`/);
     const comment = js(at('p "x" # a note'));
     expect(comment).toContain('createTextNode("x")');
     expect(comment).not.toContain('note');
+  });
+
+  test('a bare `.` line takes an id too', () => {
+    const one = js(at('.card#main "x"'));
+    expect(one).toContain("id = 'main'");
+    expect(one).toContain("className = 'card'");
+    expect(js(at('.a.b#x "x"'))).toContain("className = 'a b'");
+  });
+
+  test('the rules hold only for the selector heading its line: a chain in a value reads as code', () => {
+    // Loop variables spelled like tags, in values: member access and
+    // arithmetic, exactly as outside a template.
+    const loop = (body) => js(`Foo = component\n  items := [{w: 3, parts: [1, 2], title: 't'}]\n  ok := true\n  render\n    div\n      for a in items\n        ${body}\n`);
+    expect(loop('span title: a.w-1.toFixed(2)')).toContain('a.w - (1).toFixed(2)');
+    expect(loop('span title: a.parts[1]')).toContain('a.parts[1]');
+    expect(loop('p ok ? a.title:"none"')).toContain('a.title : "none"');
+    expect(js(`Foo = component\n  items := [{w: 4}]\n  render\n    div\n      for label in items\n        p title: label.w/2\n`)).toContain('label.w / 2');
+  });
+
+  test('a dangling hyphen, a bad character after an id, and a digit-led class reject', () => {
+    lexFails(at('div.a- "x"'), /write `class: 'a-'`/);
+    lexFails(at('.a- "x"'), /write `class: 'a-'`/);
+    lexFails(at('div#a- "x"'), /write `id: 'a-'`/);
+    lexFails(at('div#a/b "x"'), /write `id: 'a\/b'`/);
+    lexFails(at('div#a[0] "x"'), /write `id: 'a\[0\]'`/);
+    lexFails(at('div.2xl "x"'), /write `class: '2xl'`/);
+    lexFails(at('.2xl "x"'), /write `class: '2xl'`/);
+    lexFails(at('div#{name} "x"'), /a computed id is written as the attribute — `id: …`/);
+  });
+
+  test("an id on anything but an HTML tag or `.class` heading its line rejects; a selector is no key", () => {
+    lexFails(at('Card#x'), /`#x` is no element id here/);
+    lexFails(`Foo = component\n  item := {name: 'x'}\n  render\n    div\n      item.name#x\n`, /`#x` is no element id here/);
+    lexFails(at('div.card: "x"'), /an element's `\.class` takes no `:`/);
+    // A spaced `. key: value` is a bare-dot element with an attribute.
+    expect(js(at('. role: "note"'))).toContain("setAttribute('role', \"note\")");
   });
 
   test('code inside a template reads `.` and `#` as code does', () => {

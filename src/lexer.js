@@ -725,16 +725,24 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     return SELECTOR_BRANCH_HEADS.has(tokens[j].kind);
   };
 
-  // Is the last token an element's selector — a tag, or a `.class` chain on
-  // one — that a tight `#id` belongs to?
-  const idHead = () => {
-    let j = tokens.length - 1;
-    while (j >= 2 && tokens[j].kind === 'PROPERTY' && tokens[j - 1].kind === '.') j -= 2;
-    const root = tokens[j];
-    if (root.kind === 'PROPERTY' && tokens[j - 1]?.kind === '.') return headsLine(j - 1);
-    if (root.kind !== 'IDENTIFIER' || root.generated) return false;
-    const tag = String(root.value).split('#')[0];
-    return TEMPLATE_TAGS.has(tag) || tag.includes('-') || headsLine(j);
+  // Where the `.`-chain ending at tokens[k] starts: its root's index, or
+  // the index before the `.` of a bare line-start chain.
+  const chainStartFrom = (k) => {
+    while (k >= 1 && tokens[k].kind === 'PROPERTY' && tokens[k - 1].kind === '.') k -= 2;
+    return k;
+  };
+
+  // Does the chain starting at k head an element: a tag (or custom element)
+  // that heads its template line, or a bare `.` line? Only there do the
+  // selector rules hold; a chain anywhere else (a value, a loop variable
+  // spelled like a tag) reads as code.
+  const headSelectorAt = (k) => {
+    const root = tokens[k];
+    if (root?.kind === 'IDENTIFIER' && !root.generated) {
+      const tag = String(root.value).split('#')[0];
+      return (TEMPLATE_TAGS.has(tag) || tag.includes('-')) && headsLine(k);
+    }
+    return tokens[k + 1]?.kind === '.' && headsLine(k + 1);
   };
 
   // A selector shorthand holds a plain name; anything else is spelled as
@@ -744,7 +752,8 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     if (kind === 'class') {
       fail(`a class shorthand is letters, digits, \`-\` and \`_\` — write \`class: '${written}'\``, start - 1);
     }
-    fail(`an id shorthand starts with a letter — write \`id: '${written}'\``, start - 1);
+    if (text[start] === '{') fail('a computed id is written as the attribute — `id: …`', start - 1);
+    fail(`an id shorthand is a name starting with a letter — write \`id: '${written}'\``, start - 1);
   };
 
   // A render child position where a custom element's tag name may
@@ -1481,15 +1490,20 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       const glued = inRender && prev && (prev.kind === 'IDENTIFIER' || prev.kind === 'PROPERTY') &&
         !pendingSpaced && !prev.generated && text[pos + 1] !== undefined && !/\s/.test(text[pos + 1]);
       if (glued && selectorScope()) {
-        // An element's id: one, glued to its tag or class chain, a name
-        // from the identifier vocabulary (hyphens allowed). Glued to
-        // anything else, `#` is neither an id nor a comment.
-        if (!idHead()) {
-          fail(`\`#${/^[^\s"'`,()]*/.exec(text.slice(pos + 1))[0]}\` is glued to a value: an id follows an element's tag, and a comment needs a space before \`#\``, pos);
+        // An element's id: one, glued to the tag or `.class` chain that
+        // heads its line, a name from the identifier vocabulary (hyphens
+        // inside it). Glued to anything else, `#` is neither an id nor a
+        // comment.
+        if (!headSelectorAt(chainStartFrom(tokens.length - 1))) {
+          const written = /^[^\s"'`,()]*/.exec(text.slice(pos + 1))[0];
+          fail(`\`#${written}\` is no element id here: an id follows the HTML tag or \`.class\` that starts its line (otherwise write \`id: '${written}'\`), and a comment needs a space before \`#\``, pos);
         }
         if (!IDENT_START.test(text[pos + 1])) failSelector('id', pos + 1);
         let end = pos + 2;
         while (end < text.length && (IDENT_PART.test(text[end]) || (text[end] === '-' && IDENT_PART.test(text[end + 1] ?? '')))) end++;
+        if ('-/[{'.includes(text[end] ?? ' ') || (text[end] === ':' && /[^\s=:]/.test(text[end + 1] ?? ' '))) {
+          failSelector('id', pos + 1);
+        }
         for (let k = tokens.length - 1; k >= 0 && (tokens[k].kind === 'PROPERTY' || tokens[k].kind === '.' || tokens[k].kind === 'IDENTIFIER'); k--) {
           if (String(tokens[k].value).includes('#')) fail('an element has one id', pos);
           if (tokens[k].kind === 'IDENTIFIER') break;
@@ -1559,17 +1573,25 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         // is `this.box.value.w - pad`).
         let value = word;
         const selector = inRender && prev.kind === '.' && selectorScope() && classSelectorChain();
-        // A Tailwind variant glued on (`div.hover:bg-red`) is no class name.
-        if (selector && tightColon && /[^\s=:]/.test(text[pos + 1] ?? ' ')) failSelector('class', start);
+        // The element's own selector, at the head of its line, holds a
+        // plain class name (digits after a hyphen too): a Tailwind variant
+        // (`hover:bg-red`), `/`, `[`, a dangling `-` or `.5` rejects, and a
+        // selector is never a key. A chain anywhere else keeps its reading.
+        const strict = selector && !pendingSpaced && headSelectorAt(chainStartFrom(tokens.length - 2));
+        if (strict && keysColon) {
+          if (tightColon && /[^\s=:]/.test(text[pos + 1] ?? ' ')) failSelector('class', start);
+          fail('an element\'s `.class` takes no `:` — an attribute goes after a space (`div.card title: …`)', pos);
+        }
         if (selector && !keysColon) {
-          while (text[pos] === '-' && IDENT_PART.test(text[pos + 1] ?? '')) {
+          const joins = strict ? IDENT_PART : IDENT_START;
+          while (text[pos] === '-' && joins.test(text[pos + 1] ?? '')) {
             let j = pos + 1;
             while (j < text.length && IDENT_PART.test(text[j])) j++;
             value += text.slice(pos, j);
             pos = j;
           }
-          if (text[pos] === '/' || text[pos] === '[' || (text[pos] === '-' && /[^\s]/.test(text[pos + 1] ?? ' ')) ||
-              (text[pos] === '.' && /[0-9]/.test(text[pos + 1] ?? ''))) {
+          if (strict && (text[pos] === '/' || text[pos] === '[' || text[pos] === '-' ||
+              (text[pos] === '.' && /[0-9]/.test(text[pos + 1] ?? '')))) {
             failSelector('class', start);
           }
         }
@@ -1756,6 +1778,13 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     // ── Numbers: radix prefixes, BigInt, separators, exponents,
     // leading-dot floats — with radix-prefix validation ──
     if (DIGIT.test(ch) || (ch === '.' && DIGIT.test(text[pos + 1] ?? ''))) {
+      // `div.2xl` / `.2xl` at the head of a line: a class starting with a
+      // digit, which the shorthand cannot hold.
+      if (ch === '.' && inRender && selectorScope() && !pendingSpaced) {
+        const before = last();
+        const headTag = before?.kind === 'IDENTIFIER' && !before.generated && headSelectorAt(tokens.length - 1);
+        if (headTag || !before || SELECTOR_LINE_STARTS.has(before.kind)) failSelector('class', pos + 1);
+      }
       const m = NUMBER_RE.exec(text.slice(pos));
       const number = m[0];
       if (/^0[BOX]/.test(number)) fail(`radix prefix in '${number}' must be lowercase`, pos + 1);

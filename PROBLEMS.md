@@ -258,6 +258,10 @@ emits `f({__bind_a__: this.name.value})`; both belong to the element only.
 **T29 M — A component's positional argument before a children arrow is dropped.**
 `Bar n, ->` + an indented `span "k"` emits `new Bar({})`.
 
+**T30 L — A bare `.` element after `then`/`else` fails to parse.**
+`if ok then .card "y"` rejects "Unexpected '.'"; `if ok then div.card "y"`
+works.
+
 **T24 M — A call or a string as a handler runs at the wrong time or never.**
 `@click: go()` emits `(this.go())(e)` — `go` runs on every click and the
 result is called; `@click: "go()"` emits `("go()")(e)`.

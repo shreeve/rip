@@ -6323,24 +6323,27 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
       j--;
     return SELECTOR_BRANCH_HEADS.has(tokens[j].kind);
   };
-  const idHead = () => {
-    let j = tokens.length - 1;
-    while (j >= 2 && tokens[j].kind === "PROPERTY" && tokens[j - 1].kind === ".")
-      j -= 2;
-    const root = tokens[j];
-    if (root.kind === "PROPERTY" && tokens[j - 1]?.kind === ".")
-      return headsLine(j - 1);
-    if (root.kind !== "IDENTIFIER" || root.generated)
-      return false;
-    const tag = String(root.value).split("#")[0];
-    return TEMPLATE_TAGS.has(tag) || tag.includes("-") || headsLine(j);
+  const chainStartFrom = (k) => {
+    while (k >= 1 && tokens[k].kind === "PROPERTY" && tokens[k - 1].kind === ".")
+      k -= 2;
+    return k;
+  };
+  const headSelectorAt = (k) => {
+    const root = tokens[k];
+    if (root?.kind === "IDENTIFIER" && !root.generated) {
+      const tag = String(root.value).split("#")[0];
+      return (TEMPLATE_TAGS.has(tag) || tag.includes("-")) && headsLine(k);
+    }
+    return tokens[k + 1]?.kind === "." && headsLine(k + 1);
   };
   const failSelector = (kind, start) => {
     const written = /^[^\s"'`,()]+/.exec(text.slice(start))?.[0] ?? "";
     if (kind === "class") {
       fail(`a class shorthand is letters, digits, \`-\` and \`_\` — write \`class: '${written}'\``, start - 1);
     }
-    fail(`an id shorthand starts with a letter — write \`id: '${written}'\``, start - 1);
+    if (text[start] === "{")
+      fail("a computed id is written as the attribute — `id: …`", start - 1);
+    fail(`an id shorthand is a name starting with a letter — write \`id: '${written}'\``, start - 1);
   };
   const customElementEnd = (prev, at) => {
     if (!inRender || text[at] !== "-" || !IDENT_START.test(text[at + 1] ?? "") || !customElementStart(prev))
@@ -6917,14 +6920,18 @@ ${baseline}`).join(`
       const prev = last();
       const glued = inRender && prev && (prev.kind === "IDENTIFIER" || prev.kind === "PROPERTY") && !pendingSpaced && !prev.generated && text[pos + 1] !== undefined && !/\s/.test(text[pos + 1]);
       if (glued && selectorScope()) {
-        if (!idHead()) {
-          fail(`\`#${/^[^\s"'`,()]*/.exec(text.slice(pos + 1))[0]}\` is glued to a value: an id follows an element's tag, and a comment needs a space before \`#\``, pos);
+        if (!headSelectorAt(chainStartFrom(tokens.length - 1))) {
+          const written = /^[^\s"'`,()]*/.exec(text.slice(pos + 1))[0];
+          fail(`\`#${written}\` is no element id here: an id follows the HTML tag or \`.class\` that starts its line (otherwise write \`id: '${written}'\`), and a comment needs a space before \`#\``, pos);
         }
         if (!IDENT_START.test(text[pos + 1]))
           failSelector("id", pos + 1);
         let end = pos + 2;
         while (end < text.length && (IDENT_PART.test(text[end]) || text[end] === "-" && IDENT_PART.test(text[end + 1] ?? "")))
           end++;
+        if ("-/[{".includes(text[end] ?? " ") || text[end] === ":" && /[^\s=:]/.test(text[end + 1] ?? " ")) {
+          failSelector("id", pos + 1);
+        }
         for (let k = tokens.length - 1;k >= 0 && (tokens[k].kind === "PROPERTY" || tokens[k].kind === "." || tokens[k].kind === "IDENTIFIER"); k--) {
           if (String(tokens[k].value).includes("#"))
             fail("an element has one id", pos);
@@ -6975,17 +6982,22 @@ ${baseline}`).join(`
       if (prev && (prev.kind === "." || prev.kind === "?." || prev.kind === "@" && !pendingSpaced)) {
         let value = word;
         const selector = inRender && prev.kind === "." && selectorScope() && classSelectorChain();
-        if (selector && tightColon && /[^\s=:]/.test(text[pos + 1] ?? " "))
-          failSelector("class", start);
+        const strict = selector && !pendingSpaced && headSelectorAt(chainStartFrom(tokens.length - 2));
+        if (strict && keysColon) {
+          if (tightColon && /[^\s=:]/.test(text[pos + 1] ?? " "))
+            failSelector("class", start);
+          fail("an element's `.class` takes no `:` — an attribute goes after a space (`div.card title: …`)", pos);
+        }
         if (selector && !keysColon) {
-          while (text[pos] === "-" && IDENT_PART.test(text[pos + 1] ?? "")) {
+          const joins = strict ? IDENT_PART : IDENT_START;
+          while (text[pos] === "-" && joins.test(text[pos + 1] ?? "")) {
             let j = pos + 1;
             while (j < text.length && IDENT_PART.test(text[j]))
               j++;
             value += text.slice(pos, j);
             pos = j;
           }
-          if (text[pos] === "/" || text[pos] === "[" || text[pos] === "-" && /[^\s]/.test(text[pos + 1] ?? " ") || text[pos] === "." && /[0-9]/.test(text[pos + 1] ?? "")) {
+          if (strict && (text[pos] === "/" || text[pos] === "[" || text[pos] === "-" || text[pos] === "." && /[0-9]/.test(text[pos + 1] ?? ""))) {
             failSelector("class", start);
           }
         }
@@ -7109,6 +7121,12 @@ ${baseline}`).join(`
       continue;
     }
     if (DIGIT.test(ch) || ch === "." && DIGIT.test(text[pos + 1] ?? "")) {
+      if (ch === "." && inRender && selectorScope() && !pendingSpaced) {
+        const before = last();
+        const headTag = before?.kind === "IDENTIFIER" && !before.generated && headSelectorAt(tokens.length - 1);
+        if (headTag || !before || SELECTOR_LINE_STARTS.has(before.kind))
+          failSelector("class", pos + 1);
+      }
       const m = NUMBER_RE.exec(text.slice(pos));
       const number = m[0];
       if (/^0[BOX]/.test(number))
@@ -32968,7 +32986,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "646c54479f2fe2eb";
+var compilerBuild = () => "239431860b623103";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
