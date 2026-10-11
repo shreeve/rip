@@ -25,8 +25,8 @@ def say(**event):
     sys.stdout.flush()
 
 # The shell tells the driver what the job does on one pipe, and the
-# driver tells the shell to continue it on the other: neither goes
-# through the pty, which is the job's alone.
+# driver tells the shell to continue it, or that it may go, on the
+# other: neither goes through the pty, which is the job's alone.
 told_r, told_w = os.pipe()
 asked_r, asked_w = os.pipe()
 
@@ -54,6 +54,12 @@ if pid == 0:
         os.write(told_w, (text + '\n').encode())
     tell('started %d' % job.pid)
     asked = os.fdopen(asked_r)
+    # The shell holds the pty open until the driver has read what the
+    # job wrote: on the last close macOS discards what was not yet read.
+    def end(text):
+        tell(text)
+        asked.readline()
+        os._exit(0)
     while True:
         try:
             _, status = os.waitpid(job.pid, os.WUNTRACED | os.WCONTINUED)
@@ -70,11 +76,9 @@ if pid == 0:
         elif os.WIFCONTINUED(status):
             tell('continued')
         elif os.WIFEXITED(status):
-            tell('exited %d' % os.WEXITSTATUS(status))
-            os._exit(0)
+            end('exited %d' % os.WEXITSTATUS(status))
         elif os.WIFSIGNALED(status):
-            tell('killed %d' % os.WTERMSIG(status))
-            os._exit(0)
+            end('killed %d' % os.WTERMSIG(status))
 
 # The driver: relays the pty and the shell's events, and runs the steps.
 os.close(told_w)
@@ -107,9 +111,18 @@ def heard(chunk):
             continued += 1
             say(continued=continued)
         elif word[0] == 'exited':
+            drain()
             say(exited=int(word[1]))
+            os.write(asked_w, b'go\n')
         elif word[0] == 'killed':
+            drain()
             say(killed=int(word[1]))
+            os.write(asked_w, b'go\n')
+
+# Everything the job wrote before the shell told of it is in the pty.
+def drain():
+    while fd in open_fds and select.select([fd], [], [], 0)[0]:
+        read(fd)
 
 def read(which):
     global out
