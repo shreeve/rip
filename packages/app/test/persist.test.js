@@ -1,5 +1,25 @@
-import { describe, expect, test } from 'bun:test';
-import { createStash, persistStash, source, unwrapStash } from 'rip/app';
+import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
+import { createStash, persistStash as basePersistStash, source, unwrapStash } from 'rip/app';
+
+// Saving debounces through setTimeout, so on the host clock a stall
+// between steps or a timer answered late moves the save. The fake clock
+// advances only when a test advances it: every save is asserted at its
+// exact millisecond, and a save that must not exist is counted.
+//
+// Every stash shares one write-version signal, so a persistence a failed
+// test never disposed would schedule saves inside the tests after it.
+// Whatever is still live disposes after each test (dispose is idempotent).
+const live = [];
+const persistStash = (stash, opts) => {
+  const dispose = basePersistStash(stash, opts);
+  live.push(dispose);
+  return dispose;
+};
+beforeEach(() => { jest.useFakeTimers(); });
+afterEach(() => {
+  for (const dispose of live.splice(0)) dispose();
+  jest.useRealTimers();
+});
 
 const fakeStorage = (initial = {}) => {
   const table = new Map(Object.entries(initial));
@@ -17,7 +37,7 @@ describe('persistStash', () => {
     expect(() => persistStash(stash)).toThrow(/injected storage/);
   });
 
-  test('saves plain keys after the debounce, skipping sources at depth', async () => {
+  test('saves plain keys after the debounce, skipping sources at depth', () => {
     const storage = fakeStorage();
     const stash = createStash({
       count: 1,
@@ -25,7 +45,9 @@ describe('persistStash', () => {
     });
     const dispose = persistStash(stash, { storage, debounce: 10 });
     stash.count = 2;
-    await Bun.sleep(30);
+    jest.advanceTimersByTime(9);
+    expect(storage.table.has('__rip_app')).toBeFalse();
+    jest.advanceTimersByTime(1);
     const saved = JSON.parse(storage.table.get('__rip_app'));
     expect(saved.count).toBe(2);
     expect(saved.nested.label).toBe('x');
@@ -67,12 +89,14 @@ describe('persistStash', () => {
     expect(JSON.parse(storage.table.get('__rip_app')).n).toBe(42);
   });
 
-  test('reset purges the persisted snapshot', async () => {
+  test('reset purges the persisted snapshot', () => {
     const storage = fakeStorage();
     const stash = createStash({ n: 1 });
     const dispose = persistStash(stash, { storage, debounce: 5 });
     stash.n = 2;
-    await Bun.sleep(20);
+    jest.advanceTimersByTime(4);
+    expect(storage.table.has('__rip_app')).toBeFalse();
+    jest.advanceTimersByTime(1);
     expect(storage.table.has('__rip_app')).toBeTrue();
     stash.reset();
     expect(storage.table.has('__rip_app')).toBeFalse();
@@ -94,35 +118,59 @@ describe('persistStash reconciliation', () => {
     dispose();
   });
 
-  test('a delete saves after the debounce', async () => {
+  test('a delete saves after the debounce', () => {
     const storage = fakeStorage();
     const stash = createStash({ x: 1, y: 2 });
     const dispose = persistStash(stash, { storage, debounce: 10 });
     stash.x = 1;
-    await Bun.sleep(25);
+    jest.advanceTimersByTime(9);
+    expect(storage.table.has('__rip_app')).toBeFalse();
+    jest.advanceTimersByTime(1);
+    expect(JSON.parse(storage.table.get('__rip_app'))).toEqual({ x: 1, y: 2 });
+    jest.advanceTimersByTime(15);
     delete stash.y;
-    await Bun.sleep(25);
+    jest.advanceTimersByTime(9);
+    expect(JSON.parse(storage.table.get('__rip_app'))).toEqual({ x: 1, y: 2 });
+    jest.advanceTimersByTime(1);
     expect(JSON.parse(storage.table.get('__rip_app'))).toEqual({ x: 1 });
     dispose();
   });
 
-  test('a purge stays purged past the debounce window', async () => {
+  test('a purge stays purged past the debounce window', () => {
     const storage = fakeStorage();
     const stash = createStash({ n: 1 });
     const dispose = persistStash(stash, { storage, debounce: 10 });
     stash.n = 2;
-    await Bun.sleep(25);
+    jest.advanceTimersByTime(10);
+    expect(storage.table.has('__rip_app')).toBeTrue();
+    jest.advanceTimersByTime(15);
     stash.reset();
-    await Bun.sleep(30);
+    expect(storage.table.has('__rip_app')).toBeFalse();
+    expect(jest.getTimerCount()).toBe(0);
+    jest.advanceTimersByTime(10);
     expect(storage.table.has('__rip_app')).toBeFalse();
     dispose();
   });
 
-  test('an untouched stash never writes storage', async () => {
+  test('a reset inside the debounce window cancels the pending save', () => {
     const storage = fakeStorage();
     const stash = createStash({ n: 1 });
     const dispose = persistStash(stash, { storage, debounce: 10 });
-    await Bun.sleep(30);
+    stash.n = 2;
+    jest.advanceTimersByTime(5);
+    stash.reset();
+    expect(jest.getTimerCount()).toBe(0);
+    jest.advanceTimersByTime(5);
+    expect(storage.table.has('__rip_app')).toBeFalse();
+    dispose();
+  });
+
+  test('an untouched stash never writes storage', () => {
+    const storage = fakeStorage();
+    const stash = createStash({ n: 1 });
+    const dispose = persistStash(stash, { storage, debounce: 10 });
+    expect(jest.getTimerCount()).toBe(0);
+    jest.advanceTimersByTime(10);
     expect(storage.table.has('__rip_app')).toBeFalse();
     dispose();
   });
