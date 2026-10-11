@@ -7493,3 +7493,34 @@ test 'a parameter named like a computed member shadows it', '''
         p c
     typeof Foo
 ''', 'function'
+fail 'a component computed rejects an @-member destructuring write', '''
+    Foo = component
+      k := 0
+      c ~= k + 1
+      bump: -> {a: [@c]} = {a: [5]}
+      render
+        p c
+''', "cannot assign to computed 'c'"
+fail 'a component readonly rejects a destructuring write', '''
+    Foo = component
+      r =! 1
+      bump: -> {r} = {r: 5}
+      render
+        p r
+''', "cannot assign to readonly member 'r'"
+fail 'a plain member render reads rejects a destructuring write', '''
+    Foo = component
+      label = 'a'
+      bump: -> [@label] = ['b']
+      render
+        p label
+''', "silently freezes the render"
+test 'a destructuring default reads a computed member', '''
+    Foo = component
+      k := 0
+      c ~= k + 1
+      pick: -> [x = c] = []; x
+      render
+        p c
+    typeof Foo
+''', 'function'

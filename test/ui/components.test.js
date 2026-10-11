@@ -521,7 +521,7 @@ describe('the defect layer: every silent  class rejects loudly, positioned', () 
   });
 
   test('runtime-owned instance fields reject across member kinds while helper names stay legal', () => {
-    for (const name of ['_state', '_frame', '_parent', '_children', '_root', '_nodes']) {
+    for (const name of ['_state', '_frame', '_parent', '_children', '_root', '_nodes', '_boundCache']) {
       emitFails(`C = component\n  ${name} := 1\n  render null`, /collides with component runtime state/);
     }
     emitFails('C = component\n  _root <~ @stash.root\n  render null', /collides with component runtime state/);
@@ -546,7 +546,8 @@ describe('the defect layer: every silent  class rejects loudly, positioned', () 
     // the whole component). The runtime already rejected declared
     // PROPS of these names at construction; the compile rejection
     // closes the private-member half of the same hazard.
-    for (const name of ['mount', 'unmount']) {
+    // `_bound` is the method-as-value read every component emits.
+    for (const name of ['mount', 'unmount', '_bound']) {
       emitFails(`C = component\n  ${name} := 1\n  render\n    div "x"`, /collides with the component runtime API/);
       emitFails(`C = component\n  ${name} = (x) -> x\n  render\n    div "x"`, /collides with the component runtime API/);
       // The face path rejects identically (JS mode is emitFails above).
@@ -3104,5 +3105,40 @@ App = component
     const [a, b] = app.pair();
     expect(a).toBe(b);
     expect(a()).toBe(1);
+  });
+
+  const instance = (source) => {
+    const { code } = compile(source, { runtimeDelivery: 'none' });
+    const names = Object.keys(RT);
+    const { App } = new Function(...names, `${code}\nreturn { App };`)(...names.map((name) => RT[name]));
+    return { code, app: new App({}) };
+  };
+
+  test('delete removes the method itself, not its bound read', () => {
+    const { code, app } = instance(`App = component
+  go: (a) -> a
+  override: ->
+    @go = (a) -> 'over'
+    r1 = @go(1)
+    delete @go
+    [r1, @go(1)]
+  render
+    p "x"
+`);
+    expect(code).toContain('delete this.go');
+    expect(app.override()).toEqual(['over', 1]);
+  });
+
+  test('a member access on a method reads the method in both spellings', () => {
+    const { code, app } = instance(`App = component
+  go: (a, b) -> a + b
+  bare: -> [go.length, go.name, go.call(null, 1, 2)]
+  at: -> [@go.length, @go.name, @go.call(null, 1, 2)]
+  render
+    p "x"
+`);
+    expect(code).not.toContain('_bound');
+    expect(app.bare()).toEqual([2, 'go', 3]);
+    expect(app.at()).toEqual([2, 'go', 3]);
   });
 });

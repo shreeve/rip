@@ -51,6 +51,7 @@ const COMPONENT_RUNTIME_FIELDS = new Set([
   '_state', '_frame', '_parent', '_children', '_root', '_nodes', '_target',
   '_context', '_rest', '_restWriters', '_restHandlers', '_inheritedEl', '_inheritedInst', '_inheritedOwn',
   '_refCleanups', '_initFailed', '_hmrOrphans', '_hmrReleasing', '_hmrPropKeys', '_hmrResetPending', '_hmrReset', '_asChild',
+  '_boundCache',
 ]);
 
 const BINOPS = new Set(['+', '-', '*', '/', '%', '**', '<', '>', '<=', '>=', '==', '!=', '&&', '||', '??', '<<', '>>', '>>>', '&', '^', '|']);
@@ -807,8 +808,9 @@ class Emitter {
     // True while emitting an assignment/update TARGET — the position
     // where read-only lowerings (`.at(-n)`) have no valid JS form.
     this.inTarget = false;
-    // The bare or `@` method name a call is emitting as its callee: that
-    // read is a call, not a method passed as a value (boundMethodRead).
+    // The bare or `@` method name a reference position is emitting (a
+    // callee, a member access's object, a delete operand): that read is
+    // the method itself, not a value passed (boundMethodRead).
     this.calleeName = null;
     // Function nodes whose DEFINITION carries the void marker
     // (`save! = ->`, `fn!: ->`): their bodies suppress the implicit
@@ -1853,25 +1855,36 @@ class Emitter {
         'emitter: `@rest` is the runtime-owned view of the caller\'s undeclared props and is never assigned — ' +
         'set the attribute on the element in render, or declare the name as a prop the caller supplies');
     }
-    // A destructuring write lands on each name it binds: a computed
-    // among them is written as surely as by `c = …`.
+    // A destructuring write lands on each member it assigns, bare or
+    // `@`: each is written as surely as by `c = …`.
     if (Emitter.isPattern(target)) {
-      const names = [];
-      this.patternNames(target, names, true);
-      for (const n of names) {
-        if (this.memberKindOf(n) === 'computed') this.rejectComputedMemberWrite(node, n);
-      }
+      for (const [name, kind] of this.patternMemberTargets(target)) this.checkMemberKindWrite(node, name, kind);
       return;
     }
-    let name = null, kind = null;
     if (typeof target === 'string') {
       this.checkBareRest(node, target);
-      name = target;
-      kind = this.memberKindOf(target);
+      this.checkMemberKindWrite(node, target, this.memberKindOf(target));
     } else if (isNode(target) && target[0] === '.' && target[1] === 'this' && typeof target[2] === 'string') {
-      name = target[2];
-      kind = this.thisMemberKindOf(name);
+      this.checkMemberKindWrite(node, target[2], this.thisMemberKindOf(target[2]));
     }
+  }
+
+  // The members a destructuring target assigns, as [name, kind] — each
+  // bare name and each `@name` leaf; a default value is a read.
+  patternMemberTargets(p, out = []) {
+    if (typeof p === 'string') {
+      if (p !== ',') out.push([p, this.memberKindOf(p)]);
+    } else if (isNode(p)) {
+      const h = p[0];
+      if (h === '.' && p.length === 3 && p[1] === 'this' && typeof p[2] === 'string') out.push([p[2], this.thisMemberKindOf(p[2])]);
+      else if (h === 'array') for (const el of p.slice(1)) this.patternMemberTargets(el, out);
+      else if (h === 'object') for (const pair of p.slice(1)) this.patternMemberTargets(pair[0] === ':' ? pair[2] : pair[1], out);
+      else if (['rest', '...', 'default', '=', 'cast', 'satisfies'].includes(h)) this.patternMemberTargets(p[1], out);
+    }
+    return out;
+  }
+
+  checkMemberKindWrite(node, name, kind) {
     if (kind === null) return;
     if (kind === 'computed') this.rejectComputedMemberWrite(node, name);
     if (kind === 'readonly') {
@@ -1997,7 +2010,7 @@ class Emitter {
   // read site inside the role's cover row over the lowered form.
   // A component method read as a value — passed, stored, mapped — keeps
   // its instance: it reads as the instance's bound function (`_bound`).
-  // A call's own callee is a call.
+  // A reference position (asReference) reads the method itself.
   boundMethodRead(name, kind) {
     const callee = this.calleeName;
     this.calleeName = null;
@@ -2015,8 +2028,10 @@ class Emitter {
     if (this.ts) this.b.tsOnly(() => this.b.emit(` as ${self === 'this' ? 'this' : `(typeof ${self})`}[${JSON.stringify(name)}])`));
   }
 
-  // Emit a call's callee, marking a bare or `@` method name as called.
-  asCallee(callee, fn) {
+  // Emit a reference position — a call's callee, a member access's
+  // object (`go.call(…)`, `go.length`), a delete's operand — where a bare
+  // or `@` method name is the method itself, not a value read.
+  asReference(callee, fn) {
     const name = typeof callee === 'string' ? callee
       : isNode(callee) && callee[0] === '.' && callee.length === 3 && callee[1] === 'this' && typeof callee[2] === 'string' ? callee[2]
       : null;
@@ -6761,7 +6776,10 @@ class Emitter {
     const block = (body) => (into === null ? this.braceBlock(body, ind) : this.accumulateBlock(body, ind, into));
     if (Emitter.hasMatchArms(cases)) {
       this.checkMatchSwitch(node);
-      this.mark(node, '$self', () => this.matchChain(node, ind, block));
+      this.mark(node, '$self', () => {
+        this.matchChain(node, ind, block);
+        if (into !== null && dflt === null) this.accumulateMissingArm(ind, into);
+      });
       return;
     }
     this.mark(node, '$self', () => {
@@ -6785,6 +6803,8 @@ class Emitter {
         if (dflt !== null) {
           this.b.emit(`${pad}  default:\n`);
           this.caseBody(dflt, ind, into);
+        } else if (into !== null) {
+          this.b.emit(`${pad}  default:\n${pad}    ${into}.push(undefined);\n`);
         }
         this.b.emit(`${pad}}`);
       } else {
@@ -6802,6 +6822,8 @@ class Emitter {
         if (dflt !== null) {
           this.b.emit(' else ');
           block(dflt);
+        } else if (into !== null) {
+          this.accumulateMissingArm(ind, into);
         }
       }
     });
@@ -7707,30 +7729,30 @@ class Emitter {
 
   // A brace block whose LAST statement returns its value — the body
   // shape shared by every returns-pushed lowering.
-  returnBlock(block, ind) {
+  returnBlock(block, ind, effect = false) {
     const stmts = this.branchLive(block);
     this.b.emit('{\n');
     this.emitTsTypeDecls(isBlock(block) ? block.slice(1) : [block[0]], '  '.repeat(ind + 1));
     stmts.forEach((stmt, i) => {
       this.b.emit('  '.repeat(ind + 1));
-      if (i === stmts.length - 1) this.implicitReturn(stmt, ind + 1);
+      if (i === stmts.length - 1) this.implicitReturn(stmt, ind + 1, effect);
       else this.statement(stmt, ind + 1);
       this.b.emit('\n');
     });
     this.b.emit('  '.repeat(ind) + '}');
   }
 
-  returnifyIf(node, ind) {
+  returnifyIf(node, ind, effect = false) {
     // The condition emits in 'value' context —
     // compound conditions arrive double-parenthesized: `if ((v > 0))`.
     this.b.emit('if (');
     this.grouped(node, 'condition', node[1], Emitter.needsGrouping(node[1], 'operand'));
     this.b.emit(') ');
-    this.mark(node, 'then', () => this.returnBlock(node[2], ind));
+    this.mark(node, 'then', () => this.returnBlock(node[2], ind, effect));
     if (node.length >= 4) {
       this.b.emit(' else ');
-      if (isNode(node[3]) && node[3][0] === 'if') this.returnifyIf(node[3], ind);
-      else this.mark(node, 'else', () => this.returnBlock(node[3], ind));
+      if (isNode(node[3]) && node[3][0] === 'if') this.returnifyIf(node[3], ind, effect);
+      else this.mark(node, 'else', () => this.returnBlock(node[3], ind, effect));
     }
   }
 
@@ -7814,14 +7836,14 @@ class Emitter {
   // The try with every branch returning its value: the body of the
   // value form's IIFE, and the whole of a tail-position try, which
   // returns from the enclosing function in place.
-  tryBranches(node, ind) {
+  tryBranches(node, ind, effect = false) {
     this.mark(node, '$self', () => {
       this.b.emit('try ');
       // An inline body (`x = try f()`) is its own one-statement
       // block; a handler-less try gains `catch {}`, so the value is
       // the body's result or undefined on throw.
       const vbody = isBlock(node[1]) ? node[1] : ['block', node[1]];
-      this.mark(node, 'body', () => this.returnBlock(vbody, ind));
+      this.mark(node, 'body', () => this.returnBlock(vbody, ind, effect));
       if (node.length === 2) this.b.emit(' catch {}');
       for (const part of node.slice(2)) {
         if (!isNode(part)) continue;
@@ -7832,7 +7854,7 @@ class Emitter {
           const [binding, body] = part;
           if (binding === null) {
             this.b.emit(' catch ');
-            this.returnBlock(body, ind);
+            this.returnBlock(body, ind, effect);
           } else if (Emitter.isPattern(binding)) {
             this.checkExportedConstWrite(part, binding); this.checkImportWrite(part, binding);
             // The statement path's catch-pattern lowering, value-side:
@@ -7848,7 +7870,7 @@ class Emitter {
             this.emitTsTypeDecls(isBlock(body) ? body.slice(1) : [body[0]], '  '.repeat(ind + 1));
             stmts.forEach((stmt, i) => {
               this.b.emit('  '.repeat(ind + 1));
-              if (i === stmts.length - 1) this.implicitReturn(stmt, ind + 1);
+              if (i === stmts.length - 1) this.implicitReturn(stmt, ind + 1, effect);
               else this.statement(stmt, ind + 1);
               this.b.emit('\n');
             });
@@ -7857,21 +7879,21 @@ class Emitter {
             this.b.emit(' catch (');
             this.mark(part, 'binding', () => this.emitParam(binding));
             this.b.emit(') ');
-            this.withBindings([binding[1]], () => this.returnBlock(body, ind));
+            this.withBindings([binding[1]], () => this.returnBlock(body, ind, effect));
           } else {
             this.b.emit(' catch (');
             this.mark(part, 'binding', () => this.b.emit(binding));
             this.b.emit(') ');
             // The binding is a new name for the handler — it shadows a
             // same-named reactive declaration (the statement path's rule).
-            this.withBindings([binding], () => this.returnBlock(body, ind));
+            this.withBindings([binding], () => this.returnBlock(body, ind, effect));
           }
         }
       }
     });
   }
 
-  valueSwitch(node) {
+  valueSwitch(node, effect = false) {
     const [, subject, cases, dflt] = node;
     const ind = this.ind;
     const pad = '  '.repeat(ind);
@@ -7880,7 +7902,7 @@ class Emitter {
     this.mark(node, '$self', () => {
       if (Emitter.hasMatchArms(cases)) {
         this.checkMatchSwitch(node);
-        this.matchChain(node, ind, (body) => this.returnBlock(body, ind));
+        this.matchChain(node, ind, (body) => this.returnBlock(body, ind, effect));
       } else if (subject !== null) {
         this.b.emit('switch (');
         this.mark(node, 'subject', () => this.expr(subject));
@@ -7892,11 +7914,11 @@ class Emitter {
             this.expr(c);
             this.b.emit(':\n');
           }
-          this.returnCaseBody(body, ind);
+          this.returnCaseBody(body, ind, effect);
         }
         if (dflt !== null) {
           this.b.emit(`${pad}  default:\n`);
-          this.returnCaseBody(dflt, ind);
+          this.returnCaseBody(dflt, ind, effect);
         }
         this.b.emit(`${pad}}`);
       } else {
@@ -7909,30 +7931,36 @@ class Emitter {
           this.b.emit('if (');
           this.whenTests(Array.isArray(conditions) ? conditions : [conditions]);
           this.b.emit(') ');
-          this.returnBlock(body, ind);
+          this.returnBlock(body, ind, effect);
         });
         if (dflt !== null) {
           this.b.emit(' else ');
-          this.returnBlock(dflt, ind);
+          this.returnBlock(dflt, ind, effect);
         }
       }
     });
     this.b.emit(' })()');
   }
 
-  returnCaseBody(body, ind) {
-    this.inCtrl(() => this.returnCaseBodyCtrl(body, ind));
+  returnCaseBody(body, ind, effect = false) {
+    this.inCtrl(() => this.returnCaseBodyCtrl(body, ind, effect));
   }
 
-  returnCaseBodyCtrl(body, ind) {
+  returnCaseBodyCtrl(body, ind, effect) {
     const stmts = this.branchLive(body);
     this.emitTsTypeDecls(isBlock(body) ? body.slice(1) : [body[0]], '  '.repeat(ind + 2));
     stmts.forEach((stmt, i) => {
       this.b.emit('  '.repeat(ind + 2));
-      if (i === stmts.length - 1) this.implicitReturn(stmt, ind + 2);
+      if (i === stmts.length - 1) this.implicitReturn(stmt, ind + 2, effect);
       else this.statement(stmt, ind + 2);
       this.b.emit('\n');
     });
+    // An effect arm whose tail writes returns nothing, so it must leave
+    // the switch itself rather than fall into the next case's cleanup.
+    const tail = stmts[stmts.length - 1];
+    if (effect && (this.effectTailWrites(tail) || this.effectBranchWrites(tail))) {
+      this.b.emit('  '.repeat(ind + 2) + 'break;\n');
+    }
   }
 
   // The loop header for a value/tail-position accumulator: emits the
@@ -8081,7 +8109,15 @@ class Emitter {
       this.b.emit(' else ');
       if (isNode(node[3]) && node[3][0] === 'if') this.accumulateIf(node[3], ind, into);
       else this.mark(node, 'else', () => this.accumulateBlock(node[3], ind, into));
+    } else {
+      this.accumulateMissingArm(ind, into);
     }
+  }
+
+  // A collecting branch with no else arm collects `undefined`, as the
+  // same branch in value position yields.
+  accumulateMissingArm(ind, into) {
+    this.b.emit(' else {\n' + '  '.repeat(ind + 1) + `${into}.push(undefined);\n` + '  '.repeat(ind) + '}');
   }
 
   accumulateBlock(block, ind, into) {
@@ -9577,7 +9613,7 @@ class Emitter {
         const { entries, names } = this.scopedHoist(stmts, []);
         for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
         this.scopes.push(names);
-        this.funcBlock(node, body, stmts, ind, entries, false, stmts.length > 0 && this.cleanupTail(stmts[stmts.length - 1]));
+        this.funcBlock(node, body, stmts, ind, entries, false, true);
         this.scopes.pop();
         this.rframes.pop();
       }));
@@ -9598,54 +9634,67 @@ class Emitter {
       this.hoistLine(entries);
       this.b.emit(' ');
     }
-    if (this.cleanupTail(body)) this.b.emit('return ');
-    this.mark(node, 'value', () => this.withExpression(() => {
-      const wrap = Emitter.needsGrouping(body, 'operand') || isObject(body);
-      if (wrap) this.b.emit('(');
-      this.expr(body);
-      if (wrap) this.b.emit(')');
-    }));
-    this.b.emit('; })');
+    if (this.effectBranchWrites(body)) {
+      this.mark(node, 'value', () => this.withExpression(() => this.implicitReturn(body, ind, true)));
+      this.b.emit(' })');
+    } else {
+      if (!this.effectTailWrites(body)) this.b.emit('return ');
+      this.mark(node, 'value', () => this.withExpression(() => {
+        const wrap = Emitter.needsGrouping(body, 'operand') || isObject(body);
+        if (wrap) this.b.emit('(');
+        this.expr(body);
+        if (wrap) this.b.emit(')');
+      }));
+      this.b.emit('; })');
+    }
     this.scopes.pop();
     this.rframes.pop();
   }
 
-  // Does an effect body's tail produce its cleanup? A returned function
-  // runs before the next run and on dispose, so only a tail that reads
-  // as producing one returns: a function literal, a call (its result is
-  // the handle — `~> subscribe(x)`), a nested effect, or a name or
-  // member read. A tail
-  // that is a statement — an assignment, an if/switch/try, a loop —
-  // returns nothing: `if open then win.onkeydown = (e) -> …` would
-  // otherwise register the handler it assigns as the cleanup.
-  cleanupTail(stmt) {
-    if (typeof stmt === 'string') return !['break', 'continue', 'debugger'].includes(stmt);
+  // An effect's tail returns as its cleanup unless the tail is a
+  // statement: a write (`if open then win.onkeydown = (e) -> …` would
+  // otherwise register the handler it assigns as the cleanup), an
+  // update, a loop, or a declaration. Every other tail may produce the
+  // cleanup — a call (`~> subscribe(x)`), an optional call, a logical
+  // or conditional expression, `new`, a nested effect's dispose handle
+  // — and the runtime ignores a result that is not a function.
+  effectTailWrites(stmt) {
     if (!isNode(stmt)) return false;
-    if (isFunc(stmt)) return true;
-    // A nested effect's value is its dispose handle: returned, the outer
-    // run disposes it before re-running, so nested effects never pile up.
-    if (this.isEffectDecl(stmt)) return true;
     const h = stmt[0];
-    if (isNode(h)) return true;
-    if (['.', '?.', '[]', 'optindex', 'await', 'dammit!', 'dammit?', 'return', 'throw'].includes(h)) return true;
-    // A branch tail chooses its cleanup when every arm ends in one
-    // (`if x then -> undo() else null`); an arm that assigns makes the
-    // whole branch a statement.
-    if (h === 'if' && stmt.length >= 3 && stmt.length <= 4) {
-      return stmt.slice(2).every((arm) => this.cleanupTail(Emitter.blockTail(arm)));
+    // A parenthesized sequence (`(a = 0; b = 1)`) is the statement its
+    // tail is; a branching tail inside one has no per-arm form there.
+    if (h === 'block' && stmt.length > 1) {
+      const tail = stmt[stmt.length - 1];
+      return this.effectTailWrites(tail) || this.effectBranchWrites(tail);
     }
-    if (h === 'switch' && stmt.length === 4) {
-      const arms = [...stmt[2].map((w) => w[2]), ...(stmt[3] !== null ? [stmt[3]] : [])];
-      return arms.every((arm) => this.cleanupTail(Emitter.blockTail(arm)));
-    }
-    return this.semanticKindOf(stmt) === 'call';
+    if (isAssignHead(h) || h === '.=' || isUpdate(stmt)) return true;
+    if (Emitter.LOOP_HEADS.has(h) || isDefHead(h) || h === 'class' || h === 'enum' || h === 'export') return true;
+    if (this.isModuleImport(stmt) || this.isReactiveDecl(stmt) || this.isReadonlyDecl(stmt)) return true;
+    return this.isEffectDecl(stmt) && stmt[1] !== null;
   }
 
-  // The last statement of a block or a bare branch body.
-  static blockTail(body) {
-    if (isBlock(body)) return body[body.length - 1];
-    if (isNode(body) && body.length === 1 && !isFunc(body)) return body[0];
-    return body;
+  // Does a branching tail end in a statement on any arm? Each arm then
+  // decides its own return (`if active then -> stop() else status =
+  // 'idle'` returns the first arm's cleanup and runs the second's write).
+  effectBranchWrites(stmt) {
+    if (!isNode(stmt)) return false;
+    const armTail = (body) => {
+      const stmts = Emitter.branchStmts(body);
+      const tail = stmts[stmts.length - 1];
+      return this.effectTailWrites(tail) || this.effectBranchWrites(tail);
+    };
+    if (stmt[0] === 'if' && stmt.length >= 3 && stmt.length <= 4) {
+      const { arms, elseBlock } = Emitter.ifArms(stmt);
+      return arms.some((a) => armTail(a[2])) || (elseBlock !== null && armTail(elseBlock));
+    }
+    if (stmt[0] === 'switch' && stmt.length === 4) {
+      return stmt[2].some((w) => armTail(w[2])) || (stmt[3] !== null && armTail(stmt[3]));
+    }
+    if (stmt[0] === 'try') {
+      return armTail(isBlock(stmt[1]) ? stmt[1] : ['block', stmt[1]]) ||
+        stmt.slice(2).some((part) => isNode(part) && !isBlock(part) && armTail(part[1]));
+    }
+    return false;
   }
 
   static effectBodyYields(body) {
@@ -9966,9 +10015,9 @@ class Emitter {
       // runtime already rejects declared PROPS of these names at
       // construction, so the compile rejection closes the private-
       // member half of the same hazard).
-      if (name === 'mount' || name === 'unmount') {
+      if (name === 'mount' || name === 'unmount' || name === '_bound') {
         throw this.positionedError(stmt,
-          `emitter: component member '${name}' collides with the component runtime API — 'mount' and 'unmount' ` +
+          `emitter: component member '${name}' collides with the component runtime API — 'mount', 'unmount', and '_bound' ` +
           "are __Component's own methods, and the machinery calls them on every instance (a " +
           'same-named member would silently shadow them); rename the member', node);
       }
@@ -10692,8 +10741,7 @@ class Emitter {
                 const { entries, names } = this.scopedHoist(bodyStmts, []);
                 for (const n of this.pushReactiveFrame(bodyStmts, names)) names.add(n);
                 this.scopes.push(names);
-                this.funcBlock(eff, bodyNode, bodyStmts, ind + 2, entries, false,
-                  bodyStmts.length > 0 && this.cleanupTail(bodyStmts[bodyStmts.length - 1]));
+                this.funcBlock(eff, bodyNode, bodyStmts, ind + 2, entries, false, true);
                 this.scopes.pop();
                 this.rframes.pop();
               }));
@@ -10707,14 +10755,19 @@ class Emitter {
                 this.hoistLine(entries);
                 this.b.emit(' ');
               }
-              if (this.cleanupTail(single)) this.b.emit('return ');
-              this.mark(eff, 'value', () => this.withExpression(() => {
-                const wrap = Emitter.needsGrouping(single, 'operand') || isObject(single);
-                if (wrap) this.b.emit('(');
-                this.expr(single);
-                if (wrap) this.b.emit(')');
-              }));
-              this.b.emit('; }');
+              if (this.effectBranchWrites(single)) {
+                this.mark(eff, 'value', () => this.withExpression(() => this.implicitReturn(single, ind + 2, true)));
+                this.b.emit(' }');
+              } else {
+                if (!this.effectTailWrites(single)) this.b.emit('return ');
+                this.mark(eff, 'value', () => this.withExpression(() => {
+                  const wrap = Emitter.needsGrouping(single, 'operand') || isObject(single);
+                  if (wrap) this.b.emit('(');
+                  this.expr(single);
+                  if (wrap) this.b.emit(')');
+                }));
+                this.b.emit('; }');
+              }
               this.scopes.pop();
               this.rframes.pop();
             }
@@ -12873,7 +12926,7 @@ class Emitter {
           : isFunc(value) && (value[1].length === 0 || (value[1].length === 1 && typeof value[1][0] === 'string'))
             ? known
             : isFunc(value) ? null : known;
-        this.tsHandlerCast(() => this.withExpression(() => this.asCallee(value, () => this.expr(value))), evType);
+        this.tsHandlerCast(() => this.withExpression(() => this.asReference(value, () => this.expr(value))), evType);
         this.b.emit(`)(${ev})))`);
       });
     }
@@ -13232,7 +13285,7 @@ class Emitter {
                 ? (known ?? 'any')
                 : isFunc(value) ? null : known;
             this.b.emit('(');
-            site(this.tsHandlerCast(() => avoidingKey(() => this.withExpression(() => this.asCallee(value, () => this.expr(value)))), evType));
+            site(this.tsHandlerCast(() => avoidingKey(() => this.withExpression(() => this.asReference(value, () => this.expr(value)))), evType));
             this.b.emit(`)(${ev})`);
           }
           this.b.emit('))');
@@ -15374,7 +15427,7 @@ class Emitter {
         // dot as a decimal point, so the member needs `(2).toFixed`
         // (a float, exponent, hex, or bigint literal has no such
         // ambiguity).
-        if (isInner) this.grouped(n, 'object', n[1], Emitter.needsGrouping(n[1], 'head') || Emitter.isIntegerLiteral(n[1]));
+        if (isInner) this.asReference(n[1], () => this.grouped(n, 'object', n[1], Emitter.needsGrouping(n[1], 'head') || Emitter.isIntegerLiteral(n[1])));
         else f.role = this.beginMark(n, 'object');
       } else if (fkind === 'index') {
         // isWrite reads the state BEFORE this accessor clears it;
@@ -15385,16 +15438,16 @@ class Emitter {
         f.self = this.beginMark(n, '$self');
         f.savedTarget = this.inTarget;
         this.inTarget = false;
-        if (isInner) this.head(n, 'object', n[1]);
+        if (isInner) this.asReference(n[1], () => this.head(n, 'object', n[1]));
         else f.role = this.beginMark(n, 'object');
       } else if (fkind === 'optcall') {
         f.self = this.beginMark(n, '$self');
-        if (isInner) this.asCallee(n[1], () => this.head(n, 'callee', n[1]));
+        if (isInner) this.asReference(n[1], () => this.head(n, 'callee', n[1]));
         else f.role = this.beginMark(n, 'callee');
       } else {
         // A plain call ([callee, ...args]).
         f.self = this.beginMark(n, '$self');
-        if (isInner) this.asCallee(n[0], () => this.head(n, 'callee', n[0]));
+        if (isInner) this.asReference(n[0], () => this.head(n, 'callee', n[0]));
         else f.role = this.beginMark(n, 'callee');
       }
     }
@@ -16063,7 +16116,8 @@ class Emitter {
       // Word operators need the separating space (`typeof x`,
       // `delete a.b`); symbols bind directly (`!x`, `-y`).
       if (/^[a-z]/.test(node[0])) this.b.emit(' ');
-      this.operand(node, 'operand', node[1]);
+      if (node[0] === 'delete') this.asReference(node[1], () => this.operand(node, 'operand', node[1]));
+      else this.operand(node, 'operand', node[1]);
     });
   }
 
@@ -17517,7 +17571,7 @@ class Emitter {
     this.ind = ind;
   }
 
-  funcBlock(node, block, stmts, ind, hoist, voidBody = false, tailReturn = true) {
+  funcBlock(node, block, stmts, ind, hoist, voidBody = false, effectTail = false) {
     // node[1] holds def params at slot 2 (def nodes) or slot 1
     // (arrows); read whichever is the params array.
     const params = isDefHead(node[0]) ? node[2] : node[1];
@@ -17589,7 +17643,7 @@ class Emitter {
         this.mark(block, 'statements', () => {
           stmts.forEach((stmt, i) => {
             this.b.emit('  '.repeat(ind + 1));
-            if (!voidBody && tailReturn && i === stmts.length - 1) this.implicitReturn(stmt, ind + 1);
+            if (!voidBody && i === stmts.length - 1) this.implicitReturn(stmt, ind + 1, effectTail);
             else this.statement(stmt, ind + 1, true);
             this.b.emit('\n');
           });
@@ -17623,20 +17677,26 @@ class Emitter {
   // into each branch; try/switch → `return` of the value IIFE;
   // while/loop → the plain statement (tail loops return
   // nothing); for → an inline `_result` accumulator.
-  implicitReturn(stmt, ind) {
-    this.withTsDirectives(stmt, '  '.repeat(ind), () => this.implicitReturnCore(stmt, ind));
+  // `effect`: the tail of an effect body, which returns only a value
+  // that may be its cleanup (effectTailWrites) — threaded through the
+  // branch arms, never into a nested function or a value operand.
+  implicitReturn(stmt, ind, effect = false) {
+    this.withTsDirectives(stmt, '  '.repeat(ind), () => this.implicitReturnCore(stmt, ind, effect));
   }
 
-  implicitReturnCore(stmt, ind) {
+  implicitReturnCore(stmt, ind, effect) {
     if (isNode(stmt) && (stmt[0] === 'return' || stmt[0] === 'throw')) return this.statement(stmt, ind);
     if (typeof stmt === 'string' && (stmt === 'break' || stmt === 'continue' || stmt === 'debugger')) {
       return this.statement(stmt, ind);
     }
+    if (effect && this.effectTailWrites(stmt)) return this.statement(stmt, ind);
     this.ind = ind;
     if (isNode(stmt)) {
       const h = stmt[0];
       if (h === 'if' && stmt.length >= 3 && stmt.length <= 4) {
-        if (Emitter.ifIsSimple(stmt)) {
+        if (effect && this.effectBranchWrites(stmt)) {
+          this.mark(stmt, '$self', () => this.returnifyIf(stmt, ind, true));
+        } else if (Emitter.ifIsSimple(stmt)) {
           this.b.emit('return (');
           this.mark(stmt, '$self', () => this.ifTernary(stmt));
           this.b.emit(');');
@@ -17646,12 +17706,12 @@ class Emitter {
         return;
       }
       if (h === 'try') {
-        this.withTailReturn(() => this.tryBranches(stmt, ind));
+        this.withTailReturn(() => this.tryBranches(stmt, ind, effect));
         return;
       }
       if (h === 'switch' && stmt.length === 4) {
         this.b.emit('return ');
-        this.withTailReturn(() => this.valueSwitch(stmt));
+        this.withTailReturn(() => this.valueSwitch(stmt, effect));
         this.b.emit(';');
         return;
       }
@@ -17989,7 +18049,7 @@ class Emitter {
         this.b.emit(constructing ? 'await new ' : 'await ');
         this.mark(node[0], '$self', () => {
           if (constructing) this.mark(node[0], 'target', () => this.rubyNewTarget(target));
-          else this.asCallee(target, () => this.head(node[0], 'target', target));
+          else this.asReference(target, () => this.head(node[0], 'target', target));
         });
         this.mark(node, 'args', () => {
           this.b.emit('(');
@@ -18623,7 +18683,7 @@ class Emitter {
     this.mark(node, '$self', () => {
       this.mark(node, 'operator', () => this.b.emit('await'));
       this.b.emit(' ');
-      this.asCallee(node[1], () => this.head(node, 'target', node[1]));
+      this.asReference(node[1], () => this.head(node, 'target', node[1]));
       this.b.emit('()');
     });
   }

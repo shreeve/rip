@@ -226,6 +226,58 @@ test "an effect ending in a call returns its handle as the cleanup", '''
   log.join ","
   ''', "off:0"
 
+# Every tail but a statement may produce the cleanup.
+test "an effect returns an optional, logical, conditional, or try tail as the cleanup", '''
+  log = []
+  n := 0
+  live := true
+  sub = (tag, v) -> -> log.push "#{tag}:#{v}"
+  box = { sub }
+  ~> sub?("opt", n)
+  ~> box.sub?("member", n)
+  ~> live and sub("and", n)
+  ~> if live then sub("ternary", n) else null
+  ~> try sub("try", n) catch then null
+  n += 1
+  log.sort().join ","
+  ''', "and:0,member:0,opt:0,ternary:0,try:0"
+
+# A branch arm decides its own return: a cleanup arm returns, a writing
+# arm runs its write.
+test "an effect if with a cleanup arm and a writing arm returns only the cleanup", '''
+  log = []
+  active := true
+  status = null
+  ~>
+    if active
+      -> log.push "stopped"
+    else
+      status = -> log.push "never"
+  active = false
+  active = true
+  [log.join(","), typeof status]
+  ''', ["stopped", "function"]
+
+test "an effect whose arm is a sequence ending in a write registers no cleanup", '''
+  open := true
+  calls = 0
+  win = {}
+  ~> (calls += 0; win.handler = -> calls += 1) if open
+  open = false
+  calls
+  ''', 0
+
+test "an effect switch arm that writes does not fall into the next arm's cleanup", '''
+  log = []
+  mode := 'a'
+  ~>
+    switch mode
+      when 'a' then status = 1
+      when 'b' then -> log.push "b-off"
+  mode = 'c'
+  log.join ","
+  ''', ""
+
 test "effect cleanup on multiple re-runs", '''
   log = []
   count := 0
