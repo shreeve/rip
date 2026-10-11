@@ -3008,6 +3008,12 @@ describe('selector shorthands', () => {
     expect(code).toContain('label.w - (1).toFixed(2)');
   });
 
+  test('an id glued to a digit run on a value line rejects; a value block after an operator is code', () => {
+    lexFails(`Foo = component\n  items := [{w: 3}]\n  render\n    div\n      for a in items\n        a.w-4#x\n`, /`#x` is no element id here/);
+    expect(js(`Foo = component\n  ok := true\n  render\n    div\n      span title: "p" + if ok\n        label.w-1.toFixed(2)\n      else\n        "n"\n`)).toContain('label.w - (1).toFixed(2)');
+    lexFails(at('div.p-4#x.p-6#z "y"'), /an element has one id/);
+  });
+
   test('a line-start id rejects what an id cannot hold', () => {
     lexFails(at('#a- "x"'), /write `id: 'a-'`/);
     lexFails(at('#a/b "x"'), /write `id: 'a\/b'`/);

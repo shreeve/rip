@@ -728,7 +728,13 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // Where the `.`-chain ending at tokens[k] starts: its root's index, or
   // the index before the `.` of a bare line-start chain.
   const chainStartFrom = (k) => {
-    while (k >= 1 && tokens[k].kind === 'PROPERTY' && tokens[k - 1].kind === '.') k -= 2;
+    const hyphen = (t) => t?.kind === '-' || (t?.kind === 'MATH' && t.value === '-');
+    while (k >= 1) {
+      if (tokens[k].kind === 'PROPERTY' && tokens[k - 1].kind === '.') k -= 2;
+      // A class's digit run (`p-4`), which the gate joins: step over it.
+      else if (tokens[k].kind === 'NUMBER' && hyphen(tokens[k - 1]) && tokens[k - 2]?.kind === 'PROPERTY') k -= 2;
+      else break;
+    }
     return k;
   };
 

@@ -3181,7 +3181,7 @@ function rewriteRender(tokens, mintId, fail) {
         return false;
       else if (depth === 0 && BLOCK_VALUE_HEADS.has(kind)) {
         const before = out[k - 1]?.kind;
-        return before === ":" || before === "=" || before === "COMPOUND_ASSIGN";
+        return !(before === undefined || LINE_BREAKS.has(before) || before === "RENDER" || before === "THEN" || before === "ELSE" || before === ",");
       }
     }
     return false;
@@ -3517,6 +3517,10 @@ function rewriteRender(tokens, mintId, fail) {
         joinSelectorClasses(i + 1);
       else if (t.kind === "." && tokens[i + 1]?.kind === "PROPERTY" && !tokens[i + 1].spaced)
         joinSelectorClasses(i);
+    }
+    if (t.kind === "NUMBER" && String(t.value).includes("#")) {
+      const id = String(t.value).slice(String(t.value).indexOf("#"));
+      fail(`\`${id}\` is no element id here: an id follows the HTML tag or \`.class\` that starts its line, and a comment needs a space before \`#\``, t.start);
     }
     if (t.kind === "IDENTIFIER" && (out[out.length - 1]?.kind === "THEN" || out[out.length - 1]?.kind === "ELSE") && isHyphen(tokens[i + 1]) && !tokens[i + 1].spaced && tokens[i + 2]?.kind === "IDENTIFIER" && !tokens[i + 2].spaced && atTemplateLineStart(out.length) && !inCode()) {
       let j = i + 1;
@@ -6428,8 +6432,15 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
     return SELECTOR_BRANCH_HEADS.has(tokens[j].kind);
   };
   const chainStartFrom = (k) => {
-    while (k >= 1 && tokens[k].kind === "PROPERTY" && tokens[k - 1].kind === ".")
-      k -= 2;
+    const hyphen = (t) => t?.kind === "-" || t?.kind === "MATH" && t.value === "-";
+    while (k >= 1) {
+      if (tokens[k].kind === "PROPERTY" && tokens[k - 1].kind === ".")
+        k -= 2;
+      else if (tokens[k].kind === "NUMBER" && hyphen(tokens[k - 1]) && tokens[k - 2]?.kind === "PROPERTY")
+        k -= 2;
+      else
+        break;
+    }
     return k;
   };
   const headSelectorAt = (k) => {
@@ -33084,7 +33095,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "17ffcf331ce086eb";
+var compilerBuild = () => "48d473c5ec9c9fba";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

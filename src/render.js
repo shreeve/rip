@@ -405,8 +405,12 @@ export function rewriteRender(tokens, mintId, fail) {
       else if (OPENERS.has(kind)) { if (depth === 0) return false; depth--; }
       else if (LINE_BREAKS.has(kind) || kind === 'RENDER') return false;
       else if (depth === 0 && BLOCK_VALUE_HEADS.has(kind)) {
+        // A markup branch heads its line (or follows `then`/`else`, or a
+        // `,` among an element's arguments); after anything else it is a
+        // value's (`title: if ok`, `title: "p" + if ok`).
         const before = out[k - 1]?.kind;
-        return before === ':' || before === '=' || before === 'COMPOUND_ASSIGN';
+        return !(before === undefined || LINE_BREAKS.has(before) || before === 'RENDER' ||
+          before === 'THEN' || before === 'ELSE' || before === ',');
       }
     }
     return false;
@@ -774,6 +778,14 @@ export function rewriteRender(tokens, mintId, fail) {
       const head = String(t.value ?? '').split('#')[0];
       if (t.kind === 'IDENTIFIER' && !t.generated && isHtmlTag(head) && !boundHere(head)) joinSelectorClasses(i + 1);
       else if (t.kind === '.' && tokens[i + 1]?.kind === 'PROPERTY' && !tokens[i + 1].spaced) joinSelectorClasses(i);
+    }
+
+    // An `#id` the scanner glued onto a digit run (`p-4#x`) belongs to an
+    // element's class, which the line-head join consumed; anywhere else it
+    // is no id, and no JavaScript either.
+    if (t.kind === 'NUMBER' && String(t.value).includes('#')) {
+      const id = String(t.value).slice(String(t.value).indexOf('#'));
+      fail(`\`${id}\` is no element id here: an id follows the HTML tag or \`.class\` that starts its line, and a comment needs a space before \`#\``, t.start);
     }
 
     // An inline branch's element may be a custom element
