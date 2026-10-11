@@ -10094,6 +10094,12 @@ class Emitter {
     const id = stores.idOf(x);
     return id === null || stores.node(id)?.semanticKind === x[0];
   }
+  static CALL_KINDS = new Set(["call", "optcall", "super", "dammit", "maybe-dammit", "tagged", "dynimport"]);
+  rejectCallTarget(p) {
+    if (isNode(p) && Emitter.CALL_KINDS.has(this.semanticKindOf(p))) {
+      throw this.positionedError(p, "emitter: a call cannot be a destructuring target — a pattern element writes a name or a member, and a call's result is neither");
+    }
+  }
   isObject(x) {
     return isObjectShape(x) && !this.isCallNode(x);
   }
@@ -10770,6 +10776,7 @@ class Emitter {
       if (p !== ",")
         out.push([p, this.memberKindOf(p)]);
     } else if (isNode(p)) {
+      this.rejectCallTarget(p);
       const h = p[0];
       if (h === "." && p.length === 3 && p[1] === "this" && typeof p[2] === "string")
         out.push([p[2], this.thisMemberKindOf(p[2])]);
@@ -12123,6 +12130,7 @@ class Emitter {
       }
       return out;
     }
+    this.rejectCallTarget(p);
     if (p[0] === "array")
       for (const el of p.slice(1))
         this.patternNames(el, out, binding, p);
@@ -33323,7 +33331,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "f0e9093e4fba88eb";
+var compilerBuild = () => "c756378af7244357";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
