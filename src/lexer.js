@@ -747,11 +747,13 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
 
   // A selector shorthand holds a plain name; anything else is spelled as
   // the attribute, which takes any text.
+  const selectorMessage = (start) => {
+    const written = /^[^\s"'`,()]+/.exec(text.slice(start))?.[0] ?? '';
+    return `a class shorthand is letters, digits, \`-\` and \`_\` — write \`class: '${written}'\``;
+  };
   const failSelector = (kind, start) => {
     const written = /^[^\s"'`,()]+/.exec(text.slice(start))?.[0] ?? '';
-    if (kind === 'class') {
-      fail(`a class shorthand is letters, digits, \`-\` and \`_\` — write \`class: '${written}'\``, start - 1);
-    }
+    if (kind === 'class') fail(selectorMessage(start), start - 1);
     if (text[start] === '{') fail('a computed id is written as the attribute — `id: …`', start - 1);
     fail(`an id shorthand is a name starting with a letter — write \`id: '${written}'\``, start - 1);
   };
@@ -1517,6 +1519,9 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
           (prev.kind === 'TERMINATOR' || prev.kind === 'INDENT' || prev.kind === 'OUTDENT' || prev.kind === 'RENDER')) {
         let end = pos + 2;
         while (end < text.length && (IDENT_PART.test(text[end]) || (text[end] === '-' && IDENT_PART.test(text[end + 1] ?? '')))) end++;
+        if ('-/[{'.includes(text[end] ?? ' ') || (text[end] === ':' && /[^\s=:]/.test(text[end + 1] ?? ' '))) {
+          failSelector('id', pos + 1);
+        }
         push('IDENTIFIER', `div${text.slice(pos, end)}`, pos, end);
         pos = end;
         continue;
@@ -1577,10 +1582,21 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         // plain class name (digits after a hyphen too): a Tailwind variant
         // (`hover:bg-red`), `/`, `[`, a dangling `-` or `.5` rejects, and a
         // selector is never a key. A chain anywhere else keeps its reading.
-        const strict = selector && !pendingSpaced && headSelectorAt(chainStartFrom(tokens.length - 2));
+        const chainRoot = chainStartFrom(tokens.length - 2);
+        const strict = selector && !pendingSpaced && headSelectorAt(chainRoot);
+        // A bare `.` line is always an element, so a bad class fails here;
+        // under a tag word the gate decides, since only it knows whether
+        // the word is bound (a loop variable `a` reads `a.parts[1]` as a
+        // value): the fault rides the token.
+        const bareDot = tokens[chainRoot]?.kind !== 'IDENTIFIER';
+        let fault = null;
+        const reject = (message, at) => {
+          if (bareDot) fail(message, at);
+          fault ??= { message, at };
+        };
         if (strict && keysColon) {
-          if (tightColon && /[^\s=:]/.test(text[pos + 1] ?? ' ')) failSelector('class', start);
-          fail('an element\'s `.class` takes no `:` — an attribute goes after a space (`div.card title: …`)', pos);
+          if (tightColon && /[^\s=:]/.test(text[pos + 1] ?? ' ')) reject(selectorMessage(start), start - 1);
+          else reject('an element\'s `.class` takes no `:` — an attribute goes after a space (`div.card title: …`)', pos);
         }
         if (selector && !keysColon) {
           const joins = strict ? IDENT_PART : IDENT_START;
@@ -1592,10 +1608,11 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
           }
           if (strict && (text[pos] === '/' || text[pos] === '[' || text[pos] === '-' ||
               (text[pos] === '.' && /[0-9]/.test(text[pos + 1] ?? '')))) {
-            failSelector('class', start);
+            reject(selectorMessage(start), start - 1);
           }
         }
         push('PROPERTY', value, start, pos);
+        if (fault) tokens[tokens.length - 1].selectorFault = fault;
       } else if (keysColon || inPickKeyPos()) {
         push('PROPERTY', word, start, pos);
       } else if (customElementEnd(prev, pos) !== null) {

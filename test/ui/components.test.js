@@ -2972,6 +2972,25 @@ describe('selector shorthands', () => {
     expect(js(at('. role: "note"'))).toContain("setAttribute('role', \"note\")");
   });
 
+  test('a bound name heading a line is a value; a digit glued into its chain rejects, asking for spaces', () => {
+    const loop = (body) => `Foo = component\n  items := [{w: 3, title: 't', parts: [1, 2]}]\n  render\n    div\n      for a in items\n        ${body}\n`;
+    lexFails(loop('a.w-1.toFixed(2)'), /`a` is bound here, so this line is a value and `-` in `w-1` is subtraction — write it with spaces/);
+    expect(js(loop('a.parts[1]'))).toContain('_t0.data = a.parts[1]');
+    expect(js(loop('a.title'))).toContain('_t0.data = a.title');
+    expect(js(loop('a.w/2'))).toContain('a.w / 2');
+    expect(js(loop('(a.w-1.toFixed(2))'))).toContain('a.w - (1).toFixed(2)');
+    expect(js(loop('p a.title'))).toContain('_t0.data = a.title');
+    // A loop variable named like a tag, on its own line (packages/email's preview layout).
+    const layout = js(`Foo = component\n  templates := [{path: 'x'}]\n  render\n    for template in templates\n      a\n        href: "/x"\n        template.path\n`);
+    expect(layout).toContain('template.path');
+  });
+
+  test('a line-start id rejects what an id cannot hold', () => {
+    lexFails(at('#a- "x"'), /write `id: 'a-'`/);
+    lexFails(at('#a/b "x"'), /write `id: 'a\/b'`/);
+    lexFails(at('#a[0] "x"'), /write `id: 'a\[0\]'`/);
+  });
+
   test('code inside a template reads `.` and `#` as code does', () => {
     expect(js(at('button @click: -> console.log a#b'))).toContain('console.log(a)');
     expect(js(at('button @click: -> x = p.w-1'))).toContain('p.w - 1');

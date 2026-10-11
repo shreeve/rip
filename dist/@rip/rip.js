@@ -3414,6 +3414,22 @@ function rewriteRender(tokens, mintId, fail) {
     if (t.kind === "IDENTIFIER" && !t.generated && String(t.value).includes("-") && inCode()) {
       fail(`\`${String(t.value).split("#")[0]}\` here is a value, not an element — write it with spaces (\`${String(t.value).split("#")[0].split("-").join(" - ")}\`) for subtraction`, t.start);
     }
+    if (t.kind === "IDENTIFIER" && !t.generated && atTemplateLineStart(out.length) && !inCode() && tokens[i + 1]?.kind === "." && !tokens[i + 1].spaced) {
+      const chain = [];
+      for (let j = i + 1;tokens[j]?.kind === "." && tokens[j + 1]?.kind === "PROPERTY" && !tokens[j + 1].spaced; j += 2) {
+        chain.push(tokens[j + 1]);
+      }
+      if (readsAsValue(t.value)) {
+        const joined = chain.find((p) => /-[0-9]/.test(String(p.value)));
+        if (joined) {
+          fail(`\`${t.value}\` is bound here, so this line is a value and \`-\` in \`${joined.value}\` is subtraction — write it with spaces`, joined.start);
+        }
+      } else {
+        const faulted = chain.find((p) => p.selectorFault);
+        if (faulted)
+          fail(faulted.selectorFault.message, faulted.selectorFault.at);
+      }
+    }
     if (t.kind === "IDENTIFIER" && (out[out.length - 1]?.kind === "THEN" || out[out.length - 1]?.kind === "ELSE") && isHyphen(tokens[i + 1]) && !tokens[i + 1].spaced && tokens[i + 2]?.kind === "IDENTIFIER" && !tokens[i + 2].spaced && atTemplateLineStart(out.length) && !inCode()) {
       let j = i + 1;
       let name = String(t.value);
@@ -6336,11 +6352,14 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
     }
     return tokens[k + 1]?.kind === "." && headsLine(k + 1);
   };
+  const selectorMessage = (start) => {
+    const written = /^[^\s"'`,()]+/.exec(text.slice(start))?.[0] ?? "";
+    return `a class shorthand is letters, digits, \`-\` and \`_\` — write \`class: '${written}'\``;
+  };
   const failSelector = (kind, start) => {
     const written = /^[^\s"'`,()]+/.exec(text.slice(start))?.[0] ?? "";
-    if (kind === "class") {
-      fail(`a class shorthand is letters, digits, \`-\` and \`_\` — write \`class: '${written}'\``, start - 1);
-    }
+    if (kind === "class")
+      fail(selectorMessage(start), start - 1);
     if (text[start] === "{")
       fail("a computed id is written as the attribute — `id: …`", start - 1);
     fail(`an id shorthand is a name starting with a letter — write \`id: '${written}'\``, start - 1);
@@ -6947,6 +6966,9 @@ ${baseline}`).join(`
         let end = pos + 2;
         while (end < text.length && (IDENT_PART.test(text[end]) || text[end] === "-" && IDENT_PART.test(text[end + 1] ?? "")))
           end++;
+        if ("-/[{".includes(text[end] ?? " ") || text[end] === ":" && /[^\s=:]/.test(text[end + 1] ?? " ")) {
+          failSelector("id", pos + 1);
+        }
         push("IDENTIFIER", `div${text.slice(pos, end)}`, pos, end);
         pos = end;
         continue;
@@ -6982,11 +7004,20 @@ ${baseline}`).join(`
       if (prev && (prev.kind === "." || prev.kind === "?." || prev.kind === "@" && !pendingSpaced)) {
         let value = word;
         const selector = inRender && prev.kind === "." && selectorScope() && classSelectorChain();
-        const strict = selector && !pendingSpaced && headSelectorAt(chainStartFrom(tokens.length - 2));
+        const chainRoot = chainStartFrom(tokens.length - 2);
+        const strict = selector && !pendingSpaced && headSelectorAt(chainRoot);
+        const bareDot = tokens[chainRoot]?.kind !== "IDENTIFIER";
+        let fault = null;
+        const reject = (message, at) => {
+          if (bareDot)
+            fail(message, at);
+          fault ??= { message, at };
+        };
         if (strict && keysColon) {
           if (tightColon && /[^\s=:]/.test(text[pos + 1] ?? " "))
-            failSelector("class", start);
-          fail("an element's `.class` takes no `:` — an attribute goes after a space (`div.card title: …`)", pos);
+            reject(selectorMessage(start), start - 1);
+          else
+            reject("an element's `.class` takes no `:` — an attribute goes after a space (`div.card title: …`)", pos);
         }
         if (selector && !keysColon) {
           const joins = strict ? IDENT_PART : IDENT_START;
@@ -6998,10 +7029,12 @@ ${baseline}`).join(`
             pos = j;
           }
           if (strict && (text[pos] === "/" || text[pos] === "[" || text[pos] === "-" || text[pos] === "." && /[0-9]/.test(text[pos + 1] ?? ""))) {
-            failSelector("class", start);
+            reject(selectorMessage(start), start - 1);
           }
         }
         push("PROPERTY", value, start, pos);
+        if (fault)
+          tokens[tokens.length - 1].selectorFault = fault;
       } else if (keysColon || inPickKeyPos()) {
         push("PROPERTY", word, start, pos);
       } else if (customElementEnd(prev, pos) !== null) {
@@ -32986,7 +33019,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "239431860b623103";
+var compilerBuild = () => "1cbc85361efe20a2";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

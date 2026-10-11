@@ -670,6 +670,29 @@ export function rewriteRender(tokens, mintId, fail) {
       fail(`\`${String(t.value).split('#')[0]}\` here is a value, not an element — write it with spaces (\`${String(t.value).split('#')[0].split('-').join(' - ')}\`) for subtraction`, t.start);
     }
 
+    // A tag word heading a template line with a `.class` chain: bound (a
+    // loop variable, render local or member), the line is that value and
+    // the chain is member access — a digit the scanner joined into a
+    // class name (`a.w-1`) is subtraction written without spaces, and
+    // rejects; unbound, it is the element, and any class the scanner
+    // could not take rejects.
+    if (t.kind === 'IDENTIFIER' && !t.generated && atTemplateLineStart(out.length) && !inCode() &&
+        tokens[i + 1]?.kind === '.' && !tokens[i + 1].spaced) {
+      const chain = [];
+      for (let j = i + 1; tokens[j]?.kind === '.' && tokens[j + 1]?.kind === 'PROPERTY' && !tokens[j + 1].spaced; j += 2) {
+        chain.push(tokens[j + 1]);
+      }
+      if (readsAsValue(t.value)) {
+        const joined = chain.find((p) => /-[0-9]/.test(String(p.value)));
+        if (joined) {
+          fail(`\`${t.value}\` is bound here, so this line is a value and \`-\` in \`${joined.value}\` is subtraction — write it with spaces`, joined.start);
+        }
+      } else {
+        const faulted = chain.find((p) => p.selectorFault);
+        if (faulted) fail(faulted.selectorFault.message, faulted.selectorFault.at);
+      }
+    }
+
     // An inline branch's element may be a custom element
     // (`if x then sl-icon …`): in markup its tight hyphen run is one tag
     // name, as at a line start. In a value it stays subtraction.
