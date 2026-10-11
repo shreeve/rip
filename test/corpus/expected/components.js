@@ -499,7 +499,7 @@ let Deck = class extends __Component {
     this._el0.setAttribute('data-part', 'Deck');
     { const __prev = __pushComponent(this); try {
     try {
-    this._inst1 = new Chip({ label: this.name, onPick: this.picked });
+    this._inst1 = new Chip({ label: this.name, onPick: this._bound("picked") });
     if (this._inst1 && this._inst1._initFailed) {
       this._inst1 = null;
       this._el2 = document.createComment('rip:child-init-failed: Chip');
@@ -519,7 +519,7 @@ let Deck = class extends __Component {
     this._el0.appendChild(this._el2);
     { const __prev = __pushComponent(this); try {
     try {
-    this._inst3 = new Chip({ label: "static", compact: true, onPick: this.picked });
+    this._inst3 = new Chip({ label: "static", compact: true, onPick: this._bound("picked") });
     if (this._inst3 && this._inst3._initFailed) {
       this._inst3 = null;
       this._el4 = document.createComment('rip:child-init-failed: Chip');

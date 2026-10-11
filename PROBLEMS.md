@@ -68,13 +68,6 @@ member: `s =! 1` then `[s] = [5]` in a method writes it silently.
 `this.a = a` first: runtime ReferenceError. Also with
 `if c then super(1) else super(2)`.
 
-**C33 ✔ H — A collecting loop whose tail `if`/`switch` has a `continue` or `break` arm collects nothing.**
-`r = for a in [5, 1, 7]` / `  if a is 1 then continue else a * 10` gives
-`[]` (expected `[50, 70]`): the emit is `if (a === 1) continue; else
-a * 10;` with no push. `then break else a` gives `[]` for `[5]`; a
-function-tail loop and a statement-`switch` body with a `break` arm do
-the same. The block form (`if a is 1` / `break` then `a`) collects.
-
 **C34 ✔ M — A spaced slash after a name becomes a regex call.**
 `x = w /2 + 1 /g` emits `w(/2 + 1 /g)` (TypeError at runtime when `w` is
 a number); `w /2 + h /2` rejects only because `2` is no regex flag.
@@ -87,6 +80,19 @@ lowering knows arrays and strings only.
 `(b for a in xs for b in a)` rejects ("chained clauses nest") unless an
 outer `a` exists; with `a = 1` in scope it compiles to `for (let b of a)`
 over the outer `a`.
+
+**C43 M — A collecting loop whose tail `try` holds a jump collects nothing.**
+```coffee
+r = for x in [1, 2, 3]
+  try
+    continue if x is 2
+    x
+  catch e then 0
+p r    # [] — expected [1, 3]
+```
+A tail with a `break`/`continue` inside stays a statement; `if` and
+`switch` tails collect per arm (`accumulateIf`), but `try` has no such
+form yet.
 
 ### Legal-looking code emits invalid JavaScript
 
@@ -178,12 +184,6 @@ duplicate name in one pattern rejects.
 
 ## Templates, components, reactivity
 
-**T4 H — Component methods are never bound, including `=>` members.**
-`format = (n) => "#{prefix}#{n}"` then `names.map(format)` emits an
-unbound prototype method → "Cannot read properties of undefined".
-Passing `onPress: save` to a child loses `this` the same way. Plain
-classes bind `=>` members (`this.fmt = this.fmt.bind(this)`).
-
 **T5 M — `<=>` into a loop variable's field never notifies the collection.**
 `for todo in todos` → `input value <=> todo.title` writes the data but
 emits no `touch`, so dependents (`count ~= todos.filter …`) and sibling
@@ -192,19 +192,6 @@ says a bind into a chain calls it). Cause: `bindRootTouch`
 (src/emitter.js ~14981) returns null for loop variables. The rejection
 for `input value <=> s` (a bare loop variable) recommends binding "a
 chain into row data" — this broken path.
-
-**T7 H — An effect's last expression is silently registered as its cleanup.**
-```coffee
-open := true
-~>
-  if open
-    win.onkeydown = (e) -> console.log e.key
-open = false        # throws: the handler runs as cleanup with no event
-```
-Designed and pinned (src/emitter.js ~9235; test/ui/components.test.js
-~457), but invisible: packages/ui works around it with defensive
-trailing `return` lines. The one-line form differs by location — inside
-a component it returns, at module level it does not.
 
 **T8 M — A state write from inside an effect is dropped or kept depending on batching.**
 An effect `count = 10 if count > 10` keeps 50 when `set50()` is called
@@ -229,11 +216,6 @@ dropped silently. There is no public batch API (packages use `__batch`).
 **T18 L — Reading a member declared below gives a raw runtime TypeError.** `a := b + 1` above `b := 1` fails at construction; doctrine ("a member may read any member written above it") suggests a positioned compile error naming both sites.
 
 **T19 M — Shallow reactivity has no diagnostics, and a new array of the same objects does not refresh rows.** `todos.push …` and `todo.done = true` change data, not DOM; `items = [...items]` after an in-place field write leaves rows stale (`__reconcile` skips `===` items).
-
-**T21 ✔ H — A computed written inside a component compiles.**
-`k := 0; c ~= k + 1; bump: -> c = 5` emits `this.c.value = 5`, a raw
-TypeError when called; `@c = 5`, `c++` and `[c] = [5]` too. At module
-level `c = 5` rejects with "cannot assign to computed 'c'".
 
 **T22 ✔ M — A render local that reads itself shadows the member: `count = count + 1` renders NaN.**
 With `count := 3`, render `count = count + 1` then `p count` emits
@@ -295,11 +277,6 @@ $21.4M. `~integer` turns `"9007199254740993"` into `…992` silently;
 
 **S9 L — ORM wording.** `where({firstName: 'A', first_name: 'B'})` silently ANDs both (`create` rejects the conflict); `@ensure "bad", :nope, …` attributes the failure to a nonexistent field; `upsert on: [:email, :firstName]` calls an existing non-unique field "unknown".
 
-**S11 H — A numeric enum gets a VARCHAR column and every loaded row becomes unsaveable.**
-`toSQL()` gives `"status" VARCHAR`; a loaded `'1'` stays a string, and
-`save!` after an unrelated change throws "expected one of: …"
-(reproduced with a recording adapter; confirm on a database).
-
 **S12 M — Assigning a misspelled field and saving saves nothing.**
 `u.firstNmae = 'Grace'; u.save!` issues no SQL and no error; `set!`
 throws. docs/ORM.md describes only the `set!` guard.
@@ -313,6 +290,19 @@ default `[:viewer]` becomes `'viewer'` and `read()` accepts symbols.
 reached through a coercer).
 
 ---
+
+**S15 M — An enum whose member values collide with member names resolves the wrong member.**
+```coffee
+E = schema :enum
+  :a "b"
+  :b "c"
+M = schema :model
+  e E, [:b]
+p M.parse({}).e    # "b" — member :a's value; expected "c"
+```
+`_materializeEnum` (src/runtime/schema.js) matches a name OR a value
+member by member, so the first member whose value equals the name wins;
+the column DEFAULT inherits it.
 
 ## Rip Sites
 
@@ -353,12 +343,6 @@ flip side of A5).
 
 ## Standard packages
 
-**P5 H — rsx parses truncated or ill-formed XML without error.**
-`parse '<a><b>text'` → `{"a":{"b":{}}}`; `'<a>1 < 2</a>'` makes an
-element named `"2<"`; two roots, trailing junk, `'hello'` and `''` are
-accepted; duplicate attributes keep the last. A cut-off SOAP or EDI
-response parses "successfully".
-
 **P9 M — swarm's `-q` summary hides failures, and the exit code is 0 when tasks died.** The README Quick Start with `-w 4 -q` reports success while tasks sit in `.swarm/died/`.
 
 **P10 M — fake `unique` dedupes by closure identity.** The README's inline `fake.unique -> fake.email()` creates a new closure per call, so it never dedupes, and its strong `Map` leaks one entry per call (packages/fake/fake.rip ~240).
@@ -371,17 +355,13 @@ response parses "successfully".
 
 **P15 M — rsx's rejections and mixed content disagree with its README.** The mismatched-close-tag and non-string errors carry no offset; `parse '</a>'` says "expected </>, got </a>"; `<p>hi <b>there</b> you</p>` drops the text though `textKey` is described as the mixed-content key.
 
+**P27 L — rsx collapses namespaced attributes that share a local name.** With `stripNamespaces` (the default), `<a p:id="1" q:id="2"/>` keeps one `id` silently; the duplicate-attribute rejection compares raw names only.
+
 **P16 L — Barcode encoders ignore unknown options and disagree on errors.** `hieght:`, `colums:`, `eccc:` are accepted (rip/pdf rejects unknown keys); a QR miss throws `"finder"` while the others say "not found"; `encodeQR ''` encodes while Code 128 and PDF417 reject empty text.
 
 **P18 L — rip-curl drops non-JSON bodies and malformed header lines.**
 
 **P19 L — rip/script ends on an unknown control symbol without error** (`:skp` aborts silently; `trace` accepts `[:bogus]`); the README trace omits the `\r` actually sent.
-
-**P22 ✔ H — QR SVG encoding breaks for good after any `decodeQR` scan.**
-`try decodeQR {width: 50, height: 50, data: …}` then `encodeQR 'hello',
-'svg'` throws "Attempted to assign to readonly property" on every later
-SVG encode: `findRows` (packages/barcodes/qr.rip ~1649) writes `runs = 0`,
-which `=` resolves to the module-level SVG cache `runs` (~729).
 
 **P23 ✔ M — time `set` ignores `:quarter` and `:week`; `get(:week)` is undefined.**
 `time.utc('2024-01-31').set(:quarter, 2)` and `.set(:week, 2)` return the

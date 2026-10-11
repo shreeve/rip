@@ -1484,8 +1484,8 @@ describe('the reactive language surface is not reachable', () => {
   test('FLIPPED (M9-B/M9-C): the reactive triad is the shipped surface — `:=`, `~=`, and `~>` all lower', () => {
     expect(compile('x := 5').code).toBe('const x = __state(5);');
     expect(compile('x ~= a + b').code).toBe('const x = __computed(() => (a + b));');
-    expect(compile('~> f()').code).toBe('__effect(() => { f(); });');
-    expect(compile('handle ~> f()').code).toBe('const handle = __effect(() => { f(); });');
+    expect(compile('~> f()').code).toBe('__effect(() => { return f(); });');
+    expect(compile('handle ~> f()').code).toBe('const handle = __effect(() => { return f(); });');
   });
 
   test('FLIPPED: adjacent `=!` is the readonly declaration; spaced `= !` keeps assignment-of-negation', () => {

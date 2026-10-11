@@ -13,7 +13,7 @@ let inObject = {n: answer, answer};
 const count = __state(0);
 const snapshot = (count.value + 1);
 const doubled = __computed(() => (answer * 2));
-__effect(() => { probe(answer); });
+__effect(() => { return probe(answer); });
 let scaled = function(k) {
   const base = 10;
   return (base * k);

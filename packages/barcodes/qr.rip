@@ -1646,7 +1646,7 @@ findRows! =! (layer, from, to, loose) ->
   bitmap =! layer.bitmap
   for y in [from...to] by 2
     r0 = r1 = r2 = r3 = r4 = 0
-    runs  = 0
+    count = 0
     at    = y * words
     word  = bitmap[at]
     shift = 0
@@ -1671,12 +1671,12 @@ findRows! =! (layer, from, to, loose) ->
       r2 = r3
       r3 = r4
       r4 = length
-      runs++
+      count++
       dark     = previous
       previous = not previous
       # A strict center run exceeds 1.5 modules and its neighbors fall
       # short of 1.5, so a center no longer than a neighbor never fits.
-      if runs >= 5 and (loose or (r2 > r1 and r2 > r3))
+      if count >= 5 and (loose or (r2 > r1 and r2 > r3))
         ms = ratio r0, r1, r2, r3, r4, loose
         recordFinder layer, y, x, r0, r1, r2, r3, r4, ms, (not dark), loose if ms
 

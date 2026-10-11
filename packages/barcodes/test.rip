@@ -377,6 +377,13 @@ toLuma =! (img) ->
     luma[i] = (img.data[p] + 2 * img.data[p + 1] + img.data[p + 2]) >> 2
   { width: img.width, height: img.height, data: luma }
 
+test "a decode scan leaves SVG encoding intact", ->
+  # The finder scan counts runs in a local of its own; it once wrote the
+  # SVG path cache instead, and every later SVG encode threw.
+  before = encodeQR 'hello', 'svg'
+  try decodeQR(flat(50, 50, 255)) catch then null
+  eq encodeQR('hello', 'svg'), before
+
 test "round trip every third version at every level", ->
   for ver in [1..40] by 3
     text = 'RIP'.repeat(ver)

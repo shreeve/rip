@@ -1159,3 +1159,17 @@ test "closure parameter shadows the loop variable", '''
     out
   run()
   ''', [1, 3, 1, 17]
+
+# A collecting loop whose tail `if`/`switch` has an arm that jumps: each
+# other arm still collects its tail, and the jumping arm stays the jump.
+test "collecting loop with a continue arm in its tail if", "r = for a in [5, 1, 7]\n  if a is 1 then continue else a * 10\nr", [50, 70]
+test "collecting loop with a block-form continue arm", "r = for a in [5, 1, 7]\n  if a is 1\n    continue\n  else\n    a * 10\nr", [50, 70]
+test "collecting loop with a break arm in its tail if", "r = for a in [5, 1, 7]\n  if a is 1 then break else a\nr", [5]
+test "function-tail loop with a continue arm in its tail if", "f = ->\n  for a in [5, 1, 7]\n    if a is 1 then continue else a * 10\nf()", [50, 70]
+test "collecting loop with a continue arm in its tail switch", "r = for a in [1, 2, 3]\n  switch a\n    when 2 then continue\n    else a * 100\nr", [100, 300]
+# A missing else or default collects undefined, as the same branch does
+# in value position, whether or not another arm jumps.
+test "collecting loop tail if with a jumping arm and no else", "r = for x in [1, 2, 3]\n  if x is 2 then continue else if x is 3 then x\nr", [undefined, 3]
+test "collecting loop tail switch with a jumping arm and no default", "r = for x in [1, 2, 3]\n  switch x\n    when 2 then continue\n    when 3 then x\nr", [undefined, 3]
+test "collecting loop tail subjectless switch with no default", "r = for x in [1, 2, 3]\n  switch\n    when x is 2 then continue\n    when x is 3 then x\nr", [undefined, 3]
+test "collecting loop tail match switch with no default", "r = for s in ['ab', 'cd', 'x']\n  switch s\n    when /^a/ then continue\n    when /^c/ then s\nr", ['cd', undefined]

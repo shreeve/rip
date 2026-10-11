@@ -453,11 +453,14 @@ C = component
     expect(code).toContain('__effect(async () => { return await fetch("/y"); });');
   });
 
-  test('component-body effects RETURN their expression body (\'s component shape — the cleanup channel; module effects deliberately do not — , both pinned)', () => {
+  test('an effect returns its tail as the cleanup only when the tail produces one — the same rule in a component and at module level', () => {
+    // A call (its result is the handle), a function or a read returns;
+    // a statement tail — an assignment, an if — returns nothing.
     const comp = compile('C = component\n  ~> setup()\n  render\n    div "x"').code;
     expect(comp).toContain('__effect(() => { return setup(); });');
-    const mod = compile('~> setup()').code;
-    expect(mod).toContain('__effect(() => { setup(); });');
+    expect(compile('~> setup()').code).toContain('__effect(() => { return setup(); });');
+    expect(compile('w = {}\n~> w.h = -> 1').code).toContain('__effect(() => { (w.h = function() {');
+    expect(compile('w = {}\nC = component\n  ~> w.h = -> 1\n  render\n    div "x"').code).toContain('__effect(() => { (w.h = () => 1); });');
   });
 
   test('a component with no render emits no _create/_setup; `render null` returns null', () => {
@@ -518,7 +521,7 @@ describe('the defect layer: every silent  class rejects loudly, positioned', () 
   });
 
   test('runtime-owned instance fields reject across member kinds while helper names stay legal', () => {
-    for (const name of ['_state', '_frame', '_parent', '_children', '_root', '_nodes']) {
+    for (const name of ['_state', '_frame', '_parent', '_children', '_root', '_nodes', '_boundCache']) {
       emitFails(`C = component\n  ${name} := 1\n  render null`, /collides with component runtime state/);
     }
     emitFails('C = component\n  _root <~ @stash.root\n  render null', /collides with component runtime state/);
@@ -543,7 +546,8 @@ describe('the defect layer: every silent  class rejects loudly, positioned', () 
     // the whole component). The runtime already rejected declared
     // PROPS of these names at construction; the compile rejection
     // closes the private-member half of the same hazard.
-    for (const name of ['mount', 'unmount']) {
+    // `_bound` is the method-as-value read every component emits.
+    for (const name of ['mount', 'unmount', '_bound']) {
       emitFails(`C = component\n  ${name} := 1\n  render\n    div "x"`, /collides with the component runtime API/);
       emitFails(`C = component\n  ${name} = (x) -> x\n  render\n    div "x"`, /collides with the component runtime API/);
       // The face path rejects identically (JS mode is emitFails above).
@@ -3038,5 +3042,103 @@ describe('selector shorthands', () => {
   test('code inside a template reads `.` and `#` as code does', () => {
     expect(js(at('button @click: -> console.log a#b'))).toContain('console.log(a)');
     expect(js(at('button @click: -> x = p.w-1'))).toContain('p.w - 1');
+  });
+});
+
+describe('component methods keep their instance when passed as values', () => {
+  const run = (source, act) => {
+    const { code } = compile(source, { runtimeDelivery: 'none' });
+    const names = Object.keys(RT);
+    const { App } = new Function(...names, `${code}\nreturn { App };`)(...names.map((name) => RT[name]));
+    const target = document.createElement('main');
+    const app = new App({});
+    try {
+      app.mount(target);
+      return act(app, target);
+    } finally {
+      app.unmount();
+    }
+  };
+
+  test('a method mapped over a list reads its own members', () => {
+    const html = run(`App = component
+  prefix := '#'
+  names := ['a', 'b']
+  format = (n) => "\${prefix}\${n}"
+  render
+    ul
+      for x in names.map(format)
+        li x
+`, (app, target) => serialize(target));
+    expect(html).toContain('#a');
+    expect(html).toContain('#b');
+  });
+
+  test('a method passed to a child as a callback prop runs on its own instance', () => {
+    const got = run(`Kid = component
+  @onPress?: (() => string) | null := null
+  render
+    span "k"
+App = component
+  prefix := '#'
+  save: -> "saved \${prefix}"
+  render
+    div
+      Kid onPress: save
+`, (app) => app._children[0].onPress.value());
+    expect(got).toBe('saved #');
+  });
+
+  test('a method read twice is the same function; a call stays a plain call', () => {
+    const { code } = compile(`App = component
+  go: -> 1
+  pair: -> [go, go]
+  call: -> go()
+  render
+    p "x"
+`, { runtimeDelivery: 'none' });
+    expect(code).toContain('return [this._bound("go"), this._bound("go")];');
+    expect(code).toContain('return this.go();');
+    const names = Object.keys(RT);
+    const { App } = new Function(...names, `${code}\nreturn { App };`)(...names.map((name) => RT[name]));
+    const app = new App({});
+    const [a, b] = app.pair();
+    expect(a).toBe(b);
+    expect(a()).toBe(1);
+  });
+
+  const instance = (source) => {
+    const { code } = compile(source, { runtimeDelivery: 'none' });
+    const names = Object.keys(RT);
+    const { App } = new Function(...names, `${code}\nreturn { App };`)(...names.map((name) => RT[name]));
+    return { code, app: new App({}) };
+  };
+
+  test('delete removes the method itself, not its bound read', () => {
+    const { code, app } = instance(`App = component
+  go: (a) -> a
+  override: ->
+    @go = (a) -> 'over'
+    r1 = @go(1)
+    delete @go
+    [r1, @go(1)]
+  render
+    p "x"
+`);
+    expect(code).toContain('delete this.go');
+    expect(app.override()).toEqual(['over', 1]);
+  });
+
+  test('a member access on a method reads the method in both spellings', () => {
+    const { code, app } = instance(`App = component
+  go: (a, b) -> a + b
+  bare: -> [go.length, go.name, go.call(null, 1, 2)]
+  at: -> [@go.length, @go.name, @go.call(null, 1, 2)]
+  render
+    p "x"
+`);
+    expect(code).not.toContain('_bound');
+    expect(app.bare()).toEqual([2, 'go', 3]);
+    expect(app.at()).toEqual([2, 'go', 3]);
   });
 });

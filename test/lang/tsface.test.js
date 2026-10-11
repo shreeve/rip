@@ -1027,7 +1027,7 @@ describe('TS-face emission pins', () => {
     expect(code).toContain('const count: { value: number; read(): number; touch(): void } = __state<number>(0);');
     expect(code).toContain('const total: { readonly value: number; read(): number } = __computed<number>(() => (count.value * 2));');
     expect(code).toContain('const ro: string = "s";');
-    expect(code).toContain('const h: Function = __effect(() => { console.log(count.value); });');
+    expect(code).toContain('const h: Function = __effect(() => { return console.log(count.value); });');
   });
 
   test('an enum gains its type companion — annotations naming the enum resolve', () => {

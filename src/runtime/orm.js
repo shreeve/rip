@@ -3621,14 +3621,22 @@ function columnType(field, def) {
   switch (nested.kind) {
     // An enum materializes to its member VALUE, which is what the
     // column holds — not the member name. A closed set of strings is
-    // a DuckDB ENUM. A set holding a number or a boolean has no ENUM
-    // form (DuckDB enum members are strings), so it stays VARCHAR
-    // rather than being silently restated as something the values are
-    // not.
+    // a DuckDB ENUM. Numbers and booleans have no ENUM form (DuckDB
+    // enum members are strings), so the column takes the values' own
+    // type: a value read back must equal its member, and a VARCHAR
+    // would hand `1` back as '1', which no member matches. Members of
+    // different types share no column, and reject; a `null` member fits
+    // any of them.
     case 'enum': {
-      const values = [...new Set(nested._normalize().enumMembers.values())];
-      if (!values.length || !values.every((v) => typeof v === 'string')) return 'VARCHAR';
-      return sqlEnumType(values);
+      const values = [...new Set(nested._normalize().enumMembers.values())].filter((v) => v !== null);
+      if (!values.length) return 'VARCHAR';
+      if (values.every((v) => typeof v === 'string')) return sqlEnumType(values);
+      if (values.every((v) => Number.isInteger(v) && v >= -2147483648 && v <= 2147483647)) return 'INTEGER';
+      if (values.every((v) => typeof v === 'number' && Number.isFinite(v))) return 'DOUBLE';
+      if (values.every((v) => typeof v === 'boolean')) return 'BOOLEAN';
+      throw new Error("schema: enum '" + field.typeName + "'" + where + ' mixes member value types (' +
+        [...new Set(values.map((v) => typeof v))].join(', ') + ') — a column holds one type, so give every ' +
+        'member a value of the same type');
     }
     // A nested schema is an object, so it is a JSON document — the
     // array form's answer, for the same reason.
@@ -3664,7 +3672,7 @@ function columnSpec(column, field, def) {
     notNull: field.required === true,
     unique: field.unique === true,
     default: field.constraints?.default !== undefined
-      ? sQLDefault(field.constraints.default) : null,
+      ? sQLDefault(columnDefault(field)) : null,
     was: field.attrs?.was || null,
   };
 }
@@ -4002,6 +4010,14 @@ function renderCreate(spec) {
   const ix = indexes.map((i) => renderIndex(spec, i));
   if (ix.length) blocks.push(ix.join('\n'));
   return blocks;
+}
+
+// An enum default names a member (`level Level, [:high]`), and the
+// column holds the member's value — the one an instance materializes.
+function columnDefault(field) {
+  const nested = SchemaRegistry.get(field.typeName);
+  const d = field.constraints.default;
+  return nested?.kind === 'enum' ? nested._materializeEnum(d) : d;
 }
 
 function sQLDefault(v) {

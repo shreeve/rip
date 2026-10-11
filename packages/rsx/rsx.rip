@@ -6,14 +6,15 @@
 #  Legal: MIT License
 # ==============================================================================
 #
-# RSX is a small forgiving XML parser and serializer for the cases where
+# RSX is a small strict XML parser and serializer for the cases where
 # you want a Rip object, not a DOM. It is built around a real
 # scanner/tokenizer instead of nested regular expressions, with security
 # defaults appropriate for talking to outside systems (SOAP, healthcare
 # EDI envelopes, etc.).
 #
 # What it does:
-#   * Scans a well-formed-ish XML document into events: tag-open, tag-close,
+#   * Scans a well-formed XML document (one root, every element closed,
+#     no stray text or `<`, no duplicate attributes) into events: tag-open, tag-close,
 #     self-close, text, CDATA, comment.
 #   * Builds a plain Rip object tree where repeated child tags collapse into
 #     arrays automatically.
@@ -139,9 +140,7 @@ class Scanner
       if @xml.startsWith('<!DOCTYPE', @pos) or @xml.startsWith('<!doctype', @pos)
         unless @opts.allowDoctype
           throw RsxError.new 'DOCTYPE declarations are not allowed', @pos
-        @pos = @xml.indexOf '>', @pos
-        throw RsxError.new 'unterminated DOCTYPE', @pos if @pos is -1
-        @pos += 1
+        @pos = @doctypeEnd()
         return
       throw RsxError.new "unexpected '<!' construct", @pos
 
@@ -161,6 +160,30 @@ class Scanner
     # Start tag (possibly self-closing) <name ...>
     @scanStartTag()
 
+  # The offset just past a DOCTYPE. Quoted literals (`SYSTEM
+  # "http://[::1]/a.dtd"`) and the internal subset's comments and
+  # processing instructions hold their own `[`, `]`, and `>`; the
+  # declaration ends at the first `>` outside all of them.
+  doctypeEnd: ->
+    at = @pos + 2
+    subset = false
+    while at < @xml.length
+      c = @xml[at]
+      skip = if c is '"' or c is "'" then [c, 1]
+      else if subset and @xml.startsWith('<!--', at) then ['-->', 4]
+      else if subset and @xml.startsWith('<?', at) then ['?>', 2]
+      else null
+      if skip
+        close = @xml.indexOf skip[0], at + skip[1]
+        break if close is -1
+        at = close + skip[0].length
+        continue
+      if c is '[' then subset = true
+      else if c is ']' then subset = false
+      else if c is '>' and not subset then return at + 1
+      at += 1
+    throw RsxError.new 'unterminated DOCTYPE', @pos
+
   scanComment: ->
     end = @xml.indexOf '-->', @pos + 4
     throw RsxError.new 'unterminated comment', @pos if end is -1
@@ -177,10 +200,15 @@ class Scanner
     end = @xml.indexOf '>', @pos + 2
     throw RsxError.new 'unterminated end tag', @pos if end is -1
     name = @xml.slice(@pos + 2, end).trim()
+    throw RsxError.new "invalid end tag name #{JSON.stringify(name)}", @pos unless XML_NAME.test(name)
     @h.close name
     @pos = end + 1
 
   scanStartTag: ->
+    # A `<` that opens no tag name is text that should have been escaped
+    # (`1 < 2`); reading it as a tag would invent an element.
+    unless XML_NAME_START.test(@xml.slice(@pos + 1, @pos + 3))
+      throw RsxError.new "a '<' in text must be written &lt;", @pos
     end = @findStartTagEnd @pos + 1
     throw RsxError.new 'unterminated start tag', @pos if end is -1
 
@@ -211,6 +239,7 @@ class Scanner
     inner = inner.replace(/^\s+/, '').replace(/\s+$/, '')
     m = inner.match /^([^\s\/>]+)([\s\S]*)$/
     throw RsxError.new "missing tag name", @pos unless m
+    throw RsxError.new "invalid element name #{JSON.stringify(m[1])}", @pos unless XML_NAME.test(m[1])
     [m[1], m[2]]
 
   parseAttributes: (text) ->
@@ -221,6 +250,7 @@ class Scanner
       raw = m[2] ?? m[3] ?? m[4] ?? ''
       val = decodeEntities raw
       attrs ?= {}
+      throw RsxError.new "duplicate attribute #{JSON.stringify(name)}", @pos if Object.hasOwn(attrs, name)
       attrs[name] = val
     attrs
 
@@ -247,6 +277,9 @@ class Builder
 
   open: (qname, attrs, selfClose) ->
     name = @opts.stripNamespaces ? stripNs(qname) : qname
+    if @stack.length is 1
+      throw RsxError.new "a second root element <#{qname}>; a document has one" if @rooted
+      @rooted = true
 
     parent = @stack[@stack.length - 1]
     @hadElement[@hadElement.length - 1] = true
@@ -309,17 +342,24 @@ class Builder
 
   text: (str) ->
     return if str.length is 0
-    return if @stack.length <= 1   # text before root element — ignore
+    if @stack.length <= 1
+      return if str.trim() is ''
+      throw RsxError.new "text outside the root element: #{JSON.stringify(str.slice(0, 40))}"
+
     @textBuf[@textBuf.length - 1] += str
     @children?[@children.length - 1].push str if @opts.preserveChildren
 
   cdata: (str) ->
-    return if @stack.length <= 1
+    throw RsxError.new 'CDATA outside the root element' if @stack.length <= 1
     @hadCdata[@hadCdata.length - 1] = true
     @textBuf[@textBuf.length - 1] += str
     @children?[@children.length - 1].push str if @opts.preserveChildren
 
-  result: -> @root
+  # A document ends with its root closed; a cut-off one never parses.
+  result: ->
+    throw RsxError.new "unclosed element <#{@nameStack[@nameStack.length - 1]}> at the end of the input" if @stack.length > 1
+    throw RsxError.new 'no root element' unless @rooted
+    @root
 
   # Attach a freshly opened child to its parent under `name`. If a sibling
   # with the same name already exists we promote it (and the new one) into
@@ -388,6 +428,7 @@ XML_ATTR_ESC = (s) ->
 # `x" onload="evil` would otherwise inject an attribute.
 NAME_START =! ':A-Z_a-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u{10000}-\u{EFFFF}'
 XML_NAME   =! RegExp.new("^[#{NAME_START}][#{NAME_START}\\-.0-9\u00B7\u0300-\u036F\u203F-\u2040]*$", 'u')
+XML_NAME_START =! RegExp.new("^[#{NAME_START}]", 'u')
 
 xmlName = (kind, name) ->
   throw RsxError.new "invalid XML #{kind} name #{JSON.stringify(name)}" unless XML_NAME.test(name)

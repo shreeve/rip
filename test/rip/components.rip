@@ -6785,7 +6785,7 @@ code 'a component member holding an awaiting effect keeps it', '''
   ''', '''
   export const A = class extends __Component {
     _init(__given) {
-      this.e = __effect(async () => { await fn(); });
+      this.e = __effect(async () => { return await fn(); });
     }
     _create() {
       this._el0 = document.createElement('div');
@@ -7449,3 +7449,78 @@ fail 'accept names its provider by a plain member path, never a call', '''
   Part = component
     accept open from pick()
 '''
+
+# A computed member (`~=`) has no write, in any spelling — as a
+# module-level computed rejects `c = 5`.
+fail 'a component computed rejects a plain write', '''
+    Foo = component
+      k := 0
+      c ~= k + 1
+      bump: -> c = 5
+      render
+        p c
+''', "cannot assign to computed 'c'"
+fail 'a component computed rejects an @ write', '''
+    Foo = component
+      k := 0
+      c ~= k + 1
+      bump: -> @c = 5
+      render
+        p c
+''', "cannot assign to computed 'c'"
+fail 'a component computed rejects an update', '''
+    Foo = component
+      k := 0
+      c ~= k + 1
+      bump: -> c++
+      render
+        p c
+''', "cannot assign to computed 'c'"
+fail 'a component computed rejects a destructuring write', '''
+    Foo = component
+      k := 0
+      c ~= k + 1
+      bump: -> [c] = [5]
+      render
+        p c
+''', "cannot assign to computed 'c'"
+test 'a parameter named like a computed member shadows it', '''
+    Foo = component
+      k := 0
+      c ~= k + 1
+      bump: (c) -> c = 5
+      render
+        p c
+    typeof Foo
+''', 'function'
+fail 'a component computed rejects an @-member destructuring write', '''
+    Foo = component
+      k := 0
+      c ~= k + 1
+      bump: -> {a: [@c]} = {a: [5]}
+      render
+        p c
+''', "cannot assign to computed 'c'"
+fail 'a component readonly rejects a destructuring write', '''
+    Foo = component
+      r =! 1
+      bump: -> {r} = {r: 5}
+      render
+        p r
+''', "cannot assign to readonly member 'r'"
+fail 'a plain member render reads rejects a destructuring write', '''
+    Foo = component
+      label = 'a'
+      bump: -> [@label] = ['b']
+      render
+        p label
+''', "silently freezes the render"
+test 'a destructuring default reads a computed member', '''
+    Foo = component
+      k := 0
+      c ~= k + 1
+      pick: -> [x = c] = []; x
+      render
+        p c
+    typeof Foo
+''', 'function'

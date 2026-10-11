@@ -1082,6 +1082,15 @@ function __describeProjection(node) {
 }
 
 class __Component {
+  // A method read as a value (`names.map(format)`, `onPress: save`) is
+  // this instance's function: one per name, calling through the instance
+  // so it reaches the method the prototype holds at call time (an HMR
+  // patch swaps the prototype), and the same function every read.
+  _bound(name) {
+    const cache = this._boundCache ??= Object.create(null);
+    return cache[name] ??= (...args) => this[name](...args);
+  }
+
   constructor(props = {}) {
     // A living child released by its parent's HMR refresh answers the
     // parent's construction in its place (a constructor returning an

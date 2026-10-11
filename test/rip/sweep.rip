@@ -90,7 +90,7 @@ code "export bound effect", '''
   export h ~> console.log a
   ''', '''
   const a = __state(1);
-  export const h = __effect(() => { console.log(a.value); });
+  export const h = __effect(() => { return console.log(a.value); });
   '''
 
 code "export default indented object", '''
@@ -256,7 +256,7 @@ code "export typed effect", '''
   export h: Handle ~> console.log a
   ''', '''
   const a = __state(1);
-  export const h = __effect(() => { console.log(a.value); });
+  export const h = __effect(() => { return console.log(a.value); });
   '''
 
 code "export typed effect wrapped", '''
@@ -265,7 +265,7 @@ code "export typed effect wrapped", '''
   console.log a
   ''', '''
   const a = __state(1);
-  export const h = __effect(() => { console.log(a.value); });
+  export const h = __effect(() => { return console.log(a.value); });
   '''
 
 code "export typed effect block", '''
