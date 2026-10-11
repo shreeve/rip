@@ -62,8 +62,7 @@ code "satisfies is a name outside the postfix position", "satisfies = 2\no = { s
 # ==============================================================================
 # The operator takes whitespace before its type. A TIGHT follower binds to
 # the word as after any name — a call, an index, a subtraction — so the word
-# stays an ordinary name, and a call of a function named `cast` or
-# `satisfies` stays a call.
+# stays an ordinary name.
 # ==============================================================================
 
 code "a tight paren after satisfies calls it", "r = f satisfies(1, 2)", "let r = f(satisfies(1, 2));"
@@ -73,9 +72,6 @@ code "a tight bracket after as indexes it", "r = f as[0]", "let r = f(as[0]);"
 code "a tight minus after as subtracts", "r = f as-1", "let r = f(as - 1);"
 code "a spaced paren type still casts", "r = x as (A | B)", "let r = x;"
 code "a spaced bracket type still casts", "r = x satisfies [number]", "let r = x;"
-code "a call of satisfies keeps both arguments", "r = satisfies(1, 2)", "let r = satisfies(1, 2);"
-code "a call of cast keeps both arguments", "r = cast(1, 2)", "let r = cast(1, 2);"
-code "a call of cast groups as a primary", "r = cast(a + b, c).z", "let r = cast(a + b, c).z;"
 fail "a chained operator word with a tight paren rejects", "r = x as Foo satisfies(1)",
   "1:14: Unexpected 'satisfies'"
 

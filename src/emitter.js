@@ -269,7 +269,11 @@ const isRelation = (x) => isNode(x) && (x[0] === 'in' || x[0] === 'of' || x[0] =
 const isIf = (x) => isNode(x) && x[0] === 'if';
 const isRange = (x) => isNode(x) && (x[0] === '..' || x[0] === '...') && x.length === 3;
 const isSpread = (x) => isNode(x) && x[0] === '...' && x.length === 2;
-const isObject = (x) => isNode(x) && x[0] === 'object';
+// The object-literal SHAPE, for the pattern predicates (the grammar
+// never parses a call as an assignment target) and the grouping
+// lattice (a misread call only over-groups); every other reader asks
+// the call-aware Emitter#isObject.
+const isObjectShape = (x) => isNode(x) && x[0] === 'object';
 const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 3;
 // What findCapturedCtrl looks for.
 const CTRL_ALL = new Set(['break', 'continue', 'return']);
@@ -365,7 +369,6 @@ const patternBindings = (node, base = '', out = []) => {
   return out;
 };
 const isTernary = (x) => isNode(x) && x[0] === '?:' && x.length === 4;
-const isBlock = (x) => isNode(x) && x[0] === 'block';
 // Render-DSL name classes: template tags come from the
 // spec-derived vocabulary; PascalCase names (an interior lowercase
 // letter distinguishes `Counter` from ALLCAPS constants) are
@@ -974,10 +977,17 @@ class Emitter {
     return this.stores.node(id)?.semanticKind === kind;
   }
 
+  // A CALL whose callee is a bare name: the grammar's call row is the
+  // only thing that tells `block(2, 3)` from the ['block', …] node it
+  // spells, so head dispatch and head predicates consult this first.
+  isCallNode(x) {
+    return isNode(x) && typeof x[0] === 'string' && this.semanticKindOf(x) === 'call';
+  }
+
   // A REAL postfix type operator — `["cast", value, "T"]` /
-  // `["satisfies", value, "T"]` — and not a user call of a function so
-  // named: `cast(a, b)` builds the identical array, and reading it as
-  // the operator would erase the call and its second argument.
+  // `["satisfies", value, "T"]` — and never a call of a function so
+  // named, which spells the identical array. The walks that skip the
+  // operator's type slot ask this, or they would skip a call argument.
   isPostfixType(x) {
     return Emitter.isPostfixTypeIn(this.stores, x);
   }
@@ -988,11 +998,26 @@ class Emitter {
     return id === null || stores.node(id)?.semanticKind === x[0];
   }
 
+  // An object literal — never a call of a function named `object`.
+  isObject(x) {
+    return isObjectShape(x) && !this.isCallNode(x);
+  }
+
+  // A statement block — never a call of a function named `block`.
+  isBlock(x) {
+    return isNode(x) && x[0] === 'block' && !this.isCallNode(x);
+  }
+
   // A constructor spine with no call in it: a name, or a member/index
   // chain rooted at one. Only such a spine may stand bare under `new`.
-  static pureSpine(x) {
-    return typeof x === 'string' ||
-      (isNode(x) && typeof x[0] === 'string' && SPINE_HEADS.has(x[0]) && !isRubyNew(x) && Emitter.pureSpine(x[1]));
+  pureSpine(x) {
+    return typeof x === 'string' || (this.isSpine(x) && !isRubyNew(x) && this.pureSpine(x[1]));
+  }
+
+  // A member/index link — `optindex` spells a legal callee, so a call
+  // of a function so named is never a link.
+  isSpine(x) {
+    return isNode(x) && typeof x[0] === 'string' && SPINE_HEADS.has(x[0]) && !this.isCallNode(x);
   }
 
   // The semanticKind the grammar annotated on a node's row, or null for
@@ -1059,7 +1084,7 @@ class Emitter {
       // An effect body is its OWN function scope — declarations inside
       // it collect when the body emits, never here.
       if (this.isEffectDecl(n)) return;
-      const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
+      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n));
       for (const el of n) walk(el, below);
     };
     for (const n of stmts) walk(n, false);
@@ -1094,7 +1119,7 @@ class Emitter {
         // The body is its own function scope (bare and bound alike).
         return;
       }
-      const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
+      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n));
       for (const el of n) walk(el, below);
     };
     for (const n of stmts) walk(n, false);
@@ -1127,7 +1152,7 @@ class Emitter {
         walk(n[2], nested);
         return;
       }
-      const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
+      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n));
       for (const el of n) walk(el, below);
     };
     for (const n of stmts) walk(n, false);
@@ -1405,7 +1430,7 @@ class Emitter {
         // Field VALUES are expressions of this scope; field names are
         // members, never scope bindings (hoistTargets' class rule).
         const body = n[3];
-        if (isBlock(body)) {
+        if (this.isBlock(body)) {
           for (const stmt of body.slice(1)) {
             if (isNode(stmt) && ASSIGNS.has(stmt[0]) && stmt.length === 3) walk(stmt[2], true);
             else if (!Emitter.isTypedWrapper(stmt)) walk(stmt, true);
@@ -1415,7 +1440,7 @@ class Emitter {
       }
       if (this.isReactiveDecl(n)) {
         auth(n[1], n[0] === 'computed' ? 'computed' : 'state', n);
-        if (!(n[0] === 'computed' && isBlock(n[2]) && n[2].length > 2)) walk(n[2], nested);
+        if (!(n[0] === 'computed' && this.isBlock(n[2]) && n[2].length > 2)) walk(n[2], nested);
         return;
       }
       if (this.isEffectDecl(n)) {
@@ -1490,7 +1515,7 @@ class Emitter {
           }
         }
       }
-      const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
+      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n));
       for (const el of n) walk(el, below);
     };
     for (const s of stmts) walk(s, false);
@@ -1893,7 +1918,7 @@ class Emitter {
       if (h === '.' && p.length === 3 && p[1] === 'this' && typeof p[2] === 'string') out.push([p[2], this.thisMemberKindOf(p[2])]);
       else if (h === 'array') for (const el of p.slice(1)) this.patternMemberTargets(el, out);
       else if (h === 'object') for (const pair of p.slice(1)) this.patternMemberTargets(pair[0] === ':' ? pair[2] : pair[1], out);
-      else if (['rest', '...', 'default', '='].includes(h) || this.isPostfixType(p)) this.patternMemberTargets(p[1], out);
+      else if (['rest', '...', 'default', '=', 'cast', 'satisfies'].includes(h)) this.patternMemberTargets(p[1], out);
     }
     return out;
   }
@@ -1941,7 +1966,7 @@ class Emitter {
         return;
       }
       if (this.isEffectDecl(n)) return;
-      const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
+      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n));
       for (const el of n) walk(el, below);
     };
     for (const n of stmts) walk(n, false);
@@ -3663,7 +3688,7 @@ class Emitter {
     listElements(sexpr.slice(1));
     const walk = (x) => {
       if (!isNode(x)) return;
-      if (isBlock(x)) {
+      if (this.isBlock(x)) {
         listElements(x.slice(1));
         // Adjacent class members group into ONE implicit-object
         // statement, so a directive above a LATER member line can only
@@ -3673,7 +3698,7 @@ class Emitter {
         // so a directive above the FIRST member still attaches to the
         // whole-group statement).
         for (const el of x.slice(1)) {
-          if (isNode(el) && isObject(el)) listElements(el.slice(1));
+          if (isNode(el) && this.isObject(el)) listElements(el.slice(1));
         }
       }
       for (const c of x) walk(c);
@@ -3850,13 +3875,13 @@ class Emitter {
     // above — the name is invisible to every check keyed on the walk,
     // and here it hides the name from the hoist pass too, so the module
     // BUILDS and throws on the const write at runtime instead.
-    else if (this.isPostfixType(p)) this.patternNames(p[1], out, binding, p);
+    else if (p[0] === 'cast' || p[0] === 'satisfies') this.patternNames(p[1], out, binding, p);
     else if (p[0] === 'typed-var') this.patternNames(p[1], out, binding, p);
     return out;
   }
 
   static isPattern(x) {
-    return isObject(x) || (isNode(x) && x[0] === 'array');
+    return isObjectShape(x) || (isNode(x) && x[0] === 'array');
   }
 
   // A pattern a `let` declaration can spell: plain-name leaves only (a
@@ -3873,7 +3898,7 @@ class Emitter {
         ? i === els.length - 1 && typeof el[1] === 'string'
         : leaf(el));
     }
-    if (isObject(p)) {
+    if (isObjectShape(p)) {
       const pairs = p.slice(1);
       return pairs.every((pair, i) => {
         if (!isNode(pair)) return false;
@@ -4149,7 +4174,7 @@ class Emitter {
         // (computedBody hoists it — the funcBlock path); every other
         // value emits inline in THIS scope, so its assignment targets
         // hoist here .
-        if (!(n[0] === 'computed' && isBlock(n[2]) && n[2].length > 2)) walk(n[2]);
+        if (!(n[0] === 'computed' && this.isBlock(n[2]) && n[2].length > 2)) walk(n[2]);
         return;
       }
       // An effect binds its dispose handle through `const` — the name
@@ -4185,7 +4210,7 @@ class Emitter {
         const spec = n[1];
         if ((this.isReactiveDecl(spec) || this.isEffectDecl(spec) || this.isReadonlyDecl(spec)) && typeof spec[1] === 'string') {
           reactive.add(spec[1]);
-          if (!this.isEffectDecl(spec) && !(spec[0] === 'computed' && isBlock(spec[2]) && spec[2].length > 2)) {
+          if (!this.isEffectDecl(spec) && !(spec[0] === 'computed' && this.isBlock(spec[2]) && spec[2].length > 2)) {
             walk(spec[2]);
           }
           return;
@@ -4224,7 +4249,7 @@ class Emitter {
       if (boundary === 'class') {
         if (n[2] != null) walk(n[2]);
         const body = n[3];
-        if (isBlock(body)) {
+        if (this.isBlock(body)) {
           for (const stmt of body.slice(1)) {
             if (isNode(stmt) && ASSIGNS.has(stmt[0]) && stmt.length === 3) walk(stmt[2]);
             // A typed bodiless FIELD is a class member, not a scope
@@ -4467,7 +4492,7 @@ class Emitter {
           // `name: ->` pair does, so it takes the class's own level,
           // not the anywhere-def pin.
           for (const el of n.slice(2)) {
-            const stmts = isNode(el) && el[0] === 'block' ? el.slice(1) : [el];
+            const stmts = this.isBlock(el) ? el.slice(1) : [el];
             for (const st of stmts) {
               if (isNode(st) && isDefHead(st[0]) && st.length === 4) for (const part of st.slice(2)) walk(part, level);
               else walk(st, level);
@@ -5772,7 +5797,7 @@ class Emitter {
 
   enumCode(node) {
     const [, name, body] = node;
-    const items = isBlock(body) ? body.slice(1) : [body];
+    const items = this.isBlock(body) ? body.slice(1) : [body];
     const pairs = []; // [item, keyText, valueText, valueKey]
     const usedKeys = new Set();
     const claim = (key, what, at) => {
@@ -6310,7 +6335,7 @@ class Emitter {
     // false BEFORE its own dispatch runs, so a stale true can never
     // leak into a deeper statement's handler.
     this.funcBodyStmt = funcBody;
-    if (isNode(node)) {
+    if (isNode(node) && !this.isCallNode(node)) {
       const form = Emitter.STATEMENT_FORMS[node[0]];
       if (form && form(this, node, ind)) {
         this.replDeclEcho(node);
@@ -6358,7 +6383,7 @@ class Emitter {
       // Optional-chain assignment in statement position guards with a
       // plain `if` (no ternary value is needed).
       if (isAssignHead(node[0]) && node.length === 3) {
-        const guard = Emitter.optionalGuard(node[1]);
+        const guard = this.optionalGuard(node[1]);
         if (guard !== null) {
           this.optionalAssign(node, guard, 'statement');
           this.b.emit(';');
@@ -6514,7 +6539,7 @@ class Emitter {
       this.mark(node, 'condition', () => this.expr(node[1]));
       this.b.emit(') ');
       if (guard !== null) {
-        const stmts = isBlock(body) ? body.slice(1) : body;
+        const stmts = this.isBlock(body) ? body.slice(1) : body;
         this.b.emit('{\n' + '  '.repeat(ind + 1) + 'if (');
         this.expr(guard);
         this.b.emit(') {\n');
@@ -6525,7 +6550,7 @@ class Emitter {
       // A postfix loop carries a PLAIN [statement] array (the
       // postfix-if convention) and emits BRACED, single-statement
       // (unlike postfix-if's braceless line).
-      if (!isBlock(body) && isNode(body)) {
+      if (!this.isBlock(body) && isNode(body)) {
         this.mark(node, 'body', () => {
           this.b.emit('{\n');
           this.b.emit('  '.repeat(ind + 1));
@@ -6543,12 +6568,12 @@ class Emitter {
     // node) and emits braceless on one line: `if (a) b = 1;`.
     // A reactive declaration can never be the guarded statement — every
     // block-nested declaration rejects at frame collection (#88).
-    if (!isBlock(node[2]) && isNode(node[2])) {
+    if (!this.isBlock(node[2]) && isNode(node[2])) {
       const stmt = node[2][0];
       // A guarded LOOP emits braced: a loop may open with a hoisted
       // temp (`const _ref = …;` ahead of `for (… in _ref)`), and a
       // braceless `if` would guard only that first statement.
-      const braced = isNode(stmt) && Emitter.LOOP_HEADS.has(stmt[0]);
+      const braced = isNode(stmt) && Emitter.LOOP_HEADS.has(stmt[0]) && !this.isCallNode(stmt);
       this.mark(node, '$self', () => {
         this.b.emit('if (');
         this.mark(node, 'condition', () => this.expr(node[1]));
@@ -6598,14 +6623,14 @@ class Emitter {
       // An inline body (`try f()`) is its own one-statement block; a
       // handler-less try gains `catch {}` — JS requires a handler or
       // finalizer, and the bare form's contract is to swallow.
-      const body = isBlock(node[1]) ? node[1] : ['block', node[1]];
+      const body = this.isBlock(node[1]) ? node[1] : ['block', node[1]];
       this.mark(node, 'body', () => this.braceBlock(body, ind));
       if (node.length === 2) this.b.emit(' catch {}');
       // [binding|null, block] pairs are catch handlers; block nodes are
       // finalizers.
       for (const part of node.slice(2)) {
         if (!isNode(part)) continue;
-        if (isBlock(part)) {
+        if (this.isBlock(part)) {
           this.b.emit(' finally ');
           this.braceBlock(part, ind);
         } else {
@@ -6635,7 +6660,7 @@ class Emitter {
             this.b.emit(pad + '(');
             this.mark(part, 'binding', () => this.withPattern(() => this.expr(binding)));
             this.b.emit(` = ${param});\n`);
-            this.statements(isBlock(body) ? body.slice(1) : [body], ind + 1, 'block');
+            this.statements(this.isBlock(body) ? body.slice(1) : [body], ind + 1, 'block');
             this.b.emit('  '.repeat(ind) + '}');
           } else if (Emitter.isTypedWrapper(binding)) {
             // An annotated binding (`catch error: any`): the name is the
@@ -6853,8 +6878,8 @@ class Emitter {
       this.b.emit('  '.repeat(ind + 2) + 'break;\n');
       return;
     }
-    const stmts = this.liveStmts(isBlock(block) ? block.slice(1) : [block]);
-    this.emitTsTypeDecls(isBlock(block) ? block.slice(1) : [block], '  '.repeat(ind + 2));
+    const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block]);
+    this.emitTsTypeDecls(this.isBlock(block) ? block.slice(1) : [block], '  '.repeat(ind + 2));
     for (const stmt of stmts) {
       this.b.emit('  '.repeat(ind + 2));
       this.statement(stmt, ind + 2);
@@ -7029,7 +7054,7 @@ class Emitter {
             this.b.emit(`${idx} += `);
             // A `+`-headed literal step is a unary and groups as an
             // operand (`_i += (+2)`).
-            this.grouped(node, 'step', step, Emitter.needsGrouping(step, 'operand', this.stores));
+            this.grouped(node, 'step', step, Emitter.needsGrouping(step, 'operand'));
           }
         } else {
           const stp = this.loopTempName('_step');
@@ -7207,10 +7232,10 @@ class Emitter {
   // with the guarded body at guardBodyPad (4 spaces in stepped
   // loops, none in of-loops) and the close at 2.
   flatBody(body, guard, guardBodyPad) {
-    const stmts = this.liveStmts(isBlock(body) ? body.slice(1) : [body]);
-    this.emitTsTypeDecls(isBlock(body) ? body.slice(1) : [body], '');
+    const stmts = this.liveStmts(this.isBlock(body) ? body.slice(1) : [body]);
+    this.emitTsTypeDecls(this.isBlock(body) ? body.slice(1) : [body], '');
     if (guard !== null) {
-      const wrap = Emitter.needsGrouping(guard, 'operand', this.stores) || isUpdate(guard);
+      const wrap = Emitter.needsGrouping(guard, 'operand') || isUpdate(guard);
       this.b.emit('if (');
       if (wrap) this.b.emit('(');
       this.expr(guard);
@@ -7232,8 +7257,8 @@ class Emitter {
 
   // Indented body lines following an injected let-binding line.
   bodyLines(body, ind) {
-    const stmts = this.liveStmts(isBlock(body) ? body.slice(1) : [body]);
-    this.emitTsTypeDecls(isBlock(body) ? body.slice(1) : [body], '  '.repeat(ind + 1));
+    const stmts = this.liveStmts(this.isBlock(body) ? body.slice(1) : [body]);
+    this.emitTsTypeDecls(this.isBlock(body) ? body.slice(1) : [body], '  '.repeat(ind + 1));
     for (const stmt of stmts) {
       this.b.emit('  '.repeat(ind + 1));
       this.statement(stmt, ind + 1);
@@ -7365,7 +7390,7 @@ class Emitter {
           this.mark(node, 'step', () => this.b.emit(`${idx}++`));
         } else {
           this.b.emit(`${idx} += `);
-          this.grouped(node, 'step', step, Emitter.needsGrouping(step, 'operand', this.stores));
+          this.grouped(node, 'step', step, Emitter.needsGrouping(step, 'operand'));
         }
       } else {
         const stp = this.loopTempName('_step');
@@ -7424,7 +7449,7 @@ class Emitter {
   // (compounds group).
   guardOpen(guard) {
     this.b.emit('if (');
-    const wrap = Emitter.needsGrouping(guard, 'operand', this.stores) || isUpdate(guard);
+    const wrap = Emitter.needsGrouping(guard, 'operand') || isUpdate(guard);
     if (wrap) this.b.emit('(');
     this.expr(guard);
     if (wrap) this.b.emit(')');
@@ -7535,7 +7560,7 @@ class Emitter {
       if (keyExpr === null) {
         this.b.emit(`${inner}${acc}.push(`);
         // The pushed expression is an operand position (compounds group).
-        const wrap = Emitter.needsGrouping(expr, 'operand', this.stores) || isUpdate(expr);
+        const wrap = Emitter.needsGrouping(expr, 'operand') || isUpdate(expr);
         if (wrap) this.b.emit('(');
         emitValue();
         if (wrap) this.b.emit(')');
@@ -7553,7 +7578,7 @@ class Emitter {
         // so a reactive key unwraps — `result[count.value]`;
         // loop variables are frame-bound and stay bare); a node
         // key is the dynamicKey's inner expression.
-        const wrapKey = isNode(keyExpr) && (Emitter.needsGrouping(keyExpr, 'operand', this.stores) || isUpdate(keyExpr));
+        const wrapKey = isNode(keyExpr) && (Emitter.needsGrouping(keyExpr, 'operand') || isUpdate(keyExpr));
         const emitKey = () => {
           if (wrapKey) this.b.emit('(');
           this.expr(keyExpr);
@@ -7569,7 +7594,7 @@ class Emitter {
           }
         } else emitKey();
         this.b.emit(`), ${vt} = `);
-        const wrap = Emitter.needsGrouping(expr, 'operand', this.stores) || isUpdate(expr);
+        const wrap = Emitter.needsGrouping(expr, 'operand') || isUpdate(expr);
         if (wrap) this.b.emit('(');
         emitValue();
         if (wrap) this.b.emit(')');
@@ -7628,8 +7653,10 @@ class Emitter {
   // Branch statements with erased statements FILTERED — shape
   // predicates (ifIsSimple, tail classification) and emission must
   // agree with the stripped twin's shape. Pure: records nothing.
+  // An if branch is always the grammar's ['block', …] wrapper (an
+  // inline arm included), never a bare call, so the head alone decides.
   static branchStmts(b) {
-    return Emitter.stripErased(isBlock(b) ? b.slice(1) : [b[0]]);
+    return Emitter.stripErased(isNode(b) && b[0] === 'block' ? b.slice(1) : [b[0]]);
   }
 
   // The emission-path twin: same statements, with each erased one
@@ -7638,7 +7665,7 @@ class Emitter {
   // queues the branch's type declarations for the enclosing statement
   // list's flush (pendingTypeDecls) so the face never drops them.
   branchLive(b, collectDecls = false) {
-    const raw = isBlock(b) ? b.slice(1) : [b[0]];
+    const raw = this.isBlock(b) ? b.slice(1) : [b[0]];
     if (this.ts && collectDecls) {
       for (const s of raw) {
         if (isNode(s) && s[0] === 'type-decl') this.pendingTypeDecls.push(s);
@@ -7714,7 +7741,7 @@ class Emitter {
     // await conditions group in ternaries (`(await ok()) ? …`);
     // dammit conditions stay bare — the sugar's await surrounds a
     // complete call, which reads unambiguously.
-    this.grouped(node, 'condition', node[1], Emitter.needsGrouping(node[1], 'operand', this.stores) || (isNode(node[1]) && (node[1][0] === 'await' || node[1][0] === 'yield')));
+    this.grouped(node, 'condition', node[1], Emitter.needsGrouping(node[1], 'operand') || (isNode(node[1]) && (node[1][0] === 'await' || node[1][0] === 'yield')));
     this.b.emit(' ? ');
     this.ternaryArm(node, 'then', this.branchLive(node[2], true)[0]);
     this.b.emit(' : ');
@@ -7734,7 +7761,7 @@ class Emitter {
 
   ternaryArm(node, role, stmt) {
     this.mark(node, role, () => {
-      const wrap = Emitter.needsGrouping(stmt, 'operand', this.stores) || isUpdate(stmt);
+      const wrap = Emitter.needsGrouping(stmt, 'operand') || isUpdate(stmt);
       if (wrap) this.b.emit('(');
       this.expr(stmt);
       if (wrap) this.b.emit(')');
@@ -7746,7 +7773,7 @@ class Emitter {
   returnBlock(block, ind, effect = false) {
     const stmts = this.branchLive(block);
     this.b.emit('{\n');
-    this.emitTsTypeDecls(isBlock(block) ? block.slice(1) : [block[0]], '  '.repeat(ind + 1));
+    this.emitTsTypeDecls(this.isBlock(block) ? block.slice(1) : [block[0]], '  '.repeat(ind + 1));
     stmts.forEach((stmt, i) => {
       this.b.emit('  '.repeat(ind + 1));
       if (i === stmts.length - 1) this.implicitReturn(stmt, ind + 1, effect);
@@ -7760,7 +7787,7 @@ class Emitter {
     // The condition emits in 'value' context —
     // compound conditions arrive double-parenthesized: `if ((v > 0))`.
     this.b.emit('if (');
-    this.grouped(node, 'condition', node[1], Emitter.needsGrouping(node[1], 'operand', this.stores));
+    this.grouped(node, 'condition', node[1], Emitter.needsGrouping(node[1], 'operand'));
     this.b.emit(') ');
     this.mark(node, 'then', () => this.returnBlock(node[2], ind, effect));
     if (node.length >= 4) {
@@ -7856,12 +7883,12 @@ class Emitter {
       // An inline body (`x = try f()`) is its own one-statement
       // block; a handler-less try gains `catch {}`, so the value is
       // the body's result or undefined on throw.
-      const vbody = isBlock(node[1]) ? node[1] : ['block', node[1]];
+      const vbody = this.isBlock(node[1]) ? node[1] : ['block', node[1]];
       this.mark(node, 'body', () => this.returnBlock(vbody, ind, effect));
       if (node.length === 2) this.b.emit(' catch {}');
       for (const part of node.slice(2)) {
         if (!isNode(part)) continue;
-        if (isBlock(part)) {
+        if (this.isBlock(part)) {
           this.b.emit(' finally ');
           this.braceBlock(part, ind);
         } else {
@@ -7881,7 +7908,7 @@ class Emitter {
             this.mark(part, 'binding', () => this.withPattern(() => this.expr(binding)));
             this.b.emit(` = ${param});\n`);
             const stmts = this.branchLive(body);
-            this.emitTsTypeDecls(isBlock(body) ? body.slice(1) : [body[0]], '  '.repeat(ind + 1));
+            this.emitTsTypeDecls(this.isBlock(body) ? body.slice(1) : [body[0]], '  '.repeat(ind + 1));
             stmts.forEach((stmt, i) => {
               this.b.emit('  '.repeat(ind + 1));
               if (i === stmts.length - 1) this.implicitReturn(stmt, ind + 1, effect);
@@ -7962,7 +7989,7 @@ class Emitter {
 
   returnCaseBodyCtrl(body, ind, effect) {
     const stmts = this.branchLive(body);
-    this.emitTsTypeDecls(isBlock(body) ? body.slice(1) : [body[0]], '  '.repeat(ind + 2));
+    this.emitTsTypeDecls(this.isBlock(body) ? body.slice(1) : [body[0]], '  '.repeat(ind + 2));
     stmts.forEach((stmt, i) => {
       this.b.emit('  '.repeat(ind + 2));
       if (i === stmts.length - 1) this.implicitReturn(stmt, ind + 2, effect);
@@ -8071,7 +8098,7 @@ class Emitter {
   accumulateBody(body, ind, into) {
     const stmts = this.branchLive(body);
     const pad = '  '.repeat(ind + 1);
-    this.emitTsTypeDecls(isBlock(body) ? body.slice(1) : [body[0]], pad);
+    this.emitTsTypeDecls(this.isBlock(body) ? body.slice(1) : [body[0]], pad);
     stmts.forEach((stmt, i) => {
       this.b.emit(pad);
       // A tail LOOP accumulates like any tail expression — the nested
@@ -8093,7 +8120,7 @@ class Emitter {
       // its break/continue/return cannot cross a push.
       if (i === stmts.length - 1 && !Emitter.statementOnly(stmt) && !isLoopNode(stmt) && !Emitter.containsCtrl(stmt)) {
         this.b.emit(`${into}.push(`);
-        const wrap = Emitter.needsGrouping(stmt, 'operand', this.stores) || isUpdate(stmt);
+        const wrap = Emitter.needsGrouping(stmt, 'operand') || isUpdate(stmt);
         if (wrap) this.b.emit('(');
         this.expr(stmt);
         if (wrap) this.b.emit(')');
@@ -8116,7 +8143,7 @@ class Emitter {
   // A tail `if` of an accumulating loop body, every arm accumulating.
   accumulateIf(node, ind, into) {
     this.b.emit('if (');
-    this.grouped(node, 'condition', node[1], Emitter.needsGrouping(node[1], 'operand', this.stores));
+    this.grouped(node, 'condition', node[1], Emitter.needsGrouping(node[1], 'operand'));
     this.b.emit(') ');
     this.mark(node, 'then', () => this.accumulateBlock(node[2], ind, into));
     if (node.length >= 4) {
@@ -8267,8 +8294,8 @@ class Emitter {
       });
       this.tsReturnAnnotation(node, isAsync, isVoid, isGen);
       this.b.emit(' ');
-      const stmts = this.liveStmts(isBlock(node[3]) ? node[3].slice(1) : [node[3]], { forwards: true });
-      const { entries, names } = this.scopedHoist(isBlock(node[3]) ? node[3].slice(1) : [node[3]], node[2]);
+      const stmts = this.liveStmts(this.isBlock(node[3]) ? node[3].slice(1) : [node[3]], { forwards: true });
+      const { entries, names } = this.scopedHoist(this.isBlock(node[3]) ? node[3].slice(1) : [node[3]], node[2]);
       for (const n of this.pushReactiveFrame(stmts, names, node[2], node)) names.add(n);
       this.scopes.push(names);
       // def bodies implicitly return their last expression, same as
@@ -8296,14 +8323,14 @@ class Emitter {
       this.b.emit('return');
       if (node.length === 2) {
         this.b.emit(' ');
-        this.grouped(node, 'value', node[1], Emitter.needsGrouping(node[1], 'return', this.stores));
+        this.grouped(node, 'value', node[1], Emitter.needsGrouping(node[1], 'return'));
       }
     });
     this.b.emit(';');
   }
 
   braceBlock(blockNode, ind, hoist = []) {
-    const stmts = isNode(blockNode) && blockNode[0] === 'block' ? blockNode.slice(1) : [blockNode];
+    const stmts = this.isBlock(blockNode) ? blockNode.slice(1) : [blockNode];
     this.mark(blockNode, '$self', () => {
       this.b.emit('{\n');
       if (hoist.length) {
@@ -8386,10 +8413,10 @@ class Emitter {
   // (try/switch/loops, multi-branch value ifs) emit their own delimiters
   // and are therefore 'primary' by construction; a value-lowered SIMPLE
   // if emits a ternary and sits in the ternary tier.
-  static jsTier(x, stores) {
+  static jsTier(x) {
     if (!isNode(x)) return 'primary';
     // A cast or a satisfies erases to its value — grouping reads through it.
-    if (Emitter.isPostfixTypeIn(stores, x)) return Emitter.jsTier(x[1], stores);
+    if ((x[0] === 'cast' || x[0] === 'satisfies') && x.length === 3) return Emitter.jsTier(x[1]);
     if (isAssign(x)) return 'assign';
     if (isTernary(x) || (isIf(x) && x.length <= 4 && Emitter.ifIsSimple(x))) return 'ternary';
     // Postfix existence emits a `!=` comparison — the binary tier.
@@ -8411,7 +8438,7 @@ class Emitter {
     // (`(yield 1) + 2`) and in head position.
     if ((x[0] === 'yield' || x[0] === 'yield-from') && x.length <= 2) return 'yield';
     if (isFunc(x)) return 'function';
-    if (isObject(x)) return 'object';
+    if (isObjectShape(x)) return 'object';
     return 'primary';
   }
 
@@ -8439,7 +8466,7 @@ class Emitter {
   //                 (`stores` tells the postfix spelling, which hoists,
   //                 from the operator one).
   static needsGrouping(child, context, stores) {
-    const tier = Emitter.jsTier(child, stores);
+    const tier = Emitter.jsTier(child);
     if (context === 'operand' || context === 'return') {
       if (tier === 'unary') {
         return !(child[0] === '!' || child[0] === 'typeof' || child[0] === 'await' ||
@@ -8468,11 +8495,11 @@ class Emitter {
   }
 
   operand(node, role, child) {
-    this.grouped(node, role, child, Emitter.needsGrouping(child, 'operand', this.stores));
+    this.grouped(node, role, child, Emitter.needsGrouping(child, 'operand'));
   }
 
   head(node, role, child) {
-    this.grouped(node, role, child, Emitter.needsGrouping(child, 'head', this.stores));
+    this.grouped(node, role, child, Emitter.needsGrouping(child, 'head'));
   }
 
   static isIntegerLiteral(x) {
@@ -8560,6 +8587,12 @@ class Emitter {
       return;
     }
     const head = node[0];
+    // A node the grammar built as a CALL is a call, whatever its head
+    // spells: `[callee, ...args]` with an identifier callee shares its
+    // shape with every construct head (`block(2, 3)` is
+    // ['block', '2', '3']), so the call row decides before any head
+    // dispatch — any identifier is a legal callee.
+    if (this.isCallNode(node)) return this.call(node);
     if (head === 'str' && this.lockedHead(node, 'str')) return this.strTemplate(node);
     if (head === 'tagged-template' && node.length === 3) return this.taggedTemplate(node);
     if (head === 'here-regex') return this.heregex(node);
@@ -8573,7 +8606,7 @@ class Emitter {
     // An assignment whose target spine holds an optional link lowers to
     // a guarded form (JS forbids optional chains in assignment targets).
     if (isAssignHead(head) && node.length === 3 && !this.inPattern) {
-      const guard = Emitter.optionalGuard(node[1]);
+      const guard = this.optionalGuard(node[1]);
       if (guard !== null) return this.optionalAssign(node, guard, 'value');
     }
     if (ASSIGNS.has(head) && node.length === 3) return this.assign(node);
@@ -8630,7 +8663,7 @@ class Emitter {
     if (head === '%%=' && node.length === 3) return this.moduloAssign(node);
     if (isComprehensionNode(node)) return this.comprehension(node, this.ind);
     if (head === 'do-iife' && node.length === 2) return this.doIife(node);
-    if (this.isPostfixType(node)) return this.postfixType(node);
+    if ((head === 'cast' || head === 'satisfies') && node.length === 3) return this.postfixType(node);
     if (head === '?' && node.length === 2) return this.existence(node);
     if (head === 'await' && node.length === 2) return this.awaitExpr(node);
     if (head === 'dammit!' && node.length === 2) return this.dammit(node);
@@ -8741,10 +8774,10 @@ class Emitter {
   // keeps its own inner optionals — they short-circuit the guard
   // itself — while the rewritten target emits every link plain
   // (withDeopt): the guard already proved the whole spine non-null.
-  static optionalGuard(t) {
+  optionalGuard(t) {
     if (!isNode(t) || t.length !== 3) return null;
-    if (t[0] === '?.' || t[0] === 'optindex') return t;
-    if (t[0] === '.' || t[0] === '[]') return Emitter.optionalGuard(t[1]);
+    if (t[0] === '?.' || (t[0] === 'optindex' && !this.isCallNode(t))) return t;
+    if (t[0] === '.' || t[0] === '[]') return this.optionalGuard(t[1]);
     return null;
   }
 
@@ -8806,7 +8839,7 @@ class Emitter {
   //   'reactive'       a reactive declaration — the value emits inline
   //                    here UNLESS it is a multi-statement computed
   //                    block (its own scope); the walker checks
-  //                    `n[0] === 'computed' && isBlock(n[2]) &&
+  //                    `n[0] === 'computed' && this.isBlock(n[2]) &&
   //                    n[2].length > 2` for that split
   //   'readonly'       the name const-binds; the value walks here
   //   'class'          fields are members, not scope names; the head
@@ -8848,12 +8881,12 @@ class Emitter {
   //   obj   the object the final target link reads from and writes to
   //   key   the final link's computed index key
   // A null slot means that part is repeat-safe and respells directly.
-  static planNeedsFor(node) {
+  planNeedsFor(node) {
     if (!isNode(node) || node.length !== 3) return null;
     const h = node[0];
     const synth = h === '//=' || h === '%%=';
     if (!synth && !ASSIGNS.has(h)) return null;
-    const optLink = Emitter.optionalGuard(node[1]);
+    const optLink = this.optionalGuard(node[1]);
     if (optLink === null && !synth) return null;
     if (optLink === null && !(isNode(node[1]) && (node[1][0] === '.' || node[1][0] === '[]') && node[1].length === 3)) return null;
     return { synth, optLink };
@@ -8916,7 +8949,7 @@ class Emitter {
       const boundary = this.scopeBoundary(n);
       if (boundary === 'skip' || boundary === 'effect') return;
       if (boundary === 'reactive') {
-        if (!(n[0] === 'computed' && isBlock(n[2]) && n[2].length > 2)) walk(n[2], extra);
+        if (!(n[0] === 'computed' && this.isBlock(n[2]) && n[2].length > 2)) walk(n[2], extra);
         return;
       }
       if (boundary === 'readonly') {
@@ -8960,7 +8993,7 @@ class Emitter {
         walk(n[1], extra);
         return;
       }
-      const need = Emitter.planNeedsFor(n);
+      const need = this.planNeedsFor(n);
       if (need !== null) plan(n, need, extra);
       for (const el of n) walk(el, extra);
     };
@@ -9099,7 +9132,7 @@ class Emitter {
     // default's value is an expression position again.
     const patternTarget = Emitter.isPattern(node[1]);
     const declares = Emitter.declaresInPlace.has(node);
-    const wrapParens = isObject(node[1]) && !this.inPattern && !declares;
+    const wrapParens = this.isObject(node[1]) && !this.inPattern && !declares;
     // A computed (`~=`) derives from its dependencies — it has no
     // legal write; the runtime's read-only container would throw at
     // the assignment, which is the loud error in the wrong place.
@@ -9339,7 +9372,7 @@ class Emitter {
         // the hover has a value type to present. Non-evident
         // initializers stay untyped (the inlined runtime's inference).
         // No `satisfies` here: the type came FROM the value.
-        const t = syntacticLiteralType(value);
+        const t = syntacticLiteralType(value, this.stores);
         if (t !== null) {
           const ro = head === 'computed' ? 'readonly ' : '';
           this.b.tsOnly(() => this.b.emit(`: ${containerType(t, ro, MINTED)}`));
@@ -9398,7 +9431,7 @@ class Emitter {
         // The initializer is an operand position (value context:
         // compounds group — `__state((1 + 2))`).
         this.mark(node, 'value', () => this.withExpression(() => {
-          const wrap = Emitter.needsGrouping(value, 'operand', this.stores);
+          const wrap = Emitter.needsGrouping(value, 'operand');
           if (wrap) this.b.emit('(');
           this.expr(value);
           if (wrap) this.b.emit(')');
@@ -9422,7 +9455,7 @@ class Emitter {
   // comma-expression path (`(1 + 2)`); object literals
   // group (a bare `{` would open a block body).
   computedBody(node, value, ind) {
-    if (isBlock(value) && value.length > 2) {
+    if (this.isBlock(value) && value.length > 2) {
       const stmts = this.liveStmts(value.slice(1), { forwards: true });
       const { entries, names } = this.scopedHoist(stmts, []);
       for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
@@ -9432,7 +9465,7 @@ class Emitter {
       this.rframes.pop();
       return;
     }
-    const wrap = Emitter.needsGrouping(value, 'operand', this.stores) || isObject(value);
+    const wrap = Emitter.needsGrouping(value, 'operand') || this.isObject(value);
     if (wrap) this.b.emit('(');
     this.expr(value);
     if (wrap) this.b.emit(')');
@@ -9475,7 +9508,7 @@ class Emitter {
       this.mark(node, 'operator', () => this.b.emit('='));
       this.b.emit(' ');
       this.mark(node, 'value', () => this.withExpression(() => {
-        const wrap = Emitter.needsGrouping(value, 'operand', this.stores);
+        const wrap = Emitter.needsGrouping(value, 'operand');
         if (wrap) this.b.emit('(');
         this.expr(value);
         if (wrap) this.b.emit(')');
@@ -9617,7 +9650,7 @@ class Emitter {
     const isAsync = this.containsAwait(body);
     emitName();
     this.b.emit(isAsync ? '(async () => ' : '(() => ');
-    if (isBlock(body)) {
+    if (this.isBlock(body)) {
       // A block body is a function body: own scope and reactive frame,
       // hoists, implicit return of the last expression — the cleanup
       // channel (a returned function runs before the next run and on
@@ -9654,7 +9687,7 @@ class Emitter {
     } else {
       if (!this.effectTailWrites(body)) this.b.emit('return ');
       this.mark(node, 'value', () => this.withExpression(() => {
-        const wrap = Emitter.needsGrouping(body, 'operand', this.stores) || isObject(body);
+        const wrap = Emitter.needsGrouping(body, 'operand') || this.isObject(body);
         if (wrap) this.b.emit('(');
         this.expr(body);
         if (wrap) this.b.emit(')');
@@ -9677,7 +9710,7 @@ class Emitter {
     const h = stmt[0];
     // A parenthesized sequence (`(a = 0; b = 1)`) is the statement its
     // tail is; a branching tail inside one has no per-arm form there.
-    if (h === 'block' && stmt.length > 1) {
+    if (this.isBlock(stmt) && stmt.length > 1) {
       const tail = stmt[stmt.length - 1];
       return this.effectTailWrites(tail) || this.effectBranchWrites(tail);
     }
@@ -9687,7 +9720,8 @@ class Emitter {
       return this.effectTailWrites(stmt[2]) || this.effectBranchWrites(stmt[2]);
     }
     if (isAssignHead(h) || h === '.=' || isUpdate(stmt)) return true;
-    if (Emitter.LOOP_HEADS.has(h) || isDefHead(h) || h === 'class' || h === 'enum' || h === 'export') return true;
+    if (Emitter.LOOP_HEADS.has(h) && !this.isCallNode(stmt)) return true;
+    if (isDefHead(h) || h === 'class' || h === 'enum' || h === 'export') return true;
     if (this.isModuleImport(stmt) || this.isReactiveDecl(stmt) || this.isReadonlyDecl(stmt)) return true;
     return this.isEffectDecl(stmt) && stmt[1] !== null;
   }
@@ -9710,8 +9744,8 @@ class Emitter {
       return stmt[2].some((w) => armTail(w[2])) || (stmt[3] !== null && armTail(stmt[3]));
     }
     if (stmt[0] === 'try') {
-      return armTail(isBlock(stmt[1]) ? stmt[1] : ['block', stmt[1]]) ||
-        stmt.slice(2).some((part) => isNode(part) && !isBlock(part) && armTail(part[1]));
+      return armTail(this.isBlock(stmt[1]) ? stmt[1] : ['block', stmt[1]]) ||
+        stmt.slice(2).some((part) => isNode(part) && !this.isBlock(part) && armTail(part[1]));
     }
     return false;
   }
@@ -9868,7 +9902,7 @@ class Emitter {
   }
 
   componentInitValue(value) {
-    const wrap = Emitter.needsGrouping(value, 'operand', this.stores);
+    const wrap = Emitter.needsGrouping(value, 'operand');
     if (wrap) this.b.emit('(');
     this.expr(value);
     if (wrap) this.b.emit(')');
@@ -9985,7 +10019,7 @@ class Emitter {
         }
       }
     }
-    const stmts = isBlock(body) ? body.slice(1) : [];
+    const stmts = this.isBlock(body) ? body.slice(1) : [];
 
     // ── Categorization: the member model, total by construction ──
     const readonlyVars = [];
@@ -10264,7 +10298,7 @@ class Emitter {
       }
       // Colon-method groups (`save: (e) -> …` lines wrap into one
       // implicit object statement).
-      if (isObject(stmt)) {
+      if (this.isObject(stmt)) {
         if (offered) rejectOffer(stmt);
         for (const pair of stmt.slice(1)) {
           if (!isNode(pair) || (pair[0] !== ':' && pair[0] !== 'void-pair') || typeof pair[1] !== 'string' || !isFunc(pair[2])) {
@@ -10404,7 +10438,7 @@ class Emitter {
       ...[...readonlyVars, ...plainVars, ...stateVars].map((m) => m.value),
       ...derivedVars
         .map((m) => m.value)
-        .filter((v) => !(isBlock(v) && v.length > 2)),
+        .filter((v) => !(this.isBlock(v) && v.length > 2)),
     ].filter((v) => v !== undefined);
     const { entries: initHoist, names: initNames } =
       this.scopedHoist(initValues, [], { declareInPlace: false });
@@ -10552,7 +10586,7 @@ class Emitter {
       };
       const memberValue = (stmt, value) => {
         this.mark(stmt, 'value', () => this.withExpression(() => {
-          const wrap = Emitter.needsGrouping(value, 'operand', this.stores);
+          const wrap = Emitter.needsGrouping(value, 'operand');
           if (wrap) this.b.emit('(');
           this.expr(value);
           if (wrap) this.b.emit(')');
@@ -10694,7 +10728,7 @@ class Emitter {
         const tm = tsInfo.members.find((x) => x.node === m.node && x.kind === 'computed');
         if (tm === undefined || tm.annotation != null) return;
         const code = this.capturedExprText(() => this.computedBody(m.node, m.value, 0));
-        computedBodies.push({ name: m.name, code, block: isBlock(m.value) && m.value.length > 2 });
+        computedBodies.push({ name: m.name, code, block: this.isBlock(m.value) && m.value.length > 2 });
       };
       const emitGate = (gate, index) => {
         initLine(gate.node, () => {
@@ -10754,7 +10788,7 @@ class Emitter {
           this.mark(eff, '$self', () => {
             this.mark(eff, 'operator', () => this.b.emit(this.runtimeName('__effect')));
             this.b.emit(isAsync ? '(async () => ' : '(() => ');
-            if (isBlock(bodyNode) && bodyNode.length > 2) {
+            if (this.isBlock(bodyNode) && bodyNode.length > 2) {
               this.mark(eff, 'value', () => this.withExpression(() => {
                 const bodyStmts = this.liveStmts(bodyNode.slice(1), { forwards: true });
                 const { entries, names } = this.scopedHoist(bodyStmts, []);
@@ -10765,7 +10799,7 @@ class Emitter {
                 this.rframes.pop();
               }));
             } else {
-              const single = isBlock(bodyNode) ? bodyNode[1] : bodyNode;
+              const single = this.isBlock(bodyNode) ? bodyNode[1] : bodyNode;
               const { entries, names } = this.scopedHoist([single], []);
               this.scopes.push(names);
               this.rframes.push({ reactive: new Set(), bound: names });
@@ -10780,7 +10814,7 @@ class Emitter {
               } else {
                 if (!this.effectTailWrites(single)) this.b.emit('return ');
                 this.mark(eff, 'value', () => this.withExpression(() => {
-                  const wrap = Emitter.needsGrouping(single, 'operand', this.stores) || isObject(single);
+                  const wrap = Emitter.needsGrouping(single, 'operand') || this.isObject(single);
                   if (wrap) this.b.emit('(');
                   this.expr(single);
                   if (wrap) this.b.emit(')');
@@ -10871,7 +10905,7 @@ class Emitter {
           // `<object>`'s handlers must not inherit the outer tag, and
           // no wrong claim beats either right one.
           if (tag === 'object') {
-            next = isObject(x) && x.slice(1).some((c) => isNode(c) && c[0] === ':') ? host : null;
+            next = this.isObject(x) && x.slice(1).some((c) => isNode(c) && c[0] === ':') ? host : null;
           } else if (tag !== null && TEMPLATE_TAGS.has(tag)) {
             next = { tag, svg: host?.svg === true || SVG_ONLY_TAGS.has(tag) };
           } else if (typeof x[0] === 'string' && /^[A-Z]/.test(x[0])) {
@@ -11008,7 +11042,7 @@ class Emitter {
     };
     // ── Phase 1: the walk (collection only — no emission) ──
     const body = renderNode[1];
-    const stmts = isBlock(body) ? body.slice(1) : [body];
+    const stmts = this.isBlock(body) ? body.slice(1) : [body];
     classRecord.stmts = stmts;
     this.rframes.push({ reactive: new Set(), bound: classRecord.bindings });
     let rootVar;
@@ -11277,7 +11311,7 @@ class Emitter {
   renderExpr(value) {
     let span = null;
     this.withExpression(() => {
-      const wrap = Emitter.needsGrouping(value, 'operand', this.stores);
+      const wrap = Emitter.needsGrouping(value, 'operand');
       if (wrap) this.b.emit('(');
       const start = this.b.offset;
       this.expr(value);
@@ -11477,7 +11511,7 @@ class Emitter {
         'emitter: an async loop has no render reading — reconciliation is synchronous; collect the items into a state ' +
         'member and loop over it');
     }
-    if (headStr === 'comprehension' || headStr === 'while' || headStr === 'loop') {
+    if (isComprehensionNode(sexpr) || headStr === 'while' || headStr === 'loop') {
       throw this.positionedError(sexpr,
         'emitter: only `for … in` drives list rendering — while/loop/comprehensions have no reconcile reading inside ' +
         'render');
@@ -11700,8 +11734,8 @@ class Emitter {
       }
     };
     for (const arg of args) {
-      if (isObject(arg)) take(arg);
-      else if (isFunc(arg) && isBlock(arg[2])) for (const child of arg[2].slice(1)) if (isObject(child)) take(child);
+      if (this.isObject(arg)) take(arg);
+      else if (isFunc(arg) && this.isBlock(arg[2])) for (const child of arg[2].slice(1)) if (this.isObject(child)) take(child);
     }
     for (const k of ['ref', 'key']) keys.delete(k);
     for (const k of [...keys]) if (k.startsWith('__')) keys.delete(k);
@@ -11886,7 +11920,7 @@ class Emitter {
   // conditional branch, a loop body). Non-blocks render as one child;
   // a postfix conditional's plain [statement] wrapper unwraps.
   renderChildBlock(body) {
-    if (!isBlock(body)) {
+    if (!this.isBlock(body)) {
       const v = this.renderNode(body);
       if (v != null) return v;
       const c = this.newRenderVar('empty');
@@ -11931,10 +11965,10 @@ class Emitter {
             'line or bind it in a method)', this.rstate.node);
         }
         const block = arg[2];
-        if (isBlock(block)) {
+        if (this.isBlock(block)) {
           for (let j = 1; j < block.length; j++) {
             const child = block[j];
-            if (isObject(child)) {
+            if (this.isObject(child)) {
               this.renderAttributes(el, child);
             } else if (!this.renderOwnLineWord(el, child, block, j, owner)) {
               const v = this.renderNode(child);
@@ -11950,7 +11984,7 @@ class Emitter {
         }
         continue;
       }
-      if (isObject(arg)) {
+      if (this.isObject(arg)) {
         this.renderAttributes(el, arg);
         continue;
       }
@@ -12402,7 +12436,7 @@ class Emitter {
         if (isNode(value) && value[0] === '.' && value[1] === 'this' && value.length === 3 && typeof value[2] === 'string') {
           throw dead(`'@${value[2]}' is not a reactive member`, "declare it with ':=' to share it");
         }
-        if (typeof value !== 'string' && !Emitter.isChainNode(value)) {
+        if (typeof value !== 'string' && !this.isChainNodeOf(value)) {
           throw dead('this expression is never a container', 'bind a reactive member or module reactive name');
         }
         this.checkCrossScopeLocals(value, pair);
@@ -12567,7 +12601,7 @@ class Emitter {
       domItems.push(arg);
     };
     for (const arg of args) {
-      if (isObject(arg)) {
+      if (this.isObject(arg)) {
         rehomeObjectDirectives(arg);
         for (const pair of arg.slice(1)) addPair(pair);
         scanAdvance(arg);
@@ -12583,9 +12617,9 @@ class Emitter {
         // The injected children arrow: objects are props, bare words
         // follow the scope rule, everything else is child DOM.
         const block = arg[2];
-        const stmts = isBlock(block) ? block.slice(1) : block != null ? [block] : [];
+        const stmts = this.isBlock(block) ? block.slice(1) : block != null ? [block] : [];
         for (const child of stmts) {
-          if (isObject(child)) {
+          if (this.isObject(child)) {
             rehomeObjectDirectives(child);
             for (const pair of child.slice(1)) addPair(pair);
             scanAdvance(child);
@@ -14047,7 +14081,7 @@ class Emitter {
     this.rframes.push({ reactive: new Set(), bound: rec.bindings, loopVars: rec.bindings, loopBindings: Emitter.loopBindingsOf(rec) });
     try {
       let stmts;
-      if (isBlock(part)) {
+      if (this.isBlock(part)) {
         stmts = part.slice(1);
       } else if (isNode(part) && part.length === 1 && isNode(part[0]) && this.stores.idOf(part) === null) {
         // The postfix conditional's plain [statement] wrapper.
@@ -14443,7 +14477,7 @@ class Emitter {
   // subtree reachable) so it never emits: keys are reconcile
   // identities, never DOM attributes.
   extractLoopKey(body, loopNode) {
-    const stmts = isBlock(body) ? body.slice(1) : [body];
+    const stmts = this.isBlock(body) ? body.slice(1) : [body];
     const first = stmts.find((s) => !this.isRenderBinding(s));
     if (!isNode(first)) return null;
     const scanObject = (obj) => {
@@ -14461,12 +14495,12 @@ class Emitter {
       return null;
     };
     for (const arg of first.slice(1)) {
-      if (isObject(arg)) {
+      if (this.isObject(arg)) {
         const found = scanObject(arg);
         if (found !== null) return found;
-      } else if (isFunc(arg) && isBlock(arg[2])) {
+      } else if (isFunc(arg) && this.isBlock(arg[2])) {
         for (const child of arg[2].slice(1)) {
-          if (isObject(child)) {
+          if (this.isObject(child)) {
             const found = scanObject(child);
             if (found !== null) return found;
           }
@@ -14634,7 +14668,7 @@ class Emitter {
         });
         try {
           this.withExpression(() => {
-            const wrap = Emitter.needsGrouping(keyExpr, 'operand', this.stores) || isObject(keyExpr);
+            const wrap = Emitter.needsGrouping(keyExpr, 'operand') || this.isObject(keyExpr);
             // The `key:` word answers the key's own type, read off the
             // served position around the expression — the same technique
             // a bind uses: the typed position is the expression, and the
@@ -15171,7 +15205,7 @@ class Emitter {
       }
       reject(`emitter: '<=>' targets '@${value[2]}', which is not a declared member`);
     }
-    if (isNode(value) && Emitter.optionalGuard(value) !== null) {
+    if (isNode(value) && this.optionalGuard(value) !== null) {
       reject('emitter: a two-way binding target cannot carry optional links — the write form would be invalid JS');
     }
     let n = value;
@@ -15338,7 +15372,7 @@ class Emitter {
     let cur = x;
     for (;;) {
       if (!isNode(cur)) return false;
-      if (isObject(cur)) return true;
+      if (isObjectShape(cur)) return true;
       if (isBinary(cur) || isRelation(cur) || isChainLink(cur)) { cur = cur[1]; continue; }
       const slot = Emitter.chainHeadSlot(cur);
       if (slot !== null) { cur = cur[slot]; continue; }
@@ -15355,8 +15389,8 @@ class Emitter {
   // The 'optindex'/'optcall' heads are legal identifiers, so the
   // static slot test alone can hijack a call of a function so named —
   // the instance twin applies the locked-head discrimination and is
-  // what emission paths use; the static form remains for stores-free
-  // shape checks over emitter-synthesized trees.
+  // what every reading uses; the static form serves only the grouping
+  // lattice, where a misread call over-groups and never changes meaning.
   chainHeadSlotOf(x) {
     if ((x[0] === '.' || x[0] === '?.' || x[0] === '[]') && x.length === 3) return 1;
     if (x[0] === 'optindex' && x.length === 3 && this.lockedHead(x, 'optindex')) return 1;
@@ -15371,10 +15405,6 @@ class Emitter {
     if (isNode(x[0]) && x[0][0] !== 'dammit!' &&
         !(x[0][0] === '.' && x[0].length === 3 && x[0][2] === 'new')) return 0;
     return null;
-  }
-
-  static isChainNode(x) {
-    return isNode(x) && Emitter.chainHeadSlot(x) !== null;
   }
 
   isChainNodeOf(x) {
@@ -15446,7 +15476,7 @@ class Emitter {
         // dot as a decimal point, so the member needs `(2).toFixed`
         // (a float, exponent, hex, or bigint literal has no such
         // ambiguity).
-        if (isInner) this.asReference(n[1], () => this.grouped(n, 'object', n[1], Emitter.needsGrouping(n[1], 'head', this.stores) || Emitter.isIntegerLiteral(n[1])));
+        if (isInner) this.asReference(n[1], () => this.grouped(n, 'object', n[1], Emitter.needsGrouping(n[1], 'head') || Emitter.isIntegerLiteral(n[1])));
         else f.role = this.beginMark(n, 'object');
       } else if (fkind === 'index') {
         // isWrite reads the state BEFORE this accessor clears it;
@@ -15717,7 +15747,7 @@ class Emitter {
         this.b.emit(optional ? `((${p}) => ${p} == null ? undefined : ({` : `((${p}) => ({`);
         body(() => this.b.emit(p));
         this.b.emit('}))(');
-        this.withExpression(() => this.grouped(node, 'source', source, Emitter.needsGrouping(source, 'operand', this.stores)));
+        this.withExpression(() => this.grouped(node, 'source', source, Emitter.needsGrouping(source, 'operand')));
         this.b.emit(')');
       }
     });
@@ -16088,7 +16118,7 @@ class Emitter {
       : `${node[0] === 'cast' ? 'as' : 'satisfies'} ${tidyType(node[2])}`;
     this.mark(node, '$self', () => {
       this.b.tsOnly(() => this.b.emit('('));
-      const wrapValue = Emitter.jsTier(node[1], this.stores) !== 'primary';
+      const wrapValue = Emitter.jsTier(node[1]) !== 'primary';
       if (wrapValue) this.b.tsOnly(() => this.b.emit('('));
       this.mark(node, 'value', () => this.expr(node[1]));
       if (wrapValue) this.b.tsOnly(() => this.b.emit(')'));
@@ -16194,7 +16224,7 @@ class Emitter {
           // (spreads never do — `...` binds its operand; pattern
           // elements never do — they are binding positions, and
           // `[(a = 1)]` is invalid destructuring JS).
-          const wrap = !this.inPattern && !(isNode(item) && item[0] === '...') && Emitter.needsGrouping(item, 'operand', this.stores);
+          const wrap = !this.inPattern && !(isNode(item) && item[0] === '...') && Emitter.needsGrouping(item, 'operand');
           if (wrap) this.b.emit('(');
           this.expr(item);
           if (wrap) this.b.emit(')');
@@ -16528,7 +16558,7 @@ class Emitter {
       // JavaScript takes a LeftHandSideExpression here, which is what a
       // chain HEAD is: a primary stands bare, and an await, a logical or
       // a conditional groups, or `class extends a || b {` does not parse.
-      this.grouped(node, 'parent', parent, Emitter.needsGrouping(parent, 'head', this.stores));
+      this.grouped(node, 'parent', parent, Emitter.needsGrouping(parent, 'head'));
     }
     this.b.emit(' {\n');
     if (body != null) this.withThisBoundary(() => this.mark(node, 'body', () => this.classMembers(body, ind)));
@@ -16556,7 +16586,7 @@ class Emitter {
       const pair = this.stores.alias([stmt[0] === 'void-def' ? 'void-pair' : ':', stmt[1], fn], stmt);
       return { form: 'def', pair };
     }
-    if ((stmt[0] === 'get' || stmt[0] === 'set') && stmt.length === 2 && isObject(stmt[1]) && stmt[1].length === 2) {
+    if ((stmt[0] === 'get' || stmt[0] === 'set') && stmt.length === 2 && this.isObject(stmt[1]) && stmt[1].length === 2) {
       const pair = stmt[1][1];
       if (isNode(pair) && pair[0] === ':' && pair.length === 3 && isFunc(pair[2])) return { form: stmt[0], pair };
     }
@@ -16564,7 +16594,7 @@ class Emitter {
   }
 
   classMembers(body, ind) {
-    const stmts = isNode(body) && body[0] === 'block' ? body.slice(1) : [body];
+    const stmts = this.isBlock(body) ? body.slice(1) : [body];
     const forms = new Map(stmts.map((stmt) => [stmt, this.classMethodForm(stmt)]));
     const memberName = (key) => (isNode(key) && key[0] === '.' && key[1] === 'this' ? key[2] : key);
     const isStaticKey = (key) => isNode(key) && key[0] === '.' && key[1] === 'this' && key.length === 3 && typeof key[2] === 'string';
@@ -16594,7 +16624,7 @@ class Emitter {
     const accessors = [];
     for (const stmt of stmts) {
       const form = forms.get(stmt) ?? null;
-      const pairs = form !== null ? [form.pair] : isObject(stmt) ? stmt.slice(1) : null;
+      const pairs = form !== null ? [form.pair] : this.isObject(stmt) ? stmt.slice(1) : null;
       if (pairs === null) {
         const fieldKey = typeof stmt === 'string' || isStaticKey(stmt) ? stmt
           : Emitter.isTypedWrapper(stmt) && (typeof stmt[1] === 'string' || isStaticKey(stmt[1])) ? stmt[1]
@@ -16781,6 +16811,9 @@ class Emitter {
     const accessor = form !== null && form.form !== 'def' ? form.form : null;
     const keyRole = form !== null && form.form === 'def' ? 'name' : 'key';
     const origin = stmt;
+    // The reshaped member is an object by construction — its alias
+    // carries the ORIGIN's row (a `get`/`set` accessor is a call row),
+    // so the call-aware object test cannot be the one to read it.
     if (form !== null) stmt = this.stores.alias(['object', form.pair], stmt);
     {
       // A nested `class @Name` is a STATIC member class:
@@ -16794,7 +16827,7 @@ class Emitter {
         this.b.emit(';\n');
         return;
       }
-      if (isObject(stmt)) {
+      if (form !== null || this.isObject(stmt)) {
         for (const pair of stmt.slice(1)) this.withTsDirectives(pair, pad, () => {
           const key = pair[1];
           const value = pair[2];
@@ -16869,7 +16902,7 @@ class Emitter {
                 return p;
               };
               params = params.map(strip);
-              if (atParams.length > 0 && isNode(block) && block[0] === 'block' &&
+              if (atParams.length > 0 && this.isBlock(block) &&
                   isNode(block[1]) && block[1][0] === 'super') {
                 const names = new Set(atParams);
                 const subst = (x) => {
@@ -17048,7 +17081,7 @@ class Emitter {
   }
 
   methodBlock(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, tailReturn = true, voidReason = null, atParams = [] }) {
-    const stmts = this.liveStmts(isNode(block) && block[0] === 'block' ? block.slice(1) : [block], { forwards: true });
+    const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block], { forwards: true });
     const { entries: hoist, names } = this.scopedHoist(stmts, funcNode[1]);
     for (const n of this.pushReactiveFrame(stmts, names, funcNode[1], funcNode)) names.add(n);
     this.scopes.push(names);
@@ -17072,7 +17105,7 @@ class Emitter {
         // instance exists, the param carries the value.
         for (const n of atParams) this.b.emit(`${pad}this.${n} = ${n};\n`);
       };
-      this.emitTsTypeDecls(isNode(block) && block[0] === 'block' ? block.slice(1) : [block], pad);
+      this.emitTsTypeDecls(this.isBlock(block) ? block.slice(1) : [block], pad);
       this.mark(block, 'statements', () => {
         const leadingSuper = isConstructor && stmts.length > 0 && isNode(stmts[0]) && stmts[0][0] === 'super';
         if (!leadingSuper) emitBinds();
@@ -17129,7 +17162,7 @@ class Emitter {
       this.mark(node, 'operator', () => this.b.emit('new'));
       this.b.emit(' ');
       this.mark(node, 'operand', () => {
-        if (isNode(operand) && SPINE_HEADS.has(operand[0]) && Emitter.optionalGuard(operand)) {
+        if (this.isSpine(operand) && this.optionalGuard(operand)) {
           // A soaking spine seals into a VALUE before `new` reaches
           // it, at every link kind — a member tail and an index tail
           // fail the same way. `?? undefined` is the seal rather than
@@ -17149,7 +17182,7 @@ class Emitter {
           // constructor spine: `(new a.b).c` printed bare is `new a.b.c`.
           // A spine that holds a call seals whole: printed bare,
           // `new (a().b)` would construct `a`.
-          if (Emitter.pureSpine(operand)) {
+          if (this.pureSpine(operand)) {
             this.member(operand);
             this.b.emit('()');
           } else {
@@ -17158,7 +17191,7 @@ class Emitter {
             this.b.emit(')()');
           }
         } else if (isNode(operand) && operand[0] === 'new' && operand.length === 2 &&
-                   Emitter.optionalGuard(operand[1])) {
+                   this.optionalGuard(operand[1])) {
           // `new new a?.b` — the inner construction is the constructor,
           // and its spine has to seal before either `new` reaches it.
           // Only the soaking case reroutes; an ordinary `new new X`
@@ -17175,7 +17208,7 @@ class Emitter {
           this.taggedTemplate(operand);
           this.b.emit(')()');
         } else if (isNode(operand) && isNode(operand[0]) && !isRubyNew(operand[0]) &&
-                   SPINE_HEADS.has(operand[0][0]) && Emitter.optionalGuard(operand[0])) {
+                   this.isSpine(operand[0]) && this.optionalGuard(operand[0])) {
           // The same seal with the call's own argument list kept:
           // `new Registry?.Box(a)` → `new (Registry?.Box ?? undefined)(a)`.
           // The `.new` branch of the call walk is the precedent — a
@@ -17230,10 +17263,10 @@ class Emitter {
           // `X.new(args)` is a construction of its own, so as a callee
           // it is an expression too: `new a.new(1)` constructs what that
           // construction returns.
-          const plainCallee = !isRubyNew(callee) && (Emitter.pureSpine(callee) ||
+          const plainCallee = !isRubyNew(callee) && (this.pureSpine(callee) ||
             (isNode(callee) && !callee.parenthesized && this.semanticKindOf(callee) === 'call') ||
             (isNode(callee) && callee[0] === 'dammit!'));
-          if (SPINE_HEADS.has(operand[0]) && Emitter.pureSpine(operand)) {
+          if (this.isSpine(operand) && this.pureSpine(operand)) {
             // An index spine, with its argument list spelled for the
             // same reason a member spine's is.
             this.call(operand);
@@ -17498,7 +17531,7 @@ class Emitter {
     // Registered by the owning definition (`save! = ->`, `fn!: ->`):
     // the body suppresses its implicit return.
     const isVoid = this.voidFuncs.has(node);
-    const stmts = this.liveStmts(isNode(block) && block[0] === 'block' ? block.slice(1) : [block], { forwards: true });
+    const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block], { forwards: true });
     const { entries: hoist, names } = this.scopedHoist(stmts, params);
     for (const n of this.pushReactiveFrame(stmts, names, params, node)) names.add(n);
     this.scopes.push(names);
@@ -17566,14 +17599,14 @@ class Emitter {
         // bare atom (`=> throw(e)`, `=> debugger` — invalid JS both).
         const inline = !isVoid && stmts.length === 1 && hoist.length === 0 &&
           !Emitter.statementOnly(stmts[0]) &&
-          !(isNode(stmts[0]) && (isDefHead(stmts[0][0]) || ['return', 'if', 'while', 'block'].includes(stmts[0][0])));
+          !(isNode(stmts[0]) && (isDefHead(stmts[0][0]) || ['return', 'if', 'while'].includes(stmts[0][0]) || this.isBlock(stmts[0])));
         if (inline) {
           this.mark(node, 'body', () => {
             // An inline body that IS an object literal must group:
             // `() => {}` is an empty block returning undefined, not
             // the object (the statement-start problem in arrow-body
             // position).
-            const wrap = Emitter.needsGrouping(stmts[0], 'operand', this.stores) || isObject(stmts[0]);
+            const wrap = Emitter.needsGrouping(stmts[0], 'operand') || this.isObject(stmts[0]);
             if (wrap) this.b.emit('(');
             this.expr(stmts[0]);
             if (wrap) this.b.emit(')');
@@ -17658,7 +17691,7 @@ class Emitter {
           }
           this.b.emit(';\n');
         }
-        this.emitTsTypeDecls(isBlock(block) ? block.slice(1) : [block], '  '.repeat(ind + 1));
+        this.emitTsTypeDecls(this.isBlock(block) ? block.slice(1) : [block], '  '.repeat(ind + 1));
         this.mark(block, 'statements', () => {
           stmts.forEach((stmt, i) => {
             this.b.emit('  '.repeat(ind + 1));
@@ -17774,7 +17807,7 @@ class Emitter {
     }
     this.b.emit('return ');
     this.withTailReturn(() => {
-      const wrap = Emitter.needsGrouping(stmt, 'return', this.stores);
+      const wrap = Emitter.needsGrouping(stmt, 'return');
       if (wrap) this.b.emit('(');
       this.expr(stmt);
       if (wrap) this.b.emit(')');
@@ -17796,7 +17829,7 @@ class Emitter {
     this.checkMemberWrite(node, node[1]);
     // An optional chain is not a JavaScript assignment reference —
     // `obj?.x++` has no valid emission; guard the update explicitly.
-    if (isNode(node[1]) && Emitter.optionalGuard(node[1]) !== null) {
+    if (isNode(node[1]) && this.optionalGuard(node[1]) !== null) {
       throw this.positionedError(node,
         "emitter: an optional chain cannot be an update target — no reference exists for `obj?.x++`; " +
         'guard it explicitly (`obj.x++ if obj?`)');
@@ -17832,7 +17865,7 @@ class Emitter {
       }
       // `key in {literal}`: the container is statically an object, so
       // the array/string membership lowering is dead — plain JS `in`.
-      if (op === 'of' || (op === 'in' && isObject(b))) {
+      if (op === 'of' || (op === 'in' && this.isObject(b))) {
         this.operand(node, 'left', a);
         this.b.emit(' in ');
         this.operand(node, 'right', b);
@@ -17858,7 +17891,7 @@ class Emitter {
         this.b.emit(') : (');
         // The includes() slot is an argument; this one is an operand
         // of JavaScript's `in`, so a lower-precedence left side groups.
-        const wrap = Emitter.needsGrouping(a, 'operand', this.stores);
+        const wrap = Emitter.needsGrouping(a, 'operand');
         if (wrap) this.b.emit('(');
         this.expr(a);
         if (wrap) this.b.emit(')');
@@ -17911,7 +17944,7 @@ class Emitter {
     const inner = chain[chain.length - 1];
     const hoists = Emitter.ternaryHoists(inner, this.stores);
     const branch = (owner, role, child) => {
-      this.grouped(owner, role, child, Emitter.needsGrouping(child, 'operand', this.stores) || isUpdate(child));
+      this.grouped(owner, role, child, Emitter.needsGrouping(child, 'operand') || isUpdate(child));
     };
     // A ternary CONDITION keeps its parens — bare, JS
     // right-associativity re-associates and changes the value.
@@ -17968,7 +18001,7 @@ class Emitter {
         }
         this.b.emit('${');
         this.mark(chunk, '$self', () => {
-          const wrap = Emitter.needsGrouping(chunk[0], 'operand', this.stores) || isUpdate(chunk[0]);
+          const wrap = Emitter.needsGrouping(chunk[0], 'operand') || isUpdate(chunk[0]);
           if (wrap) this.b.emit('(');
           this.expr(chunk[0]);
           if (wrap) this.b.emit(')');
@@ -18115,7 +18148,7 @@ class Emitter {
         this.expr(ctor);
         // A soaking target cannot be constructed THROUGH here any
         // more than under `new` — same seal, same reason.
-        this.b.emit(Emitter.optionalGuard(ctor) ? ' ?? undefined)' : ')');
+        this.b.emit(this.optionalGuard(ctor) ? ' ?? undefined)' : ')');
       } else this.expr(ctor);
     });
   }
@@ -18195,7 +18228,7 @@ class Emitter {
       };
       // An assignment (or any non-primary operand) parenthesizes
       // inside the condition; a plain name or call reads bare.
-      const grouped = assign !== null || Emitter.jsTier(guard[1], this.stores) !== 'primary';
+      const grouped = assign !== null || Emitter.jsTier(guard[1]) !== 'primary';
       if (op === '||') {
         this.b.emit('!');
         if (grouped) { this.b.emit('('); inner(); this.b.emit(')'); }
@@ -18218,7 +18251,7 @@ class Emitter {
         if (isNode(ret) && ret.length > 1) {
           this.b.emit(' ');
           this.mark(ret, 'value', () => {
-            if (ret[0] === 'return' && Emitter.needsGrouping(ret[1], 'return', this.stores)) {
+            if (ret[0] === 'return' && Emitter.needsGrouping(ret[1], 'return')) {
               this.b.emit('('); this.expr(ret[1]); this.b.emit(')');
             } else this.expr(ret[1]);
           });
@@ -18347,14 +18380,14 @@ class Emitter {
     const [, target, rhs] = node;
     let cur = rhs;
     while (isNode(cur)) {
-      const s = Emitter.chainHeadSlot(cur);
+      const s = this.chainHeadSlotOf(cur);
       if (s === null) break;
       cur = cur[s];
     }
     const id = isNode(cur) ? this.stores.idOf(cur) : null;
     const kind = id !== null ? this.stores.node(id)?.semanticKind : null;
     const callHead = isNode(cur) && typeof cur[0] === 'string' && /^[A-Za-z_$][\w$]*$/.test(cur[0]) &&
-      (kind === 'call' || (kind == null && Emitter.jsTier(cur, this.stores) === 'primary'));
+      (kind === 'call' || (kind == null && Emitter.jsTier(cur) === 'primary'));
     if (!callHead) {
       throw this.positionedError(node, "emitter: `.=` re-binds its target to a METHOD CALL on itself — the right side must be a call chain (`x .= trim()`)");
     }
@@ -18362,7 +18395,7 @@ class Emitter {
       const read = this.compoundTarget(node, target, ind);
       const substHead = (n) => {
         if (n === cur) return [['.', read, cur[0]], ...cur.slice(1)];
-        const s = Emitter.chainHeadSlot(n);
+        const s = this.chainHeadSlotOf(n);
         const copy = n.slice();
         copy[s] = substHead(n[s]);
         return copy;
@@ -18390,7 +18423,7 @@ class Emitter {
     this.mark(node, '$self', () => {
       const tag = node[1];
       this.mark(node, 'tag', () => {
-        if (Emitter.needsGrouping(tag, 'head', this.stores)) {
+        if (Emitter.needsGrouping(tag, 'head')) {
           this.b.emit('(');
           this.expr(tag);
           this.b.emit(')');
@@ -19240,7 +19273,7 @@ const runtimeAliasBindings = (emitter, trees) => {
       // A class-body `def` is a method: its name is a member, never a
       // binding of the module (its parameters and body still walk).
       for (const part of x.slice(2)) {
-        const stmts = isNode(part) && part[0] === 'block' ? part.slice(1) : [part];
+        const stmts = emitter.isBlock(part) ? part.slice(1) : [part];
         for (const st of stmts) {
           if (isNode(st) && isDefHead(st[0]) && st.length === 4) {
             if (isNode(st[2])) for (const param of st[2]) addPattern(param);
