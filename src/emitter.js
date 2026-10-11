@@ -9667,6 +9667,11 @@ class Emitter {
       const tail = stmt[stmt.length - 1];
       return this.effectTailWrites(tail) || this.effectBranchWrites(tail);
     }
+    // A guarded write (`open and win.onkeydown = …`) is the `if` spelled
+    // with an operator: its value is the write's.
+    if ((h === '&&' || h === '||' || h === '??') && stmt.length === 3) {
+      return this.effectTailWrites(stmt[2]) || this.effectBranchWrites(stmt[2]);
+    }
     if (isAssignHead(h) || h === '.=' || isUpdate(stmt)) return true;
     if (Emitter.LOOP_HEADS.has(h) || isDefHead(h) || h === 'class' || h === 'enum' || h === 'export') return true;
     if (this.isModuleImport(stmt) || this.isReactiveDecl(stmt) || this.isReadonlyDecl(stmt)) return true;

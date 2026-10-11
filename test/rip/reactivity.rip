@@ -267,6 +267,17 @@ test "an effect whose arm is a sequence ending in a write registers no cleanup",
   calls
   ''', 0
 
+test "an effect ending in a guarded write registers no cleanup", '''
+  open := true
+  calls = 0
+  win = {}
+  ~> open and win.a = -> calls += 1
+  ~> not open or win.b = -> calls += 1
+  ~> open && (calls += 0; win.c = -> calls += 1)
+  open = false
+  calls
+  ''', 0
+
 test "an effect switch arm that writes does not fall into the next arm's cleanup", '''
   log = []
   mode := 'a'
