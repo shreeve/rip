@@ -518,6 +518,10 @@ type "fat arrow return type dts", "g = (x: number): string => \"v\"", '''
 # body — so it's a hard error pointing at the fix.
 fail "fat arrow bare function-type return", 'g = (x: number): (n: number) => number => x'
 fail "fat arrow empty-params function-type return", 'g = (x: number): () => void => x'
+# A cast's type name followed by a pair colon is still the cast's: the
+# stray colon rejects, never reading `as`/`satisfies` as a call.
+fail "a cast type followed by a pair colon rejects", 'y = x as T: 1', "1:7: Unexpected 'T'"
+fail "a satisfies type followed by a pair colon rejects", 'x = a satisfies b: c', "Unexpected 'b'"
 
 type "export interface with : annotations", """
   export interface Config

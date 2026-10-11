@@ -4162,6 +4162,7 @@ var CAST_LHS_ENDERS = new Set([
 ]);
 var TYPE_STARTERS = new Set([
   "IDENTIFIER",
+  "PROPERTY",
   "(",
   "CALL_START",
   "PARAM_START",
@@ -32674,7 +32675,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "44a4b43e1118169c";
+var compilerBuild = () => "72dfe35299bb29d5";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
