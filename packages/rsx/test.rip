@@ -161,6 +161,11 @@ test "allowDoctype: true skips an internal subset, whose declarations hold their
   eq parse('<!DOCTYPE a [ <!ELEMENT a ANY> ] ><a>x</a>', allowDoctype: true), { a: 'x' }
   throws (-> parse('<!DOCTYPE a [<!ENTITY x "y">', allowDoctype: true)), RsxError, 'unterminated DOCTYPE'
 
+test "allowDoctype: true skips quoted literals, comments, and PIs that hold brackets", ->
+  eq parse('<!DOCTYPE n SYSTEM "http://[::1]/n.dtd"><n>x</n>', allowDoctype: true), { n: 'x' }
+  eq parse('<!DOCTYPE a [<!ENTITY x "]>">]><a>x</a>', allowDoctype: true), { a: 'x' }
+  eq parse('<!DOCTYPE a [<!-- ]> --><?pi ]> ?>]><a>x</a>', allowDoctype: true), { a: 'x' }
+
 test "an element name may start with a character outside the BMP", ->
   eq parse('<𝒜>x</𝒜>'), { '𝒜': 'x' }
 
