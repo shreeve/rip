@@ -10007,6 +10007,7 @@ class Emitter {
     this.bindingPattern = false;
     this.deopt = false;
     this.inTarget = false;
+    this.calleeName = null;
     this.voidFuncs = new WeakSet;
     this.sideEffectOnly = false;
     this.voidReason = null;
@@ -10724,6 +10725,15 @@ class Emitter {
     if (this.thisMemberKindOf("rest") === "rest" && Emitter.targetsRestView(target)) {
       throw this.positionedError(node, "emitter: `@rest` is the runtime-owned view of the caller's undeclared props and is never assigned — " + "set the attribute on the element in render, or declare the name as a prop the caller supplies");
     }
+    if (Emitter.isPattern(target)) {
+      const names = [];
+      this.patternNames(target, names, true);
+      for (const n of names) {
+        if (this.memberKindOf(n) === "computed")
+          this.rejectComputedMemberWrite(node, n);
+      }
+      return;
+    }
     let name = null, kind = null;
     if (typeof target === "string") {
       this.checkBareRest(node, target);
@@ -10735,6 +10745,8 @@ class Emitter {
     }
     if (kind === null)
       return;
+    if (kind === "computed")
+      this.rejectComputedMemberWrite(node, name);
     if (kind === "readonly") {
       throw this.positionedError(node, `emitter: cannot assign to readonly member '${name}' — a '=!' member never changes after _init; ` + "a member that changes is state (':=')");
     }
@@ -10743,6 +10755,9 @@ class Emitter {
       if (!f.plainWrites.has(name))
         f.plainWrites.set(name, node);
     }
+  }
+  rejectComputedMemberWrite(node, name) {
+    throw this.positionedError(node, `emitter: cannot assign to computed '${name}' — a '~=' member derives from its dependencies; write to those instead`);
   }
   notePlainRenderRead(name, viaThis = false) {
     if (this.rstate == null || this.cframes.length === 0)
@@ -10819,6 +10834,31 @@ class Emitter {
     }
     this.b.emit(".value");
   }
+  boundMethodRead(name, kind) {
+    const callee = this.calleeName;
+    this.calleeName = null;
+    return kind === "method" && callee !== name && !this.inTarget;
+  }
+  emitBoundMethod(name) {
+    const self = this.renderSelf ?? "this";
+    if (this.ts)
+      this.b.tsOnly(() => this.b.emit("("));
+    this.b.emit(self + '._bound("');
+    this.emitPrimitive(name);
+    this.b.emit('")');
+    if (this.ts)
+      this.b.tsOnly(() => this.b.emit(` as ${self === "this" ? "this" : `(typeof ${self})`}[${JSON.stringify(name)}])`));
+  }
+  asCallee(callee, fn) {
+    const name = typeof callee === "string" ? callee : isNode(callee) && callee[0] === "." && callee.length === 3 && callee[1] === "this" && typeof callee[2] === "string" ? callee[2] : null;
+    const prev = this.calleeName;
+    this.calleeName = name;
+    try {
+      fn();
+    } finally {
+      this.calleeName = prev;
+    }
+  }
   memberRead(name, reactive) {
     if (this.thisRebound()) {
       const err = this.positionedError(name, `emitter: component member '${name}' is not reachable here — inside an object-literal method or a class body \`this\` is the object, not the component; read it into a local outside, or write the pair with \`=>\` to keep the component`);
@@ -10828,6 +10868,8 @@ class Emitter {
       }
       throw err;
     }
+    if (!reactive && this.boundMethodRead(name, this.memberKindOf(name)))
+      return this.emitBoundMethod(name);
     const m = this.b.currentMark;
     const src = this.b.source;
     this.b.emit((this.renderSelf ?? "this") + ".");
@@ -14132,12 +14174,13 @@ ${pad}`);
     });
     this.b.emit(")");
   }
-  switchStatement(node, ind) {
+  switchStatement(node, ind, into = null) {
     const [, subject, cases, dflt] = node;
     const pad = "  ".repeat(ind);
+    const block = (body) => into === null ? this.braceBlock(body, ind) : this.accumulateBlock(body, ind, into);
     if (Emitter.hasMatchArms(cases)) {
       this.checkMatchSwitch(node);
-      this.mark(node, "$self", () => this.matchChain(node, ind, (body) => this.braceBlock(body, ind)));
+      this.mark(node, "$self", () => this.matchChain(node, ind, block));
       return;
     }
     this.mark(node, "$self", () => {
@@ -14156,14 +14199,14 @@ ${pad}`);
                 this.b.emit(`:
 `);
               }
-              this.caseBody(body, ind);
+              this.caseBody(body, ind, into);
             });
           }
         });
         if (dflt !== null) {
           this.b.emit(`${pad}  default:
 `);
-          this.caseBody(dflt, ind);
+          this.caseBody(dflt, ind, into);
         }
         this.b.emit(`${pad}}`);
       } else {
@@ -14174,19 +14217,25 @@ ${pad}`);
           this.b.emit("if (");
           this.whenTests(conditions);
           this.b.emit(") ");
-          this.braceBlock(body, ind);
+          block(body);
         });
         if (dflt !== null) {
           this.b.emit(" else ");
-          this.braceBlock(dflt, ind);
+          block(dflt);
         }
       }
     });
   }
-  caseBody(block, ind) {
-    this.inCtrl(() => this.caseBodyCtrl(block, ind));
+  caseBody(block, ind, into = null) {
+    this.inCtrl(() => this.caseBodyCtrl(block, ind, into));
   }
-  caseBodyCtrl(block, ind) {
+  caseBodyCtrl(block, ind, into) {
+    if (into !== null) {
+      this.accumulateBody(block, ind + 1, into);
+      this.b.emit("  ".repeat(ind + 2) + `break;
+`);
+      return;
+    }
     const stmts = this.liveStmts(isBlock(block) ? block.slice(1) : [block]);
     this.emitTsTypeDecls(isBlock(block) ? block.slice(1) : [block], "  ".repeat(ind + 2));
     for (const stmt of stmts) {
@@ -15343,6 +15392,10 @@ ${pad ?? ""}`);
         if (wrap)
           this.b.emit(")");
         this.b.emit(");");
+      } else if (i === stmts.length - 1 && isNode(stmt) && stmt[0] === "if" && stmt.length >= 3 && stmt.length <= 4) {
+        this.mark(stmt, "$self", () => this.accumulateIf(stmt, ind + 1, into));
+      } else if (i === stmts.length - 1 && isNode(stmt) && stmt[0] === "switch" && stmt.length === 4) {
+        this.switchStatement(stmt, ind + 1, into);
       } else {
         this.statement(stmt, ind + 1);
         if (isLoopNode(stmt))
@@ -15351,6 +15404,25 @@ ${pad ?? ""}`);
       this.b.emit(`
 `);
     });
+  }
+  accumulateIf(node, ind, into) {
+    this.b.emit("if (");
+    this.grouped(node, "condition", node[1], Emitter.needsGrouping(node[1], "operand"));
+    this.b.emit(") ");
+    this.mark(node, "then", () => this.accumulateBlock(node[2], ind, into));
+    if (node.length >= 4) {
+      this.b.emit(" else ");
+      if (isNode(node[3]) && node[3][0] === "if")
+        this.accumulateIf(node[3], ind, into);
+      else
+        this.mark(node, "else", () => this.accumulateBlock(node[3], ind, into));
+    }
+  }
+  accumulateBlock(block, ind, into) {
+    this.b.emit(`{
+`);
+    this.accumulateBody(block, ind, into);
+    this.b.emit("  ".repeat(ind) + "}");
   }
   plainLoopComprehension(node, ind) {
     this.withBindings(this.loopBindingNames(node), () => this.plainLoopComprehensionCore(node, ind));
@@ -16432,7 +16504,7 @@ ${pad ?? ""}`);
         for (const n of this.pushReactiveFrame(stmts, names))
           names.add(n);
         this.scopes.push(names);
-        this.funcBlock(node, body, stmts, ind, entries);
+        this.funcBlock(node, body, stmts, ind, entries, false, stmts.length > 0 && this.cleanupTail(stmts[stmts.length - 1]));
         this.scopes.pop();
         this.rframes.pop();
       }));
@@ -16448,6 +16520,8 @@ ${pad ?? ""}`);
       this.hoistLine(entries);
       this.b.emit(" ");
     }
+    if (this.cleanupTail(body))
+      this.b.emit("return ");
     this.mark(node, "value", () => this.withExpression(() => {
       const wrap = Emitter.needsGrouping(body, "operand") || isObject(body);
       if (wrap)
@@ -16459,6 +16533,36 @@ ${pad ?? ""}`);
     this.b.emit("; })");
     this.scopes.pop();
     this.rframes.pop();
+  }
+  cleanupTail(stmt) {
+    if (typeof stmt === "string")
+      return !["break", "continue", "debugger"].includes(stmt);
+    if (!isNode(stmt))
+      return false;
+    if (isFunc(stmt))
+      return true;
+    if (this.isEffectDecl(stmt))
+      return true;
+    const h = stmt[0];
+    if (isNode(h))
+      return true;
+    if ([".", "?.", "[]", "optindex", "await", "dammit!", "dammit?", "return", "throw"].includes(h))
+      return true;
+    if (h === "if" && stmt.length >= 3 && stmt.length <= 4) {
+      return stmt.slice(2).every((arm) => this.cleanupTail(Emitter.blockTail(arm)));
+    }
+    if (h === "switch" && stmt.length === 4) {
+      const arms = [...stmt[2].map((w) => w[2]), ...stmt[3] !== null ? [stmt[3]] : []];
+      return arms.every((arm) => this.cleanupTail(Emitter.blockTail(arm)));
+    }
+    return this.semanticKindOf(stmt) === "call";
+  }
+  static blockTail(body) {
+    if (isBlock(body))
+      return body[body.length - 1];
+    if (isNode(body) && body.length === 1 && !isFunc(body))
+      return body[0];
+    return body;
   }
   static effectBodyYields(body) {
     return isFunc(body) ? Emitter.containsYield(body[2]) : Emitter.containsYield(body);
@@ -17269,7 +17373,7 @@ ${pad ?? ""}`);
                 for (const n of this.pushReactiveFrame(bodyStmts, names))
                   names.add(n);
                 this.scopes.push(names);
-                this.funcBlock(eff, bodyNode, bodyStmts, ind + 2, entries);
+                this.funcBlock(eff, bodyNode, bodyStmts, ind + 2, entries, false, bodyStmts.length > 0 && this.cleanupTail(bodyStmts[bodyStmts.length - 1]));
                 this.scopes.pop();
                 this.rframes.pop();
               }));
@@ -17283,7 +17387,8 @@ ${pad ?? ""}`);
                 this.hoistLine(entries);
                 this.b.emit(" ");
               }
-              this.b.emit("return ");
+              if (this.cleanupTail(single))
+                this.b.emit("return ");
               this.mark(eff, "value", () => this.withExpression(() => {
                 const wrap = Emitter.needsGrouping(single, "operand") || isObject(single);
                 if (wrap)
@@ -18966,7 +19071,7 @@ ${this.replayPad}}` : " }");
         this.tsScaffoldAny();
         this.b.emit(`) => ${this.runtimeName("__batch")}(() => (`);
         const evType = !this.ts ? null : isFunc(value) && (value[1].length === 0 || value[1].length === 1 && typeof value[1][0] === "string") ? known : isFunc(value) ? null : known;
-        this.tsHandlerCast(() => this.withExpression(() => this.expr(value)), evType);
+        this.tsHandlerCast(() => this.withExpression(() => this.asCallee(value, () => this.expr(value))), evType);
         this.b.emit(`)(${ev})))`);
       });
     }
@@ -19210,7 +19315,7 @@ ${this.replayPad}}` : " }");
           } else {
             const evType = !this.ts ? null : isFunc(value) && (value[1].length === 0 || value[1].length === 1 && typeof value[1][0] === "string") ? known ?? "any" : isFunc(value) ? null : known;
             this.b.emit("(");
-            site(this.tsHandlerCast(() => avoidingKey(() => this.withExpression(() => this.expr(value))), evType));
+            site(this.tsHandlerCast(() => avoidingKey(() => this.withExpression(() => this.asCallee(value, () => this.expr(value)))), evType));
             this.b.emit(`)(${ev})`);
           }
           this.b.emit("))");
@@ -20871,6 +20976,10 @@ ${this.replayPad}}` : " }");
     this.checkEmitRead(node);
     this.noteProvidedRead(node);
     this.rejectJoinedClassRead(node);
+    if (node[0] === "." && node.length === 3 && node[1] === "this" && typeof node[2] === "string" && this.boundMethodRead(node[2], this.thisMemberKindOf(node[2]))) {
+      this.mark(node, "$self", () => this.emitBoundMethod(node[2]));
+      return;
+    }
     const spine = [node];
     while (true) {
       const cur = spine[spine.length - 1];
@@ -20916,13 +21025,13 @@ ${this.replayPad}}` : " }");
       } else if (fkind === "optcall") {
         f.self = this.beginMark(n, "$self");
         if (isInner)
-          this.head(n, "callee", n[1]);
+          this.asCallee(n[1], () => this.head(n, "callee", n[1]));
         else
           f.role = this.beginMark(n, "callee");
       } else {
         f.self = this.beginMark(n, "$self");
         if (isInner)
-          this.head(n, "callee", n[0]);
+          this.asCallee(n[0], () => this.head(n, "callee", n[0]));
         else
           f.role = this.beginMark(n, "callee");
       }
@@ -22451,7 +22560,7 @@ ${"  ".repeat(ind)}`);
     this.rframes.pop();
     this.ind = ind;
   }
-  funcBlock(node, block, stmts, ind, hoist, voidBody = false) {
+  funcBlock(node, block, stmts, ind, hoist, voidBody = false, tailReturn = true) {
     const params = isDefHead(node[0]) ? node[2] : node[1];
     const { extractions } = Emitter.expansionSplit(Array.isArray(params) ? params : []);
     const prevSEO = this.sideEffectOnly;
@@ -22498,7 +22607,7 @@ ${"  ".repeat(ind)}`);
         this.mark(block, "statements", () => {
           stmts.forEach((stmt, i) => {
             this.b.emit("  ".repeat(ind + 1));
-            if (!voidBody && i === stmts.length - 1)
+            if (!voidBody && tailReturn && i === stmts.length - 1)
               this.implicitReturn(stmt, ind + 1);
             else
               this.statement(stmt, ind + 1, true);
@@ -22804,7 +22913,7 @@ ${"  ".repeat(ind)}`);
           if (constructing)
             this.mark(node[0], "target", () => this.rubyNewTarget(target));
           else
-            this.head(node[0], "target", target);
+            this.asCallee(target, () => this.head(node[0], "target", target));
         });
         this.mark(node, "args", () => {
           this.b.emit("(");
@@ -23320,7 +23429,7 @@ ${"  ".repeat(ind)}`);
     this.mark(node, "$self", () => {
       this.mark(node, "operator", () => this.b.emit("await"));
       this.b.emit(" ");
-      this.head(node, "target", node[1]);
+      this.asCallee(node[1], () => this.head(node, "target", node[1]));
       this.b.emit("()");
     });
   }
@@ -27893,6 +28002,10 @@ function __describeProjection(node) {
 }
 
 class __Component {
+  _bound(name) {
+    const cache = this._boundCache ??= Object.create(null);
+    return cache[name] ??= (...args) => this[name](...args);
+  }
   constructor(props = {}) {
     const adopted = __hmrAdopt(this.constructor, props);
     if (adopted)
@@ -33119,7 +33232,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "8c329994c1a02a59";
+var compilerBuild = () => "3adf0a6defc02f79";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
