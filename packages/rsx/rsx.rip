@@ -140,9 +140,7 @@ class Scanner
       if @xml.startsWith('<!DOCTYPE', @pos) or @xml.startsWith('<!doctype', @pos)
         unless @opts.allowDoctype
           throw RsxError.new 'DOCTYPE declarations are not allowed', @pos
-        @pos = @xml.indexOf '>', @pos
-        throw RsxError.new 'unterminated DOCTYPE', @pos if @pos is -1
-        @pos += 1
+        @pos = @doctypeEnd()
         return
       throw RsxError.new "unexpected '<!' construct", @pos
 
@@ -161,6 +159,24 @@ class Scanner
 
     # Start tag (possibly self-closing) <name ...>
     @scanStartTag()
+
+  # The offset just past a DOCTYPE. An internal subset (`[ … ]`) holds
+  # its own `>`s, so the declaration ends at the first `]` the closing
+  # `>` follows.
+  doctypeEnd: ->
+    close = @xml.indexOf '>', @pos
+    subset = @xml.indexOf '[', @pos
+    if subset isnt -1 and (close is -1 or subset < close)
+      at = subset
+      loop
+        at = @xml.indexOf ']', at + 1
+        break if at is -1
+        after = at + 1
+        after += 1 while ' \t\r\n'.includes(@xml[after] ?? '-')
+        return after + 1 if @xml[after] is '>'
+      close = -1
+    throw RsxError.new 'unterminated DOCTYPE', @pos if close is -1
+    close + 1
 
   scanComment: ->
     end = @xml.indexOf '-->', @pos + 4
@@ -185,7 +201,7 @@ class Scanner
   scanStartTag: ->
     # A `<` that opens no tag name is text that should have been escaped
     # (`1 < 2`); reading it as a tag would invent an element.
-    unless XML_NAME_START.test(@xml[@pos + 1] ?? '')
+    unless XML_NAME_START.test(@xml.slice(@pos + 1, @pos + 3))
       throw RsxError.new "a '<' in text must be written &lt;", @pos
     end = @findStartTagEnd @pos + 1
     throw RsxError.new 'unterminated start tag', @pos if end is -1

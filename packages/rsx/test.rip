@@ -156,6 +156,14 @@ test "allowDoctype: true skips the declaration, upper- or lowercase", ->
   eq parse('<!DOCTYPE html><a>x</a>', allowDoctype: true), { a: 'x' }
   eq parse('<!doctype html><a>x</a>', allowDoctype: true), { a: 'x' }
 
+test "allowDoctype: true skips an internal subset, whose declarations hold their own '>'", ->
+  eq parse('<!DOCTYPE a [<!ENTITY x "y">]><a>x</a>', allowDoctype: true), { a: 'x' }
+  eq parse('<!DOCTYPE a [ <!ELEMENT a ANY> ] ><a>x</a>', allowDoctype: true), { a: 'x' }
+  throws (-> parse('<!DOCTYPE a [<!ENTITY x "y">', allowDoctype: true)), RsxError, 'unterminated DOCTYPE'
+
+test "an element name may start with a character outside the BMP", ->
+  eq parse('<𝒜>x</𝒜>'), { '𝒜': 'x' }
+
 test "custom entity declarations are never honored", ->
   throws (-> parse('<!DOCTYPE a [<!ENTITY xxe "boom">]><a>&xxe;</a>')), RsxError
 
