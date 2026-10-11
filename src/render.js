@@ -395,6 +395,32 @@ export function rewriteRender(tokens, mintId, fail) {
     return !['INDENT', 'OUTDENT', 'RENDER', 'TERMINATOR', 'ELSE'].includes(before);
   };
 
+  // Is the block about to open the body of an `if`/`unless`/`switch`/`try`
+  // in a value on its line (`span title: if ok`), not a markup branch? A
+  // `key:` or `=` before the branch makes everything after it a value
+  // (`title: if a then "x" else if b`, `title: fmt "x", if b`); with none,
+  // a branch is markup heading its line or after `then`/`else`/`,`, and a
+  // value's after anything else (`"p" + if ok`).
+  const opensValueBlock = () => {
+    let depth = 0;
+    let head = -1;
+    for (let k = out.length - 1; k >= 0; k--) {
+      const kind = out[k].kind;
+      if (CLOSERS.has(kind)) { depth++; continue; }
+      if (OPENERS.has(kind)) { if (depth === 0) return head >= 0 ? valueHead(head) : false; depth--; continue; }
+      if (LINE_BREAKS.has(kind) || kind === 'RENDER') break;
+      if (depth !== 0) continue;
+      if (head < 0 && BLOCK_VALUE_HEADS.has(kind)) head = k;
+      else if (head >= 0 && (kind === ':' || kind === '=' || kind === 'COMPOUND_ASSIGN')) return true;
+    }
+    return head >= 0 && valueHead(head);
+  };
+  const valueHead = (k) => {
+    const before = out[k - 1]?.kind;
+    return !(before === undefined || LINE_BREAKS.has(before) || before === 'RENDER' ||
+      before === 'THEN' || before === 'ELSE' || before === ',');
+  };
+
   // Does the bracket or block tokens[i] opens hold code? Inside code,
   // everything is code. A block holds code after a function arrow, after
   // `key:` or `=` (a value spanning lines), or on a render local's
@@ -405,7 +431,7 @@ export function rewriteRender(tokens, mintId, fail) {
     if (t.kind === 'INDENT') {
       const p = tokens[i - 1];
       if (p && (p.kind === '->' || p.kind === '=>')) return out[out.length - 1] === p && isCodeArrow(out.length - 1);
-      return p?.kind === ':' || p?.kind === '=' || p?.kind === 'COMPOUND_ASSIGN';
+      return p?.kind === ':' || p?.kind === '=' || p?.kind === 'COMPOUND_ASSIGN' || opensValueBlock();
     }
     return !(t.kind === 'CALL_START' && isHeadCall(out.length));
   };
@@ -576,6 +602,83 @@ export function rewriteRender(tokens, mintId, fail) {
     (memberFrames.length > 0 && memberFrames[memberFrames.length - 1].names.has(name)) ||
     moduleValues.has(name);
 
+  // Module-level names a template line head may read as a value: plain
+  // and reactive declarations and import bindings (readsAsValue keeps its
+  // own, narrower set for block attachment).
+  const moduleBindings = new Set(moduleValues);
+  for (let j = 0, depth = 0, importLine = false; j < tokens.length; j++) {
+    const k = tokens[j].kind;
+    if (k === 'INDENT') depth++;
+    else if (k === 'OUTDENT') depth--;
+    if (LINE_BREAKS.has(k)) { importLine = false; continue; }
+    if (depth !== 0) continue;
+    if (k === 'IMPORT' && startsLine(j)) importLine = true;
+    else if (importLine && k === 'IDENTIFIER') moduleBindings.add(tokens[j].value);
+    else if ((k === 'DEF' || k === 'CLASS') && tokens[j + 1]?.kind === 'IDENTIFIER') moduleBindings.add(tokens[j + 1].value);
+    else if ((k === '{' || k === '[') && startsLine(j)) {
+      // A destructuring declaration (`{a} = …`, `[a, b] = …`).
+      let m = j;
+      for (let d = 0; m < tokens.length; m++) {
+        if (OPENERS.has(tokens[m].kind)) d++;
+        else if (CLOSERS.has(tokens[m].kind) && --d === 0) break;
+      }
+      if (/ASSIGN$|^=$/.test(tokens[m + 1]?.kind ?? '')) {
+        for (let n = j; n < m; n++) if (tokens[n].kind === 'IDENTIFIER') moduleBindings.add(tokens[n].value);
+      }
+    }
+    else if (k === 'IDENTIFIER' && (startsLine(j) || tokens[j - 1]?.kind === 'EXPORT') && /ASSIGN$|^=$/.test(tokens[j + 1]?.kind ?? '')) {
+      moduleBindings.add(tokens[j].value);
+    }
+  }
+  const boundHere = (name) => readsAsValue(name) || moduleBindings.has(name);
+
+  // The `.class` chain of an element heading its line, from the `.` at j:
+  // each class joins its tight `-` runs (a digit run, or a word after a
+  // digit run, too) into one name; anything else glued on rejects.
+  // Glued in the source: one token ends where the next begins (a line
+  // break or a space between them is not).
+  const touches = (x, y) => x && y && !y.generated && y.start === x.end;
+
+  const joinSelectorClasses = (j) => {
+    while (tokens[j]?.kind === '.' && !tokens[j].spaced && tokens[j + 1]?.kind === 'PROPERTY' && touches(tokens[j], tokens[j + 1])) {
+      const cls = tokens[j + 1];
+      let name = String(cls.value);
+      let k = j + 2;
+      let ok = true;
+      while (!name.includes('#')) {
+        const a = tokens[k];
+        const b = tokens[k + 1];
+        if (isHyphen(a) && touches(tokens[k - 1], a) && touches(a, b) && (b.kind === 'NUMBER' || b.kind === 'IDENTIFIER' || b.kind === 'PROPERTY')) {
+          // A digit run, which may carry the element's id (`p-4#x`).
+          if (b.kind === 'NUMBER' && !/^[0-9]+(?:#.+)?$/.test(String(b.value))) ok = false;
+          name += '-' + String(b.value);
+          k += 2;
+        } else if ((a?.kind === 'IDENTIFIER' || a?.kind === 'PROPERTY') && tokens[k - 1].kind === 'NUMBER' && touches(tokens[k - 1], a)) {
+          name += String(a.value);
+          k += 1;
+        } else break;
+      }
+      const next = tokens[k];
+      if (touches(tokens[k - 1], next) && (next.kind === 'STRING' || next.kind === 'STRING_START')) {
+        fail("a space goes between an element's selector and its text", next.start);
+      }
+      const glued = touches(tokens[k - 1], next) && !LINE_BREAKS.has(next.kind) &&
+        next.kind !== '.' && next.kind !== 'CALL_START' && next.kind !== '(' && next.kind !== ',';
+      if (glued && next.kind === ':' && !touches(next, tokens[k + 1])) {
+        fail("an element's `.class` takes no `:` — an attribute goes after a space (`div.card title: …`)", next.start);
+      }
+      if (!ok || glued) {
+        let written = name;
+        for (let m = k; touches(tokens[m - 1], tokens[m]) && !LINE_BREAKS.has(tokens[m].kind) && tokens[m].kind !== 'STRING'; m++) {
+          written += String(tokens[m].value);
+        }
+        fail(`a class shorthand is letters, digits, \`-\` and \`_\` — write \`class: '${written}'\``, cls.start);
+      }
+      if (k > j + 2) tokens.splice(j + 1, k - (j + 1), { ...cls, value: name, end: tokens[k - 1].end });
+      j += 2;
+    }
+  };
+
   for (let i = 0; i < tokens.length; i++) {
     if (counter.on) counter.n++;
     let t = tokens[i];
@@ -668,6 +771,26 @@ export function rewriteRender(tokens, mintId, fail) {
     // custom-element name; in code that name would be raw JavaScript.
     if (t.kind === 'IDENTIFIER' && !t.generated && String(t.value).includes('-') && inCode()) {
       fail(`\`${String(t.value).split('#')[0]}\` here is a value, not an element — write it with spaces (\`${String(t.value).split('#')[0].split('-').join(' - ')}\`) for subtraction`, t.start);
+    }
+
+    // A template line headed by an element's selector — a tag word no
+    // binding shadows, or a bare `.` with a glued class. The scanner joins
+    // letter runs into class names; the gate, which knows this line is an
+    // element, joins the rest (`p-4`, `col-span-2`, `w-2xl`) and rejects a
+    // class the shorthand cannot hold, pointing at `class: '…'`. A bound
+    // name heading a line is a value, and its chain stays code.
+    if (atTemplateLineStart(out.length) && !inCode()) {
+      const head = String(t.value ?? '').split('#')[0];
+      if (t.kind === 'IDENTIFIER' && !t.generated && isHtmlTag(head) && !boundHere(head)) joinSelectorClasses(i + 1);
+      else if (t.kind === '.' && tokens[i + 1]?.kind === 'PROPERTY' && !tokens[i + 1].spaced) joinSelectorClasses(i);
+    }
+
+    // An `#id` the scanner glued onto a digit run (`p-4#x`) belongs to an
+    // element's class, which the line-head join consumed; anywhere else it
+    // is no id, and no JavaScript either.
+    if (t.kind === 'NUMBER' && String(t.value).includes('#')) {
+      const id = String(t.value).slice(String(t.value).indexOf('#'));
+      fail(`\`${id}\` is no element id here: an id follows the HTML tag or \`.class\` that starts its line, and a comment needs a space before \`#\``, t.start);
     }
 
     // An inline branch's element may be a custom element

@@ -2894,3 +2894,149 @@ describe('ternaries in templates', () => {
     }
   });
 });
+
+describe('selector shorthands', () => {
+  const js = (src) => fullCompile(src, { runtimeDelivery: 'none' }).code;
+  const at = (line) => `Foo = component\n  name := 'n'\n  render\n    div\n      ${line}\n`;
+
+  test('a plain class or id works: names with digits after a hyphen, a custom element, one id anywhere in the chain', () => {
+    expect(js(at('div.p-4 "x"'))).toContain("className = 'p-4'");
+    expect(js(at('.p-4 "x"'))).toContain("className = 'p-4'");
+    const nested = js(at('div.col-span-2\n        span "c"'));
+    expect(nested).toContain("className = 'col-span-2'");
+    expect(nested).toContain("createElement('span')");
+    const chain = js(at('div.card#a.big "x"'));
+    expect(chain).toContain("id = 'a'");
+    expect(chain).toContain("className = 'card big'");
+    expect(js(at('div#main.card "x"'))).toContain("id = 'main'");
+    expect(js(at('sl-icon#ic "i"'))).toContain("id = 'ic'");
+    expect(js(at('#main "x"'))).toContain("id = 'main'");
+  });
+
+  test('an id is a name from the one identifier vocabulary, non-ASCII letters included', () => {
+    const code = js(at('p#café "v"'));
+    expect(code).toContain("id = 'café'");
+    expect(code).toContain('createTextNode("v")');
+  });
+
+  test("anything a shorthand can't hold rejects, naming the attribute spelling", () => {
+    lexFails(at('div.w-1/2 "x"'), /a class shorthand is letters, digits, `-` and `_` — write `class: 'w-1\/2'`/);
+    lexFails(at('div.hover:bg-red "x"'), /write `class: 'hover:bg-red'`/);
+    lexFails(at('div.w-[10px] "x"'), /write `class: 'w-\[10px\]'`/);
+    lexFails(at('div.mt-2.5 "x"'), /write `class: 'mt-2.5'`/);
+    lexFails(at('b#1 "hello"'), /an id shorthand is a name starting with a letter — write `id: '1'`/);
+    lexFails(at('div#a#b "x"'), /an element has one id/);
+    lexFails(at('div.card#a.big#b "x"'), /an element has one id/);
+  });
+
+  test('a `#word` glued to a value rejects; spaced, it is a comment', () => {
+    lexFails(at('span title: name#t'), /`#t` is no element id here: an id follows the HTML tag or `\.class` that starts its line \(otherwise write `id: 't'`\), and a comment needs a space before `#`/);
+    const comment = js(at('p "x" # a note'));
+    expect(comment).toContain('createTextNode("x")');
+    expect(comment).not.toContain('note');
+  });
+
+  test('a bare `.` line takes an id too', () => {
+    const one = js(at('.card#main "x"'));
+    expect(one).toContain("id = 'main'");
+    expect(one).toContain("className = 'card'");
+    expect(js(at('.a.b#x "x"'))).toContain("className = 'a b'");
+  });
+
+  test('the rules hold only for the selector heading its line: a chain in a value reads as code', () => {
+    // Loop variables spelled like tags, in values: member access and
+    // arithmetic, exactly as outside a template.
+    const loop = (body) => js(`Foo = component\n  items := [{w: 3, parts: [1, 2], title: 't'}]\n  ok := true\n  render\n    div\n      for a in items\n        ${body}\n`);
+    expect(loop('span title: a.w-1.toFixed(2)')).toContain('a.w - (1).toFixed(2)');
+    expect(loop('span title: a.parts[1]')).toContain('a.parts[1]');
+    expect(loop('p ok ? a.title:"none"')).toContain('a.title : "none"');
+    expect(js(`Foo = component\n  items := [{w: 4}]\n  render\n    div\n      for label in items\n        p title: label.w/2\n`)).toContain('label.w / 2');
+  });
+
+  test('a dangling hyphen, a bad character after an id, and a digit-led class reject', () => {
+    lexFails(at('div.a- "x"'), /write `class: 'a-'`/);
+    lexFails(at('.a- "x"'), /write `class: 'a-'`/);
+    lexFails(at('div#a- "x"'), /write `id: 'a-'`/);
+    lexFails(at('div#a/b "x"'), /write `id: 'a\/b'`/);
+    lexFails(at('div#a[0] "x"'), /write `id: 'a\[0\]'`/);
+    lexFails(at('div.2xl "x"'), /write `class: '2xl'`/);
+    lexFails(at('.2xl "x"'), /write `class: '2xl'`/);
+    lexFails(at('div#{name} "x"'), /a computed id is written as the attribute — `id: …`/);
+  });
+
+  test("an id on anything but an HTML tag or `.class` heading its line rejects; a selector is no key", () => {
+    lexFails(at('Card#x'), /`#x` is no element id here/);
+    lexFails(`Foo = component\n  item := {name: 'x'}\n  render\n    div\n      item.name#x\n`, /`#x` is no element id here/);
+    lexFails(at('div.card: "x"'), /an element's `\.class` takes no `:`/);
+    // A spaced `. key: value` is a bare-dot element with an attribute.
+    expect(js(at('. role: "note"'))).toContain("setAttribute('role', \"note\")");
+  });
+
+  test('a bound name heading a line is a value: its chain stays code, exactly as on any other line', () => {
+    const loop = (body) => `Foo = component\n  items := [{w: 3, title: 't', parts: [1, 2]}]\n  render\n    div\n      for a in items\n        ${body}\n`;
+    expect(js(loop('a.w-1.toFixed(2)'))).toContain('a.w - (1).toFixed(2)');
+    expect(js(loop('a.parts[1]'))).toContain('_t0.data = a.parts[1]');
+    expect(js(loop('a.title'))).toContain('_t0.data = a.title');
+    expect(js(loop('a.w/2'))).toContain('a.w / 2');
+    expect(js(loop('p a.title'))).toContain('_t0.data = a.title');
+    // A loop variable named like a tag, on its own line (packages/email's preview layout).
+    const layout = js(`Foo = component\n  templates := [{path: 'x'}]\n  render\n    for template in templates\n      a\n        href: "/x"\n        template.path\n`);
+    expect(layout).toContain('template.path');
+    // A member, a value block, an import: still code.
+    const member = `Foo = component\n  label := {w: 3, parts: [1]}\n  ok := true\n  render\n    div\n`;
+    expect(js(member + '      span\n        title:\n          label.w-1.toFixed(2)\n')).toContain('this.label.value.w - (1).toFixed(2)');
+    expect(js(member + '      x = if ok\n        label.w-1.toFixed(2)\n      else 0\n      p x\n')).toContain('this.label.value.w - (1).toFixed(2)');
+    expect(js(`import { label } from './x.js'\nFoo = component\n  render\n    div\n      label.parts[1]\n`)).toContain('label.parts[1]');
+  });
+
+  test('an id after a digit class is kept, with what follows it', () => {
+    const code = js(at('div.card.p-4#x.m-2 "y"'));
+    expect(code).toContain("id = 'x'");
+    expect(code).toContain("className = 'card p-4 m-2'");
+    expect(code).toContain('createTextNode("y")');
+    expect(js(at('.p-4#x "y"'))).toContain("id = 'x'");
+    lexFails(at('div#a.p-4#b "y"'), /an element has one id/);
+  });
+
+  test('a class never joins across a line break or onto its text', () => {
+    lexFails(at('div.a-\n  span "x"'), /write `class: 'a-'`/);
+    lexFails(at('div.p-4"x"'), /a space goes between an element's selector and its text/);
+    lexFails(at('div#a"x"'), /a space goes between an element's selector and its text/);
+    lexFails(at('p"x"'), /a space goes between an element's selector and its text/);
+    // A tagged template elsewhere keeps its reading.
+    expect(js(at('p sql"x"'))).toContain('sql`x`');
+  });
+
+  test("an attribute's `if` block is code: a digit after a hyphen there is subtraction", () => {
+    const code = js(`{label} = {label: {w: 3}}\nFoo = component\n  ok := true\n  render\n    div\n      span title: if ok\n        label.w-1.toFixed(2)\n      else\n        "x"\n`);
+    expect(code).toContain('label.w - (1).toFixed(2)');
+  });
+
+  test('an id glued to a digit run on a value line rejects; a value block after an operator is code', () => {
+    lexFails(`Foo = component\n  items := [{w: 3}]\n  render\n    div\n      for a in items\n        a.w-4#x\n`, /`#x` is no element id here/);
+    expect(js(`Foo = component\n  ok := true\n  render\n    div\n      span title: "p" + if ok\n        label.w-1.toFixed(2)\n      else\n        "n"\n`)).toContain('label.w - (1).toFixed(2)');
+    lexFails(at('div.p-4#x.p-6#z "y"'), /an element has one id/);
+    // A `key:` before a branch makes its block a value's, however nested.
+    const valued = (line) => js(`make = (label) ->\n  component\n    ok := true\n    render\n      div\n        span title: ${line}\n          label.w-1.toFixed(2)\n        else\n          "n"\n`);
+    expect(valued('if ok then "a" else if ok')).toContain('label.w - (1).toFixed(2)');
+    expect(valued('if ok then if ok')).toContain('label.w - (1).toFixed(2)');
+  });
+
+  test('a joined digit class read as a value rejects, never reaching the JavaScript', () => {
+    // A branch among an implicit call's arguments, which the gate takes for
+    // markup: the emitter catches the class read as a property.
+    const src = `fmt = (a, b) -> b\nmk = (label) ->\n  component\n    ok := true\n    render\n      div\n        span fmt "x", if ok\n          label.w-1.toFixed(2)\n        else\n          "n"\n`;
+    emitFails(src, /`\.w-1` is read as a value here, where `-` is subtraction — write it with spaces \(`w - 1`\)/);
+  });
+
+  test('a line-start id rejects what an id cannot hold', () => {
+    lexFails(at('#a- "x"'), /write `id: 'a-'`/);
+    lexFails(at('#a/b "x"'), /write `id: 'a\/b'`/);
+    lexFails(at('#a[0] "x"'), /write `id: 'a\[0\]'`/);
+  });
+
+  test('code inside a template reads `.` and `#` as code does', () => {
+    expect(js(at('button @click: -> console.log a#b'))).toContain('console.log(a)');
+    expect(js(at('button @click: -> x = p.w-1'))).toContain('p.w - 1');
+  });
+});

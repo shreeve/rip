@@ -212,10 +212,6 @@ directly, and 10 when the same method runs from a click (inside
 `__batch`). Computed self-writes reject loudly; state self-writes are
 dropped silently. There is no public batch API (packages use `__batch`).
 
-**T9 M — A tight `#word` after an identifier in render emits invalid JavaScript.** `span name#note` and `title: name#t` emit `name#note` verbatim. The lexer merges `#…` into any preceding identifier in render (src/lexer.js ~1366).
-
-**T10 M — An `#id` that starts with a digit or a non-ASCII letter swallows the rest of the line.** `b#1 "hello"` and `p#é "v"` render with no id and no text; `span#café` rejects. Regexes at src/lexer.js ~1204/1367 are a private identifier class, against "One identifier vocabulary".
-
 **T11 M — Void elements accept children.** `input disabled` (with `disabled := false` in scope) renders `<input>` with a text child `"false"` and no attribute; `input "text"`, `br x`, `img` + child all compile.
 
 **T12 M — `Component.suffix` compiles to a call rendered as text.** `Child.big` renders `undefined`; `Child.one label: "x"` throws "Child.one is not a function". `UI.Child` namespace paths work.
@@ -261,6 +257,10 @@ emits `f({__bind_a__: this.name.value})`; both belong to the element only.
 
 **T29 M — A component's positional argument before a children arrow is dropped.**
 `Bar n, ->` + an indented `span "k"` emits `new Bar({})`.
+
+**T30 L — A bare `.` element after `then`/`else` fails to parse.**
+`if ok then .card "y"` rejects "Unexpected '.'"; `if ok then div.card "y"`
+works.
 
 **T24 M — A call or a string as a handler runs at the wrong time or never.**
 `@click: go()` emits `(this.go())(e)` — `go` runs on every click and the
