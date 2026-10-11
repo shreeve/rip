@@ -125,16 +125,21 @@ test "no C0, C1 or ESC but the newline and the tab survives, whatever is written
 
 test "hostile text is read once, not once per introducer: eight times the text costs about eight times as long", ->
   # A quadratic reader takes 64 times as long for 8 times the text; a
-  # linear one about 8. The bound sits between, and each size takes its
-  # best of five, so a busy machine moves both numbers and not the ratio.
-  # A machine busy enough to stall one size alone gets two more tries: a
-  # quadratic reader is over the bound every time.
+  # linear one about 8. The bound sits between. Time is this thread's CPU
+  # time, not the wall's: on a busy machine a longer run waits for a core
+  # more often, which would move the larger number alone. Each size takes
+  # its best of five, and gets two more tries if a collection lands in
+  # every round of one size: a quadratic reader is over the bound every
+  # time.
+  spent = ->
+    { user, system } = process.threadCpuUsage()
+    (user + system) / 1000
   best = (text) ->
     least = Infinity
     for round in [0...5]
-      began = performance.now()
+      began = spent()
       sanitize text
-      least = Math.min least, performance.now() - began
+      least = Math.min least, spent() - began
     least
   for unit in [at(0x9D), ESC + ']', ESC + '[1', ESC, ESC + 'a' + at(0x85)]
     for attempt in [0...3]
