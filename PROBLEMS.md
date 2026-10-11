@@ -68,13 +68,6 @@ member: `s =! 1` then `[s] = [5]` in a method writes it silently.
 `this.a = a` first: runtime ReferenceError. Also with
 `if c then super(1) else super(2)`.
 
-**C33 ✔ H — A collecting loop whose tail `if`/`switch` has a `continue` or `break` arm collects nothing.**
-`r = for a in [5, 1, 7]` / `  if a is 1 then continue else a * 10` gives
-`[]` (expected `[50, 70]`): the emit is `if (a === 1) continue; else
-a * 10;` with no push. `then break else a` gives `[]` for `[5]`; a
-function-tail loop and a statement-`switch` body with a `break` arm do
-the same. The block form (`if a is 1` / `break` then `a`) collects.
-
 **C34 ✔ M — A spaced slash after a name becomes a regex call.**
 `x = w /2 + 1 /g` emits `w(/2 + 1 /g)` (TypeError at runtime when `w` is
 a number); `w /2 + h /2` rejects only because `2` is no regex flag.

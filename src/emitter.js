@@ -6700,12 +6700,15 @@ class Emitter {
     this.b.emit(')');
   }
 
-  switchStatement(node, ind) {
+  // `into` names an accumulator: the switch is the tail of a collecting
+  // loop's body, and each arm pushes its own tail value.
+  switchStatement(node, ind, into = null) {
     const [, subject, cases, dflt] = node;
     const pad = '  '.repeat(ind);
+    const block = (body) => (into === null ? this.braceBlock(body, ind) : this.accumulateBlock(body, ind, into));
     if (Emitter.hasMatchArms(cases)) {
       this.checkMatchSwitch(node);
-      this.mark(node, '$self', () => this.matchChain(node, ind, (body) => this.braceBlock(body, ind)));
+      this.mark(node, '$self', () => this.matchChain(node, ind, block));
       return;
     }
     this.mark(node, '$self', () => {
@@ -6722,13 +6725,13 @@ class Emitter {
                 this.expr(c);
                 this.b.emit(':\n');
               }
-              this.caseBody(body, ind);
+              this.caseBody(body, ind, into);
             });
           }
         });
         if (dflt !== null) {
           this.b.emit(`${pad}  default:\n`);
-          this.caseBody(dflt, ind);
+          this.caseBody(dflt, ind, into);
         }
         this.b.emit(`${pad}}`);
       } else {
@@ -6741,21 +6744,26 @@ class Emitter {
           this.b.emit('if (');
           this.whenTests(conditions);
           this.b.emit(') ');
-          this.braceBlock(body, ind);
+          block(body);
         });
         if (dflt !== null) {
           this.b.emit(' else ');
-          this.braceBlock(dflt, ind);
+          block(dflt);
         }
       }
     });
   }
 
-  caseBody(block, ind) {
-    this.inCtrl(() => this.caseBodyCtrl(block, ind));
+  caseBody(block, ind, into = null) {
+    this.inCtrl(() => this.caseBodyCtrl(block, ind, into));
   }
 
-  caseBodyCtrl(block, ind) {
+  caseBodyCtrl(block, ind, into) {
+    if (into !== null) {
+      this.accumulateBody(block, ind + 1, into);
+      this.b.emit('  '.repeat(ind + 2) + 'break;\n');
+      return;
+    }
     const stmts = this.liveStmts(isBlock(block) ? block.slice(1) : [block]);
     this.emitTsTypeDecls(isBlock(block) ? block.slice(1) : [block], '  '.repeat(ind + 2));
     for (const stmt of stmts) {
@@ -7995,12 +8003,38 @@ class Emitter {
         this.expr(stmt);
         if (wrap) this.b.emit(')');
         this.b.emit(');');
+      } else if (i === stmts.length - 1 && isNode(stmt) && stmt[0] === 'if' && stmt.length >= 3 && stmt.length <= 4) {
+        // A tail `if` whose arms jump (`if a is 1 then continue else
+        // a * 10`): each arm accumulates its own tail, and a jumping arm
+        // stays the jump.
+        this.mark(stmt, '$self', () => this.accumulateIf(stmt, ind + 1, into));
+      } else if (i === stmts.length - 1 && isNode(stmt) && stmt[0] === 'switch' && stmt.length === 4) {
+        this.switchStatement(stmt, ind + 1, into);
       } else {
         this.statement(stmt, ind + 1);
         if (isLoopNode(stmt)) this.b.emit(';');
       }
       this.b.emit('\n');
     });
+  }
+
+  // A tail `if` of an accumulating loop body, every arm accumulating.
+  accumulateIf(node, ind, into) {
+    this.b.emit('if (');
+    this.grouped(node, 'condition', node[1], Emitter.needsGrouping(node[1], 'operand'));
+    this.b.emit(') ');
+    this.mark(node, 'then', () => this.accumulateBlock(node[2], ind, into));
+    if (node.length >= 4) {
+      this.b.emit(' else ');
+      if (isNode(node[3]) && node[3][0] === 'if') this.accumulateIf(node[3], ind, into);
+      else this.mark(node, 'else', () => this.accumulateBlock(node[3], ind, into));
+    }
+  }
+
+  accumulateBlock(block, ind, into) {
+    this.b.emit('{\n');
+    this.accumulateBody(block, ind, into);
+    this.b.emit('  '.repeat(ind) + '}');
   }
 
   // A statement-position comprehension whose value is unused: a plain
