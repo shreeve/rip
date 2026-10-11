@@ -1173,3 +1173,10 @@ test "collecting loop tail if with a jumping arm and no else", "r = for x in [1,
 test "collecting loop tail switch with a jumping arm and no default", "r = for x in [1, 2, 3]\n  switch x\n    when 2 then continue\n    when 3 then x\nr", [undefined, 3]
 test "collecting loop tail subjectless switch with no default", "r = for x in [1, 2, 3]\n  switch\n    when x is 2 then continue\n    when x is 3 then x\nr", [undefined, 3]
 test "collecting loop tail match switch with no default", "r = for s in ['ab', 'cd', 'x']\n  switch s\n    when /^a/ then continue\n    when /^c/ then s\nr", ['cd', undefined]
+# A tail try with a jump collects per branch: the body's tail, each
+# handler's tail, and undefined for a swallowed throw.
+test "collecting loop tail try with a continue in its body", "r = for x in [1, 2, 3]\n  try\n    continue if x is 2\n    x\n  catch e then 0\nr", [1, 3]
+test "collecting loop tail try collects its handler's tail", "r = for x in [1, 2, 3, 4]\n  try\n    continue if x is 2\n    throw new Error('t') if x is 3\n    x\n  catch e then e.message\nr", [1, 't', 4]
+test "collecting loop tail handler-less try collects undefined on a throw", "r = for x in [1, 2, 3]\n  try\n    break if x is 3\n    throw new Error('t') if x is 2\n    x\nr", [1, undefined]
+test "collecting loop tail try with a pattern catch", "r = for x in [1, 2, 3]\n  try\n    continue if x is 2\n    throw {code: x} if x is 3\n    x\n  catch {code}\n    code * 10\nr", [1, 30]
+test "function-tail loop tail try keeps its return", "f = ->\n  for x in [1, 2, 3]\n    try\n      return 'early' if x is 2\n      continue if x is 1\n      x\nf()", 'early'
