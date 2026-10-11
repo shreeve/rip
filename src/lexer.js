@@ -369,6 +369,10 @@ export const ALIASES = {
 // Value-ending token kinds that can HEAD a tagged template: a string
 // right against one of these (or bridged by `$`) is `tag\`…\``, never
 // a call argument.
+// Where a template line starts, and the heads of a line an inline branch
+// opens (`if ok then div#main`).
+const SELECTOR_LINE_STARTS = new Set(['TERMINATOR', 'INDENT', 'OUTDENT', 'RENDER']);
+const SELECTOR_BRANCH_HEADS = new Set(['IF', 'UNLESS', 'ELSE', 'LEADING_WHEN']);
 const TAGGABLE = new Set(['IDENTIFIER', 'PROPERTY', ')', 'CALL_END', ']', 'INDEX_END']);
 
 // Four- through two-character operators, longest match first ('...'
@@ -696,6 +700,51 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     if (root.kind !== 'IDENTIFIER') return false;
     const tag = String(root.value).split('#')[0];
     return TEMPLATE_TAGS.has(tag) || tag.includes('-');
+  };
+
+  // Is a selector shorthand (`.class`, `#id`) possible here: markup, not a
+  // handler body, a bracket group or the rest of a line after a code arrow?
+  const selectorScope = () => {
+    if (renderCodeFloor !== null || parens.length > renderParenDepth) return false;
+    for (let k = tokens.length - 1; k >= 0; k--) {
+      const kind = tokens[k].kind;
+      if (kind === 'TERMINATOR' || kind === 'INDENT' || kind === 'OUTDENT' || kind === 'RENDER') break;
+      if (codeArrowAt(k)) return false;
+    }
+    return true;
+  };
+
+  // Does tokens[k] head its template line: first on it, or first after the
+  // `then`/`else` of a line an inline branch heads?
+  const headsLine = (k) => {
+    const before = tokens[k - 1];
+    if (!before || SELECTOR_LINE_STARTS.has(before.kind)) return true;
+    if (before.kind !== 'THEN' && before.kind !== 'ELSE') return false;
+    let j = k - 1;
+    while (j > 0 && !SELECTOR_LINE_STARTS.has(tokens[j - 1].kind)) j--;
+    return SELECTOR_BRANCH_HEADS.has(tokens[j].kind);
+  };
+
+  // Is the last token an element's selector — a tag, or a `.class` chain on
+  // one — that a tight `#id` belongs to?
+  const idHead = () => {
+    let j = tokens.length - 1;
+    while (j >= 2 && tokens[j].kind === 'PROPERTY' && tokens[j - 1].kind === '.') j -= 2;
+    const root = tokens[j];
+    if (root.kind === 'PROPERTY' && tokens[j - 1]?.kind === '.') return headsLine(j - 1);
+    if (root.kind !== 'IDENTIFIER' || root.generated) return false;
+    const tag = String(root.value).split('#')[0];
+    return TEMPLATE_TAGS.has(tag) || tag.includes('-') || headsLine(j);
+  };
+
+  // A selector shorthand holds a plain name; anything else is spelled as
+  // the attribute, which takes any text.
+  const failSelector = (kind, start) => {
+    const written = /^[^\s"'`,()]+/.exec(text.slice(start))?.[0] ?? '';
+    if (kind === 'class') {
+      fail(`a class shorthand is letters, digits, \`-\` and \`_\` — write \`class: '${written}'\``, start - 1);
+    }
+    fail(`an id shorthand starts with a letter — write \`id: '${written}'\``, start - 1);
   };
 
   // A render child position where a custom element's tag name may
@@ -1252,7 +1301,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       // normal line handling so the indent machinery runs first. The
       // line must sit DEEPER than the render statement itself — a
       // shallower `#…` line has already left the block.
-      const renderIdLine = inRender && /^#[A-Za-z_]/.test(text.slice(pos, pos + 2)) &&
+      const renderIdLine = inRender && text[pos] === '#' && IDENT_START.test(text[pos + 1] ?? '') &&
         prefix.length > (indents[renderDepth - 1] ?? '').length;
       if (text[pos] === '#' && !renderIdLine) {
         let end = pos;
@@ -1428,20 +1477,35 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     // id element at a child position (`#main` → div#main). A spaced
     // `# word` stays a comment.
     if (ch === '#') {
-      if (inRender && /[A-Za-z_]/.test(text[pos + 1] ?? '')) {
-        const m = /^#([A-Za-z_][\w-]*)/.exec(text.slice(pos));
-        const prev = last();
-        if (prev && (prev.kind === 'IDENTIFIER' || prev.kind === 'PROPERTY') && !pendingSpaced && !prev.generated) {
-          prev.value += m[0];
-          prev.end = pos + m[0].length;
-          pos += m[0].length;
-          continue;
+      const prev = last();
+      const glued = inRender && prev && (prev.kind === 'IDENTIFIER' || prev.kind === 'PROPERTY') &&
+        !pendingSpaced && !prev.generated && text[pos + 1] !== undefined && !/\s/.test(text[pos + 1]);
+      if (glued && selectorScope()) {
+        // An element's id: one, glued to its tag or class chain, a name
+        // from the identifier vocabulary (hyphens allowed). Glued to
+        // anything else, `#` is neither an id nor a comment.
+        if (!idHead()) {
+          fail(`\`#${/^[^\s"'`,()]*/.exec(text.slice(pos + 1))[0]}\` is glued to a value: an id follows an element's tag, and a comment needs a space before \`#\``, pos);
         }
-        if (prev && (prev.kind === 'TERMINATOR' || prev.kind === 'INDENT' || prev.kind === 'OUTDENT' || prev.kind === 'RENDER')) {
-          push('IDENTIFIER', `div${m[0]}`, pos, pos + m[0].length);
-          pos += m[0].length;
-          continue;
+        if (!IDENT_START.test(text[pos + 1])) failSelector('id', pos + 1);
+        let end = pos + 2;
+        while (end < text.length && (IDENT_PART.test(text[end]) || (text[end] === '-' && IDENT_PART.test(text[end + 1] ?? '')))) end++;
+        for (let k = tokens.length - 1; k >= 0 && (tokens[k].kind === 'PROPERTY' || tokens[k].kind === '.' || tokens[k].kind === 'IDENTIFIER'); k--) {
+          if (String(tokens[k].value).includes('#')) fail('an element has one id', pos);
+          if (tokens[k].kind === 'IDENTIFIER') break;
         }
+        prev.value += text.slice(pos, end);
+        prev.end = end;
+        pos = end;
+        continue;
+      }
+      if (inRender && IDENT_START.test(text[pos + 1] ?? '') && prev &&
+          (prev.kind === 'TERMINATOR' || prev.kind === 'INDENT' || prev.kind === 'OUTDENT' || prev.kind === 'RENDER')) {
+        let end = pos + 2;
+        while (end < text.length && (IDENT_PART.test(text[end]) || (text[end] === '-' && IDENT_PART.test(text[end + 1] ?? '')))) end++;
+        push('IDENTIFIER', `div${text.slice(pos, end)}`, pos, end);
+        pos = end;
+        continue;
       }
       let end = pos;
       while (end < text.length && text[end] !== '\n' && !(text[end] === '\r' && text[end + 1] === '\n')) end++;
@@ -1494,12 +1558,19 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         // value positions keep the subtraction reading (`@box.w-pad`
         // is `this.box.value.w - pad`).
         let value = word;
-        if (inRender && prev.kind === '.' && !keysColon && classSelectorChain()) {
-          while (text[pos] === '-' && IDENT_START.test(text[pos + 1] ?? '')) {
+        const selector = inRender && prev.kind === '.' && selectorScope() && classSelectorChain();
+        // A Tailwind variant glued on (`div.hover:bg-red`) is no class name.
+        if (selector && tightColon && /[^\s=:]/.test(text[pos + 1] ?? ' ')) failSelector('class', start);
+        if (selector && !keysColon) {
+          while (text[pos] === '-' && IDENT_PART.test(text[pos + 1] ?? '')) {
             let j = pos + 1;
             while (j < text.length && IDENT_PART.test(text[j])) j++;
             value += text.slice(pos, j);
             pos = j;
+          }
+          if (text[pos] === '/' || text[pos] === '[' || (text[pos] === '-' && /[^\s]/.test(text[pos + 1] ?? ' ')) ||
+              (text[pos] === '.' && /[0-9]/.test(text[pos + 1] ?? ''))) {
+            failSelector('class', start);
           }
         }
         push('PROPERTY', value, start, pos);

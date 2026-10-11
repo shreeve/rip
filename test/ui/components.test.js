@@ -2894,3 +2894,50 @@ describe('ternaries in templates', () => {
     }
   });
 });
+
+describe('selector shorthands', () => {
+  const js = (src) => fullCompile(src, { runtimeDelivery: 'none' }).code;
+  const at = (line) => `Foo = component\n  name := 'n'\n  render\n    div\n      ${line}\n`;
+
+  test('a plain class or id works: names with digits after a hyphen, a custom element, one id anywhere in the chain', () => {
+    expect(js(at('div.p-4 "x"'))).toContain("className = 'p-4'");
+    expect(js(at('.p-4 "x"'))).toContain("className = 'p-4'");
+    const nested = js(at('div.col-span-2\n        span "c"'));
+    expect(nested).toContain("className = 'col-span-2'");
+    expect(nested).toContain("createElement('span')");
+    const chain = js(at('div.card#a.big "x"'));
+    expect(chain).toContain("id = 'a'");
+    expect(chain).toContain("className = 'card big'");
+    expect(js(at('div#main.card "x"'))).toContain("id = 'main'");
+    expect(js(at('sl-icon#ic "i"'))).toContain("id = 'ic'");
+    expect(js(at('#main "x"'))).toContain("id = 'main'");
+  });
+
+  test('an id is a name from the one identifier vocabulary, non-ASCII letters included', () => {
+    const code = js(at('p#café "v"'));
+    expect(code).toContain("id = 'café'");
+    expect(code).toContain('createTextNode("v")');
+  });
+
+  test("anything a shorthand can't hold rejects, naming the attribute spelling", () => {
+    lexFails(at('div.w-1/2 "x"'), /a class shorthand is letters, digits, `-` and `_` — write `class: 'w-1\/2'`/);
+    lexFails(at('div.hover:bg-red "x"'), /write `class: 'hover:bg-red'`/);
+    lexFails(at('div.w-[10px] "x"'), /write `class: 'w-\[10px\]'`/);
+    lexFails(at('div.mt-2.5 "x"'), /write `class: 'mt-2.5'`/);
+    lexFails(at('b#1 "hello"'), /an id shorthand starts with a letter — write `id: '1'`/);
+    lexFails(at('div#a#b "x"'), /an element has one id/);
+    lexFails(at('div.card#a.big#b "x"'), /an element has one id/);
+  });
+
+  test('a `#word` glued to a value rejects; spaced, it is a comment', () => {
+    lexFails(at('span title: name#t'), /`#t` is glued to a value: an id follows an element's tag, and a comment needs a space before `#`/);
+    const comment = js(at('p "x" # a note'));
+    expect(comment).toContain('createTextNode("x")');
+    expect(comment).not.toContain('note');
+  });
+
+  test('code inside a template reads `.` and `#` as code does', () => {
+    expect(js(at('button @click: -> console.log a#b'))).toContain('console.log(a)');
+    expect(js(at('button @click: -> x = p.w-1'))).toContain('p.w - 1');
+  });
+});

@@ -4,8 +4,8 @@ This document plans the cleanup of Rip's template language (the `render`
 block of a component): what it means after the cleanup, which layer owns
 each decision, and the phases that get there. It is a plan, not a
 contract. Status: **in progress** — owner decisions are recorded in
-[Owner decisions](#owner-decisions); P0, P1 and P3 are done, and P2 is
-next.
+[Owner decisions](#owner-decisions); P0, P1 and P3 are done, and P2's
+selector half (decisions 1 and 2) is done; its scanner half is next.
 
 The evidence comes from a review of `main` (2026-10-10, after `d00d26b5`):
 an implementation map of every place that decides what a template token
@@ -165,7 +165,7 @@ regeneration where it changes the surface.
 |---|---|---|---|
 | P0 Safety nets | Byte pins for every heavily used construct; an identity scan (JS and typed face) over the repo and medlabs, with a recorded baseline; re-run every review probe | None | None |
 | P1 Event spelling | Remove bare `@event`; the event-modifier rejection shows the handler form | Corpus rows using bare `@event`, enumerated | Low |
-| P2 Render-agnostic scanner | Selector (`tag.cls`, `#id`), custom-element and event-name runs become one gate-owned token kind; `else-x` and the lexer render state go; `.` continuation restored in code | Corpus, enumerated | Medium |
+| P2 Render-agnostic scanner | Selectors first (done): plain `tag.cls` / `#id` names work, everything else rejects pointing at `class:` / `id:`, and code positions read `.` and `#` as code. Then custom-element and event-name runs become one gate-owned token kind; `else-x` and the lexer render state go; `.` continuation restored in code | Corpus, enumerated | Medium |
 | P3 One template gate | One region, code/template classification, all position rejections | None in the scan | Medium–high |
 | P4 Binding-free block attachment | The block always belongs to the line head; delete `readsAsValue` | None in the scan | **High** — cold review before merge |
 | P5 Grammar homes | `= expr` and `<=>` productions; the sentinels leave the user namespace | Typed face and mapping, enumerated | Medium–high |
@@ -187,7 +187,10 @@ reflect them.
    (`w-1/2`, `hover:bg-red`, `w-[10px]`) rejects, positioned, pointing at
    `class: '…'`.
 2. **`#id` stays**: tight after a tag or selector chain, or opening a
-   line (`#main`). `#` anywhere else is a comment.
+   line (`#main`); one per element, a name starting with a letter
+   (`b#1` rejects, pointing at `id: '…'`). A `#word` glued to a value in
+   markup (`title: name#t`) rejects; a spaced `# note` is a comment, and
+   inside code `#` reads as it does in code.
 3. **`= expr` stays** as the explicit text form.
 4. **Bare `@foo` is removed** — `button @click` and `button @escape`
    reject, naming the explicit form `@click: onClick`. One spelling per
