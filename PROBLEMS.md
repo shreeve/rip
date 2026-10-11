@@ -248,6 +248,16 @@ on every render). `count += 1` in the same place rejects.
 `createTextNode(String(hidden(() => span("kid"))))`; `div title: "t", ->`
 keeps its children.
 
+**T27 M — `~name` and `<=>` inside a nested call in an element argument are template forms.**
+`p f ~mask` emits `f({__transition__: "mask"})` and `p f a <=> name`
+emits `f({__bind_a__: this.name.value})`; both belong to the element only.
+
+**T28 M — A parenthesized inline branch as an element argument makes its value an element.**
+`p (if ok then a-b else 0)` emits `createElement('0')`.
+
+**T29 M — A component's positional argument before a children arrow is dropped.**
+`Bar n, ->` + an indented `span "k"` emits `new Bar({})`.
+
 **T24 M — A call or a string as a handler runs at the wrong time or never.**
 `@click: go()` emits `(this.go())(e)` — `go` runs on every click and the
 result is called; `@click: "go()"` emits `("go()")(e)`.

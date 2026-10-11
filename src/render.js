@@ -61,6 +61,9 @@ const VALUE_STARTS = new Set(['IDENTIFIER', 'NUMBER', 'STRING', 'STRING_START', 
   'REGEX', 'REGEX_START', '@', 'THIS', '[', '{', '(', 'PARAM_START', '->', '=>']);
 // The event-modifier names other template languages put after a dot.
 const MODIFIERS = new Set(['prevent', 'stop', 'once', 'self', 'capture', 'passive']);
+const isHyphen = (t) => t?.kind === '-' || (t?.kind === 'MATH' && t.value === '-');
+// A line that continues the statement above it at the same indent.
+const VALUE_CONTINUATIONS = new Set(['ELSE', 'CATCH', 'FINALLY']);
 const LINE_BREAKS = new Set(['INDENT', 'OUTDENT', 'TERMINATOR']);
 const REACTIVE_DECLS = new Set(['REACTIVE_ASSIGN', 'COMPUTED_ASSIGN']);
 const PLAIN_ASSIGN = new Set(['=']);
@@ -275,6 +278,22 @@ export function rewriteRender(tokens, mintId, fail) {
       !readsAsValue(head.value) && atTemplateLineStart(j);
   };
 
+  // Is the cursor on a line of an element's argument list that spans
+  // lines (`p(` / `~fade` / `"x"` / `)`)?
+  const inHeadCallBlock = () => {
+    let depth = 0;
+    for (let k = out.length - 1; k > 0; k--) {
+      if (counter.on) counter.n++;
+      const kind = out[k].kind;
+      if (CLOSERS.has(kind) || kind === 'OUTDENT') depth++;
+      else if (OPENERS.has(kind) || kind === 'INDENT') {
+        if (depth > 0) { depth--; continue; }
+        return kind === 'INDENT' && out[k - 1].kind === 'CALL_START' && isHeadCall(k - 1);
+      } else if (kind === 'RENDER') return false;
+    }
+    return false;
+  };
+
   // Walk back from out[j] over one comma-separated argument, skipping
   // bracket groups; the index of what bounds it: a top-level `,`, `:`
   // or `=`, or -1 at the line start.
@@ -351,7 +370,8 @@ export function rewriteRender(tokens, mintId, fail) {
   // arrow, an `= expr` text body, or a bracket group opened inside the
   // template? Template rewrites apply only where this answers false.
   const inCode = () =>
-    codeLevels.length > 0 || textFrames.length > 0 || explicitDepthAt() !== 0 || inArrowBodyOnLine();
+    valueLine !== null || codeLevels.length > 0 || textFrames.length > 0 || explicitDepthAt() !== 0 ||
+    inArrowBodyOnLine();
 
   // Does a block opening after the current token belong to code? Asked
   // AFTER the token, since a closer that ends a bracket group
@@ -385,6 +405,7 @@ export function rewriteRender(tokens, mintId, fail) {
     const pt = prev.kind;
     if ((pt === ',' || pt === 'IDENTIFIER' || pt === 'PROPERTY') && startsWithTag(current)) return true;
     if (pt === 'CALL_START' && isHeadCall(out.length - 1)) return true;
+    if ((pt === 'INDENT' || pt === 'TERMINATOR') && inHeadCallBlock()) return true;
     if ((pt === 'INDENT' || pt === 'TERMINATOR') && elementBodyLevels.includes(currentIndent)) return true;
     return false;
   };
@@ -507,6 +528,8 @@ export function rewriteRender(tokens, mintId, fail) {
   const renderScopes = [];   // { level, names } per open render control-flow block
   const codeLevels = [];     // indent levels of open function bodies inside render
   let lineHead = null;       // kind of the current line's first token
+  let valueLine = null;      // indent of an open render-local line (`x = …`): its value, blocks and
+                             // `else`/`catch`/`finally` continuations included, is code
   let loopVars = null;       // the variables of the `for` line being read
 
   const readsAsValue = (name) =>
@@ -521,7 +544,14 @@ export function rewriteRender(tokens, mintId, fail) {
 
     if (textFrames.length > 0) closeTextFrames(t);
 
-    if (!LINE_BREAKS.has(t.kind) && startsLine(i)) lineHead = t.kind;
+    if (!LINE_BREAKS.has(t.kind) && startsLine(i)) {
+      lineHead = t.kind;
+      if (valueLine !== null && (currentIndent < valueLine ||
+          (currentIndent === valueLine && !VALUE_CONTINUATIONS.has(t.kind)))) valueLine = null;
+      if (inRender && valueLine === null && t.kind === 'IDENTIFIER' && next?.kind === '=' && !inCode()) {
+        valueLine = currentIndent;
+      }
+    }
     if (t.kind === 'COMPONENT') memberFrames.push({ level: currentIndent + 1, names: memberNames(i) });
 
     if (t.kind === 'RENDER') {
@@ -536,7 +566,9 @@ export function rewriteRender(tokens, mintId, fail) {
       currentIndent++;
       if (inRender) {
         const opener = tokens[i - 1]?.kind;
-        if ((opener === '->' || opener === '=>') && out[out.length - 1] === tokens[i - 1]) {
+        if (valueLine !== null) {
+          codeLevels.push(currentIndent);
+        } else if ((opener === '->' || opener === '=>') && out[out.length - 1] === tokens[i - 1]) {
           if (isCodeArrow(out.length - 1)) codeLevels.push(currentIndent);
           else elementBodyLevels.push(currentIndent);
         } else if (codeLevels.length === 0 && CONTROL_HEADS.has(lineHead)) {
@@ -561,7 +593,10 @@ export function rewriteRender(tokens, mintId, fail) {
         out.push(gen('CALL_END', ')', t));
         pendingCallEnds.pop();
       }
-      if (inRender && currentIndent < renderIndentLevel) inRender = false;
+      if (inRender && currentIndent < renderIndentLevel) {
+        inRender = false;
+        valueLine = null;
+      }
       continue;
     }
     // An inline render's region is its line and the block under it: the
@@ -571,10 +606,31 @@ export function rewriteRender(tokens, mintId, fail) {
         currentIndent < renderIndentLevel && explicitDepthAt() === 0) {
       inRender = false;
       inlineRender = false;
+      valueLine = null;
     }
     if (!inRender) {
       out.push(t);
       continue;
+    }
+
+    // An inline branch's element may be a custom element
+    // (`if x then sl-icon …`): in markup its tight hyphen run is one tag
+    // name, as at a line start. In a value it stays subtraction.
+    if (t.kind === 'IDENTIFIER' && (out[out.length - 1]?.kind === 'THEN' || out[out.length - 1]?.kind === 'ELSE') &&
+        isHyphen(tokens[i + 1]) && !tokens[i + 1].spaced && tokens[i + 2]?.kind === 'IDENTIFIER' && !tokens[i + 2].spaced &&
+        atTemplateLineStart(out.length) && !inCode()) {
+      let j = i + 1;
+      let name = String(t.value);
+      while (isHyphen(tokens[j]) && !tokens[j].spaced &&
+             (tokens[j + 1]?.kind === 'IDENTIFIER' || tokens[j + 1]?.kind === 'PROPERTY') && !tokens[j + 1].spaced) {
+        name += '-' + String(tokens[j + 1].value);
+        j += 2;
+      }
+      if (tokens[j]?.kind !== ':') {
+        tokens.splice(i, j - i, { ...t, value: name, end: tokens[j - 1].end });
+        t = tokens[i];
+        next = tokens[i + 1] ?? null;
+      }
     }
 
     if (codeLevels.length === 0 && startsLine(i)) {
@@ -733,7 +789,7 @@ export function rewriteRender(tokens, mintId, fail) {
       // a `:` ends it — anywhere else a hyphen keeps its meaning.
       let j = i + 2;
       let name = String(next.value);
-      while ((tokens[j]?.kind === '-' || (tokens[j]?.kind === 'MATH' && tokens[j].value === '-')) && !tokens[j].spaced &&
+      while (isHyphen(tokens[j]) && !tokens[j].spaced &&
              (tokens[j + 1]?.kind === 'IDENTIFIER' || tokens[j + 1]?.kind === 'PROPERTY') && !tokens[j + 1].spaced) {
         name += '-' + String(tokens[j + 1].value);
         j += 2;
@@ -754,9 +810,9 @@ export function rewriteRender(tokens, mintId, fail) {
         // property is a modifier, where it is a listener written wrong.
         if (after?.kind === '.' && MODIFIERS.has(tokens[i + 3]?.value) && !readsAsValue(ev)) {
           const call = { prevent: 'e.preventDefault(); ', stop: 'e.stopPropagation(); ' }[tokens[i + 3].value] ?? '';
-          fail(`event modifiers are not supported — handle it in the listener: \`@${ev}: (e) -> ${call}…\``, after.start);
+          fail(`\`@${ev}.${tokens[i + 3].value}\` reads \`${ev}\`, which is no member here; event modifiers are not supported — handle it in the listener: \`@${ev}: (e) -> ${call}…\``, after.start);
         }
-        if (j === i + 2 && (after?.kind === '-' || (after?.kind === 'MATH' && after.value === '-'))) {
+        if (j === i + 2 && isHyphen(after)) {
           fail('an event name after `@` is words joined by tight hyphens, like `@sl-change: handler`', t.start);
         }
         if (after?.kind !== '.') {

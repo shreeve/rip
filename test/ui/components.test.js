@@ -2833,6 +2833,26 @@ describe('the template gate', () => {
     expect(chain).toContain('this.click.value.prevent');
   });
 
+  test('a render local is code through its whole value: blocks and `else` lines included', () => {
+    const head = 'Foo = component\n  ok := true\n  a := 5\n  b := 2\n  render\n    ';
+    const tail = '\n    p x\n';
+    for (const value of ['x = if ok\n      1\n    else a-b', 'x = unless ok\n      1\n    else a-b',
+                         'x =\n      if ok then a-b else 0', 'x = if ok\n      a-b\n    else 0']) {
+      const code = js(head + value + tail);
+      expect(code).toContain('this.a.value - this.b.value');
+      expect(code).not.toMatch(/[^.]a-b/);
+    }
+    // The next line at the local's indent is template again.
+    const after = js(head + 'x = if ok then 1 else 2\n    if ok then sl-icon "i"' + tail);
+    expect(after).toContain("createElement('sl-icon')");
+  });
+
+  test("an element's argument list spanning lines is template position", () => {
+    const code = js('Foo = component\n  ok := true\n  render\n    div\n      if ok\n        p(\n          title: "t"\n          ~fade\n        )\n');
+    expect(code).toContain('__transition');
+    expect(code).not.toContain('String(~fade)');
+  });
+
   test('a lone `.` line with children is an implicit div', () => {
     const code = js('Foo = component\n  render\n    div\n      .\n        span "inside"\n');
     expect(code).toContain("createElement('span')");

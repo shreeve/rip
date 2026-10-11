@@ -2872,6 +2872,8 @@ var VALUE_STARTS = new Set([
   "=>"
 ]);
 var MODIFIERS = new Set(["prevent", "stop", "once", "self", "capture", "passive"]);
+var isHyphen = (t) => t?.kind === "-" || t?.kind === "MATH" && t.value === "-";
+var VALUE_CONTINUATIONS = new Set(["ELSE", "CATCH", "FINALLY"]);
 var LINE_BREAKS = new Set(["INDENT", "OUTDENT", "TERMINATOR"]);
 var REACTIVE_DECLS = new Set(["REACTIVE_ASSIGN", "COMPUTED_ASSIGN"]);
 var PLAIN_ASSIGN = new Set(["="]);
@@ -3060,6 +3062,25 @@ function rewriteRender(tokens, mintId, fail) {
     const head = out[j];
     return head?.kind === "IDENTIFIER" && !head.generated && isTemplateTag(head.value) && !readsAsValue(head.value) && atTemplateLineStart(j);
   };
+  const inHeadCallBlock = () => {
+    let depth = 0;
+    for (let k = out.length - 1;k > 0; k--) {
+      if (counter.on)
+        counter.n++;
+      const kind = out[k].kind;
+      if (CLOSERS.has(kind) || kind === "OUTDENT")
+        depth++;
+      else if (OPENERS.has(kind) || kind === "INDENT") {
+        if (depth > 0) {
+          depth--;
+          continue;
+        }
+        return kind === "INDENT" && out[k - 1].kind === "CALL_START" && isHeadCall(k - 1);
+      } else if (kind === "RENDER")
+        return false;
+    }
+    return false;
+  };
   const argumentStart = (j) => {
     let depth = 0;
     for (let k = j;k >= 0; k--) {
@@ -3124,7 +3145,7 @@ function rewriteRender(tokens, mintId, fail) {
     }
     return false;
   };
-  const inCode = () => codeLevels.length > 0 || textFrames.length > 0 || explicitDepthAt() !== 0 || inArrowBodyOnLine();
+  const inCode = () => valueLine !== null || codeLevels.length > 0 || textFrames.length > 0 || explicitDepthAt() !== 0 || inArrowBodyOnLine();
   const blockInCode = (t) => {
     if (codeLevels.length > 0 || textFrames.length > 0)
       return true;
@@ -3154,6 +3175,8 @@ function rewriteRender(tokens, mintId, fail) {
     if ((pt === "," || pt === "IDENTIFIER" || pt === "PROPERTY") && startsWithTag(current))
       return true;
     if (pt === "CALL_START" && isHeadCall(out.length - 1))
+      return true;
+    if ((pt === "INDENT" || pt === "TERMINATOR") && inHeadCallBlock())
       return true;
     if ((pt === "INDENT" || pt === "TERMINATOR") && elementBodyLevels.includes(currentIndent))
       return true;
@@ -3264,6 +3287,7 @@ function rewriteRender(tokens, mintId, fail) {
   const renderScopes = [];
   const codeLevels = [];
   let lineHead = null;
+  let valueLine = null;
   let loopVars = null;
   const readsAsValue = (name) => renderScopes.some((s) => s.names.has(name)) || memberFrames.length > 0 && memberFrames[memberFrames.length - 1].names.has(name) || moduleValues.has(name);
   for (let i = 0;i < tokens.length; i++) {
@@ -3273,8 +3297,14 @@ function rewriteRender(tokens, mintId, fail) {
     let next = tokens[i + 1] ?? null;
     if (textFrames.length > 0)
       closeTextFrames(t);
-    if (!LINE_BREAKS.has(t.kind) && startsLine(i))
+    if (!LINE_BREAKS.has(t.kind) && startsLine(i)) {
       lineHead = t.kind;
+      if (valueLine !== null && (currentIndent < valueLine || currentIndent === valueLine && !VALUE_CONTINUATIONS.has(t.kind)))
+        valueLine = null;
+      if (inRender && valueLine === null && t.kind === "IDENTIFIER" && next?.kind === "=" && !inCode()) {
+        valueLine = currentIndent;
+      }
+    }
     if (t.kind === "COMPONENT")
       memberFrames.push({ level: currentIndent + 1, names: memberNames(i) });
     if (t.kind === "RENDER") {
@@ -3289,7 +3319,9 @@ function rewriteRender(tokens, mintId, fail) {
       currentIndent++;
       if (inRender) {
         const opener = tokens[i - 1]?.kind;
-        if ((opener === "->" || opener === "=>") && out[out.length - 1] === tokens[i - 1]) {
+        if (valueLine !== null) {
+          codeLevels.push(currentIndent);
+        } else if ((opener === "->" || opener === "=>") && out[out.length - 1] === tokens[i - 1]) {
           if (isCodeArrow(out.length - 1))
             codeLevels.push(currentIndent);
           else
@@ -3318,17 +3350,33 @@ function rewriteRender(tokens, mintId, fail) {
         out.push(gen("CALL_END", ")", t));
         pendingCallEnds.pop();
       }
-      if (inRender && currentIndent < renderIndentLevel)
+      if (inRender && currentIndent < renderIndentLevel) {
         inRender = false;
+        valueLine = null;
+      }
       continue;
     }
     if (inRender && inlineRender && (t.kind === "TERMINATOR" && t.value !== ";") && currentIndent < renderIndentLevel && explicitDepthAt() === 0) {
       inRender = false;
       inlineRender = false;
+      valueLine = null;
     }
     if (!inRender) {
       out.push(t);
       continue;
+    }
+    if (t.kind === "IDENTIFIER" && (out[out.length - 1]?.kind === "THEN" || out[out.length - 1]?.kind === "ELSE") && isHyphen(tokens[i + 1]) && !tokens[i + 1].spaced && tokens[i + 2]?.kind === "IDENTIFIER" && !tokens[i + 2].spaced && atTemplateLineStart(out.length) && !inCode()) {
+      let j = i + 1;
+      let name = String(t.value);
+      while (isHyphen(tokens[j]) && !tokens[j].spaced && (tokens[j + 1]?.kind === "IDENTIFIER" || tokens[j + 1]?.kind === "PROPERTY") && !tokens[j + 1].spaced) {
+        name += "-" + String(tokens[j + 1].value);
+        j += 2;
+      }
+      if (tokens[j]?.kind !== ":") {
+        tokens.splice(i, j - i, { ...t, value: name, end: tokens[j - 1].end });
+        t = tokens[i];
+        next = tokens[i + 1] ?? null;
+      }
     }
     if (codeLevels.length === 0 && startsLine(i)) {
       if (t.kind === "FOR") {
@@ -3433,7 +3481,7 @@ function rewriteRender(tokens, mintId, fail) {
     if (t.kind === "@" && next?.kind === "PROPERTY" && !next.spaced) {
       let j = i + 2;
       let name = String(next.value);
-      while ((tokens[j]?.kind === "-" || tokens[j]?.kind === "MATH" && tokens[j].value === "-") && !tokens[j].spaced && (tokens[j + 1]?.kind === "IDENTIFIER" || tokens[j + 1]?.kind === "PROPERTY") && !tokens[j + 1].spaced) {
+      while (isHyphen(tokens[j]) && !tokens[j].spaced && (tokens[j + 1]?.kind === "IDENTIFIER" || tokens[j + 1]?.kind === "PROPERTY") && !tokens[j + 1].spaced) {
         name += "-" + String(tokens[j + 1].value);
         j += 2;
       }
@@ -3450,9 +3498,9 @@ function rewriteRender(tokens, mintId, fail) {
         }
         if (after?.kind === "." && MODIFIERS.has(tokens[i + 3]?.value) && !readsAsValue(ev)) {
           const call = { prevent: "e.preventDefault(); ", stop: "e.stopPropagation(); " }[tokens[i + 3].value] ?? "";
-          fail(`event modifiers are not supported — handle it in the listener: \`@${ev}: (e) -> ${call}…\``, after.start);
+          fail(`\`@${ev}.${tokens[i + 3].value}\` reads \`${ev}\`, which is no member here; event modifiers are not supported — handle it in the listener: \`@${ev}: (e) -> ${call}…\``, after.start);
         }
-        if (j === i + 2 && (after?.kind === "-" || after?.kind === "MATH" && after.value === "-")) {
+        if (j === i + 2 && isHyphen(after)) {
           fail("an event name after `@` is words joined by tight hyphens, like `@sl-change: handler`", t.start);
         }
         if (after?.kind !== ".") {
@@ -5988,8 +6036,6 @@ var ALIASES = {
   on: ["BOOL", "true"],
   off: ["BOOL", "false"]
 };
-var LINE_STARTS = new Set(["TERMINATOR", "INDENT", "OUTDENT", "RENDER"]);
-var BRANCH_HEADS = new Set(["IF", "UNLESS", "ELSE", "LEADING_WHEN"]);
 var TAGGABLE = new Set(["IDENTIFIER", "PROPERTY", ")", "CALL_END", "]", "INDEX_END"]);
 var OPS4 = { ">>>=": "COMPOUND_ASSIGN" };
 var OPS3 = {
@@ -6231,16 +6277,15 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
     }
     if (prev?.kind === "INDENT") {
       const before = tokens[tokens.length - 2]?.kind;
-      return !(before === ":" || before === "=" || before === "COMPOUND_ASSIGN" || before === ",");
+      if (before === ":" || before === "=" || before === "COMPOUND_ASSIGN" || before === ",")
+        return false;
+      let k = tokens.length - 2;
+      while (k > 0 && !["TERMINATOR", "INDENT", "OUTDENT", "RENDER"].includes(tokens[k - 1].kind))
+        k--;
+      return !(tokens[k]?.kind === "IDENTIFIER" && tokens[k + 1]?.kind === "=");
     }
     if (!prev || prev.kind === "TERMINATOR" || prev.kind === "OUTDENT" || prev.kind === "RENDER")
       return true;
-    if (prev.kind === "THEN" || prev.kind === "ELSE") {
-      let k = tokens.length - 1;
-      while (k > 0 && !LINE_STARTS.has(tokens[k - 1].kind))
-        k--;
-      return BRANCH_HEADS.has(tokens[k].kind);
-    }
     if (!pendingSpaced || prev.generated)
       return false;
     let j = tokens.length - 1;
@@ -32802,7 +32847,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "4ede03b46486d009";
+var compilerBuild = () => "77f56be7d4d217d7";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
