@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, jest, test } from 'bun:test';
 import { delay, debounce, throttle, hold } from 'rip/app';
 import { __state } from '../../../src/runtime/reactive.js';
 
@@ -50,19 +50,29 @@ describe('debounce', () => {
 });
 
 describe('throttle', () => {
-  test('changes inside the window coalesce; a quiet window restores the leading edge', async () => {
+  // The window is measured against Date.now(), so a host stall between
+  // steps moves the edges. The fake clock advances only when the test
+  // advances it: every edge is asserted at its exact millisecond.
+  test('changes inside the window coalesce; a quiet window restores the leading edge', () => {
+    jest.useFakeTimers();
     const y = __state(0);
     const smooth = throttle(30, y);
-    y.value = 1;
-    y.value = 2;
-    y.value = 3;
-    expect(smooth.value).toBe(0);
-    await Bun.sleep(45);
-    expect(smooth.value).toBe(3);
-    await Bun.sleep(25);
-    y.value = 4;
-    expect(smooth.value).toBe(4);
-    smooth.dispose();
+    try {
+      y.value = 1;
+      y.value = 2;
+      y.value = 3;
+      expect(smooth.value).toBe(0);
+      jest.advanceTimersByTime(29);
+      expect(smooth.value).toBe(0);
+      jest.advanceTimersByTime(1);
+      expect(smooth.value).toBe(3);
+      jest.advanceTimersByTime(30);
+      y.value = 4;
+      expect(smooth.value).toBe(4);
+    } finally {
+      smooth.dispose();
+      jest.useRealTimers();
+    }
   });
 });
 
