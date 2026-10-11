@@ -88,6 +88,10 @@ binding-guessing block attachment).
 | `tag`, `tag args…` | An element: a `TEMPLATE_TAGS` name, or a tight-hyphen custom element (`x-icon`) |
 | `tag.cls.cls2`, `tag#id` | Classes and id; a selector token holds letters, digits, `-`, `_` |
 | `.cls` / `#id` opening a line | An implicit `div` with that class or id |
+| A bare `.` line, `. key: v` | An implicit `div` (with attributes) |
+| `tag.( a, b )` | Dynamic classes |
+| `tag ->`, `tag key: v, ->` | Optional explicit children arrow; the indented block (or a one-line child) is the children either way |
+| `~fade` | A transition on a branch root |
 | `key: v` | Attribute or property on an element, prop on a component; `null` removes |
 | `aria-*`, `data-*` keys | Joined by `tagCompoundKeys` only |
 | `class:`, `style:` | Unchanged |
@@ -124,13 +128,17 @@ on a native element a function value for a non-`@` key or an `on*:` key
 rejects. `->` is always a function; as a template argument it rejects.
 `~` rejects in a template position.
 
-**Removed, each rejecting positioned with the explicit form** (all have
-zero real uses): bare `@event` (write `@event: handler`); the bare `.`
-and `. role:` lines (write `div`);
-`.(…)` dynamic classes (write `class: [...]`); event modifiers; `tag ->`
-children arrows (an indented block is the children); `~fade`
-transitions. Selector classes that need `/`, `:` or `[` reject, pointing
-at `class: '…'`.
+**Removed, rejecting positioned with the explicit form:** bare `@event`
+(write `@event: handler`). Event modifiers stay unsupported, with a
+rejection that shows the handler form. Selector classes that need `/`,
+`:` or `[` reject, pointing at `class: '…'`.
+
+**Kept and fixed** (the owner's call: these read clearly; their bugs come
+from where they are decided, not from what they mean): dynamic classes
+`.( )`, bare `.` lines, the `->` children arrow, and `~` transitions.
+Each applies only in a template position; in code, `.` is member access,
+`->` a function and `~` bitwise not. The lone `.` line with children,
+which fails to parse today, is fixed.
 
 ## Ownership
 
@@ -153,7 +161,7 @@ regeneration where it changes the surface.
 | Phase | Scope | Output change | Risk |
 |---|---|---|---|
 | P0 Safety nets | Byte pins for every heavily used construct; an identity scan (JS and typed face) over the repo and medlabs, with a recorded baseline; re-run every review probe | None | None |
-| P1 Remove unused sugar | `~x`, `.(…)`, bare `.`/`. k:` lines, `tag ->`, bare `@event`, event-modifier message | Corpus regions rewritten to explicit forms, enumerated | Low–medium |
+| P1 Event spelling | Remove bare `@event`; the event-modifier rejection shows the handler form | Corpus rows using bare `@event`, enumerated | Low |
 | P2 Render-agnostic scanner | Selector (`tag.cls`, `#id`), custom-element and event-name runs become one gate-owned token kind; `else-x` and the lexer render state go; `.` continuation restored in code | Corpus, enumerated | Medium |
 | P3 One template gate | One region, code/template classification, all position rejections | None in the scan | Medium–high |
 | P4 Binding-free block attachment | The block always belongs to the line head; delete `readsAsValue` | None in the scan | **High** — cold review before merge |
