@@ -1,0 +1,20 @@
+{
+  "name": "@rip/vista",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Call VistA's RPCs over HTTPS, the RPC Broker's messages byte for byte — zero runtime dependencies.",
+  "rip": {
+    "browser": true
+  },
+  "exports": {
+    ".": "./vista.rip"
+  },
+  "scripts": {
+    "test": "rip test.rip"
+  },
+  "files": [
+    "vista.rip",
+    "README.md"
+  ]
+}
