@@ -44,9 +44,13 @@ session points.
 
 **Keepalive** runs only while the user is active. Start it after sign-on,
 when the idle timeout is the user's own, and call `stopKeepalive` when the
-user goes idle. A tick that fails goes to `onError`; without a handler it
-is thrown. A transient failure keeps the timer, and the session's end
-stops it.
+user goes idle. A tick runs on a timer, where nothing awaits it, so
+`onError` is required: a failed tick goes there. A transient failure keeps
+the timer, and the session's end stops it.
+
+A request belongs to the session it was sent on. One still in flight when
+`connect` starts a new session fails as `ended`, and its answer never ends
+or re-keys the new one.
 
 ## Parameters
 
@@ -57,6 +61,15 @@ stops it.
 | `{1: 'a', TEXT: 'b'}` | a list: M canonical numbers bare, anything else quoted (`"TEXT"`, `"0.5"`) |
 | `[[['TEXT', 1, 0], 'line']]` | a list with multi-level subscripts (`"TEXT",1,0`) |
 | `{}` or `[]` | an empty list |
+
+Each argument after the RPC name is one parameter, so spread an array of
+separate values (`vista.rpc! 'X', ...args`). An array passed as one
+argument is a single list, read as `[subscript, value]` pairs.
+
+A number goes out as JavaScript writes it (`0.5`), as CPRS sends one. A
+subscript is the exception: a numeric one takes M's canonical form
+(`.5`), because M compares subscripts as strings and `"0.5"` is not `.5`.
+A subscript level is never empty (M rejects `""`).
 
 Anything else rejects before a byte is sent: a boolean, a `Date`, `Map` or
 other non-plain object, a nested object, or a number with no plain form

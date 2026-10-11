@@ -133,6 +133,7 @@ subscript = (key) ->
     if typeof level is 'number'
       numericSubscript(level)
     else if typeof level is 'string'
+      fail 'request', 'a list subscript level is never empty (M rejects `""`)' if level is ''
       if mNumber(level) then level else '"' + level.replaceAll('"', '""') + '"'
     else
       fail 'request', "a list subscript is a number or a string, not #{kindOf(level)}"
@@ -306,6 +307,7 @@ export class Session
     @queue = Promise.resolve()
     @keeping = null
     @ended = null
+    @closing = false
     @epoch = 0
 
   endpoint: ->
@@ -322,16 +324,24 @@ export class Session
     @epoch += 1
 
   # One message to Janus and its reply; requests run one at a time, in order,
-  # as the broker is strictly request and reply.
+  # as the broker is strictly request and reply. Each belongs to the session
+  # it was sent on: one left over from an earlier session never runs on a
+  # later one, and its answer never ends or re-keys it.
   send: (body) ->
+    epoch = @epoch
     run = =>
+      if epoch isnt @epoch
+        reason = @ended ?? 'a new session started'
+        fail 'ended', "the session this request was sent on has ended (#{reason})", { sessionEnded: reason }
       fail 'ended', "the session has ended (#{@ended}); connect to start another", { sessionEnded: @ended } if @ended?
-      @post(body)
+      @post(body, epoch)
     result = @queue.then(run, run)
     @queue = result.then((-> null), (-> null))
     result
 
-  post: (body) ->
+  post: (body, epoch) ->
+    current = => epoch is @epoch
+    endIf = (reason) => @end(reason) if current()
     headers = { 'Content-Type': 'application/x-xwb', 'X-OV': '1' }
     token = tokens.get(this)
     headers.Authorization = "Bearer #{token}" if token
@@ -344,11 +354,11 @@ export class Session
     status = response.status
     if status is 401
       reason = response.headers.get('OV-Session-Ended')
-      @end reason ?? 'unknown'
+      endIf reason ?? 'unknown'
       fail 'ended', "the session has ended (#{reason ?? 'unknown'})", { status, sessionEnded: reason }
     if status is 502 or status is 504
-      @end "Janus answered #{status}"
-      fail 'ended', "the session has ended (Janus answered #{status})", { status, sessionEnded: @ended }
+      endIf "Janus answered #{status}"
+      fail 'ended', "the session has ended (Janus answered #{status})", { status, sessionEnded: "Janus answered #{status}" }
     fail 'transport', "Janus answered #{status}", { status, retryAfter: response.headers.get('Retry-After') } unless status is 200
     type = response.headers.get('Content-Type') ?? ''
     fail 'transport', "Janus answered #{type or 'no content type'}, not application/x-xwb", { status } unless type.startsWith('application/x-xwb')
@@ -356,17 +366,17 @@ export class Session
     # at sign-on); a browser hides Set-Cookie and sends the cookie itself.
     cookie = response.headers.get('Set-Cookie')
     fresh = cookie?.match(/(?:^|[;,]\s*)__Host-ov=([^;,\s]+)/)?[1]
-    tokens.set this, fresh if fresh
+    tokens.set this, fresh if fresh and current()
     raw = null
     try
       raw = response.arrayBuffer!
     catch e
-      @end 'the reply was cut short'
-      fail 'ended', "the session has ended (the reply was cut short: #{e.message})", { sessionEnded: @ended, cause: e }
+      endIf 'the reply was cut short'
+      fail 'ended', "the session has ended (the reply was cut short: #{e.message})", { sessionEnded: 'the reply was cut short', cause: e }
     try
       return decode(Uint8Array.new(raw))
     catch e
-      @end 'a malformed reply'
+      endIf 'a malformed reply'
       throw e
 
   # An RPC's data; a security message, an error message or an M error throws.
@@ -387,6 +397,7 @@ export class Session
     @stopKeepalive()
     tokens.delete this
     @ended = null
+    @closing = false
     @epoch += 1
     reply = @send!(encodeCommand('TCPConnect', ['127.0.0.1', 0, 'localhost']))
     unless reply.data is 'accept'
@@ -426,22 +437,22 @@ export class Session
   # Keep the session while the user is active (§4 step 6): `XWB IM HERE` at
   # half the idle timeout `XWB GET BROKER INFO` gives, until stopKeepalive,
   # bye or the session's end. Start it after sign-on, when the timeout is
-  # the user's own. A tick that fails goes to `onError`; with no handler it
-  # is thrown, never dropped. Answers the interval in ms.
+  # the user's own. A tick runs on a timer, where nothing awaits it, so a
+  # failed tick has only `onError` to go to: it is required. Answers the
+  # interval in ms.
   keepalive: (opts = {}) ->
     for key in Object.keys(opts)
       fail 'request', "unknown keepalive option '#{key}'" unless key is 'onError'
-    onError = opts.onError ?? null
-    fail 'request', "onError is a function, not #{kindOf(onError)}" if onError? and typeof onError isnt 'function'
+    onError = opts.onError
+    fail 'request', "keepalive needs onError (a function), not #{kindOf(onError)}: a failed tick has nowhere else to go" unless typeof onError is 'function'
     epoch = @epoch
     seconds = Number(@lines!('XWB GET BROKER INFO')[0])
     fail 'reply', 'XWB GET BROKER INFO gave no idle timeout' unless seconds > 0
-    fail 'ended', 'the session ended or restarted before its keepalive began', { sessionEnded: @ended } if epoch isnt @epoch
+    fail 'ended', 'the session ended or restarted before its keepalive began', { sessionEnded: @ended } if epoch isnt @epoch or @closing
     @stopKeepalive()
     ms = seconds * 500
     tick = =>
-      @rpc('XWB IM HERE').catch (e) =>
-        if onError then onError(e) else throw e
+      @rpc('XWB IM HERE').catch onError
     @keeping = @timers.set(tick, ms)
     @keeping?.unref?()
     ms
@@ -453,7 +464,7 @@ export class Session
   # End the session: `#BYE#`; em logs the user out and Janus forgets the token.
   bye: ->
     @stopKeepalive()
-    @epoch += 1
+    @closing = true
     reply = @send!(encodeCommand('#BYE#'))
     @end 'bye'
     fail 'reply', "#BYE# was answered #{JSON.stringify(reply.data)}" unless reply.data is '#BYE#'

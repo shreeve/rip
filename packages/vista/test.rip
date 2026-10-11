@@ -397,13 +397,13 @@ test! "keepalive cannot outlive its session", ->
   live = []
   timers = { set: ((f, ms) -> live.push(f); f), clear: (h) -> live.splice(live.indexOf(h), 1) }
   [s] = session([REPLY.broker, REPLY.bye], { timers })
-  k = s.keepalive()
+  k = s.keepalive(onError: ->)
   b = s.bye()
   rejects! (-> k), 'ended', 'before its keepalive began'
   eq (await b), true
   eq live.length, 0
   [t] = session([REPLY.broker, { status: 401, headers: { 'OV-Session-Ended': 'idle' } }], { timers })
-  t.keepalive!
+  t.keepalive! onError: ->
   eq live.length, 1
   rejects! (-> t.rpc('X')), 'ended'
   eq live.length, 0
@@ -420,10 +420,46 @@ test! "a keepalive tick that fails goes to onError, and a transient failure keep
   eq s.keeping?, true
   tick!
   eq seen, ['transport']
-  [t] = session([REPLY.broker, { status: 503 }], { timers })
-  t.keepalive!
-  rejects! (-> ticks[ticks.length - 1]()), 'transport'
+  [t] = session([], { timers })
+  rejects! (-> t.keepalive()), 'request', 'keepalive needs onError (a function), not undefined'
+  rejects! (-> t.keepalive({ onError: 'log' })), 'request', 'not string'
   rejects! (-> t.keepalive({ every: 5 })), 'request', "unknown keepalive option 'every'"
+
+test! "a request left from an earlier session never ends or re-keys the new one", ->
+  release = null
+  gate = Promise.new((r) -> release = r)
+  started = null
+  inFlight = Promise.new((r) -> started = r)
+  sent = []
+  f = (url, init) ->
+    name = fromBytes(init.body)
+    sent.push init.headers.Authorization ?? null
+    if name.includes('ORWU SLOW')
+      started()
+      await gate
+      return Response.new(bytes(''), { status: 401, headers: { 'OV-Session-Ended': 'idle', 'Set-Cookie': '__Host-ov=STALE; Path=/' } })
+    reply = if name.includes('TCPConnect') then REPLY.accept else if name.includes('SETUP') then REPLY.setup else REPLY.imHere
+    cookie = if name.includes('TCPConnect') then { 'Set-Cookie': '__Host-ov=NEW; Path=/' } else {}
+    Response.new(bytes(reply), { headers: { 'Content-Type': 'application/x-xwb', ...cookie } })
+  s = Session.new({ url: 'https://vista.test', fetch: f })
+  slow = s.rpc('ORWU SLOW')
+  await inFlight
+  queued = s.rpc('ORWU QUEUED')
+  c = s.connect()
+  release()
+  e = rejects! (-> slow), 'ended'
+  eq e.sessionEnded, 'idle'
+  rejects! (-> queued), 'ended', 'a new session started'
+  await c
+  eq s.ended, null
+  s.rpc! 'XWB IM HERE'
+  eq sent[sent.length - 1], 'Bearer NEW'
+  eq sent.filter((h) -> h is 'Bearer STALE').length, 0
+
+test "an empty subscript level rejects; M has no `\"\"` subscript", ->
+  throws (-> encode('X', [[['', 'v']]])), VistaError, 'never empty'
+  throws (-> encode('X', [[[['A', ''], 'v']]])), VistaError, 'never empty'
+  throws (-> encode('X', [{ '': 'v' }])), VistaError, 'never empty'
 
 test! "after bye, a call fails at once with the session's end", ->
   [s, f] = session([REPLY.bye])
@@ -435,7 +471,7 @@ test! "keepalive: XWB IM HERE at half the broker's idle timeout, until bye", ->
   ticks = []
   timers = { set: ((f, ms) -> ticks.push(ms); f), clear: (h) -> ticks.push('cleared') }
   [s, f] = session([REPLY.broker, REPLY.imHere, REPLY.bye], { timers })
-  eq s.keepalive!, 90000
+  eq s.keepalive!(onError: ->), 90000
   tick = s.keeping
   tick!
   eq f.calls[1].body, '[XWB]11302\\x010\\x0bXWB IM HERE5\\x04'
