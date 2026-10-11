@@ -377,12 +377,6 @@ response parses "successfully".
 
 **P19 L — rip/script ends on an unknown control symbol without error** (`:skp` aborts silently; `trace` accepts `[:bogus]`); the README trace omits the `\r` actually sent.
 
-**P22 ✔ H — QR SVG encoding breaks for good after any `decodeQR` scan.**
-`try decodeQR {width: 50, height: 50, data: …}` then `encodeQR 'hello',
-'svg'` throws "Attempted to assign to readonly property" on every later
-SVG encode: `findRows` (packages/barcodes/qr.rip ~1649) writes `runs = 0`,
-which `=` resolves to the module-level SVG cache `runs` (~729).
-
 **P23 ✔ M — time `set` ignores `:quarter` and `:week`; `get(:week)` is undefined.**
 `time.utc('2024-01-31').set(:quarter, 2)` and `.set(:week, 2)` return the
 date unchanged, though prettyUnit accepts both (an unknown unit throws).
