@@ -291,6 +291,19 @@ reached through a coercer).
 
 ---
 
+**S15 M — An enum whose member values collide with member names resolves the wrong member.**
+```coffee
+E = schema :enum
+  :a "b"
+  :b "c"
+M = schema :model
+  e E, [:b]
+p M.parse({}).e    # "b" — member :a's value; expected "c"
+```
+`_materializeEnum` (src/runtime/schema.js) matches a name OR a value
+member by member, so the first member whose value equals the name wins;
+the column DEFAULT inherits it.
+
 ## Rip Sites
 
 **W7 M — An async `prefix` block registers its routes without the prefix.** `prefix '/api', -> cfg = loadConfig!(); get '/ping' …` serves `/ping`, not `/api/ping`: `fn?.()` is not awaited and `finally` restores the prefix. `App(fn)` has the same `fn?.()`. Same class as #432.
