@@ -297,6 +297,18 @@ describe('schema DSL: loud rejections', () => {
     lexFails('E = schema :enum, on: analytics\n  :a\n  :b', /'on:'.*applies to :model only/);
   });
 
+  test('an enum whose input would name two members rejects', () => {
+    lexFails('E = schema :enum\n  :a "b"\n  :b "c"', /enum member ':a' has the value "b", which is the name of member ':b'/);
+    lexFails('E = schema :enum\n  :a 1\n  :a 2', /enum member ':a' is declared twice/);
+    // the hand-built form takes the same check
+    expect(() => __schema({ kind: 'enum', name: 'H', entries: [
+      { tag: 'enum-member', name: 'a', value: 'b' }, { tag: 'enum-member', name: 'b', value: 'c' },
+    ] })._normalize()).toThrow(/an input "b" would name both/);
+    // a value naming its own member, and two names for one value, are unambiguous
+    expect(run('E = schema :enum\n  :a "a"\n  :c "x"\n  :d "x"', 'return [...E._normalize().enumMembers.values()];'))
+      .toEqual(['a', 'x', 'x']);
+  });
+
   test('a schema number reads its separators and rejects a BigInt', () => {
     expect(run('E = schema :enum\n  :a 1_000\n  :b -2_000', 'return [...E._normalize().enumMembers.values()];')).toEqual([1000, -2000]);
     expect(run('S = schema :shape\n  n? integer, 1_000..2_000, [1_500]', 'return [S.parse({}).n, S.safe({ n: 2_500 }).ok];'))
