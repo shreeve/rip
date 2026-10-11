@@ -3040,3 +3040,66 @@ describe('selector shorthands', () => {
     expect(js(at('button @click: -> x = p.w-1'))).toContain('p.w - 1');
   });
 });
+
+describe('component methods keep their instance when passed as values', () => {
+  const run = (source, act) => {
+    const { code } = compile(source, { runtimeDelivery: 'none' });
+    const names = Object.keys(RT);
+    const { App } = new Function(...names, `${code}\nreturn { App };`)(...names.map((name) => RT[name]));
+    const target = document.createElement('main');
+    const app = new App({});
+    try {
+      app.mount(target);
+      return act(app, target);
+    } finally {
+      app.unmount();
+    }
+  };
+
+  test('a method mapped over a list reads its own members', () => {
+    const html = run(`App = component
+  prefix := '#'
+  names := ['a', 'b']
+  format = (n) => "\${prefix}\${n}"
+  render
+    ul
+      for x in names.map(format)
+        li x
+`, (app, target) => serialize(target));
+    expect(html).toContain('#a');
+    expect(html).toContain('#b');
+  });
+
+  test('a method passed to a child as a callback prop runs on its own instance', () => {
+    const got = run(`Kid = component
+  @onPress?: (() => string) | null := null
+  render
+    span "k"
+App = component
+  prefix := '#'
+  save: -> "saved \${prefix}"
+  render
+    div
+      Kid onPress: save
+`, (app) => app._children[0].onPress.value());
+    expect(got).toBe('saved #');
+  });
+
+  test('a method read twice is the same function; a call stays a plain call', () => {
+    const { code } = compile(`App = component
+  go: -> 1
+  pair: -> [go, go]
+  call: -> go()
+  render
+    p "x"
+`, { runtimeDelivery: 'none' });
+    expect(code).toContain('return [this._bound("go"), this._bound("go")];');
+    expect(code).toContain('return this.go();');
+    const names = Object.keys(RT);
+    const { App } = new Function(...names, `${code}\nreturn { App };`)(...names.map((name) => RT[name]));
+    const app = new App({});
+    const [a, b] = app.pair();
+    expect(a).toBe(b);
+    expect(a()).toBe(1);
+  });
+});

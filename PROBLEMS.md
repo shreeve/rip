@@ -171,12 +171,6 @@ duplicate name in one pattern rejects.
 
 ## Templates, components, reactivity
 
-**T4 H — Component methods are never bound, including `=>` members.**
-`format = (n) => "#{prefix}#{n}"` then `names.map(format)` emits an
-unbound prototype method → "Cannot read properties of undefined".
-Passing `onPress: save` to a child loses `this` the same way. Plain
-classes bind `=>` members (`this.fmt = this.fmt.bind(this)`).
-
 **T5 M — `<=>` into a loop variable's field never notifies the collection.**
 `for todo in todos` → `input value <=> todo.title` writes the data but
 emits no `touch`, so dependents (`count ~= todos.filter …`) and sibling

@@ -807,6 +807,9 @@ class Emitter {
     // True while emitting an assignment/update TARGET — the position
     // where read-only lowerings (`.at(-n)`) have no valid JS form.
     this.inTarget = false;
+    // The bare or `@` method name a call is emitting as its callee: that
+    // read is a call, not a method passed as a value (boundMethodRead).
+    this.calleeName = null;
     // Function nodes whose DEFINITION carries the void marker
     // (`save! = ->`, `fn!: ->`): their bodies suppress the implicit
     // return and end with a bare `return;`. Registered by the owning
@@ -1992,6 +1995,36 @@ class Emitter {
   // the innermost open mark's source span is exactly this identifier,
   // the name re-marks the same (nodeId, role) — an exact row on the
   // read site inside the role's cover row over the lowered form.
+  // A component method read as a value — passed, stored, mapped — keeps
+  // its instance: it reads as the instance's bound function (`_bound`).
+  // A call's own callee is a call.
+  boundMethodRead(name, kind) {
+    const callee = this.calleeName;
+    this.calleeName = null;
+    return kind === 'method' && callee !== name && !this.inTarget;
+  }
+
+  // The TS face reads the bound function back as the method's own type
+  // (TS-only bytes, so the face stays the JS bytes plus regions).
+  emitBoundMethod(name) {
+    const self = this.renderSelf ?? 'this';
+    if (this.ts) this.b.tsOnly(() => this.b.emit('('));
+    this.b.emit(self + '._bound("');
+    this.emitPrimitive(name);
+    this.b.emit('")');
+    if (this.ts) this.b.tsOnly(() => this.b.emit(` as ${self === 'this' ? 'this' : `(typeof ${self})`}[${JSON.stringify(name)}])`));
+  }
+
+  // Emit a call's callee, marking a bare or `@` method name as called.
+  asCallee(callee, fn) {
+    const name = typeof callee === 'string' ? callee
+      : isNode(callee) && callee[0] === '.' && callee.length === 3 && callee[1] === 'this' && typeof callee[2] === 'string' ? callee[2]
+      : null;
+    const prev = this.calleeName;
+    this.calleeName = name;
+    try { fn(); } finally { this.calleeName = prev; }
+  }
+
   memberRead(name, reactive) {
     if (this.thisRebound()) {
       const err = this.positionedError(name,
@@ -2002,6 +2035,7 @@ class Emitter {
       }
       throw err;
     }
+    if (!reactive && this.boundMethodRead(name, this.memberKindOf(name))) return this.emitBoundMethod(name);
     const m = this.b.currentMark;
     const src = this.b.source;
     this.b.emit((this.renderSelf ?? 'this') + '.');
@@ -12799,7 +12833,7 @@ class Emitter {
           : isFunc(value) && (value[1].length === 0 || (value[1].length === 1 && typeof value[1][0] === 'string'))
             ? known
             : isFunc(value) ? null : known;
-        this.tsHandlerCast(() => this.withExpression(() => this.expr(value)), evType);
+        this.tsHandlerCast(() => this.withExpression(() => this.asCallee(value, () => this.expr(value))), evType);
         this.b.emit(`)(${ev})))`);
       });
     }
@@ -13158,7 +13192,7 @@ class Emitter {
                 ? (known ?? 'any')
                 : isFunc(value) ? null : known;
             this.b.emit('(');
-            site(this.tsHandlerCast(() => avoidingKey(() => this.withExpression(() => this.expr(value))), evType));
+            site(this.tsHandlerCast(() => avoidingKey(() => this.withExpression(() => this.asCallee(value, () => this.expr(value)))), evType));
             this.b.emit(`)(${ev})`);
           }
           this.b.emit('))');
@@ -15239,6 +15273,11 @@ class Emitter {
     this.checkEmitRead(node);
     this.noteProvidedRead(node);
     this.rejectJoinedClassRead(node);
+    if (node[0] === '.' && node.length === 3 && node[1] === 'this' && typeof node[2] === 'string' &&
+        this.boundMethodRead(node[2], this.thisMemberKindOf(node[2]))) {
+      this.mark(node, '$self', () => this.emitBoundMethod(node[2]));
+      return;
+    }
     const spine = [node];
     while (true) {
       const cur = spine[spine.length - 1];
@@ -15310,12 +15349,12 @@ class Emitter {
         else f.role = this.beginMark(n, 'object');
       } else if (fkind === 'optcall') {
         f.self = this.beginMark(n, '$self');
-        if (isInner) this.head(n, 'callee', n[1]);
+        if (isInner) this.asCallee(n[1], () => this.head(n, 'callee', n[1]));
         else f.role = this.beginMark(n, 'callee');
       } else {
         // A plain call ([callee, ...args]).
         f.self = this.beginMark(n, '$self');
-        if (isInner) this.head(n, 'callee', n[0]);
+        if (isInner) this.asCallee(n[0], () => this.head(n, 'callee', n[0]));
         else f.role = this.beginMark(n, 'callee');
       }
     }
@@ -17910,7 +17949,7 @@ class Emitter {
         this.b.emit(constructing ? 'await new ' : 'await ');
         this.mark(node[0], '$self', () => {
           if (constructing) this.mark(node[0], 'target', () => this.rubyNewTarget(target));
-          else this.head(node[0], 'target', target);
+          else this.asCallee(target, () => this.head(node[0], 'target', target));
         });
         this.mark(node, 'args', () => {
           this.b.emit('(');
@@ -18544,7 +18583,7 @@ class Emitter {
     this.mark(node, '$self', () => {
       this.mark(node, 'operator', () => this.b.emit('await'));
       this.b.emit(' ');
-      this.head(node, 'target', node[1]);
+      this.asCallee(node[1], () => this.head(node, 'target', node[1]));
       this.b.emit('()');
     });
   }
