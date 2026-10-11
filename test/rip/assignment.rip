@@ -208,15 +208,53 @@ code 'optional chain assign: subtract', 'x?.y -= 1', 'if ((_ref = x) != null) _r
 # ==============================================================================
 # The grammar accepts the full Array / Object expression on the LHS of `=`,
 # so shapes like `[a + b] = src` and `{x: y for x in arr} = src` parse.
-# emitAssignment validates the LHS is a real binding pattern and rejects
-# expression / comprehension shapes with a clear message instead of crashing
-# the codegen or producing broken JS.
+# A call element rejects in the pattern walk at every pattern position,
+# whatever its callee spells: `cast`, `satisfies`, `array`, `object` and
+# `rest` name ordinary functions there, never the pattern shapes their
+# nodes share a head with.
 
 fail 'destructure: arithmetic expression as target', '[a + b] = src'
-fail 'destructure: function call as target', '[fn()] = src'
 
 fail 'destructure: comprehension as target',
   '{x: y for x in [1]} = src'
+
+fail 'destructure: function call as target', '[fn()] = src', 'a call cannot be a destructuring target'
+fail 'destructure: call as keyed object target', '{k: f(a)} = src', 'a call cannot be a destructuring target'
+fail 'destructure: call as rest target', '[...f(a)] = src', 'a call cannot be a destructuring target'
+fail 'destructure: call as object rest target', '{...f(a)} = src', 'a call cannot be a destructuring target'
+fail 'destructure: call in nested pattern', '[[f(a)]] = src', 'a call cannot be a destructuring target'
+fail 'destructure: implicit call as target', '[f a] = src', 'a call cannot be a destructuring target'
+fail 'destructure: method call as target', '[a.f(b)] = src', 'a call cannot be a destructuring target'
+fail 'destructure: optional call as target', '[f? a] = src', 'a call cannot be a destructuring target'
+fail 'destructure: dammit call as target', '[f!] = src', 'a call cannot be a destructuring target'
+fail 'destructure: tagged template as target', '[f"x"] = src', 'a call cannot be a destructuring target'
+fail 'destructure: call as parameter pattern', 'g = ([f(a)]) -> 1', 'a call cannot be a destructuring target'
+fail 'destructure: call as keyed parameter pattern', 'g = ({k: f(a)}) -> 1', 'a call cannot be a destructuring target'
+fail 'destructure: call as def parameter pattern', "def g([f(a)])\n  1", 'a call cannot be a destructuring target'
+fail 'destructure: call as loop variable', 'for [f(a)] in xs then 1', 'a call cannot be a destructuring target'
+fail 'destructure: call as own-loop value', 'for own k, [f(a)] of o then 1', 'a call cannot be a destructuring target'
+fail 'destructure: call as comprehension variable', 'y = (1 for [f(a)] in xs)', 'a call cannot be a destructuring target'
+fail 'destructure: call as catch pattern', 'try 1 catch [f(a)] then 2', 'a call cannot be a destructuring target'
+fail 'destructure: call as keyed catch pattern', 'try 1 catch {k: f(a)} then 2', 'a call cannot be a destructuring target'
+fail 'destructure: call as readonly pattern', '[f(a)] =! src', 'a call cannot be a destructuring target'
+
+# A call whose callee spells a pattern head is still a call.
+fail 'destructure: call of cast as target', '[cast(a, b)] = src', 'a call cannot be a destructuring target'
+fail 'destructure: call of satisfies as target', '[satisfies(a, b)] = src', 'a call cannot be a destructuring target'
+fail 'destructure: call of cast as parameter', 'g = ([cast(a, b)]) -> 1', 'a call cannot be a destructuring target'
+fail 'destructure: call of array as target', '[array(a, b)] = src', 'a call cannot be a destructuring target'
+fail 'destructure: call of object as target', '[object(a)] = src', 'a call cannot be a destructuring target'
+fail 'destructure: call of rest as target', '[rest(a)] = src', 'a call cannot be a destructuring target'
+fail 'destructure: call of rest as parameter', 'g = ([rest(a)]) -> 1', 'a call cannot be a destructuring target'
+
+# A member of a call's result is a write target, and so is a real cast.
+test 'destructure: member of a call result as target', '''
+  o = {}
+  f = -> o
+  [f().b] = [7]
+  o.b
+''', 7
+test 'destructure: postfix cast element', '[a as number] = [5]; a', 5
 
 # ==============================================================================
 # Existence Assignment — ?= (assign when nullish; the ??= compound's short spelling)

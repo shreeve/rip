@@ -998,6 +998,22 @@ class Emitter {
     return id === null || stores.node(id)?.semanticKind === x[0];
   }
 
+  // Every row whose evaluation invokes a function, whatever the callee
+  // spells: `f!` is the awaited call, a tagged template calls its tag.
+  static CALL_KINDS = new Set(['call', 'optcall', 'super', 'dammit', 'maybe-dammit', 'tagged', 'dynimport']);
+
+  // A call standing where a destructuring pattern needs a write target.
+  // The pattern is an Array/Object literal reinterpreted as a target, so
+  // the grammar parses any element there; the pattern walks are where a
+  // call can still be told from the pattern shape its callee may spell —
+  // `[cast(a, b)] = x` builds the cast node, `[array(a)] = x` a nested
+  // array pattern. A call's result is never assignable.
+  rejectCallTarget(p) {
+    if (isNode(p) && Emitter.CALL_KINDS.has(this.semanticKindOf(p))) {
+      throw this.positionedError(p, "emitter: a call cannot be a destructuring target — a pattern element writes a name or a member, and a call's result is neither");
+    }
+  }
+
   // An object literal — never a call of a function named `object`.
   isObject(x) {
     return isObjectShape(x) && !this.isCallNode(x);
@@ -1914,6 +1930,7 @@ class Emitter {
     if (typeof p === 'string') {
       if (p !== ',') out.push([p, this.memberKindOf(p)]);
     } else if (isNode(p)) {
+      this.rejectCallTarget(p);
       const h = p[0];
       if (h === '.' && p.length === 3 && p[1] === 'this' && typeof p[2] === 'string') out.push([p[2], this.thisMemberKindOf(p[2])]);
       else if (h === 'array') for (const el of p.slice(1)) this.patternMemberTargets(el, out);
@@ -3850,6 +3867,7 @@ class Emitter {
       }
       return out;
     }
+    this.rejectCallTarget(p);
     if (p[0] === 'array') for (const el of p.slice(1)) this.patternNames(el, out, binding, p);
     else if (p[0] === 'object') {
       for (const pair of p.slice(1)) {
