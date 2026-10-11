@@ -81,19 +81,6 @@ lowering knows arrays and strings only.
 outer `a` exists; with `a = 1` in scope it compiles to `for (let b of a)`
 over the outer `a`.
 
-**C43 M — A collecting loop whose tail `try` holds a jump collects nothing.**
-```coffee
-r = for x in [1, 2, 3]
-  try
-    continue if x is 2
-    x
-  catch e then 0
-p r    # [] — expected [1, 3]
-```
-A tail with a `break`/`continue` inside stays a statement; `if` and
-`switch` tails collect per arm (`accumulateIf`), but `try` has no such
-form yet.
-
 ### Legal-looking code emits invalid JavaScript
 
 **C12 M — A function-tail `switch` with a collecting loop in two `when` arms declares `const _result` twice.** Bun rejects the output.
@@ -291,19 +278,6 @@ reached through a coercer).
 
 ---
 
-**S15 M — An enum whose member values collide with member names resolves the wrong member.**
-```coffee
-E = schema :enum
-  :a "b"
-  :b "c"
-M = schema :model
-  e E, [:b]
-p M.parse({}).e    # "b" — member :a's value; expected "c"
-```
-`_materializeEnum` (src/runtime/schema.js) matches a name OR a value
-member by member, so the first member whose value equals the name wins;
-the column DEFAULT inherits it.
-
 ## Rip Sites
 
 **W7 M — An async `prefix` block registers its routes without the prefix.** `prefix '/api', -> cfg = loadConfig!(); get '/ping' …` serves `/ping`, not `/api/ping`: `fn?.()` is not awaited and `finally` restores the prefix. `App(fn)` has the same `fn?.()`. Same class as #432.
@@ -355,7 +329,7 @@ flip side of A5).
 
 **P15 M — rsx's rejections and mixed content disagree with its README.** The mismatched-close-tag and non-string errors carry no offset; `parse '</a>'` says "expected </>, got </a>"; `<p>hi <b>there</b> you</p>` drops the text though `textKey` is described as the mixed-content key.
 
-**P27 L — rsx collapses namespaced attributes that share a local name.** With `stripNamespaces` (the default), `<a p:id="1" q:id="2"/>` keeps one `id` silently; the duplicate-attribute rejection compares raw names only.
+**P28 M — rsx silently drops an attribute or element named `__proto__`.** `parse '<a __proto__="x" id="1"/>'` → `{"a":{"@attrs":{"id":"1"}}}` and `parse '<a><__proto__>x</__proto__></a>'` → `{"a":{}}`: the tree is built from plain `{}` objects, whose `__proto__` setter swallows the assignment.
 
 **P16 L — Barcode encoders ignore unknown options and disagree on errors.** `hieght:`, `colums:`, `eccc:` are accepted (rip/pdf rejects unknown keys); a QR miss throws `"finder"` while the others say "not found"; `encodeQR ''` encodes while Code 128 and PDF417 reject empty text.
 

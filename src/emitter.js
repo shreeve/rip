@@ -6635,15 +6635,22 @@ class Emitter {
     this.b.emit(';');
   }
 
-  tryStatement(node, ind) {
+  // `into`: the accumulator of a collecting loop whose tail this try
+  // is — the body and each handler collect their own tails, and a
+  // swallowed throw collects `undefined`, as the value form yields.
+  tryStatement(node, ind, into = null) {
+    const block = (body) => (into === null ? this.braceBlock(body, ind) : this.accumulateBlock(body, ind, into));
     this.mark(node, '$self', () => {
       this.b.emit('try ');
       // An inline body (`try f()`) is its own one-statement block; a
       // handler-less try gains `catch {}` — JS requires a handler or
       // finalizer, and the bare form's contract is to swallow.
       const body = this.isBlock(node[1]) ? node[1] : ['block', node[1]];
-      this.mark(node, 'body', () => this.braceBlock(body, ind));
-      if (node.length === 2) this.b.emit(' catch {}');
+      this.mark(node, 'body', () => block(body));
+      if (node.length === 2) {
+        if (into === null) this.b.emit(' catch {}');
+        else this.b.emit(' catch {\n' + '  '.repeat(ind + 1) + `${into}.push(undefined);\n` + '  '.repeat(ind) + '}');
+      }
       // [binding|null, block] pairs are catch handlers; block nodes are
       // finalizers.
       for (const part of node.slice(2)) {
@@ -6655,7 +6662,7 @@ class Emitter {
           const [binding, body] = part;
           if (binding === null) {
             this.b.emit(' catch ');
-            this.braceBlock(body, ind);
+            block(body);
           } else if (Emitter.isPattern(binding)) {
             // The catch-pattern lowering: bind `error`, destructure as
             // the handler's first statement (paren-wrapped for both
@@ -6678,7 +6685,8 @@ class Emitter {
             this.b.emit(pad + '(');
             this.mark(part, 'binding', () => this.withPattern(() => this.expr(binding)));
             this.b.emit(` = ${param});\n`);
-            this.statements(this.isBlock(body) ? body.slice(1) : [body], ind + 1, 'block');
+            if (into === null) this.statements(this.isBlock(body) ? body.slice(1) : [body], ind + 1, 'block');
+            else this.accumulateBody(this.isBlock(body) ? body : ['block', body], ind, into);
             this.b.emit('  '.repeat(ind) + '}');
           } else if (Emitter.isTypedWrapper(binding)) {
             // An annotated binding (`catch error: any`): the name is the
@@ -6686,14 +6694,14 @@ class Emitter {
             this.b.emit(' catch (');
             this.mark(part, 'binding', () => this.emitParam(binding));
             this.b.emit(') ');
-            this.withBindings([binding[1]], () => this.braceBlock(body, ind));
+            this.withBindings([binding[1]], () => block(body));
           } else {
             this.b.emit(' catch (');
             this.mark(part, 'binding', () => this.b.emit(binding));
             this.b.emit(') ');
             // The binding is a new name for the handler — it shadows a
             // same-named reactive declaration.
-            this.withBindings([binding], () => this.braceBlock(body, ind));
+            this.withBindings([binding], () => block(body));
           }
         }
       }
@@ -8150,6 +8158,19 @@ class Emitter {
         this.mark(stmt, '$self', () => this.accumulateIf(stmt, ind + 1, into));
       } else if (i === stmts.length - 1 && isNode(stmt) && stmt[0] === 'switch' && stmt.length === 4) {
         this.switchStatement(stmt, ind + 1, into);
+      } else if (i === stmts.length - 1 && isNode(stmt) && stmt[0] === 'try') {
+        if (stmt.slice(2).some((part) => this.isBlock(part))) {
+          // A finally runs after a branch's push and may throw or jump
+          // past it: the branches collect into a temp the loop takes only
+          // once the whole try completes.
+          const tmp = this.loopTempName('_try');
+          this.temps.used.add(tmp);
+          this.b.emit(`const ${tmp} = [];\n${pad}`);
+          this.tryStatement(stmt, ind + 1, tmp);
+          this.b.emit(`\n${pad}${into}.push(...${tmp});`);
+        } else {
+          this.tryStatement(stmt, ind + 1, into);
+        }
       } else {
         this.statement(stmt, ind + 1);
         if (isLoopNode(stmt)) this.b.emit(';');

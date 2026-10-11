@@ -445,6 +445,9 @@ class SchemaDef {
     const enumMembers = new Map();
     const ensures = [];
 
+    const enumAmbiguity = (n, message) => {
+      throw new SchemaError([{ field: n, error: 'enum', message }], this.name, this.kind);
+    };
     const collision = (n, where) => {
       throw new SchemaError(
         [{ field: n, error: 'collision', message: n + ' collides with ' + where }],
@@ -548,6 +551,7 @@ class SchemaDef {
           directives.push({ name: e.name, args: e.args || [] });
           break;
         case 'enum-member':
+          if (enumMembers.has(e.name)) enumAmbiguity(e.name, "enum member ':" + e.name + "' is declared twice");
           enumMembers.set(e.name, e.value !== undefined ? e.value : e.name);
           break;
         case 'union-member':
@@ -575,6 +579,16 @@ class SchemaDef {
         stack: [this.name || '<anon>'],
         seen: new Set([this.name || '<anon>']),
       });
+    }
+
+    // A value that is the name of a member holding a different value
+    // resolves that input two ways (the compiler's checkEnumMembers, for
+    // hand-built enums); an alias of the same value is unambiguous.
+    for (const [n, v] of enumMembers) {
+      if (typeof v === 'string' && enumMembers.has(v) && enumMembers.get(v) !== v) {
+        enumAmbiguity(n, "enum member ':" + n + "' has the value " + JSON.stringify(v) +
+          ", which is the name of member ':" + v + "' — an input " + JSON.stringify(v) + ' would name both');
+      }
     }
 
     let unionOn = null;

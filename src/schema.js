@@ -440,6 +440,7 @@ function parseSchemaBody(kind, kindTok, bodyTokens, ctx, fail) {
 
   if (kind === 'enum') {
     for (const line of lines) parseEnumLine(line, entries, fail);
+    checkEnumMembers(entries, fail);
   } else if (kind === 'union') {
     for (const line of lines) parseUnionLine(line, entries, fail);
     const onCount = entries.filter((e) => e.tag === 'directive' && e.name === 'on').length;
@@ -1705,6 +1706,28 @@ function parseEnumLine(line, entries, fail) {
     ? -numberOf(line[3], `enum member ':${name}' value`, fail)
     : literalOf(valueTok, `enum member ':${name}' value`, fail);
   entries.push({ tag: 'enum-member', name, value, start: first.start });
+}
+
+// An input names a member by its name or by its value, so the two
+// vocabularies must not cross: a value that is the name of a member
+// holding a DIFFERENT value (`:a "b"` beside `:b "c"`) makes the input
+// "b" resolve to two values. A member name declared twice is the same
+// ambiguity. Values may repeat — two names for one value are aliases
+// (`:active` beside `:enabled "active"`), and every input resolves to it.
+function checkEnumMembers(entries, fail) {
+  const members = entries.filter((e) => e.tag === 'enum-member');
+  const byName = new Map();
+  for (const m of members) {
+    if (byName.has(m.name)) fail(`enum member ':${m.name}' is declared twice`, m.start);
+    byName.set(m.name, m);
+  }
+  const valueOf = (m) => (m.value === undefined ? m.name : m.value);
+  for (const m of members) {
+    const other = typeof m.value === 'string' ? byName.get(m.value) : undefined;
+    if (other && valueOf(other) !== m.value) {
+      fail(`enum member ':${m.name}' has the value ${JSON.stringify(m.value)}, which is the name of member ':${other.name}' — an input ${JSON.stringify(m.value)} would name both`, m.start);
+    }
+  }
 }
 
 // ── constraint parsing (values evaluated here, fail-fast) ────────────
