@@ -217,7 +217,7 @@ function matchSchemaPragma(tokens, i, config, depth, fail) {
   if (!valTok || valTok.kind !== 'NUMBER') {
     fail(`pragma 'schema.${key}' requires a number literal — example: schema.${key} = 100`, (valTok ?? keyTok).start);
   }
-  const n = Number(valTok.value);
+  const n = numberOf(valTok, `pragma 'schema.${key}'`, fail);
   if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
     fail(`pragma 'schema.${key}' expects a non-negative integer (got ${valTok.value}); use 0 to disable`, valTok.start);
   }
@@ -1313,7 +1313,7 @@ function parseModelDirectiveArgs(e, shape, fail) {
       if (!numTok || numTok.kind !== 'NUMBER') {
         fail(`@${e.name} requires an integer literal — '@idStart 10001'`, (numTok ?? tokens[0] ?? { start: e.start }).start);
       }
-      const n = sign * Number(numTok.value);
+      const n = sign * numberOf(numTok, `@${e.name}`, fail);
       if (!Number.isInteger(n)) {
         fail(`@${e.name} requires an integer literal; got ${numTok.value}`, numTok.start);
       }
@@ -1702,7 +1702,7 @@ function parseEnumLine(line, entries, fail) {
     fail(`extra tokens after enum member ':${name}' value`, line[3].start);
   }
   const value = valueTok.kind === '-' && line[3]?.kind === 'NUMBER'
-    ? -Number(line[3].value)
+    ? -numberOf(line[3], `enum member ':${name}' value`, fail)
     : literalOf(valueTok, `enum member ':${name}' value`, fail);
   entries.push({ tag: 'enum-member', name, value, start: first.start });
 }
@@ -1723,7 +1723,7 @@ function parseRangeTokens(tokens, fieldName, fail) {
     if (numTok?.kind !== 'NUMBER') {
       fail(`range endpoints must be numeric literals`, (numTok ?? tokens[0]).start);
     }
-    return sign * Number(numTok.value);
+    return sign * numberOf(numTok, 'a range endpoint', fail);
   };
   let min;
   if (tokens[i]?.kind !== '..') min = readOne();
@@ -1759,7 +1759,7 @@ function parseDefaultBracket(tokens, fieldName, fail, span = {}) {
     fail(`regex constraints are written bare, not in brackets — replace '[${part[0].value}]' with '${part[0].value}'`, tokens[0].start);
   }
   if (part.length === 2 && part[0].kind === '-' && part[1].kind === 'NUMBER') {
-    return -Number(part[1].value);
+    return -numberOf(part[1], `field '${fieldName}' default`, fail);
   }
   const sym = symWordAt(part, 0);
   if (sym && part.length === 2) return sym.value;
@@ -1779,9 +1779,17 @@ function parseRegexToken(tok, fail) {
   }
 }
 
+// A NUMBER token's value. Separators are spelling (`1_000`); a BigInt
+// (`1n`) rejects, since a schema value serializes as a JSON number.
+function numberOf(tok, what, fail) {
+  const text = tok.value.replace(/_/g, '');
+  if (text.endsWith('n')) fail(`${what} cannot be a BigInt (${tok.value}) — schema values are JSON numbers`, tok.start);
+  return Number(text);
+}
+
 function literalOf(tok, what, fail) {
   switch (tok.kind) {
-    case 'NUMBER': return Number(tok.value);
+    case 'NUMBER': return numberOf(tok, what, fail);
     case 'STRING':
       if (!tok.value.startsWith('"')) {
         fail(`${what} must be a plain string literal (heredocs have no literal key form)`, tok.start);
