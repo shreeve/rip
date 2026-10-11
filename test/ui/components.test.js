@@ -453,11 +453,14 @@ C = component
     expect(code).toContain('__effect(async () => { return await fetch("/y"); });');
   });
 
-  test('component-body effects RETURN their expression body (\'s component shape — the cleanup channel; module effects deliberately do not — , both pinned)', () => {
+  test('an effect returns its tail as the cleanup only when the tail produces one — the same rule in a component and at module level', () => {
+    // A call (its result is the handle), a function or a read returns;
+    // a statement tail — an assignment, an if — returns nothing.
     const comp = compile('C = component\n  ~> setup()\n  render\n    div "x"').code;
     expect(comp).toContain('__effect(() => { return setup(); });');
-    const mod = compile('~> setup()').code;
-    expect(mod).toContain('__effect(() => { setup(); });');
+    expect(compile('~> setup()').code).toContain('__effect(() => { return setup(); });');
+    expect(compile('w = {}\n~> w.h = -> 1').code).toContain('__effect(() => { (w.h = function() {');
+    expect(compile('w = {}\nC = component\n  ~> w.h = -> 1\n  render\n    div "x"').code).toContain('__effect(() => { (w.h = () => 1); });');
   });
 
   test('a component with no render emits no _create/_setup; `render null` returns null', () => {

@@ -180,19 +180,6 @@ says a bind into a chain calls it). Cause: `bindRootTouch`
 for `input value <=> s` (a bare loop variable) recommends binding "a
 chain into row data" — this broken path.
 
-**T7 H — An effect's last expression is silently registered as its cleanup.**
-```coffee
-open := true
-~>
-  if open
-    win.onkeydown = (e) -> console.log e.key
-open = false        # throws: the handler runs as cleanup with no event
-```
-Designed and pinned (src/emitter.js ~9235; test/ui/components.test.js
-~457), but invisible: packages/ui works around it with defensive
-trailing `return` lines. The one-line form differs by location — inside
-a component it returns, at module level it does not.
-
 **T8 M — A state write from inside an effect is dropped or kept depending on batching.**
 An effect `count = 10 if count > 10` keeps 50 when `set50()` is called
 directly, and 10 when the same method runs from a click (inside

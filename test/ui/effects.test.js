@@ -163,7 +163,7 @@ describe('the #79/the pinned contractes extend to effects: no expression form fo
 describe('the pinned contract extends to the dispose handle: bound effects sit at module or function scope', () => {
 
   test('module and function scope stay legal — including effect and computed block bodies (their own scopes)', () => {
-    expect(compile('h ~> f()').code).toBe('const h = __effect(() => { f(); });');
+    expect(compile('h ~> f()').code).toBe('const h = __effect(() => { return f(); });');
     expect(compile('f = ->\n  h ~> g()\n  h').code).toContain('const h = __effect');
     expect(compile('~>\n  inner ~> f()\n  inner').code).toContain('const inner = __effect');
   });
@@ -322,7 +322,7 @@ describe('typed effect handles: erased twins, .d.ts surfaces the handle type', (
     const rows = mappings.of(node.nodeId, 'annotation');
     expect(rows).toHaveLength(1);
     expect(rows[0].mappingKind).toBe('cover');
-    expect(code.slice(rows[0].generatedStart, rows[0].generatedEnd)).toBe('const h = __effect(() => { f(); })');
+    expect(code.slice(rows[0].generatedStart, rows[0].generatedEnd)).toBe('const h = __effect(() => { return f(); })');
   });
 });
 
@@ -432,13 +432,15 @@ describe('schema callable bodies propagate runtime delivery', () => {
 });
 
 describe('the cleanup channel surface', () => {
-  test('GPT repro: a trailing helper definition IS the cleanup — it fires before each re-run and on dispose', () => {
+  test('a trailing helper definition is a statement, never the cleanup', () => {
+    // An assignment tail registers nothing: the helper it defines is not
+    // called before the re-run or on dispose (a function-valued tail that
+    // happened to be assigned once ran as the cleanup with the NEW value).
     const out = evalBoth(
  'count := 0\ncalls = []\nh ~>\n  calls.push count\n  helper = -> calls.push "clean:" + count\ncount = 1\nh()',
  'return calls;',
     );
-    // The "helper" runs as cleanup with the NEW value already written.
-    expect(out).toEqual([0, 'clean:1', 1, 'clean:1']);
+    expect(out).toEqual([0, 1]);
   });
 
   test('a non-function tail value is ignored — no cleanup installs', () => {

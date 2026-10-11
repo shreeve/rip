@@ -44,7 +44,7 @@ describe('HMR patch helpers emission', () => {
     const { code } = compile(BASE, { path: 'patch.rip', runtimeDelivery: 'none', hmr: false });
     expect(code).not.toContain('_hmrBindEffects');
     expect(code).not.toContain('_hmrRefreshComputeds');
-    expect(code).toContain('__effect(() => { return (this.hits.value += 1); });');
+    expect(code).toContain('__effect(() => { (this.hits.value += 1); });');
   });
 });
 

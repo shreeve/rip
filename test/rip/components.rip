@@ -6785,7 +6785,7 @@ code 'a component member holding an awaiting effect keeps it', '''
   ''', '''
   export const A = class extends __Component {
     _init(__given) {
-      this.e = __effect(async () => { await fn(); });
+      this.e = __effect(async () => { return await fn(); });
     }
     _create() {
       this._el0 = document.createElement('div');

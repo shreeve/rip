@@ -9577,7 +9577,7 @@ class Emitter {
         const { entries, names } = this.scopedHoist(stmts, []);
         for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
         this.scopes.push(names);
-        this.funcBlock(node, body, stmts, ind, entries);
+        this.funcBlock(node, body, stmts, ind, entries, false, stmts.length > 0 && this.cleanupTail(stmts[stmts.length - 1]));
         this.scopes.pop();
         this.rframes.pop();
       }));
@@ -9598,6 +9598,7 @@ class Emitter {
       this.hoistLine(entries);
       this.b.emit(' ');
     }
+    if (this.cleanupTail(body)) this.b.emit('return ');
     this.mark(node, 'value', () => this.withExpression(() => {
       const wrap = Emitter.needsGrouping(body, 'operand') || isObject(body);
       if (wrap) this.b.emit('(');
@@ -9607,6 +9608,44 @@ class Emitter {
     this.b.emit('; })');
     this.scopes.pop();
     this.rframes.pop();
+  }
+
+  // Does an effect body's tail produce its cleanup? A returned function
+  // runs before the next run and on dispose, so only a tail that reads
+  // as producing one returns: a function literal, a call (its result is
+  // the handle — `~> subscribe(x)`), a nested effect, or a name or
+  // member read. A tail
+  // that is a statement — an assignment, an if/switch/try, a loop —
+  // returns nothing: `if open then win.onkeydown = (e) -> …` would
+  // otherwise register the handler it assigns as the cleanup.
+  cleanupTail(stmt) {
+    if (typeof stmt === 'string') return !['break', 'continue', 'debugger'].includes(stmt);
+    if (!isNode(stmt)) return false;
+    if (isFunc(stmt)) return true;
+    // A nested effect's value is its dispose handle: returned, the outer
+    // run disposes it before re-running, so nested effects never pile up.
+    if (this.isEffectDecl(stmt)) return true;
+    const h = stmt[0];
+    if (isNode(h)) return true;
+    if (['.', '?.', '[]', 'optindex', 'await', 'dammit!', 'dammit?', 'return', 'throw'].includes(h)) return true;
+    // A branch tail chooses its cleanup when every arm ends in one
+    // (`if x then -> undo() else null`); an arm that assigns makes the
+    // whole branch a statement.
+    if (h === 'if' && stmt.length >= 3 && stmt.length <= 4) {
+      return stmt.slice(2).every((arm) => this.cleanupTail(Emitter.blockTail(arm)));
+    }
+    if (h === 'switch' && stmt.length === 4) {
+      const arms = [...stmt[2].map((w) => w[2]), ...(stmt[3] !== null ? [stmt[3]] : [])];
+      return arms.every((arm) => this.cleanupTail(Emitter.blockTail(arm)));
+    }
+    return this.semanticKindOf(stmt) === 'call';
+  }
+
+  // The last statement of a block or a bare branch body.
+  static blockTail(body) {
+    if (isBlock(body)) return body[body.length - 1];
+    if (isNode(body) && body.length === 1 && !isFunc(body)) return body[0];
+    return body;
   }
 
   static effectBodyYields(body) {
@@ -10653,7 +10692,8 @@ class Emitter {
                 const { entries, names } = this.scopedHoist(bodyStmts, []);
                 for (const n of this.pushReactiveFrame(bodyStmts, names)) names.add(n);
                 this.scopes.push(names);
-                this.funcBlock(eff, bodyNode, bodyStmts, ind + 2, entries);
+                this.funcBlock(eff, bodyNode, bodyStmts, ind + 2, entries, false,
+                  bodyStmts.length > 0 && this.cleanupTail(bodyStmts[bodyStmts.length - 1]));
                 this.scopes.pop();
                 this.rframes.pop();
               }));
@@ -10667,7 +10707,7 @@ class Emitter {
                 this.hoistLine(entries);
                 this.b.emit(' ');
               }
-              this.b.emit('return ');
+              if (this.cleanupTail(single)) this.b.emit('return ');
               this.mark(eff, 'value', () => this.withExpression(() => {
                 const wrap = Emitter.needsGrouping(single, 'operand') || isObject(single);
                 if (wrap) this.b.emit('(');
@@ -17477,7 +17517,7 @@ class Emitter {
     this.ind = ind;
   }
 
-  funcBlock(node, block, stmts, ind, hoist, voidBody = false) {
+  funcBlock(node, block, stmts, ind, hoist, voidBody = false, tailReturn = true) {
     // node[1] holds def params at slot 2 (def nodes) or slot 1
     // (arrows); read whichever is the params array.
     const params = isDefHead(node[0]) ? node[2] : node[1];
@@ -17549,7 +17589,7 @@ class Emitter {
         this.mark(block, 'statements', () => {
           stmts.forEach((stmt, i) => {
             this.b.emit('  '.repeat(ind + 1));
-            if (!voidBody && i === stmts.length - 1) this.implicitReturn(stmt, ind + 1);
+            if (!voidBody && tailReturn && i === stmts.length - 1) this.implicitReturn(stmt, ind + 1);
             else this.statement(stmt, ind + 1, true);
             this.b.emit('\n');
           });

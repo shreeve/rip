@@ -140,8 +140,11 @@ Pins: test/rip/control.rip ("then binds below assignment").
     each compiles to. Preferred handler forms (bare arrow for one
     statement; a method for more).
 13. **Reactivity semantics.** Tracking, batching, laziness, effect
-    cleanup (a returned function is the cleanup — the trap when a last
-    line yields one), `getEffectSignal`.
+    cleanup (a tail that produces a function — a function literal, a
+    call's handle, a nested effect, or an if/switch every arm of which
+    does — returns as the cleanup; a statement tail such as an
+    assignment returns nothing, the same at module level and in a
+    component), `getEffectSignal`.
 14. **Schemas.** Field lines, modifiers, ranges, defaults, unions, arrays,
     markers (`@unique`, `@times`, relations), `parse`/`safe`/`pick`,
     coercers.

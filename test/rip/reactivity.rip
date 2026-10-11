@@ -51,13 +51,13 @@ code "computed with expression", '''
 code "fire-and-forget effect", '''
   ~> console.log count
   ''', '''
-  __effect(() => { console.log(count); })
+  __effect(() => { return console.log(count); })
   ''', skip
 
 code "assigned effect", '''
   logger ~> console.log count
   ''', '''
-  const logger = __effect(() => { console.log(count); })
+  const logger = __effect(() => { return console.log(count); })
   ''', skip
 
 # ==============================================================================
@@ -203,6 +203,28 @@ test "effect cleanup runs before re-execution", '''
   count += 1
   log.join ","
   ''', "run:0,cleanup:0,run:1"
+
+# An effect whose tail is a statement registers no cleanup: the handler
+# an `if` assigns is not called when the effect re-runs.
+test "an effect ending in an if that assigns a handler registers no cleanup", '''
+  open := true
+  win = {}
+  calls = 0
+  ~>
+    if open
+      win.onkeydown = (e) -> calls += e.key.length
+  open = false
+  calls
+  ''', 0
+
+test "an effect ending in a call returns its handle as the cleanup", '''
+  log = []
+  n := 0
+  subscribe = (v) -> -> log.push "off:#{v}"
+  ~> subscribe(n + 0)
+  n += 1
+  log.join ","
+  ''', "off:0"
 
 test "effect cleanup on multiple re-runs", '''
   log = []
@@ -465,7 +487,7 @@ code 'an awaiting effect leaves its function synchronous', '''
   function watch(load) {
     const seen = __state(0);
     const stop = __effect(async () => { (seen.value = await load()); });
-    __effect(async () => { await load(); });
+    __effect(async () => { return await load(); });
     return stop;
   }
   '''
@@ -516,3 +538,15 @@ test 'a function declaring an awaiting effect returns its value, never a promise
     stop
   typeof watch().then
   ''', 'undefined'
+
+test "an effect ending in a nested effect disposes it before re-running", '''
+  log = []
+  outer := 0
+  inner := 0
+  ~>
+    o = outer + 0
+    ~> log.push "#{o}:#{inner}"
+  outer = 1
+  inner = 5
+  log.join ","
+  ''', "0:0,1:0,1:5"
