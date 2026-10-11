@@ -6085,6 +6085,8 @@ var ALIASES = {
   on: ["BOOL", "true"],
   off: ["BOOL", "false"]
 };
+var SELECTOR_LINE_STARTS = new Set(["TERMINATOR", "INDENT", "OUTDENT", "RENDER"]);
+var SELECTOR_BRANCH_HEADS = new Set(["IF", "UNLESS", "ELSE", "LEADING_WHEN"]);
 var TAGGABLE = new Set(["IDENTIFIER", "PROPERTY", ")", "CALL_END", "]", "INDEX_END"]);
 var OPS4 = { ">>>=": "COMPOUND_ASSIGN" };
 var OPS3 = {
@@ -6297,6 +6299,48 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
       return false;
     const tag = String(root.value).split("#")[0];
     return TEMPLATE_TAGS.has(tag) || tag.includes("-");
+  };
+  const selectorScope = () => {
+    if (renderCodeFloor !== null || parens.length > renderParenDepth)
+      return false;
+    for (let k = tokens.length - 1;k >= 0; k--) {
+      const kind = tokens[k].kind;
+      if (kind === "TERMINATOR" || kind === "INDENT" || kind === "OUTDENT" || kind === "RENDER")
+        break;
+      if (codeArrowAt(k))
+        return false;
+    }
+    return true;
+  };
+  const headsLine = (k) => {
+    const before = tokens[k - 1];
+    if (!before || SELECTOR_LINE_STARTS.has(before.kind))
+      return true;
+    if (before.kind !== "THEN" && before.kind !== "ELSE")
+      return false;
+    let j = k - 1;
+    while (j > 0 && !SELECTOR_LINE_STARTS.has(tokens[j - 1].kind))
+      j--;
+    return SELECTOR_BRANCH_HEADS.has(tokens[j].kind);
+  };
+  const idHead = () => {
+    let j = tokens.length - 1;
+    while (j >= 2 && tokens[j].kind === "PROPERTY" && tokens[j - 1].kind === ".")
+      j -= 2;
+    const root = tokens[j];
+    if (root.kind === "PROPERTY" && tokens[j - 1]?.kind === ".")
+      return headsLine(j - 1);
+    if (root.kind !== "IDENTIFIER" || root.generated)
+      return false;
+    const tag = String(root.value).split("#")[0];
+    return TEMPLATE_TAGS.has(tag) || tag.includes("-") || headsLine(j);
+  };
+  const failSelector = (kind, start) => {
+    const written = /^[^\s"'`,()]+/.exec(text.slice(start))?.[0] ?? "";
+    if (kind === "class") {
+      fail(`a class shorthand is letters, digits, \`-\` and \`_\` — write \`class: '${written}'\``, start - 1);
+    }
+    fail(`an id shorthand starts with a letter — write \`id: '${written}'\``, start - 1);
   };
   const customElementEnd = (prev, at) => {
     if (!inRender || text[at] !== "-" || !IDENT_START.test(text[at + 1] ?? "") || !customElementStart(prev))
@@ -6757,7 +6801,7 @@ ${baseline}`).join(`
         pos += nlLen;
         continue;
       }
-      const renderIdLine = inRender && /^#[A-Za-z_]/.test(text.slice(pos, pos + 2)) && prefix.length > (indents[renderDepth - 1] ?? "").length;
+      const renderIdLine = inRender && text[pos] === "#" && IDENT_START.test(text[pos + 1] ?? "") && prefix.length > (indents[renderDepth - 1] ?? "").length;
       if (text[pos] === "#" && !renderIdLine) {
         let end = pos;
         if (text.startsWith("###", pos) && text[pos + 3] !== "#") {
@@ -6870,20 +6914,35 @@ ${baseline}`).join(`
       continue;
     }
     if (ch === "#") {
-      if (inRender && /[A-Za-z_]/.test(text[pos + 1] ?? "")) {
-        const m = /^#([A-Za-z_][\w-]*)/.exec(text.slice(pos));
-        const prev = last();
-        if (prev && (prev.kind === "IDENTIFIER" || prev.kind === "PROPERTY") && !pendingSpaced && !prev.generated) {
-          prev.value += m[0];
-          prev.end = pos + m[0].length;
-          pos += m[0].length;
-          continue;
+      const prev = last();
+      const glued = inRender && prev && (prev.kind === "IDENTIFIER" || prev.kind === "PROPERTY") && !pendingSpaced && !prev.generated && text[pos + 1] !== undefined && !/\s/.test(text[pos + 1]);
+      if (glued && selectorScope()) {
+        if (!idHead()) {
+          fail(`\`#${/^[^\s"'`,()]*/.exec(text.slice(pos + 1))[0]}\` is glued to a value: an id follows an element's tag, and a comment needs a space before \`#\``, pos);
         }
-        if (prev && (prev.kind === "TERMINATOR" || prev.kind === "INDENT" || prev.kind === "OUTDENT" || prev.kind === "RENDER")) {
-          push("IDENTIFIER", `div${m[0]}`, pos, pos + m[0].length);
-          pos += m[0].length;
-          continue;
+        if (!IDENT_START.test(text[pos + 1]))
+          failSelector("id", pos + 1);
+        let end = pos + 2;
+        while (end < text.length && (IDENT_PART.test(text[end]) || text[end] === "-" && IDENT_PART.test(text[end + 1] ?? "")))
+          end++;
+        for (let k = tokens.length - 1;k >= 0 && (tokens[k].kind === "PROPERTY" || tokens[k].kind === "." || tokens[k].kind === "IDENTIFIER"); k--) {
+          if (String(tokens[k].value).includes("#"))
+            fail("an element has one id", pos);
+          if (tokens[k].kind === "IDENTIFIER")
+            break;
         }
+        prev.value += text.slice(pos, end);
+        prev.end = end;
+        pos = end;
+        continue;
+      }
+      if (inRender && IDENT_START.test(text[pos + 1] ?? "") && prev && (prev.kind === "TERMINATOR" || prev.kind === "INDENT" || prev.kind === "OUTDENT" || prev.kind === "RENDER")) {
+        let end = pos + 2;
+        while (end < text.length && (IDENT_PART.test(text[end]) || text[end] === "-" && IDENT_PART.test(text[end + 1] ?? "")))
+          end++;
+        push("IDENTIFIER", `div${text.slice(pos, end)}`, pos, end);
+        pos = end;
+        continue;
       }
       let end = pos;
       while (end < text.length && text[end] !== `
@@ -6915,13 +6974,19 @@ ${baseline}`).join(`
       const keysColon = (tightColon || spacedColon !== null && !symbolish) && !ternary.pending;
       if (prev && (prev.kind === "." || prev.kind === "?." || prev.kind === "@" && !pendingSpaced)) {
         let value = word;
-        if (inRender && prev.kind === "." && !keysColon && classSelectorChain()) {
-          while (text[pos] === "-" && IDENT_START.test(text[pos + 1] ?? "")) {
+        const selector = inRender && prev.kind === "." && selectorScope() && classSelectorChain();
+        if (selector && tightColon && /[^\s=:]/.test(text[pos + 1] ?? " "))
+          failSelector("class", start);
+        if (selector && !keysColon) {
+          while (text[pos] === "-" && IDENT_PART.test(text[pos + 1] ?? "")) {
             let j = pos + 1;
             while (j < text.length && IDENT_PART.test(text[j]))
               j++;
             value += text.slice(pos, j);
             pos = j;
+          }
+          if (text[pos] === "/" || text[pos] === "[" || text[pos] === "-" && /[^\s]/.test(text[pos + 1] ?? " ") || text[pos] === "." && /[0-9]/.test(text[pos + 1] ?? "")) {
+            failSelector("class", start);
           }
         }
         push("PROPERTY", value, start, pos);
@@ -32903,7 +32968,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "84d0b7d89514f504";
+var compilerBuild = () => "646c54479f2fe2eb";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
