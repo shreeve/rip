@@ -1,0 +1,364 @@
+# ==============================================================================
+# rip/vista — Rip Vista: call VistA's RPCs over HTTPS
+#
+# The RPC Broker's messages, byte for byte, over `POST /rpc` to Janus, which
+# holds one stream per session to that session's em process (OpenVista's
+# docs/RPC-HTTPS.md is the contract: §3 the messages, §4 the sign-on).
+#   - encode one broker request into its exact bytes, Windows-1252 as CPRS
+#     writes VistA's text; lengths count those bytes
+#   - decode one reply: security message, error message, data, or an M error
+#   - a Session: one request at a time, in order, over fetch
+#   - sign-on, verify-code change, context, keepalive and `#BYE#`
+# The RPC catalog and its schemas belong to the application, not here.
+# ==============================================================================
+
+# ==[ Wire constants ]==
+
+RPC_VERSION =! '0'                   # XWBAPVER, as CPRS's broker sends it
+EOT         =! 0x04
+M_ERROR     =! 0x18
+LIST_EMPTY  =! '\x01'
+MAX_BODY    =! 1024 * 1024           # Janus's request limit
+SHORT_MAX   =! 255
+LONG_MAX    =! { 3: 999, 9: 999999999 }
+CANONICAL   =! /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]*[1-9])?$|^-?\.[0-9]*[1-9]$/
+
+# ==[ Windows-1252 ]==
+
+# VistA's text is single-byte, as CPRS writes it. Bytes 0x00-0x7F and
+# 0xA0-0xFF are their own code points; 0x80-0x9F hold the 27 specials, and
+# the five bytes the code page leaves undefined decode (WHATWG) to the C1
+# controls of the same number, which encode back to them.
+SPECIALS =! [
+  0x20AC, 0x81,   0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021
+  0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x8D,   0x017D, 0x8F
+  0x90,   0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014
+  0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x9D,   0x017E, 0x0178
+]
+HIGH =! Map.new(SPECIALS.map((cp, i) -> [cp, 0x80 + i]))
+text =! TextDecoder.new('windows-1252')
+
+# ==[ Errors ]==
+
+# kind: 'request' (a message this package refuses to build), 'reply' (bytes
+# that are not one broker reply), 'ended' (Janus's 401: the session is
+# over, `sessionEnded` says why), 'transport' (any other HTTP status),
+# 'security' (the broker refused to run the RPC), 'error' (the RPC's error
+# message), 'm' (an M error), 'signon' (codes or context not accepted).
+export class VistaError extends Error
+  constructor: (kind, message, extra = {}) ->
+    super("rip/vista: #{message}")
+    @name = 'VistaError'
+    @kind = kind
+    Object.assign this, extra
+
+fail = (kind, message, extra) -> throw VistaError.new(kind, message, extra)
+
+# ==[ Requests ]==
+
+# A string as its Windows-1252 bytes; a character the code page cannot hold
+# is an error, never a guess.
+export toBytes = (value, what = 'the text') ->
+  out = []
+  at = 0
+  for ch as value
+    cp = ch.codePointAt(0)
+    if cp < 0x80 or (cp >= 0xA0 and cp <= 0xFF)
+      out.push cp
+    else if HIGH.has(cp)
+      out.push HIGH.get(cp)
+    else
+      fail 'request', "#{what} holds #{JSON.stringify(ch)} (U+#{cp.toString(16).toUpperCase().padStart(4, '0')}) at character #{at + 1}, which Windows-1252 cannot hold"
+    at += 1
+  Uint8Array.from(out)
+
+export fromBytes = (bytes) -> text.decode(bytes)
+
+bytesOf = (value, what) -> toBytes(value, what)
+
+short = (value, what) ->
+  b = bytesOf(value, what)
+  fail 'request', "#{what} is #{b.length} bytes; a short string holds at most #{SHORT_MAX}" if b.length > SHORT_MAX
+  [Uint8Array.of(b.length), b]
+
+long = (b, width) ->
+  [bytesOf(String(b.length).padStart(width, '0'), 'a length'), b]
+
+ascii = (s) -> bytesOf(s, 'a message field')
+
+# A parameter's value: a string, or a finite number in its plain form.
+scalar = (value, what) ->
+  return value if typeof value is 'string'
+  if typeof value is 'number' and Number.isFinite(value)
+    s = String(value)
+    fail 'request', "#{what} #{s} has no plain decimal form" unless CANONICAL.test(s)
+    return s
+  fail 'request', "#{what} must be a string or a finite number, not #{if value is null then 'null' else typeof value}"
+
+# A list subscript, as XWBPRS takes it: a number stays bare, text is quoted
+# with its quotes doubled; a multi-level subscript joins its levels by
+# commas (`"TEXT",1,0`).
+subscript = (key) ->
+  levels = if Array.isArray(key) then key else [key]
+  fail 'request', 'a list subscript needs at least one level' if levels.length is 0
+  parts = for level in levels
+    if typeof level is 'number'
+      scalar(level, 'a numeric subscript')
+    else if typeof level is 'string'
+      if CANONICAL.test(level) then level else '"' + level.replaceAll('"', '""') + '"'
+    else
+      fail 'request', "a list subscript is a number or a string, not #{if level is null then 'null' else typeof level}"
+  parts.join(',')
+
+# The entries of a list parameter: an object's own keys, or [subscript,
+# value] pairs (a subscript may be an array of levels). No entries is an
+# empty array, which VistA receives as one empty subscript.
+entriesOf = (list, what) ->
+  pairs = if Array.isArray(list) then list else Object.entries(list)
+  for pair in pairs
+    fail 'request', "#{what}: a list entry is a [subscript, value] pair" unless Array.isArray(pair) and pair.length is 2
+    value = scalar(pair[1] ?? '', "#{what}: a list value")
+    [bytesOf(subscript(pair[0]), "#{what}: a subscript"), bytesOf((if value is '' then LIST_EMPTY else value), "#{what}: a list value")]
+
+# Each parameter as typed pieces: a string or number is a literal, and null
+# or undefined the empty literal (VistA's type 4 adds no argument, so it
+# would shift every later one); an object or array of pairs is a list.
+planParams = (params) ->
+  for param, i in params
+    what = "parameter #{i + 1}"
+    if not param?
+      { type: '0', value: Uint8Array.new(0) }
+    else if typeof param is 'string' or typeof param is 'number'
+      { type: '0', value: bytesOf(scalar(param, what), what) }
+    else if typeof param is 'object'
+      { type: '2', entries: entriesOf(param, what) }
+    else
+      fail 'request', "#{what} must be a string, a number, a list or null, not #{typeof param}"
+
+# The width W of the long-string lengths: 3 while every value fits in 999
+# bytes, else 9.
+widthOf = (plan) ->
+  most = 0
+  for p in plan
+    most = Math.max(most, p.value.length) if p.value
+    for [sub, value] in p.entries ?? []
+      most = Math.max(most, sub.length, value.length)
+  fail 'request', "a value of #{most} bytes is longer than a message can carry" if most > LONG_MAX[9]
+  if most > LONG_MAX[3] then 9 else 3
+
+paramChunk = (plan, width) ->
+  pieces = [ascii('5')]
+  for p in plan
+    if p.type is '0'
+      pieces.push ascii('0'), ...long(p.value, width), ascii('f')
+    else if p.entries.length is 0
+      pieces.push ascii('2'), ...long(Uint8Array.new(0), width), ascii('f')
+    else
+      for [sub, value], j in p.entries
+        pieces.push ascii('2'), ...long(sub, width), ...long(value, width)
+        pieces.push ascii(if j is p.entries.length - 1 then 'f' else 't')
+  pieces
+
+concat = (pieces) ->
+  out = Uint8Array.new(pieces.reduce(((n, b) -> n + b.length), 0))
+  at = 0
+  for b in pieces
+    out.set b, at
+    at += b.length
+  fail 'request', "the message is #{out.length} bytes; Janus accepts at most #{MAX_BODY}" if out.length > MAX_BODY
+  out
+
+# One RPC as its broker message: `[XWB]11W0`, chunk 2 (the RPC's version and
+# name), chunk 5 (the parameters), `\x04`.
+export encode = (name, params = [], { version = RPC_VERSION } = {}) ->
+  fail 'request', 'an RPC name is a non-empty string' unless typeof name is 'string' and name isnt ''
+  plan = planParams(params)
+  width = widthOf(plan)
+  concat [
+    ascii("[XWB]11#{width}0"), ascii('2'), ...short(String(version), 'the RPC version'), ...short(name, 'the RPC name')
+    ...paramChunk(plan, width), Uint8Array.of(EOT)
+  ]
+
+# One command (`TCPConnect`, `#BYE#`) as its broker message: chunk 4, then
+# its parameters when it has any.
+export encodeCommand = (command, params = []) ->
+  fail 'request', 'a command is a non-empty string' unless typeof command is 'string' and command isnt ''
+  plan = planParams(params)
+  width = widthOf(plan)
+  rest = if plan.length > 0 then paramChunk(plan, width) else []
+  concat [ascii("[XWB]10#{width}0"), ascii('4'), ...short(command, 'the command'), ...rest, Uint8Array.of(EOT)]
+
+# ==[ Replies ]==
+
+# One reply: two short strings, the data to `\x04`, and one more `\x04` when
+# the data is an M error. Anything else, short or long, is not a reply.
+export decode = (bytes) ->
+  fail 'reply', 'a reply is a Uint8Array' unless bytes instanceof Uint8Array
+  at = 0
+  readShort = (what) ->
+    fail 'reply', "the reply ends inside its #{what}" if at >= bytes.length
+    n = bytes[at]
+    fail 'reply', "the reply ends inside its #{what}" if at + 1 + n > bytes.length
+    s = text.decode(bytes.subarray(at + 1, at + 1 + n))
+    at += 1 + n
+    s
+  security = readShort('security message')
+  error = readShort('error message')
+  end = bytes.indexOf(EOT, at)
+  fail 'reply', 'the reply has no end (\\x04)' if end < 0
+  isM = end > at and bytes[at] is M_ERROR
+  data = text.decode(bytes.subarray((if isM then at + 1 else at), end))
+  stop = end + 1
+  if isM
+    fail 'reply', 'an M error reply ends with two \\x04' unless bytes[stop] is EOT
+    stop += 1
+  fail 'reply', "#{bytes.length - stop} bytes follow the reply's end" if stop isnt bytes.length
+  { security, error, data, mError: isM }
+
+# The data as lines: each ended by `\r\n` (an array, or word processing).
+export lines = (data) ->
+  return [] if data is ''
+  parts = data.split('\r\n')
+  parts.pop() if parts[parts.length - 1] is ''
+  parts
+
+# ==[ Sessions ]==
+
+# Codes, a context option and an electronic signature reach Kernel's DECRYP
+# wrapped in one space: equal first and last characters translate nothing,
+# so the value arrives as sent (TLS carries it).
+export wrap = (value, what = 'the value') ->
+  fail 'request', "#{what} is a non-empty string" unless typeof value is 'string' and value isnt ''
+  " #{value} "
+
+export class Session
+  constructor: (opts = {}) ->
+    known = ['url', 'fetch', 'version', 'timers']
+    for key in Object.keys(opts)
+      fail 'request', "unknown session option '#{key}'" unless known.includes(key)
+    @url = opts.url ?? null
+    @fetcher = opts.fetch ?? null
+    @version = opts.version ?? RPC_VERSION
+    @timers = opts.timers ?? { set: ((f, ms) -> setInterval(f, ms)), clear: ((h) -> clearInterval(h)) }
+    @token = null
+    @queue = Promise.resolve()
+    @keeping = null
+
+  endpoint: ->
+    return "#{@url.replace(/\/+$/, '')}/rpc" if @url
+    fail 'request', 'a session outside a browser needs `url:` (the site, e.g. https://vista.example.org)' if typeof location is 'undefined'
+    '/rpc'
+
+  # One message to Janus and its reply; requests run one at a time, in order,
+  # as the broker is strictly request and reply.
+  send: (body) ->
+    run = => @post(body)
+    result = @queue.then(run, run)
+    @queue = result.then((-> null), (-> null))
+    result
+
+  post: (body) ->
+    headers = { 'Content-Type': 'application/x-xwb', 'X-OV': '1' }
+    headers.Authorization = "Bearer #{@token}" if @token
+    fetcher = @fetcher ?? fetch
+    response = fetcher!(@endpoint(), { method: 'POST', headers, body, credentials: 'same-origin' })
+    if response.status is 401
+      @token = null
+      ended = response.headers.get('OV-Session-Ended')
+      fail 'ended', "the session has ended#{if ended then " (#{ended})" else ''}", { status: 401, sessionEnded: ended }
+    fail 'transport', "Janus answered #{response.status}", { status: response.status, retryAfter: response.headers.get('Retry-After') } unless response.status is 200
+    type = response.headers.get('Content-Type') ?? ''
+    fail 'transport', "Janus answered #{type or 'no content type'}, not application/x-xwb", { status: 200 } unless type.startsWith('application/x-xwb')
+    # Outside a browser the session token is ours to carry; a browser hides
+    # Set-Cookie and sends the cookie itself.
+    cookie = response.headers.get('Set-Cookie')
+    @token = cookie.match(/(?:^|[;,]\s*)__Host-ov=([^;,\s]+)/)?[1] ?? @token if cookie
+    decode Uint8Array.new(response.arrayBuffer!)
+
+  # An RPC's data; a security message, an error message or an M error throws.
+  rpc: (name, ...params) ->
+    reply = @send!(encode(name, params, { version: @version }))
+    fail 'security', reply.security, { rpc: name } if reply.security isnt ''
+    fail 'error', reply.error, { rpc: name } if reply.error isnt ''
+    fail 'm', reply.data.split('\r\n')[0], { rpc: name, detail: reply.data } if reply.mError
+    reply.data
+
+  # An RPC's data as lines.
+  lines: (name, ...params) -> lines(@rpc!(name, ...params))
+
+  # Start the session (§4 steps 1 and 2): `TCPConnect`, which Janus answers
+  # with `accept` and the token, then `XUS SIGNON SETUP`, which VistA needs
+  # before the codes. Answers the intro text for the sign-on screen.
+  connect: ->
+    reply = @send!(encodeCommand('TCPConnect', ['127.0.0.1', 0, 'localhost']))
+    fail 'signon', "the broker answered #{JSON.stringify(reply.data)} (sign-ons inhibited, or too many users)" unless reply.data is 'accept'
+    @rpc! 'XUS SIGNON SETUP'
+    @lines! 'XUS INTRO MSG'
+
+  # Sign on with an access and verify code (`XUS AV CODE`, §4 step 3). Its
+  # lines: DUZ (0 when it failed), the can't-sign-on code, whether the
+  # verify code must change (`1`), a message, a count, then further text.
+  # Codes that are not accepted throw; an expired verify code answers
+  # `mustChangeVerify` (then `changeVerify`).
+  signOn: (access, verify) ->
+    wrap access, 'the access code'
+    wrap verify, 'the verify code'
+    fail 'request', 'an access code holds no `;`' if access.includes(';')
+    answer = @lines! 'XUS AV CODE', wrap("#{access};#{verify}", 'the codes')
+    duz = Number(answer[0])
+    mustChangeVerify = answer[2] is '1'
+    fail 'signon', answer[3] or 'the access and verify codes were not accepted', { lines: answer } if not (duz > 0) and not mustChangeVerify
+    { duz, mustChangeVerify, message: answer[3] ?? '', lines: answer }
+
+  # A verify code that must change (`XUS CVC`): its three pieces each wrapped.
+  changeVerify: (old, next, confirm) ->
+    pieces = [wrap(old, 'the old verify code'), wrap(next, 'the new verify code'), wrap(confirm, 'the confirmation')]
+    answer = @lines! 'XUS CVC', pieces.join('^')
+    fail 'signon', answer[1] or 'the new verify code was not accepted', { lines: answer } unless answer[0] is '0'
+    true
+
+  # Enter an application context (`XWB CREATE CONTEXT`); the reply is `1`.
+  context: (option) ->
+    data = @rpc! 'XWB CREATE CONTEXT', wrap(option, 'the context option')
+    fail 'signon', data or "the context #{option} was not created", { option } unless data is '1'
+    true
+
+  # Keep the session while the user is active: `XWB IM HERE` at half the
+  # idle timeout `XWB GET BROKER INFO` gives. Answers the interval in ms.
+  keepalive: ->
+    seconds = Number(@lines!('XWB GET BROKER INFO')[0])
+    fail 'reply', 'XWB GET BROKER INFO gave no idle timeout' unless seconds > 0
+    @stopKeepalive()
+    ms = seconds * 500
+    @keeping = @timers.set((=> @rpc('XWB IM HERE').catch(=> @stopKeepalive())), ms)
+    @keeping?.unref?()
+    ms
+
+  stopKeepalive: ->
+    @timers.clear(@keeping) if @keeping
+    @keeping = null
+
+  # End the session: `#BYE#`; em logs the user out and Janus forgets the token.
+  bye: ->
+    @stopKeepalive()
+    reply = @send!(encodeCommand('#BYE#'))
+    @token = null
+    fail 'reply', "#BYE# was answered #{JSON.stringify(reply.data)}" unless reply.data is '#BYE#'
+    true
+
+# ==[ The default session ]==
+
+# `import vista from 'rip/vista'` is the page's own session (same origin);
+# `vista.session url: …` makes another (and outside a browser, the one).
+export session = (opts) -> Session.new(opts)
+
+vista = Session.new()
+vista.session = session
+vista.Session = Session
+vista.VistaError = VistaError
+vista.encode = encode
+vista.encodeCommand = encodeCommand
+vista.decode = decode
+vista.wrap = wrap
+
+export default vista

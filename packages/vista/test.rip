@@ -1,0 +1,319 @@
+# ==============================================================================
+# rip/vista tests — the broker's bytes, pinned to OpenVista's RPC-HTTPS.md §3
+#
+# Requests and replies are compared byte for byte against the contract's
+# examples (measured on em). Sessions run against a recording fetch that
+# answers with those replies, so the suite needs no Janus and no network.
+# ==============================================================================
+
+import { test, eq, ok, throws } from 'rip/testing'
+import vista, { Session, VistaError, decode, encode, encodeCommand, fromBytes, lines, toBytes, wrap } from 'rip/vista'
+import * as mod from 'rip/vista'
+import { readFileSync } from 'fs'
+
+# Bytes as the contract writes them: printable ASCII as is, the rest \xNN.
+show = (b) -> Array.from(b).map((c) -> if c >= 32 and c < 127 then String.fromCharCode(c) else '\\x' + c.toString(16).padStart(2, '0')).join('')
+
+# A reply as Janus returns it, from the contract's spelling of its bytes.
+bytes = (s) -> Uint8Array.from(Array.from(s).map((ch) -> ch.charCodeAt(0)))
+
+def rejects(fn, kind, text = null)
+  caught = null
+  try
+    fn!
+  catch e
+    caught = e
+  ok caught?, "expected a rejection (#{kind})"
+  ok caught instanceof VistaError, "expected a VistaError, got #{caught?.name}: #{caught?.message}"
+  eq caught.kind, kind, "kind of: #{caught.message}"
+  ok caught.message.includes(text), "expected #{JSON.stringify(text)} in: #{caught.message}" if text?
+  caught
+
+# A recording fetch: each call takes the next scripted reply (a byte string,
+# or { status, headers, body }) and records the request it answered.
+fakeFetch = (replies) ->
+  calls = []
+  fn = (url, init) ->
+    calls.push { url, init, body: show(init.body) }
+    r = replies.shift()
+    throw Error.new("no reply scripted for #{show(init.body)}") unless r?
+    r = { body: r } if typeof r is 'string'
+    headers = { 'Content-Type': 'application/x-xwb', ...(r.headers ?? {}) }
+    Response.new(bytes(r.body ?? ''), { status: r.status ?? 200, headers })
+  fn.calls = calls
+  fn
+
+REPLY =!
+  accept:  "\x00\x00accept\x04"
+  imHere:  "\x00\x001\x04"
+  broker:  "\x00\x00180\r\n\x04"
+  setup:   "\x00\x00pop\r\nENV\r\nENV\r\n/dev/null\r\n5\r\n0\r\nFOIA.DOMAIN.EXT\r\n0\r\n\x04"
+  avCode:  "\x00\x00100\r\n0\r\n0\r\n\r\n0\r\n0\r\n\r\nGood evening MANAGER,SITE\r\n\x04"
+  context: "\x00\x001\x04"
+  refused: "\x3ARemote Procedure 'ORWU USERINFO' cannot run before sign-on\x00\x04"
+  mError:  "\x00\x00\x18M  ERROR=CAPI+16^XWBPRS,4 actual parameters for IMHERE^XWBLIB,M58,-M58\r\nLAST REF=...\x04\x04"
+  bye:     "\x00\x00#BYE#\x04"
+
+session = (replies, opts = {}) ->
+  f = fakeFetch(replies)
+  [Session.new({ url: 'https://vista.test', fetch: f, ...opts }), f]
+
+# ==[ Package surface ]==
+
+console.log "\nPackage"
+
+test "named exports + the default session", ->
+  eq Object.keys(mod).sort(), ['Session', 'VistaError', 'decode', 'default', 'encode', 'encodeCommand', 'fromBytes', 'lines', 'session', 'toBytes', 'wrap']
+  ok vista instanceof Session
+  for name in ['session', 'encode', 'encodeCommand', 'decode', 'wrap']
+    eq typeof vista[name], 'function'
+  eq vista.Session, Session
+  eq vista.VistaError, VistaError
+
+test "no runtime deps", ->
+  pkg = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8'))
+  for field in ['dependencies', 'peerDependencies', 'optionalDependencies', 'devDependencies']
+    eq pkg[field], undefined
+
+test "declares browser safety and earns it", ->
+  pkg = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8'))
+  eq pkg.rip, { browser: true }
+  source = readFileSync("#{import.meta.dir}/vista.rip", 'utf8')
+  eq /^\s*import\b/m.test(source), false
+  eq /\bBun\.|node:|process\.|globalThis/.test(source), false
+
+# ==[ Requests ]==
+
+console.log "\nRequests"
+
+test "the contract's four messages, byte for byte", ->
+  eq show(encodeCommand('TCPConnect', ['127.0.0.1', 0, 'localhost'])), '[XWB]10304\\x0aTCPConnect50009127.0.0.1f00010f0009localhostf\\x04'
+  eq show(encode('XUS INTRO MSG')), '[XWB]11302\\x010\\x0dXUS INTRO MSG5\\x04'
+  eq show(encode('XUS AV CODE', [wrap('ACCESS;VERIFY')])), '[XWB]11302\\x010\\x0bXUS AV CODE50015 ACCESS;VERIFY f\\x04'
+  eq show(encodeCommand('#BYE#')), '[XWB]10304\\x05#BYE#\\x04'
+
+test "the RPC version is 0 unless one is asked for", ->
+  eq show(encode('X', [], { version: '1.108' })), '[XWB]11302\\x051.108\\x01X5\\x04'
+
+test "text is Windows-1252, and lengths count its bytes", ->
+  eq show(encode('X', ['30º'])), '[XWB]11302\\x010\\x01X5000330\\xbaf\\x04'
+  eq show(toBytes('€‚ƒ™Ÿ')), '\\x80\\x82\\x83\\x99\\x9f'
+  eq show(toBytes('é ñ ÿ')), '\\xe9 \\xf1 \\xff'
+
+test "every byte decodes and encodes back to itself", ->
+  all = Uint8Array.from([0...256])
+  eq show(toBytes(fromBytes(all))), show(all)
+  eq fromBytes(Uint8Array.of(0x80, 0xBA)), '€º'
+
+test "a character Windows-1252 cannot hold rejects, never a guess", ->
+  throws (-> encode('X', ['ok 漢'])), VistaError, 'parameter 1 holds "漢" (U+6F22) at character 4'
+  throws (-> encode('X', ['🙂'])), VistaError, 'U+1F642'
+  throws (-> encode('ORWU☃')), VistaError, 'the RPC name holds'
+
+test "the width is 3 until a value passes 999 bytes, then 9", ->
+  eq show(encode('X', ['a'.repeat(999)])).slice(0, 9), '[XWB]1130'
+  big = show(encode('X', ['a'.repeat(1000)]))
+  eq big.slice(0, 9), '[XWB]1190'
+  ok big.includes('50000001000aaa')
+
+test "an empty value is an empty literal, so later parameters keep their places", ->
+  eq show(encode('X', [null, 'a'])), '[XWB]11302\\x010\\x01X50000f0001af\\x04'
+  eq show(encode('X', [undefined, ''])), '[XWB]11302\\x010\\x01X50000f0000f\\x04'
+
+test "a list: numbers bare, text quoted with quotes doubled, `t` between entries", ->
+  eq show(encode('X', [{ 1: 'a', TEXT: 'b', 'say "hi"': 'c' }])),
+    '[XWB]11302\\x010\\x01X520011001at2006"TEXT"001bt2012"say ""hi"""001cf\\x04'
+
+test "a list's empty value is \\x01; levels join by commas", ->
+  eq show(encode('X', [[[['TEXT', 1, 0], 'line one'], [['TEXT', 2, 0], '']]])),
+    '[XWB]11302\\x010\\x01X52010"TEXT",1,0008line onet2010"TEXT",2,0001\\x01f\\x04'
+
+test "an empty list is one empty subscript", ->
+  eq show(encode('X', [{}])), '[XWB]11302\\x010\\x01X52000f\\x04'
+  eq show(encode('X', [[], 'z'])), '[XWB]11302\\x010\\x01X52000f0001zf\\x04'
+
+test "numbers go in their plain decimal form", ->
+  eq show(encode('X', [1.5, -3, 0])), '[XWB]11302\\x010\\x01X500031.5f0002-3f00010f\\x04'
+  throws (-> encode('X', [1e21])), VistaError, 'no plain decimal form'
+  throws (-> encode('X', [NaN])), VistaError, 'a finite number'
+  throws (-> encode('X', [[[1e-7, 'a']]])), VistaError, 'no plain decimal form'
+
+test "anything else rejects, naming the parameter", ->
+  throws (-> encode('X', ['a', true])), VistaError, 'parameter 2 must be a string, a number, a list or null, not boolean'
+  throws (-> encode('X', [[['k']]])), VistaError, 'a [subscript, value] pair'
+  throws (-> encode('X', [{ a: {} }])), VistaError, 'a list value must be a string or a finite number'
+  throws (-> encode('')), VistaError, 'an RPC name is a non-empty string'
+  throws (-> encode('X'.repeat(256))), VistaError, 'the RPC name is 256 bytes'
+  throws (-> encode('X', ['a'.repeat(1024 * 1024)])), VistaError, 'Janus accepts at most 1048576'
+
+# ==[ Replies ]==
+
+console.log "\nReplies"
+
+test "the contract's replies decode", ->
+  eq decode(bytes(REPLY.accept)), { security: '', error: '', data: 'accept', mError: false }
+  eq decode(bytes(REPLY.broker)).data, '180\r\n'
+  eq lines(decode(bytes(REPLY.setup)).data), ['pop', 'ENV', 'ENV', '/dev/null', '5', '0', 'FOIA.DOMAIN.EXT', '0']
+  eq lines(decode(bytes(REPLY.avCode)).data)[7], 'Good evening MANAGER,SITE'
+  eq decode(bytes(REPLY.bye)).data, '#BYE#'
+
+test "a refusal is the security message", ->
+  r = decode(bytes(REPLY.refused))
+  eq r.security, "Remote Procedure 'ORWU USERINFO' cannot run before sign-on"
+  eq r.data, ''
+
+test "an M error ends with two \\x04 and loses its \\x18", ->
+  r = decode(bytes(REPLY.mError))
+  eq r.mError, true
+  ok r.data.startsWith('M  ERROR=CAPI+16^XWBPRS')
+
+test "replies decode as Windows-1252", ->
+  eq decode(Uint8Array.of(0, 0, 0x33, 0x30, 0xBA, 0x04)).data, '30º'
+
+test "bytes that are not one reply reject", ->
+  throws (-> decode(bytes("\x00\x00accept"))), VistaError, 'no end'
+  throws (-> decode(bytes("\x00\x00accept\x04extra"))), VistaError, '5 bytes follow'
+  throws (-> decode(bytes("\x00\x00\x18M  ERROR=X\x04"))), VistaError, 'two \\x04'
+  throws (-> decode(bytes("\x05ab"))), VistaError, 'inside its security message'
+  throws (-> decode('accept')), VistaError, 'a Uint8Array'
+
+test "lines splits on \\r\\n and drops the last empty piece", ->
+  eq lines(''), []
+  eq lines('a\r\nb\r\n'), ['a', 'b']
+  eq lines('one'), ['one']
+  eq lines('a\r\n\r\nb\r\n'), ['a', '', 'b']
+
+# ==[ Sessions ]==
+
+console.log "\nSessions"
+
+test! "connect: TCPConnect, then XUS SIGNON SETUP, answering the intro text", ->
+  [s, f] = session([{ body: REPLY.accept, headers: { 'Set-Cookie': '__Host-ov=TOK123; Secure; HttpOnly; SameSite=Strict; Path=/' } }, REPLY.setup, "\x00\x00Welcome\r\nto VistA\r\n\x04"])
+  eq s.connect!, ['Welcome', 'to VistA']
+  eq f.calls.map((c) -> c.body), ['[XWB]10304\\x0aTCPConnect50009127.0.0.1f00010f0009localhostf\\x04', '[XWB]11302\\x010\\x10XUS SIGNON SETUP5\\x04', '[XWB]11302\\x010\\x0dXUS INTRO MSG5\\x04']
+  eq f.calls[0].url, 'https://vista.test/rpc'
+  eq f.calls[0].init.method, 'POST'
+  eq f.calls[0].init.headers['Content-Type'], 'application/x-xwb'
+  eq f.calls[0].init.headers['X-OV'], '1'
+  eq f.calls[0].init.headers.Authorization, undefined
+  eq f.calls[1].init.headers.Authorization, 'Bearer TOK123'
+
+test! "a site URL's trailing slash does not double", ->
+  [s, f] = session([REPLY.imHere], { url: 'https://vista.test/' })
+  s.rpc! 'XWB IM HERE'
+  eq f.calls[0].url, 'https://vista.test/rpc'
+
+test! "connect: a rejected TCPConnect throws", ->
+  [s] = session(["\x00\x00reject\x04"])
+  rejects! (-> s.connect()), 'signon', 'sign-ons inhibited'
+
+test! "signOn sends the codes wrapped in one space and answers the DUZ", ->
+  [s, f] = session([REPLY.avCode])
+  r = s.signOn! 'ACCESS', 'VERIFY'
+  eq r.duz, 100
+  eq r.mustChangeVerify, false
+  eq f.calls[0].body, '[XWB]11302\\x010\\x0bXUS AV CODE50015 ACCESS;VERIFY f\\x04'
+
+test! "signOn: codes that are not accepted throw with VistA's message", ->
+  [s] = session(["\x00\x000\r\n0\r\n0\r\nNot a valid ACCESS CODE/VERIFY CODE pair.\r\n0\r\n0\r\n\x04"])
+  e = rejects! (-> s.signOn('A', 'V')), 'signon', 'Not a valid ACCESS CODE/VERIFY CODE pair.'
+  eq e.lines[0], '0'
+
+test! "signOn: an expired verify code answers mustChangeVerify, then changeVerify", ->
+  [s, f] = session(["\x00\x000\r\n0\r\n1\r\nVERIFY CODE must be changed before continued use.\r\n0\r\n0\r\n\x04", "\x00\x000\r\n\r\n\x04"])
+  r = s.signOn! 'A', 'OLD'
+  eq [r.duz, r.mustChangeVerify], [0, true]
+  eq s.changeVerify!('OLD', 'NEW1', 'NEW1'), true
+  eq f.calls[1].body, '[XWB]11302\\x010\\x07XUS CVC50019 OLD ^ NEW1 ^ NEW1 f\\x04'
+
+test! "changeVerify: a refused code throws", ->
+  [s] = session(["\x00\x001\r\nThis code has been used previously.\r\n\x04"])
+  rejects! (-> s.changeVerify('O', 'N', 'N')), 'signon', 'used previously'
+
+test! "signOn rejects a `;` in the access code before sending", ->
+  [s, f] = session([])
+  rejects! (-> s.signOn('A;B', 'V')), 'request', 'holds no `;`'
+  eq f.calls.length, 0
+
+test! "context wraps the option and wants 1", ->
+  [s, f] = session([REPLY.context, "\x00\x00The context 'BAD' does not exist on server.\x04"])
+  eq s.context!('OR CPRS GUI CHART'), true
+  eq f.calls[0].body, '[XWB]11302\\x010\\x12XWB CREATE CONTEXT50019 OR CPRS GUI CHART f\\x04'
+  rejects! (-> s.context('BAD')), 'signon', 'does not exist'
+
+test! "rpc answers the data; lines answers it split", ->
+  [s] = session(["\x00\x00100^MANAGER,SITE\x04", "\x00\x00a\r\nb\r\n\x04"])
+  eq s.rpc!('ORWU USERINFO'), '100^MANAGER,SITE'
+  eq s.lines!('ORWU X'), ['a', 'b']
+
+test! "a security message, an error message and an M error each throw their kind", ->
+  [s] = session([REPLY.refused, "\x00\x0FNo such patient\x04", REPLY.mError])
+  e = rejects! (-> s.rpc('ORWU USERINFO')), 'security', 'cannot run before sign-on'
+  eq e.rpc, 'ORWU USERINFO'
+  rejects! (-> s.rpc('ORWPT SELECT', 1)), 'error', 'No such patient'
+  e = rejects! (-> s.rpc('XWB IM HERE', 1)), 'm', 'M  ERROR=CAPI+16^XWBPRS'
+  ok e.detail.includes('LAST REF=')
+
+test! "401 is the session's end, with Janus's reason; the token is dropped", ->
+  [s, f] = session([{ body: REPLY.accept, headers: { 'Set-Cookie': '__Host-ov=T1; Path=/' } }, REPLY.setup, REPLY.imHere, { status: 401, headers: { 'OV-Session-Ended': 'idle' } }, { status: 401 }])
+  s.connect!
+  e = rejects! (-> s.rpc('X')), 'ended', 'the session has ended (idle)'
+  eq e.sessionEnded, 'idle'
+  rejects! (-> s.rpc('X')), 'ended'
+  eq f.calls[4].init.headers.Authorization, undefined
+
+test! "other statuses and a foreign content type are transport errors", ->
+  [s] = session([{ status: 503, headers: { 'Retry-After': '5' } }, { status: 200, headers: { 'Content-Type': 'text/html' }, body: '<html>' }])
+  e = rejects! (-> s.rpc('X')), 'transport', 'Janus answered 503'
+  eq e.retryAfter, '5'
+  rejects! (-> s.rpc('X')), 'transport', 'text/html, not application/x-xwb'
+
+test! "requests run one at a time, in order", ->
+  order = []
+  release = null
+  gate = Promise.new((r) -> release = r)
+  f = (url, init) ->
+    name = fromBytes(init.body).match(/XWB IM HERE|ORWU A|ORWU B/)[0]
+    order.push "start #{name}"
+    await gate if name is 'ORWU A'
+    order.push "end #{name}"
+    Response.new(bytes(REPLY.imHere), { headers: { 'Content-Type': 'application/x-xwb' } })
+  s = Session.new({ url: 'https://vista.test', fetch: f })
+  a = s.rpc('ORWU A')
+  b = s.rpc('ORWU B')
+  Promise.resolve().then(-> release())
+  Promise.all! [a, b]
+  eq order, ['start ORWU A', 'end ORWU A', 'start ORWU B', 'end ORWU B']
+
+test! "a failed request does not stop the ones after it", ->
+  [s] = session([{ status: 503 }, REPLY.imHere])
+  a = s.rpc('X')
+  b = s.rpc('XWB IM HERE')
+  rejects! (-> a), 'transport'
+  eq (await b), '1'
+
+test! "keepalive: XWB IM HERE at half the broker's idle timeout, until bye", ->
+  ticks = []
+  timers = { set: ((f, ms) -> ticks.push(ms); f), clear: (h) -> ticks.push('cleared') }
+  [s, f] = session([REPLY.broker, REPLY.imHere, REPLY.bye], { timers })
+  eq s.keepalive!, 90000
+  tick = s.keeping
+  tick!
+  eq f.calls[1].body, '[XWB]11302\\x010\\x0bXWB IM HERE5\\x04'
+  eq s.bye!, true
+  eq ticks, [90000, 'cleared']
+  eq f.calls[2].body, '[XWB]10304\\x05#BYE#\\x04'
+
+test! "bye wants #BYE# back", ->
+  [s] = session(["\x00\x00no\x04"])
+  rejects! (-> s.bye()), 'reply', '#BYE# was answered "no"'
+
+test "a session outside a browser needs a url; options are checked", ->
+  throws (-> Session.new().endpoint()), VistaError, 'needs `url:`'
+  throws (-> Session.new({ uri: 'x' })), VistaError, "unknown session option 'uri'"
+  ok vista.session({ url: 'https://x' }) instanceof Session
+
+test "wrap puts one space on each side and wants text", ->
+  eq wrap('OR CPRS GUI CHART'), ' OR CPRS GUI CHART '
+  throws (-> wrap('')), VistaError, 'a non-empty string'
+  throws (-> wrap(5, 'the signature code')), VistaError, 'the signature code is a non-empty string'
