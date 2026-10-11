@@ -186,8 +186,11 @@ test "stripNamespaces: false preserves prefixes verbatim", ->
   eq parse('<ns:a x:id="1"><ns2:b>x</ns2:b></ns:a>', stripNamespaces: false),
     { 'ns:a': { '@attrs': { 'x:id': '1' }, 'ns2:b': 'x' } }
 
-test "close tags match on the stripped name — prefixes are opaque labels", ->
-  eq parse('<ns:a>x</other:a>'), { a: 'x' }
+# Prefixes are opaque labels (no xmlns resolution), but an end tag still
+# repeats its start tag's name exactly (XML 1.0, WFC: Element Type Match).
+test "close tags match the written name — prefixes are opaque labels, not wildcards", ->
+  throws (-> parse('<ns:a>x</other:a>')), 'mismatched close tag: expected </ns:a>, got </other:a>'
+  eq parse('<ns:a>x</ns:a>'), { a: 'x' }
 
 # ==[ Parse: attribute forms ]==
 
@@ -266,6 +269,10 @@ test "default maxBytes admits ordinary documents", ->
 test "mismatched close tags throw with both names in the message", ->
   throws (-> parse('<a><b>x</c></a>')), 'mismatched close tag: expected </b>, got </c>'
   throws (-> parse('<a>x</a></b>')), 'mismatched close tag: expected </>, got </b>'
+
+test "attributes that stripping would merge reject; unstripped they both survive", ->
+  throws (-> parse('<a p:id="1" q:id="2"/>')), RsxError, 'share the name "id" once namespaces are stripped'
+  eq parse('<a p:id="1" q:id="2"/>', stripNamespaces: false), { a: { '@attrs': { 'p:id': '1', 'q:id': '2' } } }
 
 test "an element still open at the end of the input rejects", ->
   throws (-> parse('<a><b>x')), RsxError, 'unclosed element <b> at the end of the input'

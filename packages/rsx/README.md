@@ -51,7 +51,7 @@ parse xml, trimText: false
 
 | Option | Default | Notes |
 |---|---|---|
-| `stripNamespaces` | `true` | `'ns1:Foo'` → `'Foo'` |
+| `stripNamespaces` | `true` | `'ns1:Foo'` → `'Foo'`; attributes that would merge (`p:id`, `q:id`) reject |
 | `preserveCDATA` | `true` | CDATA text is verbatim |
 | `trimText` | `true` | Collapse whitespace in non-CDATA text |
 | `coerceNumbers` | `false` | Never auto-coerce numbers — text stays text |

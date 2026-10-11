@@ -289,6 +289,10 @@ class Builder
       decoded = {}
       for own k, v of attrs
         decodedKey = @opts.stripNamespaces ? stripNs(k) : k
+        # Stripping can merge two attributes (`p:id`, `q:id`); keeping
+        # one would drop the other's value.
+        if Object.hasOwn(decoded, decodedKey)
+          throw RsxError.new "attributes on <#{qname}> share the name #{JSON.stringify(decodedKey)} once namespaces are stripped; parse with stripNamespaces: false to keep both"
         decoded[decodedKey] = v
       node[@opts.attrsKey] = decoded
 
@@ -304,7 +308,8 @@ class Builder
 
     @attach parent, name, node, forceArr
     @stack.push node
-    @nameStack.push name
+    # The written name: a close tag matches it, prefix and all.
+    @nameStack.push qname
     @textBuf.push ''
     @hadCdata.push false
     @hadElement.push false
@@ -313,8 +318,8 @@ class Builder
   close: (qname) ->
     name = @opts.stripNamespaces ? stripNs(qname) : qname
     expected = @nameStack[@nameStack.length - 1]
-    unless name is expected
-      throw RsxError.new "mismatched close tag: expected </#{expected}>, got </#{name}>"
+    unless qname is expected
+      throw RsxError.new "mismatched close tag: expected </#{expected}>, got </#{qname}>"
 
     node = @stack.pop()
     @nameStack.pop()
