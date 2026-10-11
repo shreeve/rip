@@ -1,28 +1,39 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
 import { delay, debounce, throttle, hold } from 'rip/app';
 import { __state } from '../../../src/runtime/reactive.js';
 
+// Every primitive schedules with setTimeout and throttle measures its
+// window against Date.now(), so on the host clock a stall between steps
+// or a timer answered late moves the edges. The fake clock advances only
+// when a test advances it: every edge is asserted at its exact
+// millisecond, and a timer that must not exist is counted.
+beforeEach(() => { jest.useFakeTimers(); });
+afterEach(() => { jest.useRealTimers(); });
+
 describe('delay', () => {
-  test('truthy waits, falsy is immediate', async () => {
+  test('truthy waits, falsy is immediate', () => {
     const flag = __state(false);
     const delayed = delay(20, flag);
     expect(delayed.value).toBeFalse();
     flag.value = true;
     expect(delayed.value).toBeFalse();
-    await Bun.sleep(35);
+    jest.advanceTimersByTime(19);
+    expect(delayed.value).toBeFalse();
+    jest.advanceTimersByTime(1);
     expect(delayed.value).toBeTrue();
     flag.value = false;
     expect(delayed.value).toBeFalse();
     delayed.dispose();
   });
 
-  test('a bounce inside the window never fires', async () => {
+  test('a bounce inside the window never fires', () => {
     const flag = __state(false);
     const delayed = delay(25, flag);
     flag.value = true;
-    await Bun.sleep(5);
+    jest.advanceTimersByTime(5);
     flag.value = false;
-    await Bun.sleep(40);
+    expect(jest.getTimerCount()).toBe(0);
+    jest.advanceTimersByTime(20);
     expect(delayed.value).toBeFalse();
     delayed.dispose();
   });
@@ -37,29 +48,34 @@ describe('delay', () => {
 });
 
 describe('debounce', () => {
-  test('only the last of a burst lands, after the window', async () => {
+  test('only the last of a burst lands, after the window', () => {
     const query = __state('a');
     const settled = debounce(20, query);
     query.value = 'ab';
+    jest.advanceTimersByTime(10);
     query.value = 'abc';
     expect(settled.value).toBe('a');
-    await Bun.sleep(35);
+    jest.advanceTimersByTime(19);
+    expect(settled.value).toBe('a');
+    jest.advanceTimersByTime(1);
     expect(settled.value).toBe('abc');
     settled.dispose();
   });
 });
 
 describe('throttle', () => {
-  test('changes inside the window coalesce; a quiet window restores the leading edge', async () => {
+  test('changes inside the window coalesce; a quiet window restores the leading edge', () => {
     const y = __state(0);
     const smooth = throttle(30, y);
     y.value = 1;
     y.value = 2;
     y.value = 3;
     expect(smooth.value).toBe(0);
-    await Bun.sleep(45);
+    jest.advanceTimersByTime(29);
+    expect(smooth.value).toBe(0);
+    jest.advanceTimersByTime(1);
     expect(smooth.value).toBe(3);
-    await Bun.sleep(25);
+    jest.advanceTimersByTime(30);
     y.value = 4;
     expect(smooth.value).toBe(4);
     smooth.dispose();
@@ -67,43 +83,48 @@ describe('throttle', () => {
 });
 
 describe('hold', () => {
-  test('rises immediately and outlives the fall by the window', async () => {
+  test('rises immediately and outlives the fall by the window', () => {
     const saved = __state(false);
     const shown = hold(25, saved);
     saved.value = true;
     expect(shown.value).toBeTrue();
     saved.value = false;
     expect(shown.value).toBeTrue();
-    await Bun.sleep(40);
+    jest.advanceTimersByTime(24);
+    expect(shown.value).toBeTrue();
+    jest.advanceTimersByTime(1);
     expect(shown.value).toBeFalse();
     shown.dispose();
   });
 });
 
 describe('disposal', () => {
-  test('dispose clears the pending timer so no late write lands', async () => {
+  test('dispose clears the pending timer so no late write lands', () => {
     const flag = __state(false);
     const delayed = delay(15, flag);
     flag.value = true;
     delayed.dispose();
-    await Bun.sleep(30);
+    expect(jest.getTimerCount()).toBe(0);
+    jest.advanceTimersByTime(15);
     expect(delayed.value).toBeFalse();
   });
 
-  test('a function source returns the output signal itself with dispose', async () => {
+  test('a function source returns the output signal itself with dispose', () => {
     const flag = __state(false);
     const delayed = delay(10, () => flag.value);
     expect(typeof delayed.read).toBe('function');
     expect(typeof delayed.dispose).toBe('function');
     flag.value = true;
-    await Bun.sleep(25);
+    jest.advanceTimersByTime(9);
+    expect(delayed.value).toBeFalse();
+    jest.advanceTimersByTime(1);
     expect(delayed.value).toBeTrue();
     delayed.dispose();
   });
 });
 
 describe('timing reconciliation', () => {
-  test('debounce and throttle timers die with dispose', async () => {
+  test('debounce and throttle timers die with dispose', () => {
     const q = __state('a');
     const settled = debounce(15, q);
     q.value = 'b';
@@ -113,9 +134,10 @@ describe('timing reconciliation', () => {
     y.value = 1;
     y.value = 2;
     smooth.dispose();
-    await Bun.sleep(30);
+    expect(jest.getTimerCount()).toBe(0);
+    jest.advanceTimersByTime(15);
     expect(settled.value).toBe('a');
-    expect(smooth.value).not.toBe(2);
+    expect(smooth.value).toBe(0);
   });
 
   test('a function source is read-only and disposable for every primitive', async () => {
@@ -129,17 +151,19 @@ describe('timing reconciliation', () => {
     held.dispose();
   });
 
-  test('hold retriggers inside the fall window', async () => {
+  test('hold retriggers inside the fall window', () => {
     const saved = __state(false);
     const shown = hold(25, saved);
     saved.value = true;
     saved.value = false;
-    await Bun.sleep(10);
+    jest.advanceTimersByTime(10);
     saved.value = true;
-    await Bun.sleep(25);
+    jest.advanceTimersByTime(15);
     expect(shown.value).toBeTrue();
     saved.value = false;
-    await Bun.sleep(40);
+    jest.advanceTimersByTime(24);
+    expect(shown.value).toBeTrue();
+    jest.advanceTimersByTime(1);
     expect(shown.value).toBeFalse();
     shown.dispose();
   });
@@ -157,14 +181,17 @@ describe('timing reconciliation', () => {
     settled.dispose();
   });
 
-  test('a risen delay ignores truthy churn', async () => {
+  test('a risen delay ignores truthy churn', () => {
     const id = __state(0);
     const spinner = delay(15, id);
     id.value = 1;
-    await Bun.sleep(30);
+    jest.advanceTimersByTime(14);
+    expect(spinner.value).toBeFalse();
+    jest.advanceTimersByTime(1);
     expect(spinner.value).toBeTrue();
     id.value = 2;
     expect(spinner.value).toBeTrue();
+    expect(jest.getTimerCount()).toBe(0);
     spinner.dispose();
   });
 });
