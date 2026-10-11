@@ -271,7 +271,8 @@ test "mismatched close tags throw with both names in the message", ->
   throws (-> parse('<a>x</a></b>')), 'mismatched close tag: expected </>, got </b>'
 
 test "attributes that stripping would merge reject; unstripped they both survive", ->
-  throws (-> parse('<a p:id="1" q:id="2"/>')), RsxError, 'share the name "id" once namespaces are stripped'
+  throws (-> parse('<a p:id="1" q:id="2"/>')), RsxError, 'share the name "id" with different values once namespaces are stripped'
+  eq parse('<html xml:lang="en" lang="en"/>'), { html: { '@attrs': { lang: 'en' } } }
   eq parse('<a p:id="1" q:id="2"/>', stripNamespaces: false), { a: { '@attrs': { 'p:id': '1', 'q:id': '2' } } }
 
 test "an element still open at the end of the input rejects", ->

@@ -290,9 +290,10 @@ class Builder
       for own k, v of attrs
         decodedKey = @opts.stripNamespaces ? stripNs(k) : k
         # Stripping can merge two attributes (`p:id`, `q:id`); keeping
-        # one would drop the other's value.
-        if Object.hasOwn(decoded, decodedKey)
-          throw RsxError.new "attributes on <#{qname}> share the name #{JSON.stringify(decodedKey)} once namespaces are stripped; parse with stripNamespaces: false to keep both"
+        # one would drop the other's value. Equal values lose nothing
+        # (XHTML's `xml:lang="en" lang="en"`).
+        if Object.hasOwn(decoded, decodedKey) and decoded[decodedKey] isnt v
+          throw RsxError.new "attributes on <#{qname}> share the name #{JSON.stringify(decodedKey)} with different values once namespaces are stripped; parse with stripNamespaces: false to keep both"
         decoded[decodedKey] = v
       node[@opts.attrsKey] = decoded
 
