@@ -1740,11 +1740,11 @@ code 'an @member call after a `;` in a one-line arrow body is a call, never an e
   };
   '''
 
-code 'bare @click shorthand binds onClick to its element', '''
+code 'an explicit listener binds a method to its element', '''
   export A = component
     onClick: -> p "clicked"
     render
-      button @click, "Click me"
+      button @click: onClick, "Click me"
   ''', '''
   export const A = class extends __Component {
     _init(__given) {
@@ -1755,7 +1755,7 @@ code 'bare @click shorthand binds onClick to its element', '''
     _create() {
       this._el0 = document.createElement('button');
       this._el0.setAttribute('data-part', 'A');
-      this._el0.addEventListener('click', (e) => __batch(() => (this.onClick)(e)));
+      this._el0.addEventListener('click', (e) => __batch(() => this.onClick(e)));
       this._t0 = document.createTextNode("Click me");
       this._el0.appendChild(this._t0);
       return this._el0;
@@ -1763,12 +1763,12 @@ code 'bare @click shorthand binds onClick to its element', '''
   };
   '''
 
-code 'bare shorthand resolves @keydown to onKeydown, multiple per element', '''
+code 'explicit listeners for several events on one element', '''
   export A = component
     onClick: -> p "click"
     onKeydown: (e) -> p e.key
     render
-      button @click, @keydown, "Press"
+      button @click: onClick, @keydown: onKeydown, "Press"
   ''', '''
   export const A = class extends __Component {
     _init(__given) {
@@ -1782,8 +1782,8 @@ code 'bare shorthand resolves @keydown to onKeydown, multiple per element', '''
     _create() {
       this._el0 = document.createElement('button');
       this._el0.setAttribute('data-part', 'A');
-      this._el0.addEventListener('click', (e) => __batch(() => (this.onClick)(e)));
-      this._el0.addEventListener('keydown', (e) => __batch(() => (this.onKeydown)(e)));
+      this._el0.addEventListener('click', (e) => __batch(() => this.onClick(e)));
+      this._el0.addEventListener('keydown', (e) => __batch(() => this.onKeydown(e)));
       this._t0 = document.createTextNode("Press");
       this._el0.appendChild(this._t0);
       return this._el0;
@@ -1791,12 +1791,12 @@ code 'bare shorthand resolves @keydown to onKeydown, multiple per element', '''
   };
   '''
 
-code 'bare shorthand scopes the listener to the element it sits on, not the root', '''
+code 'a listener sits on the element it is written on, not the root', '''
   export A = component
     onClick: -> p "clicked"
     render
       div
-        button @click, "inner"
+        button @click: onClick, "inner"
   ''', '''
   export const A = class extends __Component {
     _init(__given) {
@@ -1808,7 +1808,7 @@ code 'bare shorthand scopes the listener to the element it sits on, not the root
       this._el0 = document.createElement('div');
       this._el0.setAttribute('data-part', 'A');
       this._el1 = document.createElement('button');
-      this._el1.addEventListener('click', (e) => __batch(() => (this.onClick)(e)));
+      this._el1.addEventListener('click', (e) => __batch(() => this.onClick(e)));
       this._t0 = document.createTextNode("inner");
       this._el1.appendChild(this._t0);
       this._el0.appendChild(this._el1);
@@ -1816,6 +1816,81 @@ code 'bare shorthand scopes the listener to the element it sits on, not the root
     }
   };
   '''
+
+code 'a hyphenated event name in a listener key listens for that event; a hyphen in a value stays subtraction', '''
+  A = component
+    go: -> 1
+    w := 5
+    render
+      div
+        sl-input @sl-change: go
+        button @my-long-event: go, title: w-1
+  ''', '''
+  let A = class extends __Component {
+    _init(__given) {
+      this.w = __state(5);
+    }
+    go() {
+      return 1;
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._el1 = document.createElement('sl-input');
+      this._el1.addEventListener('sl-change', (e) => __batch(() => this.go(e)));
+      this._el0.appendChild(this._el1);
+      this._el2 = document.createElement('button');
+      this._el2.addEventListener('my-long-event', (e) => __batch(() => this.go(e)));
+      this._el0.appendChild(this._el2);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { { const __v = (this.w.value - 1); __v == null ? this._el2.removeAttribute('title') : this._el2.setAttribute('title', __v); } });
+    }
+  };
+  '''
+
+fail 'a quoted event name rejects, naming the unquoted spelling', '''
+  A = component
+    go: -> 1
+    render
+      p @'value-changed': go
+  ''', "an event name is written unquoted — `@value-changed: handler`"
+
+fail 'a bare hyphenated event rejects with its whole name', '''
+  A = component
+    render
+      p @x-y
+  ''', "`@x-y` needs a handler"
+
+test 'a member chain at an element-argument position stays text', '''
+  A = component
+    user := {name: "a"}
+    render
+      p @user.name
+  typeof A
+  ''', 'function'
+
+fail 'a bare @event rejects, naming the explicit listener', '''
+  A = component
+    onClick: -> 1
+    render
+      button @click, "Go"
+  ''', "`@click` needs a handler — write `@click: handler`"
+
+fail 'a bare custom event rejects the same way', '''
+  A = component
+    onEscape: -> 1
+    render
+      div @escape
+  ''', "`@escape` needs a handler"
+
+fail 'an event modifier rejects with the handler form', '''
+  A = component
+    save: -> 1
+    render
+      form @submit.prevent: save
+  ''', "event modifiers are not supported"
 
 code 'explicit @event: handler binds to the element', '''
   export A = component

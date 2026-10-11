@@ -23,7 +23,7 @@ Counter = component
       h1 "Counter"
       = count
       span.badge total
-      button @click, disabled: count > 5
+      button @click: onClick, disabled: count > 5
         "Step"
 
 Panel = component
@@ -50,7 +50,7 @@ Badge = component
   @nick?: string := "nn"
   onClick = -> 1
   render
-    button @click
+    button @click: onClick
       "go"
     span
       = @name

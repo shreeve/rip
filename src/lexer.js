@@ -734,10 +734,17 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       if (codeArrowAt(k)) return false;
     }
     if (prev?.kind === 'INDENT') {
-      // An indent after `title:` or `x =` continues that value.
+      // An indent after `title:` or `x =` continues that value, and so
+      // does a block opened on a render-local line (`x = if ok`).
       const before = tokens[tokens.length - 2]?.kind;
-      return !(before === ':' || before === '=' || before === 'COMPOUND_ASSIGN' || before === ',');
+      if (before === ':' || before === '=' || before === 'COMPOUND_ASSIGN' || before === ',') return false;
+      let k = tokens.length - 2;
+      while (k > 0 && !['TERMINATOR', 'INDENT', 'OUTDENT', 'RENDER'].includes(tokens[k - 1].kind)) k--;
+      return !(tokens[k]?.kind === 'IDENTIFIER' && tokens[k + 1]?.kind === '=');
     }
+    // A line start. An inline branch's custom element (`if x then
+    // x-icon`) is the template gate's to join (src/render.js), since only
+    // it knows whether the branch is markup or a value.
     if (!prev || prev.kind === 'TERMINATOR' || prev.kind === 'OUTDENT' || prev.kind === 'RENDER') return true;
     if (!pendingSpaced || prev.generated) return false;
     let j = tokens.length - 1;
@@ -1312,8 +1319,14 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         // two words at the same indent are a sibling element and its
         // argument, not a new construct — the same reason the leading-dot
         // rule below excludes them. What a trailing dot means there is
-        // the render grammar's to say, and it is not saying it here.
-        if (inRender) return false;
+        // the render grammar's to say, and it is not saying it here —
+        // except a `.` alone on its line, which is an element (an implicit
+        // `div`), so its line ends there.
+        if (inRender) {
+          const before = tokens[tokens.length - 2];
+          return !before || before.kind === 'INDENT' || before.kind === 'OUTDENT' ||
+            before.kind === 'TERMINATOR' || before.kind === 'RENDER';
+        }
         if (prefix.length > current.length) return false;
         if (!IDENT_START.test(text[pos] ?? '')) return false;
         let at = pos;

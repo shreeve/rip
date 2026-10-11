@@ -1680,7 +1680,7 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
  '  onClick = -> vis = !vis',
  '  render',
  '    div',
- '      button @click',
+ '      button @click: onClick',
  '      if vis',
  '        p "on"',
  '      ul',
@@ -1696,7 +1696,7 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     // A bare member-name handler on a KNOWN event checks against the
     // event's real function type, host element included — no longer a
     // quieting `as any` (custom events keep that: no claim to check).
-    expect(faced.code).toContain(`((this.onClick) as (e: HTMLElementEventMap['click'] & { target: HTMLElementTagNameMap['button']; currentTarget: HTMLElementTagNameMap['button'] }) => unknown)(e)`);
+    expect(faced.code).toContain(`(this.onClick as (e: HTMLElementEventMap['click'] & { target: HTMLElementTagNameMap['button']; currentTarget: HTMLElementTagNameMap['button'] }) => unknown)(e)`);
     expect(faced.code).toContain('(this as any)._first = ');
     expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
   });

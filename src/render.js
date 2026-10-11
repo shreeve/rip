@@ -11,9 +11,6 @@
 //   .('a', b)        → div.__clsx('a', b) / tag.__clsx(...) /
 //                      class: __clsx(...)  (dynamic classes)
 //   = expr           → __text__(expr)    (expression text child)
-//   button @click    → button @click: @onClick (bare event directive;
-//                      the minted handler tokens are ZERO-WIDTH — the
-//                      emitter's generated-vs-user discriminator)
 //   <tag> INDENT …   → <tag>(-> INDENT …) (implicit child nesting; the
 //                      matching CALL_END lands after the OUTDENT)
 //   <tag> p INDENT … → <tag> p, -> INDENT … (a trailing word the
@@ -36,8 +33,9 @@
 // program with normal lines. The
 // extended-tier scaling gate holds the line-count dimension linear.
 //
-// The event-MODIFIER spelling (`@click.prevent: h`) is deliberately
-// unsupported — it stays a loud parse rejection.
+// A listener has one spelling, `@event: handler`: a bare `@event` and
+// the event-modifier spelling (`@click.prevent: h`) reject, positioned,
+// naming that form.
 
 const OPENERS = new Set(['(', '[', '{', 'CALL_START', 'INDEX_START', 'PARAM_START',
   'PICK_START', 'OPTPICK_START', 'STRING_START', 'INTERPOLATION_START', 'HEREGEX_START']);
@@ -50,14 +48,24 @@ const GROUP_OPENER = { __proto__: null, ')': '(', 'CALL_END': 'CALL_START', ']':
 // distinguishes `Counter` from ALLCAPS constants).
 const COMPONENT_RE = /^[A-Z][A-Za-z0-9]*[a-z][A-Za-z0-9]*$/;
 
-// Token kinds that START a same-line element argument after a bare
-// event directive (`button @click "go"` — the text child); the
+// Token kinds that START a same-line element argument after a
+// transition directive (`p ~fade "x"` — the text child); the
 // separator/closer kinds stay untouched.
 const INLINE_CONTENT = new Set(['STRING', 'STRING_START', 'NUMBER', 'BOOL', 'IDENTIFIER', 'PROPERTY', '@', '(', '[', '{']);
 
 // The token shapes the value-name tracker reads: what ends a line, the
 // operators that declare a name, the line heads whose block is a render
 // factory of its own, and what ends a `for` line's variable list.
+// Tokens that begin an expression — after a spaced word, a juxtaposed call.
+const VALUE_STARTS = new Set(['IDENTIFIER', 'NUMBER', 'STRING', 'STRING_START', 'BOOL', 'NULL', 'UNDEFINED',
+  'REGEX', 'REGEX_START', '@', 'THIS', '[', '{', '(', 'PARAM_START', '->', '=>']);
+// The event-modifier names other template languages put after a dot.
+const MODIFIERS = new Set(['prevent', 'stop', 'once', 'self', 'capture', 'passive']);
+const isHyphen = (t) => t?.kind === '-' || (t?.kind === 'MATH' && t.value === '-');
+// A line that continues the statement above it at the same indent.
+const VALUE_CONTINUATIONS = new Set(['ELSE', 'CATCH', 'FINALLY']);
+// Heads whose block a later `else`/`catch`/`finally` line continues.
+const BLOCK_VALUE_HEADS = new Set(['IF', 'UNLESS', 'TRY', 'SWITCH']);
 const LINE_BREAKS = new Set(['INDENT', 'OUTDENT', 'TERMINATOR']);
 const REACTIVE_DECLS = new Set(['REACTIVE_ASSIGN', 'COMPUTED_ASSIGN']);
 const PLAIN_ASSIGN = new Set(['=']);
@@ -117,6 +125,7 @@ export function rewriteRender(tokens, mintId, fail) {
   };
 
   let inRender = false;
+  let inlineRender = false;   // `render div "x"`: the region is that line
   let renderIndentLevel = 0;
   let currentIndent = 0;
   const pendingCallEnds = [];
@@ -186,7 +195,9 @@ export function rewriteRender(tokens, mintId, fail) {
         j--;
         continue;
       }
-      if (pt === 'TERMINATOR' || pt === 'RENDER') break;
+      // An inline branch (`if x then button …`, `else span …`) starts
+      // its element after the `then`/`else`.
+      if (pt === 'TERMINATOR' || pt === 'RENDER' || pt === 'THEN' || pt === 'ELSE') break;
       if (pt === 'OUTDENT') {
         j = skipBalancedPair(out, j - 2, 'OUTDENT', 'INDENT', current);
         continue;
@@ -216,7 +227,7 @@ export function rewriteRender(tokens, mintId, fail) {
     const head = tokAt(out, j, current);
     return head?.kind === 'IDENTIFIER' &&
       (isTemplateTag(head.value) ||
-       (j === 0 || ['INDENT', 'TERMINATOR', 'RENDER'].includes(out[j - 1]?.kind)));
+       (j === 0 || ['INDENT', 'TERMINATOR', 'RENDER', 'THEN', 'ELSE'].includes(out[j - 1]?.kind)));
   };
 
   // Net unmatched-opener test: is the CURRENT position nested inside
@@ -230,8 +241,10 @@ export function rewriteRender(tokens, mintId, fail) {
       const t = out[k].kind;
       if (CLOSERS.has(t)) depth++;
       else if (OPENERS.has(t)) {
-        if (depth === 0) return 1;
-        depth--;
+        // An element's own argument list (`p(~fade, "x")`) is the same
+        // template position as its paren-less arguments.
+        if (depth === 0 && !(t === 'CALL_START' && isHeadCall(k))) return 1;
+        if (depth > 0) depth--;
       } else if (t === 'TERMINATOR' && out[k].value === ';') {
         // A `;` separates statements on one physical line; it ends no
         // bracket group, so an opener before it still encloses the
@@ -245,15 +258,191 @@ export function rewriteRender(tokens, mintId, fail) {
     return 0;
   };
 
-  // Is the `@` about to be emitted a bare event DIRECTIVE — a new
-  // tag-head argument or an element-body statement — rather than a
-  // `@member` inside an attribute value?
+  // Does out[j] start a template line — after a line break, or after the
+  // `then`/`else` of a line an inline branch heads?
+  const atTemplateLineStart = (j) => {
+    const p = out[j - 1];
+    if (!p || p.kind === 'INDENT' || p.kind === 'OUTDENT' || p.kind === 'RENDER' || p.kind === 'TERMINATOR') return true;
+    if (p.kind !== 'THEN' && p.kind !== 'ELSE') return false;
+    let k = j - 1;
+    while (k > 0 && !['INDENT', 'OUTDENT', 'RENDER', 'TERMINATOR'].includes(out[k - 1].kind)) k--;
+    return ['IF', 'UNLESS', 'ELSE', 'LEADING_WHEN'].includes(out[k].kind);
+  };
+
+  // Is the CALL_START at out[k] an element's own argument list
+  // (`p(...)`, `div.card(...)`)? A line-start call of any other word
+  // (`basename(@dir) + '/'`) is a text expression.
+  const isHeadCall = (k) => {
+    let j = k - 1;
+    while (j >= 2 && out[j]?.kind === 'PROPERTY' && out[j - 1].kind === '.') j -= 2;
+    const head = out[j];
+    return head?.kind === 'IDENTIFIER' && !head.generated && isTemplateTag(head.value) &&
+      !readsAsValue(head.value) && atTemplateLineStart(j);
+  };
+
+  // Is the cursor on a line of an element's argument list that spans
+  // lines (`p(` / `~fade` / `"x"` / `)`)?
+  const inHeadCallBlock = () => {
+    let depth = 0;
+    for (let k = out.length - 1; k > 0; k--) {
+      if (counter.on) counter.n++;
+      const kind = out[k].kind;
+      if (CLOSERS.has(kind) || kind === 'OUTDENT') depth++;
+      else if (OPENERS.has(kind) || kind === 'INDENT') {
+        if (depth > 0) { depth--; continue; }
+        return kind === 'INDENT' && out[k - 1].kind === 'CALL_START' && isHeadCall(k - 1);
+      } else if (kind === 'RENDER') return false;
+    }
+    return false;
+  };
+
+  // Walk back from out[j] over one comma-separated argument, skipping
+  // bracket groups; the index of what bounds it: a top-level `,`, `:`
+  // or `=`, or -1 at the line start.
+  const argumentStart = (j) => {
+    let depth = 0;
+    for (let k = j; k >= 0; k--) {
+      const kind = out[k].kind;
+      if (CLOSERS.has(kind)) depth++;
+      else if (OPENERS.has(kind)) { if (depth === 0) return -1; depth--; }
+      else if (depth > 0) continue;
+      else if (kind === ',' || kind === ':' || kind === '=') return k;
+      else if (['INDENT', 'OUTDENT', 'RENDER', 'TERMINATOR'].includes(kind)) return -1;
+    }
+    return -1;
+  };
+
+  // Does out[from..to] hold a juxtaposed call (`wrap go`), whose
+  // arguments then run on past a following comma?
+  const hasJuxtaposedCall = (from, to) => {
+    for (let k = from; k < to; k++) {
+      const a = out[k];
+      const b = out[k + 1];
+      if ((a.kind === 'IDENTIFIER' || a.kind === 'PROPERTY') && a.spaced && VALUE_STARTS.has(b.kind)) return true;
+    }
+    return false;
+  };
+
+  // ── The template gate ──
+  // Is an arrow at out[k] a FUNCTION (its body is code) or an element's
+  // children arrow (its body is template)? An arrow right after an
+  // element's head or argument list (`div ->`, `div title: 't', ->`,
+  // a nesting arrow this pass mints) opens children; after `@ev:`, a
+  // parameter list, `=`, or inside brackets it opens a function.
+  const isCodeArrow = (k) => {
+    const a = out[k];
+    if (a.generated) return false;
+    const prev = out[k - 1];
+    if (!prev || prev.generated) return true;
+    // An arrow ending a value (`@click: debounce ->`, `x = wrap ->`) is
+    // a function argument; one ending the head or a bare word
+    // (`div ->`, `div hidden ->`) opens children.
+    if (prev.kind === 'IDENTIFIER' || prev.kind === 'PROPERTY') {
+      const s = argumentStart(k - 1);
+      return s >= 0 && out[s].kind !== ',';
+    }
+    // After a comma the arrow is the next argument: an element's
+    // children, unless a juxtaposed call in a value owns the comma
+    // (`@click: wrap go, ->`).
+    if (prev.kind === ',') {
+      const s = argumentStart(k - 2);
+      return s >= 0 && out[s].kind !== ',' && hasJuxtaposedCall(s + 1, k - 1);
+    }
+    return true;
+  };
+
+  // Does a function arrow earlier on this physical line own the rest of
+  // it (`@click: -> a(); b`)? Brackets opened after the arrow stay its.
+  const inArrowBodyOnLine = () => {
+    let depth = 0;
+    for (let k = out.length - 1; k >= 0; k--) {
+      if (counter.on) counter.n++;
+      const t = out[k];
+      if (CLOSERS.has(t.kind)) depth++;
+      else if (OPENERS.has(t.kind)) { if (depth === 0) return false; depth--; }
+      else if ((t.kind === '->' || t.kind === '=>') && depth === 0) return isCodeArrow(k);
+      else if (t.kind === 'INDENT' || t.kind === 'OUTDENT' || t.kind === 'RENDER' ||
+               (t.kind === 'TERMINATOR' && t.value !== ';')) return false;
+    }
+    return false;
+  };
+
+  // The one question every template rewrite asks: is the current token
+  // in CODE — a function body, the rest of a line after a function
+  // arrow, an `= expr` text body, or a bracket group opened inside the
+  // template? Template rewrites apply only where this answers false.
+  const inCode = () =>
+    frames[frames.length - 1] === true || valueLine !== null || codeLevels.length > 0 || textFrames.length > 0 ||
+    explicitDepthAt() !== 0 || inArrowBodyOnLine();
+
+  // Does the `else`/`catch`/`finally` about to be emitted continue a
+  // value's `if`/`try` (`title: if ok` / `1` / `else 2`)? Its owner opens
+  // the block just closed; a markup branch heads its line, while a value's
+  // follows a `:`, `=` or other operand on it.
+  const continuesValue = () => {
+    let k = out.length - 1;
+    if (out[k]?.kind !== 'OUTDENT') return false;
+    for (let depth = 0; k >= 0; k--) {
+      if (out[k].kind === 'OUTDENT') depth++;
+      else if (out[k].kind === 'INDENT' && --depth === 0) break;
+    }
+    let owner = -1;
+    for (let j = k - 1; j >= 0 && !['INDENT', 'OUTDENT', 'RENDER', 'TERMINATOR'].includes(out[j].kind); j--) {
+      if (BLOCK_VALUE_HEADS.has(out[j].kind)) owner = j;
+    }
+    if (owner <= 0) return false;
+    const before = out[owner - 1].kind;
+    return !['INDENT', 'OUTDENT', 'RENDER', 'TERMINATOR', 'ELSE'].includes(before);
+  };
+
+  // Does the bracket or block tokens[i] opens hold code? Inside code,
+  // everything is code. A block holds code after a function arrow, after
+  // `key:` or `=` (a value spanning lines), or on a render local's
+  // line; a bracket holds code unless it is an element's own argument
+  // list. Element children and markup control-flow blocks are template.
+  const opensCode = (i, t) => {
+    if (frames[frames.length - 1] === true || valueLine !== null || textFrames.length > 0) return true;
+    if (t.kind === 'INDENT') {
+      const p = tokens[i - 1];
+      if (p && (p.kind === '->' || p.kind === '=>')) return out[out.length - 1] === p && isCodeArrow(out.length - 1);
+      return p?.kind === ':' || p?.kind === '=' || p?.kind === 'COMPOUND_ASSIGN';
+    }
+    return !(t.kind === 'CALL_START' && isHeadCall(out.length));
+  };
+
+  // Does a block opening after the current token belong to code? Asked
+  // AFTER the token, since a closer that ends a bracket group
+  // (`class: [...]`, `@click: (-> a(); b())`) leaves its line in template
+  // position. A one-line arrow body ends with its line, so it never owns
+  // the block below (`form @submit: -> e.preventDefault(); save()` keeps
+  // its children).
+  const blockInCode = (t) => {
+    if (codeLevels.length > 0 || textFrames.length > 0) return true;
+    // Plain bracket depth, the current token included: a `;` inside a
+    // one-line arrow body opens nothing the block could belong to.
+    let depth = CLOSERS.has(t.kind) ? 1 : OPENERS.has(t.kind) ? -1 : 0;
+    for (let k = out.length - 1; k >= 0; k--) {
+      if (counter.on) counter.n++;
+      const kind = out[k].kind;
+      if (CLOSERS.has(kind)) depth++;
+      else if (OPENERS.has(kind)) { if (depth === 0) return true; depth--; }
+      else if (kind === 'INDENT' || kind === 'OUTDENT' || kind === 'RENDER' ||
+               (kind === 'TERMINATOR' && out[k].value !== ';')) break;
+    }
+    return depth < 0;
+  };
+
+  // Is the `@` about to be emitted at an element-argument position — a
+  // new tag-head argument or an element-body statement — rather than a
+  // `@member` inside an attribute value or in code?
   const isBareEventAttr = (current) => {
     const prev = out[out.length - 1];
     if (!prev) return false;
-    if (explicitDepthAt() !== 0) return false;
+    if (inCode()) return false;
     const pt = prev.kind;
     if ((pt === ',' || pt === 'IDENTIFIER' || pt === 'PROPERTY') && startsWithTag(current)) return true;
+    if (pt === 'CALL_START' && isHeadCall(out.length - 1)) return true;
+    if ((pt === 'INDENT' || pt === 'TERMINATOR') && inHeadCallBlock()) return true;
     if ((pt === 'INDENT' || pt === 'TERMINATOR') && elementBodyLevels.includes(currentIndent)) return true;
     return false;
   };
@@ -374,8 +563,12 @@ export function rewriteRender(tokens, mintId, fail) {
 
   const memberFrames = [];   // { level, names } per open component body
   const renderScopes = [];   // { level, names } per open render control-flow block
-  const functionLevels = []; // indent levels of open function bodies inside render
+  const codeLevels = [];     // indent levels of open function bodies inside render
+  const frames = [];         // per open input bracket or block in render: true when it holds code
+  let pendingFrame;          // the frame the previous token opens (a boolean) or closes (null)
   let lineHead = null;       // kind of the current line's first token
+  let valueLine = null;      // indent of an open render-local line (`x = …`): its value, blocks and
+                             // `else`/`catch`/`finally` continuations included, is code
   let loopVars = null;       // the variables of the `for` line being read
 
   const readsAsValue = (name) =>
@@ -386,15 +579,35 @@ export function rewriteRender(tokens, mintId, fail) {
   for (let i = 0; i < tokens.length; i++) {
     if (counter.on) counter.n++;
     let t = tokens[i];
-    const next = tokens[i + 1] ?? null;
+    let next = tokens[i + 1] ?? null;
+
+    // A bracket or block takes effect after the token that opens it, so
+    // the opener itself is judged in its parent's context.
+    if (pendingFrame === null) frames.pop();
+    else if (pendingFrame !== undefined) frames.push(pendingFrame);
+    pendingFrame = undefined;
+    if (inRender) {
+      if (OPENERS.has(t.kind) || t.kind === 'INDENT') pendingFrame = opensCode(i, t);
+      else if ((CLOSERS.has(t.kind) || t.kind === 'OUTDENT') && frames.length > 0) pendingFrame = null;
+    }
 
     if (textFrames.length > 0) closeTextFrames(t);
 
-    if (!LINE_BREAKS.has(t.kind) && startsLine(i)) lineHead = t.kind;
+    if (!LINE_BREAKS.has(t.kind) && startsLine(i)) {
+      lineHead = t.kind;
+      if (valueLine !== null && (currentIndent < valueLine ||
+          (currentIndent === valueLine && !VALUE_CONTINUATIONS.has(t.kind)))) valueLine = null;
+      if (inRender && valueLine === null && !inCode() &&
+          ((t.kind === 'IDENTIFIER' && next?.kind === '=') || (VALUE_CONTINUATIONS.has(t.kind) && continuesValue()))) {
+        valueLine = currentIndent;
+      }
+    }
     if (t.kind === 'COMPONENT') memberFrames.push({ level: currentIndent + 1, names: memberNames(i) });
 
     if (t.kind === 'RENDER') {
       inRender = true;
+      frames.length = 0;
+      inlineRender = next !== null && next.kind !== 'INDENT';
       renderIndentLevel = currentIndent + 1;
       renderScopes.push({ level: renderIndentLevel, names: new Set() });
       out.push(t);
@@ -404,9 +617,12 @@ export function rewriteRender(tokens, mintId, fail) {
       currentIndent++;
       if (inRender) {
         const opener = tokens[i - 1]?.kind;
-        if (opener === '->' || opener === '=>') {
-          functionLevels.push(currentIndent);
-        } else if (functionLevels.length === 0 && CONTROL_HEADS.has(lineHead)) {
+        if (valueLine !== null) {
+          codeLevels.push(currentIndent);
+        } else if ((opener === '->' || opener === '=>') && out[out.length - 1] === tokens[i - 1]) {
+          if (isCodeArrow(out.length - 1)) codeLevels.push(currentIndent);
+          else elementBodyLevels.push(currentIndent);
+        } else if (codeLevels.length === 0 && CONTROL_HEADS.has(lineHead)) {
           renderScopes.push({ level: currentIndent, names: new Set(lineHead === 'FOR' ? loopVars ?? [] : []) });
         }
       }
@@ -419,7 +635,7 @@ export function rewriteRender(tokens, mintId, fail) {
       for (const frames of [memberFrames, renderScopes]) {
         while (frames.length > 0 && frames[frames.length - 1].level > currentIndent) frames.pop();
       }
-      while (functionLevels.length > 0 && functionLevels[functionLevels.length - 1] > currentIndent) functionLevels.pop();
+      while (codeLevels.length > 0 && codeLevels[codeLevels.length - 1] > currentIndent) codeLevels.pop();
       while (elementBodyLevels.length > 0 && elementBodyLevels[elementBodyLevels.length - 1] > currentIndent) {
         elementBodyLevels.pop();
       }
@@ -428,15 +644,53 @@ export function rewriteRender(tokens, mintId, fail) {
         out.push(gen('CALL_END', ')', t));
         pendingCallEnds.pop();
       }
-      if (inRender && currentIndent < renderIndentLevel) inRender = false;
+      if (inRender && currentIndent < renderIndentLevel) {
+        inRender = false;
+        valueLine = null;
+      }
       continue;
+    }
+    // An inline render's region is its line and the block under it: the
+    // first line break back at the render's own level, outside any
+    // bracket, ends it, so later members are code.
+    if (inRender && inlineRender && (t.kind === 'TERMINATOR' && t.value !== ';') &&
+        currentIndent < renderIndentLevel && explicitDepthAt() === 0) {
+      inRender = false;
+      inlineRender = false;
+      valueLine = null;
     }
     if (!inRender) {
       out.push(t);
       continue;
     }
 
-    if (functionLevels.length === 0 && startsLine(i)) {
+    // The lexer joins a tight hyphen run at a block's first word into one
+    // custom-element name; in code that name would be raw JavaScript.
+    if (t.kind === 'IDENTIFIER' && !t.generated && String(t.value).includes('-') && inCode()) {
+      fail(`\`${String(t.value).split('#')[0]}\` here is a value, not an element — write it with spaces (\`${String(t.value).split('#')[0].split('-').join(' - ')}\`) for subtraction`, t.start);
+    }
+
+    // An inline branch's element may be a custom element
+    // (`if x then sl-icon …`): in markup its tight hyphen run is one tag
+    // name, as at a line start. In a value it stays subtraction.
+    if (t.kind === 'IDENTIFIER' && (out[out.length - 1]?.kind === 'THEN' || out[out.length - 1]?.kind === 'ELSE') &&
+        isHyphen(tokens[i + 1]) && !tokens[i + 1].spaced && tokens[i + 2]?.kind === 'IDENTIFIER' && !tokens[i + 2].spaced &&
+        atTemplateLineStart(out.length) && !inCode()) {
+      let j = i + 1;
+      let name = String(t.value);
+      while (isHyphen(tokens[j]) && !tokens[j].spaced &&
+             (tokens[j + 1]?.kind === 'IDENTIFIER' || tokens[j + 1]?.kind === 'PROPERTY') && !tokens[j + 1].spaced) {
+        name += '-' + String(tokens[j + 1].value);
+        j += 2;
+      }
+      if (tokens[j]?.kind !== ':') {
+        tokens.splice(i, j - i, { ...t, value: name, end: tokens[j - 1].end });
+        t = tokens[i];
+        next = tokens[i + 1] ?? null;
+      }
+    }
+
+    if (codeLevels.length === 0 && startsLine(i)) {
       if (t.kind === 'FOR') {
         loopVars = [];
         for (let j = i + 1; j < tokens.length && !FOR_SOURCES.has(tokens[j].kind) && !LINE_BREAKS.has(tokens[j].kind); j++) {
@@ -448,7 +702,7 @@ export function rewriteRender(tokens, mintId, fail) {
     }
 
     // ── `= expr` at a child position → __text__(expr) ──
-    if (t.kind === '=' && out.length > 0) {
+    if (t.kind === '=' && out.length > 0 && !inCode()) {
       const pt = out[out.length - 1].kind;
       if (pt === 'TERMINATOR' || pt === 'INDENT' || pt === 'RENDER') {
         out.push(gen('IDENTIFIER', '__text__', t, { at: t.start, spaced: t.spaced, newLine: t.newLine }));
@@ -459,7 +713,7 @@ export function rewriteRender(tokens, mintId, fail) {
     }
 
     // ── Transition directive: `~fade` → __transition__: "fade" ──
-    if (t.kind === 'UNARY_MATH' && t.value === '~' && next?.kind === 'IDENTIFIER') {
+    if (t.kind === 'UNARY_MATH' && t.value === '~' && next?.kind === 'IDENTIFIER' && isBareEventAttr(t)) {
       out.push(gen('PROPERTY', '__transition__', t, { spaced: t.spaced, newLine: t.newLine }));
       out.push(gen(':', ':', t));
       // The name token mutates to the STRING value IN PLACE (not
@@ -489,7 +743,7 @@ export function rewriteRender(tokens, mintId, fail) {
     // (`value <=> @name`) binds the same member.
     // A BIND whose neighbors match no attribute-pair shape survives
     // untouched — a loud parse rejection (no grammar home).
-    if (t.kind === 'BIND') {
+    if (t.kind === 'BIND' && !inCode()) {
       const prev = out[out.length - 1];
       if (prev !== undefined && (prev.kind === 'IDENTIFIER' || prev.kind === 'PROPERTY') &&
           next !== null && (next.kind === 'IDENTIFIER' || next.kind === '@')) {
@@ -501,7 +755,7 @@ export function rewriteRender(tokens, mintId, fail) {
 
     // ── Hyphenated attribute keys: `data-lucide:` / `aria-x:` →
     // one STRING key (re-joined from the '-' operator split) ──
-    if (t.kind === 'IDENTIFIER' && next?.kind === '-' && !next.spaced) {
+    if (t.kind === 'IDENTIFIER' && next?.kind === '-' && !next.spaced && !inCode()) {
       const parts = [t.value];
       let j = i + 1;
       let end = t.end;
@@ -522,8 +776,17 @@ export function rewriteRender(tokens, mintId, fail) {
       }
     }
 
+    // A line-leading `.` inside an `= expr` body would continue the
+    // expression in code, but the scanner splits the line in render, so
+    // the continuation has no reading here yet; it rejects, positioned.
+    if (t.kind === '.' && textFrames.length > 0 && (out[out.length - 1]?.kind === 'INDENT' || out[out.length - 1]?.kind === 'TERMINATOR')) {
+      fail('the `= expr` text form takes ONE expression — an indented continuation under the `=` line has no ' +
+        'render reading (inside render a leading `.` starts a NEW element, so the continuation cannot be a method ' +
+        'chain; put the whole expression on the `=` line, or bind it in a method)', t.start);
+    }
+
     // ── Implicit div for class-only and bare-dot selectors ──
-    if (t.kind === '.') {
+    if (t.kind === '.' && !inCode()) {
       const pt = out[out.length - 1]?.kind;
       if (pt === 'INDENT' || pt === 'TERMINATOR' || pt === 'RENDER') {
         if (next?.kind === 'PROPERTY') {
@@ -545,7 +808,7 @@ export function rewriteRender(tokens, mintId, fail) {
     }
 
     // ── Dynamic classes: `.( … )` → __clsx call ──
-    if (t.kind === '.' && next?.kind === '(') {
+    if (t.kind === '.' && next?.kind === '(' && !inCode()) {
       const pt = out[out.length - 1]?.kind;
       const atLineStart = pt === 'INDENT' || pt === 'TERMINATOR' || pt === 'RENDER';
       next.kind = 'CALL_START';
@@ -564,59 +827,62 @@ export function rewriteRender(tokens, mintId, fail) {
       continue;
     }
 
-    // ── Bare event shorthand: `button @click` → `@click: @onClick` ──
-    // The minted handler tokens are zero-width (generated) — the
-    // emitter validates ONLY these against the DOM-event set and the
-    // method's existence; explicit `@name:` bindings stay unvalidated
-    // (custom events are legal DOM).
+    // A quoted event name would listen for the quotes too; the
+    // unquoted name is the one spelling, hyphens included.
+    if (t.kind === '@' && next?.kind === 'STRING' && !next.spaced && tokens[i + 2]?.kind === ':' && isBareEventAttr(t)) {
+      const ev = String(next.value).slice(1, -1);
+      fail(`an event name is written unquoted — \`@${ev}: handler\``, next.start);
+    }
+
+    // ── A listener is `@event: handler` — the one spelling (RFC 3) ──
+    // At an element-argument position, `@word` with no `:` would be a
+    // listener without a handler; it rejects, naming the explicit form.
+    // A member chain there (`p @user.name`) stays text, and an event
+    // modifier (`@click.prevent:`) rejects with the handler form.
     if (t.kind === '@' && next?.kind === 'PROPERTY' && !next.spaced) {
+      // A listener key's event name runs through tight hyphens
+      // (`@sl-change: go` listens for `sl-change`; custom elements name
+      // their events so). The run joins into the one PROPERTY only when
+      // a `:` ends it — anywhere else a hyphen keeps its meaning.
+      let j = i + 2;
+      let name = String(next.value);
+      while (isHyphen(tokens[j]) && !tokens[j].spaced &&
+             (tokens[j + 1]?.kind === 'IDENTIFIER' || tokens[j + 1]?.kind === 'PROPERTY') && !tokens[j + 1].spaced) {
+        name += '-' + String(tokens[j + 1].value);
+        j += 2;
+      }
+      if (j > i + 2 && tokens[j]?.kind === ':' && isBareEventAttr(t)) {
+        tokens.splice(i + 1, j - (i + 1), { ...next, value: name, end: tokens[j - 1].end });
+        next = tokens[i + 1];
+      }
       const after = tokens[i + 2];
-      const isChain = after?.kind === '.';
-      const isPair = after?.kind === ':';
-      if (!isChain && !isPair && isBareEventAttr(t)) {
+      if (after?.kind !== ':' && isBareEventAttr(t)) {
         const ev = String(next.value);
-        const handler = `on${ev[0].toUpperCase()}${ev.slice(1)}`;
-        // A `=` directly after the directive has no sensible reading:
-        // the minted handler would become the assignment's target and
-        // the assignment's value the invoked listener.
-        if (after?.kind === '=') {
-          fail(`a \`=\` cannot follow a bare event directive on one line — \`@${ev} = expr\` would assign to the ` +
-            `minted handler and invoke the assignment as the listener; bind explicitly (\`@${ev}: handler\`), ` +
-            `or keep the bare \`@${ev}\` and put the ` +
-            'text on its own `= expr` line', after.start);
+        if (after?.kind === '.' && tokens[i + 3]?.kind === 'PROPERTY' && tokens[i + 4]?.kind === ':') {
+          const call = { prevent: 'e.preventDefault(); ', stop: 'e.stopPropagation(); ' }[tokens[i + 3].value] ?? '';
+          fail(`event modifiers are not supported — handle it in the listener: \`@${ev}: (e) -> ${call}…\``, after.start);
         }
-        out.push(t);
-        out.push(next);
-        out.push(gen(':', ':', next));
-        out.push(gen('@', '@', next));
-        out.push(gen('PROPERTY', handler, next));
-        i++;
-        // A block INDENT directly after the directive takes the
-        // element's children: the minted handler PROPERTY never rides
-        // the main loop, so the implicit-nesting rule runs here for
-        // it (the in-a-call comma path — `button @click` + block
-        // parses as `button({click: onClick}, -> …)`).
-        if (tokens[i + 1]?.kind === 'INDENT') {
-          out.push(gen(',', ',', next, { at: tokens[i + 1].start }));
-          out.push(gen('->', '->', next, { at: tokens[i + 1].start, newLine: true }));
-          elementBodyLevels.push(currentIndent + 1);
-        } else if (tokens[i + 1] !== undefined && INLINE_CONTENT.has(tokens[i + 1].kind)) {
-          // Same-line content directly after the directive is the
-          // NEXT element argument (`button @click "go"` means handler
-          // plus inline text child — the comma-list spelling's
-          // meaning; a value here is never a handler argument).
-          // Without the comma the minted handler and the content fuse
-          // into one expression (the handler called WITH the text).
-          out.push(gen(',', ',', next, { at: tokens[i + 1].start }));
+        // `@click.prevent` with no `:` reads as the member chain
+        // `this.click.prevent` — unless `click` is no member and the
+        // property is a modifier, where it is a listener written wrong.
+        if (after?.kind === '.' && MODIFIERS.has(tokens[i + 3]?.value) && !readsAsValue(ev)) {
+          const call = { prevent: 'e.preventDefault(); ', stop: 'e.stopPropagation(); ' }[tokens[i + 3].value] ?? '';
+          fail(`\`@${ev}.${tokens[i + 3].value}\` reads \`${ev}\`, which is no member here; event modifiers are not supported — handle it in the listener: \`@${ev}: (e) -> ${call}…\``, after.start);
         }
-        continue;
+        if (j === i + 2 && isHyphen(after)) {
+          fail('an event name after `@` is words joined by tight hyphens, like `@sl-change: handler`', t.start);
+        }
+        if (after?.kind !== '.') {
+          const text = j > i + 2 ? '' : `, or \`= @${ev}\` on its own line to show the member as text`;
+          fail(`\`@${j > i + 2 ? name : ev}\` needs a handler — write \`@${j > i + 2 ? name : ev}: handler\` for a listener${text}`, t.start);
+        }
       }
     }
 
     // ── Implicit child nesting: a template element directly before a
     // block INDENT takes its block as children through an injected
     // `(-> …)` (bare tags) or `, -> …` (tags already in a call) ──
-    if (next?.kind === 'INDENT' &&
+    if (next?.kind === 'INDENT' && !blockInCode(t) &&
         t.kind !== '->' && t.kind !== '=>' && t.kind !== 'CALL_START' && t.kind !== '(') {
       const pt = out[out.length - 1]?.kind;
       const isAfterControlFlow = ['IF', 'UNLESS', 'WHILE', 'UNTIL', 'WHEN', 'FORIN', 'FOROF', 'FORAS', 'FORASAWAIT', 'BY'].includes(pt);
@@ -672,7 +938,7 @@ export function rewriteRender(tokens, mintId, fail) {
     }
 
     // ── Bare PascalCase reference: `Counter` → `Counter()` ──
-    if (t.kind === 'IDENTIFIER' && isComponentName(t.value) &&
+    if (t.kind === 'IDENTIFIER' && isComponentName(t.value) && !inCode() &&
         (next?.kind === 'OUTDENT' || next?.kind === 'TERMINATOR')) {
       out.push(t);
       out.push(gen('CALL_START', '(', t));

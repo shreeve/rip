@@ -34,7 +34,7 @@ let Counter = class extends __Component {
     this._el2.className = 'badge';
     this._el0.appendChild(this._el2);
     this._el3 = document.createElement('button');
-    this._el3.addEventListener('click', (e) => __batch(() => (this.onClick)(e)));
+    this._el3.addEventListener('click', (e) => __batch(() => this.onClick(e)));
     this._t3 = document.createTextNode("Step");
     this._el3.appendChild(this._t3);
     this._el0.appendChild(this._el3);
@@ -109,7 +109,7 @@ let Badge = class extends __Component {
   _create() {
     this._frag0 = document.createDocumentFragment();
     this._el1 = document.createElement('button');
-    this._el1.addEventListener('click', (e) => __batch(() => (this.onClick)(e)));
+    this._el1.addEventListener('click', (e) => __batch(() => this.onClick(e)));
     this._t0 = document.createTextNode("go");
     this._el1.appendChild(this._t0);
     this._frag0.appendChild(this._el1);

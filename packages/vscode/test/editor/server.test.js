@@ -371,7 +371,7 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
         '    div.card',
         '      h1 "Counter"',
         '      = count',
-        '      button @click, disabled: count > 5',
+        '      button @click: onClick, disabled: count > 5',
         '        "Step"',
         'console.log Counter',
         '',
@@ -537,7 +537,7 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
         '    div.card',                     // 9
         '      = @title.toUpperCase()',     // 10
         '      = @size.toUpperCase()',      // 11 ← the planted TS2339 (number)
-        '      button @click',              // 12
+        '      button @click: onClick',     // 12
         'App = component',                  // 13
         '  name := "n"',                    // 14
         '  render',                         // 15
@@ -882,7 +882,7 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
     }
   });
 
-  test('the #124 handler story: explicit bindings navigate and rename; the bare directive declines definition and REFUSES rename', async () => {
+  test('the #124 handler story: explicit bindings navigate and rename; a bare directive is a diagnostic at its line', async () => {
     const published = [];
     const client = await startServer((p) => published.push(p));
     try {
@@ -916,32 +916,16 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       expect(edits).toHaveLength(2);
       expect(edits.some((e) => e.range.start.line === 6)).toBe(true);
 
-      // A BARE `@click` derives the handler name — nothing in source
-      // spells `onClick` at the directive, so a rename touching the
-      // minted reference REFUSES whole (the budget: never a silent broken
-      // rename; the compile rejection would name the missing method
-      // loudly if it could apply), and definition on the directive
-      // declines rather than landing on scaffolding.
+      // A bare `@click` names no handler: the compile rejects it at the
+      // `@`, and the editor publishes that rejection on the directive's
+      // line rather than navigating or renaming through a guess.
       wait = nextDiagnostics(published);
       client.notify('textDocument/didChange', {
         textDocument: { uri, version: 2 },
         contentChanges: [{ text: explicitOnly.replace('    div.card\n', '    div.card\n      button @click\n') }],
       });
-      await wait();
-      let refused = null;
-      try {
-        await client.request('textDocument/rename', {
-          textDocument: { uri }, position: { line: 2, character: 4 }, newName: 'onPress',
-        });
-      } catch (err) {
-        refused = err;
-      }
-      expect(refused).not.toBeNull();
-      expect(String(refused.message)).toContain('generated-only bytes');
-      const defAtDirective = await client.request('textDocument/definition', {
-        textDocument: { uri }, position: { line: 6, character: 15 },
-      });
-      expect(defAtDirective === null || (Array.isArray(defAtDirective) && defAtDirective.length === 0)).toBe(true);
+      const bare = (await wait()).diagnostics;
+      expect(bare.some((d) => d.range.start.line === 6 && d.message.includes('needs a handler'))).toBe(true);
     } finally {
       await client.stop();
     }

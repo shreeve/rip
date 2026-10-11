@@ -2852,6 +2852,29 @@ var CLOSERS = new Set([
 var GROUP_OPENER = { __proto__: null, ")": "(", CALL_END: "CALL_START", "]": "[", INDEX_END: "INDEX_START", "}": "{" };
 var COMPONENT_RE = /^[A-Z][A-Za-z0-9]*[a-z][A-Za-z0-9]*$/;
 var INLINE_CONTENT = new Set(["STRING", "STRING_START", "NUMBER", "BOOL", "IDENTIFIER", "PROPERTY", "@", "(", "[", "{"]);
+var VALUE_STARTS = new Set([
+  "IDENTIFIER",
+  "NUMBER",
+  "STRING",
+  "STRING_START",
+  "BOOL",
+  "NULL",
+  "UNDEFINED",
+  "REGEX",
+  "REGEX_START",
+  "@",
+  "THIS",
+  "[",
+  "{",
+  "(",
+  "PARAM_START",
+  "->",
+  "=>"
+]);
+var MODIFIERS = new Set(["prevent", "stop", "once", "self", "capture", "passive"]);
+var isHyphen = (t) => t?.kind === "-" || t?.kind === "MATH" && t.value === "-";
+var VALUE_CONTINUATIONS = new Set(["ELSE", "CATCH", "FINALLY"]);
+var BLOCK_VALUE_HEADS = new Set(["IF", "UNLESS", "TRY", "SWITCH"]);
 var LINE_BREAKS = new Set(["INDENT", "OUTDENT", "TERMINATOR"]);
 var REACTIVE_DECLS = new Set(["REACTIVE_ASSIGN", "COMPUTED_ASSIGN"]);
 var PLAIN_ASSIGN = new Set(["="]);
@@ -2909,6 +2932,7 @@ function rewriteRender(tokens, mintId, fail) {
     };
   };
   let inRender = false;
+  let inlineRender = false;
   let renderIndentLevel = 0;
   let currentIndent = 0;
   const pendingCallEnds = [];
@@ -2967,7 +2991,7 @@ function rewriteRender(tokens, mintId, fail) {
         j--;
         continue;
       }
-      if (pt === "TERMINATOR" || pt === "RENDER")
+      if (pt === "TERMINATOR" || pt === "RENDER" || pt === "THEN" || pt === "ELSE")
         break;
       if (pt === "OUTDENT") {
         j = skipBalancedPair(out, j - 2, "OUTDENT", "INDENT", current);
@@ -2996,7 +3020,7 @@ function rewriteRender(tokens, mintId, fail) {
       j--;
     }
     const head = tokAt(out, j, current);
-    return head?.kind === "IDENTIFIER" && (isTemplateTag(head.value) || (j === 0 || ["INDENT", "TERMINATOR", "RENDER"].includes(out[j - 1]?.kind)));
+    return head?.kind === "IDENTIFIER" && (isTemplateTag(head.value) || (j === 0 || ["INDENT", "TERMINATOR", "RENDER", "THEN", "ELSE"].includes(out[j - 1]?.kind)));
   };
   const explicitDepthAt = () => {
     let depth = 0;
@@ -3007,9 +3031,10 @@ function rewriteRender(tokens, mintId, fail) {
       if (CLOSERS.has(t))
         depth++;
       else if (OPENERS.has(t)) {
-        if (depth === 0)
+        if (depth === 0 && !(t === "CALL_START" && isHeadCall(k)))
           return 1;
-        depth--;
+        if (depth > 0)
+          depth--;
       } else if (t === "TERMINATOR" && out[k].value === ";") {
         if (depth === 0 && semicolonInArrowBody(k))
           return 1;
@@ -3020,14 +3045,170 @@ function rewriteRender(tokens, mintId, fail) {
     }
     return 0;
   };
+  const atTemplateLineStart = (j) => {
+    const p = out[j - 1];
+    if (!p || p.kind === "INDENT" || p.kind === "OUTDENT" || p.kind === "RENDER" || p.kind === "TERMINATOR")
+      return true;
+    if (p.kind !== "THEN" && p.kind !== "ELSE")
+      return false;
+    let k = j - 1;
+    while (k > 0 && !["INDENT", "OUTDENT", "RENDER", "TERMINATOR"].includes(out[k - 1].kind))
+      k--;
+    return ["IF", "UNLESS", "ELSE", "LEADING_WHEN"].includes(out[k].kind);
+  };
+  const isHeadCall = (k) => {
+    let j = k - 1;
+    while (j >= 2 && out[j]?.kind === "PROPERTY" && out[j - 1].kind === ".")
+      j -= 2;
+    const head = out[j];
+    return head?.kind === "IDENTIFIER" && !head.generated && isTemplateTag(head.value) && !readsAsValue(head.value) && atTemplateLineStart(j);
+  };
+  const inHeadCallBlock = () => {
+    let depth = 0;
+    for (let k = out.length - 1;k > 0; k--) {
+      if (counter.on)
+        counter.n++;
+      const kind = out[k].kind;
+      if (CLOSERS.has(kind) || kind === "OUTDENT")
+        depth++;
+      else if (OPENERS.has(kind) || kind === "INDENT") {
+        if (depth > 0) {
+          depth--;
+          continue;
+        }
+        return kind === "INDENT" && out[k - 1].kind === "CALL_START" && isHeadCall(k - 1);
+      } else if (kind === "RENDER")
+        return false;
+    }
+    return false;
+  };
+  const argumentStart = (j) => {
+    let depth = 0;
+    for (let k = j;k >= 0; k--) {
+      const kind = out[k].kind;
+      if (CLOSERS.has(kind))
+        depth++;
+      else if (OPENERS.has(kind)) {
+        if (depth === 0)
+          return -1;
+        depth--;
+      } else if (depth > 0)
+        continue;
+      else if (kind === "," || kind === ":" || kind === "=")
+        return k;
+      else if (["INDENT", "OUTDENT", "RENDER", "TERMINATOR"].includes(kind))
+        return -1;
+    }
+    return -1;
+  };
+  const hasJuxtaposedCall = (from, to) => {
+    for (let k = from;k < to; k++) {
+      const a = out[k];
+      const b = out[k + 1];
+      if ((a.kind === "IDENTIFIER" || a.kind === "PROPERTY") && a.spaced && VALUE_STARTS.has(b.kind))
+        return true;
+    }
+    return false;
+  };
+  const isCodeArrow = (k) => {
+    const a = out[k];
+    if (a.generated)
+      return false;
+    const prev = out[k - 1];
+    if (!prev || prev.generated)
+      return true;
+    if (prev.kind === "IDENTIFIER" || prev.kind === "PROPERTY") {
+      const s = argumentStart(k - 1);
+      return s >= 0 && out[s].kind !== ",";
+    }
+    if (prev.kind === ",") {
+      const s = argumentStart(k - 2);
+      return s >= 0 && out[s].kind !== "," && hasJuxtaposedCall(s + 1, k - 1);
+    }
+    return true;
+  };
+  const inArrowBodyOnLine = () => {
+    let depth = 0;
+    for (let k = out.length - 1;k >= 0; k--) {
+      if (counter.on)
+        counter.n++;
+      const t = out[k];
+      if (CLOSERS.has(t.kind))
+        depth++;
+      else if (OPENERS.has(t.kind)) {
+        if (depth === 0)
+          return false;
+        depth--;
+      } else if ((t.kind === "->" || t.kind === "=>") && depth === 0)
+        return isCodeArrow(k);
+      else if (t.kind === "INDENT" || t.kind === "OUTDENT" || t.kind === "RENDER" || t.kind === "TERMINATOR" && t.value !== ";")
+        return false;
+    }
+    return false;
+  };
+  const inCode = () => frames[frames.length - 1] === true || valueLine !== null || codeLevels.length > 0 || textFrames.length > 0 || explicitDepthAt() !== 0 || inArrowBodyOnLine();
+  const continuesValue = () => {
+    let k = out.length - 1;
+    if (out[k]?.kind !== "OUTDENT")
+      return false;
+    for (let depth = 0;k >= 0; k--) {
+      if (out[k].kind === "OUTDENT")
+        depth++;
+      else if (out[k].kind === "INDENT" && --depth === 0)
+        break;
+    }
+    let owner = -1;
+    for (let j = k - 1;j >= 0 && !["INDENT", "OUTDENT", "RENDER", "TERMINATOR"].includes(out[j].kind); j--) {
+      if (BLOCK_VALUE_HEADS.has(out[j].kind))
+        owner = j;
+    }
+    if (owner <= 0)
+      return false;
+    const before = out[owner - 1].kind;
+    return !["INDENT", "OUTDENT", "RENDER", "TERMINATOR", "ELSE"].includes(before);
+  };
+  const opensCode = (i, t) => {
+    if (frames[frames.length - 1] === true || valueLine !== null || textFrames.length > 0)
+      return true;
+    if (t.kind === "INDENT") {
+      const p = tokens[i - 1];
+      if (p && (p.kind === "->" || p.kind === "=>"))
+        return out[out.length - 1] === p && isCodeArrow(out.length - 1);
+      return p?.kind === ":" || p?.kind === "=" || p?.kind === "COMPOUND_ASSIGN";
+    }
+    return !(t.kind === "CALL_START" && isHeadCall(out.length));
+  };
+  const blockInCode = (t) => {
+    if (codeLevels.length > 0 || textFrames.length > 0)
+      return true;
+    let depth = CLOSERS.has(t.kind) ? 1 : OPENERS.has(t.kind) ? -1 : 0;
+    for (let k = out.length - 1;k >= 0; k--) {
+      if (counter.on)
+        counter.n++;
+      const kind = out[k].kind;
+      if (CLOSERS.has(kind))
+        depth++;
+      else if (OPENERS.has(kind)) {
+        if (depth === 0)
+          return true;
+        depth--;
+      } else if (kind === "INDENT" || kind === "OUTDENT" || kind === "RENDER" || kind === "TERMINATOR" && out[k].value !== ";")
+        break;
+    }
+    return depth < 0;
+  };
   const isBareEventAttr = (current) => {
     const prev = out[out.length - 1];
     if (!prev)
       return false;
-    if (explicitDepthAt() !== 0)
+    if (inCode())
       return false;
     const pt = prev.kind;
     if ((pt === "," || pt === "IDENTIFIER" || pt === "PROPERTY") && startsWithTag(current))
+      return true;
+    if (pt === "CALL_START" && isHeadCall(out.length - 1))
+      return true;
+    if ((pt === "INDENT" || pt === "TERMINATOR") && inHeadCallBlock())
       return true;
     if ((pt === "INDENT" || pt === "TERMINATOR") && elementBodyLevels.includes(currentIndent))
       return true;
@@ -3136,23 +3317,45 @@ function rewriteRender(tokens, mintId, fail) {
   };
   const memberFrames = [];
   const renderScopes = [];
-  const functionLevels = [];
+  const codeLevels = [];
+  const frames = [];
+  let pendingFrame;
   let lineHead = null;
+  let valueLine = null;
   let loopVars = null;
   const readsAsValue = (name) => renderScopes.some((s) => s.names.has(name)) || memberFrames.length > 0 && memberFrames[memberFrames.length - 1].names.has(name) || moduleValues.has(name);
   for (let i = 0;i < tokens.length; i++) {
     if (counter.on)
       counter.n++;
     let t = tokens[i];
-    const next = tokens[i + 1] ?? null;
+    let next = tokens[i + 1] ?? null;
+    if (pendingFrame === null)
+      frames.pop();
+    else if (pendingFrame !== undefined)
+      frames.push(pendingFrame);
+    pendingFrame = undefined;
+    if (inRender) {
+      if (OPENERS.has(t.kind) || t.kind === "INDENT")
+        pendingFrame = opensCode(i, t);
+      else if ((CLOSERS.has(t.kind) || t.kind === "OUTDENT") && frames.length > 0)
+        pendingFrame = null;
+    }
     if (textFrames.length > 0)
       closeTextFrames(t);
-    if (!LINE_BREAKS.has(t.kind) && startsLine(i))
+    if (!LINE_BREAKS.has(t.kind) && startsLine(i)) {
       lineHead = t.kind;
+      if (valueLine !== null && (currentIndent < valueLine || currentIndent === valueLine && !VALUE_CONTINUATIONS.has(t.kind)))
+        valueLine = null;
+      if (inRender && valueLine === null && !inCode() && (t.kind === "IDENTIFIER" && next?.kind === "=" || VALUE_CONTINUATIONS.has(t.kind) && continuesValue())) {
+        valueLine = currentIndent;
+      }
+    }
     if (t.kind === "COMPONENT")
       memberFrames.push({ level: currentIndent + 1, names: memberNames(i) });
     if (t.kind === "RENDER") {
       inRender = true;
+      frames.length = 0;
+      inlineRender = next !== null && next.kind !== "INDENT";
       renderIndentLevel = currentIndent + 1;
       renderScopes.push({ level: renderIndentLevel, names: new Set });
       out.push(t);
@@ -3162,9 +3365,14 @@ function rewriteRender(tokens, mintId, fail) {
       currentIndent++;
       if (inRender) {
         const opener = tokens[i - 1]?.kind;
-        if (opener === "->" || opener === "=>") {
-          functionLevels.push(currentIndent);
-        } else if (functionLevels.length === 0 && CONTROL_HEADS.has(lineHead)) {
+        if (valueLine !== null) {
+          codeLevels.push(currentIndent);
+        } else if ((opener === "->" || opener === "=>") && out[out.length - 1] === tokens[i - 1]) {
+          if (isCodeArrow(out.length - 1))
+            codeLevels.push(currentIndent);
+          else
+            elementBodyLevels.push(currentIndent);
+        } else if (codeLevels.length === 0 && CONTROL_HEADS.has(lineHead)) {
           renderScopes.push({ level: currentIndent, names: new Set(lineHead === "FOR" ? loopVars ?? [] : []) });
         }
       }
@@ -3178,8 +3386,8 @@ function rewriteRender(tokens, mintId, fail) {
         while (frames.length > 0 && frames[frames.length - 1].level > currentIndent)
           frames.pop();
       }
-      while (functionLevels.length > 0 && functionLevels[functionLevels.length - 1] > currentIndent)
-        functionLevels.pop();
+      while (codeLevels.length > 0 && codeLevels[codeLevels.length - 1] > currentIndent)
+        codeLevels.pop();
       while (elementBodyLevels.length > 0 && elementBodyLevels[elementBodyLevels.length - 1] > currentIndent) {
         elementBodyLevels.pop();
       }
@@ -3188,15 +3396,38 @@ function rewriteRender(tokens, mintId, fail) {
         out.push(gen("CALL_END", ")", t));
         pendingCallEnds.pop();
       }
-      if (inRender && currentIndent < renderIndentLevel)
+      if (inRender && currentIndent < renderIndentLevel) {
         inRender = false;
+        valueLine = null;
+      }
       continue;
+    }
+    if (inRender && inlineRender && (t.kind === "TERMINATOR" && t.value !== ";") && currentIndent < renderIndentLevel && explicitDepthAt() === 0) {
+      inRender = false;
+      inlineRender = false;
+      valueLine = null;
     }
     if (!inRender) {
       out.push(t);
       continue;
     }
-    if (functionLevels.length === 0 && startsLine(i)) {
+    if (t.kind === "IDENTIFIER" && !t.generated && String(t.value).includes("-") && inCode()) {
+      fail(`\`${String(t.value).split("#")[0]}\` here is a value, not an element — write it with spaces (\`${String(t.value).split("#")[0].split("-").join(" - ")}\`) for subtraction`, t.start);
+    }
+    if (t.kind === "IDENTIFIER" && (out[out.length - 1]?.kind === "THEN" || out[out.length - 1]?.kind === "ELSE") && isHyphen(tokens[i + 1]) && !tokens[i + 1].spaced && tokens[i + 2]?.kind === "IDENTIFIER" && !tokens[i + 2].spaced && atTemplateLineStart(out.length) && !inCode()) {
+      let j = i + 1;
+      let name = String(t.value);
+      while (isHyphen(tokens[j]) && !tokens[j].spaced && (tokens[j + 1]?.kind === "IDENTIFIER" || tokens[j + 1]?.kind === "PROPERTY") && !tokens[j + 1].spaced) {
+        name += "-" + String(tokens[j + 1].value);
+        j += 2;
+      }
+      if (tokens[j]?.kind !== ":") {
+        tokens.splice(i, j - i, { ...t, value: name, end: tokens[j - 1].end });
+        t = tokens[i];
+        next = tokens[i + 1] ?? null;
+      }
+    }
+    if (codeLevels.length === 0 && startsLine(i)) {
       if (t.kind === "FOR") {
         loopVars = [];
         for (let j = i + 1;j < tokens.length && !FOR_SOURCES.has(tokens[j].kind) && !LINE_BREAKS.has(tokens[j].kind); j++) {
@@ -3207,7 +3438,7 @@ function rewriteRender(tokens, mintId, fail) {
         renderScopes[renderScopes.length - 1]?.names.add(t.value);
       }
     }
-    if (t.kind === "=" && out.length > 0) {
+    if (t.kind === "=" && out.length > 0 && !inCode()) {
       const pt = out[out.length - 1].kind;
       if (pt === "TERMINATOR" || pt === "INDENT" || pt === "RENDER") {
         out.push(gen("IDENTIFIER", "__text__", t, { at: t.start, spaced: t.spaced, newLine: t.newLine }));
@@ -3216,7 +3447,7 @@ function rewriteRender(tokens, mintId, fail) {
         continue;
       }
     }
-    if (t.kind === "UNARY_MATH" && t.value === "~" && next?.kind === "IDENTIFIER") {
+    if (t.kind === "UNARY_MATH" && t.value === "~" && next?.kind === "IDENTIFIER" && isBareEventAttr(t)) {
       out.push(gen("PROPERTY", "__transition__", t, { spaced: t.spaced, newLine: t.newLine }));
       out.push(gen(":", ":", t));
       next.kind = "STRING";
@@ -3229,7 +3460,7 @@ function rewriteRender(tokens, mintId, fail) {
       out.push(gen(",", ",", t, { at: next.start }));
       continue;
     }
-    if (t.kind === "BIND") {
+    if (t.kind === "BIND" && !inCode()) {
       const prev = out[out.length - 1];
       if (prev !== undefined && (prev.kind === "IDENTIFIER" || prev.kind === "PROPERTY") && next !== null && (next.kind === "IDENTIFIER" || next.kind === "@")) {
         prev.value = `__bind_${prev.value}__`;
@@ -3237,7 +3468,7 @@ function rewriteRender(tokens, mintId, fail) {
         continue;
       }
     }
-    if (t.kind === "IDENTIFIER" && next?.kind === "-" && !next.spaced) {
+    if (t.kind === "IDENTIFIER" && next?.kind === "-" && !next.spaced && !inCode()) {
       const parts = [t.value];
       let j = i + 1;
       let end = t.end;
@@ -3256,7 +3487,10 @@ function rewriteRender(tokens, mintId, fail) {
         continue;
       }
     }
-    if (t.kind === ".") {
+    if (t.kind === "." && textFrames.length > 0 && (out[out.length - 1]?.kind === "INDENT" || out[out.length - 1]?.kind === "TERMINATOR")) {
+      fail("the `= expr` text form takes ONE expression — an indented continuation under the `=` line has no " + "render reading (inside render a leading `.` starts a NEW element, so the continuation cannot be a method " + "chain; put the whole expression on the `=` line, or bind it in a method)", t.start);
+    }
+    if (t.kind === "." && !inCode()) {
       const pt = out[out.length - 1]?.kind;
       if (pt === "INDENT" || pt === "TERMINATOR" || pt === "RENDER") {
         if (next?.kind === "PROPERTY") {
@@ -3272,7 +3506,7 @@ function rewriteRender(tokens, mintId, fail) {
         }
       }
     }
-    if (t.kind === "." && next?.kind === "(") {
+    if (t.kind === "." && next?.kind === "(" && !inCode()) {
       const pt = out[out.length - 1]?.kind;
       const atLineStart = pt === "INDENT" || pt === "TERMINATOR" || pt === "RENDER";
       next.kind = "CALL_START";
@@ -3289,33 +3523,42 @@ function rewriteRender(tokens, mintId, fail) {
       }
       continue;
     }
+    if (t.kind === "@" && next?.kind === "STRING" && !next.spaced && tokens[i + 2]?.kind === ":" && isBareEventAttr(t)) {
+      const ev = String(next.value).slice(1, -1);
+      fail(`an event name is written unquoted — \`@${ev}: handler\``, next.start);
+    }
     if (t.kind === "@" && next?.kind === "PROPERTY" && !next.spaced) {
+      let j = i + 2;
+      let name = String(next.value);
+      while (isHyphen(tokens[j]) && !tokens[j].spaced && (tokens[j + 1]?.kind === "IDENTIFIER" || tokens[j + 1]?.kind === "PROPERTY") && !tokens[j + 1].spaced) {
+        name += "-" + String(tokens[j + 1].value);
+        j += 2;
+      }
+      if (j > i + 2 && tokens[j]?.kind === ":" && isBareEventAttr(t)) {
+        tokens.splice(i + 1, j - (i + 1), { ...next, value: name, end: tokens[j - 1].end });
+        next = tokens[i + 1];
+      }
       const after = tokens[i + 2];
-      const isChain = after?.kind === ".";
-      const isPair = after?.kind === ":";
-      if (!isChain && !isPair && isBareEventAttr(t)) {
+      if (after?.kind !== ":" && isBareEventAttr(t)) {
         const ev = String(next.value);
-        const handler = `on${ev[0].toUpperCase()}${ev.slice(1)}`;
-        if (after?.kind === "=") {
-          fail(`a \`=\` cannot follow a bare event directive on one line — \`@${ev} = expr\` would assign to the ` + `minted handler and invoke the assignment as the listener; bind explicitly (\`@${ev}: handler\`), ` + `or keep the bare \`@${ev}\` and put the ` + "text on its own `= expr` line", after.start);
+        if (after?.kind === "." && tokens[i + 3]?.kind === "PROPERTY" && tokens[i + 4]?.kind === ":") {
+          const call = { prevent: "e.preventDefault(); ", stop: "e.stopPropagation(); " }[tokens[i + 3].value] ?? "";
+          fail(`event modifiers are not supported — handle it in the listener: \`@${ev}: (e) -> ${call}…\``, after.start);
         }
-        out.push(t);
-        out.push(next);
-        out.push(gen(":", ":", next));
-        out.push(gen("@", "@", next));
-        out.push(gen("PROPERTY", handler, next));
-        i++;
-        if (tokens[i + 1]?.kind === "INDENT") {
-          out.push(gen(",", ",", next, { at: tokens[i + 1].start }));
-          out.push(gen("->", "->", next, { at: tokens[i + 1].start, newLine: true }));
-          elementBodyLevels.push(currentIndent + 1);
-        } else if (tokens[i + 1] !== undefined && INLINE_CONTENT.has(tokens[i + 1].kind)) {
-          out.push(gen(",", ",", next, { at: tokens[i + 1].start }));
+        if (after?.kind === "." && MODIFIERS.has(tokens[i + 3]?.value) && !readsAsValue(ev)) {
+          const call = { prevent: "e.preventDefault(); ", stop: "e.stopPropagation(); " }[tokens[i + 3].value] ?? "";
+          fail(`\`@${ev}.${tokens[i + 3].value}\` reads \`${ev}\`, which is no member here; event modifiers are not supported — handle it in the listener: \`@${ev}: (e) -> ${call}…\``, after.start);
         }
-        continue;
+        if (j === i + 2 && isHyphen(after)) {
+          fail("an event name after `@` is words joined by tight hyphens, like `@sl-change: handler`", t.start);
+        }
+        if (after?.kind !== ".") {
+          const text = j > i + 2 ? "" : `, or \`= @${ev}\` on its own line to show the member as text`;
+          fail(`\`@${j > i + 2 ? name : ev}\` needs a handler — write \`@${j > i + 2 ? name : ev}: handler\` for a listener${text}`, t.start);
+        }
       }
     }
-    if (next?.kind === "INDENT" && t.kind !== "->" && t.kind !== "=>" && t.kind !== "CALL_START" && t.kind !== "(") {
+    if (next?.kind === "INDENT" && !blockInCode(t) && t.kind !== "->" && t.kind !== "=>" && t.kind !== "CALL_START" && t.kind !== "(") {
       const pt = out[out.length - 1]?.kind;
       const isAfterControlFlow = ["IF", "UNLESS", "WHILE", "UNTIL", "WHEN", "FORIN", "FOROF", "FORAS", "FORASAWAIT", "BY"].includes(pt);
       const atLineStart = t.kind === "IDENTIFIER" && (pt === "INDENT" || pt === "TERMINATOR" || pt === "RENDER");
@@ -3360,7 +3603,7 @@ function rewriteRender(tokens, mintId, fail) {
         continue;
       }
     }
-    if (t.kind === "IDENTIFIER" && isComponentName(t.value) && (next?.kind === "OUTDENT" || next?.kind === "TERMINATOR")) {
+    if (t.kind === "IDENTIFIER" && isComponentName(t.value) && !inCode() && (next?.kind === "OUTDENT" || next?.kind === "TERMINATOR")) {
       out.push(t);
       out.push(gen("CALL_START", "(", t));
       out.push(gen("CALL_END", ")", t));
@@ -6085,7 +6328,12 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
     }
     if (prev?.kind === "INDENT") {
       const before = tokens[tokens.length - 2]?.kind;
-      return !(before === ":" || before === "=" || before === "COMPOUND_ASSIGN" || before === ",");
+      if (before === ":" || before === "=" || before === "COMPOUND_ASSIGN" || before === ",")
+        return false;
+      let k = tokens.length - 2;
+      while (k > 0 && !["TERMINATOR", "INDENT", "OUTDENT", "RENDER"].includes(tokens[k - 1].kind))
+        k--;
+      return !(tokens[k]?.kind === "IDENTIFIER" && tokens[k + 1]?.kind === "=");
     }
     if (!prev || prev.kind === "TERMINATOR" || prev.kind === "OUTDENT" || prev.kind === "RENDER")
       return true;
@@ -6544,8 +6792,10 @@ ${baseline}`).join(`
           return false;
         if (parens.length > 0)
           return false;
-        if (inRender)
-          return false;
+        if (inRender) {
+          const before = tokens[tokens.length - 2];
+          return !before || before.kind === "INDENT" || before.kind === "OUTDENT" || before.kind === "TERMINATOR" || before.kind === "RENDER";
+        }
         if (prefix.length > current.length)
           return false;
         if (!IDENT_START.test(text[pos] ?? ""))
@@ -18030,7 +18280,6 @@ ${pad ?? ""}`);
         return;
       let [, key, value] = pair;
       if (isNode(key) && key[0] === "." && key[1] === "this" && typeof key[2] === "string") {
-        this.checkBareEventHandler(pair, value);
         this.checkCrossScopeLocals(value, pair);
         eventBindings.push({ pair, event: key[2], value });
         return;
@@ -18706,7 +18955,6 @@ ${this.replayPad}}` : " }");
       };
       if (isNode(key) && key[0] === "." && key[1] === "this" && typeof key[2] === "string") {
         const eventName = key[2];
-        this.checkBareEventHandler(pair, value);
         if (this.rstate.sink.kind === "loop" && this.loopVarNames().size > 0 && referencesNames(value, this.loopVarNames())) {
           this.rstate.sink.forceNonStatic = true;
         }
@@ -20304,26 +20552,6 @@ ${this.replayPad}}` : " }");
       return;
     if (this.b.source.slice(row.sourceStart, row.sourceEnd).startsWith("__bind_")) {
       throw this.positionedError(pair, "emitter: '__bind_…__:' is the compiler's two-way-binding channel — spell the binding `name <=> container` " + "(`__`-prefixed names are the compiler/runtime namespace)", this.rstate.node);
-    }
-  }
-  checkBareEventHandler(pair, value) {
-    if (!isNode(value) || value[0] !== "." || value[1] !== "this" || typeof value[2] !== "string")
-      return;
-    const id = this.stores.idOf(value);
-    const span = id !== null ? this.stores.selfSpan(id) : null;
-    if (span === null || span[0] !== span[1])
-      return;
-    const key = pair[1];
-    const ev = typeof key[2] === "string" ? key[2] : String(key[2]);
-    if (!DOM_EVENTS.has(ev)) {
-      throw this.positionedError(pair, `emitter: \`@${ev}\` is not a DOM event — use \`= @${ev}\` to render text, or \`@${ev}: handler\` for an explicit handler`);
-    }
-    if (ev === "error") {
-      throw this.positionedError(pair, "emitter: bare `@error` would bind `onError`, which is the error-boundary hook, not a handler — write `@error: handler` to bind a DOM error listener explicitly");
-    }
-    const method = value[2];
-    if (!this.cframes[this.cframes.length - 1].members.has(method)) {
-      throw this.positionedError(pair, `emitter: bare \`@${ev}\` requires a component method \`${method}\` — define \`${method}\`, or use \`@${ev}: handler\` for an explicit handler`);
     }
   }
   static collectTemplateClasses(sexpr) {
@@ -32675,7 +32903,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "72dfe35299bb29d5";
+var compilerBuild = () => "84d0b7d89514f504";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
