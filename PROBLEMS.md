@@ -155,6 +155,11 @@ first `else` operand.
 `{a: 1, a: 2}` is `{a: 2}` and the last duplicate method wins, while a
 duplicate name in one pattern rejects.
 
+**C39 M — A ternary whose middle operand ends in a binary operation rejects.**
+`x = ok ? a - b : a` fails "Unexpected 'b'": the lexer reads `b :` as an
+object key. `ok ? b : a` and `ok ? (a - b) : a` compile. A template
+`= ok ? a-b : a` rejects the same way.
+
 ### Error messages
 
 **C29 L — The unexpected token appears in its own "expected" list.**
@@ -168,13 +173,6 @@ duplicate name in one pattern rejects.
 ---
 
 ## Templates, components, reactivity
-
-**T20 M — A hyphenated bare event shorthand compiles to subtraction.**
-`p @x-y` in a render block emits
-`addEventListener('x', (e) => (this.onX - y)(e))`: the shorthand takes
-`x` as the event and subtracts `y` from the handler. Custom event names
-are commonly hyphenated (`@sl-change`); reject the form or read the
-whole run as the event name.
 
 **T4 H — Component methods are never bound, including `=>` members.**
 `format = (n) => "#{prefix}#{n}"` then `names.map(format)` emits an
@@ -190,15 +188,6 @@ says a bind into a chain calls it). Cause: `bindRootTouch`
 (src/emitter.js ~14981) returns null for loop variables. The rejection
 for `input value <=> s` (a bare loop variable) recommends binding "a
 chain into row data" — this broken path.
-
-**T6 M — Hyphenated or quoted event names miscompile.**
-`div @value-changed: go` listens for `value` and calls
-`(this.onValue - {changed: this.go})`; `@'value-changed': go` listens for
-an event literally named `"value-changed"` (quotes included). No spelling
-listens for `value-changed`. **Regressed 2026-10-10:** `sl-input
-@sl-change: go` used to reject (with an unrelated message); since custom
-elements lex as tags (`21ad33e7`) it compiles silently to a listener for
-`sl` calling `this.onSl - {change: this.go}`. Same root as T20.
 
 **T7 H — An effect's last expression is silently registered as its cleanup.**
 ```coffee
@@ -233,12 +222,7 @@ dropped silently. There is no public batch API (packages use `__batch`).
 
 **T15 L — `ref: @el` rejects with a wrong hint** ("declare `el := null`" when it is declared); `<=>` accepts `@x`.
 
-**T16 ✔ L — The `h1 @heading` hint is misleading.** "`@heading` is not a
-DOM event — use `= @heading` to render text…"; written literally as
-`h1 = @heading` it now says "spell it `h1` + indented `= expr`" (partly
-fixed), but the first hint still leads there instead of naming a working
-form. `h1 (@heading)` and `h1 this.heading` get "bare"
-errors for spellings the user did not write.
+**T16 ✔ L — `h1 (@heading)` and `h1 this.heading` get a "bare" error for spellings the user did not write.** Both say "bare `@heading` is not rendered as text — use `= @heading`"; neither is bare, and `= @heading` is the only working form.
 
 **T17 L — Destructuring writes bypass the "silently freezes the render" guard.** `[count] = [5]`, `{count} = {count: 5}`, `Object.assign this, count: 3` compile; `count++` and `this.count = 5` reject.
 
@@ -255,17 +239,13 @@ level `c = 5` rejects with "cannot assign to computed 'c'".
 With `count := 3`, render `count = count + 1` then `p count` emits
 `let count; count = count + 1;` and shows `NaN`.
 
-**T23 M — A bare `count++` in render writes state inside a render effect; `@count++` becomes an event listener.**
+**T23 M — A bare `count++` in render writes state inside a render effect.**
 `p` + indented `count++` emits `this._t0.data = this.count.value++` (runs
-on every render); `@count++` emits `addEventListener('count', …
-this.onCount++ …)`. `count += 1` in the same place rejects.
+on every render). `count += 1` in the same place rejects.
 
 **T24 M — A call or a string as a handler runs at the wrong time or never.**
 `@click: go()` emits `(this.go())(e)` — `go` runs on every click and the
 result is called; `@click: "go()"` emits `("go()")(e)`.
-
-**T25 M — A bare `@click` resolved to an unset callback prop throws on click.**
-With `@onClick := null`, `button @click` emits `(this.onClick.value)(e)`.
 
 ---
 
@@ -463,7 +443,7 @@ operators, not spellings.
 ## Unconfirmed and design questions
 
 Re-checked 2026-10-10; confirmed defects were promoted to numbered
-entries above (C34–C36, C38, T24, T25, S11, S12, W14, P24–P26, X4, D8).
+entries above (C34–C36, C38, T24, S11, S12, W14, P24–P26, X4, D8).
 What remains is design, to document or decide:
 
 - At statement level `f a if b else c` is the Python ternary `b ? f(a) :

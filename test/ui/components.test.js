@@ -956,7 +956,7 @@ describe('the static render DSL: emission pins', () => {
 
   test('`= expr` with an indented continuation rejects — never a silent discard', () => {
     const src = 'T = component\n  items := [1, 2]\n  render\n    div\n      = @items\n        .map (v) -> v * 2\n';
-    emitFails(src, /the `= expr` text form takes ONE expression/s);
+    lexFails(src, /the `= expr` text form takes ONE expression/s);
   });
 
   test('a member chain in an attribute value keeps the subtraction reading — never a rewritten property name', () => {
@@ -2713,5 +2713,88 @@ describe('component tags through a member path', () => {
     emitFails('Wrap = component extends Nope.Item\n  render\n    div\n', /'Nope\.Item' is neither/);
     emitFails('Part = component\n  accept open from Nope.Root\n  render\n    span\n', /'Nope\.Root' is not one/);
     emitFails(`${LIB}Part = component\n  accept open from Lib.helper\n  render\n    span\n`, /'Lib\.helper' is not one/);
+  });
+});
+
+// The template gate (docs/TEMPLATES-PLAN.md phase 3): a template
+// rewrite applies only in a template position. A handler body (an
+// arrow after `@ev:`, `(e)` or `=`), the rest of a line after such an
+// arrow, an `= expr` text body and a bracket group are code; an arrow
+// right after an element (`div ->`, `div title: 't', ->`) opens its
+// children, which are template. An inline `render div "x"` ends with
+// its line.
+describe('the template gate', () => {
+  const js = (src) => fullCompile(src, { runtimeDelivery: 'none' }).code;
+
+  test('a hyphen inside `= expr` text reads as it does in code, never as a joined key', () => {
+    // The same line outside a template rejects at parse (the lexer reads
+    // `b :` as a key; recorded in PROBLEMS.md): the template agrees, and
+    // never emits the string "a-b".
+    expect(() => js('Foo = component\n  a := 1\n  b := 2\n  ok := true\n  render\n    div\n      = ok ? a-b : a\n')).toThrow(/Unexpected 'b'/);
+    const code = js('Foo = component\n  a := 1\n  b := 2\n  ok := true\n  render\n    div\n      = ok ? (a-b) : a\n');
+    expect(code).toContain('this.a.value - this.b.value');
+    expect(code).not.toContain('"a-b"');
+  });
+
+  test('an inline render ends with its line: a later method reads `@click` as a member', () => {
+    const code = js('Foo = component\n  render div "x"\n  onClick: -> 1\n  helper: ->\n    d = 3\n    p @click\n');
+    expect(code).toContain('p(this.click)');
+  });
+
+  test('a handler body is code: `log @click` is a call, `~mask` is bitwise not', () => {
+    const one = js('Foo = component\n  onClick: -> 1\n  render\n    button @click: ->\n      log @click\n      x = 1\n    span "y"\n');
+    expect(one).toContain('log(this.click)');
+    const two = js('Foo = component\n  mask := 3\n  render\n    button @click: ->\n      y = ~mask\n      console.log y\n    span "t"\n');
+    expect(two).toContain('y = ~this.mask.value');
+    expect(two).not.toContain('__transition__');
+    const oneLine = js('Foo = component\n  mask := 3\n  render\n    button @click: (-> y = ~mask), "t"\n');
+    expect(oneLine).toContain('~this.mask.value');
+    expect(oneLine).not.toContain('__transition__');
+  });
+
+  test('a pair value is code: `title: ~mask` is bitwise not; an element argument `~fade` is a transition', () => {
+    const code = js('Foo = component\n  mask := 3\n  shown := true\n  render\n    div\n      span title: ~mask, "t"\n      if shown\n        p ~fade, "x"\n');
+    expect(code).toContain('~this.mask.value');
+    expect(code).toContain('__transition');
+  });
+
+  test('`div ->` children are template: text, transitions and listeners keep their meaning there', () => {
+    const block = js('Foo = component\n  go: -> 1\n  n := 1\n  shown := true\n  render\n    div ->\n      = n\n      button @click: go, "b"\n      if shown\n        p ~fade, "x"\n');
+    expect(block).toContain('String(this.n.value)');
+    expect(block).toContain("addEventListener('click'");
+    expect(block).toContain('__transition');
+    lexFails('Foo = component\n  onClick: -> 1\n  render\n    div ->\n      button @click\n', /`@click` needs a handler/);
+    const attrs = js('Foo = component\n  render\n    div title: "t", ->\n      span "after attrs"\n');
+    expect(attrs).toContain("setAttribute('title', \"t\")");
+    expect(attrs).toContain('createTextNode("after attrs")');
+    const oneLine = js('Foo = component\n  render\n    div -> span "one"\n');
+    expect(oneLine).toContain("createElement('span')");
+  });
+
+  test('an element after `then`/`else` on an inline branch is in template position', () => {
+    const head = 'A = component\n  @x: boolean = true\n  go: -> 1\n  render\n    div\n      ';
+    expect(js(head + 'if @x then button @a-b: go\n')).toContain("addEventListener('a-b'");
+    const custom = js(head + 'if @x then sl-input @sl-change: go\n');
+    expect(custom).toContain("createElement('sl-input')");
+    expect(custom).toContain("addEventListener('sl-change'");
+    expect(js(head + 'if @x then span "a" else button @c-d: go\n')).toContain("addEventListener('c-d'");
+    lexFails(head + 'if @x then button @x-y\n', /`@x-y` needs a handler/);
+    lexFails(head + "if @x then button @'a-b': go\n", /written unquoted/);
+  });
+
+  test('event-name and modifier rejections name what was written', () => {
+    const at = (line) => 'A = component\n  go: -> 1\n  render\n    ' + line + '\n';
+    lexFails(at('button @click.once: go'), /event modifiers are not supported — handle it in the listener: `@click: \(e\) -> …`/);
+    lexFails(at('button @click.stop: go'), /e\.stopPropagation\(\)/);
+    lexFails(at('button @a-1: go'), /words joined by tight hyphens/);
+    lexFails(at('button @x - y: go'), /words joined by tight hyphens/);
+    const bare = lexFails(at('button @x-y'), /`@x-y` needs a handler — write `@x-y: handler` for a listener$/m);
+    expect(bare.message).not.toContain('= @x');
+  });
+
+  test('a lone `.` line with children is an implicit div', () => {
+    const code = js('Foo = component\n  render\n    div\n      .\n        span "inside"\n');
+    expect(code).toContain("createElement('span')");
+    expect(code.match(/createElement\('div'\)/g).length).toBe(2);
   });
 });

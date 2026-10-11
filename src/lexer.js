@@ -755,7 +755,9 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       const before = tokens[tokens.length - 2]?.kind;
       return !(before === ':' || before === '=' || before === 'COMPOUND_ASSIGN' || before === ',');
     }
-    if (!prev || prev.kind === 'TERMINATOR' || prev.kind === 'OUTDENT' || prev.kind === 'RENDER') return true;
+    // A line start, or an inline branch's element (`if x then x-icon`).
+    if (!prev || prev.kind === 'TERMINATOR' || prev.kind === 'OUTDENT' || prev.kind === 'RENDER' ||
+        prev.kind === 'THEN' || prev.kind === 'ELSE') return true;
     if (!pendingSpaced || prev.generated) return false;
     let j = tokens.length - 1;
     while (j >= 1 && tokens[j].kind === 'PROPERTY' && tokens[j - 1].kind === '.') j -= 2;
@@ -1329,8 +1331,14 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         // two words at the same indent are a sibling element and its
         // argument, not a new construct — the same reason the leading-dot
         // rule below excludes them. What a trailing dot means there is
-        // the render grammar's to say, and it is not saying it here.
-        if (inRender) return false;
+        // the render grammar's to say, and it is not saying it here —
+        // except a `.` alone on its line, which is an element (an implicit
+        // `div`), so its line ends there.
+        if (inRender) {
+          const before = tokens[tokens.length - 2];
+          return !before || before.kind === 'INDENT' || before.kind === 'OUTDENT' ||
+            before.kind === 'TERMINATOR' || before.kind === 'RENDER';
+        }
         if (prefix.length > current.length) return false;
         if (!IDENT_START.test(text[pos] ?? '')) return false;
         let at = pos;

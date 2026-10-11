@@ -3,8 +3,9 @@
 This document plans the cleanup of Rip's template language (the `render`
 block of a component): what it means after the cleanup, which layer owns
 each decision, and the phases that get there. It is a plan, not a
-contract; nothing here is implemented. Status: **in progress** — owner decisions are recorded in
-[Owner decisions](#owner-decisions); phase 0 under way.
+contract. Status: **in progress** — owner decisions are recorded in
+[Owner decisions](#owner-decisions); P0, P1 and P3 are done, and P2 is
+next.
 
 The evidence comes from a review of `main` (2026-10-10, after `d00d26b5`):
 an implementation map of every place that decides what a template token
