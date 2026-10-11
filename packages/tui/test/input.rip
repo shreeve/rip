@@ -792,18 +792,22 @@ console.log "\nCost"
 test "hostile input is read once: eight times the input costs about eight times as long", ->
   # A parser that scans what it holds again on every read takes 64 times
   # as long for 8 times the reads; a linear one about 8. The bound sits
-  # between, and each size takes its best of five, so a busy machine
-  # moves both numbers and not the ratio. A machine busy enough to stall
-  # one size alone gets two more tries: a quadratic reader is over the
-  # bound every time.
+  # between. Time is this thread's CPU time, not the wall's: on a busy
+  # machine a longer run waits for a core more often, which would move
+  # the larger number alone. Each size takes its best of five, and gets
+  # two more tries if a collection lands in every round of one size: a
+  # quadratic reader is over the bound every time.
+  spent = ->
+    { user, system } = process.threadCpuUsage()
+    (user + system) / 1000
   best = (first, chunk, count) ->
     least = Infinity
     for round in [0...5]
       { parser } = open()
-      began = performance.now()
+      began = spent()
       parser.feed first
       parser.feed chunk for n in [0...count]
-      least = Math.min least, performance.now() - began
+      least = Math.min least, spent() - began
     least
   cases = [
     ['an unterminated CSI', CSI, '1;']
