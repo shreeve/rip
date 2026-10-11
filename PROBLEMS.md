@@ -353,12 +353,6 @@ flip side of A5).
 
 ## Standard packages
 
-**P5 H — rsx parses truncated or ill-formed XML without error.**
-`parse '<a><b>text'` → `{"a":{"b":{}}}`; `'<a>1 < 2</a>'` makes an
-element named `"2<"`; two roots, trailing junk, `'hello'` and `''` are
-accepted; duplicate attributes keep the last. A cut-off SOAP or EDI
-response parses "successfully".
-
 **P9 M — swarm's `-q` summary hides failures, and the exit code is 0 when tasks died.** The README Quick Start with `-w 4 -q` reports success while tasks sit in `.swarm/died/`.
 
 **P10 M — fake `unique` dedupes by closure identity.** The README's inline `fake.unique -> fake.email()` creates a new closure per call, so it never dedupes, and its strong `Map` leaks one entry per call (packages/fake/fake.rip ~240).

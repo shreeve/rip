@@ -4,7 +4,7 @@
 
 > **Rip Style XML — XML ⇄ Rip object, with security defaults that match what you want for SOAP and EDI envelopes.**
 
-RSX is a small, forgiving XML parser and serializer for the cases where
+RSX is a small, strict XML parser and serializer for the cases where
 you want a Rip object, not a DOM. It is built around a real
 scanner/tokenizer instead of nested regular expressions, with security
 defaults appropriate for talking to outside systems.

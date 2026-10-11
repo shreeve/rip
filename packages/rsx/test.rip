@@ -58,19 +58,24 @@ test "empty element collapses to empty string", ->
   eq parse('<a></a>'), { a: '' }
   eq parse('<a>   </a>'), { a: '' }
 
-test "multiple root elements all land on the result object", ->
-  eq parse('<a>1</a><b>2</b>'), { a: '1', b: '2' }
-  eq parse('<a>1</a><a>2</a>'), { a: ['1', '2'] }
+# A document is one root element, closed: a cut-off or concatenated
+# SOAP/EDI response rejects instead of parsing "successfully".
+test "a second root element rejects", ->
+  throws (-> parse('<a>1</a><b>2</b>')), RsxError, 'a second root element <b>; a document has one'
+  throws (-> parse('<a>1</a><a>2</a>')), RsxError, 'a second root element <a>'
 
-test "empty input yields an empty object", ->
-  eq parse(''), {}
+test "input with no root element rejects", ->
+  throws (-> parse('')), RsxError, 'no root element'
+  throws (-> parse('  <!-- only a comment -->  ')), RsxError, 'no root element'
 
 test "mixed content: text around child elements is dropped by default", ->
   eq parse('<a>hi<b>x</b>bye</a>'), { a: { b: 'x' } }
 
-test "text outside the root element is ignored", ->
-  eq parse('junk<a>x</a>'), { a: 'x' }
-  eq parse('<a>x</a>trailing'), { a: 'x' }
+test "text outside the root element rejects; whitespace there is fine", ->
+  throws (-> parse('junk<a>x</a>')), RsxError, 'text outside the root element: "junk"'
+  throws (-> parse('<a>x</a>trailing')), RsxError, 'text outside the root element: "trailing"'
+  throws (-> parse('hello')), RsxError, 'text outside the root element'
+  eq parse('\n  <a>x</a>\n'), { a: 'x' }
 
 # ==[ Parse: text and whitespace ]==
 
@@ -187,8 +192,8 @@ test "whitespace around = and newlines inside tags are tolerated", ->
   eq parse('<a  t = "v"  u="w" >x</a>').a['@attrs'], { t: 'v', u: 'w' }
   eq parse('<a\n  t="v"\n>x</a>').a['@attrs'], { t: 'v' }
 
-test "duplicate attributes: last one wins", ->
-  eq parse('<a t="1" t="2">x</a>').a['@attrs'], { t: '2' }
+test "a duplicate attribute rejects", ->
+  throws (-> parse('<a t="1" t="2">x</a>')), RsxError, 'duplicate attribute "t"'
 
 # ==[ Parse: forceArray ]==
 
@@ -249,14 +254,15 @@ test "mismatched close tags throw with both names in the message", ->
   throws (-> parse('<a><b>x</c></a>')), 'mismatched close tag: expected </b>, got </c>'
   throws (-> parse('<a>x</a></b>')), 'mismatched close tag: expected </>, got </b>'
 
-test "unclosed elements at EOF do not throw; buffered text is dropped", ->
-  eq parse('<a><b>x'), { a: { b: {} } }
+test "an element still open at the end of the input rejects", ->
+  throws (-> parse('<a><b>x')), RsxError, 'unclosed element <b> at the end of the input'
+  throws (-> parse('<Envelope><Body>')), RsxError, 'unclosed element <Body>'
 
 test "unterminated markup throws with a scan offset", ->
   cases = [
     ['<a',       'unterminated start tag', 0]
     ['<a>x</a',  'unterminated end tag',   4]
-    ['< >x</ >', 'missing tag name',       3]
+    ['< >x</ >', "a '<' in text must be written &lt;", 0]
   ]
   for [xml, msg, offset] in cases
     err = null
@@ -267,6 +273,11 @@ test "unterminated markup throws with a scan offset", ->
     ok err instanceof RsxError, "no throw for #{JSON.stringify(xml)}"
     eq err.message, msg
     eq err.offset, offset
+
+test "an unescaped '<' in text rejects instead of inventing an element", ->
+  throws (-> parse('<a>1 < 2</a>')), RsxError, "a '<' in text must be written &lt;"
+  eq parse('<a>1 &lt; 2</a>'), { a: '1 < 2' }
+  throws (-> parse('<a></2b></a>')), RsxError, 'invalid end tag name "2b"'
 
 test "RsxError is a proper Error subclass", ->
   err = RsxError.new('boom', 7)
