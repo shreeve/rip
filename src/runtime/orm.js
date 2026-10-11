@@ -3621,14 +3621,21 @@ function columnType(field, def) {
   switch (nested.kind) {
     // An enum materializes to its member VALUE, which is what the
     // column holds — not the member name. A closed set of strings is
-    // a DuckDB ENUM. A set holding a number or a boolean has no ENUM
-    // form (DuckDB enum members are strings), so it stays VARCHAR
-    // rather than being silently restated as something the values are
-    // not.
+    // a DuckDB ENUM. Numbers and booleans have no ENUM form (DuckDB
+    // enum members are strings), so the column takes the values' own
+    // type: a value read back must equal its member, and a VARCHAR
+    // would hand `1` back as '1', which no member matches. Members of
+    // different types share no column, and reject.
     case 'enum': {
       const values = [...new Set(nested._normalize().enumMembers.values())];
-      if (!values.length || !values.every((v) => typeof v === 'string')) return 'VARCHAR';
-      return sqlEnumType(values);
+      if (!values.length) return 'VARCHAR';
+      if (values.every((v) => typeof v === 'string')) return sqlEnumType(values);
+      if (values.every((v) => Number.isInteger(v) && v >= -2147483648 && v <= 2147483647)) return 'INTEGER';
+      if (values.every((v) => typeof v === 'number' && Number.isFinite(v))) return 'DOUBLE';
+      if (values.every((v) => typeof v === 'boolean')) return 'BOOLEAN';
+      throw new Error("schema: enum '" + field.typeName + "'" + where + ' mixes member value types (' +
+        [...new Set(values.map((v) => typeof v))].join(', ') + ') — a column holds one type, so give every ' +
+        'member a value of the same type');
     }
     // A nested schema is an object, so it is a JSON document — the
     // array form's answer, for the same reason.

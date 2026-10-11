@@ -164,8 +164,11 @@ User = schema :model
 Enum members may carry values (`:pending 0`); either the name or the
 value validates, and parsing materializes the value. A string-membered
 enum or literal union renders as an `ENUM` column, so the database
-enforces the same set the parse does; a non-string one renders as
-`VARCHAR`, where validation is the app-side gate alone.
+enforces the same set the parse does. A numeric enum renders as
+`INTEGER` (or `DOUBLE` when a value is fractional or outside 32 bits)
+and a boolean one as `BOOLEAN`, so a value read back equals its member;
+validation is the app-side gate there. An enum mixing value types has no
+single column and rejects.
 
 ### Coercion and transforms
 

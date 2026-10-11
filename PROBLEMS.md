@@ -295,11 +295,6 @@ $21.4M. `~integer` turns `"9007199254740993"` into `…992` silently;
 
 **S9 L — ORM wording.** `where({firstName: 'A', first_name: 'B'})` silently ANDs both (`create` rejects the conflict); `@ensure "bad", :nope, …` attributes the failure to a nonexistent field; `upsert on: [:email, :firstName]` calls an existing non-unique field "unknown".
 
-**S11 H — A numeric enum gets a VARCHAR column and every loaded row becomes unsaveable.**
-`toSQL()` gives `"status" VARCHAR`; a loaded `'1'` stays a string, and
-`save!` after an unrelated change throws "expected one of: …"
-(reproduced with a recording adapter; confirm on a database).
-
 **S12 M — Assigning a misspelled field and saving saves nothing.**
 `u.firstNmae = 'Grace'; u.save!` issues no SQL and no error; `set!`
 throws. docs/ORM.md describes only the `set!` guard.

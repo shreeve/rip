@@ -4207,17 +4207,53 @@ describe('orm: the column-mapping gates', () => {
     });
   });
 
-  test('an enum whose members are not strings stays VARCHAR', async () => {
+  test('a numeric or boolean enum takes its values\' own column type; mixed types reject', async () => {
     await K4.scope(() => {
       // DuckDB enum members are strings; restating 1 and 2 as
-      // ENUM('1','2') would name a set the values are not in
-      const L = K4.__schema({ kind: 'enum', name: 'Level', entries: [
-        { tag: 'enum-member', name: 'low', value: 1 },
-        { tag: 'enum-member', name: 'high', value: 2 },
-      ] });
+      // ENUM('1','2') would name a set the values are not in, and a
+      // VARCHAR would hand `1` back as '1', which no member matches
+      const enumOf = (name, ...values) => K4.__schema({ kind: 'enum', name,
+        entries: values.map((value, i) => ({ tag: 'enum-member', name: 'm' + i, value })) });
+      const column = (type) => K4.__schema(model('Alarm' + type, field('level', type))).toSQL();
+      const L = enumOf('Level', 1, 2);
       expect([...L._normalize().enumMembers.values()]).toEqual([1, 2]);
-      const T = K4.__schema(model('Alarm', field('level', 'Level')));
-      expect(T.toSQL()).toContain('"level" VARCHAR');
+      expect(column('Level')).toContain('"level" INTEGER');
+      enumOf('Ratio', 0.5, 1);
+      expect(column('Ratio')).toContain('"level" DOUBLE');
+      enumOf('Huge', 1, 2 ** 40);
+      expect(column('Huge')).toContain('"level" DOUBLE');
+      enumOf('Flag', true, false);
+      expect(column('Flag')).toContain('"level" BOOLEAN');
+      enumOf('Mixed', 1, 'two');
+      expect(() => column('Mixed')).toThrow(/enum 'Mixed' \(on AlarmMixed\) mixes member value types \(number, string\)/);
+    });
+  });
+
+  test('a row loaded with a numeric enum value saves after an unrelated change', async () => {
+    const src = [
+      'Level = schema :enum',
+      '  :low 1',
+      '  :high 2',
+      '',
+      'Alarm = schema :model',
+      '  level! Level',
+      '  note? string',
+    ].join('\n');
+    const { code } = compile(src);
+    await K4.scope(async () => {
+      const adapter = recordingAdapter();
+      K4.setAdapter(adapter);
+      const A = new Function('__schema', `${code}\nreturn Alarm;`)(rt4.__schema);
+      expect(A.toSQL()).toContain('"level" INTEGER NOT NULL');
+      // An INTEGER column reads back a number, which is the member.
+      adapter.on(/SELECT/, rows(['id', 'level', 'note'], [1, 2, 'x']));
+      const a = await A.where({ note: 'x' }).first();
+      expect(a.level).toBe(2);
+      adapter.calls.length = 0;
+      adapter.on(/UPDATE/, { columns: [], data: [], rowCount: 1 });
+      a.note = 'y';
+      await a.save();
+      expect(adapter.calls[0].sql).toContain('UPDATE "alarms" SET "note" = ?');
     });
   });
 
