@@ -396,24 +396,29 @@ export function rewriteRender(tokens, mintId, fail) {
   };
 
   // Is the block about to open the body of an `if`/`unless`/`switch`/`try`
-  // in a value on its line (`span title: if ok`), not a markup branch?
+  // in a value on its line (`span title: if ok`), not a markup branch? A
+  // `key:` or `=` before the branch makes everything after it a value
+  // (`title: if a then "x" else if b`, `title: fmt "x", if b`); with none,
+  // a branch is markup heading its line or after `then`/`else`/`,`, and a
+  // value's after anything else (`"p" + if ok`).
   const opensValueBlock = () => {
     let depth = 0;
+    let head = -1;
     for (let k = out.length - 1; k >= 0; k--) {
       const kind = out[k].kind;
-      if (CLOSERS.has(kind)) depth++;
-      else if (OPENERS.has(kind)) { if (depth === 0) return false; depth--; }
-      else if (LINE_BREAKS.has(kind) || kind === 'RENDER') return false;
-      else if (depth === 0 && BLOCK_VALUE_HEADS.has(kind)) {
-        // A markup branch heads its line (or follows `then`/`else`, or a
-        // `,` among an element's arguments); after anything else it is a
-        // value's (`title: if ok`, `title: "p" + if ok`).
-        const before = out[k - 1]?.kind;
-        return !(before === undefined || LINE_BREAKS.has(before) || before === 'RENDER' ||
-          before === 'THEN' || before === 'ELSE' || before === ',');
-      }
+      if (CLOSERS.has(kind)) { depth++; continue; }
+      if (OPENERS.has(kind)) { if (depth === 0) return head >= 0 ? valueHead(head) : false; depth--; continue; }
+      if (LINE_BREAKS.has(kind) || kind === 'RENDER') break;
+      if (depth !== 0) continue;
+      if (head < 0 && BLOCK_VALUE_HEADS.has(kind)) head = k;
+      else if (head >= 0 && (kind === ':' || kind === '=' || kind === 'COMPOUND_ASSIGN')) return true;
     }
-    return false;
+    return head >= 0 && valueHead(head);
+  };
+  const valueHead = (k) => {
+    const before = out[k - 1]?.kind;
+    return !(before === undefined || LINE_BREAKS.has(before) || before === 'RENDER' ||
+      before === 'THEN' || before === 'ELSE' || before === ',');
   };
 
   // Does the bracket or block tokens[i] opens hold code? Inside code,

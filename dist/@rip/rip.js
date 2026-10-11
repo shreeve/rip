@@ -3169,22 +3169,33 @@ function rewriteRender(tokens, mintId, fail) {
   };
   const opensValueBlock = () => {
     let depth = 0;
+    let head = -1;
     for (let k = out.length - 1;k >= 0; k--) {
       const kind = out[k].kind;
-      if (CLOSERS.has(kind))
+      if (CLOSERS.has(kind)) {
         depth++;
-      else if (OPENERS.has(kind)) {
-        if (depth === 0)
-          return false;
-        depth--;
-      } else if (LINE_BREAKS.has(kind) || kind === "RENDER")
-        return false;
-      else if (depth === 0 && BLOCK_VALUE_HEADS.has(kind)) {
-        const before = out[k - 1]?.kind;
-        return !(before === undefined || LINE_BREAKS.has(before) || before === "RENDER" || before === "THEN" || before === "ELSE" || before === ",");
+        continue;
       }
+      if (OPENERS.has(kind)) {
+        if (depth === 0)
+          return head >= 0 ? valueHead(head) : false;
+        depth--;
+        continue;
+      }
+      if (LINE_BREAKS.has(kind) || kind === "RENDER")
+        break;
+      if (depth !== 0)
+        continue;
+      if (head < 0 && BLOCK_VALUE_HEADS.has(kind))
+        head = k;
+      else if (head >= 0 && (kind === ":" || kind === "=" || kind === "COMPOUND_ASSIGN"))
+        return true;
     }
-    return false;
+    return head >= 0 && valueHead(head);
+  };
+  const valueHead = (k) => {
+    const before = out[k - 1]?.kind;
+    return !(before === undefined || LINE_BREAKS.has(before) || before === "RENDER" || before === "THEN" || before === "ELSE" || before === ",");
   };
   const opensCode = (i, t) => {
     if (frames[frames.length - 1] === true || valueLine !== null || textFrames.length > 0)
@@ -33095,7 +33106,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "48d473c5ec9c9fba";
+var compilerBuild = () => "61da44db18e1f51c";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
