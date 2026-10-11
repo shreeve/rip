@@ -53,6 +53,14 @@ import { counter } from './counter.js';
 const POSTFIX_TYPE_KINDS = new Map([['as', 'CAST'], ['satisfies', 'SATISFIES']]);
 const isPostfixTypeWord = (t) => t?.kind === 'IDENTIFIER' && POSTFIX_TYPE_KINDS.has(t.value);
 
+// The word heads the operator only with whitespace before its type. A
+// TIGHT follower binds to the word as it does after any name — the
+// scanner already read `satisfies(1, 2)` as a call, `as[0]` as an
+// index, `as-1` as a subtraction — so the word stays that name.
+const headsPostfixType = (prev, word, next) =>
+  isPostfixTypeWord(word) && next?.spaced === true &&
+  prev != null && prev.kind !== '.' && prev.kind !== '?.' && CAST_LHS_ENDERS.has(prev.kind);
+
 // Tokens that can END the left-hand expression of a postfix type
 // operator. CAST and SATISFIES are included so chains (`x as A as B`,
 // `x satisfies A as B`) collapse one operator at a time.
@@ -808,9 +816,7 @@ const syncTypeGenericMemo = (tokens, memo) => {
       // angle level (`interface P<T>` / `… extends Q<T>` — the
       // trailing close must end the line so the body INDENT forms).
       memo.answers.set(memo.level, true);
-    } else if (isPostfixTypeWord(t) &&
-               tokens[j - 1] && tokens[j - 1].kind !== '.' && tokens[j - 1].kind !== '?.' &&
-               CAST_LHS_ENDERS.has(tokens[j - 1].kind)) {
+    } else if (headsPostfixType(tokens[j - 1], t, tokens[j + 1])) {
       // A postfix-cast head (`expr as Map<K, V>`): the trailing close
       // ends the line the same way a return-type or declaration head
       // does — otherwise the next line continues this one and its
@@ -1356,9 +1362,8 @@ export function rewriteTypes(tokens, mintId, text, fail) {
     }
 
     // ── `expr as Type` / `expr satisfies Type` — the postfix type operators ──
-    if (isPostfixTypeWord(tok) &&
-        prev && prev.kind !== '.' && prev.kind !== '?.' && CAST_LHS_ENDERS.has(prev.kind) &&
-        tokens[i + 1] && (TYPE_STARTERS.has(tokens[i + 1].kind) ||
+    if (headsPostfixType(prev, tok, tokens[i + 1]) &&
+        (TYPE_STARTERS.has(tokens[i + 1].kind) ||
           // A signed numeric literal enters the cast reading too:
           // `-1` claims, `+1` rejects inside the run with the fix.
           (tokens[i + 1].kind === '+' && tokens[i + 2]?.kind === 'NUMBER'))) {

@@ -974,6 +974,20 @@ class Emitter {
     return this.stores.node(id)?.semanticKind === kind;
   }
 
+  // A REAL postfix type operator — `["cast", value, "T"]` /
+  // `["satisfies", value, "T"]` — and not a user call of a function so
+  // named: `cast(a, b)` builds the identical array, and reading it as
+  // the operator would erase the call and its second argument.
+  isPostfixType(x) {
+    return Emitter.isPostfixTypeIn(this.stores, x);
+  }
+
+  static isPostfixTypeIn(stores, x) {
+    if (!isNode(x) || (x[0] !== 'cast' && x[0] !== 'satisfies') || x.length !== 3) return false;
+    const id = stores.idOf(x);
+    return id === null || stores.node(id)?.semanticKind === x[0];
+  }
+
   // A constructor spine with no call in it: a name, or a member/index
   // chain rooted at one. Only such a spine may stand bare under `new`.
   static pureSpine(x) {
@@ -1879,7 +1893,7 @@ class Emitter {
       if (h === '.' && p.length === 3 && p[1] === 'this' && typeof p[2] === 'string') out.push([p[2], this.thisMemberKindOf(p[2])]);
       else if (h === 'array') for (const el of p.slice(1)) this.patternMemberTargets(el, out);
       else if (h === 'object') for (const pair of p.slice(1)) this.patternMemberTargets(pair[0] === ':' ? pair[2] : pair[1], out);
-      else if (['rest', '...', 'default', '=', 'cast', 'satisfies'].includes(h)) this.patternMemberTargets(p[1], out);
+      else if (['rest', '...', 'default', '='].includes(h) || this.isPostfixType(p)) this.patternMemberTargets(p[1], out);
     }
     return out;
   }
@@ -3189,7 +3203,7 @@ class Emitter {
     const { iter } = entry;
     if (!this.ts || rec === undefined || iter === undefined) return null;
     if (this.containsAwait(iter) || containsYield(iter)) return null;
-    if (referencesNames(iter, rec.parent.locals)) return null;
+    if (referencesNames(iter, rec.parent.locals, this.stores)) return null;
     const leaves = new Set();
     Emitter.collectLeafNames(iter, leaves);
     for (const n of [rec.self, entry.itemVar, entry.indexVar, ...rec.renameHazardNames]) if (leaves.has(n)) return null;
@@ -3559,7 +3573,7 @@ class Emitter {
       if (x[0] === 'typed-var' && x.length === 3) { walk(x[1]); return; }
       if (x[0] === 'def-sig') { walk(x[2]); return; }
       if (x[0] === 'type-decl') return;
-      if ((x[0] === 'cast' || x[0] === 'satisfies') && x.length === 3) { walk(x[1]); return; }
+      if (this.isPostfixType(x)) { walk(x[1]); return; }
       for (const c of x) walk(c);
     };
     walk(sexpr);
@@ -3836,7 +3850,7 @@ class Emitter {
     // above — the name is invisible to every check keyed on the walk,
     // and here it hides the name from the hoist pass too, so the module
     // BUILDS and throws on the const write at runtime instead.
-    else if (p[0] === 'cast' || p[0] === 'satisfies') this.patternNames(p[1], out, binding, p);
+    else if (this.isPostfixType(p)) this.patternNames(p[1], out, binding, p);
     else if (p[0] === 'typed-var') this.patternNames(p[1], out, binding, p);
     return out;
   }
@@ -7015,7 +7029,7 @@ class Emitter {
             this.b.emit(`${idx} += `);
             // A `+`-headed literal step is a unary and groups as an
             // operand (`_i += (+2)`).
-            this.grouped(node, 'step', step, Emitter.needsGrouping(step, 'operand'));
+            this.grouped(node, 'step', step, Emitter.needsGrouping(step, 'operand', this.stores));
           }
         } else {
           const stp = this.loopTempName('_step');
@@ -7196,7 +7210,7 @@ class Emitter {
     const stmts = this.liveStmts(isBlock(body) ? body.slice(1) : [body]);
     this.emitTsTypeDecls(isBlock(body) ? body.slice(1) : [body], '');
     if (guard !== null) {
-      const wrap = Emitter.needsGrouping(guard, 'operand') || isUpdate(guard);
+      const wrap = Emitter.needsGrouping(guard, 'operand', this.stores) || isUpdate(guard);
       this.b.emit('if (');
       if (wrap) this.b.emit('(');
       this.expr(guard);
@@ -7351,7 +7365,7 @@ class Emitter {
           this.mark(node, 'step', () => this.b.emit(`${idx}++`));
         } else {
           this.b.emit(`${idx} += `);
-          this.grouped(node, 'step', step, Emitter.needsGrouping(step, 'operand'));
+          this.grouped(node, 'step', step, Emitter.needsGrouping(step, 'operand', this.stores));
         }
       } else {
         const stp = this.loopTempName('_step');
@@ -7410,7 +7424,7 @@ class Emitter {
   // (compounds group).
   guardOpen(guard) {
     this.b.emit('if (');
-    const wrap = Emitter.needsGrouping(guard, 'operand') || isUpdate(guard);
+    const wrap = Emitter.needsGrouping(guard, 'operand', this.stores) || isUpdate(guard);
     if (wrap) this.b.emit('(');
     this.expr(guard);
     if (wrap) this.b.emit(')');
@@ -7521,7 +7535,7 @@ class Emitter {
       if (keyExpr === null) {
         this.b.emit(`${inner}${acc}.push(`);
         // The pushed expression is an operand position (compounds group).
-        const wrap = Emitter.needsGrouping(expr, 'operand') || isUpdate(expr);
+        const wrap = Emitter.needsGrouping(expr, 'operand', this.stores) || isUpdate(expr);
         if (wrap) this.b.emit('(');
         emitValue();
         if (wrap) this.b.emit(')');
@@ -7539,7 +7553,7 @@ class Emitter {
         // so a reactive key unwraps — `result[count.value]`;
         // loop variables are frame-bound and stay bare); a node
         // key is the dynamicKey's inner expression.
-        const wrapKey = isNode(keyExpr) && (Emitter.needsGrouping(keyExpr, 'operand') || isUpdate(keyExpr));
+        const wrapKey = isNode(keyExpr) && (Emitter.needsGrouping(keyExpr, 'operand', this.stores) || isUpdate(keyExpr));
         const emitKey = () => {
           if (wrapKey) this.b.emit('(');
           this.expr(keyExpr);
@@ -7555,7 +7569,7 @@ class Emitter {
           }
         } else emitKey();
         this.b.emit(`), ${vt} = `);
-        const wrap = Emitter.needsGrouping(expr, 'operand') || isUpdate(expr);
+        const wrap = Emitter.needsGrouping(expr, 'operand', this.stores) || isUpdate(expr);
         if (wrap) this.b.emit('(');
         emitValue();
         if (wrap) this.b.emit(')');
@@ -7700,7 +7714,7 @@ class Emitter {
     // await conditions group in ternaries (`(await ok()) ? …`);
     // dammit conditions stay bare — the sugar's await surrounds a
     // complete call, which reads unambiguously.
-    this.grouped(node, 'condition', node[1], Emitter.needsGrouping(node[1], 'operand') || (isNode(node[1]) && (node[1][0] === 'await' || node[1][0] === 'yield')));
+    this.grouped(node, 'condition', node[1], Emitter.needsGrouping(node[1], 'operand', this.stores) || (isNode(node[1]) && (node[1][0] === 'await' || node[1][0] === 'yield')));
     this.b.emit(' ? ');
     this.ternaryArm(node, 'then', this.branchLive(node[2], true)[0]);
     this.b.emit(' : ');
@@ -7720,7 +7734,7 @@ class Emitter {
 
   ternaryArm(node, role, stmt) {
     this.mark(node, role, () => {
-      const wrap = Emitter.needsGrouping(stmt, 'operand') || isUpdate(stmt);
+      const wrap = Emitter.needsGrouping(stmt, 'operand', this.stores) || isUpdate(stmt);
       if (wrap) this.b.emit('(');
       this.expr(stmt);
       if (wrap) this.b.emit(')');
@@ -7746,7 +7760,7 @@ class Emitter {
     // The condition emits in 'value' context —
     // compound conditions arrive double-parenthesized: `if ((v > 0))`.
     this.b.emit('if (');
-    this.grouped(node, 'condition', node[1], Emitter.needsGrouping(node[1], 'operand'));
+    this.grouped(node, 'condition', node[1], Emitter.needsGrouping(node[1], 'operand', this.stores));
     this.b.emit(') ');
     this.mark(node, 'then', () => this.returnBlock(node[2], ind, effect));
     if (node.length >= 4) {
@@ -8079,7 +8093,7 @@ class Emitter {
       // its break/continue/return cannot cross a push.
       if (i === stmts.length - 1 && !Emitter.statementOnly(stmt) && !isLoopNode(stmt) && !Emitter.containsCtrl(stmt)) {
         this.b.emit(`${into}.push(`);
-        const wrap = Emitter.needsGrouping(stmt, 'operand') || isUpdate(stmt);
+        const wrap = Emitter.needsGrouping(stmt, 'operand', this.stores) || isUpdate(stmt);
         if (wrap) this.b.emit('(');
         this.expr(stmt);
         if (wrap) this.b.emit(')');
@@ -8102,7 +8116,7 @@ class Emitter {
   // A tail `if` of an accumulating loop body, every arm accumulating.
   accumulateIf(node, ind, into) {
     this.b.emit('if (');
-    this.grouped(node, 'condition', node[1], Emitter.needsGrouping(node[1], 'operand'));
+    this.grouped(node, 'condition', node[1], Emitter.needsGrouping(node[1], 'operand', this.stores));
     this.b.emit(') ');
     this.mark(node, 'then', () => this.accumulateBlock(node[2], ind, into));
     if (node.length >= 4) {
@@ -8282,7 +8296,7 @@ class Emitter {
       this.b.emit('return');
       if (node.length === 2) {
         this.b.emit(' ');
-        this.grouped(node, 'value', node[1], Emitter.needsGrouping(node[1], 'return'));
+        this.grouped(node, 'value', node[1], Emitter.needsGrouping(node[1], 'return', this.stores));
       }
     });
     this.b.emit(';');
@@ -8372,10 +8386,10 @@ class Emitter {
   // (try/switch/loops, multi-branch value ifs) emit their own delimiters
   // and are therefore 'primary' by construction; a value-lowered SIMPLE
   // if emits a ternary and sits in the ternary tier.
-  static jsTier(x) {
+  static jsTier(x, stores) {
     if (!isNode(x)) return 'primary';
     // A cast or a satisfies erases to its value — grouping reads through it.
-    if ((x[0] === 'cast' || x[0] === 'satisfies') && x.length === 3) return Emitter.jsTier(x[1]);
+    if (Emitter.isPostfixTypeIn(stores, x)) return Emitter.jsTier(x[1], stores);
     if (isAssign(x)) return 'assign';
     if (isTernary(x) || (isIf(x) && x.length <= 4 && Emitter.ifIsSimple(x))) return 'ternary';
     // Postfix existence emits a `!=` comparison — the binary tier.
@@ -8425,7 +8439,7 @@ class Emitter {
   //                 (`stores` tells the postfix spelling, which hoists,
   //                 from the operator one).
   static needsGrouping(child, context, stores) {
-    const tier = Emitter.jsTier(child);
+    const tier = Emitter.jsTier(child, stores);
     if (context === 'operand' || context === 'return') {
       if (tier === 'unary') {
         return !(child[0] === '!' || child[0] === 'typeof' || child[0] === 'await' ||
@@ -8454,11 +8468,11 @@ class Emitter {
   }
 
   operand(node, role, child) {
-    this.grouped(node, role, child, Emitter.needsGrouping(child, 'operand'));
+    this.grouped(node, role, child, Emitter.needsGrouping(child, 'operand', this.stores));
   }
 
   head(node, role, child) {
-    this.grouped(node, role, child, Emitter.needsGrouping(child, 'head'));
+    this.grouped(node, role, child, Emitter.needsGrouping(child, 'head', this.stores));
   }
 
   static isIntegerLiteral(x) {
@@ -8616,7 +8630,7 @@ class Emitter {
     if (head === '%%=' && node.length === 3) return this.moduloAssign(node);
     if (isComprehensionNode(node)) return this.comprehension(node, this.ind);
     if (head === 'do-iife' && node.length === 2) return this.doIife(node);
-    if ((head === 'cast' || head === 'satisfies') && node.length === 3) return this.postfixType(node);
+    if (this.isPostfixType(node)) return this.postfixType(node);
     if (head === '?' && node.length === 2) return this.existence(node);
     if (head === 'await' && node.length === 2) return this.awaitExpr(node);
     if (head === 'dammit!' && node.length === 2) return this.dammit(node);
@@ -9384,7 +9398,7 @@ class Emitter {
         // The initializer is an operand position (value context:
         // compounds group — `__state((1 + 2))`).
         this.mark(node, 'value', () => this.withExpression(() => {
-          const wrap = Emitter.needsGrouping(value, 'operand');
+          const wrap = Emitter.needsGrouping(value, 'operand', this.stores);
           if (wrap) this.b.emit('(');
           this.expr(value);
           if (wrap) this.b.emit(')');
@@ -9418,7 +9432,7 @@ class Emitter {
       this.rframes.pop();
       return;
     }
-    const wrap = Emitter.needsGrouping(value, 'operand') || isObject(value);
+    const wrap = Emitter.needsGrouping(value, 'operand', this.stores) || isObject(value);
     if (wrap) this.b.emit('(');
     this.expr(value);
     if (wrap) this.b.emit(')');
@@ -9461,7 +9475,7 @@ class Emitter {
       this.mark(node, 'operator', () => this.b.emit('='));
       this.b.emit(' ');
       this.mark(node, 'value', () => this.withExpression(() => {
-        const wrap = Emitter.needsGrouping(value, 'operand');
+        const wrap = Emitter.needsGrouping(value, 'operand', this.stores);
         if (wrap) this.b.emit('(');
         this.expr(value);
         if (wrap) this.b.emit(')');
@@ -9640,7 +9654,7 @@ class Emitter {
     } else {
       if (!this.effectTailWrites(body)) this.b.emit('return ');
       this.mark(node, 'value', () => this.withExpression(() => {
-        const wrap = Emitter.needsGrouping(body, 'operand') || isObject(body);
+        const wrap = Emitter.needsGrouping(body, 'operand', this.stores) || isObject(body);
         if (wrap) this.b.emit('(');
         this.expr(body);
         if (wrap) this.b.emit(')');
@@ -9854,7 +9868,7 @@ class Emitter {
   }
 
   componentInitValue(value) {
-    const wrap = Emitter.needsGrouping(value, 'operand');
+    const wrap = Emitter.needsGrouping(value, 'operand', this.stores);
     if (wrap) this.b.emit('(');
     this.expr(value);
     if (wrap) this.b.emit(')');
@@ -10538,7 +10552,7 @@ class Emitter {
       };
       const memberValue = (stmt, value) => {
         this.mark(stmt, 'value', () => this.withExpression(() => {
-          const wrap = Emitter.needsGrouping(value, 'operand');
+          const wrap = Emitter.needsGrouping(value, 'operand', this.stores);
           if (wrap) this.b.emit('(');
           this.expr(value);
           if (wrap) this.b.emit(')');
@@ -10766,7 +10780,7 @@ class Emitter {
               } else {
                 if (!this.effectTailWrites(single)) this.b.emit('return ');
                 this.mark(eff, 'value', () => this.withExpression(() => {
-                  const wrap = Emitter.needsGrouping(single, 'operand') || isObject(single);
+                  const wrap = Emitter.needsGrouping(single, 'operand', this.stores) || isObject(single);
                   if (wrap) this.b.emit('(');
                   this.expr(single);
                   if (wrap) this.b.emit(')');
@@ -11247,7 +11261,7 @@ class Emitter {
   checkSetupLocalRefs(expr, node) {
     const rec = this.rstate.sink;
     if (rec.kind !== 'class' || rec.locals.size === 0) return;
-    if (referencesNames(expr, rec.locals)) {
+    if (referencesNames(expr, rec.locals, this.stores)) {
       throw this.positionedError(node ?? expr,
         'emitter: a render local cannot appear in a LIVE binding or a dynamic block head at the render top level — ' +
         'locals live in _create() and reactive machinery lives in _setup() (a compiled read here would be a ' +
@@ -11263,7 +11277,7 @@ class Emitter {
   renderExpr(value) {
     let span = null;
     this.withExpression(() => {
-      const wrap = Emitter.needsGrouping(value, 'operand');
+      const wrap = Emitter.needsGrouping(value, 'operand', this.stores);
       if (wrap) this.b.emit('(');
       const start = this.b.offset;
       this.expr(value);
@@ -13212,7 +13226,7 @@ class Emitter {
       if (isNode(key) && key[0] === '.' && key[1] === 'this' && typeof key[2] === 'string') {
         const eventName = key[2];
         if (this.rstate.sink.kind === 'loop' && this.loopVarNames().size > 0 &&
-            referencesNames(value, this.loopVarNames())) {
+            referencesNames(value, this.loopVarNames(), this.stores)) {
           // The listener is a CREATE-phase closure over the loop item:
           // p()'s param re-binding keeps it current, but only when p()
           // runs — a block with no effects must not go static.
@@ -13806,7 +13820,7 @@ class Emitter {
     for (let r = R.sink.parent; r !== null; r = r.parent) {
       if (r.locals.size === 0) continue;
       const hidden = new Set([...r.locals].filter((n) => !visible(n)));
-      if (hidden.size > 0 && referencesNames(expr, hidden)) {
+      if (hidden.size > 0 && referencesNames(expr, hidden, this.stores)) {
         throw this.positionedError(node,
           'emitter: this expression reads a render local of an ENCLOSING render scope — each dynamic block (a ' +
           'conditional branch, a loop body) is its own factory function, and render locals never cross that boundary ' +
@@ -14382,7 +14396,7 @@ class Emitter {
       // not exist there (a live keyFn compiled that way would throw
       // at mount). Checked before the
       // row-derivation rule so the diagnosis names the real problem.
-      if (rec.locals.size > 0 && referencesNames(keyExpr, rec.locals)) {
+      if (rec.locals.size > 0 && referencesNames(keyExpr, rec.locals, this.stores)) {
         throw this.positionedError(node,
           'emitter: a `key:` expression must be evaluable in the loop HEADER scope — it reads a render local declared ' +
           'inside the loop body, which lives in the row factory (derive the key from the item inline: `key: item.id`)');
@@ -14392,7 +14406,7 @@ class Emitter {
       // constant keys die at the runtime's duplicate-key rejection,
       // and an undeclared root (`key: missing.id`) is a mount-time
       // ReferenceError far from here.
-      if (!referencesNames(keyExpr, new Set([itemVar, indexVar]))) {
+      if (!referencesNames(keyExpr, new Set([itemVar, indexVar]), this.stores)) {
         throw this.positionedError(node,
           `emitter: a loop key must derive from the row — this \`key:\` expression never reads '${itemVar}'` +
           `${vars.length === 2 ? ` or '${indexVar}'` : ''} (a row-independent key cannot identify rows)`);
@@ -14620,7 +14634,7 @@ class Emitter {
         });
         try {
           this.withExpression(() => {
-            const wrap = Emitter.needsGrouping(keyExpr, 'operand') || isObject(keyExpr);
+            const wrap = Emitter.needsGrouping(keyExpr, 'operand', this.stores) || isObject(keyExpr);
             // The `key:` word answers the key's own type, read off the
             // served position around the expression — the same technique
             // a bind uses: the typed position is the expression, and the
@@ -15045,7 +15059,7 @@ class Emitter {
   // identity).
   renderBind(el, pair, prop, value, objExpr, site) {
     this.checkBindTarget(pair, value);
-    if (this.rstate.sink.kind === 'loop' && this.loopVarNames().size > 0 && referencesNames(value, this.loopVarNames())) {
+    if (this.rstate.sink.kind === 'loop' && this.loopVarNames().size > 0 && referencesNames(value, this.loopVarNames(), this.stores)) {
       this.rstate.sink.forceNonStatic = true;
     }
     let inputType = null;
@@ -15432,7 +15446,7 @@ class Emitter {
         // dot as a decimal point, so the member needs `(2).toFixed`
         // (a float, exponent, hex, or bigint literal has no such
         // ambiguity).
-        if (isInner) this.asReference(n[1], () => this.grouped(n, 'object', n[1], Emitter.needsGrouping(n[1], 'head') || Emitter.isIntegerLiteral(n[1])));
+        if (isInner) this.asReference(n[1], () => this.grouped(n, 'object', n[1], Emitter.needsGrouping(n[1], 'head', this.stores) || Emitter.isIntegerLiteral(n[1])));
         else f.role = this.beginMark(n, 'object');
       } else if (fkind === 'index') {
         // isWrite reads the state BEFORE this accessor clears it;
@@ -15703,7 +15717,7 @@ class Emitter {
         this.b.emit(optional ? `((${p}) => ${p} == null ? undefined : ({` : `((${p}) => ({`);
         body(() => this.b.emit(p));
         this.b.emit('}))(');
-        this.withExpression(() => this.grouped(node, 'source', source, Emitter.needsGrouping(source, 'operand')));
+        this.withExpression(() => this.grouped(node, 'source', source, Emitter.needsGrouping(source, 'operand', this.stores)));
         this.b.emit(')');
       }
     });
@@ -16074,7 +16088,7 @@ class Emitter {
       : `${node[0] === 'cast' ? 'as' : 'satisfies'} ${tidyType(node[2])}`;
     this.mark(node, '$self', () => {
       this.b.tsOnly(() => this.b.emit('('));
-      const wrapValue = Emitter.jsTier(node[1]) !== 'primary';
+      const wrapValue = Emitter.jsTier(node[1], this.stores) !== 'primary';
       if (wrapValue) this.b.tsOnly(() => this.b.emit('('));
       this.mark(node, 'value', () => this.expr(node[1]));
       if (wrapValue) this.b.tsOnly(() => this.b.emit(')'));
@@ -16180,7 +16194,7 @@ class Emitter {
           // (spreads never do — `...` binds its operand; pattern
           // elements never do — they are binding positions, and
           // `[(a = 1)]` is invalid destructuring JS).
-          const wrap = !this.inPattern && !(isNode(item) && item[0] === '...') && Emitter.needsGrouping(item, 'operand');
+          const wrap = !this.inPattern && !(isNode(item) && item[0] === '...') && Emitter.needsGrouping(item, 'operand', this.stores);
           if (wrap) this.b.emit('(');
           this.expr(item);
           if (wrap) this.b.emit(')');
@@ -16514,7 +16528,7 @@ class Emitter {
       // JavaScript takes a LeftHandSideExpression here, which is what a
       // chain HEAD is: a primary stands bare, and an await, a logical or
       // a conditional groups, or `class extends a || b {` does not parse.
-      this.grouped(node, 'parent', parent, Emitter.needsGrouping(parent, 'head'));
+      this.grouped(node, 'parent', parent, Emitter.needsGrouping(parent, 'head', this.stores));
     }
     this.b.emit(' {\n');
     if (body != null) this.withThisBoundary(() => this.mark(node, 'body', () => this.classMembers(body, ind)));
@@ -17231,7 +17245,7 @@ class Emitter {
           } else if (isCall && !operand.parenthesized && plainCallee) {
             this.call(operand);
           } else if (isCall && !operand.parenthesized) {
-            const selfGrouped = this.ts && isNode(callee) && (callee[0] === 'cast' || callee[0] === 'satisfies');
+            const selfGrouped = this.ts && this.isPostfixType(callee);
             this.mark(operand, '$self', () => {
               if (!selfGrouped) this.b.emit('(');
               this.expr(callee);
@@ -17248,7 +17262,7 @@ class Emitter {
           } else {
             // On the TS face a cast or `satisfies` operand prints its own
             // group, which is the seal.
-            const grouped = this.ts && (operand[0] === 'cast' || operand[0] === 'satisfies');
+            const grouped = this.ts && this.isPostfixType(operand);
             if (!grouped) this.b.emit('(');
             this.expr(operand);
             this.b.emit(grouped ? '()' : ')()');
@@ -17559,7 +17573,7 @@ class Emitter {
             // `() => {}` is an empty block returning undefined, not
             // the object (the statement-start problem in arrow-body
             // position).
-            const wrap = Emitter.needsGrouping(stmts[0], 'operand') || isObject(stmts[0]);
+            const wrap = Emitter.needsGrouping(stmts[0], 'operand', this.stores) || isObject(stmts[0]);
             if (wrap) this.b.emit('(');
             this.expr(stmts[0]);
             if (wrap) this.b.emit(')');
@@ -17760,7 +17774,7 @@ class Emitter {
     }
     this.b.emit('return ');
     this.withTailReturn(() => {
-      const wrap = Emitter.needsGrouping(stmt, 'return');
+      const wrap = Emitter.needsGrouping(stmt, 'return', this.stores);
       if (wrap) this.b.emit('(');
       this.expr(stmt);
       if (wrap) this.b.emit(')');
@@ -17844,7 +17858,7 @@ class Emitter {
         this.b.emit(') : (');
         // The includes() slot is an argument; this one is an operand
         // of JavaScript's `in`, so a lower-precedence left side groups.
-        const wrap = Emitter.needsGrouping(a, 'operand');
+        const wrap = Emitter.needsGrouping(a, 'operand', this.stores);
         if (wrap) this.b.emit('(');
         this.expr(a);
         if (wrap) this.b.emit(')');
@@ -17897,7 +17911,7 @@ class Emitter {
     const inner = chain[chain.length - 1];
     const hoists = Emitter.ternaryHoists(inner, this.stores);
     const branch = (owner, role, child) => {
-      this.grouped(owner, role, child, Emitter.needsGrouping(child, 'operand') || isUpdate(child));
+      this.grouped(owner, role, child, Emitter.needsGrouping(child, 'operand', this.stores) || isUpdate(child));
     };
     // A ternary CONDITION keeps its parens — bare, JS
     // right-associativity re-associates and changes the value.
@@ -17954,7 +17968,7 @@ class Emitter {
         }
         this.b.emit('${');
         this.mark(chunk, '$self', () => {
-          const wrap = Emitter.needsGrouping(chunk[0], 'operand') || isUpdate(chunk[0]);
+          const wrap = Emitter.needsGrouping(chunk[0], 'operand', this.stores) || isUpdate(chunk[0]);
           if (wrap) this.b.emit('(');
           this.expr(chunk[0]);
           if (wrap) this.b.emit(')');
@@ -18181,7 +18195,7 @@ class Emitter {
       };
       // An assignment (or any non-primary operand) parenthesizes
       // inside the condition; a plain name or call reads bare.
-      const grouped = assign !== null || Emitter.jsTier(guard[1]) !== 'primary';
+      const grouped = assign !== null || Emitter.jsTier(guard[1], this.stores) !== 'primary';
       if (op === '||') {
         this.b.emit('!');
         if (grouped) { this.b.emit('('); inner(); this.b.emit(')'); }
@@ -18204,7 +18218,7 @@ class Emitter {
         if (isNode(ret) && ret.length > 1) {
           this.b.emit(' ');
           this.mark(ret, 'value', () => {
-            if (ret[0] === 'return' && Emitter.needsGrouping(ret[1], 'return')) {
+            if (ret[0] === 'return' && Emitter.needsGrouping(ret[1], 'return', this.stores)) {
               this.b.emit('('); this.expr(ret[1]); this.b.emit(')');
             } else this.expr(ret[1]);
           });
@@ -18340,7 +18354,7 @@ class Emitter {
     const id = isNode(cur) ? this.stores.idOf(cur) : null;
     const kind = id !== null ? this.stores.node(id)?.semanticKind : null;
     const callHead = isNode(cur) && typeof cur[0] === 'string' && /^[A-Za-z_$][\w$]*$/.test(cur[0]) &&
-      (kind === 'call' || (kind == null && Emitter.jsTier(cur) === 'primary'));
+      (kind === 'call' || (kind == null && Emitter.jsTier(cur, this.stores) === 'primary'));
     if (!callHead) {
       throw this.positionedError(node, "emitter: `.=` re-binds its target to a METHOD CALL on itself — the right side must be a call chain (`x .= trim()`)");
     }
@@ -18376,7 +18390,7 @@ class Emitter {
     this.mark(node, '$self', () => {
       const tag = node[1];
       this.mark(node, 'tag', () => {
-        if (Emitter.needsGrouping(tag, 'head')) {
+        if (Emitter.needsGrouping(tag, 'head', this.stores)) {
           this.b.emit('(');
           this.expr(tag);
           this.b.emit(')');
@@ -19089,7 +19103,7 @@ const runtimeRequires = (rt) =>
 // under one may over-trigger injection, which the local binding then
 // shadows — harmless, and consistent with the schema-module
 // behavior.
-const referencesNames = (sexpr, names, isDecl = () => false) => {
+const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
   if (names.size === 0) return false;
   const ref = (x) => typeof x === 'string' && names.has(x);
   const walkParams = (params) => isNode(params) && params.some(walkPattern);
@@ -19143,7 +19157,7 @@ const referencesNames = (sexpr, names, isDecl = () => false) => {
     }
     if (h === 'class' && x.length >= 2) return x.slice(2).some(walk);
     if (h === 'typed-var' && x.length === 3) return isNode(x[1]) && walk(x[1]);
-    if ((h === 'cast' || h === 'satisfies') && x.length === 3) return walk(x[1]);
+    if (Emitter.isPostfixTypeIn(stores, x)) return walk(x[1]);
     if (h === 'import' || h === 'type-decl') return false;
     return x.some(walk);
   };
@@ -19168,7 +19182,7 @@ const deliveryTrees = (emitter, sexpr) => {
       Emitter.isReadonlyDeclIn(stores, x) || Emitter.isGateDeclIn(stores, x);
     const isTrigger = (x) => Emitter.isReactiveDeclIn(stores, x) || Emitter.isEffectDeclIn(stores, x);
     const isComponent = (x) => Emitter.isComponentDeclIn(stores, x);
-    trees.push({ tree, atoms, isDecl, isTrigger, isComponent });
+    trees.push({ tree, stores, atoms, isDecl, isTrigger, isComponent });
     const walk = (x) => {
       if (!isNode(x)) return;
       if (x[0] === 'schema' && x.length === 2 && x[1] && typeof x[1] === 'object' && Array.isArray(x[1].entries)) {
@@ -19639,8 +19653,8 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   const runtimes = new Set();
   for (const rt of RUNTIME_TABLE) {
     const unboundSet = new Set(rt.names.filter((n) => !bound.has(n)));
-    if (trees.some(({ tree, isDecl, isTrigger, isComponent }) =>
-          rt.triggers?.(tree, { isTrigger, isComponent }) || referencesNames(tree, unboundSet, isDecl))) {
+    if (trees.some(({ tree, stores, isDecl, isTrigger, isComponent }) =>
+          rt.triggers?.(tree, { isTrigger, isComponent }) || referencesNames(tree, unboundSet, stores, isDecl))) {
       runtimes.add(rt.key);
     }
   }

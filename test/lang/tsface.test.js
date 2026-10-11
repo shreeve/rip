@@ -1067,6 +1067,15 @@ describe('TS-face emission pins', () => {
     expect(stripFace(chained.code, chained.tsRegions)).toBe('let c = x;');
   });
 
+  test('a call of a function named cast or satisfies is a call on the face, never the operator', () => {
+    for (const head of ['cast', 'satisfies']) {
+      const called = ts(`r = new (${head}(a, b))(c)\n`);
+      expect(called.code).toBe(`let r = new (${head}(a, b))(c);` + MARKER);
+      expect(ts(`r = new (${head}(a, b))\n`).code).toBe(`let r = new (${head}(a, b))();` + MARKER);
+      expect(ts(`r = f ${head}(1, 2)\n`).code).toBe(`let r = f(${head}(1, 2));` + MARKER);
+    }
+  });
+
   test('a non-primary cast value takes its own TS-only parens — TS `as` binds tighter than the bare JS bytes', () => {
     // `a && b as boolean` would parse in TS as `a && (b as boolean)`;
     // the face groups the value so the assertion covers what Rip cast.
