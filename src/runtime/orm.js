@@ -3625,9 +3625,10 @@ function columnType(field, def) {
     // enum members are strings), so the column takes the values' own
     // type: a value read back must equal its member, and a VARCHAR
     // would hand `1` back as '1', which no member matches. Members of
-    // different types share no column, and reject.
+    // different types share no column, and reject; a `null` member fits
+    // any of them.
     case 'enum': {
-      const values = [...new Set(nested._normalize().enumMembers.values())];
+      const values = [...new Set(nested._normalize().enumMembers.values())].filter((v) => v !== null);
       if (!values.length) return 'VARCHAR';
       if (values.every((v) => typeof v === 'string')) return sqlEnumType(values);
       if (values.every((v) => Number.isInteger(v) && v >= -2147483648 && v <= 2147483647)) return 'INTEGER';
@@ -3671,7 +3672,7 @@ function columnSpec(column, field, def) {
     notNull: field.required === true,
     unique: field.unique === true,
     default: field.constraints?.default !== undefined
-      ? sQLDefault(field.constraints.default) : null,
+      ? sQLDefault(columnDefault(field)) : null,
     was: field.attrs?.was || null,
   };
 }
@@ -4009,6 +4010,14 @@ function renderCreate(spec) {
   const ix = indexes.map((i) => renderIndex(spec, i));
   if (ix.length) blocks.push(ix.join('\n'));
   return blocks;
+}
+
+// An enum default names a member (`level Level, [:high]`), and the
+// column holds the member's value — the one an instance materializes.
+function columnDefault(field) {
+  const nested = SchemaRegistry.get(field.typeName);
+  const d = field.constraints.default;
+  return nested?.kind === 'enum' ? nested._materializeEnum(d) : d;
 }
 
 function sQLDefault(v) {

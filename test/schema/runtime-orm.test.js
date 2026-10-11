@@ -4226,6 +4226,33 @@ describe('orm: the column-mapping gates', () => {
       expect(column('Flag')).toContain('"level" BOOLEAN');
       enumOf('Mixed', 1, 'two');
       expect(() => column('Mixed')).toThrow(/enum 'Mixed' \(on AlarmMixed\) mixes member value types \(number, string\)/);
+      // NULL fits any column, so a null member takes the others' type
+      enumOf('Maybe', 1, null);
+      expect(column('Maybe')).toContain('"level" INTEGER');
+    });
+  });
+
+  test('an enum default renders the member value the instance holds', async () => {
+    const src = [
+      'Level = schema :enum',
+      '  :low 1',
+      '  :high 2',
+      'Status = schema :enum',
+      '  :pending "P"',
+      '  :done "D"',
+      '',
+      'Alarm = schema :model',
+      '  level Level, [:high]',
+      '  status Status, [:pending]',
+    ].join('\n');
+    const { code } = compile(src);
+    await K4.scope(async () => {
+      const A = new Function('__schema', `${code}\nreturn Alarm;`)(rt4.__schema);
+      const sql = A.toSQL();
+      expect(sql).toContain('"level" INTEGER DEFAULT 2');
+      expect(sql).toContain(`"status" ENUM('P', 'D') DEFAULT 'P'`);
+      const a = A.parse({});
+      expect([a.level, a.status]).toEqual([2, 'P']);
     });
   });
 
