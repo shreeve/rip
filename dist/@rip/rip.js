@@ -1634,9 +1634,10 @@ function checkEnumMembers(entries, fail) {
       fail(`enum member ':${m.name}' is declared twice`, m.start);
     byName.set(m.name, m);
   }
+  const valueOf = (m) => m.value === undefined ? m.name : m.value;
   for (const m of members) {
     const other = typeof m.value === "string" ? byName.get(m.value) : undefined;
-    if (other && other !== m) {
+    if (other && valueOf(other) !== m.value) {
       fail(`enum member ':${m.name}' has the value ${JSON.stringify(m.value)}, which is the name of member ':${other.name}' — an input ${JSON.stringify(m.value)} would name both`, m.start);
     }
   }
@@ -15459,7 +15460,17 @@ ${pad ?? ""}`);
       } else if (i === stmts.length - 1 && isNode(stmt) && stmt[0] === "switch" && stmt.length === 4) {
         this.switchStatement(stmt, ind + 1, into);
       } else if (i === stmts.length - 1 && isNode(stmt) && stmt[0] === "try") {
-        this.tryStatement(stmt, ind + 1, into);
+        if (stmt.slice(2).some((part) => isBlock(part))) {
+          const tmp = this.loopTempName("_try");
+          this.temps.used.add(tmp);
+          this.b.emit(`const ${tmp} = [];
+${pad}`);
+          this.tryStatement(stmt, ind + 1, tmp);
+          this.b.emit(`
+${pad}${into}.push(...${tmp});`);
+        } else {
+          this.tryStatement(stmt, ind + 1, into);
+        }
       } else {
         this.statement(stmt, ind + 1);
         if (isLoopNode(stmt))
@@ -25476,7 +25487,7 @@ class SchemaDef {
       });
     }
     for (const [n, v] of enumMembers) {
-      if (typeof v === "string" && v !== n && enumMembers.has(v)) {
+      if (typeof v === "string" && enumMembers.has(v) && enumMembers.get(v) !== v) {
         enumAmbiguity(n, "enum member ':" + n + "' has the value " + JSON.stringify(v) + ", which is the name of member ':" + v + "' — an input " + JSON.stringify(v) + " would name both");
       }
     }
@@ -33339,7 +33350,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "c74fb92409e8daab";
+var compilerBuild = () => "5f2e0294bbacb520";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
