@@ -339,6 +339,29 @@ const VALUE_END = new Set([
 export const PASS_OPENERS = new Set(['(', '[', '{', 'PICK_START', 'OPTPICK_START', 'CALL_START', 'INDEX_START', 'PARAM_START', 'STRING_START', 'INTERPOLATION_START', 'HEREGEX_START', 'INDENT']);
 export const PASS_CLOSERS = new Set([')', ']', '}', 'PICK_END', 'CALL_END', 'INDEX_END', 'PARAM_END', 'STRING_END', 'INTERPOLATION_END', 'HEREGEX_END', 'OUTDENT']);
 
+// The ONE judgment of whether a `:` is a ternary's ELSE, shared by the
+// scanner and every pass that tells a ternary colon from a key colon.
+// Each `?` claims the next `:` at ITS bracket depth — nested and
+// sequential ternaries pair innermost-first, and a bracketed inner
+// ternary never leaks its claim outward; a statement boundary clears
+// that depth's unconsumed claims. `step` feeds one token kind and
+// answers whether it was a claimed `:`.
+export class TernaryClaims {
+  #depths = [0];
+  get pending() { return this.#depths[this.#depths.length - 1] > 0; }
+  step(kind) {
+    const d = this.#depths;
+    const top = d.length - 1;
+    if (kind === 'TERNARY') d[top]++;
+    else if (kind === ':') {
+      if (d[top] > 0) { d[top]--; return true; }
+    } else if (kind === 'TERMINATOR') d[top] = 0;
+    else if (PASS_OPENERS.has(kind)) d.push(0);
+    else if (PASS_CLOSERS.has(kind) && top > 0) d.pop();
+    return false;
+  }
+}
+
 // The implicit-call START predicate: will the call pass open a call
 // after token j? A spaced call-starter argument — or a spread of one
 // (`g ...args`) — following a
@@ -481,12 +504,7 @@ function collectObjects(tokens, mintId) {
   // {kind: 'object', at, sameLine, startsLine}; 'CONTROL' as {kind}.
   const stack = [];
   const insertions = []; // {at, token} against original indices
-  // Pending ternaries per bracket depth: each `?` claims the next ':'
-  // at ITS depth, so nested and sequential ternaries pair
-  // innermost-first (the tagDynamicKeys discipline) and a
-  // parenthesized inner ternary never leaks its claim to the outer
-  // colon.
-  const pendingTernary = [0];
+  const ternary = new TernaryClaims();
   let lastReal = null;
   // Index of a comma that kept its property list open for an indented
   // continuation line; the very next INDENT consumes it.
@@ -637,12 +655,12 @@ function collectObjects(tokens, mintId) {
       // object (the trailing-comma continuation; see the `,` rule).
       const listContinuation = continuationComma === i - 1 && Boolean(listObjectFrame());
       stack.push({ kind: 'INDENT', at: i, listContinuation });
-      pendingTernary.push(0);
+      ternary.step(k);
       continue;
     }
     if (PASS_OPENERS.has(k)) {
       stack.push({ kind: k, at: i });
-      pendingTernary.push(0);
+      ternary.step(k);
       continue;
     }
     if (PASS_CLOSERS.has(k)) {
@@ -651,7 +669,7 @@ function collectObjects(tokens, mintId) {
         else stack.pop();
       }
       stack.pop();
-      if (pendingTernary.length > 1) pendingTernary.pop();
+      ternary.step(k);
       // A dedent is a line break: objects still open below the popped
       // block are no longer same-line.
       if (k === 'OUTDENT') {
@@ -664,14 +682,10 @@ function collectObjects(tokens, mintId) {
       continue;
     }
 
-    if (k === 'TERNARY') pendingTernary[pendingTernary.length - 1]++;
+    if (k === 'TERNARY') ternary.step(k);
 
     if (k === ':') {
-      const pt = pendingTernary.length - 1;
-      if (pendingTernary[pt] > 0) {
-        pendingTernary[pt]--;
-        continue;
-      }
+      if (ternary.step(k)) continue;
       // A non-ternary colon whose key carries a trailing bang is a
       // VOID-METHOD pair (`fn!: ->`): this is the context that resolves
       // the scanner's DAMMIT into VOID_MARKER (a ternary's colon was
@@ -739,7 +753,7 @@ function collectObjects(tokens, mintId) {
       if (k === 'TERMINATOR') {
         // A statement boundary clears unconsumed ternary claims at
         // this depth and un-samelines every open implicit frame.
-        pendingTernary[pendingTernary.length - 1] = 0;
+        ternary.step(k);
         for (let d = stack.length - 1; d >= 0; d--) {
           const fr = stack[d];
           if (fr.kind !== 'object' && fr.kind !== 'CONTROL') break;

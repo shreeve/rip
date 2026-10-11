@@ -2738,3 +2738,13 @@ describe('component tags through a member path', () => {
     emitFails(`${LIB}Part = component\n  accept open from Lib.helper\n  render\n    span\n`, /'Lib\.helper' is not one/);
   });
 });
+
+describe('ternaries in templates', () => {
+  test('a ternary branch ending in subtraction reads the members, tight hyphen included', () => {
+    for (const value of ['ok ? a - b : 0', 'ok ? a-b : 0']) {
+      const code = fullCompile(`Q = component\n  ok := true\n  a := 5\n  b := 3\n  render\n    p title: ${value}\n    div\n      = ${value}\n`, { runtimeDelivery: 'none' }).code;
+      expect(code.match(/this\.ok\.value \? \(this\.a\.value - this\.b\.value\) : 0/g).length).toBe(2);
+      expect(code).not.toContain('"a-b"');
+    }
+  });
+});

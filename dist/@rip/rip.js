@@ -3708,6 +3708,31 @@ var VALUE_END = new Set([
 ]);
 var PASS_OPENERS = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START", "INDENT"]);
 var PASS_CLOSERS = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END", "OUTDENT"]);
+
+class TernaryClaims {
+  #depths = [0];
+  get pending() {
+    return this.#depths[this.#depths.length - 1] > 0;
+  }
+  step(kind) {
+    const d = this.#depths;
+    const top = d.length - 1;
+    if (kind === "TERNARY")
+      d[top]++;
+    else if (kind === ":") {
+      if (d[top] > 0) {
+        d[top]--;
+        return true;
+      }
+    } else if (kind === "TERMINATOR")
+      d[top] = 0;
+    else if (PASS_OPENERS.has(kind))
+      d.push(0);
+    else if (PASS_CLOSERS.has(kind) && top > 0)
+      d.pop();
+    return false;
+  }
+}
 var startsImplicitCall = (tokens, j) => {
   const t = tokens[j];
   const next = tokens[j + 1];
@@ -3777,7 +3802,7 @@ var controlHeadBackwards = (tokens, j) => {
 function collectObjects(tokens, mintId) {
   const stack = [];
   const insertions = [];
-  const pendingTernary = [0];
+  const ternary = new TernaryClaims;
   let lastReal = null;
   let continuationComma = -1;
   const top = () => stack[stack.length - 1];
@@ -3887,12 +3912,12 @@ function collectObjects(tokens, mintId) {
         stack.pop();
       const listContinuation = continuationComma === i - 1 && Boolean(listObjectFrame());
       stack.push({ kind: "INDENT", at: i, listContinuation });
-      pendingTernary.push(0);
+      ternary.step(k);
       continue;
     }
     if (PASS_OPENERS.has(k)) {
       stack.push({ kind: k, at: i });
-      pendingTernary.push(0);
+      ternary.step(k);
       continue;
     }
     if (PASS_CLOSERS.has(k)) {
@@ -3903,8 +3928,7 @@ function collectObjects(tokens, mintId) {
           stack.pop();
       }
       stack.pop();
-      if (pendingTernary.length > 1)
-        pendingTernary.pop();
+      ternary.step(k);
       if (k === "OUTDENT") {
         for (let d = stack.length - 1;d >= 0; d--) {
           const fr = stack[d];
@@ -3917,13 +3941,10 @@ function collectObjects(tokens, mintId) {
       continue;
     }
     if (k === "TERNARY")
-      pendingTernary[pendingTernary.length - 1]++;
+      ternary.step(k);
     if (k === ":") {
-      const pt = pendingTernary.length - 1;
-      if (pendingTernary[pt] > 0) {
-        pendingTernary[pt]--;
+      if (ternary.step(k))
         continue;
-      }
       if (prev?.kind === "DAMMIT")
         prev.kind = "VOID_MARKER";
       const bang = prev?.kind === "VOID_MARKER" ? 1 : 0;
@@ -3954,7 +3975,7 @@ function collectObjects(tokens, mintId) {
       if (k === "||" || k === "&&" || k === "??" || k === "ELSE")
         continue;
       if (k === "TERMINATOR") {
-        pendingTernary[pendingTernary.length - 1] = 0;
+        ternary.step(k);
         for (let d = stack.length - 1;d >= 0; d--) {
           const fr = stack[d];
           if (fr.kind !== "object" && fr.kind !== "CONTROL")
@@ -5644,20 +5665,11 @@ function tagParams(tokens) {
 function tagDynamicKeys(tokens) {
   const OPENERS = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START", "INDENT"]);
   const CLOSERS = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END", "OUTDENT"]);
-  const pendingTernary = [0];
+  const ternary = new TernaryClaims;
   for (let i = 0;i < tokens.length; i++) {
     if (counter.on)
       counter.n++;
-    const k = tokens[i].kind;
-    if (k === "TERNARY") {
-      pendingTernary[pendingTernary.length - 1]++;
-    } else if (k === ":" || k === "TERMINATOR") {
-      const top = pendingTernary.length - 1;
-      if (k === "TERMINATOR")
-        pendingTernary[top] = 0;
-      else if (pendingTernary[top] > 0)
-        pendingTernary[top]--;
-    } else if (k === "INDEX_START" && pendingTernary[pendingTernary.length - 1] === 0) {
+    if (tokens[i].kind === "INDEX_START" && !ternary.pending) {
       let depth = 1;
       let j = i;
       while (++j < tokens.length && depth > 0) {
@@ -5673,10 +5685,7 @@ function tagDynamicKeys(tokens) {
         tokens[j - 1].kind = "]";
       }
     }
-    if (OPENERS.has(tokens[i].kind))
-      pendingTernary.push(0);
-    else if (CLOSERS.has(tokens[i].kind))
-      pendingTernary.pop();
+    ternary.step(tokens[i].kind);
   }
   return tokens;
 }
@@ -5711,23 +5720,12 @@ function insertArrowCommas(tokens) {
   return tokens;
 }
 function tagCompoundKeys(tokens) {
-  const OPENERS = new Set(["(", "[", "{", "PICK_START", "OPTPICK_START", "CALL_START", "INDEX_START", "PARAM_START", "STRING_START", "INTERPOLATION_START", "HEREGEX_START", "INDENT"]);
-  const CLOSERS = new Set([")", "]", "}", "PICK_END", "CALL_END", "INDEX_END", "PARAM_END", "STRING_END", "INTERPOLATION_END", "HEREGEX_END", "OUTDENT"]);
   const identish = (x) => x !== undefined && (x.kind === "IDENTIFIER" || x.kind === "PROPERTY");
-  const pendingTernary = [0];
+  const ternary = new TernaryClaims;
   for (let i = 0;i < tokens.length; i++) {
     if (counter.on)
       counter.n++;
-    const k = tokens[i].kind;
-    if (k === "TERNARY") {
-      pendingTernary[pendingTernary.length - 1]++;
-    } else if (k === ":" || k === "TERMINATOR") {
-      const top = pendingTernary.length - 1;
-      if (k === "TERMINATOR")
-        pendingTernary[top] = 0;
-      else if (pendingTernary[top] > 0)
-        pendingTernary[top]--;
-    } else if (identish(tokens[i]) && pendingTernary[pendingTernary.length - 1] === 0 && tokens[i - 1]?.kind !== "." && tokens[i - 1]?.kind !== "?." && tokens[i - 1]?.kind !== "@") {
+    if (identish(tokens[i]) && !ternary.pending && tokens[i - 1]?.kind !== "." && tokens[i - 1]?.kind !== "?." && tokens[i - 1]?.kind !== "@") {
       let j = i;
       for (;; ) {
         if (counter.on)
@@ -5754,10 +5752,7 @@ function tagCompoundKeys(tokens) {
         tokens.splice(i, j - i + 1, collapsed);
       }
     }
-    if (OPENERS.has(tokens[i].kind))
-      pendingTernary.push(0);
-    else if (CLOSERS.has(tokens[i].kind))
-      pendingTernary.pop();
+    ternary.step(tokens[i].kind);
   }
   return tokens;
 }
@@ -5950,7 +5945,7 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
   const indents = [""];
   const parens = [];
   let pos = 0;
-  let scanTernary = 0;
+  const ternary = new TernaryClaims;
   let atLineStart = true;
   let lastNewlinePos = -1;
   let pendingSpaced = false;
@@ -6016,6 +6011,7 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
       ...extra
     };
     tokens.push(token);
+    ternary.step(kind);
     if (!token.generated && pendingOrigin.length > 0) {
       for (const t of pendingOrigin)
         t.origin = token.id;
@@ -6038,6 +6034,7 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
     };
     pendingOrigin.push(token);
     tokens.push(token);
+    ternary.step(kind);
   };
   const last = () => tokens[tokens.length - 1] ?? null;
   const classSelectorChain = () => {
@@ -6660,7 +6657,7 @@ ${baseline}`).join(`
       const tightColon = /^:(?![=:])/.test(afterWord);
       const spacedColon = /^[^\S\n]+:(?![=:])/.exec(afterWord);
       const symbolish = spacedColon !== null && IDENT_START.test(afterWord[spacedColon[0].length] ?? "");
-      const keysColon = (tightColon || spacedColon !== null && !symbolish) && prev?.kind !== "TERNARY";
+      const keysColon = (tightColon || spacedColon !== null && !symbolish) && !ternary.pending;
       if (prev && (prev.kind === "." || prev.kind === "?." || prev.kind === "@" && !pendingSpaced)) {
         let value = word;
         if (inRender && prev.kind === "." && !keysColon && classSelectorChain()) {
@@ -7011,7 +7008,6 @@ ${baseline}`).join(`
         }
         fail("unspaced '?' needs a value before it (postfix existence) — write ' ? ' for a ternary", pos);
       }
-      scanTernary++;
       push("TERNARY", "?", pos, pos + 1);
       pos++;
       continue;
@@ -7120,7 +7116,7 @@ ${baseline}`).join(`
     }
     if (ch === ":" && IDENT_START.test(text[pos + 1] ?? "") && !insideTypeBody() && !aliasHeadOpen()) {
       const prevTok = tokens[tokens.length - 1];
-      const structural = prevTok !== undefined && (prevTok.kind === "PROPERTY" || prevTok.kind === ")" || prevTok.kind === "]" || prevTok.kind === "}" || prevTok.kind === "CALL_END" || prevTok.kind === "INDEX_END" || prevTok.kind === "PARAM_END" || prevTok.kind === "PICK_END" || prevTok.kind === "STRING" || prevTok.kind === "STRING_END" || prevTok.kind === "NUMBER" || prevTok.kind === "REGEX" || prevTok.kind === "HEREGEX_END" || prevTok.kind === "BOOL" || prevTok.kind === "NULL" || prevTok.kind === "UNDEFINED" || prevTok.kind === "DAMMIT" || prevTok.kind === "?" || prevTok.kind === "MAYBE_DAMMIT" || prevTok.kind === "OPT_MARKER" || prevTok.kind === "THIS" || prevTok.kind === "@" || prevTok.kind === "SYMBOL" || scanTernary > 0 && prevTok.kind === "IDENTIFIER");
+      const structural = prevTok !== undefined && (prevTok.kind === "PROPERTY" || prevTok.kind === ")" || prevTok.kind === "]" || prevTok.kind === "}" || prevTok.kind === "CALL_END" || prevTok.kind === "INDEX_END" || prevTok.kind === "PARAM_END" || prevTok.kind === "PICK_END" || prevTok.kind === "STRING" || prevTok.kind === "STRING_END" || prevTok.kind === "NUMBER" || prevTok.kind === "REGEX" || prevTok.kind === "HEREGEX_END" || prevTok.kind === "BOOL" || prevTok.kind === "NULL" || prevTok.kind === "UNDEFINED" || prevTok.kind === "DAMMIT" || prevTok.kind === "?" || prevTok.kind === "MAYBE_DAMMIT" || prevTok.kind === "OPT_MARKER" || prevTok.kind === "THIS" || prevTok.kind === "@" || prevTok.kind === "SYMBOL" || ternary.pending && prevTok.kind === "IDENTIFIER");
       if (!structural) {
         const end2 = symbolNameEnd(text, pos + 1);
         push("SYMBOL", text.slice(pos + 1, end2), pos, end2);
@@ -7129,8 +7125,6 @@ ${baseline}`).join(`
       }
     }
     if (ch === "=" || ch === "+" || ch === "-" || ch === "." || ch === "," || ch === ";" || ch === ":") {
-      if (ch === ":" && scanTernary > 0)
-        scanTernary--;
       push(ch === ";" ? "TERMINATOR" : ch, ch, pos, pos + 1);
       pos++;
       continue;
@@ -32676,7 +32670,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "5614b621a5abf0dc";
+var compilerBuild = () => "c6b0fdc539a40fa6";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
