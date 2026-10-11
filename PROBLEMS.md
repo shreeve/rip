@@ -81,6 +81,19 @@ lowering knows arrays and strings only.
 outer `a` exists; with `a = 1` in scope it compiles to `for (let b of a)`
 over the outer `a`.
 
+**C43 M — A collecting loop whose tail `try` holds a jump collects nothing.**
+```coffee
+r = for x in [1, 2, 3]
+  try
+    continue if x is 2
+    x
+  catch e then 0
+p r    # [] — expected [1, 3]
+```
+A tail with a `break`/`continue` inside stays a statement; `if` and
+`switch` tails collect per arm (`accumulateIf`), but `try` has no such
+form yet.
+
 ### Legal-looking code emits invalid JavaScript
 
 **C12 M — A function-tail `switch` with a collecting loop in two `when` arms declares `const _result` twice.** Bun rejects the output.
@@ -328,6 +341,8 @@ flip side of A5).
 **P13 M — x12 accepts bad input.** `X12.load!` of an empty file returns the default ISA envelope; `get "EB(0)-1"` → `""`; `set "EB(?)", 5` → null silently; `set "NM1(0)-3", "Q"` throws a raw TypeError (packages/x12/x12.rip ~304).
 
 **P15 M — rsx's rejections and mixed content disagree with its README.** The mismatched-close-tag and non-string errors carry no offset; `parse '</a>'` says "expected </>, got </a>"; `<p>hi <b>there</b> you</p>` drops the text though `textKey` is described as the mixed-content key.
+
+**P27 L — rsx collapses namespaced attributes that share a local name.** With `stripNamespaces` (the default), `<a p:id="1" q:id="2"/>` keeps one `id` silently; the duplicate-attribute rejection compares raw names only.
 
 **P16 L — Barcode encoders ignore unknown options and disagree on errors.** `hieght:`, `colums:`, `eccc:` are accepted (rip/pdf rejects unknown keys); a QR miss throws `"finder"` while the others say "not found"; `encodeQR ''` encodes while Code 128 and PDF417 reject empty text.
 
