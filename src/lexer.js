@@ -41,7 +41,7 @@ import { IDENT_START, IDENT_PART } from './ident.js';
 // tagPostfixConditionals) stay here — they never add tokens.
 import {
   implicitBlocks, implicitObjects, implicitCalls,
-  PASS_OPENERS, PASS_CLOSERS,
+  PASS_OPENERS, PASS_CLOSERS, TernaryClaims,
 } from './implicit.js';
 // The type-annotation collapse pass, plus the four type-shape
 // predicates the SCANNER consults: a trailing `<` continues a line only
@@ -157,27 +157,18 @@ export function tagParams(tokens) {
 // followed by ':' is an object KEY (`{@[k]: v}`, `{a[i]: v}` shapes), not
 // an index — both brackets retag to their plain kinds so the grammar's
 // dynamic-key rules see `[ Expression ]`. The one ':' that must NOT
-// trigger this is a ternary's: a pending TERNARY at the same bracket
-// depth claims the next ':' there (`a ? b[k] : c` keeps its index). The
+// trigger this is a ternary's (TernaryClaims: `a ? b[k] : c` keeps its
+// index). The
 // inner matching scan is O(pair length) per INDEX_START — quadratic only
 // for pathologically nested index chains, linear for normal programs
 // (the tagPostfixConditionals bound).
 export function tagDynamicKeys(tokens) {
   const OPENERS = new Set(['(', '[', '{', 'PICK_START', 'OPTPICK_START', 'CALL_START', 'INDEX_START', 'PARAM_START', 'STRING_START', 'INTERPOLATION_START', 'HEREGEX_START', 'INDENT']);
   const CLOSERS = new Set([')', ']', '}', 'PICK_END', 'CALL_END', 'INDEX_END', 'PARAM_END', 'STRING_END', 'INTERPOLATION_END', 'HEREGEX_END', 'OUTDENT']);
-  const pendingTernary = [0]; // per bracket depth
+  const ternary = new TernaryClaims();
   for (let i = 0; i < tokens.length; i++) {
     if (counter.on) counter.n++;
-    const k = tokens[i].kind;
-    if (k === 'TERNARY') {
-      pendingTernary[pendingTernary.length - 1]++;
-    } else if (k === ':' || k === 'TERMINATOR') {
-      // A ':' satisfies the innermost pending ternary at this depth; a
-      // statement boundary clears any unconsumed ones.
-      const top = pendingTernary.length - 1;
-      if (k === 'TERMINATOR') pendingTernary[top] = 0;
-      else if (pendingTernary[top] > 0) pendingTernary[top]--;
-    } else if (k === 'INDEX_START' && pendingTernary[pendingTernary.length - 1] === 0) {
+    if (tokens[i].kind === 'INDEX_START' && !ternary.pending) {
       let depth = 1;
       let j = i;
       while (++j < tokens.length && depth > 0) {
@@ -191,8 +182,7 @@ export function tagDynamicKeys(tokens) {
         tokens[j - 1].kind = ']';
       }
     }
-    if (OPENERS.has(tokens[i].kind)) pendingTernary.push(0);
-    else if (CLOSERS.has(tokens[i].kind)) pendingTernary.pop();
+    ternary.step(tokens[i].kind);
   }
   return tokens;
 }
@@ -233,23 +223,13 @@ export function insertArrowCommas(tokens) {
 // `{ beta-site.amazon.com: 2 }`. The chain collapses to a STRING token
 // spanning the written chain; the value concatenates the parts
 // (spacing around dots drops). A ternary's `:` never claims —
-// `a ? b.c : d` keeps its member read — the same pending-ternary
-// discipline as tagDynamicKeys.
+// `a ? b.c : d` keeps its member read (TernaryClaims).
 export function tagCompoundKeys(tokens) {
-  const OPENERS = new Set(['(', '[', '{', 'PICK_START', 'OPTPICK_START', 'CALL_START', 'INDEX_START', 'PARAM_START', 'STRING_START', 'INTERPOLATION_START', 'HEREGEX_START', 'INDENT']);
-  const CLOSERS = new Set([')', ']', '}', 'PICK_END', 'CALL_END', 'INDEX_END', 'PARAM_END', 'STRING_END', 'INTERPOLATION_END', 'HEREGEX_END', 'OUTDENT']);
   const identish = (x) => x !== undefined && (x.kind === 'IDENTIFIER' || x.kind === 'PROPERTY');
-  const pendingTernary = [0];
+  const ternary = new TernaryClaims();
   for (let i = 0; i < tokens.length; i++) {
     if (counter.on) counter.n++;
-    const k = tokens[i].kind;
-    if (k === 'TERNARY') {
-      pendingTernary[pendingTernary.length - 1]++;
-    } else if (k === ':' || k === 'TERMINATOR') {
-      const top = pendingTernary.length - 1;
-      if (k === 'TERMINATOR') pendingTernary[top] = 0;
-      else if (pendingTernary[top] > 0) pendingTernary[top]--;
-    } else if (identish(tokens[i]) && pendingTernary[pendingTernary.length - 1] === 0 &&
+    if (identish(tokens[i]) && !ternary.pending &&
                tokens[i - 1]?.kind !== '.' && tokens[i - 1]?.kind !== '?.' &&
                tokens[i - 1]?.kind !== '@') {
       let j = i;
@@ -269,8 +249,7 @@ export function tagCompoundKeys(tokens) {
         tokens.splice(i, j - i + 1, collapsed);
       }
     }
-    if (OPENERS.has(tokens[i].kind)) pendingTernary.push(0);
-    else if (CLOSERS.has(tokens[i].kind)) pendingTernary.pop();
+    ternary.step(tokens[i].kind);
   }
   return tokens;
 }
@@ -549,9 +528,11 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // frame, and a dedent can never cross the innermost frame's floor.
   const parens = [];
   let pos = 0;
-  // Open ternaries during the scan: a pending `?` claims the next
-  // bare `:` as its ELSE, so `c ? a :b` never mints a symbol there.
-  let scanTernary = 0;
+  // Pending ternaries, fed by every token push (TernaryClaims — the
+  // rewriters' own judgment): a `:` a pending `?` claims is its ELSE,
+  // so the word before it never keys (`c ? a - b : d`) and the word
+  // after it never mints a symbol (`c ? a :b`).
+  const ternary = new TernaryClaims();
   let atLineStart = true;
   let lastNewlinePos = -1; // offset of the newline that ended the previous LOGICAL line
   let pendingSpaced = false;
@@ -664,6 +645,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       ...extra,
     };
     tokens.push(token);
+    ternary.step(kind);
     // Synthetic tokens' origin resolves to the ID of the first REAL
     // token that follows them — never to another synthetic token.
     if (!token.generated && pendingOrigin.length > 0) {
@@ -684,6 +666,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     };
     pendingOrigin.push(token);
     tokens.push(token);
+    ternary.step(kind);
   };
 
   const last = () => tokens[tokens.length - 1] ?? null;
@@ -1477,8 +1460,8 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       // A word directly followed by ':' is a property KEY before it is
       // anything else — keywords, aliases, and reserved words included
       // (key capture precedes keyword
-      // classification: `when: 1` and `if: 2` are pairs). Ternary
-      // branches are guarded; `::` and `:=` never key — the
+      // classification: `when: 1` and `if: 2` are pairs). A colon a
+      // pending ternary claims never keys; `::` and `:=` never key — the
       // prototype operator and the reactive assign own those colons.
       // A SPACED colon tight to a following word is a SYMBOL, never a
       // key (`a is :b`, `schema :model` — the schema-kind rule
@@ -1488,7 +1471,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       const tightColon = /^:(?![=:])/.test(afterWord);
       const spacedColon = /^[^\S\n]+:(?![=:])/.exec(afterWord);
       const symbolish = spacedColon !== null && IDENT_START.test(afterWord[spacedColon[0].length] ?? '');
-      const keysColon = (tightColon || (spacedColon !== null && !symbolish)) && prev?.kind !== 'TERNARY';
+      const keysColon = (tightColon || (spacedColon !== null && !symbolish)) && !ternary.pending;
       if (prev && (prev.kind === '.' || prev.kind === '?.' || (prev.kind === '@' && !pendingSpaced))) {
         // Render blocks: a `.class-name` chain consumes tight hyphens
         // (`.counter-display` is ONE class name); never when
@@ -1994,7 +1977,6 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         }
         fail("unspaced '?' needs a value before it (postfix existence) — write ' ? ' for a ternary", pos);
       }
-      scanTernary++;
       push('TERNARY', '?', pos, pos + 1);
       pos++;
       continue;
@@ -2160,7 +2142,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         // colon closes the ternary (`c ? d :e`); after `?` or another
         // colon the branch NEEDS a value, so `:yes` mints
         // (`c ? :yes : :no`).
-        (scanTernary > 0 && prevTok.kind === 'IDENTIFIER'));
+        (ternary.pending && prevTok.kind === 'IDENTIFIER'));
       if (!structural) {
         const end2 = symbolNameEnd(text, pos + 1);
         push('SYMBOL', text.slice(pos + 1, end2), pos, end2);
@@ -2169,7 +2151,6 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       }
     }
     if (ch === '=' || ch === '+' || ch === '-' || ch === '.' || ch === ',' || ch === ';' || ch === ':') {
-      if (ch === ':' && scanTernary > 0) scanTernary--;
       push(ch === ';' ? 'TERMINATOR' : ch, ch, pos, pos + 1);
       pos++;
       continue;

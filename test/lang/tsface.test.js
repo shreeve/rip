@@ -2528,3 +2528,9 @@ describe('branch narrowing: a block\'s effects open with the assertion that narr
     expect(faced.code).not.toContain('__ripNarrow');
   });
 });
+
+test('the TS face keeps an operator ternary\'s assignment in its branch and hoists the postfix spelling\'s', () => {
+  const code = ts('x: number = 0\na = true\ny = a ? x = 1 : 2\nw = 1 if a else 2\n').code;
+  expect(code).toContain('let y = a ? (x = 1) : 2;');
+  expect(code).toContain('w = (a ? 1 : 2);');
+});

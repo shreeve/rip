@@ -66,9 +66,9 @@ const CAST_LHS_ENDERS = new Set([
 // Tokens that can BEGIN a type expression. RESERVED covers the TS
 // types that spell JS reserved words (`void`, `unknown` is an
 // identifier, `typeof` arrives as UNARY). PROPERTY covers a type name
-// the scanner key-tagged because a ':' follows — the ternary
-// else-branch colon of `a ? x as T : b` (the cast run stops at the
-// ':', which stays the ternary's).
+// the scanner key-tagged because a pair colon follows (`x as T: 1`):
+// the cast still claims it, so the stray colon rejects at parse instead
+// of `as` falling through to a call.
 const TYPE_STARTERS = new Set([
   'IDENTIFIER', 'PROPERTY', '(', 'CALL_START', 'PARAM_START', '{', '[',
   'INDEX_START', 'STRING', 'NUMBER', 'BOOL', 'NULL', 'UNDEFINED', '-',

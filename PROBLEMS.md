@@ -111,9 +111,18 @@ false. They read as one operator with two spellings.
 binds tighter than `=~`, and `toMatchable` stringifies the boolean.
 
 **C25 L — Assorted rejections of legal-looking forms.**
-`a ? b ? c : d : e` (nested ternary); `unless a … else if c`;
+`unless a … else if c`;
 `[a, ..., b] = c` (parameters accept the `...` marker); `a?[1..2]`
 (`a?[0]` works); `x = a ?.5 : 1`.
+
+**C41 M — An implicit call in a ternary's then branch swallows the else colon.**
+`ok ? f b : c`, `ok ? f 1 : c` and `ok ? g! b : c` reject "Unexpected
+':'"; `ok ? f(b) : c` compiles. The implicit call does not close at the
+colon the pending `?` claims.
+
+**C42 L — A ternary split across lines, or with an arrow in its then branch, rejects.**
+`x = ok ? b :` + an indented `c`, a leading `: c` line, and
+`ok ? -> b : c` all fail to parse; JavaScript accepts each shape.
 
 **C26 L — A postfix comprehension on a module's last line builds a throwaway array.** `f a for a in b` as the final line emits a collecting IIFE; followed by another line it emits a plain loop and a stray `};`.
 

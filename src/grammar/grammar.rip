@@ -1113,8 +1113,10 @@ grammar =
     o 'Statement POST_UNLESS Expression' , '["if", ["!", 3], [1]]', 'if: _, condition(unary: operator, operand), _(then)'
     o 'Expression POST_UNLESS Expression', '["if", ["!", 3], [1]]', 'if: _, condition(unary: operator, operand), _(then)'
     # Postfix conditional WITH else — the Python-style ternary spelling
-    # (`b if c else d`).
-    o 'Expression[then] POST_IF Expression[condition] ELSE (INDENT Expression[else] OUTDENT | Expression[else])', '["?:", @condition, @then, @else]', 'ternary: operator, condition, then, else'
+    # (`b if c else d`). Its own kind: the left-nested chain this parses
+    # (`x if a else y if b else z`) re-associates at emission, and the
+    # operator `c ? x : y`, which shares the node shape, never does.
+    o 'Expression[then] POST_IF Expression[condition] ELSE (INDENT Expression[else] OUTDENT | Expression[else])', '["?:", @condition, @then, @else]', 'ifelse: operator, condition, then, else'
     # A statement's postfix if-else: `return x if c else y` returns the
     # ternary, the reading the same words have after any expression. The
     # Return reduces before POST_IF (the guard form needs it to), so the
@@ -1565,6 +1567,7 @@ kinds =
   'gate':          ['annotation', 'key', 'operator', 'rhs', 'target']
   'heregex':       ['flags', 'parts']
   'if':            ['condition', 'else', 'then']
+  'ifelse':        ['condition', 'else', 'operator', 'then']
   'import':        ['attributes', 'extra', 'source', 'spec', 'typeOnly']
   'index':         ['key', 'object', 'operator']
   'loop':          ['body', 'count']

@@ -90,11 +90,11 @@ const PAIRS = [
   ['f = (a = (g 1)\n b: T) -> b', 'f = (a = (g 1)\n b) -> b'],
   ['f = (a = switch v\n  when 1 then 2\n  else 3\n, b: T) -> b', 'f = (a = switch v\n  when 1 then 2\n  else 3\n, b) -> b'],
   ['f = (a = ->\n  k: 1\n  j: 2\n, b: T) -> b', 'f = (a = ->\n  k: 1\n  j: 2\n, b) -> b'],
-  // casts in ternary branches: the type name before the else-colon is
-  // scanner-key-tagged PROPERTY; the cast claims it and the ':' stays
-  // the ternary's
+  // casts in ternary branches: the cast run stops at the ternary's
+  // else-colon, which the pending `?` claims (tight or spaced)
   ['y = a ? x as T : b', 'y = a ? x : b'],
   ['q = c ? v as Map<K, V> : w', 'q = c ? v : w'],
+  ['y = a ? x as T: b', 'y = a ? x : b'],
   // return types
   ['def g(a: string): number\n  a', 'def g(a)\n  a'],
   ['def g: number\n  5', 'def g\n  5'],
@@ -234,8 +234,8 @@ describe('erasure boundary pins: guards, forwards, segments, ternary casts', () 
   });
 
   test('casts parse in ternary branches; the neighboring forms are unchanged', () => {
-    // The cast run stops at the ternary's else-colon; the PROPERTY
-    // key-tag on the type name is a type starter.
+    // The cast run stops at the ternary's else-colon, which the
+    // pending `?` claims — the type name before it is never a key.
     expect(compile('y = a ? x as T : b').code).toBe('let y = a ? x : b;');
     // No collision: an object literal in a ternary branch parses —
     // each brace depth pairs its own colons, so the brace-inner pair
