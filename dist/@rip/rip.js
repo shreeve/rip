@@ -327,7 +327,7 @@ function matchSchemaPragma(tokens, i, config, depth, fail) {
   if (!valTok || valTok.kind !== "NUMBER") {
     fail(`pragma 'schema.${key}' requires a number literal — example: schema.${key} = 100`, (valTok ?? keyTok).start);
   }
-  const n = Number(valTok.value);
+  const n = numberOf(valTok, `pragma 'schema.${key}'`, fail);
   if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
     fail(`pragma 'schema.${key}' expects a non-negative integer (got ${valTok.value}); use 0 to disable`, valTok.start);
   }
@@ -1292,7 +1292,7 @@ function parseModelDirectiveArgs(e, shape, fail) {
       if (!numTok || numTok.kind !== "NUMBER") {
         fail(`@${e.name} requires an integer literal — '@idStart 10001'`, (numTok ?? tokens[0] ?? { start: e.start }).start);
       }
-      const n = sign * Number(numTok.value);
+      const n = sign * numberOf(numTok, `@${e.name}`, fail);
       if (!Number.isInteger(n)) {
         fail(`@${e.name} requires an integer literal; got ${numTok.value}`, numTok.start);
       }
@@ -1622,7 +1622,7 @@ function parseEnumLine(line, entries, fail) {
   if (line.length > 3 && !(line.length === 4 && valueTok.kind === "-" && line[3].kind === "NUMBER")) {
     fail(`extra tokens after enum member ':${name}' value`, line[3].start);
   }
-  const value = valueTok.kind === "-" && line[3]?.kind === "NUMBER" ? -Number(line[3].value) : literalOf(valueTok, `enum member ':${name}' value`, fail);
+  const value = valueTok.kind === "-" && line[3]?.kind === "NUMBER" ? -numberOf(line[3], `enum member ':${name}' value`, fail) : literalOf(valueTok, `enum member ':${name}' value`, fail);
   entries.push({ tag: "enum-member", name, value, start: first.start });
 }
 function isRangeConstraintTokens(tokens) {
@@ -1640,7 +1640,7 @@ function parseRangeTokens(tokens, fieldName, fail) {
     if (numTok?.kind !== "NUMBER") {
       fail(`range endpoints must be numeric literals`, (numTok ?? tokens[0]).start);
     }
-    return sign * Number(numTok.value);
+    return sign * numberOf(numTok, "a range endpoint", fail);
   };
   let min;
   if (tokens[i]?.kind !== "..")
@@ -1677,7 +1677,7 @@ function parseDefaultBracket(tokens, fieldName, fail, span = {}) {
     fail(`regex constraints are written bare, not in brackets — replace '[${part[0].value}]' with '${part[0].value}'`, tokens[0].start);
   }
   if (part.length === 2 && part[0].kind === "-" && part[1].kind === "NUMBER") {
-    return -Number(part[1].value);
+    return -numberOf(part[1], `field '${fieldName}' default`, fail);
   }
   const sym = symWordAt(part, 0);
   if (sym && part.length === 2)
@@ -1697,10 +1697,16 @@ function parseRegexToken(tok, fail) {
     fail(`invalid regex '${tok.value}': ${e.message}`, tok.start);
   }
 }
+function numberOf(tok, what, fail) {
+  const text = tok.value.replace(/_/g, "");
+  if (text.endsWith("n"))
+    fail(`${what} cannot be a BigInt (${tok.value}) — schema values are JSON numbers`, tok.start);
+  return Number(text);
+}
 function literalOf(tok, what, fail) {
   switch (tok.kind) {
     case "NUMBER":
-      return Number(tok.value);
+      return numberOf(tok, what, fail);
     case "STRING":
       if (!tok.value.startsWith('"')) {
         fail(`${what} must be a plain string literal (heredocs have no literal key form)`, tok.start);
@@ -9678,7 +9684,8 @@ var COMPONENT_RUNTIME_FIELDS = new Set([
   "_hmrPropKeys",
   "_hmrResetPending",
   "_hmrReset",
-  "_asChild"
+  "_asChild",
+  "_boundCache"
 ]);
 var BINOPS = new Set(["+", "-", "*", "/", "%", "**", "<", ">", "<=", ">=", "==", "!=", "&&", "||", "??", "<<", ">>", ">>>", "&", "^", "|"]);
 var ASSIGNS = new Set(["=", "void-assign", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??=", "<<=", ">>=", ">>>=", "&=", "^=", "|="]);
@@ -10726,23 +10733,37 @@ class Emitter {
       throw this.positionedError(node, "emitter: `@rest` is the runtime-owned view of the caller's undeclared props and is never assigned — " + "set the attribute on the element in render, or declare the name as a prop the caller supplies");
     }
     if (Emitter.isPattern(target)) {
-      const names = [];
-      this.patternNames(target, names, true);
-      for (const n of names) {
-        if (this.memberKindOf(n) === "computed")
-          this.rejectComputedMemberWrite(node, n);
-      }
+      for (const [name, kind] of this.patternMemberTargets(target))
+        this.checkMemberKindWrite(node, name, kind);
       return;
     }
-    let name = null, kind = null;
     if (typeof target === "string") {
       this.checkBareRest(node, target);
-      name = target;
-      kind = this.memberKindOf(target);
+      this.checkMemberKindWrite(node, target, this.memberKindOf(target));
     } else if (isNode(target) && target[0] === "." && target[1] === "this" && typeof target[2] === "string") {
-      name = target[2];
-      kind = this.thisMemberKindOf(name);
+      this.checkMemberKindWrite(node, target[2], this.thisMemberKindOf(target[2]));
     }
+  }
+  patternMemberTargets(p, out = []) {
+    if (typeof p === "string") {
+      if (p !== ",")
+        out.push([p, this.memberKindOf(p)]);
+    } else if (isNode(p)) {
+      const h = p[0];
+      if (h === "." && p.length === 3 && p[1] === "this" && typeof p[2] === "string")
+        out.push([p[2], this.thisMemberKindOf(p[2])]);
+      else if (h === "array")
+        for (const el of p.slice(1))
+          this.patternMemberTargets(el, out);
+      else if (h === "object")
+        for (const pair of p.slice(1))
+          this.patternMemberTargets(pair[0] === ":" ? pair[2] : pair[1], out);
+      else if (["rest", "...", "default", "=", "cast", "satisfies"].includes(h))
+        this.patternMemberTargets(p[1], out);
+    }
+    return out;
+  }
+  checkMemberKindWrite(node, name, kind) {
     if (kind === null)
       return;
     if (kind === "computed")
@@ -10849,7 +10870,7 @@ class Emitter {
     if (this.ts)
       this.b.tsOnly(() => this.b.emit(` as ${self === "this" ? "this" : `(typeof ${self})`}[${JSON.stringify(name)}])`));
   }
-  asCallee(callee, fn) {
+  asReference(callee, fn) {
     const name = typeof callee === "string" ? callee : isNode(callee) && callee[0] === "." && callee.length === 3 && callee[1] === "this" && typeof callee[2] === "string" ? callee[2] : null;
     const prev = this.calleeName;
     this.calleeName = name;
@@ -14180,7 +14201,11 @@ ${pad}`);
     const block = (body) => into === null ? this.braceBlock(body, ind) : this.accumulateBlock(body, ind, into);
     if (Emitter.hasMatchArms(cases)) {
       this.checkMatchSwitch(node);
-      this.mark(node, "$self", () => this.matchChain(node, ind, block));
+      this.mark(node, "$self", () => {
+        this.matchChain(node, ind, block);
+        if (into !== null && dflt === null)
+          this.accumulateMissingArm(ind, into);
+      });
       return;
     }
     this.mark(node, "$self", () => {
@@ -14207,6 +14232,10 @@ ${pad}`);
           this.b.emit(`${pad}  default:
 `);
           this.caseBody(dflt, ind, into);
+        } else if (into !== null) {
+          this.b.emit(`${pad}  default:
+${pad}    ${into}.push(undefined);
+`);
         }
         this.b.emit(`${pad}}`);
       } else {
@@ -14222,6 +14251,8 @@ ${pad}`);
         if (dflt !== null) {
           this.b.emit(" else ");
           block(dflt);
+        } else if (into !== null) {
+          this.accumulateMissingArm(ind, into);
         }
       }
     });
@@ -15070,7 +15101,7 @@ ${pad ?? ""}`);
         this.b.emit(")");
     });
   }
-  returnBlock(block, ind) {
+  returnBlock(block, ind, effect = false) {
     const stmts = this.branchLive(block);
     this.b.emit(`{
 `);
@@ -15078,7 +15109,7 @@ ${pad ?? ""}`);
     stmts.forEach((stmt, i) => {
       this.b.emit("  ".repeat(ind + 1));
       if (i === stmts.length - 1)
-        this.implicitReturn(stmt, ind + 1);
+        this.implicitReturn(stmt, ind + 1, effect);
       else
         this.statement(stmt, ind + 1);
       this.b.emit(`
@@ -15086,17 +15117,17 @@ ${pad ?? ""}`);
     });
     this.b.emit("  ".repeat(ind) + "}");
   }
-  returnifyIf(node, ind) {
+  returnifyIf(node, ind, effect = false) {
     this.b.emit("if (");
     this.grouped(node, "condition", node[1], Emitter.needsGrouping(node[1], "operand"));
     this.b.emit(") ");
-    this.mark(node, "then", () => this.returnBlock(node[2], ind));
+    this.mark(node, "then", () => this.returnBlock(node[2], ind, effect));
     if (node.length >= 4) {
       this.b.emit(" else ");
       if (isNode(node[3]) && node[3][0] === "if")
-        this.returnifyIf(node[3], ind);
+        this.returnifyIf(node[3], ind, effect);
       else
-        this.mark(node, "else", () => this.returnBlock(node[3], ind));
+        this.mark(node, "else", () => this.returnBlock(node[3], ind, effect));
     }
   }
   rejectYieldInIIFE(node) {
@@ -15161,11 +15192,11 @@ ${pad ?? ""}`);
     this.tryBranches(node, ind);
     this.b.emit(" })()");
   }
-  tryBranches(node, ind) {
+  tryBranches(node, ind, effect = false) {
     this.mark(node, "$self", () => {
       this.b.emit("try ");
       const vbody = isBlock(node[1]) ? node[1] : ["block", node[1]];
-      this.mark(node, "body", () => this.returnBlock(vbody, ind));
+      this.mark(node, "body", () => this.returnBlock(vbody, ind, effect));
       if (node.length === 2)
         this.b.emit(" catch {}");
       for (const part of node.slice(2)) {
@@ -15178,7 +15209,7 @@ ${pad ?? ""}`);
           const [binding, body] = part;
           if (binding === null) {
             this.b.emit(" catch ");
-            this.returnBlock(body, ind);
+            this.returnBlock(body, ind, effect);
           } else if (Emitter.isPattern(binding)) {
             this.checkExportedConstWrite(part, binding);
             this.checkImportWrite(part, binding);
@@ -15196,7 +15227,7 @@ ${pad ?? ""}`);
             stmts.forEach((stmt, i) => {
               this.b.emit("  ".repeat(ind + 1));
               if (i === stmts.length - 1)
-                this.implicitReturn(stmt, ind + 1);
+                this.implicitReturn(stmt, ind + 1, effect);
               else
                 this.statement(stmt, ind + 1);
               this.b.emit(`
@@ -15207,18 +15238,18 @@ ${pad ?? ""}`);
             this.b.emit(" catch (");
             this.mark(part, "binding", () => this.emitParam(binding));
             this.b.emit(") ");
-            this.withBindings([binding[1]], () => this.returnBlock(body, ind));
+            this.withBindings([binding[1]], () => this.returnBlock(body, ind, effect));
           } else {
             this.b.emit(" catch (");
             this.mark(part, "binding", () => this.b.emit(binding));
             this.b.emit(") ");
-            this.withBindings([binding], () => this.returnBlock(body, ind));
+            this.withBindings([binding], () => this.returnBlock(body, ind, effect));
           }
         }
       }
     });
   }
-  valueSwitch(node) {
+  valueSwitch(node, effect = false) {
     const [, subject, cases, dflt] = node;
     const ind = this.ind;
     const pad = "  ".repeat(ind);
@@ -15227,7 +15258,7 @@ ${pad ?? ""}`);
     this.mark(node, "$self", () => {
       if (Emitter.hasMatchArms(cases)) {
         this.checkMatchSwitch(node);
-        this.matchChain(node, ind, (body) => this.returnBlock(body, ind));
+        this.matchChain(node, ind, (body) => this.returnBlock(body, ind, effect));
       } else if (subject !== null) {
         this.b.emit("switch (");
         this.mark(node, "subject", () => this.expr(subject));
@@ -15241,12 +15272,12 @@ ${pad ?? ""}`);
             this.b.emit(`:
 `);
           }
-          this.returnCaseBody(body, ind);
+          this.returnCaseBody(body, ind, effect);
         }
         if (dflt !== null) {
           this.b.emit(`${pad}  default:
 `);
-          this.returnCaseBody(dflt, ind);
+          this.returnCaseBody(dflt, ind, effect);
         }
         this.b.emit(`${pad}}`);
       } else {
@@ -15257,31 +15288,36 @@ ${pad ?? ""}`);
           this.b.emit("if (");
           this.whenTests(Array.isArray(conditions) ? conditions : [conditions]);
           this.b.emit(") ");
-          this.returnBlock(body, ind);
+          this.returnBlock(body, ind, effect);
         });
         if (dflt !== null) {
           this.b.emit(" else ");
-          this.returnBlock(dflt, ind);
+          this.returnBlock(dflt, ind, effect);
         }
       }
     });
     this.b.emit(" })()");
   }
-  returnCaseBody(body, ind) {
-    this.inCtrl(() => this.returnCaseBodyCtrl(body, ind));
+  returnCaseBody(body, ind, effect = false) {
+    this.inCtrl(() => this.returnCaseBodyCtrl(body, ind, effect));
   }
-  returnCaseBodyCtrl(body, ind) {
+  returnCaseBodyCtrl(body, ind, effect) {
     const stmts = this.branchLive(body);
     this.emitTsTypeDecls(isBlock(body) ? body.slice(1) : [body[0]], "  ".repeat(ind + 2));
     stmts.forEach((stmt, i) => {
       this.b.emit("  ".repeat(ind + 2));
       if (i === stmts.length - 1)
-        this.implicitReturn(stmt, ind + 2);
+        this.implicitReturn(stmt, ind + 2, effect);
       else
         this.statement(stmt, ind + 2);
       this.b.emit(`
 `);
     });
+    const tail = stmts[stmts.length - 1];
+    if (effect && (this.effectTailWrites(tail) || this.effectBranchWrites(tail))) {
+      this.b.emit("  ".repeat(ind + 2) + `break;
+`);
+    }
   }
   loopHeader(node) {
     const head = node[0];
@@ -15416,7 +15452,14 @@ ${pad ?? ""}`);
         this.accumulateIf(node[3], ind, into);
       else
         this.mark(node, "else", () => this.accumulateBlock(node[3], ind, into));
+    } else {
+      this.accumulateMissingArm(ind, into);
     }
+  }
+  accumulateMissingArm(ind, into) {
+    this.b.emit(` else {
+` + "  ".repeat(ind + 1) + `${into}.push(undefined);
+` + "  ".repeat(ind) + "}");
   }
   accumulateBlock(block, ind, into) {
     this.b.emit(`{
@@ -16504,7 +16547,7 @@ ${pad ?? ""}`);
         for (const n of this.pushReactiveFrame(stmts, names))
           names.add(n);
         this.scopes.push(names);
-        this.funcBlock(node, body, stmts, ind, entries, false, stmts.length > 0 && this.cleanupTail(stmts[stmts.length - 1]));
+        this.funcBlock(node, body, stmts, ind, entries, false, true);
         this.scopes.pop();
         this.rframes.pop();
       }));
@@ -16520,49 +16563,60 @@ ${pad ?? ""}`);
       this.hoistLine(entries);
       this.b.emit(" ");
     }
-    if (this.cleanupTail(body))
-      this.b.emit("return ");
-    this.mark(node, "value", () => this.withExpression(() => {
-      const wrap = Emitter.needsGrouping(body, "operand") || isObject(body);
-      if (wrap)
-        this.b.emit("(");
-      this.expr(body);
-      if (wrap)
-        this.b.emit(")");
-    }));
-    this.b.emit("; })");
+    if (this.effectBranchWrites(body)) {
+      this.mark(node, "value", () => this.withExpression(() => this.implicitReturn(body, ind, true)));
+      this.b.emit(" })");
+    } else {
+      if (!this.effectTailWrites(body))
+        this.b.emit("return ");
+      this.mark(node, "value", () => this.withExpression(() => {
+        const wrap = Emitter.needsGrouping(body, "operand") || isObject(body);
+        if (wrap)
+          this.b.emit("(");
+        this.expr(body);
+        if (wrap)
+          this.b.emit(")");
+      }));
+      this.b.emit("; })");
+    }
     this.scopes.pop();
     this.rframes.pop();
   }
-  cleanupTail(stmt) {
-    if (typeof stmt === "string")
-      return !["break", "continue", "debugger"].includes(stmt);
+  effectTailWrites(stmt) {
     if (!isNode(stmt))
       return false;
-    if (isFunc(stmt))
-      return true;
-    if (this.isEffectDecl(stmt))
-      return true;
     const h = stmt[0];
-    if (isNode(h))
-      return true;
-    if ([".", "?.", "[]", "optindex", "await", "dammit!", "dammit?", "return", "throw"].includes(h))
-      return true;
-    if (h === "if" && stmt.length >= 3 && stmt.length <= 4) {
-      return stmt.slice(2).every((arm) => this.cleanupTail(Emitter.blockTail(arm)));
+    if (h === "block" && stmt.length > 1) {
+      const tail = stmt[stmt.length - 1];
+      return this.effectTailWrites(tail) || this.effectBranchWrites(tail);
     }
-    if (h === "switch" && stmt.length === 4) {
-      const arms = [...stmt[2].map((w) => w[2]), ...stmt[3] !== null ? [stmt[3]] : []];
-      return arms.every((arm) => this.cleanupTail(Emitter.blockTail(arm)));
-    }
-    return this.semanticKindOf(stmt) === "call";
+    if (isAssignHead(h) || h === ".=" || isUpdate(stmt))
+      return true;
+    if (Emitter.LOOP_HEADS.has(h) || isDefHead(h) || h === "class" || h === "enum" || h === "export")
+      return true;
+    if (this.isModuleImport(stmt) || this.isReactiveDecl(stmt) || this.isReadonlyDecl(stmt))
+      return true;
+    return this.isEffectDecl(stmt) && stmt[1] !== null;
   }
-  static blockTail(body) {
-    if (isBlock(body))
-      return body[body.length - 1];
-    if (isNode(body) && body.length === 1 && !isFunc(body))
-      return body[0];
-    return body;
+  effectBranchWrites(stmt) {
+    if (!isNode(stmt))
+      return false;
+    const armTail = (body) => {
+      const stmts = Emitter.branchStmts(body);
+      const tail = stmts[stmts.length - 1];
+      return this.effectTailWrites(tail) || this.effectBranchWrites(tail);
+    };
+    if (stmt[0] === "if" && stmt.length >= 3 && stmt.length <= 4) {
+      const { arms, elseBlock } = Emitter.ifArms(stmt);
+      return arms.some((a) => armTail(a[2])) || elseBlock !== null && armTail(elseBlock);
+    }
+    if (stmt[0] === "switch" && stmt.length === 4) {
+      return stmt[2].some((w) => armTail(w[2])) || stmt[3] !== null && armTail(stmt[3]);
+    }
+    if (stmt[0] === "try") {
+      return armTail(isBlock(stmt[1]) ? stmt[1] : ["block", stmt[1]]) || stmt.slice(2).some((part) => isNode(part) && !isBlock(part) && armTail(part[1]));
+    }
+    return false;
   }
   static effectBodyYields(body) {
     return isFunc(body) ? Emitter.containsYield(body[2]) : Emitter.containsYield(body);
@@ -16802,8 +16856,8 @@ ${pad ?? ""}`);
       if (name === "_init" || name === "_create" || name === "_setup" || /^create_block_\d+$/.test(name)) {
         throw this.positionedError(stmt, `emitter: component member '${name}' collides with the generated lifecycle machinery — '_init', ` + "'_create', '_setup', and 'create_block_N' are the class methods the component lowering emits (a " + "same-named member would silently replace the generated one at runtime); rename the member", node);
       }
-      if (name === "mount" || name === "unmount") {
-        throw this.positionedError(stmt, `emitter: component member '${name}' collides with the component runtime API — 'mount' and 'unmount' ` + "are __Component's own methods, and the machinery calls them on every instance (a " + "same-named member would silently shadow them); rename the member", node);
+      if (name === "mount" || name === "unmount" || name === "_bound") {
+        throw this.positionedError(stmt, `emitter: component member '${name}' collides with the component runtime API — 'mount', 'unmount', and '_bound' ` + "are __Component's own methods, and the machinery calls them on every instance (a " + "same-named member would silently shadow them); rename the member", node);
       }
       seen.set(name, stmt);
       if (kind !== "hook") {
@@ -17373,7 +17427,7 @@ ${pad ?? ""}`);
                 for (const n of this.pushReactiveFrame(bodyStmts, names))
                   names.add(n);
                 this.scopes.push(names);
-                this.funcBlock(eff, bodyNode, bodyStmts, ind + 2, entries, false, bodyStmts.length > 0 && this.cleanupTail(bodyStmts[bodyStmts.length - 1]));
+                this.funcBlock(eff, bodyNode, bodyStmts, ind + 2, entries, false, true);
                 this.scopes.pop();
                 this.rframes.pop();
               }));
@@ -17387,17 +17441,22 @@ ${pad ?? ""}`);
                 this.hoistLine(entries);
                 this.b.emit(" ");
               }
-              if (this.cleanupTail(single))
-                this.b.emit("return ");
-              this.mark(eff, "value", () => this.withExpression(() => {
-                const wrap = Emitter.needsGrouping(single, "operand") || isObject(single);
-                if (wrap)
-                  this.b.emit("(");
-                this.expr(single);
-                if (wrap)
-                  this.b.emit(")");
-              }));
-              this.b.emit("; }");
+              if (this.effectBranchWrites(single)) {
+                this.mark(eff, "value", () => this.withExpression(() => this.implicitReturn(single, ind + 2, true)));
+                this.b.emit(" }");
+              } else {
+                if (!this.effectTailWrites(single))
+                  this.b.emit("return ");
+                this.mark(eff, "value", () => this.withExpression(() => {
+                  const wrap = Emitter.needsGrouping(single, "operand") || isObject(single);
+                  if (wrap)
+                    this.b.emit("(");
+                  this.expr(single);
+                  if (wrap)
+                    this.b.emit(")");
+                }));
+                this.b.emit("; }");
+              }
               this.scopes.pop();
               this.rframes.pop();
             }
@@ -19071,7 +19130,7 @@ ${this.replayPad}}` : " }");
         this.tsScaffoldAny();
         this.b.emit(`) => ${this.runtimeName("__batch")}(() => (`);
         const evType = !this.ts ? null : isFunc(value) && (value[1].length === 0 || value[1].length === 1 && typeof value[1][0] === "string") ? known : isFunc(value) ? null : known;
-        this.tsHandlerCast(() => this.withExpression(() => this.asCallee(value, () => this.expr(value))), evType);
+        this.tsHandlerCast(() => this.withExpression(() => this.asReference(value, () => this.expr(value))), evType);
         this.b.emit(`)(${ev})))`);
       });
     }
@@ -19315,7 +19374,7 @@ ${this.replayPad}}` : " }");
           } else {
             const evType = !this.ts ? null : isFunc(value) && (value[1].length === 0 || value[1].length === 1 && typeof value[1][0] === "string") ? known ?? "any" : isFunc(value) ? null : known;
             this.b.emit("(");
-            site(this.tsHandlerCast(() => avoidingKey(() => this.withExpression(() => this.asCallee(value, () => this.expr(value)))), evType));
+            site(this.tsHandlerCast(() => avoidingKey(() => this.withExpression(() => this.asReference(value, () => this.expr(value)))), evType));
             this.b.emit(`)(${ev})`);
           }
           this.b.emit("))");
@@ -21009,7 +21068,7 @@ ${this.replayPad}}` : " }");
         f.savedTarget = this.inTarget;
         this.inTarget = false;
         if (isInner)
-          this.grouped(n, "object", n[1], Emitter.needsGrouping(n[1], "head") || Emitter.isIntegerLiteral(n[1]));
+          this.asReference(n[1], () => this.grouped(n, "object", n[1], Emitter.needsGrouping(n[1], "head") || Emitter.isIntegerLiteral(n[1])));
         else
           f.role = this.beginMark(n, "object");
       } else if (fkind === "index") {
@@ -21019,19 +21078,19 @@ ${this.replayPad}}` : " }");
         f.savedTarget = this.inTarget;
         this.inTarget = false;
         if (isInner)
-          this.head(n, "object", n[1]);
+          this.asReference(n[1], () => this.head(n, "object", n[1]));
         else
           f.role = this.beginMark(n, "object");
       } else if (fkind === "optcall") {
         f.self = this.beginMark(n, "$self");
         if (isInner)
-          this.asCallee(n[1], () => this.head(n, "callee", n[1]));
+          this.asReference(n[1], () => this.head(n, "callee", n[1]));
         else
           f.role = this.beginMark(n, "callee");
       } else {
         f.self = this.beginMark(n, "$self");
         if (isInner)
-          this.asCallee(n[0], () => this.head(n, "callee", n[0]));
+          this.asReference(n[0], () => this.head(n, "callee", n[0]));
         else
           f.role = this.beginMark(n, "callee");
       }
@@ -21515,7 +21574,10 @@ ${this.replayPad}}` : " }");
       this.mark(node, "operator", () => this.b.emit(node[0]));
       if (/^[a-z]/.test(node[0]))
         this.b.emit(" ");
-      this.operand(node, "operand", node[1]);
+      if (node[0] === "delete")
+        this.asReference(node[1], () => this.operand(node, "operand", node[1]));
+      else
+        this.operand(node, "operand", node[1]);
     });
   }
   spread(node) {
@@ -22560,7 +22622,7 @@ ${"  ".repeat(ind)}`);
     this.rframes.pop();
     this.ind = ind;
   }
-  funcBlock(node, block, stmts, ind, hoist, voidBody = false, tailReturn = true) {
+  funcBlock(node, block, stmts, ind, hoist, voidBody = false, effectTail = false) {
     const params = isDefHead(node[0]) ? node[2] : node[1];
     const { extractions } = Emitter.expansionSplit(Array.isArray(params) ? params : []);
     const prevSEO = this.sideEffectOnly;
@@ -22607,8 +22669,8 @@ ${"  ".repeat(ind)}`);
         this.mark(block, "statements", () => {
           stmts.forEach((stmt, i) => {
             this.b.emit("  ".repeat(ind + 1));
-            if (!voidBody && tailReturn && i === stmts.length - 1)
-              this.implicitReturn(stmt, ind + 1);
+            if (!voidBody && i === stmts.length - 1)
+              this.implicitReturn(stmt, ind + 1, effectTail);
             else
               this.statement(stmt, ind + 1, true);
             this.b.emit(`
@@ -22632,20 +22694,24 @@ ${"  ".repeat(ind)}`);
     this.b.emit("  ".repeat(ind + 1) + `return;
 `);
   }
-  implicitReturn(stmt, ind) {
-    this.withTsDirectives(stmt, "  ".repeat(ind), () => this.implicitReturnCore(stmt, ind));
+  implicitReturn(stmt, ind, effect = false) {
+    this.withTsDirectives(stmt, "  ".repeat(ind), () => this.implicitReturnCore(stmt, ind, effect));
   }
-  implicitReturnCore(stmt, ind) {
+  implicitReturnCore(stmt, ind, effect) {
     if (isNode(stmt) && (stmt[0] === "return" || stmt[0] === "throw"))
       return this.statement(stmt, ind);
     if (typeof stmt === "string" && (stmt === "break" || stmt === "continue" || stmt === "debugger")) {
       return this.statement(stmt, ind);
     }
+    if (effect && this.effectTailWrites(stmt))
+      return this.statement(stmt, ind);
     this.ind = ind;
     if (isNode(stmt)) {
       const h = stmt[0];
       if (h === "if" && stmt.length >= 3 && stmt.length <= 4) {
-        if (Emitter.ifIsSimple(stmt)) {
+        if (effect && this.effectBranchWrites(stmt)) {
+          this.mark(stmt, "$self", () => this.returnifyIf(stmt, ind, true));
+        } else if (Emitter.ifIsSimple(stmt)) {
           this.b.emit("return (");
           this.mark(stmt, "$self", () => this.ifTernary(stmt));
           this.b.emit(");");
@@ -22655,12 +22721,12 @@ ${"  ".repeat(ind)}`);
         return;
       }
       if (h === "try") {
-        this.withTailReturn(() => this.tryBranches(stmt, ind));
+        this.withTailReturn(() => this.tryBranches(stmt, ind, effect));
         return;
       }
       if (h === "switch" && stmt.length === 4) {
         this.b.emit("return ");
-        this.withTailReturn(() => this.valueSwitch(stmt));
+        this.withTailReturn(() => this.valueSwitch(stmt, effect));
         this.b.emit(";");
         return;
       }
@@ -22913,7 +22979,7 @@ ${"  ".repeat(ind)}`);
           if (constructing)
             this.mark(node[0], "target", () => this.rubyNewTarget(target));
           else
-            this.asCallee(target, () => this.head(node[0], "target", target));
+            this.asReference(target, () => this.head(node[0], "target", target));
         });
         this.mark(node, "args", () => {
           this.b.emit("(");
@@ -23429,7 +23495,7 @@ ${"  ".repeat(ind)}`);
     this.mark(node, "$self", () => {
       this.mark(node, "operator", () => this.b.emit("await"));
       this.b.emit(" ");
-      this.asCallee(node[1], () => this.head(node, "target", node[1]));
+      this.asReference(node[1], () => this.head(node, "target", node[1]));
       this.b.emit("()");
     });
   }
@@ -33232,7 +33298,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "3adf0a6defc02f79";
+var compilerBuild = () => "03cf7b323c4c9a50";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
