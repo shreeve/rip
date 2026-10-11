@@ -16590,6 +16590,9 @@ ${pad ?? ""}`);
       const tail = stmt[stmt.length - 1];
       return this.effectTailWrites(tail) || this.effectBranchWrites(tail);
     }
+    if ((h === "&&" || h === "||" || h === "??") && stmt.length === 3) {
+      return this.effectTailWrites(stmt[2]) || this.effectBranchWrites(stmt[2]);
+    }
     if (isAssignHead(h) || h === ".=" || isUpdate(stmt))
       return true;
     if (Emitter.LOOP_HEADS.has(h) || isDefHead(h) || h === "class" || h === "enum" || h === "export")
@@ -33298,7 +33301,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "03cf7b323c4c9a50";
+var compilerBuild = () => "ff00567df641ed2f";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
