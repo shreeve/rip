@@ -120,13 +120,30 @@ test "an empty value is an empty literal, so later parameters keep their places"
   eq show(encode('X', [null, 'a'])), '[XWB]11302\\x010\\x01X50000f0001af\\x04'
   eq show(encode('X', [undefined, ''])), '[XWB]11302\\x010\\x01X50000f0000f\\x04'
 
-test "a list: numbers bare, text quoted with quotes doubled, `t` between entries", ->
+# A list is ONE `2`, then each entry's subscript and value with `t` between
+# them and `f` after the last: XWBPRS reads a type only after an `f`, CPRS
+# writes lists so, and the relay's own vector is `2 sub x t sub y f`.
+test "a list: one `2`, then entries joined by `t`; numbers bare, text quoted with quotes doubled", ->
   eq show(encode('X', [{ 1: 'a', TEXT: 'b', 'say "hi"': 'c' }])),
-    '[XWB]11302\\x010\\x01X520011001at2006"TEXT"001bt2012"say ""hi"""001cf\\x04'
+    '[XWB]11302\\x010\\x01X520011001at006"TEXT"001bt012"say ""hi"""001cf\\x04'
+  eq show(encode('ORWDX SAVE', [{ 1: 'a', 2: 'b' }, 'z'])),
+    '[XWB]11302\\x010\\x0aORWDX SAVE520011001at0012001bf0001zf\\x04'
 
 test "a list's empty value is \\x01; levels join by commas", ->
   eq show(encode('X', [[[['TEXT', 1, 0], 'line one'], [['TEXT', 2, 0], '']]])),
-    '[XWB]11302\\x010\\x01X52010"TEXT",1,0008line onet2010"TEXT",2,0001\\x01f\\x04'
+    '[XWB]11302\\x010\\x01X52010"TEXT",1,0008line onet010"TEXT",2,0001\\x01f\\x04'
+
+test "a subscript goes bare only as an M canonical number; anything else is text", ->
+  sub = (k) -> show(encode('X', [[[k, 'v']]])).slice(22, -9)
+  eq sub(0.5), '002.5'
+  eq sub(-0.25), '004-.25'
+  eq sub('12'), '00212'
+  eq sub('0.5'), '005"0.5"'
+  eq sub('-0'), '004"-0"'
+  eq sub('007'), '005"007"'
+  eq sub('1.50'), '006"1.50"'
+  eq sub('1234567890123456'), '018"1234567890123456"'
+  throws (-> encode('X', [[[12345678901234567, 'v']]])), VistaError, 'no exact M form'
 
 test "an empty list is one empty subscript", ->
   eq show(encode('X', [{}])), '[XWB]11302\\x010\\x01X52000f\\x04'
@@ -136,7 +153,22 @@ test "numbers go in their plain decimal form", ->
   eq show(encode('X', [1.5, -3, 0])), '[XWB]11302\\x010\\x01X500031.5f0002-3f00010f\\x04'
   throws (-> encode('X', [1e21])), VistaError, 'no plain decimal form'
   throws (-> encode('X', [NaN])), VistaError, 'a finite number'
-  throws (-> encode('X', [[[1e-7, 'a']]])), VistaError, 'no plain decimal form'
+  throws (-> encode('X', [[[1e-7, 'a']]])), VistaError, 'no exact M form'
+
+test "an object that is not a plain object or an array rejects", ->
+  throws (-> encode('X', [Date.new()])), VistaError, 'parameter 1 must be a string, a number, a list or null, not Date'
+  throws (-> encode('X', [Map.new([['a', 'b']])])), VistaError, 'not Map'
+  throws (-> encode('X', [Set.new(['a'])])), VistaError, 'not Set'
+  throws (-> encode('X', [Uint8Array.of(65)])), VistaError, 'not Uint8Array'
+  throws (-> encode('X', [String.new('ab')])), VistaError, 'not String'
+  throws (-> encode('X', 'abc')), VistaError, 'the parameters are an array, not string'
+  throws (-> encode('X', { a: 1 })), VistaError, 'the parameters are an array, not Object'
+  throws (-> encode('X', [], { version: null })), VistaError, 'the RPC version must be a string or a finite number, not null'
+  throws (-> encode('X', [], { version: {} })), VistaError, 'not Object'
+  throws (-> encode('X', [], { vers: '1' })), VistaError, "unknown encode option 'vers'"
+  throws (-> Session.new({ url: 'https://x', version: {} })), VistaError, 'the RPC version must be'
+  throws (-> toBytes(5)), VistaError, 'must be a string, not number'
+  throws (-> fromBytes('x')), VistaError, 'takes a Uint8Array'
 
 test "anything else rejects, naming the parameter", ->
   throws (-> encode('X', ['a', true])), VistaError, 'parameter 2 must be a string, a number, a list or null, not boolean'
@@ -254,13 +286,82 @@ test! "a security message, an error message and an M error each throw their kind
   e = rejects! (-> s.rpc('XWB IM HERE', 1)), 'm', 'M  ERROR=CAPI+16^XWBPRS'
   ok e.detail.includes('LAST REF=')
 
-test! "401 is the session's end, with Janus's reason; the token is dropped", ->
-  [s, f] = session([{ body: REPLY.accept, headers: { 'Set-Cookie': '__Host-ov=T1; Path=/' } }, REPLY.setup, REPLY.imHere, { status: 401, headers: { 'OV-Session-Ended': 'idle' } }, { status: 401 }])
+test! "401 is the session's end, with Janus's reason; later calls fail without a request until connect", ->
+  [s, f] = session([{ body: REPLY.accept, headers: { 'Set-Cookie': '__Host-ov=T1; Path=/' } }, REPLY.setup, REPLY.imHere, { status: 401, headers: { 'OV-Session-Ended': 'idle' } }, { body: REPLY.accept, headers: { 'Set-Cookie': '__Host-ov=T2; Path=/' } }, REPLY.setup, REPLY.imHere])
   s.connect!
   e = rejects! (-> s.rpc('X')), 'ended', 'the session has ended (idle)'
   eq e.sessionEnded, 'idle'
-  rejects! (-> s.rpc('X')), 'ended'
+  rejects! (-> s.rpc('X')), 'ended', 'connect to start another'
+  eq f.calls.length, 4
+  s.connect!
   eq f.calls[4].init.headers.Authorization, undefined
+  eq f.calls[5].init.headers.Authorization, 'Bearer T2'
+
+test! "502 and 504 end the session", ->
+  for status in [502, 504]
+    [s] = session([{ status }])
+    e = rejects! (-> s.rpc('X')), 'ended', "Janus answered #{status}"
+    eq e.status, status
+    rejects! (-> s.rpc('X')), 'ended'
+
+test! "a request that never reached Janus is a transport error; the session stays", ->
+  calls = 0
+  f = (url, init) ->
+    calls += 1
+    throw TypeError.new('fetch failed') if calls is 1
+    Response.new(bytes(REPLY.imHere), { headers: { 'Content-Type': 'application/x-xwb' } })
+  s = Session.new({ url: 'https://vista.test', fetch: f })
+  e = rejects! (-> s.rpc('X')), 'transport', 'did not reach Janus (fetch failed)'
+  ok e.cause instanceof TypeError
+  eq s.rpc!('XWB IM HERE'), '1'
+
+test! "a reply cut short or malformed ends the session", ->
+  broken = ReadableStream.new({ start: (c) -> c.enqueue(Uint8Array.of(0, 0)); c.error(Error.new('stream reset')) })
+  f = (url, init) -> Response.new(broken, { headers: { 'Content-Type': 'application/x-xwb' } })
+  s = Session.new({ url: 'https://vista.test', fetch: f })
+  rejects! (-> s.rpc('X')), 'ended', 'the reply was cut short'
+  rejects! (-> s.rpc('X')), 'ended'
+  [t] = session(["\x00\x00accept"])
+  rejects! (-> t.rpc('X')), 'reply', 'no end'
+  rejects! (-> t.rpc('X')), 'ended', 'a malformed reply'
+
+test! "no redirect is followed; the token and codes go only where the session points", ->
+  [s, f] = session([REPLY.imHere])
+  s.rpc! 'XWB IM HERE'
+  eq f.calls[0].init.redirect, 'error'
+
+test "the site url: https, or http on loopback only; no query or fragment; its path is kept", ->
+  eq Session.new({ url: 'https://vista.example.org' }).endpoint(), 'https://vista.example.org/rpc'
+  eq Session.new({ url: 'https://example.org/vista/' }).endpoint(), 'https://example.org/vista/rpc'
+  eq Session.new({ url: 'http://127.0.0.1:19300' }).endpoint(), 'http://127.0.0.1:19300/rpc'
+  eq Session.new({ url: 'http://localhost:19300' }).endpoint(), 'http://localhost:19300/rpc'
+  throws (-> Session.new({ url: 'http://vista.example.org' })), VistaError, 'must be https:'
+  throws (-> Session.new({ url: 'vista.example.org' })), VistaError, 'not an absolute URL'
+  throws (-> Session.new({ url: 'https://x/?site=1' })), VistaError, 'no query or fragment'
+  throws (-> Session.new({ url: 5 })), VistaError, 'the site url is a string'
+  throws (-> Session.new({ url: 'https://x', fetch: 'no' })), VistaError, 'the fetch option is a function'
+
+test! "Janus's rotated token replaces the old one", ->
+  [s, f] = session([{ body: REPLY.accept, headers: { 'Set-Cookie': '__Host-ov=T1; Path=/' } }, REPLY.setup, REPLY.imHere, { body: REPLY.avCode, headers: { 'Set-Cookie': '__Host-ov=T2; Path=/' } }, REPLY.imHere])
+  s.connect!
+  s.signOn! 'A', 'V'
+  s.rpc! 'XWB IM HERE'
+  eq f.calls[3].init.headers.Authorization, 'Bearer T1'
+  eq f.calls[4].init.headers.Authorization, 'Bearer T2'
+
+test! "the token is never on the session object", ->
+  [s] = session([{ body: REPLY.accept, headers: { 'Set-Cookie': '__Host-ov=SECRETTOKEN; Path=/' } }, REPLY.setup, REPLY.imHere])
+  s.connect!
+  ok not JSON.stringify(s).includes('SECRETTOKEN')
+  ok not Object.values(s).some((v) -> String(v).includes('SECRETTOKEN'))
+
+test! "a rejected code never appears in the error, not one character", ->
+  [s, f] = session([])
+  e = rejects! (-> s.signOn('ACCESS', 'p\u0101ssword')), 'request', 'the verify code holds a character Windows-1252 cannot hold'
+  ok not e.message.includes('\u0101')
+  ok not e.message.includes('character 1')
+  throws (-> wrap('sig\u2603')), VistaError, 'the value holds a character Windows-1252 cannot hold'
+  eq f.calls.length, 0
 
 test! "other statuses and a foreign content type are transport errors", ->
   [s] = session([{ status: 503, headers: { 'Retry-After': '5' } }, { status: 200, headers: { 'Content-Type': 'text/html' }, body: '<html>' }])
@@ -291,6 +392,44 @@ test! "a failed request does not stop the ones after it", ->
   b = s.rpc('XWB IM HERE')
   rejects! (-> a), 'transport'
   eq (await b), '1'
+
+test! "keepalive cannot outlive its session", ->
+  live = []
+  timers = { set: ((f, ms) -> live.push(f); f), clear: (h) -> live.splice(live.indexOf(h), 1) }
+  [s] = session([REPLY.broker, REPLY.bye], { timers })
+  k = s.keepalive()
+  b = s.bye()
+  rejects! (-> k), 'ended', 'before its keepalive began'
+  eq (await b), true
+  eq live.length, 0
+  [t] = session([REPLY.broker, { status: 401, headers: { 'OV-Session-Ended': 'idle' } }], { timers })
+  t.keepalive!
+  eq live.length, 1
+  rejects! (-> t.rpc('X')), 'ended'
+  eq live.length, 0
+
+test! "a keepalive tick that fails goes to onError, and a transient failure keeps the timer", ->
+  seen = []
+  ticks = []
+  timers = { set: ((f, ms) -> ticks.push(f); f), clear: (h) -> ticks.push('cleared') }
+  [s] = session([REPLY.broker, { status: 503 }, REPLY.imHere], { timers })
+  s.keepalive! onError: (e) -> seen.push e.kind
+  tick = ticks[0]
+  tick!
+  eq seen, ['transport']
+  eq s.keeping?, true
+  tick!
+  eq seen, ['transport']
+  [t] = session([REPLY.broker, { status: 503 }], { timers })
+  t.keepalive!
+  rejects! (-> ticks[ticks.length - 1]()), 'transport'
+  rejects! (-> t.keepalive({ every: 5 })), 'request', "unknown keepalive option 'every'"
+
+test! "after bye, a call fails at once with the session's end", ->
+  [s, f] = session([REPLY.bye])
+  s.bye!
+  rejects! (-> s.rpc('X')), 'ended', 'the session has ended (bye)'
+  eq f.calls.length, 1
 
 test! "keepalive: XWB IM HERE at half the broker's idle timeout, until bye", ->
   ticks = []
