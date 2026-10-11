@@ -434,6 +434,16 @@ export function moduleSourceText(s) {
 //
 // Exported because the .d.ts emitter asks the same question, and asking
 // it from a private copy is how the two came to disagree.
+// Both conditional spellings build ["?:", condition, then, else]; the
+// semantic kind tells the postfix `x if c else y` (`ifelse`) from the
+// operator `c ? x : y` (`ternary`). Only the postfix chain re-associates
+// and hoists an assignment; the operator form emits as it parsed.
+function isPostfixTernary(stores, x) {
+  if (!isTernary(x)) return false;
+  const id = stores.idOf(x);
+  return (id !== null ? stores.node(id)?.semanticKind : null) === 'ifelse';
+}
+
 export function isModuleImportNode(stores, x) {
   if (!isNode(x) || x[0] !== 'import' || x.length < 2) return false;
   const id = stores.idOf(x);
@@ -6288,7 +6298,7 @@ class Emitter {
     // ((i++);). The grouped form is a second $self
     // manifestation (cover row over the parens — one-to-many) so the
     // statement start itself maps.
-    const wrap = Emitter.needsGrouping(node, 'statement');
+    const wrap = Emitter.needsGrouping(node, 'statement', this.stores);
     if (wrap) {
       this.mark(node, '$self', () => {
         this.b.emit('(');
@@ -8288,7 +8298,7 @@ class Emitter {
   //                 statements (`(i++);`), delete statements
   //                 (`(delete a.b);`), ternaries unless the assignment
   //                 hoist rewrites them into assignment statements.
-  static needsGrouping(child, context) {
+  static needsGrouping(child, context, stores) {
     const tier = Emitter.jsTier(child);
     if (context === 'operand' || context === 'return') {
       if (tier === 'unary') {
@@ -8313,7 +8323,7 @@ class Emitter {
     return tier === 'object' || isUpdate(child) ||
       (tier === 'function' && child[0] === '->') ||
       (isNode(child) && (child[0] === 'class' || child[0] === 'component')) ||
-      (isTernary(child) && !Emitter.ternaryHoists(child)) ||
+      (isTernary(child) && !Emitter.ternaryHoists(child, stores)) ||
       (tier === 'unary' && child[0] === 'delete');
   }
 
@@ -17668,11 +17678,12 @@ class Emitter {
   // `x = b if c else d` — hoists the target out of the ternary:
   // `x = (c ? b : d)`. The explicit `(x = b) if c else d` keeps its
   // assign-only-when-true semantics (the Parenthetical flag guards it).
-  static ternaryHoists(node) {
+  static ternaryHoists(node, stores) {
     // The hoist belongs to the INNERMOST level of a left-nested chain
     // (`x = 1 if a else 2 if b else 3` — see ternary()).
+    if (!isPostfixTernary(stores, node)) return false;
     let inner = node;
-    while (isNode(inner[2]) && inner[2][0] === '?:' && inner[2].length === 4 && !inner[2].parenthesized) inner = inner[2];
+    while (isPostfixTernary(stores, inner[2]) && !inner[2].parenthesized) inner = inner[2];
     const then = inner[2];
     return isNode(then) && then[0] === '=' && then.length === 3 &&
       typeof then[1] === 'string' && !then.parenthesized;
@@ -17685,16 +17696,19 @@ class Emitter {
   // z)`. The chain re-associates at emission: each enclosing level's
   // condition pairs with the inner level's else, and the outermost
   // else closes it. Every mark stays on its own node. A parenthesized
-  // inner ternary is a value the author grouped and keeps its nesting.
+  // inner ternary is a value the author grouped and keeps its nesting,
+  // and an operator `?:` on either side ends the chain: `(c ? x : y)
+  // if d else e` and `c ? (x if d else e) : y` emit as they parse.
   ternary(node) {
     const chain = [node];
     while (true) {
       const then = chain[chain.length - 1][2];
-      if (isNode(then) && then[0] === '?:' && then.length === 4 && !then.parenthesized) chain.push(then);
+      if (isPostfixTernary(this.stores, chain[chain.length - 1]) && isPostfixTernary(this.stores, then) &&
+          !then.parenthesized) chain.push(then);
       else break;
     }
     const inner = chain[chain.length - 1];
-    const hoists = Emitter.ternaryHoists(inner);
+    const hoists = Emitter.ternaryHoists(inner, this.stores);
     const branch = (owner, role, child) => {
       this.grouped(owner, role, child, Emitter.needsGrouping(child, 'operand') || isUpdate(child));
     };

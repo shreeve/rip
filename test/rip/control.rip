@@ -1339,6 +1339,18 @@ code 'a parenthesized inner ternary keeps its grouping', 'x = (1 if a else 2) if
   x = (b ? (a ? 1 : 2) : 3);
   '''
 
+# The operator `c ? x : y` is one value inside a postfix-else — the
+# trailing `if … else` binds loosest, as Python's does, so it wraps the
+# whole ternary — and it never re-associates or hoists.
+test 'a postfix else wraps a whole operator ternary', 'f = (v) -> v\na = true\nd = false\nf(a ? 2 : 3 if d else 5)', 5
+code 'a postfix else around an operator ternary emits as it parses', 'f(a ? b : c if d else e)', 'f(d ? (a ? b : c) : e);'
+test 'an operator ternary assigns only in its taken branch', 'x = 0\na = false\na ? x = 1 : 2\nx', 0
+code 'an operator ternary keeps an assignment in its branch', 'y = a ? x = 1 : 0', '''
+  let x, y;
+
+  y = a ? (x = 1) : 0;
+  '''
+
 # ==============================================================================
 # Switch match arms — a regex or range `when` is a match test, not a
 # value: the switch lowers to an if/else chain over the subject.
