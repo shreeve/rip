@@ -247,6 +247,24 @@ pair = chat! [
 systemInfo = pair[1]                        # the captured group
 ```
 
+### Waiting for the End
+
+`chat.exit!` waits for the other side to end on its own and returns how
+it ended: a spawned process's exit status (128 + the signal for one a
+signal ended), or `null` when the peer closes a TCP socket. What it sends
+meanwhile and last is read like any other data (`live`, `onRecv`,
+`chat.buffer`), then the connection is closed. `chat.disconnect!` ends it
+instead.
+
+```coffee
+chat! [">", "HALT"]
+status = chat.exit!          # 0 once the program has exited
+```
+
+It waits up to `slow` seconds (`chat.exit! 60` for another limit); past
+that it throws `Timeout waiting for exit`, or returns `:slow` with
+`bomb: false`.
+
 ### Control Flow Symbols
 
 Rip symbol literals (`:name`) control the engine's behavior. No imports needed —
