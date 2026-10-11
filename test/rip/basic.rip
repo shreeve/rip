@@ -615,6 +615,20 @@ type 'a member initialized by a call of a function named array is not an array l
   };
   '''
 
+# A tight paren after `as`/`satisfies` is a call of the word: the postfix
+# type operator takes whitespace before its type.
+test 'a tight-paren satisfies after a value is a call argument', '''
+  satisfies = (...a) -> a
+  f = (...a) -> a
+  f satisfies(1, 2)
+  ''', [[1, 2]]
+
+test 'a tight-paren as after a value is a call argument', '''
+  as = (...a) -> a
+  f = (...a) -> a
+  f as(1, 2)
+  ''', [[1, 2]]
+
 # `#` comments run to end of line — there is no inline block-comment
 # form, so a comment can never sit INSIDE a compound key; everything
 # after the `#` is comment, and the brace correctly reads unclosed.

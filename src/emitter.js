@@ -984,6 +984,20 @@ class Emitter {
     return isNode(x) && typeof x[0] === 'string' && this.semanticKindOf(x) === 'call';
   }
 
+  // A REAL postfix type operator — `["cast", value, "T"]` /
+  // `["satisfies", value, "T"]` — and never a call of a function so
+  // named, which spells the identical array. The walks that skip the
+  // operator's type slot ask this, or they would skip a call argument.
+  isPostfixType(x) {
+    return Emitter.isPostfixTypeIn(this.stores, x);
+  }
+
+  static isPostfixTypeIn(stores, x) {
+    if (!isNode(x) || (x[0] !== 'cast' && x[0] !== 'satisfies') || x.length !== 3) return false;
+    const id = stores.idOf(x);
+    return id === null || stores.node(id)?.semanticKind === x[0];
+  }
+
   // An object literal — never a call of a function named `object`.
   isObject(x) {
     return isObjectShape(x) && !this.isCallNode(x);
@@ -3214,7 +3228,7 @@ class Emitter {
     const { iter } = entry;
     if (!this.ts || rec === undefined || iter === undefined) return null;
     if (this.containsAwait(iter) || containsYield(iter)) return null;
-    if (referencesNames(iter, rec.parent.locals)) return null;
+    if (referencesNames(iter, rec.parent.locals, this.stores)) return null;
     const leaves = new Set();
     Emitter.collectLeafNames(iter, leaves);
     for (const n of [rec.self, entry.itemVar, entry.indexVar, ...rec.renameHazardNames]) if (leaves.has(n)) return null;
@@ -3584,7 +3598,7 @@ class Emitter {
       if (x[0] === 'typed-var' && x.length === 3) { walk(x[1]); return; }
       if (x[0] === 'def-sig') { walk(x[2]); return; }
       if (x[0] === 'type-decl') return;
-      if ((x[0] === 'cast' || x[0] === 'satisfies') && x.length === 3) { walk(x[1]); return; }
+      if (this.isPostfixType(x)) { walk(x[1]); return; }
       for (const c of x) walk(c);
     };
     walk(sexpr);
@@ -11281,7 +11295,7 @@ class Emitter {
   checkSetupLocalRefs(expr, node) {
     const rec = this.rstate.sink;
     if (rec.kind !== 'class' || rec.locals.size === 0) return;
-    if (referencesNames(expr, rec.locals)) {
+    if (referencesNames(expr, rec.locals, this.stores)) {
       throw this.positionedError(node ?? expr,
         'emitter: a render local cannot appear in a LIVE binding or a dynamic block head at the render top level — ' +
         'locals live in _create() and reactive machinery lives in _setup() (a compiled read here would be a ' +
@@ -13246,7 +13260,7 @@ class Emitter {
       if (isNode(key) && key[0] === '.' && key[1] === 'this' && typeof key[2] === 'string') {
         const eventName = key[2];
         if (this.rstate.sink.kind === 'loop' && this.loopVarNames().size > 0 &&
-            referencesNames(value, this.loopVarNames())) {
+            referencesNames(value, this.loopVarNames(), this.stores)) {
           // The listener is a CREATE-phase closure over the loop item:
           // p()'s param re-binding keeps it current, but only when p()
           // runs — a block with no effects must not go static.
@@ -13840,7 +13854,7 @@ class Emitter {
     for (let r = R.sink.parent; r !== null; r = r.parent) {
       if (r.locals.size === 0) continue;
       const hidden = new Set([...r.locals].filter((n) => !visible(n)));
-      if (hidden.size > 0 && referencesNames(expr, hidden)) {
+      if (hidden.size > 0 && referencesNames(expr, hidden, this.stores)) {
         throw this.positionedError(node,
           'emitter: this expression reads a render local of an ENCLOSING render scope — each dynamic block (a ' +
           'conditional branch, a loop body) is its own factory function, and render locals never cross that boundary ' +
@@ -14416,7 +14430,7 @@ class Emitter {
       // not exist there (a live keyFn compiled that way would throw
       // at mount). Checked before the
       // row-derivation rule so the diagnosis names the real problem.
-      if (rec.locals.size > 0 && referencesNames(keyExpr, rec.locals)) {
+      if (rec.locals.size > 0 && referencesNames(keyExpr, rec.locals, this.stores)) {
         throw this.positionedError(node,
           'emitter: a `key:` expression must be evaluable in the loop HEADER scope — it reads a render local declared ' +
           'inside the loop body, which lives in the row factory (derive the key from the item inline: `key: item.id`)');
@@ -14426,7 +14440,7 @@ class Emitter {
       // constant keys die at the runtime's duplicate-key rejection,
       // and an undeclared root (`key: missing.id`) is a mount-time
       // ReferenceError far from here.
-      if (!referencesNames(keyExpr, new Set([itemVar, indexVar]))) {
+      if (!referencesNames(keyExpr, new Set([itemVar, indexVar]), this.stores)) {
         throw this.positionedError(node,
           `emitter: a loop key must derive from the row — this \`key:\` expression never reads '${itemVar}'` +
           `${vars.length === 2 ? ` or '${indexVar}'` : ''} (a row-independent key cannot identify rows)`);
@@ -15079,7 +15093,7 @@ class Emitter {
   // identity).
   renderBind(el, pair, prop, value, objExpr, site) {
     this.checkBindTarget(pair, value);
-    if (this.rstate.sink.kind === 'loop' && this.loopVarNames().size > 0 && referencesNames(value, this.loopVarNames())) {
+    if (this.rstate.sink.kind === 'loop' && this.loopVarNames().size > 0 && referencesNames(value, this.loopVarNames(), this.stores)) {
       this.rstate.sink.forceNonStatic = true;
     }
     let inputType = null;
@@ -17264,7 +17278,7 @@ class Emitter {
           } else if (isCall && !operand.parenthesized && plainCallee) {
             this.call(operand);
           } else if (isCall && !operand.parenthesized) {
-            const selfGrouped = this.ts && isNode(callee) && (callee[0] === 'cast' || callee[0] === 'satisfies');
+            const selfGrouped = this.ts && this.isPostfixType(callee);
             this.mark(operand, '$self', () => {
               if (!selfGrouped) this.b.emit('(');
               this.expr(callee);
@@ -17281,7 +17295,7 @@ class Emitter {
           } else {
             // On the TS face a cast or `satisfies` operand prints its own
             // group, which is the seal.
-            const grouped = this.ts && (operand[0] === 'cast' || operand[0] === 'satisfies');
+            const grouped = this.ts && this.isPostfixType(operand);
             if (!grouped) this.b.emit('(');
             this.expr(operand);
             this.b.emit(grouped ? '()' : ')()');
@@ -19122,7 +19136,7 @@ const runtimeRequires = (rt) =>
 // under one may over-trigger injection, which the local binding then
 // shadows — harmless, and consistent with the schema-module
 // behavior.
-const referencesNames = (sexpr, names, isDecl = () => false) => {
+const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
   if (names.size === 0) return false;
   const ref = (x) => typeof x === 'string' && names.has(x);
   const walkParams = (params) => isNode(params) && params.some(walkPattern);
@@ -19176,7 +19190,7 @@ const referencesNames = (sexpr, names, isDecl = () => false) => {
     }
     if (h === 'class' && x.length >= 2) return x.slice(2).some(walk);
     if (h === 'typed-var' && x.length === 3) return isNode(x[1]) && walk(x[1]);
-    if ((h === 'cast' || h === 'satisfies') && x.length === 3) return walk(x[1]);
+    if (Emitter.isPostfixTypeIn(stores, x)) return walk(x[1]);
     if (h === 'import' || h === 'type-decl') return false;
     return x.some(walk);
   };
@@ -19201,7 +19215,7 @@ const deliveryTrees = (emitter, sexpr) => {
       Emitter.isReadonlyDeclIn(stores, x) || Emitter.isGateDeclIn(stores, x);
     const isTrigger = (x) => Emitter.isReactiveDeclIn(stores, x) || Emitter.isEffectDeclIn(stores, x);
     const isComponent = (x) => Emitter.isComponentDeclIn(stores, x);
-    trees.push({ tree, atoms, isDecl, isTrigger, isComponent });
+    trees.push({ tree, stores, atoms, isDecl, isTrigger, isComponent });
     const walk = (x) => {
       if (!isNode(x)) return;
       if (x[0] === 'schema' && x.length === 2 && x[1] && typeof x[1] === 'object' && Array.isArray(x[1].entries)) {
@@ -19672,8 +19686,8 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   const runtimes = new Set();
   for (const rt of RUNTIME_TABLE) {
     const unboundSet = new Set(rt.names.filter((n) => !bound.has(n)));
-    if (trees.some(({ tree, isDecl, isTrigger, isComponent }) =>
-          rt.triggers?.(tree, { isTrigger, isComponent }) || referencesNames(tree, unboundSet, isDecl))) {
+    if (trees.some(({ tree, stores, isDecl, isTrigger, isComponent }) =>
+          rt.triggers?.(tree, { isTrigger, isComponent }) || referencesNames(tree, unboundSet, stores, isDecl))) {
       runtimes.add(rt.key);
     }
   }

@@ -60,6 +60,22 @@ code "a postfix guard ends the satisfies run", "y = x satisfies T if c", "let y;
 code "satisfies is a name outside the postfix position", "satisfies = 2\no = { satisfies: 1 }\np = o.satisfies", "let satisfies = 2;\nlet o = {satisfies: 1};\nlet p = o.satisfies;"
 
 # ==============================================================================
+# The operator takes whitespace before its type. A TIGHT follower binds to
+# the word as after any name — a call, an index, a subtraction — so the word
+# stays an ordinary name.
+# ==============================================================================
+
+code "a tight paren after satisfies calls it", "r = f satisfies(1, 2)", "let r = f(satisfies(1, 2));"
+code "a tight paren after as calls it", "r = f as(1, 2)", "let r = f(as(1, 2));"
+code "a tight bracket after satisfies indexes it", "r = f satisfies[0]", "let r = f(satisfies[0]);"
+code "a tight bracket after as indexes it", "r = f as[0]", "let r = f(as[0]);"
+code "a tight minus after as subtracts", "r = f as-1", "let r = f(as - 1);"
+code "a spaced paren type still casts", "r = x as (A | B)", "let r = x;"
+code "a spaced bracket type still casts", "r = x satisfies [number]", "let r = x;"
+fail "a chained operator word with a tight paren rejects", "r = x as Foo satisfies(1)",
+  "1:14: Unexpected 'satisfies'"
+
+# ==============================================================================
 # Shadow-TS check path — the cast becomes a real TS assertion (it narrows)
 # ==============================================================================
 #

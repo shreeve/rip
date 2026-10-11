@@ -4500,6 +4500,7 @@ var implicitCalls = (tokens, mintId) => applyInsertions(tokens, collectCalls, mi
 // src/types.js
 var POSTFIX_TYPE_KINDS = new Map([["as", "CAST"], ["satisfies", "SATISFIES"]]);
 var isPostfixTypeWord = (t) => t?.kind === "IDENTIFIER" && POSTFIX_TYPE_KINDS.has(t.value);
+var headsPostfixType = (prev, word, next) => isPostfixTypeWord(word) && next?.spaced === true && prev != null && prev.kind !== "." && prev.kind !== "?." && CAST_LHS_ENDERS.has(prev.kind);
 var CAST_LHS_ENDERS = new Set([
   "IDENTIFIER",
   "PROPERTY",
@@ -5224,7 +5225,7 @@ var syncTypeGenericMemo = (tokens, memo) => {
       memo.answers.set(memo.level, typeAliasEq(tokens, j));
     } else if (t.kind === "RESERVED" && t.value === "interface" && atStatementBoundary(tokens, j - 1)) {
       memo.answers.set(memo.level, true);
-    } else if (isPostfixTypeWord(t) && tokens[j - 1] && tokens[j - 1].kind !== "." && tokens[j - 1].kind !== "?." && CAST_LHS_ENDERS.has(tokens[j - 1].kind)) {
+    } else if (headsPostfixType(tokens[j - 1], t, tokens[j + 1])) {
       memo.answers.set(memo.level, true);
     }
   }
@@ -5599,7 +5600,7 @@ function rewriteTypes(tokens, mintId, text, fail) {
         continue;
       }
     }
-    if (isPostfixTypeWord(tok) && prev && prev.kind !== "." && prev.kind !== "?." && CAST_LHS_ENDERS.has(prev.kind) && tokens[i + 1] && (TYPE_STARTERS.has(tokens[i + 1].kind) || tokens[i + 1].kind === "+" && tokens[i + 2]?.kind === "NUMBER")) {
+    if (headsPostfixType(prev, tok, tokens[i + 1]) && (TYPE_STARTERS.has(tokens[i + 1].kind) || tokens[i + 1].kind === "+" && tokens[i + 2]?.kind === "NUMBER")) {
       const last = claim(POSTFIX_TYPE_KINDS.get(tok.value), tok, i + 1, { cast: true });
       if (last < 0) {
         fail(`'${tok.value}' takes a type — \`x ${tok.value} T\``, tok.start, tok.end);
@@ -10084,6 +10085,15 @@ class Emitter {
   isCallNode(x) {
     return isNode(x) && typeof x[0] === "string" && this.semanticKindOf(x) === "call";
   }
+  isPostfixType(x) {
+    return Emitter.isPostfixTypeIn(this.stores, x);
+  }
+  static isPostfixTypeIn(stores, x) {
+    if (!isNode(x) || x[0] !== "cast" && x[0] !== "satisfies" || x.length !== 3)
+      return false;
+    const id = stores.idOf(x);
+    return id === null || stores.node(id)?.semanticKind === x[0];
+  }
   isObject(x) {
     return isObjectShape(x) && !this.isCallNode(x);
   }
@@ -11698,7 +11708,7 @@ class Emitter {
       return null;
     if (this.containsAwait(iter) || containsYield(iter))
       return null;
-    if (referencesNames(iter, rec.parent.locals))
+    if (referencesNames(iter, rec.parent.locals, this.stores))
       return null;
     const leaves = new Set;
     Emitter.collectLeafNames(iter, leaves);
@@ -11915,7 +11925,7 @@ class Emitter {
       }
       if (x[0] === "type-decl")
         return;
-      if ((x[0] === "cast" || x[0] === "satisfies") && x.length === 3) {
+      if (this.isPostfixType(x)) {
         walk(x[1]);
         return;
       }
@@ -17871,7 +17881,7 @@ ${pad ?? ""}`);
     const rec = this.rstate.sink;
     if (rec.kind !== "class" || rec.locals.size === 0)
       return;
-    if (referencesNames(expr, rec.locals)) {
+    if (referencesNames(expr, rec.locals, this.stores)) {
       throw this.positionedError(node ?? expr, "emitter: a render local cannot appear in a LIVE binding or a dynamic block head at the render top level — " + "locals live in _create() and reactive machinery lives in _setup() (a compiled read here would be a " + "mount-time ReferenceError); bind the value to a member instead", isNode(expr) ? expr : this.rstate.node);
     }
   }
@@ -19343,7 +19353,7 @@ ${this.replayPad}}` : " }");
       };
       if (isNode(key) && key[0] === "." && key[1] === "this" && typeof key[2] === "string") {
         const eventName = key[2];
-        if (this.rstate.sink.kind === "loop" && this.loopVarNames().size > 0 && referencesNames(value, this.loopVarNames())) {
+        if (this.rstate.sink.kind === "loop" && this.loopVarNames().size > 0 && referencesNames(value, this.loopVarNames(), this.stores)) {
           this.rstate.sink.forceNonStatic = true;
         }
         const evUsed = new Set;
@@ -19756,7 +19766,7 @@ ${this.replayPad}}` : " }");
       if (r.locals.size === 0)
         continue;
       const hidden = new Set([...r.locals].filter((n) => !visible(n)));
-      if (hidden.size > 0 && referencesNames(expr, hidden)) {
+      if (hidden.size > 0 && referencesNames(expr, hidden, this.stores)) {
         throw this.positionedError(node, "emitter: this expression reads a render local of an ENCLOSING render scope — each dynamic block (a " + "conditional branch, a loop body) is its own factory function, and render locals never cross that boundary " + "; declare the local " + "inside this block, or use a member", this.rstate.node);
       }
     }
@@ -20185,10 +20195,10 @@ ${this.replayPad}}` : " }");
       this.primitiveAvoid = prevAvoid;
     }
     if (keyExpr !== null) {
-      if (rec.locals.size > 0 && referencesNames(keyExpr, rec.locals)) {
+      if (rec.locals.size > 0 && referencesNames(keyExpr, rec.locals, this.stores)) {
         throw this.positionedError(node, "emitter: a `key:` expression must be evaluable in the loop HEADER scope — it reads a render local declared " + "inside the loop body, which lives in the row factory (derive the key from the item inline: `key: item.id`)");
       }
-      if (!referencesNames(keyExpr, new Set([itemVar, indexVar]))) {
+      if (!referencesNames(keyExpr, new Set([itemVar, indexVar]), this.stores)) {
         throw this.positionedError(node, `emitter: a loop key must derive from the row — this \`key:\` expression never reads '${itemVar}'` + `${vars.length === 2 ? ` or '${indexVar}'` : ""} (a row-independent key cannot identify rows)`);
       }
     }
@@ -20802,7 +20812,7 @@ ${this.replayPad}}` : " }");
   }
   renderBind(el, pair, prop, value, objExpr, site) {
     this.checkBindTarget(pair, value);
-    if (this.rstate.sink.kind === "loop" && this.loopVarNames().size > 0 && referencesNames(value, this.loopVarNames())) {
+    if (this.rstate.sink.kind === "loop" && this.loopVarNames().size > 0 && referencesNames(value, this.loopVarNames(), this.stores)) {
       this.rstate.sink.forceNonStatic = true;
     }
     let inputType = null;
@@ -22414,7 +22424,7 @@ ${"  ".repeat(ind)}`);
           } else if (isCall && !operand.parenthesized && plainCallee) {
             this.call(operand);
           } else if (isCall && !operand.parenthesized) {
-            const selfGrouped = this.ts && isNode(callee) && (callee[0] === "cast" || callee[0] === "satisfies");
+            const selfGrouped = this.ts && this.isPostfixType(callee);
             this.mark(operand, "$self", () => {
               if (!selfGrouped)
                 this.b.emit("(");
@@ -22432,7 +22442,7 @@ ${"  ".repeat(ind)}`);
               });
             });
           } else {
-            const grouped = this.ts && (operand[0] === "cast" || operand[0] === "satisfies");
+            const grouped = this.ts && this.isPostfixType(operand);
             if (!grouped)
               this.b.emit("(");
             this.expr(operand);
@@ -23763,7 +23773,7 @@ var runtimeText = (rt) => {
   return runtimeBodies.get(rt.key);
 };
 var runtimeRequires = (rt) => rt.requires == null ? [] : Array.isArray(rt.requires) ? rt.requires : [rt.requires];
-var referencesNames = (sexpr, names, isDecl = () => false) => {
+var referencesNames = (sexpr, names, stores, isDecl = () => false) => {
   if (names.size === 0)
     return false;
   const ref = (x) => typeof x === "string" && names.has(x);
@@ -23822,7 +23832,7 @@ var referencesNames = (sexpr, names, isDecl = () => false) => {
       return x.slice(2).some(walk);
     if (h === "typed-var" && x.length === 3)
       return isNode(x[1]) && walk(x[1]);
-    if ((h === "cast" || h === "satisfies") && x.length === 3)
+    if (Emitter.isPostfixTypeIn(stores, x))
       return walk(x[1]);
     if (h === "import" || h === "type-decl")
       return false;
@@ -23836,7 +23846,7 @@ var deliveryTrees = (emitter, sexpr) => {
     const isDecl = (x) => Emitter.isReactiveDeclIn(stores, x) || Emitter.isEffectDeclIn(stores, x) || Emitter.isReadonlyDeclIn(stores, x) || Emitter.isGateDeclIn(stores, x);
     const isTrigger = (x) => Emitter.isReactiveDeclIn(stores, x) || Emitter.isEffectDeclIn(stores, x);
     const isComponent = (x) => Emitter.isComponentDeclIn(stores, x);
-    trees.push({ tree, atoms, isDecl, isTrigger, isComponent });
+    trees.push({ tree, stores, atoms, isDecl, isTrigger, isComponent });
     const walk = (x) => {
       if (!isNode(x))
         return;
@@ -24235,7 +24245,7 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
   const runtimes = new Set;
   for (const rt of RUNTIME_TABLE) {
     const unboundSet = new Set(rt.names.filter((n) => !bound.has(n)));
-    if (trees.some(({ tree, isDecl, isTrigger, isComponent }) => rt.triggers?.(tree, { isTrigger, isComponent }) || referencesNames(tree, unboundSet, isDecl))) {
+    if (trees.some(({ tree, stores, isDecl, isTrigger, isComponent }) => rt.triggers?.(tree, { isTrigger, isComponent }) || referencesNames(tree, unboundSet, stores, isDecl))) {
       runtimes.add(rt.key);
     }
   }
@@ -33313,7 +33323,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "2e27a12c74146bef";
+var compilerBuild = () => "f0e9093e4fba88eb";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
