@@ -3018,6 +3018,13 @@ describe('selector shorthands', () => {
     expect(valued('if ok then if ok')).toContain('label.w - (1).toFixed(2)');
   });
 
+  test('a joined digit class read as a value rejects, never reaching the JavaScript', () => {
+    // A branch among an implicit call's arguments, which the gate takes for
+    // markup: the emitter catches the class read as a property.
+    const src = `fmt = (a, b) -> b\nmk = (label) ->\n  component\n    ok := true\n    render\n      div\n        span fmt "x", if ok\n          label.w-1.toFixed(2)\n        else\n          "n"\n`;
+    emitFails(src, /`\.w-1` is read as a value here, where `-` is subtraction — write it with spaces \(`w - 1`\)/);
+  });
+
   test('a line-start id rejects what an id cannot hold', () => {
     lexFails(at('#a- "x"'), /write `id: 'a-'`/);
     lexFails(at('#a/b "x"'), /write `id: 'a\/b'`/);

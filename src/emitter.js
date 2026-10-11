@@ -15185,6 +15185,7 @@ class Emitter {
   chain(node) {
     this.checkEmitRead(node);
     this.noteProvidedRead(node);
+    this.rejectJoinedClassRead(node);
     const spine = [node];
     while (true) {
       const cur = spine[spine.length - 1];
@@ -15374,6 +15375,21 @@ class Emitter {
       this.notePlainRenderRead(node[2], true);
     }
     this.chain(node);
+  }
+
+  // Only the template gate joins a digit run into a name (`p-4`), and only
+  // for an element's class; such a name read as a property means the line
+  // was a value after all, and `label.w-1.toFixed(2)` would be invalid
+  // JavaScript. It rejects, asking for the spaces subtraction needs.
+  rejectJoinedClassRead(node) {
+    for (let link = node; isNode(link); link = isNode(link[0]) ? link[0] : link[1]) {
+      if ((link[0] === '.' || link[0] === '?.') && typeof link[2] === 'string' && /-[0-9]/.test(link[2])) {
+        throw this.positionedError(link,
+          `emitter: \`.${link[2]}\` is read as a value here, where \`-\` is subtraction — write it with spaces ` +
+          `(\`${link[2].replace(/-/g, ' - ')}\`), or give the element its class with \`class: '${link[2]}'\``);
+      }
+      if (!isNode(link[0]) && link[0] !== '.' && link[0] !== '?.') break;
+    }
   }
 
   // The names the runtime PROVIDES to a component — `@stash`, `@router` —
