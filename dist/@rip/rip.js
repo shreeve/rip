@@ -524,6 +524,7 @@ function parseSchemaBody(kind, kindTok, bodyTokens, ctx, fail) {
   if (kind === "enum") {
     for (const line of lines)
       parseEnumLine(line, entries, fail);
+    checkEnumMembers(entries, fail);
   } else if (kind === "union") {
     for (const line of lines)
       parseUnionLine(line, entries, fail);
@@ -1624,6 +1625,21 @@ function parseEnumLine(line, entries, fail) {
   }
   const value = valueTok.kind === "-" && line[3]?.kind === "NUMBER" ? -numberOf(line[3], `enum member ':${name}' value`, fail) : literalOf(valueTok, `enum member ':${name}' value`, fail);
   entries.push({ tag: "enum-member", name, value, start: first.start });
+}
+function checkEnumMembers(entries, fail) {
+  const members = entries.filter((e) => e.tag === "enum-member");
+  const byName = new Map;
+  for (const m of members) {
+    if (byName.has(m.name))
+      fail(`enum member ':${m.name}' is declared twice`, m.start);
+    byName.set(m.name, m);
+  }
+  for (const m of members) {
+    const other = typeof m.value === "string" ? byName.get(m.value) : undefined;
+    if (other && other !== m) {
+      fail(`enum member ':${m.name}' has the value ${JSON.stringify(m.value)}, which is the name of member ':${other.name}' — an input ${JSON.stringify(m.value)} would name both`, m.start);
+    }
+  }
 }
 function isRangeConstraintTokens(tokens) {
   return tokens.some((t) => t.kind === "..") && tokens.every((t) => t.kind === ".." || t.kind === "NUMBER" || t.kind === "-");
@@ -14044,13 +14060,20 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
     });
     this.b.emit(";");
   }
-  tryStatement(node, ind) {
+  tryStatement(node, ind, into = null) {
+    const block = (body) => into === null ? this.braceBlock(body, ind) : this.accumulateBlock(body, ind, into);
     this.mark(node, "$self", () => {
       this.b.emit("try ");
       const body = isBlock(node[1]) ? node[1] : ["block", node[1]];
-      this.mark(node, "body", () => this.braceBlock(body, ind));
-      if (node.length === 2)
-        this.b.emit(" catch {}");
+      this.mark(node, "body", () => block(body));
+      if (node.length === 2) {
+        if (into === null)
+          this.b.emit(" catch {}");
+        else
+          this.b.emit(` catch {
+` + "  ".repeat(ind + 1) + `${into}.push(undefined);
+` + "  ".repeat(ind) + "}");
+      }
       for (const part of node.slice(2)) {
         if (!isNode(part))
           continue;
@@ -14061,7 +14084,7 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
           const [binding, body] = part;
           if (binding === null) {
             this.b.emit(" catch ");
-            this.braceBlock(body, ind);
+            block(body);
           } else if (Emitter.isPattern(binding)) {
             this.checkExportedConstWrite(part, binding);
             this.checkImportWrite(part, binding);
@@ -14075,18 +14098,21 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
             this.mark(part, "binding", () => this.withPattern(() => this.expr(binding)));
             this.b.emit(` = ${param});
 `);
-            this.statements(isBlock(body) ? body.slice(1) : [body], ind + 1, "block");
+            if (into === null)
+              this.statements(isBlock(body) ? body.slice(1) : [body], ind + 1, "block");
+            else
+              this.accumulateBody(isBlock(body) ? body : ["block", body], ind, into);
             this.b.emit("  ".repeat(ind) + "}");
           } else if (Emitter.isTypedWrapper(binding)) {
             this.b.emit(" catch (");
             this.mark(part, "binding", () => this.emitParam(binding));
             this.b.emit(") ");
-            this.withBindings([binding[1]], () => this.braceBlock(body, ind));
+            this.withBindings([binding[1]], () => block(body));
           } else {
             this.b.emit(" catch (");
             this.mark(part, "binding", () => this.b.emit(binding));
             this.b.emit(") ");
-            this.withBindings([binding], () => this.braceBlock(body, ind));
+            this.withBindings([binding], () => block(body));
           }
         }
       }
@@ -15432,6 +15458,8 @@ ${pad ?? ""}`);
         this.mark(stmt, "$self", () => this.accumulateIf(stmt, ind + 1, into));
       } else if (i === stmts.length - 1 && isNode(stmt) && stmt[0] === "switch" && stmt.length === 4) {
         this.switchStatement(stmt, ind + 1, into);
+      } else if (i === stmts.length - 1 && isNode(stmt) && stmt[0] === "try") {
+        this.tryStatement(stmt, ind + 1, into);
       } else {
         this.statement(stmt, ind + 1);
         if (isLoopNode(stmt))
@@ -25326,6 +25354,9 @@ class SchemaDef {
     const directives = [];
     const enumMembers = new Map;
     const ensures = [];
+    const enumAmbiguity = (n, message) => {
+      throw new SchemaError([{ field: n, error: "enum", message }], this.name, this.kind);
+    };
     const collision = (n, where) => {
       throw new SchemaError([{ field: n, error: "collision", message: n + " collides with " + where }], this.name, this.kind);
     };
@@ -25420,6 +25451,8 @@ class SchemaDef {
           directives.push({ name: e.name, args: e.args || [] });
           break;
         case "enum-member":
+          if (enumMembers.has(e.name))
+            enumAmbiguity(e.name, "enum member ':" + e.name + "' is declared twice");
           enumMembers.set(e.name, e.value !== undefined ? e.value : e.name);
           break;
         case "union-member":
@@ -25441,6 +25474,11 @@ class SchemaDef {
         stack: [this.name || "<anon>"],
         seen: new Set([this.name || "<anon>"])
       });
+    }
+    for (const [n, v] of enumMembers) {
+      if (typeof v === "string" && v !== n && enumMembers.has(v)) {
+        enumAmbiguity(n, "enum member ':" + n + "' has the value " + JSON.stringify(v) + ", which is the name of member ':" + v + "' — an input " + JSON.stringify(v) + " would name both");
+      }
     }
     let unionOn = null;
     const unionMembers = [];
@@ -33301,7 +33339,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "ff00567df641ed2f";
+var compilerBuild = () => "c74fb92409e8daab";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
