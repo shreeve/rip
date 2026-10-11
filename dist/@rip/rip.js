@@ -4517,6 +4517,7 @@ var implicitCalls = (tokens, mintId) => applyInsertions(tokens, collectCalls, mi
 // src/types.js
 var POSTFIX_TYPE_KINDS = new Map([["as", "CAST"], ["satisfies", "SATISFIES"]]);
 var isPostfixTypeWord = (t) => t?.kind === "IDENTIFIER" && POSTFIX_TYPE_KINDS.has(t.value);
+var headsPostfixType = (prev, word, next) => isPostfixTypeWord(word) && next?.spaced === true && prev != null && prev.kind !== "." && prev.kind !== "?." && CAST_LHS_ENDERS.has(prev.kind);
 var CAST_LHS_ENDERS = new Set([
   "IDENTIFIER",
   "PROPERTY",
@@ -5241,7 +5242,7 @@ var syncTypeGenericMemo = (tokens, memo) => {
       memo.answers.set(memo.level, typeAliasEq(tokens, j));
     } else if (t.kind === "RESERVED" && t.value === "interface" && atStatementBoundary(tokens, j - 1)) {
       memo.answers.set(memo.level, true);
-    } else if (isPostfixTypeWord(t) && tokens[j - 1] && tokens[j - 1].kind !== "." && tokens[j - 1].kind !== "?." && CAST_LHS_ENDERS.has(tokens[j - 1].kind)) {
+    } else if (headsPostfixType(tokens[j - 1], t, tokens[j + 1])) {
       memo.answers.set(memo.level, true);
     }
   }
@@ -5616,7 +5617,7 @@ function rewriteTypes(tokens, mintId, text, fail) {
         continue;
       }
     }
-    if (isPostfixTypeWord(tok) && prev && prev.kind !== "." && prev.kind !== "?." && CAST_LHS_ENDERS.has(prev.kind) && tokens[i + 1] && (TYPE_STARTERS.has(tokens[i + 1].kind) || tokens[i + 1].kind === "+" && tokens[i + 2]?.kind === "NUMBER")) {
+    if (headsPostfixType(prev, tok, tokens[i + 1]) && (TYPE_STARTERS.has(tokens[i + 1].kind) || tokens[i + 1].kind === "+" && tokens[i + 2]?.kind === "NUMBER")) {
       const last = claim(POSTFIX_TYPE_KINDS.get(tok.value), tok, i + 1, { cast: true });
       if (last < 0) {
         fail(`'${tok.value}' takes a type — \`x ${tok.value} T\``, tok.start, tok.end);
@@ -9835,7 +9836,7 @@ var isRelation = (x) => isNode(x) && (x[0] === "in" || x[0] === "of" || x[0] ===
 var isIf = (x) => isNode(x) && x[0] === "if";
 var isRange = (x) => isNode(x) && (x[0] === ".." || x[0] === "...") && x.length === 3;
 var isSpread = (x) => isNode(x) && x[0] === "..." && x.length === 2;
-var isObject = (x) => isNode(x) && x[0] === "object";
+var isObjectShape = (x) => isNode(x) && x[0] === "object";
 var isFunc = (x) => isNode(x) && (x[0] === "->" || x[0] === "=>") && x.length === 3;
 var CTRL_ALL = new Set(["break", "continue", "return"]);
 var CTRL_BREAK = new Set(["break"]);
@@ -9906,7 +9907,6 @@ var patternBindings = (node, base = "", out = []) => {
   return out;
 };
 var isTernary = (x) => isNode(x) && x[0] === "?:" && x.length === 4;
-var isBlock = (x) => isNode(x) && x[0] === "block";
 var isHtmlTag2 = (name) => {
   const tag = String(name).split("#")[0];
   return TEMPLATE_TAGS.has(tag) || isCustomElementName(tag);
@@ -10099,8 +10099,35 @@ class Emitter {
       return true;
     return this.stores.node(id)?.semanticKind === kind;
   }
-  static pureSpine(x) {
-    return typeof x === "string" || isNode(x) && typeof x[0] === "string" && SPINE_HEADS.has(x[0]) && !isRubyNew(x) && Emitter.pureSpine(x[1]);
+  isCallNode(x) {
+    return isNode(x) && typeof x[0] === "string" && this.semanticKindOf(x) === "call";
+  }
+  isPostfixType(x) {
+    return Emitter.isPostfixTypeIn(this.stores, x);
+  }
+  static isPostfixTypeIn(stores, x) {
+    if (!isNode(x) || x[0] !== "cast" && x[0] !== "satisfies" || x.length !== 3)
+      return false;
+    const id = stores.idOf(x);
+    return id === null || stores.node(id)?.semanticKind === x[0];
+  }
+  static CALL_KINDS = new Set(["call", "optcall", "super", "dammit", "maybe-dammit", "tagged", "dynimport"]);
+  rejectCallTarget(p) {
+    if (isNode(p) && Emitter.CALL_KINDS.has(this.semanticKindOf(p))) {
+      throw this.positionedError(p, "emitter: a call cannot be a destructuring target — a pattern element writes a name or a member, and a call's result is neither");
+    }
+  }
+  isObject(x) {
+    return isObjectShape(x) && !this.isCallNode(x);
+  }
+  isBlock(x) {
+    return isNode(x) && x[0] === "block" && !this.isCallNode(x);
+  }
+  pureSpine(x) {
+    return typeof x === "string" || this.isSpine(x) && !isRubyNew(x) && this.pureSpine(x[1]);
+  }
+  isSpine(x) {
+    return isNode(x) && typeof x[0] === "string" && SPINE_HEADS.has(x[0]) && !this.isCallNode(x);
   }
   semanticKindOf(node) {
     const id = this.stores.idOf(node);
@@ -10131,7 +10158,7 @@ class Emitter {
       }
       if (this.isEffectDecl(n))
         return;
-      const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
+      const below = nested || Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n);
       for (const el of n)
         walk(el, below);
     };
@@ -10158,7 +10185,7 @@ class Emitter {
         }
         return;
       }
-      const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
+      const below = nested || Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n);
       for (const el of n)
         walk(el, below);
     };
@@ -10184,7 +10211,7 @@ class Emitter {
         walk(n[2], nested);
         return;
       }
-      const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
+      const below = nested || Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n);
       for (const el of n)
         walk(el, below);
     };
@@ -10376,7 +10403,7 @@ class Emitter {
         if (n[2] != null)
           walk(n[2], true);
         const body = n[3];
-        if (isBlock(body)) {
+        if (this.isBlock(body)) {
           for (const stmt of body.slice(1)) {
             if (isNode(stmt) && ASSIGNS.has(stmt[0]) && stmt.length === 3)
               walk(stmt[2], true);
@@ -10388,7 +10415,7 @@ class Emitter {
       }
       if (this.isReactiveDecl(n)) {
         auth(n[1], n[0] === "computed" ? "computed" : "state", n);
-        if (!(n[0] === "computed" && isBlock(n[2]) && n[2].length > 2))
+        if (!(n[0] === "computed" && this.isBlock(n[2]) && n[2].length > 2))
           walk(n[2], nested);
         return;
       }
@@ -10463,7 +10490,7 @@ class Emitter {
           }
         }
       }
-      const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
+      const below = nested || Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n);
       for (const el of n)
         walk(el, below);
     };
@@ -10766,6 +10793,7 @@ class Emitter {
       if (p !== ",")
         out.push([p, this.memberKindOf(p)]);
     } else if (isNode(p)) {
+      this.rejectCallTarget(p);
       const h = p[0];
       if (h === "." && p.length === 3 && p[1] === "this" && typeof p[2] === "string")
         out.push([p[2], this.thisMemberKindOf(p[2])]);
@@ -10819,7 +10847,7 @@ class Emitter {
       }
       if (this.isEffectDecl(n))
         return;
-      const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
+      const below = nested || Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n);
       for (const el of n)
         walk(el, below);
     };
@@ -11704,7 +11732,7 @@ class Emitter {
       return null;
     if (this.containsAwait(iter) || containsYield(iter))
       return null;
-    if (referencesNames(iter, rec.parent.locals))
+    if (referencesNames(iter, rec.parent.locals, this.stores))
       return null;
     const leaves = new Set;
     Emitter.collectLeafNames(iter, leaves);
@@ -11921,7 +11949,7 @@ class Emitter {
       }
       if (x[0] === "type-decl")
         return;
-      if ((x[0] === "cast" || x[0] === "satisfies") && x.length === 3) {
+      if (this.isPostfixType(x)) {
         walk(x[1]);
         return;
       }
@@ -12027,10 +12055,10 @@ class Emitter {
     const walk = (x) => {
       if (!isNode(x))
         return;
-      if (isBlock(x)) {
+      if (this.isBlock(x)) {
         listElements(x.slice(1));
         for (const el of x.slice(1)) {
-          if (isNode(el) && isObject(el))
+          if (isNode(el) && this.isObject(el))
             listElements(el.slice(1));
         }
       }
@@ -12119,6 +12147,7 @@ class Emitter {
       }
       return out;
     }
+    this.rejectCallTarget(p);
     if (p[0] === "array")
       for (const el of p.slice(1))
         this.patternNames(el, out, binding, p);
@@ -12150,7 +12179,7 @@ class Emitter {
     return out;
   }
   static isPattern(x) {
-    return isObject(x) || isNode(x) && x[0] === "array";
+    return isObjectShape(x) || isNode(x) && x[0] === "array";
   }
   static declarablePattern(p) {
     const leaf = (t) => typeof t === "string" || (isNode(t) && t[0] === "=" ? leaf(t[1]) : Emitter.declarablePattern(t));
@@ -12158,7 +12187,7 @@ class Emitter {
       const els = p.slice(1);
       return els.every((el, i) => isNode(el) && el[0] === "..." ? i === els.length - 1 && typeof el[1] === "string" : leaf(el));
     }
-    if (isObject(p)) {
+    if (isObjectShape(p)) {
       const pairs = p.slice(1);
       return pairs.every((pair, i) => {
         if (!isNode(pair))
@@ -12309,7 +12338,7 @@ class Emitter {
       if (boundary === "reactive") {
         if (typeof n[1] === "string")
           reactive.add(n[1]);
-        if (!(n[0] === "computed" && isBlock(n[2]) && n[2].length > 2))
+        if (!(n[0] === "computed" && this.isBlock(n[2]) && n[2].length > 2))
           walk(n[2]);
         return;
       }
@@ -12328,7 +12357,7 @@ class Emitter {
         const spec = n[1];
         if ((this.isReactiveDecl(spec) || this.isEffectDecl(spec) || this.isReadonlyDecl(spec)) && typeof spec[1] === "string") {
           reactive.add(spec[1]);
-          if (!this.isEffectDecl(spec) && !(spec[0] === "computed" && isBlock(spec[2]) && spec[2].length > 2)) {
+          if (!this.isEffectDecl(spec) && !(spec[0] === "computed" && this.isBlock(spec[2]) && spec[2].length > 2)) {
             walk(spec[2]);
           }
           return;
@@ -12359,7 +12388,7 @@ class Emitter {
         if (n[2] != null)
           walk(n[2]);
         const body = n[3];
-        if (isBlock(body)) {
+        if (this.isBlock(body)) {
           for (const stmt of body.slice(1)) {
             if (isNode(stmt) && ASSIGNS.has(stmt[0]) && stmt.length === 3)
               walk(stmt[2]);
@@ -12521,7 +12550,7 @@ class Emitter {
         const level = isDefHead(head) ? 2 : Math.max(inFn, 1);
         if (head === "class") {
           for (const el of n.slice(2)) {
-            const stmts = isNode(el) && el[0] === "block" ? el.slice(1) : [el];
+            const stmts = this.isBlock(el) ? el.slice(1) : [el];
             for (const st of stmts) {
               if (isNode(st) && isDefHead(st[0]) && st.length === 4)
                 for (const part of st.slice(2))
@@ -13475,7 +13504,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
   }
   enumCode(node) {
     const [, name, body] = node;
-    const items = isBlock(body) ? body.slice(1) : [body];
+    const items = this.isBlock(body) ? body.slice(1) : [body];
     const pairs = [];
     const usedKeys = new Set;
     const claim = (key, what, at) => {
@@ -13861,7 +13890,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
   statementCore(node, ind, funcBody) {
     this.ind = ind;
     this.funcBodyStmt = funcBody;
-    if (isNode(node)) {
+    if (isNode(node) && !this.isCallNode(node)) {
       const form = Emitter.STATEMENT_FORMS[node[0]];
       if (form && form(this, node, ind)) {
         this.replDeclEcho(node);
@@ -13892,7 +13921,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
         throw this.sliceAssignError(node);
       }
       if (isAssignHead(node[0]) && node.length === 3) {
-        const guard = Emitter.optionalGuard(node[1]);
+        const guard = this.optionalGuard(node[1]);
         if (guard !== null) {
           this.optionalAssign(node, guard, "statement");
           this.b.emit(";");
@@ -13994,7 +14023,7 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
       this.mark(node, "condition", () => this.expr(node[1]));
       this.b.emit(") ");
       if (guard !== null) {
-        const stmts = isBlock(body) ? body.slice(1) : body;
+        const stmts = this.isBlock(body) ? body.slice(1) : body;
         this.b.emit(`{
 ` + "  ".repeat(ind + 1) + "if (");
         this.expr(guard);
@@ -14005,7 +14034,7 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
 ` + "  ".repeat(ind) + "}");
         return;
       }
-      if (!isBlock(body) && isNode(body)) {
+      if (!this.isBlock(body) && isNode(body)) {
         this.mark(node, "body", () => {
           this.b.emit(`{
 `);
@@ -14020,9 +14049,9 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
     });
   }
   ifStatement(node, ind) {
-    if (!isBlock(node[2]) && isNode(node[2])) {
+    if (!this.isBlock(node[2]) && isNode(node[2])) {
       const stmt = node[2][0];
-      const braced = isNode(stmt) && Emitter.LOOP_HEADS.has(stmt[0]);
+      const braced = isNode(stmt) && Emitter.LOOP_HEADS.has(stmt[0]) && !this.isCallNode(stmt);
       this.mark(node, "$self", () => {
         this.b.emit("if (");
         this.mark(node, "condition", () => this.expr(node[1]));
@@ -14065,7 +14094,7 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
     const block = (body) => into === null ? this.braceBlock(body, ind) : this.accumulateBlock(body, ind, into);
     this.mark(node, "$self", () => {
       this.b.emit("try ");
-      const body = isBlock(node[1]) ? node[1] : ["block", node[1]];
+      const body = this.isBlock(node[1]) ? node[1] : ["block", node[1]];
       this.mark(node, "body", () => block(body));
       if (node.length === 2) {
         if (into === null)
@@ -14078,7 +14107,7 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
       for (const part of node.slice(2)) {
         if (!isNode(part))
           continue;
-        if (isBlock(part)) {
+        if (this.isBlock(part)) {
           this.b.emit(" finally ");
           this.braceBlock(part, ind);
         } else {
@@ -14100,9 +14129,9 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
             this.b.emit(` = ${param});
 `);
             if (into === null)
-              this.statements(isBlock(body) ? body.slice(1) : [body], ind + 1, "block");
+              this.statements(this.isBlock(body) ? body.slice(1) : [body], ind + 1, "block");
             else
-              this.accumulateBody(isBlock(body) ? body : ["block", body], ind, into);
+              this.accumulateBody(this.isBlock(body) ? body : ["block", body], ind, into);
             this.b.emit("  ".repeat(ind) + "}");
           } else if (Emitter.isTypedWrapper(binding)) {
             this.b.emit(" catch (");
@@ -14294,8 +14323,8 @@ ${pad}    ${into}.push(undefined);
 `);
       return;
     }
-    const stmts = this.liveStmts(isBlock(block) ? block.slice(1) : [block]);
-    this.emitTsTypeDecls(isBlock(block) ? block.slice(1) : [block], "  ".repeat(ind + 2));
+    const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block]);
+    this.emitTsTypeDecls(this.isBlock(block) ? block.slice(1) : [block], "  ".repeat(ind + 2));
     for (const stmt of stmts) {
       this.b.emit("  ".repeat(ind + 2));
       this.statement(stmt, ind + 2);
@@ -14632,8 +14661,8 @@ ${"  ".repeat(ind)}`);
 ` + "  ".repeat(ind) + "}");
   }
   flatBody(body, guard, guardBodyPad) {
-    const stmts = this.liveStmts(isBlock(body) ? body.slice(1) : [body]);
-    this.emitTsTypeDecls(isBlock(body) ? body.slice(1) : [body], "");
+    const stmts = this.liveStmts(this.isBlock(body) ? body.slice(1) : [body]);
+    this.emitTsTypeDecls(this.isBlock(body) ? body.slice(1) : [body], "");
     if (guard !== null) {
       const wrap = Emitter.needsGrouping(guard, "operand") || isUpdate(guard);
       this.b.emit("if (");
@@ -14661,8 +14690,8 @@ ${"  ".repeat(ind)}`);
     }
   }
   bodyLines(body, ind) {
-    const stmts = this.liveStmts(isBlock(body) ? body.slice(1) : [body]);
-    this.emitTsTypeDecls(isBlock(body) ? body.slice(1) : [body], "  ".repeat(ind + 1));
+    const stmts = this.liveStmts(this.isBlock(body) ? body.slice(1) : [body]);
+    this.emitTsTypeDecls(this.isBlock(body) ? body.slice(1) : [body], "  ".repeat(ind + 1));
     for (const stmt of stmts) {
       this.b.emit("  ".repeat(ind + 1));
       this.statement(stmt, ind + 1);
@@ -15042,10 +15071,10 @@ ${pad ?? ""}`);
     return { arms, elseBlock };
   }
   static branchStmts(b) {
-    return Emitter.stripErased(isBlock(b) ? b.slice(1) : [b[0]]);
+    return Emitter.stripErased(isNode(b) && b[0] === "block" ? b.slice(1) : [b[0]]);
   }
   branchLive(b, collectDecls = false) {
-    const raw = isBlock(b) ? b.slice(1) : [b[0]];
+    const raw = this.isBlock(b) ? b.slice(1) : [b[0]];
     if (this.ts && collectDecls) {
       for (const s of raw) {
         if (isNode(s) && s[0] === "type-decl")
@@ -15132,7 +15161,7 @@ ${pad ?? ""}`);
     const stmts = this.branchLive(block);
     this.b.emit(`{
 `);
-    this.emitTsTypeDecls(isBlock(block) ? block.slice(1) : [block[0]], "  ".repeat(ind + 1));
+    this.emitTsTypeDecls(this.isBlock(block) ? block.slice(1) : [block[0]], "  ".repeat(ind + 1));
     stmts.forEach((stmt, i) => {
       this.b.emit("  ".repeat(ind + 1));
       if (i === stmts.length - 1)
@@ -15222,14 +15251,14 @@ ${pad ?? ""}`);
   tryBranches(node, ind, effect = false) {
     this.mark(node, "$self", () => {
       this.b.emit("try ");
-      const vbody = isBlock(node[1]) ? node[1] : ["block", node[1]];
+      const vbody = this.isBlock(node[1]) ? node[1] : ["block", node[1]];
       this.mark(node, "body", () => this.returnBlock(vbody, ind, effect));
       if (node.length === 2)
         this.b.emit(" catch {}");
       for (const part of node.slice(2)) {
         if (!isNode(part))
           continue;
-        if (isBlock(part)) {
+        if (this.isBlock(part)) {
           this.b.emit(" finally ");
           this.braceBlock(part, ind);
         } else {
@@ -15250,7 +15279,7 @@ ${pad ?? ""}`);
             this.b.emit(` = ${param});
 `);
             const stmts = this.branchLive(body);
-            this.emitTsTypeDecls(isBlock(body) ? body.slice(1) : [body[0]], "  ".repeat(ind + 1));
+            this.emitTsTypeDecls(this.isBlock(body) ? body.slice(1) : [body[0]], "  ".repeat(ind + 1));
             stmts.forEach((stmt, i) => {
               this.b.emit("  ".repeat(ind + 1));
               if (i === stmts.length - 1)
@@ -15330,7 +15359,7 @@ ${pad ?? ""}`);
   }
   returnCaseBodyCtrl(body, ind, effect) {
     const stmts = this.branchLive(body);
-    this.emitTsTypeDecls(isBlock(body) ? body.slice(1) : [body[0]], "  ".repeat(ind + 2));
+    this.emitTsTypeDecls(this.isBlock(body) ? body.slice(1) : [body[0]], "  ".repeat(ind + 2));
     stmts.forEach((stmt, i) => {
       this.b.emit("  ".repeat(ind + 2));
       if (i === stmts.length - 1)
@@ -15434,7 +15463,7 @@ ${pad ?? ""}`);
   accumulateBody(body, ind, into) {
     const stmts = this.branchLive(body);
     const pad = "  ".repeat(ind + 1);
-    this.emitTsTypeDecls(isBlock(body) ? body.slice(1) : [body[0]], pad);
+    this.emitTsTypeDecls(this.isBlock(body) ? body.slice(1) : [body[0]], pad);
     stmts.forEach((stmt, i) => {
       this.b.emit(pad);
       const tailLoop = i === stmts.length - 1 && isLoopNode(stmt) && !Emitter.containsReturn(stmt);
@@ -15460,7 +15489,7 @@ ${pad ?? ""}`);
       } else if (i === stmts.length - 1 && isNode(stmt) && stmt[0] === "switch" && stmt.length === 4) {
         this.switchStatement(stmt, ind + 1, into);
       } else if (i === stmts.length - 1 && isNode(stmt) && stmt[0] === "try") {
-        if (stmt.slice(2).some((part) => isBlock(part))) {
+        if (stmt.slice(2).some((part) => this.isBlock(part))) {
           const tmp = this.loopTempName("_try");
           this.temps.used.add(tmp);
           this.b.emit(`const ${tmp} = [];
@@ -15622,8 +15651,8 @@ ${pad}${into}.push(...${tmp});`);
       });
       this.tsReturnAnnotation(node, isAsync, isVoid, isGen);
       this.b.emit(" ");
-      const stmts = this.liveStmts(isBlock(node[3]) ? node[3].slice(1) : [node[3]], { forwards: true });
-      const { entries, names } = this.scopedHoist(isBlock(node[3]) ? node[3].slice(1) : [node[3]], node[2]);
+      const stmts = this.liveStmts(this.isBlock(node[3]) ? node[3].slice(1) : [node[3]], { forwards: true });
+      const { entries, names } = this.scopedHoist(this.isBlock(node[3]) ? node[3].slice(1) : [node[3]], node[2]);
       for (const n of this.pushReactiveFrame(stmts, names, node[2], node))
         names.add(n);
       this.scopes.push(names);
@@ -15649,7 +15678,7 @@ ${pad}${into}.push(...${tmp});`);
     this.b.emit(";");
   }
   braceBlock(blockNode, ind, hoist = []) {
-    const stmts = isNode(blockNode) && blockNode[0] === "block" ? blockNode.slice(1) : [blockNode];
+    const stmts = this.isBlock(blockNode) ? blockNode.slice(1) : [blockNode];
     this.mark(blockNode, "$self", () => {
       this.b.emit(`{
 `);
@@ -15731,7 +15760,7 @@ ${pad}${into}.push(...${tmp});`);
       return "yield";
     if (isFunc(x))
       return "function";
-    if (isObject(x))
+    if (isObjectShape(x))
       return "object";
     return "primary";
   }
@@ -15816,6 +15845,8 @@ ${pad}${into}.push(...${tmp});`);
       return;
     }
     const head = node[0];
+    if (this.isCallNode(node))
+      return this.call(node);
     if (head === "str" && this.lockedHead(node, "str"))
       return this.strTemplate(node);
     if (head === "tagged-template" && node.length === 3)
@@ -15828,7 +15859,7 @@ ${pad}${into}.push(...${tmp});`);
       throw this.sliceAssignError(node);
     }
     if (isAssignHead(head) && node.length === 3 && !this.inPattern) {
-      const guard = Emitter.optionalGuard(node[1]);
+      const guard = this.optionalGuard(node[1]);
       if (guard !== null)
         return this.optionalAssign(node, guard, "value");
     }
@@ -16001,13 +16032,13 @@ ${pad}${into}.push(...${tmp});`);
     }
     return this.call(node);
   }
-  static optionalGuard(t) {
+  optionalGuard(t) {
     if (!isNode(t) || t.length !== 3)
       return null;
-    if (t[0] === "?." || t[0] === "optindex")
+    if (t[0] === "?." || t[0] === "optindex" && !this.isCallNode(t))
       return t;
     if (t[0] === "." || t[0] === "[]")
-      return Emitter.optionalGuard(t[1]);
+      return this.optionalGuard(t[1]);
     return null;
   }
   repeatSafeValue(x, extra = null) {
@@ -16067,14 +16098,14 @@ ${pad}${into}.push(...${tmp});`);
       return "try";
     return null;
   }
-  static planNeedsFor(node) {
+  planNeedsFor(node) {
     if (!isNode(node) || node.length !== 3)
       return null;
     const h = node[0];
     const synth = h === "//=" || h === "%%=";
     if (!synth && !ASSIGNS.has(h))
       return null;
-    const optLink = Emitter.optionalGuard(node[1]);
+    const optLink = this.optionalGuard(node[1]);
     if (optLink === null && !synth)
       return null;
     if (optLink === null && !(isNode(node[1]) && (node[1][0] === "." || node[1][0] === "[]") && node[1].length === 3))
@@ -16129,7 +16160,7 @@ ${pad}${into}.push(...${tmp});`);
       if (boundary === "skip" || boundary === "effect")
         return;
       if (boundary === "reactive") {
-        if (!(n[0] === "computed" && isBlock(n[2]) && n[2].length > 2))
+        if (!(n[0] === "computed" && this.isBlock(n[2]) && n[2].length > 2))
           walk(n[2], extra);
         return;
       }
@@ -16177,7 +16208,7 @@ ${pad}${into}.push(...${tmp});`);
         walk(n[1], extra);
         return;
       }
-      const need = Emitter.planNeedsFor(n);
+      const need = this.planNeedsFor(n);
       if (need !== null)
         plan(n, need, extra);
       for (const el of n)
@@ -16273,7 +16304,7 @@ ${pad}${into}.push(...${tmp});`);
     }
     const patternTarget = Emitter.isPattern(node[1]);
     const declares = Emitter.declaresInPlace.has(node);
-    const wrapParens = isObject(node[1]) && !this.inPattern && !declares;
+    const wrapParens = this.isObject(node[1]) && !this.inPattern && !declares;
     if (typeof node[1] === "string" && this.isComputedName(node[1])) {
       throw this.positionedError(node, `emitter: cannot assign to computed '${node[1]}' — a '~=' binding derives from its dependencies; write to those instead`);
     }
@@ -16411,7 +16442,7 @@ ${pad}${into}.push(...${tmp});`);
         const ro = head === "computed" ? "readonly " : "";
         this.tsAnnotate(node, "annotation", containerType(this.annotationText(node), ro, MINTED));
       } else if (this.ts) {
-        const t = syntacticLiteralType(value);
+        const t = syntacticLiteralType(value, this.stores);
         if (t !== null) {
           const ro = head === "computed" ? "readonly " : "";
           this.b.tsOnly(() => this.b.emit(`: ${containerType(t, ro, MINTED)}`));
@@ -16450,7 +16481,7 @@ ${pad}${into}.push(...${tmp});`);
     this.b.emit(";");
   }
   computedBody(node, value, ind) {
-    if (isBlock(value) && value.length > 2) {
+    if (this.isBlock(value) && value.length > 2) {
       const stmts = this.liveStmts(value.slice(1), { forwards: true });
       const { entries, names } = this.scopedHoist(stmts, []);
       for (const n of this.pushReactiveFrame(stmts, names))
@@ -16461,7 +16492,7 @@ ${pad}${into}.push(...${tmp});`);
       this.rframes.pop();
       return;
     }
-    const wrap = Emitter.needsGrouping(value, "operand") || isObject(value);
+    const wrap = Emitter.needsGrouping(value, "operand") || this.isObject(value);
     if (wrap)
       this.b.emit("(");
     this.expr(value);
@@ -16579,7 +16610,7 @@ ${pad}${into}.push(...${tmp});`);
     const isAsync = this.containsAwait(body);
     emitName();
     this.b.emit(isAsync ? "(async () => " : "(() => ");
-    if (isBlock(body)) {
+    if (this.isBlock(body)) {
       this.mark(node, "value", () => this.withExpression(() => {
         const stmts = this.liveStmts(body.slice(1), { forwards: true });
         const { entries, names } = this.scopedHoist(stmts, []);
@@ -16609,7 +16640,7 @@ ${pad}${into}.push(...${tmp});`);
       if (!this.effectTailWrites(body))
         this.b.emit("return ");
       this.mark(node, "value", () => this.withExpression(() => {
-        const wrap = Emitter.needsGrouping(body, "operand") || isObject(body);
+        const wrap = Emitter.needsGrouping(body, "operand") || this.isObject(body);
         if (wrap)
           this.b.emit("(");
         this.expr(body);
@@ -16625,7 +16656,7 @@ ${pad}${into}.push(...${tmp});`);
     if (!isNode(stmt))
       return false;
     const h = stmt[0];
-    if (h === "block" && stmt.length > 1) {
+    if (this.isBlock(stmt) && stmt.length > 1) {
       const tail = stmt[stmt.length - 1];
       return this.effectTailWrites(tail) || this.effectBranchWrites(tail);
     }
@@ -16634,7 +16665,9 @@ ${pad}${into}.push(...${tmp});`);
     }
     if (isAssignHead(h) || h === ".=" || isUpdate(stmt))
       return true;
-    if (Emitter.LOOP_HEADS.has(h) || isDefHead(h) || h === "class" || h === "enum" || h === "export")
+    if (Emitter.LOOP_HEADS.has(h) && !this.isCallNode(stmt))
+      return true;
+    if (isDefHead(h) || h === "class" || h === "enum" || h === "export")
       return true;
     if (this.isModuleImport(stmt) || this.isReactiveDecl(stmt) || this.isReadonlyDecl(stmt))
       return true;
@@ -16656,7 +16689,7 @@ ${pad}${into}.push(...${tmp});`);
       return stmt[2].some((w) => armTail(w[2])) || stmt[3] !== null && armTail(stmt[3]);
     }
     if (stmt[0] === "try") {
-      return armTail(isBlock(stmt[1]) ? stmt[1] : ["block", stmt[1]]) || stmt.slice(2).some((part) => isNode(part) && !isBlock(part) && armTail(part[1]));
+      return armTail(this.isBlock(stmt[1]) ? stmt[1] : ["block", stmt[1]]) || stmt.slice(2).some((part) => isNode(part) && !this.isBlock(part) && armTail(part[1]));
     }
     return false;
   }
@@ -16872,7 +16905,7 @@ ${pad}${into}.push(...${tmp});`);
         }
       }
     }
-    const stmts = isBlock(body) ? body.slice(1) : [];
+    const stmts = this.isBlock(body) ? body.slice(1) : [];
     const readonlyVars = [];
     const plainVars = [];
     const stateVars = [];
@@ -17100,7 +17133,7 @@ ${pad}${into}.push(...${tmp});`);
         plainVars.push({ name: t.name, value: stmt[2], isPublic: t.isPublic, node: stmt });
         return;
       }
-      if (isObject(stmt)) {
+      if (this.isObject(stmt)) {
         if (offered)
           rejectOffer(stmt);
         for (const pair of stmt.slice(1)) {
@@ -17188,7 +17221,7 @@ ${pad}${into}.push(...${tmp});`);
     this.methodName = null;
     const initValues = [
       ...[...readonlyVars, ...plainVars, ...stateVars].map((m) => m.value),
-      ...derivedVars.map((m) => m.value).filter((v) => !(isBlock(v) && v.length > 2))
+      ...derivedVars.map((m) => m.value).filter((v) => !(this.isBlock(v) && v.length > 2))
     ].filter((v) => v !== undefined);
     const { entries: initHoist, names: initNames } = this.scopedHoist(initValues, [], { declareInPlace: false });
     this.mark(node, "$self", () => {
@@ -17422,7 +17455,7 @@ ${pad}${into}.push(...${tmp});`);
         if (tm === undefined || tm.annotation != null)
           return;
         const code = this.capturedExprText(() => this.computedBody(m.node, m.value, 0));
-        computedBodies.push({ name: m.name, code, block: isBlock(m.value) && m.value.length > 2 });
+        computedBodies.push({ name: m.name, code, block: this.isBlock(m.value) && m.value.length > 2 });
       };
       const emitGate = (gate, index) => {
         initLine(gate.node, () => {
@@ -17462,7 +17495,7 @@ ${pad}${into}.push(...${tmp});`);
           this.mark(eff, "$self", () => {
             this.mark(eff, "operator", () => this.b.emit(this.runtimeName("__effect")));
             this.b.emit(isAsync ? "(async () => " : "(() => ");
-            if (isBlock(bodyNode) && bodyNode.length > 2) {
+            if (this.isBlock(bodyNode) && bodyNode.length > 2) {
               this.mark(eff, "value", () => this.withExpression(() => {
                 const bodyStmts = this.liveStmts(bodyNode.slice(1), { forwards: true });
                 const { entries, names } = this.scopedHoist(bodyStmts, []);
@@ -17474,7 +17507,7 @@ ${pad}${into}.push(...${tmp});`);
                 this.rframes.pop();
               }));
             } else {
-              const single = isBlock(bodyNode) ? bodyNode[1] : bodyNode;
+              const single = this.isBlock(bodyNode) ? bodyNode[1] : bodyNode;
               const { entries, names } = this.scopedHoist([single], []);
               this.scopes.push(names);
               this.rframes.push({ reactive: new Set, bound: names });
@@ -17490,7 +17523,7 @@ ${pad}${into}.push(...${tmp});`);
                 if (!this.effectTailWrites(single))
                   this.b.emit("return ");
                 this.mark(eff, "value", () => this.withExpression(() => {
-                  const wrap = Emitter.needsGrouping(single, "operand") || isObject(single);
+                  const wrap = Emitter.needsGrouping(single, "operand") || this.isObject(single);
                   if (wrap)
                     this.b.emit("(");
                   this.expr(single);
@@ -17559,7 +17592,7 @@ ${pad}${into}.push(...${tmp});`);
           let next = host;
           const tag = x[0] === "switch" && x.length === 4 ? null : Emitter.templateHeadTag(x);
           if (tag === "object") {
-            next = isObject(x) && x.slice(1).some((c) => isNode(c) && c[0] === ":") ? host : null;
+            next = this.isObject(x) && x.slice(1).some((c) => isNode(c) && c[0] === ":") ? host : null;
           } else if (tag !== null && TEMPLATE_TAGS.has(tag)) {
             next = { tag, svg: host?.svg === true || SVG_ONLY_TAGS.has(tag) };
           } else if (typeof x[0] === "string" && /^[A-Z]/.test(x[0])) {
@@ -17683,7 +17716,7 @@ ${pad}${into}.push(...${tmp});`);
       scopeDepth: this.scopes.length
     };
     const body = renderNode[1];
-    const stmts = isBlock(body) ? body.slice(1) : [body];
+    const stmts = this.isBlock(body) ? body.slice(1) : [body];
     classRecord.stmts = stmts;
     this.rframes.push({ reactive: new Set, bound: classRecord.bindings });
     let rootVar;
@@ -17895,7 +17928,7 @@ ${pad}${into}.push(...${tmp});`);
     const rec = this.rstate.sink;
     if (rec.kind !== "class" || rec.locals.size === 0)
       return;
-    if (referencesNames(expr, rec.locals)) {
+    if (referencesNames(expr, rec.locals, this.stores)) {
       throw this.positionedError(node ?? expr, "emitter: a render local cannot appear in a LIVE binding or a dynamic block head at the render top level — " + "locals live in _create() and reactive machinery lives in _setup() (a compiled read here would be a " + "mount-time ReferenceError); bind the value to a member instead", isNode(expr) ? expr : this.rstate.node);
     }
   }
@@ -18052,7 +18085,7 @@ ${pad}${into}.push(...${tmp});`);
     if (headStr === "for-as" && sexpr.length === 6) {
       throw this.positionedError(sexpr, "emitter: an async loop has no render reading — reconciliation is synchronous; collect the items into a state " + "member and loop over it");
     }
-    if (headStr === "comprehension" || headStr === "while" || headStr === "loop") {
+    if (isComprehensionNode(sexpr) || headStr === "while" || headStr === "loop") {
       throw this.positionedError(sexpr, "emitter: only `for … in` drives list rendering — while/loop/comprehensions have no reconcile reading inside " + "render");
     }
     if (this.isEffectDecl(sexpr) || this.isReactiveDecl(sexpr) || this.isReadonlyDecl(sexpr)) {
@@ -18215,11 +18248,11 @@ ${pad}${into}.push(...${tmp});`);
       }
     };
     for (const arg of args) {
-      if (isObject(arg))
+      if (this.isObject(arg))
         take(arg);
-      else if (isFunc(arg) && isBlock(arg[2])) {
+      else if (isFunc(arg) && this.isBlock(arg[2])) {
         for (const child of arg[2].slice(1))
-          if (isObject(child))
+          if (this.isObject(child))
             take(child);
       }
     }
@@ -18382,7 +18415,7 @@ ${pad}${into}.push(...${tmp});`);
     return el;
   }
   renderChildBlock(body) {
-    if (!isBlock(body)) {
+    if (!this.isBlock(body)) {
       const v = this.renderNode(body);
       if (v != null)
         return v;
@@ -18421,10 +18454,10 @@ ${pad}${into}.push(...${tmp});`);
           throw this.positionedError(arg, "emitter: a parameterized function is not a render child — element children arrows carry no parameters " + "(an indented `.method (v) -> …` continuation re-reads as a NEW element inside render; put the chain on one " + "line or bind it in a method)", this.rstate.node);
         }
         const block = arg[2];
-        if (isBlock(block)) {
+        if (this.isBlock(block)) {
           for (let j = 1;j < block.length; j++) {
             const child = block[j];
-            if (isObject(child)) {
+            if (this.isObject(child)) {
               this.renderAttributes(el, child);
             } else if (!this.renderOwnLineWord(el, child, block, j, owner)) {
               const v = this.renderNode(child);
@@ -18442,7 +18475,7 @@ ${pad}${into}.push(...${tmp});`);
         }
         continue;
       }
-      if (isObject(arg)) {
+      if (this.isObject(arg)) {
         this.renderAttributes(el, arg);
         continue;
       }
@@ -18733,7 +18766,7 @@ ${pad}${into}.push(...${tmp});`);
         if (isNode(value) && value[0] === "." && value[1] === "this" && value.length === 3 && typeof value[2] === "string") {
           throw dead(`'@${value[2]}' is not a reactive member`, "declare it with ':=' to share it");
         }
-        if (typeof value !== "string" && !Emitter.isChainNode(value)) {
+        if (typeof value !== "string" && !this.isChainNodeOf(value)) {
           throw dead("this expression is never a container", "bind a reactive member or module reactive name");
         }
         this.checkCrossScopeLocals(value, pair);
@@ -18833,7 +18866,7 @@ ${pad}${into}.push(...${tmp});`);
       domItems.push(arg);
     };
     for (const arg of args) {
-      if (isObject(arg)) {
+      if (this.isObject(arg)) {
         rehomeObjectDirectives(arg);
         for (const pair of arg.slice(1))
           addPair(pair);
@@ -18843,9 +18876,9 @@ ${pad}${into}.push(...${tmp});`);
           throw this.positionedError(arg, `emitter: a parameterized function is not a render child — the children of '${name}' arrive as a bare block ` + "(a callback the component should run is passed as a named prop)", this.rstate.node);
         }
         const block = arg[2];
-        const stmts = isBlock(block) ? block.slice(1) : block != null ? [block] : [];
+        const stmts = this.isBlock(block) ? block.slice(1) : block != null ? [block] : [];
         for (const child of stmts) {
-          if (isObject(child)) {
+          if (this.isObject(child)) {
             rehomeObjectDirectives(child);
             for (const pair of child.slice(1))
               addPair(pair);
@@ -19367,7 +19400,7 @@ ${this.replayPad}}` : " }");
       };
       if (isNode(key) && key[0] === "." && key[1] === "this" && typeof key[2] === "string") {
         const eventName = key[2];
-        if (this.rstate.sink.kind === "loop" && this.loopVarNames().size > 0 && referencesNames(value, this.loopVarNames())) {
+        if (this.rstate.sink.kind === "loop" && this.loopVarNames().size > 0 && referencesNames(value, this.loopVarNames(), this.stores)) {
           this.rstate.sink.forceNonStatic = true;
         }
         const evUsed = new Set;
@@ -19780,7 +19813,7 @@ ${this.replayPad}}` : " }");
       if (r.locals.size === 0)
         continue;
       const hidden = new Set([...r.locals].filter((n) => !visible(n)));
-      if (hidden.size > 0 && referencesNames(expr, hidden)) {
+      if (hidden.size > 0 && referencesNames(expr, hidden, this.stores)) {
         throw this.positionedError(node, "emitter: this expression reads a render local of an ENCLOSING render scope — each dynamic block (a " + "conditional branch, a loop body) is its own factory function, and render locals never cross that boundary " + "; declare the local " + "inside this block, or use a member", this.rstate.node);
       }
     }
@@ -19948,7 +19981,7 @@ ${this.replayPad}}` : " }");
     this.rframes.push({ reactive: new Set, bound: rec.bindings, loopVars: rec.bindings, loopBindings: Emitter.loopBindingsOf(rec) });
     try {
       let stmts;
-      if (isBlock(part)) {
+      if (this.isBlock(part)) {
         stmts = part.slice(1);
       } else if (isNode(part) && part.length === 1 && isNode(part[0]) && this.stores.idOf(part) === null) {
         stmts = [part[0]];
@@ -20209,10 +20242,10 @@ ${this.replayPad}}` : " }");
       this.primitiveAvoid = prevAvoid;
     }
     if (keyExpr !== null) {
-      if (rec.locals.size > 0 && referencesNames(keyExpr, rec.locals)) {
+      if (rec.locals.size > 0 && referencesNames(keyExpr, rec.locals, this.stores)) {
         throw this.positionedError(node, "emitter: a `key:` expression must be evaluable in the loop HEADER scope — it reads a render local declared " + "inside the loop body, which lives in the row factory (derive the key from the item inline: `key: item.id`)");
       }
-      if (!referencesNames(keyExpr, new Set([itemVar, indexVar]))) {
+      if (!referencesNames(keyExpr, new Set([itemVar, indexVar]), this.stores)) {
         throw this.positionedError(node, `emitter: a loop key must derive from the row — this \`key:\` expression never reads '${itemVar}'` + `${vars.length === 2 ? ` or '${indexVar}'` : ""} (a row-independent key cannot identify rows)`);
       }
     }
@@ -20240,7 +20273,7 @@ ${this.replayPad}}` : " }");
       Emitter.collectRenderBodyBindings(el, set);
   }
   extractLoopKey(body, loopNode) {
-    const stmts = isBlock(body) ? body.slice(1) : [body];
+    const stmts = this.isBlock(body) ? body.slice(1) : [body];
     const first = stmts.find((s) => !this.isRenderBinding(s));
     if (!isNode(first))
       return null;
@@ -20257,13 +20290,13 @@ ${this.replayPad}}` : " }");
       return null;
     };
     for (const arg of first.slice(1)) {
-      if (isObject(arg)) {
+      if (this.isObject(arg)) {
         const found = scanObject(arg);
         if (found !== null)
           return found;
-      } else if (isFunc(arg) && isBlock(arg[2])) {
+      } else if (isFunc(arg) && this.isBlock(arg[2])) {
         for (const child of arg[2].slice(1)) {
-          if (isObject(child)) {
+          if (this.isObject(child)) {
             const found = scanObject(child);
             if (found !== null)
               return found;
@@ -20441,7 +20474,7 @@ ${this.replayPad}}` : " }");
         });
         try {
           this.withExpression(() => {
-            const wrap = Emitter.needsGrouping(keyExpr, "operand") || isObject(keyExpr);
+            const wrap = Emitter.needsGrouping(keyExpr, "operand") || this.isObject(keyExpr);
             const gen = this.tsServedValue("__key", () => {
               if (wrap)
                 this.b.emit("(");
@@ -20826,7 +20859,7 @@ ${this.replayPad}}` : " }");
   }
   renderBind(el, pair, prop, value, objExpr, site) {
     this.checkBindTarget(pair, value);
-    if (this.rstate.sink.kind === "loop" && this.loopVarNames().size > 0 && referencesNames(value, this.loopVarNames())) {
+    if (this.rstate.sink.kind === "loop" && this.loopVarNames().size > 0 && referencesNames(value, this.loopVarNames(), this.stores)) {
       this.rstate.sink.forceNonStatic = true;
     }
     let inputType = null;
@@ -20914,7 +20947,7 @@ ${this.replayPad}}` : " }");
       }
       reject(`emitter: '<=>' targets '@${value[2]}', which is not a declared member`);
     }
-    if (isNode(value) && Emitter.optionalGuard(value) !== null) {
+    if (isNode(value) && this.optionalGuard(value) !== null) {
       reject("emitter: a two-way binding target cannot carry optional links — the write form would be invalid JS");
     }
     let n = value;
@@ -21032,7 +21065,7 @@ ${this.replayPad}}` : " }");
     for (;; ) {
       if (!isNode(cur))
         return false;
-      if (isObject(cur))
+      if (isObjectShape(cur))
         return true;
       if (isBinary(cur) || isRelation(cur) || isChainLink(cur)) {
         cur = cur[1];
@@ -21066,9 +21099,6 @@ ${this.replayPad}}` : " }");
     if (isNode(x[0]) && x[0][0] !== "dammit!" && !(x[0][0] === "." && x[0].length === 3 && x[0][2] === "new"))
       return 0;
     return null;
-  }
-  static isChainNode(x) {
-    return isNode(x) && Emitter.chainHeadSlot(x) !== null;
   }
   isChainNodeOf(x) {
     return isNode(x) && this.chainHeadSlotOf(x) !== null;
@@ -21909,7 +21939,7 @@ ${this.replayPad}}` : " }");
       const pair = this.stores.alias([stmt[0] === "void-def" ? "void-pair" : ":", stmt[1], fn], stmt);
       return { form: "def", pair };
     }
-    if ((stmt[0] === "get" || stmt[0] === "set") && stmt.length === 2 && isObject(stmt[1]) && stmt[1].length === 2) {
+    if ((stmt[0] === "get" || stmt[0] === "set") && stmt.length === 2 && this.isObject(stmt[1]) && stmt[1].length === 2) {
       const pair = stmt[1][1];
       if (isNode(pair) && pair[0] === ":" && pair.length === 3 && isFunc(pair[2]))
         return { form: stmt[0], pair };
@@ -21917,7 +21947,7 @@ ${this.replayPad}}` : " }");
     return null;
   }
   classMembers(body, ind) {
-    const stmts = isNode(body) && body[0] === "block" ? body.slice(1) : [body];
+    const stmts = this.isBlock(body) ? body.slice(1) : [body];
     const forms = new Map(stmts.map((stmt) => [stmt, this.classMethodForm(stmt)]));
     const memberName = (key) => isNode(key) && key[0] === "." && key[1] === "this" ? key[2] : key;
     const isStaticKey = (key) => isNode(key) && key[0] === "." && key[1] === "this" && key.length === 3 && typeof key[2] === "string";
@@ -21934,7 +21964,7 @@ ${this.replayPad}}` : " }");
     const accessors = [];
     for (const stmt of stmts) {
       const form = forms.get(stmt) ?? null;
-      const pairs = form !== null ? [form.pair] : isObject(stmt) ? stmt.slice(1) : null;
+      const pairs = form !== null ? [form.pair] : this.isObject(stmt) ? stmt.slice(1) : null;
       if (pairs === null) {
         const fieldKey = typeof stmt === "string" || isStaticKey(stmt) ? stmt : Emitter.isTypedWrapper(stmt) && (typeof stmt[1] === "string" || isStaticKey(stmt[1])) ? stmt[1] : isNode(stmt) && stmt[0] === "=" && stmt.length === 3 && (typeof stmt[1] === "string" || isStaticKey(stmt[1])) ? stmt[1] : null;
         if (fieldKey !== null) {
@@ -22083,7 +22113,7 @@ ${this.replayPad}}` : " }");
 `);
         return;
       }
-      if (isObject(stmt)) {
+      if (form !== null || this.isObject(stmt)) {
         for (const pair of stmt.slice(1))
           this.withTsDirectives(pair, pad, () => {
             const key = pair[1];
@@ -22145,7 +22175,7 @@ ${this.replayPad}}` : " }");
                   return p;
                 };
                 params = params.map(strip);
-                if (atParams.length > 0 && isNode(block) && block[0] === "block" && isNode(block[1]) && block[1][0] === "super") {
+                if (atParams.length > 0 && this.isBlock(block) && isNode(block[1]) && block[1][0] === "super") {
                   const names = new Set(atParams);
                   const subst = (x) => {
                     if (!isNode(x))
@@ -22301,7 +22331,7 @@ ${"  ".repeat(ind)}`);
     });
   }
   methodBlock(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, tailReturn = true, voidReason = null, atParams = [] }) {
-    const stmts = this.liveStmts(isNode(block) && block[0] === "block" ? block.slice(1) : [block], { forwards: true });
+    const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block], { forwards: true });
     const { entries: hoist, names } = this.scopedHoist(stmts, funcNode[1]);
     for (const n of this.pushReactiveFrame(stmts, names, funcNode[1], funcNode))
       names.add(n);
@@ -22330,7 +22360,7 @@ ${"  ".repeat(ind)}`);
           this.b.emit(`${pad}this.${n} = ${n};
 `);
       };
-      this.emitTsTypeDecls(isNode(block) && block[0] === "block" ? block.slice(1) : [block], pad);
+      this.emitTsTypeDecls(this.isBlock(block) ? block.slice(1) : [block], pad);
       this.mark(block, "statements", () => {
         const leadingSuper = isConstructor && stmts.length > 0 && isNode(stmts[0]) && stmts[0][0] === "super";
         if (!leadingSuper)
@@ -22380,12 +22410,12 @@ ${"  ".repeat(ind)}`);
       this.mark(node, "operator", () => this.b.emit("new"));
       this.b.emit(" ");
       this.mark(node, "operand", () => {
-        if (isNode(operand) && SPINE_HEADS.has(operand[0]) && Emitter.optionalGuard(operand)) {
+        if (this.isSpine(operand) && this.optionalGuard(operand)) {
           this.b.emit("(");
           this.expr(operand);
           this.b.emit(" ?? undefined)()");
         } else if (isNode(operand) && (operand[0] === "." || operand[0] === "?.")) {
-          if (Emitter.pureSpine(operand)) {
+          if (this.pureSpine(operand)) {
             this.member(operand);
             this.b.emit("()");
           } else {
@@ -22393,7 +22423,7 @@ ${"  ".repeat(ind)}`);
             this.expr(operand);
             this.b.emit(")()");
           }
-        } else if (isNode(operand) && operand[0] === "new" && operand.length === 2 && Emitter.optionalGuard(operand[1])) {
+        } else if (isNode(operand) && operand[0] === "new" && operand.length === 2 && this.optionalGuard(operand[1])) {
           this.b.emit("(");
           this.newExpr(operand);
           this.b.emit(")()");
@@ -22401,7 +22431,7 @@ ${"  ".repeat(ind)}`);
           this.b.emit("(");
           this.taggedTemplate(operand);
           this.b.emit(")()");
-        } else if (isNode(operand) && isNode(operand[0]) && !isRubyNew(operand[0]) && SPINE_HEADS.has(operand[0][0]) && Emitter.optionalGuard(operand[0])) {
+        } else if (isNode(operand) && isNode(operand[0]) && !isRubyNew(operand[0]) && this.isSpine(operand[0]) && this.optionalGuard(operand[0])) {
           this.mark(operand, "$self", () => {
             this.b.emit("(");
             this.expr(operand[0]);
@@ -22430,8 +22460,8 @@ ${"  ".repeat(ind)}`);
         } else if (isNode(operand)) {
           const isCall = this.semanticKindOf(operand) === "call";
           const callee = operand[0];
-          const plainCallee = !isRubyNew(callee) && (Emitter.pureSpine(callee) || isNode(callee) && !callee.parenthesized && this.semanticKindOf(callee) === "call" || isNode(callee) && callee[0] === "dammit!");
-          if (SPINE_HEADS.has(operand[0]) && Emitter.pureSpine(operand)) {
+          const plainCallee = !isRubyNew(callee) && (this.pureSpine(callee) || isNode(callee) && !callee.parenthesized && this.semanticKindOf(callee) === "call" || isNode(callee) && callee[0] === "dammit!");
+          if (this.isSpine(operand) && this.pureSpine(operand)) {
             this.call(operand);
             this.b.emit("()");
           } else if (isCall && !operand.parenthesized && isRubyNew(callee)) {
@@ -22441,7 +22471,7 @@ ${"  ".repeat(ind)}`);
           } else if (isCall && !operand.parenthesized && plainCallee) {
             this.call(operand);
           } else if (isCall && !operand.parenthesized) {
-            const selfGrouped = this.ts && isNode(callee) && (callee[0] === "cast" || callee[0] === "satisfies");
+            const selfGrouped = this.ts && this.isPostfixType(callee);
             this.mark(operand, "$self", () => {
               if (!selfGrouped)
                 this.b.emit("(");
@@ -22459,7 +22489,7 @@ ${"  ".repeat(ind)}`);
               });
             });
           } else {
-            const grouped = this.ts && (operand[0] === "cast" || operand[0] === "satisfies");
+            const grouped = this.ts && this.isPostfixType(operand);
             if (!grouped)
               this.b.emit("(");
             this.expr(operand);
@@ -22599,7 +22629,7 @@ ${"  ".repeat(ind)}`);
     const kind = srcKind === "->" && this.inComponent() ? "=>" : srcKind;
     const ind = this.ind;
     const isVoid = this.voidFuncs.has(node);
-    const stmts = this.liveStmts(isNode(block) && block[0] === "block" ? block.slice(1) : [block], { forwards: true });
+    const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block], { forwards: true });
     const { entries: hoist, names } = this.scopedHoist(stmts, params);
     for (const n of this.pushReactiveFrame(stmts, names, params, node))
       names.add(n);
@@ -22645,10 +22675,10 @@ ${"  ".repeat(ind)}`);
         this.b.emit(" ");
         this.mark(node, "kind", () => this.b.emit("=>"));
         this.b.emit(" ");
-        const inline = !isVoid && stmts.length === 1 && hoist.length === 0 && !Emitter.statementOnly(stmts[0]) && !(isNode(stmts[0]) && (isDefHead(stmts[0][0]) || ["return", "if", "while", "block"].includes(stmts[0][0])));
+        const inline = !isVoid && stmts.length === 1 && hoist.length === 0 && !Emitter.statementOnly(stmts[0]) && !(isNode(stmts[0]) && (isDefHead(stmts[0][0]) || ["return", "if", "while"].includes(stmts[0][0]) || this.isBlock(stmts[0])));
         if (inline) {
           this.mark(node, "body", () => {
-            const wrap = Emitter.needsGrouping(stmts[0], "operand") || isObject(stmts[0]);
+            const wrap = Emitter.needsGrouping(stmts[0], "operand") || this.isObject(stmts[0]);
             if (wrap)
               this.b.emit("(");
             this.expr(stmts[0]);
@@ -22707,7 +22737,7 @@ ${"  ".repeat(ind)}`);
           this.b.emit(`;
 `);
         }
-        this.emitTsTypeDecls(isBlock(block) ? block.slice(1) : [block], "  ".repeat(ind + 1));
+        this.emitTsTypeDecls(this.isBlock(block) ? block.slice(1) : [block], "  ".repeat(ind + 1));
         this.mark(block, "statements", () => {
           stmts.forEach((stmt, i) => {
             this.b.emit("  ".repeat(ind + 1));
@@ -22816,7 +22846,7 @@ ${"  ".repeat(ind)}`);
     this.checkExportedConstWrite(node, node[1]);
     this.checkImportWrite(node, node[1]);
     this.checkMemberWrite(node, node[1]);
-    if (isNode(node[1]) && Emitter.optionalGuard(node[1]) !== null) {
+    if (isNode(node[1]) && this.optionalGuard(node[1]) !== null) {
       throw this.positionedError(node, "emitter: an optional chain cannot be an update target — no reference exists for `obj?.x++`; " + "guard it explicitly (`obj.x++ if obj?`)");
     }
     this.mark(node, "$self", () => {
@@ -22845,7 +22875,7 @@ ${"  ".repeat(ind)}`);
           this.b.emit(")");
         return;
       }
-      if (op === "of" || op === "in" && isObject(b)) {
+      if (op === "of" || op === "in" && this.isObject(b)) {
         this.operand(node, "left", a);
         this.b.emit(" in ");
         this.operand(node, "right", b);
@@ -23059,7 +23089,7 @@ ${"  ".repeat(ind)}`);
       if (isNode(ctor)) {
         this.b.emit("(");
         this.expr(ctor);
-        this.b.emit(Emitter.optionalGuard(ctor) ? " ?? undefined)" : ")");
+        this.b.emit(this.optionalGuard(ctor) ? " ?? undefined)" : ")");
       } else
         this.expr(ctor);
     });
@@ -23263,7 +23293,7 @@ ${"  ".repeat(ind)}`);
     const [, target, rhs] = node;
     let cur = rhs;
     while (isNode(cur)) {
-      const s = Emitter.chainHeadSlot(cur);
+      const s = this.chainHeadSlotOf(cur);
       if (s === null)
         break;
       cur = cur[s];
@@ -23279,7 +23309,7 @@ ${"  ".repeat(ind)}`);
       const substHead = (n) => {
         if (n === cur)
           return [[".", read, cur[0]], ...cur.slice(1)];
-        const s = Emitter.chainHeadSlot(n);
+        const s = this.chainHeadSlotOf(n);
         const copy = n.slice();
         copy[s] = substHead(n[s]);
         return copy;
@@ -23790,7 +23820,7 @@ var runtimeText = (rt) => {
   return runtimeBodies.get(rt.key);
 };
 var runtimeRequires = (rt) => rt.requires == null ? [] : Array.isArray(rt.requires) ? rt.requires : [rt.requires];
-var referencesNames = (sexpr, names, isDecl = () => false) => {
+var referencesNames = (sexpr, names, stores, isDecl = () => false) => {
   if (names.size === 0)
     return false;
   const ref = (x) => typeof x === "string" && names.has(x);
@@ -23849,7 +23879,7 @@ var referencesNames = (sexpr, names, isDecl = () => false) => {
       return x.slice(2).some(walk);
     if (h === "typed-var" && x.length === 3)
       return isNode(x[1]) && walk(x[1]);
-    if ((h === "cast" || h === "satisfies") && x.length === 3)
+    if (Emitter.isPostfixTypeIn(stores, x))
       return walk(x[1]);
     if (h === "import" || h === "type-decl")
       return false;
@@ -23863,7 +23893,7 @@ var deliveryTrees = (emitter, sexpr) => {
     const isDecl = (x) => Emitter.isReactiveDeclIn(stores, x) || Emitter.isEffectDeclIn(stores, x) || Emitter.isReadonlyDeclIn(stores, x) || Emitter.isGateDeclIn(stores, x);
     const isTrigger = (x) => Emitter.isReactiveDeclIn(stores, x) || Emitter.isEffectDeclIn(stores, x);
     const isComponent = (x) => Emitter.isComponentDeclIn(stores, x);
-    trees.push({ tree, atoms, isDecl, isTrigger, isComponent });
+    trees.push({ tree, stores, atoms, isDecl, isTrigger, isComponent });
     const walk = (x) => {
       if (!isNode(x))
         return;
@@ -23918,7 +23948,7 @@ var runtimeAliasBindings = (emitter, trees) => {
       if (typeof x[1] === "string")
         names.add(x[1]);
       for (const part of x.slice(2)) {
-        const stmts = isNode(part) && part[0] === "block" ? part.slice(1) : [part];
+        const stmts = emitter.isBlock(part) ? part.slice(1) : [part];
         for (const st of stmts) {
           if (isNode(st) && isDefHead(st[0]) && st.length === 4) {
             if (isNode(st[2]))
@@ -24262,7 +24292,7 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
   const runtimes = new Set;
   for (const rt of RUNTIME_TABLE) {
     const unboundSet = new Set(rt.names.filter((n) => !bound.has(n)));
-    if (trees.some(({ tree, isDecl, isTrigger, isComponent }) => rt.triggers?.(tree, { isTrigger, isComponent }) || referencesNames(tree, unboundSet, isDecl))) {
+    if (trees.some(({ tree, stores, isDecl, isTrigger, isComponent }) => rt.triggers?.(tree, { isTrigger, isComponent }) || referencesNames(tree, unboundSet, stores, isDecl))) {
       runtimes.add(rt.key);
     }
   }
@@ -33350,7 +33380,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "5f2e0294bbacb520";
+var compilerBuild = () => "c7308b3f084eb8ba";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

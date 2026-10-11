@@ -886,7 +886,10 @@ test! "fg: the app takes the terminal back, asks the row again, draws whole with
   { code, states, out } = job.finish!
   eq code, 0
   eq states[2], { continued: 1 }
-  after = out.slice job.before('continued').length
+  # Cut at the stop, not the continue: the app writes before the stop is
+  # reported, and ptyrun.py continues it only after relaying that report,
+  # while the continue's own report races the app's first bytes.
+  after = out.slice job.before('stopped').length
   ok after.startsWith("#{HIDE}#{ASK}#{MOUSE}#{PROBE}#{BEGIN}#{CSI}J#{CSI}1Gcount:0\r#{END}"), JSON.stringify after.slice 0, 80
   ok after.includes('key:x') and out.includes('exit hook code=0'), JSON.stringify after
 

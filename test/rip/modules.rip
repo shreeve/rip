@@ -572,6 +572,18 @@ code "an imported name used only in a type is elided", '''
   console.log(api, errors);
 '''
 
+# A call of a function named `cast` is a value use of its arguments, even
+# when the same name also sits in a real cast's type.
+code "a name passed to a function named cast keeps its import", '''
+  import { b } from './m.js'
+  x = y as b
+  r = cast(a, b)
+''', '''
+  import { b } from "./m.js";
+  let x = y;
+  let r = cast(a, b);
+'''
+
 # Every name erased leaves the module still IMPORTED — a bare specifier runs
 # it. Dropping the statement would discard its side effects silently.
 code "an all-type clause keeps the module's side effect", '''

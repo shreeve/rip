@@ -223,6 +223,13 @@ describe('the heads are spellable — semanticKind is the discriminator (D6)', (
       expect(code).not.toContain('__state');
     }
   });
+
+  test('a runtime name passed to a function named cast or satisfies still delivers', () => {
+    for (const head of ['cast', 'satisfies']) {
+      const { runtimes } = fullCompile(`${head} = (a, b) -> b\nx = ${head}(0, pp)`, { runtimeDelivery: 'import' });
+      expect([...runtimes]).toEqual(['stdlib']);
+    }
+  });
 });
 
 describe('self-referential runtime-name targets reject (the delivered-name boundary class)', () => {
