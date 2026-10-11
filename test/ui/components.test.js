@@ -3001,6 +3001,10 @@ describe('selector shorthands', () => {
   test('a class never joins across a line break or onto its text', () => {
     lexFails(at('div.a-\n  span "x"'), /write `class: 'a-'`/);
     lexFails(at('div.p-4"x"'), /a space goes between an element's selector and its text/);
+    lexFails(at('div#a"x"'), /a space goes between an element's selector and its text/);
+    lexFails(at('p"x"'), /a space goes between an element's selector and its text/);
+    // A tagged template elsewhere keeps its reading.
+    expect(js(at('p sql"x"'))).toContain('sql`x`');
   });
 
   test("an attribute's `if` block is code: a digit after a hyphen there is subtraction", () => {

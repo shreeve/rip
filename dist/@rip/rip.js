@@ -7262,6 +7262,9 @@ ${baseline}`).join(`
     if (ch === '"' || ch === "'") {
       const prevTok = tokens[tokens.length - 1];
       if (prevTok && TAGGABLE.has(prevTok.kind) && prevTok.end === pos) {
+        if (inRender && (prevTok.kind === "IDENTIFIER" || prevTok.kind === "PROPERTY") && !prevTok.generated && selectorScope() && headSelectorAt(chainStartFrom(tokens.length - 1))) {
+          fail("a space goes between an element's selector and its text", pos);
+        }
         push("TEMPLATE_TAG", "$", pos, pos);
       }
       const delim = text.startsWith(ch.repeat(3), pos) ? ch.repeat(3) : ch;
@@ -33116,7 +33119,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "09f05dc05a3bf0d2";
+var compilerBuild = () => "8c329994c1a02a59";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

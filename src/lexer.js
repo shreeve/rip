@@ -1813,6 +1813,12 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       // spelling was a parse error before this claim.
       const prevTok = tokens[tokens.length - 1];
       if (prevTok && TAGGABLE.has(prevTok.kind) && prevTok.end === pos) {
+        // In a template, an element's tag or selector heading its line is
+        // never a tag function: text glued to it (`div#a"x"`) is a typo.
+        if (inRender && (prevTok.kind === 'IDENTIFIER' || prevTok.kind === 'PROPERTY') && !prevTok.generated &&
+            selectorScope() && headSelectorAt(chainStartFrom(tokens.length - 1))) {
+          fail("a space goes between an element's selector and its text", pos);
+        }
         push('TEMPLATE_TAG', '$', pos, pos);
       }
       const delim = text.startsWith(ch.repeat(3), pos) ? ch.repeat(3) : ch;
