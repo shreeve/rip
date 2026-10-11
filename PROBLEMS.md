@@ -329,6 +329,8 @@ flip side of A5).
 
 **P15 M — rsx's rejections and mixed content disagree with its README.** The mismatched-close-tag and non-string errors carry no offset; `parse '</a>'` says "expected </>, got </a>"; `<p>hi <b>there</b> you</p>` drops the text though `textKey` is described as the mixed-content key.
 
+**P28 M — rsx silently drops an attribute or element named `__proto__`.** `parse '<a __proto__="x" id="1"/>'` → `{"a":{"@attrs":{"id":"1"}}}` and `parse '<a><__proto__>x</__proto__></a>'` → `{"a":{}}`: the tree is built from plain `{}` objects, whose `__proto__` setter swallows the assignment.
+
 **P16 L — Barcode encoders ignore unknown options and disagree on errors.** `hieght:`, `colums:`, `eccc:` are accepted (rip/pdf rejects unknown keys); a QR miss throws `"finder"` while the others say "not found"; `encodeQR ''` encodes while Code 128 and PDF417 reject empty text.
 
 **P18 L — rip-curl drops non-JSON bodies and malformed header lines.**
