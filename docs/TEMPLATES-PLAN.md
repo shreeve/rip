@@ -32,8 +32,10 @@ sites, email).
   merge, `.a-b` hyphen absorption, custom-element runs, the `else-x`
   exception and the disabled `.` continuation exist only for spellings
   with zero real uses.
-- **Hyphenated keys are joined twice**; the render copy lacks the
-  ternary guard (`= ok ? a-b : a` emits the string `"a-b"`).
+- **Hyphenated keys are joined twice** (src/render.js and
+  `tagCompoundKeys`); only the second consults the ternary tracker, so
+  the render copy is right only because the scanner no longer key-tags
+  a word before a ternary's colon.
 - **Compiler sentinels live in the user namespace.** `__text__`,
   `__clsx`, `__transition__` and `__bind_x__` are minted by the rewriter
   and re-detected by spelling (and one by a zero-width span).

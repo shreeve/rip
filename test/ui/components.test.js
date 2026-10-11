@@ -2727,10 +2727,11 @@ describe('the template gate', () => {
   const js = (src) => fullCompile(src, { runtimeDelivery: 'none' }).code;
 
   test('a hyphen inside `= expr` text reads as it does in code, never as a joined key', () => {
-    // The same line outside a template rejects at parse (the lexer reads
-    // `b :` as a key; recorded in PROBLEMS.md): the template agrees, and
-    // never emits the string "a-b".
-    expect(() => js('Foo = component\n  a := 1\n  b := 2\n  ok := true\n  render\n    div\n      = ok ? a-b : a\n')).toThrow(/Unexpected 'b'/);
+    // A tight hyphen in a ternary branch is subtraction, as outside a
+    // template — never the string "a-b".
+    const tight = js('Foo = component\n  a := 1\n  b := 2\n  ok := true\n  render\n    div\n      = ok ? a-b : a\n');
+    expect(tight).toContain('this.ok.value ? (this.a.value - this.b.value) : this.a.value');
+    expect(tight).not.toContain('"a-b"');
     const code = js('Foo = component\n  a := 1\n  b := 2\n  ok := true\n  render\n    div\n      = ok ? (a-b) : a\n');
     expect(code).toContain('this.a.value - this.b.value');
     expect(code).not.toContain('"a-b"');
@@ -2881,5 +2882,15 @@ describe('the template gate', () => {
     const code = js('Foo = component\n  render\n    div\n      .\n        span "inside"\n');
     expect(code).toContain("createElement('span')");
     expect(code.match(/createElement\('div'\)/g).length).toBe(2);
+  });
+});
+
+describe('ternaries in templates', () => {
+  test('a ternary branch ending in subtraction reads the members, tight hyphen included', () => {
+    for (const value of ['ok ? a - b : 0', 'ok ? a-b : 0']) {
+      const code = fullCompile(`Q = component\n  ok := true\n  a := 5\n  b := 3\n  render\n    p title: ${value}\n    div\n      = ${value}\n`, { runtimeDelivery: 'none' }).code;
+      expect(code.match(/this\.ok\.value \? \(this\.a\.value - this\.b\.value\) : 0/g).length).toBe(2);
+      expect(code).not.toContain('"a-b"');
+    }
   });
 });
