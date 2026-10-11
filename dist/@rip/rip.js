@@ -3167,6 +3167,25 @@ function rewriteRender(tokens, mintId, fail) {
     const before = out[owner - 1].kind;
     return !["INDENT", "OUTDENT", "RENDER", "TERMINATOR", "ELSE"].includes(before);
   };
+  const opensValueBlock = () => {
+    let depth = 0;
+    for (let k = out.length - 1;k >= 0; k--) {
+      const kind = out[k].kind;
+      if (CLOSERS.has(kind))
+        depth++;
+      else if (OPENERS.has(kind)) {
+        if (depth === 0)
+          return false;
+        depth--;
+      } else if (LINE_BREAKS.has(kind) || kind === "RENDER")
+        return false;
+      else if (depth === 0 && BLOCK_VALUE_HEADS.has(kind)) {
+        const before = out[k - 1]?.kind;
+        return before === ":" || before === "=" || before === "COMPOUND_ASSIGN";
+      }
+    }
+    return false;
+  };
   const opensCode = (i, t) => {
     if (frames[frames.length - 1] === true || valueLine !== null || textFrames.length > 0)
       return true;
@@ -3174,7 +3193,7 @@ function rewriteRender(tokens, mintId, fail) {
       const p = tokens[i - 1];
       if (p && (p.kind === "->" || p.kind === "=>"))
         return out[out.length - 1] === p && isCodeArrow(out.length - 1);
-      return p?.kind === ":" || p?.kind === "=" || p?.kind === "COMPOUND_ASSIGN";
+      return p?.kind === ":" || p?.kind === "=" || p?.kind === "COMPOUND_ASSIGN" || opensValueBlock();
     }
     return !(t.kind === "CALL_START" && isHeadCall(out.length));
   };
@@ -3341,13 +3360,29 @@ function rewriteRender(tokens, mintId, fail) {
       importLine = true;
     else if (importLine && k === "IDENTIFIER")
       moduleBindings.add(tokens[j].value);
-    else if (k === "IDENTIFIER" && (startsLine(j) || tokens[j - 1]?.kind === "EXPORT") && /ASSIGN$|^=$/.test(tokens[j + 1]?.kind ?? "")) {
+    else if ((k === "DEF" || k === "CLASS") && tokens[j + 1]?.kind === "IDENTIFIER")
+      moduleBindings.add(tokens[j + 1].value);
+    else if ((k === "{" || k === "[") && startsLine(j)) {
+      let m = j;
+      for (let d = 0;m < tokens.length; m++) {
+        if (OPENERS.has(tokens[m].kind))
+          d++;
+        else if (CLOSERS.has(tokens[m].kind) && --d === 0)
+          break;
+      }
+      if (/ASSIGN$|^=$/.test(tokens[m + 1]?.kind ?? "")) {
+        for (let n = j;n < m; n++)
+          if (tokens[n].kind === "IDENTIFIER")
+            moduleBindings.add(tokens[n].value);
+      }
+    } else if (k === "IDENTIFIER" && (startsLine(j) || tokens[j - 1]?.kind === "EXPORT") && /ASSIGN$|^=$/.test(tokens[j + 1]?.kind ?? "")) {
       moduleBindings.add(tokens[j].value);
     }
   }
   const boundHere = (name) => readsAsValue(name) || moduleBindings.has(name);
+  const touches = (x, y) => x && y && !y.generated && y.start === x.end;
   const joinSelectorClasses = (j) => {
-    while (tokens[j]?.kind === "." && !tokens[j].spaced && tokens[j + 1]?.kind === "PROPERTY" && !tokens[j + 1].spaced) {
+    while (tokens[j]?.kind === "." && !tokens[j].spaced && tokens[j + 1]?.kind === "PROPERTY" && touches(tokens[j], tokens[j + 1])) {
       const cls = tokens[j + 1];
       let name = String(cls.value);
       let k = j + 2;
@@ -3355,25 +3390,28 @@ function rewriteRender(tokens, mintId, fail) {
       while (!name.includes("#")) {
         const a = tokens[k];
         const b = tokens[k + 1];
-        if (isHyphen(a) && !a.spaced && b && !b.spaced && (b.kind === "NUMBER" || b.kind === "IDENTIFIER" || b.kind === "PROPERTY")) {
-          if (b.kind === "NUMBER" && !/^[0-9]+$/.test(String(b.value)))
+        if (isHyphen(a) && touches(tokens[k - 1], a) && touches(a, b) && (b.kind === "NUMBER" || b.kind === "IDENTIFIER" || b.kind === "PROPERTY")) {
+          if (b.kind === "NUMBER" && !/^[0-9]+(?:#.+)?$/.test(String(b.value)))
             ok = false;
           name += "-" + String(b.value);
           k += 2;
-        } else if (a && !a.spaced && (a.kind === "IDENTIFIER" || a.kind === "PROPERTY") && tokens[k - 1].kind === "NUMBER") {
+        } else if ((a?.kind === "IDENTIFIER" || a?.kind === "PROPERTY") && tokens[k - 1].kind === "NUMBER" && touches(tokens[k - 1], a)) {
           name += String(a.value);
           k += 1;
         } else
           break;
       }
       const next = tokens[k];
-      const glued = next && !next.spaced && !LINE_BREAKS.has(next.kind) && next.kind !== "." && next.kind !== "CALL_START" && next.kind !== "(" && next.kind !== ",";
-      if (glued && next.kind === ":" && (tokens[k + 1]?.spaced || LINE_BREAKS.has(tokens[k + 1]?.kind))) {
+      if (touches(tokens[k - 1], next) && (next.kind === "STRING" || next.kind === "STRING_START")) {
+        fail("a space goes between an element's selector and its text", next.start);
+      }
+      const glued = touches(tokens[k - 1], next) && !LINE_BREAKS.has(next.kind) && next.kind !== "." && next.kind !== "CALL_START" && next.kind !== "(" && next.kind !== ",";
+      if (glued && next.kind === ":" && !touches(next, tokens[k + 1])) {
         fail("an element's `.class` takes no `:` — an attribute goes after a space (`div.card title: …`)", next.start);
       }
       if (!ok || glued) {
         let written = name;
-        for (let m = k;tokens[m] && !tokens[m].spaced && !LINE_BREAKS.has(tokens[m].kind) && tokens[m].kind !== "STRING"; m++) {
+        for (let m = k;touches(tokens[m - 1], tokens[m]) && !LINE_BREAKS.has(tokens[m].kind) && tokens[m].kind !== "STRING"; m++) {
           written += String(tokens[m].value);
         }
         fail(`a class shorthand is letters, digits, \`-\` and \`_\` — write \`class: '${written}'\``, cls.start);
@@ -6984,9 +7022,11 @@ ${baseline}`).join(`
     }
     if (ch === "#") {
       const prev = last();
-      const glued = inRender && prev && (prev.kind === "IDENTIFIER" || prev.kind === "PROPERTY") && !pendingSpaced && !prev.generated && text[pos + 1] !== undefined && !/\s/.test(text[pos + 1]);
+      const n = tokens.length;
+      const digitClass = prev?.kind === "NUMBER" && /^[0-9]+$/.test(prev.value) && (tokens[n - 2]?.kind === "-" || tokens[n - 2]?.kind === "MATH" && tokens[n - 2].value === "-") && tokens[n - 3]?.kind === "PROPERTY" && tokens[n - 4]?.kind === ".";
+      const glued = inRender && prev && (prev.kind === "IDENTIFIER" || prev.kind === "PROPERTY" || digitClass) && !pendingSpaced && !prev.generated && text[pos + 1] !== undefined && !/\s/.test(text[pos + 1]);
       if (glued && selectorScope()) {
-        if (!headSelectorAt(chainStartFrom(tokens.length - 1))) {
+        if (!headSelectorAt(chainStartFrom(digitClass ? tokens.length - 3 : tokens.length - 1))) {
           const written = /^[^\s"'`,()]*/.exec(text.slice(pos + 1))[0];
           fail(`\`#${written}\` is no element id here: an id follows the HTML tag or \`.class\` that starts its line (otherwise write \`id: '${written}'\`), and a comment needs a space before \`#\``, pos);
         }
@@ -6998,7 +7038,7 @@ ${baseline}`).join(`
         if ("-/[{".includes(text[end] ?? " ") || text[end] === ":" && /[^\s=:]/.test(text[end + 1] ?? " ")) {
           failSelector("id", pos + 1);
         }
-        for (let k = tokens.length - 1;k >= 0 && (tokens[k].kind === "PROPERTY" || tokens[k].kind === "." || tokens[k].kind === "IDENTIFIER"); k--) {
+        for (let k = tokens.length - 1;k >= 0 && ["PROPERTY", ".", "IDENTIFIER", "NUMBER", "-", "MATH"].includes(tokens[k].kind); k--) {
           if (String(tokens[k].value).includes("#"))
             fail("an element has one id", pos);
           if (tokens[k].kind === "IDENTIFIER")
@@ -33044,7 +33084,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "ae843a5199041eb8";
+var compilerBuild = () => "17ffcf331ce086eb";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

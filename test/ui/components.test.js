@@ -2989,6 +2989,25 @@ describe('selector shorthands', () => {
     expect(js(`import { label } from './x.js'\nFoo = component\n  render\n    div\n      label.parts[1]\n`)).toContain('label.parts[1]');
   });
 
+  test('an id after a digit class is kept, with what follows it', () => {
+    const code = js(at('div.card.p-4#x.m-2 "y"'));
+    expect(code).toContain("id = 'x'");
+    expect(code).toContain("className = 'card p-4 m-2'");
+    expect(code).toContain('createTextNode("y")');
+    expect(js(at('.p-4#x "y"'))).toContain("id = 'x'");
+    lexFails(at('div#a.p-4#b "y"'), /an element has one id/);
+  });
+
+  test('a class never joins across a line break or onto its text', () => {
+    lexFails(at('div.a-\n  span "x"'), /write `class: 'a-'`/);
+    lexFails(at('div.p-4"x"'), /a space goes between an element's selector and its text/);
+  });
+
+  test("an attribute's `if` block is code: a digit after a hyphen there is subtraction", () => {
+    const code = js(`{label} = {label: {w: 3}}\nFoo = component\n  ok := true\n  render\n    div\n      span title: if ok\n        label.w-1.toFixed(2)\n      else\n        "x"\n`);
+    expect(code).toContain('label.w - (1).toFixed(2)');
+  });
+
   test('a line-start id rejects what an id cannot hold', () => {
     lexFails(at('#a- "x"'), /write `id: 'a-'`/);
     lexFails(at('#a/b "x"'), /write `id: 'a\/b'`/);

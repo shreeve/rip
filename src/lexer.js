@@ -1487,14 +1487,20 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     // `# word` stays a comment.
     if (ch === '#') {
       const prev = last();
-      const glued = inRender && prev && (prev.kind === 'IDENTIFIER' || prev.kind === 'PROPERTY') &&
+      // A class's digit run (`div.p-4#x`) ends in a NUMBER the gate joins
+      // into the class; the id glues onto it like onto a name.
+      const n = tokens.length;
+      const digitClass = prev?.kind === 'NUMBER' && /^[0-9]+$/.test(prev.value) &&
+        (tokens[n - 2]?.kind === '-' || (tokens[n - 2]?.kind === 'MATH' && tokens[n - 2].value === '-')) &&
+        tokens[n - 3]?.kind === 'PROPERTY' && tokens[n - 4]?.kind === '.';
+      const glued = inRender && prev && (prev.kind === 'IDENTIFIER' || prev.kind === 'PROPERTY' || digitClass) &&
         !pendingSpaced && !prev.generated && text[pos + 1] !== undefined && !/\s/.test(text[pos + 1]);
       if (glued && selectorScope()) {
         // An element's id: one, glued to the tag or `.class` chain that
         // heads its line, a name from the identifier vocabulary (hyphens
         // inside it). Glued to anything else, `#` is neither an id nor a
         // comment.
-        if (!headSelectorAt(chainStartFrom(tokens.length - 1))) {
+        if (!headSelectorAt(chainStartFrom(digitClass ? tokens.length - 3 : tokens.length - 1))) {
           const written = /^[^\s"'`,()]*/.exec(text.slice(pos + 1))[0];
           fail(`\`#${written}\` is no element id here: an id follows the HTML tag or \`.class\` that starts its line (otherwise write \`id: '${written}'\`), and a comment needs a space before \`#\``, pos);
         }
@@ -1504,7 +1510,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         if ('-/[{'.includes(text[end] ?? ' ') || (text[end] === ':' && /[^\s=:]/.test(text[end + 1] ?? ' '))) {
           failSelector('id', pos + 1);
         }
-        for (let k = tokens.length - 1; k >= 0 && (tokens[k].kind === 'PROPERTY' || tokens[k].kind === '.' || tokens[k].kind === 'IDENTIFIER'); k--) {
+        for (let k = tokens.length - 1; k >= 0 && ['PROPERTY', '.', 'IDENTIFIER', 'NUMBER', '-', 'MATH'].includes(tokens[k].kind); k--) {
           if (String(tokens[k].value).includes('#')) fail('an element has one id', pos);
           if (tokens[k].kind === 'IDENTIFIER') break;
         }

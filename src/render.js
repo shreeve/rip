@@ -395,6 +395,23 @@ export function rewriteRender(tokens, mintId, fail) {
     return !['INDENT', 'OUTDENT', 'RENDER', 'TERMINATOR', 'ELSE'].includes(before);
   };
 
+  // Is the block about to open the body of an `if`/`unless`/`switch`/`try`
+  // in a value on its line (`span title: if ok`), not a markup branch?
+  const opensValueBlock = () => {
+    let depth = 0;
+    for (let k = out.length - 1; k >= 0; k--) {
+      const kind = out[k].kind;
+      if (CLOSERS.has(kind)) depth++;
+      else if (OPENERS.has(kind)) { if (depth === 0) return false; depth--; }
+      else if (LINE_BREAKS.has(kind) || kind === 'RENDER') return false;
+      else if (depth === 0 && BLOCK_VALUE_HEADS.has(kind)) {
+        const before = out[k - 1]?.kind;
+        return before === ':' || before === '=' || before === 'COMPOUND_ASSIGN';
+      }
+    }
+    return false;
+  };
+
   // Does the bracket or block tokens[i] opens hold code? Inside code,
   // everything is code. A block holds code after a function arrow, after
   // `key:` or `=` (a value spanning lines), or on a render local's
@@ -405,7 +422,7 @@ export function rewriteRender(tokens, mintId, fail) {
     if (t.kind === 'INDENT') {
       const p = tokens[i - 1];
       if (p && (p.kind === '->' || p.kind === '=>')) return out[out.length - 1] === p && isCodeArrow(out.length - 1);
-      return p?.kind === ':' || p?.kind === '=' || p?.kind === 'COMPOUND_ASSIGN';
+      return p?.kind === ':' || p?.kind === '=' || p?.kind === 'COMPOUND_ASSIGN' || opensValueBlock();
     }
     return !(t.kind === 'CALL_START' && isHeadCall(out.length));
   };
@@ -588,6 +605,18 @@ export function rewriteRender(tokens, mintId, fail) {
     if (depth !== 0) continue;
     if (k === 'IMPORT' && startsLine(j)) importLine = true;
     else if (importLine && k === 'IDENTIFIER') moduleBindings.add(tokens[j].value);
+    else if ((k === 'DEF' || k === 'CLASS') && tokens[j + 1]?.kind === 'IDENTIFIER') moduleBindings.add(tokens[j + 1].value);
+    else if ((k === '{' || k === '[') && startsLine(j)) {
+      // A destructuring declaration (`{a} = …`, `[a, b] = …`).
+      let m = j;
+      for (let d = 0; m < tokens.length; m++) {
+        if (OPENERS.has(tokens[m].kind)) d++;
+        else if (CLOSERS.has(tokens[m].kind) && --d === 0) break;
+      }
+      if (/ASSIGN$|^=$/.test(tokens[m + 1]?.kind ?? '')) {
+        for (let n = j; n < m; n++) if (tokens[n].kind === 'IDENTIFIER') moduleBindings.add(tokens[n].value);
+      }
+    }
     else if (k === 'IDENTIFIER' && (startsLine(j) || tokens[j - 1]?.kind === 'EXPORT') && /ASSIGN$|^=$/.test(tokens[j + 1]?.kind ?? '')) {
       moduleBindings.add(tokens[j].value);
     }
@@ -597,8 +626,12 @@ export function rewriteRender(tokens, mintId, fail) {
   // The `.class` chain of an element heading its line, from the `.` at j:
   // each class joins its tight `-` runs (a digit run, or a word after a
   // digit run, too) into one name; anything else glued on rejects.
+  // Glued in the source: one token ends where the next begins (a line
+  // break or a space between them is not).
+  const touches = (x, y) => x && y && !y.generated && y.start === x.end;
+
   const joinSelectorClasses = (j) => {
-    while (tokens[j]?.kind === '.' && !tokens[j].spaced && tokens[j + 1]?.kind === 'PROPERTY' && !tokens[j + 1].spaced) {
+    while (tokens[j]?.kind === '.' && !tokens[j].spaced && tokens[j + 1]?.kind === 'PROPERTY' && touches(tokens[j], tokens[j + 1])) {
       const cls = tokens[j + 1];
       let name = String(cls.value);
       let k = j + 2;
@@ -606,24 +639,28 @@ export function rewriteRender(tokens, mintId, fail) {
       while (!name.includes('#')) {
         const a = tokens[k];
         const b = tokens[k + 1];
-        if (isHyphen(a) && !a.spaced && b && !b.spaced && (b.kind === 'NUMBER' || b.kind === 'IDENTIFIER' || b.kind === 'PROPERTY')) {
-          if (b.kind === 'NUMBER' && !/^[0-9]+$/.test(String(b.value))) ok = false;
+        if (isHyphen(a) && touches(tokens[k - 1], a) && touches(a, b) && (b.kind === 'NUMBER' || b.kind === 'IDENTIFIER' || b.kind === 'PROPERTY')) {
+          // A digit run, which may carry the element's id (`p-4#x`).
+          if (b.kind === 'NUMBER' && !/^[0-9]+(?:#.+)?$/.test(String(b.value))) ok = false;
           name += '-' + String(b.value);
           k += 2;
-        } else if (a && !a.spaced && (a.kind === 'IDENTIFIER' || a.kind === 'PROPERTY') && tokens[k - 1].kind === 'NUMBER') {
+        } else if ((a?.kind === 'IDENTIFIER' || a?.kind === 'PROPERTY') && tokens[k - 1].kind === 'NUMBER' && touches(tokens[k - 1], a)) {
           name += String(a.value);
           k += 1;
         } else break;
       }
       const next = tokens[k];
-      const glued = next && !next.spaced && !LINE_BREAKS.has(next.kind) &&
+      if (touches(tokens[k - 1], next) && (next.kind === 'STRING' || next.kind === 'STRING_START')) {
+        fail("a space goes between an element's selector and its text", next.start);
+      }
+      const glued = touches(tokens[k - 1], next) && !LINE_BREAKS.has(next.kind) &&
         next.kind !== '.' && next.kind !== 'CALL_START' && next.kind !== '(' && next.kind !== ',';
-      if (glued && next.kind === ':' && (tokens[k + 1]?.spaced || LINE_BREAKS.has(tokens[k + 1]?.kind))) {
+      if (glued && next.kind === ':' && !touches(next, tokens[k + 1])) {
         fail("an element's `.class` takes no `:` — an attribute goes after a space (`div.card title: …`)", next.start);
       }
       if (!ok || glued) {
         let written = name;
-        for (let m = k; tokens[m] && !tokens[m].spaced && !LINE_BREAKS.has(tokens[m].kind) && tokens[m].kind !== 'STRING'; m++) {
+        for (let m = k; touches(tokens[m - 1], tokens[m]) && !LINE_BREAKS.has(tokens[m].kind) && tokens[m].kind !== 'STRING'; m++) {
           written += String(tokens[m].value);
         }
         fail(`a class shorthand is letters, digits, \`-\` and \`_\` — write \`class: '${written}'\``, cls.start);
