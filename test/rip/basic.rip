@@ -518,6 +518,103 @@ test 'a function named optindex is callable', '''
   optindex(9)
   ''', 10
 
+# A call is a call wherever it stands: the call row decides before any
+# head dispatch or head test, so the reading holds in argument,
+# statement, inline-body, operand, and target positions too.
+
+test 'a function named block is callable in every position', '''
+  out = []
+  block = (a, b) ->
+    out.push a + b
+    a + b
+  x = Math.min 100, block(2, 3)
+  y = block(2, 3)
+  block 1, 1
+  z = try block(4, 4) catch then 0
+  f = -> block(5, 5)
+  [x, y, z, f(), out]
+  ''', [5, 5, 8, 10, [5, 5, 2, 8, 10]]
+
+test 'functions named cast and satisfies are callable with two arguments', '''
+  cast = (a, b) -> [a, b]
+  satisfies = (a, b) -> a * b
+  [cast(1, 2), satisfies(3, 4), Math.max(0, satisfies(2, 5))]
+  ''', [[1, 2], 12, 10]
+
+test 'a call of a function named object is a container for in, never a literal', '''
+  object = (...xs) -> xs
+  [2 in object(1, 2), 3 in object(1, 2)]
+  ''', [true, false]
+
+test 'a call of a function named optindex is never an optional link', '''
+  calls = 0
+  held = {}
+  K = class
+    constructor: -> @v = 7
+  optindex = (a, b) ->
+    calls += 1
+    held.k = K
+    held
+  made = new (optindex(1, 2).k)()
+  optindex(null, 2).c = 1
+  [made.v, calls, held.c]
+  ''', [7, 2, 1]
+
+test 'an effect ending in a call of a function named comprehension returns its cleanup', '''
+  log = []
+  comprehension = (v) ->
+    log.push "run:#{v}"
+    -> log.push "cleanup:#{v}"
+  count := 0
+  ~> comprehension(count)
+  count += 1
+  log.join ","
+  ''', "run:0,cleanup:0,run:1"
+
+code 'a render child calling a function named comprehension is a text child', '''
+  C = component
+    render
+      div comprehension(1)
+  ''', '''
+  let C = class extends __Component {
+    _init(__given) {
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'C');
+      this._t0 = document.createTextNode(String(comprehension(1)));
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+  };
+  '''
+
+# A call's result type is the callee's, never the literal its head spells.
+type 'a member initialized by a call of a function named array is not an array literal', '''
+  export C = component
+    @x := array(1, 2)
+    render
+      div 'a'
+  ''', '''
+  /// <reference lib="dom" />
+  export interface C {
+    x: { value: any; read(): any; touch?(): void };
+    stash?: any;
+    router?: any;
+    params?: any;
+    query?: any;
+    children?: Node | string | number | boolean | null;
+    __offers?: {};
+    __host?: {};
+    mount(target?: Node | string): C;
+    unmount(options?: { removeDOM?: boolean }): void;
+  }
+  export declare let C: {
+    new (props?: { x?: any; __bind_x__?: { value: any; read(): any; touch?(): void }; children?: Node | string | number | boolean | null }): C;
+    mount(target?: Node | string): C;
+  };
+  '''
+
 # `#` comments run to end of line — there is no inline block-comment
 # form, so a comment can never sit INSIDE a compound key; everything
 # after the `#` is comment, and the brace correctly reads unclosed.
