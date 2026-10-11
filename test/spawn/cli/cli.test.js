@@ -578,7 +578,7 @@ describe('cli: diagnostics', () => {
     const render = rip(['-t', 'renderbad.rip']);
     expect(render.status).toBe(1);
     expect(render.stderr).toBe(rip(['-c', 'renderbad.rip']).stderr);
-    expect(render.stderr).toContain('renderbad.rip:3:19: a `=` cannot follow a bare event directive');
+    expect(render.stderr).toContain('renderbad.rip:3:12: `@click` needs a handler');
   });
 
   test('a compile error in an IMPORTED module fails the run with its position', () => {

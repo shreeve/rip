@@ -135,7 +135,7 @@ Pins: test/rip/control.rip ("then binds below assignment").
 11. **Components.** Members (props, state, computeds, methods, effects,
     `offer`/`accept`, lifecycle), with the declaration-order rule.
 12. **Templates.** Tags, `.class`/`#id`, attributes, bare words, `= expr`
-    text, `@event: handler` and bare `@event`, `key:`, `ref:`, `class:`,
+    text, `@event: handler`, `key:`, `ref:`, `class:`,
     `style:`, `<=>`, `if`/`for`/`switch` in render, children, and what
     each compiles to. Preferred handler forms (bare arrow for one
     statement; a method for more).

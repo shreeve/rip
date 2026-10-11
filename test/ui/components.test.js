@@ -180,8 +180,8 @@ describe('the component surface: keywords and context', () => {
     expect(code).toContain("this._el0.className = 'card';");
   });
 
-  test('the event-modifier spelling stays a loud parse rejection ', () => {
-    parseFails('C = component\n  save = -> 1\n  render\n    button @click.prevent: @save\n');
+  test('the event-modifier spelling rejects, showing the handler form', () => {
+    lexFails('C = component\n  save = -> 1\n  render\n    button @click.prevent: @save\n', /event modifiers are not supported.*preventDefault/s);
   });
 
   test('`<=>` lexes as ONE token and rewrites to the `__bind_x__:` pair inside render; elsewhere it stays a loud parse rejection', () => {
@@ -898,18 +898,20 @@ describe('the static render DSL: emission pins', () => {
     ]);
   });
 
-  test('bare `@click` validates: DOM event + method existence (#124 middle); explicit bindings stay unvalidated', () => {
-    // Bare: unknown event.
-    emitFails('P = component\n  render\n    button @clack\n', /`@clack` is not a DOM event/);
-    // Bare: missing method.
-    emitFails('P = component\n  render\n    button @click\n', /requires a component method `onClick`/);
-    // Bare: the onError ambiguity.
-    emitFails('P = component\n  onError = -> 1\n  render\n    img @error\n', /would bind `onError`, which is the error-boundary hook/);
-    // Bare with the method present: batched member dispatch.
-    expect(compile('P = component\n  onClick = -> 1\n  render\n    button @click\n').code)
-      .toContain("this._el0.addEventListener('click', (e) => __batch(() => (this.onClick)(e)));");
-    // Explicit custom event names are LEGAL DOM — compile parity (a
-    // typo'd name is a dead listener; editor intelligence is ).
+  test('a listener is `@event: handler`: a bare `@event` rejects at the `@`, naming that form; explicit bindings stay unvalidated', () => {
+    for (const src of [
+      'P = component\n  onClick = -> 1\n  render\n    button @click\n',
+      'P = component\n  onClick = -> 1\n  render\n    button @click, "go"\n',
+      'P = component\n  onClick = -> 1\n  render\n    button @click "go"\n',
+      'P = component\n  render\n    button @clack\n',
+      'P = component\n  onEscape = -> 1\n  render\n    div @escape\n',
+      'C = component\n  count := 0\n  onClick = -> 1\n  render\n    button\n      @click = count\n',
+    ]) {
+      const err = lexFails(src, /needs a handler — write `@\w+: handler` for a listener/);
+      expect(src[err.start]).toBe('@');
+    }
+    // Explicit custom event names are legal DOM — compile parity (a
+    // typo'd name is a dead listener; editor intelligence owns it).
     expect(compile('P = component\n  save = -> 1\n  render\n    button @clik: @save\n').code)
       .toContain("this._el0.addEventListener('clik', (e) => __batch(() => (this.save)(e)));");
     // A bare member identifier as the handler dispatches directly.
@@ -917,55 +919,30 @@ describe('the static render DSL: emission pins', () => {
       .toContain("this._el0.addEventListener('click', (e) => __batch(() => this.save(e)));");
   });
 
-  test('a bare directive with INLINE text means handler + text child', () => {
-    const bytes = (src) => compile(src, { runtimeDelivery: 'none' }).code.match(/_create\(\) \{[\s\S]*?\n  \}/)[0];
-    const inline = bytes('C = component\n  onClick = -> 1\n  render\n    button @click "go"\n');
-    expect(inline).toContain("addEventListener('click', (e) => __batch(() => (this.onClick)(e)))");
+  test('an explicit listener sits beside inline text, attributes, an indented child and `= expr` text', () => {
+    const handler = "addEventListener('click', (e) => __batch(() => this.onClick(e)))";
+    const one = (src) => compile(src, { runtimeDelivery: 'none' }).code;
+    const inline = one('C = component\n  onClick = -> 1\n  render\n    button @click: onClick, "go"\n');
+    expect(inline).toContain(handler);
     expect(inline).toContain('createTextNode("go")');
-    // ≡ the comma-list spelling, byte-for-byte.
-    expect(inline).toBe(bytes('C = component\n  onClick = -> 1\n  render\n    button @click, "go"\n'));
-    // Two directives + inline text; a directive followed by an
-    // attribute pair on the same line.
-    const two = bytes('C = component\n  onClick = -> 1\n  onFocus = -> 2\n  render\n    button @click @focus "go"\n');
+    const two = one('C = component\n  onClick = -> 1\n  onFocus = -> 2\n  render\n    button @click: onClick, @focus: onFocus, "go"\n');
     expect(two).toContain("addEventListener('focus'");
-    expect(two).toContain('createTextNode("go")');
-    const attr = compile('C = component\n  onClick = -> 1\n  count := 0\n  render\n    button @click disabled: count > 5\n', { runtimeDelivery: 'none' }).code;
-    expect(attr).toContain("addEventListener('click'");
+    const attr = one('C = component\n  onClick = -> 1\n  count := 0\n  render\n    button @click: onClick, disabled: count > 5\n');
+    expect(attr).toContain(handler);
     expect(attr).toContain("toggleAttribute('disabled'");
-  });
-
-  test('a `=` directly after a bare event directive rejects positioned — never an assignment-invoked listener', () => {
-    // The one-line tag-head spelling, positioned ON the `=`.
-    const head = 'C = component\n  count := 0\n  onClick = -> count += 1\n  render\n    button @click = count\n';
-    const err = lexFails(head, /a `=` cannot follow a bare event directive/s);
-    expect(head[err.start]).toBe('=');
-    // The element-body continuation line takes the same rejection.
-    lexFails('C = component\n  count := 0\n  onClick = -> count += 1\n  render\n    button\n      @click = count\n',
-      /a `=` cannot follow a bare event directive/);
-  });
-
-  test('the bare-event neighbors hold around the rejection: indented child, comma list, inline text, explicit binding, undirected `= expr` text', () => {
-    const handler = "addEventListener('click', (e) => __batch(() => (this.onClick)(e)))";
-    // Bare directive + indented child.
-    const child = compile('C = component\n  onClick = -> 1\n  render\n    button @click\n      "go"\n', { runtimeDelivery: 'none' }).code;
+    const child = one('C = component\n  onClick = -> 1\n  render\n    button @click: onClick\n      "go"\n');
     expect(child).toContain(handler);
     expect(child).toContain('createTextNode("go")');
-    // The comma-list and inline-text spellings.
-    expect(compile('C = component\n  onClick = -> 1\n  render\n    button @click, "go"\n', { runtimeDelivery: 'none' }).code).toContain(handler);
-    expect(compile('C = component\n  onClick = -> 1\n  render\n    button @click "go"\n', { runtimeDelivery: 'none' }).code).toContain(handler);
-    // The explicit binding — a user-written `=` there stays compile
-    // parity (the fork: explicit bindings are never validated).
-    expect(compile('C = component\n  count := 0\n  onClick = -> 1\n  render\n    button @click: @onClick = count\n', { runtimeDelivery: 'none' }).code)
-      .toContain("addEventListener('click', (e) => __batch(() => (this.onClick = this.count.value)(e)))");
-    // A `= expr` text line NOT preceded by a directive is untouched.
-    const text = compile('C = component\n  count := 0\n  onClick = -> 1\n  render\n    button @click\n      = count\n', { runtimeDelivery: 'none' }).code;
+    const text = one('C = component\n  count := 0\n  onClick = -> 1\n  render\n    button @click: onClick\n      = count\n');
     expect(text).toContain(handler);
     expect(text).toContain('__effect(() => { this._t0.data = String(this.count.value); });');
   });
 
-  test('bare `@prop` in a directive slot takes the DOM-event rejection; a child slot takes the `= @prop` guidance (both \'s rules)', () => {
-    emitFails('P = component\n  msg := "x"\n  render\n    div\n      @msg\n', /`@msg` is not a DOM event.*use `= @msg`/s);
+  test('`@prop` at an element-argument position takes the listener rejection, which names the `= @prop` text form; a member chain there stays text', () => {
+    lexFails('P = component\n  msg := "x"\n  render\n    div\n      @msg\n', /`@msg` needs a handler.*`= @msg`/s);
     emitFails('P = component\n  msg := "x"\n  render\n    @msg\n', /bare `@msg` is not rendered as text/);
+    expect(compile('P = component\n  user := {name: "a"}\n  render\n    p @user.name\n').code)
+      .toContain('this.user.value.name');
   });
 
   test('text children: reactive members bind live; plain members stringify once; an own-line module binding is a TAG , an arg-position one renders text', () => {
@@ -2454,7 +2431,7 @@ App = component
 describe('child components: events — `@event:` is a DOM listener on the child\'s host', () => {
   const HOSTED = 'Kid = component extends button\n  @label := "k"\n  render\n    button\n      = @label\n';
 
-  test('an explicit `@click:` binding listens on the element the child inherits (\'s exact line); bare directives keep the validation', () => {
+  test('an explicit `@click:` binding listens on the element the child inherits (\'s exact line); a bare directive rejects', () => {
     const { code } = compile(`${HOSTED}App = component
   onClick = (e) ->
     e
@@ -2463,12 +2440,12 @@ describe('child components: events — `@event:` is a DOM listener on the child\
 `);
     expect(code).toContain(
       "if (this._inst0) __hostOf(this._inst0, 'click').addEventListener('click', (e) => __batch(() => (this.onClick)(e)));");
-    emitFails(`${KID}App = component
+    lexFails(`${KID}App = component
   onSave = (e) ->
     e
   render
     Kid @save
-`, /`@save` is not a DOM event/);
+`, /`@save` needs a handler/);
   });
 
   test('a custom name on a hosted child listens on its host as it would on a native element, the handler untyped', () => {

@@ -3144,7 +3144,7 @@ function rewriteRender(tokens, mintId, fail) {
     if (counter.on)
       counter.n++;
     let t = tokens[i];
-    const next = tokens[i + 1] ?? null;
+    let next = tokens[i + 1] ?? null;
     if (textFrames.length > 0)
       closeTextFrames(t);
     if (!LINE_BREAKS.has(t.kind) && startsLine(i))
@@ -3289,30 +3289,31 @@ function rewriteRender(tokens, mintId, fail) {
       }
       continue;
     }
+    if (t.kind === "@" && next?.kind === "STRING" && !next.spaced && tokens[i + 2]?.kind === ":" && isBareEventAttr(t)) {
+      const ev = String(next.value).slice(1, -1);
+      fail(`an event name is written unquoted — \`@${ev}: handler\``, next.start);
+    }
     if (t.kind === "@" && next?.kind === "PROPERTY" && !next.spaced) {
+      let j = i + 2;
+      let name = String(next.value);
+      while ((tokens[j]?.kind === "-" || tokens[j]?.kind === "MATH" && tokens[j].value === "-") && !tokens[j].spaced && (tokens[j + 1]?.kind === "IDENTIFIER" || tokens[j + 1]?.kind === "PROPERTY") && !tokens[j + 1].spaced) {
+        name += "-" + String(tokens[j + 1].value);
+        j += 2;
+      }
+      if (j > i + 2 && tokens[j]?.kind === ":" && isBareEventAttr(t)) {
+        tokens.splice(i + 1, j - (i + 1), { ...next, value: name, end: tokens[j - 1].end });
+        next = tokens[i + 1];
+      }
       const after = tokens[i + 2];
-      const isChain = after?.kind === ".";
-      const isPair = after?.kind === ":";
-      if (!isChain && !isPair && isBareEventAttr(t)) {
+      if (after?.kind !== ":" && isBareEventAttr(t)) {
         const ev = String(next.value);
-        const handler = `on${ev[0].toUpperCase()}${ev.slice(1)}`;
-        if (after?.kind === "=") {
-          fail(`a \`=\` cannot follow a bare event directive on one line — \`@${ev} = expr\` would assign to the ` + `minted handler and invoke the assignment as the listener; bind explicitly (\`@${ev}: handler\`), ` + `or keep the bare \`@${ev}\` and put the ` + "text on its own `= expr` line", after.start);
+        if (after?.kind === "." && tokens[i + 3]?.kind === "PROPERTY" && tokens[i + 4]?.kind === ":") {
+          fail(`event modifiers are not supported — handle it in the listener: ` + `\`@${ev}: (e) -> e.${tokens[i + 3].value === "prevent" ? "preventDefault" : "stopPropagation"}(); …\``, after.start);
         }
-        out.push(t);
-        out.push(next);
-        out.push(gen(":", ":", next));
-        out.push(gen("@", "@", next));
-        out.push(gen("PROPERTY", handler, next));
-        i++;
-        if (tokens[i + 1]?.kind === "INDENT") {
-          out.push(gen(",", ",", next, { at: tokens[i + 1].start }));
-          out.push(gen("->", "->", next, { at: tokens[i + 1].start, newLine: true }));
-          elementBodyLevels.push(currentIndent + 1);
-        } else if (tokens[i + 1] !== undefined && INLINE_CONTENT.has(tokens[i + 1].kind)) {
-          out.push(gen(",", ",", next, { at: tokens[i + 1].start }));
+        if (after?.kind !== ".") {
+          const shown = j > i + 2 ? name : ev;
+          fail(`\`@${shown}\` needs a handler — write \`@${shown}: handler\` for a listener, or \`= @${ev}\` on its own line to show the member as text`, t.start);
         }
-        continue;
       }
     }
     if (next?.kind === "INDENT" && t.kind !== "->" && t.kind !== "=>" && t.kind !== "CALL_START" && t.kind !== "(") {
@@ -18025,7 +18026,6 @@ ${pad ?? ""}`);
         return;
       let [, key, value] = pair;
       if (isNode(key) && key[0] === "." && key[1] === "this" && typeof key[2] === "string") {
-        this.checkBareEventHandler(pair, value);
         this.checkCrossScopeLocals(value, pair);
         eventBindings.push({ pair, event: key[2], value });
         return;
@@ -18701,7 +18701,6 @@ ${this.replayPad}}` : " }");
       };
       if (isNode(key) && key[0] === "." && key[1] === "this" && typeof key[2] === "string") {
         const eventName = key[2];
-        this.checkBareEventHandler(pair, value);
         if (this.rstate.sink.kind === "loop" && this.loopVarNames().size > 0 && referencesNames(value, this.loopVarNames())) {
           this.rstate.sink.forceNonStatic = true;
         }
@@ -20299,26 +20298,6 @@ ${this.replayPad}}` : " }");
       return;
     if (this.b.source.slice(row.sourceStart, row.sourceEnd).startsWith("__bind_")) {
       throw this.positionedError(pair, "emitter: '__bind_…__:' is the compiler's two-way-binding channel — spell the binding `name <=> container` " + "(`__`-prefixed names are the compiler/runtime namespace)", this.rstate.node);
-    }
-  }
-  checkBareEventHandler(pair, value) {
-    if (!isNode(value) || value[0] !== "." || value[1] !== "this" || typeof value[2] !== "string")
-      return;
-    const id = this.stores.idOf(value);
-    const span = id !== null ? this.stores.selfSpan(id) : null;
-    if (span === null || span[0] !== span[1])
-      return;
-    const key = pair[1];
-    const ev = typeof key[2] === "string" ? key[2] : String(key[2]);
-    if (!DOM_EVENTS.has(ev)) {
-      throw this.positionedError(pair, `emitter: \`@${ev}\` is not a DOM event — use \`= @${ev}\` to render text, or \`@${ev}: handler\` for an explicit handler`);
-    }
-    if (ev === "error") {
-      throw this.positionedError(pair, "emitter: bare `@error` would bind `onError`, which is the error-boundary hook, not a handler — write `@error: handler` to bind a DOM error listener explicitly");
-    }
-    const method = value[2];
-    if (!this.cframes[this.cframes.length - 1].members.has(method)) {
-      throw this.positionedError(pair, `emitter: bare \`@${ev}\` requires a component method \`${method}\` — define \`${method}\`, or use \`@${ev}: handler\` for an explicit handler`);
     }
   }
   static collectTemplateClasses(sexpr) {
@@ -32668,7 +32647,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "17b6e262d11c71f7";
+var compilerBuild = () => "812d5d45f86c2640";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

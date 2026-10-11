@@ -12128,7 +12128,6 @@ class Emitter {
       let [, key, value] = pair;
       // `@event: handler` — a listener on the child's root element.
       if (isNode(key) && key[0] === '.' && key[1] === 'this' && typeof key[2] === 'string') {
-        this.checkBareEventHandler(pair, value);
         this.checkCrossScopeLocals(value, pair);
         eventBindings.push({ pair, event: key[2], value });
         return;
@@ -13014,7 +13013,6 @@ class Emitter {
       // data).
       if (isNode(key) && key[0] === '.' && key[1] === 'this' && typeof key[2] === 'string') {
         const eventName = key[2];
-        this.checkBareEventHandler(pair, value);
         if (this.rstate.sink.kind === 'loop' && this.loopVarNames().size > 0 &&
             referencesNames(value, this.loopVarNames())) {
           // The listener is a CREATE-phase closure over the loop item:
@@ -15020,33 +15018,6 @@ class Emitter {
       throw this.positionedError(pair,
         "emitter: '__bind_…__:' is the compiler's two-way-binding channel — spell the binding `name <=> container` " +
         '(`__`-prefixed names are the compiler/runtime namespace)', this.rstate.node);
-    }
-  }
-
-  // Bare `@click` shorthand validation (the known-vocabulary fork):
-  // ONLY the rewriter-minted handler pairs validate — their tokens are
-  // zero-width (generated), so the value member's store span is empty.
-  // Explicit `@name: handler` bindings stay unvalidated (custom events
-  // are legal DOM); typo intelligence there is the face's.
-  checkBareEventHandler(pair, value) {
-    if (!isNode(value) || value[0] !== '.' || value[1] !== 'this' || typeof value[2] !== 'string') return;
-    const id = this.stores.idOf(value);
-    const span = id !== null ? this.stores.selfSpan(id) : null;
-    if (span === null || span[0] !== span[1]) return; // real source → explicit binding
-    const key = pair[1];
-    const ev = typeof key[2] === 'string' ? key[2] : String(key[2]);
-    if (!DOM_EVENTS.has(ev)) {
-      throw this.positionedError(pair,
-        `emitter: \`@${ev}\` is not a DOM event — use \`= @${ev}\` to render text, or \`@${ev}: handler\` for an explicit handler`);
-    }
-    if (ev === 'error') {
-      throw this.positionedError(pair,
-        'emitter: bare `@error` would bind `onError`, which is the error-boundary hook, not a handler — write `@error: handler` to bind a DOM error listener explicitly');
-    }
-    const method = value[2];
-    if (!this.cframes[this.cframes.length - 1].members.has(method)) {
-      throw this.positionedError(pair,
-        `emitter: bare \`@${ev}\` requires a component method \`${method}\` — define \`${method}\`, or use \`@${ev}: handler\` for an explicit handler`);
     }
   }
 

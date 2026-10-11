@@ -11,9 +11,6 @@
 //   .('a', b)        → div.__clsx('a', b) / tag.__clsx(...) /
 //                      class: __clsx(...)  (dynamic classes)
 //   = expr           → __text__(expr)    (expression text child)
-//   button @click    → button @click: @onClick (bare event directive;
-//                      the minted handler tokens are ZERO-WIDTH — the
-//                      emitter's generated-vs-user discriminator)
 //   <tag> INDENT …   → <tag>(-> INDENT …) (implicit child nesting; the
 //                      matching CALL_END lands after the OUTDENT)
 //   <tag> p INDENT … → <tag> p, -> INDENT … (a trailing word the
@@ -36,8 +33,9 @@
 // program with normal lines. The
 // extended-tier scaling gate holds the line-count dimension linear.
 //
-// The event-MODIFIER spelling (`@click.prevent: h`) is deliberately
-// unsupported — it stays a loud parse rejection.
+// A listener has one spelling, `@event: handler`: a bare `@event` and
+// the event-modifier spelling (`@click.prevent: h`) reject, positioned,
+// naming that form.
 
 const OPENERS = new Set(['(', '[', '{', 'CALL_START', 'INDEX_START', 'PARAM_START',
   'PICK_START', 'OPTPICK_START', 'STRING_START', 'INTERPOLATION_START', 'HEREGEX_START']);
@@ -50,8 +48,8 @@ const GROUP_OPENER = { __proto__: null, ')': '(', 'CALL_END': 'CALL_START', ']':
 // distinguishes `Counter` from ALLCAPS constants).
 const COMPONENT_RE = /^[A-Z][A-Za-z0-9]*[a-z][A-Za-z0-9]*$/;
 
-// Token kinds that START a same-line element argument after a bare
-// event directive (`button @click "go"` — the text child); the
+// Token kinds that START a same-line element argument after a
+// transition directive (`p ~fade "x"` — the text child); the
 // separator/closer kinds stay untouched.
 const INLINE_CONTENT = new Set(['STRING', 'STRING_START', 'NUMBER', 'BOOL', 'IDENTIFIER', 'PROPERTY', '@', '(', '[', '{']);
 
@@ -245,8 +243,8 @@ export function rewriteRender(tokens, mintId, fail) {
     return 0;
   };
 
-  // Is the `@` about to be emitted a bare event DIRECTIVE — a new
-  // tag-head argument or an element-body statement — rather than a
+  // Is the `@` about to be emitted at an element-argument position — a
+  // new tag-head argument or an element-body statement — rather than a
   // `@member` inside an attribute value?
   const isBareEventAttr = (current) => {
     const prev = out[out.length - 1];
@@ -386,7 +384,7 @@ export function rewriteRender(tokens, mintId, fail) {
   for (let i = 0; i < tokens.length; i++) {
     if (counter.on) counter.n++;
     let t = tokens[i];
-    const next = tokens[i + 1] ?? null;
+    let next = tokens[i + 1] ?? null;
 
     if (textFrames.length > 0) closeTextFrames(t);
 
@@ -564,52 +562,45 @@ export function rewriteRender(tokens, mintId, fail) {
       continue;
     }
 
-    // ── Bare event shorthand: `button @click` → `@click: @onClick` ──
-    // The minted handler tokens are zero-width (generated) — the
-    // emitter validates ONLY these against the DOM-event set and the
-    // method's existence; explicit `@name:` bindings stay unvalidated
-    // (custom events are legal DOM).
+    // A quoted event name would listen for the quotes too; the
+    // unquoted name is the one spelling, hyphens included.
+    if (t.kind === '@' && next?.kind === 'STRING' && !next.spaced && tokens[i + 2]?.kind === ':' && isBareEventAttr(t)) {
+      const ev = String(next.value).slice(1, -1);
+      fail(`an event name is written unquoted — \`@${ev}: handler\``, next.start);
+    }
+
+    // ── A listener is `@event: handler` — the one spelling (RFC 3) ──
+    // At an element-argument position, `@word` with no `:` would be a
+    // listener without a handler; it rejects, naming the explicit form.
+    // A member chain there (`p @user.name`) stays text, and an event
+    // modifier (`@click.prevent:`) rejects with the handler form.
     if (t.kind === '@' && next?.kind === 'PROPERTY' && !next.spaced) {
+      // A listener key's event name runs through tight hyphens
+      // (`@sl-change: go` listens for `sl-change`; custom elements name
+      // their events so). The run joins into the one PROPERTY only when
+      // a `:` ends it — anywhere else a hyphen keeps its meaning.
+      let j = i + 2;
+      let name = String(next.value);
+      while ((tokens[j]?.kind === '-' || (tokens[j]?.kind === 'MATH' && tokens[j].value === '-')) && !tokens[j].spaced &&
+             (tokens[j + 1]?.kind === 'IDENTIFIER' || tokens[j + 1]?.kind === 'PROPERTY') && !tokens[j + 1].spaced) {
+        name += '-' + String(tokens[j + 1].value);
+        j += 2;
+      }
+      if (j > i + 2 && tokens[j]?.kind === ':' && isBareEventAttr(t)) {
+        tokens.splice(i + 1, j - (i + 1), { ...next, value: name, end: tokens[j - 1].end });
+        next = tokens[i + 1];
+      }
       const after = tokens[i + 2];
-      const isChain = after?.kind === '.';
-      const isPair = after?.kind === ':';
-      if (!isChain && !isPair && isBareEventAttr(t)) {
+      if (after?.kind !== ':' && isBareEventAttr(t)) {
         const ev = String(next.value);
-        const handler = `on${ev[0].toUpperCase()}${ev.slice(1)}`;
-        // A `=` directly after the directive has no sensible reading:
-        // the minted handler would become the assignment's target and
-        // the assignment's value the invoked listener.
-        if (after?.kind === '=') {
-          fail(`a \`=\` cannot follow a bare event directive on one line — \`@${ev} = expr\` would assign to the ` +
-            `minted handler and invoke the assignment as the listener; bind explicitly (\`@${ev}: handler\`), ` +
-            `or keep the bare \`@${ev}\` and put the ` +
-            'text on its own `= expr` line', after.start);
+        if (after?.kind === '.' && tokens[i + 3]?.kind === 'PROPERTY' && tokens[i + 4]?.kind === ':') {
+          fail(`event modifiers are not supported — handle it in the listener: ` +
+            `\`@${ev}: (e) -> e.${tokens[i + 3].value === 'prevent' ? 'preventDefault' : 'stopPropagation'}(); …\``, after.start);
         }
-        out.push(t);
-        out.push(next);
-        out.push(gen(':', ':', next));
-        out.push(gen('@', '@', next));
-        out.push(gen('PROPERTY', handler, next));
-        i++;
-        // A block INDENT directly after the directive takes the
-        // element's children: the minted handler PROPERTY never rides
-        // the main loop, so the implicit-nesting rule runs here for
-        // it (the in-a-call comma path — `button @click` + block
-        // parses as `button({click: onClick}, -> …)`).
-        if (tokens[i + 1]?.kind === 'INDENT') {
-          out.push(gen(',', ',', next, { at: tokens[i + 1].start }));
-          out.push(gen('->', '->', next, { at: tokens[i + 1].start, newLine: true }));
-          elementBodyLevels.push(currentIndent + 1);
-        } else if (tokens[i + 1] !== undefined && INLINE_CONTENT.has(tokens[i + 1].kind)) {
-          // Same-line content directly after the directive is the
-          // NEXT element argument (`button @click "go"` means handler
-          // plus inline text child — the comma-list spelling's
-          // meaning; a value here is never a handler argument).
-          // Without the comma the minted handler and the content fuse
-          // into one expression (the handler called WITH the text).
-          out.push(gen(',', ',', next, { at: tokens[i + 1].start }));
+        if (after?.kind !== '.') {
+          const shown = j > i + 2 ? name : ev;
+          fail(`\`@${shown}\` needs a handler — write \`@${shown}: handler\` for a listener, or \`= @${ev}\` on its own line to show the member as text`, t.start);
         }
-        continue;
       }
     }
 
