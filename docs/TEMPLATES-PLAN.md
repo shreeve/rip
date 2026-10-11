@@ -3,8 +3,8 @@
 This document plans the cleanup of Rip's template language (the `render`
 block of a component): what it means after the cleanup, which layer owns
 each decision, and the phases that get there. It is a plan, not a
-contract; nothing here is implemented. Status: **proposed** — owner decisions are recorded in
-[Owner decisions](#owner-decisions); one sub-question is open.
+contract; nothing here is implemented. Status: **in progress** — owner decisions are recorded in
+[Owner decisions](#owner-decisions); phase 0 under way.
 
 The evidence comes from a review of `main` (2026-10-10, after `d00d26b5`):
 an implementation map of every place that decides what a template token
@@ -96,7 +96,6 @@ binding-guessing block attachment).
 | A bound word or expression | Text |
 | An unbound plain word | Boolean attribute (element) or prop (component) |
 | `@name: handler` | Listener; the value is a function, called with the event |
-| Bare `@name` | Listener calling `onName` (`@sl-change` calls `onSlChange`) |
 | `innerHTML:` | Raw HTML for trusted content |
 | `key <=> target` | Two-way binding |
 | `ref:` | Element reference |
@@ -115,8 +114,7 @@ inline branch.
 **Characters.** `-` is subtraction in code; a tight `a-b:` key joins;
 a tight `word-word` in a template position is a custom element; in an
 event position it is part of the event name. `@word` is `this.word` in
-code; in a template position it is a listener (`@word:` explicit, bare
-`@word` calling `onWord`). `/` is division. `#` is an id tight after a
+code; in a template position only `@word:` (a listener) is legal. `/` is division. `#` is an id tight after a
 tag or selector chain or opening a line; anywhere else a comment. `.` is
 a class tight after a tag or opening a line; anywhere else member
 access. A bare word means: bound → value, tag → element, uppercase
@@ -127,7 +125,8 @@ rejects. `->` is always a function; as a template argument it rejects.
 `~` rejects in a template position.
 
 **Removed, each rejecting positioned with the explicit form** (all have
-zero real uses): the bare `.` and `. role:` lines (write `div`);
+zero real uses): bare `@event` (write `@event: handler`); the bare `.`
+and `. role:` lines (write `div`);
 `.(…)` dynamic classes (write `class: [...]`); event modifiers; `tag ->`
 children arrows (an indented block is the children); `~fade`
 transitions. Selector classes that need `/`, `:` or `[` reject, pointing
@@ -154,13 +153,13 @@ regeneration where it changes the surface.
 | Phase | Scope | Output change | Risk |
 |---|---|---|---|
 | P0 Safety nets | Byte pins for every heavily used construct; an identity scan (JS and typed face) over the repo and medlabs, with a recorded baseline; re-run every review probe | None | None |
-| P1 Remove unused sugar | `~x`, `.(…)`, bare `.`/`. k:` lines, `tag ->`, event modifiers | Corpus regions rewritten to explicit forms, enumerated | Low–medium |
+| P1 Remove unused sugar | `~x`, `.(…)`, bare `.`/`. k:` lines, `tag ->`, bare `@event`, event-modifier message | Corpus regions rewritten to explicit forms, enumerated | Low–medium |
 | P2 Render-agnostic scanner | Selector (`tag.cls`, `#id`), custom-element and event-name runs become one gate-owned token kind; `else-x` and the lexer render state go; `.` continuation restored in code | Corpus, enumerated | Medium |
 | P3 One template gate | One region, code/template classification, all position rejections | None in the scan | Medium–high |
 | P4 Binding-free block attachment | The block always belongs to the line head; delete `readsAsValue` | None in the scan | **High** — cold review before merge |
 | P5 Grammar homes | `= expr` and `<=>` productions; the sentinels leave the user namespace | Typed face and mapping, enumerated | Medium–high |
 | P6 One word classifier | Merge the four emitter paths; void elements, `Component.lower`, literal lines, `on*:` keys, write guards, `ref:` in `for` | None in the scan | Medium |
-| P7 Events, bindings, text | Hyphenated event names and `onX` minting, DOM-event case check, literal handlers reject, `<=>` into loop-row fields notifies, no "null"/"undefined" on the page (text, attributes, properties, template interpolation) | Enumerated (text slots and interpolation change bytes) | Medium |
+| P7 Events, bindings, text | Hyphenated event names in listener keys, DOM-event case check, literal handlers reject, `<=>` into loop-row fields notifies, no "null"/"undefined" on the page (text, attributes, properties, template interpolation) | Enumerated (text slots and interpolation change bytes) | Medium |
 | P8 Reference and certification | The template chapter of the reference; close PROBLEMS.md entries; full gates; cold review | — | — |
 
 Out of scope: reactivity semantics (T7, T8, T19), component method
@@ -179,17 +178,21 @@ reflect them.
 2. **`#id` stays**: tight after a tag or selector chain, or opening a
    line (`#main`). `#` anywhere else is a comment.
 3. **`= expr` stays** as the explicit text form.
-4. **Bare `@foo` stays** and calls `onFoo`. In an event position the name
-   runs through tight hyphens: `@sl-change` listens for `sl-change` and
-   calls `onSlChange`; `@sl-change: go` calls `go`. A spaced `@x - y` in
-   an event position rejects. *Open: whether bare `@name` accepts custom
-   (non-DOM) event names such as `@escape`.*
+4. **Bare `@foo` is removed** — `button @click` and `button @escape`
+   reject, naming the explicit form `@click: onClick`. One spelling per
+   listener (rule 5), as RFC 3 chose for component events; the ui
+   package already names methods `onMousedown` and still writes
+   `@mousedown: onMousedown`. In an explicit listener key the event name
+   runs through tight hyphens: `@sl-change: go` listens for `sl-change`.
+   Event modifiers (`@click.prevent:`) stay unsupported; the rejection
+   shows the handler form, `(e: Event) -> e.preventDefault()`.
 5. **Handler values keep their meaning** — a function value called with
    the event (`@keydown: note('outer')` stays legal). Literal handlers
    (`@click: "go()"`, `@click: 5`, `@click: null`) reject.
-6. **Hyphenated event names work unquoted** (see 4); event names are
-   checked against the DOM event list case-insensitively, so
-   `@dblClick` rejects with "did you mean `@dblclick`".
+6. **Hyphenated event names work unquoted** in explicit listeners (see
+   4); event names are checked against the DOM event list
+   case-insensitively, so `@dblClick` rejects with "did you mean
+   `@dblclick`".
 7. **An uppercase first letter means a component**, all-caps included
    (`QR`, `URL`); no HTML or SVG tag starts uppercase.
 8. **A render local that reuses a member's name rejects**, positioned.
