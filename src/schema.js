@@ -1709,10 +1709,11 @@ function parseEnumLine(line, entries, fail) {
 }
 
 // An input names a member by its name or by its value, so the two
-// vocabularies must not cross: a value that is ANOTHER member's name
-// (`:a "b"` beside `:b "c"`) makes the input "b" name both. A member
-// name declared twice is the same ambiguity. Values may repeat — two
-// names for one value are aliases, and every input resolves to it.
+// vocabularies must not cross: a value that is the name of a member
+// holding a DIFFERENT value (`:a "b"` beside `:b "c"`) makes the input
+// "b" resolve to two values. A member name declared twice is the same
+// ambiguity. Values may repeat — two names for one value are aliases
+// (`:active` beside `:enabled "active"`), and every input resolves to it.
 function checkEnumMembers(entries, fail) {
   const members = entries.filter((e) => e.tag === 'enum-member');
   const byName = new Map();
@@ -1720,9 +1721,10 @@ function checkEnumMembers(entries, fail) {
     if (byName.has(m.name)) fail(`enum member ':${m.name}' is declared twice`, m.start);
     byName.set(m.name, m);
   }
+  const valueOf = (m) => (m.value === undefined ? m.name : m.value);
   for (const m of members) {
     const other = typeof m.value === 'string' ? byName.get(m.value) : undefined;
-    if (other && other !== m) {
+    if (other && valueOf(other) !== m.value) {
       fail(`enum member ':${m.name}' has the value ${JSON.stringify(m.value)}, which is the name of member ':${other.name}' — an input ${JSON.stringify(m.value)} would name both`, m.start);
     }
   }

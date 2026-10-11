@@ -304,9 +304,15 @@ describe('schema DSL: loud rejections', () => {
     expect(() => __schema({ kind: 'enum', name: 'H', entries: [
       { tag: 'enum-member', name: 'a', value: 'b' }, { tag: 'enum-member', name: 'b', value: 'c' },
     ] })._normalize()).toThrow(/an input "b" would name both/);
-    // a value naming its own member, and two names for one value, are unambiguous
+    // a value naming its own member, and two names for one value, are
+    // unambiguous — including an alias of a bare member
     expect(run('E = schema :enum\n  :a "a"\n  :c "x"\n  :d "x"', 'return [...E._normalize().enumMembers.values()];'))
       .toEqual(['a', 'x', 'x']);
+    expect(run('S = schema :enum\n  :active\n  :enabled "active"', 'return [S.parse("enabled"), S.parse("active")];'))
+      .toEqual(['active', 'active']);
+    expect(__schema({ kind: 'enum', name: 'H2', entries: [
+      { tag: 'enum-member', name: 'on', value: 'on' }, { tag: 'enum-member', name: 'yes', value: 'on' },
+    ] })._normalize().enumMembers.get('yes')).toBe('on');
   });
 
   test('a schema number reads its separators and rejects a BigInt', () => {

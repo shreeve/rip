@@ -581,10 +581,11 @@ class SchemaDef {
       });
     }
 
-    // A value that is another member's name makes that input name both
-    // members (the compiler's checkEnumMembers, for hand-built enums).
+    // A value that is the name of a member holding a different value
+    // resolves that input two ways (the compiler's checkEnumMembers, for
+    // hand-built enums); an alias of the same value is unambiguous.
     for (const [n, v] of enumMembers) {
-      if (typeof v === 'string' && v !== n && enumMembers.has(v)) {
+      if (typeof v === 'string' && enumMembers.has(v) && enumMembers.get(v) !== v) {
         enumAmbiguity(n, "enum member ':" + n + "' has the value " + JSON.stringify(v) +
           ", which is the name of member ':" + v + "' — an input " + JSON.stringify(v) + ' would name both');
       }
