@@ -5,9 +5,10 @@
 #
 # Three capabilities, none app-specific:
 #
-#   scratchDb   temp DuckDB file + the app's migration ledger replayed +
-#               `harbor <db> start` on an ephemeral port. Real database,
-#               real SQL, disposable — your dev database is never in play.
+#   scratchDb   `harbor <db> start` on a temp DuckDB file and an
+#               ephemeral port, then the app's migration ledger applied
+#               through it. Real database, real SQL, disposable — your
+#               dev database is never in play.
 #   bootApp     set env, import the app's entry in-process, hand back
 #               the framework's fetch handler (start() installs it as
 #               globalThis.__ripHandler under the worker-env guard).
@@ -22,9 +23,18 @@
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { connect } from '../../src/runtime/orm.js'
+import { migrationFiles, migrationLabel, splitStatements } from '../../src/cli/migrate.js'
 
-# Replay every .sql in migrationsDir (sorted, same order as rip schema)
-# into a fresh DuckDB file, then serve it with `harbor <db> start`.
+# Serve a fresh DuckDB file with `harbor <db> start`, then replay
+# migrationsDir through it in the order and statement split `rip schema
+# migrate` uses. Harbor creates the file, so it has a deployed
+# database's storage version; a file built by any other DuckDB (the
+# CLI's default storage is far older than harbor's) can refuse a
+# migration the deployment accepts. The replay talks to this harbor
+# alone, never through the ORM's process adapter: that adapter resolved
+# its target when it loaded, from an app's .env, which can name the dev
+# database.
 # Returns { url, file, dir, stop } — stop! kills harbor and removes the
 # scratch directory; the process-exit hook covers forgotten stops.
 #
@@ -35,15 +45,7 @@ import { tmpdir } from 'node:os'
 export scratchDb = (migrationsDir) ->
   dir = mkdtempSync join(tmpdir(), 'rip-scratch-')
   file = join dir, 'scratch.duckdb'
-  ledger = readdirSync(migrationsDir).filter((n) -> n.endsWith '.sql').sort()
-  throw Error.new "scratchDb: no migrations in #{migrationsDir}" unless ledger.length
-  for name in ledger
-    ran = Bun.spawnSync ['duckdb', file, '-c', ".read #{join migrationsDir, name}"],
-      stdin: 'ignore'
-      stdout: 'ignore'
-      stderr: 'pipe'
-    unless ran.exitCode is 0
-      throw Error.new "scratchDb: migration #{name} failed: #{ran.stderr.toString()}"
+  throw Error.new "scratchDb: no migrations in #{migrationsDir}" unless readdirSync(migrationsDir).some((n) -> n.endsWith '.sql')
 
   launcher = Bun.which('harbor') or throw Error.new 'scratchDb: no `harbor` binary on PATH'
   proc = null
@@ -98,6 +100,17 @@ export scratchDb = (migrationsDir) ->
     proc.kill()
     try rmSync(dir, { recursive: true, force: true }) catch then null
   process.on 'exit', -> try proc.kill() catch then null
+
+  adapter = connect url: url, timeoutMs: null
+  label = migrationsDir
+  try
+    for f in migrationFiles!(migrationsDir)
+      label = migrationLabel(f)
+      for statement in splitStatements(f.content)
+        adapter.query! statement, []
+  catch e
+    stop!
+    throw Error.new "scratchDb: migration #{label} failed: #{e.message}"
   { url, file, dir, stop }
 
 # Point the app at its (scratch) world and import it. `start()` throws
