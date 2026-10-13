@@ -56,6 +56,7 @@ Packages, by what they are for:
 | `app` | dependency-free application data substrate: stash, source, routes, workspace, apply |
 | `ui`, `email` | unstyled composable components on native browser features; email templates as components |
 | `db` | DuckDB over duckdb-harbor: `connect()`, module-level `sql`, MCP stdio server, `rip-db` CLI |
+| `emdb` | the emdb embedded key-value database through `bun:ffi`: scoped transactions, named trees, ordered scans; needs a libemdb from an emdb build |
 | `barcodes` | QR, PDF417 and Code 128 generator and reader, camera-budgeted, zero runtime dependencies |
 | `csv`, `x12`, `rsx`, `pdf`, `decimal`, `time`, `http`, `validate`, `fake`, `googlesheets` | flat mold packages, each with `test.rip` and a README whose numbers come from its own bench |
 | `script`, `swarm`, `stamp`, `tray`, `utils`, `ai` | process and host tooling: PTY/SSH/TCP conversations, worker-thread jobs, host provisioning, macOS tray host, small CLIs, the multi-model consultation MCP |

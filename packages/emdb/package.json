@@ -1,0 +1,19 @@
+{
+  "name": "@rip/emdb",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "emdb from Rip — scoped transactions, named trees and ordered scans over libemdb, through bun:ffi.",
+  "exports": {
+    ".": "./emdb.rip"
+  },
+  "scripts": {
+    "test": "rip test.rip",
+    "bench": "rip bench.rip"
+  },
+  "files": [
+    "emdb.rip",
+    "README.md",
+    "lib"
+  ]
+}

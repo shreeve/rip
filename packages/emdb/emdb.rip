@@ -1,0 +1,874 @@
+# ==============================================================================
+# rip/emdb — emdb, the embedded key-value database, from Rip
+#
+# Author: Steve Shreeve (steve.shreeve@gmail.com)
+#   Date: October 12, 2026
+#
+# A bun:ffi binding to libemdb's C ABI (emdb's include/emdb.h, SPEC §8.8),
+# on the libemdb 0.10.1 it bundles in lib/:
+#   - open(path, options) → Env; env.read / env.write run a scoped
+#     transaction that commits when its function returns and aborts when
+#     it throws
+#   - get / put / del / delPrefix, named trees, ordered scans
+#   - values come back copied; `view: true` lends zero-copy views that are
+#     detached when they die, so a dead view never reads the map
+#   - every emdb error code is an EmdbError carrying its code and name
+#
+# Native rules this file keeps (emdb.h): commit always ends a transaction;
+# cursors die with their transaction; tree 0 is the main tree; structs go
+# by pointer with a leading uint32_t size. Every handle crosses the FFI as
+# a u64 BigInt, never as a 'ptr' number: a pointer-typed argument given a
+# plain number is the shape Bun has corrupted on Linux x86_64. Nothing in
+# emdb's ABI passes a struct by value, so no C shim is needed.
+# ==============================================================================
+
+import { dlopen, ptr, toArrayBuffer, suffix } from 'bun:ffi'
+import { realpathSync, statSync, openSync, closeSync, unlinkSync } from 'node:fs'
+import { join } from 'node:path'
+
+# ==[ The C ABI ]===============================================================
+
+# All twenty-one functions of emdb.h, so a library missing any refuses at
+# load; emdb_cursor_get_batch, which scans read through, came after the
+# first twenty.
+# Handles (emdb_env*, emdb_txn*, emdb_cursor*) are u64; a key or value is a
+# `buffer` and a u64 length, so a key encoded into a reusable scratch array
+# passes without a subarray; out-pointers are small typed arrays.
+#
+# And memcpy, which libemdb links from libc, so dlsym on libemdb's handle
+# finds it without naming a platform's libc. One memcpy into a fresh
+# Uint8Array is the cheapest copy out of the map: toArrayBuffer makes an
+# external ArrayBuffer per value, which costs several times more (bench.rip).
+SYMBOLS =!
+  emdb_env_open:    { args: ['ptr', 'ptr', 'ptr'], returns: 'i32' }
+  emdb_env_close:   { args: ['u64'], returns: 'void' }
+  emdb_env_info:    { args: ['u64', 'ptr'], returns: 'i32' }
+  emdb_env_sync:    { args: ['u64'], returns: 'i32' }
+  emdb_txn_begin:   { args: ['u64', 'u64', 'u32', 'ptr'], returns: 'i32' }
+  emdb_txn_commit:  { args: ['u64'], returns: 'i32' }
+  emdb_txn_abort:   { args: ['u64'], returns: 'void' }
+  emdb_get:         { args: ['u64', 'u32', 'buffer', 'u64', 'ptr', 'ptr'], returns: 'i32' }
+  emdb_put:         { args: ['u64', 'u32', 'buffer', 'u64', 'buffer', 'u64', 'u32'], returns: 'i32' }
+  emdb_del:         { args: ['u64', 'u32', 'buffer', 'u64', 'u32', 'ptr'], returns: 'i32' }
+  emdb_tree_open:   { args: ['u64', 'ptr', 'u32', 'ptr'], returns: 'i32' }
+  emdb_tree_drop:   { args: ['u64', 'u32', 'u32'], returns: 'i32' }
+  emdb_tree_stat:   { args: ['u64', 'u32', 'ptr'], returns: 'i32' }
+  emdb_cursor_open: { args: ['u64', 'u32', 'u32', 'ptr'], returns: 'i32' }
+  emdb_cursor_get:  { args: ['u64', 'i32', 'ptr', 'ptr', 'ptr', 'ptr'], returns: 'i32' }
+  emdb_cursor_put:  { args: ['u64', 'buffer', 'u64', 'buffer', 'u64'], returns: 'i32' }
+  emdb_cursor_get_batch: { args: ['u64', 'i32', 'buffer', 'u64', 'u32', 'buffer', 'u64', 'u32', 'ptr', 'ptr'], returns: 'i32' }
+  emdb_cursor_del:  { args: ['u64'], returns: 'i32' }
+  emdb_backup:      { args: ['u64', 'i32', 'u64', 'ptr'], returns: 'i32' }
+  emdb_strerror:    { args: ['i32'], returns: 'cstring' }
+  emdb_version:     { args: ['ptr', 'ptr', 'ptr'], returns: 'void' }
+  memcpy:           { args: ['buffer', 'u64', 'u64'], returns: 'void' }
+
+NOTFOUND =! -32000
+BUFFER_TOO_SMALL =! -32039
+WRITER_ACTIVE =! -32010
+DURABILITY_UNKNOWN =! -32023
+
+# Flags (API-ABI07): one namespace.
+RDONLY  =! 0x0001
+REVERSE =! 0x0800
+CREATE  =! 0x1000
+DELETE  =! 0x2000
+PREFIX  =! 0x4000
+
+# Cursor operations (API-C01, API-C02).
+FIRST     =! 0
+LAST      =! 1
+NEXT      =! 2
+PREV      =! 3
+SET_RANGE =! 5
+CURRENT   =! 6
+
+# ==[ Loading libemdb ]=========================================================
+
+# The libemdb this package bundles, one per supported platform, in lib/
+# beside this file and named by Bun's own platform and architecture
+# strings (lib/README.md has their provenance).
+VERSION =! '0.10.1'
+
+lib = null
+
+# The databases (by real path) with a write transaction open in this
+# process. A second Env on the same file would wait on the writer lock
+# its own process holds, forever; it is refused instead.
+WRITING =! Set.new()
+
+# The key a SET_RANGE reads, held while the call runs: the cursor gets
+# only its address.
+seeking = null
+
+isFile = (p) ->
+  try statSync(p).isFile() catch then false
+
+# The bundled library for a platform and architecture, with this host's
+# library suffix; a platform the package has no library for is refused.
+export libraryPath = (platform = process.platform, arch = process.arch) ->
+  file = join(import.meta.dir, 'lib', "libemdb-#{VERSION}-#{platform}-#{arch}.#{suffix}")
+  throw Error.new "emdb: no libemdb for #{platform}-#{arch} (this package bundles libemdb #{VERSION} for linux-x64 and darwin-arm64)" unless isFile(file)
+  file
+
+# Loaded once per process, on the first open or version.
+load = ->
+  return lib if lib?
+  path = libraryPath()
+  try
+    lib = dlopen(path, SYMBOLS).symbols
+  catch e
+    throw Error.new "emdb: cannot load #{path}: #{e.message}"
+  lib
+
+# ==[ Errors ]==================================================================
+
+# An emdb error code, thrown. `code` is the negative integer of emdb.h and
+# `name` its EMDB_* spelling, both as emdb_strerror gives them; the
+# message says which call returned it. `committed` is true only for
+# EMDB_DURABILITY_UNKNOWN from a commit: the commit stands and is
+# visible, its meta page did not sync, and the write must not be retried.
+export class EmdbError extends Error
+  constructor: (code, call) ->
+    text = lib.emdb_strerror(code)
+    i = text.indexOf(': ')
+    super "#{call}: #{if i < 0 then text else text.slice(i + 2)}"
+    @name = if i < 0 then 'EMDB_UNKNOWN' else text.slice(0, i)
+    @code = code
+    @committed = code is DURABILITY_UNKNOWN
+
+check = (rc, call) ->
+  throw EmdbError.new(rc, call) unless rc is 0
+  return
+
+# ==[ Bytes ]===================================================================
+
+ENCODER =! TextEncoder.new()
+
+# Out-pointers, reused: every call reads them before the next call writes.
+OUT   =! BigUint64Array.new(1)
+KEYP  =! BigUint64Array.new(1)
+KEYN  =! BigUint64Array.new(1)
+VALP  =! BigUint64Array.new(1)
+VALN  =! BigUint64Array.new(1)
+COUNT =! BigUint64Array.new(1)
+BCOUNT =! Uint32Array.new(1)
+BUSED  =! BigUint64Array.new(1)
+NO_KEY =! Uint8Array.new(0)
+TREE  =! Uint32Array.new(1)
+
+# Scan batches (see Txn._walk).
+BATCH_BYTES =! 64 * 1024
+BATCH_FIRST =! 16
+BATCH_MAX   =! 1 << 16
+
+notBytes = (x, what) ->
+  if x instanceof Uint8Array
+    TypeError.new "emdb: a #{what} was a view that has died (its transaction ended, or a write followed it); copy a view with .slice() while it lives"
+  else
+    TypeError.new "emdb: a #{what} is a string or a Uint8Array, got #{if x is null then 'null' else typeof x}"
+
+# Bytes the caller keeps (a scan's bounds): a string encoded afresh, or the
+# caller's own Uint8Array. A detached buffer is a dead view: passed on, it
+# would read as the empty string and act on the empty key or prefix, so it
+# is refused.
+bytesOf = (x, what) ->
+  return ENCODER.encode(x) if typeof x is 'string'
+  return x if x instanceof Uint8Array and not x.buffer.detached
+  throw notBytes(x, what)
+
+# Bytes for one call. A Uint8Array passes as it is; a string is encoded
+# into a scratch array the next call reuses, which C reads only during the
+# call: key strings into one, value strings into the other. `encoded`
+# names the array, and the length is returned, so no subarray is made.
+# Short ASCII strings, the common key, are copied by charCode, cheaper
+# than encodeInto and its result object; a scratch array grows to fit, up
+# to SCRATCH_MAX, and a longer string is encoded on its own.
+SHORT       =! 64
+SCRATCH_MAX =! 1 << 20
+keyScratch = Uint8Array.new(1024)
+valScratch = Uint8Array.new(1024)
+encoded = null
+
+bytesFor = (x, what, isValue) ->
+  if typeof x is 'string'
+    buf = if isValue then valScratch else keyScratch
+    n = x.length
+    if n <= SHORT
+      i = 0
+      while i < n
+        c = x.charCodeAt(i)
+        break if c > 0x7F
+        buf[i] = c
+        i++
+      if i is n
+        encoded = buf
+        return n
+    if n * 3 > buf.length
+      if n * 3 > SCRATCH_MAX
+        encoded = ENCODER.encode(x)
+        return encoded.length
+      buf = Uint8Array.new(Math.min(SCRATCH_MAX, Math.max(n * 3, buf.length * 2)))
+      if isValue then valScratch = buf else keyScratch = buf
+    encoded = buf
+    return ENCODER.encodeInto(x, buf).written
+  throw notBytes(x, what) unless x instanceof Uint8Array and not x.buffer.detached
+  encoded = x
+  x.length
+
+# A copy of `len` bytes at `addr` (both BigInts, as the out-pointers hold).
+copyAt = (addr, len) ->
+  n = Number(len)
+  return Uint8Array.new(0) if n is 0
+  v = Uint8Array.new(n)
+  lib.memcpy v, addr, len
+  v
+
+# A NUL-terminated UTF-8 string for a `const char *`.
+cString = (s, what) ->
+  throw TypeError.new "emdb: a #{what} is a non-empty string" unless typeof s is 'string' and s
+  throw TypeError.new "emdb: a #{what} cannot contain NUL" if s.includes('\0')
+  ENCODER.encode "#{s}\0"
+
+# A view of `len` bytes at `addr`. toArrayBuffer refuses a zero length, and
+# an empty array touches no memory, so it needs no lifetime.
+viewAt = (addr, len) ->
+  n = Number(len)
+  return Uint8Array.new(0) if n is 0
+  Uint8Array.new toArrayBuffer(Number(addr), 0, n)
+
+compareBytes = (a, b) ->
+  n = Math.min(a.length, b.length)
+  i = 0
+  while i < n
+    return a[i] - b[i] unless a[i] is b[i]
+    i++
+  a.length - b.length
+
+startsWith = (key, prefix) ->
+  return false if key.length < prefix.length
+  i = 0
+  while i < prefix.length
+    return false unless key[i] is prefix[i]
+    i++
+  true
+
+# The least byte string above every string that starts with `prefix`, or
+# null when there is none (the prefix is all 0xFF).
+successor = (prefix) ->
+  end = prefix.length
+  end-- while end > 0 and prefix[end - 1] is 0xFF
+  return null if end is 0
+  next = prefix.slice(0, end)
+  next[end - 1]++
+  next
+
+# ==[ Options ]=================================================================
+
+checkKeys = (opts, allowed, where) ->
+  return unless opts?
+  throw TypeError.new "emdb: #{where} takes an options object" unless typeof opts is 'object'
+  for own k of opts
+    throw TypeError.new "emdb: #{where} has no option '#{k}' (it takes #{[...allowed].join(', ')})" unless allowed.has(k)
+  return
+
+flagOf = (opts, name, bit, where) ->
+  v = opts[name]
+  return 0 unless v?
+  throw TypeError.new "emdb: #{where} option #{name} is true or false" unless typeof v is 'boolean'
+  if v then bit else 0
+
+uintOf = (opts, name, where, max) ->
+  v = opts[name]
+  return 0 unless v?
+  v = BigInt(v) if typeof v is 'number' and Number.isSafeInteger(v)
+  throw TypeError.new "emdb: #{where} option #{name} is an integer from 0 to #{max}" unless typeof v is 'bigint' and v >= 0n and v <= max
+  v
+
+# emdb_options fields past `flags`: [offset, width in bits].
+OPEN_FLAGS =!
+  readOnly:   0x0001
+  noCreate:   0x0002
+  noSync:     0x0004
+  noMetaSync: 0x0008
+  noVerify:   0x0040
+  noStage:    0x0080
+  previous:   0x0100
+  populate:   0x0200
+  hugePages:  0x0400
+
+OPEN_SIZES =!
+  pageSize:         [8, 32]
+  maxReaders:       [12, 32]
+  maxNamedTrees:    [16, 32]
+  sealThreads:      [20, 32]
+  mapSize:          [24, 64]
+  maxMapSize:       [32, 64]
+  growStep:         [40, 64]
+  stageAppendBytes: [48, 64]
+
+OPEN_KEYS =! Set.new([...Object.keys(OPEN_FLAGS), ...Object.keys(OPEN_SIZES)])
+
+WRITE_FLAGS =!
+  noSync:     0x0004
+  noMetaSync: 0x0008
+  sync:       0x0010
+  stage:      0x0020
+
+WRITE_KEYS =! Set.new(Object.keys(WRITE_FLAGS))
+GET_KEYS   =! Set.new(['tree', 'view'])
+TREE_KEYS  =! Set.new(['tree'])
+SCAN_KEYS  =! Set.new(['tree', 'prefix', 'from', 'reverse', 'view'])
+CREATE_KEYS =! Set.new(['create'])
+BACKUP_KEYS =! Set.new(['since'])
+
+U32_MAX =! 0xFFFFFFFFn
+U64_MAX =! 0xFFFFFFFFFFFFFFFFn
+
+# emdb_options (56 bytes), laid out as emdb.h declares it: six uint32_t
+# fields, then four uint64_t. 8-byte backing keeps the uint64_t aligned.
+optionsStruct = (opts) ->
+  words = BigUint64Array.new(7)
+  dv = DataView.new(words.buffer)
+  flags = 0
+  for own name, bit of OPEN_FLAGS
+    flags |= flagOf(opts, name, bit, 'open')
+  dv.setUint32 0, 56, true
+  dv.setUint32 4, flags, true
+  for own name, [offset, bits] of OPEN_SIZES
+    if bits is 32
+      dv.setUint32 offset, Number(uintOf(opts, name, 'open', U32_MAX)), true
+    else
+      dv.setBigUint64 offset, BigInt(uintOf(opts, name, 'open', U64_MAX)), true
+  words
+
+# A uint64_t read from a struct, as a Number; loud past 2^53.
+u64 = (dv, offset) ->
+  v = dv.getBigUint64(offset, true)
+  throw RangeError.new "emdb: #{v} does not fit a Number" if v > BigInt(Number.MAX_SAFE_INTEGER)
+  Number(v)
+
+# ==[ Trees ]===================================================================
+
+# A named tree's handle. It names the tree in every later transaction of
+# its environment until the tree is dropped; pass it as `tree:` or as the
+# argument of stat, clear and drop. A handle dies, and throws on use, when
+# a commit drops its tree or when the write that created its tree aborts:
+# emdb reuses a dropped tree's slot (INV-SUB03), so a stale handle would
+# otherwise name whatever tree takes it next. One handle per tree per
+# environment; a drop through another environment or process is not seen.
+class Tree
+  constructor: (@env, @name, @id) ->
+    @dead = null   # why the handle names nothing, once it does
+
+# ==[ Transactions ]============================================================
+
+# A transaction lives only inside env.read or env.write. Its methods throw
+# once the scope ends; so does a scan it started.
+class Txn
+  constructor: (@env, @_h, @readOnly) ->
+    @ended = false
+    @_lent = false        # whether a view may be alive
+    @_views = []          # buffers get lent out, detached when they die
+    @_scans = []          # view scans in flight, each with its batch buffer
+    @_bufs = []           # batch buffers free for another scan
+    @_idle = Map.new()    # tree id → cursors free for another scan
+    @_writes = 0          # mutating calls so far; scans re-seek after one
+    @_epochs = null       # tree id → clears and drops of it so far
+    @_created = null      # trees this write created, settled at its end
+    @_dropped = null      # trees this write dropped, settled at its end
+
+  # Every entry point tests `@ended`, one field, and only then builds this.
+  _ended: (what) ->
+    Error.new "emdb: #{what} on a transaction that has ended (it lives only inside env.read or env.write)"
+
+  _live: (what) ->
+    throw @_ended(what) if @ended
+    return
+
+  # The tree id from an options object, its keys checked.
+  _treeOf: (opts, allowed, what) ->
+    checkKeys opts, allowed, what
+    @_tree opts.tree, what
+
+  _tree: (t, what) ->
+    return 0 unless t?
+    throw TypeError.new "emdb: #{what} takes a tree from txn.tree" unless t instanceof Tree
+    throw Error.new "emdb: #{what} was given a tree of another environment" unless t.env is @env
+    throw Error.new "emdb: #{what} was given the handle of tree '#{t.name}', which names nothing: #{t.dead}" if t.dead
+    throw Error.new "emdb: #{what} was given tree '#{t.name}', dropped in this transaction" if @_dropped?.has(t)
+    t.id
+
+  # The handle for tree `id`: one this write created, else the
+  # environment's, else a new one.
+  _handle: (id, name, fresh) ->
+    if @_created?
+      for t in @_created
+        return t if t.id is id and not @_dropped?.has(t)
+    t = @env._trees.get(id)
+    return t if t? and not @_dropped?.has(t)
+    t = Tree.new @env, name, id
+    if fresh
+      (@_created ?= []).push t
+    else
+      @env._trees.set id, t
+    t
+
+  # A commit (`committed`) kills the handles of the trees it dropped and
+  # keeps the ones it created; an abort kills the ones it created.
+  _settle: (committed) ->
+    if committed
+      for t as (@_dropped ?? [])
+        t.dead = 'its tree was dropped'
+        @env._trees.delete t.id if @env._trees.get(t.id) is t
+      for t in (@_created ?? [])
+        @env._trees.set t.id, t unless t.dead or @_dropped?.has(t)
+    else
+      t.dead = 'its tree was created by a write that aborted' for t in (@_created ?? [])
+    return
+
+  _epoch: (id) -> @_epochs?.get(id) ?? 0
+
+  # After a clear or drop: no cursor of the tree may be reused.
+  _reset: (id) ->
+    @_idle.delete id
+    (@_epochs ?= Map.new()).set id, @_epoch(id) + 1
+    return
+
+  # Views die at the next mutating call or at the end of the transaction
+  # (API-ABI04): each is detached, so a dead view reads as empty, never as
+  # whatever the map or a refilled batch holds by then. get's views point
+  # into the map and wait in a plain array; a view scan's point into its
+  # batch buffer, which is detached whole.
+  _detach: ->
+    for buf in @_views
+      buf.transfer 0 unless buf.detached
+    @_views.length = 0
+    for scan in @_scans when scan.lent
+      if @ended
+        scan.buf.buffer.transfer 0
+        scan.lent = false
+      else
+        @_refill scan
+    @_lent = false
+    return
+
+  # A batch buffer's views die before it is filled again: transfer()
+  # moves its memory to a new ArrayBuffer, which the scan keeps, and
+  # detaches the old one, and with it every view of the last batch.
+  _refill: (scan) ->
+    scan.buf = Uint8Array.new(scan.buf.buffer.transfer())
+    scan.lent = false
+    return
+
+  # After every mutating call, failed or not, in a write transaction.
+  _wrote: ->
+    @_writes++
+    @_detach() if @_lent
+    return
+
+  _end: (commit) ->
+    @ended = true
+    @_detach()
+    if commit
+      rc = lib.emdb_txn_commit(@_h)
+      @_settle(rc is 0 or rc is DURABILITY_UNKNOWN) unless @readOnly
+      check rc, 'emdb_txn_commit'
+    else
+      lib.emdb_txn_abort @_h
+      @_settle false unless @readOnly
+    return
+
+  # The value stored under `key`, or undefined. A copy unless `view: true`.
+  # Without options, nothing is checked but the transaction and the key.
+  get: (key, opts = null) ->
+    throw @_ended('txn.get') if @ended
+    tree = if opts? then @_treeOf(opts, GET_KEYS, 'txn.get') else 0
+    n = bytesFor key, 'key', false
+    rc = lib.emdb_get(@_h, tree, encoded, n, VALP, VALN)
+    return undefined if rc is NOTFOUND
+    check rc, 'emdb_get' unless rc is 0
+    return copyAt(VALP[0], VALN[0]) unless opts?.view
+    v = viewAt(VALP[0], VALN[0])
+    if v.length
+      @_views.push v.buffer
+      @_lent = true
+    v
+
+  put: (key, value, opts = null) ->
+    throw @_ended('txn.put') if @ended
+    tree = if opts? then @_treeOf(opts, TREE_KEYS, 'txn.put') else 0
+    kn = bytesFor key, 'key', false
+    k = encoded
+    vn = bytesFor value, 'value', true
+    rc = lib.emdb_put(@_h, tree, k, kn, encoded, vn, 0)
+    @_wrote() unless @readOnly
+    check rc, 'emdb_put' unless rc is 0
+    return
+
+  # True when `key` was there to delete.
+  del: (key, opts = null) ->
+    throw @_ended('txn.del') if @ended
+    tree = if opts? then @_treeOf(opts, TREE_KEYS, 'txn.del') else 0
+    n = bytesFor key, 'key', false
+    rc = lib.emdb_del(@_h, tree, encoded, n, 0, COUNT)
+    @_wrote() unless @readOnly
+    return false if rc is NOTFOUND
+    check rc, 'emdb_del' unless rc is 0
+    true
+
+  # Delete every key starting with `prefix`; the number deleted.
+  delPrefix: (prefix, opts = null) ->
+    throw @_ended('txn.delPrefix') if @ended
+    tree = if opts? then @_treeOf(opts, TREE_KEYS, 'txn.delPrefix') else 0
+    n = bytesFor prefix, 'prefix', false
+    rc = lib.emdb_del(@_h, tree, encoded, n, PREFIX, COUNT)
+    @_wrote() unless @readOnly
+    check rc, 'emdb_del'
+    Number(COUNT[0])
+
+  # A named tree's handle; `create: true` creates a missing one, which
+  # otherwise throws EMDB_NOTFOUND. Its record lives in the main tree, so
+  # a scan of the main tree meets it (API-ABI03).
+  tree: (name, opts = null) ->
+    @_live 'txn.tree'
+    checkKeys opts, CREATE_KEYS, 'txn.tree'
+    create = flagOf(opts ?? {}, 'create', CREATE, 'txn.tree')
+    bytes = cString(name, 'tree name')
+    fresh = false
+    if create and not @readOnly
+      # Whether this write creates the tree decides its handle's fate if
+      # the write aborts, so look first; only a creation writes.
+      rc = lib.emdb_tree_open(@_h, bytes, 0, TREE)
+      fresh = rc is NOTFOUND
+      if fresh
+        rc = lib.emdb_tree_open(@_h, bytes, CREATE, TREE)
+        @_wrote()
+    else
+      rc = lib.emdb_tree_open(@_h, bytes, create, TREE)
+    check rc, 'emdb_tree_open'
+    @_handle TREE[0], name, fresh
+
+  # Empty a named tree; it stays open.
+  clear: (tree) ->
+    @_live 'txn.clear'
+    throw TypeError.new "emdb: txn.clear takes a tree from txn.tree" unless tree?
+    id = @_tree tree, 'txn.clear'
+    rc = lib.emdb_tree_drop(@_h, id, 0)
+    unless @readOnly
+      @_wrote()
+      @_reset id
+    check rc, 'emdb_tree_drop'
+    return
+
+  # Delete a named tree and its record; its handle names nothing after.
+  drop: (tree) ->
+    @_live 'txn.drop'
+    throw TypeError.new "emdb: txn.drop takes a tree from txn.tree" unless tree?
+    id = @_tree tree, 'txn.drop'
+    rc = lib.emdb_tree_drop(@_h, id, DELETE)
+    unless @readOnly
+      @_wrote()
+      @_reset id
+    check rc, 'emdb_tree_drop'
+    (@_dropped ?= Set.new()).add tree
+    return
+
+  # A tree's statistics as this transaction sees it (API-DB03).
+  stat: (tree = null) ->
+    @_live 'txn.stat'
+    id = @_tree tree, 'txn.stat'
+    words = BigUint64Array.new(5)
+    dv = DataView.new(words.buffer)
+    dv.setUint32 0, 40, true
+    check lib.emdb_tree_stat(@_h, id, words), 'emdb_tree_stat'
+    depth:         dv.getUint32(4, true)
+    branchPages:   u64(dv, 8)
+    leafPages:     u64(dv, 16)
+    overflowPages: u64(dv, 24)
+    entries:       u64(dv, 32)
+
+  # [key, value] pairs in key order, or reverse order with `reverse: true`.
+  # `prefix` keeps the keys that start with it; `from` starts at that key
+  # (forward: the least key at or above it; reverse: the greatest at or
+  # below it). Copies unless `view: true`, whose values die with their
+  # batch (see _walk); keys are always copies. A write in the same
+  # transaction does not end the scan: it continues from the last key it
+  # gave.
+  scan: (opts = null) ->
+    @_live 'txn.scan'
+    checkKeys opts, SCAN_KEYS, 'txn.scan'
+    tree = @_tree opts?.tree, 'txn.scan'
+    prefix = if opts?.prefix? then bytesOf(opts.prefix, 'prefix') else null
+    from = if opts?.from? then bytesOf(opts.from, 'from key') else null
+    prefix = null if prefix?.length is 0
+    for name in ['reverse', 'view']
+      throw TypeError.new "emdb: txn.scan option #{name} is true or false" if opts?[name]? and typeof opts[name] isnt 'boolean'
+    @_walk opts?.tree, tree, prefix, from, opts?.reverse is true, opts?.view is true
+
+  _cursor: (tree) ->
+    idle = @_idle.get(tree)
+    return idle.pop() if idle?.length
+    check lib.emdb_cursor_open(@_h, tree, 0, OUT), 'emdb_cursor_open'
+    OUT[0]
+
+  # Move the cursor; false at no entry. Only positions: the key comes back,
+  # and no value is read (a scan's values come through its batches).
+  _step: (cur, op) ->
+    rc = lib.emdb_cursor_get(cur, op, KEYP, KEYN, null, null)
+    return true if rc is 0
+    return false if rc is NOTFOUND
+    check rc, 'emdb_cursor_get'
+
+  # The least key at or above `bound`. An empty bound is below every key,
+  # and ptr() refuses an empty array.
+  _seek: (cur, bound) ->
+    return @_step(cur, FIRST) if bound.length is 0
+    seeking = bound
+    KEYP[0] = BigInt(ptr(bound))
+    KEYN[0] = BigInt(bound.length)
+    try
+      @_step cur, SET_RANGE
+    finally
+      seeking = null
+
+  # The greatest key below `bound`, or at it when `inclusive`.
+  _below: (cur, bound, inclusive) ->
+    return inclusive and @_step(cur, FIRST) and KEYN[0] is 0n if bound.length is 0
+    return @_step(cur, LAST) unless @_seek(cur, bound)
+    return true if inclusive and compareBytes(copyAt(KEYP[0], KEYN[0]), bound) is 0
+    @_step cur, PREV
+
+  _start: (cur, prefix, from, reverse) ->
+    unless reverse
+      low = if prefix? and from? then (if compareBytes(from, prefix) > 0 then from else prefix) else from ?? prefix
+      return if low? then @_seek(cur, low) else @_step(cur, FIRST)
+    end = if prefix? then successor(prefix) else null
+    return @_below(cur, from, true) if from? and (not end? or compareBytes(from, end) < 0)
+    return @_below(cur, end, false) if end?
+    @_step cur, LAST
+
+  # The scan's body. A generator runs nothing until its first step, which
+  # may come after the transaction ended, so it checks before any call.
+  #
+  # The cursor is positioned by emdb_cursor_get, then read in batches by
+  # emdb_cursor_get_batch into one reusable buffer per scan (API-ABI11):
+  # each entry a uint32_t key length and value length in host order, the
+  # key, the value, padding to 8. The prefix stop runs in C. A batch starts
+  # small, for scans that stop early, and grows eightfold to BATCH_MAX.
+  # Keys come out as copies; values as copies, or with `view` as subarrays
+  # of the buffer, which die when it is filled again, at a write, at the
+  # scan's end and at the transaction's end.
+  _walk: (handle, tree, prefix, from, reverse, view) ->
+    throw @_ended('a scan') if @ended
+    cur = @_cursor tree
+    epoch = @_epoch tree
+    writes = @_writes
+    last = null
+    scan = { buf: @_bufs.pop() ?? Uint8Array.new(BATCH_BYTES), lent: false }
+    @_scans.push scan if view
+    flags = (if prefix? then PREFIX else 0) | (if reverse then REVERSE else 0)
+    bound = prefix ?? NO_KEY
+    max = BATCH_FIRST
+    op = CURRENT
+    found = @_start cur, prefix, from, reverse
+    try
+      while found
+        @_refill scan if scan.lent
+        buf = scan.buf
+        rc = lib.emdb_cursor_get_batch(cur, op, bound, bound.length, flags, buf, buf.length, max, BCOUNT, BUSED)
+        if rc is BUFFER_TOO_SMALL
+          scan.buf = Uint8Array.new(Math.max(buf.length * 2, (Number(BUSED[0]) + 7) & ~7))
+          continue
+        break if rc is NOTFOUND
+        check rc, 'emdb_cursor_get_batch' unless rc is 0
+        op = if reverse then PREV else NEXT
+        max = Math.min(max * 8, BATCH_MAX)
+        words = Uint32Array.new(buf.buffer, buf.byteOffset, buf.length >>> 2)
+        count = BCOUNT[0]
+        at = 0
+        i = 0
+        while i < count
+          klen = words[at >>> 2]
+          vlen = words[(at >>> 2) + 1]
+          ks = at + 8
+          vs = ks + klen
+          at = (vs + vlen + 7) & ~7
+          i++
+          k = buf.slice(ks, vs)
+          last = k.slice() unless @readOnly
+          if view
+            scan.lent = true
+            @_lent = true
+            yield [k, buf.subarray(vs, vs + vlen)]
+          else
+            yield [k, buf.slice(vs, vs + vlen)]
+          throw @_ended('a scan') if @ended
+          continue if @_writes is writes
+          # A write dropped the cursor's position (API-C06A), and with it
+          # the rest of this batch: find the last key given again and go
+          # on from past it. After a clear or a drop the cursor itself is
+          # stale, so a fresh one does it, and a dropped tree throws.
+          writes = @_writes
+          unless @_epoch(tree) is epoch
+            @_tree handle, 'a scan'
+            epoch = @_epoch tree
+            check lib.emdb_cursor_open(@_h, tree, 0, OUT), 'emdb_cursor_open'
+            cur = OUT[0]
+          if reverse
+            found = @_below cur, last, false
+          else
+            found = @_seek cur, last
+            found = @_step(cur, NEXT) if found and compareBytes(copyAt(KEYP[0], KEYN[0]), last) is 0
+          op = CURRENT
+          break
+    finally
+      @_scans.splice @_scans.indexOf(scan), 1 if view
+      unless @ended
+        @_refill scan if scan.lent
+        @_bufs.push scan.buf
+        unless @_epoch(tree) isnt epoch
+          idle = @_idle.get(tree)
+          @_idle.set tree, (idle = []) unless idle?
+          idle.push cur
+    return
+
+# ==[ Environment ]=============================================================
+
+class Env
+  constructor: (@path, @_h, @readOnly) ->
+    @closed = false
+    @_open = 0               # transactions in flight
+    @_trees = Map.new()      # tree id → its live handle
+    @_file = realpathSync(@path)
+
+  _live: (what) ->
+    throw Error.new "emdb: #{what} on a closed environment (#{@path})" if @closed
+    return
+
+  # Run `fn(txn)` in a transaction: commit when it returns, abort when it
+  # throws (and rethrow). The function is synchronous: a returned promise
+  # aborts the transaction and throws.
+  _run: (flags, readOnly, fn, what) ->
+    @_live what
+    throw TypeError.new "emdb: #{what} takes a function" unless typeof fn is 'function'
+    if not readOnly and WRITING.has(@_file)
+      throw EmdbError.new WRITER_ACTIVE, "#{what} (a write transaction on #{@_file} is already open in this process)"
+    check lib.emdb_txn_begin(@_h, 0n, flags, OUT), 'emdb_txn_begin'
+    txn = Txn.new this, OUT[0], readOnly
+    @_open++
+    WRITING.add @_file unless readOnly
+    try
+      try
+        result = fn(txn)
+        promised = typeof result?.then is 'function'
+      catch e
+        txn._end false
+        throw e
+      if promised
+        txn._end false
+        # Its rejection, if any, would otherwise go unhandled and end the
+        # process; the TypeError below is the report.
+        try result.then(undefined, (-> null)) catch then null
+        throw TypeError.new "emdb: the function given to #{what} returned a promise; a transaction is synchronous, so it was aborted"
+      txn._end true
+      result
+    finally
+      @_open--
+      WRITING.delete @_file unless readOnly
+
+  # A read transaction on the latest commit.
+  read: (fn) ->
+    @_run RDONLY, true, fn, 'env.read'
+
+  # The write transaction; `fn`'s result is returned once it commits.
+  # Options override the sync mode for this commit (noSync, noMetaSync,
+  # sync) or stage its appended pages (stage).
+  write: (opts, fn) ->
+    [opts, fn] = [null, opts] if typeof opts is 'function'
+    checkKeys opts, WRITE_KEYS, 'env.write'
+    flags = 0
+    if opts?
+      for own name, bit of WRITE_FLAGS
+        flags |= flagOf(opts, name, bit, 'env.write')
+    @_run flags, false, fn, 'env.write'
+
+  # Geometry and the latest commit, read without a transaction (API-E06).
+  info: ->
+    @_live 'env.info'
+    words = BigUint64Array.new(7)
+    dv = DataView.new(words.buffer)
+    dv.setUint32 0, 56, true
+    check lib.emdb_env_info(@_h, words), 'emdb_env_info'
+    pageSize:      dv.getUint32(4, true)
+    mapSize:       u64(dv, 8)
+    numPages:      u64(dv, 16)
+    lastTxnId:     u64(dv, 24)
+    entries:       u64(dv, 32)
+    depth:         dv.getUint32(40, true)
+    activeReaders: dv.getUint32(44, true)
+    maxReaders:    dv.getUint32(48, true)
+    maxKeySize:    dv.getUint32(52, true)
+
+  # Make every commit so far durable (API-E10).
+  sync: ->
+    @_live 'env.sync'
+    check lib.emdb_env_sync(@_h), 'emdb_env_sync'
+    return
+
+  # Write a backup stream (API-E07) to an open descriptor, or to a new
+  # file at a path (an existing file is refused; a failed backup removes
+  # the file it made). `since` is the commit
+  # an incremental backup starts after. Restore with `emdb -r db file`.
+  backup: (target, opts = null) ->
+    @_live 'env.backup'
+    checkKeys opts, BACKUP_KEYS, 'env.backup'
+    since = uintOf(opts ?? {}, 'since', 'env.backup', U64_MAX)
+    words = BigUint64Array.new(6)
+    dv = DataView.new(words.buffer)
+    dv.setUint32 0, 48, true
+    if typeof target is 'number' and Number.isInteger(target)
+      check lib.emdb_backup(@_h, target, BigInt(since), words), 'emdb_backup'
+    else if typeof target is 'string' and target
+      fd = openSync(target, 'wx')
+      done = false
+      try
+        check lib.emdb_backup(@_h, fd, BigInt(since), words), 'emdb_backup'
+        done = true
+      finally
+        closeSync fd
+        unlinkSync target unless done
+    else
+      throw TypeError.new "emdb: env.backup takes a file descriptor or a path"
+    baseTxnId:     u64(dv, 8)
+    snapshotTxnId: u64(dv, 16)
+    pagesSpanned:  u64(dv, 24)
+    pagesCopied:   u64(dv, 32)
+    bytes:         u64(dv, 40)
+
+  # Close the environment; every transaction must have ended.
+  close: ->
+    @_live 'env.close'
+    throw Error.new "emdb: env.close inside a transaction of #{@path}" if @_open
+    lib.emdb_env_close @_h
+    @closed = true
+    @_h = 0n
+    return
+
+# ==[ Entry points ]============================================================
+
+# Open or create the database at `path` (and its `<path>-lock` sidecar).
+export open = (path, opts = null) ->
+  checkKeys opts, OPEN_KEYS, 'open'
+  load()
+  o = opts ?? {}
+  s = optionsStruct(o)
+  check lib.emdb_env_open(cString(path, 'path'), s, OUT), 'emdb_env_open'
+  Env.new path, OUT[0], o.readOnly is true
+
+# libemdb's version, "major.minor.patch".
+export version = ->
+  load()
+  parts = [Int32Array.new(1), Int32Array.new(1), Int32Array.new(1)]
+  lib.emdb_version parts[0], parts[1], parts[2]
+  parts.map((p) -> p[0]).join('.')
