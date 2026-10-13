@@ -289,6 +289,22 @@ alongside other work on the machine, so read the rows as a ranking:
 | get 64 KB value (10,000) | 84 ms | 8377 | 965 ms | 96456 |
 | get 64 KB value, `view: true` | 59 ms | 5948 | — | |
 
+On Linux x86_64 (an Intel Core Ultra 9 185H) under Bun 1.4.3, with libemdb
+from emdb `636d6cd` built for x86_64_v3, pinned to one performance core on
+a machine reserved for the run, the median of three runs:
+
+| Operation | emdb | ns/op | bun:sqlite | ns/op |
+| --- | ---: | ---: | ---: | ---: |
+| put (one transaction) | 99 ms | 99 | 630 ms | 630 |
+| get, key order | 77 ms | 77 | 428 ms | 428 |
+| get, random order | 743 ms | 743 | 1725 ms | 1725 |
+| get, `view: true` | 571 ms | 571 | — | |
+| scan | 79 ms | 79 | 179 ms | 179 |
+| scan, `view: true` | 86 ms | 86 | — | |
+| delPrefix, every key | 4 ms | 4 | 190 ms | 190 |
+| get 64 KB value (10,000) | 319 ms | 31935 | 764 ms | 76431 |
+| get 64 KB value, `view: true` | 257 ms | 25707 | — | |
+
 A copied `get` is one `memcpy` (from the libc libemdb links) into a
 fresh `Uint8Array`. A `get` view needs an external `ArrayBuffer` and a
 detach when it dies, which costs more than copying a small value, so it
