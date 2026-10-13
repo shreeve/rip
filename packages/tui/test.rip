@@ -2,6 +2,7 @@
 # tui tests — the terminal document, layout, paint, and the live diff
 # ==============================================================================
 
+import './test/environment.rip'
 import { test, eq, ok, throws } from 'rip/testing'
 import { run, quit, mount, renderToString, screen, print, clock, reveal, Box, Text, Spacer, Scrollbar, Static, Newline } from 'rip/tui'
 import * as mod from 'rip/tui'

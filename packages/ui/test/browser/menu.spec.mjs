@@ -266,6 +266,7 @@ test('a popup that fits on neither side lands below the trigger and says so', as
   await trigger.click()
   await expect.poll(() => isOpen(page)).toBe(true)
   await expect(popup).toHaveAttribute('data-side', 'bottom')
+  await settled(popup)
   const { t, p } = await boxes(page)
   near(p.y, t.y + t.height + 6)
   near(p.x, t.x)
@@ -287,6 +288,10 @@ for (const how of ['an item', 'Escape']) {
     await expect(popup).toHaveAttribute('data-side', 'top')
     await settled(popup)
     await popup.evaluate((el) => {
+      // The exit is stretched past its 100ms so every engine paints
+      // enough of it to sample: a slow runner draws two frames of 100ms.
+      // Only the timing changes; the geometry under test does not.
+      el.style.transitionDuration = '1s'
       window.edges = new Promise((resolve) => {
         const rows = []
         const tick = () => {

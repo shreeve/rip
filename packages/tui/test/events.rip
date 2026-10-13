@@ -13,6 +13,7 @@
 # of focus under a changing tree.
 # ==============================================================================
 
+import './environment.rip'
 import { test, eq, ok, throws } from 'rip/testing'
 import { run, quit, mount, screen, focus, Box, Text } from 'rip/tui'
 import { Event } from '../document.rip'

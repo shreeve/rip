@@ -1,0 +1,5 @@
+# A tui suite owns its environment. `interactive` (terminal.rip) reads a
+# set `CI` as "nobody is watching", and a CI runner sets it, so a fake
+# terminal would be drawn to as no terminal at all. Imported first, so it
+# runs before any module that registers or runs a test.
+delete process.env.CI

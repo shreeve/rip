@@ -12,6 +12,7 @@ import { test, eq, ok } from 'rip/testing'
 import { sanitize, Flow, MODES, glyph, CLUSTER, refresh, widthOf } from '../text.rip'
 import { Element, Text } from '../document.rip'
 import { Grid, intern } from '../paint.rip'
+import { spent, grows, account } from './cost.rip'
 
 at = (code) -> String.fromCodePoint code
 
@@ -125,28 +126,15 @@ test "no C0, C1 or ESC but the newline and the tab survives, whatever is written
 
 test "hostile text is read once, not once per introducer: eight times the text costs about eight times as long", ->
   # A quadratic reader takes 64 times as long for 8 times the text; a
-  # linear one about 8. The bound sits between. Time is this thread's CPU
-  # time, not the wall's: on a busy machine a longer run waits for a core
-  # more often, which would move the larger number alone. Each size takes
-  # its best of five, and gets two more tries if a collection lands in
-  # every round of one size: a quadratic reader is over the bound every
-  # time.
-  spent = ->
-    { user, system } = process.threadCpuUsage()
-    (user + system) / 1000
-  best = (text) ->
-    least = Infinity
-    for round in [0...5]
+  # linear one about 8 (test/cost.rip).
+  for unit in [at(0x9D), ESC + ']', ESC + '[1', ESC, ESC + 'a' + at(0x85)]
+    measure = (n) ->
+      text = unit.repeat n
       began = spent()
       sanitize text
-      least = Math.min least, spent() - began
-    least
-  for unit in [at(0x9D), ESC + ']', ESC + '[1', ESC, ESC + 'a' + at(0x85)]
-    for attempt in [0...3]
-      small = best unit.repeat(40000)
-      large = best unit.repeat(320000)
-      break if large < 24 * Math.max(small, 0.05)
-    ok large < 24 * Math.max(small, 0.05), "#{JSON.stringify unit} × 40,000 took #{small.toFixed 2} ms and × 320,000 took #{large.toFixed 2} ms"
+      spent() - began
+    cost = grows measure, 40000
+    ok cost.linear, account "#{JSON.stringify unit}, units", cost
 
 test "text that is not ASCII keeps every code point it came with", ->
   text = "#{SUN}#{BOOK} e#{ACUTE} #{FAMILY}"

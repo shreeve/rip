@@ -14,6 +14,7 @@
 import { test, eq, ok } from 'rip/testing'
 import { Parser } from '../input.rip'
 import { ESC, CSI, SS3, open, decode, bytes, canon, brief, key, typed, paste, FOCUS, BLUR, mouse, reply, tally, ROWS } from './input/harness.rip'
+import { spent, grows, account } from './cost.rip'
 import './input/ink.rip'
 
 BEL =! '\x07'
@@ -791,24 +792,21 @@ console.log "\nCost"
 
 test "hostile input is read once: eight times the input costs about eight times as long", ->
   # A parser that scans what it holds again on every read takes 64 times
-  # as long for 8 times the reads; a linear one about 8. The bound sits
-  # between. Time is this thread's CPU time, not the wall's: on a busy
-  # machine a longer run waits for a core more often, which would move
-  # the larger number alone. Each size takes its best of five, and gets
-  # two more tries if a collection lands in every round of one size: a
-  # quadratic reader is over the bound every time.
-  spent = ->
-    { user, system } = process.threadCpuUsage()
-    (user + system) / 1000
-  best = (first, chunk, count) ->
-    least = Infinity
-    for round in [0...5]
+  # as long for 8 times the reads; a linear one about 8 (test/cost.rip).
+  reads = (first, chunk) ->
+    (n) ->
       { parser } = open()
       began = spent()
       parser.feed first
-      parser.feed chunk for n in [0...count]
-      least = Math.min least, spent() - began
-    least
+      parser.feed chunk for i in [0...n]
+      spent() - began
+  whole = (unit) ->
+    (n) ->
+      text = unit.repeat n
+      { parser } = open()
+      began = spent()
+      parser.feed text
+      spent() - began
   cases = [
     ['an unterminated CSI', CSI, '1;']
     ['an unterminated OSC', "#{ESC}]", 'ab']
@@ -821,17 +819,11 @@ test "hostile input is read once: eight times the input costs about eight times 
     ['mouse reports in one read each', '', "#{CSI}<35;10;10M".repeat 20]
   ]
   for [name, first, chunk] in cases
-    for attempt in [0...3]
-      small = best first, chunk, 5000
-      large = best first, chunk, 40000
-      break if large < 24 * Math.max(small, 0.05)
-    ok large < 24 * Math.max(small, 0.05), "#{name}: 5,000 reads took #{small.toFixed 2} ms and 40,000 took #{large.toFixed 2} ms"
+    cost = grows reads(first, chunk), 5000
+    ok cost.linear, account "#{name}, reads", cost
   for unit in ['a', "#{CSI}A", "#{CSI}1;", ESC, "#{CSI}<0;1;1M", 'é', "#{START}x#{END}", "#{ESC}]x"]
-    for attempt in [0...3]
-      small = best '', unit.repeat(20000), 1
-      large = best '', unit.repeat(160000), 1
-      break if large < 24 * Math.max(small, 0.05)
-    ok large < 24 * Math.max(small, 0.05), "#{JSON.stringify unit} × 20,000 took #{small.toFixed 2} ms and × 160,000 took #{large.toFixed 2} ms"
+    cost = grows whole(unit), 20000
+    ok cost.linear, account "#{JSON.stringify unit} in one read, units", cost
 
 # ==[ Fuzz ]==
 
