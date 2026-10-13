@@ -17,8 +17,12 @@ test('an anchored popover inside a modal is off by the page scroll in WebKit, an
   await page.goto(repro('anchor-in-modal'))
   for (const kind of ['dialog', 'page', 'outside']) {
     const r = await page.evaluate((k) => run(k), kind)
-    expect(r.scrollY).toBeGreaterThan(0)
-    expect(r.offBy).toBe(browserName === 'webkit' && kind !== 'page' ? -r.scrollY : 0)
+    expect(r.scrollY).toBeGreaterThan(1)
+    // An engine that places it right lands within a pixel of the anchor:
+    // the repro rounds subpixel positions, and Firefox on Linux CI comes
+    // out 1 where macOS gives 0. Off by the scroll is far more than that.
+    if (browserName === 'webkit' && kind !== 'page') expect(r.offBy).toBe(-r.scrollY)
+    else expect(Math.abs(r.offBy)).toBeLessThanOrEqual(1)
   }
 })
 
