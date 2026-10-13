@@ -369,7 +369,8 @@ class Txn
       for t as (@_dropped ?? [])
         t.dead = 'its tree was dropped'
         @env._trees.delete t.id if @env._trees.get(t.id) is t
-      @env._trees.set t.id, t for t in (@_created ?? [])
+      for t in (@_created ?? [])
+        @env._trees.set t.id, t unless t.dead or @_dropped?.has(t)
     else
       t.dead = 'its tree was created by a write that aborted' for t in (@_created ?? [])
     return

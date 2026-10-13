@@ -514,6 +514,25 @@ test "a dropped tree's handle dies at the commit; an aborted drop revives it", -
     throws (-> db.write (t) -> t.put 'z', 'v', tree: tmp), "handle of tree 'tmp', which names nothing: its tree was dropped"
     eq db.read((t) -> t.stat(other).entries), 0
 
+test "a tree created and dropped in one write leaves no handle behind for its name", ->
+  path = fresh()
+  a = open path, noSync: true
+  b = open path, noSync: true
+  try
+    gone = a.write (t) ->
+      x = t.tree 'tmp', create: true
+      t.drop x
+      x
+    ok gone.dead
+    b.write (t) -> t.put 'k', 'v', tree: t.tree('tmp', create: true)
+    again = a.read (t) -> t.tree 'tmp'
+    ok not again.dead
+    eq text(a.read (t) -> t.get 'k', tree: again), 'v'
+    ok a.write((t) -> t.tree 'tmp', create: true) is again
+  finally
+    a.close()
+    b.close()
+
 test "a scan after clear sees the empty tree, and a scan of a dropped tree throws, with an idle cursor", ->
   withDb (db) ->
     db.write (t) ->
