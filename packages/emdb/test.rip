@@ -732,21 +732,121 @@ test "a reverse prefix scan with writes in the middle keeps to its prefix", ->
     eq seen, ['blueberry', 'banana']
     eq keys(db), ['ab', 'apple', 'apricot', 'bz', 'cherry']
 
-test "a view scan lends values that die at the next step; its keys are copies", ->
+test "a view scan's values die with their batch, at the scan's end and at a break; its keys are copies", ->
+  withDb (db) ->
+    db.write (t) ->
+      t.put "k#{String(i).padStart(5, '0')}", "v#{i}" for i in [0...2000]
+      return
+    db.read (t) ->
+      first = null
+      seen = []
+      i = 0
+      for [k, v] as t.scan(view: true)
+        eq text(v), "v#{i}"
+        first ?= v
+        seen.push k
+        if i is 1999
+          ok first.buffer.detached, 'a view outlived its batch'
+          ok v.buffer.detached is false
+        i++
+      ok first.buffer.detached
+      eq seen.length, 2000
+      eq text(seen[0]), 'k00000'   # keys are copies
+      held = null
+      for [k, v] as t.scan(view: true)
+        held = v
+        break
+      ok held.buffer.detached, 'a view outlived its scan'
+      return
+
+test "a view scan's values live through their batch and die at the transaction's end", ->
   withFruit (db) ->
-    kept = db.read (t) ->
-      prev = null
+    views = db.read (t) ->
       got = []
       for [k, v] as t.scan(view: true)
-        eq text(v), text(k).toUpperCase()
-        ok v.buffer.detached is false
-        ok prev[1].buffer.detached if prev?
-        prev = [k, v]
-        got.push k
-      ok prev[1].buffer.detached   # the step that ended the scan
-      [got, prev[1]]
-    eq kept[0].map(text), FRUIT
-    ok kept[1].buffer.detached
+        ok got.every((w) -> w.buffer.detached is false)
+        got.push v
+      got
+    ok views.every (v) -> v.buffer.detached
+
+test "a scan reads across many batches, copied and viewed, forward and reverse", ->
+  withDb (db) ->
+    db.write (t) ->
+      t.put "k#{String(i).padStart(5, '0')}", "v#{i}" for i in [0...5000]
+      return
+    db.read (t) ->
+      for view in [false, true]
+        n = 0
+        for [k, v] as t.scan(view: view)
+          eq text(k), "k#{String(n).padStart(5, '0')}"
+          eq text(v), "v#{n}"
+          n++
+        eq n, 5000
+        n = 5000
+        for [k, v] as t.scan(view: view, reverse: true)
+          n--
+          eq text(v), "v#{n}"
+        eq n, 0
+      return
+
+test "a prefix stops in the right place across batches, both ways", ->
+  withDb (db) ->
+    db.write (t) ->
+      t.put "a#{String(i).padStart(5, '0')}", 'x' for i in [0...3000]
+      t.put "b#{String(i).padStart(5, '0')}", 'y' for i in [0...3000]
+      t.put "c#{String(i).padStart(5, '0')}", 'z' for i in [0...3000]
+      return
+    db.read (t) ->
+      forward = (text(k) for [k] as t.scan(prefix: 'b'))
+      eq forward.length, 3000
+      eq [forward[0], forward[2999]], ['b00000', 'b02999']
+      backward = (text(k) for [k] as t.scan(prefix: 'b', reverse: true))
+      eq backward.length, 3000
+      eq [backward[0], backward[2999]], ['b02999', 'b00000']
+      eq (text(k) for [k] as t.scan(prefix: 'b', from: 'b02990')).length, 10
+      return
+
+test "a value larger than the batch buffer grows it, in a scan of small ones", ->
+  withDb (db) ->
+    big = Uint8Array.new(1_000_000)
+    big[i] = i & 0xFF for i in [0...big.length]
+    db.write (t) ->
+      t.put 'a', 'small'
+      t.put 'b', big
+      t.put 'c', 'small too'
+    for view in [false, true]
+      got = db.read (t) -> ([text(k), (if text(k) is 'b' then Buffer.from(v).equals(Buffer.from(big)) else text(v))] for [k, v] as t.scan(view: view))
+      eq got, [['a', 'small'], ['b', true], ['c', 'small too']]
+
+test "deleting every key during a scan of many batches empties the tree", ->
+  withDb (db) ->
+    db.write (t) ->
+      t.put "k#{String(i).padStart(5, '0')}", 'v' for i in [0...4000]
+      return
+    n = db.write (t) ->
+      count = 0
+      for [k] as t.scan()
+        t.del k
+        count++
+      count
+    eq n, 4000
+    eq keys(db), []
+
+test "a reverse view scan with writes across batches visits each old key once", ->
+  withDb (db) ->
+    db.write (t) ->
+      t.put "k#{String(i).padStart(5, '0')}", "v#{i}" for i in [0...3000]
+      return
+    seen = db.write (t) ->
+      out = []
+      for [k, v] as t.scan(reverse: true, view: true)
+        out.push text(k)
+        eq text(v).length > 0, true
+        t.put "k#{text(k).slice(1)}x", 'behind' if out.length % 500 is 0
+      out
+    eq seen.length, 3000
+    eq seen[0], 'k02999'
+    eq seen[2999], 'k00000'
 
 test "scan options are checked when the scan is made", ->
   withFruit (db) ->

@@ -7,9 +7,10 @@
 [emdb](https://github.com/shreeve/emdb) is an embedded key-value database:
 a memory-mapped, copy-on-write B+ tree with MVCC, in LMDB's architecture.
 This package loads its C library, `libemdb`, with `bun:ffi` and binds the
-twenty functions of its C ABI (`include/emdb.h`, emdb's SPEC §8.8); the
-API below reaches all of them except the cursor writes
-(`emdb_cursor_put`, `emdb_cursor_del`) and child transactions. One writer
+twenty-one functions of its C ABI (`include/emdb.h`, emdb's SPEC §8.8);
+the API below reaches all of them except the cursor writes
+(`emdb_cursor_put`, `emdb_cursor_del`) and child transactions. Scans
+read through `emdb_cursor_get_batch`, many entries per call. One writer
 and up to `maxReaders` readers (126 by default) share a database, each
 transaction a function that commits when it returns and aborts when it
 throws. Keys and values are bytes;
@@ -45,9 +46,11 @@ db.close()
 ## Requirements
 
 - **Bun**, which runs Rip.
-- **libemdb**, the shared library an emdb build installs: in an emdb
-  checkout, `zig build` (Zig 0.17) writes `lib/libemdb.dylib` on macOS or
-  `lib/libemdb.so` on Linux, and `lib/pkgconfig/emdb.pc`.
+- **libemdb** with `emdb_cursor_get_batch`: emdb main at commit
+  `636d6cd` or later. In an emdb checkout, `zig build` (Zig 0.17) writes
+  `lib/libemdb.dylib` on macOS or `lib/libemdb.so` on Linux, and
+  `lib/pkgconfig/emdb.pc`. A libemdb without the batch call refuses at
+  load, naming the missing symbol.
 
 The first `open` (or `version`) loads the library, from the first of
 these that names one:
@@ -113,18 +116,22 @@ instead, with no copy, and a view dies:
 - when its transaction ends;
 - in a write transaction, at the next `put`, `del`, `delPrefix`, `clear`,
   `drop` or `tree(..., create: true)` (emdb's API-ABI04);
-- for a view scan's value, at that scan's next step. A scan's keys are
-  always copies: a key is small, and a copy costs less than a view.
+- for a view scan's value, when the scan fills its batch buffer again,
+  and when the scan ends or is broken out of. A scan's keys are always
+  copies.
 
 A dead view is detached: its length is 0 and `view.buffer.detached` is
-true, so it reads as empty instead of as whatever the map holds by then.
+true, so it reads as empty instead of as whatever the map, or a refilled
+batch, holds by then.
 **Never keep a view past its scope**; `view.slice()` copies one. A dead
 view passed back as a key, value, prefix or `from` is refused with a
 `TypeError`, never read as the empty string.
 
-A transaction holds every view `get` lends until it ends, so it can
-detach them; a long read transaction that takes many views keeps that
-many small objects. A scan's views are released step by step.
+A `get` view points into the map. A scan's value view points into the
+scan's batch buffer, a copy the scan reads many entries into at once, so
+the views of one batch live and die together. A transaction holds every
+view `get` lends until it ends, so it can detach them; a long read
+transaction that takes many views keeps that many small objects.
 
 ```coffee
 size = db.read (txn) ->
@@ -173,8 +180,10 @@ db.read (txn) ->
 `prefix` and `from` combine. Options are checked when the scan is made.
 A write in the same transaction does not end a scan, which continues
 after the last key it gave: deleting each key as it is visited empties
-the tree. Each scan borrows a cursor, and returns it to its transaction
-when it finishes or is broken out of.
+the tree. Each scan borrows a cursor and a batch buffer, and returns
+them to its transaction when it finishes or is broken out of. A batch
+starts small, for scans that stop early, and grows as the scan goes on;
+a prefix stops it inside emdb.
 
 ## Errors
 
@@ -264,27 +273,29 @@ bun run bench              # 1,000,000 entries; rip bench.rip <n> for another si
 
 `bench.rip` runs each operation on 1M entries (16-byte keys, 32-byte
 values; neither engine syncs) beside the same work through `bun:sqlite`,
-which is built into Bun. Measured on an Apple M5 under Bun 1.4.3, best of
-three, alongside other work on the machine, so read the rows as a
-ranking:
+which is built into Bun. Measured on an Apple M5 under Bun 1.4.3 with
+libemdb from emdb `636d6cd`, the median of three runs of best-of-three,
+alongside other work on the machine, so read the rows as a ranking:
 
 | Operation | emdb | ns/op | bun:sqlite | ns/op |
 | --- | ---: | ---: | ---: | ---: |
-| put (one transaction) | 41 ms | 41 | 546 ms | 546 |
-| get, key order | 45 ms | 45 | 1676 ms | 1676 |
-| get, random order | 474 ms | 474 | 2988 ms | 2988 |
-| get, `view: true` | 229 ms | 229 | — | |
-| scan | 63 ms | 63 | 92 ms | 92 |
-| scan, `view: true` | 221 ms | 221 | — | |
-| delPrefix, every key | 2 ms | 2 | 164 ms | 164 |
-| get 64 KB value (10,000) | 77 ms | 7744 | 1014 ms | 101431 |
-| get 64 KB value, `view: true` | 61 ms | 6066 | — | |
+| put (one transaction) | 40 ms | 40 | 442 ms | 442 |
+| get, key order | 48 ms | 48 | 1334 ms | 1334 |
+| get, random order | 502 ms | 502 | 2549 ms | 2549 |
+| get, `view: true` | 243 ms | 243 | — | |
+| scan | 68 ms | 68 | 77 ms | 77 |
+| scan, `view: true` | 50 ms | 50 | — | |
+| delPrefix, every key | 2 ms | 2 | 145 ms | 145 |
+| get 64 KB value (10,000) | 84 ms | 8377 | 965 ms | 96456 |
+| get 64 KB value, `view: true` | 59 ms | 5948 | — | |
 
-A copy is one `memcpy` (from the libc libemdb links) into a fresh
-`Uint8Array`. A view needs an external `ArrayBuffer` and a detach when
-it dies, which costs more than copying a small value: `view: true` pays
-only for large values, and less than it might, since emdb assembles a
-value spanning overflow pages into the transaction's own copy.
+A copied `get` is one `memcpy` (from the libc libemdb links) into a
+fresh `Uint8Array`. A `get` view needs an external `ArrayBuffer` and a
+detach when it dies, which costs more than copying a small value, so it
+pays only for large values, and less than it might, since emdb assembles
+a value spanning overflow pages into the transaction's own copy. A scan
+reads a batch of entries per call; its copies are `slice`s of the batch,
+and its views subarrays of it, with one detach per batch.
 
 ## Test
 

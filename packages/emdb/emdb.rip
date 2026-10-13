@@ -27,7 +27,9 @@ import { join, resolve } from 'node:path'
 
 # ==[ The C ABI ]===============================================================
 
-# All twenty functions of emdb.h, so a library missing any refuses at load.
+# All twenty-one functions of emdb.h, so a library missing any refuses at
+# load; emdb_cursor_get_batch, which scans read through, came after the
+# first twenty.
 # Handles (emdb_env*, emdb_txn*, emdb_cursor*) are u64; a key or value is a
 # `buffer` and a u64 length, so a key encoded into a reusable scratch array
 # passes without a subarray; out-pointers are small typed arrays.
@@ -53,6 +55,7 @@ SYMBOLS =!
   emdb_cursor_open: { args: ['u64', 'u32', 'u32', 'ptr'], returns: 'i32' }
   emdb_cursor_get:  { args: ['u64', 'i32', 'ptr', 'ptr', 'ptr', 'ptr'], returns: 'i32' }
   emdb_cursor_put:  { args: ['u64', 'buffer', 'u64', 'buffer', 'u64'], returns: 'i32' }
+  emdb_cursor_get_batch: { args: ['u64', 'i32', 'buffer', 'u64', 'u32', 'buffer', 'u64', 'u32', 'ptr', 'ptr'], returns: 'i32' }
   emdb_cursor_del:  { args: ['u64'], returns: 'i32' }
   emdb_backup:      { args: ['u64', 'i32', 'u64', 'ptr'], returns: 'i32' }
   emdb_strerror:    { args: ['i32'], returns: 'cstring' }
@@ -60,11 +63,13 @@ SYMBOLS =!
   memcpy:           { args: ['buffer', 'u64', 'u64'], returns: 'void' }
 
 NOTFOUND =! -32000
+BUFFER_TOO_SMALL =! -32039
 WRITER_ACTIVE =! -32010
 DURABILITY_UNKNOWN =! -32023
 
 # Flags (API-ABI07): one namespace.
 RDONLY  =! 0x0001
+REVERSE =! 0x0800
 CREATE  =! 0x1000
 DELETE  =! 0x2000
 PREFIX  =! 0x4000
@@ -75,6 +80,7 @@ LAST      =! 1
 NEXT      =! 2
 PREV      =! 3
 SET_RANGE =! 5
+CURRENT   =! 6
 
 # ==[ Loading libemdb ]=========================================================
 
@@ -179,7 +185,15 @@ KEYN  =! BigUint64Array.new(1)
 VALP  =! BigUint64Array.new(1)
 VALN  =! BigUint64Array.new(1)
 COUNT =! BigUint64Array.new(1)
+BCOUNT =! Uint32Array.new(1)
+BUSED  =! BigUint64Array.new(1)
+NO_KEY =! Uint8Array.new(0)
 TREE  =! Uint32Array.new(1)
+
+# Scan batches (see Txn._walk).
+BATCH_BYTES =! 64 * 1024
+BATCH_FIRST =! 16
+BATCH_MAX   =! 1 << 16
 
 notBytes = (x, what) ->
   if x instanceof Uint8Array
@@ -389,7 +403,8 @@ class Txn
     @ended = false
     @_lent = false        # whether a view may be alive
     @_views = []          # buffers get lent out, detached when they die
-    @_scans = []          # view scans in flight, each holding its value's buffer
+    @_scans = []          # view scans in flight, each with its batch buffer
+    @_bufs = []           # batch buffers free for another scan
     @_idle = Map.new()    # tree id → cursors free for another scan
     @_writes = 0          # mutating calls so far; scans re-seek after one
     @_epochs = null       # tree id → clears and drops of it so far
@@ -455,17 +470,28 @@ class Txn
 
   # Views die at the next mutating call or at the end of the transaction
   # (API-ABI04): each is detached, so a dead view reads as empty, never as
-  # whatever the map holds by then. get's views wait in a plain array; a
-  # view scan holds only its current value's buffer, which its next step
-  # detaches.
+  # whatever the map or a refilled batch holds by then. get's views point
+  # into the map and wait in a plain array; a view scan's point into its
+  # batch buffer, which is detached whole.
   _detach: ->
     for buf in @_views
       buf.transfer 0 unless buf.detached
     @_views.length = 0
-    for scan in @_scans
-      scan.buf.transfer 0 if scan.buf? and not scan.buf.detached
-      scan.buf = null
+    for scan in @_scans when scan.lent
+      if @ended
+        scan.buf.buffer.transfer 0
+        scan.lent = false
+      else
+        @_refill scan
     @_lent = false
+    return
+
+  # A batch buffer's views die before it is filled again: transfer()
+  # moves its memory to a new ArrayBuffer, which the scan keeps, and
+  # detaches the old one, and with it every view of the last batch.
+  _refill: (scan) ->
+    scan.buf = Uint8Array.new(scan.buf.buffer.transfer())
+    scan.lent = false
     return
 
   # After every mutating call, failed or not, in a write transaction.
@@ -598,9 +624,10 @@ class Txn
   # [key, value] pairs in key order, or reverse order with `reverse: true`.
   # `prefix` keeps the keys that start with it; `from` starts at that key
   # (forward: the least key at or above it; reverse: the greatest at or
-  # below it). Copies unless `view: true`, whose pair dies at the scan's
-  # next step. A write in the same transaction does not end the scan: it
-  # continues from the last key it gave.
+  # below it). Copies unless `view: true`, whose values die with their
+  # batch (see _walk); keys are always copies. A write in the same
+  # transaction does not end the scan: it continues from the last key it
+  # gave.
   scan: (opts = null) ->
     @_live 'txn.scan'
     checkKeys opts, SCAN_KEYS, 'txn.scan'
@@ -618,9 +645,10 @@ class Txn
     check lib.emdb_cursor_open(@_h, tree, 0, OUT), 'emdb_cursor_open'
     OUT[0]
 
-  # Move the cursor; false at no entry.
+  # Move the cursor; false at no entry. Only positions: the key comes back,
+  # and no value is read (a scan's values come through its batches).
   _step: (cur, op) ->
-    rc = lib.emdb_cursor_get(cur, op, KEYP, KEYN, VALP, VALN)
+    rc = lib.emdb_cursor_get(cur, op, KEYP, KEYN, null, null)
     return true if rc is 0
     return false if rc is NOTFOUND
     check rc, 'emdb_cursor_get'
@@ -655,42 +683,65 @@ class Txn
 
   # The scan's body. A generator runs nothing until its first step, which
   # may come after the transaction ended, so it checks before any call.
-  # Keys are always copies: a key is small, and a copy costs less than a
-  # view. With `view`, the value is a view, held in `scan.buf` so that the
-  # next step, a write or the transaction's end detaches it.
+  #
+  # The cursor is positioned by emdb_cursor_get, then read in batches by
+  # emdb_cursor_get_batch into one reusable buffer per scan (API-ABI11):
+  # each entry a uint32_t key length and value length in host order, the
+  # key, the value, padding to 8. The prefix stop runs in C. A batch starts
+  # small, for scans that stop early, and grows eightfold to BATCH_MAX.
+  # Keys come out as copies; values as copies, or with `view` as subarrays
+  # of the buffer, which die when it is filled again, at a write, at the
+  # scan's end and at the transaction's end.
   _walk: (handle, tree, prefix, from, reverse, view) ->
     throw @_ended('a scan') if @ended
     cur = @_cursor tree
     epoch = @_epoch tree
     writes = @_writes
     last = null
-    scan = if view then { buf: null } else null
+    scan = { buf: @_bufs.pop() ?? Uint8Array.new(BATCH_BYTES), lent: false }
     @_scans.push scan if view
+    flags = (if prefix? then PREFIX else 0) | (if reverse then REVERSE else 0)
+    bound = prefix ?? NO_KEY
+    max = BATCH_FIRST
+    op = CURRENT
     found = @_start cur, prefix, from, reverse
     try
       while found
-        k = copyAt(KEYP[0], KEYN[0])
-        break if prefix? and not startsWith(k, prefix)
-        last = k.slice() unless @readOnly
-        if view
-          v = viewAt(VALP[0], VALN[0])
-          if v.length
-            scan.buf = v.buffer
+        @_refill scan if scan.lent
+        buf = scan.buf
+        rc = lib.emdb_cursor_get_batch(cur, op, bound, bound.length, flags, buf, buf.length, max, BCOUNT, BUSED)
+        if rc is BUFFER_TOO_SMALL
+          scan.buf = Uint8Array.new(Math.max(buf.length * 2, (Number(BUSED[0]) + 7) & ~7))
+          continue
+        break if rc is NOTFOUND
+        check rc, 'emdb_cursor_get_batch' unless rc is 0
+        op = if reverse then PREV else NEXT
+        max = Math.min(max * 8, BATCH_MAX)
+        words = Uint32Array.new(buf.buffer, buf.byteOffset, buf.length >>> 2)
+        count = BCOUNT[0]
+        at = 0
+        i = 0
+        while i < count
+          klen = words[at >>> 2]
+          vlen = words[(at >>> 2) + 1]
+          ks = at + 8
+          vs = ks + klen
+          at = (vs + vlen + 7) & ~7
+          i++
+          k = buf.slice(ks, vs)
+          last = k.slice() unless @readOnly
+          if view
+            scan.lent = true
             @_lent = true
-          yield [k, v]
-        else
-          yield [k, copyAt(VALP[0], VALN[0])]
-        throw @_ended('a scan') if @ended
-        if view and scan.buf?
-          scan.buf.transfer 0 unless scan.buf.detached
-          scan.buf = null
-        if @_writes is writes
-          found = @_step cur, (if reverse then PREV else NEXT)
-        else
-          # A write dropped the cursor's position (API-C06A): find the
-          # last key given again and step past it. After a clear or a
-          # drop the cursor itself is stale, so a fresh one does it, and
-          # a dropped tree throws.
+            yield [k, buf.subarray(vs, vs + vlen)]
+          else
+            yield [k, buf.slice(vs, vs + vlen)]
+          throw @_ended('a scan') if @ended
+          continue if @_writes is writes
+          # A write dropped the cursor's position (API-C06A), and with it
+          # the rest of this batch: find the last key given again and go
+          # on from past it. After a clear or a drop the cursor itself is
+          # stale, so a fresh one does it, and a dropped tree throws.
           writes = @_writes
           unless @_epoch(tree) is epoch
             @_tree handle, 'a scan'
@@ -702,12 +753,17 @@ class Txn
           else
             found = @_seek cur, last
             found = @_step(cur, NEXT) if found and compareBytes(copyAt(KEYP[0], KEYN[0]), last) is 0
+          op = CURRENT
+          break
     finally
       @_scans.splice @_scans.indexOf(scan), 1 if view
-      unless @ended or @_epoch(tree) isnt epoch
-        idle = @_idle.get(tree)
-        @_idle.set tree, (idle = []) unless idle?
-        idle.push cur
+      unless @ended
+        @_refill scan if scan.lent
+        @_bufs.push scan.buf
+        unless @_epoch(tree) isnt epoch
+          idle = @_idle.get(tree)
+          @_idle.set tree, (idle = []) unless idle?
+          idle.push cur
     return
 
 # ==[ Environment ]=============================================================
