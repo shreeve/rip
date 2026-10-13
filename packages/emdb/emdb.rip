@@ -22,7 +22,7 @@
 # ==============================================================================
 
 import { dlopen, ptr, toArrayBuffer, suffix } from 'bun:ffi'
-import { realpathSync, statSync, openSync, closeSync } from 'node:fs'
+import { realpathSync, statSync, openSync, closeSync, unlinkSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 # ==[ The C ABI ]===============================================================
@@ -54,6 +54,8 @@ SYMBOLS =!
   emdb_version:     { args: ['ptr', 'ptr', 'ptr'], returns: 'void' }
 
 NOTFOUND =! -32000
+WRITER_ACTIVE =! -32010
+DURABILITY_UNKNOWN =! -32023
 
 # Flags (API-ABI07): one namespace.
 RDONLY  =! 0x0001
@@ -78,6 +80,15 @@ SIBLING =! resolve(import.meta.dir, '..', '..', '..', 'emdb', 'lib', LIB_FILE)
 
 lib = null
 libPath = null
+
+# The databases (by real path) with a write transaction open in this
+# process. A second Env on the same file would wait on the writer lock
+# its own process holds, forever; it is refused instead.
+WRITING =! Set.new()
+
+# The key a SET_RANGE reads, held while the call runs: the cursor gets
+# only its address.
+seeking = null
 
 isFile = (p) ->
   try statSync(p).isFile() catch then false
@@ -135,7 +146,9 @@ load = (explicit = null) ->
 
 # An emdb error code, thrown. `code` is the negative integer of emdb.h and
 # `name` its EMDB_* spelling, both as emdb_strerror gives them; the
-# message says which call returned it.
+# message says which call returned it. `committed` is true only for
+# EMDB_DURABILITY_UNKNOWN from a commit: the commit stands and is
+# visible, its meta page did not sync, and the write must not be retried.
 export class EmdbError extends Error
   constructor: (code, call) ->
     text = lib.emdb_strerror(code)
@@ -143,6 +156,7 @@ export class EmdbError extends Error
     super "#{call}: #{if i < 0 then text else text.slice(i + 2)}"
     @name = if i < 0 then 'EMDB_UNKNOWN' else text.slice(0, i)
     @code = code
+    @committed = code is DURABILITY_UNKNOWN
 
 check = (rc, call) ->
   throw EmdbError.new(rc, call) unless rc is 0
@@ -161,9 +175,13 @@ VALN  =! BigUint64Array.new(1)
 COUNT =! BigUint64Array.new(1)
 TREE  =! Uint32Array.new(1)
 
+# A detached buffer is a dead view: passed on, it would read as the empty
+# string and act on the empty key or prefix, so it is refused.
 bytesOf = (x, what) ->
   return ENCODER.encode(x) if typeof x is 'string'
-  return x if x instanceof Uint8Array
+  if x instanceof Uint8Array
+    throw TypeError.new "emdb: a #{what} was a view that has died (its transaction ended, or a write followed it); copy a view with .slice() while it lives" if x.buffer.detached
+    return x
   throw TypeError.new "emdb: a #{what} is a string or a Uint8Array, got #{if x is null then 'null' else typeof x}"
 
 # A NUL-terminated UTF-8 string for a `const char *`.
@@ -293,10 +311,15 @@ u64 = (dv, offset) ->
 # ==[ Trees ]===================================================================
 
 # A named tree's handle. It names the tree in every later transaction of
-# its environment, until the tree is dropped; pass it as `tree:` or as the
-# argument of stat, clear and drop.
+# its environment until the tree is dropped; pass it as `tree:` or as the
+# argument of stat, clear and drop. A handle dies, and throws on use, when
+# a commit drops its tree or when the write that created its tree aborts:
+# emdb reuses a dropped tree's slot (INV-SUB03), so a stale handle would
+# otherwise name whatever tree takes it next. One handle per tree per
+# environment; a drop through another environment or process is not seen.
 class Tree
   constructor: (@env, @name, @id) ->
+    @dead = null   # why the handle names nothing, once it does
 
 # ==[ Transactions ]============================================================
 
@@ -308,6 +331,9 @@ class Txn
     @_views = Set.new()   # buffers lent out, detached when they die
     @_idle = Map.new()    # tree id → cursors free for another scan
     @_writes = 0          # mutating calls so far; scans re-seek after one
+    @_epochs = null       # tree id → clears and drops of it so far
+    @_created = null      # trees this write created, settled at its end
+    @_dropped = null      # trees this write dropped, settled at its end
 
   _live: (what) ->
     throw Error.new "emdb: #{what} on a transaction that has ended (it lives only inside env.read or env.write)" if @ended
@@ -317,7 +343,44 @@ class Txn
     return 0 unless t?
     throw TypeError.new "emdb: #{what} takes a tree from txn.tree" unless t instanceof Tree
     throw Error.new "emdb: #{what} was given a tree of another environment" unless t.env is @env
+    throw Error.new "emdb: #{what} was given the handle of tree '#{t.name}', which names nothing: #{t.dead}" if t.dead
+    throw Error.new "emdb: #{what} was given tree '#{t.name}', dropped in this transaction" if @_dropped?.has(t)
     t.id
+
+  # The handle for tree `id`: one this write created, else the
+  # environment's, else a new one.
+  _handle: (id, name, fresh) ->
+    if @_created?
+      for t in @_created
+        return t if t.id is id and not @_dropped?.has(t)
+    t = @env._trees.get(id)
+    return t if t? and not @_dropped?.has(t)
+    t = Tree.new @env, name, id
+    if fresh
+      (@_created ?= []).push t
+    else
+      @env._trees.set id, t
+    t
+
+  # A commit (`committed`) kills the handles of the trees it dropped and
+  # keeps the ones it created; an abort kills the ones it created.
+  _settle: (committed) ->
+    if committed
+      for t as (@_dropped ?? [])
+        t.dead = 'its tree was dropped'
+        @env._trees.delete t.id if @env._trees.get(t.id) is t
+      @env._trees.set t.id, t for t in (@_created ?? [])
+    else
+      t.dead = 'its tree was created by a write that aborted' for t in (@_created ?? [])
+    return
+
+  _epoch: (id) -> @_epochs?.get(id) ?? 0
+
+  # After a clear or drop: no cursor of the tree may be reused.
+  _reset: (id) ->
+    @_idle.delete id
+    (@_epochs ?= Map.new()).set id, @_epoch(id) + 1
+    return
 
   # A view lent out: detached at the next mutating call or at the end of
   # the transaction (API-ABI04), so a dead view reads as empty, never as
@@ -348,9 +411,12 @@ class Txn
     @ended = true
     @_detach()
     if commit
-      check lib.emdb_txn_commit(@_h), 'emdb_txn_commit'
+      rc = lib.emdb_txn_commit(@_h)
+      @_settle(rc is 0 or rc is DURABILITY_UNKNOWN) unless @readOnly
+      check rc, 'emdb_txn_commit'
     else
       lib.emdb_txn_abort @_h
+      @_settle false unless @readOnly
     return
 
   # The value stored under `key`, or undefined. A copy unless `view: true`.
@@ -406,10 +472,20 @@ class Txn
     @_live 'txn.tree'
     checkKeys opts, CREATE_KEYS, 'txn.tree'
     create = flagOf(opts ?? {}, 'create', CREATE, 'txn.tree')
-    rc = lib.emdb_tree_open(@_h, cString(name, 'tree name'), create, TREE)
-    @_wrote() if create and not @readOnly
+    bytes = cString(name, 'tree name')
+    fresh = false
+    if create and not @readOnly
+      # Whether this write creates the tree decides its handle's fate if
+      # the write aborts, so look first; only a creation writes.
+      rc = lib.emdb_tree_open(@_h, bytes, 0, TREE)
+      fresh = rc is NOTFOUND
+      if fresh
+        rc = lib.emdb_tree_open(@_h, bytes, CREATE, TREE)
+        @_wrote()
+    else
+      rc = lib.emdb_tree_open(@_h, bytes, create, TREE)
     check rc, 'emdb_tree_open'
-    Tree.new @env, name, TREE[0]
+    @_handle TREE[0], name, fresh
 
   # Empty a named tree; it stays open.
   clear: (tree) ->
@@ -417,7 +493,9 @@ class Txn
     throw TypeError.new "emdb: txn.clear takes a tree from txn.tree" unless tree?
     id = @_tree tree, 'txn.clear'
     rc = lib.emdb_tree_drop(@_h, id, 0)
-    @_wrote() unless @readOnly
+    unless @readOnly
+      @_wrote()
+      @_reset id
     check rc, 'emdb_tree_drop'
     return
 
@@ -427,8 +505,11 @@ class Txn
     throw TypeError.new "emdb: txn.drop takes a tree from txn.tree" unless tree?
     id = @_tree tree, 'txn.drop'
     rc = lib.emdb_tree_drop(@_h, id, DELETE)
-    @_wrote() unless @readOnly
+    unless @readOnly
+      @_wrote()
+      @_reset id
     check rc, 'emdb_tree_drop'
+    (@_dropped ?= Set.new()).add tree
     return
 
   # A tree's statistics as this transaction sees it (API-DB03).
@@ -460,7 +541,7 @@ class Txn
     prefix = null if prefix?.length is 0
     for name in ['reverse', 'view']
       throw TypeError.new "emdb: txn.scan option #{name} is true or false" if opts?[name]? and typeof opts[name] isnt 'boolean'
-    @_walk tree, prefix, from, opts?.reverse is true, opts?.view is true
+    @_walk opts?.tree, tree, prefix, from, opts?.reverse is true, opts?.view is true
 
   _cursor: (tree) ->
     idle = @_idle.get(tree)
@@ -479,9 +560,13 @@ class Txn
   # and ptr() refuses an empty array.
   _seek: (cur, bound) ->
     return @_step(cur, FIRST) if bound.length is 0
+    seeking = bound
     KEYP[0] = BigInt(ptr(bound))
     KEYN[0] = BigInt(bound.length)
-    @_step cur, SET_RANGE
+    try
+      @_step cur, SET_RANGE
+    finally
+      seeking = null
 
   # The greatest key below `bound`, or at it when `inclusive`.
   _below: (cur, bound, inclusive) ->
@@ -499,8 +584,12 @@ class Txn
     return @_below(cur, end, false) if end?
     @_step cur, LAST
 
-  _walk: (tree, prefix, from, reverse, view) ->
+  # The scan's body. A generator runs nothing until its first step, which
+  # may come after the transaction ended, so it checks before any call.
+  _walk: (handle, tree, prefix, from, reverse, view) ->
+    @_live 'a scan'
     cur = @_cursor tree
+    epoch = @_epoch tree
     writes = @_writes
     last = null
     found = @_start cur, prefix, from, reverse
@@ -511,27 +600,36 @@ class Txn
         v = viewAt(VALP[0], VALN[0])
         last = k.slice() unless @readOnly
         if view
-          pair = [@_lend(k), @_lend(v)]
+          [kb, vb] = [k.buffer, v.buffer]
+          @_lend k
+          @_lend v
+          yield [k, v]
         else
-          pair = [k.slice(), v.slice()]
-        yield pair
+          yield [k.slice(), v.slice()]
         @_live 'a scan'
         if view
-          @_kill pair[0].buffer
-          @_kill pair[1].buffer
+          @_kill kb
+          @_kill vb
         if @_writes is writes
           found = @_step cur, (if reverse then PREV else NEXT)
         else
           # A write dropped the cursor's position (API-C06A): find the
-          # last key given again and step past it.
+          # last key given again and step past it. After a clear or a
+          # drop the cursor itself is stale, so a fresh one does it, and
+          # a dropped tree throws.
           writes = @_writes
+          unless @_epoch(tree) is epoch
+            @_tree handle, 'a scan'
+            epoch = @_epoch tree
+            check lib.emdb_cursor_open(@_h, tree, 0, OUT), 'emdb_cursor_open'
+            cur = OUT[0]
           if reverse
             found = @_below cur, last, false
           else
             found = @_seek cur, last
             found = @_step(cur, NEXT) if found and compareBytes(viewAt(KEYP[0], KEYN[0]), last) is 0
     finally
-      unless @ended
+      unless @ended or @_epoch(tree) isnt epoch
         idle = @_idle.get(tree)
         @_idle.set tree, (idle = []) unless idle?
         idle.push cur
@@ -542,7 +640,9 @@ class Txn
 class Env
   constructor: (@path, @_h, @readOnly) ->
     @closed = false
-    @_open = 0   # transactions in flight
+    @_open = 0               # transactions in flight
+    @_trees = Map.new()      # tree id → its live handle
+    @_file = realpathSync(@path)
 
   _live: (what) ->
     throw Error.new "emdb: #{what} on a closed environment (#{@path})" if @closed
@@ -554,22 +654,30 @@ class Env
   _run: (flags, readOnly, fn, what) ->
     @_live what
     throw TypeError.new "emdb: #{what} takes a function" unless typeof fn is 'function'
+    if not readOnly and WRITING.has(@_file)
+      throw EmdbError.new WRITER_ACTIVE, "#{what} (a write transaction on #{@_file} is already open in this process)"
     check lib.emdb_txn_begin(@_h, 0n, flags, OUT), 'emdb_txn_begin'
     txn = Txn.new this, OUT[0], readOnly
     @_open++
+    WRITING.add @_file unless readOnly
     try
       try
         result = fn(txn)
+        promised = typeof result?.then is 'function'
       catch e
         txn._end false
         throw e
-      if typeof result?.then is 'function'
+      if promised
         txn._end false
+        # Its rejection, if any, would otherwise go unhandled and end the
+        # process; the TypeError below is the report.
+        try result.then(undefined, (-> null)) catch then null
         throw TypeError.new "emdb: the function given to #{what} returned a promise; a transaction is synchronous, so it was aborted"
       txn._end true
       result
     finally
       @_open--
+      WRITING.delete @_file unless readOnly
 
   # A read transaction on the latest commit.
   read: (fn) ->
@@ -611,7 +719,8 @@ class Env
     return
 
   # Write a backup stream (API-E07) to an open descriptor, or to a new
-  # file at a path (an existing file is refused). `since` is the commit
+  # file at a path (an existing file is refused; a failed backup removes
+  # the file it made). `since` is the commit
   # an incremental backup starts after. Restore with `emdb -r db file`.
   backup: (target, opts = null) ->
     @_live 'env.backup'
@@ -624,10 +733,13 @@ class Env
       check lib.emdb_backup(@_h, target, BigInt(since), words), 'emdb_backup'
     else if typeof target is 'string' and target
       fd = openSync(target, 'wx')
+      done = false
       try
         check lib.emdb_backup(@_h, fd, BigInt(since), words), 'emdb_backup'
+        done = true
       finally
         closeSync fd
+        unlinkSync target unless done
     else
       throw TypeError.new "emdb: env.backup takes a file descriptor or a path"
     baseTxnId:     u64(dv, 8)

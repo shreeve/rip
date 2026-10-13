@@ -5,7 +5,7 @@
 import { test, eq, ok, throws, plainEnv } from 'rip/testing'
 import { open, version, EmdbError } from 'rip/emdb'
 import * as mod from 'rip/emdb'
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync, statSync, openSync, closeSync, realpathSync } from 'fs'
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync, statSync, openSync, closeSync, realpathSync, existsSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { spawnSync } from 'child_process'
@@ -72,19 +72,36 @@ test "version is libemdb's, major.minor.patch", ->
 
 console.log "\nLoading libemdb"
 
+RIP_BIN =! join(import.meta.dir, '..', '..', 'bin', 'rip')
+
+# The library this suite loads: EMDB_LIB, else the sibling emdb checkout.
+libFile = ->
+  file = process.env.EMDB_LIB ?? join(import.meta.dir, '..', '..', '..', 'emdb', 'lib', "libemdb.#{suffix}")
+  realpathSync file
+
 # A copy of the module in a directory with no emdb checkout beside it, run
-# with EMDB_LIB unset and an empty pkg-config search path.
-runCopy = (env) ->
+# with EMDB_LIB unset and an empty pkg-config search path. `body` gets
+# `open`, `version` and `db` (a path for a database).
+runCopy = (env, body = "open db") ->
   dir = join ROOT, "copy-#{++serial}", 'a', 'b', 'c'
   mkdirSync dir, recursive: true
   copyFileSync join(import.meta.dir, 'emdb.rip'), join(dir, 'emdb.rip')
-  writeFileSync join(dir, 'run.rip'), "import { open } from './emdb.rip'\nopen '#{join(dir, 'x.emdb')}'\n"
+  writeFileSync join(dir, 'run.rip'), "import { open, version } from './emdb.rip'\ndb = '#{join(dir, 'x.emdb')}'\n#{body}\n"
   empty = join ROOT, "pc-#{serial}"
   mkdirSync empty
   base = plainEnv(PKG_CONFIG_LIBDIR: empty, PKG_CONFIG_PATH: '')
   delete base.EMDB_LIB
-  bin = join(import.meta.dir, '..', '..', 'bin', 'rip')
-  spawnSync process.execPath, [bin, join(dir, 'run.rip')], encoding: 'utf8', env: { ...base, ...env }
+  spawnSync process.execPath, [RIP_BIN, join(dir, 'run.rip')], encoding: 'utf8', env: { ...base, ...env }, timeout: 20000
+
+# A script run in its own process against this package, killed after 20s
+# so a hang fails instead of stalling the suite.
+runScript = (body) ->
+  lines = body.split('\n')
+  indent = Math.min(...lines.filter((l) -> l.trim()).map((l) -> l.length - l.trimStart().length))
+  body = lines.map((l) -> l.slice(indent)).join('\n')
+  file = join ROOT, "script-#{++serial}.rip"
+  writeFileSync file, "import { open, EmdbError } from '#{join(import.meta.dir, 'emdb.rip')}'\ndb = '#{join(ROOT, "script-#{serial}.emdb")}'\n#{body}\n"
+  spawnSync process.execPath, [RIP_BIN, file], encoding: 'utf8', env: plainEnv(), timeout: 20000
 
 test "no library anywhere: the error names every place tried, in order", ->
   r = runCopy {}
@@ -105,6 +122,20 @@ test "EMDB_LIB naming a missing file fails on it, never falling through", ->
 
 test "the lib option naming a missing file fails on it", ->
   throws (-> open fresh(), lib: '/nonexistent/libemdb.dylib'), 'libemdb not found at /nonexistent/libemdb.dylib (the lib option)'
+
+test "the lib option loads the library it names", ->
+  r = runCopy {}, "open db, lib: '#{libFile()}'\nconsole.log 'loaded', version()"
+  eq r.status, 0, r.stderr
+  ok r.stdout.includes("loaded #{version()}"), r.stdout
+
+test "pkg-config's libdir for emdb loads the library", ->
+  ok Bun.which('pkg-config'), 'pkg-config is not on PATH'
+  pc = join ROOT, "pkgconfig-#{++serial}"
+  mkdirSync pc
+  writeFileSync join(pc, 'emdb.pc'), "libdir=#{join(libFile(), '..')}\nName: emdb\nDescription: emdb\nVersion: #{version()}\n"
+  r = runCopy { PKG_CONFIG_PATH: pc }, "open db\nconsole.log 'loaded', version()"
+  eq r.status, 0, r.stderr
+  ok r.stdout.includes("loaded #{version()}"), r.stdout
 
 test "a second, different library in one process is refused", ->
   version()   # loaded
@@ -196,6 +227,38 @@ test "in a write transaction a view dies at the next write (API-ABI04)", ->
       ok v.buffer.detached
       eq text(t.get 'k'), 'value'
 
+test "a dead view is refused as a key, value, prefix or from, never read as empty", ->
+  withDb (db) ->
+    db.write (t) ->
+      t.put 'cfg', 'session:'
+      t.put 'session:1', 'x'
+      t.put 'user:1', 'ann'
+    dead = db.read (t) -> t.get 'cfg', view: true
+    ok dead.buffer.detached
+    db.write (t) ->
+      throws (-> t.get dead), TypeError, 'a key was a view that has died'
+      throws (-> t.put dead, 'v'), TypeError, 'a key was a view that has died'
+      throws (-> t.put 'k', dead), TypeError, 'a value was a view that has died'
+      throws (-> t.del dead), TypeError, 'a key was a view that has died'
+      throws (-> t.delPrefix dead), TypeError, 'a prefix was a view that has died'
+      throws (-> t.scan prefix: dead), TypeError, 'a prefix was a view that has died'
+      throws (-> t.scan from: dead), TypeError, 'a from key was a view that has died'
+    eq keys(db), ['cfg', 'session:1', 'user:1']
+
+test "a view that dies at a write is refused by the next call", ->
+  withDb (db) ->
+    db.write (t) -> t.put 'cfg', 'session:'; t.put 'session:1', 'x'
+    caught = null
+    try
+      db.write (t) ->
+        p = t.get 'cfg', view: true
+        t.put 'other', 'x'
+        t.delPrefix p
+    catch e
+      caught = e
+    ok caught instanceof TypeError, String(caught)
+    eq keys(db), ['cfg', 'session:1']
+
 test "big values spanning overflow pages round-trip, copied and viewed", ->
   withDb pageSize: 4096, (db) ->
     big = Uint8Array.new(1_000_003)
@@ -266,6 +329,88 @@ test "a scan resumed after its transaction ended throws", ->
       s
     throws (-> walk.next()), 'a scan on a transaction that has ended'
 
+test "a scan made in its scope but never started throws after it", ->
+  withDb (db) ->
+    db.write (t) -> t.put 'a', '1'
+    fromRead = db.read (t) -> t.scan()
+    fromWrite = db.write (t) -> t.scan(reverse: true)
+    db.write (t) ->
+      t.put 'b', '2'
+      throws (-> fromRead.next()), 'a scan on a transaction that has ended'
+    throws (-> fromWrite.next()), 'a scan on a transaction that has ended'
+  db = scratch()
+  late = db.read (t) -> t.scan()
+  db.close()
+  throws (-> late.next()), 'a scan on a transaction that has ended'
+
+test "an async transaction function is refused without an unhandled rejection", ->
+  r = runScript '''
+    try
+      db0 = open db, noSync: true
+      db0.write (t) ->
+        t.put 'a', '1'
+        await Promise.resolve()
+        t.put 'b', '2'
+    catch e
+      console.log 'refused', e.constructor.name
+    await Bun.sleep 30
+    console.log 'alive', db0.read((t) -> t.get 'a') is undefined
+  '''
+  eq r.status, 0, r.stderr
+  ok r.stdout.includes('refused TypeError'), r.stdout
+  ok r.stdout.includes('alive true'), r.stdout
+
+test "a result whose then getter throws still aborts the transaction", ->
+  withDb (db) ->
+    boom = Error.new 'then getter'
+    caught = null
+    try
+      db.write (t) ->
+        t.put 'k', 'v'
+        Object.defineProperty {}, 'then', get: -> throw boom
+    catch e
+      caught = e
+    eq caught, boom
+    eq db.read((t) -> t.get 'k'), undefined
+    db.write (t) -> t.put 'k', 'later'
+
+test "a failed commit throws, ends the transaction, and leaves the environment usable", ->
+  withDb pageSize: 4096, mapSize: 1 << 20, maxMapSize: 1 << 20, (db) ->
+    held = null
+    e = emdbError ->
+      db.write (t) ->
+        held = t
+        t.put 'first', '1'
+        try
+          t.put "big#{i}", 'x'.repeat(100_000) for i in [0...30]
+        catch full
+          eq full.name, 'EMDB_DATABASE_FULL'
+        'returned normally'
+    eq e.name, 'EMDB_TXN_BROKEN'
+    ok e.message.startsWith('emdb_txn_commit: '), e.message
+    eq e.committed, false
+    ok held.ended
+    throws (-> held.get 'first'), 'txn.get on a transaction that has ended'
+    eq db.read((t) -> t.get 'first'), undefined
+    db.write (t) -> t.put 'after', 'ok'
+    eq text(db.read (t) -> t.get 'after'), 'ok'
+
+test "a write inside a write through a second environment on the same file is refused, not a hang", ->
+  r = runScript '''
+    a = open db, noSync: true
+    b = open db, noSync: true
+    try
+      a.write (t) -> b.write (u) -> u.put 'k', 'v'
+    catch e
+      console.log 'refused', e instanceof EmdbError, e.name
+    b.write (u) -> u.put 'k', 'v'
+    console.log 'then', a.read((t) -> t.get('k').length)
+  '''
+  eq r.signal, null, 'the nested write hung'
+  eq r.status, 0, r.stderr
+  ok r.stdout.includes('refused true EMDB_WRITER_ACTIVE'), r.stdout
+  ok r.stdout.includes('then 1'), r.stdout
+
 test "a second write transaction in one environment is EMDB_WRITER_ACTIVE", ->
   withDb (db) ->
     e = emdbError -> db.write (t) -> db.write (u) -> u.put 'k', 'v'
@@ -318,6 +463,86 @@ test "clear empties a tree; drop deletes it", ->
     eq db.read((t) -> t.stat(t.tree('logs')).entries), 0
     db.write (t) -> t.drop t.tree('logs')
     eq emdbError(-> db.read (t) -> t.tree 'logs').name, 'EMDB_NOTFOUND'
+
+test "one handle per tree: opening it again gives the same handle", ->
+  withDb (db) ->
+    a = db.write (t) -> t.tree 'users', create: true
+    b = db.read (t) -> t.tree 'users'
+    c = db.write (t) -> t.tree 'users', create: true
+    ok a is b and b is c
+
+test "the handle of a tree created by a write that aborts dies", ->
+  withDb (db) ->
+    stale = null
+    try
+      db.write (t) ->
+        stale = t.tree 'audit', create: true
+        t.put 'k', 'v', tree: stale
+        throw Error.new 'abort'
+    catch then null
+    ok stale.dead
+    billing = db.write (t) -> t.tree 'billing', create: true
+    eq billing.id, stale.id   # emdb reuses the slot
+    throws (-> db.write (t) -> t.put 'k', 'via a stale handle', tree: stale), "handle of tree 'audit', which names nothing"
+    eq db.read((t) -> t.stat(billing).entries), 0
+
+test "a tree that already existed keeps its handle when a write naming it aborts", ->
+  withDb (db) ->
+    users = db.write (t) -> t.tree 'users', create: true
+    try
+      db.write (t) ->
+        t.tree 'users', create: true
+        throw Error.new 'abort'
+    catch then null
+    ok not users.dead
+    db.write (t) -> t.put 'k', 'v', tree: users
+
+test "a dropped tree's handle dies at the commit; an aborted drop revives it", ->
+  withDb (db) ->
+    tmp = db.write (t) -> t.tree 'tmp', create: true
+    try
+      db.write (t) ->
+        t.drop tmp
+        throws (-> t.get 'k', tree: tmp), "tree 'tmp', dropped in this transaction"
+        throw Error.new 'abort'
+    catch then null
+    ok not tmp.dead
+    db.write (t) -> t.put 'k', 'v', tree: tmp
+    db.write (t) -> t.drop tmp
+    ok tmp.dead
+    other = db.write (t) -> t.tree 'other', create: true
+    throws (-> db.write (t) -> t.put 'z', 'v', tree: tmp), "handle of tree 'tmp', which names nothing: its tree was dropped"
+    eq db.read((t) -> t.stat(other).entries), 0
+
+test "a scan after clear sees the empty tree, and a scan of a dropped tree throws, with an idle cursor", ->
+  withDb (db) ->
+    db.write (t) ->
+      c = t.tree 'c', create: true
+      t.put "k#{i}", 'x', tree: c for i in [0...300]
+      for [k] as t.scan(tree: c)
+        break
+      t.clear c
+      eq (k for [k] as t.scan(tree: c)), []
+      for [k] as t.scan(tree: c)
+        break
+      t.drop c
+      throws (-> t.scan(tree: c)), "tree 'c', dropped in this transaction"
+
+test "a scan in flight across a clear ends; across a drop it throws", ->
+  withDb (db) ->
+    db.write (t) ->
+      c = t.tree 'c', create: true
+      t.put "k#{i}", 'x', tree: c for i in [0...300]
+      seen = 0
+      for [k] as t.scan(tree: c)
+        seen++
+        t.clear c if seen is 1
+      eq seen, 1
+      t.put "k#{i}", 'x', tree: c for i in [0...300]
+      walk = t.scan(tree: c)
+      walk.next()
+      t.drop c
+      throws (-> walk.next()), "tree 'c', dropped in this transaction"
 
 test "the main tree cannot be cleared or dropped by omission", ->
   withDb (db) ->
@@ -442,6 +667,31 @@ test "a reverse write scan skips keys inserted behind it", ->
       out
     eq seen, ['cherry', 'blueberry', 'banana2', 'banana', 'apricot', 'apple']
 
+test "a view scan with a write in the middle continues, its views dying at the write", ->
+  withFruit (db) ->
+    db.write (t) ->
+      seen = []
+      for [k, v] as t.scan(view: true)
+        name = text(k)
+        seen.push "#{name}=#{text(v)}"
+        if name is 'apricot'
+          t.put 'avocado', 'AVOCADO'
+          ok k.buffer.detached and v.buffer.detached
+      eq seen, ['apple=APPLE', 'apricot=APRICOT', 'avocado=AVOCADO', 'banana=BANANA', 'blueberry=BLUEBERRY', 'cherry=CHERRY']
+
+test "a reverse prefix scan with writes in the middle keeps to its prefix", ->
+  withFruit (db) ->
+    seen = db.write (t) ->
+      out = []
+      for [k] as t.scan(prefix: 'b', reverse: true)
+        out.push text(k)
+        t.del k
+        t.put 'bz', 'late'   # above the scan: not visited
+        t.put 'ab', 'below the prefix'
+      out
+    eq seen, ['blueberry', 'banana']
+    eq keys(db), ['ab', 'apple', 'apricot', 'bz', 'cherry']
+
 test "a view scan lends pairs that die at the next step", ->
   withFruit (db) ->
     db.read (t) ->
@@ -485,6 +735,16 @@ test "info reports the page size asked for, entries, depth and key limit", ->
     ok info.maxKeySize > 0
     ok info.numPages >= 3
     ok info.mapSize >= info.numPages * info.pageSize
+
+test "options past pageSize reach C: maxReaders, mapSize, maxNamedTrees", ->
+  withDb maxReaders: 7, mapSize: 1 << 25, maxNamedTrees: 3, (db) ->
+    info = db.info()
+    eq info.maxReaders, 7
+    eq info.mapSize, 1 << 25
+    db.write (t) ->
+      t.tree "t#{i}", create: true for i in [0...3]
+      return
+    eq emdbError(-> db.write (t) -> t.tree 't3', create: true).name, 'EMDB_TREES_FULL'
 
 test "lastTxnId advances by one per committed write, not per abort", ->
   withDb (db) ->
@@ -540,6 +800,7 @@ test "a write in a read transaction is EMDB_TXN_READ_ONLY", ->
     eq e.name, 'EMDB_TXN_READ_ONLY'
     eq e.code, -32016
     ok e.message.startsWith('emdb_put: '), e.message
+    eq e.committed, false
     eq emdbError(-> db.read (t) -> t.del 'k').name, 'EMDB_TXN_READ_ONLY'
     eq emdbError(-> db.read (t) -> t.delPrefix 'k').name, 'EMDB_TXN_READ_ONLY'
 
@@ -623,4 +884,6 @@ test "a backup to a descriptor, and an incremental one after it", ->
       closeSync fd
     eq st.baseTxnId, base
     eq st.bytes, statSync(file).size
-    eq emdbError(-> db.backup join(ROOT, "backup-#{++serial}"), since: base + 10).name, 'EMDB_BACKUP_BASE_MISMATCH'
+    failed = join ROOT, "backup-#{++serial}"
+    eq emdbError(-> db.backup failed, since: base + 10).name, 'EMDB_BACKUP_BASE_MISMATCH'
+    eq existsSync(failed), false

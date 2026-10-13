@@ -7,9 +7,12 @@
 [emdb](https://github.com/shreeve/emdb) is an embedded key-value database:
 a memory-mapped, copy-on-write B+ tree with MVCC, in LMDB's architecture.
 This package loads its C library, `libemdb`, with `bun:ffi` and binds the
-whole C ABI (`include/emdb.h`, emdb's SPEC §8.8): one writer and any
-number of readers per database, each transaction a function that commits
-when it returns and aborts when it throws. Keys and values are bytes;
+twenty functions of its C ABI (`include/emdb.h`, emdb's SPEC §8.8); the
+API below reaches all of them except the cursor writes
+(`emdb_cursor_put`, `emdb_cursor_del`) and child transactions. One writer
+and up to `maxReaders` readers (126 by default) share a database, each
+transaction a function that commits when it returns and aborts when it
+throws. Keys and values are bytes;
 values come back copied, or as zero-copy views on request. No C shim
 sits between the two: emdb passes no struct by value, so every call is a
 plain `bun:ffi` call.
@@ -80,8 +83,11 @@ db.read (txn) -> txn.get 'count'
 - A transaction object lives only inside its function: any method called
   after it returns throws, and so does a scan resumed after it.
 - One write transaction per database at a time: a `write` inside a
-  `write` is `EMDB_WRITER_ACTIVE`. A `read` inside a `write` sees the last
-  commit, not the write in flight.
+  `write` is `EMDB_WRITER_ACTIVE`, also through a second environment on
+  the same file in this process, which would otherwise wait forever on
+  the writer lock its own process holds. A writer in another process is
+  waited for. A `read` inside a `write` sees the last commit, not the
+  write in flight.
 - `env.write opts, fn` sets the commit's sync mode — `noSync: true`,
   `noMetaSync: true` or `sync: true` — and `stage: true` stages its
   appended pages for a bulk load. `env.sync()` makes every commit so far
@@ -111,7 +117,13 @@ instead, with no copy, and a view dies:
 
 A dead view is detached: its length is 0 and `view.buffer.detached` is
 true, so it reads as empty instead of as whatever the map holds by then.
-**Never keep a view past its scope**; `view.slice()` copies one.
+**Never keep a view past its scope**; `view.slice()` copies one. A dead
+view passed back as a key, value, prefix or `from` is refused with a
+`TypeError`, never read as the empty string.
+
+A transaction holds every view `get` lends until it ends, so it can
+detach them; a long read transaction that takes many views keeps that
+many small objects. A scan's views are released step by step.
 
 ```coffee
 size = db.read (txn) ->
@@ -133,7 +145,13 @@ db.read (txn) ->
 
 A tree handle names its tree in every later transaction of the same
 environment until the tree is dropped. `txn.clear tree` empties a tree;
-`txn.drop tree` deletes it. Each named tree has a record in the main tree,
+`txn.drop tree` deletes it. emdb reuses a dropped tree's slot, so a
+stale handle would name whichever tree takes it next; instead a handle
+dies, and throws on use, once a commit drops its tree, or when the write
+that created its tree aborts. A drop in the write in flight makes the
+handle throw at once, and an abort revives it. Drops made through
+another environment or process are not seen: there the stale-handle
+hazard is the caller's (emdb's INV-SUB03). Each named tree has a record in the main tree,
 so a scan of the main tree meets the trees' names.
 
 ## Scans
@@ -175,7 +193,15 @@ catch e
 ```
 
 `EMDB_NOTFOUND` from `get` is `undefined` and from `del` is `false`; a
-missing tree throws it. A misuse — an unknown option, a key that is not a
+missing tree throws it.
+
+**`EMDB_DURABILITY_UNKNOWN`** from a commit is the one error after which
+the write stands: the commit is published and visible, and only its meta
+page failed to sync. Its `EmdbError` has `committed: true` (every other
+has `committed: false`). Do not retry that write. Whether it survives a
+crash is unknown, and once any sync fails the environment syncs nothing
+more, its later syncing commits and `env.sync()` failing with
+`EMDB_SYNC_FAILED`, until it is opened again (emdb's §7.1). A misuse — an unknown option, a key that is not a
 string or `Uint8Array`, a transaction used after its scope — throws a
 `TypeError` or `Error` naming it.
 
@@ -187,7 +213,8 @@ db = open 'data.emdb', mapSize: 1 << 30, pageSize: 8192
 db.info()      # { pageSize, mapSize, numPages, lastTxnId, entries, depth,
                #   activeReaders, maxReaders, maxKeySize }
 db.read (txn) -> txn.stat()        # { depth, branchPages, leafPages, overflowPages, entries }
-db.backup 'data.backup'            # a new file; or an open descriptor; { since: txnId } for incremental
+db.backup 'data.backup'            # a new file (removed if the backup fails); or an open
+                                   # descriptor; { since: txnId } for incremental
 db.close()
 ```
 
@@ -226,7 +253,7 @@ emdb command: `emdb -r data.emdb data.backup`.
 | `txn.clear(tree)` / `txn.drop(tree)` | — |
 | `txn.stat(tree)` | stat (main tree when omitted) |
 | `txn.scan({tree, prefix, from, reverse, view})` | iterator of `[key, value]` |
-| `EmdbError` | `code`, `name`, `message` |
+| `EmdbError` | `code`, `name`, `message`, `committed` |
 
 ## Test
 
