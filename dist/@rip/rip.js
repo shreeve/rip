@@ -13,6 +13,139 @@ var __export = (target, all) => {
     });
 };
 
+// src/runtime/intrinsics.js
+var exports_intrinsics = {};
+__export(exports_intrinsics, {
+  __defineOwnDataProperty: () => __defineOwnDataProperty,
+  __toPropertyKey: () => __toPropertyKey
+});
+
+// src/runtime/stdlib.js
+var exports_stdlib = {};
+__export(exports_stdlib, {
+  abort: () => abort,
+  assert: () => assert,
+  exit: () => exit,
+  kind: () => kind,
+  noop: () => noop,
+  p: () => p,
+  pj: () => pj,
+  pp: () => pp,
+  pr: () => pr,
+  raise: () => raise,
+  rand: () => rand,
+  sleep: () => sleep,
+  toMatchable: () => toMatchable,
+  todo: () => todo,
+  warn: () => warn,
+  zip: () => zip
+});
+
+// src/runtime/schema.js
+var exports_schema = {};
+__export(exports_schema, {
+  SchemaDef: () => SchemaDef,
+  SchemaError: () => SchemaError,
+  SchemaRegistry: () => SchemaRegistry,
+  __schema: () => __schema,
+  installPersistence: () => installPersistence,
+  registerCoercer: () => registerCoercer
+});
+
+// src/runtime/reactive.js
+var exports_reactive = {};
+__export(exports_reactive, {
+  __batch: () => __batch,
+  __catchErrors: () => __catchErrors,
+  __computed: () => __computed,
+  __detachRef: () => __detachRef,
+  __effect: () => __effect,
+  __handleError: () => __handleError,
+  __ownerFrame: () => __ownerFrame,
+  __popOwner: () => __popOwner,
+  __pushOwner: () => __pushOwner,
+  __readonly: () => __readonly,
+  __setEffectErrorReporter: () => __setEffectErrorReporter,
+  __setErrorHandler: () => __setErrorHandler,
+  __state: () => __state,
+  __untracked: () => __untracked,
+  getEffectSignal: () => getEffectSignal
+});
+
+// src/runtime/components.js
+var exports_components = {};
+__export(exports_components, {
+  __Component: () => __Component,
+  __claimGateConstructor: () => __claimGateConstructor,
+  __clsx: () => __clsx,
+  __detach: () => __detach,
+  __detachRef: () => __detachRef,
+  __gateBind: () => __gateBind,
+  __handleComponentError: () => __handleComponentError,
+  __hmrClassify: () => __hmrClassify,
+  __hmrEmit: () => __hmrEmit,
+  __hmrEntries: () => __hmrEntries,
+  __hmrEvents: () => __hmrEvents,
+  __hmrInitDiff: () => __hmrInitDiff,
+  __hmrLookup: () => __hmrLookup,
+  __hmrMigrateDiff: () => __hmrMigrateDiff,
+  __hmrMigrateRemount: () => __hmrMigrateRemount,
+  __hmrPatch: () => __hmrPatch,
+  __hmrPreserveState: () => __hmrPreserveState,
+  __hmrRegisterDefinition: () => __hmrRegisterDefinition,
+  __hmrRegistry: () => __hmrRegistry,
+  __hmrRestoreUi: () => __hmrRestoreUi,
+  __hmrSnapshotUi: () => __hmrSnapshotUi,
+  __hostOf: () => __hostOf,
+  __lis: () => __lis,
+  __ownerFrame: () => __ownerFrame,
+  __popComponent: () => __popComponent,
+  __popOwner: () => __popOwner,
+  __pushComponent: () => __pushComponent,
+  __pushOwner: () => __pushOwner,
+  __reconcile: () => __reconcile,
+  __reportChildFailure: () => __reportChildFailure,
+  __setChildFailureReporter: () => __setChildFailureReporter,
+  __style: () => __style,
+  __transition: () => __transition,
+  getContext: () => getContext,
+  hasContext: () => hasContext,
+  setContext: () => setContext
+});
+
+// packages/app/index.rip
+var exports_app = {};
+__export(exports_app, {
+  ariaCurrent: () => ariaCurrent,
+  browserAdapter: () => browserAdapter,
+  buildRoutes: () => buildRoutes,
+  check: () => check,
+  connectFeed: () => connectFeed,
+  createApply: () => createApply,
+  createComponents: () => createComponents,
+  createMutation: () => createMutation,
+  createRenderer: () => createRenderer,
+  createRouter: () => createRouter,
+  createStash: () => createStash,
+  createWorkspace: () => createWorkspace,
+  currentRouter: () => currentRouter,
+  currentStash: () => currentStash,
+  debounce: () => debounce,
+  delay: () => delay,
+  hold: () => hold,
+  interceptClicks: () => interceptClicks,
+  launch: () => launch,
+  ownsAnchor: () => ownsAnchor,
+  parseQuery: () => parseQuery,
+  persistStash: () => persistStash,
+  preloadLinks: () => preloadLinks,
+  rash: () => rash,
+  source: () => source,
+  throttle: () => throttle,
+  unwrapStash: () => unwrapStash,
+  validatePrepared: () => validatePrepared
+});
+
 // src/source.js
 class SourceFile {
   constructor(text, path = "<anonymous>") {
@@ -24878,11 +25011,6 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
 }
 
 // src/runtime/intrinsics.js
-var exports_intrinsics = {};
-__export(exports_intrinsics, {
-  __defineOwnDataProperty: () => __defineOwnDataProperty,
-  __toPropertyKey: () => __toPropertyKey
-});
 var {
   defineProperty: __definePropertyIntrinsic,
   getOwnPropertyNames: __getOwnPropertyNamesIntrinsic,
@@ -24901,25 +25029,6 @@ var __defineOwnDataProperty = (target, key, value) => __definePropertyIntrinsic(
 });
 
 // src/runtime/stdlib.js
-var exports_stdlib = {};
-__export(exports_stdlib, {
-  abort: () => abort,
-  assert: () => assert,
-  exit: () => exit,
-  kind: () => kind,
-  noop: () => noop,
-  p: () => p,
-  pj: () => pj,
-  pp: () => pp,
-  pr: () => pr,
-  raise: () => raise,
-  rand: () => rand,
-  sleep: () => sleep,
-  toMatchable: () => toMatchable,
-  todo: () => todo,
-  warn: () => warn,
-  zip: () => zip
-});
 var abort = (msg) => {
   if (msg)
     console.error(msg);
@@ -25049,15 +25158,6 @@ var toMatchable = (v) => {
 };
 
 // src/runtime/schema.js
-var exports_schema = {};
-__export(exports_schema, {
-  SchemaDef: () => SchemaDef,
-  SchemaError: () => SchemaError,
-  SchemaRegistry: () => SchemaRegistry,
-  __schema: () => __schema,
-  installPersistence: () => installPersistence,
-  registerCoercer: () => registerCoercer
-});
 var __RIP_SCHEMA_SENTINEL = Symbol.for("rip.runtime.schema");
 if (globalThis[__RIP_SCHEMA_SENTINEL]) {
   throw new Error("two copies of the Rip schema runtime loaded in one process — schemas from different copies " + "cannot see each other (separate registries, distinct SchemaError classes). Run .rip sources " + "through the rip CLI/loader (one shared runtime module per process), or load only one " + "standalone-compiled file per process.");
@@ -26766,24 +26866,6 @@ if (typeof globalThis !== "undefined") {
 }
 
 // src/runtime/reactive.js
-var exports_reactive = {};
-__export(exports_reactive, {
-  __batch: () => __batch,
-  __catchErrors: () => __catchErrors,
-  __computed: () => __computed,
-  __detachRef: () => __detachRef,
-  __effect: () => __effect,
-  __handleError: () => __handleError,
-  __ownerFrame: () => __ownerFrame,
-  __popOwner: () => __popOwner,
-  __pushOwner: () => __pushOwner,
-  __readonly: () => __readonly,
-  __setEffectErrorReporter: () => __setEffectErrorReporter,
-  __setErrorHandler: () => __setErrorHandler,
-  __state: () => __state,
-  __untracked: () => __untracked,
-  getEffectSignal: () => getEffectSignal
-});
 var __RIP_REACTIVE_SENTINEL = Symbol.for("rip.runtime.reactive");
 if (globalThis[__RIP_REACTIVE_SENTINEL]) {
   throw new Error("two copies of the Rip reactive runtime loaded in one process — states from different copies " + "cannot notify each other (separate dependency graphs, separate effect queues). Run .rip " + "sources through the rip CLI/loader (one shared runtime module per process), or load only " + "one standalone-compiled file per process.");
@@ -27302,45 +27384,6 @@ function __catchErrors(fn) {
 }
 
 // src/runtime/components.js
-var exports_components = {};
-__export(exports_components, {
-  __Component: () => __Component,
-  __claimGateConstructor: () => __claimGateConstructor,
-  __clsx: () => __clsx,
-  __detach: () => __detach,
-  __detachRef: () => __detachRef,
-  __gateBind: () => __gateBind,
-  __handleComponentError: () => __handleComponentError,
-  __hmrClassify: () => __hmrClassify,
-  __hmrEmit: () => __hmrEmit,
-  __hmrEntries: () => __hmrEntries,
-  __hmrEvents: () => __hmrEvents,
-  __hmrInitDiff: () => __hmrInitDiff,
-  __hmrLookup: () => __hmrLookup,
-  __hmrMigrateDiff: () => __hmrMigrateDiff,
-  __hmrMigrateRemount: () => __hmrMigrateRemount,
-  __hmrPatch: () => __hmrPatch,
-  __hmrPreserveState: () => __hmrPreserveState,
-  __hmrRegisterDefinition: () => __hmrRegisterDefinition,
-  __hmrRegistry: () => __hmrRegistry,
-  __hmrRestoreUi: () => __hmrRestoreUi,
-  __hmrSnapshotUi: () => __hmrSnapshotUi,
-  __hostOf: () => __hostOf,
-  __lis: () => __lis,
-  __ownerFrame: () => __ownerFrame,
-  __popComponent: () => __popComponent,
-  __popOwner: () => __popOwner,
-  __pushComponent: () => __pushComponent,
-  __pushOwner: () => __pushOwner,
-  __reconcile: () => __reconcile,
-  __reportChildFailure: () => __reportChildFailure,
-  __setChildFailureReporter: () => __setChildFailureReporter,
-  __style: () => __style,
-  __transition: () => __transition,
-  getContext: () => getContext,
-  hasContext: () => hasContext,
-  setContext: () => setContext
-});
 var __RIP_COMPONENTS_SENTINEL = Symbol.for("rip.runtime.components");
 if (globalThis[__RIP_COMPONENTS_SENTINEL]) {
   throw new Error("two copies of the Rip component runtime loaded in one process — components from different " + "copies cannot see each other (separate component stacks: context, parent chains, and error " + "boundaries silently break across copies). Run .rip sources through the rip CLI/loader (one " + "shared runtime module per process), or load only one standalone-compiled file per process.");
@@ -28806,39 +28849,6 @@ function __hostOf(inst, event) {
   const cap = event.charAt(0).toUpperCase() + event.slice(1);
   throw new Error(`${name}: @${event}: has no element to listen on — ${name} extends no tag. ` + `A child notifies its parent through a callback prop: declare \`@on${cap}?: () => void\` and call \`on${cap}?()\``);
 }
-
-// packages/app/index.rip
-var exports_app = {};
-__export(exports_app, {
-  ariaCurrent: () => ariaCurrent,
-  browserAdapter: () => browserAdapter,
-  buildRoutes: () => buildRoutes,
-  check: () => check,
-  connectFeed: () => connectFeed,
-  createApply: () => createApply,
-  createComponents: () => createComponents,
-  createMutation: () => createMutation,
-  createRenderer: () => createRenderer,
-  createRouter: () => createRouter,
-  createStash: () => createStash,
-  createWorkspace: () => createWorkspace,
-  currentRouter: () => currentRouter,
-  currentStash: () => currentStash,
-  debounce: () => debounce,
-  delay: () => delay,
-  hold: () => hold,
-  interceptClicks: () => interceptClicks,
-  launch: () => launch,
-  ownsAnchor: () => ownsAnchor,
-  parseQuery: () => parseQuery,
-  persistStash: () => persistStash,
-  preloadLinks: () => preloadLinks,
-  rash: () => rash,
-  source: () => source,
-  throttle: () => throttle,
-  unwrapStash: () => unwrapStash,
-  validatePrepared: () => validatePrepared
-});
 
 // packages/app/source.rip
 var makeSourceCell;
@@ -33380,7 +33390,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "c7308b3f084eb8ba";
+var compilerBuild = () => "02494a2e86a6b6f8";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

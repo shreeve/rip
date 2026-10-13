@@ -959,7 +959,7 @@ test! 'connection outages report once and a recovered stream resets the diagnost
   fetcher = (_url, options) ->
     calls++
     if calls <= 3 or calls is 5
-      throw Object.assign(Error.new('Was there a typo in the url or port?'), { code: 'FailedToOpenSocket' })
+      throw Object.assign(Error.new('ENOENT: Was there a typo in the url or port?'), { code: 'ENOENT' })
     if calls is 4
       return Response.new ReadableStream.new
         start: (controller) ->
