@@ -281,9 +281,11 @@ alongside other work on the machine, so read the rows as a ranking:
 | get 64 KB value, `view: true` | 59 ms | 5948 | — | |
 
 On Linux x86_64 (an Intel Core Ultra 9 185H) under Bun 1.4.3, with libemdb
-from emdb `636d6cd` built for x86_64_v3 (the bundled Linux library is
-built for baseline x86-64), pinned to one performance core on a machine
-reserved for the run, the median of three runs:
+from emdb `636d6cd` built for x86_64_v3, pinned to one performance core on
+a machine reserved for the run, the median of three runs. The bundled
+library is built for baseline x86-64; on the same machine, reserved,
+baseline, x86_64_v2 and x86_64_v3 builds of 0.10.1 measure the same within
+run-to-run noise on every row:
 
 | Operation | emdb | ns/op | bun:sqlite | ns/op |
 | --- | ---: | ---: | ---: | ---: |

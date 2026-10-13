@@ -11,7 +11,7 @@ licensed under the GNU Affero General Public License v3.0 (emdb's
 
 ## Provenance
 
-- emdb 0.10.1, commit `TAG-COMMIT` (to be filled in at the v0.10.1 tag)
+- emdb 0.10.1, tag `v0.10.1`, commit `3de80bf6d2628e031ae673f9496aefd36d33d380`
 - Zig 0.17.0
 - The C library is always built on a ReleaseFast engine, whatever
   `-Doptimize` says, and the shared one is stripped, its exports kept in
