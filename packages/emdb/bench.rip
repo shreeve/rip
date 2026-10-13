@@ -1,0 +1,150 @@
+# ==============================================================================
+# emdb bench — the binding's per-operation cost, beside bun:sqlite
+#
+#   bun run bench              # 1,000,000 entries
+#   rip bench.rip 200000       # another size
+#
+# Workloads, each on N entries with 16-byte string keys (key00000000…, in
+# order) and 32-byte values: put (one write transaction), get in key order,
+# get in random order, scan, scan with views, and delPrefix of every key;
+# then get of 64 KB values, copied and viewed, on N/100 entries.
+# Reads take the best of three passes after a warm-up; put and delPrefix
+# run once on a fresh database. Neither engine syncs: emdb opens noSync,
+# SQLite runs synchronous=OFF in WAL mode, on a WITHOUT ROWID table with
+# prepared statements. bun:sqlite is built into Bun, so the comparison
+# adds no dependency.
+# ==============================================================================
+
+import { open } from 'rip/emdb'
+import { Database } from 'bun:sqlite'
+import { mkdtempSync, rmSync } from 'fs'
+import { join } from 'path'
+import { tmpdir } from 'os'
+
+N =! Number(process.argv[2] ?? 1_000_000)
+DIR =! mkdtempSync join(tmpdir(), 'rip-emdb-bench-')
+process.on 'exit', -> rmSync DIR, recursive: true, force: true
+
+KEYS =! (("key" + String(i).padStart(8, '0')).padEnd(16, '.') for i in [0...N])
+VALUE =! Uint8Array.new(32).fill(0x61)
+SHUFFLED =! KEYS.slice()
+do ->
+  seed = 42
+  for i in [SHUFFLED.length - 1..1] by -1
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff
+    j = seed % (i + 1)
+    [SHUFFLED[i], SHUFFLED[j]] = [SHUFFLED[j], SHUFFLED[i]]
+  return
+
+once = (fn) ->
+  t0 = performance.now()
+  n = fn()
+  [performance.now() - t0, n]
+
+bestOf3 = (fn) ->
+  fn()
+  best = Infinity
+  n = 0
+  for _ in [0...3]
+    [ms, n] = once fn
+    best = Math.min(best, ms)
+  [best, n]
+
+rows = []
+row = (engine, name, [ms, n], count = N) ->
+  throw Error.new "#{engine} #{name}: touched #{n} entries, not #{count}" unless n is count
+  rows.push { engine, name, ms, count }
+
+# ==[ emdb ]====================================================================
+
+db = open join(DIR, 'bench.emdb'), noSync: true, mapSize: 2 ** 31
+
+putAll = ->
+  db.write (t) ->
+    t.put k, VALUE for k in KEYS
+    KEYS.length
+
+row 'emdb', 'put', once putAll
+
+getAll = (keys, opts) ->
+  db.read (t) ->
+    n = 0
+    for k in keys
+      n++ if t.get(k, opts)?
+    n
+
+row 'emdb', 'get (in order)', bestOf3 -> getAll KEYS
+row 'emdb', 'get (random)', bestOf3 -> getAll SHUFFLED
+row 'emdb', 'get (view)', bestOf3 -> getAll KEYS, { view: true }
+
+scanAll = (opts) ->
+  db.read (t) ->
+    n = 0
+    for [k, v] as t.scan(opts)
+      n++
+    n
+
+row 'emdb', 'scan', bestOf3 -> scanAll()
+row 'emdb', 'scan (view)', bestOf3 -> scanAll { view: true }
+purgeAll = -> db.write (t) -> t.delPrefix 'key'
+row 'emdb', 'delPrefix', once purgeAll
+
+BIG_N =! Math.max(1, Math.floor(N / 100))
+BIG =! Uint8Array.new(65536).fill(0x62)
+bigKeys = KEYS.slice(0, BIG_N)
+putBig = ->
+  db.write (t) ->
+    t.put k, BIG for k in bigKeys
+    return
+putBig()
+row 'emdb', 'get 64 KB', (bestOf3 -> getAll bigKeys), BIG_N
+row 'emdb', 'get 64 KB (view)', (bestOf3 -> getAll bigKeys, { view: true }), BIG_N
+db.close()
+
+# ==[ bun:sqlite, for comparison ]==============================================
+
+sq = Database.new join(DIR, 'bench.sqlite')
+sq.run 'PRAGMA journal_mode = WAL'
+sq.run 'PRAGMA synchronous = OFF'
+sq.run 'CREATE TABLE kv (k TEXT PRIMARY KEY, v BLOB) WITHOUT ROWID'
+
+insert = sq.prepare 'INSERT INTO kv (k, v) VALUES (?, ?)'
+row 'sqlite', 'put', once -> sq.transaction(->
+  insert.run k, VALUE for k in KEYS
+  KEYS.length)()
+
+select = sq.prepare 'SELECT v FROM kv WHERE k = ?'
+sqGetAll = (keys) -> sq.transaction(->
+  n = 0
+  for k in keys
+    n++ if select.get(k)?
+  n)()
+
+row 'sqlite', 'get (in order)', bestOf3 -> sqGetAll KEYS
+row 'sqlite', 'get (random)', bestOf3 -> sqGetAll SHUFFLED
+
+scan = sq.prepare 'SELECT k, v FROM kv ORDER BY k'
+row 'sqlite', 'scan', bestOf3 -> sq.transaction(->
+  n = 0
+  for r as scan.iterate()
+    n++
+  n)()
+
+purge = sq.prepare "DELETE FROM kv WHERE k >= 'key' AND k < 'kez'"
+row 'sqlite', 'delPrefix', once -> purge.run().changes
+
+sq.transaction(-> insert.run k, BIG for k in bigKeys)()
+row 'sqlite', 'get 64 KB', (bestOf3 -> sqGetAll bigKeys), BIG_N
+sq.close()
+
+# ==[ Report ]==================================================================
+
+p "\n#{N.toLocaleString()} entries, Bun #{Bun.version} on #{process.platform}-#{process.arch}\n"
+p "#{'operation'.padEnd(16)} #{'emdb'.padStart(10)} #{'ns/op'.padStart(7)}   #{'sqlite'.padStart(10)} #{'ns/op'.padStart(7)}"
+for name in [...Set.new(rows.map (r) -> r.name)]
+  cell = (engine) ->
+    r = rows.find (r) -> r.engine is engine and r.name is name
+    return "#{'—'.padStart(10)} #{''.padStart(7)}" unless r
+    "#{(r.ms.toFixed(0) + ' ms').padStart(10)} #{(r.ms * 1e6 / r.count).toFixed(0).padStart(7)}"
+  p "#{name.padEnd(16)} #{cell('emdb')}   #{cell('sqlite')}"
+p ''
