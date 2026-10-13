@@ -21,7 +21,7 @@ import { run, quit, suspend, mount, renderToString, print, screen, Box, Text, St
 import { Log } from '../demo/log.rip'
 import { Terminal, Stdin, count, differs, tally } from './events/harness.rip'
 import { join } from 'path'
-import { tmpdir } from 'os'
+import { tmpdir, constants } from 'os'
 import { unlinkSync } from 'fs'
 
 # A test that fails with its app still live would hand its own report
@@ -52,6 +52,7 @@ PUSH  =! "#{CSI}>1u"                            # kitty: push the disambiguation
 POP   =! "#{CSI}<u"
 KITTY =! "#{CSI}?0u"                            # what a terminal that speaks kitty answers
 ENTER =! "#{CSI}?1049h#{CSI}H"                  # the alternate screen, and its top-left
+TSTP =! constants.signals.SIGTSTP                # 18 on macOS, 20 on Linux
 LEAVE =! "#{CSI}?1049l"
 BEGIN =! "#{CSI}?2026h"                         # a synchronized update
 END   =! "#{CSI}?2026l"
@@ -879,7 +880,7 @@ test! "Ctrl-Z under `rip app.rip`: the terminal is given back and the job — th
   { code, err, states, out } = job.finish!
   eq [code, err], [0, '']
   eq states.map((event) -> Object.keys(event)[0]), ['started', 'stopped', 'continued', 'exited', 'end'], JSON.stringify states
-  eq states[1], { stopped: 18 }, 'the job leader is stopped by SIGTSTP'
+  eq states[1], { stopped: TSTP }, 'the job leader is stopped by SIGTSTP'
   ok job.before('stopped').endsWith(TORN), JSON.stringify job.before('stopped').slice -60
 
 test! "fg: the app takes the terminal back, asks the row again, draws whole with no timer to keep it alive, and hears the next key", ->
@@ -898,7 +899,7 @@ test! "SIGTERM while stopped: pending until the continue, then the app is closed
   job = Pty.new [[0, '?count:0'], [200, '\x1a'], [300, '@SIGTERM'], [300, '%fg'], [800, '']]
   { code, states, out } = job.finish!
   eq code, 0
-  ok states.some((event) -> event.stopped is 18), JSON.stringify states
+  ok states.some((event) -> event.stopped is TSTP), JSON.stringify states
   ok states.some((event) -> event.exited is 143), JSON.stringify states
   ok out.includes('exit hook code=143') and not out.includes('exited\r\n'), JSON.stringify out.slice -120
   ok out.replace(/exit hook code=143\r\n$/, '').endsWith(TORN), JSON.stringify out.slice -80
