@@ -113,7 +113,8 @@ instead, with no copy, and a view dies:
 - when its transaction ends;
 - in a write transaction, at the next `put`, `del`, `delPrefix`, `clear`,
   `drop` or `tree(..., create: true)` (emdb's API-ABI04);
-- for a scan's pair, at that scan's next step.
+- for a view scan's value, at that scan's next step. A scan's keys are
+  always copies: a key is small, and a copy costs less than a view.
 
 A dead view is detached: its length is 0 and `view.buffer.detached` is
 true, so it reads as empty instead of as whatever the map holds by then.
@@ -166,7 +167,7 @@ db.read (txn) ->
   txn.scan prefix: 'user:'              # keys starting with user:
   txn.scan from: 'm'                    # from the first key at or after m
   txn.scan from: 'm', reverse: true     # from the last key at or before m, down
-  txn.scan tree: users, view: true      # a named tree's pairs, zero-copy
+  txn.scan tree: users, view: true      # a named tree's pairs, values zero-copy
 ```
 
 `prefix` and `from` combine. Options are checked when the scan is made.
@@ -254,6 +255,36 @@ emdb command: `emdb -r data.emdb data.backup`.
 | `txn.stat(tree)` | stat (main tree when omitted) |
 | `txn.scan({tree, prefix, from, reverse, view})` | iterator of `[key, value]` |
 | `EmdbError` | `code`, `name`, `message`, `committed` |
+
+## Performance
+
+```bash
+bun run bench              # 1,000,000 entries; rip bench.rip <n> for another size
+```
+
+`bench.rip` runs each operation on 1M entries (16-byte keys, 32-byte
+values; neither engine syncs) beside the same work through `bun:sqlite`,
+which is built into Bun. Measured on an Apple M5 under Bun 1.4.3, best of
+three, alongside other work on the machine, so read the rows as a
+ranking:
+
+| Operation | emdb | ns/op | bun:sqlite | ns/op |
+| --- | ---: | ---: | ---: | ---: |
+| put (one transaction) | 41 ms | 41 | 546 ms | 546 |
+| get, key order | 45 ms | 45 | 1676 ms | 1676 |
+| get, random order | 474 ms | 474 | 2988 ms | 2988 |
+| get, `view: true` | 229 ms | 229 | — | |
+| scan | 63 ms | 63 | 92 ms | 92 |
+| scan, `view: true` | 221 ms | 221 | — | |
+| delPrefix, every key | 2 ms | 2 | 164 ms | 164 |
+| get 64 KB value (10,000) | 77 ms | 7744 | 1014 ms | 101431 |
+| get 64 KB value, `view: true` | 61 ms | 6066 | — | |
+
+A copy is one `memcpy` (from the libc libemdb links) into a fresh
+`Uint8Array`. A view needs an external `ArrayBuffer` and a detach when
+it dies, which costs more than copying a small value: `view: true` pays
+only for large values, and less than it might, since emdb assembles a
+value spanning overflow pages into the transaction's own copy.
 
 ## Test
 

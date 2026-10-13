@@ -182,6 +182,26 @@ test "strings are UTF-8", ->
     db.write (t) -> t.put 'héllo', '✓ ok'
     eq [...db.read((t) -> t.get Uint8Array.from([104, 195, 169, 108, 108, 111]))], [...TextEncoder.new().encode('✓ ok')]
 
+test "string keys and values of every size round-trip", ->
+  withDb (db) ->
+    values =
+      ascii: 'plain'
+      short: 'é✓ ok'
+      long: 'x'.repeat(5000)
+      wide: 'é'.repeat(200_000)
+      huge: 'y'.repeat(400_000)
+    db.write (t) ->
+      t.put name, value for own name, value of values
+      t.put 'k'.repeat(70), 'long key'
+      t.put 'ключ', 'short non-ASCII key'
+      return
+    db.read (t) ->
+      eq text(t.get name), value for own name, value of values
+      eq text(t.get 'k'.repeat(70)), 'long key'
+      eq text(t.get 'ключ'), 'short non-ASCII key'
+      eq t.get('k'.repeat(69)), undefined
+      return
+
 test "a Uint8Array view with an offset passes only its own bytes", ->
   withDb (db) ->
     whole = TextEncoder.new().encode 'XXkeyYY'
@@ -686,7 +706,7 @@ test "a reverse write scan skips keys inserted behind it", ->
       out
     eq seen, ['cherry', 'blueberry', 'banana2', 'banana', 'apricot', 'apple']
 
-test "a view scan with a write in the middle continues, its views dying at the write", ->
+test "a view scan with a write in the middle continues, its value view dying at the write", ->
   withFruit (db) ->
     db.write (t) ->
       seen = []
@@ -695,7 +715,8 @@ test "a view scan with a write in the middle continues, its views dying at the w
         seen.push "#{name}=#{text(v)}"
         if name is 'apricot'
           t.put 'avocado', 'AVOCADO'
-          ok k.buffer.detached and v.buffer.detached
+          ok v.buffer.detached
+          eq text(k), 'apricot'   # keys are copies
       eq seen, ['apple=APPLE', 'apricot=APRICOT', 'avocado=AVOCADO', 'banana=BANANA', 'blueberry=BLUEBERRY', 'cherry=CHERRY']
 
 test "a reverse prefix scan with writes in the middle keeps to its prefix", ->
@@ -711,16 +732,21 @@ test "a reverse prefix scan with writes in the middle keeps to its prefix", ->
     eq seen, ['blueberry', 'banana']
     eq keys(db), ['ab', 'apple', 'apricot', 'bz', 'cherry']
 
-test "a view scan lends pairs that die at the next step", ->
+test "a view scan lends values that die at the next step; its keys are copies", ->
   withFruit (db) ->
-    db.read (t) ->
+    kept = db.read (t) ->
       prev = null
+      got = []
       for [k, v] as t.scan(view: true)
         eq text(v), text(k).toUpperCase()
-        if prev?
-          ok prev[0].buffer.detached and prev[1].buffer.detached
+        ok v.buffer.detached is false
+        ok prev[1].buffer.detached if prev?
         prev = [k, v]
-      return
+        got.push k
+      ok prev[1].buffer.detached   # the step that ended the scan
+      [got, prev[1]]
+    eq kept[0].map(text), FRUIT
+    ok kept[1].buffer.detached
 
 test "scan options are checked when the scan is made", ->
   withFruit (db) ->

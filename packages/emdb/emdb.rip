@@ -29,8 +29,13 @@ import { join, resolve } from 'node:path'
 
 # All twenty functions of emdb.h, so a library missing any refuses at load.
 # Handles (emdb_env*, emdb_txn*, emdb_cursor*) are u64; a key or value is a
-# `buffer` plus its `buffer_length` twin, which Bun reads off one typed
-# array at the moment of the call; out-pointers are small typed arrays.
+# `buffer` and a u64 length, so a key encoded into a reusable scratch array
+# passes without a subarray; out-pointers are small typed arrays.
+#
+# And memcpy, which libemdb links from libc, so dlsym on libemdb's handle
+# finds it without naming a platform's libc. One memcpy into a fresh
+# Uint8Array is the cheapest copy out of the map: toArrayBuffer makes an
+# external ArrayBuffer per value, which costs several times more (bench.rip).
 SYMBOLS =!
   emdb_env_open:    { args: ['ptr', 'ptr', 'ptr'], returns: 'i32' }
   emdb_env_close:   { args: ['u64'], returns: 'void' }
@@ -39,19 +44,20 @@ SYMBOLS =!
   emdb_txn_begin:   { args: ['u64', 'u64', 'u32', 'ptr'], returns: 'i32' }
   emdb_txn_commit:  { args: ['u64'], returns: 'i32' }
   emdb_txn_abort:   { args: ['u64'], returns: 'void' }
-  emdb_get:         { args: ['u64', 'u32', 'buffer', 'buffer_length', 'ptr', 'ptr'], returns: 'i32' }
-  emdb_put:         { args: ['u64', 'u32', 'buffer', 'buffer_length', 'buffer', 'buffer_length', 'u32'], returns: 'i32' }
-  emdb_del:         { args: ['u64', 'u32', 'buffer', 'buffer_length', 'u32', 'ptr'], returns: 'i32' }
+  emdb_get:         { args: ['u64', 'u32', 'buffer', 'u64', 'ptr', 'ptr'], returns: 'i32' }
+  emdb_put:         { args: ['u64', 'u32', 'buffer', 'u64', 'buffer', 'u64', 'u32'], returns: 'i32' }
+  emdb_del:         { args: ['u64', 'u32', 'buffer', 'u64', 'u32', 'ptr'], returns: 'i32' }
   emdb_tree_open:   { args: ['u64', 'ptr', 'u32', 'ptr'], returns: 'i32' }
   emdb_tree_drop:   { args: ['u64', 'u32', 'u32'], returns: 'i32' }
   emdb_tree_stat:   { args: ['u64', 'u32', 'ptr'], returns: 'i32' }
   emdb_cursor_open: { args: ['u64', 'u32', 'u32', 'ptr'], returns: 'i32' }
   emdb_cursor_get:  { args: ['u64', 'i32', 'ptr', 'ptr', 'ptr', 'ptr'], returns: 'i32' }
-  emdb_cursor_put:  { args: ['u64', 'buffer', 'buffer_length', 'buffer', 'buffer_length'], returns: 'i32' }
+  emdb_cursor_put:  { args: ['u64', 'buffer', 'u64', 'buffer', 'u64'], returns: 'i32' }
   emdb_cursor_del:  { args: ['u64'], returns: 'i32' }
   emdb_backup:      { args: ['u64', 'i32', 'u64', 'ptr'], returns: 'i32' }
   emdb_strerror:    { args: ['i32'], returns: 'cstring' }
   emdb_version:     { args: ['ptr', 'ptr', 'ptr'], returns: 'void' }
+  memcpy:           { args: ['buffer', 'u64', 'u64'], returns: 'void' }
 
 NOTFOUND =! -32000
 WRITER_ACTIVE =! -32010
@@ -175,14 +181,67 @@ VALN  =! BigUint64Array.new(1)
 COUNT =! BigUint64Array.new(1)
 TREE  =! Uint32Array.new(1)
 
-# A detached buffer is a dead view: passed on, it would read as the empty
-# string and act on the empty key or prefix, so it is refused.
+notBytes = (x, what) ->
+  if x instanceof Uint8Array
+    TypeError.new "emdb: a #{what} was a view that has died (its transaction ended, or a write followed it); copy a view with .slice() while it lives"
+  else
+    TypeError.new "emdb: a #{what} is a string or a Uint8Array, got #{if x is null then 'null' else typeof x}"
+
+# Bytes the caller keeps (a scan's bounds): a string encoded afresh, or the
+# caller's own Uint8Array. A detached buffer is a dead view: passed on, it
+# would read as the empty string and act on the empty key or prefix, so it
+# is refused.
 bytesOf = (x, what) ->
   return ENCODER.encode(x) if typeof x is 'string'
-  if x instanceof Uint8Array
-    throw TypeError.new "emdb: a #{what} was a view that has died (its transaction ended, or a write followed it); copy a view with .slice() while it lives" if x.buffer.detached
-    return x
-  throw TypeError.new "emdb: a #{what} is a string or a Uint8Array, got #{if x is null then 'null' else typeof x}"
+  return x if x instanceof Uint8Array and not x.buffer.detached
+  throw notBytes(x, what)
+
+# Bytes for one call. A Uint8Array passes as it is; a string is encoded
+# into a scratch array the next call reuses, which C reads only during the
+# call: key strings into one, value strings into the other. `encoded`
+# names the array, and the length is returned, so no subarray is made.
+# Short ASCII strings, the common key, are copied by charCode, cheaper
+# than encodeInto and its result object; a scratch array grows to fit, up
+# to SCRATCH_MAX, and a longer string is encoded on its own.
+SHORT       =! 64
+SCRATCH_MAX =! 1 << 20
+keyScratch = Uint8Array.new(1024)
+valScratch = Uint8Array.new(1024)
+encoded = null
+
+bytesFor = (x, what, isValue) ->
+  if typeof x is 'string'
+    buf = if isValue then valScratch else keyScratch
+    n = x.length
+    if n <= SHORT
+      i = 0
+      while i < n
+        c = x.charCodeAt(i)
+        break if c > 0x7F
+        buf[i] = c
+        i++
+      if i is n
+        encoded = buf
+        return n
+    if n * 3 > buf.length
+      if n * 3 > SCRATCH_MAX
+        encoded = ENCODER.encode(x)
+        return encoded.length
+      buf = Uint8Array.new(Math.min(SCRATCH_MAX, Math.max(n * 3, buf.length * 2)))
+      if isValue then valScratch = buf else keyScratch = buf
+    encoded = buf
+    return ENCODER.encodeInto(x, buf).written
+  throw notBytes(x, what) unless x instanceof Uint8Array and not x.buffer.detached
+  encoded = x
+  x.length
+
+# A copy of `len` bytes at `addr` (both BigInts, as the out-pointers hold).
+copyAt = (addr, len) ->
+  n = Number(len)
+  return Uint8Array.new(0) if n is 0
+  v = Uint8Array.new(n)
+  lib.memcpy v, addr, len
+  v
 
 # A NUL-terminated UTF-8 string for a `const char *`.
 cString = (s, what) ->
@@ -328,16 +387,27 @@ class Tree
 class Txn
   constructor: (@env, @_h, @readOnly) ->
     @ended = false
-    @_views = Set.new()   # buffers lent out, detached when they die
+    @_lent = false        # whether a view may be alive
+    @_views = []          # buffers get lent out, detached when they die
+    @_scans = []          # view scans in flight, each holding its value's buffer
     @_idle = Map.new()    # tree id → cursors free for another scan
     @_writes = 0          # mutating calls so far; scans re-seek after one
     @_epochs = null       # tree id → clears and drops of it so far
     @_created = null      # trees this write created, settled at its end
     @_dropped = null      # trees this write dropped, settled at its end
 
+  # Every entry point tests `@ended`, one field, and only then builds this.
+  _ended: (what) ->
+    Error.new "emdb: #{what} on a transaction that has ended (it lives only inside env.read or env.write)"
+
   _live: (what) ->
-    throw Error.new "emdb: #{what} on a transaction that has ended (it lives only inside env.read or env.write)" if @ended
+    throw @_ended(what) if @ended
     return
+
+  # The tree id from an options object, its keys checked.
+  _treeOf: (opts, allowed, what) ->
+    checkKeys opts, allowed, what
+    @_tree opts.tree, what
 
   _tree: (t, what) ->
     return 0 unless t?
@@ -383,29 +453,25 @@ class Txn
     (@_epochs ?= Map.new()).set id, @_epoch(id) + 1
     return
 
-  # A view lent out: detached at the next mutating call or at the end of
-  # the transaction (API-ABI04), so a dead view reads as empty, never as
-  # whatever the map holds by then.
-  _lend: (v) ->
-    @_views.add v.buffer if v.length
-    v
-
-  # A scan's view dies at its next step, before the transaction ends.
-  _kill: (buf) ->
-    @_views.delete buf
-    buf.transfer 0 unless buf.detached
-    return
-
+  # Views die at the next mutating call or at the end of the transaction
+  # (API-ABI04): each is detached, so a dead view reads as empty, never as
+  # whatever the map holds by then. get's views wait in a plain array; a
+  # view scan holds only its current value's buffer, which its next step
+  # detaches.
   _detach: ->
-    for buf as @_views
+    for buf in @_views
       buf.transfer 0 unless buf.detached
-    @_views.clear()
+    @_views.length = 0
+    for scan in @_scans
+      scan.buf.transfer 0 if scan.buf? and not scan.buf.detached
+      scan.buf = null
+    @_lent = false
     return
 
   # After every mutating call, failed or not, in a write transaction.
   _wrote: ->
     @_writes++
-    @_detach() if @_views.size
+    @_detach() if @_lent
     return
 
   _end: (commit) ->
@@ -421,47 +487,49 @@ class Txn
     return
 
   # The value stored under `key`, or undefined. A copy unless `view: true`.
+  # Without options, nothing is checked but the transaction and the key.
   get: (key, opts = null) ->
-    @_live 'txn.get'
-    checkKeys opts, GET_KEYS, 'txn.get'
-    tree = @_tree opts?.tree, 'txn.get'
-    k = bytesOf key, 'key'
-    rc = lib.emdb_get(@_h, tree, k, k, VALP, VALN)
+    throw @_ended('txn.get') if @ended
+    tree = if opts? then @_treeOf(opts, GET_KEYS, 'txn.get') else 0
+    n = bytesFor key, 'key', false
+    rc = lib.emdb_get(@_h, tree, encoded, n, VALP, VALN)
     return undefined if rc is NOTFOUND
-    check rc, 'emdb_get'
+    check rc, 'emdb_get' unless rc is 0
+    return copyAt(VALP[0], VALN[0]) unless opts?.view
     v = viewAt(VALP[0], VALN[0])
-    if opts?.view then @_lend(v) else v.slice()
+    if v.length
+      @_views.push v.buffer
+      @_lent = true
+    v
 
   put: (key, value, opts = null) ->
-    @_live 'txn.put'
-    checkKeys opts, TREE_KEYS, 'txn.put'
-    tree = @_tree opts?.tree, 'txn.put'
-    k = bytesOf key, 'key'
-    v = bytesOf value, 'value'
-    rc = lib.emdb_put(@_h, tree, k, k, v, v, 0)
+    throw @_ended('txn.put') if @ended
+    tree = if opts? then @_treeOf(opts, TREE_KEYS, 'txn.put') else 0
+    kn = bytesFor key, 'key', false
+    k = encoded
+    vn = bytesFor value, 'value', true
+    rc = lib.emdb_put(@_h, tree, k, kn, encoded, vn, 0)
     @_wrote() unless @readOnly
-    check rc, 'emdb_put'
+    check rc, 'emdb_put' unless rc is 0
     return
 
   # True when `key` was there to delete.
   del: (key, opts = null) ->
-    @_live 'txn.del'
-    checkKeys opts, TREE_KEYS, 'txn.del'
-    tree = @_tree opts?.tree, 'txn.del'
-    k = bytesOf key, 'key'
-    rc = lib.emdb_del(@_h, tree, k, k, 0, COUNT)
+    throw @_ended('txn.del') if @ended
+    tree = if opts? then @_treeOf(opts, TREE_KEYS, 'txn.del') else 0
+    n = bytesFor key, 'key', false
+    rc = lib.emdb_del(@_h, tree, encoded, n, 0, COUNT)
     @_wrote() unless @readOnly
     return false if rc is NOTFOUND
-    check rc, 'emdb_del'
+    check rc, 'emdb_del' unless rc is 0
     true
 
   # Delete every key starting with `prefix`; the number deleted.
   delPrefix: (prefix, opts = null) ->
-    @_live 'txn.delPrefix'
-    checkKeys opts, TREE_KEYS, 'txn.delPrefix'
-    tree = @_tree opts?.tree, 'txn.delPrefix'
-    p = bytesOf prefix, 'prefix'
-    rc = lib.emdb_del(@_h, tree, p, p, PREFIX, COUNT)
+    throw @_ended('txn.delPrefix') if @ended
+    tree = if opts? then @_treeOf(opts, TREE_KEYS, 'txn.delPrefix') else 0
+    n = bytesFor prefix, 'prefix', false
+    rc = lib.emdb_del(@_h, tree, encoded, n, PREFIX, COUNT)
     @_wrote() unless @readOnly
     check rc, 'emdb_del'
     Number(COUNT[0])
@@ -553,9 +621,9 @@ class Txn
   # Move the cursor; false at no entry.
   _step: (cur, op) ->
     rc = lib.emdb_cursor_get(cur, op, KEYP, KEYN, VALP, VALN)
+    return true if rc is 0
     return false if rc is NOTFOUND
     check rc, 'emdb_cursor_get'
-    true
 
   # The least key at or above `bound`. An empty bound is below every key,
   # and ptr() refuses an empty array.
@@ -573,7 +641,7 @@ class Txn
   _below: (cur, bound, inclusive) ->
     return inclusive and @_step(cur, FIRST) and KEYN[0] is 0n if bound.length is 0
     return @_step(cur, LAST) unless @_seek(cur, bound)
-    return true if inclusive and compareBytes(viewAt(KEYP[0], KEYN[0]), bound) is 0
+    return true if inclusive and compareBytes(copyAt(KEYP[0], KEYN[0]), bound) is 0
     @_step cur, PREV
 
   _start: (cur, prefix, from, reverse) ->
@@ -587,30 +655,35 @@ class Txn
 
   # The scan's body. A generator runs nothing until its first step, which
   # may come after the transaction ended, so it checks before any call.
+  # Keys are always copies: a key is small, and a copy costs less than a
+  # view. With `view`, the value is a view, held in `scan.buf` so that the
+  # next step, a write or the transaction's end detaches it.
   _walk: (handle, tree, prefix, from, reverse, view) ->
-    @_live 'a scan'
+    throw @_ended('a scan') if @ended
     cur = @_cursor tree
     epoch = @_epoch tree
     writes = @_writes
     last = null
+    scan = if view then { buf: null } else null
+    @_scans.push scan if view
     found = @_start cur, prefix, from, reverse
     try
       while found
-        k = viewAt(KEYP[0], KEYN[0])
+        k = copyAt(KEYP[0], KEYN[0])
         break if prefix? and not startsWith(k, prefix)
-        v = viewAt(VALP[0], VALN[0])
         last = k.slice() unless @readOnly
         if view
-          [kb, vb] = [k.buffer, v.buffer]
-          @_lend k
-          @_lend v
+          v = viewAt(VALP[0], VALN[0])
+          if v.length
+            scan.buf = v.buffer
+            @_lent = true
           yield [k, v]
         else
-          yield [k.slice(), v.slice()]
-        @_live 'a scan'
-        if view
-          @_kill kb
-          @_kill vb
+          yield [k, copyAt(VALP[0], VALN[0])]
+        throw @_ended('a scan') if @ended
+        if view and scan.buf?
+          scan.buf.transfer 0 unless scan.buf.detached
+          scan.buf = null
         if @_writes is writes
           found = @_step cur, (if reverse then PREV else NEXT)
         else
@@ -628,8 +701,9 @@ class Txn
             found = @_below cur, last, false
           else
             found = @_seek cur, last
-            found = @_step(cur, NEXT) if found and compareBytes(viewAt(KEYP[0], KEYN[0]), last) is 0
+            found = @_step(cur, NEXT) if found and compareBytes(copyAt(KEYP[0], KEYN[0]), last) is 0
     finally
+      @_scans.splice @_scans.indexOf(scan), 1 if view
       unless @ended or @_epoch(tree) isnt epoch
         idle = @_idle.get(tree)
         @_idle.set tree, (idle = []) unless idle?
