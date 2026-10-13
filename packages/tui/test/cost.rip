@@ -1,0 +1,46 @@
+# Cost pins: does a reader take time in proportion to its input?
+#
+# Time is this thread's CPU time, not the wall's: on a busy machine a
+# longer run waits for a core more often, which would move the larger
+# number alone.
+export spent = ->
+  { user, system } = process.threadCpuUsage()
+  (user + system) / 1000
+
+# The smallest step that clock takes, in ms. It differs by platform, so
+# a pin sizes its work to it rather than assume one: a run shorter than a
+# few steps can read as no time at all.
+export step =! do ->
+  least = Infinity
+  for round in [0...5]
+    from = spent()
+    now = from
+    now = spent() while now is from
+    least = Math.min least, now - from
+  least
+
+# Whether `measure`, which runs `n` units of work and answers the ms it
+# took, grows linearly: eight times the work under 24 times the time,
+# where a quadratic reader takes 64. Each size is its best of five. The
+# size doubles from `base` until the smaller run spans five clock steps,
+# so the ratio is of times the clock can tell apart — a work whose time
+# never reaches that is reported, never passed on a floor. Then two
+# more tries if a collection lands in every round of one size — but not
+# for a run far over the bound, which no collection explains.
+export grows = (measure, base) ->
+  best = (n) ->
+    least = Infinity
+    least = Math.min(least, measure(n)) for round in [0...5]
+    least
+  n = base
+  n *= 2 while n < base * 4096 and best(n) < 5 * step
+  small = large = 0
+  for attempt in [0...3]
+    small = best n
+    large = best 8 * n
+    break if small >= 5 * step and (large < 24 * small or large > 48 * small)
+  { linear: small >= 5 * step and large < 24 * small, n, small, large }
+
+# The failure message: the sizes, their times, and the clock's step.
+export account = (what, { n, small, large }) ->
+  "#{what}: #{n.toLocaleString()} took #{small.toFixed 2} ms and #{(8 * n).toLocaleString()} took #{large.toFixed 2} ms (clock step #{step.toFixed 3} ms)"
