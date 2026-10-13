@@ -102,6 +102,15 @@ emits a plain `function*`.
 
 ### Legal-looking code rejected, or inconsistent
 
+**C44 M — A curried arrow with a block body does not parse.**
+```coffee
+f = (a) -> (n) ->
+  a + n
+```
+`1:18: Unexpected 'dedent' — expected indent`. The one-line form
+`f = (a) -> (n) -> a + n` and the explicit nest (`(a) ->` with an
+indented `(n) ->` under it) both compile.
+
 **C17 ✔ M — Inline `try` with a paren-less call before `catch`/`finally` fails to parse.**
 `y = try f 1 catch then 2`, `x = try JSON.parse s catch then null`,
 `try f! x catch then y`, `try f x finally g()` → "Unexpected 'catch'".
