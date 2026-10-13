@@ -54,6 +54,10 @@
         "rip-email": "./cli.rip",
       },
     },
+    "packages/emdb": {
+      "name": "@rip/emdb",
+      "version": "0.0.0",
+    },
     "packages/fake": {
       "name": "@rip/fake",
       "version": "4.0.0",
@@ -212,6 +216,8 @@
     "@rip/decimal": ["@rip/decimal@workspace:packages/decimal"],
 
     "@rip/email": ["@rip/email@workspace:packages/email"],
+
+    "@rip/emdb": ["@rip/emdb@workspace:packages/emdb"],
 
     "@rip/fake": ["@rip/fake@workspace:packages/fake"],
 

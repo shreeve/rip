@@ -1,0 +1,626 @@
+# ==============================================================================
+# rip/emdb tests — the binding against a real libemdb
+# ==============================================================================
+
+import { test, eq, ok, throws, plainEnv } from 'rip/testing'
+import { open, version, EmdbError } from 'rip/emdb'
+import * as mod from 'rip/emdb'
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync, statSync, openSync, closeSync, realpathSync } from 'fs'
+import { join } from 'path'
+import { tmpdir } from 'os'
+import { spawnSync } from 'child_process'
+import { suffix } from 'bun:ffi'
+
+ROOT =! mkdtempSync join(tmpdir(), 'rip-emdb-')
+process.on 'exit', -> rmSync ROOT, recursive: true, force: true
+
+DECODER =! TextDecoder.new()
+text = (b) -> if b? then DECODER.decode(b) else b
+
+serial = 0
+fresh = -> join ROOT, "db-#{++serial}.emdb"
+
+# A database of its own, syncs off: these tests are not about durability.
+scratch = (opts = {}) -> open fresh(), { noSync: true, ...opts }
+
+# Run `fn` on a scratch database and close it, whatever happens.
+withDb = (opts, fn) ->
+  [opts, fn] = [{}, opts] if typeof opts is 'function'
+  db = scratch opts
+  try
+    fn db
+  finally
+    db.close() unless db.closed
+
+keys = (db, opts = {}) ->
+  db.read (t) -> (text(k) for [k] as t.scan(opts))
+
+# The EmdbError a function throws.
+emdbError = (fn) ->
+  try
+    fn()
+  catch e
+    return e if e instanceof EmdbError
+    throw e
+  throw Error.new 'expected an EmdbError'
+
+# ==[ Package surface ]==
+
+console.log "\nPackage"
+
+test "exports open, version and EmdbError, nothing else", ->
+  eq Object.keys(mod).sort(), ['EmdbError', 'open', 'version']
+  eq typeof open, 'function'
+  eq typeof version, 'function'
+  ok EmdbError.prototype instanceof Error
+
+test "no dependencies of any kind", ->
+  pkg = JSON.parse readFileSync(join(import.meta.dir, 'package.json'), 'utf8')
+  for field in ['dependencies', 'peerDependencies', 'optionalDependencies', 'devDependencies']
+    eq pkg[field], undefined
+  eq pkg.exports, { '.': './emdb.rip' }
+  eq pkg.files, ['emdb.rip', 'README.md']
+
+test "server-only: browser safety is never declared", ->
+  pkg = JSON.parse readFileSync(join(import.meta.dir, 'package.json'), 'utf8')
+  eq pkg.rip, undefined
+
+test "version is libemdb's, major.minor.patch", ->
+  ok /^\d+\.\d+\.\d+$/.test(version()), version()
+
+# ==[ Loading libemdb ]==
+
+console.log "\nLoading libemdb"
+
+# A copy of the module in a directory with no emdb checkout beside it, run
+# with EMDB_LIB unset and an empty pkg-config search path.
+runCopy = (env) ->
+  dir = join ROOT, "copy-#{++serial}", 'a', 'b', 'c'
+  mkdirSync dir, recursive: true
+  copyFileSync join(import.meta.dir, 'emdb.rip'), join(dir, 'emdb.rip')
+  writeFileSync join(dir, 'run.rip'), "import { open } from './emdb.rip'\nopen '#{join(dir, 'x.emdb')}'\n"
+  empty = join ROOT, "pc-#{serial}"
+  mkdirSync empty
+  base = plainEnv(PKG_CONFIG_LIBDIR: empty, PKG_CONFIG_PATH: '')
+  delete base.EMDB_LIB
+  bin = join(import.meta.dir, '..', '..', 'bin', 'rip')
+  spawnSync process.execPath, [bin, join(dir, 'run.rip')], encoding: 'utf8', env: { ...base, ...env }
+
+test "no library anywhere: the error names every place tried, in order", ->
+  r = runCopy {}
+  ok r.status isnt 0, 'expected a failure'
+  out = r.stderr
+  ok out.includes('emdb: libemdb not found. Tried, in order:'), out
+  a = out.indexOf('EMDB_LIB: not set')
+  b = out.indexOf('pkg-config')
+  c = out.indexOf("sibling emdb checkout: ")
+  ok a >= 0 and b > a and c > b, out
+  ok out.includes("/emdb/lib/libemdb.#{suffix} does not exist"), out
+
+test "EMDB_LIB naming a missing file fails on it, never falling through", ->
+  r = runCopy EMDB_LIB: '/nonexistent/libemdb.so'
+  ok r.status isnt 0, 'expected a failure'
+  ok r.stderr.includes('emdb: libemdb not found at /nonexistent/libemdb.so (EMDB_LIB)'), r.stderr
+  ok not r.stderr.includes('Tried, in order'), r.stderr
+
+test "the lib option naming a missing file fails on it", ->
+  throws (-> open fresh(), lib: '/nonexistent/libemdb.dylib'), 'libemdb not found at /nonexistent/libemdb.dylib (the lib option)'
+
+test "a second, different library in one process is refused", ->
+  version()   # loaded
+  other = join ROOT, "other-libemdb.#{suffix}"
+  writeFileSync other, ''   # refused by its path, before any load
+  throws (-> open fresh(), lib: other), 'libemdb is already loaded from', "cannot also load #{realpathSync(other)}"
+
+# ==[ Keys and values ]==
+
+console.log "\nKeys and values"
+
+test "put, get, update, delete", ->
+  withDb (db) ->
+    db.write (t) -> t.put 'apple', 'red'
+    eq text(db.read (t) -> t.get 'apple'), 'red'
+    db.write (t) -> t.put 'apple', 'green'
+    eq text(db.read (t) -> t.get 'apple'), 'green'
+    eq db.write((t) -> t.del 'apple'), true
+    eq db.read((t) -> t.get 'apple'), undefined
+
+test "a missing key is undefined; deleting one is false", ->
+  withDb (db) ->
+    eq db.read((t) -> t.get 'nope'), undefined
+    eq db.write((t) -> t.del 'nope'), false
+
+test "values come back as Uint8Array; binary keys and values round-trip", ->
+  withDb (db) ->
+    key = Uint8Array.from [0, 255, 1, 0]
+    val = Uint8Array.from [0, 0, 7, 255, 0]
+    db.write (t) -> t.put key, val
+    got = db.read (t) -> t.get key
+    ok got instanceof Uint8Array
+    eq [...got], [0, 0, 7, 255, 0]
+
+test "an empty value round-trips as an empty Uint8Array", ->
+  withDb (db) ->
+    db.write (t) -> t.put 'k', ''
+    got = db.read (t) -> t.get 'k'
+    ok got instanceof Uint8Array
+    eq got.length, 0
+
+test "strings are UTF-8", ->
+  withDb (db) ->
+    db.write (t) -> t.put 'héllo', '✓ ok'
+    eq [...db.read((t) -> t.get Uint8Array.from([104, 195, 169, 108, 108, 111]))], [...TextEncoder.new().encode('✓ ok')]
+
+test "a Uint8Array view with an offset passes only its own bytes", ->
+  withDb (db) ->
+    whole = TextEncoder.new().encode 'XXkeyYY'
+    db.write (t) -> t.put whole.subarray(2, 5), whole.subarray(0, 2)
+    eq text(db.read (t) -> t.get 'key'), 'XX'
+
+test "delPrefix deletes every key with the prefix and returns the count", ->
+  withDb (db) ->
+    db.write (t) ->
+      t.put k, '1' for k in ['a', 'user:1', 'user:2', 'user:3', 'users', 'z']
+      return
+    eq db.write((t) -> t.delPrefix 'user:'), 3
+    eq keys(db), ['a', 'users', 'z']
+    eq db.write((t) -> t.delPrefix 'nothing'), 0
+
+test "copied values survive their transaction and later writes", ->
+  withDb (db) ->
+    db.write (t) -> t.put 'k', 'first'
+    kept = db.read (t) -> t.get 'k'
+    db.write (t) -> t.put 'k', 'second'
+    eq text(kept), 'first'
+    eq text(db.read (t) -> t.get 'k'), 'second'
+
+test "a view is detached when its transaction ends", ->
+  withDb (db) ->
+    db.write (t) -> t.put 'k', 'value'
+    seen = null
+    dead = db.read (t) ->
+      v = t.get 'k', view: true
+      seen = text(v)
+      v
+    eq seen, 'value'
+    ok dead.buffer.detached
+    eq dead.length, 0
+
+test "in a write transaction a view dies at the next write (API-ABI04)", ->
+  withDb (db) ->
+    db.write (t) -> t.put 'k', 'value'
+    db.write (t) ->
+      v = t.get 'k', view: true
+      eq text(v), 'value'
+      t.put 'other', 'x'
+      ok v.buffer.detached
+      eq text(t.get 'k'), 'value'
+
+test "big values spanning overflow pages round-trip, copied and viewed", ->
+  withDb pageSize: 4096, (db) ->
+    big = Uint8Array.new(1_000_003)
+    big[i] = (i * 31) & 0xFF for i in [0...big.length]
+    db.write (t) -> t.put 'big', big
+    got = db.read (t) -> t.get 'big'
+    eq got.length, big.length
+    ok Buffer.from(got).equals(Buffer.from(big))
+    same = db.read (t) -> Buffer.from(t.get('big', view: true)).equals(Buffer.from(big))
+    ok same
+    st = db.read (t) -> t.stat()
+    ok st.overflowPages >= Math.ceil(big.length / 4096), "overflow pages: #{st.overflowPages}"
+
+# ==[ Transactions ]==
+
+console.log "\nTransactions"
+
+test "write returns its function's result once committed; read returns too", ->
+  withDb (db) ->
+    eq db.write((t) -> t.put('k', 'v'); 42), 42
+    eq db.read((t) -> text(t.get 'k') + '!'), 'v!'
+
+test "a throw inside write aborts and rethrows the same error", ->
+  withDb (db) ->
+    db.write (t) -> t.put 'k', 'kept'
+    boom = Error.new 'boom'
+    caught = null
+    try
+      db.write (t) ->
+        t.put 'k', 'lost'
+        t.put 'new', 'lost'
+        throw boom
+    catch e
+      caught = e
+    eq caught, boom
+    eq text(db.read (t) -> t.get 'k'), 'kept'
+    eq db.read((t) -> t.get 'new'), undefined
+
+test "a read inside a write sees the last commit, not the write in flight", ->
+  withDb (db) ->
+    db.write (t) -> t.put 'k', 'old'
+    db.write (t) ->
+      t.put 'k', 'new'
+      eq text(t.get 'k'), 'new'
+      eq text(db.read (r) -> r.get 'k'), 'old'
+    eq text(db.read (t) -> t.get 'k'), 'new'
+
+test "a transaction function that returns a promise is aborted and refused", ->
+  withDb (db) ->
+    throws (-> db.write (t) -> t.put('k', 'v'); Promise.resolve(1)), TypeError, 'returned a promise'
+    eq db.read((t) -> t.get 'k'), undefined
+
+test "a transaction used after its scope throws", ->
+  withDb (db) ->
+    db.write (t) -> t.put 'k', 'v'
+    leaked = db.read (t) -> t
+    ok leaked.ended
+    throws (-> leaked.get 'k'), 'txn.get on a transaction that has ended'
+    leakedW = db.write (t) -> t
+    throws (-> leakedW.put 'k', 'v'), 'txn.put on a transaction that has ended'
+
+test "a scan resumed after its transaction ended throws", ->
+  withDb (db) ->
+    db.write (t) -> t.put 'a', '1'; t.put 'b', '2'
+    walk = db.read (t) ->
+      s = t.scan()
+      s.next()
+      s
+    throws (-> walk.next()), 'a scan on a transaction that has ended'
+
+test "a second write transaction in one environment is EMDB_WRITER_ACTIVE", ->
+  withDb (db) ->
+    e = emdbError -> db.write (t) -> db.write (u) -> u.put 'k', 'v'
+    eq e.name, 'EMDB_WRITER_ACTIVE'
+
+test "write options set the commit's sync mode; unknown ones are refused", ->
+  withDb (db) ->
+    db.write { noSync: true }, (t) -> t.put 'a', '1'
+    db.write { sync: true }, (t) -> t.put 'b', '2'
+    eq keys(db), ['a', 'b']
+    throws (-> db.write { durable: true }, (t) -> t), TypeError, "env.write has no option 'durable'"
+    throws (-> db.write { sync: 1 }, (t) -> t), TypeError, 'sync is true or false'
+    db.sync()
+
+# ==[ Named trees ]==
+
+console.log "\nNamed trees"
+
+test "a named tree keeps its keys apart from the main tree", ->
+  withDb (db) ->
+    db.write (t) ->
+      users = t.tree 'users', create: true
+      t.put 'k', 'in users', tree: users
+      t.put 'k', 'in main'
+    db.read (t) ->
+      users = t.tree 'users'
+      eq text(t.get 'k', tree: users), 'in users'
+      eq text(t.get 'k'), 'in main'
+      eq t.stat(users).entries, 1
+
+test "a tree handle works in later transactions", ->
+  withDb (db) ->
+    users = db.write (t) -> t.tree 'users', create: true
+    db.write (t) -> t.put 'a', '1', tree: users
+    eq db.read((t) -> (text(k) for [k] as t.scan(tree: users))), ['a']
+
+test "a missing tree without create is EMDB_NOTFOUND", ->
+  withDb (db) ->
+    e = emdbError -> db.read (t) -> t.tree 'nope'
+    eq e.name, 'EMDB_NOTFOUND'
+    eq e.code, -32000
+
+test "clear empties a tree; drop deletes it", ->
+  withDb (db) ->
+    db.write (t) ->
+      logs = t.tree 'logs', create: true
+      t.put "#{i}", 'x', tree: logs for i in [0...10]
+      return
+    db.write (t) -> t.clear t.tree('logs')
+    eq db.read((t) -> t.stat(t.tree('logs')).entries), 0
+    db.write (t) -> t.drop t.tree('logs')
+    eq emdbError(-> db.read (t) -> t.tree 'logs').name, 'EMDB_NOTFOUND'
+
+test "the main tree cannot be cleared or dropped by omission", ->
+  withDb (db) ->
+    throws (-> db.write (t) -> t.clear()), TypeError, 'txn.clear takes a tree'
+    throws (-> db.write (t) -> t.drop()), TypeError, 'txn.drop takes a tree'
+
+test "a tree of another environment is refused", ->
+  withDb (a) ->
+    withDb (b) ->
+      tree = a.write (t) -> t.tree 'x', create: true
+      throws (-> b.read (t) -> t.get 'k', tree: tree), 'a tree of another environment'
+      throws (-> b.read (t) -> t.get 'k', tree: 'x'), TypeError, 'takes a tree from txn.tree'
+
+test "creating a tree in a read transaction is EMDB_TXN_READ_ONLY", ->
+  withDb (db) ->
+    eq emdbError(-> db.read (t) -> t.tree 'x', create: true).name, 'EMDB_TXN_READ_ONLY'
+
+test "a tree name is a non-empty string without NUL", ->
+  withDb (db) ->
+    throws (-> db.write (t) -> t.tree ''), TypeError, 'tree name is a non-empty string'
+    throws (-> db.write (t) -> t.tree 'a\0b'), TypeError, 'cannot contain NUL'
+
+# ==[ Scans ]==
+
+console.log "\nScans"
+
+FRUIT =! ['apple', 'apricot', 'banana', 'blueberry', 'cherry']
+
+withFruit = (fn) ->
+  withDb (db) ->
+    db.write (t) ->
+      t.put k, k.toUpperCase() for k in FRUIT
+      return
+    fn db
+
+test "forward scan yields [key, value] pairs in key order", ->
+  withFruit (db) ->
+    pairs = db.read (t) -> ([text(k), text(v)] for [k, v] as t.scan())
+    eq pairs, FRUIT.map (k) -> [k, k.toUpperCase()]
+
+test "reverse scan", ->
+  withFruit (db) ->
+    eq keys(db, reverse: true), [...FRUIT].reverse()
+
+test "prefix scan, forward and reverse", ->
+  withFruit (db) ->
+    eq keys(db, prefix: 'ap'), ['apple', 'apricot']
+    eq keys(db, prefix: 'b', reverse: true), ['blueberry', 'banana']
+    eq keys(db, prefix: 'zz'), []
+    eq keys(db, prefix: 'zz', reverse: true), []
+    eq keys(db, prefix: 'a', reverse: true), ['apricot', 'apple']
+
+test "from starts at the key, or the nearest one past it in the scan's direction", ->
+  withFruit (db) ->
+    eq keys(db, from: 'banana'), ['banana', 'blueberry', 'cherry']
+    eq keys(db, from: 'b'), ['banana', 'blueberry', 'cherry']
+    eq keys(db, from: 'banana', reverse: true), ['banana', 'apricot', 'apple']
+    eq keys(db, from: 'b', reverse: true), ['apricot', 'apple']
+    eq keys(db, from: 'zzz', reverse: true), [...FRUIT].reverse()
+    eq keys(db, from: 'zzz'), []
+    eq keys(db, from: 'a', reverse: true), []
+
+test "from and prefix together", ->
+  withFruit (db) ->
+    eq keys(db, prefix: 'b', from: 'bl'), ['blueberry']
+    eq keys(db, prefix: 'b', from: 'a'), ['banana', 'blueberry']
+    eq keys(db, prefix: 'b', from: 'bz', reverse: true), ['blueberry', 'banana']
+    eq keys(db, prefix: 'b', from: 'bc', reverse: true), ['banana']
+    eq keys(db, prefix: 'b', from: 'c', reverse: true), ['blueberry', 'banana']
+
+test "an empty from is below every key: forward from it is everything, reverse only the empty key", ->
+  withDb (db) ->
+    db.write (t) -> t.put 'a', '1'
+    eq keys(db, from: ''), ['a']
+    eq keys(db, from: '', reverse: true), []
+    db.write (t) -> t.put '', '0'
+    eq keys(db, from: ''), ['', 'a']
+    eq keys(db, from: '', reverse: true), ['']
+    eq keys(db, prefix: '', reverse: true), ['a', '']
+
+test "a reverse prefix scan of 0xFF bytes reaches the end of the tree", ->
+  withDb (db) ->
+    db.write (t) ->
+      t.put Uint8Array.from([0xFF]), 'a'
+      t.put Uint8Array.from([0xFF, 0xFF]), 'b'
+      t.put Uint8Array.from([0xFE]), 'c'
+    got = db.read (t) -> ([...k] for [k] as t.scan(prefix: Uint8Array.from([0xFF]), reverse: true))
+    eq got, [[0xFF, 0xFF], [0xFF]]
+
+test "an empty tree scans to nothing in either direction", ->
+  withDb (db) ->
+    eq keys(db), []
+    eq keys(db, reverse: true), []
+
+test "breaking out of a scan and scanning again works", ->
+  withFruit (db) ->
+    db.read (t) ->
+      for [k] as t.scan()
+        break
+      eq (text(k) for [k] as t.scan(prefix: 'c')), ['cherry']
+
+test "deleting and inserting during a write scan continues from the last key", ->
+  withFruit (db) ->
+    seen = db.write (t) ->
+      out = []
+      for [k] as t.scan()
+        out.push text(k)
+        t.del k
+        t.put 'banana2', 'B' if text(k) is 'banana'
+      out
+    eq seen, ['apple', 'apricot', 'banana', 'banana2', 'blueberry', 'cherry']
+    eq keys(db), []
+
+test "a reverse write scan skips keys inserted behind it", ->
+  withFruit (db) ->
+    seen = db.write (t) ->
+      out = []
+      for [k] as t.scan(reverse: true)
+        out.push text(k)
+        t.put 'banana2', 'B' if text(k) is 'blueberry'
+        t.put 'blueberry2', 'B' if text(k) is 'banana'
+      out
+    eq seen, ['cherry', 'blueberry', 'banana2', 'banana', 'apricot', 'apple']
+
+test "a view scan lends pairs that die at the next step", ->
+  withFruit (db) ->
+    db.read (t) ->
+      prev = null
+      for [k, v] as t.scan(view: true)
+        eq text(v), text(k).toUpperCase()
+        if prev?
+          ok prev[0].buffer.detached and prev[1].buffer.detached
+        prev = [k, v]
+      return
+
+test "scan options are checked when the scan is made", ->
+  withFruit (db) ->
+    db.read (t) ->
+      throws (-> t.scan(limit: 1)), TypeError, "txn.scan has no option 'limit'"
+      throws (-> t.scan(reverse: 'yes')), TypeError, 'reverse is true or false'
+      throws (-> t.scan(prefix: 5)), TypeError, 'a prefix is a string or a Uint8Array'
+
+test "the main tree holds each named tree's record (API-ABI03)", ->
+  withDb (db) ->
+    db.write (t) ->
+      t.tree 'users', create: true
+      t.put 'a', '1'
+    eq keys(db), ['a', 'users']
+
+# ==[ Stat and info ]==
+
+console.log "\nStat and info"
+
+test "info reports the page size asked for, entries, depth and key limit", ->
+  withDb pageSize: 8192, (db) ->
+    db.write (t) ->
+      t.put "k#{i}", "v#{i}" for i in [0...100]
+      return
+    info = db.info()
+    eq info.pageSize, 8192
+    eq info.entries, 100
+    eq info.depth, 1
+    eq info.activeReaders, 0
+    eq info.maxReaders, 126
+    ok info.maxKeySize > 0
+    ok info.numPages >= 3
+    ok info.mapSize >= info.numPages * info.pageSize
+
+test "lastTxnId advances by one per committed write, not per abort", ->
+  withDb (db) ->
+    start = db.info().lastTxnId
+    db.write (t) -> t.put 'a', '1'
+    eq db.info().lastTxnId, start + 1
+    try db.write((t) -> throw Error.new('x')) catch then null
+    eq db.info().lastTxnId, start + 1
+    db.read (t) -> t.get 'a'
+    eq db.info().lastTxnId, start + 1
+
+test "a read transaction holds a reader slot while it runs", ->
+  withDb (db) ->
+    eq db.read((t) -> db.info().activeReaders), 1
+    eq db.info().activeReaders, 0
+
+test "maxKeySize is the largest key accepted", ->
+  withDb (db) ->
+    max = db.info().maxKeySize
+    db.write (t) -> t.put 'k'.repeat(max), 'v'
+    e = emdbError -> db.write (t) -> t.put 'k'.repeat(max + 1), 'v'
+    eq e.name, 'EMDB_KEY_TOO_LARGE'
+    eq e.code, -32018
+
+test "stat counts a tree's pages and entries", ->
+  withDb pageSize: 4096, (db) ->
+    db.write (t) ->
+      t.put "key#{String(i).padStart(5, '0')}", 'x'.repeat(100) for i in [0...2000]
+      return
+    st = db.read (t) -> t.stat()
+    eq st.entries, 2000
+    eq st.depth, 2
+    ok st.branchPages >= 1
+    ok st.leafPages > 1
+    eq st.overflowPages, 0
+    eq db.read((t) -> t.stat()), st
+
+test "stat inside a write sees that write's changes", ->
+  withDb (db) ->
+    db.write (t) ->
+      t.put 'a', '1'
+      eq t.stat().entries, 1
+      eq db.read((r) -> r.stat().entries), 0
+
+# ==[ Errors ]==
+
+console.log "\nErrors"
+
+test "a write in a read transaction is EMDB_TXN_READ_ONLY", ->
+  withDb (db) ->
+    e = emdbError -> db.read (t) -> t.put 'k', 'v'
+    ok e instanceof Error
+    eq e.name, 'EMDB_TXN_READ_ONLY'
+    eq e.code, -32016
+    ok e.message.startsWith('emdb_put: '), e.message
+    eq emdbError(-> db.read (t) -> t.del 'k').name, 'EMDB_TXN_READ_ONLY'
+    eq emdbError(-> db.read (t) -> t.delPrefix 'k').name, 'EMDB_TXN_READ_ONLY'
+
+test "a read-only environment refuses a write transaction's writes", ->
+  path = fresh()
+  db = open path, noSync: true
+  db.write (t) -> t.put 'k', 'v'
+  db.close()
+  ro = open path, readOnly: true
+  try
+    eq text(ro.read (t) -> t.get 'k'), 'v'
+    eq emdbError(-> ro.write (t) -> t.put 'k', 'w').name, 'EMDB_TXN_READ_ONLY'
+  finally
+    ro.close()
+
+test "noCreate refuses a missing database", ->
+  e = emdbError -> open fresh(), noCreate: true
+  eq e.name, 'EMDB_OPEN_FAILED'
+
+test "a page size that is not a power of two is EMDB_INVALID_PAGE_SIZE", ->
+  eq emdbError(-> open fresh(), pageSize: 3000).name, 'EMDB_INVALID_PAGE_SIZE'
+
+test "open options are checked: names, booleans, integers", ->
+  throws (-> open fresh(), readonly: true), TypeError, "open has no option 'readonly'"
+  throws (-> open fresh(), readOnly: 'yes'), TypeError, 'readOnly is true or false'
+  throws (-> open fresh(), mapSize: -1), TypeError, 'mapSize is an integer'
+  throws (-> open fresh(), pageSize: 1.5), TypeError, 'pageSize is an integer'
+  throws (-> open ''), TypeError, 'a path is a non-empty string'
+
+test "keys and values are strings or Uint8Arrays", ->
+  withDb (db) ->
+    throws (-> db.write (t) -> t.put 1, 'v'), TypeError, 'a key is a string or a Uint8Array, got number'
+    throws (-> db.write (t) -> t.put 'k', null), TypeError, 'a value is a string or a Uint8Array, got null'
+    throws (-> db.read (t) -> t.get 'k', limit: 1), TypeError, "txn.get has no option 'limit'"
+
+test "a failed put inside write aborts the whole transaction", ->
+  withDb (db) ->
+    max = db.info().maxKeySize
+    caught = emdbError ->
+      db.write (t) ->
+        t.put 'a', '1'
+        t.put 'k'.repeat(max + 1), 'v'
+    eq caught.name, 'EMDB_KEY_TOO_LARGE'
+    eq db.read((t) -> t.get 'a'), undefined
+
+test "close inside a transaction is refused; use after close throws", ->
+  db = scratch()
+  throws (-> db.read (t) -> db.close()), 'env.close inside a transaction'
+  db.close()
+  ok db.closed
+  throws (-> db.read (t) -> t), 'env.read on a closed environment'
+  throws (-> db.close()), 'env.close on a closed environment'
+
+# ==[ Backup ]==
+
+console.log "\nBackup"
+
+test "a backup to a path writes a stream whose size it reports", ->
+  withDb (db) ->
+    db.write (t) ->
+      t.put "k#{i}", 'v'.repeat(200) for i in [0...500]
+      return
+    file = join ROOT, "backup-#{++serial}"
+    st = db.backup file
+    eq st.bytes, statSync(file).size
+    eq st.baseTxnId, 0
+    eq st.snapshotTxnId, db.info().lastTxnId
+    ok st.pagesCopied > 0 and st.pagesCopied <= st.pagesSpanned
+    throws (-> db.backup file), 'EEXIST'
+
+test "a backup to a descriptor, and an incremental one after it", ->
+  withDb (db) ->
+    db.write (t) -> t.put 'a', '1'
+    base = db.info().lastTxnId
+    db.write (t) -> t.put 'b', '2'
+    file = join ROOT, "backup-#{++serial}"
+    fd = openSync file, 'w'
+    try
+      st = db.backup fd, since: base
+    finally
+      closeSync fd
+    eq st.baseTxnId, base
+    eq st.bytes, statSync(file).size
+    eq emdbError(-> db.backup join(ROOT, "backup-#{++serial}"), since: base + 10).name, 'EMDB_BACKUP_BASE_MISMATCH'
