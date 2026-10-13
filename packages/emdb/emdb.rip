@@ -4,7 +4,8 @@
 # Author: Steve Shreeve (steve.shreeve@gmail.com)
 #   Date: October 12, 2026
 #
-# A bun:ffi binding to libemdb's C ABI (emdb's include/emdb.h, SPEC §8.8):
+# A bun:ffi binding to libemdb's C ABI (emdb's include/emdb.h, SPEC §8.8),
+# on the libemdb 0.10.1 it bundles in lib/:
 #   - open(path, options) → Env; env.read / env.write run a scoped
 #     transaction that commits when its function returns and aborts when
 #     it throws
@@ -23,7 +24,7 @@
 
 import { dlopen, ptr, toArrayBuffer, suffix } from 'bun:ffi'
 import { realpathSync, statSync, openSync, closeSync, unlinkSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 
 # ==[ The C ABI ]===============================================================
 
@@ -84,14 +85,12 @@ CURRENT   =! 6
 
 # ==[ Loading libemdb ]=========================================================
 
-LIB_FILE =! "libemdb.#{suffix}"
-
-# A sibling emdb checkout beside the Rip checkout: <dir>/rip/packages/emdb
-# looks in <dir>/emdb/lib after an emdb `zig build`.
-SIBLING =! resolve(import.meta.dir, '..', '..', '..', 'emdb', 'lib', LIB_FILE)
+# The libemdb this package bundles, one per supported platform, in lib/
+# beside this file and named by Bun's own platform and architecture
+# strings (lib/README.md has their provenance).
+VERSION =! '0.10.1'
 
 lib = null
-libPath = null
 
 # The databases (by real path) with a write transaction open in this
 # process. A second Env on the same file would wait on the writer lock
@@ -105,53 +104,21 @@ seeking = null
 isFile = (p) ->
   try statSync(p).isFile() catch then false
 
-# pkg-config's libdir for emdb, or why there is none.
-pkgConfigLib = ->
-  return { why: 'pkg-config is not on PATH' } unless Bun.which('pkg-config')
-  r = Bun.spawnSync ['pkg-config', '--variable=libdir', 'emdb'], stdout: 'pipe', stderr: 'pipe'
-  dir = r.stdout.toString().trim()
-  return { why: 'no emdb package on the pkg-config search path' } unless r.exitCode is 0 and dir
-  file = join(dir, LIB_FILE)
-  if isFile(file) then { file } else { why: "#{file} does not exist" }
+# The bundled library for a platform and architecture, with this host's
+# library suffix; a platform the package has no library for is refused.
+export libraryPath = (platform = process.platform, arch = process.arch) ->
+  file = join(import.meta.dir, 'lib', "libemdb-#{VERSION}-#{platform}-#{arch}.#{suffix}")
+  throw Error.new "emdb: no libemdb for #{platform}-#{arch} (this package bundles libemdb #{VERSION} for linux-x64 and darwin-arm64)" unless isFile(file)
+  file
 
-# The library to load, by the first rule that names one. An explicit
-# path (the `lib` option, then EMDB_LIB) is the only one tried when given:
-# a named library that is missing never falls through to another.
-findLibrary = (explicit) ->
-  if explicit?
-    throw TypeError.new "emdb: the lib option must be a path string" unless typeof explicit is 'string' and explicit
-    throw Error.new "emdb: libemdb not found at #{explicit} (the lib option)" unless isFile(explicit)
-    return realpathSync explicit
-  env = process.env.EMDB_LIB
-  if env?
-    throw Error.new "emdb: EMDB_LIB is set but empty" unless env
-    throw Error.new "emdb: libemdb not found at #{env} (EMDB_LIB)" unless isFile(env)
-    return realpathSync env
-  tried = ['EMDB_LIB: not set']
-  pc = pkgConfigLib()
-  return realpathSync pc.file if pc.file
-  tried.push "pkg-config --variable=libdir emdb: #{pc.why}"
-  return realpathSync SIBLING if isFile(SIBLING)
-  tried.push "sibling emdb checkout: #{SIBLING} does not exist"
-  throw Error.new """
-    emdb: libemdb not found. Tried, in order:
-      #{tried.join('\n  ')}
-    Build emdb (`zig build` installs lib/#{LIB_FILE}), then set EMDB_LIB to that file or put its lib/pkgconfig on PKG_CONFIG_PATH.
-    """
-
-# One libemdb per process: a second, different library is refused.
-load = (explicit = null) ->
-  if lib?
-    return lib unless explicit?
-    want = findLibrary explicit
-    throw Error.new "emdb: libemdb is already loaded from #{libPath}; cannot also load #{want}" unless want is libPath
-    return lib
-  path = findLibrary explicit
+# Loaded once per process, on the first open or version.
+load = ->
+  return lib if lib?
+  path = libraryPath()
   try
     lib = dlopen(path, SYMBOLS).symbols
   catch e
     throw Error.new "emdb: cannot load #{path}: #{e.message}"
-  libPath = path
   lib
 
 # ==[ Errors ]==================================================================
@@ -340,7 +307,7 @@ OPEN_SIZES =!
   growStep:         [40, 64]
   stageAppendBytes: [48, 64]
 
-OPEN_KEYS =! Set.new(['lib', ...Object.keys(OPEN_FLAGS), ...Object.keys(OPEN_SIZES)])
+OPEN_KEYS =! Set.new([...Object.keys(OPEN_FLAGS), ...Object.keys(OPEN_SIZES)])
 
 WRITE_FLAGS =!
   noSync:     0x0004
@@ -893,7 +860,7 @@ class Env
 # Open or create the database at `path` (and its `<path>-lock` sidecar).
 export open = (path, opts = null) ->
   checkKeys opts, OPEN_KEYS, 'open'
-  load opts?.lib ?? null
+  load()
   o = opts ?? {}
   s = optionsStruct(o)
   check lib.emdb_env_open(cString(path, 'path'), s, OUT), 'emdb_env_open'

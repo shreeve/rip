@@ -13,6 +13,7 @@
   },
   "files": [
     "emdb.rip",
-    "README.md"
+    "README.md",
+    "lib"
   ]
 }

@@ -6,7 +6,8 @@
 
 [emdb](https://github.com/shreeve/emdb) is an embedded key-value database:
 a memory-mapped, copy-on-write B+ tree with MVCC, in LMDB's architecture.
-This package loads its C library, `libemdb`, with `bun:ffi` and binds the
+This package bundles its C library, `libemdb` 0.10.1, loads it with
+`bun:ffi` and binds the
 twenty-one functions of its C ABI (`include/emdb.h`, emdb's SPEC §8.8);
 the API below reaches all of them except the cursor writes
 (`emdb_cursor_put`, `emdb_cursor_del`) and child transactions. Scans
@@ -19,7 +20,8 @@ sits between the two: emdb passes no struct by value, so every call is a
 plain `bun:ffi` call.
 
 **Runtime:** not browser-safe — loads `libemdb` through `bun:ffi` and
-opens database files; Bun only. One `.rip` file.
+opens database files; Bun only. One `.rip` file, beside the bundled
+libemdb in `lib/`.
 
 ## Quick Start
 
@@ -45,27 +47,15 @@ db.close()
 
 ## Requirements
 
-- **Bun**, which runs Rip.
-- **libemdb** with `emdb_cursor_get_batch`: emdb main at commit
-  `636d6cd` or later. In an emdb checkout, `zig build` (Zig 0.17) writes
-  `lib/libemdb.dylib` on macOS or `lib/libemdb.so` on Linux, and
-  `lib/pkgconfig/emdb.pc`. A libemdb without the batch call refuses at
-  load, naming the missing symbol.
+- **Bun** on Linux x86_64 (glibc 2.17 or later) or macOS arm64.
 
-The first `open` (or `version`) loads the library, from the first of
-these that names one:
-
-1. the `lib` option of `open` — a path to the library file;
-2. `EMDB_LIB` — a path to the library file;
-3. `pkg-config --variable=libdir emdb` — put an emdb checkout's
-   `lib/pkgconfig` on `PKG_CONFIG_PATH`;
-4. a sibling emdb checkout: `emdb/lib/` in the directory that holds this
-   Rip checkout (`<dir>/rip` beside `<dir>/emdb`).
-
-An explicit path (1 or 2) that names no file fails on that path; it never
-falls through to the others. When none finds a library, the error lists
-every place tried. A process loads one libemdb: a `lib` option naming a
-different file after the first load is refused.
+Nothing to build or install: the package bundles libemdb 0.10.1, emdb's
+C library, for those two platforms in `lib/`, and loads the one named
+for the platform and architecture Bun reports. Any other platform is
+refused at the first `open` with `no libemdb for <platform>-<arch>`.
+`libraryPath()` names the file it loads. The binaries are emdb's, under
+the AGPL-3.0, not Rip's license; `lib/README.md` gives their provenance,
+build commands and checksums.
 
 ## Transactions
 
@@ -242,7 +232,6 @@ db.close()
 | `pageSize` | a new file's page size; default the OS page size |
 | `maxReaders`, `maxNamedTrees`, `sealThreads` | reader slots, named-tree handles, commit sealing threads |
 | `mapSize`, `maxMapSize`, `growStep`, `stageAppendBytes` | file size, growth limit and step, staging limit, in bytes |
-| `lib` | the libemdb file to load |
 
 An unknown option, a flag that is not `true` or `false`, and a size that
 is not a non-negative integer are refused. A backup restores with the
@@ -253,7 +242,8 @@ emdb command: `emdb -r data.emdb data.backup`.
 | Call | Returns |
 | --- | --- |
 | `open(path, options)` | `Env` |
-| `version()` | libemdb's version, `'0.10.0'` |
+| `version()` | libemdb's version, `'0.10.1'` |
+| `libraryPath()` | the bundled libemdb file for this platform |
 | `env.read(fn)` / `env.write([options,] fn)` | `fn`'s result |
 | `env.info()` / `env.sync()` / `env.backup(target, {since})` / `env.close()` | info / — / backup stats / — |
 | `txn.get(key, {tree, view})` | `Uint8Array` or `undefined` |
@@ -274,7 +264,8 @@ bun run bench              # 1,000,000 entries; rip bench.rip <n> for another si
 `bench.rip` runs each operation on 1M entries (16-byte keys, 32-byte
 values; neither engine syncs) beside the same work through `bun:sqlite`,
 which is built into Bun. Measured on an Apple M5 under Bun 1.4.3 with
-libemdb from emdb `636d6cd`, the median of three runs of best-of-three,
+libemdb from emdb `636d6cd`, whose code the bundled 0.10.1 is (0.10.1
+only strips the shared library), the median of three runs of best-of-three,
 alongside other work on the machine, so read the rows as a ranking:
 
 | Operation | emdb | ns/op | bun:sqlite | ns/op |
@@ -290,8 +281,9 @@ alongside other work on the machine, so read the rows as a ranking:
 | get 64 KB value, `view: true` | 59 ms | 5948 | — | |
 
 On Linux x86_64 (an Intel Core Ultra 9 185H) under Bun 1.4.3, with libemdb
-from emdb `636d6cd` built for x86_64_v3, pinned to one performance core on
-a machine reserved for the run, the median of three runs:
+from emdb `636d6cd` built for x86_64_v3 (the bundled Linux library is
+built for baseline x86-64), pinned to one performance core on a machine
+reserved for the run, the median of three runs:
 
 | Operation | emdb | ns/op | bun:sqlite | ns/op |
 | --- | ---: | ---: | ---: | ---: |

@@ -3,9 +3,9 @@
 # ==============================================================================
 
 import { test, eq, ok, throws, plainEnv } from 'rip/testing'
-import { open, version, EmdbError } from 'rip/emdb'
+import { open, version, libraryPath, EmdbError } from 'rip/emdb'
 import * as mod from 'rip/emdb'
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync, statSync, openSync, closeSync, realpathSync, existsSync } from 'fs'
+import { mkdtempSync, readFileSync, writeFileSync, readdirSync, rmSync, statSync, openSync, closeSync, existsSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { spawnSync } from 'child_process'
@@ -44,54 +44,7 @@ emdbError = (fn) ->
     throw e
   throw Error.new 'expected an EmdbError'
 
-# ==[ Package surface ]==
-
-console.log "\nPackage"
-
-test "exports open, version and EmdbError, nothing else", ->
-  eq Object.keys(mod).sort(), ['EmdbError', 'open', 'version']
-  eq typeof open, 'function'
-  eq typeof version, 'function'
-  ok EmdbError.prototype instanceof Error
-
-test "no dependencies of any kind", ->
-  pkg = JSON.parse readFileSync(join(import.meta.dir, 'package.json'), 'utf8')
-  for field in ['dependencies', 'peerDependencies', 'optionalDependencies', 'devDependencies']
-    eq pkg[field], undefined
-  eq pkg.exports, { '.': './emdb.rip' }
-  eq pkg.files, ['emdb.rip', 'README.md']
-
-test "server-only: browser safety is never declared", ->
-  pkg = JSON.parse readFileSync(join(import.meta.dir, 'package.json'), 'utf8')
-  eq pkg.rip, undefined
-
-test "version is libemdb's, major.minor.patch", ->
-  ok /^\d+\.\d+\.\d+$/.test(version()), version()
-
-# ==[ Loading libemdb ]==
-
-console.log "\nLoading libemdb"
-
 RIP_BIN =! join(import.meta.dir, '..', '..', 'bin', 'rip')
-
-# The library this suite loads: EMDB_LIB, else the sibling emdb checkout.
-libFile = ->
-  file = process.env.EMDB_LIB ?? join(import.meta.dir, '..', '..', '..', 'emdb', 'lib', "libemdb.#{suffix}")
-  realpathSync file
-
-# A copy of the module in a directory with no emdb checkout beside it, run
-# with EMDB_LIB unset and an empty pkg-config search path. `body` gets
-# `open`, `version` and `db` (a path for a database).
-runCopy = (env, body = "open db") ->
-  dir = join ROOT, "copy-#{++serial}", 'a', 'b', 'c'
-  mkdirSync dir, recursive: true
-  copyFileSync join(import.meta.dir, 'emdb.rip'), join(dir, 'emdb.rip')
-  writeFileSync join(dir, 'run.rip'), "import { open, version } from './emdb.rip'\ndb = '#{join(dir, 'x.emdb')}'\n#{body}\n"
-  empty = join ROOT, "pc-#{serial}"
-  mkdirSync empty
-  base = plainEnv(PKG_CONFIG_LIBDIR: empty, PKG_CONFIG_PATH: '')
-  delete base.EMDB_LIB
-  spawnSync process.execPath, [RIP_BIN, join(dir, 'run.rip')], encoding: 'utf8', env: { ...base, ...env }, timeout: 20000
 
 # A script run in its own process against this package, killed after 20s
 # so a hang fails instead of stalling the suite.
@@ -103,45 +56,63 @@ runScript = (body) ->
   writeFileSync file, "import { open, EmdbError } from '#{join(import.meta.dir, 'emdb.rip')}'\ndb = '#{join(ROOT, "script-#{serial}.emdb")}'\n#{body}\n"
   spawnSync process.execPath, [RIP_BIN, file], encoding: 'utf8', env: plainEnv(), timeout: 20000
 
-test "no library anywhere: the error names every place tried, in order", ->
-  r = runCopy {}
-  ok r.status isnt 0, 'expected a failure'
-  out = r.stderr
-  ok out.includes('emdb: libemdb not found. Tried, in order:'), out
-  a = out.indexOf('EMDB_LIB: not set')
-  b = out.indexOf('pkg-config')
-  c = out.indexOf("sibling emdb checkout: ")
-  ok a >= 0 and b > a and c > b, out
-  ok out.includes("/emdb/lib/libemdb.#{suffix} does not exist"), out
+# ==[ Package surface ]==
 
-test "EMDB_LIB naming a missing file fails on it, never falling through", ->
-  r = runCopy EMDB_LIB: '/nonexistent/libemdb.so'
-  ok r.status isnt 0, 'expected a failure'
-  ok r.stderr.includes('emdb: libemdb not found at /nonexistent/libemdb.so (EMDB_LIB)'), r.stderr
-  ok not r.stderr.includes('Tried, in order'), r.stderr
+console.log "\nPackage"
 
-test "the lib option naming a missing file fails on it", ->
-  throws (-> open fresh(), lib: '/nonexistent/libemdb.dylib'), 'libemdb not found at /nonexistent/libemdb.dylib (the lib option)'
+test "exports open, version, libraryPath and EmdbError, nothing else", ->
+  eq Object.keys(mod).sort(), ['EmdbError', 'libraryPath', 'open', 'version']
+  eq typeof open, 'function'
+  eq typeof version, 'function'
+  ok EmdbError.prototype instanceof Error
 
-test "the lib option loads the library it names", ->
-  r = runCopy {}, "open db, lib: '#{libFile()}'\nconsole.log 'loaded', version()"
+test "no dependencies of any kind; the package ships its libraries", ->
+  pkg = JSON.parse readFileSync(join(import.meta.dir, 'package.json'), 'utf8')
+  for field in ['dependencies', 'peerDependencies', 'optionalDependencies', 'devDependencies']
+    eq pkg[field], undefined
+  eq pkg.exports, { '.': './emdb.rip' }
+  eq pkg.files, ['emdb.rip', 'README.md', 'lib']
+
+test "server-only: browser safety is never declared", ->
+  pkg = JSON.parse readFileSync(join(import.meta.dir, 'package.json'), 'utf8')
+  eq pkg.rip, undefined
+
+# ==[ The bundled libemdb ]==
+
+console.log "\nThe bundled libemdb"
+
+LIB_DIR =! join(import.meta.dir, 'lib')
+BUNDLED =! ['libemdb-0.10.1-linux-x64.so', 'libemdb-0.10.1-darwin-arm64.dylib']
+
+test "this platform's library is lib/libemdb-<version>-<platform>-<arch>, beside the module", ->
+  eq libraryPath(), join(LIB_DIR, "libemdb-0.10.1-#{process.platform}-#{process.arch}.#{suffix}")
+  ok existsSync(libraryPath())
+
+test "version is the bundled library's, 0.10.1", ->
+  eq version(), '0.10.1'
+
+test "a platform without a bundled library is refused, naming it", ->
+  throws (-> libraryPath 'win32', 'x64'), 'emdb: no libemdb for win32-x64'
+  throws (-> libraryPath 'linux', 'arm64'), 'emdb: no libemdb for linux-arm64'
+  throws (-> libraryPath 'freebsd', 'x64'), 'bundles libemdb 0.10.1 for linux-x64 and darwin-arm64'
+
+test "lib/ holds exactly the two libraries and their README, whose sizes and sha256 match", ->
+  eq readdirSync(LIB_DIR).sort(), ['README.md', ...BUNDLED].sort()
+  readme = readFileSync join(LIB_DIR, 'README.md'), 'utf8'
+  for name in BUNDLED
+    bytes = readFileSync join(LIB_DIR, name)
+    sha = Bun.CryptoHasher.new('sha256').update(bytes).digest('hex')
+    ok readme.includes("| `#{name}` | #{bytes.length} | `#{sha}` |"), "lib/README.md does not list #{name} as #{bytes.length} bytes, sha256 #{sha}"
+
+test "the library loads from the package, whatever the working directory", ->
+  r = runScript """
+    process.chdir '/'
+    db0 = open db, noSync: true
+    db0.close()
+    console.log 'loaded'
+  """
   eq r.status, 0, r.stderr
-  ok r.stdout.includes("loaded #{version()}"), r.stdout
-
-test "pkg-config's libdir for emdb loads the library", ->
-  ok Bun.which('pkg-config'), 'pkg-config is not on PATH'
-  pc = join ROOT, "pkgconfig-#{++serial}"
-  mkdirSync pc
-  writeFileSync join(pc, 'emdb.pc'), "libdir=#{join(libFile(), '..')}\nName: emdb\nDescription: emdb\nVersion: #{version()}\n"
-  r = runCopy { PKG_CONFIG_PATH: pc }, "open db\nconsole.log 'loaded', version()"
-  eq r.status, 0, r.stderr
-  ok r.stdout.includes("loaded #{version()}"), r.stdout
-
-test "a second, different library in one process is refused", ->
-  version()   # loaded
-  other = join ROOT, "other-libemdb.#{suffix}"
-  writeFileSync other, ''   # refused by its path, before any load
-  throws (-> open fresh(), lib: other), 'libemdb is already loaded from', "cannot also load #{realpathSync(other)}"
+  ok r.stdout.includes('loaded'), r.stdout
 
 # ==[ Keys and values ]==
 
