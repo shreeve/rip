@@ -15,6 +15,7 @@
 # believes after every step.
 # ==============================================================================
 
+import './environment.rip'
 import { test as pin, eq, ok, throws, plainEnv } from 'rip/testing'
 import { run, quit, suspend, mount, renderToString, print, screen, Box, Text, Static } from 'rip/tui'
 import { Log } from '../demo/log.rip'
