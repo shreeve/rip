@@ -2,9 +2,11 @@ import { existsSync, lstatSync, mkdirSync, realpathSync, statSync } from 'node:f
 import { dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 
-# A socket nobody listens on: missing, stale, or closed under the request.
+# A socket nobody listens on: missing (ENOENT), stale (ECONNREFUSED), a
+# leftover non-socket file in its place (ENOTSOCK), or closed under the
+# request (ECONNRESET).
 export unreachable = (error) ->
-  error?.code in ['FailedToOpenSocket', 'ConnectionRefused', 'ECONNREFUSED', 'ECONNRESET']
+  error?.code in ['ENOENT', 'ECONNREFUSED', 'ENOTSOCK', 'ECONNRESET']
 
 export janusErrorMessage = (error) ->
   if unreachable error
