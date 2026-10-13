@@ -22,9 +22,11 @@ export step =! do ->
 # Whether `measure`, which runs `n` units of work and answers the ms it
 # took, grows linearly: eight times the work under 24 times the time,
 # where a quadratic reader takes 64. Each size is its best of five. The
-# size doubles from `base` until the smaller run spans five clock steps,
-# so the ratio is of times the clock can tell apart — a work whose time
-# never reaches that is reported, never passed on a floor. Then two
+# size doubles from `base` until the smaller run spans ten clock steps,
+# so the ratio is of times the clock can tell apart; it is judged on at
+# least five, the margin for a later best of five reading lower (Linux CI
+# grew to 5.0 ms and read 4.3). A work whose time never reaches that is
+# reported, never passed on a floor. Then two
 # more tries if a collection lands in every round of one size — but not
 # for a run far over the bound, which no collection explains.
 export grows = (measure, base) ->
@@ -33,7 +35,7 @@ export grows = (measure, base) ->
     least = Math.min(least, measure(n)) for round in [0...5]
     least
   n = base
-  n *= 2 while n < base * 4096 and best(n) < 5 * step
+  n *= 2 while n < base * 4096 and best(n) < 10 * step
   small = large = 0
   for attempt in [0...3]
     small = best n
