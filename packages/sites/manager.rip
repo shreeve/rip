@@ -1096,6 +1096,7 @@ export main = (argv) ->
   operation = 'Maintenance' if migration?
   managerControl = null
   managerOwned = false
+  predecessor = null
   releaseHold = null
   appId = null
   heartbeat = null
@@ -1225,6 +1226,7 @@ export main = (argv) ->
         process.kill owner?.pid, 0
         alive = true
       abort "rip-sites: manager already running for #{project.root}" if alive
+      predecessor = owner
       unlinkSync managerOwner
       acquire()
     acquire()
@@ -2156,6 +2158,16 @@ export main = (argv) ->
     throw Error.new("operation id mismatch: want #{record.id}") unless id is record.id
     activateMigration! persistMigration({ ...record, phase: 'fix-forward', outcome: record.outcome or 'unknown' })
 
+  # The owner record names this manager's Janus registration. A manager
+  # that dies without deregistering leaves its claim on the hosts until
+  # Janus's heartbeat TTL lapses; the successor that takes over its lock —
+  # proof the owner is dead and this project's — retires that claim first.
+  recordRegistration = ->
+    return unless managerOwned
+    temporary = "#{managerOwner}.#{process.pid}.tmp"
+    writeFileSync temporary, JSON.stringify({ pid: process.pid, root: project.root, app: appId, control: args.control }), { mode: 0o600 }
+    renameSync temporary, managerOwner
+
   beat = ->
     return if stopping or not appId? or heartbeatTask?
     heartbeatTask = do ->
@@ -2169,6 +2181,7 @@ export main = (argv) ->
             try controlFetch! args.control, 'DELETE', "/1.0/apps/#{replacementId}"
             return
           appId = replacementId
+          recordRegistration()
           hubRefused = false
           moveAccess()
         else unless response.ok
@@ -2283,12 +2296,15 @@ export main = (argv) ->
     if stopping
       process.exitCode = await finished
       return
+    if predecessor?.app? and predecessor.control is args.control
+      try controlFetch! args.control, 'DELETE', "/1.0/apps/#{predecessor.app}"
     registrationId = createRegistration!
     if stopping
       try controlFetch! args.control, 'DELETE', "/1.0/apps/#{registrationId}"
       process.exitCode = await finished
       return
     appId = registrationId
+    recordRegistration()
     hubRefused = false
     registered = true
     appWatchReady = true

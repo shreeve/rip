@@ -1488,6 +1488,8 @@ for `app.rip`, `index.rip`, or `app/`.
 `JANUS_CONTROL` supplies the control endpoint when `--control` is omitted.
 Startup validates the endpoint before claiming the server.
 
+A manager that died without deregistering leaves its claim on the hosts until Janus's heartbeat TTL lapses. Its successor — the manager that takes over the project's lock, which proves the owner dead — deletes the registration the owner record names before claiming, so a crash costs the replacement's boot rather than the TTL. A claim held by anything else is retried for up to 30 seconds (`RIP_REGISTER_409_MS`).
+
 `rip sites publish` resolves and publishes exactly the
 named directory as one
 `revalidate` browsable root. It publishes no worker upstreams and no SPA shell. By
