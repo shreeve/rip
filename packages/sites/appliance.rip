@@ -2,6 +2,7 @@ import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync } f
 import { spawn } from 'node:child_process'
 import { homedir, platform, tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { autostartInstalled, startService } from './autostart.rip'
 
 export secureDirectory = (path, label) ->
   try
@@ -49,6 +50,8 @@ export loaderArg = (label = 'rip-agent') ->
   abort "#{label}: the Rip loader is missing" unless preload?
   preload
 
+export agentProgram = (label = 'rip-agent') -> [process.execPath, loaderArg(label), join(import.meta.dir, 'agent.rip')]
+
 agentFetch = (paths, method, path, body = null, timeout = 60000) ->
   options = { method, unix: paths.socket, signal: AbortSignal.timeout(timeout) }
   if body?
@@ -76,21 +79,33 @@ export ensureAgent = (label) ->
   try
     response = agentFetch! paths, 'GET', '/1.0', null, 1000
     return paths if response.ok
-  log = openSync paths.agentLog, 'a', 0o600
-  try
-    child = spawn process.execPath, [loaderArg(label), join(import.meta.dir, 'agent.rip')],
-      detached: true
-      stdio: ['ignore', log, log]
-      env: process.env
-    child.unref()
-  finally
-    closeSync log
+  service = autostartInstalled()
+  if service
+    startService()
+  else
+    [command, ...argv] = agentProgram label
+    log = openSync paths.agentLog, 'a', 0o600
+    try
+      child = spawn command, argv,
+        detached: true
+        stdio: ['ignore', log, log]
+        env: process.env
+      child.unref()
+    finally
+      closeSync log
   deadline = Date.now() + 5000
+  asked = Date.now()
   loop
     try
       response = agentFetch! paths, 'GET', '/1.0', null, 1000
       return paths if response.ok
     break if Date.now() >= deadline
+    # An agent that has closed its socket but not yet exited still counts
+    # as running to the service manager, which ignores the start, and its
+    # clean exit is not restarted. Ask until one answers.
+    if service and Date.now() - asked >= 250
+      startService()
+      asked = Date.now()
     sleep! 20
   diagnostic = agentDiagnostic paths
   suffix = if diagnostic then "\n#{diagnostic}" else " — see #{paths.agentLog}"

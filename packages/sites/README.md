@@ -50,7 +50,7 @@ ordinary HTTP themselves — they register with Janus and supervise workers.
 Reserved nouns (not app names): **`edge`**, **`all`**, **`agent`**.
 Durable catalog is
 `sites.json` (Rip-owned). The agent serializes every catalog mutation, starts on demand,
-and exits when nothing remains to supervise — Janus stays live-only.
+and exits when nothing remains to supervise — Janus stays live-only. `rip sites autostart` hands the agent to launchd or systemd, which starts it at login and again after a crash.
 
 ## Quick Start
 
@@ -160,7 +160,17 @@ Pass `--host` when you want a stable URL in the catalog (needed for
 `rip sites open` while stopped). Projects with `serve.rip` hosts still run
 without it; the Agent stores hosts from `--host` / add options.
 
-### 3. Stop cleanly
+### 3. Keep apps running across crashes and logins
+
+```bash
+rip sites autostart
+```
+
+Once per machine, like `janus autostart`. A launchd LaunchAgent (macOS) or a systemd user unit (Linux) then runs the control agent at every login and again after a crash, and the agent restarts any app manager that dies. After a login it starts every app that was running before; an app you `rip sites stop` stays stopped. `rip sites status` shows `autostart on` on the Agent line, and `rip sites autostart off` removes the service.
+
+The unit records this shell's `PATH`, `TMPDIR`, `XDG_STATE_HOME`, and `JANUS_CONTROL`, and the agent of this checkout. Run `rip sites autostart` again after changing any of them, after moving the checkout, or after `bun run global` from another checkout. On Linux a user unit starts at login; `loginctl enable-linger` starts it at boot.
+
+### 4. Stop cleanly
 
 ```bash
 rip sites stop hello
@@ -205,7 +215,7 @@ One user CLI: **`rip sites <verb> [noun]`**. There is no `rip site` or `rip edge
 - Path forms (`run`, `publish`, bare `stop`, path `status`) default to the
   **current directory** when the path is omitted.
 - Durable catalog: `sites.json` (Rip-owned). The agent is the single writer;
-  mutations start it on demand, even with Janus stopped. It exits when idle.
+  mutations start it on demand, even with Janus stopped. It exits when idle. With `rip sites autostart`, the service manager is what starts it.
 - The edge process is Janus's: `janus autostart`, `start`, `stop`,
   `restart`, `status`. `rip sites` renders what it serves.
 
@@ -224,10 +234,11 @@ One user CLI: **`rip sites <verb> [noun]`**. There is no `rip site` or `rip edge
 | `rip sites start <app\|all\|agent>` | Start a supervised app, every app, or the control agent. Apps register with Janus, so the edge must be running (`janus autostart`). `all` fans out in catalog order: an app that fails shows its error in place, the rest still start, and the exit code is non-zero. |
 | `rip sites stop [noun]` | Stop a supervised app, `all`, or `agent`. **Bare `stop`** stops the manager at cwd. A filesystem path stops that project’s manager without requiring catalog membership. Returns once the manager’s control socket stops answering, a moment before the process itself exits. |
 | `rip sites restart <app\|all\|agent>` | Restart. For `agent` this is a recycle (stop then start). |
-| `rip sites status` | Edge + apps summary (JSON: `{ edge, apps }`). The edge line is Janus's status and scope plus whether this machine trusts the local CA. |
+| `rip sites status` | Edge + agent + apps summary (JSON: `{ edge, agent, apps }`). The edge line is Janus's status and scope plus whether this machine trusts the local CA; the agent line says whether autostart is on. |
 | `rip sites status all` | Apps only. |
 | `rip sites status <app\|agent>` | One target. |
 | `rip sites status <path>` | Manager JSON for a project path (`.` or an existing directory not in the catalog). |
+| `rip sites autostart [off]` | Install the control agent as a login service (launchd on macOS, a systemd user unit on Linux) that restarts after a crash, or remove it. Refused while `RIP_AGENT_HOME` or `RIP_AGENT_RUNTIME` points at another catalog. |
 
 ### Edge — TLS, reachability
 
@@ -1409,7 +1420,9 @@ Rip owns the durable catalog at `sites.json`
 catalog writes; commands that change the catalog or app state start it as
 needed, even while Janus is stopped. Read-only commands can inspect the
 catalog without an agent. The agent adopts healthy managers after a restart
-and exits when no app remains desired-running. Janus never writes the catalog,
+and exits when no app remains desired-running.
+
+`rip sites autostart` installs a per-user service that runs `agent.rip` itself: a LaunchAgent (`~/Library/LaunchAgents/rip.sites.agent.plist`, `KeepAlive` on unsuccessful exit) or a systemd user unit (`rip-sites-agent.service`, `Restart=on-failure`). A crash restarts the agent; its clean idle exit does not. While the unit is installed, every command that needs the agent asks the service manager for it (`launchctl kickstart`, `systemctl --user start`) instead of spawning one, so the running agent is always the supervised one. Managers outlive the agent under either service manager: they start in their own session, outside the job's process group, and the systemd unit sets `KillMode=process` so the cgroup survives. The service runs the default catalog only; a process with `RIP_AGENT_HOME` or `RIP_AGENT_RUNTIME` set spawns its own agent as before. Janus never writes the catalog,
 and the catalog keeps only Rip's URL shape and last edge configuration error.
 Exposure scope and CA trust are Janus's facts.
 

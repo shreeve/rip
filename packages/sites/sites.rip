@@ -4,7 +4,8 @@
 # Reserved nouns: edge, all, agent — never real app names.
 # The only user-facing Sites CLI — no rip site / rip edge commands.
 
-import { agentPaths, printJson, probeAgent, requestAgent } from './appliance.rip'
+import { agentPaths, agentProgram, printJson, probeAgent, requestAgent } from './appliance.rip'
+import { autostartInstalled, installAutostart, removeAutostart, requireAutostart } from './autostart.rip'
 import { readLog } from './logs.rip'
 import { RESERVED, findCatalogApp, loadCatalog, snapshotCatalogApp } from './catalog.rip'
 import { JANUS_MISSING, dashboardUrl, edgeControl, edgeFetch, snapshotEdgeState, externalEdge, janusBinary, janusStatus } from './edge.rip'
@@ -29,7 +30,8 @@ HELP = '''
     start <app|all|agent>                Start supervised app(s) or the agent
     stop [noun]                          Stop (default: manager at cwd)
     restart <app|all|agent>              Restart (agent = recycle)
-    status [noun]                        Summary, or one target (default: edge+apps)
+    status [noun]                        Summary, or one target (default: edge+agent+apps)
+    autostart [off]                      Run the agent as a login service that restarts after a crash
 
   Edge: Janus's (janus autostart | start | stop | status | mode | trust)
 
@@ -231,6 +233,18 @@ renderEdge = (edge) ->
   lines.push "  Error:    #{edge.lastError}" if edge.lastError
   lines.join '\n'
 
+# Liveness without booting it, and whether a login service runs it.
+agentState = ->
+  info = requestAgent! 'rip-sites', 'GET', '/1.0', null, { start: false, soft: true }
+  { state: (if info? then 'running' else 'stopped'), pid: info?.pid or null, autostart: autostartInstalled() }
+
+renderAgent = (agent) ->
+  marker = if agent.state is 'running' then '●' else '○'
+  detail = []
+  detail.push "pid #{agent.pid}" if agent.pid?
+  detail.push(if agent.autostart then 'autostart on' else 'autostart off')
+  "#{marker} Agent #{agent.state} (#{detail.join(', ')})"
+
 printEdge = (edge) ->
   if json then printJson edge else console.log renderEdge(edge)
 
@@ -348,11 +362,10 @@ switch verb
   when 'status'
     abort 'rip-sites: status takes at most one noun' if positionals.length > 1
     # Path / cwd manager JSON when noun is `.`, an existing path, or missing
-    # from the catalog — but bare status stays the edge+apps summary.
+    # from the catalog — but bare status stays the edge+agent+apps summary.
     if noun is 'agent'
-      info = requestAgent! 'rip-sites', 'GET', '/1.0', null, { start: false, soft: true }
-      status = { state: (if info? then 'running' else 'stopped'), pid: info?.pid or null }
-      if json then printJson status else console.log(if info? then "Control agent running (pid #{info.pid})." else 'Control agent is not running.')
+      agent = agentState!
+      if json then printJson agent else console.log renderAgent(agent)
     else if noun? and noun not in RESERVED and noun isnt 'all' and (noun is '.' or (not catalogHas!(noun) and existsSync(noun)))
       runManager! ['status', pathNoun!(noun)]
     else
@@ -365,12 +378,14 @@ switch verb
           doc = loadCatalog()
           edge = readOfflineEdge!
           apps = offlineApps! doc
+        agent = agentState! unless noun is 'all'
         if json
-          printJson if noun is 'all' then apps else { edge, apps }
+          printJson if noun is 'all' then apps else { edge, agent, apps }
         else if noun is 'all'
           if apps.length then console.log(apps.map(renderApp).join('\n')) else console.log 'No Rip sites.'
         else
           console.log renderEdge(edge)
+          console.log renderAgent(agent)
           console.log ''
           if apps.length then console.log(apps.map(renderApp).join('\n')) else console.log 'No Rip sites.'
       else if noun is 'edge'
@@ -427,6 +442,25 @@ switch verb
                 current = app.id
               process.stdout.write next.text
             offsets[app.id] = next.next
+
+  when 'autostart'
+    abort "rip-sites: autostart takes no noun but `off`, not #{JSON.stringify(noun)}" if noun? and noun isnt 'off'
+    requireAutostart()
+    if noun is 'off'
+      result = removeAutostart()
+      # Without the service the agent is an ordinary process again; one
+      # starts now so apps desired running keep their supervision.
+      requestAgent!('rip-sites', 'GET', '/1.0', null, { start: true }) if wantsControl!
+      message = if result.removed then "Autostart off — removed #{result.unit}" else 'Autostart is not installed.'
+    else
+      # An agent started outside the service holds the control socket,
+      # and the service's boot would lose to it. Apps keep serving.
+      stopAgentProcess!
+      result = installAutostart agentProgram('rip-sites'), agentPaths('rip-sites').agentLog
+      requestAgent!('rip-sites', 'GET', '/1.0', null, { start: true }) if wantsControl!
+      message = "Autostart on — #{result.manager} runs the control agent at login and after a crash\n  Unit: #{result.unit}"
+      message += "\n  #{result.note}" if result.note
+    if json then printJson result else console.log message
 
   when 'reload'
     edgeIsJanus 'reload'
