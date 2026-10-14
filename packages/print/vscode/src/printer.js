@@ -517,7 +517,7 @@ function generateMarkdownHtml(fileName, markdown, options = {}) {
   body > :first-child { margin-top: 0; }
   @page { size: letter; margin: 0.75in; }
   @media print {
-    html { font-size: 14pt; }
+    html { font-size: calc(20pt / 1.75); }  /* an h1 (1.75rem) prints at 20pt */
     body { max-width: none; padding: 0; background: #fff; color: #1a1a1a; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     h1, h2, h3, h4 { break-after: avoid; }
     pre, blockquote, img, tr { break-inside: avoid; }
