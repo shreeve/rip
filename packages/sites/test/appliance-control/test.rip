@@ -271,6 +271,8 @@ test! 'path controls report a missing manager instead of crashing', ->
     eq refused.code, 1
     eq refused.err, "rip-sites: hold needs a running manager for #{root}\n"
   finally
+    # The manager runtime is the user's own, not the fixture's.
+    rmSync managerRuntime(root).socket, { force: true }
     rmSync site.root, { recursive: true, force: true }
 
 test! 'public manager grammar preserves option values and cwd defaults', ->

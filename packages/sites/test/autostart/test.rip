@@ -1,0 +1,165 @@
+import { test, eq, ok } from 'rip/testing'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { platform, tmpdir } from 'node:os'
+import { plistUnit, systemdUnit } from '../../autostart.rip'
+import { APP, PRELOAD, alive, cli, startJanus, stopAgent } from '../appliance/support.rip'
+
+# `rip sites autostart`: the control agent as a login service. The unit
+# files, and the hand-off of the agent between an ordinary process and
+# the service manager — driven through a stand-in service manager
+# (service.rip) that runs the unit as written.
+
+SERVICE = join(import.meta.dir, 'service.rip')
+
+# The service manager runs the agent itself, restarts it only after a
+# failure (an idle exit is clean and stays down), starts it on demand
+# within the 5s a command waits, and under systemd kills only the agent:
+# its managers share its cgroup and must outlive it.
+test 'units run the agent, restart it only after a failure, and spare its managers', ->
+  program = ['/opt/a b/bun', '--preload=/r/src/loader.js', '/r/packages/sites/agent.rip']
+  env = { PATH: '/usr/bin:/a&b', JANUS_CONTROL: '/run/50%/janus.sock' }
+  plist = plistUnit program, env, '/s/agent.log'
+  ok plist.includes('<string>/opt/a b/bun</string>'), plist
+  ok plist.includes('<string>/usr/bin:/a&amp;b</string>'), plist
+  ok /<key>KeepAlive<\/key>\s*<dict>\s*<key>SuccessfulExit<\/key>\s*<false\/>/.test(plist), plist
+  ok /<key>RunAtLoad<\/key>\s*<true\/>/.test(plist), plist
+  ok /<key>ThrottleInterval<\/key>\s*<integer>2<\/integer>/.test(plist), plist
+  if Bun.which 'plutil'
+    scratch = mkdtempSync join(tmpdir(), 'rip-plist-')
+    try
+      writeFileSync join(scratch, 'unit.plist'), plist
+      lint = Bun.spawnSync ['plutil', '-lint', join(scratch, 'unit.plist')], { stdout: 'pipe', stderr: 'pipe' }
+      eq lint.exitCode, 0, lint.stdout.toString()
+    finally
+      rmSync scratch, { recursive: true, force: true }
+  unit = systemdUnit [...program, '$HOME'], env, '/s/agent.log'
+  ok unit.includes('ExecStart="/opt/a b/bun" "--preload=/r/src/loader.js" "/r/packages/sites/agent.rip" "$$HOME"'), unit
+  ok unit.includes('Environment="JANUS_CONTROL=/run/50%%/janus.sock"'), unit
+  ok unit.includes('Restart=on-failure'), unit
+  ok unit.includes('StartLimitIntervalSec=0'), unit
+  ok unit.includes('KillMode=process'), unit
+  ok unit.includes('WantedBy=default.target'), unit
+
+# Each phase hands the agent from one owner to the next while an app is
+# running, and the app's manager — the same pid throughout — never notices.
+test! 'autostart hands the agent to the service manager and back without touching its apps', ->
+  root = realpathSync mkdtempSync(join(tmpdir(), 'rip-auto-'))
+  home = join root, 'h'
+  temp = join root, 't'
+  bin = join root, 'bin'
+  service = join root, 's'
+  mkdirSync dir, { recursive: true } for dir in [home, temp, bin, service]
+  for tool in ['launchctl', 'systemctl', 'loginctl']
+    shim = join bin, tool
+    writeFileSync shim, "#!/bin/sh\nexec '#{process.execPath}' '#{PRELOAD}' '#{SERVICE}' #{tool} '#{service}' \"$@\"\n"
+    chmodSync shim, 0o755
+  manager = if platform() is 'darwin' then 'launchctl' else 'systemctl'
+  janusSocket = join root, 'janus.sock'
+  janus = startJanus janusSocket, []
+  # A whole user, in the fixture: the default catalog under HOME, the
+  # control socket under TMPDIR, and only the stand-in service manager
+  # on PATH. Empty overrides are unset ones.
+  env =
+    HOME: home
+    TMPDIR: temp
+    XDG_CONFIG_HOME: join(home, '.config')
+    XDG_STATE_HOME: join(home, '.local', 'state')
+    PATH: "#{bin}:#{dirname(process.execPath)}:/usr/bin:/bin"
+    RIP_AGENT_HOME: ''
+    RIP_AGENT_RUNTIME: ''
+    JANUS_CONTROL: janusSocket
+  runtime = join temp, "rip-agent-#{process.getuid()}"
+  calls = -> try readFileSync(join(service, 'calls'), 'utf8').trim().split('\n') catch then []
+  servicePid = -> try Number(readFileSync(join(service, 'pid'), 'utf8')) catch then null
+  agentStatus = (over = env) -> JSON.parse (cli!(APP, ['status', 'agent', '--json'], over)).out
+  appPid = -> JSON.parse((cli!(APP, ['status', 'fixture', '--json'], env)).out).pid
+  project = join root, 'p'
+  mkdirSync join(project, 'app'), { recursive: true }
+  writeFileSync join(project, 'app', 'index.rip'), "export default -> 'ok'\n"
+  elsewhere = { ...env, RIP_AGENT_HOME: join(root, 'o', 'state'), RIP_AGENT_RUNTIME: join(root, 'o', 'run') }
+  app = null
+  try
+    eq (cli!(APP, ['add', project, '--name', 'fixture'], env)).code, 0
+    started = cli! APP, ['start', 'fixture', '--json'], env
+    eq started.code, 0, started.err
+    app = JSON.parse(started.out).pid
+    direct = agentStatus!
+    eq direct.autostart, false
+    eq calls(), [], 'no service manager before autostart'
+
+    # On: the agent the CLI started gives way to the service's, which
+    # adopts the running manager rather than starting another.
+    installed = cli! APP, ['autostart', '--json'], env
+    eq installed.code, 0, installed.err
+    unit = JSON.parse(installed.out).unit
+    ok unit.startsWith(home), unit
+    ok existsSync(unit)
+    ok calls().some((line) -> line.startsWith(manager)), calls().join('\n')
+    ok not alive(direct.pid), 'the agent started outside the service is stopped'
+    eq agentStatus!, { state: 'running', pid: servicePid(), autostart: true }
+    eq appPid!, app
+
+    # A stopped agent comes back through the service manager, never
+    # spawned beside it.
+    eq (cli!(APP, ['stop', 'agent'], env)).code, 0
+    before = calls().length
+    restarted = cli! APP, ['start', 'agent', '--json'], env
+    eq restarted.code, 0, restarted.err
+    eq JSON.parse(restarted.out).pid, servicePid()
+    ok calls().slice(before).some((line) -> line.startsWith(manager)), calls().join('\n')
+    eq appPid!, app
+
+    # An agent that has closed its socket but not yet exited still counts
+    # as running to the service manager, which ignores a start, and its
+    # clean exit is not restarted — the moment `restart agent` asks. A
+    # process that holds the job for a second and never listens stands in
+    # for it.
+    eq (cli!(APP, ['stop', 'agent'], env)).code, 0
+    exiting = Bun.spawn ['sleep', '1']
+    writeFileSync join(service, 'pid'), String(exiting.pid)
+    revived = cli! APP, ['start', 'agent', '--json'], env
+    eq revived.code, 0, revived.err
+    eq JSON.parse(revived.out).pid, servicePid()
+    recycled = cli! APP, ['restart', 'agent', '--json'], env
+    eq recycled.code, 0, recycled.err
+    eq JSON.parse(recycled.out).pid, servicePid()
+    eq appPid!, app
+
+    # Another catalog is not the service's: its agent spawns directly,
+    # and autostart refuses it before stopping anything.
+    before = calls().length
+    booted = cli! APP, ['start', 'agent', '--json'], elsewhere
+    eq booted.code, 0, booted.err
+    other = JSON.parse(booted.out).pid
+    ok other isnt servicePid()
+    refused = cli! APP, ['autostart'], elsewhere
+    eq refused.code, 1
+    ok refused.err.includes('unset RIP_AGENT_HOME'), refused.err
+    ok alive(other), 'a refused autostart stops no agent'
+    eq agentStatus!(elsewhere).autostart, false
+    eq calls().length, before, 'an override never reaches the service manager'
+    eq agentStatus!.pid, servicePid(), 'the service agent is untouched'
+    stopAgent! join(root, 'o', 'run')
+
+    # Off: the service lets go of its agent, and an ordinary agent takes
+    # over supervision of the app still running.
+    supervised = servicePid()
+    removed = cli! APP, ['autostart', 'off', '--json'], env
+    eq removed.code, 0, removed.err
+    eq JSON.parse(removed.out).removed, true
+    ok not existsSync(unit)
+    ok not alive(supervised), 'the service agent is stopped'
+    after = agentStatus!
+    eq after.state, 'running'
+    eq after.autostart, false
+    eq appPid!, app
+  finally
+    # A failed phase can leave no agent able to reach the manager; it
+    # must not outlive the fixture.
+    try cli! APP, ['stop', 'fixture'], env
+    try process.kill(app, 'SIGTERM') if app? and alive(app)
+    stopAgent! runtime
+    try process.kill(servicePid(), 'SIGKILL') if servicePid()?
+    janus.stop true
+    rmSync root, { recursive: true, force: true }

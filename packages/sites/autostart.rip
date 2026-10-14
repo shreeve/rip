@@ -1,0 +1,204 @@
+import { existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { homedir, platform, userInfo } from 'node:os'
+import { dirname, join } from 'node:path'
+
+# The control agent as a per-user OS service: a launchd LaunchAgent on
+# macOS, a systemd user unit on Linux. The service runs agent.rip itself,
+# so the service manager starts it at login and again after a crash. A
+# clean exit — the agent idling out with no app desired running — is not
+# restarted; the next control request asks the service manager for the
+# agent and never spawns one beside it, which would hold the control
+# socket and refuse the service's boot.
+#
+# The agent idles out seconds after its last app stops, and a command
+# waits 5s for one to answer. launchd defers any start, a demand start
+# too, until ThrottleInterval (10s by default) after the last; systemd
+# refuses starts past its rate limit. Both run at the agent's pace: a
+# start at most every 2s, never refused.
+#
+# Managers outlive their agent, and the unit must not take them down:
+# launchd kills only the job's process group, which managers leave when
+# they spawn detached; systemd kills the whole cgroup unless
+# KillMode=process.
+
+LABEL = 'rip.sites.agent'
+UNIT = 'rip-sites-agent.service'
+
+# Autostart serves the default control plane. RIP_AGENT_HOME or
+# RIP_AGENT_RUNTIME points a process at another catalog, which the
+# installed service does not run.
+export autostartApplies = -> not (process.env.RIP_AGENT_HOME or process.env.RIP_AGENT_RUNTIME)
+
+serviceKind = ->
+  switch platform()
+    when 'darwin' then 'launchd'
+    when 'linux' then 'systemd'
+    else null
+
+export unitPath = ->
+  switch serviceKind()
+    when 'launchd' then join(homedir(), 'Library', 'LaunchAgents', "#{LABEL}.plist")
+    when 'systemd' then join((process.env.XDG_CONFIG_HOME or join(homedir(), '.config')), 'systemd', 'user', UNIT)
+    else null
+
+export autostartInstalled = ->
+  path = unitPath()
+  autostartApplies() and path? and existsSync(path)
+
+# Ask the service manager for the agent. kickstart starts a loaded job
+# that is not running and leaves a running one alone; a unit on disk that
+# is not loaded (booted out by hand) is bootstrapped, which runs it.
+export startService = ->
+  if serviceKind() is 'launchd'
+    return if invoke('launchctl', 'kickstart', target()).ok
+    must 'launchctl', 'bootstrap', domain(), unitPath()
+  else
+    must 'systemctl', '--user', 'start', UNIT
+
+# The installing shell's variables that decide which catalog, control
+# socket, and edge an agent uses, and where it finds janus. A service
+# manager hands its jobs few of them — launchd's PATH is the system
+# directories alone — so the unit carries each one that is set.
+CARRIED = ['PATH', 'TMPDIR', 'XDG_STATE_HOME', 'JANUS_CONTROL']
+
+# `program` is the agent's argv, `log` the file its output appends to.
+export installAutostart = (program, log) ->
+  kind = requireAutostart()
+  path = unitPath()
+  env = {}
+  env[key] = process.env[key] for key in CARRIED when process.env[key]
+  writeUnit path, (if kind is 'launchd' then plistUnit(program, env, log) else systemdUnit(program, env, log))
+  if kind is 'launchd'
+    # A loaded job keeps the definition it was loaded with.
+    if loaded()
+      must 'launchctl', 'bootout', target()
+      waitUnloaded()
+    must 'launchctl', 'bootstrap', domain(), path
+    { autostart: true, manager: kind, unit: path, note: null }
+  else
+    must 'systemctl', '--user', 'daemon-reload'
+    must 'systemctl', '--user', 'enable', UNIT
+    must 'systemctl', '--user', 'restart', UNIT
+    { autostart: true, manager: kind, unit: path, note: lingerNote() }
+
+export removeAutostart = ->
+  kind = requireAutostart()
+  path = unitPath()
+  installed = existsSync path
+  if kind is 'launchd'
+    if loaded()
+      must 'launchctl', 'bootout', target()
+      waitUnloaded()
+    unlinkSync path if installed
+  else if installed
+    must 'systemctl', '--user', 'disable', '--now', UNIT
+    unlinkSync path
+    must 'systemctl', '--user', 'daemon-reload'
+  { autostart: false, manager: kind, unit: path, removed: installed }
+
+export plistUnit = (program, env, log) ->
+  strings = (values, indent) -> values.map((value) -> "#{indent}<string>#{xml(value)}</string>").join('\n')
+  variables = Object.entries(env).map(([key, value]) -> "    <key>#{xml(key)}</key>\n    <string>#{xml(value)}</string>").join('\n')
+  """
+  <?xml version="1.0" encoding="UTF-8"?>
+  <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+  <plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>#{LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+  #{strings(program, '    ')}
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+  #{variables}
+    </dict>
+    <key>KeepAlive</key>
+    <dict>
+      <key>SuccessfulExit</key>
+      <false/>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>2</integer>
+    <key>StandardOutPath</key>
+    <string>#{xml(log)}</string>
+    <key>StandardErrorPath</key>
+    <string>#{xml(log)}</string>
+  </dict>
+  </plist>
+
+  """
+
+export systemdUnit = (program, env, log) ->
+  variables = Object.entries(env).map(([key, value]) -> "Environment=#{systemdQuote("#{key}=#{value}")}").join('\n')
+  """
+  [Unit]
+  Description=Rip Sites control agent
+  StartLimitIntervalSec=0
+
+  [Service]
+  ExecStart=#{program.map((arg) -> systemdQuote(arg, true)).join(' ')}
+  #{variables}
+  Restart=on-failure
+  RestartSec=2
+  KillMode=process
+  StandardOutput=append:#{log.replaceAll('%', '%%')}
+  StandardError=append:#{log.replaceAll('%', '%%')}
+
+  [Install]
+  WantedBy=default.target
+
+  """
+
+xml = (text) -> text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+
+# Unit values expand `%` specifiers everywhere and `$` variables in
+# ExecStart; a quoted word takes C-style escapes.
+systemdQuote = (text, exec = false) ->
+  text = text.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('%', '%%')
+  text = text.replaceAll('$', '$$$$') if exec
+  "\"#{text}\""
+
+export requireAutostart = ->
+  abort 'rip-sites: autostart supports macOS (launchd) and Linux (systemd)' unless serviceKind()?
+  abort 'rip-sites: autostart runs the default control plane — unset RIP_AGENT_HOME and RIP_AGENT_RUNTIME' unless autostartApplies()
+  serviceKind()
+
+domain = -> "gui/#{process.getuid()}"
+target = -> "#{domain()}/#{LABEL}"
+
+loaded = -> invoke('launchctl', 'print', target()).ok
+
+# bootout returns before launchd has finished unloading, and a bootstrap
+# of the same label in that window fails.
+waitUnloaded = ->
+  deadline = Date.now() + 5000
+  while loaded()
+    abort "rip-sites: launchd did not unload #{LABEL}" if Date.now() >= deadline
+    Bun.sleepSync 50
+
+writeUnit = (path, text) ->
+  mkdirSync dirname(path), { recursive: true }
+  temporary = "#{path}.tmp-#{process.pid}"
+  writeFileSync temporary, text, { mode: 0o644 }
+  renameSync temporary, path
+
+lingerNote = ->
+  result = invoke 'loginctl', 'show-user', userInfo().username, '--property=Linger', '--value'
+  return null unless result.ok and result.text is 'no'
+  'Linger is off: the agent starts at login. `loginctl enable-linger` starts it at boot.'
+
+invoke = (tool, ...args) ->
+  command = Bun.which tool
+  return { ok: false, missing: true, text: '' } unless command?
+  result = Bun.spawnSync [command, ...args], { stdout: 'pipe', stderr: 'pipe' }
+  { ok: result.exitCode is 0, missing: false, text: "#{result.stdout.toString()}#{result.stderr.toString()}".trim() }
+
+must = (tool, ...args) ->
+  result = invoke tool, ...args
+  abort "rip-sites: autostart needs #{tool} on PATH" if result.missing
+  abort "rip-sites: #{tool} #{args.join(' ')} failed#{if result.text then ": #{result.text}" else ''}" unless result.ok
+  result

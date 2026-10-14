@@ -2,6 +2,7 @@ import { test, eq, ok } from 'rip/testing'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { managerRuntime } from '../../control.rip'
 
 PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
 SERVER = join(import.meta.dir, '..', '..', 'manager.rip')
@@ -32,7 +33,32 @@ startControl = (socket, calls, handlers = {}) ->
       if request.method is 'POST' and url.pathname.endsWith('/heartbeat')
         heartbeatSerial++
         return handlers.heartbeat(heartbeatSerial, url.pathname) if handlers.heartbeat?
+      return handlers.delete(url.pathname) if request.method is 'DELETE' and handlers.delete?
       Response.new null, { status: 204 }
+
+# A project's manager owner record, and the Janus registration it names.
+ownerRecord = (project) ->
+  try JSON.parse(readFileSync(managerRuntime(realpathSync(project)).owner, 'utf8')) catch then null
+
+recordedApp = (project) -> ownerRecord(project)?.app
+
+# The manager runtime is the user's own, not the fixture's: a test that
+# crashes a manager removes what the crash leaves there, pass or fail.
+forgetManager = (project) ->
+  runtime = managerRuntime realpathSync(project)
+  rmSync runtime.owner, { force: true }
+  rmSync runtime.socket, { force: true }
+
+# Starts a manager and kills it the way a crash does once its owner record
+# names a registration: nothing deregistered, the record left behind.
+crash = (project, args) ->
+  { proc } = run project, args
+  try
+    waitFor! 'registration recorded', -> recordedApp(project)?
+    recordedApp project
+  finally
+    proc.kill 'SIGKILL'
+    await proc.exited
 
 run = (cwd, args, env = {}) ->
   proc = Bun.spawn [process.execPath, PRELOAD, SERVER, ...args],
@@ -384,6 +410,7 @@ test! 'heartbeat recovery retries a stale replacement claim', ->
     process = launched.proc
     waitFor! 'heartbeat replacement registration', ->
       calls.filter((call) -> call.method is 'POST' and call.path is '/1.0/apps').length is 4
+    waitFor! 'owner record names the replacement', -> recordedApp(project) is 'registration-new'
     ok not process.exitCode?
     process.kill 'SIGTERM'
     eq await process.exited, 143
@@ -392,6 +419,107 @@ test! 'heartbeat recovery retries a stale replacement claim', ->
     try process?.kill 'SIGKILL'
     await process.exited if process?
     control.stop true
+    forgetManager project
+    rmSync dir, { recursive: true, force: true }
+
+# Janus holds a dead manager's claim until its heartbeat TTL lapses. The
+# manager lock proves a dead owner is this project's predecessor, so the
+# successor retires the registration it left and claims the hosts at
+# once. This fake Janus never lapses a claim: only a delete frees it.
+test! "a crashed manager's successor retires its registration and claims the hosts at once", ->
+  dir = mkdtempSync join(tmpdir(), 'rip-manager-successor-')
+  project = join dir, 'project'
+  mkdirSync join(project, 'app'), { recursive: true }
+  writeFileSync join(project, 'app', 'index.rip'), "export default -> 'ok'\n"
+  calls = []
+  live = Set.new()
+  controlSocket = join dir, 'janus.sock'
+  control = startControl controlSocket, calls,
+    register: (serial) ->
+      live.delete call.path.split('/').at(-1) for call in calls when call.method is 'DELETE'
+      return Response.new('claimed', { status: 409 }) if live.size
+      live.add "registration-#{serial}"
+      Response.json({ id: "registration-#{serial}" }, { status: 201 })
+  args = [project, '--host', 'successor.example.test', '--control', controlSocket, '--no-watch', '--access-log=off']
+  second = null
+  try
+    eq crash!(project, args), 'registration-1'
+    second = run project, args, { RIP_REGISTER_409_MS: '2000' }
+    waitFor! 'successor registration', -> live.has 'registration-2'
+    retired = calls.findIndex (call) -> call.method is 'DELETE' and call.path is '/1.0/apps/registration-1'
+    ok retired >= 0, JSON.stringify(calls.map((call) -> "#{call.method} #{call.path}"))
+    registrations = calls.filter (call) -> call.method is 'POST' and call.path is '/1.0/apps'
+    eq registrations.length, 2, 'the successor never met the dead claim'
+    ok calls.indexOf(registrations[1]) > retired
+    second.proc.kill 'SIGTERM'
+    eq await second.proc.exited, 143
+    ok not (await second.err).includes('held by another app'), await second.err
+  finally
+    try second?.proc.kill 'SIGKILL'
+    await second.proc.exited if second?
+    control.stop true
+    forgetManager project
+    rmSync dir, { recursive: true, force: true }
+
+# Janus may reap the dead claim before the successor starts. The retiring
+# delete then finds nothing, and registration goes ahead untouched.
+test! "a successor whose predecessor's claim already lapsed registers as usual", ->
+  dir = mkdtempSync join(tmpdir(), 'rip-manager-lapsed-')
+  project = join dir, 'project'
+  mkdirSync join(project, 'app'), { recursive: true }
+  writeFileSync join(project, 'app', 'index.rip'), "export default -> 'ok'\n"
+  calls = []
+  controlSocket = join dir, 'janus.sock'
+  control = startControl controlSocket, calls,
+    delete: (path) -> Response.json({ error: "unknown app #{path.split('/').at(-1)}" }, { status: 404 })
+  args = [project, '--host', 'lapsed.example.test', '--control', controlSocket, '--no-watch', '--access-log=off']
+  second = null
+  try
+    eq crash!(project, args), 'registration-1'
+    second = run project, args
+    waitFor! 'successor registration', -> recordedApp(project) is 'registration-2'
+    ok calls.some((call) -> call.method is 'DELETE' and call.path is '/1.0/apps/registration-1')
+    ok not second.proc.exitCode?, 'a missing predecessor registration is not an error'
+    second.proc.kill 'SIGTERM'
+    eq await second.proc.exited, 143
+  finally
+    try second?.proc.kill 'SIGKILL'
+    await second.proc.exited if second?
+    control.stop true
+    forgetManager project
+    rmSync dir, { recursive: true, force: true }
+
+# A claim on another Janus holds nothing on this one, and that edge's
+# registration is not this successor's to remove.
+test! "a successor on another Janus leaves its predecessor's registration alone", ->
+  dir = mkdtempSync join(tmpdir(), 'rip-manager-moved-')
+  project = join dir, 'project'
+  mkdirSync join(project, 'app'), { recursive: true }
+  writeFileSync join(project, 'app', 'index.rip'), "export default -> 'ok'\n"
+  formerCalls = []
+  currentCalls = []
+  formerSocket = join dir, 'former.sock'
+  currentSocket = join dir, 'current.sock'
+  former = startControl formerSocket, formerCalls
+  current = startControl currentSocket, currentCalls
+  base = [project, '--host', 'moved.example.test', '--no-watch', '--access-log=off']
+  second = null
+  try
+    eq crash!(project, [...base, '--control', formerSocket]), 'registration-1'
+    second = run project, [...base, '--control', currentSocket]
+    waitFor! 'successor registration', -> ownerRecord(project)?.control is currentSocket
+    eq recordedApp(project), 'registration-1'
+    deletes = (calls) -> calls.filter((call) -> call.method is 'DELETE').map((call) -> call.path)
+    eq deletes(currentCalls), []
+    eq deletes(formerCalls), []
+    second.proc.kill 'SIGTERM'
+    eq await second.proc.exited, 143
+  finally
+    try second?.proc.kill 'SIGKILL'
+    await second.proc.exited if second?
+    former.stop true
+    current.stop true
+    forgetManager project
     rmSync dir, { recursive: true, force: true }
 
 test! 'manager runtime is private to the current POSIX user', ->

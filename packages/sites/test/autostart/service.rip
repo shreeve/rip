@@ -1,0 +1,102 @@
+# A stand-in service manager for test/autostart: enough of launchctl and
+# systemctl for the agent's unit to load, start, and stop. It runs the
+# agent the way the real one does — the unit's program, the unit's
+# environment over what a login session hands every job — and records
+# each call. Restart after a crash is the real service manager's and is
+# not modeled. Nothing here is a test.
+import { appendFileSync, existsSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { join } from 'node:path'
+
+[tool, state, ...args] = process.argv.slice 2
+appendFileSync join(state, 'calls'), "#{tool} #{args.join(' ')}\n"
+loadedPath = join state, 'loaded'
+pidPath = join state, 'pid'
+
+alive = (pid) ->
+  try
+    process.kill pid, 0
+    true
+  catch then false
+
+runningPid = ->
+  return null unless existsSync pidPath
+  pid = Number readFileSync(pidPath, 'utf8')
+  if alive(pid) then pid else null
+
+xml = (text) -> text.replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&')
+
+words = (line) ->
+  [...line.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map (match) ->
+    match[1].replace(/\\(.)/g, '$1').replaceAll('%%', '%').replaceAll('$$', '$')
+
+readUnit = (path) ->
+  text = readFileSync path, 'utf8'
+  env = {}
+  if tool is 'launchctl'
+    array = text.match(/<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/)[1]
+    program = [...array.matchAll(/<string>(.*?)<\/string>/g)].map (match) -> xml match[1]
+    variables = text.match(/<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/)[1]
+    env[xml match[1]] = xml match[2] for match in [...variables.matchAll(/<key>(.*?)<\/key>\s*<string>(.*?)<\/string>/g)]
+    log = xml text.match(/<key>StandardOutPath<\/key>\s*<string>(.*?)<\/string>/)[1]
+  else
+    program = words text.match(/^ExecStart=(.*)$/m)[1]
+    for line in text.match(/^Environment=.*$/gm) or []
+      [pair] = words line
+      at = pair.indexOf '='
+      env[pair.slice(0, at)] = pair.slice(at + 1)
+    log = text.match(/^StandardOutput=append:(.*)$/m)[1].replaceAll('%%', '%')
+  { program, env, log }
+
+LOGIN = ['HOME', 'USER', 'LOGNAME']
+
+start = (path) ->
+  return if runningPid()?
+  unit = readUnit path
+  env = {}
+  env[key] = process.env[key] for key in LOGIN when process.env[key]?
+  log = openSync unit.log, 'a'
+  child = spawn unit.program[0], unit.program.slice(1),
+    detached: true
+    stdio: ['ignore', log, log]
+    env: { ...env, ...unit.env }
+  child.unref()
+  writeFileSync pidPath, String(child.pid)
+
+stop = ->
+  pid = runningPid()
+  return unless pid?
+  process.kill pid, 'SIGTERM'
+  deadline = Date.now() + 5000
+  Bun.sleepSync 20 while alive(pid) and Date.now() < deadline
+
+systemdUnitPath = -> join process.env.XDG_CONFIG_HOME, 'systemd', 'user', 'rip-sites-agent.service'
+
+switch tool
+  when 'launchctl'
+    [verb, ...rest] = args
+    switch verb
+      when 'print'
+        exit(if existsSync(loadedPath) then 0 else 113)
+      when 'bootstrap'
+        exit 5 if existsSync loadedPath
+        writeFileSync loadedPath, rest[1]
+        start rest[1]
+      when 'kickstart'
+        exit 113 unless existsSync loadedPath
+        start readFileSync(loadedPath, 'utf8')
+      when 'bootout'
+        exit 3 unless existsSync loadedPath
+        stop()
+        rmSync loadedPath
+      else exit 64
+  when 'systemctl'
+    verb = args[1]
+    switch verb
+      when 'start' then start systemdUnitPath()
+      when 'restart'
+        stop()
+        start systemdUnitPath()
+      when 'disable' then stop()
+  when 'loginctl'
+    console.log 'yes'
