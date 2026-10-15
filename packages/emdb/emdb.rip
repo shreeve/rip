@@ -5,7 +5,7 @@
 #   Date: October 12, 2026
 #
 # A bun:ffi binding to libemdb's C ABI (emdb's include/emdb.h, SPEC §8.8),
-# on the libemdb 0.10.2 it bundles in lib/:
+# on the libemdb 0.10.3 it bundles in lib/:
 #   - open(path, options) → Env; env.read / env.write run a scoped
 #     transaction that commits when its function returns and aborts when
 #     it throws
@@ -88,7 +88,7 @@ CURRENT   =! 6
 # The libemdb this package bundles, one per supported platform, in lib/
 # beside this file and named by Bun's own platform and architecture
 # strings (lib/README.md has their provenance).
-VERSION =! '0.10.2'
+VERSION =! '0.10.3'
 
 lib = null
 

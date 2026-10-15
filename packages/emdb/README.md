@@ -6,7 +6,7 @@
 
 [emdb](https://github.com/shreeve/emdb) is an embedded key-value database:
 a memory-mapped, copy-on-write B+ tree with MVCC, in LMDB's architecture.
-This package bundles its C library, `libemdb` 0.10.2, loads it with
+This package bundles its C library, `libemdb` 0.10.3, loads it with
 `bun:ffi` and binds the
 twenty-one functions of its C ABI (`include/emdb.h`, emdb's SPEC §8.8);
 the API below reaches all of them except the cursor writes
@@ -49,7 +49,7 @@ db.close()
 
 - **Bun** on Linux x86_64 (glibc 2.17 or later) or macOS arm64.
 
-Nothing to build or install: the package bundles libemdb 0.10.2, emdb's
+Nothing to build or install: the package bundles libemdb 0.10.3, emdb's
 C library, for those two platforms in `lib/`, and loads the one named
 for the platform and architecture Bun reports. Any other platform is
 refused at the first `open` with `no libemdb for <platform>-<arch>`.
@@ -243,7 +243,8 @@ of the one before (`'16kb'`, `'8gb'`). Anything else is refused with a
 `TypeError` naming those forms: `'1.5mb'`, `'16 kb'`, `'8gib'`, a string
 with no unit, a negative or fractional number, a size past 2^53 - 1
 bytes, and a `step` or `max` of 0. `start` and `step` round up to whole
-pages; `max` in effect rounds down, as no page can lie past it. An unknown option,
+pages, and `max` rounds down; emdb refuses a `start` above `max`, or a
+`max` under two pages, with `EMDB_INVALID_GEOMETRY`. An unknown option,
 a flag that is not `true` or `false`, and any other size that is not a
 non-negative integer are refused. A backup restores with the
 emdb command: `emdb -r data.emdb data.backup`.
@@ -281,7 +282,7 @@ write still returns, and the error is thrown again on its own afterwards.
 | Call | Returns |
 | --- | --- |
 | `open(path, options)` | `Env` |
-| `version()` | libemdb's version, `'0.10.2'` |
+| `version()` | libemdb's version, `'0.10.3'` |
 | `libraryPath()` | the bundled libemdb file for this platform |
 | `env.read(fn)` / `env.write([options,] fn)` | `fn`'s result |
 | `env.info()` / `env.headroom()` | info / `{size, max, step, bytesLeft, stepsLeft}` |

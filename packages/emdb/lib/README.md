@@ -11,7 +11,7 @@ licensed under the GNU Affero General Public License v3.0 (emdb's
 
 ## Provenance
 
-- emdb 0.10.2, tag `v0.10.2`, commit `37454273c7e7b8c1e34b01e0e63e1c798dac4e42`
+- emdb 0.10.3, tag `v0.10.3`, commit `e0b86015a90e743c03a6bd33653daa40f3bd9f7d`
 - Zig 0.17.0
 - The C library is always built on a ReleaseFast engine, whatever
   `-Doptimize` says, and the shared one is stripped, its exports kept in
@@ -22,10 +22,10 @@ From an emdb checkout at that commit:
 
 ```bash
 zig build --prefix /tmp/emdb-linux-x64/p -Dtarget=x86_64-linux-gnu.2.17
-cp /tmp/emdb-linux-x64/lib/libemdb.so libemdb-0.10.2-linux-x64.so
+cp /tmp/emdb-linux-x64/lib/libemdb.so libemdb-0.10.3-linux-x64.so
 
 zig build --prefix /tmp/emdb-darwin-arm64/p     # on an arm64 Mac (aarch64-macos)
-cp /tmp/emdb-darwin-arm64/lib/libemdb.dylib libemdb-0.10.2-darwin-arm64.dylib
+cp /tmp/emdb-darwin-arm64/lib/libemdb.dylib libemdb-0.10.3-darwin-arm64.dylib
 ```
 
 The Linux library is built with no `-Dcpu`, so for baseline x86-64, and
@@ -33,5 +33,5 @@ needs glibc 2.17 or later; the macOS one is for arm64.
 
 | File | Size (bytes) | sha256 |
 | --- | ---: | --- |
-| `libemdb-0.10.2-linux-x64.so` | 242320 | `6f65942917a23f93d6693263c4ead0db377914c7f767dbda6f6b13e497fc5aa0` |
-| `libemdb-0.10.2-darwin-arm64.dylib` | 234800 | `4a61ebb7a3ed324176696f0d3b026b482de79901a6ab782fc6fabc1e5a90d461` |
+| `libemdb-0.10.3-linux-x64.so` | 243360 | `e1a8a6a2f4ba758568e650ffbe15137b1e5f7928088b5f049d1e49003e820b43` |
+| `libemdb-0.10.3-darwin-arm64.dylib` | 234800 | `96af2d8c6e1c67ed35c6481a120c2d63420e6823351467e8183ec4b7b332569e` |

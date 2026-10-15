@@ -82,19 +82,19 @@ test "server-only: browser safety is never declared", ->
 console.log "\nThe bundled libemdb"
 
 LIB_DIR =! join(import.meta.dir, 'lib')
-BUNDLED =! ['libemdb-0.10.2-linux-x64.so', 'libemdb-0.10.2-darwin-arm64.dylib']
+BUNDLED =! ['libemdb-0.10.3-linux-x64.so', 'libemdb-0.10.3-darwin-arm64.dylib']
 
 test "this platform's library is lib/libemdb-<version>-<platform>-<arch>, beside the module", ->
-  eq libraryPath(), join(LIB_DIR, "libemdb-0.10.2-#{process.platform}-#{process.arch}.#{suffix}")
+  eq libraryPath(), join(LIB_DIR, "libemdb-0.10.3-#{process.platform}-#{process.arch}.#{suffix}")
   ok existsSync(libraryPath())
 
-test "version is the bundled library's, 0.10.2", ->
-  eq version(), '0.10.2'
+test "version is the bundled library's, 0.10.3", ->
+  eq version(), '0.10.3'
 
 test "a platform without a bundled library is refused, naming it", ->
   throws (-> libraryPath 'win32', 'x64'), 'emdb: no libemdb for win32-x64'
   throws (-> libraryPath 'linux', 'arm64'), 'emdb: no libemdb for linux-arm64'
-  throws (-> libraryPath 'freebsd', 'x64'), 'bundles libemdb 0.10.2 for linux-x64 and darwin-arm64'
+  throws (-> libraryPath 'freebsd', 'x64'), 'bundles libemdb 0.10.3 for linux-x64 and darwin-arm64'
 
 test "lib/ holds exactly the two libraries and their README, whose sizes and sha256 match", ->
   eq readdirSync(LIB_DIR).sort(), ['README.md', ...BUNDLED].sort()
@@ -1119,6 +1119,10 @@ test "noCreate refuses a missing database", ->
 
 test "a page size that is not a power of two is EMDB_INVALID_PAGE_SIZE", ->
   eq emdbError(-> open fresh(), pageSize: 3000).name, 'EMDB_INVALID_PAGE_SIZE'
+
+test "a start above max, or a max under two pages, is EMDB_INVALID_GEOMETRY", ->
+  eq emdbError(-> open fresh(), start: '2mb', max: '1mb').name, 'EMDB_INVALID_GEOMETRY'
+  eq emdbError(-> open fresh(), pageSize: 4096, max: '4kb').name, 'EMDB_INVALID_GEOMETRY'
 
 test "open options are checked: names, booleans, integers", ->
   throws (-> open fresh(), readonly: true), TypeError, "open has no option 'readonly'"
