@@ -1,6 +1,6 @@
-# Browser behavior rip/ui works around
+# Browser behavior rip/ui and rip/barcodes work around
 
-Each entry is an engine behavior that shapes how a rip/ui part is built or what it can promise. An entry names the engines it was measured on, links its bug where one is filed, and has a page under [`repro/`](repro/) with no rip code in it, which is what a bug report attaches. Every page reports what it measures, so an entry is rechecked by opening its page. Entries a page can measure without a device are pinned by [`test/browser/browsers.spec.mjs`](test/browser/browsers.spec.mjs), which drives the pages on Playwright's engines in `bun run test` and fails when an engine changes; a failing pin names the entry to update and the workaround to drop once the engine fixed it. What no pin can see, the entry says how to watch.
+Each entry is an engine behavior that shapes how a rip/ui part or the rip/barcodes camera is built, or what it can promise. An entry names the engines it was measured on, links its bug where one is filed, and has a page under [`repro/`](repro/) with no rip code in it, which is what a bug report attaches. Every page reports what it measures, so an entry is rechecked by opening its page. Entries a page can measure without a device are pinned by [`test/browser/browsers.spec.mjs`](test/browser/browsers.spec.mjs), which drives the pages on Playwright's engines in `bun run test` and fails when an engine changes; a failing pin names the entry to update and the workaround to drop once the engine fixed it. What no pin can see, the entry says how to watch.
 
 Engine facts live here and nowhere else. A comment or the README states what a part promises and points here for the engine behind it.
 
@@ -75,3 +75,13 @@ Safari on a device and Playwright's WebKit are recorded separately and neither s
 - **Pin:** none; the strip is drawn by the browser's chrome, outside the page. Watch it on a device.
 - **Affects:** every `Dialog.Popup` and `Drawer.Popup`. The demo's backdrops fade in, so the strip usually stays the page's color.
 - **Workaround:** none. Dimming the strip needs page content under the bar while the modal is open, which the native modal does not allow.
+
+## A camera stream's first frames ignore object-fit on iOS
+
+- **Behavior:** a `<video>` playing a camera stream from `getUserMedia` paints its first frames at the wrong scale, then snaps to the correct rendering. On iOS 27 the whole portrait frame shows letterboxed, as a centered column with black on both sides, at a size that ignores `object-fit` and the element's box: sizing the `<video>` to the stream's own shape inside a clipping box leaves the column the same width, and pinning the stream to a single lens leaves it too. Script sees nothing wrong there: `videoWidth` and `videoHeight`, `getSettings()`, and every `requestVideoFrameCallback` frame report the stream's real size from the first frame, every media event from `loadedmetadata` to `canplaythrough` fires before the column appears, and nothing fires when it goes. On iOS 26 the first frames fill the box but are drawn at a larger scale; only that has been observed there.
+- **Measured on:** Safari 27.0 on an iPhone 18 Pro, letterboxed for 0.36–0.40 s; Safari 26.6.2 on an iPhone 16 Pro, drawn larger for about 50 ms. Correct on Chrome on a Pixel 8.
+- **Bug:** [WebKit 324317](https://bugs.webkit.org/show_bug.cgi?id=324317) (open; comment 6 has these measurements and the recordings).
+- **Repro:** [`repro/camera-first-frames.html`](repro/camera-first-frames.html), served over HTTPS, since a camera needs a secure context, and opened on an iPhone. It opens the rear camera into a wide box with `object-fit: cover`, draws `performance.now()` over the box, and lists the media events and frame callbacks on the same clock. Screen-record a start and read the clock where the picture snaps.
+- **Pin:** none; Playwright's engines have no camera, and the glitch is in Safari's painting, which no script observes. Watch it on a device.
+- **Affects:** every stream rip/barcodes attaches with `rearCamera` or `selfieCamera`, in [`../barcodes/dom.rip`](../barcodes/dom.rip), and so any page that shows the camera, such as a scanner's viewfinder.
+- **Workaround:** none. Hiding the video until `loadedmetadata` does not help, since that fires before the glitch begins, and sizing the video to the stream's shape does not either, since the glitch ignores the box. Hiding it for a fixed time after `playing` would cover the phones measured, but no event marks the end.

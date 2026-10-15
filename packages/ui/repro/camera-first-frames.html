@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>A camera stream's first frames on iOS</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 16px -apple-system, system-ui, sans-serif;
+        background: #fff;
+      }
+      button {
+        margin: 0 6px 6px 0;
+        padding: 8px 10px;
+        font: inherit;
+      }
+      .box {
+        position: relative;
+        height: 260px;
+        margin: 10px -16px;
+        background: #000;
+      }
+      video {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      #clock {
+        position: absolute;
+        top: 4px;
+        left: 4px;
+        padding: 2px 4px;
+        font: 16px ui-monospace, monospace;
+        color: #0f0;
+        background: #000;
+      }
+      #log {
+        margin: 0;
+        font: 12px ui-monospace, monospace;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <p>On an iPhone, screen-record a start. The picture should fill the box, cropped by <code>object-fit: cover</code>, from its first frame. Where Safari paints the first frames at a scale of its own, it shows narrower or larger first and then snaps. Read the clock where it snaps and compare it with the log: the log shares the clock.</p>
+
+    <button onclick="start()">Start back camera</button>
+    <button onclick="stop()">Stop</button>
+
+    <div class="box">
+      <video id="v" autoplay muted playsinline></video>
+      <div id="clock"></div>
+    </div>
+
+    <pre id="log"></pre>
+
+    <script>
+      const video = document.getElementById('v')
+      const clock = document.getElementById('clock')
+      const out = document.getElementById('log')
+      const events = ['loadstart', 'loadedmetadata', 'loadeddata', 'canplay', 'canplaythrough', 'play', 'playing', 'resize']
+
+      const now = () => Math.round(performance.now())
+      const log = (text) => { out.textContent += `${now()}  ${text}\n` }
+      const size = () => `${video.videoWidth}x${video.videoHeight}`
+
+      const tick = () => {
+        clock.textContent = now()
+        requestAnimationFrame(tick)
+      }
+      tick()
+
+      for (const name of events) {
+        video.addEventListener(name, () => log(`${name} ${size()} readyState ${video.readyState}`))
+      }
+
+      // The same request rip/barcodes makes for the rear camera.
+      async function start() {
+        stop()
+        out.textContent = ''
+        log('getUserMedia')
+        let stream
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment', width: { ideal: 3840 }, height: { ideal: 2160 }, frameRate: { ideal: 30 } },
+          })
+        } catch (error) {
+          log(`getUserMedia failed: ${error.name} ${error.message}`)
+          return
+        }
+        const track = stream.getVideoTracks()[0]
+        log(`track ${track.label} ${JSON.stringify(track.getSettings().aspectRatio)}`)
+        video.srcObject = stream
+        let count = 0
+        const frame = (time, meta) => {
+          log(`frame ${count} ${meta.width}x${meta.height} presented ${meta.presentedFrames}`)
+          if (++count < 20) video.requestVideoFrameCallback(frame)
+        }
+        video.requestVideoFrameCallback(frame)
+      }
+
+      function stop() {
+        const stream = video.srcObject
+        if (stream) for (const track of stream.getTracks()) track.stop()
+        video.srcObject = null
+      }
+    </script>
+  </body>
+</html>

@@ -318,6 +318,8 @@ camera. `getSize element` is an element's rendered size in CSS pixels.
 `readPDF417` that reports `qr_code` and `pdf417`. Camera access needs a
 secure context.
 
+Safari on iOS draws a stream's first frames at the wrong scale before it settles, letterboxed for about 0.4 s on iOS 27, and nothing the page can observe marks when it settles ([BROWSERS.md](../ui/BROWSERS.md#a-camera-streams-first-frames-ignore-object-fit-on-ios)).
+
 ## Performance
 
 Everything below is reproducible from this directory on an Apple M5 under
