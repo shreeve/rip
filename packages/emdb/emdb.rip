@@ -5,7 +5,7 @@
 #   Date: October 12, 2026
 #
 # A bun:ffi binding to libemdb's C ABI (emdb's include/emdb.h, SPEC §8.8),
-# on the libemdb 0.10.1 it bundles in lib/:
+# on the libemdb 0.10.2 it bundles in lib/:
 #   - open(path, options) → Env; env.read / env.write run a scoped
 #     transaction that commits when its function returns and aborts when
 #     it throws
@@ -88,7 +88,7 @@ CURRENT   =! 6
 # The libemdb this package bundles, one per supported platform, in lib/
 # beside this file and named by Bun's own platform and architecture
 # strings (lib/README.md has their provenance).
-VERSION =! '0.10.1'
+VERSION =! '0.10.2'
 
 lib = null
 
@@ -96,6 +96,10 @@ lib = null
 # process. A second Env on the same file would wait on the writer lock
 # its own process holds, forever; it is refused instead.
 WRITING =! Set.new()
+
+# The databases (by real path) warned of low headroom, per process, so a
+# second Env on the same file does not warn again.
+LOW_HEADROOM =! Set.new()
 
 # The key a SET_RANGE reads, held while the call runs: the cursor gets
 # only its address.
@@ -302,12 +306,16 @@ OPEN_SIZES =!
   maxReaders:       [12, 32]
   maxNamedTrees:    [16, 32]
   sealThreads:      [20, 32]
-  mapSize:          [24, 64]
-  maxMapSize:       [32, 64]
-  growStep:         [40, 64]
   stageAppendBytes: [48, 64]
 
-OPEN_KEYS =! Set.new([...Object.keys(OPEN_FLAGS), ...Object.keys(OPEN_SIZES)])
+# The file's geometry (INV-GEO02), in human sizes: emdb_options' map_size,
+# max_map_size and grow_step.
+OPEN_GEOMETRY =!
+  start: 24
+  max:   32
+  step:  40
+
+OPEN_KEYS =! Set.new([...Object.keys(OPEN_FLAGS), ...Object.keys(OPEN_SIZES), ...Object.keys(OPEN_GEOMETRY)])
 
 WRITE_FLAGS =!
   noSync:     0x0004
@@ -325,6 +333,60 @@ BACKUP_KEYS =! Set.new(['since'])
 U32_MAX =! 0xFFFFFFFFn
 U64_MAX =! 0xFFFFFFFFFFFFFFFFn
 
+SIZE_UNITS =!
+  kb: 1n << 10n
+  mb: 1n << 20n
+  gb: 1n << 30n
+  tb: 1n << 40n
+SIZE_FORMS =! "a whole number of bytes, or a whole number and a unit with no space (kb, mb, gb or tb, each 1024 of the one before), such as '16kb' or '8gb'"
+
+# A geometry size in bytes: a non-negative safe integer, or a string of
+# digits and a unit. Anything else is refused, never guessed at: '1.5mb',
+# '16 kb', '8gib', a unitless string, a negative or fractional number, a
+# size past 2^64. A step or max of 0 would mean emdb's default, which a
+# caller writing 0 cannot mean, so those are refused too; a start of 0 is
+# the smallest file, which emdb starts at anyway. emdb rounds to pages.
+sizeOf = (opts, name) ->
+  v = opts[name]
+  return 0n unless v?
+  bytes = null
+  if typeof v is 'number'
+    bytes = BigInt(v) if Number.isSafeInteger(v) and v >= 0
+  else if typeof v is 'string'
+    m = /^(\d+)(kb|mb|gb|tb)$/i.exec(v)
+    bytes = BigInt(m[1]) * SIZE_UNITS[m[2].toLowerCase()] if m?
+  unless bytes? and bytes <= U64_MAX
+    got = if typeof v is 'string' then JSON.stringify(v) else String(v)
+    throw TypeError.new "emdb: open option #{name} is #{SIZE_FORMS}; got #{got}"
+  throw TypeError.new "emdb: open option #{name} is above 0" if bytes is 0n and name isnt 'start'
+  bytes
+
+sizeText = (n) ->
+  for [unit, size] in [['TB', 2 ** 40], ['GB', 2 ** 30], ['MB', 2 ** 20], ['KB', 2 ** 10]]
+    return "#{+(n / size).toFixed(1)} #{unit}" if n >= size
+  "#{n} bytes"
+
+alignUp = (n, unit) -> Math.ceil(n / unit) * unit
+
+# How far a file of `size` can still grow toward `max` (INV-GEO02). Each
+# growth adds min(size, step), rounded up to a page, the last one capped
+# at max: below step the file doubles, one growth at a time; from step on
+# each growth adds step rounded up to a page (sizes are whole pages), so
+# those are counted by division. A write needing more pages than a step
+# grows further at once, so stepsLeft is the most growths left.
+headroomOf = (size, max, step, pageSize) ->
+  stepsLeft = 0
+  s = size
+  while s < max and s < step
+    s = Math.min(alignUp(s + s, pageSize), max)
+    stepsLeft++
+  stepsLeft += Math.ceil((max - s) / alignUp(step, pageSize)) if s < max
+  { size, max, step, bytesLeft: Math.max(0, max - size), stepsLeft }
+
+# A database warns once when a growth leaves it this few growths or fewer,
+# and again only after its headroom has risen above this and fallen back.
+WARN_STEPS =! 3
+
 # emdb_options (56 bytes), laid out as emdb.h declares it: six uint32_t
 # fields, then four uint64_t. 8-byte backing keeps the uint64_t aligned.
 optionsStruct = (opts) ->
@@ -340,6 +402,8 @@ optionsStruct = (opts) ->
       dv.setUint32 offset, Number(uintOf(opts, name, 'open', U32_MAX)), true
     else
       dv.setBigUint64 offset, BigInt(uintOf(opts, name, 'open', U64_MAX)), true
+  for own name, offset of OPEN_GEOMETRY
+    dv.setBigUint64 offset, sizeOf(opts, name), true
   words
 
 # A uint64_t read from a struct, as a Number; loud past 2^53.
@@ -741,6 +805,7 @@ class Env
     @_open = 0               # transactions in flight
     @_trees = Map.new()      # tree id → its live handle
     @_file = realpathSync(@path)
+    @_size = @info().mapSize # the file's size after the last write
 
   _live: (what) ->
     throw Error.new "emdb: #{what} on a closed environment (#{@path})" if @closed
@@ -772,10 +837,28 @@ class Env
         try result.then(undefined, (-> null)) catch then null
         throw TypeError.new "emdb: the function given to #{what} returned a promise; a transaction is synchronous, so it was aborted"
       txn._end true
+      @_watch() unless readOnly
       result
     finally
       @_open--
       WRITING.delete @_file unless readOnly
+
+  # After a write commits, one emdb_env_info call: when the write grew the
+  # file and left it WARN_STEPS growths or fewer from its max, one warning,
+  # until its headroom rises above WARN_STEPS again. No option turns it
+  # off; a larger max: does.
+  _watch: ->
+    i = @info()
+    grew = i.mapSize > @_size
+    @_size = i.mapSize
+    return unless grew
+    h = headroomOf(i.mapSize, i.maxMapSize, i.growStep, i.pageSize)
+    if h.stepsLeft > WARN_STEPS
+      LOW_HEADROOM.delete @_file
+    else if not LOW_HEADROOM.has(@_file)
+      LOW_HEADROOM.add @_file
+      console.warn "emdb: #{@path} has grown to #{sizeText h.size} of its #{sizeText h.max} max, #{h.stepsLeft} growth#{if h.stepsLeft is 1 then '' else 's'} left; open it with a larger max: before it fills (EMDB_DATABASE_FULL)"
+    return
 
   # A read transaction on the latest commit.
   read: (fn) ->
@@ -794,11 +877,13 @@ class Env
     @_run flags, false, fn, 'env.write'
 
   # Geometry and the latest commit, read without a transaction (API-E06).
+  # emdb_info, 72 bytes: maxMapSize at 56 and growStep at 64 follow the
+  # first 56.
   info: ->
     @_live 'env.info'
-    words = BigUint64Array.new(7)
+    words = BigUint64Array.new(9)
     dv = DataView.new(words.buffer)
-    dv.setUint32 0, 56, true
+    dv.setUint32 0, 72, true
     check lib.emdb_env_info(@_h, words), 'emdb_env_info'
     pageSize:      dv.getUint32(4, true)
     mapSize:       u64(dv, 8)
@@ -809,6 +894,14 @@ class Env
     activeReaders: dv.getUint32(44, true)
     maxReaders:    dv.getUint32(48, true)
     maxKeySize:    dv.getUint32(52, true)
+    maxMapSize:    u64(dv, 56)
+    growStep:      u64(dv, 64)
+
+  # How far the file can still grow: its size, max and step, the bytes
+  # left, and the growths left before it reaches max (see headroomOf).
+  headroom: ->
+    i = @info()
+    headroomOf i.mapSize, i.maxMapSize, i.growStep, i.pageSize
 
   # Make every commit so far durable (API-E10).
   sync: ->

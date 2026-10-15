@@ -6,7 +6,7 @@
 
 [emdb](https://github.com/shreeve/emdb) is an embedded key-value database:
 a memory-mapped, copy-on-write B+ tree with MVCC, in LMDB's architecture.
-This package bundles its C library, `libemdb` 0.10.1, loads it with
+This package bundles its C library, `libemdb` 0.10.2, loads it with
 `bun:ffi` and binds the
 twenty-one functions of its C ABI (`include/emdb.h`, emdb's SPEC §8.8);
 the API below reaches all of them except the cursor writes
@@ -49,7 +49,7 @@ db.close()
 
 - **Bun** on Linux x86_64 (glibc 2.17 or later) or macOS arm64.
 
-Nothing to build or install: the package bundles libemdb 0.10.1, emdb's
+Nothing to build or install: the package bundles libemdb 0.10.2, emdb's
 C library, for those two platforms in `lib/`, and loads the one named
 for the platform and architecture Bun reports. Any other platform is
 refused at the first `open` with `no libemdb for <platform>-<arch>`.
@@ -208,10 +208,11 @@ string or `Uint8Array`, a transaction used after its scope — throws a
 ## Environment
 
 ```coffee
-db = open 'data.emdb', mapSize: 1 << 30, pageSize: 8192
+db = open 'data.emdb', max: '64gb', pageSize: 8192
 
 db.info()      # { pageSize, mapSize, numPages, lastTxnId, entries, depth,
-               #   activeReaders, maxReaders, maxKeySize }
+               #   activeReaders, maxReaders, maxKeySize, maxMapSize, growStep }
+db.headroom()  # { size, max, step, bytesLeft, stepsLeft }: see Size and Growth
 db.read (txn) -> txn.stat()        # { depth, branchPages, leafPages, overflowPages, entries }
 db.backup 'data.backup'            # a new file (removed if the backup fails); or an open
                                    # descriptor; { since: txnId } for incremental
@@ -231,21 +232,54 @@ db.close()
 | `populate`, `hugePages` | pre-fault the file; ask for transparent huge pages (Linux) |
 | `pageSize` | a new file's page size; default the OS page size |
 | `maxReaders`, `maxNamedTrees`, `sealThreads` | reader slots, named-tree handles, commit sealing threads |
-| `mapSize`, `maxMapSize`, `growStep`, `stageAppendBytes` | file size, growth limit and step, staging limit, in bytes |
+| `start` | a new file's size; default the smallest, two pages |
+| `step` | the largest single growth; default `'64mb'` |
+| `max` | the largest the file may grow to; default `'1tb'` |
+| `stageAppendBytes` | the most bytes an `env.write stage: true` stages, in bytes |
 
-An unknown option, a flag that is not `true` or `false`, and a size that
-is not a non-negative integer are refused. A backup restores with the
+`start`, `step` and `max` are a whole number of bytes, or a whole number
+and a unit with no space: `kb`, `mb`, `gb` or `tb`, in any case, each 1024
+of the one before (`'16kb'`, `'8gb'`). Anything else is refused with a
+`TypeError` naming those forms: `'1.5mb'`, `'16 kb'`, `'8gib'`, a string
+with no unit, a negative or fractional number, a size past 2^64, and a
+`step` or `max` of 0. emdb rounds each to whole pages. An unknown option,
+a flag that is not `true` or `false`, and any other size that is not a
+non-negative integer are refused. A backup restores with the
 emdb command: `emdb -r data.emdb data.backup`.
+
+## Size and Growth
+
+A new file starts at `start`, by default the smallest file, two pages
+(8 KB at 4 KB pages, 32 KB at 16 KB). When a write needs pages past the
+end, the file grows by its own size, at most `step`: it doubles until it
+reaches `step`, then grows by `step` each time, never past `max`. With
+`start: '8gb', step: '4gb'` it grows 8, 12, 16, 20 GB. `step` and `max`
+belong to the open, not the file: open again with a larger `max` to give
+a database more room. A write that would grow it past `max` is
+`EMDB_DATABASE_FULL`, and its transaction aborts.
+
+`db.headroom()` says how far it can still go: its `size`, `max` and
+`step`, the `bytesLeft`, and `stepsLeft`, the growths left before `max`,
+counted by that rule. A write needing more than a step at once grows
+further in one go, so `stepsLeft` is the most growths left.
+
+When a write grows the file and leaves it 3 growths or fewer from its
+`max`, the package warns once, with `console.warn`, naming the database,
+its size, its `max` and the growths left. It warns again only after the
+headroom has risen above 3, by opening it with a larger `max`, and fallen
+to 3 or fewer again. The check is one `emdb_env_info` call after each
+write; there is no option to turn it off.
 
 ## API Summary
 
 | Call | Returns |
 | --- | --- |
 | `open(path, options)` | `Env` |
-| `version()` | libemdb's version, `'0.10.1'` |
+| `version()` | libemdb's version, `'0.10.2'` |
 | `libraryPath()` | the bundled libemdb file for this platform |
 | `env.read(fn)` / `env.write([options,] fn)` | `fn`'s result |
-| `env.info()` / `env.sync()` / `env.backup(target, {since})` / `env.close()` | info / — / backup stats / — |
+| `env.info()` / `env.headroom()` | info / `{size, max, step, bytesLeft, stepsLeft}` |
+| `env.sync()` / `env.backup(target, {since})` / `env.close()` | — / backup stats / — |
 | `txn.get(key, {tree, view})` | `Uint8Array` or `undefined` |
 | `txn.put(key, value, {tree})` | — |
 | `txn.del(key, {tree})` / `txn.delPrefix(prefix, {tree})` | `true`/`false` / count |
@@ -264,8 +298,10 @@ bun run bench              # 1,000,000 entries; rip bench.rip <n> for another si
 `bench.rip` runs each operation on 1M entries (16-byte keys, 32-byte
 values; neither engine syncs) beside the same work through `bun:sqlite`,
 which is built into Bun. Measured on an Apple M5 under Bun 1.4.3 with
-libemdb from emdb `636d6cd`, whose code the bundled 0.10.1 is (0.10.1
-only strips the shared library), the median of three runs of best-of-three,
+libemdb from emdb `636d6cd`, whose engine 0.10.1 is (0.10.2 changes
+only how a file starts and grows, and the bench starts its file at 2 GB;
+run back to back on the Mac, the 0.10.1 and 0.10.2 packages measure the
+same within noise on every row), the median of three runs of best-of-three,
 alongside other work on the machine, so read the rows as a ranking:
 
 | Operation | emdb | ns/op | bun:sqlite | ns/op |

@@ -82,19 +82,19 @@ test "server-only: browser safety is never declared", ->
 console.log "\nThe bundled libemdb"
 
 LIB_DIR =! join(import.meta.dir, 'lib')
-BUNDLED =! ['libemdb-0.10.1-linux-x64.so', 'libemdb-0.10.1-darwin-arm64.dylib']
+BUNDLED =! ['libemdb-0.10.2-linux-x64.so', 'libemdb-0.10.2-darwin-arm64.dylib']
 
 test "this platform's library is lib/libemdb-<version>-<platform>-<arch>, beside the module", ->
-  eq libraryPath(), join(LIB_DIR, "libemdb-0.10.1-#{process.platform}-#{process.arch}.#{suffix}")
+  eq libraryPath(), join(LIB_DIR, "libemdb-0.10.2-#{process.platform}-#{process.arch}.#{suffix}")
   ok existsSync(libraryPath())
 
-test "version is the bundled library's, 0.10.1", ->
-  eq version(), '0.10.1'
+test "version is the bundled library's, 0.10.2", ->
+  eq version(), '0.10.2'
 
 test "a platform without a bundled library is refused, naming it", ->
   throws (-> libraryPath 'win32', 'x64'), 'emdb: no libemdb for win32-x64'
   throws (-> libraryPath 'linux', 'arm64'), 'emdb: no libemdb for linux-arm64'
-  throws (-> libraryPath 'freebsd', 'x64'), 'bundles libemdb 0.10.1 for linux-x64 and darwin-arm64'
+  throws (-> libraryPath 'freebsd', 'x64'), 'bundles libemdb 0.10.2 for linux-x64 and darwin-arm64'
 
 test "lib/ holds exactly the two libraries and their README, whose sizes and sha256 match", ->
   eq readdirSync(LIB_DIR).sort(), ['README.md', ...BUNDLED].sort()
@@ -366,7 +366,7 @@ test "a result whose then getter throws still aborts the transaction", ->
     db.write (t) -> t.put 'k', 'later'
 
 test "a failed commit throws, ends the transaction, and leaves the environment usable", ->
-  withDb pageSize: 4096, mapSize: 1 << 20, maxMapSize: 1 << 20, (db) ->
+  withDb pageSize: 4096, start: '1mb', max: '1mb', (db) ->
     held = null
     e = emdbError ->
       db.write (t) ->
@@ -852,11 +852,13 @@ test "info reports the page size asked for, entries, depth and key limit", ->
     ok info.numPages >= 3
     ok info.mapSize >= info.numPages * info.pageSize
 
-test "options past pageSize reach C: maxReaders, mapSize, maxNamedTrees", ->
-  withDb maxReaders: 7, mapSize: 1 << 25, maxNamedTrees: 3, (db) ->
+test "options past pageSize reach C: maxReaders, start, step, max, maxNamedTrees", ->
+  withDb maxReaders: 7, start: '32mb', step: '8mb', max: '2gb', maxNamedTrees: 3, (db) ->
     info = db.info()
     eq info.maxReaders, 7
-    eq info.mapSize, 1 << 25
+    eq info.mapSize, 32 * 2 ** 20
+    eq info.growStep, 8 * 2 ** 20
+    eq info.maxMapSize, 2 * 2 ** 30
     db.write (t) ->
       t.tree "t#{i}", create: true for i in [0...3]
       return
@@ -905,6 +907,116 @@ test "stat inside a write sees that write's changes", ->
       eq t.stat().entries, 1
       eq db.read((r) -> r.stat().entries), 0
 
+# ==[ Size and growth ]==
+
+console.log "\nSize and growth"
+
+MB =! 2 ** 20
+
+test "a new file starts at two pages, growing by up to 64 MB, to at most 1 TB", ->
+  withDb pageSize: 4096, (db) ->
+    info = db.info()
+    eq [info.mapSize, info.growStep, info.maxMapSize], [8192, 64 * MB, 2 ** 40]
+
+test "sizes are bytes, or digits and a unit of kb, mb, gb or tb in any case", ->
+  withDb pageSize: 4096, start: '64KB', step: '1Mb', max: '1tb', (db) ->
+    info = db.info()
+    eq [info.mapSize, info.growStep, info.maxMapSize], [65536, MB, 2 ** 40]
+  withDb pageSize: 4096, start: 65536, step: 2 * MB, max: 4 * MB, (db) ->
+    info = db.info()
+    eq [info.mapSize, info.growStep, info.maxMapSize], [65536, 2 * MB, 4 * MB]
+  withDb pageSize: 4096, start: 0, (db) ->
+    eq db.info().mapSize, 8192
+
+test "any other size is refused, naming the forms accepted", ->
+  forms = "a whole number of bytes, or a whole number and a unit with no space (kb, mb, gb or tb"
+  for bad in ['1.5mb', '16 kb', '8gib', '1024', 'mb', '', '-1mb', '99999999999tb', -1, 1.5, 2 ** 60, NaN, true, 10n]
+    throws (-> open fresh(), max: bad), TypeError, forms
+  throws (-> open fresh(), start: '1.5mb'), TypeError, 'open option start is a whole number'
+  throws (-> open fresh(), step: 0), TypeError, 'open option step is above 0'
+  throws (-> open fresh(), max: '0kb'), TypeError, 'open option max is above 0'
+
+test "the byte-named geometry options are gone: start, step and max are the one way", ->
+  for name in ['mapSize', 'maxMapSize', 'growStep']
+    opts = {}
+    opts[name] = 1 << 20
+    throws (-> open fresh(), opts), TypeError, "open has no option '#{name}'"
+
+test "headroom counts the growths left: doubling to the step, then a step at a time", ->
+  # 8 KB doubles to 64 KB in 3 growths; 15 steps of 64 KB reach 1 MB.
+  withDb pageSize: 4096, start: '8kb', step: '64kb', max: '1mb', (db) ->
+    eq db.headroom(), { size: 8192, max: MB, step: 65536, bytesLeft: MB - 8192, stepsLeft: 18 }
+  # A last step short of a full one still counts: 15 to 1000 KB from 64 KB.
+  withDb pageSize: 4096, start: '8kb', step: '64kb', max: '1000kb', (db) ->
+    eq db.headroom().stepsLeft, 18
+  # A step that is not whole pages grows by whole pages: 12 KB a step.
+  withDb pageSize: 4096, start: '8kb', step: 10000, max: '1mb', (db) ->
+    eq db.headroom().stepsLeft, 1 + (MB - 16384) / 12288
+  # At max, nothing is left.
+  withDb pageSize: 4096, start: '1mb', max: '1mb', (db) ->
+    eq db.headroom(), { size: MB, max: MB, step: 64 * MB, bytesLeft: 0, stepsLeft: 0 }
+
+# Writes small enough that each growth is a minimal one, until the file is
+# full: the sizes it passes through, and what the last write threw.
+fillUp = (db) ->
+  sizes = [db.info().mapSize]
+  full = null
+  i = 0
+  while not full?
+    try
+      db.write (t) -> t.put "k#{String(i++).padStart(6, '0')}", 'v'.repeat(1000)
+    catch e
+      throw e unless e instanceof EmdbError
+      full = e
+    size = db.info().mapSize
+    sizes.push size unless size is sizes[sizes.length - 1]
+  [sizes, full]
+
+test "the file grows as headroom says, and a write past max is EMDB_DATABASE_FULL and aborts", ->
+  withDb pageSize: 4096, start: '8kb', step: '64kb', max: '1mb', (db) ->
+    expected = db.headroom().stepsLeft
+    seen = []
+    warn = console.warn
+    console.warn = (msg) -> seen.push msg
+    try
+      [sizes, full] = fillUp db
+    finally
+      console.warn = warn
+    eq full.name, 'EMDB_DATABASE_FULL'
+    eq sizes.length - 1, expected
+    eq sizes.slice(0, 5), [8192, 16384, 32768, 65536, 131072]
+    eq sizes[sizes.length - 1], MB
+    eq db.headroom().stepsLeft, 0
+    eq seen.length, 1
+
+test "a growth that leaves 3 or fewer warns once, naming the database, and again only after headroom rose", ->
+  path = fresh()
+  seen = []
+  warn = console.warn
+  console.warn = (msg) -> seen.push msg
+  try
+    db = open path, noSync: true, pageSize: 4096, start: '8kb', step: '64kb', max: '1mb'
+    i = 0
+    db.write((t) -> t.put "k#{String(i++).padStart(6, '0')}", 'v'.repeat(1000)) while db.headroom().stepsLeft > 3
+    eq seen.length, 1
+    ok seen[0].includes(path), seen[0]
+    ok seen[0].includes('3 growths left'), seen[0]
+    ok seen[0].includes('of its 1 MB max'), seen[0]
+    db.write((t) -> t.put "k#{String(i++).padStart(6, '0')}", 'v'.repeat(1000)) while db.headroom().stepsLeft > 1
+    eq seen.length, 1   # later growths stay quiet
+    db.close()
+    db = open path, noSync: true, step: '64kb', max: '1mb'
+    db.write((t) -> t.put "k#{String(i++).padStart(6, '0')}", 'v'.repeat(1000)) while db.headroom().stepsLeft > 0
+    eq seen.length, 1   # reopened at the same max: still warned
+    db.close()
+    db = open path, noSync: true, step: '64kb', max: '2mb'
+    db.write((t) -> t.put "k#{String(i++).padStart(6, '0')}", 'v'.repeat(1000)) while db.headroom().stepsLeft > 3
+    eq seen.length, 2   # risen above 3 with the larger max, then down to 3 again
+    ok seen[1].includes('of its 2 MB max'), seen[1]
+  finally
+    console.warn = warn
+    db?.close() unless db?.closed
+
 # ==[ Errors ]==
 
 console.log "\nErrors"
@@ -942,7 +1054,6 @@ test "a page size that is not a power of two is EMDB_INVALID_PAGE_SIZE", ->
 test "open options are checked: names, booleans, integers", ->
   throws (-> open fresh(), readonly: true), TypeError, "open has no option 'readonly'"
   throws (-> open fresh(), readOnly: 'yes'), TypeError, 'readOnly is true or false'
-  throws (-> open fresh(), mapSize: -1), TypeError, 'mapSize is an integer'
   throws (-> open fresh(), pageSize: 1.5), TypeError, 'pageSize is an integer'
   throws (-> open ''), TypeError, 'a path is a non-empty string'
 

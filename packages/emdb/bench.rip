@@ -57,7 +57,7 @@ row = (engine, name, [ms, n], count = N) ->
 
 # ==[ emdb ]====================================================================
 
-db = open join(DIR, 'bench.emdb'), noSync: true, mapSize: 2 ** 31
+db = open join(DIR, 'bench.emdb'), noSync: true, start: '2gb'
 
 putAll = ->
   db.write (t) ->
