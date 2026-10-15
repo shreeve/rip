@@ -7,7 +7,8 @@
 # Workloads, each on N entries with 16-byte string keys (key00000000…, in
 # order) and 32-byte values: put (one write transaction), get in key order,
 # get in random order, scan, scan with views, and delPrefix of every key;
-# then get of 64 KB values, copied and viewed, on N/100 entries.
+# then put with a write transaction each, on N/10 entries; then get of
+# 64 KB values, copied and viewed, on N/100 entries.
 # Reads take the best of three passes after a warm-up; put and delPrefix
 # run once on a fresh database. Neither engine syncs: emdb opens noSync,
 # SQLite runs synchronous=OFF in WAL mode, on a WITHOUT ROWID table with
@@ -57,7 +58,7 @@ row = (engine, name, [ms, n], count = N) ->
 
 # ==[ emdb ]====================================================================
 
-db = open join(DIR, 'bench.emdb'), noSync: true, mapSize: 2 ** 31
+db = open join(DIR, 'bench.emdb'), noSync: true, start: '2gb'
 
 putAll = ->
   db.write (t) ->
@@ -88,6 +89,14 @@ row 'emdb', 'scan', bestOf3 -> scanAll()
 row 'emdb', 'scan (view)', bestOf3 -> scanAll { view: true }
 purgeAll = -> db.write (t) -> t.delPrefix 'key'
 row 'emdb', 'delPrefix', once purgeAll
+
+EACH_N =! Math.max(1, Math.floor(N / 10))
+eachKeys = KEYS.slice(0, EACH_N)
+putEach = ->
+  for k in eachKeys
+    db.write (t) -> t.put k, VALUE
+  eachKeys.length
+row 'emdb', 'put, a write each', (once putEach), EACH_N
 
 BIG_N =! Math.max(1, Math.floor(N / 100))
 BIG =! Uint8Array.new(65536).fill(0x62)
@@ -132,6 +141,12 @@ row 'sqlite', 'scan', bestOf3 -> sq.transaction(->
 
 purge = sq.prepare "DELETE FROM kv WHERE k >= 'key' AND k < 'kez'"
 row 'sqlite', 'delPrefix', once -> purge.run().changes
+
+sqPutEach = ->
+  insert.run k, VALUE for k in eachKeys
+  eachKeys.length
+row 'sqlite', 'put, a write each', (once sqPutEach), EACH_N
+purge.run()
 
 sq.transaction(-> insert.run k, BIG for k in bigKeys)()
 row 'sqlite', 'get 64 KB', (bestOf3 -> sqGetAll bigKeys), BIG_N
