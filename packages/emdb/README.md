@@ -241,8 +241,9 @@ db.close()
 and a unit with no space: `kb`, `mb`, `gb` or `tb`, in any case, each 1024
 of the one before (`'16kb'`, `'8gb'`). Anything else is refused with a
 `TypeError` naming those forms: `'1.5mb'`, `'16 kb'`, `'8gib'`, a string
-with no unit, a negative or fractional number, a size past 2^64, and a
-`step` or `max` of 0. emdb rounds each to whole pages. An unknown option,
+with no unit, a negative or fractional number, a size past 2^53 - 1
+bytes, and a `step` or `max` of 0. `start` and `step` round up to whole
+pages; `max` in effect rounds down, as no page can lie past it. An unknown option,
 a flag that is not `true` or `false`, and any other size that is not a
 non-negative integer are refused. A backup restores with the
 emdb command: `emdb -r data.emdb data.backup`.
@@ -267,8 +268,13 @@ When a write grows the file and leaves it 3 growths or fewer from its
 `max`, the package warns once, with `console.warn`, naming the database,
 its size, its `max` and the growths left. It warns again only after the
 headroom has risen above 3, by opening it with a larger `max`, and fallen
-to 3 or fewer again. The check is one `emdb_env_info` call after each
-write; there is no option to turn it off.
+to 3 or fewer again; when none is left, it says the database is at its
+`max`. That state is per database file in the process, so two
+environments on one file opened with different `max` values share it. The
+check is one `emdb_env_info` call after each write, reading only the
+file's size unless it grew; there is no option to turn it off. A warning
+can never fail a write that has committed: if `console.warn` throws, the
+write still returns, and the error is thrown again on its own afterwards.
 
 ## API Summary
 
@@ -315,6 +321,12 @@ alongside other work on the machine, so read the rows as a ranking:
 | delPrefix, every key | 2 ms | 2 | 145 ms | 145 |
 | get 64 KB value (10,000) | 84 ms | 8377 | 965 ms | 96456 |
 | get 64 KB value, `view: true` | 59 ms | 5948 | — | |
+
+A write transaction of one put each, on 100,000 entries (`put, a write
+each`, a later row of the bench), takes about 3.3 µs per write on the same
+Mac in a later run, against about 7.4 µs for `bun:sqlite`'s
+autocommit insert. The check after each write (Size and Growth) is about
+18 ns of that.
 
 On Linux x86_64 (an Intel Core Ultra 9 185H) under Bun 1.4.3, with libemdb
 from emdb `636d6cd` built for x86_64_v3, pinned to one performance core on

@@ -930,11 +930,30 @@ test "sizes are bytes, or digits and a unit of kb, mb, gb or tb in any case", ->
 
 test "any other size is refused, naming the forms accepted", ->
   forms = "a whole number of bytes, or a whole number and a unit with no space (kb, mb, gb or tb"
-  for bad in ['1.5mb', '16 kb', '8gib', '1024', 'mb', '', '-1mb', '99999999999tb', -1, 1.5, 2 ** 60, NaN, true, 10n]
+  for bad in ['1.5mb', '16 kb', '8gib', '1024', 'mb', '', '-1mb', -1, 1.5, NaN, Infinity, true, 10n]
     throws (-> open fresh(), max: bad), TypeError, forms
   throws (-> open fresh(), start: '1.5mb'), TypeError, 'open option start is a whole number'
-  throws (-> open fresh(), step: 0), TypeError, 'open option step is above 0'
-  throws (-> open fresh(), max: '0kb'), TypeError, 'open option max is above 0'
+  throws (-> open fresh(), step: 0), TypeError, 'open option step must be above 0'
+  throws (-> open fresh(), max: '0kb'), TypeError, 'open option max must be above 0'
+
+test "a size of 2^53 bytes or more is refused, for each of start, step and max", ->
+  for name in ['start', 'step', 'max']
+    for big in [2 ** 53, 2 ** 60, '8192tb', '99999999999tb', '9007199254740992kb']
+      opts = {}
+      opts[name] = big
+      throws (-> open fresh(), opts), TypeError, "open option #{name} is at most 2^53 - 1 bytes (9007199254740991)"
+
+test "refused and failed opens leak no file descriptors", ->
+  count = -> readdirSync('/dev/fd').length
+  before = count()
+  for _ in [0...20]
+    for name in ['start', 'step', 'max']
+      opts = {}
+      opts[name] = '8192tb'
+      throws (-> open fresh(), opts), TypeError
+    eq emdbError(-> open fresh(), pageSize: 3000).name, 'EMDB_INVALID_PAGE_SIZE'
+    open(fresh(), noSync: true).close()
+  eq count(), before
 
 test "the byte-named geometry options are gone: start, step and max are the one way", ->
   for name in ['mapSize', 'maxMapSize', 'growStep']
@@ -971,6 +990,26 @@ fillUp = (db) ->
     size = db.info().mapSize
     sizes.push size unless size is sizes[sizes.length - 1]
   [sizes, full]
+
+test "headroom limits at max rounded down to a page, so an unaligned max ends at 0 left", ->
+  path = fresh()
+  db = open path, noSync: true, pageSize: 4096, start: '8kb', step: '64kb', max: 15000
+  warn = console.warn
+  console.warn = -> null
+  try
+    eq db.headroom().stepsLeft, 1          # 8 KB to 12 KB, the last whole page below 15000
+    eq db.headroom().bytesLeft, 12288 - 8192
+    [sizes, full] = fillUp db
+    eq full.name, 'EMDB_DATABASE_FULL'
+    eq db.headroom().stepsLeft, 0
+    eq db.headroom().bytesLeft, 0
+    db.close()
+    db = open path, noSync: true, pageSize: 4096, step: '64kb', max: 15000
+    eq db.headroom().stepsLeft, 0
+    eq db.headroom().bytesLeft, 0
+  finally
+    console.warn = warn
+    db.close() unless db.closed
 
 test "the file grows as headroom says, and a write past max is EMDB_DATABASE_FULL and aborts", ->
   withDb pageSize: 4096, start: '8kb', step: '64kb', max: '1mb', (db) ->
@@ -1016,6 +1055,36 @@ test "a growth that leaves 3 or fewer warns once, naming the database, and again
   finally
     console.warn = warn
     db?.close() unless db?.closed
+
+test "with no growth left the warning says the database is at its max", ->
+  seen = []
+  warn = console.warn
+  console.warn = (msg) -> seen.push msg
+  try
+    withDb pageSize: 4096, start: '8kb', step: '64kb', max: '16kb', (db) ->
+      fillUp db
+  finally
+    console.warn = warn
+  eq seen.length, 1
+  ok seen[0].includes('has grown to its 16 KB max'), seen[0]
+  ok seen[0].includes('EMDB_DATABASE_FULL'), seen[0]
+
+test "a console.warn that throws cannot fail a committed write: it returns, and the error comes after", ->
+  r = runScript """
+    db0 = open db, noSync: true, pageSize: 4096, start: '8kb', step: '64kb', max: '1mb'
+    console.warn = -> throw Error.new 'the warn hook failed'
+    i = 0
+    last = null
+    while db0.headroom().stepsLeft > 3
+      last = db0.write (t) ->
+        t.put "k\#{i}", 'v'.repeat(1000)
+        "wrote \#{i++}"
+    console.log 'returned', last, db0.read((t) -> t.get("k\#{i - 1}").length)
+  """
+  ok r.stdout.includes('returned wrote '), r.stdout + r.stderr
+  ok r.stdout.includes(' 1000'), r.stdout
+  ok r.stderr.includes('the warn hook failed'), r.stderr
+  ok r.status isnt 0, 'the warn failure must stay loud'
 
 # ==[ Errors ]==
 

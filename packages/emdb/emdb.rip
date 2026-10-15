@@ -98,8 +98,15 @@ lib = null
 WRITING =! Set.new()
 
 # The databases (by real path) warned of low headroom, per process, so a
-# second Env on the same file does not warn again.
+# second Env on the same file does not warn again. Two Envs on one file
+# opened with different max values share this one state: the warning
+# follows whichever grew the file last.
 LOW_HEADROOM =! Set.new()
+
+# emdb_info for the check after each write, preallocated: 72 bytes, of
+# which the check reads map_size alone (offset 8, word 1).
+WATCH_INFO =! BigUint64Array.new(9)
+Uint32Array.new(WATCH_INFO.buffer)[0] = 72
 
 # The key a SET_RANGE reads, held while the call runs: the cursor gets
 # only its address.
@@ -338,27 +345,30 @@ SIZE_UNITS =!
   mb: 1n << 20n
   gb: 1n << 30n
   tb: 1n << 40n
+MAX_SIZE =! BigInt(Number.MAX_SAFE_INTEGER)
 SIZE_FORMS =! "a whole number of bytes, or a whole number and a unit with no space (kb, mb, gb or tb, each 1024 of the one before), such as '16kb' or '8gb'"
 
 # A geometry size in bytes: a non-negative safe integer, or a string of
 # digits and a unit. Anything else is refused, never guessed at: '1.5mb',
-# '16 kb', '8gib', a unitless string, a negative or fractional number, a
-# size past 2^64. A step or max of 0 would mean emdb's default, which a
-# caller writing 0 cannot mean, so those are refused too; a start of 0 is
-# the smallest file, which emdb starts at anyway. emdb rounds to pages.
+# '16 kb', '8gib', a unitless string, a negative or fractional number. So
+# is a size past 2^53 - 1, which info() could not report as a Number. A
+# step or max of 0 would mean emdb's default, which a caller writing 0
+# cannot mean, so those are refused too; a start of 0 is the smallest
+# file, which emdb starts at anyway. Start and step round up to pages; no
+# page lies past max, so in effect it rounds down.
 sizeOf = (opts, name) ->
   v = opts[name]
   return 0n unless v?
   bytes = null
   if typeof v is 'number'
-    bytes = BigInt(v) if Number.isSafeInteger(v) and v >= 0
+    bytes = BigInt(v) if Number.isInteger(v) and v >= 0
   else if typeof v is 'string'
     m = /^(\d+)(kb|mb|gb|tb)$/i.exec(v)
     bytes = BigInt(m[1]) * SIZE_UNITS[m[2].toLowerCase()] if m?
-  unless bytes? and bytes <= U64_MAX
-    got = if typeof v is 'string' then JSON.stringify(v) else String(v)
-    throw TypeError.new "emdb: open option #{name} is #{SIZE_FORMS}; got #{got}"
-  throw TypeError.new "emdb: open option #{name} is above 0" if bytes is 0n and name isnt 'start'
+  got = if typeof v is 'string' then JSON.stringify(v) else String(v)
+  throw TypeError.new "emdb: open option #{name} is #{SIZE_FORMS}; got #{got}" unless bytes?
+  throw TypeError.new "emdb: open option #{name} is at most 2^53 - 1 bytes (#{Number.MAX_SAFE_INTEGER}); got #{got}" if bytes > MAX_SIZE
+  throw TypeError.new "emdb: open option #{name} must be above 0" if bytes is 0n and name isnt 'start'
   bytes
 
 sizeText = (n) ->
@@ -373,15 +383,18 @@ alignUp = (n, unit) -> Math.ceil(n / unit) * unit
 # at max: below step the file doubles, one growth at a time; from step on
 # each growth adds step rounded up to a page (sizes are whole pages), so
 # those are counted by division. A write needing more pages than a step
-# grows further at once, so stepsLeft is the most growths left.
+# grows further at once, so stepsLeft is the most growths left. The limit
+# is max rounded down to a page, as no page can lie past it, whether or
+# not emdb rounded max itself.
 headroomOf = (size, max, step, pageSize) ->
+  limit = Math.floor(max / pageSize) * pageSize
   stepsLeft = 0
   s = size
-  while s < max and s < step
-    s = Math.min(alignUp(s + s, pageSize), max)
+  while s < limit and s < step
+    s = Math.min(alignUp(s + s, pageSize), limit)
     stepsLeft++
-  stepsLeft += Math.ceil((max - s) / alignUp(step, pageSize)) if s < max
-  { size, max, step, bytesLeft: Math.max(0, max - size), stepsLeft }
+  stepsLeft += Math.ceil((limit - s) / alignUp(step, pageSize)) if s < limit
+  { size, max, step, bytesLeft: Math.max(0, limit - size), stepsLeft }
 
 # A database warns once when a growth leaves it this few growths or fewer,
 # and again only after its headroom has risen above this and fallen back.
@@ -805,7 +818,7 @@ class Env
     @_open = 0               # transactions in flight
     @_trees = Map.new()      # tree id → its live handle
     @_file = realpathSync(@path)
-    @_size = @info().mapSize # the file's size after the last write
+    @_size = BigInt(@info().mapSize)   # the file's size after the last write
 
   _live: (what) ->
     throw Error.new "emdb: #{what} on a closed environment (#{@path})" if @closed
@@ -837,27 +850,39 @@ class Env
         try result.then(undefined, (-> null)) catch then null
         throw TypeError.new "emdb: the function given to #{what} returned a promise; a transaction is synchronous, so it was aborted"
       txn._end true
-      @_watch() unless readOnly
+      unless readOnly
+        # The write has committed, so nothing the watch does may report it
+        # as failed: a failure there, such as a console.warn that throws,
+        # is thrown again on its own, after this call returns.
+        try
+          @_watch()
+        catch e
+          queueMicrotask -> throw e
       result
     finally
       @_open--
       WRITING.delete @_file unless readOnly
 
-  # After a write commits, one emdb_env_info call: when the write grew the
-  # file and left it WARN_STEPS growths or fewer from its max, one warning,
-  # until its headroom rises above WARN_STEPS again. No option turns it
-  # off; a larger max: does.
+  # After a write commits, one emdb_env_info call into a preallocated
+  # buffer, read for map_size alone: when the write grew the file and left
+  # it WARN_STEPS growths or fewer from its max, one warning, until its
+  # headroom rises above WARN_STEPS again. No option turns it off; a
+  # larger max: does.
   _watch: ->
+    check lib.emdb_env_info(@_h, WATCH_INFO), 'emdb_env_info'
+    size = WATCH_INFO[1]
+    return if size <= @_size
+    @_size = size
     i = @info()
-    grew = i.mapSize > @_size
-    @_size = i.mapSize
-    return unless grew
     h = headroomOf(i.mapSize, i.maxMapSize, i.growStep, i.pageSize)
     if h.stepsLeft > WARN_STEPS
       LOW_HEADROOM.delete @_file
     else if not LOW_HEADROOM.has(@_file)
       LOW_HEADROOM.add @_file
-      console.warn "emdb: #{@path} has grown to #{sizeText h.size} of its #{sizeText h.max} max, #{h.stepsLeft} growth#{if h.stepsLeft is 1 then '' else 's'} left; open it with a larger max: before it fills (EMDB_DATABASE_FULL)"
+      if h.stepsLeft is 0
+        console.warn "emdb: #{@path} has grown to its #{sizeText h.max} max; a write that needs more room is EMDB_DATABASE_FULL until it is opened with a larger max:"
+      else
+        console.warn "emdb: #{@path} has grown to #{sizeText h.size} of its #{sizeText h.max} max, #{h.stepsLeft} growth#{if h.stepsLeft is 1 then '' else 's'} left; open it with a larger max: before it fills (EMDB_DATABASE_FULL)"
     return
 
   # A read transaction on the latest commit.
@@ -957,7 +982,14 @@ export open = (path, opts = null) ->
   o = opts ?? {}
   s = optionsStruct(o)
   check lib.emdb_env_open(cString(path, 'path'), s, OUT), 'emdb_env_open'
-  Env.new path, OUT[0], o.readOnly is true
+  h = OUT[0]
+  # The handle is open now: anything that fails before the Env holds it
+  # must close it, or its files and reservation leak.
+  try
+    Env.new path, h, o.readOnly is true
+  catch e
+    lib.emdb_env_close h
+    throw e
 
 # libemdb's version, "major.minor.patch".
 export version = ->
