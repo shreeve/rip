@@ -13,6 +13,7 @@ import hljs from 'highlight.js'
 import ripLanguage from 'rip/highlight'
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
 import { basename, extname, join, relative } from 'path'
+import { homedir } from 'os'
 import { execSync } from 'child_process'
 
 # A pure CLI with no library surface: importing this module is always a
@@ -115,6 +116,11 @@ if args.includes('-h') or args.includes('--help')
       -h, --help       Show this help message
       -v, --version    Show version and quit
       -x <exts>        Comma list of extensions to exclude
+
+    Languages:
+      Each *.js in $XDG_CONFIG_HOME/rip/print/languages/ (by default
+      ~/.config/rip/print/languages/) adds a highlight.js language for
+      the extensions it names; see the README.
 
     Examples:
       rip-print src/              # Print all source files in src/
@@ -270,6 +276,49 @@ extToLang =
   ini:    'ini'
   dockerfile: 'dockerfile'
   makefile:   'makefile'
+
+# ==============================================================================
+# Languages added by the user
+# ==============================================================================
+
+# Every `*.js` in the languages directory is a highlight.js language: an ES
+# module whose default export is the language function, and whose optional
+# `extensions` export names the file extensions it prints. It registers
+# under the file's name (`rig.js` is `rig`); without `extensions` it
+# claims that name and the language's aliases. A language here replaces a
+# built-in of the same name or extension. A module that does not load, or
+# claims an extension another module here claims, stops the run: printing
+# on without it would leave its files plain with nothing said.
+languagesDir =! join(process.env.XDG_CONFIG_HOME or join(homedir(), '.config'), 'rip', 'print', 'languages')
+
+if existsSync languagesDir
+  claimed = {}
+  for file in readdirSync(languagesDir).filter((f) -> f.endsWith('.js')).sort()
+    path = join languagesDir, file
+    id = file.slice 0, -3
+    fail = (why) ->
+      console.error "rip-print: language #{path}: #{why}"
+      process.exit(1)
+    mod = null
+    language = null
+    try
+      mod = import!(path)
+    catch error
+      fail error.message
+    fail 'its default export is not a language function' unless typeof mod.default is 'function'
+    try
+      language = mod.default(hljs)
+    catch error
+      fail error.message
+    exts = mod.extensions ?? [id, ...(language?.aliases ?? [])]
+    unless Array.isArray(exts) and exts.every((ext) -> typeof ext is 'string' and ext.length > 0)
+      fail '`extensions` must be an array of extension names'
+    hljs.registerLanguage id, mod.default
+    for ext in exts
+      key = ext.toLowerCase().replace(/^\./, '')
+      fail "it claims .#{key}, which #{claimed[key]} also claims" if claimed[key]?
+      claimed[key] = file
+      extToLang[key] = id
 
 def getLang(file)
   base = basename(file).toLowerCase()

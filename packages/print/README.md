@@ -40,6 +40,8 @@ rip-print notes.md            # A single .md renders as a document
   adjustment
 - **Rip-aware HTML** — `<script type="text/rip">` blocks inside HTML
   files re-highlight as Rip
+- **Your own languages** — drop a highlight.js language file in a
+  folder and its extensions print highlighted ([below](#adding-a-language))
 - **Markdown mode** — a single `.md` argument renders the document
   instead of showing its source (`-d` force-darkens it)
 - **Serve-once lifecycle** — first request wins, then the server stops
@@ -62,7 +64,64 @@ Directory arguments walk recursively with a sorted result. Dotfiles,
 as are binary and lock extensions (images, fonts, archives, maps,
 databases, …); `-x` extends the exclusion list. `Makefile`,
 `Dockerfile`, and rc-file names detect their language by filename;
-unknown extensions fall back to plaintext.
+unknown extensions fall back to plaintext unless a language you added
+claims them.
+
+## Adding a language
+
+Rip Print highlights any language highlight.js can, including ones it
+has never heard of: put the language's highlight.js module in
+
+```
+~/.config/rip/print/languages/
+```
+
+(`$XDG_CONFIG_HOME/rip/print/languages/` when `XDG_CONFIG_HOME` is
+set), and files with its extensions print highlighted. Nothing in Rip
+Print changes.
+
+The module is an ES module whose default export is the highlight.js
+language function, plus an optional list of the file extensions it
+prints:
+
+```js
+export const extensions = ['rig'];
+
+export default function (hljs) {
+  return {
+    name: 'Rig',
+    keywords: { keyword: 'fun let if else while return' },
+    contains: [hljs.QUOTE_STRING_MODE, hljs.C_LINE_COMMENT_MODE, hljs.NUMBER_MODE],
+  };
+}
+```
+
+- **The name** is the file's name: `rig.js` registers the language
+  `rig`, which the console report shows as `[rig]`.
+- **The extensions** are the `extensions` export. Without one, the
+  language claims its own name and its `aliases`.
+- **A language here wins** over a built-in of the same name or
+  extension, so a folder file can also replace one Rip Print ships.
+
+A module that fails to load, has no default function, or claims an
+extension another file in the folder claims stops `rip-print` with an
+error naming the file. Printing on without it would leave those files
+plain with nothing said.
+
+Grammar tools that generate highlight.js modules produce exactly this
+shape; Nexus does (`nexus --highlight all x.grammar editors`). Link the
+generated file rather than copying it, and every regeneration is picked
+up on the next print. For Rig:
+
+```bash
+mkdir -p ~/.config/rip/print/languages
+ln -s ~/Data/Code/rig/editors/highlightjs/rig.js ~/.config/rip/print/languages/rig.js
+rip-print src/
+```
+
+Every `.rig` file under `src/` now prints highlighted. The folder is
+read by the `rip-print` command; the editor extension below keeps its
+own built-in languages.
 
 ## VS Code / Cursor extension
 
@@ -81,6 +140,6 @@ bun run test
 ```
 
 The suite pins the flag and error paths, file discovery, the served
-page (chrome, highlighting, themes, headers), markdown mode, and the
-shared-grammar divergences — every case runs the CLI as a real
+page (chrome, highlighting, themes, headers), markdown mode, added
+languages, and the shared-grammar divergences — every case runs the CLI as a real
 subprocess with a stubbed browser opener.

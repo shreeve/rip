@@ -28,7 +28,8 @@ stubDir =! mkdtempSync join(tmpdir(), 'print-stub-')
 for name in ['open', 'xdg-open', 'start']
   writeFileSync join(stubDir, name), '#!/bin/sh\nexit 0\n'
   chmodSync join(stubDir, name), 0o755
-env =! { ...process.env, PATH: "#{stubDir}:#{process.env.PATH}" }
+# An empty config home, so no languages this machine installed load.
+env =! { ...process.env, PATH: "#{stubDir}:#{process.env.PATH}", XDG_CONFIG_HOME: mkdtempSync(join(tmpdir(), 'print-config-')) }
 
 # Fixture tree (byte-for-byte the v3-era test fixtures).
 fixtures =! mkdtempSync join(tmpdir(), 'print-fixtures-')
@@ -71,15 +72,15 @@ write fixtures, 'util.js', ['export const add = (a, b) => a + b;']
 scratch = -> mkdtempSync join(tmpdir(), 'print-tree-')
 
 # Run the CLI to completion for non-serving paths (-v, -h, errors).
-run = (args, cwd = fixtures) ->
-  spawnSync process.execPath, [ripCli, printRip, ...args], { cwd, env, encoding: 'utf8' }
+run = (args, cwd = fixtures, extra = {}) ->
+  spawnSync process.execPath, [ripCli, printRip, ...args], { cwd, env: { ...env, ...extra }, encoding: 'utf8' }
 
 # Run the CLI, fetch the served page, and wait for the self-exit. The
 # server announces its URL on stdout (9111, or a free port when 9111 is
 # taken), so two runs never fetch each other's page. A run that never
 # announces or never answers is killed: a lane cannot hang on it.
-serve = (args, cwd = fixtures) ->
-  proc = Bun.spawn [process.execPath, ripCli, printRip, ...args], { cwd, env, stdout: 'pipe', stderr: 'pipe' }
+serve = (args, cwd = fixtures, extra = {}) ->
+  proc = Bun.spawn [process.execPath, ripCli, printRip, ...args], { cwd, env: { ...env, ...extra }, stdout: 'pipe', stderr: 'pipe' }
   reader = proc.stdout.getReader()
   decoder = TextDecoder.new()
   stdout = ''
@@ -372,3 +373,54 @@ test! "word arrays, symbols, and maybe dammit highlight", ->
   ok html.includes('<span class="hljs-string">%w[alpha beta]</span>')
   ok html.includes('<span class="hljs-symbol">:friendly</span>')
   eq html.match(/<span class="hljs-operator">\?!<\/span>/g).length, 2
+
+# ==[ Languages added by the user ]==
+
+console.log "\nUser languages"
+
+# A config home whose languages directory holds `files`, [name, source].
+languages = (files) ->
+  home = mkdtempSync join(tmpdir(), 'print-langs-')
+  dir = join home, 'rip', 'print', 'languages'
+  mkdirSync dir, { recursive: true }
+  writeFileSync join(dir, name), source for [name, source] in files
+  { XDG_CONFIG_HOME: home, dir }
+
+TOY =! 'export default function (hljs) {\n  return { name: "Toy", aliases: ["toyish"], contains: [{ className: "keyword", begin: /\\bzap\\b/ }] }\n}\n'
+
+test! "a language in the languages directory highlights the extensions it names", ->
+  { XDG_CONFIG_HOME } = languages [['toy.js', "#{TOY}export const extensions = ['toy', '.tz']\n"]]
+  dir = scratch()
+  write dir, 'a.toy', 'zap here\n'
+  write dir, 'b.tz', 'zap there\n'
+  { html, stdout, exitCode } = serve! ['a.toy', 'b.tz'], dir, { XDG_CONFIG_HOME }
+  eq exitCode, 0
+  ok stdout.includes('  a.toy (2 lines) [toy]\n'), stdout
+  ok stdout.includes('  b.tz (2 lines) [toy]\n'), stdout
+  eq html.match(/<span class="hljs-keyword">zap<\/span>/g).length, 2
+
+test! "without an extensions export a language claims its name and aliases", ->
+  { XDG_CONFIG_HOME } = languages [['toy.js', TOY]]
+  dir = scratch()
+  write dir, 'a.toy', 'zap\n'
+  write dir, 'b.toyish', 'zap\n'
+  { stdout } = serve! ['a.toy', 'b.toyish'], dir, { XDG_CONFIG_HOME }
+  ok stdout.includes('  a.toy (2 lines) [toy]\n'), stdout
+  ok stdout.includes('  b.toyish (2 lines) [toy]\n'), stdout
+
+test! "a language that does not load stops the run, naming its file", ->
+  dir = scratch()
+  write dir, 'a.toy', 'zap\n'
+  for [source, why] in [['export default 3\n', 'its default export is not a language function'], ['this is not javascript (\n', ''], ["#{TOY}export const extensions = 'toy'\n", '`extensions` must be an array of extension names']]
+    { XDG_CONFIG_HOME, dir: home } = languages [['toy.js', source]]
+    r = run ['a.toy'], dir, { XDG_CONFIG_HOME }
+    eq r.status, 1
+    ok r.stderr.startsWith("rip-print: language #{join home, 'toy.js'}: #{why}"), r.stderr
+
+test! "two languages claiming one extension stop the run", ->
+  dir = scratch()
+  write dir, 'a.toy', 'zap\n'
+  { XDG_CONFIG_HOME } = languages [['one.js', "#{TOY}export const extensions = ['toy']\n"], ['two.js', "#{TOY}export const extensions = ['toy']\n"]]
+  r = run ['a.toy'], dir, { XDG_CONFIG_HOME }
+  eq r.status, 1
+  ok r.stderr.includes('two.js: it claims .toy, which one.js also claims'), r.stderr
