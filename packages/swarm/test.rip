@@ -247,19 +247,45 @@ test "non-quiet runs render the ANSI frame, bars, and summary", ->
   ok /[ ]jobs @ [\d.]+\/sec/.test(out), 'per-worker stats'
   ok /\d+\.\d{2} secs for 12 jobs by 2 workers @ [\d.]+ jobs\/sec/.test(out)
 
-test "a worker's bar never shrinks: it holds its widest while the leader surges, and moves only forward", ->
+test "a worker's bar is its share of the busiest worker's jobs, and the last frame keeps it", ->
   dir = fresh()
   r = run dir, 'surge.rip', '-w', '2', '-b', '20', '-c', '#'
   eq r.status, 0
-  # every worker-bar write: the row it lands on and the # cells it draws
-  widths = {}
+  # the last bar drawn on each row while the run was live
+  live = {}
   for m in [...r.stdout.matchAll(/\x1b\[(\d+);\d+H\x1b\[48;2;83;131;236m(#*)\x1b\[49m/g)]
-    row = m[1]
-    cols = m[2].length
-    ok cols >= (widths[row] ?? 0), "row #{row} drew #{cols} cells after #{widths[row]}"
-    widths[row] = cols
-  ok Object.keys(widths).length is 2, "two worker rows drew bars: #{Object.keys(widths)}"
-  ok Object.values(widths).some((w) -> w is 20), "the leader's bar ends full: #{JSON.stringify widths}"
+    live[m[1]] = m[2].length
+  # the stats rows: white on blue, the bar, then the worker's job count
+  final = {}
+  jobs = {}
+  for m in [...r.stdout.matchAll(/\x1b\[(\d+);\d+H\x1b\[38;2;255;255;255m\x1b\[48;2;83;131;236m(#*)(?:\x1b\[49m *\x1b\[39m|\x1b\[39m\x1b\[49m) │ (\d+) jobs @/g)]
+    final[m[1]] = m[2].length
+    jobs[m[1]] = Number(m[3])
+  eq Object.keys(final).length, 2, "two worker rows: #{JSON.stringify final}"
+  most = Math.max(...Object.values(jobs))
+  for row, n of jobs
+    eq final[row], Math.round(n / most * 20), "row #{row}: #{n} of #{most} jobs"
+  eq final, live, 'each bar ends where the run left it: no jump'
+  ok Object.values(final).some((w) -> w is 20), "the busiest worker's bar is full: #{JSON.stringify final}"
+  ok Object.values(final).some((w) -> w < 20), "the surged worker's bar shows its share: #{JSON.stringify final}"
+
+test "the display draws on a 0.2 s timer, not once a job", ->
+  dir = fresh()
+  r = cli [fixture('many.rip'), '-w', '2', '-b', '20', '-c', '#'], { cwd: dir }
+  eq r.status, 0
+  frames = r.stdout.match(/\/2001 done/g).length
+  ok frames < 40, "#{frames} frames for 2,001 jobs"
+
+test "the percentage rounds down: 2000 of 2001 reads 99.9, only a finished run 100.0", ->
+  dir = fresh()
+  r = cli [fixture('many.rip'), '-w', '2', '-b', '20', '-c', '#'], { cwd: dir }
+  eq r.status, 0
+  plain = r.stdout.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, ' ')
+  seen = [...plain.matchAll(/([\d.]+)% +(\d+)\/2001 done/g)].map (m) -> [Number(m[1]), Number(m[2])]
+  ok seen.length > 0, 'progress was drawn'
+  for [pct, done] in seen
+    ok (done is 2001) is (pct is 100), "#{done}/2001 read #{pct}%"
+  ok seen.some(([pct, done]) -> done is 2001), 'the finished run reads 100.0%'
 
 # ==[ args() ]==
 
