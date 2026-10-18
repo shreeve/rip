@@ -117,8 +117,12 @@ high = {}   # slot -> the widest bar drawn for it this run
 # progress, and every other bar its share of that, so the chart reads
 # "how far done" and "who did it" at once. Integer arithmetic rounded
 # down: a finished run's busiest bar is jobs of jobs and most of most,
-# exactly full, and no one short of the most rounds up to look full.
-cells = (finished, jobs, count, most) -> Math.floor(finished * count * wide / (jobs * most))
+# exactly full, and no one short of the most rounds up to look full. A
+# worker with any job done shows at least one cell: an empty row reads
+# as a worker that did nothing, and its count only grows.
+cells = (finished, jobs, count, most) ->
+  return 0 unless count > 0
+  Math.max 1, Math.floor(finished * count * wide / (jobs * most))
 
 drawFrame! = (workers) ->
   len = String(workers).length
