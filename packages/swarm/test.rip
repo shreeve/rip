@@ -247,27 +247,60 @@ test "non-quiet runs render the ANSI frame, bars, and summary", ->
   ok /[ ]jobs @ [\d.]+\/sec/.test(out), 'per-worker stats'
   ok /\d+\.\d{2} secs for 12 jobs by 2 workers @ [\d.]+ jobs\/sec/.test(out)
 
-test "a worker's bar is its share of the busiest worker's jobs, and the last frame keeps it", ->
+# Every live bar write, in order: [row, cells]. The stats rows of the
+# last frame are written white on blue and do not match.
+liveBars = (out) ->
+  [...out.matchAll(/\x1b\[(\d+);\d+H\x1b\[48;2;83;131;236m(#*)\x1b\[49m/g)].map (m) -> [m[1], m[2].length]
+
+# The last frame's stats rows: { row: [cells, jobs] }.
+statsRows = (out) ->
+  rows = {}
+  for m in [...out.matchAll(/\x1b\[(\d+);\d+H\x1b\[38;2;255;255;255m\x1b\[48;2;83;131;236m(#*)(?:\x1b\[49m *\x1b\[39m|\x1b\[39m\x1b\[49m) │ (\d+) jobs @/g)]
+    rows[m[1]] = [m[2].length, Number(m[3])]
+  rows
+
+test "the busiest bar is the run's progress in every frame, and no bar passes it", ->
+  dir = fresh()
+  r = cli [fixture('many.rip'), '-w', '2', '-b', '20', '-c', '#'], { cwd: dir }
+  eq r.status, 0
+  # a frame is its bar writes, then its summary
+  frame = {}
+  checked = 0
+  for m in [...r.stdout.matchAll(/\x1b\[(\d+);\d+H\x1b\[48;2;83;131;236m(#*)\x1b\[49m|(\d+)\/2001 done/g)]
+    if m[3]?
+      widest = Math.max(...Object.values(frame))
+      eq widest, Math.floor(Number(m[3]) * 20 / 2001), "at #{m[3]}/2001 the widest bar is #{widest}"
+      checked++
+      frame = {}
+    else
+      frame[m[1]] = m[2].length
+  # a fast run draws few frames; 2000/2001 is the telling one, 19 cells
+  # where a bar that ignored progress would already be full
+  ok checked >= 2, "#{checked} frames checked"
+
+test "a worker's bar never shrinks while the run is live", ->
   dir = fresh()
   r = run dir, 'surge.rip', '-w', '2', '-b', '20', '-c', '#'
   eq r.status, 0
-  # the last bar drawn on each row while the run was live
-  live = {}
-  for m in [...r.stdout.matchAll(/\x1b\[(\d+);\d+H\x1b\[48;2;83;131;236m(#*)\x1b\[49m/g)]
-    live[m[1]] = m[2].length
-  # the stats rows: white on blue, the bar, then the worker's job count
-  final = {}
-  jobs = {}
-  for m in [...r.stdout.matchAll(/\x1b\[(\d+);\d+H\x1b\[38;2;255;255;255m\x1b\[48;2;83;131;236m(#*)(?:\x1b\[49m *\x1b\[39m|\x1b\[39m\x1b\[49m) │ (\d+) jobs @/g)]
-    final[m[1]] = m[2].length
-    jobs[m[1]] = Number(m[3])
-  eq Object.keys(final).length, 2, "two worker rows: #{JSON.stringify final}"
-  most = Math.max(...Object.values(jobs))
-  for row, n of jobs
-    eq final[row], Math.round(n / most * 20), "row #{row}: #{n} of #{most} jobs"
-  eq final, live, 'each bar ends where the run left it: no jump'
-  ok Object.values(final).some((w) -> w is 20), "the busiest worker's bar is full: #{JSON.stringify final}"
-  ok Object.values(final).some((w) -> w < 20), "the surged worker's bar shows its share: #{JSON.stringify final}"
+  widths = {}
+  for [row, cols] in liveBars(r.stdout)
+    ok cols >= (widths[row] ?? 0), "row #{row} drew #{cols} cells after #{widths[row]}"
+    widths[row] = cols
+  eq Object.keys(widths).length, 2, "two worker rows drew bars: #{JSON.stringify widths}"
+
+test "the last frame shows each worker's share: the busiest exactly full, the rest where they ended", ->
+  dir = fresh()
+  r = run dir, 'surge.rip', '-w', '2', '-b', '20', '-c', '#'
+  eq r.status, 0
+  rows = statsRows r.stdout
+  eq Object.keys(rows).length, 2, "two worker rows: #{JSON.stringify rows}"
+  most = Math.max(...Object.values(rows).map(([cols, n]) -> n))
+  # rounded down: 3 of 9 jobs is 6 cells, where nearest would say 7, so
+  # no one short of the most can round up to look full
+  for row, [cols, n] of rows
+    eq cols, Math.floor(n * 20 / most), "row #{row}: #{n} of #{most} jobs"
+  ok Object.values(rows).some(([cols]) -> cols is 20), "the busiest worker is full: #{JSON.stringify rows}"
+  ok Object.values(rows).some(([cols]) -> cols < 20), "the surged worker shows its share: #{JSON.stringify rows}"
 
 test "the display draws on a 0.2 s timer, not once a job", ->
   dir = fresh()
