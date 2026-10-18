@@ -10,4 +10,4 @@ setup = ->
 
 perform = (task) -> null
 
-swarm { setup, perform, tag: 'alpha' }
+swarm! { setup, perform, tag: 'alpha' }

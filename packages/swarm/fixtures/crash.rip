@@ -13,4 +13,4 @@ setup = ->
 perform = (task, ctx) ->
   exit 7 if task.split('/').pop() is '5'
 
-swarm { setup, perform }
+swarm! { setup, perform }

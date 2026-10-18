@@ -184,15 +184,32 @@ draw! = (state) ->
 # Worker orchestration
 # ==============================================================================
 
-# Worker mode: swarm() registers the perform function here, and the
-# worker-entry block at the bottom of this file reads it back: same
-# module instance, no bridge.
-_workerPerform = null
+# Worker mode: a worker loads the job script, and its swarm() call starts
+# the worker serving tasks then and there, in this same module instance.
+# It then waits on a promise that never settles, so a script that awaits it
+# (`swarm! {…}`) stops there in every worker: code after it runs once, in
+# the main thread, and a worker never waits on it to take its first task.
+_serving = false
+
+serve = (perform) ->
+  _serving = true
+  parentPort.postMessage { type: 'ready' }
+  parentPort.on 'message', (msg) ->
+    switch msg.type
+      when 'task'
+        try
+          perform!(msg.taskPath, workerData.context)
+          parentPort.postMessage { type: 'done', taskPath: msg.taskPath }
+        catch err
+          parentPort.postMessage { type: 'failed', taskPath: msg.taskPath, error: err.message }
+      when 'shutdown'
+        exit(0)
 
 export swarm! = (opts = {}) ->
   unless isMainThread
-    _workerPerform = opts.perform
-    return
+    return unless typeof opts.perform is 'function' and not _serving
+    serve opts.perform
+    await Promise.new(-> null)
 
   # parse CLI options
   args    = process.argv.slice(2)
@@ -259,30 +276,37 @@ export swarm! = (opts = {}) ->
 
   high = {}
 
-  # A job's event only marks the frame stale; a timer draws it five times
-  # a second. Drawing on every event made the terminal the work: a run of
-  # 2,001 instant jobs wrote a megabyte of frames in a seventh of a second.
+  # A job's event only marks the frame stale, and a resize marks the
+  # whole frame for redrawing; a timer draws ten times a second, and only
+  # when something changed. Drawing on every event made the terminal the
+  # work: a run of 2,001 instant jobs wrote a megabyte of frames in a
+  # seventh of a second, and a dragged window redrew once per event.
   stale = false
+  reframe = false
   paint! = -> draw({ live, done, died, jobs, workers, info, inflight })
   redraw! = -> stale = true
   ticker = null
   unless quiet
     ticker = setInterval (->
+      if reframe
+        reframe = false
+        drawFrame(workers)
+        stale = true
       if stale
         stale = false
         paint()
-    ), 200
+    ), 100
 
-  # signal handlers
-  process.on 'SIGINT', ->
+  # signal handlers, for the run alone: swarm() returns to its script,
+  # and a resize or interrupt after that is the script's own
+  interrupted = ->
     unless quiet
       cursor(true)
       write go(workers + 6, 1) + "\n"
     exit(1)
-  unless quiet
-    process.on 'SIGWINCH', ->
-      drawFrame(workers)
-      paint()
+  resized = -> reframe = true
+  process.on 'SIGINT', interrupted
+  process.on 'SIGWINCH', resized unless quiet
 
   # draw initial frame
   startTime = Date.now()
@@ -376,6 +400,8 @@ export swarm! = (opts = {}) ->
     spawnWorker(slot) for slot in [1..Math.min(workers, jobs)]
 
   clearInterval ticker if ticker
+  process.off 'SIGINT', interrupted
+  process.off 'SIGWINCH', resized
 
   # summary
   secs = (Date.now() - startTime) / 1000
@@ -486,27 +512,13 @@ if import.meta.main and isMainThread
 # ==============================================================================
 #
 # Each worker thread runs THIS file as its entry: it imports the user's
-# job script (whose swarm() call registers perform in this same module
-# instance), then processes tasks over IPC until shutdown.
+# job script, whose swarm() call starts the worker serving (above). A
+# script that awaits swarm() never finishes loading in a worker; one that
+# finishes without having started it named no perform function.
 
 if not isMainThread and workerData?.scriptPath?
-  perform = null
   try
     import!(pathToFileURL(workerData.scriptPath).href)
-    raise 'No perform() function provided to swarm()' unless typeof _workerPerform is 'function'
-    perform = _workerPerform
+    raise 'No perform() function provided to swarm()' unless _serving
   catch err
     parentPort.postMessage { type: 'error', error: err.message }
-
-  parentPort.postMessage { type: 'ready' }
-
-  parentPort.on 'message', (msg) ->
-    switch msg.type
-      when 'task'
-        try
-          perform!(msg.taskPath, workerData.context)
-          parentPort.postMessage { type: 'done', taskPath: msg.taskPath }
-        catch err
-          parentPort.postMessage { type: 'failed', taskPath: msg.taskPath, error: err.message }
-      when 'shutdown'
-        exit(0)

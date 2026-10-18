@@ -1,0 +1,18 @@
+# A window dragged during a run: setup schedules fifty resize signals two
+# milliseconds apart, and four tasks of 150 ms keep the run going past
+# them, so the frame is redrawn on the display's ticks, not per signal.
+
+import { swarm, init, retry, todo } from 'rip/swarm'
+
+setup = ->
+  unless retry()
+    init()
+    todo i for i in [1..4]
+  for i in [0...50]
+    setTimeout (-> process.kill process.pid, 'SIGWINCH'), 10 + i * 2
+  {}
+
+perform = (task, ctx) ->
+  Bun.sleep! 150
+
+swarm! { setup, perform }

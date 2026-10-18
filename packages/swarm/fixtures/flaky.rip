@@ -19,4 +19,4 @@ perform = (task, ctx) ->
     writeFileSync marker, ''
     raise "first attempt #{name}"
 
-swarm { setup, perform }
+swarm! { setup, perform }

@@ -15,4 +15,4 @@ perform = (task, ctx) ->
   name = task.split('/').pop()
   appendFileSync 'out.log', JSON.stringify({ name, token: ctx.token, deep: ctx.nested.deep, safe: ctx.safe }) + '\n'
 
-swarm { setup, perform }
+swarm! { setup, perform }

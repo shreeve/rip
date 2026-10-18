@@ -67,7 +67,7 @@ perform = (task, ctx) ->
   await Bun.sleep(Math.random() * 1000)
   throw new Error("boom") if Math.random() < 0.03
 
-swarm { setup, perform }
+swarm! { setup, perform }
 ```
 
 Run it:
@@ -133,7 +133,7 @@ is installed. `rip jobs.rip` runs the same script identically — the
 
 One queue per working directory, shared by every swarm script run
 there. A script that runs beside others names its own with a tag —
-`swarm { tag: 'reports' }` or `-t reports` — and its queue lives under
+`swarm! { tag: 'reports' }` or `-t reports` — and its queue lives under
 `.swarm/reports/` instead, so a day one script leaves in `died/` is
 never replayed by another.
 
@@ -158,10 +158,17 @@ todo('task-2', data) # Create task file with data (string or JSON)
 ### swarm()
 
 ```coffee
-swarm { setup, perform }
-swarm { setup, perform, workers: 8, bar: 30, char: '█' }
-swarm { setup, perform, tag: 'reports' }
+swarm! { setup, perform }
+swarm! { setup, perform, workers: 8, bar: 30, char: '█' }
+swarm! { setup, perform, tag: 'reports' }
 ```
+
+Write it with the `!` so the script waits on it. Every worker loads your
+script to find `perform`, and a worker stops at `swarm!`: code before it
+(imports, definitions) runs in each worker as well, and code after it
+runs once, in the main thread, when the run is over. Without the `!` the
+script does not wait, so code after the call runs at once, in the main
+thread and in every worker.
 
 | Option | Description | Default |
 |--------|-------------|---------|
@@ -249,7 +256,7 @@ perform = (task, ctx) ->
   throw new Error("HTTP #{resp.status}") unless resp.ok
   await Bun.write(join(ctx.outDir, "#{code}.json"), await resp.text())
 
-swarm { setup, perform }
+swarm! { setup, perform }
 ```
 
 ```bash
