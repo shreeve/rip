@@ -158,11 +158,11 @@ draw! = (state) ->
   for slot, task of inflight when task
     write go(parseInt(slot) + 1, len + 5 + wide + 3) + " " + base(task) + clear(true)
 
-  # summary bar: one atomic write — round the green and yellow segment
-  # BOUNDARIES and take differences, so the three segments always sum
-  # to wide exactly; flooring green and yellow independently leaked
-  # their rounding crumbs into red, showing phantom "pending" cells
-  # even when every job was done or in flight
+  # summary bar, one atomic write: green is done, yellow in flight, red
+  # the rest (pending, and at the end the jobs that died). The green and
+  # yellow BOUNDARIES are rounded and the segments taken as differences,
+  # so the three always fill the width exactly and no rounding crumb
+  # shows as a pending cell
   gcol = Math.round(done / jobs * wide)
   ycol = Math.round((done + live) / jobs * wide) - gcol
   # in-flight work always shows: sub-half-cell live rounds to nothing

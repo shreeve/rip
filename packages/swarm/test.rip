@@ -341,6 +341,14 @@ test "the last frame shows each worker's share: the busiest exactly full, the re
   for row, [cols, n] of rows when n < most
     ok cols < 20, "row #{row}: #{n} of #{most} jobs drew full"
 
+test "the summary bar ends filled: green for done, red for died, nothing left over", ->
+  r = run fresh(), 'fail.rip', '-w', '2', '-b', '20', '-c', '#'
+  eq r.status, 0
+  bars = [...r.stdout.matchAll(/\x1b\[48;2;88;166;92m(#*)\x1b\[48;2;241;191;66m(#*)\x1b\[48;2;216;81;64m( *)/g)]
+  [, green, yellow, red] = bars.at(-1)
+  eq [green.length, yellow.length, red.length], [16, 0, 4], '8 of 10 done, 2 died'
+  ok r.stdout.includes(' 100.0% '), 'a finished run reads 100.0%'
+
 test "the display draws on a 0.1 s timer, not once a job", ->
   dir = fresh()
   r = cli [fixture('many.rip'), '-w', '2', '-b', '20', '-c', '#'], { cwd: dir }
