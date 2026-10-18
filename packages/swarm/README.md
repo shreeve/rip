@@ -22,8 +22,9 @@ files. One `.rip` file, which is itself the `swarm` binary (first line
   crash-safe restarts pick up where they left off
 - **Workers are threads** — setup runs once, context clones to N
   workers by message passing; no shared mutable state
-- **Real-time progress** — per-worker ANSI bars, live stats, a
-  one-line summary (or `-q` for just the summary)
+- **Real-time progress** — a bar per worker showing how far along the
+  run is and who is doing the work, an overall bar, and per-worker stats
+  at the end (or `-q` for one summary line)
 - **Retries built in** — failed tasks land in `died/`; `retry()` moves
   them back and only they reprocess
 - **Crash recovery** — a dead worker's in-flight task is counted,
@@ -47,7 +48,7 @@ distributed locks. Swarm takes the opposite approach:
   progress bars update live with per-worker stats. Workers never touch
   stdout.
 
-The result: ~460 lines of Rip, zero dependencies, and it handles
+The result: ~530 lines of Rip, zero dependencies, and it handles
 thousands of tasks reliably. Boring infrastructure, rock solid.
 
 ## Quick Start
@@ -64,8 +65,8 @@ setup = ->
   { startedAt: Date.now() }
 
 perform = (task, ctx) ->
-  await Bun.sleep(Math.random() * 1000)
-  throw new Error("boom") if Math.random() < 0.03
+  Bun.sleep! Math.random() * 1000
+  raise 'boom' if Math.random() < 0.03
 
 swarm! { setup, perform }
 ```
@@ -113,16 +114,60 @@ is installed. `rip jobs.rip` runs the same script identically — the
 3. Tasks are dispatched from `.swarm/todo/` to workers via message passing
 4. Workers call `perform(task, ctx)` — on success the file moves to
    `done/`, on failure it moves to `died/`
-5. ANSI progress bars update live, five times a second. The busiest
-   worker's bar is the run's progress, and every other bar is its share
-   of that, so the chart shows how far along the run is and who is doing
-   the work. A bar only moves forward while the run is live (`hold`;
-   losing ground reads as a drawing error), so a worker that falls behind
-   holds its widest bar. When done, the busiest bar is full, the others
-   show their share of the busiest worker's jobs, and each has its jobs
-   and rate beside it
+5. The main thread draws the progress display as tasks finish (see
+   [The Progress Display](#the-progress-display))
 6. If tasks died, just run it again — `retry()` moves them back to
    `todo/` and only those tasks are reprocessed
+
+## The Progress Display
+
+The end of a real run, 4,045 tasks across 10 workers:
+
+```
+    ╭──────────────────────╮
+  1 │ ••••                 │ 151 jobs @ 13.1/sec
+  2 │ ••••••••••••••       │ 499 jobs @ 43.4/sec
+  3 │ •••••••••••••••••••• │ 692 jobs @ 60.2/sec
+  4 │ •••••••••            │ 312 jobs @ 27.1/sec
+  5 │ ••••••••••••••••••   │ 633 jobs @ 55.0/sec
+  6 │ ••••                 │ 139 jobs @ 12.1/sec
+  7 │ •••••••••••          │ 397 jobs @ 34.5/sec
+  8 │ ••••••••••••         │ 441 jobs @ 38.3/sec
+  9 │ •••••••••••••••••    │ 595 jobs @ 51.7/sec
+ 10 │ •••••                │ 186 jobs @ 16.2/sec
+    ├──────────────────────┤
+    │ •••••••••••••••••••• │  100.0%  4045/4045 done
+    ╰──────────────────────╯
+
+11.50 secs for 4045 jobs by 10 workers @ 351.74 jobs/sec
+```
+
+**Worker bars** answer two questions at once: how far along is the run,
+and who is doing the work.
+
+- **While the run is live,** a bar is the run's progress times the
+  worker's share of the busiest worker's jobs. The busiest worker's bar
+  *is* the run's progress; every other bar is its share of that. Beside
+  each row is the task that worker is on.
+- **Bars never step back** while the run is live. When the leader pulls
+  ahead, a worker's true share shrinks, and a bar losing ground reads as a
+  drawing error, so each bar holds its widest until its own work carries
+  it past. Pass `hold: false` to draw every bar at its true value.
+- **A worker that has done any work shows at least one cell,** so a row
+  is empty only for a worker that has finished nothing.
+- **At the end,** the busiest worker's bar is exactly full and every
+  other bar is its true share of the busiest worker's jobs, with its job
+  count and rate beside it. A jagged edge is normal: it shows how
+  unevenly the work fell, and workers tied for the most are all full.
+
+**The overall bar** says when the run is done: green for done, yellow
+for in flight, red for the rest — pending, and at the end the tasks that
+died. The three always fill its width. The percentage rounds down, so it
+reads `100.0%` only when every task has finished.
+
+**Drawing** happens ten times a second, and only when something changed;
+a terminal resize redraws on the next tick. Only the main thread draws
+it. `-q` replaces it with the one summary line.
 
 ## Task Lifecycle
 
@@ -252,12 +297,12 @@ setup = ->
 perform = (task, ctx) ->
   code = task.split('/').pop()
   return if existsSync(join(ctx.outDir, "#{code}.json"))
-  resp = await fetch "https://api.example.com/tests/#{code}",
+  resp = fetch! "https://api.example.com/tests/#{code}",
     method: 'POST'
     headers: { 'Cookie': ctx.cook }
     body: JSON.stringify { testCode: code }
-  throw new Error("HTTP #{resp.status}") unless resp.ok
-  await Bun.write(join(ctx.outDir, "#{code}.json"), await resp.text())
+  raise "HTTP #{resp.status}" unless resp.ok
+  Bun.write! join(ctx.outDir, "#{code}.json"), resp.text!
 
 swarm! { setup, perform }
 ```
@@ -290,7 +335,9 @@ bun run test
 ```
 
 The suite pins batch runs across workers (context cloning, failures,
-retries, crash recovery), every CLI flag and error path, the ANSI
-progress rendering, `args()` stripping, the file-based queue contract
-line for line, and the `swarm` command itself — each case running the
-fixtures/ job scripts as real subprocesses.
+retries, crash recovery), every CLI flag and error path, the progress
+display (bar arithmetic, holding, the last frame, the overall bar, the
+draw timer, resizes), what runs where around `swarm!`, `args()`
+stripping, the file-based queue contract line for line, and the `swarm`
+command itself — each case running the fixtures/ job scripts as real
+subprocesses.
