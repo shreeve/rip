@@ -26,6 +26,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFile
 import { join, resolve } from 'path'
 import { pathToFileURL } from 'url'
 import { cpus } from 'os'
+import { check } from 'rip/validate'
 
 # ==============================================================================
 # Module state
@@ -223,10 +224,9 @@ export swarm! = (opts = {}) ->
   dosafe  = args.includes('-s') or args.includes('--safe')
   quiet   = args.includes('-q') or args.includes('--quiet')
   tag     = findArg(args, '-t', '--tag') or opts.tag
-  hold    = opts.hold ?? true
+  hold    = check(opts.hold ?? true, 'bool') ?? true   # off only when it clearly says so
 
   abort 'error: workers must be at least 1' if workers < 1
-  abort 'error: hold must be true or false' if opts.hold? and typeof opts.hold isnt 'boolean'
   abort 'error: tag must be a plain name (letters, digits, - _ .)' if tag? and not /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(String(tag))
   useDir join('.swarm', String(tag)) if tag?
 

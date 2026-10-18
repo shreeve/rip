@@ -180,7 +180,7 @@ thread and in every worker.
 | **bar** | Progress bar width in characters | 20 |
 | **char** | Character for progress bars | `•` |
 | **tag** | Name of this script's queue, kept under `.swarm/<tag>/` | none — `.swarm/` |
-| **hold** | Worker bars only move forward while the run is live; `false` draws each at its true value, so a worker falling behind steps back | `true` |
+| **hold** | Worker bars only move forward while the run is live; a clear off (`false`, `0`, `'no'`, `'off'`, any case) draws each at its true value, so a worker falling behind steps back | `true` |
 
 ### CLI Flags
 
