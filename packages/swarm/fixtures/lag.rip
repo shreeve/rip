@@ -1,0 +1,19 @@
+# A worker that falls behind: tasks take 40 ms, but the 4th takes 800 ms,
+# so the worker on it keeps pace at first and then sits while the other
+# runs ahead. Its true bar shrinks across the display's ticks; held, it
+# keeps its widest. `accurate` passes hold: false; `bogus` passes 'yes'.
+
+import { swarm, init, retry, todo, args } from 'rip/swarm'
+
+setup = ->
+  unless retry()
+    init()
+    todo i for i in [1..20]
+  {}
+
+perform = (task, ctx) ->
+  Bun.sleep!(if task.split('/').pop() is '4' then 800 else 40)
+
+mode = args()[0]
+hold = if mode is 'accurate' then false else if mode is 'bogus' then 'yes' else true
+swarm! { setup, perform, hold }
