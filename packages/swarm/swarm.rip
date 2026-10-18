@@ -109,11 +109,15 @@ fgw =! fg("fff")
 # ==============================================================================
 
 char = wide = len = null
+high = {}   # slot -> the widest bar drawn for it this run
 
-# A worker's bar: its jobs against the busiest worker's, the whole run
-# long, so the rows show who did the work and the busiest bar is full.
-# Progress is the summary bar's to show.
-share = (count, most) -> Math.round(count / most * wide)
+# A worker's bar, in whole cells: the run's progress times the worker's
+# count against the busiest worker's. The busiest bar is the run's
+# progress, and every other bar its share of that, so the chart reads
+# "how far done" and "who did it" at once. Integer arithmetic rounded
+# down: a finished run's busiest bar is jobs of jobs and most of most,
+# exactly full, and no one short of the most rounds up to look full.
+cells = (finished, jobs, count, most) -> Math.floor(finished * count * wide / (jobs * most))
 
 drawFrame! = (workers) ->
   len = String(workers).length
@@ -137,10 +141,14 @@ draw! = (state) ->
 
   most = Math.max(...Object.values(info), 1)
 
-  # worker bars, then the task each worker is on beside its row
+  # worker bars, then the task each worker is on beside its row. `most`
+  # in the denominator means the leader's every job pulls the other bars
+  # back a fraction, so a bar holds its widest until its own count carries
+  # it past: the rows only move forward while the run is live
   write fgw
   for slot, count of info
-    cols = share count, most
+    cols = Math.max(high[slot] ?? 0, cells(done + died, jobs, count, most))
+    high[slot] = cols
     write go(parseInt(slot) + 1, len + 5) + bg("5383ec") + char.repeat(cols) + bg() + " ".repeat(wide - cols)
   write fg()
   for slot, task of inflight when task
@@ -248,6 +256,8 @@ export swarm! = (opts = {}) ->
   fatal    = false
   inflight = {}  # slot -> taskPath (track in-flight tasks for crash recovery)
   lastTask = {}  # slot -> last completed task name (for display)
+
+  high = {}
 
   # A job's event only marks the frame stale; a timer draws it five times
   # a second. Drawing on every event made the terminal the work: a run of
@@ -372,13 +382,15 @@ export swarm! = (opts = {}) ->
   if quiet
     p "#{secs.toFixed(2)} secs for #{jobs} jobs by #{workers} workers" + (" @ #{(jobs / secs).toFixed(2)} jobs/sec" if secs > 0 else "")
   else
-    # the last frame, then each worker's stats beside its bar: the bars
-    # mean what they meant all run, so the frame does not jump
+    # the last frame, then each worker's stats beside its bar at its true
+    # share of the busiest worker's jobs: the busiest exactly full, every
+    # other bar where the run brought it, and a bar the hold kept above its
+    # share settles to it, so the chart ends on who did the work
     paint()
     most = Math.max(...Object.values(info), 1)
     for slot, n of info
       rate = (n / secs).toFixed(1) if secs > 0 else '-'
-      cols = share n, most
+      cols = cells jobs, jobs, n, most
       write go(parseInt(slot) + 1, len + 5) + fgw + bg("5383ec") + char.repeat(cols) + bg() + " ".repeat(wide - cols) + fg() + " │ #{n} jobs @ #{rate}/sec" + clear(true)
     cursor(true)
     write go(workers + 6, 1)

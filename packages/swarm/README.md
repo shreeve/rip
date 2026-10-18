@@ -113,10 +113,12 @@ is installed. `rip jobs.rip` runs the same script identically — the
 3. Tasks are dispatched from `.swarm/todo/` to workers via message passing
 4. Workers call `perform(task, ctx)` — on success the file moves to
    `done/`, on failure it moves to `died/`
-5. ANSI progress bars update live — per-worker throughput and overall
-   completion. A worker's bar is its share of the busiest worker's
-   jobs, so only the busiest ends full; when done, each bar stays where
-   it ended, with that worker's jobs and rate beside it
+5. ANSI progress bars update live, five times a second. The busiest
+   worker's bar is the run's progress, and every other bar is its share
+   of that, so the chart shows how far along the run is and who is doing
+   the work. When done, the busiest bar is full, the others show their
+   share of the busiest worker's jobs, and each has its jobs and rate
+   beside it
 6. If tasks died, just run it again — `retry()` moves them back to
    `todo/` and only those tasks are reprocessed
 
