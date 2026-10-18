@@ -302,7 +302,7 @@ test "hold (the default) keeps a falling-behind worker's bar; hold: false draws 
   held = run fresh(), 'lag.rip', '-w', '2', '-b', '100', '-c', '#'
   eq held.status, 0
   ok not stepsBack(held.stdout), 'a held bar never narrows'
-  accurate = run fresh(), 'lag.rip', 'accurate', '-w', '2', '-b', '100', '-c', '#'
+  accurate = run fresh(), 'lag.rip', 'off', '-w', '2', '-b', '100', '-c', '#'
   eq accurate.status, 0
   ok stepsBack(accurate.stdout), 'a true bar narrows as the leader pulls ahead'
   # either way the run ends on true shares
@@ -313,10 +313,16 @@ test "hold (the default) keeps a falling-behind worker's bar; hold: false draws 
     for row, [cols, n] of rows
       eq cols, Math.floor(n * 100 / most), "row #{row}: #{n} of #{most} jobs"
 
-test "a hold that is not true or false is refused", ->
-  r = run fresh(), 'lag.rip', 'bogus', '-w', '2'
-  eq r.status, 1
-  ok (r.stdout + r.stderr).includes('error: hold must be true or false'), r.stderr
+test "hold reads like a yes or no: clearly off turns it off, anything else leaves it on", ->
+  # a bar that steps back means hold was off
+  for word in ['false', 'False', '0', 'no', 'off']
+    r = run fresh(), 'lag.rip', word, '-w', '2', '-b', '100', '-c', '#'
+    eq r.status, 0
+    ok stepsBack(r.stdout), "hold: '#{word}' turns hold off"
+  for word in ['true', 'on', 'goofy']
+    r = run fresh(), 'lag.rip', word, '-w', '2', '-b', '100', '-c', '#'
+    eq r.status, 0
+    ok not stepsBack(r.stdout), "hold: '#{word}' leaves hold on"
 
 test "the last frame shows each worker's share: the busiest exactly full, the rest where they ended", ->
   dir = fresh()
@@ -330,7 +336,18 @@ test "the last frame shows each worker's share: the busiest exactly full, the re
   for row, [cols, n] of rows
     eq cols, Math.floor(n * 20 / most), "row #{row}: #{n} of #{most} jobs"
   ok Object.values(rows).some(([cols]) -> cols is 20), "the busiest worker is full: #{JSON.stringify rows}"
-  ok Object.values(rows).some(([cols]) -> cols < 20), "the surged worker shows its share: #{JSON.stringify rows}"
+  # how the jobs split is the scheduler's, and an even split fills both;
+  # whoever is short of the most is short of full
+  for row, [cols, n] of rows when n < most
+    ok cols < 20, "row #{row}: #{n} of #{most} jobs drew full"
+
+test "the summary bar ends filled: green for done, red for died, nothing left over", ->
+  r = run fresh(), 'fail.rip', '-w', '2', '-b', '20', '-c', '#'
+  eq r.status, 0
+  bars = [...r.stdout.matchAll(/\x1b\[48;2;88;166;92m(#*)\x1b\[48;2;241;191;66m(#*)\x1b\[48;2;216;81;64m( *)/g)]
+  [, green, yellow, red] = bars.at(-1)
+  eq [green.length, yellow.length, red.length], [16, 0, 4], '8 of 10 done, 2 died'
+  ok r.stdout.includes(' 100.0% '), 'a finished run reads 100.0%'
 
 test "the display draws on a 0.1 s timer, not once a job", ->
   dir = fresh()
