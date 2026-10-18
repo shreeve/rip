@@ -261,6 +261,32 @@ test "a worker's bar never shrinks: it holds its widest while the leader surges,
   ok Object.keys(widths).length is 2, "two worker rows drew bars: #{Object.keys(widths)}"
   ok Object.values(widths).some((w) -> w is 20), "the leader's bar ends full: #{JSON.stringify widths}"
 
+test "the last frame keeps every worker's bar at the width it reached: no jump to full", ->
+  dir = fresh()
+  r = run dir, 'surge.rip', '-w', '2', '-b', '20', '-c', '#'
+  eq r.status, 0
+  live = {}
+  for m in [...r.stdout.matchAll(/\x1b\[(\d+);\d+H\x1b\[48;2;83;131;236m(#*)\x1b\[49m/g)]
+    live[m[1]] = m[2].length
+  # the stats rows: white on blue, then the bar, then the job count
+  final = {}
+  for m in [...r.stdout.matchAll(/\x1b\[(\d+);\d+H\x1b\[38;2;255;255;255m\x1b\[48;2;83;131;236m(#*)(?:\x1b\[49m *\x1b\[39m|\x1b\[39m\x1b\[49m) │ (\d+) jobs @/g)]
+    final[m[1]] = m[2].length
+  eq final, live, 'each bar ends where the run left it'
+  ok Object.values(final).some((w) -> w < 20), "the surged worker's bar stays short: #{JSON.stringify final}"
+
+test "the percentage rounds down: 2000 of 2001 reads 99.9, only a finished run 100.0", ->
+  dir = fresh()
+  # a frame per job: about a megabyte of drawing, past spawnSync's default buffer
+  r = cli [fixture('many.rip'), '-w', '2', '-b', '20', '-c', '#'], { cwd: dir, maxBuffer: 16 * 1024 * 1024 }
+  eq r.status, 0
+  plain = r.stdout.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, ' ')
+  seen = [...plain.matchAll(/([\d.]+)% +(\d+)\/2001 done/g)].map (m) -> [Number(m[1]), Number(m[2])]
+  ok seen.length > 0, 'progress was drawn'
+  for [pct, done] in seen
+    ok (done is 2001) is (pct is 100), "#{done}/2001 read #{pct}%"
+  ok seen.some(([pct, done]) -> done is 2001), 'the finished run reads 100.0%'
+
 # ==[ args() ]==
 
 console.log "\nargs()"

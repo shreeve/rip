@@ -114,7 +114,9 @@ is installed. `rip jobs.rip` runs the same script identically — the
 4. Workers call `perform(task, ctx)` — on success the file moves to
    `done/`, on failure it moves to `died/`
 5. ANSI progress bars update live — per-worker throughput and overall
-   completion. When done, per-worker stats are shown
+   completion. A worker's bar is its share of the busiest worker's
+   jobs, so only the busiest ends full; when done, each bar stays where
+   it ended, with that worker's jobs and rate beside it
 6. If tasks died, just run it again — `retry()` moves them back to
    `todo/` and only those tasks are reprocessed
 

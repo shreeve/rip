@@ -1,0 +1,14 @@
+# Many instant tasks: 2,001 of them, so one job is under a twentieth of a
+# percent and a percentage rounded to tenths would read 100.0 a job early.
+
+import { swarm, init, retry, todo } from 'rip/swarm'
+
+setup = ->
+  unless retry()
+    init()
+    todo i for i in [1..2001]
+  {}
+
+perform = (task, ctx) ->
+
+swarm { setup, perform }

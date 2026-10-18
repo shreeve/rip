@@ -123,6 +123,11 @@ drawFrame! = (workers) ->
   write go(workers + 3, len + 3) + "│ " + " ".repeat(wide) +     " │"
   write go(workers + 4, len + 3) + "╰"  + "─".repeat(wide  + 2) + "╯"
 
+# A percentage to one decimal, rounded down: 4044 of 4045 is 99.9, and
+# only a finished run reads 100.0. Integer arithmetic, so 57 of 100 is
+# 57.0 and not the 56.9 a float product would floor to.
+tenths = (part, whole) -> (Math.floor(part * 1000 / whole) / 10).toFixed(1)
+
 draw! = (state) ->
   { live, done, died, jobs, workers, info } = state
 
@@ -130,10 +135,11 @@ draw! = (state) ->
   most = Math.max(...Object.values(info), 1)
 
   # worker bars: a bar is the worker's count against the leader's,
-  # scaled by the run's progress, and `most` in the denominator means
-  # the leader's surge would pull every other bar back a step. A bar
-  # never shrinks: it holds its widest until its own count carries it
-  # past, so the rows only ever move forward
+  # scaled by the run's progress, so at the end it is the worker's share
+  # of the leader's work and only the leader's is full. `most` in the
+  # denominator means the leader's surge would pull every other bar back
+  # a step, so a bar never shrinks: it holds its widest until its own
+  # count carries it past, and the rows only ever move forward
   write fgw
   for slot, count of info
     tpct = count / most
@@ -161,7 +167,7 @@ draw! = (state) ->
     bg("f1bf42") + char.repeat(ycol)                          # yellow (live)
     bg("d85140") + " ".repeat(rcol)                           #    red (rest)
     go(row, len + 5 + wide + 3)
-    bg("5383ec") + " #{(ppct * 100).toFixed(1)}% "            #   blue (pct)
+    bg("5383ec") + " #{tenths(done + died, jobs)}% "          #   blue (pct)
     if done > 0 then bg() + " " + bg("58a65c") + " #{done}/#{jobs} done "
     if died > 0 then bg() + " " + bg("d85140") + " #{died} died "
   ].filter(Boolean).join('') + fg() + bg()
@@ -355,12 +361,13 @@ export swarm! = (opts = {}) ->
   if quiet
     p "#{secs.toFixed(2)} secs for #{jobs} jobs by #{workers} workers" + (" @ #{(jobs / secs).toFixed(2)} jobs/sec" if secs > 0 else "")
   else
-    # final summary bar first: draw() repaints worker bars at their
-    # relative widths, which would truncate the full stats bars below
+    # the last frame, then each worker's stats beside the bar it ended
+    # at: a bar keeps its width, so the frame does not jump to full
     draw({ live: 0, done, died, jobs, workers, info })
     for slot, n of info
       rate = (n / secs).toFixed(1) if secs > 0 else '-'
-      write go(parseInt(slot) + 1, len + 5) + fgw + bg("5383ec") + char.repeat(wide) + fg() + bg() + " │ #{n} jobs @ #{rate}/sec" + clear(true)
+      cols = high[slot] ?? 0
+      write go(parseInt(slot) + 1, len + 5) + fgw + bg("5383ec") + char.repeat(cols) + bg() + " ".repeat(wide - cols) + fg() + " │ #{n} jobs @ #{rate}/sec" + clear(true)
     cursor(true)
     write go(workers + 6, 1)
     write "#{secs.toFixed(2)} secs"
