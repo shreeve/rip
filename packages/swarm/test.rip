@@ -288,6 +288,36 @@ test "a worker's bar never shrinks while the run is live", ->
     widths[row] = cols
   eq Object.keys(widths).length, 2, "two worker rows drew bars: #{JSON.stringify widths}"
 
+# Whether any row's live bar ever drew narrower than it had before.
+stepsBack = (out) ->
+  widths = {}
+  back = false
+  for [row, cols] in liveBars(out)
+    back = true if cols < (widths[row] ?? 0)
+    widths[row] = cols
+  back
+
+test "hold (the default) keeps a falling-behind worker's bar; hold: false draws it stepping back", ->
+  # at 100 cells the lagging worker's true bar shrinks visibly across ticks
+  held = run fresh(), 'lag.rip', '-w', '2', '-b', '100', '-c', '#'
+  eq held.status, 0
+  ok not stepsBack(held.stdout), 'a held bar never narrows'
+  accurate = run fresh(), 'lag.rip', 'accurate', '-w', '2', '-b', '100', '-c', '#'
+  eq accurate.status, 0
+  ok stepsBack(accurate.stdout), 'a true bar narrows as the leader pulls ahead'
+  # either way the run ends on true shares
+  for out in [held.stdout, accurate.stdout]
+    rows = statsRows out
+    eq Object.keys(rows).length, 2
+    most = Math.max(...Object.values(rows).map(([cols, n]) -> n))
+    for row, [cols, n] of rows
+      eq cols, Math.floor(n * 100 / most), "row #{row}: #{n} of #{most} jobs"
+
+test "a hold that is not true or false is refused", ->
+  r = run fresh(), 'lag.rip', 'bogus', '-w', '2'
+  eq r.status, 1
+  ok (r.stdout + r.stderr).includes('error: hold must be true or false'), r.stderr
+
 test "the last frame shows each worker's share: the busiest exactly full, the rest where they ended", ->
   dir = fresh()
   r = run dir, 'surge.rip', '-w', '2', '-b', '20', '-c', '#'

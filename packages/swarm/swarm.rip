@@ -108,7 +108,7 @@ fgw =! fg("fff")
 # Progress display
 # ==============================================================================
 
-char = wide = len = null
+char = wide = len = hold = null
 high = {}   # slot -> the widest bar drawn for it this run
 
 # A worker's bar, in whole cells: the run's progress times the worker's
@@ -143,11 +143,14 @@ draw! = (state) ->
 
   # worker bars, then the task each worker is on beside its row. `most`
   # in the denominator means the leader's every job pulls the other bars
-  # back a fraction, so a bar holds its widest until its own count carries
-  # it past: the rows only move forward while the run is live
+  # back a fraction, and a bar losing ground reads as a drawing error; so
+  # with `hold` (the default) a bar holds its widest until its own count
+  # carries it past, and the rows only move forward while the run is
+  # live. `hold: false` draws every bar at its true value in every frame
   write fgw
   for slot, count of info
-    cols = Math.max(high[slot] ?? 0, cells(done + died, jobs, count, most))
+    cols = cells done + died, jobs, count, most
+    cols = Math.max(high[slot] ?? 0, cols) if hold
     high[slot] = cols
     write go(parseInt(slot) + 1, len + 5) + bg("5383ec") + char.repeat(cols) + bg() + " ".repeat(wide - cols)
   write fg()
@@ -220,8 +223,10 @@ export swarm! = (opts = {}) ->
   dosafe  = args.includes('-s') or args.includes('--safe')
   quiet   = args.includes('-q') or args.includes('--quiet')
   tag     = findArg(args, '-t', '--tag') or opts.tag
+  hold    = opts.hold ?? true
 
   abort 'error: workers must be at least 1' if workers < 1
+  abort 'error: hold must be true or false' if opts.hold? and typeof opts.hold isnt 'boolean'
   abort 'error: tag must be a plain name (letters, digits, - _ .)' if tag? and not /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(String(tag))
   useDir join('.swarm', String(tag)) if tag?
 

@@ -116,9 +116,11 @@ is installed. `rip jobs.rip` runs the same script identically — the
 5. ANSI progress bars update live, five times a second. The busiest
    worker's bar is the run's progress, and every other bar is its share
    of that, so the chart shows how far along the run is and who is doing
-   the work. When done, the busiest bar is full, the others show their
-   share of the busiest worker's jobs, and each has its jobs and rate
-   beside it
+   the work. A bar only moves forward while the run is live (`hold`;
+   losing ground reads as a drawing error), so a worker that falls behind
+   holds its widest bar. When done, the busiest bar is full, the others
+   show their share of the busiest worker's jobs, and each has its jobs
+   and rate beside it
 6. If tasks died, just run it again — `retry()` moves them back to
    `todo/` and only those tasks are reprocessed
 
@@ -178,6 +180,7 @@ thread and in every worker.
 | **bar** | Progress bar width in characters | 20 |
 | **char** | Character for progress bars | `•` |
 | **tag** | Name of this script's queue, kept under `.swarm/<tag>/` | none — `.swarm/` |
+| **hold** | Worker bars only move forward while the run is live; `false` draws each at its true value, so a worker falling behind steps back | `true` |
 
 ### CLI Flags
 
