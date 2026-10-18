@@ -27,4 +27,4 @@ perform = (task, ctx) ->
   return if existsSync(join(ctx.outDir, "#{code}.json"))
   writeFileSync join(ctx.outDir, "#{code}.json"), JSON.stringify({ code })
 
-swarm { setup, perform }
+swarm! { setup, perform }

@@ -1,0 +1,20 @@
+# Code after `swarm!`: it runs once, in the main thread, when the run is
+# over, and no worker waits on it (the sleep would hold every worker that
+# ran it). The run's signal handlers are gone by then: a resize the script
+# takes draws nothing, and the counts are printed for the test.
+
+import { swarm, init, retry, todo } from 'rip/swarm'
+
+setup = ->
+  unless retry()
+    init()
+    todo i for i in [1..4]
+  {}
+
+perform = (task, ctx) ->
+
+swarm! { setup, perform }
+console.log "AFTER-SWARM #{process.listenerCount('SIGINT')} #{process.listenerCount('SIGWINCH')}"
+process.kill process.pid, 'SIGWINCH'
+Bun.sleep! 1000
+console.log 'SCRIPT-END'

@@ -13,4 +13,4 @@ perform = (task, ctx) ->
   name = task.split('/').pop()
   raise "boom #{name}" if name in ['3', '7']
 
-swarm { setup, perform }
+swarm! { setup, perform }

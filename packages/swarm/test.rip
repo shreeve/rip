@@ -302,12 +302,42 @@ test "the last frame shows each worker's share: the busiest exactly full, the re
   ok Object.values(rows).some(([cols]) -> cols is 20), "the busiest worker is full: #{JSON.stringify rows}"
   ok Object.values(rows).some(([cols]) -> cols < 20), "the surged worker shows its share: #{JSON.stringify rows}"
 
-test "the display draws on a 0.2 s timer, not once a job", ->
+test "the display draws on a 0.1 s timer, not once a job", ->
   dir = fresh()
   r = cli [fixture('many.rip'), '-w', '2', '-b', '20', '-c', '#'], { cwd: dir }
   eq r.status, 0
   frames = r.stdout.match(/\/2001 done/g).length
   ok frames < 40, "#{frames} frames for 2,001 jobs"
+
+test "a resize redraws the frame on the next tick, not once per signal", ->
+  dir = fresh()
+  r = run dir, 'resize.rip', '-w', '2', '-b', '10', '-c', '#'
+  eq r.status, 0
+  # the opening frame clears once; fifty signals inside 0.1 s land in a
+  # tick or two (one per signal before: fifty-one)
+  clears = r.stdout.split('\x1b[2J').length - 1
+  ok clears >= 2 and clears <= 4, "#{clears} full redraws for 50 resizes"
+
+test "code after swarm! runs once, after the run, and no worker waits on it", ->
+  dir = fresh()
+  r = run dir, 'after.rip', '-w', '2', '-b', '10', '-c', '#'
+  eq r.status, 0
+  eq r.stdout.split('AFTER-SWARM').length - 1, 1, 'once, in the main thread'
+  eq r.stdout.split('SCRIPT-END').length - 1, 1
+  # the script sleeps a second after swarm!: a worker that ran it would
+  # hold the four instant jobs that long
+  secs = Number(r.stdout.match(/([\d.]+) secs for 4 jobs/)[1])
+  ok secs < 0.8, "the run took #{secs} s"
+  ok r.stdout.indexOf('AFTER-SWARM') > r.stdout.indexOf('jobs/sec'), 'after the summary'
+
+test "the run's signal handlers come off when swarm! returns", ->
+  dir = fresh()
+  r = run dir, 'after.rip', '-w', '2', '-b', '10', '-c', '#'
+  eq r.status, 0
+  ok r.stdout.includes('AFTER-SWARM 0 0'), 'no SIGINT or SIGWINCH listener left'
+  # the script resizes itself after the run: nothing of swarm's draws
+  rest = r.stdout.slice r.stdout.indexOf('AFTER-SWARM')
+  ok not rest.includes('\x1b[2J') and not rest.includes('╭'), JSON.stringify rest
 
 test "the percentage rounds down: 2000 of 2001 reads 99.9, only a finished run 100.0", ->
   dir = fresh()

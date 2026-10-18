@@ -6,4 +6,4 @@ setup = ->
   init()
   null
 
-swarm { setup, perform: noop }
+swarm! { setup, perform: noop }

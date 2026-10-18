@@ -14,4 +14,4 @@ setup = ->
 perform = (task, ctx) ->
   Bun.sleep! 700 if task.split('/').pop() is '2001'
 
-swarm { setup, perform }
+swarm! { setup, perform }
