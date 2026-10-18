@@ -341,6 +341,21 @@ test "the last frame shows each worker's share: the busiest exactly full, the re
   for row, [cols, n] of rows when n < most
     ok cols < 20, "row #{row}: #{n} of #{most} jobs drew full"
 
+test "a worker with any job done shows at least one cell", ->
+  # one job against nineteen on a 4-cell bar is a fifth of a cell
+  r = run fresh(), 'straggler.rip', '-w', '2', '-b', '4', '-c', '#'
+  eq r.status, 0
+  rows = statsRows r.stdout
+  jobs = Object.values(rows).map(([cols, n]) -> n).sort((a, b) -> a - b)
+  eq jobs, [1, 19], "the straggler did one job: #{JSON.stringify rows}"
+  for row, [cols, n] of rows
+    ok cols >= 1, "row #{row} did #{n} job(s) and drew #{cols} cells"
+  # and no live frame leaves a working row empty once it has a job
+  seen = {}
+  for [row, cols] in liveBars(r.stdout)
+    ok cols >= (seen[row] ?? 0), "row #{row} narrowed to #{cols}"
+    seen[row] = cols if cols > 0
+
 test "the summary bar ends filled: green for done, red for died, nothing left over", ->
   r = run fresh(), 'fail.rip', '-w', '2', '-b', '20', '-c', '#'
   eq r.status, 0

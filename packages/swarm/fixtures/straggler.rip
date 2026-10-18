@@ -1,0 +1,16 @@
+# A worker that does almost nothing: task 1, dispatched first, sleeps
+# while the other worker takes the 19 instant tasks, so the straggler ends
+# with one job, a share that rounds to no cell on a narrow bar.
+
+import { swarm, init, retry, todo } from 'rip/swarm'
+
+setup = ->
+  unless retry()
+    init()
+    todo i for i in [1..20]
+  {}
+
+perform = (task, ctx) ->
+  Bun.sleep! 600 if task.split('/').pop() is '1'
+
+swarm! { setup, perform }
