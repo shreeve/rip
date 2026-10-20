@@ -431,6 +431,7 @@ describe('indexed loops: the iterable wraps on the face, the record carries the 
     // One record per read, the loop's head on each, the report on the
     // first; the comprehension's head is its clause, read off the text.
     const heads = faced.indexedLoops.map((r) => [loops.slice(...r.head), faced.code.slice(...r.value), r.report]);
+    expect(faced.indexedLoops.map((r) => faced.code.slice(...r.wrap))).toEqual(faced.indexedLoops.map((r) => `__ripIndexed(${faced.code.slice(...r.value)})`));
     expect(heads).toEqual([
       ['for k, v in rec', 'rec', true], ['for k, v in rec', 'rec', false],
       ['for x in rec by 2', 'rec', true], ['for x in rec by 2', 'rec', false],

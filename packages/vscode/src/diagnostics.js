@@ -172,6 +172,11 @@ export function mapTsDiagnostic(good, d) {
     if (!indexed.report) return null;
     span = [indexed.head[0], indexed.head[1]];
   }
+  // A complaint about the wrapped call's VALUE — a nullish iterable, an
+  // unknown one — stands on the whole `__ripIndexed(…)` call, bytes the
+  // author never wrote; it is about the iterable and lands there.
+  const wrapped = indexed === undefined ? (good.indexedLoops ?? []).find((r) => r.wrap[0] === s && r.wrap[1] === e) : undefined;
+  if (wrapped !== undefined) span = generatedSpanToSource(good.mappings, wrapped.value[0], wrapped.value[1]) ?? span;
   // A listener on a child with no host: the listener's host cast indexes
   // `el` in the child's `__host` record, TS-only bytes with no row of
   // their own, so the miss stands inside a recorded relation site and

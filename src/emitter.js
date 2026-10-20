@@ -7077,11 +7077,16 @@ class Emitter {
     let report = true;
     return () => {
       this._needsIndexedHelper = true;
+      const wrapStart = this.b.offset;
       this.b.tsOnly(() => this.b.emit('__ripIndexed('));
       const start = this.b.offset;
       this.expr(iter);
-      this.indexedLoops.push({ value: [start, this.b.offset], head, construct, of, report });
+      const value = [start, this.b.offset];
       this.b.tsOnly(() => this.b.emit(')'));
+      // `wrap` is the whole call: a complaint the checker makes about the
+      // call's VALUE (a nullish iterable, an unknown one) stands there, and
+      // re-anchors on the iterable the author wrote (mapTsDiagnostic).
+      this.indexedLoops.push({ value, wrap: [wrapStart, this.b.offset], head, construct, of, report });
       report = false;
     };
   }

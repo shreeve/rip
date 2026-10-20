@@ -666,6 +666,12 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     '  console.log y, i',
     'ys = (v for k, v in rec)',
     'console.log ys',
+    'maybe: string[] | undefined = undefined',
+    'for s, i in maybe',
+    '  console.log s, i',
+    'unk: unknown = 1',
+    'for u, i in unk',
+    '  console.log u, i',
     '',
   ].join('\n');
   const RECORD_LOOP = "`for k, v in rec` indexes an array, and 'Record<string, number>' is not one — an object is iterated with `for k, v of rec`";
@@ -679,6 +685,10 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
         [2, 1, 2, 16, 2345, RECORD_LOOP],
         [5, 1, 5, 16, 2345, "`for k, v in obj` indexes an array, and '{ a: number; b: number; }' is not one — an object is iterated with `for k, v of obj`"],
         [37, 9, 37, 24, 2345, RECORD_LOOP],
+        // The checker's own complaints about a nullish or unknown iterable
+        // keep their anchor on the iterable, not on the wrap around it.
+        [40, 13, 40, 18, 2532, "Object is possibly 'undefined'."],
+        [43, 13, 43, 16, 2571, "Object is of type 'unknown'."],
       ]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
@@ -691,6 +701,10 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       expect(JSON.parse(stdout).map((d) => [d.line, d.column, d.code, d.message])).toEqual([
         [2, 1, 2345, RECORD_LOOP],
         [37, 9, 2345, RECORD_LOOP],
+        // Gradual's loose null posture holds the nullish iterable; the
+        // unknown one keeps the checker's member miss, cover-mapped onto
+        // the loop as before.
+        [43, 1, 2339, "Property 'length' does not exist on type 'unknown'."],
       ]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
