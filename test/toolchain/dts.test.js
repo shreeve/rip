@@ -113,6 +113,14 @@ const ROWS = [
   ['def typed!(x): Number\n  bump(x)', 'declare function typed(x?: any): Number;\nexport {};\n'],
   // bodiless overload signatures
   ['def f(a: number): string\ndef f(a)\n  a', 'declare function f(a: number): string;\nexport {};\n'],
+  ['def f<T>(a: T): T\ndef f(a)\n  a', 'declare function f<T>(a: T): T;\nexport {};\n'],
+  // rows above an exported implementation export with it: a merged
+  // declaration is all exported or all local
+  ['def f(a: number): string\nexport def f(a)\n  String(a)', 'export declare function f(a: number): string;\n'],
+  [
+    'def f<T>(a: Promise<T>): Promise<T>\ndef f<T>(a: T): T\nexport def f(a)\n  a',
+    'export declare function f<T>(a: Promise<T>): Promise<T>;\nexport declare function f<T>(a: T): T;\n',
+  ],
   [
     'def f(a: number): string\ndef f(a: string): string\ndef f(a)\n  String(a)',
     'declare function f(a: number): string;\ndeclare function f(a: string): string;\nexport {};\n',

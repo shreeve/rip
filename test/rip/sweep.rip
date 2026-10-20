@@ -931,6 +931,39 @@ code "bodiless def overload", '''
   }
   '''
 
+code "generic bodiless def overload", '''
+  def f<T>(a: T): T
+  def f(a)
+    a
+  ''', '''
+  function f(a) {
+    return a;
+  }
+  '''
+
+code "bodiless def overload above an exported def", '''
+  def f(a: number): string
+  export def f(a)
+    String a
+  ''', '''
+  export function f(a) {
+    return String(a);
+  };
+  '''
+
+code "generic bodiless def overloads above an exported def", '''
+  def f<T>(a: Promise<T>): Promise<T>
+  def f<T>(a: T): T
+  export def f(a)
+    a
+  ''', '''
+  export function f(a) {
+    return a;
+  };
+  '''
+
+fail "bodiless def overload with no implementation", 'def f(a: number): string\nx = 1', 'has no implementation'
+
 code "bare class", '''
   A = class
   ''', '''

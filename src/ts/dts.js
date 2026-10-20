@@ -207,9 +207,12 @@ export function emitDeclarations({ sexpr, stores, source }) {
     pass.lines.push(`${exported ? 'export ' : ''}declare function ${name}${typeParamsOf(node)}${rendered(() => renderParams(params, isOptionalParam))}: ${returnType ?? 'any'};`);
   };
 
+  // An overload row is exported when its implementation is: TypeScript
+  // refuses a merged declaration that is part exported, part local.
   const defSigDecl = (node) => {
     const [, name, params, returnType] = node;
-    pass.lines.push(`declare function ${name}${typeParamsOf(node)}${rendered(() => renderParams(params, isOptionalParam))}: ${tidyType(returnType)};`);
+    const exp = exportedDefs.has(name) ? 'export ' : '';
+    pass.lines.push(`${exp}declare function ${name}${typeParamsOf(node)}${rendered(() => renderParams(params, isOptionalParam))}: ${tidyType(returnType)};`);
   };
 
   const assignDecl = (node, exported) => {
@@ -648,6 +651,9 @@ export function emitDeclarations({ sexpr, stores, source }) {
   // known only once the pass has run and never depends on how a member
   // is typed, so the pass runs once recording the roots and, if any
   // fail to resolve, again with those roots refused.
+  const exportedDefs = new Set(sexpr.slice(1)
+    .filter((s) => isNode(s) && s[0] === 'export' && isNode(s[1]) && isDefHead(s[1][0]) && s[1].length === 4)
+    .map((s) => s[1][1]));
   startPass();
   const roots = new Set();
   spellable = (name) => { roots.add(name); return true; };
