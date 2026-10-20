@@ -31,7 +31,7 @@ import { buildProbe, parseProbeHover, buildVerify, refusedByVerify } from '../..
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from '../../packages/vscode/src/diagnostics.js';
 import { SUPPRESSED_TS_CODES, IMPLICIT_ANY_CODES, MISSING_TYPES_CODES } from '../../packages/vscode/src/translate.js';
 import { scopeGateOf, typedExportsOf, typedImportsOf } from '../../packages/vscode/src/scopes.js';
-import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, missingModuleRead, linkNestedNodeModules, declaredButUninstalled, configEarnsBoundary, appStashSpecFor, appRoutesFor, closureImportsOf, checkoutNodeModules } from '../../packages/vscode/src/mirror.js';
+import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, missingModuleRead, linkNestedNodeModules, linkExternalDeclarations, declarationImportsOf, declaredButUninstalled, configEarnsBoundary, appStashSpecFor, appRoutesFor, closureImportsOf, checkoutNodeModules } from '../../packages/vscode/src/mirror.js';
 import { lineStartsOf, offsetToPosition, positionToOffset, generatedSpanToSource } from '../../packages/vscode/src/translate.js';
 import { publicEntriesOf, compileFailureOf } from './public.js';
 import { createPublicSession, walkPublicEntry, useSitesOf, exportIdsOf } from '../../packages/vscode/src/publicwalk.js';
@@ -887,6 +887,8 @@ if (compiled.size > 0) {
     fs.mkdirSync(path.dirname(mirrorPath), { recursive: true });
     if (!mirrorRootIsFallback) linkNestedNodeModules(workspaceRoot, mirrorRoot, fsPath);
     fs.writeFileSync(mirrorPath, entry.good.code);
+    linkExternalDeclarations(mirrorRootIsFallback ? null : workspaceRoot, mirrorRoot, fsPath,
+      declarationImportsOf(entry.result.stores, entry.source, path.dirname(fsPath)));
   }
   // Per-project wrappers: one generated tsconfig at each mirrored dir whose
   // OWN tsconfig governs it, so a nested package's compilerOptions — its

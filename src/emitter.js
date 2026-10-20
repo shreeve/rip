@@ -3799,11 +3799,15 @@ class Emitter {
 
   // The def's recorded overload signatures (TS face): each prints as a
   // bodiless TS overload row immediately above the implementation —
-  // name/params/returnType marked from the def-sig's own roles.
-  tsOverloadSigs(node, ind) {
+  // name/params/returnType marked from the def-sig's own roles. An
+  // exported implementation prints them ahead of its own `export`,
+  // each row exported too: TypeScript refuses overloads that are not
+  // all exported or all local (TS2383).
+  tsOverloadSigs(node, ind, exported = false) {
     if (!this.ts) return;
     const sigs = this.pendingSigs.get(node);
     if (!sigs) return;
+    this.pendingSigs.delete(node);
     for (const sig of sigs) {
       // The overload row reads the SAME optionalMarker role the face's
       // main param path and dts.js read — without it, `b?: string` in a
@@ -3819,8 +3823,11 @@ class Emitter {
       }
       this.b.tsOnly(() => {
         this.mark(sig, '$self', () => {
+          if (exported) this.b.emit('export ');
           this.b.emit('function ');
           this.mark(sig, 'name', () => this.b.emit(sig[1]));
+          const tp = this.annotationText(sig, 'typeParams');
+          if (tp !== null) this.mark(sig, 'typeParams', () => this.emitTypeText(sig, 'typeParams', tp));
           this.mark(sig, 'params', () => this.b.emit(params));
           this.mark(sig, 'returnType', () => this.emitTypeText(sig, 'returnType', `: ${tidyType(sig[3])}`));
           this.b.emit(';');
@@ -4006,6 +4013,7 @@ class Emitter {
           const name = s[1];
           const impl = list
             .slice(i + 1)
+            .map((later) => (isNode(later) && later[0] === 'export' ? later[1] : later))
             .find((later) => isNode(later) && isDefHead(later[0]) && later.length === 4 && later[1] === name);
           if (!impl) {
             throw this.positionedError(s,
@@ -4042,7 +4050,7 @@ class Emitter {
     this.mark(stmt, '$self', () => {});
     const roles =
       stmt[0] === 'type-decl' ? ['declaration'] :
-      stmt[0] === 'def-sig' ? ['name', 'params', 'returnType'] :
+      stmt[0] === 'def-sig' ? ['name', 'params', 'returnType', 'typeParams'] :
       ['target', 'annotation'];
     for (const role of roles) this.mark(stmt, role, () => {});
   }
@@ -5661,6 +5669,7 @@ class Emitter {
           this.classStatement(spec, ind);
           this.b.emit(';');
         } else if (isNode(spec) && isDefHead(spec[0])) {
+          this.tsOverloadSigs(spec, ind, true);
           this.b.emit('export ');
           this.defStatement(spec, ind);
           this.b.emit(';');

@@ -125,6 +125,7 @@ grammar =
     # WITHOUT one stays the loud missing-body parse error, so a
     # forgotten body can never erase silently.
     o 'DEF Identifier OptParams TYPE', '["def-sig", 2, 3, 4]', 'defsig: _, name, params, returnType'
+    o 'DEF Identifier TYPE_PARAMS[typeParams] OptParams TYPE', '["def-sig", 2, 4, 5]', 'defsig: _, name, params, returnType'
   ]
 
   # ============================================================================
@@ -1551,7 +1552,7 @@ kinds =
   'dammit':        ['operator', 'target']
   'def':           ['body', 'name', 'params', 'returnType', 'typeParams', 'voidMarker']
   'default':       ['name', 'value']
-  'defsig':        ['name', 'params', 'returnType']
+  'defsig':        ['name', 'params', 'returnType', 'typeParams']
   'doiife':        ['func']
   'dynamicKey':    ['key']
   'dynimport':     ['args', 'keyword']
@@ -1704,6 +1705,7 @@ expectedConflicts = [
   ['ambiguous',     'Try → TRY Statement Catch'               ,  1]
   ['ambiguous',     'Finalizer → FINALLY Expression'          , 24]
   ['ambiguous',     'TypeDecl → DEF Identifier OptParams TYPE',  1]
+  ['ambiguous',     'TypeDecl → DEF Identifier TYPE_PARAMS OptParams TYPE', 1]
 ]
 
 # ==============================================================================

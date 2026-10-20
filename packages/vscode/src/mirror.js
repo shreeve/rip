@@ -1159,6 +1159,7 @@ export function ripManifestTarget(manifest, subpath) {
 // manifest NAMES — the `types` condition of the entry, or top-level
 // `types`/`typings` for '.' — and otherwise the conventional sibling:
 // `x.js` → `x.d.ts`, `x.mjs` → `x.d.mts`, `x.cjs` → `x.d.cts`.
+const declarationBeside = (jsPath) => jsPath.replace(/\.([cm]?)js$/, '.d.$1ts');
 function declarationTarget(manifest, subpath, dir) {
   const target = manifestTarget(manifest, subpath);
   if (target === null || !/\.[cm]?js$/.test(target)) return null;
@@ -1167,7 +1168,7 @@ function declarationTarget(manifest, subpath, dir) {
   const entry = exp && typeof exp === 'object' ? (isSubpathExportsMap(exp) ? exp[subpath] : (subpath === '.' ? exp : null)) : null;
   if (entry && typeof entry === 'object' && typeof entry.types === 'string') candidates.push(entry.types);
   if (subpath === '.') for (const named of [manifest?.types, manifest?.typings]) if (typeof named === 'string') candidates.push(named);
-  candidates.push(target.replace(/\.([cm]?)js$/, '.d.$1ts'));
+  candidates.push(declarationBeside(target));
   for (const candidate of candidates) {
     try { return fs.realpathSync(path.resolve(dir, candidate)); } catch { /* next */ }
   }
@@ -1427,18 +1428,24 @@ export const missingModuleRead = (err) =>
 export function ripImportsOf(stores, sourceText, fromDir) {
   const seen = new Set();
   const targets = [];
-  const addSpec = (spec) => {
+  for (const spec of importSpecifiersOf(stores, sourceText)) {
     const abs = ripSpecifierTarget(spec, fromDir);
-    if (abs === null) return;
-    if (seen.has(abs)) return;   // one edge per module, however many spellings name it
+    if (abs === null) continue;
+    if (seen.has(abs)) continue;   // one edge per module, however many spellings name it
     seen.add(abs);
     targets.push(abs);
-  };
+  }
+  return targets;
+}
+
+// Every module specifier a compiled file names, from the stores.
+function importSpecifiersOf(stores, sourceText) {
+  const specs = [];
   for (const kind of ['import', 'export']) {
     for (const node of stores.nodesByKind(kind)) {
       const src = stores.role(node.nodeId, 'source');
       if (!src || typeof src.sourceStart !== 'number') continue;
-      addSpec(sourceText.slice(src.sourceStart, src.sourceEnd).replace(/^['"`]|['"`]$/g, ''));
+      specs.push(sourceText.slice(src.sourceStart, src.sourceEnd).replace(/^['"`]|['"`]$/g, ''));
     }
   }
   for (const node of stores.nodesByKind('dynimport')) {
@@ -1446,11 +1453,49 @@ export function ripImportsOf(stores, sourceText, fromDir) {
     if (!args || typeof args.sourceStart !== 'number') continue;
     const raw = sourceText.slice(args.sourceStart, args.sourceEnd);
     const literal = /^\(\s*(['"`])([^'"`]+)\1\s*\)$/.exec(raw);
-    if (literal) addSpec(literal[2]);
+    if (literal) specs.push(literal[2]);
   }
   for (const r of stores.roles) {
     if (!TYPE_TEXT_ROLES.has(r.role) || typeof r.sourceStart !== 'number') continue;
-    for (const spec of typeImportSpecifiers(sourceText.slice(r.sourceStart, r.sourceEnd))) addSpec(spec);
+    specs.push(...typeImportSpecifiers(sourceText.slice(r.sourceStart, r.sourceEnd)));
   }
-  return targets;
+  return specs;
+}
+
+// The declarations a compiled file's relative JavaScript imports carry
+// beside their sources (`../../src/runtime/duckdb.js` → the sibling
+// `duckdb.d.ts`), read from the same stores as the `.rip` edges.
+export function declarationImportsOf(stores, sourceText, fromDir) {
+  const found = [];
+  for (const spec of importSpecifiersOf(stores, sourceText)) {
+    if (!(spec.startsWith('./') || spec.startsWith('../')) || !/\.[cm]?js$/.test(spec)) continue;
+    let real;
+    try { real = fs.realpathSync(declarationBeside(path.resolve(fromDir, spec))); } catch { continue; }
+    if (!found.includes(real)) found.push(real);
+  }
+  return found;
+}
+
+// A face's relative import of a JavaScript module resolves in the MIRROR
+// tree. A workspace file's declaration is in the program by the mirror's
+// `../../**/*.d.ts` include and reached through rootDirs; a face
+// mirrored under __external__ (the stdlib's, from any consumer workspace)
+// sits in no such tree, so its import of `../../src/runtime/duckdb.js`
+// lands on nothing and every name it re-exports arrives as `any`. Each
+// declaration such a face imports gets a symlink twin at its own
+// __external__ spelling — where the face's relative import lands, by the
+// one mirror-naming rule — as a nested node_modules does. Best-effort: a
+// failed link leaves the `any`s standing.
+export function linkExternalDeclarations(workspaceRoot, mirrorRoot, fsPath, declarations) {
+  if (!mirrorRoot || declarations.length === 0) return;
+  if (mirrorRelForFsPath(fsPath, workspaceRoot).split(path.sep)[0] !== '__external__') return;
+  for (const dts of declarations) {
+    const rel = mirrorRelForFsPath(dts, workspaceRoot);
+    if (rel.split(path.sep)[0] !== '__external__') continue;
+    const at = path.join(mirrorRoot, rel);
+    try {
+      fs.mkdirSync(path.dirname(at), { recursive: true });
+      if (!fs.lstatSync(at, { throwIfNoEntry: false })) fs.symlinkSync(dts, at);
+    } catch { /* best-effort */ }
+  }
 }

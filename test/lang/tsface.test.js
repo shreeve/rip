@@ -927,6 +927,18 @@ describe('TS-face emission pins', () => {
       .toBe('function f(a: number): string;\nfunction f(a: string): string;\nfunction f(a?) {\n  return String(a);\n}' + MARKER);
   });
 
+  test('an overload row carries its type parameters after the name', () => {
+    expect(ts('def f<T>(a: T): T\ndef f(a)\n  a\n').code)
+      .toBe('function f<T>(a: T): T;\nfunction f(a?) {\n  return a;\n}' + MARKER);
+  });
+
+  test('overload rows above an exported implementation are exported with it, ahead of its own export (TS2383)', () => {
+    expect(ts('def f(a: number): string\nexport def f(a)\n  String(a)\n').code)
+      .toBe('export function f(a: number): string;\nexport function f(a?) {\n  return String(a);\n};');
+    expect(ts('def f<T>(a: Promise<T>): Promise<T>\ndef f<T>(a: T): T\nexport def f(a)\n  a\n').code)
+      .toBe('export function f<T>(a: Promise<T>): Promise<T>;\nexport function f<T>(a: T): T;\nexport function f(a?) {\n  return a;\n};');
+  });
+
   test('typed class fields, methods, and void methods', () => {
     expect(ts('class A\n  x: number = 5\n  y: string\n  m: (v: number): number -> v\n  save!: (v) ->\n    v\n').code)
       .toBe('class A {\n  x: number = 5;\n  y: string;\n  m(v: number): number {\n    return v;\n  }\n  save(v?): void {\n    v;\n    return;\n  }\n}' + MARKER);
@@ -1452,6 +1464,16 @@ describe('TS-face mapping rows (the same mark protocol)', () => {
     for (const m of plain.mappings.rows.filter((r2) => r2.role === 'declaration')) {
       expect(m.generatedStart).toBe(m.generatedEnd);
     }
+  });
+
+  test('an overload row maps its type parameters onto the printed signature', () => {
+    const src = 'def f<T>(a: T): T\ndef f(a)\n  a\n';
+    const r = ts(src);
+    const row = r.mappings.rows.find(
+      (m) => m.role === 'typeParams' && r.code.slice(m.generatedStart, m.generatedEnd) === '<T>',
+    );
+    expect(row).toBeDefined();
+    expect(src.slice(row.sourceStart, row.sourceEnd)).toBe('<T>');
   });
 
   test('an overload row maps its def-sig roles onto the printed signature', () => {

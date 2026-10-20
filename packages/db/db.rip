@@ -46,6 +46,12 @@ import {
   QueryError
   CancelledError
   isDbError
+  HarborAdapter
+  HarborOptions
+  Query
+  QueryResult
+  FetchLike
+  Column
 } from '../../src/runtime/duckdb.js'
 
 # `encodeParams` is deliberately not among them: it is harbor's wire
@@ -63,6 +69,40 @@ export {
 }
 
 # ==[ Client ]================================================================
+
+type Row = Record<string, unknown>
+type Result = { rows: Row[], columns: string[], rowCount: number }
+type CamelOption = { camel?: boolean }
+type CallOptions = CamelOption & { signal?: AbortSignal | null }
+type Params = unknown[] | CallOptions | null
+type Tx = { query: Query, commit: () => unknown, rollback: () => unknown }
+type Adapter =
+  query: Query
+  begin?: (opts?: unknown) => Promise<Tx>
+  catalog?: HarborAdapter['catalog']
+  capabilities?: { tx?: boolean, ddlTransactional?: boolean }
+type Client =
+  sql: (text: string, params?: Params, opts?: CallOptions) => Promise<Result>
+  rows: (text: string, params?: Params, opts?: CallOptions) => Promise<Row[]>
+  one: (text: string, params?: Params, opts?: CallOptions) => Promise<Row | null>
+  value: (text: string, params?: Params, opts?: CallOptions) => Promise<unknown>
+  values: (text: string, params?: Params, opts?: CallOptions) => Promise<unknown[] | null>
+  transaction: <R>(fn: (tx: Client) => R | Promise<R>, opts?: { retries?: number }) => Promise<R>
+type ConnectOptions = HarborOptions & { adapter?: Adapter, camel?: boolean }
+type ShowOptions = { maxRows?: number, maxWidth?: number }
+type ProbeOptions = { fetch?: FetchLike }
+type Sql = (query: string, params?: unknown[] | null) => Promise<QueryResult>
+type HostDeps =
+  sql: Sql
+  fs: { exists: (p: string) => boolean, isDir: (p: string) => boolean, statSize: (p: string) => number, rm: (p: string) => void }
+  tar: { create: (archive: string, dir: string) => void, extract: (archive: string, dir: string) => void, list: (archive: string) => string[] }
+  tmp: () => string
+  now: () => Date
+  join: (a: string, b: string) => string
+type McpReply = { ok?: boolean, error?: string, errorCode?: string, columns?: Column[], data?: unknown[][] }
+type McpSql = (query: string, params?: unknown[] | null) => McpReply | Promise<McpReply>
+type McpMessage = { jsonrpc?: string, id?: number | string | null, method: string, params?: Record<string, unknown> }
+type McpQueryOutput = { success: boolean, columns: string[], columnTypes: string[], rows: unknown[][], rowCount: number, truncated?: boolean, warning?: string }
 
 # The query client — parameterized execution, result materialization,
 # the transaction runner, and cancellation, layered over any adapter.
@@ -100,7 +140,7 @@ camelName = (name) ->
 # `camel` — opt-in, never automatic; the default result is untouched —
 # runs the names through `camelName` before keying, so row keys and the
 # reported `columns` cannot disagree.
-materialize = (result, camel = false) ->
+materialize = (result, camel = false): Result ->
   names = (result?.columns ?? []).map (column) -> column.name
   names = names.map((name) -> camelName name) if camel
   data = result?.data ?? []
@@ -146,8 +186,8 @@ isPlainObject = (v) ->
 # snake_case → camelCase key projection (see `camelName`); `defaults`
 # carries the client-level opts a `connect`/`createClient` established,
 # and a per-call opt always wins over its default.
-makeSurface = (run, beginTx, defaults = {}) ->
-  sql = (text, params = null, opts = {}) ->
+makeSurface = (run, beginTx, defaults: CamelOption = {}) ->
+  sql = (text, params = null, opts: CallOptions = {}) ->
     if isPlainObject params
       fail 'db: options were given in both the params slot and the opts slot — params must be an array of positional values' if Object.keys(opts).length
       opts = params
@@ -210,12 +250,12 @@ sleep = (ms) ->
 # Would running this again plausibly succeed? Only for failures that left
 # nothing behind — never for a bad statement, which will fail identically
 # however many times it is sent.
-export def isRetryable(error)
+export def isRetryable(error: unknown): boolean
   return false unless error?
-  return true if RETRYABLE_CODES.includes error.code
+  return true if RETRYABLE_CODES.includes (error as { code?: string }).code
   error instanceof QueryError and CONFLICT_SHAPE.test(String(error.message ?? ''))
 
-export def createClient(adapter, defaults = {})
+export def createClient(adapter: Adapter, defaults: CamelOption = {}): Client
   fail 'createClient requires an adapter with a query() method' unless typeof adapter?.query is 'function'
 
   # A transaction: begin a session, hand the callback a surface bound
@@ -264,7 +304,7 @@ export def createClient(adapter, defaults = {})
     else
       runTx fn, tx, noSettle
 
-  transaction = (fn, opts = {}) ->
+  transaction = (fn, opts: { retries?: number } = {}) ->
     fail 'this adapter does not support transactions' unless typeof adapter.begin is 'function'
     retries = opts.retries ?? DEFAULT_TX_RETRIES
     for attemptNo in [0..retries]
@@ -330,11 +370,11 @@ defaultPair = ->
 #   ensureRunning!
 #   connect! camel: true                  # or connect! 'http://…'
 #   findOne! 'SELECT * FROM users WHERE id = ?', [1]
-export def connect(urlOrOpts = null, opts = {})
+export def connect(urlOrOpts: string | ConnectOptions | null = null, opts: ConnectOptions = {}): Client & { adapter: Adapter }
   o = if urlOrOpts? and typeof urlOrOpts is 'object' and not Array.isArray(urlOrOpts)
     urlOrOpts
   else
-    { ...opts, url: (if urlOrOpts isnt undefined then urlOrOpts else opts.url) }
+    { ...opts, url: (if urlOrOpts isnt undefined then urlOrOpts else opts.url) as string | null }
   adapter = if o.adapter?
     o.adapter
   else
@@ -349,32 +389,32 @@ export def connect(urlOrOpts = null, opts = {})
 # also export at module scope.) `sql` runs any statement and returns the
 # full envelope — rows, columns, rowCount — for callers who want to deal
 # with the result themselves; findAll/findOne project it.
-export def sql(text, params = null, opts = {})
+export def sql(text: string, params: Params = null, opts: CallOptions = {}): Promise<Result>
   defaultPair!.client.sql! text, params, opts
 
-export def findAll(text, params = null, opts = {})
+export def findAll(text: string, params: Params = null, opts: CallOptions = {}): Promise<Row[]>
   defaultPair!.client.rows! text, params, opts
 
-export def findOne(text, params = null, opts = {})
+export def findOne(text: string, params: Params = null, opts: CallOptions = {}): Promise<Row | null>
   defaultPair!.client.one! text, params, opts
 
-export def transaction(fn)
+export def transaction<R>(fn: (tx: Client) => R | Promise<R>): Promise<R>
   defaultPair!.client.transaction! fn
 
 # Raw adapter begin (session + BEGIN) — what schema.transaction uses under
 # the hood. App code usually wants `transaction(fn)` instead.
-export def begin(opts = {})
+export def begin(opts: Record<string, unknown> = {}): Promise<Tx>
   adapter = defaultPair!.adapter
   fail 'this adapter does not support transactions' unless typeof adapter.begin is 'function'
   adapter.begin! opts
 
 # Quote a SQL identifier; doubles embedded `"`.
-export ident = (name) ->
+export ident = (name: unknown): string ->
   '"' + String(name).replace(/"/g, '""') + '"'
 
 # Adapter envelope `{ columns, data }` → row objects. `{ camel: true }`
 # opts into the snake_case → camelCase key projection (see `camelName`).
-export def materializeAll(result, opts = {})
+export def materializeAll(result: { columns?: { name: string }[], data?: unknown[][], rowCount?: number } | null, opts: CamelOption = {}): Row[]
   (materialize result, opts.camel ?? false).rows
 
 # Print a result as an aligned text table and return it unchanged, so
@@ -389,7 +429,10 @@ export def materializeAll(result, opts = {})
 # REPL guardrails, both overridable: `maxRows` (default 50) prints the
 # head and says how many were left unshown; `maxWidth` (default 40)
 # clips runaway cells with an ellipsis.
-export def show(result, opts = {})
+def show<T>(result: Promise<T>, opts?: ShowOptions): Promise<T>
+def show<T>(result: { all: () => T }, opts?: ShowOptions): T
+def show<T>(result: T, opts?: ShowOptions): T
+export def show(result, opts: ShowOptions = {})
   # Print what the caller MEANT, never the plumbing object they
   # happened to hold: a promise awaits, and a query builder (anything
   # non-array with an .all() method — a SchemaQuery chain, or a model
@@ -490,20 +533,20 @@ reachable = (target, fetchFn) ->
 
 # Boot probe: GET /ready. Returns 'running' or throws. Prefer this name;
 # `ensureRunning` is the same check (apps still import that spelling).
-export def assertReachable(url = null, opts = {})
+export def assertReachable(url: string | null = null, opts: ProbeOptions = {}): Promise<'running'>
   fetchFn = opts.fetch ?? fetch
   target = resolveTarget url
   return 'running' if reachable!(target, fetchFn)
   throw Error.new "harbor not reachable at #{target.shown} — start your harbor instance and try again"
 
-export def ensureRunning(url = null, opts = {})
+export def ensureRunning(url: string | null = null, opts: ProbeOptions = {}): Promise<'running'>
   assertReachable url, opts
 
 # Health check: `/ready` then `current_database()`. Returns
 # `{ ok: true, url, database }` or throws ConnectionError.
 # CLI also accepts `rip-db status` as an alias (not exported — `status`
 # is too common as a local / HTTP field name).
-export def ping(opts = {})
+export def ping(opts: HarborOptions = {}): Promise<{ ok: true, url: string, database: string }>
   o = if opts? and typeof opts is 'object' and not Array.isArray(opts) then opts else {}
   target = resolveTarget o.url
   fetchFn = o.fetch ?? fetch
@@ -524,21 +567,21 @@ export def ping(opts = {})
 
 # A SQL single-quoted string literal, doubling embedded quotes. A NUL
 # byte is rejected — it does not survive HTTP-as-text transport.
-export sqlString = (s) ->
+export sqlString = (s: string): string ->
   throw Error.new 'db: path contains NUL byte' if s.includes '\0'
   "'" + s.replaceAll("'", "''") + "'"
 
 # A filesystem-safe stem for an auto-named archive.
-export safeFileStem = (s) ->
+export safeFileStem = (s: unknown): string ->
   String(s).replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '') or 'rip-db'
 
 # A `YYYYMMDD-HHMMSS` stamp from a Date (injected, never a bare `new
 # Date()` — the caller owns the clock).
-export stamp = (d) ->
+export stamp = (d: Date): string ->
   p = (n) -> String(n).padStart(2, '0')
   "#{d.getFullYear()}#{p(d.getMonth() + 1)}#{p(d.getDate())}-#{p(d.getHours())}#{p(d.getMinutes())}#{p(d.getSeconds())}"
 
-export humanSize = (bytes) ->
+export humanSize = (bytes: number): string ->
   if bytes < 1024 then "#{bytes} B"
   else if bytes < 1024 * 1024 then "#{(bytes / 1024).toFixed(1)} KB"
   else if bytes < 1024 * 1024 * 1024 then "#{(bytes / 1024 / 1024).toFixed(1)} MB"
@@ -548,7 +591,7 @@ export humanSize = (bytes) ->
 # a bare `..`, or a `..` path segment. (This blocks the obvious traversal
 # patterns; it does not defend against crafted symlink/hardlink archives,
 # so `load` is for archives you trust — see the CLI help.)
-export unsafeTarPath = (raw) ->
+export unsafeTarPath = (raw: string): boolean ->
   name = raw.replaceAll('\\', '/')
   name.startsWith('/') or name is '..' or name.startsWith('../') or name.includes('/../')
 
@@ -557,7 +600,7 @@ export unsafeTarPath = (raw) ->
 # One wire with the adapter: temporal encode/decode, timeout/abort, and
 # typed DbError. CLI and MCP both call this — there is no second /sql
 # client. `makeMcpSql` is the same function under the historical name.
-export makeSql = (opts = {}) ->
+export makeSql = (opts: HarborOptions = {}): Sql ->
   adapter = harborAdapter
     url: opts.url
     fetch: opts.fetch
@@ -568,13 +611,13 @@ export makeSql = (opts = {}) ->
 export makeMcpSql = makeSql
 
 # The database name, for auto-naming an archive.
-export currentDatabase = (sql) ->
+export currentDatabase = (sql: Sql): Promise<string> ->
   r = sql! 'SELECT current_database()'
-  r?.data?[0]?[0] ?? 'rip-db'
+  (r?.data?[0]?[0] as string) ?? 'rip-db'
 
 # Refuse to IMPORT into a populated DB — across every user schema, not
 # just `main` — so a load never crashes half-way with "already exists".
-export assertEmptyDatabase = (sql) ->
+export assertEmptyDatabase = (sql: Sql): Promise<void> ->
   r = sql! '''
     SELECT count(*) FROM (
       SELECT 1 FROM duckdb_tables() WHERE internal = false
@@ -600,7 +643,7 @@ export assertEmptyDatabase = (sql) ->
 # whatever existed even if a future version changes a default, so
 # fidelity beats prettiness here. Terse SQL is for human-authored
 # files, not this one.
-export dump = (arg, deps) ->
+export dump = (arg: string | null, deps: Omit<HostDeps, 'tar'> & { tar: Pick<HostDeps['tar'], 'create'> }): Promise<string> ->
   { sql, fs, tar, now } = deps
   staging = deps.tmp()
   try
@@ -621,7 +664,7 @@ export dump = (arg, deps) ->
 
 # load: verify the target is empty, screen the archive for traversal,
 # extract, IMPORT DATABASE.
-export load = (arg, deps) ->
+export load = (arg: string, deps: Pick<HostDeps, 'sql' | 'fs' | 'tar' | 'tmp'>): Promise<string> ->
   { sql, fs, tar } = deps
   throw Error.new 'usage: rip-db load ARCHIVE.tar.gz' unless arg
   throw Error.new "no such file: #{arg}" unless fs.exists arg
@@ -640,7 +683,7 @@ export load = (arg, deps) ->
 # checkpoint: flush the WAL. Plain CHECKPOINT fails while other writers
 # are active; --force preempts them (and can lose their uncommitted
 # writes), so the plain-mode failure escalates to a --force hint.
-export checkpoint = (force, deps) ->
+export checkpoint = (force: boolean, deps: Pick<HostDeps, 'sql' | 'now'>): Promise<string> ->
   { sql, now } = deps
   stmt = if force then 'FORCE CHECKPOINT' else 'CHECKPOINT'
   t0 = now().getTime()
@@ -724,7 +767,7 @@ rowsToObjects = (columns, data) ->
 
 # ── the protocol core ─────────────────────────────────────────────────
 
-export def createMcpServer(deps)
+export def createMcpServer(deps: { sql: McpSql }): { dispatch: (msg: McpMessage) => Promise<string | null> }
   { sql } = deps
 
   # execute_query: run arbitrary SQL, shape the result, and truncate to
@@ -744,7 +787,7 @@ export def createMcpServer(deps)
         rows = rows.slice 0, MAX_ROWS
         truncated = true
         warning = "Results limited to #{MAX_ROWS} rows."
-      output = { success: true, columns, columnTypes, rows, rowCount: rows.length }
+      output = { success: true, columns, columnTypes, rows, rowCount: rows.length } as McpQueryOutput
       # Shrink by ~10% per pass until the serialized result fits the byte
       # budget (or one row remains).
       while JSON.stringify(output).length > MAX_CHARS and output.rows.length > 1
@@ -846,7 +889,7 @@ export def createMcpServer(deps)
 
 # options (library) > --url argv (CLI) > RIP_DB_* env > defaults.
 # Inject `sql` or `fetch` for hermetic tests.
-export def startStdio(options = {})
+export def startStdio(options: HarborOptions & { sql?: Sql } = {}): Promise<import('node:readline').Interface>
   { createInterface } = import!('node:readline')
   argv = process.argv.slice 2
   flagIdx = argv.indexOf '--url'

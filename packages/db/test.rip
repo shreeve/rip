@@ -177,7 +177,9 @@ parseJson = (s) -> JSON.parse s
 toolResult = (reply) -> JSON.parse(parseJson(reply).result.content[0].text)
 
 runDb = (...args) -> spawnSync process.execPath, [RIP_CLI, DB_RIP, ...args], encoding: 'utf8'
-binDb = (...args) -> spawnSync DB_RIP, args, encoding: 'utf8'
+# db.rip's shebang runs whichever `rip` PATH finds; the checkout's own
+# bin goes first so the test exercises the compiler it lives with.
+binDb = (...args) -> spawnSync DB_RIP, args, encoding: 'utf8', env: { ...process.env, PATH: "#{join(ROOT, 'bin')}:#{process.env.PATH}" }
 
 # ==[ 1. Package surface ]====================================================
 
@@ -1293,7 +1295,7 @@ test! "an already-aborted signal rejects before the query runs", ->
 
 test! "an abort while in flight rejects with CancelledError", ->
   controller = AbortController.new()
-  adapter = { query: (-> Promise.new (->)), capabilities: {} }
+  adapter = { query: (-> Promise.new(->) as Promise<never>), capabilities: {} }
   pending = createClient(adapter).sql 'SELECT pg_sleep(10)', [], { signal: controller.signal }
   controller.abort()
   err = caught! pending
@@ -1302,7 +1304,7 @@ test! "an abort while in flight rejects with CancelledError", ->
 test! "an abort mid-flight hands the signal to the adapter", ->
   seen = { signal: null }
   adapter =
-    query: (sql, params, opts) -> seen.signal = opts?.signal ?? null; Promise.new (->)
+    query: (sql, params, opts) -> seen.signal = opts?.signal ?? null; Promise.new(->) as Promise<never>
     capabilities: {}
   controller = AbortController.new()
   pending = createClient(adapter).sql 'SELECT pg_sleep(10)', [], { signal: controller.signal }
@@ -1317,7 +1319,7 @@ test! "over the harbor adapter, cancellation aborts the underlying fetch", ->
   fetch = (url, init) ->
     return Promise.resolve { ok: true, status: 200, json: (-> { cancelled: true }) } if url.includes '/sql/queries/'
     fetchSignal = init?.signal ?? null
-    Promise.new (->)
+    Promise.new(->) as Promise<never>
   controller = AbortController.new()
   pending = createClient(harborAdapter { url: 'http://h', fetch }).sql 'SELECT 1', [], { signal: controller.signal }
   controller.abort()
@@ -1336,6 +1338,7 @@ p "\nClient — shape"
 
 test "createClient requires an adapter with a query method", ->
   throws (-> createClient null), 'adapter'
+  # @ts-expect-error
   throws (-> createClient {}), 'adapter'
 
 test "CancelledError is a DbError with code ABORTED", ->
@@ -1909,7 +1912,7 @@ test! "a transport failure surfaces as a typed DbError", ->
 
 test! "an in-flight cancellation rejects with CancelledError", ->
   controller = AbortController.new()
-  adapter = { query: (-> Promise.new (->)), capabilities: {} }
+  adapter = { query: (-> Promise.new(->) as Promise<never>), capabilities: {} }
   pending = createClient(adapter).sql 'SELECT pg_sleep(9)', [], { signal: controller.signal }
   controller.abort()
   err = caught! pending
