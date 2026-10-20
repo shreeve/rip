@@ -1903,6 +1903,9 @@ async function refresh(document) {
     sourceKeys: result.sourceKeys ?? [],
     stashMembers: result.stashMembers ?? [],
     stashKeys: stashKeysFor(stashSpec, document.uri),
+    // Per `__ripIndexed(…)` wrap of an indexed loop's iterable — a
+    // refused iterable reports once, on the loop's head, from the record.
+    indexedLoops: result.indexedLoops ?? [],
     // Per member initializer, the lowered write's left-hand side and
     // the name it lands on (diagnostics.js, recordedAnchor).
     memberInits: result.memberInits ?? [],

@@ -543,6 +543,12 @@ class Emitter {
     // row carries what the served answer is built from — the tag, its
     // namespace, and for `ref` the cell's name. TS face only.
     this.intrinsics = [];
+    // Per `__ripIndexed(…)` wrap of an indexed loop's iterable: the
+    // argument's generated span, the loop head's source span, the head's
+    // spelling and the `for … of` spelling the report suggests, and
+    // whether this wrap is the loop's reporting one (mapTsDiagnostic).
+    // TS face only.
+    this.indexedLoops = [];
     // SOURCE span and spelling of every component tag's constructor
     // reference, where a construction of a non-component reports
     // (mapTsDiagnostic). TS face only.
@@ -3194,7 +3200,7 @@ class Emitter {
     const { n, used } = this.temps;
     this.temps.used = new Set(used);
     const channels = ['pinnables', 'mutables', 'enums', 'classDecls', 'loopVars', 'attrNames', 'importedRefs',
-      'vocabulary', 'silences', 'memberDecls', 'narrowedDecls', 'importSpans', 'pendingTypeDecls', 'loopVarDecls'];
+      'vocabulary', 'silences', 'memberDecls', 'narrowedDecls', 'importSpans', 'pendingTypeDecls', 'loopVarDecls', 'indexedLoops'];
     const saved = {};
     for (const k of channels) { saved[k] = this[k]; this[k] = []; }
     try {
@@ -7020,6 +7026,66 @@ class Emitter {
     this.withBindings(this.loopBindingNames(node), () => this.forInCore(node, vars, iter, step, guard, body, ind));
   }
 
+  // `for k, v in xs` and `for x in xs by n` INDEX their iterable: the
+  // header reads its `.length` and the body reads its `[i]`, and
+  // JavaScript admits both on anything. A record admits them too — its
+  // index signature types `.length` as a number — so `for k, v in record`
+  // checks clean and runs zero times. The TS face wraps every read of the
+  // iterable these headers make in `__ripIndexed(…)`, whose parameter
+  // refuses a type that is neither iterable nor array-like (the declare
+  // at the emit tail) and whose result is the argument's own type, so a
+  // loop that passes types exactly as before. The refusal is one TS2345
+  // per read; the first read's record carries the report and the others
+  // drop (mapTsDiagnostic), so a loop reports once, on its head, in the
+  // loop's own words. TS-only: the JS bytes are untouched. A scratch
+  // capture (capturedExprText) re-emits bytes the real pass already
+  // wrapped and reported, with no source to word a record from, so it
+  // reads plain. Returns the emitter for one read of the iterable.
+  indexedReader(node, vars, iter) {
+    const id = this.ts && this.b.source !== null ? this.stores.idOf(node) : null;
+    const self = id !== null ? this.stores.selfSpan(id) : null;
+    if (self === null) return () => this.expr(iter);
+    const roleSpan = (role) => {
+      const r = this.stores.role(id, role);
+      return r?.sourceStart != null ? [r.sourceStart, r.sourceEnd] : null;
+    };
+    const squash = (s) => s.replace(/\s+/g, ' ').trim();
+    const clip = (s, n) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
+    const plainVars = vars.length === 2 && vars.every((v) => typeof v === 'string');
+    let head, iterText, names;
+    if (roleSpan('iterable') !== null) {
+      const tail = roleSpan('step') ?? roleSpan('iterable');
+      head = [self[0], tail[1]];
+      const iterSpan = roleSpan('iterable');
+      iterText = clip(squash(this.b.source.slice(iterSpan[0], iterSpan[1])), 40);
+      const varsSpan = roleSpan('vars');
+      names = plainVars && varsSpan !== null ? squash(this.b.source.slice(varsSpan[0], varsSpan[1])) : 'key, value';
+    } else {
+      // A comprehension's clause carries no roles of its own: its node is
+      // the comprehension, whose span opens on the value. The clause is
+      // the text from its `for`, the last one in the span, and its parts
+      // are read off that text.
+      const text = this.b.source.slice(self[0], self[1]);
+      const at = Math.max(0, text.search(/\bfor\b(?![\s\S]*\bfor\b)/));
+      head = [self[0] + at, self[1]];
+      const m = /^for\s+([\s\S]+?)\s+in\s+([\s\S]+?)(?:\s+(?:when|by)\b[\s\S]*)?$/.exec(text.slice(at));
+      iterText = m !== null ? clip(squash(m[2]), 40) : '…';
+      names = plainVars && m !== null ? squash(m[1]) : 'key, value';
+    }
+    const construct = clip(squash(this.b.source.slice(head[0], head[1])), 60);
+    const of = `for ${names} of ${iterText}`;
+    let report = true;
+    return () => {
+      this._needsIndexedHelper = true;
+      this.b.tsOnly(() => this.b.emit('__ripIndexed('));
+      const start = this.b.offset;
+      this.expr(iter);
+      this.indexedLoops.push({ value: [start, this.b.offset], head, construct, of, report });
+      this.b.tsOnly(() => this.b.emit(')'));
+      report = false;
+    };
+  }
+
   forInCore(node, vars, iter, step, guard, body, ind) {
     this.mark(node, '$self', () => {
       const markVar = (v) => this.mark(node, 'vars', () => (typeof v === 'string' ? this.emitPrimitive(v) : this.withPattern(() => this.expr(v), true)));
@@ -7059,8 +7125,9 @@ class Emitter {
         // An impure iterable binds ONCE in the init; every later
         // read (bounds, element) uses the binding.
         const it = this.singleReadIterable(iter) ? null : this.loopTempName('_ref');
-        const bind = () => { if (it) { this.b.emit(`${it} = `); this.expr(iter); this.b.emit(', '); } };
-        const ref = () => { if (it) this.b.emit(it); else this.expr(iter); };
+        const read = this.indexedReader(node, vars, iter);
+        const bind = () => { if (it) { this.b.emit(`${it} = `); read(); this.b.emit(', '); } };
+        const ref = () => { if (it) this.b.emit(it); else read(); };
         if (negLit !== null) {
           this.b.emit('for (let ');
           bind();
@@ -7112,10 +7179,11 @@ class Emitter {
         this.b.emit('}');
       } else if (vars.length === 2) {
         const it = this.singleReadIterable(iter) ? null : this.loopTempName('_ref');
+        const read = this.indexedReader(node, vars, iter);
         this.b.emit('for (let ');
         if (it) {
           this.b.emit(`${it} = `);
-          this.expr(iter);
+          read();
           this.b.emit(', ');
         }
         // The index name's DECLARING occurrence is the source variable; every
@@ -7123,12 +7191,12 @@ class Emitter {
         // binding, not another read of the source.
         markVar(vars[1]);
         this.b.emit(` = 0; ${vars[1]} < `);
-        if (it) this.b.emit(it); else this.expr(iter);
+        if (it) this.b.emit(it); else read();
         this.b.emit(`.length; ${vars[1]}++) {\n`);
         this.b.emit('  '.repeat(ind + 1) + 'let ');
         markVar(vars[0]);
         this.b.emit(' = ');
-        if (it) this.b.emit(it); else this.expr(iter);
+        if (it) this.b.emit(it); else read();
         this.b.emit(`[${vars[1]}];\n`);
         if (guard !== null) {
           this.b.emit('  '.repeat(ind + 1) + 'if (');
@@ -7397,8 +7465,9 @@ class Emitter {
         throw this.positionedError(node, 'emitter: a BY step of 0 never advances the loop');
       }
       const it = this.singleReadIterable(iter) ? null : this.loopTempName('_ref');
-      const bind = () => { if (it) { this.b.emit(`${it} = `); this.expr(iter); this.b.emit(', '); } };
-      const ref = () => { if (it) this.b.emit(it); else this.expr(iter); };
+      const read = this.indexedReader(node, vars, iter);
+      const bind = () => { if (it) { this.b.emit(`${it} = `); read(); this.b.emit(', '); } };
+      const ref = () => { if (it) this.b.emit(it); else read(); };
       if (negLit !== null) {
         this.b.emit('for (let ');
         bind();
@@ -7451,23 +7520,24 @@ class Emitter {
     }
     if (vars.length === 2) {
       const it = this.singleReadIterable(iter) ? null : this.loopTempName('_ref');
+      const read = this.indexedReader(node, vars, iter);
       this.b.emit('for (let ');
       if (it) {
         this.b.emit(`${it} = `);
-        this.expr(iter);
+        read();
         this.b.emit(', ');
       }
       // The index name's DECLARING occurrence is the source variable; every
       // later `${vars[1]}` in the header is emitter arithmetic on that binding.
       markVar(vars[1]);
       this.b.emit(` = 0; ${vars[1]} < `);
-      if (it) this.b.emit(it); else this.expr(iter);
+      if (it) this.b.emit(it); else read();
       this.b.emit(`.length; ${vars[1]}++)`);
       setups.push(() => {
         this.b.emit('let ');
         markVar(vars[0]);
         this.b.emit(' = ');
-        if (it) this.b.emit(it); else this.expr(iter);
+        if (it) this.b.emit(it); else read();
         this.b.emit(`[${vars[1]}];`);
       });
       return setups;
@@ -20082,6 +20152,19 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
     const stashKeys = `keyof import(${JSON.stringify(emitter.appStashSpec)}).__RipStash & string`;
     builder.tsOnly(() => builder.emit(`\ndeclare function __ripSourceKey<const T extends ((${stashKeys}) | \`\${${stashKeys}}.\${string}\`)>(s: T): T;\n`));
   }
+  // The indexed-loop helper's ONE declaration per module (indexedReader).
+  // The constraint admits what `.length` and `[i]` genuinely index: a
+  // type the checker cannot see into (`never`, `any`, `unknown`), a
+  // nullish arm (the checker's own complaint stands), an iterable
+  // (arrays, tuples, strings, typed arrays, collections — a Map's
+  // missing `length` is still the checker's own report), and an
+  // array-like with a numeric length that is not a string index
+  // signature answering for one. A refused argument yields
+  // `ArrayLike<any>`, so the header's `.length` and the body's `[i]`
+  // draw no second complaint about the same loop.
+  if (emitter._needsIndexedHelper === true) {
+    builder.tsOnly(() => builder.emit('\ndeclare function __ripIndexed<T>(xs: T & __RipIndexed<T>): [T] extends [never] ? T : [__RipIndexed<T>] extends [never] ? ArrayLike<any> : T;\ntype __RipIndexed<T> = [T] extends [never] ? T : unknown extends T ? T : T extends null | undefined ? T : T extends Iterable<unknown> ? T : T extends { readonly length: number } ? (string extends keyof T ? never : T) : never;\n'));
+  }
   // The narrowing assertion's ONE declaration per module — an
   // assertion signature over the condition itself, so each
   // `__ripNarrow(claim)` a block's function body opens with narrows the
@@ -20186,7 +20269,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   const partNames = emitter.exportedObjects
     .filter(([, values]) => values.every((value) => emitter.componentNames.includes(value)))
     .map(([name]) => name);
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, componentUses: emitter.componentUses, componentProps: emitter.componentProps, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, indexedLoops: emitter.indexedLoops, componentUses: emitter.componentUses, componentProps: emitter.componentProps, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

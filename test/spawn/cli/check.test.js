@@ -620,6 +620,81 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  // An indexed loop over a record ran zero times and checked clean: the
+  // lowering reads `.length`, which the index signature types as a
+  // number. The face's `__ripIndexed(…)` wrap refuses it, and the report
+  // lands once on the loop's head in the loop's own words. Everything
+  // that genuinely indexes stays silent — arrays, readonly arrays,
+  // tuples, strings, typed arrays, ArrayLike, `any`, and every stepped
+  // form over them.
+  const INDEXED = [
+    'rec: Record<string, number> = { a: 1, b: 2 }',
+    'for k, v in rec',
+    '  console.log k, v',
+    'obj = { a: 1, b: 2 }',
+    'for k, v in obj',
+    '  console.log k, v',
+    'xs: number[] = [1, 2]',
+    'for x, i in xs',
+    '  console.log x, i',
+    'for x in xs by 2',
+    '  console.log x',
+    'for x in xs by -1',
+    '  console.log x',
+    'step = 2',
+    'for x in xs by step',
+    '  console.log x',
+    "ro: readonly string[] = ['a']",
+    'for s, i in ro',
+    '  console.log s, i',
+    "tup: [number, string] = [1, 'a']",
+    'for t, i in tup',
+    '  console.log t, i',
+    "str = 'abc'",
+    'for ch, i in str',
+    '  console.log ch, i',
+    'u8 = new Uint8Array(2)',
+    'for b, i in u8',
+    '  console.log b, i',
+    'al: ArrayLike<number> = [1]',
+    'for n, i in al',
+    '  console.log n, i',
+    'loose: any = null',
+    'for q, i in loose',
+    '  console.log q, i',
+    'for y, i in xs.map((n) -> n * 2)',
+    '  console.log y, i',
+    'ys = (v for k, v in rec)',
+    'console.log ys',
+    '',
+  ].join('\n');
+  const RECORD_LOOP = "`for k, v in rec` indexes an array, and 'Record<string, number>' is not one — an object is iterated with `for k, v of rec`";
+
+  test('an indexed loop over what is not an array reports once, on its head, with the `for … of` spelling', async () => {
+    const dir = workspace({ 'loops.rip': INDEXED }, { strict: true });
+    try {
+      const { stdout, status } = await check(dir, ['--json']);
+      expect(status).toBe(1);
+      expect(JSON.parse(stdout).map((d) => [d.line, d.column, d.endLine, d.endColumn, d.code, d.message])).toEqual([
+        [2, 1, 2, 16, 2345, RECORD_LOOP],
+        [5, 1, 5, 16, 2345, "`for k, v in obj` indexes an array, and '{ a: number; b: number; }' is not one — an object is iterated with `for k, v of obj`"],
+        [37, 9, 37, 24, 2345, RECORD_LOOP],
+      ]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  test('under gradual the report reaches the annotated record and holds on the unannotated object', async () => {
+    const dir = workspace({ 'loops.rip': INDEXED });
+    try {
+      const { stdout, status } = await check(dir, ['--json']);
+      expect(status).toBe(1);
+      expect(JSON.parse(stdout).map((d) => [d.line, d.column, d.code, d.message])).toEqual([
+        [2, 1, 2345, RECORD_LOOP],
+        [37, 9, 2345, RECORD_LOOP],
+      ]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   test('an accept is typed from what its provider offers, and a miss names the provider once, on the name', async () => {
     const dir = workspace({
       'app.rip': [
