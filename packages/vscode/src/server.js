@@ -76,7 +76,7 @@ import {
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
 import { FALLBACK_LEGEND, importRecordOf, importedKindInRecord, correctSemanticTokens } from './tokens.js';
 import { scopeGateOf, typedExportsOf, typedImportsOf } from './scopes.js';
-import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfig, gitRootFor, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, scanExportNames, stubFacesFromScans, linkNestedNodeModules, configEarnsBoundary, appStashSpecFor, appRoutesFor, closureImportsOf, isStdlibPath, anchorStdlib, identifierRunAt, ripSpecifierTarget, stdlibSpellingOf } from './mirror.js';
+import { generatedMirror as buildGeneratedMirror, projectWrapper, nearestTsconfig, gitRootFor, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf, scanExportNames, stubFacesFromScans, linkNestedNodeModules, linkExternalDeclarations, declarationImportsOf, configEarnsBoundary, appStashSpecFor, appRoutesFor, closureImportsOf, isStdlibPath, anchorStdlib, identifierRunAt, ripSpecifierTarget, stdlibSpellingOf } from './mirror.js';
 
 // The compiler: in-repo development resolves the repository's src/;
 // the staged .vsix carries a copy at compiler/src/ (scripts/package.js).
@@ -978,6 +978,7 @@ function mirrorFromDisk(fsPath, source) {
   const mirrorPath = mirrorPathOf('file://' + fsPath);
   warnOnMirrorCollision(mirrorPath, fsPath);
   writeMirror(mirrorPath, result.code);
+  linkExternalDeclarations(workspaceRoot, mirrorRoot, fsPath, declarationImportsOf(result.stores, source, path.dirname(fsPath)));
   // A dependency that DECLARES globals or lives in a mode-flipped package
   // gets its boundary the moment its face materializes — the closure pass
   // may be the first to see it. Only INSIDE the workspace: a dependency
@@ -1997,6 +1998,10 @@ async function refresh(document) {
       warnOnMirrorCollision(state.mirrorPath, document.uri);
       if (!mirrorRootIsFallback) { try { linkNestedNodeModules(workspaceRoot, mirrorRoot, fileURLToPath(document.uri)); } catch { /* non-file uri */ } }
       writeMirror(state.mirrorPath, result.code);
+      try {
+        const fsPath = fileURLToPath(document.uri);
+        linkExternalDeclarations(workspaceRoot, mirrorRoot, fsPath, declarationImportsOf(result.stores, text, path.dirname(fsPath)));
+      } catch { /* non-file uri */ }
     } catch (err) {
       connection.console.error(`[rip] mirror write failed: ${err.message}`);
     }
