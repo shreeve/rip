@@ -643,6 +643,10 @@ export function emitDeclarations({ sexpr, stores, source }) {
     if (isNode(t) && BINDING_HEADS.has(t[0])) patternNames(t[1], sourceBinds);
   }
 
+  const exportedDefs = new Set(sexpr.slice(1)
+    .filter((s) => isNode(s) && s[0] === 'export' && isNode(s[1]) && isDefHead(s[1][0]) && s[1].length === 4)
+    .map((s) => s[1][1]));
+
   // A member's `typeof` names a module binding, and this file declares
   // only its typed bindings: a root the source binds that no
   // declaration here spells is TS2304 for every consumer, so such a
@@ -651,9 +655,6 @@ export function emitDeclarations({ sexpr, stores, source }) {
   // known only once the pass has run and never depends on how a member
   // is typed, so the pass runs once recording the roots and, if any
   // fail to resolve, again with those roots refused.
-  const exportedDefs = new Set(sexpr.slice(1)
-    .filter((s) => isNode(s) && s[0] === 'export' && isNode(s[1]) && isDefHead(s[1][0]) && s[1].length === 4)
-    .map((s) => s[1][1]));
   startPass();
   const roots = new Set();
   spellable = (name) => { roots.add(name); return true; };
