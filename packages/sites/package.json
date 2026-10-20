@@ -7,7 +7,8 @@
   "exports": {
     ".": "./site.rip",
     "./middleware": "./middleware.rip",
-    "./edge": "./edge.rip"
+    "./edge": "./edge.rip",
+    "./configs": { "types": "./configs.d.ts" }
   },
   "bin": {
     "rip-sites": "./sites.rip"
@@ -33,6 +34,7 @@
     "middleware.rip",
     "worker.rip",
     "generate.rip",
+    "configs.d.ts",
     "manager.rip",
     "bundle.rip",
     "control.rip",

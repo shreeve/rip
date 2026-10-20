@@ -1124,12 +1124,15 @@ export function typeImportSpecifiers(text) {
 // manifest publishes.
 export const isSubpathExportsMap = (exp) => Object.keys(exp).some((k) => k === '.' || k.startsWith('./'));
 
+// The file a subpath serves at run time. A `types` condition names a
+// declaration, never what runs, so an entry carrying nothing else serves
+// no file.
 function manifestTarget(manifest, subpath) {
   const pick = (entry) => {
     if (typeof entry === 'string') return entry;
     if (entry && typeof entry === 'object') {
       for (const key of ['import', 'default', ...Object.keys(entry)]) {
-        if (typeof entry[key] === 'string') return entry[key];
+        if (key !== 'types' && typeof entry[key] === 'string') return entry[key];
       }
     }
     return null;
@@ -1151,24 +1154,29 @@ export function ripManifestTarget(manifest, subpath) {
   return target !== null && target.endsWith('.rip') ? target : null;
 }
 
-// The declaration a package serving JAVASCRIPT carries for its entry. A
-// `.rip` entry has a face and needs none; a `.js` entry has no face, and
-// without its declaration the bare name is unresolvable (TS2307) — with
-// it, the name resolves to the declaration, absolute because the file
-// lives in the source tree, not the mirror. The declaration is what the
-// manifest NAMES — the `types` condition of the entry, or top-level
-// `types`/`typings` for '.' — and otherwise the conventional sibling:
-// `x.js` → `x.d.ts`, `x.mjs` → `x.d.mts`, `x.cjs` → `x.d.cts`.
+// The declaration a package carries for a subpath it serves without a
+// `.rip` file. A `.rip` entry has a face and needs none; a `.js` entry has
+// no face, and without its declaration the bare name is unresolvable
+// (TS2307) — with it, the name resolves to the declaration, absolute
+// because the file lives in the source tree, not the mirror. The
+// declaration is what the manifest NAMES — the `types` condition of the
+// entry, or top-level `types`/`typings` for '.' — and otherwise the
+// conventional sibling: `x.js` → `x.d.ts`, `x.mjs` → `x.d.mts`, `x.cjs` →
+// `x.d.cts`. A subpath serving no file at all (rip/sites/configs is
+// generated when a site is served) has only what its `types` condition
+// names.
 const declarationBeside = (jsPath) => jsPath.replace(/\.([cm]?)js$/, '.d.$1ts');
 function declarationTarget(manifest, subpath, dir) {
   const target = manifestTarget(manifest, subpath);
-  if (target === null || !/\.[cm]?js$/.test(target)) return null;
+  if (target !== null && !/\.[cm]?js$/.test(target)) return null;
   const candidates = [];
   const exp = manifest?.exports;
   const entry = exp && typeof exp === 'object' ? (isSubpathExportsMap(exp) ? exp[subpath] : (subpath === '.' ? exp : null)) : null;
   if (entry && typeof entry === 'object' && typeof entry.types === 'string') candidates.push(entry.types);
-  if (subpath === '.') for (const named of [manifest?.types, manifest?.typings]) if (typeof named === 'string') candidates.push(named);
-  candidates.push(declarationBeside(target));
+  if (target !== null) {
+    if (subpath === '.') for (const named of [manifest?.types, manifest?.typings]) if (typeof named === 'string') candidates.push(named);
+    candidates.push(declarationBeside(target));
+  }
   for (const candidate of candidates) {
     try { return fs.realpathSync(path.resolve(dir, candidate)); } catch { /* next */ }
   }

@@ -26,3 +26,10 @@ test('the test, bench, demo, and node_modules trees and the root verb files are 
     expect(name).not.toMatch(/^rip\/[^/]+\/(?:test|bench|demo)\.rip$/);
   }
 });
+
+// rip/sites/configs is generated when a site is served; its `types`-only
+// export subpath declares the module for the checker and names no file, so
+// the generator's own resolve keeps serving it.
+test('a types-only export subpath never enters the runtime map', () => {
+  expect(bareSpecifierMap().has('rip/sites/configs')).toBe(false);
+});

@@ -169,7 +169,11 @@ Keys in exactly this order for mold packages (omit what does not apply):
 ```
 
 - `exports` points at `.rip` sources only — no `"types"`, no `"main"`
-  (highlight's `.js` entry is the earned exception).
+  (highlight's `.js` entry is the earned exception). A module a package
+  generates at serve time has no source to point at: its subpath carries
+  a `types`-only entry naming the declaration shipped beside the
+  generator (sites' `./configs` → `configs.d.ts`), which the checker and
+  the editor resolve and the runtime loader never sees.
 - `description` and the README `> **…**` pitch are the same sentence
   (include the trailing period in both). WIP packages may use
   `"version": "0.0.0"` until the surface stabilizes.

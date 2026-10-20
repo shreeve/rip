@@ -112,3 +112,12 @@ test('the workspace fence admits the anchored stdlib and nothing else', () => {
   expect(isStdlibPath(BINARY_VALIDATE)).toBe(true);
   expect(isStdlibPath(path.join(other, 'packages', 'validate', 'validate.rip'))).toBe(false);
 });
+
+// A module a stdlib package serves with no file behind it — rip/sites/configs
+// is generated when a site is served — is named by a `types`-only export
+// subpath, and the map points that name at its declaration.
+test('a types-only export subpath maps to its declaration', () => {
+  anchorStdlib(null);
+  const mapped = stdlibRipPaths(tmp('rip-ws-generated-'))['rip/sites/configs'];
+  expect(mapped).toEqual([path.join(REAL_ROOT, 'packages', 'sites', 'configs.d.ts')]);
+});
