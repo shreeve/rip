@@ -95,6 +95,8 @@ const REGION_SHAPES = [
   /^\)+$/u,                                                // the expression form's closers
   /^create_block_\d+_iter\(ctx: this.*\) \{ return .*; \}$/su, // a render loop's iterable thunk (the element type a call iterable reaches through)
   /^declare function __ripNarrow\(c: unknown\): asserts c;$/u, // the narrowing helper declare
+  /^__ripIndexed\($/u,                                     // indexed-loop wrap opener (an iterable `for k, v in` / `by` reads by index)
+  /^declare function __ripIndexed<T>\(xs: T & __RipIndexed<T>\): .*;\ntype __RipIndexed<T> = .*;$/su, // the indexed-loop helper declare and its constraint
 ];
 
 describe('the strip gate: TS face minus recorded regions === JS mode, byte-for-byte', () => {
@@ -390,6 +392,82 @@ describe('route options: TS-only wraps, strip identity, JS indifference', () => 
 
 // ── 1b. captures leave no trace ──────────────────────────────────────
 //
+// An indexed loop — `for k, v in xs`, `for x in xs by n`, and the
+// comprehension clauses of either — reads its iterable's `.length` and
+// `[i]`, which JavaScript admits on anything and a record's index
+// signature types as a number. The face wraps every such read in
+// `__ripIndexed(…)`, so the checker refuses what the loop would run
+// zero times over; the first read's record carries the report.
+describe('indexed loops: the iterable wraps on the face, the record carries the report, JS indifference', () => {
+  const loops = [
+    'rec: Record<string, number> = { a: 1 }',
+    'for k, v in rec',
+    '  console.log k, v',
+    'for x in rec by 2',
+    '  console.log x',
+    'for x in rec by -1',
+    '  console.log x',
+    'n = 2',
+    'for x, i in rec by n',
+    '  console.log x, i',
+    'ys = (v for k, v in rec when v > 1)',
+    'for y, i in rec.keys()',
+    '  console.log y, i',
+    '',
+  ].join('\n');
+
+  test('every read of the iterable wraps, and the loop records its head once', () => {
+    const faced = ts(loops);
+    // The two-variable form reads twice (the bound and the element) and
+    // the stepped forms read twice or three times (a runtime step tests
+    // both bounds); an impure iterable binds once and reads the binding.
+    expect(faced.code).toContain('for (let v = 0; v < __ripIndexed(rec).length; v++) {\n  let k = __ripIndexed(rec)[v];');
+    expect(faced.code).toContain('for (let _i = 0; _i < __ripIndexed(rec).length; _i += 2) {\nlet x = __ripIndexed(rec)[_i];');
+    expect(faced.code).toContain('for (let _i = __ripIndexed(rec).length - 1; _i >= 0; _i--) {\nlet x = __ripIndexed(rec)[_i];');
+    expect(faced.code).toContain('for (let _step = n, i = _step > 0 ? 0 : __ripIndexed(rec).length - 1; _step > 0 ? i < __ripIndexed(rec).length : _step < 0 && i >= 0; i += _step) {\nlet x = __ripIndexed(rec)[i];');
+    expect(faced.code).toContain('for (let v = 0; v < __ripIndexed(rec).length; v++) {\n    let k = __ripIndexed(rec)[v];\n    if ((v > 1)) {');
+    expect(faced.code).toContain('for (let _ref = __ripIndexed(rec.keys()), i = 0; i < _ref.length; i++) {\n  let y = _ref[i];');
+    expect(faced.code.match(/__ripIndexed\(/g)).toHaveLength(12);
+    // One record per read, the loop's head on each, the report on the
+    // first; the comprehension's head is its clause, read off the text.
+    const heads = faced.indexedLoops.map((r) => [loops.slice(...r.head), faced.code.slice(...r.value), r.report]);
+    expect(faced.indexedLoops.map((r) => faced.code.slice(...r.wrap))).toEqual(faced.indexedLoops.map((r) => `__ripIndexed(${faced.code.slice(...r.value)})`));
+    expect(heads).toEqual([
+      ['for k, v in rec', 'rec', true], ['for k, v in rec', 'rec', false],
+      ['for x in rec by 2', 'rec', true], ['for x in rec by 2', 'rec', false],
+      ['for x in rec by -1', 'rec', true], ['for x in rec by -1', 'rec', false],
+      ['for x, i in rec by n', 'rec', true], ['for x, i in rec by n', 'rec', false], ['for x, i in rec by n', 'rec', false],
+      ['for k, v in rec when v > 1', 'rec', true], ['for k, v in rec when v > 1', 'rec', false],
+      ['for y, i in rec.keys()', 'rec.keys()', true],
+    ]);
+    expect(faced.indexedLoops.filter((r) => r.report).map((r) => [r.construct, r.of])).toEqual([
+      ['for k, v in rec', 'for k, v of rec'],
+      ['for x in rec by 2', 'for key, value of rec'],
+      ['for x in rec by -1', 'for key, value of rec'],
+      ['for x, i in rec by n', 'for x, i of rec'],
+      ['for k, v in rec when v > 1', 'for k, v of rec'],
+      ['for y, i in rec.keys()', 'for y, i of rec.keys()'],
+    ]);
+    // The helper declares once per module, at the tail.
+    expect(faced.code.match(/declare function __ripIndexed</g)).toHaveLength(1);
+    expect(faced.code).toContain('\ndeclare function __ripIndexed<T>(xs: T & __RipIndexed<T>): [T] extends [never] ? T : [__RipIndexed<T>] extends [never] ? ArrayLike<any> : T;\ntype __RipIndexed<T> = ');
+  });
+
+  test('the JS is indifferent, and the strip reproduces it', () => {
+    const faced = ts(loops);
+    const plain = js(loops);
+    expect(plain.code).not.toContain('__ripIndexed');
+    expect(stripFace(faced.code, faced.tsRegions)).toBe(plain.code);
+    expect(plain.indexedLoops).toEqual([]);
+  });
+
+  test('a plain `for x in xs`, a range, and a `for … of` never wrap', () => {
+    const faced = ts('xs = [1, 2]\nfor x in xs\n  console.log x\nfor i in [0..3]\n  console.log i\nfor k, v of { a: 1 }\n  console.log k, v\n');
+    expect(faced.code).not.toContain('__ripIndexed');
+    expect(faced.indexedLoops).toEqual([]);
+  });
+});
+
 // The TS face re-emits certain bodies into a scratch builder (a
 // component computed's copy for the behavior object). The capture runs
 // in the TS emission ONLY, so anything it consumes from shared state —

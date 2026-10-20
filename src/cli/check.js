@@ -818,6 +818,7 @@ while (queue.length) {
       routeWraps: result.routeWraps ?? [],
       sourceKeys: result.sourceKeys ?? [],
       stashMembers: result.stashMembers ?? [],
+      indexedLoops: result.indexedLoops ?? [],
       memberInits: result.memberInits ?? [],
       // The render-pair re-anchor (mapTsDiagnostic): a complaint standing
       // on a pair's recorded relation site lands on the KEY here exactly

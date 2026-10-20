@@ -353,6 +353,10 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // checker's sentence. TS face only; empty otherwise.
     sourceKeys: emitted.sourceKeys,
     stashMembers: emitted.stashMembers,
+    // Per `__ripIndexed(…)` wrap of an indexed loop's iterable — the
+    // diagnostics road reports a refused iterable once, on the loop's
+    // head, from the record. TS face only; empty otherwise.
+    indexedLoops: emitted.indexedLoops,
     // A STASH MODULE's own top-level keys (`{ keys, complete }`), read
     // off its binding's object literal; null for every other module.
     // The diagnostics road of a DEPENDENT names these in a miss.

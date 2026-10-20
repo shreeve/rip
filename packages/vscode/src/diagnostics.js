@@ -162,6 +162,21 @@ export function mapTsDiagnostic(good, d) {
   // key — the one re-anchor path, over the two records the emitter keeps
   // (recordedAnchor). Judged on the GENERATED span, exactly.
   if (span) span = recordedAnchor(good, s, e, d.code) ?? span;
+  // AN INDEXED LOOP OVER WHAT IS NOT AN ARRAY. The face wraps each read
+  // of the iterable in `__ripIndexed(…)`, and tsgo refuses the argument
+  // (TS2345) once per read; the first read's record reports on the
+  // loop's head, in the loop's own words (below), and the other reads'
+  // reports are the same fact again and drop.
+  const indexed = d.code === 2345 ? (good.indexedLoops ?? []).find((r) => r.value[0] === s && r.value[1] === e) : undefined;
+  if (indexed !== undefined) {
+    if (!indexed.report) return null;
+    span = [indexed.head[0], indexed.head[1]];
+  }
+  // A complaint about the wrapped call's VALUE — a nullish iterable, an
+  // unknown one — stands on the whole `__ripIndexed(…)` call, bytes the
+  // author never wrote; it is about the iterable and lands there.
+  const wrapped = indexed === undefined ? (good.indexedLoops ?? []).find((r) => r.wrap[0] === s && r.wrap[1] === e) : undefined;
+  if (wrapped !== undefined) span = generatedSpanToSource(good.mappings, wrapped.value[0], wrapped.value[1]) ?? span;
   // A listener on a child with no host: the listener's host cast indexes
   // `el` in the child's `__host` record, TS-only bytes with no row of
   // their own, so the miss stands inside a recorded relation site and
@@ -277,7 +292,14 @@ export function mapTsDiagnostic(good, d) {
   // recorded route value, a member miss covering exactly a recorded
   // `@stash.<name>`. Judged on the GENERATED span and the code alone.
   const onSpan = (spans) => spans?.some(([a, b]) => a === s && b === e) === true;
-  if (d.code === 2345 && onSpan(good.sourceKeys)) {
+  if (indexed !== undefined) {
+    // The argument type is the one fact taken from the checker's
+    // sentence; the construct and its `for … of` twin come from the
+    // record. A cell reads as its value here as everywhere.
+    const type = /^Argument of type '(.+?)' is not assignable to parameter of type /s.exec(d.message)?.[1];
+    message = `\`${indexed.construct}\` indexes an array, and ${type === undefined ? 'its iterable' : `'${collapseCellArms(type)}'`} is not one`
+      + ` — an object is iterated with \`${indexed.of}\``;
+  } else if (d.code === 2345 && onSpan(good.sourceKeys)) {
     const literal = quotedText(good.code.slice(s, e));
     if (literal !== null) message = stashKeyMissMessage(literal, good.stashKeys);
   } else if (d.code === 2345 && onSpan(good.routeWraps?.map((w) => w.value))) {

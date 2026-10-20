@@ -300,6 +300,10 @@ The wrap's constraint is the checker's, not the reader's, and the reader's messa
 
 The remaining template-literal casualty is `Duration`: it stays `number | string` (the runtime `DURATION_RE` parse is the sole authority on duration strings) rather than v3's template-literal form.
 
+## Indexed loops
+
+`for k, v in xs`, `for x in xs by n`, and the comprehension clauses of either lower to an indexed loop: the header reads the iterable's `.length` and the body reads its `[i]`. JavaScript admits both on anything, and so does a record's index signature — `obj: Record<string, number>` types `obj.length` as a number — so `for k, v in obj` would check clean and run zero times. The face wraps every read of the iterable such a header makes in the TS-only `__ripIndexed(…)`, declared once per module at the emit tail with a constraint that admits what indexing genuinely reaches — `never`, `any` and `unknown` (the checker's own verdicts stand), a nullish arm (its own complaint stands), any iterable (arrays, tuples, strings, typed arrays; a Map's missing `length` stays the checker's own report), and an array-like whose numeric `length` is not a string index signature answering for one — and whose result is the argument's own type, so a loop that passes types exactly as before. A refused argument yields `ArrayLike<any>`, so the loop draws no second complaint about its `.length` or `[i]`. The emitter records each wrap's generated span with the loop head's source span and spellings (`indexedLoops`), and `mapTsDiagnostic` reports the first read's TS2345 on the head, in the loop's words — `` `for k, v in obj` indexes an array, and 'Record<string, number>' is not one — an object is iterated with `for k, v of obj` `` — and drops the other reads' reports of the same fact. The argument type is the one fact taken from the checker's sentence. A plain `for x in xs` is a `for…of` and takes the checker's own iterability verdict; a range iterates numbers and never wraps.
+
 ## Declared globals
 
 A top-level `globalThis.NAME ??= expr` declares the global. The `??=`
