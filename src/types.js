@@ -366,7 +366,7 @@ const VALUE_INDENT_OPENERS = new Set([
 export const atStatementBoundary = (tokens, k) => {
   const t = tokens[k];
   if (!t) return true; // start of file
-  if (t.kind === 'TERMINATOR' || t.kind === 'EXPORT' || t.kind === 'OFFER') return true;
+  if (t.kind === 'TERMINATOR' || t.kind === 'EXPORT' || t.kind === 'OFFER' || t.kind === 'PRIVATE') return true;
   if (t.kind !== 'INDENT' && t.kind !== 'OUTDENT') return false;
   // Walk back past balanced INDENT/OUTDENT pairs to the enclosing
   // block's INDENT and inspect its opener.

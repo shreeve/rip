@@ -189,6 +189,13 @@
       }
     },
 
+    {"comment": "=== CLASS-MEMBER VISIBILITY ==="},
+    {
+      "comment": "`private` heads a class member line — a method, a field, a def, or their `@`-static spellings — and erases from the JavaScript the way an annotation does, so it takes storage.modifier, the scope `readonly` and the void bang carry. The lookahead admits only a member head after it: `private: 1` is an object key and `x.private` a member, both left to their own rules, and the member after the word keeps its own color.",
+      "match": "\\b(private)(?=\\s+(?:def\\b|@|[a-zA-Z_$\"']))",
+      "captures": { "1": { "name": "storage.modifier.rip" } }
+    },
+
     {"comment": "=== FUNCTION DEFINITIONS ==="},
     {
       "comment": "def name(...) or def name!(...). The bang is NOT part of the name — `def announce!` defines `announce`, and the call site spells it without one; what the bang changes is the definition, suppressing the implicit return so the def is void. So it takes storage.modifier, the scope `readonly` and `abstract` already carry, and reads in a different color from the name it is not part of. Only `!` is admitted: `def ask?` does not parse.",

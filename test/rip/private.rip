@@ -1,0 +1,299 @@
+# Test: Class-member visibility
+# `private` heads a member line in a class body — a method pair, a def,
+# a field, or their `@`-static spellings. It erases from the JavaScript
+# exactly as a type annotation does (the JS twin is the unmodified
+# class) and marks the member on the TS face and in the declaration
+# file. Everywhere else the word stays reserved and rejects positioned.
+
+import { test, code, fail, type } from '../support/testing.js'
+
+# ==============================================================================
+# Methods
+# ==============================================================================
+
+code 'a private method pair emits the plain method', '''
+  class A
+    private helper: (x) -> x + 1
+    pub: -> @helper 1
+  ''', '''
+  class A {
+    helper(x) {
+      return (x + 1);
+    }
+    pub() {
+      return this.helper(1);
+    }
+  };
+  '''
+
+test 'a private method is callable from the class', '''
+  class A
+    private helper: (x) -> x + 1
+    pub: -> @helper 1
+  (new A).pub()
+  ''', 2
+
+test 'the modifier binds to its own pair — neighbors in one method object stay public', '''
+  class A
+    a: -> 1
+    private b: -> 2
+    c: -> 3
+  k = new A
+  [k.a(), k.b(), k.c()]
+  ''', [1, 2, 3]
+
+test 'a private method whose arrow sits on the next line', '''
+  class A
+    private m:
+      -> 7
+  (new A).m()
+  ''', 7
+
+code 'a private void method keeps its bare return', '''
+  class A
+    private reset!: -> @n = 0
+  ''', '''
+  class A {
+    reset() {
+      this.n = 0;
+      return;
+    }
+  };
+  '''
+
+test 'a private void method whose arrow sits on the next line', '''
+  class A
+    private reset!:
+      -> @n = 0
+  k = new A
+  [k.reset(), k.n]
+  ''', [undefined, 0]
+
+code 'a private static method pair emits the plain static', '''
+  class A
+    private @make: -> new A()
+  ''', '''
+  class A {
+    static make() {
+      return new A();
+    }
+  };
+  '''
+
+# ==============================================================================
+# Defs
+# ==============================================================================
+
+code 'a private def emits the plain method', '''
+  class A
+    private def m(x)
+      x
+  ''', '''
+  class A {
+    m(x) {
+      return x;
+    }
+  };
+  '''
+
+test 'a private def with a return type', '''
+  class A
+    private def m(x): number
+      x * 2
+  (new A).m 4
+  ''', 8
+
+test 'a private generic def, with and without a return type', '''
+  class A
+    private def id<T>(x: T)
+      x
+    private def same<T>(x: T): T
+      x
+  k = new A
+  [k.id(1), k.same('s')]
+  ''', [1, 's']
+
+test 'a private void def, with and without a return type', '''
+  class A
+    private def tick!(x)
+      x
+    private def tock!(x): void
+      x
+  k = new A
+  [k.tick(1), k.tock(2)]
+  ''', [undefined, undefined]
+
+code 'a private static def emits the plain static', '''
+  class A
+    private def @m(x)
+      x
+  ''', '''
+  class A {
+    static m(x) {
+      return x;
+    }
+  };
+  '''
+
+test 'private static defs: return type, generic, and void spellings', '''
+  class A
+    private def @a(x): number
+      x
+    private def @b<T>(x: T)
+      x
+    private def @c<T>(x: T): T
+      x
+    private def @d!(x)
+      x
+    private def @e!(x): void
+      x
+  [A.a(1), A.b(2), A.c(3), A.d(4), A.e(5)]
+  ''', [1, 2, 3, undefined, undefined]
+
+# ==============================================================================
+# Fields
+# ==============================================================================
+
+code 'a private field with an initializer emits the plain field', '''
+  class A
+    private count = 0
+  ''', '''
+  class A {
+    count = 0;
+  };
+  '''
+
+test 'a private field value wrapped onto the next line, bare and indented', '''
+  class A
+    private a =
+    1
+    private b =
+      2
+  k = new A
+  [k.a, k.b]
+  ''', [1, 2]
+
+code 'a private typed field erases its annotation', '''
+  class A
+    private count: number = 0
+  ''', '''
+  class A {
+    count = 0;
+  };
+  '''
+
+test 'a private typed field value wrapped onto the next line, bare and indented', '''
+  class A
+    private a: number =
+    1
+    private b: number =
+      2
+  k = new A
+  [k.a, k.b]
+  ''', [1, 2]
+
+code 'a private bodiless typed field declares the bare name', '''
+  class A
+    private count: number
+    constructor: -> @count = 1
+  ''', '''
+  class A {
+    count;
+    constructor() {
+      this.count = 1;
+    }
+  };
+  '''
+
+test 'the optional marker rides a private field as it rides any other', '''
+  class A
+    private a? = 1
+    private b? =
+    2
+    private c? =
+      3
+    private d?: number = 4
+    private e?: number =
+    5
+    private f?: number =
+      6
+    private g?: number
+  k = new A
+  [k.a, k.b, k.c, k.d, k.e, k.f, k.g]
+  ''', [1, 2, 3, 4, 5, 6, undefined]
+
+code 'a private static field emits the plain static', '''
+  class A
+    private @count = 0
+  ''', '''
+  class A {
+    static count = 0;
+  };
+  '''
+
+test 'a private string-named field, bare and typed', '''
+  class A
+    private "data-a" = 1
+    private "data-b": number = 2
+  k = new A
+  [k['data-a'], k['data-b']]
+  ''', [1, 2]
+
+# ==============================================================================
+# Declarations: a private member declares as its name alone
+# ==============================================================================
+
+type 'private members declare by name alone, typed or not', '''
+  export class A
+    private helper: (x: number) -> x
+    private @make: -> new A()
+    private count: number = 0
+    private name: string
+    pub: (x: number): number -> @helper x
+  ''', '''
+  export declare class A {
+    private helper;
+    private static make;
+    private count;
+    private name;
+    pub(x: number): number;
+  }
+  '''
+
+# ==============================================================================
+# The word outside its one position stays reserved
+# ==============================================================================
+
+fail 'private at module level is reserved', 'private x = 1', "'private' marks a class member"
+fail 'private inside a method body is reserved', '''
+  class A
+    m: ->
+      private y = 1
+  ''', "'private' marks a class member"
+fail 'private mid-line is reserved', '''
+  class A
+    x = private a: 1
+  ''', "'private' marks a class member"
+fail 'private in a then-bodied class is reserved', 'class A then private x = 1', "'private' marks a class member"
+fail 'a private constructor rejects', '''
+  class A
+    private constructor: -> @x = 1
+  ''', '`private constructor` is not supported'
+
+test 'private is an ordinary property name', '''
+  o = { private: 1 }
+  class A
+    private: -> 2
+  [o.private, (new A).private()]
+  ''', [1, 2]
+fail 'a private accessor rejects by name', '''
+  class A
+    private get x: -> 1
+  ''', 'not supported on a get/set accessor'
+test 'a private method named get or set is a method', '''
+  class A
+    private get: -> 1
+    private set: (v) -> v
+  k = new A
+  [k.get(), k.set(2)]
+  ''', [1, 2]

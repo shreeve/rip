@@ -1081,6 +1081,26 @@ describe('TS-face emission pins', () => {
     expect(stripFace(face.code, face.tsRegions)).toBe(js(src).code);
   });
 
+  test('a `private` member carries the modifier on the face alone — the JS twin is the unmodified class', () => {
+    // The modifier erases exactly as an annotation does: it rides the
+    // visibility side-band role, emits TS-only before `static`, and
+    // binds to its own member — `b` is private, its neighbors in the
+    // same method object are not.
+    const src = 'class A\n  a: -> 1\n  private b: (x: number) -> 2\n  c: -> 3\n  private d!: -> @n = 1\n  private @make: -> new A()\n  private def e(x: number): number\n    x\n  private f: number = 0\n  private g = 1\n  private h: string\n  private @i = 2\n';
+    const face = ts(src);
+    expect(face.code).toBe('class A {\n  n;\n  a() {\n    return 1;\n  }\n  private b(x: number) {\n    return 2;\n  }\n  c() {\n    return 3;\n  }\n  private d(): void {\n    this.n = 1;\n    return;\n  }\n  private static make() {\n    return new A();\n  }\n  private e(x: number): number {\n    return x;\n  }\n  private f: number = 0;\n  private g = 1;\n  private h: string;\n  private static i = 2;\n}' + MARKER);
+    expect(stripFace(face.code, face.tsRegions)).toBe(js(src).code);
+    expect(js(src).code).toBe(js(src.replaceAll('private ', '')).code);
+    // Each modifier maps EXACT onto its own source bytes.
+    const rows = face.mappings.rows.filter((r) => r.role === 'visibility');
+    expect(rows).toHaveLength(8);
+    for (const r of rows) {
+      expect(r.mappingKind).toBe('exact');
+      expect(src.slice(r.sourceStart, r.sourceEnd)).toBe('private');
+      expect(face.code.slice(r.generatedStart, r.generatedEnd)).toBe('private');
+    }
+  });
+
   test('JS arity: a bare trailing parameter is optional — except where something else types it', () => {
     // Calling with fewer arguments is legal in rip as in JavaScript, and
     // `arguments.length` branching on it is idiomatic. Declaring every

@@ -199,3 +199,9 @@ test "tagged template dollar", ->
   out = hl 'sh $"cmd #{x}"'
   ok out.includes span('operator', '$')
   ok out.includes '<span class="hljs-subst">'
+
+test "private heads a class member as a keyword and leaves the member its own color", ->
+  out = hl 'class A\n  private helper: (x) -> x\n  private def @make(a)\n    a\n'
+  eq out.match(/<span class="hljs-keyword">private<\/span>/g).length, 2
+  ok out.includes span('function', 'helper')
+  ok out.includes span('title function_', '@make')

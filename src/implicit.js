@@ -390,6 +390,9 @@ const startsImplicitCall = (tokens, j) => {
 // by `:`.) Shared by implicitBlocks (comma ownership) and
 // implicitObjects (continuation decisions).
 const looksObjectishAt = (tokens, j) => {
+  // A class-member modifier is transparent: `private fn: ->` is the
+  // pair after it.
+  if (tokens[j]?.kind === 'PRIVATE') j++;
   if (!tokens[j]) return false;
   // A void-method key reads objectish too (`fn!:` / `@fn!:`) — the
   // bang is still DAMMIT on forward looks (the `:` handler retags it
@@ -704,6 +707,9 @@ function collectObjects(tokens, mintId) {
       // still produce a consistent tape and reject loudly at parse).
       let s = PASS_CLOSERS.has(prev?.kind) ? (top()?.at ?? i - 1) : i - 1 - bang;
       if (tokens[i - 2 - bang]?.kind === '@') s = i - 2 - bang;
+      // A class-member modifier belongs to its pair: the brace opens
+      // before it, and the pair after it continues an open object.
+      if (tokens[s - 1]?.kind === 'PRIVATE') s--;
 
       // startsLine — with the two-pass bridge: a key OPENING an
       // implicit call is never line-starting. The call pass runs after

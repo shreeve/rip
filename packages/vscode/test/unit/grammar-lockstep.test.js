@@ -222,3 +222,35 @@ describe('word-shaped operator lockstep (editor grammars)', () => {
     expect(hljs).toMatch(/'and', 'or', 'not', 'is', 'isnt'/);
   });
 });
+
+describe('class-member visibility lockstep (editor grammars ⇄ compiler)', () => {
+  const privateRule = grammar.patterns.find((p) =>
+    typeof p.match === 'string' && p.match.startsWith('\\b(private)'));
+  const re = new RegExp(privateRule.match);
+  const hljs = readFileSync(
+    path.resolve(import.meta.dir, '..', '..', '..', 'highlight', 'hljs-rip.js'), 'utf8');
+
+  test('TextMate scopes the modifier before every member head, and the compiler erases it from the JS twin alone', () => {
+    expect(privateRule.captures['1'].name).toBe('storage.modifier.rip');
+    const members = ['helper: (x) -> x', 'def @make(a)\n    a', 'count: number = 0', '@count = 0', '"data-x" = 1'];
+    for (const member of members) {
+      expect(re.exec(`  private ${member}`)?.[1]).toBe('private');
+      const src = `class A\n  private ${member}\n`;
+      const plain = compile(src.replace('private ', ''), { runtimeDelivery: 'none' }).code;
+      expect(compile(src, { runtimeDelivery: 'none' }).code).toBe(plain);
+      expect(compile(src, { runtimeDelivery: 'none', face: 'ts' }).code).toContain('private ');
+    }
+  });
+
+  test('a key or a member spelled private is not the modifier', () => {
+    expect('  private: 1').not.toMatch(re);
+    expect('x.private').not.toMatch(re);
+    expect(compile('o = { private: 1 }\no.private\n', { runtimeDelivery: 'none' }).code)
+      .toBe('let o = {private: 1};\no.private;');
+  });
+
+  test('Vim and highlight.js carry the modifier', () => {
+    expect(vimSyntax).toMatch(/syn match\s+ripKeyword\s+\/\\<private\\ze/);
+    expect(hljs).toMatch(/'schema', 'private'/);
+  });
+});

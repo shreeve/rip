@@ -155,6 +155,15 @@ export function emitDeclarations({ sexpr, stores, source }) {
     return normalizeTypeText(source.slice(row.sourceStart, row.sourceEnd).replace(/^\s*:\s*/, ''));
   };
 
+  // Whether a class member carries the `private` modifier (the
+  // visibility side-band role). It declares as TypeScript's own emit
+  // spells it — the name alone, no type: a private member shapes
+  // assignability and is never a consumer's call.
+  const isPrivate = (node) => {
+    const id = stores.idOf(node);
+    return id !== null && stores.role(id, 'visibility') !== null;
+  };
+
   // The SHARED optionality reader — the same one the TS face uses, so
   // the declaration and the face cannot drift on `?` (see types.js).
   const isOptionalParam = optionalReader(stores);
@@ -282,6 +291,10 @@ export function emitDeclarations({ sexpr, stores, source }) {
           if (!isFunc(value)) continue;
           const mName = memberName(key);
           if (typeof mName !== 'string') continue;
+          if (isPrivate(form === 'def' ? typed : pair)) {
+            members.push(`private ${isStaticKey(key) ? 'static ' : ''}${mName};`);
+            continue;
+          }
           let params = value[1];
           const returnType = returnTypeOf(typed, value[2], pair[0] === 'void-pair');
           if (mName === 'constructor') {
@@ -342,14 +355,19 @@ export function emitDeclarations({ sexpr, stores, source }) {
       }
       if (isTypedWrapper(stmt) && (typeof stmt[1] === 'string' || isStaticKey(stmt[1]))) {
         const staticPrefix = isStaticKey(stmt[1]) ? 'static ' : '';
-        members.push(`${staticPrefix}${memberName(stmt[1])}: ${tidyType(stmt[2])};`);
+        if (isPrivate(stmt)) members.push(`private ${staticPrefix}${memberName(stmt[1])};`);
+        else members.push(`${staticPrefix}${memberName(stmt[1])}: ${tidyType(stmt[2])};`);
         continue;
       }
       if (isNode(stmt) && stmt[0] === '=' && stmt.length === 3 &&
           (typeof stmt[1] === 'string' || isStaticKey(stmt[1]))) {
+        const staticPrefix = isStaticKey(stmt[1]) ? 'static ' : '';
+        if (isPrivate(stmt)) {
+          members.push(`private ${staticPrefix}${memberName(stmt[1])};`);
+          continue;
+        }
         const annotation = roleType(stmt, 'annotation');
         if (annotation === null) continue;
-        const staticPrefix = isStaticKey(stmt[1]) ? 'static ' : '';
         members.push(`${staticPrefix}${memberName(stmt[1])}: ${annotation};`);
       }
     }

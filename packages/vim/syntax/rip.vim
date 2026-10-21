@@ -75,6 +75,11 @@ syn keyword ripKeyword      it
 " all of which anchor on one of these words — unable to claim their name.
 syn match  ripKeyword       /\<\%(class\|def\|enum\|interface\|type\|schema\)\>/
 
+" The class-member modifier: `private` before a member head (a name, a
+" string, an `@`-static, or a def). A match with a lookahead, so the key
+" `private:` and the member `x.private` keep their own rules.
+syn match  ripKeyword       /\<private\ze\s\+\%(def\>\|@\|[a-zA-Z_$"']\)/
+
 " PascalCase globals are syn-keyword: a keyword outranks every match wherever
 " it sits, so these need no ordering, and no object key is spelled this way.
 syn keyword ripBuiltin      Promise Array Object String Number Boolean
