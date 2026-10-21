@@ -2022,6 +2022,48 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 
+  // Q1, for a package a rip checkout ships: the checkout's `src/` is the
+  // runtime the loader serves the package with, and the only tree outside
+  // the package directory its entries reach by a relative path. A name
+  // re-exported from a declaration there is the package's own surface —
+  // audited, and clean only when it is clean — and a defect there is
+  // reported at its position in the declaration file, spelled as the disk
+  // spells it.
+  test('--public audits a checkout package on the runtime it re-exports, and points into the .d.ts', async () => {
+    const checkout = (declaration) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-runtime-'));
+      fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ workspaces: ['packages/*'] }));
+      // What makes a directory a rip checkout: its packages/ holds the editor package.
+      fs.mkdirSync(path.join(dir, 'packages', 'vscode'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'packages', 'vscode', 'package.json'), JSON.stringify({ name: 'vscode-rip' }));
+      fs.mkdirSync(path.join(dir, 'packages', 'lib'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'packages', 'lib', 'package.json'),
+        JSON.stringify({ name: '@rt/lib', exports: { '.': './lib.rip' } }));
+      fs.writeFileSync(path.join(dir, 'packages', 'lib', 'lib.rip'),
+        "import { make } from '../../src/runtime/x.js'\nexport { make }\nexport def solid(n: number): number\n  n\n");
+      fs.mkdirSync(path.join(dir, 'src', 'runtime'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'src', 'runtime', 'x.js'), 'export const make = (n) => n\n');
+      fs.writeFileSync(path.join(dir, 'src', 'runtime', 'x.d.ts'), declaration);
+      return dir;
+    };
+    const typed = checkout('export declare function make(n: number): number\n');
+    const leaky = checkout('export declare function make(n: any): number\n');
+    try {
+      const ok = await check(path.join(typed, 'packages', 'lib'), ['--public']);
+      expect(ok.stdout).toMatch(/✓ make/);
+      expect(ok.stdout).not.toMatch(/not audited/);
+      expect(ok.stdout).toContain('2/2 exports fully typed');
+      expect(ok.status).toBe(0);
+
+      const bad = await check(path.join(leaky, 'packages', 'lib'), ['--public']);
+      expect(bad.stdout).toMatch(/✗ make/);
+      expect(bad.stdout).toMatch(/src\/runtime\/x\.d\.ts:1:30 +any at: make\(n\)/);
+      expect(bad.stdout).toContain('1/2 exports fully typed');
+      expect(bad.status).toBe(1);
+    } finally { for (const d of [typed, leaky]) fs.rmSync(d, { recursive: true, force: true }); }
+  }, 90_000);
+
   // Q2b — a module's own export table carries `export * from` as a single
   // opaque marker, so reading it alone reports a barrel as an empty surface.
   // The names ARE published, so each star is followed to its target module

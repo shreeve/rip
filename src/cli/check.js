@@ -34,6 +34,7 @@ import { scopeGateOf, typedExportsOf, typedImportsOf } from '../../packages/vsco
 import { generatedMirror, projectWrapper, nearestTsconfig, HOST_FLOOR_NAME, mirrorRelForFsPath, missingModuleRead, linkNestedNodeModules, linkExternalDeclarations, declarationImportsOf, declaredButUninstalled, configEarnsBoundary, appStashSpecFor, appRoutesFor, closureImportsOf, checkoutNodeModules } from '../../packages/vscode/src/mirror.js';
 import { lineStartsOf, offsetToPosition, positionToOffset, generatedSpanToSource } from '../../packages/vscode/src/translate.js';
 import { publicEntriesOf, compileFailureOf } from './public.js';
+import { enclosingStdlib } from '../checkout.js';
 import { createPublicSession, walkPublicEntry, useSitesOf, exportIdsOf } from '../../packages/vscode/src/publicwalk.js';
 import { importBindingsOf, namespaceImportsOf } from '../../packages/vscode/src/scopes.js';
 import { ripSpecifierTarget, anchorStdlib } from '../../packages/vscode/src/mirror.js';
@@ -123,8 +124,9 @@ Options:
                            names the row that has to change, and counts as
                            typed nowhere;
                            members a package does not declare are its
-                           dependencies' and are left alone. Exits 1 when any
-                           export leaks, so it can gate
+                           dependencies' and are left alone, and a package in
+                           a rip checkout declares the checkout's src/ runtime
+                           too. Exits 1 when any export leaks, so it can gate
   --build                  Print the build identity (a content hash over the
                            compiler and editor-server trees) and exit — the
                            editor logs the same hash in its ready line, so a
@@ -156,6 +158,42 @@ const nearestPackage = (from) => {
   }
   pkgOfMemo.set(from, found);
   return found;
+};
+
+// The runtime a stdlib package ships with. A package under a rip
+// checkout's `packages/` is never packed: the loader serves it from the
+// checkout as `rip/<pkg>`, and the checkout's `src/` goes with it — the one
+// tree outside the package's own directory its entries reach by a relative
+// path, and one the package's own change can fix. Spelled the way the walk
+// spells a declaration's path, realpath'd and case-folded, with the
+// separator so a sibling directory sharing the prefix does not match. Null
+// for a package no checkout encloses, and for a checkout with no `src/`:
+// either owns nothing beyond its own tree.
+const checkoutRuntimeOf = (pkgDir) => {
+  const stdlib = enclosingStdlib(pkgDir);
+  if (stdlib === null || !pkgDir.startsWith(stdlib + path.sep)) return null;
+  let src = path.join(path.dirname(stdlib), 'src');
+  try { src = fs.realpathSync(src); } catch { return null; }
+  return (src + path.sep).toLowerCase();
+};
+
+// A position in a declaration file the walk reached directly. The walk
+// hands over the checker's spelling of the path, case-folded, and a report
+// names files as the disk spells them, so the spelling is read back from
+// the disk. Line starts are computed once per file for the run.
+const declarationLineStarts = new Map();
+const declarationSite = (origin) => {
+  let file;
+  try { file = fs.realpathSync.native(origin.path); } catch { return undefined; }
+  if (!declarationLineStarts.has(file)) {
+    let starts = null;
+    try { starts = lineStartsOf(fs.readFileSync(file, 'utf8')); } catch { /* unreadable: no position */ }
+    declarationLineStarts.set(file, starts);
+  }
+  const starts = declarationLineStarts.get(file);
+  if (starts === null) return undefined;
+  const at = offsetToPosition(starts, origin.start);
+  return { file, line: at.line, character: at.character };
 };
 
 // ── report colors ───────────────────────────────────────────────────
@@ -1079,22 +1117,29 @@ if (compiled.size > 0) {
       };
       for (const item of compiled) if (item[1].pinnables.length) await probeOne(item);
 
-      // A finding's origin arrives as a position in the MIRROR. The report
-      // is about source, so each mirror is kept under the checker's own
-      // canonical spelling of its path — case-folded on a case-insensitive
-      // filesystem, and never the spelling this process happens to hold.
-      // One index for the run, shared by both passes below.
+      // A finding's origin in a compiled file arrives as a position in the
+      // MIRROR; one in a runtime declaration is a position in that file's
+      // own text. The report is about source, so each mirror is kept under
+      // the checker's own canonical spelling of its path — case-folded on a
+      // case-insensitive filesystem, and never the spelling this process
+      // happens to hold. One index for the run, shared by both passes below.
       const byMirror = new Map();
       for (const [fp, e] of compiled) {
         if (e.mirrorPath !== undefined) byMirror.set(e.mirrorPath.toLowerCase(), { fsPath: fp, entry: e });
       }
       // Q1 spelled once: a declaration belongs to the package whose
-      // package.json is nearest it. Both passes ask it of a different
-      // package, so the package is the parameter.
-      const ownedBy = (pkgDir) => (declPath) => {
-        const owner = byMirror.get(String(declPath ?? '').toLowerCase());
-        if (owner === undefined) return false;
-        return nearestPackage(path.dirname(owner.fsPath)) === pkgDir;
+      // package.json is nearest it, and the checkout's runtime belongs to
+      // every stdlib package of that checkout. Both passes ask it of a
+      // different package, so the package is the parameter.
+      const ownedBy = (pkgDir) => {
+        const runtime = checkoutRuntimeOf(pkgDir);
+        return (declPath) => {
+          const key = String(declPath ?? '').toLowerCase();
+          if (runtime !== null && key.startsWith(runtime)) return true;
+          const owner = byMirror.get(key);
+          if (owner === undefined) return false;
+          return nearestPackage(path.dirname(owner.fsPath)) === pkgDir;
+        };
       };
 
       // Whether a generated offset falls in type text the COMPILER wrote.
@@ -1119,13 +1164,14 @@ if (compiled.size > 0) {
         const session = createPublicSession(mirrorRoot);
         try {
           for (const { dir, entries: pkgEntries, patterns, outside } of publicPkgs) {
-            // The package's own mirrored tree: the ownership line, and the
-            // only directory whose declarations this package can change.
-            // Q1: a declaration is this package's when the package.json
-            // NEAREST it is this one. Mirrored paths arrive case-folded, so
-            // the index is keyed that way; a declaration this run never
-            // compiled (lib.dom, node types, a `.d.ts`) is in no package of
-            // ours and answers false, which is the correct answer and not a
+            // The ownership line: the declarations this package's own change
+            // can fix. Q1: a declaration is this package's when the
+            // package.json NEAREST it is this one, or when it sits in the
+            // runtime its checkout ships with it. Mirrored paths arrive
+            // case-folded, so the index is keyed that way; a declaration
+            // this run never compiled and no checkout of ours wrote (lib.dom,
+            // node types, a dependency's `.d.ts`) is in no package of ours
+            // and answers false, which is the correct answer and not a
             // fallback.
             const owns = ownedBy(dir);
             for (const spec of outside) {
@@ -1181,7 +1227,9 @@ if (compiled.size > 0) {
               const toSite = (origin) => {
                 if (origin === null || origin === undefined) return undefined;
                 const owner = byMirror.get(origin.path.toLowerCase());
-                if (owner === undefined) return undefined;
+                // Owned but never compiled: a runtime declaration, whose
+                // text is its own source and whose offsets need no mapping.
+                if (owner === undefined) return owns(origin.path) ? declarationSite(origin) : undefined;
                 const span = generatedSpanToSource(owner.entry.good.mappings, origin.start, origin.start);
                 if (!span) return undefined;
                 const at = offsetToPosition(owner.entry.good.srcLineStarts, span[0]);
