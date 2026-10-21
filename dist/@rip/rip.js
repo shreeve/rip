@@ -10114,6 +10114,7 @@ class Emitter {
     this._restTags = new Set;
     this._needsRefCellHelper = false;
     this.intrinsics = [];
+    this.indexedLoops = [];
     this.componentUses = [];
     this.namespaceExports = [];
     this.componentNames = [];
@@ -11839,7 +11840,8 @@ class Emitter {
       "narrowedDecls",
       "importSpans",
       "pendingTypeDecls",
-      "loopVarDecls"
+      "loopVarDecls",
+      "indexedLoops"
     ];
     const saved = {};
     for (const k of channels) {
@@ -14572,6 +14574,49 @@ ${pad}    ${into}.push(undefined);
     const [, vars, iter, step, guard, body] = node;
     this.withBindings(this.loopBindingNames(node), () => this.forInCore(node, vars, iter, step, guard, body, ind));
   }
+  indexedReader(node, vars, iter) {
+    const id = this.ts && this.b.source !== null ? this.stores.idOf(node) : null;
+    const self = id !== null ? this.stores.selfSpan(id) : null;
+    if (self === null)
+      return () => this.expr(iter);
+    const roleSpan = (role) => {
+      const r = this.stores.role(id, role);
+      return r?.sourceStart != null ? [r.sourceStart, r.sourceEnd] : null;
+    };
+    const squash = (s) => s.replace(/\s+/g, " ").trim();
+    const clip = (s, n) => s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s;
+    const plainVars = vars.length === 2 && vars.every((v) => typeof v === "string");
+    let head, iterText, names;
+    if (roleSpan("iterable") !== null) {
+      const tail = roleSpan("step") ?? roleSpan("iterable");
+      head = [self[0], tail[1]];
+      const iterSpan = roleSpan("iterable");
+      iterText = clip(squash(this.b.source.slice(iterSpan[0], iterSpan[1])), 40);
+      const varsSpan = roleSpan("vars");
+      names = plainVars && varsSpan !== null ? squash(this.b.source.slice(varsSpan[0], varsSpan[1])) : "key, value";
+    } else {
+      const text = this.b.source.slice(self[0], self[1]);
+      const at = Math.max(0, text.search(/\bfor\b(?![\s\S]*\bfor\b)/));
+      head = [self[0] + at, self[1]];
+      const m = /^for\s+([\s\S]+?)\s+in\s+([\s\S]+?)(?:\s+(?:when|by)\b[\s\S]*)?$/.exec(text.slice(at));
+      iterText = m !== null ? clip(squash(m[2]), 40) : "…";
+      names = plainVars && m !== null ? squash(m[1]) : "key, value";
+    }
+    const construct = clip(squash(this.b.source.slice(head[0], head[1])), 60);
+    const of = `for ${names} of ${iterText}`;
+    let report = true;
+    return () => {
+      this._needsIndexedHelper = true;
+      const wrapStart = this.b.offset;
+      this.b.tsOnly(() => this.b.emit("__ripIndexed("));
+      const start = this.b.offset;
+      this.expr(iter);
+      const value = [start, this.b.offset];
+      this.b.tsOnly(() => this.b.emit(")"));
+      this.indexedLoops.push({ value, wrap: [wrapStart, this.b.offset], head, construct, of, report });
+      report = false;
+    };
+  }
   forInCore(node, vars, iter, step, guard, body, ind) {
     this.mark(node, "$self", () => {
       const markVar = (v) => this.mark(node, "vars", () => typeof v === "string" ? this.emitPrimitive(v) : this.withPattern(() => this.expr(v), true));
@@ -14597,10 +14642,11 @@ ${pad}    ${into}.push(undefined);
           throw this.positionedError(node, "emitter: a BY step of 0 never advances the loop");
         }
         const it = this.singleReadIterable(iter) ? null : this.loopTempName("_ref");
+        const read = this.indexedReader(node, vars, iter);
         const bind = () => {
           if (it) {
             this.b.emit(`${it} = `);
-            this.expr(iter);
+            read();
             this.b.emit(", ");
           }
         };
@@ -14608,7 +14654,7 @@ ${pad}    ${into}.push(undefined);
           if (it)
             this.b.emit(it);
           else
-            this.expr(iter);
+            read();
         };
         if (negLit !== null) {
           this.b.emit("for (let ");
@@ -14664,10 +14710,11 @@ let `);
         this.b.emit("}");
       } else if (vars.length === 2) {
         const it = this.singleReadIterable(iter) ? null : this.loopTempName("_ref");
+        const read = this.indexedReader(node, vars, iter);
         this.b.emit("for (let ");
         if (it) {
           this.b.emit(`${it} = `);
-          this.expr(iter);
+          read();
           this.b.emit(", ");
         }
         markVar(vars[1]);
@@ -14675,7 +14722,7 @@ let `);
         if (it)
           this.b.emit(it);
         else
-          this.expr(iter);
+          read();
         this.b.emit(`.length; ${vars[1]}++) {
 `);
         this.b.emit("  ".repeat(ind + 1) + "let ");
@@ -14684,7 +14731,7 @@ let `);
         if (it)
           this.b.emit(it);
         else
-          this.expr(iter);
+          read();
         this.b.emit(`[${vars[1]}];
 `);
         if (guard !== null) {
@@ -14923,10 +14970,11 @@ ${pad ?? ""}`);
         throw this.positionedError(node, "emitter: a BY step of 0 never advances the loop");
       }
       const it = this.singleReadIterable(iter) ? null : this.loopTempName("_ref");
+      const read = this.indexedReader(node, vars, iter);
       const bind = () => {
         if (it) {
           this.b.emit(`${it} = `);
-          this.expr(iter);
+          read();
           this.b.emit(", ");
         }
       };
@@ -14934,7 +14982,7 @@ ${pad ?? ""}`);
         if (it)
           this.b.emit(it);
         else
-          this.expr(iter);
+          read();
       };
       if (negLit !== null) {
         this.b.emit("for (let ");
@@ -14991,10 +15039,11 @@ ${pad ?? ""}`);
     }
     if (vars.length === 2) {
       const it = this.singleReadIterable(iter) ? null : this.loopTempName("_ref");
+      const read = this.indexedReader(node, vars, iter);
       this.b.emit("for (let ");
       if (it) {
         this.b.emit(`${it} = `);
-        this.expr(iter);
+        read();
         this.b.emit(", ");
       }
       markVar(vars[1]);
@@ -15002,7 +15051,7 @@ ${pad ?? ""}`);
       if (it)
         this.b.emit(it);
       else
-        this.expr(iter);
+        read();
       this.b.emit(`.length; ${vars[1]}++)`);
       setups.push(() => {
         this.b.emit("let ");
@@ -15011,7 +15060,7 @@ ${pad ?? ""}`);
         if (it)
           this.b.emit(it);
         else
-          this.expr(iter);
+          read();
         this.b.emit(`[${vars[1]}];`);
       });
       return setups;
@@ -24714,6 +24763,12 @@ declare function __ripRoute<const T extends string>(s: ${routeArgType(emitter.ro
 declare function __ripSourceKey<const T extends ((${stashKeys}) | \`\${${stashKeys}}.\${string}\`)>(s: T): T;
 `));
   }
+  if (emitter._needsIndexedHelper === true) {
+    builder.tsOnly(() => builder.emit(`
+declare function __ripIndexed<T>(xs: T & __RipIndexed<T>): [T] extends [never] ? T : [__RipIndexed<T>] extends [never] ? ArrayLike<any> : T;
+type __RipIndexed<T> = [T] extends [never] ? T : unknown extends T ? T : T extends null | undefined ? T : T extends Iterable<unknown> ? T : T extends { readonly length: number } ? (string extends keyof T ? never : T) : never;
+`));
+  }
   if (emitter._needsNarrowHelper === true) {
     builder.tsOnly(() => builder.emit(`
 declare function __ripNarrow(c: unknown): asserts c;
@@ -24786,7 +24841,7 @@ export {};
     });
   }
   const partNames = emitter.exportedObjects.filter(([, values]) => values.every((value) => emitter.componentNames.includes(value))).map(([name]) => name);
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, componentUses: emitter.componentUses, componentProps: emitter.componentProps, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, indexedLoops: emitter.indexedLoops, componentUses: emitter.componentUses, componentProps: emitter.componentProps, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
 }
 
 // src/sourcemap.js
@@ -24994,6 +25049,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     memberInits: emitted.memberInits,
     sourceKeys: emitted.sourceKeys,
     stashMembers: emitted.stashMembers,
+    indexedLoops: emitted.indexedLoops,
     stashKeys: emitted.stashKeys,
     renderPairs: emitted.renderPairs,
     kinds: emitted.kinds,
@@ -33399,7 +33455,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "69376aa190f2beb6";
+var compilerBuild = () => "cb742765c13ad670";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
