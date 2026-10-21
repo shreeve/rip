@@ -242,6 +242,11 @@ const CLEAN_ROWS = [
     // meets a checked receiver; an inferred `any` would type-check
     // whatever the face spelled and prove nothing.
  'Form = component\n  data: { first: string } := { first: "" }\n  render\n    input type: "text", value <=> data.first\nconsole.log Form',
+    // The context API from source: a read is the provider's offered
+    // container, through an alias and a generic provider alike, the probe
+    // answers a boolean, and a wrap keeps the function's own parameters
+    // and return (plus the undefined a routed throw leaves)
+ 'Root = component\n  offer open := false\n  offer depth: number := 1\n  render\n    slot\nSelect<T extends { id: number }> = component\n  offer @options: T[] := []\n  render\n    slot\nAlias = Root\nPart = component\n  mounted = ->\n    setContext("extra", 1)\n    flag: boolean = getContext(Root, "open").value\n    depth: number = getContext(Alias, "depth").value\n    ids: number[] = getContext(Select, "options").value.map((o) -> o.id)\n    has: boolean = hasContext(Root, "open")\n    safe = __catchErrors((n: number) -> n + 1)\n    m: number | undefined = safe(1)\n    console.log flag, depth, ids, has, m\n  render\n    span\nconsole.log Part',
 ];
 
 // The clean rows check as ONE tsc program: one file per row,
@@ -395,6 +400,20 @@ describeTscExtended('tier 2: self-contained typed faces check CLEAN — annotati
     const { status, output } = tscRun({ 'mod.ts': `${faced.code}\nexport {};\n` });
     expect(status).not.toBe(0);
     expect(output).toContain('TS2322');
+  }, TSC_TIMEOUT);
+
+  // A source context read is typed as the accept lowering is, so the
+  // refusals the record carries land on the call's arguments: a provider
+  // whose instances carry no record (a plain value, an empty class), and
+  // a key the provider does not offer.
+  test('the context API has teeth: a provider that is no component, or a key it does not offer, FAILS at the call (TS2345)', () => {
+    const program = (call) => `Root = component\n  offer open := false\n  render\n    slot\nPlain = 5\nclass Empty\nread = -> ${call}\n`;
+    for (const call of ["getContext(Plain, 'open')", "getContext(Empty, 'open')", "getContext(Root, 'opne')", "hasContext(Plain, 'open')", "hasContext(Root, 'opne')"]) {
+      const faced = compile(program(call), { runtimeDelivery: 'none', face: 'ts' });
+      const { status, output } = tscRun({ 'ambient.d.ts': AMBIENT, 'mod.ts': `${faced.code}\nexport {};\n` });
+      expect(status, call).not.toBe(0);
+      expect(output, call).toContain('TS2345');
+    }
   }, TSC_TIMEOUT);
 
   test('object-literal method returns have teeth: the annotation reaches the checker (TS2322)', () => {

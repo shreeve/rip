@@ -253,7 +253,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
 
   test('the match operator and its regex-index sugar publish nothing', async () => {
     // `text =~ /re/` lowers to `(_ = toMatchable(text).match(re))`, and the
-    // face's prelude types toMatchable `(v: any) => string` — RULED: the
+    // face's prelude types toMatchable `(v: unknown) => string` — RULED: the
     // coercion always answers a string and carries no multi-line guard
     // (`^`/`$` across newlines are the regex's own /m business, exactly
     // as in hand-written JS), so no narrowing rides the lowering and no
@@ -3296,12 +3296,13 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
   // strict's, previewed by `--strict` and reported once the project flips.
   // The remedy is a table entry in the rip checkout, which no annotation
   // in the project can stand in for, so the note says where and not what.
+  // `__lis` is the component runtime's own list helper, untyped by
+  // decision, as are the names only emission spells.
   test('an injected `any` is advised like an inherited one, under the strict posture', async () => {
     const dir = workspace({
       'ctx.rip': [
-        'open = (provider: unknown) ->',
-        "  getContext(provider, 'open')",
-        'console.log open',
+        'order = (xs: number[]) -> __lis(xs)',
+        'console.log order',
       ].join('\n') + '\n',
     });
     try {
@@ -3309,13 +3310,79 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       expect(gradual.stdout).not.toContain('injected by');
       const preview = await check(dir, ['--strict', 'ctx.rip']);
       expect(preview.stdout).toContain('1 value injected by the `components` runtime is `any`');
-      expect(preview.stdout).toContain('(`getContext`) — typed in the rip checkout\'s runtime table (src/emitter.js), not here');
-      expect(preview.stdout).toMatch(/ctx\.rip:2:3\s+getContext/);
+      expect(preview.stdout).toContain('(`__lis`) — typed in the rip checkout\'s runtime table (src/emitter.js), not here');
+      expect(preview.stdout).toMatch(/ctx\.rip:1:27\s+__lis/);
       fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ rip: { strict: true } }));
       const flipped = await check(dir, ['ctx.rip']);
       expect(flipped.stdout).toContain('injected by the `components` runtime');
-      expect(flipped.stdout).toMatch(/ctx\.rip:2:3\s+getContext/);
+      expect(flipped.stdout).toMatch(/ctx\.rip:1:27\s+__lis/);
       expect(flipped.status).toBe(0);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // The context API is typed as the accept lowering is: a source read
+  // answers the provider's offered container, so nothing arrives untyped,
+  // and the refusals are the checker's own, on the argument — the
+  // provider that is no component, the key the provider does not offer.
+  // The accept's lowered read is the same call; its copy of a miss folds
+  // into the declare line's one report (the accept pin above).
+  test('a source context read is typed from what its provider offers, and refuses on the argument', async () => {
+    const dir = workspace({
+      'ctx.rip': [
+        'export Root = component',
+        '  offer open := false',
+        '  render',
+        '    slot',
+        'Alias = Root',
+        'Plain = 5',
+        'export Part = component',
+        '  mounted = ->',
+        "    flag: boolean = getContext(Alias, 'open').value",
+        "    has: boolean = hasContext(Root, 'open')",
+        "    setContext('extra', 1)",
+        "    label: string = getContext(Root, 'open').value",
+        "    getContext(Root, 'opne')",
+        "    hasContext(Plain, 'open')",
+        '    console.log flag, has, label',
+        '  render',
+        '    span',
+      ].join('\n') + '\n',
+    }, { strict: true });
+    try {
+      const { stdout, status } = await check(dir, ['ctx.rip']);
+      expect(status).toBe(1);
+      expect(stdout).not.toContain('injected by');
+      const errors = stdout.split('\n').filter((l) => /^ctx\.rip:\d+:\d+ - error/.test(l)).map((l) => l.replace(/ - error TS\d+:/, ''));
+      expect(errors).toEqual([
+        "ctx.rip:12:5 Type 'boolean' is not assignable to type 'string'.",
+        "ctx.rip:13:22 Argument of type '\"opne\"' is not assignable to parameter of type '\"open\"'.",
+        "ctx.rip:14:16 Argument of type 'number' is not assignable to parameter of type '__RipProvider'.",
+      ]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // The stdlib's helpers are typed off stdlib.js: `zip` keeps its arrays'
+  // element types, one tuple per element of the first array, and `raise`
+  // takes a message, or a constructor with the argument it constructs from.
+  test('an injected stdlib helper checks against the table: `zip` keeps its element types, `raise` its two calls', async () => {
+    const dir = workspace({
+      'pairs.rip': [
+        "pairs: [number, string][] = zip([1, 2], ['a', 'b'])",
+        "wrong: [string, number][] = zip([1, 2], ['a', 'b'])",
+        "boom = -> raise TypeError, 'x'",
+        'bad = -> raise TypeError, 5',
+        'console.log pairs, wrong, boom, bad',
+      ].join('\n') + '\n',
+    }, { strict: true });
+    try {
+      const { stdout, status } = await check(dir, ['pairs.rip']);
+      expect(status).toBe(1);
+      expect(stdout).not.toContain('injected by');
+      const errors = stdout.split('\n').filter((l) => /^pairs\.rip:\d+:\d+ - error/.test(l)).map((l) => l.replace(/ - error TS\d+:/, ''));
+      expect(errors).toEqual([
+        "pairs.rip:2:1 Type '[number, string][]' is not assignable to type '[string, number][]'.",
+        "pairs.rip:4:27 Argument of type 'number' is not assignable to parameter of type 'string'.",
+      ]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 

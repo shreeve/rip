@@ -4,9 +4,9 @@ export declare const __computed: <T>(fn: () => T) => { readonly value: T; read()
 export declare const __effect: (fn: () => void | (() => void)) => () => void;
 export declare const __batch: <T>(fn: () => T) => T;
 export declare const __readonly: <T>(value: T) => Readonly<{ value: T }>;
-export declare const __setErrorHandler: (handler: ((error: any, source?: string) => void) | null) => void;
-export declare const __handleError: (error: any, source?: string) => void;
-export declare const __catchErrors: <F extends (...args: any[]) => unknown>(fn: F) => (this: ThisParameterType<F>, ...args: Parameters<F>) => ReturnType<F> | undefined;
+export declare const __setErrorHandler: (handler: ((error: unknown) => void) | null) => ((error: unknown) => void) | null;
+export declare const __handleError: (error: unknown) => void;
+export declare const __catchErrors: <F extends (...args: never[]) => unknown>(fn: F) => (this: ThisParameterType<F>, ...args: Parameters<F>) => ReturnType<F> | undefined;
 export declare const getEffectSignal: () => AbortSignal | null;
 export declare const __setEffectErrorReporter: any;
 export declare const __ownerFrame: any;

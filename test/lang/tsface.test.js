@@ -27,7 +27,9 @@ import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { compile, CompileError } from '../../src/compiler.js';
-import { toMatchable } from '../../src/runtime/stdlib.js';
+import { toMatchable, zip } from '../../src/runtime/stdlib.js';
+import { getContext, hasContext } from '../../src/runtime/components.js';
+import { __setErrorHandler, __handleError } from '../../src/runtime/reactive.js';
 import { stripFace } from '../../src/emitter.js';
 import { routeArgType } from '../../src/ts/components.js';
 import { ripFiles } from '../support/rip-files.js';
@@ -701,7 +703,7 @@ describe('TS-face emission pins', () => {
   // which the author governs the ordinary ways. Both tries carry the
   // branch separately, so both are pinned; stripping restores the JS.
   // The match lowering carries no narrowing at all — RULED (2026-08-03):
-  // toMatchable is pure coercion, `(v: any) => string`, so the face and
+  // toMatchable is pure coercion, `(v: unknown) => string`, so the face and
   // the JS twin are the same bare call. The liveness probes below keep
   // the annotation honest against the runtime it describes: soften the
   // helper back toward v3's null answer and `=> string` becomes a lie
@@ -715,7 +717,7 @@ describe('TS-face emission pins', () => {
     expect(code).toContain('toMatchable(text).match(/(b)/)');
     expect(js(src).code).toContain('toMatchable(text).match(/b+/)');
     const withPrelude = compile(src, { runtimeDelivery: 'inline', face: 'ts' }).code;
-    expect(withPrelude).toContain('toMatchable: (v: any) => string');
+    expect(withPrelude).toContain('toMatchable: (v: unknown) => string');
     // LIVENESS — the trio that keeps the signature from being a lie.
     // `=> string` is honest only because the runtime answers a string
     // for EVERY receiver (RULED 2026-08-03: pure coercion, never null,
@@ -782,6 +784,54 @@ describe('TS-face emission pins', () => {
     expect(shape).toContain(' as { __schema: (descriptor: unknown) => unknown; SchemaError: {');
   });
 
+  // The component, stdlib, and reactive runtimes type every name a source
+  // program calls, read off their modules. The context API reads as the
+  // `accept … from` lowering is typed — a component provider, a key it
+  // offers, that member's container — through aliases the entry declares
+  // ahead of the destructure; the stdlib's open parameters are `unknown`,
+  // `zip` keeps its arrays' element types, and `raise` is its two calls;
+  // the error handlers take the error alone, as `unknown`. The names only
+  // emission spells (`__Component`, `__reconcile`, the owner seam) and the
+  // runtime's internal helpers stay `any` by decision.
+  test('the components, stdlib, and reactive runtimes type their user-callable names, with the context aliases declared ahead', () => {
+    const src = "App = component\n  offer open := false\n  render\n    slot\nconsole.log zip([1], ['a']), getContext(App, 'open')\n";
+    const r = compile(src, { runtimeDelivery: 'inline', face: 'ts' });
+    expect(r.code).toContain("type __RipProvider = abstract new (...args: never[]) => { __offers?: object };\ntype __RipOffers<P extends __RipProvider> = NonNullable<InstanceType<P>['__offers']>;\nconst { __state, ");
+    const at = r.code.indexOf(' as { __state:');
+    expect(at).toBeGreaterThan(-1);
+    const assertion = r.code.slice(at, r.code.indexOf(';\n', at));
+    expect(assertion).toContain("setContext: (key: string, value: unknown) => void; getContext: <P extends __RipProvider, K extends keyof __RipOffers<P>>(provider: '__offers' extends keyof InstanceType<P> ? P : never, key: K) => __RipOffers<P>[K]; hasContext: <P extends __RipProvider>(provider: '__offers' extends keyof InstanceType<P> ? P : never, key: keyof __RipOffers<P>) => boolean;");
+    expect(assertion).toContain('__setErrorHandler: (handler: ((error: unknown) => void) | null) => ((error: unknown) => void) | null; __handleError: (error: unknown) => void; __catchErrors: <F extends (...args: never[]) => unknown>(fn: F) =>');
+    for (const name of ['__Component', '__reconcile', '__lis', '__ownerFrame']) expect(assertion).toContain(`${name}: any`);
+    const sat = r.code.indexOf(' as { abort:');
+    expect(sat).toBeGreaterThan(-1);
+    const stdlib = r.code.slice(sat, r.code.indexOf(';\n', sat));
+    expect(stdlib).toContain('assert: (v: unknown, msg?: string) => void; exit: (code?: number) => never; kind: (v: unknown) => string; noop: () => void; p: (...args: unknown[]) => void;');
+    expect(stdlib).toContain('raise: { (message: unknown): never; <A>(ctor: new (arg: A) => unknown, arg: A): never };');
+    expect(stdlib).toContain('toMatchable: (v: unknown) => string; todo: (msg?: string) => never; warn: (...args: unknown[]) => void; zip: <T extends unknown[][]>(...arrays: T) => { [I in keyof T]: T[I] extends (infer E)[] ? E : never }[] }');
+    expect(stdlib).not.toMatch(/\bany\b/);
+    expect(stripFace(r.code, r.tsRegions)).toBe(compile(src, { runtimeDelivery: 'inline' }).code);
+  });
+
+  // LIVENESS for what the implementation gate cannot see — a parameter
+  // narrower than inference, a return inference leaves `any`: `zip`
+  // answers one tuple per element of its first array, positionally; a
+  // context read refuses a provider that is no component, and a read that
+  // names none, before any walk, so the face's refusals are the runtime's;
+  // the handler installer hands back the previous handler, and the router
+  // passes the error alone.
+  test('the stdlib, context, and error-handler signatures are honest to their runtimes', () => {
+    expect(zip([1, 2], ['a', 'b'])).toEqual([[1, 'a'], [2, 'b']]);
+    expect(() => hasContext(5, 'open')).toThrow(/is not a component/);
+    expect(() => getContext('open')).toThrow(/names its provider/);
+    const seen = [];
+    const handler = (...args) => seen.push(args);
+    const prev = __setErrorHandler(handler);
+    __handleError('boom');
+    expect(__setErrorHandler(prev)).toBe(handler);
+    expect(seen).toEqual([['boom']]);
+  });
+
   // The face records each free reference to an injected name with its
   // runtime and the table's verdict on it — what a checker needs to say
   // which values a module received untyped and where it first reads
@@ -799,14 +849,16 @@ describe('TS-face emission pins', () => {
       'x = { schema: 1 }',
       'y = x.schema',
       'f = (schema) -> schema',
-      "read = (provider: unknown) -> getContext(provider, 'open')",
+      "read = (p: unknown) -> getContext(p, 'open')",
+      'order = (xs: number[]) -> __lis(xs)',
     ].join('\n') + '\n';
     const r = compile(src, { runtimeDelivery: 'inline', face: 'ts' });
     const refs = r.runtimeRefs.map(([start, end, name, runtime, typed]) => [r.code.slice(start, end), name, runtime, typed]);
     expect(refs).toEqual([
       ['schema', 'schema', 'orm', true],
       ['schema', 'schema', 'orm', true],
-      ['getContext', 'getContext', 'components', false],
+      ['getContext', 'getContext', 'components', true],
+      ['__lis', '__lis', 'components', false],
     ]);
     expect(r.code.slice(r.runtimeRefs[1][0] - 'return '.length, r.runtimeRefs[1][1] + '.sequence()'.length)).toBe('return schema.sequence()');
     // A program-scope binding of the name takes it out of delivery, so

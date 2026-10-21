@@ -321,9 +321,10 @@ describe('generated-scope inventory', () => {
     // node head against '=>' — whose `this` an assignment describes,
     // not an emission of one; classMethodForm spells '->' as the kind
     // of the method pair a class-body `def` reads as.
-    // type 34: the runtime table's face signatures and the alias text
+    // type 38: the runtime table's face signatures and the alias text
     // they reference, the schema and orm entries' among them —
-    // `__schema`'s open return included.
-    expect(categories).toEqual({ diagnostic: 42, semantic: 20, type: 34 });
+    // `__schema`'s open return included — and the components entry's
+    // context API with the provider alias it names.
+    expect(categories).toEqual({ diagnostic: 42, semantic: 20, type: 38 });
   });
 });

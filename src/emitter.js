@@ -19180,6 +19180,14 @@ const SCHEMA_TYPE_DECLS = [
 // itself; a `raw` the call cannot settle is the wire arm. The function
 // comes back as it was given. An unannotated callback takes its
 // parameter type from the arm the call selects.
+// The context API's aliases: a provider is a component, whose instances
+// carry the `__offers` record — required on the face's class, optional on
+// a declaration file's interface, where a hand-built value owes none —
+// and the record is what a read indexes.
+const COMPONENTS_TYPE_DECLS = [
+  'type __RipProvider = abstract new (...args: never[]) => { __offers?: object };',
+  "type __RipOffers<P extends __RipProvider> = NonNullable<InstanceType<P>['__offers']>;",
+].join('\n');
 const COERCER_TYPE = '{ <F extends (value: string) => unknown>(name: string, fn: F, options?: { raw?: false }): F; <F extends (value: unknown) => unknown>(name: string, fn: F, options: { raw: boolean }): F }';
 // Adapter Contract v2 (docs/ORM.md): `query` is the floor the
 // installation seams check, and the rest is feature-detected where it
@@ -19349,12 +19357,12 @@ const RUNTIME_TABLE = [
       __effect: '(fn: () => void | (() => void)) => () => void',
       __batch: '<T>(fn: () => T) => T',
       __readonly: '<T>(value: T) => Readonly<{ value: T }>',
-      __setErrorHandler: '(handler: ((error: any, source?: string) => void) | null) => void',
-      __handleError: '(error: any, source?: string) => void',
+      __setErrorHandler: '(handler: ((error: unknown) => void) | null) => ((error: unknown) => void) | null',
+      __handleError: '(error: unknown) => void',
       // `__catchErrors` WRAPS: the function it returns calls `fn` with the
       // caller's `this` and arguments, and a throw goes to the error
       // handler in place of a result.
-      __catchErrors: '<F extends (...args: any[]) => unknown>(fn: F) => (this: ThisParameterType<F>, ...args: Parameters<F>) => ReturnType<F> | undefined',
+      __catchErrors: '<F extends (...args: never[]) => unknown>(fn: F) => (this: ThisParameterType<F>, ...args: Parameters<F>) => ReturnType<F> | undefined',
       getEffectSignal: '() => AbortSignal | null',
     },
   },
@@ -19377,21 +19385,25 @@ const RUNTIME_TABLE = [
     triggers: (sexpr, preds) => containsMatchRead(sexpr),
     types: {
       abort: '(msg?: string) => never',
-      assert: '(v: any, msg?: string) => void',
+      assert: '(v: unknown, msg?: string) => void',
       exit: '(code?: number) => never',
-      kind: '(v: any) => string',
+      kind: '(v: unknown) => string',
       noop: '() => void',
-      p: '(...args: any[]) => void',
+      p: '(...args: unknown[]) => void',
       pp: '<T>(v: T) => T',
       pj: '<T>(v: T) => T',
       pr: '<T>(v: T) => T',
-      raise: '(a: any, b?: any) => never',
+      // `raise` throws what it is handed: a message becomes an Error, and
+      // a constructor with its argument constructs the throwable.
+      raise: '{ (message: unknown): never; <A>(ctor: new (arg: A) => unknown, arg: A): never }',
       rand: '(a?: number, b?: number) => number',
       sleep: '(ms: number) => Promise<void>',
-      toMatchable: '(v: any) => string',
+      toMatchable: '(v: unknown) => string',
       todo: '(msg?: string) => never',
-      warn: '(...args: any[]) => void',
-      zip: '(...arrays: any[][]) => any[][]',
+      warn: '(...args: unknown[]) => void',
+      // `zip` tuples its arrays' elements positionally, as many tuples as
+      // the first array has elements.
+      zip: '<T extends unknown[][]>(...arrays: T) => { [I in keyof T]: T[I] extends (infer E)[] ? E : never }[]',
     },
   },
   {
@@ -19408,7 +19420,21 @@ const RUNTIME_TABLE = [
                      '__pushComponent', '__popComponent', '__clsx', '__style', '__reconcile',
                      '__transition', '__gateBind', '__detach', '__reportChildFailure', '__hostOf',
                      '__ownerFrame', '__pushOwner', '__popOwner', '__detachRef'],
+    decls: COMPONENTS_TYPE_DECLS,
     types: {
+      // The context API types a source call as the `accept … from`
+      // lowering is typed: the provider is a component, whose instances
+      // carry the `__offers` record, the key is one the provider OFFERS,
+      // and a read answers that offered member's container. A provider
+      // whose instances carry no record — a plain class included — fails
+      // on the provider argument, and a key the record lacks on the key.
+      // The key vocabulary is the offered names, so `setContext` takes a
+      // string where the runtime's Map would take any key. The lowering's
+      // own read is typed the same way; its report folds into the declare
+      // line's (mapTsDiagnostic).
+      setContext: '(key: string, value: unknown) => void',
+      getContext: "<P extends __RipProvider, K extends keyof __RipOffers<P>>(provider: '__offers' extends keyof InstanceType<P> ? P : never, key: K) => __RipOffers<P>[K]",
+      hasContext: "<P extends __RipProvider>(provider: '__offers' extends keyof InstanceType<P> ? P : never, key: keyof __RipOffers<P>) => boolean",
       // The one entry that types every merged `class:` value — the
       // face's __RipClassValue alias arms alongside it (the tail's
       // domSurfaceDecls emission).

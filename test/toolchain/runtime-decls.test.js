@@ -27,22 +27,32 @@ describe('runtime declarations', () => {
       .toEqual([...typed, 'duckdb'].map((k) => `${k}.d.ts`).sort());
   });
 
-  // The direct importers of schema.js and orm.js read the same types the
-  // injected names carry — every one typed, `__schema` as the open
-  // `unknown` return that only an anonymous schema value meets — and the
-  // exports the table does not inject arrive `any`.
-  test('every name the schema and orm units inject is declared typed', () => {
-    for (const key of ['schema', 'orm']) {
+  // The direct importers of the runtimes read the same types the injected
+  // names carry: every name the schema, orm, reactive, and stdlib units
+  // inject is typed (`__schema` as the open `unknown` return that only an
+  // anonymous schema value meets), and so is the components unit's context
+  // API; the names only emission spells, the runtime's internal helpers,
+  // and the exports the table does not inject arrive `any`.
+  test('every name the schema, orm, reactive, and stdlib units inject is declared typed, and the context API', () => {
+    const typedNames = (key) => {
       const rt = _runtimeTable().find((r) => r.key === key);
-      const lines = generated.find((g) => g.key === key).text.split('\n');
-      for (const name of rt.names) {
-        const line = lines.find((l) => l.startsWith(`export declare const ${name}: `));
-        expect(line, name).toBeDefined();
-        expect(line, name).not.toMatch(/: any;$/);
-      }
+      return key === 'components' ? ['setContext', 'getContext', 'hasContext'] : rt.names;
+    };
+    const declared = (key, name) => {
+      const line = generated.find((g) => g.key === key).text.split('\n').find((l) => l.startsWith(`export declare const ${name}: `));
+      expect(line, name).toBeDefined();
+      return line;
+    };
+    for (const key of ['schema', 'orm', 'reactive', 'stdlib', 'components']) {
+      for (const name of typedNames(key)) expect(declared(key, name), name).not.toMatch(/: any;$/);
     }
-    expect(generated.find((g) => g.key === 'schema').text).toContain('export declare const __schema: (descriptor: unknown) => unknown;');
-    expect(generated.find((g) => g.key === 'schema').text).toContain('export declare const SchemaRegistry: any;');
+    // No `any` rides a typed signature either: an open parameter is `unknown`.
+    for (const key of ['reactive', 'stdlib']) {
+      for (const name of typedNames(key)) expect(declared(key, name), name).not.toMatch(/\bany\b/);
+    }
+    expect(declared('schema', '__schema')).toBe('export declare const __schema: (descriptor: unknown) => unknown;');
+    expect(declared('schema', 'SchemaRegistry')).toBe('export declare const SchemaRegistry: any;');
+    for (const name of ['__Component', '__reconcile', '__lis', '__ownerFrame']) expect(declared('components', name)).toBe(`export declare const ${name}: any;`);
   });
 
   // The alias text a signature names travels with it: the schema aliases
