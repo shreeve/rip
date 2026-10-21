@@ -758,15 +758,15 @@ describe('TS-face emission pins', () => {
     const at = r.code.indexOf(' as { __schema:');
     expect(at).toBeGreaterThan(-1);
     const assertion = r.code.slice(at, r.code.indexOf(';\n', at));
-    // `__schema` is the one name the table leaves to the fallback: a
-    // declaration inside a function body has no type story to cast
-    // through, so an open return would refuse every use of it.
-    expect(assertion).toContain('{ __schema: any; SchemaError: {');
+    // `__schema` returns `unknown`: every named declaration casts its
+    // result through its type story wherever it is written, so only an
+    // anonymous schema value meets the open return.
+    expect(assertion).toContain('{ __schema: (descriptor: unknown) => unknown; SchemaError: {');
     expect(assertion).toContain('SchemaError: { new (issues: __RipSchemaIssue[], schemaName?: string | null, schemaKind?: string | null): __RipSchemaError; prototype: __RipSchemaError }');
     expect(assertion).toContain('schema: { transaction: { <T>(fn: () => T): Promise<Awaited<T>>; <T>(options: { on?: __RipAdapter; [option: string]: unknown }, fn: () => T): Promise<Awaited<T>> }');
     expect(assertion).toContain('sequence: { (): __RipSequence | null; (name: null): null; (name: string, options?: { start?: number }): __RipSequence }');
     expect(assertion).toContain('__schemaSetAdapter: (adapter: __RipAdapter) => void');
-    expect(assertion.replace('__schema: any', '')).not.toMatch(/\bany\b/);
+    expect(assertion).not.toMatch(/\bany\b/);
     const decl = r.code.indexOf('type __RipSchemaIssue = ');
     expect(decl).toBeGreaterThan(-1);
     expect(decl).toBeLessThan(r.code.indexOf('const { __schema, SchemaError, registerCoercer, schema, __schemaSetAdapter }'));
@@ -779,7 +779,7 @@ describe('TS-face emission pins', () => {
     const shape = compile("Point = schema :shape\n  x! integer\n", { runtimeDelivery: 'inline', face: 'ts' }).code;
     expect(shape).toMatch(/^type __RipSchemaIssue = /m);
     expect(shape).not.toContain('__RipAdapter');
-    expect(shape).toContain(' as { __schema: any; SchemaError: {');
+    expect(shape).toContain(' as { __schema: (descriptor: unknown) => unknown; SchemaError: {');
   });
 
   // The face records each free reference to an injected name with its

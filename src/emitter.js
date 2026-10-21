@@ -797,6 +797,10 @@ class Emitter {
     // companion-interface emission after the binding statement.
     this.componentInfo = new Map();
     this.schemaFns = new Map();
+    // Schema nodes whose behavior object is owed and not yet placed:
+    // set by schemaExpr, cleared by tsSchemaBehavior, checked empty when
+    // the program has emitted.
+    this.schemaBehaviorPending = new Map();
     // Module-scope component binding names → their component node
     // (BOTH modes): a name bound to a second component rejects — the
     // rebinding clobbers the first class silently, and the typed
@@ -2786,10 +2790,54 @@ class Emitter {
   // erased statement (liveStmts), so reverse queries resolve.
   emitTsTypeDecls(list, pad) {
     if (!this.ts) return;
+    this.placeSchemaScope(list, pad);
     for (const s of list) {
       if (!isNode(s) || s[0] !== 'type-decl') continue;
       this.tsTypeDeclLine(s, pad);
     }
+  }
+
+  // The schema scope record a statement list belongs to: the function
+  // scope whose body holds one of the list's statements, or null for
+  // the module and for a scope that declares no schema.
+  schemaScopeOf(list) {
+    if (!this.schemaScopes) return null;
+    for (const s of list) {
+      const record = this.schemaScopes.get(s);
+      if (record !== undefined) return record;
+    }
+    return null;
+  }
+
+  // A function scope's schema alias lines, placed at its top beside
+  // the user type declarations the same list carries (the
+  // emitTsTypeDecls cluster): once per scope, at the first statement
+  // list of its body the emission reaches — the body's own top, ahead
+  // of every nested list. Each block is a TS-only cover manifestation
+  // of its schema node, like the module's at the program's top.
+  placeSchemaScope(list, pad) {
+    const record = this.schemaScopeOf(list);
+    if (record === null || record.placed) return;
+    record.placed = true;
+    for (const s of record.stories) {
+      this.emitSchemaAliasBlock({ node: s.decl.node, exported: false, story: s, lines: s.faceAliasLines ?? s.aliasLines }, '', pad, '\n');
+    }
+  }
+
+  emitSchemaAliasBlock(block, exp, pad, tail) {
+    const nodeId = this.stores.idOf(block.node);
+    this.b.tsOnly(() => {
+      this.b.emit(pad);
+      const lines = () => {
+        const at = this.b.offset;
+        const text = block.lines.map((l) => `${exp}${l}`).join('\n' + pad);
+        emitSchemaTextMarked(this, block, text, nodeId);
+        recordSchemaFields(this, block, text, at);
+      };
+      if (nodeId !== null) this.b.mark(nodeId, '$self', lines);
+      else lines();
+      this.b.emit(tail);
+    });
   }
 
   // One rendered type/interface declaration as a TS-only cluster line.
@@ -4165,6 +4213,7 @@ class Emitter {
     if (declareInPlace) {
       entries = this.applyDeclareInPlace(entries, stmts, { tailIsExpression: true });
     }
+    this.attachSchemaConsts(entries, this.schemaScopeOf(stmts)?.stories ?? null);
     return { entries, names };
   }
 
@@ -4960,14 +5009,14 @@ class Emitter {
             this.mark(owner, 'annotation', () => this.b.emit(`: ${this.annotationText(owner)}`));
           });
         } else {
-          // A module-level schema binding declares its story type on
-          // the hoist line: a DECLARED type answers at every
-          // reference — the evolving-let alternative leaves reads
-          // inside nested functions hovering the evolving base `any`
-          // (tsgo quickinfo, plain-TS parity), which is exactly where
-          // model bindings are used. Attached only at the program
-          // hoist line (entries.schemaConsts is set only there), so a
-          // same-named function-local never annotates.
+          // A schema binding declares its story type on its scope's
+          // hoist line: a DECLARED type answers at every reference — the
+          // evolving-let alternative leaves reads inside nested functions
+          // hovering the evolving base `any` (tsgo quickinfo, plain-TS
+          // parity), which is exactly where model bindings are used. A
+          // scope's entries carry its own stories' types alone
+          // (attachSchemaConsts), so a same-named binding in another
+          // scope never annotates.
           const constType = entries.schemaConsts?.get(name) ?? null;
           // A forward-referenced COMPONENT declares its published
           // constructor type here, ahead of the class expression the
@@ -4979,7 +5028,12 @@ class Emitter {
           const ctorType = entries.componentTypes?.get(name) ?? null;
           if (constType !== null) {
             const bind = this.bindingNameSpan(node, role, name);
-            this.b.tsOnly(() => { this.b.emit(': '); this.emitNamedCopies(constType, name, bind?.id ?? null, bind?.span ?? null); });
+            // A binding assigned inside a block (`if c then S = schema …`)
+            // and read after is legal Rip, so outside strict the declared
+            // type carries the definite-assignment assertion the typed
+            // forward above carries; strict sees the conditional
+            // assignment as the checker reports it (TS2454).
+            this.b.tsOnly(() => { if (!this.strict) this.b.emit('!'); this.b.emit(': '); this.emitNamedCopies(constType, name, bind?.id ?? null, bind?.span ?? null); });
           } else if (ctorType !== null) {
             // Emitted as SEGMENTS, so the props block's member names map to
             // their declarations — a prop key at a use site lands here.
@@ -5046,13 +5100,16 @@ class Emitter {
     return entries;
   }
 
-  // Attach the schema story's declared types to the PROGRAM hoist
-  // entries (only non-exported module-level schema bindings hoist;
-  // exported ones emit `export const` and infer from the cast).
-  attachSchemaConsts(entries) {
-    if (!this.schemaStories) return;
+  // Attach a scope's schema stories' declared types to that scope's
+  // hoist entries: the module's stories at the program hoist line
+  // (only non-exported bindings hoist; exported ones emit `export
+  // const` and infer from the cast), a function scope's at its own
+  // (scopedHoist). A scope's entries see its own stories alone, so a
+  // same-named binding elsewhere never annotates.
+  attachSchemaConsts(entries, stories) {
+    if (!stories) return;
     const consts = new Map();
-    for (const s of this.schemaStories.values()) {
+    for (const s of stories) {
       if (!s.decl.exported && s.constType !== null) consts.set(s.decl.name, s.constType);
     }
     if (consts.size) entries.schemaConsts = consts;
@@ -5083,7 +5140,7 @@ class Emitter {
         // an accept provider. The emission split is layout.
         const imported = Emitter.importedNames(all.filter((n) => this.isModuleImport(n)));
         let entries = this.ambientHoistFilter(this.hoistTargets(rest, [], imported));
-        this.attachSchemaConsts(entries);
+        this.attachSchemaConsts(entries, this.schemaModuleStories);
         const names = new Set([...entries.map(([n]) => n), ...imported]);
         for (const n of this.pushReactiveFrame(all, names)) names.add(n);
         this.moduleBound = Emitter.moduleBoundNames(rest);
@@ -5227,7 +5284,7 @@ class Emitter {
       // and it binds for the whole module.
       const imported = Emitter.importedNames(stmts.filter((n) => this.isModuleImport(n)));
       let entries = this.ambientHoistFilter(this.hoistTargets(stmts, [], imported));
-      this.attachSchemaConsts(entries);
+      this.attachSchemaConsts(entries, this.schemaModuleStories);
       const names = new Set([...entries.map(([n]) => n), ...imported]);
       for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
       this.moduleBound = Emitter.moduleBoundNames(stmts);
@@ -6056,10 +6113,35 @@ class Emitter {
     // binding identically under every runtimeDelivery.
     const story = this.schemaStories?.get(node) ?? null;
     const nodeId = this.stores.idOf(node);
+    // A NAMED declaration always has a story: the story walk reaches
+    // every function scope, and a name arrives only through the
+    // assignment forms it records. One without a story is a walk the
+    // emitter's scope rules outgrew — rejected here, never a bare
+    // untyped call by position.
+    if (this.ts && schemaName !== null && story === null) {
+      throw this.positionedError(node,
+        `emitter: the schema declaration '${schemaName}' has no type story — its scope is one the story walk does not reach`);
+    }
+    // Rip assigns outward: a name bound by an enclosing scope is that
+    // scope's binding, and a declaration of it inside this function
+    // REBINDS it rather than declaring a local. The enclosing scope's
+    // story cannot describe two shapes under one name (the same reason
+    // a scope rejects a second declaration), and this scope's aliases
+    // would describe a binding that is not its own.
+    if (this.ts && story?.scope && !this.scopes[this.scopes.length - 1]?.has(schemaName)) {
+      throw this.positionedError(node,
+        `emitter: the schema declaration '${schemaName}' inside this function rebinds the enclosing '${schemaName}' ` +
+        `(a name assigned in an enclosing scope is that scope's binding) — a schema binds once; ` +
+        `declare it under a name of its own, or at the scope that binds '${schemaName}'`);
+    }
     // The compiled bodies, kept for the behavior object the binding
     // statement emits after this expression (same bodies, one place
-    // they are compiled).
-    if (this.ts && story !== null) this.schemaFns.set(node, fns);
+    // they are compiled). The object is owed from here until that
+    // statement places it (schemaBehaviorPending).
+    if (this.ts && story !== null) {
+      this.schemaFns.set(node, fns);
+      if (behaviorObjectText(descriptor, story.decl.name, fns, story.thisTypes) !== null) this.schemaBehaviorPending.set(node, story);
+    }
     // The descriptor's word-valued strings that repeat a DECLARED name —
     // a field's `name:`, an ensure's `field:`, a `typeName:` naming
     // another schema, a union's constituent, a mixin target — are copies
@@ -6087,7 +6169,12 @@ class Emitter {
     // copy of the declaration, and queued first so the head's `name:`
     // takes it ahead of any entry that shares the spelling.
     if (this.ts && schemaName !== null) {
-      pinSpan('name', this.moduleTypeDeclarationSpans().get(schemaName) ?? null, schemaName);
+      // A function-local declaration is no line-start match; its name's
+      // bytes are the binding ahead of the schema expression.
+      const declared = story?.scope
+        ? this.bindingNameSpan(node, 'target', schemaName)?.span ?? null
+        : this.moduleTypeDeclarationSpans().get(schemaName) ?? null;
+      pinSpan('name', declared, schemaName);
     }
     for (const e of this.ts ? descriptor.entries : []) {
       const pin = (key, name, start) => {
@@ -6508,15 +6595,21 @@ class Emitter {
     if (story === null || fns === undefined) return;
     const text = behaviorObjectText(schemaNode[1], story.decl.name, fns, story.thisTypes);
     if (text === null) return;
+    this.schemaBehaviorPending.delete(schemaNode);
     // The behavior const's name is face-only but not invisible: a user
-    // module binding of the same spelling redeclares it in the TS face
-    // (TS2451 blamed on the schema head) while the JS runs fine — the
-    // worst kind of divergence. Rejected loudly here, the
-    // `__schema`-shadow precedent; every minted TYPE name is already
-    // guarded the same way (buildSchemaTypeStory).
-    if (this.scopes[0]?.has(story.behaviorName) || this.moduleBound?.has(story.behaviorName)) {
+    // binding of the same spelling in the scope the const lands in — or,
+    // for a function-local schema, in any scope the const would shadow
+    // — redeclares or captures it in the TS face (TS2451 blamed on the
+    // schema head) while the JS runs fine — the worst kind of
+    // divergence. Rejected loudly here, the `__schema`-shadow
+    // precedent; every minted TYPE name is already guarded the same
+    // way (buildSchemaTypeStory).
+    const bound = story.scope
+      ? this.scopes.some((s) => s.has(story.behaviorName))
+      : this.scopes[0]?.has(story.behaviorName);
+    if (bound || this.moduleBound?.has(story.behaviorName)) {
       throw this.positionedError(schemaNode,
-        `emitter: the module binds '${story.behaviorName}', the face-only name this schema's ` +
+        `emitter: ${story.scope ? 'an enclosing scope' : 'the module'} binds '${story.behaviorName}', the face-only name this schema's ` +
         'callable types read through — rename the binding');
     }
     const id = this.stores.idOf(schemaNode);
@@ -9840,6 +9933,7 @@ class Emitter {
       this.hoistLine(entries);
       this.b.emit(' ');
     }
+    this.placeSchemaScope([body], '');
     if (this.effectBranchWrites(body)) {
       this.mark(node, 'value', () => this.withExpression(() => this.implicitReturn(body, ind, true)));
       this.b.emit(' })');
@@ -17998,6 +18092,11 @@ class Emitter {
       if (wrap) this.b.emit(')');
     });
     this.b.emit(';');
+    // A tail schema declaration (`return S = __schema(…)`) takes its
+    // behavior object after the return, as the statement form takes
+    // it after the statement: TS-only, and a type query (`typeof`)
+    // reads a declaration below it whether or not control reaches it.
+    if (this.ts && isNode(stmt) && stmt[0] === '=' && stmt.length === 3) this.tsSchemaBehavior(stmt[2]);
   }
 
   // [op, target, postfix] — prefix/postfix increment and decrement.
@@ -19175,12 +19274,13 @@ const RUNTIME_TABLE = [
     requires: ['vocab'],
     triggers: (sexpr, preds) => containsSchema(sexpr),
     decls: SCHEMA_TYPE_DECLS,
-    // `__schema` stays untyped: a module-scope declaration casts its
-    // result to the schema's type story, but a declaration inside a
-    // function body has no story and keeps the bare call, whose every
-    // use an open return would refuse. The name is spelled by emission
-    // alone, so no source reference reads it untyped.
+    // `__schema` returns `unknown`: every NAMED declaration casts its
+    // result to the schema's type story wherever it is written (module
+    // scope or a function body), so the open return reaches only an
+    // anonymous schema — a value with no name to type — and the name
+    // is spelled by emission alone, so no source reference reads it.
     types: {
+      __schema: '(descriptor: unknown) => unknown',
       SchemaError: '{ new (issues: __RipSchemaIssue[], schemaName?: string | null, schemaKind?: string | null): __RipSchemaError; prototype: __RipSchemaError }',
       registerCoercer: COERCER_TYPE,
     },
@@ -19762,7 +19862,14 @@ function emitSchemaTextMarked(emitter, block, text, nodeId) {
     // expansion. Each is a copy, so a rename of the declaration must
     // reach it; unmarked, one such copy refuses the whole rename.
     const named = emitter.moduleTypeDeclarationSpans();
-    const heads = [...new Set([...text.matchAll(/(?:^|\n)(?:export )?type ([A-Za-z_$][\w$]*)/g)].map((m) => m[1]))];
+    // A function-local schema's own name declares at its binding, not at
+    // a line-start match — and a module declaration of the same spelling
+    // is the one it shadows, never its own.
+    if (block.story?.scope) {
+      const own = emitter.bindingNameSpan(block.story.decl.node, 'target', block.story.decl.name);
+      if (own !== null) named.set(block.story.decl.name, own.span);
+    }
+    const heads = [...new Set([...text.matchAll(/(?:^|\n)[ \t]*(?:export )?type ([A-Za-z_$][\w$]*)/g)].map((m) => m[1]))];
     for (const headName of heads) {
       if (named.has(headName)) continue;
       // `+ 1` admits an occurrence starting exactly AT the span (see
@@ -20093,15 +20200,19 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // cover manifestations of THEIR schema node (a diagnostic landing
   // in an alias line cover-lands on the declaration that produced
   // it), and schemaExpr reads the per-node story for the binding cast
-  // and the callable `this` parameters. TS type declarations hoist,
-  // so top placement governs every scope. Collisions on the emitted
-  // type names reject positioned.
+  // and the callable `this` parameters. TS type declarations hoist
+  // within their scope: the module's aliases emit here, at the top,
+  // and a function scope's aliases emit at that function's top
+  // (placeSchemaScope), where the names they declare are the ones its
+  // casts and annotations spell. Collisions on the emitted type names
+  // reject positioned.
   let schemaStory = null;
   if (face === 'ts') {
     let story = null;
     try {
       story = buildSchemaTypeStory(parseResult.sexpr, builder.source,
-        Emitter.importedNames(parseResult.sexpr.slice(1).filter((s) => emitter.isModuleImport(s))));
+        Emitter.importedNames(parseResult.sexpr.slice(1).filter((s) => emitter.isModuleImport(s))),
+        { boundary: (n) => emitter.scopeBoundary(n), isBlock: (n) => emitter.isBlock(n) });
     } catch (err) {
       if (err instanceof SchemaTypeError) {
         const e = new Error(`emitter: ${err.message}`);
@@ -20134,6 +20245,21 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
         });
       }
       emitter.schemaStories = new Map();
+      emitter.schemaModuleStories = story.stories;
+      // A function scope's stories join the per-node map now — the cast
+      // and the behavior object read it at the declaration — and its
+      // alias lines wait for the scope's top. The scope is found again
+      // by any of its body's own statement nodes (`keys`).
+      emitter.schemaScopes = new Map();
+      emitter.schemaScopeRecords = story.scopes.map((scope) => {
+        const record = { stories: scope.stories, placed: false };
+        for (const s of scope.stories) {
+          s.scope = record;
+          emitter.schemaStories.set(s.decl.node, s);
+        }
+        for (const k of scope.keys) if (isNode(k)) emitter.schemaScopes.set(k, record);
+        return record;
+      });
       // A derived binding contributes an alias and nothing else, so it
       // joins the same block on the same terms — marked under its own
       // assignment, and the LAST block of either kind carries the
@@ -20147,20 +20273,13 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
       blocks.forEach((b, i) => {
         if (b.story !== null) emitter.schemaStories.set(b.node, b.story);
         const exp = b.exported ? 'export ' : '';
-        const nodeId = stores.idOf(b.node);
         const tail = i === blocks.length - 1 ? '\n\n' : '\n';
-        builder.tsOnly(() => {
-          const lines = () => {
-            const at = builder.offset;
-            const text = b.lines.map((l) => `${exp}${l}`).join('\n');
-            emitSchemaTextMarked(emitter, b, text, nodeId);
-            recordSchemaFields(emitter, b, text, at);
-          };
-          if (nodeId !== null) builder.mark(nodeId, '$self', lines);
-          else lines();
-          builder.emit(tail);
-        });
+        emitter.emitSchemaAliasBlock(b, exp, '', tail);
       });
+      // A module whose only schemas are function-local emits the
+      // intrinsic block alone; the blank line the last alias block
+      // otherwise carries still separates it from the program.
+      if (blocks.length === 0) builder.tsOnly(() => builder.emit('\n'));
     }
   }
 
@@ -20189,6 +20308,25 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   if (ambient.length > 0) {
     emitter.rframes.pop();
     emitter.scopes.pop();
+  }
+  // Every function scope's aliases were placed: a function form whose
+  // emission reaches neither emitTsTypeDecls nor a statement-list seam
+  // would otherwise leave a cast naming a type the face never declares
+  // — an emitter defect, reported at the declaration rather than as a
+  // checker error.
+  for (const record of emitter.schemaScopeRecords ?? []) {
+    if (record.placed) continue;
+    throw emitter.positionedError(record.stories[0].decl.node,
+      `emitter: the schema declaration '${record.stories[0].decl.name}' sits in a function form whose top the alias placement never reached`);
+  }
+  // Every behavior object owed was placed. The one declaration form
+  // with none to follow is a declaration that is not a statement of its
+  // own (`y = X = schema …`, an argument): its callable members' types
+  // would name a const the face never declares.
+  for (const [node, story] of emitter.schemaBehaviorPending) {
+    throw emitter.positionedError(node,
+      `emitter: the schema declaration '${story.decl.name}' declares callable members but is not a statement of its own, ` +
+      'so its behavior object has no statement to follow — declare it on its own line');
   }
   // A module exporting a top-level `stash` binding — the framework
   // contract launch reads — carries its own type on the face, so a

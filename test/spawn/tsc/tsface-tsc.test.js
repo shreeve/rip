@@ -210,6 +210,16 @@ const CLEAN_ROWS = [
     // where the two field sets are computed most differently.
  'Base = schema :shape\n  a! string\n  b? integer\nView = Base.omit("b")\nv: View = View.parse({})\nechoed = View.parse({})\nechoed = v\ns: string = v.a\ns = "z"',
  'User = schema :model\n  name! string\n  @times\nView = User.pick("id", "name", "createdAt")\nv: View = View.parse({})\nechoed = View.parse({})\nechoed = v\ni: number = v.id\nn: string = v.name\nn = "z"\ni = 2',
+    // the story inside a function scope: the aliases are block-scoped
+    // under the schema's own name, so the parse result, a behavior
+    // member, the model statics and query chain, and an `input:`-style
+    // consumer all type there as they do at module scope; a tail
+    // declaration's behavior object follows the return
+ 'mk = ->\n  S = schema :shape\n    name! string\n    size? integer\n    label: (p) -> p + @name\n  p = S.parse({})\n  n: string = p.name\n  n = "z"\n  S',
+ 'mk = ->\n  S = schema :shape\n    a! string\n    full: ~> @a\nv = mk().parse({})\ns: string = v.full\ns = "z"',
+ 'run = ->\n  U = schema :model\n    name! string\n    active? boolean\n    @scope :live, -> @where(active: true)\n  u = await U.find(1)\n  s: string = u.name if u\n  rows = await U.live().all()\n  s = "z"',
+ 'post = (path: string, opts: { input: Schema<unknown> }) -> path\nrun = ->\n  Signup = schema :input\n    name! 2..20\n    age? ~integer\n  post "/signup", input: Signup',
+ 'mk = (c: boolean) ->\n  if c\n    S = schema :shape\n      a! string\n  v = S.parse({})\n  a: string = v.a\n  a = "z"\n  S',
     //  the component member model — every member kind's declare,
     // methods/hooks, the ctor and _init props annotations, the
     // companion interface used as an annotation type
@@ -372,6 +382,16 @@ describeTscExtended('tier 2: self-contained typed faces check CLEAN — annotati
 
   test('the gate has teeth: an annotation violation FAILS the check (TS2322)', () => {
     const faced = compile('x: number = 5\nx = "not a number"\n', { runtimeDelivery: 'none', face: 'ts' });
+    const { status, output } = tscRun({ 'mod.ts': `${faced.code}\nexport {};\n` });
+    expect(status).not.toBe(0);
+    expect(output).toContain('TS2322');
+  }, TSC_TIMEOUT);
+
+  test('the function-scope story has teeth: a parse result read against the wrong type FAILS inside the function (TS2322)', () => {
+    // Under an untyped `__schema` the read is `any` and checks clean
+    // whatever it is assigned to; the story's cast is what makes the
+    // violation visible, in a function body as at module scope.
+    const faced = compile('mk = ->\n  S = schema :shape\n    a! string\n  n: number = S.parse({}).a\n  n = 1\n', { runtimeDelivery: 'none', face: 'ts' });
     const { status, output } = tscRun({ 'mod.ts': `${faced.code}\nexport {};\n` });
     expect(status).not.toBe(0);
     expect(output).toContain('TS2322');

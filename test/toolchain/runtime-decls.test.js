@@ -28,20 +28,20 @@ describe('runtime declarations', () => {
   });
 
   // The direct importers of schema.js and orm.js read the same types the
-  // injected names carry; `__schema` is the one injected name left `any`
-  // (a schema declared inside a function body has no type story to cast
-  // through), and the exports the table does not inject arrive `any`.
-  test('among the names the schema and orm units inject, `__schema` alone is declared `any`', () => {
+  // injected names carry — every one typed, `__schema` as the open
+  // `unknown` return that only an anonymous schema value meets — and the
+  // exports the table does not inject arrive `any`.
+  test('every name the schema and orm units inject is declared typed', () => {
     for (const key of ['schema', 'orm']) {
       const rt = _runtimeTable().find((r) => r.key === key);
       const lines = generated.find((g) => g.key === key).text.split('\n');
       for (const name of rt.names) {
         const line = lines.find((l) => l.startsWith(`export declare const ${name}: `));
         expect(line, name).toBeDefined();
-        if (name === '__schema') expect(line).toBe('export declare const __schema: any;');
-        else expect(line, name).not.toMatch(/: any;$/);
+        expect(line, name).not.toMatch(/: any;$/);
       }
     }
+    expect(generated.find((g) => g.key === 'schema').text).toContain('export declare const __schema: (descriptor: unknown) => unknown;');
     expect(generated.find((g) => g.key === 'schema').text).toContain('export declare const SchemaRegistry: any;');
   });
 
