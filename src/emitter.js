@@ -19075,19 +19075,22 @@ const containsMatchRead = (sexpr) => {
 // instance of the error class that carries them.
 const SCHEMA_TYPE_DECLS = [
   'type __RipSchemaIssue = { field: string; error: string; message: string };',
-  'type __RipSchemaError = Error & { name: "SchemaError"; issues: __RipSchemaIssue[]; schemaName: string | null; schemaKind: string | null };',
+  'type __RipSchemaError = Error & { issues: __RipSchemaIssue[]; schemaName: string | null; schemaKind: string | null };',
 ].join('\n');
-// A coercer is any one-parameter function: `raw` decides whether it
-// receives the trimmed string or the wire value itself, so the
-// parameter is open and the function comes back as it was given.
-const COERCER_TYPE = '<F extends (value: never) => unknown>(name: string, fn: F, options?: { raw?: boolean }) => F';
+// A coercer receives the trimmed string, or with `raw` the wire value
+// itself; a `raw` the call cannot settle is the wire arm. The function
+// comes back as it was given. An unannotated callback takes its
+// parameter type from the arm the call selects.
+const COERCER_TYPE = '{ <F extends (value: string) => unknown>(name: string, fn: F, options?: { raw?: false }): F; <F extends (value: unknown) => unknown>(name: string, fn: F, options: { raw: boolean }): F }';
 // Adapter Contract v2 (docs/ORM.md): `query` is the floor the
 // installation seams check, and the rest is feature-detected where it
-// is used. A result's `rows` is the write-path alias of `rowCount`.
+// is used. `begin` receives the transaction's options whole, so its
+// parameter is open; `catalog` receives the query options the CLI's
+// reads pass. A result's `rows` is the write-path alias of `rowCount`.
 const ORM_TYPE_DECLS = [
   'type __RipAdapterResult = { columns: { name: string; type?: string; duckdbType?: string; encoding?: string }[]; data: unknown[][]; rowCount?: number; rows?: number };',
   'type __RipAdapterQuery = (sql: string, params?: unknown[] | null, options?: { signal?: AbortSignal | null; timeoutMs?: number | null }) => __RipAdapterResult | Promise<__RipAdapterResult>;',
-  'type __RipAdapter = { query: __RipAdapterQuery; begin?: (options?: unknown) => Promise<{ query: __RipAdapterQuery; commit: () => Promise<void>; rollback: () => Promise<void> }>; catalog?: (options?: unknown) => Promise<Record<string, unknown>>; capabilities?: { tx?: boolean; ddlTransactional?: boolean } };',
+  'type __RipAdapter = { query: __RipAdapterQuery; begin?: (options?: unknown) => Promise<{ query: __RipAdapterQuery; commit: () => Promise<void>; rollback: () => Promise<void> }>; catalog?: (options?: { signal?: AbortSignal | null; timeoutMs?: number | null }) => Promise<Record<string, unknown>>; capabilities?: { tx?: boolean; ddlTransactional?: boolean } };',
   'type __RipSequence = { name: string; start: number };',
 ].join('\n');
 // The `schema` namespace as orm.js builds it. `transaction` takes the
@@ -19245,10 +19248,13 @@ const RUNTIME_TABLE = [
       __computed: '<T>(fn: () => T) => { readonly value: T; read(): T }',
       __effect: '(fn: () => void | (() => void)) => () => void',
       __batch: '<T>(fn: () => T) => T',
-      __readonly: '<T>(value: T) => T',
+      __readonly: '<T>(value: T) => Readonly<{ value: T }>',
       __setErrorHandler: '(handler: ((error: any, source?: string) => void) | null) => void',
       __handleError: '(error: any, source?: string) => void',
-      __catchErrors: '<T>(fn: () => T, onError?: (e: any) => void) => T | undefined',
+      // `__catchErrors` WRAPS: the function it returns calls `fn` with the
+      // caller's `this` and arguments, and a throw goes to the error
+      // handler in place of a result.
+      __catchErrors: '<F extends (...args: any[]) => unknown>(fn: F) => (this: ThisParameterType<F>, ...args: Parameters<F>) => ReturnType<F> | undefined',
       getEffectSignal: '() => AbortSignal | null',
     },
   },
@@ -19322,11 +19328,15 @@ const RUNTIME_TABLE = [
 // sibling runtime module is likewise: inlined bodies share one IIFE
 // scope, so both lines strip and the references bind directly.
 const runtimeBodies = new Map();
+// The export line is the module's ES seam: inline delivery strips it, and
+// the declaration beside the runtime (src/ts/runtime-decls.js) reads the
+// module's export names off it, so both see the same list.
+const RUNTIME_EXPORT_LINE = /^export \{([^}]*)\};\s*$/gm;
 const runtimeText = (rt) => {
   if (!runtimeBodies.has(rt.key)) {
     const raw = readFileSync(rt.url, 'utf8');
     const body = raw
-      .replace(/^export \{[^}]*\};\s*$/gm, '')
+      .replace(RUNTIME_EXPORT_LINE, '')
       .replace(/^import \{[^}]*\} from '\.\/[a-z-]+\.js';\s*$/gm, '')
       .trimEnd();
     // Inline delivery splices these bodies into a shared IIFE scope,
@@ -20418,6 +20428,9 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
 // (test/tsface.test.js) holds this equal to the JS-mode emission
 // byte-for-byte across the corpus.
 export const _runtimeTable = () => RUNTIME_TABLE;
+// The names a runtime module exports, read off its export line.
+export const _runtimeExports = (rt) => [...readFileSync(rt.url, 'utf8').matchAll(RUNTIME_EXPORT_LINE)]
+  .flatMap(([, list]) => list.split(',').map((s) => s.trim()).filter(Boolean));
 
 export function stripFace(code, tsRegions) {
   let out = '';

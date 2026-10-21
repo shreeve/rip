@@ -53,8 +53,9 @@ repository root; consulted for UNDERSTANDING → docs/.
  impossible, the construct rejects loudly (rule 1); it never ships
  quietly altered semantics. The full doctrine is below.
 
-3. **Never hand-edit generated files** (`src/parser.js`). Change the
- grammar or generator and regenerate via `bun run parser` —
+3. **Never hand-edit generated files** (`src/parser.js`, the `.d.ts`
+ beside each typed runtime). Change the grammar, the generator, or the
+ runtime table and regenerate via `bun run parser` / `bun run decls` —
  regeneration is byte-gated in CI.
 
 4. **Every bug gets fixed at the layer that owns it.** A wrong tree
@@ -485,6 +486,11 @@ the affected final gates again.
  Manual certification, not a pull-request gate. No demo is a gate.
 - `bun run parser` — regenerate `src/parser.js` from the grammar.
 - `bun run corpus` — regenerate the corpus expected outputs.
+- `bun run decls` — regenerate the declaration beside each typed
+  runtime (`src/runtime/<key>.d.ts`) from the runtime table's face
+  signatures; `test/toolchain/runtime-decls.test.js` byte-gates the
+  files, and the extended tier checks each runtime's JavaScript against
+  its declaration with tsc.
 - `bun run browser` — regenerate `dist/@rip/rip.js` (and
  `rip.min.js` / `rip.min.js.br`) after any `src/browser.js` change; a
  freshness gate in `test:all` catches a stale bundle.
