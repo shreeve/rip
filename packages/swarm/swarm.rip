@@ -217,7 +217,7 @@ export swarm! = (opts = {}) ->
   unless isMainThread
     return unless typeof opts.perform is 'function' and not _serving
     serve opts.perform
-    await Promise.new(-> null)
+    Promise.new! -> null
 
   # parse CLI options
   args    = process.argv.slice(2)
