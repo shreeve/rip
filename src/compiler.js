@@ -385,6 +385,10 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // know an imported name's kind — the editor resolves the specifier and
     // asks the declaring module. TS face only; empty otherwise.
     importedRefs: emitted.importedRefs,
+    // Generated spans of each free reference to a name runtime delivery
+    // injected, with the runtime's key and whether the face types it:
+    // `[start, end, name, runtime, typed]`. TS face only.
+    runtimeRefs: emitted.runtimeRefs,
     // Emitted module-specifier spans, recorded at emission — the
     // browser module loader splices resolved specifiers by offset.
     imports: emitted.imports,

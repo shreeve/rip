@@ -310,7 +310,7 @@ describe('generated-scope inventory', () => {
       } else if (/factory function/.test(text)) {
         categories.diagnostic += row.count;
       } else if (/=>/.test(text) &&
-          /(?:\bany\b|:\s*(?:number|string|never|void|T\b)|=>\s*void|<T>|Promise<|AbortSignal|readonly value)/.test(text)) {
+          /(?:\bany\b|:\s*(?:number|string|never|void|unknown|T\b)|=>\s*(?:void|never|unknown)|<T>|Promise<|AbortSignal|readonly value)/.test(text)) {
         categories.type += row.count;
       } else {
         unknown.push(row);
@@ -321,6 +321,8 @@ describe('generated-scope inventory', () => {
     // node head against '=>' — whose `this` an assignment describes,
     // not an emission of one; classMethodForm spells '->' as the kind
     // of the method pair a class-body `def` reads as.
-    expect(categories).toEqual({ diagnostic: 40, semantic: 20, type: 25 });
+    // type 33: the runtime table's face signatures and the alias text
+    // they reference, the schema and orm entries' among them.
+    expect(categories).toEqual({ diagnostic: 40, semantic: 20, type: 33 });
   });
 });

@@ -680,6 +680,21 @@ class Emitter {
     // an enum's uses in a consuming module carry the same merged-symbol
     // `type` classification its declaration does.
     this.importedRefs = [];
+    // The names runtime delivery injects into this module — name →
+    // `{ runtime, typed }`, where `typed` says the TS face asserts a
+    // signature for the name (a name the runtime table does not type
+    // rides as `any`). Filled by delivery before the program emits.
+    this.injected = new Map();
+    // Generated spans of each free SOURCE reference to an injected name:
+    // `[start, end, name, runtime, typed]`. A reference an enclosing
+    // scope binds (a parameter spelled like the name) is not one; a
+    // member or key spelled like it never reaches this funnel. Checkers
+    // read it to report what a module uses untyped. TS face only.
+    this.runtimeRefs = [];
+    // While a compiled schema callable's text re-emits here, the names
+    // that callable binds (its parameters, its locals): a word among
+    // them is the callable's own, whatever the enclosing scopes say.
+    this.schemaBodyBound = null;
     // rip.strict (presentation-only, E): typed forwards and pins emit
     // WITHOUT the `!` definite-assignment assertion, so use-before-
     // assign is checked (TS2454) instead of silenced. TS-only glyphs
@@ -2205,6 +2220,11 @@ class Emitter {
     const imported = this.importSpecOf(value);
     if (imported !== null) {
       this.importedRefs.push([start, this.b.offset, imported.importedName, imported.specifier]);
+      return;
+    }
+    const injected = this.injected.get(value);
+    if (injected !== undefined && !this.inScope(value) && !this.schemaBodyBound?.has(value)) {
+      this.runtimeRefs.push([start, this.b.offset, value, injected.runtime, injected.typed]);
     }
   }
 
@@ -3205,7 +3225,7 @@ class Emitter {
     this.b = new CodeBuilder(this.stores, { source });
     const { n, used } = this.temps;
     this.temps.used = new Set(used);
-    const channels = ['pinnables', 'mutables', 'enums', 'classDecls', 'loopVars', 'attrNames', 'importedRefs',
+    const channels = ['pinnables', 'mutables', 'enums', 'classDecls', 'loopVars', 'attrNames', 'importedRefs', 'runtimeRefs',
       'vocabulary', 'silences', 'memberDecls', 'narrowedDecls', 'importSpans', 'pendingTypeDecls', 'loopVarDecls', 'indexedLoops'];
     const saved = {};
     for (const k of channels) { saved[k] = this[k]; this[k] = []; }
@@ -6098,7 +6118,11 @@ class Emitter {
         for (const seg of segments) {
           if (typeof seg === 'string') this.emitSchemaText(seg);
           // Compiled body text: the author's words, keys included.
-          else if (seg.body !== undefined) this.emitSchemaText(seg.body, true);
+          else if (seg.body !== undefined) {
+            this.schemaBodyBound = seg.bound ?? null;
+            this.emitSchemaText(seg.body, true);
+            this.schemaBodyBound = null;
+          }
           // A face segment carrying a source span marks there — a
           // wrong-typed default's diagnostic anchors on the literal the
           // author wrote, not on the entry list that encloses it.
@@ -6171,10 +6195,16 @@ class Emitter {
   // calling convention's `this` parameter goes, and annots carries each
   // declared parameter's type (or the JS-arity `?`) at the offset it
   // follows. The code itself is the runtime spelling and holds neither.
+  // `bound` is every name the callable binds, parameters and locals at
+  // any depth: the parent re-emits this text word by word under its own
+  // scopes, which know none of them.
   schemaFnCode(params, bodyTokens) {
     const names = params.map((p) => p.name);
     const { stmts, stores } = this.subParse(bodyTokens);
-    if (stmts.length === 0) return { code: '(function() {})', thisAt: '(function('.length, annots: [] };
+    if (stmts.length === 0) return { code: '(function() {})', thisAt: '(function('.length, annots: [], bound: new Set(names) };
+    const isDecl = (x) => Emitter.isReactiveDeclIn(stores, x) || Emitter.isEffectDeclIn(stores, x) ||
+      Emitter.isReadonlyDeclIn(stores, x) || Emitter.isGateDeclIn(stores, x);
+    const bound = runtimeAliasBindings(this, [{ tree: ['program', ...stmts], atoms: names, isDecl }]);
     const bodyNode = stmts.length === 1 ? stmts[0] : ['block', ...stmts];
     const isAsync = this.containsAwait(bodyNode);
     const isGen = Emitter.containsYield(bodyNode);
@@ -6227,7 +6257,7 @@ class Emitter {
       else if (p.optional) annots.push([at, '?']);
       if (i < params.length - 1) at += ', '.length;
     });
-    return { code: `${head}${names.join(', ')}) ${bodyText})`, thisAt: head.length, annots };
+    return { code: `${head}${names.join(', ')}) ${bodyText})`, thisAt: head.length, annots, bound };
   }
 
   // Compile a captured VALUE-expression slice (the `on:` adapter) —
@@ -19031,6 +19061,49 @@ const containsMatchRead = (sexpr) => {
   return sexpr.some(containsMatchRead);
 };
 
+// The face vocabulary of the runtime table below. An entry's `types`
+// (TS face) states each injected name's signature, read off the
+// runtime's implementation; a unit's assertion types every name it
+// binds, and a name without an entry rides as `any`, which `rip check`
+// reports to a strict project as a value it received untyped. An
+// entry's `decls` is TS-only alias text its signatures reference,
+// emitted ahead of the unit's destructure under the same synthetic
+// row; the names are `__Rip`-prefixed, a spelling no user binding may
+// take.
+//
+// The schema runtime's: a validation failure's issue row and the
+// instance of the error class that carries them.
+const SCHEMA_TYPE_DECLS = [
+  'type __RipSchemaIssue = { field: string; error: string; message: string };',
+  'type __RipSchemaError = Error & { name: "SchemaError"; issues: __RipSchemaIssue[]; schemaName: string | null; schemaKind: string | null };',
+].join('\n');
+// A coercer is any one-parameter function: `raw` decides whether it
+// receives the trimmed string or the wire value itself, so the
+// parameter is open and the function comes back as it was given.
+const COERCER_TYPE = '<F extends (value: never) => unknown>(name: string, fn: F, options?: { raw?: boolean }) => F';
+// Adapter Contract v2 (docs/ORM.md): `query` is the floor the
+// installation seams check, and the rest is feature-detected where it
+// is used. A result's `rows` is the write-path alias of `rowCount`.
+const ORM_TYPE_DECLS = [
+  'type __RipAdapterResult = { columns: { name: string; type?: string; duckdbType?: string; encoding?: string }[]; data: unknown[][]; rowCount?: number; rows?: number };',
+  'type __RipAdapterQuery = (sql: string, params?: unknown[] | null, options?: { signal?: AbortSignal | null; timeoutMs?: number | null }) => __RipAdapterResult | Promise<__RipAdapterResult>;',
+  'type __RipAdapter = { query: __RipAdapterQuery; begin?: (options?: unknown) => Promise<{ query: __RipAdapterQuery; commit: () => Promise<void>; rollback: () => Promise<void> }>; catalog?: (options?: unknown) => Promise<Record<string, unknown>>; capabilities?: { tx?: boolean; ddlTransactional?: boolean } };',
+  'type __RipSequence = { name: string; start: number };',
+].join('\n');
+// The `schema` namespace as orm.js builds it. `transaction` takes the
+// block alone or options first, and the options pass whole to the
+// adapter's `begin`, so beyond `on` they are the adapter's to read.
+// `sequence` reads back with no argument, clears with null, and sets
+// with a name; the migration verbs throw, CLI-only.
+const ORM_SCHEMA_TYPE = '{ '
+  + 'transaction: { <T>(fn: () => T): Promise<Awaited<T>>; <T>(options: { on?: __RipAdapter; [option: string]: unknown }, fn: () => T): Promise<Awaited<T>> }; '
+  + 'connect: (options: string | { url: string; timeoutMs?: number | null }) => __RipAdapter; '
+  + 'setAdapter: (adapter: __RipAdapter) => void; '
+  + 'sequence: { (): __RipSequence | null; (name: null): null; (name: string, options?: { start?: number }): __RipSequence }; '
+  + `registerCoercer: ${COERCER_TYPE}; `
+  + 'plan: () => never; status: () => never; make: () => never; migrate: () => never; introspect: () => never'
+  + ' }';
+
 // The delivered-runtime table — one entry per feature runtime. Each
 // entry carries the runtime's public names (the trigger set AND the
 // injected binding set), its module URL, and an optional structural
@@ -19098,6 +19171,16 @@ const RUNTIME_TABLE = [
     url: new URL('./runtime/schema.js', import.meta.url),
     requires: ['vocab'],
     triggers: (sexpr, preds) => containsSchema(sexpr),
+    decls: SCHEMA_TYPE_DECLS,
+    // `__schema` stays untyped: a module-scope declaration casts its
+    // result to the schema's type story, but a declaration inside a
+    // function body has no story and keeps the bare call, whose every
+    // use an open return would refuse. The name is spelled by emission
+    // alone, so no source reference reads it untyped.
+    types: {
+      SchemaError: '{ new (issues: __RipSchemaIssue[], schemaName?: string | null, schemaKind?: string | null): __RipSchemaError; prototype: __RipSchemaError }',
+      registerCoercer: COERCER_TYPE,
+    },
   },
   {
     // The DuckDB substrate (wire client to duckdb-harbor). Binds NO
@@ -19116,6 +19199,11 @@ const RUNTIME_TABLE = [
     url: new URL('./runtime/orm.js', import.meta.url),
     requires: ['schema', 'duckdb', 'vocab'],
     triggers: (sexpr, preds) => containsModelSchema(sexpr),
+    decls: ORM_TYPE_DECLS,
+    types: {
+      schema: ORM_SCHEMA_TYPE,
+      __schemaSetAdapter: '(adapter: __RipAdapter) => void',
+    },
   },
   {
     // `types` (TS face): the reactive primitives are GENERIC — the
@@ -19899,21 +19987,26 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
         };
         visit(rt);
         if (chain.length === 1) {
-          units.push({ runtimes: [rt], names: rt.names, body: runtimeText(rt), types: rt.types });
+          units.push({ runtimes: [rt], names: rt.names, body: runtimeText(rt), types: rt.types, decls: rt.decls });
           continue;
         }
         // A fused unit states the union of its runtimes' face types
         // — and only when one of them HAS a table: the assertion
         // types every bound name, so an empty union would flatten
-        // names that infer honestly through the IIFE to `any`.
+        // names that infer honestly through the IIFE to `any`. Its
+        // alias declarations join the same way.
         const types = chain.some((r) => r.types)
           ? Object.assign({}, ...chain.map((r) => r.types))
+          : undefined;
+        const decls = chain.some((r) => r.decls)
+          ? chain.filter((r) => r.decls).map((r) => r.decls).join('\n')
           : undefined;
         units.push({
           runtimes: chain,
           names: chain.flatMap((r) => r.names),
           body: chain.map((r) => runtimeText(r)).join('\n'),
           types,
+          decls,
         });
       }
     }
@@ -19924,6 +20017,11 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
         .filter((name) => generated.has(name) || !bound.has(name))
         .map((name) => ({ name, local: generated.has(name) ? emitter.runtimeAliases.get(name) : name }));
       if (bindings.length === 0) continue;
+      for (const { name } of bindings) {
+        const rt = unit.runtimes.find((r) => r.names.includes(name));
+        const signature = unit.types?.[name];
+        emitter.injected.set(name, { runtime: rt.key, typed: signature !== undefined && signature !== 'any' });
+      }
       const start = builder.offset;
       if (unit.imp) {
         builder.emit(`import { ${bindings.map(({ name, local }) => name === local ? name : `${name} as ${local}`).join(', ')} } from `);
@@ -19932,6 +20030,10 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
         emitter.importSpans.push({ start: specStart, end: builder.offset, specifier: JSON.stringify(unit.imp) });
         builder.emit(';\n');
       } else {
+        // The aliases the assertion's signatures reference, declared
+        // ahead of it under the unit's own synthetic row (declarations
+        // hoist, so the position serves the row, not the checker).
+        if (face === 'ts' && unit.types && unit.decls) builder.tsOnly(() => builder.emit(`${unit.decls}\n`));
         builder.emit(`const { ${bindings.map(({ name, local }) => name === local ? name : `${name}: ${local}`).join(', ')} }`);
         // Precise runtime types on the TS face (the table's signatures):
         // the checker reads the declared shapes instead of inferring
@@ -20306,7 +20408,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   const partNames = emitter.exportedObjects
     .filter(([, values]) => values.every((value) => emitter.componentNames.includes(value)))
     .map(([name]) => name);
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, indexedLoops: emitter.indexedLoops, componentUses: emitter.componentUses, componentProps: emitter.componentProps, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, runtimeRefs: emitter.runtimeRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, indexedLoops: emitter.indexedLoops, componentUses: emitter.componentUses, componentProps: emitter.componentProps, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

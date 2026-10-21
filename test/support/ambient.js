@@ -32,14 +32,17 @@ const NAMES = [
   '__pushOwner', '__popOwner', '__detachRef',
 ];
 
-// name → face type, unioned across the table's runtimes.
+// name → face type, unioned across the table's runtimes, and the alias
+// text the signatures reference (an entry's `decls`), in table order.
 const TYPES = new Map();
 const KNOWN = new Set();
+const DECLS = [];
 for (const rt of _runtimeTable()) {
   for (const name of rt.names) {
     KNOWN.add(name);
     if (rt.types?.[name]) TYPES.set(name, rt.types[name]);
   }
+  if (rt.decls) DECLS.push(rt.decls);
 }
 
 // A curated name the compiler no longer delivers would be declared here and
@@ -53,8 +56,9 @@ if (stale.length > 0) {
 }
 
 // The signatures may reference face-declared aliases (an inline face
-// emits __RipClassValue beside its types assertion); the ambient
-// carries the same alias so the declared shapes resolve here too.
+// emits __RipClassValue beside its types assertion, and each runtime's
+// `decls` ahead of its destructure); the ambient carries the same
+// aliases so the declared shapes resolve here too.
 export const AMBIENT =
-  `${CLASS_VALUE_DECL}\n` +
+  `${CLASS_VALUE_DECL}\n${DECLS.join('\n')}\n` +
   `declare const ${NAMES.map((n) => `${n}: ${TYPES.get(n) ?? 'any'}`).join(', ')};\n`;

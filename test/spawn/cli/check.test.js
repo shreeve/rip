@@ -3264,6 +3264,61 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     }
   }, 90_000);
 
+  // The names runtime delivery injects arrive like imports: typed by the
+  // runtime table's assertion, or as `any` where the table has no entry.
+  // The persistence namespace is typed off orm.js, so a misspelled
+  // `sequence` option is refused where it was written — the runtime would
+  // have read `start ?? 1` past it in silence — and the file that spells
+  // it right receives nothing untyped.
+  test('an injected runtime name checks against the table: `schema.sequence` refuses an unknown option', async () => {
+    const model = (option) => [
+      `schema.sequence('id', ${option}: 2)`,
+      'export Probe = schema :model',
+      '  name! string',
+    ].join('\n') + '\n';
+    const dir = workspace({ 'models.rip': model('startz') }, { strict: true });
+    try {
+      const wrong = await check(dir, ['models.rip']);
+      expect(wrong.stdout).toContain("'startz' does not exist in type '{ start?: number | undefined; }'");
+      expect(wrong.stdout).toMatch(/models\.rip:1:23/);
+      expect(wrong.status).toBe(1);
+      fs.writeFileSync(path.join(dir, 'models.rip'), model('start'));
+      const right = await check(dir, ['models.rip']);
+      expect(right.stdout).toContain('No type errors');
+      expect(right.stdout).not.toContain('injected by');
+      expect(right.status).toBe(0);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  // A name the table leaves untyped is reported the way an untyped import
+  // is — the runtime named, every name listed, the first use located —
+  // and under the same posture: gradual accepts `any`, so the finding is
+  // strict's, previewed by `--strict` and reported once the project flips.
+  // The remedy is a table entry in the rip checkout, which no annotation
+  // in the project can stand in for, so the note says where and not what.
+  test('an injected `any` is advised like an inherited one, under the strict posture', async () => {
+    const dir = workspace({
+      'ctx.rip': [
+        'open = (provider: unknown) ->',
+        "  getContext(provider, 'open')",
+        'console.log open',
+      ].join('\n') + '\n',
+    });
+    try {
+      const gradual = await check(dir, ['ctx.rip']);
+      expect(gradual.stdout).not.toContain('injected by');
+      const preview = await check(dir, ['--strict', 'ctx.rip']);
+      expect(preview.stdout).toContain('1 value injected by the `components` runtime is `any`');
+      expect(preview.stdout).toContain('(`getContext`) — typed in the rip checkout\'s runtime table (src/emitter.js), not here');
+      expect(preview.stdout).toMatch(/ctx\.rip:2:3\s+getContext/);
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ rip: { strict: true } }));
+      const flipped = await check(dir, ['ctx.rip']);
+      expect(flipped.stdout).toContain('injected by the `components` runtime');
+      expect(flipped.stdout).toMatch(/ctx\.rip:2:3\s+getContext/);
+      expect(flipped.status).toBe(0);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   // Gradual accepts `any` — that is what it is for — and an inherited one
   // is not even a defect the project can answer by annotating its own code,
   // so it is not on the gradual path at all. It belongs to the posture that

@@ -806,6 +806,11 @@ const inheritedAny = new Map();
 // The files where this project uses a value it received as `any` — one
 // row per (file, local binding), with the arrival position to open at.
 const inheritedSites = [];
+// The same two levels for the names runtime delivery injects: runtime key
+// -> the injected names this project reads untyped, and one row per (file,
+// name) at the first use.
+const injectedAny = new Map();
+const injectedSites = [];
 const seen = new Set();
 const explicitTargets = new Set(targets);
 const queue = [...targets];
@@ -1299,6 +1304,28 @@ if (compiled.size > 0) {
           // finding: under `--strict`, which reads the workspace as if it
           // had flipped.
           if (entry.good.strict !== true) continue;
+          // What runtime delivery handed this file untyped, and where the
+          // file reads it. The compiler records each free reference to an
+          // injected name with the runtime's key and whether the face
+          // asserts a signature for it; a name it does not type arrives
+          // as `any` exactly as an untyped import does, and the remedy is
+          // likewise elsewhere — in the runtime table, not in this file.
+          // The rows open at the first use, since an injected value has no
+          // import line to arrive at.
+          const firstUse = new Map();                // name -> { runtime, offset }
+          for (const [start, end, name, runtime, typed] of entry.result.runtimeRefs ?? []) {
+            if (typed) continue;
+            const mapped = generatedSpanToSource(entry.good.mappings, start, end);
+            if (mapped === null) continue;
+            const prior = firstUse.get(name);
+            if (prior === undefined || mapped[0] < prior.offset) firstUse.set(name, { runtime, offset: mapped[0] });
+          }
+          for (const [name, { runtime, offset }] of [...firstUse].sort((a, b) => a[1].offset - b[1].offset)) {
+            const names = injectedAny.get(runtime) ?? new Set();
+            names.add(name);
+            injectedAny.set(runtime, names);
+            injectedSites.push({ file: fsPath, local: name, label: runtime, at: offsetToPosition(entry.good.srcLineStarts, offset) });
+          }
           const fromDir = path.dirname(fsPath);
           const ownPackage = nearestPackage(fromDir);
           // The dependency an import lands on, when it IS one: resolved by
@@ -1766,19 +1793,24 @@ if (asJson) {
       ` — \`Bun\`, \`process\`, and the rest are typed from the wrong version `
       + `(try \`bun add -d @types/bun@${runtimeBun}\`${wholly ? ' there' : ''})`));
   }
-  if (inheritedAny.size > 0) {
-    // Two levels, two questions: the heading is what this project
-    // RECEIVES untyped from that package, the rows are where it reaches.
-    // An import that arrives and is never used answers the first and not
-    // the second, so neither level restates the other.
-    //
-    // One line per FILE, and every file that has one. A file is the unit
-    // a reader opens, and naming each of them is complete at that level —
-    // unlike a sample of positions, which shows some of the reach and
-    // says nothing about the rest.
-    const blocks = [...inheritedAny.keys()].sort().map((label) => {
+  // Two levels, two questions: the heading is what this project RECEIVES
+  // untyped from that source, the rows are where it reaches. An import
+  // that arrives and is never used answers the first and not the second,
+  // so neither level restates the other.
+  //
+  // One line per FILE, and every file that has one. A file is the unit a
+  // reader opens, and naming each of them is complete at that level —
+  // unlike a sample of positions, which shows some of the reach and says
+  // nothing about the rest.
+  //
+  // Two sources read through it: the packages this project imports from,
+  // and the runtimes the compiler injects into its modules. `claimOf`
+  // words the heading for one label and its sorted names.
+  const receivedAny = (anyMap, sites, claimOf) => {
+    if (anyMap.size === 0) return;
+    const blocks = [...anyMap.keys()].sort().map((label) => {
       const byFile = new Map();
-      for (const x of inheritedSites) {
+      for (const x of sites) {
         if (x.label !== label) continue;
         const row = byFile.get(x.file) ?? { locals: new Set(), at: null };
         row.locals.add(x.local);
@@ -1809,21 +1841,29 @@ if (asJson) {
       // and a reader who cannot see which ones has to go find out anyway.
       // A count with four of nine names beside it is the shape that reads
       // as complete while withholding most of what it describes.
-      const names = [...inheritedAny.get(label)].sort();
-      const shown = names.map((n) => `\`${n}\``).join(', ');
-      // Each package is its own finding with its own remedy, so each
-      // gets the blank line an advisory gets — run together they read as
-      // one paragraph about nothing in particular.
+      const names = [...anyMap.get(label)].sort();
+      // Each source is its own finding with its own remedy, so each gets
+      // the blank line an advisory gets — run together they read as one
+      // paragraph about nothing in particular.
       console.log('');
-      console.log(claim(`${names.length} value${plural(names.length)} imported from \`${label}\` `
-        + `${names.length === 1 ? 'is' : 'are'} \`any\``,
-        ` (${shown}) — run \`rip check --public\` there`));
+      console.log(claimOf(label, names));
       for (const f of files) {
         const at = shownAt(byFile, f);
         console.log(`  ${at}${' '.repeat(Math.max(0, w - bare(at)))}  ${dim([...byFile.get(f).locals].sort().join(', '))}`);
       }
     }
-  }
+  };
+  const shownNames = (names) => names.map((n) => `\`${n}\``).join(', ');
+  receivedAny(inheritedAny, inheritedSites, (label, names) =>
+    claim(`${names.length} value${plural(names.length)} imported from \`${label}\` `
+      + `${names.length === 1 ? 'is' : 'are'} \`any\``,
+      ` (${shownNames(names)}) — run \`rip check --public\` there`));
+  // The remedy is a signature in the compiler's runtime table, which no
+  // project can supply for itself — so the note says where, not what.
+  receivedAny(injectedAny, injectedSites, (label, names) =>
+    claim(`${names.length} value${plural(names.length)} injected by the \`${label}\` runtime `
+      + `${names.length === 1 ? 'is' : 'are'} \`any\``,
+      ` (${shownNames(names)}) — typed in the rip checkout's runtime table (src/emitter.js), not here`));
   if (hiddenAnnotations > 0 || hiddenMissingTypes > 0 || hiddenScope > 0 || hiddenUninstalled > 0) console.log('');
   if (hiddenScope > 0) {
     console.log(dim(`${hiddenScope} diagnostic${plural(hiddenScope)} hidden in unannotated code${inProjects(hiddenScopeDirs)} `

@@ -745,6 +745,76 @@ describe('TS-face emission pins', () => {
     expect(plain).toContain('as { __state: <T>(value: T');
   });
 
+  // The validation and persistence runtimes assert their signatures the
+  // way the reactive and stdlib runtimes do, read off schema.js and
+  // orm.js: `sequence` reads, clears, and sets; `transaction` takes the
+  // block alone or options first; the migration verbs throw. The fused
+  // unit types EVERY name it binds — a bare `any` in the assertion is a
+  // name the table forgot — and the aliases the signatures reference are
+  // declared ahead of the destructure, TS-only, so the JS keeps its bytes.
+  test('the schema and orm runtimes type every injected name, with their aliases declared ahead', () => {
+    const src = "schema.sequence('id', start: 2)\nexport User = schema :model\n  name! string\n";
+    const r = compile(src, { runtimeDelivery: 'inline', face: 'ts' });
+    const at = r.code.indexOf(' as { __schema:');
+    expect(at).toBeGreaterThan(-1);
+    const assertion = r.code.slice(at, r.code.indexOf(';\n', at));
+    // `__schema` is the one name the table leaves to the fallback: a
+    // declaration inside a function body has no type story to cast
+    // through, so an open return would refuse every use of it.
+    expect(assertion).toContain('{ __schema: any; SchemaError: {');
+    expect(assertion).toContain('SchemaError: { new (issues: __RipSchemaIssue[], schemaName?: string | null, schemaKind?: string | null): __RipSchemaError; prototype: __RipSchemaError }');
+    expect(assertion).toContain('schema: { transaction: { <T>(fn: () => T): Promise<Awaited<T>>; <T>(options: { on?: __RipAdapter; [option: string]: unknown }, fn: () => T): Promise<Awaited<T>> }');
+    expect(assertion).toContain('sequence: { (): __RipSequence | null; (name: null): null; (name: string, options?: { start?: number }): __RipSequence }');
+    expect(assertion).toContain('__schemaSetAdapter: (adapter: __RipAdapter) => void');
+    expect(assertion.replace('__schema: any', '')).not.toMatch(/\bany\b/);
+    const decl = r.code.indexOf('type __RipSchemaIssue = ');
+    expect(decl).toBeGreaterThan(-1);
+    expect(decl).toBeLessThan(r.code.indexOf('const { __schema, SchemaError, registerCoercer, schema, __schemaSetAdapter }'));
+    for (const alias of ['__RipSchemaError', '__RipAdapterResult', '__RipAdapterQuery', '__RipAdapter', '__RipSequence']) {
+      expect(r.code).toContain(`\ntype ${alias} = `);
+    }
+    expect(stripFace(r.code, r.tsRegions)).toBe(compile(src, { runtimeDelivery: 'inline' }).code);
+    // A validation-only module delivers the schema runtime alone: its
+    // aliases, its assertion, and none of orm's.
+    const shape = compile("Point = schema :shape\n  x! integer\n", { runtimeDelivery: 'inline', face: 'ts' }).code;
+    expect(shape).toMatch(/^type __RipSchemaIssue = /m);
+    expect(shape).not.toContain('__RipAdapter');
+    expect(shape).toContain(' as { __schema: any; SchemaError: {');
+  });
+
+  // The face records each free reference to an injected name with its
+  // runtime and the table's verdict on it — what a checker needs to say
+  // which values a module received untyped and where it first reads
+  // them. A key, a member, a parameter, the declaration keyword, and a
+  // schema callable's own parameter all spell the word without reading
+  // the injected binding; a use inside a callable body does, through the
+  // body's re-emission in the parent.
+  test('runtime references record on the face: free uses only, by runtime, with the table verdict', () => {
+    const src = [
+      "schema.sequence('id', start: 2)",
+      'export User = schema :model',
+      '  name! string',
+      '  tag: (schema) -> schema',
+      '  seq: -> schema.sequence()',
+      'x = { schema: 1 }',
+      'y = x.schema',
+      'f = (schema) -> schema',
+      "read = (provider: unknown) -> getContext(provider, 'open')",
+    ].join('\n') + '\n';
+    const r = compile(src, { runtimeDelivery: 'inline', face: 'ts' });
+    const refs = r.runtimeRefs.map(([start, end, name, runtime, typed]) => [r.code.slice(start, end), name, runtime, typed]);
+    expect(refs).toEqual([
+      ['schema', 'schema', 'orm', true],
+      ['schema', 'schema', 'orm', true],
+      ['getContext', 'getContext', 'components', false],
+    ]);
+    expect(r.code.slice(r.runtimeRefs[1][0] - 'return '.length, r.runtimeRefs[1][1] + '.sequence()'.length)).toBe('return schema.sequence()');
+    // A program-scope binding of the name takes it out of delivery, so
+    // nothing records; the JS face records nothing at all.
+    expect(compile("schema = 1\nconsole.log(schema)\n", { runtimeDelivery: 'inline', face: 'ts' }).runtimeRefs).toEqual([]);
+    expect(compile(src, { runtimeDelivery: 'inline' }).runtimeRefs).toEqual([]);
+  });
+
   test('catch patterns: the minted parameter carries a face-only `any`, in the statement try and the value try alike', () => {
     const stmt = 'try\n  f()\ncatch {message}\n  message\n';
     const value = 'v = try\n  f()\ncatch [first]\n  first\n';
