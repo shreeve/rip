@@ -805,7 +805,7 @@ renderGif =! (r) ->
 
 # ==[ Encoder API ]==
 
-export encodeQR =! (text, output = 'raw', opts = {}) ->
+export def encodeQR(text, output = 'raw', opts = {})
   asString text,   'text'
   asString output, 'output'
   asObject opts,   'opts'

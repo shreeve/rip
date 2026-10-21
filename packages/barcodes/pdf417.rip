@@ -717,7 +717,7 @@ messageBytes =! (text, codes) ->
   codes.push ECI_CHARSET, ECI_UTF8
   TextEncoder.new().encode text
 
-export encodePDF417 =! (text, output = 'raw', opts = {}) ->
+export def encodePDF417(text, output = 'raw', opts = {})
   asString text,   'text'
   asString output, 'output'
   asObject opts,   'opts'

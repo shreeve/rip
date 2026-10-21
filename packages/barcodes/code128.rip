@@ -226,7 +226,7 @@ renderGif =! (r) ->
 
 # ==[ Encoder ]==
 
-export encodeCode128 =! (text, output = 'raw', opts = {}) ->
+export def encodeCode128(text, output = 'raw', opts = {})
   asString text,   'text'
   asString output, 'output'
   asObject opts,   'opts'
