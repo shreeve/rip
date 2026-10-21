@@ -1071,6 +1071,16 @@ describe('TS-face emission pins', () => {
       .toBe('class C {\n  seen;\n  static make() {\n    return (this.cache = 1);\n  }\n  m() {\n    return (this.seen = 2);\n  }\n}' + MARKER);
   });
 
+  test('a field assigned under a postfix if or unless is declared', () => {
+    // The consequent of a postfix conditional is a bare statement list,
+    // not a node with a head, so a walk that drops the first element as
+    // a head skips the one statement the list holds.
+    const src = 'class A\n  constructor: (a) ->\n    @x = 1 if a\n    @y = 2 unless a\n';
+    const face = ts(src);
+    expect(face.code).toBe('class A {\n  x;\n  y;\n  constructor(a?) {\n    if (a) this.x = 1;\n    if (!a) this.y = 2;\n  }\n}' + MARKER);
+    expect(stripFace(face.code, face.tsRegions)).toBe(js(src).code);
+  });
+
   test('JS arity: a bare trailing parameter is optional — except where something else types it', () => {
     // Calling with fewer arguments is legal in rip as in JavaScript, and
     // `arguments.length` branching on it is idiomatic. Declaring every

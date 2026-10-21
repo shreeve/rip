@@ -214,6 +214,12 @@ export function ctorAtFields(bodies) {
   const walk = (n, inArrow) => {
     if (!isNode(n)) return;
     const h = n[0];
+    // A headless array is a statement list (a postfix conditional's
+    // consequent): every element is a statement, the first included.
+    if (typeof h !== 'string') {
+      for (const el of n) walk(el, inArrow);
+      return;
+    }
     // The boundary is WHOSE `this` a function has, not whether one is
     // nested. `->`/`def` emit a plain function, whose `this` is
     // dynamic — an assignment there says nothing about this class. A
