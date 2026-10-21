@@ -1461,6 +1461,65 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     }
   }, 90_000);
 
+  // A return is read off the signature's own declaration, so a signature
+  // with no parameters answers the same way as one with any: `(): void ->`
+  // and `: Cancel` both state the returned function's return, and the
+  // bare lambda states nothing. Finding the function through a parameter
+  // instead leaves a zero-parameter signature nowhere to look but the
+  // binding that published it — `export const f = (function …)` — which
+  // carries no return annotation whatever the inner function says, and
+  // every spelling of the position reports as inferred.
+  //
+  // A pinned type is NOT authored: the compiler spelled `make`'s hoisted
+  // `let` into the face, so the `() => number` it carries claims nothing
+  // and its return stays inferred — reading the signature's declaration
+  // must not promote the pin's text to a contract.
+  test('--public reads a zero-parameter return off the signature itself: stated through a type or an alias, inferred when bare, never from a pin', async () => {
+    const dir = workspace({
+      'index.rip': [
+        'export loopA =! (cb: (ts: number) => void): (() => void) ->',
+        '  active = true',
+        '  (): void ->',
+        '    active = false',
+        '    return',
+        '',
+        'type Cancel = () => void',
+        'export loopB =! (cb: (ts: number) => void): Cancel ->',
+        '  active = true',
+        '  ->',
+        '    active = false',
+        '    return',
+        '',
+        'export loopC =! (cb: (ts: number) => void) ->',
+        '  active = true',
+        '  ->',                                // line 16: the signature the finding names
+        '    active = false',
+        '    return',
+        '',
+        'make = -> 1',
+        'make = -> 2',                         // hoisted: its type arrives as a pin
+        'export tools = { make }',
+      ].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'zero-param', exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = await check(dir, ['--public']);
+      expect(out.stdout).toMatch(/✓ loopA/);
+      expect(out.stdout).toMatch(/✓ loopB/);
+      // The control keeps both of its positions, and the inner one is
+      // placed at the lambda that would take the annotation, not at the
+      // export that published it.
+      expect(out.stdout).toMatch(/inferred\s+at: loopC\(\)$/m);
+      expect(out.stdout).toMatch(/index\.rip:16:\d+\s+inferred\s+at: loopC\(\)\(\)/);
+      expect(out.stdout).toMatch(/inferred\s+at: tools\.make\(\)/);
+      expect(out.stdout).toContain('2/4 exports fully typed (50.0%)');
+      expect(out.status).toBe(1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   // Ownership decides whether the walk enters a type at all, so getting it
   // wrong does not misreport a leak — it reports NONE, and the export comes
   // back clean. Neither spelling here carries `export` on the declaration
@@ -2828,10 +2887,9 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
   }, 90_000);
 
   // A defect INSIDE a return type belongs to the return annotation too, so
-  // it arrives at the same one place however it was reached. What that
-  // rule does NOT cover is a signature with no parameter at all: nothing
-  // there points back at the function, and the position falls back to
-  // whatever exposed it.
+  // it arrives at the same one place however it was reached. The place is
+  // the signature's own declaration, so a signature with no parameter at
+  // all is attributed the same way: the lambda, not the names exposing it.
   test('--public attributes a return to the signature that declares it, and says so through the type it returns', async () => {
     const inside = workspace({
       'package.json': JSON.stringify({ name: '@ret/inside', rip: { strict: true }, exports: { '.': './index.rip' } }),
@@ -2861,13 +2919,12 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       expect(a).toMatch(/index\.rip:2:\d+\s+any\s+at: thing\(\)<0>/);
       expect(a).toContain('1 position needs a type');
 
-      // The stated limit, pinned so it cannot drift unnoticed: with no
-      // parameter to reach the function through, each name that exposes
-      // the lambda carries a return position of its own.
+      // No parameter to enter by, and still one return, on the lambda's
+      // line: the member built from the same lambda adds no position.
       const b = (await check(noParams, ['--public'])).stdout;
-      expect(b).toContain('any at: thing()');
-      expect(b).toContain('any at: thing.again()');
-      expect(b).toContain('2 positions need a type');
+      expect(b).toMatch(/index\.rip:2:\d+\s+any\s+at: thing\(\)/);
+      expect(b).not.toContain('thing.again()');
+      expect(b).toContain('1 position needs a type');
     } finally {
       for (const w of [inside, noParams]) fs.rmSync(w, { recursive: true, force: true });
     }

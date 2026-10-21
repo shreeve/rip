@@ -13,6 +13,8 @@
 // checker end to end.
 import { test, expect } from 'bun:test';
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as api from 'typescript/unstable/async';
 
 // The session layer — how a project is reached. Newest, and the likeliest
@@ -34,6 +36,11 @@ const CHECKER = [
 
 const SYMBOL = ['getExports'];
 const SIGNATURE = ['getParameters'];
+// Read as a PROPERTY, never called: the handle to the node that spelled the
+// signature, which is where a return annotation is read and where a return
+// finding is placed. A prototype check cannot see an instance property, so
+// the declaration file is the witness.
+const SIGNATURE_PROPERTIES = ['declaration'];
 
 // The list is DERIVED from the walk, not maintained beside it: a hand copy
 // drifts the moment a call is added, and the drift is invisible because the
@@ -75,6 +82,22 @@ test('symbol and signature members the walk reads still exist', () => {
   expect(SYMBOL.filter((m) => typeof symProto[m] !== 'function')).toEqual([]);
   const sigProto = api.Signature?.prototype ?? {};
   expect(SIGNATURE.filter((m) => typeof sigProto[m] !== 'function')).toEqual([]);
+});
+
+// Derived the same way as the checker list, and failing closed the same
+// way: every `sig.` member the walk touches is either a pinned method or a
+// pinned property, and the property is declared on the class.
+test('the signature properties the walk reads are pinned and still declared', () => {
+  const src = fs.readFileSync(new URL('../../packages/vscode/src/publicwalk.js', import.meta.url), 'utf8');
+  const touched = [...new Set([...src.matchAll(/\bsig\??\.([a-zA-Z][A-Za-z0-9]*)/g)].map((m) => m[1]))].sort();
+  expect(touched.length, 'derived no signature reads at all — the walk renamed its signature binding').toBeGreaterThanOrEqual(2);
+  const unpinned = touched.filter((m) => !SIGNATURE.includes(m) && !SIGNATURE_PROPERTIES.includes(m));
+  expect(unpinned, `publicwalk.js reads signature members this gate does not pin: ${unpinned.join(', ')}`).toEqual([]);
+  const dts = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.resolve('typescript/package.json'))), 'dist/api/async/api.d.ts'), 'utf8');
+  const cls = dts.slice(dts.indexOf('export declare class Signature {'));
+  const body = cls.slice(0, cls.indexOf('\n}'));
+  const missing = SIGNATURE_PROPERTIES.filter((p) => !new RegExp(`^\\s*readonly ${p}\\??:`, 'm').test(body));
+  expect(missing, `typescript ${api.version ?? ''} no longer declares Signature properties: ${missing.join(', ')}`).toEqual([]);
 });
 
 // Flags are compared by VALUE, so a renumbering is as breaking as a rename
