@@ -79,7 +79,7 @@ texts =! (v) ->
 t0 = performance.now()
 count = 0
 for v in [1..40]
-  for ecc in ['low', 'medium', 'quartile', 'high']
+  for ecc in (['low', 'medium', 'quartile', 'high'] as const)
     for mask in [undefined, (v + ecc.length) % 8]
       for text, ti in texts(v)
         raw = null

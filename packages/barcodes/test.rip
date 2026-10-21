@@ -477,12 +477,16 @@ test "option and image validation", ->
   img = raster 'V', {}, 4, 200, 200
   throws (-> decodeQR(img, effort: 0)                                  ), TypeError
   throws (-> decodeQR(img, timeLimit: -1)                              ), TypeError
+  # @ts-expect-error
   throws (-> decodeQR(img, format: 'nope')                             ), TypeError
+  # @ts-expect-error
   throws (-> decodeQR(img, format: 'toString')                         ), TypeError, 'format'
   throws (-> decodeQR(null)                                            ), TypeError, 'img'
+  # @ts-expect-error
   throws (-> decodeQR(img, pointsOnDetect: 1)                          ), TypeError
   throws (-> decodeQR({ width: 0, height: 1, data: Uint8Array.new(0) })), RangeError
   throws (-> decodeQR({ width: 2, height: 2, data: Uint8Array.new(5) })), RangeError
+  # @ts-expect-error
   throws (-> decodeQR({ width: 2, height: 2, data: [1, 2, 3, 4] })     ), TypeError
 
 test "pointsOnDetect reports geometry in image coordinates", ->
@@ -589,10 +593,13 @@ test "modules and outputs", ->
   eq gif.at(-1), 0x3b
   url = encodeCode128 'ok', 'data-url', border: 2, height: 4
   eq url, 'data:image/gif;base64,' + btoa(String.fromCharCode(...gif))
+  # @ts-expect-error
   throws (-> encodeCode128 'ok', 'png'),              Error,      'Unknown output'
+  # @ts-expect-error
   throws (-> encodeCode128 42),                       TypeError,  'expected string'
   throws (-> encodeCode128 'ok', 'raw', scale: 0),    RangeError, 'scale'
   throws (-> encodeCode128 'ok', 'raw', border: -1),  RangeError, 'border'
+  # @ts-expect-error
   throws (-> encodeCode128 'ok', 'raw', height: '4'), TypeError,  'height'
   throws (-> encodeCode128 'ok', 'raw', scale: 100),  Error,      'exceeds'
 
@@ -695,7 +702,7 @@ test "text: shifts, FNC4 high characters, latches", ->
 p "\nPDF417"
 
 # Message codewords of Latin-1 text.
-cw =! (text, encoding = 'auto') -> p417.codewords Uint8Array.from(text, (ch) -> ch.charCodeAt 0), encoding, []
+cw =! (text: string, encoding: 'auto' | 'text' | 'byte' | 'numeric' = 'auto') -> p417.codewords Uint8Array.from(text, (ch) -> ch.charCodeAt 0), encoding, []
 
 test "codewords: modes, submodes, switching", ->
   eq cw('ABCD', 'text'),    [1, 63]
@@ -810,7 +817,7 @@ HELLO =! """
   """
 
 # Every case here decodes with zxing-cpp.
-PINS =! [
+PINS: [string, NonNullable<Parameters<typeof encodePDF417>[2]>, string, number, number][] =! [
   ['Hello PDF417', {}, '16759322038964277220', 86, 18]
   ['The quick brown fox jumps over the lazy dog, 42 times; really? (yes) {ok} [fine] "quoted" #1 @home', {}, '7846982029010869402', 103, 37]
   ['12345678901234567890123456789012345678901234567890', {}, '5965295783082383056', 86, 28]
@@ -859,12 +866,15 @@ test "outputs agree and options apply", ->
   eq gif.pixels.join(''), raw.flat().map((b) -> if b then 1 else 0).join('')
   url = encodePDF417 'Hello PDF417', 'data-url', rowHeight: 1, border: 0
   ok url.startsWith 'data:image/gif;base64,R0lGODdh'
+  # @ts-expect-error
   throws (-> encodePDF417 'x', 'png'),                   Error,      'Unknown output'
+  # @ts-expect-error
   throws (-> encodePDF417 42),                           TypeError,  'expected string'
   throws (-> encodePDF417 'x', 'raw', scale: 0),         RangeError, 'scale'
   throws (-> encodePDF417 'x', 'raw', ecc: 9),           RangeError, 'ecc'
   throws (-> encodePDF417 'x', 'raw', columns: 31),      RangeError, 'columns'
   throws (-> encodePDF417 'x', 'raw', rows: 2),          RangeError, 'rows'
+  # @ts-expect-error
   throws (-> encodePDF417 'x', 'raw', encoding: 'ascii'), Error,     'encoding'
   throws (-> encodePDF417 'x'.repeat(2000)),             Error,      'Capacity overflow'
   throws (-> encodePDF417 'x', 'raw', scale: 60),        Error,      'exceeds'

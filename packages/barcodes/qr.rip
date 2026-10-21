@@ -26,8 +26,8 @@
 import { ECI_DECODERS, guessDecoder } from './eci.rip'
 import { gifDataUrl, writeGif } from './gif.rip'
 import {
-  FORMATS, LITTLE_ENDIAN, asInt, asObject, asString, copyLuma, darkToImage, fail,
-  validateImage, validateSize,
+  FORMATS, Format, LITTLE_ENDIAN, Layout, Output, Point, Raster, Size, asInt, asObject,
+  asString, copyLuma, darkToImage, fail, validateImage, validateSize,
 } from './image.rip'
 
 # ==[ Spec tables ]==
@@ -805,7 +805,21 @@ renderGif =! (r) ->
 
 # ==[ Encoder API ]==
 
-export def encodeQR(text, output = 'raw', opts = {})
+type QROptions =
+  ecc?: 'low' | 'medium' | 'quartile' | 'high'
+  encoding?: 'numeric' | 'alphanumeric' | 'byte'
+  version?: number
+  mask?: number
+  border?: number
+  scale?: number
+  optimize?: boolean
+  textEncoder?: (text: string) => Uint8Array
+
+def encodeQR(text: string, output?: 'raw', opts?: QROptions): boolean[][]
+def encodeQR(text: string, output: 'gif', opts?: QROptions): Uint8Array
+def encodeQR(text: string, output: 'ascii' | 'term' | 'svg' | 'data-url', opts?: QROptions): string
+def encodeQR(text: string, output: Output, opts?: QROptions): string | boolean[][] | Uint8Array
+export def encodeQR(text: string, output: Output = 'raw', opts: QROptions = {}): string | boolean[][] | Uint8Array
   asString text,   'text'
   asString output, 'output'
   asObject opts,   'opts'
@@ -935,26 +949,26 @@ KANJI_CHUNK =! MAX_CODEWORDS & ~1
 class Payload
   constructor: ->
     @position = 0
-    @data     = Uint8Array.new(0)
+    @data: Uint8Array = Uint8Array.new(0)
     @dataLen  = 0
     @bytes    = Uint8Array.new(0)
-    @views    = []
+    @views: Uint8Array[] = []
 
   # Grow the byte arena to n; the prefix views follow the new buffer.
-  reserve!: (n) ->
+  reserve!: (n: number) ->
     return if @bytes.length >= n
     @bytes        = Uint8Array.new(n)
     @views.length = 0
 
   # A length-n window over the byte arena, created once per length so the
   # frame path never allocates after its first use.
-  view: (n) ->
+  view: (n: number): Uint8Array ->
     @views[n] or (@views[n] = Uint8Array.new(@bytes.buffer, 0, n))
 
   # No field exceeds 16 bits, so three bytes cover one at any bit offset;
   # bytes past the end read as zero and are masked away with the rest of
   # the window.
-  read: (bits) ->
+  read: (bits: number): number ->
     start = @position
     return -1 if start + bits > @dataLen * 8
     data   = @data
@@ -965,7 +979,7 @@ class Payload
 
   # Returns a string, or with deferText an array of strings and [bytes, eci]
   # parts for a caller-supplied text decoder, or FAIL.data.
-  decode: (data, dataLen, version, deferText = false) ->
+  decode: (data: Uint8Array, dataLen: number, version: number, deferText: boolean = false): string | (string | [Uint8Array, number])[] | Error ->
     @position = 0
     @data     = data
     @dataLen  = dataLen
@@ -1160,6 +1174,26 @@ mapPoint =! (map, x, y) ->
   { x: (map[0] * x + map[1] * y + map[2]) / den, y: (map[3] * x + map[4] * y + map[5]) / den }
 
 # ==[ Input ]==
+
+type Marker = Point & { moduleSize: number, corners: Point[] }
+type Points =
+  tl: Marker
+  tr: Marker
+  br: Point
+  bl: Marker
+  aligners: Marker[]
+  bounds: Point[]
+  outline: Point[]
+  boundingBox: { x: number, y: number, width: number, height: number }
+type ScanOptions =
+  format?: Format
+  effort?: number
+  timeLimit?: number
+  nativeLimit?: number
+  textDecoder?: (bytes: Uint8Array, eci: number) => string
+  pointsOnDetect?: (points: Points, result: string | Error) => void
+  imageOnResult?: (image: Raster) => void
+  imageOnBitmap?: (image: Raster) => void
 
 validateOpts! =! (opts) ->
   asObject opts, 'opts'
@@ -1723,7 +1757,7 @@ makePattern =! -> { x: 0.1, y: 0.1, ms: 0.1 }
 # Reusable decode state. Operations are exclusive: while decodeAsync is
 # pending, staging, decoding and cleaning throw until it settles.
 export class QRScanner
-  constructor: (init) ->
+  constructor: (init: ScanOptions & { maxSize: Size, stride?: number }) ->
     validateOpts init
     maxPixels = validateSize init.maxSize, 'maxSize'
     maxSize   = Object.freeze { ...init.maxSize }
@@ -1778,7 +1812,7 @@ export class QRScanner
     @blocked    = 0
     @retryStart = 0
     @retries    = 0
-    @points     = undefined
+    @points: Points | undefined = undefined
     # `map` holds the active homography; `from` and `to` are scratch, and `to`
     # doubles as the fine-plane map until the next build.
     @map        = Float64Array.new(9)
@@ -1848,19 +1882,19 @@ export class QRScanner
   endOperation!: ->
     @inFlight = false
 
-  decodePayload: (data, dataLen, version) ->
+  private decodePayload: (data, dataLen, version) ->
     decoded = @payload.decode data, dataLen, version, !!@opts.textDecoder
     if decoded instanceof Error then decoded else finishPayload(decoded, @opts.textDecoder)
 
   # Square-to-output composed with input-to-square, from `from` and `to`.
-  mapQuad!: (out) ->
+  private mapQuad!: (out) ->
     squareToQuad out, @to
     squareToQuad @to, @from
     adjugate @from, @to
     ptMul out, out, @from
 
   # Module-to-plane map from the finder-center square; BR is the alignment inset.
-  mapFinderQuad!: (out, size, t, brX, brY) ->
+  private mapFinderQuad!: (out, size, t, brX, brY) ->
     {tl, tr, bl} = t
     c = 3.5
     packQuad @from, c, c, size - c, c, size - 6.5, size - 6.5, c, size - c
@@ -1870,7 +1904,7 @@ export class QRScanner
   # Grow the module grid, function map and codeword scratch to one symbol
   # size: a scanner that only ever meets small symbols never pays for
   # Version 40.
-  reserve!: (size) ->
+  private reserve!: (size) ->
     return if @grid.length >= size * size
     words       = BYTES[versionOf(size) - 1]
     @grid       = Uint8Array.new(size * size)
@@ -1878,7 +1912,7 @@ export class QRScanner
     @codewords  = Uint8Array.new(words)
     @blockBytes = Uint8Array.new(words)
 
-  setAlignments: (ver) ->
+  private setAlignments: (ver) ->
     return 0 if ver is 1
     last     = sizeOf(ver) - 7
     count    = Math.ceil((last - 6) / 28)
@@ -1893,7 +1927,7 @@ export class QRScanner
     positions[count] = last
     count + 1
 
-  addImage!: (img, format = @opts.format) ->
+  addImage!: (img: Raster, format: Format = @opts.format) ->
     @beginOperation()
     try
       copyLuma @luma, @opts.maxSize, img, format
@@ -1901,7 +1935,7 @@ export class QRScanner
     finally
       @endOperation()
 
-  stage!: (size) ->
+  private stage!: (size) ->
     {width, height} = size
     @width        = width
     @image.width  = width
@@ -1950,10 +1984,10 @@ export class QRScanner
       @payload.position = 0
       @payload.bytes.fill 0
       for own k, v of this
-        v.fill 0 if ArrayBuffer.isView v
+        (v as unknown as { fill: (value: number) => unknown }).fill 0 if ArrayBuffer.isView v
       for layer in @layers
         for own k, v of layer
-          v.fill 0 if ArrayBuffer.isView(v) and v isnt layer.lumaWords and v isnt @luma
+          (v as unknown as { fill: (value: number) => unknown }).fill 0 if ArrayBuffer.isView(v) and v isnt layer.lumaWords and v isnt @luma
         layer.blockHeight  = 0
         layer.blockWidth   = 0
         layer.height       = 0
@@ -1980,7 +2014,7 @@ export class QRScanner
       @endOperation()
 
   # Pixels an integration wrote directly into `luma`.
-  processImage!: (size, format = 'I420', layout = { offset: 0, stride: size.width * (FORMATS[format]?.step or 0) }) ->
+  processImage!: (size: Size, format: Format = 'I420', layout: Layout = { offset: 0, stride: size.width * (FORMATS[format]?.step or 0) }) ->
     @beginOperation()
     try
       @input.width  = size.width
@@ -1992,7 +2026,7 @@ export class QRScanner
 
   # Project a module center and classify its bilinear luma against the
   # threshold interpolated between the four nearest block centers.
-  read: (s, map, mx, my) ->
+  private read: (s, map, mx, my) ->
     point = mapPoint map, mx, my
     W  = s.W
     x  = point.x - 0.5
@@ -2024,7 +2058,7 @@ export class QRScanner
   # Fourth corner of a projective finder square from its three local pitches:
   # pitch varies with the inverse 3/2 power of the homography denominator, so
   # the 2/3 power of each pitch ratio recovers the corner weight.
-  perspective: (t, p0, p1, p2) ->
+  private perspective: (t, p0, p1, p2) ->
     {tl, tr, bl} = t
     wx = Math.cbrt(p0 / p1) ** 2
     wy = Math.cbrt(p0 / p2) ** 2
@@ -2042,7 +2076,7 @@ export class QRScanner
   # Best 5x5 alignment-template placement on a 7x7 offset lattice around
   # (ox, oy). Grid tiles use half-module steps with ties toward the smallest
   # offset; the perspective search uses unit steps, first best wins.
-  searchAlign: (s, map, scale, side, ox, oy, stepMul, tie) ->
+  private searchAlign: (s, map, scale, side, ox, oy, stepMul, tie) ->
     bestX      = 0
     bestY      = 0
     bestErrors = if tie then Infinity else 6
@@ -2074,7 +2108,7 @@ export class QRScanner
   # Best 5x5 alignment-template placement on a half-module lattice within
   # `reach` modules of (ox, oy) through `map`; ties go to the placement
   # nearest the estimate. False unless some placement fits within `maxErrors`.
-  searchAlignWide: (s, map, ox, oy, reach, maxErrors) ->
+  private searchAlignWide: (s, map, ox, oy, reach, maxErrors) ->
     bestX      = 0
     bestY      = 0
     bestErrors = maxErrors + 1
@@ -2107,7 +2141,7 @@ export class QRScanner
     true
 
   # Queue a bottom-right candidate unless one within half a module is queued.
-  offerBr!: (x, y, ms) ->
+  private offerBr!: (x, y, ms) ->
     points = @brPoints
     for i in [0...@brCount]
       return if Math.abs(points[2 * i] - x) + Math.abs(points[2 * i + 1] - y) < ms / 2
@@ -2116,13 +2150,13 @@ export class QRScanner
     @brCount++
 
   # A template hit through `map`, recentered on its dark center module's runs.
-  offerTemplate!: (layer, s, map, size, ms, reach) ->
+  private offerTemplate!: (layer, s, map, size, ms, reach) ->
     return unless @searchAlignWide s, map, size - 6.5, size - 6.5, reach, 5
     @findBasicAlign layer, @alignPoint.x, @alignPoint.y, ms, Math.max(Math.round(ms), 2)
     @offerBr @alignPoint.x, @alignPoint.y, ms
 
   # Does a finder lie inside a QR region already decoded on any layer?
-  excluded: (layer, index) ->
+  private excluded: (layer, index) ->
     return false unless @blocked
     scale  = layer.context.scale
     offset = (scale - 1) / 2
@@ -2153,14 +2187,14 @@ export class QRScanner
         return true if across >= -padding and across <= 1 + padding and down >= -padding and down <= 1 + padding
     false
 
-  exclude!: (layer) ->
+  private exclude!: (layer) ->
     for i in [0...layer.patternCount]
       continue if layer.inverted[i] & DEAD or not @excluded(layer, i)
       layer.inverted[i] |= DEAD
       @blocked++
 
   # Bounded candidate retention; equal ranks keep the earlier slot.
-  retain: (index, rank, count, capacity) ->
+  private retain: (index, rank, count, capacity) ->
     ranks = @ranks
     if count < capacity
       @candidates[count] = index
@@ -2174,7 +2208,7 @@ export class QRScanner
     count
 
   # Assign three finder records to TL/TR/BL by longest side, clockwise.
-  makeTriple: (layer, i0, i1, i2) ->
+  private makeTriple: (layer, i0, i1, i2) ->
     pts = layer.patterns
     d01 = dist2 pts, i0 * 4, i1 * 4
     d12 = dist2 pts, i1 * 4, i2 * 4
@@ -2205,7 +2239,7 @@ export class QRScanner
     triple
 
   # Does some upper layer confirm candidate slots i, j, k with three distinct centers?
-  confirmedAbove: (lowerIndex, i, j, k) ->
+  private confirmedAbove: (lowerIndex, i, j, k) ->
     found = @found
     for upperIndex in [lowerIndex + 1...@layers.length]
       first   = 0
@@ -2232,7 +2266,7 @@ export class QRScanner
   # as (i0, i1, i2, relative error). Raw error rejects square cross-symbol
   # mixes in dense grids; sparse scenes use relative error minus row
   # confidence to reject small data pseudo-squares.
-  pickPolarity: (layer, polarity) ->
+  private pickPolarity: (layer, polarity) ->
     pts        = layer.patterns
     candidates = @candidates
     confirmed  = 0
@@ -2369,7 +2403,7 @@ export class QRScanner
   # Reject wrong triples and dimensions from the timing tracks before full
   # sampling: 75% agreement over the horizontal and vertical tracks
   # together, or one track read perfectly.
-  timing: (s, map, size) ->
+  private timing: (s, map, size) ->
     gh    = 0
     gv    = 0
     n     = 0
@@ -2387,7 +2421,7 @@ export class QRScanner
   # A dark run of about one module flanked by light near the expected
   # bottom-right alignment center, cross-checked vertically. This reads the
   # native bitmap even when projection later samples a fine s.
-  findBasicAlign: (layer, ex, ey, ms, R = Math.max(Math.round(5 * ms), 8)) ->
+  private findBasicAlign: (layer, ex, ey, ms, R = Math.max(Math.round(5 * ms), 8)) ->
     found = false
     bestD = Infinity
     yLo   = Math.max 1, Math.round(ey - R)
@@ -2421,12 +2455,12 @@ export class QRScanner
     found
 
   # Detected geometry in caller coordinates for the terminal callback.
-  report!: (t, br, aligners, ms, size, ctx) ->
+  private report!: (t, br, aligners, ms, size, ctx) ->
     return unless ctx.opts.pointsOnDetect
     {tl, tr, bl} = t
     {scale, ox, oy} = ctx
     pt = (point, moduleSize) ->
-      mapped = { x: point.x * scale + ox, y: point.y * scale + oy }
+      mapped: Point & { moduleSize?: number } = { x: point.x * scale + ox, y: point.y * scale + oy }
       mapped.moduleSize = moduleSize * scale if moduleSize isnt undefined
       mapped
     # The located alignment center is inset from the fourth finder position;
@@ -2448,7 +2482,7 @@ export class QRScanner
         for corner in corners
           corner.x += dx
           corner.y += dy
-      { ...center, corners }
+      { ...center, corners } as Marker
     c      = 3.5
     pad    = 1
     bounds = quad 0, 0, size, size
@@ -2469,7 +2503,7 @@ export class QRScanner
   # Retarget a coarse layer's homography and threshold grid to native luma.
   # Coordinates are edge-based (pixel i spans [i, i + 1)), so a coarse
   # coordinate scales by 2^r with no offset.
-  upgrade: (p, map, ctx) ->
+  private upgrade: (p, map, ctx) ->
     fine = ctx.fine
     return 0 unless fine
     sc     = 1 << fine.r
@@ -2490,7 +2524,7 @@ export class QRScanner
     sc
 
   # Berlekamp-Massey, Chien search and Forney over one block in place.
-  correctBlock: (offset, length, eccWords) ->
+  private correctBlock: (offset, length, eccWords) ->
     blockBytes = @blockBytes
     syndromes  = @syndromes
     # The generator divides an intact block: a zero LFSR remainder, computed
@@ -2578,7 +2612,7 @@ export class QRScanner
 
   # Function-cell map, zigzag unmask into codewords, deinterleave, correct
   # every block, then parse the payload.
-  decodeFormat: (size, eccIndex, mask) ->
+  private decodeFormat: (size, eccIndex, mask) ->
     ver = versionOf size
     fun = @fun
     fun.fill 0, 0, size * size
@@ -2687,7 +2721,7 @@ export class QRScanner
   # is retried on the transposed grid, which is the upright symbol. The
   # symbology expects a reader to read mirror images; a camera plane can
   # arrive mirrored with no metadata saying so.
-  decodeGrid: (size) ->
+  private decodeGrid: (size) ->
     result = @decodeOriented size
     return result unless result instanceof Error
     grid = @grid
@@ -2701,7 +2735,7 @@ export class QRScanner
     mirrored = @decodeOriented size
     if mirrored instanceof Error then result else mirrored
 
-  decodeOriented: (size) ->
+  private decodeOriented: (size) ->
     return FAIL.version unless checkVersion(@grid, size)
     m  = @grid
     f1 = 0
@@ -2737,7 +2771,7 @@ export class QRScanner
     bFormat     = if bEcc < 0 then -1 else (bEcc << 3) | bMask
     first       = if firstB then bFormat else aFormat
     second      = if firstB then aFormat else if bEcc >= 0 and not same then bFormat else -1
-    decoded     = FAIL.format
+    decoded: string | Error = FAIL.format
     formatValue = first
     while formatValue >= 0
       decoded = @decodeFormat size, formatValue >> 3, formatValue & 7
@@ -2749,7 +2783,7 @@ export class QRScanner
   # overlap. Sampling is read() unrolled: each row's homography terms are
   # products of one module coordinate, computed once per row and summed in
   # read()'s order, so every sample matches read() bit for bit.
-  projectQuad!: (s, map, size, left = 0, right = size, top = 0, bottom = size) ->
+  private projectQuad!: (s, map, size, left = 0, right = size, top = 0, bottom = size) ->
     grid     = @grid
     inverted = @invertedProjection
     {W, H, d, cut, bw, bh, sh} = s
@@ -2804,7 +2838,7 @@ export class QRScanner
         grid[row + x] = if (value <= threshold) isnt inverted then 1 else 0
     return
 
-  projectMap: (s, map, size) ->
+  private projectMap: (s, map, size) ->
     return FAIL.timing unless @timing(s, map, size)
     @projectQuad s, map, size
     result = @decodeGrid size
@@ -2825,7 +2859,7 @@ export class QRScanner
     FAIL.rs
 
   # Timing plus the redundant version bits alone, to gate Version 7+ tiling.
-  confirm: (s, map, size) ->
+  private confirm: (s, map, size) ->
     return false unless @timing(s, map, size)
     grid = @grid
     for i in [0...18]
@@ -2837,7 +2871,7 @@ export class QRScanner
 
   # Version 7+: locate every alignment pattern on the lattice, then project
   # each tile through its own homography built from the four surrounding nodes.
-  projectTiles: (sp, sm, size, version, fine, brPoint, t, ms, ctx) ->
+  private projectTiles: (sp, sm, size, version, fine, brPoint, t, ms, ctx) ->
     sc           = if fine then fine else 1
     count        = @setAlignments version
     positions    = @alignPos
@@ -2907,13 +2941,13 @@ export class QRScanner
 
   # One path for both polarities: inverted sampling flips read() and the
   # aligner's dark color.
-  projectWith: (layer, triple, pitch) ->
+  private projectWith: (layer, triple, pitch) ->
     @invertedProjection = triple.inverted
     result = @projectTriple layer, triple, pitch
     @invertedProjection = false
     result
 
-  projectTriple: (layer, t, pitch) ->
+  private projectTriple: (layer, t, pitch) ->
     inverted = t.inverted
     plane    = layer.plane
     ctx      = layer.context
@@ -3047,7 +3081,7 @@ export class QRScanner
     failed
 
   # Threshold, pack the bitmap and collect finders for one layer.
-  binarize!: (layer, cooperative) ->
+  binarize!: (layer: QRScanner['layers'][number], cooperative: boolean): Generator<undefined, void, number> ->
     bHeight = layer.blockHeight
     chunk   = if cooperative then 16 else bHeight
     for y in [0...bHeight] by chunk
@@ -3067,7 +3101,7 @@ export class QRScanner
 
   # Retry tier: admit loose finder windows, bounded by the time limit and
   # the per-layer window and record caps, then rebuild the retry sets.
-  loosen!: (layer, cooperative) ->
+  private loosen!: (layer, cooperative): Generator<undefined, void, number> ->
     layer.loosened  = true
     layer.setsReady = false
     # Textured rows are dense in loose windows: small chunks keep the
@@ -3081,7 +3115,7 @@ export class QRScanner
 
   # Mandatory attempt: both polarities ranked independently, then the pick
   # with the better geometry-times-evidence product.
-  pickTriple: (layer) ->
+  private pickTriple: (layer) ->
     @exclude layer
     ordinary = @pickPolarity layer, 0
     inverted = @pickPolarity layer, 1
@@ -3107,7 +3141,7 @@ export class QRScanner
     triple
 
   # Push one retry set onto the bounded max-heap.
-  retainSet!: (layer, score, inverted, i, i1, i2) ->
+  private retainSet!: (layer, score, inverted, i, i1, i2) ->
     sets  = layer.sets
     index = layer.setCount
     if index < MAX_SETS
@@ -3130,7 +3164,7 @@ export class QRScanner
 
   # Retry schedule for one layer: every finder's bounded neighborhood, each
   # pair scored by compactness over row-hit evidence, heapsorted ascending.
-  buildSets!: (layer, cooperative) ->
+  private buildSets!: (layer, cooperative): Generator<undefined, void, number> ->
     layer.setsReady = true
     layer.setCount  = 0
     layer.setCursor = 0
@@ -3194,7 +3228,7 @@ export class QRScanner
       siftDown layer.sets, end
 
   # Next scheduled set that is neither excluded nor the round-0 pick.
-  nextSet: (layer) ->
+  private nextSet: (layer) ->
     sets = layer.sets
     while layer.setCursor < layer.setCount
       pos = layer.setCursor * 5
@@ -3216,7 +3250,7 @@ export class QRScanner
   # slots 2..3 (its pitch and row-hit count are dead), and the TR record's
   # slot 2 holds the exclusion padding in units of the finder span.
   # `excluded` reads them back.
-  markDecoded!: (layer, triple, result) ->
+  private markDecoded!: (layer, triple, result) ->
     opts = layer.context.opts
     if opts.imageOnResult
       size = @decodedSize
@@ -3247,7 +3281,7 @@ export class QRScanner
 
   # Lazily build the pyramid, then one mandatory triple per layer (coarse
   # first) followed by scheduled retries while effort and time remain.
-  scan: (cooperative) ->
+  private scan: (cooperative) ->
     fail 'expected addImage before decode' unless @staged
     layers  = @layers
     @points = undefined
@@ -3311,7 +3345,7 @@ export class QRScanner
     failed
 
   # Re-run the scan after each success for decode-all under one budget.
-  walk: (cooperative, all) ->
+  private walk: (cooperative, all) ->
     @retryStart = Date.now()
     @retries    = if @effort is Infinity then Infinity else @effort - 1
     results     = []
@@ -3322,14 +3356,14 @@ export class QRScanner
       return results if result instanceof Error
       @retryStart += yield if cooperative
 
-  decode: (all = false) ->
+  decode: (all: boolean = false): (string | Error)[] ->
     @beginOperation()
     try
       runDecode @walk(false, all)
     finally
       @endOperation()
 
-  decodeAsync: (all = false) ->
+  decodeAsync: (all: boolean = false): Promise<(string | Error)[]> ->
     @beginOperation()
     try
       runDecodeAsync! @walk(true, all), @timeLimit
@@ -3339,7 +3373,7 @@ export class QRScanner
 # ==[ Decoder API ]==
 
 # First QR in an image through the coarse-to-fine scan; throws when none decodes.
-export decodeQR =! (img, opts = {}) ->
+export decodeQR =! (img: Raster, opts: ScanOptions = {}): string ->
   validateOpts opts
   validateImage img, opts.format
   scanner = QRScanner.new { ...opts, maxSize: { height: img.height, width: img.width } }
@@ -3352,7 +3386,7 @@ export decodeQR =! (img, opts = {}) ->
     scanner.clean()
 
 # Every QR in each image through one cooperatively scheduled scanner.
-export decodeQRBatch =! (images, opts = {}) ->
+export decodeQRBatch =! (images: Iterable<Raster, unknown, unknown>, opts: ScanOptions & { maxSize?: Size } = {}): Promise<(string | Error)[][]> ->
   maxSize = opts.maxSize or { width: BATCH_MAX_SIDE, height: BATCH_MAX_SIDE }
   scanner = QRScanner.new { ...opts, maxSize }
   results = []
@@ -3369,4 +3403,13 @@ export decodeQRBatch =! (images, opts = {}) ->
   results
 
 # Internals for the test suite.
-export _tests =! { BYTES, alignmentPatterns, formatBits, versionBits, maskBits, popcnt, encodeData, detectType }
+export _tests: {
+  BYTES: number[]
+  alignmentPatterns: (ver: number) => number[]
+  formatBits: (ecc: 'low' | 'medium' | 'quartile' | 'high', mask: number) => number
+  versionBits: (ver: number) => number
+  maskBits: (x: number, y: number) => number
+  popcnt: (n: number) => number
+  encodeData: (ver: number, ecc: 'low' | 'medium' | 'quartile' | 'high', text: string, type: keyof typeof LENGTH_BITS, utf8?: Uint8Array) => Uint8Array
+  detectType: (str: string) => string
+} =! { BYTES, alignmentPatterns, formatBits, versionBits, maskBits, popcnt, encodeData, detectType }

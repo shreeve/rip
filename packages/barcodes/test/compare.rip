@@ -18,6 +18,7 @@ import { prepareZXingModule, readBarcodes } from 'zxing-wasm/reader'
 import { encodeQR, decodeQR } from '../qr.rip'
 import { encodeCode128, readCode128 } from '../code128.rip'
 import { encodePDF417, readPDF417 } from '../pdf417.rip'
+import { fail } from '../image.rip'
 import { encodeQR as encode070 } from '../../../misc/qr/src/index.ts'
 import { decodeQR as decode070 } from '../../../misc/qr/src/decode.ts'
 import { encodeQR as encode39 } from '../../../misc/qr-perf/src/index.ts'
@@ -137,8 +138,8 @@ PDF_JS  =! zxing.BarcodeFormat.PDF_417
 
 encodeWidths =! [12, 12, 12, 6]
 head 'Encode (µs)', ['qr 0.7.0', 'qr + PR 39', 'rip main', 'rip'], encodeWidths
-for [name, text, format] in [['raw, version 1', 'Hello world', 'raw'], ['raw, version 10', t10, 'raw'], ['raw, version 22', t22, 'raw'], ['svg, version 10', t10, 'svg'], ['gif, version 10', t10, 'gif']]
-  row! name, encodeWidths, [(-> encode070 text, format), (-> encode39 text, format), (-> encodePrior text, format), (-> encodeQR text, format)]
+for [name, text, format] in ([['raw, version 1', 'Hello world', 'raw'], ['raw, version 10', t10, 'raw'], ['raw, version 22', t22, 'raw'], ['svg, version 10', t10, 'svg'], ['gif, version 10', t10, 'gif']] as const)
+  row! name, encodeWidths, [(-> (encode070 as typeof encodeQR)(text, format)), (-> encode39 text, format), (-> encodePrior text, format), (-> encodeQR text, format)]
 
 small = qrRaster 'Hello world', 4, 132, 132
 hd    = qrRaster 'https://example.com/some/path?with=query', 8, 1280, 720

@@ -17,7 +17,7 @@
 # ==============================================================================
 
 import { gifDataUrl, writeGif } from './gif.rip'
-import { MAX_IMAGE_SIDE, asInt, asObject, asString, contrast, edgeRuns, fail, reverseRuns, sampleLine, validateImage } from './image.rip'
+import { Format, MAX_IMAGE_SIDE, Output, Point, Raster, asInt, asObject, asString, contrast, edgeRuns, fail, reverseRuns, sampleLine, validateImage } from './image.rip'
 
 # Bar/space widths for values 0..106; 106 is Stop with its termination bar.
 PATTERNS =! %w[
@@ -226,7 +226,13 @@ renderGif =! (r) ->
 
 # ==[ Encoder ]==
 
-export def encodeCode128(text, output = 'raw', opts = {})
+type Code128Options = { scale?: number, border?: number, height?: number, gs1?: boolean, optimize?: boolean }
+
+def encodeCode128(text: string, output?: 'raw', opts?: Code128Options): boolean[]
+def encodeCode128(text: string, output: 'gif', opts?: Code128Options): Uint8Array
+def encodeCode128(text: string, output: 'ascii' | 'term' | 'svg' | 'data-url', opts?: Code128Options): string
+def encodeCode128(text: string, output: Output, opts?: Code128Options): string | boolean[] | Uint8Array
+export def encodeCode128(text: string, output: Output = 'raw', opts: Code128Options = {}): string | boolean[] | Uint8Array
   asString text,   'text'
   asString output, 'output'
   asObject opts,   'opts'
@@ -831,11 +837,13 @@ trackEdges =! (img, format, hit, codes, luma, runs, rev) ->
 # feeding frames of one size allocates once.
 lines =! { side: 0, luma: Uint8Array.new(0), runs: Float64Array.new(0), rev: Float64Array.new(0) }
 
+type ReadOptions = { format?: Format, tilt?: boolean }
+
 # First Code 128 on any scan line, where it was read and its corners; null
 # on a miss. Lines run along both axes; after each axis pass, lines along
 # the tilt estimated from its best unread crossings, unless `opts.tilt` is
 # false, which reads the axes only.
-export readCode128 =! (img, opts = {}) ->
+export readCode128 =! (img: Raster, opts: ReadOptions = {}): { text: string, gs1: boolean, codes: number[], angle: number, o: number, t0: number, t1: number, corners: Point[], vertical: boolean, reversed: boolean, inverted: boolean } | null ->
   asObject opts, 'opts'
   format = validateImage img, opts.format
   tilt   = if opts.tilt is undefined then true else opts.tilt
@@ -850,7 +858,7 @@ export readCode128 =! (img, opts = {}) ->
   {luma, runs, rev} = lines
   codes = []
   more  = []
-  hit   = null
+  hit: { reversed: boolean, inverted: boolean, len: number, from: number, to: number, angle?: number, o?: number, t0?: number, t1?: number } | null = null
   axis  = 0
   for a in [0, Math.PI / 2]
     axis = a
@@ -898,10 +906,13 @@ export readCode128 =! (img, opts = {}) ->
   { text, gs1, codes, angle, o: hit.o, t0: hit.t0, t1: hit.t1, corners, vertical, reversed: hit.reversed, inverted: hit.inverted }
 
 # Text only; throws on a miss.
-export decodeCode128 =! (img, opts = {}) ->
+export decodeCode128 =! (img: Raster, opts: ReadOptions = {}): string ->
   hit = readCode128 img, opts
   fail 'Code 128 not found' unless hit
   hit.text
 
 # Internals for the test suite.
-export _tests =! { codewords, decodeText }
+export _tests: {
+  codewords: (text: string, gs1?: boolean) => number[]
+  decodeText: (codes: number[], len: number) => { text: string, gs1: boolean }
+} =! { codewords, decodeText }

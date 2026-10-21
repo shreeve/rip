@@ -45,7 +45,7 @@ line =! (name, fn) ->
   count++
   return
 
-OUTPUTS =! ['raw', 'ascii', 'term', 'gif', 'data-url', 'svg']
+OUTPUTS =! ['raw', 'ascii', 'term', 'gif', 'data-url', 'svg'] as const
 t0 = performance.now()
 
 # ==[ QR ]==
@@ -65,11 +65,11 @@ while len <= 3000
   len = Math.ceil len * 1.35
 
 for text, ti in texts
-  for ecc, ei in ['low', 'medium', 'quartile', 'high']
+  for ecc, ei in (['low', 'medium', 'quartile', 'high'] as const)
     for [border, scale], bi in [[2, 1], [1, 1], [4, 1], [2, 2], [3, 3], [5, 2]]
       for output, oi in OUTPUTS
         k = ti + ei + bi + oi
-        opts = { ecc, border, scale }
+        opts: NonNullable<Parameters<typeof encodeQR>[2]> & NonNullable<Parameters<typeof encodeCode128>[2]> = { ecc, border, scale }
         opts.mask     = k % 8 if k % 3 is 0
         opts.optimize = false if output is 'svg' and k % 2 is 1
         line "qr t#{ti}:#{text.length} #{ecc} b#{border} s#{scale} m#{opts.mask} o#{opts.optimize} #{output}", -> encodeQR text, output, opts
@@ -109,7 +109,7 @@ for text, ti in P417
     line "p417 t#{ti} #{output}", -> encodePDF417 text, output
   for ecc in [0..8]
     line "p417 t#{ti} ecc#{ecc} raw", -> encodePDF417 text, 'raw', { ecc }
-  for encoding in ['auto', 'text', 'byte', 'numeric']
+  for encoding in (['auto', 'text', 'byte', 'numeric'] as const)
     line "p417 t#{ti} #{encoding} raw", -> encodePDF417 text, 'raw', { encoding }
   for [columns, rows] in [[1, undefined], [3, undefined], [10, undefined], [30, undefined], [undefined, 3], [undefined, 20], [undefined, 90], [5, 12], [2, 60]]
     line "p417 t#{ti} c#{columns} r#{rows} raw", -> encodePDF417 text, 'raw', { columns, rows }
