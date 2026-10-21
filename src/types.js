@@ -762,6 +762,34 @@ const isDefName = (tokens, k) => {
   return t.kind === 'PROPERTY' && tokens[k - 1]?.kind === '@' && tokens[k - 2]?.kind === 'DEF';
 };
 
+// Does tokens[k] end a `for` head's variable list? Walks back over one
+// ForValue — a name, `@name`, or a balanced pattern — then an optional
+// `, ForValue`, then `own`/`await`, and requires FOR. A colon right
+// after such a list annotates a loop variable.
+const endsLoopVariables = (tokens, k) => {
+  const skipValue = (j) => {
+    const t = tokens[j];
+    if (!t) return -1;
+    if (t.kind === 'IDENTIFIER' || t.kind === 'PROPERTY') return tokens[j - 1]?.kind === '@' ? j - 2 : j - 1;
+    if (t.kind === '}' || t.kind === ']') {
+      let depth = 0;
+      for (let i = j; i >= 0; i--) {
+        if (RUN_CLOSERS.has(tokens[i].kind)) depth++;
+        else if (RUN_OPENERS.has(tokens[i].kind) && --depth === 0) return i - 1;
+      }
+    }
+    return -1;
+  };
+  let j = skipValue(k);
+  if (j < 0) return false;
+  if (tokens[j]?.kind === ',') {
+    j = skipValue(j - 1);
+    if (j < 0) return false;
+  }
+  if (tokens[j]?.kind === 'OWN' || tokens[j]?.kind === 'AWAIT') j--;
+  return tokens[j]?.kind === 'FOR';
+};
+
 const classifyTypeColon = (tokens, j) => {
   const before = tokens[j - 1];
   if (!before) return false;
@@ -1521,6 +1549,20 @@ export function rewriteTypes(tokens, mintId, text, fail) {
           i = last;
           continue;
         }
+      }
+
+      // A loop variable's colon: `for x: T in xs`, in any slot of the
+      // head (`for x, i: T in xs`, a pattern, `@name`, `own`, `await`,
+      // the postfix and comprehension forms). The plain `for x in xs`
+      // lowers to an ES for-of, whose binding TypeScript forbids
+      // annotating, so no loop shape takes an annotation: the typed
+      // spelling is a cast on the iterable. Rejected here because
+      // implicitObjects would otherwise read `x: T, i` as the pattern
+      // `{x: T}, i` — a destructuring RENAME binding T — which parses.
+      if ((prev.kind === 'PROPERTY' || prev.kind === 'IDENTIFIER' || prev.kind === '}' || prev.kind === ']') &&
+          endsLoopVariables(out, out.length - 1)) {
+        fail('a loop variable does not take a type annotation — type the iterable instead ' +
+          '(`for x in xs as T[]`)', tok.start, tok.end);
       }
 
       // Parameter annotation: `(a: T)`, `(a: T = d)`, `def f(a: T)`,

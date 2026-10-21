@@ -1312,6 +1312,51 @@ describe('structured-type validation', () => {
 // miscompile class the rules forbid.
 // ════════════════════════════════════════════════════════════════════
 
+// ════════════════════════════════════════════════════════════════════
+// Loop variables take no annotation — `for x: T, i in xs` would read
+// its head as the destructuring rename `{x: T}` and bind T: valid
+// JavaScript with the wrong binding, the silent-miscompile class.
+// The plain `for x in xs` lowers to an ES for-of, whose binding
+// TypeScript forbids annotating, so the typed spelling is a cast on
+// the iterable and every annotated placement rejects at its colon.
+// ════════════════════════════════════════════════════════════════════
+
+describe('loop-variable annotations reject loudly, positioned at the colon', () => {
+  const rejects = [
+    "for ecc: 'low' | 'high', ei in ['low', 'high']\n  ecc\n",
+    'for x: Foo, i in xs\n  x\n',
+    'for x, i: number in xs\n  x\n',
+    'for x: string in xs\n  x\n',
+    'for {a}: T in xs\n  a\n',
+    'for [a, b], i: number in xs\n  a\n',
+    'for own k: string of obj\n  k\n',
+    'for await x: T as it\n  x\n',
+    'for x: T as it\n  x\n',
+    'for @x: T in xs\n  @x\n',
+    'y = x for x: T in xs\n',
+    'ys = (x for x: T in xs)\n',
+  ];
+  for (const src of rejects) {
+    test(`rejects at the colon: ${JSON.stringify(src)}`, () => {
+      let err = null;
+      try { tokenize(src); } catch (e) { err = e; }
+      expect(err?.message).toMatch(/a loop variable does not take a type annotation/);
+      expect(err.start).toBe(src.indexOf(':'));
+    });
+  }
+
+  test('a pattern rename in a loop head and a cast on the iterable both stay legal', () => {
+    for (const ok of [
+      'for {a: b} in xs\n  b\n',
+      'for {a: b}, i in xs\n  b\n',
+      'for x in xs as Foo[]\n  x\n',
+      'for k, v of (c ? a : b)\n  k\n',
+    ]) {
+      expect(() => tokenize(ok)).not.toThrow();
+    }
+  });
+});
+
 describe('class-head generics reject loudly, positioned at the `<`', () => {
   test('the named head: class Box<T>', () => {
     const src = 'class Box<T>\n  x: T\n';

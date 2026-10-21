@@ -36,6 +36,31 @@ test "for-in indexed reassign loop var", '''
 # A var-less ranged for rejects loudly — the repeat idiom takes a binding.
 fail "range loop without var rejects", "for [1...5]\n  x = 1", "binds no variable"
 
+# A loop variable takes no type annotation: the plain `for x in xs` is an
+# ES for-of, whose binding TypeScript forbids annotating, so the one
+# typed spelling is a cast on the iterable. Every placement rejects at
+# the colon — the indexed form would otherwise read `x: T` as the
+# destructuring rename `{x: T}` and bind T.
+fail "annotated first variable of an indexed loop rejects", "for ecc: 'low' | 'high', ei in ['low', 'high']\n  ecc", "a loop variable does not take a type annotation"
+fail "annotated first variable with a plain type name rejects", "for x: Foo, i in xs\n  x", "a loop variable does not take a type annotation"
+fail "annotated index variable rejects", "for x, i: number in xs\n  x", "a loop variable does not take a type annotation"
+fail "annotated single loop variable rejects", "for x: string in xs\n  x", "a loop variable does not take a type annotation"
+fail "annotated pattern loop variable rejects", "for {a}: T in xs\n  a", "a loop variable does not take a type annotation"
+fail "annotated variable after a pattern rejects", "for [a, b], i: number in xs\n  a", "a loop variable does not take a type annotation"
+fail "annotated for-of key rejects", "for k: string, v of obj\n  k", "a loop variable does not take a type annotation"
+fail "annotated own for-of key rejects", "for own k: string of obj\n  k", "a loop variable does not take a type annotation"
+fail "annotated for-as variable rejects", "for x: T as it\n  x", "a loop variable does not take a type annotation"
+fail "annotated for-await variable rejects", "for await x: T as it\n  x", "a loop variable does not take a type annotation"
+fail "annotated postfix loop variable rejects", "x for x: T in xs", "a loop variable does not take a type annotation"
+fail "annotated comprehension variable rejects", "ys = (x for x: T in xs)", "a loop variable does not take a type annotation"
+fail "annotated promoted loop variable rejects", "for @x: T in xs\n  @x", "a loop variable does not take a type annotation"
+
+# The typed spelling: a cast on the iterable, erased from the JS.
+test "a cast on the iterable types the loop", "out = ''; for ecc, ei in ['low', 'high'] as const\n  out += ecc + ei\nout", "low0high1"
+code "a cast on a plain for-in iterable erases", "for x in xs as Foo[]\n  x", "for (let x of xs) {\n  x;\n}"
+# A pattern rename in a loop head is a rename, never an annotation.
+test "a pattern rename in an indexed loop head binds the renamed name", "out = []; for {a: b}, i in [{a: 1}, {a: 2}]\n  out.push(b + i)\nout", [1, 3]
+
 # Closure capture: loop variable must be fresh per iteration so that
 # closures created inside the body see *this* iteration's value, not
 # the last value the loop variable held. Regression for the bug where
