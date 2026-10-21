@@ -21,9 +21,16 @@ export FORMATS =!
   I420P10: LUMA10, I420P12: LUMA12
 Object.setPrototypeOf FORMATS, null   # 'toString' is not a format
 
+export type Size = { width: number, height: number }
+export type Raster = Size & { data: Uint8Array | Uint8ClampedArray }
+export type Format = keyof typeof FORMATS
+export type Layout = { offset: number, stride: number }
+export type Point = { x: number, y: number }
+export type Output = 'raw' | 'ascii' | 'term' | 'svg' | 'gif' | 'data-url'
+
 # ==[ Validation ]==
 
-export fail =! (msg, kind = Error) -> throw kind.new msg
+export fail: (msg: string, kind?: ErrorConstructor) => never =! (msg, kind = Error) -> throw kind.new msg
 
 export asString =! (value, name) ->
   fail "#{name} expected string, got type=#{typeof value}", TypeError unless typeof value is 'string'

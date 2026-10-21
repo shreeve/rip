@@ -214,6 +214,12 @@ export function ctorAtFields(bodies) {
   const walk = (n, inArrow) => {
     if (!isNode(n)) return;
     const h = n[0];
+    // A headless array is a statement list (a postfix conditional's
+    // consequent): every element is a statement, the first included.
+    if (typeof h !== 'string') {
+      for (const el of n) walk(el, inArrow);
+      return;
+    }
     // The boundary is WHOSE `this` a function has, not whether one is
     // nested. `->`/`def` emit a plain function, whose `this` is
     // dynamic — an assignment there says nothing about this class. A
@@ -16716,6 +16722,26 @@ class Emitter {
     return null;
   }
 
+  // Whether a class member carries the `private` modifier — the
+  // visibility side-band role, which the lexer admits only at the head
+  // of a class body's member row, so a node that carries it is a class
+  // member by construction.
+  isPrivateMember(node) {
+    const id = this.stores.idOf(node);
+    return id !== null && this.stores.role(id, 'visibility') !== null;
+  }
+
+  // The modifier's one generated manifestation: `private` on the TS
+  // face, exact on its own bytes. The JS twin carries nothing — the
+  // modifier erases exactly as an annotation does.
+  tsPrivate(node) {
+    if (!this.ts || !this.isPrivateMember(node)) return;
+    this.b.tsOnly(() => {
+      this.mark(node, 'visibility', () => this.b.emit('private'));
+      this.b.emit(' ');
+    });
+  }
+
   classMembers(body, ind) {
     const stmts = this.isBlock(body) ? body.slice(1) : [body];
     const forms = new Map(stmts.map((stmt) => [stmt, this.classMethodForm(stmt)]));
@@ -16969,8 +16995,12 @@ class Emitter {
           if (isVoidPair && mName === 'constructor') {
             throw this.positionedError(pair, "emitter: a constructor cannot carry the void marker (`constructor!:`) — constructors have no implicit return to suppress", stmt);
           }
+          if (mName === 'constructor' && !isStaticKey(key) && this.isPrivateMember(pair)) {
+            throw this.positionedError(pair, "emitter: `private constructor` is not supported — `private` hides the members a class keeps to itself; the constructor is its callers' entry", stmt);
+          }
           this.b.emit(pad);
           this.mark(pair, 'voidMarker', () => this.mark(pair, '$self', () => {
+            this.tsPrivate(pair);
             if (isStaticKey(key)) this.b.emit('static ');
             if (this.containsAwait(value[2])) this.b.emit('async ');
             if (Emitter.containsYield(value[2])) this.b.emit('*');
@@ -17085,6 +17115,7 @@ class Emitter {
           (typeof stmt[1] === 'string' || isStaticKey(stmt[1]))) {
         this.b.emit(pad);
         this.mark(stmt, '$self', () => this.mark(stmt, 'annotation', () => {
+          this.tsPrivate(stmt);
           if (isStaticKey(stmt[1])) this.b.emit('static ');
           this.mark(stmt, 'target', () => this.withDeclaredName(() => this.emitPrimitive(memberName(stmt[1]))));
           if (this.ts) this.tsAnnotate(stmt, 'annotation', this.annotationText(stmt) ?? tidyType(stmt[2]));
@@ -17100,6 +17131,7 @@ class Emitter {
         this.ind = ind + 1;
         this.b.emit(pad);
         this.mark(stmt, 'annotation', () => this.mark(stmt, '$self', () => {
+          this.tsPrivate(stmt);
           if (isStaticKey(stmt[1])) this.b.emit('static ');
           this.mark(stmt, 'target', () => this.withDeclaredName(() => this.emitPrimitive(memberName(stmt[1]))));
           if (this.ts && this.annotationText(stmt) !== null) {

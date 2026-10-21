@@ -16,7 +16,7 @@
 
 import { QRScanner, decodeQR } from './qr.rip'
 import { readPDF417 } from './pdf417.rip'
-import { fail } from './image.rip'
+import { Format, Layout, Point, Raster, Size, fail } from './image.rip'
 
 # Plane descriptors per VideoFrame format: x shift, y shift, bytes per sample.
 Y8      =! [0, 0, 1]
@@ -37,10 +37,56 @@ PLANES  =!
   I444:    [Y8, Y8, Y8]
   NV12:    [Y8, [1, 1, 2]]
 
+type ScannerInit = ConstructorParameters<typeof QRScanner>[0]
+type Points = Parameters<NonNullable<ScannerInit['pointsOnDetect']>>[0]
+type FrameSource = 'VideoFrame' | 'canvas'
+type Decoded = string | (string | Error)[] | undefined
+type Geometry =
+  rotate: boolean
+  sourceHeight: number
+  sourceX: number
+  sourceY: number
+  size: Size
+  width: number
+  height: number
+type Frame = Geometry & { format: keyof typeof PLANES, layout: Layout }
+type Reader =
+  clean: () => void
+  crop: number | null
+  margin: number
+  luma: Uint8Array
+  landing: boolean
+  busy: () => boolean
+  frame?: (frame: VideoFrame) => void
+  source: (source: FrameSource) => void
+  read: (frame: Frame) => Decoded | Promise<Decoded>
+type CanvasOptions =
+  resultBlockSize?: number
+  overlayColor?: string
+  overlayFailedColor?: string
+  overlaySideColor?: string
+  overlayTimeout?: number
+  overlayEase?: number
+  nativeEvery?: number
+  crop?: number | null
+  margin?: number
+  decodeAll?: boolean
+  async?: boolean
+  drawFailed?: boolean
+  effort?: number
+  timeLimit?: number
+  nativeLimit?: number
+  textDecoder?: ScannerInit['textDecoder']
+  onVideoFrame?: (frame: VideoFrame) => void
+  onFrameSource?: (source: FrameSource) => void
+type CameraFormat = 'auto' | 'canvas' | keyof typeof PLANES
+type CameraOptions = { format?: CameraFormat, video?: MediaTrackConstraints }
+type BarcodeFormat = 'aztec' | 'code_128' | 'code_39' | 'code_93' | 'codabar' | 'data_matrix' | 'ean_13' | 'ean_8' | 'itf' | 'pdf417' | 'qr_code' | 'unknown' | 'upc_a' | 'upc_e'
+
 # ==[ Canvas helpers ]==
 
 # Rendered element size from computed CSS.
-export getSize =! (elm) ->
+export getSize =! (elm: Element): Size ->
   css = getComputedStyle elm
   { width: Math.floor(+css.width.split('px')[0]), height: Math.floor(+css.height.split('px')[0]) }
 
@@ -49,7 +95,7 @@ setCanvasSize =! (canvas, width, height) ->
   canvas.height = height if canvas.height isnt height
   canvas.width  = width  if canvas.width  isnt width
 
-getCanvasContext =! (canvas) ->
+getCanvasContext =! (canvas: HTMLCanvasElement) ->
   context = canvas.getContext '2d'
   fail 'Cannot get 2d context' if context is null
   { canvas, context }
@@ -136,15 +182,15 @@ canvasDefaults =! ->
   drawFailed:          false
 
 export class QRCanvas
-  constructor: (elements = {}, opts = {}, Scanner = QRScanner) ->
+  constructor: (elements: { overlay?: HTMLCanvasElement, resultQR?: HTMLCanvasElement, bitmap?: HTMLCanvasElement } = {}, opts: CanvasOptions = {}, Scanner = QRScanner) ->
     {overlay, resultQR, bitmap} = elements
     @opts = { ...canvasDefaults(), ...opts }
 
     # Decode in flight, and a count of the frames that have landed.
     @frames       = 0
     @lastDetect   = 0
-    @pending      = undefined
-    @task         = undefined
+    @pending: Promise<Decoded> | undefined = undefined
+    @task: TaskController | undefined = undefined
     @cleanPending = false
     @generation   = 0
     @bitmapDrawn  = false
@@ -152,26 +198,26 @@ export class QRCanvas
     # Overlay identity across frames.
     @overlayDrawn              = false
     @overlayMatches            = 0
-    @overlayCandidate          = undefined
-    @overlayPoints             = undefined
-    @overlayBatch              = []
-    @overlayBatchFailed        = undefined
-    @overlaySet                = []
-    @overlayCandidates         = []
+    @overlayCandidate: Points | undefined = undefined
+    @overlayPoints: Points | undefined = undefined
+    @overlayBatch: Points[] = []
+    @overlayBatchFailed: Points | undefined = undefined
+    @overlaySet: Points[] = []
+    @overlayCandidates: Points[] = []
     @overlaySetMatches         = 0
-    @overlayFailed             = undefined
-    @overlayFailedCandidate    = undefined
+    @overlayFailed: Points | undefined = undefined
+    @overlayFailedCandidate: Points | undefined = undefined
     @overlayFailedCandidateSet = false
     @overlayFailedMatches      = 0
     @overlayDeadline           = 0
-    @overlayTimer              = undefined
+    @overlayTimer: ReturnType<typeof setTimeout> | undefined = undefined
     # The lock on screen, where it is headed, and its animation frame.
-    @lockQuad                  = undefined
-    @lockTarget                = undefined
+    @lockQuad: Point[] | undefined = undefined
+    @lockTarget: Point[] | undefined = undefined
     @lockFailed                = false
     @lockAlpha                 = 1
     @lockFading                = false
-    @lockFrame                 = undefined
+    @lockFrame: number | undefined = undefined
 
     # Source geometry of the frame being decoded.
     @rotate       = false
@@ -180,14 +226,14 @@ export class QRCanvas
     @sourceY      = 0
     @inputWidth   = 0
     @inputHeight  = 0
-    @frameSource  = undefined
+    @frameSource: FrameSource | undefined = undefined
     @main = getCanvasContext document.createElement('canvas')
     @overlay = getCanvasContext(overlay) if overlay
     if resultQR
       @resultQR = getCanvasContext resultQR
       @resultQR.context.imageSmoothingEnabled = false
     @bitmap = getCanvasContext(bitmap) if bitmap
-    decoder = { maxSize: { width: 3840, height: 3840 }, stride: 4, textDecoder: @opts.textDecoder }
+    decoder: ScannerInit = { maxSize: { width: 3840, height: 3840 }, stride: 4, textDecoder: @opts.textDecoder }
     decoder.effort         = @opts.effort      if @opts.effort      isnt undefined
     decoder.timeLimit      = @opts.timeLimit   if @opts.timeLimit   isnt undefined
     decoder.nativeLimit    = @opts.nativeLimit if @opts.nativeLimit isnt undefined
@@ -203,7 +249,7 @@ export class QRCanvas
 
     # The frame reader QRCamera drives: clean, crop, luma, frame, source, read.
     # `landing` is set while a copy into the arena is in flight.
-    @reader =
+    @reader: Reader =
       clean!: =>
         @generation++
         @task?.abort()
@@ -225,7 +271,7 @@ export class QRCanvas
 
   # Geometry of the frame about to decode: the crop rect in coded pixels and
   # the presentation size the overlay takes.
-  land!: (frame) ->
+  land!: (frame: Geometry) ->
     @rotate       = frame.rotate
     @sourceHeight = frame.sourceHeight
     @sourceX      = frame.sourceX
@@ -248,12 +294,12 @@ export class QRCanvas
 
   # Decoder geometry lives in cropped, row-contiguous coded pixels, which
   # were never rotated; the overlay is in presentation coordinates.
-  view: (point) ->
+  view: (point: Point): Point ->
     x = point.x + @sourceX
     y = point.y + @sourceY
     if @rotate then { x: @sourceHeight - 1 - y, y: x } else { x, y }
 
-  onPoints!: (points, result) ->
+  onPoints!: (points: Points, result: string | Error) ->
     @resetOverlay() if Date.now() - @lastDetect > @opts.overlayTimeout
     if @rotate or @sourceX or @sourceY
       move! = (point) =>
@@ -373,7 +419,7 @@ export class QRCanvas
     @drawOverlay()
 
   # Sized to the plane, often a downscaled rung; CSS scales it over the preview.
-  drawBitmap!: (img) ->
+  drawBitmap!: (img: Raster) ->
     return unless @bitmap
     {data, height, width} = img
     if @rotate
@@ -389,7 +435,7 @@ export class QRCanvas
     setCanvasSize @bitmap.canvas, width, height
     @bitmap.context.putImageData ImageData.new(out, width, height), 0, 0
 
-  drawResultQr!: (img) ->
+  drawResultQr!: (img: Raster) ->
     return unless @resultQR
     {data, height, width} = img
     blockSize = @opts.resultBlockSize
@@ -400,7 +446,7 @@ export class QRCanvas
 
   # Without points: the lock on screen begins to fade. With points, in
   # batch mode: drawn where they are. Otherwise the lock glides there.
-  drawOverlay!: (points, append = false, failed = false) ->
+  drawOverlay!: (points?: { outline: Point[] }, append: boolean = false, failed: boolean = false) ->
     return unless @overlay
     unless points
       @fade()
@@ -441,7 +487,7 @@ export class QRCanvas
   # snaps. Every draw happens in the one animation frame `schedule`
   # keeps, so aiming inside a decode costs the decode nothing.
 
-  aim!: (quad, failed) ->
+  aim!: (quad: Point[], failed: boolean) ->
     target = ({ x: p.x, y: p.y } for p in quad)
     last   = @lockQuad
     if last and @opts.overlayEase < 1
@@ -495,7 +541,7 @@ export class QRCanvas
   # A lock on a quad: a faint tint and hairline inside a rounded outline,
   # then a bracket over each corner. Sizes follow the frame, not the
   # symbol, so the mark reads the same at every stream size and distance.
-  drawLock!: (ctx, quad, failed, alpha = 1) ->
+  drawLock!: (ctx: CanvasRenderingContext2D, quad: Point[], failed: boolean, alpha: number = 1) ->
     unit   = Math.max 2, ctx.canvas.width / 320
     side   = 0
     side  += Math.hypot(quad[(i + 1) % 4].x - quad[i].x, quad[(i + 1) % 4].y - quad[i].y) for i in [0...4]
@@ -533,7 +579,7 @@ export class QRCanvas
   # The same lock on four image-space corners another reader found on the
   # frame `lastFrame()` handed it, pushed out from the symbol's edge as the
   # QR outline is; it expires like a QR overlay.
-  mark!: (corners, failed = false) ->
+  mark!: (corners: Point[], failed: boolean = false) ->
     return unless @overlay
     quad = (@view point for point in corners)
     cx   = (quad[0].x + quad[1].x + quad[2].x + quad[3].x) / 4
@@ -551,7 +597,7 @@ export class QRCanvas
     @arm()
 
   # Camera-frame decoding is fail-soft: a failed frame is a miss, never a throw.
-  finish: (res) ->
+  finish: (res?: (string | Error)[]): Decoded ->
     failures = undefined
     if res and @opts.decodeAll
       failures = res
@@ -566,7 +612,7 @@ export class QRCanvas
     @drawOverlayBatch() if @opts.decodeAll
     @arm() if @overlayDeadline
 
-  decode: (image, format, layout, size) ->
+  decode: (image?: Raster, format?: Format, layout?: Layout, size?: Size): Decoded | Promise<Decoded> ->
     return if @pending
     @frames++
     # Every nativeEvery-th frame searches the native layer regardless, so a
@@ -624,12 +670,12 @@ export class QRCanvas
   # other readers: `readCode128 canvas.lastFrame(), format: 'I420'`. Valid
   # until the next frame lands, which raises `id`; null before the first
   # and while the next copy is writing the arena.
-  lastFrame: ->
+  lastFrame: (): (Raster & { id: number }) | null ->
     return null if @reader.landing
     {width, height, luma} = @scanner
     if width and height then { width, height, data: luma, id: @frames } else null
 
-  drawImage: (image, height, width) ->
+  drawImage: (image: CanvasImageSource, height: number, width: number): Decoded | Promise<Decoded> ->
     rect = if @opts.crop then cropRect(width, height, @opts.crop, @opts.margin) else { x: 0, y: 0, width, height }
     @land { rotate: false, sourceHeight: height, sourceX: rect.x, sourceY: rect.y, size: rect, width, height }
     # The working canvas holds only the selected source rect; the overlay
@@ -641,7 +687,7 @@ export class QRCanvas
 
   # Scan a different centered region from the next frame on, such as the
   # part of the frame a viewfinder shows and a little beyond its edges.
-  cropTo!: (aspect, margin = @opts.margin) ->
+  cropTo!: (aspect: number | null, margin: number = @opts.margin) ->
     @opts.crop     = aspect
     @opts.margin   = margin
     @reader.crop   = aspect
@@ -675,21 +721,21 @@ export class QRCanvas
 # With only a player it replays file-backed video: VideoFrame reads the
 # decoded player surface, no captured stream needed.
 export class QRCamera
-  constructor: (player, streamOrOpts = {}, init = {}) ->
+  constructor: (player: HTMLVideoElement, streamOrOpts: MediaStream | CameraOptions = {}, init: CameraOptions = {}) ->
     @player = player
     stream = if 'getTracks' of streamOrOpts then streamOrOpts else undefined
-    opts   = if stream then init else streamOrOpts
-    @opts          = { format: 'auto', ...opts }
-    @video         = {}
-    @stream        = undefined
-    @reader        = undefined
+    opts   = if stream then init else streamOrOpts as CameraOptions
+    @opts: CameraOptions & { format: CameraFormat } = { format: 'auto', ...opts }
+    @video: MediaTrackConstraints = {}
+    @stream: MediaStream | undefined = undefined
+    @reader: Reader | undefined = undefined
     @planes        = ({ offset: 0, stride: 0 } for i in [0...4])
     @layouts       = (@planes.slice(0, n) for n in [1..4])
     @rect          = { x: 0, y: 0, width: 0, height: 0 }
-    @nativeCopy    = { rect: @rect }
-    @convertedCopy = { format: 'RGBA', rect: @rect }
-    @scanned = { format: 'I420', layout: { offset: 0, stride: 0 }, rotate: false, size: { width: 0, height: 0 }, sourceHeight: 0, sourceX: 0, sourceY: 0, width: 0, height: 0 }
-    @videoFrame = undefined
+    @nativeCopy: VideoFrameCopyToOptions = { rect: @rect }
+    @convertedCopy: VideoFrameCopyToOptions = { format: 'RGBA', rect: @rect }
+    @scanned: Frame = { format: 'I420', layout: { offset: 0, stride: 0 }, rotate: false, size: { width: 0, height: 0 }, sourceHeight: 0, sourceX: 0, sourceY: 0, width: 0, height: 0 }
+    @videoFrame: boolean | undefined = undefined
     @nativeOnly = false
     @reported   = false
     @reading    = false
@@ -697,13 +743,13 @@ export class QRCamera
     @validateFormat @opts.format
     @setStream stream if stream
 
-  validateFormat!: (format) ->
+  validateFormat!: (format: string) ->
     return if format is 'auto' or format is 'canvas'
-    return if format isnt 'RGB' and PLANES[format]
+    return if format isnt 'RGB' and PLANES[format as keyof typeof PLANES]
     fail "invalid opts.format=#{format} (#{typeof format})", TypeError
 
   # Native auto-detection, forced canvas, or one VideoFrame output format.
-  setFormat!: (format) ->
+  setFormat!: (format: CameraFormat) ->
     @validateFormat format
     return if format is @opts.format
     @opts.format = format
@@ -736,7 +782,7 @@ export class QRCamera
     @resetFrame()
 
   # Plane offsets and strides for a copy of the given format; returns the total bytes.
-  setLayout: (copy, format, width, height) ->
+  setLayout: (copy: VideoFrameCopyToOptions, format: keyof typeof PLANES, width: number, height: number): number ->
     planes = PLANES[format]
     fail "Unsupported VideoFrame format=#{format}" unless planes
     offset = 0
@@ -752,13 +798,13 @@ export class QRCamera
 
   # Copy one frame's coded pixels into the reader's arena; the canvas path
   # handles frames whose visible and display dimensions differ.
-  scan: (frame, reader, rotate) ->
+  scan: (frame: VideoFrame, reader: Reader, rotate: boolean): Promise<Frame> ->
     visible = frame.visibleRect
     width  = visible?.width  or frame.displayWidth
     height = visible?.height or frame.displayHeight
     unless Number.isSafeInteger(width) and Number.isSafeInteger(height) and width > 0 and height > 0 and width is frame.displayWidth and height is frame.displayHeight
       fail 'Unsupported VideoFrame dimensions'
-    selected = if @opts.format is 'auto' or @nativeOnly then frame.format else @opts.format
+    selected = (if @opts.format is 'auto' or @nativeOnly then frame.format else @opts.format) as keyof typeof PLANES | 'canvas' | null
     fail "Unsupported VideoFrame format=#{selected}" if not selected or selected is 'canvas'
     planes = PLANES[selected]
     fail "Unsupported VideoFrame format=#{selected}" unless planes
@@ -783,7 +829,7 @@ export class QRCamera
     # Chromium rejects an explicit non-RGB format even when it equals the
     # native one; omitting it requests the native planes directly.
     copy = if selected is frame.format then @nativeCopy else @convertedCopy
-    copy.format = selected if copy is @convertedCopy
+    copy.format = selected as VideoPixelFormat if copy is @convertedCopy
     required = @setLayout copy, selected, sourceWidth, sourceHeight
     size = frame.allocationSize copy
     unless Number.isSafeInteger(size) and size >= required and size <= reader.luma.length
@@ -804,7 +850,7 @@ export class QRCamera
     scanned.height        = if rotate then width  else height
     scanned
 
-  setStream!: (stream) ->
+  setStream!: (stream: MediaStream) ->
     if @stream and @stream isnt stream
       track.stop() for track in @stream.getTracks()
     @stream = stream
@@ -822,7 +868,7 @@ export class QRCamera
     player.play?()?.catch(->)
 
   # Labels are empty until the first getUserMedia grant.
-  listDevices: ->
+  listDevices: (): Promise<{ deviceId: string, label: string }[]> ->
     fail 'Media Devices not supported' unless navigator.mediaDevices?.enumerateDevices
     devices = navigator.mediaDevices.enumerateDevices!
     devices.filter((device) -> device.kind is 'videoinput').map (d) -> { deviceId: d.deviceId, label: d.label or "Camera #{d.deviceId}" }
@@ -830,7 +876,7 @@ export class QRCamera
   # Stop first so constrained camera hardware is released before the
   # replacement stream is requested; the new constraints layer over the
   # ones the camera opened with.
-  reopen!: (video) ->
+  reopen!: (video: MediaTrackConstraints): Promise<void> ->
     @stop()
     source = @source
     @video = { ...@video, ...video }
@@ -841,34 +887,34 @@ export class QRCamera
       return
     @setStream stream
 
-  setDevice!: (deviceId) ->
+  setDevice!: (deviceId: string): Promise<void> ->
     @reopen! deviceId: { exact: deviceId }
 
   # The live video track and what the browser lets a page do with it.
-  track: -> @stream?.getVideoTracks()[0]
-  capabilities: -> @track()?.getCapabilities?() or {}
-  settings:     -> @track()?.getSettings?() or {}
+  track: (): MediaStreamTrack | undefined -> @stream?.getVideoTracks()[0]
+  capabilities: (): MediaTrackCapabilities & { zoom?: DoubleRange, torch?: boolean } -> @track()?.getCapabilities?() or {}
+  settings: (): MediaTrackSettings -> @track()?.getSettings?() or {}
 
   # One advanced constraint applied to the live track, when the capability
   # exists: zoom is a sensor crop that gives a code more pixels per module,
   # torch lights a dark scene, and Android also takes focusMode and
   # exposure settings. Resolves to whether anything was applied.
-  apply: (constraint) ->
+  apply: (constraint: MediaTrackConstraintSet & Record<string, unknown>): Promise<boolean> ->
     track = @track()
     caps  = @capabilities()
     return false unless track and Object.keys(constraint).every (name) -> caps[name] isnt undefined
     track.applyConstraints! advanced: [constraint]
     true
 
-  zoom: (value) ->
+  zoom: (value: number): Promise<boolean> ->
     range = @capabilities().zoom
     return false unless range
     @apply! zoom: Math.min(range.max, Math.max(range.min, value))
 
-  torch: (lit = true) ->
+  torch: (lit: boolean = true): Promise<boolean> ->
     @apply! torch: lit
 
-  draw: (canvas, fullSize) ->
+  draw: (canvas: QRCanvas, fullSize?: boolean): Decoded | Promise<Decoded> ->
     player = @player
     # drawImage throws while a newly attached video has no decoded frame.
     return if player.readyState < 2 or not player.videoWidth or not player.videoHeight
@@ -879,7 +925,7 @@ export class QRCamera
     size = getSize player
     canvas.drawImage player, size.height, size.width
 
-  readFrame: (canvas, fullSize = false) ->
+  readFrame: (canvas: QRCanvas, fullSize: boolean = false): Promise<Decoded> ->
     reader = canvas.reader
     @reader = reader
     return @draw(canvas, fullSize) if not fullSize or @opts.format is 'canvas' or @videoFrame is false
@@ -893,7 +939,7 @@ export class QRCamera
     return if @reading or reader.busy()
     @reading = true
     source = @source
-    frame = undefined
+    frame: (VideoFrame & { rotation?: number, flip?: boolean }) | undefined = undefined
     try
       frame = VideoFrame.new @player
     catch
@@ -963,23 +1009,23 @@ openCamera =! (player, facingMode, opts = {}) ->
   camera.video = video
   camera
 
-export rearCamera =! (player, opts = {}) ->
+export rearCamera =! (player: HTMLVideoElement, opts: CameraOptions = {}): Promise<QRCamera> ->
   openCamera! player, 'environment', opts
 
-export selfieCamera =! (player, opts = {}) ->
+export selfieCamera =! (player: HTMLVideoElement, opts: CameraOptions = {}): Promise<QRCamera> ->
   openCamera! player, 'user', opts
 
 # Run a callback per presented frame; returns a canceller.
-export frameLoop =! (cb, video) ->
+export frameLoop =! (cb: (ts: number) => void, video?: HTMLVideoElement): (() => void) ->
   useVideo = !!video and typeof video.requestVideoFrameCallback is 'function' and typeof video.cancelVideoFrameCallback is 'function'
   active = true
   handle = undefined
-  loopFn! = (ts) ->
+  loopFn! = (ts: number) ->
     # Check active after the callback: it may cancel the loop from inside.
     cb ts
     handle = request() if active
   request = -> if useVideo then video.requestVideoFrameCallback(loopFn) else requestAnimationFrame(loopFn)
-  cancel  = (id) -> if useVideo then video.cancelVideoFrameCallback(id) else cancelAnimationFrame(id)
+  cancel  = (id: number) -> if useVideo then video.cancelVideoFrameCallback(id) else cancelAnimationFrame(id)
   handle = request()
   ->
     return unless active
@@ -991,7 +1037,7 @@ export frameLoop =! (cb, video) ->
 # ==[ Rasterizers ]==
 
 # SVG markup to a PNG data URL through an image element and a canvas.
-export svgToPng =! (svgData, width, height) ->
+export svgToPng =! (svgData: string, width: number, height: number): Promise<string> ->
   Promise.new (resolve, reject) ->
     # 8192 is the common canvas side limit.
     unless Number.isSafeInteger(width) and Number.isSafeInteger(height) and width > 0 and height > 0 and width <= 8192 and height <= 8192
@@ -1019,7 +1065,7 @@ export svgToPng =! (svgData, width, height) ->
     img.onerror = reject
     img.src = 'data:image/svg+xml,' + encodeURIComponent(source)
 
-export gifToPng =! (gifBytes) ->
+export gifToPng =! (gifBytes: BlobPart): Promise<Blob> ->
   blob = Blob.new [gifBytes], { type: 'image/gif' }
   bitmap = createImageBitmap! blob
   try
@@ -1128,32 +1174,32 @@ symbolCorners =! (bounds) ->
   points.map (_, i) -> points[(first + i) % points.length]
 
 export class BarcodeDetector
-  constructor: (options = {}) ->
+  constructor: (options: { formats?: Iterable<BarcodeFormat, unknown, unknown> } | null = {}) ->
     try
       # WebIDL dictionaries treat null as empty and reject primitives.
       type = typeof options
       throw TypeError.new('The provided value is not a dictionary.') if options isnt null and type isnt 'object' and type isnt 'function'
-      dictionary = if options is null then {} else options
+      dictionary: { formats?: Iterable<BarcodeFormat, unknown, unknown> } = if options is null then {} else options
       # 'unknown' is dropped rather than rejected, as in Chromium.
       formats = if dictionary.formats is undefined then undefined else [...dictionary.formats].filter (f) -> f isnt 'unknown'
       throw TypeError.new('Hint option provided, but is empty.') if formats isnt undefined and formats.length is 0
       for format in formats or []
         unless BARCODE_FORMATS.includes format
           throw TypeError.new "Failed to read the 'formats' property from 'BarcodeDetectorOptions': The provided value '#{format}' is not a valid enum value of type BarcodeFormat."
-      @formats = formats or []
+      @formats: BarcodeFormat[] = formats or []
     catch e
       throw prefixed(e, "Failed to construct 'BarcodeDetector'")
 
-  @getSupportedFormats: -> Promise.resolve ['pdf417', 'qr_code']
+  @getSupportedFormats: (): Promise<BarcodeFormat[]> -> Promise.resolve ['pdf417', 'qr_code']
 
-  detect: (image) ->
+  detect: (image: ImageBitmapSource): Promise<{ boundingBox: DOMRectReadOnly, rawValue: string, format: BarcodeFormat, cornerPoints: Point[] }[]> ->
     try
       data = toImageData! image
       return [] if data is null
       formats = @formats
-      wanted  = (format) -> formats.length is 0 or formats.includes(format)
+      wanted  = (format: BarcodeFormat) -> formats.length is 0 or formats.includes(format)
       if wanted 'qr_code'
-        points   = undefined
+        points: Points | undefined = undefined
         rawValue = try decodeQR(data, effort: Infinity, timeLimit: Infinity, pointsOnDetect: (p, result) -> points = p if typeof result is 'string') catch then undefined
         if rawValue isnt undefined
           box = points.boundingBox

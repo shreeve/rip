@@ -332,7 +332,9 @@ const KEYWORDS = {
 // Pure statements: the token value is the statement itself.
 const STATEMENTS = new Set(['break', 'continue', 'debugger']);
 
-// Keywords and JS reserved words with no feature behind them yet.
+// Keywords and JS reserved words with no feature behind them yet
+// (`private` has one position: the class-member modifier, scanned
+// PRIVATE at the head of a member line and reserved everywhere else).
 // They must never reach the parser as IDENTIFIER: with implicit calls
 // live, `do f x` or `new Date` would otherwise compile silently to a
 // CALL of a reserved word — invalid or wrong JS. Property positions
@@ -837,6 +839,29 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
             if (h === 'COMPONENT') return true;
           }
         }
+      }
+    }
+    return false;
+  };
+
+  // Is the scanner inside a CLASS body — directly, not in a block
+  // nested under one? The innermost unclosed INDENT decides: it is a
+  // class body when the line that opened it carries CLASS. A method's
+  // body, a field's indented value, and every deeper block answer no.
+  const insideClassBody = () => {
+    let depth = 0;
+    for (let i = tokens.length - 1; i >= 0; i--) {
+      const k = tokens[i].kind;
+      if (k === 'OUTDENT') {
+        depth++;
+      } else if (k === 'INDENT') {
+        if (depth > 0) { depth--; continue; }
+        for (let j = i - 1; j >= 0; j--) {
+          const h = tokens[j].kind;
+          if (h === 'TERMINATOR' || h === 'INDENT' || h === 'OUTDENT') return false;
+          if (h === 'CLASS') return true;
+        }
+        return false;
       }
     }
     return false;
@@ -1767,6 +1792,18 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
           renderDepth = indents.length;
           renderParenDepth = parens.length;
         }
+      } else if (word === 'private' && insideClassBody() &&
+                 (prev?.kind === 'INDENT' || prev?.kind === 'TERMINATOR' || prev?.kind === 'OUTDENT')) {
+        // The class-member modifier: a keyword only at the head of a
+        // member line in a class body (the grammar's member rows are
+        // the only shapes that take it), reserved everywhere else. An
+        // accessor takes no modifier — `get x: ->` parses as a call of
+        // `get`, which no member row heads — so the shape rejects here
+        // by name rather than at the parser's dedent.
+        if (/^[ \t]+(get|set)[ \t]+(?=[A-Za-z_$@"'])/.test(afterWord)) {
+          fail('`private` is not supported on a get/set accessor — it marks methods and fields', start);
+        }
+        push('PRIVATE', word, start, pos);
       } else if (RESERVED_WORDS.has(word)) {
         push('RESERVED', word, start, pos);
       } else {
@@ -2067,7 +2104,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
           // (after `@` or a line boundary) — a `b?: string` inside a
           // type's object literal is TYPE TEXT, never a marker.
           const beforeName = tokens[tokens.length - 2] ?? null;
-          const nameSlot = beforeName === null || beforeName.kind === '@' ||
+          const nameSlot = beforeName === null || beforeName.kind === '@' || beforeName.kind === 'PRIVATE' ||
             beforeName.kind === 'TERMINATOR' || beforeName.kind === 'INDENT' || beforeName.kind === 'OUTDENT';
           if ((prev.kind === 'PROPERTY' || prev.kind === 'IDENTIFIER') && nameSlot &&
               /^[^\S\n]*(:=|~=|=!|=(?![=>!])|:(?![:=]))/.test(text.slice(pos + 1))) {
@@ -2416,6 +2453,9 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // surviving in VALUE position is the original loud rejection.
   for (const t of tokens) {
     if (t.kind === 'RESERVED') {
+      if (t.value === 'private') {
+        fail("'private' marks a class member — it heads a member line in a class body (`private helper: ->`) and is reserved everywhere else", t.start);
+      }
       fail(`'${t.value}' is reserved and not supported yet`, t.start);
     }
   }

@@ -218,6 +218,9 @@ const ROWS = [
   ['export class W\n  w: number = 1', 'export declare class W {\n  w: number;\n}\n'],
   ['class A\n  x: number = 5\n  m: -> @x', 'declare class A {\n  x: number;\n}\nexport {};\n'],
   // module-scope typed bindings inside control flow or function bodies
+  // a private member declares by its name alone, as TypeScript's own
+  // emit spells it — typed or not, static or not
+  ['export class A\n  private helper: (x: number) -> x\n  private @make: -> new A()\n  private count: number = 0\n  private name: string\n  private plain = 1\n  pub: (x: number): number -> @helper x', 'export declare class A {\n  private helper;\n  private static make;\n  private count;\n  private name;\n  private plain;\n  pub(x: number): number;\n}\n'],
   // do NOT declare (a d.ts is a module boundary)
   ['f = ->\n  r: number = g()\n  r', ''],
   ['if c\n  x: number = 5\n  x', ''],

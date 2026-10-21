@@ -432,6 +432,17 @@ async function declarationSiteOf(symbol) {
   return typeof start === 'number' ? { path: String(declaration.path), start } : null;
 }
 
+// The node that SPELLED a signature — a function type, a function
+// expression, a method — resolved from the signature's own handle, with the
+// path its offsets are read against. Null for a signature the checker
+// assembled rather than read, and for a handle that will not resolve.
+async function signatureDeclarationOf(sig) {
+  const handle = sig?.declaration;
+  if (handle == null) return null;
+  const node = await handle.resolve().catch(() => null);
+  return node == null ? null : { node, path: String(handle.path) };
+}
+
 // WHERE a SIGNATURE is written, as a generated-text offset.
 //
 // A return is the one position under a signature that no symbol of its own
@@ -440,49 +451,33 @@ async function declarationSiteOf(symbol) {
 // published under several names reports its single return as several things
 // to fix, and the count says more work is left than there is.
 //
-// A parameter is the way in. A parameter's declaration sits inside the
-// function that declares it, and that function is the one place a return
-// annotation can go — so every name exposing that lambda arrives at the
-// same site. A signature with no parameters offers no way in and answers
-// null, for the caller to fall back on what exposed it.
-async function signatureSiteOf(params) {
-  for (const p of params) {
-    const declaration = p?.declarations?.[0];
-    if (declaration === undefined) continue;
-    const node = await declaration.resolve().catch(() => null);
-    const fn = node?.parent;
-    if (fn == null) continue;
-    let start = null;
-    try { start = await fn.getStart(); } catch { continue; }
-    if (typeof start === 'number') return { path: String(declaration.path), start };
-  }
-  return null;
+// The signature's declaring node is the one place a return annotation can
+// go, so every name exposing one lambda arrives at the same site — a
+// signature with no parameters included, whose exposing binding holds the
+// function in an initializer and carries no annotation of its own. A
+// signature with no declaration answers null, for the caller to fall back
+// on what exposed it.
+async function signatureSiteOf(sig) {
+  const found = await signatureDeclarationOf(sig);
+  if (found === null) return null;
+  let start = null;
+  try { start = await found.node.getStart(); } catch { return null; }
+  return typeof start === 'number' ? { path: found.path, start } : null;
 }
 
-// Whether a SIGNATURE states its return, reached the same two ways and for
-// the same reason: the return carries no symbol of its own, so the
-// annotation is read off the FUNCTION.
-//
-// A parameter is the way in, and its parent is that function whatever the
-// function is spelled like. With no parameter to enter by, the symbol that
-// exposes the signature answers instead — and a binding holds its function
-// in an initializer, so `f = (): unknown -> …` writes the annotation there
-// rather than on `f`. The binding's own annotation still wins where it has
-// one, which is what `f: Reader = -> …` claims.
-async function returnIsStated(params, origin, synthesized) {
-  for (const p of params) {
-    const declaration = p?.declarations?.[0];
-    if (declaration === undefined) continue;
-    const node = await declaration.resolve().catch(() => null);
-    const fn = node?.parent;
-    if (fn != null) return authored(fn.type, declaration.path, synthesized);
-  }
+// Whether a SIGNATURE states its return, read off the same node for the
+// same reason: the return carries no symbol of its own, so the annotation is
+// the declaring node's — `(): void ->` writes it on the inner function, and
+// `: Cancel` on the alias's function type. A signature with no declaration
+// is answered by the symbol that exposes it, whose own annotation is the
+// claim (`f: Reader = -> …`).
+async function returnIsStated(sig, origin, synthesized) {
+  const found = await signatureDeclarationOf(sig);
+  if (found !== null) return authored(found.node.type, found.path, synthesized);
   const declaration = origin?.declarations?.[0];
   if (declaration === undefined) return true;
   const node = await declaration.resolve().catch(() => null);
-  if (node === null) return true;
-  return await authored(node.type, declaration.path, synthesized)
-    || await authored(node.initializer?.type, declaration.path, synthesized);
+  return node === null || await authored(node.type, declaration.path, synthesized);
 }
 
 // One published name, walked breadth-first to its first defect.
@@ -627,9 +622,9 @@ async function walkOne(ck, rootType, rootName, owns, rootSymbol, siblings, funct
             // is the claim, and there is no annotation to leave off. Only
             // the width test below answers for the instance.
             signature: !isCtor,
-            stated: await returnIsStated(params, item.origin, synthesized),
+            stated: await returnIsStated(sig, item.origin, synthesized),
             origin: item.origin,
-            site: await signatureSiteOf(params),
+            site: await signatureSiteOf(sig),
             ctorParams,
           });
         }

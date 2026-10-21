@@ -22,7 +22,7 @@
 
 import { gifDataUrl, writeGif } from './gif.rip'
 import { ECI_DECODERS } from './eci.rip'
-import { MAX_IMAGE_SIDE, asInt, asObject, asString, edgeRuns, fail, reverseRuns, sampleLine, validateImage } from './image.rip'
+import { Format, MAX_IMAGE_SIDE, Output, Point, Raster, asInt, asObject, asString, edgeRuns, fail, reverseRuns, sampleLine, validateImage } from './image.rip'
 
 # ==[ Spec tables ]==
 
@@ -707,7 +707,7 @@ ENCODINGS =! ['auto', 'text', 'byte', 'numeric']
 
 # Message bytes: Latin-1 when every character fits, otherwise UTF-8 behind
 # its ECI.
-messageBytes =! (text, codes) ->
+messageBytes =! (text: string, codes: number[]) ->
   wide = false
   for i in [0...text.length]
     if text.charCodeAt(i) > 255
@@ -717,7 +717,23 @@ messageBytes =! (text, codes) ->
   codes.push ECI_CHARSET, ECI_UTF8
   TextEncoder.new().encode text
 
-export encodePDF417 =! (text, output = 'raw', opts = {}) ->
+type PDF417Options =
+  scale?: number
+  border?: number
+  rowHeight?: number
+  aspect?: number
+  columns?: number
+  rows?: number
+  ecc?: number
+  encoding?: 'auto' | 'text' | 'byte' | 'numeric'
+  compact?: boolean
+  optimize?: boolean
+
+def encodePDF417(text: string, output?: 'raw', opts?: PDF417Options): boolean[][]
+def encodePDF417(text: string, output: 'gif', opts?: PDF417Options): Uint8Array
+def encodePDF417(text: string, output: 'ascii' | 'term' | 'svg' | 'data-url', opts?: PDF417Options): string
+def encodePDF417(text: string, output: Output, opts?: PDF417Options): string | boolean[][] | Uint8Array
+export def encodePDF417(text: string, output: Output = 'raw', opts: PDF417Options = {}): string | boolean[][] | Uint8Array
   asString text,   'text'
   asString output, 'output'
   asObject opts,   'opts'
@@ -1343,18 +1359,18 @@ class Stream
 
 # What a read answers: the parse fills the message fields, and the
 # decoder that called it adds the symbol's geometry and error budget.
-export type PDF417Result = {
+type PDF417Result = {
   readerInit: boolean
   text?: string
   bytes?: Uint8Array
-  macro?: { segmentIndex: number, fileId: string, last: boolean, [key: string]: any }
+  macro?: { segmentIndex: number, fileId: string, last: boolean, segmentCount?: number, fileName?: string, timestamp?: number, sender?: string, addressee?: string, fileSize?: number, checksum?: number }
   columns?: number
   rows?: number
   ecc?: number
   errors?: number
   erasures?: number
   codewords?: number[]
-  corners?: { x: number, y: number }[]
+  corners?: Point[]
   vertical?: boolean
   reversed?: boolean
   inverted?: boolean
@@ -1813,7 +1829,26 @@ scanLines =! (s, vertical) ->
 
 # Reader buffers sized for the longest image side seen so far, so a camera
 # loop feeding frames of one size allocates once.
-state =! { side: 0 }
+state: {
+  side: number
+  img?: Raster
+  format?: { step: number, bits: number }
+  luma?: Uint8Array
+  runs?: Float64Array
+  rev?: Float64Array
+  hits?: unknown[][]
+  rluma?: Uint8Array
+  rruns?: Float64Array
+  cells?: Int16Array
+  rayRow?: Int16Array
+  rayT?: Float64Array
+  maxRays?: number
+  hist?: Int32Array
+  votes?: Int32Array
+  codewords?: Int32Array
+  grid?: Int32Array
+  erasures?: Int32Array
+} =! { side: 0 }
 
 buffers =! (side) ->
   maxRays = 4 * side
@@ -1834,8 +1869,10 @@ buffers =! (side) ->
   state.grid      = Int32Array.new(MAX_CODEWORDS)
   state.erasures  = Int32Array.new(MAX_CODEWORDS)
 
+type ReadOptions = { format?: Format }
+
 # First PDF417 found on any scan line; null on a miss.
-export readPDF417 =! (img, opts = {}) ->
+export readPDF417 =! (img: Raster, opts: ReadOptions = {}): PDF417Result | null ->
   asObject opts, 'opts'
   format = validateImage img, opts.format
   side   = Math.max(img.width, img.height) + 2
@@ -1846,10 +1883,20 @@ export readPDF417 =! (img, opts = {}) ->
   scanLines(s, false) or scanLines(s, true)
 
 # Text only; throws on a miss.
-export decodePDF417 =! (img, opts = {}) ->
+export decodePDF417 =! (img: Raster, opts: ReadOptions = {}): string ->
   hit = readPDF417 img, opts
   fail 'PDF417 not found' unless hit
   hit.text
 
 # Internals for the test suite.
-export _tests =! { codewords, eccCodewords, generator, symbolCodewords, indicator, autoLevel, dimensions, correct, parse }
+export _tests: {
+  codewords: (bytes: Uint8Array, encoding: 'auto' | 'text' | 'byte' | 'numeric', codes: number[]) => number[]
+  eccCodewords: (data: Int32Array, level: number) => Int32Array
+  generator: (level: number) => Int32Array
+  symbolCodewords: (codes: number[], columns: number, rows: number, level: number) => Int32Array
+  indicator: (c: number, r: number, rows: number, columns: number, level: number, right: boolean) => number
+  autoLevel: (m: number) => number
+  dimensions: (need: number, columns: number | undefined, rows: number | undefined, rowHeight: number, aspect: number) => { columns: number, rows: number }
+  correct: (c: Int32Array, n: number, k: number, erasures: Int32Array, e: number) => number
+  parse: (c: ArrayLike<number>, count: number) => PDF417Result
+} =! { codewords, eccCodewords, generator, symbolCodewords, indicator, autoLevel, dimensions, correct, parse }

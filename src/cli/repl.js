@@ -251,7 +251,7 @@ const KEYWORD_WORDS = new Set([
   'catch', 'finally', 'yield', 'await', 'import', 'export', 'from',
   'default', 'delete', 'typeof', 'instanceof', 'new', 'super', 'and',
   'or', 'not', 'is', 'isnt', 'class', 'def', 'enum', 'interface',
-  'type', 'extends', 'own', 'schema', 'in', 'of', 'by', 'as',
+  'type', 'extends', 'own', 'schema', 'private', 'in', 'of', 'by', 'as',
   'component', 'render', 'slot', 'offer', 'accept', 'use', 'debugger', 'it',
 ]);
 const LITERAL_WORDS = new Set([
