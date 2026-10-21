@@ -489,6 +489,13 @@ describe('schema type story inside function scopes', () => {
     expect(() => face('f = ->\n  type Schema = { z: number }\n  1\nS = schema :shape; a!')).not.toThrow();
   });
 
+  test('a named declaration in a parameter default rejects positioned: no scope\'s aliases are visible there', () => {
+    const src = 'f = (x = (S = schema :shape; a!)) -> x';
+    const caught = reject(src);
+    expect(caught.message).toMatch(/the schema declaration 'S' sits in a parameter default, where no scope's type aliases are visible/);
+    expect(() => compile(src).code).not.toThrow();
+  });
+
   test('a declaration that is not a statement of its own types too, unless its callable members need a behavior object to follow', () => {
     const value = face('y = (X = schema :shape; a!)\nf (Z = schema :shape; b!)');
     expect(value.code).toContain('type X = { a: string };\ntype Z = { b: string };\n\nlet X!: Schema<X, X>, Z!: Schema<Z, Z>;');

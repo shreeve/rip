@@ -6115,12 +6115,13 @@ class Emitter {
     const nodeId = this.stores.idOf(node);
     // A NAMED declaration always has a story: the story walk reaches
     // every function scope, and a name arrives only through the
-    // assignment forms it records. One without a story is a walk the
-    // emitter's scope rules outgrew — rejected here, never a bare
-    // untyped call by position.
+    // assignment forms it records. The one position it leaves out is a
+    // parameter default, where no scope's aliases are visible; any other
+    // story-less name is a walk the emitter's scope rules outgrew.
+    // Either rejects here, never a bare untyped call by position.
     if (this.ts && schemaName !== null && story === null) {
       throw this.positionedError(node,
-        `emitter: the schema declaration '${schemaName}' has no type story — its scope is one the story walk does not reach`);
+        `emitter: the schema declaration '${schemaName}' sits in a parameter default, where no scope's type aliases are visible — move it into the body, or to module scope`);
     }
     // Rip assigns outward: a name bound by an enclosing scope is that
     // scope's binding, and a declaration of it inside this function

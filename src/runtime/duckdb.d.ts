@@ -68,7 +68,7 @@ export type HarborAdapter = {
   query: Query
   begin: (options?: unknown) => Promise<TxHandle>
   catalog: (opts?: QueryOptions) => Promise<Record<string, unknown>>
-  capabilities: { tx: boolean, ddlTransactional: boolean }
+  capabilities: { tx: true, ddlTransactional: true }
 }
 
 export type TemporalKind = 'utc' | 'instant' | 'civil'

@@ -871,7 +871,7 @@ function harborAdapter(opts = {}) {
     catalog,
     // DuckDB rolls DDL back with the transaction, so the migration
     // runner may claim a whole-file rollback.
-    capabilities: { tx: true, ddlTransactional: true },
+    capabilities: /** @type {{ tx: true, ddlTransactional: true }} */ ({ tx: true, ddlTransactional: true }),
   };
 }
 
