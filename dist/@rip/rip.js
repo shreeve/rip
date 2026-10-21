@@ -1916,7 +1916,7 @@ function descriptorSegments(descriptor, schemaName, fns, adapterCode = null, thi
       segs.push(s);
   };
   const emitTs = (s, span = null) => segs.push({ ts: s, span });
-  const emitBody = (s) => segs.push({ body: s });
+  const emitBody = (s, bound = null) => segs.push({ body: s, bound });
   emit(`{kind: ${JSON.stringify(descriptor.kind)}`);
   if (schemaName)
     emit(`, name: ${JSON.stringify(schemaName)}`);
@@ -1964,18 +1964,19 @@ function tsInserts(fnCode, thisType, annots = true) {
 }
 function fnSegments(fnCode, thisType, emitBody, emitTs, tsFace = false) {
   const inserts = tsInserts(fnCode, thisType, tsFace);
+  const bound = typeof fnCode === "string" ? null : fnCode.bound ?? null;
   if (inserts.length === 0) {
-    emitBody(fnText(fnCode));
+    emitBody(fnText(fnCode), bound);
     return;
   }
   const { code } = fnCode;
   let prev = 0;
   for (const [at, text] of inserts) {
-    emitBody(code.slice(prev, at));
+    emitBody(code.slice(prev, at), bound);
     emitTs(text);
     prev = at;
   }
-  emitBody(code.slice(prev));
+  emitBody(code.slice(prev), bound);
 }
 function entrySegments(e, fnCode, thisType, emit, emitTs, tsFace = false, defaultType = null, ensureType = null, emitBody = emit) {
   switch (e.tag) {
@@ -10242,6 +10243,9 @@ class Emitter {
     this.loopVarDecls = [];
     this.attrNames = [];
     this.importedRefs = [];
+    this.injected = new Map;
+    this.runtimeRefs = [];
+    this.schemaBodyBound = null;
     this.strict = strict;
     this.ts = face === "ts";
     this.pendingHoistTypes = new Map;
@@ -10263,6 +10267,7 @@ class Emitter {
     this.kinds = [];
     this.componentInfo = new Map;
     this.schemaFns = new Map;
+    this.schemaBehaviorPending = new Map;
     this.moduleComponentNames = new Map;
     this.ind = 0;
     this.methodName = null;
@@ -11242,6 +11247,11 @@ class Emitter {
     const imported = this.importSpecOf(value);
     if (imported !== null) {
       this.importedRefs.push([start, this.b.offset, imported.importedName, imported.specifier]);
+      return;
+    }
+    const injected = this.injected.get(value);
+    if (injected !== undefined && !this.inScope(value) && !this.schemaBodyBound?.has(value)) {
+      this.runtimeRefs.push([start, this.b.offset, value, injected.runtime, injected.typed]);
     }
   }
   withDeclaredName(fn) {
@@ -11625,11 +11635,50 @@ class Emitter {
   emitTsTypeDecls(list, pad) {
     if (!this.ts)
       return;
+    this.placeSchemaScope(list, pad);
     for (const s of list) {
       if (!isNode(s) || s[0] !== "type-decl")
         continue;
       this.tsTypeDeclLine(s, pad);
     }
+  }
+  schemaScopeOf(list) {
+    if (!this.schemaScopes)
+      return null;
+    for (const s of list) {
+      const record = this.schemaScopes.get(s);
+      if (record !== undefined)
+        return record;
+    }
+    return null;
+  }
+  placeSchemaScope(list, pad) {
+    const record = this.schemaScopeOf(list);
+    if (record === null || record.placed)
+      return;
+    record.placed = true;
+    for (const s of record.stories) {
+      this.emitSchemaAliasBlock({ node: s.decl.node, exported: false, story: s, lines: s.faceAliasLines ?? s.aliasLines }, "", pad, `
+`);
+    }
+  }
+  emitSchemaAliasBlock(block, exp, pad, tail) {
+    const nodeId = this.stores.idOf(block.node);
+    this.b.tsOnly(() => {
+      this.b.emit(pad);
+      const lines = () => {
+        const at = this.b.offset;
+        const text = block.lines.map((l) => `${exp}${l}`).join(`
+` + pad);
+        emitSchemaTextMarked(this, block, text, nodeId);
+        recordSchemaFields(this, block, text, at);
+      };
+      if (nodeId !== null)
+        this.b.mark(nodeId, "$self", lines);
+      else
+        lines();
+      this.b.emit(tail);
+    });
   }
   tsTypeDeclLine(s, pad) {
     const lines = this.tsRendered(s, () => renderTypeDecl(s[1]));
@@ -11939,6 +11988,7 @@ class Emitter {
       "loopVars",
       "attrNames",
       "importedRefs",
+      "runtimeRefs",
       "vocabulary",
       "silences",
       "memberDecls",
@@ -12544,6 +12594,7 @@ class Emitter {
     if (declareInPlace) {
       entries = this.applyDeclareInPlace(entries, stmts, { tailIsExpression: true });
     }
+    this.attachSchemaConsts(entries, this.schemaScopeOf(stmts)?.stories ?? null);
     return { entries, names };
   }
   hoistTargets(nodes, exclude = [], extraDeclared = []) {
@@ -13075,6 +13126,8 @@ class Emitter {
           if (constType !== null) {
             const bind = this.bindingNameSpan(node, role, name);
             this.b.tsOnly(() => {
+              if (!this.strict)
+                this.b.emit("!");
               this.b.emit(": ");
               this.emitNamedCopies(constType, name, bind?.id ?? null, bind?.span ?? null);
             });
@@ -13125,11 +13178,11 @@ class Emitter {
     entries.directives = collected.directives;
     return entries;
   }
-  attachSchemaConsts(entries) {
-    if (!this.schemaStories)
+  attachSchemaConsts(entries, stories) {
+    if (!stories)
       return;
     const consts = new Map;
-    for (const s of this.schemaStories.values()) {
+    for (const s of stories) {
       if (!s.decl.exported && s.constType !== null)
         consts.set(s.decl.name, s.constType);
     }
@@ -13150,7 +13203,7 @@ class Emitter {
         const rest = all.slice(lead);
         const imported = Emitter.importedNames(all.filter((n) => this.isModuleImport(n)));
         let entries = this.ambientHoistFilter(this.hoistTargets(rest, [], imported));
-        this.attachSchemaConsts(entries);
+        this.attachSchemaConsts(entries, this.schemaModuleStories);
         const names = new Set([...entries.map(([n]) => n), ...imported]);
         for (const n of this.pushReactiveFrame(all, names))
           names.add(n);
@@ -13270,7 +13323,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
       this.emitDataConst();
       const imported = Emitter.importedNames(stmts.filter((n) => this.isModuleImport(n)));
       let entries = this.ambientHoistFilter(this.hoistTargets(stmts, [], imported));
-      this.attachSchemaConsts(entries);
+      this.attachSchemaConsts(entries, this.schemaModuleStories);
       const names = new Set([...entries.map(([n]) => n), ...imported]);
       for (const n of this.pushReactiveFrame(stmts, names))
         names.add(n);
@@ -13877,8 +13930,17 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
     }
     const story = this.schemaStories?.get(node) ?? null;
     const nodeId = this.stores.idOf(node);
-    if (this.ts && story !== null)
+    if (this.ts && schemaName !== null && story === null) {
+      throw this.positionedError(node, `emitter: the schema declaration '${schemaName}' has no type story — its scope is one the story walk does not reach`);
+    }
+    if (this.ts && story?.scope && !this.scopes[this.scopes.length - 1]?.has(schemaName)) {
+      throw this.positionedError(node, `emitter: the schema declaration '${schemaName}' inside this function rebinds the enclosing '${schemaName}' ` + `(a name assigned in an enclosing scope is that scope's binding) — a schema binds once; ` + `declare it under a name of its own, or at the scope that binds '${schemaName}'`);
+    }
+    if (this.ts && story !== null) {
       this.schemaFns.set(node, fns);
+      if (behaviorObjectText(descriptor, story.decl.name, fns, story.thisTypes) !== null)
+        this.schemaBehaviorPending.set(node, story);
+    }
     this.schemaPins = this.ts ? new Map : null;
     this.schemaPinNode = nodeId;
     const pinSpan = (key, span, name) => {
@@ -13890,7 +13952,8 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
       this.schemaPins.get(k).push([span[0], span[1]]);
     };
     if (this.ts && schemaName !== null) {
-      pinSpan("name", this.moduleTypeDeclarationSpans().get(schemaName) ?? null, schemaName);
+      const declared = story?.scope ? this.bindingNameSpan(node, "target", schemaName)?.span ?? null : this.moduleTypeDeclarationSpans().get(schemaName) ?? null;
+      pinSpan("name", declared, schemaName);
     }
     for (const e of this.ts ? descriptor.entries : []) {
       const pin = (key, name, start) => {
@@ -13923,9 +13986,11 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
         for (const seg of segments) {
           if (typeof seg === "string")
             this.emitSchemaText(seg);
-          else if (seg.body !== undefined)
+          else if (seg.body !== undefined) {
+            this.schemaBodyBound = seg.bound ?? null;
             this.emitSchemaText(seg.body, true);
-          else if (seg.span !== null && seg.span !== undefined && nodeId !== null) {
+            this.schemaBodyBound = null;
+          } else if (seg.span !== null && seg.span !== undefined && nodeId !== null) {
             this.b.tsOnly(() => this.b.markSpan(nodeId, "literal", seg.span[0], seg.span[1], () => this.b.emit(seg.ts)));
           } else if (story !== null) {
             const bind = this.bindingNameSpan(story.decl.node, "target", story.decl.name);
@@ -13976,7 +14041,9 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
     const names = params.map((p) => p.name);
     const { stmts, stores } = this.subParse(bodyTokens);
     if (stmts.length === 0)
-      return { code: "(function() {})", thisAt: "(function(".length, annots: [] };
+      return { code: "(function() {})", thisAt: "(function(".length, annots: [], bound: new Set(names) };
+    const isDecl = (x) => Emitter.isReactiveDeclIn(stores, x) || Emitter.isEffectDeclIn(stores, x) || Emitter.isReadonlyDeclIn(stores, x) || Emitter.isGateDeclIn(stores, x);
+    const bound = runtimeAliasBindings(this, [{ tree: ["program", ...stmts], atoms: names, isDecl }]);
     const bodyNode = stmts.length === 1 ? stmts[0] : ["block", ...stmts];
     const isAsync = this.containsAwait(bodyNode);
     const isGen = Emitter.containsYield(bodyNode);
@@ -14034,7 +14101,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
       if (i < params.length - 1)
         at += ", ".length;
     });
-    return { code: `${head}${names.join(", ")}) ${bodyText})`, thisAt: head.length, annots };
+    return { code: `${head}${names.join(", ")}) ${bodyText})`, thisAt: head.length, annots, bound };
   }
   schemaValueCode(bodyTokens) {
     const { stmts, stores } = this.subParse(bodyTokens);
@@ -14207,8 +14274,10 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
     const text = behaviorObjectText(schemaNode[1], story.decl.name, fns, story.thisTypes);
     if (text === null)
       return;
-    if (this.scopes[0]?.has(story.behaviorName) || this.moduleBound?.has(story.behaviorName)) {
-      throw this.positionedError(schemaNode, `emitter: the module binds '${story.behaviorName}', the face-only name this schema's ` + "callable types read through — rename the binding");
+    this.schemaBehaviorPending.delete(schemaNode);
+    const bound = story.scope ? this.scopes.some((s) => s.has(story.behaviorName)) : this.scopes[0]?.has(story.behaviorName);
+    if (bound || this.moduleBound?.has(story.behaviorName)) {
+      throw this.positionedError(schemaNode, `emitter: ${story.scope ? "an enclosing scope" : "the module"} binds '${story.behaviorName}', the face-only name this schema's ` + "callable types read through — rename the binding");
     }
     const id = this.stores.idOf(schemaNode);
     this.b.tsOnly(() => this.b.echo(() => {
@@ -16929,6 +16998,7 @@ ${pad}${into}.push(...${tmp});`);
       this.hoistLine(entries);
       this.b.emit(" ");
     }
+    this.placeSchemaScope([body], "");
     if (this.effectBranchWrites(body)) {
       this.mark(node, "value", () => this.withExpression(() => this.implicitReturn(body, ind, true)));
       this.b.emit(" })");
@@ -23149,6 +23219,8 @@ ${"  ".repeat(ind)}`);
         this.b.emit(")");
     });
     this.b.emit(";");
+    if (this.ts && isNode(stmt) && stmt[0] === "=" && stmt.length === 3)
+      this.tsSchemaBehavior(stmt[2]);
   }
   update(node) {
     if (typeof node[1] === "string" && this.isComputedName(node[1])) {
@@ -23964,6 +24036,25 @@ var containsMatchRead = (sexpr) => {
     return true;
   return sexpr.some(containsMatchRead);
 };
+var SCHEMA_TYPE_DECLS = [
+  "type __RipSchemaIssue = { field: string; error: string; message: string };",
+  "type __RipSchemaError = Error & { issues: __RipSchemaIssue[]; schemaName: string | null; schemaKind: string | null };"
+].join(`
+`);
+var COMPONENTS_TYPE_DECLS = [
+  "type __RipProvider = abstract new (...args: never[]) => { __offers?: object };",
+  "type __RipOffers<P extends __RipProvider> = NonNullable<InstanceType<P>['__offers']>;"
+].join(`
+`);
+var COERCER_TYPE = "{ <F extends (value: string) => unknown>(name: string, fn: F, options?: { raw?: false }): F; <F extends (value: unknown) => unknown>(name: string, fn: F, options: { raw: boolean }): F }";
+var ORM_TYPE_DECLS = [
+  "type __RipAdapterResult = { columns: { name: string; type?: string; duckdbType?: string; encoding?: string }[]; data: unknown[][]; rowCount?: number; rows?: number };",
+  "type __RipAdapterQuery = (sql: string, params?: unknown[] | null, options?: { signal?: AbortSignal | null; timeoutMs?: number | null }) => __RipAdapterResult | Promise<__RipAdapterResult>;",
+  "type __RipAdapter = { query: __RipAdapterQuery; begin?: (options?: unknown) => Promise<{ query: __RipAdapterQuery; commit: () => Promise<void>; rollback: () => Promise<void> }>; catalog?: (options?: { signal?: AbortSignal | null; timeoutMs?: number | null }) => Promise<Record<string, unknown>>; capabilities?: { tx?: boolean; ddlTransactional?: boolean } };",
+  "type __RipSequence = { name: string; start: number };"
+].join(`
+`);
+var ORM_SCHEMA_TYPE = "{ " + "transaction: { <T>(fn: () => T): Promise<Awaited<T>>; <T>(options: { on?: __RipAdapter; [option: string]: unknown }, fn: () => T): Promise<Awaited<T>> }; " + "connect: (options: string | { url: string; timeoutMs?: number | null }) => __RipAdapter; " + "setAdapter: (adapter: __RipAdapter) => void; " + "sequence: { (): __RipSequence | null; (name: null): null; (name: string, options?: { start?: number }): __RipSequence }; " + `registerCoercer: ${COERCER_TYPE}; ` + "plan: () => never; status: () => never; make: () => never; migrate: () => never; introspect: () => never" + " }";
 var RUNTIME_TABLE = [
   {
     key: "intrinsics",
@@ -23983,7 +24074,13 @@ var RUNTIME_TABLE = [
     names: ["__schema", "SchemaError", "registerCoercer"],
     url: new URL("./runtime/schema.js", import.meta.url),
     requires: ["vocab"],
-    triggers: (sexpr, preds) => containsSchema(sexpr)
+    triggers: (sexpr, preds) => containsSchema(sexpr),
+    decls: SCHEMA_TYPE_DECLS,
+    types: {
+      __schema: "(descriptor: unknown) => unknown",
+      SchemaError: "{ new (issues: __RipSchemaIssue[], schemaName?: string | null, schemaKind?: string | null): __RipSchemaError; prototype: __RipSchemaError }",
+      registerCoercer: COERCER_TYPE
+    }
   },
   {
     key: "duckdb",
@@ -23996,7 +24093,12 @@ var RUNTIME_TABLE = [
     names: ["schema", "__schemaSetAdapter"],
     url: new URL("./runtime/orm.js", import.meta.url),
     requires: ["schema", "duckdb", "vocab"],
-    triggers: (sexpr, preds) => containsModelSchema(sexpr)
+    triggers: (sexpr, preds) => containsModelSchema(sexpr),
+    decls: ORM_TYPE_DECLS,
+    types: {
+      schema: ORM_SCHEMA_TYPE,
+      __schemaSetAdapter: "(adapter: __RipAdapter) => void"
+    }
   },
   {
     key: "reactive",
@@ -24019,10 +24121,10 @@ var RUNTIME_TABLE = [
       __computed: "<T>(fn: () => T) => { readonly value: T; read(): T }",
       __effect: "(fn: () => void | (() => void)) => () => void",
       __batch: "<T>(fn: () => T) => T",
-      __readonly: "<T>(value: T) => T",
-      __setErrorHandler: "(handler: ((error: any, source?: string) => void) | null) => void",
-      __handleError: "(error: any, source?: string) => void",
-      __catchErrors: "<T>(fn: () => T, onError?: (e: any) => void) => T | undefined",
+      __readonly: "<T>(value: T) => Readonly<{ value: T }>",
+      __setErrorHandler: "(handler: ((error: unknown) => void) | null) => ((error: unknown) => void) | null",
+      __handleError: "(error: unknown) => void",
+      __catchErrors: "<F extends (...args: never[]) => unknown>(fn: F) => (this: ThisParameterType<F>, ...args: Parameters<F>) => ReturnType<F> | undefined",
       getEffectSignal: "() => AbortSignal | null"
     }
   },
@@ -24051,21 +24153,21 @@ var RUNTIME_TABLE = [
     triggers: (sexpr, preds) => containsMatchRead(sexpr),
     types: {
       abort: "(msg?: string) => never",
-      assert: "(v: any, msg?: string) => void",
+      assert: "(v: unknown, msg?: string) => void",
       exit: "(code?: number) => never",
-      kind: "(v: any) => string",
+      kind: "(v: unknown) => string",
       noop: "() => void",
-      p: "(...args: any[]) => void",
+      p: "(...args: unknown[]) => void",
       pp: "<T>(v: T) => T",
       pj: "<T>(v: T) => T",
       pr: "<T>(v: T) => T",
-      raise: "(a: any, b?: any) => never",
+      raise: "{ (message: unknown): never; <A>(ctor: new (arg: A) => unknown, arg: A): never }",
       rand: "(a?: number, b?: number) => number",
       sleep: "(ms: number) => Promise<void>",
-      toMatchable: "(v: any) => string",
+      toMatchable: "(v: unknown) => string",
       todo: "(msg?: string) => never",
-      warn: "(...args: any[]) => void",
-      zip: "(...arrays: any[][]) => any[][]"
+      warn: "(...args: unknown[]) => void",
+      zip: "<T extends unknown[][]>(...arrays: T) => { [I in keyof T]: T[I] extends (infer E)[] ? E : never }[]"
     }
   },
   {
@@ -24111,7 +24213,11 @@ var RUNTIME_TABLE = [
       "__popOwner",
       "__detachRef"
     ],
+    decls: COMPONENTS_TYPE_DECLS,
     types: {
+      setContext: "(key: string, value: unknown) => void",
+      getContext: "<P extends __RipProvider, K extends keyof __RipOffers<P>>(provider: '__offers' extends keyof InstanceType<P> ? P : never, key: K) => __RipOffers<P>[K]",
+      hasContext: "<P extends __RipProvider>(provider: '__offers' extends keyof InstanceType<P> ? P : never, key: keyof __RipOffers<P>) => boolean",
       __clsx: CLSX_TYPE,
       __style: STYLE_FN_TYPE
     },
@@ -24121,10 +24227,11 @@ var RUNTIME_TABLE = [
   }
 ];
 var runtimeBodies = new Map;
+var RUNTIME_EXPORT_LINE = /^export \{([^}]*)\};\s*$/gm;
 var runtimeText = (rt) => {
   if (!runtimeBodies.has(rt.key)) {
     const raw = readFileSync(rt.url, "utf8");
-    const body = raw.replace(/^export \{[^}]*\};\s*$/gm, "").replace(/^import \{[^}]*\} from '\.\/[a-z-]+\.js';\s*$/gm, "").trimEnd();
+    const body = raw.replace(RUNTIME_EXPORT_LINE, "").replace(/^import \{[^}]*\} from '\.\/[a-z-]+\.js';\s*$/gm, "").trimEnd();
     const stray = /^[ \t]*(import|export)\b.*$/m.exec(body);
     if (stray) {
       throw new Error(`emitter: runtime '${rt.key}' carries a top-level ${stray[1]} that inline delivery cannot strip — ` + `${JSON.stringify(stray[0].trim())}. Inline bodies share one IIFE scope, so it would emit unparseable ` + `output. Use the './name.js' import form, or move the dependency into RUNTIME_TABLE 'requires'.`);
@@ -24453,7 +24560,12 @@ function emitSchemaTextMarked(emitter, block, text, nodeId) {
   if (selfSpan !== null && emitter.b.source !== null) {
     const src = emitter.b.source;
     const named = emitter.moduleTypeDeclarationSpans();
-    const heads = [...new Set([...text.matchAll(/(?:^|\n)(?:export )?type ([A-Za-z_$][\w$]*)/g)].map((m) => m[1]))];
+    if (block.story?.scope) {
+      const own = emitter.bindingNameSpan(block.story.decl.node, "target", block.story.decl.name);
+      if (own !== null)
+        named.set(block.story.decl.name, own.span);
+    }
+    const heads = [...new Set([...text.matchAll(/(?:^|\n)[ \t]*(?:export )?type ([A-Za-z_$][\w$]*)/g)].map((m) => m[1]))];
     for (const headName of heads) {
       if (named.has(headName))
         continue;
@@ -24647,16 +24759,19 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
         };
         visit(rt);
         if (chain.length === 1) {
-          units.push({ runtimes: [rt], names: rt.names, body: runtimeText(rt), types: rt.types });
+          units.push({ runtimes: [rt], names: rt.names, body: runtimeText(rt), types: rt.types, decls: rt.decls });
           continue;
         }
         const types = chain.some((r) => r.types) ? Object.assign({}, ...chain.map((r) => r.types)) : undefined;
+        const decls = chain.some((r) => r.decls) ? chain.filter((r) => r.decls).map((r) => r.decls).join(`
+`) : undefined;
         units.push({
           runtimes: chain,
           names: chain.flatMap((r) => r.names),
           body: chain.map((r) => runtimeText(r)).join(`
 `),
-          types
+          types,
+          decls
         });
       }
     }
@@ -24666,6 +24781,11 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
       const bindings = unit.names.filter((name) => generated.has(name) || !bound.has(name)).map((name) => ({ name, local: generated.has(name) ? emitter.runtimeAliases.get(name) : name }));
       if (bindings.length === 0)
         continue;
+      for (const { name } of bindings) {
+        const rt = unit.runtimes.find((r) => r.names.includes(name));
+        const signature = unit.types?.[name];
+        emitter.injected.set(name, { runtime: rt.key, typed: signature !== undefined && signature !== "any" });
+      }
       const start = builder.offset;
       if (unit.imp) {
         builder.emit(`import { ${bindings.map(({ name, local }) => name === local ? name : `${name} as ${local}`).join(", ")} } from `);
@@ -24675,6 +24795,9 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
         builder.emit(`;
 `);
       } else {
+        if (face === "ts" && unit.types && unit.decls)
+          builder.tsOnly(() => builder.emit(`${unit.decls}
+`));
         builder.emit(`const { ${bindings.map(({ name, local }) => name === local ? name : `${name}: ${local}`).join(", ")} }`);
         const types = face === "ts" && unit.types ? `{ ${bindings.map(({ name }) => `${name}: ${unit.types[name] ?? "any"}`).join("; ")} }` : null;
         if (types !== null && types.includes("__RipClassValue"))
@@ -24711,7 +24834,7 @@ return { ${unit.names.join(", ")} };
   if (face === "ts") {
     let story = null;
     try {
-      story = buildSchemaTypeStory(parseResult.sexpr, builder.source, Emitter.importedNames(parseResult.sexpr.slice(1).filter((s) => emitter.isModuleImport(s))));
+      story = buildSchemaTypeStory(parseResult.sexpr, builder.source, Emitter.importedNames(parseResult.sexpr.slice(1).filter((s) => emitter.isModuleImport(s))), { boundary: (n) => emitter.scopeBoundary(n), isBlock: (n) => emitter.isBlock(n) });
     } catch (err) {
       if (err instanceof SchemaTypeError) {
         const e = new Error(`emitter: ${err.message}`);
@@ -24748,6 +24871,19 @@ return { ${unit.names.join(", ")} };
         });
       }
       emitter.schemaStories = new Map;
+      emitter.schemaModuleStories = story.stories;
+      emitter.schemaScopes = new Map;
+      emitter.schemaScopeRecords = story.scopes.map((scope) => {
+        const record = { stories: scope.stories, placed: false };
+        for (const s of scope.stories) {
+          s.scope = record;
+          emitter.schemaStories.set(s.decl.node, s);
+        }
+        for (const k of scope.keys)
+          if (isNode(k))
+            emitter.schemaScopes.set(k, record);
+        return record;
+      });
       const blocks = [
         ...story.stories.map((s) => ({
           node: s.decl.node,
@@ -24766,26 +24902,15 @@ return { ${unit.names.join(", ")} };
         if (b.story !== null)
           emitter.schemaStories.set(b.node, b.story);
         const exp = b.exported ? "export " : "";
-        const nodeId = stores.idOf(b.node);
         const tail = i === blocks.length - 1 ? `
 
 ` : `
 `;
-        builder.tsOnly(() => {
-          const lines = () => {
-            const at = builder.offset;
-            const text = b.lines.map((l) => `${exp}${l}`).join(`
-`);
-            emitSchemaTextMarked(emitter, b, text, nodeId);
-            recordSchemaFields(emitter, b, text, at);
-          };
-          if (nodeId !== null)
-            builder.mark(nodeId, "$self", lines);
-          else
-            lines();
-          builder.emit(tail);
-        });
+        emitter.emitSchemaAliasBlock(b, exp, "", tail);
       });
+      if (blocks.length === 0)
+        builder.tsOnly(() => builder.emit(`
+`));
     }
   }
   emitter.tsDirectivesArmed = true;
@@ -24811,6 +24936,14 @@ return { ${unit.names.join(", ")} };
   if (ambient.length > 0) {
     emitter.rframes.pop();
     emitter.scopes.pop();
+  }
+  for (const record of emitter.schemaScopeRecords ?? []) {
+    if (record.placed)
+      continue;
+    throw emitter.positionedError(record.stories[0].decl.node, `emitter: the schema declaration '${record.stories[0].decl.name}' sits in a function form whose top the alias placement never reached`);
+  }
+  for (const [node, story] of emitter.schemaBehaviorPending) {
+    throw emitter.positionedError(node, `emitter: the schema declaration '${story.decl.name}' declares callable members but is not a statement of its own, ` + "so its behavior object has no statement to follow — declare it on its own line");
   }
   if (face === "ts" && Array.isArray(parseResult.sexpr)) {
     const stashLocal = (() => {
@@ -24964,7 +25097,7 @@ export {};
     });
   }
   const partNames = emitter.exportedObjects.filter(([, values]) => values.every((value) => emitter.componentNames.includes(value))).map(([name]) => name);
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, indexedLoops: emitter.indexedLoops, componentUses: emitter.componentUses, componentProps: emitter.componentProps, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, runtimeRefs: emitter.runtimeRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, indexedLoops: emitter.indexedLoops, componentUses: emitter.componentUses, componentProps: emitter.componentProps, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
 }
 
 // src/sourcemap.js
@@ -25183,6 +25316,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     componentNames: emitted.componentNames ?? [],
     partNames: emitted.partNames ?? [],
     importedRefs: emitted.importedRefs,
+    runtimeRefs: emitted.runtimeRefs,
     imports: emitted.imports,
     trivia: result.trivia ?? [],
     get declarations() {
@@ -33578,7 +33712,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "f36ad2234ff0f42d";
+var compilerBuild = () => "067415969ab2956f";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
