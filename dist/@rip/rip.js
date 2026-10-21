@@ -13931,7 +13931,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
     const story = this.schemaStories?.get(node) ?? null;
     const nodeId = this.stores.idOf(node);
     if (this.ts && schemaName !== null && story === null) {
-      throw this.positionedError(node, `emitter: the schema declaration '${schemaName}' has no type story — its scope is one the story walk does not reach`);
+      throw this.positionedError(node, `emitter: the schema declaration '${schemaName}' sits in a parameter default, where no scope's type aliases are visible — move it into the body, or to module scope`);
     }
     if (this.ts && story?.scope && !this.scopes[this.scopes.length - 1]?.has(schemaName)) {
       throw this.positionedError(node, `emitter: the schema declaration '${schemaName}' inside this function rebinds the enclosing '${schemaName}' ` + `(a name assigned in an enclosing scope is that scope's binding) — a schema binds once; ` + `declare it under a name of its own, or at the scope that binds '${schemaName}'`);
@@ -33712,7 +33712,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "067415969ab2956f";
+var compilerBuild = () => "7828d146cded634a";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
