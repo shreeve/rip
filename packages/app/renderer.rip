@@ -13,6 +13,7 @@ import {
   __hmrRestoreUi
   __hmrSnapshotUi
 } from '../../src/runtime/components.js'
+import type { __Component } from '../../src/runtime/components.js'
 
 constructGateComponent = __claimGateConstructor()
 
@@ -60,13 +61,16 @@ export type RendererOpts =
 type MountedEntry =
   file: string
   cls: Record<string, any>
-  instance?: Record<string, any> | null
+  instance?: __Component | null
   bindings?: MountBinding[]
   slot?: Record<string, any> | null
   slotOwned?: number
 
 # A component class as HMR sees it: stamped with an identity.
 type HmrCtor = Function & { __hmrId?: string }
+
+# A mounted instance that may define the boundary hook.
+type Boundary = __Component & { onError?: unknown }
 
 type MountBinding =
   path: string
@@ -438,7 +442,7 @@ export def createRenderer(opts: RendererOpts): Renderer
   boundaryOnMounted = (prefixEntries, failure) ->
     handler = null
     for entry in prefixEntries by -1
-      if typeof entry.instance?.onError is 'function'
+      if typeof (entry.instance as Boundary | null | undefined)?.onError is 'function'
         handler = entry.instance
         break
     return false unless handler
@@ -690,7 +694,7 @@ export def createRenderer(opts: RendererOpts): Renderer
         # living instance no patch can carry.
         continue if instance._state is 'unmounted'
         return 'fallback' unless instance._state is 'mounted'
-        id = instance.constructor?.__hmrId
+        id = (instance.constructor as HmrCtor)?.__hmrId
         NewCtor = if typeof id is 'string' then hmrCtorFor(module, id) else null
         return 'fallback' unless NewCtor?
         __hmrRegisterDefinition NewCtor

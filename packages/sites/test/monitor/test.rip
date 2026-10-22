@@ -206,7 +206,7 @@ test! 'pretty rendering derives MIME and rejects unsafe values', ->
   throws (-> renderAccess(record(path: "\ud800"), '{path}')), 'lone surrogate'
 
 test! 'access validation enforces every protocol field bound', ->
-  bad = [
+  bad: [Record<string, unknown>, string][] = [
     [{ sequence: '01' }, 'sequence']
     [{ sequence: '18446744073709551616' }, 'sequence']
     [{ timestamp: '2026-02-29T00:00:00Z' }, 'timestamp']

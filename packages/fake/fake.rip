@@ -19,6 +19,12 @@
 import { SchemaDef } from '../../src/runtime/schema.js'
 import { normalizePersistenceInput, constructInputInstance } from '../../src/runtime/orm.js'
 
+# What a model definition carries once orm.js has installed persistence:
+# the statics fake reads, and the normalized shape its helpers walk.
+type Relation = { kind: string, optional?: boolean, foreignKey: string }
+type Norm = { fields: Map<string, { typeName?: string }>, methods: Map<string, (...args: unknown[]) => unknown>, relations: Map<string, Relation> }
+type Model = SchemaDef & { _assertModel: (api: string) => void, create: (data: Record<string, unknown>) => Promise<unknown>, factory: (num?: number | string, ...args: unknown[]) => unknown }
+
 # ==[ Randomness ]==
 
 __rand = Math.random
@@ -430,9 +436,9 @@ __factoryTableRows = (norm, text) ->
         else v
     row
 
-SchemaDef.prototype.factory = (num = 0, ...args) ->
+(SchemaDef.prototype as Model).factory = (num = 0, ...args) ->
   @_assertModel 'factory'
-  norm = @_normalize()
+  norm = @_normalize() as Norm
 
   if typeof num is 'string'
     out = []
@@ -449,7 +455,7 @@ SchemaDef.prototype.factory = (num = 0, ...args) ->
   make = =>
     derived = __factoryDerive norm, overrides ?? {}
     custom = if seedFn then seedFn.apply!(this, args) else overrides
-    data = { ...derived, ...(custom or {}) }
+    data: Record<string, unknown> = { ...derived, ...(custom or {}) }
     norm.relations.forEach (rel) =>
       return unless rel.kind is 'belongsTo' and not rel.optional
       fk = __camel rel.foreignKey

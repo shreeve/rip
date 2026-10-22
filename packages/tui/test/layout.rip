@@ -758,7 +758,7 @@ test "styles that are all the painter's leave a record blank, and a layout style
   eq [at(box), at(words)], ['0,0 5x1', '0,0 5x1']
 
 test "a value layout cannot use is refused by name, for the key it was written to", ->
-  refused = [
+  refused: [string, unknown, string][] = [
     ['flexGrow', 'lots', 'flexGrow: "lots" is not a number']
     ['flexGrow', -1, 'flexGrow: -1 is not a number']
     ['flex', '1 1 auto', 'flex: "1 1 auto" is not a number']
@@ -781,7 +781,7 @@ test "a value layout cannot use is refused by name, for the key it was written t
   for [key, value, message] in refused
     throws (-> admit key, value), message
     node = div()
-    node.styles[key] = value
+    (node.styles as Record<string, unknown>)[key] = value
     throws (-> layout div({}, [node]), 20), message
 
 test "a name every object inherits is no word of any key, and no wrap mode", ->
