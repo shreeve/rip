@@ -1891,7 +1891,9 @@ export function descriptorSegments(descriptor, schemaName, fns, adapterCode = nu
   // Compiled BODY text — a callable's function, the adapter's expression
   // — rides its own segment kind: it is the author's code, where a `word:`
   // is an object key or a ternary arm, never the descriptor's vocabulary.
-  const emitBody = (s) => segs.push({ body: s });
+  // A callable's segments carry the names it binds (`bound`); the
+  // adapter expression evaluates in the enclosing scope and binds none.
+  const emitBody = (s, bound = null) => segs.push({ body: s, bound });
   emit(`{kind: ${JSON.stringify(descriptor.kind)}`);
   if (schemaName) emit(`, name: ${JSON.stringify(schemaName)}`);
   emit(`, entries: [`);
@@ -1958,18 +1960,19 @@ function tsInserts(fnCode, thisType, annots = true) {
 // road would ship — the gate is a check on the face, not a filter.
 function fnSegments(fnCode, thisType, emitBody, emitTs, tsFace = false) {
   const inserts = tsInserts(fnCode, thisType, tsFace);
+  const bound = typeof fnCode === 'string' ? null : fnCode.bound ?? null;
   if (inserts.length === 0) {
-    emitBody(fnText(fnCode));
+    emitBody(fnText(fnCode), bound);
     return;
   }
   const { code } = fnCode;
   let prev = 0;
   for (const [at, text] of inserts) {
-    emitBody(code.slice(prev, at));
+    emitBody(code.slice(prev, at), bound);
     emitTs(text);
     prev = at;
   }
-  emitBody(code.slice(prev));
+  emitBody(code.slice(prev), bound);
 }
 
 function entrySegments(e, fnCode, thisType, emit, emitTs, tsFace = false, defaultType = null, ensureType = null, emitBody = emit) {

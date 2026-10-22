@@ -53,6 +53,11 @@ jobs:
           bun run parser
           git diff --exit-code src/parser.js
 
+      - name: Runtime declarations
+        run: |
+          bun run decls
+          git diff --exit-code src/runtime
+
       - name: Corpus snapshots
         run: |
           bun run corpus

@@ -281,23 +281,111 @@ const isSchemaNode = (x) =>
   isNode(x) && x[0] === 'schema' && x.length === 2 &&
   x[1] && typeof x[1] === 'object' && Array.isArray(x[1].entries);
 
-// The MODULE-LEVEL named schema declarations — the type story's
-// population (function-local and anonymous schemas keep today's
-// untyped behavior; both are recorded boundaries). Returns
-// declaration order.
+const schemaDeclOf = (n, exported) =>
+  isNode(n) && n[0] === '=' && n.length === 3 && typeof n[1] === 'string' && isSchemaNode(n[2])
+    ? { name: n[1], descriptor: n[2][1], node: n[2], exported }
+    : null;
+
+// The named schema declarations that are MODULE TOP-LEVEL statements,
+// in declaration order — the `.d.ts` road's population. A declaration
+// inside a function is not module surface; an anonymous schema has no
+// name to declare.
 export function collectSchemaDecls(programSexpr) {
   const out = [];
   if (!isNode(programSexpr) || programSexpr[0] !== 'program') return out;
-  const consider = (stmt, exported) => {
-    if (!isNode(stmt) || stmt[0] !== '=' || stmt.length !== 3) return;
-    if (typeof stmt[1] !== 'string' || !isSchemaNode(stmt[2])) return;
-    out.push({ name: stmt[1], descriptor: stmt[2][1], node: stmt[2], exported });
-  };
   for (const stmt of programSexpr.slice(1)) {
-    if (isNode(stmt) && stmt[0] === 'export' && stmt.length === 2) consider(stmt[1], true);
-    else consider(stmt, false);
+    const decl = isNode(stmt) && stmt[0] === 'export' && stmt.length === 2
+      ? schemaDeclOf(stmt[1], true) : schemaDeclOf(stmt, false);
+    if (decl !== null) out.push(decl);
   }
   return out;
+}
+
+const isFuncNode = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 3;
+const isDefNode = (x) => isNode(x) && (x[0] === 'def' || x[0] === 'void-def') && x.length === 4;
+
+// Every named schema declaration (`Name = schema …`) the face types,
+// grouped by the FUNCTION scope whose binding it is: the module, and
+// each function body beneath it — an arrow, a def, an effect body, a
+// multi-statement computed body. A block opens no scope: a declaration
+// inside an `if`, a `try`, or a loop hoists to the enclosing function,
+// and its alias and cast belong there. Class and component bodies are
+// member lists, not statement lists: a member's own `=` is a field
+// whose schema is anonymous (no `name:`), so members are walked only
+// for the function scopes their values hold. Parameter lists are not
+// walked: a schema in a parameter default sits where no scope's
+// aliases are visible, and schemaExpr rejects it.
+// `hooks.boundary` is the emitter's scope classifier (scopeBoundary),
+// the one definition of what opens a scope — the reactive and effect
+// heads are spellable shapes that only the NodeStore's semanticKind
+// tells from a call — and `hooks.isBlock` its block test.
+// Returns { module, scopes }: `module` as collectSchemaDecls gives it
+// plus the block-nested module-scope declarations, each scope as
+// { owner, keys, decls, parent } — `keys` are the body's own statement
+// nodes (the emitter places the scope's aliases at the statement list
+// holding one of them), `parent` the enclosing scope or null directly
+// under the module. Every function scope is listed, declaring or not,
+// outermost first.
+export function collectScopedSchemaDecls(programSexpr, hooks) {
+  const module = [];
+  const scopes = [];
+  if (!isNode(programSexpr) || programSexpr[0] !== 'program') return { module, scopes };
+  const open = (owner, body, parent) => {
+    const scope = { owner, keys: hooks.isBlock(body) ? body.slice(1) : [body], decls: [], parent };
+    scopes.push(scope);
+    walk(body, scope);
+  };
+  const members = (block, scope) => {
+    if (!isNode(block)) return;
+    for (const m of block.slice(1)) {
+      if (!isNode(m)) continue;
+      if (m[0] === '=' && m.length === 3) walk(m[2], scope);
+      else if (m[0] === 'object') for (const pair of m.slice(1)) { if (isNode(pair) && pair.length === 3) walk(pair[2], scope); }
+      else walk(m, scope);
+    }
+  };
+  const walk = (n, scope) => {
+    if (!isNode(n)) return;
+    const decl = schemaDeclOf(n, false);
+    if (decl !== null) {
+      (scope === null ? module : scope.decls).push(decl);
+      return;
+    }
+    if (n[0] === 'export' && n.length === 2) {
+      const exported = schemaDeclOf(n[1], true);
+      if (exported !== null) module.push(exported);
+      else walk(n[1], scope);
+      return;
+    }
+    const boundary = hooks.boundary(n);
+    if (boundary === 'skip') {
+      if (isFuncNode(n)) open(n, n[2], scope);
+      else if (isDefNode(n)) open(n, n[3], scope);
+      else if (n[0] === 'component' && n.length === 3) members(n[2], scope);
+      return;
+    }
+    if (boundary === 'effect') {
+      open(n, n[2], scope);
+      return;
+    }
+    if (boundary === 'reactive') {
+      if (n[0] === 'computed' && hooks.isBlock(n[2]) && n[2].length > 2) open(n, n[2], scope);
+      else walk(n[2], scope);
+      return;
+    }
+    if (boundary === 'readonly') {
+      walk(n[2], scope);
+      return;
+    }
+    if (boundary === 'class') {
+      walk(n[2], scope);
+      members(n[n.length - 1], scope);
+      return;
+    }
+    for (const el of n) walk(el, scope);
+  };
+  for (const stmt of programSexpr.slice(1)) walk(stmt, null);
+  return { module, scopes };
 }
 
 // How many times the module's top level BINDS each name with `=`.
@@ -318,14 +406,13 @@ export function collectAssignedNames(programSexpr) {
   return counts;
 }
 
-// User-declared TYPE-SPACE names at module level — everything that
-// occupies a TS type name in the emitted artifacts: type/interface
-// declarations, class declarations, and enum declarations (the enum
-// companion). The collision check runs the schema alias names
-// against this set.
-export function collectUserTypeNames(programSexpr) {
+// User-declared TYPE-SPACE names among one scope's own statements —
+// everything that occupies a TS type name in the emitted artifacts:
+// type/interface declarations, class declarations, and enum
+// declarations (the enum companion). The collision check runs the
+// scope's schema alias names against this set.
+export function userTypeNamesOf(stmts) {
   const names = new Map(); // name → {what, node} (message + face position)
-  if (!isNode(programSexpr) || programSexpr[0] !== 'program') return names;
   const consider = (stmt) => {
     if (!isNode(stmt)) return;
     if (stmt[0] === 'type-decl' && typeof stmt[1] === 'string') {
@@ -337,10 +424,15 @@ export function collectUserTypeNames(programSexpr) {
       names.set(stmt[1], { what: `enum ${stmt[1]}`, node: stmt });
     }
   };
-  for (const stmt of programSexpr.slice(1)) {
+  for (const stmt of stmts) {
     consider(isNode(stmt) && stmt[0] === 'export' && stmt.length === 2 ? stmt[1] : stmt);
   }
   return names;
+}
+
+export function collectUserTypeNames(programSexpr) {
+  if (!isNode(programSexpr) || programSexpr[0] !== 'program') return new Map();
+  return userTypeNamesOf(programSexpr.slice(1));
 }
 
 // Is the program a MODULE by its own VALUE-LEVEL syntax — a
@@ -725,9 +817,26 @@ export function schemaTypeStory(decl, byName, known, source = null) {
 // a field, union member, or relation target spelling one renders it
 // rather than `unknown`. The caller supplies them because telling a
 // module import from a dynamic-import call takes the stores.
-export function buildSchemaTypeStory(programSexpr, source = null, imported = []) {
-  const decls = collectSchemaDecls(programSexpr);
-  if (decls.length === 0) return null;
+// `hooks` (collectScopedSchemaDecls) extends the population from the
+// module's top-level statements to every function scope: the face
+// passes it, so a declaration types the same wherever it is written;
+// the `.d.ts` road passes none, since only module surface declares.
+// With it, the module story covers block-nested module-scope
+// declarations too, and `scopes` carries one entry per declaring
+// function scope — { owner, keys, stories } — whose alias lines the
+// emitter places at that scope's top. Each scope claims its own
+// type-space namespace (TS block scoping), sees every enclosing
+// scope's schemas and the module's as `known`, and is never seen by
+// them: a module field naming a function-local schema renders
+// `unknown`, never an unresolved identifier.
+export function buildSchemaTypeStory(programSexpr, source = null, imported = [], hooks = null) {
+  const scoped = hooks !== null
+    ? collectScopedSchemaDecls(programSexpr, hooks)
+    : { module: collectSchemaDecls(programSexpr), scopes: [] };
+  const decls = scoped.module;
+  const scopes = scoped.scopes.filter((s) => s.decls.length > 0);
+  if (decls.length === 0 && scopes.length === 0) return null;
+  const everyDecl = [...decls, ...scopes.flatMap((s) => s.decls)];
   // A DERIVED binding (`UserPublic = User.pick("id", "email")`) builds
   // its schema by calling the algebra, so the checker types the VALUE
   // from the intrinsic signatures and needs nothing from here — but the
@@ -752,70 +861,77 @@ export function buildSchemaTypeStory(programSexpr, source = null, imported = [])
   ]);
   const byName = new Map(decls.map((d) => [d.name, d]));
   const userTypes = collectUserTypeNames(programSexpr);
-  const withModel = decls.some((d) => d.descriptor.kind === 'model');
-  const withMixin = decls.some((d) => d.descriptor.kind === 'mixin');
+  const withModel = everyDecl.some((d) => d.descriptor.kind === 'model');
+  const withMixin = everyDecl.some((d) => d.descriptor.kind === 'mixin');
 
   // The user-vs-intrinsic direction: the module is about to EMIT the
   // intrinsic block, so a user type/interface/class/enum name in the
   // emitted tier would duplicate (aliases, TS2300) or silently merge
-  // (interfaces) with it. Checked against the tier that actually
-  // prints — a user `ModelSchema` beside validation-only schemas is
-  // legal. Positioned on the USER declaration (the offender the user
-  // can rename).
-  for (const [name, user] of userTypes) {
-    const emitted = VALIDATION_INTRINSIC_NAMES.has(name) ||
-      (withMixin && MIXIN_INTRINSIC_NAMES.has(name)) ||
-      (withModel && MODEL_INTRINSIC_NAMES.has(name));
-    if (emitted) {
-      throw new SchemaTypeError(
-        `${user.what} collides with the schema intrinsic declarations this module emits ` +
-        `(a schema declaration is present${MODEL_INTRINSIC_NAMES.has(name) ? ', and a :model brings the persistence tier' : ''}) — ` +
-        `rename it; the emitted intrinsic vocabulary here is ` +
-        `${[...VALIDATION_INTRINSIC_NAMES, ...(withMixin ? MIXIN_INTRINSIC_NAMES : []), ...(withModel ? MODEL_INTRINSIC_NAMES : [])].join(', ')}`,
-        null, user.node);
+  // (interfaces) with it — and a function scope that declares a schema
+  // reads the intrinsic names through its cast, so a user type of that
+  // spelling among its statements would shadow what the cast names.
+  // Checked against the tier that actually prints — a user
+  // `ModelSchema` beside validation-only schemas is legal. Positioned
+  // on the USER declaration (the offender the user can rename).
+  const rejectIntrinsicUsers = (types) => {
+    for (const [name, user] of types) {
+      const emitted = VALIDATION_INTRINSIC_NAMES.has(name) ||
+        (withMixin && MIXIN_INTRINSIC_NAMES.has(name)) ||
+        (withModel && MODEL_INTRINSIC_NAMES.has(name));
+      if (emitted) {
+        throw new SchemaTypeError(
+          `${user.what} collides with the schema intrinsic declarations this module emits ` +
+          `(a schema declaration is present${MODEL_INTRINSIC_NAMES.has(name) ? ', and a :model brings the persistence tier' : ''}) — ` +
+          `rename it; the emitted intrinsic vocabulary here is ` +
+          `${[...VALIDATION_INTRINSIC_NAMES, ...(withMixin ? MIXIN_INTRINSIC_NAMES : []), ...(withModel ? MODEL_INTRINSIC_NAMES : [])].join(', ')}`,
+          null, user.node);
+      }
     }
-  }
+  };
+  rejectIntrinsicUsers(userTypes);
 
-  const owners = new Map(); // emitted type name → owning description
-  // One name's claim on the module's type-space namespace. Derived
-  // bindings claim through here too — their alias occupies the same
+  // One scope's claims on its type-space namespace. Derived bindings
+  // claim through the module's too — their alias occupies the same
   // namespace and collides on the same three fronts.
   // `at` positions the rejection where no descriptor offset exists: a
   // folded descriptor is built fresh and carries none, so a derived
   // name's collision would otherwise report against the file instead of
   // the line the reader has to change.
-  const claim = (t, whose, start, at = null) => {
-    if (SCHEMA_INTRINSIC_NAMES.has(t)) {
-      throw new SchemaTypeError(
-        `${whose} emits the type name '${t}', which is reserved by the schema ` +
-        `intrinsic declarations (${[...SCHEMA_INTRINSIC_NAMES].join(', ')}) — rename the schema`,
-        start, at);
-    }
-    const prior = owners.get(t);
-    if (prior !== undefined) {
-      throw new SchemaTypeError(
-        `${whose} emits the type name '${t}', which ${prior} already emits — ` +
-        `every schema-emitted type name binds once per module; rename one`,
-        start, at);
-    }
-    owners.set(t, whose);
-    const user = userTypes.get(t);
-    if (user !== undefined) {
-      // Positioned on the USER declaration — the offender the user
-      // can rename — like the intrinsic-collision path above. The
-      // reserved family is `${name}Data` / `${name}Create` /
-      // `${name}Ensure` / `${name}Query` beside the schema's own
-      // name: a deliberate per-schema namespace reservation.
-      throw new SchemaTypeError(
-        `${whose} emits the type name '${t}', which collides with ${user.what} — ` +
-        `the schema's types and the user declaration would merge or duplicate; rename one`,
-        null, user.node);
-    }
+  const claimer = (types, where) => {
+    const owners = new Map(); // emitted type name → owning description
+    return (t, whose, start, at = null) => {
+      if (SCHEMA_INTRINSIC_NAMES.has(t)) {
+        throw new SchemaTypeError(
+          `${whose} emits the type name '${t}', which is reserved by the schema ` +
+          `intrinsic declarations (${[...SCHEMA_INTRINSIC_NAMES].join(', ')}) — rename the schema`,
+          start, at);
+      }
+      const prior = owners.get(t);
+      if (prior !== undefined) {
+        throw new SchemaTypeError(
+          `${whose} emits the type name '${t}', which ${prior} already emits — ` +
+          `every schema-emitted type name binds once per ${where}; rename one`,
+          start, at);
+      }
+      owners.set(t, whose);
+      const user = types.get(t);
+      if (user !== undefined) {
+        // Positioned on the USER declaration — the offender the user
+        // can rename — like the intrinsic-collision path above. The
+        // reserved family is `${name}Data` / `${name}Create` /
+        // `${name}Ensure` / `${name}Query` beside the schema's own
+        // name: a deliberate per-schema namespace reservation.
+        throw new SchemaTypeError(
+          `${whose} emits the type name '${t}', which collides with ${user.what} — ` +
+          `the schema's types and the user declaration would merge or duplicate; rename one`,
+          null, user.node);
+      }
+    };
   };
-  const stories = [];
-  for (const d of decls) {
-    const story = schemaTypeStory(d, byName, known, source);
-    for (const t of story.typeNames) claim(t, `schema '${d.name}'`, d.descriptor.start ?? null);
+  const claim = claimer(userTypes, 'module');
+  const storyOf = (d, names, visible, claimIn) => {
+    const story = schemaTypeStory(d, names, visible, source);
+    for (const t of story.typeNames) claimIn(t, `schema '${d.name}'`, d.descriptor.start ?? null);
     // A field's `[default]` is a bare JS value in the runtime
     // descriptor, related to the field's declared type by nothing the
     // checker can see — so the face states the relation: entry index →
@@ -833,10 +949,23 @@ export function buildSchemaTypeStory(programSexpr, source = null, imported = [])
       // spelling the runtime deliberately serves. (`~` coercions run
       // before defaults, so no other type earns this.)
       const admits = e.typeName === 'date' || e.typeName === 'datetime' ? ' | string' : '';
-      defaultTypes.set(i, fieldType(e, known) + admits);
+      defaultTypes.set(i, fieldType(e, visible) + admits);
     });
-    stories.push({ decl: d, ...story, defaultTypes });
-  }
+    return { decl: d, ...story, defaultTypes };
+  };
+  const stories = decls.map((d) => storyOf(d, byName, known, claim));
+
+  const scopeStories = scopes.map((scope) => {
+    const chain = [];
+    for (let s = scope.parent; s !== null; s = s.parent) chain.unshift(s);
+    const inherited = chain.flatMap((s) => s.decls);
+    const visible = new Set([...known, ...inherited.map((d) => d.name), ...scope.decls.map((d) => d.name)]);
+    const names = new Map([...byName, ...[...inherited, ...scope.decls].map((d) => [d.name, d])]);
+    const types = userTypeNamesOf(scope.keys);
+    rejectIntrinsicUsers(types);
+    const claimIn = claimer(types, 'scope');
+    return { owner: scope.owner, keys: scope.keys, stories: scope.decls.map((d) => storyOf(d, names, visible, claimIn)) };
+  });
 
   // The companion alias, and ONLY that: the binding keeps the type the
   // algebra gives its value, so nothing here re-declares the const and
@@ -870,6 +999,7 @@ export function buildSchemaTypeStory(programSexpr, source = null, imported = [])
   return {
     stories,
     derivations,
+    scopes: scopeStories,
     intrinsicLines: schemaIntrinsicLines(withModel, withMixin),
     withModel,
   };

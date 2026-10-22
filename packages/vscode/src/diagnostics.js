@@ -341,6 +341,21 @@ export function mapTsDiagnostic(good, d) {
         'a child notifies its parent through a callback prop';
     }
   }
+  // THE LOWERED CONTEXT READ. An accept's `_init` reads its provider
+  // through `getContext(Provider, 'name')`, typed as a source call is, so
+  // a provider that is no component, or a key it does not offer, is
+  // refused there too (TS2345) — the fact the declare line reports on the
+  // accept's name, so this copy drops. The line is known by its shape —
+  // the runtime's read, under its own name or the alias delivery mints
+  // when a binding takes the name (underscores appended) — and by the
+  // accept it serves: the member written, the provider spelled, and the
+  // key are the accept's own record. A read the author wrote through
+  // another callee keeps its diagnostic.
+  if (d.code === 2345) {
+    const line = good.code.slice(good.code.lastIndexOf('\n', s) + 1, good.code.indexOf('\n', s) === -1 ? undefined : good.code.indexOf('\n', s)).trim();
+    const read = /^this\.([A-Za-z_$][\w$]*) = getContext_*\((.+), '([^']*)'\);$/.exec(line);
+    if (read && read[1] === read[3] && (good.kinds ?? []).some((k) => k.provider != null && k.name === read[1] && k.provider === read[2])) return null;
+  }
   // A REQUIRED PROP THE CONSTRUCTION OMITS. The props parameter spells a
   // required prop as the two-arm union its bind channel admits, and
   // tsgo's sentence elides the arm, so the miss is named from the

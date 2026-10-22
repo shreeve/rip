@@ -1945,17 +1945,12 @@ harborDouble = (rules = []) ->
   fetchFn.calls = calls
   fetchFn
 
-field = (name, typeName = 'string', opts = {}) ->
-  { tag: 'field', name, modifiers: (if opts.optional then ['?'] else ['!']), typeName, ...(if opts.unique then { unique: true } else {}) }
-dir = (name, ...args) -> { tag: 'directive', name, args }
-model = (name, ...entries) -> { kind: 'model', name, entries }
-
 withHarbor = (rules, scenario) ->
   SchemaRegistry.scope! ->
     fetch = harborDouble rules
     __schemaSetAdapter harborAdapter { url: 'http://harbor', fetch }
     sqls = (-> fetch.calls.filter((c) -> c.url.endsWith('/sql')).map (c) -> c.sql)
-    scenario { define: (m) -> __schema(m), fetch, sqls }
+    scenario { fetch, sqls }
 
 test "setAdapter accepts a harborAdapter", ->
   adapter = harborAdapter { url: 'http://harbor', fetch: harborDouble() }
@@ -1967,9 +1962,10 @@ test! "connect installs the adapter for the schema ORM", ->
   fetch = harborDouble [[/^SELECT/, hrows(['id'], [7])]]
   connect { url: 'http://harbor', fetch }
   SchemaRegistry.scope! ->
-    User = __schema model 'User', field('name')
+    User = schema :model
+      name! string
     row = User.find! 7
-    eq row.id, 7
+    eq row?.id, 7
     ok fetch.calls.some (c) -> c.sql? and /FROM "users"/.test(c.sql)
 
 # The two tiers open transactions by different mechanisms — this one
@@ -1981,7 +1977,8 @@ test! "a model statement inside a rip/db transaction runs on that session", ->
   fetch = harborDouble [[/^INSERT INTO "users"/, hrows(['id', 'name'], [1, 'Ada'])]]
   connect { url: 'http://harbor', fetch }
   SchemaRegistry.scope! ->
-    User = __schema model 'User', field('name')
+    User = schema :model
+      name! string
     transaction! (tx) ->
       tx.sql! 'DELETE FROM "users"'
       User.create! { name: 'Ada' }
@@ -1996,7 +1993,8 @@ test! "a raw statement inside a schema transaction runs on that session", ->
   fetch = harborDouble [[/^INSERT INTO "users"/, hrows(['id', 'name'], [1, 'Ada'])]]
   connect { url: 'http://harbor', fetch }
   SchemaRegistry.scope! ->
-    User = __schema model 'User', field('name')
+    User = schema :model
+      name! string
     ormTransaction! ->
       User.create! { name: 'Ada' }
       db.sql! 'DELETE FROM "users"'
@@ -2009,33 +2007,38 @@ test! "a raw statement inside a schema transaction runs on that session", ->
 p "\nORM — row hydration"
 
 test! "create() hydrates from INSERT ... RETURNING", ->
-  value = withHarbor! [[/^INSERT INTO "users"/, hrows(['id', 'name', 'email'], [1, 'Ada', 'a@b.c'])]], ({ define }) ->
-    User = define model 'User', field('name'), field('email')
+  value = withHarbor! [[/^INSERT INTO "users"/, hrows(['id', 'name', 'email'], [1, 'Ada', 'a@b.c'])]], ->
+    User = schema :model
+      name! string
+      email! string
     u = User.create! { name: 'Ada', email: 'a@b.c' }
     { id: u.id, name: u.name, email: u.email }
   eq value, { id: 1, name: 'Ada', email: 'a@b.c' }
 
 test! "where().all() hydrates each row keyed by column.name", ->
-  value = withHarbor! [[/^SELECT \* FROM "users"/, hrows(['id', 'name'], [1, 'Ada'], [2, 'Bo'])]], ({ define, sqls }) ->
-    User = define model 'User', field('name')
+  value = withHarbor! [[/^SELECT \* FROM "users"/, hrows(['id', 'name'], [1, 'Ada'], [2, 'Bo'])]], ({ sqls }) ->
+    User = schema :model
+      name! string
     found = User.where({ id: [1, 2] }).all!
     { rows: found.map((u) -> { id: u.id, name: u.name }), sql: sqls().find (s) -> s.startsWith 'SELECT' }
   eq value.rows, [{ id: 1, name: 'Ada' }, { id: 2, name: 'Bo' }]
   eq value.sql, 'SELECT * FROM "users" WHERE "id" IN (?, ?)'
 
 test! "find(id) targets the primary key and hydrates the row", ->
-  value = withHarbor! [[/^SELECT \* FROM "users"/, hrows(['id', 'name'], [7, 'Ada'])]], ({ define, fetch }) ->
-    User = define model 'User', field('name')
+  value = withHarbor! [[/^SELECT \* FROM "users"/, hrows(['id', 'name'], [7, 'Ada'])]], ({ fetch }) ->
+    User = schema :model
+      name! string
     u = User.find! 7
     select = fetch.calls.find (c) -> c.sql?.startsWith 'SELECT'
-    { id: u.id, name: u.name, sql: select.sql, params: select.params }
+    { id: u?.id, name: u?.name, sql: select.sql, params: select.params }
   eq value, { id: 7, name: 'Ada', sql: 'SELECT * FROM "users" WHERE "id" = ? LIMIT 1', params: [7] }
 
 p "\nORM — transactions"
 
 test! "a committing transaction opens a session, carries it, and drops it", ->
-  trace = withHarbor! [[/^INSERT INTO "users"/, hrows(['id', 'name'], [1, 'Ada'])]], ({ define, fetch }) ->
-    User = define model 'User', field('name')
+  trace = withHarbor! [[/^INSERT INTO "users"/, hrows(['id', 'name'], [1, 'Ada'])]], ({ fetch }) ->
+    User = schema :model
+      name! string
     id = ormTransaction! ->
       u = User.create! { name: 'Ada' }
       u.id
@@ -2049,8 +2052,9 @@ test! "a committing transaction opens a session, carries it, and drops it", ->
   eq trace, { id: 1, opened: true, insertCarriedSession: 'sess-1', committed: true, dropped: true }
 
 test! "a throwing transaction rolls back and still drops the session", ->
-  trace = withHarbor! [[/^INSERT INTO "users"/, hrows(['id', 'name'], [1, 'Ada'])]], ({ define, fetch }) ->
-    User = define model 'User', field('name')
+  trace = withHarbor! [[/^INSERT INTO "users"/, hrows(['id', 'name'], [1, 'Ada'])]], ({ fetch }) ->
+    User = schema :model
+      name! string
     threw = false
     try
       ormTransaction! ->
@@ -2072,9 +2076,13 @@ test! "include() loads a hasMany relation with one IN query", ->
   value = withHarbor! [
     [/^SELECT \* FROM "users"/, hrows(['id', 'name'], [1, 'Ada'], [2, 'Bo'])]
     [/^SELECT \* FROM "orders"/, hrows(['id', 'user_id'], [10, 1], [11, 1], [12, 2])]
-  ], ({ define, sqls }) ->
-    define model 'Order', field('total'), dir('belongsTo', { target: 'User', optional: false })
-    User = define model 'User', field('name'), dir('hasMany', { target: 'Order', optional: false })
+  ], ({ sqls }) ->
+    Order = schema :model
+      total! string
+      @belongsTo User
+    User = schema :model
+      name! string
+      @hasMany Order
     users = User.where({}).includes('orders').all!
     counts = []
     for u in users
@@ -2091,8 +2099,9 @@ test! "include() loads a hasMany relation with one IN query", ->
 p "\nORM — constraint translation"
 
 test! "a unique violation becomes a SchemaError on the offending field", ->
-  outcome = withHarbor! [[/^INSERT INTO "users"/, (-> hfail('Duplicate key "email: a@b.c" violates unique constraint', 'CONSTRAINT'))]], ({ define }) ->
-    User = define model 'User', field('email', 'email', { unique: true })
+  outcome = withHarbor! [[/^INSERT INTO "users"/, (-> hfail('Duplicate key "email: a@b.c" violates unique constraint', 'CONSTRAINT'))]], ->
+    User = schema :model
+      email! email @unique
     try
       User.create! { email: 'a@b.c' }
       { threw: false }
@@ -2112,10 +2121,12 @@ test! "destroy() on a softDelete model sets deleted_at", ->
   value = withHarbor! [
     [/^SELECT \* FROM "posts"/, hrows(['id', 'title', 'deleted_at'], [1, 'Hi', null])]
     [/^UPDATE "posts"/, hack(1)]
-  ], ({ define, sqls }) ->
-    Post = define model 'Post', field('title'), dir('softDelete')
+  ], ({ sqls }) ->
+    Post = schema :model
+      title! string
+      @softDelete
     post = Post.first!
-    post.destroy!
+    post?.destroy!
     { update: sqls().find((s) -> s.startsWith 'UPDATE'), deletedNothing: sqls().every (s) -> not s.startsWith 'DELETE' }
   ok /^UPDATE "posts" SET "deleted_at" = \? WHERE "id" = \?/.test value.update
   eq value.deletedNothing, true
@@ -2123,8 +2134,9 @@ test! "destroy() on a softDelete model sets deleted_at", ->
 p "\nORM — bulk operations"
 
 test! "insertMany issues a single multi-row INSERT", ->
-  value = withHarbor! [[/^INSERT INTO "users"/, hrows(['id', 'name'], [1, 'Ada'], [2, 'Bo'])]], ({ define, fetch }) ->
-    User = define model 'User', field('name')
+  value = withHarbor! [[/^INSERT INTO "users"/, hrows(['id', 'name'], [1, 'Ada'], [2, 'Bo'])]], ({ fetch }) ->
+    User = schema :model
+      name! string
     User.insertMany! [{ name: 'Ada' }, { name: 'Bo' }]
     inserts = fetch.calls.filter (c) -> c.sql?.startsWith 'INSERT'
     { count: inserts.length, sql: inserts[0].sql, params: inserts[0].params }
@@ -2133,8 +2145,9 @@ test! "insertMany issues a single multi-row INSERT", ->
   eq value.params, ['Ada', 'Bo']
 
 test! "updateAll and deleteAll issue set-based statements", ->
-  value = withHarbor! [[/^(UPDATE|DELETE)/, hack(3)]], ({ define, sqls }) ->
-    User = define model 'User', field('name')
+  value = withHarbor! [[/^(UPDATE|DELETE)/, hack(3)]], ({ sqls }) ->
+    User = schema :model
+      name! string
     User.where({ name: 'x' }).updateAll! { name: 'y' }
     User.where({ name: 'y' }).deleteAll!
     { sqls: sqls() }
@@ -2143,20 +2156,23 @@ test! "updateAll and deleteAll issue set-based statements", ->
 p "\nORM — transaction hooks"
 
 test! "afterCommit fires after COMMIT", ->
-  trace = withHarbor! [[/^INSERT INTO "users"/, hrows(['id', 'name'], [1, 'Ada'])]], ({ define, fetch }) ->
+  trace = withHarbor! [[/^INSERT INTO "users"/, hrows(['id', 'name'], [1, 'Ada'])]], ({ fetch }) ->
     fired = []
-    User = define model 'User', field('name'), { tag: 'hook', name: 'afterCommit', fn: (-> fired.push 'afterCommit') }
+    User = schema :model
+      name! string
+      afterCommit: -> fired.push 'afterCommit'
     ormTransaction! -> User.create! { name: 'Ada' }
     { fired, committedBeforeHook: fetch.calls.some (c) -> c.sql is 'COMMIT' }
   eq trace.fired, ['afterCommit']
   eq trace.committedBeforeHook, true
 
 test! "afterRollback fires when the transaction throws", ->
-  trace = withHarbor! [[/^INSERT INTO "users"/, hrows(['id', 'name'], [1, 'Ada'])]], ({ define, fetch }) ->
+  trace = withHarbor! [[/^INSERT INTO "users"/, hrows(['id', 'name'], [1, 'Ada'])]], ({ fetch }) ->
     fired = []
-    User = define model 'User', field('name'),
-      { tag: 'hook', name: 'afterCommit', fn: (-> fired.push 'afterCommit') }
-      { tag: 'hook', name: 'afterRollback', fn: (-> fired.push 'afterRollback') }
+    User = schema :model
+      name! string
+      afterCommit: -> fired.push 'afterCommit'
+      afterRollback: -> fired.push 'afterRollback'
     try
       ormTransaction! ->
         User.create! { name: 'Ada' }
@@ -2265,7 +2281,7 @@ harborMigrate = ({ catalog = { tables: [] }, failSql = null, lockHeld = false } 
 withRunner = (fetch, scenario) ->
   SchemaRegistry.scope! ->
     __schemaSetAdapter harborAdapter { url: 'http://harbor', fetch }
-    scenario { define: (m) -> __schema(m) }
+    scenario()
 
 withMigDir = (files, fn) ->
   dir = mkdtempSync join(tmpdir(), 'rip-mig-live-')
@@ -2278,8 +2294,9 @@ withMigDir = (files, fn) ->
 
 test! "plan() reads the deployed schema in ONE GET /catalog and proposes a create", ->
   fetch = harborMigrate { catalog: { tables: [] } }
-  steps = withRunner! fetch, ({ define }) ->
-    define model 'User', field('name')
+  steps = withRunner! fetch, ->
+    User = schema :model
+      name! string
     mig.plan!
   eq steps.map((s) -> "#{s.kind}:#{s.table}"), ['create-table:users']
   catalogReads = fetch.calls.filter (c) -> c.method is 'GET' and c.url.endsWith '/catalog'
@@ -2307,8 +2324,11 @@ test! "a deployed schema matching the model plans nothing", ->
       foreignKeys: []
     }]
   fetch = harborMigrate { catalog: usersDeployed }
-  steps = withRunner! fetch, ({ define }) ->
-    define model 'User', field('name'), field('email', 'email', { unique: true }), dir('times')
+  steps = withRunner! fetch, ->
+    User = schema :model
+      name! string
+      email! email @unique
+      @times
     mig.plan!
   eq steps, []
 

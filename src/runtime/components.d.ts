@@ -1,0 +1,44 @@
+/// <reference lib="dom" />
+// Generated from RUNTIME_TABLE in src/emitter.js by `bun run decls`; change the table and regenerate.
+type __RipClassValue = string | boolean | null | undefined | Record<string, boolean | null | undefined> | __RipClassValue[];
+type __RipUnitless = 'animationIterationCount' | 'aspectRatio' | 'borderImageOutset' | 'borderImageSlice' | 'borderImageWidth' | 'columnCount' | 'columns' | 'flex' | 'flexGrow' | 'flexShrink' | 'fontWeight' | 'gridArea' | 'gridColumn' | 'gridColumnEnd' | 'gridColumnStart' | 'gridRow' | 'gridRowEnd' | 'gridRowStart' | 'lineHeight' | 'opacity' | 'order' | 'orphans' | 'scale' | 'tabSize' | 'widows' | 'zIndex' | 'zoom' | 'fillOpacity' | 'floodOpacity' | 'stopOpacity' | 'strokeDasharray' | 'strokeDashoffset' | 'strokeMiterlimit' | 'strokeOpacity' | 'strokeWidth' | 'webkitLineClamp';
+/** An inline style as an object: CSS property names, camelCased, plus `--custom` properties. Values are written as given — no unit is appended — so a number is admitted only where CSS reads one bare: the unitless properties, and 0 anywhere. */
+type __RipCSSProperties = { [K in Exclude<keyof CSSStyleProperties, keyof CSSStyleDeclarationBase>]?: K extends __RipUnitless ? string | number : string | 0 } & { [k: `--${string}`]: string | number };
+type __RipProvider = abstract new (...args: never[]) => { __offers?: object };
+type __RipOffers<P extends __RipProvider> = NonNullable<InstanceType<P>['__offers']>;
+export declare const __Component: any;
+export declare const __pushComponent: any;
+export declare const __popComponent: any;
+export declare const setContext: (key: string, value: unknown) => void;
+export declare const getContext: <P extends __RipProvider, K extends keyof __RipOffers<P>>(provider: '__offers' extends keyof InstanceType<P> ? P : never, key: K) => __RipOffers<P>[K];
+export declare const hasContext: <P extends __RipProvider>(provider: '__offers' extends keyof InstanceType<P> ? P : never, key: keyof __RipOffers<P>) => boolean;
+export declare const __clsx: (...args: (__RipClassValue | __RipClassValue[])[]) => string;
+export declare const __style: (el: object, value: __RipCSSProperties | string | null | undefined) => void;
+export declare const __lis: any;
+export declare const __reconcile: any;
+export declare const __transition: any;
+export declare const __handleComponentError: any;
+export declare const __gateBind: any;
+export declare const __detach: any;
+export declare const __reportChildFailure: any;
+export declare const __setChildFailureReporter: any;
+export declare const __hostOf: any;
+export declare const __ownerFrame: any;
+export declare const __pushOwner: any;
+export declare const __popOwner: any;
+export declare const __detachRef: any;
+export declare const __claimGateConstructor: any;
+export declare const __hmrRegistry: any;
+export declare const __hmrLookup: any;
+export declare const __hmrEntries: any;
+export declare const __hmrRegisterDefinition: any;
+export declare const __hmrClassify: any;
+export declare const __hmrMigrateDiff: any;
+export declare const __hmrInitDiff: any;
+export declare const __hmrPreserveState: any;
+export declare const __hmrEmit: any;
+export declare const __hmrEvents: any;
+export declare const __hmrPatch: any;
+export declare const __hmrMigrateRemount: any;
+export declare const __hmrSnapshotUi: any;
+export declare const __hmrRestoreUi: any;

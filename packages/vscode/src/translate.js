@@ -1057,6 +1057,14 @@ export function scrubFaceArtifacts(text) {
     .replace(/\b__RipClassValue\b/g, 'ClassValue')
     .replace(/\b__RipChildren\b/g, 'Children')
     .replace(/\b__RipCSSProperties\b/g, 'CSSProperties')
+    // The schema and orm runtimes' face vocabulary reads under the names
+    // docs/ORM.md uses for the same shapes.
+    .replace(/\b__RipSchemaIssue\b/g, 'SchemaIssue')
+    .replace(/\b__RipSchemaError\b/g, 'SchemaError')
+    .replace(/\b__RipAdapterResult\b/g, 'AdapterResult')
+    .replace(/\b__RipAdapterQuery\b/g, 'AdapterQuery')
+    .replace(/\b__RipAdapter\b/g, 'Adapter')
+    .replace(/\b__RipSequence\b/g, 'Sequence')
     // The per-tag rest alias reads as `Rest<tag>` — the tag shorthand's own idiom.
     .replace(/\b__RipRest_([A-Za-z][\w]*)\b/g, 'Rest<$1>')
     // A schema's behavior object is the face's own home for the

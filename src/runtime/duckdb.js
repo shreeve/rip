@@ -255,6 +255,7 @@ class CancelledError extends DbError {
   }
 }
 
+/** @returns {value is DbError} */
 function isDbError(value) { return value instanceof DbError; }
 
 // ── Values at the wire ───────────────────────────────────────────────
@@ -319,6 +320,11 @@ function decodeTemporal(value, kind) {
 // parser's own complaint and never the cell's text: a document can hold
 // what a log should not.
 
+/**
+ * @param {unknown} value
+ * @param {object | null} [column]
+ * @param {number | null} [row]
+ */
 function decodeJson(value, column = null, row = null) {
   if (typeof value !== 'string') return value;
   try {
@@ -360,6 +366,7 @@ function decodeRows(columns, rows) {
   return rows.map((row, r) => row.map((v, i) => (kinds[i] ? decodeCell(v, kinds[i], columns[i], r) : v)));
 }
 
+/** @returns {v is Record<string, unknown>} */
 function isPlainObject(v) {
   return v != null && typeof v === 'object' &&
     (Object.getPrototypeOf(v) === Object.prototype || Object.getPrototypeOf(v) === null);
@@ -535,6 +542,10 @@ function toColumn(c) {
   return typeof c === 'string' ? { name: c } : { ...c, type: c.duckdbType ?? c.type };
 }
 
+/**
+ * @param {object | null | undefined} env
+ * @param {string | null} [sql]
+ */
 function toResult(env, sql = null) {
   const columns = (env?.columns ?? []).map(toColumn);
   let data;
@@ -556,7 +567,7 @@ function toResult(env, sql = null) {
  * capabilities }` — speaking to duckdb-harbor over HTTP.
  *
  * @param {object} [opts]
- * @param {string} [opts.url]        harbor base URL; else RIP_DB_URL, else the default
+ * @param {string|null} [opts.url]   harbor base URL; else RIP_DB_URL, else the default
  * @param {Function} [opts.fetch]    injected fetch (tests)
  * @param {number|null} [opts.timeoutMs] per-statement deadline, ours AND harbor's.
  *   Three states, and the difference between the last two matters:
@@ -758,6 +769,11 @@ function harborAdapter(opts = {}) {
     }
   };
 
+  /**
+   * @param {string} sql
+   * @param {unknown[] | null} [params]
+   * @param {{ signal?: AbortSignal | null, timeoutMs?: number | null }} [opts]
+   */
   const query = async (sql, params = null, opts = {}) =>
     toResult(await request('POST', '/sql', params?.length ? { sql, params: encodeParams(params) } : { sql },
       sql, opts?.signal, opts?.timeoutMs), sql);
@@ -770,6 +786,7 @@ function harborAdapter(opts = {}) {
   // taxonomy as every other request. A 404 gets its own words, because it means the
   // deployment predates the endpoint — the fix is an upgrade, never
   // a retry.
+  /** @param {{ signal?: AbortSignal | null, timeoutMs?: number | null }} [opts] */
   const catalog = async (opts = {}) => {
     try {
       return await request('GET', '/catalog', null, null, opts?.signal, opts?.timeoutMs);
@@ -786,6 +803,7 @@ function harborAdapter(opts = {}) {
     }
   };
 
+  /** @param {unknown} [options] */
   const begin = async (options = {}) => {
     const session = await request('POST', '/sql/sessions/new', {});
     const sessionId = session.sessionId;
@@ -794,6 +812,11 @@ function harborAdapter(opts = {}) {
     if (sessionId == null) {
       throw new DbError('db: harbor returned no session id for the transaction');
     }
+    /**
+     * @param {string} sql
+     * @param {unknown[] | null} [params]
+     * @param {{ signal?: AbortSignal | null, timeoutMs?: number | null }} [opts]
+     */
     const run = async (sql, params = null, opts = {}) => toResult(await request(
       'POST', '/sql',
       params?.length ? { sql, params: encodeParams(params), sessionId } : { sql, sessionId },
@@ -848,7 +871,7 @@ function harborAdapter(opts = {}) {
     catalog,
     // DuckDB rolls DDL back with the transaction, so the migration
     // runner may claim a whole-file rollback.
-    capabilities: { tx: true, ddlTransactional: true },
+    capabilities: /** @type {{ tx: true, ddlTransactional: true }} */ ({ tx: true, ddlTransactional: true }),
   };
 }
 

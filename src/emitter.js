@@ -680,6 +680,21 @@ class Emitter {
     // an enum's uses in a consuming module carry the same merged-symbol
     // `type` classification its declaration does.
     this.importedRefs = [];
+    // The names runtime delivery injects into this module — name →
+    // `{ runtime, typed }`, where `typed` says the TS face asserts a
+    // signature for the name (a name the runtime table does not type
+    // rides as `any`). Filled by delivery before the program emits.
+    this.injected = new Map();
+    // Generated spans of each free SOURCE reference to an injected name:
+    // `[start, end, name, runtime, typed]`. A reference an enclosing
+    // scope binds (a parameter spelled like the name) is not one; a
+    // member or key spelled like it never reaches this funnel. Checkers
+    // read it to report what a module uses untyped. TS face only.
+    this.runtimeRefs = [];
+    // While a compiled schema callable's text re-emits here, the names
+    // that callable binds (its parameters, its locals): a word among
+    // them is the callable's own, whatever the enclosing scopes say.
+    this.schemaBodyBound = null;
     // rip.strict (presentation-only, E): typed forwards and pins emit
     // WITHOUT the `!` definite-assignment assertion, so use-before-
     // assign is checked (TS2454) instead of silenced. TS-only glyphs
@@ -782,6 +797,10 @@ class Emitter {
     // companion-interface emission after the binding statement.
     this.componentInfo = new Map();
     this.schemaFns = new Map();
+    // Schema nodes whose behavior object is owed and not yet placed:
+    // set by schemaExpr, cleared by tsSchemaBehavior, checked empty when
+    // the program has emitted.
+    this.schemaBehaviorPending = new Map();
     // Module-scope component binding names → their component node
     // (BOTH modes): a name bound to a second component rejects — the
     // rebinding clobbers the first class silently, and the typed
@@ -2205,6 +2224,11 @@ class Emitter {
     const imported = this.importSpecOf(value);
     if (imported !== null) {
       this.importedRefs.push([start, this.b.offset, imported.importedName, imported.specifier]);
+      return;
+    }
+    const injected = this.injected.get(value);
+    if (injected !== undefined && !this.inScope(value) && !this.schemaBodyBound?.has(value)) {
+      this.runtimeRefs.push([start, this.b.offset, value, injected.runtime, injected.typed]);
     }
   }
 
@@ -2766,10 +2790,54 @@ class Emitter {
   // erased statement (liveStmts), so reverse queries resolve.
   emitTsTypeDecls(list, pad) {
     if (!this.ts) return;
+    this.placeSchemaScope(list, pad);
     for (const s of list) {
       if (!isNode(s) || s[0] !== 'type-decl') continue;
       this.tsTypeDeclLine(s, pad);
     }
+  }
+
+  // The schema scope record a statement list belongs to: the function
+  // scope whose body holds one of the list's statements, or null for
+  // the module and for a scope that declares no schema.
+  schemaScopeOf(list) {
+    if (!this.schemaScopes) return null;
+    for (const s of list) {
+      const record = this.schemaScopes.get(s);
+      if (record !== undefined) return record;
+    }
+    return null;
+  }
+
+  // A function scope's schema alias lines, placed at its top beside
+  // the user type declarations the same list carries (the
+  // emitTsTypeDecls cluster): once per scope, at the first statement
+  // list of its body the emission reaches — the body's own top, ahead
+  // of every nested list. Each block is a TS-only cover manifestation
+  // of its schema node, like the module's at the program's top.
+  placeSchemaScope(list, pad) {
+    const record = this.schemaScopeOf(list);
+    if (record === null || record.placed) return;
+    record.placed = true;
+    for (const s of record.stories) {
+      this.emitSchemaAliasBlock({ node: s.decl.node, exported: false, story: s, lines: s.faceAliasLines ?? s.aliasLines }, '', pad, '\n');
+    }
+  }
+
+  emitSchemaAliasBlock(block, exp, pad, tail) {
+    const nodeId = this.stores.idOf(block.node);
+    this.b.tsOnly(() => {
+      this.b.emit(pad);
+      const lines = () => {
+        const at = this.b.offset;
+        const text = block.lines.map((l) => `${exp}${l}`).join('\n' + pad);
+        emitSchemaTextMarked(this, block, text, nodeId);
+        recordSchemaFields(this, block, text, at);
+      };
+      if (nodeId !== null) this.b.mark(nodeId, '$self', lines);
+      else lines();
+      this.b.emit(tail);
+    });
   }
 
   // One rendered type/interface declaration as a TS-only cluster line.
@@ -3205,7 +3273,7 @@ class Emitter {
     this.b = new CodeBuilder(this.stores, { source });
     const { n, used } = this.temps;
     this.temps.used = new Set(used);
-    const channels = ['pinnables', 'mutables', 'enums', 'classDecls', 'loopVars', 'attrNames', 'importedRefs',
+    const channels = ['pinnables', 'mutables', 'enums', 'classDecls', 'loopVars', 'attrNames', 'importedRefs', 'runtimeRefs',
       'vocabulary', 'silences', 'memberDecls', 'narrowedDecls', 'importSpans', 'pendingTypeDecls', 'loopVarDecls', 'indexedLoops'];
     const saved = {};
     for (const k of channels) { saved[k] = this[k]; this[k] = []; }
@@ -4145,6 +4213,7 @@ class Emitter {
     if (declareInPlace) {
       entries = this.applyDeclareInPlace(entries, stmts, { tailIsExpression: true });
     }
+    this.attachSchemaConsts(entries, this.schemaScopeOf(stmts)?.stories ?? null);
     return { entries, names };
   }
 
@@ -4940,14 +5009,14 @@ class Emitter {
             this.mark(owner, 'annotation', () => this.b.emit(`: ${this.annotationText(owner)}`));
           });
         } else {
-          // A module-level schema binding declares its story type on
-          // the hoist line: a DECLARED type answers at every
-          // reference — the evolving-let alternative leaves reads
-          // inside nested functions hovering the evolving base `any`
-          // (tsgo quickinfo, plain-TS parity), which is exactly where
-          // model bindings are used. Attached only at the program
-          // hoist line (entries.schemaConsts is set only there), so a
-          // same-named function-local never annotates.
+          // A schema binding declares its story type on its scope's
+          // hoist line: a DECLARED type answers at every reference — the
+          // evolving-let alternative leaves reads inside nested functions
+          // hovering the evolving base `any` (tsgo quickinfo, plain-TS
+          // parity), which is exactly where model bindings are used. A
+          // scope's entries carry its own stories' types alone
+          // (attachSchemaConsts), so a same-named binding in another
+          // scope never annotates.
           const constType = entries.schemaConsts?.get(name) ?? null;
           // A forward-referenced COMPONENT declares its published
           // constructor type here, ahead of the class expression the
@@ -4959,7 +5028,12 @@ class Emitter {
           const ctorType = entries.componentTypes?.get(name) ?? null;
           if (constType !== null) {
             const bind = this.bindingNameSpan(node, role, name);
-            this.b.tsOnly(() => { this.b.emit(': '); this.emitNamedCopies(constType, name, bind?.id ?? null, bind?.span ?? null); });
+            // A binding assigned inside a block (`if c then S = schema …`)
+            // and read after is legal Rip, so outside strict the declared
+            // type carries the definite-assignment assertion the typed
+            // forward above carries; strict sees the conditional
+            // assignment as the checker reports it (TS2454).
+            this.b.tsOnly(() => { if (!this.strict) this.b.emit('!'); this.b.emit(': '); this.emitNamedCopies(constType, name, bind?.id ?? null, bind?.span ?? null); });
           } else if (ctorType !== null) {
             // Emitted as SEGMENTS, so the props block's member names map to
             // their declarations — a prop key at a use site lands here.
@@ -5026,13 +5100,16 @@ class Emitter {
     return entries;
   }
 
-  // Attach the schema story's declared types to the PROGRAM hoist
-  // entries (only non-exported module-level schema bindings hoist;
-  // exported ones emit `export const` and infer from the cast).
-  attachSchemaConsts(entries) {
-    if (!this.schemaStories) return;
+  // Attach a scope's schema stories' declared types to that scope's
+  // hoist entries: the module's stories at the program hoist line
+  // (only non-exported bindings hoist; exported ones emit `export
+  // const` and infer from the cast), a function scope's at its own
+  // (scopedHoist). A scope's entries see its own stories alone, so a
+  // same-named binding elsewhere never annotates.
+  attachSchemaConsts(entries, stories) {
+    if (!stories) return;
     const consts = new Map();
-    for (const s of this.schemaStories.values()) {
+    for (const s of stories) {
       if (!s.decl.exported && s.constType !== null) consts.set(s.decl.name, s.constType);
     }
     if (consts.size) entries.schemaConsts = consts;
@@ -5063,7 +5140,7 @@ class Emitter {
         // an accept provider. The emission split is layout.
         const imported = Emitter.importedNames(all.filter((n) => this.isModuleImport(n)));
         let entries = this.ambientHoistFilter(this.hoistTargets(rest, [], imported));
-        this.attachSchemaConsts(entries);
+        this.attachSchemaConsts(entries, this.schemaModuleStories);
         const names = new Set([...entries.map(([n]) => n), ...imported]);
         for (const n of this.pushReactiveFrame(all, names)) names.add(n);
         this.moduleBound = Emitter.moduleBoundNames(rest);
@@ -5207,7 +5284,7 @@ class Emitter {
       // and it binds for the whole module.
       const imported = Emitter.importedNames(stmts.filter((n) => this.isModuleImport(n)));
       let entries = this.ambientHoistFilter(this.hoistTargets(stmts, [], imported));
-      this.attachSchemaConsts(entries);
+      this.attachSchemaConsts(entries, this.schemaModuleStories);
       const names = new Set([...entries.map(([n]) => n), ...imported]);
       for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
       this.moduleBound = Emitter.moduleBoundNames(stmts);
@@ -6036,10 +6113,36 @@ class Emitter {
     // binding identically under every runtimeDelivery.
     const story = this.schemaStories?.get(node) ?? null;
     const nodeId = this.stores.idOf(node);
+    // A NAMED declaration always has a story: the story walk reaches
+    // every function scope, and a name arrives only through the
+    // assignment forms it records. The one position it leaves out is a
+    // parameter default, where no scope's aliases are visible; any other
+    // story-less name is a walk the emitter's scope rules outgrew.
+    // Either rejects here, never a bare untyped call by position.
+    if (this.ts && schemaName !== null && story === null) {
+      throw this.positionedError(node,
+        `emitter: the schema declaration '${schemaName}' sits in a parameter default, where no scope's type aliases are visible — move it into the body, or to module scope`);
+    }
+    // Rip assigns outward: a name bound by an enclosing scope is that
+    // scope's binding, and a declaration of it inside this function
+    // REBINDS it rather than declaring a local. The enclosing scope's
+    // story cannot describe two shapes under one name (the same reason
+    // a scope rejects a second declaration), and this scope's aliases
+    // would describe a binding that is not its own.
+    if (this.ts && story?.scope && !this.scopes[this.scopes.length - 1]?.has(schemaName)) {
+      throw this.positionedError(node,
+        `emitter: the schema declaration '${schemaName}' inside this function rebinds the enclosing '${schemaName}' ` +
+        `(a name assigned in an enclosing scope is that scope's binding) — a schema binds once; ` +
+        `declare it under a name of its own, or at the scope that binds '${schemaName}'`);
+    }
     // The compiled bodies, kept for the behavior object the binding
     // statement emits after this expression (same bodies, one place
-    // they are compiled).
-    if (this.ts && story !== null) this.schemaFns.set(node, fns);
+    // they are compiled). The object is owed from here until that
+    // statement places it (schemaBehaviorPending).
+    if (this.ts && story !== null) {
+      this.schemaFns.set(node, fns);
+      if (behaviorObjectText(descriptor, story.decl.name, fns, story.thisTypes) !== null) this.schemaBehaviorPending.set(node, story);
+    }
     // The descriptor's word-valued strings that repeat a DECLARED name —
     // a field's `name:`, an ensure's `field:`, a `typeName:` naming
     // another schema, a union's constituent, a mixin target — are copies
@@ -6067,7 +6170,12 @@ class Emitter {
     // copy of the declaration, and queued first so the head's `name:`
     // takes it ahead of any entry that shares the spelling.
     if (this.ts && schemaName !== null) {
-      pinSpan('name', this.moduleTypeDeclarationSpans().get(schemaName) ?? null, schemaName);
+      // A function-local declaration is no line-start match; its name's
+      // bytes are the binding ahead of the schema expression.
+      const declared = story?.scope
+        ? this.bindingNameSpan(node, 'target', schemaName)?.span ?? null
+        : this.moduleTypeDeclarationSpans().get(schemaName) ?? null;
+      pinSpan('name', declared, schemaName);
     }
     for (const e of this.ts ? descriptor.entries : []) {
       const pin = (key, name, start) => {
@@ -6098,7 +6206,11 @@ class Emitter {
         for (const seg of segments) {
           if (typeof seg === 'string') this.emitSchemaText(seg);
           // Compiled body text: the author's words, keys included.
-          else if (seg.body !== undefined) this.emitSchemaText(seg.body, true);
+          else if (seg.body !== undefined) {
+            this.schemaBodyBound = seg.bound ?? null;
+            this.emitSchemaText(seg.body, true);
+            this.schemaBodyBound = null;
+          }
           // A face segment carrying a source span marks there — a
           // wrong-typed default's diagnostic anchors on the literal the
           // author wrote, not on the entry list that encloses it.
@@ -6171,10 +6283,16 @@ class Emitter {
   // calling convention's `this` parameter goes, and annots carries each
   // declared parameter's type (or the JS-arity `?`) at the offset it
   // follows. The code itself is the runtime spelling and holds neither.
+  // `bound` is every name the callable binds, parameters and locals at
+  // any depth: the parent re-emits this text word by word under its own
+  // scopes, which know none of them.
   schemaFnCode(params, bodyTokens) {
     const names = params.map((p) => p.name);
     const { stmts, stores } = this.subParse(bodyTokens);
-    if (stmts.length === 0) return { code: '(function() {})', thisAt: '(function('.length, annots: [] };
+    if (stmts.length === 0) return { code: '(function() {})', thisAt: '(function('.length, annots: [], bound: new Set(names) };
+    const isDecl = (x) => Emitter.isReactiveDeclIn(stores, x) || Emitter.isEffectDeclIn(stores, x) ||
+      Emitter.isReadonlyDeclIn(stores, x) || Emitter.isGateDeclIn(stores, x);
+    const bound = runtimeAliasBindings(this, [{ tree: ['program', ...stmts], atoms: names, isDecl }]);
     const bodyNode = stmts.length === 1 ? stmts[0] : ['block', ...stmts];
     const isAsync = this.containsAwait(bodyNode);
     const isGen = Emitter.containsYield(bodyNode);
@@ -6227,7 +6345,7 @@ class Emitter {
       else if (p.optional) annots.push([at, '?']);
       if (i < params.length - 1) at += ', '.length;
     });
-    return { code: `${head}${names.join(', ')}) ${bodyText})`, thisAt: head.length, annots };
+    return { code: `${head}${names.join(', ')}) ${bodyText})`, thisAt: head.length, annots, bound };
   }
 
   // Compile a captured VALUE-expression slice (the `on:` adapter) —
@@ -6478,15 +6596,21 @@ class Emitter {
     if (story === null || fns === undefined) return;
     const text = behaviorObjectText(schemaNode[1], story.decl.name, fns, story.thisTypes);
     if (text === null) return;
+    this.schemaBehaviorPending.delete(schemaNode);
     // The behavior const's name is face-only but not invisible: a user
-    // module binding of the same spelling redeclares it in the TS face
-    // (TS2451 blamed on the schema head) while the JS runs fine — the
-    // worst kind of divergence. Rejected loudly here, the
-    // `__schema`-shadow precedent; every minted TYPE name is already
-    // guarded the same way (buildSchemaTypeStory).
-    if (this.scopes[0]?.has(story.behaviorName) || this.moduleBound?.has(story.behaviorName)) {
+    // binding of the same spelling in the scope the const lands in — or,
+    // for a function-local schema, in any scope the const would shadow
+    // — redeclares or captures it in the TS face (TS2451 blamed on the
+    // schema head) while the JS runs fine — the worst kind of
+    // divergence. Rejected loudly here, the `__schema`-shadow
+    // precedent; every minted TYPE name is already guarded the same
+    // way (buildSchemaTypeStory).
+    const bound = story.scope
+      ? this.scopes.some((s) => s.has(story.behaviorName))
+      : this.scopes[0]?.has(story.behaviorName);
+    if (bound || this.moduleBound?.has(story.behaviorName)) {
       throw this.positionedError(schemaNode,
-        `emitter: the module binds '${story.behaviorName}', the face-only name this schema's ` +
+        `emitter: ${story.scope ? 'an enclosing scope' : 'the module'} binds '${story.behaviorName}', the face-only name this schema's ` +
         'callable types read through — rename the binding');
     }
     const id = this.stores.idOf(schemaNode);
@@ -9810,6 +9934,7 @@ class Emitter {
       this.hoistLine(entries);
       this.b.emit(' ');
     }
+    this.placeSchemaScope([body], '');
     if (this.effectBranchWrites(body)) {
       this.mark(node, 'value', () => this.withExpression(() => this.implicitReturn(body, ind, true)));
       this.b.emit(' })');
@@ -17968,6 +18093,11 @@ class Emitter {
       if (wrap) this.b.emit(')');
     });
     this.b.emit(';');
+    // A tail schema declaration (`return S = __schema(…)`) takes its
+    // behavior object after the return, as the statement form takes
+    // it after the statement: TS-only, and a type query (`typeof`)
+    // reads a declaration below it whether or not control reaches it.
+    if (this.ts && isNode(stmt) && stmt[0] === '=' && stmt.length === 3) this.tsSchemaBehavior(stmt[2]);
   }
 
   // [op, target, postfix] — prefix/postfix increment and decrement.
@@ -19031,6 +19161,60 @@ const containsMatchRead = (sexpr) => {
   return sexpr.some(containsMatchRead);
 };
 
+// The face vocabulary of the runtime table below. An entry's `types`
+// (TS face) states each injected name's signature, read off the
+// runtime's implementation; a unit's assertion types every name it
+// binds, and a name without an entry rides as `any`, which `rip check`
+// reports to a strict project as a value it received untyped. An
+// entry's `decls` is TS-only alias text its signatures reference,
+// emitted ahead of the unit's destructure under the same synthetic
+// row; the names are `__Rip`-prefixed, a spelling no user binding may
+// take.
+//
+// The schema runtime's: a validation failure's issue row and the
+// instance of the error class that carries them.
+const SCHEMA_TYPE_DECLS = [
+  'type __RipSchemaIssue = { field: string; error: string; message: string };',
+  'type __RipSchemaError = Error & { issues: __RipSchemaIssue[]; schemaName: string | null; schemaKind: string | null };',
+].join('\n');
+// A coercer receives the trimmed string, or with `raw` the wire value
+// itself; a `raw` the call cannot settle is the wire arm. The function
+// comes back as it was given. An unannotated callback takes its
+// parameter type from the arm the call selects.
+// The context API's aliases: a provider is a component, whose instances
+// carry the `__offers` record — required on the face's class, optional on
+// a declaration file's interface, where a hand-built value owes none —
+// and the record is what a read indexes.
+const COMPONENTS_TYPE_DECLS = [
+  'type __RipProvider = abstract new (...args: never[]) => { __offers?: object };',
+  "type __RipOffers<P extends __RipProvider> = NonNullable<InstanceType<P>['__offers']>;",
+].join('\n');
+const COERCER_TYPE = '{ <F extends (value: string) => unknown>(name: string, fn: F, options?: { raw?: false }): F; <F extends (value: unknown) => unknown>(name: string, fn: F, options: { raw: boolean }): F }';
+// Adapter Contract v2 (docs/ORM.md): `query` is the floor the
+// installation seams check, and the rest is feature-detected where it
+// is used. `begin` receives the transaction's options whole, so its
+// parameter is open; `catalog` receives the query options the CLI's
+// reads pass. A result's `rows` is the write-path alias of `rowCount`.
+const ORM_TYPE_DECLS = [
+  'type __RipAdapterResult = { columns: { name: string; type?: string; duckdbType?: string; encoding?: string }[]; data: unknown[][]; rowCount?: number; rows?: number };',
+  'type __RipAdapterQuery = (sql: string, params?: unknown[] | null, options?: { signal?: AbortSignal | null; timeoutMs?: number | null }) => __RipAdapterResult | Promise<__RipAdapterResult>;',
+  'type __RipAdapter = { query: __RipAdapterQuery; begin?: (options?: unknown) => Promise<{ query: __RipAdapterQuery; commit: () => Promise<void>; rollback: () => Promise<void> }>; catalog?: (options?: { signal?: AbortSignal | null; timeoutMs?: number | null }) => Promise<Record<string, unknown>>; capabilities?: { tx?: boolean; ddlTransactional?: boolean } };',
+  'type __RipSequence = { name: string; start: number };',
+].join('\n');
+// The `schema` namespace as orm.js builds it. `transaction` takes the
+// block alone or options first, and the options pass whole to the
+// adapter's `begin`, so beyond `on` they are the adapter's to read.
+// `sequence` reads back with no argument, clears with null, and sets
+// with a name; the migration verbs throw, CLI-only.
+const ORM_SCHEMA_TYPE = '{ '
+  + 'transaction: { <T>(fn: () => T): Promise<Awaited<T>>; <T>(options: { on?: __RipAdapter; [option: string]: unknown }, fn: () => T): Promise<Awaited<T>> }; '
+  + 'connect: (options: string | { url: string; timeoutMs?: number | null }) => __RipAdapter; '
+  + 'setAdapter: (adapter: __RipAdapter) => void; '
+  + 'sequence: { (): __RipSequence | null; (name: null): null; (name: string, options?: { start?: number }): __RipSequence }; '
+  + `registerCoercer: ${COERCER_TYPE}; `
+  + 'plan: () => never; status: () => never; make: () => never; migrate: () => never; introspect: () => never'
+  + ' }';
+
 // The delivered-runtime table — one entry per feature runtime. Each
 // entry carries the runtime's public names (the trigger set AND the
 // injected binding set), its module URL, and an optional structural
@@ -19098,6 +19282,17 @@ const RUNTIME_TABLE = [
     url: new URL('./runtime/schema.js', import.meta.url),
     requires: ['vocab'],
     triggers: (sexpr, preds) => containsSchema(sexpr),
+    decls: SCHEMA_TYPE_DECLS,
+    // `__schema` returns `unknown`: every NAMED declaration casts its
+    // result to the schema's type story wherever it is written (module
+    // scope or a function body), so the open return reaches only an
+    // anonymous schema — a value with no name to type — and the name
+    // is spelled by emission alone, so no source reference reads it.
+    types: {
+      __schema: '(descriptor: unknown) => unknown',
+      SchemaError: '{ new (issues: __RipSchemaIssue[], schemaName?: string | null, schemaKind?: string | null): __RipSchemaError; prototype: __RipSchemaError }',
+      registerCoercer: COERCER_TYPE,
+    },
   },
   {
     // The DuckDB substrate (wire client to duckdb-harbor). Binds NO
@@ -19116,6 +19311,11 @@ const RUNTIME_TABLE = [
     url: new URL('./runtime/orm.js', import.meta.url),
     requires: ['schema', 'duckdb', 'vocab'],
     triggers: (sexpr, preds) => containsModelSchema(sexpr),
+    decls: ORM_TYPE_DECLS,
+    types: {
+      schema: ORM_SCHEMA_TYPE,
+      __schemaSetAdapter: '(adapter: __RipAdapter) => void',
+    },
   },
   {
     // `types` (TS face): the reactive primitives are GENERIC — the
@@ -19157,10 +19357,13 @@ const RUNTIME_TABLE = [
       __computed: '<T>(fn: () => T) => { readonly value: T; read(): T }',
       __effect: '(fn: () => void | (() => void)) => () => void',
       __batch: '<T>(fn: () => T) => T',
-      __readonly: '<T>(value: T) => T',
-      __setErrorHandler: '(handler: ((error: any, source?: string) => void) | null) => void',
-      __handleError: '(error: any, source?: string) => void',
-      __catchErrors: '<T>(fn: () => T, onError?: (e: any) => void) => T | undefined',
+      __readonly: '<T>(value: T) => Readonly<{ value: T }>',
+      __setErrorHandler: '(handler: ((error: unknown) => void) | null) => ((error: unknown) => void) | null',
+      __handleError: '(error: unknown) => void',
+      // `__catchErrors` WRAPS: the function it returns calls `fn` with the
+      // caller's `this` and arguments, and a throw goes to the error
+      // handler in place of a result.
+      __catchErrors: '<F extends (...args: never[]) => unknown>(fn: F) => (this: ThisParameterType<F>, ...args: Parameters<F>) => ReturnType<F> | undefined',
       getEffectSignal: '() => AbortSignal | null',
     },
   },
@@ -19183,21 +19386,25 @@ const RUNTIME_TABLE = [
     triggers: (sexpr, preds) => containsMatchRead(sexpr),
     types: {
       abort: '(msg?: string) => never',
-      assert: '(v: any, msg?: string) => void',
+      assert: '(v: unknown, msg?: string) => void',
       exit: '(code?: number) => never',
-      kind: '(v: any) => string',
+      kind: '(v: unknown) => string',
       noop: '() => void',
-      p: '(...args: any[]) => void',
+      p: '(...args: unknown[]) => void',
       pp: '<T>(v: T) => T',
       pj: '<T>(v: T) => T',
       pr: '<T>(v: T) => T',
-      raise: '(a: any, b?: any) => never',
+      // `raise` throws what it is handed: a message becomes an Error, and
+      // a constructor with its argument constructs the throwable.
+      raise: '{ (message: unknown): never; <A>(ctor: new (arg: A) => unknown, arg: A): never }',
       rand: '(a?: number, b?: number) => number',
       sleep: '(ms: number) => Promise<void>',
-      toMatchable: '(v: any) => string',
+      toMatchable: '(v: unknown) => string',
       todo: '(msg?: string) => never',
-      warn: '(...args: any[]) => void',
-      zip: '(...arrays: any[][]) => any[][]',
+      warn: '(...args: unknown[]) => void',
+      // `zip` tuples its arrays' elements positionally, as many tuples as
+      // the first array has elements.
+      zip: '<T extends unknown[][]>(...arrays: T) => { [I in keyof T]: T[I] extends (infer E)[] ? E : never }[]',
     },
   },
   {
@@ -19214,7 +19421,21 @@ const RUNTIME_TABLE = [
                      '__pushComponent', '__popComponent', '__clsx', '__style', '__reconcile',
                      '__transition', '__gateBind', '__detach', '__reportChildFailure', '__hostOf',
                      '__ownerFrame', '__pushOwner', '__popOwner', '__detachRef'],
+    decls: COMPONENTS_TYPE_DECLS,
     types: {
+      // The context API types a source call as the `accept … from`
+      // lowering is typed: the provider is a component, whose instances
+      // carry the `__offers` record, the key is one the provider OFFERS,
+      // and a read answers that offered member's container. A provider
+      // whose instances carry no record — a plain class included — fails
+      // on the provider argument, and a key the record lacks on the key.
+      // The key vocabulary is the offered names, so `setContext` takes a
+      // string where the runtime's Map would take any key. The lowering's
+      // own read is typed the same way; its report folds into the declare
+      // line's (mapTsDiagnostic).
+      setContext: '(key: string, value: unknown) => void',
+      getContext: "<P extends __RipProvider, K extends keyof __RipOffers<P>>(provider: '__offers' extends keyof InstanceType<P> ? P : never, key: K) => __RipOffers<P>[K]",
+      hasContext: "<P extends __RipProvider>(provider: '__offers' extends keyof InstanceType<P> ? P : never, key: keyof __RipOffers<P>) => boolean",
       // The one entry that types every merged `class:` value — the
       // face's __RipClassValue alias arms alongside it (the tail's
       // domSurfaceDecls emission).
@@ -19234,11 +19455,15 @@ const RUNTIME_TABLE = [
 // sibling runtime module is likewise: inlined bodies share one IIFE
 // scope, so both lines strip and the references bind directly.
 const runtimeBodies = new Map();
+// The export line is the module's ES seam: inline delivery strips it, and
+// the declaration beside the runtime (src/ts/runtime-decls.js) reads the
+// module's export names off it, so both see the same list.
+const RUNTIME_EXPORT_LINE = /^export \{([^}]*)\};\s*$/gm;
 const runtimeText = (rt) => {
   if (!runtimeBodies.has(rt.key)) {
     const raw = readFileSync(rt.url, 'utf8');
     const body = raw
-      .replace(/^export \{[^}]*\};\s*$/gm, '')
+      .replace(RUNTIME_EXPORT_LINE, '')
       .replace(/^import \{[^}]*\} from '\.\/[a-z-]+\.js';\s*$/gm, '')
       .trimEnd();
     // Inline delivery splices these bodies into a shared IIFE scope,
@@ -19664,7 +19889,14 @@ function emitSchemaTextMarked(emitter, block, text, nodeId) {
     // expansion. Each is a copy, so a rename of the declaration must
     // reach it; unmarked, one such copy refuses the whole rename.
     const named = emitter.moduleTypeDeclarationSpans();
-    const heads = [...new Set([...text.matchAll(/(?:^|\n)(?:export )?type ([A-Za-z_$][\w$]*)/g)].map((m) => m[1]))];
+    // A function-local schema's own name declares at its binding, not at
+    // a line-start match — and a module declaration of the same spelling
+    // is the one it shadows, never its own.
+    if (block.story?.scope) {
+      const own = emitter.bindingNameSpan(block.story.decl.node, 'target', block.story.decl.name);
+      if (own !== null) named.set(block.story.decl.name, own.span);
+    }
+    const heads = [...new Set([...text.matchAll(/(?:^|\n)[ \t]*(?:export )?type ([A-Za-z_$][\w$]*)/g)].map((m) => m[1]))];
     for (const headName of heads) {
       if (named.has(headName)) continue;
       // `+ 1` admits an occurrence starting exactly AT the span (see
@@ -19899,21 +20131,26 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
         };
         visit(rt);
         if (chain.length === 1) {
-          units.push({ runtimes: [rt], names: rt.names, body: runtimeText(rt), types: rt.types });
+          units.push({ runtimes: [rt], names: rt.names, body: runtimeText(rt), types: rt.types, decls: rt.decls });
           continue;
         }
         // A fused unit states the union of its runtimes' face types
         // — and only when one of them HAS a table: the assertion
         // types every bound name, so an empty union would flatten
-        // names that infer honestly through the IIFE to `any`.
+        // names that infer honestly through the IIFE to `any`. Its
+        // alias declarations join the same way.
         const types = chain.some((r) => r.types)
           ? Object.assign({}, ...chain.map((r) => r.types))
+          : undefined;
+        const decls = chain.some((r) => r.decls)
+          ? chain.filter((r) => r.decls).map((r) => r.decls).join('\n')
           : undefined;
         units.push({
           runtimes: chain,
           names: chain.flatMap((r) => r.names),
           body: chain.map((r) => runtimeText(r)).join('\n'),
           types,
+          decls,
         });
       }
     }
@@ -19924,6 +20161,11 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
         .filter((name) => generated.has(name) || !bound.has(name))
         .map((name) => ({ name, local: generated.has(name) ? emitter.runtimeAliases.get(name) : name }));
       if (bindings.length === 0) continue;
+      for (const { name } of bindings) {
+        const rt = unit.runtimes.find((r) => r.names.includes(name));
+        const signature = unit.types?.[name];
+        emitter.injected.set(name, { runtime: rt.key, typed: signature !== undefined && signature !== 'any' });
+      }
       const start = builder.offset;
       if (unit.imp) {
         builder.emit(`import { ${bindings.map(({ name, local }) => name === local ? name : `${name} as ${local}`).join(', ')} } from `);
@@ -19932,6 +20174,10 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
         emitter.importSpans.push({ start: specStart, end: builder.offset, specifier: JSON.stringify(unit.imp) });
         builder.emit(';\n');
       } else {
+        // The aliases the assertion's signatures reference, declared
+        // ahead of it under the unit's own synthetic row (declarations
+        // hoist, so the position serves the row, not the checker).
+        if (face === 'ts' && unit.types && unit.decls) builder.tsOnly(() => builder.emit(`${unit.decls}\n`));
         builder.emit(`const { ${bindings.map(({ name, local }) => name === local ? name : `${name}: ${local}`).join(', ')} }`);
         // Precise runtime types on the TS face (the table's signatures):
         // the checker reads the declared shapes instead of inferring
@@ -19981,15 +20227,19 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // cover manifestations of THEIR schema node (a diagnostic landing
   // in an alias line cover-lands on the declaration that produced
   // it), and schemaExpr reads the per-node story for the binding cast
-  // and the callable `this` parameters. TS type declarations hoist,
-  // so top placement governs every scope. Collisions on the emitted
-  // type names reject positioned.
+  // and the callable `this` parameters. TS type declarations hoist
+  // within their scope: the module's aliases emit here, at the top,
+  // and a function scope's aliases emit at that function's top
+  // (placeSchemaScope), where the names they declare are the ones its
+  // casts and annotations spell. Collisions on the emitted type names
+  // reject positioned.
   let schemaStory = null;
   if (face === 'ts') {
     let story = null;
     try {
       story = buildSchemaTypeStory(parseResult.sexpr, builder.source,
-        Emitter.importedNames(parseResult.sexpr.slice(1).filter((s) => emitter.isModuleImport(s))));
+        Emitter.importedNames(parseResult.sexpr.slice(1).filter((s) => emitter.isModuleImport(s))),
+        { boundary: (n) => emitter.scopeBoundary(n), isBlock: (n) => emitter.isBlock(n) });
     } catch (err) {
       if (err instanceof SchemaTypeError) {
         const e = new Error(`emitter: ${err.message}`);
@@ -20022,6 +20272,21 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
         });
       }
       emitter.schemaStories = new Map();
+      emitter.schemaModuleStories = story.stories;
+      // A function scope's stories join the per-node map now — the cast
+      // and the behavior object read it at the declaration — and its
+      // alias lines wait for the scope's top. The scope is found again
+      // by any of its body's own statement nodes (`keys`).
+      emitter.schemaScopes = new Map();
+      emitter.schemaScopeRecords = story.scopes.map((scope) => {
+        const record = { stories: scope.stories, placed: false };
+        for (const s of scope.stories) {
+          s.scope = record;
+          emitter.schemaStories.set(s.decl.node, s);
+        }
+        for (const k of scope.keys) if (isNode(k)) emitter.schemaScopes.set(k, record);
+        return record;
+      });
       // A derived binding contributes an alias and nothing else, so it
       // joins the same block on the same terms — marked under its own
       // assignment, and the LAST block of either kind carries the
@@ -20035,20 +20300,13 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
       blocks.forEach((b, i) => {
         if (b.story !== null) emitter.schemaStories.set(b.node, b.story);
         const exp = b.exported ? 'export ' : '';
-        const nodeId = stores.idOf(b.node);
         const tail = i === blocks.length - 1 ? '\n\n' : '\n';
-        builder.tsOnly(() => {
-          const lines = () => {
-            const at = builder.offset;
-            const text = b.lines.map((l) => `${exp}${l}`).join('\n');
-            emitSchemaTextMarked(emitter, b, text, nodeId);
-            recordSchemaFields(emitter, b, text, at);
-          };
-          if (nodeId !== null) builder.mark(nodeId, '$self', lines);
-          else lines();
-          builder.emit(tail);
-        });
+        emitter.emitSchemaAliasBlock(b, exp, '', tail);
       });
+      // A module whose only schemas are function-local emits the
+      // intrinsic block alone; the blank line the last alias block
+      // otherwise carries still separates it from the program.
+      if (blocks.length === 0) builder.tsOnly(() => builder.emit('\n'));
     }
   }
 
@@ -20077,6 +20335,25 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   if (ambient.length > 0) {
     emitter.rframes.pop();
     emitter.scopes.pop();
+  }
+  // Every function scope's aliases were placed: a function form whose
+  // emission reaches neither emitTsTypeDecls nor a statement-list seam
+  // would otherwise leave a cast naming a type the face never declares
+  // — an emitter defect, reported at the declaration rather than as a
+  // checker error.
+  for (const record of emitter.schemaScopeRecords ?? []) {
+    if (record.placed) continue;
+    throw emitter.positionedError(record.stories[0].decl.node,
+      `emitter: the schema declaration '${record.stories[0].decl.name}' sits in a function form whose top the alias placement never reached`);
+  }
+  // Every behavior object owed was placed. The one declaration form
+  // with none to follow is a declaration that is not a statement of its
+  // own (`y = X = schema …`, an argument): its callable members' types
+  // would name a const the face never declares.
+  for (const [node, story] of emitter.schemaBehaviorPending) {
+    throw emitter.positionedError(node,
+      `emitter: the schema declaration '${story.decl.name}' declares callable members but is not a statement of its own, ` +
+      'so its behavior object has no statement to follow — declare it on its own line');
   }
   // A module exporting a top-level `stash` binding — the framework
   // contract launch reads — carries its own type on the face, so a
@@ -20306,7 +20583,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   const partNames = emitter.exportedObjects
     .filter(([, values]) => values.every((value) => emitter.componentNames.includes(value)))
     .map(([name]) => name);
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, indexedLoops: emitter.indexedLoops, componentUses: emitter.componentUses, componentProps: emitter.componentProps, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
+  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, runtimeRefs: emitter.runtimeRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, indexedLoops: emitter.indexedLoops, componentUses: emitter.componentUses, componentProps: emitter.componentProps, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
 }
 
 // The strip transform: delete the recorded TS-only regions from a
@@ -20316,6 +20593,9 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
 // (test/tsface.test.js) holds this equal to the JS-mode emission
 // byte-for-byte across the corpus.
 export const _runtimeTable = () => RUNTIME_TABLE;
+// The names a runtime module exports, read off its export line.
+export const _runtimeExports = (rt) => [...readFileSync(rt.url, 'utf8').matchAll(RUNTIME_EXPORT_LINE)]
+  .flatMap(([, list]) => list.split(',').map((s) => s.trim()).filter(Boolean));
 
 export function stripFace(code, tsRegions) {
   let out = '';

@@ -12,6 +12,7 @@
     "audit": "bun test/audit/runner.js",
     "browser": "bun scripts/browser-bundle.mjs",
     "corpus": "bun scripts/corpus.mjs",
+    "decls": "bun scripts/runtime-decls.mjs",
     "ext": "bun scripts/install-ext.mjs",
     "global": "bun scripts/global.mjs",
     "parser": "bun src/grammar/solar.rip -o src/parser.js src/grammar/grammar.rip",

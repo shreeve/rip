@@ -311,12 +311,14 @@ describe('schema type story on the TS face', () => {
     expect(binding).toContain('as unknown as MixinSchema<T>;');
   });
 
-  test('anonymous and function-local schemas decline the story (recorded boundary)', () => {
+  test('an anonymous schema declines the story (recorded boundary): no name, nothing to type', () => {
     const anon = face('check = (s) -> s\ncheck(schema :shape\n  a! string)');
     expect(anon.code).not.toContain('as unknown as');
-    const local = face('mk = ->\n  S = schema :shape\n    a! string\n  S');
-    expect(local.code).not.toContain('as unknown as');
-    expect(local.code).not.toContain('interface Schema');
+    expect(anon.code).not.toContain('interface Schema');
+    // A class field's schema is anonymous the same way (no `name:`).
+    const field = face('class A\n  s = schema :shape\n    a! string');
+    expect(field.code).not.toContain('as unknown as');
+    expect(field.code).toContain('s = __schema({kind: "shape", entries: [');
   });
 
   test('export prefixes reach the alias lines', () => {
@@ -362,6 +364,162 @@ describe('schema type story on the TS face', () => {
       expect(stripFace(f.code, f.tsRegions)).toBe(p.code);
       expect(p.tsRegions).toEqual([]);
     }
+  });
+});
+
+// ── 2b. the story at every scope ─────────────────────────────────────
+
+// A named declaration types the same wherever it is written. The module's
+// aliases emit at the program's top; a function scope's emit at that
+// function's top, block-scoped under the schema's own name, so the cast,
+// the hoist-line annotation, and the behavior object spell the same names
+// there as at module scope. Anonymity, not position, is the one boundary.
+describe('schema type story inside function scopes', () => {
+  const reject = (src) => {
+    let caught = null;
+    try { compile(src, { runtimeDelivery: 'none', face: 'ts' }); } catch (e) { caught = e; }
+    expect(caught).toBeInstanceOf(CompileError);
+    return caught;
+  };
+
+  test('a function-local declaration types like a module-level one: aliases at the body top, the cast, the intrinsic block once', () => {
+    const src = 'mk = ->\n  S = schema :shape\n    a! string\n  S';
+    for (const runtimeDelivery of ['none', 'import', 'inline']) {
+      const f = compile(src, { runtimeDelivery, face: 'ts' });
+      expect(f.code).toContain('let mk = function() {\n  type S = { a: string };\n  let S = __schema(');
+      expect(f.code).toContain(') as unknown as Schema<S, S>;\n  return S;');
+      expect(f.code.match(/^interface Schema</gm)).toHaveLength(1);
+      expect(f.code).not.toMatch(/^type S = /m);
+      expect(stripFace(f.code, f.tsRegions)).toBe(compile(src, { runtimeDelivery }).code);
+    }
+    // The dts road is module surface only (pinned above): unchanged.
+    expect(dts(src)).toBe('');
+  });
+
+  test('every function form places its scope\'s aliases at its own top', () => {
+    const forms = [
+      ['def', 'def g()\n  S = schema :shape; a!\n  S', 'function g() {\n  type S = { a: string };\n  let S = __schema('],
+      ['class method', 'class A\n  m: ->\n    T = schema :shape; b!\n    T', '  m() {\n    type T = { b: string };\n    let T = __schema('],
+      ['component method', 'Counter = component\n  count := 0\n  bump: ->\n    S = schema :shape; a!\n    S\n  render\n    div "x"', '  bump() {\n    type S = { a: string };\n    let S = __schema('],
+      ['effect body', 'x := 1\n~>\n  S = schema :shape; a!\n  console.log S', '__effect(() => {\n  type S = { a: string };\n  let S = __schema('],
+      ['single-expression effect body', 'x := 1\n~> S = schema :shape; a!', '__effect(() => { let S!: Schema<S, S>; type S = { a: string };\n(S = __schema('],
+      ['multi-statement computed body', 'x := 1\ny ~=\n  S = schema :shape; a!\n  S', '__computed(() => {\n  type S = { a: string };\n  let S = __schema('],
+      ['nested arrow', 'outer = ->\n  inner = ->\n    S = schema :shape; a!\n    S\n  inner', '  let inner = function() {\n    type S = { a: string };\n    let S = __schema('],
+    ];
+    for (const [label, src, expected] of forms) {
+      const f = face(src);
+      expect(f.code, label).toContain(expected);
+      expect(f.code, label).toMatch(/\) as unknown as Schema<([ST]), \1>/);
+      expect(stripFace(f.code, f.tsRegions), label).toBe(js(src).code);
+    }
+  });
+
+  test('a block opens no scope: a declaration under `if` hoists to the enclosing function or module, annotated on its hoist line', () => {
+    const inFn = face('f = (c) ->\n  if c\n    S = schema :shape; a!\n  S');
+    expect(inFn.code).toContain('let f = function(c?) {\n  let S!: Schema<S, S>;\n  type S = { a: string };\n  if (c) {\n    S = __schema(');
+    const atModule = face('if c\n  S = schema :shape; a!');
+    expect(atModule.code).toContain('type S = { a: string };\n\nlet S!: Schema<S, S>;\n\nif (c) {\n  S = __schema(');
+    expect(atModule.code).toContain(') as unknown as Schema<S, S>;');
+    for (const r of [inFn, atModule]) expect(r.code.match(/^interface Schema</gm)).toHaveLength(1);
+    // Strict keeps the conditional assignment visible to the checker.
+    expect(face('if c\n  S = schema :shape; a!', { strict: true }).code).toContain('\n\nlet S: Schema<S, S>;\n');
+  });
+
+  test('callable members: the behavior object follows the statement inside the function, and a tail declaration takes it after the return', () => {
+    const stmt = face('f = ->\n  S = schema :shape\n    a! string\n    full: ~> @a\n  S');
+    expect(stmt.code).toContain('  type SData = { a: string };\n  type S = SData & { readonly full: ReturnType<typeof __S__behavior.full> };\n  let S = __schema(');
+    expect(stmt.code).toContain(') as unknown as Schema<S, SData>;\n  const __S__behavior = {full: (function(this: S) { return this.a; })};\n  return S;');
+    const tail = face('f = ->\n  S = schema :shape\n    a! string\n    full: ~> @a');
+    expect(tail.code).toContain('  let S!: Schema<S, SData>;\n  type SData = { a: string };\n  type S = SData & { readonly full: ReturnType<typeof __S__behavior.full> };\n  return (S = __schema(');
+    expect(tail.code).toContain(') as unknown as Schema<S, SData>);\n  const __S__behavior = {full: (function(this: S) { return this.a; })};\n};');
+    for (const r of [stmt, tail]) expect(stripFace(r.code, r.tsRegions)).toBe(js(r === stmt ? 'f = ->\n  S = schema :shape\n    a! string\n    full: ~> @a\n  S' : 'f = ->\n  S = schema :shape\n    a! string\n    full: ~> @a').code);
+  });
+
+  test('every kind types in a function: a :model brings the persistence tier to the module top, a :mixin resolves for its sibling', () => {
+    const model = face('f = ->\n  U = schema :model\n    name! string\n    @scope :live, -> @where(active: true)\n  U');
+    expect(model.code).toMatch(/^interface ModelSchema</m);
+    expect(model.code).toContain('  type UQuery = SchemaQuery<U, UData> & { live(...args: any[]): UQuery };\n  let U = __schema(');
+    expect(model.code).toContain(') as unknown as ModelSchema<U, UData, number, UCreate> & { live(...args: any[]): UQuery };');
+    const mixin = face('f = ->\n  T = schema :mixin\n    at? datetime\n  U = schema :shape\n    @mixin T\n    name!\n  U');
+    expect(mixin.code).toContain('  type T = { at?: Date };\n  type U = { name: string } & T;\n  let T = __schema(');
+    expect(mixin.code).toContain('as unknown as MixinSchema<T>;');
+  });
+
+  test('visibility follows lexical nesting: a scope sees the module and every enclosing function; nothing sees inward', () => {
+    const chain = face('Addr = schema :shape; city!\nouter = ->\n  Org = schema :shape\n    name!\n    addr! Addr\n  inner = ->\n    User = schema :shape\n      org! Org\n      home! Addr\n    User\n  inner');
+    expect(chain.code).toContain('  type Org = { name: string; addr: Addr };');
+    expect(chain.code).toContain('    type User = { org: Org; home: Addr };');
+    const inward = face('f = ->\n  Local = schema :shape; a!\n  Local\nM = schema :shape\n  l! Local');
+    expect(inward.code).toContain('type M = { l: unknown };');
+    expect(inward.code).toContain('  type Local = { a: string };');
+  });
+
+  test('sibling functions each own their name: two `S` of different shapes, both typed, no collision', () => {
+    const f = face('a = ->\n  S = schema :shape; x! integer\n  S\nb = ->\n  S = schema :shape; y! string\n  S');
+    expect(f.code).toContain('let a = function() {\n  type S = { x: number };');
+    expect(f.code).toContain('let b = function() {\n  type S = { y: string };');
+  });
+
+  test('a declaration that rebinds an enclosing binding rejects positioned: Rip assigns outward, and a schema binds once', () => {
+    for (const src of [
+      'S = schema :shape; a!\nf = ->\n  S = schema :shape; b! integer\n  S',
+      'S = 1\nf = ->\n  S = schema :shape; b! integer\n  S',
+      'f = ->\n  S = 1\n  g = ->\n    S = schema :shape; b! integer\n  g',
+    ]) {
+      const caught = reject(src);
+      expect(caught.message).toMatch(/the schema declaration 'S' inside this function rebinds the enclosing 'S'/);
+      expect(caught.line).toBeGreaterThan(1);
+      // The JS emission is untouched: the write is legal Rip.
+      expect(() => compile(src).code).not.toThrow();
+    }
+  });
+
+  test('a scope claims its own type-space namespace: a second declaration, a user type, an intrinsic shadow, the behavior name', () => {
+    const cases = [
+      ['f = ->\n  try\n    R = schema :input; name!\n    R = schema :input; other! integer\n  catch e\n    e', /which schema 'R' already emits — every schema-emitted type name binds once per scope/],
+      ['f = ->\n  type S = { z: number }\n  S = schema :shape; a!\n  S', /collides with the type declaration 'S'/],
+      ['f = ->\n  type Schema = { z: number }\n  S = schema :shape; a!\n  S', /the type declaration 'Schema' collides with the schema intrinsic declarations/],
+      ['f = ->\n  __S__behavior = 1\n  S = schema :shape\n    a! string\n    full: ~> @a\n  S', /binds '__S__behavior', the face-only name/],
+    ];
+    for (const [src, re] of cases) {
+      expect(reject(src).message).toMatch(re);
+      expect(() => compile(src).code).not.toThrow();
+    }
+    // A user type in a function that declares no schema is not a claim.
+    expect(() => face('f = ->\n  type Schema = { z: number }\n  1\nS = schema :shape; a!')).not.toThrow();
+  });
+
+  test('a named declaration in a parameter default rejects positioned: no scope\'s aliases are visible there', () => {
+    const src = 'f = (x = (S = schema :shape; a!)) -> x';
+    const caught = reject(src);
+    expect(caught.message).toMatch(/the schema declaration 'S' sits in a parameter default, where no scope's type aliases are visible/);
+    expect(() => compile(src).code).not.toThrow();
+  });
+
+  test('a declaration that is not a statement of its own types too, unless its callable members need a behavior object to follow', () => {
+    const value = face('y = (X = schema :shape; a!)\nf (Z = schema :shape; b!)');
+    expect(value.code).toContain('type X = { a: string };\ntype Z = { b: string };\n\nlet X!: Schema<X, X>, Z!: Schema<Z, Z>;');
+    expect(value.code).toContain('let y = X = __schema(');
+    expect(value.code).toContain('f(Z = __schema(');
+    expect(value.code.match(/as unknown as Schema</g)).toHaveLength(2);
+    const src = 'y = (X = schema :shape\n  a! string\n  full: ~> @a)';
+    expect(reject(src).message).toMatch(/'X' declares callable members but is not a statement of its own/);
+    expect(() => compile(src).code).not.toThrow();
+  });
+
+  test('mapping: a function-local alias block covers its schema node, and the descriptor\'s `name:` pins to the local declaration', () => {
+    const src = 'S = schema :shape; a!\nmk = ->\n  T = schema :shape; b!\n  T';
+    const { mappings, stores, code } = compile(src, { runtimeDelivery: 'none', face: 'ts' });
+    expect(mappings.rows.filter((r) => r.role === 'schemaTypes')).toHaveLength(1);
+    const local = stores.nodesByKind('schema')[1];
+    const selfRows = mappings.rows.filter((r) => r.nodeId === local.nodeId && r.role === '$self');
+    expect(selfRows.length).toBeGreaterThanOrEqual(2);
+    expect(selfRows.every((r) => r.sourceStart === local.sourceStart)).toBe(true);
+    const declAt = src.indexOf('  T = schema') + 2;
+    const pin = mappings.rows.find((r) => r.role === 'literal' && r.sourceStart === declAt && r.sourceEnd === declAt + 1);
+    expect(pin).toBeDefined();
+    expect(code.slice(pin.generatedStart, pin.generatedEnd)).toBe('T');
+    expect(code.slice(pin.generatedStart - 'name: "'.length, pin.generatedStart)).toBe('name: "');
   });
 });
 
