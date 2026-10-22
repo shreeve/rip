@@ -22,7 +22,8 @@ import { normalizePersistenceInput, constructInputInstance } from '../../src/run
 # What a model definition carries once orm.js has installed persistence:
 # the statics fake reads, and the normalized shape its helpers walk.
 type Relation = { kind: string, optional?: boolean, foreignKey: string }
-type Norm = { fields: Map<string, { typeName?: string }>, methods: Map<string, (...args: unknown[]) => unknown>, relations: Map<string, Relation> }
+type Field = { name: string, typeName: string, literals: string[] | null }
+type Norm = { fields: Map<string, Field>, methods: Map<string, (...args: unknown[]) => unknown>, relations: Map<string, Relation> }
 type Model = SchemaDef & { _assertModel: (api: string) => void, create: (data: Record<string, unknown>) => Promise<unknown>, factory: (num?: number | string, ...args: unknown[]) => unknown }
 
 # ==[ Randomness ]==
@@ -37,16 +38,16 @@ mulberry32 = (a) ->
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
     ((t ^ (t >>> 14)) >>> 0) / 4294967296
 
-seed = (n) ->
+seed = (n?: number | null): void ->
   __rand = if n? then mulberry32(n >>> 0) else Math.random
   return
 
-random  = -> __rand()
-integer = (min = 0, max = 100) -> min + Math.floor __rand() * (max - min + 1)
+random  = (): number -> __rand()
+integer = (min: number = 0, max: number = 100): number -> min + Math.floor __rand() * (max - min + 1)
 # sample ary — uniform pick. sample ary, weights — weighted pick from a
 # parallel array; entries past the end of weights count 1, so
 # sample(['a','b','c'], [10]) draws 10/1/1. Zero weight = never picked.
-sample = (ary, weights) ->
+sample: <T>(ary: ArrayLike<T>, weights?: number[]) => T = (ary, weights) ->
   return ary[Math.floor __rand() * ary.length] unless weights?
   throw Error.new "fake.sample: #{weights.length} weights for #{ary.length} values" if weights.length > ary.length
   total = ary.length - weights.length
@@ -63,21 +64,21 @@ sample = (ary, weights) ->
     r -= w
     return v if r < 0
   last
-chance  = (prob = 0.5) -> __rand() < prob
-maybe   = (prob, fn) ->
+chance  = (prob: number = 0.5): boolean -> __rand() < prob
+maybe: <T>(prob: number, fn: T | (() => T)) => T | null = (prob, fn) ->
   return null unless __rand() < prob
-  if typeof fn is 'function' then fn() else fn
+  if typeof fn is 'function' then (fn as Function)() else fn
 
 # ==[ Pattern templating (faker's numerify/letterify, kept) ]==
 
 LETTERS = 'abcdefghijklmnopqrstuvwxyz'
 
-numerify  = (s) -> s.replace /#/g, -> String integer(0, 9)
-letterify = (s) -> s.replace /\?/g, -> sample LETTERS
-pattern   = (s) -> letterify numerify(s)
-digits    = (n = 6) -> numerify '#'.repeat(n)
-token     = (n = 8) -> (sample('0123456789abcdef') for i in [0...n]).join ''
-uuid      = ->
+numerify  = (s: string): string -> s.replace /#/g, -> String integer(0, 9)
+letterify = (s: string): string -> s.replace /\?/g, -> sample LETTERS
+pattern   = (s: string): string -> letterify numerify(s)
+digits    = (n: number = 6): string -> numerify '#'.repeat(n)
+token     = (n: number = 8): string -> (sample('0123456789abcdef') for i in [0...n]).join ''
+uuid      = (): string ->
   'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace /[xy]/g, (c) ->
     r = integer 0, 15
     v = if c is 'x' then r else (r & 0x3) | 0x8
@@ -161,70 +162,70 @@ WORDS = [
 
 # ==[ Generators ]==
 
-firstName = (sex) ->
+firstName = (sex?: string | null): string ->
   switch sex
     when 'M' then sample FIRST_M
     when 'F' then sample FIRST_F
     else sample(if chance() then FIRST_M else FIRST_F)
 
-lastName = -> sample LAST
-fullName = (sex) -> "#{firstName sex} #{lastName()}"
+lastName = (): string -> sample LAST
+fullName = (sex?: string | null): string -> "#{firstName sex} #{lastName()}"
 
-nickname = (sex) ->
+nickname = (sex?: string | null): string ->
   switch sex
     when 'M' then sample NICK_M
     when 'F' then sample NICK_F
     else sample(if chance() then NICK_M else NICK_F)
 
-domain = -> "#{sample WORDS}#{sample ['mail', 'box', 'net', 'hub']}.example.com"
+domain = (): string -> "#{sample WORDS}#{sample ['mail', 'box', 'net', 'hub']}.example.com"
 
-email = (first, last) ->
+email = (first?: string | null, last?: string | null): string ->
   f = (first ?? firstName()).toLowerCase().replace /[^a-z]/g, ''
   l = (last ?? lastName()).toLowerCase().replace /[^a-z]/g, ''
   sample(["#{f}.#{l}", "#{f}#{l}", "#{f[0]}#{l}", "#{f}#{integer 1, 99}"]) + '@' + domain()
 
-username = (first, last) ->
+username = (first?: string | null, last?: string | null): string ->
   "#{(first ?? firstName()).toLowerCase()}#{(last ?? lastName()).toLowerCase()}#{integer 1, 999}"
 
 # NANP-legal: area code is [2-9][0-8][0-9] (a middle 9 is reserved for
 # expansion and rip/validate's toPhone refuses it), never N11; exchange
 # codes start 2-9.
-areaCode = ->
+areaCode = (): string ->
   loop
     s = String(integer 2, 9) + String(integer 0, 8) + String(integer 0, 9)
     return s unless s.endsWith '11'
 
 exchangeCode = -> String(integer 2, 9) + digits(2)
 
-phone = ({ ext } = {}) ->
+phone = ({ ext }: { ext?: boolean | number } = {}): string ->
   s = "(#{areaCode()}) #{exchangeCode()}-#{digits 4}"
   s += ", ext. #{integer 50, 3000}" if ext is true or (typeof ext is 'number' and chance(ext))
   s
 
-fax = -> phone()
-phoneType = -> sample ['cell', 'home', 'work']
+fax = (): string -> phone()
+phoneType = (): 'cell' | 'home' | 'work' -> sample ['cell', 'home', 'work']
 
-sex = -> sample ['M', 'F']
-age = (min = 18, max = 90) -> integer min, max
+sex: () => 'M' | 'F' = -> sample ['M', 'F']
+age = (min: number = 18, max: number = 90): number -> integer min, max
 
 # Base name, with a street type appended most of the time — so you get
 # 'Elm', 'Elm St', 'Elm Peak', … from a small combinatorial pool.
-street = ->
+street = (): string ->
   s = sample STREETS
   s += " #{sample STREET_TYPES}" if chance 0.8
   s
 
-streetAddress = -> "#{integer 10, 9950} #{street()}"
-city = -> sample CITIES
-state = -> sample STATES
-zip = -> digits 5
-company = -> "#{sample COMPANIES} #{sample COMPANY_SUFFIX}"
-profession = -> sample PROFESSIONS
-jobTitle = -> "#{sample JOB_LEVELS} #{sample JOB_ROLES}"
+streetAddress = (): string -> "#{integer 10, 9950} #{street()}"
+city = (): string -> sample CITIES
+state = (): string -> sample STATES
+zip = (): string -> digits 5
+company = (): string -> "#{sample COMPANIES} #{sample COMPANY_SUFFIX}"
+profession = (): string -> sample PROFESSIONS
+jobTitle = (): string -> "#{sample JOB_LEVELS} #{sample JOB_ROLES}"
 
-word = -> sample WORDS
-words = (n = 3) -> (word() for i in [0...n]).join ' '
-sentence = (n = 8) ->
+word = (): string -> sample WORDS
+words = (n: number = 3): string -> (word() for i in [0...n]).join ' '
+sentence = (n: number = 8): string ->
   s = words n
   s[0].toUpperCase() + s.slice(1) + '.'
 
@@ -232,7 +233,9 @@ sentence = (n = 8) ->
 # date(days: 30) -> within the last 30 days; date() -> last year.
 MS_DAY = 86400000
 
-date = (opts = {}) ->
+type DateOptions = { years?: [number, number], days?: number }
+
+date = (opts: DateOptions = {}): string ->
   ms = if opts.years
     [a, b] = opts.years
     Date.now() - integer(a * 365.25 * MS_DAY, b * 365.25 * MS_DAY)
@@ -240,12 +243,12 @@ date = (opts = {}) ->
     Date.now() - integer(0, (opts.days ?? 365) * MS_DAY)
   Date.new(ms).toISOString().slice 0, 10
 
-datetime = (opts = {}) -> Date.new(Date.parse(date opts) + integer(0, MS_DAY - 1))
+datetime = (opts: DateOptions = {}): Date -> Date.new(Date.parse(date opts) + integer(0, MS_DAY - 1))
 
 # unique(fn) — retry fn until unseen, then error.
 __seen = Map.new()
 
-unique = (fn, max = 1000) ->
+unique: <T>(fn: () => T, max?: number) => T = (fn, max = 1000) ->
   set = __seen.get fn
   unless set
     set = Set.new()
@@ -268,6 +271,8 @@ unique = (fn, max = 1000) ->
 # The delimiter is sniffed from the header (tab, then pipe, then
 # comma) or passed explicitly.
 
+type Row = Record<string, string | null>
+
 __tableLines = (text) ->
   text.split(/\r?\n/).map((l) -> l.trim())
     .filter (l) -> l and not l.startsWith('#') and not /^[|\s:-]+$/.test(l)
@@ -281,7 +286,7 @@ __tableCells = (line, delim) ->
   line = line.replace(/^\||\|$/g, '') if delim is '|'
   line.split(delim).map (c) -> c.trim()
 
-table = (text, delim = null) ->
+table = (text: string, delim: string | null = null): Row[] ->
   lines = __tableLines text
   throw Error.new 'fake.table: needs a header line and at least one data row' if lines.length < 2
   delim ?= __tableSniff lines[0]
@@ -299,9 +304,9 @@ table = (text, delim = null) ->
 # File-loading variants: csv reads a delimited file, comma by default —
 # override for anything else (csv path, ';'); tsv and psv are the tab
 # and pipe spellings of the same call.
-csv = (path, delim = ',') -> table Bun.file(path).text!, delim
-tsv = (path) -> csv! path, '\t'
-psv = (path) -> csv! path, '|'
+csv = (path: string | URL, delim: string = ','): Promise<Row[]> -> table Bun.file(path).text!, delim
+tsv = (path: string | URL): Promise<Row[]> -> csv! path, '\t'
+psv = (path: string | URL): Promise<Row[]> -> csv! path, '|'
 
 export fake = {
   seed, random, integer, sample, chance, maybe,
@@ -320,7 +325,9 @@ export fake = {
 # at all. Name heuristics cover the string fields the type system can't
 # distinguish.
 
-NAME_HINTS = [
+type Ctx = { sex?: string, firstName?: string, lastName?: string }
+
+NAME_HINTS: [RegExp, (ctx: Ctx) => string][] = [
   [/^first_?name$/i,      (ctx) -> ctx.firstName ?? firstName(ctx.sex)]
   [/^last_?name$/i,       (ctx) -> ctx.lastName ?? lastName()]
   [/^(full_?)?name$/i,    -> if chance(0.5) then fullName() else company()]
@@ -344,7 +351,7 @@ NAME_HINTS = [
   [/company|organization/i, -> company()]
 ]
 
-export __fakeFieldValue = (f, ctx = {}) ->
+export __fakeFieldValue = (f: Field, ctx: Ctx = {}): string | number | boolean | Date | undefined ->
   return sample f.literals if f.literals
   switch f.typeName
     when 'email' then email ctx.firstName, ctx.lastName
@@ -392,7 +399,7 @@ __factoryDerive = (norm, overrides) ->
   skip = Set.new [norm.primaryKey, 'createdAt', 'updatedAt', 'deletedAt']
 
   # Names first, so emails and correlated fields can agree with them.
-  ctx = {}
+  ctx: Ctx = {}
   norm.fields.forEach (f, n) ->
     if /^(sex|gender)$/i.test n
       picks = f.literals?.filter((l) -> l is 'M' or l is 'F')
@@ -449,7 +456,7 @@ __factoryTableRows = (norm, text) ->
   persist = num >= 1
   many = num >= 2 or num <= -2
   count = if many then Math.abs(num) else 1
-  seedFn = norm.methods.get('seed') or null
+  seedFn = (norm.methods.get('seed') or null) as ((...args: unknown[]) => Record<string, unknown> | null | undefined) | null
   overrides = if not seedFn and args.length is 1 and args[0] and typeof args[0] is 'object' then args[0] else null
 
   make = =>

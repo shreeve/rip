@@ -39,7 +39,7 @@ test "phones are NANP-legal, fax matches, extensions opt in", ->
     ok m, 'phone shape'
     ok m[1][0] >= '2', 'area code starts 2-9'
     ok m[1][1] <= '8', 'area code middle digit never 9 (reserved)'
-    ok m[1] % 100 isnt 11, 'area code never N11'
+    ok Number(m[1]) % 100 isnt 11, 'area code never N11'
     ok m[2][0] >= '2', 'exchange starts 2-9'
     # The real contract: everything the generator emits, the validator
     # accepts unchanged — fakes must survive real validation.
@@ -108,6 +108,7 @@ test "weighted sample follows weights; short weights default to 1", ->
 
 test "weighted sample validates weights loudly", ->
   throws -> fake.sample ['a'], [1, 2]
+  # @ts-expect-error
   throws -> fake.sample ['a', 'b'], ['x']
   throws -> fake.sample ['a', 'b'], [1, -1]
   throws -> fake.sample ['a', 'b'], [0, 0]
