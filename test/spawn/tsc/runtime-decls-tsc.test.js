@@ -38,20 +38,27 @@ import { resolveTsc } from '../../support/tsc.js';
 const TSC = EXTENDED ? resolveTsc() : null;
 const runtimeDir = join(import.meta.dir, '../../../src/runtime');
 
+// The declared side decides whether a member is entered: a member the
+// implementation infers circularly (a class field read before its first
+// write) carries tsc's error type, and a conditional type over that is
+// \`any\`, which would swallow the whole verdict — so the implementation's
+// member type is consulted only once the declaration claims an object.
 const UNDECLARED = `
 type IsAny<T> = 0 extends 1 & T ? true : false;
-export type Undeclared<I, D> = {
-  [K in keyof I & string]: K extends keyof D
-    ? IsAny<D[K]> extends true ? never
-      : IsAny<I[K]> extends true ? never
-      : D[K] extends (...a: never[]) => unknown ? never
-      : D[K] extends object
-        ? (I[K] extends object
-          ? (Undeclared<I[K], D[K]> extends infer R ? (R extends string ? \`\${K}.\${R}\` : never) : never)
-          : never)
-        : never
-    : K
-}[keyof I & string];
+export type Undeclared<I, D> =
+  | Exclude<keyof I & string, keyof D>
+  | {
+    [K in keyof I & string]: K extends keyof D
+      ? IsAny<D[K]> extends true ? never
+        : D[K] extends (...a: never[]) => unknown ? never
+        : D[K] extends object
+          ? (IsAny<I[K]> extends true ? never
+            : I[K] extends object
+              ? (Undeclared<I[K], D[K]> extends infer R ? (R extends string ? \`\${K}.\${R}\` : never) : never)
+              : never)
+          : never
+      : never
+  }[keyof I & string];
 `;
 
 // One assignment per declared value, so every disagreement reports in one
@@ -120,18 +127,24 @@ describeExtended('runtime declarations ↔ implementations', () => {
     const rows = [
       // a declared return the function does not produce
       ['reactive', decls.reactive.replace(
-        'export declare const __readonly: <T>(value: T) => Readonly<{ value: T }>;',
+        'export declare const __readonly: <T>(value: T) => Readonly<{\n  value: T;\n}>;',
         'export declare const __readonly: <T>(value: T) => T;'),
         /The types returned by '__readonly\(\.\.\.\)' are incompatible/],
       // a declared name the module does not export
       ['schema', decls.schema + 'export declare const registerCoercerz: (name: string) => void;\n',
         /Property 'registerCoercerz' is missing/],
       // a declared member the exported object does not carry
-      ['orm', decls.orm.replace('plan: () => never;', 'plan: () => never; drop: () => never;'),
+      ['orm', decls.orm.replace('plan: () => never;', 'plan: () => never;\n  drop: () => never;'),
         /Property 'drop' is missing in type/],
       // an export the declaration leaves out
-      ['schema', decls.schema.replace('export declare const SchemaRegistry: any;\n', ''),
+      ['schema', decls.schema.replace(/^export declare const SchemaRegistry: \{\n[\s\S]*?\n\};\n/m, ''),
         /Type 'true' is not assignable to type '"SchemaRegistry"'/],
+      // a class member the declaration leaves out
+      ['components', decls.components.replace('  _bound(name: string): (...args: unknown[]) => unknown;\n', ''),
+        /Type 'true' is not assignable to type '"__Component.prototype._bound"'/],
+      // a declared class member the implementation does not carry
+      ['schema', decls.schema.replace('  name: string | null;\n', '  name: string | null;\n  kindz: string;\n'),
+        /Property 'kindz' is missing in type/],
     ];
     for (const [name, text, expected] of rows) {
       expect(text).not.toBe(decls[name]);

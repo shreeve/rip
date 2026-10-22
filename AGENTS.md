@@ -54,9 +54,10 @@ repository root; consulted for UNDERSTANDING → docs/.
  quietly altered semantics. The full doctrine is below.
 
 3. **Never hand-edit generated files** (`src/parser.js`, the `.d.ts`
- beside each typed runtime). Change the grammar, the generator, or the
- runtime table and regenerate via `bun run parser` / `bun run decls` —
- regeneration is byte-gated in CI.
+ beside each typed runtime). Change the grammar, the generator, the
+ runtime table, or `src/ts/runtime-exports.js` (the signatures of the
+ exports the table does not inject) and regenerate via `bun run parser`
+ / `bun run decls` — regeneration is byte-gated in CI.
 
 4. **Every bug gets fixed at the layer that owns it.** A wrong tree
  is a grammar (or lexer-token) bug; a correct tree that serializes
@@ -488,9 +489,10 @@ the affected final gates again.
 - `bun run corpus` — regenerate the corpus expected outputs.
 - `bun run decls` — regenerate the declaration beside each typed
   runtime (`src/runtime/<key>.d.ts`) from the runtime table's face
-  signatures; `test/toolchain/runtime-decls.test.js` byte-gates the
-  files, and the extended tier checks each runtime's JavaScript against
-  its declaration with tsc.
+  signatures and `src/ts/runtime-exports.js`, the signatures of the
+  exports the table does not inject; `test/toolchain/runtime-decls.test.js`
+  byte-gates the files, and the extended tier checks each runtime's
+  JavaScript against its declaration with tsc.
 - `bun run browser` — regenerate `dist/@rip/rip.js` (and
  `rip.min.js` / `rip.min.js.br`) after any `src/browser.js` change; a
  freshness gate in `test:all` catches a stale bundle.

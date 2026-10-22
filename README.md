@@ -50,7 +50,7 @@ bun run test:all       # exhaustive: extended tier + every package
 bun run test:tui       # the same lanes, drawn live on packages/tui
 rip check [paths...]   # headless TypeScript checking over Rip source
 bun run parser         # regenerate src/parser.js
-bun run decls          # regenerate src/runtime/*.d.ts from the runtime table
+bun run decls          # regenerate src/runtime/*.d.ts from the runtime table and src/ts/runtime-exports.js
 bun run corpus
 bun run audit
 ```
