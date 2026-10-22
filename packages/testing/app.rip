@@ -26,6 +26,17 @@ import { tmpdir } from 'node:os'
 import { connect } from '../../src/runtime/orm.js'
 import { migrationFiles, migrationLabel, splitStatements } from '../../src/cli/migrate.js'
 
+type Handler = (request: Request) => Response | Promise<Response>
+type HeaderMap = Record<string, string>
+type Body = string | Record<string, unknown> | unknown[] | null
+type Client =
+  get: (path: string, headers?: HeaderMap) => Promise<Response>
+  post: (path: string, body?: Body, headers?: HeaderMap) => Promise<Response>
+  put: (path: string, body?: Body, headers?: HeaderMap) => Promise<Response>
+  patch: (path: string, body?: Body, headers?: HeaderMap) => Promise<Response>
+  del: (path: string, headers?: HeaderMap) => Promise<Response>
+  jar: Map<string, string>
+
 # Serve a fresh DuckDB file with `harbor <db> start`, then replay
 # migrationsDir through it in the order and statement split `rip schema
 # migrate` uses. Harbor creates the file, so it has a deployed
@@ -42,7 +53,7 @@ import { migrationFiles, migrationLabel, splitStatements } from '../../src/cli/m
 # listens on loopback only and authenticates nobody, which is the same
 # thing the unix socket says. Reaching it means already being on this
 # machine.
-export scratchDb = (migrationsDir) ->
+export scratchDb = (migrationsDir: string): Promise<{ url: string, file: string, dir: string, stop: () => void }> ->
   dir = mkdtempSync join(tmpdir(), 'rip-scratch-')
   file = join dir, 'scratch.duckdb'
   throw Error.new "scratchDb: no migrations in #{migrationsDir}" unless readdirSync(migrationsDir).some((n) -> n.endsWith '.sql')
@@ -101,7 +112,7 @@ export scratchDb = (migrationsDir) ->
     try rmSync(dir, { recursive: true, force: true }) catch then null
   process.on 'exit', -> try proc.kill() catch then null
 
-  adapter = connect url: url, timeoutMs: null
+  adapter = connect url: (url as string), timeoutMs: null
   label = migrationsDir
   try
     for f in migrationFiles!(migrationsDir)
@@ -111,34 +122,34 @@ export scratchDb = (migrationsDir) ->
   catch e
     stop!
     throw Error.new "scratchDb: migration #{label} failed: #{e.message}"
-  { url, file, dir, stop }
+  { url: url as string, file, dir, stop }
 
 # Point the app at its (scratch) world and import it. `start()` throws
 # without APP_ARTIFACT/SOCKET_PATH — the worker-runtime guard — so the
 # harness satisfies it with sentinels; start() then installs the fetch
 # handler on globalThis and the app is fully wired, in this process.
-export bootApp = (entry, env = {}) ->
+export bootApp = (entry: string, env: Record<string, unknown> = {}): Promise<Handler> ->
   process.env[k] = String(v) for k, v of env
   process.env.APP_ARTIFACT ?= '(rip-testing)'
   process.env.SOCKET_PATH ?= '(rip-testing)'
   import!(entry)
-  handler = globalThis.__ripHandler
+  handler = (globalThis as typeof globalThis & { __ripHandler?: Handler }).__ripHandler
   throw Error.new "bootApp: #{entry} did not install a handler — does it call start()?" unless handler
   handler
 
 # Cookie-jar client over an in-process handler. Object bodies JSON-
 # encode themselves; set-cookie headers persist into the jar so a
 # login on one call authenticates the next.
-export appClient = (handler, base = 'https://app.test') ->
+export appClient = (handler: Handler, base: string = 'https://app.test'): Client ->
   jar = Map.new()
-  send = (method, path, body = null, headers = {}) ->
-    h = { ...headers }
+  send = (method, path, body: Body = null, headers = {}) ->
+    h: HeaderMap = { ...headers }
     cookies = [...jar.entries()].map(([k, v]) -> "#{k}=#{v}").join '; '
     h.cookie = cookies if cookies
     if body? and typeof body is 'object'
       h['content-type'] ?= 'application/json'
       body = JSON.stringify body
-    res = handler!(Request.new("#{base}#{path}", { method, body, headers: h }))
+    res = handler!(Request.new("#{base}#{path}", { method, body: body as string | null, headers: h }))
     for raw in (res.headers.getSetCookie?() ?? [])
       pair = raw.split(';')[0]
       i = pair.indexOf '='

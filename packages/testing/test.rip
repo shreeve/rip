@@ -115,6 +115,7 @@ test "an eq failure whose sides print alike shows both distinctly", ->
 console.log "\nthrows"
 
 test "throws rejects a target that is not a function", ->
+  # @ts-expect-error
   throws (-> throws(42)), TypeError, 'expects a function'
 
 test "passes when the body throws, throws when it does not", ->

@@ -40,10 +40,10 @@ process.on 'exit', report
 
 # An async body works too: invoke as `test! "name", -> ...` so the
 # file awaits it in place and output stays ordered.
-export def test(name, fn)
+export def test(name: string, fn: () => unknown): Promise<void>
   try
     r = fn()
-    await r if r?.then?
+    await r if (r as { then: unknown } | null | undefined)?.then?
     pass++
     console.log "  #{paint(GREEN, '✓')} #{name}"
   catch e
@@ -79,7 +79,7 @@ deepEq = (a, b) ->
 
 # The message is CONTEXT beside expected/got, never a replacement — most
 # often a failed subprocess's stderr, which is the whole diagnosis.
-export def eq(a, b, message = null)
+export def eq(a: unknown, b: unknown, message: unknown = null): void
   unless deepEq(a, b)
     [want, got] = [JSON.stringify(b), JSON.stringify(a)]
     # JSON hides undefined, NaN and Map/Set content; say what differs
@@ -87,12 +87,12 @@ export def eq(a, b, message = null)
     detail = "expected #{want}, got #{got}"
     throw Error.new(if message? then "#{detail}: #{message}" else detail)
 
-export def ok(cond, message = 'assertion failed')
+export def ok(cond: unknown, message: string = 'assertion failed'): void
   throw Error.new(message) unless cond
 
 # `expected` refines the assertion: an Error class checks instanceof,
 # a string checks message containment, and both can be given in order.
-export def throws(fn, ...expected)
+export def throws(fn: () => unknown, ...expected: (string | (abstract new (...args: never[]) => unknown))[]): unknown
   throw TypeError.new("throws expects a function, got #{typeof fn}") unless typeof fn is 'function'
   caught = null
   threw  = false
@@ -113,7 +113,7 @@ export def throws(fn, ...expected)
 # Env for subprocesses whose stdout is byte-pinned. FORCE_COLOR wins over
 # NO_COLOR for Bun's inspect paint, so a parent that set FORCE_COLOR for
 # its own reporter must not leak it into children under test.
-export def plainEnv(extra = {})
+export def plainEnv(extra: Record<string, string | undefined> = {}): Record<string, string | undefined>
   env = { ...process.env, ...extra }
   delete env.FORCE_COLOR unless Object.hasOwn(extra, 'FORCE_COLOR')
   env
