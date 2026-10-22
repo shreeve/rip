@@ -133,17 +133,25 @@ test "the default line width is one point in every unit", ->
   eq PDF.new('mm').state.lineWidth.toFixed(4), '0.3528'
 
 test "loud rejections at construction", ->
+  # @ts-expect-error
   throws (-> PDF.new nonsense: 1), PDFError, 'unknown document option "nonsense"'
   throws (-> PDF.new size: Infinity), PDFError, 'font size must be a positive number, got Infinity'
+  # @ts-expect-error
   throws (-> PDF.new fonts: [1]), PDFError, 'fonts must be an object'
+  # @ts-expect-error
   throws (-> PDF.new margins: 'wide'), PDFError, 'margins must be non-negative numbers, got "wide"'
   throws (-> PDF.new 'tabloid'), PDFError, 'unrecognized argument "tabloid"'
+  # @ts-expect-error
   throws (-> PDF.new unit: 'px'), PDFError, 'unknown unit "px"'
+  # @ts-expect-error
   throws (-> PDF.new paper: 'b5'), PDFError, 'unknown paper "b5"'
   throws (-> PDF.new font: 'symbol'), PDFError, 'unknown font "symbol"'
+  # @ts-expect-error
   throws (-> PDF.new margins: [1, 2, 3]), PDFError, 'margins take 1, 2 or 4 numbers'
   throws (-> PDF.new margins: 400), PDFError, 'no room'
+  # @ts-expect-error
   throws (-> PDF.new header: 'x'), PDFError, 'header must be a function'
+  # @ts-expect-error
   throws (-> PDF.new date: '2026-09-04'), PDFError, 'date must be a Date'
 
 # ==[ Structure ]==
@@ -239,17 +247,22 @@ test "text rejects what it cannot draw", ->
   throws (-> doc.text '⚠'), PDFError, '"⚠" (U+26A0) is not in WinAnsi'
   throws (-> doc.text '😀'), PDFError, '"😀" (U+1F600) is not in WinAnsi'
   throws (-> doc.text '\x7F'), PDFError, 'U+007F'
+  # @ts-expect-error
   throws (-> doc.text 'x', x: 'abc'), PDFError, 'x must be a finite number, got "abc"'
   throws (-> doc.text 'x', y: NaN), PDFError, 'y must be a finite number, got NaN'
   throws (-> doc.text 'x', size: Infinity), PDFError, 'size must be a positive number, got Infinity'
   throws (-> doc.text 'x', w: 1, overflow: 'ellipsis'), PDFError, 'too narrow even for an ellipsis'
+  # @ts-expect-error
   throws (-> doc.text 'x', 'opts'), PDFError, 'text options must be an object'
+  # @ts-expect-error
   throws (-> doc.text 42), PDFError, 'text expects a string, got 42'
   eq PDF.winAnsi('\x7F'), false
   throws (-> doc.text 'a\nb'), PDFError, 'newlines'
   throws (-> doc.text 'a\tb'), PDFError, 'tabs'
   throws (-> doc.text 'x', align: 'center'), PDFError, 'needs a width'
+  # @ts-expect-error
   throws (-> doc.text 'x', align: 'middle', w: 10), PDFError, 'unknown align'
+  # @ts-expect-error
   throws (-> doc.text 'x', bogus: 1), PDFError, 'unknown text option "bogus"'
   throws (-> doc.text 'x', color: 'red'), PDFError, 'bad color "red"'
   throws (-> doc.text 'x', font: 'nope'), PDFError, 'unknown font "nope"'
@@ -295,6 +308,7 @@ test "puts flows down by size × leading and returns to the left edge", ->
   eq doc.y, 145
   doc.puts 'flush', align: 'right'          # align without w spans to the right edge
   eq doc.y, 160
+  # @ts-expect-error
   throws (-> doc.puts 'x', x: 1), PDFError, 'unknown puts option "x"'
 
 test "goto and move validate their numbers", ->
@@ -303,8 +317,10 @@ test "goto and move validate their numbers", ->
   eq [doc.x, doc.y], [10, 20]
   doc.move 5, null
   eq [doc.x, doc.y], [15, 20]
+  # @ts-expect-error
   throws (-> doc.goto '10', 20), PDFError, 'x must be a finite number, got "10"'
   throws (-> doc.move 0, NaN), PDFError, 'dy must be a finite number'
+  # @ts-expect-error
   throws (-> doc.down 'x'), PDFError, 'down must be a finite number'
 
 test "lines wraps at spaces, splits overlong words, keeps blank lines", ->
@@ -322,6 +338,7 @@ test! "paragraph returns its height and honours align", ->
   eq doc.y, 72
   content = latin doc.bytes!
   eq (content.match(/ Tj ET/g) ?? []).length, 3
+  # @ts-expect-error
   throws (-> doc.paragraph 'x', leading: 'x'), PDFError, 'leading must be a positive number, got "x"'
   throws (-> doc.paragraph 'x', size: 800), PDFError, 'taller than the page box'
 
@@ -403,7 +420,9 @@ test "breaks: false never adds pages", ->
 
 test "scope validates its keys and restores every setting", ->
   doc = PDF.new()
+  # @ts-expect-error
   throws (-> doc.scope { colour: 'red' }, ->), PDFError, 'unknown scope option "colour"'
+  # @ts-expect-error
   throws (-> doc.scope {}, 'fn'), PDFError, 'scope expects a function, got "fn"'
   doc.scope { lineWidth: 3, tracking: 1, leading: 2, fill: 'white', stroke: '#abc' }, (d) ->
     eq [d.state.lineWidth, d.state.tracking, d.state.leading, d.state.fill, d.state.stroke], [3, 1, 2, '1', '0.667 0.733 0.8']
@@ -477,6 +496,7 @@ test "color forms", ->
   eq doc.color('black').state.color, '0'
   throws (-> doc.color 'red'), PDFError, 'bad color'
   throws (-> doc.color 2), PDFError, 'not in 0..1'
+  # @ts-expect-error
   throws (-> doc.color [1, 2]), PDFError, 'three 0–255 values'
 
 test! "shapes emit the right operators, lazily", ->
@@ -494,6 +514,7 @@ test! "shapes emit the right operators, lazily", ->
   throws (-> doc.rect 0, 0, 10, 10, radius: 6), PDFError, 'exceeds half'
   throws (-> doc.rect 0, 0, -1, 10), PDFError, 'rect width must be a positive number, got -1'
   throws (-> doc.rect NaN, 0, 1, 1), PDFError, 'rect x must be a finite number, got NaN'
+  # @ts-expect-error
   throws (-> doc.line 0, 0, '1', 1), PDFError, 'line x2 must be a finite number'
   throws (-> doc.circle 0, 0, 0), PDFError, 'circle radius must be a positive number, got 0'
   throws (-> doc.rect 0, 0, 1, 1, width: -1), PDFError, 'width must be a non-negative number, got -1'
@@ -547,9 +568,11 @@ test! "Code 39", ->
   eq c.x, 75
   s = latin doc.bytes!
   ok s.includes('14.5 772 1 20 re f 16.5 772 1 20 re f 20 772 2.5 20 re f 23.5 772 2.5 20 re f 27 772 1 20 re f')   # nnnwwnwnn
+  # @ts-expect-error
   throws (-> doc.barcode '12', x: 'a'), PDFError, 'x must be a finite number'
   throws (-> doc.barcode '12', h: 0), PDFError, 'barcode h must be a positive number, got 0'
   throws (-> doc.barcode 'a@', type: 'code39'), PDFError, 'Code 39 cannot encode'
+  # @ts-expect-error
   throws (-> doc.barcode 'x', type: 'qr'), PDFError, 'unknown barcode type'
 
 # ==[ Images ]==
@@ -616,6 +639,7 @@ test! "palette PNGs carry their palette and transparent index", ->
   ok /\/ColorSpace \[\/Indexed \/DeviceRGB 1 \d+ 0 R\] \/Mask \[0 0\]/.test s
   ok s.includes('/Colors 1 /BitsPerComponent 8 /Columns 2')
   ok s.includes('q 10 0 0 40 0 752 cm /I1 Do Q')
+  # @ts-expect-error
   throws (-> doc.image palettePNG(), w: 'a'), PDFError, 'image w must be a positive number, got "a"'
 
 test "images that cannot be passed through are rejected by name", ->
@@ -699,12 +723,18 @@ test! "table layout, header redraw across a break, and loud column errors", ->
   throws (-> doc.table [['a']], cols: [{}, {}]), PDFError, 'exactly one flexible column'
   throws (-> doc.table [['a', 'b']], w: 100, cols: [{ w: 60 }, { w: 60 }]), PDFError, 'exceed the table width'
   throws (-> doc.table [['a'], ['a very long cell that will not fit']], w: 60, cols: [{ w: 60 }]), PDFError, "table row 1 column 0: \"a very long cell that will not fit\" is"
+  # @ts-expect-error
   throws (-> doc.table 'rows'), PDFError, 'array of rows'
+  # @ts-expect-error
   throws (-> doc.table ['abc']), PDFError, 'row 0 is not an array, got "abc"'
+  # @ts-expect-error
   throws (-> doc.table [['a']], head: { colour: 'x' }), PDFError, 'unknown head option "colour"'
+  # @ts-expect-error
   throws (-> doc.table [['a']], cols: [{ aling: 'right' }]), PDFError, 'unknown column 0 option "aling"'
+  # @ts-expect-error
   throws (-> doc.table [['a']], row: -> { colour: 'x' }), PDFError, 'unknown row 0 override option "colour"'
   throws (-> doc.table [['a']], rowH: 800), PDFError, 'taller than the page box'
+  # @ts-expect-error
   throws (-> doc.table [['a']], rowH: '10'), PDFError, 'rowH must be a positive number, got "10"'
   s = latin doc.bytes!
   eq (s.match(/\(A\) Tj/g).length), 2

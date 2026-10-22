@@ -110,7 +110,7 @@ export def requisition(req, fonts)
     for [name, value, style], i in rows
       ry = y + 23.6 + i * 13.5
       doc.text name, x: x + 10.04, y: ry, size: 7.5, color: MUTED
-      opts = { x: x + 74.54, y: ry - 0.72, w: w - 84, overflow: 'ellipsis' }
+      opts = { x: x + 74.54, y: ry - 0.72, w: w - 84, overflow: 'ellipsis' as const }
       switch style
         when 'strong' then doc.text value or '—', { ...opts, font: 'interB', color: INK }
         when 'mono'   then doc.text value or '—', { ...opts, font: 'mono', size: 7.875, y: ry - 0.76 }
