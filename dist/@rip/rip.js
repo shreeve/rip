@@ -230,8 +230,23 @@ function camelCase(col) {
 }
 var UNCOUNTABLE = new Set(["equipment", "information", "rice", "money", "species", "series", "fish", "sheep", "data"]);
 var IRREGULAR = new Map([["person", "people"], ["man", "men"], ["woman", "women"], ["child", "children"], ["tooth", "teeth"], ["foot", "feet"], ["mouse", "mice"]]);
+function pluralize(word) {
+  const lw = word.toLowerCase();
+  if (UNCOUNTABLE.has(lw))
+    return word;
+  if (IRREGULAR.has(lw))
+    return IRREGULAR.get(lw);
+  if (/[^aeiouy]y$/i.test(word))
+    return word.slice(0, -1) + "ies";
+  if (/(s|x|z|ch|sh)$/i.test(word))
+    return word + "es";
+  return word + "s";
+}
 function fkName(model) {
   return snakeCase(model) + "_id";
+}
+function accessorOf(target) {
+  return target[0].toLowerCase() + target.slice(1);
 }
 function isCanonicalName(name) {
   if (typeof name !== "string" || !/^[a-z][a-zA-Z0-9]*$/.test(name))
@@ -2130,19 +2145,40 @@ function foldHasMixin(descriptor) {
 function foldFkName(arg) {
   return camelCase(arg.foreignKey ?? fkName(arg.as ?? arg.target));
 }
+var RELATION_KINDS = { __proto__: null, belongsTo: "belongsTo", hasOne: "hasOne", hasMany: "hasMany" };
+function relationOf(e) {
+  const kind = e.tag === "directive" ? RELATION_KINDS[e.name] : undefined;
+  if (!kind)
+    return null;
+  const target = e.args?.[0]?.target;
+  if (!target)
+    return null;
+  const a = e.args[0];
+  const accessor = a.as ?? (kind === "hasMany" ? pluralize(accessorOf(target)) : accessorOf(target));
+  return {
+    kind,
+    target,
+    accessor,
+    optional: a.optional === true,
+    as: a.as,
+    foreignKey: a.foreignKey,
+    through: a.through
+  };
+}
 function foldProjectableMap(descriptor) {
   if (foldHasMixin(descriptor))
     return null;
   const map = new Map;
+  const column = descriptor.kind === "model";
   for (const e of descriptor.entries) {
     if (e.tag === "field")
-      map.set(e.name, e);
+      map.set(e.name, column ? { ...e, column } : e);
   }
-  if (descriptor.kind !== "model")
+  if (!column)
     return map;
   const synth = (name, typeName, required) => {
     if (!map.has(name))
-      map.set(name, { tag: "field", name, modifiers: required ? ["!"] : ["?"], typeName, array: false });
+      map.set(name, { tag: "field", name, modifiers: required ? ["!"] : ["?"], typeName, array: false, column });
   };
   let timestamps = false, softDelete = false;
   const fks = [];
@@ -10202,6 +10238,8 @@ class Emitter {
     this.b = builder;
     this.repl = repl;
     this.tolerant = tolerant;
+    this.opaqueSpans = [];
+    this.terminatorStarts = [];
     this.replResultName = null;
     this.replImportResolver = null;
     this.script = script;
@@ -11764,8 +11802,7 @@ class Emitter {
         }
         const SPEC = /(?:^|,)\s*(?:type\s+)?(?:[A-Za-z_$][\w$]*\s+as\s+)?([A-Za-z_$][\w$]*)/gd;
         for (const clause of this.b.source.matchAll(/^import\s+(?:type\s+)?\{([^}]*)\}/gmd)) {
-          const [from] = clause.indices[1];
-          const after = clause.index + clause[0].length;
+          const after = this.statementEndAfter(clause.index + clause[0].length);
           for (const sp of clause[1].matchAll(SPEC)) {
             const [start, end] = sp.indices[1];
             const name = clause[1].slice(start, end);
@@ -11773,9 +11810,12 @@ class Emitter {
               continue;
             const use = new RegExp(`(?<![\\w$])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w$])`, "g");
             use.lastIndex = after;
-            const hit = use.exec(this.b.source);
-            if (hit !== null)
+            for (let hit = use.exec(this.b.source);hit !== null; hit = use.exec(this.b.source)) {
+              if (this.inOpaqueSpan(hit.index))
+                continue;
               spans.set(name, [hit.index, hit.index + name.length]);
+              break;
+            }
           }
         }
       }
@@ -12293,6 +12333,32 @@ class Emitter {
     if (local === null || !isNode(x) || x.length !== 1 || x[0] !== local)
       return false;
     return !this.scopes.slice(1).some((sc) => sc.has(local));
+  }
+  collectSourceChannels(tokens, trivia) {
+    const OPAQUE = new Set(["STRING", "STRING_START", "STRING_END", "REGEX", "HEREGEX_START", "HEREGEX_END"]);
+    this.opaqueSpans = [];
+    this.terminatorStarts = [];
+    for (const t of tokens) {
+      if (typeof t.start !== "number" || typeof t.end !== "number")
+        continue;
+      if (OPAQUE.has(t.kind))
+        this.opaqueSpans.push([t.start, t.end]);
+      else if (t.kind === "TERMINATOR")
+        this.terminatorStarts.push(t.start);
+    }
+    for (const t of trivia)
+      if (t.kind === "comment")
+        this.opaqueSpans.push([t.start, t.end]);
+  }
+  inOpaqueSpan(at) {
+    return this.opaqueSpans.some(([start, end]) => at >= start && at < end);
+  }
+  statementEndAfter(at) {
+    let end = this.b.source.length;
+    for (const t of this.terminatorStarts)
+      if (t >= at && t < end)
+        end = t;
+    return end;
   }
   collectTsDirectives(sexpr, trivia, source) {
     this.tsDirectiveMap = new Map;
@@ -13963,7 +14029,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
       };
       if (e.tag === "union-member")
         pin("name", e.name, e.start);
-      else if (e.tag === "directive" && e.name === "mixin" && e.argTokens?.[0]?.kind === "IDENTIFIER")
+      else if (schemaBodyReference(e) !== null)
         pin("target", e.argTokens[0].value, e.argTokens[0].start);
       else if (e.tag === "ensure")
         pin("field", e.field, e.fieldStart);
@@ -24528,32 +24594,47 @@ var inventoryBindings = (emitter, sexpr, ambientNames) => {
   return [...kinds].map(([name, kind]) => ({ name, kind }));
 };
 var SCHEMA_BODY_KINDS = { field: "field", computed: "computed", derived: "derived", method: "method" };
+function schemaBodyReference(e) {
+  if (e.tag !== "directive" || e.argTokens?.[0]?.kind !== "IDENTIFIER" || typeof e.argTokens[0].start !== "number")
+    return null;
+  const word = e.argTokens[0].value;
+  if (e.name === "mixin")
+    return { name: word, start: e.argTokens[0].start, accessor: null };
+  const rel = relationOf(e);
+  if (rel === null || rel.target !== word)
+    return null;
+  return { name: word, start: e.argTokens[0].start, accessor: rel.accessor };
+}
+function schemaReferenceIn(e, text) {
+  const esc = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const ref = e.tag === "union-member" && typeof e.start === "number" ? { name: e.name, start: e.start, accessor: null } : schemaBodyReference(e);
+  if (ref === null)
+    return null;
+  const pattern = ref.accessor === null ? `(?:= |\\| |& )(${esc(ref.name)})(?= \\||;| &)` : `(?:\\{ |; )${esc(ref.accessor)}\\([^)]*\\): Promise<(${esc(ref.name)})(?=\\[\\]>| \\| null>)`;
+  const m = new RegExp(pattern, "d").exec(text);
+  if (m === null)
+    return null;
+  return { name: ref.name, start: ref.start, at: m.indices[1][0] };
+}
 function emitSchemaTextMarked(emitter, block, text, nodeId) {
   const marks = [];
   const esc = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   for (const e of block.story?.decl?.descriptor?.entries ?? []) {
-    const ref = e.tag === "union-member" ? { name: e.name, start: e.start } : e.tag === "directive" && e.name === "mixin" && e.argTokens?.[0]?.kind === "IDENTIFIER" ? { name: e.argTokens[0].value, start: e.argTokens[0].start } : null;
-    if (ref !== null && typeof ref.start === "number") {
-      const rm = new RegExp(`(= |\\| |& )(${esc(ref.name)})(?= \\||;| &)`).exec(text);
-      if (rm !== null)
-        marks.push({ at: rm.index + rm[1].length, len: ref.name.length, start: ref.start, end: ref.start + ref.name.length });
-      continue;
-    }
+    const ref = schemaReferenceIn(e, text);
+    if (ref !== null)
+      marks.push({ at: ref.at, len: ref.name.length, start: ref.start, end: ref.start + ref.name.length });
     if ((SCHEMA_BODY_KINDS[e.tag] ?? null) === null || typeof e.start !== "number")
       continue;
-    const m = new RegExp(`([{;] )((?:readonly )?)(${esc(e.name)})(\\??: )`).exec(text);
-    if (m === null)
-      continue;
-    marks.push({ at: m.index + m[1].length + m[2].length, len: e.name.length, start: e.start, end: e.start + e.name.length });
-    if (e.tag === "field" && Array.isArray(e.typeSpan) && emitter.b.source !== null) {
-      const typeWord = /[A-Za-z_$][\w$]*/.exec(emitter.b.source.slice(e.typeSpan[0], e.typeSpan[1]));
-      if (typeWord !== null) {
-        const after = m.index + m[0].length;
-        const stop = text.indexOf(";", after) < 0 ? text.length : text.indexOf(";", after) + 1;
-        const tm = new RegExp(`(?<![\\w$])${esc(typeWord[0])}(?![\\w$])`).exec(text.slice(after, stop));
-        if (tm !== null)
-          marks.push({ at: after + tm.index, len: typeWord[0].length, start: e.typeSpan[0] + typeWord.index, end: e.typeSpan[0] + typeWord.index + typeWord[0].length });
-      }
+    const typeWord = e.tag === "field" && Array.isArray(e.typeSpan) && emitter.b.source !== null ? /[A-Za-z_$][\w$]*/.exec(emitter.b.source.slice(e.typeSpan[0], e.typeSpan[1])) : null;
+    for (const m of text.matchAll(new RegExp(`([{;] )((?:readonly )?)(${esc(e.name)})(\\??: )`, "g"))) {
+      marks.push({ at: m.index + m[1].length + m[2].length, len: e.name.length, start: e.start, end: e.start + e.name.length });
+      if (typeWord === null)
+        continue;
+      const after = m.index + m[0].length;
+      const stop = text.indexOf(";", after) < 0 ? text.length : text.indexOf(";", after) + 1;
+      const tm = new RegExp(`(?<![\\w$])${esc(typeWord[0])}(?![\\w$])`).exec(text.slice(after, stop));
+      if (tm !== null)
+        marks.push({ at: after + tm.index, len: typeWord[0].length, start: e.typeSpan[0] + typeWord.index, end: e.typeSpan[0] + typeWord.index + typeWord[0].length });
     }
   }
   const selfSpan = nodeId !== null ? emitter.stores.selfSpan(nodeId) : null;
@@ -24612,11 +24693,8 @@ function recordSchemaFields(emitter, block, text, at) {
     return;
   const esc = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   for (const e of entries) {
-    const ref = e.tag === "union-member" ? { name: e.name, start: e.start } : e.tag === "directive" && e.name === "mixin" && e.argTokens?.[0]?.kind === "IDENTIFIER" ? { name: e.argTokens[0].value, start: e.argTokens[0].start } : null;
-    if (ref === null || typeof ref.start !== "number")
-      continue;
-    const m = new RegExp(`(= |\\| |& )(${esc(ref.name)})(?= \\||;| &)`).exec(text);
-    if (m === null)
+    const ref = schemaReferenceIn(e, text);
+    if (ref === null)
       continue;
     emitter.intrinsics.push({
       start: ref.start,
@@ -24624,7 +24702,7 @@ function recordSchemaFields(emitter, block, text, at) {
       kind: "schema",
       label: null,
       name: ref.name,
-      gen: at + m.index + m[1].length
+      gen: at + ref.at
     });
   }
   for (const e of entries) {
@@ -24672,6 +24750,7 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
   if (runtimeDelivery !== "none" && runtimeDelivery !== "import" && runtimeDelivery !== "inline") {
     throw new Error(`emitter: unknown runtimeDelivery '${runtimeDelivery}' — expected 'none', 'import', or 'inline'`);
   }
+  emitter.collectSourceChannels(parseResult.tokens ?? [], parseResult.trivia ?? []);
   emitter.collectTsDirectives(parseResult.sexpr, parseResult.trivia ?? [], source);
   emitter.collectTypeOnlyImports(parseResult.sexpr, source);
   emitter.collectAppAccessors(parseResult.sexpr);
@@ -33712,7 +33791,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "7828d146cded634a";
+var compilerBuild = () => "24f6220b038de529";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

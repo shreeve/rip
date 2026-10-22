@@ -1730,6 +1730,103 @@ describe('TS-face mapping rows (the same mark protocol)', () => {
     // the answer a hover there should give, not the whole `: number` span.
     expect(src.slice(row.sourceStart, row.sourceEnd)).toBe('number');
   });
+
+  // An imported name has no declaration here, so a generated copy of it
+  // marks its first USE below the import. A use is a word the program
+  // reads: the bytes of a string, a regex, or a comment are never one,
+  // and the specifier string is behind the statement the search starts
+  // after — a module path that spells the name must not become a span.
+  test('an imported name\'s copies never map into a string; a schema member maps to its own field on every companion line', () => {
+    const src = [
+      "import { eid } from './lib/eid.rip'",
+      '',
+      'export Thing = schema :model',
+      "  eid! string @unique -> it.eid or eid('t')",
+      '  name string',
+      '',
+    ].join('\n');
+    const r = ts(src, { path: '/ws/repro.rip' });
+    const strings = r.tokens.filter((t) => t.kind === 'STRING').map((t) => [t.start, t.end]);
+    expect(strings).toContainEqual([src.indexOf("'./lib"), src.indexOf("rip'") + 4]);
+    const insideString = (at) => strings.some(([s, e]) => at > s && at < e);
+    for (const m of r.mappings.rows) {
+      if (m.mappingKind === 'exact') expect(insideString(m.sourceStart)).toBe(false);
+    }
+    // The `eid` member of the Create companion, not only the Data one,
+    // maps to the field declaration.
+    const field = src.indexOf('eid!');
+    for (const head of ['export type ThingData = {', 'export type ThingCreate = {']) {
+      const member = r.code.indexOf('eid', r.code.indexOf(head));
+      const row = r.mappings.rows.find((m) => m.mappingKind === 'exact' && m.generatedStart === member);
+      expect(row).toBeDefined();
+      expect([row.sourceStart, row.sourceEnd]).toEqual([field, field + 3]);
+    }
+  });
+
+  test('an imported name\'s first use skips a comment and a string that spell it', () => {
+    const src = [
+      "import { Item } from './x.rip'",
+      '# Item in a comment',
+      "s = 'Item'",
+      'f = (x: Item[]) -> x',
+      'Row = component',
+      '  @item: Item',
+      '  render',
+      '    div',
+      '',
+    ].join('\n');
+    const r = ts(src);
+    const comment = [src.indexOf('# Item'), src.indexOf('\ns = ')];
+    const string = [src.indexOf("'Item'"), src.indexOf("'Item'") + 6];
+    const copies = r.mappings.rows.filter((m) => m.mappingKind === 'exact' && src.slice(m.sourceStart, m.sourceEnd) === 'Item');
+    expect(copies.length).toBeGreaterThan(2);
+    for (const m of copies) {
+      expect(m.sourceStart >= comment[0] && m.sourceStart < comment[1]).toBe(false);
+      expect(m.sourceStart > string[0] && m.sourceStart < string[1]).toBe(false);
+    }
+    // The props surface copies the prop's annotation word; each copy
+    // marks the first use, the parameter annotation on line 4.
+    const use = src.indexOf('Item[]');
+    expect(copies.filter((m) => m.sourceStart === use).length).toBeGreaterThan(1);
+  });
+
+  // A relation directive's target is a USE of the target schema, as a
+  // mixin target is: the accessor's return type copies it in the alias
+  // text, and that copy marks the word on the directive line, so a
+  // definition from there lands on an identifier the checker resolves
+  // rather than inside the descriptor's string.
+  test('a relation target maps the accessor\'s return-type copy to the directive line, bare and optional', () => {
+    const src = [
+      'export Partner = schema :model',
+      '  name string',
+      '',
+      'export Order = schema :model',
+      '  total number',
+      '',
+      'export User = schema :model',
+      '  name string',
+      '  @belongsTo Partner?',
+      '  @hasMany Order',
+      '',
+    ].join('\n');
+    const r = ts(src, { path: '/ws/rel.rip' });
+    for (const [directive, name, type] of [['@belongsTo Partner', 'Partner', 'Promise<Partner | null>'], ['@hasMany Order', 'Order', 'Promise<Order[]>']]) {
+      const use = src.indexOf(directive) + directive.length - name.length;
+      const rows = r.mappings.rows.filter((m) => m.mappingKind === 'exact' && m.sourceStart === use && m.sourceEnd === use + name.length);
+      const accessor = r.code.indexOf(type, r.code.indexOf('export type User = UserData'));
+      expect(accessor).toBeGreaterThan(0);
+      const reference = rows.filter((m) => m.generatedStart === accessor + 'Promise<'.length);
+      expect(reference).toHaveLength(1);
+      expect(r.code.slice(reference[0].generatedStart, reference[0].generatedEnd)).toBe(name);
+      // The descriptor's `target:` string stays a row of its own.
+      expect(rows.length).toBeGreaterThan(1);
+      // Hover at the directive reads the target's declaration through
+      // the reference, as a mixin target does.
+      expect(r.intrinsics.filter((i) => i.kind === 'schema' && i.start === use)).toEqual([
+        { start: use, end: use + name.length, kind: 'schema', label: null, name, gen: accessor + 'Promise<'.length },
+      ]);
+    }
+  });
 });
 
 // ── 4b. the component face ───────────────────────────────────

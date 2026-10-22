@@ -127,7 +127,7 @@ import { normalizeTypeText } from './ts/types.js';
 // importing a runtime file creates no bootstrap cycle.
 //
 import {
-  snakeCase, camelCase, fkName,
+  snakeCase, camelCase, fkName, pluralize, accessorOf,
   isCanonicalName, isCanonicalTarget,
   attrValueError,
   MODEL_DIRECTIVES, ONCE_DIRECTIVES, RELATION_DIRECTIVES,
@@ -2172,20 +2172,45 @@ function foldFkName(arg) {
   return camelCase(arg.foreignKey ?? fkName(arg.as ?? arg.target));
 }
 
+// The relation one directive entry declares, null for any other entry,
+// with the names the runtime derives for it: `accessor`, the instance
+// method (`as:`, else the target's accessor, pluralized for hasMany),
+// which the type story renders and the emitter finds its type
+// reference by. Shared by the compile-time passes and the face, so the
+// browser bundle, which stubs the face, carries it too.
+const RELATION_KINDS = { __proto__: null, belongsTo: 'belongsTo', hasOne: 'hasOne', hasMany: 'hasMany' };
+
+export function relationOf(e) {
+  const kind = e.tag === 'directive' ? RELATION_KINDS[e.name] : undefined;
+  if (!kind) return null;
+  const target = e.args?.[0]?.target;
+  if (!target) return null;
+  const a = e.args[0];
+  const accessor = a.as ?? (kind === 'hasMany' ? pluralize(accessorOf(target)) : accessorOf(target));
+  return {
+    kind, target, accessor, optional: a.optional === true,
+    as: a.as, foreignKey: a.foreignKey, through: a.through,
+  };
+}
+
 // The projectable columns of a descriptor as an ordered Map(name → field
 // entry): declared fields, then a :model's implicit id / @times /
 // @softDelete / @belongsTo FK columns — matching `projectableFields` in
 // runtime/orm.js so a fold yields the same field set the runtime
 // would. Returns null (bail) when the base uses `@mixin`.
+// A :model's entries carry `column: true`: each is a row column, which
+// a loaded row holds as `null` when NULL, and the type story reads the
+// flag. The literal never does — entryLiteral writes named keys only.
 function foldProjectableMap(descriptor) {
   if (foldHasMixin(descriptor)) return null;
   const map = new Map();
+  const column = descriptor.kind === 'model';
   for (const e of descriptor.entries) {
-    if (e.tag === 'field') map.set(e.name, e);
+    if (e.tag === 'field') map.set(e.name, column ? { ...e, column } : e);
   }
-  if (descriptor.kind !== 'model') return map;
+  if (!column) return map;
   const synth = (name, typeName, required) => {
-    if (!map.has(name)) map.set(name, { tag: 'field', name, modifiers: required ? ['!'] : ['?'], typeName, array: false });
+    if (!map.has(name)) map.set(name, { tag: 'field', name, modifiers: required ? ['!'] : ['?'], typeName, array: false, column });
   };
   let timestamps = false, softDelete = false;
   const fks = [];

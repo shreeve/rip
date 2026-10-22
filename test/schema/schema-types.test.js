@@ -150,8 +150,9 @@ describe('schema declarations: the per-kind shapes', () => {
     // columns are real `Date`s per the runtime (the adapter decodes
     // temporal columns at the wire; owner ruling on PORT-AUDIT D2).
     // `posted` stays REQUIRED in Data (the `!` is the validation
-    // contract; the default applies at parse) while Create relaxes it.
-    expect(d).toContain('type MData = { name: string; code?: string; posted: boolean } & ' +
+    // contract; the default applies at parse) while Create relaxes it;
+    // the optional `code` is a nullable column, null on a loaded row.
+    expect(d).toContain('type MData = { name: string; code: string | null; posted: boolean } & ' +
       '{ id: number; orgId: number | null; createdAt: Date; updatedAt: Date; deletedAt: Date | null };');
     // Create: `!` without default required; a DEFAULTED required
     // field is optional at insert; optional FK rides `| null`
@@ -170,6 +171,73 @@ describe('schema declarations: the per-kind shapes', () => {
     expect(d).toContain('declare const M: ModelSchema<M, MData, number, MCreate> & { live(...args: any[]): MQuery };');
     // no @softDelete → no restore
     expect(dts('P = schema :model\n  a! string')).not.toContain('restore()');
+  });
+
+  // A belongsTo's FK column derives from the relation's ACCESSOR, as
+  // the runtime derives it: `{as: parent}` reads parent_id, so the
+  // data shape carries `parentId`, never a key named after the target.
+  // A hasMany's `foreignKey:` names a column on the OTHER table and
+  // adds nothing here.
+  test('a belongsTo with `as:` types its foreign key after the accessor; `foreignKey:` still wins', () => {
+    const d = dts([
+      'Partner = schema :model',
+      '  name! string',
+      '  @belongsTo Partner?, {as: parent}',
+      '  @hasMany Partner, {as: clients, foreignKey: "parent_id"}',
+      '  @belongsTo Partner?, {as: owner, foreignKey: "owner_ref"}',
+    ].join('\n'));
+    expect(d).toContain('type PartnerData = { name: string } & { id: number; parentId: number | null; ownerRef: number | null };');
+    expect(d).toContain('type PartnerCreate = { name: string; parentId?: number | null; ownerRef?: number | null };');
+    expect(d).not.toContain('partnerId');
+  });
+
+  // A loaded row holds `null` for a NULL column — hydrate stores every
+  // selected column as the adapter delivers it, so a declared column is
+  // never absent on an instance — and an optional field's column is
+  // nullable, so the data shape admits null and nothing else; the
+  // create companion keeps accepting omission.
+  test('an optional model field types `T | null` on the data shape and stays omittable at create', () => {
+    const d = dts([
+      'Partner = schema :model',
+      '  name! string',
+      '  phone phone',
+      '  token? string',
+      '  note string, [null]',
+      '  @ensure "named", (m) -> m.name.length > 0',
+    ].join('\n'));
+    expect(d).toContain('type PartnerData = { name: string; phone: string | null; token: string | null; note: string | null } & { id: number };');
+    expect(d).toContain('type PartnerCreate = { name: string; phone?: string; token?: string; note?: string | null };');
+    // The ensure predicate also sees create-path data, where an omitted
+    // optional field is absent: optional AND nullable there.
+    expect(d).toContain('type PartnerEnsure = { name: string; phone?: string | null; token?: string | null; note?: string | null } & Partial<{ id: number }>;');
+  });
+
+  // A projection of a :model carries the row's columns, and a loaded
+  // row holds `null` for a NULL column: a picked optional field admits
+  // null as well as omission, so the alias agrees with the algebra's
+  // own `Pick<Data, K>` answer for a row. `required` takes the null
+  // away with the `?`; a :shape's fields, and fields `extend` merges
+  // from one, are input and stay as declared.
+  test('a projection of a model admits null on its optional columns; a shape projection does not', () => {
+    const d = dts([
+      'User = schema :model',
+      '  name! string',
+      '  phone string',
+      '  @belongsTo Org?',
+      '  @softDelete',
+      'Extra = schema :shape',
+      '  memo string',
+      'UserPublic = User.pick("id", "name", "phone", "orgId", "deletedAt")',
+      'UserPatch = User.pick("name", "phone").partial()',
+      'UserFirm = User.pick("phone").required("phone")',
+      'UserMore = User.pick("phone").extend(Extra)',
+      'Slim = Extra.pick("memo")',
+    ].join('\n'));
+    expect(d).toContain('type UserPublic = { id: number; name: string; phone?: string | null; orgId?: number | null; deletedAt?: Date | null };');
+    expect(d).toContain('type UserPatch = { name?: string | null; phone?: string | null };');
+    expect(d).toContain('type UserFirm = { phone: string };');
+    expect(d).toContain('type UserMore = { phone?: string | null; memo?: string };');
+    expect(d).toContain('type Slim = { memo?: string };');
   });
 
   test('exported schemas export their aliases AND the const', () => {

@@ -21,7 +21,7 @@
 import { readFileSync } from 'fs';
 import { Stores } from './stores.js';
 import { CodeBuilder } from './builder.js';
-import { descriptorSegments, behaviorObjectText, paramsOf, splitTopLevelByComma } from './schema.js';
+import { descriptorSegments, behaviorObjectText, paramsOf, relationOf, splitTopLevelByComma } from './schema.js';
 import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './ts/schema.js';
 import { Parser } from './parser.js';
 import { tagPostfixConditionals } from './lexer.js';
@@ -475,6 +475,11 @@ class Emitter {
     // (an unclosed literal that swallowed the next statement) must
     // still emit, so the dead-code rejections stand down here.
     this.tolerant = tolerant;
+    // The lexer's channels an identifier search over the SOURCE consults
+    // (collectSourceChannels): string, regex, and comment spans no hit
+    // may land in, and the statement ends a search starts after.
+    this.opaqueSpans = [];
+    this.terminatorStarts = [];
     this.replResultName = null;
     this.replImportResolver = null;
     // Script-target emission: <script type="text/rip"> sources share one
@@ -2951,28 +2956,36 @@ class Emitter {
         // An IMPORTED name has no declaration in this file, and a
         // generated text still spells it (a props type names the alias
         // its member is annotated with). Its copies mark the name's first
-        // USE below the import — never the specifier, whose bytes a
-        // rename of the LOCAL binding rewrites to the alias form
+        // USE below the import statement — never the specifier, whose
+        // bytes a rename of the LOCAL binding rewrites to the alias form
         // (`Tone as Shade`) while every use takes the bare new name; a
         // copy marked there would demand two different texts over one
         // span. Marked at a use, the copy's edit matches that use's own
         // and the coincident-span dedup folds them, whichever end the
         // rename started from. A local declaration of the same spelling
         // already claimed the name above and keeps it.
+        // The search starts past the statement's terminator, so a module
+        // path spelling the name (`./lib/eid.rip`) lies behind it, and a
+        // word inside any string, regex, or comment is no use (the
+        // editor paints a marked span with the copy's token, which a
+        // literal's bytes must never carry). A name with no use below
+        // the import marks nothing.
         // The captured group is the LOCAL name either way: the alias in
         // `Origin as local`, otherwise the specifier's own word.
         const SPEC = /(?:^|,)\s*(?:type\s+)?(?:[A-Za-z_$][\w$]*\s+as\s+)?([A-Za-z_$][\w$]*)/gd;
         for (const clause of this.b.source.matchAll(/^import\s+(?:type\s+)?\{([^}]*)\}/gmd)) {
-          const [from] = clause.indices[1];
-          const after = clause.index + clause[0].length;
+          const after = this.statementEndAfter(clause.index + clause[0].length);
           for (const sp of clause[1].matchAll(SPEC)) {
             const [start, end] = sp.indices[1];
             const name = clause[1].slice(start, end);
             if (spans.has(name)) continue;
             const use = new RegExp(`(?<![\\w$])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w$])`, 'g');
             use.lastIndex = after;
-            const hit = use.exec(this.b.source);
-            if (hit !== null) spans.set(name, [hit.index, hit.index + name.length]);
+            for (let hit = use.exec(this.b.source); hit !== null; hit = use.exec(this.b.source)) {
+              if (this.inOpaqueSpan(hit.index)) continue;
+              spans.set(name, [hit.index, hit.index + name.length]);
+              break;
+            }
           }
         }
       }
@@ -3740,6 +3753,35 @@ class Emitter {
   isAccessorCall(x, local) {
     if (local === null || !isNode(x) || x.length !== 1 || x[0] !== local) return false;
     return !this.scopes.slice(1).some((sc) => sc.has(local));
+  }
+
+  // A whole-word search over the source finds a USE only outside the
+  // bytes the lexer read as a literal or skipped as trivia: a string
+  // chunk (an interpolation's code between chunks stays a use), a
+  // regex, a comment. Both channels are the parse's own record; the
+  // emitter never re-lexes the source to tell a word from a literal.
+  collectSourceChannels(tokens, trivia) {
+    const OPAQUE = new Set(['STRING', 'STRING_START', 'STRING_END', 'REGEX', 'HEREGEX_START', 'HEREGEX_END']);
+    this.opaqueSpans = [];
+    this.terminatorStarts = [];
+    for (const t of tokens) {
+      if (typeof t.start !== 'number' || typeof t.end !== 'number') continue;
+      if (OPAQUE.has(t.kind)) this.opaqueSpans.push([t.start, t.end]);
+      else if (t.kind === 'TERMINATOR') this.terminatorStarts.push(t.start);
+    }
+    for (const t of trivia) if (t.kind === 'comment') this.opaqueSpans.push([t.start, t.end]);
+  }
+
+  inOpaqueSpan(at) {
+    return this.opaqueSpans.some(([start, end]) => at >= start && at < end);
+  }
+
+  // The end of the statement whose last clause closes at `at`: the first
+  // terminator at or past it, or the end of the source when none follows.
+  statementEndAfter(at) {
+    let end = this.b.source.length;
+    for (const t of this.terminatorStarts) if (t >= at && t < end) end = t;
+    return end;
   }
 
   collectTsDirectives(sexpr, trivia, source) {
@@ -6183,7 +6225,7 @@ class Emitter {
         pinSpan(key, [start, start + name.length], name);
       };
       if (e.tag === 'union-member') pin('name', e.name, e.start);
-      else if (e.tag === 'directive' && e.name === 'mixin' && e.argTokens?.[0]?.kind === 'IDENTIFIER') pin('target', e.argTokens[0].value, e.argTokens[0].start);
+      else if (schemaBodyReference(e) !== null) pin('target', e.argTokens[0].value, e.argTokens[0].start);
       else if (e.tag === 'ensure') pin('field', e.field, e.fieldStart);
       else if ((SCHEMA_BODY_KINDS[e.tag] ?? null) !== null) {
         pin('name', e.name, e.start);
@@ -19826,17 +19868,51 @@ const inventoryBindings = (emitter, sexpr, ambientNames) => {
 // declared rather than the `property` the alias spells it as.
 const SCHEMA_BODY_KINDS = { field: 'field', computed: 'computed', derived: 'derived', method: 'method' };
 
+// A directive whose first argument NAMES a schema — an `@mixin` target,
+// a relation's target — with the word the author wrote for it: null
+// for any other entry, and for a target the parse did not read as one
+// identifier token.
+function schemaBodyReference(e) {
+  if (e.tag !== 'directive' || e.argTokens?.[0]?.kind !== 'IDENTIFIER' || typeof e.argTokens[0].start !== 'number') return null;
+  const word = e.argTokens[0].value;
+  if (e.name === 'mixin') return { name: word, start: e.argTokens[0].start, accessor: null };
+  const rel = relationOf(e);
+  if (rel === null || rel.target !== word) return null;
+  return { name: word, start: e.argTokens[0].start, accessor: rel.accessor };
+}
+
+// Where an entry's schema reference sits in the alias text `text`: a
+// union constituent or a mixin target follows its operator (`= A | B`,
+// `& M`), which keeps it apart from a same-named member; a relation
+// target is the accessor's return type (`partner(…): Promise<Partner |
+// null>`, `orders(…): Promise<Order[]>`), matched through the accessor
+// so two relations to one schema each find their own. Null when the
+// entry names no schema or the text carries no reference for it (an
+// unknown target renders `unknown`).
+function schemaReferenceIn(e, text) {
+  const esc = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const ref = e.tag === 'union-member' && typeof e.start === 'number' ? { name: e.name, start: e.start, accessor: null } : schemaBodyReference(e);
+  if (ref === null) return null;
+  const pattern = ref.accessor === null
+    ? `(?:= |\\| |& )(${esc(ref.name)})(?= \\||;| &)`
+    : `(?:\\{ |; )${esc(ref.accessor)}\\([^)]*\\): Promise<(${esc(ref.name)})(?=\\[\\]>| \\| null>)`;
+  const m = new RegExp(pattern, 'd').exec(text);
+  if (m === null) return null;
+  return { name: ref.name, start: ref.start, at: m.indices[1][0] };
+}
+
 // `text` is the block's alias text as emitted, starting at generated
 // offset `at` — the caller hands over the string it just built rather
 // than the face re-joining its chunks (a mark is open here, so the
 // builder's `code` getter joins the whole output on every read).
 // The alias text, emitted in slices so the names it declares MAP: the
 // alias head (`type Person =`) marks the schema's own declaration name,
-// and each member (`{ name: T`, `; name?: T`) marks its entry's span —
-// so a definition or a rename from a use lands on the schema body rather
-// than dropping on generated-only bytes. The slice positions are the
-// ones recordSchemaFields reads for the hover records, computed the same
-// way, so the two never disagree about where a name sits.
+// and each member (`{ name: T`, `; name?: T`), on every line that
+// carries it, marks its entry's span — so a definition or a rename from
+// a use lands on the schema body rather than dropping on generated-only
+// bytes. The member's first slice position is the one recordSchemaFields
+// reads for the hover record, computed the same way, so the two never
+// disagree about where a name sits.
 function emitSchemaTextMarked(emitter, block, text, nodeId) {
   const marks = [];
   const esc = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -19851,32 +19927,28 @@ function emitSchemaTextMarked(emitter, block, text, nodeId) {
   // a minted `__Name__behavior` is one word to the underscore, not a copy.
   for (const e of block.story?.decl?.descriptor?.entries ?? []) {
     // A schema NAMED in the body — a union's constituent, an `@mixin`
-    // target — is a copy of that schema's name, and marks the word the
-    // author wrote for it.
-    const ref = e.tag === 'union-member' ? { name: e.name, start: e.start }
-      : e.tag === 'directive' && e.name === 'mixin' && e.argTokens?.[0]?.kind === 'IDENTIFIER'
-        ? { name: e.argTokens[0].value, start: e.argTokens[0].start }
-        : null;
-    if (ref !== null && typeof ref.start === 'number') {
-      const rm = new RegExp(`(= |\\| |& )(${esc(ref.name)})(?= \\||;| &)`).exec(text);
-      if (rm !== null) marks.push({ at: rm.index + rm[1].length, len: ref.name.length, start: ref.start, end: ref.start + ref.name.length });
-      continue;
-    }
+    // target, a relation's target — is a copy of that schema's name,
+    // and marks the word the author wrote for it.
+    const ref = schemaReferenceIn(e, text);
+    if (ref !== null) marks.push({ at: ref.at, len: ref.name.length, start: ref.start, end: ref.start + ref.name.length });
     if ((SCHEMA_BODY_KINDS[e.tag] ?? null) === null || typeof e.start !== 'number') continue;
-    const m = new RegExp(`([{;] )((?:readonly )?)(${esc(e.name)})(\\??: )`).exec(text);
-    if (m === null) continue;
-    marks.push({ at: m.index + m[1].length + m[2].length, len: e.name.length, start: e.start, end: e.start + e.name.length });
     // A field whose type names another schema (`hops: [Hop]`) repeats
     // that name in the member's type; the copy marks the author's type
     // word.
-    if (e.tag === 'field' && Array.isArray(e.typeSpan) && emitter.b.source !== null) {
-      const typeWord = /[A-Za-z_$][\w$]*/.exec(emitter.b.source.slice(e.typeSpan[0], e.typeSpan[1]));
-      if (typeWord !== null) {
-        const after = m.index + m[0].length;
-        const stop = text.indexOf(';', after) < 0 ? text.length : text.indexOf(';', after) + 1;
-        const tm = new RegExp(`(?<![\\w$])${esc(typeWord[0])}(?![\\w$])`).exec(text.slice(after, stop));
-        if (tm !== null) marks.push({ at: after + tm.index, len: typeWord[0].length, start: e.typeSpan[0] + typeWord.index, end: e.typeSpan[0] + typeWord.index + typeWord[0].length });
-      }
+    const typeWord = e.tag === 'field' && Array.isArray(e.typeSpan) && emitter.b.source !== null
+      ? /[A-Za-z_$][\w$]*/.exec(emitter.b.source.slice(e.typeSpan[0], e.typeSpan[1]))
+      : null;
+    // The member recurs on every companion line (`ThingData`,
+    // `ThingCreate`): each copy marks the entry, so none is left for the
+    // module-wide copy pass below to answer with some other span of the
+    // same spelling.
+    for (const m of text.matchAll(new RegExp(`([{;] )((?:readonly )?)(${esc(e.name)})(\\??: )`, 'g'))) {
+      marks.push({ at: m.index + m[1].length + m[2].length, len: e.name.length, start: e.start, end: e.start + e.name.length });
+      if (typeWord === null) continue;
+      const after = m.index + m[0].length;
+      const stop = text.indexOf(';', after) < 0 ? text.length : text.indexOf(';', after) + 1;
+      const tm = new RegExp(`(?<![\\w$])${esc(typeWord[0])}(?![\\w$])`).exec(text.slice(after, stop));
+      if (tm !== null) marks.push({ at: after + tm.index, len: typeWord[0].length, start: e.typeSpan[0] + typeWord.index, end: e.typeSpan[0] + typeWord.index + typeWord[0].length });
     }
   }
   const selfSpan = nodeId !== null ? emitter.stores.selfSpan(nodeId) : null;
@@ -19940,21 +20012,15 @@ function recordSchemaFields(emitter, block, text, at) {
   if (entries === null) return;
   const esc = (name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   // A schema NAMED in the body — a union's constituent, an `@mixin`
-  // target — reaches the alias as a type reference (`= A | B`, `& M`),
-  // so the word answers what any use of the companion type answers: the
-  // structural type, expanded. The reference is matched by the operator
-  // ahead of it, which keeps it apart from a same-named member.
+  // target, a relation's target — reaches the alias as a type
+  // reference, so the word answers what any use of the companion type
+  // answers: the structural type, expanded.
   for (const e of entries) {
-    const ref = e.tag === 'union-member' ? { name: e.name, start: e.start }
-      : e.tag === 'directive' && e.name === 'mixin' && e.argTokens?.[0]?.kind === 'IDENTIFIER'
-        ? { name: e.argTokens[0].value, start: e.argTokens[0].start }
-        : null;
-    if (ref === null || typeof ref.start !== 'number') continue;
-    const m = new RegExp(`(= |\\| |& )(${esc(ref.name)})(?= \\||;| &)`).exec(text);
-    if (m === null) continue;
+    const ref = schemaReferenceIn(e, text);
+    if (ref === null) continue;
     emitter.intrinsics.push({
       start: ref.start, end: ref.start + ref.name.length,
-      kind: 'schema', label: null, name: ref.name, gen: at + m.index + m[1].length,
+      kind: 'schema', label: null, name: ref.name, gen: at + ref.at,
     });
   }
   for (const e of entries) {
@@ -19999,6 +20065,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
     throw new Error(`emitter: unknown runtimeDelivery '${runtimeDelivery}' — expected 'none', 'import', or 'inline'`);
   }
 
+  emitter.collectSourceChannels(parseResult.tokens ?? [], parseResult.trivia ?? []);
   // TS directive comments: pair each whole-line `# @ts-…`
   // comment from the trivia channel with the statement it governs.
   // The file-level `@ts-nocheck` emits as the face's FIRST line —

@@ -54,14 +54,14 @@
 // one is known; dts wraps them as DtsError and the TS face as a
 // positioned emitter diagnostic.
 
-import { derivedSchemaDescriptors, behaviorName, paramsOf } from '../schema.js';
+import { derivedSchemaDescriptors, behaviorName, paramsOf, relationOf } from '../schema.js';
 // The naming rules, under readable local spellings. One definition —
 // the runtime derives its INSTALLED names from the same file, so the
 // renderer cannot drift from it. src/runtime/orm.js is still never
 // imported here (that would evaluate the persistence install into the
 // compiler process); vocab.js is a side-effect-free leaf, the same
 // reason src/schema.js imports it.
-import { camelCase, pluralize, fkName, accessorOf } from '../runtime/vocab.js';
+import { camelCase, fkName } from '../runtime/vocab.js';
 export { behaviorName } from '../schema.js';
 
 export class SchemaTypeError extends Error {
@@ -79,9 +79,11 @@ export class SchemaTypeError extends Error {
 // ── naming ───────────────────────────────────────────────────────────
 
 // The FK property a belongsTo puts on the instance — `{foreignKey:}`
-// names the COLUMN, and the property is the camel of it, the same
-// derivation the runtime makes.
-const fkProp = (rel) => camelCase(rel.foreignKey ?? fkName(rel.target));
+// names the COLUMN, otherwise the column is named after the relation's
+// ACCESSOR (`@belongsTo Partner, {as: parent}` reads parent_id), and
+// the property is the camel of it, the same derivation the runtime
+// makes.
+const fkProp = (rel) => camelCase(rel.foreignKey ?? fkName(rel.accessor));
 
 // The primary key, and which of the two postures it is in. Declaring
 // the pk as a field alongside an explicit @primaryKey is what makes it
@@ -491,12 +493,37 @@ export const fieldType = (entry, known) => {
   return (entry.array ? `${base}[]` : base) + nullable;
 };
 
+// A field a projection folded from a :model (`column`, set by the
+// fold) is a row column: optional, it admits the `null` a loaded row
+// holds for a NULL column beside omission, so the alias agrees with
+// the algebra's own `Pick<Data, K>` answer for a row.
 const fieldProps = (descriptor, known) => {
   const props = [];
   for (const e of descriptor.entries) {
     if (e.tag !== 'field') continue;
     const required = e.modifiers.includes('!');
-    props.push(`${e.name}${required ? '' : '?'}: ${fieldType(e, known)}`);
+    const type = fieldType(e, known);
+    const nullable = !required && e.column === true && !type.endsWith(' | null') ? `${type} | null` : type;
+    props.push(`${e.name}${required ? '' : '?'}: ${nullable}`);
+  }
+  return props;
+};
+
+// A :model's declared fields as ROW properties. An optional field's
+// column is nullable, and a loaded row holds `null` for a NULL column
+// (hydrate stores every selected column as the adapter delivers it, so
+// a declared column is never absent on an instance): the field types
+// `T | null`, with no `?`. `absent` admits omission as well, for the
+// ensure shape, whose create-path data is input the optional field may
+// be missing from.
+const modelFieldProps = (descriptor, known, absent) => {
+  const props = [];
+  for (const e of descriptor.entries) {
+    if (e.tag !== 'field') continue;
+    const required = e.modifiers.includes('!');
+    const type = fieldType(e, known);
+    const nullable = required || type.endsWith(' | null') ? type : `${type} | null`;
+    props.push(`${e.name}${!required && absent ? '?' : ''}: ${nullable}`);
   }
   return props;
 };
@@ -517,23 +544,7 @@ const mixinRefs = (descriptor, byName) => {
 
 const intersect = (base, refs) => (refs.length ? `${base} & ${refs.join(' & ')}` : base);
 
-const RELATION_KINDS = { __proto__: null, belongsTo: 'belongsTo', hasOne: 'hasOne', hasMany: 'hasMany' };
-
-const relationsOf = (descriptor) => {
-  const rels = [];
-  for (const e of descriptor.entries) {
-    const kind = e.tag === 'directive' ? RELATION_KINDS[e.name] : undefined;
-    if (!kind) continue;
-    const target = e.args?.[0]?.target;
-    if (!target) continue;
-    const a = e.args[0];
-    rels.push({
-      kind, target, optional: a.optional === true,
-      as: a.as, foreignKey: a.foreignKey, through: a.through,
-    });
-  }
-  return rels;
-};
+const relationsOf = (descriptor) => descriptor.entries.map(relationOf).filter((rel) => rel !== null);
 
 // A :model's implicitly-managed columns as Data properties: the `id`
 // pk, belongsTo FK columns, and the @times/@softDelete columns.
@@ -587,15 +598,9 @@ const relationAccessors = (descriptor, known) => {
   const OPTS = 'opts?: { reload?: boolean }';
   for (const rel of relationsOf(descriptor)) {
     const isKnown = known.has(rel.target);
-    if (rel.kind === 'hasMany') {
-      const acc = rel.as ?? pluralize(accessorOf(rel.target));
-      out.push(`${acc}(${OPTS}): Promise<${isKnown ? `${rel.target}[]` : 'unknown[]'}>`);
-      out.push(...throughWriters(rel, acc, isKnown));
-    } else {
-      const acc = rel.as ?? accessorOf(rel.target);
-      out.push(`${acc}(${OPTS}): Promise<${isKnown ? `${rel.target} | null` : 'unknown'}>`);
-      out.push(...throughWriters(rel, acc, isKnown));
-    }
+    if (rel.kind === 'hasMany') out.push(`${rel.accessor}(${OPTS}): Promise<${isKnown ? `${rel.target}[]` : 'unknown[]'}>`);
+    else out.push(`${rel.accessor}(${OPTS}): Promise<${isKnown ? `${rel.target} | null` : 'unknown'}>`);
+    out.push(...throughWriters(rel, rel.accessor, isKnown));
   }
   return out;
 };
@@ -745,10 +750,12 @@ export function schemaTypeStory(decl, byName, known, source = null) {
     // path then crashed.
     const ensureName = `${name}Ensure`;
     const hasEnsures = ensureIdx.length > 0;
+    const rowType = intersect(braced(modelFieldProps(descriptor, known, false)), mixinRefs(descriptor, byName));
+    const ensureType = intersect(braced(modelFieldProps(descriptor, known, true)), mixinRefs(descriptor, byName));
     const linesFor = (face) => [
-      `type ${dataName} = ${dataType} & ${braced(modelImplicitProps(descriptor))};`,
+      `type ${dataName} = ${rowType} & ${braced(modelImplicitProps(descriptor))};`,
       `type ${createName} = ${intersect(braced(modelCreateProps(descriptor, known)), mixinRefs(descriptor, byName))};`,
-      ...(hasEnsures ? [`type ${ensureName} = ${dataType} & Partial<${braced(modelImplicitProps(descriptor))}>;`] : []),
+      ...(hasEnsures ? [`type ${ensureName} = ${ensureType} & Partial<${braced(modelImplicitProps(descriptor))}>;`] : []),
       `type ${name} = ${dataName} & ${braced(instanceExtras(face))};`,
     ];
     const aliasLines = linesFor(false);

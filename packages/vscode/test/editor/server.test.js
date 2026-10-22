@@ -993,8 +993,9 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
         textDocument: { uri }, position: { line: 7, character: 6 },
       });
       const instLabels = (instCompletion?.items ?? []).map((i) => i.label);
-      // (`active?` — tsgo labels optional properties with their marker)
-      for (const expected of ['name', 'active?', 'createdAt', 'save', 'toJSON']) {
+      // (`active` carries no marker: a model's optional field is a
+      // nullable column, `boolean | null` on the row, never absent)
+      for (const expected of ['name', 'active', 'createdAt', 'save', 'toJSON']) {
         expect(instLabels, `instance completion should offer '${expected}'`).toContain(expected);
       }
     } finally {
