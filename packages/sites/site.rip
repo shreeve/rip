@@ -859,7 +859,7 @@ export App = (fn?: (() => unknown) | null): ((request: Request) => Promise<Respo
 # Utility: Get Current Environment/Context
 # ==============================================================================
 
-export ctx = ->
+export ctx = (): Ctx | null ->
   store = requestContext.getStore()
   store?.env or null
 
