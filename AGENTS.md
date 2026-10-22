@@ -458,11 +458,13 @@ the affected final gates again.
 - `bun run test:all` — the EXHAUSTIVE repository certification: the
   fast loop PLUS `test/spawn/` PLUS the extended tier PLUS every
   `packages/*/` suite, which `scripts/test-all.mjs` spawns as parallel
-  lanes and aggregates into one exit code. Run it explicitly for
-  release certification; the manual `repository-certification`
-  workflow runs it with the corpus audit and generated-byte gates. It
-  is not the edit loop or an automatic pull-request gate. The ONE
-  suite it does not carry is `test/browser` — it needs installed
+  lanes and aggregates into one exit code — except the packages
+  `scripts/lanes.mjs` excludes by name, each printed with its reason
+  on every run. Run it explicitly for release certification; the
+  manual `repository-certification` workflow runs it with the corpus
+  audit and generated-byte gates. It is not the edit loop or an
+  automatic pull-request gate. Beyond those exclusions, the one suite
+  it does not carry is `test/browser` — it needs installed
   Playwright browsers. CI runs its deterministic Chromium/WebKit
   smoke matrix as a required job (`bun run test:browser`); the live
   Server/Manager suite is explicit through `bun run test:live` and the

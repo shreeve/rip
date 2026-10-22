@@ -60,8 +60,10 @@ const LONGEST_FIRST = [
   'packages/swarm',
 ];
 
-// Named package exclusions (none today — Playwright lives under test/browser).
-const EXCLUDED = new Map();
+// Packages left out by name; every run prints each one with its reason.
+const EXCLUDED = new Map([
+  ['emdb', 'its bundled macOS libemdb is built for CPUs with FEAT_CSSC and crashes (SIGILL) on M1–M3'],
+]);
 
 export const secs = (ms) => `${(ms / 1000).toFixed(1)}s`;
 

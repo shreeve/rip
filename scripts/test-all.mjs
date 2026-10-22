@@ -119,8 +119,8 @@ for (const lane of skipped) {
   const tint = CI ? red : yellow;
   console.log(`  ${tint('⊘')} ${cols(lane.label)}  ${tint(lane.skip)}`);
 }
-for (const { name } of excluded) {
-  console.log(`  ${dim('·')} ${dim(cols(`packages/${name}`))}  ${dim('excluded (CI runs it as its own job)')}`);
+for (const { name, why } of excluded) {
+  console.log(`  ${dim('·')} ${dim(cols(`packages/${name}`))}  ${dim(`excluded: ${why}`)}`);
 }
 
 // A failing lane's output is printed where the lane finished, which in
