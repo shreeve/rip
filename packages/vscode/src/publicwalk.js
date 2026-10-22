@@ -334,6 +334,20 @@ async function widthOf(ck, type, owns, functionTypeId, members) {
   return '{}';
 }
 
+// The type an OPTIONAL position was written with. Under `strictNullChecks`
+// the checker adds `undefined` to an optional property or parameter —
+// `first?: any[]` arrives as `any[] | undefined` — and that arm is the
+// checker's, not the package's: a union is asked about per member, the
+// array member is a foreign reference the union rule skips, and the `any`
+// the package wrote at it would be lost behind a name the author never
+// gave (`first|0[]`). The arm is removed before the walk, so an optional
+// position reads the same under every posture. A nullable arm the author
+// wrote goes with it; neither arm can hold an `any`.
+async function writtenType(ck, symbol, type) {
+  if (type === undefined || (symbol.flags & SymbolFlags.Optional) === 0) return type;
+  return await ck.getNonNullableType(type) ?? type;
+}
+
 // Whether a type annotation is the AUTHOR's claim.
 //
 // Not every annotation in the face was written by one. A pin is the type
@@ -585,7 +599,7 @@ async function walkOne(ck, rootType, rootName, owns, rootSymbol, siblings, funct
           const ctorParams = [];
           const params = await sig.getParameters();
           for (const p of params) {
-            const pType = await ck.getTypeOfSymbol(p);
+            const pType = await writtenType(ck, p, await ck.getTypeOfSymbol(p));
             if (pType === undefined) { lost++; continue; }
             // Recorded before the stop: the ledger is what the constructor
             // TAKES, and a parameter whose defects belong to another row is
@@ -641,7 +655,7 @@ async function walkOne(ck, rootType, rootName, owns, rootSymbol, siblings, funct
         // counted as the member it repeats.
         if (prop.name === '__offers') continue;
         if (published !== null && !published.has(prop.name)) continue;
-        const propType = await ck.getTypeOfSymbol(prop);
+        const propType = await writtenType(ck, prop, await ck.getTypeOfSymbol(prop));
         if (propType === undefined) { lost++; continue; }
         const propStop = await siblingStop(ck, propType, siblings, rootSymbol, owns, functionTypeId, caches);
         if (propStop !== null) { deferred.add(propStop); continue; }

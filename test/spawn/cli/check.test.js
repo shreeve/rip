@@ -1461,6 +1461,38 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     }
   }, 90_000);
 
+  // The audit answers for a CONSUMER, and a consumer's checker is strict:
+  // under `strictNullChecks` an optional key indexes as `any`, and that
+  // `any` is what arrives in a strict project's hands. The package's own
+  // posture may hide it — a gradual package resolves the same index as
+  // `number` — so the walk resolves under the strict posture whatever the
+  // package sets, or a leak every strict consumer meets reports as clean.
+  test('--public resolves under the strict posture whatever the package sets: a gradual package\'s optional-key index leaks', async () => {
+    const dir = workspace({
+      'index.rip': [
+        'UNITS =! { pt: 1, in: 72 }',
+        '',
+        'type Options =',
+        "  unit?: 'pt' | 'in'",
+        '',
+        'export class Doc',
+        '  constructor: (o: Options) ->',
+        '    @unit = UNITS[o.unit]',
+        '    @size: number = @unit * 2',
+      ].join('\n') + '\n',
+    });
+    fs.writeFileSync(path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'gradual-pkg', exports: { '.': './index.rip' } }, null, 2));
+    try {
+      const out = await check(dir, ['--public']);
+      expect(out.stdout).toMatch(/any\s+at: Doc#unit/);
+      expect(out.stdout).not.toMatch(/Doc#size/);
+      expect(out.status).toBe(1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   // A return is read off the signature's own declaration, so a signature
   // with no parameters answers the same way as one with any: `(): void ->`
   // and `: Cancel` both state the returned function's return, and the

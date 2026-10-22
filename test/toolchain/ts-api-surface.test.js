@@ -32,6 +32,9 @@ const CHECKER = [
   // the resolved export table that follows `export *`.
   'getIndexInfosOfType', 'getTypeArguments', 'isArrayType',
   'resolveName', 'getReferencesToSymbolInFile', 'getExportsOfModule',
+  // The type an optional position was written with, behind the
+  // `undefined` strict null checks add to it.
+  'getNonNullableType',
 ];
 
 const SYMBOL = ['getExports'];

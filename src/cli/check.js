@@ -980,8 +980,16 @@ if (compiled.size > 0) {
       if (![...wrapperRels].some((w) => rel === w)) autoBoundaryRels.add(rel);
     }
   }
+  // The public audit answers for a CONSUMER, whose checker is strict:
+  // the projects the walk resolves in take the strict posture whatever
+  // each package sets, or an `any` only `strictNullChecks` produces (an
+  // optional key indexing a table) reports as clean from a gradual
+  // package and arrives in every strict consumer's hands. The package's
+  // face still compiles at its own posture; only the resolution is held
+  // to the consumer's.
+  const resolveStrict = forceStrict || publicAudit;
   const mirror = generatedMirror({
-    workspaceRoot, mirrorRootIsFallback, excludeDirs: [...wrapperRels, ...autoBoundaryRels], strict: forceStrict,
+    workspaceRoot, mirrorRootIsFallback, excludeDirs: [...wrapperRels, ...autoBoundaryRels], strict: resolveStrict,
   });
   fs.writeFileSync(path.join(mirrorRoot, 'tsconfig.json'), JSON.stringify(mirror.tsconfig, null, 2));
   fs.writeFileSync(path.join(mirrorRoot, HOST_FLOOR_NAME), mirror.hostFloorDts);
@@ -989,7 +997,7 @@ if (compiled.size > 0) {
     const wrapperDir = path.join(mirrorRoot, rel);
     const wrapper = projectWrapper({
       wrapperDir, sourceTsconfig: path.join(workspaceRoot, rel, 'tsconfig.json'),
-      workspaceRoot, mirrorRoot, strict: forceStrict,
+      workspaceRoot, mirrorRoot, strict: resolveStrict,
     });
     fs.mkdirSync(wrapperDir, { recursive: true });
     fs.writeFileSync(path.join(wrapperDir, 'tsconfig.json'), JSON.stringify(wrapper.tsconfig, null, 2));
@@ -999,7 +1007,7 @@ if (compiled.size > 0) {
     const wrapperDir = path.join(mirrorRoot, rel);
     const wrapper = projectWrapper({
       wrapperDir, sourceTsconfig: null, sourceDir: path.join(workspaceRoot, rel),
-      workspaceRoot, mirrorRoot, strict: forceStrict,
+      workspaceRoot, mirrorRoot, strict: resolveStrict,
     });
     fs.mkdirSync(wrapperDir, { recursive: true });
     fs.writeFileSync(path.join(wrapperDir, 'tsconfig.json'), JSON.stringify(wrapper.tsconfig, null, 2));
