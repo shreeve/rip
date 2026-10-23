@@ -832,12 +832,16 @@ grammar =
     # erases as voidMarker.
     o '(PRIVATE[visibility])? DEF Identifier[name] VOID_MARKER[voidMarker] OptParams[params] Block[body]'                  , '["void-def", @name, @params, @body]', 'def: _, name, params, body'
     o '(PRIVATE[visibility])? DEF Identifier[name] VOID_MARKER[voidMarker] OptParams[params] TYPE[returnType] Block[body]' , '["void-def", @name, @params, @body]', 'def: _, name, params, body'
+    # Generic void def (`def run!<T>(x: T)`): the bang precedes the list.
+    o '(PRIVATE[visibility])? DEF Identifier[name] VOID_MARKER[voidMarker] TYPE_PARAMS[typeParams] OptParams[params] Block[body]'                  , '["void-def", @name, @params, @body]', 'def: _, name, params, body'
+    o '(PRIVATE[visibility])? DEF Identifier[name] VOID_MARKER[voidMarker] TYPE_PARAMS[typeParams] OptParams[params] TYPE[returnType] Block[body]' , '["void-def", @name, @params, @body]', 'def: _, name, params, body'
     # Static def (`def @m(a)`, `def @m!(a)`): the ThisProperty name marks
     # a static class method; anywhere but a class body the shape
     # rejects at emission.
     o '(PRIVATE[visibility])? DEF ThisProperty[name] OptParams[params] (TYPE[returnType])? Block[body]'                                   , '["def", @name, @params, @body]'     , 'def: _, name, params, body'
     o '(PRIVATE[visibility])? DEF ThisProperty[name] TYPE_PARAMS[typeParams] OptParams[params] (TYPE[returnType])? Block[body]'           , '["def", @name, @params, @body]'     , 'def: _, name, params, body'
     o '(PRIVATE[visibility])? DEF ThisProperty[name] VOID_MARKER[voidMarker] OptParams[params] (TYPE[returnType])? Block[body]'           , '["void-def", @name, @params, @body]', 'def: _, name, params, body'
+    o '(PRIVATE[visibility])? DEF ThisProperty[name] VOID_MARKER[voidMarker] TYPE_PARAMS[typeParams] OptParams[params] (TYPE[returnType])? Block[body]', '["void-def", @name, @params, @body]', 'def: _, name, params, body'
   ]
 
   OptParams: [

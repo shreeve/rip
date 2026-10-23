@@ -586,6 +586,26 @@ type 'generic constraint dts', '''
     v
 ''', 'declare function identity<T extends object>(v: T): T;'
 
+type 'generic void function dts', '''
+  export def run!<C>(x: C): Promise<void>
+    null
+''', 'export declare function run<C>(x: C): Promise<void>;'
+
+type 'generic void methods dts', '''
+  class A
+    def m!<T>(x: T)
+      log x
+    def @n!<T>(x: T): void
+      log x
+''', '''
+  declare class A {
+    m<T>(x: T): void;
+    static n<T>(x: T): void;
+  }
+'''
+
+fail "'void' in value position stays reserved", 'x = void 0', "'void' is reserved and not supported yet"
+
 type 'typed promoted parameter declares its class field', '''
   class Api
     constructor: (@url: string) ->

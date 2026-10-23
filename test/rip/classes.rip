@@ -585,6 +585,7 @@ code 'a static member named constructor is an ordinary static method', 'class A\
 code 'a parameterless static def with a return type', 'class A\n  def @g: number\n    1', 'class A {\n  static g() {\n    return 1;\n  }\n}'
 code 'a parameterless static void def with a return type', 'class A\n  def @h!: void\n    log 1', 'class A {\n  static h() {\n    log(1);\n    return;\n  }\n}'
 code 'a parameterless generic def takes a return type', 'class A\n  def @g<T>: T\n    1', 'class A {\n  static g() {\n    return 1;\n  }\n}'
+code 'generic void defs in a class body, instance and static', 'class A\n  def m!<T>(x: T): void\n    log x\n  def @n!<T>(x: T)\n    log x', 'class A {\n  m(x) {\n    log(x);\n    return;\n  }\n  static n(x) {\n    log(x);\n    return;\n  }\n}'
 
 # JavaScript takes a LeftHandSideExpression after `extends` — a name, a
 # spine, a call. Any other heritage groups, and a heritage that awaits

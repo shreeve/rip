@@ -495,6 +495,10 @@ test 'a parameterless def with a generic return type keeps its body', '''
     g().get('a')
   ''', 1
 code 'a parameterless generic def takes a return type', 'def g<T>: T\n  1', 'function g() {\n  return 1;\n}'
+code 'a generic void def', 'def f!<C>(x: C)\n  null', 'function f(x) {\n  null;\n  return;\n}'
+code 'a generic void def takes a return type', 'export def f!<C>(x: C): Promise<void>\n  null', 'export function f(x) {\n  null;\n  return;\n};'
+code 'a parameterless generic void def takes a return type', 'def g!<T>: T\n  1', 'function g() {\n  1;\n  return;\n}'
+fail 'the void bang precedes the generic list', 'def f<T>!(x)\n  null', "Unexpected '!'"
 
 # ==============================================================================
 # A parenthesized sequence as the WHOLE body

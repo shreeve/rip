@@ -762,6 +762,15 @@ const isDefName = (tokens, k) => {
   return t.kind === 'PROPERTY' && tokens[k - 1]?.kind === '@' && tokens[k - 2]?.kind === 'DEF';
 };
 
+// tokens[k] ends a def's head short of its params: the name, then an
+// optional VOID_MARKER, then an optional TYPE_PARAMS — in that order
+// (`def f`, `def f!`, `def f<T>`, `def f!<T>`).
+const endsDefHead = (tokens, k) => {
+  if (tokens[k]?.kind === 'TYPE_PARAMS') k--;
+  if (tokens[k]?.kind === 'VOID_MARKER') k--;
+  return isDefName(tokens, k);
+};
+
 // Does tokens[k] end a `for` head's variable list? Walks back over one
 // ForValue — a name, `@name`, or a balanced pattern — then an optional
 // `, ForValue`, then `own`/`await`, and requires FOR. A colon right
@@ -1432,13 +1441,15 @@ export function rewriteTypes(tokens, mintId, text, fail) {
     }
 
     // Generic parameter list: an
-    // unspaced `<` after a DEF's name (`def wrap<T extends string>(…)`)
-    // or on a component declaration's target (`Select<T> = component…`)
+    // unspaced `<` after a DEF's name or its void bang
+    // (`def wrap<T extends string>(…)`, `def run!<T>(…)`) or on a
+    // component declaration's target (`Select<T> = component…`)
     // collapses its balanced angle run into ONE TYPE_PARAMS token —
     // opaque text the grammar drops as the side-band typeParams role;
     // the TS face re-emits it after the name, type-level only.
+    const voidDefHead = prev?.kind === 'VOID_MARKER' && isDefName(out, out.length - 2);
     if (kd === 'COMPARE' && tok.value === '<' && !tok.spaced &&
-        prev && (prev.kind === 'IDENTIFIER' || isDefName(out, out.length - 1))) {
+        prev && (prev.kind === 'IDENTIFIER' || isDefName(out, out.length - 1) || voidDefHead)) {
       const beforeName = out[out.length - 2] ?? null;
       // skipAngleGroup's -1 also covers a list left unclosed at end of
       // input, where no token past the tape has an `.end` to slice to.
@@ -1446,7 +1457,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
       if (afterGroup > i) {
         const j = afterGroup - 1;
         const afterClose = tokens[j + 1]?.kind;
-        const defHead = beforeName?.kind === 'DEF' || isDefName(out, out.length - 1);
+        const defHead = beforeName?.kind === 'DEF' || isDefName(out, out.length - 1) || voidDefHead;
         const isComponentTarget = afterClose === '=' && tokens[j + 2]?.kind === 'COMPONENT';
         if (defHead || isComponentTarget) {
           // The def's param paren scanned PLAIN (the scanner mints
@@ -1521,14 +1532,9 @@ export function rewriteTypes(tokens, mintId, text, fail) {
         }
       }
 
-      // Return type on a parameterless GENERIC def: `def g<T>: T`.
-      if (prev.kind === 'TYPE_PARAMS' && isDefName(out, out.length - 2)) {
-        const last = claim('TYPE', tok, i + 1, {});
-        if (last >= 0) { i = last; continue; }
-      }
-
-      // Return type on a parameterless VOID def: `def tick!: T`.
-      if (prev.kind === 'VOID_MARKER' && isDefName(out, out.length - 2)) {
+      // Return type on a parameterless GENERIC or VOID def:
+      // `def g<T>: T`, `def tick!: T`, `def g!<T>: T`.
+      if ((prev.kind === 'TYPE_PARAMS' || prev.kind === 'VOID_MARKER') && endsDefHead(out, out.length - 1)) {
         const last = claim('TYPE', tok, i + 1, {});
         if (last >= 0) { i = last; continue; }
       }
@@ -1814,13 +1820,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
     if (RUN_OPENERS.has(kd)) {
       let fk = 'other';
       if (kd === 'PARAM_START') fk = 'param';
-      else if (kd === 'CALL_START' && isDefName(out, out.length - 1)) fk = 'defparam';
-      // Generic def: the minted TYPE_PARAMS sits between the name and
-      // its param list.
-      else if (kd === 'CALL_START' && prev?.kind === 'TYPE_PARAMS' && isDefName(out, out.length - 2)) fk = 'defparam';
-      // Void def (`def save!(x)`): the VOID_MARKER sits between the
-      // def name and its param list.
-      else if (kd === 'CALL_START' && prev?.kind === 'VOID_MARKER' && isDefName(out, out.length - 2)) fk = 'defparam';
+      else if (kd === 'CALL_START' && endsDefHead(out, out.length - 1)) fk = 'defparam';
       frames.push({
         kind: fk, sawEq: false, sawType: false, bodyDepth: 0,
         pendingImmediate: false, pendingCond: false, inlineBody: false,

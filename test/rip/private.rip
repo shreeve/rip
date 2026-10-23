@@ -123,6 +123,16 @@ test 'a private void def, with and without a return type', '''
   [k.tick(1), k.tock(2)]
   ''', [undefined, undefined]
 
+test 'a private generic void def, with and without a return type', '''
+  class A
+    private def tick!<T>(x: T)
+      x
+    private def tock!<T>(x: T): void
+      x
+  k = new A
+  [k.tick(1), k.tock(2)]
+  ''', [undefined, undefined]
+
 code 'a private static def emits the plain static', '''
   class A
     private def @m(x)
@@ -149,6 +159,15 @@ test 'private static defs: return type, generic, and void spellings', '''
       x
   [A.a(1), A.b(2), A.c(3), A.d(4), A.e(5)]
   ''', [1, 2, 3, undefined, undefined]
+
+test 'private static generic void defs, with and without a return type', '''
+  class A
+    private def @f!<T>(x: T)
+      x
+    private def @g!<T>(x: T): void
+      x
+  [A.f(1), A.g(2)]
+  ''', [undefined, undefined]
 
 # ==============================================================================
 # Fields
