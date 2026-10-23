@@ -266,17 +266,22 @@ test "the busiest bar is the run's progress in every frame, and no bar passes it
   # a frame is its bar writes, then its summary
   frame = {}
   checked = 0
+  early = 0
   for m in [...r.stdout.matchAll(/\x1b\[(\d+);\d+H\x1b\[48;2;83;131;236m(#*)\x1b\[49m|(\d+)\/2001 done/g)]
     if m[3]?
       widest = Math.max(...Object.values(frame))
-      eq widest, Math.floor(Number(m[3]) * 20 / 2001), "at #{m[3]}/2001 the widest bar is #{widest}"
+      eq widest, Math.max(1, Math.floor(Number(m[3]) * 20 / 2001)), "at #{m[3]}/2001 the widest bar is #{widest}"
       checked++
+      early++ if Number(m[3]) * 20 < 2001
       frame = {}
     else
       frame[m[1]] = m[2].length
-  # a fast run draws few frames; 2000/2001 is the telling one, 19 cells
-  # where a bar that ignored progress would already be full
+  # a fast run draws few frames; two are telling. At 2000/2001 the bar is
+  # 19 cells where one that ignored progress would already be full, and
+  # at a job or two done it is the one-cell minimum, not the zero that
+  # progress alone rounds down to
   ok checked >= 2, "#{checked} frames checked"
+  ok early > 0, 'a frame was drawn under a cell of progress'
 
 test "a worker's bar never shrinks while the run is live", ->
   dir = fresh()

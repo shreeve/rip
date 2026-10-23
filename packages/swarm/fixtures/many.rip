@@ -1,7 +1,8 @@
 # Many instant tasks: 2,001 of them, so one job is under a twentieth of a
 # percent and a percentage rounded to tenths would read 100.0 a job early.
-# The last one sleeps past three of the display's 0.2 s ticks, so a frame
-# is always drawn at 2000/2001.
+# Each worker sleeps on its second task past three of the display's 0.1 s
+# ticks, so a frame is always drawn with a job or two done; and the last
+# task sleeps past seven of them, so a frame is always drawn at 2000/2001.
 
 import { swarm, init, retry, todo } from 'rip/swarm'
 
@@ -11,7 +12,10 @@ setup = ->
     todo i for i in [1..2001]
   {}
 
+performed = 0
 perform = (task, ctx) ->
+  performed++
+  Bun.sleep! 300 if performed is 2
   Bun.sleep! 700 if task.split('/').pop() is '2001'
 
 swarm! { setup, perform }
