@@ -23,11 +23,37 @@ CR         =! 13      # \r
 LF         =! 10      # \n
 EQ         =! 61      # =
 
+# ==[ Types ]==
+
+type Cells = Iterable<unknown, unknown, unknown>
+
+type Dialect =
+  sep?: string
+  quote?: string
+  escape?: string
+  row?: string
+  excel?: boolean
+  relax?: boolean
+  strip?: boolean
+  comments?: string | null
+  skipBlanks?: boolean
+
+type ReadOptions = Dialect & { headers?: boolean, each?: ((row: string[] | Record<string, string>, index: number) => unknown) | null }
+
+type WriteOptions =
+  sep?: string
+  quote?: string
+  escape?: string
+  mode?: 'compact' | 'full'
+  zeros?: boolean
+  drop?: boolean
+  rowsep?: string
+
 # ==============================================================================
 # Probe — auto-detect CSV dialect from the first few KB
 # ==============================================================================
 
-def probe(str, opts = {})
+def probe(str, opts: ReadOptions = {})
 
   # strip BOM
   if str.charCodeAt(0) is 0xFEFF
@@ -363,7 +389,7 @@ def readFull(str, cfg)
 # ==============================================================================
 
 class Writer
-  constructor: (opts = {}) ->
+  constructor: (opts: WriteOptions = {}) ->
     @sep    = opts.sep    ?? ','
     @quote  = opts.quote  ?? '"'
     @escape = opts.escape ?? @quote
@@ -377,14 +403,14 @@ class Writer
     @leadZero = /^0\d+$/
 
   # check if a cell value needs quoting
-  needsQuote: (cell) ->
+  needsQuote: (cell: string): boolean ->
     cell.indexOf(@sep)  >= 0 or
     cell.indexOf('\n')  >= 0 or
     cell.indexOf('\r')  >= 0 or
     cell.indexOf(@quote) >= 0
 
   # format a single row as a CSV line (no trailing row separator)
-  row: (data) ->
+  row: (data: Cells): string ->
     cells = (String(v ?? '') for v in data)
 
     # drop trailing empty columns
@@ -418,7 +444,7 @@ class Writer
     formatted.join @sep
 
   # format multiple rows as a complete CSV string
-  rows: (data) ->
+  rows: (data?: readonly Cells[] | null): string ->
     return '' unless data?.length
     ((@row(r) for r in data).join(@rowsep)) + @rowsep
 
@@ -427,30 +453,40 @@ class Writer
 # ==============================================================================
 
 # parse a CSV string into rows (arrays or objects)
+def read(str: string, opts: Dialect & { headers: true, each: (row: Record<string, string>, index: number) => unknown }): number
+def read(str: string, opts: Dialect & { headers?: false, each: (row: string[], index: number) => unknown }): number
+def read(str: string, opts: Dialect & { headers: true, each?: null }): Record<string, string>[]
+def read(str: string, opts?: Dialect & { headers?: false, each?: null }): string[][]
+def read(str: string, opts?: ReadOptions): number | string[][] | Record<string, string>[]
 def read(str, opts = {})
   throw TypeError.new("CSV.read expects a string, got #{if str is null then 'null' else typeof str}") unless typeof str is 'string'
   cfg = probe(str, opts)
   readFull(cfg.str, cfg)
 
 # format row arrays into a CSV string
-def write(rows, opts = {})
+def write(rows?: readonly Cells[] | null, opts: WriteOptions = {}): string
   Writer.new(opts).rows(rows)
 
 # read and parse a CSV file (async — uses Bun.file)
-def load(path, opts = {})
+def load(path: string | URL, opts: Dialect & { headers: true, each: (row: Record<string, string>, index: number) => unknown }): Promise<number>
+def load(path: string | URL, opts: Dialect & { headers?: false, each: (row: string[], index: number) => unknown }): Promise<number>
+def load(path: string | URL, opts: Dialect & { headers: true, each?: null }): Promise<Record<string, string>[]>
+def load(path: string | URL, opts?: Dialect & { headers?: false, each?: null }): Promise<string[][]>
+def load(path: string | URL, opts?: ReadOptions): Promise<number | string[][] | Record<string, string>[]>
+def load(path, opts = {}): Promise<number | string[][] | Record<string, string>[]>
   str = Bun.file(path).text!
   CSV.read str, opts
 
 # write rows to a CSV file (async — uses Bun.write)
-def save(path, rows, opts = {})
+def save(path: Bun.BunFile | Bun.S3File | Bun.PathLike, rows?: readonly Cells[] | null, opts: WriteOptions = {}): Promise<number>
   Bun.write! path, CSV.write(rows, opts)
 
 # create a reusable Writer instance
-def writer(opts = {})
+def writer(opts: WriteOptions = {}): Writer
   Writer.new(opts)
 
 # format a single row (convenience — creates a one-shot Writer)
-def formatRow(row, opts = {})
+def formatRow(row: Cells, opts: WriteOptions = {}): string
   Writer.new(opts).row(row)
 
 export CSV = { read, write, load, save, writer, formatRow }

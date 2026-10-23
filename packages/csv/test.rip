@@ -381,6 +381,7 @@ test "a quoted field followed by an empty last field keeps that field", ->
 test "read rejects anything but a string", ->
   for bad in [42, null, undefined, ['a,b'], {a: 1}]
     threw = try
+      # @ts-expect-error
       CSV.read bad
       null
     catch e
