@@ -426,33 +426,34 @@ class Writer
 # Public API
 # ==============================================================================
 
-export CSV =
-  # parse a CSV string into rows (arrays or objects)
-  read: (str, opts = {}) ->
-    throw TypeError.new("CSV.read expects a string, got #{if str is null then 'null' else typeof str}") unless typeof str is 'string'
-    cfg = probe(str, opts)
-    readFull(cfg.str, cfg)
+# parse a CSV string into rows (arrays or objects)
+def read(str, opts = {})
+  throw TypeError.new("CSV.read expects a string, got #{if str is null then 'null' else typeof str}") unless typeof str is 'string'
+  cfg = probe(str, opts)
+  readFull(cfg.str, cfg)
 
-  # format row arrays into a CSV string
-  write: (rows, opts = {}) ->
-    Writer.new(opts).rows(rows)
+# format row arrays into a CSV string
+def write(rows, opts = {})
+  Writer.new(opts).rows(rows)
 
-  # read and parse a CSV file (async — uses Bun.file)
-  load: (path, opts = {}) ->
-    str = Bun.file(path).text!
-    CSV.read str, opts
+# read and parse a CSV file (async — uses Bun.file)
+def load(path, opts = {})
+  str = Bun.file(path).text!
+  CSV.read str, opts
 
-  # write rows to a CSV file (async — uses Bun.write)
-  save: (path, rows, opts = {}) ->
-    Bun.write! path, CSV.write(rows, opts)
+# write rows to a CSV file (async — uses Bun.write)
+def save(path, rows, opts = {})
+  Bun.write! path, CSV.write(rows, opts)
 
-  # create a reusable Writer instance
-  writer: (opts = {}) ->
-    Writer.new(opts)
+# create a reusable Writer instance
+def writer(opts = {})
+  Writer.new(opts)
 
-  # format a single row (convenience — creates a one-shot Writer)
-  formatRow: (row, opts = {}) ->
-    Writer.new(opts).row(row)
+# format a single row (convenience — creates a one-shot Writer)
+def formatRow(row, opts = {})
+  Writer.new(opts).row(row)
+
+export CSV = { read, write, load, save, writer, formatRow }
 
 # ==============================================================================
 # CLI — run directly with: bun csv.rip [options] <input> [output]
@@ -514,12 +515,12 @@ if import.meta.main
   # report the message alone.
   try
     rows = CSV.read(Bun.file(input).text!, readOpts)
-    writer = Writer.new(writeOpts)
+    w = Writer.new(writeOpts)
     if output
-      Bun.write! output, writer.rows(rows)
+      Bun.write! output, w.rows(rows)
       p "#{rows.length} rows: #{input} -> #{output}"
     else
-      process.stdout.write writer.rows(rows)
+      process.stdout.write w.rows(rows)
   catch error
     console.error "rip-csv: #{error?.message ?? String(error)}"
     exit 1
