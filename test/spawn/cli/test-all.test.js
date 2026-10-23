@@ -372,9 +372,13 @@ test('the plan for this repository is one lane per packages/*/ suite plus root',
   // `▸` alone quietly turns it into an assertion that `bun install` has
   // been run, which fails on a fresh checkout where the other 5,849
   // tests in this tier pass.
+  // A package excluded by name (scripts/lanes.mjs EXCLUDED) was found by
+  // the walk too, and the plan says so with its reason: it is accounted
+  // for, never silently dropped.
   const discovered = [
     ...[...r.stdout.matchAll(/^▸ (.+)$/gm)].map((m) => m[1]),
     ...[...r.stdout.matchAll(/^\s*⊘ (.+?) SKIPPED:/gm)].map((m) => m[1]),
+    ...[...r.stdout.matchAll(/^\s*· (packages\/\S+) excluded: \S/gm)].map((m) => m[1]),
   ];
 
   const declared = readdirSync(join(repo, 'packages'))
