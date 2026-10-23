@@ -430,7 +430,6 @@ export CSV =
   # parse a CSV string into rows (arrays or objects)
   read: (str, opts = {}) ->
     throw TypeError.new("CSV.read expects a string, got #{if str is null then 'null' else typeof str}") unless typeof str is 'string'
-    return [] unless str.length
     cfg = probe(str, opts)
     readFull(cfg.str, cfg)
 

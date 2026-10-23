@@ -146,6 +146,10 @@ test "each with early halt", ->
   eq n, 2
   eq collected, [['a'],['1']]
 
+test "each over an empty input counts zero rows", ->
+  eq CSV.read("", each: -> ok false, 'no row'), 0
+  eq CSV.read("", headers: true), []
+
 # ==[ Reading: Relax mode ]==
 
 console.log "\nReading — relax mode"
