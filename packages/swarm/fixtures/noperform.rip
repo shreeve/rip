@@ -2,4 +2,5 @@
 
 import { swarm } from 'rip/swarm'
 
+# @ts-expect-error
 swarm! {}

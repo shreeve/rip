@@ -27,7 +27,7 @@ run = (dir, script, ...flags) ->
     cwd: dir, encoding: 'utf8', timeout: 12000, env: plainEnv()
   }
 
-cli = (args, opts = {}) ->
+cli = (args, opts: { cwd?: string, env?: Record<string, string | undefined> } = {}) ->
   spawnSync process.execPath, [ripCli, ...args], {
     encoding: 'utf8', timeout: 12000, ...opts, env: plainEnv(opts.env)
   }
@@ -254,7 +254,7 @@ liveBars = (out) ->
 
 # The last frame's stats rows: { row: [cells, jobs] }.
 statsRows = (out) ->
-  rows = {}
+  rows: Record<string, [number, number]> = {}
   for m in [...out.matchAll(/\x1b\[(\d+);\d+H\x1b\[38;2;255;255;255m\x1b\[48;2;83;131;236m(#*)(?:\x1b\[49m *\x1b\[39m|\x1b\[39m\x1b\[49m) │ (\d+) jobs @/g)]
     rows[m[1]] = [m[2].length, Number(m[3])]
   rows
@@ -264,7 +264,7 @@ test "the busiest bar is the run's progress in every frame, and no bar passes it
   r = cli [fixture('many.rip'), '-w', '2', '-b', '20', '-c', '#'], { cwd: dir }
   eq r.status, 0
   # a frame is its bar writes, then its summary
-  frame = {}
+  frame: Record<string, number> = {}
   checked = 0
   early = 0
   for m in [...r.stdout.matchAll(/\x1b\[(\d+);\d+H\x1b\[48;2;83;131;236m(#*)\x1b\[49m|(\d+)\/2001 done/g)]

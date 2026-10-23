@@ -22,6 +22,7 @@
 # ==============================================================================
 
 import { Worker, isMainThread, parentPort, workerData } from 'worker_threads'
+import type { WorkerOptions } from 'worker_threads'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync, rmSync } from 'fs'
 import { join, resolve } from 'path'
 import { pathToFileURL } from 'url'
@@ -60,7 +61,7 @@ export init! = ->
   rmSync(_dir, { recursive: true, force: true })
   mkdirSync(dir, { recursive: true }) for dir in [_todo, _done, _died]
 
-export retry = ->
+export retry = (): boolean ->
   return false unless existsSync(_died) and existsSync(_todo)
   died = readdirSync(_died)
   todo = readdirSync(_todo)
@@ -68,10 +69,10 @@ export retry = ->
   renameSync(join(_died, file), join(_todo, file)) for file in died
   true
 
-export todo! = (name, data) ->
+export todo! = (name: unknown, data?: unknown) ->
   data ?= ''
   data = JSON.stringify(data) unless kind(data) is 'string'
-  writeFileSync(join(_todo, String(name)), data)
+  writeFileSync(join(_todo, String(name)), data as string)
 
 base = (path) -> path.split('/').pop()
 
@@ -213,7 +214,16 @@ serve = (perform) ->
       when 'shutdown'
         exit(0)
 
-export swarm! = (opts = {}) ->
+type Options =
+  setup?: () => unknown
+  perform: (task: string, ctx: Record<string, unknown> & { safe: boolean }) => unknown
+  workers?: number
+  bar?: number
+  char?: string
+  tag?: string | number
+  hold?: unknown
+
+export swarm! = (opts: Options = {} as Options) ->
   unless isMainThread
     return unless typeof opts.perform is 'function' and not _serving
     serve opts.perform
@@ -242,7 +252,7 @@ export swarm! = (opts = {}) ->
   # run setup
   abort 'error: perform() function is required' unless typeof opts.perform is 'function'
 
-  context = {}
+  context: { safe?: boolean } = {}
   if typeof opts.setup is 'function'
     result = opts.setup!
     context = result if result? and typeof result is 'object'
@@ -277,7 +287,7 @@ export swarm! = (opts = {}) ->
   live     = 0
   done     = 0
   died     = 0
-  info     = {}
+  info: Record<string, number> = {}
   taskIdx  = 0
   fatal    = false
   inflight = {}  # slot -> taskPath (track in-flight tasks for crash recovery)
@@ -327,7 +337,7 @@ export swarm! = (opts = {}) ->
   # create workers and dispatch tasks
   allWorkers = []
 
-  Promise.new! (resolveAll) ->
+  Promise.new! (resolveAll: (value?: unknown) => void) ->
 
     finished = false
     checkDone! = ->
@@ -351,7 +361,7 @@ export swarm! = (opts = {}) ->
     spawnWorker! = (slot) ->
       info[slot] ?= 0
 
-      w = Worker.new(workerPath, { workerData: { scriptPath, context }, preload: [loaderPath] })
+      w = Worker.new(workerPath, { workerData: { scriptPath, context }, preload: [loaderPath] } as WorkerOptions)
       allWorkers.push(w)
 
       w.on 'message', (msg) ->
@@ -386,7 +396,7 @@ export swarm! = (opts = {}) ->
             redraw()
             dispatchNext(w, slot)
 
-      w.on 'error', (err) ->
+      w.on 'error', (err: Error) ->
         logError "worker #{slot} error: #{err.message}"
 
       w.on 'exit', (code) ->
@@ -451,7 +461,7 @@ findArg = (args, short, long) ->
   null
 
 # return process.argv with swarm's flags stripped: only your args remain
-export args = ->
+export args = (): string[] ->
   result = []
   skip = false
   for arg in process.argv.slice(2)
