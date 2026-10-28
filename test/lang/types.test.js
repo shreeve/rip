@@ -53,6 +53,11 @@ const PAIRS = [
   ['get: (p: string) => void = f', 'get = f'],
   ['if c\n  x: number = 5\n  x', 'if c\n  x = 5\n  x'],
   ['f = ->\n  r: number = g()\n  r', 'f = ->\n  r = g()\n  r'],
+  // a block body inside explicit brackets: its statements claim as
+  // they do outside every bracket
+  ['o = {\n  f: ->\n    r: number = g()\n    r\n}', 'o = {\n  f: ->\n    r = g()\n    r\n}'],
+  ['xs.map((x) ->\n  r: number = x\n  r\n)', 'xs.map((x) ->\n  r = x\n  r\n)'],
+  ['[\n  ->\n    try g() catch e: any then e\n]', '[\n  ->\n    try g() catch e then e\n]'],
   // parameter annotations
   ['f = (a: number, b: string = "s") -> a', 'f = (a, b = "s") -> a'],
   ['f = (a: number = 3) -> a', 'f = (a = 3) -> a'],
@@ -658,6 +663,11 @@ const STMT_PAIRS = [
   ['export f: (n: number) => number = (n) -> n + 1', 'export f = (n) -> n + 1'],
   // module-level @-typed declaration
   ['@x: number = 2', '@x = 2'],
+  // a block body inside explicit brackets erases as it does outside
+  // every bracket
+  ['h({\n  f: ->\n    r: number\n    r = g()\n    r\n})', 'h({\n  f: ->\n    r = g()\n    r\n})'],
+  ['o = {\n  f: ->\n    type T = string\n    5\n}', 'o = {\n  f: ->\n    5\n}'],
+  ['o = {\n  K: class\n    x: number = 5\n}', 'o = {\n  K: class\n    x = 5\n}'],
 ];
 
 describe('whole-statement erasure: typed and stripped twins compile to the same bytes', () => {

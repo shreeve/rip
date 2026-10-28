@@ -572,6 +572,180 @@ code "arrow-valued object literal not armed", "obj = { f: (e) -> e }", '''
   }};
   '''
 
+# A block body inside explicit brackets is a statement block like any
+# other: each row compiles to the bytes of its unbracketed twin.
+code "typed local in a braced object's method", '''
+  o = {
+    fetch: ->
+      sent: number = 1
+      sent
+  }
+  ''', '''
+  let o = {fetch() {
+    let sent = 1;
+    return sent;
+  }};
+  '''
+
+code "typed local in a braced call argument's method", '''
+  server = make({
+    fetch: ->
+      sent: number = 1
+      sent
+  })
+  ''', '''
+  let server = make({fetch() {
+    let sent = 1;
+    return sent;
+  }});
+  '''
+
+code "typed local in a parenthesized callback", '''
+  xs.forEach((x) ->
+    y: number = x
+    log y
+  )
+  ''', '''
+  xs.forEach(function(x) {
+    let y = x;
+    return log(y);
+  });
+  '''
+
+code "typed local in an arrow inside an array", '''
+  fs = [
+    ->
+      y: number = 1
+      y
+  ]
+  ''', '''
+  let fs = [(function() {
+    let y = 1;
+    return y;
+  })];
+  '''
+
+code "typed local in a parameter default's body", '''
+  f = (cb = ->
+    y: number = 1
+    y
+  ) -> cb()
+  ''', '''
+  let f = function(cb = function() {
+    let y = 1;
+    return y;
+  }) {
+    return cb();
+  };
+  '''
+
+code "typed forward in a braced object's method", '''
+  o = {
+    f: ->
+      r: number
+      r = 2
+      r
+  }
+  ''', '''
+  let o = {f() {
+    let r = 2;
+    return r;
+  }};
+  '''
+
+code "typed catch binding in a braced object's method", '''
+  o = {
+    f: ->
+      try
+        g()
+      catch e: any
+        e
+  }
+  ''', '''
+  let o = {f() {
+    try {
+      return g();
+    } catch (e) {
+      return e;
+    }
+  }};
+  '''
+
+code "type alias in a braced object's method", '''
+  o = {
+    f: ->
+      type T = number
+      y: T = 1
+      y
+  }
+  ''', '''
+  let o = {f() {
+    let y = 1;
+    return y;
+  }};
+  '''
+
+code "typed field in a class inside a braced object", '''
+  o = {
+    K: class
+      x: number = 1
+  }
+  ''', '''
+  let o = {K: class {
+    x = 1;
+  }};
+  '''
+
+code "typed reactive local in a braced object's method", '''
+  o = {
+    f: ->
+      c: number := 0
+      c
+  }
+  ''', '''
+  let o = {f() {
+    const c = __state(0);
+    return c.value;
+  }};
+  '''
+
+code "typed local in a parenthesized if body", '''
+  x = (if c
+    r: number = 1
+    r
+  )
+  ''', '''
+  let r;
+
+  let x = (() => { if (c) {
+    r = 1;
+    return r;
+  } })();
+  '''
+
+code "pairs in a braced object's method stay pairs", '''
+  o = {
+    f: ->
+      g({a: 1})
+      {b: 2}
+  }
+  ''', '''
+  let o = {f() {
+    g({a: 1});
+    return {b: 2};
+  }};
+  '''
+
+fail "a partial-evidence sibling run in a braced call argument's method rejects", '''
+  h({
+    f: ->
+      a: 1
+      b: number
+      b = 2
+      b
+  })
+  ''', "'a' is never assigned in this block"
+
 # ==============================================================================
 # Declaration pins — the type verb compares emitted .d.ts (module marker shed)
 # ==============================================================================

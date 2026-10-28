@@ -356,6 +356,7 @@ const VALUE_INDENT_OPENERS = new Set([
   'INDEX_START', 'PARAM_START', 'PICK_START', 'OPTPICK_START',
   'RETURN', 'THROW', 'AWAIT', 'YIELD',
 ]);
+const opensStatementBlock = (before) => !(before && VALUE_INDENT_OPENERS.has(before.kind));
 
 // Is the token at index k (the one directly before a candidate `name :`)
 // a statement boundary? EXPORT counts (`export x: T = v` — the binding
@@ -377,8 +378,7 @@ export const atStatementBoundary = (tokens, k) => {
     if (kd === 'OUTDENT') depth++;
     else if (kd === 'INDENT') {
       if (depth === 0) {
-        const before = tokens[j - 1];
-        return !(before && VALUE_INDENT_OPENERS.has(before.kind));
+        return opensStatementBlock(tokens[j - 1]);
       }
       depth--;
     }
@@ -933,8 +933,10 @@ const buildAssignIndex = (tokens) => {
   const blockMaps = [new Map()];
   const blockIdAt = new Array(tokens.length);
   // Each frame links UP to its enclosing block, severed at closure
-  // boundaries — an assignment registers along its up-chain only.
-  const stack = [{ id: 0, up: null }];
+  // boundaries — an assignment registers along its up-chain only. A
+  // frame's floor is the bracket depth its statements sit at (see
+  // blockFloors in rewriteTypes): `f(r = 1)` is not a statement.
+  const stack = [{ id: 0, up: null, floor: 0 }];
   let bracket = 0;
   for (let j = 0; j < tokens.length; j++) {
     if (counter.on) counter.n++;
@@ -944,14 +946,16 @@ const buildAssignIndex = (tokens) => {
       const id = blockMaps.push(new Map()) - 1;
       const p = tokens[j - 1]?.kind;
       const closure = p === '->' || p === '=>';
-      stack.push({ id, up: closure ? null : stack[stack.length - 1] });
+      const top = stack[stack.length - 1];
+      const floor = opensStatementBlock(tokens[j - 1]) ? bracket : top.floor;
+      stack.push({ id, up: closure ? null : top, floor });
     } else if (kd === 'OUTDENT') {
       if (stack.length > 1) stack.pop();
     } else if (RUN_OPENERS.has(kd)) {
       bracket++;
     } else if (RUN_CLOSERS.has(kd)) {
       bracket--;
-    } else if (bracket === 0 && (kd === 'IDENTIFIER' || kd === 'PROPERTY') &&
+    } else if (bracket === stack[stack.length - 1].floor && (kd === 'IDENTIFIER' || kd === 'PROPERTY') &&
         tokens[j + 1]?.kind === '=') {
       for (let f = stack[stack.length - 1]; f; f = f.up) {
         if (counter.on) counter.n++;
@@ -1108,6 +1112,16 @@ export function rewriteTypes(tokens, mintId, text, fail) {
   const defParamEnds = new WeakSet(); // CALL_END tokens that close a def param list
   const frameTop = () => frames[frames.length - 1] ?? null;
 
+  // The frame depth each open block's statements sit at, one entry per
+  // INDENT. A statement block (a function, class, or clause body)
+  // starts at the depth of the brackets around it, so its lines claim
+  // exactly as they would outside every bracket: `{ f: -> x: T = v }`
+  // reads `x: T = v` as the typed declaration it is in the unbraced
+  // `f: -> x: T = v`. A value block inherits its enclosing floor.
+  const blockFloors = [];
+  const floor = () => blockFloors[blockFloors.length - 1] ?? 0;
+  const atStatementLevel = () => frames.length === floor();
+
   // Class-body tracking: CLASS arms the next INDENT as a class BODY
   // (a head line that ends in TERMINATOR or THEN without one has no
   // block body); nested indents inside the body (method bodies,
@@ -1145,10 +1159,10 @@ export function rewriteTypes(tokens, mintId, text, fail) {
   let classHeadDepth = -1;
   let classHeadRunDepth = 0;
 
-  // Statement-level `name:`-shaped line tracking (outside all
-  // brackets): a bare typed declaration never claims NEXT TO another
-  // `key:` line — adjacent key lines are an implicit OBJECT (the
-  // sibling guard).
+  // Statement-level `name:`-shaped line tracking (outside every
+  // bracket its block opened): a bare typed declaration never claims
+  // NEXT TO another `key:` line — adjacent key lines are an implicit
+  // OBJECT (the sibling guard).
   let prevSiblingKV = false, curLineKV = false;
 
   // The bare-declaration claim's assigned-later evidence: the linear
@@ -1381,7 +1395,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
     // it); the grammar reduces it to an erased statement node
     // carrying the span. An `export` prefix folds in — the whole
     // exported declaration erases.
-    if (frames.length === 0 &&
+    if (atStatementLevel() &&
         ((kd === 'IDENTIFIER' && tok.value === 'type') ||
          (kd === 'RESERVED' && tok.value === 'interface')) &&
         (!prev || prev.kind === 'TERMINATOR' || prev.kind === 'INDENT' ||
@@ -1543,7 +1557,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
       // before implicitObjects, which would otherwise read the line as
       // the pattern `{error: any}`. TypeScript admits `any` and
       // `unknown` there and reports any other spelling at the annotation.
-      if (frames.length === 0 && (prev.kind === 'PROPERTY' || prev.kind === 'IDENTIFIER') &&
+      if (atStatementLevel() && (prev.kind === 'PROPERTY' || prev.kind === 'IDENTIFIER') &&
           beforePrev?.kind === 'CATCH') {
         // The inline handler (`catch e: any then …`) ends the run at `then`.
         const last = claim('TYPE', tok, i + 1, { stopAtThen: true });
@@ -1630,13 +1644,13 @@ export function rewriteTypes(tokens, mintId, text, fail) {
       // implicit object it always was.
       const stringNamedColon = nameTok !== null && nameTok.kind === 'STRING' &&
         atStatementBoundary(out, nameBoundaryAt);
-      if (frames.length === 0 && namedColon && !isAtName) curLineKV = true;
+      if (atStatementLevel() && namedColon && !isAtName) curLineKV = true;
 
       // An annotated SOAK prototype write (`X?::m: T = v`): the
       // augmentation declares that the member EXISTS on the type — a
       // conditional write cannot carry that claim. Reject shaped,
       // naming the fix.
-      if (frames.length === 0 && prev.kind === 'PROPERTY' &&
+      if (atStatementLevel() && prev.kind === 'PROPERTY' &&
           out[out.length - 2]?.kind === '.' &&
           out[out.length - 3]?.kind === 'PROPERTY' && out[out.length - 3].value === 'prototype' &&
           out[out.length - 4]?.kind === '?.' &&
@@ -1654,7 +1668,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
       // the face's interface augmentation, so hovers and calls of the
       // added member resolve to the declared type. The member keeps
       // its PROPERTY tag (the member-chain grammar shape requires it).
-      if (frames.length === 0 && prev.kind === 'PROPERTY' &&
+      if (atStatementLevel() && prev.kind === 'PROPERTY' &&
           out[out.length - 2]?.kind === '.' &&
           out[out.length - 3]?.kind === 'PROPERTY' && out[out.length - 3].value === 'prototype' &&
           out[out.length - 4]?.kind === '.' &&
@@ -1666,12 +1680,12 @@ export function rewriteTypes(tokens, mintId, text, fail) {
       }
 
       // Statement-level typed declaration: `name: T = v` at a
-      // statement boundary, outside all brackets, with the binding `=`
-      // decided by the forward scan (typedDeclEq). `@`-prefixed names
-      // claim too (`@x: T = v` — the target is the ThisProperty) and
-      // keep their PROPERTY tag, as the `@ Property` grammar shape
-      // requires.
-      if (frames.length === 0 && (namedColon || stringNamedColon) && typedDeclEq(tokens, i) >= 0) {
+      // statement boundary, outside every bracket its block opened,
+      // with the binding `=` decided by the forward scan (typedDeclEq).
+      // `@`-prefixed names claim too (`@x: T = v` — the target is the
+      // ThisProperty) and keep their PROPERTY tag, as the `@ Property`
+      // grammar shape requires.
+      if (atStatementLevel() && (namedColon || stringNamedColon) && typedDeclEq(tokens, i) >= 0) {
         const last = claim('TYPE', tok, i + 1, {});
         if (last >= 0) {
           if (nameTok.kind === 'PROPERTY' && !isAtName) {
@@ -1696,7 +1710,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
       // a prop and never a method pair (a class's `@name:` is a static
       // method), so a depth-0 `=>` there is a function TYPE —
       // `@onPick?: (item: Item) => void` — not an arrow value.
-      if (frames.length === 0 && inClassBody() && namedColon &&
+      if (atStatementLevel() && inClassBody() && namedColon &&
           ((isAtName && classBodyKind() === 'component') || !methodValueAhead(tokens, i + 1))) {
         let end = -1, depth = 0;
         for (let j = i + 1; j < tokens.length; j++) {
@@ -1736,7 +1750,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
       // evidence rejects loudly; otherwise the run keeps its
       // implicit-object reading. The claim erases to NOTHING at
       // emission.
-      if (frames.length === 0 && !inClassBody() && namedColon && !isAtName && !marker) {
+      if (atStatementLevel() && !inClassBody() && namedColon && !isAtName && !marker) {
         const cached = runClaims?.get(i);
         const decision = cached !== undefined ? cached
           : (!prevSiblingKV && decideBareRun(i));
@@ -1794,8 +1808,8 @@ export function rewriteTypes(tokens, mintId, text, fail) {
     // typed FIELDS by the class rule (`@size: number` is a required
     // typed prop — the claim builds the typed-var wrapper the member
     // categorizer reads). Consumed claims never reach here, but every
-    // run they eat is INDENT/OUTDENT-balanced, so the stack stays
-    // true.
+    // run they eat is INDENT/OUTDENT-balanced, so the stacks (this one
+    // and blockFloors) stay true.
     if (kd === 'CLASS' || kd === 'COMPONENT') pendingClassBody = kd === 'CLASS' ? 'class' : 'component';
     else if (kd === 'THEN') pendingClassBody = false;
     else if (kd === 'INDENT') {
@@ -1806,7 +1820,13 @@ export function rewriteTypes(tokens, mintId, text, fail) {
     } else if (kd === 'TERMINATOR') {
       pendingClassBody = false;
     }
-    if (frames.length === 0) {
+    // An INDENT or OUTDENT resets the line tracking when the block it
+    // bounds sits at statement level — judged by that block's own floor,
+    // so the floor is pushed before the test and popped after it.
+    if (kd === 'INDENT') blockFloors.push(opensStatementBlock(prev) ? frames.length : floor());
+    const lineAtStatementLevel = atStatementLevel();
+    if (kd === 'OUTDENT') blockFloors.pop();
+    if (lineAtStatementLevel) {
       if (kd === 'TERMINATOR') {
         prevSiblingKV = curLineKV;
         curLineKV = false;

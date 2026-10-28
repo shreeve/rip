@@ -584,6 +584,15 @@ describe('TS-face emission pins', () => {
     expect(ts('x: number = 5\nx = 7\n').code).toBe('let x: number = 5;\nx = 7;' + MARKER);
   });
 
+  test('a block body inside explicit brackets claims its annotations like its unbracketed twin', () => {
+    const body = '  fetch: ->\n    type T = number\n    sent: T = 1\n    r: number\n    r = 2\n    try\n      g()\n    catch e: any\n      e\n    sent + r\n';
+    const want = 'let o = {fetch() {\n  type T = number;\n  let sent: T = 1;\n  let r: number = 2;\n' +
+      '  try {\n    g();\n  } catch (e: any) {\n    e;\n  }\n  return (sent + r);\n}};' + MARKER;
+    expect(ts(`o =\n${body}`).code).toBe(want);
+    expect(ts(`o = {\n${body}}\n`).code).toBe(want);
+    expect(ts(`o = make({\n${body}})\n`).code).toBe(want.replace('let o = {', 'let o = make({').replace('}};', '}});'));
+  });
+
   test('a ctor field only a bound arrow assigns spells its any; a directly-assigned one stays bare', () => {
     // TypeScript's constructor inference reads direct assignments but
     // never descends into arrows — a bare declaration for an
