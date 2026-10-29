@@ -167,8 +167,8 @@ describe('schema declarations: the per-kind shapes', () => {
     expect(d).toContain('savedChanges: Map<string, [unknown, unknown]>');
     expect(d).toContain('toJSON(): MData');
     // Scopes: the Query alias + the const intersection
-    expect(d).toContain('type MQuery = SchemaQuery<M, MData> & { live(...args: any[]): MQuery };');
-    expect(d).toContain('declare const M: ModelSchema<M, MData, number, MCreate> & { live(...args: any[]): MQuery };');
+    expect(d).toContain('type MQuery = SchemaQuery<M, MData> & { live(): MQuery };');
+    expect(d).toContain('declare const M: ModelSchema<M, MData, number, MCreate, MQuery> & { live(): MQuery };');
     // no @softDelete → no restore
     expect(dts('P = schema :model\n  a! string')).not.toContain('restore()');
   });
@@ -252,7 +252,7 @@ describe('schema declarations: the per-kind shapes', () => {
     expect(v).not.toContain('interface ModelSchema');
     expect(v).not.toContain('interface SchemaQuery');
     const m = dts('M = schema :model\n  a! string');
-    expect(m).toContain('interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {');
+    expect(m).toContain('interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>, Query = SchemaQuery<Instance, Data>> extends Schema<Instance, Data> {');
   });
 
   test('zero-cost holds: schema-free modules keep the trivial declaration', () => {
@@ -506,8 +506,8 @@ describe('schema type story inside function scopes', () => {
   test('every kind types in a function: a :model brings the persistence tier to the module top, a :mixin resolves for its sibling', () => {
     const model = face('f = ->\n  U = schema :model\n    name! string\n    @scope :live, -> @where(active: true)\n  U');
     expect(model.code).toMatch(/^interface ModelSchema</m);
-    expect(model.code).toContain('  type UQuery = SchemaQuery<U, UData> & { live(...args: any[]): UQuery };\n  let U = __schema(');
-    expect(model.code).toContain(') as unknown as ModelSchema<U, UData, number, UCreate> & { live(...args: any[]): UQuery };');
+    expect(model.code).toContain('  type UQuery = SchemaQuery<U, UData> & { live(): UQuery };\n  let U = __schema(');
+    expect(model.code).toContain(') as unknown as ModelSchema<U, UData, number, UCreate, UQuery> & { live(): UQuery };');
     const mixin = face('f = ->\n  T = schema :mixin\n    at? datetime\n  U = schema :shape\n    @mixin T\n    name!\n  U');
     expect(mixin.code).toContain('  type T = { at?: Date };\n  type U = { name: string } & T;\n  let T = __schema(');
     expect(mixin.code).toContain('as unknown as MixinSchema<T>;');

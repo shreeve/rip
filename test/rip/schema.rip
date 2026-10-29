@@ -2057,27 +2057,27 @@ INTRINSICS = '''
     all(): Promise<T[]>;
     first(): Promise<T | null>;
     count(): Promise<number>;
-    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<T, Data>;
-    limit(n: number): SchemaQuery<T, Data>;
-    offset(n: number): SchemaQuery<T, Data>;
-    order(spec: string): SchemaQuery<T, Data>;
-    orderBy(spec: string): SchemaQuery<T, Data>;
-    includes(...specs: unknown[]): SchemaQuery<T, Data>;
-    withDeleted(): SchemaQuery<T, Data>;
-    onlyDeleted(): SchemaQuery<T, Data>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): this;
+    limit(n: number): this;
+    offset(n: number): this;
+    order(spec: string): this;
+    orderBy(spec: string): this;
+    includes(...specs: unknown[]): this;
+    withDeleted(): this;
+    onlyDeleted(): this;
     updateAll(values: Partial<Record<keyof Data, unknown>>): Promise<number | null>;
     deleteAll(): Promise<number | null>;
-    unscoped(): SchemaQuery<T, Data>;
+    unscoped(): this;
   }
-  interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {
+  interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>, Query = SchemaQuery<Instance, Data>> extends Schema<Instance, Data> {
     find(id: Id): Promise<Instance | null>;
     with(cond: string | Partial<Record<keyof Data, unknown>>, ...params: unknown[]): Promise<Instance | null>;
     findMany(ids: Id[]): Promise<Instance[]>;
-    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;
-    includes(...specs: unknown[]): SchemaQuery<Instance, Data>;
-    withDeleted(): SchemaQuery<Instance, Data>;
-    onlyDeleted(): SchemaQuery<Instance, Data>;
-    unscoped(): SchemaQuery<Instance, Data>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): Query;
+    includes(...specs: unknown[]): Query;
+    withDeleted(): Query;
+    onlyDeleted(): Query;
+    unscoped(): Query;
     all(limit?: number): Promise<Instance[]>;
     first(): Promise<Instance | null>;
     count(cond?: Partial<Record<keyof Data, unknown>>): Promise<number>;
@@ -2399,27 +2399,27 @@ type ":model emits ModelSchema<Instance, Data> with relation accessors", '''
     all(): Promise<T[]>;
     first(): Promise<T | null>;
     count(): Promise<number>;
-    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<T, Data>;
-    limit(n: number): SchemaQuery<T, Data>;
-    offset(n: number): SchemaQuery<T, Data>;
-    order(spec: string): SchemaQuery<T, Data>;
-    orderBy(spec: string): SchemaQuery<T, Data>;
-    includes(...specs: unknown[]): SchemaQuery<T, Data>;
-    withDeleted(): SchemaQuery<T, Data>;
-    onlyDeleted(): SchemaQuery<T, Data>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): this;
+    limit(n: number): this;
+    offset(n: number): this;
+    order(spec: string): this;
+    orderBy(spec: string): this;
+    includes(...specs: unknown[]): this;
+    withDeleted(): this;
+    onlyDeleted(): this;
     updateAll(values: Partial<Record<keyof Data, unknown>>): Promise<number | null>;
     deleteAll(): Promise<number | null>;
-    unscoped(): SchemaQuery<T, Data>;
+    unscoped(): this;
   }
-  interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {
+  interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>, Query = SchemaQuery<Instance, Data>> extends Schema<Instance, Data> {
     find(id: Id): Promise<Instance | null>;
     with(cond: string | Partial<Record<keyof Data, unknown>>, ...params: unknown[]): Promise<Instance | null>;
     findMany(ids: Id[]): Promise<Instance[]>;
-    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;
-    includes(...specs: unknown[]): SchemaQuery<Instance, Data>;
-    withDeleted(): SchemaQuery<Instance, Data>;
-    onlyDeleted(): SchemaQuery<Instance, Data>;
-    unscoped(): SchemaQuery<Instance, Data>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): Query;
+    includes(...specs: unknown[]): Query;
+    withDeleted(): Query;
+    onlyDeleted(): Query;
+    unscoped(): Query;
     all(): Promise<Instance[]>;
     first(): Promise<Instance | null>;
     count(): Promise<number>;
@@ -2490,27 +2490,27 @@ type ":mixin emits field-type alias; host Data intersects mixins", '''
     all(): Promise<T[]>;
     first(): Promise<T | null>;
     count(): Promise<number>;
-    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<T, Data>;
-    limit(n: number): SchemaQuery<T, Data>;
-    offset(n: number): SchemaQuery<T, Data>;
-    order(spec: string): SchemaQuery<T, Data>;
-    orderBy(spec: string): SchemaQuery<T, Data>;
-    includes(...specs: unknown[]): SchemaQuery<T, Data>;
-    withDeleted(): SchemaQuery<T, Data>;
-    onlyDeleted(): SchemaQuery<T, Data>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): this;
+    limit(n: number): this;
+    offset(n: number): this;
+    order(spec: string): this;
+    orderBy(spec: string): this;
+    includes(...specs: unknown[]): this;
+    withDeleted(): this;
+    onlyDeleted(): this;
     updateAll(values: Partial<Record<keyof Data, unknown>>): Promise<number | null>;
     deleteAll(): Promise<number | null>;
-    unscoped(): SchemaQuery<T, Data>;
+    unscoped(): this;
   }
-  interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {
+  interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>, Query = SchemaQuery<Instance, Data>> extends Schema<Instance, Data> {
     find(id: Id): Promise<Instance | null>;
     with(cond: string | Partial<Record<keyof Data, unknown>>, ...params: unknown[]): Promise<Instance | null>;
     findMany(ids: Id[]): Promise<Instance[]>;
-    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;
-    includes(...specs: unknown[]): SchemaQuery<Instance, Data>;
-    withDeleted(): SchemaQuery<Instance, Data>;
-    onlyDeleted(): SchemaQuery<Instance, Data>;
-    unscoped(): SchemaQuery<Instance, Data>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): Query;
+    includes(...specs: unknown[]): Query;
+    withDeleted(): Query;
+    onlyDeleted(): Query;
+    unscoped(): Query;
     all(): Promise<Instance[]>;
     first(): Promise<Instance | null>;
     count(): Promise<number>;
@@ -2566,27 +2566,27 @@ type "cross-file relation target degrades to unknown", '''
     all(): Promise<T[]>;
     first(): Promise<T | null>;
     count(): Promise<number>;
-    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<T, Data>;
-    limit(n: number): SchemaQuery<T, Data>;
-    offset(n: number): SchemaQuery<T, Data>;
-    order(spec: string): SchemaQuery<T, Data>;
-    orderBy(spec: string): SchemaQuery<T, Data>;
-    includes(...specs: unknown[]): SchemaQuery<T, Data>;
-    withDeleted(): SchemaQuery<T, Data>;
-    onlyDeleted(): SchemaQuery<T, Data>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): this;
+    limit(n: number): this;
+    offset(n: number): this;
+    order(spec: string): this;
+    orderBy(spec: string): this;
+    includes(...specs: unknown[]): this;
+    withDeleted(): this;
+    onlyDeleted(): this;
     updateAll(values: Partial<Record<keyof Data, unknown>>): Promise<number | null>;
     deleteAll(): Promise<number | null>;
-    unscoped(): SchemaQuery<T, Data>;
+    unscoped(): this;
   }
-  interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {
+  interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>, Query = SchemaQuery<Instance, Data>> extends Schema<Instance, Data> {
     find(id: Id): Promise<Instance | null>;
     with(cond: string | Partial<Record<keyof Data, unknown>>, ...params: unknown[]): Promise<Instance | null>;
     findMany(ids: Id[]): Promise<Instance[]>;
-    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;
-    includes(...specs: unknown[]): SchemaQuery<Instance, Data>;
-    withDeleted(): SchemaQuery<Instance, Data>;
-    onlyDeleted(): SchemaQuery<Instance, Data>;
-    unscoped(): SchemaQuery<Instance, Data>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): Query;
+    includes(...specs: unknown[]): Query;
+    withDeleted(): Query;
+    onlyDeleted(): Query;
+    unscoped(): Query;
     all(): Promise<Instance[]>;
     first(): Promise<Instance | null>;
     count(): Promise<number>;
@@ -2649,27 +2649,27 @@ type "derived schema emits a bare projection type", '''
     all(): Promise<T[]>;
     first(): Promise<T | null>;
     count(): Promise<number>;
-    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<T, Data>;
-    limit(n: number): SchemaQuery<T, Data>;
-    offset(n: number): SchemaQuery<T, Data>;
-    order(spec: string): SchemaQuery<T, Data>;
-    orderBy(spec: string): SchemaQuery<T, Data>;
-    includes(...specs: unknown[]): SchemaQuery<T, Data>;
-    withDeleted(): SchemaQuery<T, Data>;
-    onlyDeleted(): SchemaQuery<T, Data>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): this;
+    limit(n: number): this;
+    offset(n: number): this;
+    order(spec: string): this;
+    orderBy(spec: string): this;
+    includes(...specs: unknown[]): this;
+    withDeleted(): this;
+    onlyDeleted(): this;
     updateAll(values: Partial<Record<keyof Data, unknown>>): Promise<number | null>;
     deleteAll(): Promise<number | null>;
-    unscoped(): SchemaQuery<T, Data>;
+    unscoped(): this;
   }
-  interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {
+  interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>, Query = SchemaQuery<Instance, Data>> extends Schema<Instance, Data> {
     find(id: Id): Promise<Instance | null>;
     with(cond: string | Partial<Record<keyof Data, unknown>>, ...params: unknown[]): Promise<Instance | null>;
     findMany(ids: Id[]): Promise<Instance[]>;
-    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;
-    includes(...specs: unknown[]): SchemaQuery<Instance, Data>;
-    withDeleted(): SchemaQuery<Instance, Data>;
-    onlyDeleted(): SchemaQuery<Instance, Data>;
-    unscoped(): SchemaQuery<Instance, Data>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): Query;
+    includes(...specs: unknown[]): Query;
+    withDeleted(): Query;
+    onlyDeleted(): Query;
+    unscoped(): Query;
     all(): Promise<Instance[]>;
     first(): Promise<Instance | null>;
     count(): Promise<number>;
@@ -2729,27 +2729,27 @@ type "chained + exported derived schema emits one bare type each", '''
     all(): Promise<T[]>;
     first(): Promise<T | null>;
     count(): Promise<number>;
-    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<T, Data>;
-    limit(n: number): SchemaQuery<T, Data>;
-    offset(n: number): SchemaQuery<T, Data>;
-    order(spec: string): SchemaQuery<T, Data>;
-    orderBy(spec: string): SchemaQuery<T, Data>;
-    includes(...specs: unknown[]): SchemaQuery<T, Data>;
-    withDeleted(): SchemaQuery<T, Data>;
-    onlyDeleted(): SchemaQuery<T, Data>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): this;
+    limit(n: number): this;
+    offset(n: number): this;
+    order(spec: string): this;
+    orderBy(spec: string): this;
+    includes(...specs: unknown[]): this;
+    withDeleted(): this;
+    onlyDeleted(): this;
     updateAll(values: Partial<Record<keyof Data, unknown>>): Promise<number | null>;
     deleteAll(): Promise<number | null>;
-    unscoped(): SchemaQuery<T, Data>;
+    unscoped(): this;
   }
-  interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {
+  interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>, Query = SchemaQuery<Instance, Data>> extends Schema<Instance, Data> {
     find(id: Id): Promise<Instance | null>;
     with(cond: string | Partial<Record<keyof Data, unknown>>, ...params: unknown[]): Promise<Instance | null>;
     findMany(ids: Id[]): Promise<Instance[]>;
-    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;
-    includes(...specs: unknown[]): SchemaQuery<Instance, Data>;
-    withDeleted(): SchemaQuery<Instance, Data>;
-    onlyDeleted(): SchemaQuery<Instance, Data>;
-    unscoped(): SchemaQuery<Instance, Data>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): Query;
+    includes(...specs: unknown[]): Query;
+    withDeleted(): Query;
+    onlyDeleted(): Query;
+    unscoped(): Query;
     all(): Promise<Instance[]>;
     first(): Promise<Instance | null>;
     count(): Promise<number>;
@@ -4722,6 +4722,7 @@ type "@scope emits typed statics and a per-model query alias", '''
       name!   string
       active? boolean
       @scope :active, -> @where(active: true)
+      @scope :named, (n: string, limit) -> @where(name: n).limit(limit)
   ''', '''
   interface SchemaIssue { field: string; error: string; message: string; }
   type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };
@@ -4753,27 +4754,27 @@ type "@scope emits typed statics and a per-model query alias", '''
     all(): Promise<T[]>;
     first(): Promise<T | null>;
     count(): Promise<number>;
-    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<T, Data>;
-    limit(n: number): SchemaQuery<T, Data>;
-    offset(n: number): SchemaQuery<T, Data>;
-    order(spec: string): SchemaQuery<T, Data>;
-    orderBy(spec: string): SchemaQuery<T, Data>;
-    includes(...specs: unknown[]): SchemaQuery<T, Data>;
-    withDeleted(): SchemaQuery<T, Data>;
-    onlyDeleted(): SchemaQuery<T, Data>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): this;
+    limit(n: number): this;
+    offset(n: number): this;
+    order(spec: string): this;
+    orderBy(spec: string): this;
+    includes(...specs: unknown[]): this;
+    withDeleted(): this;
+    onlyDeleted(): this;
     updateAll(values: Partial<Record<keyof Data, unknown>>): Promise<number | null>;
     deleteAll(): Promise<number | null>;
-    unscoped(): SchemaQuery<T, Data>;
+    unscoped(): this;
   }
-  interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {
+  interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>, Query = SchemaQuery<Instance, Data>> extends Schema<Instance, Data> {
     find(id: Id): Promise<Instance | null>;
     with(cond: string | Partial<Record<keyof Data, unknown>>, ...params: unknown[]): Promise<Instance | null>;
     findMany(ids: Id[]): Promise<Instance[]>;
-    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;
-    includes(...specs: unknown[]): SchemaQuery<Instance, Data>;
-    withDeleted(): SchemaQuery<Instance, Data>;
-    onlyDeleted(): SchemaQuery<Instance, Data>;
-    unscoped(): SchemaQuery<Instance, Data>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): Query;
+    includes(...specs: unknown[]): Query;
+    withDeleted(): Query;
+    onlyDeleted(): Query;
+    unscoped(): Query;
     all(): Promise<Instance[]>;
     first(): Promise<Instance | null>;
     count(): Promise<number>;
@@ -4787,8 +4788,8 @@ type "@scope emits typed statics and a per-model query alias", '''
   type UserData = { name: string; active: boolean | null } & { id: number };
   type UserCreate = { name: string; active?: boolean };
   type User = UserData & { save(): Promise<User>; set(attrs: Partial<UserData>): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
-  type UserQuery = SchemaQuery<User, UserData> & { active(...args: any[]): UserQuery };
-  declare const User: ModelSchema<User, UserData, number, UserCreate> & { active(...args: any[]): UserQuery };
+  type UserQuery = SchemaQuery<User, UserData> & { active(): UserQuery; named(n: string, limit?: any): UserQuery };
+  declare const User: ModelSchema<User, UserData, number, UserCreate, UserQuery> & { active(): UserQuery; named(n: string, limit?: any): UserQuery };
   export {};
   '''
 

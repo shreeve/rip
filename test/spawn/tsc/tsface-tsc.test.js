@@ -218,6 +218,9 @@ const CLEAN_ROWS = [
  'mk = ->\n  S = schema :shape\n    name! string\n    size? integer\n    label: (p) -> p + @name\n  p = S.parse({})\n  n: string = p.name\n  n = "z"\n  S',
  'mk = ->\n  S = schema :shape\n    a! string\n    full: ~> @a\nv = mk().parse({})\ns: string = v.full\ns = "z"',
  'run = ->\n  U = schema :model\n    name! string\n    active? boolean\n    @scope :live, -> @where(active: true)\n  u = await U.find(1)\n  s: string = u.name if u\n  rows = await U.live().all()\n  s = "z"',
+    // a scope takes its declared parameters, and every chain step keeps
+    // the model's scopes, from the model and from a scope alike
+ 'P = schema :model\n  name! string\n  @scope :named, (n: string) -> @where(name: n)\n  @scope :live, -> @where(name: "a")\nq: PQuery = P.named("a").where(name: "b").live()\nq = P.where(name: "b").limit(2).named("c")\nq = q.includes().unscoped().withDeleted()',
  'post = (path: string, opts: { input: Schema<unknown> }) -> path\nrun = ->\n  Signup = schema :input\n    name! 2..20\n    age? ~integer\n  post "/signup", input: Signup',
  'mk = (c: boolean) ->\n  if c\n    S = schema :shape\n      a! string\n  v = S.parse({})\n  a: string = v.a\n  a = "z"\n  S',
     //  the component member model — every member kind's declare,
@@ -390,6 +393,16 @@ describeTscExtended('tier 2: self-contained typed faces check CLEAN — annotati
     const { status, output } = tscRun({ 'mod.ts': `${faced.code}\nexport {};\n` });
     expect(status).not.toBe(0);
     expect(output).toContain('TS2322');
+  }, TSC_TIMEOUT);
+
+  test('a scope call has teeth: an argument outside the declared parameter type, or one too many, FAILS at the call', () => {
+    const program = (call) => `P = schema :model\n  name! string\n  @scope :owned, (ownerId: number) -> @where(id: ownerId)\n  @scope :live, -> @where(name: "a")\nmaybe = (): number | null -> null\n${call}\n`;
+    for (const [call, code] of [['P.owned("x")', 'TS2345'], ['P.owned(maybe())', 'TS2345'], ['P.where(name: "a").owned("x")', 'TS2345'], ['P.live(1)', 'TS2554']]) {
+      const faced = compile(program(call), { runtimeDelivery: 'none', face: 'ts' });
+      const { status, output } = tscRun({ 'ambient.d.ts': AMBIENT, 'mod.ts': `${faced.code}\nexport {};\n` });
+      expect(status, call).not.toBe(0);
+      expect(output, call).toContain(code);
+    }
   }, TSC_TIMEOUT);
 
   test('the function-scope story has teeth: a parse result read against the wrong type FAILS inside the function (TS2322)', () => {

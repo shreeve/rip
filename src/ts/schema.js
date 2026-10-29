@@ -221,33 +221,35 @@ const MIXIN_INTRINSICS = [
 // The persistence tier — the query builder and model statics exactly
 // as src/runtime/orm.js serves them: all()/first()/count()
 // take no arguments (reads route through where()), updateAll/
-// deleteAll live on the BUILDER only.
+// deleteAll live on the BUILDER only. A chain step answers `this`: the
+// runtime returns the same builder, which carries the model's scopes
+// as own methods, so a model's `NameQuery` survives every step.
 const MODEL_INTRINSICS = [
   'interface SchemaQuery<T, Data = Record<string, unknown>> {',
   '  all(): Promise<T[]>;',
   '  first(): Promise<T | null>;',
   '  count(): Promise<number>;',
-  '  where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<T, Data>;',
-  '  limit(n: number): SchemaQuery<T, Data>;',
-  '  offset(n: number): SchemaQuery<T, Data>;',
-  '  order(spec: string): SchemaQuery<T, Data>;',
-  '  orderBy(spec: string): SchemaQuery<T, Data>;',
-  '  includes(...specs: unknown[]): SchemaQuery<T, Data>;',
-  '  withDeleted(): SchemaQuery<T, Data>;',
-  '  onlyDeleted(): SchemaQuery<T, Data>;',
+  '  where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): this;',
+  '  limit(n: number): this;',
+  '  offset(n: number): this;',
+  '  order(spec: string): this;',
+  '  orderBy(spec: string): this;',
+  '  includes(...specs: unknown[]): this;',
+  '  withDeleted(): this;',
+  '  onlyDeleted(): this;',
   '  updateAll(values: Partial<Record<keyof Data, unknown>>): Promise<number | null>;',
   '  deleteAll(): Promise<number | null>;',
-  '  unscoped(): SchemaQuery<T, Data>;',
+  '  unscoped(): this;',
   '}',
-  'interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {',
+  'interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>, Query = SchemaQuery<Instance, Data>> extends Schema<Instance, Data> {',
   '  find(id: Id): Promise<Instance | null>;',
   '  with(cond: string | Partial<Record<keyof Data, unknown>>, ...params: unknown[]): Promise<Instance | null>;',
   '  findMany(ids: Id[]): Promise<Instance[]>;',
-  '  where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;',
-  '  includes(...specs: unknown[]): SchemaQuery<Instance, Data>;',
-  '  withDeleted(): SchemaQuery<Instance, Data>;',
-  '  onlyDeleted(): SchemaQuery<Instance, Data>;',
-  '  unscoped(): SchemaQuery<Instance, Data>;',
+  '  where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): Query;',
+  '  includes(...specs: unknown[]): Query;',
+  '  withDeleted(): Query;',
+  '  onlyDeleted(): Query;',
+  '  unscoped(): Query;',
   '  all(): Promise<Instance[]>;',
   '  first(): Promise<Instance | null>;',
   '  count(): Promise<number>;',
@@ -724,9 +726,9 @@ export function schemaTypeStory(decl, byName, known, source = null) {
     const dataName = `${name}Data`;
     const createName = `${name}Create`;
     const softDelete = descriptor.entries.some((e) => e.tag === 'directive' && e.name === 'softDelete');
-    const scopeNames = descriptor.entries.filter((e) => e.tag === 'scope').map((e) => e.name);
+    const scopes = descriptor.entries.filter((e) => e.tag === 'scope');
     const queryName = `${name}Query`;
-    const queryType = scopeNames.length ? queryName : `SchemaQuery<${name}, ${dataName}>`;
+    const queryType = scopes.length ? queryName : `SchemaQuery<${name}, ${dataName}>`;
     const instanceExtras = (face) => [
       ...behaviorFor(face),
       ...relationAccessors(descriptor, known),
@@ -767,9 +769,9 @@ export function schemaTypeStory(decl, byName, known, source = null) {
       ? descriptor.entries.find((e) => e.tag === 'field' && e.name === primaryKeyName(descriptor))
       : null;
     const idType = pkEntry ? fieldType(pkEntry, known) : 'number';
-    let constType = `ModelSchema<${name}, ${dataName}, ${idType}, ${createName}>`;
-    if (scopeNames.length) {
-      const scopeSigs = scopeNames.map((s) => `${s}(...args: any[]): ${queryName}`);
+    let constType = `ModelSchema<${name}, ${dataName}, ${idType}, ${createName}${scopes.length ? `, ${queryName}` : ''}>`;
+    if (scopes.length) {
+      const scopeSigs = scopes.map((e) => `${e.name}(${sig(e)}): ${queryName}`);
       aliasLines.push(`type ${queryName} = SchemaQuery<${name}, ${dataName}> & ${braced(scopeSigs)};`);
       faceAliasLines.push(`type ${queryName} = SchemaQuery<${name}, ${dataName}> & ${braced(scopeSigs)};`);
       typeNames.push(queryName);
