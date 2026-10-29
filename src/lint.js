@@ -15,7 +15,7 @@
 
 // Each rule's accepted values: a rule names its subject, and its value names
 // the spelling it requires. A rule the block leaves out is off.
-const RULES = { calls: ['explicit'] };
+const RULES = { calls: ['explicit'], construction: ['.new'], await: ['dammit'], dammit: ['bare'] };
 const CALL_KINDS = new Set(['call', 'optcall', 'maybe-dammit', 'super']);
 
 // The validated rule set for a package's `rip.lint` block, or null when the
@@ -24,7 +24,7 @@ const CALL_KINDS = new Set(['call', 'optcall', 'maybe-dammit', 'super']);
 export function lintRulesOf(raw) {
   if (raw === null || raw === undefined) return null;
   if (typeof raw !== 'object' || Array.isArray(raw)) throw new Error('rip.lint: expected an object');
-  const rules = { calls: null };
+  const rules = Object.fromEntries(Object.keys(RULES).map((key) => [key, null]));
   for (const [key, value] of Object.entries(raw)) {
     const accepted = RULES[key];
     if (!Object.hasOwn(RULES, key)) throw new Error(`rip.lint: unknown rule \`${key}\``);
@@ -44,8 +44,13 @@ export function lintRulesOf(raw) {
 // the next line), a heredoc (`sql! """`), or an implicit call that itself
 // ends in one (`count db.sql! """`): the block closes the argument. A render
 // tree is template, not code, except inside a handler body.
+//
+// `construction: '.new'`: `X.new(a)`, never `new X(a)`. `await: 'dammit'`:
+// a call is awaited with dammit, `f!(a)` for `await f(a)`; a written `await`
+// is for a promise already in hand. `dammit: 'bare'`: a dammit call without
+// arguments is `f!`, never `f!()`.
 export function lintFindingsOf(tokens, stores, source, rules) {
-  if (!rules?.calls || !tokens || !stores) return [];
+  if (!rules || !Object.values(rules).some((v) => v) || !tokens || !stores) return [];
   const parents = parentsOf(stores);
   const children = childrenOf(stores, parents);
   const depthOf = (id) => { let d = 0; for (let p = parents.get(id); p !== undefined; p = parents.get(p)) d++; return d; };
@@ -90,7 +95,7 @@ export function lintFindingsOf(tokens, stores, source, rules) {
   };
 
   const found = [];
-  for (const node of stores.nodes) {
+  for (const node of rules.calls ? stores.nodes : []) {
     if (!CALL_KINDS.has(node.semanticKind)) continue;
     const args = stores.role(node.nodeId, 'args');
     if (!args || args.sourceStart === args.sourceEnd) continue;
@@ -189,10 +194,15 @@ export function lintFindingsOf(tokens, stores, source, rules) {
     });
   }
 
+  found.push(...spellingFindingsOf(stores, source, rules, { parents, depthOf, real, tokenAt, lastRealEndBefore }));
+  for (const f of found) for (const e of f.edits ?? []) e.rule = f.rule;
+
   // Each message shows its own source with every fix it or a call inside it
   // owns applied, so a nested call reads as it will once the whole file is
   // fixed. Ownership, not position, decides: an enclosing call's closer can
-  // sit at exactly this call's end. When the fix drops grouping parens, the
+  // sit at exactly this call's end. Another rule's rewrite strictly inside
+  // the span applies too, wherever it is owned (`X.new(a)` for the call in
+  // `new X a`). When the fix drops grouping parens, the
   // message names the text it replaces, since the fixed call alone would
   // read as if the parens stayed.
   const all = found.flatMap((f) => f.edits ?? []);
@@ -203,12 +213,86 @@ export function lintFindingsOf(tokens, stores, source, rules) {
   };
   return found.map(({ node, kind, span: [from, to], ...f }) => {
     if (f.edits === null) return { ...f, message: `${kind} — no automatic rewrite for this shape` };
-    const inside = all.filter((e) => within(e.owner, node.nodeId) && e.start >= from && e.end <= to)
+    const inside = all.filter((e) => e.start >= from && e.end <= to &&
+      (within(e.owner, node.nodeId) || (e.rule !== f.rule && e.start > from && e.end < to)))
       .map((e) => ({ ...e, start: e.start - from, end: e.end - from }));
     const original = source.slice(from, to);
     const replaced = from === node.sourceStart ? '' : ` in place of ${quoted(original)}`;
     return { ...f, message: `${kind} — write ${quoted(applyEdits(original, inside))}${replaced}` };
   }).sort((a, b) => a.start - b.start || a.end - b.end);
+}
+
+// The construction, await, and dammit rules. Each rewrites one keyword or
+// operator in place. `await new X(a)` has one owner, the await rule, which
+// writes `X.new!(a)` whole; the construction rule leaves that `new` to it.
+//
+// `.new` and `!` insert where the callee's last real token ends, ahead of the
+// calls rule's `(` at the same offset (`.new` before `!`). `.new()` after a
+// bare constructor closes like a call, ahead of any enclosing closer there.
+function spellingFindingsOf(stores, source, rules, { parents, depthOf, real, tokenAt, lastRealEndBefore }) {
+  const found = [];
+  const role = (id, name) => stores.role(id, name);
+  const child = (id, name) => { const r = role(id, name); return r?.childNodeId == null ? null : stores.node(r.childNodeId); };
+  const nextRealStart = (offset) => real.find((t) => t.start >= offset)?.start ?? offset;
+  const isAwait = (n) => n?.semanticKind === 'await' && tokenAt(n.sourceStart, 'AWAIT', false) !== null;
+  const isNew = (n) => n?.semanticKind === 'unary' && tokenAt(n.sourceStart, 'NEW', false) !== null;
+  // A constructor the rewrite can name as a receiver: a plain identifier.
+  // `a.B.new(c)` compiles to `new (a.B)(c)`, not to `new a.B(c)`.
+  const plainCallee = (call) => {
+    const callee = role(call.nodeId, 'callee');
+    return callee && callee.childNodeId == null && tokenAt(callee.sourceStart, 'IDENTIFIER', false)?.end === callee.sourceEnd;
+  };
+  const plainOperand = (unary) => {
+    const operand = role(unary.nodeId, 'operand');
+    return operand && operand.childNodeId == null && tokenAt(operand.sourceStart, 'IDENTIFIER', false)?.end === operand.sourceEnd ? operand : null;
+  };
+  // `new X(a)` → `.new` at the callee's end; bare `new X` → `.new()` after
+  // it, since `X.new` alone reads the property (`X.new!` constructs).
+  const constructionEdits = (unary, suffix) => {
+    const operand = child(unary.nodeId, 'operand');
+    if (operand?.semanticKind === 'call' && plainCallee(operand)) {
+      const args = role(operand.nodeId, 'args');
+      return [{ start: lastRealEndBefore(args.sourceStart), text: `.new${suffix}`, rank: 1 }, ...(suffix ? emptyArgs(operand) : [])];
+    }
+    const bare = plainOperand(unary);
+    return bare ? [{ start: bare.sourceEnd, text: suffix ? `.new${suffix}` : '.new()', rank: -depthOf(unary.nodeId) - 1 }] : null;
+  };
+  // The `()` an awaited call drops when the project writes dammit calls bare.
+  const emptyArgs = (call) => {
+    const args = role(call.nodeId, 'args');
+    return rules.dammit && source.slice(args.sourceStart, args.sourceEnd) === '()' ? [{ start: args.sourceStart, end: args.sourceEnd, text: '', rank: 0 }] : [];
+  };
+  const push = (rule, kind, node, edits) => {
+    for (const e of edits ?? []) { e.end ??= e.start; e.owner = node.nodeId; }
+    const lineEnd = source.indexOf('\n', node.sourceStart);
+    found.push({ rule, start: node.sourceStart, end: lineEnd === -1 ? node.sourceEnd : Math.min(node.sourceEnd, lineEnd), kind, node, span: [node.sourceStart, node.sourceEnd], edits });
+  };
+
+  for (const node of stores.nodes) {
+    if (rules.construction && isNew(node) && !(rules.await && isAwait(stores.node(parents.get(node.nodeId) ?? -1)))) {
+      const edits = constructionEdits(node, '');
+      push('construction', 'prefix construction', node, edits && [{ start: node.sourceStart, end: nextRealStart(node.sourceStart + 3), text: '', rank: 0 }, ...edits]);
+    }
+    if (rules.await && isAwait(node)) {
+      const value = child(node.nodeId, 'value');
+      const drop = { start: node.sourceStart, end: nextRealStart(node.sourceStart + 5), text: '', rank: 0 };
+      if (isNew(value)) {
+        const edits = constructionEdits(value, '!');
+        push('await', 'await on a call', node, edits && [{ ...drop, end: nextRealStart(value.sourceStart + 3) }, ...edits]);
+      } else if (value && ['call', 'optcall', 'dynimport'].includes(value.semanticKind)) {
+        const callee = child(value.nodeId, 'callee');
+        const awaited = callee?.semanticKind === 'dammit' || callee?.semanticKind === 'maybe-dammit';
+        const args = role(value.nodeId, 'args');
+        push('await', 'await on a call', node, awaited ? null : [drop, { start: lastRealEndBefore(args.sourceStart), text: '!', rank: 2 },
+          ...(value.semanticKind === 'call' ? emptyArgs(value) : [])]);
+      }
+    }
+    if (rules.dammit && node.semanticKind === 'call' && child(node.nodeId, 'callee')?.semanticKind === 'dammit') {
+      const args = role(node.nodeId, 'args');
+      if (source.slice(args.sourceStart, args.sourceEnd) === '()') push('dammit', 'empty parens on a dammit call', node, [{ start: args.sourceStart, end: args.sourceEnd, text: '', rank: 0 }]);
+    }
+  }
+  return found;
 }
 
 // A call whose whole argument list is one parenthesized group (`f (a)`): the
@@ -296,10 +380,12 @@ function inRenderTree(node, parents, stores) {
 }
 
 // Edits are { start, end, text, rank }: replace [start, end) with text. They
-// never overlap; insertions at one offset apply in rank order, closers
-// (negative rank, innermost first) ahead of openers (outermost first).
+// never overlap. At one offset, insertions apply ahead of a replacement that
+// starts there, and in rank order among themselves: closers (negative rank,
+// innermost first) ahead of openers (outermost first).
 export function applyEdits(source, edits) {
-  const sorted = [...edits].sort((a, b) => a.start - b.start || (a.rank ?? 0) - (b.rank ?? 0));
+  const sorted = [...edits].sort((a, b) => a.start - b.start ||
+    (a.end > a.start) - (b.end > b.start) || (a.rank ?? 0) - (b.rank ?? 0));
   let out = '';
   let cursor = 0;
   for (const e of sorted) {

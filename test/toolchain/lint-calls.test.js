@@ -9,8 +9,8 @@
 // Two shapes stay implicit: a multi-line trailing block (`run ->` with its
 // body below), and everything inside a render tree except a handler body.
 //
-// Fixtures are inline strings: package-rip-style.test.js tokenizes every
-// .rip file under packages/, so a fixture file there would be audited as
+// Fixtures are inline strings: package-rip-style.test.js lints every .rip
+// file under packages/, so a fixture file there would be audited as
 // authored Rip.
 import { describe, expect, test } from 'bun:test';
 import fs from 'node:fs';
@@ -173,7 +173,7 @@ describe('rip.lint — configuration', () => {
   });
 
   test('a rule the block leaves out is off', () => {
-    expect(lintRulesOf({})).toEqual({ calls: null });
+    expect(lintRulesOf({})).toEqual({ calls: null, construction: null, await: null, dammit: null });
     expect(findings('f a\n', lintRulesOf({}))).toEqual([]);
   });
 

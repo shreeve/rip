@@ -25,13 +25,20 @@ Options:
 Rules are set per package in package.json#rip.lint (the nearest package.json
 wins); a package without the key is not linted:
 
-  { "rip": { "lint": { "calls": "explicit" } } }
+  { "rip": { "lint": { "calls": "explicit", "construction": ".new" } } }
 
   calls: "explicit"
           every call with arguments is spelled with parentheses and every
           object argument with braces — except a call whose last argument
           opens a block on the lines below (a function body, keyword pairs,
           or a heredoc), and a render tree
+  construction: ".new"
+          X.new(a), never new X(a)
+  await: "dammit"
+          f!(a), never await f(a); a written await is for a promise
+          already in hand
+  dammit: "bare"
+          f!, never f!()
 
 A rule the block leaves out is off.
 
@@ -81,6 +88,8 @@ for (const file of files) {
       rewritten++;
       source = next;
       found = findingsOf(source, file, rules);
+    } else {
+      console.error(`rip lint: ${path.relative(process.cwd(), file)}: --fix left the file as it was — the rewrite does not compile to the same JavaScript`);
     }
   }
   for (const f of found) rows.push(row(file, source, f.start, f.end, `lint/${f.rule}`, f.message));
