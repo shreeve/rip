@@ -1018,19 +1018,21 @@ export { error, notice, bail }
 # `check` reaches the very one `read` dispatches through by importing
 # rip/validate itself.
 
-import { getValidator, Validated } from 'rip/validate'
+import { getValidator, Validated, ValidatorName } from 'rip/validate'
 
 # ==============================================================================
 # read() — Sinatra-style Parameter Reading
 # ==============================================================================
 
 type ReadFn =
-  <K extends keyof Validated>(name: string, type: `${K}!`, miss?: Validated[K] | (() => Validated[K])): Validated[K]
-  <K extends keyof Validated>(name: string, type: K | `${K}?`, miss?: Validated[K] | (() => Validated[K])): Validated[K] | null
+  (): Record<string, unknown>
+  (name: string, type?: ValidatorName<'raw'>, miss?: unknown): unknown
+  <K extends keyof Validated>(name: string, type: ValidatorName<`${K}!`>, miss?: Validated[K] | (() => Validated[K])): Validated[K]
+  <K extends keyof Validated>(name: string, type: ValidatorName<K | `${K}?`>, miss?: Validated[K] | (() => Validated[K])): Validated[K] | null
   (name: string, type: RegExp | readonly string[], miss?: string | (() => string)): string | null
   (name: string, type: readonly number[], miss?: number | (() => number)): number | null
   (name: string, type: { start: number, end?: number } | { end: number, start?: number } | { min: number, max?: number } | { max: number, min?: number }, miss?: string | number | (() => string | number)): string | number | null
-  (name?: string, type?: string | symbol | RegExp | readonly unknown[] | Record<string, unknown>, miss?: unknown): unknown
+  (name: string, type: RegExp | readonly unknown[] | Record<string, unknown>, miss?: unknown): unknown
 
 export read: ReadFn = (name?: string, type?: string | symbol | RegExp | any[] | Record<string, any>, miss?: unknown) ->
   store = requestContext.getStore() or throw Error.new 'no context for read()'

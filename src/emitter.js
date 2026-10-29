@@ -3747,6 +3747,37 @@ class Emitter {
     }
   }
 
+  // The validators this module registers where the checker can type
+  // them: a top-level call of `registerValidator` imported as a value
+  // from 'rip/validate', naming the validator by a literal and passing a
+  // bound function. The face declares each into `Validated`, typed by
+  // what the function answers. Any other registration runs and stays
+  // unknown to the checker, so a read of its name fails the check.
+  collectValidatorRegistrations(sexpr) {
+    this.validatorRegistrations = [];
+    if (!this.ts) return;
+    const locals = new Set();
+    for (const x of sexpr.slice(1)) {
+      if (!isModuleImportNode(this.stores, x)) continue;
+      const from = x[x.length - 1];
+      if (typeof from !== 'string' || from.slice(1, -1) !== 'rip/validate') continue;
+      const id = this.stores.idOf(x);
+      if (id !== null && this.stores.role(id, 'typeOnly') !== null) continue;
+      for (const spec of Emitter.importSpecs(x)) {
+        if (!isNode(spec) || spec[0] === '*') continue;
+        for (const s of spec) if ((isNode(s) ? s[0] : s) === 'registerValidator') locals.add(isNode(s) ? s[1] : s);
+      }
+    }
+    if (locals.size === 0) return;
+    for (const x of sexpr.slice(1)) {
+      if (!this.isCallNode(x) || !locals.has(x[0]) || x.length < 3) continue;
+      const [, nameArg, fn] = x;
+      const name = isNode(nameArg) && nameArg[0] === 'symbol' && nameArg.length === 2 ? nameArg[1]
+        : typeof nameArg === 'string' && /^"\w+"$/.test(nameArg) ? nameArg.slice(1, -1) : null;
+      if (name !== null && typeof fn === 'string' && isIdentifierName(fn)) this.validatorRegistrations.push([name, fn]);
+    }
+  }
+
   // A zero-argument call of an accessor's local binding, reached
   // through no inner scope that rebinds the name (a parameter of the
   // same name is a different binding).
@@ -15872,7 +15903,7 @@ class Emitter {
             // Optional-call arguments do NOT unwrap a pick's parens:
             // `h?.(({a: o.a}))` — the double parens are valid JS and
             // the byte battery pins the spelling.
-            this.expr(arg);
+            this.argExpr(arg);
           });
           this.b.emit(')');
         });
@@ -16087,7 +16118,18 @@ class Emitter {
       return;
     }
     if (isNode(arg) && (arg[0] === '.{}' || arg[0] === '?.{}') && arg.length >= 3) return this.pick(arg, true);
+    this.argExpr(arg);
+  }
+
+  // A `:name` passed straight to a call carries its name on the face, as
+  // a quoted literal keeps its literal type there: a parameter that reads
+  // names (`ValidatorName` in rip/validate) infers from it. A symbol bound
+  // first is plain `symbol`, so a later `x = :other` still assigns.
+  argExpr(arg) {
+    if (!(this.ts && isNode(arg) && arg[0] === 'symbol' && arg.length === 2)) return this.expr(arg);
+    this.b.tsOnly(() => this.b.emit('('));
     this.expr(arg);
+    this.b.tsOnly(() => this.b.emit(` as symbol & { readonly ripSymbol?: ${JSON.stringify(arg[1])} })`));
   }
 
   // The checked spellings of a stash-handle ask: a call whose callee
@@ -19093,7 +19135,7 @@ class Emitter {
         this.b.emit('(');
         node.slice(2).forEach((arg, i) => {
           if (i > 0) this.b.emit(', ');
-          this.expr(arg);
+          this.argExpr(arg);
         });
         this.b.emit(')');
       });
@@ -20074,6 +20116,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   emitter.collectTsDirectives(parseResult.sexpr, parseResult.trivia ?? [], source);
   emitter.collectTypeOnlyImports(parseResult.sexpr, source);
   emitter.collectAppAccessors(parseResult.sexpr);
+  emitter.collectValidatorRegistrations(parseResult.sexpr);
   if (emitter.tsNocheck !== null) {
     const programId = stores.idOf(parseResult.sexpr);
     const t = emitter.tsNocheck;
@@ -20532,6 +20575,11 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   if (emitter._needsSourceKeyHelper === true) {
     const stashKeys = `keyof import(${JSON.stringify(emitter.appStashSpec)}).__RipStash & string`;
     builder.tsOnly(() => builder.emit(`\ndeclare function __ripSourceKey<const T extends ((${stashKeys}) | \`\${${stashKeys}}.\${string}\`)>(s: T): T;\n`));
+  }
+  if (face === 'ts' && emitter.validatorRegistrations.length > 0) {
+    const entries = emitter.validatorRegistrations
+      .map(([name, fn]) => `${JSON.stringify(name)}: Exclude<ReturnType<typeof ${fn}>, null | undefined>;`).join(' ');
+    builder.tsOnly(() => builder.emit(`\ndeclare module 'rip/validate' { interface Validated { ${entries} } }\n`));
   }
   // The indexed-loop helper's ONE declaration per module (indexedReader).
   // The constraint admits what `.length` and `[i]` genuinely index: a

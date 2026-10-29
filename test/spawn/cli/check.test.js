@@ -5938,3 +5938,94 @@ describeExtended.concurrent('branch narrowing — what the editor says', () => {
     }
   }, 60_000);
 });
+
+// The validator vocabulary types by name in every spelling the runtime
+// accepts: a quoted name or a `:name` symbol, with `!` and `?` riding the
+// name, for the built-in set and for a validator the program registers.
+// A name nothing registers fails the check where it is read.
+describeExtended.concurrent('rip check: validator names over the real server', () => {
+  const codes = async (dir) => JSON.parse((await check(dir, ['--json'])).stdout).map((d) => [d.code, d.file, d.line]);
+
+  test('a symbol name types read and check as its validator', async () => {
+    const dir = workspace({
+      'app.rip': [
+        "import { read } from 'rip/sites'",
+        "import { check, getValidator } from 'rip/validate'",
+        "a: string | null = read('q', :text)",
+        "b: string = read('q', :text!)",
+        "c: number | null = read('n', :int?)",
+        "d: string | null = check('x', :email)",
+        "e: string | null = getValidator(:email)?('x') ?? null",
+        'console.log a, b, c, d, e',
+        '',
+      ].join('\n'),
+    });
+    try { expect(await codes(dir)).toEqual([]); }
+    finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  test('a name no validator answers to fails where it is read, quoted or symbol', async () => {
+    const dir = workspace({
+      'app.rip': [
+        "import { read } from 'rip/sites'",
+        "import { check } from 'rip/validate'",
+        "a = read('q', :txet)",
+        "b = read('q', 'txet!')",
+        "c = check('x', :emial)",
+        "d: number | null = read('q', :text)",
+        'console.log a, b, c, d',
+        '',
+      ].join('\n'),
+    });
+    try {
+      const got = await codes(dir);
+      expect(got.map(([, , line]) => line)).toEqual([3, 4, 5, 6]);
+      expect(got[3][0]).toBe(2322);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  test('a validator the program registers types by its name', async () => {
+    const dir = workspace({
+      'eid.rip': [
+        "import { registerValidator } from 'rip/validate'",
+        "export validEid = (v: unknown): string | null -> if typeof v is 'string' then v else null",
+        'registerValidator(:eid, validEid)',
+        '',
+      ].join('\n'),
+      'app.rip': [
+        "import { read } from 'rip/sites'",
+        "import { check } from 'rip/validate'",
+        "import './eid.rip'",
+        "a: string | null = read('x', :eid)",
+        "b: string = read('x', 'eid!')",
+        "c: string | null = check('x', :eid)",
+        "d = read('x', :eidd)",
+        "e: number | null = read('x', :eid?)",
+        'console.log a, b, c, d, e',
+        '',
+      ].join('\n'),
+    });
+    try {
+      const got = await codes(dir);
+      expect(got.map(([, file, line]) => [file, line])).toEqual([['app.rip', 7], ['app.rip', 8]]);
+      expect(got[1][0]).toBe(2322);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  test('a nameless read answers the whole map', async () => {
+    const dir = workspace({
+      'app.rip': [
+        "import { read } from 'rip/sites'",
+        'all: Record<string, unknown> = read()',
+        "one = read('q')",
+        "s: string = one",
+        'console.log all, s',
+        '',
+      ].join('\n'),
+    });
+    try {
+      const got = await codes(dir);
+      expect(got.map(([code, , line]) => [code, line])).toEqual([[2322, 4]]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+});
