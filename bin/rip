@@ -40,6 +40,8 @@ Usage:
                                      common indentation is stripped, as it is for -e
   rip check [paths...]               Type-check .rip files/dirs headlessly, no editor
                                      (default: the current directory; 'rip check --help')
+  rip lint [paths...] [--fix]        Check .rip files against package.json#rip.lint
+                                     (default: the current directory; 'rip lint --help')
   rip schema <verb> [args...]        Schema evolution: status | plan | dump | make | migrate | push
                                      (run 'rip schema --help' for the full surface)
   rip email <verb> [dir] [args...]   Email templates: dev (live preview) | export | render
@@ -140,6 +142,14 @@ if (args[0] === 'check') {
   const checkCliPath = join(dirname(fileURLToPath(import.meta.url)), '../src/cli/check.js');
   process.argv = [process.argv[0], checkCliPath, ...args.slice(1)];
   await import(checkCliPath);
+}
+
+// `rip lint` — the project's lint rules, dispatched and run in this process
+// like `check` (a file literally named `lint` runs as `rip ./lint`).
+if (args[0] === 'lint') {
+  const lintCliPath = join(dirname(fileURLToPath(import.meta.url)), '../src/cli/lint.js');
+  process.argv = [process.argv[0], lintCliPath, ...args.slice(1)];
+  await import(lintCliPath);
 }
 
 // `rip test [bun-test args...]` — Bun's test runner with the .rip
