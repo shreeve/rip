@@ -32,9 +32,9 @@ usage: rip-email <verb> [args]
   dir defaults to ./emails, or to the current directory when it is
   itself named emails. A template is a .rip file exporting one component;
   a file led by an underscore, such as _layout.rip, is shared by templates
-  and is not one. Component.previewProps chooses the props it renders
-  with; Component.subject, a function of the props, gives the subject
-  line.
+  and is not one. The module's previewProps export chooses the props it
+  renders with; its subject export, a function of the props, gives the
+  subject line.
 '''
 
 die = (message) ->
@@ -150,15 +150,15 @@ templates = (root) ->
     entries.push { path: label.replace(/\.rip$/, ''), file: label, component: Component.name } if Component
   entries
 
-# The rendered message: html, text, the subject static's answer, and the
+# The rendered message: html, text, the subject export's answer, and the
 # inbox preview line. Throws when the file is not a template.
 renderTemplate = (file) ->
   mod = import!(resolve file)
   Component = templateIn mod, file
   throw Error.new "#{file} exports no component" unless Component
-  props = Component.previewProps ?? {}
+  props = mod.previewProps ?? {}
   { html, text, preview } = toEmail Component, props
-  subject = if typeof Component.subject is 'function' then Component.subject(props) else null
+  subject = if typeof mod.subject is 'function' then mod.subject(props) else null
   { subject, preview, html, text }
 
 shown = (path) ->

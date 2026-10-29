@@ -32,7 +32,8 @@ import { isComponentName, componentPathText, memberPathText, componentPathRoot, 
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './ts/types.js';
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute, suggestAttribute } from './dom.js';
 import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls, CLSX_TYPE, STYLE_FN_TYPE } from './ts/dom-types.js';
-import { restAliasName, restPassthroughText, restOfComponentText, COMPONENT_FAILURE_TYPE,
+import { COMPONENT_CLASS, OWNER_FRAME_DECLS, TEARDOWN_DECL } from './ts/runtime-exports.js';
+import { restAliasName, restPassthroughText, restOfComponentText, restViewOfComponentText, COMPONENT_FAILURE_TYPE,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer, ambientClassDeclares, plainBehaviorValued, stateBehaviorValued, OFFERS, offersRecordText, HOST, hostTypeText, publicProps,
   propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType, restContainerType, MINTED,
@@ -3121,7 +3122,10 @@ class Emitter {
       this._needsClassValue = true; // the alias types the view's `class`
       line(() => this.b.emit(`declare rest: ${restContainerType(restAliasName(info.extendsTag))};`));
     } else if (info.extendsComponent !== null) {
-      line(() => this.b.emit(`declare rest: ${restContainerType(restOfComponentText(info))};`));
+      // `_rest` is the object the rest view holds, which the lowering
+      // spreads into the host's construction.
+      line(() => this.b.emit(`declare rest: ${restContainerType(restViewOfComponentText(info))};`));
+      line(() => this.b.emit(`declare _rest: ${restOfComponentText(info)} | undefined;`));
       // The host itself, referenced under the head's own bytes so the
       // name there resolves to the component it names and hovers as the
       // component. A construction inside a body: a type position hovers
@@ -19527,12 +19531,35 @@ const RUNTIME_TABLE = [
       // The style road's writer — its value parameter is the face's
       // __RipCSSProperties alias, armed alongside.
       __style: STYLE_FN_TYPE,
+      // The base every component extends. A component's own `_init` is
+      // private on the face, which a public base member would refuse, so
+      // the face's copy leaves the base's out.
+      __Component: { class: COMPONENT_CLASS, decls: `${OWNER_FRAME_DECLS}\n${TEARDOWN_DECL}`, faceOmits: ['_init(props: Record<string, unknown>): void; '] },
     },
     url: new URL('./runtime/components.js', import.meta.url),
     requires: 'reactive',
     triggers: (sexpr, preds) => containsComponentDecl(sexpr, preds.isComponent),
   },
 ];
+
+// A table entry typed `{ class }` is a class the runtime exports. On the
+// face its injected binding is a value, never a type, so the class is
+// declared under a face name of its own and the binding typed `typeof`
+// it; a subclass's undeclared member then fails against it.
+const faceClassName = (name) => `__Rip${name.replace(/^_+/, '')}`;
+export const _faceRuntimeType = (name, signature) =>
+  typeof signature === 'object' ? `typeof ${faceClassName(name)}` : signature;
+export const _faceClassDecls = (types) => Object.entries(types ?? {})
+  .filter(([, signature]) => typeof signature === 'object')
+  .map(([name, { class: body, decls, faceOmits = [] }]) => {
+    let text = body.replace(new RegExp(`\\b${name}\\b`, 'g'), faceClassName(name));
+    for (const member of faceOmits) {
+      if (!text.includes(member)) throw new Error(`runtime table: '${name}' omits '${member.trim()}' from its face class, which declares no such member`);
+      text = text.replace(member, '');
+    }
+    return `${decls ? `${decls}\n` : ''}declare class ${faceClassName(name)} ${text}`;
+  })
+  .join('\n');
 
 // Inline-mode body text, lazily read and cached per runtime. The
 // export line is the module's ES seam, and a runtime's import of a
@@ -20287,7 +20314,11 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
         // The aliases the assertion's signatures reference, declared
         // ahead of it under the unit's own synthetic row (declarations
         // hoist, so the position serves the row, not the checker).
-        if (face === 'ts' && unit.types && unit.decls) builder.tsOnly(() => builder.emit(`${unit.decls}\n`));
+        if (face === 'ts' && unit.types) {
+          const decls = [unit.decls, _faceClassDecls(unit.types)].filter(Boolean).join('\n');
+          if (decls !== '') builder.tsOnly(() => builder.emit(`${decls}\n`));
+          if (decls.includes('__RipCSSProperties')) emitter._needsCssProperties = true;
+        }
         builder.emit(`const { ${bindings.map(({ name, local }) => name === local ? name : `${name}: ${local}`).join(', ')} }`);
         // Precise runtime types on the TS face (the table's signatures):
         // the checker reads the declared shapes instead of inferring
@@ -20303,7 +20334,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
         // binding mints — the assertion describes the object the
         // pattern reads from, not the names it binds.
         const types = face === 'ts' && unit.types
-          ? `{ ${bindings.map(({ name }) => `${name}: ${unit.types[name] ?? 'any'}`).join('; ')} }`
+          ? `{ ${bindings.map(({ name }) => `${name}: ${_faceRuntimeType(name, unit.types[name] ?? 'any')}`).join('; ')} }`
           : null;
         // A signature in the assertion may reference a face-declared
         // alias; the tail emission arms it (declarations hoist, so the

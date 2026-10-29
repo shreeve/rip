@@ -6029,3 +6029,36 @@ describeExtended.concurrent('rip check: validator names over the real server', (
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 });
+
+// A component's type is the members it declares over the runtime's base
+// class: a name it never declares, static or instance, fails the check
+// rather than reading as `any`.
+describeExtended.concurrent('rip check: component members over the real server', () => {
+  const codes = async (dir) => JSON.parse((await check(dir, ['--json'])).stdout).map((d) => [d.code, d.file, d.line]);
+
+  test('an undeclared static or member fails, in the module and from an importer', async () => {
+    const dir = workspace({
+      't.rip': [
+        'export T = component',
+        '  @code: string',
+        '  render',
+        '    p code',
+        'a = T.nothing',
+        'b = T.new(code: "x").nothing',
+        'console.log a, b',
+        '',
+      ].join('\n'),
+      'use.rip': [
+        "import { T } from './t.rip'",
+        'c = T.nothing',
+        'd: string = T.new(code: "x").code.value',
+        'm = T.new(code: "x").mount',
+        'console.log c, d, m',
+        '',
+      ].join('\n'),
+    });
+    try {
+      expect(await codes(dir)).toEqual([[2339, 't.rip', 5], [2339, 't.rip', 6], [2339, 'use.rip', 2]]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+});

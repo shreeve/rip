@@ -26,8 +26,8 @@ export Welcome = component
         Preview text: "Hi #{@name} & co"
         Text "Hello, #{@name}"
 
-Welcome.previewProps = name: 'Ada'
-Welcome.subject = (props) -> "Hello #{props.name}"
+export previewProps = name: 'Ada'
+export subject = (props: { name: string }): string -> "Hello #{props.name}"
 
 export helper = -> 1
 `);

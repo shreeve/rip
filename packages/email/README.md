@@ -62,7 +62,19 @@ Block elements and headings become line breaks, a link keeps its address beside 
 
 ## CLI
 
-`rip email` previews and exports the templates in a directory (`./emails` by default, or the current directory when it is itself named `emails`). A template file exports one component; a file led by an underscore is shared by templates and is not one. `Component.previewProps` chooses the props it renders with and `Component.subject`, a function of the props, gives the subject line.
+`rip email` previews and exports the templates in a directory (`./emails` by default, or the current directory when it is itself named `emails`). A template file exports one component; a file led by an underscore is shared by templates and is not one. The module's `previewProps` export chooses the props it renders with and its `subject` export, a function of the props, gives the subject line:
+
+```coffee
+export Welcome = component
+  @name: string
+  render
+    Email
+      Body
+        Text "Hello, #{@name}"
+
+export subject = (props: { name: string }): string -> "Hello #{props.name}"
+export previewProps = { name: 'Ada' }
+```
 
 ```bash
 rip email dev            # live preview at https://email.local/ and https://email.via.rip/ under the edge

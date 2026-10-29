@@ -107,6 +107,7 @@ const IDE_STUBS = new Map([
     `export const restAliasName = ${unavailable('component type story')};`,
     `export const restPassthroughText = ${unavailable('component type story')};`,
     `export const restOfComponentText = ${unavailable('component type story')};`,
+    `export const restViewOfComponentText = ${unavailable('component type story')};`,
     `export const componentCtorSegments = () => [];`,
   ].join('\n')],
 ]);
