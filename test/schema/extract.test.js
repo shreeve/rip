@@ -107,6 +107,39 @@ describe('extractClientProjections', () => {
     expect(r.source).toMatch(/export Item = __schema/);
   });
 
+  test('a projection ships its mixins, their nested types and their own mixins', () => {
+    const src = [
+      'Theme = schema',
+      '  brand! string',
+      'Stamped = schema :mixin',
+      '  at! string',
+      'Branding = schema :mixin',
+      '  theme! Theme',
+      '  @mixin Stamped',
+      'Config = schema',
+      '  site! string',
+      '  @mixin Branding',
+      '',
+    ].join('\n');
+    const r = extractClientProjections(src, ['Config'], { path: 'm.rip' });
+    expect(r.ok).toBe(true);
+    for (const name of ['Config', 'Branding', 'Stamped', 'Theme']) {
+      expect(r.source).toMatch(new RegExp(`export ${name} = __schema`));
+    }
+
+    const Config = loadFromSynthetic(r.source, 'Config');
+    expect(Config.parse({ site: 's', theme: { brand: 'b' }, at: 'now' }))
+      .toEqual({ site: 's', theme: { brand: 'b' }, at: 'now' });
+    expect(Config.safe({ site: 's' }).ok).toBe(false);
+  });
+
+  test('a mixin defined outside the file is refused, not shipped dangling', () => {
+    const src = 'Config = schema\n  site! string\n  @mixin Branding\n';
+    const r = extractClientProjections(src, ['Config'], { path: 'm.rip' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/'Branding'/);
+  });
+
   test('a non-shippable nested type (a :model) is refused', () => {
     const src = 'Owner = schema :model\n  name! string\nThing = schema :shape\n  owner! Owner\nThingPub = Thing.pick("owner")\n';
     const r = extractClientProjections(src, ['ThingPub'], { path: 'm.rip' });

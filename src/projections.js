@@ -8,9 +8,9 @@
 // Pipeline: parse → foldDerivedSchemas (so Model.pick(...) becomes a
 // source-free schema descriptor) → walk the sexpr → refuse :model /
 // behavior / non-schemas → emit `export Name = __schema({...})` via
-// descriptorSegments. Nested schema-typed fields pull their same-file
-// dependencies transitively; a nested type that is not itself shippable
-// refuses the whole extract.
+// descriptorSegments. Nested schema-typed fields and @mixin targets pull
+// their same-file dependencies transitively; a nested type or mixin that
+// is not itself shippable refuses the whole extract.
 import { makeParserLexer } from './lexer.js';
 import { Parser } from './parser.js';
 import { descriptorSegments, foldDerivedSchemas } from './schema.js';
@@ -110,6 +110,14 @@ export function extractClientProjections(source, names, { path } = {}) {
 
     lines.push(emitSchemaRip(name, descriptor));
     for (const e of descriptor.entries) {
+      // A mixin resolves by name in the browser's registry, so it ships
+      // or the extract refuses; a field type outside the file may be a
+      // builtin, so only same-file types are followed.
+      if (e.tag === 'directive' && e.name === 'mixin') {
+        const target = e.args?.[0]?.target;
+        if (typeof target === 'string' && !seen.has(target)) queue.push(target);
+        continue;
+      }
       if (e.tag !== 'field' || typeof e.typeName !== 'string') continue;
       if (byName.has(e.typeName) && !seen.has(e.typeName)) queue.push(e.typeName);
     }
