@@ -151,13 +151,22 @@ templates = (root) ->
   entries
 
 # The rendered message: html, text, the subject export's answer, and the
-# inbox preview line. Throws when the file is not a template.
+# inbox preview line. Throws when the file is not a template. A render
+# with no previewProps export renders with no props, and a component
+# that needs some fails inside a child, so that failure names the
+# missing export, and any export spelled like it.
 renderTemplate = (file) ->
   mod = import!(resolve file)
   Component = templateIn mod, file
   throw Error.new "#{file} exports no component" unless Component
   props = mod.previewProps ?? {}
-  { html, text, preview } = toEmail Component, props
+  try
+    { html, text, preview } = toEmail Component, props
+  catch error
+    throw error if mod.previewProps?
+    near = (name for name in Object.keys(mod) when /preview/i.test name)
+    also = if near.length then " (it exports #{near.join ', '})" else ''
+    throw Error.new "#{file}: #{Component.name} failed to render with no props, and the module exports no previewProps#{also} — #{error.message}"
   subject = if typeof mod.subject is 'function' then mod.subject(props) else null
   { subject, preview, html, text }
 
