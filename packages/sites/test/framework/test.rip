@@ -89,14 +89,29 @@ test "read's signature answers from the validator name it is given", ->
   finally
     rmSync dir, { recursive: true, force: true }
 
-test "a route's input: schema types @input; a route with none keeps it unknown", ->
+test "a route's input: schema types @input, a route with none keeps it unknown, and an error guard narrows", ->
   dir = join(import.meta.dir, '.input-types')
   rmSync dir, { recursive: true, force: true }
   mkdirSync dir, { recursive: true }
   try
     writeFileSync join(dir, 'package.json'), JSON.stringify({ name: 'input-types', rip: { strict: true } })
     writeFileSync join(dir, 'index.rip'), [
-      "import { get, post } from 'rip/sites'"
+      "import { get, post, error } from 'rip/sites'"
+      ''
+      'maybe = (): string | null -> null'
+      "get '/narrow', ->"
+      '  m = maybe()'
+      "  error({ m: 'required' }) unless m"
+      '  s: string = m'
+      '  s'
+      "get '/collected', ->"
+      '  m = maybe()'
+      '  errs: Partial<Record<"m" | "n", string>> = {}'
+      "  errs.m = 'required' unless m"
+      '  error(errs)'
+      '  # @ts-expect-error a collected map may be empty, so it narrows nothing'
+      '  s: string = m'
+      '  s'
       ''
       'Signup = schema :input'
       '  name! string'

@@ -936,14 +936,13 @@ export env: Readonly<Record<string, string | undefined>> = Proxy.new {}, get: (_
 # onError keys on to reshape the envelope — so system errors that
 # happen to carry a `code` (ENOENT and friends) can never impersonate
 # an intentional API error.
-# TWO signatures, and the split is the whole point. The STRING form
-# always throws, so it is `never`. The MAP form CAN return — an empty
-# map is a no-op — so it is `void` and the stanza after it stays live.
-# One `never` over both would have made the whole process stanza
-# unreachable, which is why this was `any` for a long time; overloads
-# are how to have both.
+# The STRING form always throws, so it is `never`. So does a MAP with a
+# key it cannot lack, as one written with a field in it has. A map that
+# may be empty — collected into a `Record` or a `Partial` — CAN return,
+# since an empty map is a no-op, so it is `void` and the stanza after it
+# stays live.
 #
-# `never` on the string form buys a guard that NARROWS:
+# `never` buys a guard that NARROWS:
 #
 #   error 'No such patient', 404 unless patient
 #   patient.id        # checker knows it is not null
@@ -973,6 +972,7 @@ export env: Readonly<Record<string, string | undefined>> = Proxy.new {}, get: (_
 type HttpError = Error & { status: number, code?: string, api?: boolean, field?: string }
 
 def error(message: string, status?: number, code?: string, field?: string): never
+def error<T extends Record<string, string>>(fields: T & ({} extends T ? never : unknown)): never
 def error(fields: Record<string, string>): void
 def error(message: string | Record<string, string>, status = 400, code?: string, field?: string): void
   # Map form — a field→message map, for collected validation:
