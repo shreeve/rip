@@ -198,8 +198,8 @@ export type CtxReq =
   formData: () => Promise<FormData>
   parseBody: (opts?: Record<string, unknown>) => Promise<unknown>
 
-export type Ctx =
-  input: unknown
+export type Ctx<I = unknown> =
+  input: I
   json: (data: unknown, status?: number, headers?: Record<string, string>) => Response
   text: (str: string, status?: number, headers?: Record<string, string>) => Response
   html: (str: string, status?: number, headers?: Record<string, string>) => Response
@@ -213,14 +213,24 @@ export type Ctx =
   req: CtxReq
   mark?: string                  # the request's correlation id, set by the handler
 
-export type RouteHandler = (this: Ctx, c: Ctx, next?: () => Promise<void>) => unknown
+export type RouteHandler<I = unknown> = (this: Ctx<I>, c: Ctx<I>, next?: () => Promise<void>) => unknown
+
+# The schema an `input:` names: what its parse answers is `@input`.
+export type InputSchema<I = unknown> =
+  parseAsync: (data: unknown) => Promise<I>
+  safeAsync: (data: unknown) => Promise<{ ok: boolean, value: unknown, errors: unknown }>
+  toJSONSchema: () => Record<string, unknown>
 
 # The leading options slot a verb accepts before its handlers: `input:` wires
 # schema validation and the OpenAPI contract.
 export type RouteOptions =
-  input?:
-    safeAsync: (data: unknown) => Promise<{ ok: boolean, value: unknown, errors: unknown }>
-    toJSONSchema: () => Record<string, unknown>
+  input?: InputSchema
+
+# A route with an `input:` schema hands its handlers `@input` as the type the
+# schema parses to; any other route's `@input` stays `unknown`.
+type VerbFn =
+  <I>(path: string, options: { input: InputSchema<I> }, ...handlers: RouteHandler<I>[]): void
+  (path: string, ...handlers: Array<RouteOptions | RouteHandler>): void
 
 # The custom error handler: the thrown value, then the request context.
 export type ErrorHandler = (this: Ctx, error: unknown, c: Ctx) => unknown
@@ -555,12 +565,12 @@ addRoute = (method, path, ...handlers) ->
       inputSchema: null,
     }
 
-export get:   (path: string, ...handlers: Array<RouteOptions | RouteHandler>) => void = (path, ...handlers) -> addRoute 'GET',    path, ...handlers
-export post:  (path: string, ...handlers: Array<RouteOptions | RouteHandler>) => void = (path, ...handlers) -> addRoute 'POST',   path, ...handlers
-export put:   (path: string, ...handlers: Array<RouteOptions | RouteHandler>) => void = (path, ...handlers) -> addRoute 'PUT',    path, ...handlers
-export patch: (path: string, ...handlers: Array<RouteOptions | RouteHandler>) => void = (path, ...handlers) -> addRoute 'PATCH',  path, ...handlers
-export del:   (path: string, ...handlers: Array<RouteOptions | RouteHandler>) => void = (path, ...handlers) -> addRoute 'DELETE', path, ...handlers
-export all:   (path: string, ...handlers: Array<RouteOptions | RouteHandler>) => void = (path, ...handlers) -> addRoute 'ALL',    path, ...handlers
+export get:   VerbFn = (path: string, ...handlers: unknown[]) -> addRoute 'GET',    path, ...handlers
+export post:  VerbFn = (path: string, ...handlers: unknown[]) -> addRoute 'POST',   path, ...handlers
+export put:   VerbFn = (path: string, ...handlers: unknown[]) -> addRoute 'PUT',    path, ...handlers
+export patch: VerbFn = (path: string, ...handlers: unknown[]) -> addRoute 'PATCH',  path, ...handlers
+export del:   VerbFn = (path: string, ...handlers: unknown[]) -> addRoute 'DELETE', path, ...handlers
+export all:   VerbFn = (path: string, ...handlers: unknown[]) -> addRoute 'ALL',    path, ...handlers
 
 # ==============================================================================
 # OpenAPI generation
@@ -926,14 +936,13 @@ export env: Readonly<Record<string, string | undefined>> = Proxy.new {}, get: (_
 # onError keys on to reshape the envelope — so system errors that
 # happen to carry a `code` (ENOENT and friends) can never impersonate
 # an intentional API error.
-# TWO signatures, and the split is the whole point. The STRING form
-# always throws, so it is `never`. The MAP form CAN return — an empty
-# map is a no-op — so it is `void` and the stanza after it stays live.
-# One `never` over both would have made the whole process stanza
-# unreachable, which is why this was `any` for a long time; overloads
-# are how to have both.
+# The STRING form always throws, so it is `never`. So does a MAP with a
+# key it cannot lack, as one written with a field in it has. A map that
+# may be empty — collected into a `Record` or a `Partial` — CAN return,
+# since an empty map is a no-op, so it is `void` and the stanza after it
+# stays live.
 #
-# `never` on the string form buys a guard that NARROWS:
+# `never` buys a guard that NARROWS:
 #
 #   error 'No such patient', 404 unless patient
 #   patient.id        # checker knows it is not null
@@ -963,6 +972,7 @@ export env: Readonly<Record<string, string | undefined>> = Proxy.new {}, get: (_
 type HttpError = Error & { status: number, code?: string, api?: boolean, field?: string }
 
 def error(message: string, status?: number, code?: string, field?: string): never
+def error<T extends Record<string, string>>(fields: T & ({} extends T ? never : unknown)): never
 def error(fields: Record<string, string>): void
 def error(message: string | Record<string, string>, status = 400, code?: string, field?: string): void
   # Map form — a field→message map, for collected validation:
@@ -1018,19 +1028,21 @@ export { error, notice, bail }
 # `check` reaches the very one `read` dispatches through by importing
 # rip/validate itself.
 
-import { getValidator, Validated } from 'rip/validate'
+import { getValidator, Validated, ValidatorName } from 'rip/validate'
 
 # ==============================================================================
 # read() — Sinatra-style Parameter Reading
 # ==============================================================================
 
 type ReadFn =
-  <K extends keyof Validated>(name: string, type: `${K}!`, miss?: Validated[K] | (() => Validated[K])): Validated[K]
-  <K extends keyof Validated>(name: string, type: K | `${K}?`, miss?: Validated[K] | (() => Validated[K])): Validated[K] | null
+  (): Record<string, unknown>
+  (name: string, type?: ValidatorName<'raw'>, miss?: unknown): unknown
+  <K extends keyof Validated>(name: string, type: ValidatorName<`${K}!`>, miss?: Validated[K] | (() => Validated[K])): Validated[K]
+  <K extends keyof Validated>(name: string, type: ValidatorName<K | `${K}?`>, miss?: Validated[K] | (() => Validated[K])): Validated[K] | null
   (name: string, type: RegExp | readonly string[], miss?: string | (() => string)): string | null
   (name: string, type: readonly number[], miss?: number | (() => number)): number | null
   (name: string, type: { start: number, end?: number } | { end: number, start?: number } | { min: number, max?: number } | { max: number, min?: number }, miss?: string | number | (() => string | number)): string | number | null
-  (name?: string, type?: string | symbol | RegExp | readonly unknown[] | Record<string, unknown>, miss?: unknown): unknown
+  (name: string, type: RegExp | readonly unknown[] | Record<string, unknown>, miss?: unknown): unknown
 
 export read: ReadFn = (name?: string, type?: string | symbol | RegExp | any[] | Record<string, any>, miss?: unknown) ->
   store = requestContext.getStore() or throw Error.new 'no context for read()'

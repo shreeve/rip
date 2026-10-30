@@ -15,6 +15,7 @@ import { collapseCellArms, collapseTypedHead, presentType, presentOutgoing, isIm
   SCAFFOLD_FAMILIES, prettifyRouteUnion, hoverableSpans, SCHEMA_PAYLOADS, flattenHover, nearestSpelling,
 } from '../../src/translate.js';
 import { routerAmbienceType } from '../../../../src/ts/components.js';
+import { COMPONENT_CLASS } from '../../../../src/ts/runtime-exports.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -403,6 +404,21 @@ describe('TS-face artifact filters', () => {
     expect(isScaffoldingLabel('create_block_3_iter')).toBe(true);
     expect(isScaffoldingLabel('create_block_3_items')).toBe(false);
     expect(isScaffoldingLabel('answer')).toBe(false);
+  });
+
+  // Every component inherits the runtime base on the face, so each of its
+  // `_` members would be offered inside a component body; none is the
+  // author's to call.
+  test('scaffolding labels: every private member of the component base, unless the source spells it', () => {
+    const members = [...new Set([...COMPONENT_CLASS.matchAll(/(?:\{ |; )(_[A-Za-z]\w*)\??[(:<]/g)].map((m) => m[1]))];
+    expect(members).toContain('_mergeRestStyle');
+    for (const name of members) expect(isScaffoldingLabel(name), name).toBe(true);
+    expect(isScaffoldingLabel('_state', 'x = @_state')).toBe(false);
+  });
+
+  test('scrubFaceArtifacts: the component base reads back as Component', () => {
+    expect(scrubFaceArtifacts('(property) __RipComponent.rest?: unknown')).toBe('(property) Component.rest?: unknown');
+    expect(scrubFaceArtifacts('(method) __RipComponent.mount(target?: Node | string): __RipComponent')).toBe('(method) Component.mount(target?: Node | string): Component');
   });
 
   test('scrubFaceArtifacts: the `!:` assertion and mirror .rip.ts specifiers leave user-visible strings', () => {

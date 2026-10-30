@@ -10,7 +10,7 @@
 import { test, eq, ok, throws, plainEnv } from 'rip/testing'
 import {
   check, formatMoney, getValidator, isBlank, isRawType,
-  registerValidator, toName, toPhone, validatorNames,
+  registerValidator, toName, toPhone, Validated, validatorNames,
 } from 'rip/validate'
 import * as mod from 'rip/validate'
 import { registerCoercer, SchemaError } from '../../src/runtime/schema.js'
@@ -348,7 +348,7 @@ rows: [string, string, unknown][] = [
 
 test "the row table: #{rows.length} contracts", ->
   for [type, input, expected] in rows
-    got = check input, type
+    got = check input, type as keyof Validated
     unless JSON.stringify(got) is JSON.stringify(expected)
       throw Error.new "#{type} #{JSON.stringify(input)}: expected #{JSON.stringify(expected)}, got #{JSON.stringify(got)}"
 
@@ -401,13 +401,17 @@ console.log "\nRegistration"
 
 test "a registered validator joins the vocabulary", ->
   registerValidator 'even', (v) -> if Number(v) % 2 is 0 then Number(v) else null
+  # @ts-expect-error a registration inside a function is out of the checker's sight
   eq check('4', 'even'), 4
+  # @ts-expect-error
   eq check('3', 'even'), null
   ok validatorNames().includes('even')
 
 test "a raw registration receives values untouched", ->
   registerValidator 'pair', ((v) -> if Array.isArray(v) and v.length is 2 then v else null), { raw: true }
+  # @ts-expect-error a registration inside a function is out of the checker's sight
   eq check([1, 2], 'pair'), [1, 2]
+  # @ts-expect-error
   eq check([1], 'pair'), null
   ok isRawType('pair')
   ok not isRawType('even')
@@ -433,6 +437,7 @@ test "an invalid name or non-function rejects", ->
 test "getValidator answers softly; check rejects loudly", ->
   eq typeof getValidator('id'), 'function'
   eq getValidator('nope'), undefined
+  # @ts-expect-error no validator answers to the name
   throws (-> check('x', 'nope')), "unknown validator 'nope'"
 
 test "getValidator is self-preparing: stringified, trimmed, no setup owed", ->
@@ -447,6 +452,7 @@ test "symbols name validators everywhere strings do", ->
   eq getValidator(:email), getValidator('email')
   eq check('steve@gmail.com', :email), 'steve@gmail.com'
   eq isRawType(:email), false
+  # @ts-expect-error no validator answers to the name
   throws (-> check('x', :nope)), "unknown validator 'nope'"
 
 test "prepared validators are scalar-only: composites are null, never fictions", ->

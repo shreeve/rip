@@ -156,7 +156,13 @@ describe('schema declarations: the per-kind shapes', () => {
       '{ id: number; orgId: number | null; createdAt: Date; updatedAt: Date; deletedAt: Date | null };');
     // Create: `!` without default required; a DEFAULTED required
     // field is optional at insert; optional FK rides `| null`
-    expect(d).toContain('type MCreate = { name: string; code?: string; posted?: boolean; orgId?: number | null };');
+    // An optional field takes null at create, as its column stores it.
+    expect(d).toContain('type MCreate = { name: string; code?: string | null; posted?: boolean; orgId?: number | null };');
+    // A transform supplies its field from the whole input, so the field
+    // is optional at create though required in the row.
+    const minted = dts('T = schema :model\n  eid! string, -> it.eid or "minted"\n  name! string');
+    expect(minted).toContain('type TCreate = { eid?: string; name: string };');
+    expect(minted).toContain('type TData = { eid: string; name: string }');
     // Instance: relation accessors (cross-file target honest unknown,
     // hasMany pluralized), the persistence surface incl. restore
     // (softDelete present), markDirty/savedChanges per the runtime
@@ -167,8 +173,8 @@ describe('schema declarations: the per-kind shapes', () => {
     expect(d).toContain('savedChanges: Map<string, [unknown, unknown]>');
     expect(d).toContain('toJSON(): MData');
     // Scopes: the Query alias + the const intersection
-    expect(d).toContain('type MQuery = SchemaQuery<M, MData> & { live(...args: any[]): MQuery };');
-    expect(d).toContain('declare const M: ModelSchema<M, MData, number, MCreate> & { live(...args: any[]): MQuery };');
+    expect(d).toContain('type MQuery = SchemaQuery<M, MData> & { live(): MQuery };');
+    expect(d).toContain('declare const M: ModelSchema<M, MData, number, MCreate, MQuery> & { live(): MQuery };');
     // no @softDelete → no restore
     expect(dts('P = schema :model\n  a! string')).not.toContain('restore()');
   });
@@ -196,7 +202,7 @@ describe('schema declarations: the per-kind shapes', () => {
   // never absent on an instance — and an optional field's column is
   // nullable, so the data shape admits null and nothing else; the
   // create companion keeps accepting omission.
-  test('an optional model field types `T | null` on the data shape and stays omittable at create', () => {
+  test('an optional model field types `T | null` on the data shape and at create, where it is also omittable', () => {
     const d = dts([
       'Partner = schema :model',
       '  name! string',
@@ -206,7 +212,7 @@ describe('schema declarations: the per-kind shapes', () => {
       '  @ensure "named", (m) -> m.name.length > 0',
     ].join('\n'));
     expect(d).toContain('type PartnerData = { name: string; phone: string | null; token: string | null; note: string | null } & { id: number };');
-    expect(d).toContain('type PartnerCreate = { name: string; phone?: string; token?: string; note?: string | null };');
+    expect(d).toContain('type PartnerCreate = { name: string; phone?: string | null; token?: string | null; note?: string | null };');
     // The ensure predicate also sees create-path data, where an omitted
     // optional field is absent: optional AND nullable there.
     expect(d).toContain('type PartnerEnsure = { name: string; phone?: string | null; token?: string | null; note?: string | null } & Partial<{ id: number }>;');
@@ -252,7 +258,7 @@ describe('schema declarations: the per-kind shapes', () => {
     expect(v).not.toContain('interface ModelSchema');
     expect(v).not.toContain('interface SchemaQuery');
     const m = dts('M = schema :model\n  a! string');
-    expect(m).toContain('interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {');
+    expect(m).toContain('interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>, Query = SchemaQuery<Instance, Data>> extends Schema<Instance, Data> {');
   });
 
   test('zero-cost holds: schema-free modules keep the trivial declaration', () => {
@@ -506,8 +512,8 @@ describe('schema type story inside function scopes', () => {
   test('every kind types in a function: a :model brings the persistence tier to the module top, a :mixin resolves for its sibling', () => {
     const model = face('f = ->\n  U = schema :model\n    name! string\n    @scope :live, -> @where(active: true)\n  U');
     expect(model.code).toMatch(/^interface ModelSchema</m);
-    expect(model.code).toContain('  type UQuery = SchemaQuery<U, UData> & { live(...args: any[]): UQuery };\n  let U = __schema(');
-    expect(model.code).toContain(') as unknown as ModelSchema<U, UData, number, UCreate> & { live(...args: any[]): UQuery };');
+    expect(model.code).toContain('  type UQuery = SchemaQuery<U, UData> & { live(): UQuery };\n  let U = __schema(');
+    expect(model.code).toContain(') as unknown as ModelSchema<U, UData, number, UCreate, UQuery> & { live(): UQuery };');
     const mixin = face('f = ->\n  T = schema :mixin\n    at? datetime\n  U = schema :shape\n    @mixin T\n    name!\n  U');
     expect(mixin.code).toContain('  type T = { at?: Date };\n  type U = { name: string } & T;\n  let T = __schema(');
     expect(mixin.code).toContain('as unknown as MixinSchema<T>;');

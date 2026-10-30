@@ -130,10 +130,10 @@ export declare class __Component {
   _state: string | undefined;
   _owner: __Component | null | undefined;
   _parent: __Component | null | undefined;
-  stash: unknown;
-  router: unknown;
-  children: unknown;
-  rest: unknown;
+  stash?: unknown;
+  router?: unknown;
+  children?: unknown;
+  rest?: unknown;
   _hmrPropKeys: string | undefined;
   _rest: Record<string, unknown> | undefined;
   _asChild: boolean | undefined;
@@ -143,9 +143,9 @@ export declare class __Component {
   _restHandlers: unknown;
   _hmrRebindPending: boolean | undefined;
   _root: unknown;
-  _children: unknown;
+  _children: __Component[] | null | undefined;
   _restWriters: unknown;
-  _refCleanups: unknown;
+  _refCleanups: (() => void)[] | null | undefined;
   _nodes: unknown;
   _inheritedEl: unknown;
   _inheritedInst: unknown;
@@ -172,7 +172,13 @@ export declare class __Component {
   _updateProp(name: string, value: unknown): void;
   _setRestProp(key: string, value: unknown): void;
   _applyRestToInheritedEl(): void;
-  _mergeRestStyle(own: unknown): unknown;
+  _mergeRestStyle<S extends __RipCSSProperties | string | null | undefined>(own: S): S | (this extends {
+    rest?: {
+      value: {
+        style?: infer T;
+      };
+    };
+  } ? NonNullable<T> : never);
   _applyInheritedProp(host: unknown, key: string, value: unknown): void;
   _applyPlainInheritedProp(host: unknown, key: string, value: unknown): void;
   _beginMount(): void;

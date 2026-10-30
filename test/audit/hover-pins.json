@@ -549,7 +549,7 @@
       },
       {
         "name": "Account",
-        "expect": "let Account: ModelSchema<Account, AccountData, number, AccountCreate>"
+        "expect": "let Account: ModelSchema<Account, AccountData, number, AccountCreate, SchemaQuery<Account, AccountData>>"
       },
       {
         "name": "Tiny",

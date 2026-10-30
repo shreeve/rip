@@ -60,14 +60,13 @@ test "read's signature answers from the validator name it is given", ->
       "enumd: string | null = read 'a', ['x', 'y']"     # an enumeration matches a string
       "ranged: number | null = read 'a', [1, 9]"        # a range matches a number
       "pattern: string | null = read 'a', /^x$/"
-      # Each of the three lands on the signature that promises nothing, and
-      # `unknown` would accept whatever it returned — so the claim is that a
-      # NARROW annotation is refused, which stops holding the moment one of
-      # them starts answering from the map.
-      "# @ts-expect-error a symbol carries no literal a type can read"
-      "sym: string = read 'a', :email!"
-      "# @ts-expect-error a name registered at runtime is in no map"
-      "custom: string = read 'a', 'registeredAtRuntime'"
+      "sym: string = read 'a', :email!"                  # a symbol names its validator
+      "symOpt: number | null = read 'a', :int?"
+      "all: Record<string, unknown> = read()"             # nameless, the whole map
+      "# @ts-expect-error a name no validator answers to is refused"
+      "custom = read 'a', 'registeredAtRuntime'"
+      "# @ts-expect-error so is a misspelled symbol"
+      "typo = read 'a', :emial"
       "# @ts-expect-error a read naming no type promises nothing"
       "bareName: string = read 'a'"
       # A shape the signatures can read is answered precisely; one they
@@ -84,6 +83,57 @@ test "read's signature answers from the validator name it is given", ->
       "thunk: number = read 'a', 'int!', -> 1"
       "# @ts-expect-error a fallback of another type is not the read's own"
       "mismatched: number = read 'a', 'int!', -> null"
+    ].join('\n') + '\n'
+    r = spawnSync process.execPath, [join(import.meta.dir, '..', '..', '..', '..', 'bin', 'rip'), 'check', dir], { encoding: 'utf8' }
+    eq r.status, 0, r.stdout + r.stderr
+  finally
+    rmSync dir, { recursive: true, force: true }
+
+test "a route's input: schema types @input, a route with none keeps it unknown, and an error guard narrows", ->
+  dir = join(import.meta.dir, '.input-types')
+  rmSync dir, { recursive: true, force: true }
+  mkdirSync dir, { recursive: true }
+  try
+    writeFileSync join(dir, 'package.json'), JSON.stringify({ name: 'input-types', rip: { strict: true } })
+    writeFileSync join(dir, 'index.rip'), [
+      "import { get, post, error } from 'rip/sites'"
+      ''
+      'maybe = (): string | null -> null'
+      "get '/narrow', ->"
+      '  m = maybe()'
+      "  error({ m: 'required' }) unless m"
+      '  s: string = m'
+      '  s'
+      "get '/collected', ->"
+      '  m = maybe()'
+      '  errs: Partial<Record<"m" | "n", string>> = {}'
+      "  errs.m = 'required' unless m"
+      '  error(errs)'
+      '  # @ts-expect-error a collected map may be empty, so it narrows nothing'
+      '  s: string = m'
+      '  s'
+      ''
+      'Signup = schema :input'
+      '  name! string'
+      '  age? integer'
+      ''
+      "post '/signup', { input: Signup }, ->"
+      '  name: string = @input.name'
+      '  age: number | undefined = @input.age'
+      '  { name, age }'
+      ''
+      "post '/signup2', { input: Signup }, (c) ->"
+      '  n: string = c.input.name'
+      '  n'
+      ''
+      "post '/bad', { input: Signup }, ->"
+      '  # @ts-expect-error the schema declares no such field'
+      '  @input.nmae'
+      ''
+      "get '/plain', ->"
+      '  # @ts-expect-error a route with no input: schema has no typed input'
+      '  s: string = @input'
+      '  s'
     ].join('\n') + '\n'
     r = spawnSync process.execPath, [join(import.meta.dir, '..', '..', '..', '..', 'bin', 'rip'), 'check', dir], { encoding: 'utf8' }
     eq r.status, 0, r.stdout + r.stderr
@@ -452,6 +502,7 @@ test! 'read with a numeric range answers a number in range or null', ->
 
 test! 'read rejects a misspelled validator, a bad required value, and a broken body', ->
   resetGlobals()
+  # @ts-expect-error the misspelled name the route is refused for
   get '/typo' -> { v: read('email', 'emial') }
   get '/id' -> { id: read('id', 'id!') }
   post '/body' -> { name: read('name') }

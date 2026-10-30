@@ -19,8 +19,8 @@
 // stdlib, so a fixture that leans on `p` or `zip` without delivering them is
 // still caught. Names the table types nothing for fall back to `any` — the face
 // never depends on their shape.
-import { _runtimeTable } from '../../src/emitter.js';
-import { CLASS_VALUE_DECL } from '../../src/ts/dom-types.js';
+import { _runtimeTable, _faceRuntimeType, _faceClassDecls } from '../../src/emitter.js';
+import { CLASS_VALUE_DECL, CSS_PROPERTIES_DECL } from '../../src/ts/dom-types.js';
 
 const NAMES = [
   '__state', '__computed', '__effect', '__batch', '__readonly',
@@ -40,9 +40,11 @@ const DECLS = [];
 for (const rt of _runtimeTable()) {
   for (const name of rt.names) {
     KNOWN.add(name);
-    if (rt.types?.[name]) TYPES.set(name, rt.types[name]);
+    if (rt.types?.[name]) TYPES.set(name, _faceRuntimeType(name, rt.types[name]));
   }
   if (rt.decls) DECLS.push(rt.decls);
+  const classDecls = _faceClassDecls(rt.types);
+  if (classDecls !== '') DECLS.push(classDecls);
 }
 
 // A curated name the compiler no longer delivers would be declared here and
@@ -60,5 +62,5 @@ if (stale.length > 0) {
 // `decls` ahead of its destructure); the ambient carries the same
 // aliases so the declared shapes resolve here too.
 export const AMBIENT =
-  `${CLASS_VALUE_DECL}\n${DECLS.join('\n')}\n` +
+  `${CLASS_VALUE_DECL}\n${CSS_PROPERTIES_DECL}\n${DECLS.join('\n')}\n` +
   `declare const ${NAMES.map((n) => `${n}: ${TYPES.get(n) ?? 'any'}`).join(', ')};\n`;

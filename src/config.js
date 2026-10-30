@@ -16,6 +16,11 @@
 //   repl     — REPL presentation: { theme: 'dark'|'light'|'mono',
 //              colors: { <class>: <ansi name | #hex> } } — consumed by
 //              src/cli/repl.js; anything non-object leaves the null default.
+//   lint     — the project's lint rules, as written ({ calls: true }):
+//              `rip lint` enforces them. The shape is validated where it is
+//              used (src/lint.js), so a malformed block fails that run
+//              loudly instead of reading as defaults here. Anything
+//              non-object leaves the null default.
 //
 // Resolution: walk UP to the FIRST package.json and stop — that file
 // is the project boundary whether or not it carries a `rip` block. A
@@ -26,7 +31,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 
 export function readProjectConfig(dir) {
-  const config = { strict: false, noCheck: [], repl: null, _configDir: null };
+  const config = { strict: false, noCheck: [], repl: null, lint: null, _configDir: null };
   try {
     let d = resolve(dir);
     for (;;) {
@@ -43,6 +48,9 @@ export function readProjectConfig(dir) {
           else if (Array.isArray(nc)) config.noCheck = nc.filter((g) => typeof g === 'string');
           if (pkg.rip.repl !== null && typeof pkg.rip.repl === 'object' && !Array.isArray(pkg.rip.repl)) {
             config.repl = pkg.rip.repl;
+          }
+          if (pkg.rip.lint !== null && typeof pkg.rip.lint === 'object' && !Array.isArray(pkg.rip.lint)) {
+            config.lint = pkg.rip.lint;
           }
         }
         config._configDir = d;

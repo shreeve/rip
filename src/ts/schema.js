@@ -151,7 +151,7 @@ export const VALIDATION_INTRINSIC_NAMES = new Set([
   'SchemaIssue', 'SchemaSafeResult', 'ArraySchema', 'Schema',
 ]);
 export const MIXIN_INTRINSIC_NAMES = new Set(['MixinSchema']);
-export const MODEL_INTRINSIC_NAMES = new Set(['SchemaQuery', 'ModelSchema']);
+export const MODEL_INTRINSIC_NAMES = new Set(['SchemaOrder', 'SchemaQuery', 'ModelSchema']);
 export const SCHEMA_INTRINSIC_NAMES = new Set([
   ...VALIDATION_INTRINSIC_NAMES, ...MIXIN_INTRINSIC_NAMES, ...MODEL_INTRINSIC_NAMES,
 ]);
@@ -221,33 +221,43 @@ const MIXIN_INTRINSICS = [
 // The persistence tier — the query builder and model statics exactly
 // as src/runtime/orm.js serves them: all()/first()/count()
 // take no arguments (reads route through where()), updateAll/
-// deleteAll live on the BUILDER only.
+// deleteAll live on the BUILDER only. A chain step answers `this`: the
+// runtime returns the same builder, which carries the model's scopes
+// as own methods, so a model's `NameQuery` survives every step.
+// `order` takes caller-authored SQL spliced verbatim, or a
+// {field: direction} object, or a list of them, whose keys the runtime
+// resolves against the model's columns; it reads a direction in either
+// case.
 const MODEL_INTRINSICS = [
+  "type SchemaOrder<Data> = string | Partial<Record<keyof Data, 'asc' | 'desc' | 'asc nulls first' | 'asc nulls last' | 'desc nulls first' | 'desc nulls last' | 'ASC' | 'DESC' | 'ASC NULLS FIRST' | 'ASC NULLS LAST' | 'DESC NULLS FIRST' | 'DESC NULLS LAST'>> | Partial<Record<keyof Data, 'asc' | 'desc' | 'asc nulls first' | 'asc nulls last' | 'desc nulls first' | 'desc nulls last' | 'ASC' | 'DESC' | 'ASC NULLS FIRST' | 'ASC NULLS LAST' | 'DESC NULLS FIRST' | 'DESC NULLS LAST'>>[];",
   'interface SchemaQuery<T, Data = Record<string, unknown>> {',
   '  all(): Promise<T[]>;',
   '  first(): Promise<T | null>;',
   '  count(): Promise<number>;',
-  '  where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<T, Data>;',
-  '  limit(n: number): SchemaQuery<T, Data>;',
-  '  offset(n: number): SchemaQuery<T, Data>;',
-  '  order(spec: string): SchemaQuery<T, Data>;',
-  '  orderBy(spec: string): SchemaQuery<T, Data>;',
-  '  includes(...specs: unknown[]): SchemaQuery<T, Data>;',
-  '  withDeleted(): SchemaQuery<T, Data>;',
-  '  onlyDeleted(): SchemaQuery<T, Data>;',
+  '  where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): this;',
+  '  limit(n: number): this;',
+  '  offset(n: number): this;',
+  '  order(spec: SchemaOrder<Data>): this;',
+  '  orderBy(spec: SchemaOrder<Data>): this;',
+  '  includes(...specs: unknown[]): this;',
+  '  withDeleted(): this;',
+  '  onlyDeleted(): this;',
   '  updateAll(values: Partial<Record<keyof Data, unknown>>): Promise<number | null>;',
   '  deleteAll(): Promise<number | null>;',
-  '  unscoped(): SchemaQuery<T, Data>;',
+  '  unscoped(): this;',
   '}',
-  'interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {',
+  'interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>, Query = SchemaQuery<Instance, Data>> extends Schema<Instance, Data> {',
   '  find(id: Id): Promise<Instance | null>;',
   '  with(cond: string | Partial<Record<keyof Data, unknown>>, ...params: unknown[]): Promise<Instance | null>;',
   '  findMany(ids: Id[]): Promise<Instance[]>;',
-  '  where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;',
-  '  includes(...specs: unknown[]): SchemaQuery<Instance, Data>;',
-  '  withDeleted(): SchemaQuery<Instance, Data>;',
-  '  onlyDeleted(): SchemaQuery<Instance, Data>;',
-  '  unscoped(): SchemaQuery<Instance, Data>;',
+  '  where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): Query;',
+  '  includes(...specs: unknown[]): Query;',
+  '  withDeleted(): Query;',
+  '  onlyDeleted(): Query;',
+  '  unscoped(): Query;',
+  '  order(spec: SchemaOrder<Data>): Query;',
+  '  limit(n: number): Query;',
+  '  offset(n: number): Query;',
   '  all(): Promise<Instance[]>;',
   '  first(): Promise<Instance | null>;',
   '  count(): Promise<number>;',
@@ -255,14 +265,6 @@ const MODEL_INTRINSICS = [
   '  upsert(data: Create, opts: { on: unknown }): Promise<Instance>;',
   '  insertMany(rows: Create[]): Promise<Instance[]>;',
   '  toSQL(options?: { dropFirst?: boolean; header?: string; idStart?: number }): string;',
-  // Installed on every model by `rip/fake` when it is imported — absent
-  // otherwise, which is why it is optional. A LITERAL count of 0, 1, or
-  // -1 makes one instance (built, created, built); any other count, and a
-  // pipe-table string, make an array. A count the types see only as
-  // `number` answers the array form — spell the literal where one
-  // instance is meant.
-  '  factory?(count?: 0 | 1 | -1, ...args: unknown[]): Promise<Instance>;',
-  '  factory?(count: number | string, ...args: unknown[]): Promise<Instance[]>;',
   '}',
 ];
 
@@ -576,10 +578,15 @@ const modelCreateProps = (descriptor, known) => {
   for (const e of descriptor.entries) {
     if (e.tag !== 'field') continue;
     // A natural key is always required at insert: nothing generates
-    // it, so a default cannot stand in for it either.
+    // it, so a default cannot stand in for it either. A transform reads
+    // the whole input and supplies the field's value, so the input may
+    // omit it; the runtime's `!` judges what the transform returned.
     const required = e.name === pkName ||
-      (e.modifiers.includes('!') && e.constraints?.default === undefined);
-    props.push(`${e.name}${required ? '' : '?'}: ${fieldType(e, known)}`);
+      (e.modifiers.includes('!') && e.constraints?.default === undefined && !e.transformTokens);
+    // An optional field takes null as absent, the way its column stores
+    // it; a null default already puts null in the field's own type.
+    const nullable = e.name !== pkName && !e.modifiers.includes('!') && e.constraints?.default !== null;
+    props.push(`${e.name}${required ? '' : '?'}: ${fieldType(e, known)}${nullable ? ' | null' : ''}`);
   }
   for (const rel of relationsOf(descriptor)) {
     if (rel.kind !== 'belongsTo') continue;
@@ -724,9 +731,9 @@ export function schemaTypeStory(decl, byName, known, source = null) {
     const dataName = `${name}Data`;
     const createName = `${name}Create`;
     const softDelete = descriptor.entries.some((e) => e.tag === 'directive' && e.name === 'softDelete');
-    const scopeNames = descriptor.entries.filter((e) => e.tag === 'scope').map((e) => e.name);
+    const scopes = descriptor.entries.filter((e) => e.tag === 'scope');
     const queryName = `${name}Query`;
-    const queryType = scopeNames.length ? queryName : `SchemaQuery<${name}, ${dataName}>`;
+    const queryType = scopes.length ? queryName : `SchemaQuery<${name}, ${dataName}>`;
     const instanceExtras = (face) => [
       ...behaviorFor(face),
       ...relationAccessors(descriptor, known),
@@ -767,9 +774,9 @@ export function schemaTypeStory(decl, byName, known, source = null) {
       ? descriptor.entries.find((e) => e.tag === 'field' && e.name === primaryKeyName(descriptor))
       : null;
     const idType = pkEntry ? fieldType(pkEntry, known) : 'number';
-    let constType = `ModelSchema<${name}, ${dataName}, ${idType}, ${createName}>`;
-    if (scopeNames.length) {
-      const scopeSigs = scopeNames.map((s) => `${s}(...args: any[]): ${queryName}`);
+    let constType = `ModelSchema<${name}, ${dataName}, ${idType}, ${createName}${scopes.length ? `, ${queryName}` : ''}>`;
+    if (scopes.length) {
+      const scopeSigs = scopes.map((e) => `${e.name}(${sig(e)}): ${queryName}`);
       aliasLines.push(`type ${queryName} = SchemaQuery<${name}, ${dataName}> & ${braced(scopeSigs)};`);
       faceAliasLines.push(`type ${queryName} = SchemaQuery<${name}, ${dataName}> & ${braced(scopeSigs)};`);
       typeNames.push(queryName);

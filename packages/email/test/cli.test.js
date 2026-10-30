@@ -26,8 +26,8 @@ export Welcome = component
         Preview text: "Hi #{@name} & co"
         Text "Hello, #{@name}"
 
-Welcome.previewProps = name: 'Ada'
-Welcome.subject = (props) -> "Hello #{props.name}"
+export previewProps = name: 'Ada'
+export subject = (props: { name: string }): string -> "Hello #{props.name}"
 
 export helper = -> 1
 `);
@@ -156,6 +156,29 @@ test('render, the child-process verb, answers the message as json from previewPr
   expect(welcome.text).toBe('Hello, Ada');
   expect(welcome.subject).toBe('Hello Ada');
   expect(welcome.preview).toBe('Hi Ada & co');
+});
+
+test('render names a missing previewProps when the component cannot render without it', () => {
+  const missing = mkdtempSync(join(tmpdir(), 'rip-email-preview-'));
+  try {
+    writeFileSync(join(missing, 'code.rip'), `
+import { Email, Body, Text } from 'rip/email'
+
+export Code = component
+  @user: { name: string }
+  render
+    Email
+      Body
+        Text "Hi #{@user.name}"
+
+export previewPropsz = user: { name: 'Ada' }
+`);
+    const r = spawnSync(ripCli, [emailCli, 'render', 'code.rip'], { cwd: missing, encoding: 'utf8' });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('rip-email: code.rip: Code failed to render with no props, and the module exports no previewProps (it exports previewPropsz) — ');
+  } finally {
+    rmSync(missing, { recursive: true, force: true });
+  }
 });
 
 test('render refuses a file with no component', () => {

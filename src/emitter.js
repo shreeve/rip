@@ -32,7 +32,8 @@ import { isComponentName, componentPathText, memberPathText, componentPathRoot, 
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './ts/types.js';
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute, suggestAttribute } from './dom.js';
 import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls, CLSX_TYPE, STYLE_FN_TYPE } from './ts/dom-types.js';
-import { restAliasName, restPassthroughText, restOfComponentText, COMPONENT_FAILURE_TYPE,
+import { COMPONENT_CLASS, OWNER_FRAME_DECLS, TEARDOWN_DECL } from './ts/runtime-exports.js';
+import { restAliasName, restPassthroughText, restOfComponentText, restViewOfComponentText, COMPONENT_FAILURE_TYPE,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer, ambientClassDeclares, plainBehaviorValued, stateBehaviorValued, OFFERS, offersRecordText, HOST, hostTypeText, publicProps,
   propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType, restContainerType, MINTED,
@@ -3121,7 +3122,10 @@ class Emitter {
       this._needsClassValue = true; // the alias types the view's `class`
       line(() => this.b.emit(`declare rest: ${restContainerType(restAliasName(info.extendsTag))};`));
     } else if (info.extendsComponent !== null) {
-      line(() => this.b.emit(`declare rest: ${restContainerType(restOfComponentText(info))};`));
+      // `_rest` is the object the rest view holds, which the lowering
+      // spreads into the host's construction.
+      line(() => this.b.emit(`declare rest: ${restContainerType(restViewOfComponentText(info))};`));
+      line(() => this.b.emit(`declare _rest: ${restOfComponentText(info)} | undefined;`));
       // The host itself, referenced under the head's own bytes so the
       // name there resolves to the component it names and hovers as the
       // component. A construction inside a body: a type position hovers
@@ -3744,6 +3748,37 @@ class Emitter {
           else if (imported === 'currentRouter') this.appAccessors.router = local;
         }
       }
+    }
+  }
+
+  // The validators this module registers where the checker can type
+  // them: a top-level call of `registerValidator` imported as a value
+  // from 'rip/validate', naming the validator by a literal and passing a
+  // bound function. The face declares each into `Validated`, typed by
+  // what the function answers. Any other registration runs and stays
+  // unknown to the checker, so a read of its name fails the check.
+  collectValidatorRegistrations(sexpr) {
+    this.validatorRegistrations = [];
+    if (!this.ts) return;
+    const locals = new Set();
+    for (const x of sexpr.slice(1)) {
+      if (!isModuleImportNode(this.stores, x)) continue;
+      const from = x[x.length - 1];
+      if (typeof from !== 'string' || from.slice(1, -1) !== 'rip/validate') continue;
+      const id = this.stores.idOf(x);
+      if (id !== null && this.stores.role(id, 'typeOnly') !== null) continue;
+      for (const spec of Emitter.importSpecs(x)) {
+        if (!isNode(spec) || spec[0] === '*') continue;
+        for (const s of spec) if ((isNode(s) ? s[0] : s) === 'registerValidator') locals.add(isNode(s) ? s[1] : s);
+      }
+    }
+    if (locals.size === 0) return;
+    for (const x of sexpr.slice(1)) {
+      if (!this.isCallNode(x) || !locals.has(x[0]) || x.length < 3) continue;
+      const [, nameArg, fn] = x;
+      const name = isNode(nameArg) && nameArg[0] === 'symbol' && nameArg.length === 2 ? nameArg[1]
+        : typeof nameArg === 'string' && /^"\w+"$/.test(nameArg) ? nameArg.slice(1, -1) : null;
+      if (name !== null && typeof fn === 'string' && isIdentifierName(fn)) this.validatorRegistrations.push([name, fn]);
     }
   }
 
@@ -15872,7 +15907,7 @@ class Emitter {
             // Optional-call arguments do NOT unwrap a pick's parens:
             // `h?.(({a: o.a}))` — the double parens are valid JS and
             // the byte battery pins the spelling.
-            this.expr(arg);
+            this.argExpr(arg);
           });
           this.b.emit(')');
         });
@@ -16087,7 +16122,18 @@ class Emitter {
       return;
     }
     if (isNode(arg) && (arg[0] === '.{}' || arg[0] === '?.{}') && arg.length >= 3) return this.pick(arg, true);
+    this.argExpr(arg);
+  }
+
+  // A `:name` passed straight to a call carries its name on the face, as
+  // a quoted literal keeps its literal type there: a parameter that reads
+  // names (`ValidatorName` in rip/validate) infers from it. A symbol bound
+  // first is plain `symbol`, so a later `x = :other` still assigns.
+  argExpr(arg) {
+    if (!(this.ts && isNode(arg) && arg[0] === 'symbol' && arg.length === 2)) return this.expr(arg);
+    this.b.tsOnly(() => this.b.emit('('));
     this.expr(arg);
+    this.b.tsOnly(() => this.b.emit(` as symbol & { readonly ripSymbol?: ${JSON.stringify(arg[1])} })`));
   }
 
   // The checked spellings of a stash-handle ask: a call whose callee
@@ -18201,7 +18247,11 @@ class Emitter {
         // list) may carry side effects or getters — the inline
         // dispatch would evaluate it more than once, so the helper
         // call evaluates each operand exactly once.
-        this.b.emit(Emitter.MEMBER_IN + '(');
+        if (this.ts) {
+          this.b.emit("((k, c) => Array.isArray(c) || typeof c === 'string' ? c.includes(k) : ");
+          this.memberKey(() => this.b.emit('c'), () => this.b.emit('k'));
+          this.b.emit(' in c)(');
+        } else this.b.emit(Emitter.MEMBER_IN + '(');
         this.mark(node, 'left', () => this.expr(a));
         this.b.emit(', ');
         this.mark(node, 'right', () => this.expr(b));
@@ -18219,15 +18269,30 @@ class Emitter {
         // The includes() slot is an argument; this one is an operand
         // of JavaScript's `in`, so a lower-precedence left side groups.
         const wrap = Emitter.needsGrouping(a, 'operand');
-        if (wrap) this.b.emit('(');
-        this.expr(a);
-        if (wrap) this.b.emit(')');
+        const left = () => {
+          if (wrap) this.b.emit('(');
+          this.expr(a);
+          if (wrap) this.b.emit(')');
+        };
+        if (this.ts) this.memberKey(() => this.expr(b), left);
+        else left();
         this.b.emit(' in ');
         this.mark(node, 'right', () => this.expr(b));
         this.b.emit(')');
       }
       if (negated) this.b.emit(')');
     });
+  }
+
+  // The key operand of a membership lowering's `in` branch, on the face.
+  // A list or string container takes the `includes` branch, so its `in`
+  // never runs and any value may be sought; any other container's `in`
+  // is a key test, which still takes only a property key.
+  memberKey(container, key) {
+    this._needsMemberKeyHelper = true;
+    this.b.tsOnly(() => { this.b.emit('__ripMemberKey<typeof '); container(); this.b.emit('>()('); });
+    key();
+    this.b.tsOnly(() => this.b.emit(')'));
   }
 
   // ['?:', condition, then, else] — the condition emits bare (like an if
@@ -19093,7 +19158,7 @@ class Emitter {
         this.b.emit('(');
         node.slice(2).forEach((arg, i) => {
           if (i > 0) this.b.emit(', ');
-          this.expr(arg);
+          this.argExpr(arg);
         });
         this.b.emit(')');
       });
@@ -19485,12 +19550,35 @@ const RUNTIME_TABLE = [
       // The style road's writer — its value parameter is the face's
       // __RipCSSProperties alias, armed alongside.
       __style: STYLE_FN_TYPE,
+      // The base every component extends. A component's own `_init` is
+      // private on the face, which a public base member would refuse, so
+      // the face's copy leaves the base's out.
+      __Component: { class: COMPONENT_CLASS, decls: `${OWNER_FRAME_DECLS}\n${TEARDOWN_DECL}`, faceOmits: ['_init(props: Record<string, unknown>): void; '] },
     },
     url: new URL('./runtime/components.js', import.meta.url),
     requires: 'reactive',
     triggers: (sexpr, preds) => containsComponentDecl(sexpr, preds.isComponent),
   },
 ];
+
+// A table entry typed `{ class }` is a class the runtime exports. On the
+// face its injected binding is a value, never a type, so the class is
+// declared under a face name of its own and the binding typed `typeof`
+// it; a subclass's undeclared member then fails against it.
+const faceClassName = (name) => `__Rip${name.replace(/^_+/, '')}`;
+export const _faceRuntimeType = (name, signature) =>
+  typeof signature === 'object' ? `typeof ${faceClassName(name)}` : signature;
+export const _faceClassDecls = (types) => Object.entries(types ?? {})
+  .filter(([, signature]) => typeof signature === 'object')
+  .map(([name, { class: body, decls, faceOmits = [] }]) => {
+    let text = body.replace(new RegExp(`\\b${name}\\b`, 'g'), faceClassName(name));
+    for (const member of faceOmits) {
+      if (!text.includes(member)) throw new Error(`runtime table: '${name}' omits '${member.trim()}' from its face class, which declares no such member`);
+      text = text.replace(member, '');
+    }
+    return `${decls ? `${decls}\n` : ''}declare class ${faceClassName(name)} ${text}`;
+  })
+  .join('\n');
 
 // Inline-mode body text, lazily read and cached per runtime. The
 // export line is the module's ES seam, and a runtime's import of a
@@ -20074,6 +20162,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   emitter.collectTsDirectives(parseResult.sexpr, parseResult.trivia ?? [], source);
   emitter.collectTypeOnlyImports(parseResult.sexpr, source);
   emitter.collectAppAccessors(parseResult.sexpr);
+  emitter.collectValidatorRegistrations(parseResult.sexpr);
   if (emitter.tsNocheck !== null) {
     const programId = stores.idOf(parseResult.sexpr);
     const t = emitter.tsNocheck;
@@ -20244,7 +20333,11 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
         // The aliases the assertion's signatures reference, declared
         // ahead of it under the unit's own synthetic row (declarations
         // hoist, so the position serves the row, not the checker).
-        if (face === 'ts' && unit.types && unit.decls) builder.tsOnly(() => builder.emit(`${unit.decls}\n`));
+        if (face === 'ts' && unit.types) {
+          const decls = [unit.decls, _faceClassDecls(unit.types)].filter(Boolean).join('\n');
+          if (decls !== '') builder.tsOnly(() => builder.emit(`${decls}\n`));
+          if (decls.includes('__RipCSSProperties')) emitter._needsCssProperties = true;
+        }
         builder.emit(`const { ${bindings.map(({ name, local }) => name === local ? name : `${name}: ${local}`).join(', ')} }`);
         // Precise runtime types on the TS face (the table's signatures):
         // the checker reads the declared shapes instead of inferring
@@ -20260,7 +20353,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
         // binding mints — the assertion describes the object the
         // pattern reads from, not the names it binds.
         const types = face === 'ts' && unit.types
-          ? `{ ${bindings.map(({ name }) => `${name}: ${unit.types[name] ?? 'any'}`).join('; ')} }`
+          ? `{ ${bindings.map(({ name }) => `${name}: ${_faceRuntimeType(name, unit.types[name] ?? 'any')}`).join('; ')} }`
           : null;
         // A signature in the assertion may reference a face-declared
         // alias; the tail emission arms it (declarations hoist, so the
@@ -20529,9 +20622,17 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // source() constraint: a top-level stash key, or a DOTTED path under
   // one (legal, untyped at the package surface). Spelled off the stash
   // splice so it tracks the stash by reference, never by copied text.
+  if (emitter._needsMemberKeyHelper === true) {
+    builder.tsOnly(() => builder.emit('\ndeclare function __ripMemberKey<C>(): <K>(k: [C] extends [readonly unknown[] | string] ? K : K & PropertyKey) => PropertyKey;\n'));
+  }
   if (emitter._needsSourceKeyHelper === true) {
     const stashKeys = `keyof import(${JSON.stringify(emitter.appStashSpec)}).__RipStash & string`;
     builder.tsOnly(() => builder.emit(`\ndeclare function __ripSourceKey<const T extends ((${stashKeys}) | \`\${${stashKeys}}.\${string}\`)>(s: T): T;\n`));
+  }
+  if (face === 'ts' && emitter.validatorRegistrations.length > 0) {
+    const entries = emitter.validatorRegistrations
+      .map(([name, fn]) => `${JSON.stringify(name)}: Exclude<ReturnType<typeof ${fn}>, null | undefined>;`).join(' ');
+    builder.tsOnly(() => builder.emit(`\ndeclare module 'rip/validate' { interface Validated { ${entries} } }\n`));
   }
   // The indexed-loop helper's ONE declaration per module (indexedReader).
   // The constraint admits what `.length` and `[i]` genuinely index: a

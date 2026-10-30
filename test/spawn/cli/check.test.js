@@ -5938,3 +5938,154 @@ describeExtended.concurrent('branch narrowing — what the editor says', () => {
     }
   }, 60_000);
 });
+
+// The validator vocabulary types by name in every spelling the runtime
+// accepts: a quoted name or a `:name` symbol, with `!` and `?` riding the
+// name, for the built-in set and for a validator the program registers.
+// A name nothing registers fails the check where it is read.
+describeExtended.concurrent('rip check: validator names over the real server', () => {
+  const codes = async (dir) => JSON.parse((await check(dir, ['--json'])).stdout).map((d) => [d.code, d.file, d.line]);
+
+  test('a symbol name types read and check as its validator', async () => {
+    const dir = workspace({
+      'app.rip': [
+        "import { read } from 'rip/sites'",
+        "import { check, getValidator } from 'rip/validate'",
+        "a: string | null = read('q', :text)",
+        "b: string = read('q', :text!)",
+        "c: number | null = read('n', :int?)",
+        "d: string | null = check('x', :email)",
+        "e: string | null = getValidator(:email)?('x') ?? null",
+        'console.log a, b, c, d, e',
+        '',
+      ].join('\n'),
+    });
+    try { expect(await codes(dir)).toEqual([]); }
+    finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  test('a name no validator answers to fails where it is read, quoted or symbol', async () => {
+    const dir = workspace({
+      'app.rip': [
+        "import { read } from 'rip/sites'",
+        "import { check } from 'rip/validate'",
+        "a = read('q', :txet)",
+        "b = read('q', 'txet!')",
+        "c = check('x', :emial)",
+        "d: number | null = read('q', :text)",
+        'console.log a, b, c, d',
+        '',
+      ].join('\n'),
+    });
+    try {
+      const got = await codes(dir);
+      expect(got.map(([, , line]) => line)).toEqual([3, 4, 5, 6]);
+      expect(got[3][0]).toBe(2322);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  test('a validator the program registers types by its name', async () => {
+    const dir = workspace({
+      'eid.rip': [
+        "import { registerValidator } from 'rip/validate'",
+        "export validEid = (v: unknown): string | null -> if typeof v is 'string' then v else null",
+        'registerValidator(:eid, validEid)',
+        '',
+      ].join('\n'),
+      'app.rip': [
+        "import { read } from 'rip/sites'",
+        "import { check } from 'rip/validate'",
+        "import './eid.rip'",
+        "a: string | null = read('x', :eid)",
+        "b: string = read('x', 'eid!')",
+        "c: string | null = check('x', :eid)",
+        "d = read('x', :eidd)",
+        "e: number | null = read('x', :eid?)",
+        'console.log a, b, c, d, e',
+        '',
+      ].join('\n'),
+    });
+    try {
+      const got = await codes(dir);
+      expect(got.map(([, file, line]) => [file, line])).toEqual([['app.rip', 7], ['app.rip', 8]]);
+      expect(got[1][0]).toBe(2322);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  test('a nameless read answers the whole map', async () => {
+    const dir = workspace({
+      'app.rip': [
+        "import { read } from 'rip/sites'",
+        'all: Record<string, unknown> = read()',
+        "one = read('q')",
+        "s: string = one",
+        'console.log all, s',
+        '',
+      ].join('\n'),
+    });
+    try {
+      const got = await codes(dir);
+      expect(got.map(([code, , line]) => [code, line])).toEqual([[2322, 4]]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+});
+
+// A component's type is the members it declares over the runtime's base
+// class: a name it never declares, static or instance, fails the check
+// rather than reading as `any`.
+describeExtended.concurrent('rip check: component members over the real server', () => {
+  const codes = async (dir) => JSON.parse((await check(dir, ['--json'])).stdout).map((d) => [d.code, d.file, d.line]);
+
+  test('an undeclared static or member fails, in the module and from an importer', async () => {
+    const dir = workspace({
+      't.rip': [
+        'export T = component',
+        '  @code: string',
+        '  render',
+        '    p code',
+        'a = T.nothing',
+        'b = T.new(code: "x").nothing',
+        'console.log a, b',
+        '',
+      ].join('\n'),
+      'use.rip': [
+        "import { T } from './t.rip'",
+        'c = T.nothing',
+        'd: string = T.new(code: "x").code.value',
+        'm = T.new(code: "x").mount',
+        'console.log c, d, m',
+        '',
+      ].join('\n'),
+    });
+    try {
+      expect(await codes(dir)).toEqual([[2339, 't.rip', 5], [2339, 't.rip', 6], [2339, 'use.rip', 2]]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+});
+
+// rip/fake's `factory` makes what the model's own `create` makes, typed
+// from the model it is handed; a model has no factory of its own.
+describeExtended.concurrent('rip check: rip/fake factory over the real server', () => {
+  test('factory answers the model\'s records, one or a list by its count', async () => {
+    const dir = workspace({
+      'app.rip': [
+        "import { factory } from 'rip/fake'",
+        'Patient = schema :model',
+        '  name! string',
+        'run = ->',
+        '  one: Patient = factory!(Patient, 1)',
+        '  built: Patient = factory!(Patient)',
+        '  many: Patient[] = factory!(Patient, 3)',
+        '  bad: string = factory!(Patient, 1)',
+        '  Patient.factory',
+        '  [one, built, many, bad]',
+        'console.log run',
+        '',
+      ].join('\n'),
+    });
+    try {
+      const got = JSON.parse((await check(dir, ['--json'])).stdout).map((d) => [d.code, d.line]);
+      expect(got).toEqual([[2322, 8], [2339, 9]]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+});

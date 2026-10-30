@@ -107,6 +107,14 @@ registers first, so a coercer-name collision rejects loudly and leaves
 the validator registry unchanged — the two tables never disagree about
 a name.
 
+`rip check` types a validator by its name, quoted or as a `:name`
+symbol passed straight to the call, with `!` and `?` riding the name:
+`check value, :email` answers `string | null`, and a name no validator
+answers to fails the check. A registration joins that vocabulary when it
+is a top-level `registerValidator :name, fn` with `fn` a bound function;
+the entry answers what `fn` returns. One made inside a function still
+runs, out of the checker's sight.
+
 ## Test
 
 ```bash

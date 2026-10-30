@@ -29,7 +29,10 @@ import time from 'rip/time'
 
 type Validator = (value: unknown) => unknown
 
-export type Validated =
+# Every validator by name, and the value it answers. An interface so a
+# program's `registerValidator(:name, fn)` can add its own entry: the
+# compiler declares it, typed by what `fn` returns.
+export interface Validated
   id: number, int: number, whole: number, float: number
   money: number, money_even: number, cents: number
   bool: boolean, truthy: boolean, falsy: boolean
@@ -313,7 +316,15 @@ export def registerValidator(name: string | symbol, fn: Validator, opts: { raw?:
     fail "validator '#{nameOf name}' raw flag must be boolean"
   define nameOf(name), fn, opts.raw is true
 
-export def getValidator(name: string | symbol): Validator | undefined
+# A validator's name, quoted or as a `:name` symbol. A symbol passed
+# straight to a call carries its name in the face, which this reads.
+export type ValidatorName<K extends string> = K | symbol & { readonly ripSymbol?: K }
+
+type GetValidatorFn =
+  <K extends keyof Validated>(name: ValidatorName<K>): ((value: unknown) => Validated[K] | null) | undefined
+  (name: string | symbol): Validator | undefined
+
+export getValidator: GetValidatorFn = (name: string | symbol) ->
   registry.get(nameOf name)?.prepared
 
 # Whether a validator takes its value untouched: the seam callers
@@ -328,14 +339,10 @@ export def validatorNames(): string[]
 # untouched; every other validator receives its string form, and a value
 # with none — absent, an array, a plain object — answers null rather
 # than validating as "" or "[object Object]".
-type CheckFn =
-  <K extends keyof Validated>(value: unknown, type: K): Validated[K] | null
-  (value: unknown, type: string | symbol): unknown
-
-export check: CheckFn = (value: unknown, type: string | symbol) ->
-  type = nameOf type
-  entry = registry.get type
-  fail "unknown validator '#{type}'" unless entry
-  return entry.fn(value) if entry.raw
+export def check<K extends keyof Validated>(value: unknown, type: ValidatorName<K>): Validated[K] | null
+  name = nameOf type
+  entry = registry.get name
+  fail "unknown validator '#{name}'" unless entry
+  return entry.fn(value) as Validated[K] | null if entry.raw
   return null if not value? or Array.isArray(value) or Object.getPrototypeOf(value) in [Object.prototype, null]
-  entry.fn String(value)
+  entry.fn(String(value)) as Validated[K] | null

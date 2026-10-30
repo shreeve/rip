@@ -87,6 +87,8 @@ const REGION_SHAPES = [
   /^__ripRoute\($/u,                                       // route-literal wrap opener (href / push / replace checking)
   /^declare function __ripRoute<const T extends string>\(s: T extends `\/\$\{string\}` \? .* : T\): T;$/su, // the route helper declare, the path-part conditional with the union inlined
   /^__ripSourceKey\($/u,                                   // stash-key wrap opener (source() literal checking)
+  /^__ripMemberKey<typeof .+>\(\)\($/su,                  // membership key wrap opener (a list's `in` branch takes any value)
+  /^declare function __ripMemberKey<C>\(\): <K>\(k: \[C\] extends \[readonly unknown\[\] \| string\] \? K : K & PropertyKey\) => PropertyKey;$/u, // the membership key helper declare
   /^__ripNarrowed\($/u,                                    // narrowed-container wrap opener (a container passed under the branch that tested its member)
   /^declare function __ripNarrowed<T extends \{ value: unknown \}>\(c: T\): \{ readonly value: NonNullable<T\['value'\]>; read\(\): NonNullable<T\['value'\]> \};$/u, // the narrowed-container helper declare
   /^stash = __ripAmbientStash\(0 as any as .*\);$/su,           // the stash ambience member (class road)
@@ -805,13 +807,16 @@ describe('TS-face emission pins', () => {
   test('the components, stdlib, and reactive runtimes type their user-callable names, with the context aliases declared ahead', () => {
     const src = "App = component\n  offer open := false\n  render\n    slot\nconsole.log zip([1], ['a']), getContext(App, 'open')\n";
     const r = compile(src, { runtimeDelivery: 'inline', face: 'ts' });
-    expect(r.code).toContain("type __RipProvider = abstract new (...args: never[]) => { __offers?: object };\ntype __RipOffers<P extends __RipProvider> = NonNullable<InstanceType<P>['__offers']>;\nconst { __state, ");
+    expect(r.code).toContain("type __RipProvider = abstract new (...args: never[]) => { __offers?: object };\ntype __RipOffers<P extends __RipProvider> = NonNullable<InstanceType<P>['__offers']>;\ntype __RipOwnerFrame = ");
+    // The base class declares under its face name, ahead of the destructure.
+    expect(r.code).toMatch(/\ndeclare class __RipComponent \{ constructor\(props\?: Record<string, unknown>\); [^\n]*\nconst \{ __state, /);
     const at = r.code.indexOf(' as { __state:');
     expect(at).toBeGreaterThan(-1);
     const assertion = r.code.slice(at, r.code.indexOf(';\n', at));
     expect(assertion).toContain("setContext: (key: string, value: unknown) => void; getContext: <P extends __RipProvider, K extends keyof __RipOffers<P>>(provider: '__offers' extends keyof InstanceType<P> ? P : never, key: K) => __RipOffers<P>[K]; hasContext: <P extends __RipProvider>(provider: '__offers' extends keyof InstanceType<P> ? P : never, key: keyof __RipOffers<P>) => boolean;");
     expect(assertion).toContain('__setErrorHandler: (handler: ((error: unknown) => void) | null) => ((error: unknown) => void) | null; __handleError: (error: unknown) => void; __catchErrors: <F extends (...args: never[]) => unknown>(fn: F) =>');
-    for (const name of ['__Component', '__reconcile', '__lis', '__ownerFrame']) expect(assertion).toContain(`${name}: any`);
+    expect(assertion).toContain('__Component: typeof __RipComponent;');
+    for (const name of ['__reconcile', '__lis', '__ownerFrame']) expect(assertion).toContain(`${name}: any`);
     const sat = r.code.indexOf(' as { abort:');
     expect(sat).toBeGreaterThan(-1);
     const stdlib = r.code.slice(sat, r.code.indexOf(';\n', sat));

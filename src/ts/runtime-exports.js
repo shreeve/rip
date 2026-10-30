@@ -11,7 +11,7 @@
 
 // src/runtime/reactive.js — the owner-frame seam the render layer and the
 // components runtime share.
-const OWNER_FRAME_DECLS = [
+export const OWNER_FRAME_DECLS = [
   'type __RipOwnerFrame = { readonly depth: number; readonly disposed: boolean; readonly size: number; add(disposer: () => void): void; remove(disposer: () => void): void; dispose(): void };',
   'type __RipOwnerToken = { frame: __RipOwnerFrame; prev: __RipOwnerFrame | null };',
 ].join('\n');
@@ -39,6 +39,7 @@ const ORM_DECLS = [
 // the registry reads statics off — any function stamped with an HMR
 // identity — and a registered instance is a component whose constructor
 // carries one; a component class is a definition that constructs.
+export const TEARDOWN_DECL = 'type __RipTeardown = { state: string; hooks: boolean; removeDOM: boolean };';
 const COMPONENTS_DECLS = [
   'type __RipHmrSignature = { shape?: unknown; impl?: unknown; state?: readonly string[]; computed?: readonly string[]; props?: readonly string[]; gates?: unknown; extends?: unknown; inits?: Record<string, string> };',
   'type __RipHmrDefinition = Function & { __hmrId?: string; __hmrSig?: __RipHmrSignature };',
@@ -52,23 +53,23 @@ const COMPONENTS_DECLS = [
   'type __RipGateMetadata = { gates: readonly __RipGateBinding[]; parent?: __Component | null; stash?: unknown; router?: unknown };',
   'type __RipListBlock = { c(): void; m(parent: Node, anchor: Node | null): void; p(ctx: unknown, item: unknown, index: number, ...outer: unknown[]): void; d(): void; _s?: boolean; _first?: Node | null };',
   'type __RipListState = { keys: unknown[]; items?: unknown[]; blocks: __RipListBlock[] };',
-  'type __RipTeardown = { state: string; hooks: boolean; removeDOM: boolean };',
+  TEARDOWN_DECL,
 ].join('\n');
 
 // The base class: the public surface is construction, `mount`, and
 // `unmount`; every other member is the runtime's own, declared so a
 // subclass meets the member set the base carries.
-const COMPONENT_CLASS = '{ '
+export const COMPONENT_CLASS = '{ '
   + 'constructor(props?: Record<string, unknown>); '
   + 'mount(target?: Node | string): this; '
   + 'unmount(options?: { removeDOM?: boolean }): void; '
   + 'static mount(target?: Node | string): __Component; '
   + '_state: string | undefined; _owner: __Component | null | undefined; _parent: __Component | null | undefined; '
-  + 'stash: unknown; router: unknown; children: unknown; rest: unknown; '
+  + 'stash?: unknown; router?: unknown; children?: unknown; rest?: unknown; '
   + '_hmrPropKeys: string | undefined; _rest: Record<string, unknown> | undefined; _asChild: boolean | undefined; '
   + '_frame: __RipOwnerFrame | undefined; _initFailed: boolean | undefined; _projectionOwner: __Component | null | undefined; '
-  + '_restHandlers: unknown; _hmrRebindPending: boolean | undefined; _root: unknown; _children: unknown; _restWriters: unknown; '
-  + '_refCleanups: unknown; _nodes: unknown; _inheritedEl: unknown; _inheritedInst: unknown; _inheritedOwn: unknown; _target: unknown; '
+  + '_restHandlers: unknown; _hmrRebindPending: boolean | undefined; _root: unknown; _children: __Component[] | null | undefined; _restWriters: unknown; '
+  + '_refCleanups: (() => void)[] | null | undefined; _nodes: unknown; _inheritedEl: unknown; _inheritedInst: unknown; _inheritedOwn: unknown; _target: unknown; '
   + '_hmrOrphans: __Component[] | null | undefined; _hmrReleasing: boolean | undefined; _hmrReset: string[] | undefined; _hmrResetPending: unknown; '
   + '_bound(name: string): (...args: unknown[]) => unknown; '
   + '_init(props: Record<string, unknown>): void; '
@@ -76,7 +77,7 @@ const COMPONENT_CLASS = '{ '
   + '_endProjection(token: { prev: __Component | null; owner: __Component | null }): void; '
   + '_setChildren(value: unknown): void; _adoptChild(): unknown; _rehost(): void; _rehostAbove(prev: unknown): void; '
   + '_updateProp(name: string, value: unknown): void; _setRestProp(key: string, value: unknown): void; '
-  + '_applyRestToInheritedEl(): void; _mergeRestStyle(own: unknown): unknown; '
+  + '_applyRestToInheritedEl(): void; _mergeRestStyle<S extends __RipCSSProperties | string | null | undefined>(own: S): S | (this extends { rest?: { value: { style?: infer T } } } ? NonNullable<T> : never); '
   + '_applyInheritedProp(host: unknown, key: string, value: unknown): void; _applyPlainInheritedProp(host: unknown, key: string, value: unknown): void; '
   + '_beginMount(): void; _mountCreate(): boolean; _mountSetup(failurePlaceholder?: unknown): unknown; _failMount(error: unknown): void; '
   + '_dispose(report: unknown, unmountChild: unknown): void; _detachDOM(report: unknown, removeDOM: unknown): void; '
@@ -158,7 +159,6 @@ export const RUNTIME_EXPORT_TYPES = {
   components: {
     decls: `${OWNER_FRAME_DECLS}\n${COMPONENTS_DECLS}`,
     types: {
-      __Component: { class: COMPONENT_CLASS },
       __pushComponent: '(component: __Component | null) => __Component | null',
       __popComponent: '(prev: __Component | null) => void',
       __lis: '(arr: readonly number[]) => number[]',

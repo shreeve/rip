@@ -1001,13 +1001,21 @@ export function exactSpanMapper(mappings) {
 // runtime helpers, the `_ref` temps, the render locals (`_el3`, `_t1`,
 // `_inst9`, `_factoryChildren`), the block factories (`create_block_5`)
 // and their loop-iterable thunks (`create_block_5_iter`),
-// and the component runtime's private surface (`_init`, `_teardown`,
-// `_mountSetup`, …). A `_`-prefixed name the SOURCE spells is the
-// author's own and stays offered.
+// and the component runtime's private surface: every `_` member of the
+// base class every component extends (COMPONENT_CLASS in
+// src/ts/runtime-exports.js, which a unit test holds this list to), and
+// the lowering's own `_create`/`_setup`. A `_`-prefixed name the SOURCE
+// spells is the author's own and stays offered.
 const RUNTIME_PRIVATE = new Set([
-  '_init', '_teardown', '_mountSetup', '_mountCreate', '_beginMount', '_failMount', '_hmrRerender',
-  '_setRestProp', '_updateProp', '_applyInheritedProp', '_applyPlainInheritedProp', '_applyRestToInheritedEl',
-  '_adoptChild',
+  '_state', '_owner', '_parent', '_hmrPropKeys', '_rest', '_asChild', '_frame', '_initFailed',
+  '_projectionOwner', '_restHandlers', '_hmrRebindPending', '_root', '_children', '_restWriters',
+  '_refCleanups', '_nodes', '_inheritedEl', '_inheritedInst', '_inheritedOwn', '_target', '_hmrOrphans',
+  '_hmrReleasing', '_hmrReset', '_hmrResetPending', '_bound', '_init', '_beginProjection', '_endProjection',
+  '_setChildren', '_adoptChild', '_rehost', '_rehostAbove', '_updateProp', '_setRestProp',
+  '_applyRestToInheritedEl', '_mergeRestStyle', '_applyInheritedProp', '_applyPlainInheritedProp',
+  '_beginMount', '_mountCreate', '_mountSetup', '_failMount', '_dispose', '_detachDOM', '_teardown',
+  '_teardownUntracked', '_hmrRelease', '_hmrReleaseUntracked', '_hmrRebind', '_hmrApplyResets',
+  '_hmrApplyProps', '_hmrDrainOrphans', '_hmrRerender', '_create', '_setup',
 ]);
 export function isScaffoldingLabel(label, source = '') {
   if (/^__/.test(label) || /^_ref\d*$/.test(label)) return true;
@@ -1057,6 +1065,8 @@ export function scrubFaceArtifacts(text) {
     .replace(/\b__RipClassValue\b/g, 'ClassValue')
     .replace(/\b__RipChildren\b/g, 'Children')
     .replace(/\b__RipCSSProperties\b/g, 'CSSProperties')
+    // The runtime base every component extends.
+    .replace(/\b__RipComponent\b/g, 'Component')
     // The schema and orm runtimes' face vocabulary reads under the names
     // docs/ORM.md uses for the same shapes.
     .replace(/\b__RipSchemaIssue\b/g, 'SchemaIssue')

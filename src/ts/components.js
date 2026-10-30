@@ -937,8 +937,7 @@ export const restAliasName = (tag) => `__RipRest_${tag.replace(/[^A-Za-z0-9_]/g,
 // a component that extends a component, and `{}` for one with no host.
 // A parent's `@event:` on the component indexes `el` to claim the
 // handler's `target`, so a listener on a hostless component is a miss
-// in `{}` — a record rather than an absent member because the class
-// road extends an `any` base, where an absent member indexes silently.
+// in `{}`.
 export const HOST = '__host';
 export const hostTypeText = (info) => {
   if (info.extendsTag !== null) return `{ el: ${hostText(info.extendsTag, SVG_ONLY_TAGS.has(info.extendsTag))} }`;
@@ -960,6 +959,11 @@ export const restOfComponentText = (info) => {
   const keys = [...[...own].map((k) => `'${k}'`), '`__bind_${string}__`'].join(' | ');
   return `(NonNullable<ConstructorParameters<typeof ${info.extendsComponent}>[0]> extends infer __P ? (__P extends unknown ? Omit<__P, ${keys}> : never) : never)${style}`;
 };
+// What the rest VIEW holds: the passthrough props with each container
+// read through, as the runtime's view reads a held container's value.
+// The raw map behind it (`_rest`) keeps the containers the caller passed.
+export const restViewOfComponentText = (info) =>
+  `{ [K in keyof (${restOfComponentText(info)})]: (${restOfComponentText(info)})[K] extends infer __V ? (__V extends { read(): infer __R } ? __R : __V) : never }`;
 // Every DOM-lib global the minted declaration text can spell: `Node`
 // in the children union, the tag map under `extends`. A declaration
 // file naming one carries its own `dom` lib reference (src/ts/dts.js),
@@ -1124,11 +1128,9 @@ export const componentCtorMembers = (info, name, typeParams = '', self = name, o
 export const AMBIENT_FIELDS = ['stash', 'router', 'params', 'query'];
 
 // The API every component instance carries from the runtime BASE
-// (src/runtime/components.js). The inlined runtime is destructured
-// through a cast that types `__Component` as `any`, so a component's
-// `class extends __Component` inherits nothing at the type level: both
-// roads must DECLARE this surface, or the class instance is not
-// assignable to the constructor type its own binding publishes.
+// (src/runtime/components.js). Both roads DECLARE this surface: the
+// declaration road's companion interface has no base to inherit it from,
+// and the class road states the members the face's base declares.
 // A null `returns` is the INSTANCE type, which each road spells its own
 // way — the companion interface by name, the class road as `this`.
 const RUNTIME_API = [
@@ -1157,10 +1159,12 @@ export const runtimeApiDeclares = (self) =>
 // interface), the lowering reads these only where the runtime injected
 // them, and an optional here would draw possibly-undefined on every
 // such read. An author member of the same name wins the line, as on
-// the interface.
+// the interface. Without a discovered stash the members are `any` on
+// both roads: the runtime base declares them `unknown`, which no read of
+// an app's undiscovered stash could pass.
 export const ambientClassDeclares = (info) => {
-  if (!info.appStashSpec) return [];
   const taken = new Set(info.members.map((m) => m.name));
+  if (!info.appStashSpec) return AMBIENT_FIELDS.filter((name) => !taken.has(name)).map((name) => `declare ${name}: any;`);
   const lines = [];
   for (const name of AMBIENT_FIELDS) {
     if (taken.has(name)) continue;
@@ -1382,7 +1386,7 @@ export function instanceTypeLines(info, selfType, { road = 'dts' } = {}) {
   // The rest view: the passthrough object, named on the face and inline
   // in the declarations (a .d.ts owes its reader a self-contained type).
   if (info.extendsTag !== null) lines.push({ segs: [{ text: `rest: ${restContainerType(road === 'face' ? restAliasName(info.extendsTag) : restPassthroughText(info.extendsTag))};` }] });
-  else if (info.extendsComponent !== null) lines.push({ segs: [{ text: `rest: ${restContainerType(restOfComponentText(info))};` }] });
+  else if (info.extendsComponent !== null) lines.push({ segs: [{ text: `rest: ${restContainerType(restViewOfComponentText(info))};` }] });
   lines.push({ segs: [{ text: `${HOST}?: ${hostTypeText(info)};` }] });
   for (const text of runtimeApiMembers(selfType)) lines.push({ segs: [{ text }] });
   return lines;

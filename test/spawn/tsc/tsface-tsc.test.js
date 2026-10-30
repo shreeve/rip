@@ -218,6 +218,18 @@ const CLEAN_ROWS = [
  'mk = ->\n  S = schema :shape\n    name! string\n    size? integer\n    label: (p) -> p + @name\n  p = S.parse({})\n  n: string = p.name\n  n = "z"\n  S',
  'mk = ->\n  S = schema :shape\n    a! string\n    full: ~> @a\nv = mk().parse({})\ns: string = v.full\ns = "z"',
  'run = ->\n  U = schema :model\n    name! string\n    active? boolean\n    @scope :live, -> @where(active: true)\n  u = await U.find(1)\n  s: string = u.name if u\n  rows = await U.live().all()\n  s = "z"',
+    // a scope takes its declared parameters, and every chain step keeps
+    // the model's scopes, from the model and from a scope alike
+ 'P = schema :model\n  name! string\n  @scope :named, (n: string) -> @where(name: n)\n  @scope :live, -> @where(name: "a")\nq: PQuery = P.named("a").where(name: "b").live()\nq = P.where(name: "b").limit(2).named("c")\nq = q.includes().unscoped().withDeleted()',
+    // `in` over a list is membership, so any value may be sought in it,
+    // through a bound container and a constructed one alike
+ 'f = (x: unknown, xs: unknown[], s: string, word: string) ->\n  a: boolean = x in xs\n  b: boolean = x in xs.slice()\n  c: boolean = s in word\n  d: boolean = "k" in { k: 1 }\n  [a, b, c, d]\nconsole.log f',
+    // a required field its transform supplies is optional at create: the
+    // transform reads the whole input, and `!` judges what it returns
+ 'T = schema :model\n  eid! string, -> it.eid or "minted"\n  name! string\nrun = ->\n  t = await T.create(name: "x")\n  s: string = t.eid',
+    // order takes trusted SQL, a {field: direction} object, or a list of
+    // them; order, limit, and offset start a chain from the model
+ 'O = schema :model\n  name! string\n  rank? integer\nrun = ->\n  a = await O.order(name: "desc").limit(2).offset(1).all()\n  b = await O.where(name: "x").order([{ rank: "ASC" }, { name: "desc nulls last" }]).all()\n  c = await O.order("name ASC").first()\n  d = await O.limit(5).order(id: "asc").all()\n  n: string = a[0].name',
  'post = (path: string, opts: { input: Schema<unknown> }) -> path\nrun = ->\n  Signup = schema :input\n    name! 2..20\n    age? ~integer\n  post "/signup", input: Signup',
  'mk = (c: boolean) ->\n  if c\n    S = schema :shape\n      a! string\n  v = S.parse({})\n  a: string = v.a\n  a = "z"\n  S',
     //  the component member model — every member kind's declare,
@@ -390,6 +402,35 @@ describeTscExtended('tier 2: self-contained typed faces check CLEAN — annotati
     const { status, output } = tscRun({ 'mod.ts': `${faced.code}\nexport {};\n` });
     expect(status).not.toBe(0);
     expect(output).toContain('TS2322');
+  }, TSC_TIMEOUT);
+
+  test('a scope call has teeth: an argument outside the declared parameter type, or one too many, FAILS at the call', () => {
+    const program = (call) => `P = schema :model\n  name! string\n  @scope :owned, (ownerId: number) -> @where(id: ownerId)\n  @scope :live, -> @where(name: "a")\nmaybe = (): number | null -> null\n${call}\n`;
+    for (const [call, code] of [['P.owned("x")', 'TS2345'], ['P.owned(maybe())', 'TS2345'], ['P.where(name: "a").owned("x")', 'TS2345'], ['P.live(1)', 'TS2554']]) {
+      const faced = compile(program(call), { runtimeDelivery: 'none', face: 'ts' });
+      const { status, output } = tscRun({ 'ambient.d.ts': AMBIENT, 'mod.ts': `${faced.code}\nexport {};\n` });
+      expect(status, call).not.toBe(0);
+      expect(output, call).toContain(code);
+    }
+  }, TSC_TIMEOUT);
+
+  test('a key test has teeth: `in` over an object still takes only a property key', () => {
+    for (const body of ['a = x in o', 'a = x in (-> o)()']) {
+      const faced = compile(`f = (x: unknown, o: Record<string, number>) ->\n  ${body}\n  a\nconsole.log f\n`, { runtimeDelivery: 'none', face: 'ts' });
+      const { status, output } = tscRun({ 'mod.ts': `${faced.code}\nexport {};\n` });
+      expect(status, body).not.toBe(0);
+      expect(output, body).toContain('TS2345');
+    }
+  }, TSC_TIMEOUT);
+
+  test('order has teeth: a key the model lacks, a direction it does not take, or a limit that is not a number FAILS', () => {
+    const program = (call) => `O = schema :model\n  name! string\n${call}\n`;
+    for (const [call, code] of [['O.order(nmae: "asc")', 'TS2353'], ['O.order(name: "down")', 'TS2345'], ['O.where(name: "a").order([{ nmae: "asc" }])', 'TS2353'], ['O.limit("2")', 'TS2345']]) {
+      const faced = compile(program(call), { runtimeDelivery: 'none', face: 'ts' });
+      const { status, output } = tscRun({ 'ambient.d.ts': AMBIENT, 'mod.ts': `${faced.code}\nexport {};\n` });
+      expect(status, call).not.toBe(0);
+      expect(output, call).toContain(code);
+    }
   }, TSC_TIMEOUT);
 
   test('the function-scope story has teeth: a parse result read against the wrong type FAILS inside the function (TS2322)', () => {

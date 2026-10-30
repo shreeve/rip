@@ -596,14 +596,16 @@ describe('component declarations: the class shape, the props surface, the extend
     expect(manualWrap).toContain("Omit<__P, 'children' | `__bind_${string}__`>");
   });
 
-  test('extends a component: the props surface is the host\'s less the declared keys, and the rest view holds that object', () => {
+  test('extends a component: the props surface is the host\'s less the declared keys, and the rest view holds that object read through', () => {
     const d = compile("import { Popup } from './popup.rip'\nSheet = component extends Popup\n  @side := 'left'\n  render\n    Popup data-side: @side\n      slot\n").declarations;
     const omitted = "(NonNullable<ConstructorParameters<typeof Popup>[0]> extends infer __P ? (__P extends unknown ? Omit<__P, 'children' | 'data-side' | 'side' | `__bind_${string}__`> : never) : never)";
     // The parameter is required under a component host (the host may
     // carry a required prop this surface cannot name).
     expect(d).toContain(`new (props: { side?: string`);
     expect(d).toContain(`children?: Node | string | number | boolean | null } & ${omitted}): Sheet;`);
-    expect(d).toContain(`rest: { readonly value: ${omitted}; read(): ${omitted}; touch(): void };`);
+    // The view reads a held container through, as the runtime's does.
+    const view = `{ [K in keyof (${omitted})]: (${omitted})[K] extends infer __V ? (__V extends { read(): infer __R } ? __R : __V) : never }`;
+    expect(d).toContain(`rest: { readonly value: ${view}; read(): ${view}; touch(): void };`);
     expect(d).not.toContain('HTMLElementTagNameMap["Popup"]');
     expect(d).toContain("import { Popup } from './popup.rip';");
   });
