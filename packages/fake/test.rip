@@ -1,10 +1,10 @@
 # ==============================================================================
-# fake tests — generators, determinism, and Model.factory
+# fake tests — generators, determinism, and factory
 # ==============================================================================
 
 import { rmSync } from 'node:fs'
 import { test, eq, ok, throws } from 'rip/testing'
-import { fake } from 'rip/fake'
+import { fake, factory } from 'rip/fake'
 import * as mod from 'rip/fake'
 import { toPhone } from 'rip/validate'
 import { __schemaSetAdapter } from '../../src/runtime/orm.js'
@@ -14,8 +14,8 @@ import { recordingAdapter, row } from '../../test/support/recording-adapter.js'
 
 console.log "\nPackage"
 
-test "module exports fake and the factory field seam", ->
-  eq Object.keys(mod).sort(), ['__fakeFieldValue', 'fake']
+test "module exports fake, factory, and the factory field seam", ->
+  eq Object.keys(mod).sort(), ['__fakeFieldValue', 'factory', 'fake']
   eq typeof fake.firstName, 'function'
   eq typeof fake.phone, 'function'
   eq typeof fake.seed, 'function'
@@ -154,9 +154,9 @@ test "maybe honors probability edges; unique refuses exhaustion", ->
     exhausted = /exhausted/.test String(e?.message or e)
   ok exhausted, 'unique throws after max retries'
 
-# ==[ Model.factory ]==
+# ==[ factory ]==
 
-console.log "\nModel.factory"
+console.log "\nfactory"
 
 FakePatient = schema :model
   firstName!  string
@@ -194,27 +194,30 @@ reset = ->
 
 inserts = -> adapter.calls.filter((c) -> /INSERT/i.test(c.sql)).length
 
+test "a model carries no factory of its own", ->
+  eq typeof (FakePatient as unknown as Record<string, unknown>).factory, 'undefined'
+
 test! "signed counts: 0/-1 build one, -3 builds three, no INSERT", ->
   reset()
-  for p in [FakePatient.factory!(0), FakePatient.factory!(-1)]
+  for p in [factory!(FakePatient, 0), factory!(FakePatient, -1)]
     ok p.firstName.length > 0
     ok p.lastName.length > 0
-  ary = FakePatient.factory!(-3)
+  ary = factory!(FakePatient, -3)
   eq ary.length, 3
   eq inserts(), 0
 
 test! "signed counts: 1 creates one, 3 creates three", ->
   reset()
-  one = FakePatient.factory! 1
+  one = factory! FakePatient, 1
   ok not Array.isArray one
-  ary = FakePatient.factory! 3
+  ary = factory! FakePatient, 3
   eq ary.length, 3
   eq inserts(), 4
 
 test! "schema-derived values: enums sampled, email/phone shapes valid", ->
   reset()
   fake.seed 7
-  for p in FakePatient.factory!(-10)
+  for p in factory!(FakePatient, -10)
     ok ['M', 'F', 'O', 'U'].includes(p.sex) if p.sex?
     ok /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(p.email) if p.email?
     ok /^\(\d{3}\) \d{3}-\d{4}/.test(p.phone) if p.phone?
@@ -222,17 +225,17 @@ test! "schema-derived values: enums sampled, email/phone shapes valid", ->
 
 test! "overrides win; a declared seed recipe wins over derivation", ->
   reset()
-  p = FakePatient.factory! 0, firstName: 'Zed', sex: 'M'
+  p = factory! FakePatient, 0, firstName: 'Zed', sex: 'M'
   eq p.firstName, 'Zed'
   eq p.sex, 'M'
-  s = FakeSeeded.factory! 0
+  s = factory! FakeSeeded, 0
   eq s.firstName, 'Recipe'
-  s2 = FakeSeeded.factory! 0, lastName: 'Override'
+  s2 = factory! FakeSeeded, 0, lastName: 'Override'
   eq s2.lastName, 'Override'
 
 test! "pipe tables create exact rows, typed by the schema", ->
   reset()
-  made = FakeCatalog.factory! """
+  made = factory! FakeCatalog, """
     code   | name                 | price
     005009 | Complete Blood Count | 2800
     322000 | Basic Metabolic      | 4200
@@ -247,9 +250,9 @@ test! "required foreign keys are never invented", ->
   reset()
   failed = false
   try
-    FakeChild.factory! 1
+    factory! FakeChild, 1
   catch e
     failed = /required foreign key/.test String(e?.message or e)
   ok failed, 'persisting without the FK throws the named error'
-  built = FakeChild.factory! 0, fakeOwnerId: 7
+  built = factory! FakeChild, 0, fakeOwnerId: 7
   ok built.label?

@@ -172,7 +172,7 @@ const RESERVED_STATIC = new Set([
   'parse', 'array', 'safe', 'ok', 'parseAsync', 'safeAsync', 'okAsync', 'toJSONSchema',
   'find', 'findMany', 'with', 'where', 'all', 'first', 'count', 'create', 'toSQL',
   'includes', 'upsert', 'insertMany', 'updateAll', 'deleteAll', 'withDeleted', 'onlyDeleted',
-  'unscoped', 'factory',
+  'unscoped',
 ]);
 // Names a @scope may not take: the model statics above plus the
 // builder-only chain methods — scopes install on both surfaces.
@@ -4094,8 +4094,8 @@ const schema = {
 };
 
 // The last two are the build-an-unsaved-instance seam rip/fake's
-// Model.factory() augmentation composes with — normalize caller
-// input, construct without saving.
+// factory composes with — normalize caller input, construct without
+// saving.
 export { schema, __schemaSetAdapter, transaction, adoptTransaction, txHandle, connect, runSQL, adapterFor, adapterConfigured, quoteIdent, renderCreate, renderIndex, isAutoUniqueIndex, normalizePersistenceInput, constructInputInstance, sqlEnumType, sqlEnumMembers, sequenceSetting };
 
 // Process doorbell for packages that must not hard-import this file

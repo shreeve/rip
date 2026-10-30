@@ -11,9 +11,8 @@
 # seeded PRNG (mulberry32) so tests reproduce byte-for-byte; fake.seed()
 # returns to Math.random.
 #
-# Importing this package also installs Model.factory() on every :model
-# schema — one polymorphic verb for fabricating records, deriving
-# plausible values straight from the schema declarations.
+# `factory(Model, …)` fabricates a :model's records — one polymorphic
+# verb, deriving plausible values straight from the schema declarations.
 # ==============================================================================
 
 import { SchemaDef } from '../../src/runtime/schema.js'
@@ -24,7 +23,7 @@ import { normalizePersistenceInput, constructInputInstance } from '../../src/run
 type Relation = { kind: string, optional?: boolean, foreignKey: string }
 type Field = { name: string, typeName: string, literals: string[] | null }
 type Norm = { fields: Map<string, Field>, methods: Map<string, (...args: unknown[]) => unknown>, relations: Map<string, Relation> }
-type Model = SchemaDef & { _assertModel: (api: string) => void, create: (data: Record<string, unknown>) => Promise<unknown>, factory: (num?: number | string, ...args: unknown[]) => unknown }
+type Model = SchemaDef & { _assertModel: (api: string) => void, create: (data: Record<string, unknown>) => Promise<unknown> }
 
 # ==[ Randomness ]==
 
@@ -317,7 +316,7 @@ export fake = {
   word, words, sentence, date, datetime, unique, table, csv, tsv, psv,
 }
 
-# ==[ Schema-driven derivation (used by Model.factory) ]==
+# ==[ Schema-driven derivation (used by factory) ]==
 #
 # Given a field descriptor from the schema runtime, produce a plausible
 # value. The schema carries the semantics — enum literals, email/phone/
@@ -371,16 +370,16 @@ export __fakeFieldValue = (f: Field, ctx: Ctx = {}): string | number | boolean |
       if f.typeName is 'text' then sentence() else words 2
     else undefined
 
-# ==[ Model.factory — schema-driven fabrication ]==
+# ==[ factory — schema-driven fabrication ]==
 #
 # One polymorphic verb, sign says persisted (trust/sinatra heritage):
 #
-#   Model.factory(5)      five created (persisted) instances
-#   Model.factory(1)      one created instance
-#   Model.factory(0)      one built (unsaved) instance   — the default
-#   Model.factory(-1)     one built (unsaved) instance
-#   Model.factory(-3)     three built (unsaved) instances
-#   Model.factory("…|…")  pipe-table literal: exact rows, all created
+#   factory(Model, 5)      five created (persisted) instances
+#   factory(Model, 1)      one created instance
+#   factory(Model, 0)      one built (unsaved) instance   — the default
+#   factory(Model, -1)     one built (unsaved) instance
+#   factory(Model, -3)     three built (unsaved) instances
+#   factory(Model, "…|…")  pipe-table literal: exact rows, all created
 #
 # Attribute derivation, lowest to highest precedence: schema-derived
 # fakes -> the model's own `seed` method (a recipe returning an
@@ -443,13 +442,19 @@ __factoryTableRows = (norm, text) ->
         else v
     row
 
-(SchemaDef.prototype as Model).factory = (num = 0, ...args) ->
-  @_assertModel 'factory'
-  norm = @_normalize() as Norm
+# A model is anything whose `create` makes its records; factory makes the
+# same records. A literal count of 0, 1, or -1 makes one; any other count,
+# and a pipe-table string, make a list.
+def factory<I>(model: { create: (data: never) => Promise<I> }, num?: 0 | 1 | -1, ...args: unknown[]): Promise<I>
+def factory<I>(model: { create: (data: never) => Promise<I> }, num: number | string, ...args: unknown[]): Promise<I[]>
+export def factory(model: { create: (data: never) => Promise<unknown> }, num: number | string = 0, ...args: unknown[]): Promise<unknown>
+  target = model as unknown as Model
+  target._assertModel 'factory'
+  norm = target._normalize() as Norm
 
   if typeof num is 'string'
     out = []
-    out.push @create!(row) for row in __factoryTableRows(norm, num)
+    out.push target.create!(row) for row in __factoryTableRows(norm, num)
     return out
   throw Error.new 'fake: factory(n) expects an integer count or a pipe-table string' unless Number.isInteger num
 
@@ -459,18 +464,18 @@ __factoryTableRows = (norm, text) ->
   seedFn = (norm.methods.get('seed') or null) as ((...args: unknown[]) => Record<string, unknown> | null | undefined) | null
   overrides = if not seedFn and args.length is 1 and args[0] and typeof args[0] is 'object' then args[0] else null
 
-  make = =>
+  make = ->
     derived = __factoryDerive norm, overrides ?? {}
-    custom = if seedFn then seedFn.apply!(this, args) else overrides
+    custom = if seedFn then seedFn.apply!(target, args) else overrides
     data: Record<string, unknown> = { ...derived, ...(custom or {}) }
-    norm.relations.forEach (rel) =>
+    norm.relations.forEach (rel) ->
       return unless rel.kind is 'belongsTo' and not rel.optional
       fk = __camel rel.foreignKey
       if persist and not data[fk]?
-        throw Error.new "fake: #{@name}.factory() — required foreign key #{fk} is not invented; pass it explicitly (e.g. factory(n, {#{fk}: parent.id}))"
-    return @create!(data) if persist
-    canonical = normalizePersistenceInput!(this, data, { skipEnsures: true, api: 'factory()' })
-    constructInputInstance this, canonical
+        throw Error.new "fake: factory(#{target.name}) — required foreign key #{fk} is not invented; pass it explicitly (e.g. factory(#{target.name}, n, {#{fk}: parent.id}))"
+    return target.create!(data) if persist
+    canonical = normalizePersistenceInput!(target, data, { skipEnsures: true, api: 'factory()' })
+    constructInputInstance target, canonical
 
   return make() unless many
   out = []

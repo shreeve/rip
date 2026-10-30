@@ -2089,8 +2089,6 @@ INTRINSICS = '''
     upsert(data: Create, opts: { on: unknown }): Promise<Instance>;
     insertMany(rows: Create[]): Promise<Instance[]>;
     toSQL(options?: { dropFirst?: boolean; header?: string; idStart?: number }): string;
-    factory?(count?: 0 | 1 | -1, ...args: unknown[]): Promise<Instance>;
-    factory?(count: number | string, ...args: unknown[]): Promise<Instance[]>;
   }
   declare const schema: {
     transaction<T>(fn: () => T | Promise<T>): Promise<T>;
@@ -2435,8 +2433,6 @@ type ":model emits ModelSchema<Instance, Data> with relation accessors", '''
     upsert(data: Create, opts: { on: unknown }): Promise<Instance>;
     insertMany(rows: Create[]): Promise<Instance[]>;
     toSQL(options?: { dropFirst?: boolean; header?: string; idStart?: number }): string;
-    factory?(count?: 0 | 1 | -1, ...args: unknown[]): Promise<Instance>;
-    factory?(count: number | string, ...args: unknown[]): Promise<Instance[]>;
   }
   type OrgData = { name: string } & { id: number };
   type OrgCreate = { name: string };
@@ -2530,8 +2526,6 @@ type ":mixin emits field-type alias; host Data intersects mixins", '''
     upsert(data: Create, opts: { on: unknown }): Promise<Instance>;
     insertMany(rows: Create[]): Promise<Instance[]>;
     toSQL(options?: { dropFirst?: boolean; header?: string; idStart?: number }): string;
-    factory?(count?: 0 | 1 | -1, ...args: unknown[]): Promise<Instance>;
-    factory?(count: number | string, ...args: unknown[]): Promise<Instance[]>;
   }
   type UserData = { name: string } & Timestamps & { id: number };
   type UserCreate = { name: string } & Timestamps;
@@ -2610,8 +2604,6 @@ type "cross-file relation target degrades to unknown", '''
     upsert(data: Create, opts: { on: unknown }): Promise<Instance>;
     insertMany(rows: Create[]): Promise<Instance[]>;
     toSQL(options?: { dropFirst?: boolean; header?: string; idStart?: number }): string;
-    factory?(count?: 0 | 1 | -1, ...args: unknown[]): Promise<Instance>;
-    factory?(count: number | string, ...args: unknown[]): Promise<Instance[]>;
   }
   type UserData = { name: string } & { id: number; organizationId: number };
   type UserCreate = { name: string; organizationId: number };
@@ -2697,8 +2689,6 @@ type "derived schema emits a bare projection type", '''
     upsert(data: Create, opts: { on: unknown }): Promise<Instance>;
     insertMany(rows: Create[]): Promise<Instance[]>;
     toSQL(options?: { dropFirst?: boolean; header?: string; idStart?: number }): string;
-    factory?(count?: 0 | 1 | -1, ...args: unknown[]): Promise<Instance>;
-    factory?(count: number | string, ...args: unknown[]): Promise<Instance[]>;
   }
   type UserData = { firstName: string; lastName: string } & { id: number; createdAt: Date; updatedAt: Date };
   type UserCreate = { firstName: string; lastName: string };
@@ -2781,8 +2771,6 @@ type "chained + exported derived schema emits one bare type each", '''
     upsert(data: Create, opts: { on: unknown }): Promise<Instance>;
     insertMany(rows: Create[]): Promise<Instance[]>;
     toSQL(options?: { dropFirst?: boolean; header?: string; idStart?: number }): string;
-    factory?(count?: 0 | 1 | -1, ...args: unknown[]): Promise<Instance>;
-    factory?(count: number | string, ...args: unknown[]): Promise<Instance[]>;
   }
   type UserData = { firstName: string; lastName: string } & { id: number; createdAt: Date; updatedAt: Date };
   type UserCreate = { firstName: string; lastName: string };
@@ -4810,8 +4798,6 @@ type "@scope emits typed statics and a per-model query alias", '''
     upsert(data: Create, opts: { on: unknown }): Promise<Instance>;
     insertMany(rows: Create[]): Promise<Instance[]>;
     toSQL(options?: { dropFirst?: boolean; header?: string; idStart?: number }): string;
-    factory?(count?: 0 | 1 | -1, ...args: unknown[]): Promise<Instance>;
-    factory?(count: number | string, ...args: unknown[]): Promise<Instance[]>;
   }
   type UserData = { name: string; active: boolean | null } & { id: number };
   type UserCreate = { name: string; active?: boolean | null };

@@ -6062,3 +6062,30 @@ describeExtended.concurrent('rip check: component members over the real server',
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 });
+
+// rip/fake's `factory` makes what the model's own `create` makes, typed
+// from the model it is handed; a model has no factory of its own.
+describeExtended.concurrent('rip check: rip/fake factory over the real server', () => {
+  test('factory answers the model\'s records, one or a list by its count', async () => {
+    const dir = workspace({
+      'app.rip': [
+        "import { factory } from 'rip/fake'",
+        'Patient = schema :model',
+        '  name! string',
+        'run = ->',
+        '  one: Patient = factory!(Patient, 1)',
+        '  built: Patient = factory!(Patient)',
+        '  many: Patient[] = factory!(Patient, 3)',
+        '  bad: string = factory!(Patient, 1)',
+        '  Patient.factory',
+        '  [one, built, many, bad]',
+        'console.log run',
+        '',
+      ].join('\n'),
+    });
+    try {
+      const got = JSON.parse((await check(dir, ['--json'])).stdout).map((d) => [d.code, d.line]);
+      expect(got).toEqual([[2322, 8], [2339, 9]]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+});

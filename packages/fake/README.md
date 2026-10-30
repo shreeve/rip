@@ -2,14 +2,14 @@
 
 # Rip Fake
 
-> **Fake data and Model.factory() — curated, valid-looking, seedable, zero dependencies.**
+> **Fake data and factory() — curated, valid-looking, seedable, zero dependencies.**
 
 The distillation of Ruby's faker (102 generator classes + YAML locale
 machinery) and ffaker (203 modules + 1.7MB of data files) down to the
 screenful a business app actually seeds. Curated inline data, and
 values that are VALID-looking — NANP-legal phones, well-formed emails,
-real state codes — so fakes survive real validators. Importing the
-package also installs `Model.factory()` on every `:model` schema.
+real state codes — so fakes survive real validators. `factory()`
+fabricates a `:model`'s records from its schema.
 
 **Runtime:** server-side — `factory()` composes with the persistence
 runtime; the generators themselves are pure. One `.rip` file.
@@ -61,24 +61,24 @@ Deterministic when you want it — `fake.seed 42` switches to a seeded
 PRNG so tests reproduce byte-for-byte; `fake.seed()` returns to
 `Math.random`.
 
-## Model.factory()
+## factory()
 
-Models fabricate themselves through their schema: enum literals are
+`factory` fabricates a model's records through its schema: enum literals are
 sampled, `email`/`phone`/`zip`/`uuid` types generate valid shapes,
 name heuristics cover plain strings, and correlated fields agree —
 the email matches the generated name. One polymorphic verb; the sign
 says persisted:
 
 ```coffee
-import 'rip/fake'             # installs Model.factory()
+import { factory } from 'rip/fake'
 
-Patient.factory! 5            # five created (persisted)
-Patient.factory! 1            # one created
-Patient.factory! 0            # one built, unsaved
-Patient.factory!(-3)          # three built, unsaved
-Patient.factory! 1, partnerId: partner.id    # overrides; FKs are NEVER invented
+factory! Patient, 5           # five created (persisted)
+factory! Patient, 1           # one created, typed as a Patient
+factory! Patient, 0           # one built, unsaved
+factory! Patient, -3          # three built, unsaved
+factory! Patient, 1, partnerId: partner.id   # overrides; FKs are NEVER invented
 
-Test.factory! """
+factory! Test, """
   code   | name                 | price
   005009 | Complete Blood Count | 2800
   322000 | Basic Metabolic      | 4200
