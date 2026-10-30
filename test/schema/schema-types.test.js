@@ -156,7 +156,13 @@ describe('schema declarations: the per-kind shapes', () => {
       '{ id: number; orgId: number | null; createdAt: Date; updatedAt: Date; deletedAt: Date | null };');
     // Create: `!` without default required; a DEFAULTED required
     // field is optional at insert; optional FK rides `| null`
-    expect(d).toContain('type MCreate = { name: string; code?: string; posted?: boolean; orgId?: number | null };');
+    // An optional field takes null at create, as its column stores it.
+    expect(d).toContain('type MCreate = { name: string; code?: string | null; posted?: boolean; orgId?: number | null };');
+    // A transform supplies its field from the whole input, so the field
+    // is optional at create though required in the row.
+    const minted = dts('T = schema :model\n  eid! string, -> it.eid or "minted"\n  name! string');
+    expect(minted).toContain('type TCreate = { eid?: string; name: string };');
+    expect(minted).toContain('type TData = { eid: string; name: string }');
     // Instance: relation accessors (cross-file target honest unknown,
     // hasMany pluralized), the persistence surface incl. restore
     // (softDelete present), markDirty/savedChanges per the runtime
@@ -196,7 +202,7 @@ describe('schema declarations: the per-kind shapes', () => {
   // never absent on an instance — and an optional field's column is
   // nullable, so the data shape admits null and nothing else; the
   // create companion keeps accepting omission.
-  test('an optional model field types `T | null` on the data shape and stays omittable at create', () => {
+  test('an optional model field types `T | null` on the data shape and at create, where it is also omittable', () => {
     const d = dts([
       'Partner = schema :model',
       '  name! string',
@@ -206,7 +212,7 @@ describe('schema declarations: the per-kind shapes', () => {
       '  @ensure "named", (m) -> m.name.length > 0',
     ].join('\n'));
     expect(d).toContain('type PartnerData = { name: string; phone: string | null; token: string | null; note: string | null } & { id: number };');
-    expect(d).toContain('type PartnerCreate = { name: string; phone?: string; token?: string; note?: string | null };');
+    expect(d).toContain('type PartnerCreate = { name: string; phone?: string | null; token?: string | null; note?: string | null };');
     // The ensure predicate also sees create-path data, where an omitted
     // optional field is absent: optional AND nullable there.
     expect(d).toContain('type PartnerEnsure = { name: string; phone?: string | null; token?: string | null; note?: string | null } & Partial<{ id: number }>;');

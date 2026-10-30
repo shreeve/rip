@@ -221,6 +221,9 @@ const CLEAN_ROWS = [
     // a scope takes its declared parameters, and every chain step keeps
     // the model's scopes, from the model and from a scope alike
  'P = schema :model\n  name! string\n  @scope :named, (n: string) -> @where(name: n)\n  @scope :live, -> @where(name: "a")\nq: PQuery = P.named("a").where(name: "b").live()\nq = P.where(name: "b").limit(2).named("c")\nq = q.includes().unscoped().withDeleted()',
+    // a required field its transform supplies is optional at create: the
+    // transform reads the whole input, and `!` judges what it returns
+ 'T = schema :model\n  eid! string, -> it.eid or "minted"\n  name! string\nrun = ->\n  t = await T.create(name: "x")\n  s: string = t.eid',
     // order takes trusted SQL, a {field: direction} object, or a list of
     // them; order, limit, and offset start a chain from the model
  'O = schema :model\n  name! string\n  rank? integer\nrun = ->\n  a = await O.order(name: "desc").limit(2).offset(1).all()\n  b = await O.where(name: "x").order([{ rank: "ASC" }, { name: "desc nulls last" }]).all()\n  c = await O.order("name ASC").first()\n  d = await O.limit(5).order(id: "asc").all()\n  n: string = a[0].name',

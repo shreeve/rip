@@ -4814,7 +4814,7 @@ type "@scope emits typed statics and a per-model query alias", '''
     factory?(count: number | string, ...args: unknown[]): Promise<Instance[]>;
   }
   type UserData = { name: string; active: boolean | null } & { id: number };
-  type UserCreate = { name: string; active?: boolean };
+  type UserCreate = { name: string; active?: boolean | null };
   type User = UserData & { save(): Promise<User>; set(attrs: Partial<UserData>): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
   type UserQuery = SchemaQuery<User, UserData> & { active(): UserQuery; named(n: string, limit?: any): UserQuery };
   declare const User: ModelSchema<User, UserData, number, UserCreate, UserQuery> & { active(): UserQuery; named(n: string, limit?: any): UserQuery };

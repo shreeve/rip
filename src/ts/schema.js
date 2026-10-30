@@ -586,10 +586,15 @@ const modelCreateProps = (descriptor, known) => {
   for (const e of descriptor.entries) {
     if (e.tag !== 'field') continue;
     // A natural key is always required at insert: nothing generates
-    // it, so a default cannot stand in for it either.
+    // it, so a default cannot stand in for it either. A transform reads
+    // the whole input and supplies the field's value, so the input may
+    // omit it; the runtime's `!` judges what the transform returned.
     const required = e.name === pkName ||
-      (e.modifiers.includes('!') && e.constraints?.default === undefined);
-    props.push(`${e.name}${required ? '' : '?'}: ${fieldType(e, known)}`);
+      (e.modifiers.includes('!') && e.constraints?.default === undefined && !e.transformTokens);
+    // An optional field takes null as absent, the way its column stores
+    // it; a null default already puts null in the field's own type.
+    const nullable = e.name !== pkName && !e.modifiers.includes('!') && e.constraints?.default !== null;
+    props.push(`${e.name}${required ? '' : '?'}: ${fieldType(e, known)}${nullable ? ' | null' : ''}`);
   }
   for (const rel of relationsOf(descriptor)) {
     if (rel.kind !== 'belongsTo') continue;
