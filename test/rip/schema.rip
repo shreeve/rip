@@ -2053,6 +2053,7 @@ INTRINSICS = '''
     required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
     extend<U>(other: Schema<U>): Schema<In & U, In & U>;
   }
+  type SchemaOrder<Data> = string | Partial<Record<keyof Data, 'asc' | 'desc' | 'asc nulls first' | 'asc nulls last' | 'desc nulls first' | 'desc nulls last' | 'ASC' | 'DESC' | 'ASC NULLS FIRST' | 'ASC NULLS LAST' | 'DESC NULLS FIRST' | 'DESC NULLS LAST'>> | Partial<Record<keyof Data, 'asc' | 'desc' | 'asc nulls first' | 'asc nulls last' | 'desc nulls first' | 'desc nulls last' | 'ASC' | 'DESC' | 'ASC NULLS FIRST' | 'ASC NULLS LAST' | 'DESC NULLS FIRST' | 'DESC NULLS LAST'>>[];
   interface SchemaQuery<T, Data = Record<string, unknown>> {
     all(): Promise<T[]>;
     first(): Promise<T | null>;
@@ -2060,8 +2061,8 @@ INTRINSICS = '''
     where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): this;
     limit(n: number): this;
     offset(n: number): this;
-    order(spec: string): this;
-    orderBy(spec: string): this;
+    order(spec: SchemaOrder<Data>): this;
+    orderBy(spec: SchemaOrder<Data>): this;
     includes(...specs: unknown[]): this;
     withDeleted(): this;
     onlyDeleted(): this;
@@ -2078,6 +2079,9 @@ INTRINSICS = '''
     withDeleted(): Query;
     onlyDeleted(): Query;
     unscoped(): Query;
+    order(spec: SchemaOrder<Data>): Query;
+    limit(n: number): Query;
+    offset(n: number): Query;
     all(limit?: number): Promise<Instance[]>;
     first(): Promise<Instance | null>;
     count(cond?: Partial<Record<keyof Data, unknown>>): Promise<number>;
@@ -2395,6 +2399,7 @@ type ":model emits ModelSchema<Instance, Data> with relation accessors", '''
     required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
     extend<U>(other: Schema<U>): Schema<In & U, In & U>;
   }
+  type SchemaOrder<Data> = string | Partial<Record<keyof Data, 'asc' | 'desc' | 'asc nulls first' | 'asc nulls last' | 'desc nulls first' | 'desc nulls last' | 'ASC' | 'DESC' | 'ASC NULLS FIRST' | 'ASC NULLS LAST' | 'DESC NULLS FIRST' | 'DESC NULLS LAST'>> | Partial<Record<keyof Data, 'asc' | 'desc' | 'asc nulls first' | 'asc nulls last' | 'desc nulls first' | 'desc nulls last' | 'ASC' | 'DESC' | 'ASC NULLS FIRST' | 'ASC NULLS LAST' | 'DESC NULLS FIRST' | 'DESC NULLS LAST'>>[];
   interface SchemaQuery<T, Data = Record<string, unknown>> {
     all(): Promise<T[]>;
     first(): Promise<T | null>;
@@ -2402,8 +2407,8 @@ type ":model emits ModelSchema<Instance, Data> with relation accessors", '''
     where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): this;
     limit(n: number): this;
     offset(n: number): this;
-    order(spec: string): this;
-    orderBy(spec: string): this;
+    order(spec: SchemaOrder<Data>): this;
+    orderBy(spec: SchemaOrder<Data>): this;
     includes(...specs: unknown[]): this;
     withDeleted(): this;
     onlyDeleted(): this;
@@ -2420,6 +2425,9 @@ type ":model emits ModelSchema<Instance, Data> with relation accessors", '''
     withDeleted(): Query;
     onlyDeleted(): Query;
     unscoped(): Query;
+    order(spec: SchemaOrder<Data>): Query;
+    limit(n: number): Query;
+    offset(n: number): Query;
     all(): Promise<Instance[]>;
     first(): Promise<Instance | null>;
     count(): Promise<number>;
@@ -2486,6 +2494,7 @@ type ":mixin emits field-type alias; host Data intersects mixins", '''
   interface Schema<Out, In = unknown> {
     extend<U>(other: MixinSchema<U>): Schema<In & U, In & U>;
   }
+  type SchemaOrder<Data> = string | Partial<Record<keyof Data, 'asc' | 'desc' | 'asc nulls first' | 'asc nulls last' | 'desc nulls first' | 'desc nulls last' | 'ASC' | 'DESC' | 'ASC NULLS FIRST' | 'ASC NULLS LAST' | 'DESC NULLS FIRST' | 'DESC NULLS LAST'>> | Partial<Record<keyof Data, 'asc' | 'desc' | 'asc nulls first' | 'asc nulls last' | 'desc nulls first' | 'desc nulls last' | 'ASC' | 'DESC' | 'ASC NULLS FIRST' | 'ASC NULLS LAST' | 'DESC NULLS FIRST' | 'DESC NULLS LAST'>>[];
   interface SchemaQuery<T, Data = Record<string, unknown>> {
     all(): Promise<T[]>;
     first(): Promise<T | null>;
@@ -2493,8 +2502,8 @@ type ":mixin emits field-type alias; host Data intersects mixins", '''
     where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): this;
     limit(n: number): this;
     offset(n: number): this;
-    order(spec: string): this;
-    orderBy(spec: string): this;
+    order(spec: SchemaOrder<Data>): this;
+    orderBy(spec: SchemaOrder<Data>): this;
     includes(...specs: unknown[]): this;
     withDeleted(): this;
     onlyDeleted(): this;
@@ -2511,6 +2520,9 @@ type ":mixin emits field-type alias; host Data intersects mixins", '''
     withDeleted(): Query;
     onlyDeleted(): Query;
     unscoped(): Query;
+    order(spec: SchemaOrder<Data>): Query;
+    limit(n: number): Query;
+    offset(n: number): Query;
     all(): Promise<Instance[]>;
     first(): Promise<Instance | null>;
     count(): Promise<number>;
@@ -2562,6 +2574,7 @@ type "cross-file relation target degrades to unknown", '''
     required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
     extend<U>(other: Schema<U>): Schema<In & U, In & U>;
   }
+  type SchemaOrder<Data> = string | Partial<Record<keyof Data, 'asc' | 'desc' | 'asc nulls first' | 'asc nulls last' | 'desc nulls first' | 'desc nulls last' | 'ASC' | 'DESC' | 'ASC NULLS FIRST' | 'ASC NULLS LAST' | 'DESC NULLS FIRST' | 'DESC NULLS LAST'>> | Partial<Record<keyof Data, 'asc' | 'desc' | 'asc nulls first' | 'asc nulls last' | 'desc nulls first' | 'desc nulls last' | 'ASC' | 'DESC' | 'ASC NULLS FIRST' | 'ASC NULLS LAST' | 'DESC NULLS FIRST' | 'DESC NULLS LAST'>>[];
   interface SchemaQuery<T, Data = Record<string, unknown>> {
     all(): Promise<T[]>;
     first(): Promise<T | null>;
@@ -2569,8 +2582,8 @@ type "cross-file relation target degrades to unknown", '''
     where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): this;
     limit(n: number): this;
     offset(n: number): this;
-    order(spec: string): this;
-    orderBy(spec: string): this;
+    order(spec: SchemaOrder<Data>): this;
+    orderBy(spec: SchemaOrder<Data>): this;
     includes(...specs: unknown[]): this;
     withDeleted(): this;
     onlyDeleted(): this;
@@ -2587,6 +2600,9 @@ type "cross-file relation target degrades to unknown", '''
     withDeleted(): Query;
     onlyDeleted(): Query;
     unscoped(): Query;
+    order(spec: SchemaOrder<Data>): Query;
+    limit(n: number): Query;
+    offset(n: number): Query;
     all(): Promise<Instance[]>;
     first(): Promise<Instance | null>;
     count(): Promise<number>;
@@ -2645,6 +2661,7 @@ type "derived schema emits a bare projection type", '''
     required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
     extend<U>(other: Schema<U>): Schema<In & U, In & U>;
   }
+  type SchemaOrder<Data> = string | Partial<Record<keyof Data, 'asc' | 'desc' | 'asc nulls first' | 'asc nulls last' | 'desc nulls first' | 'desc nulls last' | 'ASC' | 'DESC' | 'ASC NULLS FIRST' | 'ASC NULLS LAST' | 'DESC NULLS FIRST' | 'DESC NULLS LAST'>> | Partial<Record<keyof Data, 'asc' | 'desc' | 'asc nulls first' | 'asc nulls last' | 'desc nulls first' | 'desc nulls last' | 'ASC' | 'DESC' | 'ASC NULLS FIRST' | 'ASC NULLS LAST' | 'DESC NULLS FIRST' | 'DESC NULLS LAST'>>[];
   interface SchemaQuery<T, Data = Record<string, unknown>> {
     all(): Promise<T[]>;
     first(): Promise<T | null>;
@@ -2652,8 +2669,8 @@ type "derived schema emits a bare projection type", '''
     where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): this;
     limit(n: number): this;
     offset(n: number): this;
-    order(spec: string): this;
-    orderBy(spec: string): this;
+    order(spec: SchemaOrder<Data>): this;
+    orderBy(spec: SchemaOrder<Data>): this;
     includes(...specs: unknown[]): this;
     withDeleted(): this;
     onlyDeleted(): this;
@@ -2670,6 +2687,9 @@ type "derived schema emits a bare projection type", '''
     withDeleted(): Query;
     onlyDeleted(): Query;
     unscoped(): Query;
+    order(spec: SchemaOrder<Data>): Query;
+    limit(n: number): Query;
+    offset(n: number): Query;
     all(): Promise<Instance[]>;
     first(): Promise<Instance | null>;
     count(): Promise<number>;
@@ -2725,6 +2745,7 @@ type "chained + exported derived schema emits one bare type each", '''
     required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
     extend<U>(other: Schema<U>): Schema<In & U, In & U>;
   }
+  type SchemaOrder<Data> = string | Partial<Record<keyof Data, 'asc' | 'desc' | 'asc nulls first' | 'asc nulls last' | 'desc nulls first' | 'desc nulls last' | 'ASC' | 'DESC' | 'ASC NULLS FIRST' | 'ASC NULLS LAST' | 'DESC NULLS FIRST' | 'DESC NULLS LAST'>> | Partial<Record<keyof Data, 'asc' | 'desc' | 'asc nulls first' | 'asc nulls last' | 'desc nulls first' | 'desc nulls last' | 'ASC' | 'DESC' | 'ASC NULLS FIRST' | 'ASC NULLS LAST' | 'DESC NULLS FIRST' | 'DESC NULLS LAST'>>[];
   interface SchemaQuery<T, Data = Record<string, unknown>> {
     all(): Promise<T[]>;
     first(): Promise<T | null>;
@@ -2732,8 +2753,8 @@ type "chained + exported derived schema emits one bare type each", '''
     where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): this;
     limit(n: number): this;
     offset(n: number): this;
-    order(spec: string): this;
-    orderBy(spec: string): this;
+    order(spec: SchemaOrder<Data>): this;
+    orderBy(spec: SchemaOrder<Data>): this;
     includes(...specs: unknown[]): this;
     withDeleted(): this;
     onlyDeleted(): this;
@@ -2750,6 +2771,9 @@ type "chained + exported derived schema emits one bare type each", '''
     withDeleted(): Query;
     onlyDeleted(): Query;
     unscoped(): Query;
+    order(spec: SchemaOrder<Data>): Query;
+    limit(n: number): Query;
+    offset(n: number): Query;
     all(): Promise<Instance[]>;
     first(): Promise<Instance | null>;
     count(): Promise<number>;
@@ -4750,6 +4774,7 @@ type "@scope emits typed statics and a per-model query alias", '''
     required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
     extend<U>(other: Schema<U>): Schema<In & U, In & U>;
   }
+  type SchemaOrder<Data> = string | Partial<Record<keyof Data, 'asc' | 'desc' | 'asc nulls first' | 'asc nulls last' | 'desc nulls first' | 'desc nulls last' | 'ASC' | 'DESC' | 'ASC NULLS FIRST' | 'ASC NULLS LAST' | 'DESC NULLS FIRST' | 'DESC NULLS LAST'>> | Partial<Record<keyof Data, 'asc' | 'desc' | 'asc nulls first' | 'asc nulls last' | 'desc nulls first' | 'desc nulls last' | 'ASC' | 'DESC' | 'ASC NULLS FIRST' | 'ASC NULLS LAST' | 'DESC NULLS FIRST' | 'DESC NULLS LAST'>>[];
   interface SchemaQuery<T, Data = Record<string, unknown>> {
     all(): Promise<T[]>;
     first(): Promise<T | null>;
@@ -4757,8 +4782,8 @@ type "@scope emits typed statics and a per-model query alias", '''
     where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): this;
     limit(n: number): this;
     offset(n: number): this;
-    order(spec: string): this;
-    orderBy(spec: string): this;
+    order(spec: SchemaOrder<Data>): this;
+    orderBy(spec: SchemaOrder<Data>): this;
     includes(...specs: unknown[]): this;
     withDeleted(): this;
     onlyDeleted(): this;
@@ -4775,6 +4800,9 @@ type "@scope emits typed statics and a per-model query alias", '''
     withDeleted(): Query;
     onlyDeleted(): Query;
     unscoped(): Query;
+    order(spec: SchemaOrder<Data>): Query;
+    limit(n: number): Query;
+    offset(n: number): Query;
     all(): Promise<Instance[]>;
     first(): Promise<Instance | null>;
     count(): Promise<number>;

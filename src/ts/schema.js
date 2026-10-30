@@ -151,7 +151,7 @@ export const VALIDATION_INTRINSIC_NAMES = new Set([
   'SchemaIssue', 'SchemaSafeResult', 'ArraySchema', 'Schema',
 ]);
 export const MIXIN_INTRINSIC_NAMES = new Set(['MixinSchema']);
-export const MODEL_INTRINSIC_NAMES = new Set(['SchemaQuery', 'ModelSchema']);
+export const MODEL_INTRINSIC_NAMES = new Set(['SchemaOrder', 'SchemaQuery', 'ModelSchema']);
 export const SCHEMA_INTRINSIC_NAMES = new Set([
   ...VALIDATION_INTRINSIC_NAMES, ...MIXIN_INTRINSIC_NAMES, ...MODEL_INTRINSIC_NAMES,
 ]);
@@ -224,7 +224,12 @@ const MIXIN_INTRINSICS = [
 // deleteAll live on the BUILDER only. A chain step answers `this`: the
 // runtime returns the same builder, which carries the model's scopes
 // as own methods, so a model's `NameQuery` survives every step.
+// `order` takes caller-authored SQL spliced verbatim, or a
+// {field: direction} object, or a list of them, whose keys the runtime
+// resolves against the model's columns; it reads a direction in either
+// case.
 const MODEL_INTRINSICS = [
+  "type SchemaOrder<Data> = string | Partial<Record<keyof Data, 'asc' | 'desc' | 'asc nulls first' | 'asc nulls last' | 'desc nulls first' | 'desc nulls last' | 'ASC' | 'DESC' | 'ASC NULLS FIRST' | 'ASC NULLS LAST' | 'DESC NULLS FIRST' | 'DESC NULLS LAST'>> | Partial<Record<keyof Data, 'asc' | 'desc' | 'asc nulls first' | 'asc nulls last' | 'desc nulls first' | 'desc nulls last' | 'ASC' | 'DESC' | 'ASC NULLS FIRST' | 'ASC NULLS LAST' | 'DESC NULLS FIRST' | 'DESC NULLS LAST'>>[];",
   'interface SchemaQuery<T, Data = Record<string, unknown>> {',
   '  all(): Promise<T[]>;',
   '  first(): Promise<T | null>;',
@@ -232,8 +237,8 @@ const MODEL_INTRINSICS = [
   '  where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): this;',
   '  limit(n: number): this;',
   '  offset(n: number): this;',
-  '  order(spec: string): this;',
-  '  orderBy(spec: string): this;',
+  '  order(spec: SchemaOrder<Data>): this;',
+  '  orderBy(spec: SchemaOrder<Data>): this;',
   '  includes(...specs: unknown[]): this;',
   '  withDeleted(): this;',
   '  onlyDeleted(): this;',
@@ -250,6 +255,9 @@ const MODEL_INTRINSICS = [
   '  withDeleted(): Query;',
   '  onlyDeleted(): Query;',
   '  unscoped(): Query;',
+  '  order(spec: SchemaOrder<Data>): Query;',
+  '  limit(n: number): Query;',
+  '  offset(n: number): Query;',
   '  all(): Promise<Instance[]>;',
   '  first(): Promise<Instance | null>;',
   '  count(): Promise<number>;',

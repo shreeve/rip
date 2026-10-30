@@ -221,6 +221,9 @@ const CLEAN_ROWS = [
     // a scope takes its declared parameters, and every chain step keeps
     // the model's scopes, from the model and from a scope alike
  'P = schema :model\n  name! string\n  @scope :named, (n: string) -> @where(name: n)\n  @scope :live, -> @where(name: "a")\nq: PQuery = P.named("a").where(name: "b").live()\nq = P.where(name: "b").limit(2).named("c")\nq = q.includes().unscoped().withDeleted()',
+    // order takes trusted SQL, a {field: direction} object, or a list of
+    // them; order, limit, and offset start a chain from the model
+ 'O = schema :model\n  name! string\n  rank? integer\nrun = ->\n  a = await O.order(name: "desc").limit(2).offset(1).all()\n  b = await O.where(name: "x").order([{ rank: "ASC" }, { name: "desc nulls last" }]).all()\n  c = await O.order("name ASC").first()\n  d = await O.limit(5).order(id: "asc").all()\n  n: string = a[0].name',
  'post = (path: string, opts: { input: Schema<unknown> }) -> path\nrun = ->\n  Signup = schema :input\n    name! 2..20\n    age? ~integer\n  post "/signup", input: Signup',
  'mk = (c: boolean) ->\n  if c\n    S = schema :shape\n      a! string\n  v = S.parse({})\n  a: string = v.a\n  a = "z"\n  S',
     //  the component member model — every member kind's declare,
@@ -398,6 +401,16 @@ describeTscExtended('tier 2: self-contained typed faces check CLEAN — annotati
   test('a scope call has teeth: an argument outside the declared parameter type, or one too many, FAILS at the call', () => {
     const program = (call) => `P = schema :model\n  name! string\n  @scope :owned, (ownerId: number) -> @where(id: ownerId)\n  @scope :live, -> @where(name: "a")\nmaybe = (): number | null -> null\n${call}\n`;
     for (const [call, code] of [['P.owned("x")', 'TS2345'], ['P.owned(maybe())', 'TS2345'], ['P.where(name: "a").owned("x")', 'TS2345'], ['P.live(1)', 'TS2554']]) {
+      const faced = compile(program(call), { runtimeDelivery: 'none', face: 'ts' });
+      const { status, output } = tscRun({ 'ambient.d.ts': AMBIENT, 'mod.ts': `${faced.code}\nexport {};\n` });
+      expect(status, call).not.toBe(0);
+      expect(output, call).toContain(code);
+    }
+  }, TSC_TIMEOUT);
+
+  test('order has teeth: a key the model lacks, a direction it does not take, or a limit that is not a number FAILS', () => {
+    const program = (call) => `O = schema :model\n  name! string\n${call}\n`;
+    for (const [call, code] of [['O.order(nmae: "asc")', 'TS2353'], ['O.order(name: "down")', 'TS2345'], ['O.where(name: "a").order([{ nmae: "asc" }])', 'TS2353'], ['O.limit("2")', 'TS2345']]) {
       const faced = compile(program(call), { runtimeDelivery: 'none', face: 'ts' });
       const { status, output } = tscRun({ 'ambient.d.ts': AMBIENT, 'mod.ts': `${faced.code}\nexport {};\n` });
       expect(status, call).not.toBe(0);
