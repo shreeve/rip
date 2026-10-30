@@ -87,6 +87,8 @@ const REGION_SHAPES = [
   /^__ripRoute\($/u,                                       // route-literal wrap opener (href / push / replace checking)
   /^declare function __ripRoute<const T extends string>\(s: T extends `\/\$\{string\}` \? .* : T\): T;$/su, // the route helper declare, the path-part conditional with the union inlined
   /^__ripSourceKey\($/u,                                   // stash-key wrap opener (source() literal checking)
+  /^__ripMemberKey<typeof .+>\(\)\($/su,                  // membership key wrap opener (a list's `in` branch takes any value)
+  /^declare function __ripMemberKey<C>\(\): <K>\(k: \[C\] extends \[readonly unknown\[\] \| string\] \? K : K & PropertyKey\) => PropertyKey;$/u, // the membership key helper declare
   /^__ripNarrowed\($/u,                                    // narrowed-container wrap opener (a container passed under the branch that tested its member)
   /^declare function __ripNarrowed<T extends \{ value: unknown \}>\(c: T\): \{ readonly value: NonNullable<T\['value'\]>; read\(\): NonNullable<T\['value'\]> \};$/u, // the narrowed-container helper declare
   /^stash = __ripAmbientStash\(0 as any as .*\);$/su,           // the stash ambience member (class road)

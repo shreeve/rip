@@ -18247,7 +18247,11 @@ class Emitter {
         // list) may carry side effects or getters — the inline
         // dispatch would evaluate it more than once, so the helper
         // call evaluates each operand exactly once.
-        this.b.emit(Emitter.MEMBER_IN + '(');
+        if (this.ts) {
+          this.b.emit("((k, c) => Array.isArray(c) || typeof c === 'string' ? c.includes(k) : ");
+          this.memberKey(() => this.b.emit('c'), () => this.b.emit('k'));
+          this.b.emit(' in c)(');
+        } else this.b.emit(Emitter.MEMBER_IN + '(');
         this.mark(node, 'left', () => this.expr(a));
         this.b.emit(', ');
         this.mark(node, 'right', () => this.expr(b));
@@ -18265,15 +18269,30 @@ class Emitter {
         // The includes() slot is an argument; this one is an operand
         // of JavaScript's `in`, so a lower-precedence left side groups.
         const wrap = Emitter.needsGrouping(a, 'operand');
-        if (wrap) this.b.emit('(');
-        this.expr(a);
-        if (wrap) this.b.emit(')');
+        const left = () => {
+          if (wrap) this.b.emit('(');
+          this.expr(a);
+          if (wrap) this.b.emit(')');
+        };
+        if (this.ts) this.memberKey(() => this.expr(b), left);
+        else left();
         this.b.emit(' in ');
         this.mark(node, 'right', () => this.expr(b));
         this.b.emit(')');
       }
       if (negated) this.b.emit(')');
     });
+  }
+
+  // The key operand of a membership lowering's `in` branch, on the face.
+  // A list or string container takes the `includes` branch, so its `in`
+  // never runs and any value may be sought; any other container's `in`
+  // is a key test, which still takes only a property key.
+  memberKey(container, key) {
+    this._needsMemberKeyHelper = true;
+    this.b.tsOnly(() => { this.b.emit('__ripMemberKey<typeof '); container(); this.b.emit('>()('); });
+    key();
+    this.b.tsOnly(() => this.b.emit(')'));
   }
 
   // ['?:', condition, then, else] — the condition emits bare (like an if
@@ -20603,6 +20622,9 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // source() constraint: a top-level stash key, or a DOTTED path under
   // one (legal, untyped at the package surface). Spelled off the stash
   // splice so it tracks the stash by reference, never by copied text.
+  if (emitter._needsMemberKeyHelper === true) {
+    builder.tsOnly(() => builder.emit('\ndeclare function __ripMemberKey<C>(): <K>(k: [C] extends [readonly unknown[] | string] ? K : K & PropertyKey) => PropertyKey;\n'));
+  }
   if (emitter._needsSourceKeyHelper === true) {
     const stashKeys = `keyof import(${JSON.stringify(emitter.appStashSpec)}).__RipStash & string`;
     builder.tsOnly(() => builder.emit(`\ndeclare function __ripSourceKey<const T extends ((${stashKeys}) | \`\${${stashKeys}}.\${string}\`)>(s: T): T;\n`));

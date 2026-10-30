@@ -221,6 +221,9 @@ const CLEAN_ROWS = [
     // a scope takes its declared parameters, and every chain step keeps
     // the model's scopes, from the model and from a scope alike
  'P = schema :model\n  name! string\n  @scope :named, (n: string) -> @where(name: n)\n  @scope :live, -> @where(name: "a")\nq: PQuery = P.named("a").where(name: "b").live()\nq = P.where(name: "b").limit(2).named("c")\nq = q.includes().unscoped().withDeleted()',
+    // `in` over a list is membership, so any value may be sought in it,
+    // through a bound container and a constructed one alike
+ 'f = (x: unknown, xs: unknown[], s: string, word: string) ->\n  a: boolean = x in xs\n  b: boolean = x in xs.slice()\n  c: boolean = s in word\n  d: boolean = "k" in { k: 1 }\n  [a, b, c, d]\nconsole.log f',
     // a required field its transform supplies is optional at create: the
     // transform reads the whole input, and `!` judges what it returns
  'T = schema :model\n  eid! string, -> it.eid or "minted"\n  name! string\nrun = ->\n  t = await T.create(name: "x")\n  s: string = t.eid',
@@ -408,6 +411,15 @@ describeTscExtended('tier 2: self-contained typed faces check CLEAN — annotati
       const { status, output } = tscRun({ 'ambient.d.ts': AMBIENT, 'mod.ts': `${faced.code}\nexport {};\n` });
       expect(status, call).not.toBe(0);
       expect(output, call).toContain(code);
+    }
+  }, TSC_TIMEOUT);
+
+  test('a key test has teeth: `in` over an object still takes only a property key', () => {
+    for (const body of ['a = x in o', 'a = x in (-> o)()']) {
+      const faced = compile(`f = (x: unknown, o: Record<string, number>) ->\n  ${body}\n  a\nconsole.log f\n`, { runtimeDelivery: 'none', face: 'ts' });
+      const { status, output } = tscRun({ 'mod.ts': `${faced.code}\nexport {};\n` });
+      expect(status, body).not.toBe(0);
+      expect(output, body).toContain('TS2345');
     }
   }, TSC_TIMEOUT);
 
