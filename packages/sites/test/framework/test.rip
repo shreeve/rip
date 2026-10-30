@@ -89,6 +89,42 @@ test "read's signature answers from the validator name it is given", ->
   finally
     rmSync dir, { recursive: true, force: true }
 
+test "a route's input: schema types @input; a route with none keeps it unknown", ->
+  dir = join(import.meta.dir, '.input-types')
+  rmSync dir, { recursive: true, force: true }
+  mkdirSync dir, { recursive: true }
+  try
+    writeFileSync join(dir, 'package.json'), JSON.stringify({ name: 'input-types', rip: { strict: true } })
+    writeFileSync join(dir, 'index.rip'), [
+      "import { get, post } from 'rip/sites'"
+      ''
+      'Signup = schema :input'
+      '  name! string'
+      '  age? integer'
+      ''
+      "post '/signup', { input: Signup }, ->"
+      '  name: string = @input.name'
+      '  age: number | undefined = @input.age'
+      '  { name, age }'
+      ''
+      "post '/signup2', { input: Signup }, (c) ->"
+      '  n: string = c.input.name'
+      '  n'
+      ''
+      "post '/bad', { input: Signup }, ->"
+      '  # @ts-expect-error the schema declares no such field'
+      '  @input.nmae'
+      ''
+      "get '/plain', ->"
+      '  # @ts-expect-error a route with no input: schema has no typed input'
+      '  s: string = @input'
+      '  s'
+    ].join('\n') + '\n'
+    r = spawnSync process.execPath, [join(import.meta.dir, '..', '..', '..', '..', 'bin', 'rip'), 'check', dir], { encoding: 'utf8' }
+    eq r.status, 0, r.stdout + r.stderr
+  finally
+    rmSync dir, { recursive: true, force: true }
+
 test! 'routes, parameters, prefixes, and smart responses compose', ->
   resetGlobals()
   get '/text' -> 'hello'

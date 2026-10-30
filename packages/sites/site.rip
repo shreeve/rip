@@ -198,8 +198,8 @@ export type CtxReq =
   formData: () => Promise<FormData>
   parseBody: (opts?: Record<string, unknown>) => Promise<unknown>
 
-export type Ctx =
-  input: unknown
+export type Ctx<I = unknown> =
+  input: I
   json: (data: unknown, status?: number, headers?: Record<string, string>) => Response
   text: (str: string, status?: number, headers?: Record<string, string>) => Response
   html: (str: string, status?: number, headers?: Record<string, string>) => Response
@@ -213,14 +213,24 @@ export type Ctx =
   req: CtxReq
   mark?: string                  # the request's correlation id, set by the handler
 
-export type RouteHandler = (this: Ctx, c: Ctx, next?: () => Promise<void>) => unknown
+export type RouteHandler<I = unknown> = (this: Ctx<I>, c: Ctx<I>, next?: () => Promise<void>) => unknown
+
+# The schema an `input:` names: what its parse answers is `@input`.
+export type InputSchema<I = unknown> =
+  parseAsync: (data: unknown) => Promise<I>
+  safeAsync: (data: unknown) => Promise<{ ok: boolean, value: unknown, errors: unknown }>
+  toJSONSchema: () => Record<string, unknown>
 
 # The leading options slot a verb accepts before its handlers: `input:` wires
 # schema validation and the OpenAPI contract.
 export type RouteOptions =
-  input?:
-    safeAsync: (data: unknown) => Promise<{ ok: boolean, value: unknown, errors: unknown }>
-    toJSONSchema: () => Record<string, unknown>
+  input?: InputSchema
+
+# A route with an `input:` schema hands its handlers `@input` as the type the
+# schema parses to; any other route's `@input` stays `unknown`.
+type VerbFn =
+  <I>(path: string, options: { input: InputSchema<I> }, ...handlers: RouteHandler<I>[]): void
+  (path: string, ...handlers: Array<RouteOptions | RouteHandler>): void
 
 # The custom error handler: the thrown value, then the request context.
 export type ErrorHandler = (this: Ctx, error: unknown, c: Ctx) => unknown
@@ -555,12 +565,12 @@ addRoute = (method, path, ...handlers) ->
       inputSchema: null,
     }
 
-export get:   (path: string, ...handlers: Array<RouteOptions | RouteHandler>) => void = (path, ...handlers) -> addRoute 'GET',    path, ...handlers
-export post:  (path: string, ...handlers: Array<RouteOptions | RouteHandler>) => void = (path, ...handlers) -> addRoute 'POST',   path, ...handlers
-export put:   (path: string, ...handlers: Array<RouteOptions | RouteHandler>) => void = (path, ...handlers) -> addRoute 'PUT',    path, ...handlers
-export patch: (path: string, ...handlers: Array<RouteOptions | RouteHandler>) => void = (path, ...handlers) -> addRoute 'PATCH',  path, ...handlers
-export del:   (path: string, ...handlers: Array<RouteOptions | RouteHandler>) => void = (path, ...handlers) -> addRoute 'DELETE', path, ...handlers
-export all:   (path: string, ...handlers: Array<RouteOptions | RouteHandler>) => void = (path, ...handlers) -> addRoute 'ALL',    path, ...handlers
+export get:   VerbFn = (path: string, ...handlers: unknown[]) -> addRoute 'GET',    path, ...handlers
+export post:  VerbFn = (path: string, ...handlers: unknown[]) -> addRoute 'POST',   path, ...handlers
+export put:   VerbFn = (path: string, ...handlers: unknown[]) -> addRoute 'PUT',    path, ...handlers
+export patch: VerbFn = (path: string, ...handlers: unknown[]) -> addRoute 'PATCH',  path, ...handlers
+export del:   VerbFn = (path: string, ...handlers: unknown[]) -> addRoute 'DELETE', path, ...handlers
+export all:   VerbFn = (path: string, ...handlers: unknown[]) -> addRoute 'ALL',    path, ...handlers
 
 # ==============================================================================
 # OpenAPI generation
