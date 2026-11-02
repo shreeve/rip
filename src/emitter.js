@@ -11687,8 +11687,8 @@ class Emitter {
   // member, a module-level `:=`/`~=` name, a deeper chain rooted at
   // `this`, a plain member, or a module binding (signal-backed
   // getters: a mutation's `pending`, a router's `navigating`), a
-  // component-method call, or a loop item/index variable over a
-  // reactive collection? the rule plus
+  // component-method call (`@m()` or bare `m()`), or a loop
+  // item/index variable over a reactive collection? the rule plus
   // the deliberate widenings: module-level reactive names bind LIVE
   // here (a one-time read would go silently stale), and index
   // variables patch live (staying correct across keyed reorders). Over-wrapping a static chain in
@@ -11723,6 +11723,9 @@ class Emitter {
     if ((sexpr[0] === '.' || sexpr[0] === '[]') && sexpr.length === 3 && rootsAtLoopReactive(sexpr)) return true;
     if (isNode(sexpr[0]) && sexpr[0][0] === '.' && sexpr[0][1] === 'this' && typeof sexpr[0][2] === 'string' &&
         this.cframes.length > 0 && this.cframes[this.cframes.length - 1].members.has(sexpr[0][2])) {
+      return true;
+    }
+    if (this.isCallNode(sexpr) && this.renderVarKind(sexpr[0]) === null && this.resolveBareRead(sexpr[0]) === 'member') {
       return true;
     }
     return sexpr.some((c) => this.renderReactive(c));

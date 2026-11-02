@@ -2025,6 +2025,25 @@ App = component
     expect(code).not.toContain("_updateProp('label', r.pending)");
   });
 
+  test('a component-method call is live in both spellings, as a prop and as text; a module function call stays a snapshot', () => {
+    // `fieldError(…)` and `@fieldError(…)` emit the same `this.fieldError(…)`
+    // read, and the method may read reactive state.
+    const { code } = compile(`${KID}helper = (k) -> k
+App = component
+  errors := {}
+  fieldError: (k) -> errors[k]
+  render
+    div
+      Kid label: fieldError("a")
+      Kid label: @fieldError("a")
+      Kid label: helper("a")
+      p fieldError("a")
+`);
+    expect(code.match(/_updateProp\('label', this\.fieldError\("a"\)\)/g)).toHaveLength(2);
+    expect(code).not.toContain("_updateProp('label', helper(\"a\"))");
+    expect(code).toMatch(/__effect\(\(\) => \{ this\._t\d+\.data = this\.fieldError\("a"\); \}\);/);
+  });
+
   test('a function-literal prop takes no updater; a callback INVOKED while the prop evaluates still does', () => {
     // A closure's reads run when the child CALLS it, so the prop's value
     // cannot change: the effect would track nothing (the body never runs
