@@ -10059,7 +10059,7 @@ var readonlyCastType = () => {
   throw new Error("rip: component type story is unavailable in the browser");
 };
 var routeArgType = () => "string";
-var COMPONENT_FAILURE_TYPE = "";
+var hookParamTypes = () => null;
 var ambientClassDeclares = () => [];
 var plainBehaviorValued = () => false;
 var stateBehaviorValued = () => false;
@@ -10089,7 +10089,7 @@ var restViewOfComponentText = () => {
 var componentCtorSegments = () => [];
 
 // src/emitter.js
-var COMPONENT_HOOKS = new Set(["beforeMount", "mounted", "beforeUnmount", "unmounted", "onError"]);
+var COMPONENT_HOOKS = new Set(["beforeMount", "mounted", "beforeUnmount", "unmounted", "onError", "load"]);
 var COMPONENT_RUNTIME_FIELDS = new Set([
   "_state",
   "_frame",
@@ -17368,7 +17368,7 @@ ${pad}${into}.push(...${tmp});`);
       return { error: "key", node: key };
     if (keySegments[0] === "this")
       keySegments.shift();
-    if (keySegments[0] !== "params" && keySegments[0] !== "query" || keySegments.length < 2) {
+    if (keySegments[0] !== "params" && keySegments[0] !== "query") {
       return { error: "key", node: key };
     }
     return { path, pathNode, key, keyCode: keySegments.join("."), keyParts: keySegments };
@@ -17631,7 +17631,7 @@ ${pad}${into}.push(...${tmp});`);
           gateError(stmt, "rhs", source.node, "emitter: '<~' requires a literal @stash.<path> on the right-hand side, optionally called with one key");
         }
         if (source.error === "key") {
-          gateError(stmt, "key", source.node, "emitter: a keyed render gate key may only be a literal or a params/query path (for example params.id or @query.tab)");
+          gateError(stmt, "key", source.node, "emitter: a keyed render gate key may only be a literal, params, query, or a path into one (for example params.id or @query.tab)");
         }
         declare(target.name, "gate", stmt, true);
         gateVars.push({ name: target.name, ...source, node: stmt });
@@ -18226,7 +18226,7 @@ ${pad}${into}.push(...${tmp});`);
         const [, params, block] = func;
         const evRec = methodEventNames.get(name);
         const evHost = evRec !== undefined && !evRec.unknownHost && evRec.hosts.size > 0 ? [...evRec.hosts].join(" | ") : null;
-        const evParamType = evRec !== undefined ? this.tsEventTypeText([...evRec.events], evHost) : name === "onError" ? COMPONENT_FAILURE_TYPE : null;
+        const evParamType = evRec !== undefined ? this.tsEventTypeText([...evRec.events], evHost) : hookParamTypes(name);
         this.b.emit(pad);
         this.mark(owner, "$self", () => {
           if (this.containsAwait(block))
@@ -23223,11 +23223,14 @@ ${"  ".repeat(ind)}`);
     })();
     return this._annotatedValueSpans.has(`${self.sourceStart}:${self.sourceEnd}`);
   }
-  emitParams(params, firstParamTypeText = null, jsArity = true) {
+  emitParams(params, injectedTypes = null, jsArity = true) {
     const list = Emitter.expansionSplit(params).list;
     const optional = jsArity && this.ts ? jsArityOptional(list) : new Set;
-    if (firstParamTypeText !== null)
-      optional.delete(0);
+    const injected = injectedTypes === null ? [] : [].concat(injectedTypes);
+    injected.forEach((type, i) => {
+      if (type != null)
+        optional.delete(i);
+    });
     list.forEach((p, i) => {
       const control = this.firstAwaitIn(p);
       if (control !== null) {
@@ -23241,8 +23244,8 @@ ${"  ".repeat(ind)}`);
       this.emitParam(p);
       if (optional.has(i) && this.ts)
         this.b.tsOnly(() => this.b.emit("?"));
-      if (i === 0 && firstParamTypeText !== null && typeof p === "string" && this.ts) {
-        this.b.tsOnly(() => this.b.emit(`: ${firstParamTypeText}`));
+      if (injected[i] != null && typeof p === "string" && this.ts) {
+        this.b.tsOnly(() => this.b.emit(`: ${injected[i]}`));
       }
     });
   }
@@ -28696,7 +28699,13 @@ function __gateBind(self, index) {
   }
   let last = binding.value;
   let prefetched = true;
+  const moved = __state(0);
+  binding.retargeted = () => {
+    prefetched = false;
+    moved.value += 1;
+  };
   return __computed(() => {
+    moved.value;
     if (prefetched) {
       prefetched = false;
       binding.cell.read();
@@ -31633,6 +31642,67 @@ function createRenderer(opts) {
     }
     return false;
   };
+  let pageRetargets = function(entry, params, query) {
+    let binding, cell, keyFn, resolved;
+    let moves = [];
+    let gates = entry.cls.__gates;
+    if (!Array.isArray(gates))
+      return moves;
+    for (let index = 0;index < gates.length; index++) {
+      let gate = gates[index];
+      keyFn = typeof gate === "string" ? null : gate?.key;
+      if (!(typeof keyFn === "function"))
+        continue;
+      binding = entry.bindings?.[index];
+      if (!(binding && typeof binding.retargeted === "function"))
+        return null;
+      resolved = resolveGateCell(binding.path);
+      if (!(resolved && _isSourceFamily(resolved.cell)))
+        return null;
+      try {
+        cell = resolved.cell.cellFor(keyFn(params, query));
+      } catch {
+        return null;
+      }
+      if (!(cell === binding.cell))
+        moves.push({ binding, cell });
+    }
+    return moves;
+  };
+  let retarget = async function(moves, mine) {
+    let value;
+    let results = await Promise.allSettled((() => {
+      const result1 = [];
+      for (let move of moves) {
+        result1.push(move.cell.ensure());
+      }
+      return result1;
+    })());
+    if (mine !== generation)
+      return false;
+    let values = [];
+    for (let index = 0;index < results.length; index++) {
+      let result = results[index];
+      if (!(result.status === "fulfilled" && result.value != null))
+        return false;
+      value = moves[index].cell.peek();
+      for (let segment of moves[index].binding.tail) {
+        if (!(value != null))
+          break;
+        value = value[segment];
+      }
+      if (!(value != null))
+        return false;
+      values.push(value);
+    }
+    for (let index = 0;index < moves.length; index++) {
+      let move = moves[index];
+      move.binding.cell = move.cell;
+      move.binding.value = values[index];
+      move.binding.retargeted();
+    }
+    return true;
+  };
   let gateJobs = function(entries, params, query) {
     let cell, error, gates, key, keyFn, path, resolved;
     let jobs = new Map;
@@ -31962,7 +32032,7 @@ function createRenderer(opts) {
     return true;
   };
   let performMount = async function(info, mine, componentRegistry = components) {
-    let boundaryIndex, failure, handled, instance, parent, ready;
+    let boundaryIndex, failure, handled, instance, moved, moves, parent, ready;
     let route = info?.route;
     if (!route?.file) {
       throw new Error("Rip App: renderer route state requires route.file");
@@ -31980,13 +32050,19 @@ function createRenderer(opts) {
     forceFrom = null;
     if (!(forcedFrom != null) && current != null && lastRoute != null && route.file === lastRoute.file) {
       if (sameChain([...layoutFiles, route.file], mountedFiles) && shallowEqual(params, lastRoute.params)) {
-        if (!(shallowEqual(query, lastRoute.query) || queryKeyedRetargets(mountedEntries, params, query))) {
-          if (typeof current.load === "function")
-            await current.load(params, query);
+        if (!(shallowEqual(query, lastRoute.query) || queryKeyedRetargets(mountedEntries.slice(0, -1), params, query))) {
+          moves = pageRetargets(mountedEntries[mountedEntries.length - 1], params, query);
+          moved = moves != null && (moves.length === 0 || await retarget(moves, mine));
           if (mine !== generation)
             return null;
-          lastRoute = { file: route.file, params, query };
-          return current;
+          if (moved) {
+            if (typeof current.load === "function")
+              await current.load(params, query);
+            if (mine !== generation)
+              return null;
+            lastRoute = { file: route.file, params, query };
+            return current;
+          }
         }
       }
     }
@@ -34027,7 +34103,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "bc3c3f1c02c26523";
+var compilerBuild = () => "7176d260a34a69b7";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
