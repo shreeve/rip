@@ -43,7 +43,7 @@ import { CAMEL, CLASS_TYPE, STYLE_TYPE, CSS_PROPERTIES_TEXT, hostText } from './
 
 // Same spellings as src/emitter.js COMPONENT_HOOKS (emission owns the
 // JS-face list; this file cannot import the emitter).
-const COMPONENT_HOOKS = new Set(['beforeMount', 'mounted', 'beforeUnmount', 'unmounted', 'onError']);
+const COMPONENT_HOOKS = new Set(['beforeMount', 'mounted', 'beforeUnmount', 'unmounted', 'onError', 'load']);
 
 const isNode = (x) => Array.isArray(x);
 const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 3;
@@ -1287,6 +1287,14 @@ export const stashProjection = (m, info) =>
 export const COMPONENT_FAILURE_TYPE =
   '{ name: string; message: string; error: unknown; status?: number; path?: string; file?: string }';
 
+// What a hook's unannotated params are called with: onError the failure
+// envelope, load the route's params and query (rip/app's renderer calls
+// it when only the query changed).
+export const hookParamTypes = (name) =>
+  name === 'onError' ? COMPONENT_FAILURE_TYPE
+    : name === 'load' ? ['Record<string, string>', 'Record<string, string>']
+    : null;
+
 export function instanceTypeLines(info, selfType, { road = 'dts' } = {}) {
   const lines = [];
   let hasChildren = false;
@@ -1308,8 +1316,7 @@ export function instanceTypeLines(info, selfType, { road = 'dts' } = {}) {
       const isGen = yieldsIn(m.func[2]);
       const base = declared ?? (m.isVoid && !isGen ? 'void' : 'any');
       const ret = info.awaits(m.func[2]) && !isGen && !/^Promise\s*</.test(base) ? `Promise<${base}>` : base;
-      const firstType = m.name === 'onError' ? COMPONENT_FAILURE_TYPE : null;
-      lines.push({ segs: [{ text: `${m.name}${renderParams(m.func[1], info.isOptionalParam, firstType)}: ${ret};` }] });
+      lines.push({ segs: [{ text: `${m.name}${renderParams(m.func[1], info.isOptionalParam, hookParamTypes(m.name))}: ${ret};` }] });
       continue;
     }
     // SEGMENTS, not one blob: the member's type is rendered here a second

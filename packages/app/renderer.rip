@@ -159,9 +159,9 @@ export def createRenderer(opts: RendererOpts): Renderer
     cause = error ?? Error.new(message)
     failureFor path, file, cause, message
 
-  # A staying navigation may keep its mounted page only while every
-  # query-keyed gate still addresses the cell it was constructed with;
-  # a retargeted key means new data ownership and a fresh instance.
+  # A kept layout may stay only while every query-keyed gate still
+  # addresses the cell it was constructed with; a retargeted key means
+  # new data ownership and a fresh instance.
   queryKeyedRetargets = (entriesToCheck, params, query) ->
     for entry in entriesToCheck
       gates = entry.cls.__gates
@@ -179,6 +179,47 @@ export def createRenderer(opts: RendererOpts): Renderer
           return true
         return true unless cell is binding.cell
     false
+
+  # The page's query-keyed gates that now address a different cell, or
+  # null when one of them cannot move in place.
+  pageRetargets = (entry, params, query) ->
+    moves = []
+    gates = entry.cls.__gates
+    return moves unless Array.isArray gates
+    for gate, index in gates
+      keyFn = if typeof gate is 'string' then null else gate?.key
+      continue unless typeof keyFn is 'function'
+      binding = entry.bindings?[index]
+      return null unless binding and typeof binding.retargeted is 'function'
+      resolved = resolveGateCell binding.path
+      return null unless resolved and _isSourceFamily resolved.cell
+      try
+        cell = resolved.cell.cellFor keyFn(params, query)
+      catch
+        return null
+      moves.push { binding, cell } unless cell is binding.cell
+    moves
+
+  # Every moved cell loads before any binding moves, so the page shows
+  # its old values until the new ones are all in hand. False when a cell
+  # fails or resolves empty, which leaves the bindings untouched.
+  retarget = (moves, mine) ->
+    results = Promise.allSettled! (move.cell.ensure() for move in moves)
+    return false if mine isnt generation
+    values = []
+    for result, index in results
+      return false unless result.status is 'fulfilled' and result.value?
+      value = moves[index].cell.peek()
+      for segment in moves[index].binding.tail
+        break unless value?
+        value = value[segment]
+      return false unless value?
+      values.push value
+    for move, index in moves
+      move.binding.cell = move.cell
+      move.binding.value = values[index]
+      move.binding.retargeted()
+    true
 
   gateJobs = (entries, params, query) ->
     jobs = Map.new()
@@ -471,20 +512,26 @@ export def createRenderer(opts: RendererOpts): Renderer
 
     # Staying navigation: same page, same params, same layout chain,
     # only the query moved — the mounted instance keeps its identity and
-    # receives load(params, query), unless a query-keyed gate now
-    # addresses a different cell. Identical remount() calls still rebuild
-    # (explicit refresh); publication rebuild must not churn route
-    # identity — that soft path lives in router.rebuild.
+    # receives load(params, query). A page gate whose query key now
+    # addresses a different cell moves to it in place; a kept layout's
+    # does not, and a cell that fails to load falls back to a rebuild.
+    # Identical remount() calls still rebuild (explicit refresh);
+    # publication rebuild must not churn route identity — that soft path
+    # lives in router.rebuild.
     mountedFiles = mountedEntries.map (entry) -> entry.file
     forcedFrom = forceFrom
     forceFrom = null
     if not forcedFrom? and current? and lastRoute? and route.file is lastRoute.file
       if sameChain([...layoutFiles, route.file], mountedFiles) and shallowEqual(params, lastRoute.params)
-        unless shallowEqual(query, lastRoute.query) or queryKeyedRetargets(mountedEntries, params, query)
-          current.load! params, query if typeof current.load is 'function'
+        unless shallowEqual(query, lastRoute.query) or queryKeyedRetargets(mountedEntries.slice(0, -1), params, query)
+          moves = pageRetargets mountedEntries[mountedEntries.length - 1], params, query
+          moved = moves? and (moves.length is 0 or retarget!(moves, mine))
           return null if mine isnt generation
-          lastRoute = { file: route.file, params, query }
-          return current
+          if moved
+            current.load! params, query if typeof current.load is 'function'
+            return null if mine isnt generation
+            lastRoute = { file: route.file, params, query }
+            return current
 
     # Reuse demands a completed page mount behind it (lastRoute survives
     # only those), an identical layout chain, and kept layouts whose

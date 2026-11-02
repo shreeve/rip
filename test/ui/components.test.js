@@ -603,6 +603,15 @@ describe('the defect layer: every silent  class rejects loudly, positioned', () 
     emitFails('C = component\n  mounted = 5\n  render\n    div "x"', /lifecycle hook 'mounted' takes a function value/);
   });
 
+  test('load is a lifecycle hook: a non-function value rejects', () => {
+    emitFails('C = component\n  load = 5\n  render\n    div "x"', /lifecycle hook 'load' takes a function value/);
+  });
+
+  test("load's unannotated params type as the route's params and query", () => {
+    const { code } = compile('C = component\n  load: (params, query) -> query.tab\n  render\n    div "x"', { runtimeDelivery: 'none', face: 'ts' });
+    expect(code).toContain('load(params: Record<string, string>, query: Record<string, string>)');
+  });
+
   test('member declarations with pattern targets reject', () => {
     emitFails('C = component\n  [a, b] := pair()\n  render\n    div "x"', /takes a plain name or '@name'/);
     emitFails('C = component\n  [c, d] = pair()\n  render\n    div "x"', /matches no category/);

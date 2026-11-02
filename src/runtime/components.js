@@ -949,7 +949,12 @@ function __gateBind(self, index) {
   }
   let last = binding.value;
   let prefetched = true;
+  // The renderer moves a living page's query-keyed gate to a new cell by
+  // swapping binding.cell once that cell has loaded, then calling this.
+  const moved = __state(0);
+  binding.retargeted = () => { prefetched = false; moved.value += 1; };
   return __computed(() => {
+    moved.value;
     if (prefetched) {
       prefetched = false;
       // Track the source cell without traversing the addressed tail a

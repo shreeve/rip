@@ -177,9 +177,15 @@ constructor and mount succeeds, then the outgoing instances tear down.
 
 Navigation reuses what it can. A staying navigation (same page, same params,
 same chain, query-only change) keeps the mounted page's identity and calls
-its `load(params, query)`; an unchanged layout chain survives page swaps
-without re-gating — unless a keyed gate now addresses a different cell,
-which always rebuilds. Every other visit constructs a fresh instance.
+its `load` lifecycle hook, `load: (params, query) ->`, whose params type as
+the route's params and query. A page gate whose key now addresses a different
+cell moves to that cell in place: the page keeps its old value until the new
+cell has loaded, and a cell that fails to load rebuilds the page instead. Its
+own state carries over too, so a page that wants a fresh start for each key
+resets it in `load`, which runs once the new cell is in place. An
+unchanged layout chain survives page swaps without re-gating — unless a kept
+layout's keyed gate now addresses a different cell, which always rebuilds.
+Every other visit constructs a fresh instance.
 
 A gate failure routes to the nearest already-gated ancestor whose class
 defines `onError`: the boundary chain renders (or the living chain keeps

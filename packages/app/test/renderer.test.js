@@ -970,9 +970,10 @@ describe('renderer navigation integration', () => {
     expect(inits).toBe(2);
   });
 
-  test('a query-keyed gate addressing a new cell forces a remount', async () => {
+  test("a page's query-keyed gate moves to its new cell without remounting", async () => {
     const host = node('host');
     let inits = 0;
+    const loads = [];
     const data = createStash({
       search: source({ kind: 'keyed', fetch: async term => ({ term }) }),
     });
@@ -980,7 +981,7 @@ describe('renderer navigation integration', () => {
       static __gates = [{ path: 'search', key: (params, query) => query.term }];
       _init() { inits += 1; this.search = __gateBind(this, 0); }
       _create() { return node('page'); }
-      load() {}
+      load(params, query) { loads.push(query.term); }
     }
     const renderer = createRenderer({
       router: { current: null },
@@ -988,9 +989,97 @@ describe('renderer navigation integration', () => {
       components: registry({ 'page.rip': { Page } }),
       target: host,
     });
-    await renderer.mount(route('page.rip', { query: { term: 'a' } }));
-    await renderer.mount(route('page.rip', { query: { term: 'b' } }));
-    expect(inits).toBe(2);
+    const first = await renderer.mount(route('page.rip', { query: { term: 'a' } }));
+    expect(first.search.value).toEqual({ term: 'a' });
+    const second = await renderer.mount(route('page.rip', { query: { term: 'b' } }));
+    expect(second).toBe(first);
+    expect(inits).toBe(1);
+    expect(loads).toEqual(['b']);
+    expect(first.search.value).toEqual({ term: 'b' });
+  });
+
+  test('a moving gate keeps its old value until the new cell has loaded', async () => {
+    const host = node('host');
+    let release = null;
+    const data = createStash({
+      search: source({ kind: 'keyed', fetch: term => term === 'slow'
+        ? new Promise(resolve => { release = () => resolve({ term }); })
+        : Promise.resolve({ term }) }),
+    });
+    class Page extends __Component {
+      static __gates = [{ path: 'search', key: (params, query) => query.term }];
+      _init() { this.search = __gateBind(this, 0); }
+      _create() { return node('page'); }
+    }
+    const renderer = createRenderer({
+      router: { current: null },
+      stash: data,
+      components: registry({ 'page.rip': { Page } }),
+      target: host,
+    });
+    const page = await renderer.mount(route('page.rip', { query: { term: 'a' } }));
+    const moving = renderer.mount(route('page.rip', { query: { term: 'slow' } }));
+    await Promise.resolve();
+    expect(page.search.value).toEqual({ term: 'a' });
+    release();
+    expect(await moving).toBe(page);
+    expect(page.search.value).toEqual({ term: 'slow' });
+  });
+
+  test('a newer navigation wins over a slower move', async () => {
+    const host = node('host');
+    let release = null;
+    const data = createStash({
+      search: source({ kind: 'keyed', fetch: term => term === 'slow'
+        ? new Promise(resolve => { release = () => resolve({ term }); })
+        : Promise.resolve({ term }) }),
+    });
+    class Page extends __Component {
+      static __gates = [{ path: 'search', key: (params, query) => query.term }];
+      _init() { this.search = __gateBind(this, 0); }
+      _create() { return node('page'); }
+    }
+    const renderer = createRenderer({
+      router: { current: null },
+      stash: data,
+      components: registry({ 'page.rip': { Page } }),
+      target: host,
+    });
+    const page = await renderer.mount(route('page.rip', { query: { term: 'a' } }));
+    const slow = renderer.mount(route('page.rip', { query: { term: 'slow' } }));
+    await Promise.resolve();
+    expect(await renderer.mount(route('page.rip', { query: { term: 'c' } }))).toBe(page);
+    release();
+    expect(await slow).toBe(null);
+    expect(page.search.value).toEqual({ term: 'c' });
+  });
+
+  test('a moved cell that fails to load falls back to a rebuild', async () => {
+    const host = node('host');
+    let inits = 0;
+    const data = createStash({
+      search: source({ kind: 'keyed', fetch: async term => {
+        if (term === 'bad') throw new Error('no such search');
+        return { term };
+      } }),
+    });
+    class Page extends __Component {
+      static __gates = [{ path: 'search', key: (params, query) => query.term }];
+      _init() { inits += 1; this.search = __gateBind(this, 0); }
+      _create() { return node('page'); }
+    }
+    const renderer = createRenderer({
+      router: { current: null },
+      stash: data,
+      components: registry({ 'page.rip': { Page } }),
+      target: host,
+      onError: () => {},
+    });
+    const page = await renderer.mount(route('page.rip', { query: { term: 'a' } }));
+    await renderer.mount(route('page.rip', { query: { term: 'bad' } })).catch(() => null);
+    expect(inits).toBe(1);
+    expect(page.search.value).toEqual({ term: 'a' });
+    expect(renderer.current).toBe(page);
   });
 
   test('a query-keyed gate holding its cell keeps the fast path', async () => {

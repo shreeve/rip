@@ -40,6 +40,38 @@ code 'gate: keyed source hoists (path, key fn) pair', '''
   };
 '''
 
+code 'gate: the whole @query keys a source by every query value', '''
+  export A = component
+    orders <~ @stash.orders(@query)
+    render null
+''', '''
+  export const A = class extends __Component {
+    static __gates = [{ path: 'orders', key: (params, query) => query }];
+    _init(__given) {
+      this.orders = __gateBind(this, 0);
+    }
+    _create() {
+      return null;
+    }
+  };
+'''
+
+code 'gate: the whole @params keys a source by every route param', '''
+  export A = component
+    page <~ @stash.page(@params)
+    render null
+''', '''
+  export const A = class extends __Component {
+    static __gates = [{ path: 'page', key: (params, query) => params }];
+    _init(__given) {
+      this.page = __gateBind(this, 0);
+    }
+    _create() {
+      return null;
+    }
+  };
+'''
+
 code 'gate: @params key form normalizes to bare params', '''
   export A = component
     order <~ @stash.order(@params.id)
@@ -133,7 +165,7 @@ fail 'gate: key referencing a local is a compile error', '''
   C = component
     order <~ @stash.order(someLocal)
     render null
-''', 'key may only be a literal or a params/query path'
+''', 'key may only be a literal, params, query, or a path into one'
 
 type 'gate: annotated value is a non-null readonly computed container', '''
   export UserCard = component

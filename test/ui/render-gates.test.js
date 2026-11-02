@@ -68,7 +68,7 @@ describe('render gates', () => {
     expect(arity.slice(arityError.start, arityError.end)).toBe('params.id, query.tab');
 
     const badKey = 'C = component\n  user <~ @stash.user(local)\n  render null';
-    const keyError = fails(badKey, /key may only be a literal or a params\/query path/);
+    const keyError = fails(badKey, /key may only be a literal, params, query, or a path into one/);
     expect(badKey.slice(keyError.start, keyError.end)).toBe('local');
   });
 

@@ -733,14 +733,15 @@ export const jsArityOptional = (params) => {
   return out;
 };
 
-export const renderParams = (params, isOptional, firstType = null) => {
+export const renderParams = (params, isOptional, injected = null) => {
   const arity = jsArityOptional(params);
-  // An injected FIRST-param type (the onError envelope, the event seam)
-  // applies only to a bare untyped name — an annotated, defaulted, rest
-  // or pattern param is the author's own shape and is never overridden.
-  const inject = firstType !== null && typeof params[0] === 'string';
-  return `(${params.map((p, i) => (inject && i === 0
-    ? `${p}: ${firstType}`
+  // An injected type (a hook's params, the event seam) applies by
+  // position and only to a bare untyped name — an annotated, defaulted,
+  // rest or pattern param is the author's own shape and is never
+  // overridden.
+  const types = injected === null ? [] : [].concat(injected);
+  return `(${params.map((p, i) => (types[i] != null && typeof p === 'string'
+    ? `${p}: ${types[i]}`
     : renderParam(p, (q) => isOptional(q) || arity.has(i)))).join(', ')})`;
 };
 

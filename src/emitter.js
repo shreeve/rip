@@ -33,7 +33,7 @@ import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParam
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute, suggestAttribute } from './dom.js';
 import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls, CLSX_TYPE, STYLE_FN_TYPE } from './ts/dom-types.js';
 import { COMPONENT_CLASS, OWNER_FRAME_DECLS, TEARDOWN_DECL } from './ts/runtime-exports.js';
-import { restAliasName, restPassthroughText, restOfComponentText, restViewOfComponentText, COMPONENT_FAILURE_TYPE,
+import { restAliasName, restPassthroughText, restOfComponentText, restViewOfComponentText, hookParamTypes,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer, ambientClassDeclares, plainBehaviorValued, stateBehaviorValued, OFFERS, offersRecordText, HOST, hostTypeText, publicProps,
   propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType, restContainerType, MINTED,
@@ -47,7 +47,7 @@ import { restAliasName, restPassthroughText, restOfComponentText, restViewOfComp
 // categorization; keep the two hook lists identical. The runtime fields
 // are the instance slots src/runtime/components.js owns: a member of
 // that name would be overwritten by the runtime.
-const COMPONENT_HOOKS = new Set(['beforeMount', 'mounted', 'beforeUnmount', 'unmounted', 'onError']);
+const COMPONENT_HOOKS = new Set(['beforeMount', 'mounted', 'beforeUnmount', 'unmounted', 'onError', 'load']);
 const COMPONENT_RUNTIME_FIELDS = new Set([
   '_state', '_frame', '_parent', '_children', '_root', '_nodes', '_target',
   '_context', '_rest', '_restWriters', '_restHandlers', '_inheritedEl', '_inheritedInst', '_inheritedOwn',
@@ -10092,13 +10092,13 @@ class Emitter {
   // model; value members initialize in SOURCE ORDER inside
   // _init(__given), offers register next, and effects start last (a
   // reaction never fires against a half-built instance); methods and the
-  // exact-five lifecycle hooks emit as class methods; the render block
+  // lifecycle hooks emit as class methods; the render block
   // lowers to _create()/_setup(). The categorization is TOTAL — a body
   // statement matching no category REJECTS positioned,
   // duplicate members and render blocks reject, and
   // `offer` takes a state declaration only (#127).
 
-  // The exact-five lifecycle hooks (module COMPONENT_HOOKS above).
+  // The lifecycle hooks (module COMPONENT_HOOKS above).
   static COMPONENT_HOOKS = COMPONENT_HOOKS;
 
   // Boolean HTML attributes the render DSL toggles as properties of
@@ -10177,7 +10177,7 @@ class Emitter {
     const keySegments = Emitter.gateChain(key);
     if (keySegments === null) return { error: 'key', node: key };
     if (keySegments[0] === 'this') keySegments.shift();
-    if ((keySegments[0] !== 'params' && keySegments[0] !== 'query') || keySegments.length < 2) {
+    if (keySegments[0] !== 'params' && keySegments[0] !== 'query') {
       return { error: 'key', node: key };
     }
     return { path, pathNode, key, keyCode: keySegments.join('.'), keyParts: keySegments };
@@ -10512,7 +10512,7 @@ class Emitter {
         }
         if (source.error === 'key') {
           gateError(stmt, 'key', source.node,
-            "emitter: a keyed render gate key may only be a literal or a params/query path (for example params.id or @query.tab)");
+            "emitter: a keyed render gate key may only be a literal, params, query, or a path into one (for example params.id or @query.tab)");
         }
         declare(target.name, 'gate', stmt, true);
         gateVars.push({ name: target.name, ...source, node: stmt });
@@ -11267,13 +11267,12 @@ class Emitter {
       const emitCallable = ({ name, func, isVoid, node: owner }) => {
         const [, params, block] = func;
         const evRec = methodEventNames.get(name);
-        // The onError hook's unannotated param types as the failure
-        // envelope every boundary delivers (COMPONENT_FAILURE_TYPE) —
-        // the injection seam already yields to an author-typed param.
+        // A hook's unannotated params type as what it is called with
+        // (hookParamTypes) — the injection yields to an author-typed param.
         const evHost = evRec !== undefined && !evRec.unknownHost && evRec.hosts.size > 0
           ? [...evRec.hosts].join(' | ') : null;
         const evParamType = evRec !== undefined ? this.tsEventTypeText([...evRec.events], evHost)
-          : name === 'onError' ? COMPONENT_FAILURE_TYPE : null;
+          : hookParamTypes(name);
         this.b.emit(pad);
         this.mark(owner, '$self', () => {
           if (this.containsAwait(block)) this.b.emit('async ');
@@ -17829,14 +17828,15 @@ class Emitter {
     return this._annotatedValueSpans.has(`${self.sourceStart}:${self.sourceEnd}`);
   }
 
-  emitParams(params, firstParamTypeText = null, jsArity = true) {
+  emitParams(params, injectedTypes = null, jsArity = true) {
     const list = Emitter.expansionSplit(params).list;
     // Arity softens only the TS face (`?` markers); the JS face never
     // reads the set, so skip the walk unless type syntax will emit.
     const optional = jsArity && this.ts ? jsArityOptional(list) : new Set();
-    // The injected handler-param annotation types the FIRST param, so JS
-    // arity leaves it alone — it is no longer unannotated.
-    if (firstParamTypeText !== null) optional.delete(0);
+    // An injected annotation types its param by position, so JS arity
+    // leaves that param alone — it is no longer unannotated.
+    const injected = injectedTypes === null ? [] : [].concat(injectedTypes);
+    injected.forEach((type, i) => { if (type != null) optional.delete(i); });
     list.forEach((p, i) => {
       // JavaScript refuses `await` and `yield` anywhere in formal
       // parameters — a default, a pattern's default, a computed key —
@@ -17870,8 +17870,8 @@ class Emitter {
       // The moment the author annotates, the parameter is required and the
       // arity check is back.
       if (optional.has(i) && this.ts) this.b.tsOnly(() => this.b.emit('?'));
-      if (i === 0 && firstParamTypeText !== null && typeof p === 'string' && this.ts) {
-        this.b.tsOnly(() => this.b.emit(`: ${firstParamTypeText}`));
+      if (injected[i] != null && typeof p === 'string' && this.ts) {
+        this.b.tsOnly(() => this.b.emit(`: ${injected[i]}`));
       }
     });
   }
