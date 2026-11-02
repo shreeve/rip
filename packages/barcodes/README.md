@@ -15,8 +15,8 @@ camera, fast enough to scan on a phone at thirty frames a second.
 - **Reads** all three from any raster: a canvas `ImageData`, an RGB or RGBA
   buffer, or the planar YUV frames a camera delivers.
 - **Scans** from a phone's camera through a small browser layer that opens
-  the stream at full sensor size, copies frames into the reader without
-  a canvas round trip, and draws a lock around what it finds.
+  the stream at full sensor size, copies frames into the readers a page
+  lists without a canvas round trip, and draws a lock around what it finds.
 
 **Why you might want it**
 
@@ -246,32 +246,33 @@ per image; images holding several symbols return the first found.
 ## Camera
 
 ```coffee
-import { QRCanvas, frameLoop, rearCamera } from 'rip/barcodes/dom'
+import { BarcodeReader, frameLoop, rearCamera } from 'rip/barcodes/dom'
 
 video = document.querySelector 'video'
 overlay = document.querySelector 'canvas'     # positioned over the video
-canvas = QRCanvas.new { overlay }
+reader = BarcodeReader.new { overlay }, formats: ['qr_code', 'code_128']
 camera = rearCamera! video
 cancel = frameLoop (->
-  decoded = camera.readFrame! canvas, true    # undefined until a frame decodes
-  if decoded isnt undefined
-    p decoded
+  hit = camera.readFrame! reader, true        # undefined until a frame reads
+  if hit
+    p hit.format, hit.text                    # code_128 KIT-0042
     cancel()
     camera.stop()
 ), video                                      # paced by the video's presented frames
 ```
 
-`QRCanvas.new elements, opts` decodes frames through one reusable scanner.
+`BarcodeReader.new elements, opts` reads frames through one reusable scanner.
 `elements` names the canvases it paints: `overlay` for the lock around a
-decoded symbol, `resultQR` for the sampled module grid (scaled by
+decoded symbol, `resultQR` for the sampled QR module grid (scaled by
 `resultBlockSize`, 8), `bitmap` for the binarized plane of each frame.
 
 | option | meaning | default |
 | --- | --- | --- |
 | `crop` | aspect (width over height) of the largest centered region scanned; `null` scans the whole frame | `1` |
 | `margin` | fraction of that region scanned beyond each edge, where the frame has pixels | `0` |
-| `async` | decode with `decodeAsync`, yielding to the host between chunks | `false` |
-| `decodeAll` | decode every symbol on the frame and draw every lock | `false` |
+| `formats` | what each frame is read for, in this order, the first hit winning: any of `qr_code`, `code_128`, `pdf417`; a format left out costs nothing | `['qr_code', 'code_128', 'pdf417']` |
+| `async` | decode QR with `decodeAsync`, yielding to the host between chunks | `false` |
+| `decodeAll` | decode every QR symbol on the frame and draw every lock; `readFrame` still resolves to the first | `false` |
 | `effort`, `timeLimit`, `nativeLimit`, `textDecoder` | passed to the scanner (see [Decoding](#decoding)) | |
 | `nativeEvery` | with `nativeLimit`: every `nativeEvery`-th frame searches the native layer regardless; `1` never does | `1` |
 | `overlayColor`, `overlayFailedColor` | the lock, and the lock with `drawFailed` on a symbol found but not read | `#4ade80`, `#f87171` |
@@ -282,22 +283,16 @@ decoded symbol, `resultQR` for the sampled module grid (scaled by
 | `onVideoFrame` | `(frame) ->` the first `VideoFrame` of each source, borrowed: it is closed after the call | |
 | `onFrameSource` | `(source) ->` `'VideoFrame'` or `'canvas'` when the frame path changes | |
 
-`canvas.cropTo! aspect, margin` changes the scanned region from the next
-frame on, so a page scans what its viewfinder shows plus a little past its
-edges, and the copy out of the video frame stays that small.
-`canvas.lastFrame()` hands the luma of the last decoded frame to the other
-readers as `format: 'I420'` without another copy; it is `null` before the
-first frame and while the next copy is landing. `canvas.mark! corners`
-draws the lock on four image-space corners another reader found on that
-frame, such as a PDF417 hit's `corners`. `canvas.clear!` stops the decode
-in flight, zeroes the scanner and clears every canvas.
+`camera.readFrame! reader, true` resolves to `{ format, text, corners }` for the first listed format that read the frame, or `undefined`. `format` is the Shape Detection name; `corners` are the symbol's four corners as its decoder reports them, in the presented frame's pixels, where the overlay draws its lock. Each frame lands once in the scanner's arena, and every listed format's decoder reads that same luma: QR through the scanner, Code 128 and PDF417 through `readCode128` and `readPDF417`. Under `async`, the decoders listed after `qr_code` run once its decode misses. A list naming anything else (`data_matrix`, which nothing here decodes, among them), naming a format twice, or naming none throws a `TypeError`.
+
+`reader.cropTo! aspect, margin` changes the scanned region from the next frame on, so a page scans what its viewfinder shows plus a little past its edges, and the copy out of the video frame stays that small. `reader.lastFrame()` is the luma of the last frame read, as `format: 'I420'` without another copy, for a page that saves a frame or runs a decoder of its own; it is `null` before the first frame and while the next copy is landing. `reader.mark! corners` draws the lock on four image-space corners such a decoder found on that frame. `reader.clear!` stops the decode in flight, zeroes the scanner and clears every canvas.
 
 `rearCamera` and `selfieCamera` open a stream into a video element,
 asking for the sensor's full size (3840x2160 ideal at 30 frames per
 second, with `opts.video` layering further constraints), since a symbol's
 modules must reach a pixel or two in the frame the readers see; the
 browsers' default of the screen size gives a driver's license no distance
-at which it both focuses and resolves. `camera.readFrame! canvas, true`
+at which it both focuses and resolves. `camera.readFrame! reader, true`
 copies the presented frame plane-for-plane into the scanner arena through
 `VideoFrame` where the browser has it, falling back to a canvas draw;
 without `true` it draws the player at its rendered size, which is only
@@ -314,9 +309,10 @@ Android also focus and exposure), and `camera.reopen! { width: { ideal:
 and `camera.setDevice! id` switch cameras; `camera.stop()` releases the
 camera. `getSize element` is an element's rendered size in CSS pixels.
 `svgToPng` resolves to a PNG data URL and `gifToPng` to a `Blob`, and
-`BarcodeDetector` is a Shape Detection API ponyfill over `decodeQR` and
-`readPDF417` that reports `qr_code` and `pdf417`. Camera access needs a
-secure context.
+`BarcodeDetector` is a Shape Detection API ponyfill over `decodeQR`,
+`readCode128` and `readPDF417` that reports `qr_code`, `code_128` and
+`pdf417`, accepting the other format names and never reporting them.
+Camera access needs a secure context.
 
 Safari on iOS draws a stream's first frames at the wrong scale before it settles, letterboxed for about 0.4 s on iOS 27, and nothing the page can observe marks when it settles ([BROWSERS.md](../ui/BROWSERS.md#a-camera-streams-first-frames-ignore-object-fit-on-ios)).
 
@@ -448,7 +444,7 @@ parity, symbol layout and row indicators, a full module matrix, every
 output, errors-and-erasures correction to its limit, and decompaction
 including Macro PDF417, then round-trips rasters across scales, row
 heights, rotations, inversion, compact and extreme shapes, skew, cropped
-and torn start columns and holes.
+and torn start columns and holes. The camera layer is driven headless through `BarcodeReader` on the same rasters: each `formats` list reads what it names and nothing else, in its order, under `async` and without an overlay, with corners in presentation coordinates; `BarcodeDetector` reads Code 128.
 
 Three probes under `test/` print one hash line per case, so two builds can
 be shown identical beyond the corpus counts: `probe-stages.rip` hashes the

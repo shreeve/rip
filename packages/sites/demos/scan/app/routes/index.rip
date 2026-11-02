@@ -1,12 +1,12 @@
-# One camera, three readers. QRCanvas and QRCamera decode QR through the
-# VideoFrame path and paint the finder overlay; the luma that lands in the
-# scanner's arena goes on to readCode128 and readPDF417 without another
-# copy. Every hit is announced once until a different code appears. The
-# stats line reports what the camera delivers and how the readers keep up,
-# so a change to the pipeline is measured, not felt.
-import { QRCanvas, rearCamera, frameLoop } from 'rip/barcodes/dom'
-import { readCode128 } from 'rip/barcodes/code128'
-import { readPDF417 } from 'rip/barcodes/pdf417'
+# One camera, three formats. BarcodeCamera lands each frame through the
+# VideoFrame path, and BarcodeReader reads it for QR, Code 128 and PDF417
+# in that order and paints the lock around the hit. Every hit is announced
+# once until a different code appears. The stats line reports what the
+# camera delivers and how the readers keep up, so a change to the pipeline
+# is measured, not felt.
+import { BarcodeReader, rearCamera, frameLoop } from 'rip/barcodes/dom'
+
+KINDS = { qr_code: 'QR', code_128: 'Code 128', pdf417: 'PDF417' }
 
 # "09/17/2026 @ 7:26pm", local time.
 stamp = (at) ->
@@ -23,7 +23,7 @@ export Home = component
   history := []
   cancel  := null
   camera  := null
-  canvas  := null
+  reader  := null
   stream  := ''        # delivered width x height and frame rate
   fps     := 0
   decodeMs := 0        # moving average over frames
@@ -36,7 +36,6 @@ export Home = component
   torchable := false
   torch   := false
   quality := '4k'
-  seen    := 0         # id of the last frame the 1D and stacked readers saw
   stamps  := []
   onResize := null     # the listeners, bound here so removal finds them
   onWake   := null
@@ -65,7 +64,7 @@ export Home = component
     # Above 1080p a QR's finders are found at half resolution on two frames
     # in three, and at full resolution on the third, so a small or distant
     # code is still found within a tenth of a second.
-    canvas = QRCanvas.new { overlay }, async: true, nativeLimit: 1500, nativeEvery: 3
+    reader = BarcodeReader.new { overlay }, async: true, nativeLimit: 1500, nativeEvery: 3, formats: ['qr_code', 'code_128', 'pdf417']
     armedAt = performance.now()
     describe()
     fit()
@@ -98,7 +97,7 @@ export Home = component
   # Scan the part of the frame the viewfinder shows and a tenth beyond each
   # edge, since a symbol centered by eye can poke past the edge.
   fit: ->
-    canvas.cropTo finder.clientWidth / finder.clientHeight, 0.1 if finder?.clientHeight
+    reader.cropTo finder.clientWidth / finder.clientHeight, 0.1 if finder?.clientHeight
 
   # What the track settled on, and the controls it offers.
   describe: ->
@@ -183,7 +182,7 @@ export Home = component
   # Post the frame the readers last saw, as raw luma, to /api/dump, where
   # it lands in dumps/ for the readers to replay outside the browser.
   dump: ->
-    f = canvas?.lastFrame()
+    f = reader?.lastFrame()
     unless f
       status = 'No frame to dump yet'
       return
@@ -201,37 +200,21 @@ export Home = component
     armedAt = performance.now()
     latest  = null
     history = []
-    seen    = 0
-    canvas?.clear()
+    reader?.clear()
 
-  # Per presented frame: QR through the canvas (its own async decode), then
-  # the other readers on the same luma while the scanner is not busy.
+  # Per presented frame: every listed format on the luma the frame landed,
+  # QR through its own async decode.
   scan: ->
-    t0   = performance.now()
-    text = camera.readFrame! canvas, true
-    frame = canvas.lastFrame()
-    hit = null
-    if text isnt undefined
-      hit = { kind: 'QR', text }
-    else if frame and frame.id isnt seen
-      seen = frame.id
-      c128 = readCode128 frame, format: 'I420'
-      if c128
-        hit = { kind: 'Code 128', text: c128.text }
-        canvas.mark! c128.corners
-      else
-        pdf = readPDF417 frame, format: 'I420'
-        if pdf
-          hit = { kind: 'PDF417', text: pdf.text }
-          canvas.mark! pdf.corners
-    dt = performance.now() - t0
+    t0  = performance.now()
+    hit = camera.readFrame! reader, true
+    dt  = performance.now() - t0
     decodeMs = if frames then decodeMs * 0.9 + dt * 0.1 else dt
     frames++
     tick t0
     if hit
       reads++
       firstMs = t0 - armedAt if firstMs is null
-      found hit.kind, hit.text
+      found KINDS[hit.format], hit.text
 
   # Frames per second over the last second.
   tick: (now) ->

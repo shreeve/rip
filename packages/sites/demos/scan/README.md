@@ -5,15 +5,7 @@ for [`rip/barcodes`](../../../barcodes/README.md). One page, no API beyond
 the Hub admit in `index.rip`, served over HTTPS on the LAN by Janus so a
 phone can use its camera.
 
-`app/routes/index.rip` opens the rear camera with `rearCamera` at the
-sensor's full size, runs `frameLoop`, and hands every frame to a
-`QRCanvas`, which decodes QR through the `VideoFrame` path, scanning the
-part of the frame the viewfinder shows plus a tenth beyond each edge, and
-paints a lock around the symbol. The luma that lands in the scanner's arena goes on
-to `readCode128` and then `readPDF417` with no further copy, and their
-hits get the same lock through `canvas.mark!`. A hit is
-announced once until a different code appears; the last twenty stay in a
-list.
+`app/routes/index.rip` opens the rear camera with `rearCamera` at the sensor's full size, runs `frameLoop`, and hands every frame to a `BarcodeReader` constructed with `formats: ['qr_code', 'code_128', 'pdf417']`. The frame lands once through the `VideoFrame` path, cropped to the part the viewfinder shows plus a tenth beyond each edge, and its luma is read for QR, then Code 128, then PDF417; `readFrame` resolves to the first hit's `{ format, text, corners }`, and the reader paints the lock around it. A hit is announced once until a different code appears; the last twenty stay in a list.
 
 A stats line at the top shows the delivered stream size and frame rate,
 frames per second, milliseconds per frame, reads per frame since the last

@@ -11,6 +11,7 @@ import * as enc from 'rip/barcodes'
 import { decodeQR, QRScanner, decodeQRBatch, _tests } from 'rip/barcodes/qr'
 import * as qr from 'rip/barcodes/qr'
 import * as dom from 'rip/barcodes/dom'
+import { BarcodeReader, BarcodeDetector } from 'rip/barcodes/dom'
 import { encodeCode128, readCode128, decodeCode128, _tests as c128 } from 'rip/barcodes/code128'
 import * as code128 from 'rip/barcodes/code128'
 import { encodePDF417, readPDF417, decodePDF417, _tests as p417 } from 'rip/barcodes/pdf417'
@@ -144,7 +145,7 @@ test "exports", ->
   eq Object.keys(qr).sort(), ['QRScanner', '_tests', 'decodeQR', 'decodeQRBatch', 'encodeQR']
   eq Object.keys(code128).sort(), ['_tests', 'decodeCode128', 'encodeCode128', 'readCode128']
   eq Object.keys(pdf417).sort(),  ['_tests', 'decodePDF417', 'encodePDF417', 'readPDF417']
-  eq Object.keys(dom).sort(), ['BarcodeDetector', 'QRCamera', 'QRCanvas', 'frameLoop', 'getSize', 'gifToPng', 'rearCamera', 'selfieCamera', 'svgToPng']
+  eq Object.keys(dom).sort(), ['BarcodeCamera', 'BarcodeDetector', 'BarcodeReader', 'frameLoop', 'getSize', 'gifToPng', 'rearCamera', 'selfieCamera', 'svgToPng']
 
 test "no runtime deps, declares browser safety and earns it", ->
   pkg = JSON.parse readFileSync("#{import.meta.dir}/package.json", 'utf8')
@@ -997,3 +998,148 @@ test "decompaction: text, bytes, numbers, ECI, macro", ->
   throws (-> parse [928, 111]),      Error, 'truncated'
   throws (-> parse [928, 111, 103]), Error, 'no file id'
   throws (-> parse [902, 899]),      Error, 'start with 1'
+
+# ==[ Camera ]==
+
+p "\nCamera"
+
+# The browser surface the camera layer draws on, as no-ops: a 2d context
+# answers every method, and animation frames queue without running.
+stubCanvas =! ->
+  canvas  = { width: 0, height: 0 }
+  context = Proxy.new { canvas }, get: (target, key) -> if key of target then target[key] else (->)
+  canvas.getContext = -> context
+  canvas
+globalThis.document             ?= { createElement: -> stubCanvas() }
+globalThis.requestAnimationFrame ?= -> 1
+globalThis.cancelAnimationFrame  ?= ->
+globalThis.DOMRectReadOnly      ?= class
+  constructor: (@x, @y, @width, @height) ->
+
+# A scanner that counts the QR decodes it is asked for.
+qrDecodes = 0
+class CountingScanner extends QRScanner
+  decode: (all) ->
+    qrDecodes++
+    super.decode all
+  decodeAsync: (all) ->
+    qrDecodes++
+    super.decodeAsync all
+
+counted =! (opts = {}) -> BarcodeReader.new { overlay: stubCanvas() as unknown as HTMLCanvasElement }, opts, CountingScanner
+
+# One frame through a reader that answers at once.
+read =! (reader, image) ->
+  hit = reader.decode image
+  ok not (hit instanceof Promise), 'a synchronous read'
+  hit
+
+# Two rasters of one height side by side.
+beside =! (left, right) ->
+  W    = left.width + right.width
+  H    = left.height
+  data = Uint8Array.new W * H * 4
+  for y in [0...H]
+    data.set left.data.subarray(4 * y * left.width, 4 * (y + 1) * left.width), 4 * y * W
+    data.set right.data.subarray(4 * y * right.width, 4 * (y + 1) * right.width), 4 * (y * W + left.width)
+  { width: W, height: H, data }
+
+moved =! (corners, dx, dy) -> ({ x: c.x + dx, y: c.y + dy } for c in corners)
+
+LABEL =! bars 'KIT-0042', {}, 2, 400, 300
+CODE  =! raster 'KIT-QR', {}, 4, 300, 300
+STACK =! stack 'KIT-PDF', { scale: 2 }, 400, 300
+
+test "a reader reads the formats it lists, all three by default", ->
+  reader = counted()
+  hit = read reader, CODE
+  eq hit.format, 'qr_code'
+  eq hit.text,   'KIT-QR'
+  eq hit.corners.length, 4
+  eq read(reader, LABEL), { format: 'code_128', text: 'KIT-0042', corners: readCode128(LABEL).corners }
+  eq read(reader, STACK), { format: 'pdf417',   text: 'KIT-PDF',  corners: readPDF417(STACK).corners }
+  # QR first: with both in view, the default reads the QR.
+  eq read(reader, beside(CODE, LABEL)).format, 'qr_code'
+  reader = counted formats: ['qr_code']
+  eq read(reader, CODE).format, 'qr_code'
+  eq read(reader, LABEL), undefined
+  reader.clear()
+
+test "a format left out costs nothing, QR included", ->
+  qrDecodes = 0
+  reader = counted formats: ['code_128']
+  eq read(reader, LABEL).text, 'KIT-0042'
+  eq read(reader, CODE), undefined
+  eq qrDecodes, 0
+  reader = counted formats: ['qr_code', 'code_128']
+  read reader, LABEL
+  eq qrDecodes, 1
+
+test "the list's order decides which of two symbols in view wins", ->
+  both = beside CODE, LABEL
+  qrDecodes = 0
+  eq read(counted(formats: ['qr_code', 'code_128']), both).format, 'qr_code'
+  eq qrDecodes, 1
+  eq read(counted(formats: ['code_128', 'qr_code']), both).format, 'code_128'
+  eq qrDecodes, 1
+
+test "corners are in presentation coordinates, as the overlay draws", ->
+  reader = counted formats: ['qr_code', 'code_128']
+  # A crop 10 right and 20 down of a 420x340 frame.
+  reader.land { rotate: false, sourceHeight: 340, sourceX: 10, sourceY: 20, size: { width: 400, height: 300 }, width: 420, height: 340 }
+  eq read(reader, LABEL).corners, moved(readCode128(LABEL).corners, 10, 20)
+  # Coded pixels of a portrait stream lie sideways: (x, y) presents at
+  # (sourceHeight - 1 - y, x).
+  reader.land { rotate: true, sourceHeight: 300, sourceX: 0, sourceY: 0, size: { width: 400, height: 300 }, width: 300, height: 400 }
+  eq read(reader, LABEL).corners, ({ x: 299 - c.y, y: c.x } for c in readCode128(LABEL).corners)
+  points = null
+  decodeQR CODE, pointsOnDetect: (found) -> points = found
+  reader.land { rotate: false, sourceHeight: 300, sourceX: 5, sourceY: 0, size: { width: 300, height: 300 }, width: 310, height: 300 }
+  eq read(reader, CODE).corners, moved(points.bounds, 5, 0)
+  reader.clear()
+
+test "a reader with no overlay still reads every format, corners and all", ->
+  reader = BarcodeReader.new {}, formats: ['qr_code', 'code_128', 'pdf417']
+  for [image, format] in [[CODE, 'qr_code'], [LABEL, 'code_128'], [STACK, 'pdf417']]
+    hit = read reader, image
+    eq hit.format, format
+    eq hit.corners.length, 4, format
+
+test "the lock goes around whichever format hit", ->
+  centroid = (quad) -> { x: quad.reduce(((s, c) -> s + c.x), 0) / 4, y: quad.reduce(((s, c) -> s + c.y), 0) / 4 }
+  near     = (a, b) -> Math.hypot(a.x - b.x, a.y - b.y) < 1
+  for image in [CODE, LABEL, STACK]
+    reader = counted formats: ['qr_code', 'code_128', 'pdf417']
+    hit = read reader, image
+    ok reader.lockTarget, "#{hit.format} lock"
+    ok near(centroid(reader.lockTarget), centroid(hit.corners)), "#{hit.format} lock centered"
+    reader.clear()
+
+test "async: the other readers run on the frame QR missed, never a cleaned one", ->
+  qrDecodes = 0
+  reader  = counted async: true, formats: ['qr_code', 'code_128']
+  pending = reader.decode LABEL
+  ok pending instanceof Promise
+  ok reader.intake.busy()
+  eq reader.decode(CODE), undefined, 'a frame never lands over a decode in flight'
+  hit = await pending
+  eq hit, { format: 'code_128', text: 'KIT-0042', corners: readCode128(LABEL).corners }
+  eq qrDecodes, 1
+  pending = reader.decode LABEL
+  reader.intake.clean()
+  eq (await pending), undefined
+  eq read(counted(async: true, formats: ['code_128']), LABEL).text, 'KIT-0042', 'without QR nothing waits'
+
+test "formats reject loudly", ->
+  for formats in [[], ['data_matrix'], ['ean_13'], ['QR'], ['qr_code', 'qr_code'], 'qr_code']
+    throws (-> BarcodeReader.new {}, { formats }), TypeError, 'formats'
+
+test "BarcodeDetector reads Code 128", ->
+  eq BarcodeDetector.getSupportedFormats!, ['code_128', 'pdf417', 'qr_code']
+  image = (raster) -> Object.defineProperty { ...raster }, Symbol.toStringTag, value: 'ImageData'
+  [hit] = BarcodeDetector.new(formats: ['code_128']).detect! image(LABEL)
+  eq hit.format,   'code_128'
+  eq hit.rawValue, 'KIT-0042'
+  eq hit.cornerPoints.length, 4
+  eq BarcodeDetector.new().detect!(image(LABEL))[0]?.format, 'code_128'
+  eq BarcodeDetector.new(formats: ['qr_code']).detect!(image(LABEL)), []
