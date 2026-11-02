@@ -18607,6 +18607,9 @@ ${pad}${into}.push(...${tmp});`);
     if (isNode(sexpr[0]) && sexpr[0][0] === "." && sexpr[0][1] === "this" && typeof sexpr[0][2] === "string" && this.cframes.length > 0 && this.cframes[this.cframes.length - 1].members.has(sexpr[0][2])) {
       return true;
     }
+    if (this.isCallNode(sexpr) && this.renderVarKind(sexpr[0]) === null && this.resolveBareRead(sexpr[0]) === "member") {
+      return true;
+    }
     return sexpr.some((c) => this.renderReactive(c));
   }
   isRenderBinding(stmt) {
@@ -34024,7 +34027,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "2de391ce0295a085";
+var compilerBuild = () => "bc3c3f1c02c26523";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
