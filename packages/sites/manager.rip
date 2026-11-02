@@ -789,9 +789,14 @@ appPublicationDocuments = (graph, list, ship, inputHashes, watchRoots) ->
     latest: JSON.stringify({ hash })
   }
 
+# One manager assembles one App for its lifetime, so what assembly read from
+# each module source carries from one publication to the next.
+assemblyCache = Map.new()
+
 appDocuments = (project, graph, ship) ->
   { assembleRipPublication } = import!(join(import.meta.dir, 'bundle.rip'))
   assembled = assembleRipPublication
+    cache: assemblyCache
     modules: graph.modules
     moduleFiles: graph.moduleFiles
     appDir: project.root

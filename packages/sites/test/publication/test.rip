@@ -2,7 +2,7 @@ import { test, eq, ok } from 'rip/testing'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { assembleRipBundle } from '../../bundle.rip'
+import { assembleRipBundle, assembleRipPublication } from '../../bundle.rip'
 
 PACKAGES = join(import.meta.dir, '..', '..', '..')
 
@@ -18,6 +18,39 @@ test! 'Rip bundle is one canonical source list with no resolver metadata', ->
   ok paths.includes 'rip/http/index.rip'
   ok not paths.includes 'rip/http/http.rip'
   ok list.find((entry) -> entry[0] is 'rip/http/index.rip')[1].includes('export class HTTPError')
+
+test! 'a cache recompiles only the modules whose source changed, and a failed assembly leaves it as it was', ->
+  cache = Map.new()
+  modules =
+    'index.rip': "import { helper } from './helper.rip'\nexport value = helper"
+    'helper.rip': 'export helper = 1'
+  eq assembleRipPublication({ modules, cache }).compiled, 2
+  eq assembleRipPublication({ modules, cache }).compiled, 0
+
+  edited = { ...modules, 'helper.rip': 'export helper = 2' }
+  rebuilt = assembleRipPublication({ modules: edited, cache })
+  eq rebuilt.compiled, 1
+  eq rebuilt.list, assembleRipPublication({ modules: edited }).list
+
+  message = null
+  try
+    assembleRipPublication({ modules: { ...modules, 'helper.rip': 'export helper = (' }, cache })
+  catch error
+    message = error.message
+  ok message?.includes("'helper.rip' failed to compile during bundle assembly")
+  eq assembleRipPublication({ modules: edited, cache }).compiled, 0
+  eq assembleRipPublication({ modules: { ...modules, 'helper.rip': 'export helper = 3' }, cache }).compiled, 1
+
+  assembleRipPublication({ modules: { 'index.rip': 'export value = 1' }, cache })
+  eq cache.size, 1
+
+test! 'a cached module is keyed by its path as well as its source', ->
+  cache = Map.new()
+  eq assembleRipPublication({ modules: { 'a.rip': 'export value = 1', 'b.rip': 'export value = 1' }, cache }).compiled, 2
+
+  modules = { 'index.rip': "import { http } from 'rip/http'\nexport client = http" }
+  assembleRipPublication({ modules, packagesDir: PACKAGES, cache })
+  eq assembleRipPublication({ modules, packagesDir: PACKAGES, cache }).compiled, 0
 
 test! 'embedded App imports never add App source to the server bundle', ->
   list = assembleRipBundle

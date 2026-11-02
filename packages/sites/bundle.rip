@@ -108,7 +108,9 @@ materializeSharedSchemas = (modules, moduleFiles, appDir, appRoot) ->
 
   consumed
 
-export assembleBundle = ({ modules, packagesDir, moduleFiles = null, appDir = null, appRoot = null } = {}) ->
+export assembleBundle = (options = {}) -> collectBundle(options, moduleReader())
+
+collectBundle = ({ modules, packagesDir, moduleFiles = null, appDir = null, appRoot = null } = {}, reader) ->
   unless modules? and typeof modules is 'object'
     throw TypeError.new 'rip: assembleBundle requires a modules object'
 
@@ -191,20 +193,11 @@ export assembleBundle = ({ modules, packagesDir, moduleFiles = null, appDir = nu
     path = queue.pop()
     continue if seen.has path
     seen.add path
-    source = bundle.modules[path]
-    compiled = null
-    try
-      compiled = compile source, { path, runtimeDelivery: 'none' }
-    catch error
-      framed = Error.new "rip: '#{path}' failed to compile during bundle assembly: #{error.message}"
-      framed.cause = error
-      throw framed
-
-    if compiled.runtimes? and compiled.runtimes.has('orm')
+    facts = reader.read(path, bundle.modules[path])
+    if facts.orm
       throw Error.new "rip: '#{path}' declares a :model schema — persistence is server-only and cannot travel to the browser"
 
-    for span in compiled.imports
-      specifier = unquote span.specifier
+    for specifier in facts.specifiers
       continue if RUNTIME_RE.test specifier
       continue if specifier in ['rip/app', 'rip/app/rash']
       if specifier.startsWith 'rip/app/'
@@ -236,6 +229,40 @@ export assembleBundle = ({ modules, packagesDir, moduleFiles = null, appDir = nu
 
   bundle
 
+# What assembly reads from a module: its import specifiers and whether it
+# needs the server-only orm runtime. The compile is the browser one, so a
+# module the browser would reject fails here. Facts are held per path while
+# its source is unchanged; a failed compile leaves the held facts as they
+# were, and `retire` leaves the cache holding exactly the paths a completed
+# assembly read.
+moduleReader = (cache = Map.new()) ->
+  current = Set.new()
+  reader =
+    compiled: 0
+    read: (path, source) ->
+      held = cache.get(path)
+      unless held?.source is source
+        compiled = null
+        try
+          compiled = compile(source, { path, runtimeDelivery: 'none', browserModule: true })
+        catch error
+          framed = Error.new("rip: '#{path}' failed to compile during bundle assembly: #{error.message}")
+          framed.cause = error
+          throw framed
+        held =
+          source: source
+          facts:
+            specifiers: compiled.imports.map((span) -> unquote(span.specifier))
+            orm: compiled.runtimes?.has('orm') is true
+        cache.set(path, held)
+        reader.compiled++
+      current.add(path)
+      held.facts
+    retire: ->
+      cache.delete(path) for path in [...cache.keys()] when not current.has(path)
+      return
+  reader
+
 joinModulePath = (from, specifier) ->
   parts = from.split('/').slice 0, -1
   for piece in specifier.split '/'
@@ -256,7 +283,7 @@ validBrowserModulePath = (path) ->
   return false if filename is '.rip' or not filename.endsWith '.rip'
   not segments.slice(0, -1).some((segment) -> segment.endsWith '.rip')
 
-validateRipProgram = (modules) ->
+validateRipProgram = (modules, reader) ->
   edges = Map.new()
   resolveImport = (from, specifier) ->
     if specifier.startsWith('./') or specifier.startsWith('../')
@@ -281,10 +308,8 @@ validateRipProgram = (modules) ->
   for [path, source] in Object.entries modules
     unless validBrowserModulePath path
       throw Error.new "rip: invalid browser module path '#{path}'"
-    compiled = compile source, { path, runtimeDelivery: 'none', browserModule: true }
     dependencies = []
-    for span in compiled.imports
-      specifier = unquote span.specifier
+    for specifier in reader.read(path, source).specifiers
       continue if RUNTIME_RE.test specifier
       continue if specifier in ['rip/app', 'rip/app/rash']
       dependencies.push resolveImport(path, specifier)
@@ -306,8 +331,13 @@ validateRipProgram = (modules) ->
 # The wire program is only canonical `[[path, source], ...]`. Bare package
 # roots resolve by convention to `rip/<name>/index.rip`, keeping resolver
 # metadata private to Manager.
+#
+# A long-lived caller passes the same `cache` Map to every assembly, so an
+# edit recompiles only the modules whose source changed; `compiled` counts
+# the compiles this assembly ran.
 export assembleRipPublication = (options = {}) ->
-  assembled = assembleBundle options
+  reader = moduleReader(options.cache)
+  assembled = collectBundle(options, reader)
   modules = { ...assembled.modules }
 
   for [name, packageInfo] in Object.entries assembled.packages
@@ -319,7 +349,8 @@ export assembleRipPublication = (options = {}) ->
       modules[canonical] = modules[entry]
       delete modules[entry]
 
-  validateRipProgram modules
+  validateRipProgram(modules, reader)
+  reader.retire()
   seenInputs = Map.new()
   for entry in assembled.inputHashes
     seenInputs.set entry.path, entry.hash unless seenInputs.has entry.path
@@ -331,6 +362,7 @@ export assembleRipPublication = (options = {}) ->
     inputs: inputHashes.map (entry) -> entry.path
     inputHashes
     watchRoots: [...Set.new(assembled.watchRoots)].sort()
+    compiled: reader.compiled
   }
 
 export assembleRipBundle = (options = {}) -> assembleRipPublication(options).list
