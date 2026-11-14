@@ -19465,7 +19465,7 @@ const RUNTIME_TABLE = [
     types: {
       __state: '<T>(value: T | { value: T; read(): T }) => { value: T; read(): T; touch(): void }',
       __computed: '<T>(fn: () => T) => { readonly value: T; read(): T }',
-      __effect: '(fn: () => void | (() => void)) => () => void',
+      __effect: '(fn: () => void | (() => void) | Promise<unknown>) => () => void',
       __batch: '<T>(fn: () => T) => T',
       __readonly: '<T>(value: T) => Readonly<{ value: T }>',
       __setErrorHandler: '(handler: ((error: unknown) => void) | null) => ((error: unknown) => void) | null',
