@@ -27,7 +27,7 @@ export declare const __computed: <T>(fn: () => T) => {
   read(): T;
 };
 
-export declare const __effect: (fn: () => void | (() => void) | Promise<unknown>) => () => void;
+export declare const __effect: (fn: () => unknown) => () => void;
 export declare const __batch: <T>(fn: () => T) => T;
 
 export declare const __readonly: <T>(value: T) => Readonly<{
