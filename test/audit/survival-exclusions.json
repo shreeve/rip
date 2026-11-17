@@ -15,8 +15,8 @@
     "138:46:message": "member read on `error`, bound by an annotated `catch error: any` — a member of `any` has no symbol, no token; tsgo behaves identically on hand-written TS"
   },
   "08-functions.rip": {
-    "147:33:json": "INTERIM — hoist cost, not twin-equivalent: idiomatic hand-written TS tokens this. `FORMATS` is a hoisted evolving `let`; inside a closure the classifier does not flow-type the capture, so the member carries no token (probe-verified on the face's exact shape)",
-    "147:51:text": "INTERIM — hoist cost, not twin-equivalent: idiomatic hand-written TS tokens this. `FORMATS` is a hoisted evolving `let`; inside a closure the classifier does not flow-type the capture, so the member carries no token (probe-verified on the face's exact shape)"
+    "155:33:json": "INTERIM — hoist cost, not twin-equivalent: idiomatic hand-written TS tokens this. `FORMATS` is a hoisted evolving `let`; inside a closure the classifier does not flow-type the capture, so the member carries no token (probe-verified on the face's exact shape)",
+    "155:51:text": "INTERIM — hoist cost, not twin-equivalent: idiomatic hand-written TS tokens this. `FORMATS` is a hoisted evolving `let`; inside a closure the classifier does not flow-type the capture, so the member carries no token (probe-verified on the face's exact shape)"
   },
   "10-modules.rip": {
     "14:24:theme": "import-binding head tsgo leaves untokenized on equivalent hand-written TS (namespace head, or a default that exports a literal) — probe-verified 2026-08-03",
@@ -30,10 +30,10 @@
     "54:23:hubTheme": "import-binding head tsgo leaves untokenized on equivalent hand-written TS (namespace head, or a default that exports a literal) — probe-verified 2026-08-03"
   },
   "11-types.rip": {
-    "184:74:hits": "member resolves through `Counts`'s index signature — no declared property symbol, no token; probe-verified identical on hand-written TS",
-    "200:14:first": "labeled tuple element — a label, not an identifier with a symbol",
-    "200:29:second": "labeled tuple element — a label, not an identifier with a symbol",
-    "208:62:length": "tuple `.length` — resolves through the array apparatus, no own symbol; probe-verified: hand-written TS gets no token either"
+    "189:74:hits": "member resolves through `Counts`'s index signature — no declared property symbol, no token; probe-verified identical on hand-written TS",
+    "205:14:first": "labeled tuple element — a label, not an identifier with a symbol",
+    "205:29:second": "labeled tuple element — a label, not an identifier with a symbol",
+    "213:62:length": "tuple `.length` — resolves through the array apparatus, no own symbol; probe-verified: hand-written TS gets no token either"
   },
   "13-components-lib.rip": {
     "4:2:offer": "gate spelling — lowers to gate scaffold, not an identifier",

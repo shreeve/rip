@@ -113,7 +113,13 @@ function describe(id: number | string): string {
   return `entry ${id}`
 }
 
-console.log(describe(7), describe('seven'))
+function filled<T>(value: T): T[]
+function filled<T>(value: T, count: number): T[]
+function filled<T>(value: T, count: number = 1): T[] {
+  return Array(count).fill(value)
+}
+
+console.log(describe(7), describe('seven'), filled('x'), filled(0, 3))
 
 // ── exported type declarations ──
 

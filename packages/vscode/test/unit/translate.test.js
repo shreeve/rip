@@ -421,6 +421,19 @@ describe('TS-face artifact filters', () => {
     expect(scrubFaceArtifacts('(method) __RipComponent.mount(target?: Node | string): __RipComponent')).toBe('(method) Component.mount(target?: Node | string): Component');
   });
 
+  test('scrubFaceArtifacts: the context reads name their provider and its offers, never the conditional that admits it', () => {
+    expect(scrubFaceArtifacts('const getContext: <P extends __RipProvider, K extends keyof __RipOffers<P>>(provider: __RipProviding<P>, key: K) => __RipOffers<P>[K]'))
+      .toBe('const getContext: <P extends Provider, K extends keyof Offers<P>>(provider: P, key: K) => Offers<P>[K]');
+  });
+
+  test('scrubFaceArtifacts: a face name tsgo truncated mid-word leaves with the cut', () => {
+    expect(scrubFaceArtifacts('connect: (options: string) => __R...')).toBe('connect: (options: string) => ...');
+    expect(scrubFaceArtifacts('on?: __RipAdap...')).toBe('on?: ...');
+    // A whole name before the cut still translates, and a user's own `__` name is not a face name.
+    expect(scrubFaceArtifacts('on?: __RipAdapter...')).toBe('on?: Adapter...');
+    expect(scrubFaceArtifacts('mine: __Ready...')).toBe('mine: __Ready...');
+  });
+
   test('scrubFaceArtifacts: the `!:` assertion and mirror .rip.ts specifiers leave user-visible strings', () => {
     expect(scrubFaceArtifacts('let y!: number')).toBe('let y: number');
     expect(scrubFaceArtifacts('Add import from "./util.rip.ts"')).toBe('Add import from "./util.rip"');

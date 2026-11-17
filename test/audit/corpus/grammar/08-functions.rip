@@ -35,8 +35,16 @@ def announce!(subject: string)
 def persist!(entry: string): void
   console.log('persisted', entry)
 
+def notify!<T>(subject: T)
+  console.log('notified', subject)
+
+def record!<T>(entry: T): void
+  console.log('recorded', entry)
+
 announce('launch')
 persist('log line')
+notify(7)
+record('entry')
 
 # ── params: the default, the optional, and the splat rest ──
 

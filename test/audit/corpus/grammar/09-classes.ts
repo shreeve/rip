@@ -222,6 +222,12 @@ class Counter {
   static tick(): void {
     console.log('tick')
   }
+  static echo<T>(x: T): void {
+    console.log('echo', x)
+  }
+  static note<T>(x: T): void {
+    console.log('note', x)
+  }
   get doubled() {
     return this.count * 2
   }
@@ -232,7 +238,112 @@ class Counter {
 
 Counter.zero()
 Counter.tick()
+Counter.echo('e')
+Counter.note(1)
 const counted = Counter.of(3)
 counted.add(2)
 counted.doubled = 20
 console.log('counted:', counted.count, counted.doubled, counted.history.length, Counter.fresh().count, Counter.pair(1).length, Counter.only(2).length)
+
+// ── private members: the modifier heads every field, method pair, and def form, and erases from the JavaScript ──
+
+class Vault {
+  private 'sealed': boolean = true
+  private 'kind' = 'vault'
+  private plain = 1
+  private carried = 2
+  private dropped = 3
+  private annotated: number = 4
+  private annotatedCarried: number = 5
+  private annotatedDropped: number = 6
+  private maybe = 7
+  private maybeCarried = 8
+  private maybeDropped = 9
+  private maybeTyped: number = 10
+  private maybeTypedCarried: number = 11
+  private maybeTypedDropped: number = 12
+  private owner: string
+  private memo: string
+  constructor(owner: string) {
+    this.owner = owner
+    this.memo = ''
+  }
+  private bump() {
+    return this.plain + this.carried
+  }
+  private lifted() {
+    return this.dropped + this.annotated
+  }
+  private seal(): void {
+    this.memo = 'sealed'
+  }
+  private unseal(): void {
+    this.memo = 'open'
+  }
+  private peek() {
+    return this.annotatedCarried
+  }
+  private peekTyped(): number {
+    return this.annotatedDropped
+  }
+  private mirror<T>(x: T) {
+    return [x]
+  }
+  private mirrorTyped<T>(x: T): T[] {
+    return [x]
+  }
+  private mark(): void {
+    this.memo = 'marked'
+  }
+  private markTyped(): void {
+    this.memo = 'typed'
+  }
+  private keep<T>(x: T): void {
+    this.memo = String(x)
+  }
+  private keepTyped<T>(x: T): void {
+    this.memo = String(x)
+  }
+  private static mint() {
+    return new Vault('mint')
+  }
+  private static mintTyped(): Vault {
+    return new Vault('typed')
+  }
+  private static pairOf<T>(x: T) {
+    return [x, x]
+  }
+  private static pairOfTyped<T>(x: T): T[] {
+    return [x, x]
+  }
+  private static reset(): void {
+    console.log('reset')
+  }
+  private static resetTyped(): void {
+    console.log('reset typed')
+  }
+  private static hold<T>(x: T): void {
+    console.log('hold', x)
+  }
+  private static holdTyped<T>(x: T): void {
+    console.log('hold typed', x)
+  }
+  tally(): number {
+    this.seal()
+    this.unseal()
+    this.mark()
+    this.markTyped()
+    this.keep(1)
+    this.keepTyped('k')
+    Vault.reset()
+    Vault.resetTyped()
+    Vault.hold(1)
+    Vault.holdTyped('h')
+    const minted = [Vault.mint(), Vault.mintTyped(), Vault.pairOf(1), Vault.pairOfTyped(2)].length
+    return this.bump() + this.lifted() + this.peek() + this.peekTyped() + this.mirror(1).length + this.mirrorTyped(2).length + minted + this.maybe + this.maybeCarried + this.maybeDropped + this.maybeTyped + this.maybeTypedCarried + this.maybeTypedDropped
+  }
+}
+
+const vault = new Vault('ada')
+
+console.log('vault:', vault.tally())

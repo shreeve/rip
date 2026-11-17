@@ -19305,10 +19305,13 @@ const SCHEMA_TYPE_DECLS = [
 // The context API's aliases: a provider is a component, whose instances
 // carry the `__offers` record — required on the face's class, optional on
 // a declaration file's interface, where a hand-built value owes none —
-// and the record is what a read indexes.
+// and the record is what a read indexes. A read's provider argument is
+// __RipProviding, which admits only a type whose instances name the
+// record; named, it reads back as a name rather than its conditional.
 const COMPONENTS_TYPE_DECLS = [
   'type __RipProvider = abstract new (...args: never[]) => { __offers?: object };',
   "type __RipOffers<P extends __RipProvider> = NonNullable<InstanceType<P>['__offers']>;",
+  "type __RipProviding<P extends __RipProvider> = '__offers' extends keyof InstanceType<P> ? P : never;",
 ].join('\n');
 const COERCER_TYPE = '{ <F extends (value: string) => unknown>(name: string, fn: F, options?: { raw?: false }): F; <F extends (value: unknown) => unknown>(name: string, fn: F, options: { raw: boolean }): F }';
 // Adapter Contract v2 (docs/ORM.md): `query` is the floor the
@@ -19555,8 +19558,8 @@ const RUNTIME_TABLE = [
       // own read is typed the same way; its report folds into the declare
       // line's (mapTsDiagnostic).
       setContext: '(key: string, value: unknown) => void',
-      getContext: "<P extends __RipProvider, K extends keyof __RipOffers<P>>(provider: '__offers' extends keyof InstanceType<P> ? P : never, key: K) => __RipOffers<P>[K]",
-      hasContext: "<P extends __RipProvider>(provider: '__offers' extends keyof InstanceType<P> ? P : never, key: keyof __RipOffers<P>) => boolean",
+      getContext: '<P extends __RipProvider, K extends keyof __RipOffers<P>>(provider: __RipProviding<P>, key: K) => __RipOffers<P>[K]',
+      hasContext: '<P extends __RipProvider>(provider: __RipProviding<P>, key: keyof __RipOffers<P>) => boolean',
       // The one entry that types every merged `class:` value — the
       // face's __RipClassValue alias arms alongside it (the tail's
       // domSurfaceDecls emission).

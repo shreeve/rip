@@ -15,6 +15,7 @@ type __RipProvider = abstract new (...args: never[]) => {
 };
 
 type __RipOffers<P extends __RipProvider> = NonNullable<InstanceType<P>['__offers']>;
+type __RipProviding<P extends __RipProvider> = '__offers' extends keyof InstanceType<P> ? P : never;
 
 type __RipOwnerFrame = {
   readonly depth: number;
@@ -201,8 +202,8 @@ export declare class __Component {
 export declare const __pushComponent: (component: __Component | null) => __Component | null;
 export declare const __popComponent: (prev: __Component | null) => void;
 export declare const setContext: (key: string, value: unknown) => void;
-export declare const getContext: <P extends __RipProvider, K extends keyof __RipOffers<P>>(provider: '__offers' extends keyof InstanceType<P> ? P : never, key: K) => __RipOffers<P>[K];
-export declare const hasContext: <P extends __RipProvider>(provider: '__offers' extends keyof InstanceType<P> ? P : never, key: keyof __RipOffers<P>) => boolean;
+export declare const getContext: <P extends __RipProvider, K extends keyof __RipOffers<P>>(provider: __RipProviding<P>, key: K) => __RipOffers<P>[K];
+export declare const hasContext: <P extends __RipProvider>(provider: __RipProviding<P>, key: keyof __RipOffers<P>) => boolean;
 export declare const __clsx: (...args: (__RipClassValue | __RipClassValue[])[]) => string;
 export declare const __style: (el: object, value: __RipCSSProperties | string | null | undefined) => void;
 export declare const __lis: (arr: readonly number[]) => number[];

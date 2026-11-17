@@ -1579,7 +1579,7 @@ const NEVER_TOKENED_WORDS = new Set([
   'finally', 'throw', 'switch', 'case', 'default', 'return', 'break', 'continue',
   'new', 'typeof', 'instanceof', 'delete', 'await', 'yield', 'this', 'super',
   'true', 'false', 'null', 'undefined', 'yes', 'no', 'on', 'off', 'async',
-  'from', 'as', 'static', 'get', 'set', 'readonly', 'declare', 'abstract',
+  'from', 'as', 'static', 'get', 'set', 'readonly', 'private', 'declare', 'abstract',
   'satisfies', 'keyof', 'infer', 'asserts', 'unique', 'void', 'let', 'const',
   'var', 'function', 'debugger', 'constructor', 'out',
 ]);
