@@ -12546,6 +12546,17 @@ class Emitter {
     // has no place to go: its append is guarded (renderAppend).
     if (this.rstate.frame.extendsTag !== null && this.rstate.sink.kind === 'class') this.rstate.frame.asChildSlot = v;
     const slotSpan = this.ts ? this.wordSpanIn('slot', markNode ?? this.rstate.node) : null;
+    // Under a conditional the slot comes and goes with its branch, so it
+    // projects through __heldSlot, which lets several root children
+    // detach whole; a slot outside one is inserted once.
+    if (this.rstate.sink.kind !== 'class') {
+      this.renderLine(markNode, () => {
+        this.b.emit(`${v} = ${this.runtimeName('__heldSlot')}(`);
+        this.emitChildrenRead(slotSpan);
+        this.b.emit(')');
+      });
+      return v;
+    }
     this.renderLine(markNode, () => {
       const c = this.childrenReadText();
       this.b.emit(`${v} = `);
@@ -19521,7 +19532,7 @@ const RUNTIME_TABLE = [
     key: 'components',
     names: ['setContext', 'getContext', 'hasContext', '__Component',
             '__pushComponent', '__popComponent', '__clsx', '__style', '__lis', '__reconcile',
-            '__transition', '__handleComponentError', '__gateBind', '__detach',
+            '__transition', '__handleComponentError', '__gateBind', '__detach', '__heldSlot',
             '__reportChildFailure', '__hostOf',
             // The owner-seam names factory emission spells —
             // re-exported by the components module so reactive-only
@@ -19529,7 +19540,7 @@ const RUNTIME_TABLE = [
             '__ownerFrame', '__pushOwner', '__popOwner', '__detachRef'],
     generatedNames: ['setContext', 'getContext', '__Component',
                      '__pushComponent', '__popComponent', '__clsx', '__style', '__reconcile',
-                     '__transition', '__gateBind', '__detach', '__reportChildFailure', '__hostOf',
+                     '__transition', '__gateBind', '__detach', '__heldSlot', '__reportChildFailure', '__hostOf',
                      '__ownerFrame', '__pushOwner', '__popOwner', '__detachRef'],
     decls: COMPONENTS_TYPE_DECLS,
     types: {

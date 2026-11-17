@@ -167,6 +167,7 @@ export const RUNTIME_EXPORT_TYPES = {
       __handleComponentError: '(error: unknown, component: __Component | null | undefined) => void',
       __gateBind: '(self: __Component, index: number) => { readonly value: unknown; read(): unknown }',
       __detach: '(node: Node | null | undefined) => void',
+      __heldSlot: '(children: unknown) => Node',
       __reportChildFailure: '(name: string, error: unknown) => void',
       __setChildFailureReporter: '(reporter: (name: string, error: unknown) => void) => (name: string, error: unknown) => void',
       __hostOf: '(inst: __Component, event: string) => Element',

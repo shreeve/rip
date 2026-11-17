@@ -82,6 +82,7 @@ __export(exports_components, {
   __detachRef: () => __detachRef,
   __gateBind: () => __gateBind,
   __handleComponentError: () => __handleComponentError,
+  __heldSlot: () => __heldSlot,
   __hmrClassify: () => __hmrClassify,
   __hmrEmit: () => __hmrEmit,
   __hmrEntries: () => __hmrEntries,
@@ -10003,6 +10004,7 @@ ${COMPONENTS_DECLS}`,
       __handleComponentError: "(error: unknown, component: __Component | null | undefined) => void",
       __gateBind: "(self: __Component, index: number) => { readonly value: unknown; read(): unknown }",
       __detach: "(node: Node | null | undefined) => void",
+      __heldSlot: "(children: unknown) => Node",
       __reportChildFailure: "(name: string, error: unknown) => void",
       __setChildFailureReporter: "(reporter: (name: string, error: unknown) => void) => (name: string, error: unknown) => void",
       __hostOf: "(inst: __Component, event: string) => Element",
@@ -19235,6 +19237,14 @@ ${pad}${into}.push(...${tmp});`);
     if (this.rstate.frame.extendsTag !== null && this.rstate.sink.kind === "class")
       this.rstate.frame.asChildSlot = v;
     const slotSpan = this.ts ? this.wordSpanIn("slot", markNode ?? this.rstate.node) : null;
+    if (this.rstate.sink.kind !== "class") {
+      this.renderLine(markNode, () => {
+        this.b.emit(`${v} = ${this.runtimeName("__heldSlot")}(`);
+        this.emitChildrenRead(slotSpan);
+        this.b.emit(")");
+      });
+      return v;
+    }
     this.renderLine(markNode, () => {
       const c = this.childrenReadText();
       this.b.emit(`${v} = `);
@@ -24391,7 +24401,7 @@ var RUNTIME_TABLE = [
     types: {
       __state: "<T>(value: T | { value: T; read(): T }) => { value: T; read(): T; touch(): void }",
       __computed: "<T>(fn: () => T) => { readonly value: T; read(): T }",
-      __effect: "(fn: () => void | (() => void)) => () => void",
+      __effect: "(fn: () => unknown) => () => void",
       __batch: "<T>(fn: () => T) => T",
       __readonly: "<T>(value: T) => Readonly<{ value: T }>",
       __setErrorHandler: "(handler: ((error: unknown) => void) | null) => ((error: unknown) => void) | null",
@@ -24459,6 +24469,7 @@ var RUNTIME_TABLE = [
       "__handleComponentError",
       "__gateBind",
       "__detach",
+      "__heldSlot",
       "__reportChildFailure",
       "__hostOf",
       "__ownerFrame",
@@ -24478,6 +24489,7 @@ var RUNTIME_TABLE = [
       "__transition",
       "__gateBind",
       "__detach",
+      "__heldSlot",
       "__reportChildFailure",
       "__hostOf",
       "__ownerFrame",
@@ -28335,14 +28347,30 @@ function __claimGateConstructor() {
   };
 }
 function __detach(node) {
-  if (!node || node.nodeType === 11)
+  if (!node)
     return;
+  if (node.nodeType === 11) {
+    const held = node._held;
+    if (held)
+      __untracked(() => {
+        for (const n of held)
+          node.appendChild(n);
+      });
+    return;
+  }
   __untracked(() => {
     if (typeof node.remove === "function")
       node.remove();
     else if (node.parentNode)
       node.parentNode.removeChild(node);
   });
+}
+function __heldSlot(children) {
+  if (!(children instanceof Node))
+    return children != null ? document.createTextNode(String(children)) : document.createComment("");
+  if (children.nodeType === 11)
+    children._held ??= [...children.childNodes];
+  return children;
 }
 function __pushComponent(component) {
   const prev = __currentComponent;
@@ -34103,7 +34131,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "7176d260a34a69b7";
+var compilerBuild = () => "0ce253b34bf08f0d";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

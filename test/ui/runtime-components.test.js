@@ -112,7 +112,7 @@ describe('module shape', () => {
   test('named exports are the delivered set plus the private renderer construction seam', () => {
     expect(Object.keys(v4c).sort()).toEqual([
  '__Component', '__claimGateConstructor', '__clsx', '__detach', '__detachRef', '__gateBind', '__handleComponentError',
- '__hmrClassify', '__hmrEmit', '__hmrEntries', '__hmrEvents', '__hmrInitDiff', '__hmrLookup', '__hmrMigrateDiff',
+ '__heldSlot', '__hmrClassify', '__hmrEmit', '__hmrEntries', '__hmrEvents', '__hmrInitDiff', '__hmrLookup', '__hmrMigrateDiff',
  '__hmrMigrateRemount', '__hmrPatch', '__hmrPreserveState', '__hmrRegisterDefinition', '__hmrRegistry',
  '__hmrRestoreUi', '__hmrSnapshotUi', '__hostOf',
  '__lis',
@@ -1959,10 +1959,10 @@ describe('the extends rest seam (runtime-owned;  re-emits it per class — /#165
 // ════════════════════════════════════════════════════════════════════
 
 const REACTIVE_IMPORT = /^import \{ __state, __computed, __effect, __batch, __readonly, __setErrorHandler, __handleError, __catchErrors, getEffectSignal \} from ".*src\/runtime\/reactive\.js";$/;
-const COMPONENTS_IMPORT = /^import \{ setContext, getContext, hasContext, __Component, __pushComponent, __popComponent, __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __reportChildFailure, __hostOf, __ownerFrame, __pushOwner, __popOwner, __detachRef \} from ".*src\/runtime\/components\.js";$/;
+const COMPONENTS_IMPORT = /^import \{ setContext, getContext, hasContext, __Component, __pushComponent, __popComponent, __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __heldSlot, __reportChildFailure, __hostOf, __ownerFrame, __pushOwner, __popOwner, __detachRef \} from ".*src\/runtime\/components\.js";$/;
 const ALL_COMPONENT_NAMES = ['setContext', 'getContext', 'hasContext', '__Component', '__pushComponent',
  '__popComponent', '__clsx', '__style', '__lis', '__reconcile', '__transition', '__handleComponentError', '__gateBind', '__detach',
- '__hostOf', '__ownerFrame', '__pushOwner', '__popOwner', '__detachRef'];
+ '__heldSlot', '__hostOf', '__ownerFrame', '__pushOwner', '__popOwner', '__detachRef'];
 
 // A program that exercises the runtime for real without the language
 // surface: a hand-built component scope around the context API.
@@ -2008,7 +2008,7 @@ describe('runtime delivery: the components runtime', () => {
     expect(/^import /m.test(code)).toBe(false);
     expect(code.startsWith(
  'const { __state, __computed, __effect, __batch, __readonly, __setErrorHandler, __handleError, __catchErrors, getEffectSignal, ' +
- 'setContext, getContext, hasContext, __Component, __pushComponent, __popComponent, __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __reportChildFailure, __hostOf, __ownerFrame, __pushOwner, __popOwner, __detachRef } = (() => {',
+ 'setContext, getContext, hasContext, __Component, __pushComponent, __popComponent, __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __heldSlot, __reportChildFailure, __hostOf, __ownerFrame, __pushOwner, __popOwner, __detachRef } = (() => {',
     )).toBe(true);
     expect(code).toContain('__RIP_REACTIVE_SENTINEL');
     expect(code).toContain('__RIP_COMPONENTS_SENTINEL');
@@ -2128,11 +2128,17 @@ describe('runtime delivery: the components runtime', () => {
 
   test('render effects, events, reconciliation, transitions, refs, ownership, and teardown use aliases', () => {
     const generated = [
-      '__effect', '__batch', '__clsx', '__reconcile', '__transition', '__detach',
+      '__effect', '__batch', '__clsx', '__reconcile', '__transition', '__detach', '__heldSlot',
       '__ownerFrame', '__pushOwner', '__popOwner', '__detachRef',
     ];
     const source = [
       ...generated.map((name) => `${name} = null`),
+      'Box = component',
+      '  @open := true',
+      '  render',
+      '    section',
+      '      if open',
+      '        slot',
       'App = component',
       '  items := ["a"]',
       '  shown := true',
@@ -2146,6 +2152,8 @@ describe('runtime delivery: the components runtime', () => {
       '          "shown"',
       '      for item in items',
       '        em item',
+      '      Box open: shown',
+      '        i "held"',
       'app = App.new()',
     ].join('\n');
     const { code } = compile(source, { runtimeDelivery: 'none' });
@@ -2166,6 +2174,7 @@ describe('runtime delivery: the components runtime', () => {
       const after = serialize(document.body);
       app.unmount();
       expect(before).toContain('<em>a</em>');
+      expect(before).toContain('<i>held</i>');
       expect(after).toContain('<em>b</em><em>c</em>');
       expect(serialize(document.body)).toBe('<body></body>');
     } finally {

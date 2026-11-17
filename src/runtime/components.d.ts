@@ -216,6 +216,7 @@ export declare const __gateBind: (self: __Component, index: number) => {
 };
 
 export declare const __detach: (node: Node | null | undefined) => void;
+export declare const __heldSlot: (children: unknown) => Node;
 export declare const __reportChildFailure: (name: string, error: unknown) => void;
 export declare const __setChildFailureReporter: (reporter: (name: string, error: unknown) => void) => (name: string, error: unknown) => void;
 export declare const __hostOf: (inst: __Component, event: string) => Element;
