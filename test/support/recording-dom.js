@@ -23,8 +23,8 @@
 //     with no attribute echo
 //   - real CSS transitions: transitionend is dispatched BY scenarios,
 //     never by a timer; classList changes are bookkeeping only
-//   - live traversal accessors: no nextSibling/firstChild/children/
-//     querySelectorAll — childNodes and the mount-path querySelector
+//   - live traversal accessors: no firstChild/children/querySelectorAll
+//     — childNodes, nextSibling, and the mount-path querySelector
 //     ('body', '#id', tag) are the whole read surface
 //   - HTML parsing: no innerHTML materialization; namespaceURI is
 //     stored, never interpreted
@@ -63,6 +63,11 @@ class RNode {
     return node;
   }
   remove() { if (this.parentNode) this.parentNode.removeChild(this); }
+  // Live, as the DOM's is: a block mounts after its anchor through it.
+  get nextSibling() {
+    const kids = this.parentNode?.childNodes;
+    return kids ? kids[kids.indexOf(this) + 1] ?? null : null;
+  }
   addEventListener(type, fn, opts) {
     this._listeners ??= new Map();
     if (!this._listeners.has(type)) this._listeners.set(type, []);

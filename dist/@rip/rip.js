@@ -18306,6 +18306,7 @@ ${pad}${into}.push(...${tmp});`);
       blockCount: 0,
       svgDepth: 0,
       fragChildren: new Map,
+      blockAnchors: new Set,
       tags: new Map,
       svgEls: new Set,
       pendingClassArgs: null,
@@ -19548,7 +19549,12 @@ ${pad}${into}.push(...${tmp});`);
           if (v != null)
             childrenVar = v;
         }
-        return childrenVar;
+        if (!this.rstate.blockAnchors.has(childrenVar))
+          return childrenVar;
+        const frag = this.newRenderVar("frag");
+        this.renderLine(null, () => this.b.emit(`${frag} = document.createDocumentFragment()`));
+        this.renderLine(null, () => this.b.emit(`${frag}.appendChild(${childrenVar})`));
+        return frag;
       };
     } else if (renderables.length > 1) {
       declareKey("children", null, "body");
@@ -20747,6 +20753,7 @@ ${this.replayPad}}` : " }");
     this.checkSetupLocalRefs(cond, markNode);
     this.checkCrossScopeLocals(cond, markNode);
     const anchorVar = this.newRenderVar("anchor");
+    this.rstate.blockAnchors.add(anchorVar);
     this.renderLine(null, () => this.b.emit(`${anchorVar} = document.createComment('if')`));
     this._narrowNext = this.narrowConjuncts(cond);
     const thenRec = this.walkFactory(thenPart, "branch", markNode);
@@ -20839,6 +20846,7 @@ ${this.replayPad}}` : " }");
       indexVar = indexVar ?? `__rip_idx${this.rstate.sink.loopStack.length}`;
     }
     const anchorVar = this.newRenderVar("anchor");
+    this.rstate.blockAnchors.add(anchorVar);
     this.renderLine(null, () => this.b.emit(`${anchorVar} = document.createComment('for')`));
     const reactiveSource = this.renderReactive(iter);
     const keyExpr = this.extractLoopKey(body, node);
@@ -28351,12 +28359,15 @@ function __detach(node) {
   if (!node)
     return;
   if (node.nodeType === 11) {
-    const held = node._held;
-    if (held)
-      __untracked(() => {
-        for (const n of held)
-          node.appendChild(n);
-      });
+    const start = node._slotStart;
+    if (!start?.parentNode || start.parentNode === node)
+      return;
+    __untracked(() => {
+      for (let n = start, next;n; n = next) {
+        next = n === node._slotEnd ? null : n.nextSibling;
+        node.appendChild(n);
+      }
+    });
     return;
   }
   __untracked(() => {
@@ -28369,8 +28380,10 @@ function __detach(node) {
 function __heldSlot(children) {
   if (!(children instanceof Node))
     return children != null ? document.createTextNode(String(children)) : document.createComment("");
-  if (children.nodeType === 11)
-    children._held ??= [...children.childNodes];
+  if (children.nodeType === 11 && !children._slotStart) {
+    children._slotStart = children.insertBefore(document.createComment(""), children.childNodes[0] ?? null);
+    children._slotEnd = children.appendChild(document.createComment(""));
+  }
   return children;
 }
 function __pushComponent(component) {
@@ -34132,7 +34145,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "5cb972536a6cd6e3";
+var compilerBuild = () => "7ab5cae64663b10d";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

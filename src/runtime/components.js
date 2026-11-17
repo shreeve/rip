@@ -493,16 +493,22 @@ function __claimGateConstructor() {
 // DocumentFragment is emptied the moment it is inserted: a multi-root
 // component's _root owns nothing to remove (its real top-level nodes
 // are tracked on the instance as _nodes and removed there), and a held
-// slot's fragment takes back the nodes __heldSlot recorded. A detached
-// node (parentNode null) is a harmless no-op.
+// slot's fragment takes back its run, its markers and all between them.
+// A detached node (parentNode null) is a harmless no-op.
 // A removal fires listeners on the node it removes (a focused field's
 // focusout), inside whatever effect is detaching it, so they run
 // untracked: a read in one subscribes nothing.
 function __detach(node) {
   if (!node) return;
   if (node.nodeType === 11) {
-    const held = node._held;
-    if (held) __untracked(() => { for (const n of held) node.appendChild(n); });
+    const start = node._slotStart;
+    if (!start?.parentNode || start.parentNode === node) return;
+    __untracked(() => {
+      for (let n = start, next; n; n = next) {
+        next = n === node._slotEnd ? null : n.nextSibling;
+        node.appendChild(n);
+      }
+    });
     return;
   }
   __untracked(() => {
@@ -512,13 +518,19 @@ function __detach(node) {
 }
 
 // The node a `slot` under a conditional projects, which comes and goes
-// with its branch. Several root children arrive as one DocumentFragment,
-// which empties into the DOM when inserted, so its nodes are recorded
-// once: __detach moves them back into it, and the next insert restores
-// the same nodes with their state.
+// with its branch. Several root children, or a block's anchor, arrive as
+// one DocumentFragment, which empties into the DOM when inserted, and a
+// block among them places and replaces its content beside its anchor
+// after that. So the run gains a marker at each end: __detach moves the
+// markers and everything between them back into the fragment, whatever
+// the blocks placed meanwhile, and the next insert restores the same
+// nodes with their state.
 function __heldSlot(children) {
   if (!(children instanceof Node)) return children != null ? document.createTextNode(String(children)) : document.createComment('');
-  if (children.nodeType === 11) children._held ??= [...children.childNodes];
+  if (children.nodeType === 11 && !children._slotStart) {
+    children._slotStart = children.insertBefore(document.createComment(''), children.childNodes[0] ?? null);
+    children._slotEnd = children.appendChild(document.createComment(''));
+  }
   return children;
 }
 
