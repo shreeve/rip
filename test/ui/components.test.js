@@ -1916,31 +1916,31 @@ App = component
     try {
       app.mount(target);
       const root = app._root;
-      const branchPlaceholder = root.childNodes[4];
-      const rowA = root.childNodes[1];
-      const rowB = root.childNodes[2];
+      const branchPlaceholder = root.childNodes[1];
+      const rowA = root.childNodes[2];
+      const rowB = root.childNodes[3];
       expect(serialize(target)).toBe(
-        '<main><div data-part="App"><!--if--><!--rip:child-error: Bad--><!--rip:child-error: Bad--><!--for--><!--rip:child-error: Bad--></div></main>',
+        '<main><div data-part="App"><!--if--><!--rip:child-error: Bad--><!--rip:child-error: Bad--><!--rip:child-error: Bad--><!--for--></div></main>',
       );
 
       app.items.value = [{ id: 'b' }, { id: 'a' }];
-      expect(root.childNodes).toEqual([root.childNodes[0], rowB, rowA, root.childNodes[3], branchPlaceholder]);
+      expect(root.childNodes).toEqual([root.childNodes[0], branchPlaceholder, rowB, rowA, root.childNodes[4]]);
 
       app.items.value = [{ id: 'b' }];
-      expect(root.childNodes).toEqual([root.childNodes[0], rowB, root.childNodes[2], branchPlaceholder]);
+      expect(root.childNodes).toEqual([root.childNodes[0], branchPlaceholder, rowB, root.childNodes[3]]);
       expect(rowA.parentNode).toBeNull();
 
       app.show.value = false;
       expect(branchPlaceholder.parentNode).toBeNull();
       expect(serialize(target)).toBe(
-        '<main><div data-part="App"><!--if--><!--rip:child-error: Bad--><!--for--><strong data-part="Good">good</strong></div></main>',
+        '<main><div data-part="App"><!--if--><strong data-part="Good">good</strong><!--rip:child-error: Bad--><!--for--></div></main>',
       );
       for (const failedRoot of failedRoots) expect(failedRoot.parentNode).toBeNull();
 
       app.items.value = [];
       expect(rowB.parentNode).toBeNull();
       expect(serialize(target)).toBe(
-        '<main><div data-part="App"><!--if--><!--for--><strong data-part="Good">good</strong></div></main>',
+        '<main><div data-part="App"><!--if--><strong data-part="Good">good</strong><!--for--></div></main>',
       );
     } finally {
       console.error = prior;
@@ -2496,6 +2496,106 @@ App = component
 
     app.shown.value = false;
     expect(serialize(target)).not.toContain('<p>one</p>');
+    app.unmount();
+  });
+
+  // Slotted children whose top level is itself a conditional place their
+  // branch after mount, beside the branch's anchor; the held slot carries
+  // whatever its run holds when it folds, wherever the branch has moved.
+  const heldBranch = (children, open, before = '') => {
+    const { code } = compile(`${before}Box = component
+  @open := true
+  render
+    section
+      if open
+        slot
+App = component
+  shown := ${open}
+  ready := false
+  items := ['a']
+  render
+    Box open: shown
+${children}`, { runtimeDelivery: 'none' });
+    const names = Object.keys(RT);
+    const { App } = new Function(...names, `${code}\nreturn { App };`)(...names.map((name) => RT[name]));
+    const target = document.createElement('main');
+    const app = new App({});
+    app.mount(target);
+    return { app, html: () => serialize(target) };
+  };
+  const LONE_IF = "      if ready\n        p 'loaded'\n      else\n        span 'loading'\n";
+
+  for (const open of [true, false]) {
+    test(`a slot under an if holds a root-level conditional, open ${open} at mount: the branch shows, swaps while folded, and leaves nothing behind`, () => {
+      const { app, html } = heldBranch(LONE_IF, open);
+      if (!open) {
+        expect(html()).not.toContain('loading');
+        app.shown.value = true;
+      }
+      expect(html()).toContain('<span>loading</span>');
+
+      app.shown.value = false;
+      expect(html()).not.toContain('loading');
+      app.ready.value = true;
+      expect(html()).not.toContain('loaded');
+
+      app.shown.value = true;
+      expect(html()).toContain('<p>loaded</p>');
+      expect(html()).not.toContain('loading');
+
+      app.shown.value = false;
+      expect(html()).toBe('<main><section data-part="Box"><!--if--></section></main>');
+      app.unmount();
+    });
+  }
+
+  test('a slot under an if holds a root-level loop: rows replaced while folded return as the new rows, and fold whole', () => {
+    const { app, html } = heldBranch("      for item in items\n        b item\n", true);
+    expect(html()).toContain('<b>a</b>');
+    app.shown.value = false;
+    app.items.value = ['b', 'c'];
+    expect(html()).toBe('<main><section data-part="Box"><!--if--></section></main>');
+    app.shown.value = true;
+    expect(html()).toContain('<b>b</b><b>c</b>');
+    expect(html()).not.toContain('<b>a</b>');
+    app.items.value = ['c', 'd'];
+    app.shown.value = false;
+    expect(html()).toBe('<main><section data-part="Box"><!--if--></section></main>');
+    app.unmount();
+  });
+
+  test('a slot under an if holds a child component rooted at a conditional: its branch shows and swaps while folded', () => {
+    const { app, html } = heldBranch('      Tree ready: ready\n', false, `Tree = component
+  @ready := false
+  render
+    if ready
+      p 'loaded'
+    else
+      span 'loading'
+`);
+    app.shown.value = true;
+    expect(html()).toContain('<span>loading</span>');
+    app.shown.value = false;
+    app.ready.value = true;
+    app.shown.value = true;
+    expect(html()).toContain('<p>loaded</p>');
+    expect(html()).not.toContain('loading');
+    app.shown.value = false;
+    expect(html()).toBe('<main><section data-part="Box"><!--if--></section></main>');
+    app.unmount();
+  });
+
+  test('a slot under an if holds a conditional among other roots: a branch swapped while shown folds with the rest', () => {
+    const { app, html } = heldBranch("      h1 'title'\n" + LONE_IF + "      em 'end'\n", true);
+    expect(html()).toMatch(/<h1>title<\/h1>.*<span>loading<\/span>.*<em>end<\/em>/);
+    app.ready.value = true;
+    expect(html()).toMatch(/<h1>title<\/h1>.*<p>loaded<\/p>.*<em>end<\/em>/);
+
+    app.shown.value = false;
+    expect(html()).toBe('<main><section data-part="Box"><!--if--></section></main>');
+    app.shown.value = true;
+    expect(html()).toMatch(/<h1>title<\/h1>.*<p>loaded<\/p>.*<em>end<\/em>/);
+    expect(html()).not.toContain('loading');
     app.unmount();
   });
 });

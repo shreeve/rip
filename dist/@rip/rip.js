@@ -28351,12 +28351,15 @@ function __detach(node) {
   if (!node)
     return;
   if (node.nodeType === 11) {
-    const held = node._held;
-    if (held)
-      __untracked(() => {
-        for (const n of held)
-          node.appendChild(n);
-      });
+    const start = node._slotStart;
+    if (!start?.parentNode || start.parentNode === node)
+      return;
+    __untracked(() => {
+      for (let n = start, next;n; n = next) {
+        next = n === node._slotEnd ? null : n.nextSibling;
+        node.appendChild(n);
+      }
+    });
     return;
   }
   __untracked(() => {
@@ -28369,8 +28372,10 @@ function __detach(node) {
 function __heldSlot(children) {
   if (!(children instanceof Node))
     return children != null ? document.createTextNode(String(children)) : document.createComment("");
-  if (children.nodeType === 11)
-    children._held ??= [...children.childNodes];
+  if (children.nodeType === 11 && !children._slotStart) {
+    children._slotStart = children.insertBefore(document.createComment(""), children.childNodes[0] ?? null);
+    children._slotEnd = children.appendChild(document.createComment(""));
+  }
   return children;
 }
 function __pushComponent(component) {
@@ -28948,6 +28953,11 @@ class __Component {
     __popComponent(token.prev);
   }
   _setChildren(value) {
+    if (value?.nodeType === 8 && value.parentNode == null) {
+      const home = document.createDocumentFragment();
+      home.appendChild(value);
+      value = home;
+    }
     const current = this.children;
     if (current != null && typeof current === "object" && typeof current.read === "function" && "value" in current) {
       current.value = value;
@@ -34132,7 +34142,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "5cb972536a6cd6e3";
+var compilerBuild = () => "38eada1103e2f467";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
