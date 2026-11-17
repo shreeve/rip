@@ -18306,7 +18306,6 @@ ${pad}${into}.push(...${tmp});`);
       blockCount: 0,
       svgDepth: 0,
       fragChildren: new Map,
-      blockAnchors: new Set,
       tags: new Map,
       svgEls: new Set,
       pendingClassArgs: null,
@@ -19549,12 +19548,7 @@ ${pad}${into}.push(...${tmp});`);
           if (v != null)
             childrenVar = v;
         }
-        if (!this.rstate.blockAnchors.has(childrenVar))
-          return childrenVar;
-        const frag = this.newRenderVar("frag");
-        this.renderLine(null, () => this.b.emit(`${frag} = document.createDocumentFragment()`));
-        this.renderLine(null, () => this.b.emit(`${frag}.appendChild(${childrenVar})`));
-        return frag;
+        return childrenVar;
       };
     } else if (renderables.length > 1) {
       declareKey("children", null, "body");
@@ -20753,7 +20747,6 @@ ${this.replayPad}}` : " }");
     this.checkSetupLocalRefs(cond, markNode);
     this.checkCrossScopeLocals(cond, markNode);
     const anchorVar = this.newRenderVar("anchor");
-    this.rstate.blockAnchors.add(anchorVar);
     this.renderLine(null, () => this.b.emit(`${anchorVar} = document.createComment('if')`));
     this._narrowNext = this.narrowConjuncts(cond);
     const thenRec = this.walkFactory(thenPart, "branch", markNode);
@@ -20846,7 +20839,6 @@ ${this.replayPad}}` : " }");
       indexVar = indexVar ?? `__rip_idx${this.rstate.sink.loopStack.length}`;
     }
     const anchorVar = this.newRenderVar("anchor");
-    this.rstate.blockAnchors.add(anchorVar);
     this.renderLine(null, () => this.b.emit(`${anchorVar} = document.createComment('for')`));
     const reactiveSource = this.renderReactive(iter);
     const keyExpr = this.extractLoopKey(body, node);
@@ -28961,6 +28953,11 @@ class __Component {
     __popComponent(token.prev);
   }
   _setChildren(value) {
+    if (value?.nodeType === 8 && value.parentNode == null) {
+      const home = document.createDocumentFragment();
+      home.appendChild(value);
+      value = home;
+    }
     const current = this.children;
     if (current != null && typeof current === "object" && typeof current.read === "function" && "value" in current) {
       current.value = value;
@@ -34145,7 +34142,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "7ab5cae64663b10d";
+var compilerBuild = () => "38eada1103e2f467";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

@@ -2502,8 +2502,8 @@ App = component
   // Slotted children whose top level is itself a conditional place their
   // branch after mount, beside the branch's anchor; the held slot carries
   // whatever its run holds when it folds, wherever the branch has moved.
-  const heldBranch = (children, open) => {
-    const { code } = compile(`Box = component
+  const heldBranch = (children, open, before = '') => {
+    const { code } = compile(`${before}Box = component
   @open := true
   render
     section
@@ -2559,6 +2559,27 @@ ${children}`, { runtimeDelivery: 'none' });
     expect(html()).toContain('<b>b</b><b>c</b>');
     expect(html()).not.toContain('<b>a</b>');
     app.items.value = ['c', 'd'];
+    app.shown.value = false;
+    expect(html()).toBe('<main><section data-part="Box"><!--if--></section></main>');
+    app.unmount();
+  });
+
+  test('a slot under an if holds a child component rooted at a conditional: its branch shows and swaps while folded', () => {
+    const { app, html } = heldBranch('      Tree ready: ready\n', false, `Tree = component
+  @ready := false
+  render
+    if ready
+      p 'loaded'
+    else
+      span 'loading'
+`);
+    app.shown.value = true;
+    expect(html()).toContain('<span>loading</span>');
+    app.shown.value = false;
+    app.ready.value = true;
+    app.shown.value = true;
+    expect(html()).toContain('<p>loaded</p>');
+    expect(html()).not.toContain('loading');
     app.shown.value = false;
     expect(html()).toBe('<main><section data-part="Box"><!--if--></section></main>');
     app.unmount();

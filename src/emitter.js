@@ -11363,7 +11363,7 @@ class Emitter {
     };
     this.rstate = {
       elCount: 0, textCount: 0, blockCount: 0, svgDepth: 0,
-      fragChildren: new Map(), blockAnchors: new Set(), tags: new Map(), svgEls: new Set(),
+      fragChildren: new Map(), tags: new Map(), svgEls: new Set(),
       pendingClassArgs: null, pendingClassEl: null,
       pad: ipad, frame, node: renderNode,
       records: [], sink: classRecord, classRecord,
@@ -13022,14 +13022,7 @@ class Emitter {
           const v = buildChild(arg);
           if (v != null) childrenVar = v;
         }
-        // A lone block's anchor mounts its content beside itself, so it
-        // needs a parent before the slot places it: a fragment holds the
-        // two together until then.
-        if (!this.rstate.blockAnchors.has(childrenVar)) return childrenVar;
-        const frag = this.newRenderVar('frag');
-        this.renderLine(null, () => this.b.emit(`${frag} = document.createDocumentFragment()`));
-        this.renderLine(null, () => this.b.emit(`${frag}.appendChild(${childrenVar})`));
-        return frag;
+        return childrenVar;
       };
     } else if (renderables.length > 1) {
       declareKey('children', null, 'body');
@@ -14634,7 +14627,6 @@ class Emitter {
     this.checkSetupLocalRefs(cond, markNode);
     this.checkCrossScopeLocals(cond, markNode);
     const anchorVar = this.newRenderVar('anchor');
-    this.rstate.blockAnchors.add(anchorVar);
     this.renderLine(null, () => this.b.emit(`${anchorVar} = document.createComment('if')`));
     this._narrowNext = this.narrowConjuncts(cond);
     const thenRec = this.walkFactory(thenPart, 'branch', markNode);
@@ -14755,7 +14747,6 @@ class Emitter {
       indexVar = indexVar ?? `__rip_idx${this.rstate.sink.loopStack.length}`;
     }
     const anchorVar = this.newRenderVar('anchor');
-    this.rstate.blockAnchors.add(anchorVar);
     this.renderLine(null, () => this.b.emit(`${anchorVar} = document.createComment('for')`));
     const reactiveSource = this.renderReactive(iter);
     const keyExpr = this.extractLoopKey(body, node);

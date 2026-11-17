@@ -1235,6 +1235,14 @@ class __Component {
   // A declared reactive `children` prop already holds a container;
   // the projection goes into it, never over it.
   _setChildren(value) {
+    // A bare comment is a block's anchor, or a component rooted at one,
+    // which mounts its content beside itself and so needs a parent before
+    // a slot places it: a fragment holds the two together until then.
+    if (value?.nodeType === 8 && value.parentNode == null) {
+      const home = document.createDocumentFragment();
+      home.appendChild(value);
+      value = home;
+    }
     const current = this.children;
     if (current != null && typeof current === 'object' && typeof current.read === 'function' && 'value' in current) {
       current.value = value;
