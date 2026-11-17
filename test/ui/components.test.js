@@ -2441,15 +2441,13 @@ App = component
     expect(code.indexOf('new Kid(')).toBeLessThan(code.indexOf('this._inst0._endProjection(__kid)'));
   });
 
-  test('the slot line is \'s exact ternary; factories project through ctx', () => {
+  test('the slot line: a class slot inserts its children once; a branch slot holds them through ctx', () => {
     const cls = compile('Card = component\n  render\n    div\n      slot\n').code;
     expect(cls).toContain(
       "this._slot1 = this.children instanceof Node ? this.children : (this.children != null ? " +
       "document.createTextNode(String(this.children)) : document.createComment(''));");
     const fac = compile('Card = component\n  vis := true\n  render\n    div\n      if vis\n        slot\n').code;
-    expect(fac).toContain(
-      "_slot2 = ctx.children instanceof Node ? ctx.children : (ctx.children != null ? " +
-      "document.createTextNode(String(ctx.children)) : document.createComment(''));");
+    expect(fac).toContain('_slot2 = __heldSlot(ctx.children);');
   });
 
   test('slot is structurally single: a second slot, a loop-row slot, and slot arguments reject positioned ', () => {
@@ -2457,6 +2455,48 @@ App = component
     emitFails('Card = component\n  items := [1]\n  render\n    div\n      for item in items\n        slot\n',
       /`slot` inside a loop row/s);
     emitFails('Card = component\n  render\n    div\n      slot "fallback"\n', /`slot` takes no arguments/s);
+  });
+
+  test('a slot under an if folds and unfolds several root children: the same nodes leave and return', () => {
+    const { code } = compile(`SideBox = component
+  @open := true
+  render
+    section
+      if open
+        slot
+App = component
+  shown := true
+  render
+    SideBox open: shown
+      p "one"
+      span "two"
+`, { runtimeDelivery: 'none' });
+    const names = Object.keys(RT);
+    const { App } = new Function(...names, `${code}\nreturn { App };`)(...names.map((name) => RT[name]));
+    const target = document.createElement('main');
+    const app = new App({});
+    app.mount(target);
+    const open = serialize(target);
+    expect(open).toContain('<p>one</p><span>two</span>');
+    const section = target.childNodes[0];
+    const elements = () => section.childNodes.filter((n) => n.nodeType === 1);
+    const [p, span] = elements();
+    expect([p.tagName, span.tagName]).toEqual(['p', 'span']);
+
+    app.shown.value = false;
+    expect(serialize(target)).not.toContain('<p>one</p>');
+    expect(serialize(target)).not.toContain('<span>two</span>');
+
+    app.shown.value = true;
+    expect(serialize(target)).toBe(open);
+    // the same nodes come back, so their state (a typed value, a scroll) survives
+    const [p2, span2] = elements();
+    expect(p2).toBe(p);
+    expect(span2).toBe(span);
+
+    app.shown.value = false;
+    expect(serialize(target)).not.toContain('<p>one</p>');
+    app.unmount();
   });
 });
 

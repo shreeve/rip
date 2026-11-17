@@ -80,6 +80,8 @@
 //                               terminal) makes the failure loud.
 //   __detach(node)            - remove a node from the DOM, tolerant of
 //                               fragments and detached nodes
+//   __heldSlot(children)      - the node a slot under a conditional
+//                               projects; a fragment detaches whole
 //
 // Ownership: every instance holds a NON-NESTED owner frame from the
 // reactive runtime's seam; __effect disposers created during _init /
@@ -488,20 +490,36 @@ function __claimGateConstructor() {
 }
 
 // Remove a node from the DOM, tolerant of what it actually is. A
-// DocumentFragment (a multi-root component's _root) is skipped: it is
-// emptied the moment it is inserted, so it owns nothing to remove —
-// its real top-level nodes are tracked on the component instance
-// (_nodes) and removed there. A detached node (parentNode null) is a
-// harmless no-op.
+// DocumentFragment is emptied the moment it is inserted: a multi-root
+// component's _root owns nothing to remove (its real top-level nodes
+// are tracked on the instance as _nodes and removed there), and a held
+// slot's fragment takes back the nodes __heldSlot recorded. A detached
+// node (parentNode null) is a harmless no-op.
 // A removal fires listeners on the node it removes (a focused field's
 // focusout), inside whatever effect is detaching it, so they run
 // untracked: a read in one subscribes nothing.
 function __detach(node) {
-  if (!node || node.nodeType === 11) return;
+  if (!node) return;
+  if (node.nodeType === 11) {
+    const held = node._held;
+    if (held) __untracked(() => { for (const n of held) node.appendChild(n); });
+    return;
+  }
   __untracked(() => {
     if (typeof node.remove === 'function') node.remove();
     else if (node.parentNode) node.parentNode.removeChild(node);
   });
+}
+
+// The node a `slot` under a conditional projects, which comes and goes
+// with its branch. Several root children arrive as one DocumentFragment,
+// which empties into the DOM when inserted, so its nodes are recorded
+// once: __detach moves them back into it, and the next insert restores
+// the same nodes with their state.
+function __heldSlot(children) {
+  if (!(children instanceof Node)) return children != null ? document.createTextNode(String(children)) : document.createComment('');
+  if (children.nodeType === 11) children._held ??= [...children.childNodes];
+  return children;
 }
 
 function __pushComponent(component) {
@@ -1822,7 +1840,7 @@ function __hostOf(inst, event) {
 // untouched.
 export {
   __Component, __pushComponent, __popComponent, setContext, getContext, hasContext,
-  __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach,
+  __clsx, __style, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __heldSlot,
   __reportChildFailure, __setChildFailureReporter, __hostOf,
   __ownerFrame, __pushOwner, __popOwner, __detachRef, __claimGateConstructor,
   __hmrRegistry, __hmrLookup, __hmrEntries, __hmrRegisterDefinition, __hmrClassify, __hmrMigrateDiff, __hmrInitDiff,
