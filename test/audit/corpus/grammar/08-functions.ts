@@ -43,8 +43,18 @@ function persist(entry: string): void {
   console.log('persisted', entry)
 }
 
+function notify<T>(subject: T): void {
+  console.log('notified', subject)
+}
+
+function record<T>(entry: T): void {
+  console.log('recorded', entry)
+}
+
 announce('launch')
 persist('log line')
+notify(7)
+record('entry')
 
 // ── params: the default, the optional, and the splat rest ──
 

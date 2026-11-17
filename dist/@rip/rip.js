@@ -24325,7 +24325,8 @@ var SCHEMA_TYPE_DECLS = [
 `);
 var COMPONENTS_TYPE_DECLS = [
   "type __RipProvider = abstract new (...args: never[]) => { __offers?: object };",
-  "type __RipOffers<P extends __RipProvider> = NonNullable<InstanceType<P>['__offers']>;"
+  "type __RipOffers<P extends __RipProvider> = NonNullable<InstanceType<P>['__offers']>;",
+  "type __RipProviding<P extends __RipProvider> = '__offers' extends keyof InstanceType<P> ? P : never;"
 ].join(`
 `);
 var COERCER_TYPE = "{ <F extends (value: string) => unknown>(name: string, fn: F, options?: { raw?: false }): F; <F extends (value: unknown) => unknown>(name: string, fn: F, options: { raw: boolean }): F }";
@@ -24500,8 +24501,8 @@ var RUNTIME_TABLE = [
     decls: COMPONENTS_TYPE_DECLS,
     types: {
       setContext: "(key: string, value: unknown) => void",
-      getContext: "<P extends __RipProvider, K extends keyof __RipOffers<P>>(provider: '__offers' extends keyof InstanceType<P> ? P : never, key: K) => __RipOffers<P>[K]",
-      hasContext: "<P extends __RipProvider>(provider: '__offers' extends keyof InstanceType<P> ? P : never, key: keyof __RipOffers<P>) => boolean",
+      getContext: "<P extends __RipProvider, K extends keyof __RipOffers<P>>(provider: __RipProviding<P>, key: K) => __RipOffers<P>[K]",
+      hasContext: "<P extends __RipProvider>(provider: __RipProviding<P>, key: keyof __RipOffers<P>) => boolean",
       __clsx: CLSX_TYPE,
       __style: STYLE_FN_TYPE,
       __Component: { class: COMPONENT_CLASS, decls: `${OWNER_FRAME_DECLS}
@@ -34131,7 +34132,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "0ce253b34bf08f0d";
+var compilerBuild = () => "5cb972536a6cd6e3";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

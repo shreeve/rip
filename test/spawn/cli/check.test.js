@@ -3388,7 +3388,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       expect(errors).toEqual([
         "ctx.rip:12:5 Type 'boolean' is not assignable to type 'string'.",
         "ctx.rip:13:22 Argument of type '\"opne\"' is not assignable to parameter of type '\"open\"'.",
-        "ctx.rip:14:16 Argument of type 'number' is not assignable to parameter of type '__RipProvider'.",
+        "ctx.rip:14:16 Argument of type 'number' is not assignable to parameter of type 'Provider'.",
       ]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);

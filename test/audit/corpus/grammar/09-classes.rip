@@ -163,12 +163,104 @@ class Counter
     console.log('zeroed')
   def @tick!(): void
     console.log('tick')
+  def @echo!<T>(x: T)
+    console.log('echo', x)
+  def @note!<T>(x: T): void
+    console.log('note', x)
   get doubled: -> @count * 2
   set doubled: (v) -> @count = v / 2
 
 Counter.zero()
 Counter.tick()
+Counter.echo('e')
+Counter.note(1)
 counted = Counter.of(3)
 counted.add(2)
 counted.doubled = 20
 console.log('counted:', counted.count, counted.doubled, counted.history.length, Counter.fresh().count, Counter.pair(1).length, Counter.only(2).length)
+
+# ── private members: the modifier heads every field, method pair, and def form, and erases from the JavaScript ──
+
+class Vault
+  private 'sealed': boolean = true
+  private 'kind' = 'vault'
+  private plain = 1
+  private carried =
+  2
+  private dropped =
+    3
+  private annotated: number = 4
+  private annotatedCarried: number =
+  5
+  private annotatedDropped: number =
+    6
+  private maybe? = 7
+  private maybeCarried? =
+  8
+  private maybeDropped? =
+    9
+  private maybeTyped?: number = 10
+  private maybeTypedCarried?: number =
+  11
+  private maybeTypedDropped?: number =
+    12
+  private owner: string
+  private memo?: string
+  constructor: (owner: string) ->
+    @owner = owner
+    @memo = ''
+  private bump: -> @plain + @carried
+  private lifted:
+    -> @dropped + @annotated
+  private seal!: -> @memo = 'sealed'
+  private unseal!:
+    -> @memo = 'open'
+  private def peek()
+    @annotatedCarried
+  private def peekTyped(): number
+    @annotatedDropped
+  private def mirror<T>(x: T)
+    [x]
+  private def mirrorTyped<T>(x: T): T[]
+    [x]
+  private def mark!()
+    @memo = 'marked'
+  private def markTyped!(): void
+    @memo = 'typed'
+  private def keep!<T>(x: T)
+    @memo = String(x)
+  private def keepTyped!<T>(x: T): void
+    @memo = String(x)
+  private def @mint()
+    new Vault('mint')
+  private def @mintTyped(): Vault
+    new Vault('typed')
+  private def @pairOf<T>(x: T)
+    [x, x]
+  private def @pairOfTyped<T>(x: T): T[]
+    [x, x]
+  private def @reset!()
+    console.log('reset')
+  private def @resetTyped!(): void
+    console.log('reset typed')
+  private def @hold!<T>(x: T)
+    console.log('hold', x)
+  private def @holdTyped!<T>(x: T): void
+    console.log('hold typed', x)
+  def tally(): number
+    @seal()
+    @unseal()
+    @mark()
+    @markTyped()
+    @keep(1)
+    @keepTyped('k')
+    Vault.reset()
+    Vault.resetTyped()
+    Vault.hold(1)
+    Vault.holdTyped('h')
+    minted = [Vault.mint(), Vault.mintTyped(), Vault.pairOf(1), Vault.pairOfTyped(2)].length
+    @bump() + @lifted() + @peek() + @peekTyped() + @mirror(1).length + @mirrorTyped(2).length + minted + @maybe + @maybeCarried + @maybeDropped + @maybeTyped + @maybeTypedCarried + @maybeTypedDropped
+
+vault = new Vault('ada')
+
+console.log('vault:', vault.tally())

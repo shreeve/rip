@@ -312,7 +312,7 @@ describe('generated-scope inventory', () => {
       } else if (/factory function/.test(text)) {
         categories.diagnostic += row.count;
       } else if (/=>/.test(text) &&
-          /(?:\bany\b|:\s*(?:number|string|never|void|unknown|T\b)|=>\s*(?:void|never|unknown)|<T>|Promise<|AbortSignal|readonly value)/.test(text)) {
+          /(?:^<[A-Z][\w$]* extends |\bany\b|:\s*(?:number|string|never|void|unknown|T\b)|=>\s*(?:void|never|unknown)|<T>|Promise<|AbortSignal|readonly value)/.test(text)) {
         categories.type += row.count;
       } else {
         unknown.push(row);

@@ -108,7 +108,12 @@ def describe(id: string): string
 def describe(id: number | string): string
   "entry #{id}"
 
-console.log(describe(7), describe('seven'))
+def filled<T>(value: T): T[]
+def filled<T>(value: T, count: number): T[]
+def filled<T>(value: T, count: number = 1): T[]
+  Array(count).fill(value)
+
+console.log(describe(7), describe('seven'), filled('x'), filled(0, 3))
 
 # ── exported type declarations: the same erased statement, exported ──
 

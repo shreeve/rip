@@ -1075,13 +1075,22 @@ export function scrubFaceArtifacts(text) {
     .replace(/\b__RipAdapterQuery\b/g, 'AdapterQuery')
     .replace(/\b__RipAdapter\b/g, 'Adapter')
     .replace(/\b__RipSequence\b/g, 'Sequence')
+    // The context API's aliases read under the names docs/RFCS.md uses,
+    // and a read's provider argument as the type parameter it admits.
+    .replace(/\b__RipProviding<([\w$]+)>/g, '$1')
+    .replace(/\b__RipProvider\b/g, 'Provider')
+    .replace(/\b__RipOffers\b/g, 'Offers')
     // The per-tag rest alias reads as `Rest<tag>` — the tag shorthand's own idiom.
     .replace(/\b__RipRest_([A-Za-z][\w]*)\b/g, 'Rest<$1>')
     // A schema's behavior object is the face's own home for the
     // methods the author declared ON the schema — `__Cart__behavior`
     // reads back as Cart, whose behavior it is.
     .replace(/\b__([A-Za-z$][\w$]*)__behavior\b/g, '$1')
-    .replace(/ClassValue\[\] \| ClassValue\b(?!\[)/g, 'ClassValue | ClassValue[]');
+    .replace(/ClassValue\[\] \| ClassValue\b(?!\[)/g, 'ClassValue | ClassValue[]')
+    // tsgo cuts a long type at a length budget, at times inside a face
+    // name, and a cut name has nothing left to translate: it goes with
+    // the rest of what the cut dropped.
+    .replace(/\b__R(?:i(?:p[\w$]*)?)?(?=\.\.\.)/g, '');
 }
 
 // A hover's markdown body reduced to its bare type text, for pinning
