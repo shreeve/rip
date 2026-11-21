@@ -47,8 +47,11 @@ components = createComponents()
 components.write 'app.rip', 'export App = component'
 ```
 
-Source reads are lazy. A direct stash read starts loading and returns `null`
-until the value lands. `unwrapStash(data)` exposes source cells to framework
+Source reads are lazy and passive. A direct stash read returns `null` until
+the value lands and asks for the load, which starts a microtask later, once
+the reader is done: a read may sit inside a computed, which must not write
+state, and starting a load writes `loading`. A load that fails, even before
+its fetch, keeps its error and clears `loading`. `unwrapStash(data)` exposes source cells to framework
 code that must call `ensure`, `peek`, `refetch`, or `reset` without triggering
 an ordinary read.
 
