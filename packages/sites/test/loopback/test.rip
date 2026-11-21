@@ -1,0 +1,297 @@
+import { test, eq, ok } from 'rip/testing'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+
+PRELOAD = process.execArgv.find (arg) -> arg.startsWith '--preload='
+SITES = join(import.meta.dir, '..', '..', 'sites.rip')
+APP = join(import.meta.dir, '..', 'hello-app', 'app')
+INDEX = readFileSync join(APP, 'routes', 'index.rip'), 'utf8'
+
+waitFor = (fn, timeout = 5000) ->
+  deadline = Date.now() + timeout
+  loop
+    value = fn!
+    return value if value
+    throw Error.new('loopback test timed out') if Date.now() >= deadline
+    sleep! 10
+
+# A scratch project holding the hello-app App, shaped by `extra`.
+project = (extra = null) ->
+  dir = mkdtempSync join(tmpdir(), 'rip-sites-loopback-')
+  root = join dir, 'project'
+  cpSync APP, join(root, 'app'), { recursive: true }
+  extra?(root)
+  { dir, root: realpathSync(root) }
+
+# `rip sites serve` in the project, resolved once it prints its URL.
+serve = (root, args = ['--port', '0']) ->
+  proc = Bun.spawn [process.execPath, PRELOAD, SITES, 'serve', ...args],
+    cwd: root
+    stdin: 'ignore'
+    stdout: 'pipe'
+    stderr: 'pipe'
+  out = ''
+  do ->
+    decoder = TextDecoder.new()
+    for await chunk as proc.stdout
+      out += decoder.decode chunk, { stream: true }
+  err = Bun.readableStreamToText proc.stderr
+  url = waitFor! -> out.match(/http:\/\/127\.0\.0\.1:\d+\//)?[0]
+  { proc, url, err, output: -> out }
+
+# A refusal: the command exits 1, naming why.
+refused = (root, args = ['--port', '0']) ->
+  proc = Bun.spawn [process.execPath, PRELOAD, SITES, 'serve', ...args],
+    cwd: root
+    stdin: 'ignore'
+    stdout: 'pipe'
+    stderr: 'pipe'
+  code = await proc.exited
+  eq code, 1
+  Bun.readableStreamToText! proc.stderr
+
+stop = (served) ->
+  return unless served?
+  served.proc.kill 'SIGTERM'
+  await served.proc.exited
+
+json = (url) -> (fetch! url).json!
+
+# The status for a request target sent byte for byte: fetch would
+# normalize the path first.
+rawStatus = (url, target, accept) ->
+  { port } = URL.new url
+  text = ''
+  done = null
+  closed = Promise.new (resolve) -> done = resolve
+  socket = Bun.connect!
+    hostname: '127.0.0.1'
+    port: Number(port)
+    socket:
+      data: (socket, chunk) -> text += chunk.toString()
+      close: -> done()
+  socket.write "GET #{target} HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: #{accept}\r\nConnection: close\r\n\r\n"
+  await closed
+  Number text.split(' ')[1]
+
+# One Hub subscriber, as the browser feed subscribes: the frames it
+# receives after the server acknowledges its token.
+subscribe = (url) ->
+  frames = []
+  socket = WebSocket.new url.replace('http:', 'ws:') + 'hub'
+  acked = false
+  socket.onmessage = (event) ->
+    frame = JSON.parse event.data
+    if frame['!'] is 'probe' then acked = true else frames.push frame
+  socket.onopen = -> socket.send JSON.stringify({ '+': ['/hub'], '?': 'probe' })
+  waitFor! -> acked
+  { frames, close: -> socket.close() }
+
+test! 'serve answers the App surface the edge would, and writes nothing', ->
+  { dir, root } = project (root) ->
+    mkdirSync join(root, 'public', '.well-known'), { recursive: true }
+    writeFileSync join(root, 'public', 'robots.txt'), 'public wins'
+    writeFileSync join(root, 'public', '.well-known', 'security.txt'), 'contact'
+    writeFileSync join(root, 'public', '.secret'), 'hidden'
+    writeFileSync join(root, 'app', 'robots.txt'), 'app loses'
+  served = null
+  try
+    served = serve! root
+    url = served.url
+    page = { headers: { accept: 'text/html' } }
+    data = { headers: { accept: 'application/json' } }
+    shell = (fetch! url, page).text!
+    ok shell.includes("import { bootApp } from '/@rip/rip.min.js'")
+    ok shell.includes('watch: true')
+    eq (fetch! "#{url}index.html").text!, shell
+    bundle = json! "#{url}bundle.json"
+    eq Object.keys(bundle), ['hash', 'list']
+    eq bundle.list, [['routes/index.rip', INDEX]]
+    eq (json! "#{url}latest.json"), { hash: bundle.hash }
+    runtime = fetch! "#{url}@rip/rip.min.js"
+    eq runtime.status, 200
+    ok runtime.headers.get('content-type').startsWith('text/javascript')
+    eq (fetch! "#{url}routes/index.rip").text!, INDEX
+    eq (fetch! "#{url}robots.txt").text!, 'public wins'
+    eq (fetch! "#{url}.well-known/security.txt").text!, 'contact'
+
+    # The shell answers a navigation, by Janus's Accept rule, and nothing else.
+    eq (fetch! "#{url}some/route", page).text!, shell
+    eq (fetch! "#{url}some/route", { headers: { accept: '*/*' } }).text!, shell
+    eq (fetch! "#{url}some/route", { headers: { accept: 'text/html;q=0' } }).status, 404
+    eq (fetch! "#{url}some/route", { headers: { accept: 'text/html;q=x' } }).status, 404
+    eq (fetch! "#{url}missing.js", data).status, 404
+    eq (fetch! url, data).status, 404
+
+    # Hidden names and a file under a slash are misses; never the shell.
+    eq (fetch! "#{url}.secret", page).status, 404
+    eq (fetch! "#{url}a/.well-known/security.txt", page).status, 404
+    eq (fetch! "#{url}robots.txt/", data).status, 404
+    eq (rawStatus! url, '//robots.txt', 'application/json'), 404
+    eq (fetch! "#{url}some/route", { headers: { accept: 'text/html;q=".5"' } }).text!, shell
+
+    # A path that does not decode exactly once to clean segments is a 400.
+    eq (fetch! "#{url}routes%2Findex.rip").status, 400
+    eq (fetch! "#{url}routes%5Cindex.rip").status, 400
+    eq (fetch! "#{url}%zz").status, 400
+
+    # Only GET and HEAD read files; anything else is a miss.
+    eq (fetch! url, { method: 'POST' }).status, 404
+    eq (fetch! "#{url}robots.txt", { method: 'HEAD' }).status, 200
+    ok not existsSync(join(root, 'dist'))
+  finally
+    stop! served
+    rmSync dir, { recursive: true, force: true }
+
+test! 'a project with no App serves its files and no shell', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-sites-loopback-')
+  root = join dir, 'project'
+  mkdirSync join(root, 'public'), { recursive: true }
+  writeFileSync join(root, 'public', 'a.txt'), 'plain'
+  writeFileSync join(root, 'serve.rip'), "export default\n  name: 'plain'\n"
+  served = null
+  try
+    served = serve! realpathSync(root)
+    eq (fetch! "#{served.url}a.txt").text!, 'plain'
+    eq (fetch! served.url, { headers: { accept: 'text/html' } }).status, 404
+    eq (fetch! "#{served.url}bundle.json").status, 404
+    eq (fetch! "#{served.url}@rip/rip.min.js").status, 404
+  finally
+    stop! served
+    rmSync dir, { recursive: true, force: true }
+
+test! 'an authored index.html is the shell, and nothing is generated beside it', ->
+  { dir, root } = project (root) -> writeFileSync join(root, 'app', 'index.html'), '<!doctype html><h1>Authored</h1>'
+  served = null
+  try
+    served = serve! root
+    eq (fetch! served.url).text!, '<!doctype html><h1>Authored</h1>'
+    eq (fetch! "#{served.url}index.html").text!, '<!doctype html><h1>Authored</h1>'
+    eq (fetch! "#{served.url}elsewhere", { headers: { accept: 'text/html' } }).text!, '<!doctype html><h1>Authored</h1>'
+  finally
+    stop! served
+    rmSync dir, { recursive: true, force: true }
+
+test! 'a change reloads open tabs; a failed assembly reports and keeps the last publication', ->
+  { dir, root } = project (root) ->
+    mkdirSync join(root, 'public')
+    writeFileSync join(root, 'public', 'note.txt'), 'one'
+  served = null
+  hub = null
+  try
+    served = serve! root
+    url = served.url
+    hub = subscribe! url
+    first = (json! "#{url}latest.json").hash
+
+    writeFileSync join(root, 'app', 'routes', 'index.rip'), INDEX.replace('Hello App', 'Hello Again')
+    waitFor! -> hub.frames.length is 1
+    ok hub.frames[0].reload?
+    second = (json! "#{url}latest.json").hash
+    ok second isnt first
+    ok (fetch! "#{url}bundle.json").text!.includes('Hello Again')
+
+    writeFileSync join(root, 'app', 'routes', 'index.rip'), "export Index = component\n  render\n    h1 (\n"
+    waitFor! -> hub.frames.length is 2
+    eq hub.frames[1].assembly.hash, second
+    ok typeof hub.frames[1].assembly.failure is 'string'
+    eq (json! "#{url}latest.json").hash, second
+    ok (fetch! "#{url}bundle.json").text!.includes('Hello Again')
+
+    # Back to the last publication's bytes: the failure clears, nothing reloads.
+    writeFileSync join(root, 'app', 'routes', 'index.rip'), INDEX.replace('Hello App', 'Hello Again')
+    waitFor! -> hub.frames.length is 3
+    eq hub.frames[2], { assembly: { hash: second, failure: null } }
+
+    # A file outside the App root moves no App hash, and still reloads.
+    writeFileSync join(root, 'public', 'note.txt'), 'two'
+    waitFor! -> hub.frames.length is 4
+    ok hub.frames[3].reload?
+    eq (json! "#{url}latest.json").hash, second
+    eq (fetch! "#{url}note.txt").text!, 'two'
+
+    # One made while the sources fail is still owed when they assemble again.
+    writeFileSync join(root, 'app', 'routes', 'index.rip'), "export Index = component\n  render\n    h1 (\n"
+    waitFor! -> hub.frames.length is 5
+    ok hub.frames[4].assembly.failure?
+    writeFileSync join(root, 'public', 'note.txt'), 'three'
+    sleep! 200
+    eq hub.frames.length, 5
+    writeFileSync join(root, 'app', 'routes', 'index.rip'), INDEX.replace('Hello App', 'Hello Again')
+    waitFor! -> hub.frames.length is 6
+    ok hub.frames[5].reload?
+  finally
+    hub?.close()
+    stop! served
+    rmSync dir, { recursive: true, force: true }
+
+test! 'a file whose real path leaves its root is a named miss, and the search goes on', ->
+  outside = mkdtempSync join(tmpdir(), 'rip-sites-loopback-outside-')
+  writeFileSync join(outside, 'fonts.css'), 'outside'
+  writeFileSync join(outside, 'only.css'), 'outside'
+  { dir, root } = project (root) ->
+    mkdirSync join(root, 'public')
+    symlinkSync outside, join(root, 'public', 'fonts')
+    mkdirSync join(root, 'app', 'fonts')
+    writeFileSync join(root, 'app', 'fonts', 'fonts.css'), 'in the app'
+  served = null
+  try
+    served = serve! root
+    eq (fetch! "#{served.url}fonts/fonts.css").text!, 'in the app'
+    eq (fetch! "#{served.url}fonts/only.css", { headers: { accept: 'text/css' } }).status, 404
+    stop! served
+    stderr = await served.err
+    ok stderr.includes("serve skipped #{join(root, 'public', 'fonts', 'only.css')}: it resolves to #{realpathSync(join(outside, 'only.css'))}, outside its root"), stderr
+    served = null
+  finally
+    stop! served
+    rmSync dir, { recursive: true, force: true }
+    rmSync outside, { recursive: true, force: true }
+
+test! 'what serve cannot carry rejects at startup, naming why', ->
+  cases = [
+    ['an API entry', ((root) -> writeFileSync join(root, 'index.rip'), "get '/api/x', -> 1\n"), 'runs App-only projects']
+    ['tenant hosts', ((root) ->
+      mkdirSync join(root, 'sites', 'common', 'public'), { recursive: true }
+      writeFileSync join(root, 'serve.rip'), "export default\n  sites:\n    host: '{site}.example.test'\n    dir: 'sites'\n  files:\n    roots: ['sites/common/public', 'app']\n    shell: 'app/template.html'\n"
+    ), 'cannot route serve.rip sites']
+    ['a browsable root', ((root) ->
+      writeFileSync join(root, 'serve.rip'), "export default\n  files:\n    roots: [{ path: 'app', browse: true }]\n    shell: 'app/template.html'\n"
+    ), 'cannot list directories']
+    ['proxied prefixes', ((root) ->
+      writeFileSync join(root, 'serve.rip'), "export default\n  files:\n    roots: ['app']\n    proxyFirst: ['/api']\n    shell: 'app/template.html'\n"
+    ), 'has no API workers for serve.rip files.proxyFirst']
+    ['a Hub bridge', ((root) ->
+      writeFileSync join(root, 'serve.rip'), "export default\n  hub:\n    bridge: 'hub'\n"
+    ), 'has no API workers for serve.rip hub.bridge']
+    ['a {site} root', ((root) ->
+      mkdirSync join(root, 'sites')
+      writeFileSync join(root, 'serve.rip'), "export default\n  files:\n    roots: ['sites/{site}', 'app']\n    shell: 'app/template.html'\n"
+    ), 'cannot fill the {site}']
+  ]
+  for [label, shape, message] in cases
+    { dir, root } = project shape
+    try
+      stderr = refused! root
+      ok stderr.includes(message), "#{label}: #{stderr}"
+    finally
+      rmSync dir, { recursive: true, force: true }
+
+test! 'a port held on any address sharing it rejects, and malformed arguments are named', ->
+  { dir, root } = project()
+  holders = [
+    Bun.serve { hostname: '127.0.0.1', port: 0, fetch: -> Response.new('held') }
+    Bun.serve { hostname: '0.0.0.0', port: 0, fetch: -> Response.new('held') }
+  ]
+  try
+    for holder in holders
+      ok (refused! root, ['--port', String(holder.port)]).includes("cannot listen on 127.0.0.1:#{holder.port}: the port is in use")
+    ok (refused! root, ['--port']).includes('--port requires a value')
+    ok (refused! root, ['--port', '80x']).includes('--port must be an integer from 0 to 65535, not "80x"')
+    ok (refused! root, ['--port', '65536']).includes('--port must be an integer from 0 to 65535, not "65536"')
+    ok (refused! root, ['--watch']).includes('serve does not accept --watch')
+    ok (refused! root, ['.', 'other']).includes('serve takes one project, not "other" after "."')
+  finally
+    holder.stop(true) for holder in holders
+    rmSync dir, { recursive: true, force: true }
