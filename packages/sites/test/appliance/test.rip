@@ -47,7 +47,7 @@ test! "rip registers with Janus's edge and brings nothing to it", ->
   ok agent.includes 'ensureLanHosts'
   ok agent.includes 'defaultAppHosts'
   ok agent.includes '"#{name}.localhost", "#{name}.local"'
-  ok not existsSync(join(packageRoot, 'rip.caddy')), 'rip brings no site file to the edge'
+  ok not manifest.files.some((file) -> file.endsWith('.caddy')), 'rip brings no site file to the edge'
   helloServe = readFileSync join(import.meta.dir, '..', '..', 'demos', 'hello', 'serve.rip'), 'utf8'
   ok helloServe.includes 'hello.localhost'
   ok helloServe.includes 'hello.local'

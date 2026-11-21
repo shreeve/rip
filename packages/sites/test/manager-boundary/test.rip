@@ -129,6 +129,36 @@ test! 'manager loads and normalizes the app-local declaration before registering
     control.stop true
     rmSync dir, { recursive: true, force: true }
 
+test! 'a project with no declared hosts claims <name>.localhost and <name>.local, its API from index.rip', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-manager-defaults-')
+  project = join dir, 'quick'
+  mkdirSync join(project, 'app'), { recursive: true }
+  writeFileSync join(project, 'app', 'index.rip'), "export default -> 'ok'\n"
+  writeFileSync join(project, 'index.rip'), "import { get, start } from 'rip/sites'\n\nget '/api/ping' -> { ok: true }\n\nstart!\n"
+  calls = []
+  controlSocket = join dir, 'janus.sock'
+  control = startControl controlSocket, calls
+  process = null
+  try
+    started = run project, ['--control', controlSocket, '--no-watch', '--access-log=off', '--workers', '1']
+    process = started.proc
+    registration = waitFor! 'default-host registration', ->
+      calls.find (call) -> call.method is 'POST' and call.path is '/1.0/apps'
+    eq registration.body.name, 'quick'
+    eq registration.body.hosts, ['quick.localhost', 'quick.local']
+    eq registration.body.upstreams.length, 1
+    eq registration.body.files.proxy_first, ['/api', '/hub']
+    process.kill 'SIGTERM'
+    eq await process.exited, 143
+    out = await started.out
+    ok out.includes('https://quick.localhost/'), out
+    ok out.includes('https://quick.local/'), out
+  finally
+    try process?.kill 'SIGKILL'
+    await process.exited if process?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
 test! 'shell-less all-browsable declaration registers exactly its declared roots', ->
   dir = mkdtempSync join(tmpdir(), 'rip-manager-browse-policy-')
   project = join dir, 'project'

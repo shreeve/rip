@@ -41,7 +41,6 @@ HELP = '''
 
   Manager (cwd default for path forms):
     run [project] …                      Foreground manager
-    serve [project] [--port N]           App only, on 127.0.0.1 with no edge
     publish [dir] …                      Publish one directory through Janus
     hold|release <app> […]               Deploy barriers on a remembered app
     migrate <app> [entry] […]            Coordinated DB migrate
@@ -105,10 +104,7 @@ takeAppNoun = ->
   findCatalogApp loadCatalog(), selector
 
 # Path forms keep manager flags intact — handle before Sites option parsing.
-if verb is 'serve'
-  { serveLocal } = import!('./loopback.rip')
-  serveLocal! args
-else if verb in MANAGER
+if verb in MANAGER
   if verb is 'run'
     runManager! args
   else if verb is 'publish'

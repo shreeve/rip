@@ -22,7 +22,6 @@
     "test:appliance-control": "rip test/appliance-control/test.rip",
     "test:autostart": "rip test/autostart/test.rip",
     "test:janus": "rip test/janus/test.rip",
-    "test:loopback": "rip test/loopback/test.rip",
     "test:manager-boundary": "rip test/manager-boundary/test.rip",
     "test:middleware": "rip test/middleware/test.rip",
     "test:monitor": "rip test/monitor/test.rip",
@@ -47,7 +46,6 @@
     "edge.rip",
     "sites.rip",
     "serve-hosts.rip",
-    "loopback.rip",
     "monitor.rip",
     "README.md"
   ]

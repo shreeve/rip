@@ -35,12 +35,12 @@ name over HTTPS and trust Janus's CA:
 janus trust
 janus mode lan
 rip sites start scan
-# Mac:     https://scan.via.rip/  or  https://scan.local/
+# Mac:     https://scan.localhost/  or  https://scan.local/
 # Phone:   trust the CA at http://janus.local/trust (it walks you through it)
 #          open https://scan.local/ and allow the camera
 ```
 
-`*.via.rip` resolves only to `127.0.0.1`; phones need the `.local` host.
+`*.localhost` resolves only to this machine; phones need the `.local` host.
 Camera permission is per origin, so the phone asks once.
 
 ## Reading tips

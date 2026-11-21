@@ -18,8 +18,8 @@ rip sites add packages/sites/demos/hello
 rip sites start hello
 ```
 
-`serve.rip` declares the `hello` name, dual hosts (`hello.via.rip` for
-loopback, `hello.local` for LAN once `janus mode lan` opens it), conventional
+`serve.rip` declares the `hello` name, dual hosts (`hello.localhost` for
+this machine, `hello.local` for LAN once `janus mode lan` opens it), conventional
 `app/` root, and explicit default change policy.
 
 ## LAN / phone
@@ -32,7 +32,7 @@ rip sites start hello
 #          open https://hello.local/
 ```
 
-`*.via.rip` still resolves only to `127.0.0.1` — phones need the `.local`
+`*.localhost` resolves only to this machine — phones need the `.local`
 host and the trusted local CA.
 
 ## Server publication
