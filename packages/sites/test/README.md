@@ -23,8 +23,6 @@ Order:
     ownership, outages, one writer under concurrent clients, and the CLI
     surfaces that never boot it (shares `appliance/support.rip`).
 13. `janus` — the released Janus data plane and control plane.
-14. `loopback` — `rip sites serve`: the App surface with no edge, reload on
-    change, and the startup refusals.
 
 Code enters `rip/sites` only when one of these fixtures demonstrates why
 the server, rather than Janus, Caddy, or application code, must own it.

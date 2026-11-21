@@ -110,9 +110,9 @@ effectiveHosts = (app, manager, readDecl) ->
   site = decl.site or null
   hosts = decl.hosts or []
   hosts = Object.keys(site.aliases or {}) if not hosts.length and site?
-  # A bare serve.rip (neither hosts nor sites) makes the manager serve
-  # the app name as its host — mirror that.
-  hosts = [app.name] unless hosts.length
+  # A bare serve.rip (neither hosts nor sites) makes the manager claim
+  # <name>.localhost and <name>.local — mirror that.
+  hosts = ["#{app.name}.localhost", "#{app.name}.local"] unless hosts.length
   { hosts, site, error: null }
 
 hostCovered = (host, dir) ->

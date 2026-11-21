@@ -40,18 +40,14 @@ export resolveProject = (input, label = 'rip-sites', report = abort) ->
       break if parent is at
       at = parent
   for root in starts
-    entry = null
-    for name in ['app.rip', 'index.rip']
-      candidate = join root, name
-      if existsSync candidate
-        entry = realpathSync candidate
-        break
+    candidate = join root, 'index.rip'
+    entry = if existsSync(candidate) then realpathSync(candidate) else null
     appRoot = join root, 'app'
     serve = join root, 'serve.rip'
     return { root, entry, appRoot: (if existsSync(appRoot) then realpathSync(appRoot) else null) } if entry? or existsSync(appRoot) or existsSync(serve)
   if input?
     report "#{prefix}#{input} has no API entry, app/ directory, or serve.rip"
-  report "#{prefix}no App — pass a project, or create app.rip, index.rip, app/, or serve.rip here or above"
+  report "#{prefix}no App — pass a project, or create index.rip, app/, or serve.rip here or above"
 
 export managerRuntime = (root, label = 'rip-sites') ->
   abort "#{label}: manager control requires a POSIX user identity" unless typeof process.getuid is 'function'

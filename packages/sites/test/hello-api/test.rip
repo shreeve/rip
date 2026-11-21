@@ -84,7 +84,7 @@ test! 'foreground manager registers one ready worker and deregisters before exit
   dir = mkdtempSync join(import.meta.dir, '.rip-hello-manager-')
   project = join dir, 'project'
   mkdirSync project
-  entry = join project, 'app.rip'
+  entry = join project, 'index.rip'
   copyFileSync join(import.meta.dir, 'index.rip'), entry
   controlSocket = join dir, 'janus.sock'
   registration = null

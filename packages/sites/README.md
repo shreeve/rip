@@ -46,7 +46,6 @@ ordinary HTTP themselves — they register with Janus and supervise workers.
 | `rip/sites` | Framework API (`get`, `read`, middleware, …) | Inside `index.rip` / App code |
 | `rip sites` | Unified CLI: catalog, apps, edge, agent, advanced | Day-to-day Sites |
 | `rip sites run` / `publish` | Foreground manager / directory publish | Dev without the catalog |
-| `rip sites serve` | The browser App on a loopback port, no edge | A quick look with nothing installed |
 
 Reserved nouns (not app names): **`edge`**, **`all`**, **`agent`**.
 Durable catalog is
@@ -358,7 +357,6 @@ work and explicit deploy ops (the manager module is internal — not a second CL
 | Command | What it does |
 | --- | --- |
 | `rip sites run [project] …` | Foreground manager for a project (default: cwd). Blocks until Ctrl-C. Registers with Janus's control socket, or `--control` / `JANUS_CONTROL`. Flags: `--name`, `--host`, `--workers`, `--watch` / `--no-watch`, … |
-| `rip sites serve [project] [--port N]` | The browser App alone on `http://127.0.0.1`, with no edge; open tabs reload on change. See [Serve](#serve--an-app-with-no-edge). |
 | `rip sites publish [dir] …` | Publish one directory through Janus (default: cwd). Options include `--host`, `--control`, `--until-restart`. |
 | `rip sites hold <app>` | Hold a remembered app’s manager (freeze App/API activation). |
 | `rip sites release <app>` | Release hold — one coherent snapshot, then clear hold. |
@@ -373,49 +371,6 @@ rip sites status .          # manager JSON for cwd
 ```
 
 Output: add `--json` on most verbs for machine-readable responses.
-
-### Serve — an App with no edge
-
-`rip sites serve [project] [--port N]` runs one project's browser App on
-`http://127.0.0.1` without Janus, HTTPS, host names, or the catalog. It
-needs nothing installed beyond Rip, and the project runs unchanged under
-`rip sites run` or `start` later.
-
-```bash
-cd my-app                   # app/, optional public/ and serve.rip
-rip sites serve             # rip-sites: serving my-app at http://127.0.0.1:4000/
-```
-
-It reads the same `serve.rip`, `app/`, and `public/` a full site uses, and
-answers what the edge would answer: the shell (authored or generated), the
-App's `bundle.json` and `latest.json`, the runtime under `/@rip`, and the file
-roots in order, by Janus's rules — a path that does not decode exactly once to
-clean segments is a 400 (Bun itself resolves a literal `..` or backslash
-before serve sees it, so those reach the roots as clean paths), a hidden name (all but a leading `.well-known`) is a
-miss, only GET and HEAD read files, and the shell answers a miss only for a
-request whose `Accept` admits HTML. A project with no `app/` has no shell.
-Everything comes from memory and the project's own directories; nothing is
-written into the project, not even `dist/`.
-
-A source change reloads every open tab, which then boots the new bundle; a
-change outside the App root reloads too. Sources that fail to assemble keep
-the last publication live and show the failure in each open tab, the same
-report the Hub carries from a Manager. There is no in-place update; that is
-the edge's.
-
-The port is the first free one from 4000, `--port N` names one, and `--port 0`
-lets the system choose. A port that another listener answers on at the
-loopback, directly or through a wildcard address, rejects. Serve listens on
-`127.0.0.1` only.
-
-What serve cannot carry rejects at startup, naming why: an API entry
-(`index.rip` or `app.rip`), `serve.rip` `sites` (tenant hosts) or a `{site}`
-root, a `browse: true` root, `files.proxyFirst`, and `hub.bridge`. Three
-`serve.rip` keys have no meaning on a loopback port and are read but unused:
-`hosts` (serve has one address), `access` (it keeps no access log), and a
-root's `cache` (every answer revalidates). A file whose real path leaves its
-root, such as one under a symlink to a directory elsewhere, is a miss, as at
-the edge, and serve names it in the terminal.
 
 ## Typical sessions
 
@@ -1505,11 +1460,11 @@ rip sites publish [directory] [--host <host>] [--until-restart]
 ```
 
 The project argument may identify an entry or directory. Discovery searches
-for `app.rip`, `index.rip`, or `app/`.
+for `index.rip` or `app/`.
 
 ```text
 --name <name>           registration name
---host <host>           exact public host; repeatable
+--host <host>           exact public host; repeatable (default <name>.localhost and <name>.local)
 -w, --workers <n>       worker processes (default 2)
 -c, --concurrency <n>   requests per worker (default 1; >1 requires API watch off)
 --watch / --no-watch    enable or disable App and API watching together
