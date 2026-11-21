@@ -646,13 +646,36 @@ appModules = (appRoot, changes) ->
   moduleFiles = {}
   entries = []
   directories = []
-  walk = (directory, prefix) ->
+  # A symlink is followed when its target stays inside the App root, where
+  # Janus serves it too. One that leaves the root, points at nothing, or
+  # leads back into a directory being walked rejects, named: Janus never
+  # serves a file whose real path leaves its root, so such a link would
+  # publish a member the edge answers with a miss.
+  realRoot = realpathSync appRoot
+  linkTarget = (path, id, walking) ->
+    real = try
+      realpathSync path
+    catch error
+      throw error unless error?.code in ['ENOENT', 'ELOOP']
+      throw Error.new "App link '#{id}' points to nothing (#{path})"
+    unless real is realRoot or real.startsWith("#{realRoot}/")
+      throw Error.new "App link '#{id}' leaves the App root: it points to #{real}, and Janus serves nothing outside #{realRoot} — move the target inside the App root or copy it in"
+    info = statSync real
+    throw Error.new("App link '#{id}' leads back into #{real}") if info.isDirectory() and walking.has(real)
+    { real, directory: info.isDirectory() }
+  walk = (directory, prefix, walking) ->
     for entry in readdirSync(directory, { withFileTypes: true })
       continue if entry.name.startsWith '.'
       path = join directory, entry.name
-      if entry.isDirectory()
+      isDirectory = entry.isDirectory()
+      real = path
+      if entry.isSymbolicLink()
+        target = linkTarget path, "#{prefix}#{entry.name}", walking
+        isDirectory = target.directory
+        real = target.real
+      if isDirectory
         directories.push "#{prefix}#{entry.name}"
-        walk path, "#{prefix}#{entry.name}/"
+        walk path, "#{prefix}#{entry.name}/", Set.new([...walking, realpathSync(real)])
       else
         id = "#{prefix}#{entry.name}"
         kind = appChangeKind changes, id
@@ -665,7 +688,7 @@ appModules = (appRoot, changes) ->
           catch
             throw Error.new "rip-sites: App module '#{id}' is not valid UTF-8"
           moduleFiles[id] = path
-  walk appRoot, ''
+  walk appRoot, '', Set.new([realRoot])
   entries.sort (a, b) -> if a.id < b.id then -1 else if a.id > b.id then 1 else 0
   { modules, moduleFiles, entries, directories, check: check(entries) }
 
