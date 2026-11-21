@@ -3,8 +3,8 @@
 # bundle.json and latest.json, the runtime under /@rip, and the file
 # roots, by Janus's request-path, hidden-name, method, and Accept rules —
 # from memory and the project's own directories, and sends what Janus
-# proxies to its API workers. It writes nothing into the project. An App
-# change tells open tabs to reload; an API change swaps in new workers.
+# proxies to one API worker. It writes nothing into the project. An App
+# change tells open tabs to reload; an API change swaps in a new worker.
 #
 # A project serve cannot carry the way the edge does (tenant hosts,
 # directory browsing) rejects at startup instead of half-running.
@@ -18,10 +18,10 @@ FIRST_PORT = 4000
 LAST_PORT = 4099
 SETTLE_MS = 50
 BURST_MS = 250
-# The Manager's default pool: two workers of one request each, the only
-# concurrency it allows while it watches the API. Requests past it wait here
-# rather than bouncing off a busy 503.
-WORKERS = 2
+# The manager's default capacity — two workers of one request each — in
+# one worker, so a handler that calls its own API once still finds a slot.
+# Requests past it wait here rather than bouncing off its busy 503.
+CONCURRENCY = 2
 RETRY_MS = 10
 # Janus's holds: a request waits at most HOLD_MS for a worker that can take
 # it, and at most BUSY_MS past a worker's marked busy or draining 503, then
@@ -49,8 +49,8 @@ USAGE = '''
   usage: rip sites serve [project] [--port N]
 
   Serves one project on http://127.0.0.1 with no edge: its browser App,
-  its files, and its API in two workers. Open tabs reload when the App
-  changes; the workers are replaced when the API does. The port defaults to
+  its files, and its API in one worker. Open tabs reload when the App
+  changes; the worker is replaced when the API does. The port defaults to
   the first free one from 4000; --port 0 lets the system pick.
 '''
 
@@ -157,9 +157,7 @@ findFile = (roots, path) ->
     warn "rip-sites: serve skipped #{candidate}: it resolves to #{real}, outside its root"
   null
 
-# No idle timeout: Bun's default would drop a request still inside Janus's
-# hold, or a slow handler, with an empty reply.
-listen = (port, fetch, websocket) -> Bun.serve { hostname: '127.0.0.1', port, fetch, websocket, idleTimeout: 0 }
+listen = (port, fetch, websocket) -> Bun.serve { hostname: '127.0.0.1', port, fetch, websocket }
 
 answers = (hostname, port) ->
   try
@@ -224,21 +222,18 @@ sendfile = (response, headers, target) ->
   headers.set 'X-Content-Type-Options', 'nosniff'
   Response.new Bun.file(target), { status, headers }
 
-# The project's API in the Manager's default pool — WORKERS workers of one
-# request each — built and run as the Manager builds and runs them. An API
-# change builds a candidate pool; one that compiles and boots replaces the
-# running pool, which drains; one that does not leaves the running pool
-# serving and is named in the terminal.
+# The project's API in one worker, built and run as the manager builds and
+# runs its workers. An API change builds a candidate; one that compiles
+# and boots replaces the worker, which drains; one that does not leaves
+# the running worker serving and is named in the terminal.
 startApi = (project, artifactsDir) ->
   serial = 0
   generation = 0
   inputs = Set.new()
   rejected = false
-  pool = []
-  # The artifact the running pool was built from; a replacement for a dead
-  # worker joins only a pool still built from its own.
-  poolArtifact = null
+  current = null
   stopping = false
+  inflight = 0
   waiting = []
   watcher = null
   chain = Promise.resolve()
@@ -262,16 +257,11 @@ startApi = (project, artifactsDir) ->
     waiting = []
     settle() for settle in queued
 
-  # A worker with its one slot free; null when the hold runs out, the client
-  # leaves, or serve stops first.
+  # The worker once it has a free slot; null when the hold runs out, the
+  # client leaves, or serve stops first.
   acquire = (deadline, signal) ->
-    loop
-      return null if stopping or signal.aborted
-      worker = pool.find (candidate) -> candidate.inflight is 0
-      if worker?
-        worker.inflight++
-        return worker
-      return null if Date.now() >= deadline
+    until current? and inflight < CONCURRENCY
+      return null if stopping or signal.aborted or Date.now() >= deadline
       Promise.new! (resolve) ->
         timer = null
         settle = ->
@@ -281,9 +271,11 @@ startApi = (project, artifactsDir) ->
         timer = setTimeout settle, Math.max(0, deadline - Date.now())
         signal.addEventListener 'abort', settle
         waiting.push settle
+    inflight++
+    current
 
-  release = (worker) ->
-    worker.inflight--
+  release = ->
+    inflight--
     wake()
 
   compile = ->
@@ -299,7 +291,7 @@ startApi = (project, artifactsDir) ->
       stdin: 'ignore'
       stdout: 'inherit'
       stderr: 'inherit'
-      env: { ...process.env, APP_ARTIFACT: artifact, SOCKET_PATH: socket, WORKER_ID: "#{serial}", WORKER_CONCURRENCY: '1' }
+      env: { ...process.env, APP_ARTIFACT: artifact, SOCKET_PATH: socket, WORKER_ID: "#{serial}", WORKER_CONCURRENCY: "#{CONCURRENCY}" }
     procs.add proc
     proc.exited.then -> procs.delete proc
     try
@@ -308,44 +300,27 @@ startApi = (project, artifactsDir) ->
     catch error
       killWorker! proc
       throw error
-    worker = { proc, socket, artifact, inflight: 0 }
+    worker = { proc, socket, artifact }
     replaceOnExit worker
     worker
 
-  # A whole pool or none: a worker that fails to boot takes its booted
-  # siblings down with it.
-  spawnPool = (artifact) ->
-    workers = []
-    try
-      for slot in [0...WORKERS]
-        workers.push spawn!(artifact)
-    catch error
-      Promise.all! workers.map (worker) -> killWorker worker.proc
-      throw error
-    workers
-
-  adopt = (workers, artifact) ->
-    pool = workers
-    poolArtifact = artifact
+  adopt = (worker) ->
+    current = worker
     wake()
 
   # A worker that exits on its own is replaced from the same artifact,
-  # unless a newer pool took its place first.
+  # unless a newer worker took its place first.
   replaceOnExit = (worker) ->
     do ->
       code = await worker.proc.exited
-      return if stopping or not pool.includes(worker)
-      pool = pool.filter (candidate) -> candidate isnt worker
+      return if stopping or worker isnt current
+      current = null
       warn "rip-sites: API worker exited (#{code}); replacing"
       loop
-        return if stopping or poolArtifact isnt worker.artifact
+        return if stopping or current?
         try
           replacement = spawn! worker.artifact
-          if poolArtifact is worker.artifact
-            pool = [...pool, replacement]
-            wake()
-          else
-            stopWorker! replacement.proc
+          if current? then stopWorker!(replacement.proc) else adopt(replacement)
           return
         catch error
           return if stopping
@@ -362,30 +337,30 @@ startApi = (project, artifactsDir) ->
       catch error
         return if stopping
         rejected = true
-        warn "rip-sites: API candidate rejected; keeping the current workers: #{error?.message or error}"
+        warn "rip-sites: API candidate rejected; keeping the current worker: #{error?.message or error}"
         return
       return if stopping
       inputs = Set.new candidate.inputs
-      workers = null
+      worker = null
       try
-        workers = spawnPool! candidate.artifact
+        worker = spawn! candidate.artifact
       catch error
         return if stopping
         rejected = true
-        warn "rip-sites: API candidate failed to boot; keeping the current workers: #{error?.message or error}"
+        warn "rip-sites: API candidate failed to boot; keeping the current worker: #{error?.message or error}"
         return
       rejected = false
-      prior = pool
-      adopt workers, candidate.artifact
-      console.log "rip-sites: API reloaded (generation #{generation})"
-      Promise.all! prior.map (worker) -> stopWorker worker.proc
+      prior = current
+      adopt worker
+      console.log "rip-sites: API reloaded (worker #{serial})"
+      stopWorker! prior.proc if prior?
     ).catch (error) -> warn "rip-sites: API reload failed: #{error?.message or error}"
 
   start = ->
     build! join(import.meta.dir, 'worker.rip'), workerArtifact, join(artifactsDir, 'worker-result.json'), 'worker'
     candidate = compile!
     inputs = Set.new candidate.inputs
-    adopt spawnPool!(candidate.artifact), candidate.artifact
+    adopt spawn!(candidate.artifact)
     trigger = cadence refresh
     # The manager's API filter: a recorded input counts wherever it lives;
     # anything else counts only outside the App root and the generated and
@@ -434,7 +409,7 @@ startApi = (project, artifactsDir) ->
         undelivered = error?.code in ['ENOENT', 'ECONNREFUSED']
         warn "rip-sites: API worker #{worker.socket} failed #{request.method} #{url.pathname}: #{error?.message or error}" unless undelivered
       finally
-        release worker
+        release()
       if undelivered
         return unavailable("no API worker accepted it within #{HOLD_MS}ms") if Date.now() >= held
         sleep! RETRY_MS
@@ -456,7 +431,7 @@ startApi = (project, artifactsDir) ->
     stopping = true
     watcher?.close()
     wake()
-    pool = []
+    current = null
     ended.abort()
     Promise.allSettled! [...generations]
     Promise.all! [...procs].map (proc) -> stopWorker proc
@@ -674,6 +649,6 @@ export serveLocal = (argv) ->
   schedule(false)
 
   console.log "rip-sites: serving #{name} at http://127.0.0.1:#{server.port}/"
-  console.log "  the API workers answer #{if filePolicy then proxyFirst.join(', ') else 'every path'}" if api?
+  console.log "  the API worker answers #{if filePolicy then proxyFirst.join(', ') else 'every path'}" if api?
   console.log '  behind the edge, with HTTPS and in-place updates: rip sites run (or rip sites add, then rip sites start)'
   Promise.new -> return

@@ -359,7 +359,7 @@ work and explicit deploy ops (the manager module is internal — not a second CL
 | Command | What it does |
 | --- | --- |
 | `rip sites run [project] …` | Foreground manager for a project (default: cwd). Blocks until Ctrl-C. Registers with Janus's control socket, or `--control` / `JANUS_CONTROL`. Flags: `--name`, `--host`, `--workers`, `--watch` / `--no-watch`, … |
-| `rip sites serve [project] [--port N]` | One project on `http://127.0.0.1`, with no edge: App, files, and its API in two workers; open tabs reload on an App change. See [Serve](#serve--a-project-with-no-edge). |
+| `rip sites serve [project] [--port N]` | One project on `http://127.0.0.1`, with no edge: App, files, and its API in one worker; open tabs reload on an App change. See [Serve](#serve--a-project-with-no-edge). |
 | `rip sites publish [dir] …` | Publish one directory through Janus (default: cwd). Options include `--host`, `--control`, `--until-restart`. |
 | `rip sites hold <app>` | Hold a remembered app’s manager (freeze App/API activation). |
 | `rip sites release <app>` | Release hold — one coherent snapshot, then clear hold. |
@@ -379,7 +379,7 @@ Output: add `--json` on most verbs for machine-readable responses.
 
 `rip sites serve [project] [--port N]` runs one project on
 `http://127.0.0.1` without Janus, HTTPS, host names, or the catalog: its
-browser App, its files, and its API in two workers. It needs nothing
+browser App, its files, and its API in one worker. It needs nothing
 installed beyond Rip, and the project runs unchanged under `rip sites run` or
 `start` later.
 
@@ -401,28 +401,29 @@ from memory, the project's own directories, and a temporary directory that
 leaves with serve; nothing is written into the project, not even `dist/`.
 
 An API entry (`index.rip` or `app.rip`) is generated and run as the Manager
-runs it, in the Manager's default pool of two workers of one request each, and
-serve sends them what Janus would: the `files.proxyFirst` prefixes (`/api`
-when `serve.rip` declares no file policy) and the Hub bridge path, or every
-request when the project has no file roots at all. A worker sees the peer and
-`Host` Janus would send, never a client's `X-Forwarded-*` or `X-Real-IP`, and
-no hop-by-hop header, the ones `Connection` names included. Requests past the
-pool's capacity wait; a busy or draining worker's marked 503 is retried, as is
-a request whose connection a worker never accepted while a dead worker is
-replaced. Every wait is bounded by Janus's holds — 17 seconds for a worker
-that can take the request, 2 seconds past a busy one — and ends in a 503 with
-`Retry-After`; a request whose client leaves stops waiting and never reaches a
-worker. An `X-Sendfile` answer is sent as the file, ranges included but
-without the edge's validators, and one that names no readable regular file is
-a 502, named in the terminal.
+runs it, in one worker that takes two requests at once (the Manager's default
+capacity of two workers), and serve sends it what Janus would: the
+`files.proxyFirst` prefixes (`/api` when `serve.rip` declares no file policy)
+and the Hub bridge path, or every request when the project has no file roots
+at all. The worker sees the peer and `Host` Janus would send, never a client's
+`X-Forwarded-*` or `X-Real-IP`, and no hop-by-hop header, the ones
+`Connection` names included. Requests past its capacity wait; a busy or
+draining worker's marked 503 is retried, as is a request whose connection the
+worker never accepted while a dead worker is replaced. Every wait is bounded
+by Janus's holds — 17 seconds for a worker that can take the request, 2
+seconds past a busy one — and ends in a 503 with `Retry-After`; a request
+whose client leaves stops waiting and never reaches the worker. An
+`X-Sendfile` answer is sent as the file, ranges included but without the
+edge's validators, and one that names no readable regular file is a 502, named
+in the terminal.
 
 An App change reloads every open tab, which then boots the new bundle; a
 change outside the App root reloads too. Sources that fail to assemble keep
 the last publication live and show the failure in each open tab, the same
 report the Hub carries from a Manager. There is no in-place update; that is
-the edge's. An API change builds new workers and swaps them in once they
-are ready; the old ones drain, and no tab reloads. An API that does not compile
-or boot is named in the terminal and the running workers keep serving.
+the edge's. An API change builds a new worker and swaps it in once it is
+ready; the old one drains, and no tab reloads. An API that does not compile
+or boot is named in the terminal and the running worker keeps serving.
 
 The port is the first free one from 4000, `--port N` names one, and `--port 0`
 lets the system choose. A port that another listener answers on at the
