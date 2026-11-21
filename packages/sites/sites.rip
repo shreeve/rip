@@ -41,7 +41,7 @@ HELP = '''
 
   Manager (cwd default for path forms):
     run [project] …                      Foreground manager
-    serve [project] [--port N]           One project and its API on 127.0.0.1, no edge
+    serve [project] [--port N]           App only, on 127.0.0.1 with no edge
     publish [dir] …                      Publish one directory through Janus
     hold|release <app> […]               Deploy barriers on a remembered app
     migrate <app> [entry] […]            Coordinated DB migrate

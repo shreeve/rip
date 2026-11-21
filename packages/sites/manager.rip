@@ -169,11 +169,9 @@ loaderDir = ->
 
 ripRoot = -> join loaderDir(), '..'
 
-# A signal, when given, ends the generation child when it aborts.
-export generate = (entry, artifact, reportPath, taskId, signal) ->
+generate = (entry, artifact, reportPath, taskId) ->
   preload = "--preload=#{join(loaderDir(), 'loader.js')}"
   proc = Bun.spawn [process.execPath, preload, join(import.meta.dir, 'generate.rip'), entry, artifact, reportPath, taskId, '0'],
-    signal: signal
     stdin: 'ignore'
     stdout: 'ignore'
     stderr: 'pipe'
@@ -399,7 +397,7 @@ normalizeServeConfig = (raw, appDir) ->
   invalidServe 'serve.rip sites requires files' if out.site? and not out.files?
   out
 
-export ensureProxyFirst = (files, bridgePath) ->
+ensureProxyFirst = (files, bridgePath) ->
   return files unless files? and bridgePath?
   proxy = [...(files.proxy_first or [])]
   covered = proxy.some (prefix) -> bridgePath is prefix or bridgePath.startsWith("#{prefix}/") or prefix is '/'
@@ -929,7 +927,7 @@ registrationFiles = (project, declared, publication) ->
   files.shell = publication.files.shell if publication?
   files
 
-export waitReady = (proc, socket) ->
+waitReady = (proc, socket) ->
   deadline = Date.now() + READY_MS
   loop
     throw Error.new("worker exited with code #{proc.exitCode} before readiness") if proc.exitCode?
@@ -944,7 +942,7 @@ export waitReady = (proc, socket) ->
     throw Error.new('worker readiness deadline expired') if Date.now() >= deadline
     Promise.new! (done) -> setTimeout done, 25
 
-export stopWorker = (proc) ->
+stopWorker = (proc) ->
   return unless proc?
   # A signal-killed child reports a signalCode and a null exitCode.
   gone = -> proc.exitCode? or proc.signalCode?
@@ -955,7 +953,7 @@ export stopWorker = (proc) ->
   proc.kill 'SIGKILL' unless gone()
   await proc.exited
 
-export killWorker = (proc) ->
+killWorker = (proc) ->
   proc.kill 'SIGKILL' unless proc.exitCode?
   await proc.exited
 

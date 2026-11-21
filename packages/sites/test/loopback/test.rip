@@ -1,5 +1,5 @@
 import { test, eq, ok } from 'rip/testing'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -25,36 +25,31 @@ project = (extra = null) ->
   { dir, root: realpathSync(root) }
 
 # `rip sites serve` in the project, resolved once it prints its URL.
-serve = (root, args = ['--port', '0'], env = {}) ->
+serve = (root, args = ['--port', '0']) ->
   proc = Bun.spawn [process.execPath, PRELOAD, SITES, 'serve', ...args],
     cwd: root
-    env: { ...process.env, ...env }
     stdin: 'ignore'
     stdout: 'pipe'
     stderr: 'pipe'
-  read = (stream, add) ->
-    decoder = TextDecoder.new()
-    for await chunk as stream
-      add decoder.decode(chunk, { stream: true })
   out = ''
-  errText = ''
-  read proc.stdout, (text) -> out += text
-  err = read(proc.stderr, (text) -> errText += text).then -> errText
+  do ->
+    decoder = TextDecoder.new()
+    for await chunk as proc.stdout
+      out += decoder.decode chunk, { stream: true }
+  err = Bun.readableStreamToText proc.stderr
   url = waitFor! -> out.match(/http:\/\/127\.0\.0\.1:\d+\//)?[0]
-  { proc, url, err, output: (-> out), errors: (-> errText) }
+  { proc, url, err, output: -> out }
 
 # A refusal: the command exits 1, naming why.
-refused = (root, args = ['--port', '0'], env = {}) ->
+refused = (root, args = ['--port', '0']) ->
   proc = Bun.spawn [process.execPath, PRELOAD, SITES, 'serve', ...args],
     cwd: root
-    env: { ...process.env, ...env }
     stdin: 'ignore'
     stdout: 'pipe'
     stderr: 'pipe'
-  [code, out, stderr] = Promise.all! [proc.exited, Bun.readableStreamToText(proc.stdout), Bun.readableStreamToText(proc.stderr)]
+  code = await proc.exited
   eq code, 1
-  ok not out.includes('rip-sites: serving'), out
-  stderr
+  Bun.readableStreamToText! proc.stderr
 
 stop = (served) ->
   return unless served?
@@ -79,22 +74,6 @@ rawStatus = (url, target, accept) ->
   socket.write "GET #{target} HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: #{accept}\r\nConnection: close\r\n\r\n"
   await closed
   Number text.split(' ')[1]
-
-# A request sent byte for byte, and the whole response as text.
-raw = (url, request) ->
-  { port } = URL.new url
-  text = ''
-  done = null
-  closed = Promise.new (resolve) -> done = resolve
-  socket = Bun.connect!
-    hostname: '127.0.0.1'
-    port: Number(port)
-    socket:
-      data: (socket, chunk) -> text += chunk.toString()
-      close: -> done()
-  socket.write request
-  await closed
-  text
 
 # One Hub subscriber, as the browser feed subscribes: the frames it
 # receives after the server acknowledges its token.
@@ -270,237 +249,9 @@ test! 'a file whose real path leaves its root is a named miss, and the search go
     rmSync dir, { recursive: true, force: true }
     rmSync outside, { recursive: true, force: true }
 
-API = (version, boot = '') -> """
-  import { appendFileSync, readFileSync } from 'node:fs'
-  import { get, post, read, start } from 'rip/sites'
-
-  here = import.meta.dir
-  #{boot}
-  get '/api/version' -> { version: '#{version}', host: @req.header('host'), via: @req.header('x-forwarded-for'), real: @req.header('x-real-ip'), proto: @req.header('x-forwarded-proto'), forwardedHost: @req.header('x-forwarded-host'), secret: @req.header('x-secret') }
-  post '/api/echo' -> { got: read('name') }
-  post '/api/count' ->
-    appendFileSync here + '/count.txt', 'x'
-    { counted: true }
-  get '/api/file' -> @send here + '/app/styles.css'
-  get '/api/gone' -> @send here + '/no-such-file.css'
-  get '/api/marked' ->
-    @mark = 'm1'
-    { marked: true }
-  get '/api/self' ->
-    response = fetch! 'http://' + @req.header('host') + '/api/version'
-    response.json!
-  get '/api/busy' -> Response.new 'busy', { status: 503, headers: { 'retry-after': '0', 'rip-worker-busy': '1' } }
-
-  start!
-
-  """
-
-# The serve processes' temporary directory, made per test so what serve
-# leaves behind in it can be checked.
-scratchTmp = -> mkdtempSync join(tmpdir(), 'rip-sites-loopback-tmp-')
-
-workerPids = (tmp) ->
-  found = Bun.spawnSync ['pgrep', '-f', "#{tmp}/rip-serve-.*/worker.js"]
-  found.stdout.toString().trim().split('\n').filter(Boolean).map(Number)
-
-test! 'the API runs in the Manager pool on the paths Janus proxies, and a change swaps it', ->
-  { dir, root } = project (root) -> writeFileSync join(root, 'index.rip'), API('one')
-  tmp = scratchTmp()
-  served = null
-  hub = null
-  try
-    served = serve! root, ['--port', '0'], { TMPDIR: tmp }
-    url = served.url
-    ok served.output().includes('the API workers answer /api, /hub'), served.output()
-    hub = subscribe! url
-
-    # The worker sees the Host and peer Janus would send, never a client's claim.
-    version = (fetch! "#{url}api/version", { headers: { 'x-forwarded-for': '6.6.6.6', 'x-real-ip': '6.6.6.6' } }).json!
-    host = URL.new(url).host
-    eq version, { version: 'one', host, via: '127.0.0.1', real: null, proto: 'http', forwardedHost: host, secret: null }
-
-    # Headers the Connection header names stay on the client's hop.
-    reply = raw! url, "GET /api/version HTTP/1.1\r\nHost: #{host}\r\nConnection: close, x-secret\r\nX-Secret: 1\r\n\r\n"
-    eq JSON.parse(reply.slice(reply.indexOf('\r\n\r\n') + 4)).secret, null
-
-    # A handler that calls its own API once finds a second slot.
-    eq (json! "#{url}api/self").version, 'one'
-
-    # A worker that stays busy is held as Janus holds it, then answered 503.
-    started = Date.now()
-    busy = fetch! "#{url}api/busy"
-    eq busy.status, 503
-    eq busy.headers.get('retry-after'), '1'
-    eq busy.headers.get('cache-control'), 'no-store'
-    ok Date.now() - started >= 1900, "busy hold ended after #{Date.now() - started}ms"
-    eq (fetch! "#{url}api/echo", { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'zed' }) }).json!, { got: 'zed' }
-    marked = fetch! "#{url}api/marked"
-    eq (marked.json!), { marked: true }
-    eq marked.headers.get('rip-mark'), null
-    eq (fetch! "#{url}api/nope").status, 404
-
-    # X-Sendfile is answered with the file, or a named 502.
-    file = fetch! "#{url}api/file"
-    eq file.text!, readFileSync(join(root, 'app', 'styles.css'), 'utf8')
-    eq file.headers.get('x-sendfile'), null
-    eq file.headers.get('x-content-type-options'), 'nosniff'
-    eq (fetch! "#{url}api/gone").status, 502
-
-    # The App is still served beside it, and requests past the worker's
-    # concurrency wait instead of failing.
-    ok (fetch! url, { headers: { accept: 'text/html' } }).text!.includes('bootApp')
-    statuses = Promise.all! [1..8].map -> fetch("#{url}api/version").then (response) -> response.status
-    eq statuses, [200, 200, 200, 200, 200, 200, 200, 200]
-
-    # An API change swaps the worker and reloads no tab; one that does not
-    # compile is named and leaves the running worker serving.
-    writeFileSync join(root, 'index.rip'), API('two')
-    waitFor! -> (json! "#{url}api/version").version is 'two'
-    writeFileSync join(root, 'index.rip'), "get '/api/version' -> (\n"
-    waitFor! -> served.errors().includes('API candidate rejected; keeping the current workers')
-    eq (json! "#{url}api/version").version, 'two'
-    writeFileSync join(root, 'index.rip'), API('three')
-    waitFor! -> (json! "#{url}api/version").version is 'three'
-    writeFileSync join(root, 'index.rip'), API('four', "throw Error.new('boom')")
-    waitFor! -> served.errors().includes('API candidate failed to boot; keeping the current workers')
-    eq (json! "#{url}api/version").version, 'three'
-    eq hub.frames, []
-    eq workerPids(tmp).length, 2
-
-    # Workers that die are replaced from the same build.
-    process.kill pid, 'SIGKILL' for pid in workerPids(tmp)
-    eq (json! "#{url}api/version").version, 'three'
-    waitFor! -> workerPids(tmp).length is 2
-
-    stop! served
-    eq served.proc.exitCode, 0
-    stderr = await served.err
-    ok stderr.includes('API candidate rejected; keeping the current workers'), stderr
-    ok stderr.includes('API worker exited'), stderr
-    ok stderr.includes("serve rejected the API's X-Sendfile"), stderr
-    served = null
-    waitFor! -> workerPids(tmp).length is 0
-    eq readdirSync(tmp), []
-  finally
-    hub?.close()
-    stop! served
-    rmSync dir, { recursive: true, force: true }
-    rmSync tmp, { recursive: true, force: true }
-
-test! 'a request waits a bounded hold for a worker, and one whose client left never runs', ->
-  { dir, root } = project (root) ->
-    writeFileSync join(root, 'boot.txt'), 'ready'
-    writeFileSync join(root, 'index.rip'), API('one', "readFileSync here + '/boot.txt'")
-  tmp = scratchTmp()
-  served = null
-  try
-    served = serve! root, ['--port', '0'], { TMPDIR: tmp, RIP_SERVE_HOLD_MS: '12500' }
-    url = served.url
-    eq (json! "#{url}api/version").version, 'one'
-
-    # The workers die and cannot come back while their boot file is gone.
-    rmSync join(root, 'boot.txt')
-    process.kill pid, 'SIGKILL' for pid in workerPids(tmp)
-    waitFor! -> served.errors().includes('replacement API worker failed')
-    abandoned = [1..3].map ->
-      fetch("#{url}api/count", { method: 'POST', signal: AbortSignal.timeout(200) }).catch -> null
-    Promise.all! abandoned
-    # The hold outlasts Bun's default idle timeout, and still ends in a 503.
-    started = Date.now()
-    held = fetch! "#{url}api/version"
-    eq held.status, 503
-    eq held.headers.get('retry-after'), '1'
-    ok Date.now() - started >= 12400, "hold ended after #{Date.now() - started}ms"
-    ok served.errors().includes('serve answered 503 to GET /api/version: no API worker could take it within 12500ms'), served.errors()
-
-    writeFileSync join(root, 'boot.txt'), 'ready'
-    waitFor!((-> (fetch! "#{url}api/version").status is 200), 10000)
-    ok not existsSync(join(root, 'count.txt')), 'an abandoned POST reached the worker'
-  finally
-    stop! served
-    rmSync dir, { recursive: true, force: true }
-    rmSync tmp, { recursive: true, force: true }
-
-test! 'serve takes its worker and temporary files with it on any signal, startup included', ->
-  { dir, root } = project (root) -> writeFileSync join(root, 'index.rip'), API('one')
-  tmp = scratchTmp()
-  try
-    for signal in ['SIGINT', 'SIGHUP']
-      served = serve! root, ['--port', '0'], { TMPDIR: tmp }
-      eq workerPids(tmp).length, 2
-      served.proc.kill signal
-      eq (await served.proc.exited), 0
-      waitFor! -> workerPids(tmp).length is 0
-      eq readdirSync(tmp), [], signal
-
-    # A signal while the API is still being built.
-    proc = Bun.spawn [process.execPath, PRELOAD, SITES, 'serve', '--port', '0'],
-      cwd: root
-      env: { ...process.env, TMPDIR: tmp }
-      stdin: 'ignore'
-      stdout: 'ignore'
-      stderr: 'ignore'
-    waitFor! -> readdirSync(tmp).length > 0
-    proc.kill 'SIGTERM'
-    eq (await proc.exited), 0
-    waitFor! -> workerPids(tmp).length is 0
-    eq readdirSync(tmp), []
-  finally
-    rmSync dir, { recursive: true, force: true }
-    rmSync tmp, { recursive: true, force: true }
-
-test! 'an API with no file policy answers every path, and the Hub carries only the reload feed', ->
-  dir = mkdtempSync join(tmpdir(), 'rip-sites-loopback-')
-  root = join dir, 'project'
-  mkdirSync root
-  writeFileSync join(root, 'index.rip'), "import { get, start } from 'rip/sites'\n\nget '/hello' -> { message: 'hello' }\n\nstart!\n"
-  served = null
-  hub = null
-  try
-    served = serve! realpathSync(root)
-    url = served.url
-    ok served.output().includes('the API workers answer every path'), served.output()
-    eq (json! "#{url}hello"), { message: 'hello' }
-    eq (fetch! url, { headers: { accept: 'text/html' } }).status, 404
-    hub = subscribe! url
-
-    # Hub bridge traffic has no worker to reach here, so it closes, named.
-    socket = WebSocket.new url.replace('http:', 'ws:') + 'hub'
-    closed = Promise.new (done) -> socket.onclose = (event) -> done event
-    socket.onopen = -> socket.send JSON.stringify({ '+': ['/chat'] })
-    event = await closed
-    eq event.code, 1008
-    eq event.reason, 'rip sites serve: the Hub carries only the App reload feed'
-    stop! served
-    ok (await served.err).includes("serve closed a Hub socket that sent {\"+\":[\"/chat\"]}")
-    served = null
-  finally
-    hub?.close()
-    stop! served
-    rmSync dir, { recursive: true, force: true }
-
-test! 'an API serve cannot start or place stops it before it listens, leaving nothing', ->
-  { dir, root } = project (root) -> writeFileSync join(root, 'index.rip'), "get '/api/version' -> (\n"
-  tmp = scratchTmp()
-  holder = Bun.serve { hostname: '127.0.0.1', port: 0, fetch: -> Response.new('held') }
-  try
-    stderr = refused! root, ['--port', '0'], { TMPDIR: tmp }
-    ok stderr.includes('serve cannot start the API'), stderr
-    eq readdirSync(tmp), []
-
-    # The worker is up before the port is claimed; a held port takes it down.
-    writeFileSync join(root, 'index.rip'), API('one')
-    stderr = refused! root, ['--port', String(holder.port)], { TMPDIR: tmp }
-    ok stderr.includes("cannot listen on 127.0.0.1:#{holder.port}: the port is in use"), stderr
-    waitFor! -> workerPids(tmp).length is 0
-    eq readdirSync(tmp), []
-  finally
-    holder.stop true
-    rmSync dir, { recursive: true, force: true }
-    rmSync tmp, { recursive: true, force: true }
-
 test! 'what serve cannot carry rejects at startup, naming why', ->
   cases = [
+    ['an API entry', ((root) -> writeFileSync join(root, 'index.rip'), "get '/api/x', -> 1\n"), 'runs App-only projects']
     ['tenant hosts', ((root) ->
       mkdirSync join(root, 'sites', 'common', 'public'), { recursive: true }
       writeFileSync join(root, 'serve.rip'), "export default\n  sites:\n    host: '{site}.example.test'\n    dir: 'sites'\n  files:\n    roots: ['sites/common/public', 'app']\n    shell: 'app/template.html'\n"
@@ -510,10 +261,10 @@ test! 'what serve cannot carry rejects at startup, naming why', ->
     ), 'cannot list directories']
     ['proxied prefixes', ((root) ->
       writeFileSync join(root, 'serve.rip'), "export default\n  files:\n    roots: ['app']\n    proxyFirst: ['/api']\n    shell: 'app/template.html'\n"
-    ), 'has no API entry for serve.rip files.proxyFirst']
+    ), 'has no API workers for serve.rip files.proxyFirst']
     ['a Hub bridge', ((root) ->
       writeFileSync join(root, 'serve.rip'), "export default\n  hub:\n    bridge: 'hub'\n"
-    ), 'has no API entry for serve.rip hub.bridge']
+    ), 'has no API workers for serve.rip hub.bridge']
     ['a {site} root', ((root) ->
       mkdirSync join(root, 'sites')
       writeFileSync join(root, 'serve.rip'), "export default\n  files:\n    roots: ['sites/{site}', 'app']\n    shell: 'app/template.html'\n"
