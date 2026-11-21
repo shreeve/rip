@@ -83,6 +83,24 @@ test! 'capacity bounces, shutdown marks, and admitted work completes', ->
     await proc.exited if proc?
     rmSync dir, { recursive: true, force: true }
 
+test! "a handler slower than Bun's idle timeout still answers", ->
+  dir = mkdtempSync join(tmpdir(), 'rip-workers-patient-')
+  proc = null
+  try
+    built = buildWorker! dir, join(import.meta.dir, 'index.rip')
+    socket = join dir, 'worker.sock'
+    proc = spawnWorker built, socket, { WORKER_CONCURRENCY: '1' }
+    waitFor! ->
+      try (unixFetch!('/ready', socket)).status is 200
+      catch then false
+    response = unixFetch! '/patient', socket
+    eq response.status, 200
+    eq response.json!, { patient: true }
+  finally
+    try proc?.kill('SIGKILL')
+    await proc.exited if proc?
+    rmSync dir, { recursive: true, force: true }
+
 test! 'boot failure is reported before bounded nonzero exit', ->
   dir = mkdtempSync join(tmpdir(), 'rip-workers-boot-')
   proc = null

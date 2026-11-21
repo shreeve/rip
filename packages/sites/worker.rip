@@ -42,8 +42,12 @@ boot = ->
     warn "[worker #{workerId}] boot failed: #{state.bootError}"
     setTimeout (-> exit 1), 1500
 
+# No idle timeout: Bun's default answers 503 for a request whose handler
+# sends nothing for 10 seconds. A handler's time is bounded by the handler
+# deadline (RIP_HANDLER_DEADLINE_MS) and by the edge, never by silence.
 server = Bun.serve
   unix: socket
+  idleTimeout: 0
   fetch: (request) ->
     url = request.url
     if request.method is 'GET' and (url.endsWith('/ready') or url.includes('/ready?')) and URL.new(url).pathname is '/ready'
