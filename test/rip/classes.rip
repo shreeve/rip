@@ -175,6 +175,7 @@ test "new.target in constructor", '''
 ''', true
 
 code "new.target passes through", "class A\n  constructor: ->\n    @t = new.target", "class A {\n  constructor() {\n    this.t = new.target;\n  }\n};"
+code "new.target opens an implicit call argument", "class A\n  constructor: ->\n    record new.target", "class A {\n  constructor() {\n    record(new.target);\n  }\n};"
 
 # ==============================================================================
 # Promoted Parameters — constructor: (@name) -> assigns this.name; inside a
