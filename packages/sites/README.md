@@ -46,7 +46,7 @@ ordinary HTTP themselves — they register with Janus and supervise workers.
 | `rip/sites` | Framework API (`get`, `read`, middleware, …) | Inside `index.rip` / App code |
 | `rip sites` | Unified CLI: catalog, apps, edge, agent, advanced | Day-to-day Sites |
 | `rip sites run` / `publish` | Foreground manager / directory publish | Dev without the catalog |
-| `rip sites serve` | The browser App on a loopback port, no edge | A quick look with nothing installed |
+| `rip sites serve` | One project — App, files, API — on a loopback port, no edge | A quick look with nothing installed |
 
 Reserved nouns (not app names): **`edge`**, **`all`**, **`agent`**.
 Durable catalog is
@@ -359,7 +359,7 @@ work and explicit deploy ops (the manager module is internal — not a second CL
 | Command | What it does |
 | --- | --- |
 | `rip sites run [project] …` | Foreground manager for a project (default: cwd). Blocks until Ctrl-C. Registers with Janus's control socket, or `--control` / `JANUS_CONTROL`. Flags: `--name`, `--host`, `--workers`, `--watch` / `--no-watch`, … |
-| `rip sites serve [project] [--port N]` | The browser App alone on `http://127.0.0.1`, with no edge; open tabs reload on change. See [Serve](#serve--an-app-with-no-edge). |
+| `rip sites serve [project] [--port N]` | One project on `http://127.0.0.1`, with no edge: App, files, and its API in one worker; open tabs reload on an App change. See [Serve](#serve--a-project-with-no-edge). |
 | `rip sites publish [dir] …` | Publish one directory through Janus (default: cwd). Options include `--host`, `--control`, `--until-restart`. |
 | `rip sites hold <app>` | Hold a remembered app’s manager (freeze App/API activation). |
 | `rip sites release <app>` | Release hold — one coherent snapshot, then clear hold. |
@@ -375,48 +375,72 @@ rip sites status .          # manager JSON for cwd
 
 Output: add `--json` on most verbs for machine-readable responses.
 
-### Serve — an App with no edge
+### Serve — a project with no edge
 
-`rip sites serve [project] [--port N]` runs one project's browser App on
-`http://127.0.0.1` without Janus, HTTPS, host names, or the catalog. It
-needs nothing installed beyond Rip, and the project runs unchanged under
-`rip sites run` or `start` later.
+`rip sites serve [project] [--port N]` runs one project on
+`http://127.0.0.1` without Janus, HTTPS, host names, or the catalog: its
+browser App, its files, and its API in one worker. It needs nothing
+installed beyond Rip, and the project runs unchanged under `rip sites run` or
+`start` later.
 
 ```bash
-cd my-app                   # app/, optional public/ and serve.rip
+cd my-app                   # index.rip, app/, public/, serve.rip — any of them
 rip sites serve             # rip-sites: serving my-app at http://127.0.0.1:4000/
 ```
 
-It reads the same `serve.rip`, `app/`, and `public/` a full site uses, and
-answers what the edge would answer: the shell (authored or generated), the
-App's `bundle.json` and `latest.json`, the runtime under `/@rip`, and the file
-roots in order, by Janus's rules — a path that does not decode exactly once to
-clean segments is a 400 (Bun itself resolves a literal `..` or backslash
-before serve sees it, so those reach the roots as clean paths), a hidden name (all but a leading `.well-known`) is a
-miss, only GET and HEAD read files, and the shell answers a miss only for a
-request whose `Accept` admits HTML. A project with no `app/` has no shell.
-Everything comes from memory and the project's own directories; nothing is
-written into the project, not even `dist/`.
+It reads the same `serve.rip`, `index.rip`, `app/`, and `public/` a full site
+uses, and answers what the edge would answer: the shell (authored or
+generated), the App's `bundle.json` and `latest.json`, the runtime under
+`/@rip`, and the file roots in order, by Janus's rules — a path that does not
+decode exactly once to clean segments is a 400 (Bun itself resolves a literal
+`..` or backslash before serve sees it, so those reach the roots as clean
+paths), a hidden name (all but a leading `.well-known`) is a miss, only GET
+and HEAD read files, and the shell answers a miss only for a request whose
+`Accept` admits HTML. A project with no `app/` has no shell. Everything comes
+from memory, the project's own directories, and a temporary directory that
+leaves with serve; nothing is written into the project, not even `dist/`.
 
-A source change reloads every open tab, which then boots the new bundle; a
+An API entry (`index.rip` or `app.rip`) is generated and run as the Manager
+runs it, in one worker that takes two requests at once (the Manager's default
+capacity of two workers), and serve sends it what Janus would: the
+`files.proxyFirst` prefixes (`/api` when `serve.rip` declares no file policy)
+and the Hub bridge path, or every request when the project has no file roots
+at all. The worker sees the peer and `Host` Janus would send, never a client's
+`X-Forwarded-*` or `X-Real-IP`, and no hop-by-hop header, the ones
+`Connection` names included. Requests past its capacity wait; a busy or
+draining worker's marked 503 is retried, as is a request whose connection the
+worker never accepted while a dead worker is replaced. Every wait is bounded
+by Janus's holds — 17 seconds for a worker that can take the request, 2
+seconds past a busy one — and ends in a 503 with `Retry-After`; a request
+whose client leaves stops waiting and never reaches the worker. An
+`X-Sendfile` answer is sent as the file, ranges included but without the
+edge's validators, and one that names no readable regular file is a 502, named
+in the terminal.
+
+An App change reloads every open tab, which then boots the new bundle; a
 change outside the App root reloads too. Sources that fail to assemble keep
 the last publication live and show the failure in each open tab, the same
 report the Hub carries from a Manager. There is no in-place update; that is
-the edge's.
+the edge's. An API change builds a new worker and swaps it in once it is
+ready; the old one drains, and no tab reloads. An API that does not compile
+or boot is named in the terminal and the running worker keeps serving.
 
 The port is the first free one from 4000, `--port N` names one, and `--port 0`
 lets the system choose. A port that another listener answers on at the
 loopback, directly or through a wildcard address, rejects. Serve listens on
 `127.0.0.1` only.
 
-What serve cannot carry rejects at startup, naming why: an API entry
-(`index.rip` or `app.rip`), `serve.rip` `sites` (tenant hosts) or a `{site}`
-root, a `browse: true` root, `files.proxyFirst`, and `hub.bridge`. Three
-`serve.rip` keys have no meaning on a loopback port and are read but unused:
-`hosts` (serve has one address), `access` (it keeps no access log), and a
-root's `cache` (every answer revalidates). A file whose real path leaves its
-root, such as one under a symlink to a directory elsewhere, is a miss, as at
-the edge, and serve names it in the terminal.
+The Hub on a loopback port carries the App's reload feed and nothing else, and
+admits it without the bridge's open call: any other frame — bridge traffic the
+edge would post to a worker — closes the socket (1008) and is named in the
+terminal. What serve cannot carry rejects at startup, naming why: `serve.rip`
+`sites` (tenant hosts) or a `{site}` root, a `browse: true` root, and
+`files.proxyFirst` or `hub.bridge` with no API entry. Three `serve.rip` keys
+have no meaning on a loopback port and are read but unused: `hosts` (serve has
+one address), `access` (it keeps no access log), and a root's `cache` (every
+answer revalidates). A file whose real path leaves its root, such as one under
+a symlink to a directory elsewhere, is a miss, as at the edge, and serve names
+it in the terminal.
 
 ## Typical sessions
 

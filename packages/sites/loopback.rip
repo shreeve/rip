@@ -1,21 +1,43 @@
-# `rip sites serve`: one project's browser App on a loopback port, with no
-# edge. It answers what Janus answers for the same project — the shell,
-# the App's bundle.json and latest.json, the runtime under /@rip, and the
-# file roots, by Janus's request-path, hidden-name, method, and Accept
-# rules — from memory and the project's own directories, and writes
-# nothing into the project. A source change tells open tabs to reload.
+# `rip sites serve`: one project on a loopback port, with no edge. It
+# answers what Janus answers for the same project — the shell, the App's
+# bundle.json and latest.json, the runtime under /@rip, and the file
+# roots, by Janus's request-path, hidden-name, method, and Accept rules —
+# from memory and the project's own directories, and sends what Janus
+# proxies to one API worker. It writes nothing into the project. An App
+# change tells open tabs to reload; an API change swaps in a new worker.
 #
-# A project serve cannot carry the way the edge does (API workers, tenant
-# hosts, directory browsing) rejects at startup instead of half-running.
-import { existsSync, realpathSync, statSync, watch } from 'node:fs'
-import { basename, join, sep } from 'node:path'
+# A project serve cannot carry the way the edge does (tenant hosts,
+# directory browsing) rejects at startup instead of half-running.
+import { accessSync, constants, existsSync, mkdtempSync, realpathSync, rmSync, statSync, watch } from 'node:fs'
+import { basename, isAbsolute, join, resolve, sep } from 'node:path'
+import { tmpdir } from 'node:os'
 import { resolveProject } from './control.rip'
-import { appEventRelevant, appShell, buildAppDocuments, currentShipSet, defaultAppChanges, loadServeConfig, settleShipSet } from './manager.rip'
+import { appEventRelevant, appShell, buildAppDocuments, currentShipSet, defaultAppChanges, ensureProxyFirst, generate, killWorker, loadServeConfig, settleShipSet, stopWorker, waitReady } from './manager.rip'
 
 FIRST_PORT = 4000
 LAST_PORT = 4099
 SETTLE_MS = 50
 BURST_MS = 250
+# The manager's default capacity — two workers of one request each — in
+# one worker, so a handler that calls its own API once still finds a slot.
+# Requests past it wait here rather than bouncing off its busy 503.
+CONCURRENCY = 2
+RETRY_MS = 10
+# Janus's holds: a request waits at most HOLD_MS for a worker that can take
+# it, and at most BUSY_MS past a worker's marked busy or draining 503, then
+# is answered 503 with Retry-After.
+holdText = process.env.RIP_SERVE_HOLD_MS or '17000'
+HOLD_MS = Number holdText
+abort "rip-sites: RIP_SERVE_HOLD_MS must be an integer greater than zero, not #{JSON.stringify(holdText)}" unless /^\d+$/.test(holdText) and HOLD_MS > 0
+BUSY_MS = 2000
+# Headers that describe one connection, never carried across a proxy, beside
+# any the Connection header itself names.
+HOP_BY_HOP = ['connection', 'keep-alive', 'proxy-connection', 'te', 'trailer', 'transfer-encoding', 'upgrade']
+hopByHop = (headers) ->
+  named = (headers.get('connection') or '').split(',').map((name) -> name.trim().toLowerCase()).filter(Boolean)
+  [...HOP_BY_HOP, ...named]
+gatewayText = (status, text, extra = {}) ->
+  Response.new "#{text}\n", { status, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...extra } }
 # Loopback addresses a listener elsewhere answers on when it holds the
 # port — on them, or on a wildcard that covers them. Binding 127.0.0.1
 # succeeds beside such a listener, so serve asks first by connecting,
@@ -26,9 +48,10 @@ NO_CACHE = { 'Cache-Control': 'no-cache' }
 USAGE = '''
   usage: rip sites serve [project] [--port N]
 
-  Serves one project's browser App on http://127.0.0.1 with no edge, and
-  reloads open tabs when its sources change. The port defaults to the
-  first free one from 4000; --port 0 lets the system pick.
+  Serves one project on http://127.0.0.1 with no edge: its browser App,
+  its files, and its API in one worker. Open tabs reload when the App
+  changes; the worker is replaced when the API does. The port defaults to
+  the first free one from 4000; --port 0 lets the system pick.
 '''
 
 parseServeArgs = (argv) ->
@@ -156,15 +179,273 @@ claim = (port, fetch, websocket) ->
     throw error unless error?.code is 'EADDRINUSE'
     null
 
+# The manager's cadence: SETTLE_MS after the latest call, but never later
+# than BURST_MS after the first, so a burst of saves runs once or twice.
+cadence = (run) ->
+  timer = null
+  deadline = null
+  ->
+    now = Date.now()
+    if timer?
+      clearTimeout timer
+      delay = Math.max 0, Math.min(SETTLE_MS, deadline - now)
+    else
+      deadline = now + BURST_MS
+      delay = SETTLE_MS
+    timer = setTimeout (->
+      timer = null
+      deadline = null
+      run()
+    ), delay
+
+# Janus's sendfile rule for a worker's X-Sendfile answer: one absolute
+# path to a readable regular file, on a status that carries a body.
+# Anything else is a 502, named in the terminal.
+sendfile = (response, headers, target) ->
+  response.body?.cancel()
+  headers.delete 'x-sendfile'
+  fail = (reason) ->
+    warn "rip-sites: serve rejected the API's X-Sendfile #{JSON.stringify(target)}: #{reason}"
+    gatewayText 502, 'bad gateway'
+  return fail('it is not an absolute path') unless target and isAbsolute(target) and not target.includes('\0')
+  status = response.status
+  return fail("status #{status} cannot carry a body") if status < 200 or status in [204, 205, 206, 304, 416]
+  info = try statSync(target) catch then null
+  return fail('it is not a regular file') unless info?.isFile()
+  readable = try
+    accessSync target, constants.R_OK
+    true
+  catch
+    false
+  return fail('it is not readable') unless readable
+  headers.delete name for name in ['content-length', 'content-encoding', 'transfer-encoding']
+  headers.set 'X-Content-Type-Options', 'nosniff'
+  Response.new Bun.file(target), { status, headers }
+
+# The project's API in one worker, built and run as the manager builds and
+# runs its workers. An API change builds a candidate; one that compiles
+# and boots replaces the worker, which drains; one that does not leaves
+# the running worker serving and is named in the terminal.
+startApi = (project, artifactsDir) ->
+  serial = 0
+  generation = 0
+  inputs = Set.new()
+  rejected = false
+  current = null
+  stopping = false
+  inflight = 0
+  waiting = []
+  watcher = null
+  chain = Promise.resolve()
+  # Every worker process still running, adopted or not, so stop reaches
+  # one a swap or a replacement is still booting.
+  procs = Set.new()
+  # Generation children likewise: one still writing when serve leaves would
+  # recreate the temporary directory, so stop ends them and waits.
+  generations = Set.new()
+  ended = AbortController.new()
+  workerArtifact = join artifactsDir, 'worker.js'
+
+  build = (entry, artifact, reportPath, taskId) ->
+    task = generate entry, artifact, reportPath, taskId, ended.signal
+    generations.add task
+    task.finally(-> generations.delete task).catch(-> null)
+    task
+
+  wake = ->
+    queued = waiting
+    waiting = []
+    settle() for settle in queued
+
+  # The worker once it has a free slot; null when the hold runs out, the
+  # client leaves, or serve stops first.
+  acquire = (deadline, signal) ->
+    until current? and inflight < CONCURRENCY
+      return null if stopping or signal.aborted or Date.now() >= deadline
+      Promise.new! (resolve) ->
+        timer = null
+        settle = ->
+          clearTimeout timer
+          signal.removeEventListener 'abort', settle
+          resolve()
+        timer = setTimeout settle, Math.max(0, deadline - Date.now())
+        signal.addEventListener 'abort', settle
+        waiting.push settle
+    inflight++
+    current
+
+  release = ->
+    inflight--
+    wake()
+
+  compile = ->
+    generation++
+    artifact = join artifactsDir, "app-#{generation}.js"
+    report = build! project.entry, artifact, join(artifactsDir, "app-#{generation}.json"), "api-#{generation}"
+    { artifact, inputs: report.inputs }
+
+  spawn = (artifact) ->
+    serial++
+    socket = join artifactsDir, "worker-#{serial}.sock"
+    proc = Bun.spawn [process.execPath, workerArtifact],
+      stdin: 'ignore'
+      stdout: 'inherit'
+      stderr: 'inherit'
+      env: { ...process.env, APP_ARTIFACT: artifact, SOCKET_PATH: socket, WORKER_ID: "#{serial}", WORKER_CONCURRENCY: "#{CONCURRENCY}" }
+    procs.add proc
+    proc.exited.then -> procs.delete proc
+    try
+      waitReady! proc, socket
+      throw Error.new('serve is stopping') if stopping
+    catch error
+      killWorker! proc
+      throw error
+    worker = { proc, socket, artifact }
+    replaceOnExit worker
+    worker
+
+  adopt = (worker) ->
+    current = worker
+    wake()
+
+  # A worker that exits on its own is replaced from the same artifact,
+  # unless a newer worker took its place first.
+  replaceOnExit = (worker) ->
+    do ->
+      code = await worker.proc.exited
+      return if stopping or worker isnt current
+      current = null
+      warn "rip-sites: API worker exited (#{code}); replacing"
+      loop
+        return if stopping or current?
+        try
+          replacement = spawn! worker.artifact
+          if current? then stopWorker!(replacement.proc) else adopt(replacement)
+          return
+        catch error
+          return if stopping
+          warn "rip-sites: replacement API worker failed: #{error?.message or error}"
+          sleep! 250
+    return
+
+  refresh = ->
+    chain = chain.then(->
+      return if stopping
+      candidate = null
+      try
+        candidate = compile!
+      catch error
+        return if stopping
+        rejected = true
+        warn "rip-sites: API candidate rejected; keeping the current worker: #{error?.message or error}"
+        return
+      return if stopping
+      inputs = Set.new candidate.inputs
+      worker = null
+      try
+        worker = spawn! candidate.artifact
+      catch error
+        return if stopping
+        rejected = true
+        warn "rip-sites: API candidate failed to boot; keeping the current worker: #{error?.message or error}"
+        return
+      rejected = false
+      prior = current
+      adopt worker
+      console.log "rip-sites: API reloaded (worker #{serial})"
+      stopWorker! prior.proc if prior?
+    ).catch (error) -> warn "rip-sites: API reload failed: #{error?.message or error}"
+
+  start = ->
+    build! join(import.meta.dir, 'worker.rip'), workerArtifact, join(artifactsDir, 'worker-result.json'), 'worker'
+    candidate = compile!
+    inputs = Set.new candidate.inputs
+    adopt spawn!(candidate.artifact)
+    trigger = cadence refresh
+    # The manager's API filter: a recorded input counts wherever it lives;
+    # anything else counts only outside the App root and the generated and
+    # installed trees, and after a rejected candidate any event may be the
+    # missing piece.
+    watcher = watch project.root, { recursive: true }, (event, filename) ->
+      return if stopping
+      rel = String(filename or '').replaceAll('\\', '/')
+      path = resolve project.root, rel
+      known = path is project.entry or inputs.has(path) or [...inputs].some((input) -> input.startsWith("#{path}/"))
+      unless known
+        return if rel.startsWith('dist/') or rel.startsWith('.rip/') or rel.startsWith('node_modules/')
+        return if project.appRoot? and (path is project.appRoot or path.startsWith("#{project.appRoot}/"))
+      trigger() if not filename? or rel is '' or known or rejected
+
+  # What Janus does on the way to a worker: the peer and Host it saw, no
+  # client claim to X-Real-IP or X-Sendfile, and a worker's marked busy or
+  # draining 503 retried rather than shown. A connection the worker never
+  # accepted delivered nothing, so it is retried too, as Janus retries a
+  # failed dial, while a dead worker is replaced; one that broke after
+  # delivery is a 502. Every wait is bounded by Janus's holds and ends the
+  # moment the client leaves, so an abandoned request never reaches a worker
+  # late.
+  forward = (request, url, server) ->
+    signal = request.signal
+    body = if request.method in ['GET', 'HEAD'] then null else request.arrayBuffer!
+    headers = Headers.new request.headers
+    headers.delete name for name in [...hopByHop(request.headers), 'x-real-ip', 'x-sendfile', 'x-forwarded-for', 'x-forwarded-proto', 'x-forwarded-host']
+    headers.set 'X-Forwarded-For', server.requestIP(request)?.address or '127.0.0.1'
+    headers.set 'X-Forwarded-Proto', 'http'
+    headers.set 'X-Forwarded-Host', request.headers.get('host') or url.host
+    unavailable = (reason) ->
+      warn "rip-sites: serve answered 503 to #{request.method} #{url.pathname}: #{reason}" if reason? and not signal.aborted
+      gatewayText 503, 'service unavailable', { 'Retry-After': '1' }
+    held = Date.now() + HOLD_MS
+    busyUntil = null
+    loop
+      worker = acquire! held, signal
+      return unavailable(if stopping or signal.aborted then null else "no API worker could take it within #{HOLD_MS}ms") unless worker?
+      response = null
+      undelivered = false
+      try
+        response = fetch! "http://worker#{url.pathname}#{url.search}", { unix: worker.socket, method: request.method, headers, body, signal, redirect: 'manual', decompress: false }
+      catch error
+        return unavailable(null) if signal.aborted
+        undelivered = error?.code in ['ENOENT', 'ECONNREFUSED']
+        warn "rip-sites: API worker #{worker.socket} failed #{request.method} #{url.pathname}: #{error?.message or error}" unless undelivered
+      finally
+        release()
+      if undelivered
+        return unavailable("no API worker accepted it within #{HOLD_MS}ms") if Date.now() >= held
+        sleep! RETRY_MS
+        continue
+      return gatewayText(502, 'bad gateway') unless response?
+      if response.status is 503 and (response.headers.has('rip-worker-busy') or response.headers.has('rip-worker-draining'))
+        response.body?.cancel()
+        busyUntil ?= Date.now() + BUSY_MS
+        return unavailable(null) if Date.now() >= busyUntil or signal.aborted
+        sleep! RETRY_MS
+        continue
+      out = Headers.new response.headers
+      out.delete name for name in [...hopByHop(response.headers), 'rip-mark']
+      target = out.get 'x-sendfile'
+      return sendfile(response, out, target) if target?
+      return Response.new response.body, { status: response.status, statusText: response.statusText, headers: out }
+
+  stop = ->
+    stopping = true
+    watcher?.close()
+    wake()
+    current = null
+    ended.abort()
+    Promise.allSettled! [...generations]
+    Promise.all! [...procs].map (proc) -> stopWorker proc
+
+  { start, forward, stop }
+
 export serveLocal = (argv) ->
   args = parseServeArgs argv
   project = resolveProject args.entry
   serve = try loadServeConfig!(project.root) catch error then abort(error?.message or String(error))
 
-  refuse "runs App-only projects; #{project.entry} is an API entry — run it behind the edge with `rip sites run`" if project.entry?
   refuse 'cannot route serve.rip sites (tenant hosts) — run it behind the edge' if serve?.site?
-  refuse 'has no API workers for serve.rip files.proxyFirst — run it behind the edge' if serve?.files?.proxy_first?.length
-  refuse 'has no API workers for serve.rip hub.bridge — run it behind the edge' if serve?.hub?
+  refuse "has no API entry for serve.rip files.proxyFirst in #{project.root}" if serve?.files?.proxy_first?.length and not project.entry?
+  refuse "has no API entry for serve.rip hub.bridge in #{project.root}" if serve?.hub? and not project.entry?
 
   if serve?.app?
     project.appRoot = serve.app.root
@@ -173,7 +454,20 @@ export serveLocal = (argv) ->
     project.appChanges = defaultAppChanges()
   name = serve?.name or basename(project.root).replace(/\.[^.]+$/, '')
   roots = servedRoots project, serve
-  refuse "has nothing to serve in #{project.root}: no app/, public/, or serve.rip files roots" unless project.appRoot? or roots.length
+  refuse "has nothing to serve in #{project.root}: no index.rip, app/, public/, or serve.rip files roots" unless project.entry? or project.appRoot? or roots.length
+
+  # What Janus sends to the workers: with no file policy, every request;
+  # with one, the proxyFirst prefixes (`/api` by default) and the Hub
+  # bridge path.
+  filePolicy = serve?.files? or roots.length > 0
+  proxyFirst = []
+  if project.entry?
+    files = try
+      ensureProxyFirst { proxy_first: serve?.files?.proxy_first ?? ['/api'] }, serve?.hub?.bridge ?? '/hub'
+    catch error
+      abort error?.message or String(error)
+    proxyFirst = files.proxy_first
+  proxied = (path) -> proxyFirst.some (prefix) -> prefix is '/' or path is prefix or path.startsWith("#{prefix}/")
 
   # The shell the edge registers: serve.rip's, else an authored
   # index.html, else the generated one — which exists only with an App.
@@ -213,13 +507,15 @@ export serveLocal = (argv) ->
     return Response.new(generatedShell, headers: { 'Content-Type': 'text/html; charset=utf-8', ...NO_CACHE }) if generatedShell?
     null
 
+  api = null
   respond = (request, server) ->
     url = URL.new request.url
-    if url.pathname is '/hub'
-      return if server.upgrade(request)
-      return Response.new('the Hub takes WebSocket connections only', status: 400)
+    return if url.pathname is '/hub' and server.upgrade(request)
+    return api.forward(request, url, server) if api? and not filePolicy
     path = requestPath url
     return Response.new('Bad Request', status: 400) unless path?
+    return api.forward(request, url, server) if api? and proxied(path)
+    return Response.new('the Hub takes WebSocket connections only', status: 400) if url.pathname is '/hub'
     return Response.new('Not Found', status: 404) unless request.method in ['GET', 'HEAD']
     return Response.new('Not Found', status: 404) if hiddenPath(path)
     answer = distFile path
@@ -229,22 +525,58 @@ export serveLocal = (argv) ->
     answer = shell() if acceptsHtml(request.headers.get('accept'))
     answer ?? Response.new('Not Found', status: 404)
 
+  # The Hub here carries the App's reload feed and nothing else: the feed's
+  # one subscription is acknowledged, and any other frame — Hub bridge
+  # traffic the edge would POST to a worker — closes the socket, named.
   hub =
     message: (socket, data) ->
-      frame = try JSON.parse(String(data)) catch then null
-      return unless frame? and typeof frame is 'object' and Array.isArray(frame['+']) and frame['+'].includes('/hub')
+      text = String data
+      frame = try JSON.parse(text) catch then null
+      feed = frame? and typeof frame is 'object' and Array.isArray(frame['+']) and frame['+'].length is 1 and frame['+'][0] is '/hub'
+      unless feed
+        warn "rip-sites: serve closed a Hub socket that sent #{text.slice(0, 80)}: serve's Hub carries only the App reload feed — run behind the edge for the Hub bridge"
+        socket.close 1008, 'rip sites serve: the Hub carries only the App reload feed'
+        return
       socket.subscribe 'hub'
       socket.send JSON.stringify({ '!': frame['?'] }) if frame['?']?
+
+  # The API starts before the port is claimed, so the first request finds
+  # its worker; the generated artifacts and the worker's socket live in a
+  # temporary directory that leaves with serve — on a signal from the
+  # moment it exists, startup included, and on a startup failure. A failure
+  # a signal caused leaves the exit to the signal.
+  artifactsDir = null
+  signalled = false
+  cleanup = ->
+    api?.stop!
+    rmSync artifactsDir, { recursive: true, force: true } if artifactsDir?
+  fail = (message) ->
+    return Promise.new(-> return) if signalled
+    cleanup!
+    abort message
+  if project.entry?
+    artifactsDir = mkdtempSync join(tmpdir(), 'rip-serve-')
+    api = startApi project, artifactsDir
+    for signal in ['SIGINT', 'SIGTERM', 'SIGHUP']
+      process.on signal, ->
+        return if signalled
+        signalled = true
+        cleanup!
+        exit 0
+    try
+      api.start!
+    catch error
+      fail! "rip-sites: serve cannot start the API: #{error?.message or error}"
 
   server = null
   if args.port?
     server = claim! args.port, respond, hub
-    abort "rip-sites: serve cannot listen on 127.0.0.1:#{args.port}: the port is in use" unless server?
+    fail! "rip-sites: serve cannot listen on 127.0.0.1:#{args.port}: the port is in use" unless server?
   else
     for port in [FIRST_PORT..LAST_PORT]
       server = claim! port, respond, hub
       break if server?
-    abort "rip-sites: serve found no free port from #{FIRST_PORT} to #{LAST_PORT}; pass --port" unless server?
+    fail! "rip-sites: serve found no free port from #{FIRST_PORT} to #{LAST_PORT}; pass --port" unless server?
 
   publish = (frame) -> server.publish 'hub', JSON.stringify(frame)
 
@@ -263,7 +595,6 @@ export serveLocal = (argv) ->
   # what is served, so the served publication is always the one the tabs
   # were last told of. A change outside the App root reloads even though
   # the App hash holds, and stays owed through a failed assembly.
-  timer = null
   running = false
   again = false
   outsideApp = false
@@ -302,23 +633,10 @@ export serveLocal = (argv) ->
         publish { assembly: { hash: documents.hash, failure: null } }
     running = false
 
-  # The manager's cadence: SETTLE_MS after the latest event, but never later
-  # than BURST_MS after the first, so a burst of saves reloads once or twice.
-  deadline = null
+  appTrigger = cadence -> rebuild()
   schedule = (outside) ->
     outsideApp = true if outside
-    now = Date.now()
-    if timer?
-      clearTimeout timer
-      delay = Math.max 0, Math.min(SETTLE_MS, deadline - now)
-    else
-      deadline = now + BURST_MS
-      delay = SETTLE_MS
-    timer = setTimeout (->
-      timer = null
-      deadline = null
-      rebuild!
-    ), delay
+    appTrigger()
 
   hidden = (filename) -> filename? and String(filename).replaceAll('\\', '/').split('/').some((segment) -> segment.startsWith('.'))
   if project.appRoot?
@@ -331,5 +649,6 @@ export serveLocal = (argv) ->
   schedule(false)
 
   console.log "rip-sites: serving #{name} at http://127.0.0.1:#{server.port}/"
+  console.log "  the API worker answers #{if filePolicy then proxyFirst.join(', ') else 'every path'}" if api?
   console.log '  behind the edge, with HTTPS and in-place updates: rip sites run (or rip sites add, then rip sites start)'
   Promise.new -> return
