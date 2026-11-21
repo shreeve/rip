@@ -109,13 +109,16 @@ makeSourceCell = (fetchFn, staleTime, onSettle = null) ->
   loadedAt = 0
   freshUntil = 0
 
+  # Every step after the generation is taken sits inside the try, so a
+  # load that fails before its fetch still settles: its error kept and
+  # `loading` and `inflight` cleared by the finally.
   load = (background = false, preload = false) ->
     controller?.abort()
     controller = if typeof AbortController isnt 'undefined' then AbortController.new() else null
     mine = ++generation
-    loading.value = true unless background
     wasLoaded = loaded
     try
+      loading.value = true unless background
       pending = fetchFn controller?.signal
       unless pending? and typeof pending.then is 'function'
         throw TypeError.new 'Rip App: source fetch must return a Promise'
@@ -157,9 +160,24 @@ makeSourceCell = (fetchFn, staleTime, onSettle = null) ->
   cell: Record<PropertyKey, any> = {}
   cell[SOURCE] = true
 
+  # A read only asks for the value: the load it needs starts once the
+  # reader's evaluation is over (a microtask later). Starting a load
+  # writes the cell's state (`loading`), and a read may sit inside a
+  # computed, which must derive without writing. A write or reset in
+  # between (a new generation) drops the request.
+  requested = false
+  request = ->
+    return if requested
+    requested = true
+    asked = generation
+    queueMicrotask ->
+      requested = false
+      return if asked isnt generation or loaded or inflight
+      start().catch(-> null)
+
   cell.read = ->
     value = data.value
-    start().catch(-> null) unless loaded or inflight
+    request() unless loaded or inflight
     value
 
   cell.peek = -> data.read()

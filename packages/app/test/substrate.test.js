@@ -5,7 +5,7 @@ import {
   source,
   unwrapStash,
 } from 'rip/app';
-import { __effect } from '../../../src/runtime/reactive.js';
+import { __computed, __effect, __state } from '../../../src/runtime/reactive.js';
 
 const deferred = () => {
   let resolve;
@@ -30,6 +30,8 @@ describe('singleton sources', () => {
 
     expect(calls).toBe(0);
     expect(stash.user).toBeNull();
+    expect(calls).toBe(0); // a read only asks: the load starts a microtask later
+    await Promise.resolve();
     expect(calls).toBe(1);
 
     pending.resolve({ name: 'Ada' });
@@ -181,6 +183,56 @@ describe('singleton sources', () => {
 });
 
 describe('keyed source families', () => {
+  test('a load that fails before its fetch settles with its error', async () => {
+    // An effect that throws when the cell starts loading fails the load
+    // at its first step, before the fetch: the error is kept, nothing is
+    // left loading or in flight, and a refetch loads.
+    let calls = 0;
+    let trip = true;
+    const stash = createStash({
+      item: source({ fetch: async key => { calls++; return { key }; } }),
+    });
+    const handle = stash.source('item', 'a');
+    const stop = __effect(() => { if (handle.loading && trip) throw new Error('watcher failed'); });
+
+    await handle.refetch().catch(() => {});
+    expect(calls).toBe(0);
+    expect(handle.loading).toBeFalse();
+    expect(handle.error?.message).toBe('watcher failed');
+    trip = false;
+    await handle.refetch();
+    expect(calls).toBe(1);
+    expect(handle.value).toEqual({ key: 'a' });
+    stop();
+  });
+
+  test('a key read inside a computed loads, though an effect watches the cell', async () => {
+    // A computed reads a family member by a key from state; an effect
+    // reads the member's loading and then the computed. Changing the key
+    // makes the computed read a new member: that read must start its load
+    // without writing state inside the computed's evaluation, so the load
+    // runs, finishes, and nothing is left loading.
+    const calls = [];
+    const stash = createStash({
+      item: source({ fetch: async key => { calls.push(key); return { key }; } }),
+    });
+    const key = __state('a');
+    const data = __computed(() => stash.item(key.value));
+    const seen = [];
+    const stop = __effect(() => seen.push([stash.source('item', key.value).loading, data.value?.key ?? null]));
+
+    await Bun.sleep(0);
+    expect(data.value).toEqual({ key: 'a' });
+    key.value = 'b';
+    await Bun.sleep(0);
+    expect(calls).toEqual(['a', 'b']);
+    expect(data.value).toEqual({ key: 'b' });
+    expect(stash.source('item', 'b').loading).toBeFalse();
+    expect(stash.source('item', 'b').error).toBeNull();
+    expect(seen.at(-1)).toEqual([false, 'b']);
+    stop();
+  });
+
   test('reuse one cell identity per key', async () => {
     const calls = [];
     const stash = createStash({
@@ -383,7 +435,9 @@ describe('stash source handles', () => {
     const spinner = [];
     const stopSpinner = __effect(() => spinner.push(handle.loading));
 
-    expect(handle.value).toBeNull(); // kicks the lazy load
+    expect(handle.value).toBeNull(); // asks for the lazy load
+    expect(handle.loading).toBeFalse();
+    await Promise.resolve(); // the load starts a microtask after the read
     expect(handle.loading).toBeTrue();
     await Bun.sleep(0);
     expect(handle.value.n).toBe(1);
