@@ -6,5 +6,8 @@ get '/slow' ->
   { complete: true }
 get '/crash' -> process.exit 7
 get '/hang' -> Promise.new (->)
+get '/patient' ->
+  sleep! 13000
+  { patient: true }
 
 start!
