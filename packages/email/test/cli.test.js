@@ -105,7 +105,7 @@ test('dev refuses a host outside the families that resolve here, before touching
   const r = run('dev', dir, '--host', 'foo');
   expect(r.status).toBe(1);
   expect(r.stderr).toContain('nothing resolves foo to this machine');
-  expect(r.stderr).toContain('foo.local, foo.via.rip, or foo.localhost');
+  expect(r.stderr).toContain('use foo.localhost or foo.local');
   expect(r.stdout).not.toContain('Rip Email');
 });
 

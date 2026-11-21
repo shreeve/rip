@@ -2,17 +2,11 @@
 # (`janus autostart` installs it under launchd or systemd; `janus start`,
 # `stop`, `restart`, and `status` manage it), its reach (`janus mode`),
 # its local names (*.local, *.localhost), and trust in its CA (`janus
-# trust`, http://janus.local/trust). Rip brings one thing: the site file
-# for its own names beside this module, kept in Janus's sites directory,
-# which the service Caddyfile imports. Apps register over the control
-# socket Janus names.
+# trust`, http://janus.local/trust). Apps register over the control
+# socket Janus names, claiming names in Janus's families.
 #
-# JANUS_CONTROL names an edge Rip does not configure: apps register there
-# and nothing here writes a file or reloads anything. Tests and custom
-# edges use it.
-
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+# JANUS_CONTROL names an edge Rip does not check: apps register there as
+# found. Tests and custom edges use it.
 
 type JanusStatus =
   running?: boolean
@@ -100,10 +94,6 @@ export dashboardUrl = (edge: Partial<Omit<EdgeState, 'state'>> & { state?: strin
     if mdns?.enabled is true then validDashboardUrl(mdns.dashboard_url) else null
   catch then null
 
-# Rip's site file: via.rip and *.via.rip, on Janus's edge as a drop-in.
-export SITE = join(import.meta.dir, 'rip.caddy')
-export SITE_NAME = 'rip.caddy'
-
 # rip needs a Janus that owns exposure: `janus status --json` carries
 # `scope` and `bind` from 1.13.0 on. An older Janus is refused; nothing
 # falls back to a wildcard bind.
@@ -117,47 +107,11 @@ export requireExposureJanus = (janus: JanusStatus | null, report: Report = abort
 # to ask: nothing is rendered then, and loopback routing claims the least.
 export edgeScope = (janus: JanusStatus | null = janusStatus()): string -> janus?.scope or 'localhost'
 
-lastLine = (result) ->
-  lines = (result.stderr.toString() + result.stdout.toString()).trim().split('\n').filter (line) -> line and not line.startsWith('{')
-  (lines.at(-1) or '').replace /^Error: /, ''
-
-writeSite = (target, content) ->
-  temporary = "#{target}.tmp-#{process.pid}"
-  try
-    writeFileSync temporary, content
-    renameSync temporary, target
-  finally
-    unlinkSync temporary if existsSync temporary
-
-# Keep rip's site file in Janus's sites directory, as shipped, and reload
-# a running edge when it changed. `janus` is Janus's status; `report(message,
-# status)` receives a failure. Returns the status.
-export ensureEdgeSite = (janus: JanusStatus, report: Report = abort): JanusStatus | null ->
-  desired = readFileSync SITE, 'utf8'
-  target = join janus.sites, SITE_NAME
-  current = try readFileSync(target, 'utf8') catch then null
-  return janus if current is desired
-  mkdirSync janus.sites, { recursive: true }
-  writeSite target, desired
-  if janus.running
-    try
-      reload = Bun.spawnSync [janusBinary(), 'reload'], { stdout: 'pipe', stderr: 'pipe' }
-      throw Error.new(lastLine(reload)) unless reload.exitCode is 0
-    catch error
-      # Restore the pre-reload file so a later attempt retries the change.
-      # Preserve an operator edit made while reload was running.
-      if (try readFileSync(target, 'utf8') catch then null) is desired
-        if current? then writeSite(target, current) else unlinkSync(target)
-      return report("janus reload failed: #{error?.message or error}", 503)
-  janus
-
-# The service edge, with rip's site file in place. An external edge
-# (JANUS_CONTROL) is used as found.
+# The service edge apps register with: a Janus that owns exposure. An
+# external edge (JANUS_CONTROL) is used as found.
 export configureEdge = (report: Report = abort): JanusStatus | null ->
   return null if externalEdge()
-  janus = requireExposureJanus janusStatus(), report
-  return null unless janus?
-  ensureEdgeSite janus, report
+  requireExposureJanus janusStatus(), report
 
 # Snapshot readers share the same short-lived service facts. No disk state
 # is cached: this only avoids spawning Janus once for every app in a list.

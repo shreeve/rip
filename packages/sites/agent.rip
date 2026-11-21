@@ -13,16 +13,16 @@ throw Error.new('rip/sites/agent is private process machinery') unless import.me
 paths = agentPaths 'rip-agent'
 secureDirectory paths.appLogs, 'rip-agent'
 
-# Dual-claim so localhost (via.rip) and lan (.local) stay reachable without remapping.
-defaultAppHosts = (name) -> ["#{name}.via.rip", "#{name}.local"]
+# Dual-claim so this machine (.localhost) and the LAN (.local) stay reachable without remapping.
+defaultAppHosts = (name) -> ["#{name}.localhost", "#{name}.local"]
 
-# For every *.via.rip host, ensure the matching *.local twin is present.
+# For every *.localhost host, ensure the matching *.local twin is present.
 ensureLanHosts = (hosts) ->
   out = [...hosts]
   seen = Set.new out
   for host in hosts
-    continue unless host.endsWith '.via.rip'
-    twin = "#{host.slice(0, -'.via.rip'.length)}.local"
+    continue unless host.endsWith '.localhost'
+    twin = "#{host.slice(0, -'.localhost'.length)}.local"
     continue if seen.has twin
     fail "invalid LAN twin host #{JSON.stringify(twin)}" unless validHost twin
     out.push twin
@@ -112,9 +112,9 @@ edgeHealth = ->
     response.json!
   catch then null
 
-# Keep rip's site file in Janus's sites directory. An external edge
-# (JANUS_CONTROL) is left alone.
-ensureEdgeSite = ->
+# Require a Janus that owns exposure. An external edge (JANUS_CONTROL) is
+# used as found.
+requireEdge = ->
   return if externalEdge()
   configureEdge fail
   state.edge.lastError = null
@@ -272,9 +272,9 @@ startApp = (app, automatic = false) ->
   pending = starting.get app.id
   return pending if pending?
   task = do ->
-    # The edge is Janus's process: make sure rip's site file is there,
-    # then that the edge is there to register with.
-    ensureEdgeSite!
+    # The edge is Janus's process: make sure it is one rip can use, then
+    # that it is there to register with.
+    requireEdge!
     health = edgeHealth!
     unless health?
       fail JANUS_MISSING, 503 unless externalEdge() or janusBinary()?
@@ -554,10 +554,9 @@ process.on 'SIGTERM', shutdown
 acquire!
 try
   state = loadCatalog 'rip-agent'
-  # A boot is the moment to make sure rip's site file is in Janus's sites
-  # directory.
+  # A boot is the moment to check the edge rip registers with.
   try
-    ensureEdgeSite!
+    requireEdge!
   catch error
     state.edge.lastError = error?.message or String(error)
   # One missed probe is not an outage (see PROBE_TIMEOUT) — recovery

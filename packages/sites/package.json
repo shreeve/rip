@@ -46,7 +46,6 @@
     "agent.rip",
     "edge.rip",
     "sites.rip",
-    "rip.caddy",
     "serve-hosts.rip",
     "loopback.rip",
     "monitor.rip",
