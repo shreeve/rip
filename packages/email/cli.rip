@@ -26,7 +26,7 @@ VERSION = JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf-8'
 USAGE = '''
 usage: rip-email <verb> [args]
 
-  rip-email dev [dir] [--host H] [--open]         serve a live preview at https://email.local/ and https://email.via.rip/
+  rip-email dev [dir] [--host H] [--open]         serve a live preview at https://email.localhost/ and https://email.local/
   rip-email export [dir] [--out DIR] [--text]     write <out>/<file>.html per template
 
   dir defaults to ./emails, or to the current directory when it is
@@ -261,7 +261,7 @@ dev = (root, hosts, open) ->
 
   if open
     # The family the edge resolves here, as the catalog chooses it.
-    family = if edgeScope() is 'lan' then '.local' else '.via.rip'
+    family = if edgeScope() is 'lan' then '.local' else '.localhost'
     address = "https://#{hosts.find((host) -> host.endsWith family) or hosts[0]}/"
     try
       execSync (if process.platform is 'darwin' then "open '#{address}'" else "xdg-open '#{address}'")
@@ -316,22 +316,22 @@ defaultRoot = ->
   return process.cwd() if basename(process.cwd()) is 'emails'
   die "rip-email: no emails directory here — pass one: rip-email #{verb} <dir>"
 
-# Only three families of name reach this machine: <name>.local over
-# Bonjour, <name>.via.rip through public DNS, <name>.localhost in the
-# browser's own resolver. The edge would claim any other name and serve
+# Only two families of name reach this machine: <name>.localhost, which
+# the system and the browser resolve to loopback themselves, and
+# <name>.local over Bonjour. The edge would claim any other name and serve
 # it to no one.
-FAMILIES = ['.local', '.via.rip', '.localhost']
+FAMILIES = ['.localhost', '.local']
 previewHost = (host) ->
   ok = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(host) and FAMILIES.some (family) -> host.endsWith family
   return host if ok
   label = host.split('.')[0] or 'mail'
-  die "rip-email: nothing resolves #{host} to this machine — use #{label}.local, #{label}.via.rip, or #{label}.localhost"
+  die "rip-email: nothing resolves #{host} to this machine — use #{label}.localhost or #{label}.local"
 
 rootArg = -> if positional[0] then templateRoot(positional[0]) else defaultRoot()
 
 switch verb
   when 'dev'
-    hosts = if flag('--host')? then [previewHost flag('--host')] else ['email.local', 'email.via.rip']
+    hosts = if flag('--host')? then [previewHost flag('--host')] else ['email.localhost', 'email.local']
     dev rootArg(), hosts, has('--open')
   when 'export'
     exportAll! rootArg(), resolve(flag('--out') ?? 'out'), has('--text')

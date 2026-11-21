@@ -77,7 +77,7 @@ export previewProps = { name: 'Ada' }
 ```
 
 ```bash
-rip email dev            # live preview at https://email.local/ and https://email.via.rip/ under the edge
+rip email dev            # live preview at https://email.localhost/ and https://email.local/ under the edge
 rip email export --text  # <out>/<file>.html and .txt per template
 ```
 

@@ -1,53 +1,22 @@
 import { test, eq, ok } from 'rip/testing'
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync, mkdtempSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { SITE, SITE_NAME, ensureEdgeSite, requireExposureJanus } from '../../edge.rip'
+import { requireExposureJanus } from '../../edge.rip'
 import { defaultCatalog } from '../../catalog.rip'
 import { APP, cli, fixture, startJanus, stopAgent, waitFor } from './support.rip'
 
-# The catalog and the apps in it: the site file rip brings to Janus's
-# edge, one project's whole life through `rip sites`, fan-out over the
-# catalog, offline snapshots, and the agent's own status. The control
-# plane's ownership, outages, and the CLI paths that never boot it live
-# in test/appliance-control.
+# The catalog and the apps in it: the edge rip registers with, one
+# project's whole life through `rip sites`, fan-out over the catalog,
+# offline snapshots, and the agent's own status. The control plane's
+# ownership, outages, and the CLI paths that never boot it live in
+# test/appliance-control.
 
-# The edge is Janus's: its process, its reach, its *.local names, and
-# trust in its CA. Rip brings one site file for its own names, via.rip
-# and *.via.rip, kept in Janus's sites directory as shipped: exact-host
-# certs from the local CA on demand (dogfooding — we run exactly what
-# users run; no packaged public certificate, no renewal treadmill), the
-# janus handler, and the janus access log format. Nothing in it is
-# global, nothing is rendered, and nothing varies with the mode.
-test! "rip's site file joins Janus's edge as shipped", ->
-  site = readFileSync SITE, 'utf8'
-  eq basename(SITE), SITE_NAME
-  ok site.includes('via.rip, *.via.rip {'), 'the via.rip family, one block'
-  ok site.includes 'issuer internal'
-  ok site.includes 'on_demand'
-  ok site.includes 'format janus'
-  ok not site.includes('{$'), 'no placeholders: nothing to render'
-  for global in ['admin', 'default_bind', 'on_demand_tls', 'control', 'mdns', 'listen', 'import', 'skip_install_trust']
-    ok not RegExp.new("^\\s*#{global}\\b", 'm').test(site), "no #{global}: site blocks only, the edge's options are Janus's"
-  directives = site.split('\n').filter((line) -> not line.startsWith('#')).join '\n'
-  ok not directives.includes('.local'), "the LAN names are Janus's own site"
-  ok not directives.includes('trust'), 'trust is served by Janus'
-
-  # The file lands in the sites directory Janus reports, as shipped, and
-  # a second pass with nothing changed writes nothing.
-  sites = mkdtempSync join(tmpdir(), 'rip-sites-edge-')
-  try
-    janus = { sites: join(sites, 'sites'), running: false }
-    reports = []
-    eq ensureEdgeSite(janus, (message) -> reports.push message; null), janus
-    eq readFileSync(join(janus.sites, SITE_NAME), 'utf8'), site
-    eq reports.length, 0
-    written = statSync(join(janus.sites, SITE_NAME)).mtimeMs
-    ensureEdgeSite janus, (message) -> reports.push message; null
-    eq statSync(join(janus.sites, SITE_NAME)).mtimeMs, written
-  finally
-    rmSync sites, { recursive: true, force: true }
-
+# The edge is Janus's: its process, its reach, its *.localhost and *.local
+# names, and trust in its CA. Rip brings no file to it; apps register over
+# its control socket, claiming <name>.localhost for this machine and
+# <name>.local for the LAN.
+test! "rip registers with Janus's edge and brings nothing to it", ->
   packageRoot = join(import.meta.dir, '..', '..')
   manifest = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'))
   for file in manifest.files
@@ -77,8 +46,10 @@ test! "rip's site file joins Janus's edge as shipped", ->
   eq reports.length, 0
   ok agent.includes 'ensureLanHosts'
   ok agent.includes 'defaultAppHosts'
+  ok agent.includes '"#{name}.localhost", "#{name}.local"'
+  ok not existsSync(join(packageRoot, 'rip.caddy')), 'rip brings no site file to the edge'
   helloServe = readFileSync join(import.meta.dir, '..', '..', 'demos', 'hello', 'serve.rip'), 'utf8'
-  ok helloServe.includes 'hello.via.rip'
+  ok helloServe.includes 'hello.localhost'
   ok helloServe.includes 'hello.local'
 
 test! 'rip sites remembers, supervises, observes, and removes one project', ->
@@ -107,12 +78,12 @@ test! 'rip sites remembers, supervises, observes, and removes one project', ->
     eq idle.edge.control, janusSocket
     ok not existsSync(join(site.runtime, 'agent.json')), 'idle status must not spawn the control plane'
 
-    added = cli! APP, ['add', project, '--name', 'tray', '--host', 'fixture.via.rip', '--json'], env
+    added = cli! APP, ['add', project, '--name', 'tray', '--host', 'fixture.localhost', '--json'], env
     eq added.code, 0
     app = JSON.parse added.out
     eq app.name, 'tray'
     eq app.state, 'stopped'
-    eq app.url, 'https://fixture.via.rip/'
+    eq app.url, 'https://fixture.localhost/'
     ok existsSync(join(site.state, 'sites.json')), 'add writes sites.json'
     ok existsSync(join(site.runtime, 'agent.json')), 'catalog mutations use the single writer'
     stopAgent! site.runtime
@@ -261,7 +232,7 @@ test! 'start all reports a failed app in place and still starts the rest', ->
     eq (cli!(APP, ['add', broken, '--name', 'broken'], env)).code, 0
     eq (cli!(APP, ['add', healthy, '--name', 'healthy'], env)).code, 0
     # Registered clean; the manager rejects the declaration when it boots.
-    writeFileSync join(broken, 'serve.rip'), "export default { hosts: ['broken.via.rip'], extra: true }\n"
+    writeFileSync join(broken, 'serve.rip'), "export default { hosts: ['broken.localhost'], extra: true }\n"
 
     started = cli! APP, ['start', 'all', '--json'], env
     eq started.code, 1
@@ -296,7 +267,7 @@ test! 'offline snapshots derive hosts from serve.rip without persisting them', -
   hostsProject = join site.root, 'probe'
   mkdirSync join(hostsProject, 'app'), { recursive: true }
   writeFileSync join(hostsProject, 'app', 'index.rip'), "export default -> 'ok'\n"
-  writeFileSync join(hostsProject, 'serve.rip'), "export default\n  name: 'probe'\n  hosts: ['probe.via.rip', 'probe.local']\n"
+  writeFileSync join(hostsProject, 'serve.rip'), "export default\n  name: 'probe'\n  hosts: ['probe.localhost', 'probe.local']\n"
   siteProject = join site.root, 'tenants'
   mkdirSync join(siteProject, 'app'), { recursive: true }
   mkdirSync join(siteProject, 'sites'), { recursive: true }
@@ -304,8 +275,8 @@ test! 'offline snapshots derive hosts from serve.rip without persisting them', -
   writeFileSync join(siteProject, 'app', 'index.html'), '<!doctype html><title>t</title>\n'
   writeFileSync join(siteProject, 'serve.rip'), "export default\n  sites:\n    host: '{site}.probe.dev'\n    dir: 'sites'\n    aliases: { 'beta.probe.dev': 'ola' }\n  files:\n    roots: ['app']\n    shell: 'app/index.html'\n"
   added = JSON.parse (cli!(APP, ['add', hostsProject, '--name', 'probe', '--json'], env)).out
-  eq added.hosts, ['probe.via.rip', 'probe.local']
-  eq added.url, 'https://probe.via.rip/'
+  eq added.hosts, ['probe.localhost', 'probe.local']
+  eq added.url, 'https://probe.localhost/'
   tenants = JSON.parse (cli!(APP, ['add', siteProject, '--name', 'tenants', '--json'], env)).out
   eq tenants.hosts, ['beta.probe.dev']
   eq tenants.sitePattern, '{site}.probe.dev'

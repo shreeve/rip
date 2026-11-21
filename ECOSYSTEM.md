@@ -209,10 +209,9 @@ them, and exits when no App needs supervision.
 The shared Janus edge is Janus's own process: `janus autostart` runs it as
 a service under launchd or systemd, and `janus start`, `stop`, `restart`,
 and `status` manage it; its reach, its local names, and trust in its CA
-are Janus's too. Rip's names join it as one drop-in site file the control
-process keeps in Janus's sites directory, and apps register over the
-control socket. An edge named by `JANUS_CONTROL` is used as found and
-never configured.
+are Janus's too. Apps register over its control socket, claiming names in
+Janus's own `*.localhost` and `*.local` families. An edge named by
+`JANUS_CONTROL` is used as found.
 
 ### Per-project Manager
 

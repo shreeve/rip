@@ -8,7 +8,7 @@ import { managerRuntime } from '../../control.rip'
 test! 'direct and supervised snapshots share readiness, fields, and host choice', ->
   root = mkdtempSync join(tmpdir(), 'rip-status-')
   runtime = managerRuntime root
-  manager = { ready: false, stopping: false, hosts: ['test.via.rip', 'test.local'] }
+  manager = { ready: false, stopping: false, hosts: ['test.localhost', 'test.local'] }
   server = Bun.serve { unix: runtime.socket, fetch: -> Response.json(manager) }
   app = { id: '1234567890abcdef', name: 'test', root, hosts: ['pinned.local'], desired: 'running', options: { workers: 2 }, addedAt: '2026-09-10' }
   edge = { scope: 'lan', sites: null }

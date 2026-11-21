@@ -151,7 +151,7 @@ on:
 - Rip Sites needs `janus` on PATH for its integration lane and for
   local HTTPS: `janus autostart`, then `rip sites add
   packages/sites/demos/hello && rip sites start hello` serves
-  https://hello.via.rip/. Registered sites run with a watcher and
+  https://hello.localhost/. Registered sites run with a watcher and
   republish `dist/bundle.json` on every source change, so a served
   demo already runs whatever the working tree holds.
 - The barcodes scorecard and the race need checkouts under the
@@ -191,7 +191,7 @@ Verified at main `9868a69f`, 2026-09-18:
   baselines are regenerated from a main checkout, not committed. The
   package has 46 tests and zero runtime dependencies (the two dev
   dependencies serve only the race). The scan demo at
-  `packages/sites/demos/scan` (scan.via.rip) is its browser example
+  `packages/sites/demos/scan` (scan.localhost) is its browser example
   and reads live from the camera.
 - **Upstream.** Two pull requests from this work are open on
   paulmillr/qr: #39 (the decoder and encoder performance units, result

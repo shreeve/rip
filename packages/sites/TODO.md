@@ -4,8 +4,8 @@ Open work only. Delete a line when it lands or moves into docs/tests.
 
 ## Edge
 
-- [ ] **wan routing:** ACME / real DNS for `janus mode wan`; `rip.caddy`
-      and Janus's local sites route the local-CA families only.
+- [ ] **wan routing:** ACME / real DNS for `janus mode wan`; Janus's
+      local sites route the local-CA families only.
 - [ ] Behavioral appliance pins for `.local` host registration (the
       pins are static strings).
 - [ ] Pin `GET /bundle.json` + `Accept-Encoding: br` → Manager

@@ -7,7 +7,7 @@ export default defineConfig({
   testDir: './test/.build/test',
   globalSetup: './test/.build/test/support/setup.js',
   use: {
-    baseURL: 'https://cart.via.rip',
+    baseURL: 'https://cart.localhost',
     ignoreHTTPSErrors: true,
   },
 })

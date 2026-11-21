@@ -20,7 +20,7 @@ The system-wide ownership, reload, migration, and cache contract is
 ```text
 ┌─────────────────────────────────────────────────────────────┐
 │  rip sites             one CLI: apps · edge · agent         │
-│                    HTTPS *.via.rip → files / Hub / /api     │
+│                  HTTPS *.localhost → files / Hub / /api     │
 └────────────────────────────┬────────────────────────────────┘
                              │ Janus control socket
 ┌────────────────────────────▼────────────────────────────────┐
@@ -72,10 +72,9 @@ crash. `janus status` shows it; `janus stop`, `start`, and `restart` are
 its verbs, and `janus autostart off` removes the service. Rip never starts
 or stops that process.
 
-Rip's names join that edge as one drop-in site file, `rip.caddy` beside
-this README, which `rip sites` keeps in Janus's sites directory (`janus
-status` names it) and reloads into a running edge, so the first `rip sites
-start <app>` on a host leaves the edge serving Rip's sites:
+Rip brings nothing to that edge: apps register over its control socket,
+claiming names in Janus's own families, so the first `rip sites start
+<app>` on a host leaves the edge serving it:
 
 ```bash
 rip sites status
@@ -94,10 +93,10 @@ machine:
 
 | Family | Names | Resolves | Served by | For |
 | --- | --- | --- | --- | --- |
-| via.rip | `https://{name}.via.rip/` (apps) | `127.0.0.1`, publicly, forever | `rip.caddy` | this machine's browser |
+| .localhost | `https://{name}.localhost/` (apps) | loopback, by the system and the browser themselves | Janus's own `*.localhost` site | this machine's browser |
 | .local | `https://janus.local/` (status), `https://{name}.local/` (apps) | Bonjour, from this machine | Janus's own `*.local` site | phones and peers on the LAN |
 
-Every app claims both: catalog adds dual-claim each `*.via.rip` host with
+Every app claims both: catalog adds dual-claim each `*.localhost` host with
 its `*.local` twin, and the demos declare both in `serve.rip`.
 
 Janus owns the read-only browser dashboard. It shows live registrations,
@@ -143,16 +142,16 @@ rip sites start hello
 
 An edge Rip does not configure — a test's, or one with a hand-written
 Caddyfile — is named by `JANUS_CONTROL` (its control socket or URL). Apps
-register there, and Rip writes no site file and reloads nothing.
+register there, and Rip checks nothing about it.
 
 ### 2. Remember and start a demo site
 
 ```bash
-rip sites add packages/sites/demos/hello --name hello --host hello.via.rip
+rip sites add packages/sites/demos/hello --name hello --host hello.localhost
 rip sites start hello
-rip sites open hello          # https://hello.via.rip/
+rip sites open hello          # https://hello.localhost/
 rip sites list
-# ● hello  running  https://hello.via.rip/
+# ● hello  running  https://hello.localhost/
 ```
 
 Packaged demos (hello → pulse → cart): [`demos/`](demos/README.md).
@@ -261,8 +260,8 @@ installed and what is running, and says when they differ; so does
 
 ### Custom domains
 
-The app name families come for free: `via.rip` and `*.via.rip`
-from `rip.caddy`, and `*.local` from Janus's own site.
+The app name families come for free: `*.localhost` and `*.local`, both
+Janus's own sites.
 Certificates for those are minted on demand by the local CA; `janus trust`
 makes them verify.
 
@@ -423,7 +422,7 @@ the edge, and serve names it in the terminal.
 **Happy path (catalog)**
 
 ```bash
-rip sites add packages/sites/demos/pulse --name pulse --host pulse.via.rip
+rip sites add packages/sites/demos/pulse --name pulse --host pulse.localhost
 rip sites start pulse
 rip sites open pulse
 # …develop…
@@ -436,7 +435,7 @@ rip sites stop pulse
 rip sites start hello
 rip sites start pulse
 rip sites start cart
-# https://hello.via.rip/  https://pulse.via.rip/  https://cart.via.rip/
+# https://hello.localhost/  https://pulse.localhost/  https://cart.localhost/
 rip sites stop all
 ```
 
@@ -1475,20 +1474,15 @@ The edge process is Janus's. `janus autostart` installs it under launchd
 (macOS) or systemd (Linux), running now, at every login, and again after a
 crash; `janus status` reports it, and `janus start`, `stop`, and `restart`
 manage it. `rip sites` runs `janus` from `PATH` for what it needs of it —
-`status --json` for the service's paths and facts, `reload` after placing
-its site file — and nothing else, so an upgraded install is what the next
-`janus restart` runs.
+`status --json` for the service's paths and facts — and nothing else, so an
+upgraded install is what the next `janus restart` runs.
 
-Rip's names are one site file, `rip.caddy` beside this README: the via.rip
-family, site blocks only, nothing rendered. The control plane copies it
-into Janus's sites directory as shipped and reloads a running edge when
-it changed; that happens when the control plane boots and before an app
-starts, including foreground `run` and `publish`. A failed reload restores
-the previous file so the next attempt retries. The LAN family, `*.local`, is Janus's own site; the bind, the
+Rip brings no file to the edge. Both name families, `*.localhost` for this
+machine and `*.local` for the LAN, are Janus's own sites; the bind, the
 firewall, the local CA, and trust in it are Janus's; a mode change touches
 nothing of Rip's. Operator-owned domains go in one `*.caddy` file each in
-the same directory. `JANUS_CONTROL` names an edge Rip does not configure:
-apps register there and nothing is written or reloaded.
+the same directory. `JANUS_CONTROL` names an edge Rip does not check:
+apps register there as found.
 
 The edge binds where its scope says (`localhost`, `lan`, or `wan`) on
 standard HTTP and HTTPS, which an unprivileged user may do on macOS; on
@@ -1576,8 +1570,8 @@ rip sites logs hello --follow
 That reads the manager log
 (`~/Library/Application Support/Rip/apps/<id>.log`). Agent-managed sites use
 `--access-log=pretty` by default (or `serve.rip` `access.log` / `access.format`
-when set). A site block needs `log { format janus }` for this — `rip.caddy`
-and Janus's own local sites carry it; without that encoder Janus publishes
+when set). A site block needs `log { format janus }` for this — Janus's own local
+sites carry it; without that encoder Janus publishes
 nothing and the log stays URL-only.
 
 Caddy/Janus process diagnostics (TLS, Hub, dial failures) go to Janus's

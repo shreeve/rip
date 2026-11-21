@@ -116,7 +116,7 @@ effectiveHosts = (app, manager, readDecl) ->
   { hosts, site, error: null }
 
 hostCovered = (host, dir) ->
-  return true if host is 'via.rip' or host is 'rip.local' or host.endsWith('.via.rip') or host.endsWith('.local')
+  return true if host is 'localhost' or host.endsWith('.localhost') or host.endsWith('.local')
   return false unless dir?
   names = try
     readdirSync(dir).filter (name) -> name.endsWith '.caddy'
@@ -146,7 +146,7 @@ export snapshotCatalogApp = (app, label = 'rip-sites', options: {
     catch then null
   { hosts, site, error } = effectiveHosts! app, manager, options.readDecl or readServeDecl
   edge = options.edge or snapshotEnvironment()
-  suffix = if edge.scope is 'lan' then '.local' else '.via.rip'
+  suffix = if edge.scope is 'lan' then '.local' else '.localhost'
   host = hosts.find((h) -> h.endsWith(suffix)) or hosts[0]
   uncovered = (h for h in hosts when not hostCovered(h, edge.sites))
   {

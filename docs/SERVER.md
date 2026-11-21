@@ -315,8 +315,7 @@ mode says (`janus mode`), with HTTP/1.1 and HTTP/2. Caddy owns TLS and
 dispatches requests into Janus. Janus owns dynamic App registration, root
 search, API proxying, Hub transport, access streams, weak file ETags, the
 `*.local` and `*.localhost` names, the local CA, and trust in it. Rip
-contributes one site file for its via.rip names and registers apps over
-Janus's private control socket; everything Rip runs listens on Unix
+registers apps over Janus's private control socket; everything Rip runs listens on Unix
 sockets.
 
 ## Open leftovers
