@@ -222,7 +222,7 @@ pathTemplate = (value, at) ->
     invalidServe "#{at} must use {site} as a complete path segment" unless segments.includes '{site}'
   { value, dynamic: count is 1 }
 
-defaultAppChanges = ->
+export defaultAppChanges = ->
   update: ['**/*.rip']
   css: ['**/*.css']
   reload: ['**/*']
@@ -700,7 +700,7 @@ sourceHashes = (paths) ->
 # identity: each must decompress to its sibling, and a set that does not
 # (mid-regeneration) is torn and refused, never served to half the clients.
 SHIP_PLAIN = ['rip.min.js', 'tailwind.min.js', 'watch.js']
-SHIP_FILES = ['rip.min.js', 'rip.min.js.br', 'tailwind.min.js', 'tailwind.min.js.br', 'watch.js']
+export SHIP_FILES = ['rip.min.js', 'rip.min.js.br', 'tailwind.min.js', 'tailwind.min.js.br', 'watch.js']
 SHIP_ID = '/@rip'
 SHIP_SETTLE_MS = positiveEnv 'RIP_SHIP_SETTLE_MS', 2000
 
@@ -739,7 +739,7 @@ readShipSet = ->
 # sidecar moments after its plain file, and a boot, release, or
 # activation that lands in that gap should come up, not fail. A missing
 # file is an error at once; a set still torn past the budget is too.
-settleShipSet = ->
+export settleShipSet = ->
   deadline = Date.now() + SHIP_SETTLE_MS
   loop
     try
@@ -751,7 +751,7 @@ settleShipSet = ->
 # The watch reconciler's read: the published set is reused while the
 # plain files on disk still hash to it — an App edit never re-reads a
 # megabyte — and read whole only when the runtime moved.
-currentShipSet = (prior) ->
+export currentShipSet = (prior) ->
   return prior if prior?.files?.length and diskShipIdentity() is prior.check
   readShipSet()
 
@@ -806,7 +806,7 @@ appDocuments = (project, graph, ship) ->
 
 # Reads the ship set itself — waiting out a torn one — unless the caller
 # already holds the set to publish with.
-buildAppDocuments = (project, ship = null) ->
+export buildAppDocuments = (project, ship = null) ->
   graph = appModules project.appRoot, project.appChanges
   appDocuments! project, graph, (ship ?? settleShipSet!)
 
@@ -863,6 +863,20 @@ writeAppDocuments = (project) ->
   commitAppDocuments project, documents
   documents
 
+# The shell a project gets when it authors none.
+export appShell = (name, watch) ->
+  """
+  <!doctype html>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>#{escapeHtml(name)}</title>
+  <div id="app"></div>
+  <script type="module">
+    import { bootApp } from '/@rip/rip.min.js'
+    bootApp({ url: '/bundle.json', watch: #{if watch then 'true' else 'false'} })
+  </script>
+  """
+
 publishApp = (project, name, watch, documents = undefined, declaredShell = null) ->
   return null unless project.appRoot?
   dist = join project.root, 'dist'
@@ -878,17 +892,7 @@ publishApp = (project, name, watch, documents = undefined, declaredShell = null)
   shell = declaredShell or authoredShell
   unless declaredShell? or existsSync authoredShell
     shell = join dist, 'index.html'
-    writeAtomic shell, """
-    <!doctype html>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>#{escapeHtml(name)}</title>
-    <div id="app"></div>
-    <script type="module">
-      import { bootApp } from '/@rip/rip.min.js'
-      bootApp({ url: '/bundle.json', watch: #{if watch then 'true' else 'false'} })
-    </script>
-    """
+    writeAtomic shell, appShell(name, watch)
 
   roots = [
     { path: dist, cache: 'revalidate' }
