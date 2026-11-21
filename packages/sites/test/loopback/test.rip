@@ -303,7 +303,7 @@ workerPids = (tmp) ->
   found = Bun.spawnSync ['pgrep', '-f', "#{tmp}/rip-serve-.*/worker.js"]
   found.stdout.toString().trim().split('\n').filter(Boolean).map(Number)
 
-test! 'the API runs in one worker on the paths Janus proxies, and a change swaps it', ->
+test! 'the API runs in the Manager pool on the paths Janus proxies, and a change swaps it', ->
   { dir, root } = project (root) -> writeFileSync join(root, 'index.rip'), API('one')
   tmp = scratchTmp()
   served = null
@@ -311,7 +311,7 @@ test! 'the API runs in one worker on the paths Janus proxies, and a change swaps
   try
     served = serve! root, ['--port', '0'], { TMPDIR: tmp }
     url = served.url
-    ok served.output().includes('the API worker answers /api, /hub'), served.output()
+    ok served.output().includes('the API workers answer /api, /hub'), served.output()
     hub = subscribe! url
 
     # The worker sees the Host and peer Janus would send, never a client's claim.
@@ -357,24 +357,25 @@ test! 'the API runs in one worker on the paths Janus proxies, and a change swaps
     writeFileSync join(root, 'index.rip'), API('two')
     waitFor! -> (json! "#{url}api/version").version is 'two'
     writeFileSync join(root, 'index.rip'), "get '/api/version' -> (\n"
-    waitFor! -> served.errors().includes('API candidate rejected; keeping the current worker')
+    waitFor! -> served.errors().includes('API candidate rejected; keeping the current workers')
     eq (json! "#{url}api/version").version, 'two'
     writeFileSync join(root, 'index.rip'), API('three')
     waitFor! -> (json! "#{url}api/version").version is 'three'
     writeFileSync join(root, 'index.rip'), API('four', "throw Error.new('boom')")
-    waitFor! -> served.errors().includes('API candidate failed to boot; keeping the current worker')
+    waitFor! -> served.errors().includes('API candidate failed to boot; keeping the current workers')
     eq (json! "#{url}api/version").version, 'three'
     eq hub.frames, []
-    eq workerPids(tmp).length, 1
+    eq workerPids(tmp).length, 2
 
-    # A worker that dies is replaced from the same build.
-    process.kill workerPids(tmp)[0], 'SIGKILL'
+    # Workers that die are replaced from the same build.
+    process.kill pid, 'SIGKILL' for pid in workerPids(tmp)
     eq (json! "#{url}api/version").version, 'three'
+    waitFor! -> workerPids(tmp).length is 2
 
     stop! served
     eq served.proc.exitCode, 0
     stderr = await served.err
-    ok stderr.includes('API candidate rejected; keeping the current worker'), stderr
+    ok stderr.includes('API candidate rejected; keeping the current workers'), stderr
     ok stderr.includes('API worker exited'), stderr
     ok stderr.includes("serve rejected the API's X-Sendfile"), stderr
     served = null
@@ -393,23 +394,24 @@ test! 'a request waits a bounded hold for a worker, and one whose client left ne
   tmp = scratchTmp()
   served = null
   try
-    served = serve! root, ['--port', '0'], { TMPDIR: tmp, RIP_SERVE_HOLD_MS: '3000' }
+    served = serve! root, ['--port', '0'], { TMPDIR: tmp, RIP_SERVE_HOLD_MS: '12500' }
     url = served.url
     eq (json! "#{url}api/version").version, 'one'
 
-    # The worker dies and cannot come back while its boot file is gone.
+    # The workers die and cannot come back while their boot file is gone.
     rmSync join(root, 'boot.txt')
-    process.kill workerPids(tmp)[0], 'SIGKILL'
+    process.kill pid, 'SIGKILL' for pid in workerPids(tmp)
     waitFor! -> served.errors().includes('replacement API worker failed')
     abandoned = [1..3].map ->
       fetch("#{url}api/count", { method: 'POST', signal: AbortSignal.timeout(200) }).catch -> null
     Promise.all! abandoned
+    # The hold outlasts Bun's default idle timeout, and still ends in a 503.
     started = Date.now()
     held = fetch! "#{url}api/version"
     eq held.status, 503
     eq held.headers.get('retry-after'), '1'
-    ok Date.now() - started >= 2900, "hold ended after #{Date.now() - started}ms"
-    ok served.errors().includes('serve answered 503 to GET /api/version: no API worker could take it within 3000ms'), served.errors()
+    ok Date.now() - started >= 12400, "hold ended after #{Date.now() - started}ms"
+    ok served.errors().includes('serve answered 503 to GET /api/version: no API worker could take it within 12500ms'), served.errors()
 
     writeFileSync join(root, 'boot.txt'), 'ready'
     waitFor!((-> (fetch! "#{url}api/version").status is 200), 10000)
@@ -425,7 +427,7 @@ test! 'serve takes its worker and temporary files with it on any signal, startup
   try
     for signal in ['SIGINT', 'SIGHUP']
       served = serve! root, ['--port', '0'], { TMPDIR: tmp }
-      eq workerPids(tmp).length, 1
+      eq workerPids(tmp).length, 2
       served.proc.kill signal
       eq (await served.proc.exited), 0
       waitFor! -> workerPids(tmp).length is 0
@@ -457,7 +459,7 @@ test! 'an API with no file policy answers every path, and the Hub carries only t
   try
     served = serve! realpathSync(root)
     url = served.url
-    ok served.output().includes('the API worker answers every path'), served.output()
+    ok served.output().includes('the API workers answer every path'), served.output()
     eq (json! "#{url}hello"), { message: 'hello' }
     eq (fetch! url, { headers: { accept: 'text/html' } }).status, 404
     hub = subscribe! url
