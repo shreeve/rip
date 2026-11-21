@@ -4207,6 +4207,9 @@ var IMPLICIT_CALL_STARTERS = new Set([
   "SUPER",
   "UNDEFINED",
   "NULL",
+  "IMPORT_META",
+  "NEW_TARGET",
+  "DYNAMIC_IMPORT",
   "BOOL",
   "UNARY",
   "NEW",
@@ -34155,7 +34158,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "1eefec9c7db2ff76";
+var compilerBuild = () => "d96f492b61a1ede0";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
