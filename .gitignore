@@ -26,3 +26,4 @@ notes.txt
 
 # Worktrees the desktop app makes for agents
 /.claude/worktrees/
+packages/emdb/demo.rip
