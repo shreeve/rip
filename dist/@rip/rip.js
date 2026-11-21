@@ -29605,10 +29605,10 @@ makeSourceCell = function(fetchFn, staleTime, onSettle = null) {
     controller?.abort();
     controller = typeof AbortController !== "undefined" ? new AbortController : null;
     let mine = ++generation;
-    if (!background)
-      loading.value = true;
     let wasLoaded = loaded;
     try {
+      if (!background)
+        loading.value = true;
       pending = fetchFn(controller?.signal);
       if (!(pending != null && typeof pending.then === "function")) {
         throw new TypeError("Rip App: source fetch must return a Promise");
@@ -29656,12 +29656,25 @@ makeSourceCell = function(fetchFn, staleTime, onSettle = null) {
   };
   let cell = {};
   cell[SOURCE] = true;
+  let requested = false;
+  let request = function() {
+    if (requested)
+      return;
+    requested = true;
+    let asked = generation;
+    return queueMicrotask(function() {
+      requested = false;
+      if (asked !== generation || loaded || inflight)
+        return;
+      return start().catch(function() {
+        return null;
+      });
+    });
+  };
   cell.read = function() {
     let value = data.value;
     if (!(loaded || inflight))
-      start().catch(function() {
-        return null;
-      });
+      request();
     return value;
   };
   cell.peek = function() {
@@ -34142,7 +34155,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "38eada1103e2f467";
+var compilerBuild = () => "1eefec9c7db2ff76";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
