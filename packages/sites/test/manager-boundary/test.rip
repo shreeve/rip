@@ -159,6 +159,67 @@ test! 'a project with no declared hosts claims <name>.localhost and <name>.local
     control.stop true
     rmSync dir, { recursive: true, force: true }
 
+test! 'App symlinks that stay inside the App root are followed, files and directories alike', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-manager-links-')
+  project = join dir, 'linked'
+  mkdirSync join(project, 'app', 'routes'), { recursive: true }
+  mkdirSync join(project, 'app', 'parts')
+  writeFileSync join(project, 'app', 'routes', 'index.rip'), "export Index = component\n  render\n    h1 'Linked'\n"
+  writeFileSync join(project, 'app', 'parts', 'extra.rip'), "export Extra = 1\n"
+  writeFileSync join(project, 'app', 'real.css'), 'body { color: navy; }'
+  symlinkSync 'parts', join(project, 'app', 'shared')
+  symlinkSync 'real.css', join(project, 'app', 'alias.css')
+  calls = []
+  controlSocket = join dir, 'janus.sock'
+  control = startControl controlSocket, calls
+  process = null
+  try
+    started = run project, ['--control', controlSocket, '--no-watch', '--access-log=off']
+    process = started.proc
+    waitFor! 'linked registration', ->
+      calls.find (call) -> call.method is 'POST' and call.path is '/1.0/apps'
+    bundle = JSON.parse readFileSync(join(project, 'dist', 'bundle.json'), 'utf8')
+    eq (path for [path] in bundle.list).sort(), ['parts/extra.rip', 'routes/index.rip', 'shared/extra.rip']
+    process.kill 'SIGTERM'
+    eq await process.exited, 143
+  finally
+    try process?.kill 'SIGKILL'
+    await process.exited if process?
+    control.stop true
+    rmSync dir, { recursive: true, force: true }
+
+test! 'an App symlink that leaves the App root, dangles, or loops stops the manager, named', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-manager-bad-links-')
+  outside = join dir, 'shared'
+  mkdirSync join(outside, 'fonts'), { recursive: true }
+  writeFileSync join(outside, 'fonts', 'f.css'), '/* outside */'
+  cases = [
+    ['a directory outside', ((app) -> symlinkSync join(outside, 'fonts'), join(app, 'fonts')), "App link 'fonts' leaves the App root: it points to #{realpathSync(join(outside, 'fonts'))}"]
+    ['a file outside', ((app) -> symlinkSync join(outside, 'fonts', 'f.css'), join(app, 'one.css')), "App link 'one.css' leaves the App root"]
+    ['nothing', ((app) -> symlinkSync 'missing.css', join(app, 'gone.css')), "App link 'gone.css' points to nothing"]
+    ['the App root itself', ((app) -> symlinkSync '.', join(app, 'loop')), "App link 'loop' leads back into"]
+  ]
+  try
+    for [label, shape, message], i in cases
+      project = join dir, "project-#{i}"
+      mkdirSync join(project, 'app', 'routes'), { recursive: true }
+      writeFileSync join(project, 'app', 'routes', 'index.rip'), "export Index = component\n  render\n    h1 'x'\n"
+      shape join(project, 'app')
+      calls = []
+      controlSocket = join dir, "janus-#{i}.sock"
+      control = startControl controlSocket, calls
+      try
+        started = run project, ['--control', controlSocket, '--no-watch', '--access-log=off']
+        code = await started.proc.exited
+        stderr = await started.err
+        ok code isnt 0, "#{label}: exited #{code}"
+        ok stderr.includes(message), "#{label}: #{stderr}"
+        eq calls.filter((call) -> call.path is '/1.0/apps').length, 0
+      finally
+        control.stop true
+  finally
+    rmSync dir, { recursive: true, force: true }
+
 test! 'shell-less all-browsable declaration registers exactly its declared roots', ->
   dir = mkdtempSync join(tmpdir(), 'rip-manager-browse-policy-')
   project = join dir, 'project'
