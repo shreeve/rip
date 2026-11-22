@@ -99,9 +99,13 @@ Every failure is a `VistaError` with a `kind`:
 | `error` | the RPC's error message |
 | `m` | an M error; `detail` holds its full text |
 | `signon` | `TCPConnect` rejected, codes or a new verify code not accepted, or a context not created |
-| `ended` | the session is over: Janus's 401 (`sessionEnded` says why), a 502 or 504, a reply cut short, or `#BYE#`. Later calls fail at once until `connect` |
-| `transport` | the request never reached Janus, another status (`status`, `retryAfter`), or a reply that is not `application/x-xwb`; the session stays |
+| `ended` | the session is over: Janus's 401, a 502, a 504 with `OV-Session-Ended`, a reply cut short, or `#BYE#`. `sessionEnded` says why: Janus's `OV-Session-Ended` when it sent one. Later calls fail at once until `connect` |
+| `transport` | the request never reached Janus, a 504 without `OV-Session-Ended` (it waited in the session's queue past its limit and was never sent), another status (`retryAfter` with it), or a reply that is not `application/x-xwb`; the session stays |
 | `reply` | bytes that are not one broker reply; the session ends |
+
+An answer from Janus puts its HTTP `status` on the error. A sign-on screen
+reads it to tell a request Janus never sent (a 401, a 503, a 504 without
+`OV-Session-Ended`) from one that may have run.
 
 An error never quotes a code or a signature, not even one character of it.
 The session token stays off the session object, so printing or serializing
