@@ -642,3 +642,12 @@ test! "endAll is for a browser: a session holding its own token refuses it", ->
   [s] = session([{ body: REPLY.accept, headers: { 'Set-Cookie': '__Host-ov=TOK; Path=/' } }])
   s.send! encodeCommand('TCPConnect', ['127.0.0.1', 0, 'localhost'])
   rejects! (-> s.endAll()), 'request', 'its own token'
+
+test! "ORWPT SELECT goes only with a literal DFN, the form Janus binds on; anything else is refused unsent", ->
+  [s, f] = session([])
+  s.resume NUM
+  for bad in [{ 1: '7' }, '07', 'x', 0, null]
+    rejects! (-> s.rpc('ORWPT SELECT', bad)), 'request', 'DFN'
+  rejects! (-> s.patientRpc('7', 'ORWPT SELECT', [[['1'], '7']])), 'request', 'DFN'
+  eq f.calls.length, 0
+  eq s.patient, null
