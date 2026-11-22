@@ -208,16 +208,121 @@ test! 'an App symlink that leaves the App root, dangles, or loops stops the mana
       calls = []
       controlSocket = join dir, "janus-#{i}.sock"
       control = startControl controlSocket, calls
+      started = null
       try
         started = run project, ['--control', controlSocket, '--no-watch', '--access-log=off']
+        outcome = waitFor! "#{label}: exit or registration", ->
+          return 'exited' if started.proc.exitCode? or started.proc.signalCode?
+          return 'registered' if calls.some (call) -> call.method is 'POST' and call.path is '/1.0/apps'
+          null
+        eq outcome, 'exited', "#{label}: the manager registered instead of refusing the link"
         code = await started.proc.exited
         stderr = await started.err
         ok code isnt 0, "#{label}: exited #{code}"
         ok stderr.includes(message), "#{label}: #{stderr}"
-        eq calls.filter((call) -> call.path is '/1.0/apps').length, 0
       finally
+        try started?.proc.kill 'SIGKILL'
         control.stop true
   finally
+    rmSync dir, { recursive: true, force: true }
+
+test! 'a file root symlink is followed inside its root and stops the manager, named, outside it', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-manager-root-links-')
+  outside = join dir, 'shared'
+  mkdirSync join(outside, 'fonts'), { recursive: true }
+  writeFileSync join(outside, 'fonts', 'f.css'), '/* outside */'
+  appProject = (name, shape) ->
+    project = join dir, name
+    mkdirSync join(project, 'app', 'routes'), { recursive: true }
+    writeFileSync join(project, 'app', 'routes', 'index.rip'), "export Index = component\n  render\n    h1 'x'\n"
+    shape project
+    project
+  boot = (project, i) ->
+    calls = []
+    controlSocket = join dir, "janus-#{i}.sock"
+    control = startControl controlSocket, calls
+    started = run project, ['--control', controlSocket, '--no-watch', '--access-log=off']
+    { calls, control, started }
+  try
+    # Inside public/: registered, the link left as Janus serves it.
+    inside = appProject 'inside', (project) ->
+      mkdirSync join(project, 'public', 'parts'), { recursive: true }
+      writeFileSync join(project, 'public', 'parts', 'real.css'), 'body {}'
+      symlinkSync 'parts', join(project, 'public', 'shared')
+      symlinkSync 'parts/real.css', join(project, 'public', 'alias.css')
+    { calls, control, started } = boot inside, 0
+    try
+      waitFor! 'inside-link registration', ->
+        calls.find (call) -> call.method is 'POST' and call.path is '/1.0/apps'
+      started.proc.kill 'SIGTERM'
+      eq await started.proc.exited, 143
+    finally
+      try started.proc.kill 'SIGKILL'
+      control.stop true
+
+    cases = [
+      ['public/ to a directory outside', ((project) ->
+        mkdirSync join(project, 'public')
+        symlinkSync join(outside, 'fonts'), join(project, 'public', 'fonts')
+      ), (project) -> "File root link 'fonts' in #{join(realpathSync(project), 'public')} leaves its root: it points to #{realpathSync(join(outside, 'fonts'))}"]
+      ['public/ to nothing', ((project) ->
+        mkdirSync join(project, 'public')
+        symlinkSync 'missing.css', join(project, 'public', 'gone.css')
+      ), (project) -> "File root link 'gone.css' in #{join(realpathSync(project), 'public')} points to nothing"]
+      ['a site root to a file outside', ((project) ->
+        mkdirSync join(project, 'sites', 'acme', 'public'), { recursive: true }
+        writeFileSync join(project, 'app', 'template.html'), '<!doctype html>'
+        symlinkSync join(outside, 'fonts', 'f.css'), join(project, 'sites', 'acme', 'public', 'f.css')
+        writeFileSync join(project, 'serve.rip'), "export default\n  sites:\n    host: '{site}.example.test'\n    dir: 'sites'\n  files:\n    roots: ['sites/{site}/public', 'app']\n    shell: 'app/template.html'\n"
+      ), (project) -> "File root link 'f.css' in #{join(realpathSync(project), 'sites', 'acme', 'public')} leaves its root"]
+    ]
+    for [label, shape, message], i in cases
+      project = appProject "bad-#{i}", shape
+      { calls, control, started } = boot project, i + 1
+      try
+        # A manager that accepts the link registers and runs on; that fails
+        # the case at once rather than waiting on an exit that never comes.
+        outcome = waitFor! "#{label}: exit or registration", ->
+          return 'exited' if started.proc.exitCode? or started.proc.signalCode?
+          return 'registered' if calls.some (call) -> call.method is 'POST' and call.path is '/1.0/apps'
+          null
+        eq outcome, 'exited', "#{label}: the manager registered instead of refusing the link"
+        code = await started.proc.exited
+        stderr = await started.err
+        ok code isnt 0, "#{label}: exited #{code}"
+        ok stderr.includes(message(project)), "#{label}: #{stderr}"
+      finally
+        try started.proc.kill 'SIGKILL'
+        control.stop true
+  finally
+    rmSync dir, { recursive: true, force: true }
+
+test! 'a file root symlink that leaves its root while watching is named', ->
+  dir = mkdtempSync join(tmpdir(), 'rip-manager-watched-link-')
+  outside = join dir, 'one.css'
+  writeFileSync outside, '/* outside */'
+  project = join dir, 'project'
+  mkdirSync join(project, 'app', 'routes'), { recursive: true }
+  mkdirSync join(project, 'public')
+  writeFileSync join(project, 'app', 'routes', 'index.rip'), "export Index = component\n  render\n    h1 'x'\n"
+  calls = []
+  controlSocket = join dir, 'janus.sock'
+  control = startControl controlSocket, calls
+  started = null
+  try
+    started = run project, ['--control', controlSocket, '--access-log=off']
+    waitFor! 'watched registration', ->
+      calls.find (call) -> call.method is 'POST' and call.path is '/1.0/apps'
+    symlinkSync outside, join(project, 'public', 'one.css')
+    sleep! 1000
+    started.proc.kill 'SIGTERM'
+    await started.proc.exited
+    stderr = await started.err
+    ok stderr.includes("File root link 'one.css' in #{join(realpathSync(project), 'public')} leaves its root: it points to #{realpathSync(outside)}"), stderr
+  finally
+    try started?.proc.kill 'SIGKILL'
+    await started.proc.exited if started?
+    control.stop true
     rmSync dir, { recursive: true, force: true }
 
 test! 'shell-less all-browsable declaration registers exactly its declared roots', ->

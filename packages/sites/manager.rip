@@ -1,5 +1,5 @@
-import { chmodSync, closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs'
-import { basename, dirname, join, resolve } from 'node:path'
+import { chmodSync, closeSync, copyFileSync, existsSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, watch, writeFileSync } from 'node:fs'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { brotliCompressSync, brotliDecompressSync, constants as zlib } from 'node:zlib'
@@ -641,28 +641,67 @@ export appEventRelevant = (appRoot, graph, changes, filename) ->
     return true
   false
 
+# Janus never serves a file whose real path leaves the root it searches,
+# so a symlink in a served root is followed only when its target stays
+# inside that root. One that leaves it, points at nothing, or leads back
+# into a directory being walked rejects, named — published, it would be a
+# member the edge answers with a miss. `walking` holds the real paths of
+# the directories above the link.
+rootLinkTarget = (realRoot, path, label, rootName, walking) ->
+  real = try
+    realpathSync path
+  catch error
+    throw error unless error?.code in ['ENOENT', 'ELOOP']
+    throw Error.new "#{label} points to nothing (#{path})"
+  unless real is realRoot or real.startsWith("#{realRoot}/")
+    throw Error.new "#{label} leaves #{rootName}: it points to #{real}, and Janus serves nothing outside #{realRoot} — move the target inside #{rootName} or copy it in"
+  info = statSync real
+  throw Error.new("#{label} leads back into #{real}") if info.isDirectory() and walking.has(real)
+  { real, directory: info.isDirectory() }
+
+# Every symlink under one served file root, checked by rootLinkTarget.
+# Hidden names are skipped: Janus answers them with a miss either way.
+checkRootLinks = (rootPath) ->
+  return unless existsSync(rootPath) and statSync(rootPath).isDirectory()
+  realRoot = realpathSync rootPath
+  walk = (directory, prefix, walking) ->
+    for entry in readdirSync(directory, { withFileTypes: true })
+      continue if entry.name.startsWith '.'
+      path = join directory, entry.name
+      name = "#{prefix}#{entry.name}"
+      if entry.isSymbolicLink()
+        target = rootLinkTarget realRoot, path, "File root link '#{name}' in #{rootPath}", 'its root', walking
+        walk(path, "#{name}/", Set.new([...walking, target.real])) if target.directory
+      else if entry.isDirectory()
+        walk path, "#{name}/", Set.new([...walking, realpathSync(path)])
+  walk rootPath, '', Set.new([realRoot])
+
+# The directories a registered root names: itself, or for a '{site}' root
+# each site directory that exists under its static prefix.
+concreteRoots = (rootPath) ->
+  return [rootPath] unless rootPath.includes '/{site}'
+  [prefix, rest] = rootPath.split '/{site}'
+  return [] unless existsSync(prefix) and statSync(prefix).isDirectory()
+  ("#{join(prefix, entry.name)}#{rest}" for entry in readdirSync(prefix, { withFileTypes: true }) when entry.isDirectory() and not entry.name.startsWith('.'))
+
+# The served file roots' links, before registering: the dist root is the
+# manager's own output, and the App root's links are checked by every
+# assembly (appModules).
+checkFileRoots = (project, files) ->
+  return unless files?.roots?
+  dist = join project.root, 'dist'
+  for root in files.roots
+    continue if root.path is dist or root.path is project.appRoot
+    checkRootLinks path for path in concreteRoots(root.path)
+  return
+
 appModules = (appRoot, changes) ->
   modules = {}
   moduleFiles = {}
   entries = []
   directories = []
-  # A symlink is followed when its target stays inside the App root, where
-  # Janus serves it too. One that leaves the root, points at nothing, or
-  # leads back into a directory being walked rejects, named: Janus never
-  # serves a file whose real path leaves its root, so such a link would
-  # publish a member the edge answers with a miss.
+  # Links follow rootLinkTarget's rule, against the App root.
   realRoot = realpathSync appRoot
-  linkTarget = (path, id, walking) ->
-    real = try
-      realpathSync path
-    catch error
-      throw error unless error?.code in ['ENOENT', 'ELOOP']
-      throw Error.new "App link '#{id}' points to nothing (#{path})"
-    unless real is realRoot or real.startsWith("#{realRoot}/")
-      throw Error.new "App link '#{id}' leaves the App root: it points to #{real}, and Janus serves nothing outside #{realRoot} — move the target inside the App root or copy it in"
-    info = statSync real
-    throw Error.new("App link '#{id}' leads back into #{real}") if info.isDirectory() and walking.has(real)
-    { real, directory: info.isDirectory() }
   walk = (directory, prefix, walking) ->
     for entry in readdirSync(directory, { withFileTypes: true })
       continue if entry.name.startsWith '.'
@@ -670,7 +709,7 @@ appModules = (appRoot, changes) ->
       isDirectory = entry.isDirectory()
       real = path
       if entry.isSymbolicLink()
-        target = linkTarget path, "#{prefix}#{entry.name}", walking
+        target = rootLinkTarget realRoot, path, "App link '#{prefix}#{entry.name}'", 'the App root', walking
         isDirectory = target.directory
         real = target.real
       if isDirectory
@@ -1745,6 +1784,23 @@ export main = (argv) ->
   # a rip for-loop rebinds its loop VARIABLE each pass, but body locals are
   # function-scoped, and a callback closing over them would read the last
   # root's values for every event.
+  # A link that appears in a served root while watching follows the same
+  # rule as at startup; there is no publication to refuse, so a bad one is
+  # named in the terminal — the edge answers it with a miss.
+  checkTouchedLink = (path, root) ->
+    info = try lstatSync(path) catch then null
+    return unless info?.isSymbolicLink()
+    try
+      realRoot = realpathSync root
+      walking = Set.new [realRoot]
+      parent = dirname path
+      while parent.startsWith("#{root}/")
+        walking.add realpathSync(parent)
+        parent = dirname parent
+      rootLinkTarget realRoot, path, "File root link '#{relative(root, path)}' in #{root}", 'its root', walking
+    catch error
+      warn "rip-sites: #{error?.message or error}"
+
   watchAssetsRoot = (rootPath) ->
     segments = rootPath.split '/'
     index = segments.indexOf '{site}'
@@ -1756,6 +1812,7 @@ export main = (argv) ->
       parts = String(filename).replaceAll('\\', '/').split '/'
       return if parts.some (part) -> not part or part.startsWith '.'
       return unless parts.length > drop and suffix.every (part, i) -> parts[i + 1] is part
+      checkTouchedLink join(dir, ...parts), (if index >= 0 then join(dir, parts[0], ...suffix) else rootPath)
       touchedPaths.add "/#{parts.slice(drop).join '/'}"
       scheduleTouchedPublish()
     assetsWatchers.push watcher
@@ -2307,6 +2364,7 @@ export main = (argv) ->
       startAppWatcher() if project.appRoot?
     files = registrationFiles project, serve?.files, publication
     files = ensureProxyFirst files, hubBridge
+    checkFileRoots project, files
     startAssetsWatchers()
     if project.entry?
       startApiWatcher()

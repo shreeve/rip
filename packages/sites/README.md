@@ -469,13 +469,16 @@ slash.
 - `app/index.html` is an HTML-navigation fallback, not a response for a
   missing script, stylesheet, image, or module.
 
-**Symlinks stay inside their root.** Janus never serves a file whose real
-path leaves the root it searches, so the Manager follows a symlink in the
-App root — to a file or a directory — only when its target is inside that
-root, where its member is served like any other. A link that leaves the App
+**Symlinks stay inside their root.** Janus never serves a file whose real path
+leaves the root it searches, so the Manager follows a symlink in a served root
+— the App root, `public/`, a `serve.rip` file root, or each site directory of
+a `{site}` root, to a file or a directory — only when its target is inside
+that root, where it is served like any other file. A link that leaves its
 root, points to nothing, or leads back into a directory above it stops the
-Manager, naming the link and its target; move the target inside the App root
-or copy it in.
+Manager at startup, naming the link and its target; one that appears while
+watching fails the App assembly when it is in the App root and is named in the
+terminal when it is in a file root. Move the target inside the root or copy it
+in.
 
 `serve.rip` makes the host or tenant rule, root order, API prefixes, cache
 policy, and shell explicit. Without it, ordinary projects discover `dist/`
