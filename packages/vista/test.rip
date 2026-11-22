@@ -290,19 +290,41 @@ test! "401 is the session's end, with Janus's reason; later calls fail without a
   [s, f] = session([{ body: REPLY.accept, headers: { 'Set-Cookie': '__Host-ov=T1; Path=/' } }, REPLY.setup, REPLY.imHere, { status: 401, headers: { 'OV-Session-Ended': 'idle' } }, { body: REPLY.accept, headers: { 'Set-Cookie': '__Host-ov=T2; Path=/' } }, REPLY.setup, REPLY.imHere])
   s.connect!
   e = rejects! (-> s.rpc('X')), 'ended', 'the session has ended (idle)'
-  eq e.sessionEnded, 'idle'
+  eq [e.status, e.sessionEnded], [401, 'idle']
   rejects! (-> s.rpc('X')), 'ended', 'connect to start another'
   eq f.calls.length, 4
   s.connect!
   eq f.calls[4].init.headers.Authorization, undefined
   eq f.calls[5].init.headers.Authorization, 'Bearer T2'
 
-test! "502 and 504 end the session", ->
-  for status in [502, 504]
-    [s] = session([{ status }])
-    e = rejects! (-> s.rpc('X')), 'ended', "Janus answered #{status}"
-    eq e.status, status
+test! "401, 502 and a 504 naming its end end the session, carrying the status and Janus's cause", ->
+  for [status, cause] in [[401, 'signon-timeout'], [502, 'closed'], [504, 'rpc-timeout']]
+    [s] = session([{ status, headers: { 'OV-Session-Ended': cause } }])
+    e = rejects! (-> s.rpc('X')), 'ended', "the session has ended (#{cause})"
+    eq [e.status, e.sessionEnded], [status, cause]
     rejects! (-> s.rpc('X')), 'ended'
+
+test! "a 502 without OV-Session-Ended still ends the session; a 401 without it is unknown", ->
+  [s] = session([{ status: 502 }])
+  e = rejects! (-> s.rpc('X')), 'ended', 'Janus answered 502'
+  eq [e.status, e.sessionEnded], [502, 'Janus answered 502']
+  [t] = session([{ status: 401 }])
+  e = rejects! (-> t.rpc('X')), 'ended', '(unknown)'
+  eq [e.status, e.sessionEnded], [401, 'unknown']
+
+test! "a 504 without OV-Session-Ended never left the queue: the session stays", ->
+  [s, f] = session([{ status: 504 }, REPLY.imHere])
+  e = rejects! (-> s.rpc('X')), 'transport', 'never sent; the session stays'
+  eq [e.status, e.sessionEnded], [504, undefined]
+  eq s.ended, null
+  eq s.rpc!('XWB IM HERE'), '1'
+  eq f.calls.length, 2
+
+test! "a 503 carries its status and Retry-After; the session stays", ->
+  [s] = session([{ status: 503, headers: { 'Retry-After': '1' } }, REPLY.imHere])
+  e = rejects! (-> s.rpc('X')), 'transport', 'Janus answered 503'
+  eq [e.status, e.retryAfter, e.sessionEnded], [503, '1', undefined]
+  eq s.rpc!('XWB IM HERE'), '1'
 
 test! "a request that never reached Janus is a transport error; the session stays", ->
   calls = 0

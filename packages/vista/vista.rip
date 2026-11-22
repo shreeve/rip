@@ -47,11 +47,13 @@ text =! TextDecoder.new('windows-1252')
 
 # kind: 'request' (a message this package refuses to build), 'reply' (bytes
 # that are not one broker reply; the session ends), 'ended' (the session is
-# over: Janus's 401, `sessionEnded` says why, a 502 or 504, a reply cut
-# short, or `#BYE#`), 'transport' (the request did not reach Janus, or any
-# other status), 'security' (the broker refused to run the RPC), 'error'
-# (the RPC's error message), 'm' (an M error), 'signon' (TCPConnect, codes
-# or a context not accepted).
+# over: Janus's 401, a 502, a 504 naming its end, a reply cut short, or
+# `#BYE#`; `sessionEnded` says why, Janus's OV-Session-Ended when it sent
+# one), 'transport' (the request did not reach Janus, a 504 that never left
+# the session's queue, or any other status; the session stays), 'security'
+# (the broker refused to run the RPC), 'error' (the RPC's error message),
+# 'm' (an M error), 'signon' (TCPConnect, codes or a context not accepted).
+# An answer from Janus carries its `status`.
 export class VistaError extends Error
   constructor: (kind, message, extra = {}) ->
     super("rip/vista: #{message}")
@@ -352,13 +354,15 @@ export class Session
     catch e
       fail 'transport', "the request did not reach Janus (#{e.message})", { cause: e }
     status = response.status
-    if status is 401
-      reason = response.headers.get('OV-Session-Ended')
-      endIf reason ?? 'unknown'
-      fail 'ended', "the session has ended (#{reason ?? 'unknown'})", { status, sessionEnded: reason }
-    if status is 502 or status is 504
-      endIf "Janus answered #{status}"
-      fail 'ended', "the session has ended (Janus answered #{status})", { status, sessionEnded: "Janus answered #{status}" }
+    # Janus names a session's end in OV-Session-Ended. A 504 without it
+    # waited in the session's queue and was never sent: the session lives.
+    cause = response.headers.get('OV-Session-Ended')
+    if status is 401 or status is 502 or (status is 504 and cause?)
+      reason = cause ?? (if status is 401 then 'unknown' else "Janus answered #{status}")
+      endIf reason
+      fail 'ended', "the session has ended (#{reason})", { status, sessionEnded: reason }
+    if status is 504
+      fail 'transport', 'Janus answered 504: the request waited past its limit and was never sent; the session stays', { status }
     fail 'transport', "Janus answered #{status}", { status, retryAfter: response.headers.get('Retry-After') } unless status is 200
     type = response.headers.get('Content-Type') ?? ''
     fail 'transport', "Janus answered #{type or 'no content type'}, not application/x-xwb", { status } unless type.startsWith('application/x-xwb')
