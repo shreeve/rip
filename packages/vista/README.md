@@ -52,6 +52,49 @@ A request belongs to the session it was sent on. One still in flight when
 `connect` starts a new session fails as `ended`, and its answer never ends
 or re-keys the new one.
 
+## A browser's connections
+
+A browser can hold several connections, one per tab and patient. Each one
+is its own em process, with its own locks.
+
+- **The secret stays out of reach of script.** The connections share
+  Janus's HttpOnly cookie, the one secret, and the browser sends it itself.
+- **Each connection has a number.** Janus mints it for the connection
+  (`OV-Session`), and it is useless without the cookie.
+  - `session.connection` holds it.
+  - `resume(number, patient)` names a connection again after a reload,
+    sending nothing.
+- **Later connections sign on with a handle**, so no codes are typed
+  twice:
+
+```coffee
+h = vista.handle!                         # XUS GET TOKEN → '~1…', one try, seconds to live
+s = vista.session()                       # a new connection: TCPConnect, then XUS SIGNON SETUP
+s.send! vista.encodeCommand('TCPConnect', ['127.0.0.1', 0, 'localhost'])
+s.rpc! 'XUS SIGNON SETUP'
+s.signOnHandle! h                         # XUS AV CODE with the handle, as is
+s.context! 'OR CPRS GUI CHART'
+s.rpc! 'ORWPT SELECT', dfn                # binds s to dfn
+vista.swap s                              # vista takes the new connection; s now holds the old
+s.bye!                                    # the old connection ends, and its locks with it
+```
+
+- **Handles.** Kernel deletes a handle at its first try, and a refused one
+  counts as a failed sign-on from the address, so never send one twice.
+  Keep it in memory only.
+- **A connection serves one patient.**
+  - Its first `ORWPT SELECT` binds it.
+  - `patientRpc(dfn, name, …)` and `patientLines` send the DFN with the
+    RPC (`OV-Patient`).
+  - A DFN other than the bound one is refused before anything is sent
+    (kind `patient`), as Janus refuses it.
+  - An unbound connection takes any DFN, so the patient list can read
+    before a patient is opened.
+- **`swap(other)`** trades connections between two sessions, and requests
+  queued on either fail as `ended`.
+- **`endAll`** sends one `#BYE#` with `OV-End: all`, which ends every
+  connection under the cookie (every tab's) and answers how many ended.
+
 ## Parameters
 
 | Value | Sent as |
@@ -98,7 +141,8 @@ Every failure is a `VistaError` with a `kind`:
 | `security` | the broker refused to run the RPC (not signed on, no context, OpenVista's guards) |
 | `error` | the RPC's error message |
 | `m` | an M error; `detail` holds its full text |
-| `signon` | `TCPConnect` rejected, codes or a new verify code not accepted, or a context not created |
+| `signon` | `TCPConnect` rejected, codes, a handle or a new verify code not accepted, no handle given, or a context not created |
+| `patient` | a patient's RPC on a connection open for another patient; nothing was sent (`dfn`, `patient`) |
 | `ended` | the session is over: Janus's 401, a 502, a 504 with `OV-Session-Ended`, a reply cut short, or `#BYE#`. `sessionEnded` says why: Janus's `OV-Session-Ended` when it sent one. Later calls fail at once until `connect` |
 | `transport` | the request never reached Janus, a 504 without `OV-Session-Ended` (it waited in the session's queue past its limit and was never sent), another status (`retryAfter` with it), or a reply that is not `application/x-xwb`; the session stays |
 | `reply` | bytes that are not one broker reply; the session ends |
@@ -107,7 +151,7 @@ An answer from Janus puts its HTTP `status` on the error. A sign-on screen
 reads it to tell a request Janus never sent (a 401, a 503, a 504 without
 `OV-Session-Ended`) from one that may have run.
 
-An error never quotes a code or a signature, not even one character of it.
+An error never quotes a code, a handle or a signature, not even one character of it.
 The session token stays off the session object, so printing or serializing
 a session never shows it.
 
@@ -132,4 +176,6 @@ bun run test
 The suite checks requests and replies against the contract's bytes, which
 were measured on em, and lists in the form CPRS writes. It drives sessions
 through a recording fetch: sign-on and token rotation, every error kind,
-the session's end, in-order requests, the keepalive lifecycle and `#BYE#`.
+the session's end, in-order requests, the keepalive lifecycle and `#BYE#`;
+and a browser's connections: numbers, handles, patient binding, `swap` and
+`endAll`.

@@ -514,3 +514,140 @@ test "wrap puts one space on each side and wants text", ->
   eq wrap('OR CPRS GUI CHART'), ' OR CPRS GUI CHART '
   throws (-> wrap('')), VistaError, 'a non-empty string'
   throws (-> wrap(5, 'the signature code')), VistaError, 'the signature code is a non-empty string'
+
+# ==[ A browser's connections ]==
+
+console.log "\nConnections"
+
+NUM  = 'AbCdEfGhIjKlMnOpQrStUv'
+NUM2 = 'ZyXwVuTsRqPoNmLkJiHgFe'
+HDL  = '~1XWBAS1234-56789_0'
+accepted = (number = NUM) -> { body: REPLY.accept, headers: { 'OV-Session': number } }
+sentHeaders = (f, i) -> f.calls[i].init.headers
+
+test! "TCPConnect takes the connection number; later requests carry it, and no Bearer", ->
+  [s, f] = session([accepted(), REPLY.setup, "\x00\x00intro\r\n\x04", REPLY.imHere])
+  s.connect!
+  eq s.connection, NUM
+  eq sentHeaders(f, 0)['OV-Session'], undefined
+  eq sentHeaders(f, 1)['OV-Session'], NUM
+  s.rpc! 'XWB IM HERE'
+  eq sentHeaders(f, 3)['OV-Session'], NUM
+  eq sentHeaders(f, 3).Authorization, undefined
+
+test! "a new TCPConnect goes without the old number and takes the new one", ->
+  [s, f] = session([accepted(), accepted(NUM2)])
+  s.send! encodeCommand('TCPConnect', ['127.0.0.1', 0, 'localhost'])
+  s.send! encodeCommand('TCPConnect', ['127.0.0.1', 0, 'localhost'])
+  eq sentHeaders(f, 1)['OV-Session'], undefined
+  eq s.connection, NUM2
+
+test! "an OV-Session that is not a connection number is a transport error", ->
+  [s] = session([{ body: REPLY.accept, headers: { 'OV-Session': 'short' } }])
+  rejects! (-> s.send(encodeCommand('TCPConnect', ['127.0.0.1', 0, 'localhost']))), 'transport', 'not a connection number'
+
+test! "resume names a connection by its number, sending nothing; its end forgets it", ->
+  [s, f] = session([REPLY.imHere, { status: 401, headers: { 'OV-Session-Ended': 'closed' } }])
+  s.resume NUM, 7
+  eq f.calls.length, 0
+  eq s.patient, '7'
+  s.rpc! 'XWB IM HERE'
+  eq sentHeaders(f, 0)['OV-Session'], NUM
+  rejects! (-> s.rpc('XWB IM HERE')), 'ended', 'closed'
+  eq s.connection, null
+  eq s.patient, null
+  throws (-> s.resume('nope')), VistaError, 'OV-Session'
+  throws (-> s.resume(NUM, '0')), VistaError, 'a DFN'
+
+test! "ORWPT SELECT binds the connection; another patient is refused before it is sent", ->
+  [s, f] = session(["\x00\x00TEN,PATIENT^M\x04"])
+  s.resume NUM
+  s.rpc! 'ORWPT SELECT', 100
+  eq s.patient, '100'
+  e = rejects! (-> s.rpc('ORWPT SELECT', '200')), 'patient', 'open for patient 100'
+  eq e.dfn, '200'
+  eq f.calls.length, 1
+
+test! "a patient's RPC carries OV-Patient; a bound connection refuses another DFN unsent", ->
+  [s, f] = session(["\x00\x00a\r\n\x04", "\x00\x00b\r\n\x04", "\x00\x00c\r\n\x04"])
+  s.resume NUM
+  eq s.patientLines!(55, 'ORQQAL LIST', 55), ['a']
+  eq sentHeaders(f, 0)['OV-Patient'], '55'
+  eq s.patientLines!('66', 'ORQQAL LIST', '66'), ['b']
+  s.resume NUM, 55
+  eq s.patientRpc!('55', 'ORQQAL LIST', '55'), 'c\r\n'
+  rejects! (-> s.patientRpc('66', 'ORQQAL LIST', '66')), 'patient', 'ORQQAL LIST is for patient 66'
+  eq f.calls.length, 3
+  rejects! (-> s.patientRpc('x', 'ORQQAL LIST')), 'request', 'a DFN'
+
+test! "Janus's refusal of another patient is a security error", ->
+  [s] = session(["\x2CThis connection is open for another patient.\x00\x04"])
+  s.resume NUM
+  rejects! (-> s.patientRpc(9, 'ORQQAL LIST', 9)), 'security', 'another patient'
+
+test! "handle: XUS GET TOKEN's `~1` handle; anything else is a sign-on error", ->
+  [s, f] = session(["\x00\x00#{HDL}\x04", "\x00\x00NOT AUTHENTICATED\x04"])
+  eq s.handle!, HDL
+  eq f.calls[0].body, '[XWB]11302\\x010\\x0dXUS GET TOKEN5\\x04'
+  rejects! (-> s.handle()), 'signon', 'NOT AUTHENTICATED'
+
+test! "signOnHandle sends the handle as is, never wrapped", ->
+  [s, f] = session([REPLY.avCode])
+  me = s.signOnHandle!(HDL)
+  eq me.duz, 100
+  eq f.calls[0].body, "[XWB]11302\\x010\\x0bXUS AV CODE50019#{HDL}f\\x04"
+
+test! "a refused handle is a sign-on error that never quotes the handle", ->
+  [s] = session(["\x00\x000\r\n0\r\n0\r\n*** MULTIPLE SIGN-ONS NOT ALLOWED ***\r\n0\r\n0\r\n\x04"])
+  e = rejects! (-> s.signOnHandle(HDL)), 'signon', 'MULTIPLE SIGN-ONS NOT ALLOWED'
+  ok e.handle
+  ok not e.message.includes('XWBAS')
+  rejects! (-> s.signOnHandle(' ~1X ')), 'request', 'a sign-on handle'
+  rejects! (-> s.signOnHandle('ACCESS;VERIFY')), 'request', 'a sign-on handle'
+
+test! "swap trades connections; a request queued on the old one fails as ended", ->
+  release = null
+  gate = Promise.new((r) -> release = r)
+  calls = []
+  f = (url, init) ->
+    calls.push init.headers['OV-Session']
+    await gate if calls.length is 1
+    Response.new(bytes(REPLY.imHere), { headers: { 'Content-Type': 'application/x-xwb' } })
+  page = Session.new({ url: 'https://vista.test', fetch: f })
+  page.resume NUM, 1
+  fresh = Session.new({ url: 'https://vista.test', fetch: f })
+  fresh.resume NUM2, 2
+  first = page.rpc('XWB IM HERE')
+  queued = page.rpc('XWB IM HERE')
+  await Promise.new((r) -> setTimeout(r, 0)) until calls.length is 1
+  page.swap fresh
+  release()
+  await first
+  rejects! (-> queued), 'ended'
+  eq [page.connection, page.patient, fresh.connection, fresh.patient], [NUM2, '2', NUM, '1']
+  page.rpc! 'XWB IM HERE'
+  eq calls, [NUM, NUM2]
+  throws (-> page.swap(page)), VistaError, 'itself'
+
+test! "endAll: one #BYE# with OV-End: all and no number, even after the session ended", ->
+  [s, f] = session([{ status: 401, headers: { 'OV-Session-Ended': 'closed' } }, { body: REPLY.bye, headers: { 'OV-Ended': '3' } }])
+  s.resume NUM
+  rejects! (-> s.rpc('XWB IM HERE')), 'ended'
+  eq s.endAll!, 3
+  eq sentHeaders(f, 1)['OV-End'], 'all'
+  eq sentHeaders(f, 1)['OV-Session'], undefined
+  eq s.ended, 'bye'
+
+test! "endAll is for a browser: a session holding its own token refuses it", ->
+  [s] = session([{ body: REPLY.accept, headers: { 'Set-Cookie': '__Host-ov=TOK; Path=/' } }])
+  s.send! encodeCommand('TCPConnect', ['127.0.0.1', 0, 'localhost'])
+  rejects! (-> s.endAll()), 'request', 'its own token'
+
+test! "ORWPT SELECT goes only with a literal DFN, the form Janus binds on; anything else is refused unsent", ->
+  [s, f] = session([])
+  s.resume NUM
+  for bad in [{ 1: '7' }, '07', 'x', 0, null]
+    rejects! (-> s.rpc('ORWPT SELECT', bad)), 'request', 'DFN'
+  rejects! (-> s.patientRpc('7', 'ORWPT SELECT', [[['1'], '7']])), 'request', 'DFN'
+  eq f.calls.length, 0
+  eq s.patient, null

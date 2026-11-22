@@ -9,6 +9,8 @@
 #   - decode one reply: security message, error message, data, or an M error
 #   - a Session: one request at a time, in order, over fetch
 #   - sign-on, verify-code change, context, keepalive and `#BYE#`
+#   - a browser's connections: each named by Janus's number under one
+#     HttpOnly cookie, signed on by handle, bound to one patient
 # The RPC catalog and its schemas belong to the application, not here.
 # ==============================================================================
 
@@ -52,8 +54,9 @@ text =! TextDecoder.new('windows-1252')
 # one), 'transport' (the request did not reach Janus, a 504 that never left
 # the session's queue, or any other status; the session stays), 'security'
 # (the broker refused to run the RPC), 'error' (the RPC's error message),
-# 'm' (an M error), 'signon' (TCPConnect, codes or a context not accepted).
-# An answer from Janus carries its `status`.
+# 'm' (an M error), 'signon' (TCPConnect, codes, a handle or a context not
+# accepted), 'patient' (a patient's RPC on a connection open for another
+# patient; nothing was sent). An answer from Janus carries its `status`.
 export class VistaError extends Error
   constructor: (kind, message, extra = {}) ->
     super("rip/vista: #{message}")
@@ -230,7 +233,13 @@ export encodeCommand = (command, params = []) ->
   plan = planParams(params)
   width = widthOf(plan)
   rest = if plan.length > 0 then paramChunk(plan, width) else []
-  concat [ascii("[XWB]10#{width}0"), ascii('4'), ...short(command, 'the command'), ...rest, Uint8Array.of(EOT)]
+  body = concat [ascii("[XWB]10#{width}0"), ascii('4'), ...short(command, 'the command'), ...rest, Uint8Array.of(EOT)]
+  connecting.add body if command is 'TCPConnect'
+  body
+
+# The TCPConnect messages encodeCommand built: each starts a new connection,
+# so it goes without the old one's number and takes the new one's
+connecting =! WeakSet.new()
 
 # ==[ Replies ]==
 
@@ -296,6 +305,20 @@ rpcUrl = (url) ->
 # session never shows it.
 tokens =! WeakMap.new()
 
+# A browser's connections share Janus's HttpOnly cookie, the one secret,
+# which the browser sends by itself. Each connection is named by the number
+# Janus mints for it (OV-Session): random, and useless without the cookie,
+# so it may sit on the object and in a tab's storage. A DFN as VistA files
+# it, and VistA's sign-on handle (`~1` then the handle Kernel checks).
+NUMBER =! /^[A-Za-z0-9_-]{16,64}$/
+DFN    =! /^[1-9][0-9]{0,15}$/
+HANDLE =! /^~1[!-~]{1,253}$/
+
+dfnOf = (value, what = 'the DFN') ->
+  dfn = if typeof value is 'number' and Number.isSafeInteger(value) then String(value) else value
+  fail 'request', "#{what} is a DFN (digits, not 0), not #{if typeof dfn is 'string' then JSON.stringify(dfn) else kindOf(dfn)}" unless typeof dfn is 'string' and DFN.test(dfn)
+  dfn
+
 export class Session
   constructor: (opts = {}) ->
     known = ['url', 'fetch', 'version', 'timers']
@@ -311,6 +334,8 @@ export class Session
     @ended = null
     @closing = false
     @epoch = 0
+    @connection = null
+    @patient = null
 
   endpoint: ->
     return @url if @url
@@ -322,31 +347,73 @@ export class Session
   end: (reason) ->
     @ended = reason
     tokens.delete this
+    @connection = null
+    @patient = null
     @stopKeepalive()
     @epoch += 1
+
+  # A browser connection by its number, as a reload finds it in the tab's
+  # storage: nothing is sent, so whether it still lives is the next
+  # request's answer. The patient it was opened for comes with it.
+  resume: (number, patient = null) ->
+    fail 'request', 'a connection number is what Janus sent in OV-Session' unless typeof number is 'string' and NUMBER.test(number)
+    @stopKeepalive()
+    tokens.delete this
+    @ended = null
+    @closing = false
+    @epoch += 1
+    @connection = number
+    @patient = if patient? then dfnOf(patient, 'the patient') else null
+    this
+
+  # Trade connections with another session: this one takes the other's
+  # (the one a sign-on or a patient change just opened), and the other takes
+  # this one's, to be closed with `bye`. Requests either had queued fail as
+  # `ended`, so none reaches the connection it was not sent for.
+  swap: (other) ->
+    fail 'request', "swap takes a Session, not #{kindOf(other)}" unless other instanceof Session
+    fail 'request', 'a session cannot swap with itself' if other is this
+    mine = { token: tokens.get(this), connection: @connection, patient: @patient, ended: @ended, closing: @closing }
+    theirs = { token: tokens.get(other), connection: other.connection, patient: other.patient, ended: other.ended, closing: other.closing }
+    for [s, v] in [[this, theirs], [other, mine]]
+      s.stopKeepalive()
+      if v.token then tokens.set(s, v.token) else tokens.delete(s)
+      s.connection = v.connection
+      s.patient = v.patient
+      s.ended = v.ended
+      s.closing = v.closing
+      s.epoch += 1
+    this
 
   # One message to Janus and its reply; requests run one at a time, in order,
   # as the broker is strictly request and reply. Each belongs to the session
   # it was sent on: one left over from an earlier session never runs on a
   # later one, and its answer never ends or re-keys it.
-  send: (body) ->
+  send: (body, headers = {}) ->
     epoch = @epoch
     run = =>
       if epoch isnt @epoch
         reason = @ended ?? 'a new session started'
         fail 'ended', "the session this request was sent on has ended (#{reason})", { sessionEnded: reason }
-      fail 'ended', "the session has ended (#{@ended}); connect to start another", { sessionEnded: @ended } if @ended?
-      @post(body, epoch)
+      fail 'ended', "the session has ended (#{@ended}); connect to start another", { sessionEnded: @ended } if @ended? and not connecting.has(body)
+      @post(body, epoch, headers)
     result = @queue.then(run, run)
     @queue = result.then((-> null), (-> null))
     result
 
-  post: (body, epoch) ->
+  post: (body, epoch, extra = {}) ->
     current = => epoch is @epoch
     endIf = (reason) => @end(reason) if current()
-    headers = { 'Content-Type': 'application/x-xwb', 'X-OV': '1' }
+    fresh = connecting.has(body)
+    if fresh
+      tokens.delete this
+      @connection = null
+      @patient = null
+      @ended = null
+    headers = { 'Content-Type': 'application/x-xwb', 'X-OV': '1', ...extra }
     token = tokens.get(this)
     headers.Authorization = "Bearer #{token}" if token
+    headers['OV-Session'] = @connection if @connection and not token and not extra['OV-End']
     fetcher = @fetcher ?? fetch
     response = null
     try
@@ -367,25 +434,64 @@ export class Session
     type = response.headers.get('Content-Type') ?? ''
     fail 'transport', "Janus answered #{type or 'no content type'}, not application/x-xwb", { status } unless type.startsWith('application/x-xwb')
     # Outside a browser the session token is ours to carry (Janus rotates it
-    # at sign-on); a browser hides Set-Cookie and sends the cookie itself.
+    # at sign-on); a browser hides Set-Cookie and sends the cookie itself,
+    # and names the connection by the number Janus sent with TCPConnect.
     cookie = response.headers.get('Set-Cookie')
-    fresh = cookie?.match(/(?:^|[;,]\s*)__Host-ov=([^;,\s]+)/)?[1]
-    tokens.set this, fresh if fresh and current()
+    rotated = cookie?.match(/(?:^|[;,]\s*)__Host-ov=([^;,\s]+)/)?[1]
+    tokens.set this, rotated if rotated and current()
+    number = response.headers.get('OV-Session')
+    if number? and fresh
+      fail 'transport', 'Janus sent an OV-Session that is not a connection number', { status } unless NUMBER.test(number)
+      @connection = number if current()
     raw = null
     try
       raw = response.arrayBuffer!
     catch e
       endIf 'the reply was cut short'
       fail 'ended', "the session has ended (the reply was cut short: #{e.message})", { sessionEnded: 'the reply was cut short', cause: e }
+    reply = null
     try
-      return decode(Uint8Array.new(raw))
+      reply = decode(Uint8Array.new(raw))
     catch e
       endIf 'a malformed reply'
       throw e
+    # Ending every connection under the cookie: Janus counts them
+    count = response.headers.get('OV-Ended')
+    reply.ended = Number(count) if count?
+    reply
 
   # An RPC's data; a security message, an error message or an M error throws.
+  # ORWPT SELECT opens a patient: the connection's first binds it to that
+  # DFN, and another is refused before it is sent, as Janus refuses it.
   rpc: (name, ...params) ->
-    reply = @send!(encode(name, params, { version: @version }))
+    body = encode(name, params, { version: @version })
+    @bind(params[0]) if name is 'ORWPT SELECT'
+    @call!(name, body)
+
+  # A patient's RPC: its DFN goes with it (OV-Patient), and a connection
+  # open for another patient refuses it before it is sent. The patient list
+  # reads by DFN before any patient is opened, so an unbound connection
+  # takes any.
+  patientRpc: (dfn, name, ...params) ->
+    dfn = dfnOf(dfn)
+    body = encode(name, params, { version: @version })
+    @guard(dfn, name)
+    @bind(params[0]) if name is 'ORWPT SELECT'
+    @call!(name, body, { 'OV-Patient': dfn })
+
+  # A patient's RPC as lines.
+  patientLines: (dfn, name, ...params) -> lines(@patientRpc!(dfn, name, ...params))
+
+  guard: (dfn, name) ->
+    fail 'patient', "#{name} is for patient #{dfn}; this connection is open for patient #{@patient}", { rpc: name, dfn, patient: @patient } if @patient? and @patient isnt dfn
+
+  bind: (value) ->
+    dfn = dfnOf(value, 'ORWPT SELECT\'s DFN')
+    @guard(dfn, 'ORWPT SELECT')
+    @patient = dfn
+
+  call: (name, body, headers = {}) ->
+    reply = @send!(body, headers)
     fail 'security', reply.security, { rpc: name } if reply.security isnt ''
     fail 'error', reply.error, { rpc: name } if reply.error isnt ''
     fail 'm', reply.data.split('\r\n')[0], { rpc: name, detail: reply.data } if reply.mError
@@ -432,6 +538,28 @@ export class Session
     fail 'signon', answer[1] or 'the new verify code was not accepted', { lines: answer } unless answer[0] is '0'
     true
 
+  # VistA's one-time sign-on handle for another connection (`XUS GET TOKEN`,
+  # Kernel's ASH^XUSRB4): `~1` then the handle, good for one try and for
+  # 20 seconds (90 on a later Kernel), from this client's address. It runs
+  # in any context. Keep it in memory only, and use it at once.
+  handle: ->
+    data = @rpc! 'XUS GET TOKEN'
+    fail 'signon', "VistA gave no sign-on handle (#{data or 'an empty reply'})" unless HANDLE.test(data)
+    data
+
+  # Sign this connection on with a handle from `handle` (`XUS AV CODE`,
+  # which Kernel's VALIDAV sends to CHKASH^XUSRB4 for a value starting
+  # `~1`): sent as is, never wrapped. Kernel deletes the handle at its first
+  # try, so a refused one is never worth sending again; the refusal counts
+  # as a failed sign-on from this address. Answers as `signOn`.
+  signOnHandle: (handle) ->
+    fail 'request', 'a sign-on handle is what `handle` answered (`~1` then the handle)' unless typeof handle is 'string' and HANDLE.test(handle)
+    answer = @lines! 'XUS AV CODE', handle
+    duz = Number(answer[0])
+    mustChangeVerify = answer[2] is '1'
+    fail 'signon', answer[3] or 'the sign-on handle was not accepted', { lines: answer, handle: true } if not (duz > 0) and not mustChangeVerify
+    { duz, mustChangeVerify, message: answer[3] ?? '', lines: answer }
+
   # Enter an application context (`XWB CREATE CONTEXT`); the reply is `1`.
   context: (option) ->
     data = @rpc! 'XWB CREATE CONTEXT', wrap(option, 'the context option')
@@ -473,6 +601,20 @@ export class Session
     @end 'bye'
     fail 'reply', "#BYE# was answered #{JSON.stringify(reply.data)}" unless reply.data is '#BYE#'
     true
+
+  # Sign out everywhere: one `#BYE#` with `OV-End: all` ends every
+  # connection under the browser's cookie (every tab's, a frozen or
+  # discarded one's too), each as `#BYE#` ends it. Sent even when this
+  # session's own connection has ended. Answers how many Janus ended.
+  endAll: ->
+    fail 'request', 'endAll is for a browser, whose connections share the cookie; a session with its own token ends with bye' if tokens.has(this)
+    @stopKeepalive()
+    @closing = true
+    @ended = null
+    reply = @send!(encodeCommand('#BYE#'), { 'OV-End': 'all' })
+    @end 'bye'
+    fail 'reply', "#BYE# was answered #{JSON.stringify(reply.data)}" unless reply.data is '#BYE#'
+    reply.ended
 
 # ==[ The default session ]==
 
