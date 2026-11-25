@@ -423,6 +423,38 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     }
   }, 60_000);
 
+  // The face writes DOM type names into the author's module, and the author
+  // may declare a type of the same name (a tree's `Node`): those names are
+  // spelled through globalThis, so the component's `mount` and children
+  // types still mean the DOM's and match the runtime's base class.
+  test('a component module may declare its own Node', async () => {
+    const dir = workspace({
+      'card.rip': [
+        'type Node = { key: string, depth: number }',
+        "tree: Node[] = [{ key: 'a', depth: 0 }]",
+        '',
+        'export Card = component',
+        "  @title: string = ''",
+        '  render',
+        '    div',
+        '      = @title',
+        '      slot',
+        '',
+        'export Shell = component',
+        '  render',
+        '    Card title: tree[0].key',
+        "      span 'child'",
+      ].join('\n') + '\n',
+    }, { strict: true });
+    try {
+      const r = await check(dir);
+      expect(r.stdout).toContain('No type errors');
+      expect(r.status).toBe(0);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   // Every component member form checks its initializer, and every wrong-typed
   // member WRITE inside a method reaches the source. Two mechanisms hold this
   // up and each has its own spelling below.

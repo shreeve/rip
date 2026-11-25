@@ -3477,7 +3477,7 @@ class Emitter {
       // against its own published type. A class expression has no name
       // for its own instance type; `typeof this` in a static member is
       // the constructor, so InstanceType of it is that type without one.
-      this.b.tsOnly(() => this.b.emit(`${pad}declare static mount: (target?: Node | string) => InstanceType<typeof this>;\n`));
+      this.b.tsOnly(() => this.b.emit(`${pad}declare static mount: (target?: globalThis.Node | string) => InstanceType<typeof this>;\n`));
     }
     this.b.tsOnly(() => {
       this.b.emit(`${pad}constructor(props${propsParamOptional(info) ? '?' : ''}: `);

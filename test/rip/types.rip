@@ -853,15 +853,15 @@ type 'void slot: optionality reaches inside the container only where absence can
     router?: any;
     params?: any;
     query?: any;
-    children?: Node | string | number | boolean | null;
+    children?: globalThis.Node | string | number | boolean | null;
     __offers?: {};
     __host?: {};
-    mount(target?: Node | string): Panel;
+    mount(target?: globalThis.Node | string): Panel;
     unmount(options?: { removeDOM?: boolean }): void;
   }
   export declare let Panel: {
-    new (props?: { title?: string | { value: string | undefined; read(): string | undefined; touch?(): void }; __bind_title__?: { value: string | undefined; read(): string | undefined; touch?(): void }; children?: Node | string | number | boolean | null }): Panel;
-    mount(target?: Node | string): Panel;
+    new (props?: { title?: string | { value: string | undefined; read(): string | undefined; touch?(): void }; __bind_title__?: { value: string | undefined; read(): string | undefined; touch?(): void }; children?: globalThis.Node | string | number | boolean | null }): Panel;
+    mount(target?: globalThis.Node | string): Panel;
   };
   '''
 
@@ -883,14 +883,14 @@ type 'callback prop: a bare function type in the head groups wherever the face u
     router?: any;
     params?: any;
     query?: any;
-    children?: Node | string | number | boolean | null;
+    children?: globalThis.Node | string | number | boolean | null;
     __offers?: {};
     __host?: {};
-    mount(target?: Node | string): Picker;
+    mount(target?: globalThis.Node | string): Picker;
     unmount(options?: { removeDOM?: boolean }): void;
   }
   export declare let Picker: {
-    new (props: { onPick?: ((label: string) => void) | { value: ((label: string) => void) | undefined; read(): ((label: string) => void) | undefined; touch?(): void }; __bind_onPick__?: { value: ((label: string) => void) | undefined; read(): ((label: string) => void) | undefined; touch?(): void }; onDone?: (() => void) | { value: () => void; read(): () => void; touch?(): void }; __bind_onDone__?: { value: () => void; read(): () => void; touch?(): void }; children?: Node | string | number | boolean | null } & ({ onDone: (() => void) | { value: () => void; read(): () => void; touch?(): void } } | { __bind_onDone__: { value: () => void; read(): () => void; touch?(): void } })): Picker;
+    new (props: { onPick?: ((label: string) => void) | { value: ((label: string) => void) | undefined; read(): ((label: string) => void) | undefined; touch?(): void }; __bind_onPick__?: { value: ((label: string) => void) | undefined; read(): ((label: string) => void) | undefined; touch?(): void }; onDone?: (() => void) | { value: () => void; read(): () => void; touch?(): void }; __bind_onDone__?: { value: () => void; read(): () => void; touch?(): void }; children?: globalThis.Node | string | number | boolean | null } & ({ onDone: (() => void) | { value: () => void; read(): () => void; touch?(): void } } | { __bind_onDone__: { value: () => void; read(): () => void; touch?(): void } })): Picker;
   };
   '''
 

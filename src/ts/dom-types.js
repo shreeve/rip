@@ -80,10 +80,12 @@ export const CLASS_VALUE_DECL =
 // renders as text. The union is the runtime's own admission (renderSlot:
 // a Node as-is, any other non-null value through String()); the name is
 // what the editor shows, scrubbed to `Children`, and its doc rides the
-// alias so a hover on the name explains it.
+// alias so a hover on the name explains it. `Node` is spelled through
+// globalThis: the alias lives in the author's module, which may declare a
+// `Node` of its own.
 export const CHILDREN_DECL =
   '/** What a component projects through `slot`: the DOM its parent built for it — an element, a fragment, or a text node — or a value rendered as text. */\n' +
-  'type __RipChildren = Node | string | number | boolean | null;';
+  'type __RipChildren = globalThis.Node | string | number | boolean | null;';
 
 // The `__clsx` signature for the runtime-destructure types assertion
 // (RUNTIME_TABLE `types`) — the one entry that types every merged
