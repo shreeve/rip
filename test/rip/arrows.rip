@@ -126,3 +126,31 @@ code "arrow comma ends body not object", """
     return 42;
   }, 99);
 """
+
+# A comma after a bracketed argument belongs to the call inside the body,
+# whether the brackets close on the line or after an indented element.
+test "arrow body call keeps the comma after an indented array", """
+  seen = []
+  f = (...args) -> seen.push args.length
+  h = (...fns) -> fns.length
+  n = h -> f [
+    1
+  ], 2
+  [n, seen]
+  """, [1, []]
+
+test "arrow body call keeps the comma after an indented array, called", """
+  f = (...args) -> args.length
+  h = (fn) -> fn()
+  h -> f [
+    1
+  ], 2
+  """, 2
+
+test "arrow body call keeps the comma after an indented object", """
+  f = (...args) -> args.length
+  h = (fn) -> fn()
+  h -> f {
+    a: 1
+  }, 2
+  """, 2

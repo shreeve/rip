@@ -122,7 +122,6 @@ function collectBlocks(tokens, mintId) {
       const k = tokens[j].kind;
       if (CLOSERS.has(k) || k === 'OUTDENT') { levels++; continue; }
       if (OPENERS.has(k) || k === 'INDENT') {
-        if (k === 'INDENT') return false;
         levels--;
         if (levels < 0) return false;
         continue;
