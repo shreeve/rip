@@ -357,6 +357,9 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     // diagnostics road reports a refused iterable once, on the loop's
     // head, from the record. TS face only; empty otherwise.
     indexedLoops: emitted.indexedLoops,
+    // The runtime import statements' generated spans: a diagnostic there
+    // reports at the file head (the runtime did not resolve).
+    runtimeImports: emitted.runtimeImports,
     // A STASH MODULE's own top-level keys (`{ keys, complete }`), read
     // off its binding's object literal; null for every other module.
     // The diagnostics road of a DEPENDENT names these in a miss.

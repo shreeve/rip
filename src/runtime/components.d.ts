@@ -17,6 +17,21 @@ type __RipProvider = abstract new (...args: never[]) => {
 type __RipOffers<P extends __RipProvider> = NonNullable<InstanceType<P>['__offers']>;
 type __RipProviding<P extends __RipProvider> = '__offers' extends keyof InstanceType<P> ? P : never;
 
+type __RipListBlock = {
+  c(): void;
+  m(parent: Node, anchor: Node | null): void;
+  p(ctx: unknown, item: unknown, index: number, ...outer: unknown[]): void;
+  d(detaching: boolean): void;
+  _s?: boolean;
+  _first?: Node | null;
+};
+
+type __RipListState = {
+  keys: unknown[];
+  items?: unknown[];
+  blocks: __RipListBlock[];
+};
+
 type __RipOwnerFrame = {
   readonly depth: number;
   readonly disposed: boolean;
@@ -98,21 +113,6 @@ type __RipGateMetadata = {
   parent?: __Component | null;
   stash?: unknown;
   router?: unknown;
-};
-
-type __RipListBlock = {
-  c(): void;
-  m(parent: Node, anchor: Node | null): void;
-  p(ctx: unknown, item: unknown, index: number, ...outer: unknown[]): void;
-  d(detaching: boolean): void;
-  _s?: boolean;
-  _first?: Node | null;
-};
-
-type __RipListState = {
-  keys: unknown[];
-  items?: unknown[];
-  blocks: __RipListBlock[];
 };
 
 type __RipTeardown = {

@@ -862,6 +862,7 @@ while (queue.length) {
       sourceKeys: result.sourceKeys ?? [],
       stashMembers: result.stashMembers ?? [],
       indexedLoops: result.indexedLoops ?? [],
+      runtimeImports: result.runtimeImports ?? [],
       memberInits: result.memberInits ?? [],
       // The render-pair re-anchor (mapTsDiagnostic): a complaint standing
       // on a pair's recorded relation site lands on the KEY here exactly
@@ -1091,6 +1092,7 @@ if (compiled.size > 0) {
         entry.good.stashMembers = r.stashMembers ?? [];
         entry.good.memberInits = r.memberInits ?? [];
         entry.good.renderPairs = r.renderPairs ?? [];
+        entry.good.runtimeImports = r.runtimeImports ?? [];
         entry.good.genLineStarts = lineStartsOf(r.code);
         fs.writeFileSync(entry.mirrorPath, r.code);
         tsgo.notify('textDocument/didOpen', { textDocument: { uri: entry.mirrorUri, languageId: 'typescript', version: 1, text: r.code } });

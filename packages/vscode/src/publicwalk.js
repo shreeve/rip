@@ -718,8 +718,8 @@ async function walkOne(ck, rootType, rootName, owns, rootSymbol, siblings, funct
         if ((info.keyType.flags & (TypeFlags.String | TypeFlags.Number)) === 0) continue;
         if (info.declaration !== undefined && !declaredAt(info.declaration, owns)) continue;
         // A CLASS type's index signature nobody declared is the checker's
-        // own: a class whose base types as `any` (the inlined runtime's
-        // `__Component`) answers every unknown name through a synthesized
+        // own: a class whose base types as `any` (an untyped base module)
+        // answers every unknown name through a synthesized
         // `string` index, on its instance and its constructor alike.
         // Nothing in the package wrote it, so nothing in it is the
         // package's to fix. A mapped type's index (`Record<string, any>`)

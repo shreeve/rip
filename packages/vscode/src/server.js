@@ -1906,6 +1906,12 @@ async function refresh(document) {
     // Per `__ripIndexed(…)` wrap of an indexed loop's iterable — a
     // refused iterable reports once, on the loop's head, from the record.
     indexedLoops: result.indexedLoops ?? [],
+    // The runtime import statements — a diagnostic there means the
+    // runtime did not resolve, and reports at the file head.
+    runtimeImports: result.runtimeImports ?? [],
+    // Each free reference to a runtime-injected name: the hover presents
+    // one without the alias dress the face's import gives it.
+    runtimeRefs: result.runtimeRefs ?? [],
     // Per member initializer, the lowered write's left-hand side and
     // the name it lands on (diagnostics.js, recordedAnchor).
     memberInits: result.memberInits ?? [],
@@ -3476,6 +3482,7 @@ connection.onHover(presented('textDocument/hover', async (params) => {
   const atPropKey = (ctx.good.renderPairs ?? []).some((p) => ctx.offset >= p.key[0] && ctx.offset < p.key[1]);
   contents = presentPropSlotHover(contents, atPropKey) ?? contents;
   contents = presentModuleAliasHover(ctx, contents) ?? contents;
+  contents = presentInjectedHover(ctx, contents) ?? contents;
   // The declaration's own kind. tsgo names the CELL the lowering binds
   // (`const count: number`), which describes the emission and not the
   // construct the author declared — the same leak the token audit refuses
@@ -4469,6 +4476,18 @@ function importedKindOf(fromDir, specifier, name) {
 
 // tsgo spells a module alias by its mirror path; the mirror never surfaces,
 // so the module reads as the stdlib name or a path relative to the file.
+// A runtime-injected name hovers through the face's import of it, which
+// tsgo dresses as `(alias) const sleep: …`; the source imported nothing,
+// so the dress goes.
+function presentInjectedHover(ctx, contents) {
+  const value = contents?.value;
+  if (typeof value !== 'string') return null;
+  const word = wordAtOffset(ctx.good.source, ctx.offset);
+  if (!(ctx.good.runtimeRefs ?? []).some((ref) => ref[2] === word)) return null;
+  const m = /^(```(?:typescript|ts)\n)\(alias\) /.exec(value);
+  return m ? { ...contents, value: `${m[1]}${value.slice(m[0].length)}` } : null;
+}
+
 function presentModuleAliasHover(ctx, contents) {
   const value = contents?.value;
   if (typeof value !== 'string') return null;

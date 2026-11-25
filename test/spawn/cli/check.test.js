@@ -365,35 +365,39 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
 
   // Faces import the runtime, so the declaration beside each runtime types
   // the lowering's own calls: a component's `_init` overrides the base's,
-  // a gate binds a typed cell, and a list factory takes its loop's item
-  // and every outer loop binding. A stdlib function declared `never`
-  // narrows what follows it.
+  // a gate binds the cell its stash projection names, and a list factory
+  // takes its loop's item and every outer loop binding. A stdlib function
+  // declared `never` narrows what follows it. `index.rip` beside
+  // package.json anchors the app, so the stash is discovered.
   test('the runtime declarations type the lowering: _init, a gate, list and nested-list factories, a never guard', async () => {
+    const STASH = [
+      "import { source } from 'rip/app'",
+      '',
+      'type Row = { id: number, label: string }',
+      'type User = { name: string, rows: Row[] }',
+      '',
+      "ada: User = { name: 'ada', rows: [] }",
+      '',
+      'export stash =',
+      '  user: source',
+      '    fetch: -> Promise.resolve ada',
+    ].join('\n') + '\n';
+    const page = (gate) => [
+      'export Page = component',
+      `  ${gate}`,
+      '  groups: { id: number, label: string }[][] := []',
+      '  render',
+      '    div user.name',
+      '    for row in user.rows',
+      '      span row.label',
+      '    for group, i in groups',
+      '      for row in group',
+      '        span "#{i} #{row.label}"',
+    ].join('\n') + '\n';
     const dir = workspace({
-      'app/stash.rip': [
-        "import { source } from 'rip/app'",
-        '',
-        'type Row = { id: number, label: string }',
-        'type User = { name: string, rows: Row[] }',
-        '',
-        "ada: User = { name: 'ada', rows: [] }",
-        '',
-        'export stash =',
-        '  user: source',
-        '    fetch: -> Promise.resolve ada',
-      ].join('\n') + '\n',
-      'app/routes/page.rip': [
-        'export Page = component',
-        '  user <~ @stash.user',
-        '  groups: { id: number, label: string }[][] := []',
-        '  render',
-        '    div user.name',
-        '    for row in user.rows',
-        '      span row.label',
-        '    for group, i in groups',
-        '      for row in group',
-        '        span "#{i} #{row.label}"',
-      ].join('\n') + '\n',
+      'index.rip': '',
+      'app/stash.rip': STASH,
+      'app/routes/page.rip': page('user <~ @stash.user'),
       'guard.rip': [
         'find = (xs: string[], key: string): string | null -> xs.find((x) -> x is key) ?? null',
         "hit = find ['a'], 'a'",
@@ -401,21 +405,31 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
         'console.log hit.length',
       ].join('\n') + '\n',
     }, { strict: true });
+    // An annotation on a gate checks against what the stash yields.
+    const annotated = workspace({
+      'index.rip': '',
+      'app/stash.rip': STASH,
+      'app/routes/page.rip': page('user: { wrong: boolean } <~ @stash.user'),
+    }, { strict: true });
     try {
       const r = await check(dir);
       expect(r.stdout).toContain('No type errors');
       expect(r.status).toBe(0);
-    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+      const bad = JSON.parse((await check(annotated, ['--json'])).stdout);
+      expect(bad.map((d) => [d.code, d.line])).toEqual([[2322, 2], [2339, 5], [2339, 6]]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(annotated, { recursive: true, force: true });
+    }
   }, 60_000);
 
   // Every component member form checks its initializer, and every wrong-typed
   // member WRITE inside a method reaches the source. Two mechanisms hold this
   // up and each has its own spelling below.
   //
-  // The initializer half is the face's runtime destructure: a component-carrying
-  // file fuses the components runtime into the reactive one, and the fused unit
-  // states the union of their signatures, so `__state`/`__computed` stay generic
-  // and every `_init` assignment checks against the member's declared type. The
+  // The initializer half is the runtime's declaration: the face imports
+  // `__state`/`__computed` generic, so every `_init` assignment checks against
+  // the member's declared type. The
   // `=!` member rides a second seam — its one legitimate constructor-seam write
   // casts `this` to the member's own type rather than to `any`, which would
   // swallow the value check along with TS2540.
@@ -3368,14 +3382,11 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
   }, 90_000);
 
   // A name the table leaves untyped is reported the way an untyped import
-  // is — the runtime named, every name listed, the first use located —
-  // and under the same posture: gradual accepts `any`, so the finding is
-  // strict's, previewed by `--strict` and reported once the project flips.
-  // The remedy is a table entry in the rip checkout, which no annotation
-  // in the project can stand in for, so the note says where and not what.
-  // `__lis` is the component runtime's own list helper, untyped by
-  // decision, as are the names only emission spells.
-  test('an injected `any` is advised like an inherited one, under the strict posture', async () => {
+  // is — the runtime named, every name listed, the first use located — under
+  // strict, since gradual accepts `any`. Every runtime that injects a name
+  // now types it in the table, the component runtime's own helpers
+  // included, so a strict project reading `__lis` is advised nothing.
+  test('an injected name the table types draws no `any` advisory, under the strict posture', async () => {
     const dir = workspace({
       'ctx.rip': [
         'order = (xs: number[]) -> __lis(xs)',
@@ -3383,17 +3394,10 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       ].join('\n') + '\n',
     });
     try {
-      const gradual = await check(dir, ['ctx.rip']);
-      expect(gradual.stdout).not.toContain('injected by');
       const preview = await check(dir, ['--strict', 'ctx.rip']);
-      expect(preview.stdout).toContain('1 value injected by the `components` runtime is `any`');
-      expect(preview.stdout).toContain('(`__lis`) — typed in the rip checkout\'s runtime table (src/emitter.js), not here');
-      expect(preview.stdout).toMatch(/ctx\.rip:1:27\s+__lis/);
-      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ rip: { strict: true } }));
-      const flipped = await check(dir, ['ctx.rip']);
-      expect(flipped.stdout).toContain('injected by the `components` runtime');
-      expect(flipped.stdout).toMatch(/ctx\.rip:1:27\s+__lis/);
-      expect(flipped.status).toBe(0);
+      expect(preview.stdout).toContain('No type errors');
+      expect(preview.stdout).not.toContain('injected by');
+      expect(preview.status).toBe(0);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 90_000);
 

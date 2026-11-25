@@ -15,7 +15,7 @@ export const OWNER_FRAME_DECLS = [
   'type __RipOwnerFrame = { readonly depth: number; readonly disposed: boolean; readonly size: number; add(disposer: () => void): void; remove(disposer: () => void): void; dispose(): void };',
   'type __RipOwnerToken = { frame: __RipOwnerFrame; prev: __RipOwnerFrame | null };',
 ].join('\n');
-const OWNER_FRAME_TYPES = {
+export const OWNER_FRAME_TYPES = {
   __ownerFrame: '(options?: { nested?: boolean }) => __RipOwnerFrame',
   __pushOwner: '(frame: __RipOwnerFrame) => __RipOwnerToken',
   __popOwner: '(token: __RipOwnerToken) => void',
@@ -51,8 +51,6 @@ const COMPONENTS_DECLS = [
   'type __RipUiSnapshot = { active: Element | null; locator: { identity: Record<string, string | null>; id: string | null; path: number[] | null } | null; selection: { start: number; end: number; direction: string } | null; scrollX: number; scrollY: number };',
   'type __RipGateBinding = { cell: { read(): unknown }; value: unknown };',
   'type __RipGateMetadata = { gates: readonly __RipGateBinding[]; parent?: __Component | null; stash?: unknown; router?: unknown };',
-  'type __RipListBlock = { c(): void; m(parent: Node, anchor: Node | null): void; p(ctx: unknown, item: unknown, index: number, ...outer: unknown[]): void; d(detaching: boolean): void; _s?: boolean; _first?: Node | null };',
-  'type __RipListState = { keys: unknown[]; items?: unknown[]; blocks: __RipListBlock[] };',
   TEARDOWN_DECL,
 ].join('\n');
 
@@ -159,19 +157,7 @@ export const RUNTIME_EXPORT_TYPES = {
   components: {
     decls: `${OWNER_FRAME_DECLS}\n${COMPONENTS_DECLS}`,
     types: {
-      __pushComponent: '(component: __Component | null) => __Component | null',
-      __popComponent: '(prev: __Component | null) => void',
-      __lis: '(arr: readonly number[]) => number[]',
-      __reconcile: '<C, T, O extends unknown[]>(anchor: Node | null | undefined, state: __RipListState, items: readonly T[], ctx: C, factory: (ctx: C, item: T, index: number, ...outer: O) => __RipListBlock, keyFn: ((item: T, index: number) => unknown) | null | undefined, ...outer: O) => void',
-      __transition: '(el: Element, name: string, dir: string, done?: (() => void) | null) => void',
-      __handleComponentError: '(error: unknown, component: __Component | null | undefined) => void',
-      __gateBind: '<T>(self: __Component, index: number) => { readonly value: T; read(): T }',
-      __detach: '(node: Node | null | undefined) => void',
-      __heldSlot: '(children: unknown) => Node',
-      __reportChildFailure: '(name: string, error: unknown) => void',
       __setChildFailureReporter: '(reporter: (name: string, error: unknown) => void) => (name: string, error: unknown) => void',
-      __hostOf: '(inst: __Component, event: string) => Element',
-      ...OWNER_FRAME_TYPES,
       __claimGateConstructor: '() => (Component: __RipComponentClass, metadata: __RipGateMetadata) => __Component',
       __hmrRegistry: 'Map<string, __RipHmrEntry>',
       __hmrLookup: '(id: string) => __RipHmrEntry | undefined',

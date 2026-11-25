@@ -9943,8 +9943,6 @@ var COMPONENTS_DECLS = [
   "type __RipUiSnapshot = { active: Element | null; locator: { identity: Record<string, string | null>; id: string | null; path: number[] | null } | null; selection: { start: number; end: number; direction: string } | null; scrollX: number; scrollY: number };",
   "type __RipGateBinding = { cell: { read(): unknown }; value: unknown };",
   "type __RipGateMetadata = { gates: readonly __RipGateBinding[]; parent?: __Component | null; stash?: unknown; router?: unknown };",
-  "type __RipListBlock = { c(): void; m(parent: Node, anchor: Node | null): void; p(ctx: unknown, item: unknown, index: number, ...outer: unknown[]): void; d(detaching: boolean): void; _s?: boolean; _first?: Node | null };",
-  "type __RipListState = { keys: unknown[]; items?: unknown[]; blocks: __RipListBlock[] };",
   TEARDOWN_DECL
 ].join(`
 `);
@@ -9999,19 +9997,7 @@ var RUNTIME_EXPORT_TYPES = {
     decls: `${OWNER_FRAME_DECLS}
 ${COMPONENTS_DECLS}`,
     types: {
-      __pushComponent: "(component: __Component | null) => __Component | null",
-      __popComponent: "(prev: __Component | null) => void",
-      __lis: "(arr: readonly number[]) => number[]",
-      __reconcile: "<C, T, O extends unknown[]>(anchor: Node | null | undefined, state: __RipListState, items: readonly T[], ctx: C, factory: (ctx: C, item: T, index: number, ...outer: O) => __RipListBlock, keyFn: ((item: T, index: number) => unknown) | null | undefined, ...outer: O) => void",
-      __transition: "(el: Element, name: string, dir: string, done?: (() => void) | null) => void",
-      __handleComponentError: "(error: unknown, component: __Component | null | undefined) => void",
-      __gateBind: "<T>(self: __Component, index: number) => { readonly value: T; read(): T }",
-      __detach: "(node: Node | null | undefined) => void",
-      __heldSlot: "(children: unknown) => Node",
-      __reportChildFailure: "(name: string, error: unknown) => void",
       __setChildFailureReporter: "(reporter: (name: string, error: unknown) => void) => (name: string, error: unknown) => void",
-      __hostOf: "(inst: __Component, event: string) => Element",
-      ...OWNER_FRAME_TYPES,
       __claimGateConstructor: "() => (Component: __RipComponentClass, metadata: __RipGateMetadata) => __Component",
       __hmrRegistry: "Map<string, __RipHmrEntry>",
       __hmrLookup: "(id: string) => __RipHmrEntry | undefined",
@@ -10064,6 +10050,7 @@ var readonlyCastType = () => {
   throw new Error("rip: component type story is unavailable in the browser");
 };
 var routeArgType = () => "string";
+var gateProjection = () => null;
 var hookParamTypes = () => null;
 var ambientClassDeclares = () => [];
 var plainBehaviorValued = () => false;
@@ -10412,6 +10399,7 @@ class Emitter {
     this.hmr = hmr === true;
     this.modulePath = typeof modulePath === "string" && modulePath.length > 0 ? modulePath : null;
     this.importSpans = [];
+    this.runtimeImports = [];
     this.typeOnlyImports = new Set;
     this.pins = pins;
     this.pinnables = [];
@@ -18067,7 +18055,11 @@ ${pad}${into}.push(...${tmp});`);
       const emitGate = (gate, index) => {
         initLine(gate.node, () => {
           memberName(gate.node, gate.name);
-          this.b.emit(` = ${this.runtimeName("__gateBind")}(`);
+          this.b.emit(` = ${this.runtimeName("__gateBind")}`);
+          const projection = this.ts && this.appStashSpec !== null ? gateProjection(gate, this.appStashSpec) : null;
+          if (projection !== null)
+            this.b.tsOnly(() => this.b.emit(`<${projection}>`));
+          this.b.emit("(");
           this.mark(gate.node, "operator", () => {});
           this.mark(gate.node, "rhs", () => {
             this.b.emit(`this, ${index}`);
@@ -24327,7 +24319,9 @@ var SCHEMA_TYPE_DECLS = [
 var COMPONENTS_TYPE_DECLS = [
   "type __RipProvider = abstract new (...args: never[]) => { __offers?: object };",
   "type __RipOffers<P extends __RipProvider> = NonNullable<InstanceType<P>['__offers']>;",
-  "type __RipProviding<P extends __RipProvider> = '__offers' extends keyof InstanceType<P> ? P : never;"
+  "type __RipProviding<P extends __RipProvider> = '__offers' extends keyof InstanceType<P> ? P : never;",
+  "type __RipListBlock = { c(): void; m(parent: Node, anchor: Node | null): void; p(ctx: unknown, item: unknown, index: number, ...outer: unknown[]): void; d(detaching: boolean): void; _s?: boolean; _first?: Node | null };",
+  "type __RipListState = { keys: unknown[]; items?: unknown[]; blocks: __RipListBlock[] };"
 ].join(`
 `);
 var COERCER_TYPE = "{ <F extends (value: string) => unknown>(name: string, fn: F, options?: { raw?: false }): F; <F extends (value: unknown) => unknown>(name: string, fn: F, options: { raw: boolean }): F }";
@@ -24344,6 +24338,10 @@ var RUNTIME_TABLE = [
     key: "intrinsics",
     names: ["__toPropertyKey", "__defineOwnDataProperty"],
     generatedNames: ["__toPropertyKey", "__defineOwnDataProperty"],
+    types: {
+      __toPropertyKey: "(value: unknown) => string | symbol",
+      __defineOwnDataProperty: "<T extends object>(target: T, key: PropertyKey, value: unknown) => T"
+    },
     url: new URL("./runtime/intrinsics.js", import.meta.url),
     triggers: (sexpr, preds) => containsObjectComprehension(sexpr)
   },
@@ -24507,7 +24505,19 @@ var RUNTIME_TABLE = [
       __clsx: CLSX_TYPE,
       __style: STYLE_FN_TYPE,
       __Component: { class: COMPONENT_CLASS, decls: `${OWNER_FRAME_DECLS}
-${TEARDOWN_DECL}` }
+${TEARDOWN_DECL}` },
+      __pushComponent: "(component: __Component | null) => __Component | null",
+      __popComponent: "(prev: __Component | null) => void",
+      __lis: "(arr: readonly number[]) => number[]",
+      __reconcile: "<C, T, O extends unknown[]>(anchor: Node | null | undefined, state: __RipListState, items: readonly T[], ctx: C, factory: (ctx: C, item: T, index: number, ...outer: O) => __RipListBlock, keyFn: ((item: T, index: number) => unknown) | null | undefined, ...outer: O) => void",
+      __transition: "(el: Element, name: string, dir: string, done?: (() => void) | null) => void",
+      __handleComponentError: "(error: unknown, component: __Component | null | undefined) => void",
+      __gateBind: "<T>(self: __Component, index: number) => { readonly value: T; read(): T }",
+      __detach: "(node: Node | null | undefined) => void",
+      __heldSlot: "(children: unknown) => Node",
+      __reportChildFailure: "(name: string, error: unknown) => void",
+      __hostOf: "(inst: __Component, event: string) => Element",
+      ...OWNER_FRAME_TYPES
     },
     url: new URL("./runtime/components.js", import.meta.url),
     requires: "reactive",
@@ -24515,7 +24525,16 @@ ${TEARDOWN_DECL}` }
   }
 ];
 var faceClassName = (name) => `__Rip${name.replace(/^_+/, "")}`;
-var _faceRuntimeType = (name, signature) => typeof signature === "object" ? `typeof ${faceClassName(name)}` : signature;
+var _faceRuntimeType = (name, signature, types = {}) => {
+  if (typeof signature === "object")
+    return `typeof ${faceClassName(name)}`;
+  let text = signature;
+  for (const [cls, sig] of Object.entries(types)) {
+    if (typeof sig === "object")
+      text = text.replace(new RegExp(`\\b${cls}\\b`, "g"), faceClassName(cls));
+  }
+  return text;
+};
 var _faceClassDecls = (types) => Object.entries(types ?? {}).filter(([, signature]) => typeof signature === "object").map(([name, { class: body, decls }]) => {
   const text = body.replace(new RegExp(`\\b${name}\\b`, "g"), faceClassName(name));
   return `${decls ? `${decls}
@@ -25050,7 +25069,7 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
     const units = [];
     if (runtimeDelivery === "import") {
       for (const rt of active)
-        units.push({ runtimes: [rt], names: rt.names, imp: rt.url.pathname, types: rt.types });
+        units.push({ runtimes: [rt], names: rt.names, imp: decodeURIComponent(rt.url.pathname), types: rt.types });
     } else {
       const fused = new Set(active.flatMap((rt) => runtimeRequires(rt)));
       for (const rt of active) {
@@ -25104,6 +25123,7 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
         emitter.importSpans.push({ start: specStart, end: builder.offset, specifier: JSON.stringify(unit.imp) });
         builder.emit(`;
 `);
+        emitter.runtimeImports.push([start, builder.offset]);
       } else {
         if (face === "ts" && unit.types) {
           const decls = [unit.decls, _faceClassDecls(unit.types)].filter(Boolean).join(`
@@ -25115,7 +25135,7 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
             emitter._needsCssProperties = true;
         }
         builder.emit(`const { ${bindings.map(({ name, local }) => name === local ? name : `${name}: ${local}`).join(", ")} }`);
-        const types = face === "ts" && unit.types ? `{ ${bindings.map(({ name }) => `${name}: ${_faceRuntimeType(name, unit.types[name] ?? "any")}`).join("; ")} }` : null;
+        const types = face === "ts" && unit.types ? `{ ${bindings.map(({ name }) => `${name}: ${_faceRuntimeType(name, unit.types[name] ?? "any", unit.types)}`).join("; ")} }` : null;
         if (types !== null && types.includes("__RipClassValue"))
           emitter._needsClassValue = true;
         if (types !== null && types.includes("__RipCSSProperties"))
@@ -25424,7 +25444,7 @@ export {};
     });
   }
   const partNames = emitter.exportedObjects.filter(([, values]) => values.every((value) => emitter.componentNames.includes(value))).map(([name]) => name);
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, runtimeRefs: emitter.runtimeRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, indexedLoops: emitter.indexedLoops, componentUses: emitter.componentUses, componentProps: emitter.componentProps, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
+  return { code: builder.code, mappings: builder.rows, runtimeImports: emitter.runtimeImports, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, runtimeRefs: emitter.runtimeRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, indexedLoops: emitter.indexedLoops, componentUses: emitter.componentUses, componentProps: emitter.componentProps, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
 }
 
 // src/sourcemap.js
@@ -25633,6 +25653,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     sourceKeys: emitted.sourceKeys,
     stashMembers: emitted.stashMembers,
     indexedLoops: emitted.indexedLoops,
+    runtimeImports: emitted.runtimeImports,
     stashKeys: emitted.stashKeys,
     renderPairs: emitted.renderPairs,
     kinds: emitted.kinds,
@@ -34151,7 +34172,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "16a7e8a9fde67d7b";
+var compilerBuild = () => "6483d9ac1a3c91d7";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

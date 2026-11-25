@@ -993,8 +993,8 @@ export function exactSpanMapper(mappings) {
 }
 
 // Compiler-owned spellings that must never surface as completion items:
-// the `__`-prefixed runtime namespace (inlined runtime exports and
-// their internals) and the `_ref` temp family (hoisted chain-comparison
+// the `__`-prefixed runtime namespace (the runtime exports a face
+// imports) and the `_ref` temp family (hoisted chain-comparison
 // caches). Both namespaces are the compiler's by construction — temps
 // dodge every user identifier, and the runtime ships under `__`.
 // The lowering's own names never surface as completion items: the `__`
@@ -1065,9 +1065,7 @@ export function scrubFaceArtifacts(text) {
     .replace(/\b__RipClassValue\b/g, 'ClassValue')
     .replace(/\b__RipChildren\b/g, 'Children')
     .replace(/\b__RipCSSProperties\b/g, 'CSSProperties')
-    // The runtime base every component extends: the face's own class name,
-    // and the runtime module's, which an imported runtime declares.
-    .replace(/\b__RipComponent\b/g, 'Component')
+    // The runtime base every component extends.
     .replace(/\b__Component\b/g, 'Component')
     // The schema and orm runtimes' face vocabulary reads under the names
     // docs/ORM.md uses for the same shapes.

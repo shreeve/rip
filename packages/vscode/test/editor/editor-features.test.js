@@ -77,7 +77,7 @@ const APP_AB = 'import { aa } from "./a.rip"\nimport { bb } from "./b.rip"\nk = 
 describe.concurrent.skipIf(!tsgoAvailable)('completions', () => {
   test('member completion serves with resolve-lazy detail; scaffolding labels never surface', async () => {
     await inWorkspace({}, async (api) => {
-      // A reactive declaration inlines the __ runtime into the face —
+      // A reactive declaration brings the __ runtime into the face —
       // its exports (and the _ref temp family) are compiler territory
       // and must never appear as completion items.
       await api.open('app.rip', 'count := 0\nmsg = "hi"\nk = msg.sub\n');
@@ -1506,6 +1506,16 @@ describe.concurrent.skipIf(!tsgoAvailable)('write-site hover enrichment across f
       await api.change('lib.rip', 'total = 1 + 2\nout = total.toFixed(2)\nexport { out }\n');
       const local = await api.hover('lib.rip', 0, 1);
       expect(local.contents.value).toContain('let total: number');
+    });
+  }, 30000);
+
+  // The face imports each runtime, so tsgo hovers an injected name as an
+  // alias; the source imported nothing, and the hover says what it is.
+  test('an injected runtime name hovers its signature, never an alias', async () => {
+    await inWorkspace({}, async (api) => {
+      await api.open('app.rip', "sleep! 10\nabort 'x' unless true\n");
+      expect((await api.hover('app.rip', 0, 1)).contents.value).toContain('\nconst sleep: (ms: number) => Promise<void>\n');
+      expect((await api.hover('app.rip', 1, 1)).contents.value).toContain('\nconst abort: (msg?: string) => never\n');
     });
   }, 30000);
 
