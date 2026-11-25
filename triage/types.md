@@ -3,8 +3,53 @@
 Survivors of the lexer-pass mutation audit at 119b45bb, classified per the triage brief.
 Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 
-## GAP (54)
+## GAP (99)
 
+- src/types.js:217:11845:statement — test/rip/types.rip › a method member after a generic member in an inline object type
+- src/types.js:217:11858:number — test/rip/types.rip › a method member after a generic member in an inline object type
+- src/types.js:217:11863:relation — test/rip/types.rip › a method member after a generic member in an inline object type
+- src/types.js:221:12009:branch — test/rip/types.rip › an unclosed nested generic in an interface body rejects at the outer opener
+- src/types.js:221:12016:relation — test/rip/types.rip › an unclosed nested generic in an interface body rejects at the outer opener
+- src/types.js:221:12020:number — test/rip/types.rip › an unclosed nested generic in an interface body rejects at the outer opener
+- src/types.js:231:12293:statement — test/rip/types.rip › a negative literal type argument
+- src/types.js:231:12303:boolean — test/rip/types.rip › a negative literal type argument
+- src/types.js:234:12408:boolean — test/rip/types.rip › arithmetic after a generic close rejects
+- src/types.js:235:12449:logic — test/rip/types.rip › a triple generic close in a type body
+- src/types.js:235:12501:boolean — test/rip/types.rip › arithmetic after a double generic close rejects
+- src/types.js:236:12530:relation — test/rip/types.rip › a triple generic close in a type body
+- src/types.js:236:12542:logic — test/rip/types.rip › a left shift in a type body rejects
+- src/types.js:236:12553:relation — test/rip/types.rip › a triple generic close in a type body
+- src/types.js:236:12581:number — test/rip/types.rip › a triple generic close in a type body
+- src/types.js:236:12595:boolean — test/rip/types.rip › arithmetic after a triple generic close rejects
+- src/types.js:236:12601:statement — test/rip/types.rip › a triple generic close in a type body
+- src/types.js:237:12636:logic — test/rip/types.rip › delete in a type body rejects
+- src/types.js:237:12673:boolean — test/rip/types.rip › a negative literal after typeof is in prefix position
+- src/types.js:249:13484:number — test/rip/types.rip › an asserts predicate as a whole alias body
+- src/types.js:249:13486:relation — test/rip/types.rip › an asserts predicate as a whole alias body
+- src/types.js:250:13515:arith — test/rip/types.rip › a predicate on a non-name subject rejects
+- src/types.js:250:13564:relation — test/rip/types.rip › a predicate on a non-name subject rejects
+- src/types.js:254:13798:boolean — test/rip/types.rip › a type predicate on a negative literal type
+- src/types.js:265:14458:arith — test/rip/types.rip › a tight readonly mapped row with an optionality modifier
+- src/types.js:265:14460:number — test/rip/types.rip › a tight readonly mapped row with an optionality modifier
+- src/types.js:265:14468:relation — test/rip/types.rip › a tight readonly mapped row with an optionality modifier
+- src/types.js:266:14508:arith — test/rip/types.rip › a mapped type over a literal union
+- src/types.js:266:14557:relation — test/rip/types.rip › a mapped row over a non-name parameter rejects
+- src/types.js:268:14639:boolean — test/rip/types.rip › a mapped type whose constraint opens with a negative literal
+- src/types.js:276:15169:boolean — test/rip/types.rip › a negative literal after a negative literal rejects
+- src/types.js:283:15646:arith — test/rip/types.rip › a tight -readonly mapped row with an optionality modifier
+- src/types.js:283:15648:number — test/rip/types.rip › a tight -readonly mapped row with an optionality modifier
+- src/types.js:291:16109:logic — test/rip/types.rip › a sign before an optional marker outside a mapped row rejects
+- src/types.js:292:16148:logic — test/rip/types.rip › a mapped type with a negative literal value
+- src/types.js:292:16171:logic — test/rip/types.rip › arithmetic after an array type rejects
+- src/types.js:293:16223:arith — test/rip/types.rip › a tight readonly mapped row with an optionality modifier
+- src/types.js:293:16225:number — test/rip/types.rip › a tight readonly mapped row with an optionality modifier
+- src/types.js:293:16234:relation — test/rip/types.rip › a sign before an optional marker outside a mapped row rejects
+- src/types.js:296:16320:relation — test/rip/types.rip › an assignment line in a block alias body rejects
+- src/types.js:296:16337:boolean — test/rip/types.rip › a negative literal after a generic default
+- src/types.js:306:16950:relation — test/rip/types.rip › a string-named method shorthand in an interface rejects
+- src/types.js:316:17288:statement — test/rip/types.rip › two method members in an inline object type
+- src/types.js:317:17316:statement — test/rip/types.rip › a negative literal opening a method parameter list
+- src/types.js:317:17326:boolean — test/rip/types.rip › a negative literal opening a method parameter list
 - src/types.js:1399:66520:logic — test/rip/types.rip › an implicit call whose argument assigns is not a type alias
 - src/types.js:1402:66703:relation — test/rip/types.rip › a function named type called mid-expression is not an alias
 - src/types.js:1417:67416:number — test/rip/types.rip › as before an operator that starts no type stays a name
@@ -60,8 +105,23 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:1901:90987:statement — test/rip/types.rip › a colon after a parameter default is an object key
 - src/types.js:1901:91013:boolean — test/rip/types.rip › a colon after a parameter default is an object key
 
-## EQUIVALENT (72)
+## EQUIVALENT (87)
 
+- src/types.js:221:12006:statement — openAngle is reassigned at every `<` opened from angle 0 and read only while angle > 0, i.e. after such an opener; the stale value is always overwritten first
+- src/types.js:249:13482:arith — j-2 < from puts tokens[j-2] before the body: the alias `=` or the body INDENT, never `=>`, `asserts`, or a `:` after CALL_END, so the shape test fails there anyway
+- src/types.js:250:13554:arith — a predicate subject is followed by `is`, never `:`, so it never carries the keys-colon PROPERTY tag; dropping the PROPERTY leg loses nothing, and the token after `is` being PROPERTY needs a following `:` no predicate has
+- src/types.js:250:13556:number — the PROPERTY subject leg never matches (see 250:13554); testing the `is` token itself (COMPARE) is the same false
+- src/types.js:264:14395:arith — admitting j-2 < from requires both a `[` and an enclosing `{` inside the body before `in`, i.e. j >= from+3, so the bound never decides
+- src/types.js:264:14397:number — enclosing() === '[' with enclosing(1) === '{' needs `{` and `[` in the body before `in`, so j >= from+3 already
+- src/types.js:264:14399:relation — same as 264:14397 — j >= from+3 whenever the group checks pass
+- src/types.js:266:14547:arith — the mapped parameter name is followed by `in`, never `:`, so the PROPERTY leg never matches; the token after `in` likewise never carries the keys tag
+- src/types.js:266:14549:number — the PROPERTY leg never matches (see 266:14547); testing the `in` token itself is the same false
+- src/types.js:275:15065:boolean — the rule requires tokens[j+1] to be `:`, which matches no atomEnd-reading rule and resets atomEnd (not an atom ender) before any read
+- src/types.js:285:15761:boolean — the rule requires tokens[j+1] to be `readonly`, an IDENTIFIER that matches no atomEnd-reading rule and sets atomEnd itself
+- src/types.js:294:16270:boolean — the rule requires tokens[j+1] to be `?`; `?` is TYPE_VOCAB, so it is admitted (and leaves atomEnd false) whether the optional-member rule or the vocabulary takes it
+- src/types.js:309:17043:relation — tokens[to] is the body's OUTDENT or the alias line's TERMINATOR/OUTDENT (typeAliasEnd rejects anything else after the run), never CALL_START/CALL_END
+- src/types.js:328:17580:logic — every CALL_START in a body either rejects or pushes its mate's index, and the pairs nest, so each CALL_END that reaches this line is the stack top
+- src/types.js:329:17680:boolean — a method list's CALL_END is always followed by its return `:` (the push requires it), which matches no atomEnd-reading rule and resets atomEnd
 - src/types.js:1160:55747:number — classHeadRunDepth is only compared with classHeadDepth, which is captured from it at CLASS; a constant offset of 1 changes no comparison (balanced brackets keep it >= its start, so `classHeadDepth >= 0` still means armed)
 - src/types.js:1404:66838:relation — typeAliasEnd/interfaceEnd return -1 or an index >= i+3 (name, `=`/INDENT follow), never 0
 - src/types.js:1404:66841:number — typeAliasEnd/interfaceEnd return -1 or an index >= i+3, never in [0, 1)

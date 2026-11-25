@@ -1172,3 +1172,66 @@ test 'a newline after a semicolon ends an inline default body', '''
   ) -> b
   f(undefined, 7)
 ''', 7
+
+# ==============================================================================
+# Mutation-audit pins — the type-body vocabulary floor
+# ==============================================================================
+
+type 'a method member after a generic member in an inline object type', 'type X = {a: Foo<B>, m(x: number): void}', '''
+  type X = {a: Foo<B>, m(x: number): void};
+'''
+type 'two method members in an inline object type', 'type X = {m(a: number): void, n(b: number): void}', '''
+  type X = {m(a: number): void, n(b: number): void};
+'''
+type 'a triple generic close in a type body', 'type X = A<B<C<D>>>', '''
+  type X = A<B<C<D>>>;
+'''
+type 'a negative literal type argument', 'type X = Foo<-1>', '''
+  type X = Foo<-1>;
+'''
+type 'a negative literal after typeof is in prefix position', 'type X = typeof -1', '''
+  type X = typeof -1;
+'''
+type 'an asserts predicate as a whole alias body', 'type P = asserts v is string', '''
+  type P = asserts v is string;
+'''
+type 'a type predicate on a negative literal type', 'type G = (v: unknown) => v is -1', '''
+  type G = (v: unknown) => v is -1;
+'''
+type 'a mapped type over a literal union', 'type M = {[K in "a" | "b"]: number}', '''
+  type M = {[K in "a" | "b"]: number};
+'''
+type 'a mapped type whose constraint opens with a negative literal', 'type M = {[K in -1]: number}', '''
+  type M = {[K in -1]: number};
+'''
+type 'a mapped type with a negative literal value', 'type M = {[K in Keys]: -1}', '''
+  type M = {[K in Keys]: -1};
+'''
+type 'a tight readonly mapped row with an optionality modifier', 'type M = { readonly[K in keyof T]-?: T[K] }', '''
+  type M = { readonly[K in keyof T]-?: T[K] };
+'''
+type 'a tight -readonly mapped row with an optionality modifier', 'type M = { -readonly[K in keyof T]-?: T[K] }', '''
+  type M = { -readonly[K in keyof T]-?: T[K] };
+'''
+type 'a negative literal after a generic default', 'type X = Foo<A = -1>', '''
+  type X = Foo<A = -1>;
+'''
+type 'a negative literal opening a method parameter list', "interface I\n  m(-1): void", '''
+  interface I {
+    m(-1): void;
+  }
+'''
+
+fail 'an unclosed nested generic in an interface body rejects at the outer opener', "interface I\n  a: A<B<C>", "2:7: unclosed '<' in a type body"
+fail 'arithmetic after a generic close rejects', 'type X = Foo<B> - 1', "code expression ('-')"
+fail 'arithmetic after a double generic close rejects', 'type X = A<B<C>> - 1', "code expression ('-')"
+fail 'arithmetic after a triple generic close rejects', 'type X = A<B<C<D>>> - 1', "code expression ('-')"
+fail 'a left shift in a type body rejects', 'type X = A << B', "code expression ('<<')"
+fail 'delete in a type body rejects', 'type X = delete A', "code expression ('delete')"
+fail 'a predicate on a non-name subject rejects', 'type G = (v: unknown) => 1 is string', "code expression ('is')"
+fail 'a mapped row over a non-name parameter rejects', 'type M = {[1 in Keys]: number}', "code expression ('in')"
+fail 'a negative literal after a negative literal rejects', 'type X = -1 -1', "code expression ('-')"
+fail 'a sign before an optional marker outside a mapped row rejects', 'type X = { a - ?: number }', "code expression ('-')"
+fail 'arithmetic after an array type rejects', 'type X = A[] + 1', "code expression ('+')"
+fail 'an assignment line in a block alias body rejects', "type X =\n  a: number\n  b = 2", "code expression ('=')"
+fail 'a string-named method shorthand in an interface rejects', "interface I\n  \"m\"(x: number): void", "code expression ('(')"
