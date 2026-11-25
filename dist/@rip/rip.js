@@ -4030,8 +4030,6 @@ function collectBlocks(tokens, mintId) {
         continue;
       }
       if (OPENERS.has(k) || k === "INDENT") {
-        if (k === "INDENT")
-          return false;
         levels--;
         if (levels < 0)
           return false;
@@ -4470,7 +4468,7 @@ function collectObjects(tokens, mintId) {
     if (prev && !prev.generated)
       lastReal = prev;
     if (top()?.kind === "object" && CONTROL_IN_IMPLICIT.has(k) && !(k === "FOR" && !t.newLine && prev && VALUE_END.has(prev.kind))) {
-      stack.push({ kind: "CONTROL", trigger: k });
+      stack.push({ kind: "CONTROL" });
       continue;
     }
     if (k === "INDENT") {
@@ -4517,9 +4515,11 @@ function collectObjects(tokens, mintId) {
         claimedColons.add(i);
         continue;
       }
-      if (prev?.kind === "DAMMIT")
+      if (!prev || LINE_BREAK_KINDS.has(prev.kind))
+        continue;
+      if (prev.kind === "DAMMIT")
         prev.kind = "VOID_MARKER";
-      const bang = prev?.kind === "VOID_MARKER" ? 1 : 0;
+      const bang = prev.kind === "VOID_MARKER" ? 1 : 0;
       let s = PASS_CLOSERS.has(prev?.kind) ? top()?.at ?? i - 1 : i - 1 - bang;
       if (tokens[i - 2 - bang]?.kind === "@")
         s = i - 2 - bang;
@@ -4560,7 +4560,7 @@ function collectObjects(tokens, mintId) {
             fr.sameLine = false;
         }
       }
-      while (top()?.kind === "object" || k === "TERMINATOR" && top()?.kind === "CONTROL" && top()?.trigger === "CLASS") {
+      while (top()?.kind === "object" || k === "TERMINATOR" && top()?.kind === "CONTROL") {
         const fr = top();
         if (fr.kind === "CONTROL") {
           stack.pop();
@@ -4633,7 +4633,7 @@ function collectCalls(tokens, mintId) {
     if (i > 0 && !tokens[i - 1].generated)
       lastReal = tokens[i - 1];
     if (stack[stack.length - 1] === "call" && CONTROL_IN_IMPLICIT.has(k) && !(k === "FOR" && !t.newLine && tokens[i - 1] && VALUE_END.has(tokens[i - 1].kind))) {
-      stack.push(k === "CLASS" ? "CONTROL_CLASS" : "CONTROL");
+      stack.push("CONTROL");
       continue;
     }
     if (k === "INDENT") {
@@ -4646,7 +4646,7 @@ function collectCalls(tokens, mintId) {
         while (stack[stack.length - 1] === "call")
           closeCall(i);
       }
-      if (stack[stack.length - 1] === "CONTROL" || stack[stack.length - 1] === "CONTROL_CLASS")
+      if (stack[stack.length - 1] === "CONTROL")
         stack.pop();
       stack.push("INDENT");
       continue;
@@ -4654,7 +4654,7 @@ function collectCalls(tokens, mintId) {
     if (PASS_OPENERS.has(k)) {
       stack.push(k);
     } else if (PASS_CLOSERS.has(k)) {
-      while (stack[stack.length - 1] === "call" || stack[stack.length - 1] === "CONTROL" || stack[stack.length - 1] === "CONTROL_CLASS") {
+      while (stack[stack.length - 1] === "call" || stack[stack.length - 1] === "CONTROL") {
         if (stack[stack.length - 1] === "call")
           closeCall(i);
         else
@@ -4668,7 +4668,7 @@ function collectCalls(tokens, mintId) {
       if (k === "ELSE" && tokens[i - 1]?.kind === "OUTDENT")
         continue;
       if (tokens[i - 1]?.kind !== ",") {
-        while (stack[stack.length - 1] === "call" || k === "TERMINATOR" && stack[stack.length - 1] === "CONTROL_CLASS") {
+        while (stack[stack.length - 1] === "call" || k === "TERMINATOR" && stack[stack.length - 1] === "CONTROL") {
           if (stack[stack.length - 1] === "call")
             closeCall(i);
           else
@@ -4688,7 +4688,7 @@ function collectCalls(tokens, mintId) {
   }
   if (tokens.length && !tokens[tokens.length - 1].generated)
     lastReal = tokens[tokens.length - 1];
-  while (stack[stack.length - 1] === "call" || stack[stack.length - 1] === "CONTROL" || stack[stack.length - 1] === "CONTROL_CLASS") {
+  while (stack[stack.length - 1] === "call" || stack[stack.length - 1] === "CONTROL") {
     if (stack[stack.length - 1] === "call")
       closeCall(tokens.length);
     else
@@ -5181,7 +5181,7 @@ var collectTypeRun = (tokens, j, opts, fail) => {
       const kd = t.kind;
       if (opts.cast && depth === 0 && isPostfixTypeWord(t))
         break;
-      if (opts.cast && depth === 0 && j > startJ && t.newLine)
+      if (opts.cast && depth === 0 && j > startJ && t.newLine && tokens[j - 1].kind !== "|" && tokens[j - 1].kind !== "&")
         break;
       if (kd === "SHIFT" && (t.value === ">>" || t.value === ">>>") && angleOpens.length > 0) {
         closeAngles(t, t.value === ">>" ? 2 : 3);
@@ -5616,6 +5616,7 @@ var matchingOutdent = (tokens, at) => {
 var IMMEDIATE_BODY_HEADS = new Set(["->", "=>", "DO_IIFE", "TRY", "LOOP"]);
 var CONDITION_BODY_HEADS = new Set(["IF", "UNLESS", "SWITCH", "WHILE", "UNTIL", "FOR", "CLASS"]);
 var INLINE_BODY_INTRODUCERS = new Set(["->", "=>", "THEN", "ELSE"]);
+var CLAUSE_BODY_HEADS = new Set(["ELSE", "CATCH", "FINALLY"]);
 var CLASS_HEAD_ENDERS = new Set([
   "TERMINATOR",
   "INDENT",
@@ -5690,6 +5691,8 @@ function rewriteTypes(tokens, mintId, text, fail) {
   let prevSiblingKV = false, curLineKV = false;
   let assignIndex = null;
   const assignedLater = (start, name) => {
+    if (start >= tokens.length)
+      return false;
     assignIndex ??= buildAssignIndex(tokens);
     const m = assignIndex.blockMaps[assignIndex.blockIdAt[start]];
     return (m.get(name) ?? -1) >= start;
@@ -6123,7 +6126,8 @@ function rewriteTypes(tokens, mintId, text, fail) {
         bodyDepth: 0,
         pendingImmediate: false,
         pendingCond: false,
-        inlineBody: false
+        inlineBody: false,
+        afterBody: false
       });
     } else if (RUN_CLOSERS.has(kd)) {
       const open = frames.pop();
@@ -6138,12 +6142,15 @@ function rewriteTypes(tokens, mintId, text, fail) {
           f.pendingImmediate = false;
           f.pendingCond = false;
           f.inlineBody = false;
+          f.afterBody = false;
         };
+        const afterBody = f.afterBody;
+        f.afterBody = false;
         if (f.bodyDepth > 0) {
           if (kd === "INDENT")
             f.bodyDepth++;
-          else if (kd === "OUTDENT")
-            f.bodyDepth--;
+          else if (kd === "OUTDENT" && --f.bodyDepth === 0)
+            f.afterBody = true;
         } else if (kd === "INDENT") {
           if (f.pendingImmediate || f.pendingCond) {
             f.bodyDepth = 1;
@@ -6164,7 +6171,9 @@ function rewriteTypes(tokens, mintId, text, fail) {
           }
         } else {
           f.pendingImmediate = IMMEDIATE_BODY_HEADS.has(kd);
-          if (CONDITION_BODY_HEADS.has(kd) && prev?.kind === "=")
+          if (afterBody && CLAUSE_BODY_HEADS.has(kd))
+            f.pendingCond = true;
+          else if (CONDITION_BODY_HEADS.has(kd) && prev?.kind === "=")
             f.pendingCond = true;
           else if (kd === "THEN")
             f.pendingCond = false;
@@ -34498,7 +34507,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "3f89350475a19f54";
+var compilerBuild = () => "5e53f0575e7456c0";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
