@@ -4,6 +4,16 @@ Rip is a zero-build, full-stack language for reactive UI, schemas, ORM,
 and server code. It runs directly under Bun, emits clean JavaScript,
 type-checks through TypeScript 7, and ships a full LSP.
 
+## How Rip compiles
+
+<p align="center"><img src="docs/assets/pipeline.svg" alt="Rip compiler pipeline: Rip source → lexer → parser → s-expressions → emitter, which writes a JavaScript face that runs in Bun or the browser and a TypeScript face that tsgo checks" width="560"></p>
+
+One compile serves every consumer. The emitter writes JavaScript
+directly, with types erased, for Bun and the browser; it writes the same
+program with types as a TypeScript face for `rip check` and the editor,
+whose `tsgo` errors map back to `.rip` positions. Each stage is
+described in [docs/PIPELINE.md](docs/PIPELINE.md).
+
 ## Repository scope
 
 This repository owns the complete Rip product:
@@ -32,6 +42,7 @@ package-local `TODO.md` files (for example
 
 **Understanding (permanent contracts under `docs/`):**
 
+- [docs/PIPELINE.md](docs/PIPELINE.md) — the compiler pipeline, stage by stage
 - [docs/SERVER.md](docs/SERVER.md) — Sites, Janus, manager, worker architecture
 - [docs/WORKSPACE.md](docs/WORKSPACE.md) — browser publication / apply contract
 - [docs/TYPES.md](docs/TYPES.md) — type-system and editor architecture

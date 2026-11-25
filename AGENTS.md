@@ -9,6 +9,9 @@ Permanent documentation:
 - [README.md](README.md) — repository orientation and entry points.
 - [packages/AGENTS.md](packages/AGENTS.md) — first-party package mold
   (layout, package.json, README LAF, tests) and earned-shape inventory.
+- [docs/PIPELINE.md](docs/PIPELINE.md) — the compiler pipeline: lexer
+  passes, parser, side tables, the emitter's two faces, and where each
+  face goes.
 - [docs/SERVER.md](docs/SERVER.md) — Rip Sites' system-wide
   Caddy/Janus/manager/worker architecture and lifecycle contract.
 - [docs/ORM.md](docs/ORM.md) — the `schema :model` user guide:
