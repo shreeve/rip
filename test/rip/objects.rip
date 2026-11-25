@@ -245,3 +245,40 @@ test 'a trailing comma inside an indented array closes the object', '''
   ]
   x
 ''', [{a: 1}]
+
+# ==============================================================================
+# What reads as the next pair — the objectish look-ahead
+# ==============================================================================
+#
+# A line break or comma keeps a property list open only when what follows
+# reads as a pair: `key:`, `@key:`, a void-method key, a `private` member,
+# or a balanced bracket group followed by `:` (an interpolated or computed
+# key).
+
+test 'an interpolated key on the next line continues the object', '''
+  k = 'b'
+  x =
+    a: 1
+    "#{k}": 2
+  x
+''', {a: 1, b: 2}
+
+test 'a computed key on the next line continues the object', '''
+  k = 'b'
+  x =
+    a: 1
+    [k]: 2
+  x
+''', {a: 1, b: 2}
+
+test 'a static void-method key after a comma continues the class body', '''
+  class A
+    x: (-> 1), @b!: (-> 2)
+  [(new A).x(), A.b()]
+''', [1, undefined]
+
+fail 'a guard before a private member line binds the pair value', 'class A\n  x: (-> 1) if c\n  private y: -> 2', 'a class field takes'
+
+test 'a guard on a bare object before a final semicolon guards the statement', 'c = true\na: 1 if c;', {a: 1}
+
+test 'a trailing comma at the end of the program closes the argument object', 'f = (...a) -> a\nf a: 1,', [{a: 1}]

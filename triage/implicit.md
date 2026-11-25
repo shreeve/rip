@@ -1,6 +1,6 @@
 # Mutation triage: src/implicit.js
 
-Survivors classified: 75 of 191.
+Survivors classified: 97 of 191.
 
 ## GAP
 
@@ -57,6 +57,27 @@ Survivors classified: 75 of 191.
 - src/implicit.js:985:47320:logic — test/rip/control.rip › the end of the program retires an inline try frame
 - src/implicit.js:985:47342:arith — test/rip/control.rip › the end of the program retires a bodiless class frame
 - src/implicit.js:985:47344:number — test/rip/control.rip › the end of the program retires a bodiless class frame
+- src/implicit.js:402:19556:update — test/rip/objects.rip › a guard before a private member line binds the pair value
+- src/implicit.js:402:19520:statement — test/rip/objects.rip › a guard before a private member line binds the pair value
+- src/implicit.js:403:19585:boolean — test/rip/objects.rip › a guard on a bare object before a final semicolon guards the statement
+- src/implicit.js:403:19562:statement — test/rip/objects.rip › a guard on a bare object before a final semicolon guards the statement
+- src/implicit.js:409:19988:arith — test/rip/objects.rip › a static void-method key after a comma continues the class body
+- src/implicit.js:409:19990:number — test/rip/objects.rip › a static void-method key after a comma continues the class body
+- src/implicit.js:411:20081:branch — test/rip/objects.rip › an interpolated key on the next line continues the object
+- src/implicit.js:414:20158:branch — test/rip/objects.rip › an interpolated key on the next line continues the object
+- src/implicit.js:414:20179:logic — test/rip/objects.rip › an interpolated key on the next line continues the object
+- src/implicit.js:414:20184:relation — test/rip/objects.rip › an interpolated key on the next line continues the object
+- src/implicit.js:416:20271:update — test/rip/objects.rip › an interpolated key on the next line continues the object
+- src/implicit.js:414:20186:number — test/rip/objects.rip › an interpolated key on the next line continues the object
+- src/implicit.js:412:20130:number — test/rip/objects.rip › an interpolated key on the next line continues the object
+- src/implicit.js:416:20235:branch — test/rip/objects.rip › an interpolated key on the next line continues the object
+- src/implicit.js:417:20325:update — test/rip/objects.rip › an interpolated key on the next line continues the object
+- src/implicit.js:419:20345:relation — test/rip/objects.rip › an interpolated key on the next line continues the object
+- src/implicit.js:419:20349:number — test/rip/objects.rip › an interpolated key on the next line continues the object
+- src/implicit.js:419:20386:boolean — test/rip/objects.rip › an interpolated key on the next line continues the object
+- src/implicit.js:416:20232:statement — test/rip/objects.rip › an interpolated key on the next line continues the object
+- src/implicit.js:417:20281:statement — test/rip/objects.rip › an interpolated key on the next line continues the object
+- src/implicit.js:419:20339:statement — test/rip/objects.rip › an interpolated key on the next line continues the object
 
 ## EQUIVALENT
 
@@ -79,6 +100,7 @@ Survivors classified: 75 of 191.
 - src/implicit.js:955:45694:statement — falling through from the IMPLICIT_END branch: its kinds (and `.`/`?.`) are never IMPLICIT_FUNC, so neither call-start branch fires
 - src/implicit.js:978:47035:number — tokens[i + 2] is the generated `{` the object pass anchored at tokens[s].start, and tokens[i + 3] is tokens[s], so both read the same offset
 - src/implicit.js:978:47056:number — token `origin` is never read after it is assigned (no consumer in src/ or packages/), so CALL_START's origin feeds nothing
+- src/implicit.js:414:20163:relation — the tape is bracket-balanced when this runs (the scanner closes every opener; forward scans never cross a retagged THEN), so d reaches 0 at the matching closer while k < tokens.length, and `d > 0` ends the loop under either bound
 
 ## BUG
 
@@ -91,3 +113,4 @@ Survivors classified: 75 of 191.
 - Not a survivor, found while probing: a program whose first token is `:` (`: b`, or `:` + an indented pair) crashes collectObjects with "undefined is not an object (evaluating 'tokens[s].start')" — an unpositioned internal TypeError instead of a positioned rejection.
 - BUG, not tied to one survivor (the call-pass twin of 787:37887): an inline `try` with no `catch` as an implicit-call argument never retires its CONTROL frame at the line break, so the next statement becomes another argument. `f try g()` + newline + `h 3` compiles to `f(try g(), h(3))`, and `f try g()` + `y = 2` to `f(try g(), y = 2)`, a silent miscompile. Expected `f(try g()); h(3)`. In the object pass the same frame gives `x = a: try f()` + `y = 2` a misleading "destructuring default" rejection.
 - Questionable, not pinned: a bodiless class keeps its CONTROL frame until the TERMINATOR, so a guard after it binds the value (`f class if c` gives `f(c ? class {} : undefined)`, and `x = a: class if c` gives `{a: c ? class {} : undefined}`). Every other value lets the guard govern the statement (`f x if c` gives `if (c) f(x)`).
+- Not a survivor, found while probing (emitter, not this file): a bare implicit object statement ending in `;` at the end of the program (`a: 1;`, or `x = 1` + `a: 1;`) crashes with "undefined is not an object (evaluating 'assignIndex.blockMaps[assignIndex.blockIdAt[start]].get')" — an unpositioned internal TypeError.
