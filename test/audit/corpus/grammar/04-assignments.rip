@@ -55,10 +55,10 @@ total *=
 
 console.log('total:', total)
 
-# ── Method assignment: the target re-binds to a method call on itself ──
+# ── Reassignment through a method call on the same binding ──
 
 label = '  rip  '
-label .= trim()
+label = label.trim()
 
 console.log('label:', label)
 

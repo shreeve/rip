@@ -90,7 +90,7 @@ greet = (name: string) -> "hi #{name}"
 loud = greet('ada').toUpperCase()
 quiet = greet 'grace'
 answer = -> 42
-ran = do answer
+ran = answer()
 fetchNumber = -> Promise.resolve(7)
 awaited = await fetchNumber()
 gotten = fetchNumber!
@@ -140,10 +140,10 @@ drop = (n: number) ->
 
 console.log('guards:', take(10), take(0), drop(10), drop(0))
 
-# `then … else` is one left-associative level: (a && b) || c
-console.log('chain:', (0 then 'yes' else 'no'), (ten then 0 else 'fallback'))
+# One loose `then` or `else` per expression; parentheses make each its own
+console.log('chain:', ((0 then 'yes') else 'no'), ((ten then 0) else 'fallback'))
 pick = (n: number) ->
-  n then n > 1 else return 'small'
+  (n then n > 1) else return 'small'
   'big'
 console.log('pick:', pick(0), pick(1), pick(2))
 
@@ -170,7 +170,7 @@ for n in [0, 1]
 
 keptChain: number[] = []
 for n in [0, 1, 2]
-  n then n > 1 else continue
+  (n then n > 1) else continue
   keptChain.push n
 
 console.log('continue:', keptAnd, keptOr, keptNull, keptThen, keptElse, keptChain)

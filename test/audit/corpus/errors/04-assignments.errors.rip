@@ -7,7 +7,7 @@ point = { x: 1 }
 box = { size: 1 }
 text -= 1
 port = 'high'
-text .= missing()
+text = text.missing()
 
 wrongMaybe?: number = 'nine'
 { absent } = point
