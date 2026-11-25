@@ -3,8 +3,9 @@
 Survivors of the lexer-pass mutation audit at 119b45bb, classified per the triage brief.
 Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 
-## GAP (198)
+## GAP (229)
 
+- src/types.js:178:10001:relation — test/rip/types.rip › a method shorthand needs a member-row start (UNPROVEN: kill-proof run interrupted for machine load)
 - src/types.js:217:11845:statement — test/rip/types.rip › a method member after a generic member in an inline object type
 - src/types.js:217:11858:number — test/rip/types.rip › a method member after a generic member in an inline object type
 - src/types.js:217:11863:relation — test/rip/types.rip › a method member after a generic member in an inline object type
@@ -112,9 +113,21 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:636:31698:logic — test/rip/types.rip › a parenthesized conditional type is an arrow return
 - src/types.js:636:31732:boolean — test/rip/types.rip › a parenthesized conditional type is an arrow return
 - src/types.js:638:31820:boolean — test/rip/types.rip › a colon after a parenthesized conditional type branch rejects
+- src/types.js:657:32527:logic — test/rip/types.rip › a type predicate inside a generic parameter constraint (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:660:32691:statement — test/rip/types.rip › a generic list wrapped across def head lines rejects (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:660:32724:logic — test/rip/types.rip › a generic list wrapped across def head lines rejects (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:660:32747:logic — test/rip/types.rip › a generic list wrapped across def head lines rejects (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:693:33964:statement — test/rip/types.rip › a void-assigned arrow named type is no alias head for a trailing comparison (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:693:33974:logic — test/rip/types.rip › a void-assigned arrow named type is no alias head for a trailing comparison (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:748:37148:logic — test/rip/types.rip › a type predicate on a generic ends the def head line (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:760:37717:statement — test/rip/types.rip › a def head without a name rejects at the colon (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:760:37724:logic — test/rip/types.rip › a def head without a name rejects at the colon (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:790:39050:number — test/rip/types.rip › an object key after a comma inside a loop body is no loop variable (UNPROVEN: kill-proof run interrupted for machine load)
 - src/types.js:805:39485:relation — test/rip/types.rip › an object-key colon is no type head for a trailing comparison
 - src/types.js:806:39533:relation — test/rip/types.rip › a string-key colon is no type head for a trailing comparison
 - src/types.js:815:40025:branch — test/rip/types.rip › an object-key colon is no type head for a trailing comparison
+- src/types.js:819:40171:logic — test/rip/types.rip › a TERMINATOR resets the trailing-close answer (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:819:40194:logic — test/rip/types.rip › an INDENT resets the trailing-close answer (UNPROVEN: kill-proof run interrupted for machine load)
 - src/types.js:840:40971:statement — test/rip/types.rip › a trailing comparison line after a generic return type continues
 - src/types.js:851:41340:branch — test/rip/types.rip › a trailing comparison line after a generic return type continues
 - src/types.js:851:41390:logic — test/rip/types.rip › a trailing comparison line after a generic return type continues
@@ -126,6 +139,8 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:873:42370:logic — test/rip/types.rip › a trailing << after a cast continues the line
 - src/types.js:873:42408:relation — test/rip/types.rip › a trailing << after a cast continues the line
 - src/types.js:877:42559:boolean — test/rip/types.rip › a trailing comparison line after a generic return type continues
+- src/types.js:950:46112:arith — test/rip/types.rip › an assignment inside call arguments is no evidence for a bare forward (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:950:46114:number — test/rip/types.rip › an assignment inside call arguments is no evidence for a bare forward (UNPROVEN: kill-proof run interrupted for machine load)
 - src/types.js:972:46921:number — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
 - src/types.js:976:47030:branch — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
 - src/types.js:976:47057:update — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
@@ -146,7 +161,23 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:982:47266:relation — test/rip/types.rip › a union ending in a fat-arrow value in a class body is no field type
 - src/types.js:982:47279:logic — test/rip/types.rip › a bare typed field before an else arrow is still a field
 - src/types.js:982:47285:relation — test/rip/types.rip › a union ending in a fat-arrow value in a class body is no field type
+- src/types.js:1003:48013:logic — test/rip/types.rip › a reactive declaration separates bare typed forwards (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:1004:48051:logic — test/rip/types.rip › a reactive declaration separates bare typed forwards (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:1004:48079:logic — test/rip/types.rip › a readonly declaration separates bare typed forwards (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:1004:48107:logic — test/rip/types.rip › a readonly declaration separates bare typed forwards (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:1004:48124:logic — test/rip/types.rip › an effect declaration separates bare typed forwards (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:1007:48175:number — test/rip/types.rip › a key line at the end of input stays an object (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:1024:48919:update — test/rip/types.rip › a clause after a parenthesized value keeps the run an object (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:1025:48927:statement — test/rip/types.rip › a clause after a parenthesized value keeps the run an object (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:1025:48962:update — test/rip/types.rip › a clause after a parenthesized value keeps the run an object (UNPROVEN: kill-proof run interrupted for machine load)
 - src/types.js:1235:59143:relation — test/rip/types.rip › a string-keyed line ends a bare typed-forward run
+- src/types.js:1320:62988:statement — test/rip/types.rip › a string after type is no alias name (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:1324:63172:number — test/rip/types.rip › a variable named type compares when its generic never closes (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:1325:63179:statement — test/rip/types.rip › a variable named type compares when the alias head has no = (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:1325:63216:number — test/rip/types.rip › a variable named type compares when the alias head has no = (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:1369:65353:statement — test/rip/types.rip › interface with a string name rejects as reserved (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:1369:65399:number — test/rip/types.rip › interface without a name rejects as reserved (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:1374:65522:statement — test/rip/types.rip › interface extending a string rejects as reserved (UNPROVEN: kill-proof run interrupted for machine load)
 - src/types.js:1399:66520:logic — test/rip/types.rip › an implicit call whose argument assigns is not a type alias
 - src/types.js:1402:66703:relation — test/rip/types.rip › a function named type called mid-expression is not an alias
 - src/types.js:1417:67416:number — test/rip/types.rip › as before an operator that starts no type stays a name
@@ -204,8 +235,12 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:1901:90987:statement — test/rip/types.rip › a colon after a parameter default is an object key
 - src/types.js:1901:91013:boolean — test/rip/types.rip › a colon after a parameter default is an object key
 
-## EQUIVALENT (163)
+## EQUIVALENT (219)
 
+- src/types.js:178:9990:statement — the first row of a block body sits right after the body INDENT, a MEMBER_ROW_OPENER, so walking to tokens[from-1] answers true as the guard does; an inline body's first token never reaches a member-row check (method and mapped rows need an enclosing `{`)
+- src/types.js:178:9997:arith — same as 178:9990 — at === from falls through to tokens[from-1], the body INDENT
+- src/types.js:178:9999:number — same as 178:9990 — at === from falls through to tokens[from-1], the body INDENT
+- src/types.js:186:10464:logic — recursing past a `-`/`+` that is not before `readonly` only happens on a `-[`/`+[` row, whose sign the floor has already rejected as code; a `readonly`-named method walks to the same row opener
 - src/types.js:221:12006:statement — openAngle is reassigned at every `<` opened from angle 0 and read only while angle > 0, i.e. after such an opener; the stale value is always overwritten first
 - src/types.js:249:13482:arith — j-2 < from puts tokens[j-2] before the body: the alias `=` or the body INDENT, never `=>`, `asserts`, or a `:` after CALL_END, so the shape test fails there anyway
 - src/types.js:250:13554:arith — a predicate subject is followed by `is`, never `:`, so it never carries the keys-colon PROPERTY tag; dropping the PROPERTY leg loses nothing, and the token after `is` being PROPERTY needs a following `:` no predicate has
@@ -221,6 +256,10 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:309:17043:relation — tokens[to] is the body's OUTDENT or the alias line's TERMINATOR/OUTDENT (typeAliasEnd rejects anything else after the run), never CALL_START/CALL_END
 - src/types.js:328:17580:logic — every CALL_START in a body either rejects or pushes its mate's index, and the pairs nest, so each CALL_END that reaches this line is the stack top
 - src/types.js:329:17680:boolean — a method list's CALL_END is always followed by its return `:` (the push requires it), which matches no atomEnd-reading rule and resets atomEnd
+- src/types.js:375:19695:relation — the walk stops at an INDENT before index 0 in every non-file-top block, and the file-top answer (true) is the same with or without inspecting tokens[0], which is never an INDENT
+- src/types.js:375:19698:number — same as 375:19695
+- src/types.js:375:19702:update — the walk starts at an INDENT/OUTDENT boundary; at an INDENT both directions return at once, and a name directly after an OUTDENT does not occur (the scanner emits TERMINATOR after a dedent before a statement)
+- src/types.js:378:19803:update — OUTDENT depth matters only when the walk starts at an OUTDENT, and a candidate name never directly follows one (TERMINATOR comes first)
 - src/types.js:396:20424:statement — same as 396:20430 — the empty slice returns false at the end
 - src/types.js:396:20430:relation — an empty slice skips the loop and fails the final `atomEnd` check, so returning false early or not is the same
 - src/types.js:396:20443:boolean — every caller passes a non-empty slice (decideBareRun and the class-field claim check end > start first; typedDeclEq calls only after a `=>` inside the slice), so the empty-slice branch never runs
@@ -240,6 +279,27 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:625:31096:statement — same as 625:31120 — depth is always 0 here
 - src/types.js:625:31120:boolean — a claimed run is bracket-balanced, so depth is 0 after the walk and this return never runs
 - src/types.js:631:31412:relation — tokens[b] is the run's arrow stop: not a bracket, TERNARY, `?`, or `:`
+- src/types.js:660:32780:number — skipAngleGroup returns 0 only for an unbalanced group; every caller treats 0 like -1 (TYPE_PARAMS needs afterGroup > i; typeAliasEnd then needs tokens[0] to be `=`, interfaceEnd EXTENDS/INDENT — never the first token of a parsable file)
+- src/types.js:664:32852:number — skipAngleGroup returns 0 only for an unbalanced group; every caller treats 0 like -1 (TYPE_PARAMS needs afterGroup > i; typeAliasEnd then needs tokens[0] to be `=`, interfaceEnd EXTENDS/INDENT — never the first token of a parsable file)
+- src/types.js:672:33155:relation — beforeAngleGroupBack starts from a generic close whose `<` opens after a name, so the walk never needs index 0 and never meets k < 0 with a defined token; one-line generic heads never cross a line boundary (the scanner suppresses newlines inside an open `<`)
+- src/types.js:672:33157:number — beforeAngleGroupBack starts from a generic close whose `<` opens after a name, so the walk never needs index 0 and never meets k < 0 with a defined token; one-line generic heads never cross a line boundary (the scanner suppresses newlines inside an open `<`)
+- src/types.js:672:33159:logic — with k < 0, `k < 0 && !tokens[k]` is true, the same early return; with k >= 0 tokens[k] is defined, so `!tokens[k]` never decided
+- src/types.js:674:33243:relation — beforeAngleGroupBack starts from a generic close whose `<` opens after a name, so the walk never needs index 0 and never meets k < 0 with a defined token; one-line generic heads never cross a line boundary (the scanner suppresses newlines inside an open `<`)
+- src/types.js:674:33246:number — beforeAngleGroupBack starts from a generic close whose `<` opens after a name, so the walk never needs index 0 and never meets k < 0 with a defined token; one-line generic heads never cross a line boundary (the scanner suppresses newlines inside an open `<`)
+- src/types.js:677:33313:statement — beforeAngleGroupBack starts from a generic close whose `<` opens after a name, so the walk never needs index 0 and never meets k < 0 with a defined token; one-line generic heads never cross a line boundary (the scanner suppresses newlines inside an open `<`)
+- src/types.js:677:33341:logic — beforeAngleGroupBack starts from a generic close whose `<` opens after a name, so the walk never needs index 0 and never meets k < 0 with a defined token; one-line generic heads never cross a line boundary (the scanner suppresses newlines inside an open `<`)
+- src/types.js:677:33364:logic — beforeAngleGroupBack starts from a generic close whose `<` opens after a name, so the walk never needs index 0 and never meets k < 0 with a defined token; one-line generic heads never cross a line boundary (the scanner suppresses newlines inside an open `<`)
+- src/types.js:677:33397:number — returning 0 for an unbalanced or line-crossing walk is read like -1 by both callers: typeAliasEq and typeBodyHead then need tokens[k-1] (tokens[-1], undefined) to be `type`/`interface`/EXTENDS
+- src/types.js:682:33498:number — returning 0 for an unbalanced or line-crossing walk is read like -1 by both callers: typeAliasEq and typeBodyHead then need tokens[k-1] (tokens[-1], undefined) to be `type`/`interface`/EXTENDS
+- src/types.js:693:33970:relation — k is -1 or the index of a name with a token before it, never 0 when tokens[k-1] could be `type`
+- src/types.js:693:33972:number — same as 693:33970
+- src/types.js:750:37243:logic — levels are relative within a line: a head after the `<<` records at the shifted level and its close returns there; a `<<` between a head and its generic close is not type syntax and rejects on either reading
+- src/types.js:781:38658:statement — skipValue is only called on indices inside the tape (the colon's predecessor, or the token before a comma that has a predecessor)
+- src/types.js:781:38674:number — same as 781:38658 — the undefined-token branch never runs
+- src/types.js:785:38876:relation — a pattern opener at index 0 has no FOR before it, so endsLoopVariables is false either way
+- src/types.js:785:38879:number — same as 785:38876
+- src/types.js:793:39084:statement — with j < 0, tokens[-1] is undefined: not `,`, OWN, AWAIT, or FOR, so the function returns false anyway
+- src/types.js:796:39172:statement — same as 793:39084
 - src/types.js:804:39407:boolean — before is null only for a colon that is the file's first token, and every such program crashes in implicit.js collectObjects whatever this answer decides (see the 804:39387 BUG)
 - src/types.js:824:40396:branch — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
 - src/types.js:824:40407:relation — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
@@ -261,10 +321,27 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:865:42124:logic — `?? null`→`&& null` makes ref null, so every sync rebuilds to the same state
 - src/types.js:870:42246:statement — same as 870:42264 — last is always defined
 - src/types.js:870:42264:boolean — closesTypeGeneric is called only when the scanner's prev token is non-null, so the tape is never empty here
+- src/types.js:895:43443:arith — the scan from colon-1 or colon adds the name and the colon, neither a bracket nor a stop token
+- src/types.js:895:43445:number — the scan from colon-1 or colon adds the name and the colon, neither a bracket nor a stop token
+- src/types.js:900:43618:statement — a statement-level `name:` line ends at its TERMINATOR/OUTDENT before any closer of a bracket opened outside it (a block inside brackets closes with OUTDENT first), so the depth-0 closer return never runs
+- src/types.js:900:43643:number — a statement-level `name:` line ends at its TERMINATOR/OUTDENT before any closer of a bracket opened outside it (a block inside brackets closes with OUTDENT first), so the depth-0 closer return never runs
+- src/types.js:906:44036:arith — a `name :` or `:` prefix leaves isCompleteTypeExpr in its start state, so the verdict equals the type slice's
+- src/types.js:906:44038:number — a leading `:` is a separator that leaves isCompleteTypeExpr in its start state
+- src/types.js:953:46258:relation — the scanner balances INDENT/OUTDENT, so an OUTDENT never meets a root-only stack
+- src/types.js:953:46260:number — same as 953:46258
 - src/types.js:973:46935:relation — the scan starts inside a class body, whose OUTDENT lies ahead at depth 0 (brackets balance within it), so it always returns before tokens.length
 - src/types.js:978:47103:statement — same as 978:47127 — the depth-0 closer case never occurs
 - src/types.js:978:47127:boolean — a depth-0 closer never appears on a class-body line (the body's brackets balance before its TERMINATOR/OUTDENT), so this return never runs
+- src/types.js:994:47636:arith — the scan from colon-1 or colon adds the name and the colon, neither a bracket nor a stop token
+- src/types.js:994:47638:number — the scan from colon-1 or colon adds the name and the colon, neither a bracket nor a stop token
+- src/types.js:999:47811:statement — a statement-level `name:` line ends at its TERMINATOR/OUTDENT before any closer of a bracket opened outside it (a block inside brackets closes with OUTDENT first), so the depth-0 closer return never runs
+- src/types.js:999:47836:number — a statement-level `name:` line ends at its TERMINATOR/OUTDENT before any closer of a bracket opened outside it (a block inside brackets closes with OUTDENT first), so the depth-0 closer return never runs
+- src/types.js:1021:48809:relation — tokens[b] is the member line's TERMINATOR, neither a bracket nor a postfix clause
+- src/types.js:1035:49226:relation — the scanner balances INDENT/OUTDENT, so the matching OUTDENT is always found before tokens.length
+- src/types.js:1136:54482:relation — with an empty stack, classIndents[-1] is undefined and `!!undefined` is false, the same answer
+- src/types.js:1137:54601:boolean — with an empty stack, classBodyKind() is compared only with 'class'/'component'; false and true both fail === 'component' and pass !== 'class'
 - src/types.js:1160:55747:number — classHeadRunDepth is only compared with classHeadDepth, which is captured from it at CLASS; a constant offset of 1 changes no comparison (balanced brackets keep it >= its start, so `classHeadDepth >= 0` still means armed)
+- src/types.js:1175:56446:number — start is end+1 >= 2, so a missing name's 0 fails `>= start` as -1 does
 - src/types.js:1208:58179:number — lastEnd's initial value is read only when the first member breaks as a typed-declaration separator; that colon's typedDeclEq >= 0 means the line-1688 claim tried first, and it declined only on an empty run, which the bare claim declines identically
 - src/types.js:1212:58296:relation — bareDeclLineEnd returns -1 or a TERMINATOR index > colon >= 1, never 0
 - src/types.js:1212:58298:number — bareDeclLineEnd returns -1 or an index > colon >= 1, never 0
@@ -298,6 +375,16 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:1242:59350:number — eligibility matters only when some member is assigned later in its own block (full, or the partial rejection); a tail run (OUTDENT or end of input next) has no later statement in that block (assignedLater is block-scoped), so both stay false either way
 - src/types.js:1243:59390:logic — eligibility matters only when some member is assigned later in its own block (full, or the partial rejection); a tail run (OUTDENT or end of input next) has no later statement in that block (assignedLater is block-scoped), so both stay false either way
 - src/types.js:1262:60344:statement — re-deciding per line gives the same answers: a full run's suffix is itself full (same evidence, same final follower), and a non-full run leaves its first line unclaimed, so the sibling guard forces false for the rest (a claimed line resets curLineKV, so a full suffix is not blocked)
+- src/types.js:1298:62014:logic — only the scanner's expanded `prototype` PROPERTY carries the two-byte `::` source slice, so the `||` reading flags exactly the same tokens (probed `x: typeof Array::slice = v`: same rejection, same position)
+- src/types.js:1324:63153:statement — skipAngleGroup returns -1 or an index >= i+2, and tokens[-1] is undefined, so the next line's `!== '='` returns -1 the same
+- src/types.js:1324:63159:relation — skipAngleGroup returns -1 or an index >= i+2, never 0
+- src/types.js:1324:63161:number — skipAngleGroup returns -1 or an index >= i+2, never in [0, 1)
+- src/types.js:1337:63818:number — tokens[j] is the body INDENT, which the vocabulary floor admits as layout with no state change
+- src/types.js:1372:65450:statement — with j === -1, tokens[-1] is undefined: neither EXTENDS nor INDENT, so -1 is returned below anyway
+- src/types.js:1372:65461:number — skipAngleGroup's -1 here means an unclosed head `<`, which the scanner rejects first (`unclosed '<'`, probed `interface P<T` + body), so the return never reaches the claim
+- src/types.js:1377:65632:statement — with j === -1, tokens[-1] is undefined: not INDENT, so -1 is returned below anyway
+- src/types.js:1377:65643:number — same as 1372:65461 for the parent's generic group (probed `interface P extends Q<T` + body)
+- src/types.js:1381:65793:number — tokens[j] is the body INDENT, which the vocabulary floor admits as layout with no state change
 - src/types.js:1404:66838:relation — typeAliasEnd/interfaceEnd return -1 or an index >= i+3 (name, `=`/INDENT follow), never 0
 - src/types.js:1404:66841:number — typeAliasEnd/interfaceEnd return -1 or an index >= i+3, never in [0, 1)
 - src/types.js:1426:68013:relation — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
@@ -370,16 +457,18 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:1890:90493:statement — the flag is already false at the `;` unless an immediate head directly precedes it (`-> ;`, `loop ;`, `do ;`), which leaves an empty body the grammar rejects at the same token either way (probed)
 - src/types.js:1891:90533:statement — pendingCond is true at the `;` only after `= if/class…` with no THEN, which the grammar rejects at the same token either way (probed `c = if x ;`, `c = class ;`)
 
-## BUG (15)
+## BUG (17)
 
 - src/types.js:495:25439:statement — `x = y as A |\n  B` → expected the type `A | B` (or a loud rejection), got `let x = y;\nB;`: the cast run breaks at the continuation line's depth-0 newline after a trailing `|`, and `B` silently compiles as its own statement
-- src/types.js:804:39387:statement — `: a < b, c >\n  d` (any file starting with `:`) → expected a positioned rejection, got a TypeError; base crashes in implicit.js collectObjects (`tokens[s].start`), the mutant one step earlier (`before.kind`). The guard's only input already crashes downstream (implicit.js, outside this file)
+- src/types.js:659:32653:logic — `type X<T extends A << B> = T` → expected a positioned rejection on every face, got a clean JS-face compile (the alias head's generic list is never vocabulary-checked); only declaration emission rejects it ("a type alias needs '='")
+- src/types.js:804:39387:statement — `: a < b, c >\n  d` (any file starting with `:`) → expected a positioned rejection, got a TypeError; base crashes in implicit.js collectObjects (`tokens[s].start`), the mutant one step earlier (`before.kind`). The guard's only input already crashes downstream (implicit.js, outside this file); fixed on the coordinator's fix branch
 - src/types.js:815:40022:statement — `def t!: Map<string, number>\n  null` → expected `function t()` with return type `Map<string, number>` (as `def t!(): Map<string, number>` compiles), got `Unexpected 'newline' — expected indent` (the body is swallowed into the type, TYPE "Map<string, number>null"): at scan time the bang is still DAMMIT (tagVoidMarkers runs later), so this VOID_MARKER rule is dead and the trailing `>` never ends the line — deleting the dead rule changes nothing
 - src/types.js:815:40038:relation — `def t!: Map<string, number>\n  null` → expected `function t()` with return type `Map<string, number>` (as `def t!(): Map<string, number>` compiles), got `Unexpected 'newline' — expected indent` (the body is swallowed into the type, TYPE "Map<string, number>null"): at scan time the bang is still DAMMIT (tagVoidMarkers runs later), so this VOID_MARKER rule is dead and the trailing `>` never ends the line — this mutant fires on the DAMMIT and compiles it correctly
 - src/types.js:815:40056:logic — `def t!: Map<string, number>\n  null` → expected `function t()` with return type `Map<string, number>` (as `def t!(): Map<string, number>` compiles), got `Unexpected 'newline' — expected indent` (the body is swallowed into the type, TYPE "Map<string, number>null"): at scan time the bang is still DAMMIT (tagVoidMarkers runs later), so this VOID_MARKER rule is dead and the trailing `>` never ends the line — this mutant fires on the DAMMIT and compiles it correctly
 - src/types.js:815:40079:arith — `def t!: Map<string, number>\n  null` → expected `function t()` with return type `Map<string, number>` (as `def t!(): Map<string, number>` compiles), got `Unexpected 'newline' — expected indent` (the body is swallowed into the type, TYPE "Map<string, number>null"): at scan time the bang is still DAMMIT (tagVoidMarkers runs later), so this VOID_MARKER rule is dead and the trailing `>` never ends the line — this mutant survives because the rule never fires
 - src/types.js:815:40081:number — `def t!: Map<string, number>\n  null` → expected `function t()` with return type `Map<string, number>` (as `def t!(): Map<string, number>` compiles), got `Unexpected 'newline' — expected indent` (the body is swallowed into the type, TYPE "Map<string, number>null"): at scan time the bang is still DAMMIT (tagVoidMarkers runs later), so this VOID_MARKER rule is dead and the trailing `>` never ends the line — this mutant survives because the rule never fires
 - src/types.js:815:40092:boolean — `def t!: Map<string, number>\n  null` → expected `function t()` with return type `Map<string, number>` (as `def t!(): Map<string, number>` compiles), got `Unexpected 'newline' — expected indent` (the body is swallowed into the type, TYPE "Map<string, number>null"): at scan time the bang is still DAMMIT (tagVoidMarkers runs later), so this VOID_MARKER rule is dead and the trailing `>` never ends the line — this mutant survives because the rule never fires
+- src/types.js:958:46473:relation — `o = {}\nx: number\no.x = 1\nx` → expected the implicit-object reading (no identifier assignment of `x` follows), got the line erased as a typed forward declaration (dts `declare let x: number`): the assignment index counts the PROPERTY write `o.x = 1` (and `@x = 1`) as evidence that the binding `x` is assigned
 - src/types.js:1435:68450:arith — `a = [x as number\n]` (also `f(x as number\n)`, `{a: x as number\n}`) → expected `[x]`, got `Unexpected ']'` at 3:1: the cast's terminator restoration inserts a TERMINATOR before a closer on its own line (`a = [x\n]` compiles)
 - src/types.js:1435:68452:number — same repro as 1435:68450 — the restoration fires for every newline follower, closers included
 - src/types.js:1510:72162:statement — same repro as 1510:72165

@@ -1453,3 +1453,124 @@ test 'a string-key colon is no type head for a trailing comparison', '''
       e]
   f().s
 ''', [true, true]
+
+# ==============================================================================
+# Mutation-audit pins — heads, run lines, and assignment evidence
+# ==============================================================================
+
+type 'a type predicate inside a generic parameter constraint', 'type G<T extends (v: unknown) => v is string> = T', '''
+  type G<T extends (v: unknown) => v is string> = T;
+'''
+fail 'a generic list wrapped across def head lines rejects', "def f<T,\n  U>(x)\n  x", ":1:6: Unexpected '<'"
+
+test 'a variable named type compares when the alias head has no =', '''
+  type = (x) -> x
+  X = 1
+  T = 2
+  number = 0
+  type X<T> number
+''', true
+
+test 'a variable named type compares when its generic never closes', '''
+  type = (x) -> x
+  X = 1
+  T = 0
+  type X<T = 5
+''', true
+
+fail 'a string after type is no alias name', 'type "x" = 1', 'a string is not an assignment target'
+fail 'interface without a name rejects as reserved', "interface\n  a: T", "'interface' is reserved"
+fail 'interface with a string name rejects as reserved', "interface \"x\"\n  a: T", "'interface' is reserved"
+fail 'interface extending a string rejects as reserved', "interface P extends \"x\"\n  a: T", "'interface' is reserved"
+fail 'a method shorthand needs a member-row start', "interface I\n  x m(): void", "code expression ('(')"
+fail 'a def head without a name rejects at the colon', "def @: number\n  1", ":1:5: Unexpected implicit '{'"
+
+test 'a void-assigned arrow named type is no alias head for a trailing comparison', '''
+  a = 1
+  b = 2
+  c = 3
+  d = 0
+  g = (x, y) -> [x, y]
+  out = []
+  type! = -> out.push g a<b, c>
+    d
+  type()
+  out
+''', [[true, true]]
+
+test 'a type predicate on a generic ends the def head line', '''
+  def f(v: unknown): v is Map<string, number>
+    yes
+  f(1)
+''', true
+
+test 'a TERMINATOR resets the trailing-close answer', '''
+  g = (x, y) -> [x, y]
+  a = 1
+  b = 2
+  c = 3
+  d = 0
+  h = (z): Array<number> -> [z]
+  g a < b, c >
+    d
+''', [true, true]
+
+test 'an INDENT resets the trailing-close answer', '''
+  g = (x, y) -> [x, y]
+  a = 1
+  b = 2
+  c = 3
+  d = 0
+  def f(): Array<number>
+    g a < b, c >
+      d
+  f()
+''', [true, true]
+
+test 'an object key after a comma inside a loop body is no loop variable', '''
+  for x in [1]
+    r = [1, a: 2]
+  r
+''', [1, {a: 2}]
+
+test 'a reactive declaration separates bare typed forwards', '''
+  a: number
+  b: number := 2
+  a = 1
+  a + b
+''', 3
+
+test 'a readonly declaration separates bare typed forwards', '''
+  a: number
+  b: number =! 2
+  a = 1
+  a + b
+''', 3
+
+test 'an effect declaration separates bare typed forwards', '''
+  a: number
+  b: Function ~> 1
+  a = 1
+  a
+''', 1
+
+test 'a clause after a parenthesized value keeps the run an object', '''
+  number = 1
+  c = yes
+  a: number
+  x: (number) if c
+  a = 1
+  x = 2
+  a + x
+''', 3
+
+test 'a key line at the end of input stays an object', '''
+  number = 1
+  y = 1
+  x = 0
+  a: number
+  x: number
+''', {a: 1, x: 1}
+
+type 'an assignment inside call arguments is no evidence for a bare forward', "number = 1\nr: number\nf = (x) -> x\nf(\n  r = 5\n)\nr", '''
+'''
