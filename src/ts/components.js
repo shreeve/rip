@@ -36,6 +36,7 @@
 // joins the same segments as plain text — one assembly, two
 // consumers, no drift.
 
+import { isIdentifierName } from '../ident.js';
 import { tidyType, normalizeTypeText, renderParams, optionalReader } from './types.js';
 import { attributeNamesFor, BOOLEAN_ATTRS, SVG_ONLY_TAGS } from '../dom.js';
 import { isComponentName, componentPathText, restReadKeys } from '../render.js';
@@ -569,7 +570,7 @@ export const syntacticLiteralType = (v, stores) => {
 // does a path whose root name `spellable` refuses.
 const entityPath = (v) => {
   if (typeof v === 'string') {
-    return /^[A-Za-z_$][\w$]*$/.test(v) &&
+    return isIdentifierName(v) &&
       !['true', 'false', 'null', 'undefined', 'this', 'it'].includes(v) ? v : null;
   }
   if (Array.isArray(v) && v[0] === '.' && v.length === 3 && typeof v[2] === 'string') {
@@ -584,7 +585,7 @@ const typeofSpelling = (v, spellable = null) => {
     return spellable === null || spellable(path.split('.')[0]) ? `typeof ${path}` : null;
   }
   if (Array.isArray(v) && v[0] === 'new' && v.length === 2 &&
-      Array.isArray(v[1]) && typeof v[1][0] === 'string' && /^[A-Za-z_$][\w$]*$/.test(v[1][0])) {
+      Array.isArray(v[1]) && typeof v[1][0] === 'string' && isIdentifierName(v[1][0])) {
     return spellable === null || spellable(v[1][0]) ? `InstanceType<typeof ${v[1][0]}>` : null;
   }
   return null;
@@ -836,7 +837,7 @@ export const publicProps = (info) =>
 const isRequiredProp = (m) => m.kind === 'prop' && m.annotation !== null && !m.optional;
 
 // A props-object key spelling (attribute names may carry hyphens).
-const keyText = (name) => (/^[A-Za-z_$][\w$]*$/.test(name) ? name : `'${name}'`);
+const keyText = (name) => (isIdentifierName(name) ? name : `'${name}'`);
 
 // Every component takes `props` optionally unless a REQUIRED prop
 // exists (annotated `@x: T`, no marker, no default). Under a component

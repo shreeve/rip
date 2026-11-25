@@ -223,6 +223,27 @@ test "switch when with nested inline if", '''
   result
 ''', "hero-home"
 
+# A function's tail switch is the statement itself: each arm returns, with
+# no IIFE between it and the function — so a generator's arm may yield and
+# an async function's arm may await in place
+code "tail switch returns from its arms", '''
+  f = (x) ->
+    switch x
+      when 1 then 'a'
+      else 'b'
+''', '''
+  let f = function(x) {
+    switch (x) {
+      case 1:
+        return "a";
+      default:
+        return "b";
+    }
+  };
+'''
+test "tail switch arm in a generator yields", "g = ->\n  switch 1\n    when 1 then yield 2\n[...g()]", [2]
+test "tail switch arm in an async function awaits", "h = (x) ->\n  switch x\n    when 1 then await Promise.resolve 'one'\n    else 'other'\nawait h 1", 'one'
+
 # Switch without discriminant in statement context (loop)
 
 test "switch in loop for side effects", '''
@@ -438,10 +459,10 @@ code "switch with explicit return", '''
           return "A"
   ''', '''
   let fn = function(x) {
-    return (() => { switch (x) {
+    switch (x) {
       case "a":
         return "A";
-    } })();
+    }
   };
   '''
 

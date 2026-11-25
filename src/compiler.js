@@ -16,6 +16,7 @@
 // shows a precise diagnostic; the structured fields (path, start, end,
 // line, col — 1-based) remain available for tooling.
 
+import { IDENT_SOURCE } from './ident.js';
 import { SourceFile } from './source.js';
 import { makeParserLexer } from './lexer.js';
 import { Parser } from './parser.js';
@@ -82,7 +83,7 @@ const parseHint = (file, d) => {
   if (d.expected?.[0] === ':' || /\?[ \t]*$/.test(before)) {
     return "a two-operand '?' is incomplete — a default for null/undefined is spelled x ?? y";
   }
-  if (/^\.\.\.[^\n]*\)\s*[-=]>/.test(at) && /[(,]\s*[A-Za-z_$][\w$]*\s*$/.test(before)) {
+  if (/^\.\.\.[^\n]*\)\s*[-=]>/.test(at) && new RegExp(String.raw`[(,]\s*${IDENT_SOURCE}\s*$`).test(before)) {
     return 'a rest parameter is spelled `...name` — the dots lead the name';
   }
   if (/^for\b/.test(at) && /^\s*return\b/.test(line)) {

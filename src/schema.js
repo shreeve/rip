@@ -118,6 +118,7 @@ const isKeywordWord = (t) =>
   t && typeof t.value === 'string' && /^[a-z]+$/.test(t.value) &&
   (t.kind === t.value.toUpperCase() || t.kind === 'LEADING_WHEN' || t.kind === 'RELATION' || t.kind === 'STATEMENT');
 
+import { isIdentifierName, identifierRunAt } from './ident.js';
 import { counter } from './counter.js';
 import { normalizeTypeText } from './ts/types.js';
 // The schema vocabulary and naming rules, shared verbatim with the two
@@ -407,7 +408,7 @@ function collapseSchemaAt(tokens, i, out, config, mintId, fail, text) {
   // parser can carry primitive identity through that collapse just as it does
   // for ordinary list elements. The descriptor remains the same tree value.
   descriptor.primitiveSpans = [kindTok, ...bodyTokens]
-    .filter((t) => t && typeof t.value === 'string' && /^[A-Za-z_$][\w$]*$/.test(t.value))
+    .filter((t) => t && typeof t.value === 'string' && isIdentifierName(t.value))
     .map((t) => ({
       value: t.value,
       sourceStart: t === kindTok && t.end - t.start === t.value.length + 1 ? t.start + 1 : t.start,
@@ -2017,7 +2018,7 @@ function entrySegments(e, fnCode, thisType, emit, emitTs, tsFace = false, defaul
       // data type splices in after it.
       if (tsFace && e.tag === 'ensure' && ensureType !== null && marks.fnAt !== undefined &&
           typeof fnCode !== 'string' && fnCode !== undefined) {
-        const p0 = /^[A-Za-z_$][\w$]*/.exec(fnText(fnCode).slice(fnCode.thisAt))?.[0];
+        const p0 = identifierRunAt(fnText(fnCode), fnCode.thisAt)?.value;
         if (p0) cuts.push({ at: marks.fnAt + fnCode.thisAt + p0.length, ts: `: ${ensureType}` });
       }
       let pos = 0;
@@ -2349,7 +2350,7 @@ function foldParseChain(rhs) {
         op = { method, otherDescriptor: inline };
       } else {
         const name = foldStr(a);
-        if (typeof name !== 'string' || !/^[A-Za-z_$][\w$]*$/.test(name)) return null;
+        if (typeof name !== 'string' || !isIdentifierName(name)) return null;
         op = { method, otherName: name };
       }
     } else {

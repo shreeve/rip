@@ -55,8 +55,13 @@ const FLOORS = {
   'tabs.rip': 58,
   'singleline.rip': 100,
   'strings2.rip': 31,
-  'regexes.rip': 32,
-  'compose5.rip': 59,
+  // Their non-ASCII names declare in place on the same Tier 1 rule now
+  // that the eligibility test reads the identifier vocabulary: regexes
+  // drops its whole hoist line (a cover and two names) and its first
+  // statement maps where that line stood (32 - 3 + 1); compose5's hoist
+  // line keeps `t1` and drops `café` (59 - 1).
+  'regexes.rip': 30,
+  'compose5.rip': 58,
   'loops2.rip': 84,
   // compose4/postfix floors reflect the single-evaluation membership
   // helper: the container and key map ONCE each (the inline dispatch

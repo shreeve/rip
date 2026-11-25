@@ -147,6 +147,38 @@ __export(exports_app, {
   validatePrepared: () => validatePrepared
 });
 
+// src/ident.js
+var IDENT_START = /[$A-Za-z_\x7f-\uffff]/;
+var IDENT_PART = /[$\w\x7f-\uffff]/;
+function isIdentifierName(value) {
+  if (typeof value !== "string" || value.length === 0 || !IDENT_START.test(value[0]))
+    return false;
+  for (let i = 1;i < value.length; i++) {
+    if (!IDENT_PART.test(value[i]))
+      return false;
+  }
+  return true;
+}
+function isCustomElementName(value) {
+  return typeof value === "string" && value.includes("-") && value.split("-").every(isIdentifierName);
+}
+var IDENT_SOURCE = `${IDENT_START.source}${IDENT_PART.source}*`;
+var IDENT_RE = new RegExp(IDENT_SOURCE);
+var IDENT_RUN_RE = new RegExp(IDENT_SOURCE, "g");
+function identifierMatches(text) {
+  return text.matchAll(IDENT_RUN_RE);
+}
+function identifierRunAt(text, start) {
+  if (typeof text !== "string" || !Number.isInteger(start) || start < 0 || start >= text.length)
+    return null;
+  if (!IDENT_START.test(text[start]))
+    return null;
+  let end = start + 1;
+  while (end < text.length && IDENT_PART.test(text[end]))
+    end++;
+  return { value: text.slice(start, end), start, end };
+}
+
 // src/source.js
 class SourceFile {
   constructor(text, path = "<anonymous>") {
@@ -641,7 +673,7 @@ function collapseSchemaAt(tokens, i, out, config, mintId, fail, text) {
     descriptor.adapterTokens = adapterTokens;
   descriptor.start = (kindTok ?? bodyTokens[0]).start;
   descriptor.end = bodyEnd;
-  descriptor.primitiveSpans = [kindTok, ...bodyTokens].filter((t) => t && typeof t.value === "string" && /^[A-Za-z_$][\w$]*$/.test(t.value)).map((t) => ({
+  descriptor.primitiveSpans = [kindTok, ...bodyTokens].filter((t) => t && typeof t.value === "string" && isIdentifierName(t.value)).map((t) => ({
     value: t.value,
     sourceStart: t === kindTok && t.end - t.start === t.value.length + 1 ? t.start + 1 : t.start,
     sourceEnd: t.end
@@ -2018,7 +2050,7 @@ function entrySegments(e, fnCode, thisType, emit, emitTs, tsFace = false, defaul
         cuts.push({ at: whole.length - 1 - fn.length + fnCode.thisAt + "it".length, ts: ": any" });
       }
       if (tsFace && e.tag === "ensure" && ensureType !== null && marks.fnAt !== undefined && typeof fnCode !== "string" && fnCode !== undefined) {
-        const p0 = /^[A-Za-z_$][\w$]*/.exec(fnText(fnCode).slice(fnCode.thisAt))?.[0];
+        const p0 = identifierRunAt(fnText(fnCode), fnCode.thisAt)?.value;
         if (p0)
           cuts.push({ at: marks.fnAt + fnCode.thisAt + p0.length, ts: `: ${ensureType}` });
       }
@@ -2317,7 +2349,7 @@ function foldParseChain(rhs) {
         op = { method, otherDescriptor: inline };
       } else {
         const name = foldStr(a);
-        if (typeof name !== "string" || !/^[A-Za-z_$][\w$]*$/.test(name))
+        if (typeof name !== "string" || !isIdentifierName(name))
           return null;
         op = { method, otherName: name };
       }
@@ -2988,33 +3020,6 @@ function knownBareAttribute(tag, name) {
   if (SVG_TAGS.has(tag) && SVG_ATTRS.has(attr))
     return true;
   return false;
-}
-
-// src/ident.js
-var IDENT_START = /[$A-Za-z_\x7f-\uffff]/;
-var IDENT_PART = /[$\w\x7f-\uffff]/;
-function isIdentifierName(value) {
-  if (typeof value !== "string" || value.length === 0 || !IDENT_START.test(value[0]))
-    return false;
-  for (let i = 1;i < value.length; i++) {
-    if (!IDENT_PART.test(value[i]))
-      return false;
-  }
-  return true;
-}
-function isCustomElementName(value) {
-  return typeof value === "string" && value.includes("-") && value.split("-").every(isIdentifierName);
-}
-var IDENT_RUN_RE = new RegExp(`${IDENT_START.source}${IDENT_PART.source}*`, "g");
-function identifierRunAt(text, start) {
-  if (typeof text !== "string" || !Number.isInteger(start) || start < 0 || start >= text.length)
-    return null;
-  if (!IDENT_START.test(text[start]))
-    return null;
-  let end = start + 1;
-  while (end < text.length && IDENT_PART.test(text[end]))
-    end++;
-  return { value: text.slice(start, end), start, end };
 }
 
 // src/render.js
@@ -6181,6 +6186,8 @@ function rewriteTypes(tokens, mintId, text, fail) {
 }
 
 // src/lexer.js
+var NOT_WORD = new RegExp(`^[ \\t]+not(?!${IDENT_PART.source})`);
+var ACCESSOR_HEAD = new RegExp(`^[ \\t]+(get|set)[ \\t]+(?=${IDENT_START.source}|[@"'])`);
 function tagParams(tokens) {
   for (let i = 1;i < tokens.length; i++) {
     if (counter.on)
@@ -7474,7 +7481,7 @@ ${baseline}`).join(`
       } else if (ALIASES[word]) {
         const [kind, value] = ALIASES[word];
         if (word === "is" && (text[pos] === " " || text[pos] === "\t")) {
-          const not = /^[ \t]+not(?![\w$])/.exec(text.slice(pos));
+          const not = NOT_WORD.exec(text.slice(pos));
           if (not !== null) {
             fail("'is not' compares against a negation — `x is not y` reads as `x === !y`; spell the negated comparison `x isnt y`", start, pos + not[0].length);
           }
@@ -7499,7 +7506,7 @@ ${baseline}`).join(`
           renderParenDepth = parens.length;
         }
       } else if (word === "private" && insideClassBody() && (prev?.kind === "INDENT" || prev?.kind === "TERMINATOR" || prev?.kind === "OUTDENT")) {
-        if (/^[ \t]+(get|set)[ \t]+(?=[A-Za-z_$@"'])/.test(afterWord)) {
+        if (ACCESSOR_HEAD.test(afterWord)) {
           fail("`private` is not supported on a get/set accessor — it marks methods and fields", start);
         }
         push("PRIVATE", word, start, pos);
@@ -9622,7 +9629,7 @@ class CodeBuilder {
     taken.add(p.sourceStart);
     if (this.source !== null) {
       const text = this.source.slice(p.sourceStart, p.sourceEnd);
-      if (text !== value && text.endsWith(value) && !/[\w$]/.test(text[text.length - value.length - 1] ?? "")) {
+      if (text !== value && text.endsWith(value) && !IDENT_PART.test(text[text.length - value.length - 1] ?? "")) {
         return [p.sourceEnd - value.length, p.sourceEnd];
       }
     }
@@ -9799,7 +9806,7 @@ var STYLE_TYPE = "__RipCSSProperties | string";
 var STYLE_FN_TYPE = "(el: object, value: __RipCSSProperties | string | null | undefined) => void";
 var CLASS_TYPE = "__RipClassValue | __RipClassValue[]";
 var TEMPLATE_ROWS = "  [k: `data-${string}`]: string | number | boolean;\n" + "  [k: `aria-${string}`]: string | number | boolean;";
-var keyText = (name) => /^[A-Za-z_$][\w$]*$/.test(name) ? name : `'${name}'`;
+var keyText = (name) => isIdentifierName(name) ? name : `'${name}'`;
 var attrValsName = (tag, svg) => `__RipAttrVals_${svg ? "svg_" : ""}${tag}`;
 var elSurfaceName = (tag, svg) => `__RipEl_${svg ? "svg_" : ""}${tag}`;
 var hostText = (tag, svg) => `${svg ? "SVGElementTagNameMap" : "HTMLElementTagNameMap"}['${tag}']`;
@@ -10112,7 +10119,6 @@ var ASSIGNS = new Set(["=", "void-assign", "+=", "-=", "*=", "/=", "%=", "**=", 
 var isAssignHead = (h) => ASSIGNS.has(h) || h === "//=" || h === "%%=";
 var DECLARING_ASSIGNS = new Set(["=", "void-assign"]);
 var RENDER_BINDING_HEADS = new Set(["=", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??="]);
-var RENDER_LOCAL_RE = /^[A-Za-z_$][\w$]*$/;
 var JS_OP = { "==": "===", "!=": "!==" };
 var PATTERN_LITERALS = new Set(["true", "false", "null", "undefined", "this"]);
 var typeIdentifierTokens = (text, base = 0) => {
@@ -10275,7 +10281,6 @@ function containsYield(sexpr) {
   return sexpr.some((item) => containsYield(item));
 }
 var isUpdate = (x) => isNode(x) && (x[0] === "++" || x[0] === "--") && x.length === 3;
-var IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 var patternBindings = (node, base = "", out = []) => {
   if (!isNode(node))
     return out;
@@ -10289,10 +10294,10 @@ var patternBindings = (node, base = "", out = []) => {
       const key = el[1];
       if (typeof key !== "string")
         continue;
-      const seg = IDENT.test(key) ? `.${key}` : `[${key}]`;
+      const seg = isIdentifierName(key) ? `.${key}` : `[${key}]`;
       const target = el[2];
       if (typeof target === "string") {
-        if (IDENT.test(target))
+        if (isIdentifierName(target))
           out.push([target, base + seg]);
       } else
         patternBindings(target, base + seg, out);
@@ -10304,7 +10309,7 @@ var patternBindings = (node, base = "", out = []) => {
       if (isNode(el) && el[0] === "...")
         return;
       if (typeof el === "string") {
-        if (IDENT.test(el))
+        if (isIdentifierName(el))
           out.push([el, `${base}[${i}]`]);
       } else
         patternBindings(el, `${base}[${i}]`, out);
@@ -11634,9 +11639,9 @@ class Emitter {
         i = Math.min(j + 1, text.length);
         continue;
       }
-      if (/[A-Za-z_$]/.test(ch)) {
+      if (IDENT_START.test(ch)) {
         let j = i + 1;
-        while (j < text.length && /[\w$]/.test(text[j]))
+        while (j < text.length && IDENT_PART.test(text[j]))
           j++;
         const word = text.slice(i, j);
         let k = j;
@@ -11909,7 +11914,7 @@ class Emitter {
       return;
     }
     let cursor = 0;
-    for (const m of text.matchAll(/[A-Za-z_$][\w$]*/g)) {
+    for (const m of identifierMatches(text)) {
       const at = declared.get(m[0]);
       if (at === undefined || m.index < cursor)
         continue;
@@ -11923,7 +11928,7 @@ class Emitter {
     if (this._typeDeclSpans === undefined) {
       const spans = new Map;
       if (this.b.source !== null) {
-        const DECL = /^(?:export\s+)?(?:(?:type|interface|enum)\s+([A-Za-z_$][\w$]*)|([A-Za-z_$][\w$]*)\s*=\s*schema\b|([A-Za-z_$][\w$]*)\s*=\s*[A-Za-z_$][\w$]*\s*\.\s*(?:pick|omit|partial|required|extend)\b)/gmd;
+        const DECL = new RegExp(String.raw`^(?:export\s+)?(?:(?:type|interface|enum)\s+(${IDENT_SOURCE})|(${IDENT_SOURCE})\s*=\s*schema\b|(${IDENT_SOURCE})\s*=\s*${IDENT_SOURCE}\s*\.\s*(?:pick|omit|partial|required|extend)\b)`, "gmd");
         for (const m of this.b.source.matchAll(DECL)) {
           const at = m.indices[1] ?? m.indices[2] ?? m.indices[3];
           const name = this.b.source.slice(at[0], at[1]);
@@ -11931,7 +11936,7 @@ class Emitter {
             continue;
           spans.set(name, [at[0], at[1]]);
         }
-        const SPEC = /(?:^|,)\s*(?:type\s+)?(?:[A-Za-z_$][\w$]*\s+as\s+)?([A-Za-z_$][\w$]*)/gd;
+        const SPEC = new RegExp(String.raw`(?:^|,)\s*(?:type\s+)?(?:${IDENT_SOURCE}\s+as\s+)?(${IDENT_SOURCE})`, "gd");
         for (const clause of this.b.source.matchAll(/^import\s+(?:type\s+)?\{([^}]*)\}/gmd)) {
           const after = this.statementEndAfter(clause.index + clause[0].length);
           for (const sp of clause[1].matchAll(SPEC)) {
@@ -11969,7 +11974,7 @@ class Emitter {
       const i = this.b.source.lastIndexOf(name, from - 1);
       if (i < 0)
         break;
-      if (!/[\w$]/.test(this.b.source[i - 1] ?? " ") && !/[\w$]/.test(this.b.source[i + name.length] ?? " "))
+      if (!IDENT_PART.test(this.b.source[i - 1] ?? " ") && !IDENT_PART.test(this.b.source[i + name.length] ?? " "))
         return { id, span: [i, i + name.length] };
       from = i;
     }
@@ -11988,11 +11993,11 @@ class Emitter {
       return;
     }
     const words = new Map;
-    for (const m of src.matchAll(/[A-Za-z_$][\w$]*/g))
+    for (const m of identifierMatches(src))
       if (!words.has(m[0]))
         words.set(m[0], [r.sourceStart + m.index, r.sourceStart + m.index + m[0].length]);
     let cursor = 0;
-    for (const m of s.text.matchAll(/[A-Za-z_$][\w$]*/g)) {
+    for (const m of identifierMatches(s.text)) {
       const at = words.get(m[0]);
       if (!at)
         continue;
@@ -12300,7 +12305,7 @@ class Emitter {
             if (i < 0)
               break;
             const before = this.b.source[i - 1] ?? " ", after = this.b.source[i + name.length] ?? " ";
-            if (!/[\w$]/.test(before) && !/[\w$]/.test(after)) {
+            if (!IDENT_PART.test(before) && !IDENT_PART.test(after)) {
               nameAt = i;
               break;
             }
@@ -12316,7 +12321,7 @@ class Emitter {
             return;
           }
           let cursor = 0;
-          for (const m of text.matchAll(/[A-Za-z_$][\w$]*/g)) {
+          for (const m of identifierMatches(text)) {
             const span = declared.get(m[0]);
             if (!span)
               continue;
@@ -12370,7 +12375,7 @@ class Emitter {
             const i = this.b.source.lastIndexOf(name, from - 1);
             if (i < 0)
               break;
-            if (!/[\w$]/.test(this.b.source[i - 1] ?? " ") && !/[\w$]/.test(this.b.source[i + name.length] ?? " ")) {
+            if (!IDENT_PART.test(this.b.source[i - 1] ?? " ") && !IDENT_PART.test(this.b.source[i + name.length] ?? " ")) {
               bindAt = i;
               break;
             }
@@ -12428,7 +12433,7 @@ class Emitter {
       for (const r of this.stores.rolesOf(n.nodeId)) {
         if (!Emitter.TYPE_ROLES.has(r.role) || typeof r.sourceStart !== "number")
           continue;
-        for (const m of source.slice(r.sourceStart, r.sourceEnd).matchAll(/[A-Za-z_$][\w$]*/g))
+        for (const m of identifierMatches(source.slice(r.sourceStart, r.sourceEnd)))
           inTypes.add(m[0]);
       }
     }
@@ -12998,7 +13003,7 @@ class Emitter {
     const top = new Set(stmts.filter(isNode));
     const facts = new Map;
     const occur = (name, inFn, write = false, declStmt = null, writeNode = null, writePath = "") => {
-      if (typeof name !== "string" || !IDENT.test(name))
+      if (typeof name !== "string" || !isIdentifierName(name))
         return;
       let f = facts.get(name);
       if (f === undefined)
@@ -14073,7 +14078,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
       if (isNode(item) && item[0] === "=" && item.length === 3 && typeof item[1] !== "string") {
         throw this.positionedError(item, `emitter: enum '${name}' member names are plain identifiers — ` + `a computed/bracket-spelled member ('["…"] = value') is not an enum form`, node);
       }
-      if (typeof item === "string" && /^[A-Za-z_$][\w$]*$/.test(item)) {
+      if (typeof item === "string" && isIdentifierName(item)) {
         const rv = resolved[k].value;
         if (rv === null) {
           const message = `emitter: enum '${name}' bare member '${item}' follows a STRING value — ` + `auto-numbering has no number to continue; give it an explicit value`;
@@ -14201,7 +14206,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
       else if ((SCHEMA_BODY_KINDS[e.tag] ?? null) !== null) {
         pin("name", e.name, e.start);
         if (e.tag === "field" && Array.isArray(e.typeSpan) && this.b.source !== null) {
-          const typeWord = /[A-Za-z_$][\w$]*/.exec(this.b.source.slice(e.typeSpan[0], e.typeSpan[1]));
+          const typeWord = IDENT_RE.exec(this.b.source.slice(e.typeSpan[0], e.typeSpan[1]));
           if (typeWord !== null && typeWord[0] === e.typeName)
             pin("typeName", typeWord[0], e.typeSpan[0] + typeWord.index);
         }
@@ -14757,7 +14762,7 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
   matchChain(node, ind, arm) {
     const [, subject, cases, dflt] = node;
     const pad = "  ".repeat(ind);
-    const plainRead = typeof subject === "string" && /^[A-Za-z_$][\w$]*$/.test(subject) && !this.isReactiveName(subject);
+    const plainRead = typeof subject === "string" && isIdentifierName(subject) && !this.isReactiveName(subject);
     const ref = plainRead ? null : this.loopTempName("_switch");
     const subj = () => ref !== null ? this.b.emit(ref) : this.mark(node, "subject", () => this.expr(subject));
     if (ref !== null) {
@@ -15902,53 +15907,53 @@ ${pad ?? ""}`);
     });
   }
   valueSwitch(node, effect = false) {
-    const [, subject, cases, dflt] = node;
-    const ind = this.ind;
-    const pad = "  ".repeat(ind);
     this.rejectYieldInIIFE(node);
     this.b.emit(this.containsAwait(node) ? "await (async () => { " : "(() => { ");
-    this.mark(node, "$self", () => {
-      if (Emitter.hasMatchArms(cases)) {
-        this.checkMatchSwitch(node);
-        this.matchChain(node, ind, (body) => this.returnBlock(body, ind, effect));
-      } else if (subject !== null) {
-        this.b.emit("switch (");
-        this.mark(node, "subject", () => this.expr(subject));
-        this.b.emit(`) {
-`);
-        for (const when of cases) {
-          const [, conditions, body] = when;
-          for (const c of conditions) {
-            this.b.emit(`${pad}  case `);
-            this.expr(c);
-            this.b.emit(`:
-`);
-          }
-          this.returnCaseBody(body, ind, effect);
-        }
-        if (dflt !== null) {
-          this.b.emit(`${pad}  default:
-`);
-          this.returnCaseBody(dflt, ind, effect);
-        }
-        this.b.emit(`${pad}}`);
-      } else {
-        cases.forEach((when, i) => {
-          const [, conditions, body] = when;
-          if (i > 0)
-            this.b.emit(" else ");
-          this.b.emit("if (");
-          this.whenTests(Array.isArray(conditions) ? conditions : [conditions]);
-          this.b.emit(") ");
-          this.returnBlock(body, ind, effect);
-        });
-        if (dflt !== null) {
-          this.b.emit(" else ");
-          this.returnBlock(dflt, ind, effect);
-        }
-      }
-    });
+    this.mark(node, "$self", () => this.switchArms(node, this.ind, effect));
     this.b.emit(" })()");
+  }
+  switchArms(node, ind, effect) {
+    const [, subject, cases, dflt] = node;
+    const pad = "  ".repeat(ind);
+    if (Emitter.hasMatchArms(cases)) {
+      this.checkMatchSwitch(node);
+      this.matchChain(node, ind, (body) => this.returnBlock(body, ind, effect));
+    } else if (subject !== null) {
+      this.b.emit("switch (");
+      this.mark(node, "subject", () => this.expr(subject));
+      this.b.emit(`) {
+`);
+      for (const when of cases) {
+        const [, conditions, body] = when;
+        for (const c of conditions) {
+          this.b.emit(`${pad}  case `);
+          this.expr(c);
+          this.b.emit(`:
+`);
+        }
+        this.returnCaseBody(body, ind, effect);
+      }
+      if (dflt !== null) {
+        this.b.emit(`${pad}  default:
+`);
+        this.returnCaseBody(dflt, ind, effect);
+      }
+      this.b.emit(`${pad}}`);
+    } else {
+      cases.forEach((when, i) => {
+        const [, conditions, body] = when;
+        if (i > 0)
+          this.b.emit(" else ");
+        this.b.emit("if (");
+        this.whenTests(Array.isArray(conditions) ? conditions : [conditions]);
+        this.b.emit(") ");
+        this.returnBlock(body, ind, effect);
+      });
+      if (dflt !== null) {
+        this.b.emit(" else ");
+        this.returnBlock(dflt, ind, effect);
+      }
+    }
   }
   returnCaseBody(body, ind, effect = false) {
     this.inCtrl(() => this.returnCaseBodyCtrl(body, ind, effect));
@@ -18608,7 +18613,7 @@ ${pad}${into}.push(...${tmp});`);
     return sexpr.some((c) => this.renderReactive(c));
   }
   isRenderBinding(stmt) {
-    return isNode(stmt) && RENDER_BINDING_HEADS.has(stmt[0]) && stmt.length === 3 && typeof stmt[1] === "string" && RENDER_LOCAL_RE.test(stmt[1]);
+    return isNode(stmt) && RENDER_BINDING_HEADS.has(stmt[0]) && stmt.length === 3 && typeof stmt[1] === "string" && isIdentifierName(stmt[1]);
   }
   renderSpreadError(spread, component = null) {
     return this.positionedError(spread, component !== null ? "emitter: a spread has no reading on a child component — pass each prop as a named pair; to forward the " + `caller's undeclared props onto '${component}', declare the wrapper \`component extends ${component}\` and ` + "construct it in the render" : "emitter: a spread has no render reading — an element takes named attribute pairs, and `= expr` renders ONE value", this.rstate.node);
@@ -19113,7 +19118,7 @@ ${pad}${into}.push(...${tmp});`);
           this.renderAppend(el, v);
           continue;
         }
-        if (/^[A-Za-z_$][\w$]*$/.test(arg) && this.resolveBareRead(arg) === null && !this.inScope(arg)) {
+        if (isIdentifierName(arg) && this.resolveBareRead(arg) === null && !this.inScope(arg)) {
           this.renderBareAttribute(el, arg, args, k, owner);
           continue;
         }
@@ -19185,7 +19190,7 @@ ${pad}${into}.push(...${tmp});`);
     });
   }
   renderOwnLineWord(el, child, siblings, k, owner) {
-    if (typeof child !== "string" || !/^[A-Za-z_$][\w$]*$/.test(child))
+    if (typeof child !== "string" || !isIdentifierName(child))
       return false;
     if (isHtmlTag2(child) || isComponentName(child))
       return false;
@@ -19458,7 +19463,7 @@ ${pad}${into}.push(...${tmp});`);
         return;
       if (isSpread(arg))
         throw this.renderSpreadError(arg, name);
-      const isBareWord = typeof arg === "string" && RENDER_LOCAL_RE.test(arg) && this.renderVarKind(arg) === null && this.resolveBareRead(arg) === null;
+      const isBareWord = typeof arg === "string" && isIdentifierName(arg) && this.renderVarKind(arg) === null && this.resolveBareRead(arg) === null;
       if (isBareWord && (isHtmlTag2(arg) || arg === "slot") && (this.inScope(arg) || this.moduleBound.has(arg))) {
         rejectTagWord(markNode ?? this.rstate.node, arg);
       }
@@ -20494,7 +20499,7 @@ ${this.replayPad}}` : " }");
   }
   static collectLeafNames(x, set) {
     if (typeof x === "string") {
-      if (RENDER_LOCAL_RE.test(x))
+      if (isIdentifierName(x))
         set.add(x);
       return;
     }
@@ -20673,7 +20678,7 @@ ${this.replayPad}}` : " }");
     if (o === "this")
       return true;
     if (typeof o === "string")
-      return /^[A-Za-z_$][\w$]*$/.test(o);
+      return isIdentifierName(o);
     return Emitter.isDotChain(o);
   }
   activeNarrowed() {
@@ -21416,7 +21421,7 @@ ${this.replayPad}}` : " }");
     });
   }
   renderRef(el, pair, value, objExpr, site) {
-    const refName = typeof value === "string" && RENDER_LOCAL_RE.test(value) ? value : null;
+    const refName = typeof value === "string" && isIdentifierName(value) ? value : null;
     if (refName === null) {
       throw this.positionedError(pair, "emitter: ref: expects a state cell — declare `el := null` then write `ref: el`", this.rstate.node);
     }
@@ -21528,7 +21533,7 @@ ${this.replayPad}}` : " }");
       throw this.positionedError(pair, msg, this.rstate.node);
     };
     if (typeof value === "string") {
-      if (!RENDER_LOCAL_RE.test(value)) {
+      if (!isIdentifierName(value)) {
         reject("emitter: a two-way binding (`<=>`) needs an assignable target — a literal cannot receive the input");
       }
       const kind = this.renderVarKind(value, pair);
@@ -21917,7 +21922,7 @@ ${this.replayPad}}` : " }");
       throw this.positionedError(node, "emitter: a pick expression is not an assignment target — it lowers to a fresh object literal (`({…}) = value` would be invalid JS)");
     }
     const optional = head === "?.{}";
-    const simple = typeof source === "string" && (source === "this" || /^[A-Za-z_$][\w$]*$/.test(source));
+    const simple = typeof source === "string" && (source === "this" || isIdentifierName(source));
     if (!simple) {
       for (const item of items) {
         if (item[2] !== null && this.containsAwait(item[2])) {
@@ -22322,7 +22327,7 @@ ${this.replayPad}}` : " }");
     this.b.emit("]");
   }
   static isMethodPair(pair) {
-    return isNode(pair) && (pair[0] === ":" || pair[0] === "void-pair") && typeof pair[1] === "string" && /^[A-Za-z_$][\w$]*$/.test(pair[1]) && isNode(pair[2]) && pair[2][0] === "->";
+    return isNode(pair) && (pair[0] === ":" || pair[0] === "void-pair") && typeof pair[1] === "string" && isIdentifierName(pair[1]) && isNode(pair[2]) && pair[2][0] === "->";
   }
   object(node) {
     for (const pair of node.slice(1)) {
@@ -23435,9 +23440,7 @@ ${"  ".repeat(ind)}`);
         return;
       }
       if (h === "switch" && stmt.length === 4) {
-        this.b.emit("return ");
-        this.withTailReturn(() => this.valueSwitch(stmt, effect));
-        this.b.emit(";");
+        this.withTailReturn(() => this.mark(stmt, "$self", () => this.switchArms(stmt, ind, effect)));
         return;
       }
       if (h === "while" && (stmt.length === 3 || stmt.length === 4) || h === "loop" && stmt.length === 2) {
@@ -23961,7 +23964,7 @@ ${"  ".repeat(ind)}`);
     }
     const id = isNode(cur) ? this.stores.idOf(cur) : null;
     const kind = id !== null ? this.stores.node(id)?.semanticKind : null;
-    const callHead = isNode(cur) && typeof cur[0] === "string" && /^[A-Za-z_$][\w$]*$/.test(cur[0]) && (kind === "call" || kind == null && Emitter.jsTier(cur) === "primary");
+    const callHead = isNode(cur) && typeof cur[0] === "string" && isIdentifierName(cur[0]) && (kind === "call" || kind == null && Emitter.jsTier(cur) === "primary");
     if (!callHead) {
       throw this.positionedError(node, "emitter: `.=` re-binds its target to a METHOD CALL on itself — the right side must be a call chain (`x .= trim()`)");
     }
@@ -24034,7 +24037,7 @@ ${"  ".repeat(ind)}`);
           this.b.emit("[");
           const key = pair[1];
           this.mark(pair, "key", () => {
-            if (typeof key === "string" && /^[A-Za-z_$][\w$]*$/.test(key) && key !== "true" && key !== "false" && key !== "null" && key !== "undefined") {
+            if (typeof key === "string" && isIdentifierName(key) && key !== "true" && key !== "false" && key !== "null" && key !== "undefined") {
               this.b.emit('"');
               this.emitPrimitive(key);
               this.b.emit('"');
@@ -24560,6 +24563,71 @@ var referencesNames = (sexpr, names, stores, isDecl = () => false) => {
   if (names.size === 0)
     return false;
   const ref = (x) => typeof x === "string" && names.has(x);
+  const paramBindings = (params) => {
+    const out = new Set;
+    const bind = (p) => {
+      if (typeof p === "string") {
+        out.add(p);
+        return;
+      }
+      if (!isNode(p))
+        return;
+      const [h] = p;
+      if (h === "object" || h === "array")
+        p.slice(1).forEach(bind);
+      else if (h === null && p.length === 3)
+        bind(p[2]);
+      else if ((h === ":" || h === "=") && p.length === 3)
+        bind(h === ":" ? p[2] : p[1]);
+      else if (h === "default" && p.length === 3)
+        bind(p[1]);
+      else if ((h === "rest" || h === "..." || h === "expansion") && p.length === 2)
+        bind(p[1]);
+      else if (h === "typed-var" && p.length === 3)
+        bind(p[1]);
+    };
+    if (isNode(params))
+      params.forEach(bind);
+    return out;
+  };
+  const walkBody = (params, body) => {
+    const shadowed = paramBindings(params);
+    const live = [...names].filter((n) => !shadowed.has(n));
+    if (live.length === names.size)
+      return walk(body);
+    return referencesNames(body, new Set(live), stores, isDecl);
+  };
+  const semanticKind = (x) => {
+    const id = stores.idOf(x);
+    return id !== null ? stores.node(id)?.semanticKind : null;
+  };
+  const isTagWord = (w) => typeof w === "string" && isHtmlTag2(w.split("#")[0]);
+  const tagOf = (head) => {
+    if (isTagWord(head))
+      return true;
+    if (isNode(head) && head[0] === ".")
+      return isTagWord(Emitter.collectTemplateClasses(head).tag);
+    return false;
+  };
+  const walkRender = (x) => {
+    if (typeof x === "string")
+      return !isTagWord(x) && ref(x);
+    if (!isNode(x))
+      return false;
+    const [h] = x;
+    if (h === "block")
+      return x.slice(1).some(walkRender);
+    if (tagOf(h))
+      return x.slice(1).some((a) => isFunc(a) && isNode(a[1]) && a[1].length === 0 ? walkRender(a[2]) : walk(a));
+    if (h === "." && tagOf(x))
+      return false;
+    if (h === "if" && x.length >= 3 && x.length <= 4)
+      return walk(x[1]) || walkRender(x[2]) || x.length === 4 && walkRender(x[3]);
+    if ((h === "for-in" || h === "for-of" || h === "for-as") && x.length === 6) {
+      return isNode(x[1]) && x[1].some(walkPattern) || walk(x[2]) || walk(x[3]) || walk(x[4]) || walkRender(x[5]);
+    }
+    return walk(x);
+  };
   const walkParams = (params) => isNode(params) && params.some(walkPattern);
   const walkPattern = (p) => {
     if (!isNode(p))
@@ -24571,7 +24639,7 @@ var referencesNames = (sexpr, names, stores, isDecl = () => false) => {
       return false;
     if (h === ":" && p.length === 3)
       return isNode(p[1]) && walk(p[1]) || walkPattern(p[2]);
-    if (h === "=" && p.length === 3)
+    if ((h === "=" || h === "default") && p.length === 3)
       return walkPattern(p[1]) || walk(p[2]);
     if ((h === "rest" || h === "..." || h === "expansion") && p.length === 2)
       return walkPattern(p[1]);
@@ -24592,9 +24660,11 @@ var referencesNames = (sexpr, names, stores, isDecl = () => false) => {
     if ((h === ":" || h === "void-pair") && x.length === 3)
       return isNode(x[1]) && walk(x[1]) || walk(x[2]);
     if (isFunc(x))
-      return walkParams(x[1]) || walk(x[2]);
+      return walkParams(x[1]) || walkBody(x[1], x[2]);
     if (isDefHead(h) && x.length === 4)
-      return walkParams(x[2]) || walk(x[3]);
+      return walkParams(x[2]) || walkBody(x[2], x[3]);
+    if (h === "render" && x.length === 2 && semanticKind(x) === "render")
+      return walkRender(x[1]);
     if (isDecl(x))
       return walk(x[2]);
     if (ASSIGNS.has(h) && x.length === 3)
@@ -24874,7 +24944,7 @@ function emitSchemaTextMarked(emitter, block, text, nodeId) {
       marks.push({ at: ref.at, len: ref.name.length, start: ref.start, end: ref.start + ref.name.length });
     if ((SCHEMA_BODY_KINDS[e.tag] ?? null) === null || typeof e.start !== "number")
       continue;
-    const typeWord = e.tag === "field" && Array.isArray(e.typeSpan) && emitter.b.source !== null ? /[A-Za-z_$][\w$]*/.exec(emitter.b.source.slice(e.typeSpan[0], e.typeSpan[1])) : null;
+    const typeWord = e.tag === "field" && Array.isArray(e.typeSpan) && emitter.b.source !== null ? IDENT_RE.exec(emitter.b.source.slice(e.typeSpan[0], e.typeSpan[1])) : null;
     for (const m of text.matchAll(new RegExp(`([{;] )((?:readonly )?)(${esc(e.name)})(\\??: )`, "g"))) {
       marks.push({ at: m.index + m[1].length + m[2].length, len: e.name.length, start: e.start, end: e.start + e.name.length });
       if (typeWord === null)
@@ -24895,7 +24965,7 @@ function emitSchemaTextMarked(emitter, block, text, nodeId) {
       if (own !== null)
         named.set(block.story.decl.name, own.span);
     }
-    const heads = [...new Set([...text.matchAll(/(?:^|\n)[ \t]*(?:export )?type ([A-Za-z_$][\w$]*)/g)].map((m) => m[1]))];
+    const heads = [...new Set([...text.matchAll(new RegExp(String.raw`(?:^|\n)[ \t]*(?:export )?type (${IDENT_SOURCE})`, "g"))].map((m) => m[1]))];
     for (const headName of heads) {
       if (named.has(headName))
         continue;
@@ -24904,7 +24974,7 @@ function emitSchemaTextMarked(emitter, block, text, nodeId) {
         const i = src.lastIndexOf(headName, from - 1);
         if (i < 0)
           break;
-        if (!/[\w$]/.test(src[i - 1] ?? " ") && !/[\w$]/.test(src[i + headName.length] ?? " ")) {
+        if (!IDENT_PART.test(src[i - 1] ?? " ") && !IDENT_PART.test(src[i + headName.length] ?? " ")) {
           nameAt = i;
           break;
         }
@@ -25292,7 +25362,7 @@ return { ${unit.names.join(", ")} };
             return "stash";
           continue;
         }
-        const specList = decl.every((x) => typeof x === "string" && /^[A-Za-z_$][\w$]*$/.test(x) || Array.isArray(x) && x.length === 2 && typeof x[0] === "string" && typeof x[1] === "string");
+        const specList = decl.every((x) => typeof x === "string" && isIdentifierName(x) || Array.isArray(x) && x.length === 2 && typeof x[0] === "string" && typeof x[1] === "string");
         if (!specList)
           continue;
         for (const spec of decl) {
@@ -25384,20 +25454,19 @@ declare function __ripNarrowed<T extends { value: unknown }>(c: T): { readonly v
   }
   const globalDecls = [];
   if (face === "ts" && isNode(parseResult.sexpr) && parseResult.sexpr[0] === "program") {
-    const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
     for (const stmt of parseResult.sexpr.slice(1)) {
       if (!isNode(stmt) || stmt[0] !== "??=" || stmt.length !== 3)
         continue;
       const target = stmt[1];
       if (!isNode(target) || target[0] !== "." || target[1] !== "globalThis")
         continue;
-      if (typeof target[2] !== "string" || !IDENT.test(target[2]))
+      if (typeof target[2] !== "string" || !isIdentifierName(target[2]))
         continue;
       const RESERVED = new Set(["null", "undefined", "true", "false", "this"]);
       const v = stmt[2];
       globalDecls.push({
         name: target[2],
-        anchor: typeof v === "string" && IDENT.test(v) && !RESERVED.has(v) ? v : null
+        anchor: typeof v === "string" && isIdentifierName(v) && !RESERVED.has(v) ? v : null
       });
     }
     if (globalDecls.length) {
@@ -25450,7 +25519,7 @@ export {};
 // src/sourcemap.js
 var B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 var B64_INDEX = new Map([...B64].map((c, i) => [c, i]));
-var IDENT2 = /^[$_\p{ID_Start}][$\u200C\u200D_\p{ID_Continue}]*$/u;
+var IDENT = /^[$_\p{ID_Start}][$\u200C\u200D_\p{ID_Continue}]*$/u;
 function encodeVLQ(value) {
   let vlq = value < 0 ? -value << 1 | 1 : value << 1;
   let out = "";
@@ -25483,7 +25552,7 @@ function toSourceMap({ code, mappings }, { source, file = "output.js", sourcePat
     prevSrcLine = src.line;
     prevSrcCol = src.col;
     const slice = code.slice(m.generatedStart, m.generatedEnd);
-    if (m.mappingKind === "exact" && IDENT2.test(slice)) {
+    if (m.mappingKind === "exact" && IDENT.test(slice)) {
       let idx = nameIndex.get(slice);
       if (idx === undefined) {
         idx = names.length;
@@ -25548,7 +25617,7 @@ var parseHint = (file, d) => {
   if (d.expected?.[0] === ":" || /\?[ \t]*$/.test(before)) {
     return "a two-operand '?' is incomplete — a default for null/undefined is spelled x ?? y";
   }
-  if (/^\.\.\.[^\n]*\)\s*[-=]>/.test(at) && /[(,]\s*[A-Za-z_$][\w$]*\s*$/.test(before)) {
+  if (/^\.\.\.[^\n]*\)\s*[-=]>/.test(at) && new RegExp(String.raw`[(,]\s*${IDENT_SOURCE}\s*$`).test(before)) {
     return "a rest parameter is spelled `...name` — the dots lead the name";
   }
   if (/^for\b/.test(at) && /^\s*return\b/.test(line)) {
@@ -30962,48 +31031,46 @@ matchParts = function(parts, segments) {
       return si === segments.length ? [] : null;
     }
     let part = parts[pi];
-    return (() => {
-      switch (part.kind) {
-        case "static":
-          if (!(si < segments.length))
-            return null;
-          if (!(decodeSegment(segments[si]) === part.text))
-            return null;
-          return walk(pi + 1, si + 1);
-        case "dynamic":
-          if (!(si < segments.length && segments[si] !== ""))
-            return null;
-          value = decodeSegment(segments[si]);
+    switch (part.kind) {
+      case "static":
+        if (!(si < segments.length))
+          return null;
+        if (!(decodeSegment(segments[si]) === part.text))
+          return null;
+        return walk(pi + 1, si + 1);
+      case "dynamic":
+        if (!(si < segments.length && segments[si] !== ""))
+          return null;
+        value = decodeSegment(segments[si]);
+        if (!(value != null))
+          return null;
+        rest = walk(pi + 1, si + 1);
+        if (!rest)
+          return null;
+        return [[part.name, value], ...rest];
+      case "optional":
+        skipped = walk(pi + 1, si);
+        if (skipped)
+          return skipped;
+        if (!(si < segments.length && segments[si] !== ""))
+          return null;
+        value = decodeSegment(segments[si]);
+        if (!(value != null))
+          return null;
+        rest = walk(pi + 1, si + 1);
+        if (!rest)
+          return null;
+        return [[part.name, value], ...rest];
+      case "catchall":
+        pieces = [];
+        for (let segment of segments.slice(si)) {
+          value = decodeSegment(segment);
           if (!(value != null))
             return null;
-          rest = walk(pi + 1, si + 1);
-          if (!rest)
-            return null;
-          return [[part.name, value], ...rest];
-        case "optional":
-          skipped = walk(pi + 1, si);
-          if (skipped)
-            return skipped;
-          if (!(si < segments.length && segments[si] !== ""))
-            return null;
-          value = decodeSegment(segments[si]);
-          if (!(value != null))
-            return null;
-          rest = walk(pi + 1, si + 1);
-          if (!rest)
-            return null;
-          return [[part.name, value], ...rest];
-        case "catchall":
-          pieces = [];
-          for (let segment of segments.slice(si)) {
-            value = decodeSegment(segment);
-            if (!(value != null))
-              return null;
-            pieces.push(value);
-          }
-          return [[part.name, pieces.join("/")]];
-      }
-    })();
+          pieces.push(value);
+        }
+        return [[part.name, pieces.join("/")]];
+    }
   };
   return walk(0, 0);
 };
@@ -34018,7 +34085,7 @@ function createModuleLoaderImpl({
     for (const name of Object.keys(namespace)) {
       if (name === "default") {
         lines.push("export default ns['default'];");
-      } else if (/^[A-Za-z_$][\w$]*$/.test(name)) {
+      } else if (isIdentifierName(name)) {
         lines.push(`export const ${name} = ns[${JSON.stringify(name)}];`);
       } else {
         throw new Error(`rip: embedded module '${key}' exports '${name}', which cannot cross the module bridge`);
@@ -34172,7 +34239,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "6483d9ac1a3c91d7";
+var compilerBuild = () => "d5baa11142dd9366";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

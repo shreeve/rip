@@ -1105,7 +1105,7 @@ describe('TS-face emission pins', () => {
   test('a unicode-named type declaration renders, strips, and passes the region-shape spec', () => {
     const src = 'type Ω = number\nω: Ω\nω = 1\n';
     const faced = ts(src);
-    expect(faced.code).toBe('let ω!: Ω;\n\ntype Ω = number;\nω = 1;' + MARKER);
+    expect(faced.code).toBe('type Ω = number;\nlet ω: Ω = 1;' + MARKER);
     expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
     for (const [start, end] of faced.tsRegions) {
       const text = faced.code.slice(start, end).trim();
@@ -2647,6 +2647,12 @@ describe('globalThis ??= declares the global', () => {
     expect(r.code).not.toContain('var inner');
     expect(r.globalDecls).toEqual(['seed']);
     expect(stripFace(r.code, r.tsRegions)).toBe(js(src).code);
+  });
+
+  test('a non-ASCII global name declares like any other', () => {
+    const r = ts('globalThis.größe ??= 1\n');
+    expect(r.code).toContain('var größe: any;');
+    expect(r.globalDecls).toEqual(['größe']);
   });
 });
 

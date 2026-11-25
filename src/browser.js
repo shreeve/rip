@@ -11,6 +11,7 @@
 // TypeScript face / declaration emission belong to CLI check and
 // packages/vscode — never to the in-page compiler.
 
+import { isIdentifierName } from './ident.js';
 import { compile as compileSource } from './compiler.js';
 import * as intrinsics from './runtime/intrinsics.js';
 import * as stdlib from './runtime/stdlib.js';
@@ -140,7 +141,7 @@ function createModuleLoaderImpl({
     for (const name of Object.keys(namespace)) {
       if (name === 'default') {
         lines.push("export default ns['default'];");
-      } else if (/^[A-Za-z_$][\w$]*$/.test(name)) {
+      } else if (isIdentifierName(name)) {
         lines.push(`export const ${name} = ns[${JSON.stringify(name)}];`);
       } else {
         throw new Error(`rip: embedded module '${key}' exports '${name}', which cannot cross the module bridge`);

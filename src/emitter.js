@@ -26,7 +26,7 @@ import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './ts/sche
 import { Parser } from './parser.js';
 import { tagPostfixConditionals } from './lexer.js';
 import { rewriteTypes } from './types.js';
-import { identifierRunAt, isIdentifierName, isCustomElementName } from './ident.js';
+import { identifierRunAt, isIdentifierName, isCustomElementName, IDENT_START, IDENT_PART, IDENT_SOURCE, IDENT_RE, identifierMatches } from './ident.js';
 import { implicitBlocks, implicitObjects, implicitCalls } from './implicit.js';
 import { isComponentName, componentPathText, memberPathText, componentPathRoot, restReadKeys } from './render.js';
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './ts/types.js';
@@ -74,7 +74,6 @@ const DECLARING_ASSIGNS = new Set(['=', 'void-assign']);
 // child position : `=` declares, compound forms
 // mutate. Other assign heads have no render reading and reject.
 const RENDER_BINDING_HEADS = new Set(['=', '+=', '-=', '*=', '/=', '%=', '**=', '&&=', '||=', '??=']);
-const RENDER_LOCAL_RE = /^[A-Za-z_$][\w$]*$/;
 const JS_OP = { '==': '===', '!=': '!==' };
 
 // What a value word has already become by the time a pattern is walked.
@@ -331,7 +330,6 @@ const isUpdate = (x) => isNode(x) && (x[0] === '++' || x[0] === '--') && x.lengt
 // What may be a BINDING NAME. One spelling, read by the pattern walker and
 // by captureScan's own occurrence recorder — a walker that returned names
 // its caller then had to filter would be a helper you cannot reuse.
-const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 // The bindings a destructuring pattern introduces, each paired with the
 // ACCESSOR PATH from the assigned value to that binding's own value:
 // `{ json: media }` yields `media` at `.json`, `[p, q]` yields `p` at `[0]`
@@ -355,9 +353,9 @@ const patternBindings = (node, base = '', out = []) => {
       if (head !== ':' && head !== null) continue;   // '=' default, '...' rest: skipped
       const key = el[1];
       if (typeof key !== 'string') continue;         // computed key
-      const seg = IDENT.test(key) ? `.${key}` : `[${key}]`;
+      const seg = isIdentifierName(key) ? `.${key}` : `[${key}]`;
       const target = el[2];
-      if (typeof target === 'string') { if (IDENT.test(target)) out.push([target, base + seg]); }
+      if (typeof target === 'string') { if (isIdentifierName(target)) out.push([target, base + seg]); }
       else patternBindings(target, base + seg, out);
     }
     return out;
@@ -368,7 +366,7 @@ const patternBindings = (node, base = '', out = []) => {
       // the indices right (`[, b]` binds b at [1]), and it is not a name.
       // Every other non-identifier string is refused for the same reason.
       if (isNode(el) && el[0] === '...') return;     // rest: skipped
-      if (typeof el === 'string') { if (IDENT.test(el)) out.push([el, `${base}[${i}]`]); }
+      if (typeof el === 'string') { if (isIdentifierName(el)) out.push([el, `${base}[${i}]`]); }
       else patternBindings(el, `${base}[${i}]`, out);
     });
     return out;
@@ -2515,9 +2513,9 @@ class Emitter {
         i = Math.min(j + 1, text.length);
         continue;
       }
-      if (/[A-Za-z_$]/.test(ch)) {
+      if (IDENT_START.test(ch)) {
         let j = i + 1;
-        while (j < text.length && /[\w$]/.test(text[j])) j++;
+        while (j < text.length && IDENT_PART.test(text[j])) j++;
         const word = text.slice(i, j);
         let k = j;
         while (k < text.length && /\s/.test(text[k])) k++;
@@ -2929,7 +2927,7 @@ class Emitter {
     if (name !== null && span !== null) declared.set(name, span);
     if (declared.size === 0) { this.b.emit(text); return; }
     let cursor = 0;
-    for (const m of text.matchAll(/[A-Za-z_$][\w$]*/g)) {
+    for (const m of identifierMatches(text)) {
       const at = declared.get(m[0]);
       if (at === undefined || m.index < cursor) continue;
       this.b.emit(text.slice(cursor, m.index));
@@ -2951,7 +2949,7 @@ class Emitter {
     if (this._typeDeclSpans === undefined) {
       const spans = new Map();
       if (this.b.source !== null) {
-        const DECL = /^(?:export\s+)?(?:(?:type|interface|enum)\s+([A-Za-z_$][\w$]*)|([A-Za-z_$][\w$]*)\s*=\s*schema\b|([A-Za-z_$][\w$]*)\s*=\s*[A-Za-z_$][\w$]*\s*\.\s*(?:pick|omit|partial|required|extend)\b)/gmd;
+        const DECL = new RegExp(String.raw`^(?:export\s+)?(?:(?:type|interface|enum)\s+(${IDENT_SOURCE})|(${IDENT_SOURCE})\s*=\s*schema\b|(${IDENT_SOURCE})\s*=\s*${IDENT_SOURCE}\s*\.\s*(?:pick|omit|partial|required|extend)\b)`, 'gmd');
         for (const m of this.b.source.matchAll(DECL)) {
           const at = m.indices[1] ?? m.indices[2] ?? m.indices[3];
           const name = this.b.source.slice(at[0], at[1]);
@@ -2977,7 +2975,7 @@ class Emitter {
         // the import marks nothing.
         // The captured group is the LOCAL name either way: the alias in
         // `Origin as local`, otherwise the specifier's own word.
-        const SPEC = /(?:^|,)\s*(?:type\s+)?(?:[A-Za-z_$][\w$]*\s+as\s+)?([A-Za-z_$][\w$]*)/gd;
+        const SPEC = new RegExp(String.raw`(?:^|,)\s*(?:type\s+)?(?:${IDENT_SOURCE}\s+as\s+)?(${IDENT_SOURCE})`, 'gd');
         for (const clause of this.b.source.matchAll(/^import\s+(?:type\s+)?\{([^}]*)\}/gmd)) {
           const after = this.statementEndAfter(clause.index + clause[0].length);
           for (const sp of clause[1].matchAll(SPEC)) {
@@ -3018,7 +3016,7 @@ class Emitter {
     while (from > 0) {
       const i = this.b.source.lastIndexOf(name, from - 1);
       if (i < 0) break;
-      if (!/[\w$]/.test(this.b.source[i - 1] ?? ' ') && !/[\w$]/.test(this.b.source[i + name.length] ?? ' ')) return { id, span: [i, i + name.length] };
+      if (!IDENT_PART.test(this.b.source[i - 1] ?? ' ') && !IDENT_PART.test(this.b.source[i + name.length] ?? ' ')) return { id, span: [i, i + name.length] };
       from = i;
     }
     return null;
@@ -3037,9 +3035,9 @@ class Emitter {
     const src = r?.sourceStart != null && this.b.source !== null ? this.b.source.slice(r.sourceStart, r.sourceEnd) : null;
     if (src === null || s.text.includes(src)) { this.noteImportedTypeWords(s.text); return; }
     const words = new Map();
-    for (const m of src.matchAll(/[A-Za-z_$][\w$]*/g)) if (!words.has(m[0])) words.set(m[0], [r.sourceStart + m.index, r.sourceStart + m.index + m[0].length]);
+    for (const m of identifierMatches(src)) if (!words.has(m[0])) words.set(m[0], [r.sourceStart + m.index, r.sourceStart + m.index + m[0].length]);
     let cursor = 0;
-    for (const m of s.text.matchAll(/[A-Za-z_$][\w$]*/g)) {
+    for (const m of identifierMatches(s.text)) {
       const at = words.get(m[0]);
       if (!at) continue;
       this.b.emit(s.text.slice(cursor, m.index));
@@ -3519,7 +3517,7 @@ class Emitter {
             const i = this.b.source.lastIndexOf(name, from - 1);
             if (i < 0) break;
             const before = this.b.source[i - 1] ?? ' ', after = this.b.source[i + name.length] ?? ' ';
-            if (!/[\w$]/.test(before) && !/[\w$]/.test(after)) { nameAt = i; break }
+            if (!IDENT_PART.test(before) && !IDENT_PART.test(after)) { nameAt = i; break }
             from = i;
           }
         }
@@ -3534,7 +3532,7 @@ class Emitter {
         const emitNamed = (text) => {
           if (declared.size === 0) { this.b.emit(text); return; }
           let cursor = 0;
-          for (const m of text.matchAll(/[A-Za-z_$][\w$]*/g)) {
+          for (const m of identifierMatches(text)) {
             const span = declared.get(m[0]);
             if (!span) continue;
             this.b.emit(text.slice(cursor, m.index));
@@ -3603,7 +3601,7 @@ class Emitter {
           while (from > 0) {
             const i = this.b.source.lastIndexOf(name, from - 1);
             if (i < 0) break;
-            if (!/[\w$]/.test(this.b.source[i - 1] ?? ' ') && !/[\w$]/.test(this.b.source[i + name.length] ?? ' ')) { bindAt = i; break }
+            if (!IDENT_PART.test(this.b.source[i - 1] ?? ' ') && !IDENT_PART.test(this.b.source[i + name.length] ?? ' ')) { bindAt = i; break }
             from = i;
           }
         }
@@ -3725,7 +3723,7 @@ class Emitter {
     for (const n of this.stores.nodes ?? []) {
       for (const r of this.stores.rolesOf(n.nodeId)) {
         if (!Emitter.TYPE_ROLES.has(r.role) || typeof r.sourceStart !== 'number') continue;
-        for (const m of source.slice(r.sourceStart, r.sourceEnd).matchAll(/[A-Za-z_$][\w$]*/g)) inTypes.add(m[0]);
+        for (const m of identifierMatches(source.slice(r.sourceStart, r.sourceEnd))) inTypes.add(m[0]);
       }
     }
     for (const name of bound) if (inTypes.has(name) && !used.has(name)) this.typeOnlyImports.add(name);
@@ -4618,7 +4616,7 @@ class Emitter {
     // Only level 2 disqualifies declare-in-place; level 1 still marks
     // `nested` for the pin pipeline.
     const occur = (name, inFn, write = false, declStmt = null, writeNode = null, writePath = '') => {
-      if (typeof name !== 'string' || !IDENT.test(name)) return;
+      if (typeof name !== 'string' || !isIdentifierName(name)) return;
       let f = facts.get(name);
       if (f === undefined) facts.set(name, (f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: null, firstWrite: null, firstWritePath: '' }));
       if (!f.seen) { f.seen = true; f.decl = declStmt; }
@@ -6046,7 +6044,7 @@ class Emitter {
           node,
         );
       }
-      if (typeof item === 'string' && /^[A-Za-z_$][\w$]*$/.test(item)) {
+      if (typeof item === 'string' && isIdentifierName(item)) {
         // Bare member: auto-numbered (the TS rule) — resolved once
         // for the whole member list so explicit numerics thread the
         // counter.
@@ -6269,7 +6267,7 @@ class Emitter {
       else if ((SCHEMA_BODY_KINDS[e.tag] ?? null) !== null) {
         pin('name', e.name, e.start);
         if (e.tag === 'field' && Array.isArray(e.typeSpan) && this.b.source !== null) {
-          const typeWord = /[A-Za-z_$][\w$]*/.exec(this.b.source.slice(e.typeSpan[0], e.typeSpan[1]));
+          const typeWord = IDENT_RE.exec(this.b.source.slice(e.typeSpan[0], e.typeSpan[1]));
           if (typeWord !== null && typeWord[0] === e.typeName) pin('typeName', typeWord[0], e.typeSpan[0] + typeWord.index);
         }
       }
@@ -7014,7 +7012,7 @@ class Emitter {
   matchChain(node, ind, arm) {
     const [, subject, cases, dflt] = node;
     const pad = '  '.repeat(ind);
-    const plainRead = typeof subject === 'string' && /^[A-Za-z_$][\w$]*$/.test(subject) && !this.isReactiveName(subject);
+    const plainRead = typeof subject === 'string' && isIdentifierName(subject) && !this.isReactiveName(subject);
     const ref = plainRead ? null : this.loopTempName('_switch');
     const subj = () => (ref !== null ? this.b.emit(ref) : this.mark(node, 'subject', () => this.expr(subject)));
     if (ref !== null) {
@@ -8256,52 +8254,55 @@ class Emitter {
   }
 
   valueSwitch(node, effect = false) {
-    const [, subject, cases, dflt] = node;
-    const ind = this.ind;
-    const pad = '  '.repeat(ind);
     this.rejectYieldInIIFE(node);
     this.b.emit(this.containsAwait(node) ? 'await (async () => { ' : '(() => { ');
-    this.mark(node, '$self', () => {
-      if (Emitter.hasMatchArms(cases)) {
-        this.checkMatchSwitch(node);
-        this.matchChain(node, ind, (body) => this.returnBlock(body, ind, effect));
-      } else if (subject !== null) {
-        this.b.emit('switch (');
-        this.mark(node, 'subject', () => this.expr(subject));
-        this.b.emit(') {\n');
-        for (const when of cases) {
-          const [, conditions, body] = when;
-          for (const c of conditions) {
-            this.b.emit(`${pad}  case `);
-            this.expr(c);
-            this.b.emit(':\n');
-          }
-          this.returnCaseBody(body, ind, effect);
-        }
-        if (dflt !== null) {
-          this.b.emit(`${pad}  default:\n`);
-          this.returnCaseBody(dflt, ind, effect);
-        }
-        this.b.emit(`${pad}}`);
-      } else {
-        // Subjectless switch lowers to an if/else chain with returns
-        // (value context); a multi-condition `when` ORs every test,
-        // exactly like the statement-position chain.
-        cases.forEach((when, i) => {
-          const [, conditions, body] = when;
-          if (i > 0) this.b.emit(' else ');
-          this.b.emit('if (');
-          this.whenTests(Array.isArray(conditions) ? conditions : [conditions]);
-          this.b.emit(') ');
-          this.returnBlock(body, ind, effect);
-        });
-        if (dflt !== null) {
-          this.b.emit(' else ');
-          this.returnBlock(dflt, ind, effect);
-        }
-      }
-    });
+    this.mark(node, '$self', () => this.switchArms(node, this.ind, effect));
     this.b.emit(' })()');
+  }
+
+  // A switch whose every arm returns its value: the body of a value
+  // switch's IIFE, or a function's tail statement.
+  switchArms(node, ind, effect) {
+    const [, subject, cases, dflt] = node;
+    const pad = '  '.repeat(ind);
+    if (Emitter.hasMatchArms(cases)) {
+      this.checkMatchSwitch(node);
+      this.matchChain(node, ind, (body) => this.returnBlock(body, ind, effect));
+    } else if (subject !== null) {
+      this.b.emit('switch (');
+      this.mark(node, 'subject', () => this.expr(subject));
+      this.b.emit(') {\n');
+      for (const when of cases) {
+        const [, conditions, body] = when;
+        for (const c of conditions) {
+          this.b.emit(`${pad}  case `);
+          this.expr(c);
+          this.b.emit(':\n');
+        }
+        this.returnCaseBody(body, ind, effect);
+      }
+      if (dflt !== null) {
+        this.b.emit(`${pad}  default:\n`);
+        this.returnCaseBody(dflt, ind, effect);
+      }
+      this.b.emit(`${pad}}`);
+    } else {
+      // Subjectless switch lowers to an if/else chain with returns
+      // (value context); a multi-condition `when` ORs every test,
+      // exactly like the statement-position chain.
+      cases.forEach((when, i) => {
+        const [, conditions, body] = when;
+        if (i > 0) this.b.emit(' else ');
+        this.b.emit('if (');
+        this.whenTests(Array.isArray(conditions) ? conditions : [conditions]);
+        this.b.emit(') ');
+        this.returnBlock(body, ind, effect);
+      });
+      if (dflt !== null) {
+        this.b.emit(' else ');
+        this.returnBlock(dflt, ind, effect);
+      }
+    }
   }
 
   returnCaseBody(body, ind, effect = false) {
@@ -11740,7 +11741,7 @@ class Emitter {
 
   isRenderBinding(stmt) {
     return isNode(stmt) && RENDER_BINDING_HEADS.has(stmt[0]) && stmt.length === 3 &&
-      typeof stmt[1] === 'string' && RENDER_LOCAL_RE.test(stmt[1]);
+      typeof stmt[1] === 'string' && isIdentifierName(stmt[1]);
   }
 
   // `component` names the child component the spread sits on; null
@@ -12366,7 +12367,7 @@ class Emitter {
           this.renderAppend(el, v);
           continue;
         }
-        if (/^[A-Za-z_$][\w$]*$/.test(arg) && this.resolveBareRead(arg) === null && !this.inScope(arg)) {
+        if (isIdentifierName(arg) && this.resolveBareRead(arg) === null && !this.inScope(arg)) {
           this.renderBareAttribute(el, arg, args, k, owner);
           continue;
         }
@@ -12487,7 +12488,7 @@ class Emitter {
   // plain identifier resolving to nothing reaches the attribute arm.
   // Everything else (quoted text, a call, a chain) is renderNode's.
   renderOwnLineWord(el, child, siblings, k, owner) {
-    if (typeof child !== 'string' || !/^[A-Za-z_$][\w$]*$/.test(child)) return false;
+    if (typeof child !== 'string' || !isIdentifierName(child)) return false;
     if (isHtmlTag(child) || isComponentName(child)) return false;
     if (this.renderVarKind(child, child) !== null) return false;
     if (this.resolveBareRead(child) !== null || this.inScope(child)) return false;
@@ -12927,7 +12928,7 @@ class Emitter {
     const classifyChild = (arg) => {
       if (arg == null) return;
       if (isSpread(arg)) throw this.renderSpreadError(arg, name);
-      const isBareWord = typeof arg === 'string' && RENDER_LOCAL_RE.test(arg) &&
+      const isBareWord = typeof arg === 'string' && isIdentifierName(arg) &&
         this.renderVarKind(arg) === null && this.resolveBareRead(arg) === null;
       if (isBareWord && (isHtmlTag(arg) || arg === 'slot')
           && (this.inScope(arg) || this.moduleBound.has(arg))) {
@@ -14312,7 +14313,7 @@ class Emitter {
   // user's code references — fixed names would silently collide.
   static collectLeafNames(x, set) {
     if (typeof x === 'string') {
-      if (RENDER_LOCAL_RE.test(x)) set.add(x);
+      if (isIdentifierName(x)) set.add(x);
       return;
     }
     if (!isNode(x)) return;
@@ -14539,7 +14540,7 @@ class Emitter {
     if (!isNode(n) || n[0] !== '.' || n.length !== 3 || typeof n[2] !== 'string' || n[2][0] === '"') return false;
     const o = n[1];
     if (o === 'this') return true;
-    if (typeof o === 'string') return /^[A-Za-z_$][\w$]*$/.test(o);
+    if (typeof o === 'string') return isIdentifierName(o);
     return Emitter.isDotChain(o);
   }
 
@@ -15365,7 +15366,7 @@ class Emitter {
   // before any effect first runs — glitch-free) and clear through
   // _refCleanups on unmount; dynamic refs ride the factory's m()/d().
   renderRef(el, pair, value, objExpr, site) {
-    const refName = typeof value === 'string' && RENDER_LOCAL_RE.test(value) ? value : null;
+    const refName = typeof value === 'string' && isIdentifierName(value) ? value : null;
     if (refName === null) {
       throw this.positionedError(pair,
         'emitter: ref: expects a state cell — declare `el := null` then write `ref: el`', this.rstate.node);
@@ -15525,7 +15526,7 @@ class Emitter {
       throw this.positionedError(pair, msg, this.rstate.node);
     };
     if (typeof value === 'string') {
-      if (!RENDER_LOCAL_RE.test(value)) {
+      if (!isIdentifierName(value)) {
         reject('emitter: a two-way binding (`<=>`) needs an assignable target — a literal cannot receive the input');
       }
       const kind = this.renderVarKind(value, pair);
@@ -16042,7 +16043,7 @@ class Emitter {
       throw this.positionedError(node, 'emitter: a pick expression is not an assignment target — it lowers to a fresh object literal (`({…}) = value` would be invalid JS)');
     }
     const optional = head === '?.{}';
-    const simple = typeof source === 'string' && (source === 'this' || /^[A-Za-z_$][\w$]*$/.test(source));
+    const simple = typeof source === 'string' && (source === 'this' || isIdentifierName(source));
     // A complex source binds `_` in a plain arrow — awaits and yields
     // in defaults cannot cross it (inside the arrow they are invalid
     // JS both ways).
@@ -16613,7 +16614,7 @@ class Emitter {
 
   static isMethodPair(pair) {
     return isNode(pair) && (pair[0] === ':' || pair[0] === 'void-pair') && typeof pair[1] === 'string' &&
-      /^[A-Za-z_$][\w$]*$/.test(pair[1]) && isNode(pair[2]) && pair[2][0] === '->';
+      isIdentifierName(pair[1]) && isNode(pair[2]) && pair[2][0] === '->';
   }
 
   object(node) {
@@ -18151,10 +18152,10 @@ class Emitter {
         this.withTailReturn(() => this.tryBranches(stmt, ind, effect));
         return;
       }
+      // A tail switch is the statement itself: each arm returns from the
+      // enclosing function, as a tail `if` or `try` does.
       if (h === 'switch' && stmt.length === 4) {
-        this.b.emit('return ');
-        this.withTailReturn(() => this.valueSwitch(stmt, effect));
-        this.b.emit(';');
+        this.withTailReturn(() => this.mark(stmt, '$self', () => this.switchArms(stmt, ind, effect)));
         return;
       }
       if ((h === 'while' && (stmt.length === 3 || stmt.length === 4)) || (h === 'loop' && stmt.length === 2)) {
@@ -18800,7 +18801,7 @@ class Emitter {
     }
     const id = isNode(cur) ? this.stores.idOf(cur) : null;
     const kind = id !== null ? this.stores.node(id)?.semanticKind : null;
-    const callHead = isNode(cur) && typeof cur[0] === 'string' && /^[A-Za-z_$][\w$]*$/.test(cur[0]) &&
+    const callHead = isNode(cur) && typeof cur[0] === 'string' && isIdentifierName(cur[0]) &&
       (kind === 'call' || (kind == null && Emitter.jsTier(cur) === 'primary'));
     if (!callHead) {
       throw this.positionedError(node, "emitter: `.=` re-binds its target to a METHOD CALL on itself — the right side must be a call chain (`x .= trim()`)");
@@ -18886,7 +18887,7 @@ class Emitter {
           this.b.emit('[');
           const key = pair[1];
           this.mark(pair, 'key', () => {
-            if (typeof key === 'string' && /^[A-Za-z_$][\w$]*$/.test(key) &&
+            if (typeof key === 'string' && isIdentifierName(key) &&
                 key !== 'true' && key !== 'false' && key !== 'null' && key !== 'undefined') {
               // Re-rendered quoted, so the pair's cover breaks at the quote —
               // the name itself is still verbatim inside it.
@@ -19688,15 +19689,68 @@ const runtimeRequires = (rt) =>
 // SHORTHAND in expression position — x = {SchemaError} — remains a
 // reference; only patterns bind). String/number literals keep
 // their source spelling (quotes included), so they never equal a
-// bare name. The walk is scope-free by design: a FUNCTION-scope
-// binding of a runtime name does not suppress module-level delivery
-// (function scope suppresses nothing), so a reference
-// under one may over-trigger injection, which the local binding then
-// shadows — harmless, and consistent with the schema-module
-// behavior.
+// bare name. A function's parameters shadow the names they bind
+// throughout its body, and a word in a render block's tag position
+// names an element, never a value: a tag word that a render local,
+// loop variable or member shadows is that component's own name, and
+// any other is the element. Every other function-scope binding
+// suppresses nothing, so a reference under one may over-trigger
+// injection, which the local binding then shadows — wasted bytes, never
+// a wrong program.
 const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
   if (names.size === 0) return false;
   const ref = (x) => typeof x === 'string' && names.has(x);
+  // The names a parameter list binds: a bare name, the target of a
+  // default, a rest, an annotation, or a destructuring pattern's leaves.
+  const paramBindings = (params) => {
+    const out = new Set();
+    const bind = (p) => {
+      if (typeof p === 'string') { out.add(p); return; }
+      if (!isNode(p)) return;
+      const [h] = p;
+      if (h === 'object' || h === 'array') p.slice(1).forEach(bind);
+      else if (h === null && p.length === 3) bind(p[2]);
+      else if ((h === ':' || h === '=') && p.length === 3) bind(h === ':' ? p[2] : p[1]);
+      else if (h === 'default' && p.length === 3) bind(p[1]);
+      else if ((h === 'rest' || h === '...' || h === 'expansion') && p.length === 2) bind(p[1]);
+      else if (h === 'typed-var' && p.length === 3) bind(p[1]);
+    };
+    if (isNode(params)) params.forEach(bind);
+    return out;
+  };
+  const walkBody = (params, body) => {
+    const shadowed = paramBindings(params);
+    const live = [...names].filter((n) => !shadowed.has(n));
+    if (live.length === names.size) return walk(body);
+    return referencesNames(body, new Set(live), stores, isDecl);
+  };
+  const semanticKind = (x) => {
+    const id = stores.idOf(x);
+    return id !== null ? stores.node(id)?.semanticKind : null;
+  };
+  const isTagWord = (w) => typeof w === 'string' && isHtmlTag(w.split('#')[0]);
+  const tagOf = (head) => {
+    if (isTagWord(head)) return true;
+    if (isNode(head) && head[0] === '.') return isTagWord(Emitter.collectTemplateClasses(head).tag);
+    return false;
+  };
+  // A render statement: a tag word or a tag call names an element, and
+  // a parameterless arrow among a tag call's arguments is its children
+  // block; a branch's or a loop's body is render too. Anything else is
+  // an expression.
+  const walkRender = (x) => {
+    if (typeof x === 'string') return !isTagWord(x) && ref(x);
+    if (!isNode(x)) return false;
+    const [h] = x;
+    if (h === 'block') return x.slice(1).some(walkRender);
+    if (tagOf(h)) return x.slice(1).some((a) => (isFunc(a) && isNode(a[1]) && a[1].length === 0 ? walkRender(a[2]) : walk(a)));
+    if (h === '.' && tagOf(x)) return false;
+    if (h === 'if' && x.length >= 3 && x.length <= 4) return walk(x[1]) || walkRender(x[2]) || (x.length === 4 && walkRender(x[3]));
+    if ((h === 'for-in' || h === 'for-of' || h === 'for-as') && x.length === 6) {
+      return (isNode(x[1]) && x[1].some(walkPattern)) || walk(x[2]) || walk(x[3]) || walk(x[4]) || walkRender(x[5]);
+    }
+    return walk(x);
+  };
   const walkParams = (params) => isNode(params) && params.some(walkPattern);
   // Binding-position walk: bare strings are binding names (skipped);
   // only the expression slots inside a pattern can reference.
@@ -19706,7 +19760,7 @@ const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
     if (h === 'object' || h === 'array') return p.slice(1).some(walkPattern);
     if (h === null && p.length === 3) return false;
     if (h === ':' && p.length === 3) return (isNode(p[1]) && walk(p[1])) || walkPattern(p[2]);
-    if (h === '=' && p.length === 3) return walkPattern(p[1]) || walk(p[2]);
+    if ((h === '=' || h === 'default') && p.length === 3) return walkPattern(p[1]) || walk(p[2]);
     if ((h === 'rest' || h === '...' || h === 'expansion') && p.length === 2) return walkPattern(p[1]);
     if (h === 'typed-var' && p.length === 3) return walkPattern(p[1]);
     return walk(p);
@@ -19723,8 +19777,9 @@ const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
     if (h === 'schema' && x.length === 2 && x[1] && typeof x[1] === 'object' && Array.isArray(x[1].entries)) return false;
     if (h === '.' || h === '?.') return walk(x[1]);
     if ((h === ':' || h === 'void-pair') && x.length === 3) return (isNode(x[1]) && walk(x[1])) || walk(x[2]);
-    if (isFunc(x)) return walkParams(x[1]) || walk(x[2]);
-    if (isDefHead(h) && x.length === 4) return walkParams(x[2]) || walk(x[3]);
+    if (isFunc(x)) return walkParams(x[1]) || walkBody(x[1], x[2]);
+    if (isDefHead(h) && x.length === 4) return walkParams(x[2]) || walkBody(x[2], x[3]);
+    if (h === 'render' && x.length === 2 && semanticKind(x) === 'render') return walkRender(x[1]);
     // A reactive DECLARATION's target is a binding name, never a
     // reference; its initializer is expression territory. (A user
     // call impersonating the head fails isDecl and walks generically
@@ -20072,7 +20127,7 @@ function emitSchemaTextMarked(emitter, block, text, nodeId) {
     // that name in the member's type; the copy marks the author's type
     // word.
     const typeWord = e.tag === 'field' && Array.isArray(e.typeSpan) && emitter.b.source !== null
-      ? /[A-Za-z_$][\w$]*/.exec(emitter.b.source.slice(e.typeSpan[0], e.typeSpan[1]))
+      ? IDENT_RE.exec(emitter.b.source.slice(e.typeSpan[0], e.typeSpan[1]))
       : null;
     // The member recurs on every companion line (`ThingData`,
     // `ThingCreate`): each copy marks the entry, so none is left for the
@@ -20104,7 +20159,7 @@ function emitSchemaTextMarked(emitter, block, text, nodeId) {
       const own = emitter.bindingNameSpan(block.story.decl.node, 'target', block.story.decl.name);
       if (own !== null) named.set(block.story.decl.name, own.span);
     }
-    const heads = [...new Set([...text.matchAll(/(?:^|\n)[ \t]*(?:export )?type ([A-Za-z_$][\w$]*)/g)].map((m) => m[1]))];
+    const heads = [...new Set([...text.matchAll(new RegExp(String.raw`(?:^|\n)[ \t]*(?:export )?type (${IDENT_SOURCE})`, 'g'))].map((m) => m[1]))];
     for (const headName of heads) {
       if (named.has(headName)) continue;
       // `+ 1` admits an occurrence starting exactly AT the span (see
@@ -20114,7 +20169,7 @@ function emitSchemaTextMarked(emitter, block, text, nodeId) {
       while (from > 0) {
         const i = src.lastIndexOf(headName, from - 1);
         if (i < 0) break;
-        if (!/[\w$]/.test(src[i - 1] ?? ' ') && !/[\w$]/.test(src[i + headName.length] ?? ' ')) { nameAt = i; break }
+        if (!IDENT_PART.test(src[i - 1] ?? ' ') && !IDENT_PART.test(src[i + headName.length] ?? ' ')) { nameAt = i; break }
         from = i;
       }
       if (nameAt >= 0) named.set(headName, [nameAt, nameAt + headName.length]);
@@ -20584,7 +20639,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
         // any other declaration form (def, class, …) is not the binding
         // contract and falls through.
         const specList = decl.every((x) =>
-          (typeof x === 'string' && /^[A-Za-z_$][\w$]*$/.test(x)) ||
+          (typeof x === 'string' && isIdentifierName(x)) ||
           (Array.isArray(x) && x.length === 2 && typeof x[0] === 'string' && typeof x[1] === 'string'));
         if (!specList) continue;
         for (const spec of decl) {
@@ -20724,19 +20779,18 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // shape, which the marker below guarantees for bare files.
   const globalDecls = [];
   if (face === 'ts' && isNode(parseResult.sexpr) && parseResult.sexpr[0] === 'program') {
-    const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
     for (const stmt of parseResult.sexpr.slice(1)) {
       if (!isNode(stmt) || stmt[0] !== '??=' || stmt.length !== 3) continue;
       const target = stmt[1];
       if (!isNode(target) || target[0] !== '.' || target[1] !== 'globalThis') continue;
-      if (typeof target[2] !== 'string' || !IDENT.test(target[2])) continue;
+      if (typeof target[2] !== 'string' || !isIdentifierName(target[2])) continue;
       // Keyword literals are identifier-shaped in the sexpr (`??= null`
       // seeds ui's focus tracker) but are not typeof-able values.
       const RESERVED = new Set(['null', 'undefined', 'true', 'false', 'this']);
       const v = stmt[2];
       globalDecls.push({
         name: target[2],
-        anchor: typeof v === 'string' && IDENT.test(v) && !RESERVED.has(v) ? v : null,
+        anchor: typeof v === 'string' && isIdentifierName(v) && !RESERVED.has(v) ? v : null,
       });
     }
     if (globalDecls.length) {
