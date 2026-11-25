@@ -1980,7 +1980,7 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     // statics — without the declare, a hoisted binding's class
     // expression is not assignable to its own published type. The
     // precise return reaches use sites through that published type.
-    expect(code).toContain('declare static mount: (target?: Node | string) => InstanceType<typeof this>;');
+    expect(code).toContain('declare static mount: (target?: globalThis.Node | string) => InstanceType<typeof this>;');
     expect(code).not.toContain('declare static mount: never');
   });
 
@@ -1993,7 +1993,7 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     const src = 'mk = -> new Chip()\nChip = component\n  @label := "c"\n';
     const faced = ts(src);
     expect(faced.code).toContain(
-      'let Chip!: { new (props?: { label?: string | { value: string; read(): string; touch?(): void }; __bind_label__?: { value: string; read(): string; touch?(): void }; children?: __RipChildren }): Chip; mount(target?: Node | string): Chip; };',
+      'let Chip!: { new (props?: { label?: string | { value: string; read(): string; touch?(): void }; __bind_label__?: { value: string; read(): string; touch?(): void }; children?: __RipChildren }): Chip; mount(target?: globalThis.Node | string): Chip; };',
     );
     // Whole-line TS syntax: stripping restores the bare hoist.
     expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
@@ -2016,7 +2016,7 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
   test('the companion interface: the instance surface under the binding name (value/type pairing)', () => {
     const code = ts(FIXTURE).code;
     expect(code).toContain('interface Counter {');
-    expect(code).toContain('  mount(target?: Node | string): Counter;');
+    expect(code).toContain('  mount(target?: globalThis.Node | string): Counter;');
     expect(code).toContain('  unmount(options?: { removeDOM?: boolean }): void;');
     expect(code).toContain('  unmount(options?: { removeDOM?: boolean }): void;');
     expect(code).not.toContain('emit(');

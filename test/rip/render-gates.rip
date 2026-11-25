@@ -179,10 +179,10 @@ type 'gate: annotated value is a non-null readonly computed container', '''
     router?: any;
     params?: any;
     query?: any;
-    children?: Node | string | number | boolean | null;
+    children?: globalThis.Node | string | number | boolean | null;
     __offers?: {};
     __host?: {};
-    mount(target?: Node | string): UserCard;
+    mount(target?: globalThis.Node | string): UserCard;
     unmount(options?: { removeDOM?: boolean }): void;
   }
   export declare let UserCard: {

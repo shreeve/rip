@@ -741,6 +741,9 @@ export function emitDeclarations({ sexpr, stores, source }) {
   // language lib alone still resolves every name the file uses. A
   // module naming none stays directive-free. The directive is a
   // file-head pragma, so it goes before the retained imports.
-  if (DOM_LIB_GLOBALS.some(referenced)) lines.unshift('/// <reference lib="dom" />');
+  // The surfaces spell some of these through globalThis (an author's own
+  // `Node` must not capture them), and that spelling needs the lib too.
+  const namesGlobal = (name) => referenced(name) || new RegExp(`(?<!${IDENT_PART.source})globalThis\\.${name}(?!${IDENT_PART.source})`).test(bodyText);
+  if (DOM_LIB_GLOBALS.some(namesGlobal)) lines.unshift('/// <reference lib="dom" />');
   return lines.length > 0 ? lines.join('\n') + '\n' : '';
 }

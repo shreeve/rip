@@ -603,15 +603,15 @@ type 'a member initialized by a call of a function named array is not an array l
     router?: any;
     params?: any;
     query?: any;
-    children?: Node | string | number | boolean | null;
+    children?: globalThis.Node | string | number | boolean | null;
     __offers?: {};
     __host?: {};
-    mount(target?: Node | string): C;
+    mount(target?: globalThis.Node | string): C;
     unmount(options?: { removeDOM?: boolean }): void;
   }
   export declare let C: {
-    new (props?: { x?: any; __bind_x__?: { value: any; read(): any; touch?(): void }; children?: Node | string | number | boolean | null }): C;
-    mount(target?: Node | string): C;
+    new (props?: { x?: any; __bind_x__?: { value: any; read(): any; touch?(): void }; children?: globalThis.Node | string | number | boolean | null }): C;
+    mount(target?: globalThis.Node | string): C;
   };
   '''
 

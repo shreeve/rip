@@ -857,7 +857,10 @@ export const propsParamOptional = (info) => info.extendsComponent === null && !p
 // reader a self-contained type); the FACE road names it through the
 // `__RipChildren` alias the editor scrubs to `Children` — a name at the
 // hover, the union one hop behind it.
-export const CHILDREN_UNION = 'Node | string | number | boolean | null';
+// DOM type names the face writes into the author's module are spelled
+// through globalThis: the author may declare a `Node` of their own, and a
+// bare name would resolve to theirs.
+export const CHILDREN_UNION = 'globalThis.Node | string | number | boolean | null';
 const childrenType = (road) => (road === 'face' ? '__RipChildren' : CHILDREN_UNION);
 
 // The passthrough object an `extends` component admits beyond what it
@@ -1079,7 +1082,7 @@ export const componentCtorSegments = (info, name, typeParams = '', self = name, 
   return [
     { text: `{ new ${typeParams}(props${optional ? '?' : ''}: ` },
     ...propsTypeSegments(info, opts),
-    { text: `): ${self};${optional ? ` mount${typeParams}(target?: Node | string): ${self};` : ''} }` },
+    { text: `): ${self};${optional ? ` mount${typeParams}(target?: globalThis.Node | string): ${self};` : ''} }` },
   ];
 };
 
@@ -1100,7 +1103,7 @@ export const componentCtorMembers = (info, name, typeParams = '', self = name, o
   // container holding undefined. Requiredness is a TYPE-story fact
   // (annotations erase — the runtime never sees it), so the gate lives
   // here, never as a runtime throw.
-  if (optional) members.push(`mount${typeParams}(target?: Node | string): ${self};`);
+  if (optional) members.push(`mount${typeParams}(target?: globalThis.Node | string): ${self};`);
   return members;
 };
 
@@ -1135,7 +1138,7 @@ export const AMBIENT_FIELDS = ['stash', 'router', 'params', 'query'];
 // A null `returns` is the INSTANCE type, which each road spells its own
 // way — the companion interface by name, the class road as `this`.
 const RUNTIME_API = [
-  { name: 'mount', params: 'target?: Node | string', returns: null },
+  { name: 'mount', params: 'target?: globalThis.Node | string', returns: null },
   { name: 'unmount', params: 'options?: { removeDOM?: boolean }', returns: 'void' },
 ];
 

@@ -9820,7 +9820,7 @@ var CAMEL = {
   allowfullscreen: "allowFullscreen"
 };
 var CLASS_VALUE_DECL = "type __RipClassValue = string | boolean | null | undefined | Record<string, boolean | null | undefined> | __RipClassValue[];";
-var CHILDREN_DECL = "/** What a component projects through `slot`: the DOM its parent built for it — an element, a fragment, or a text node — or a value rendered as text. */\n" + "type __RipChildren = Node | string | number | boolean | null;";
+var CHILDREN_DECL = "/** What a component projects through `slot`: the DOM its parent built for it — an element, a fragment, or a text node — or a value rendered as text. */\n" + "type __RipChildren = globalThis.Node | string | number | boolean | null;";
 var CLSX_TYPE = "(...args: (__RipClassValue | __RipClassValue[])[]) => string";
 var HELPER_DECLS = `type __RipAV<E, P extends PropertyKey, F = string> = E extends Record<P, infer V> ? V | string : F;
 ` + "type __RipProp<E, P extends PropertyKey> = E extends Record<P, infer V> ? V : any;";
@@ -12339,7 +12339,7 @@ class Emitter {
       this.b.tsOnly(() => this.b.emit(`${pad}declare static mount: never;
 `));
     } else {
-      this.b.tsOnly(() => this.b.emit(`${pad}declare static mount: (target?: Node | string) => InstanceType<typeof this>;
+      this.b.tsOnly(() => this.b.emit(`${pad}declare static mount: (target?: globalThis.Node | string) => InstanceType<typeof this>;
 `));
     }
     this.b.tsOnly(() => {
@@ -34498,7 +34498,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "82d91ae791f59302";
+var compilerBuild = () => "3f89350475a19f54";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

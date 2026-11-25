@@ -467,7 +467,7 @@ describe('component declarations: the class shape, the props surface, the extend
     expect(d).toContain('interface Theme {\n  theme: { value: string; read(): string; touch(): void };');
     expect(d).toContain('  bump(n: number): number;');
     expect(d).toContain('  mounted(): any;');
-    expect(d).toContain('  mount(target?: Node | string): Counter;');
+    expect(d).toContain('  mount(target?: globalThis.Node | string): Counter;');
     expect(d).toContain('  unmount(options?: { removeDOM?: boolean }): void;');
     expect(d).toContain('  __host?: {};');
     expect(d).not.toContain('emit(');
@@ -481,8 +481,8 @@ describe('component declarations: the class shape, the props surface, the extend
     // runtime's static mount constructs with NO props — offering it
     // would be tsc-clean with a required container holding
     // undefined); the INSTANCE mount stays.
-    expect(d).toContain('  mount(target?: Node | string): Counter;\n  unmount');
-    expect(d).not.toContain('  mount(target?: Node | string): Counter;\n};');
+    expect(d).toContain('  mount(target?: globalThis.Node | string): Counter;\n  unmount');
+    expect(d).not.toContain('  mount(target?: globalThis.Node | string): Counter;\n};');
     // The module-marker interplay: no emitted line self-scopes, so the
     // non-exported artifact carries the marker.
     expect(d.endsWith('export {};\n')).toBe(true);
@@ -494,7 +494,7 @@ describe('component declarations: the class shape, the props surface, the extend
     expect(d).toContain('export declare let Chip: {');
     expect(d).toContain('new (props?: {');
     // All-optional props: the static mount mirror IS offered.
-    expect(d).toContain('  mount(target?: Node | string): Chip;\n};');
+    expect(d).toContain('  mount(target?: globalThis.Node | string): Chip;\n};');
     expect(d.endsWith('export {};\n')).toBe(false);
   });
 
@@ -602,7 +602,7 @@ describe('component declarations: the class shape, the props surface, the extend
     // The parameter is required under a component host (the host may
     // carry a required prop this surface cannot name).
     expect(d).toContain(`new (props: { side?: string`);
-    expect(d).toContain(`children?: Node | string | number | boolean | null } & ${omitted}): Sheet;`);
+    expect(d).toContain(`children?: globalThis.Node | string | number | boolean | null } & ${omitted}): Sheet;`);
     // The view reads a held container through, as the runtime's does.
     const view = `{ [K in keyof (${omitted})]: (${omitted})[K] extends infer __V ? (__V extends { read(): infer __R } ? __R : __V) : never }`;
     expect(d).toContain(`rest: { readonly value: ${view}; read(): ${view}; touch(): void };`);
@@ -642,7 +642,7 @@ describe('component declarations: the class shape, the props surface, the extend
   test('a declaration file that names a DOM global opens with the dom lib reference; one that names none has no directive', () => {
     const card = compile('export Card = component\n  @title := "x"\n  render\n    div\n      = @title\n').declarations;
     expect(card.split('\n')[0]).toBe('/// <reference lib="dom" />');
-    expect(card).toContain('children?: Node | string | number | boolean | null;');
+    expect(card).toContain('children?: globalThis.Node | string | number | boolean | null;');
     const push = compile('export Push = component extends button\n  @label := "x"\n  render\n    button\n      = @label\n').declarations;
     expect(push.split('\n')[0]).toBe('/// <reference lib="dom" />');
     // Every component names `Element` through its `mount`, so every
