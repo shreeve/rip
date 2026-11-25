@@ -1,0 +1,478 @@
+# Mutation triage — src/types.js
+
+Survivors of the lexer-pass mutation audit at 119b45bb, classified per the triage brief.
+Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
+
+## GAP (229)
+
+- src/types.js:178:10001:relation — test/rip/types.rip › a method shorthand needs a member-row start
+- src/types.js:217:11845:statement — test/rip/types.rip › a method member after a generic member in an inline object type
+- src/types.js:217:11858:number — test/rip/types.rip › a method member after a generic member in an inline object type
+- src/types.js:217:11863:relation — test/rip/types.rip › a method member after a generic member in an inline object type
+- src/types.js:221:12009:branch — test/rip/types.rip › an unclosed nested generic in an interface body rejects at the outer opener
+- src/types.js:221:12016:relation — test/rip/types.rip › an unclosed nested generic in an interface body rejects at the outer opener
+- src/types.js:221:12020:number — test/rip/types.rip › an unclosed nested generic in an interface body rejects at the outer opener
+- src/types.js:231:12293:statement — test/rip/types.rip › a negative literal type argument
+- src/types.js:231:12303:boolean — test/rip/types.rip › a negative literal type argument
+- src/types.js:234:12408:boolean — test/rip/types.rip › arithmetic after a generic close rejects
+- src/types.js:235:12449:logic — test/rip/types.rip › a triple generic close in a type body
+- src/types.js:235:12501:boolean — test/rip/types.rip › arithmetic after a double generic close rejects
+- src/types.js:236:12530:relation — test/rip/types.rip › a triple generic close in a type body
+- src/types.js:236:12542:logic — test/rip/types.rip › a left shift in a type body rejects
+- src/types.js:236:12553:relation — test/rip/types.rip › a triple generic close in a type body
+- src/types.js:236:12581:number — test/rip/types.rip › a triple generic close in a type body
+- src/types.js:236:12595:boolean — test/rip/types.rip › arithmetic after a triple generic close rejects
+- src/types.js:236:12601:statement — test/rip/types.rip › a triple generic close in a type body
+- src/types.js:237:12636:logic — test/rip/types.rip › delete in a type body rejects
+- src/types.js:237:12673:boolean — test/rip/types.rip › a negative literal after typeof is in prefix position
+- src/types.js:249:13484:number — test/rip/types.rip › an asserts predicate as a whole alias body
+- src/types.js:249:13486:relation — test/rip/types.rip › an asserts predicate as a whole alias body
+- src/types.js:250:13515:arith — test/rip/types.rip › a predicate on a non-name subject rejects
+- src/types.js:250:13564:relation — test/rip/types.rip › a predicate on a non-name subject rejects
+- src/types.js:254:13798:boolean — test/rip/types.rip › a type predicate on a negative literal type
+- src/types.js:265:14458:arith — test/rip/types.rip › a tight readonly mapped row with an optionality modifier
+- src/types.js:265:14460:number — test/rip/types.rip › a tight readonly mapped row with an optionality modifier
+- src/types.js:265:14468:relation — test/rip/types.rip › a tight readonly mapped row with an optionality modifier
+- src/types.js:266:14508:arith — test/rip/types.rip › a mapped type over a literal union
+- src/types.js:266:14557:relation — test/rip/types.rip › a mapped row over a non-name parameter rejects
+- src/types.js:268:14639:boolean — test/rip/types.rip › a mapped type whose constraint opens with a negative literal
+- src/types.js:276:15169:boolean — test/rip/types.rip › a negative literal after a negative literal rejects
+- src/types.js:283:15646:arith — test/rip/types.rip › a tight -readonly mapped row with an optionality modifier
+- src/types.js:283:15648:number — test/rip/types.rip › a tight -readonly mapped row with an optionality modifier
+- src/types.js:291:16109:logic — test/rip/types.rip › a sign before an optional marker outside a mapped row rejects
+- src/types.js:292:16148:logic — test/rip/types.rip › a mapped type with a negative literal value
+- src/types.js:292:16171:logic — test/rip/types.rip › arithmetic after an array type rejects
+- src/types.js:293:16223:arith — test/rip/types.rip › a tight readonly mapped row with an optionality modifier
+- src/types.js:293:16225:number — test/rip/types.rip › a tight readonly mapped row with an optionality modifier
+- src/types.js:293:16234:relation — test/rip/types.rip › a sign before an optional marker outside a mapped row rejects
+- src/types.js:296:16320:relation — test/rip/types.rip › an assignment line in a block alias body rejects
+- src/types.js:296:16337:boolean — test/rip/types.rip › a negative literal after a generic default
+- src/types.js:306:16950:relation — test/rip/types.rip › a string-named method shorthand in an interface rejects
+- src/types.js:316:17288:statement — test/rip/types.rip › two method members in an inline object type
+- src/types.js:317:17316:statement — test/rip/types.rip › a negative literal opening a method parameter list
+- src/types.js:317:17326:boolean — test/rip/types.rip › a negative literal opening a method parameter list
+- src/types.js:409:21087:relation — test/rip/types.rip › a fat arrow after a union member is no type, so the line stays an object
+- src/types.js:415:21640:boolean — test/rip/types.rip › a tuple parameter in a fn-type-valued declaration
+- src/types.js:421:22010:relation — test/rip/types.rip › a comparison chain in a class body is no field type
+- src/types.js:421:22023:boolean — test/rip/types.rip › a comparison chain in a class body is no field type
+- src/types.js:429:22376:branch — test/rip/types.rip › a generic default in a fn-type-valued declaration
+- src/types.js:429:22381:relation — test/rip/types.rip › an assignment after an open union in a fn-type declaration rejects
+- src/types.js:429:22383:number — test/rip/types.rip › a generic default in a fn-type-valued declaration
+- src/types.js:429:22398:boolean — test/rip/types.rip › a generic default in a fn-type-valued declaration
+- src/types.js:429:22405:statement — test/rip/types.rip › a generic default in a fn-type-valued declaration
+- src/types.js:429:22424:boolean — test/rip/types.rip › an assignment after an open union in a fn-type declaration rejects
+- src/types.js:432:22681:relation — test/rip/types.rip › a string-literal union class field
+- src/types.js:432:22715:relation — test/rip/types.rip › a class field type admitting undefined
+- src/types.js:432:22731:logic — test/rip/types.rip › a class field type admitting undefined
+- src/types.js:432:22736:relation — test/rip/types.rip › a boolean-literal class field type
+- src/types.js:433:22776:boolean — test/rip/types.rip › two adjacent names in a class body are no field type
+- src/types.js:495:25462:relation — test/rip/types.rip › a cast to a multi-line object type
+- src/types.js:495:25466:number — test/rip/types.rip › a cast to a multi-line object type
+- src/types.js:503:25918:relation — test/rip/types.rip › a cast to a triple generic close
+- src/types.js:503:25950:relation — test/rip/types.rip › a right shift after a cast is the operator
+- src/types.js:504:26001:number — test/rip/types.rip › a cast to a triple generic close
+- src/types.js:505:26011:statement — test/rip/types.rip › a cast to a double generic close
+- src/types.js:528:26918:arith — test/rip/types.rip › a closer over two open generics in a cast rejects at the inner one
+- src/types.js:528:26920:number — test/rip/types.rip › a closer over two open generics in a cast rejects at the inner one
+- src/types.js:529:26942:statement — test/rip/types.rip › a closer over two open generics in a cast rejects at the inner one
+- src/types.js:553:28160:arith — test/lang/lexer.test.js › mutation-audit pins — src/types.js › a '+1' cast type rejects spanning the sign and its number
+- src/types.js:553:28162:number — test/lang/lexer.test.js › mutation-audit pins — src/types.js › a '+1' cast type rejects spanning the sign and its number
+- src/types.js:562:28473:logic — test/rip/types.rip › a multi-line object parameter type separates its fields
+- src/types.js:567:28837:arith — test/rip/types.rip › a multi-line object parameter type separates its fields
+- src/types.js:567:28839:number — test/rip/types.rip › a multi-line object parameter type separates its fields
+- src/types.js:568:28893:arith — test/rip/types.rip › a multi-line object parameter type separates its fields
+- src/types.js:568:28895:number — test/rip/types.rip › a multi-line object parameter type separates its fields
+- src/types.js:569:28940:relation — test/rip/types.rip › a multi-line object parameter type separates its fields
+- src/types.js:569:28956:relation — test/rip/types.rip › a multi-line object parameter type separates its fields
+- src/types.js:575:29163:negation — test/rip/types.rip › an optional member in a parameter object type
+- src/types.js:575:29185:arith — test/rip/types.rip › an optional member in a parameter object type
+- src/types.js:575:29187:number — test/rip/types.rip › an optional member in a parameter object type
+- src/types.js:575:29196:relation — test/rip/types.rip › an optional member in a parameter object type
+- src/types.js:576:29229:statement — test/rip/types.rip › an optional member in a parameter object type
+- src/types.js:576:29248:arith — test/rip/types.rip › an optional member in a parameter object type
+- src/types.js:576:29250:number — test/rip/types.rip › an optional member in a parameter object type
+- src/types.js:578:29291:statement — test/rip/types.rip › an optional member in a parameter object type
+- src/types.js:613:30699:logic — test/rip/types.rip › a bare function type with a nested function parameter rejects
+- src/types.js:614:30778:logic — test/rip/types.rip › a bare function type with a nested function parameter rejects
+- src/types.js:615:30811:relation — test/rip/types.rip › a bare empty-parameter function type as an arrow return rejects
+- src/types.js:615:30813:number — test/rip/types.rip › a bare empty-parameter function type as an arrow return rejects
+- src/types.js:622:31048:relation — test/rip/types.rip › a bare function type with a nested function parameter rejects
+- src/types.js:622:31052:number — test/rip/types.rip › a bare function type with a nested function parameter rejects
+- src/types.js:626:31135:arith — test/rip/types.rip › a bare empty-parameter function type as an arrow return rejects
+- src/types.js:626:31143:number — test/rip/types.rip › a parenthesized single type is an arrow return
+- src/types.js:626:31153:boolean — test/rip/types.rip › a bare empty-parameter function type as an arrow return rejects
+- src/types.js:634:31524:logic — test/rip/types.rip › a parenthesized object type is an arrow return
+- src/types.js:634:31539:logic — test/rip/types.rip › a parenthesized object type is an arrow return
+- src/types.js:635:31596:logic — test/rip/types.rip › a bare function type after a tuple parameter rejects
+- src/types.js:635:31611:logic — test/rip/types.rip › a bare function type after an object parameter rejects
+- src/types.js:635:31626:logic — test/rip/types.rip › a bare function type after an object parameter rejects
+- src/types.js:635:31651:update — test/rip/types.rip › a bare function type after an object parameter rejects
+- src/types.js:636:31659:statement — test/rip/types.rip › a parenthesized conditional type is an arrow return
+- src/types.js:636:31670:relation — test/rip/types.rip › a parenthesized conditional type is an arrow return
+- src/types.js:636:31674:number — test/rip/types.rip › a parenthesized conditional type is an arrow return
+- src/types.js:636:31698:logic — test/rip/types.rip › a parenthesized conditional type is an arrow return
+- src/types.js:636:31732:boolean — test/rip/types.rip › a parenthesized conditional type is an arrow return
+- src/types.js:638:31820:boolean — test/rip/types.rip › a colon after a parenthesized conditional type branch rejects
+- src/types.js:657:32527:logic — test/rip/types.rip › a type predicate inside a generic parameter constraint
+- src/types.js:660:32691:statement — test/rip/types.rip › a generic list wrapped across def head lines rejects
+- src/types.js:660:32724:logic — test/rip/types.rip › a generic list wrapped across def head lines rejects
+- src/types.js:660:32747:logic — test/rip/types.rip › a generic list wrapped across def head lines rejects
+- src/types.js:693:33964:statement — test/rip/types.rip › a void-assigned arrow named type is no alias head for a trailing comparison
+- src/types.js:693:33974:logic — test/rip/types.rip › a void-assigned arrow named type is no alias head for a trailing comparison
+- src/types.js:748:37148:logic — test/rip/types.rip › a type predicate on a generic ends the def head line
+- src/types.js:760:37717:statement — test/rip/types.rip › a def head without a name rejects at the colon
+- src/types.js:760:37724:logic — test/rip/types.rip › a def head without a name rejects at the colon
+- src/types.js:790:39050:number — test/rip/types.rip › an object key after a comma inside a loop body is no loop variable
+- src/types.js:805:39485:relation — test/rip/types.rip › an object-key colon is no type head for a trailing comparison
+- src/types.js:806:39533:relation — test/rip/types.rip › a string-key colon is no type head for a trailing comparison
+- src/types.js:815:40025:branch — test/rip/types.rip › an object-key colon is no type head for a trailing comparison
+- src/types.js:819:40171:logic — test/rip/types.rip › a TERMINATOR resets the trailing-close answer
+- src/types.js:819:40194:logic — test/rip/types.rip › an INDENT resets the trailing-close answer
+- src/types.js:840:40971:statement — test/rip/types.rip › a trailing comparison line after a generic return type continues
+- src/types.js:851:41340:branch — test/rip/types.rip › a trailing comparison line after a generic return type continues
+- src/types.js:851:41390:logic — test/rip/types.rip › a trailing comparison line after a generic return type continues
+- src/types.js:856:41686:branch — test/rip/types.rip › a trailing comparison line after a generic return type continues
+- src/types.js:856:41713:arith — test/rip/types.rip › a cast ending in a generic close ends its line before a line starting with as
+- src/types.js:856:41715:number — test/rip/types.rip › as after an opening bracket is no cast head for a trailing comparison
+- src/types.js:856:41733:number — test/rip/types.rip › a tight call of as is no cast head for a trailing comparison
+- src/types.js:872:42317:logic — test/rip/types.rip › a trailing <= after a cast continues the line
+- src/types.js:873:42370:logic — test/rip/types.rip › a trailing << after a cast continues the line
+- src/types.js:873:42408:relation — test/rip/types.rip › a trailing << after a cast continues the line
+- src/types.js:877:42559:boolean — test/rip/types.rip › a trailing comparison line after a generic return type continues
+- src/types.js:950:46112:arith — test/rip/types.rip › an assignment inside call arguments is no evidence for a bare forward
+- src/types.js:950:46114:number — test/rip/types.rip › an assignment inside call arguments is no evidence for a bare forward
+- src/types.js:972:46921:number — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:976:47030:branch — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:976:47057:update — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:977:47073:branch — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:978:47106:branch — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:978:47113:relation — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:978:47117:number — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:979:47140:statement — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:979:47145:update — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:980:47163:branch — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:980:47170:relation — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:980:47174:number — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:981:47185:statement — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:981:47201:logic — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:981:47224:boolean — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:982:47239:branch — test/rip/types.rip › a union ending in a fat-arrow value in a class body is no field type
+- src/types.js:982:47243:relation — test/rip/types.rip › a union ending in a fat-arrow value in a class body is no field type
+- src/types.js:982:47266:relation — test/rip/types.rip › a union ending in a fat-arrow value in a class body is no field type
+- src/types.js:982:47279:logic — test/rip/types.rip › a bare typed field before an else arrow is still a field
+- src/types.js:982:47285:relation — test/rip/types.rip › a union ending in a fat-arrow value in a class body is no field type
+- src/types.js:1003:48013:logic — test/rip/types.rip › a reactive declaration separates bare typed forwards
+- src/types.js:1004:48051:logic — test/rip/types.rip › a reactive declaration separates bare typed forwards
+- src/types.js:1004:48079:logic — test/rip/types.rip › a readonly declaration separates bare typed forwards
+- src/types.js:1004:48107:logic — test/rip/types.rip › a readonly declaration separates bare typed forwards
+- src/types.js:1004:48124:logic — test/rip/types.rip › an effect declaration separates bare typed forwards
+- src/types.js:1007:48175:number — test/rip/types.rip › a key line at the end of input stays an object
+- src/types.js:1024:48919:update — test/rip/types.rip › a clause after a parenthesized value keeps the run an object
+- src/types.js:1025:48927:statement — test/rip/types.rip › a clause after a parenthesized value keeps the run an object
+- src/types.js:1025:48962:update — test/rip/types.rip › a clause after a parenthesized value keeps the run an object
+- src/types.js:1235:59143:relation — test/rip/types.rip › a string-keyed line ends a bare typed-forward run
+- src/types.js:1320:62988:statement — test/rip/types.rip › a string after type is no alias name
+- src/types.js:1324:63172:number — test/rip/types.rip › a variable named type compares when its generic never closes
+- src/types.js:1325:63179:statement — test/rip/types.rip › a variable named type compares when the alias head has no =
+- src/types.js:1325:63216:number — test/rip/types.rip › a variable named type compares when the alias head has no =
+- src/types.js:1369:65353:statement — test/rip/types.rip › interface with a string name rejects as reserved
+- src/types.js:1369:65399:number — test/rip/types.rip › interface without a name rejects as reserved
+- src/types.js:1374:65522:statement — test/rip/types.rip › interface extending a string rejects as reserved
+- src/types.js:1399:66520:logic — test/rip/types.rip › an implicit call whose argument assigns is not a type alias
+- src/types.js:1402:66703:relation — test/rip/types.rip › a function named type called mid-expression is not an alias
+- src/types.js:1417:67416:number — test/rip/types.rip › as before an operator that starts no type stays a name
+- src/types.js:1420:67601:logic — test/rip/types.rip › as before an operator that starts no type stays a name
+- src/types.js:1436:68492:arith — test/rip/types.rip › a cast before a closing paren on the next line
+- src/types.js:1436:68494:number — test/rip/types.rip › a cast before a closing paren on the next line
+- src/types.js:1464:69714:logic — test/rip/types.rip › a second generic group after a def name stays a comparison
+- src/types.js:1465:69774:logic — test/rip/types.rip › a generic list on a property target is no component target
+- src/types.js:1465:69795:logic — test/rip/types.rip › a generic list on a property target is no component target
+- src/types.js:1465:69810:logic — test/rip/types.rip › a generic list on a property target is no component target
+- src/types.js:1467:69952:number — test/rip/types.rip › a generic group after a non-name in a def head stays a comparison
+- src/types.js:1475:70424:logic — test/rip/types.rip › an unspaced comparison chain into a component is no generic list
+- src/types.js:1483:70849:arith — test/rip/types.rip › a parenthesized generic constraint keeps the def parameter list
+- src/types.js:1503:71756:relation — test/rip/types.rip › an optional marker after a destructuring parameter rejects
+- src/types.js:1508:72074:logic — test/rip/types.rip › a bare optional parameter on its own line
+- src/types.js:1508:72097:logic — test/rip/types.rip › a bare optional parameter on its own line
+- src/types.js:1535:73191:arith — test/rip/types.rip › a doubled colon after a parameterless def name rejects
+- src/types.js:1563:74510:arith — test/rip/types.rip › a doubled colon after a catch binding rejects
+- src/types.js:1566:74617:statement — test/rip/types.rip › an annotated catch binding named for a value word rejects
+- src/types.js:1582:75415:relation — test/rip/types.rip › an annotated array-pattern loop variable rejects
+- src/types.js:1596:76233:relation — test/rip/types.rip › a string-keyed parameter is a destructuring rename
+- src/types.js:1604:76721:relation — test/rip/types.rip › an optional marker after a destructuring pattern takes no annotation
+- src/types.js:1645:78889:logic — test/rip/types.rip › a numeric key with an assigned value stays an object
+- src/types.js:1658:79601:arith — test/rip/types.rip › a soak prototype write inside an implicit call is no annotation
+- src/types.js:1658:79603:number — test/rip/types.rip › an annotated soak prototype write rejects after a statement
+- src/types.js:1673:80517:logic — test/rip/types.rip › a prototype chain inside an implicit call is an object key
+- src/types.js:1676:80669:arith — test/rip/types.rip › a prototype chain inside an implicit call is an object key
+- src/types.js:1678:80760:arith — test/rip/types.rip › a doubled colon after a typed prototype member rejects
+- src/types.js:1714:82543:logic — test/rip/types.rip › a static class method with a typed parameter returning a name
+- src/types.js:1725:83070:logic — test/rip/types.rip › a component prop function type with a generic default is no type
+- src/types.js:1725:83084:logic — test/rip/types.rip › a component prop function type with a generic default is no type
+- src/types.js:1729:83302:logic — test/rip/types.rip › a class field with a call value rejects
+- src/types.js:1786:85818:statement — test/rip/types.rip › class generics after a parent call reject
+- src/types.js:1786:85860:update — test/rip/types.rip › class generics after a parent call reject
+- src/types.js:1788:85923:update — test/rip/types.rip › class generics after a parent call reject
+- src/types.js:1789:85933:statement — test/rip/types.rip › a bracketed comparison after a bracketed class expression
+- src/types.js:1789:85936:branch — test/rip/types.rip › class generics after a parent call reject
+- src/types.js:1789:85957:logic — test/rip/types.rip › class generics after a parent call reject
+- src/types.js:1789:85978:relation — test/rip/types.rip › class generics after a parent call reject
+- src/types.js:1792:86116:logic — test/rip/types.rip › class generics after a parent call with arguments reject
+- src/types.js:1793:86186:logic — test/rip/types.rip › a class expression compares with !=
+- src/types.js:1814:87260:statement — test/rip/types.rip › a class then-body does not make the next block a class body
+- src/types.js:1814:87303:boolean — test/rip/types.rip › a class then-body does not make the next block a class body
+- src/types.js:1821:87522:statement — test/rip/types.rip › a bodiless class does not make a later block a class body
+- src/types.js:1828:87919:statement — test/rip/types.rip › a typed declaration after a bracketed function block
+- src/types.js:1832:88068:statement — test/rip/types.rip › a key line two lines up does not block a bare typed forward
+- src/types.js:1833:88120:logic — test/rip/types.rip › a key line before a block does not block its first bare typed forward
+- src/types.js:1834:88151:statement — test/rip/types.rip › a key line before a block does not block its first bare typed forward
+- src/types.js:1835:88182:statement — test/rip/types.rip › a key line opening a block does not block bare typed forwards inside it
+- src/types.js:1861:89218:statement — test/rip/types.rip › a parameter after an empty arrow default takes its annotation
+- src/types.js:1862:89256:statement — test/rip/types.rip › a parameter after a class default takes its annotation
+- src/types.js:1868:89530:update — test/rip/types.rip › a nested block inside a default body keeps its key lines
+- src/types.js:1890:90514:boolean — test/rip/types.rip › a newline after a semicolon ends an inline default body
+- src/types.js:1891:90549:boolean — test/rip/types.rip › a newline after a semicolon ends an inline default body
+- src/types.js:1901:90987:statement — test/rip/types.rip › a colon after a parameter default is an object key
+- src/types.js:1901:91013:boolean — test/rip/types.rip › a colon after a parameter default is an object key
+
+## EQUIVALENT (219)
+
+- src/types.js:178:9990:statement — the first row of a block body sits right after the body INDENT, a MEMBER_ROW_OPENER, so walking to tokens[from-1] answers true as the guard does; an inline body's first token never reaches a member-row check (method and mapped rows need an enclosing `{`)
+- src/types.js:178:9997:arith — same as 178:9990 — at === from falls through to tokens[from-1], the body INDENT
+- src/types.js:178:9999:number — same as 178:9990 — at === from falls through to tokens[from-1], the body INDENT
+- src/types.js:186:10464:logic — recursing past a `-`/`+` that is not before `readonly` only happens on a `-[`/`+[` row, whose sign the floor has already rejected as code; a `readonly`-named method walks to the same row opener
+- src/types.js:221:12006:statement — openAngle is reassigned at every `<` opened from angle 0 and read only while angle > 0, i.e. after such an opener; the stale value is always overwritten first
+- src/types.js:249:13482:arith — j-2 < from puts tokens[j-2] before the body: the alias `=` or the body INDENT, never `=>`, `asserts`, or a `:` after CALL_END, so the shape test fails there anyway
+- src/types.js:250:13554:arith — a predicate subject is followed by `is`, never `:`, so it never carries the keys-colon PROPERTY tag; dropping the PROPERTY leg loses nothing, and the token after `is` being PROPERTY needs a following `:` no predicate has
+- src/types.js:250:13556:number — the PROPERTY subject leg never matches (see 250:13554); testing the `is` token itself (COMPARE) is the same false
+- src/types.js:264:14395:arith — admitting j-2 < from requires both a `[` and an enclosing `{` inside the body before `in`, i.e. j >= from+3, so the bound never decides
+- src/types.js:264:14397:number — enclosing() === '[' with enclosing(1) === '{' needs `{` and `[` in the body before `in`, so j >= from+3 already
+- src/types.js:264:14399:relation — same as 264:14397 — j >= from+3 whenever the group checks pass
+- src/types.js:266:14547:arith — the mapped parameter name is followed by `in`, never `:`, so the PROPERTY leg never matches; the token after `in` likewise never carries the keys tag
+- src/types.js:266:14549:number — the PROPERTY leg never matches (see 266:14547); testing the `in` token itself is the same false
+- src/types.js:275:15065:boolean — the rule requires tokens[j+1] to be `:`, which matches no atomEnd-reading rule and resets atomEnd (not an atom ender) before any read
+- src/types.js:285:15761:boolean — the rule requires tokens[j+1] to be `readonly`, an IDENTIFIER that matches no atomEnd-reading rule and sets atomEnd itself
+- src/types.js:294:16270:boolean — the rule requires tokens[j+1] to be `?`; `?` is TYPE_VOCAB, so it is admitted (and leaves atomEnd false) whether the optional-member rule or the vocabulary takes it
+- src/types.js:309:17043:relation — tokens[to] is the body's OUTDENT or the alias line's TERMINATOR/OUTDENT (typeAliasEnd rejects anything else after the run), never CALL_START/CALL_END
+- src/types.js:328:17580:logic — every CALL_START in a body either rejects or pushes its mate's index, and the pairs nest, so each CALL_END that reaches this line is the stack top
+- src/types.js:329:17680:boolean — a method list's CALL_END is always followed by its return `:` (the push requires it), which matches no atomEnd-reading rule and resets atomEnd
+- src/types.js:375:19695:relation — the walk stops at an INDENT before index 0 in every non-file-top block, and the file-top answer (true) is the same with or without inspecting tokens[0], which is never an INDENT
+- src/types.js:375:19698:number — same as 375:19695
+- src/types.js:375:19702:update — the walk starts at an INDENT/OUTDENT boundary; at an INDENT both directions return at once, and a name directly after an OUTDENT does not occur (the scanner emits TERMINATOR after a dedent before a statement)
+- src/types.js:378:19803:update — OUTDENT depth matters only when the walk starts at an OUTDENT, and a candidate name never directly follows one (TERMINATOR comes first)
+- src/types.js:396:20424:statement — same as 396:20430 — the empty slice returns false at the end
+- src/types.js:396:20430:relation — an empty slice skips the loop and fails the final `atomEnd` check, so returning false early or not is the same
+- src/types.js:396:20443:boolean — every caller passes a non-empty slice (decideBareRun and the class-field claim check end > start first; typedDeclEq calls only after a `=>` inside the slice), so the empty-slice branch never runs
+- src/types.js:408:21041:relation — at j === a the previous token is the token before the slice — the annotation `:` in every caller — never `)` or PARAM_END, so the arrow rejects as with p null
+- src/types.js:414:21441:boolean — the slices callers pass are bracket-balanced (whole lines, or a typedDeclEq prefix ending at a depth-0 `=`), so a closer never underflows and this return never runs
+- src/types.js:416:21723:boolean — the slices callers pass are bracket-balanced (whole lines, or a typedDeclEq prefix ending at a depth-0 `=`), so a closer never underflows and this return never runs
+- src/types.js:418:21858:boolean — the slices callers pass are bracket-balanced (whole lines, or a typedDeclEq prefix ending at a depth-0 `=`), so a closer never underflows and this return never runs
+- src/types.js:464:24312:arith — `end`'s initial value survives only when the run collects no parts (every part push sets end), and every caller discards run.end then (claim returns -1; typeAliasEnd fails at tokens[j-1].end)
+- src/types.js:464:24314:number — `end`'s initial value survives only when the run collects no parts (every part push sets end), and every caller discards run.end then (claim returns -1; typeAliasEnd fails at tokens[j-1].end)
+- src/types.js:464:24322:logic — `end`'s initial value survives only when the run collects no parts (every part push sets end), and every caller discards run.end then (claim returns -1; typeAliasEnd fails at tokens[j-1].end)
+- src/types.js:464:24325:number — `end`'s initial value survives only when the run collects no parts (every part push sets end), and every caller discards run.end then (claim returns -1; typeAliasEnd fails at tokens[j-1].end)
+- src/types.js:495:25473:relation — the run's first token directly follows the `as` word, which never suppresses a newline: a next-line follower arrives as INDENT/TERMINATOR, which is no TYPE_STARTER, so the first token never carries newLine
+- src/types.js:518:26440:logic — braceStack entries are only ever compared with '<' and '{'; a '[' mislabelled '(' compares identically
+- src/types.js:539:27365:logic — drops the STRING_END and HEREGEX_END legs: a run inside an interpolation always meets INTERPOLATION_END first, and runs never start inside string text, so neither is ever the first stop (probed string/heregex interpolations and interpolated string types)
+- src/types.js:615:30807:arith — b + a < 2 never holds, which drops the guard; past it a one-token run cannot be an opener (runs are bracket-balanced), so `!isOpen` returns false exactly as the guard did
+- src/types.js:617:30894:relation — tokens[b] is the depth-0 `=>`/`->` stop that ended the run (the `(x)` param tags require an arrow after the type), neither an opener nor a closer
+- src/types.js:625:31096:statement — same as 625:31120 — depth is always 0 here
+- src/types.js:625:31120:boolean — a claimed run is bracket-balanced, so depth is 0 after the walk and this return never runs
+- src/types.js:631:31412:relation — tokens[b] is the run's arrow stop: not a bracket, TERNARY, `?`, or `:`
+- src/types.js:660:32780:number — skipAngleGroup returns 0 only for an unbalanced group; every caller treats 0 like -1 (TYPE_PARAMS needs afterGroup > i; typeAliasEnd then needs tokens[0] to be `=`, interfaceEnd EXTENDS/INDENT — never the first token of a parsable file)
+- src/types.js:664:32852:number — skipAngleGroup returns 0 only for an unbalanced group; every caller treats 0 like -1 (TYPE_PARAMS needs afterGroup > i; typeAliasEnd then needs tokens[0] to be `=`, interfaceEnd EXTENDS/INDENT — never the first token of a parsable file)
+- src/types.js:672:33155:relation — beforeAngleGroupBack starts from a generic close whose `<` opens after a name, so the walk never needs index 0 and never meets k < 0 with a defined token; one-line generic heads never cross a line boundary (the scanner suppresses newlines inside an open `<`)
+- src/types.js:672:33157:number — beforeAngleGroupBack starts from a generic close whose `<` opens after a name, so the walk never needs index 0 and never meets k < 0 with a defined token; one-line generic heads never cross a line boundary (the scanner suppresses newlines inside an open `<`)
+- src/types.js:672:33159:logic — with k < 0, `k < 0 && !tokens[k]` is true, the same early return; with k >= 0 tokens[k] is defined, so `!tokens[k]` never decided
+- src/types.js:674:33243:relation — beforeAngleGroupBack starts from a generic close whose `<` opens after a name, so the walk never needs index 0 and never meets k < 0 with a defined token; one-line generic heads never cross a line boundary (the scanner suppresses newlines inside an open `<`)
+- src/types.js:674:33246:number — beforeAngleGroupBack starts from a generic close whose `<` opens after a name, so the walk never needs index 0 and never meets k < 0 with a defined token; one-line generic heads never cross a line boundary (the scanner suppresses newlines inside an open `<`)
+- src/types.js:677:33313:statement — beforeAngleGroupBack starts from a generic close whose `<` opens after a name, so the walk never needs index 0 and never meets k < 0 with a defined token; one-line generic heads never cross a line boundary (the scanner suppresses newlines inside an open `<`)
+- src/types.js:677:33341:logic — beforeAngleGroupBack starts from a generic close whose `<` opens after a name, so the walk never needs index 0 and never meets k < 0 with a defined token; one-line generic heads never cross a line boundary (the scanner suppresses newlines inside an open `<`)
+- src/types.js:677:33364:logic — beforeAngleGroupBack starts from a generic close whose `<` opens after a name, so the walk never needs index 0 and never meets k < 0 with a defined token; one-line generic heads never cross a line boundary (the scanner suppresses newlines inside an open `<`)
+- src/types.js:677:33397:number — returning 0 for an unbalanced or line-crossing walk is read like -1 by both callers: typeAliasEq and typeBodyHead then need tokens[k-1] (tokens[-1], undefined) to be `type`/`interface`/EXTENDS
+- src/types.js:682:33498:number — returning 0 for an unbalanced or line-crossing walk is read like -1 by both callers: typeAliasEq and typeBodyHead then need tokens[k-1] (tokens[-1], undefined) to be `type`/`interface`/EXTENDS
+- src/types.js:693:33970:relation — k is -1 or the index of a name with a token before it, never 0 when tokens[k-1] could be `type`
+- src/types.js:693:33972:number — same as 693:33970
+- src/types.js:750:37243:logic — levels are relative within a line: a head after the `<<` records at the shifted level and its close returns there; a `<<` between a head and its generic close is not type syntax and rejects on either reading
+- src/types.js:781:38658:statement — skipValue is only called on indices inside the tape (the colon's predecessor, or the token before a comma that has a predecessor)
+- src/types.js:781:38674:number — same as 781:38658 — the undefined-token branch never runs
+- src/types.js:785:38876:relation — a pattern opener at index 0 has no FOR before it, so endsLoopVariables is false either way
+- src/types.js:785:38879:number — same as 785:38876
+- src/types.js:793:39084:statement — with j < 0, tokens[-1] is undefined: not `,`, OWN, AWAIT, or FOR, so the function returns false anyway
+- src/types.js:796:39172:statement — same as 793:39084
+- src/types.js:804:39407:boolean — before is null only for a colon that is the file's first token, and every such program crashes in implicit.js collectObjects whatever this answer decides (see the 804:39387 BUG)
+- src/types.js:824:40396:branch — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
+- src/types.js:824:40407:relation — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
+- src/types.js:824:40423:logic — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
+- src/types.js:824:40437:relation — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
+- src/types.js:824:40439:number — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
+- src/types.js:824:40441:logic — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
+- src/types.js:824:40461:arith — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
+- src/types.js:824:40463:number — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
+- src/types.js:824:40466:relation — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
+- src/types.js:841:40999:statement — answers are cleared at every line boundary, so a level is only ever compared with keys set on the same line; a constant offset in the line's starting level changes no lookup
+- src/types.js:841:41012:number — answers are cleared at every line boundary, so a level is only ever compared with keys set on the same line; a constant offset in the line's starting level changes no lookup
+- src/types.js:842:41021:statement — a boundary token falling through has angleWeight 0 and is not ':', '=', RESERVED, or a postfix word, so no later branch acts on it
+- src/types.js:851:41363:logic — a RESERVED token outside an interface head appears legally only in type text after a head that already set the same level's answer to true (or rejects at its own position, earlier in the line than the newline this decides)
+- src/types.js:864:42058:statement — upTo never advances: with upTo 0 the shift test stays false and every sync re-walks the whole tape from 0; the state resets at each line boundary, so the current line's state is the same
+- src/types.js:865:42087:statement — ref stays null, so every sync rebuilds to the same state
+- src/types.js:865:42119:arith — ref becomes null, so every later sync takes the rebuild path, which recomputes the same state from the nearest line boundary
+- src/types.js:865:42121:number — ref becomes null (tokens[length] is undefined), so every sync rebuilds to the same state
+- src/types.js:865:42124:logic — `?? null`→`&& null` makes ref null, so every sync rebuilds to the same state
+- src/types.js:870:42246:statement — same as 870:42264 — last is always defined
+- src/types.js:870:42264:boolean — closesTypeGeneric is called only when the scanner's prev token is non-null, so the tape is never empty here
+- src/types.js:895:43443:arith — the scan from colon-1 or colon adds the name and the colon, neither a bracket nor a stop token
+- src/types.js:895:43445:number — the scan from colon-1 or colon adds the name and the colon, neither a bracket nor a stop token
+- src/types.js:900:43618:statement — a statement-level `name:` line ends at its TERMINATOR/OUTDENT before any closer of a bracket opened outside it (a block inside brackets closes with OUTDENT first), so the depth-0 closer return never runs
+- src/types.js:900:43643:number — a statement-level `name:` line ends at its TERMINATOR/OUTDENT before any closer of a bracket opened outside it (a block inside brackets closes with OUTDENT first), so the depth-0 closer return never runs
+- src/types.js:906:44036:arith — a `name :` or `:` prefix leaves isCompleteTypeExpr in its start state, so the verdict equals the type slice's
+- src/types.js:906:44038:number — a leading `:` is a separator that leaves isCompleteTypeExpr in its start state
+- src/types.js:953:46258:relation — the scanner balances INDENT/OUTDENT, so an OUTDENT never meets a root-only stack
+- src/types.js:953:46260:number — same as 953:46258
+- src/types.js:973:46935:relation — the scan starts inside a class body, whose OUTDENT lies ahead at depth 0 (brackets balance within it), so it always returns before tokens.length
+- src/types.js:978:47103:statement — same as 978:47127 — the depth-0 closer case never occurs
+- src/types.js:978:47127:boolean — a depth-0 closer never appears on a class-body line (the body's brackets balance before its TERMINATOR/OUTDENT), so this return never runs
+- src/types.js:994:47636:arith — the scan from colon-1 or colon adds the name and the colon, neither a bracket nor a stop token
+- src/types.js:994:47638:number — the scan from colon-1 or colon adds the name and the colon, neither a bracket nor a stop token
+- src/types.js:999:47811:statement — a statement-level `name:` line ends at its TERMINATOR/OUTDENT before any closer of a bracket opened outside it (a block inside brackets closes with OUTDENT first), so the depth-0 closer return never runs
+- src/types.js:999:47836:number — a statement-level `name:` line ends at its TERMINATOR/OUTDENT before any closer of a bracket opened outside it (a block inside brackets closes with OUTDENT first), so the depth-0 closer return never runs
+- src/types.js:1021:48809:relation — tokens[b] is the member line's TERMINATOR, neither a bracket nor a postfix clause
+- src/types.js:1035:49226:relation — the scanner balances INDENT/OUTDENT, so the matching OUTDENT is always found before tokens.length
+- src/types.js:1136:54482:relation — with an empty stack, classIndents[-1] is undefined and `!!undefined` is false, the same answer
+- src/types.js:1137:54601:boolean — with an empty stack, classBodyKind() is compared only with 'class'/'component'; false and true both fail === 'component' and pass !== 'class'
+- src/types.js:1160:55747:number — classHeadRunDepth is only compared with classHeadDepth, which is captured from it at CLASS; a constant offset of 1 changes no comparison (balanced brackets keep it >= its start, so `classHeadDepth >= 0` still means armed)
+- src/types.js:1175:56446:number — start is end+1 >= 2, so a missing name's 0 fails `>= start` as -1 does
+- src/types.js:1208:58179:number — lastEnd's initial value is read only when the first member breaks as a typed-declaration separator; that colon's typedDeclEq >= 0 means the line-1688 claim tried first, and it declined only on an empty run, which the bare claim declines identically
+- src/types.js:1212:58296:relation — bareDeclLineEnd returns -1 or a TERMINATOR index > colon >= 1, never 0
+- src/types.js:1212:58298:number — bareDeclLineEnd returns -1 or an index > colon >= 1, never 0
+- src/types.js:1213:58342:relation — typedDeclEq returns -1 or an index > colon, never 0
+- src/types.js:1213:58345:number — typedDeclEq returns -1 or an index > colon, never 0
+- src/types.js:1214:58393:boolean — the same path also sets allBare = false and lastEnd = -1 (nk null), and either one alone makes eligible false, so the member's flags are never read and full stays false
+- src/types.js:1214:58410:boolean — the same path also sets allBare = false and lastEnd = -1 (nk null), and either one alone makes eligible false, so the member's flags are never read and full stays false
+- src/types.js:1215:58428:statement — the same path also sets allBare = false and lastEnd = -1 (nk null), and either one alone makes eligible false, so the member's flags are never read and full stays false
+- src/types.js:1215:58438:boolean — the same path also sets allBare = false and lastEnd = -1 (nk null), and either one alone makes eligible false, so the member's flags are never read and full stays false
+- src/types.js:1216:58453:statement — the same path also sets allBare = false and lastEnd = -1 (nk null), and either one alone makes eligible false, so the member's flags are never read and full stays false
+- src/types.js:1216:58464:number — the same path also sets allBare = false and lastEnd = -1 (nk null), and either one alone makes eligible false, so the member's flags are never read and full stays false
+- src/types.js:1222:58723:arith — clauseInLine from colon-1 adds the name and the colon, neither a bracket nor a postfix clause keyword
+- src/types.js:1222:58725:number — clauseInLine from the colon adds only the colon, neither a bracket nor a clause keyword
+- src/types.js:1223:58774:boolean — the same path also sets allBare = false and lastEnd = -1 (nk null), and either one alone makes eligible false, so the member's flags are never read and full stays false
+- src/types.js:1223:58791:boolean — the same path also sets allBare = false and lastEnd = -1 (nk null), and either one alone makes eligible false, so the member's flags are never read and full stays false
+- src/types.js:1224:58809:statement — the same path also sets allBare = false and lastEnd = -1 (nk null), and either one alone makes eligible false, so the member's flags are never read and full stays false
+- src/types.js:1224:58819:boolean — the same path also sets allBare = false and lastEnd = -1 (nk null), and either one alone makes eligible false, so the member's flags are never read and full stays false
+- src/types.js:1225:58834:statement — the same path also sets allBare = false and lastEnd = -1 (nk null), and either one alone makes eligible false, so the member's flags are never read and full stays false
+- src/types.js:1225:58845:number — the same path also sets allBare = false and lastEnd = -1 (nk null), and either one alone makes eligible false, so the member's flags are never read and full stays false
+- src/types.js:1226:58856:statement — without the break the walk caches later lines as false, but every later run line sits directly under a `name:` line whose sibling guard (prevSiblingKV) already forces false; allBare is false, so no rejection runs
+- src/types.js:1230:58927:relation — end === colon+1 is the empty slice, which isCompleteTypeExpr rejects
+- src/types.js:1230:58935:arith — end > colon-1 adds only end ∈ {colon, colon+1}; end is a TERMINATOR after the type, and colon+1 is the empty slice isCompleteTypeExpr rejects
+- src/types.js:1230:58937:number — end > colon adds only end === colon+1, the empty slice isCompleteTypeExpr rejects
+- src/types.js:1230:58975:arith — prefixing `name :` (an atom, then the ':' separator) leaves isCompleteTypeExpr in its start state (atomEnd false, no open paren), so the verdict equals the type slice's
+- src/types.js:1230:58977:number — a leading ':' is a separator that leaves isCompleteTypeExpr in its start state, so the verdict equals the type slice's
+- src/types.js:1231:59022:arith — buildAssignIndex records a name at j only when tokens[j+1] is `=`; tokens[end-1] precedes the TERMINATOR and tokens[end] is the TERMINATOR, so neither index is ever a recorded assignment, and both map to the same block as end+1
+- src/types.js:1231:59024:number — same as 1231:59022
+- src/types.js:1242:59326:relation — lastEnd is -1 or a TERMINATOR index >= 2, never 0
+- src/types.js:1242:59329:number — lastEnd is -1 or a TERMINATOR index >= 2, never in [0, 1)
+- src/types.js:1242:59348:arith — eligibility matters only when some member is assigned later in its own block (full, or the partial rejection); a tail run (OUTDENT or end of input next) has no later statement in that block (assignedLater is block-scoped), so both stay false either way
+- src/types.js:1242:59350:number — eligibility matters only when some member is assigned later in its own block (full, or the partial rejection); a tail run (OUTDENT or end of input next) has no later statement in that block (assignedLater is block-scoped), so both stay false either way
+- src/types.js:1243:59390:logic — eligibility matters only when some member is assigned later in its own block (full, or the partial rejection); a tail run (OUTDENT or end of input next) has no later statement in that block (assignedLater is block-scoped), so both stay false either way
+- src/types.js:1262:60344:statement — re-deciding per line gives the same answers: a full run's suffix is itself full (same evidence, same final follower), and a non-full run leaves its first line unclaimed, so the sibling guard forces false for the rest (a claimed line resets curLineKV, so a full suffix is not blocked)
+- src/types.js:1298:62014:logic — only the scanner's expanded `prototype` PROPERTY carries the two-byte `::` source slice, so the `||` reading flags exactly the same tokens (probed `x: typeof Array::slice = v`: same rejection, same position)
+- src/types.js:1324:63153:statement — skipAngleGroup returns -1 or an index >= i+2, and tokens[-1] is undefined, so the next line's `!== '='` returns -1 the same
+- src/types.js:1324:63159:relation — skipAngleGroup returns -1 or an index >= i+2, never 0
+- src/types.js:1324:63161:number — skipAngleGroup returns -1 or an index >= i+2, never in [0, 1)
+- src/types.js:1337:63818:number — tokens[j] is the body INDENT, which the vocabulary floor admits as layout with no state change
+- src/types.js:1372:65450:statement — with j === -1, tokens[-1] is undefined: neither EXTENDS nor INDENT, so -1 is returned below anyway
+- src/types.js:1372:65461:number — skipAngleGroup's -1 here means an unclosed head `<`, which the scanner rejects first (`unclosed '<'`, probed `interface P<T` + body), so the return never reaches the claim
+- src/types.js:1377:65632:statement — with j === -1, tokens[-1] is undefined: not INDENT, so -1 is returned below anyway
+- src/types.js:1377:65643:number — same as 1372:65461 for the parent's generic group (probed `interface P extends Q<T` + body)
+- src/types.js:1381:65793:number — tokens[j] is the body INDENT, which the vocabulary floor admits as layout with no state change
+- src/types.js:1404:66838:relation — typeAliasEnd/interfaceEnd return -1 or an index >= i+3 (name, `=`/INDENT follow), never 0
+- src/types.js:1404:66841:number — typeAliasEnd/interfaceEnd return -1 or an index >= i+3, never in [0, 1)
+- src/types.js:1426:68013:relation — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
+- src/types.js:1426:68015:number — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
+- src/types.js:1429:68131:relation — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
+- src/types.js:1429:68134:number — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
+- src/types.js:1467:69950:arith — beforeName becomes undefined; beforeName DEF only matters with prev a name directly after DEF, which isDefName(out, out.length - 1) already accepts in the same `||`
+- src/types.js:1467:69955:logic — `?? null`→`&& null` yields null or undefined; beforeName is read only as `beforeName?.kind === 'DEF'`, false for both
+- src/types.js:1471:70181:relation — tok is an unspaced COMPARE `<` here (entry guard), so skipAngleGroup returns -1 or an index > i; afterGroup === i cannot occur
+- src/types.js:1483:70851:number — tokens[j] is the group's closing `>`/`>>`/`>>>`, neither an opener nor a closer, so starting the paren walk at j is identical to j+1
+- src/types.js:1483:70856:relation — the scanner rejects an unclosed `(` ("unclosed '(' — never closed by end of input"), so the walk always breaks at the mate before tokens.length
+- src/types.js:1524:72761:relation — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
+- src/types.js:1524:72764:number — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
+- src/types.js:1530:72995:relation — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
+- src/types.js:1530:72998:number — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
+- src/types.js:1536:73218:relation — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
+- src/types.js:1536:73221:number — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
+- src/types.js:1551:73824:logic — TYPE_PARAMS/VOID_MARKER followed by `:` exist only in def heads (component-target TYPE_PARAMS are followed by `=`), so A&&C ≡ A||C except prev a def name, which the line-1534 branch already claimed with identical arguments (same -1 when it declined)
+- src/types.js:1553:73932:relation — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
+- src/types.js:1553:73935:number — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
+- src/types.js:1560:74327:relation — an annotated catch binding always scans PROPERTY (the keys-colon tag), so dropping IDENTIFIER loses nothing; the added kinds (`}`/`]`/literals) never sit directly after CATCH with a colon
+- src/types.js:1564:74555:relation — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
+- src/types.js:1564:74558:number — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
+- src/types.js:1582:75364:relation — loop-variable names before `:` always scan PROPERTY (keys-colon tag), so dropping IDENTIFIER loses nothing; endsLoopVariables gates every added kind
+- src/types.js:1607:76900:relation — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
+- src/types.js:1607:76903:number — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
+- src/types.js:1610:76991:statement — same as 1610:76994 — the deleted retype never fires
+- src/types.js:1610:76994:branch — the name before an optional `?` in a parameter always scans IDENTIFIER (the keys tag needs an adjacent `:`, and `@name?` scans OPT_MARKER, never reaching this branch), so the PROPERTY retype never fires
+- src/types.js:1610:77011:relation — same as 1610:76994 — beforePrev is IDENTIFIER here, so the retype is a no-op either way
+- src/types.js:1620:77513:statement — same as 1620:77525
+- src/types.js:1620:77525:boolean — after a param claim the run swallowed every depth-0 `:`; it stops only at a separator (segment reset), `=`/`->`/`=>` (sawEq/inlineBody block the next colon), or an assign head the grammar rejects at the same token either way (probed `:=`, `=!`, `~>`, `+=`), so sawType is never the deciding guard
+- src/types.js:1659:79642:relation — typedDeclEq returns -1 or the index of an `=` after the colon (> i >= 1), never 0
+- src/types.js:1677:80710:relation — typedDeclEq returns -1 or an index > i >= 1, never 0
+- src/types.js:1677:80713:number — typedDeclEq returns -1 or an index > i >= 1, never in [0, 1)
+- src/types.js:1679:80787:relation — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
+- src/types.js:1679:80790:number — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
+- src/types.js:1688:81298:relation — typedDeclEq returns -1 or an index > i >= 1, never 0
+- src/types.js:1688:81301:number — typedDeclEq returns -1 or an index > i >= 1, never in [0, 1)
+- src/types.js:1690:81375:relation — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
+- src/types.js:1690:81378:number — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
+- src/types.js:1714:82610:arith — methodValueAhead from i-1 (the name) or i (the colon) scans the same: neither token is a bracket, an arrow, or a line boundary
+- src/types.js:1714:82612:number — same as 1714:82610 — tokens[i] is the colon, inert to methodValueAhead
+- src/types.js:1715:82638:number — end starts at 0 instead of -1; an unset end fails `end > i + 1` the same since i >= 1
+- src/types.js:1716:82675:arith — starting the scan at the name or colon: neither is an opener, closer, or stop token, so the scan state at i+1 is the same
+- src/types.js:1716:82677:number — same as 1716:82675 — tokens[i] is the colon
+- src/types.js:1716:82682:relation — inClassBody() means the class body's OUTDENT lies ahead at depth 0 (brackets balance inside the body), so the scan always breaks before tokens.length
+- src/types.js:1721:82880:statement — a class body's INDENT sits inside every enclosing bracket and the scanner emits its OUTDENT before that bracket's closer, so no depth-0 closer precedes the line's TERMINATOR/OUTDENT
+- src/types.js:1725:83112:logic — drops COMPOUND_ASSIGN and REACTIVE_ASSIGN from the stops; the scan then reaches the line end and isCompleteTypeExpr rejects any slice containing either token, so no claim either way
+- src/types.js:1726:83156:logic — drops REACTIVE_ASSIGN/COMPUTED_ASSIGN; isCompleteTypeExpr rejects any slice containing them, so no claim either way
+- src/types.js:1726:83184:logic — drops COMPUTED_ASSIGN/READONLY_ASSIGN; isCompleteTypeExpr rejects any slice containing them
+- src/types.js:1726:83212:logic — drops READONLY_ASSIGN/GATE; isCompleteTypeExpr rejects any slice containing them
+- src/types.js:1726:83229:logic — drops GATE/EFFECT; isCompleteTypeExpr rejects any slice containing them
+- src/types.js:1729:83294:relation — end === i+1 is the empty slice, which isCompleteTypeExpr rejects (b <= a)
+- src/types.js:1729:83298:arith — end > i-1 adds only end ∈ {i, i+1}; end is -1 or > i, and end === i+1 is the empty slice isCompleteTypeExpr rejects
+- src/types.js:1729:83300:number — end > i adds only end === i+1, the empty slice isCompleteTypeExpr rejects
+- src/types.js:1729:83336:number — a leading `:` is a SEP for isCompleteTypeExpr: it leaves atomEnd false with no paren open — the start state — so the verdict on [i, end) equals [i+1, end) (and the lone-colon slice is false like the empty one)
+- src/types.js:1731:83420:relation — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
+- src/types.js:1731:83423:number — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
+- src/types.js:1759:84672:relation — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
+- src/types.js:1759:84675:number — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
+- src/types.js:1761:84738:statement — a bare forward claims only when its name is assigned later; a value word's write is not an identifier assignment in buildAssignIndex, so a value-word name never reaches this claim (probed `yes:`/`null:`/`undefined:` forwards)
+- src/types.js:1764:84834:statement — same as 1764:84846
+- src/types.js:1764:84846:boolean — curLineKV feeds only prevSiblingKV, read only for an uncached candidate on the next line; after a claimed run member the next `name:` line is either in the same cached run or a typed declaration (claimed above, which resets curLineKV)
+- src/types.js:1789:85952:relation — at classHeadDepth 0, `classHeadRunDepth < 0` cannot hold (balanced brackets), so excluding 0 changes nothing
+- src/types.js:1789:85955:number — same as 1789:85952 — the excluded value 0 never disarms
+- src/types.js:1875:89834:statement — same as 1875:89855
+- src/types.js:1875:89855:boolean — pendingImmediate is inert while bodyDepth > 0, and the scanner follows a claimed body's OUTDENT with TERMINATOR, `,`, or the frame closer, which reset the segment or end the frame before any INDENT reads it
+- src/types.js:1877:89909:statement — same as 1877:89924
+- src/types.js:1877:89924:boolean — inlineBody is read only at bodyDepth 0; after the body's OUTDENT the next frame token is TERMINATOR, `,`, or the closer (segment reset / frame end) — a `;` line there is unparseable either way (probed)
+- src/types.js:1890:90493:statement — the flag is already false at the `;` unless an immediate head directly precedes it (`-> ;`, `loop ;`, `do ;`), which leaves an empty body the grammar rejects at the same token either way (probed)
+- src/types.js:1891:90533:statement — pendingCond is true at the `;` only after `= if/class…` with no THEN, which the grammar rejects at the same token either way (probed `c = if x ;`, `c = class ;`)
+
+## BUG (17)
+
+- src/types.js:495:25439:statement — `x = y as A |\n  B` → expected the type `A | B` (or a loud rejection), got `let x = y;\nB;`: the cast run breaks at the continuation line's depth-0 newline after a trailing `|`, and `B` silently compiles as its own statement
+- src/types.js:659:32653:logic — `type X<T extends A << B> = T` → expected a positioned rejection on every face, got a clean JS-face compile (the alias head's generic list is never vocabulary-checked); only declaration emission rejects it ("a type alias needs '='")
+- src/types.js:804:39387:statement — `: a < b, c >\n  d` (any file starting with `:`) → expected a positioned rejection, got a TypeError; base crashes in implicit.js collectObjects (`tokens[s].start`), the mutant one step earlier (`before.kind`). The guard's only input already crashes downstream (implicit.js, outside this file); fixed on the coordinator's fix branch
+- src/types.js:815:40022:statement — `def t!: Map<string, number>\n  null` → expected `function t()` with return type `Map<string, number>` (as `def t!(): Map<string, number>` compiles), got `Unexpected 'newline' — expected indent` (the body is swallowed into the type, TYPE "Map<string, number>null"): at scan time the bang is still DAMMIT (tagVoidMarkers runs later), so this VOID_MARKER rule is dead and the trailing `>` never ends the line — deleting the dead rule changes nothing
+- src/types.js:815:40038:relation — `def t!: Map<string, number>\n  null` → expected `function t()` with return type `Map<string, number>` (as `def t!(): Map<string, number>` compiles), got `Unexpected 'newline' — expected indent` (the body is swallowed into the type, TYPE "Map<string, number>null"): at scan time the bang is still DAMMIT (tagVoidMarkers runs later), so this VOID_MARKER rule is dead and the trailing `>` never ends the line — this mutant fires on the DAMMIT and compiles it correctly
+- src/types.js:815:40056:logic — `def t!: Map<string, number>\n  null` → expected `function t()` with return type `Map<string, number>` (as `def t!(): Map<string, number>` compiles), got `Unexpected 'newline' — expected indent` (the body is swallowed into the type, TYPE "Map<string, number>null"): at scan time the bang is still DAMMIT (tagVoidMarkers runs later), so this VOID_MARKER rule is dead and the trailing `>` never ends the line — this mutant fires on the DAMMIT and compiles it correctly
+- src/types.js:815:40079:arith — `def t!: Map<string, number>\n  null` → expected `function t()` with return type `Map<string, number>` (as `def t!(): Map<string, number>` compiles), got `Unexpected 'newline' — expected indent` (the body is swallowed into the type, TYPE "Map<string, number>null"): at scan time the bang is still DAMMIT (tagVoidMarkers runs later), so this VOID_MARKER rule is dead and the trailing `>` never ends the line — this mutant survives because the rule never fires
+- src/types.js:815:40081:number — `def t!: Map<string, number>\n  null` → expected `function t()` with return type `Map<string, number>` (as `def t!(): Map<string, number>` compiles), got `Unexpected 'newline' — expected indent` (the body is swallowed into the type, TYPE "Map<string, number>null"): at scan time the bang is still DAMMIT (tagVoidMarkers runs later), so this VOID_MARKER rule is dead and the trailing `>` never ends the line — this mutant survives because the rule never fires
+- src/types.js:815:40092:boolean — `def t!: Map<string, number>\n  null` → expected `function t()` with return type `Map<string, number>` (as `def t!(): Map<string, number>` compiles), got `Unexpected 'newline' — expected indent` (the body is swallowed into the type, TYPE "Map<string, number>null"): at scan time the bang is still DAMMIT (tagVoidMarkers runs later), so this VOID_MARKER rule is dead and the trailing `>` never ends the line — this mutant survives because the rule never fires
+- src/types.js:958:46473:relation — `o = {}\nx: number\no.x = 1\nx` → expected the implicit-object reading (no identifier assignment of `x` follows), got the line erased as a typed forward declaration (dts `declare let x: number`): the assignment index counts the PROPERTY write `o.x = 1` (and `@x = 1`) as evidence that the binding `x` is assigned
+- src/types.js:1435:68450:arith — `a = [x as number\n]` (also `f(x as number\n)`, `{a: x as number\n}`) → expected `[x]`, got `Unexpected ']'` at 3:1: the cast's terminator restoration inserts a TERMINATOR before a closer on its own line (`a = [x\n]` compiles)
+- src/types.js:1435:68452:number — same repro as 1435:68450 — the restoration fires for every newline follower, closers included
+- src/types.js:1510:72162:statement — same repro as 1510:72165
+- src/types.js:1510:72165:branch — `class A\n  constructor: (@a?) ->` → expected an optional promoted parameter (or a precise rejection), got `Unexpected 'a' — expected a string, a property name`: the bare-optional branch retypes the promoted name PROPERTY→IDENTIFIER (the colon branch exempts `@`)
+- src/types.js:1510:72176:relation — same repro as 1510:72165
+- src/types.js:1876:89874:statement — same repro as 1876:89890
+- src/types.js:1876:89890:boolean — `f = (a = if no\n  1\nelse\n  b: 2\n) -> a` → expected `a = false ? 1 : {b: 2}`, got an empty `else {}`: the else block's INDENT reads as parameter layout, so `b: 2` claims as an annotation and erases (silent miscompile)

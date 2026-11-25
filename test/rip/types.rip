@@ -977,3 +977,600 @@ code 'optional property erased', '''
   ''', '''
   
   '''
+
+# ==============================================================================
+# Mutation-audit pins — the rewriteTypes pass
+# ==============================================================================
+
+test 'an implicit call whose argument assigns is not a type alias', '''
+  r = []
+  push = (v) -> r.push v
+  push x = 5
+  r
+''', [5]
+
+test 'a function named type called mid-expression is not an alias', '''
+  type = (v) -> v * 2
+  wrap = (v) -> v + 1
+  wrap type x = 5
+''', 11
+
+test 'as before an operator that starts no type stays a name', '''
+  as = 3
+  f = (v) -> v + 1
+  f as * 2
+''', 7
+
+test 'a cast before a closing paren on the next line', '''
+  x = 1
+  r = (x as number
+  )
+  r
+''', 1
+
+test 'a cast before an interpolation close on the next line', '''
+  x = 1
+  "#{x as number
+  }"
+''', "1"
+
+fail 'a second generic group after a def name stays a comparison', "def f<T><U>(x)\n  x", "Unexpected '<' —"
+fail 'a generic group after a non-name in a def head stays a comparison', "def f x<T>(y)\n  y", "Unexpected '<' —"
+fail 'a generic list on a property target is no component target', "obj = {}\nobj.Sel<T> = component\n  render\n    div", ":2:12: Unexpected '='"
+
+test 'an unspaced comparison chain into a component is no generic list', '''
+  a = 1
+  b = 2
+  r = a<b>(component
+    render
+      div)
+  r
+''', false
+
+test 'a parenthesized generic constraint keeps the def parameter list', '''
+  def f<T extends (() => number)>(x: T)
+    x()
+  f(-> 7)
+''', 7
+
+fail 'an optional marker after a destructuring parameter rejects', 'f = ({a}?, b) -> b', ":1:9: Unexpected '?'"
+
+test 'a bare optional parameter on its own line', '''
+  f = (
+    a?
+    b
+  ) -> b
+  f(1, 2)
+''', 2
+
+fail 'a doubled colon after a parameterless def name rejects', "def f: : number\n  1", "type annotations use a single ':'"
+fail 'a doubled colon after a catch binding rejects', "try\n  g()\ncatch e: : any\n  e", "type annotations use a single ':'"
+fail 'a doubled colon after a typed prototype member rejects', 'String::foo: : number = 1', "type annotations use a single ':'"
+fail 'an annotated catch binding named for a value word rejects', "try\n  x()\ncatch yes: any\n  1", "'yes' cannot name a binding"
+fail 'an annotated array-pattern loop variable rejects', "for [a, b]: number in xs\n  a", 'a loop variable does not take a type annotation'
+
+test 'a string-keyed parameter is a destructuring rename', '''
+  f = ("a": n) -> n
+  f({a: 7})
+''', 7
+
+fail 'an optional marker after a destructuring pattern takes no annotation', 'f = ({a}?: string) -> a', ":1:9: Unexpected"
+
+test 'a numeric key with an assigned value stays an object', '''
+  r = (->
+    1: n = 5
+  )()
+  r[1]
+''', 5
+
+fail 'an annotated soak prototype write rejects after a statement', "f\nX?::m: number = 1", 'the soak form cannot carry the annotation'
+fail 'a soak prototype write inside an implicit call is no annotation', 'f X?::m: number = 1', "Unexpected implicit '{'"
+
+test 'a prototype chain inside an implicit call is an object key', '''
+  f = (o) -> o
+  r = f String::m: n = 1
+  r["String.prototype.m"]
+''', 1
+
+test 'a static class method with a typed parameter returning a name', '''
+  class A
+    @make: (x: number) => x
+  A.make(3)
+''', 3
+
+fail 'a class field with a call value rejects', "class A\n  x: f()", "a class field takes '=' for its value"
+fail 'a component prop function type with a generic default is no type', "Foo = component\n  @x: () => Bar<T = number>\n  render\n    div", ":2:28: Unexpected 'dedent'"
+
+fail 'class generics after a parent call reject', "mixin = (b) -> b\nclass B\nclass A extends mixin(B)<T>\n  x = 1", 'class generics are not supported'
+fail 'class generics after a parent call with arguments reject', "mix = (b, c) -> b\nclass B\nclass A extends mix(B, B)<T>\n  x = 1", 'class generics are not supported'
+
+test 'a bracketed comparison after a bracketed class expression', '''
+  x = [class A][0]
+  y = [1 < 2][0]
+  y
+''', true
+
+test 'a class expression compares with !=', '''
+  r = class A != null
+  r
+''', true
+
+fail 'a class then-body does not make the next block a class body', "class A then make: ->\n  x: number\n  y: 1\n  x = 1\n  0", "these adjacent 'name:' lines are ambiguous"
+
+test 'a bodiless class does not make a later block a class body', '''
+  class A
+  f = ->
+    y: 1
+  f().y
+''', 1
+
+test 'a typed declaration after a bracketed function block', '''
+  f = (g) -> g()
+  f(->
+    1
+  )
+  x: number = 5
+  x
+''', 5
+
+test 'a key line two lines up does not block a bare typed forward', '''
+  a: 1
+  b = 2
+  c: number
+  c = 3
+  c
+''', 3
+
+test 'a key line before a block does not block its first bare typed forward', '''
+  a: 1
+  if true
+    c: number
+    c = 3
+    r = c
+  r
+''', 3
+
+test 'a key line opening a block does not block bare typed forwards inside it', '''
+  r = null
+  k: do ->
+    z = 1
+    c: number
+    c = 3
+    r = c + z
+  r
+''', 4
+
+test 'a nested block inside a default body keeps its key lines', '''
+  f = (a = ->
+    if true
+      1
+    b: 2
+  ) -> a().b
+  f()
+''', 2
+
+test 'a parameter after an empty arrow default takes its annotation', '''
+  f = (a = ->,
+    b: number) -> b
+  f(undefined, 5)
+''', 5
+
+test 'a parameter after a class default takes its annotation', '''
+  f = (a = class,
+    b: number) -> b
+  f(undefined, 5)
+''', 5
+
+test 'a colon after a parameter default is an object key', '''
+  f = (a = b: 1) -> a.b
+  f()
+''', 1
+
+test 'a newline after a semicolon ends an inline default body', '''
+  f = (a = -> 1 ;
+      b: 2
+  ) -> b
+  f(undefined, 7)
+''', 7
+
+# ==============================================================================
+# Mutation-audit pins — the type-body vocabulary floor
+# ==============================================================================
+
+type 'a method member after a generic member in an inline object type', 'type X = {a: Foo<B>, m(x: number): void}', '''
+  type X = {a: Foo<B>, m(x: number): void};
+'''
+type 'two method members in an inline object type', 'type X = {m(a: number): void, n(b: number): void}', '''
+  type X = {m(a: number): void, n(b: number): void};
+'''
+type 'a triple generic close in a type body', 'type X = A<B<C<D>>>', '''
+  type X = A<B<C<D>>>;
+'''
+type 'a negative literal type argument', 'type X = Foo<-1>', '''
+  type X = Foo<-1>;
+'''
+type 'a negative literal after typeof is in prefix position', 'type X = typeof -1', '''
+  type X = typeof -1;
+'''
+type 'an asserts predicate as a whole alias body', 'type P = asserts v is string', '''
+  type P = asserts v is string;
+'''
+type 'a type predicate on a negative literal type', 'type G = (v: unknown) => v is -1', '''
+  type G = (v: unknown) => v is -1;
+'''
+type 'a mapped type over a literal union', 'type M = {[K in "a" | "b"]: number}', '''
+  type M = {[K in "a" | "b"]: number};
+'''
+type 'a mapped type whose constraint opens with a negative literal', 'type M = {[K in -1]: number}', '''
+  type M = {[K in -1]: number};
+'''
+type 'a mapped type with a negative literal value', 'type M = {[K in Keys]: -1}', '''
+  type M = {[K in Keys]: -1};
+'''
+type 'a tight readonly mapped row with an optionality modifier', 'type M = { readonly[K in keyof T]-?: T[K] }', '''
+  type M = { readonly[K in keyof T]-?: T[K] };
+'''
+type 'a tight -readonly mapped row with an optionality modifier', 'type M = { -readonly[K in keyof T]-?: T[K] }', '''
+  type M = { -readonly[K in keyof T]-?: T[K] };
+'''
+type 'a negative literal after a generic default', 'type X = Foo<A = -1>', '''
+  type X = Foo<A = -1>;
+'''
+type 'a negative literal opening a method parameter list', "interface I\n  m(-1): void", '''
+  interface I {
+    m(-1): void;
+  }
+'''
+
+fail 'an unclosed nested generic in an interface body rejects at the outer opener', "interface I\n  a: A<B<C>", "2:7: unclosed '<' in a type body"
+fail 'arithmetic after a generic close rejects', 'type X = Foo<B> - 1', "code expression ('-')"
+fail 'arithmetic after a double generic close rejects', 'type X = A<B<C>> - 1', "code expression ('-')"
+fail 'arithmetic after a triple generic close rejects', 'type X = A<B<C<D>>> - 1', "code expression ('-')"
+fail 'a left shift in a type body rejects', 'type X = A << B', "code expression ('<<')"
+fail 'delete in a type body rejects', 'type X = delete A', "code expression ('delete')"
+fail 'a predicate on a non-name subject rejects', 'type G = (v: unknown) => 1 is string', "code expression ('is')"
+fail 'a mapped row over a non-name parameter rejects', 'type M = {[1 in Keys]: number}', "code expression ('in')"
+fail 'a negative literal after a negative literal rejects', 'type X = -1 -1', "code expression ('-')"
+fail 'a sign before an optional marker outside a mapped row rejects', 'type X = { a - ?: number }', "code expression ('-')"
+fail 'arithmetic after an array type rejects', 'type X = A[] + 1', "code expression ('+')"
+fail 'an assignment line in a block alias body rejects', "type X =\n  a: number\n  b = 2", "code expression ('=')"
+fail 'a string-named method shorthand in an interface rejects', "interface I\n  \"m\"(x: number): void", "code expression ('(')"
+
+# ==============================================================================
+# Mutation-audit pins — type-run collection
+# ==============================================================================
+
+test 'a cast to a multi-line object type', '''
+  y = 1
+  x = y as {
+    a: number
+  }
+  x
+''', 1
+
+test 'a cast to a double generic close', '''
+  y = 1
+  x = y as A<B<C>>
+  x
+''', 1
+
+test 'a cast to a triple generic close', '''
+  y = 1
+  x = y as A<B<C<D>>>
+  x
+''', 1
+
+test 'a right shift after a cast is the operator', '''
+  x = 8
+  r = x as number >> 1
+  r
+''', 4
+
+fail 'a closer over two open generics in a cast rejects at the inner one', "y = 1\nf = (v) -> v\nf(y as A<B<C)", ":3:11: unclosed '<'"
+
+type 'a multi-line object parameter type separates its fields', "def f(o: {\n  a: Array<number>\n  b: string\n})\n  o", '''
+  declare function f(o: { a: Array<number>; b: string }): any;
+'''
+type 'an optional member in a parameter object type', "def f(o: {a?: number})\n  o", '''
+  declare function f(o: { a?: number }): any;
+'''
+
+# ==============================================================================
+# Mutation-audit pins — the bare-forward sibling run
+# ==============================================================================
+
+test 'a string-keyed line ends a bare typed-forward run', '''
+  a: number
+  "s": 1
+  a = 1
+  a
+''', 1
+
+# ==============================================================================
+# Mutation-audit pins — trailing generic closes at a line end
+# ==============================================================================
+
+test 'a trailing comparison line after a generic return type continues', '''
+  g = (x, y) -> [x, y]
+  a = 1
+  b = 2
+  c = 3
+  d = 0
+  def f(): Array<number>
+    1
+  g a < b, c >
+    d
+''', [true, true]
+
+test 'a trailing <= after a cast continues the line', '''
+  y = 1
+  b = 2
+  r = y as number <=
+    b
+  r
+''', true
+
+test 'a trailing << after a cast continues the line', '''
+  y = 1
+  r = y as number <<
+    2
+  r
+''', 4
+
+test 'a cast ending in a generic close ends its line before a line starting with as', '''
+  y = 1
+  x = y as {a: number} | Map<string, number>
+  as = 3
+  as
+''', 3
+
+test 'as after an opening bracket is no cast head for a trailing comparison', '''
+  as = 1
+  b = 2
+  c = 3
+  d = 0
+  r = [as < b, c >
+    d]
+  r
+''', [true, true]
+
+test 'a tight call of as is no cast head for a trailing comparison', '''
+  as = (v) -> 9
+  y = (v) -> v
+  b = 2
+  c = 3
+  d = 0
+  r = [y as(1) < b, c >
+    d]
+  r
+''', [false]
+
+# ==============================================================================
+# Mutation-audit pins — bare function types in arrow-return position
+# ==============================================================================
+
+fail 'a bare empty-parameter function type as an arrow return rejects', 'f = (x): () => x', 'must be parenthesized as a whole'
+fail 'a bare function type with a nested function parameter rejects', 'f = (x): (a: (b: number) => void) => x', 'must be parenthesized as a whole'
+fail 'a bare function type after a tuple parameter rejects', 'f = (x): ([number], b: string) => x', 'must be parenthesized as a whole'
+fail 'a bare function type after an object parameter rejects', 'f = (x): ({a: number}, b: string) => x', 'must be parenthesized as a whole'
+fail 'a colon after a parenthesized conditional type branch rejects', 'f = (x): (T extends string ? number : boolean, e: string) => x', 'must be parenthesized as a whole'
+
+test 'a parenthesized single type is an arrow return', '''
+  f = (x): (number) => x
+  f(4)
+''', 4
+
+test 'a parenthesized object type is an arrow return', '''
+  f = (x): ({a: number}) => x
+  f(4)
+''', 4
+
+test 'a parenthesized conditional type is an arrow return', '''
+  f = (x): (T extends string ? number : boolean) => x
+  f(4)
+''', 4
+
+# ==============================================================================
+# Mutation-audit pins — method values in class bodies
+# ==============================================================================
+
+fail 'a typed fat-arrow value in a class body is a bound method, not a field type', "class A\n  make: (x: number) => x", "bound ('=>') class methods require an explicit constructor"
+fail 'a union ending in a fat-arrow value in a class body is no field type', "class A\n  m: B | (x: number) => x", "a class field takes '=' for its value"
+
+test 'a bare typed field before an else arrow is still a field', '''
+  r = if yes
+    class A
+      x: number
+  else -> 1
+  Object.keys(new r())
+''', ["x"]
+
+# ==============================================================================
+# Mutation-audit pins — complete-type judgment
+# ==============================================================================
+
+test 'a tuple parameter in a fn-type-valued declaration', '''
+  get: (p: [number]) => number = (p) -> p[0]
+  get([7])
+''', 7
+
+test 'a generic default in a fn-type-valued declaration', '''
+  get: () => Foo<T = number> = -> 5
+  get()
+''', 5
+
+test 'a fat arrow after a union member is no type, so the line stays an object', '''
+  r = 0
+  number = 1
+  B = (f) -> r = 7
+  x: (a: number) | B => C
+  x = 1
+  r
+''', 7
+
+fail 'a comparison chain in a class body is no field type', "class A\n  x: a > (b) < c", "a class field takes '=' for its value"
+fail 'two adjacent names in a class body are no field type', "class A\n  x: f g", "a class field takes '=' for its value"
+fail 'an assignment after an open union in a fn-type declaration rejects', 'get: () => A | = b = 5', ":1:16: Unexpected '='"
+
+type 'a string-literal union class field', "class A\n  x: \"a\" | \"b\"", '''
+  declare class A {
+    x: "a" | "b";
+  }
+'''
+type 'a class field type admitting undefined', "class A\n  x: number | undefined", '''
+  declare class A {
+    x: number | undefined;
+  }
+'''
+type 'a boolean-literal class field type', "class A\n  x: true", '''
+  declare class A {
+    x: true;
+  }
+'''
+
+# ==============================================================================
+# Mutation-audit pins — type-head colons at a trailing generic close
+# ==============================================================================
+
+test 'an object-key colon is no type head for a trailing comparison', '''
+  g = (o, x, y) -> y
+  b = 1
+  c = 2
+  d = 3
+  e = 0
+  r = g {k: 1}, b < c, d >
+    e
+  r
+''', true
+
+test 'a string-key colon is no type head for a trailing comparison', '''
+  b = 1
+  c = 2
+  d = 3
+  e = 0
+  f = ->
+    "s": [b < c, d >
+      e]
+  f().s
+''', [true, true]
+
+# ==============================================================================
+# Mutation-audit pins — heads, run lines, and assignment evidence
+# ==============================================================================
+
+type 'a type predicate inside a generic parameter constraint', 'type G<T extends (v: unknown) => v is string> = T', '''
+  type G<T extends (v: unknown) => v is string> = T;
+'''
+fail 'a generic list wrapped across def head lines rejects', "def f<T,\n  U>(x)\n  x", ":1:6: Unexpected '<'"
+
+test 'a variable named type compares when the alias head has no =', '''
+  type = (x) -> x
+  X = 1
+  T = 2
+  number = 0
+  type X<T> number
+''', true
+
+test 'a variable named type compares when its generic never closes', '''
+  type = (x) -> x
+  X = 1
+  T = 0
+  type X<T = 5
+''', true
+
+fail 'a string after type is no alias name', 'type "x" = 1', 'a string is not an assignment target'
+fail 'interface without a name rejects as reserved', "interface\n  a: T", "'interface' is reserved"
+fail 'interface with a string name rejects as reserved', "interface \"x\"\n  a: T", "'interface' is reserved"
+fail 'interface extending a string rejects as reserved', "interface P extends \"x\"\n  a: T", "'interface' is reserved"
+fail 'a method shorthand needs a member-row start', "interface I\n  x m(): void", "code expression ('(')"
+fail 'a def head without a name rejects at the colon', "def @: number\n  1", ":1:5: Unexpected implicit '{'"
+
+test 'a void-assigned arrow named type is no alias head for a trailing comparison', '''
+  a = 1
+  b = 2
+  c = 3
+  d = 0
+  g = (x, y) -> [x, y]
+  out = []
+  type! = -> out.push g a<b, c>
+    d
+  type()
+  out
+''', [[true, true]]
+
+test 'a type predicate on a generic ends the def head line', '''
+  def f(v: unknown): v is Map<string, number>
+    yes
+  f(1)
+''', true
+
+test 'a TERMINATOR resets the trailing-close answer', '''
+  g = (x, y) -> [x, y]
+  a = 1
+  b = 2
+  c = 3
+  d = 0
+  h = (z): Array<number> -> [z]
+  g a < b, c >
+    d
+''', [true, true]
+
+test 'an INDENT resets the trailing-close answer', '''
+  g = (x, y) -> [x, y]
+  a = 1
+  b = 2
+  c = 3
+  d = 0
+  def f(): Array<number>
+    g a < b, c >
+      d
+  f()
+''', [true, true]
+
+test 'an object key after a comma inside a loop body is no loop variable', '''
+  for x in [1]
+    r = [1, a: 2]
+  r
+''', [1, {a: 2}]
+
+test 'a reactive declaration separates bare typed forwards', '''
+  a: number
+  b: number := 2
+  a = 1
+  a + b
+''', 3
+
+test 'a readonly declaration separates bare typed forwards', '''
+  a: number
+  b: number =! 2
+  a = 1
+  a + b
+''', 3
+
+test 'an effect declaration separates bare typed forwards', '''
+  a: number
+  b: Function ~> 1
+  a = 1
+  a
+''', 1
+
+test 'a clause after a parenthesized value keeps the run an object', '''
+  number = 1
+  c = yes
+  a: number
+  x: (number) if c
+  a = 1
+  x = 2
+  a + x
+''', 3
+
+test 'a key line at the end of input stays an object', '''
+  number = 1
+  y = 1
+  x = 0
+  a: number
+  x: number
+''', {a: 1, x: 1}
+
+type 'an assignment inside call arguments is no evidence for a bare forward', "number = 1\nr: number\nf = (x) -> x\nf(\n  r = 5\n)\nr", '''
+'''

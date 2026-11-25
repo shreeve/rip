@@ -754,3 +754,14 @@ describe('large inputs', () => {
     expect(tokens.length).toBeGreaterThan(1_500_000);
   });
 });
+
+describe('mutation-audit pins — src/types.js', () => {
+  test("a '+1' cast type rejects spanning the sign and its number", () => {
+    let err = null;
+    try { tokenize('r = x as +1'); } catch (e) { err = e; }
+    expect(err).not.toBeNull();
+    expect(err.message).toContain("TypeScript has no '+1' type");
+    expect(err.start).toBe(9);
+    expect(err.end).toBe(11);
+  });
+});
