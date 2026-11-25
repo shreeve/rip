@@ -135,3 +135,14 @@ code 'an implicit call inside a bracket list keeps its spread', '[1, g a, x: 1, 
 code 'a spread inside an array is the next element, not an object continuation', '[x: 1, ...opts, y: 2]', '[{x: 1}, ...opts, {y: 2}];'
 code 'a spread inside call parens is the next argument', 'f(a: 1, ...rest)', 'f({a: 1}, ...rest);'
 code 'a spread after an implicit-call object continues it', 'f a, x: 1, ...opts, y: 2', 'f(a, {x: 1, ...opts, y: 2});'
+
+# A colon with no key before it on its line opens no object: the stray
+# `:` rejects at parse, positioned at the colon itself.
+fail "a program starting with a colon rejects at the colon", ': b', "1:1: Unexpected ':'"
+fail "a colon heading an indented pair rejects at the colon", ':\n  a: 1', "1:1: Unexpected ':'"
+fail "a line starting with a colon rejects at the colon", 'x = 1\n: b', "2:1: Unexpected ':'"
+
+# A bare object statement may end the program with a semicolon.
+test "a semicolon-ended bare object statement is the program's value", 'a: 1;', {a: 1}
+code "a semicolon-ended bare object statement ends the program", 'a: 1;', '({a: 1});'
+code "a semicolon-ended bare object after a statement ends the program", 'x = 1\na: 1;', 'let x = 1;\n({a: 1});'

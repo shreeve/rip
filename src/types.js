@@ -1179,6 +1179,9 @@ export function rewriteTypes(tokens, mintId, text, fail) {
   // candidate — every candidate afterwards is one map lookup.
   let assignIndex = null;
   const assignedLater = (start, name) => {
+    // A line ending the tape (`a: 1;` as the last statement) has nothing
+    // after it to assign anything.
+    if (start >= tokens.length) return false;
     assignIndex ??= buildAssignIndex(tokens);
     const m = assignIndex.blockMaps[assignIndex.blockIdAt[start]];
     return (m.get(name) ?? -1) >= start;

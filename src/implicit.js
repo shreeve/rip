@@ -706,8 +706,11 @@ function collectObjects(tokens, mintId) {
       // VOID-METHOD pair (`fn!: ->`): this is the context that resolves
       // the scanner's DAMMIT into VOID_MARKER (a ternary's colon was
       // consumed above, so `c ? f!: g` keeps its call-site dammit).
-      if (prev?.kind === 'DAMMIT') prev.kind = 'VOID_MARKER';
-      const bang = prev?.kind === 'VOID_MARKER' ? 1 : 0;
+      // A colon with nothing before it on its line has no key: it opens
+      // no object, and the stray `:` rejects at parse, at the colon.
+      if (!prev || LINE_BREAK_KINDS.has(prev.kind)) continue;
+      if (prev.kind === 'DAMMIT') prev.kind = 'VOID_MARKER';
+      const bang = prev.kind === 'VOID_MARKER' ? 1 : 0;
 
       // The key's start: normally the previous token (one further back
       // past a void marker); `@`-prefixed keys start at the `@`; a
