@@ -3,7 +3,7 @@
 Survivors of the lexer-pass mutation audit at 119b45bb, classified per the triage brief.
 Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 
-## GAP (160)
+## GAP (180)
 
 - src/types.js:217:11845:statement — test/rip/types.rip › a method member after a generic member in an inline object type
 - src/types.js:217:11858:number — test/rip/types.rip › a method member after a generic member in an inline object type
@@ -108,6 +108,26 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:873:42370:logic — test/rip/types.rip › a trailing << after a cast continues the line
 - src/types.js:873:42408:relation — test/rip/types.rip › a trailing << after a cast continues the line
 - src/types.js:877:42559:boolean — test/rip/types.rip › a trailing comparison line after a generic return type continues
+- src/types.js:972:46921:number — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:976:47030:branch — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:976:47057:update — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:977:47073:branch — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:978:47106:branch — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:978:47113:relation — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:978:47117:number — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:979:47140:statement — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:979:47145:update — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:980:47163:branch — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:980:47170:relation — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:980:47174:number — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:981:47185:statement — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:981:47201:logic — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:981:47224:boolean — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
+- src/types.js:982:47239:branch — test/rip/types.rip › a union ending in a fat-arrow value in a class body is no field type
+- src/types.js:982:47243:relation — test/rip/types.rip › a union ending in a fat-arrow value in a class body is no field type
+- src/types.js:982:47266:relation — test/rip/types.rip › a union ending in a fat-arrow value in a class body is no field type
+- src/types.js:982:47279:logic — test/rip/types.rip › a bare typed field before an else arrow is still a field
+- src/types.js:982:47285:relation — test/rip/types.rip › a union ending in a fat-arrow value in a class body is no field type
 - src/types.js:1235:59143:relation — test/rip/types.rip › a string-keyed line ends a bare typed-forward run
 - src/types.js:1399:66520:logic — test/rip/types.rip › an implicit call whose argument assigns is not a type alias
 - src/types.js:1402:66703:relation — test/rip/types.rip › a function named type called mid-expression is not an alias
@@ -166,7 +186,7 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:1901:90987:statement — test/rip/types.rip › a colon after a parameter default is an object key
 - src/types.js:1901:91013:boolean — test/rip/types.rip › a colon after a parameter default is an object key
 
-## EQUIVALENT (152)
+## EQUIVALENT (155)
 
 - src/types.js:221:12006:statement — openAngle is reassigned at every `<` opened from angle 0 and read only while angle > 0, i.e. after such an opener; the stale value is always overwritten first
 - src/types.js:249:13482:arith — j-2 < from puts tokens[j-2] before the body: the alias `=` or the body INDENT, never `=>`, `asserts`, or a `:` after CALL_END, so the shape test fails there anyway
@@ -215,6 +235,9 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:865:42124:logic — `?? null`→`&& null` makes ref null, so every sync rebuilds to the same state
 - src/types.js:870:42246:statement — same as 870:42264 — last is always defined
 - src/types.js:870:42264:boolean — closesTypeGeneric is called only when the scanner's prev token is non-null, so the tape is never empty here
+- src/types.js:973:46935:relation — the scan starts inside a class body, whose OUTDENT lies ahead at depth 0 (brackets balance within it), so it always returns before tokens.length
+- src/types.js:978:47103:statement — same as 978:47127 — the depth-0 closer case never occurs
+- src/types.js:978:47127:boolean — a depth-0 closer never appears on a class-body line (the body's brackets balance before its TERMINATOR/OUTDENT), so this return never runs
 - src/types.js:1160:55747:number — classHeadRunDepth is only compared with classHeadDepth, which is captured from it at CLASS; a constant offset of 1 changes no comparison (balanced brackets keep it >= its start, so `classHeadDepth >= 0` still means armed)
 - src/types.js:1208:58179:number — lastEnd's initial value is read only when the first member breaks as a typed-declaration separator; that colon's typedDeclEq >= 0 means the line-1688 claim tried first, and it declined only on an empty run, which the bare claim declines identically
 - src/types.js:1212:58296:relation — bareDeclLineEnd returns -1 or a TERMINATOR index > colon >= 1, never 0

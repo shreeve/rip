@@ -1369,3 +1369,18 @@ test 'a parenthesized conditional type is an arrow return', '''
   f = (x): (T extends string ? number : boolean) => x
   f(4)
 ''', 4
+
+# ==============================================================================
+# Mutation-audit pins — method values in class bodies
+# ==============================================================================
+
+fail 'a typed fat-arrow value in a class body is a bound method, not a field type', "class A\n  make: (x: number) => x", "bound ('=>') class methods require an explicit constructor"
+fail 'a union ending in a fat-arrow value in a class body is no field type', "class A\n  m: B | (x: number) => x", "a class field takes '=' for its value"
+
+test 'a bare typed field before an else arrow is still a field', '''
+  r = if yes
+    class A
+      x: number
+  else -> 1
+  Object.keys(new r())
+''', ["x"]
