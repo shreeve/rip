@@ -1,9 +1,30 @@
 # src/lexer.js mutation survivors
 
-272 of 565 survivors classified.
+308 of 565 survivors classified.
 
 ## GAP
 
+- src/lexer.js:83:4149:statement — test/rip/arrows.rip › a ternary paren branch then do
+- src/lexer.js:97:4752:logic — test/rip/types.rip › an arrow return type may be an import type
+- src/lexer.js:97:4772:logic — test/rip/types.rip › an arrow return type may be an import type
+- src/lexer.js:100:4990:logic — test/rip/types.rip › an arrow return type may be an import type
+- src/lexer.js:100:5012:logic — test/rip/types.rip › an arrow return type may be an import type
+- src/lexer.js:103:5160:relation — test/rip/types.rip › an arrow return type may close two generics with one token
+- src/lexer.js:103:5172:logic — test/rip/types.rip › an arrow return type may close three generics with one token
+- src/lexer.js:103:5183:relation — test/rip/types.rip › an arrow return type may close two generics with one token; test/rip/types.rip › an arrow return type may close three generics with one token
+- src/lexer.js:103:5202:number — test/rip/types.rip › an arrow return type may close two generics with one token
+- src/lexer.js:104:5213:statement — test/rip/types.rip › an arrow return type may close three generics with one token
+- src/lexer.js:104:5224:relation — test/rip/types.rip › an arrow return type may close three generics with one token
+- src/lexer.js:104:5236:logic — test/rip/arrows.rip › a ternary paren branch then comparisons and a shift before an arrow
+- src/lexer.js:104:5247:relation — test/rip/types.rip › an arrow return type may close three generics with one token
+- src/lexer.js:104:5267:number — test/rip/types.rip › an arrow return type may close three generics with one token
+- src/lexer.js:108:5401:statement — test/rip/arrows.rip › a ternary paren branch then a nested ternary with an arrow (the mutant also exposes a BUG: `f = (a): T extends U ? X : Y -> a` rejects with "Unexpected implicit '{'", while `def f(a): T extends U ? X : Y`, a parenthesized `(T extends U ? X : Y)` return, and param annotations all accept the conditional type)
+- src/lexer.js:110:5453:logic — test/rip/arrows.rip › a ternary paren branch then an arrow on the next line
+- src/lexer.js:110:5471:logic — test/rip/arrows.rip › a ternary paren branch in an if head then an arrow in its body
+- src/lexer.js:110:5490:logic — test/rip/arrows.rip › a ternary paren branch then an assignment of an arrow call
+- src/lexer.js:110:5503:logic — test/rip/arrows.rip › a ternary paren branch then an assignment of an arrow call
+- src/lexer.js:110:5517:logic — test/rip/types.rip › an arrow return type with an unparenthesized function type in a union
+- src/lexer.js:122:5915:arith — test/rip/types.rip › a parenthesized arrow return type before a parenthesized body
 - src/lexer.js:509:23456:statement — test/mapping/stores.test.js › parse scaling › tokenize op count grows linearly with arrow-body count (extended tier only: RIP_EXTENDED=1; the fast loop skips it)
 - src/lexer.js:542:25325:boolean — test/lang/lexer.test.js › line starts and trivia › the first token follows no whitespace, even under leading indentation
 - src/lexer.js:551:25831:relation — test/rip/modules.rip › a keyword renamed at the head of a specifier line (code row: the evaluator cannot host an import)
@@ -220,6 +241,20 @@
 
 ## EQUIVALENT
 
+- src/lexer.js:74:3853:number — at i 0 tokens[i-1] is undefined, so the !close guard continues before anything reads it; i 0 is never otherwise an arrow with a token before it
+- src/lexer.js:80:4060:statement — with i starting at 1, tokens[i-1] always exists, so the guard never fires
+- src/lexer.js:92:4548:number — found starting at 0 instead of -1: when no param close is found, closeAt becomes 0 and the pairing walk starts at index -1 and runs no iterations, so nothing retags
+- src/lexer.js:93:4579:relation — tokens[0] is the last token the walk could examine: a depth change there is never read, a ':' there has no token before it to be ')', and a boundary there ends the walk exactly where it ends anyway
+- src/lexer.js:93:4582:number — tokens[0] is the last token the walk could examine: a depth change there is never read, a ':' there has no token before it to be ')', and a boundary there ends the walk exactly where it ends anyway
+- src/lexer.js:113:5563:statement — with found -1, closeAt is -1 and the pairing walk from -2 runs no iterations; close (undefined) is never read
+- src/lexer.js:113:5573:relation — found 0 means tokens[0] is the ')': the pairing walk from closeAt-1 = -1 runs no iterations, so skipping it changes nothing
+- src/lexer.js:113:5575:number — found 0 means tokens[0] is the ')': the pairing walk from closeAt-1 = -1 runs no iterations, so skipping it changes nothing
+- src/lexer.js:121:5891:number — op starting at 0 instead of -1 fails the op > 1 test the same way
+- src/lexer.js:122:5917:number — starting at k = i reads the arrow token itself first, which neither opens nor closes, so the walk proceeds exactly as from i-1
+- src/lexer.js:122:5922:relation — an opener matched at index 0 gives op 0, which fails op > 1 just as op -1 does
+- src/lexer.js:122:5925:number — an opener matched at index 0 gives op 0, which fails op > 1 just as op -1 does
+- src/lexer.js:133:6266:relation — op 1 passes the mutated guard but then needs tokens[-1] to be ')', which is undefined, so the branch is never taken
+- src/lexer.js:133:6268:number — op 1 passes the mutated guard but then needs tokens[-1] to be ')', which is undefined, so the branch is never taken
 - src/lexer.js:541:25238:number — every logical line start after the first follows a main-loop newline, which assigns lastNewlinePos before its only read
 - src/lexer.js:543:25355:boolean — the first logical line start sets pendingNewLine = true before any token is pushed
 - src/lexer.js:568:26873:boolean — the first code line's line-start block resets seenImport and seenExport (parens is empty there) before any word scans; blank and comment lines scan no words
@@ -277,6 +312,7 @@
 
 ## BUG
 
+- src/lexer.js:100:4965:logic — `c = false; a = 1\nr = c ? (a) : [1].map -> 7` (also `c ? (a) : -> 7`, `c ? (a) : (x) -> 7`) → expected the ternary `c ? a : [1].map(-> 7)`, got a rejection: the return-type walk reads `(a) :` as an arrow's params and return type. The mutant (PICK_START not counted) stops the walk and compiles `c ? (a) : o.{b}.b.map -> 7` correctly where the base rejects it
 - src/lexer.js:1539:72002:arith — in a render child position `#x: "a"` (or `div#x: "a"`) → expected a positioned rejection (an id shorthand cannot key an attribute), got setAttribute('div#x', "a") on the parent, which throws InvalidCharacterError at runtime
 - src/lexer.js:1555:72922:arith — in a render child position `#x: "a"` (or `div#x: "a"`) → expected a positioned rejection (an id shorthand cannot key an attribute), got setAttribute('div#x', "a") on the parent, which throws InvalidCharacterError at runtime
 - src/lexer.js:1724:82184:relation — `import d from "./#{a}.json"` (with or without `with { type: 'json' }`; also `export * from "./#{a}"`) → expected a positioned rejection (a module source is a plain string), got the silent miscompile `import d from 'tr,"./",a,".json'`

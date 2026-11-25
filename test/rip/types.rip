@@ -977,3 +977,11 @@ code 'optional property erased', '''
   ''', '''
   
   '''
+
+# The arrow's param list is found by walking back over its return type,
+# counting every bracket kind the type can hold.
+test "an arrow return type may be an import type", "f = (a): import(\"./m\").T -> a\nf(3)", 3
+test "an arrow return type may close two generics with one token", "f = (a): Map<K, Array<V>> -> a\nf(1)", 1
+test "an arrow return type may close three generics with one token", "f = (a): A<B<C<D>>> -> a\nf(2)", 2
+test "a parenthesized arrow return type before a parenthesized body", "f = (a): (number) -> (a)\nf(4)", 4
+fail "an arrow return type with an unparenthesized function type in a union", 'f = (a): T | (x) => U -> a'
