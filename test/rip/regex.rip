@@ -407,3 +407,4 @@ test 'a function inside a parameter default owns its own _', '''
   f = (cb = (s) -> (s =~ /x(\\w)/) and _[1]) -> cb("xJ")
   f()
 ''', 'J'
+fail 'an unclosed slash regex rejects', 'x = /abc', 'missing / (unclosed regex)'

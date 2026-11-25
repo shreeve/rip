@@ -665,3 +665,13 @@ code 'a four-hash line is a line comment', '#### heading\nx = 1', 'let x = 1;'
 fail 'an unclosed block comment rejects at its opener', 'x = 1\n###\nwords here', 'unclosed `###` block comment'
 fail 'code after a closing ### rejects', '###\nnote\n### x = 1', 'code after a closing `###`'
 code 'a line comment may follow a closing ###', '###\nnote\n### # heading\nx = 1', 'let x = 1;'
+
+# Line starts: blank lines, comments, and leading continuations under
+# both line endings.
+test 'a block comment may close the file', 'x = 1\n###\nnote\n###', undefined
+test 'a comment line before code under CRLF', "# c\r\nx = 4\r\nx", 4
+test 'a whitespace-only blank line under CRLF', "x = 1\r\n  \r\ny = 2\r\nx + y", 3
+test 'a line-leading ?. continues the chain', "a = {b: {c: 1}}\nx = a\n  ?.b\n  ?.c\nx", 1
+fail 'a line-leading ?. before a digit is no continuation', "x = a\n?.5", "2:1: Unexpected '?.'"
+test 'a line-leading .5 is a number, not a member continuation', "x = 1\n.5", 0.5
+test 'a word that merely starts with else begins a new statement', "elsewhere = 1\nx = 2\nelsewhere = x + elsewhere\nelsewhere", 3

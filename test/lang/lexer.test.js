@@ -872,3 +872,36 @@ describe('tolerant end-of-input repair', () => {
     expect(new Set(tokens.map((t) => t.id)).size).toBe(tokens.length);
   });
 });
+
+describe('line starts and trivia', () => {
+  const trivia = (src) => tokenize(src).trivia.map((t) => [t.kind, t.start, t.end]);
+
+  test('the first token follows no whitespace, even under leading indentation', () => {
+    const first = tokenize('  x').tokens.find((t) => !t.generated);
+    expect(first.spaced).toBe(false);
+  });
+
+  test('a comment that ends the file stops at the last character', () => {
+    expect(trivia('x\n# c')).toEqual([['comment', 2, 5]]);
+    expect(trivia('x = 1 # c')).toEqual([['comment', 6, 9]]);
+  });
+
+  test('a mid-line comment stops before a CRLF', () => {
+    expect(trivia('x = 1 # c\r\ny = 2')).toEqual([['comment', 6, 9]]);
+  });
+
+  test('an unclosed block comment rejects over its opener', () => {
+    expect(rejection('x = 1\n###\nwords')).toEqual([expect.stringContaining('unclosed `###` block comment'), 6, 9]);
+  });
+
+  test('a dollar template tag covers its one character', () => {
+    expect(realSpans('sh $"cmd"')).toBe('sh@0 $@3 "cmd"@4');
+  });
+
+  test('a tolerant schema rejection records its bare reason and offset', () => {
+    const { lexDiagnostics } = tokenize('X = schema :shape\n  name! string\n  greet: str', '<t>', { tolerant: true });
+    expect(lexDiagnostics.map((d) => [d.message, d.start, d.end])).toEqual([
+      ["schema fields use 'name type' (space, no colon) — got 'greet:'; for methods/computed use 'name: -> body' or 'name: ~> body'", 40, 40],
+    ]);
+  });
+});

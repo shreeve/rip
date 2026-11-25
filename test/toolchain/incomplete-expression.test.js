@@ -44,6 +44,12 @@ describe('tolerant repair at the parser level', () => {
     }
   });
 
+  test('a FOR line missing its connector never lends it to the next line', () => {
+    // The pending FOR ends with its logical line; a later `in` is a
+    // relation, so no repair can splice the two lines into one loop.
+    expect(() => tolerant('for x\ny = a in b')).toThrow(/1:6: Unexpected 'newline'/);
+  });
+
   test('typing a new class method keeps the class\'s face', () => {
     for (const src of ['class A\n  m: (\n', 'class A\n  m: (x,\n']) {
       const r = tolerant(src);

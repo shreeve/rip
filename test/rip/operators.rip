@@ -599,3 +599,6 @@ test "nullish assignment directly after an assignment", "a = null\nb=a?=1\n[a, b
 test "nullish assignment of a comparison keeps a set value", "a = 0\nb = 1\nc = 1\na?=b==c\na", 0
 fail "an unspaced ? after an operator with no carve-out", "x = [a]*?: b", "unspaced '?' needs a value"
 fail "an unspaced ? between a tight operator and a colon", "x = a+?: b", "unspaced '?' needs a value"
+fail "is not with a tab rejects", "x is\tnot y", "'is not' compares against a negation"
+fail "and followed by == is no compound assignment", "x and== y", "Unexpected '=='"
+fail "new followed by a member other than target rejects", "f = -> new.foo", "1:11: Unexpected '.'"
