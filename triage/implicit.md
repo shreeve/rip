@@ -1,6 +1,6 @@
 # Mutation triage: src/implicit.js
 
-Survivors classified: 140 of 191.
+Survivors classified: 165 of 191.
 
 ## GAP
 
@@ -101,6 +101,17 @@ Survivors classified: 140 of 191.
 - src/implicit.js:610:29730:branch — test/rip/objects.rip › a call past a bracket group in a pair value takes the comma
 - src/implicit.js:610:29738:relation — test/rip/objects.rip › a call past a bracket group in a pair value takes the comma
 - src/implicit.js:610:29740:number — test/rip/objects.rip › a call past a bracket group in a pair value takes the comma
+- src/implicit.js:191:9121:update — test/rip/arrows.rip › an inline if inside a one-line body claims its own else
+- src/implicit.js:197:9341:update — test/rip/arrows.rip › an inline if inside a one-line body claims its own else
+- src/implicit.js:197:9332:statement — test/rip/arrows.rip › an inline if inside a one-line body claims its own else
+- src/implicit.js:201:9511:relation — test/rip/arrows.rip › a line-starting optional chain applies to the one-line function
+- src/implicit.js:83:4571:update — test/rip/control.rip › a comprehension in brackets does not make a later then a body
+- src/implicit.js:89:4731:number — test/rip/control.rip › a comprehension in brackets does not make a later then a body
+- src/implicit.js:89:4719:statement — test/rip/control.rip › a comprehension in brackets does not make a later then a body
+- src/implicit.js:95:5108:relation — test/rip/control.rip › a postfix unless with an else then a then keeps its rejection
+- src/implicit.js:97:5172:statement — test/rip/control.rip › a head on an earlier statement does not make a later then a body
+- src/implicit.js:224:10335:relation — test/mapping/stores.test.js › store rows: an empty one-line body anchors at its introducer (a span pin: the mutant moves only the generated INDENT/OUTDENT anchors, which no value or rejection observes)
+- src/implicit.js:240:11030:number — test/mapping/stores.test.js › store rows: an empty one-line body anchors at its introducer (a span pin, as for 224:10335)
 
 ## EQUIVALENT
 
@@ -140,6 +151,17 @@ Survivors classified: 140 of 191.
 - src/implicit.js:610:29750:boolean — levels < 0 is unreachable: the only unmatched opener between `from` and `i` is a continuation or brace INDENT, met at level 0, where the INDENT branch returns first
 - src/implicit.js:610:29727:statement — same as 610:29750
 - src/implicit.js:611:29765:statement — falling through after an opener: it is not TERMINATOR and no PASS_OPENERS kind is IMPLICIT_FUNC, so the remaining checks do nothing
+- src/implicit.js:182:8849:update — after a claimed block's OUTDENT the scan is back at the body line's indent, and the next depth-0 INDENT can only follow a continuation keyword (else claimed by an inline IF, catch, finally), each of which bumps pendingBlocks itself; operator, comma and dot continuation lines emit no INDENT. So every consult sees a nonzero count in both versions
+- src/implicit.js:182:8836:statement — same as 182:8849
+- src/implicit.js:80:4430:number — starting at j = i visits the THEN itself, which is in no set and is neither TERMINATOR nor ELSE
+- src/implicit.js:83:4575:statement — after `depth++` depth is at least 1 (an opener at depth 0 returns at once, so depth is never negative), so the `depth > 0` continue fires anyway
+- src/implicit.js:87:4699:statement — falling through after an opener: an opener kind is not a head, TERMINATOR or ELSE
+- src/implicit.js:224:10343:update — reached only when tokens[start] is generated; stepping back lands on the introducer, a real token, which moves only the generated INDENT's start/origin. That anchor is unobservable here: an empty or generated-led body never produced a differing span, value or rejection under probing (the anchor equals the body's first real token in every non-empty case checked)
+- src/implicit.js:236:10852:update — afterReal feeds only afterId, the OUTDENT's origin, and token origin is never read after assignment
+- src/implicit.js:238:10902:branch — same as 236:10852 (afterId only)
+- src/implicit.js:238:10903:negation — same as 236:10852 (afterId only)
+- src/implicit.js:238:10950:statement — same as 236:10852 (afterId only)
+- src/implicit.js:240:11041:number — the `?? 0` fallback needs tokens[start - 1] to be missing, but start = i + 1 >= 1 and tokens[i] (the introducer) always exists
 
 ## BUG
 
@@ -150,6 +172,9 @@ Survivors classified: 140 of 191.
 - src/implicit.js:125:6587:statement — same repro as 125:6614 (removing the early return gives the expected reading)
 - src/implicit.js:604:29480:logic — `f x: 1,` / `  y: g` / `    z: 2` / `  , w: 3` → expected the reading the call pass already takes for `, 5` in the same spot (`f({x: 1, y: g({z: 2}, 5)})`), i.e. `y: g({z: 2}, {w: 3})`, or a rejection that names the ambiguity; got "Unexpected 'w'": openCallBetween treats the indented-object call as closed once its block's OUTDENT passes, while the call pass keeps it open
 - src/implicit.js:599:29278:number — distinguishable only by a spaced `@ key:` pair: `x = {@ a: 1, b: 2}` rejects with "Unexpected implicit '('" at 1:8 (the mutant moves it to "Unexpected implicit '{'" at 1:6) → expected a rejection that names the spaced `@` key, got a parser error about a generated token
+- src/implicit.js:192:9146:update — `if xs.every (s) => if s then 1 else 2` + indented `ok()` → expected `if (xs.every(s => s ? 1 : 2)) { ok() }` (as `if xs.every (s) => f s` + block compiles), got "Unexpected 'if'" at 1:1: bodyEnd counts the inline IF and its ELSE as pending blocks, but `then`/`else` bodies never bring a block INDENT in this forward scan, so the count leaks and the enclosing if's INDENT is claimed by the arrow body; the mutant compiles the expected output
+- src/implicit.js:198:9366:update — same repro and cause as 192:9146 (the ELSE's leaked count); the mutant compiles the expected output
+- src/implicit.js:194:9233:update — `if g -> try x if c` + indented `ok()` → expected the guarded try in the arrow and `ok()` as the if's block, got "Unexpected 'if'" at 1:1 (an inline `try` never consumes its pending block); the mutant compiles the expected output
 
 ## Notes
 
@@ -157,3 +182,5 @@ Survivors classified: 140 of 191.
 - BUG, not tied to one survivor (the call-pass twin of 787:37887): an inline `try` with no `catch` as an implicit-call argument never retires its CONTROL frame at the line break, so the next statement becomes another argument. `f try g()` + newline + `h 3` compiles to `f(try g(), h(3))`, and `f try g()` + `y = 2` to `f(try g(), y = 2)`, a silent miscompile. Expected `f(try g()); h(3)`. In the object pass the same frame gives `x = a: try f()` + `y = 2` a misleading "destructuring default" rejection.
 - Questionable, not pinned: a bodiless class keeps its CONTROL frame until the TERMINATOR, so a guard after it binds the value (`f class if c` gives `f(c ? class {} : undefined)`, and `x = a: class if c` gives `{a: c ? class {} : undefined}`). Every other value lets the guard govern the statement (`f x if c` gives `if (c) f(x)`).
 - Not a survivor, found while probing (emitter, not this file): a bare implicit object statement ending in `;` at the end of the program (`a: 1;`, or `x = 1` + `a: 1;`) crashes with "undefined is not an object (evaluating 'assignIndex.blockMaps[assignIndex.blockIdAt[start]].get')" — an unpositioned internal TypeError.
+- BUG, not tied to a survivor: a nested arrow at the end of a one-line arrow body cannot take an indented block. `h -> g ->` + indented `x`, and `describe "a", -> it "b", ->` + indented body, reject with "Unexpected implicit ')' — expected indent" (bodyEnd ends the outer body at the inner arrow's unclaimed INDENT). `h ->` + indented `g ->` + deeper `x` compiles.
+- BUG, not tied to a survivor: `x = (if a then b) then c` rejects with "Unexpected 'indent'". thenIntroducesBody pairs the earlier THEN's in-place INDENT (whose OUTDENT is not on the tape yet) with the `)`, sees the IF, and opens a body. Expected `(x = (a ? b : undefined)) && c`, which `x = (a else b) then c` gets.

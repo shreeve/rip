@@ -1566,3 +1566,25 @@ test 'a trailing comma carries the call across the line break', '''
 test 'an unspaced sign at the end of the program is an argument', 'f = (x) -> x * 10\nf -1', -10
 
 fail 'a trailing for rejects at the end of input', 'f x for', 'Unexpected end of input'
+
+# ==============================================================================
+# When `then` opens a body and when it is the loose operator
+# ==============================================================================
+
+test 'a comprehension in brackets does not make a later then a body', '''
+  c = [1, 2]
+  x = [a for a in c] then 3
+  x
+''', [[1, 2]]
+
+test 'a head on an earlier statement does not make a later then a body', '''
+  a = false
+  g = -> 4
+  h = 5
+  while a
+    b
+  x = g() then h
+  x
+''', 4
+
+fail 'a postfix unless with an else then a then keeps its rejection', 'y = a unless c else b then d', "postfix 'unless' has no else form"
