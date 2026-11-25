@@ -227,3 +227,17 @@ code 'parens are params', '''
     return (x * 2);
   });
   '''
+
+# ==============================================================================
+# A closer or a value literal before `=>` is never a callee
+# ==============================================================================
+
+test 'a fat arrow after an array literal is the next argument', '''
+  f = (a, g) -> [a, g()]
+  f [1, 2] => 3
+''', [[1, 2], 3]
+
+test 'a fat arrow after Infinity is the next argument', '''
+  f = (a, g) -> [a > 1e308, g()]
+  f Infinity => 3
+''', [true, 3]
