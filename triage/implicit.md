@@ -1,6 +1,6 @@
 # Mutation triage: src/implicit.js
 
-Survivors classified: 124 of 191.
+Survivors classified: 140 of 191.
 
 ## GAP
 
@@ -92,6 +92,15 @@ Survivors classified: 124 of 191.
 - src/implicit.js:147:7213:number — test/rip/arrows.rip › a pair inside call parens does not claim the comma
 - src/implicit.js:147:7200:statement — test/rip/arrows.rip › a pair inside call parens does not claim the comma
 - src/implicit.js:149:7331:statement — test/rip/arrows.rip › a pair before a semicolon does not claim a later comma
+- src/implicit.js:604:29464:branch — test/rip/objects.rip › a call past a bracket group in a pair value takes the comma
+- src/implicit.js:604:29467:relation — test/rip/objects.rip › a callee ending its line inside braces takes the indented pairs
+- src/implicit.js:604:29490:relation — test/rip/objects.rip › a callee ending its line inside braces takes the indented pairs
+- src/implicit.js:604:29494:number — test/rip/objects.rip › a callee ending its line inside braces takes the indented pairs
+- src/implicit.js:609:29715:update — test/rip/objects.rip › a call past a bracket group in a pair value takes the comma
+- src/implicit.js:609:29709:statement — test/rip/objects.rip › a call past a bracket group in a pair value takes the comma
+- src/implicit.js:610:29730:branch — test/rip/objects.rip › a call past a bracket group in a pair value takes the comma
+- src/implicit.js:610:29738:relation — test/rip/objects.rip › a call past a bracket group in a pair value takes the comma
+- src/implicit.js:610:29740:number — test/rip/objects.rip › a call past a bracket group in a pair value takes the comma
 
 ## EQUIVALENT
 
@@ -126,6 +135,11 @@ Survivors classified: 124 of 191.
 - src/implicit.js:144:7161:boolean — levels < 0 is unreachable (depth-0 comma, so every opener in [start, i) is matched; see 127:6670)
 - src/implicit.js:144:7138:statement — same as 144:7161
 - src/implicit.js:145:7176:statement — falling through after an opener: an opener kind is neither ':' nor 'TERMINATOR'
+- src/implicit.js:599:29283:relation — visiting tokens[from] adds nothing: it is a brace/bracket opener (levels goes to -1 and returns false, as running off the loop does) or an object start (a key followed by ':', or `@`/PRIVATE, never a call start; a spaced `@ key:` is the one exception, and the parser rejects it at the call's implicit '(' either way)
+- src/implicit.js:602:29408:statement — after `levels++` levels is at least 1, so the `levels > 0` continue fires anyway
+- src/implicit.js:610:29750:boolean — levels < 0 is unreachable: the only unmatched opener between `from` and `i` is a continuation or brace INDENT, met at level 0, where the INDENT branch returns first
+- src/implicit.js:610:29727:statement — same as 610:29750
+- src/implicit.js:611:29765:statement — falling through after an opener: it is not TERMINATOR and no PASS_OPENERS kind is IMPLICIT_FUNC, so the remaining checks do nothing
 
 ## BUG
 
@@ -134,6 +148,8 @@ Survivors classified: 124 of 191.
 - src/implicit.js:787:37887:logic — `x = a: try f()` + newline + `y = 2` → expected `{a: try f()}` then `y = 2`, got "emitter: `a = 1` inside an object literal is a destructuring default" (the TRY CONTROL frame is never retired at the TERMINATOR, so the object swallows the next line); the mutant compiles it correctly. It also flips `x = a: class if c` from `{a: c ? class : undefined}` to `if (c) x = {a: class}` — the latter matches `x = a: [1] if c`
 - src/implicit.js:125:6614:boolean — `h -> f [` + indented `1` + `], 2` → expected `h(-> f([1], 2))`, the reading of the one-line `h -> f [1], 2` and of the same lines at statement level (`f [` … `], 2` is `f([1], 2)`), got `h(-> f([1]), 2)`: commaInImplicitCall returns false at an INDENT before checking the bracket level, so an INDENT inside brackets hides the call that owns the comma
 - src/implicit.js:125:6587:statement — same repro as 125:6614 (removing the early return gives the expected reading)
+- src/implicit.js:604:29480:logic — `f x: 1,` / `  y: g` / `    z: 2` / `  , w: 3` → expected the reading the call pass already takes for `, 5` in the same spot (`f({x: 1, y: g({z: 2}, 5)})`), i.e. `y: g({z: 2}, {w: 3})`, or a rejection that names the ambiguity; got "Unexpected 'w'": openCallBetween treats the indented-object call as closed once its block's OUTDENT passes, while the call pass keeps it open
+- src/implicit.js:599:29278:number — distinguishable only by a spaced `@ key:` pair: `x = {@ a: 1, b: 2}` rejects with "Unexpected implicit '('" at 1:8 (the mutant moves it to "Unexpected implicit '{'" at 1:6) → expected a rejection that names the spaced `@` key, got a parser error about a generated token
 
 ## Notes
 
