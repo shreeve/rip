@@ -255,7 +255,7 @@ const KEYWORD_WORDS = new Set([
   'component', 'render', 'slot', 'offer', 'accept', 'use', 'debugger', 'it',
 ]);
 const LITERAL_WORDS = new Set([
-  'true', 'false', 'yes', 'no', 'on', 'off', 'null', 'undefined',
+  'true', 'false', 'yes', 'no', 'null', 'undefined',
   'NaN', 'Infinity', 'this',
 ]);
 const BUILTIN_WORDS = new Set([

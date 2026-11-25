@@ -1093,7 +1093,7 @@ const CLASS_HEAD_ENDERS = new Set([
 // one (rejectValueWordBinding): the binding would be unreachable,
 // since no read can ever resolve to it.
 const VALUE_WORDS = new Map([
-  ['yes', 'true'], ['no', 'false'], ['on', 'true'], ['off', 'false'],
+  ['yes', 'true'], ['no', 'false'],
   ['true', 'true'], ['false', 'false'],
   ['null', 'null'], ['undefined', 'undefined'], ['this', 'this'],
 ]);

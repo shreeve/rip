@@ -26,7 +26,7 @@ export default function(hljs) {
   ];
 
   const LITERALS = [
-    'true', 'false', 'yes', 'no', 'on', 'off',
+    'true', 'false', 'yes', 'no',
     'null', 'undefined', 'NaN', 'Infinity', 'this',
   ];
 

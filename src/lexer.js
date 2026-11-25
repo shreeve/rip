@@ -369,8 +369,6 @@ export const ALIASES = {
   isnt: ['COMPARE', '!='],
   yes: ['BOOL', 'true'],
   no: ['BOOL', 'false'],
-  on: ['BOOL', 'true'],
-  off: ['BOOL', 'false'],
 };
 
 // Value-ending token kinds that can HEAD a tagged template: a string

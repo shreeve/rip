@@ -238,7 +238,7 @@ syn match  ripPascalCase    /\<[A-Z]\w*/
 " (`{on: 2}`, `{string: 1}`, `{kind: 3}`), so it declines the position and
 " ripObjKey takes it.
 
-syn match  ripBoolean       /\<\%(true\|false\|yes\|no\|on\|off\)\>\%(\s*?\?:\%([=:]\)\@!\)\@!/
+syn match  ripBoolean       /\<\%(true\|false\|yes\|no\)\>\%(\s*?\?:\%([=:]\)\@!\)\@!/
 syn match  ripConstant      /\<\%(null\|undefined\|NaN\|Infinity\)\>\%(\s*?\?:\%([=:]\)\@!\)\@!/
 syn keyword ripThis         this
 

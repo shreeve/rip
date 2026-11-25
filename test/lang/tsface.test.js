@@ -2437,9 +2437,9 @@ describe('TS-face negatives', () => {
   });
 
   test('boolean word aliases render as TypeScript literal types', () => {
-    expect(ts('f = (x: yes, y: off) -> x\ntype Flags = on | no\n').code)
+    expect(ts('f = (x: yes, y: no) -> x\ntype Flags = yes | no\n').code)
       .toContain('function(x: true, y: false)');
-    expect(ts('type Flags = on | no\n').code).toContain('type Flags = true | false;');
+    expect(ts('type Flags = yes | no\n').code).toContain('type Flags = true | false;');
     expect(js('f = (x: yes) -> x\n').declarations).toContain('declare function f(x: true)');
   });
 

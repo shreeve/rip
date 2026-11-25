@@ -78,7 +78,7 @@ const JS_OP = { '==': '===', '!=': '!==' };
 
 // What a value word has already become by the time a pattern is walked.
 // The scanner's own table (types.js VALUE_WORDS) maps the SOURCE spellings
-// — `yes`/`no`/`on`/`off` and the literal keywords — onto these; only the
+// — `yes`/`no` and the literal keywords — onto these; only the
 // lowered side survives into the tree, so this is the set a destructuring
 // target can never legally be.
 const PATTERN_LITERALS = new Set(['true', 'false', 'null', 'undefined', 'this']);

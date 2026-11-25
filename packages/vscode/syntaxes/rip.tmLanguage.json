@@ -294,8 +294,8 @@
     },
 
     {"comment": "=== CONSTANTS ==="},
-    { "match": "\\b(true|yes|on)\\b",    "name": "constant.language.boolean.true.rip" },
-    { "match": "\\b(false|no|off)\\b",  "name": "constant.language.boolean.false.rip" },
+    { "match": "\\b(true|yes)\\b",    "name": "constant.language.boolean.true.rip" },
+    { "match": "\\b(false|no)\\b",  "name": "constant.language.boolean.false.rip" },
     { "match": "\\b(null)\\b",          "name": "constant.language.null.rip" },
     { "match": "\\b(undefined)\\b",     "name": "constant.language.undefined.rip" },
     { "match": "\\b(NaN|Infinity)\\b",  "name": "constant.language.rip" },

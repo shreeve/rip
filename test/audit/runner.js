@@ -1578,7 +1578,7 @@ const NEVER_TOKENED_WORDS = new Set([
   'is', 'isnt', 'and', 'or', 'not', 'own', 'by', 'do', 'loop', 'try', 'catch',
   'finally', 'throw', 'switch', 'case', 'default', 'return', 'break', 'continue',
   'new', 'typeof', 'instanceof', 'delete', 'await', 'yield', 'this', 'super',
-  'true', 'false', 'null', 'undefined', 'yes', 'no', 'on', 'off', 'async',
+  'true', 'false', 'null', 'undefined', 'yes', 'no', 'async',
   'from', 'as', 'static', 'get', 'set', 'readonly', 'private', 'declare', 'abstract',
   'satisfies', 'keyof', 'infer', 'asserts', 'unique', 'void', 'let', 'const',
   'var', 'function', 'debugger', 'constructor', 'out',
@@ -2939,13 +2939,10 @@ if (RUN_GRAMMAR) {
     // naming a spelling the lexer no longer rewrites paints red (stale), so
     // an alias-table change trims this rather than being absorbed by it.
     //
-    // All four value words are here now that #51 is closed: a binding named
-    // for one is REJECTED at every annotated site, so in the positions a
-    // fixture can legally carry, the spelling and its literal are
-    // interchangeable and the bar is met.
+    // Both value words are here: a binding named for one is REJECTED at
+    // every annotated site, so in the positions a fixture can legally carry,
+    // the spelling and its literal are interchangeable and the bar is met.
     const EXCLUDED_SPELLINGS = new Map([
-      ['on', '`true` produces the identical BOOL token and reaches the parser as itself, so the production denominator already covers the lowering'],
-      ['off', '`false` produces the identical BOOL token and reaches the parser as itself, so the production denominator already covers the lowering'],
       ['yes', '`true` produces the identical BOOL token and reaches the parser as itself, so the production denominator already covers the lowering'],
       ['no', '`false` produces the identical BOOL token and reaches the parser as itself, so the production denominator already covers the lowering'],
     ]);
