@@ -398,17 +398,43 @@ async function run(args) {
   if (args.clean) rmSync(base, { recursive: true, force: true });
 }
 
-// The enclosing function of each line, by declaration shape — a report
-// label, not an analysis, so a regex is enough.
-const DECL = /^\s*(?:export\s+)?(?:async\s+)?function\*?\s+([\w$]+)|^\s{0,4}(?:static\s+)?(?:async\s+)?\*?([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{\s*$|^\s*(?:export\s+)?(?:const|let)\s+([\w$]+)\s*=\s*(?:async\s*)?(?:function|\([^)]*\)\s*=>|[\w$]+\s*=>)/;
-const NOT_NAMES = new Set(['if', 'for', 'while', 'switch', 'catch', 'return', 'else']);
+// The enclosing function of each line: declaration-shaped lines open a
+// candidate, and the tokenizer's brace matching gives each candidate its
+// exact body, so a line belongs to the innermost body that contains it —
+// not to whichever declaration happened to precede it. A report label,
+// not an analysis: the shapes below are the ones this engine uses.
+const DECL = /^\s*(?:export\s+)?(?:async\s+)?function\*?\s+([\w$]+)|^\s*(?:static\s+|async\s+|get\s+|set\s+)*\*?(#?[A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{\s*$|^\s*(?:export\s+)?(?:const|let)\s+([\w$]+)\s*=\s*(?:async\s*)?(?:function|\([^)]*\)\s*=>|[\w$]+\s*=>)/;
+const NOT_NAMES = new Set(['if', 'for', 'while', 'switch', 'catch', 'return', 'else', 'with', 'function']);
 const fnCache = new Map();
 function functionsOf(file) {
   if (fnCache.has(file)) return fnCache.get(file);
-  const lines = readFileSync(join(ROOT, file), 'utf8').split('\n');
+  const src = readFileSync(join(ROOT, file), 'utf8');
+  const lines = src.split('\n');
+  const starts = [0];
+  for (let i = 0; i < src.length; i++) if (src[i] === '\n') starts.push(i + 1);
+  const lineOf = (off) => { let lo = 0, hi = starts.length - 1; while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (starts[mid] <= off) lo = mid; else hi = mid - 1; } return lo + 1; };
+  const toks = tokenize(src);
+  const close = new Map(); // index of '{' -> line of its matching '}'
+  const lastOpenOnLine = new Map();
+  const stack = [];
+  toks.forEach((t, i) => {
+    if (t.kind !== 'punct') return;
+    if (t.text === '{') { stack.push(i); lastOpenOnLine.set(lineOf(t.start), i); }
+    else if (t.text === '}' && stack.length) close.set(stack.pop(), lineOf(t.start));
+  });
+  const ranges = [];
+  lines.forEach((l, i) => {
+    const m = DECL.exec(l); const nm = m && (m[1] ?? m[2] ?? m[3]);
+    if (!nm || NOT_NAMES.has(nm)) return;
+    const open = lastOpenOnLine.get(i + 1);
+    ranges.push({ name: nm, from: i + 1, to: open !== undefined && close.has(open) ? close.get(open) : i + 1 });
+  });
   const at = [null];
-  let cur = '<top>';
-  for (const l of lines) { const m = DECL.exec(l); const nm = m && (m[1] ?? m[2] ?? m[3]); if (nm && !NOT_NAMES.has(nm)) cur = nm; at.push(cur); }
+  for (let ln = 1; ln <= lines.length; ln++) {
+    let best = null;
+    for (const r of ranges) if (r.from <= ln && ln <= r.to && (!best || r.to - r.from < best.to - best.from)) best = r;
+    at.push(best ? best.name : '<top>');
+  }
   const r = { at, lines };
   fnCache.set(file, r);
   return r;
