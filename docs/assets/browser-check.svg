@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="680" height="388" viewBox="0 0 680 388" role="img">
+<title>Rip type-checking in the browser with a wasm checker</title>
+<desc>On the main thread, rip.js compiles .rip source; the JavaScript face runs the app and the TypeScript face goes to a Web Worker, where a wasm checker (tsrs now, Trig later) uses the type libraries and returns diagnostics that Rip maps back onto the .rip source.</desc>
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; dominant-baseline: central; text-anchor: middle; }
+  .th { font-size: 14px; font-weight: 600; }
+  .ts { font-size: 12px; }
+  .start { text-anchor: start; }
+  .arr { stroke: #888780; stroke-width: 1.5; fill: none; }
+  .frame { fill: none; stroke: #B4B2A9; stroke-width: 0.75; stroke-dasharray: 4 4; }
+  .head, .note { fill: #2C2C2A; } .note { fill: #5F5E5A; }
+  .box rect { fill: #FFFFFF; stroke: #B4B2A9; }
+  .box .th { fill: #2C2C2A; } .box .ts { fill: #5F5E5A; }
+  .js rect, rect.js { fill: #E1F5EE; stroke: #0F6E56; }
+  .js .th { fill: #085041; } .js .ts { fill: #0F6E56; }
+  .ck rect, rect.ck { fill: #FAECE7; stroke: #993C1D; }
+  .ck .th { fill: #712B13; } .ck .ts { fill: #993C1D; }
+  .rig rect { fill: #EEEDFE; stroke: #534AB7; }
+  .rig .th { fill: #3C3489; } .rig .ts { fill: #534AB7; }
+  @media (prefers-color-scheme: dark) {
+    .arr { stroke: #B4B2A9; }
+    .frame { stroke: #5F5E5A; }
+    .head { fill: #F1EFE8; } .note { fill: #B4B2A9; }
+    .box rect { fill: #2C2C2A; stroke: #5F5E5A; }
+    .box .th { fill: #F1EFE8; } .box .ts { fill: #B4B2A9; }
+    .js rect, rect.js { fill: #085041; stroke: #5DCAA5; }
+    .js .th { fill: #E1F5EE; } .js .ts { fill: #9FE1CB; }
+    .ck rect, rect.ck { fill: #712B13; stroke: #F0997B; }
+    .ck .th { fill: #FAECE7; } .ck .ts { fill: #F5C4B3; }
+    .rig rect { fill: #3C3489; stroke: #AFA9EC; }
+    .rig .th { fill: #EEEDFE; } .rig .ts { fill: #CECBF6; }
+  }
+</style>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<rect class="frame" x="40" y="30" width="260" height="300" rx="16"/><text class="th head" x="170" y="54">Main thread</text>
+<rect class="frame" x="380" y="30" width="260" height="300" rx="16"/><text class="th head" x="510" y="54">Web Worker</text>
+<g class="box"><rect x="60" y="80" width="220" height="44" rx="8" stroke-width="0.75"/><text class="th" x="170" y="102">.rip source</text></g>
+<path d="M170 124 L170 148" class="arr" marker-end="url(#arrow)"/>
+<g class="box"><rect x="60" y="150" width="220" height="56" rx="8" stroke-width="0.75"/><text class="th" x="170" y="169">rip.js compiler</text><text class="ts" x="170" y="189">Lexer, parser, emitter</text></g>
+<path d="M170 206 L170 220 L110 220 L110 244" class="arr" marker-end="url(#arrow)"/>
+<g class="js"><rect x="60" y="246" width="100" height="56" rx="8" stroke-width="0.75"/><text class="th" x="110" y="265">App runs</text><text class="ts" x="110" y="285">JS face</text></g>
+<g class="ck"><rect x="180" y="246" width="100" height="56" rx="8" stroke-width="0.75"/><text class="th" x="230" y="265">Errors</text><text class="ts" x="230" y="285">On .rip</text></g>
+<text class="ts note" x="340" y="166">TS face</text>
+<path d="M280 182 L398 182" class="arr" marker-end="url(#arrow)"/>
+<g class="ck"><rect x="400" y="80" width="220" height="44" rx="8" stroke-width="0.75"/><text class="th" x="510" y="102">Type libraries (.d.ts)</text></g>
+<path d="M510 124 L510 148" class="arr" marker-end="url(#arrow)"/>
+<g class="ck"><rect x="400" y="150" width="220" height="56" rx="8" stroke-width="0.75"/><text class="th" x="510" y="169">Checker (wasm)</text><text class="ts" x="510" y="189">tsrs now, Trig later</text></g>
+<path d="M510 206 L510 244" class="arr" marker-end="url(#arrow)"/>
+<g class="ck"><rect x="400" y="246" width="220" height="56" rx="8" stroke-width="0.75"/><text class="th" x="510" y="265">Diagnostics</text><text class="ts" x="510" y="285">In TypeScript positions</text></g>
+<path d="M400 274 L282 274" class="arr" marker-end="url(#arrow)"/>
+<rect class="js" x="40" y="352" width="12" height="12" rx="2" stroke-width="0.75"/><text class="ts note start" x="60" y="358">Shipping path</text>
+<rect class="ck" x="180" y="352" width="12" height="12" rx="2" stroke-width="0.75"/><text class="ts note start" x="200" y="358">Type-check path</text>
+</svg>
