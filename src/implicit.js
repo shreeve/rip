@@ -122,6 +122,11 @@ function collectBlocks(tokens, mintId) {
       const k = tokens[j].kind;
       if (CLOSERS.has(k) || k === 'OUTDENT') { levels++; continue; }
       if (OPENERS.has(k) || k === 'INDENT') {
+        // A block whose OUTDENT sat at the body's own level is a control
+        // block (`if f x` + block): calls in its head closed at its
+        // INDENT and own no comma after it. An INDENT nested in brackets
+        // (`f [` + indented elements + `], 2`) is only layout.
+        if (k === 'INDENT' && levels <= 1) return false;
         levels--;
         if (levels < 0) return false;
         continue;
@@ -707,7 +712,7 @@ function collectObjects(tokens, mintId) {
       // the scanner's DAMMIT into VOID_MARKER (a ternary's colon was
       // consumed above, so `c ? f!: g` keeps its call-site dammit).
       // A colon with nothing before it on its line has no key: it opens
-      // no object, and the stray `:` rejects at parse, at the colon.
+      // no object, and the stray `:` rejects at parse.
       if (!prev || LINE_BREAK_KINDS.has(prev.kind)) continue;
       if (prev.kind === 'DAMMIT') prev.kind = 'VOID_MARKER';
       const bang = prev.kind === 'VOID_MARKER' ? 1 : 0;

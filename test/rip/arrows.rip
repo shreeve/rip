@@ -147,6 +147,23 @@ test "arrow body call keeps the comma after an indented array, called", """
   ], 2
   """, 2
 
+test "a call in an arrow body's control head owns no comma after the block", """
+  f = (v) -> v
+  h = (...a) -> a.length
+  h -> if f 1
+    1
+  , 3
+  """, 2
+
+test "a pair value's control head call owns no comma after the block", """
+  f = (v) -> v
+  y = 7
+  h = (...a) -> a.length
+  h -> k: if f 1
+    1
+  , y
+  """, 2
+
 test "arrow body call keeps the comma after an indented object", """
   f = (...args) -> args.length
   h = (fn) -> fn()

@@ -183,6 +183,22 @@ test "default param finally block evaluates its pairs", """
   [fn(), seen]
   """, [1, ['fin']]
 
+test "a parameter line after a default's inline else stays a parameter", """
+  fn = (a = if no
+    1
+  else 3
+    b: number) -> b
+  fn(1, 2)
+  """, 2
+
+test "a parameter line after a default's inline finally stays a parameter", """
+  fn = (a = try
+    1
+  finally 0
+    b: number) -> b
+  fn(1, 2)
+  """, 2
+
 test "a parameter after a default's else block stays a parameter", """
   fn = (a = if no
     1

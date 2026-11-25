@@ -99,7 +99,8 @@ const parseHint = (file, d) => {
   if (/^if\b[^\n]*\n[ \t]*then\b/.test(at)) {
     return '`then` belongs on the `if` line (`if c then …`) — or indent the body beneath the condition';
   }
-  if (/^"(?:[^"\\\n]|\\.)*#\{/.test(at) && /\b(?:from|import)\s*$/.test(before)) {
+  if ((/^"(?:[^"\\\n]|\\.)*#\{/.test(at) || /^"""(?:(?!""")[^\\]|\\[\s\S])*#\{/.test(at)) &&
+      /\b(?:from|import)\s*$/.test(before)) {
     return 'a module source is a plain string — an interpolated path has no static value; a computed path loads with `import("…")`';
   }
   return null;

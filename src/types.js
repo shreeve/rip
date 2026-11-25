@@ -1071,12 +1071,16 @@ const CONDITION_BODY_HEADS = new Set(['IF', 'UNLESS', 'SWITCH', 'WHILE', 'UNTIL'
 // only-a-newline-ends-one rule, mirrored by implicitBlocks), so it
 // must not end the parameter segment.
 const INLINE_BODY_INTRODUCERS = new Set(['->', '=>', 'THEN', 'ELSE']);
-// Clause heads that continue a construct whose body block just closed:
-// right after that OUTDENT, one of these claims the next indent on its
-// line as ITS body (`else`, `else if c`, `catch e`, `finally`), exactly
-// as the construct's own head did. Read as parameter layout instead, a
-// `key: value` line in that block would claim as an annotation and erase.
-const CLAUSE_BODY_HEADS = new Set(['ELSE', 'CATCH', 'FINALLY']);
+// Clause heads that continue a construct whose body block just closed.
+// Right after that OUTDENT, `else` and `finally` claim an indent that
+// follows them directly, `else if c`/`else unless c` hand the claim to
+// their condition, and `catch e` claims the next indent on its line —
+// each the clause's own body, as the construct's head claimed its first.
+// Read as parameter layout instead, a `key: value` line in that block
+// would claim as an annotation and erase. An inline clause body
+// (`else 3`) leaves nothing to claim: the next indented line is the
+// parameter list's.
+const CLAUSE_IMMEDIATE_HEADS = new Set(['ELSE', 'FINALLY']);
 
 // Tokens that END a class HEAD's armed window (the class-generics
 // rejection): statement layout, the body/clause keywords that follow
@@ -1855,7 +1859,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
       else if (kd === 'CALL_START' && endsDefHead(out, out.length - 1)) fk = 'defparam';
       frames.push({
         kind: fk, sawEq: false, sawType: false, bodyDepth: 0,
-        pendingImmediate: false, pendingCond: false, inlineBody: false, afterBody: false,
+        pendingImmediate: false, pendingCond: false, inlineBody: false, afterBody: false, clauseElse: false,
       });
     } else if (RUN_CLOSERS.has(kd)) {
       const open = frames.pop();
@@ -1874,6 +1878,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
           f.pendingCond = false;
           f.inlineBody = false;
           f.afterBody = false;
+          f.clauseElse = false;
         };
         const afterBody = f.afterBody;
         f.afterBody = false;
@@ -1909,10 +1914,11 @@ export function rewriteTypes(tokens, mintId, text, fail) {
           }
         } else {
           // The immediate claim survives ONLY to the very next token.
-          f.pendingImmediate = IMMEDIATE_BODY_HEADS.has(kd);
-          if (afterBody && CLAUSE_BODY_HEADS.has(kd)) f.pendingCond = true;
-          else if (CONDITION_BODY_HEADS.has(kd) && prev?.kind === '=') f.pendingCond = true;
+          f.pendingImmediate = IMMEDIATE_BODY_HEADS.has(kd) || (afterBody && CLAUSE_IMMEDIATE_HEADS.has(kd));
+          if (afterBody && kd === 'CATCH') f.pendingCond = true;
+          else if (CONDITION_BODY_HEADS.has(kd) && (prev?.kind === '=' || (f.clauseElse && prev?.kind === 'ELSE'))) f.pendingCond = true;
           else if (kd === 'THEN') f.pendingCond = false;
+          f.clauseElse = afterBody && kd === 'ELSE';
           if (INLINE_BODY_INTRODUCERS.has(kd)) f.inlineBody = true;
           if (kd === '=') f.sawEq = true;
         }
