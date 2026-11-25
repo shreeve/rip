@@ -75,6 +75,7 @@ const positioned = (file, path, reason, start, end) => {
 //   `import! 'm'`         the awaited dynamic import takes parens
 //   `fn()!`               the await bang goes on the callee
 //   `if c` / `then …`     `then` belongs on the `if` line
+//   `from "./#{x}"`       a module source has no interpolation
 const parseHint = (file, d) => {
   const src = file.text;
   const before = src.slice(0, d.start);
@@ -97,6 +98,9 @@ const parseHint = (file, d) => {
   }
   if (/^if\b[^\n]*\n[ \t]*then\b/.test(at)) {
     return '`then` belongs on the `if` line (`if c then …`) — or indent the body beneath the condition';
+  }
+  if (/^"(?:[^"\\\n]|\\.)*#\{/.test(at) && /\b(?:from|import)\s*$/.test(before)) {
+    return 'a module source is a plain string — an interpolated path has no static value; a computed path loads with `import("…")`';
   }
   return null;
 };

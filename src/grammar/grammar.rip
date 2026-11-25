@@ -138,22 +138,22 @@ grammar =
     # A SIDE-EFFECT import carries no clause and none is minted for it:
     # `["import", source]` stays distinct from `import {} from …`, whose
     # empty named list reads to TypeScript as a clause waiting to be filled.
-    o 'IMPORT String'                                                                           , '["import", 2]'                , 'import: _, source'
-    o 'IMPORT ImportDefaultSpecifier FROM String'                                               , '["import", 2, 4]'             , 'import: _, spec, source'
-    o 'IMPORT ImportNamespaceSpecifier FROM String'                                             , '["import", 2, 4]'             , 'import: _, spec, source'
-    o 'IMPORT { } FROM String'                                                                  , '["import", "{}", 5]'          , 'import: _, spec, source'
-    o 'IMPORT { ImportSpecifierList OptComma } FROM String'                                     , '["import", 3, 7]'             , 'import: _, spec, source'
-    o 'IMPORT ImportDefaultSpecifier , ImportNamespaceSpecifier FROM String'                    , '["import", 2, 4, 6]'          , 'import: _, spec, extra, source'
-    o 'IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM String'            , '["import", 2, 5, 9]'          , 'import: _, spec, extra, source'
+    o 'IMPORT STRING'                                                                           , '["import", 2]'                , 'import: _, source'
+    o 'IMPORT ImportDefaultSpecifier FROM STRING'                                               , '["import", 2, 4]'             , 'import: _, spec, source'
+    o 'IMPORT ImportNamespaceSpecifier FROM STRING'                                             , '["import", 2, 4]'             , 'import: _, spec, source'
+    o 'IMPORT { } FROM STRING'                                                                  , '["import", "{}", 5]'          , 'import: _, spec, source'
+    o 'IMPORT { ImportSpecifierList OptComma } FROM STRING'                                     , '["import", 3, 7]'             , 'import: _, spec, source'
+    o 'IMPORT ImportDefaultSpecifier , ImportNamespaceSpecifier FROM STRING'                    , '["import", 2, 4, 6]'          , 'import: _, spec, extra, source'
+    o 'IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM STRING'            , '["import", 2, 5, 9]'          , 'import: _, spec, extra, source'
     # Import attributes (`import data from './d.json' with { type: 'json' }`):
     # the clause rides BEFORE the source so the source stays last (every
     # consumer reads the specifier there); the emitter prints it after.
-    o 'IMPORT String WITH Object'                                                               , '["import", [3, 4], 2]'        , 'import: _, attributes(withattrs: keyword, value), source'
-    o 'IMPORT ImportDefaultSpecifier FROM String WITH Object'                                   , '["import", 2, [5, 6], 4]'     , 'import: _, spec, attributes(withattrs: keyword, value), source'
-    o 'IMPORT ImportNamespaceSpecifier FROM String WITH Object'                                 , '["import", 2, [5, 6], 4]'     , 'import: _, spec, attributes(withattrs: keyword, value), source'
-    o 'IMPORT { ImportSpecifierList OptComma } FROM String WITH Object'                         , '["import", 3, [8, 9], 7]'     , 'import: _, spec, attributes(withattrs: keyword, value), source'
-    o 'IMPORT ImportDefaultSpecifier , ImportNamespaceSpecifier FROM String WITH Object'        , '["import", 2, 4, [7, 8], 6]'  , 'import: _, spec, extra, attributes(withattrs: keyword, value), source'
-    o 'IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM String WITH Object', '["import", 2, 5, [10, 11], 9]', 'import: _, spec, extra, attributes(withattrs: keyword, value), source'
+    o 'IMPORT STRING WITH Object'                                                               , '["import", [3, 4], 2]'        , 'import: _, attributes(withattrs: keyword, value), source'
+    o 'IMPORT ImportDefaultSpecifier FROM STRING WITH Object'                                   , '["import", 2, [5, 6], 4]'     , 'import: _, spec, attributes(withattrs: keyword, value), source'
+    o 'IMPORT ImportNamespaceSpecifier FROM STRING WITH Object'                                 , '["import", 2, [5, 6], 4]'     , 'import: _, spec, attributes(withattrs: keyword, value), source'
+    o 'IMPORT { ImportSpecifierList OptComma } FROM STRING WITH Object'                         , '["import", 3, [8, 9], 7]'     , 'import: _, spec, attributes(withattrs: keyword, value), source'
+    o 'IMPORT ImportDefaultSpecifier , ImportNamespaceSpecifier FROM STRING WITH Object'        , '["import", 2, 4, [7, 8], 6]'  , 'import: _, spec, extra, attributes(withattrs: keyword, value), source'
+    o 'IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM STRING WITH Object', '["import", 2, 5, [10, 11], 9]', 'import: _, spec, extra, attributes(withattrs: keyword, value), source'
     # A TYPE-ONLY import (`import type … from …`): the keyword rides the
     # side-band typeOnly role and the node keeps the plain import's
     # shape, so everything that consumes an import statement consumes
@@ -163,10 +163,10 @@ grammar =
     # default-plus-clause rows have no type-only mirror on purpose:
     # TypeScript rejects `import type D, { A } from …` (TS1363), and a
     # side-effect `import type 'mod'` names a contradiction.
-    o 'IMPORT IMPORT_TYPE[typeOnly] ImportDefaultSpecifier FROM String'                         , '["import", 3, 5]'             , 'import: _, spec, source'
-    o 'IMPORT IMPORT_TYPE[typeOnly] ImportNamespaceSpecifier FROM String'                       , '["import", 3, 5]'             , 'import: _, spec, source'
-    o 'IMPORT IMPORT_TYPE[typeOnly] { } FROM String'                                            , '["import", "{}", 6]'          , 'import: _, spec, source'
-    o 'IMPORT IMPORT_TYPE[typeOnly] { ImportSpecifierList OptComma } FROM String'               , '["import", 4, 8]'             , 'import: _, spec, source'
+    o 'IMPORT IMPORT_TYPE[typeOnly] ImportDefaultSpecifier FROM STRING'                         , '["import", 3, 5]'             , 'import: _, spec, source'
+    o 'IMPORT IMPORT_TYPE[typeOnly] ImportNamespaceSpecifier FROM STRING'                       , '["import", 3, 5]'             , 'import: _, spec, source'
+    o 'IMPORT IMPORT_TYPE[typeOnly] { } FROM STRING'                                            , '["import", "{}", 6]'          , 'import: _, spec, source'
+    o 'IMPORT IMPORT_TYPE[typeOnly] { ImportSpecifierList OptComma } FROM STRING'               , '["import", 4, 8]'             , 'import: _, spec, source'
   ]
 
   ImportSpecifierList: list 'ImportSpecifierList', 'ImportSpecifier', indented: true, reason: 'specifier plumbing; import.spec owns the span'
@@ -210,12 +210,12 @@ grammar =
     # statement form).
     o 'EXPORT DEFAULT Expression'                          , '["export-default", 3]'          , 'export: _, spec', prec: 'REACTIVE_ASSIGN'
     o 'EXPORT DEFAULT INDENT Object OUTDENT'               , '["export-default", 4]'          , 'export: _, spec'
-    o 'EXPORT EXPORT_ALL FROM String'                      , '["export-all", 4]'              , 'export: _, source'
+    o 'EXPORT EXPORT_ALL FROM STRING'                      , '["export-all", 4]'              , 'export: _, source'
     # `export * as ns from` / `export * as default from` (DEFAULT is
     # contextual after AS on an export line).
-    o 'EXPORT EXPORT_ALL AS (Identifier[alias] | DEFAULT[alias]) FROM String[source]', '["export-all", @source, @alias]', 'export: _, source, alias'
-    o 'EXPORT { } FROM String'                             , '["export-from", "{}", 5]'       , 'export: _, spec, source'
-    o 'EXPORT { ExportSpecifierList OptComma } FROM String', '["export-from", 3, 7]'          , 'export: _, spec, source'
+    o 'EXPORT EXPORT_ALL AS (Identifier[alias] | DEFAULT[alias]) FROM STRING[source]', '["export-all", @source, @alias]', 'export: _, source, alias'
+    o 'EXPORT { } FROM STRING'                             , '["export-from", "{}", 5]'       , 'export: _, spec, source'
+    o 'EXPORT { ExportSpecifierList OptComma } FROM STRING', '["export-from", 3, 7]'          , 'export: _, spec, source'
     # A TYPE-ONLY re-export (`export type { … } from …`), the mirror of
     # `import type`: the keyword rides the side-band typeOnly role and
     # the node keeps the plain re-export's shape. The statement erases
@@ -223,7 +223,7 @@ grammar =
     # TS face and the declarations keep it as `export type …`. One
     # spelling: no per-specifier `type`, and no source-less form, since
     # a local type exports at its own declaration.
-    o 'EXPORT EXPORT_TYPE[typeOnly] { ExportSpecifierList OptComma } FROM String', '["export-from", 4, 8]', 'export: _, spec, source'
+    o 'EXPORT EXPORT_TYPE[typeOnly] { ExportSpecifierList OptComma } FROM STRING', '["export-from", 4, 8]', 'export: _, spec, source'
   ]
 
   # An exported binding (`export x = v`; typed `export x: T = v`).

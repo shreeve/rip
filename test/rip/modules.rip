@@ -669,3 +669,11 @@ code 'a parameter shadows an import, and the write is the parameter', '''
     return (Far = 2);
   };
 '''
+
+# A module source is a plain string: an interpolated path has no static
+# value, so every static form rejects at the string, naming the fix.
+fail "an interpolated import source rejects", 'import d from "./#{a}.json"', "1:15: Unexpected '(' — expected a string\n  (a module source is a plain string"
+fail "an interpolated side-effect import source rejects", 'import "./#{a}"', "a module source is a plain string"
+fail "an interpolated export-all source rejects", 'export * from "./#{a}"', "a module source is a plain string"
+fail "an interpolated export-from source rejects", 'export { x } from "./#{a}"', "a module source is a plain string"
+code 'a single-quoted source with an interpolation sign stays literal', 'import d from \'./#{a}\'', 'import d from \'./#{a}\';'
