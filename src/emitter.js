@@ -6614,14 +6614,6 @@ class Emitter {
         this.b.emit(';');
         return;
       }
-      // Method assignment is a statement lowering: the target is
-      // spelled twice (write + read), and an impure member target
-      // pre-binds its base on its own line.
-      if (node[0] === '.=' && node.length === 3) {
-        this.methodAssignStatement(node, ind);
-        this.b.emit(';');
-        return;
-      }
       // Slice assignment (`a[1..2] = v`) replaces the range in place:
       // a statement lowering to splice (value position rejects).
       if (node[0] === '=' && node.length === 3 && Emitter.sliceTarget(node[1]) !== null) {
@@ -8359,7 +8351,7 @@ class Emitter {
       const rest = isNode(stmt[3]) && stmt[3][0] === 'if' ? stmt[3] : last(stmt[3]);
       return this.tailLeaves(last(stmt[2]), effect) && this.tailLeaves(rest, effect);
     }
-    if (h === 'try' || h === 'switch' || h === 'enum' || h === '.=') return false;
+    if (h === 'try' || h === 'switch' || h === 'enum') return false;
     if ((h === 'while' && (stmt.length === 3 || stmt.length === 4)) || (h === 'loop' && stmt.length === 2)) return false;
     if (Emitter.returnGuard(stmt) || Emitter.stmtGuard(stmt)) return false;
     if (h === '=' && stmt.length === 3 &&
@@ -9034,9 +9026,6 @@ class Emitter {
           this.b.emit('")');
         } else this.b.emit(`Symbol.for(${quoted})`);
       });
-    }
-    if (head === '.=' && node.length === 3) {
-      throw this.positionedError(node, `emitter: ${head} is a statement — its target is spelled twice (write + read), which has no single-expression form`);
     }
     if (head === '%%=' && node.length === 3) return this.moduloAssign(node);
     if (isComprehensionNode(node)) return this.comprehension(node, this.ind);
@@ -10097,7 +10086,7 @@ class Emitter {
     if ((h === '&&' || h === '||' || h === '??') && stmt.length === 3) {
       return this.effectTailWrites(stmt[2]) || this.effectBranchWrites(stmt[2]);
     }
-    if (isAssignHead(h) || h === '.=' || isUpdate(stmt)) return true;
+    if (isAssignHead(h) || isUpdate(stmt)) return true;
     if (Emitter.LOOP_HEADS.has(h) && !this.isCallNode(stmt)) return true;
     if (isDefHead(h) || h === 'class' || h === 'enum' || h === 'export') return true;
     if (this.isModuleImport(stmt) || this.isReactiveDecl(stmt) || this.isReadonlyDecl(stmt)) return true;
@@ -18223,10 +18212,6 @@ class Emitter {
           (h === '=' && stmt.length === 3 && (Emitter.returnGuard(stmt[2]) || Emitter.stmtGuard(stmt[2])))) {
         return this.statement(stmt, ind);
       }
-      // Tail-position method assignment stays a statement (the
-      // double-spelled target has no single-expression form); the
-      // function returns undefined.
-      if (h === '.=' && stmt.length === 3) return this.statement(stmt, ind);
       // A slice assignment likewise: it splices in place, and the
       // function returns undefined.
       if (h === '=' && stmt.length === 3 && Emitter.sliceTarget(stmt[1]) !== null) return this.statement(stmt, ind);
@@ -18731,53 +18716,6 @@ class Emitter {
     });
   }
 
-  // The compound target's WRITE spelling. Pure targets (a plain
-  // name, `this` properties, pure chains) spell twice directly —
-  // both reads are effect-free. An impure member/index target binds
-  // its base (and an impure key) ONCE on a pre-line, and both
-  // spellings go through the binding — the compounds'
-  // single-evaluation contract. Returns the node the READ spelling
-  // embeds. Minted names come from the used-name registry.
-  compoundTarget(node, target, ind) {
-    this.checkExportedConstWrite(node, target); this.checkImportWrite(node, target);
-    if (this.repeatSafeValue(target)) {
-      this.mark(node, 'target', () => this.withTarget(() => this.expr(target)));
-      return target;
-    }
-    if (isNode(target) && (target[0] === '.' || target[0] === '[]') && target.length === 3) {
-      let base = target[1];
-      if (!this.repeatSafeValue(base)) {
-        base = this.loopTempName('_ref');
-        this.temps.used.add(base);
-        this.b.emit(`const ${base} = `);
-        this.expr(target[1]);
-        this.b.emit(`;\n${'  '.repeat(ind)}`);
-      }
-      let read;
-      if (target[0] === '[]') {
-        let key = target[2];
-        if (!this.repeatSafeValue(key)) {
-          const k = this.loopTempName('_key');
-          this.temps.used.add(k);
-          this.b.emit(`const ${k} = `);
-          this.expr(key);
-          this.b.emit(`;\n${'  '.repeat(ind)}`);
-          key = k;
-        }
-        read = ['[]', base, key];
-      } else {
-        read = ['.', base, target[2]];
-      }
-      this.mark(node, 'target', () => this.expr(read));
-      return read;
-    }
-    throw this.positionedError(node, `emitter: ${node[0]} needs a stable target — a plain name or member/index chain (an optional chain has no reference to write back to)`);
-  }
-
-  // ['.=', target, rhs] — the target re-binds to a method call on
-  // itself: `x .= trim()` → `x = x.trim()`; the right side's chain
-  // HEAD call gains the target as its receiver, so a chained right
-  // side works too (`s .= trim().toLowerCase()`).
   // A slice as an assignment target: `["[]", obj, ["..", from, to]]`
   // (either end may be null — an open end).
   static sliceTarget(t) {
@@ -18841,42 +18779,6 @@ class Emitter {
         }
       });
       this.b.emit(')');
-    });
-  }
-
-  methodAssignStatement(node, ind) {
-    const [, target, rhs] = node;
-    let cur = rhs;
-    while (isNode(cur)) {
-      const s = this.chainHeadSlotOf(cur);
-      if (s === null) break;
-      cur = cur[s];
-    }
-    const id = isNode(cur) ? this.stores.idOf(cur) : null;
-    const kind = id !== null ? this.stores.node(id)?.semanticKind : null;
-    const callHead = isNode(cur) && typeof cur[0] === 'string' && isIdentifierName(cur[0]) &&
-      (kind === 'call' || (kind == null && Emitter.jsTier(cur) === 'primary'));
-    if (!callHead) {
-      throw this.positionedError(node, "emitter: `.=` re-binds its target to a METHOD CALL on itself — the right side must be a call chain (`x .= trim()`)");
-    }
-    this.mark(node, '$self', () => {
-      const read = this.compoundTarget(node, target, ind);
-      const substHead = (n) => {
-        if (n === cur) return [['.', read, cur[0]], ...cur.slice(1)];
-        const s = this.chainHeadSlotOf(n);
-        const copy = n.slice();
-        copy[s] = substHead(n[s]);
-        return copy;
-      };
-      this.b.emit(' ');
-      this.mark(node, 'operator', () => this.b.emit('='));
-      this.b.emit(' ');
-      // The read of the target inside the value is the author's one
-      // occurrence of it, re-read: it maps to the target's own span.
-      const tspan = typeof read === 'string' ? this.bindingNameSpan(node, 'target', read) : null;
-      if (tspan !== null) this.primitiveReuse = { name: read, span: tspan.span };
-      this.mark(node, 'value', () => this.expr(substHead(rhs)));
-      this.primitiveReuse = null;
     });
   }
 

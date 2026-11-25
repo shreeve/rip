@@ -123,7 +123,7 @@ syn match  ripOperator      /!?\|?!\|??\|?\./
 
 " Method assignment (x .= trim()), map literal (*{a: 1}),
 " existence assignment (a ?= 5)
-syn match  ripOperator      /\.=\|\*{\@=\|?=/
+syn match  ripOperator      /\*{\@=\|?=/
 
 " Tagged-template bridge: sh $"cmd" (the $ heads the template)
 syn match  ripOperator      /\$\ze['"]/

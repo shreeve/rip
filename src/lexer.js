@@ -439,11 +439,6 @@ const OPS2 = {
   // deliberately non-chaining (the emitter rejects a bare chain).
   '=~': 'MATCH',
   '->': '->', '=>': '=>', '++': '++', '--': '--', '?.': '?.',
-  // Method assignment: ADJACENT `.=` is one token (`x .= trim()` —
-  // the target re-binds to a method call on itself). No legal
-  // program carries a tight `.` `=` pair (a property name must
-  // follow `.`), so the claim can never change a program's meaning.
-  '.=': 'METHOD_ASSIGN',
   // Map literals: ADJACENT `*{` marks the brace as a MAP (`*{a: 1}` →
   // new Map([["a", 1]])). The star claims; the `{` itself follows as
   // a normal brace so every brace pass (implicit structure, matching)
@@ -2014,6 +2009,9 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       pos += 1;
       continue;
     }
+    // A tight `.=` names no property, so no legal program spells it;
+    // the assignment it reads as spells its target twice.
+    if (two === '.=') fail('`.=` is not an operator; write the assignment out: `x = x.trim()`', pos, pos + 2);
     if (OPS2[two]) {
       // Unspaced `!=` directly after a name is the bang sigil
       // colliding with an assignment (`f!= 1`) — rejected; a spaced

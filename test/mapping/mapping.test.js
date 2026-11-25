@@ -430,12 +430,6 @@ describe('TS face: a node synthesized at emit time still places its names', () =
     } };
   };
 
-  test('`.=` places the method it re-binds through', () => {
-    const { code, owns } = rowsFor("label = ' x '\nlabel .= trim()\n");
-    expect(code).toContain('label = label.trim();');
-    expect(owns('trim', 0)).toBe(true);
-  });
-
   test('a gap parameter\'s tail binding places its name', () => {
     // `(first, …, last)` lowers to `..._rest` plus `const last = _rest[…]` at
     // the body's top — and that extraction emits inside the BODY's frame, which

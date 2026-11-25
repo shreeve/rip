@@ -709,7 +709,7 @@
     { "match": "%w([^\\s\\w\\(\\[\\{<])(?:\\\\.|(?!\\1).)*\\1", "name": "string.quoted.other.word-array.rip" },
 
     {"comment": "=== COMPOUND ASSIGNMENT (before simple assignment) ==="},
-    { "match": "\\.=|&&=|\\|\\|=|\\?\\?=|\\?=|\\+=|-=|\\*\\*=|\\*=|//=|%%=|/=|%=|<<=|>>>=|>>=|&=|\\|=|\\^=",
+    { "match": "&&=|\\|\\|=|\\?\\?=|\\?=|\\+=|-=|\\*\\*=|\\*=|//=|%%=|/=|%=|<<=|>>>=|>>=|&=|\\|=|\\^=",
       "name": "keyword.operator.assignment.compound.rip" },
     { "match": "\\$(?=[\"'])", "name": "keyword.operator.template-tag.rip" },
     { "match": "(?<![\\w$]):[a-zA-Z_$][\\w$]*(?:[.-][a-zA-Z_$][\\w$]*)*(?:[!?](?=[\\s,)\\]};:]|$))?", "name": "constant.other.symbol.rip" },

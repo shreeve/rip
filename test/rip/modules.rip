@@ -273,7 +273,6 @@ fail "exported plain compound write rejects", "export n = 1\nn += 2", "cannot as
 fail "exported plain merge write rejects", "export n = 1\nn ||= 2", "cannot assign to exported 'n'"
 fail "exported plain floor-div write rejects", "export n = 4\nn //= 2", "cannot assign to exported 'n'"
 fail "exported plain modulo write rejects", "export n = 4\nn %%= 3", "cannot assign to exported 'n'"
-fail "exported plain method-assign rejects", "export s = ' a '\ns .= trim()", "cannot assign to exported 's'"
 fail "exported plain postfix update rejects", "export n = 1\nn++", "cannot assign to exported 'n'"
 fail "exported plain prefix update rejects", "export n = 1\n--n", "cannot assign to exported 'n'"
 fail "exported void binding reassignment rejects", "export announce! = -> 1\nannounce! = -> 2", "cannot assign to exported 'announce'"

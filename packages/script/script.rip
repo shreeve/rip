@@ -169,7 +169,7 @@ class Engine
       return :slow
     process.stdout.write(data) if @live
     @opts.onRecv?(data)
-    data .= replace /\r/g, '' if @nocr
+    data = data.replace /\r/g, '' if @nocr
     data = stripAnsi(data) unless @ansi
     @buff += data
 

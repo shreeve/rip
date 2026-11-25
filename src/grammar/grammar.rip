@@ -391,10 +391,6 @@ grammar =
     o 'Assignable[target] TYPE_PARAMS[typeParams] = Expression[value]'               , '["=", @target, @value]'          , 'assign: operator, target, value'
     o 'SimpleAssignable[target] COMPOUND_ASSIGN[operator] (Expression[value] | INDENT Expression[value] OUTDENT | TERMINATOR Expression[value])', '[@operator, @target, @value]'    , 'assign: operator, target, value'
 
-    # Method assignment: the target re-binds to a method call on
-    # itself (`x .= trim()` → `x = x.trim()`) — a STATEMENT lowering;
-    # the emitter rejects value-position use.
-    o 'SimpleAssignable METHOD_ASSIGN Expression'                                    , '[".=", 1, 3]'                    , 'assign: operator, target, value'
     # Void definition (`save! = ->`): the bang on the target name marks
     # the assigned function void (no implicit return). Word-form head
     # (`=!` is the readonly glyph); VOID_MARKER erases as voidMarker.
@@ -1399,7 +1395,7 @@ operators = """
   right       TERNARY
   nonassoc    INDENT OUTDENT
   right       YIELD
-  right       = : COMPOUND_ASSIGN METHOD_ASSIGN RETURN THROW EXTENDS
+  right       = : COMPOUND_ASSIGN RETURN THROW EXTENDS
   right       FORIN FOROF FORAS FORASAWAIT BY WHEN
   right       IF ELSE FOR WHILE UNTIL LOOP SUPER CLASS COMPONENT RENDER OFFER ACCEPT
   nonassoc    THEN LOOSE_ELSE
@@ -1517,7 +1513,6 @@ displays =
   TERNARY: '?'
   GATE: '<~'
   MATCH: '=~'
-  METHOD_ASSIGN: '.='
   REACTIVE_ASSIGN: ':='
   COMPUTED_ASSIGN: '~='
   READONLY_ASSIGN: '=!'
