@@ -1,6 +1,6 @@
 # src/lexer.js mutation survivors
 
-363 of 565 survivors classified.
+375 of 565 survivors classified.
 
 ## GAP
 
@@ -39,6 +39,16 @@
 - src/lexer.js:591:28072:number — test/lang/lexer.test.js › rejection spans › a direct tokenize() rejection message carries path, line, and column
 - src/lexer.js:591:28081:arith — test/lang/lexer.test.js › rejection spans › a direct tokenize() rejection message carries path, line, and column
 - src/lexer.js:591:28083:number — test/lang/lexer.test.js › rejection spans › a direct tokenize() rejection message carries path, line, and column
+- src/lexer.js:695:32364:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a member chain in a text value keeps subtraction
+- src/lexer.js:695:32390:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a member chain in a text value keeps subtraction
+- src/lexer.js:695:32427:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a member chain in a text value keeps subtraction
+- src/lexer.js:695:32463:number — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a member chain in a text value keeps subtraction
+- src/lexer.js:697:32512:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a class name may end in a keyword-spelled part
+- src/lexer.js:697:32538:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a class name may end in a keyword-spelled part
+- src/lexer.js:697:32568:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a class name may end in a keyword-spelled part
+- src/lexer.js:697:32595:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a bare class on the render line joins its hyphens
+- src/lexer.js:698:32637:boolean — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a class name may end in a keyword-spelled part; test/ui/components.test.js › render scanner: ids, classes, and line shapes › a bare class on the render line joins its hyphens
+- src/lexer.js:700:32689:statement — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a member chain in a text value keeps subtraction
 - src/lexer.js:731:34092:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › only a hyphenated digit run continues a class chain
 - src/lexer.js:731:34103:relation — test/ui/components.test.js › render scanner: ids, classes, and line shapes › only a hyphenated digit run continues a class chain
 - src/lexer.js:797:37334:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element nests under an element after its handler line; test/ui/components.test.js › render scanner: ids, classes, and line shapes › an inline else element takes a custom element after a block holding a handler
@@ -300,6 +310,8 @@
 - src/lexer.js:575:27226:number — renderDepth and renderParenDepth are read only while inRender, and RENDER assigns both when it sets inRender
 - src/lexer.js:581:27554:number — renderDepth and renderParenDepth are read only while inRender, and RENDER assigns both when it sets inRender
 - src/lexer.js:582:27572:number — token ids are compared only for identity and order (origin links; minted ids continue from nextId), and a uniform shift by one preserves both
+- src/lexer.js:695:32359:relation — the walk stops at j 2 instead of stepping to 0 only when tokens[0] is '.', and a render block always has a RENDER token before the line, so tokens[0] is never that '.' here
+- src/lexer.js:695:32362:number — the walk stops at j 2 instead of stepping to 0 only when tokens[0] is '.', and a render block always has a RENDER token before the line, so tokens[0] is never that '.' here
 - src/lexer.js:731:34081:relation — the only scan-time token whose value is '-' is kind '-' (MATH carries only '*', '/', '%', '//', '%%'), which the first arm already accepts, so a non-MATH-with-value-'-' arm adds nothing
 - src/lexer.js:795:37233:relation — inside a render block a RENDER token precedes the line, and the backward walk breaks at it or at an earlier boundary; it reaches index 0 only when tokens[0] is that RENDER, which breaks the loop just as skipping it ends the loop
 - src/lexer.js:795:37236:number — inside a render block a RENDER token precedes the line, and the backward walk breaks at it or at an earlier boundary; it reaches index 0 only when tokens[0] is that RENDER, which breaks the loop just as skipping it ends the loop

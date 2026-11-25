@@ -3447,4 +3447,22 @@ describe('render scanner: ids, classes, and line shapes', () => {
     expect(inBody('div n.a a-b')).toContain(`this.n.value.a(${minus})`);
     expect(inBody('div @n.a a-b')).toContain(`this.n.value.a(${minus})`);
   });
+
+  test('a class name may end in a keyword-spelled part', () => {
+    const cls = "className = 'fade-in'";
+    expect(js('Foo = component\n  render\n    .fade-in "b"\n')).toContain(cls);
+    expect(js('Foo = component\n  render\n    div\n      .fade-in "b"\n')).toContain(cls);
+    expect(js('Foo = component\n  render\n    div\n      p "a"\n      .fade-in "b"\n')).toContain(cls);
+  });
+
+  test('a bare class on the render line joins its hyphens', () => {
+    expect(js('Foo = component\n  render .card-x "b"\n')).toContain("className = 'card-x'");
+  });
+
+  test('a member chain in a text value keeps subtraction', () => {
+    const body = (line) => js(`Foo = component\n  n := {a: {b: 5}}\n  c := 1\n  box := {w: 4}\n  pad := 1\n  render\n    div\n      p "x"\n      ${line}\n`);
+    expect(body('p @box.w-pad')).toContain('this.box.value.w - this.pad.value');
+    expect(body('p n.a.b-c')).toContain('this.n.value.a.b - this.c.value');
+    expect(body('p "a-b".length-c')).toContain('"a-b".length - this.c.value');
+  });
 });
