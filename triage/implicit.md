@@ -1,6 +1,6 @@
 # Mutation triage: src/implicit.js
 
-Survivors classified: 45 of 191.
+Survivors classified: 75 of 191.
 
 ## GAP
 
@@ -37,6 +37,26 @@ Survivors classified: 45 of 191.
 - src/implicit.js:836:40368:number — test/rip/objects.rip › a trailing comma before a dedent closes the object after the comma
 - src/implicit.js:836:40393:number — test/rip/objects.rip › a trailing comma before a dedent closes the object after the comma
 - src/implicit.js:837:40457:arith — test/rip/objects.rip › a trailing comma inside an indented array closes the object
+- src/implicit.js:893:42715:arith — test/rip/control.rip › a trailing for rejects at the end of input
+- src/implicit.js:894:42780:relation — test/rip/control.rip › a bodiless class argument ends with its line
+- src/implicit.js:911:43462:number — test/rip/control.rip › a class body consumes its frame, so a later guard is the statement
+- src/implicit.js:911:43460:arith — test/rip/control.rip › a class body consumes its frame, so a later guard is the statement
+- src/implicit.js:920:43817:number — test/rip/control.rip › a closer retires an inline try frame inside the call
+- src/implicit.js:920:43815:arith — test/rip/control.rip › a closer retires an inline try frame inside the call
+- src/implicit.js:920:43834:logic — test/rip/control.rip › a closer retires an inline try frame inside the call
+- src/implicit.js:920:43856:arith — test/rip/control.rip › a closer retires a bodiless class frame inside the call
+- src/implicit.js:920:43858:number — test/rip/control.rip › a closer retires a bodiless class frame inside the call
+- src/implicit.js:943:45077:arith — test/rip/control.rip › a trailing comma carries the call across the line break
+- src/implicit.js:943:45079:number — test/rip/control.rip › a trailing comma carries the call across the line break
+- src/implicit.js:950:45510:relation — test/rip/control.rip › a bodiless class argument ends with its line
+- src/implicit.js:950:45551:number — test/rip/control.rip › a bodiless class argument ends with its line
+- src/implicit.js:950:45549:arith — test/rip/control.rip › a bodiless class argument ends with its line
+- src/implicit.js:961:45876:number — test/rip/control.rip › an unspaced sign at the end of the program is an argument
+- src/implicit.js:985:47303:number — test/rip/control.rip › the end of the program retires an inline try frame
+- src/implicit.js:985:47301:arith — test/rip/control.rip › the end of the program retires an inline try frame
+- src/implicit.js:985:47320:logic — test/rip/control.rip › the end of the program retires an inline try frame
+- src/implicit.js:985:47342:arith — test/rip/control.rip › the end of the program retires a bodiless class frame
+- src/implicit.js:985:47344:number — test/rip/control.rip › the end of the program retires a bodiless class frame
 
 ## EQUIVALENT
 
@@ -49,6 +69,16 @@ Survivors classified: 45 of 191.
 - src/implicit.js:779:37539:statement — a TERNARY still pending at a TERMINATOR at its own depth is already a parse error at that TERMINATOR (strict and tolerant parses both stop there), so later claim state is never read
 - src/implicit.js:801:38594:number — tokens[i] is the POST_IF/POST_UNLESS itself, neither opener, closer nor TERMINATOR, so objectContinues(i) reaches the same verdict as objectContinues(i + 1)
 - src/implicit.js:805:38661:statement — falling through from the IMPLICIT_END branch: k is never ',' there
+- src/implicit.js:860:41355:number — `i === callIndentAt` at i = 0 takes the early push, but the normal INDENT path at i = 0 also just pushes 'INDENT' (no prev, empty stack: nothing to close or pop)
+- src/implicit.js:866:41514:boolean — generated CALL_START/CALL_END `spaced` is read by nobody: collectCalls walks the pre-insertion tape, and tagLooseElse, rejectDoTails, insertArrowCommas and the parser adapter read only kind/value/start/end
+- src/implicit.js:866:41530:boolean — same as 866:41514, for `newLine`
+- src/implicit.js:876:41917:number — lastReal is never null at closeCall: a close comes at least two tokens past the callee, and the argument between holds a real token (generated tokens are only brackets and blocks)
+- src/implicit.js:884:42129:number — lastReal is read only by closeCall, which always runs after a real argument token at index >= 1 has replaced whatever tokens[0] would have set
+- src/implicit.js:893:42717:number — the `tokens[i - 1]` existence guard matters only at i = 0, where the stack is empty and the leading `top === 'call'` conjunct already fails
+- src/implicit.js:895:42830:statement — falling through after the CONTROL push: only FOR reaches the IMPLICIT_END branch, whose close loop stops at the CONTROL just pushed, and no CONTROL_IN_IMPLICIT kind is IMPLICIT_FUNC, so no call starts
+- src/implicit.js:955:45694:statement — falling through from the IMPLICIT_END branch: its kinds (and `.`/`?.`) are never IMPLICIT_FUNC, so neither call-start branch fires
+- src/implicit.js:978:47035:number — tokens[i + 2] is the generated `{` the object pass anchored at tokens[s].start, and tokens[i + 3] is tokens[s], so both read the same offset
+- src/implicit.js:978:47056:number — token `origin` is never read after it is assigned (no consumer in src/ or packages/), so CALL_START's origin feeds nothing
 
 ## BUG
 
@@ -59,3 +89,5 @@ Survivors classified: 45 of 191.
 ## Notes
 
 - Not a survivor, found while probing: a program whose first token is `:` (`: b`, or `:` + an indented pair) crashes collectObjects with "undefined is not an object (evaluating 'tokens[s].start')" — an unpositioned internal TypeError instead of a positioned rejection.
+- BUG, not tied to one survivor (the call-pass twin of 787:37887): an inline `try` with no `catch` as an implicit-call argument never retires its CONTROL frame at the line break, so the next statement becomes another argument. `f try g()` + newline + `h 3` compiles to `f(try g(), h(3))`, and `f try g()` + `y = 2` to `f(try g(), y = 2)`, a silent miscompile. Expected `f(try g()); h(3)`. In the object pass the same frame gives `x = a: try f()` + `y = 2` a misleading "destructuring default" rejection.
+- Questionable, not pinned: a bodiless class keeps its CONTROL frame until the TERMINATOR, so a guard after it binds the value (`f class if c` gives `f(c ? class {} : undefined)`, and `x = a: class if c` gives `{a: c ? class {} : undefined}`). Every other value lets the guard govern the statement (`f x if c` gives `if (c) f(x)`).
