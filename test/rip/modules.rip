@@ -684,3 +684,4 @@ code "a default binding named type before a specifier list", "import type, {a} f
 code "an exported name called type renamed with as", "type = 1\nexport { type as T }", "let type = 1;\nexport { type as T };"
 code "default renamed after a comma", "import {a, default as b} from 'm'", "import { a, default as b } from 'm';"
 code "a name called from on the line after an export", "export a = 1\nb = from 'x'", "export const a = 1;\nlet b = from(\"x\");"
+code "an imported name called from", "import {from as f} from 'y'", "import { from as f } from 'y';"

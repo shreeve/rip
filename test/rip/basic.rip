@@ -675,3 +675,8 @@ test 'a line-leading ?. continues the chain', "a = {b: {c: 1}}\nx = a\n  ?.b\n  
 fail 'a line-leading ?. before a digit is no continuation', "x = a\n?.5", "2:1: Unexpected '?.'"
 test 'a line-leading .5 is a number, not a member continuation', "x = 1\n.5", 0.5
 test 'a word that merely starts with else begins a new statement', "elsewhere = 1\nx = 2\nelsewhere = x + elsewhere\nelsewhere", 3
+test 'a compound key may head the file', 'data-src: 1', {'data-src': 1}
+fail 'a member chain before a colon is no compound key', 'this.a.b: 1', "1:8: Unexpected implicit '{'"
+fail 'an optional chain before a colon is no compound key', 'x = o?.a.b: 1', "1:10: Unexpected implicit '{'"
+fail 'a static member chain is no compound key', "class C\n  @a.b: -> 1", "Unexpected implicit '{'"
+fail 'a tight minus before a number is no compound key', 'x = {a-1: 2}', "Unexpected '-'"

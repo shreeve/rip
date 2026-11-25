@@ -1023,3 +1023,23 @@ test "a block at an interface body's depth after the interface is code", '''
     :ok
   f().description
 ''', 'ok'
+
+test 'a type body closed by its bracket leaves later blocks as values', '''
+  run = (fn) -> fn()
+  run(->
+    type T =
+      a: number)
+  trim = ->
+    if true
+      String::trim.call ' a '
+  trim()
+''', 'a'
+
+test 'an alias line before an else leaves the else body a value', '''
+  f = (s) -> s.description
+  x = if false
+    type T = 'a'
+  else
+    f :foo
+  x
+''', 'foo'

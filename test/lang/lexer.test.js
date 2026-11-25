@@ -946,3 +946,25 @@ describe('heregex interpolation spans', () => {
     expect(realSpans('x = ///a#{b}c///')).toBe('x@0 =@2 ///@4 a@7 #{@8 b@10 }@11 c@12 ///@13');
   });
 });
+
+describe('scan-time block tokens', () => {
+  test('a scanned INDENT or OUTDENT is unspaced and starts no line', () => {
+    const blocks = tokenize('if x\n  y\nz').tokens.filter((t) => t.kind === 'INDENT' || t.kind === 'OUTDENT');
+    expect(blocks.map((t) => [t.kind, t.spaced, t.newLine])).toEqual([['INDENT', false, false], ['OUTDENT', false, false]]);
+  });
+
+  test('a block opened inside a pending ternary starts its own claim level', () => {
+    const when = tokenize('x = c ? f\n  when: 1\n: 0').tokens.find((t) => t.value === 'when');
+    expect(when.kind).toBe('PROPERTY');
+  });
+
+  test('every token id stays unique after the insertion passes', () => {
+    const { tokens } = tokenize('f a, b: -> c d');
+    expect(new Set(tokens.map((t) => t.id)).size).toBe(tokens.length);
+  });
+
+  test('a string opener and an interpolation start cover their own characters', () => {
+    expect(realSpans('x = "a#{b}c"')).toBe('x@0 =@2 "@4 a@5 #{@6 b@8 }@9 c@10 "@11');
+    expect(realSpans('x = """a#{b}c"""')).toBe('x@0 =@2 """@4 a@7 #{@8 b@10 }@11 c@12 """@13');
+  });
+});

@@ -107,3 +107,4 @@ test 'a symbol-keyed method is callable', 'class A\n  :greet: -> "hi"\nnew A()[S
 code 'a symbol key in an object literal', 'o = { :sym: 1 }', 'let o = {[Symbol.for("sym")]: 1};'
 test 'a symbol-keyed property reads back', 'o = { :k: 5 }\no[:k]', 5
 fail 'a bound symbol-keyed method rejects', 'class A\n  constructor: ->\n  :sym: => 1', 'symbol-keyed method cannot be bound'
+fail 'a symbol name stops at a hyphen before a digit', 'x = :a-1', 'Cannot convert a symbol'

@@ -640,3 +640,4 @@ test "a static member named constructor is not the constructor", "class A\n  con
 fail "a constructor that awaits rejects", "class A\n  constructor: -> @x = f!()", "a constructor cannot await or yield"
 fail "a constructor that yields rejects", "class A\n  constructor: ->\n    yield 1", "a constructor cannot await or yield"
 test "a constructor may build an async function that awaits", "class A\n  constructor: -> @load = -> f!()\ntypeof (new A).load", "function"
+fail "private at the top level is reserved", "x = 1\nprivate y = 2", "'private' marks a class member"

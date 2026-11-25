@@ -3512,4 +3512,9 @@ describe('render scanner: ids, classes, and line shapes', () => {
     expect(code).toContain("this._el2 = document.createElement('div')");
     expect(code).toContain("this._el3 = document.createElement('span')");
   });
+
+  test('a bracket that closes a handler block re-reads the next line by depth', () => {
+    expect(inBody('div\n  button @click: (->\n    a)\n  x-icon')).toContain(element);
+    expect(inBody('div\n  button @click: ->\n    n.a(->\n      a)\n    a-b')).toContain(minus);
+  });
 });

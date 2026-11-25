@@ -1512,3 +1512,5 @@ fail 'a postfix break in a match arm has nothing to leave', 'for x in xs\n  swit
 code 'a member named break in a match arm is a name', 'switch x\n  when /a/\n    obj.break()', 'if (/a/.test(x)) {\n  obj.break();\n}'
 code 'a key named break in a match arm is a name', 'switch x\n  when /a/\n    o.x = {break: 1}', 'if (/a/.test(x)) {\n  o.x = {break: 1};\n}'
 code 'a member named break in a value if is a name', 'y = if q then obj.break() else 2', 'let y = q ? obj.break() : 2;'
+test 'a leading paren group takes its own loose operator', '(1 then 0) else 2', 2
+fail 'a do invocation at the head of the file rejects a tail', 'do (-> 1).x', 'takes no call, member or index tail'

@@ -635,3 +635,5 @@ test "a tight else colon after any value-ending token closes the ternary", '''
     c ? :a :b
   ]
 ''', [9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9]
+
+fail 'a dangling not in rejects at not', 'x = not in b', '1:5: Unexpected'

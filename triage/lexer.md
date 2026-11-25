@@ -1,6 +1,6 @@
 # src/lexer.js mutation survivors
 
-489 of 565 survivors classified.
+565 of 565 survivors classified.
 
 ## GAP
 
@@ -25,11 +25,21 @@
 - src/lexer.js:110:5503:logic — test/rip/arrows.rip › a ternary paren branch then an assignment of an arrow call
 - src/lexer.js:110:5517:logic — test/rip/types.rip › an arrow return type with an unparenthesized function type in a union
 - src/lexer.js:122:5915:arith — test/rip/types.rip › a parenthesized arrow return type before a parenthesized body
+- src/lexer.js:181:8323:statement — test/rip/map-literal.rip › a this-index map key may hold its own brackets
+- src/lexer.js:181:8361:update — test/rip/map-literal.rip › a this-index map key may hold its own brackets
 - src/lexer.js:207:9362:number — test/rip/commaless.rip › a literal then an arrow in an array has no implied comma
 - src/lexer.js:212:9513:statement — test/rip/commaless.rip › a literal then an arrow after a closed call has no implied comma
 - src/lexer.js:212:9545:update — test/rip/commaless.rip › a literal then an arrow after a closed call has no implied comma
 - src/lexer.js:213:9568:relation — test/rip/commaless.rip › a literal then an arrow in an array has no implied comma
 - src/lexer.js:215:9724:logic — test/rip/commaless.rip › a name tight against an arrow in call arguments has no implied comma
+- src/lexer.js:235:10687:number — test/rip/basic.rip › a compound key may head the file
+- src/lexer.js:238:10826:number — test/rip/basic.rip › a member chain before a colon is no compound key (positioned: the rejection points at the key after the chain)
+- src/lexer.js:238:10855:arith — test/rip/basic.rip › an optional chain before a colon is no compound key (positioned)
+- src/lexer.js:238:10857:number — test/rip/basic.rip › an optional chain before a colon is no compound key (positioned)
+- src/lexer.js:239:10902:arith — test/rip/basic.rip › a static member chain is no compound key
+- src/lexer.js:239:10904:number — test/rip/basic.rip › a static member chain is no compound key
+- src/lexer.js:245:11095:logic — test/rip/basic.rip › a tight minus before a number is no compound key
+- src/lexer.js:473:21665:arith — test/rip/symbols.rip › a symbol name stops at a hyphen before a digit
 - src/lexer.js:509:23456:statement — test/mapping/stores.test.js › parse scaling › tokenize op count grows linearly with arrow-body count (extended tier only: RIP_EXTENDED=1; the fast loop skips it)
 - src/lexer.js:542:25325:boolean — test/lang/lexer.test.js › line starts and trivia › the first token follows no whitespace, even under leading indentation
 - src/lexer.js:551:25831:relation — test/rip/modules.rip › a keyword renamed at the head of a specifier line (code row: the evaluator cannot host an import)
@@ -44,6 +54,13 @@
 - src/lexer.js:591:28072:number — test/lang/lexer.test.js › rejection spans › a direct tokenize() rejection message carries path, line, and column
 - src/lexer.js:591:28081:arith — test/lang/lexer.test.js › rejection spans › a direct tokenize() rejection message carries path, line, and column
 - src/lexer.js:591:28083:number — test/lang/lexer.test.js › rejection spans › a direct tokenize() rejection message carries path, line, and column
+- src/lexer.js:616:28993:relation — test/rip/modules.rip › an imported name called from (28993 also exposes `import x from "y#{1}"` → `'tr,"y",1,"'`; the 1724 bug, fixed on main in #504)
+- src/lexer.js:616:29013:logic — test/rip/modules.rip › an imported name called from (28993 also exposes `import x from "y#{1}"` → `'tr,"y",1,"'`; the 1724 bug, fixed on main in #504)
+- src/lexer.js:636:30097:logic — test/rip/async.rip › a dammit call result is the left side of in
+- src/lexer.js:639:30184:statement — test/rip/operators.rip › a dangling not in rejects at not (positioned: the folded `not in` token starts at `not`)
+- src/lexer.js:669:31087:boolean — test/lang/lexer.test.js › scan-time block tokens › a scanned INDENT or OUTDENT is unspaced and starts no line (token-level: no compile reader of these flags differs across 3782 harvested programs)
+- src/lexer.js:669:31103:boolean — test/lang/lexer.test.js › scan-time block tokens › a scanned INDENT or OUTDENT is unspaced and starts no line (token-level: no compile reader of these flags differs across 3782 harvested programs)
+- src/lexer.js:673:31207:statement — test/lang/lexer.test.js › scan-time block tokens › a block opened inside a pending ternary starts its own claim level (token-level: every program that opens a block inside a pending ternary is a parse error; the mutant only moves the rejection)
 - src/lexer.js:695:32364:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a member chain in a text value keeps subtraction
 - src/lexer.js:695:32390:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a member chain in a text value keeps subtraction
 - src/lexer.js:695:32427:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a member chain in a text value keeps subtraction
@@ -100,6 +117,18 @@
 - src/lexer.js:817:38629:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element may open a render block, on its line or the next
 - src/lexer.js:817:38642:relation — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a hyphenated word after an operator or a member chain is subtraction; test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element nests after a class chain or a bare class line
 - src/lexer.js:817:38664:boolean — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element nests after a class chain or a bare class line
+- src/lexer.js:834:39170:relation — test/rip/components.rip › a bare component that opens the file reads offer as the keyword
+- src/lexer.js:834:39173:number — test/rip/components.rip › a bare component that opens the file reads offer as the keyword
+- src/lexer.js:836:39274:logic — test/rip/components.rip › a name called offer after a component branch stays a name
+- src/lexer.js:865:40214:boolean — test/rip/classes.rip › private at the top level is reserved
+- src/lexer.js:890:41329:statement — test/rip/strings.rip › a single-quoted string stops at a line break
+- src/lexer.js:890:41350:number — test/rip/strings.rip › a single-quoted string stops at a line break
+- src/lexer.js:890:41375:logic — test/rip/strings.rip › a single-quoted string stops at a line break
+- src/lexer.js:917:42607:number — test/rip/strings.rip › a one-space heredoc line sets the baseline
+- src/lexer.js:917:42624:relation — test/rip/strings.rip › an equally deep heredoc line keeps the first indentation
+- src/lexer.js:986:45555:arith — test/lang/lexer.test.js › scan-time block tokens › a string opener and an interpolation start cover their own characters (span-only)
+- src/lexer.js:1001:46149:arith — test/lang/lexer.test.js › scan-time block tokens › a string opener and an interpolation start cover their own characters (span-only)
+- src/lexer.js:1001:46151:number — test/lang/lexer.test.js › scan-time block tokens › a string opener and an interpolation start cover their own characters (span-only)
 - src/lexer.js:1076:49747:logic — test/rip/regex.rip › a line break inside a heregex character class rejects
 - src/lexer.js:1079:49887:branch — test/rip/regex.rip › whitespace inside a heregex character class is kept
 - src/lexer.js:1079:49890:relation — test/rip/regex.rip › whitespace inside a heregex character class is kept
@@ -107,6 +136,7 @@
 - src/lexer.js:1115:50890:number — test/lang/lexer.test.js › heregex interpolation spans › the opener and the interpolation start cover their own characters
 - src/lexer.js:1118:51016:arith — test/lang/lexer.test.js › heregex interpolation spans › the opener and the interpolation start cover their own characters
 - src/lexer.js:1118:51018:number — test/lang/lexer.test.js › heregex interpolation spans › the opener and the interpolation start cover their own characters
+- src/lexer.js:1183:54008:logic — test/rip/types.rip › an alias line before an else leaves the else body a value
 - src/lexer.js:1202:54945:arith — test/rip/types.rip › a generic interface body holds a template-literal type
 - src/lexer.js:1202:54947:number — test/rip/types.rip › an interface after a statement holds a template-literal type
 - src/lexer.js:1203:54958:branch — test/rip/types.rip › an interface that extends holds a template-literal type
@@ -142,6 +172,12 @@
 - src/lexer.js:1268:57903:statement — test/lang/lexer.test.js › template-literal type scanning › an escape never steps over a line break
 - src/lexer.js:1272:58020:arith — test/lang/lexer.test.js › template-literal type scanning › rejections point at the literal, the interpolation, or the string
 - src/lexer.js:1272:58022:number — test/lang/lexer.test.js › template-literal type scanning › rejections point at the literal, the interpolation, or the string
+- src/lexer.js:1282:58321:statement — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a bracket that closes a handler block re-reads the next line by depth
+- src/lexer.js:1282:58324:branch — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a bracket that closes a handler block re-reads the next line by depth
+- src/lexer.js:1282:58341:relation — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a bracket that closes a handler block re-reads the next line by depth
+- src/lexer.js:1282:58350:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a bracket that closes a handler block re-reads the next line by depth
+- src/lexer.js:1282:58368:relation — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a bracket that closes a handler block re-reads the next line by depth
+- src/lexer.js:1285:58455:statement — test/rip/types.rip › a type body closed by its bracket leaves later blocks as values
 - src/lexer.js:1300:59221:arith — test/lang/lexer.test.js › dedent across a bracket floor › the rejection names the indentation the bracket opened at
 - src/lexer.js:1300:59223:number — test/lang/lexer.test.js › dedent across a bracket floor › the rejection names the indentation the bracket opened at
 - src/lexer.js:1305:59297:statement — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a handler body ends at its dedent and lasts across its own nested blocks
@@ -370,9 +406,12 @@
 - src/lexer.js:2406:115755:boolean — test/lang/lexer.test.js › tolerant end-of-input repair › the hole is a generated, unspaced token with its own id
 - src/lexer.js:2409:115828:statement — test/lang/lexer.test.js › tolerant end-of-input repair › a multiline call keeps its slot inside the argument block
 - src/lexer.js:2409:115846:number — test/lang/lexer.test.js › tolerant end-of-input repair › a multiline call keeps its slot inside the argument block
+- src/lexer.js:2432:116802:update — test/lang/lexer.test.js › scan-time block tokens › every token id stays unique after the insertion passes
 - src/lexer.js:2450:117800:logic — test/lang/lexer.test.js › line starts and trivia › a tolerant schema rejection records its bare reason and offset
 - src/lexer.js:2450:117841:logic — test/lang/lexer.test.js › line starts and trivia › a tolerant schema rejection records its bare reason and offset
 - src/lexer.js:2460:118374:number — test/rip/sweep.rip › do at the start of the file rejects
+- src/lexer.js:2563:123041:number — test/rip/control.rip › a leading paren group takes its own loose operator
+- src/lexer.js:2591:124647:number — test/rip/control.rip › a do invocation at the head of the file rejects a tail
 
 ## EQUIVALENT
 
@@ -390,11 +429,14 @@
 - src/lexer.js:122:5925:number — an opener matched at index 0 gives op 0, which fails op > 1 just as op -1 does
 - src/lexer.js:133:6266:relation — op 1 passes the mutated guard but then needs tokens[-1] to be ')', which is undefined, so the branch is never taken
 - src/lexer.js:133:6268:number — op 1 passes the mutated guard but then needs tokens[-1] to be ')', which is undefined, so the branch is never taken
+- src/lexer.js:174:8065:number — tokens[0] is never INDEX_START (minted only directly after an indexable token); skipping its ternary step matters only for a leading opener whose group leaves a TERNARY unclaimed, which is a parse error at that group's closer, before any token this pass changes
+- src/lexer.js:179:8246:relation — every OPENERS kind's closer is in CLOSERS and the scanner rejects unbalanced brackets, so depth reaches 0 at the matching INDEX_END (index <= length-1) and `depth > 0` ends the loop with the same j either way
 - src/lexer.js:208:9380:number — tokens[0] is never CALL_START (an implicit call follows its callee) and is never an arrow with a token before it, so skipping it changes nothing
 - src/lexer.js:213:9607:relation — depth > 0 needs a CALL_START earlier on the tape, so an arrow there sits at index 2 or later; i 0 and i 1 never reach this test
 - src/lexer.js:213:9609:number — depth > 0 needs a CALL_START earlier on the tape, so an arrow there sits at index 2 or later; i 0 and i 1 never reach this test
 - src/lexer.js:218:9923:statement — after the splice tokens[i] is the new ',' and tokens[i+1] the arrow; revisiting from i-1 or i only re-reads the literal and the ',' (neither a call bracket nor an arrow), and the arrow's predecessor is now ',', outside the set, so no second comma is inserted
 - src/lexer.js:218:9924:update — after the splice tokens[i] is the new ',' and tokens[i+1] the arrow; revisiting from i-1 or i only re-reads the literal and the ',' (neither a call bracket nor an arrow), and the arrow's predecessor is now ',', outside the set, so no second comma is inserted
+- src/lexer.js:279:12781:number — DAMMIT is minted only directly after a name, so tokens[0] is never DAMMIT and the skipped iteration does nothing
 - src/lexer.js:541:25238:number — every logical line start after the first follows a main-loop newline, which assigns lastNewlinePos before its only read
 - src/lexer.js:543:25355:boolean — the first logical line start sets pendingNewLine = true before any token is pushed
 - src/lexer.js:568:26873:boolean — the first code line's line-start block resets seenImport and seenExport (parens is empty there) before any word scans; blank and comment lines scan no words
@@ -402,6 +444,7 @@
 - src/lexer.js:575:27226:number — renderDepth and renderParenDepth are read only while inRender, and RENDER assigns both when it sets inRender
 - src/lexer.js:581:27554:number — renderDepth and renderParenDepth are read only while inRender, and RENDER assigns both when it sets inRender
 - src/lexer.js:582:27572:number — token ids are compared only for identity and order (origin links; minted ids continue from nextId), and a uniform shift by one preserves both
+- src/lexer.js:655:30652:relation — with an empty pendingOrigin the loop runs zero times and resetting length 0 to 0 changes nothing
 - src/lexer.js:695:32359:relation — the walk stops at j 2 instead of stepping to 0 only when tokens[0] is '.', and a render block always has a RENDER token before the line, so tokens[0] is never that '.' here
 - src/lexer.js:695:32362:number — the walk stops at j 2 instead of stepping to 0 only when tokens[0] is '.', and a render block always has a RENDER token before the line, so tokens[0] is never that '.' here
 - src/lexer.js:709:33154:relation — inside a render block a RENDER token precedes the line and the walk breaks at it or at an earlier boundary; it reaches index 0 only when tokens[0] is that RENDER, which breaks the loop just as skipping it ends the loop
@@ -419,6 +462,21 @@
 - src/lexer.js:817:38516:relation — these widen j < L-1 to admit j = L-1 (no chain walked), where root is prev itself, and every boundary kind of prev (INDENT, TERMINATOR, OUTDENT, RENDER) has already returned above; !root needs j < 0, impossible with a RENDER before the line
 - src/lexer.js:817:38532:arith — these widen j < L-1 to admit j = L-1 (no chain walked), where root is prev itself, and every boundary kind of prev (INDENT, TERMINATOR, OUTDENT, RENDER) has already returned above; !root needs j < 0, impossible with a RENDER before the line
 - src/lexer.js:817:38534:number — these widen j < L-1 to admit j = L-1 (no chain walked), where root is prev itself, and every boundary kind of prev (INDENT, TERMINATOR, OUTDENT, RENDER) has already returned above; !root needs j < 0, impossible with a RENDER before the line
+- src/lexer.js:826:38945:relation — tokens[0], even an INDENT from leading indentation, has nothing before it for the COMPONENT scan, and it is the last iteration, so depth/min are never read again
+- src/lexer.js:826:38948:number — tokens[0], even an INDENT from leading indentation, has nothing before it for the COMPONENT scan, and it is the last iteration, so depth/min are never read again
+- src/lexer.js:836:39256:logic — breaking only at OUTDENT: a COMPONENT reached across a TERMINATOR or INDENT is either on an enclosing INDENT's line (the base finds it there) or on an earlier sibling line whose body block ends in an OUTDENT that stops the walk first; a bodiless COMPONENT is a parse error at its own line, before this word
+- src/lexer.js:851:39779:relation — tokens[0], even an INDENT from leading indentation, has nothing before it to scan for CLASS, so the base answers false there exactly as the loop's end does
+- src/lexer.js:851:39782:number — tokens[0], even an INDENT from leading indentation, has nothing before it to scan for CLASS, so the base answers false there exactly as the loop's end does
+- src/lexer.js:889:41274:relation — at pos === text.length the extra iteration only steps pos past the end (text[pos] is undefined: no newline, no backslash), and the following `pos >= text.length` raises the same open-at-end rejection
+- src/lexer.js:938:43467:statement — both single-delimiter scanners reject a raw CR or LF, so the content's CR normalization is a no-op and the no-newline early return yields the content unchanged
+- src/lexer.js:938:43488:number — both single-delimiter scanners reject a raw CR or LF, so the content's CR normalization is a no-op and the no-newline early return yields the content unchanged
+- src/lexer.js:940:43558:statement — with no '\n' the closer line is the whole content, minIndent is null, the baseline is '' or whitespace never preceded by '\n', and both newline replaces match nothing, so the content returns unchanged
+- src/lexer.js:956:44356:relation — at pos === text.length the extra iteration sees text[pos] undefined (no newline, backslash or `#{`), steps past the end, and the following `pos >= text.length` raises the same open-at-end rejection
+- src/lexer.js:1021:47181:arith — text[closer.start] and text[closer.start+1] are closing quote characters, never line breaks, so the backward searches from closer.start-1, closer.start or closer.start+1 return the same index
+- src/lexer.js:1021:47183:number — text[closer.start] and text[closer.start+1] are closing quote characters, never line breaks, so the backward searches from closer.start-1, closer.start or closer.start+1 return the same index
+- src/lexer.js:1022:47217:relation — lineFrom is closer.start-1 >= 3 (the `"""` opener precedes the closer), so the `< 0` branch and its -1 are unreachable
+- src/lexer.js:1022:47219:number — lineFrom is closer.start-1 >= 3 (the `"""` opener precedes the closer), so the `< 0` branch and its -1 are unreachable
+- src/lexer.js:1022:47224:number — lineFrom is closer.start-1 >= 3 (the `"""` opener precedes the closer), so the `< 0` branch and its -1 are unreachable
 - src/lexer.js:1063:49376:relation — the extra iteration at pos === text.length runs only when no closer was found; it appends to out and steps past the end, then scanHeregexPart fails 'missing ///' at the opener and discards out and pos
 - src/lexer.js:1066:49484:statement — a backslash as the last character of the input leaves no closer after it: consuming it as an escape steps past the end, and both paths fail 'missing ///' at the opener, discarding out and pos
 - src/lexer.js:1066:49492:arith — a backslash as the last character of the input leaves no closer after it: consuming it as an escape steps past the end, and both paths fail 'missing ///' at the opener, discarding out and pos
@@ -428,8 +486,13 @@
 - src/lexer.js:1093:50259:relation — a comment running to the end of the input leaves no closer: stepping one past the end ends the chunk loop, and the caller fails 'missing ///' at the opener either way
 - src/lexer.js:1112:50766:relation — interpAt is either -1 or the index of a `#{` inside the body, which sits after the three-character opener, so it is never 0
 - src/lexer.js:1112:50769:number — interpAt is either -1 or the index of a `#{` inside the body, which sits after the three-character opener, so it is never 0
+- src/lexer.js:1146:52110:relation — every call that uses the result synthesizes OUTDENTs for an open block, and a block opens only at a line whose first token the scanner pushes as real, so a real token exists at index >= 1 and the walk returns before index 0
+- src/lexer.js:1146:52113:number — every call that uses the result synthesizes OUTDENTs for an open block, and a block opens only at a line whose first token the scanner pushes as real, so a real token exists at index >= 1 and the walk returns before index 0
+- src/lexer.js:1149:52194:number — the fallback is reached only with no real token on the tape, and then no block is open, so no caller uses the value
 - src/lexer.js:1175:53579:number — upTo 1 with ref null makes the first sync's staleness check fire (tokens[0] !== null), which rebuilds from the nearest line boundary, the state upTo 0 starts from
 - src/lexer.js:1175:53600:number — level is only a key: answers are stored and read at the same running level, so a constant offset changes no lookup, and the next line boundary resets it to 0
+- src/lexer.js:1181:53913:relation — tokens[0] as a line break returns false like the loop's end, and as '=' it has no `type Name` before it, so typeAliasEq answers false (k = -1)
+- src/lexer.js:1181:53916:number — tokens[0] as a line break returns false like the loop's end, and as '=' it has no `type Name` before it, so typeAliasEq answers false (k = -1)
 - src/lexer.js:1201:54831:relation — at k 0 the name has nothing before it: iface(-1) is false and tokens[-1] is not EXTENDS, so the function returns false either way
 - src/lexer.js:1201:54833:number — at k 0 the name has nothing before it: iface(-1) is false and tokens[-1] is not EXTENDS, so the function returns false either way
 - src/lexer.js:1205:55061:relation — m 0 passes only the mutated bound, and then iface(-1) is false, so the branch is never taken
@@ -487,6 +550,19 @@
 - src/lexer.js:2408:115794:statement — the hole's origin would resolve only when a real token follows, and after end-of-input repair every later token is synthesized, so origin stays null either way
 - src/lexer.js:2450:117844:number — carrySchemaRejection rethrows any error without a numeric start, and fail() always sets end, so neither ?? 0 fallback ever applies
 - src/lexer.js:2451:117884:number — carrySchemaRejection rethrows any error without a numeric start, and fail() always sets end, so neither ?? 0 fallback ever applies
+- src/lexer.js:2525:121489:number — tokens[i] is IF/UNLESS, neither a TERMINATOR, an INDENT, an opener nor a closer, so starting the scan on it changes nothing
+- src/lexer.js:2534:121913:statement — postfix is only ever set false, so the scan continuing past the block INDENT changes only the op counter, never the result
+- src/lexer.js:2565:123192:statement — an opener kind is none of TERMINATOR, ',', POST_IF, POST_UNLESS, ELSE, THEN or LOOSE_ELSE, so the fall-through reaches the final `continue` with no effect
+- src/lexer.js:2566:123241:relation — the tape is bracket-balanced and the walk starts at 0, so every closer meets its opener's pushed level and d > 0; d === 0 at a closer never occurs
+- src/lexer.js:2566:123275:statement — a closer kind is none of TERMINATOR, ',', POST_IF, POST_UNLESS, ELSE, THEN or LOOSE_ELSE, so the fall-through reaches the final `continue` with no effect
+- src/lexer.js:2569:123498:statement — after the reset the token is TERMINATOR or ',', none of POST_IF, POST_UNLESS, ELSE, THEN or LOOSE_ELSE, so the fall-through reaches the final `continue`
+- src/lexer.js:2570:123571:statement — after the count the token is POST_IF/POST_UNLESS, neither ELSE, THEN nor LOOSE_ELSE, so the fall-through reaches the final `continue`
+- src/lexer.js:2593:124782:number — tokens[i] is DO_IIFE, neither an opener nor a closer, so starting the scan on it changes nothing
+- src/lexer.js:2594:124798:relation — the `(` after DO_IIFE always has its balanced closer, so the loop breaks before j reaches tokens.length
+- src/lexer.js:2616:125769:statement — nothing reads the adapter's `source`: the parser reads only text, loc, token and lexDiagnostics, and grammar actions never touch ctx.lexer
+- src/lexer.js:2619:125879:statement — each parse runs on a fresh Object.create(this.lexer) that holds no text/loc/token until lex() assigns them; the parser reads them only after a lex() that assigned them or on EOF paths that short-circuit (`lexer.loc ?? null`, `lexer.token?.generated`, describeGot's EOF return), so undefined and ''/null are never told apart
+- src/lexer.js:2620:125901:statement — each parse runs on a fresh Object.create(this.lexer) that holds no text/loc/token until lex() assigns them; the parser reads them only after a lex() that assigned them or on EOF paths that short-circuit (`lexer.loc ?? null`, `lexer.token?.generated`, describeGot's EOF return), so undefined and ''/null are never told apart
+- src/lexer.js:2621:125924:statement — each parse runs on a fresh Object.create(this.lexer) that holds no text/loc/token until lex() assigns them; the parser reads them only after a lex() that assigned them or on EOF paths that short-circuit (`lexer.loc ?? null`, `lexer.token?.generated`, describeGot's EOF return), so undefined and ''/null are never told apart
 
 ## BUG
 
