@@ -977,3 +977,198 @@ code 'optional property erased', '''
   ''', '''
   
   '''
+
+# ==============================================================================
+# Mutation-audit pins — the rewriteTypes pass
+# ==============================================================================
+
+test 'an implicit call whose argument assigns is not a type alias', '''
+  r = []
+  push = (v) -> r.push v
+  push x = 5
+  r
+''', [5]
+
+test 'a function named type called mid-expression is not an alias', '''
+  type = (v) -> v * 2
+  wrap = (v) -> v + 1
+  wrap type x = 5
+''', 11
+
+test 'as before an operator that starts no type stays a name', '''
+  as = 3
+  f = (v) -> v + 1
+  f as * 2
+''', 7
+
+test 'a cast before a closing paren on the next line', '''
+  x = 1
+  r = (x as number
+  )
+  r
+''', 1
+
+test 'a cast before an interpolation close on the next line', '''
+  x = 1
+  "#{x as number
+  }"
+''', "1"
+
+fail 'a second generic group after a def name stays a comparison', "def f<T><U>(x)\n  x", "Unexpected '<' —"
+fail 'a generic group after a non-name in a def head stays a comparison', "def f x<T>(y)\n  y", "Unexpected '<' —"
+fail 'a generic list on a property target is no component target', "obj = {}\nobj.Sel<T> = component\n  render\n    div", ":2:12: Unexpected '='"
+
+test 'an unspaced comparison chain into a component is no generic list', '''
+  a = 1
+  b = 2
+  r = a<b>(component
+    render
+      div)
+  r
+''', false
+
+test 'a parenthesized generic constraint keeps the def parameter list', '''
+  def f<T extends (() => number)>(x: T)
+    x()
+  f(-> 7)
+''', 7
+
+fail 'an optional marker after a destructuring parameter rejects', 'f = ({a}?, b) -> b', ":1:9: Unexpected '?'"
+
+test 'a bare optional parameter on its own line', '''
+  f = (
+    a?
+    b
+  ) -> b
+  f(1, 2)
+''', 2
+
+fail 'a doubled colon after a parameterless def name rejects', "def f: : number\n  1", "type annotations use a single ':'"
+fail 'a doubled colon after a catch binding rejects', "try\n  g()\ncatch e: : any\n  e", "type annotations use a single ':'"
+fail 'a doubled colon after a typed prototype member rejects', 'String::foo: : number = 1', "type annotations use a single ':'"
+fail 'an annotated catch binding named for a value word rejects', "try\n  x()\ncatch yes: any\n  1", "'yes' cannot name a binding"
+fail 'an annotated array-pattern loop variable rejects', "for [a, b]: number in xs\n  a", 'a loop variable does not take a type annotation'
+
+test 'a string-keyed parameter is a destructuring rename', '''
+  f = ("a": n) -> n
+  f({a: 7})
+''', 7
+
+fail 'an optional marker after a destructuring pattern takes no annotation', 'f = ({a}?: string) -> a', ":1:9: Unexpected"
+
+test 'a numeric key with an assigned value stays an object', '''
+  r = (->
+    1: n = 5
+  )()
+  r[1]
+''', 5
+
+fail 'an annotated soak prototype write rejects after a statement', "f\nX?::m: number = 1", 'the soak form cannot carry the annotation'
+fail 'a soak prototype write inside an implicit call is no annotation', 'f X?::m: number = 1', "Unexpected implicit '{'"
+
+test 'a prototype chain inside an implicit call is an object key', '''
+  f = (o) -> o
+  r = f String::m: n = 1
+  r["String.prototype.m"]
+''', 1
+
+test 'a static class method with a typed parameter returning a name', '''
+  class A
+    @make: (x: number) => x
+  A.make(3)
+''', 3
+
+fail 'a class field with a call value rejects', "class A\n  x: f()", "a class field takes '=' for its value"
+fail 'a component prop function type with a generic default is no type', "Foo = component\n  @x: () => Bar<T = number>\n  render\n    div", ":2:28: Unexpected 'dedent'"
+
+fail 'class generics after a parent call reject', "mixin = (b) -> b\nclass B\nclass A extends mixin(B)<T>\n  x = 1", 'class generics are not supported'
+fail 'class generics after a parent call with arguments reject', "mix = (b, c) -> b\nclass B\nclass A extends mix(B, B)<T>\n  x = 1", 'class generics are not supported'
+
+test 'a bracketed comparison after a bracketed class expression', '''
+  x = [class A][0]
+  y = [1 < 2][0]
+  y
+''', true
+
+test 'a class expression compares with !=', '''
+  r = class A != null
+  r
+''', true
+
+fail 'a class then-body does not make the next block a class body', "class A then make: ->\n  x: number\n  y: 1\n  x = 1\n  0", "these adjacent 'name:' lines are ambiguous"
+
+test 'a bodiless class does not make a later block a class body', '''
+  class A
+  f = ->
+    y: 1
+  f().y
+''', 1
+
+test 'a typed declaration after a bracketed function block', '''
+  f = (g) -> g()
+  f(->
+    1
+  )
+  x: number = 5
+  x
+''', 5
+
+test 'a key line two lines up does not block a bare typed forward', '''
+  a: 1
+  b = 2
+  c: number
+  c = 3
+  c
+''', 3
+
+test 'a key line before a block does not block its first bare typed forward', '''
+  a: 1
+  if true
+    c: number
+    c = 3
+    r = c
+  r
+''', 3
+
+test 'a key line opening a block does not block bare typed forwards inside it', '''
+  r = null
+  k: do ->
+    z = 1
+    c: number
+    c = 3
+    r = c + z
+  r
+''', 4
+
+test 'a nested block inside a default body keeps its key lines', '''
+  f = (a = ->
+    if true
+      1
+    b: 2
+  ) -> a().b
+  f()
+''', 2
+
+test 'a parameter after an empty arrow default takes its annotation', '''
+  f = (a = ->,
+    b: number) -> b
+  f(undefined, 5)
+''', 5
+
+test 'a parameter after a class default takes its annotation', '''
+  f = (a = class,
+    b: number) -> b
+  f(undefined, 5)
+''', 5
+
+test 'a colon after a parameter default is an object key', '''
+  f = (a = b: 1) -> a.b
+  f()
+''', 1
+
+test 'a newline after a semicolon ends an inline default body', '''
+  f = (a = -> 1 ;
+      b: 2
+  ) -> b
+  f(undefined, 7)
+''', 7
