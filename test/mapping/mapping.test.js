@@ -412,10 +412,10 @@ describe('TS face: a re-rendered literal owns its own source extent', () => {
   });
 });
 
-// Two lowerings build a NODE at emit time, so it carries no store row and the
-// name inside it inherits whatever cover encloses it: `.=` synthesizes the
-// member it re-binds through, and a constructor's promoted-parameter strip
-// rebuilds each typed-var. The names are still source reads either way.
+// A lowering can build a NODE at emit time, so it carries no store row and the
+// name inside it inherits whatever cover encloses it: a constructor's
+// promoted-parameter strip rebuilds each typed-var. The names are still source
+// reads.
 describe('TS face: a node synthesized at emit time still places its names', () => {
   const rowsFor = (src) => {
     const r = parser.parse(src, { primitives: true });
