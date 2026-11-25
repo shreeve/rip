@@ -143,6 +143,55 @@ code "default param", "(x = 10) -> x", "(function(x = 10) {\n  return x;\n});"
 test "multiple defaults", "fn = (a = 1, b = 2) -> a + b\nfn()", 3
 test "partial defaults", "fn = (a = 1, b = 2) -> a + b\nfn(5)", 7
 
+# A default's clause blocks (else, else if, catch, finally) are the value's
+# body like its first block: a `key: value` line there is a pair, never a
+# parameter annotation.
+test "default param else block keeps an object", """
+  fn = (a = if no
+    1
+  else
+    b: 2
+  ) -> a
+  fn().b
+  """, 2
+
+test "default param else if block keeps an object", """
+  fn = (a = if no
+    1
+  else if yes
+    b: 2
+  ) -> a
+  fn().b
+  """, 2
+
+test "default param catch block keeps an object", """
+  fn = (a = try
+    throw new Error 'no'
+  catch e
+    b: e.message
+  ) -> a
+  fn().b
+  """, 'no'
+
+test "default param finally block evaluates its pairs", """
+  seen = []
+  fn = (a = try
+    1
+  finally
+    b: seen.push 'fin'
+  ) -> a
+  [fn(), seen]
+  """, [1, ['fin']]
+
+test "a parameter after a default's else block stays a parameter", """
+  fn = (a = if no
+    1
+  else
+    3
+  , b = 4) -> a + b
+  fn()
+  """, 7
+
 # ==============================================================================
 # Expansion: "expansion"
 # ==============================================================================
