@@ -1235,3 +1235,42 @@ fail 'a sign before an optional marker outside a mapped row rejects', 'type X = 
 fail 'arithmetic after an array type rejects', 'type X = A[] + 1', "code expression ('+')"
 fail 'an assignment line in a block alias body rejects', "type X =\n  a: number\n  b = 2", "code expression ('=')"
 fail 'a string-named method shorthand in an interface rejects', "interface I\n  \"m\"(x: number): void", "code expression ('(')"
+
+# ==============================================================================
+# Mutation-audit pins — type-run collection
+# ==============================================================================
+
+test 'a cast to a multi-line object type', '''
+  y = 1
+  x = y as {
+    a: number
+  }
+  x
+''', 1
+
+test 'a cast to a double generic close', '''
+  y = 1
+  x = y as A<B<C>>
+  x
+''', 1
+
+test 'a cast to a triple generic close', '''
+  y = 1
+  x = y as A<B<C<D>>>
+  x
+''', 1
+
+test 'a right shift after a cast is the operator', '''
+  x = 8
+  r = x as number >> 1
+  r
+''', 4
+
+fail 'a closer over two open generics in a cast rejects at the inner one', "y = 1\nf = (v) -> v\nf(y as A<B<C)", ":3:11: unclosed '<'"
+
+type 'a multi-line object parameter type separates its fields', "def f(o: {\n  a: Array<number>\n  b: string\n})\n  o", '''
+  declare function f(o: { a: Array<number>; b: string }): any;
+'''
+type 'an optional member in a parameter object type', "def f(o: {a?: number})\n  o", '''
+  declare function f(o: { a?: number }): any;
+'''

@@ -3,7 +3,7 @@
 Survivors of the lexer-pass mutation audit at 119b45bb, classified per the triage brief.
 Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 
-## GAP (99)
+## GAP (127)
 
 - src/types.js:217:11845:statement — test/rip/types.rip › a method member after a generic member in an inline object type
 - src/types.js:217:11858:number — test/rip/types.rip › a method member after a generic member in an inline object type
@@ -50,6 +50,32 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:316:17288:statement — test/rip/types.rip › two method members in an inline object type
 - src/types.js:317:17316:statement — test/rip/types.rip › a negative literal opening a method parameter list
 - src/types.js:317:17326:boolean — test/rip/types.rip › a negative literal opening a method parameter list
+- src/types.js:495:25462:relation — test/rip/types.rip › a cast to a multi-line object type
+- src/types.js:495:25466:number — test/rip/types.rip › a cast to a multi-line object type
+- src/types.js:503:25918:relation — test/rip/types.rip › a cast to a triple generic close
+- src/types.js:503:25950:relation — test/rip/types.rip › a right shift after a cast is the operator
+- src/types.js:504:26001:number — test/rip/types.rip › a cast to a triple generic close
+- src/types.js:505:26011:statement — test/rip/types.rip › a cast to a double generic close
+- src/types.js:528:26918:arith — test/rip/types.rip › a closer over two open generics in a cast rejects at the inner one
+- src/types.js:528:26920:number — test/rip/types.rip › a closer over two open generics in a cast rejects at the inner one
+- src/types.js:529:26942:statement — test/rip/types.rip › a closer over two open generics in a cast rejects at the inner one
+- src/types.js:553:28160:arith — test/lang/lexer.test.js › mutation-audit pins — src/types.js › a '+1' cast type rejects spanning the sign and its number
+- src/types.js:553:28162:number — test/lang/lexer.test.js › mutation-audit pins — src/types.js › a '+1' cast type rejects spanning the sign and its number
+- src/types.js:562:28473:logic — test/rip/types.rip › a multi-line object parameter type separates its fields
+- src/types.js:567:28837:arith — test/rip/types.rip › a multi-line object parameter type separates its fields
+- src/types.js:567:28839:number — test/rip/types.rip › a multi-line object parameter type separates its fields
+- src/types.js:568:28893:arith — test/rip/types.rip › a multi-line object parameter type separates its fields
+- src/types.js:568:28895:number — test/rip/types.rip › a multi-line object parameter type separates its fields
+- src/types.js:569:28940:relation — test/rip/types.rip › a multi-line object parameter type separates its fields
+- src/types.js:569:28956:relation — test/rip/types.rip › a multi-line object parameter type separates its fields
+- src/types.js:575:29163:negation — test/rip/types.rip › an optional member in a parameter object type
+- src/types.js:575:29185:arith — test/rip/types.rip › an optional member in a parameter object type
+- src/types.js:575:29187:number — test/rip/types.rip › an optional member in a parameter object type
+- src/types.js:575:29196:relation — test/rip/types.rip › an optional member in a parameter object type
+- src/types.js:576:29229:statement — test/rip/types.rip › an optional member in a parameter object type
+- src/types.js:576:29248:arith — test/rip/types.rip › an optional member in a parameter object type
+- src/types.js:576:29250:number — test/rip/types.rip › an optional member in a parameter object type
+- src/types.js:578:29291:statement — test/rip/types.rip › an optional member in a parameter object type
 - src/types.js:1399:66520:logic — test/rip/types.rip › an implicit call whose argument assigns is not a type alias
 - src/types.js:1402:66703:relation — test/rip/types.rip › a function named type called mid-expression is not an alias
 - src/types.js:1417:67416:number — test/rip/types.rip › as before an operator that starts no type stays a name
@@ -99,13 +125,15 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:1833:88120:logic — test/rip/types.rip › a key line before a block does not block its first bare typed forward
 - src/types.js:1834:88151:statement — test/rip/types.rip › a key line before a block does not block its first bare typed forward
 - src/types.js:1835:88182:statement — test/rip/types.rip › a key line opening a block does not block bare typed forwards inside it
+- src/types.js:1861:89218:statement — test/rip/types.rip › a parameter after an empty arrow default takes its annotation
+- src/types.js:1862:89256:statement — test/rip/types.rip › a parameter after a class default takes its annotation
 - src/types.js:1868:89530:update — test/rip/types.rip › a nested block inside a default body keeps its key lines
 - src/types.js:1890:90514:boolean — test/rip/types.rip › a newline after a semicolon ends an inline default body
 - src/types.js:1891:90549:boolean — test/rip/types.rip › a newline after a semicolon ends an inline default body
 - src/types.js:1901:90987:statement — test/rip/types.rip › a colon after a parameter default is an object key
 - src/types.js:1901:91013:boolean — test/rip/types.rip › a colon after a parameter default is an object key
 
-## EQUIVALENT (87)
+## EQUIVALENT (94)
 
 - src/types.js:221:12006:statement — openAngle is reassigned at every `<` opened from angle 0 and read only while angle > 0, i.e. after such an opener; the stale value is always overwritten first
 - src/types.js:249:13482:arith — j-2 < from puts tokens[j-2] before the body: the alias `=` or the body INDENT, never `=>`, `asserts`, or a `:` after CALL_END, so the shape test fails there anyway
@@ -122,6 +150,13 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:309:17043:relation — tokens[to] is the body's OUTDENT or the alias line's TERMINATOR/OUTDENT (typeAliasEnd rejects anything else after the run), never CALL_START/CALL_END
 - src/types.js:328:17580:logic — every CALL_START in a body either rejects or pushes its mate's index, and the pairs nest, so each CALL_END that reaches this line is the stack top
 - src/types.js:329:17680:boolean — a method list's CALL_END is always followed by its return `:` (the push requires it), which matches no atomEnd-reading rule and resets atomEnd
+- src/types.js:464:24312:arith — `end`'s initial value survives only when the run collects no parts (every part push sets end), and every caller discards run.end then (claim returns -1; typeAliasEnd fails at tokens[j-1].end)
+- src/types.js:464:24314:number — `end`'s initial value survives only when the run collects no parts (every part push sets end), and every caller discards run.end then (claim returns -1; typeAliasEnd fails at tokens[j-1].end)
+- src/types.js:464:24322:logic — `end`'s initial value survives only when the run collects no parts (every part push sets end), and every caller discards run.end then (claim returns -1; typeAliasEnd fails at tokens[j-1].end)
+- src/types.js:464:24325:number — `end`'s initial value survives only when the run collects no parts (every part push sets end), and every caller discards run.end then (claim returns -1; typeAliasEnd fails at tokens[j-1].end)
+- src/types.js:495:25473:relation — the run's first token directly follows the `as` word, which never suppresses a newline: a next-line follower arrives as INDENT/TERMINATOR, which is no TYPE_STARTER, so the first token never carries newLine
+- src/types.js:518:26440:logic — braceStack entries are only ever compared with '<' and '{'; a '[' mislabelled '(' compares identically
+- src/types.js:539:27365:logic — drops the STRING_END and HEREGEX_END legs: a run inside an interpolation always meets INTERPOLATION_END first, and runs never start inside string text, so neither is ever the first stop (probed string/heregex interpolations and interpolated string types)
 - src/types.js:1160:55747:number — classHeadRunDepth is only compared with classHeadDepth, which is captured from it at CLASS; a constant offset of 1 changes no comparison (balanced brackets keep it >= its start, so `classHeadDepth >= 0` still means armed)
 - src/types.js:1404:66838:relation — typeAliasEnd/interfaceEnd return -1 or an index >= i+3 (name, `=`/INDENT follow), never 0
 - src/types.js:1404:66841:number — typeAliasEnd/interfaceEnd return -1 or an index >= i+3, never in [0, 1)
@@ -195,8 +230,9 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:1890:90493:statement — the flag is already false at the `;` unless an immediate head directly precedes it (`-> ;`, `loop ;`, `do ;`), which leaves an empty body the grammar rejects at the same token either way (probed)
 - src/types.js:1891:90533:statement — pendingCond is true at the `;` only after `= if/class…` with no THEN, which the grammar rejects at the same token either way (probed `c = if x ;`, `c = class ;`)
 
-## BUG (7)
+## BUG (8)
 
+- src/types.js:495:25439:statement — `x = y as A |\n  B` → expected the type `A | B` (or a loud rejection), got `let x = y;\nB;`: the cast run breaks at the continuation line's depth-0 newline after a trailing `|`, and `B` silently compiles as its own statement
 - src/types.js:1435:68450:arith — `a = [x as number\n]` (also `f(x as number\n)`, `{a: x as number\n}`) → expected `[x]`, got `Unexpected ']'` at 3:1: the cast's terminator restoration inserts a TERMINATOR before a closer on its own line (`a = [x\n]` compiles)
 - src/types.js:1435:68452:number — same repro as 1435:68450 — the restoration fires for every newline follower, closers included
 - src/types.js:1510:72162:statement — same repro as 1510:72165
