@@ -492,7 +492,11 @@ the affected final gates again.
  Server/Manager: every refresh tier in docs/HMR.md, plus API proxying.
  Manual certification, not a pull-request gate. No demo is a gate.
 - `bun run parser` — regenerate `src/parser.js` from the grammar.
-- `bun run corpus` — regenerate the corpus expected outputs.
+- `bun run corpus` — regenerate the corpus expected outputs and the
+  consumer-corpus manifest (`test/corpus/consumers.json`: one output hash
+  per face for every package module and language-suite row). Review a
+  moved manifest with `bun scripts/consumer-diff.mjs <ref>` before
+  accepting it.
 - `bun run decls` — regenerate the declaration beside each typed
   runtime (`src/runtime/<key>.d.ts`) from the runtime table's face
   signatures and `src/ts/runtime-exports.js`, the signatures of the
