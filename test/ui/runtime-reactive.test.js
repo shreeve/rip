@@ -1494,3 +1494,123 @@ describe('the reactive language surface is not reachable', () => {
     expect(compile('x < ~load()').code).toBe('x < (~load());');
   });
 });
+
+// ── Edge reuse keeps the drop-and-re-add graph's behavior ─────────────
+//
+// The runtime reuses dependency links across runs instead of dropping
+// every edge at run start and re-adding each on read. These pins hold it
+// to the drop-and-re-add graph's observable behavior where reuse is
+// subtle: repeat reads, free() and dispose mid-run, reentrant runs, and
+// pull-checks that run their consumer again. The last three are
+// minimized programs from a differential fuzzer; each expected trace is
+// the drop-and-re-add runtime's.
+
+// Replays a minimized differential-fuzz program against a reactive runtime
+// module and returns its trace: every effect run and cleanup, computed
+// evaluation and write, and the reads and writes at the end.
+function replay(R, P) {
+  const log = [];
+  const L = (...a) => log.push(a.join(' '));
+  const states = Array.from({ length: P.NS }, (_, i) => R.__state(i % 3));
+  const srcs = [...states];
+  const comps = [];
+  P.comps.forEach((cs, c) => {
+    const pool = srcs.slice();
+    const comp = R.__computed(() => {
+      L('C' + c);
+      let sum = 0;
+      for (let k = 0; k < cs.reads.length; k++) {
+        if (k === cs.at && cs.cwrite >= 0) { L('C' + c, 'writes', cs.cwrite); states[cs.cwrite].value = (states[cs.cwrite].read() + 1) % 4; }
+        sum += +pool[cs.reads[k]].value;
+      }
+      return sum % cs.mod;
+    });
+    comps.push(comp);
+    srcs.push(comp);
+  });
+  for (const es of P.effects) {
+    const pool = srcs.slice();
+    let runs = 0;
+    R.__effect(() => {
+      runs++;
+      L('E' + es.id, 'run', runs);
+      let acc = 0;
+      for (let k = 0; k <= es.reads.length; k++) {
+        if (k === es.actAt && es.act === 0 && runs > 1) { L('E' + es.id, 'act', 0); srcs[es.actArg % srcs.length].free(); }
+        if (k === es.reads.length) break;
+        if (es.cond && k > 0 && acc % 2 === 0) continue;
+        acc += +pool[es.reads[k]].value;
+      }
+      return () => L('E' + es.id, 'cleanup');
+    });
+  }
+  for (const [op, i, v] of P.steps) if (op === 'write') { L('write', i, v); states[i].value = v; }
+  for (let i = 0; i < srcs.length; i++) { try { L('final', i, String(srcs[i].value)); } catch (e) { L('ferr', i, e.message.slice(0, 40)); } }
+  for (let i = 0; i < P.NS; i++) { try { L('poke', i); states[i].value = 9; } catch (e) { L('perr', e.message.slice(0, 40)); } }
+  return log;
+}
+
+describe('edge reuse keeps the drop-and-re-add behavior', () => {
+  test('free() between two reads of a state in one run keeps the subscription', () => {
+    const s = v4mod.__state(0);
+    let runs = 0;
+    const dispose = v4mod.__effect(() => { runs++; s.value; if (runs === 1) s.free(); s.value; });
+    s.value = 1;
+    expect(runs).toBe(2);
+    dispose();
+  });
+
+  test('a computed read twice with a write between compares only its latest version', () => {
+    const s = v4mod.__state(0), x = v4mod.__state(0);
+    const C = v4mod.__computed(() => s.value * 2);
+    let runs = 0, dispose;
+    v4mod.__batch(() => {
+      dispose = v4mod.__effect(() => { runs++; C.value; x.value; if (runs === 1) s.value = 1; C.value; });
+    });
+    expect(runs).toBe(1);
+    dispose();
+  });
+
+  test('an effect re-queued by its own write pull-checks only what this run has read', () => {
+    const s1 = v4mod.__state(0), s2 = v4mod.__state(0);
+    const C1 = v4mod.__computed(() => s1.value > 100);
+    let evals = 0;
+    const C2 = v4mod.__computed(() => { evals++; return s2.value; });
+    let runs = 0;
+    const dispose = v4mod.__effect(() => {
+      runs++;
+      C1.value;
+      if (runs >= 2) s1.value = s1.read() + 1;
+      C2.value;
+    });
+    s2.value = 1;
+    expect([runs, evals]).toEqual([2, 2]);
+    dispose();
+  });
+
+  test('an effect that touches a source of its own computed runs once per change', () => {
+    const tick = v4mod.__state(0), sel = v4mod.__state('a');
+    const stamp = v4mod.__computed(() => { tick.value; return 'const'; });
+    const label = v4mod.__computed(() => sel.value.toUpperCase());
+    let runs = 0;
+    const dispose = v4mod.__effect(() => { runs++; stamp.value; if (runs > 1) tick.touch(); label.value; });
+    sel.value = 'b';
+    expect(runs).toBe(2);
+    dispose();
+  });
+
+  test("a computed freed by a nested effect mid-evaluation, then read again, must not leave a link its next free() cannot find", () => {
+    const program = {"NS": 5, "comps": [{"reads": [3], "alt": -1, "mod": 3, "cthrow": -1, "cwrite": -1, "at": 1, "cself": false}, {"reads": [5, 3, 4, 5], "alt": -1, "mod": 3, "cthrow": -1, "cwrite": 1, "at": 1, "cself": false}, {"reads": [5, 3], "alt": -1, "mod": 4, "cthrow": -1, "cwrite": -1, "at": 0, "cself": false}], "effects": [{"id": 1, "hasChild": false, "reads": [1, 3, 1], "writeAt": -1, "target": 1, "batch": false, "cond": false, "disposeOther": -1, "child": null, "act": 0, "actAt": 3, "actArg": 454}, {"id": 2, "hasChild": false, "reads": [6, 1, 3], "writeAt": -1, "target": 1, "batch": false, "cond": false, "disposeOther": -1, "child": null, "act": -1, "actAt": 1, "actArg": 936}], "steps": []};
+    expect(replay(v4mod, program)).toEqual(["E1 run 1", "E2 run 1", "C1", "C0", "C1 writes 1", "E1 cleanup", "E1 run 2", "E1 act 0", "final 0 0", "final 1 2", "final 2 2", "final 3 0", "final 4 1", "final 5 0", "final 6 1", "C2", "final 7 0", "poke 0", "poke 1", "E1 cleanup", "E1 run 3", "E1 act 0", "E2 cleanup", "E2 run 2", "poke 2", "poke 3", "E1 cleanup", "E1 run 4", "E1 act 0", "E2 cleanup", "E2 run 3", "poke 4"]);
+  });
+
+  test("a pull-check whose recompute runs the reader again walks that run's reads, not the dropped ones", () => {
+    const program = {"NS": 2, "comps": [{"reads": [1, 1, 1], "alt": -1, "mod": 4, "cthrow": -1, "cwrite": -1, "at": 1, "cself": false}, {"reads": [1], "alt": -1, "mod": 2, "cthrow": -1, "cwrite": -1, "at": 0, "cself": false}, {"reads": [0, 0], "alt": -1, "mod": 3, "cthrow": -1, "cwrite": 1, "at": 0, "cself": false}, {"reads": [4, 4, 4], "alt": -1, "mod": 3, "cthrow": -1, "cwrite": -1, "at": 1, "cself": false}], "effects": [{"id": 1, "hasChild": false, "reads": [1, 4, 2], "writeAt": -1, "target": 1, "batch": false, "cond": true, "disposeOther": -1, "child": null, "act": -1, "actAt": 2, "actArg": 831}], "steps": [["write", 1, 1]]};
+    expect(replay(v4mod, program)).toEqual(["E1 run 1", "C2", "C2 writes 1", "E1 run 2", "C0", "write 1 1", "E1 cleanup", "E1 run 3", "C0", "final 0 0", "final 1 1", "final 2 3", "C1", "final 3 1", "final 4 0", "C3", "final 5 0", "poke 0", "C2", "C2 writes 1", "E1 cleanup", "E1 run 4", "poke 1", "E1 cleanup", "E1 run 5", "C0"]);
+  });
+
+  test("a computed whose evaluation re-runs its reader, which drops the edge, still has its version compared by the reader's pull-check", () => {
+    const program = {"NS": 4, "comps": [{"reads": [2], "alt": -1, "mod": 2, "cthrow": -1, "cwrite": -1, "at": 1, "cself": false}, {"reads": [4, 0], "alt": -1, "mod": 2, "cthrow": -1, "cwrite": -1, "at": 1, "cself": false}, {"reads": [5, 5], "alt": -1, "mod": 2, "cthrow": -1, "cwrite": 1, "at": 1, "cself": false}, {"reads": [1, 4, 1], "alt": -1, "mod": 4, "cthrow": -1, "cwrite": -1, "at": 2, "cself": false}], "effects": [{"id": 1, "hasChild": false, "reads": [1, 6, 5], "writeAt": -1, "target": 1, "batch": false, "cond": true, "disposeOther": -1, "child": null, "act": -1, "actAt": 4, "actArg": 512}], "steps": []};
+    expect(replay(v4mod, program)).toEqual(["E1 run 1", "C2", "C1", "C0", "C2 writes 1", "E1 run 2", "final 0 0", "final 1 2", "final 2 2", "final 3 0", "final 4 0", "final 5 0", "final 6 0", "C3", "final 7 0", "poke 0", "C1", "C2", "C2 writes 1", "E1 cleanup", "E1 run 3", "perr reactive runtime: computed value read du", "poke 1", "E1 run 4", "C2", "C2 writes 1", "poke 2", "C0", "C1", "C2", "C2 writes 1", "E1 cleanup", "E1 run 5", "poke 3"]);
+  });
+});

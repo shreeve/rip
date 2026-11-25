@@ -178,8 +178,14 @@ function __flushEffects() {
 //     and queue order decides flush order within an owner depth;
 //   - while a subscriber runs, a link it has not yet re-read this run
 //     is not followed by notification (a dropped edge would not be).
-// A link carries the epoch of the run that last read it; the run's own
-// epoch tells current links from not-yet-re-read ones.
+// Every run takes a fresh id from one global counter. A link carries the
+// id of the run that last read it, so the run's own id tells current
+// links from not-yet-re-read ones. A source carries the id of the last
+// run that read it: a repeat read in the same run finds its link and
+// keeps its first place, as a repeat add to a set does, so a run holds
+// at most one link per source.
+
+let __runCounter = 0;
 
 class Link {
   constructor(dep, sub) {
@@ -230,25 +236,75 @@ function detachAllSubs(dep) {
 // Record that sub read dep in its current run; returns the edge.
 function track(dep, sub) {
   const cursor = sub._cursor;
-  if (cursor !== null && cursor.dep === dep) return cursor;
+  let link = cursor !== null && cursor.dep === dep ? cursor : linkThisRun(dep, sub);
+  if (link !== null) {
+    // free()/kill() detached it mid-run; re-adding puts it at the end.
+    if (!link.attached) attachSub(dep, link);
+    return link;
+  }
   const next = cursor === null ? sub._depsHead : cursor.nextDep;
   if (next !== null && next.dep === dep) {
-    next.epoch = sub._epoch;
-    if (!next.attached || dep._subsTail !== next) { detachSub(dep, next); attachSub(dep, next); }
-    sub._cursor = next;
-    return next;
+    link = next;
+    link.epoch = sub._epoch;
+    if (!link.attached || dep._subsTail !== link) { detachSub(dep, link); attachSub(dep, link); }
+  } else {
+    link = new Link(dep, sub);
+    if (cursor === null) { link.nextDep = sub._depsHead; sub._depsHead = link; }
+    else { link.nextDep = cursor.nextDep; cursor.nextDep = link; }
+    attachSub(dep, link);
   }
+  sub._cursor = link;
+  dep._readRun = sub._epoch;
+  dep._readLink = link;
+  if (sub._index !== null) sub._index.set(dep, link);
+  return link;
+}
+
+// sub's link to dep if its current run has read dep, else null. Run ids
+// only grow, so a mark below this run's id predates it; a mark above it
+// was left by a run nested inside this one, which hides whether this run
+// read dep too — only then is the run's own list consulted.
+function linkThisRun(dep, sub) {
+  const mark = dep._readRun;
+  if (mark === sub._epoch) return dep._readLink.epoch === mark ? dep._readLink : null;
+  if (mark < sub._epoch || sub._cursor === null) return null;
+  if (sub._index !== null) return sub._index.get(dep) ?? null;
+  let n = 0;
+  for (let l = sub._depsHead; l !== null; l = l.nextDep) {
+    if (l.dep === dep) return l;
+    if (l === sub._cursor) break;
+    // A long run asked repeatedly would scan quadratically; index it once.
+    if (++n === 32) {
+      const index = new Map();
+      for (let m = sub._depsHead; m !== null; m = m.nextDep) {
+        index.set(m.dep, m);
+        if (m === sub._cursor) break;
+      }
+      sub._index = index;
+      return index.get(dep) ?? null;
+    }
+  }
+  return null;
+}
+
+// A link the pull-check compares but notification never follows: in the
+// reader's list at its cursor, detached from the source.
+function versionLink(dep, sub) {
   const link = new Link(dep, sub);
+  const cursor = sub._cursor;
   if (cursor === null) { link.nextDep = sub._depsHead; sub._depsHead = link; }
   else { link.nextDep = cursor.nextDep; cursor.nextDep = link; }
-  attachSub(dep, link);
   sub._cursor = link;
+  dep._readRun = sub._epoch;
+  dep._readLink = link;
+  if (sub._index !== null) sub._index.set(dep, link);
   return link;
 }
 
 function beginRun(sub) {
-  sub._epoch++;
+  sub._epoch = ++__runCounter;
   sub._cursor = null;
+  sub._index = null;
   sub._running++;
 }
 
@@ -258,30 +314,24 @@ function endRun(sub) {
   let l = cursor === null ? sub._depsHead : cursor.nextDep;
   while (l !== null) { detachSub(l.dep, l); l = l.nextDep; }
   if (cursor === null) sub._depsHead = null; else cursor.nextDep = null;
+  sub._index = null;
   sub._running--;
 }
 
+// A dropped link also stops counting as read this run: a subscriber
+// freed or disposed mid-run that reads the source again gets a fresh
+// link in its own list, never the dropped one re-attached outside it.
 function dropAllDeps(sub) {
-  for (let l = sub._depsHead; l !== null; l = l.nextDep) detachSub(l.dep, l);
+  for (let l = sub._depsHead; l !== null; l = l.nextDep) { detachSub(l.dep, l); l.epoch = 0; }
   sub._depsHead = null;
   sub._cursor = null;
+  sub._index = null;
 }
 
 // Is this edge followed by notification right now?
 function live(link) {
   const sub = link.sub;
   return sub._running === 0 || link.epoch === sub._epoch;
-}
-
-// Has the subscriber read dep during its current run so far?
-function readThisRun(sub, dep) {
-  const end = sub._cursor;
-  if (end === null) return false;
-  for (let l = sub._depsHead; l !== null; l = l.nextDep) {
-    if (l.dep === dep) return true;
-    if (l === end) break;
-  }
-  return false;
 }
 
 const DEPENDENCY_WRITE = 'reactive runtime: computed dependency changed during evaluation — ' +
@@ -302,6 +352,8 @@ class State extends Source {
     this._value = value;
     this._subsHead = null;
     this._subsTail = null;
+    this._readRun = 0;
+    this._readLink = null;
     this._notifying = false;
     this._locked = false;
     this._dead = false;
@@ -338,7 +390,7 @@ class State extends Source {
 
   _rejectDependencyWrite() {
     const cur = __currentEffect;
-    if (cur !== null && cur._isComputed && readThisRun(cur, this)) throw new Error(DEPENDENCY_WRITE);
+    if (cur !== null && cur._isComputed && linkThisRun(this, cur) !== null) throw new Error(DEPENDENCY_WRITE);
   }
 
   // Computeds mark dirty (invalidation propagates without
@@ -390,16 +442,29 @@ const CLEAN = 0, CHECK = 1, DIRTY = 2;
 
 // Pull-check: did any computed this consumer read last run actually
 // change its output since? Recomputes those computeds on demand
-// (untracked — the consumer keeps its existing edges).
+// (untracked — the consumer keeps its existing edges). A consumer
+// re-queued by its own write is checked mid-run: only what this run has
+// read so far counts, as only those edges would exist after a drop at
+// run start. The list is walked live and each version read after its
+// recompute, since a recompute can run the consumer again.
 function __computedDepsChanged(consumer) {
   const prev = __currentEffect;
   __currentEffect = null;
   try {
-    for (let l = consumer._depsHead; l !== null; l = l.nextDep) {
+    const first = () => (consumer._running > 0 && consumer._cursor === null ? null : consumer._depsHead);
+    for (let l = first(); l !== null;) {
+      const last = consumer._running > 0 && l === consumer._cursor;
       const dep = l.dep;
-      if (!dep._isComputed) continue;
-      dep.value;
-      if (dep.version !== l.version) return true;
+      if (dep._isComputed) {
+        const seen = l.version, run = consumer._epoch;
+        dep.value;
+        if (dep.version !== seen) return true;
+        // The recompute ran the consumer again: what it read last is now
+        // its new run's reads, and the walk continues over those.
+        if (consumer._epoch !== run) { l = first(); continue; }
+      }
+      if (last) break;
+      l = l.nextDep;
     }
     return false;
   } finally {
@@ -415,8 +480,11 @@ class Computed extends Source {
     this._dirty = DIRTY;
     this._subsHead = null;
     this._subsTail = null;
+    this._readRun = 0;
+    this._readLink = null;
     this._depsHead = null;
     this._cursor = null;
+    this._index = null;
     this._epoch = 0;
     this._running = 0;
     this._written = null;
@@ -481,7 +549,13 @@ class Computed extends Source {
         endRun(this);
       }
     }
-    if (link !== null) link.version = this.version;
+    if (link !== null) {
+      // The evaluation ran the reader again, and that run did not read
+      // this computed: the edge is gone, but the read still happened, so
+      // the reader's pull-check still compares this version.
+      if (link.epoch !== cur._epoch) link = linkThisRun(this, cur) ?? versionLink(this, cur);
+      link.version = this.version;
+    }
     return this._value;
   }
 
@@ -548,6 +622,7 @@ class Effect {
     this.depth = owner ? owner.depth + 1 : 0;
     this._depsHead = null;
     this._cursor = null;
+    this._index = null;
     this._epoch = 0;
     this._running = 0;
     this._hard = true; // the creation run always runs; a state write sets it again

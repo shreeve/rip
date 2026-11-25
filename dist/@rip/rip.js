@@ -27719,6 +27719,7 @@ function __flushEffects() {
     throw e;
   }
 }
+var __runCounter = 0;
 
 class Link {
   constructor(dep, sub) {
@@ -27770,19 +27771,68 @@ function detachAllSubs(dep) {
 }
 function track(dep, sub) {
   const cursor = sub._cursor;
-  if (cursor !== null && cursor.dep === dep)
-    return cursor;
+  let link = cursor !== null && cursor.dep === dep ? cursor : linkThisRun(dep, sub);
+  if (link !== null) {
+    if (!link.attached)
+      attachSub(dep, link);
+    return link;
+  }
   const next = cursor === null ? sub._depsHead : cursor.nextDep;
   if (next !== null && next.dep === dep) {
-    next.epoch = sub._epoch;
-    if (!next.attached || dep._subsTail !== next) {
-      detachSub(dep, next);
-      attachSub(dep, next);
+    link = next;
+    link.epoch = sub._epoch;
+    if (!link.attached || dep._subsTail !== link) {
+      detachSub(dep, link);
+      attachSub(dep, link);
     }
-    sub._cursor = next;
-    return next;
+  } else {
+    link = new Link(dep, sub);
+    if (cursor === null) {
+      link.nextDep = sub._depsHead;
+      sub._depsHead = link;
+    } else {
+      link.nextDep = cursor.nextDep;
+      cursor.nextDep = link;
+    }
+    attachSub(dep, link);
   }
+  sub._cursor = link;
+  dep._readRun = sub._epoch;
+  dep._readLink = link;
+  if (sub._index !== null)
+    sub._index.set(dep, link);
+  return link;
+}
+function linkThisRun(dep, sub) {
+  const mark = dep._readRun;
+  if (mark === sub._epoch)
+    return dep._readLink.epoch === mark ? dep._readLink : null;
+  if (mark < sub._epoch || sub._cursor === null)
+    return null;
+  if (sub._index !== null)
+    return sub._index.get(dep) ?? null;
+  let n = 0;
+  for (let l = sub._depsHead;l !== null; l = l.nextDep) {
+    if (l.dep === dep)
+      return l;
+    if (l === sub._cursor)
+      break;
+    if (++n === 32) {
+      const index = new Map;
+      for (let m = sub._depsHead;m !== null; m = m.nextDep) {
+        index.set(m.dep, m);
+        if (m === sub._cursor)
+          break;
+      }
+      sub._index = index;
+      return index.get(dep) ?? null;
+    }
+  }
+  return null;
+}
+function versionLink(dep, sub) {
   const link = new Link(dep, sub);
+  const cursor = sub._cursor;
   if (cursor === null) {
     link.nextDep = sub._depsHead;
     sub._depsHead = link;
@@ -27790,13 +27840,17 @@ function track(dep, sub) {
     link.nextDep = cursor.nextDep;
     cursor.nextDep = link;
   }
-  attachSub(dep, link);
   sub._cursor = link;
+  dep._readRun = sub._epoch;
+  dep._readLink = link;
+  if (sub._index !== null)
+    sub._index.set(dep, link);
   return link;
 }
 function beginRun(sub) {
-  sub._epoch++;
+  sub._epoch = ++__runCounter;
   sub._cursor = null;
+  sub._index = null;
   sub._running++;
 }
 function endRun(sub) {
@@ -27810,29 +27864,21 @@ function endRun(sub) {
     sub._depsHead = null;
   else
     cursor.nextDep = null;
+  sub._index = null;
   sub._running--;
 }
 function dropAllDeps(sub) {
-  for (let l = sub._depsHead;l !== null; l = l.nextDep)
+  for (let l = sub._depsHead;l !== null; l = l.nextDep) {
     detachSub(l.dep, l);
+    l.epoch = 0;
+  }
   sub._depsHead = null;
   sub._cursor = null;
+  sub._index = null;
 }
 function live(link) {
   const sub = link.sub;
   return sub._running === 0 || link.epoch === sub._epoch;
-}
-function readThisRun(sub, dep) {
-  const end = sub._cursor;
-  if (end === null)
-    return false;
-  for (let l = sub._depsHead;l !== null; l = l.nextDep) {
-    if (l.dep === dep)
-      return true;
-    if (l === end)
-      break;
-  }
-  return false;
 }
 var DEPENDENCY_WRITE = "reactive runtime: computed dependency changed during evaluation — " + "computed functions must derive without writing or touching a dependency";
 
@@ -27857,6 +27903,8 @@ class State extends Source {
     this._value = value;
     this._subsHead = null;
     this._subsTail = null;
+    this._readRun = 0;
+    this._readLink = null;
     this._notifying = false;
     this._locked = false;
     this._dead = false;
@@ -27907,7 +27955,7 @@ class State extends Source {
   }
   _rejectDependencyWrite() {
     const cur = __currentEffect;
-    if (cur !== null && cur._isComputed && readThisRun(cur, this))
+    if (cur !== null && cur._isComputed && linkThisRun(this, cur) !== null)
       throw new Error(DEPENDENCY_WRITE);
   }
   _notify() {
@@ -27957,13 +28005,23 @@ function __computedDepsChanged(consumer) {
   const prev = __currentEffect;
   __currentEffect = null;
   try {
-    for (let l = consumer._depsHead;l !== null; l = l.nextDep) {
+    const first = () => consumer._running > 0 && consumer._cursor === null ? null : consumer._depsHead;
+    for (let l = first();l !== null; ) {
+      const last = consumer._running > 0 && l === consumer._cursor;
       const dep = l.dep;
-      if (!dep._isComputed)
-        continue;
-      dep.value;
-      if (dep.version !== l.version)
-        return true;
+      if (dep._isComputed) {
+        const seen = l.version, run = consumer._epoch;
+        dep.value;
+        if (dep.version !== seen)
+          return true;
+        if (consumer._epoch !== run) {
+          l = first();
+          continue;
+        }
+      }
+      if (last)
+        break;
+      l = l.nextDep;
     }
     return false;
   } finally {
@@ -27979,8 +28037,11 @@ class Computed extends Source {
     this._dirty = DIRTY;
     this._subsHead = null;
     this._subsTail = null;
+    this._readRun = 0;
+    this._readLink = null;
     this._depsHead = null;
     this._cursor = null;
+    this._index = null;
     this._epoch = 0;
     this._running = 0;
     this._written = null;
@@ -28046,8 +28107,11 @@ class Computed extends Source {
         endRun(this);
       }
     }
-    if (link !== null)
+    if (link !== null) {
+      if (link.epoch !== cur._epoch)
+        link = linkThisRun(this, cur) ?? versionLink(this, cur);
       link.version = this.version;
+    }
     return this._value;
   }
   read() {
@@ -28099,6 +28163,7 @@ class Effect {
     this.depth = owner ? owner.depth + 1 : 0;
     this._depsHead = null;
     this._cursor = null;
+    this._index = null;
     this._epoch = 0;
     this._running = 0;
     this._hard = true;
@@ -34423,7 +34488,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "60ee135a0877f603";
+var compilerBuild = () => "7c2cbc08786e9909";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
