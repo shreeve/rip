@@ -227,3 +227,23 @@ code 'parens are params', '''
     return (x * 2);
   });
   '''
+
+# ==============================================================================
+# A closer or a value literal before `=>` is never a callee
+# ==============================================================================
+
+test 'a fat arrow after an array literal is the next argument', '''
+  f = (a, g) -> [a, g()]
+  f [1, 2] => 3
+''', [[1, 2], 3]
+
+test 'a fat arrow after Infinity is the next argument', '''
+  f = (a, g) -> [a > 1e308, g()]
+  f Infinity => 3
+''', [true, 3]
+
+# The implied comma before an arrow belongs to call arguments only, and
+# only after a completed literal argument.
+fail "a literal then an arrow in an array has no implied comma", 'x = [1 -> 2]', "1:8: Unexpected '->'"
+fail "a literal then an arrow after a closed call has no implied comma", 'f(1)\ny = ["a" -> 2]', "2:10: Unexpected '->'"
+fail "a name tight against an arrow in call arguments has no implied comma", 'f(a->1)', "1:4: Unexpected '->'"

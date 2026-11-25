@@ -62,3 +62,9 @@ test "optional index null", "arr = null\narr?.[0]", undefined
 
 # Code generation
 code "optional index", "arr?.[i]", "arr?.[i]"
+
+# A line-end operator or dot continues onto the next line unless that line
+# is two words at the same indent after a dot (a new construct).
+test "an operator at a line end continues onto a two-word line", "foo = (a) -> a\nbar = 2\nx = 1 +\nfoo bar\nx", 3
+test "a dot at a line end continues onto a word and a spaced paren", "foo = {bar: (n) -> n + 1}\nx = foo.\nbar (1)\nx", 2
+test "a dot at a line end continues onto a pick", "o = {a: 1, b: 2}\nx = o.\n{a}\nx", {a: 1}

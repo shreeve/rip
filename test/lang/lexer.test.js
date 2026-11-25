@@ -754,3 +754,228 @@ describe('large inputs', () => {
     expect(tokens.length).toBeGreaterThan(1_500_000);
   });
 });
+
+describe('mutation-audit pins — src/types.js', () => {
+  test("a '+1' cast type rejects spanning the sign and its number", () => {
+    let err = null;
+    try { tokenize('r = x as +1'); } catch (e) { err = e; }
+    expect(err).not.toBeNull();
+    expect(err.message).toContain("TypeScript has no '+1' type");
+    expect(err.start).toBe(9);
+    expect(err.end).toBe(11);
+  });
+});
+
+// Every real token's span, written as the source text it covers and its
+// start offset: the side tables key on these, so a token that covers the
+// wrong bytes misplaces every mapping and diagnostic built on it.
+const realSpans = (src, opts) => tokenize(src, '<t>', opts).tokens
+  .filter((t) => !t.generated)
+  .map((t) => `${t.end < t.start ? '<reversed>' : src.slice(t.start, t.end)}@${t.start}`)
+  .join(' ');
+
+// A rejection's structured span (what an editor squiggles) and reason.
+const rejection = (src) => {
+  try { tokenize(src, 'f.rip'); } catch (e) { return [e.reason, e.start, e.end]; }
+  return null;
+};
+
+describe('operator and literal spans', () => {
+  test('word arrays: the opener, each word, the gaps between words, the closer', () => {
+    expect(realSpans('%w[a b  c]')).toBe('%w[@0 a@3  @4 b@5   @6 c@8 ]@9');
+  });
+
+  test('multi-character operators cover exactly their characters', () => {
+    expect(realSpans('a >>>= b + c')).toBe('a@0 >>>=@2 b@7 +@9 c@11');
+    expect(realSpans('a === b')).toBe('a@0 ===@2 b@6');
+    expect(realSpans('a ?= b')).toBe('a@0 ?=@2 b@5');
+    expect(realSpans('m = *{a: 1}')).toBe('m@0 =@2 *@4 {@5 a@6 :@7 1@9 }@10');
+    expect(realSpans('a & b | c ^ d')).toBe('a@0 &@2 b@4 |@6 c@8 ^@10 d@12');
+  });
+
+  test('module stars, yield delegation, and postfix existence cover one character', () => {
+    expect(realSpans('import * as ns from "m"')).toBe('import@0 *@7 as@9 ns@12 from@15 "m"@20');
+    expect(realSpans('export * from "m"')).toBe('export@0 *@7 from@9 "m"@14');
+    expect(realSpans('-> yield* g')).toBe('->@0 yield@3 *@8 g@10');
+    expect(realSpans('x = a? @b')).toBe('x@0 =@2 a@4 ?@5 @@7 b@8');
+  });
+
+  test('brackets, picks, and interpolation closers cover one character', () => {
+    expect(realSpans('f(x)[1]')).toBe('f@0 (@1 x@2 )@3 [@4 1@5 ]@6');
+    expect(realSpans('a?.(1)')).toBe('a@0 ?.@1 (@3 1@4 )@5');
+    expect(realSpans('a?.[1]')).toBe('a@0 ?.@1 [@3 1@4 ]@5');
+    expect(realSpans('o.{a}')).toBe('o@0 {@2 a@3 }@4');
+    expect(realSpans('o?.{a}')).toBe('o@0 {@3 a@4 }@5');
+    // Keys lex as properties only when the brace sits tight against them.
+    expect(kinds('o.{ a }')).toEqual(['IDENTIFIER', 'PICK_START', 'IDENTIFIER', 'PICK_END']);
+    expect(kinds('o.{a }')).toEqual(['IDENTIFIER', 'PICK_START', 'PROPERTY', 'PICK_END']);
+    expect(kinds('o.{\ta }')).toEqual(['IDENTIFIER', 'PICK_START', 'IDENTIFIER', 'PICK_END']);
+    expect(realSpans('x = {a: 1}')).toBe('x@0 =@2 {@4 a@5 :@6 1@8 }@9');
+    expect(realSpans('"a#{b}c"')).toBe('"@0 a@1 #{@2 b@4 }@5 c@6 "@7');
+  });
+
+  test('prototype access: every minted token covers the two colons', () => {
+    expect(realSpans('A::b + c')).toBe('A@0 ::@1 ::@1 ::@1 b@3 +@5 c@7');
+    // The soak form widens the existence token over the colons.
+    expect(realSpans('a?::b')).toBe('a@0 ?::@1 ::@2 ::@2 b@4');
+    const soak = tokenize('a?::b').tokens[1];
+    expect([soak.kind, soak.value]).toEqual(['?.', '?.']);
+  });
+});
+
+describe('rejection spans', () => {
+  test('operator rejections cover the offending characters', () => {
+    expect(rejection('a !~ b')).toEqual([expect.stringContaining("no '!~' operator"), 2, 4]);
+    expect(rejection('x .= 1')).toEqual([expect.stringContaining('`.=` is not an operator'), 2, 4]);
+    expect(rejection('f(a)?!')).toEqual([expect.stringContaining("maybe dammit '?!' follows a name"), 4, 6]);
+    expect(rejection('a :: b')).toEqual([expect.stringContaining("not '::'"), 2, 4]);
+    expect(rejection('a is not b')).toEqual([expect.stringContaining("'is not' compares against a negation"), 2, 8]);
+  });
+
+  test('literal rejections point into the literal', () => {
+    expect(rejection('x = %w[a b')).toEqual([expect.stringContaining('unclosed %w['), 4, 7]);
+    expect(rejection('x = /ab#{c}/')).toEqual([expect.stringContaining('a slash regex does not interpolate'), 7, 9]);
+    expect(rejection('x = 0X1F')).toEqual([expect.stringContaining('radix prefix'), 5, 5]);
+  });
+
+  test('a direct tokenize() rejection message carries path, line, and column', () => {
+    expect(() => tokenize('x = 1\ny !~ z', 'f.rip')).toThrow(/^f\.rip:2:3: Rip has no '!~' operator/);
+  });
+});
+
+describe('tolerant end-of-input repair', () => {
+  const repair = (src) => {
+    const { tokens, lexDiagnostics } = tokenize(src, '<t>', { tolerant: true });
+    return {
+      tape: tokens.map((t) => `${t.kind}@${t.start}${t.generated ? 'g' : ''}`).join(' '),
+      diagnostics: lexDiagnostics.map((d) => [d.message, d.start, d.end]),
+    };
+  };
+
+  test('an empty call or index keeps its argument slot as a zero-width hole', () => {
+    expect(repair('add(').tape).toBe('IDENTIFIER@0 CALL_START@3 IDENTIFIER@4g CALL_END@4g');
+    expect(repair('items[').tape).toBe('IDENTIFIER@0 INDEX_START@5 IDENTIFIER@6g INDEX_END@6g');
+    expect(repair('items[').diagnostics).toEqual([["unclosed '[' — never closed by end of input", 5, 6]]);
+  });
+
+  test('a trailing comma keeps its slot; a bare element or empty literal gets none', () => {
+    expect(repair('f(a, ').tape).toBe('IDENTIFIER@0 CALL_START@1 IDENTIFIER@2 ,@3 IDENTIFIER@5g CALL_END@5g');
+    expect(repair('f(a').tape).toBe('IDENTIFIER@0 CALL_START@1 IDENTIFIER@2 CALL_END@3g');
+    expect(repair('items[0').tape).toBe('IDENTIFIER@0 INDEX_START@5 NUMBER@6 INDEX_END@7g');
+    expect(repair('x = [').tape).toBe('IDENTIFIER@0 =@2 [@4 ]@5g');
+    expect(repair('x = (1').tape).toBe('IDENTIFIER@0 =@2 (@4 NUMBER@5 )@6g');
+    expect(repair('o = {a: 1').tape).toBe('IDENTIFIER@0 =@2 {@4 PROPERTY@5 :@6 NUMBER@8 }@9g');
+  });
+
+  test('repairs anchor before trailing newlines, LF or CRLF', () => {
+    expect(repair('x = [1,\n\n').tape).toBe('IDENTIFIER@0 =@2 [@4 NUMBER@5 ,@6 IDENTIFIER@7g ]@7g');
+    expect(repair('x = [1,\r\n').tape).toBe('IDENTIFIER@0 =@2 [@4 NUMBER@5 ,@6 IDENTIFIER@7g ]@7g');
+  });
+
+  test('a multiline call keeps its slot inside the argument block', () => {
+    expect(repair('f(\n  a,\n').tape).toBe('IDENTIFIER@0 CALL_START@1 INDENT@5g IDENTIFIER@5 ,@6 IDENTIFIER@7g OUTDENT@7g CALL_END@7g');
+  });
+
+  test('the hole is a generated, unspaced token with its own id', () => {
+    const { tokens } = tokenize('f(a, ', '<t>', { tolerant: true });
+    const hole = tokens.find((t) => t.kind === 'IDENTIFIER' && t.value === '');
+    expect([hole.spaced, hole.newLine, hole.generated]).toEqual([false, false, true]);
+    expect(new Set(tokens.map((t) => t.id)).size).toBe(tokens.length);
+  });
+});
+
+describe('line starts and trivia', () => {
+  const trivia = (src) => tokenize(src).trivia.map((t) => [t.kind, t.start, t.end]);
+
+  test('the first token follows no whitespace, even under leading indentation', () => {
+    const first = tokenize('  x').tokens.find((t) => !t.generated);
+    expect(first.spaced).toBe(false);
+  });
+
+  test('a comment that ends the file stops at the last character', () => {
+    expect(trivia('x\n# c')).toEqual([['comment', 2, 5]]);
+    expect(trivia('x = 1 # c')).toEqual([['comment', 6, 9]]);
+  });
+
+  test('a `#` line back at the render statement\'s own indent is a comment line', () => {
+    expect(trivia('Foo = component\n  render\n    div\n      p "a"\n  #note\n')).toEqual([['comment', 47, 52], ['blank', 52, 53]]);
+  });
+
+  test('a mid-line comment stops before a CRLF', () => {
+    expect(trivia('x = 1 # c\r\ny = 2')).toEqual([['comment', 6, 9]]);
+  });
+
+  test('an unclosed block comment rejects over its opener', () => {
+    expect(rejection('x = 1\n###\nwords')).toEqual([expect.stringContaining('unclosed `###` block comment'), 6, 9]);
+  });
+
+  test('a dollar template tag covers its one character', () => {
+    expect(realSpans('sh $"cmd"')).toBe('sh@0 $@3 "cmd"@4');
+  });
+
+  test('a tolerant schema rejection records its bare reason and offset', () => {
+    const { lexDiagnostics } = tokenize('X = schema :shape\n  name! string\n  greet: str', '<t>', { tolerant: true });
+    expect(lexDiagnostics.map((d) => [d.message, d.start, d.end])).toEqual([
+      ["schema fields use 'name type' (space, no colon) — got 'greet:'; for methods/computed use 'name: -> body' or 'name: ~> body'", 40, 40],
+    ]);
+  });
+});
+
+describe('template-literal type scanning', () => {
+  const alias = (src) => tokenize(`${src}\nw = 1`, 'f.rip').tokens[0].value;
+
+  test('braces and escapes inside a literal or its interpolation are skipped exactly', () => {
+    expect(alias('type T = `x${keyof {a: 1}}`')).toBe('type T = `x${keyof {a: 1}}`');
+    expect(alias('type T = `x${keyof {}}`')).toBe('type T = `x${keyof {}}`');
+    expect(alias('type T = `a${A\\b}`')).toBe('type T = `a${A\\b}`');
+    expect(alias('type T = `a\\``')).toBe('type T = `a\\``');
+    expect(alias('type T = `a${"x\\""}`')).toBe('type T = `a${"x\\""}`');
+  });
+
+  test('an escape never steps over a line break', () => {
+    expect(rejection('type T = `a\\b\nz`\nw = 1')).toEqual([expect.stringContaining('stays on one line'), 9, 13]);
+    expect(rejection('type T = `a${"\\x\nz"}`\nw = 1')).toEqual(['unterminated string', 13, 14]);
+  });
+
+  test('rejections point at the literal, the interpolation, or the string', () => {
+    expect(rejection('type T = `a${B}\nz = 1')).toEqual([expect.stringContaining('stays on one line'), 9, 15]);
+    expect(rejection('type T = `a${B\nz = 1')).toEqual([expect.stringContaining('stays on one line'), 11, 14]);
+    expect(rejection('type T = `a${"x"\nz = 1')).toEqual([expect.stringContaining('stays on one line'), 11, 16]);
+    expect(rejection('type T = `a${"x')).toEqual(['unterminated string', 13, 14]);
+    expect(rejection('type T = `abc')).toEqual([expect.stringContaining('never closes'), 9, 10]);
+  });
+});
+
+describe('dedent across a bracket floor', () => {
+  test('the rejection names the indentation the bracket opened at', () => {
+    expect(rejection('if x\n  y = [\n1]')).toEqual(['dedent to "" crosses the enclosing bracket\'s indentation floor "  "', 13, 13]);
+  });
+});
+
+describe('heregex interpolation spans', () => {
+  test('the opener and the interpolation start cover their own characters', () => {
+    expect(realSpans('x = ///a#{b}c///')).toBe('x@0 =@2 ///@4 a@7 #{@8 b@10 }@11 c@12 ///@13');
+  });
+});
+
+describe('scan-time block tokens', () => {
+  test('a scanned INDENT or OUTDENT is unspaced and starts no line', () => {
+    const blocks = tokenize('if x\n  y\nz').tokens.filter((t) => t.kind === 'INDENT' || t.kind === 'OUTDENT');
+    expect(blocks.map((t) => [t.kind, t.spaced, t.newLine])).toEqual([['INDENT', false, false], ['OUTDENT', false, false]]);
+  });
+
+  test('a block opened inside a pending ternary starts its own claim level', () => {
+    const when = tokenize('x = c ? f\n  when: 1\n: 0').tokens.find((t) => t.value === 'when');
+    expect(when.kind).toBe('PROPERTY');
+  });
+
+  test('every token id stays unique after the insertion passes', () => {
+    const { tokens } = tokenize('f a, b: -> c d');
+    expect(new Set(tokens.map((t) => t.id)).size).toBe(tokens.length);
+  });
+
+  test('a string opener and an interpolation start cover their own characters', () => {
+    expect(realSpans('x = "a#{b}c"')).toBe('x@0 =@2 "@4 a@5 #{@6 b@8 }@9 c@10 "@11');
+    expect(realSpans('x = """a#{b}c"""')).toBe('x@0 =@2 """@4 a@7 #{@8 b@10 }@11 c@12 """@13');
+  });
+});

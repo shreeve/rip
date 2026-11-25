@@ -1371,3 +1371,4 @@ code "as! comprehension with a guard", '''
   '''
 
 code "trailing newline", 'x = 1;', 'let x = 1;'
+fail "do at the start of the file rejects", "do 5", "`do` invokes a function literal"

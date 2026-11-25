@@ -1029,3 +1029,4 @@ test 'the body is where a missing argument awaits its default', '''
   g!
 ''', 42
 
+test 'a dammit call result is the left side of in', "f = -> 2\nf! in [3]", false

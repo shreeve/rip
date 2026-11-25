@@ -7524,3 +7524,14 @@ test 'a destructuring default reads a computed member', '''
         p c
     typeof Foo
 ''', 'function'
+
+test 'a bare component that opens the file reads offer as the keyword', "component\n  offer x := 7\n'ok'", 'ok'
+test 'a name called offer after a component branch stays a name', '''
+  f = (c, offer) ->
+    if c
+      C = component
+        x := 1
+    else
+      offer
+  f false, 7
+''', 7

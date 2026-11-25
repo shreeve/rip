@@ -697,3 +697,25 @@ describe('the mapping query index', () => {
     });
   }, 30000);
 });
+
+// An empty one-line body has no real token to anchor on, so its block is
+// the zero-width point where the introducer (`->`, `then`) ends — never a
+// location past the body's terminator.
+describe('store rows: an empty one-line body anchors at its introducer', () => {
+  const blockSpans = (src) => {
+    const { stores } = parse(src);
+    return stores.nodesByKind('block').map((b) => stores.selfSpan(b.nodeId));
+  };
+
+  test('an empty arrow body before a closer', () => {
+    expect(blockSpans('x = (->)')).toEqual([[7, 7]]);
+  });
+
+  test('an empty arrow body before a comma', () => {
+    expect(blockSpans('f(-> , 1)')).toEqual([[4, 4]]);
+  });
+
+  test('an empty then-body before else', () => {
+    expect(blockSpans('if a then else b')[0]).toEqual([9, 9]);
+  });
+});

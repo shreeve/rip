@@ -3332,3 +3332,198 @@ App = component
     expect(app.at()).toEqual([2, 'go', 3]);
   });
 });
+
+describe('render scanner: ids, classes, and line shapes', () => {
+  const js = (src) => fullCompile(src, { runtimeDelivery: 'none' }).code;
+  const at = (line) => `Foo = component\n  name := 'n'\n  render\n    div\n      ${line}\n`;
+
+  test('ids take hyphenated names with letters or digits after each hyphen', () => {
+    expect(js(at('p#a-b "v"'))).toContain("id = 'a-b'");
+    expect(js(at('#a-b-c "x"'))).toContain("id = 'a-b-c'");
+    expect(js(at('span#a-1 "x"'))).toContain("id = 'a-1'");
+  });
+
+  test('a colon glued inside an id rejects, naming the attribute spelling', () => {
+    lexFails(at('div#x:y "x"'), /write `id: 'x:y'`/);
+    lexFails(at('#x:y "x"'), /write `id: 'x:y'`/);
+  });
+
+  test('a spaced or bare `#` after a digit class is a comment', () => {
+    const spaced = js(at('div.p-4 #x'));
+    expect(spaced).toContain("className = 'p-4'");
+    expect(spaced).not.toContain("id = ");
+    const bare = js(at('div.p-4#'));
+    expect(bare).toContain("className = 'p-4'");
+    expect(bare).not.toContain("id = ");
+  });
+
+  test('a nested `.class#id` line under an element with an id is its own element', () => {
+    const code = js(at('div#a\n        .card#b "x"'));
+    expect(code).toContain("id = 'a'");
+    expect(code).toContain("id = 'b'");
+  });
+
+  test('a `#id` line opens an element after a dedent and at the root child level', () => {
+    expect(js(at('div\n        span "a"\n      #main "b"'))).toContain("id = 'main'");
+    expect(js(`Foo = component\n  render\n    div\n      p "a"\n    #side "b"\n`)).toContain("id = 'side'");
+  });
+
+  test('a render block may end the file without a newline', () => {
+    expect(js(`Foo = component\n  render\n    div\n      #ab`)).toContain("id = 'ab'");
+    expect(js(`Foo = component\n  render\n    div\n      .card-x`)).toContain("className = 'card-x'");
+  });
+
+  test('a trailing `#` that ends the file is a comment', () => {
+    expect(js(`Foo = component\n  render\n    div\n      div.card#`)).toContain("className = 'card'");
+    expect(js(`Foo = component\n  render\n    div\n      div#`)).not.toContain('id = ');
+  });
+
+  test('a handler body is code only while it lasts', () => {
+    const handler = (line) => at(`button\n        @click: ->\n          z = 1\n        ${line}`);
+    expect(js(handler('div#q "x"'))).toContain("id = 'q'");
+    lexFails(handler('span title: name#t'), /`#t` is no element id here/);
+  });
+
+  test('`#id` right after render on its own line is an element', () => {
+    expect(js(`Foo = component\n  render #main "x"\n`)).toContain("id = 'main'");
+  });
+
+  test('ids glue inside a component passed as an argument', () => {
+    const code = js(`x = f(component\n  render\n    div\n      div#m "b"\n      div.p-4#q "c"\n)\n`);
+    expect(code).toContain("id = 'm'");
+    expect(code).toContain("id = 'q'");
+  });
+
+  test('a line back at the render statement\'s indent has left the render block', () => {
+    expect(() => js(`Foo = component\n  render\n    div "a"\n  x-y := 1\n`)).toThrow(/a component body line must be a member declaration/);
+  });
+
+  test('else glued to a digit is else and a number', () => {
+    expect(js(at('if name\n        p "a"\n      else-1'))).toContain('String(-1)');
+  });
+
+  test('digit runs after a name or event shorthand never become classes', () => {
+    expect(() => js(at('p name.2xl "x"'))).toThrow(/5:13: Unexpected '\.2'/);
+    expect(() => js(`Foo = component\n  w := 1\n  render\n    div\n      span @w-4#x\n`)).toThrow(/5:12: an event name after `@`/);
+  });
+
+  test('only a hyphenated digit run continues a class chain', () => {
+    lexFails(at('div.a*4.b#x "y"'), /`#x` is no element id here/);
+  });
+
+  test('a class starting with a digit, and text glued to a selector, reject', () => {
+    lexFails(at('.2xl "x"'), /write `class: '2xl'`/);
+    lexFails(at('.card"x"'), /a space goes between an element's selector and its text/);
+  });
+
+  // A component whose render body is the given lines, with a callable
+  // state `n` and two plain states `a` and `b` for subtraction readings.
+  const inBody = (lines) => js(`Foo = component\n  n := {a: (x) -> x}\n  a := 1\n  b := 1\n  render\n${lines.split('\n').map((l) => `    ${l}`).join('\n')}\n`);
+  const element = "createElement('x-icon')";
+  const minus = 'this.a.value - this.b.value';
+
+  test('a custom element nests under an element after its handler line', () => {
+    expect(inBody('button @click: -> n\n  x-icon')).toContain(element);
+  });
+
+  test('an inline else element takes a custom element after a block holding a handler', () => {
+    expect(inBody('div\n  if n\n    p @click: -> n\n  else span x-icon')).toContain(element);
+  });
+
+  test('a block under a compound assignment or a trailing comma continues the value', () => {
+    expect(inBody('div\n  m = 1\n  m +=\n    a-b\n  span m')).toContain(`m += ${minus}`);
+    expect(inBody('div "a",\n  a-b')).toContain(`(${minus})`);
+  });
+
+  test('a custom element may open a render block, on its line or the next', () => {
+    expect(js('Foo = component\n  render\n    x-icon\n')).toContain(element);
+    expect(js('Foo = component\n  render x-icon\n')).toContain(element);
+    expect(js('Foo = component\n  render .card x-icon\n')).toContain(element);
+  });
+
+  test('a render block outside a component rejects', () => {
+    expect(() => js('render\n  x-icon')).toThrow(/render blocks can only be used inside a component/);
+  });
+
+  test('a custom element nests after a class chain or a bare class line', () => {
+    expect(inBody('div.a.b x-icon')).toContain(element);
+    expect(inBody('div\n  .card x-icon')).toContain(element);
+    expect(inBody('div\n  p\n  .card x-icon')).toContain(element);
+  });
+
+  test('a hyphenated word after an operator or a member chain is subtraction', () => {
+    expect(inBody('div !a-b')).toContain(`!${minus}`);
+    expect(inBody('div n.a a-b')).toContain(`this.n.value.a(${minus})`);
+    expect(inBody('div @n.a a-b')).toContain(`this.n.value.a(${minus})`);
+  });
+
+  test('a class name may end in a keyword-spelled part', () => {
+    const cls = "className = 'fade-in'";
+    expect(js('Foo = component\n  render\n    .fade-in "b"\n')).toContain(cls);
+    expect(js('Foo = component\n  render\n    div\n      .fade-in "b"\n')).toContain(cls);
+    expect(js('Foo = component\n  render\n    div\n      p "a"\n      .fade-in "b"\n')).toContain(cls);
+  });
+
+  test('a bare class on the render line joins its hyphens', () => {
+    expect(js('Foo = component\n  render .card-x "b"\n')).toContain("className = 'card-x'");
+  });
+
+  test('a member chain in a text value keeps subtraction', () => {
+    const body = (line) => js(`Foo = component\n  n := {a: {b: 5}}\n  c := 1\n  box := {w: 4}\n  pad := 1\n  render\n    div\n      p "x"\n      ${line}\n`);
+    expect(body('p @box.w-pad')).toContain('this.box.value.w - this.pad.value');
+    expect(body('p n.a.b-c')).toContain('this.n.value.a.b - this.c.value');
+    expect(body('p "a-b".length-c')).toContain('"a-b".length - this.c.value');
+  });
+
+  test('a handler body ends at its dedent and lasts across its own nested blocks', () => {
+    const body = (lines) => js(`Foo = component\n  n := 1\n  a := 1\n  b := 1\n  render\n    div\n      button @click: ->\n${lines}\n`);
+    expect(body('        n = 2\n      x-icon')).toContain("createElement('x-icon')");
+    expect(body('        n = 2\n      span\n        x-icon')).toContain("createElement('x-icon')");
+    expect(body('        if n\n          n = 2\n        a-b')).toContain('return (this.a.value - this.b.value)');
+  });
+
+  test('a glued `#` in a handler body is a comment', () => {
+    expect(inBody('div\n  button @click: ->\n    a = b#note\n    a\n  p "x"')).toContain("createElement('p')");
+  });
+
+  test('a code arrow reaches only the rest of its own line', () => {
+    expect(inBody('div\n  button @click: -> n\n  div#main "x"')).toContain("id = 'main'");
+    expect(inBody('div\n  button @click: -> n\n    span#q "y"')).toContain("id = 'q'");
+    expect(inBody('div\n  if n\n    p @click: -> n\n  else span#q "x"')).toContain("id = 'q'");
+  });
+
+  test('an id glues only to the tag or class chain that heads its line', () => {
+    const no = /`#[xy]` is no element id here/;
+    lexFails(`Foo = component\n  render\n    div\n      span @x#y "t"\n`, no);
+    lexFails(`Foo = component\n  render\n    div - 2 .b#x "t"\n`, no);
+    lexFails(`Foo = component\n  render\n    div.a + b#x "t"\n`, no);
+    lexFails(`Foo = component\n  render\n    div span#x "t"\n`, no);
+  });
+
+  test('a bare class line takes an id on the render line and after a sibling', () => {
+    expect(js('Foo = component\n  render .card#x "t"\n')).toContain("id = 'x'");
+    expect(inBody('div\n  p "a"\n  .card#x "t"')).toContain("id = 'x'");
+  });
+
+  test('a custom element name takes digits before and between its hyphens', () => {
+    expect(inBody('x1-icon')).toContain("createElement('x1-icon')");
+    expect(inBody('my-el2-x')).toContain("createElement('my-el2-x')");
+  });
+
+  test('a malformed selector shorthand rejects at its `.` or `#`', () => {
+    expect(() => inBody('div.2xl "t"')).toThrow(/6:8: a class shorthand/);
+    expect(() => inBody('div#{n} "t"')).toThrow(/6:8: a computed id/);
+    expect(() => inBody('div#9 "t"')).toThrow(/6:8: an id shorthand/);
+  });
+
+  test('a `.` alone on its line is an implicit div', () => {
+    const code = js('Foo = component\n  render\n    div\n      p "a"\n      .\n      span "b"\n');
+    expect(code).toContain("this._el2 = document.createElement('div')");
+    expect(code).toContain("this._el3 = document.createElement('span')");
+  });
+
+  test('a bracket that closes a handler block re-reads the next line by depth', () => {
+    expect(inBody('div\n  button @click: (->\n    a)\n  x-icon')).toContain(element);
+    expect(inBody('div\n  button @click: ->\n    n.a(->\n      a)\n    a-b')).toContain(minus);
+  });
+});

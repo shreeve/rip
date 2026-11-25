@@ -678,3 +678,19 @@ fail "an interpolated export-all source rejects", 'export * from "./#{a}"', "a m
 fail "an interpolated export-from source rejects", 'export { x } from "./#{a}"', "a module source is a plain string"
 fail "an interpolated heredoc import source rejects", 'import d from """./#{a}.json"""', "a module source is a plain string"
 code 'a single-quoted source with an interpolation sign stays literal', 'import d from \'./#{a}\'', 'import d from \'./#{a}\';'
+
+# Module-line scanning: which words are specifier names, and where the
+# module state ends.
+fail "'package' is no local import name", "import { a as package } from 'm'", "'package' is a Rip keyword"
+fail "'in' is no local import name", "import { a as in } from 'm'", "'in' is a Rip keyword"
+fail "'of' is no local import name", "import { a as of } from 'm'", "'of' is a Rip keyword"
+fail "'when' is no local import name", "import { a as when } from 'm'", "'when' is a Rip keyword"
+fail "'import' is no local import name", "import { a as import } from 'm'", "'import' is a Rip keyword"
+fail "'export' is no local import name", "import { a as export } from 'm'", "'export' is a Rip keyword"
+code "a keyword renamed at the head of a specifier line", "import {\n  a\n  render as draw\n} from 'ink'", "import { a, render as draw } from 'ink';"
+code "a keyword after the semicolon that ends an import", "import './a.js'; if x then y", "import './a.js';\nif (x) {\n  y;\n}"
+code "a default binding named type before a specifier list", "import type, {a} from 'm'", "import type, { a } from 'm';"
+code "an exported name called type renamed with as", "type = 1\nexport { type as T }", "let type = 1;\nexport { type as T };"
+code "default renamed after a comma", "import {a, default as b} from 'm'", "import { a, default as b } from 'm';"
+code "a name called from on the line after an export", "export a = 1\nb = from 'x'", "export const a = 1;\nlet b = from(\"x\");"
+code "an imported name called from", "import {from as f} from 'y'", "import { from as f } from 'y';"

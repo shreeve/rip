@@ -146,3 +146,204 @@ fail "a line starting with a colon rejects at the colon", 'x = 1\n: b', "2:1: Un
 test "a semicolon-ended bare object statement is the program's value", 'a: 1;', {a: 1}
 code "a semicolon-ended bare object statement ends the program", 'a: 1;', '({a: 1});'
 code "a semicolon-ended bare object after a statement ends the program", 'x = 1\na: 1;', 'let x = 1;\n({a: 1});'
+
+# ==============================================================================
+# Where an implicit object ends — the boundary pins
+# ==============================================================================
+#
+# A same-line object closes at a postfix guard, so the guard governs the
+# whole statement; a line break (a TERMINATOR or a dedent) un-samelines
+# it, so a later guard binds the pair's value instead. Brackets keep the
+# object same-line however many lines they span.
+
+test 'a closer before a guard leaves the guard on the statement', '''
+  c = false
+  x = 0
+  x = a: (1) if c
+  x
+''', 0
+
+test 'a bracket block keeps the object same-line for its guard', '''
+  c = false
+  x = 0
+  x = a: [
+    1
+  ] if c
+  x
+''', 0
+
+test 'a multi-line bracket block keeps the object same-line for its guard', '''
+  c = false
+  x = 0
+  x = a: [
+    1
+    2
+  ] if c
+  x
+''', 0
+
+test 'after a dedent a guard binds the next pair, not the statement', '''
+  c = false
+  x = a: ->
+    1
+  , b: 2 if c
+  [x.a(), Object.keys(x), x.b?]
+''', [1, ['a', 'b'], false]
+
+test 'a guard inside a multi-line object binds its own pair', '''
+  c = false
+  x =
+    a: [1] if c
+    b: 2
+  [Object.keys(x), x.a?, x.b]
+''', [['a', 'b'], false, 2]
+
+test 'a key that opens a call is not line-starting, so its guard is the statement', '''
+  calls = 0
+  f = (o) -> calls += 1
+  c = false
+  g = ->
+    f a: 1 if c
+    x: 1
+  [g(), calls]
+''', [{x: 1}, 0]
+
+test 'a block inside a ternary branch keeps its own colon depth', '''
+  c = true
+  g = (f, o) -> f() + o.a
+  x = c ? g(->
+    1
+  , a: 1) : 3
+  x
+''', 2
+
+test 'a line-starting optional chain closes the object it follows', '''
+  b = 7
+  x = a: b
+  ?.a
+  x
+''', 7
+
+test 'a bodiless class value ends with its line', '''
+  x = a: class
+  y = 2
+  [typeof x.a, y]
+''', ['function', 2]
+
+test 'a comma then a newline continues the property list', '''
+  f = (...xs) -> xs
+  f a: 1,
+  b: 2
+''', [{a: 1, b: 2}]
+
+test 'a non-objectish element after a dedented comma ends the object', '''
+  f = (...xs) -> xs.length
+  f a: ->
+    1
+  , 3
+''', 2
+
+test 'a trailing comma before a dedent closes the object after the comma', '''
+  x =
+    a: 1,
+  y = 2
+  [x, y]
+''', [{a: 1}, 2]
+
+test 'a trailing comma inside an indented array closes the object', '''
+  x = [
+    a: 1,
+  ]
+  x
+''', [{a: 1}]
+
+# ==============================================================================
+# What reads as the next pair — the objectish look-ahead
+# ==============================================================================
+#
+# A line break or comma keeps a property list open only when what follows
+# reads as a pair: `key:`, `@key:`, a void-method key, a `private` member,
+# or a balanced bracket group followed by `:` (an interpolated or computed
+# key).
+
+test 'an interpolated key on the next line continues the object', '''
+  k = 'b'
+  x =
+    a: 1
+    "#{k}": 2
+  x
+''', {a: 1, b: 2}
+
+test 'a computed key on the next line continues the object', '''
+  k = 'b'
+  x =
+    a: 1
+    [k]: 2
+  x
+''', {a: 1, b: 2}
+
+test 'a static void-method key after a comma continues the class body', '''
+  class A
+    x: (-> 1), @b!: (-> 2)
+  [(new A).x(), A.b()]
+''', [1, undefined]
+
+fail 'a guard before a private member line binds the pair value', 'class A\n  x: (-> 1) if c\n  private y: -> 2', 'a class field takes'
+
+test 'a guard on a bare object before a final semicolon guards the statement', 'c = true\na: 1 if c;', {a: 1}
+
+test 'a trailing comma at the end of the program closes the argument object', 'f = (...a) -> a\nf a: 1,', [{a: 1}]
+
+# ==============================================================================
+# A call open inside a pair's value owns the comma and the next key
+# ==============================================================================
+
+test 'a call past a bracket group in a pair value takes the comma', '''
+  g = (...a) -> a
+  x = a: g [1], 2
+  x
+''', {a: [[1], 2]}
+
+test 'a callee ending its line inside braces takes the indented pairs', '''
+  g = (o) -> o.b
+  x = {a: g
+    b: 1}
+  x
+''', {a: 1}
+
+# ==============================================================================
+# Indented-object calls, guards and continuations at the edges
+# ==============================================================================
+
+test 'a pair after a trailing comma inside brackets is a new element', '''
+  x = a: [1,
+      b: 2]
+  x
+''', {a: [1, {b: 2}]}
+
+test 'a guard on a bare object at the end of the program guards the statement', 'c = true\na: 1 if c', {a: 1}
+
+test 'a guard with call parens still sees the next pair', '''
+  f = (v) -> v
+  c = false
+  x =
+    a: 1 if f(c)
+    b: 2
+  [Object.keys(x), x.b]
+''', [['a', 'b'], 2]
+
+test 'a loop head owns the indented block after an object condition', '''
+  f = 3
+  until a: f
+    b: 1
+  'done'
+''', 'done'
+
+test 'a callee inside an if head paren takes the indented pairs', '''
+  f = (o) -> o.b
+  r = 0
+  if (f
+      b: 1)
+    r = 5
+  r
+''', 5

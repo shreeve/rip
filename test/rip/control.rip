@@ -1545,3 +1545,89 @@ fail 'a postfix break in a match arm has nothing to leave', 'for x in xs\n  swit
 code 'a member named break in a match arm is a name', 'switch x\n  when /a/\n    obj.break()', 'if (/a/.test(x)) {\n  obj.break();\n}'
 code 'a key named break in a match arm is a name', 'switch x\n  when /a/\n    o.x = {break: 1}', 'if (/a/.test(x)) {\n  o.x = {break: 1};\n}'
 code 'a member named break in a value if is a name', 'y = if q then obj.break() else 2', 'let y = q ? obj.break() : 2;'
+
+# ==============================================================================
+# Where an implicit call ends — control frames and boundary pins
+# ==============================================================================
+#
+# A control construct opening inside an implicit call pushes a frame that
+# shields the call from the construct's own block and boundary tokens. A
+# bodiless class never consumes its frame at an INDENT, so its statement
+# boundary retires it; an enclosing closer or the end of the program
+# retires any frame still open.
+
+test 'a bodiless class argument ends with its line', '''
+  f = (...a) -> a.length
+  r = f class
+  y = 2
+  [r, y]
+''', [1, 2]
+
+test 'a class body consumes its frame, so a later guard is the statement', '''
+  calls = 0
+  f = -> calls += 1
+  c = false
+  f class
+    m: 1
+  , 2 if c
+  calls
+''', 0
+
+test 'a closer retires an inline try frame inside the call', '''
+  g = -> 5
+  f = (v) -> v * 2
+  x = (f try g())
+  x
+''', 10
+
+test 'a closer retires a bodiless class frame inside the call', '''
+  f = (k) -> typeof k
+  x = (f class)
+  x
+''', 'function'
+
+test 'the end of the program retires an inline try frame', 'g = -> 5\nf = (v) -> v * 2\nf try g()', 10
+
+test 'the end of the program retires a bodiless class frame', 'f = (k) -> typeof k\nf class', 'function'
+
+test 'a trailing comma carries the call across the line break', '''
+  f = (...a) -> a
+  f 1,
+  2
+''', [1, 2]
+
+test 'an unspaced sign at the end of the program is an argument', 'f = (x) -> x * 10\nf -1', -10
+
+fail 'a trailing for rejects at the end of input', 'f x for', 'Unexpected end of input'
+
+# ==============================================================================
+# When `then` opens a body and when it is the loose operator
+# ==============================================================================
+
+test 'a comprehension in brackets does not make a later then a body', '''
+  c = [1, 2]
+  x = [a for a in c] then 3
+  x
+''', [[1, 2]]
+
+test 'a head on an earlier statement does not make a later then a body', '''
+  a = false
+  g = -> 4
+  h = 5
+  while a
+    b
+  x = g() then h
+  x
+''', 4
+
+fail 'a postfix unless with an else then a then keeps its rejection', 'y = a unless c else b then d', "postfix 'unless' has no else form"
+
+# ==============================================================================
+# A spread argument opens an implicit call
+# ==============================================================================
+
+test 'a spread argument at the end of the program opens the call', 'g = (...a) -> a.length\nargs = [1, 2]\ng ...args', 2
+test 'a spread argument after the first token opens the call', "String ...['ab']", 'ab'
+
+test 'a leading paren group takes its own loose operator', '(1 then 0) else 2', 2
+fail 'a do invocation at the head of the file rejects a tail', 'do (-> 1).x', 'takes no call, member or index tail'
