@@ -3323,3 +3323,83 @@ App = component
     expect(app.at()).toEqual([2, 'go', 3]);
   });
 });
+
+describe('render scanner: ids, classes, and line shapes', () => {
+  const js = (src) => fullCompile(src, { runtimeDelivery: 'none' }).code;
+  const at = (line) => `Foo = component\n  name := 'n'\n  render\n    div\n      ${line}\n`;
+
+  test('ids take hyphenated names with letters or digits after each hyphen', () => {
+    expect(js(at('p#a-b "v"'))).toContain("id = 'a-b'");
+    expect(js(at('#a-b-c "x"'))).toContain("id = 'a-b-c'");
+    expect(js(at('span#a-1 "x"'))).toContain("id = 'a-1'");
+  });
+
+  test('a colon glued inside an id rejects, naming the attribute spelling', () => {
+    lexFails(at('div#x:y "x"'), /write `id: 'x:y'`/);
+    lexFails(at('#x:y "x"'), /write `id: 'x:y'`/);
+  });
+
+  test('a spaced or bare `#` after a digit class is a comment', () => {
+    const spaced = js(at('div.p-4 #x'));
+    expect(spaced).toContain("className = 'p-4'");
+    expect(spaced).not.toContain("id = ");
+    const bare = js(at('div.p-4#'));
+    expect(bare).toContain("className = 'p-4'");
+    expect(bare).not.toContain("id = ");
+  });
+
+  test('a nested `.class#id` line under an element with an id is its own element', () => {
+    const code = js(at('div#a\n        .card#b "x"'));
+    expect(code).toContain("id = 'a'");
+    expect(code).toContain("id = 'b'");
+  });
+
+  test('a `#id` line opens an element after a dedent and at the root child level', () => {
+    expect(js(at('div\n        span "a"\n      #main "b"'))).toContain("id = 'main'");
+    expect(js(`Foo = component\n  render\n    div\n      p "a"\n    #side "b"\n`)).toContain("id = 'side'");
+  });
+
+  test('a render block may end the file without a newline', () => {
+    expect(js(`Foo = component\n  render\n    div\n      #ab`)).toContain("id = 'ab'");
+    expect(js(`Foo = component\n  render\n    div\n      .card-x`)).toContain("className = 'card-x'");
+  });
+
+  test('a trailing `#` that ends the file is a comment', () => {
+    expect(js(`Foo = component\n  render\n    div\n      div.card#`)).toContain("className = 'card'");
+    expect(js(`Foo = component\n  render\n    div\n      div#`)).not.toContain('id = ');
+  });
+
+  test('a handler body is code only while it lasts', () => {
+    const handler = (line) => at(`button\n        @click: ->\n          z = 1\n        ${line}`);
+    expect(js(handler('div#q "x"'))).toContain("id = 'q'");
+    lexFails(handler('span title: name#t'), /`#t` is no element id here/);
+  });
+
+  test('`#id` right after render on its own line is an element', () => {
+    expect(js(`Foo = component\n  render #main "x"\n`)).toContain("id = 'main'");
+  });
+
+  test('ids glue inside a component passed as an argument', () => {
+    const code = js(`x = f(component\n  render\n    div\n      div#m "b"\n      div.p-4#q "c"\n)\n`);
+    expect(code).toContain("id = 'm'");
+    expect(code).toContain("id = 'q'");
+  });
+
+  test('a line back at the render statement\'s indent has left the render block', () => {
+    expect(() => js(`Foo = component\n  render\n    div "a"\n  x-y := 1\n`)).toThrow(/a component body line must be a member declaration/);
+  });
+
+  test('else glued to a digit is else and a number', () => {
+    expect(js(at('if name\n        p "a"\n      else-1'))).toContain('String(-1)');
+  });
+
+  test('digit runs after a name or event shorthand never become classes', () => {
+    expect(() => js(at('p name.2xl "x"'))).toThrow(/5:13: Unexpected '\.2'/);
+    expect(() => js(`Foo = component\n  w := 1\n  render\n    div\n      span @w-4#x\n`)).toThrow(/5:12: an event name after `@`/);
+  });
+
+  test('a class starting with a digit, and text glued to a selector, reject', () => {
+    lexFails(at('.2xl "x"'), /write `class: '2xl'`/);
+    lexFails(at('.card"x"'), /a space goes between an element's selector and its text/);
+  });
+});

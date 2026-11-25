@@ -1,6 +1,6 @@
 # src/lexer.js mutation survivors
 
-221 of 565 survivors classified.
+269 of 565 survivors classified.
 
 ## GAP
 
@@ -21,6 +21,10 @@
 - src/lexer.js:1331:60453:arith — test/rip/basic.rip › a whitespace-only blank line under CRLF
 - src/lexer.js:1331:60455:number — test/rip/basic.rip › a whitespace-only blank line under CRLF
 - src/lexer.js:1331:60458:relation — test/rip/basic.rip › a whitespace-only blank line under CRLF
+- src/lexer.js:1343:61107:relation — test/lang/lexer.test.js › line starts and trivia › a `#` line back at the render statement's own indent is a comment line
+- src/lexer.js:1343:61130:arith — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a `#id` line opens an element after a dedent and at the root child level
+- src/lexer.js:1343:61132:number — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a `#id` line opens an element after a dedent and at the root child level
+- src/lexer.js:1343:61135:logic — test/lang/lexer.test.js › line starts and trivia › a `#` line back at the render statement's own indent is a comment line
 - src/lexer.js:1356:61986:arith — test/lang/lexer.test.js › line starts and trivia › an unclosed block comment rejects over its opener
 - src/lexer.js:1356:61988:number — test/lang/lexer.test.js › line starts and trivia › an unclosed block comment rejects over its opener
 - src/lexer.js:1360:62137:relation — test/rip/basic.rip › a block comment may close the file
@@ -35,13 +39,38 @@
 - src/lexer.js:1432:66503:arith — test/rip/basic.rip › a line-leading .5 is a number, not a member continuation
 - src/lexer.js:1432:66505:number — test/rip/basic.rip › a line-leading .5 is a number, not a member continuation
 - src/lexer.js:1432:66508:logic — test/rip/basic.rip › a line-leading .5 is a number, not a member continuation
+- src/lexer.js:1453:67584:arith — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a handler body is code only while it lasts
+- src/lexer.js:1453:67586:number — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a handler body is code only while it lasts
 - src/lexer.js:1467:68418:logic — test/rip/basic.rip › a word that merely starts with else begins a new statement
+- src/lexer.js:1468:68523:arith — test/ui/components.test.js › render scanner: ids, classes, and line shapes › else glued to a digit is else and a number
+- src/lexer.js:1477:69005:relation — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a line back at the render statement's indent has left the render block
 - src/lexer.js:1483:69151:statement — test/toolchain/incomplete-expression.test.js › tolerant repair at the parser level › a FOR line missing its connector never lends it to the next line
 - src/lexer.js:1483:69154:branch — test/rip/loops.rip › a destructured loop variable may wrap across lines
 - src/lexer.js:1483:69163:relation — test/toolchain/incomplete-expression.test.js › tolerant repair at the parser level › a FOR line missing its connector never lends it to the next line
 - src/lexer.js:1483:69172:logic — test/rip/loops.rip › a destructured loop variable may wrap across lines
 - src/lexer.js:1483:69189:relation — test/toolchain/incomplete-expression.test.js › tolerant repair at the parser level › a FOR line missing its connector never lends it to the next line
 - src/lexer.js:1486:69286:statement — test/rip/modules.rip › a name called from on the line after an export (code row: the evaluator cannot host an export)
+- src/lexer.js:1522:70569:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › digit runs after a name or event shorthand never become classes
+- src/lexer.js:1522:70600:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › digit runs after a name or event shorthand never become classes
+- src/lexer.js:1523:70708:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › digit runs after a name or event shorthand never become classes
+- src/lexer.js:1524:70754:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › digit runs after a name or event shorthand never become classes
+- src/lexer.js:1525:70897:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a spaced or bare `#` after a digit class is a comment
+- src/lexer.js:1526:70923:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a spaced or bare `#` after a digit class is a comment
+- src/lexer.js:1526:70954:arith — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a trailing `#` that ends the file is a comment
+- src/lexer.js:1526:70956:number — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a trailing `#` that ends the file is a comment
+- src/lexer.js:1526:70996:arith — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a spaced or bare `#` after a digit class is a comment
+- src/lexer.js:1526:70998:number — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a spaced or bare `#` after a digit class is a comment
+- src/lexer.js:1538:71887:number — test/ui/components.test.js › render scanner: ids, classes, and line shapes › ids take hyphenated names with letters or digits after each hyphen
+- src/lexer.js:1538:71890:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › ids take hyphenated names with letters or digits after each hyphen
+- src/lexer.js:1539:72004:number — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a colon glued inside an id rejects, naming the attribute spelling
+- src/lexer.js:1539:72007:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a colon glued inside an id rejects, naming the attribute spelling
+- src/lexer.js:1542:72115:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a nested `.class#id` line under an element with an id is its own element
+- src/lexer.js:1552:72634:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › `#id` right after render on its own line is an element
+- src/lexer.js:1554:72710:relation — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a render block may end the file without a newline
+- src/lexer.js:1554:72807:number — test/ui/components.test.js › render scanner: ids, classes, and line shapes › ids take hyphenated names with letters or digits after each hyphen
+- src/lexer.js:1554:72810:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › ids take hyphenated names with letters or digits after each hyphen
+- src/lexer.js:1555:72924:number — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a colon glued inside an id rejects, naming the attribute spelling
+- src/lexer.js:1555:72927:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a colon glued inside an id rejects, naming the attribute spelling
 - src/lexer.js:1563:73139:relation — test/lang/lexer.test.js › line starts and trivia › a comment that ends the file stops at the last character
 - src/lexer.js:1563:73211:arith — test/lang/lexer.test.js › line starts and trivia › a mid-line comment stops before a CRLF
 - src/lexer.js:1563:73213:number — test/lang/lexer.test.js › line starts and trivia › a mid-line comment stops before a CRLF
@@ -49,6 +78,7 @@
 - src/lexer.js:1576:73841:logic — test/rip/strings.rip › a dollar tag after an operator is a name
 - src/lexer.js:1577:73917:arith — test/lang/lexer.test.js › line starts and trivia › a dollar template tag covers its one character
 - src/lexer.js:1577:73919:number — test/lang/lexer.test.js › line starts and trivia › a dollar template tag covers its one character
+- src/lexer.js:1616:76033:relation — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a render block may end the file without a newline
 - src/lexer.js:1671:79170:statement — test/rip/modules.rip › a default binding named type before a specifier list (code row: the evaluator cannot host an import)
 - src/lexer.js:1671:79206:boolean — test/rip/modules.rip › a default binding named type before a specifier list (code row: the evaluator cannot host an import)
 - src/lexer.js:1697:80568:arith — test/rip/modules.rip › an exported name called type renamed with as (code row: the evaluator cannot host an export)
@@ -60,8 +90,13 @@
 - src/lexer.js:1761:84166:arith — test/lang/lexer.test.js › rejection spans › operator rejections cover the offending characters
 - src/lexer.js:1766:84420:arith — test/rip/operators.rip › and followed by == is no compound assignment
 - src/lexer.js:1769:84568:logic — test/rip/operators.rip › new followed by a member other than target rejects
+- src/lexer.js:1791:85728:statement — test/ui/components.test.js › render scanner: ids, classes, and line shapes › ids glue inside a component passed as an argument
+- src/lexer.js:1820:87216:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › digit runs after a name or event shorthand never become classes
+- src/lexer.js:1820:87237:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › digit runs after a name or event shorthand never become classes
+- src/lexer.js:1821:87298:negation — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a class starting with a digit, and text glued to a selector, reject
 - src/lexer.js:1825:87556:arith — test/lang/lexer.test.js › rejection spans › literal rejections point into the literal
 - src/lexer.js:1825:87558:number — test/lang/lexer.test.js › rejection spans › literal rejections point into the literal
+- src/lexer.js:1853:89222:relation — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a class starting with a digit, and text glued to a selector, reject
 - src/lexer.js:1899:91182:statement — test/rip/regex.rip › an unclosed slash regex rejects
 - src/lexer.js:1906:91591:arith — test/lang/lexer.test.js › rejection spans › literal rejections point into the literal
 - src/lexer.js:1906:91593:number — test/lang/lexer.test.js › rejection spans › literal rejections point into the literal
@@ -204,7 +239,16 @@
 - src/lexer.js:1470:68574:relation — tokens is empty only before the first code line, when lastNewlinePos is still -1, so the guard fails either way
 - src/lexer.js:1470:68596:relation — the main loop never records a newline at offset 0: offset 0 is always consumed by the line-start block
 - src/lexer.js:1470:68599:number — the main loop never records a newline at offset 0: offset 0 is always consumed by the line-start block
+- src/lexer.js:1479:69057:statement — leaving the render block needs a dedent to the render statement's depth, and renderCodeFloor sits deeper than that statement, so dedentTo's pop loop has already cleared it
 - src/lexer.js:1488:69320:statement — after the line-start block atLineStart is false, so the next iteration handles text[pos] exactly as the fall-through does (only the op counter differs, by one per line)
+- src/lexer.js:1523:70653:arith — a hyphen always scans as kind '-' (MATH carries only '*', '/', '%', '//', '%%'), so the MATH-with-value-'-' arm never holds and its operands are never read
+- src/lexer.js:1523:70655:number — a hyphen always scans as kind '-' (MATH carries only '*', '/', '%', '//', '%%'), so the MATH-with-value-'-' arm never holds and its operands are never read
+- src/lexer.js:1523:70689:number — a hyphen always scans as kind '-' (MATH carries only '*', '/', '%', '//', '%%'), so the MATH-with-value-'-' arm never holds and its operands are never read
+- src/lexer.js:1523:70698:relation — a hyphen always scans as kind '-' (MATH carries only '*', '/', '%', '//', '%%'), so the MATH-with-value-'-' arm never holds and its operands are never read
+- src/lexer.js:1542:72110:relation — the walk always stops at the line's head IDENTIFIER (break) or at the line-boundary token before a bare `.class` chain, so it never reaches index 0
+- src/lexer.js:1542:72113:number — the walk always stops at the line's head IDENTIFIER (break) or at the line-boundary token before a bare `.class` chain, so it never reaches index 0
+- src/lexer.js:1544:72305:statement — a glued id's head IDENTIFIER starts its line, so the token before it is a line boundary (TERMINATOR, INDENT, OUTDENT or RENDER), outside the walk's kind list; dropping the break ends the walk one step later at the same place
+- src/lexer.js:1554:72823:update — end-- walks back to pos and pushes a zero-width `div` at pos; the next iteration re-reads the same `#` through the glued-id path, which appends the same id text and sets the same end, so the token is identical
 - src/lexer.js:1672:79234:number — the scan starts on a character IDENT_START already proved is IDENT_PART, so starting one earlier ends at the same j
 - src/lexer.js:1673:79254:relation — IDENT_PART is unanchored, so IDENT_PART.test(undefined) passes on the string "undefined" and j can reach length + 1, but j only bounds a text.slice, which clamps
 - src/lexer.js:1697:80570:number — the scan starts on a character IDENT_START already proved is IDENT_PART, so starting one earlier ends at the same j
@@ -230,4 +274,11 @@
 
 ## BUG
 
+- src/lexer.js:1539:72002:arith — in a render child position `#x: "a"` (or `div#x: "a"`) → expected a positioned rejection (an id shorthand cannot key an attribute), got setAttribute('div#x', "a") on the parent, which throws InvalidCharacterError at runtime
+- src/lexer.js:1555:72922:arith — in a render child position `#x: "a"` (or `div#x: "a"`) → expected a positioned rejection (an id shorthand cannot key an attribute), got setAttribute('div#x', "a") on the parent, which throws InvalidCharacterError at runtime
 - src/lexer.js:1724:82184:relation — `import d from "./#{a}.json"` (with or without `with { type: 'json' }`; also `export * from "./#{a}"`) → expected a positioned rejection (a module source is a plain string), got the silent miscompile `import d from 'tr,"./",a,".json'`
+
+## UNCLASSIFIED
+
+- src/lexer.js:1439:66947:statement — the newLine flag on a leading comma at a lower indent; its readers (implicit.js startsLine via before.newLine, types.js cast stops, render.js) showed no difference for `f ->` bodies followed by `, 3` / `, b: 3` / `, b: 3\n, c: 4` continuations; no reason for unobservability established yet
+- src/lexer.js:1439:66964:boolean — the newLine flag on a leading comma at a lower indent; its readers (implicit.js startsLine via before.newLine, types.js cast stops, render.js) showed no difference for `f ->` bodies followed by `, 3` / `, b: 3` / `, b: 3\n, c: 4` continuations; no reason for unobservability established yet

@@ -886,6 +886,10 @@ describe('line starts and trivia', () => {
     expect(trivia('x = 1 # c')).toEqual([['comment', 6, 9]]);
   });
 
+  test('a `#` line back at the render statement\'s own indent is a comment line', () => {
+    expect(trivia('Foo = component\n  render\n    div\n      p "a"\n  #note\n')).toEqual([['comment', 47, 52], ['blank', 52, 53]]);
+  });
+
   test('a mid-line comment stops before a CRLF', () => {
     expect(trivia('x = 1 # c\r\ny = 2')).toEqual([['comment', 6, 9]]);
   });
