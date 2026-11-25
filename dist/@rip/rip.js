@@ -10253,7 +10253,6 @@ var isObjectShape = (x) => isNode(x) && x[0] === "object";
 var isFunc = (x) => isNode(x) && (x[0] === "->" || x[0] === "=>") && x.length === 3;
 var CTRL_ALL = new Set(["break", "continue", "return"]);
 var CTRL_BREAK = new Set(["break"]);
-var CTRL_CONTINUE = new Set(["continue"]);
 var isDefHead = (h) => h === "def" || h === "void-def";
 function containsAwait(sexpr, stores) {
   if (!isNode(sexpr))
@@ -10466,6 +10465,7 @@ class Emitter {
     this.temps = { used: new Set, n: 0, byNode: new WeakMap };
     this.refPlans = new WeakMap;
     this.ctrlDepth = 0;
+    this.loopDepth = 0;
     this.tailReturnOk = false;
     this.rframes = [];
     this.cframes = [];
@@ -13301,12 +13301,27 @@ class Emitter {
     } while (this.temps.used.has(name));
     return name;
   }
-  inCtrl(fn) {
+  inCtrl(fn, loop = true) {
     this.ctrlDepth++;
+    if (loop)
+      this.loopDepth++;
     try {
       fn();
     } finally {
       this.ctrlDepth--;
+      if (loop)
+        this.loopDepth--;
+    }
+  }
+  freshCtrl(fn) {
+    const ctrl = this.ctrlDepth, loops = this.loopDepth;
+    this.ctrlDepth = 0;
+    this.loopDepth = 0;
+    try {
+      return fn();
+    } finally {
+      this.ctrlDepth = ctrl;
+      this.loopDepth = loops;
     }
   }
   loopTempName(base) {
@@ -14869,7 +14884,7 @@ ${pad}    ${into}.push(undefined);
     });
   }
   caseBody(block, ind, into = null) {
-    this.inCtrl(() => this.caseBodyCtrl(block, ind, into));
+    this.inCtrl(() => this.caseBodyCtrl(block, ind, into), false);
   }
   caseBodyCtrl(block, ind, into) {
     if (into !== null) {
@@ -15957,7 +15972,7 @@ ${pad ?? ""}`);
     }
   }
   returnCaseBody(body, ind, effect = false) {
-    this.inCtrl(() => this.returnCaseBodyCtrl(body, ind, effect));
+    this.inCtrl(() => this.returnCaseBodyCtrl(body, ind, effect), false);
   }
   returnCaseBodyCtrl(body, ind, effect) {
     const stmts = this.branchLive(body);
@@ -15971,11 +15986,44 @@ ${pad ?? ""}`);
       this.b.emit(`
 `);
     });
-    const tail = stmts[stmts.length - 1];
-    if (effect && (this.effectTailWrites(tail) || this.effectBranchWrites(tail))) {
+    if (!this.tailLeaves(stmts[stmts.length - 1], effect))
       this.b.emit("  ".repeat(ind + 2) + `break;
 `);
+  }
+  tailLeaves(stmt, effect) {
+    if (stmt === undefined)
+      return false;
+    if (typeof stmt === "string")
+      return stmt !== "debugger";
+    if (!isNode(stmt))
+      return true;
+    const h = stmt[0];
+    if (h === "return" || h === "throw")
+      return true;
+    if (effect && (this.effectTailWrites(stmt) || this.effectBranchWrites(stmt)))
+      return false;
+    if (h === "if" && stmt.length >= 3 && stmt.length <= 4) {
+      if (Emitter.ifIsSimple(stmt))
+        return true;
+      if (stmt.length === 3)
+        return false;
+      const last = (b) => Emitter.branchStmts(b).at(-1);
+      const rest = isNode(stmt[3]) && stmt[3][0] === "if" ? stmt[3] : last(stmt[3]);
+      return this.tailLeaves(last(stmt[2]), effect) && this.tailLeaves(rest, effect);
     }
+    if (h === "try" || h === "switch" || h === "enum" || h === ".=")
+      return false;
+    if (h === "while" && (stmt.length === 3 || stmt.length === 4) || h === "loop" && stmt.length === 2)
+      return false;
+    if (Emitter.returnGuard(stmt) || Emitter.stmtGuard(stmt))
+      return false;
+    if (h === "=" && stmt.length === 3 && (Emitter.returnGuard(stmt[2]) || Emitter.stmtGuard(stmt[2]) || Emitter.sliceTarget(stmt[1]) !== null))
+      return false;
+    if (this.isReactiveDecl(stmt) || this.isReadonlyDecl(stmt))
+      return false;
+    if (this.isEffectDecl(stmt) && stmt[1] !== null)
+      return false;
+    return true;
   }
   loopHeader(node) {
     const head = node[0];
@@ -16432,7 +16480,7 @@ ${pad}${into}.push(...${tmp});`);
         if (node === "this" && this.renderSelf !== null)
           return this.b.emit(this.renderSelf);
       }
-      if ((node === "break" || node === "continue") && this.ctrlDepth === 0) {
+      if (node === "break" && this.ctrlDepth === 0 || node === "continue" && this.loopDepth === 0) {
         const err = this.positionedError(node, `emitter: '${node}' outside a loop${node === "break" ? " or switch" : ""}`);
         if (typeof err.start !== "number" && this.b.currentMark) {
           err.start = this.b.currentMark.sourceStart;
@@ -22971,7 +23019,10 @@ ${"  ".repeat(ind)}`);
       });
     });
   }
-  methodBlock(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, tailReturn = true, voidReason = null, atParams = [] }) {
+  methodBlock(...args) {
+    return this.freshCtrl(() => this.methodBlockCore(...args));
+  }
+  methodBlockCore(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, tailReturn = true, voidReason = null, atParams = [] }) {
     const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block], { forwards: true });
     const { entries: hoist, names } = this.scopedHoist(stmts, funcNode[1]);
     for (const n of this.pushReactiveFrame(stmts, names, funcNode[1], funcNode))
@@ -23338,7 +23389,10 @@ ${"  ".repeat(ind)}`);
     this.rframes.pop();
     this.ind = ind;
   }
-  funcBlock(node, block, stmts, ind, hoist, voidBody = false, effectTail = false) {
+  funcBlock(...args) {
+    return this.freshCtrl(() => this.funcBlockCore(...args));
+  }
+  funcBlockCore(node, block, stmts, ind, hoist, voidBody = false, effectTail = false) {
     const params = isDefHead(node[0]) ? node[2] : node[1];
     const { extractions } = Emitter.expansionSplit(Array.isArray(params) ? params : []);
     const prevSEO = this.sideEffectOnly;
@@ -23441,9 +23495,6 @@ ${"  ".repeat(ind)}`);
         return;
       }
       if (h === "switch" && stmt.length === 4) {
-        if (Emitter.findCapturedCtrl(stmt, CTRL_CONTINUE) !== null) {
-          throw this.positionedError(stmt, "emitter: 'continue' outside a loop");
-        }
         this.mark(stmt, "$self", () => this.switchArms(stmt, ind, effect));
         return;
       }
@@ -23785,7 +23836,7 @@ ${"  ".repeat(ind)}`);
     if (kind === "return" && this.scopes.length <= 1) {
       throw this.positionedError(ret, "emitter: 'return' outside a function");
     }
-    if ((kind === "break" || kind === "continue") && this.ctrlDepth === 0) {
+    if (kind === "break" && this.ctrlDepth === 0 || kind === "continue" && this.loopDepth === 0) {
       throw this.positionedError(guard, `emitter: '${kind}' outside a loop${kind === "break" ? " or switch" : ""}`);
     }
     const op = guard[0];
@@ -34245,7 +34296,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "20d93e241cada52a";
+var compilerBuild = () => "2359ce90070b3f10";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

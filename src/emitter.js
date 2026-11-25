@@ -284,7 +284,6 @@ const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length 
 // What findCapturedCtrl looks for.
 const CTRL_ALL = new Set(['break', 'continue', 'return']);
 const CTRL_BREAK = new Set(['break']);
-const CTRL_CONTINUE = new Set(['continue']);
 // The def heads — plain and void — are ONE family everywhere a
 // predicate asks "is this a def?": every def-shaped decision reads
 // this helper, never a hand-maintained head pair (a site that listed
@@ -908,6 +907,7 @@ class Emitter {
     // repeat-safety rule the plans encode.
     this.refPlans = new WeakMap();
     this.ctrlDepth = 0;
+    this.loopDepth = 0;
     this.tailReturnOk = false;
     // Reactive scope frames, innermost last: { reactive, bound }.
     // `reactive` is the set of names the frame's scope declares with
@@ -4986,10 +4986,27 @@ class Emitter {
   // loop header, so sibling and nested loops share a spelling safely
   // — and a program that never spells a base name keeps its bytes.
   // Loop/switch context for the bare `break`/`continue` legality
-  // check: bodies emitted inside this wrapper may carry them.
-  inCtrl(fn) {
+  // check: bodies emitted inside this wrapper may carry a `break`, and
+  // a loop's may carry a `continue`; a switch arm is not a loop.
+  inCtrl(fn, loop = true) {
     this.ctrlDepth++;
-    try { fn(); } finally { this.ctrlDepth--; }
+    if (loop) this.loopDepth++;
+    try { fn(); } finally {
+      this.ctrlDepth--;
+      if (loop) this.loopDepth--;
+    }
+  }
+
+  // A function body starts outside every loop and switch: a `break` or
+  // `continue` in a closure cannot reach the loop the closure sits in.
+  freshCtrl(fn) {
+    const ctrl = this.ctrlDepth, loops = this.loopDepth;
+    this.ctrlDepth = 0;
+    this.loopDepth = 0;
+    try { return fn(); } finally {
+      this.ctrlDepth = ctrl;
+      this.loopDepth = loops;
+    }
   }
 
   loopTempName(base) {
@@ -7120,7 +7137,7 @@ class Emitter {
   }
 
   caseBody(block, ind, into = null) {
-    this.inCtrl(() => this.caseBodyCtrl(block, ind, into));
+    this.inCtrl(() => this.caseBodyCtrl(block, ind, into), false);
   }
 
   caseBodyCtrl(block, ind, into) {
@@ -8307,7 +8324,7 @@ class Emitter {
   }
 
   returnCaseBody(body, ind, effect = false) {
-    this.inCtrl(() => this.returnCaseBodyCtrl(body, ind, effect));
+    this.inCtrl(() => this.returnCaseBodyCtrl(body, ind, effect), false);
   }
 
   returnCaseBodyCtrl(body, ind, effect) {
@@ -8319,12 +8336,37 @@ class Emitter {
       else this.statement(stmt, ind + 2);
       this.b.emit('\n');
     });
-    // An effect arm whose tail writes returns nothing, so it must leave
-    // the switch itself rather than fall into the next case's cleanup.
-    const tail = stmts[stmts.length - 1];
-    if (effect && (this.effectTailWrites(tail) || this.effectBranchWrites(tail))) {
-      this.b.emit('  '.repeat(ind + 2) + 'break;\n');
+    if (!this.tailLeaves(stmts[stmts.length - 1], effect)) this.b.emit('  '.repeat(ind + 2) + 'break;\n');
+  }
+
+  // Whether an arm's tail, as implicitReturn lowers it, always leaves the
+  // arm: returns, throws, or jumps. A tail it lowers to a statement — a
+  // loop, a guard, a declaration, a write with no value form, an effect
+  // write — can finish, and its arm then breaks itself rather than fall
+  // into the next case. Unsure answers false: a `break` after a return is
+  // unreachable, a missing one runs the next arm.
+  tailLeaves(stmt, effect) {
+    if (stmt === undefined) return false;
+    if (typeof stmt === 'string') return stmt !== 'debugger';
+    if (!isNode(stmt)) return true;
+    const h = stmt[0];
+    if (h === 'return' || h === 'throw') return true;
+    if (effect && (this.effectTailWrites(stmt) || this.effectBranchWrites(stmt))) return false;
+    if (h === 'if' && stmt.length >= 3 && stmt.length <= 4) {
+      if (Emitter.ifIsSimple(stmt)) return true;
+      if (stmt.length === 3) return false;
+      const last = (b) => Emitter.branchStmts(b).at(-1);
+      const rest = isNode(stmt[3]) && stmt[3][0] === 'if' ? stmt[3] : last(stmt[3]);
+      return this.tailLeaves(last(stmt[2]), effect) && this.tailLeaves(rest, effect);
     }
+    if (h === 'try' || h === 'switch' || h === 'enum' || h === '.=') return false;
+    if ((h === 'while' && (stmt.length === 3 || stmt.length === 4)) || (h === 'loop' && stmt.length === 2)) return false;
+    if (Emitter.returnGuard(stmt) || Emitter.stmtGuard(stmt)) return false;
+    if (h === '=' && stmt.length === 3 &&
+        (Emitter.returnGuard(stmt[2]) || Emitter.stmtGuard(stmt[2]) || Emitter.sliceTarget(stmt[1]) !== null)) return false;
+    if (this.isReactiveDecl(stmt) || this.isReadonlyDecl(stmt)) return false;
+    if (this.isEffectDecl(stmt) && stmt[1] !== null) return false;
+    return true;
   }
 
   // The loop header for a value/tail-position accumulator: emits the
@@ -8910,7 +8952,7 @@ class Emitter {
         // run unbound, so a literal `this` would be the block handle.
         if (node === 'this' && this.renderSelf !== null) return this.b.emit(this.renderSelf);
       }
-      if ((node === 'break' || node === 'continue') && this.ctrlDepth === 0) {
+      if ((node === 'break' && this.ctrlDepth === 0) || (node === 'continue' && this.loopDepth === 0)) {
         const err = this.positionedError(node, `emitter: '${node}' outside a loop${node === 'break' ? ' or switch' : ''}`);
         if (typeof err.start !== 'number' && this.b.currentMark) {
           err.start = this.b.currentMark.sourceStart;
@@ -17471,7 +17513,11 @@ class Emitter {
     });
   }
 
-  methodBlock(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, tailReturn = true, voidReason = null, atParams = [] }) {
+  methodBlock(...args) {
+    return this.freshCtrl(() => this.methodBlockCore(...args));
+  }
+
+  methodBlockCore(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, tailReturn = true, voidReason = null, atParams = [] }) {
     const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block], { forwards: true });
     const { entries: hoist, names } = this.scopedHoist(stmts, funcNode[1]);
     for (const n of this.pushReactiveFrame(stmts, names, funcNode[1], funcNode)) names.add(n);
@@ -18015,7 +18061,11 @@ class Emitter {
     this.ind = ind;
   }
 
-  funcBlock(node, block, stmts, ind, hoist, voidBody = false, effectTail = false) {
+  funcBlock(...args) {
+    return this.freshCtrl(() => this.funcBlockCore(...args));
+  }
+
+  funcBlockCore(node, block, stmts, ind, hoist, voidBody = false, effectTail = false) {
     // node[1] holds def params at slot 2 (def nodes) or slot 1
     // (arrows); read whichever is the params array.
     const params = isDefHead(node[0]) ? node[2] : node[1];
@@ -18157,12 +18207,7 @@ class Emitter {
         this.tryBranches(stmt, ind, effect);
         return;
       }
-      // An arm's `break` leaves the switch; a `continue` no loop inside
-      // the switch binds has nothing to continue.
       if (h === 'switch' && stmt.length === 4) {
-        if (Emitter.findCapturedCtrl(stmt, CTRL_CONTINUE) !== null) {
-          throw this.positionedError(stmt, "emitter: 'continue' outside a loop");
-        }
         this.mark(stmt, '$self', () => this.switchArms(stmt, ind, effect));
         return;
       }
@@ -18631,7 +18676,7 @@ class Emitter {
     if (kind === 'return' && this.scopes.length <= 1) {
       throw this.positionedError(ret, "emitter: 'return' outside a function");
     }
-    if ((kind === 'break' || kind === 'continue') && this.ctrlDepth === 0) {
+    if ((kind === 'break' && this.ctrlDepth === 0) || (kind === 'continue' && this.loopDepth === 0)) {
       throw this.positionedError(guard, `emitter: '${kind}' outside a loop${kind === 'break' ? ' or switch' : ''}`);
     }
     const op = guard[0];
