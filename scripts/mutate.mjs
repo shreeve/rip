@@ -335,7 +335,9 @@ async function run(args) {
   const dirs = [];
   for (let w = 0; w < workers; w++) {
     const d = join(base, `w${w}`);
-    if (!existsSync(d)) cpSync(ROOT, d, { recursive: true, filter: (p) => !p.includes('/.rip/') && !p.endsWith('/.git') });
+    // .git stays: repository gates list files with `git ls-files`, and a
+    // copy without an index fails them for every mutant alike.
+    if (!existsSync(d)) cpSync(ROOT, d, { recursive: true, filter: (p) => !p.includes('/.rip/') });
     dirs.push(d);
   }
   // A run killed mid-mutant leaves that mutant in its worker's copy;
