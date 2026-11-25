@@ -1,6 +1,6 @@
 # src/lexer.js mutation survivors
 
-429 of 565 survivors classified.
+439 of 565 survivors classified.
 
 ## GAP
 
@@ -25,6 +25,11 @@
 - src/lexer.js:110:5503:logic — test/rip/arrows.rip › a ternary paren branch then an assignment of an arrow call
 - src/lexer.js:110:5517:logic — test/rip/types.rip › an arrow return type with an unparenthesized function type in a union
 - src/lexer.js:122:5915:arith — test/rip/types.rip › a parenthesized arrow return type before a parenthesized body
+- src/lexer.js:207:9362:number — test/rip/commaless.rip › a literal then an arrow in an array has no implied comma
+- src/lexer.js:212:9513:statement — test/rip/commaless.rip › a literal then an arrow after a closed call has no implied comma
+- src/lexer.js:212:9545:update — test/rip/commaless.rip › a literal then an arrow after a closed call has no implied comma
+- src/lexer.js:213:9568:relation — test/rip/commaless.rip › a literal then an arrow in an array has no implied comma
+- src/lexer.js:215:9724:logic — test/rip/commaless.rip › a name tight against an arrow in call arguments has no implied comma
 - src/lexer.js:509:23456:statement — test/mapping/stores.test.js › parse scaling › tokenize op count grows linearly with arrow-body count (extended tier only: RIP_EXTENDED=1; the fast loop skips it)
 - src/lexer.js:542:25325:boolean — test/lang/lexer.test.js › line starts and trivia › the first token follows no whitespace, even under leading indentation
 - src/lexer.js:551:25831:relation — test/rip/modules.rip › a keyword renamed at the head of a specifier line (code row: the evaluator cannot host an import)
@@ -350,6 +355,11 @@
 - src/lexer.js:122:5925:number — an opener matched at index 0 gives op 0, which fails op > 1 just as op -1 does
 - src/lexer.js:133:6266:relation — op 1 passes the mutated guard but then needs tokens[-1] to be ')', which is undefined, so the branch is never taken
 - src/lexer.js:133:6268:number — op 1 passes the mutated guard but then needs tokens[-1] to be ')', which is undefined, so the branch is never taken
+- src/lexer.js:208:9380:number — tokens[0] is never CALL_START (an implicit call follows its callee) and is never an arrow with a token before it, so skipping it changes nothing
+- src/lexer.js:213:9607:relation — depth > 0 needs a CALL_START earlier on the tape, so an arrow there sits at index 2 or later; i 0 and i 1 never reach this test
+- src/lexer.js:213:9609:number — depth > 0 needs a CALL_START earlier on the tape, so an arrow there sits at index 2 or later; i 0 and i 1 never reach this test
+- src/lexer.js:218:9923:statement — after the splice tokens[i] is the new ',' and tokens[i+1] the arrow; revisiting from i-1 or i only re-reads the literal and the ',' (neither a call bracket nor an arrow), and the arrow's predecessor is now ',', outside the set, so no second comma is inserted
+- src/lexer.js:218:9924:update — after the splice tokens[i] is the new ',' and tokens[i+1] the arrow; revisiting from i-1 or i only re-reads the literal and the ',' (neither a call bracket nor an arrow), and the arrow's predecessor is now ',', outside the set, so no second comma is inserted
 - src/lexer.js:541:25238:number — every logical line start after the first follows a main-loop newline, which assigns lastNewlinePos before its only read
 - src/lexer.js:543:25355:boolean — the first logical line start sets pendingNewLine = true before any token is pushed
 - src/lexer.js:568:26873:boolean — the first code line's line-start block resets seenImport and seenExport (parens is empty there) before any word scans; blank and comment lines scan no words
