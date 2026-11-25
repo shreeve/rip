@@ -4030,6 +4030,8 @@ function collectBlocks(tokens, mintId) {
         continue;
       }
       if (OPENERS.has(k) || k === "INDENT") {
+        if (k === "INDENT" && levels <= 1)
+          return false;
         levels--;
         if (levels < 0)
           return false;
@@ -5616,7 +5618,7 @@ var matchingOutdent = (tokens, at) => {
 var IMMEDIATE_BODY_HEADS = new Set(["->", "=>", "DO_IIFE", "TRY", "LOOP"]);
 var CONDITION_BODY_HEADS = new Set(["IF", "UNLESS", "SWITCH", "WHILE", "UNTIL", "FOR", "CLASS"]);
 var INLINE_BODY_INTRODUCERS = new Set(["->", "=>", "THEN", "ELSE"]);
-var CLAUSE_BODY_HEADS = new Set(["ELSE", "CATCH", "FINALLY"]);
+var CLAUSE_IMMEDIATE_HEADS = new Set(["ELSE", "FINALLY"]);
 var CLASS_HEAD_ENDERS = new Set([
   "TERMINATOR",
   "INDENT",
@@ -6127,7 +6129,8 @@ function rewriteTypes(tokens, mintId, text, fail) {
         pendingImmediate: false,
         pendingCond: false,
         inlineBody: false,
-        afterBody: false
+        afterBody: false,
+        clauseElse: false
       });
     } else if (RUN_CLOSERS.has(kd)) {
       const open = frames.pop();
@@ -6143,6 +6146,7 @@ function rewriteTypes(tokens, mintId, text, fail) {
           f.pendingCond = false;
           f.inlineBody = false;
           f.afterBody = false;
+          f.clauseElse = false;
         };
         const afterBody = f.afterBody;
         f.afterBody = false;
@@ -6170,13 +6174,14 @@ function rewriteTypes(tokens, mintId, text, fail) {
             segmentReset();
           }
         } else {
-          f.pendingImmediate = IMMEDIATE_BODY_HEADS.has(kd);
-          if (afterBody && CLAUSE_BODY_HEADS.has(kd))
+          f.pendingImmediate = IMMEDIATE_BODY_HEADS.has(kd) || afterBody && CLAUSE_IMMEDIATE_HEADS.has(kd);
+          if (afterBody && kd === "CATCH")
             f.pendingCond = true;
-          else if (CONDITION_BODY_HEADS.has(kd) && prev?.kind === "=")
+          else if (CONDITION_BODY_HEADS.has(kd) && (prev?.kind === "=" || f.clauseElse && prev?.kind === "ELSE"))
             f.pendingCond = true;
           else if (kd === "THEN")
             f.pendingCond = false;
+          f.clauseElse = afterBody && kd === "ELSE";
           if (INLINE_BODY_INTRODUCERS.has(kd))
             f.inlineBody = true;
           if (kd === "=")
@@ -25681,7 +25686,7 @@ var parseHint = (file, d) => {
   if (/^if\b[^\n]*\n[ \t]*then\b/.test(at)) {
     return "`then` belongs on the `if` line (`if c then …`) — or indent the body beneath the condition";
   }
-  if (/^"(?:[^"\\\n]|\\.)*#\{/.test(at) && /\b(?:from|import)\s*$/.test(before)) {
+  if ((/^"(?:[^"\\\n]|\\.)*#\{/.test(at) || /^"""(?:(?!""")[^\\]|\\[\s\S])*#\{/.test(at)) && /\b(?:from|import)\s*$/.test(before)) {
     return 'a module source is a plain string — an interpolated path has no static value; a computed path loads with `import("…")`';
   }
   return null;
@@ -34510,7 +34515,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "99ddf728178e75d8";
+var compilerBuild = () => "f91c7ff3d861ab83";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
