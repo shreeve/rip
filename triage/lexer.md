@@ -1,6 +1,6 @@
 # src/lexer.js mutation survivors
 
-308 of 565 survivors classified.
+341 of 565 survivors classified.
 
 ## GAP
 
@@ -41,6 +41,28 @@
 - src/lexer.js:591:28083:number — test/lang/lexer.test.js › rejection spans › a direct tokenize() rejection message carries path, line, and column
 - src/lexer.js:731:34092:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › only a hyphenated digit run continues a class chain
 - src/lexer.js:731:34103:relation — test/ui/components.test.js › render scanner: ids, classes, and line shapes › only a hyphenated digit run continues a class chain
+- src/lexer.js:797:37334:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element nests under an element after its handler line; test/ui/components.test.js › render scanner: ids, classes, and line shapes › an inline else element takes a custom element after a block holding a handler
+- src/lexer.js:797:37356:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › an inline else element takes a custom element after a block holding a handler
+- src/lexer.js:804:37702:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a block under a compound assignment or a trailing comma continues the value
+- src/lexer.js:804:37734:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a block under a compound assignment or a trailing comma continues the value
+- src/lexer.js:805:37797:number — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element may open a render block, on its line or the next
+- src/lexer.js:806:37815:relation — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a render block outside a component rejects
+- src/lexer.js:812:38261:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element may open a render block, on its line or the next
+- src/lexer.js:813:38350:boolean — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a hyphenated word after an operator or a member chain is subtraction
+- src/lexer.js:815:38439:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a hyphenated word after an operator or a member chain is subtraction
+- src/lexer.js:815:38475:number — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element nests after a class chain or a bare class line
+- src/lexer.js:817:38510:statement — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element nests after a class chain or a bare class line
+- src/lexer.js:817:38536:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a hyphenated word after an operator or a member chain is subtraction
+- src/lexer.js:817:38540:negation — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a hyphenated word after an operator or a member chain is subtraction
+- src/lexer.js:817:38546:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element nests after a class chain or a bare class line
+- src/lexer.js:817:38559:relation — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a hyphenated word after an operator or a member chain is subtraction; test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element nests after a class chain or a bare class line
+- src/lexer.js:817:38572:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element nests after a class chain or a bare class line
+- src/lexer.js:817:38585:relation — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a hyphenated word after an operator or a member chain is subtraction; test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element nests after a class chain or a bare class line
+- src/lexer.js:817:38602:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element nests after a class chain or a bare class line
+- src/lexer.js:817:38615:relation — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a hyphenated word after an operator or a member chain is subtraction
+- src/lexer.js:817:38629:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element may open a render block, on its line or the next
+- src/lexer.js:817:38642:relation — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a hyphenated word after an operator or a member chain is subtraction; test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element nests after a class chain or a bare class line
+- src/lexer.js:817:38664:boolean — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element nests after a class chain or a bare class line
 - src/lexer.js:1331:60453:arith — test/rip/basic.rip › a whitespace-only blank line under CRLF
 - src/lexer.js:1331:60455:number — test/rip/basic.rip › a whitespace-only blank line under CRLF
 - src/lexer.js:1331:60458:relation — test/rip/basic.rip › a whitespace-only blank line under CRLF
@@ -263,6 +285,16 @@
 - src/lexer.js:581:27554:number — renderDepth and renderParenDepth are read only while inRender, and RENDER assigns both when it sets inRender
 - src/lexer.js:582:27572:number — token ids are compared only for identity and order (origin links; minted ids continue from nextId), and a uniform shift by one preserves both
 - src/lexer.js:731:34081:relation — the only scan-time token whose value is '-' is kind '-' (MATH carries only '*', '/', '%', '//', '%%'), which the first arm already accepts, so a non-MATH-with-value-'-' arm adds nothing
+- src/lexer.js:795:37233:relation — inside a render block a RENDER token precedes the line, and the backward walk breaks at it or at an earlier boundary; it reaches index 0 only when tokens[0] is that RENDER, which breaks the loop just as skipping it ends the loop
+- src/lexer.js:795:37236:number — inside a render block a RENDER token precedes the line, and the backward walk breaks at it or at an earlier boundary; it reaches index 0 only when tokens[0] is that RENDER, which breaks the loop just as skipping it ends the loop
+- src/lexer.js:806:37817:number — the head walk stops at the token after the RENDER (a line boundary always precedes it), so k reaches 1 only when tokens[0] is RENDER, where both bounds stop at k 1
+- src/lexer.js:813:38305:statement — at this point prev is never generated (scan-time synthesized tokens are only INDENT, OUTDENT and TERMINATOR, all returned above), and a tight prev is never an IDENTIFIER or PROPERTY (the word would have merged into it), so the chain walk stops at prev itself, a non-IDENTIFIER root, and the function returns false either way
+- src/lexer.js:813:38324:logic — at this point prev is never generated (scan-time synthesized tokens are only INDENT, OUTDENT and TERMINATOR, all returned above), and a tight prev is never an IDENTIFIER or PROPERTY (the word would have merged into it), so the chain walk stops at prev itself, a non-IDENTIFIER root, and the function returns false either way
+- src/lexer.js:815:38401:relation — the chain walk reaches index 0 or 1 only if every token from there to the end is a PROPERTY or '.', which leaves no RENDER token, so the scanner is not in a render block and this code is unreachable
+- src/lexer.js:815:38404:number — the chain walk reaches index 0 or 1 only if every token from there to the end is a PROPERTY or '.', which leaves no RENDER token, so the scanner is not in a render block and this code is unreachable
+- src/lexer.js:817:38516:relation — these widen j < L-1 to admit j = L-1 (no chain walked), where root is prev itself, and every boundary kind of prev (INDENT, TERMINATOR, OUTDENT, RENDER) has already returned above; !root needs j < 0, impossible with a RENDER before the line
+- src/lexer.js:817:38532:arith — these widen j < L-1 to admit j = L-1 (no chain walked), where root is prev itself, and every boundary kind of prev (INDENT, TERMINATOR, OUTDENT, RENDER) has already returned above; !root needs j < 0, impossible with a RENDER before the line
+- src/lexer.js:817:38534:number — these widen j < L-1 to admit j = L-1 (no chain walked), where root is prev itself, and every boundary kind of prev (INDENT, TERMINATOR, OUTDENT, RENDER) has already returned above; !root needs j < 0, impossible with a RENDER before the line
 - src/lexer.js:1175:53579:number — upTo 1 with ref null makes the first sync's staleness check fire (tokens[0] !== null), which rebuilds from the nearest line boundary, the state upTo 0 starts from
 - src/lexer.js:1175:53600:number — level is only a key: answers are stored and read at the same running level, so a constant offset changes no lookup, and the next line boundary resets it to 0
 - src/lexer.js:1323:59974:relation — text[text.length] is undefined, never ' ' or '\t'
@@ -313,6 +345,7 @@
 ## BUG
 
 - src/lexer.js:100:4965:logic — `c = false; a = 1\nr = c ? (a) : [1].map -> 7` (also `c ? (a) : -> 7`, `c ? (a) : (x) -> 7`) → expected the ternary `c ? a : [1].map(-> 7)`, got a rejection: the return-type walk reads `(a) :` as an arrow's params and return type. The mutant (PICK_START not counted) stops the walk and compiles `c ? (a) : o.{b}.b.map -> 7` correctly where the base rejects it
+- src/lexer.js:818:38674:statement — in a render block `span -> x-icon` → expected an `x-icon` child element, as `span -> p` makes a `p` child, got the text child String(x - icon), which throws ReferenceError at runtime. The mutant joins the run only because the root token '->' contains a hyphen
 - src/lexer.js:1539:72002:arith — in a render child position `#x: "a"` (or `div#x: "a"`) → expected a positioned rejection (an id shorthand cannot key an attribute), got setAttribute('div#x', "a") on the parent, which throws InvalidCharacterError at runtime
 - src/lexer.js:1555:72922:arith — in a render child position `#x: "a"` (or `div#x: "a"`) → expected a positioned rejection (an id shorthand cannot key an attribute), got setAttribute('div#x', "a") on the parent, which throws InvalidCharacterError at runtime
 - src/lexer.js:1724:82184:relation — `import d from "./#{a}.json"` (with or without `with { type: 'json' }`; also `export * from "./#{a}"`) → expected a positioned rejection (a module source is a plain string), got the silent miscompile `import d from 'tr,"./",a,".json'`

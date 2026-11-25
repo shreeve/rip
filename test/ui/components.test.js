@@ -3406,4 +3406,45 @@ describe('render scanner: ids, classes, and line shapes', () => {
     lexFails(at('.2xl "x"'), /write `class: '2xl'`/);
     lexFails(at('.card"x"'), /a space goes between an element's selector and its text/);
   });
+
+  // A component whose render body is the given lines, with a callable
+  // state `n` and two plain states `a` and `b` for subtraction readings.
+  const inBody = (lines) => js(`Foo = component\n  n := {a: (x) -> x}\n  a := 1\n  b := 1\n  render\n${lines.split('\n').map((l) => `    ${l}`).join('\n')}\n`);
+  const element = "createElement('x-icon')";
+  const minus = 'this.a.value - this.b.value';
+
+  test('a custom element nests under an element after its handler line', () => {
+    expect(inBody('button @click: -> n\n  x-icon')).toContain(element);
+  });
+
+  test('an inline else element takes a custom element after a block holding a handler', () => {
+    expect(inBody('div\n  if n\n    p @click: -> n\n  else span x-icon')).toContain(element);
+  });
+
+  test('a block under a compound assignment or a trailing comma continues the value', () => {
+    expect(inBody('div\n  m = 1\n  m +=\n    a-b\n  span m')).toContain(`m += ${minus}`);
+    expect(inBody('div "a",\n  a-b')).toContain(`(${minus})`);
+  });
+
+  test('a custom element may open a render block, on its line or the next', () => {
+    expect(js('Foo = component\n  render\n    x-icon\n')).toContain(element);
+    expect(js('Foo = component\n  render x-icon\n')).toContain(element);
+    expect(js('Foo = component\n  render .card x-icon\n')).toContain(element);
+  });
+
+  test('a render block outside a component rejects', () => {
+    expect(() => js('render\n  x-icon')).toThrow(/render blocks can only be used inside a component/);
+  });
+
+  test('a custom element nests after a class chain or a bare class line', () => {
+    expect(inBody('div.a.b x-icon')).toContain(element);
+    expect(inBody('div\n  .card x-icon')).toContain(element);
+    expect(inBody('div\n  p\n  .card x-icon')).toContain(element);
+  });
+
+  test('a hyphenated word after an operator or a member chain is subtraction', () => {
+    expect(inBody('div !a-b')).toContain(`!${minus}`);
+    expect(inBody('div n.a a-b')).toContain(`this.n.value.a(${minus})`);
+    expect(inBody('div @n.a a-b')).toContain(`this.n.value.a(${minus})`);
+  });
 });
