@@ -5,7 +5,7 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 
 ## GAP (229)
 
-- src/types.js:178:10001:relation — test/rip/types.rip › a method shorthand needs a member-row start (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:178:10001:relation — test/rip/types.rip › a method shorthand needs a member-row start
 - src/types.js:217:11845:statement — test/rip/types.rip › a method member after a generic member in an inline object type
 - src/types.js:217:11858:number — test/rip/types.rip › a method member after a generic member in an inline object type
 - src/types.js:217:11863:relation — test/rip/types.rip › a method member after a generic member in an inline object type
@@ -113,21 +113,21 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:636:31698:logic — test/rip/types.rip › a parenthesized conditional type is an arrow return
 - src/types.js:636:31732:boolean — test/rip/types.rip › a parenthesized conditional type is an arrow return
 - src/types.js:638:31820:boolean — test/rip/types.rip › a colon after a parenthesized conditional type branch rejects
-- src/types.js:657:32527:logic — test/rip/types.rip › a type predicate inside a generic parameter constraint (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:660:32691:statement — test/rip/types.rip › a generic list wrapped across def head lines rejects (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:660:32724:logic — test/rip/types.rip › a generic list wrapped across def head lines rejects (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:660:32747:logic — test/rip/types.rip › a generic list wrapped across def head lines rejects (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:693:33964:statement — test/rip/types.rip › a void-assigned arrow named type is no alias head for a trailing comparison (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:693:33974:logic — test/rip/types.rip › a void-assigned arrow named type is no alias head for a trailing comparison (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:748:37148:logic — test/rip/types.rip › a type predicate on a generic ends the def head line (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:760:37717:statement — test/rip/types.rip › a def head without a name rejects at the colon (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:760:37724:logic — test/rip/types.rip › a def head without a name rejects at the colon (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:790:39050:number — test/rip/types.rip › an object key after a comma inside a loop body is no loop variable (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:657:32527:logic — test/rip/types.rip › a type predicate inside a generic parameter constraint
+- src/types.js:660:32691:statement — test/rip/types.rip › a generic list wrapped across def head lines rejects
+- src/types.js:660:32724:logic — test/rip/types.rip › a generic list wrapped across def head lines rejects
+- src/types.js:660:32747:logic — test/rip/types.rip › a generic list wrapped across def head lines rejects
+- src/types.js:693:33964:statement — test/rip/types.rip › a void-assigned arrow named type is no alias head for a trailing comparison
+- src/types.js:693:33974:logic — test/rip/types.rip › a void-assigned arrow named type is no alias head for a trailing comparison
+- src/types.js:748:37148:logic — test/rip/types.rip › a type predicate on a generic ends the def head line
+- src/types.js:760:37717:statement — test/rip/types.rip › a def head without a name rejects at the colon
+- src/types.js:760:37724:logic — test/rip/types.rip › a def head without a name rejects at the colon
+- src/types.js:790:39050:number — test/rip/types.rip › an object key after a comma inside a loop body is no loop variable
 - src/types.js:805:39485:relation — test/rip/types.rip › an object-key colon is no type head for a trailing comparison
 - src/types.js:806:39533:relation — test/rip/types.rip › a string-key colon is no type head for a trailing comparison
 - src/types.js:815:40025:branch — test/rip/types.rip › an object-key colon is no type head for a trailing comparison
-- src/types.js:819:40171:logic — test/rip/types.rip › a TERMINATOR resets the trailing-close answer (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:819:40194:logic — test/rip/types.rip › an INDENT resets the trailing-close answer (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:819:40171:logic — test/rip/types.rip › a TERMINATOR resets the trailing-close answer
+- src/types.js:819:40194:logic — test/rip/types.rip › an INDENT resets the trailing-close answer
 - src/types.js:840:40971:statement — test/rip/types.rip › a trailing comparison line after a generic return type continues
 - src/types.js:851:41340:branch — test/rip/types.rip › a trailing comparison line after a generic return type continues
 - src/types.js:851:41390:logic — test/rip/types.rip › a trailing comparison line after a generic return type continues
@@ -139,8 +139,8 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:873:42370:logic — test/rip/types.rip › a trailing << after a cast continues the line
 - src/types.js:873:42408:relation — test/rip/types.rip › a trailing << after a cast continues the line
 - src/types.js:877:42559:boolean — test/rip/types.rip › a trailing comparison line after a generic return type continues
-- src/types.js:950:46112:arith — test/rip/types.rip › an assignment inside call arguments is no evidence for a bare forward (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:950:46114:number — test/rip/types.rip › an assignment inside call arguments is no evidence for a bare forward (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:950:46112:arith — test/rip/types.rip › an assignment inside call arguments is no evidence for a bare forward
+- src/types.js:950:46114:number — test/rip/types.rip › an assignment inside call arguments is no evidence for a bare forward
 - src/types.js:972:46921:number — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
 - src/types.js:976:47030:branch — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
 - src/types.js:976:47057:update — test/rip/types.rip › a typed fat-arrow value in a class body is a bound method, not a field type
@@ -161,23 +161,23 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:982:47266:relation — test/rip/types.rip › a union ending in a fat-arrow value in a class body is no field type
 - src/types.js:982:47279:logic — test/rip/types.rip › a bare typed field before an else arrow is still a field
 - src/types.js:982:47285:relation — test/rip/types.rip › a union ending in a fat-arrow value in a class body is no field type
-- src/types.js:1003:48013:logic — test/rip/types.rip › a reactive declaration separates bare typed forwards (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:1004:48051:logic — test/rip/types.rip › a reactive declaration separates bare typed forwards (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:1004:48079:logic — test/rip/types.rip › a readonly declaration separates bare typed forwards (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:1004:48107:logic — test/rip/types.rip › a readonly declaration separates bare typed forwards (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:1004:48124:logic — test/rip/types.rip › an effect declaration separates bare typed forwards (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:1007:48175:number — test/rip/types.rip › a key line at the end of input stays an object (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:1024:48919:update — test/rip/types.rip › a clause after a parenthesized value keeps the run an object (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:1025:48927:statement — test/rip/types.rip › a clause after a parenthesized value keeps the run an object (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:1025:48962:update — test/rip/types.rip › a clause after a parenthesized value keeps the run an object (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:1003:48013:logic — test/rip/types.rip › a reactive declaration separates bare typed forwards
+- src/types.js:1004:48051:logic — test/rip/types.rip › a reactive declaration separates bare typed forwards
+- src/types.js:1004:48079:logic — test/rip/types.rip › a readonly declaration separates bare typed forwards
+- src/types.js:1004:48107:logic — test/rip/types.rip › a readonly declaration separates bare typed forwards
+- src/types.js:1004:48124:logic — test/rip/types.rip › an effect declaration separates bare typed forwards
+- src/types.js:1007:48175:number — test/rip/types.rip › a key line at the end of input stays an object
+- src/types.js:1024:48919:update — test/rip/types.rip › a clause after a parenthesized value keeps the run an object
+- src/types.js:1025:48927:statement — test/rip/types.rip › a clause after a parenthesized value keeps the run an object
+- src/types.js:1025:48962:update — test/rip/types.rip › a clause after a parenthesized value keeps the run an object
 - src/types.js:1235:59143:relation — test/rip/types.rip › a string-keyed line ends a bare typed-forward run
-- src/types.js:1320:62988:statement — test/rip/types.rip › a string after type is no alias name (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:1324:63172:number — test/rip/types.rip › a variable named type compares when its generic never closes (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:1325:63179:statement — test/rip/types.rip › a variable named type compares when the alias head has no = (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:1325:63216:number — test/rip/types.rip › a variable named type compares when the alias head has no = (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:1369:65353:statement — test/rip/types.rip › interface with a string name rejects as reserved (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:1369:65399:number — test/rip/types.rip › interface without a name rejects as reserved (UNPROVEN: kill-proof run interrupted for machine load)
-- src/types.js:1374:65522:statement — test/rip/types.rip › interface extending a string rejects as reserved (UNPROVEN: kill-proof run interrupted for machine load)
+- src/types.js:1320:62988:statement — test/rip/types.rip › a string after type is no alias name
+- src/types.js:1324:63172:number — test/rip/types.rip › a variable named type compares when its generic never closes
+- src/types.js:1325:63179:statement — test/rip/types.rip › a variable named type compares when the alias head has no =
+- src/types.js:1325:63216:number — test/rip/types.rip › a variable named type compares when the alias head has no =
+- src/types.js:1369:65353:statement — test/rip/types.rip › interface with a string name rejects as reserved
+- src/types.js:1369:65399:number — test/rip/types.rip › interface without a name rejects as reserved
+- src/types.js:1374:65522:statement — test/rip/types.rip › interface extending a string rejects as reserved
 - src/types.js:1399:66520:logic — test/rip/types.rip › an implicit call whose argument assigns is not a type alias
 - src/types.js:1402:66703:relation — test/rip/types.rip › a function named type called mid-expression is not an alias
 - src/types.js:1417:67416:number — test/rip/types.rip › as before an operator that starts no type stays a name
