@@ -233,3 +233,12 @@ test 'an inline if inside a one-line body claims its own else', '''
 test 'a line-starting optional chain applies to the one-line function', 'g = -> 1\n?.length\ntypeof g', 'number'
 
 test 'a program may begin with a one-line arrow', '-> 5\n.call()', 5
+
+# A ternary's parenthesized branch followed by ':' is never an arrow's
+# param list: a later arrow without parentheses keeps its own (empty) params.
+test "a ternary paren branch then an arrow on the next line", "c = true\na = 1\nb = 2\nx = c ? (a) : b\n[1].map -> x", [1]
+test "a ternary paren branch in an if head then an arrow in its body", "c = true\na = 1\nb = 2\nr = if c ? (a) : b\n  [1].map -> 5\nr", [5]
+test "a ternary paren branch then an assignment of an arrow call", "c = false\na = 1\nr = c ? (a) : y = [1].map -> 7\n[r, y]", [[7], [7]]
+test "a ternary paren branch then a nested ternary with an arrow", "c = false\na = 1\nd = true\ne = 2\nr = c ? (a) : d ? e : [1].map -> 7\nr", 2
+test "a ternary paren branch then do", "c = false\na = 1\nr = c ? (a) : do -> 7\nr", 7
+test "a ternary paren branch then comparisons and a shift before an arrow", "c = false\na = 1\nb = 1\nd = 2\ne = 3\nf = 4\ng = (h) -> h()\nr = c ? (a) : b < d < e < f << g -> 1\nr", true

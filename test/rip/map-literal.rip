@@ -75,3 +75,11 @@ test 'computed key via brackets', '''
   m = *{ [fn()]: 42 }
   m.get('dynamic')
   ''', 42
+
+test 'a this-index map key may hold its own brackets', '''
+  names = ['seed']
+  class A
+    seed = 'k'
+    grab: -> *{ @[names[0]]: 1 }
+  new A().grab().get('k')
+  ''', 1

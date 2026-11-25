@@ -1210,3 +1210,4 @@ test "function-tail loop tail try keeps its return", "f = ->\n  for x in [1, 2, 
 test "collecting loop tail try whose finally throws collects the outer handler alone", "boom = (x) -> throw new Error('b')\nr = for x in [1, 2]\n  try\n    try\n      continue if x is 5\n      x\n    finally\n      boom(x) if x is 2\n  catch e\n    'caught'\nr", [1, 'caught']
 test "collecting loop tail try whose finally continues drops the value", "r = for x in [1, 2, 3]\n  try\n    continue if x is 9\n    x\n  finally\n    continue if x is 2\nr", [1, 3]
 test "collecting loop tail try whose finally breaks drops the value", "r = for x in [1, 2, 3]\n  try\n    continue if x is 9\n    x\n  finally\n    break if x is 2\nr", [1]
+test "a destructured loop variable may wrap across lines", "r = []\nfor [a,\n  b] in [[1, 2]]\n  r.push a + b\nr", [3]

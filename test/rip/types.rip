@@ -1574,3 +1574,69 @@ test 'a key line at the end of input stays an object', '''
 
 type 'an assignment inside call arguments is no evidence for a bare forward', "number = 1\nr: number\nf = (x) -> x\nf(\n  r = 5\n)\nr", '''
 '''
+
+# The arrow's param list is found by walking back over its return type,
+# counting every bracket kind the type can hold.
+test "an arrow return type may be an import type", "f = (a): import(\"./m\").T -> a\nf(3)", 3
+test "an arrow return type may close two generics with one token", "f = (a): Map<K, Array<V>> -> a\nf(1)", 1
+test "an arrow return type may close three generics with one token", "f = (a): A<B<C<D>>> -> a\nf(2)", 2
+test "a parenthesized arrow return type before a parenthesized body", "f = (a): (number) -> (a)\nf(4)", 4
+fail "an arrow return type with an unparenthesized function type in a union", 'f = (a): T | (x) => U -> a'
+
+# An interface head at a statement boundary opens a type body, where a
+# template-literal member type is legal.
+test "a generic interface body holds a template-literal type", '''
+  interface P<T>
+    a: `x${number}`
+  1
+''', 1
+test "an interface after a statement holds a template-literal type", '''
+  x = 2
+  interface P
+    a: `x${number}`
+  x
+''', 2
+test "an interface that extends holds a template-literal type", '''
+  interface P extends Q
+    a: `x${number}`
+  3
+''', 3
+test "an interface that extends, after a statement, holds a template-literal type", '''
+  x = 4
+  interface P extends Q
+    a: `x${number}`
+  x
+''', 4
+test "a class that extends keeps symbols in its body", '''
+  class B
+  class A extends B
+    m: -> :ok
+  new A().m().description
+''', 'ok'
+test "a block at an interface body's depth after the interface is code", '''
+  interface P
+    a: number
+  f = ->
+    :ok
+  f().description
+''', 'ok'
+
+test 'a type body closed by its bracket leaves later blocks as values', '''
+  run = (fn) -> fn()
+  run(->
+    type T =
+      a: number)
+  trim = ->
+    if true
+      String::trim.call ' a '
+  trim()
+''', 'a'
+
+test 'an alias line before an else leaves the else body a value', '''
+  f = (s) -> s.description
+  x = if false
+    type T = 'a'
+  else
+    f :foo
+  x
+''', 'foo'

@@ -1628,3 +1628,6 @@ fail 'a postfix unless with an else then a then keeps its rejection', 'y = a unl
 
 test 'a spread argument at the end of the program opens the call', 'g = (...a) -> a.length\nargs = [1, 2]\ng ...args', 2
 test 'a spread argument after the first token opens the call', "String ...['ab']", 'ab'
+
+test 'a leading paren group takes its own loose operator', '(1 then 0) else 2', 2
+fail 'a do invocation at the head of the file rejects a tail', 'do (-> 1).x', 'takes no call, member or index tail'
