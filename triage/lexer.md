@@ -1,6 +1,6 @@
 # src/lexer.js mutation survivors
 
-341 of 565 survivors classified.
+363 of 565 survivors classified.
 
 ## GAP
 
@@ -63,6 +63,22 @@
 - src/lexer.js:817:38629:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element may open a render block, on its line or the next
 - src/lexer.js:817:38642:relation — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a hyphenated word after an operator or a member chain is subtraction; test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element nests after a class chain or a bare class line
 - src/lexer.js:817:38664:boolean — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element nests after a class chain or a bare class line
+- src/lexer.js:1202:54945:arith — test/rip/types.rip › a generic interface body holds a template-literal type
+- src/lexer.js:1202:54947:number — test/rip/types.rip › an interface after a statement holds a template-literal type
+- src/lexer.js:1203:54958:branch — test/rip/types.rip › an interface that extends holds a template-literal type
+- src/lexer.js:1203:54968:arith — test/rip/types.rip › an interface that extends holds a template-literal type
+- src/lexer.js:1203:54970:number — test/rip/types.rip › an interface that extends holds a template-literal type
+- src/lexer.js:1203:54979:relation — test/rip/types.rip › an interface that extends holds a template-literal type
+- src/lexer.js:1204:55043:arith — test/rip/types.rip › an interface that extends holds a template-literal type
+- src/lexer.js:1204:55045:number — test/rip/types.rip › an interface that extends holds a template-literal type
+- src/lexer.js:1205:55058:branch — test/rip/types.rip › an interface that extends holds a template-literal type
+- src/lexer.js:1205:55066:logic — test/rip/types.rip › a class that extends keeps symbols in its body
+- src/lexer.js:1205:55085:relation — test/rip/types.rip › an interface that extends holds a template-literal type
+- src/lexer.js:1205:55102:logic — test/rip/types.rip › a class that extends keeps symbols in its body
+- src/lexer.js:1205:55113:arith — test/rip/types.rip › an interface that extends holds a template-literal type
+- src/lexer.js:1205:55115:number — test/rip/types.rip › an interface that extends holds a template-literal type
+- src/lexer.js:1206:55166:arith — test/rip/types.rip › an interface that extends holds a template-literal type
+- src/lexer.js:1206:55168:number — test/rip/types.rip › an interface that extends, after a statement, holds a template-literal type
 - src/lexer.js:1331:60453:arith — test/rip/basic.rip › a whitespace-only blank line under CRLF
 - src/lexer.js:1331:60455:number — test/rip/basic.rip › a whitespace-only blank line under CRLF
 - src/lexer.js:1331:60458:relation — test/rip/basic.rip › a whitespace-only blank line under CRLF
@@ -297,6 +313,10 @@
 - src/lexer.js:817:38534:number — these widen j < L-1 to admit j = L-1 (no chain walked), where root is prev itself, and every boundary kind of prev (INDENT, TERMINATOR, OUTDENT, RENDER) has already returned above; !root needs j < 0, impossible with a RENDER before the line
 - src/lexer.js:1175:53579:number — upTo 1 with ref null makes the first sync's staleness check fire (tokens[0] !== null), which rebuilds from the nearest line boundary, the state upTo 0 starts from
 - src/lexer.js:1175:53600:number — level is only a key: answers are stored and read at the same running level, so a constant offset changes no lookup, and the next line boundary resets it to 0
+- src/lexer.js:1201:54831:relation — at k 0 the name has nothing before it: iface(-1) is false and tokens[-1] is not EXTENDS, so the function returns false either way
+- src/lexer.js:1201:54833:number — at k 0 the name has nothing before it: iface(-1) is false and tokens[-1] is not EXTENDS, so the function returns false either way
+- src/lexer.js:1205:55061:relation — m 0 passes only the mutated bound, and then iface(-1) is false, so the branch is never taken
+- src/lexer.js:1205:55064:number — m 0 passes only the mutated bound, and then iface(-1) is false, so the branch is never taken
 - src/lexer.js:1323:59974:relation — text[text.length] is undefined, never ' ' or '\t'
 - src/lexer.js:1355:61880:number — the opener guard requires text[pos + 3] !== '#', so no closer starts at pos + 3 and searching from pos + 4 finds the same closer
 - src/lexer.js:1356:61904:relation — indexOf from pos + 3 returns -1 or an offset >= 3, so close < 0, close <= 0 and close < 1 agree
@@ -346,6 +366,8 @@
 
 - src/lexer.js:100:4965:logic — `c = false; a = 1\nr = c ? (a) : [1].map -> 7` (also `c ? (a) : -> 7`, `c ? (a) : (x) -> 7`) → expected the ternary `c ? a : [1].map(-> 7)`, got a rejection: the return-type walk reads `(a) :` as an arrow's params and return type. The mutant (PICK_START not counted) stops the walk and compiles `c ? (a) : o.{b}.b.map -> 7` correctly where the base rejects it
 - src/lexer.js:818:38674:statement — in a render block `span -> x-icon` → expected an `x-icon` child element, as `span -> p` makes a `p` child, got the text child String(x - icon), which throws ReferenceError at runtime. The mutant joins the run only because the root token '->' contains a hyphen
+- src/lexer.js:1201:54825:statement — `interface render\n  a: number` (any keyword-spelled name: render, component, …) → expected the TS interface accepted, or a rejection naming the keyword, got "'interface' is reserved and not supported yet", which `interface Props` disproves; with a template-literal member (`a: \`x${number}\``) the base fails first with "cannot tokenize '`'" at the member. The mutants admit a non-IDENTIFIER name as a type-body head and only change which of the two rejections fires
+- src/lexer.js:1201:54835:logic — `interface render\n  a: number` (any keyword-spelled name: render, component, …) → expected the TS interface accepted, or a rejection naming the keyword, got "'interface' is reserved and not supported yet", which `interface Props` disproves; with a template-literal member (`a: \`x${number}\``) the base fails first with "cannot tokenize '`'" at the member. The mutants admit a non-IDENTIFIER name as a type-body head and only change which of the two rejections fires
 - src/lexer.js:1539:72002:arith — in a render child position `#x: "a"` (or `div#x: "a"`) → expected a positioned rejection (an id shorthand cannot key an attribute), got setAttribute('div#x', "a") on the parent, which throws InvalidCharacterError at runtime
 - src/lexer.js:1555:72922:arith — in a render child position `#x: "a"` (or `div#x: "a"`) → expected a positioned rejection (an id shorthand cannot key an attribute), got setAttribute('div#x', "a") on the parent, which throws InvalidCharacterError at runtime
 - src/lexer.js:1724:82184:relation — `import d from "./#{a}.json"` (with or without `with { type: 'json' }`; also `export * from "./#{a}"`) → expected a positioned rejection (a module source is a plain string), got the silent miscompile `import d from 'tr,"./",a,".json'`
