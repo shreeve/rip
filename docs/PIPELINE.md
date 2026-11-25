@@ -103,3 +103,44 @@ back to `.rip` positions through the MappingStore. The editor and
 `rip check` share that machinery, so they report the same errors.
 [docs/TYPES.md](TYPES.md) covers the type system and editor
 architecture.
+
+## Where this is heading: checking in the browser
+
+Everything above runs today. The browser already compiles Rip in-page,
+but it does not type-check: `tsgo` is a native binary, so checking
+lives in `rip check` and the editor. Two further steps bring the
+checker into the page. Neither is built.
+
+**Step 1: a wasm checker in a Web Worker.** `rip.js` keeps compiling on
+the main thread and posts the TypeScript face to a worker. The worker
+runs a TypeScript checker compiled to wasm, with the TypeScript lib
+files and the runtime declarations loaded in memory, and posts back
+diagnostics in TypeScript positions. Rip maps them onto the `.rip`
+source exactly as `rip check` does. tsrs ships such a build today
+(`@tsrs/wasm`); Trig, our own checker written in Rig, takes the same
+slot once Rig can target wasm32.
+
+![A wasm checker in a Web Worker beside rip.js](assets/browser-check.svg)
+
+**Step 2: one wasm module.** With the Rip compiler itself written in
+Rig, the compiler and Trig build into a single wasm module that shares
+one memory. The TypeScript face goes from the emitter to the checker
+without being copied or reparsed, and the worker returns both the
+JavaScript to run and diagnostics already mapped to `.rip`. The main
+thread keeps only what needs the DOM: the source, the running app, and
+the errors on screen. The same Rig code built natively serves `rip
+check` and the editor, so every host runs one engine.
+
+![The Rip compiler and Trig in one wasm module](assets/browser-wasm.svg)
+
+What each step waits on:
+
+| step | needs |
+|---|---|
+| 1, with tsrs | `@tsrs/wasm` in a worker, and a checker seam that passes files as messages instead of writing a mirror directory |
+| 1, with Trig | a wasm32 backend for Rig's runtime; a language service in Trig |
+| 2 | the above, plus the Rip compiler written in Rig ([CLEANROOM.md](CLEANROOM.md) chooses the engine language) |
+
+In-browser checking serves playgrounds, in-browser editors and
+development. A production page never needs the checker, so it never
+pays for one.
