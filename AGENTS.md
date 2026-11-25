@@ -102,12 +102,13 @@ repository root; consulted for UNDERSTANDING → docs/.
  commits — never squash-merged, never rebase-merged: a landed
  branch's tip stays an ancestor of main, so merged-branch
  verification is a pure git ancestry check. The `main` ruleset
- requires PR CI jobs `test` (`test:rip`) and `browser` (Playwright
- smoke); both must be green to merge. That workflow runs on the
+ requires PR CI jobs `test` (`test:rip` and the grammar audit,
+ `audit --grammar`) and `browser` (Playwright smoke); both must be
+ green to merge. That workflow runs on the
  pull request only — not again on the post-merge push. Merge-queue
  CI is unavailable on a user-owned repo; if the repository moves to
- an organization, prefer `merge_group`. `test:all` / `audit` stay
- manual certification, not merge blockers.
+ an organization, prefer `merge_group`. `test:all` and the full
+ `audit` stay manual certification, not merge blockers.
 
 10. **Big merges get adversarial review, including one COLD pass.**
  Before a substantial PR lands: independent empirical verification
