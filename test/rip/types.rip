@@ -1344,3 +1344,28 @@ test 'a tight call of as is no cast head for a trailing comparison', '''
     d]
   r
 ''', [false]
+
+# ==============================================================================
+# Mutation-audit pins — bare function types in arrow-return position
+# ==============================================================================
+
+fail 'a bare empty-parameter function type as an arrow return rejects', 'f = (x): () => x', 'must be parenthesized as a whole'
+fail 'a bare function type with a nested function parameter rejects', 'f = (x): (a: (b: number) => void) => x', 'must be parenthesized as a whole'
+fail 'a bare function type after a tuple parameter rejects', 'f = (x): ([number], b: string) => x', 'must be parenthesized as a whole'
+fail 'a bare function type after an object parameter rejects', 'f = (x): ({a: number}, b: string) => x', 'must be parenthesized as a whole'
+fail 'a colon after a parenthesized conditional type branch rejects', 'f = (x): (T extends string ? number : boolean, e: string) => x', 'must be parenthesized as a whole'
+
+test 'a parenthesized single type is an arrow return', '''
+  f = (x): (number) => x
+  f(4)
+''', 4
+
+test 'a parenthesized object type is an arrow return', '''
+  f = (x): ({a: number}) => x
+  f(4)
+''', 4
+
+test 'a parenthesized conditional type is an arrow return', '''
+  f = (x): (T extends string ? number : boolean) => x
+  f(4)
+''', 4

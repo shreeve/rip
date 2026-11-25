@@ -3,7 +3,7 @@
 Survivors of the lexer-pass mutation audit at 119b45bb, classified per the triage brief.
 Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 
-## GAP (139)
+## GAP (160)
 
 - src/types.js:217:11845:statement — test/rip/types.rip › a method member after a generic member in an inline object type
 - src/types.js:217:11858:number — test/rip/types.rip › a method member after a generic member in an inline object type
@@ -76,6 +76,27 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:576:29248:arith — test/rip/types.rip › an optional member in a parameter object type
 - src/types.js:576:29250:number — test/rip/types.rip › an optional member in a parameter object type
 - src/types.js:578:29291:statement — test/rip/types.rip › an optional member in a parameter object type
+- src/types.js:613:30699:logic — test/rip/types.rip › a bare function type with a nested function parameter rejects
+- src/types.js:614:30778:logic — test/rip/types.rip › a bare function type with a nested function parameter rejects
+- src/types.js:615:30811:relation — test/rip/types.rip › a bare empty-parameter function type as an arrow return rejects
+- src/types.js:615:30813:number — test/rip/types.rip › a bare empty-parameter function type as an arrow return rejects
+- src/types.js:622:31048:relation — test/rip/types.rip › a bare function type with a nested function parameter rejects
+- src/types.js:622:31052:number — test/rip/types.rip › a bare function type with a nested function parameter rejects
+- src/types.js:626:31135:arith — test/rip/types.rip › a bare empty-parameter function type as an arrow return rejects
+- src/types.js:626:31143:number — test/rip/types.rip › a parenthesized single type is an arrow return
+- src/types.js:626:31153:boolean — test/rip/types.rip › a bare empty-parameter function type as an arrow return rejects
+- src/types.js:634:31524:logic — test/rip/types.rip › a parenthesized object type is an arrow return
+- src/types.js:634:31539:logic — test/rip/types.rip › a parenthesized object type is an arrow return
+- src/types.js:635:31596:logic — test/rip/types.rip › a bare function type after a tuple parameter rejects
+- src/types.js:635:31611:logic — test/rip/types.rip › a bare function type after an object parameter rejects
+- src/types.js:635:31626:logic — test/rip/types.rip › a bare function type after an object parameter rejects
+- src/types.js:635:31651:update — test/rip/types.rip › a bare function type after an object parameter rejects
+- src/types.js:636:31659:statement — test/rip/types.rip › a parenthesized conditional type is an arrow return
+- src/types.js:636:31670:relation — test/rip/types.rip › a parenthesized conditional type is an arrow return
+- src/types.js:636:31674:number — test/rip/types.rip › a parenthesized conditional type is an arrow return
+- src/types.js:636:31698:logic — test/rip/types.rip › a parenthesized conditional type is an arrow return
+- src/types.js:636:31732:boolean — test/rip/types.rip › a parenthesized conditional type is an arrow return
+- src/types.js:638:31820:boolean — test/rip/types.rip › a colon after a parenthesized conditional type branch rejects
 - src/types.js:840:40971:statement — test/rip/types.rip › a trailing comparison line after a generic return type continues
 - src/types.js:851:41340:branch — test/rip/types.rip › a trailing comparison line after a generic return type continues
 - src/types.js:851:41390:logic — test/rip/types.rip › a trailing comparison line after a generic return type continues
@@ -145,7 +166,7 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:1901:90987:statement — test/rip/types.rip › a colon after a parameter default is an object key
 - src/types.js:1901:91013:boolean — test/rip/types.rip › a colon after a parameter default is an object key
 
-## EQUIVALENT (147)
+## EQUIVALENT (152)
 
 - src/types.js:221:12006:statement — openAngle is reassigned at every `<` opened from angle 0 and read only while angle > 0, i.e. after such an opener; the stale value is always overwritten first
 - src/types.js:249:13482:arith — j-2 < from puts tokens[j-2] before the body: the alias `=` or the body INDENT, never `=>`, `asserts`, or a `:` after CALL_END, so the shape test fails there anyway
@@ -169,6 +190,11 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:495:25473:relation — the run's first token directly follows the `as` word, which never suppresses a newline: a next-line follower arrives as INDENT/TERMINATOR, which is no TYPE_STARTER, so the first token never carries newLine
 - src/types.js:518:26440:logic — braceStack entries are only ever compared with '<' and '{'; a '[' mislabelled '(' compares identically
 - src/types.js:539:27365:logic — drops the STRING_END and HEREGEX_END legs: a run inside an interpolation always meets INTERPOLATION_END first, and runs never start inside string text, so neither is ever the first stop (probed string/heregex interpolations and interpolated string types)
+- src/types.js:615:30807:arith — b + a < 2 never holds, which drops the guard; past it a one-token run cannot be an opener (runs are bracket-balanced), so `!isOpen` returns false exactly as the guard did
+- src/types.js:617:30894:relation — tokens[b] is the depth-0 `=>`/`->` stop that ended the run (the `(x)` param tags require an arrow after the type), neither an opener nor a closer
+- src/types.js:625:31096:statement — same as 625:31120 — depth is always 0 here
+- src/types.js:625:31120:boolean — a claimed run is bracket-balanced, so depth is 0 after the walk and this return never runs
+- src/types.js:631:31412:relation — tokens[b] is the run's arrow stop: not a bracket, TERNARY, `?`, or `:`
 - src/types.js:824:40396:branch — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
 - src/types.js:824:40407:relation — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
 - src/types.js:824:40423:logic — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
