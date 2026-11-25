@@ -363,6 +363,51 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     }
   }, 90_000);
 
+  // Faces import the runtime, so the declaration beside each runtime types
+  // the lowering's own calls: a component's `_init` overrides the base's,
+  // a gate binds a typed cell, and a list factory takes its loop's item
+  // and every outer loop binding. A stdlib function declared `never`
+  // narrows what follows it.
+  test('the runtime declarations type the lowering: _init, a gate, list and nested-list factories, a never guard', async () => {
+    const dir = workspace({
+      'app/stash.rip': [
+        "import { source } from 'rip/app'",
+        '',
+        'type Row = { id: number, label: string }',
+        'type User = { name: string, rows: Row[] }',
+        '',
+        "ada: User = { name: 'ada', rows: [] }",
+        '',
+        'export stash =',
+        '  user: source',
+        '    fetch: -> Promise.resolve ada',
+      ].join('\n') + '\n',
+      'app/routes/page.rip': [
+        'export Page = component',
+        '  user <~ @stash.user',
+        '  groups: { id: number, label: string }[][] := []',
+        '  render',
+        '    div user.name',
+        '    for row in user.rows',
+        '      span row.label',
+        '    for group, i in groups',
+        '      for row in group',
+        '        span "#{i} #{row.label}"',
+      ].join('\n') + '\n',
+      'guard.rip': [
+        'find = (xs: string[], key: string): string | null -> xs.find((x) -> x is key) ?? null',
+        "hit = find ['a'], 'a'",
+        "abort 'missing' unless hit?",
+        'console.log hit.length',
+      ].join('\n') + '\n',
+    }, { strict: true });
+    try {
+      const r = await check(dir);
+      expect(r.stdout).toContain('No type errors');
+      expect(r.status).toBe(0);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
   // Every component member form checks its initializer, and every wrong-typed
   // member WRITE inside a method reaches the source. Two mechanisms hold this
   // up and each has its own spelling below.

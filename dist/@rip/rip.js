@@ -9943,7 +9943,7 @@ var COMPONENTS_DECLS = [
   "type __RipUiSnapshot = { active: Element | null; locator: { identity: Record<string, string | null>; id: string | null; path: number[] | null } | null; selection: { start: number; end: number; direction: string } | null; scrollX: number; scrollY: number };",
   "type __RipGateBinding = { cell: { read(): unknown }; value: unknown };",
   "type __RipGateMetadata = { gates: readonly __RipGateBinding[]; parent?: __Component | null; stash?: unknown; router?: unknown };",
-  "type __RipListBlock = { c(): void; m(parent: Node, anchor: Node | null): void; p(ctx: unknown, item: unknown, index: number, ...outer: unknown[]): void; d(): void; _s?: boolean; _first?: Node | null };",
+  "type __RipListBlock = { c(): void; m(parent: Node, anchor: Node | null): void; p(ctx: unknown, item: unknown, index: number, ...outer: unknown[]): void; d(detaching: boolean): void; _s?: boolean; _first?: Node | null };",
   "type __RipListState = { keys: unknown[]; items?: unknown[]; blocks: __RipListBlock[] };",
   TEARDOWN_DECL
 ].join(`
@@ -10002,10 +10002,10 @@ ${COMPONENTS_DECLS}`,
       __pushComponent: "(component: __Component | null) => __Component | null",
       __popComponent: "(prev: __Component | null) => void",
       __lis: "(arr: readonly number[]) => number[]",
-      __reconcile: "(anchor: Node | null | undefined, state: __RipListState, items: readonly unknown[], ctx: unknown, factory: (ctx: unknown, item: unknown, index: number, ...outer: unknown[]) => __RipListBlock, keyFn: ((item: unknown, index: number) => unknown) | null | undefined, ...outer: unknown[]) => void",
+      __reconcile: "<C, T, O extends unknown[]>(anchor: Node | null | undefined, state: __RipListState, items: readonly T[], ctx: C, factory: (ctx: C, item: T, index: number, ...outer: O) => __RipListBlock, keyFn: ((item: T, index: number) => unknown) | null | undefined, ...outer: O) => void",
       __transition: "(el: Element, name: string, dir: string, done?: (() => void) | null) => void",
       __handleComponentError: "(error: unknown, component: __Component | null | undefined) => void",
-      __gateBind: "(self: __Component, index: number) => { readonly value: unknown; read(): unknown }",
+      __gateBind: "<T>(self: __Component, index: number) => { readonly value: T; read(): T }",
       __detach: "(node: Node | null | undefined) => void",
       __heldSlot: "(children: unknown) => Node",
       __reportChildFailure: "(name: string, error: unknown) => void",
@@ -17929,8 +17929,6 @@ ${pad}${into}.push(...${tmp});`);
       if (tsInfo !== null)
         this.tsComponentCtor(tsInfo, pad);
       this.b.emit(pad);
-      if (tsInfo !== null)
-        this.b.tsOnly(() => this.b.emit("private "));
       this.b.emit("_init(__given");
       if (tsInfo !== null)
         this.b.tsOnly(() => {
@@ -24509,7 +24507,7 @@ var RUNTIME_TABLE = [
       __clsx: CLSX_TYPE,
       __style: STYLE_FN_TYPE,
       __Component: { class: COMPONENT_CLASS, decls: `${OWNER_FRAME_DECLS}
-${TEARDOWN_DECL}`, faceOmits: ["_init(props: Record<string, unknown>): void; "] }
+${TEARDOWN_DECL}` }
     },
     url: new URL("./runtime/components.js", import.meta.url),
     requires: "reactive",
@@ -24518,13 +24516,8 @@ ${TEARDOWN_DECL}`, faceOmits: ["_init(props: Record<string, unknown>): void; "] 
 ];
 var faceClassName = (name) => `__Rip${name.replace(/^_+/, "")}`;
 var _faceRuntimeType = (name, signature) => typeof signature === "object" ? `typeof ${faceClassName(name)}` : signature;
-var _faceClassDecls = (types) => Object.entries(types ?? {}).filter(([, signature]) => typeof signature === "object").map(([name, { class: body, decls, faceOmits = [] }]) => {
-  let text = body.replace(new RegExp(`\\b${name}\\b`, "g"), faceClassName(name));
-  for (const member of faceOmits) {
-    if (!text.includes(member))
-      throw new Error(`runtime table: '${name}' omits '${member.trim()}' from its face class, which declares no such member`);
-    text = text.replace(member, "");
-  }
+var _faceClassDecls = (types) => Object.entries(types ?? {}).filter(([, signature]) => typeof signature === "object").map(([name, { class: body, decls }]) => {
+  const text = body.replace(new RegExp(`\\b${name}\\b`, "g"), faceClassName(name));
   return `${decls ? `${decls}
 ` : ""}declare class ${faceClassName(name)} ${text}`;
 }).join(`
@@ -25057,7 +25050,7 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
     const units = [];
     if (runtimeDelivery === "import") {
       for (const rt of active)
-        units.push({ runtimes: [rt], names: rt.names, imp: rt.url.pathname });
+        units.push({ runtimes: [rt], names: rt.names, imp: rt.url.pathname, types: rt.types });
     } else {
       const fused = new Set(active.flatMap((rt) => runtimeRequires(rt)));
       for (const rt of active) {
@@ -34158,7 +34151,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "d96f492b61a1ede0";
+var compilerBuild = () => "16a7e8a9fde67d7b";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

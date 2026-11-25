@@ -10892,10 +10892,9 @@ class Emitter {
         });
       }
       if (tsInfo !== null) this.tsComponentCtor(tsInfo, pad);
-      // The lowering's own methods are private on the face: they are
-      // the runtime's to call, and no consumer's surface.
+      // `_init` overrides the base's public member, so it carries no
+      // modifier; the editor hides every `_` member from consumers.
       this.b.emit(pad);
-      if (tsInfo !== null) this.b.tsOnly(() => this.b.emit('private '));
       this.b.emit('_init(__given');
       if (tsInfo !== null) this.b.tsOnly(() => { this.b.emit(': '); this.emitDeclaredTypeCopies(propsTypeText(tsInfo, { road: 'face' })); });
       this.b.emit(') {\n');
@@ -19567,10 +19566,8 @@ const RUNTIME_TABLE = [
       // The style road's writer — its value parameter is the face's
       // __RipCSSProperties alias, armed alongside.
       __style: STYLE_FN_TYPE,
-      // The base every component extends. A component's own `_init` is
-      // private on the face, which a public base member would refuse, so
-      // the face's copy leaves the base's out.
-      __Component: { class: COMPONENT_CLASS, decls: `${OWNER_FRAME_DECLS}\n${TEARDOWN_DECL}`, faceOmits: ['_init(props: Record<string, unknown>): void; '] },
+      // The base every component extends.
+      __Component: { class: COMPONENT_CLASS, decls: `${OWNER_FRAME_DECLS}\n${TEARDOWN_DECL}` },
     },
     url: new URL('./runtime/components.js', import.meta.url),
     requires: 'reactive',
@@ -19587,12 +19584,8 @@ export const _faceRuntimeType = (name, signature) =>
   typeof signature === 'object' ? `typeof ${faceClassName(name)}` : signature;
 export const _faceClassDecls = (types) => Object.entries(types ?? {})
   .filter(([, signature]) => typeof signature === 'object')
-  .map(([name, { class: body, decls, faceOmits = [] }]) => {
-    let text = body.replace(new RegExp(`\\b${name}\\b`, 'g'), faceClassName(name));
-    for (const member of faceOmits) {
-      if (!text.includes(member)) throw new Error(`runtime table: '${name}' omits '${member.trim()}' from its face class, which declares no such member`);
-      text = text.replace(member, '');
-    }
+  .map(([name, { class: body, decls }]) => {
+    const text = body.replace(new RegExp(`\\b${name}\\b`, 'g'), faceClassName(name));
     return `${decls ? `${decls}\n` : ''}declare class ${faceClassName(name)} ${text}`;
   })
   .join('\n');
@@ -20278,15 +20271,11 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
     const active = RUNTIME_TABLE.filter((rt) => runtimes.has(rt.key));
     const units = [];
     if (runtimeDelivery === 'import') {
-      // No `types` here: the import binds the runtime module's own JS, whose
-      // functions carry no type parameters. A TS FACE built under this delivery
-      // therefore cannot type-check an annotated reactive — the face spells
-      // `__state<T>(v)` and the imported `__state` takes none (TS2558). No
-      // shipped path asks for one (check and the server both deliver inline,
-      // and `--ts` refuses to combine with `--runtime`), so this is a
-      // constraint to respect rather than a bug to route around: typing an
-      // import-delivered face means giving these units a signature source too.
-      for (const rt of active) units.push({ runtimes: [rt], names: rt.names, imp: rt.url.pathname });
+      // The import resolves to the declaration beside each runtime, generated
+      // from these same `types` (`bun run decls`), so a face built under this
+      // delivery types every injected name the table types; the unit carries
+      // `types` so each reference records whether it is typed.
+      for (const rt of active) units.push({ runtimes: [rt], names: rt.names, imp: rt.url.pathname, types: rt.types });
     } else {
       const fused = new Set(active.flatMap((rt) => runtimeRequires(rt)));
       for (const rt of active) {

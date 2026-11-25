@@ -1065,8 +1065,10 @@ export function scrubFaceArtifacts(text) {
     .replace(/\b__RipClassValue\b/g, 'ClassValue')
     .replace(/\b__RipChildren\b/g, 'Children')
     .replace(/\b__RipCSSProperties\b/g, 'CSSProperties')
-    // The runtime base every component extends.
+    // The runtime base every component extends: the face's own class name,
+    // and the runtime module's, which an imported runtime declares.
     .replace(/\b__RipComponent\b/g, 'Component')
+    .replace(/\b__Component\b/g, 'Component')
     // The schema and orm runtimes' face vocabulary reads under the names
     // docs/ORM.md uses for the same shapes.
     .replace(/\b__RipSchemaIssue\b/g, 'SchemaIssue')

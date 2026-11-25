@@ -843,7 +843,7 @@ while (queue.length) {
   const srcLineStarts = lineStartsOf(source);
   let result;
   try {
-    result = compile(source, { path: fsPath, face: 'ts', runtimeDelivery: 'inline', strict: cfg.strict, appStashSpec: appStashSpecFor(fsPath, workspaceRoot, stashMemo), ...routeOptionsFor(fsPath) });
+    result = compile(source, { path: fsPath, face: 'ts', runtimeDelivery: 'import', strict: cfg.strict, appStashSpec: appStashSpecFor(fsPath, workspaceRoot, stashMemo), ...routeOptionsFor(fsPath) });
   } catch (err) {
     if (err?.name !== 'CompileError') throw err;
     const { reason, start, end } = compileErrorInfo(err, source.length);
@@ -1081,7 +1081,7 @@ if (compiled.size > 0) {
       // importer's queued hovers against its dependency's didOpen, and
       // which pinnables land would then depend on timing, not source.
       const repin = (fsPath, entry, pins) => {
-        const r = compile(entry.source, { path: fsPath, face: 'ts', runtimeDelivery: 'inline', strict: entry.cfg.strict, pins, appStashSpec: appStashSpecFor(fsPath, workspaceRoot, stashMemo), ...routeOptionsFor(fsPath) });
+        const r = compile(entry.source, { path: fsPath, face: 'ts', runtimeDelivery: 'import', strict: entry.cfg.strict, pins, appStashSpec: appStashSpecFor(fsPath, workspaceRoot, stashMemo), ...routeOptionsFor(fsPath) });
         entry.good.code = r.code;
         entry.good.mappings = r.mappings;
         entry.good.echoSpans = r.echoSpans ?? [];

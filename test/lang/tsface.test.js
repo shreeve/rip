@@ -67,7 +67,7 @@ const REGION_SHAPES = [
   new RegExp(String.raw`^declare (static |readonly )?${ID}\??: \S`, 'su'), // component member declare (optional for the projection channel) / static-mount narrowing / =! readonly 
   new RegExp(String.raw`^${ID}(: \S[^;]*)?;$`, 'su'),      // the field a promoted param or a constructor-body `@x =` declares (bare when the assignment's own inference is the honest type)
   /^\[key: `_\$\{string\}`\]: any;$/u,                    // the component slot-namespace index signature (M12-E)
-  /^private$/u,                                            // the lowering's own methods (_init/_create/_setup), no consumer's surface
+  /^private$/u,                                            // the lowering's own methods (_create/_setup), no consumer's surface
   new RegExp(String.raw`^private static __ripHost\(\) \{ return new ${ID}(\.${ID})*\(null!\); \}$`, 'u'), // the extends host referenced under the head's own bytes, a bare name or a member path
   /^constructor\(props\??: \{ .*\{ super\(props\); \}$/su, // the component props ctor (M12-E)
   /^as any\)?$/u,                                          // scaffold/handler quieting casts (M12-E)
