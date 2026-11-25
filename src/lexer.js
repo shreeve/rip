@@ -731,8 +731,10 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     const hyphen = (t) => t?.kind === '-' || (t?.kind === 'MATH' && t.value === '-');
     while (k >= 1) {
       if (tokens[k].kind === 'PROPERTY' && tokens[k - 1].kind === '.') k -= 2;
-      // A class's digit run (`p-4`), which the gate joins: step over it.
-      else if (tokens[k].kind === 'NUMBER' && hyphen(tokens[k - 1]) && tokens[k - 2]?.kind === 'PROPERTY') k -= 2;
+      // A class's hyphenated tail after a digit run (`p-4`, `p-4-2`,
+      // `p-4-x`), which the gate joins: step over each part.
+      else if ((tokens[k].kind === 'NUMBER' || tokens[k].kind === 'PROPERTY') && hyphen(tokens[k - 1]) &&
+               (tokens[k - 2]?.kind === 'PROPERTY' || tokens[k - 2]?.kind === 'NUMBER')) k -= 2;
       else break;
     }
     return k;
@@ -1516,12 +1518,16 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     // `# word` stays a comment.
     if (ch === '#') {
       const prev = last();
-      // A class's digit run (`div.p-4#x`) ends in a NUMBER the gate joins
-      // into the class; the id glues onto it like onto a name.
-      const n = tokens.length;
+      // A class's digit run (`div.p-4#x`, `div.p-4-2#x`) ends in a NUMBER
+      // the gate joins into the class; the id glues onto it like onto a
+      // name, and chainStartFrom walks the whole hyphenated tail back to
+      // the chain's root.
+      const isHyphen = (t) => t?.kind === '-' || (t?.kind === 'MATH' && t.value === '-');
+      let root = tokens.length - 1;
+      while ((tokens[root]?.kind === 'NUMBER' || (root < tokens.length - 1 && tokens[root]?.kind === 'PROPERTY')) &&
+             isHyphen(tokens[root - 1]) && (tokens[root - 2]?.kind === 'NUMBER' || tokens[root - 2]?.kind === 'PROPERTY')) root -= 2;
       const digitClass = prev?.kind === 'NUMBER' && /^[0-9]+$/.test(prev.value) &&
-        (tokens[n - 2]?.kind === '-' || (tokens[n - 2]?.kind === 'MATH' && tokens[n - 2].value === '-')) &&
-        tokens[n - 3]?.kind === 'PROPERTY' && tokens[n - 4]?.kind === '.';
+        root < tokens.length - 1 && tokens[root]?.kind === 'PROPERTY' && tokens[root - 1]?.kind === '.';
       const glued = inRender && prev && (prev.kind === 'IDENTIFIER' || prev.kind === 'PROPERTY' || digitClass) &&
         !pendingSpaced && !prev.generated && text[pos + 1] !== undefined && !/\s/.test(text[pos + 1]);
       if (glued && selectorScope()) {
@@ -1529,7 +1535,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         // heads its line, a name from the identifier vocabulary (hyphens
         // inside it). Glued to anything else, `#` is neither an id nor a
         // comment.
-        if (!headSelectorAt(chainStartFrom(digitClass ? tokens.length - 3 : tokens.length - 1))) {
+        if (!headSelectorAt(chainStartFrom(tokens.length - 1))) {
           const written = /^[^\s"'`,()]*/.exec(text.slice(pos + 1))[0];
           fail(`\`#${written}\` is no element id here: an id follows the HTML tag or \`.class\` that starts its line (otherwise write \`id: '${written}'\`), and a comment needs a space before \`#\``, pos);
         }

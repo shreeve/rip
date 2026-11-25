@@ -3098,6 +3098,15 @@ describe('selector shorthands', () => {
     expect(js(at('#main "x"'))).toContain("id = 'main'");
   });
 
+  test('an id glues after a class with several digit runs, and the text stays', () => {
+    for (const [line, cls] of [['div.p-4-2#x "y"', 'p-4-2'], ['div.p-4-2-8#x "y"', 'p-4-2-8'], ['.p-4-2#x "y"', 'p-4-2'], ['div.w-1-2.h-3-4#x "y"', 'w-1-2 h-3-4'], ['div.a-1-2.b#x "y"', 'a-1-2 b']]) {
+      const code = js(at(line));
+      expect(code).toContain("id = 'x'");
+      expect(code).toContain('createTextNode("y")');
+      expect(code).toContain(`className = '${cls}'`);
+    }
+  });
+
   test('an id is a name from the one identifier vocabulary, non-ASCII letters included', () => {
     const code = js(at('p#café "v"'));
     expect(code).toContain("id = 'café'");

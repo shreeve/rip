@@ -491,8 +491,11 @@ const collectTypeRun = (tokens, j, opts, fail) => {
     if (opts.cast && depth === 0 && isPostfixTypeWord(t)) break;
     // The cast's type lives on one logical line: a depth-0 line break
     // that survived as a plain continuation (a trailing `>` suppresses
-    // the TERMINATOR) must not let the run swallow the next line.
-    if (opts.cast && depth === 0 && j > startJ && t.newLine) break;
+    // the TERMINATOR) must not let the run swallow the next line. A line
+    // ending in `|` or `&` is the exception: neither can end a type, so
+    // the next line is its right operand, as annotation runs read it.
+    if (opts.cast && depth === 0 && j > startJ && t.newLine &&
+        tokens[j - 1].kind !== '|' && tokens[j - 1].kind !== '&') break;
 
     // With any `<` open, a shift spelling is a multi-level generic
     // close and must line up exactly — an over-close (`Map<K>> 2`)
@@ -1068,6 +1071,16 @@ const CONDITION_BODY_HEADS = new Set(['IF', 'UNLESS', 'SWITCH', 'WHILE', 'UNTIL'
 // only-a-newline-ends-one rule, mirrored by implicitBlocks), so it
 // must not end the parameter segment.
 const INLINE_BODY_INTRODUCERS = new Set(['->', '=>', 'THEN', 'ELSE']);
+// Clause heads that continue a construct whose body block just closed.
+// Right after that OUTDENT, `else` and `finally` claim an indent that
+// follows them directly, `else if c`/`else unless c` hand the claim to
+// their condition, and `catch e` claims the next indent on its line —
+// each the clause's own body, as the construct's head claimed its first.
+// Read as parameter layout instead, a `key: value` line in that block
+// would claim as an annotation and erase. An inline clause body
+// (`else 3`) leaves nothing to claim: the next indented line is the
+// parameter list's.
+const CLAUSE_IMMEDIATE_HEADS = new Set(['ELSE', 'FINALLY']);
 
 // Tokens that END a class HEAD's armed window (the class-generics
 // rejection): statement layout, the body/clause keywords that follow
@@ -1170,6 +1183,9 @@ export function rewriteTypes(tokens, mintId, text, fail) {
   // candidate — every candidate afterwards is one map lookup.
   let assignIndex = null;
   const assignedLater = (start, name) => {
+    // A line ending the tape (`a: 1;` as the last statement) has nothing
+    // after it to assign anything.
+    if (start >= tokens.length) return false;
     assignIndex ??= buildAssignIndex(tokens);
     const m = assignIndex.blockMaps[assignIndex.blockIdAt[start]];
     return (m.get(name) ?? -1) >= start;
@@ -1843,7 +1859,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
       else if (kd === 'CALL_START' && endsDefHead(out, out.length - 1)) fk = 'defparam';
       frames.push({
         kind: fk, sawEq: false, sawType: false, bodyDepth: 0,
-        pendingImmediate: false, pendingCond: false, inlineBody: false,
+        pendingImmediate: false, pendingCond: false, inlineBody: false, afterBody: false, clauseElse: false,
       });
     } else if (RUN_CLOSERS.has(kd)) {
       const open = frames.pop();
@@ -1861,12 +1877,16 @@ export function rewriteTypes(tokens, mintId, text, fail) {
           f.pendingImmediate = false;
           f.pendingCond = false;
           f.inlineBody = false;
+          f.afterBody = false;
+          f.clauseElse = false;
         };
+        const afterBody = f.afterBody;
+        f.afterBody = false;
         if (f.bodyDepth > 0) {
           // Inside a default's body block: its INDENT/OUTDENT nest and
           // its separators belong to the value, not the list.
           if (kd === 'INDENT') f.bodyDepth++;
-          else if (kd === 'OUTDENT') f.bodyDepth--;
+          else if (kd === 'OUTDENT' && --f.bodyDepth === 0) f.afterBody = true;
         } else if (kd === 'INDENT') {
           // A pending head claims THIS indent as its body; any other
           // indent is parameter-list layout.
@@ -1894,9 +1914,11 @@ export function rewriteTypes(tokens, mintId, text, fail) {
           }
         } else {
           // The immediate claim survives ONLY to the very next token.
-          f.pendingImmediate = IMMEDIATE_BODY_HEADS.has(kd);
-          if (CONDITION_BODY_HEADS.has(kd) && prev?.kind === '=') f.pendingCond = true;
+          f.pendingImmediate = IMMEDIATE_BODY_HEADS.has(kd) || (afterBody && CLAUSE_IMMEDIATE_HEADS.has(kd));
+          if (afterBody && kd === 'CATCH') f.pendingCond = true;
+          else if (CONDITION_BODY_HEADS.has(kd) && (prev?.kind === '=' || (f.clauseElse && prev?.kind === 'ELSE'))) f.pendingCond = true;
           else if (kd === 'THEN') f.pendingCond = false;
+          f.clauseElse = afterBody && kd === 'ELSE';
           if (INLINE_BODY_INTRODUCERS.has(kd)) f.inlineBody = true;
           if (kd === '=') f.sawEq = true;
         }

@@ -122,7 +122,11 @@ function collectBlocks(tokens, mintId) {
       const k = tokens[j].kind;
       if (CLOSERS.has(k) || k === 'OUTDENT') { levels++; continue; }
       if (OPENERS.has(k) || k === 'INDENT') {
-        if (k === 'INDENT') return false;
+        // A block whose OUTDENT sat at the body's own level is a control
+        // block (`if f x` + block): calls in its head closed at its
+        // INDENT and own no comma after it. An INDENT nested in brackets
+        // (`f [` + indented elements + `], 2`) is only layout.
+        if (k === 'INDENT' && levels <= 1) return false;
         levels--;
         if (levels < 0) return false;
         continue;
@@ -329,10 +333,13 @@ const IMPLICIT_END = new Set([
   'POST_IF', 'POST_UNLESS', 'FOR', 'WHILE', 'UNTIL', 'WHEN', 'BY', 'LOOP',
   'TERMINATOR', '||', '&&', '??', 'THEN', 'ELSE', 'LOOSE_ELSE',
 ]);
-// CLASS is control-in-implicit like IF/SWITCH — its body INDENT must not
-// close an enclosing implicit call/object — with one extra rule:
-// a BODILESS class never consumes its CONTROL frame at an INDENT, so a
-// TERMINATOR pops it and the enclosing close proceeds.
+// A CONTROL frame comes off at its construct's block INDENT. One still on
+// top at a TERMINATOR belongs to a construct that finished on its line —
+// a bodiless class, an inline `try g()` or `try g() finally h()` — because
+// the lexer drops the TERMINATOR before a next-line `catch`/`finally`/
+// `else`, and every other block opens with an INDENT. The TERMINATOR
+// retires it and the enclosing close proceeds; shielding there would carry
+// the call or object onto the next line.
 const CONTROL_IN_IMPLICIT = new Set(['IF', 'TRY', 'FINALLY', 'CATCH', 'SWITCH', 'FOR', 'CLASS']);
 const VALUE_END = new Set([
   'IDENTIFIER', 'PROPERTY', 'NUMBER', 'STRING', 'STRING_END', 'REGEX', 'HEREGEX_END',
@@ -648,7 +655,7 @@ function collectObjects(tokens, mintId) {
     // through to IMPLICIT_END (the comprehension wraps the object).
     if (top()?.kind === 'object' && CONTROL_IN_IMPLICIT.has(k) &&
         !(k === 'FOR' && !t.newLine && prev && VALUE_END.has(prev.kind))) {
-      stack.push({ kind: 'CONTROL', trigger: k });
+      stack.push({ kind: 'CONTROL' });
       continue;
     }
 
@@ -704,8 +711,11 @@ function collectObjects(tokens, mintId) {
       // VOID-METHOD pair (`fn!: ->`): this is the context that resolves
       // the scanner's DAMMIT into VOID_MARKER (a ternary's colon was
       // consumed above, so `c ? f!: g` keeps its call-site dammit).
-      if (prev?.kind === 'DAMMIT') prev.kind = 'VOID_MARKER';
-      const bang = prev?.kind === 'VOID_MARKER' ? 1 : 0;
+      // A colon with nothing before it on its line has no key: it opens
+      // no object, and the stray `:` rejects at parse.
+      if (!prev || LINE_BREAK_KINDS.has(prev.kind)) continue;
+      if (prev.kind === 'DAMMIT') prev.kind = 'VOID_MARKER';
+      const bang = prev.kind === 'VOID_MARKER' ? 1 : 0;
 
       // The key's start: normally the previous token (one further back
       // past a void marker); `@`-prefixed keys start at the `@`; a
@@ -784,11 +794,10 @@ function collectObjects(tokens, mintId) {
         }
       }
       while (top()?.kind === 'object' ||
-             (k === 'TERMINATOR' && top()?.kind === 'CONTROL' && top()?.trigger === 'CLASS')) {
+             (k === 'TERMINATOR' && top()?.kind === 'CONTROL')) {
         const fr = top();
-        // A bodiless class's CONTROL frame was never consumed by an
-        // INDENT; the statement boundary retires it and the close
-        // proceeds to the frames beneath (the CLASS-at-TERMINATOR pop).
+        // An unconsumed CONTROL frame at a statement boundary retires
+        // (see CONTROL_IN_IMPLICIT) and the close proceeds beneath it.
         if (fr.kind === 'CONTROL') {
           stack.pop();
           continue;
@@ -891,7 +900,7 @@ function collectCalls(tokens, mintId) {
     // wraps the call instead of feeding it.
     if (stack[stack.length - 1] === 'call' && CONTROL_IN_IMPLICIT.has(k) &&
         !(k === 'FOR' && !t.newLine && tokens[i - 1] && VALUE_END.has(tokens[i - 1].kind))) {
-      stack.push(k === 'CLASS' ? 'CONTROL_CLASS' : 'CONTROL');
+      stack.push('CONTROL');
       continue;
     }
 
@@ -908,7 +917,7 @@ function collectCalls(tokens, mintId) {
       if (!prev || !BLOCK_ARG_CARRIERS.has(prev.kind)) {
         while (stack[stack.length - 1] === 'call') closeCall(i);
       }
-      if (stack[stack.length - 1] === 'CONTROL' || stack[stack.length - 1] === 'CONTROL_CLASS') stack.pop();
+      if (stack[stack.length - 1] === 'CONTROL') stack.pop();
       stack.push('INDENT');
       continue;
     }
@@ -917,7 +926,7 @@ function collectCalls(tokens, mintId) {
       // No continue: '(' etc. are never IMPLICIT_FUNC, and falling
       // through keeps one code path.
     } else if (PASS_CLOSERS.has(k)) {
-      while (stack[stack.length - 1] === 'call' || stack[stack.length - 1] === 'CONTROL' || stack[stack.length - 1] === 'CONTROL_CLASS') {
+      while (stack[stack.length - 1] === 'call' || stack[stack.length - 1] === 'CONTROL') {
         if (stack[stack.length - 1] === 'call') closeCall(i);
         else stack.pop();
       }
@@ -942,12 +951,11 @@ function collectCalls(tokens, mintId) {
       if (k === 'ELSE' && tokens[i - 1]?.kind === 'OUTDENT') continue;
       if (tokens[i - 1]?.kind !== ',') {
         // A CONTROL frame on top shields the call: the boundary token
-        // belongs to the control construct, not the call — except
-        // a bodiless class's frame at a statement boundary, which was
-        // never consumed by an INDENT: the TERMINATOR retires it and
-        // the close proceeds (the CLASS-at-TERMINATOR pop).
+        // belongs to the control construct, not the call — except at a
+        // TERMINATOR, which retires an unconsumed frame (see
+        // CONTROL_IN_IMPLICIT) so the close proceeds.
         while (stack[stack.length - 1] === 'call' ||
-               (k === 'TERMINATOR' && stack[stack.length - 1] === 'CONTROL_CLASS')) {
+               (k === 'TERMINATOR' && stack[stack.length - 1] === 'CONTROL')) {
           if (stack[stack.length - 1] === 'call') closeCall(i);
           else stack.pop();
         }
@@ -982,7 +990,7 @@ function collectCalls(tokens, mintId) {
   }
 
   if (tokens.length && !tokens[tokens.length - 1].generated) lastReal = tokens[tokens.length - 1];
-  while (stack[stack.length - 1] === 'call' || stack[stack.length - 1] === 'CONTROL' || stack[stack.length - 1] === 'CONTROL_CLASS') {
+  while (stack[stack.length - 1] === 'call' || stack[stack.length - 1] === 'CONTROL') {
     if (stack[stack.length - 1] === 'call') closeCall(tokens.length);
     else stack.pop();
   }
