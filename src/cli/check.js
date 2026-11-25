@@ -23,7 +23,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { cacheIdentityOf } from '../../packages/vscode/src/hash.js';
-import { compile } from '../compiler.js';
+import { parseSource, emitSource } from '../compiler.js';
 import { readProjectConfig } from '../config.js';
 import { identifierRunAt } from '../ident.js';
 import { startTsgo } from '../../packages/vscode/src/tsgo.js';
@@ -633,11 +633,10 @@ anchorStdlib(workspaceRoot);
 // One run = one consistent view of the disk, so stash discovery
 // memoizes per directory — files sharing a dirname share one walk.
 const stashMemo = new Map();
-// Route discovery memoizes the same way, and BOTH compile passes — the
-// main compile and the pin-pass recompile — derive their route options
-// through this one helper over the one memo: the pin pass must hand
-// compile() identical options, or a pinned file's face would re-emit
-// against a different route view than the one its diagnostics map onto.
+// Route discovery memoizes the same way. A file's two emissions — the
+// main one and the pin pass's — share the one options object built at
+// the main compile, so a pinned face re-emits against the same route
+// view its diagnostics map onto.
 const routesMemo = new Map();
 const routeOptionsFor = (fsPath) => {
   const { union, params } = appRoutesFor(fsPath, workspaceRoot, routesMemo);
@@ -703,7 +702,7 @@ const projectConfig = (dir) => {
   return postureCache.get(dir);
 };
 
-const compiled = new Map();   // fsPath → { source, cfg, good, pinnables }
+const compiled = new Map();   // fsPath → { source, cfg, good, pinnables, faceOptions, parsed }
 const parseDiags = [];        // rows for files that failed to compile
 // A file that could not be read, or whose diagnostics could not be pulled,
 // leaves coverage SHORT of what was asked — the run then never exits 0 (a
@@ -841,9 +840,13 @@ while (queue.length) {
   }
   const cfg = projectConfig(path.dirname(fsPath));
   const srcLineStarts = lineStartsOf(source);
-  let result;
+  // The parse is kept for a file with pinnable bindings: the pin pass
+  // emits it again with the probed types, and only emission reads pins.
+  const faceOptions = { path: fsPath, face: 'ts', runtimeDelivery: 'import', strict: cfg.strict, appStashSpec: appStashSpecFor(fsPath, workspaceRoot, stashMemo), ...routeOptionsFor(fsPath) };
+  let result, parsed;
   try {
-    result = compile(source, { path: fsPath, face: 'ts', runtimeDelivery: 'import', strict: cfg.strict, appStashSpec: appStashSpecFor(fsPath, workspaceRoot, stashMemo), ...routeOptionsFor(fsPath) });
+    parsed = parseSource(source, faceOptions);
+    result = emitSource(parsed, faceOptions);
   } catch (err) {
     if (err?.name !== 'CompileError') throw err;
     const { reason, start, end } = compileErrorInfo(err, source.length);
@@ -882,6 +885,8 @@ while (queue.length) {
       dir: path.dirname(fsPath),
     },
     pinnables: result.pinnables ?? [],
+    faceOptions,
+    parsed: result.pinnables?.length ? parsed : null,
   });
   // The spliced stash rides the closure like an import (closureImportsOf):
   // a single-file check of a route must still compile the stash its face
@@ -1082,7 +1087,8 @@ if (compiled.size > 0) {
       // importer's queued hovers against its dependency's didOpen, and
       // which pinnables land would then depend on timing, not source.
       const repin = (fsPath, entry, pins) => {
-        const r = compile(entry.source, { path: fsPath, face: 'ts', runtimeDelivery: 'import', strict: entry.cfg.strict, pins, appStashSpec: appStashSpecFor(fsPath, workspaceRoot, stashMemo), ...routeOptionsFor(fsPath) });
+        const r = emitSource(entry.parsed, { ...entry.faceOptions, pins });
+        entry.parsed = null;
         entry.good.code = r.code;
         entry.good.mappings = r.mappings;
         entry.good.echoSpans = r.echoSpans ?? [];

@@ -38,11 +38,12 @@ export label: (job: () => void) => void = (job) ->
   catch err
     console.log(err.message)
 
-# posture, object-literal this: a method reading `@` members; the loose base
-# types `this` as `any` (strict: TS2339 on the member and TS7023 on the
-# circular return)
+# posture, object-literal this: methods reading `@` members; the loose base
+# types `this` as `any` (strict: TS2339 on the member read, and TS7023 on a
+# return that calls back through `this`)
 counter =
-  bump: -> (@count or 0) + 1
+  bump: -> console.log(@count)
+  again: -> @again()
 console.log(counter.bump())
 
 # gate, function bodies: a function's type is its header; a typed binding

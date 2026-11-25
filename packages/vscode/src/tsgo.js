@@ -6,6 +6,13 @@
 // We resolve the binary directly so the LSP stdio stream carries no
 // extra process layer; the shim remains the fallback.
 //
+// RIP_CHECKER picks the engine behind that protocol. Every engine named
+// here speaks tsgo's `--lsp --stdio` and prints the same diagnostics, so
+// one client serves them all and nothing downstream knows which ran:
+//   tsgo (default)   the root install's `typescript` 7
+//   tsrs             the `tsrs` package's native binary (Rust)
+//   an absolute path any binary speaking the same protocol
+//
 // The client is deliberately small — Content-Length framing, request/
 // notification dispatch, and a notification listener — because the Rip
 // server needs exactly that and nothing more.
@@ -47,6 +54,35 @@ export function decodeSemanticTokens(data, legend) {
 }
 
 export function tsgoBinaryPath() {
+  return checkerBinaryPath(process.env.RIP_CHECKER);
+}
+
+// The engine name or path a RIP_CHECKER value selects, resolved to a
+// binary; an unknown name or an engine that is not installed rejects
+// with how to fix it, never falling back to a different engine.
+export function checkerBinaryPath(choice) {
+  const engine = choice === undefined || choice === '' ? 'tsgo' : choice;
+  if (engine === 'tsgo') return typescriptBinaryPath();
+  if (engine === 'tsrs') return tsrsBinaryPath();
+  if (path.isAbsolute(engine)) {
+    if (fs.existsSync(engine)) return engine;
+    throw new Error(`RIP_CHECKER: ${engine} does not exist`);
+  }
+  throw new Error(`RIP_CHECKER: unknown engine ${JSON.stringify(engine)} — use tsgo, tsrs, or an absolute path to a binary`);
+}
+
+function tsrsBinaryPath() {
+  let pkgJson;
+  try { pkgJson = require.resolve('tsrs/package.json'); }
+  catch { throw new Error('RIP_CHECKER=tsrs: the tsrs package is not installed — run `bun add -d tsrs` at the repository root'); }
+  const nodeModules = path.resolve(path.dirname(pkgJson), '..');
+  const binName = process.platform === 'win32' ? 'tsrs.exe' : 'tsrs';
+  const direct = path.join(nodeModules, '@tsrs', `${process.platform}-${process.arch}`, binName);
+  if (fs.existsSync(direct)) return direct;
+  throw new Error(`RIP_CHECKER=tsrs: no binary for ${process.platform}-${process.arch} at ${direct}`);
+}
+
+function typescriptBinaryPath() {
   const pkgJson = require.resolve('typescript/package.json');
   const nodeModules = path.resolve(path.dirname(pkgJson), '..');
   const platformPkg = `typescript-${process.platform}-${process.arch}`;
