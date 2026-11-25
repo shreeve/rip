@@ -10,6 +10,7 @@
 //   bun scripts/mutate.mjs report --in <mutants.json> --results <r1.jsonl,r2.jsonl>
 //                               [--out <survivor ids>] [--killed <killed ids>]
 //                               [--md <report.md>]
+//   bun scripts/mutate.mjs try    --in <mutants.json> --ids <id,…|ids file> -- <command…>
 //
 // `gen` mutates only lines the lcov file marks executed: an unexecuted
 // line survives every mutant by construction, and the coverage report
@@ -501,6 +502,34 @@ function section(title, list) {
   return md;
 }
 
+// Applies each named mutant to THIS checkout in turn, runs the given
+// command, and restores the file: the triage loop's proof that a new test
+// kills the mutant it was written for. A mutant whose `from` text no longer
+// stands at its offset is refused, since the file has moved under it.
+async function tryMutants(args, cmd) {
+  const mutants = new Map(JSON.parse(readFileSync(args.in, 'utf8')).map((m) => [m.id, m]));
+  const ids = existsSync(String(args.ids)) ? readFileSync(args.ids, 'utf8').split('\n').filter(Boolean) : String(args.ids).split(',');
+  if (!cmd.length) { console.error('try: give the command after --'); process.exit(2); }
+  let survived = 0;
+  for (const id of ids) {
+    const m = mutants.get(id);
+    if (!m) { console.log(`unknown  ${id}`); continue; }
+    if (m.op === 'table') { console.log(`skipped  ${id} (table mutants regenerate the parser; use run)`); continue; }
+    const target = join(ROOT, m.file);
+    const src = readFileSync(target, 'utf8');
+    if (src.slice(m.start, m.end) !== m.from) { console.log(`moved    ${id}`); continue; }
+    writeFileSync(target, src.slice(0, m.start) + m.to + src.slice(m.end));
+    let code;
+    try {
+      const proc = spawn(cmd, { cwd: ROOT, env: { ...process.env, RIP_NO_CACHE: '1', FORCE_COLOR: '0' }, stdout: 'ignore', stderr: 'ignore' });
+      code = await proc.exited;
+    } finally { writeFileSync(target, src); }
+    if (code === 0) survived++;
+    console.log(`${code === 0 ? 'SURVIVED' : 'killed  '} ${id}`);
+  }
+  if (survived) process.exitCode = 1;
+}
+
 // ── cli ──────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
   const a = { _: [] };
@@ -512,11 +541,14 @@ function parseArgs(argv) {
 }
 
 if (import.meta.main) {
-  const [cmd, ...rest] = process.argv.slice(2);
+  const [cmd, ...all] = process.argv.slice(2);
+  const dash = all.indexOf('--');
+  const rest = dash < 0 ? all : all.slice(0, dash);
   const args = parseArgs(rest);
   if (cmd === 'gen') gen(args);
   else if (cmd === 'gen-table') await genTable(args);
   else if (cmd === 'run') await run(args);
   else if (cmd === 'report') report(args);
+  else if (cmd === 'try') await tryMutants(args, dash < 0 ? [] : all.slice(dash + 1));
   else { console.error('usage: bun scripts/mutate.mjs gen|run|report …'); process.exit(2); }
 }
