@@ -1,6 +1,6 @@
 # src/lexer.js mutation survivors
 
-439 of 565 survivors classified.
+455 of 565 survivors classified.
 
 ## GAP
 
@@ -78,6 +78,13 @@
 - src/lexer.js:817:38629:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element may open a render block, on its line or the next
 - src/lexer.js:817:38642:relation — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a hyphenated word after an operator or a member chain is subtraction; test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element nests after a class chain or a bare class line
 - src/lexer.js:817:38664:boolean — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element nests after a class chain or a bare class line
+- src/lexer.js:1076:49747:logic — test/rip/regex.rip › a line break inside a heregex character class rejects
+- src/lexer.js:1079:49887:branch — test/rip/regex.rip › whitespace inside a heregex character class is kept
+- src/lexer.js:1079:49890:relation — test/rip/regex.rip › whitespace inside a heregex character class is kept
+- src/lexer.js:1115:50888:arith — test/lang/lexer.test.js › heregex interpolation spans › the opener and the interpolation start cover their own characters
+- src/lexer.js:1115:50890:number — test/lang/lexer.test.js › heregex interpolation spans › the opener and the interpolation start cover their own characters
+- src/lexer.js:1118:51016:arith — test/lang/lexer.test.js › heregex interpolation spans › the opener and the interpolation start cover their own characters
+- src/lexer.js:1118:51018:number — test/lang/lexer.test.js › heregex interpolation spans › the opener and the interpolation start cover their own characters
 - src/lexer.js:1202:54945:arith — test/rip/types.rip › a generic interface body holds a template-literal type
 - src/lexer.js:1202:54947:number — test/rip/types.rip › an interface after a statement holds a template-literal type
 - src/lexer.js:1203:54958:branch — test/rip/types.rip › an interface that extends holds a template-literal type
@@ -380,6 +387,15 @@
 - src/lexer.js:817:38516:relation — these widen j < L-1 to admit j = L-1 (no chain walked), where root is prev itself, and every boundary kind of prev (INDENT, TERMINATOR, OUTDENT, RENDER) has already returned above; !root needs j < 0, impossible with a RENDER before the line
 - src/lexer.js:817:38532:arith — these widen j < L-1 to admit j = L-1 (no chain walked), where root is prev itself, and every boundary kind of prev (INDENT, TERMINATOR, OUTDENT, RENDER) has already returned above; !root needs j < 0, impossible with a RENDER before the line
 - src/lexer.js:817:38534:number — these widen j < L-1 to admit j = L-1 (no chain walked), where root is prev itself, and every boundary kind of prev (INDENT, TERMINATOR, OUTDENT, RENDER) has already returned above; !root needs j < 0, impossible with a RENDER before the line
+- src/lexer.js:1063:49376:relation — the extra iteration at pos === text.length runs only when no closer was found; it appends to out and steps past the end, then scanHeregexPart fails 'missing ///' at the opener and discards out and pos
+- src/lexer.js:1066:49484:statement — a backslash as the last character of the input leaves no closer after it: consuming it as an escape steps past the end, and both paths fail 'missing ///' at the opener, discarding out and pos
+- src/lexer.js:1066:49492:arith — a backslash as the last character of the input leaves no closer after it: consuming it as an escape steps past the end, and both paths fail 'missing ///' at the opener, discarding out and pos
+- src/lexer.js:1066:49494:number — a backslash as the last character of the input leaves no closer after it: consuming it as an escape steps past the end, and both paths fail 'missing ///' at the opener, discarding out and pos
+- src/lexer.js:1066:49496:relation — a backslash as the last character of the input leaves no closer after it: consuming it as an escape steps past the end, and both paths fail 'missing ///' at the opener, discarding out and pos
+- src/lexer.js:1091:50134:relation — at pos === text.length /\s/ tests the string 'undefined', which holds no whitespace, so the skip stops at the same place
+- src/lexer.js:1093:50259:relation — a comment running to the end of the input leaves no closer: stepping one past the end ends the chunk loop, and the caller fails 'missing ///' at the opener either way
+- src/lexer.js:1112:50766:relation — interpAt is either -1 or the index of a `#{` inside the body, which sits after the three-character opener, so it is never 0
+- src/lexer.js:1112:50769:number — interpAt is either -1 or the index of a `#{` inside the body, which sits after the three-character opener, so it is never 0
 - src/lexer.js:1175:53579:number — upTo 1 with ref null makes the first sync's staleness check fire (tokens[0] !== null), which rebuilds from the nearest line boundary, the state upTo 0 starts from
 - src/lexer.js:1175:53600:number — level is only a key: answers are stored and read at the same running level, so a constant offset changes no lookup, and the next line boundary resets it to 0
 - src/lexer.js:1201:54831:relation — at k 0 the name has nothing before it: iface(-1) is false and tokens[-1] is not EXTENDS, so the function returns false either way

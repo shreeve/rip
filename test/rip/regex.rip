@@ -408,3 +408,8 @@ test 'a function inside a parameter default owns its own _', '''
   f()
 ''', 'J'
 fail 'an unclosed slash regex rejects', 'x = /abc', 'missing / (unclosed regex)'
+
+# Inside a heregex character class whitespace is literal and a line
+# break is an error.
+test "whitespace inside a heregex character class is kept", '///[a b]///.test(" ")', true
+fail "a line break inside a heregex character class rejects", '///[a\nb]///', "newline inside a heregex character class"

@@ -940,3 +940,9 @@ describe('dedent across a bracket floor', () => {
     expect(rejection('if x\n  y = [\n1]')).toEqual(['dedent to "" crosses the enclosing bracket\'s indentation floor "  "', 13, 13]);
   });
 });
+
+describe('heregex interpolation spans', () => {
+  test('the opener and the interpolation start cover their own characters', () => {
+    expect(realSpans('x = ///a#{b}c///')).toBe('x@0 =@2 ///@4 a@7 #{@8 b@10 }@11 c@12 ///@13');
+  });
+});
