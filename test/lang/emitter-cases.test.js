@@ -381,6 +381,7 @@ describe('runtime delivery reads references, not spellings', () => {
     expect(stdlib('f = (x) -> p x\n')).toBe(true);
     expect(stdlib("export A = component\n  render\n    div\n      = p\n")).toBe(true);
     expect(stdlib('f = (p) -> p\ng = -> p 1\n')).toBe(true);
+    expect(stdlib("r = do (p) -> p 'via do'\n")).toBe(true);
   });
 });
 

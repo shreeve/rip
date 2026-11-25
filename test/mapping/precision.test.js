@@ -55,8 +55,8 @@ const FLOORS = {
   'tabs.rip': 58,
   'singleline.rip': 100,
   'strings2.rip': 31,
-  // Their non-ASCII names declare in place on the same Tier 1 rule now
-  // that the eligibility test reads the identifier vocabulary: regexes
+  // Their non-ASCII names declare in place on the same Tier 1 rule, the
+  // eligibility test reading the identifier vocabulary: regexes
   // drops its whole hoist line (a cover and two names) and its first
   // statement maps where that line stood (32 - 3 + 1); compose5's hoist
   // line keeps `t1` and drops `café` (59 - 1).

@@ -284,6 +284,7 @@ const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length 
 // What findCapturedCtrl looks for.
 const CTRL_ALL = new Set(['break', 'continue', 'return']);
 const CTRL_BREAK = new Set(['break']);
+const CTRL_CONTINUE = new Set(['continue']);
 // The def heads — plain and void — are ONE family everywhere a
 // predicate asks "is this a def?": every def-shaped decision reads
 // this helper, never a hand-maintained head pair (a site that listed
@@ -2982,7 +2983,7 @@ class Emitter {
             const [start, end] = sp.indices[1];
             const name = clause[1].slice(start, end);
             if (spans.has(name)) continue;
-            const use = new RegExp(`(?<![\\w$])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w$])`, 'g');
+            const use = new RegExp(`(?<!${IDENT_PART.source})${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?!${IDENT_PART.source})`, 'g');
             use.lastIndex = after;
             for (let hit = use.exec(this.b.source); hit !== null; hit = use.exec(this.b.source)) {
               if (this.inOpaqueSpan(hit.index)) continue;
@@ -12870,7 +12871,7 @@ class Emitter {
     };
     const wordSpan = (word) => {
       if (scanAt === null) return null;
-      const re = new RegExp(`(?<![\\w$])${word.replace(/\$/g, '\\$&')}(?![\\w$])`, 'g');
+      const re = new RegExp(`(?<!${IDENT_PART.source})${word.replace(/\$/g, '\\$&')}(?!${IDENT_PART.source})`, 'g');
       re.lastIndex = scanAt;
       const m = re.exec(this.b.source);
       if (m === null || m.index + word.length > scanSelfSpan[1]) return null;
@@ -18148,14 +18149,21 @@ class Emitter {
         }
         return;
       }
+      // A tail `try` and a tail `switch` are the statements themselves: a
+      // `return` in a branch or an arm returns from the enclosing function,
+      // so neither arms the tail exemption, which belongs to a value
+      // lowering whose IIFE a `return` must tunnel through.
       if (h === 'try') {
-        this.withTailReturn(() => this.tryBranches(stmt, ind, effect));
+        this.tryBranches(stmt, ind, effect);
         return;
       }
-      // A tail switch is the statement itself: each arm returns from the
-      // enclosing function, as a tail `if` or `try` does.
+      // An arm's `break` leaves the switch; a `continue` no loop inside
+      // the switch binds has nothing to continue.
       if (h === 'switch' && stmt.length === 4) {
-        this.withTailReturn(() => this.mark(stmt, '$self', () => this.switchArms(stmt, ind, effect)));
+        if (Emitter.findCapturedCtrl(stmt, CTRL_CONTINUE) !== null) {
+          throw this.positionedError(stmt, "emitter: 'continue' outside a loop");
+        }
+        this.mark(stmt, '$self', () => this.switchArms(stmt, ind, effect));
         return;
       }
       if ((h === 'while' && (stmt.length === 3 || stmt.length === 4)) || (h === 'loop' && stmt.length === 2)) {
@@ -19777,6 +19785,9 @@ const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
     if (h === 'schema' && x.length === 2 && x[1] && typeof x[1] === 'object' && Array.isArray(x[1].entries)) return false;
     if (h === '.' || h === '?.') return walk(x[1]);
     if ((h === ':' || h === 'void-pair') && x.length === 3) return (isNode(x[1]) && walk(x[1])) || walk(x[2]);
+    // An immediately invoked arrow passes each parameter the enclosing
+    // binding of its own name, so those names are reads out here.
+    if (h === 'do-iife' && x.length === 2 && isFunc(x[1])) return [...paramBindings(x[1][1])].some(ref) || walk(x[1]);
     if (isFunc(x)) return walkParams(x[1]) || walkBody(x[1], x[2]);
     if (isDefHead(h) && x.length === 4) return walkParams(x[2]) || walkBody(x[2], x[3]);
     if (h === 'render' && x.length === 2 && semanticKind(x) === 'render') return walkRender(x[1]);
@@ -20138,7 +20149,7 @@ function emitSchemaTextMarked(emitter, block, text, nodeId) {
       if (typeWord === null) continue;
       const after = m.index + m[0].length;
       const stop = text.indexOf(';', after) < 0 ? text.length : text.indexOf(';', after) + 1;
-      const tm = new RegExp(`(?<![\\w$])${esc(typeWord[0])}(?![\\w$])`).exec(text.slice(after, stop));
+      const tm = new RegExp(`(?<!${IDENT_PART.source})${esc(typeWord[0])}(?!${IDENT_PART.source})`).exec(text.slice(after, stop));
       if (tm !== null) marks.push({ at: after + tm.index, len: typeWord[0].length, start: e.typeSpan[0] + typeWord.index, end: e.typeSpan[0] + typeWord.index + typeWord[0].length });
     }
   }
@@ -20180,7 +20191,7 @@ function emitSchemaTextMarked(emitter, block, text, nodeId) {
     // answers about the use, not about the declaration it names.
     const claimed = (at, len) => marks.some((mk) => at < mk.at + mk.len && mk.at < at + len);
     for (const [name, span] of named) {
-      for (const m of text.matchAll(new RegExp(`(?<![\\w$])${esc(name)}(?![\\w$])`, 'g'))) {
+      for (const m of text.matchAll(new RegExp(`(?<!${IDENT_PART.source})${esc(name)}(?!${IDENT_PART.source})`, 'g'))) {
         if (claimed(m.index, name.length)) continue;
         marks.push({ at: m.index, len: name.length, start: span[0], end: span[1] });
       }

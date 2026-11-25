@@ -242,6 +242,10 @@ code "tail switch returns from its arms", '''
   };
 '''
 test "tail switch arm in a generator yields", "g = ->\n  switch 1\n    when 1 then yield 2\n[...g()]", [2]
+fail "a return inside a value if within a tail switch arm rejects", "f = (x) ->\n  switch x\n    when 1\n      y = (if x > 0 then return 'early' else 3)\n      y\n    else 'other'", "cannot cross the IIFE boundary"
+fail "a return inside a tail switch's subject rejects", "g = (x) ->\n  switch (if x > 5 then return 'big' else x)\n    when 1 then 'one'\n    else 'other'", "cannot cross the IIFE boundary"
+fail "a return inside a value if within a tail try rejects", "f = (x) ->\n  try\n    y = (if x > 0 then return 'early' else 3)\n    y\n  catch e\n    'caught'", "cannot cross the IIFE boundary"
+fail "continue in a tail switch arm rejects", "f = (x) ->\n  switch x\n    when 1 then continue\n    else 2", "'continue' outside a loop"
 test "tail switch arm in an async function awaits", "h = (x) ->\n  switch x\n    when 1 then await Promise.resolve 'one'\n    else 'other'\nawait h 1", 'one'
 
 # Switch without discriminant in statement context (loop)
