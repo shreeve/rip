@@ -1285,3 +1285,62 @@ test 'a string-keyed line ends a bare typed-forward run', '''
   a = 1
   a
 ''', 1
+
+# ==============================================================================
+# Mutation-audit pins — trailing generic closes at a line end
+# ==============================================================================
+
+test 'a trailing comparison line after a generic return type continues', '''
+  g = (x, y) -> [x, y]
+  a = 1
+  b = 2
+  c = 3
+  d = 0
+  def f(): Array<number>
+    1
+  g a < b, c >
+    d
+''', [true, true]
+
+test 'a trailing <= after a cast continues the line', '''
+  y = 1
+  b = 2
+  r = y as number <=
+    b
+  r
+''', true
+
+test 'a trailing << after a cast continues the line', '''
+  y = 1
+  r = y as number <<
+    2
+  r
+''', 4
+
+test 'a cast ending in a generic close ends its line before a line starting with as', '''
+  y = 1
+  x = y as {a: number} | Map<string, number>
+  as = 3
+  as
+''', 3
+
+test 'as after an opening bracket is no cast head for a trailing comparison', '''
+  as = 1
+  b = 2
+  c = 3
+  d = 0
+  r = [as < b, c >
+    d]
+  r
+''', [true, true]
+
+test 'a tight call of as is no cast head for a trailing comparison', '''
+  as = (v) -> 9
+  y = (v) -> v
+  b = 2
+  c = 3
+  d = 0
+  r = [y as(1) < b, c >
+    d]
+  r
+''', [false]

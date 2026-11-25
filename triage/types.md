@@ -3,7 +3,7 @@
 Survivors of the lexer-pass mutation audit at 119b45bb, classified per the triage brief.
 Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 
-## GAP (128)
+## GAP (139)
 
 - src/types.js:217:11845:statement — test/rip/types.rip › a method member after a generic member in an inline object type
 - src/types.js:217:11858:number — test/rip/types.rip › a method member after a generic member in an inline object type
@@ -76,6 +76,17 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:576:29248:arith — test/rip/types.rip › an optional member in a parameter object type
 - src/types.js:576:29250:number — test/rip/types.rip › an optional member in a parameter object type
 - src/types.js:578:29291:statement — test/rip/types.rip › an optional member in a parameter object type
+- src/types.js:840:40971:statement — test/rip/types.rip › a trailing comparison line after a generic return type continues
+- src/types.js:851:41340:branch — test/rip/types.rip › a trailing comparison line after a generic return type continues
+- src/types.js:851:41390:logic — test/rip/types.rip › a trailing comparison line after a generic return type continues
+- src/types.js:856:41686:branch — test/rip/types.rip › a trailing comparison line after a generic return type continues
+- src/types.js:856:41713:arith — test/rip/types.rip › a cast ending in a generic close ends its line before a line starting with as
+- src/types.js:856:41715:number — test/rip/types.rip › as after an opening bracket is no cast head for a trailing comparison
+- src/types.js:856:41733:number — test/rip/types.rip › a tight call of as is no cast head for a trailing comparison
+- src/types.js:872:42317:logic — test/rip/types.rip › a trailing <= after a cast continues the line
+- src/types.js:873:42370:logic — test/rip/types.rip › a trailing << after a cast continues the line
+- src/types.js:873:42408:relation — test/rip/types.rip › a trailing << after a cast continues the line
+- src/types.js:877:42559:boolean — test/rip/types.rip › a trailing comparison line after a generic return type continues
 - src/types.js:1235:59143:relation — test/rip/types.rip › a string-keyed line ends a bare typed-forward run
 - src/types.js:1399:66520:logic — test/rip/types.rip › an implicit call whose argument assigns is not a type alias
 - src/types.js:1402:66703:relation — test/rip/types.rip › a function named type called mid-expression is not an alias
@@ -134,7 +145,7 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:1901:90987:statement — test/rip/types.rip › a colon after a parameter default is an object key
 - src/types.js:1901:91013:boolean — test/rip/types.rip › a colon after a parameter default is an object key
 
-## EQUIVALENT (127)
+## EQUIVALENT (147)
 
 - src/types.js:221:12006:statement — openAngle is reassigned at every `<` opened from angle 0 and read only while angle > 0, i.e. after such an opener; the stale value is always overwritten first
 - src/types.js:249:13482:arith — j-2 < from puts tokens[j-2] before the body: the alias `=` or the body INDENT, never `=>`, `asserts`, or a `:` after CALL_END, so the shape test fails there anyway
@@ -158,6 +169,26 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:495:25473:relation — the run's first token directly follows the `as` word, which never suppresses a newline: a next-line follower arrives as INDENT/TERMINATOR, which is no TYPE_STARTER, so the first token never carries newLine
 - src/types.js:518:26440:logic — braceStack entries are only ever compared with '<' and '{'; a '[' mislabelled '(' compares identically
 - src/types.js:539:27365:logic — drops the STRING_END and HEREGEX_END legs: a run inside an interpolation always meets INTERPOLATION_END first, and runs never start inside string text, so neither is ever the first stop (probed string/heregex interpolations and interpolated string types)
+- src/types.js:824:40396:branch — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
+- src/types.js:824:40407:relation — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
+- src/types.js:824:40423:logic — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
+- src/types.js:824:40437:relation — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
+- src/types.js:824:40439:number — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
+- src/types.js:824:40441:logic — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
+- src/types.js:824:40461:arith — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
+- src/types.js:824:40463:number — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
+- src/types.js:824:40466:relation — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
+- src/types.js:841:40999:statement — answers are cleared at every line boundary, so a level is only ever compared with keys set on the same line; a constant offset in the line's starting level changes no lookup
+- src/types.js:841:41012:number — answers are cleared at every line boundary, so a level is only ever compared with keys set on the same line; a constant offset in the line's starting level changes no lookup
+- src/types.js:842:41021:statement — a boundary token falling through has angleWeight 0 and is not ':', '=', RESERVED, or a postfix word, so no later branch acts on it
+- src/types.js:851:41363:logic — a RESERVED token outside an interface head appears legally only in type text after a head that already set the same level's answer to true (or rejects at its own position, earlier in the line than the newline this decides)
+- src/types.js:864:42058:statement — upTo never advances: with upTo 0 the shift test stays false and every sync re-walks the whole tape from 0; the state resets at each line boundary, so the current line's state is the same
+- src/types.js:865:42087:statement — ref stays null, so every sync rebuilds to the same state
+- src/types.js:865:42119:arith — ref becomes null, so every later sync takes the rebuild path, which recomputes the same state from the nearest line boundary
+- src/types.js:865:42121:number — ref becomes null (tokens[length] is undefined), so every sync rebuilds to the same state
+- src/types.js:865:42124:logic — `?? null`→`&& null` makes ref null, so every sync rebuilds to the same state
+- src/types.js:870:42246:statement — same as 870:42264 — last is always defined
+- src/types.js:870:42264:boolean — closesTypeGeneric is called only when the scanner's prev token is non-null, so the tape is never empty here
 - src/types.js:1160:55747:number — classHeadRunDepth is only compared with classHeadDepth, which is captured from it at CLASS; a constant offset of 1 changes no comparison (balanced brackets keep it >= its start, so `classHeadDepth >= 0` still means armed)
 - src/types.js:1208:58179:number — lastEnd's initial value is read only when the first member breaks as a typed-declaration separator; that colon's typedDeclEq >= 0 means the line-1688 claim tried first, and it declined only on an empty run, which the bare claim declines identically
 - src/types.js:1212:58296:relation — bareDeclLineEnd returns -1 or a TERMINATOR index > colon >= 1, never 0
