@@ -619,7 +619,7 @@ test! "swap trades connections; a request queued on the old one fails as ended",
   fresh.resume NUM2, 2
   first = page.rpc('XWB IM HERE')
   queued = page.rpc('XWB IM HERE')
-  await Promise.new((r) -> setTimeout(r, 0)) until calls.length is 1
+  Promise.new!((r) -> setTimeout(r, 0)) until calls.length is 1
   page.swap fresh
   release()
   await first
