@@ -1274,3 +1274,14 @@ type 'a multi-line object parameter type separates its fields', "def f(o: {\n  a
 type 'an optional member in a parameter object type', "def f(o: {a?: number})\n  o", '''
   declare function f(o: { a?: number }): any;
 '''
+
+# ==============================================================================
+# Mutation-audit pins — the bare-forward sibling run
+# ==============================================================================
+
+test 'a string-keyed line ends a bare typed-forward run', '''
+  a: number
+  "s": 1
+  a = 1
+  a
+''', 1

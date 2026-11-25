@@ -3,7 +3,7 @@
 Survivors of the lexer-pass mutation audit at 119b45bb, classified per the triage brief.
 Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 
-## GAP (127)
+## GAP (128)
 
 - src/types.js:217:11845:statement — test/rip/types.rip › a method member after a generic member in an inline object type
 - src/types.js:217:11858:number — test/rip/types.rip › a method member after a generic member in an inline object type
@@ -76,6 +76,7 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:576:29248:arith — test/rip/types.rip › an optional member in a parameter object type
 - src/types.js:576:29250:number — test/rip/types.rip › an optional member in a parameter object type
 - src/types.js:578:29291:statement — test/rip/types.rip › an optional member in a parameter object type
+- src/types.js:1235:59143:relation — test/rip/types.rip › a string-keyed line ends a bare typed-forward run
 - src/types.js:1399:66520:logic — test/rip/types.rip › an implicit call whose argument assigns is not a type alias
 - src/types.js:1402:66703:relation — test/rip/types.rip › a function named type called mid-expression is not an alias
 - src/types.js:1417:67416:number — test/rip/types.rip › as before an operator that starts no type stays a name
@@ -133,7 +134,7 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:1901:90987:statement — test/rip/types.rip › a colon after a parameter default is an object key
 - src/types.js:1901:91013:boolean — test/rip/types.rip › a colon after a parameter default is an object key
 
-## EQUIVALENT (94)
+## EQUIVALENT (127)
 
 - src/types.js:221:12006:statement — openAngle is reassigned at every `<` opened from angle 0 and read only while angle > 0, i.e. after such an opener; the stale value is always overwritten first
 - src/types.js:249:13482:arith — j-2 < from puts tokens[j-2] before the body: the alias `=` or the body INDENT, never `=>`, `asserts`, or a `:` after CALL_END, so the shape test fails there anyway
@@ -158,6 +159,39 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:518:26440:logic — braceStack entries are only ever compared with '<' and '{'; a '[' mislabelled '(' compares identically
 - src/types.js:539:27365:logic — drops the STRING_END and HEREGEX_END legs: a run inside an interpolation always meets INTERPOLATION_END first, and runs never start inside string text, so neither is ever the first stop (probed string/heregex interpolations and interpolated string types)
 - src/types.js:1160:55747:number — classHeadRunDepth is only compared with classHeadDepth, which is captured from it at CLASS; a constant offset of 1 changes no comparison (balanced brackets keep it >= its start, so `classHeadDepth >= 0` still means armed)
+- src/types.js:1208:58179:number — lastEnd's initial value is read only when the first member breaks as a typed-declaration separator; that colon's typedDeclEq >= 0 means the line-1688 claim tried first, and it declined only on an empty run, which the bare claim declines identically
+- src/types.js:1212:58296:relation — bareDeclLineEnd returns -1 or a TERMINATOR index > colon >= 1, never 0
+- src/types.js:1212:58298:number — bareDeclLineEnd returns -1 or an index > colon >= 1, never 0
+- src/types.js:1213:58342:relation — typedDeclEq returns -1 or an index > colon, never 0
+- src/types.js:1213:58345:number — typedDeclEq returns -1 or an index > colon, never 0
+- src/types.js:1214:58393:boolean — the same path also sets allBare = false and lastEnd = -1 (nk null), and either one alone makes eligible false, so the member's flags are never read and full stays false
+- src/types.js:1214:58410:boolean — the same path also sets allBare = false and lastEnd = -1 (nk null), and either one alone makes eligible false, so the member's flags are never read and full stays false
+- src/types.js:1215:58428:statement — the same path also sets allBare = false and lastEnd = -1 (nk null), and either one alone makes eligible false, so the member's flags are never read and full stays false
+- src/types.js:1215:58438:boolean — the same path also sets allBare = false and lastEnd = -1 (nk null), and either one alone makes eligible false, so the member's flags are never read and full stays false
+- src/types.js:1216:58453:statement — the same path also sets allBare = false and lastEnd = -1 (nk null), and either one alone makes eligible false, so the member's flags are never read and full stays false
+- src/types.js:1216:58464:number — the same path also sets allBare = false and lastEnd = -1 (nk null), and either one alone makes eligible false, so the member's flags are never read and full stays false
+- src/types.js:1222:58723:arith — clauseInLine from colon-1 adds the name and the colon, neither a bracket nor a postfix clause keyword
+- src/types.js:1222:58725:number — clauseInLine from the colon adds only the colon, neither a bracket nor a clause keyword
+- src/types.js:1223:58774:boolean — the same path also sets allBare = false and lastEnd = -1 (nk null), and either one alone makes eligible false, so the member's flags are never read and full stays false
+- src/types.js:1223:58791:boolean — the same path also sets allBare = false and lastEnd = -1 (nk null), and either one alone makes eligible false, so the member's flags are never read and full stays false
+- src/types.js:1224:58809:statement — the same path also sets allBare = false and lastEnd = -1 (nk null), and either one alone makes eligible false, so the member's flags are never read and full stays false
+- src/types.js:1224:58819:boolean — the same path also sets allBare = false and lastEnd = -1 (nk null), and either one alone makes eligible false, so the member's flags are never read and full stays false
+- src/types.js:1225:58834:statement — the same path also sets allBare = false and lastEnd = -1 (nk null), and either one alone makes eligible false, so the member's flags are never read and full stays false
+- src/types.js:1225:58845:number — the same path also sets allBare = false and lastEnd = -1 (nk null), and either one alone makes eligible false, so the member's flags are never read and full stays false
+- src/types.js:1226:58856:statement — without the break the walk caches later lines as false, but every later run line sits directly under a `name:` line whose sibling guard (prevSiblingKV) already forces false; allBare is false, so no rejection runs
+- src/types.js:1230:58927:relation — end === colon+1 is the empty slice, which isCompleteTypeExpr rejects
+- src/types.js:1230:58935:arith — end > colon-1 adds only end ∈ {colon, colon+1}; end is a TERMINATOR after the type, and colon+1 is the empty slice isCompleteTypeExpr rejects
+- src/types.js:1230:58937:number — end > colon adds only end === colon+1, the empty slice isCompleteTypeExpr rejects
+- src/types.js:1230:58975:arith — prefixing `name :` (an atom, then the ':' separator) leaves isCompleteTypeExpr in its start state (atomEnd false, no open paren), so the verdict equals the type slice's
+- src/types.js:1230:58977:number — a leading ':' is a separator that leaves isCompleteTypeExpr in its start state, so the verdict equals the type slice's
+- src/types.js:1231:59022:arith — buildAssignIndex records a name at j only when tokens[j+1] is `=`; tokens[end-1] precedes the TERMINATOR and tokens[end] is the TERMINATOR, so neither index is ever a recorded assignment, and both map to the same block as end+1
+- src/types.js:1231:59024:number — same as 1231:59022
+- src/types.js:1242:59326:relation — lastEnd is -1 or a TERMINATOR index >= 2, never 0
+- src/types.js:1242:59329:number — lastEnd is -1 or a TERMINATOR index >= 2, never in [0, 1)
+- src/types.js:1242:59348:arith — eligibility matters only when some member is assigned later in its own block (full, or the partial rejection); a tail run (OUTDENT or end of input next) has no later statement in that block (assignedLater is block-scoped), so both stay false either way
+- src/types.js:1242:59350:number — eligibility matters only when some member is assigned later in its own block (full, or the partial rejection); a tail run (OUTDENT or end of input next) has no later statement in that block (assignedLater is block-scoped), so both stay false either way
+- src/types.js:1243:59390:logic — eligibility matters only when some member is assigned later in its own block (full, or the partial rejection); a tail run (OUTDENT or end of input next) has no later statement in that block (assignedLater is block-scoped), so both stay false either way
+- src/types.js:1262:60344:statement — re-deciding per line gives the same answers: a full run's suffix is itself full (same evidence, same final follower), and a non-full run leaves its first line unclaimed, so the sibling guard forces false for the rest (a claimed line resets curLineKV, so a full suffix is not blocked)
 - src/types.js:1404:66838:relation — typeAliasEnd/interfaceEnd return -1 or an index >= i+3 (name, `=`/INDENT follow), never 0
 - src/types.js:1404:66841:number — typeAliasEnd/interfaceEnd return -1 or an index >= i+3, never in [0, 1)
 - src/types.js:1426:68013:relation — claim() returns -1 or runStart+consumed-1 >= i+1, and i >= 1 whenever prev exists, so a successful `last` is never 0
