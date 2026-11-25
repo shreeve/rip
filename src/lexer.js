@@ -2424,18 +2424,13 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
 
   // Post-scan passes: scan → tagParams → tagDynamicKeys →
   // rewriteTypes → implicitBlocks → tagPostfixConditionals →
-  // implicitObjects → implicitCalls → tape. Order matters:
+  // tagLooseElse → implicitObjects → implicitCalls → tape. Order matters:
   // parameter retagging reads pre-insertion arrow context; implicit
   // INDENTs must exist before postfix detection (a then-body if is a
   // PREFIX if); postfix retagging must precede implicit calls so `f if
   // x` guards f instead of calling it.
   const mintId = () => nextId++;
   tagParams(tokens);
-  // `do` invokes a function literal; tagParams retagged every one it
-  // heads to DO_IIFE, so a DO left here heads anything else.
-  for (const t of tokens) {
-    if (t.kind === 'DO') fail('`do` invokes a function literal (`do ->`, `do (x) ->`); call any other value directly: `f()`', t.start, t.end);
-  }
   tagDynamicKeys(tokens);
   // Definition-site bangs resolve BEFORE rewriteTypes (its def-context
   // scans read VOID_MARKER); the object/class-key form resolves later,
@@ -2456,6 +2451,21 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         end: err.end ?? err.start ?? 0, expected: [], got: '',
       })
     : null);
+  // `do` invokes a function literal, and tagParams retagged every one it
+  // heads to DO_IIFE. A DO before a parenthesis heads the function the
+  // parentheses hold (the emitter rejects anything else inside), and one
+  // with nothing after it awaits its function, a DO_IIFE the input ended
+  // inside (the parser reports an unfinished line; the REPL reads on); a
+  // DO left after those heads anything else. Schema fields named `do`
+  // collapsed above.
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i].kind !== 'DO') continue;
+    if (tokens[i + 1]?.kind === '(' || tokens.slice(i + 1).every((t) => t.kind === 'TERMINATOR' || t.kind === 'OUTDENT')) {
+      tokens[i].kind = 'DO_IIFE';
+      continue;
+    }
+    fail('`do` invokes a function literal (`do ->`, `do (x) ->`, `do (-> …)`); call any other value directly: `f()`', tokens[i].start, tokens[i].end);
+  }
   rewriteTypes(tokens, mintId, text, fail);
   // Reserved words are legal inside type runs (absorbed above); one
   // surviving in VALUE position is the original loud rejection.
@@ -2554,7 +2564,9 @@ export function tagLooseElse(tokens, fail) {
     const t = tokens[i], k = t.kind, d = open.length - 1;
     if (PASS_OPENERS.has(k)) { open.push(0); loose.push(false); continue; }
     if (PASS_CLOSERS.has(k)) { if (d > 0) { open.pop(); loose.pop(); } continue; }
-    if (k === 'TERMINATOR') { open[d] = 0; loose[d] = false; continue; }
+    // A statement end or a comma closes the expression: each element,
+    // argument, pair and parameter takes its own loose operator.
+    if (k === 'TERMINATOR' || k === ',') { open[d] = 0; loose[d] = false; continue; }
     if (k === 'POST_IF' || k === 'POST_UNLESS') { open[d]++; continue; }
     if (k === 'ELSE' && tokens[i - 1]?.kind !== 'OUTDENT') {
       if (open[d] > 0) { open[d]--; continue; }

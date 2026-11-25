@@ -2185,8 +2185,8 @@ class Emitter {
     const owner = this.b.currentMark;
     let span = this.ts && typeof value === 'string'
       ? this.b.claimPrimitiveSpan(value, this.primitiveAvoid) : null;
-    // A lowering that re-reads a name it has no occurrence for (`x .= f()`
-    // reads `x` where the author wrote it once, as the target) names the
+    // A lowering that re-reads a name it has no occurrence for (a child
+    // component's name, spelled again in its event casts) names the
     // occurrence it repeats ahead of the emission: the copy maps there.
     if (span === null && this.primitiveReuse !== null && this.primitiveReuse.name === value) {
       span = this.primitiveReuse.span;
@@ -6742,7 +6742,7 @@ class Emitter {
   // syntax outside all role marks (the declare-in-place `let `
   // precedent), so every role row keeps its exact source↔generated
   // slice. Assignment forms that lower to multi-statement rewrites
-  // (`.=`, optional-chain targets, middle-rest patterns) return
+  // (optional-chain targets, middle-rest patterns) return
   // from statementCore before this point and stay echo-free.
   replCapture(node) {
     if (!this.repl || node !== this.lastProgramStmt) return false;
@@ -15902,8 +15902,8 @@ class Emitter {
         } else {
           this.mark(n, 'operator', () => this.b.emit(op));
           this.mark(n, 'property', () => {
-            // A SYNTHESIZED member — the `.=` lowering builds `['.', read, prop]`
-            // at emit time — has no store row, so no frame opens here and the
+            // A SYNTHESIZED member — one a lowering builds at emit time — has
+            // no store row, so no frame opens here and the
             // property would inherit the statement's cover. Its name is still a
             // source read; it claims its occurrence in that enclosing span. A
             // real member already owns an exact row from its own frame.
@@ -19058,6 +19058,9 @@ class Emitter {
   // rejected loudly.
   doIife(node) {
     const [, fn] = node;
+    if (!isFunc(fn)) {
+      throw this.positionedError(isNode(fn) ? fn : node, 'emitter: `do` invokes a function literal (`do ->`, `do (x) ->`, `do (-> …)`); call any other value directly: `f()`', node);
+    }
     this.mark(node, '$self', () => {
       this.b.emit('(');
       this.mark(node, 'func', () => this.expr(fn));
@@ -19732,7 +19735,7 @@ const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
     if ((h === ':' || h === 'void-pair') && x.length === 3) return (isNode(x[1]) && walk(x[1])) || walk(x[2]);
     // An immediately invoked arrow passes each parameter the enclosing
     // binding of its own name, so those names are reads out here.
-    if (h === 'do-iife' && x.length === 2) return [...paramBindings(x[1][1])].some(ref) || walk(x[1]);
+    if (h === 'do-iife' && x.length === 2 && isFunc(x[1])) return [...paramBindings(x[1][1])].some(ref) || walk(x[1]);
     if (isFunc(x)) return walkParams(x[1]) || walkBody(x[1], x[2]);
     if (isDefHead(h) && x.length === 4) return walkParams(x[2]) || walkBody(x[2], x[3]);
     if (h === 'render' && x.length === 2 && semanticKind(x) === 'render') return walkRender(x[1]);

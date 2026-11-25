@@ -76,7 +76,7 @@ const BODY_THEN_OPENERS = new Set(['(', '[', '{', 'PICK_START', 'OPTPICK_START',
 const BODY_THEN_CLOSERS = new Set([')', ']', '}', 'PICK_END', 'CALL_END', 'INDEX_END', 'PARAM_END', 'STRING_END', 'INTERPOLATION_END', 'HEREGEX_END']);
 
 function thenIntroducesBody(tokens, i) {
-  let depth = 0;
+  let depth = 0, pastElse = false;
   for (let j = i - 1; j >= 0; j--) {
     if (counter.on) counter.n++;
     const k = tokens[j].kind;
@@ -87,10 +87,15 @@ function thenIntroducesBody(tokens, i) {
       continue;
     }
     if (depth > 0) continue;
-    if (BODY_THEN_HEADS.has(k)) return true;
-    // An ELSE between this THEN and any head closed that head's body
-    // (`a if c else b then d`): the THEN opens nothing.
-    if (k === 'TERMINATOR' || k === 'ELSE') return false;
+    if (BODY_THEN_HEADS.has(k)) {
+      // Past a depth-0 ELSE, an IF/UNLESS straight after a value is a
+      // postfix ternary that ELSE closed, so the THEN opens nothing
+      // (`a if c else b then d`); any other head's condition may hold a
+      // loose else (`if x else y then z`), and the THEN opens its body.
+      return !(pastElse && (k === 'IF' || k === 'UNLESS') && VALUE_END.has(tokens[j - 1]?.kind));
+    }
+    if (k === 'TERMINATOR') return false;
+    if (k === 'ELSE') pastElse = true;
   }
   return false;
 }

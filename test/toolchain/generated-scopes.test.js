@@ -328,6 +328,6 @@ describe('generated-scope inventory', () => {
     // `__schema`'s open return included — the components entry's
     // context API with the provider alias it names, the lowering's own
     // component calls, and the intrinsics.
-    expect(categories).toEqual({ diagnostic: 42, semantic: 20, type: 51 });
+    expect(categories).toEqual({ diagnostic: 43, semantic: 20, type: 51 });
   });
 });

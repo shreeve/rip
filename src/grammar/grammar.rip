@@ -602,9 +602,12 @@ grammar =
   # do-IIFE: `do ->` (and `do (x) ->`) invokes the function immediately;
   # identifier params capture the enclosing variables of the same name
   # as call arguments, default params pass their default value. The
-  # lexer retags DO to DO_IIFE and rejects a `do` heading anything else.
+  # function may stand in parentheses (`do (-> 1)`); the emitter rejects
+  # anything else there. The lexer retags DO to DO_IIFE and rejects a
+  # `do` heading anything but a function or a parenthesis.
   DoIife: [
     o 'DO_IIFE Code', '["do-iife", 2]', 'doiife: _, func'
+    o 'DO_IIFE Parenthetical', '["do-iife", 2]', 'doiife: _, func'
   ]
 
   # ============================================================================

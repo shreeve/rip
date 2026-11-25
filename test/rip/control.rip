@@ -110,6 +110,25 @@ test "parentheses give each loose operator its own expression", '''
   [y, log]
 ''', [0, ["else"]]
 
+# A comma closes the expression too: each element, argument, pair and
+# parameter takes its own loose operator.
+code "loose else per array element", "[a else 1, c else 2]", "[(a || 1), (c || 2)];"
+code "loose else per call argument", "f(x else 1, y else 2)", "f(x || 1, y || 2);"
+code "loose else per implicit-object pair", "f a: x else 1, b: y else 2", "f({a: (x || 1), b: (y || 2)});"
+code "loose else per default parameter", "g = (a = x else 1, b = y else 2) -> a", '''
+  let g = function(a = x || 1, b = y || 2) {
+    return a;
+  };
+'''
+code "a postfix if ends at its comma", "f(a if c, d else e)", "f(c ? a : undefined, d || e);"
+
+# A loose `else` inside a head's own condition leaves its `then` the body
+# introducer; only a postfix ternary's `else` closes the body a `then`
+# could open.
+code "loose else in an if condition", "if x else y then z", "if (x || y) {\n  z;\n}"
+code "loose else in a while condition", "while a else b then c", "while (a || b) {\n  c;\n}"
+code "loose else in a for source", "for v in xs else [] then f v", "for (let v of xs || []) {\n  f(v);\n}"
+
 # A postfix ternary's `else` is not loose, so one loose operator may follow
 # it, binding below the assignment like any other.
 code "loose then after a postfix ternary", "y = a if c else b then d", "let y;\n\n(y = (c ? a : b)) && d;"

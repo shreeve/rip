@@ -29,6 +29,7 @@ describe('incomplete: end-of-input parse diagnostics', () => {
   test('bodiless arrow', () => expect(status('->')).toBe('incomplete'));
   test('bodiless try', () => expect(status('try')).toBe('incomplete'));
   test('dangling else', () => expect(status('if x\n  1\nelse')).toBe('incomplete'));
+  test('a do awaiting its function', () => expect(status('x = do')).toBe('incomplete'));
 });
 
 describe('incomplete: bodiless block headers (the POST_IF retag class)', () => {

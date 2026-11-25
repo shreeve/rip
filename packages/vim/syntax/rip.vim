@@ -121,8 +121,7 @@ syn match  ripOperator      />>>=\|\*\*=\|\/\/=\|%%=\|&&=\|||=\|??=\|<<=\|>>=\|+
 " matched together because it reads as one idiom.
 syn match  ripOperator      /!?\|?!\|??\|?\./
 
-" Method assignment (x .= trim()), map literal (*{a: 1}),
-" existence assignment (a ?= 5)
+" Map literal (*{a: 1}), existence assignment (a ?= 5)
 syn match  ripOperator      /\*{\@=\|?=/
 
 " Tagged-template bridge: sh $"cmd" (the $ heads the template)

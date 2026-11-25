@@ -143,7 +143,7 @@ console.log('guards:', take(10), take(0), drop(10), drop(0))
 # One loose `then` or `else` per expression; parentheses make each its own
 console.log('chain:', ((0 then 'yes') else 'no'), ((ten then 0) else 'fallback'))
 pick = (n: number) ->
-  (n then n > 1) else return 'small'
+  n and n > 1 else return 'small'
   'big'
 console.log('pick:', pick(0), pick(1), pick(2))
 
@@ -170,7 +170,7 @@ for n in [0, 1]
 
 keptChain: number[] = []
 for n in [0, 1, 2]
-  (n then n > 1) else continue
+  n and n > 1 else continue
   keptChain.push n
 
 console.log('continue:', keptAnd, keptOr, keptNull, keptThen, keptElse, keptChain)
