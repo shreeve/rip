@@ -44,83 +44,83 @@
     },
     {
       "line": 45,
-      "character": 2,
-      "code": 7023,
-      "token": "bump",
-      "why": "object-literal `this` under strict makes the member read circular; gradual's loose base types `this` as `any`"
-    },
-    {
-      "line": 45,
-      "character": 13,
+      "character": 24,
       "code": 2339,
       "token": "count",
-      "why": "the same method's member read against the literal type strict gives `this`"
+      "why": "a member read against the literal type strict gives `this`"
     },
     {
-      "line": 54,
+      "line": 46,
+      "character": 2,
+      "code": 7023,
+      "token": "again",
+      "why": "object-literal `this` under strict types the literal, so a return calling back through `this` is circular; gradual's loose base types `this` as `any`"
+    },
+    {
+      "line": 55,
       "character": 16,
       "code": 2339,
       "token": "factor",
       "why": "function bodies: the lambda is typed by its header, so the `= {}` parameter stays untyped and its member read is held; strict checks everything — the bare literal"
     },
     {
-      "line": 58,
+      "line": 59,
       "character": 16,
       "code": 2339,
       "token": "amount",
       "why": "function bodies: the lambda is typed by its header, so the `= {}` parameter stays untyped and its member read is held; strict checks everything — a paramless `->`"
     },
     {
-      "line": 61,
+      "line": 62,
       "character": 15,
       "code": 2339,
       "token": "width",
       "why": "function bodies: the lambda is typed by its header, so the `= {}` parameter stays untyped and its member read is held; strict checks everything — a parenthesized literal"
     },
     {
-      "line": 63,
+      "line": 64,
       "character": 8,
       "code": 7006,
       "token": "fn",
       "why": "the implicit-any family on the wrapper's parameter: code-suppressed in gradual, published in strict"
     },
     {
-      "line": 65,
+      "line": 66,
       "character": 15,
       "code": 2339,
       "token": "depth",
       "why": "function bodies: the lambda is typed by its header, so the `= {}` parameter stays untyped and its member read is held; strict checks everything — a literal passed as a call argument"
     },
     {
-      "line": 69,
+      "line": 70,
       "character": 17,
       "code": 2339,
       "token": "speed",
       "why": "function bodies: the lambda is typed by its header, so the `= {}` parameter stays untyped and its member read is held; strict checks everything — a method inside an object literal"
     },
     {
-      "line": 79,
+      "line": 80,
       "character": 6,
       "code": 2339,
       "token": "status",
       "why": "property seeding: `.new` on a typed line is a member name, not a binding — `Error.new` types nothing, so the expando write is held; strict publishes it"
     },
     {
-      "line": 88,
+      "line": 89,
       "character": 10,
       "code": 7006,
       "token": "side",
       "why": "the implicit-any family on the lambda's parameter: code-suppressed in gradual, published in strict"
     },
     {
-      "line": 90,
+      "line": 91,
       "character": 9,
       "code": 2339,
       "token": "top",
       "why": "property match: the object key `position` is text, not a reference to the annotated function, so the literal's shape is never reached; strict publishes the closed-literal write"
     },
     {
-      "line": 102,
+      "line": 103,
       "character": 0,
       "code": 2322,
       "token": "box",
