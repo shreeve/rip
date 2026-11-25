@@ -11,6 +11,8 @@
 //                               [--out <survivor ids>] [--killed <killed ids>]
 //                               [--md <report.md>]
 //   bun scripts/mutate.mjs try    --in <mutants.json> --ids <id,…|ids file> -- <command…>
+//   bun scripts/mutate.mjs observe --in <mutants.json> --ids <ids file> --out <observe.jsonl>
+//                               [--workers N] [--workdir <dir>] [--cap [--mem SIZE]]
 //
 // `gen` mutates only lines the lcov file marks executed: an unexecuted
 // line survives every mutant by construction, and the coverage report
@@ -530,6 +532,108 @@ async function tryMutants(args, cmd) {
   if (survived) process.exitCode = 1;
 }
 
+// ── corpus observation ──────────────────────────────────────────────
+// A survivor's other question: can any program the repository holds tell
+// the mutant apart? The child mode compiles every corpus input with the
+// checkout it runs in — each tracked package module and each language-
+// suite row's source, on the JS face and the TS face — and prints one
+// hash per input; `observe` runs it once pristine, then once per mutant in
+// a private copy, and records the inputs whose output moved.
+async function corpusHashes() {
+  const { compile } = await import(join(ROOT, 'src/compiler.js'));
+  const { loadBattery } = await import(join(ROOT, 'test/support/battery.js'));
+  const { ripFiles } = await import(join(ROOT, 'test/support/rip-files.js'));
+  const proc = Bun.spawnSync(['git', 'ls-files', '-z', '--', 'packages/*.rip', 'packages/**/*.rip'], { cwd: ROOT });
+  const inputs = [];
+  for (const f of new TextDecoder().decode(proc.stdout).split('\0').filter(Boolean)) {
+    inputs.push([f, readFileSync(join(ROOT, f), 'utf8'), f]);
+  }
+  for (const file of ripFiles(join(ROOT, 'test/rip'))) {
+    const rows = await loadBattery(join(ROOT, 'test/rip', file));
+    rows.forEach((row, n) => { if (typeof row.src === 'string') inputs.push([`test/rip/${file}#${n} ${row.verb} ${row.name}`, row.src, `<${file}>`]); });
+  }
+  const out = {};
+  for (const [name, src, path] of inputs) {
+    for (const face of ['js', 'ts']) {
+      let text;
+      try {
+        const r = compile(src, { path, runtimeDelivery: 'none', ...(face === 'ts' ? { face: 'ts' } : {}) });
+        text = r.code;
+      } catch (e) { text = `ERR ${String(e?.message ?? e).split('\n')[0]}`; }
+      out[`${face} ${name}`] = Bun.hash(text).toString(36);
+    }
+  }
+  process.stdout.write(JSON.stringify(out));
+}
+
+async function observe(args) {
+  const mutants = new Map(JSON.parse(readFileSync(args.in, 'utf8')).map((m) => [m.id, m]));
+  const ids = readFileSync(args.ids, 'utf8').split('\n').filter(Boolean);
+  const done = new Set();
+  if (existsSync(args.out)) for (const l of readFileSync(args.out, 'utf8').split('\n')) if (l) done.add(JSON.parse(l).id);
+  const queue = ids.filter((id) => !done.has(id) && mutants.has(id)).map((id) => mutants.get(id));
+  const workers = Number(args.workers ?? 4);
+  const base = join(args.workdir ?? join(tmpdir(), 'rip-mutate'), 'observe');
+  mkdirSync(base, { recursive: true });
+  const dirs = [];
+  for (let w = 0; w < workers; w++) {
+    const d = join(base, `w${w}`);
+    if (!existsSync(d)) cpSync(ROOT, d, { recursive: true, filter: (p) => !p.includes('/.rip/') });
+    dirs.push(d);
+  }
+  const pristine = new Map();
+  for (const f of new Set(queue.map((m) => m.file))) {
+    const src = readFileSync(join(ROOT, f), 'utf8');
+    pristine.set(f, src);
+    for (const d of dirs) writeFileSync(join(d, f), src);
+  }
+  const hashesIn = async (dir) => {
+    const cmd = ['bun', 'scripts/mutate.mjs', 'corpus-hashes'];
+    const proc = spawn(args.cap ? ['cpuq', 'cap', '--mem', args.mem ?? MEM_CAP, '--time', '300s', '--', ...cmd] : cmd,
+      { cwd: dir, env: { ...process.env, RIP_NO_CACHE: '1', FORCE_COLOR: '0' }, stdout: 'pipe', stderr: 'pipe' });
+    const [out] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+    const code = await proc.exited;
+    if (code !== 0) return { failed: code };
+    try { return { hashes: JSON.parse(out) }; } catch { return { failed: 'unparsable' }; }
+  };
+  const baseline = await hashesIn(dirs[0]);
+  if (!baseline.hashes) { console.error(`observe: the pristine corpus run failed (${baseline.failed})`); process.exit(1); }
+  console.log(`observe: ${Object.keys(baseline.hashes).length} corpus outputs; ${queue.length} mutants, ${workers} workers`);
+  let n = 0, seen = 0;
+  const started = Date.now();
+  const worker = async (dir) => {
+    while (queue.length) {
+      const m = queue.shift();
+      const src = pristine.get(m.file);
+      const target = join(dir, m.file);
+      let mutated;
+      if (m.op === 'table') {
+        try { mutated = generateTable(await loadSolar(), m); } catch (e) {
+          appendFileSync(args.out, JSON.stringify({ id: m.id, verdict: 'invalid' }) + '\n');
+          continue;
+        }
+      } else mutated = src.slice(0, m.start) + m.to + src.slice(m.end);
+      writeFileSync(target, mutated);
+      let r;
+      try { r = await hashesIn(dir); } finally { writeFileSync(target, src); }
+      let rec;
+      if (!r.hashes) rec = { id: m.id, verdict: 'observed', by: [`corpus run failed: ${r.failed}`] };
+      else {
+        const moved = Object.keys(baseline.hashes).filter((k) => r.hashes[k] !== baseline.hashes[k]);
+        rec = moved.length ? { id: m.id, verdict: 'observed', count: moved.length, by: moved.slice(0, 5) } : { id: m.id, verdict: 'unobserved' };
+      }
+      appendFileSync(args.out, JSON.stringify(rec) + '\n');
+      n++; if (rec.verdict === 'observed') seen++;
+      if (n % 50 === 0) {
+        const rate = n / ((Date.now() - started) / 1000);
+        console.log(`  ${n} run, ${seen} observed — ${rate.toFixed(2)}/s, ~${Math.round(queue.length / rate / 60)} min left`);
+      }
+    }
+  };
+  await Promise.all(dirs.map(worker));
+  console.log(`observe done: ${n} run, ${seen} observed, ${n - seen} unobserved`);
+}
+
 // ── cli ──────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
   const a = { _: [] };
@@ -550,5 +654,7 @@ if (import.meta.main) {
   else if (cmd === 'run') await run(args);
   else if (cmd === 'report') report(args);
   else if (cmd === 'try') await tryMutants(args, dash < 0 ? [] : all.slice(dash + 1));
+  else if (cmd === 'observe') await observe(args);
+  else if (cmd === 'corpus-hashes') await corpusHashes();
   else { console.error('usage: bun scripts/mutate.mjs gen|run|report …'); process.exit(2); }
 }
