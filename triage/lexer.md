@@ -1,6 +1,6 @@
 # src/lexer.js mutation survivors
 
-481 of 565 survivors classified.
+489 of 565 survivors classified.
 
 ## GAP
 
@@ -163,6 +163,12 @@
 - src/lexer.js:1364:62389:relation — test/lang/lexer.test.js › line starts and trivia › a comment that ends the file stops at the last character
 - src/lexer.js:1365:62555:number — test/rip/basic.rip › a comment line before code under CRLF
 - src/lexer.js:1367:62672:relation — test/lang/lexer.test.js › line starts and trivia › a comment that ends the file stops at the last character
+- src/lexer.js:1400:64543:statement — test/rip/properties.rip › an operator at a line end continues onto a two-word line
+- src/lexer.js:1400:64560:logic — test/rip/properties.rip › an operator at a line end continues onto a two-word line
+- src/lexer.js:1414:65525:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a `.` alone on its line is an implicit div
+- src/lexer.js:1415:65569:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a `.` alone on its line is an implicit div
+- src/lexer.js:1418:65721:boolean — test/rip/properties.rip › a dot at a line end continues onto a pick
+- src/lexer.js:1421:65874:update — test/rip/properties.rip › a dot at a line end continues onto a word and a spaced paren
 - src/lexer.js:1428:66200:arith — test/rip/basic.rip › a line-leading ?. continues the chain
 - src/lexer.js:1428:66202:number — test/rip/basic.rip › a line-leading ?. continues the chain
 - src/lexer.js:1428:66205:relation — test/rip/basic.rip › a line-leading ?. continues the chain
@@ -440,6 +446,8 @@
 - src/lexer.js:1356:61904:relation — indexOf from pos + 3 returns -1 or an offset >= 3, so close < 0, close <= 0 and close < 1 agree
 - src/lexer.js:1356:61906:number — indexOf from pos + 3 returns -1 or an offset >= 3, so close < 0, close <= 0 and close < 1 agree
 - src/lexer.js:1365:62511:relation — at end === text.length only pos changes (to length + 1), which ends the scan exactly as length does; nothing after the scan loop reads pos
+- src/lexer.js:1418:65674:statement — without the guard, a line whose first character is not an identifier start reads no identifier characters, and text[pos] is not a space (it starts the line's content), so the final IDENT_START test reads that same first character and returns false
+- src/lexer.js:1420:65768:relation — at at === text.length the next test is IDENT_START.test(text[at] ?? ''), which reads '' and returns false wherever the identifier loop stopped
 - src/lexer.js:1432:66445:relation — dotAt is 0 only for a '.' at offset 0; there the continuation path and the normal line path leave identical state (no token to terminate, prefix '' is the base block, scan flags at their initial values)
 - src/lexer.js:1432:66448:number — dotAt is 0 only for a '.' at offset 0; there the continuation path and the normal line path leave identical state (no token to terminate, prefix '' is the base block, scan flags at their initial values)
 - src/lexer.js:1433:66585:relation — at an equal prefix dedentTo pops nothing and finds no new floor to clear, and the branch's other steps are exactly the continuation branch's

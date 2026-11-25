@@ -3506,4 +3506,10 @@ describe('render scanner: ids, classes, and line shapes', () => {
     expect(() => inBody('div#{n} "t"')).toThrow(/6:8: a computed id/);
     expect(() => inBody('div#9 "t"')).toThrow(/6:8: an id shorthand/);
   });
+
+  test('a `.` alone on its line is an implicit div', () => {
+    const code = js('Foo = component\n  render\n    div\n      p "a"\n      .\n      span "b"\n');
+    expect(code).toContain("this._el2 = document.createElement('div')");
+    expect(code).toContain("this._el3 = document.createElement('span')");
+  });
 });
