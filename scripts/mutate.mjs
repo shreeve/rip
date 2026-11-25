@@ -539,34 +539,18 @@ async function tryMutants(args, cmd) {
 
 // ── corpus observation ──────────────────────────────────────────────
 // A survivor's other question: can any program the repository holds tell
-// the mutant apart? The child mode compiles every corpus input with the
-// checkout it runs in — each tracked package module and each language-
-// suite row's source, on the JS face and the TS face — and prints one
-// hash per input; `observe` runs it once pristine, then once per mutant in
-// a private copy, and records the inputs whose output moved.
+// the mutant apart? The child mode hashes the consumer corpus
+// (test/support/consumer-hashes.js, the inputs the consumer-corpus gate
+// pins) with the checkout it runs in; `observe` runs it once pristine,
+// then once per mutant in a private copy, and records the inputs whose
+// output moved — exactly the mutants that gate kills.
 async function corpusHashes() {
   const { compile } = await import(join(ROOT, 'src/compiler.js'));
-  const { loadBattery } = await import(join(ROOT, 'test/support/battery.js'));
-  const { ripFiles } = await import(join(ROOT, 'test/support/rip-files.js'));
-  const proc = Bun.spawnSync(['git', 'ls-files', '-z', '--', 'packages/*.rip', 'packages/**/*.rip'], { cwd: ROOT });
-  const inputs = [];
-  for (const f of new TextDecoder().decode(proc.stdout).split('\0').filter(Boolean)) {
-    inputs.push([f, readFileSync(join(ROOT, f), 'utf8'), f]);
-  }
-  for (const file of ripFiles(join(ROOT, 'test/rip'))) {
-    const rows = await loadBattery(join(ROOT, 'test/rip', file));
-    rows.forEach((row, n) => { if (typeof row.src === 'string') inputs.push([`test/rip/${file}#${n} ${row.verb} ${row.name}`, row.src, `<${file}>`]); });
-  }
+  const { packageInputs, rowInputs, hashInputs } = await import(join(ROOT, 'test/support/consumer-hashes.js'));
   const out = {};
-  for (const [name, src, path] of inputs) {
-    for (const face of ['js', 'ts']) {
-      let text;
-      try {
-        const r = compile(src, { path, runtimeDelivery: 'none', ...(face === 'ts' ? { face: 'ts' } : {}) });
-        text = r.code;
-      } catch (e) { text = `ERR ${String(e?.message ?? e).split('\n')[0]}`; }
-      out[`${face} ${name}`] = Bun.hash(text).toString(36);
-    }
+  for (const [key, faces] of Object.entries(hashInputs([...packageInputs(ROOT), ...(await rowInputs(ROOT))], compile))) {
+    out[`js ${key}`] = faces.js;
+    out[`ts ${key}`] = faces.ts;
   }
   process.stdout.write(JSON.stringify(out));
 }
