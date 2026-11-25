@@ -205,7 +205,9 @@ function subjectOf(flat) {
   let m
   if ((m = /^\(element\) ([\w-]+):/.exec(flat))) return m[1]
   if ((m = /^constructor ([A-Za-z_$][\w$]*)\(/.exec(flat))) return m[1]
-  if ((m = /^\(type parameter\) ([A-Za-z_$][\w$]*)/.exec(flat))) return m[1]
+  // A type parameter a conditional type distributes over carries
+  // `(distributed)` before its name.
+  if ((m = /^\(type parameter\) (?:\(distributed\) )?([A-Za-z_$][\w$]*)/.exec(flat))) return m[1]
   if ((m = /^\(local (?:class|function)\) ([A-Za-z_$][\w$]*)/.exec(flat))) return m[1]
   if ((m = /^\((?:property|method)\) \(Anonymous class\)\.([A-Za-z_$][\w$]*)/.exec(flat))) return m[1]
   if ((m = /^\(property\) <[\w-]+>\.([A-Za-z_$][\w$]*)/.exec(flat))) return m[1]

@@ -337,6 +337,18 @@ The VS Code/Cursor extension:
 The mirror is deterministic scratch state keyed by source and compiler
 hashes. It is never committed or shipped.
 
+`rip check`, the editor and the audit start their checker through one
+function, `tsgoBinaryPath()` in `packages/vscode/src/tsgo.js`, and the
+`RIP_CHECKER` environment variable picks the engine: `tsgo` (the
+default, the root install's TypeScript 7), `tsrs` (the `tsrs` package's
+Rust binary, installed separately with `bun add -d tsrs`), or an
+absolute path to any binary that speaks the same `--lsp --stdio`
+protocol. An engine that is named but not installed rejects; nothing
+falls back to another engine. The engines answer the same TypeScript
+version identically, so a switch changes speed and memory, not
+results; moving to a new TypeScript version is the change the audit
+judges.
+
 Synthetic generated ranges do not receive fabricated Rip positions.
 Diagnostics without an honest source mapping are dropped.
 
