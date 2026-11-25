@@ -6,7 +6,7 @@
 //   bun scripts/mutate.mjs gen-table --out <mutants.json>
 //   bun scripts/mutate.mjs run  --in <mutants.json> --out <results.jsonl>
 //                               [--stage 1|2|3] [--workers N] [--only <ids file>]
-//                               [--workdir <dir>] [--cap]
+//                               [--workdir <dir>] [--cap [--mem SIZE]]
 //   bun scripts/mutate.mjs report --in <mutants.json> --results <r1.jsonl,r2.jsonl>
 //                               [--out <survivor ids>] [--killed <killed ids>]
 //                               [--md <report.md>]
@@ -310,13 +310,14 @@ const STAGES = {
 // With --cap, `cpuq cap` holds each test process to a memory and time
 // limit in a cgroup of its own, so a mutant that allocates without bound
 // dies alone instead of pressing on every process sharing the machine.
-// The suite peaks near 1.2 GB unmutated; MEM_CAP leaves room above that.
+// The suite peaks near 1.2 GB unmutated; the default cap leaves room above
+// that, and --mem trades headroom for more workers in the same memory.
 const MEM_CAP = '3G';
 const CAP_MEMORY = 122, CAP_TIME = 124;
 
-async function runOne(dir, stage, timeoutMs, m, cap) {
+async function runOne(dir, stage, timeoutMs, m, cap, mem = MEM_CAP) {
   const argv = typeof STAGES[stage] === 'function' ? STAGES[stage](m) : STAGES[stage];
-  const cmd = cap ? ['cpuq', 'cap', '--mem', MEM_CAP, '--time', `${timeoutMs / 1000}s`, '--', 'bun', ...argv] : ['bun', ...argv];
+  const cmd = cap ? ['cpuq', 'cap', '--mem', mem, '--time', `${timeoutMs / 1000}s`, '--', 'bun', ...argv] : ['bun', ...argv];
   const proc = spawn(cmd, { cwd: dir, env: { ...process.env, RIP_NO_CACHE: '1', FORCE_COLOR: '0' }, stdout: 'pipe', stderr: 'pipe' });
   let timedOut = false;
   // Under a cap this is only a backstop: cpuq stops the whole cgroup first,
@@ -383,7 +384,7 @@ async function run(args) {
       } else mutated = src.slice(0, m.start) + m.to + src.slice(m.end);
       writeFileSync(target, mutated);
       let r;
-      try { r = await runOne(dir, stage, timeoutMs, m, Boolean(args.cap)); } finally { writeFileSync(target, src); }
+      try { r = await runOne(dir, stage, timeoutMs, m, Boolean(args.cap), args.mem ?? MEM_CAP); } finally { writeFileSync(target, src); }
       appendFileSync(args.out, JSON.stringify({ id: m.id, stage, ...r }) + '\n');
       n++; if (r.verdict === 'killed') killed++;
       if (n % 50 === 0) {
