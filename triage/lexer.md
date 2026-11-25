@@ -496,7 +496,7 @@
 - src/lexer.js:1201:54835:logic — `interface render\n  a: number` (any keyword-spelled name: render, component, …) → expected the TS interface accepted, or a rejection naming the keyword, got "'interface' is reserved and not supported yet", which `interface Props` disproves; with a template-literal member (`a: \`x${number}\``) the base fails first with "cannot tokenize '`'" at the member. The mutants admit a non-IDENTIFIER name as a type-body head and only change which of the two rejections fires
 - src/lexer.js:1539:72002:arith — in a render child position `#x: "a"` (or `div#x: "a"`) → expected a positioned rejection (an id shorthand cannot key an attribute), got setAttribute('div#x', "a") on the parent, which throws InvalidCharacterError at runtime
 - src/lexer.js:1555:72922:arith — in a render child position `#x: "a"` (or `div#x: "a"`) → expected a positioned rejection (an id shorthand cannot key an attribute), got setAttribute('div#x', "a") on the parent, which throws InvalidCharacterError at runtime
-- src/lexer.js:1724:82184:relation — `import d from "./#{a}.json"` (with or without `with { type: 'json' }`; also `export * from "./#{a}"`) → expected a positioned rejection (a module source is a plain string), got the silent miscompile `import d from 'tr,"./",a,".json'`
+- src/lexer.js:1724:82184:relation — `import d from "./#{a}.json"` (with or without `with { type: 'json' }`; also `export * from "./#{a}"`) → expected a positioned rejection (a module source is a plain string), got the silent miscompile `import d from 'tr,"./",a,".json'` (fixed on main in #504)
 
 ## UNCLASSIFIED
 
