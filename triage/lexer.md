@@ -1,6 +1,6 @@
 # src/lexer.js mutation survivors
 
-375 of 565 survivors classified.
+398 of 565 survivors classified.
 
 ## GAP
 
@@ -89,6 +89,25 @@
 - src/lexer.js:1205:55115:number — test/rip/types.rip › an interface that extends holds a template-literal type
 - src/lexer.js:1206:55166:arith — test/rip/types.rip › an interface that extends holds a template-literal type
 - src/lexer.js:1206:55168:number — test/rip/types.rip › an interface that extends, after a statement, holds a template-literal type
+- src/lexer.js:1235:56523:number — test/lang/lexer.test.js › template-literal type scanning › an escape never steps over a line break
+- src/lexer.js:1235:56526:statement — test/lang/lexer.test.js › template-literal type scanning › an escape never steps over a line break
+- src/lexer.js:1240:56766:arith — test/lang/lexer.test.js › template-literal type scanning › rejections point at the literal, the interpolation, or the string
+- src/lexer.js:1240:56768:number — test/lang/lexer.test.js › template-literal type scanning › rejections point at the literal, the interpolation, or the string
+- src/lexer.js:1250:57145:logic — test/lang/lexer.test.js › template-literal type scanning › rejections point at the literal, the interpolation, or the string; test/lang/lexer.test.js › template-literal type scanning › braces and escapes inside a literal or its interpolation are skipped exactly
+- src/lexer.js:1251:57235:arith — test/lang/lexer.test.js › template-literal type scanning › rejections point at the literal, the interpolation, or the string
+- src/lexer.js:1251:57237:number — test/lang/lexer.test.js › template-literal type scanning › rejections point at the literal, the interpolation, or the string
+- src/lexer.js:1253:57281:number — test/lang/lexer.test.js › template-literal type scanning › braces and escapes inside a literal or its interpolation are skipped exactly
+- src/lexer.js:1253:57284:statement — test/lang/lexer.test.js › template-literal type scanning › braces and escapes inside a literal or its interpolation are skipped exactly
+- src/lexer.js:1256:57460:update — test/lang/lexer.test.js › template-literal type scanning › braces and escapes inside a literal or its interpolation are skipped exactly
+- src/lexer.js:1256:57465:update — test/lang/lexer.test.js › template-literal type scanning › braces and escapes inside a literal or its interpolation are skipped exactly (the mutant loops forever on `{}`; the test's 60 s alarm kills it)
+- src/lexer.js:1256:57469:statement — test/lang/lexer.test.js › template-literal type scanning › braces and escapes inside a literal or its interpolation are skipped exactly
+- src/lexer.js:1257:57538:update — test/lang/lexer.test.js › template-literal type scanning › braces and escapes inside a literal or its interpolation are skipped exactly (the mutant loops forever on `{}`; the test's 60 s alarm kills it)
+- src/lexer.js:1257:57542:statement — test/lang/lexer.test.js › template-literal type scanning › braces and escapes inside a literal or its interpolation are skipped exactly
+- src/lexer.js:1267:57834:logic — test/lang/lexer.test.js › template-literal type scanning › rejections point at the literal, the interpolation, or the string; test/lang/lexer.test.js › template-literal type scanning › braces and escapes inside a literal or its interpolation are skipped exactly
+- src/lexer.js:1268:57900:number — test/lang/lexer.test.js › template-literal type scanning › an escape never steps over a line break
+- src/lexer.js:1268:57903:statement — test/lang/lexer.test.js › template-literal type scanning › an escape never steps over a line break
+- src/lexer.js:1272:58020:arith — test/lang/lexer.test.js › template-literal type scanning › rejections point at the literal, the interpolation, or the string
+- src/lexer.js:1272:58022:number — test/lang/lexer.test.js › template-literal type scanning › rejections point at the literal, the interpolation, or the string
 - src/lexer.js:1331:60453:arith — test/rip/basic.rip › a whitespace-only blank line under CRLF
 - src/lexer.js:1331:60455:number — test/rip/basic.rip › a whitespace-only blank line under CRLF
 - src/lexer.js:1331:60458:relation — test/rip/basic.rip › a whitespace-only blank line under CRLF
@@ -329,6 +348,10 @@
 - src/lexer.js:1201:54833:number — at k 0 the name has nothing before it: iface(-1) is false and tokens[-1] is not EXTENDS, so the function returns false either way
 - src/lexer.js:1205:55061:relation — m 0 passes only the mutated bound, and then iface(-1) is false, so the branch is never taken
 - src/lexer.js:1205:55064:number — m 0 passes only the mutated bound, and then iface(-1) is false, so the branch is never taken
+- src/lexer.js:1230:56309:relation — at i === text.length the char is undefined, matches no case, and i++ ends the loop into the same end-of-input failure
+- src/lexer.js:1248:57063:relation — at i === text.length the char is undefined, matches no case, and i++ ends the loop into the same end-of-input failure
+- src/lexer.js:1257:57534:number — returning the index of the closing '}' instead of the one past it hands the template scan a '}', which it steps over as a plain character, so the literal ends at the same place
+- src/lexer.js:1266:57771:relation — at i === text.length the char is undefined, matches no case, and i++ ends the loop into the same end-of-input failure
 - src/lexer.js:1323:59974:relation — text[text.length] is undefined, never ' ' or '\t'
 - src/lexer.js:1355:61880:number — the opener guard requires text[pos + 3] !== '#', so no closer starts at pos + 3 and searching from pos + 4 finds the same closer
 - src/lexer.js:1356:61904:relation — indexOf from pos + 3 returns -1 or an offset >= 3, so close < 0, close <= 0 and close < 1 agree

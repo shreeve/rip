@@ -909,3 +909,28 @@ describe('line starts and trivia', () => {
     ]);
   });
 });
+
+describe('template-literal type scanning', () => {
+  const alias = (src) => tokenize(`${src}\nw = 1`, 'f.rip').tokens[0].value;
+
+  test('braces and escapes inside a literal or its interpolation are skipped exactly', () => {
+    expect(alias('type T = `x${keyof {a: 1}}`')).toBe('type T = `x${keyof {a: 1}}`');
+    expect(alias('type T = `x${keyof {}}`')).toBe('type T = `x${keyof {}}`');
+    expect(alias('type T = `a${A\\b}`')).toBe('type T = `a${A\\b}`');
+    expect(alias('type T = `a\\``')).toBe('type T = `a\\``');
+    expect(alias('type T = `a${"x\\""}`')).toBe('type T = `a${"x\\""}`');
+  });
+
+  test('an escape never steps over a line break', () => {
+    expect(rejection('type T = `a\\b\nz`\nw = 1')).toEqual([expect.stringContaining('stays on one line'), 9, 13]);
+    expect(rejection('type T = `a${"\\x\nz"}`\nw = 1')).toEqual(['unterminated string', 13, 14]);
+  });
+
+  test('rejections point at the literal, the interpolation, or the string', () => {
+    expect(rejection('type T = `a${B}\nz = 1')).toEqual([expect.stringContaining('stays on one line'), 9, 15]);
+    expect(rejection('type T = `a${B\nz = 1')).toEqual([expect.stringContaining('stays on one line'), 11, 14]);
+    expect(rejection('type T = `a${"x"\nz = 1')).toEqual([expect.stringContaining('stays on one line'), 11, 16]);
+    expect(rejection('type T = `a${"x')).toEqual(['unterminated string', 13, 14]);
+    expect(rejection('type T = `abc')).toEqual([expect.stringContaining('never closes'), 9, 10]);
+  });
+});
