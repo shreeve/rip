@@ -2346,8 +2346,8 @@ if (RUN_GRAMMAR) {
   const EXCLUDED = new Map([
     ['For → FOR Range Block', 'banned by design — the emitter rejects a for loop that binds no variable'],
     ['For → FOR Range BY Expression Block', 'banned by design — the emitter rejects a for loop that binds no variable'],
-    ['Import → IMPORT { ImportSpecifierList OptComma } FROM String WITH Object', 'no corpus carrier — attributes name a JSON module, and a named specifier from JSON has no definition for the landing lane (probed 2026-09-05: `import { port } from "./10-modules-data.json" with …` landed definition-silent); test/rip/modules.rip pins the form'],
-    ['Import → IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM String WITH Object', 'no corpus carrier — attributes name a JSON module, and a named specifier from JSON has no definition for the landing lane (probed 2026-09-05, same carrier); test/rip/modules.rip pins the form'],
+    ['Import → IMPORT { ImportSpecifierList OptComma } FROM STRING WITH Object', 'no corpus carrier — attributes name a JSON module, and a named specifier from JSON has no definition for the landing lane (probed 2026-09-05: `import { port } from "./10-modules-data.json" with …` landed definition-silent); test/rip/modules.rip pins the form'],
+    ['Import → IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM STRING WITH Object', 'no corpus carrier — attributes name a JSON module, and a named specifier from JSON has no definition for the landing lane (probed 2026-09-05, same carrier); test/rip/modules.rip pins the form'],
     ['If → Statement POST_UNLESS Expression ELSE Expression', 'banned by design — postfix unless has no else form; the production carries that rejection rather than folding the else into the condition'],
     ['If → Expression POST_UNLESS Expression ELSE Expression', 'banned by design — postfix unless has no else form; the production carries that rejection rather than folding the else into the condition'],
     ['ComponentLine → ACCEPT IDENTIFIER', 'an accept names its provider — the emitter rejects the bare form, pointing at `accept name from Component`'],
