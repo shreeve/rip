@@ -6708,7 +6708,7 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
     while (k >= 1) {
       if (tokens[k].kind === "PROPERTY" && tokens[k - 1].kind === ".")
         k -= 2;
-      else if (tokens[k].kind === "NUMBER" && hyphen(tokens[k - 1]) && tokens[k - 2]?.kind === "PROPERTY")
+      else if ((tokens[k].kind === "NUMBER" || tokens[k].kind === "PROPERTY") && hyphen(tokens[k - 1]) && (tokens[k - 2]?.kind === "PROPERTY" || tokens[k - 2]?.kind === "NUMBER"))
         k -= 2;
       else
         break;
@@ -7328,11 +7328,14 @@ ${baseline}`).join(`
     }
     if (ch === "#") {
       const prev = last();
-      const n = tokens.length;
-      const digitClass = prev?.kind === "NUMBER" && /^[0-9]+$/.test(prev.value) && (tokens[n - 2]?.kind === "-" || tokens[n - 2]?.kind === "MATH" && tokens[n - 2].value === "-") && tokens[n - 3]?.kind === "PROPERTY" && tokens[n - 4]?.kind === ".";
+      const isHyphen = (t) => t?.kind === "-" || t?.kind === "MATH" && t.value === "-";
+      let root = tokens.length - 1;
+      while ((tokens[root]?.kind === "NUMBER" || root < tokens.length - 1 && tokens[root]?.kind === "PROPERTY") && isHyphen(tokens[root - 1]) && (tokens[root - 2]?.kind === "NUMBER" || tokens[root - 2]?.kind === "PROPERTY"))
+        root -= 2;
+      const digitClass = prev?.kind === "NUMBER" && /^[0-9]+$/.test(prev.value) && root < tokens.length - 1 && tokens[root]?.kind === "PROPERTY" && tokens[root - 1]?.kind === ".";
       const glued = inRender && prev && (prev.kind === "IDENTIFIER" || prev.kind === "PROPERTY" || digitClass) && !pendingSpaced && !prev.generated && text[pos + 1] !== undefined && !/\s/.test(text[pos + 1]);
       if (glued && selectorScope()) {
-        if (!headSelectorAt(chainStartFrom(digitClass ? tokens.length - 3 : tokens.length - 1))) {
+        if (!headSelectorAt(chainStartFrom(tokens.length - 1))) {
           const written = /^[^\s"'`,()]*/.exec(text.slice(pos + 1))[0];
           fail(`\`#${written}\` is no element id here: an id follows the HTML tag or \`.class\` that starts its line (otherwise write \`id: '${written}'\`), and a comment needs a space before \`#\``, pos);
         }
@@ -34515,7 +34518,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "f91c7ff3d861ab83";
+var compilerBuild = () => "86302920f1107d73";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
