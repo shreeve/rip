@@ -1,6 +1,6 @@
 # Mutation triage: src/implicit.js
 
-Survivors classified: 97 of 191.
+Survivors classified: 124 of 191.
 
 ## GAP
 
@@ -78,6 +78,20 @@ Survivors classified: 97 of 191.
 - src/implicit.js:416:20232:statement — test/rip/objects.rip › an interpolated key on the next line continues the object
 - src/implicit.js:417:20281:statement — test/rip/objects.rip › an interpolated key on the next line continues the object
 - src/implicit.js:419:20339:statement — test/rip/objects.rip › an interpolated key on the next line continues the object
+- src/implicit.js:130:6722:number — test/rip/arrows.rip › a call inside brackets does not claim the comma after them
+- src/implicit.js:130:6709:statement — test/rip/arrows.rip › a call inside brackets does not claim the comma after them
+- src/implicit.js:138:6906:arith — test/rip/arrows.rip › an interpolated key after the comma keeps the object in the body
+- src/implicit.js:141:7050:update — test/rip/arrows.rip › a pair value with call parens keeps the object in the body
+- src/implicit.js:141:7022:logic — test/rip/arrows.rip › a pair value with call parens keeps the object in the body
+- src/implicit.js:142:7091:logic — test/rip/arrows.rip › a pair value with call parens keeps the object in the body
+- src/implicit.js:143:7126:update — test/rip/arrows.rip › a pair value with call parens keeps the object in the body
+- src/implicit.js:143:7120:statement — test/rip/arrows.rip › a pair value with call parens keeps the object in the body
+- src/implicit.js:144:7149:relation — test/rip/arrows.rip › a pair value with call parens keeps the object in the body
+- src/implicit.js:144:7141:branch — test/rip/arrows.rip › a pair value with call parens keeps the object in the body
+- src/implicit.js:144:7151:number — test/rip/arrows.rip › a pair value with call parens keeps the object in the body
+- src/implicit.js:147:7213:number — test/rip/arrows.rip › a pair inside call parens does not claim the comma
+- src/implicit.js:147:7200:statement — test/rip/arrows.rip › a pair inside call parens does not claim the comma
+- src/implicit.js:149:7331:statement — test/rip/arrows.rip › a pair before a semicolon does not claim a later comma
 
 ## EQUIVALENT
 
@@ -101,12 +115,25 @@ Survivors classified: 97 of 191.
 - src/implicit.js:978:47035:number — tokens[i + 2] is the generated `{` the object pass anchored at tokens[s].start, and tokens[i + 3] is tokens[s], so both read the same offset
 - src/implicit.js:978:47056:number — token `origin` is never read after it is assigned (no consumer in src/ or packages/), so CALL_START's origin feeds nothing
 - src/implicit.js:414:20163:relation — the tape is bracket-balanced when this runs (the scanner closes every opener; forward scans never cross a retagged THEN), so d reaches 0 at the matching closer while k < tokens.length, and `d > 0` ends the loop under either bound
+- src/implicit.js:120:6375:number — starting at j = i visits the comma itself first, and startsImplicitCall(tokens, i) is false for ',' (not IMPLICIT_FUNC)
+- src/implicit.js:123:6521:statement — after `levels++` levels is at least 1 (it is never negative: a negative value returns at once), so the `levels > 0` continue fires anyway
+- src/implicit.js:127:6670:boolean — bodyEnd consults a comma only at depth 0, so every opener in [start, i) is matched before the comma and the backward walk never drives levels below 0
+- src/implicit.js:127:6647:statement — same as 127:6670: levels < 0 is unreachable
+- src/implicit.js:128:6685:statement — falling through after an opener: the next steps are `levels > 0` or startsImplicitCall at an opener, which is never IMPLICIT_FUNC
+- src/implicit.js:138:6908:number — starting at j = i visits the comma itself first, which matches no branch
+- src/implicit.js:138:6913:relation — skipping tokens[start] (the body's first token) changes nothing: as an opener or TERMINATOR it can only lead to `return false`, the same as running off the loop, and a body never starts with ':'
+- src/implicit.js:141:7054:statement — after `levels++` levels is at least 1, so the `levels > 0` continue fires anyway
+- src/implicit.js:144:7161:boolean — levels < 0 is unreachable (depth-0 comma, so every opener in [start, i) is matched; see 127:6670)
+- src/implicit.js:144:7138:statement — same as 144:7161
+- src/implicit.js:145:7176:statement — falling through after an opener: an opener kind is neither ':' nor 'TERMINATOR'
 
 ## BUG
 
 - src/implicit.js:715:33846:arith — `x = [k]: 1`, `x = "a#{b}": 1`, and `f` + indented `"a#{b}": 1` reject with "Unexpected implicit '{'" at the key, though braced `{[k]: 1}` and `{"a#{b}": 1}` compile; the fallback start this mutant moves is reached only by these forms → expected either the braced meaning or a rejection that names the unsupported key form, got a parser error about a generated token
 - src/implicit.js:715:33848:number — same repro as 715:33846 (the mutant only moves where that rejection lands)
 - src/implicit.js:787:37887:logic — `x = a: try f()` + newline + `y = 2` → expected `{a: try f()}` then `y = 2`, got "emitter: `a = 1` inside an object literal is a destructuring default" (the TRY CONTROL frame is never retired at the TERMINATOR, so the object swallows the next line); the mutant compiles it correctly. It also flips `x = a: class if c` from `{a: c ? class : undefined}` to `if (c) x = {a: class}` — the latter matches `x = a: [1] if c`
+- src/implicit.js:125:6614:boolean — `h -> f [` + indented `1` + `], 2` → expected `h(-> f([1], 2))`, the reading of the one-line `h -> f [1], 2` and of the same lines at statement level (`f [` … `], 2` is `f([1], 2)`), got `h(-> f([1]), 2)`: commaInImplicitCall returns false at an INDENT before checking the bracket level, so an INDENT inside brackets hides the call that owns the comma
+- src/implicit.js:125:6587:statement — same repro as 125:6614 (removing the early return gives the expected reading)
 
 ## Notes
 

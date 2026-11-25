@@ -126,3 +126,49 @@ code "arrow comma ends body not object", """
     return 42;
   }, 99);
 """
+
+# ==============================================================================
+# Which comma ends a single-line arrow body
+# ==============================================================================
+#
+# A depth-0 comma inside a one-line body stays in the body only when an
+# implicit call or a property list opened within the body owns it;
+# otherwise the body ends and the comma separates the next argument.
+
+test 'an interpolated key after the comma keeps the object in the body', '''
+  h = (f) -> f()
+  k = 'b'
+  h -> a: 1, "#{k}": 2
+''', {a: 1, b: 2}
+
+test 'a pair value with call parens keeps the object in the body', '''
+  h = (f, o) -> [f(), o?]
+  g = (v) -> v * 10
+  h -> a: g(1), b: 2
+''', [{a: 10, b: 2}, false]
+
+test 'a pair inside call parens does not claim the comma', '''
+  h = (f, o) -> [f(), o]
+  g = (v) -> v
+  h -> g(a: 1), b: 2
+''', [{a: 1}, {b: 2}]
+
+test 'a multi-line bracket value keeps the object in the body', '''
+  h = (f, o) -> [f(), o?]
+  h -> a: [
+    1
+    2
+  ], b: 2
+''', [{a: [1, 2], b: 2}, false]
+
+test 'a pair before a semicolon does not claim a later comma', '''
+  h = (f, o) -> [f(), o]
+  b = 5
+  h -> a: 1; b, c: 2
+''', [5, {c: 2}]
+
+test 'a call inside brackets does not claim the comma after them', '''
+  h = (f, o) -> [f(), o]
+  g = (v) -> v + 1
+  h -> [g 1], 3
+''', [[2], 3]
