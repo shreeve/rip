@@ -1016,3 +1016,10 @@ test "a class that extends keeps symbols in its body", '''
     m: -> :ok
   new A().m().description
 ''', 'ok'
+test "a block at an interface body's depth after the interface is code", '''
+  interface P
+    a: number
+  f = ->
+    :ok
+  f().description
+''', 'ok'

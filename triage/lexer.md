@@ -1,6 +1,6 @@
 # src/lexer.js mutation survivors
 
-398 of 565 survivors classified.
+409 of 565 survivors classified.
 
 ## GAP
 
@@ -108,6 +108,14 @@
 - src/lexer.js:1268:57903:statement — test/lang/lexer.test.js › template-literal type scanning › an escape never steps over a line break
 - src/lexer.js:1272:58020:arith — test/lang/lexer.test.js › template-literal type scanning › rejections point at the literal, the interpolation, or the string
 - src/lexer.js:1272:58022:number — test/lang/lexer.test.js › template-literal type scanning › rejections point at the literal, the interpolation, or the string
+- src/lexer.js:1300:59221:arith — test/lang/lexer.test.js › dedent across a bracket floor › the rejection names the indentation the bracket opened at
+- src/lexer.js:1300:59223:number — test/lang/lexer.test.js › dedent across a bracket floor › the rejection names the indentation the bracket opened at
+- src/lexer.js:1305:59297:statement — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a handler body ends at its dedent and lasts across its own nested blocks
+- src/lexer.js:1305:59300:branch — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a handler body ends at its dedent and lasts across its own nested blocks
+- src/lexer.js:1305:59317:relation — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a handler body ends at its dedent and lasts across its own nested blocks
+- src/lexer.js:1305:59326:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a handler body ends at its dedent and lasts across its own nested blocks
+- src/lexer.js:1305:59344:relation — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a handler body ends at its dedent and lasts across its own nested blocks
+- src/lexer.js:1308:59431:statement — test/rip/types.rip › a block at an interface body's depth after the interface is code
 - src/lexer.js:1331:60453:arith — test/rip/basic.rip › a whitespace-only blank line under CRLF
 - src/lexer.js:1331:60455:number — test/rip/basic.rip › a whitespace-only blank line under CRLF
 - src/lexer.js:1331:60458:relation — test/rip/basic.rip › a whitespace-only blank line under CRLF
@@ -352,6 +360,9 @@
 - src/lexer.js:1248:57063:relation — at i === text.length the char is undefined, matches no case, and i++ ends the loop into the same end-of-input failure
 - src/lexer.js:1257:57534:number — returning the index of the closing '}' instead of the one past it hands the template scan a '}', which it steps over as a plain character, so the literal ends at the same place
 - src/lexer.js:1266:57771:relation — at i === text.length the char is undefined, matches no case, and i++ ends the loop into the same end-of-input failure
+- src/lexer.js:1295:58928:number — with no open bracket the floor test indents.length <= floor runs only inside a loop that needs indents.length > 1, so floor 1 and floor 0 both never fire
+- src/lexer.js:1296:58957:relation — indents[0] is the root prefix '', whose length 0 is never greater than prefix.length, so the second conjunct stops the loop at the root either way
+- src/lexer.js:1296:58959:number — indents[0] is the root prefix '', whose length 0 is never greater than prefix.length, so the second conjunct stops the loop at the root either way
 - src/lexer.js:1323:59974:relation — text[text.length] is undefined, never ' ' or '\t'
 - src/lexer.js:1355:61880:number — the opener guard requires text[pos + 3] !== '#', so no closer starts at pos + 3 and searching from pos + 4 finds the same closer
 - src/lexer.js:1356:61904:relation — indexOf from pos + 3 returns -1 or an offset >= 3, so close < 0, close <= 0 and close < 1 agree

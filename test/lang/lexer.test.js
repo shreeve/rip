@@ -934,3 +934,9 @@ describe('template-literal type scanning', () => {
     expect(rejection('type T = `abc')).toEqual([expect.stringContaining('never closes'), 9, 10]);
   });
 });
+
+describe('dedent across a bracket floor', () => {
+  test('the rejection names the indentation the bracket opened at', () => {
+    expect(rejection('if x\n  y = [\n1]')).toEqual(['dedent to "" crosses the enclosing bracket\'s indentation floor "  "', 13, 13]);
+  });
+});

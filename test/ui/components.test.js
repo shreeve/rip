@@ -3465,4 +3465,11 @@ describe('render scanner: ids, classes, and line shapes', () => {
     expect(body('p n.a.b-c')).toContain('this.n.value.a.b - this.c.value');
     expect(body('p "a-b".length-c')).toContain('"a-b".length - this.c.value');
   });
+
+  test('a handler body ends at its dedent and lasts across its own nested blocks', () => {
+    const body = (lines) => js(`Foo = component\n  n := 1\n  a := 1\n  b := 1\n  render\n    div\n      button @click: ->\n${lines}\n`);
+    expect(body('        n = 2\n      x-icon')).toContain("createElement('x-icon')");
+    expect(body('        n = 2\n      span\n        x-icon')).toContain("createElement('x-icon')");
+    expect(body('        if n\n          n = 2\n        a-b')).toContain('return (this.a.value - this.b.value)');
+  });
 });
