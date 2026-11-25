@@ -19147,8 +19147,8 @@ class Emitter {
     });
   }
 
-  // ["do-iife", operand] — immediate invocation: `(<operand>)(<args>)`.
-  // A function operand captures per-parameter arguments — an identifier
+  // ["do-iife", fn] — immediate invocation: `(<fn>)(<args>)`. The
+  // function captures per-parameter arguments — an identifier
   // param passes the enclosing binding of the same name (the
   // loop-closure idiom), a default param passes its default value.
   // Trailing default-only arguments drop: the default itself fires.
@@ -19160,27 +19160,25 @@ class Emitter {
       this.b.emit('(');
       this.mark(node, 'func', () => this.expr(fn));
       this.b.emit(')(');
-      if (isFunc(fn)) {
-        const params = fn[1];
-        const args = params.map((p) => {
-          // Typed params erase to their cores here too: `do (x: T) ->`
-          // captures the enclosing `x`; a typed default passes its
-          // default value. The capture argument is a READ of the
-          // enclosing binding — a reactive name captures its current
-          // VALUE (the expr path unwraps), and the param then shadows
-          // it inside the body.
-          const core = Emitter.paramCore(p);
-          if (typeof core === 'string') return () => this.expr(core);
-          if (isNode(core) && core[0] === 'default' && typeof Emitter.paramCore(core[1]) === 'string') return () => this.expr(core[2]);
-          throw this.positionedError(p, 'emitter: do-IIFE parameters must be plain names or defaulted names — patterns and rests have no capture argument', node);
-        });
-        let live = params.length;
-        while (live > 0 && isNode(params[live - 1]) && params[live - 1][0] === 'default') live--;
-        args.slice(0, live).forEach((arg, i) => {
-          if (i > 0) this.b.emit(', ');
-          arg();
-        });
-      }
+      const params = fn[1];
+      const args = params.map((p) => {
+        // Typed params erase to their cores here too: `do (x: T) ->`
+        // captures the enclosing `x`; a typed default passes its
+        // default value. The capture argument is a READ of the
+        // enclosing binding — a reactive name captures its current
+        // VALUE (the expr path unwraps), and the param then shadows
+        // it inside the body.
+        const core = Emitter.paramCore(p);
+        if (typeof core === 'string') return () => this.expr(core);
+        if (isNode(core) && core[0] === 'default' && typeof Emitter.paramCore(core[1]) === 'string') return () => this.expr(core[2]);
+        throw this.positionedError(p, 'emitter: do-IIFE parameters must be plain names or defaulted names — patterns and rests have no capture argument', node);
+      });
+      let live = params.length;
+      while (live > 0 && isNode(params[live - 1]) && params[live - 1][0] === 'default') live--;
+      args.slice(0, live).forEach((arg, i) => {
+        if (i > 0) this.b.emit(', ');
+        arg();
+      });
       this.b.emit(')');
     });
   }
@@ -19832,7 +19830,7 @@ const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
     if ((h === ':' || h === 'void-pair') && x.length === 3) return (isNode(x[1]) && walk(x[1])) || walk(x[2]);
     // An immediately invoked arrow passes each parameter the enclosing
     // binding of its own name, so those names are reads out here.
-    if (h === 'do-iife' && x.length === 2 && isFunc(x[1])) return [...paramBindings(x[1][1])].some(ref) || walk(x[1]);
+    if (h === 'do-iife' && x.length === 2) return [...paramBindings(x[1][1])].some(ref) || walk(x[1]);
     if (isFunc(x)) return walkParams(x[1]) || walkBody(x[1], x[2]);
     if (isDefHead(h) && x.length === 4) return walkParams(x[2]) || walkBody(x[2], x[3]);
     if (h === 'render' && x.length === 2 && semanticKind(x) === 'render') return walkRender(x[1]);

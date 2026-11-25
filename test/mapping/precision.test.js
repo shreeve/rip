@@ -38,7 +38,9 @@ const FLOORS = {
   'typedecls.rip': 18,
   'foras.rip': 84,
   'loops3.rip': 132,
-  'doiife.rip': 46,
+  // `do <expr>` left the language with its fixture lines (`mk = -> 7`,
+  // `z = do mk`), which held 6 of the file's 46 positions.
+  'doiife.rip': 40,
   'objspread.rip': 197,
   'heredocs2.rip': 15,
   'multiline.rip': 205,

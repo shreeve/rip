@@ -1061,7 +1061,7 @@ const matchingOutdent = (tokens, at) => {
 //   necessarily its body.
 //
 // Only scanner indents exist at this stage (implicitBlocks runs later).
-const IMMEDIATE_BODY_HEADS = new Set(['->', '=>', 'DO', 'DO_IIFE', 'TRY', 'LOOP']);
+const IMMEDIATE_BODY_HEADS = new Set(['->', '=>', 'DO_IIFE', 'TRY', 'LOOP']);
 const CONDITION_BODY_HEADS = new Set(['IF', 'UNLESS', 'SWITCH', 'WHILE', 'UNTIL', 'FOR', 'CLASS']);
 // Tokens that introduce a single-line BODY within a segment: after one
 // of these, a ';' statement separator continues the body (the

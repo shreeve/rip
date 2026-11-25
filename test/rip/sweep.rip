@@ -1018,15 +1018,7 @@ code "return an indented object", '''
   };
   '''
 
-code "do on a plain expression", '''
-  f = -> 1
-  do f
-  ''', '''
-  let f = function() {
-    return 1;
-  };
-  (f)();
-  '''
+fail "do on a plain expression rejects", "f = -> 1\ndo f", "`do` invokes a function literal"
 
 code "await an indented object", '''
   f = ->

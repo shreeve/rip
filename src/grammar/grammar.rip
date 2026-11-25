@@ -606,8 +606,7 @@ grammar =
   # do-IIFE: `do ->` (and `do (x) ->`) invokes the function immediately;
   # identifier params capture the enclosing variables of the same name
   # as call arguments, default params pass their default value. The
-  # lexer retags DO to DO_IIFE when a function follows; `do <expr>`
-  # invokes any other expression (`do f` → `(f)()`).
+  # lexer retags DO to DO_IIFE and rejects a `do` heading anything else.
   DoIife: [
     o 'DO_IIFE Code', '["do-iife", 2]', 'doiife: _, func'
   ]
@@ -1321,7 +1320,6 @@ grammar =
     o 'Expression TERNARY Expression : Expression', '["?:", 1, 3, 5]'  , 'ternary: operator, condition, then, else'
 
     o 'UNARY Expression'                          , '[1, 2]'           , 'unary: operator, operand'
-    o 'DO Expression'                             , '["do-iife", 2]'   , 'doiife: _, func'
     o 'UNARY_MATH Expression'                     , '[1, 2]'           , 'unary: operator, operand'
     # AWAIT is labeled so the keyword owns its span: TS80007 reports on
     # the generated `await`, and the author-spelled keyword is where it
@@ -1383,7 +1381,7 @@ operators = """
   left        . ?. DAMMIT INDEX_START TEMPLATE_TAG
   left        CALL_START CALL_END
   nonassoc    ++ -- ? MAYBE_DAMMIT
-  right       UNARY NEW DO
+  right       UNARY NEW
   right       AWAIT
   right       **
   right       UNARY_MATH
@@ -1493,7 +1491,6 @@ displays =
   THROW: 'throw'
   AWAIT: 'await'
   YIELD: 'yield'
-  DO: 'do'
   DO_IIFE: 'do'
   CAST: 'as'
   SATISFIES: 'satisfies'

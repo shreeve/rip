@@ -321,8 +321,8 @@ const KEYWORDS = {
   super: 'SUPER',
   await: 'AWAIT',
   yield: 'YIELD',
-  // `do` scans as DO (the invoke-an-expression operator); tagParams
-  // retags it to DO_IIFE when a function literal follows.
+  // `do` scans as DO; tagParams retags it to DO_IIFE, the immediate
+  // invocation of the function literal that follows.
   do: 'DO',
   enum: 'ENUM',
   // Components. `component` and `render` are keywords
@@ -2433,6 +2433,11 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // x` guards f instead of calling it.
   const mintId = () => nextId++;
   tagParams(tokens);
+  // `do` invokes a function literal; tagParams retagged every one it
+  // heads to DO_IIFE, so a DO left here heads anything else.
+  for (const t of tokens) {
+    if (t.kind === 'DO') fail('`do` invokes a function literal (`do ->`, `do (x) ->`); call any other value directly: `f()`', t.start, t.end);
+  }
   tagDynamicKeys(tokens);
   // Definition-site bangs resolve BEFORE rewriteTypes (its def-context
   // scans read VOID_MARKER); the object/class-key form resolves later,
