@@ -3398,6 +3398,10 @@ describe('render scanner: ids, classes, and line shapes', () => {
     expect(() => js(`Foo = component\n  w := 1\n  render\n    div\n      span @w-4#x\n`)).toThrow(/5:12: an event name after `@`/);
   });
 
+  test('only a hyphenated digit run continues a class chain', () => {
+    lexFails(at('div.a*4.b#x "y"'), /`#x` is no element id here/);
+  });
+
   test('a class starting with a digit, and text glued to a selector, reject', () => {
     lexFails(at('.2xl "x"'), /write `class: '2xl'`/);
     lexFails(at('.card"x"'), /a space goes between an element's selector and its text/);

@@ -1,6 +1,6 @@
 # src/lexer.js mutation survivors
 
-269 of 565 survivors classified.
+272 of 565 survivors classified.
 
 ## GAP
 
@@ -18,6 +18,8 @@
 - src/lexer.js:591:28072:number — test/lang/lexer.test.js › rejection spans › a direct tokenize() rejection message carries path, line, and column
 - src/lexer.js:591:28081:arith — test/lang/lexer.test.js › rejection spans › a direct tokenize() rejection message carries path, line, and column
 - src/lexer.js:591:28083:number — test/lang/lexer.test.js › rejection spans › a direct tokenize() rejection message carries path, line, and column
+- src/lexer.js:731:34092:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › only a hyphenated digit run continues a class chain
+- src/lexer.js:731:34103:relation — test/ui/components.test.js › render scanner: ids, classes, and line shapes › only a hyphenated digit run continues a class chain
 - src/lexer.js:1331:60453:arith — test/rip/basic.rip › a whitespace-only blank line under CRLF
 - src/lexer.js:1331:60455:number — test/rip/basic.rip › a whitespace-only blank line under CRLF
 - src/lexer.js:1331:60458:relation — test/rip/basic.rip › a whitespace-only blank line under CRLF
@@ -225,6 +227,7 @@
 - src/lexer.js:575:27226:number — renderDepth and renderParenDepth are read only while inRender, and RENDER assigns both when it sets inRender
 - src/lexer.js:581:27554:number — renderDepth and renderParenDepth are read only while inRender, and RENDER assigns both when it sets inRender
 - src/lexer.js:582:27572:number — token ids are compared only for identity and order (origin links; minted ids continue from nextId), and a uniform shift by one preserves both
+- src/lexer.js:731:34081:relation — the only scan-time token whose value is '-' is kind '-' (MATH carries only '*', '/', '%', '//', '%%'), which the first arm already accepts, so a non-MATH-with-value-'-' arm adds nothing
 - src/lexer.js:1175:53579:number — upTo 1 with ref null makes the first sync's staleness check fire (tokens[0] !== null), which rebuilds from the nearest line boundary, the state upTo 0 starts from
 - src/lexer.js:1175:53600:number — level is only a key: answers are stored and read at the same running level, so a constant offset changes no lookup, and the next line boundary resets it to 0
 - src/lexer.js:1323:59974:relation — text[text.length] is undefined, never ' ' or '\t'
