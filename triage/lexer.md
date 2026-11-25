@@ -1,0 +1,149 @@
+# src/lexer.js mutation survivors
+
+136 of 565 survivors classified.
+
+## GAP
+
+- src/lexer.js:591:28070:arith — test/lang/lexer.test.js › rejection spans › a direct tokenize() rejection message carries path, line, and column
+- src/lexer.js:591:28072:number — test/lang/lexer.test.js › rejection spans › a direct tokenize() rejection message carries path, line, and column
+- src/lexer.js:591:28081:arith — test/lang/lexer.test.js › rejection spans › a direct tokenize() rejection message carries path, line, and column
+- src/lexer.js:591:28083:number — test/lang/lexer.test.js › rejection spans › a direct tokenize() rejection message carries path, line, and column
+- src/lexer.js:1825:87556:arith — test/lang/lexer.test.js › rejection spans › literal rejections point into the literal
+- src/lexer.js:1825:87558:number — test/lang/lexer.test.js › rejection spans › literal rejections point into the literal
+- src/lexer.js:1906:91591:arith — test/lang/lexer.test.js › rejection spans › literal rejections point into the literal
+- src/lexer.js:1906:91593:number — test/lang/lexer.test.js › rejection spans › literal rejections point into the literal
+- src/lexer.js:1906:91595:arith — test/lang/lexer.test.js › rejection spans › literal rejections point into the literal
+- src/lexer.js:1906:91610:arith — test/lang/lexer.test.js › rejection spans › literal rejections point into the literal
+- src/lexer.js:1906:91629:arith — test/lang/lexer.test.js › rejection spans › literal rejections point into the literal
+- src/lexer.js:1906:91631:number — test/lang/lexer.test.js › rejection spans › literal rejections point into the literal
+- src/lexer.js:1907:91771:arith — test/lang/lexer.test.js › rejection spans › literal rejections point into the literal
+- src/lexer.js:1907:91773:number — test/lang/lexer.test.js › rejection spans › literal rejections point into the literal
+- src/lexer.js:1928:92730:logic — test/rip/literals.rip › tight modulo by a name called w
+- src/lexer.js:1936:93084:number — test/rip/literals.rip › %w escape before the closer stays in the word
+- src/lexer.js:1936:93087:statement — test/rip/literals.rip › %w escape before the closer stays in the word
+- src/lexer.js:1937:93109:statement — test/rip/literals.rip › %w nested pairs count depth
+- src/lexer.js:1937:93143:update — test/rip/literals.rip › %w nested pairs count depth
+- src/lexer.js:1941:93327:arith — test/lang/lexer.test.js › rejection spans › literal rejections point into the literal
+- src/lexer.js:1941:93329:number — test/lang/lexer.test.js › rejection spans › literal rejections point into the literal
+- src/lexer.js:1942:93365:arith — test/lang/lexer.test.js › operator and literal spans › word arrays: the opener, each word, the gaps between words, the closer
+- src/lexer.js:1942:93367:number — test/lang/lexer.test.js › operator and literal spans › word arrays: the opener, each word, the gaps between words, the closer
+- src/lexer.js:1954:93877:statement — test/lang/lexer.test.js › operator and literal spans › word arrays: the opener, each word, the gaps between words, the closer
+- src/lexer.js:1958:93998:arith — test/lang/lexer.test.js › operator and literal spans › word arrays: the opener, each word, the gaps between words, the closer
+- src/lexer.js:1958:94000:number — test/lang/lexer.test.js › operator and literal spans › word arrays: the opener, each word, the gaps between words, the closer
+- src/lexer.js:1969:94503:arith — test/lang/lexer.test.js › rejection spans › operator rejections cover the offending characters
+- src/lexer.js:1969:94505:number — test/lang/lexer.test.js › rejection spans › operator rejections cover the offending characters
+- src/lexer.js:1973:94618:arith — test/lang/lexer.test.js › operator and literal spans › multi-character operators cover exactly their characters
+- src/lexer.js:1973:94620:number — test/lang/lexer.test.js › operator and literal spans › multi-character operators cover exactly their characters
+- src/lexer.js:1974:94637:number — test/rip/operators.rip › tight unsigned-shift assignment
+- src/lexer.js:1983:95062:arith — test/lang/lexer.test.js › operator and literal spans › multi-character operators cover exactly their characters
+- src/lexer.js:1983:95064:number — test/lang/lexer.test.js › operator and literal spans › multi-character operators cover exactly their characters
+- src/lexer.js:1984:95081:number — test/rip/operators.rip › tight strict equality
+- src/lexer.js:1997:95563:arith — test/rip/operators.rip › nullish assignment directly after an assignment
+- src/lexer.js:1997:95565:number — test/rip/operators.rip › nullish assignment of a comparison keeps a set value
+- src/lexer.js:1998:95625:arith — test/lang/lexer.test.js › operator and literal spans › multi-character operators cover exactly their characters
+- src/lexer.js:1998:95627:number — test/lang/lexer.test.js › operator and literal spans › multi-character operators cover exactly their characters
+- src/lexer.js:1999:95644:number — test/rip/operators.rip › tight nullish assignment
+- src/lexer.js:2006:95904:arith — test/lang/lexer.test.js › operator and literal spans › multi-character operators cover exactly their characters
+- src/lexer.js:2006:95906:number — test/lang/lexer.test.js › operator and literal spans › multi-character operators cover exactly their characters
+- src/lexer.js:2012:96182:arith — test/lang/lexer.test.js › rejection spans › operator rejections cover the offending characters
+- src/lexer.js:2012:96184:number — test/lang/lexer.test.js › rejection spans › operator rejections cover the offending characters
+- src/lexer.js:2032:97159:arith — test/lang/lexer.test.js › operator and literal spans › module stars, yield delegation, and postfix existence cover one character
+- src/lexer.js:2032:97161:number — test/lang/lexer.test.js › operator and literal spans › module stars, yield delegation, and postfix existence cover one character
+- src/lexer.js:2033:97253:arith — test/lang/lexer.test.js › operator and literal spans › module stars, yield delegation, and postfix existence cover one character
+- src/lexer.js:2033:97255:number — test/lang/lexer.test.js › operator and literal spans › module stars, yield delegation, and postfix existence cover one character
+- src/lexer.js:2038:97646:arith — test/lang/lexer.test.js › operator and literal spans › module stars, yield delegation, and postfix existence cover one character
+- src/lexer.js:2038:97648:number — test/lang/lexer.test.js › operator and literal spans › module stars, yield delegation, and postfix existence cover one character
+- src/lexer.js:2058:98384:arith — test/lang/lexer.test.js › operator and literal spans › multi-character operators cover exactly their characters
+- src/lexer.js:2058:98386:number — test/lang/lexer.test.js › operator and literal spans › multi-character operators cover exactly their characters
+- src/lexer.js:2085:99861:arith — test/lang/lexer.test.js › rejection spans › operator rejections cover the offending characters
+- src/lexer.js:2085:99863:number — test/lang/lexer.test.js › rejection spans › operator rejections cover the offending characters
+- src/lexer.js:2128:102281:logic — test/rip/operators.rip › an unspaced ? after an operator with no carve-out
+- src/lexer.js:2128:102297:logic — test/rip/operators.rip › an unspaced ? after an operator with no carve-out
+- src/lexer.js:2129:102358:relation — test/rip/operators.rip › an unspaced ? between a tight operator and a colon
+- src/lexer.js:2129:102375:logic — test/rip/operators.rip › an unspaced ? between a tight operator and a colon
+- src/lexer.js:2142:102748:number — test/lang/lexer.test.js › operator and literal spans › module stars, yield delegation, and postfix existence cover one character
+- src/lexer.js:2153:103135:number — test/lang/lexer.test.js › operator and literal spans › brackets, picks, and interpolation closers cover one character
+- src/lexer.js:2177:104020:arith — test/lang/lexer.test.js › operator and literal spans › brackets, picks, and interpolation closers cover one character
+- src/lexer.js:2177:104022:number — test/lang/lexer.test.js › operator and literal spans › brackets, picks, and interpolation closers cover one character
+- src/lexer.js:2214:105790:arith — test/lang/lexer.test.js › operator and literal spans › brackets, picks, and interpolation closers cover one character
+- src/lexer.js:2214:105792:number — test/lang/lexer.test.js › operator and literal spans › brackets, picks, and interpolation closers cover one character
+- src/lexer.js:2215:105887:arith — test/lang/lexer.test.js › operator and literal spans › brackets, picks, and interpolation closers cover one character
+- src/lexer.js:2215:105889:number — test/lang/lexer.test.js › operator and literal spans › brackets, picks, and interpolation closers cover one character
+- src/lexer.js:2220:106231:logic — test/rip/cast.rip › a cast inside an exported array's object (code row: the evaluator cannot host an export)
+- src/lexer.js:2222:106362:arith — test/lang/lexer.test.js › operator and literal spans › brackets, picks, and interpolation closers cover one character
+- src/lexer.js:2222:106364:number — test/lang/lexer.test.js › operator and literal spans › brackets, picks, and interpolation closers cover one character
+- src/lexer.js:2232:106680:arith — test/lang/lexer.test.js › operator and literal spans › brackets, picks, and interpolation closers cover one character
+- src/lexer.js:2232:106682:number — test/lang/lexer.test.js › operator and literal spans › brackets, picks, and interpolation closers cover one character
+- src/lexer.js:2259:107983:statement — test/lang/lexer.test.js › operator and literal spans › prototype access: every minted token covers the two colons
+- src/lexer.js:2260:108012:statement — test/lang/lexer.test.js › operator and literal spans › prototype access: every minted token covers the two colons
+- src/lexer.js:2260:108027:arith — test/lang/lexer.test.js › operator and literal spans › prototype access: every minted token covers the two colons
+- src/lexer.js:2260:108029:number — test/lang/lexer.test.js › operator and literal spans › prototype access: every minted token covers the two colons
+- src/lexer.js:2261:108081:arith — test/lang/lexer.test.js › operator and literal spans › prototype access: every minted token covers the two colons
+- src/lexer.js:2261:108083:number — test/lang/lexer.test.js › operator and literal spans › prototype access: every minted token covers the two colons
+- src/lexer.js:2262:108121:arith — test/lang/lexer.test.js › operator and literal spans › prototype access: every minted token covers the two colons
+- src/lexer.js:2262:108123:number — test/lang/lexer.test.js › operator and literal spans › prototype access: every minted token covers the two colons
+- src/lexer.js:2264:108178:arith — test/lang/lexer.test.js › operator and literal spans › prototype access: every minted token covers the two colons
+- src/lexer.js:2264:108180:number — test/lang/lexer.test.js › operator and literal spans › prototype access: every minted token covers the two colons
+- src/lexer.js:2266:108273:arith — test/lang/lexer.test.js › operator and literal spans › prototype access: every minted token covers the two colons
+- src/lexer.js:2266:108275:number — test/lang/lexer.test.js › operator and literal spans › prototype access: every minted token covers the two colons
+- src/lexer.js:2271:108419:arith — test/lang/lexer.test.js › rejection spans › operator rejections cover the offending characters
+- src/lexer.js:2271:108421:number — test/lang/lexer.test.js › rejection spans › operator rejections cover the offending characters
+- src/lexer.js:2357:112931:statement — test/lang/lexer.test.js › tolerant end-of-input repair › repairs anchor before trailing newlines, LF or CRLF
+- src/lexer.js:2357:112937:branch — test/lang/lexer.test.js › tolerant end-of-input repair › repairs anchor before trailing newlines, LF or CRLF
+- src/lexer.js:2357:112952:logic — test/lang/lexer.test.js › tolerant end-of-input repair › repairs anchor before trailing newlines, LF or CRLF
+- src/lexer.js:2357:112971:arith — test/lang/lexer.test.js › tolerant end-of-input repair › repairs anchor before trailing newlines, LF or CRLF
+- src/lexer.js:2357:112973:number — test/lang/lexer.test.js › tolerant end-of-input repair › repairs anchor before trailing newlines, LF or CRLF
+- src/lexer.js:2357:112976:relation — test/lang/lexer.test.js › tolerant end-of-input repair › repairs anchor before trailing newlines, LF or CRLF
+- src/lexer.js:2357:112985:logic — test/lang/lexer.test.js › tolerant end-of-input repair › repairs anchor before trailing newlines, LF or CRLF
+- src/lexer.js:2357:113003:arith — test/lang/lexer.test.js › tolerant end-of-input repair › repairs anchor before trailing newlines, LF or CRLF
+- src/lexer.js:2357:113005:number — test/lang/lexer.test.js › tolerant end-of-input repair › repairs anchor before trailing newlines, LF or CRLF
+- src/lexer.js:2357:113008:relation — test/lang/lexer.test.js › tolerant end-of-input repair › repairs anchor before trailing newlines, LF or CRLF
+- src/lexer.js:2363:113359:arith — test/lang/lexer.test.js › tolerant end-of-input repair › an empty call or index keeps its argument slot as a zero-width hole
+- src/lexer.js:2368:113548:relation — test/lang/lexer.test.js › tolerant end-of-input repair › a trailing comma keeps its slot; a bare element or empty literal gets none
+- src/lexer.js:2369:113595:relation — test/lang/lexer.test.js › tolerant end-of-input repair › a trailing comma keeps its slot; a bare element or empty literal gets none
+- src/lexer.js:2396:115235:relation — test/lang/lexer.test.js › tolerant end-of-input repair › a multiline call keeps its slot inside the argument block
+- src/lexer.js:2396:115249:logic — test/lang/lexer.test.js › tolerant end-of-input repair › a multiline call keeps its slot inside the argument block
+- src/lexer.js:2396:115272:relation — test/lang/lexer.test.js › tolerant end-of-input repair › a multiline call keeps its slot inside the argument block
+- src/lexer.js:2397:115332:relation — test/lang/lexer.test.js › tolerant end-of-input repair › a multiline call keeps its slot inside the argument block
+- src/lexer.js:2397:115353:update — test/lang/lexer.test.js › tolerant end-of-input repair › a multiline call keeps its slot inside the argument block
+- src/lexer.js:2398:115386:arith — test/lang/lexer.test.js › tolerant end-of-input repair › a multiline call keeps its slot inside the argument block
+- src/lexer.js:2398:115388:number — test/lang/lexer.test.js › tolerant end-of-input repair › a multiline call keeps its slot inside the argument block
+- src/lexer.js:2400:115442:relation — test/lang/lexer.test.js › tolerant end-of-input repair › a trailing comma keeps its slot; a bare element or empty literal gets none
+- src/lexer.js:2400:115453:logic — test/lang/lexer.test.js › tolerant end-of-input repair › a trailing comma keeps its slot; a bare element or empty literal gets none
+- src/lexer.js:2400:115461:relation — test/lang/lexer.test.js › tolerant end-of-input repair › a trailing comma keeps its slot; a bare element or empty literal gets none
+- src/lexer.js:2400:115479:logic — test/lang/lexer.test.js › tolerant end-of-input repair › a trailing comma keeps its slot; a bare element or empty literal gets none
+- src/lexer.js:2401:115502:relation — test/lang/lexer.test.js › tolerant end-of-input repair › a trailing comma keeps its slot; a bare element or empty literal gets none
+- src/lexer.js:2401:115514:logic — test/lang/lexer.test.js › tolerant end-of-input repair › a trailing comma keeps its slot; a bare element or empty literal gets none
+- src/lexer.js:2401:115522:relation — test/lang/lexer.test.js › tolerant end-of-input repair › a trailing comma keeps its slot; a bare element or empty literal gets none
+- src/lexer.js:2402:115551:branch — test/lang/lexer.test.js › tolerant end-of-input repair › a trailing comma keeps its slot; a bare element or empty literal gets none
+- src/lexer.js:2402:115557:relation — test/lang/lexer.test.js › tolerant end-of-input repair › a trailing comma keeps its slot; a bare element or empty literal gets none
+- src/lexer.js:2402:115565:logic — test/lang/lexer.test.js › tolerant end-of-input repair › a trailing comma keeps its slot; a bare element or empty literal gets none
+- src/lexer.js:2404:115624:update — test/lang/lexer.test.js › tolerant end-of-input repair › the hole is a generated, unspaced token with its own id
+- src/lexer.js:2406:115721:boolean — test/lang/lexer.test.js › tolerant end-of-input repair › the hole is a generated, unspaced token with its own id
+- src/lexer.js:2406:115737:boolean — test/lang/lexer.test.js › tolerant end-of-input repair › the hole is a generated, unspaced token with its own id
+- src/lexer.js:2406:115755:boolean — test/lang/lexer.test.js › tolerant end-of-input repair › the hole is a generated, unspaced token with its own id
+- src/lexer.js:2409:115828:statement — test/lang/lexer.test.js › tolerant end-of-input repair › a multiline call keeps its slot inside the argument block
+- src/lexer.js:2409:115846:number — test/lang/lexer.test.js › tolerant end-of-input repair › a multiline call keeps its slot inside the argument block
+
+## EQUIVALENT
+
+- src/lexer.js:1934:92990:relation — at i === text.length the char is undefined (never the closer), so the loop exits with depth > 0 and fails identically; i is unused after the failure
+- src/lexer.js:1947:93515:arith — the initial prevEnd is never read: the comma push is guarded by !first and the first word overwrites prevEnd
+- src/lexer.js:1947:93517:number — the initial prevEnd is never read: the comma push is guarded by !first and the first word overwrites prevEnd
+- src/lexer.js:1955:93903:statement — wEnd is clipped to i only when the match reaches the closer; the next exec then starts at or past i and the m2.index < i guard ends the loop, so the break and the lastIndex reset change nothing
+- src/lexer.js:1955:93912:relation — wEnd is clipped to i only when the match reaches the closer; the next exec then starts at or past i and the m2.index < i guard ends the loop, so the break and the lastIndex reset change nothing
+- src/lexer.js:1955:93918:statement — wEnd is clipped to i only when the match reaches the closer; the next exec then starts at or past i and the m2.index < i guard ends the loop, so the break and the lastIndex reset change nothing
+- src/lexer.js:1956:93935:statement — wEnd is clipped to i only when the match reaches the closer; the next exec then starts at or past i and the m2.index < i guard ends the loop, so the break and the lastIndex reset change nothing
+- src/lexer.js:2032:97037:logic — outside an import line nothing legal puts '*', '/' or '%' right after ','; IMPORT_ALL appears only in the import rule and MATH never starts an operand, so both readings reject at that token with the same value-named message (checked: '[1, %x]', 'f 1, *2')
+- src/lexer.js:2131:102449:arith — the mapped-type '?' always sits inside a type run before ':'; rewriteTypes collapses the run and slices its text from source between the run's endpoints, so this token's own end is never read (checked: declarations of 'def f(x: {[K in keyof T]-?: T[K]})' unchanged)
+- src/lexer.js:2131:102451:number — the mapped-type '?' always sits inside a type run before ':'; rewriteTypes collapses the run and slices its text from source between the run's endpoints, so this token's own end is never read (checked: declarations of 'def f(x: {[K in keyof T]-?: T[K]})' unchanged)
+- src/lexer.js:2357:112948:relation — at cursorEnd 0 text[-1] is undefined, never a newline, so the walk stops either way
+- src/lexer.js:2357:112950:number — an open frame's glyph is a non-newline character, so the walk stops at or above opener+1 >= 1 and never tests cursorEnd 1 vs 0
+- src/lexer.js:2396:115207:relation — the frame's opener token always precedes the trailing structure, so the backward walk stops above index 1 and never reaches the at > 0 bound
+- src/lexer.js:2396:115209:number — the frame's opener token always precedes the trailing structure, so the backward walk stops above index 1 and never reaches the at > 0 bound
+- src/lexer.js:2396:115285:logic — after closeBracket the tail never holds an INDENT or TERMINATOR: closeBracket pops trailing TERMINATORs and synthesizes only OUTDENTs, and an INDENT is always followed by its line's real token
+- src/lexer.js:2408:115794:statement — the hole's origin would resolve only when a real token follows, and after end-of-input repair every later token is synthesized, so origin stays null either way
+
+## BUG
+
+

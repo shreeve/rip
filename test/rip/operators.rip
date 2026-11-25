@@ -590,3 +590,12 @@ test 'a parenthesized update of a member still updates the member', '''
   [got, box.z]
 ''', [9, 9]
 
+
+# Tight operator spellings: the scanner consumes exactly the operator.
+test "tight strict equality", "a = 1\nb = 1\na===b", true
+test "tight unsigned-shift assignment", "a = 16\nb = 2\na>>>=b\na", 4
+test "tight nullish assignment", "a = null\nb = 5\na?=b\na", 5
+test "nullish assignment directly after an assignment", "a = null\nb=a?=1\n[a, b]", [1, 1]
+test "nullish assignment of a comparison keeps a set value", "a = 0\nb = 1\nc = 1\na?=b==c\na", 0
+fail "an unspaced ? after an operator with no carve-out", "x = [a]*?: b", "unspaced '?' needs a value"
+fail "an unspaced ? between a tight operator and a colon", "x = a+?: b", "unspaced '?' needs a value"

@@ -192,3 +192,8 @@ code "block-final generic cast before a sibling if", """
     return (x ? h(x) : undefined);
   }
   '''
+
+# On an export line, only a module statement's own brace holds
+# specifiers; an object literal after a comma keeps its casts.
+# The evaluator cannot host an export, so this row pins the compile.
+code "a cast inside an exported array's object", "export y = [0, {a: x as number}]", "export const y = [0, {a: x}];"
