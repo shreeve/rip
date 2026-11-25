@@ -1,6 +1,6 @@
 # src/lexer.js mutation survivors
 
-455 of 565 survivors classified.
+481 of 565 survivors classified.
 
 ## GAP
 
@@ -54,8 +54,30 @@
 - src/lexer.js:697:32595:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a bare class on the render line joins its hyphens
 - src/lexer.js:698:32637:boolean — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a class name may end in a keyword-spelled part; test/ui/components.test.js › render scanner: ids, classes, and line shapes › a bare class on the render line joins its hyphens
 - src/lexer.js:700:32689:statement — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a member chain in a text value keeps subtraction
+- src/lexer.js:708:33036:statement — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a glued `#` in a handler body is a comment
+- src/lexer.js:708:33065:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a glued `#` in a handler body is a comment
+- src/lexer.js:708:33109:boolean — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a glued `#` in a handler body is a comment
+- src/lexer.js:711:33234:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a code arrow reaches only the rest of its own line
+- src/lexer.js:711:33255:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a code arrow reaches only the rest of its own line
+- src/lexer.js:711:33277:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a code arrow reaches only the rest of its own line
+- src/lexer.js:721:33575:negation — test/ui/components.test.js › render scanner: ids, classes, and line shapes › an id glues only to the tag or class chain that heads its line
 - src/lexer.js:731:34092:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › only a hyphenated digit run continues a class chain
 - src/lexer.js:731:34103:relation — test/ui/components.test.js › render scanner: ids, classes, and line shapes › only a hyphenated digit run continues a class chain
+- src/lexer.js:733:34174:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › an id glues only to the tag or class chain that heads its line
+- src/lexer.js:735:34330:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › an id glues only to the tag or class chain that heads its line
+- src/lexer.js:735:34355:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › an id glues only to the tag or class chain that heads its line
+- src/lexer.js:735:34367:arith — test/ui/components.test.js › render scanner: ids, classes, and line shapes › an id glues only to the tag or class chain that heads its line
+- src/lexer.js:747:34808:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a bare class line takes an id on the render line and after a sibling
+- src/lexer.js:751:35003:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › an id glues only to the tag or class chain that heads its line
+- src/lexer.js:751:35018:arith — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a bare class line takes an id on the render line and after a sibling
+- src/lexer.js:759:35394:arith — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a malformed selector shorthand rejects at its `.` or `#`
+- src/lexer.js:759:35396:number — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a malformed selector shorthand rejects at its `.` or `#`
+- src/lexer.js:761:35501:arith — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a malformed selector shorthand rejects at its `.` or `#`
+- src/lexer.js:761:35503:number — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a malformed selector shorthand rejects at its `.` or `#`
+- src/lexer.js:762:35603:arith — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a malformed selector shorthand rejects at its `.` or `#`
+- src/lexer.js:762:35605:number — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a malformed selector shorthand rejects at its `.` or `#`
+- src/lexer.js:772:36132:arith — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element name takes digits before and between its hyphens
+- src/lexer.js:774:36257:arith — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element name takes digits before and between its hyphens
 - src/lexer.js:797:37334:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a custom element nests under an element after its handler line; test/ui/components.test.js › render scanner: ids, classes, and line shapes › an inline else element takes a custom element after a block holding a handler
 - src/lexer.js:797:37356:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › an inline else element takes a custom element after a block holding a handler
 - src/lexer.js:804:37702:logic — test/ui/components.test.js › render scanner: ids, classes, and line shapes › a block under a compound assignment or a trailing comma continues the value
@@ -376,7 +398,11 @@
 - src/lexer.js:582:27572:number — token ids are compared only for identity and order (origin links; minted ids continue from nextId), and a uniform shift by one preserves both
 - src/lexer.js:695:32359:relation — the walk stops at j 2 instead of stepping to 0 only when tokens[0] is '.', and a render block always has a RENDER token before the line, so tokens[0] is never that '.' here
 - src/lexer.js:695:32362:number — the walk stops at j 2 instead of stepping to 0 only when tokens[0] is '.', and a render block always has a RENDER token before the line, so tokens[0] is never that '.' here
+- src/lexer.js:709:33154:relation — inside a render block a RENDER token precedes the line and the walk breaks at it or at an earlier boundary; it reaches index 0 only when tokens[0] is that RENDER, which breaks the loop just as skipping it ends the loop
+- src/lexer.js:709:33157:number — inside a render block a RENDER token precedes the line and the walk breaks at it or at an earlier boundary; it reaches index 0 only when tokens[0] is that RENDER, which breaks the loop just as skipping it ends the loop
 - src/lexer.js:731:34081:relation — the only scan-time token whose value is '-' is kind '-' (MATH carries only '*', '/', '%', '//', '%%'), which the first arm already accepts, so a non-MATH-with-value-'-' arm adds nothing
+- src/lexer.js:732:34126:relation — the chain walk reaches index 0 or 1 only if every token from there to the end is part of a '.'/PROPERTY or digit-run chain, which leaves no RENDER token, so the scanner is not in a render block and this code is unreachable
+- src/lexer.js:732:34129:number — the chain walk reaches index 0 or 1 only if every token from there to the end is part of a '.'/PROPERTY or digit-run chain, which leaves no RENDER token, so the scanner is not in a render block and this code is unreachable
 - src/lexer.js:795:37233:relation — inside a render block a RENDER token precedes the line, and the backward walk breaks at it or at an earlier boundary; it reaches index 0 only when tokens[0] is that RENDER, which breaks the loop just as skipping it ends the loop
 - src/lexer.js:795:37236:number — inside a render block a RENDER token precedes the line, and the backward walk breaks at it or at an earlier boundary; it reaches index 0 only when tokens[0] is that RENDER, which breaks the loop just as skipping it ends the loop
 - src/lexer.js:806:37817:number — the head walk stops at the token after the RENDER (a line boundary always precedes it), so k reaches 1 only when tokens[0] is RENDER, where both bounds stop at k 1

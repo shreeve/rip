@@ -3472,4 +3472,38 @@ describe('render scanner: ids, classes, and line shapes', () => {
     expect(body('        n = 2\n      span\n        x-icon')).toContain("createElement('x-icon')");
     expect(body('        if n\n          n = 2\n        a-b')).toContain('return (this.a.value - this.b.value)');
   });
+
+  test('a glued `#` in a handler body is a comment', () => {
+    expect(inBody('div\n  button @click: ->\n    a = b#note\n    a\n  p "x"')).toContain("createElement('p')");
+  });
+
+  test('a code arrow reaches only the rest of its own line', () => {
+    expect(inBody('div\n  button @click: -> n\n  div#main "x"')).toContain("id = 'main'");
+    expect(inBody('div\n  button @click: -> n\n    span#q "y"')).toContain("id = 'q'");
+    expect(inBody('div\n  if n\n    p @click: -> n\n  else span#q "x"')).toContain("id = 'q'");
+  });
+
+  test('an id glues only to the tag or class chain that heads its line', () => {
+    const no = /`#[xy]` is no element id here/;
+    lexFails(`Foo = component\n  render\n    div\n      span @x#y "t"\n`, no);
+    lexFails(`Foo = component\n  render\n    div - 2 .b#x "t"\n`, no);
+    lexFails(`Foo = component\n  render\n    div.a + b#x "t"\n`, no);
+    lexFails(`Foo = component\n  render\n    div span#x "t"\n`, no);
+  });
+
+  test('a bare class line takes an id on the render line and after a sibling', () => {
+    expect(js('Foo = component\n  render .card#x "t"\n')).toContain("id = 'x'");
+    expect(inBody('div\n  p "a"\n  .card#x "t"')).toContain("id = 'x'");
+  });
+
+  test('a custom element name takes digits before and between its hyphens', () => {
+    expect(inBody('x1-icon')).toContain("createElement('x1-icon')");
+    expect(inBody('my-el2-x')).toContain("createElement('my-el2-x')");
+  });
+
+  test('a malformed selector shorthand rejects at its `.` or `#`', () => {
+    expect(() => inBody('div.2xl "t"')).toThrow(/6:8: a class shorthand/);
+    expect(() => inBody('div#{n} "t"')).toThrow(/6:8: a computed id/);
+    expect(() => inBody('div#9 "t"')).toThrow(/6:8: an id shorthand/);
+  });
 });
