@@ -1138,8 +1138,7 @@ grammar =
     # ternary, the reading the same words have after any expression. The
     # Return reduces before POST_IF (the guard form needs it to), so the
     # value is lifted out here; a statement with no value has no else
-    # reading. Rule order keeps both rows over infix `c else y`
-    # (declared in expectedConflicts).
+    # reading.
     o 'Statement POST_IF Expression ELSE Expression', '$1[0] === "return" && $1.length === 2 ? ["return", ["?:", $3, $1[1], $5]] : (() => { throw Object.assign(new Error("a postfix if-else on a statement takes its value from the statement, and this one has no value — write the if as a block"), { start: locs[locs.length - 5].start, end: locs[locs.length - 1].end }); })()', '~ the returned ternary carries the statement and condition spans'
     # POST_UNLESS has no ELSE form: `x unless c else y` would otherwise
     # fold the else into the condition. It rejects, positioned. (An
@@ -1358,27 +1357,21 @@ grammar =
     o 'Expression && STATEMENT'                   , '["&&", 1, 3]'     , 'binary: operator, left, right'
     o 'Expression || STATEMENT'                   , '["||", 1, 3]'     , 'binary: operator, left, right'
     o 'Expression ?? STATEMENT'                   , '["??", 1, 3]'     , 'binary: operator, left, right'
-    # Loose `and` / `or`: `x = get() then print "ok"` / `x = get() else
-    # error "nope"` bind below assignment. Inside an if/unless condition,
-    # THEN is still the body introducer and ELSE is still the if-tail
-    # (implicit-blocks / IfElseTail); postfix `b if c else d` stays the
-    # ternary. Return / STATEMENT mirror the tight `&&` / `||` guards
-    # (`x = 17 then return 22`, `x else continue`).
-    #
-    # `then` and `else` are one left-associative level, but ELSE's token
-    # precedence belongs to the if-tail (the dangling-else shift), so
-    # after `a then b` it shifts. The three-operand form takes that shift
-    # and builds the left-grouped tree, `(a && b) || c`; rule order keeps
-    # it over the inner `b else c` (declared in expectedConflicts).
-    o 'Expression THEN Expression ELSE Expression', '["||", ["&&", 1, 3], 5]', 'binary: operator, left(binary: operator, left, right), right'
-    o 'Expression THEN Expression ELSE Return'    , '["||", ["&&", 1, 3], 5]', 'binary: operator, left(binary: operator, left, right), right'
-    o 'Expression THEN Expression ELSE STATEMENT' , '["||", ["&&", 1, 3], 5]', 'binary: operator, left(binary: operator, left, right), right'
+    # Loose `and` / `or`, Ruby's low-precedence pair: `x = get() then
+    # print "ok"` / `x = get() else error "nope"` bind below assignment.
+    # The lexer hands these two their own tokens: every THEN implicitBlocks
+    # leaves in place, and the LOOSE_ELSE tagLooseElse retags from an ELSE
+    # that ends no block and closes no postfix conditional, so the if-tail
+    # and the ternary keep ELSE and its precedence. One level, non-
+    # associative: an expression takes one of the pair (the lexer rejects
+    # a second by name). Return / STATEMENT mirror the tight `&&` / `||`
+    # guards (`x = 17 then return 22`, `x else continue`).
     o 'Expression THEN Expression'                , '["&&", 1, 3]'     , 'binary: operator, left, right'
-    o 'Expression ELSE Expression'                , '["||", 1, 3]'     , 'binary: operator, left, right', prec: 'THEN'
-    o 'Expression THEN Return'                   , '["&&", 1, 3]'     , 'binary: operator, left, right'
-    o 'Expression ELSE Return'                   , '["||", 1, 3]'     , 'binary: operator, left, right', prec: 'THEN'
-    o 'Expression THEN STATEMENT'                , '["&&", 1, 3]'     , 'binary: operator, left, right'
-    o 'Expression ELSE STATEMENT'                , '["||", 1, 3]'     , 'binary: operator, left, right', prec: 'THEN'
+    o 'Expression LOOSE_ELSE Expression'          , '["||", 1, 3]'     , 'binary: operator, left, right'
+    o 'Expression THEN Return'                    , '["&&", 1, 3]'     , 'binary: operator, left, right'
+    o 'Expression LOOSE_ELSE Return'              , '["||", 1, 3]'     , 'binary: operator, left, right'
+    o 'Expression THEN STATEMENT'                 , '["&&", 1, 3]'     , 'binary: operator, left, right'
+    o 'Expression LOOSE_ELSE STATEMENT'           , '["||", 1, 3]'     , 'binary: operator, left, right'
   ]
 
 # ==============================================================================
@@ -1411,7 +1404,7 @@ operators = """
   right       = : COMPOUND_ASSIGN METHOD_ASSIGN RETURN THROW EXTENDS
   right       FORIN FOROF FORAS FORASAWAIT BY WHEN
   right       IF ELSE FOR WHILE UNTIL LOOP SUPER CLASS COMPONENT RENDER OFFER ACCEPT
-  left        THEN
+  nonassoc    THEN LOOSE_ELSE
   left        POST_IF POST_UNLESS
   right       REACTIVE_ASSIGN COMPUTED_ASSIGN READONLY_ASSIGN EFFECT
 """.trim().split('\n').reverse().map (line) -> line.trim().split /\s+/
@@ -1480,6 +1473,7 @@ displays =
   POST_UNLESS: 'unless'
   ELSE: 'else'
   THEN: 'then'
+  LOOSE_ELSE: 'else'
   WHILE: 'while'
   UNTIL: 'until'
   LOOP: 'loop'
@@ -1651,27 +1645,13 @@ kinds =
 #   keep these conflicts too.
 # • The guard operations over Statement → Return / STATEMENT — after
 #   the guard idiom (`E && return V`, `E || continue`, `||`, `??`,
-#   `then` / `else`), the four postfix modifiers (POST_IF POST_UNLESS
+#   `then` / loose `else`), the four postfix modifiers (POST_IF POST_UNLESS
 #   WHILE UNTIL) sit in the lookaheads of both the completed Operation
 #   and the bare Return/STATEMENT-as-Statement (an LALR merge: no
 #   canonical state has both). The Operation must win, and the pinned
 #   behavior is modifier-binds-widest (`c && return 3 if flag`
 #   compiles to `if (flag) if (c) return 3`; `x or continue if y` and
 #   `x then return 1 if y` likewise).
-# • Postfix ternary over infix else — after `b if c else d`, the
-#   Python-style ternary (`If → Expression POST_IF Expression ELSE
-#   Expression`) and loose `or` (`Operation → Expression ELSE
-#   Expression`) both complete. Rule order keeps the ternary, so
-#   `b if c else d` stays `c ? b : d` and infix else only fires
-#   where there is no POST_IF (`x = get() else error`). The statement
-#   form (`return x if c else y`, the returned ternary) and the two
-#   POST_UNLESS forms (which reject) win the same way, so an else
-#   after a postfix condition never folds into it.
-# • Left-grouped then/else over infix else — after `a then b else c`
-#   (c an Expression, Return or STATEMENT), the three-operand form and
-#   the inner `b else c` both complete. Rule order keeps the
-#   three-operand form, so the chain groups `(a && b) || c` as one
-#   left-associative level should; the inner form serves `a else c`.
 # • Gate over Arguments — after `target <~ path(...)`, the trailing
 #   call completes the gate's keyed-source form (Gate → … CALL_END,
 #   which owns the arguments as key spans) or a plain call expression
@@ -1693,25 +1673,16 @@ expectedConflicts = [
   ['reduce-reduce', 'Operation → Expression || Return over Statement → Return'                                                                    ,  4]
   ['reduce-reduce', 'Operation → Expression ?? Return over Statement → Return'                                                                    ,  4]
   ['reduce-reduce', 'Operation → Expression THEN Return over Statement → Return'                                                                ,  4]
-  ['reduce-reduce', 'Operation → Expression ELSE Return over Statement → Return'                                                                   ,  4]
+  ['reduce-reduce', 'Operation → Expression LOOSE_ELSE Return over Statement → Return'                                                                   ,  4]
   ['reduce-reduce', 'Operation → Expression && STATEMENT over Statement → STATEMENT'                                                              ,  4]
   ['reduce-reduce', 'Operation → Expression || STATEMENT over Statement → STATEMENT'                                                              ,  4]
   ['reduce-reduce', 'Operation → Expression ?? STATEMENT over Statement → STATEMENT'                                                              ,  4]
   ['reduce-reduce', 'Operation → Expression THEN STATEMENT over Statement → STATEMENT'                                                            ,  4]
-  ['reduce-reduce', 'Operation → Expression ELSE STATEMENT over Statement → STATEMENT'                                                             ,  4]
-  ['reduce-reduce', 'If → Expression POST_IF Expression ELSE Expression over Operation → Expression ELSE Expression'                              , 23]
-  ['reduce-reduce', 'If → Statement POST_IF Expression ELSE Expression over Operation → Expression ELSE Expression'                               , 23]
-  ['reduce-reduce', 'If → Statement POST_UNLESS Expression ELSE Expression over Operation → Expression ELSE Expression'                           , 23]
-  ['reduce-reduce', 'If → Expression POST_UNLESS Expression ELSE Expression over Operation → Expression ELSE Expression'                          , 23]
-  ['reduce-reduce', 'Operation → Expression THEN Expression ELSE Expression over Operation → Expression ELSE Expression'                    , 23]
-  ['reduce-reduce', 'Operation → Expression THEN Expression ELSE Return over Operation → Expression ELSE Return'                            , 44]
-  ['reduce-reduce', 'Operation → Expression THEN Expression ELSE Return over Statement → Return'                                            ,  4]
-  ['reduce-reduce', 'Operation → Expression THEN Expression ELSE STATEMENT over Operation → Expression ELSE STATEMENT'                      , 44]
-  ['reduce-reduce', 'Operation → Expression THEN Expression ELSE STATEMENT over Statement → STATEMENT'                                      ,  4]
-  ['reduce-reduce', 'Gate → Assignable GATE Value CALL_START CALL_END over Arguments → CALL_START CALL_END'                                       , 44]
-  ['reduce-reduce', 'Gate → Assignable TYPE GATE Value CALL_START CALL_END over Arguments → CALL_START CALL_END'                                  , 44]
-  ['reduce-reduce', 'Gate → Assignable GATE Value CALL_START ArgList OptComma CALL_END over Arguments → CALL_START ArgList OptComma CALL_END'     , 44]
-  ['reduce-reduce', 'Gate → Assignable TYPE GATE Value CALL_START ArgList OptComma CALL_END over Arguments → CALL_START ArgList OptComma CALL_END', 44]
+  ['reduce-reduce', 'Operation → Expression LOOSE_ELSE STATEMENT over Statement → STATEMENT'                                                             ,  4]
+  ['reduce-reduce', 'Gate → Assignable GATE Value CALL_START CALL_END over Arguments → CALL_START CALL_END'                                       , 45]
+  ['reduce-reduce', 'Gate → Assignable TYPE GATE Value CALL_START CALL_END over Arguments → CALL_START CALL_END'                                  , 45]
+  ['reduce-reduce', 'Gate → Assignable GATE Value CALL_START ArgList OptComma CALL_END over Arguments → CALL_START ArgList OptComma CALL_END'     , 45]
+  ['reduce-reduce', 'Gate → Assignable TYPE GATE Value CALL_START ArgList OptComma CALL_END over Arguments → CALL_START ArgList OptComma CALL_END', 45]
   ['reduce-reduce', 'ExportSpecifier → Identifier over SimpleObjAssignable → Identifier'                                                          ,  4]
   ['reduce-reduce', 'ObjRestValue → ... SimpleObjAssignable over ObjSpreadExpr → SimpleObjAssignable'                                             ,  5]
   ['ambiguous',     'Try → TRY Block'                         ,  2]

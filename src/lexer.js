@@ -2477,6 +2477,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   tagCompoundKeys(tokens);
   implicitBlocks(tokens, mintId);
   tagPostfixConditionals(tokens);
+  tagLooseElse(tokens, fail);
   implicitObjects(tokens, mintId);
   implicitCalls(tokens, mintId);
   insertArrowCommas(tokens);
@@ -2529,6 +2530,38 @@ export function tagPostfixConditionals(tokens) {
       }
     }
     if (postfix) tokens[i].kind = kind === 'IF' ? 'POST_IF' : 'POST_UNLESS';
+  }
+  return tokens;
+}
+
+// Loose `and`/`or` tagging. An ELSE after a closed block (OUTDENT) is an
+// if/unless/switch tail, its body wrapped by implicitBlocks; one that
+// closes a postfix IF/UNLESS earlier in its statement is that ternary's
+// else; any other is the loose `or` operator and retags to LOOSE_ELSE,
+// whose precedence is its own (the THEN level) rather than the if-tail's.
+// Every THEN implicitBlocks left in place is the loose `and`. An
+// expression takes one of the two: `a then b else c` is `(a && b) || c`,
+// which reads as a conditional and is not one. Retag-only apart from
+// that rejection.
+export function tagLooseElse(tokens, fail) {
+  // Per nesting depth: unclaimed postfix conditionals, and whether the
+  // statement already holds a loose operator.
+  const open = [0], loose = [false];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i], k = t.kind, d = open.length - 1;
+    if (PASS_OPENERS.has(k)) { open.push(0); loose.push(false); continue; }
+    if (PASS_CLOSERS.has(k)) { if (d > 0) { open.pop(); loose.pop(); } continue; }
+    if (k === 'TERMINATOR') { open[d] = 0; loose[d] = false; continue; }
+    if (k === 'POST_IF' || k === 'POST_UNLESS') { open[d]++; continue; }
+    if (k === 'ELSE' && tokens[i - 1]?.kind !== 'OUTDENT') {
+      if (open[d] > 0) { open[d]--; continue; }
+      t.kind = 'LOOSE_ELSE';
+    }
+    if (t.kind !== 'THEN' && t.kind !== 'LOOSE_ELSE') continue;
+    if (loose[d]) {
+      fail(`an expression takes one loose \`then\` or \`else\` — \`a then b else c\` is \`(a && b) || c\`, not a conditional; write \`if a then b else c\`, or chain with \`and\`/\`or\``, t.start, t.end);
+    }
+    loose[d] = true;
   }
   return tokens;
 }

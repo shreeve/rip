@@ -88,7 +88,9 @@ function thenIntroducesBody(tokens, i) {
     }
     if (depth > 0) continue;
     if (BODY_THEN_HEADS.has(k)) return true;
-    if (k === 'TERMINATOR') return false;
+    // An ELSE between this THEN and any head closed that head's body
+    // (`a if c else b then d`): the THEN opens nothing.
+    if (k === 'TERMINATOR' || k === 'ELSE') return false;
   }
   return false;
 }
@@ -320,7 +322,7 @@ const IMPLICIT_CALL_STARTERS = new Set([
 ]);
 const IMPLICIT_END = new Set([
   'POST_IF', 'POST_UNLESS', 'FOR', 'WHILE', 'UNTIL', 'WHEN', 'BY', 'LOOP',
-  'TERMINATOR', '||', '&&', '??', 'THEN', 'ELSE',
+  'TERMINATOR', '||', '&&', '??', 'THEN', 'ELSE', 'LOOSE_ELSE',
 ]);
 // CLASS is control-in-implicit like IF/SWITCH — its body INDENT must not
 // close an enclosing implicit call/object — with one extra rule:
@@ -413,7 +415,7 @@ const looksObjectishAt = (tokens, j) => {
   }
   return false;
 };
-const BLOCK_ARG_CARRIERS = new Set(['->', '=>', '[', '(', ',', '{', 'ELSE', '=']);
+const BLOCK_ARG_CARRIERS = new Set(['->', '=>', '[', '(', ',', '{', 'ELSE', 'LOOSE_ELSE', '=']);
 const LINE_BREAK_KINDS = new Set(['INDENT', 'OUTDENT', 'TERMINATOR']);
 
 // Control-flow heads that OWN a following INDENT: an IMPLICIT_FUNC token
@@ -765,7 +767,7 @@ function collectObjects(tokens, mintId) {
       // binds the pair's value (`x = a: 1 && 2` is {a: (1 && 2)}).
       // ELSE stays open too: postfix `a: 1 if c else 2` is one pair,
       // and loose `a: x else y` binds the value like `||`.
-      if (k === '||' || k === '&&' || k === '??' || k === 'ELSE') continue;
+      if (k === '||' || k === '&&' || k === '??' || k === 'ELSE' || k === 'LOOSE_ELSE') continue;
       if (k === 'TERMINATOR') {
         // A statement boundary clears unconsumed ternary claims at
         // this depth and un-samelines every open implicit frame.

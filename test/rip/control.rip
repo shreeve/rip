@@ -97,33 +97,28 @@ fail "break with postfix if else rejects", "for x in xs\n  break if x else 2", "
 fail "postfix unless else rejects", "x = 'a' unless b else 'c'", "postfix 'unless' has no else"
 fail "statement postfix unless else rejects", "f = (b) ->\n  return 1 unless b else 2", "postfix 'unless' has no else"
 
-# `then` and `else` are one left-associative level: a chain groups from
-# the left in either order, so `else` sees the whole `then` before it.
-test "then else chain groups left", '''
+# An expression takes one loose `then` or `else`: a chain reads as a
+# conditional and is `(a && b) || c`, so a second loose operator rejects
+# by name, in either order and with a guard.
+fail "then else chain rejects", "y = a then b else c", "an expression takes one loose `then` or `else`"
+fail "else then chain rejects", "y = a else b then c", "an expression takes one loose `then` or `else`"
+fail "then then chain rejects", "a then b then c", "an expression takes one loose `then` or `else`"
+fail "then else continue rejects", "for x in xs\n  x then x > 1 else continue", "an expression takes one loose `then` or `else`"
+test "parentheses give each loose operator its own expression", '''
   log = []
-  y = 0 then log.push("then") else log.push("else")
-  z = 1 then false else log.push("fallback")
-  [y, z, log]
-''', [0, 1, ["else", "fallback"]]
+  y = (0 then log.push "then") else log.push "else"
+  [y, log]
+''', [0, ["else"]]
 
-code "then else chain groups left", "a then b else c", "(a && b) || c;"
-code "then then else chain groups left", "a then b then c else d", "(a && b && c) || d;"
-code "else then chain groups left", "a else b then c", "(a || b) && c;"
-code "then else then chain groups left", "a then b else c then d", "((a && b) || c) && d;"
-test "then else continue groups left", '''
-  out = []
-  for x in [0, 1, 2]
-    x then x > 1 else continue
-    out.push x
-  out
-''', [2]
-
-code "then else return groups left", "f = (x) ->\n  x then g() else return 1\n  2", '''
-  let f = function(x) {
-    if (!(x && g())) return 1;
-    return 2;
-  };
-'''
+# A postfix ternary's `else` is not loose, so one loose operator may follow
+# it, binding below the assignment like any other.
+code "loose then after a postfix ternary", "y = a if c else b then d", "let y;\n\n(y = (c ? a : b)) && d;"
+code "loose else after a postfix ternary", "y = a if c else b else d", "let y;\n\n(y = (c ? a : b)) || d;"
+test "loose else after a postfix ternary runs", '''
+  log = []
+  y = 0 if false else null else log.push "fallback"
+  [y, log]
+''', [null, ["fallback"]]
 
 # Loose then/else guards: same rewrite as `and return` / `or continue`
 code "then return assignment lowers to an if-guard", "f = (x) ->\n  y = x then return 22\n  y", '''
