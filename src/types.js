@@ -491,8 +491,11 @@ const collectTypeRun = (tokens, j, opts, fail) => {
     if (opts.cast && depth === 0 && isPostfixTypeWord(t)) break;
     // The cast's type lives on one logical line: a depth-0 line break
     // that survived as a plain continuation (a trailing `>` suppresses
-    // the TERMINATOR) must not let the run swallow the next line.
-    if (opts.cast && depth === 0 && j > startJ && t.newLine) break;
+    // the TERMINATOR) must not let the run swallow the next line. A line
+    // ending in `|` or `&` is the exception: neither can end a type, so
+    // the next line is its right operand, as annotation runs read it.
+    if (opts.cast && depth === 0 && j > startJ && t.newLine &&
+        tokens[j - 1].kind !== '|' && tokens[j - 1].kind !== '&') break;
 
     // With any `<` open, a shift spelling is a multi-level generic
     // close and must line up exactly — an over-close (`Map<K>> 2`)

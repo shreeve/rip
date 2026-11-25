@@ -37,6 +37,22 @@ code "cast with intersection type", "k = x as A & B", "let k = x;"
 code "cast with object type", "o = x as { a: number }", "let o = x;"
 code "cast with array type", "a = x as number[]", "let a = x;"
 
+# A line ending in `|` or `&` continues the cast's type: neither operator
+# can end a type, so the next line is its right operand, never a statement.
+test "cast union continues past a trailing |", """
+  y = 5
+  x = y as A |
+    B
+  x
+  """, 5
+
+test "cast intersection continues past a trailing &", """
+  y = 5
+  x = y as A &
+    B
+  x
+  """, 5
+
 # ==============================================================================
 # Chaining — `x as A as B`
 # ==============================================================================

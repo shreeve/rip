@@ -586,6 +586,12 @@ describe('TS-face emission pins', () => {
     expect(ts('x: number = 5\nx = 7\n').code).toBe('let x: number = 5;\nx = 7;' + MARKER);
   });
 
+  test('a cast type continues past a line ending in | or &, and only there', () => {
+    expect(ts('x = y as A |\n  B\n').code).toBe('let x = (y as A |\n  B);' + MARKER);
+    expect(ts('x = y as A &\n  B\nz = 1\n').code).toBe('let x = (y as A &\n  B);\nlet z = 1;' + MARKER);
+    expect(ts('x = y as A\nfoo()\n').code).toBe('let x = (y as A);\nfoo();' + MARKER);
+  });
+
   test('a block body inside explicit brackets claims its annotations like its unbracketed twin', () => {
     const body = '  fetch: ->\n    type T = number\n    sent: T = 1\n    r: number\n    r = 2\n    try\n      g()\n    catch e: any\n      e\n    sent + r\n';
     const want = 'let o = {fetch() {\n  type T = number;\n  let sent: T = 1;\n  let r: number = 2;\n' +
