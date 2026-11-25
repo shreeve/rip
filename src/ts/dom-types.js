@@ -41,6 +41,7 @@
 // name union — TS2345, re-worded at publish to name the spelling that
 // works (src/emitter.js unknownAttrMessage).
 
+import { isIdentifierName } from '../ident.js';
 import { attributeNamesFor, GLOBAL_ATTRS, SVG_ATTRS, SVG_TAGS, HTML_TAGS } from '../dom.js';
 
 // Attribute spellings whose DOM property is camelCased — the
@@ -130,7 +131,7 @@ const TEMPLATE_ROWS =
   '  [k: `data-${string}`]: string | number | boolean;\n' +
   '  [k: `aria-${string}`]: string | number | boolean;';
 
-const keyText = (name) => (/^[A-Za-z_$][\w$]*$/.test(name) ? name : `'${name}'`);
+const keyText = (name) => (isIdentifierName(name) ? name : `'${name}'`);
 
 // The generated names, one scheme both halves use. Dual-namespace tags
 // (a, script, style, title) carry distinct surfaces per namespace.

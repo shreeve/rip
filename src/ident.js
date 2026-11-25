@@ -39,9 +39,17 @@ export function isCustomElementName(value) {
 // repository), for consumers that mint scaffold names against
 // everything a source spells. String.match with /g resets lastIndex
 // itself, so the shared regex stays stateless across calls.
-const IDENT_RUN_RE = new RegExp(`${IDENT_START.source}${IDENT_PART.source}*`, 'g');
+// IDENT_SOURCE composes the run into larger patterns; IDENT_RE (no flags,
+// so `exec` carries no state) finds the first run; identifierMatches
+// yields every run with its index.
+export const IDENT_SOURCE = `${IDENT_START.source}${IDENT_PART.source}*`;
+export const IDENT_RE = new RegExp(IDENT_SOURCE);
+const IDENT_RUN_RE = new RegExp(IDENT_SOURCE, 'g');
 export function identifierRuns(text) {
   return text.match(IDENT_RUN_RE) ?? [];
+}
+export function identifierMatches(text) {
+  return text.matchAll(IDENT_RUN_RE);
 }
 export function identifierRunAt(text, start) {
   if (typeof text !== 'string' || !Number.isInteger(start) || start < 0 || start >= text.length) return null;

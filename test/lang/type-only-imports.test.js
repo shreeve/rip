@@ -51,6 +51,25 @@ test('a module importing a type-only name loads', async () => {
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+// A type name is any identifier the lexer admits, so the scan for type
+// words reads the one identifier vocabulary (src/ident.js).
+test('a non-ASCII type name used only as a type elides', async () => {
+  const { dir, url } = build({
+    'lib.rip': "export type Größe = { n?: number }\nexport val = 41\n",
+    'use.rip': [
+      "import { val, Größe } from './lib.rip'",
+      'm: Größe = {}',
+      'export answer = val + 1',
+      'export seen = m',
+    ].join('\n') + '\n',
+  }, 'use.rip');
+  try {
+    const mod = await import(url);
+    expect(mod.answer).toBe(42);
+    expect(mod.seen).toEqual({});
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('a type used only in a parameter annotation elides', async () => {
   // The annotation rides the tree as a typed-var's text slot, not a side
   // table — the one type position a value-tree walk can mistake for a use.

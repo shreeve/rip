@@ -85,12 +85,12 @@ let tailTry = function() {
   }
 };
 let tailSwitch = function(v) {
-  return (() => { switch (v) {
+  switch (v) {
     case 7:
       return "lucky";
     default:
       return "plain";
-  } })();
+  }
 };
 let tailFor = function(xs) {
   const _result = [];

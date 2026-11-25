@@ -24,6 +24,7 @@
 // of the chunks appended during its fn() — O(marked region), never a
 // flatten of the whole growing buffer.
 
+import { IDENT_PART } from './ident.js';
 import { counter } from './counter.js';
 import { CALLER_SPAN_ROLES } from './stores.js';
 
@@ -364,7 +365,7 @@ export class CodeBuilder {
       // precedes it is a single non-identifier byte. Anything else keeps the
       // recorded span and classifies exactly as it did before.
       if (text !== value && text.endsWith(value) &&
-          !/[\w$]/.test(text[text.length - value.length - 1] ?? '')) {
+          !IDENT_PART.test(text[text.length - value.length - 1] ?? '')) {
         return [p.sourceEnd - value.length, p.sourceEnd];
       }
     }

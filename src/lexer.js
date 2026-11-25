@@ -36,6 +36,11 @@ import { counter, syncCounterFlag } from './counter.js';
 // The identifier character classes; the scanner walks characters, so it
 // takes the classes rather than the helpers built on them.
 import { IDENT_START, IDENT_PART } from './ident.js';
+
+// `is not` and a `get`/`set` accessor head, bounded by the identifier
+// classes so a word that merely starts with `not` or a name stays a word.
+const NOT_WORD = new RegExp(`^[ \\t]+not(?!${IDENT_PART.source})`);
+const ACCESSOR_HEAD = new RegExp(`^[ \\t]+(get|set)[ \\t]+(?=${IDENT_START.source}|[@"'])`);
 // The three insertion passes; each applies itself. The retag passes
 // (tagParams, tagDynamicKeys, tagVoidMarkers, tagCompoundKeys,
 // tagPostfixConditionals) stay here — they never add tokens.
@@ -1758,7 +1763,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         // negation, never what was meant. The negated comparison is
         // `isnt`; the rejection names it.
         if (word === 'is' && (text[pos] === ' ' || text[pos] === '\t')) {
-          const not = /^[ \t]+not(?![\w$])/.exec(text.slice(pos));
+          const not = NOT_WORD.exec(text.slice(pos));
           if (not !== null) {
             fail("'is not' compares against a negation — `x is not y` reads as `x === !y`; spell the negated comparison `x isnt y`", start, pos + not[0].length);
           }
@@ -1800,7 +1805,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         // accessor takes no modifier — `get x: ->` parses as a call of
         // `get`, which no member row heads — so the shape rejects here
         // by name rather than at the parser's dedent.
-        if (/^[ \t]+(get|set)[ \t]+(?=[A-Za-z_$@"'])/.test(afterWord)) {
+        if (ACCESSOR_HEAD.test(afterWord)) {
           fail('`private` is not supported on a get/set accessor — it marks methods and fields', start);
         }
         push('PRIVATE', word, start, pos);

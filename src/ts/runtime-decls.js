@@ -14,6 +14,7 @@ import { _runtimeTable, _runtimeExports } from '../emitter.js';
 import { CLASS_VALUE_DECL, CSS_PROPERTIES_DECL } from './dom-types.js';
 import { DOM_LIB_GLOBALS } from './components.js';
 import { RUNTIME_EXPORT_TYPES } from './runtime-exports.js';
+import { IDENT_PART } from '../ident.js';
 
 const HEADER = '// Generated from RUNTIME_TABLE in src/emitter.js and src/ts/runtime-exports.js by `bun run decls`; change the source and regenerate.';
 
@@ -24,7 +25,7 @@ const FACE_ALIASES = [
   ['__RipCSSProperties', CSS_PROPERTIES_DECL],
 ];
 
-const references = (text, name) => new RegExp(`(?:^|[^\\w$.])${name}(?![\\w$])`).test(text);
+const references = (text, name) => new RegExp(`(?<!${IDENT_PART.source}|\\.)${name}(?!${IDENT_PART.source})`).test(text);
 
 export function runtimeDeclarations({ table = _runtimeTable(), exports = RUNTIME_EXPORT_TYPES } = {}) {
   const out = [];

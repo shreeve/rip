@@ -914,6 +914,13 @@ type 'enum dts', '''
   }
   '''
 
+test 'enum bare members take any identifier', '''
+  enum Measure
+    größe
+    size
+  [Measure.größe, Measure.size, Measure[0]]
+  ''', [0, 1, 'größe']
+
 test 'enum auto-numbering runtime', '''
   enum Direction
     North

@@ -1,4 +1,4 @@
-let café, t1;
+let t1;
 
 function shout(msg) {
   return `${msg}!`;
@@ -17,4 +17,4 @@ while (who && (who.length > 99)) {
   who = "";
 }
 `statement ${who}`;
-café = shout(`naïve ${who}`);
+let café = shout(`naïve ${who}`);

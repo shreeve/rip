@@ -54,6 +54,7 @@
 // one is known; dts wraps them as DtsError and the TS face as a
 // positioned emitter diagnostic.
 
+import { IDENT_SOURCE } from '../ident.js';
 import { derivedSchemaDescriptors, behaviorName, paramsOf, relationOf } from '../schema.js';
 // The naming rules, under readable local spellings. One definition —
 // the runtime derives its INSTALLED names from the same file, so the
@@ -420,7 +421,7 @@ export function userTypeNamesOf(stmts) {
   const consider = (stmt) => {
     if (!isNode(stmt)) return;
     if (stmt[0] === 'type-decl' && typeof stmt[1] === 'string') {
-      const m = stmt[1].replace(/^export\s+/, '').match(/^(type|interface)\s+([A-Za-z_$][\w$]*)/);
+      const m = stmt[1].replace(/^export\s+/, '').match(new RegExp(String.raw`^(type|interface)\s+(${IDENT_SOURCE})`));
       if (m) names.set(m[2], { what: `the ${m[1]} declaration '${m[2]}'`, node: stmt });
     } else if (stmt[0] === 'class' && typeof stmt[1] === 'string') {
       names.set(stmt[1], { what: `class ${stmt[1]}`, node: stmt });

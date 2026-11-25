@@ -360,6 +360,31 @@ describe('compiler-generated runtime aliases', () => {
   });
 });
 
+// A runtime is delivered for a reference to one of its names, and only
+// a reference: a render tag word names an element, and a parameter
+// shadows the runtime name throughout its function. A real read still
+// delivers, in render text and under a function that binds another name.
+describe('runtime delivery reads references, not spellings', () => {
+  const stdlib = (src) => /const \{[^}]*\bpp\b[^}]*\}/.test(compileDelivered(src, 'inline'));
+  test('a render tag `p` delivers nothing, in children, a class chain, and a branch', () => {
+    expect(stdlib("export A = component\n  render\n    p 'hi'\n")).toBe(false);
+    expect(stdlib("export A = component\n  render\n    div\n      p\n      p.intro 'x'\n      if true\n        p 'y'\n")).toBe(false);
+  });
+  test('a parameter named `p` shadows the runtime name in its body', () => {
+    expect(stdlib('f = (p) -> p + 1\n')).toBe(false);
+    expect(stdlib('f = ({ p }) -> p\n')).toBe(false);
+    expect(stdlib('def g(p = 1)\n  p\n')).toBe(false);
+    expect(stdlib('h = (p = 1) -> p\n')).toBe(false);
+    expect(stdlib('h = (x = p) -> x\n')).toBe(true);
+  });
+  test('a real read delivers: a call, render text, and a read past a shadowing scope', () => {
+    expect(stdlib('f = (x) -> p x\n')).toBe(true);
+    expect(stdlib("export A = component\n  render\n    div\n      = p\n")).toBe(true);
+    expect(stdlib('f = (p) -> p\ng = -> p 1\n')).toBe(true);
+    expect(stdlib("r = do (p) -> p 'via do'\n")).toBe(true);
+  });
+});
+
 describe('match reads deliver the stdlib runtime', () => {
   test('`=~` delivers toMatchable in both modes', () => {
     const src = 'm = "x42" =~ /x(\\d+)/\nconsole.log _[1]';

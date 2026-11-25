@@ -19,7 +19,7 @@
 // prefix); dts wraps them as DtsError ("declaration emission: …") and
 // the TS face as a positioned emitter diagnostic ("emitter: …").
 
-import { identifierRunAt } from '../ident.js';
+import { identifierRunAt, IDENT_SOURCE } from '../ident.js';
 
 export class TypeTextError extends Error {
   constructor(message) {
@@ -201,7 +201,7 @@ export const normalizeTypeText = (raw) => {
 // shorthand and `new` construct signatures never reach here: the
 // type-token vocabulary rejects both in ALIAS bodies at the lexer
 // (methods are interface-only; `new` is code-shaped).
-const MEMBER_KEY = String.raw`(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\d[\w.]*|[A-Za-z_$][\w$]*)`;
+const MEMBER_KEY = String.raw`(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\d[\w.]*|${IDENT_SOURCE})`;
 const MEMBER_PROPERTY = new RegExp(String.raw`^(?:readonly\s+)?${MEMBER_KEY}\??\s*:`);
 const MEMBER_SIGNATURE = /^(?:<.*>\s*)?\(.*\)\s*:/;
 // Method shorthand member (`addItem(item: CartItem): void` — the

@@ -2250,6 +2250,19 @@ App = component
 `, /reads a render local of an ENCLOSING render scope/);
   });
 
+  // `do (t) -> t` passes the enclosing `t` in as its argument: a read of
+  // the render local, however its parameter spells the same name.
+  test('an immediately invoked arrow reads its parameters\' names where it stands', () => {
+    emitFails(`App = component
+  shown := true
+  render
+    div
+      t = 'local'
+      if shown
+        span (do (t) -> t)
+`, /reads a render local of an ENCLOSING render scope/);
+  });
+
   test('duplicate prop keys reject positioned — one key, one writer ', () => {
     // The plain duplicate.
     emitFails(`${KID}App = component

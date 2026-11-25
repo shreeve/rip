@@ -223,6 +223,41 @@ test "switch when with nested inline if", '''
   result
 ''', "hero-home"
 
+# A function's tail switch is the statement itself: each arm returns, with
+# no IIFE between it and the function — so a generator's arm may yield and
+# an async function's arm may await in place
+code "tail switch returns from its arms", '''
+  f = (x) ->
+    switch x
+      when 1 then 'a'
+      else 'b'
+''', '''
+  let f = function(x) {
+    switch (x) {
+      case 1:
+        return "a";
+      default:
+        return "b";
+    }
+  };
+'''
+test "tail switch arm in a generator yields", "g = ->\n  switch 1\n    when 1 then yield 2\n[...g()]", [2]
+fail "a return inside a value if within a tail switch arm rejects", "f = (x) ->\n  switch x\n    when 1\n      y = (if x > 0 then return 'early' else 3)\n      y\n    else 'other'", "cannot cross the IIFE boundary"
+fail "a return inside a tail switch's subject rejects", "g = (x) ->\n  switch (if x > 5 then return 'big' else x)\n    when 1 then 'one'\n    else 'other'", "cannot cross the IIFE boundary"
+fail "a return inside a value if within a tail try rejects", "f = (x) ->\n  try\n    y = (if x > 0 then return 'early' else 3)\n    y\n  catch e\n    'caught'", "cannot cross the IIFE boundary"
+fail "continue in a statement switch arm rejects", "f = (x) ->\n  switch x\n    when 1 then continue\n    else console.log 'two'\n  'done'", "'continue' outside a loop"
+fail "continue in a closure inside a loop rejects", "for x in [1, 2]\n  f = -> continue\n  f()", "'continue' outside a loop"
+fail "break in a closure inside a loop rejects", "for x in [1, 2]\n  f = -> break\n  f()", "'break' outside a loop or switch"
+test "continue in a switch inside a loop continues the loop", "seen = []\nfor x in [1, 2, 3]\n  switch x\n    when 2 then continue\n    else seen.push x\nseen", [1, 3]
+
+# An arm whose tail lowers to a statement (a loop, a declaration, a write
+# with no value form) breaks itself instead of running the next arm
+test "a tail switch arm ending in a loop does not run the next arm", "n = 0\nf = (x) ->\n  switch x\n    when 1\n      while n < 3\n        n += 1\n    when 2\n      n = 100\n[f(1), n]", [undefined, 3]
+test "a value switch arm ending in a loop does not run the next arm", "n = 0\nr = switch 1\n  when 1\n    loop\n      n += 1\n      break if n > 2\n  when 2\n    n = 100\n[r, n]", [undefined, 3]
+test "a tail switch arm ending in an enum or debugger does not run the next arm", "n = 0\nf = (x) ->\n  switch x\n    when 1\n      enum E\n        a = 1\n    when 2\n      debugger\n    when 3\n      n = 100\n[f(1), f(2), n]", [undefined, undefined, 0]
+fail "continue in a tail switch arm rejects", "f = (x) ->\n  switch x\n    when 1 then continue\n    else 2", "'continue' outside a loop"
+test "tail switch arm in an async function awaits", "h = (x) ->\n  switch x\n    when 1 then await Promise.resolve 'one'\n    else 'other'\nawait h 1", 'one'
+
 # Switch without discriminant in statement context (loop)
 
 test "switch in loop for side effects", '''
@@ -438,10 +473,10 @@ code "switch with explicit return", '''
           return "A"
   ''', '''
   let fn = function(x) {
-    return (() => { switch (x) {
+    switch (x) {
       case "a":
         return "A";
-    } })();
+    }
   };
   '''
 

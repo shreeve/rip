@@ -39,6 +39,7 @@
 // tsc's default CLI configuration (TS7006/TS7010), so a bare untyped
 // parameter has no valid declaration spelling.
 
+import { isIdentifierName, IDENT_PART } from '../ident.js';
 import {
   TypeTextError, tidyType, normalizeTypeText, renderTypeDecl,
   renderParams, paramTyped, optionalReader,
@@ -557,7 +558,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
     'def', 'void-def', 'def-sig', 'state', 'computed', 'effect',
     'readonly', 'void-readonly', 'gate', 'component', 'schema',
   ]);
-  const isIdent = (s) => typeof s === 'string' && /^[A-Za-z_$][\w$]*$/.test(s);
+  const isIdent = isIdentifierName;
   const isExportList = (x) =>
     isNode(x) && !STMT_HEADS.has(x[0]) &&
     !isReactiveDecl(x) && !isEffectDecl(x) && !isReadonlyDecl(x) &&
@@ -711,7 +712,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   const bodyText = lines.join('\n');
   const referenced = (name) => {
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp(`(?:^|[^\\w$.])${escaped}(?![\\w$])`).test(bodyText);
+    return new RegExp(`(?<!${IDENT_PART.source}|\\.)${escaped}(?!${IDENT_PART.source})`).test(bodyText);
   };
   const keptImports = pendingImports
     .filter((node) => importBoundNames(node).some(referenced))
