@@ -71,12 +71,13 @@ console.log('parenthetical:', parenthetical, 'tall:', tall)
 
 let iife = (function() { return integer * 2 })()
 let seeded = (function(seed = 5) { return seed + 1 })()
+let wrapped = (function() { return integer + 1 })()
 let chain = (function() { return 7 })
 .bind(null)
 let noop = function() {
   // a comment-only body still parses — the empty block
 }
-console.log('iife:', iife, 'seeded:', seeded)
+console.log('iife:', iife, 'seeded:', seeded, 'wrapped:', wrapped)
 // the corpus default is explicit parens; this one paren-less call keeps the implicit spelling covered (02-operations owns invocation)
 console.log(typeof chain, typeof noop)
 

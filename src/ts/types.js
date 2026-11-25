@@ -77,7 +77,7 @@ export const isArrayShapedType = (t) => {
 // Object.prototype member (`constructor`, `toString`, `hasOwnProperty`,
 // …) must never satisfy the lookup — a member NAMED `constructor` is
 // a legal TS member and keeps its spelling.
-const BOOLEAN_WORDS = { __proto__: null, yes: 'true', on: 'true', no: 'false', off: 'false' };
+const BOOLEAN_WORDS = { __proto__: null, yes: 'true', no: 'false' };
 
 // Is the identifier run at [start, end) of `raw` a NAME rather than a
 // type — a position the boolean lowering must leave alone? Mirrors

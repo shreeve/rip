@@ -869,8 +869,8 @@ describe('schema method parameter annotations normalize on both roads', () => {
   const dtsLine = (ann) => dts(src(ann)).split('\n').find((l) => l.startsWith('type Flag ='));
 
   test('the boolean spellings lower to TS', () => {
-    expect(faceLine('on | off')).toBe('const __Flag__behavior = {set: (function(this: Flag, v: true | false) { return v; })};');
-    expect(dtsLine('on | off')).toBe('type Flag = FlagData & { set: (v: true | false) => unknown };');
+    expect(faceLine('yes | no')).toBe('const __Flag__behavior = {set: (function(this: Flag, v: true | false) { return v; })};');
+    expect(dtsLine('yes | no')).toBe('type Flag = FlagData & { set: (v: true | false) => unknown };');
   });
 
   test('a single-quoted literal union displays double-quoted', () => {
@@ -879,7 +879,7 @@ describe('schema method parameter annotations normalize on both roads', () => {
   });
 
   test('a comment inside a wrapped annotation drops with its layout', () => {
-    expect(faceLine('on | # which\n    off')).toBe('const __Flag__behavior = {set: (function(this: Flag, v: true | false) { return v; })};');
-    expect(dtsLine('on | # which\n    off')).toBe('type Flag = FlagData & { set: (v: true | false) => unknown };');
+    expect(faceLine('yes | # which\n    no')).toBe('const __Flag__behavior = {set: (function(this: Flag, v: true | false) { return v; })};');
+    expect(dtsLine('yes | # which\n    no')).toBe('type Flag = FlagData & { set: (v: true | false) => unknown };');
   });
 });

@@ -71,12 +71,13 @@ console.log('parenthetical:', parenthetical, 'tall:', tall)
 
 iife = do -> integer * 2
 seeded = do (seed = 5) -> seed + 1
+wrapped = do (-> integer + 1)
 chain = -> 7
 .bind(null)
 noop = ->
   # a comment-only body still parses — the empty block
 
-console.log('iife:', iife, 'seeded:', seeded)
+console.log('iife:', iife, 'seeded:', seeded, 'wrapped:', wrapped)
 # the corpus default is explicit parens; this one paren-less call keeps the implicit spelling covered (02-operations owns invocation)
 console.log typeof chain, typeof noop
 

@@ -130,7 +130,7 @@ on:
   clause's variable would read it unbound, and rejects. For one flat
   list use one `for` per comprehension, outer loop last, and `.flat()`:
   `((item for item in xs) for xs in lists).flat()`.
-- `on`, `off`, `yes`, `no`, `by` and `then` are reserved words; `own`
+- `yes`, `no`, `by` and `then` are reserved words; `own`
   is a keyword only directly after `for`.
 - Rest parameters are `...args` (dots first). Spread the same way.
 - Before benchmarking, inspect the emitted JavaScript (`rip -c file.rip`)

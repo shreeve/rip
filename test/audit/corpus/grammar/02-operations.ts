@@ -145,7 +145,7 @@ let drop = function(n: number) {
 
 console.log('guards:', take(10), take(0), drop(10), drop(0))
 
-// `then … else` is one left-associative level: (a && b) || c
+// One loose `then` or `else` per expression; parentheses make each its own
 console.log('chain:', ((0 && 'yes') || 'no'), ((ten && 0) || 'fallback'))
 let pick = function(n: number) {
   if (!(n && n > 1)) return 'small'

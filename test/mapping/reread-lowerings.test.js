@@ -170,19 +170,6 @@ describe('loop and destructuring reread mappings', () => {
 });
 
 describe('assignment and class-field capture mappings', () => {
-  test('method assignment maps the captured write/read expression as target and value covers', () => {
-    const source = 'get().name .= trim()';
-    const r = compile(source);
-    const [assign] = r.stores.nodesByKind('assign');
-    exactOperand(r, 'get()');
-    expect(slices(r, assign, 'target')).toEqual([['cover', 'get().name', '_ref.name']]);
-    expect(slices(r, assign, 'value')).toEqual([['cover', 'trim()', '_ref.name.trim()']]);
-    expect(slices(r, assign, 'operator')).toEqual([['synthetic', '', '=']]);
-    coveredAt(r, '_ref', source);
-    noMintedNames(r);
-  });
-
-
   test('class-field captures are covered by the field value and exact inside each activation', () => {
     const source = 'class Box\n  value = get().x //= 2';
     const r = compile(source);

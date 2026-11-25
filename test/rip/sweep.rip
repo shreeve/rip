@@ -1018,15 +1018,21 @@ code "return an indented object", '''
   };
   '''
 
-code "do on a plain expression", '''
-  f = -> 1
-  do f
-  ''', '''
-  let f = function() {
-    return 1;
-  };
-  (f)();
-  '''
+fail "do on a plain expression rejects", "f = -> 1\ndo f", "`do` invokes a function literal"
+test "do on a parenthesized function invokes it, capturing like do ->", "x = 5\nr = do ((x) -> x * 2)\n[r, do (-> 1)]", [10, 1]
+fail "do on a parenthesized non-function rejects", "r = do (f)", "`do` invokes a function literal"
+fail "do on an effect rejects", "x = do ~> 1", "`do` invokes a function literal"
+fail "a trailing do rejects", "x = do", "`do` invokes a function literal"
+# A tail after `do (…)` could apply before the invocation or after it.
+fail "do with a call tail rejects", "y = do (-> f)(2)", "`do (…)` takes no call, member or index tail"
+fail "do with a juxtaposed argument rejects", "y = do (-> f) x", "`do (…)` takes no call, member or index tail"
+fail "do with a member tail rejects", "y = do (-> {x: 1}).x", "`do (…)` takes no call, member or index tail"
+fail "do with an index tail rejects", "y = do (-> [1])[0]", "`do (…)` takes no call, member or index tail"
+fail "do with an optional tail rejects", "y = do (-> null)?.x", "`do (…)` takes no call, member or index tail"
+fail "do with an existence tail rejects", "y = do (-> 1)?", "`do (…)` takes no call, member or index tail"
+test "a parenthesized do takes a tail", "(do (-> {x: 7})).x", 7
+test "do followed by an operator is no tail", "y = do (-> 1) + 2\ny", 3
+code "a schema field may be named do", "U = schema :shape\n  do! string", "let U = __schema({kind: \"shape\", name: \"U\", entries: [{tag: \"field\", name: \"do\", modifiers: [\"!\"], typeName: \"string\", array: false}]});"
 
 code "await an indented object", '''
   f = ->

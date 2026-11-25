@@ -121,9 +121,8 @@ syn match  ripOperator      />>>=\|\*\*=\|\/\/=\|%%=\|&&=\|||=\|??=\|<<=\|>>=\|+
 " matched together because it reads as one idiom.
 syn match  ripOperator      /!?\|?!\|??\|?\./
 
-" Method assignment (x .= trim()), map literal (*{a: 1}),
-" existence assignment (a ?= 5)
-syn match  ripOperator      /\.=\|\*{\@=\|?=/
+" Map literal (*{a: 1}), existence assignment (a ?= 5)
+syn match  ripOperator      /\*{\@=\|?=/
 
 " Tagged-template bridge: sh $"cmd" (the $ heads the template)
 syn match  ripOperator      /\$\ze['"]/
@@ -239,7 +238,7 @@ syn match  ripPascalCase    /\<[A-Z]\w*/
 " (`{on: 2}`, `{string: 1}`, `{kind: 3}`), so it declines the position and
 " ripObjKey takes it.
 
-syn match  ripBoolean       /\<\%(true\|false\|yes\|no\|on\|off\)\>\%(\s*?\?:\%([=:]\)\@!\)\@!/
+syn match  ripBoolean       /\<\%(true\|false\|yes\|no\)\>\%(\s*?\?:\%([=:]\)\@!\)\@!/
 syn match  ripConstant      /\<\%(null\|undefined\|NaN\|Infinity\)\>\%(\s*?\?:\%([=:]\)\@!\)\@!/
 syn keyword ripThis         this
 

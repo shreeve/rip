@@ -129,6 +129,7 @@
     "67:3:open": "symbol literal — lowers into a string",
     "68:3:closed": "symbol literal — lowers into a string",
     "82:18:union": "symbol literal — lowers into a string",
+    "83:3:on": "lowered into a string — the face holds these bytes inside a literal",
     "83:7:kind": "symbol literal — lowers into a string",
     "95:18:mixin": "symbol literal — lowers into a string",
     "99:3:mixin": "lowered into a string — the face holds these bytes inside a literal",

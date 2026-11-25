@@ -90,7 +90,7 @@ const PAIRS = [
   ['f = (x = => 2\n b: T) -> b', 'f = (x = => 2\n b) -> b'],
   ['f = (cb = (y: U) -> y\n b: T) -> b', 'f = (cb = (y) -> y\n b) -> b'],
   ['def g(a = -> 1\n b: T)\n  b', 'def g(a = -> 1\n b)\n  b'],
-  ['f = (a = do g\n b: T) -> b', 'f = (a = do g\n b) -> b'],
+  ['f = (a = do -> 1\n b: T) -> b', 'f = (a = do -> 1\n b) -> b'],
   ['f = (a = if c then 1 else 2\n b: T) -> b', 'f = (a = if c then 1 else 2\n b) -> b'],
   ['f = (a = (g 1)\n b: T) -> b', 'f = (a = (g 1)\n b) -> b'],
   ['f = (a = switch v\n  when 1 then 2\n  else 3\n, b: T) -> b', 'f = (a = switch v\n  when 1 then 2\n  else 3\n, b) -> b'],

@@ -76,7 +76,7 @@ const BODY_THEN_OPENERS = new Set(['(', '[', '{', 'PICK_START', 'OPTPICK_START',
 const BODY_THEN_CLOSERS = new Set([')', ']', '}', 'PICK_END', 'CALL_END', 'INDEX_END', 'PARAM_END', 'STRING_END', 'INTERPOLATION_END', 'HEREGEX_END']);
 
 function thenIntroducesBody(tokens, i) {
-  let depth = 0;
+  let depth = 0, pastElse = false;
   for (let j = i - 1; j >= 0; j--) {
     if (counter.on) counter.n++;
     const k = tokens[j].kind;
@@ -87,8 +87,15 @@ function thenIntroducesBody(tokens, i) {
       continue;
     }
     if (depth > 0) continue;
-    if (BODY_THEN_HEADS.has(k)) return true;
+    if (BODY_THEN_HEADS.has(k)) {
+      // Past a depth-0 ELSE, an IF/UNLESS straight after a value is a
+      // postfix ternary that ELSE closed, so the THEN opens nothing
+      // (`a if c else b then d`); any other head's condition may hold a
+      // loose else (`if x else y then z`), and the THEN opens its body.
+      return !(pastElse && (k === 'IF' || k === 'UNLESS') && VALUE_END.has(tokens[j - 1]?.kind));
+    }
     if (k === 'TERMINATOR') return false;
+    if (k === 'ELSE') pastElse = true;
   }
   return false;
 }
@@ -315,12 +322,12 @@ const IMPLICIT_CALL_STARTERS = new Set([
   'IDENTIFIER', 'PROPERTY', 'NUMBER', 'STRING', 'STRING_START', 'REGEX', 'HEREGEX_START', 'SYMBOL', 'MAP_START',
   'PARAM_START', 'IF', 'TRY', 'SWITCH', 'CLASS', 'THIS', 'SUPER',
   'UNDEFINED', 'NULL', 'IMPORT_META', 'NEW_TARGET', 'DYNAMIC_IMPORT',
-  'BOOL', 'UNARY', 'NEW', 'DO', 'DO_IIFE', 'UNARY_MATH', 'AWAIT', 'YIELD', 'THROW', '@', '->', '=>', '[', '(', '{',
+  'BOOL', 'UNARY', 'NEW', 'DO_IIFE', 'UNARY_MATH', 'AWAIT', 'YIELD', 'THROW', '@', '->', '=>', '[', '(', '{',
   '--', '++',
 ]);
 const IMPLICIT_END = new Set([
   'POST_IF', 'POST_UNLESS', 'FOR', 'WHILE', 'UNTIL', 'WHEN', 'BY', 'LOOP',
-  'TERMINATOR', '||', '&&', '??', 'THEN', 'ELSE',
+  'TERMINATOR', '||', '&&', '??', 'THEN', 'ELSE', 'LOOSE_ELSE',
 ]);
 // CLASS is control-in-implicit like IF/SWITCH — its body INDENT must not
 // close an enclosing implicit call/object — with one extra rule:
@@ -413,7 +420,7 @@ const looksObjectishAt = (tokens, j) => {
   }
   return false;
 };
-const BLOCK_ARG_CARRIERS = new Set(['->', '=>', '[', '(', ',', '{', 'ELSE', '=']);
+const BLOCK_ARG_CARRIERS = new Set(['->', '=>', '[', '(', ',', '{', 'ELSE', 'LOOSE_ELSE', '=']);
 const LINE_BREAK_KINDS = new Set(['INDENT', 'OUTDENT', 'TERMINATOR']);
 
 // Control-flow heads that OWN a following INDENT: an IMPLICIT_FUNC token
@@ -765,7 +772,7 @@ function collectObjects(tokens, mintId) {
       // binds the pair's value (`x = a: 1 && 2` is {a: (1 && 2)}).
       // ELSE stays open too: postfix `a: 1 if c else 2` is one pair,
       // and loose `a: x else y` binds the value like `||`.
-      if (k === '||' || k === '&&' || k === '??' || k === 'ELSE') continue;
+      if (k === '||' || k === '&&' || k === '??' || k === 'ELSE' || k === 'LOOSE_ELSE') continue;
       if (k === 'TERMINATOR') {
         // A statement boundary clears unconsumed ternary claims at
         // this depth and un-samelines every open implicit frame.

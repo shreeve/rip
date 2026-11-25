@@ -60,6 +60,16 @@ describe('error: no continuation fixes it', () => {
     expect(r.error.line).toBe(1);
   });
 
+  // `do` takes its function on its own line, so a line break after it
+  // can never complete the entry.
+  for (const src of ['x = do', 'g do', 'h = ->\n  do']) {
+    test(`a trailing do: ${JSON.stringify(src)}`, () => {
+      const r = classifyCompleteness(src);
+      expect(r.status).toBe('error');
+      expect(r.error.message).toContain('`do` invokes a function literal');
+    });
+  }
+
   test('an unmatched closer is a lexer hard error', () => {
     const r = classifyCompleteness('f(1))');
     expect(r.status).toBe('error');

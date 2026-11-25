@@ -32,9 +32,10 @@ const CONTINUATIONS = new Map([
   ['$end', 'end of input — the collector stops by exhaustion'],
 ]);
 
-// The type collapse runs before the rewriter's postfix retag, so the
-// table's POST_* spellings answer for their pre-rewrite kinds.
-const PRE_REWRITE = { POST_IF: 'IF', POST_UNLESS: 'UNLESS' };
+// The type collapse runs before the rewriter's postfix and loose-`or`
+// retags, so the table's retagged spellings answer for their pre-rewrite
+// kinds.
+const PRE_REWRITE = { POST_IF: 'IF', POST_UNLESS: 'UNLESS', LOOSE_ELSE: 'ELSE' };
 
 // Literal-context closers end every run unconditionally in the collector:
 // their openers cannot appear inside a type, so the closer belongs to the

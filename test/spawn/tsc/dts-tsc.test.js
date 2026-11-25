@@ -74,7 +74,7 @@ const HAND_ROWS = [
   // a schema method's parameter annotation lowers like every other
   // annotation: the rip boolean spellings and a single-quoted literal
   // reach the member's respelled signature as TS
-  "Flag = schema :shape\n  n! number\n  set: (v: on | off) -> v\n  pick: (k: 'a' | 'b') -> k",
+  "Flag = schema :shape\n  n! number\n  set: (v: yes | no) -> v\n  pick: (k: 'a' | 'b') -> k",
 ];
 
 // The whole gate's rows — corpus declarations and hand rows — as one

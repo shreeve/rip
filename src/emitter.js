@@ -78,7 +78,7 @@ const JS_OP = { '==': '===', '!=': '!==' };
 
 // What a value word has already become by the time a pattern is walked.
 // The scanner's own table (types.js VALUE_WORDS) maps the SOURCE spellings
-// — `yes`/`no`/`on`/`off` and the literal keywords — onto these; only the
+// — `yes`/`no` and the literal keywords — onto these; only the
 // lowered side survives into the tree, so this is the set a destructuring
 // target can never legally be.
 const PATTERN_LITERALS = new Set(['true', 'false', 'null', 'undefined', 'this']);
@@ -2185,8 +2185,8 @@ class Emitter {
     const owner = this.b.currentMark;
     let span = this.ts && typeof value === 'string'
       ? this.b.claimPrimitiveSpan(value, this.primitiveAvoid) : null;
-    // A lowering that re-reads a name it has no occurrence for (`x .= f()`
-    // reads `x` where the author wrote it once, as the target) names the
+    // A lowering that re-reads a name it has no occurrence for (a child
+    // component's name, spelled again in its event casts) names the
     // occurrence it repeats ahead of the emission: the copy maps there.
     if (span === null && this.primitiveReuse !== null && this.primitiveReuse.name === value) {
       span = this.primitiveReuse.span;
@@ -6614,14 +6614,6 @@ class Emitter {
         this.b.emit(';');
         return;
       }
-      // Method assignment is a statement lowering: the target is
-      // spelled twice (write + read), and an impure member target
-      // pre-binds its base on its own line.
-      if (node[0] === '.=' && node.length === 3) {
-        this.methodAssignStatement(node, ind);
-        this.b.emit(';');
-        return;
-      }
       // Slice assignment (`a[1..2] = v`) replaces the range in place:
       // a statement lowering to splice (value position rejects).
       if (node[0] === '=' && node.length === 3 && Emitter.sliceTarget(node[1]) !== null) {
@@ -6750,7 +6742,7 @@ class Emitter {
   // syntax outside all role marks (the declare-in-place `let `
   // precedent), so every role row keeps its exact source↔generated
   // slice. Assignment forms that lower to multi-statement rewrites
-  // (`.=`, optional-chain targets, middle-rest patterns) return
+  // (optional-chain targets, middle-rest patterns) return
   // from statementCore before this point and stay echo-free.
   replCapture(node) {
     if (!this.repl || node !== this.lastProgramStmt) return false;
@@ -8359,7 +8351,7 @@ class Emitter {
       const rest = isNode(stmt[3]) && stmt[3][0] === 'if' ? stmt[3] : last(stmt[3]);
       return this.tailLeaves(last(stmt[2]), effect) && this.tailLeaves(rest, effect);
     }
-    if (h === 'try' || h === 'switch' || h === 'enum' || h === '.=') return false;
+    if (h === 'try' || h === 'switch' || h === 'enum') return false;
     if ((h === 'while' && (stmt.length === 3 || stmt.length === 4)) || (h === 'loop' && stmt.length === 2)) return false;
     if (Emitter.returnGuard(stmt) || Emitter.stmtGuard(stmt)) return false;
     if (h === '=' && stmt.length === 3 &&
@@ -9034,9 +9026,6 @@ class Emitter {
           this.b.emit('")');
         } else this.b.emit(`Symbol.for(${quoted})`);
       });
-    }
-    if (head === '.=' && node.length === 3) {
-      throw this.positionedError(node, `emitter: ${head} is a statement — its target is spelled twice (write + read), which has no single-expression form`);
     }
     if (head === '%%=' && node.length === 3) return this.moduloAssign(node);
     if (isComprehensionNode(node)) return this.comprehension(node, this.ind);
@@ -10097,7 +10086,7 @@ class Emitter {
     if ((h === '&&' || h === '||' || h === '??') && stmt.length === 3) {
       return this.effectTailWrites(stmt[2]) || this.effectBranchWrites(stmt[2]);
     }
-    if (isAssignHead(h) || h === '.=' || isUpdate(stmt)) return true;
+    if (isAssignHead(h) || isUpdate(stmt)) return true;
     if (Emitter.LOOP_HEADS.has(h) && !this.isCallNode(stmt)) return true;
     if (isDefHead(h) || h === 'class' || h === 'enum' || h === 'export') return true;
     if (this.isModuleImport(stmt) || this.isReactiveDecl(stmt) || this.isReadonlyDecl(stmt)) return true;
@@ -15913,8 +15902,8 @@ class Emitter {
         } else {
           this.mark(n, 'operator', () => this.b.emit(op));
           this.mark(n, 'property', () => {
-            // A SYNTHESIZED member — the `.=` lowering builds `['.', read, prop]`
-            // at emit time — has no store row, so no frame opens here and the
+            // A SYNTHESIZED member — one a lowering builds at emit time — has
+            // no store row, so no frame opens here and the
             // property would inherit the statement's cover. Its name is still a
             // source read; it claims its occurrence in that enclosing span. A
             // real member already owns an exact row from its own frame.
@@ -18223,10 +18212,6 @@ class Emitter {
           (h === '=' && stmt.length === 3 && (Emitter.returnGuard(stmt[2]) || Emitter.stmtGuard(stmt[2])))) {
         return this.statement(stmt, ind);
       }
-      // Tail-position method assignment stays a statement (the
-      // double-spelled target has no single-expression form); the
-      // function returns undefined.
-      if (h === '.=' && stmt.length === 3) return this.statement(stmt, ind);
       // A slice assignment likewise: it splices in place, and the
       // function returns undefined.
       if (h === '=' && stmt.length === 3 && Emitter.sliceTarget(stmt[1]) !== null) return this.statement(stmt, ind);
@@ -18731,53 +18716,6 @@ class Emitter {
     });
   }
 
-  // The compound target's WRITE spelling. Pure targets (a plain
-  // name, `this` properties, pure chains) spell twice directly —
-  // both reads are effect-free. An impure member/index target binds
-  // its base (and an impure key) ONCE on a pre-line, and both
-  // spellings go through the binding — the compounds'
-  // single-evaluation contract. Returns the node the READ spelling
-  // embeds. Minted names come from the used-name registry.
-  compoundTarget(node, target, ind) {
-    this.checkExportedConstWrite(node, target); this.checkImportWrite(node, target);
-    if (this.repeatSafeValue(target)) {
-      this.mark(node, 'target', () => this.withTarget(() => this.expr(target)));
-      return target;
-    }
-    if (isNode(target) && (target[0] === '.' || target[0] === '[]') && target.length === 3) {
-      let base = target[1];
-      if (!this.repeatSafeValue(base)) {
-        base = this.loopTempName('_ref');
-        this.temps.used.add(base);
-        this.b.emit(`const ${base} = `);
-        this.expr(target[1]);
-        this.b.emit(`;\n${'  '.repeat(ind)}`);
-      }
-      let read;
-      if (target[0] === '[]') {
-        let key = target[2];
-        if (!this.repeatSafeValue(key)) {
-          const k = this.loopTempName('_key');
-          this.temps.used.add(k);
-          this.b.emit(`const ${k} = `);
-          this.expr(key);
-          this.b.emit(`;\n${'  '.repeat(ind)}`);
-          key = k;
-        }
-        read = ['[]', base, key];
-      } else {
-        read = ['.', base, target[2]];
-      }
-      this.mark(node, 'target', () => this.expr(read));
-      return read;
-    }
-    throw this.positionedError(node, `emitter: ${node[0]} needs a stable target — a plain name or member/index chain (an optional chain has no reference to write back to)`);
-  }
-
-  // ['.=', target, rhs] — the target re-binds to a method call on
-  // itself: `x .= trim()` → `x = x.trim()`; the right side's chain
-  // HEAD call gains the target as its receiver, so a chained right
-  // side works too (`s .= trim().toLowerCase()`).
   // A slice as an assignment target: `["[]", obj, ["..", from, to]]`
   // (either end may be null — an open end).
   static sliceTarget(t) {
@@ -18841,42 +18779,6 @@ class Emitter {
         }
       });
       this.b.emit(')');
-    });
-  }
-
-  methodAssignStatement(node, ind) {
-    const [, target, rhs] = node;
-    let cur = rhs;
-    while (isNode(cur)) {
-      const s = this.chainHeadSlotOf(cur);
-      if (s === null) break;
-      cur = cur[s];
-    }
-    const id = isNode(cur) ? this.stores.idOf(cur) : null;
-    const kind = id !== null ? this.stores.node(id)?.semanticKind : null;
-    const callHead = isNode(cur) && typeof cur[0] === 'string' && isIdentifierName(cur[0]) &&
-      (kind === 'call' || (kind == null && Emitter.jsTier(cur) === 'primary'));
-    if (!callHead) {
-      throw this.positionedError(node, "emitter: `.=` re-binds its target to a METHOD CALL on itself — the right side must be a call chain (`x .= trim()`)");
-    }
-    this.mark(node, '$self', () => {
-      const read = this.compoundTarget(node, target, ind);
-      const substHead = (n) => {
-        if (n === cur) return [['.', read, cur[0]], ...cur.slice(1)];
-        const s = this.chainHeadSlotOf(n);
-        const copy = n.slice();
-        copy[s] = substHead(n[s]);
-        return copy;
-      };
-      this.b.emit(' ');
-      this.mark(node, 'operator', () => this.b.emit('='));
-      this.b.emit(' ');
-      // The read of the target inside the value is the author's one
-      // occurrence of it, re-read: it maps to the target's own span.
-      const tspan = typeof read === 'string' ? this.bindingNameSpan(node, 'target', read) : null;
-      if (tspan !== null) this.primitiveReuse = { name: read, span: tspan.span };
-      this.mark(node, 'value', () => this.expr(substHead(rhs)));
-      this.primitiveReuse = null;
     });
   }
 
@@ -19147,8 +19049,8 @@ class Emitter {
     });
   }
 
-  // ["do-iife", operand] — immediate invocation: `(<operand>)(<args>)`.
-  // A function operand captures per-parameter arguments — an identifier
+  // ["do-iife", fn] — immediate invocation: `(<fn>)(<args>)`. The
+  // function captures per-parameter arguments — an identifier
   // param passes the enclosing binding of the same name (the
   // loop-closure idiom), a default param passes its default value.
   // Trailing default-only arguments drop: the default itself fires.
@@ -19156,31 +19058,32 @@ class Emitter {
   // rejected loudly.
   doIife(node) {
     const [, fn] = node;
+    if (!isFunc(fn)) {
+      throw this.positionedError(isNode(fn) ? fn : node, 'emitter: `do` invokes a function literal (`do ->`, `do (x) ->`, `do (-> …)`); call any other value directly: `f()`', node);
+    }
     this.mark(node, '$self', () => {
       this.b.emit('(');
       this.mark(node, 'func', () => this.expr(fn));
       this.b.emit(')(');
-      if (isFunc(fn)) {
-        const params = fn[1];
-        const args = params.map((p) => {
-          // Typed params erase to their cores here too: `do (x: T) ->`
-          // captures the enclosing `x`; a typed default passes its
-          // default value. The capture argument is a READ of the
-          // enclosing binding — a reactive name captures its current
-          // VALUE (the expr path unwraps), and the param then shadows
-          // it inside the body.
-          const core = Emitter.paramCore(p);
-          if (typeof core === 'string') return () => this.expr(core);
-          if (isNode(core) && core[0] === 'default' && typeof Emitter.paramCore(core[1]) === 'string') return () => this.expr(core[2]);
-          throw this.positionedError(p, 'emitter: do-IIFE parameters must be plain names or defaulted names — patterns and rests have no capture argument', node);
-        });
-        let live = params.length;
-        while (live > 0 && isNode(params[live - 1]) && params[live - 1][0] === 'default') live--;
-        args.slice(0, live).forEach((arg, i) => {
-          if (i > 0) this.b.emit(', ');
-          arg();
-        });
-      }
+      const params = fn[1];
+      const args = params.map((p) => {
+        // Typed params erase to their cores here too: `do (x: T) ->`
+        // captures the enclosing `x`; a typed default passes its
+        // default value. The capture argument is a READ of the
+        // enclosing binding — a reactive name captures its current
+        // VALUE (the expr path unwraps), and the param then shadows
+        // it inside the body.
+        const core = Emitter.paramCore(p);
+        if (typeof core === 'string') return () => this.expr(core);
+        if (isNode(core) && core[0] === 'default' && typeof Emitter.paramCore(core[1]) === 'string') return () => this.expr(core[2]);
+        throw this.positionedError(p, 'emitter: do-IIFE parameters must be plain names or defaulted names — patterns and rests have no capture argument', node);
+      });
+      let live = params.length;
+      while (live > 0 && isNode(params[live - 1]) && params[live - 1][0] === 'default') live--;
+      args.slice(0, live).forEach((arg, i) => {
+        if (i > 0) this.b.emit(', ');
+        arg();
+      });
       this.b.emit(')');
     });
   }
