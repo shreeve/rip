@@ -115,7 +115,7 @@ const committed = () => Object.fromEntries(
 describeExtended('runtime declarations ↔ implementations', () => {
   test('every declaration beside a runtime is satisfied by its JavaScript and declares every export', () => {
     const decls = committed();
-    expect(Object.keys(decls).sort()).toEqual(['components', 'duckdb', 'orm', 'reactive', 'schema', 'stdlib']);
+    expect(Object.keys(decls).sort()).toEqual(['components', 'duckdb', 'intrinsics', 'orm', 'reactive', 'schema', 'stdlib']);
     const diagnostics = check(decls);
     expect(diagnostics, diagnostics.join('\n')).toEqual([]);
   }, 120_000);

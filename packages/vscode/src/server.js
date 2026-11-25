@@ -793,7 +793,7 @@ function rawCompileEntry(fsPath, source, sourceHash) {
   const hit = rawCompileCache.get(fsPath);
   if (hit && hit.sourceHash === sourceHash && hit.stashSpec === stashSpec &&
       hit.routesUnion === routesUnion && hit.routeParams === routeParams) return hit;
-  const result = compile(source, { path: fsPath, runtimeDelivery: 'inline', face: 'ts', appStashSpec: stashSpec, routesUnion, routeParams });
+  const result = compile(source, { path: fsPath, runtimeDelivery: 'import', face: 'ts', appStashSpec: stashSpec, routesUnion, routeParams });
   const entry = { sourceHash, stashSpec, routesUnion, routeParams, result };
   rawCompileCache.delete(fsPath);
   rawCompileCache.set(fsPath, entry);
@@ -1873,7 +1873,7 @@ async function refresh(document) {
     // The same URI-vs-fsPath trap as the stash walk: discovery walks
     // the FILESYSTEM, so it takes the converted path, never the URI.
     try { routes = appRoutesFor(fileURLToPath(document.uri), workspaceRoot); } catch { /* non-file uri — stays unarmed */ }
-    result = compile(text, { path: document.uri, runtimeDelivery: 'inline', face: 'ts', pins, strict: state.strict, tolerant: true, appStashSpec: stashSpec, routesUnion: routes.union, routeParams: routes.params });
+    result = compile(text, { path: document.uri, runtimeDelivery: 'import', face: 'ts', pins, strict: state.strict, tolerant: true, appStashSpec: stashSpec, routesUnion: routes.union, routeParams: routes.params });
   } catch (err) {
     if (err?.name !== 'CompileError') throw err;
     // staleness: lastGood (and the overlay/mirror) stay as they are.
@@ -1906,6 +1906,12 @@ async function refresh(document) {
     // Per `__ripIndexed(…)` wrap of an indexed loop's iterable — a
     // refused iterable reports once, on the loop's head, from the record.
     indexedLoops: result.indexedLoops ?? [],
+    // The runtime import statements — a diagnostic there means the
+    // runtime did not resolve, and reports at the file head.
+    runtimeImports: result.runtimeImports ?? [],
+    // Each free reference to a runtime-injected name: the hover presents
+    // one without the alias dress the face's import gives it.
+    runtimeRefs: result.runtimeRefs ?? [],
     // Per member initializer, the lowered write's left-hand side and
     // the name it lands on (diagnostics.js, recordedAnchor).
     memberInits: result.memberInits ?? [],
@@ -3476,6 +3482,7 @@ connection.onHover(presented('textDocument/hover', async (params) => {
   const atPropKey = (ctx.good.renderPairs ?? []).some((p) => ctx.offset >= p.key[0] && ctx.offset < p.key[1]);
   contents = presentPropSlotHover(contents, atPropKey) ?? contents;
   contents = presentModuleAliasHover(ctx, contents) ?? contents;
+  contents = presentInjectedHover(ctx, contents) ?? contents;
   // The declaration's own kind. tsgo names the CELL the lowering binds
   // (`const count: number`), which describes the emission and not the
   // construct the author declared — the same leak the token audit refuses
@@ -4024,7 +4031,7 @@ async function dotProbeCompletion(params) {
     const stashSpec = appStashSpecFor(fsPath, workspaceRoot);
     const routes = appRoutesFor(fsPath, workspaceRoot);
     result = compile(text.slice(0, cursor) + DOT_PROBE_MARK + text.slice(cursor), {
-      path: document.uri, runtimeDelivery: 'inline', face: 'ts', strict: state.strict, tolerant: true,
+      path: document.uri, runtimeDelivery: 'import', face: 'ts', strict: state.strict, tolerant: true,
       appStashSpec: stashSpec, routesUnion: routes.union, routeParams: routes.params,
     });
   } catch { return null; }
@@ -4169,7 +4176,7 @@ async function pairSpliceProbe(params) {
     const stashSpec = appStashSpecFor(fsPath, workspaceRoot);
     const routes = appRoutesFor(fsPath, workspaceRoot);
     result = compile(text.slice(0, s) + DOT_PROBE_MARK + ': null' + text.slice(cursor), {
-      path: document.uri, runtimeDelivery: 'inline', face: 'ts', strict: state.strict, tolerant: true,
+      path: document.uri, runtimeDelivery: 'import', face: 'ts', strict: state.strict, tolerant: true,
       appStashSpec: stashSpec, routesUnion: routes.union, routeParams: routes.params,
     });
   } catch { return null; }
@@ -4469,6 +4476,18 @@ function importedKindOf(fromDir, specifier, name) {
 
 // tsgo spells a module alias by its mirror path; the mirror never surfaces,
 // so the module reads as the stdlib name or a path relative to the file.
+// A runtime-injected name hovers through the face's import of it, which
+// tsgo dresses as `(alias) const sleep: …`; the source imported nothing,
+// so the dress goes.
+function presentInjectedHover(ctx, contents) {
+  const value = contents?.value;
+  if (typeof value !== 'string') return null;
+  const word = wordAtOffset(ctx.good.source, ctx.offset);
+  if (!(ctx.good.runtimeRefs ?? []).some((ref) => ref[2] === word)) return null;
+  const m = /^(```(?:typescript|ts)\n)\(alias\) /.exec(value);
+  return m ? { ...contents, value: `${m[1]}${value.slice(m[0].length)}` } : null;
+}
+
 function presentModuleAliasHover(ctx, contents) {
   const value = contents?.value;
   if (typeof value !== 'string') return null;

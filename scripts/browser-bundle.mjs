@@ -93,6 +93,7 @@ const IDE_STUBS = new Map([
     `export const anyArgsOf = () => '';`,
     `export const readonlyCastType = ${unavailable('component type story')};`,
     `export const routeArgType = () => 'string';`,
+    `export const gateProjection = () => null;`,
     `export const hookParamTypes = () => null;`,
     `export const ambientClassDeclares = () => [];`,
     `export const plainBehaviorValued = () => false;`,

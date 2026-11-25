@@ -67,7 +67,7 @@ const REGION_SHAPES = [
   new RegExp(String.raw`^declare (static |readonly )?${ID}\??: \S`, 'su'), // component member declare (optional for the projection channel) / static-mount narrowing / =! readonly 
   new RegExp(String.raw`^${ID}(: \S[^;]*)?;$`, 'su'),      // the field a promoted param or a constructor-body `@x =` declares (bare when the assignment's own inference is the honest type)
   /^\[key: `_\$\{string\}`\]: any;$/u,                    // the component slot-namespace index signature (M12-E)
-  /^private$/u,                                            // the lowering's own methods (_init/_create/_setup), no consumer's surface
+  /^private$/u,                                            // the lowering's own methods (_create/_setup), no consumer's surface
   new RegExp(String.raw`^private static __ripHost\(\) \{ return new ${ID}(\.${ID})*\(null!\); \}$`, 'u'), // the extends host referenced under the head's own bytes, a bare name or a member path
   /^constructor\(props\??: \{ .*\{ super\(props\); \}$/su, // the component props ctor (M12-E)
   /^as any\)?$/u,                                          // scaffold/handler quieting casts (M12-E)
@@ -802,12 +802,13 @@ describe('TS-face emission pins', () => {
   // ahead of the destructure; the stdlib's open parameters are `unknown`,
   // `zip` keeps its arrays' element types, and `raise` is its two calls;
   // the error handlers take the error alone, as `unknown`. The names only
-  // emission spells (`__Component`, `__reconcile`, the owner seam) and the
-  // runtime's internal helpers stay `any` by decision.
+  // emission spells (`__reconcile`, `__lis`, the owner seam) carry the
+  // table's signatures too, so this face and an importing one agree, and a
+  // signature naming the base class names its face declaration.
   test('the components, stdlib, and reactive runtimes type their user-callable names, with the context aliases declared ahead', () => {
     const src = "App = component\n  offer open := false\n  render\n    slot\nconsole.log zip([1], ['a']), getContext(App, 'open')\n";
     const r = compile(src, { runtimeDelivery: 'inline', face: 'ts' });
-    expect(r.code).toContain("type __RipProvider = abstract new (...args: never[]) => { __offers?: object };\ntype __RipOffers<P extends __RipProvider> = NonNullable<InstanceType<P>['__offers']>;\ntype __RipProviding<P extends __RipProvider> = '__offers' extends keyof InstanceType<P> ? P : never;\ntype __RipOwnerFrame = ");
+    expect(r.code).toContain("type __RipProvider = abstract new (...args: never[]) => { __offers?: object };\ntype __RipOffers<P extends __RipProvider> = NonNullable<InstanceType<P>['__offers']>;\ntype __RipProviding<P extends __RipProvider> = '__offers' extends keyof InstanceType<P> ? P : never;\ntype __RipListBlock = ");
     // The base class declares under its face name, ahead of the destructure.
     expect(r.code).toMatch(/\ndeclare class __RipComponent \{ constructor\(props\?: Record<string, unknown>\); [^\n]*\nconst \{ __state, /);
     const at = r.code.indexOf(' as { __state:');
@@ -816,7 +817,11 @@ describe('TS-face emission pins', () => {
     expect(assertion).toContain("setContext: (key: string, value: unknown) => void; getContext: <P extends __RipProvider, K extends keyof __RipOffers<P>>(provider: __RipProviding<P>, key: K) => __RipOffers<P>[K]; hasContext: <P extends __RipProvider>(provider: __RipProviding<P>, key: keyof __RipOffers<P>) => boolean;");
     expect(assertion).toContain('__setErrorHandler: (handler: ((error: unknown) => void) | null) => ((error: unknown) => void) | null; __handleError: (error: unknown) => void; __catchErrors: <F extends (...args: never[]) => unknown>(fn: F) =>');
     expect(assertion).toContain('__Component: typeof __RipComponent;');
-    for (const name of ['__reconcile', '__lis', '__ownerFrame']) expect(assertion).toContain(`${name}: any`);
+    expect(assertion).toContain('__pushComponent: (component: __RipComponent | null) => __RipComponent | null;');
+    expect(assertion).toContain('__lis: (arr: readonly number[]) => number[];');
+    expect(assertion).toContain('__reconcile: <C, T, O extends unknown[]>(');
+    expect(assertion).toContain('__ownerFrame: (options?: { nested?: boolean }) => __RipOwnerFrame;');
+    expect(assertion).not.toMatch(/\bany\b/);
     const sat = r.code.indexOf(' as { abort:');
     expect(sat).toBeGreaterThan(-1);
     const stdlib = r.code.slice(sat, r.code.indexOf(';\n', sat));
@@ -872,7 +877,7 @@ describe('TS-face emission pins', () => {
       ['schema', 'schema', 'orm', true],
       ['schema', 'schema', 'orm', true],
       ['getContext', 'getContext', 'components', true],
-      ['__lis', '__lis', 'components', false],
+      ['__lis', '__lis', 'components', true],
     ]);
     expect(r.code.slice(r.runtimeRefs[1][0] - 'return '.length, r.runtimeRefs[1][1] + '.sequence()'.length)).toBe('return schema.sequence()');
     // A program-scope binding of the name takes it out of delivery, so

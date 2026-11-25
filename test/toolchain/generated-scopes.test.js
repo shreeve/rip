@@ -312,7 +312,7 @@ describe('generated-scope inventory', () => {
       } else if (/factory function/.test(text)) {
         categories.diagnostic += row.count;
       } else if (/=>/.test(text) &&
-          /(?:^<[A-Z][\w$]* extends |\bany\b|:\s*(?:number|string|never|void|unknown|T\b)|=>\s*(?:void|never|unknown)|<T>|Promise<|AbortSignal|readonly value)/.test(text)) {
+          /(?:^<[A-Z][\w$]* extends |\bany\b|:\s*(?:readonly )?(?:number|string|never|void|unknown|T\b)|=>\s*(?:void|never|unknown)|<T>|Promise<|AbortSignal|readonly value|\b__Component\b)/.test(text)) {
         categories.type += row.count;
       } else {
         unknown.push(row);
@@ -323,10 +323,11 @@ describe('generated-scope inventory', () => {
     // node head against '=>' — whose `this` an assignment describes,
     // not an emission of one; classMethodForm spells '->' as the kind
     // of the method pair a class-body `def` reads as.
-    // type 38: the runtime table's face signatures and the alias text
+    // type 51: the runtime table's face signatures and the alias text
     // they reference, the schema and orm entries' among them —
-    // `__schema`'s open return included — and the components entry's
-    // context API with the provider alias it names.
-    expect(categories).toEqual({ diagnostic: 42, semantic: 20, type: 38 });
+    // `__schema`'s open return included — the components entry's
+    // context API with the provider alias it names, the lowering's own
+    // component calls, and the intrinsics.
+    expect(categories).toEqual({ diagnostic: 42, semantic: 20, type: 51 });
   });
 });

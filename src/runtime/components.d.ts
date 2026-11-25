@@ -17,6 +17,21 @@ type __RipProvider = abstract new (...args: never[]) => {
 type __RipOffers<P extends __RipProvider> = NonNullable<InstanceType<P>['__offers']>;
 type __RipProviding<P extends __RipProvider> = '__offers' extends keyof InstanceType<P> ? P : never;
 
+type __RipListBlock = {
+  c(): void;
+  m(parent: Node, anchor: Node | null): void;
+  p(ctx: unknown, item: unknown, index: number, ...outer: unknown[]): void;
+  d(detaching: boolean): void;
+  _s?: boolean;
+  _first?: Node | null;
+};
+
+type __RipListState = {
+  keys: unknown[];
+  items?: unknown[];
+  blocks: __RipListBlock[];
+};
+
 type __RipOwnerFrame = {
   readonly depth: number;
   readonly disposed: boolean;
@@ -98,21 +113,6 @@ type __RipGateMetadata = {
   parent?: __Component | null;
   stash?: unknown;
   router?: unknown;
-};
-
-type __RipListBlock = {
-  c(): void;
-  m(parent: Node, anchor: Node | null): void;
-  p(ctx: unknown, item: unknown, index: number, ...outer: unknown[]): void;
-  d(): void;
-  _s?: boolean;
-  _first?: Node | null;
-};
-
-type __RipListState = {
-  keys: unknown[];
-  items?: unknown[];
-  blocks: __RipListBlock[];
 };
 
 type __RipTeardown = {
@@ -207,13 +207,13 @@ export declare const hasContext: <P extends __RipProvider>(provider: __RipProvid
 export declare const __clsx: (...args: (__RipClassValue | __RipClassValue[])[]) => string;
 export declare const __style: (el: object, value: __RipCSSProperties | string | null | undefined) => void;
 export declare const __lis: (arr: readonly number[]) => number[];
-export declare const __reconcile: (anchor: Node | null | undefined, state: __RipListState, items: readonly unknown[], ctx: unknown, factory: (ctx: unknown, item: unknown, index: number, ...outer: unknown[]) => __RipListBlock, keyFn: ((item: unknown, index: number) => unknown) | null | undefined, ...outer: unknown[]) => void;
+export declare const __reconcile: <C, T, O extends unknown[]>(anchor: Node | null | undefined, state: __RipListState, items: readonly T[], ctx: C, factory: (ctx: C, item: T, index: number, ...outer: O) => __RipListBlock, keyFn: ((item: T, index: number) => unknown) | null | undefined, ...outer: O) => void;
 export declare const __transition: (el: Element, name: string, dir: string, done?: (() => void) | null) => void;
 export declare const __handleComponentError: (error: unknown, component: __Component | null | undefined) => void;
 
-export declare const __gateBind: (self: __Component, index: number) => {
-  readonly value: unknown;
-  read(): unknown;
+export declare const __gateBind: <T>(self: __Component, index: number) => {
+  readonly value: T;
+  read(): T;
 };
 
 export declare const __detach: (node: Node | null | undefined) => void;

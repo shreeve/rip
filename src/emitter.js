@@ -32,14 +32,14 @@ import { isComponentName, componentPathText, memberPathText, componentPathRoot, 
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader, jsArityOptional } from './ts/types.js';
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute, suggestAttribute } from './dom.js';
 import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls, CLSX_TYPE, STYLE_FN_TYPE } from './ts/dom-types.js';
-import { COMPONENT_CLASS, OWNER_FRAME_DECLS, TEARDOWN_DECL } from './ts/runtime-exports.js';
+import { COMPONENT_CLASS, OWNER_FRAME_DECLS, OWNER_FRAME_TYPES, TEARDOWN_DECL } from './ts/runtime-exports.js';
 import { restAliasName, restPassthroughText, restOfComponentText, restViewOfComponentText, hookParamTypes,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer, ambientClassDeclares, plainBehaviorValued, stateBehaviorValued, OFFERS, offersRecordText, HOST, hostTypeText, publicProps,
   propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType, restContainerType, MINTED,
   componentCtorMembers, componentCtorSegments, runtimeApiDeclares,
   syntacticLiteralType,
-  selfArgsOf, anyArgsOf, readonlyCastType, routeArgType,
+  selfArgsOf, anyArgsOf, readonlyCastType, routeArgType, gateProjection,
 } from './ts/components.js';
 
 // Component member vocabulary — emission owns these sets. The type story
@@ -596,6 +596,10 @@ class Emitter {
     // rediscovered by scanning output): the browser module loader
     // splices resolved specifiers by these exact offsets.
     this.importSpans = [];
+    // The runtime import statements, [start, end) per statement: a
+    // diagnostic standing there means the runtime did not resolve or
+    // carries no declaration, which leaves every injected name `any`.
+    this.runtimeImports = [];
     // Imported bindings the running program never references — the face
     // keeps them (they are real types there), the JS emission does not
     // (see collectTypeOnlyImports).
@@ -9695,12 +9699,11 @@ class Emitter {
         const ro = head === 'computed' ? 'readonly ' : '';
         this.tsAnnotate(node, 'annotation', containerType(this.annotationText(node), ro, MINTED));
       } else if (this.ts) {
-        // Unannotated reactive with a syntactically-evident value type
-        //: the container annotates from the
-        // initializer alone — `clicks := 0` is a number cell, `~=
-        // clicks * 2` a readonly number cell — so the cell CHECKS and
-        // the hover has a value type to present. Non-evident
-        // initializers stay untyped (the inlined runtime's inference).
+        // Unannotated reactive with a syntactically-evident value type:
+        // the container annotates from the initializer alone — `clicks
+        // := 0` is a number cell, `~= clicks * 2` a readonly number cell —
+        // so the cell CHECKS and the hover has a value type to present.
+        // Other initializers infer through the runtime's generic signature.
         // No `satisfies` here: the type came FROM the value.
         const t = syntacticLiteralType(value, this.stores);
         if (t !== null) {
@@ -10892,10 +10895,9 @@ class Emitter {
         });
       }
       if (tsInfo !== null) this.tsComponentCtor(tsInfo, pad);
-      // The lowering's own methods are private on the face: they are
-      // the runtime's to call, and no consumer's surface.
+      // `_init` overrides the base's public member, so it carries no
+      // modifier; the editor's runtime-private list keeps it from consumers.
       this.b.emit(pad);
-      if (tsInfo !== null) this.b.tsOnly(() => this.b.emit('private '));
       this.b.emit('_init(__given');
       if (tsInfo !== null) this.b.tsOnly(() => { this.b.emit(': '); this.emitDeclaredTypeCopies(propsTypeText(tsInfo, { road: 'face' })); });
       this.b.emit(') {\n');
@@ -11061,10 +11063,16 @@ class Emitter {
         const code = this.capturedExprText(() => this.computedBody(m.node, m.value, 0));
         computedBodies.push({ name: m.name, code, block: this.isBlock(m.value) && m.value.length > 2 });
       };
+      // Under a discovered stash the face names the gate's cell type, the
+      // stash projection, so the member's type — an annotation included —
+      // checks against what the stash yields.
       const emitGate = (gate, index) => {
         initLine(gate.node, () => {
           memberName(gate.node, gate.name);
-          this.b.emit(` = ${this.runtimeName('__gateBind')}(`);
+          this.b.emit(` = ${this.runtimeName('__gateBind')}`);
+          const projection = this.ts && this.appStashSpec !== null ? gateProjection(gate, this.appStashSpec) : null;
+          if (projection !== null) this.b.tsOnly(() => this.b.emit(`<${projection}>`));
+          this.b.emit('(');
           this.mark(gate.node, 'operator', () => {});
           this.mark(gate.node, 'rhs', () => {
             this.b.emit(`this, ${index}`);
@@ -19312,6 +19320,8 @@ const COMPONENTS_TYPE_DECLS = [
   'type __RipProvider = abstract new (...args: never[]) => { __offers?: object };',
   "type __RipOffers<P extends __RipProvider> = NonNullable<InstanceType<P>['__offers']>;",
   "type __RipProviding<P extends __RipProvider> = '__offers' extends keyof InstanceType<P> ? P : never;",
+  'type __RipListBlock = { c(): void; m(parent: Node, anchor: Node | null): void; p(ctx: unknown, item: unknown, index: number, ...outer: unknown[]): void; d(detaching: boolean): void; _s?: boolean; _first?: Node | null };',
+  'type __RipListState = { keys: unknown[]; items?: unknown[]; blocks: __RipListBlock[] };',
 ].join('\n');
 const COERCER_TYPE = '{ <F extends (value: string) => unknown>(name: string, fn: F, options?: { raw?: false }): F; <F extends (value: unknown) => unknown>(name: string, fn: F, options: { raw: boolean }): F }';
 // Adapter Contract v2 (docs/ORM.md): `query` is the floor the
@@ -19386,6 +19396,10 @@ const RUNTIME_TABLE = [
     key: 'intrinsics',
     names: ['__toPropertyKey', '__defineOwnDataProperty'],
     generatedNames: ['__toPropertyKey', '__defineOwnDataProperty'],
+    types: {
+      __toPropertyKey: '(value: unknown) => string | symbol',
+      __defineOwnDataProperty: '<T extends object>(target: T, key: PropertyKey, value: unknown) => T',
+    },
     url: new URL('./runtime/intrinsics.js', import.meta.url),
     triggers: (sexpr, preds) => containsObjectComprehension(sexpr),
   },
@@ -19567,10 +19581,23 @@ const RUNTIME_TABLE = [
       // The style road's writer — its value parameter is the face's
       // __RipCSSProperties alias, armed alongside.
       __style: STYLE_FN_TYPE,
-      // The base every component extends. A component's own `_init` is
-      // private on the face, which a public base member would refuse, so
-      // the face's copy leaves the base's out.
-      __Component: { class: COMPONENT_CLASS, decls: `${OWNER_FRAME_DECLS}\n${TEARDOWN_DECL}`, faceOmits: ['_init(props: Record<string, unknown>): void; '] },
+      // The base every component extends.
+      __Component: { class: COMPONENT_CLASS, decls: `${OWNER_FRAME_DECLS}\n${TEARDOWN_DECL}` },
+      // The lowering's own calls: list reconciliation generic over the
+      // context, the item and every outer loop binding; a gate's cell
+      // typed by the stash projection the face passes as its argument.
+      __pushComponent: '(component: __Component | null) => __Component | null',
+      __popComponent: '(prev: __Component | null) => void',
+      __lis: '(arr: readonly number[]) => number[]',
+      __reconcile: '<C, T, O extends unknown[]>(anchor: Node | null | undefined, state: __RipListState, items: readonly T[], ctx: C, factory: (ctx: C, item: T, index: number, ...outer: O) => __RipListBlock, keyFn: ((item: T, index: number) => unknown) | null | undefined, ...outer: O) => void',
+      __transition: '(el: Element, name: string, dir: string, done?: (() => void) | null) => void',
+      __handleComponentError: '(error: unknown, component: __Component | null | undefined) => void',
+      __gateBind: '<T>(self: __Component, index: number) => { readonly value: T; read(): T }',
+      __detach: '(node: Node | null | undefined) => void',
+      __heldSlot: '(children: unknown) => Node',
+      __reportChildFailure: '(name: string, error: unknown) => void',
+      __hostOf: '(inst: __Component, event: string) => Element',
+      ...OWNER_FRAME_TYPES,
     },
     url: new URL('./runtime/components.js', import.meta.url),
     requires: 'reactive',
@@ -19583,16 +19610,20 @@ const RUNTIME_TABLE = [
 // declared under a face name of its own and the binding typed `typeof`
 // it; a subclass's undeclared member then fails against it.
 const faceClassName = (name) => `__Rip${name.replace(/^_+/, '')}`;
-export const _faceRuntimeType = (name, signature) =>
-  typeof signature === 'object' ? `typeof ${faceClassName(name)}` : signature;
+// A string signature naming one of the unit's classes names its face
+// declaration, since the injected binding is a value.
+export const _faceRuntimeType = (name, signature, types = {}) => {
+  if (typeof signature === 'object') return `typeof ${faceClassName(name)}`;
+  let text = signature;
+  for (const [cls, sig] of Object.entries(types)) {
+    if (typeof sig === 'object') text = text.replace(new RegExp(`\\b${cls}\\b`, 'g'), faceClassName(cls));
+  }
+  return text;
+};
 export const _faceClassDecls = (types) => Object.entries(types ?? {})
   .filter(([, signature]) => typeof signature === 'object')
-  .map(([name, { class: body, decls, faceOmits = [] }]) => {
-    let text = body.replace(new RegExp(`\\b${name}\\b`, 'g'), faceClassName(name));
-    for (const member of faceOmits) {
-      if (!text.includes(member)) throw new Error(`runtime table: '${name}' omits '${member.trim()}' from its face class, which declares no such member`);
-      text = text.replace(member, '');
-    }
+  .map(([name, { class: body, decls }]) => {
+    const text = body.replace(new RegExp(`\\b${name}\\b`, 'g'), faceClassName(name));
     return `${decls ? `${decls}\n` : ''}declare class ${faceClassName(name)} ${text}`;
   })
   .join('\n');
@@ -20278,15 +20309,12 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
     const active = RUNTIME_TABLE.filter((rt) => runtimes.has(rt.key));
     const units = [];
     if (runtimeDelivery === 'import') {
-      // No `types` here: the import binds the runtime module's own JS, whose
-      // functions carry no type parameters. A TS FACE built under this delivery
-      // therefore cannot type-check an annotated reactive — the face spells
-      // `__state<T>(v)` and the imported `__state` takes none (TS2558). No
-      // shipped path asks for one (check and the server both deliver inline,
-      // and `--ts` refuses to combine with `--runtime`), so this is a
-      // constraint to respect rather than a bug to route around: typing an
-      // import-delivered face means giving these units a signature source too.
-      for (const rt of active) units.push({ runtimes: [rt], names: rt.names, imp: rt.url.pathname });
+      // The specifier is the module's file path (decoded: a URL pathname
+      // escapes spaces and non-ASCII). Under the face it resolves to the
+      // declaration beside each runtime, generated from these same `types`
+      // (`bun run decls`); the unit carries `types` so each reference
+      // records whether it is typed.
+      for (const rt of active) units.push({ runtimes: [rt], names: rt.names, imp: decodeURIComponent(rt.url.pathname), types: rt.types });
     } else {
       const fused = new Set(active.flatMap((rt) => runtimeRequires(rt)));
       for (const rt of active) {
@@ -20346,6 +20374,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
         builder.emit(JSON.stringify(unit.imp));
         emitter.importSpans.push({ start: specStart, end: builder.offset, specifier: JSON.stringify(unit.imp) });
         builder.emit(';\n');
+        emitter.runtimeImports.push([start, builder.offset]);
       } else {
         // The aliases the assertion's signatures reference, declared
         // ahead of it under the unit's own synthetic row (declarations
@@ -20370,7 +20399,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
         // binding mints — the assertion describes the object the
         // pattern reads from, not the names it binds.
         const types = face === 'ts' && unit.types
-          ? `{ ${bindings.map(({ name }) => `${name}: ${_faceRuntimeType(name, unit.types[name] ?? 'any')}`).join('; ')} }`
+          ? `{ ${bindings.map(({ name }) => `${name}: ${_faceRuntimeType(name, unit.types[name] ?? 'any', unit.types)}`).join('; ')} }`
           : null;
         // A signature in the assertion may reference a face-declared
         // alias; the tail emission arms it (declarations hoist, so the
@@ -20768,7 +20797,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   const partNames = emitter.exportedObjects
     .filter(([, values]) => values.every((value) => emitter.componentNames.includes(value)))
     .map(([name]) => name);
-  return { code: builder.code, mappings: builder.rows, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, runtimeRefs: emitter.runtimeRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, indexedLoops: emitter.indexedLoops, componentUses: emitter.componentUses, componentProps: emitter.componentProps, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
+  return { code: builder.code, mappings: builder.rows, runtimeImports: emitter.runtimeImports, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, runtimeRefs: emitter.runtimeRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, indexedLoops: emitter.indexedLoops, componentUses: emitter.componentUses, componentProps: emitter.componentProps, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

@@ -106,4 +106,17 @@ describe('cacheIdentityOf (the manifest key over both trees)', () => {
       fs.rmSync(b, { recursive: true, force: true });
     }
   });
+
+  // A face imports its runtime by absolute path, so two checkouts of the
+  // same bytes build faces that name different files.
+  test('the same compiler bytes at another path are another identity', () => {
+    const one = makeTree(BASE);
+    const two = makeTree(BASE);
+    const server = makeTree(SERVER);
+    try {
+      expect(cacheIdentityOf(one, server)).not.toBe(cacheIdentityOf(two, server));
+    } finally {
+      for (const dir of [one, two, server]) fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

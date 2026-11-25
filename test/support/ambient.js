@@ -40,7 +40,7 @@ const DECLS = [];
 for (const rt of _runtimeTable()) {
   for (const name of rt.names) {
     KNOWN.add(name);
-    if (rt.types?.[name]) TYPES.set(name, _faceRuntimeType(name, rt.types[name]));
+    if (rt.types?.[name]) TYPES.set(name, _faceRuntimeType(name, rt.types[name], rt.types));
   }
   if (rt.decls) DECLS.push(rt.decls);
   const classDecls = _faceClassDecls(rt.types);

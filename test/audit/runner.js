@@ -1481,8 +1481,8 @@ class FaceOracle {
     const code = FACES.get(base).code;
     this.client.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'typescript', version: 1, text: code } });
     // Generous ceiling (15s). The FIRST request per oracle triggers the full
-    // program build over all 12 faces (09's alone is ~167KB with the inlined
-    // runtime), and a timeout here surfaces downstream as a hard coverage abort
+    // program build over all 12 faces and the runtime declarations they
+    // import, and a timeout here surfaces downstream as a hard coverage abort
     // — so wait well past the editor side's 6s rather than fail a merely-slow
     // machine. A healthy build answers on the first poll; this ceiling is only
     // reached when something is genuinely wrong.
@@ -3313,7 +3313,7 @@ if (RUN_MAP) {
     try {
       // The SAME compile the server's `faceOf` and the survival oracle use, so
       // the rows walked here are the exact rows the editor remaps through.
-      const { code, mappings, vocabulary } = compile(src, { path: full, runtimeDelivery: 'inline', face: 'ts' });
+      const { code, mappings, vocabulary } = compile(src, { path: full, runtimeDelivery: 'import', face: 'ts' });
       scan = mappingScan(src, code, mappings, vocabulary);
     } catch (e) {
       // A fixture that will not compile has no face to walk. Surfaced, never
@@ -4207,7 +4207,7 @@ if (RUN_HOVER || RUN_TOKENS) {
   // fixture to its TS face ONCE into a shared dir where sibling faces resolve
   // each other's imports (07 → 06), then start one oracle PER LANE — the same
   // one-document contract as the editor servers and twins. The faces are the
-  // exact bytes the server remaps: same `compile(..., runtimeDelivery:'inline',
+  // exact bytes the server remaps: same `compile(..., runtimeDelivery:'import',
   // face:'ts')` call as server.js `faceOf`.
   let faces = [];
   if (RUN_TOKENS) {
@@ -4222,7 +4222,7 @@ if (RUN_HOVER || RUN_TOKENS) {
       const full = fixPath(f);
       if (!await compiles(full)) continue;   // a fixture with no face has nothing to survive
       try {
-        const { code, mappings, bindingNames, attrNames, importedRefs } = compile(fs.readFileSync(full, 'utf8'), { path: full, runtimeDelivery: 'inline', face: 'ts' });
+        const { code, mappings, bindingNames, attrNames, importedRefs } = compile(fs.readFileSync(full, 'utf8'), { path: full, runtimeDelivery: 'import', face: 'ts' });
         FACES.set(f, { code, mappings, bindingNames, attrNames, importedRefs });
         fs.writeFileSync(path.join(FACE_DIR, f.replace(/\.rip$/, '.rip.ts')), code);
       } catch (e) {

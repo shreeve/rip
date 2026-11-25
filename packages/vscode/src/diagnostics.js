@@ -145,6 +145,9 @@ function withRouteSuggestion(message, literal, entries) {
 // locations) rides the pull when the client advertises the capability
 // (`diagnostic: { relatedInformation: true }`), and the caller maps each
 // related location itself rather than routing it through here.
+// Cannot find module, no exported member (three spellings), no declaration file.
+const RUNTIME_IMPORT_FAILURES = new Set([2305, 2307, 2614, 2724, 7016]);
+
 export function mapTsDiagnostic(good, d) {
   if (!good.strict && SUPPRESSED_TS_CODES.has(d.code)) return null;
   // Installation pressure: a bare import the governing manifest declares
@@ -191,9 +194,13 @@ export function mapTsDiagnostic(good, d) {
   // synthetic region. A TYPE claim there is about bytes the author
   // never wrote — dropped. A SYNTAX-class error there still means the
   // face does not parse, so it reports at the FILE HEAD instead: a
-  // vanished syntax error reads as a clean file.
+  // vanished syntax error reads as a clean file. So does a runtime import
+  // that fails to resolve, has no declaration, or lacks a name: each leaves
+  // injected names `any` without another word.
   if (!span) {
-    if (!isSyntaxClass(d.code)) return null;
+    const runtimeImportFailed = RUNTIME_IMPORT_FAILURES.has(d.code)
+      && (good.runtimeImports ?? []).some(([a, b]) => a <= s && e <= b);
+    if (!isSyntaxClass(d.code) && !runtimeImportFailed) return null;
     return {
       severity: d.severity ?? 1,
       code: d.code,

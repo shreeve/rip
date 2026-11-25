@@ -843,7 +843,7 @@ while (queue.length) {
   const srcLineStarts = lineStartsOf(source);
   let result;
   try {
-    result = compile(source, { path: fsPath, face: 'ts', runtimeDelivery: 'inline', strict: cfg.strict, appStashSpec: appStashSpecFor(fsPath, workspaceRoot, stashMemo), ...routeOptionsFor(fsPath) });
+    result = compile(source, { path: fsPath, face: 'ts', runtimeDelivery: 'import', strict: cfg.strict, appStashSpec: appStashSpecFor(fsPath, workspaceRoot, stashMemo), ...routeOptionsFor(fsPath) });
   } catch (err) {
     if (err?.name !== 'CompileError') throw err;
     const { reason, start, end } = compileErrorInfo(err, source.length);
@@ -862,6 +862,7 @@ while (queue.length) {
       sourceKeys: result.sourceKeys ?? [],
       stashMembers: result.stashMembers ?? [],
       indexedLoops: result.indexedLoops ?? [],
+      runtimeImports: result.runtimeImports ?? [],
       memberInits: result.memberInits ?? [],
       // The render-pair re-anchor (mapTsDiagnostic): a complaint standing
       // on a pair's recorded relation site lands on the KEY here exactly
@@ -1081,7 +1082,7 @@ if (compiled.size > 0) {
       // importer's queued hovers against its dependency's didOpen, and
       // which pinnables land would then depend on timing, not source.
       const repin = (fsPath, entry, pins) => {
-        const r = compile(entry.source, { path: fsPath, face: 'ts', runtimeDelivery: 'inline', strict: entry.cfg.strict, pins, appStashSpec: appStashSpecFor(fsPath, workspaceRoot, stashMemo), ...routeOptionsFor(fsPath) });
+        const r = compile(entry.source, { path: fsPath, face: 'ts', runtimeDelivery: 'import', strict: entry.cfg.strict, pins, appStashSpec: appStashSpecFor(fsPath, workspaceRoot, stashMemo), ...routeOptionsFor(fsPath) });
         entry.good.code = r.code;
         entry.good.mappings = r.mappings;
         entry.good.echoSpans = r.echoSpans ?? [];
@@ -1091,6 +1092,7 @@ if (compiled.size > 0) {
         entry.good.stashMembers = r.stashMembers ?? [];
         entry.good.memberInits = r.memberInits ?? [];
         entry.good.renderPairs = r.renderPairs ?? [];
+        entry.good.runtimeImports = r.runtimeImports ?? [];
         entry.good.genLineStarts = lineStartsOf(r.code);
         fs.writeFileSync(entry.mirrorPath, r.code);
         tsgo.notify('textDocument/didOpen', { textDocument: { uri: entry.mirrorUri, languageId: 'typescript', version: 1, text: r.code } });

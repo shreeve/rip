@@ -417,8 +417,8 @@ describe('TS-face artifact filters', () => {
   });
 
   test('scrubFaceArtifacts: the component base reads back as Component', () => {
-    expect(scrubFaceArtifacts('(property) __RipComponent.rest?: unknown')).toBe('(property) Component.rest?: unknown');
-    expect(scrubFaceArtifacts('(method) __RipComponent.mount(target?: Node | string): __RipComponent')).toBe('(method) Component.mount(target?: Node | string): Component');
+    expect(scrubFaceArtifacts('(property) __Component.rest?: unknown')).toBe('(property) Component.rest?: unknown');
+    expect(scrubFaceArtifacts('(method) __Component.mount(target?: Node | string): __Component')).toBe('(method) Component.mount(target?: Node | string): Component');
   });
 
   test('scrubFaceArtifacts: the context reads name their provider and its offers, never the conditional that admits it', () => {

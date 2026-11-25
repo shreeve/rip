@@ -41,6 +41,9 @@ export function hashTree(dir) {
 // compiler alone leaves the second half unversioned — change which
 // spellings count as an edge and every warm workspace goes on serving
 // lists the old rule produced, invisibly, until each file is next
-// edited. Order matters, so the two trees can never trade places.
+// edited. Order matters, so the two trees can never trade places. The
+// compiler's own path joins them: a face imports its runtime by absolute
+// path, so a face built by another checkout of the same bytes names that
+// checkout's runtime, which may be gone.
 export const cacheIdentityOf = (compilerDir, serverDir) =>
-  hashText(`compiler:${hashTree(compilerDir)};server:${hashTree(serverDir)}`);
+  hashText(`compiler:${compilerDir}:${hashTree(compilerDir)};server:${hashTree(serverDir)}`);

@@ -542,7 +542,7 @@ if (showTsFace) {
   const tsFaceSource = inputFile !== null ? readFileSync(inputFile, 'utf8') : readFileSync(0, 'utf8');
   const { compile, CompileError } = await loadCompiler();
   try {
-    const { code } = compile(tsFaceSource, { path: inputFile ?? '<stdin>', face: 'ts' });
+    const { code } = compile(tsFaceSource, { path: inputFile ?? '<stdin>', face: 'ts', runtimeDelivery: 'import' });
     process.stdout.write(code.endsWith('\n') ? code : `${code}\n`);
   } catch (err) {
     if (err instanceof CompileError) fail(err.message);
