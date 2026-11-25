@@ -1,6 +1,6 @@
 # src/lexer.js mutation survivors
 
-409 of 565 survivors classified.
+429 of 565 survivors classified.
 
 ## GAP
 
@@ -274,6 +274,26 @@
 - src/lexer.js:2266:108275:number — test/lang/lexer.test.js › operator and literal spans › prototype access: every minted token covers the two colons
 - src/lexer.js:2271:108419:arith — test/lang/lexer.test.js › rejection spans › operator rejections cover the offending characters
 - src/lexer.js:2271:108421:number — test/lang/lexer.test.js › rejection spans › operator rejections cover the offending characters
+- src/lexer.js:2288:109341:logic — test/rip/operators.rip › a tight else colon after any value-ending token closes the ternary
+- src/lexer.js:2288:109365:logic — test/rip/operators.rip › a tight else colon after any value-ending token closes the ternary
+- src/lexer.js:2288:109389:logic — test/rip/operators.rip › a tight else colon after any value-ending token closes the ternary
+- src/lexer.js:2289:109428:logic — test/rip/operators.rip › a tight else colon after any value-ending token closes the ternary
+- src/lexer.js:2289:109460:logic — test/rip/operators.rip › a tight else colon after any value-ending token closes the ternary
+- src/lexer.js:2290:109500:logic — test/rip/operators.rip › a tight else colon after any value-ending token closes the ternary
+- src/lexer.js:2290:109531:logic — test/rip/operators.rip › a tight else colon after any value-ending token closes the ternary
+- src/lexer.js:2291:109568:logic — test/rip/operators.rip › a tight else colon after any value-ending token closes the ternary
+- src/lexer.js:2292:109638:logic — test/rip/operators.rip › a tight else colon after any value-ending token closes the ternary
+- src/lexer.js:2292:109666:logic — test/rip/operators.rip › a tight else colon after any value-ending token closes the ternary
+- src/lexer.js:2293:109708:logic — test/rip/operators.rip › a tight else colon after any value-ending token closes the ternary
+- src/lexer.js:2293:109735:logic — test/rip/operators.rip › a tight else colon after any value-ending token closes the ternary
+- src/lexer.js:2294:109770:logic — test/rip/operators.rip › a tight else colon after any value-ending token closes the ternary
+- src/lexer.js:2294:109802:logic — test/rip/operators.rip › a tight else colon after any value-ending token closes the ternary
+- src/lexer.js:2295:109839:logic — test/rip/operators.rip › a tight else colon after any value-ending token closes the ternary
+- src/lexer.js:2295:109863:logic — test/rip/operators.rip › a tight else colon after any value-ending token closes the ternary
+- src/lexer.js:2296:109906:logic — test/rip/operators.rip › a tight else colon after any value-ending token closes the ternary
+- src/lexer.js:2296:109939:logic — test/rip/operators.rip › a tight else colon after any value-ending token closes the ternary
+- src/lexer.js:2297:109974:logic — test/rip/operators.rip › a tight else colon after any value-ending token closes the ternary
+- src/lexer.js:2297:109998:logic — test/rip/operators.rip › a tight else colon after any value-ending token closes the ternary
 - src/lexer.js:2357:112931:statement — test/lang/lexer.test.js › tolerant end-of-input repair › repairs anchor before trailing newlines, LF or CRLF
 - src/lexer.js:2357:112937:branch — test/lang/lexer.test.js › tolerant end-of-input repair › repairs anchor before trailing newlines, LF or CRLF
 - src/lexer.js:2357:112952:logic — test/lang/lexer.test.js › tolerant end-of-input repair › repairs anchor before trailing newlines, LF or CRLF

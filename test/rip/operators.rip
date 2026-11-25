@@ -602,3 +602,36 @@ fail "an unspaced ? between a tight operator and a colon", "x = a+?: b", "unspac
 fail "is not with a tab rejects", "x is\tnot y", "'is not' compares against a negation"
 fail "and followed by == is no compound assignment", "x and== y", "Unexpected '=='"
 fail "new followed by a member other than target rejects", "f = -> new.foo", "1:11: Unexpected '.'"
+
+# A colon tight to a name after a value-ending token is structural (here a
+# ternary's else colon), never a symbol literal.
+test "a tight else colon after any value-ending token closes the ternary", '''
+  c = false
+  b = 9
+  f = -> 1
+  x = [1]
+  o = {a: 1}
+  u = null
+  [
+    c ? (1) :b
+    c ? [1] :b
+    c ? {} :b
+    c ? f(1) :b
+    c ? x[0] :b
+    c ? o.{a} :b
+    c ? "s" :b
+    c ? "s#{b}" :b
+    c ? 1 :b
+    c ? /r/ :b
+    c ? ///r#{b}/// :b
+    c ? true :b
+    c ? null :b
+    c ? undefined :b
+    c ? f! :b
+    c ? u? :b
+    c ? f?! :b
+    c ? this :b
+    c ? @ :b
+    c ? :a :b
+  ]
+''', [9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9]
