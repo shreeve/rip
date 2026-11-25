@@ -1174,6 +1174,39 @@ test 'multi-line handler-less try swallows', '''
   'after'
   ''', 'after'
 
+# An inline try inside an implicit call or object finishes on its line:
+# the next line is the next statement, never another argument or pair.
+test 'an inline try argument ends the call at its line', '''
+  seen = []
+  f = (...args) -> seen.push args.length
+  f try 1
+  f 2
+  seen
+''', [1, 1]
+
+test 'an inline try finally argument ends the call at its line', '''
+  seen = []
+  f = (...args) -> seen.push args.length
+  f try 1 finally seen.push 'fin'
+  f 2
+  seen
+''', ['fin', 1, 1]
+
+test 'a next-line finally still belongs to the inline try argument', '''
+  seen = []
+  f = (...args) -> seen.push args.length
+  f try 1
+  finally seen.push 'fin'
+  f 2
+  seen
+''', ['fin', 1, 1]
+
+test 'an inline try pair value ends the object at its line', '''
+  x = a: try 1
+  y = 2
+  [x.a, y]
+''', [1, 2]
+
 code 'or throw assignment generates if', '  data = fetchData() or throw new Error \'No data\'', '''
   let data;
 
