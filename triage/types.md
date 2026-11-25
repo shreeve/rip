@@ -3,7 +3,7 @@
 Survivors of the lexer-pass mutation audit at 119b45bb, classified per the triage brief.
 Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 
-## GAP (195)
+## GAP (198)
 
 - src/types.js:217:11845:statement — test/rip/types.rip › a method member after a generic member in an inline object type
 - src/types.js:217:11858:number — test/rip/types.rip › a method member after a generic member in an inline object type
@@ -112,6 +112,9 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:636:31698:logic — test/rip/types.rip › a parenthesized conditional type is an arrow return
 - src/types.js:636:31732:boolean — test/rip/types.rip › a parenthesized conditional type is an arrow return
 - src/types.js:638:31820:boolean — test/rip/types.rip › a colon after a parenthesized conditional type branch rejects
+- src/types.js:805:39485:relation — test/rip/types.rip › an object-key colon is no type head for a trailing comparison
+- src/types.js:806:39533:relation — test/rip/types.rip › a string-key colon is no type head for a trailing comparison
+- src/types.js:815:40025:branch — test/rip/types.rip › an object-key colon is no type head for a trailing comparison
 - src/types.js:840:40971:statement — test/rip/types.rip › a trailing comparison line after a generic return type continues
 - src/types.js:851:41340:branch — test/rip/types.rip › a trailing comparison line after a generic return type continues
 - src/types.js:851:41390:logic — test/rip/types.rip › a trailing comparison line after a generic return type continues
@@ -201,7 +204,7 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:1901:90987:statement — test/rip/types.rip › a colon after a parameter default is an object key
 - src/types.js:1901:91013:boolean — test/rip/types.rip › a colon after a parameter default is an object key
 
-## EQUIVALENT (162)
+## EQUIVALENT (163)
 
 - src/types.js:221:12006:statement — openAngle is reassigned at every `<` opened from angle 0 and read only while angle > 0, i.e. after such an opener; the stale value is always overwritten first
 - src/types.js:249:13482:arith — j-2 < from puts tokens[j-2] before the body: the alias `=` or the body INDENT, never `=>`, `asserts`, or a `:` after CALL_END, so the shape test fails there anyway
@@ -237,6 +240,7 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:625:31096:statement — same as 625:31120 — depth is always 0 here
 - src/types.js:625:31120:boolean — a claimed run is bracket-balanced, so depth is 0 after the walk and this return never runs
 - src/types.js:631:31412:relation — tokens[b] is the run's arrow stop: not a bracket, TERNARY, `?`, or `:`
+- src/types.js:804:39407:boolean — before is null only for a colon that is the file's first token, and every such program crashes in implicit.js collectObjects whatever this answer decides (see the 804:39387 BUG)
 - src/types.js:824:40396:branch — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
 - src/types.js:824:40407:relation — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
 - src/types.js:824:40423:logic — the memo's ref is the trailing closer at its sync, and nothing pops it (closers pop only the TERMINATORs after it), so the shift test is false on every reachable sync; a mutant that rebuilds more often recomputes the same state from the nearest line boundary (level and answers reset at every boundary, and the answers read only earlier tokens), and none suppresses a rebuild that can be needed
@@ -366,9 +370,16 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:1890:90493:statement — the flag is already false at the `;` unless an immediate head directly precedes it (`-> ;`, `loop ;`, `do ;`), which leaves an empty body the grammar rejects at the same token either way (probed)
 - src/types.js:1891:90533:statement — pendingCond is true at the `;` only after `= if/class…` with no THEN, which the grammar rejects at the same token either way (probed `c = if x ;`, `c = class ;`)
 
-## BUG (8)
+## BUG (15)
 
 - src/types.js:495:25439:statement — `x = y as A |\n  B` → expected the type `A | B` (or a loud rejection), got `let x = y;\nB;`: the cast run breaks at the continuation line's depth-0 newline after a trailing `|`, and `B` silently compiles as its own statement
+- src/types.js:804:39387:statement — `: a < b, c >\n  d` (any file starting with `:`) → expected a positioned rejection, got a TypeError; base crashes in implicit.js collectObjects (`tokens[s].start`), the mutant one step earlier (`before.kind`). The guard's only input already crashes downstream (implicit.js, outside this file)
+- src/types.js:815:40022:statement — `def t!: Map<string, number>\n  null` → expected `function t()` with return type `Map<string, number>` (as `def t!(): Map<string, number>` compiles), got `Unexpected 'newline' — expected indent` (the body is swallowed into the type, TYPE "Map<string, number>null"): at scan time the bang is still DAMMIT (tagVoidMarkers runs later), so this VOID_MARKER rule is dead and the trailing `>` never ends the line — deleting the dead rule changes nothing
+- src/types.js:815:40038:relation — `def t!: Map<string, number>\n  null` → expected `function t()` with return type `Map<string, number>` (as `def t!(): Map<string, number>` compiles), got `Unexpected 'newline' — expected indent` (the body is swallowed into the type, TYPE "Map<string, number>null"): at scan time the bang is still DAMMIT (tagVoidMarkers runs later), so this VOID_MARKER rule is dead and the trailing `>` never ends the line — this mutant fires on the DAMMIT and compiles it correctly
+- src/types.js:815:40056:logic — `def t!: Map<string, number>\n  null` → expected `function t()` with return type `Map<string, number>` (as `def t!(): Map<string, number>` compiles), got `Unexpected 'newline' — expected indent` (the body is swallowed into the type, TYPE "Map<string, number>null"): at scan time the bang is still DAMMIT (tagVoidMarkers runs later), so this VOID_MARKER rule is dead and the trailing `>` never ends the line — this mutant fires on the DAMMIT and compiles it correctly
+- src/types.js:815:40079:arith — `def t!: Map<string, number>\n  null` → expected `function t()` with return type `Map<string, number>` (as `def t!(): Map<string, number>` compiles), got `Unexpected 'newline' — expected indent` (the body is swallowed into the type, TYPE "Map<string, number>null"): at scan time the bang is still DAMMIT (tagVoidMarkers runs later), so this VOID_MARKER rule is dead and the trailing `>` never ends the line — this mutant survives because the rule never fires
+- src/types.js:815:40081:number — `def t!: Map<string, number>\n  null` → expected `function t()` with return type `Map<string, number>` (as `def t!(): Map<string, number>` compiles), got `Unexpected 'newline' — expected indent` (the body is swallowed into the type, TYPE "Map<string, number>null"): at scan time the bang is still DAMMIT (tagVoidMarkers runs later), so this VOID_MARKER rule is dead and the trailing `>` never ends the line — this mutant survives because the rule never fires
+- src/types.js:815:40092:boolean — `def t!: Map<string, number>\n  null` → expected `function t()` with return type `Map<string, number>` (as `def t!(): Map<string, number>` compiles), got `Unexpected 'newline' — expected indent` (the body is swallowed into the type, TYPE "Map<string, number>null"): at scan time the bang is still DAMMIT (tagVoidMarkers runs later), so this VOID_MARKER rule is dead and the trailing `>` never ends the line — this mutant survives because the rule never fires
 - src/types.js:1435:68450:arith — `a = [x as number\n]` (also `f(x as number\n)`, `{a: x as number\n}`) → expected `[x]`, got `Unexpected ']'` at 3:1: the cast's terminator restoration inserts a TERMINATOR before a closer on its own line (`a = [x\n]` compiles)
 - src/types.js:1435:68452:number — same repro as 1435:68450 — the restoration fires for every newline follower, closers included
 - src/types.js:1510:72162:statement — same repro as 1510:72165

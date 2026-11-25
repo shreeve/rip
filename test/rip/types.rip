@@ -1427,3 +1427,29 @@ type 'a boolean-literal class field type', "class A\n  x: true", '''
     x: true;
   }
 '''
+
+# ==============================================================================
+# Mutation-audit pins — type-head colons at a trailing generic close
+# ==============================================================================
+
+test 'an object-key colon is no type head for a trailing comparison', '''
+  g = (o, x, y) -> y
+  b = 1
+  c = 2
+  d = 3
+  e = 0
+  r = g {k: 1}, b < c, d >
+    e
+  r
+''', true
+
+test 'a string-key colon is no type head for a trailing comparison', '''
+  b = 1
+  c = 2
+  d = 3
+  e = 0
+  f = ->
+    "s": [b < c, d >
+      e]
+  f().s
+''', [true, true]
