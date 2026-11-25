@@ -3,7 +3,7 @@
 Survivors of the lexer-pass mutation audit at 119b45bb, classified per the triage brief.
 Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 
-## GAP (180)
+## GAP (195)
 
 - src/types.js:217:11845:statement — test/rip/types.rip › a method member after a generic member in an inline object type
 - src/types.js:217:11858:number — test/rip/types.rip › a method member after a generic member in an inline object type
@@ -50,6 +50,21 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:316:17288:statement — test/rip/types.rip › two method members in an inline object type
 - src/types.js:317:17316:statement — test/rip/types.rip › a negative literal opening a method parameter list
 - src/types.js:317:17326:boolean — test/rip/types.rip › a negative literal opening a method parameter list
+- src/types.js:409:21087:relation — test/rip/types.rip › a fat arrow after a union member is no type, so the line stays an object
+- src/types.js:415:21640:boolean — test/rip/types.rip › a tuple parameter in a fn-type-valued declaration
+- src/types.js:421:22010:relation — test/rip/types.rip › a comparison chain in a class body is no field type
+- src/types.js:421:22023:boolean — test/rip/types.rip › a comparison chain in a class body is no field type
+- src/types.js:429:22376:branch — test/rip/types.rip › a generic default in a fn-type-valued declaration
+- src/types.js:429:22381:relation — test/rip/types.rip › an assignment after an open union in a fn-type declaration rejects
+- src/types.js:429:22383:number — test/rip/types.rip › a generic default in a fn-type-valued declaration
+- src/types.js:429:22398:boolean — test/rip/types.rip › a generic default in a fn-type-valued declaration
+- src/types.js:429:22405:statement — test/rip/types.rip › a generic default in a fn-type-valued declaration
+- src/types.js:429:22424:boolean — test/rip/types.rip › an assignment after an open union in a fn-type declaration rejects
+- src/types.js:432:22681:relation — test/rip/types.rip › a string-literal union class field
+- src/types.js:432:22715:relation — test/rip/types.rip › a class field type admitting undefined
+- src/types.js:432:22731:logic — test/rip/types.rip › a class field type admitting undefined
+- src/types.js:432:22736:relation — test/rip/types.rip › a boolean-literal class field type
+- src/types.js:433:22776:boolean — test/rip/types.rip › two adjacent names in a class body are no field type
 - src/types.js:495:25462:relation — test/rip/types.rip › a cast to a multi-line object type
 - src/types.js:495:25466:number — test/rip/types.rip › a cast to a multi-line object type
 - src/types.js:503:25918:relation — test/rip/types.rip › a cast to a triple generic close
@@ -186,7 +201,7 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:1901:90987:statement — test/rip/types.rip › a colon after a parameter default is an object key
 - src/types.js:1901:91013:boolean — test/rip/types.rip › a colon after a parameter default is an object key
 
-## EQUIVALENT (155)
+## EQUIVALENT (162)
 
 - src/types.js:221:12006:statement — openAngle is reassigned at every `<` opened from angle 0 and read only while angle > 0, i.e. after such an opener; the stale value is always overwritten first
 - src/types.js:249:13482:arith — j-2 < from puts tokens[j-2] before the body: the alias `=` or the body INDENT, never `=>`, `asserts`, or a `:` after CALL_END, so the shape test fails there anyway
@@ -203,6 +218,13 @@ Pins live in `test/rip/types.rip` (the "Mutation-audit pins" blocks at the end).
 - src/types.js:309:17043:relation — tokens[to] is the body's OUTDENT or the alias line's TERMINATOR/OUTDENT (typeAliasEnd rejects anything else after the run), never CALL_START/CALL_END
 - src/types.js:328:17580:logic — every CALL_START in a body either rejects or pushes its mate's index, and the pairs nest, so each CALL_END that reaches this line is the stack top
 - src/types.js:329:17680:boolean — a method list's CALL_END is always followed by its return `:` (the push requires it), which matches no atomEnd-reading rule and resets atomEnd
+- src/types.js:396:20424:statement — same as 396:20430 — the empty slice returns false at the end
+- src/types.js:396:20430:relation — an empty slice skips the loop and fails the final `atomEnd` check, so returning false early or not is the same
+- src/types.js:396:20443:boolean — every caller passes a non-empty slice (decideBareRun and the class-field claim check end > start first; typedDeclEq calls only after a `=>` inside the slice), so the empty-slice branch never runs
+- src/types.js:408:21041:relation — at j === a the previous token is the token before the slice — the annotation `:` in every caller — never `)` or PARAM_END, so the arrow rejects as with p null
+- src/types.js:414:21441:boolean — the slices callers pass are bracket-balanced (whole lines, or a typedDeclEq prefix ending at a depth-0 `=`), so a closer never underflows and this return never runs
+- src/types.js:416:21723:boolean — the slices callers pass are bracket-balanced (whole lines, or a typedDeclEq prefix ending at a depth-0 `=`), so a closer never underflows and this return never runs
+- src/types.js:418:21858:boolean — the slices callers pass are bracket-balanced (whole lines, or a typedDeclEq prefix ending at a depth-0 `=`), so a closer never underflows and this return never runs
 - src/types.js:464:24312:arith — `end`'s initial value survives only when the run collects no parts (every part push sets end), and every caller discards run.end then (claim returns -1; typeAliasEnd fails at tokens[j-1].end)
 - src/types.js:464:24314:number — `end`'s initial value survives only when the run collects no parts (every part push sets end), and every caller discards run.end then (claim returns -1; typeAliasEnd fails at tokens[j-1].end)
 - src/types.js:464:24322:logic — `end`'s initial value survives only when the run collects no parts (every part push sets end), and every caller discards run.end then (claim returns -1; typeAliasEnd fails at tokens[j-1].end)

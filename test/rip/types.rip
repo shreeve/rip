@@ -1384,3 +1384,46 @@ test 'a bare typed field before an else arrow is still a field', '''
   else -> 1
   Object.keys(new r())
 ''', ["x"]
+
+# ==============================================================================
+# Mutation-audit pins — complete-type judgment
+# ==============================================================================
+
+test 'a tuple parameter in a fn-type-valued declaration', '''
+  get: (p: [number]) => number = (p) -> p[0]
+  get([7])
+''', 7
+
+test 'a generic default in a fn-type-valued declaration', '''
+  get: () => Foo<T = number> = -> 5
+  get()
+''', 5
+
+test 'a fat arrow after a union member is no type, so the line stays an object', '''
+  r = 0
+  number = 1
+  B = (f) -> r = 7
+  x: (a: number) | B => C
+  x = 1
+  r
+''', 7
+
+fail 'a comparison chain in a class body is no field type', "class A\n  x: a > (b) < c", "a class field takes '=' for its value"
+fail 'two adjacent names in a class body are no field type', "class A\n  x: f g", "a class field takes '=' for its value"
+fail 'an assignment after an open union in a fn-type declaration rejects', 'get: () => A | = b = 5', ":1:16: Unexpected '='"
+
+type 'a string-literal union class field', "class A\n  x: \"a\" | \"b\"", '''
+  declare class A {
+    x: "a" | "b";
+  }
+'''
+type 'a class field type admitting undefined', "class A\n  x: number | undefined", '''
+  declare class A {
+    x: number | undefined;
+  }
+'''
+type 'a boolean-literal class field type', "class A\n  x: true", '''
+  declare class A {
+    x: true;
+  }
+'''
