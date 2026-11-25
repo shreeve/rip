@@ -41,6 +41,12 @@ jobs:
       - name: Rip language battery
         run: bun run test:rip
 
+      # Parser only, under a second: every grammar production is reduced by
+      # a fixture or excluded by a row that names a real production, so a
+      # grammar change can't leave the corpus or the exclusion table behind.
+      - name: Grammar audit
+        run: bun run audit --grammar
+
   browser:
     runs-on: ubuntu-latest
     timeout-minutes: 40
