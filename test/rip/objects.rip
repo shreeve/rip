@@ -299,3 +299,40 @@ test 'a callee ending its line inside braces takes the indented pairs', '''
     b: 1}
   x
 ''', {a: 1}
+
+# ==============================================================================
+# Indented-object calls, guards and continuations at the edges
+# ==============================================================================
+
+test 'a pair after a trailing comma inside brackets is a new element', '''
+  x = a: [1,
+      b: 2]
+  x
+''', {a: [1, {b: 2}]}
+
+test 'a guard on a bare object at the end of the program guards the statement', 'c = true\na: 1 if c', {a: 1}
+
+test 'a guard with call parens still sees the next pair', '''
+  f = (v) -> v
+  c = false
+  x =
+    a: 1 if f(c)
+    b: 2
+  [Object.keys(x), x.b]
+''', [['a', 'b'], 2]
+
+test 'a loop head owns the indented block after an object condition', '''
+  f = 3
+  until a: f
+    b: 1
+  'done'
+''', 'done'
+
+test 'a callee inside an if head paren takes the indented pairs', '''
+  f = (o) -> o.b
+  r = 0
+  if (f
+      b: 1)
+    r = 5
+  r
+''', 5

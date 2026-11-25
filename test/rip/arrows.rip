@@ -186,3 +186,5 @@ test 'an inline if inside a one-line body claims its own else', '''
 ''', 3
 
 test 'a line-starting optional chain applies to the one-line function', 'g = -> 1\n?.length\ntypeof g', 'number'
+
+test 'a program may begin with a one-line arrow', '-> 5\n.call()', 5

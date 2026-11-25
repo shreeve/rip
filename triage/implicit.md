@@ -1,6 +1,6 @@
 # Mutation triage: src/implicit.js
 
-Survivors classified: 165 of 191.
+Survivors classified: 191 of 191.
 
 ## GAP
 
@@ -112,6 +112,18 @@ Survivors classified: 165 of 191.
 - src/implicit.js:97:5172:statement — test/rip/control.rip › a head on an earlier statement does not make a later then a body
 - src/implicit.js:224:10335:relation — test/mapping/stores.test.js › store rows: an empty one-line body anchors at its introducer (a span pin: the mutant moves only the generated INDENT/OUTDENT anchors, which no value or rejection observes)
 - src/implicit.js:240:11030:number — test/mapping/stores.test.js › store rows: an empty one-line body anchors at its introducer (a span pin, as for 224:10335)
+- src/implicit.js:259:11558:number — test/rip/arrows.rip › a program may begin with a one-line arrow
+- src/implicit.js:263:11725:arith — test/rip/arrows.rip › a program may begin with a one-line arrow
+- src/implicit.js:385:18616:relation — test/rip/commaless.rip › a fat arrow after an array literal is the next argument
+- src/implicit.js:390:18971:relation — test/rip/commaless.rip › a fat arrow after Infinity is the next argument
+- src/implicit.js:392:19095:arith — test/rip/control.rip › a spread argument after the first token opens the call
+- src/implicit.js:392:19097:number — test/rip/control.rip › a spread argument at the end of the program opens the call
+- src/implicit.js:454:21873:negation — test/rip/objects.rip › a callee inside an if head paren takes the indented pairs
+- src/implicit.js:550:26923:statement — test/rip/objects.rip › a pair after a trailing comma inside brackets is a new element
+- src/implicit.js:593:29177:arith — test/rip/objects.rip › a loop head owns the indented block after an object condition
+- src/implicit.js:593:29179:number — test/rip/objects.rip › a loop head owns the indented block after an object condition
+- src/implicit.js:624:30189:relation — test/rip/objects.rip › a guard on a bare object at the end of the program guards the statement
+- src/implicit.js:627:30312:update — test/rip/objects.rip › a guard with call parens still sees the next pair
 
 ## EQUIVALENT
 
@@ -156,12 +168,26 @@ Survivors classified: 165 of 191.
 - src/implicit.js:80:4430:number — starting at j = i visits the THEN itself, which is in no set and is neither TERMINATOR nor ELSE
 - src/implicit.js:83:4575:statement — after `depth++` depth is at least 1 (an opener at depth 0 returns at once, so depth is never negative), so the `depth > 0` continue fires anyway
 - src/implicit.js:87:4699:statement — falling through after an opener: an opener kind is not a head, TERMINATOR or ELSE
-- src/implicit.js:224:10343:update — reached only when tokens[start] is generated; stepping back lands on the introducer, a real token, which moves only the generated INDENT's start/origin. That anchor is unobservable here: an empty or generated-led body never produced a differing span, value or rejection under probing (the anchor equals the body's first real token in every non-empty case checked)
+- src/implicit.js:224:10343:update — fires only when the body's first token is generated: arrow and ELSE bodies cannot start with an INDENT (the trigger excludes it), a generated TERMINATOR or OUTDENT there ends the body empty so the loop never runs, and a THEN followed by a scanner INDENT (`if a then` + indented line) rejects at that INDENT ("Unexpected 'indent'") whichever way the THEN's anchor points
 - src/implicit.js:236:10852:update — afterReal feeds only afterId, the OUTDENT's origin, and token origin is never read after assignment
 - src/implicit.js:238:10902:branch — same as 236:10852 (afterId only)
 - src/implicit.js:238:10903:negation — same as 236:10852 (afterId only)
 - src/implicit.js:238:10950:statement — same as 236:10852 (afterId only)
 - src/implicit.js:240:11041:number — the `?? 0` fallback needs tokens[start - 1] to be missing, but start = i + 1 >= 1 and tokens[i] (the introducer) always exists
+- src/implicit.js:32:1772:statement — with no insertions the backward merge copies every token onto itself (read and write start equal and move together)
+- src/implicit.js:214:9874:boolean — generated block INDENT/OUTDENT `spaced` is read by no later stage: every later flag read is gated on a kind that is never INDENT/OUTDENT (FOR, `.`/`?.`, a call starter, the token after an unspaced sign), and startsLine already counts INDENT/OUTDENT as line breaks by kind
+- src/implicit.js:214:9890:boolean — same as 214:9874, for `newLine`
+- src/implicit.js:250:11232:number — `lastClosedAt === i` at i = 0 means an ELSE as the program's first token, which rejects at that token ("Unexpected 'else'") with or without a wrapped body
+- src/implicit.js:272:12241:statement — an INDENT's value is never read: the parser adapter passes it on as text, but no grammar action or error message spells an INDENT by its text (errors name the kind; `if then x` reports 'indent' either way)
+- src/implicit.js:367:17749:relation — every TernaryClaims user steps a bracket-balanced tape, so each closer arrives after its own opener pushed a depth and top > 0 holds at every closer; `>=` differs only at an unmatched closer, which the scanner rejects
+- src/implicit.js:447:21750:statement — after `depth++` depth is at least 1, so neither the opener branch (not an opener) nor the depth-0 line-break test applies
+- src/implicit.js:450:21813:relation — differs only by scanning past an unmatched generated `{` to a head on the same line. In the call pass such a `{` sits left of the callee only when the object pass kept its object open across the INDENT, which it does only when its own controlHeadBackwards (on the tape before braces) found no head. In the object pass no generated `{` exists yet, and generated INDENTs are line breaks
+- src/implicit.js:455:21942:statement — falling through after a pass-through opener: only generated non-line-break openers reach it, and the remaining test is the depth-0 line-break check, which they fail
+- src/implicit.js:529:26073:boolean — the `?? false` default applies only to `}` (closeObject passes no flags), and a `}`'s spaced flag is never read (`}` is neither IMPLICIT_FUNC nor a call starter)
+- src/implicit.js:529:26106:boolean — same as 529:26073, for `}`'s newLine
+- src/implicit.js:529:26103:logic — forces a generated `{`'s newLine to false; the only later reader of a generated token's newLine is the unspaced-sign check (`f -a: 1`), where the key follows the sign on the same line and is never line-starting
+- src/implicit.js:535:26272:number — lastReal is never null at closeObject: a close comes after the pair's `:`, and the tape before it holds the program's first token, which the scanner always emits as a real token
+- src/implicit.js:550:26950:logic — the pass-through matters only for a comma sitting directly in an ordinary INDENT block above an open object, with no implicit call open and an indented pair after it. Rip has no bare comma list at block level (`y = 1,` + indented pair rejects at the comma either way), and brackets, call parens and implicit calls stop or claim the comma first
 
 ## BUG
 
@@ -184,3 +210,4 @@ Survivors classified: 165 of 191.
 - Not a survivor, found while probing (emitter, not this file): a bare implicit object statement ending in `;` at the end of the program (`a: 1;`, or `x = 1` + `a: 1;`) crashes with "undefined is not an object (evaluating 'assignIndex.blockMaps[assignIndex.blockIdAt[start]].get')" — an unpositioned internal TypeError.
 - BUG, not tied to a survivor: a nested arrow at the end of a one-line arrow body cannot take an indented block. `h -> g ->` + indented `x`, and `describe "a", -> it "b", ->` + indented body, reject with "Unexpected implicit ')' — expected indent" (bodyEnd ends the outer body at the inner arrow's unclaimed INDENT). `h ->` + indented `g ->` + deeper `x` compiles.
 - BUG, not tied to a survivor: `x = (if a then b) then c` rejects with "Unexpected 'indent'". thenIntroducesBody pairs the earlier THEN's in-place INDENT (whose OUTDENT is not on the tape yet) with the `)`, sees the IF, and opens a body. Expected `(x = (a ? b : undefined)) && c`, which `x = (a else b) then c` gets.
+- Possible BUG, not tied to a survivor: an empty arrow as the last token of the program rejects. `f = ->` alone fails with "Unexpected end of input — expected indent", while `f = ->` + another line and `x = (->)` both compile to an empty function.
