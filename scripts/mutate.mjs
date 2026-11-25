@@ -286,13 +286,16 @@ async function genTable(args) {
 
 // ── runner ───────────────────────────────────────────────────────────────
 const STAGES = {
-  1: ['test', '--bail', '--timeout', '15000', 'test/rip.test.js', 'test/toolchain/corpus-expected.test.js'],
+  1: ['test', '--isolate', '--bail', '--timeout', '15000', 'test/rip.test.js', 'test/toolchain/corpus-expected.test.js'],
   // Serial with --bail, cheapest killers first: several mutants in
   // parallel use the machine better than one mutant with --parallel.
+  // --isolate gives each file the fresh global `bun run test` gives it
+  // (--parallel implies it): files that share one global see each
+  // other's once-per-runtime state, and then file order decides verdicts.
   // A table mutant IS a parser.js that differs from what the grammar
   // generates, so the regeneration gate would kill every one of them
   // without consulting behavior.
-  2: (m) => ['test', '--bail', '--timeout', '30000', 'test/rip.test.js', 'test/toolchain/corpus-expected.test.js', 'test/mapping', 'test/lang', 'test/ui', 'test/schema',
+  2: (m) => ['test', '--isolate', '--bail', '--timeout', '30000', 'test/rip.test.js', 'test/toolchain/corpus-expected.test.js', 'test/mapping', 'test/lang', 'test/ui', 'test/schema',
     ...readdirSync(join(ROOT, 'test/toolchain')).filter((f) => f.endsWith('.test.js') && f !== 'package-rip-style.test.js' && f !== 'corpus-expected.test.js' && !(m.op === 'table' && f === 'generated.test.js')).map((f) => `test/toolchain/${f}`)],
   // The language suite's `test` and `fail` rows alone: values and
   // positioned rejections, no emitted-byte comparison. Run on mutants
@@ -300,7 +303,7 @@ const STAGES = {
   // which the rebuild may renegotiate. Mixed suites (ui, schema, lang,
   // mapping) assert bytes beside behavior, so they stay out rather than
   // vouch for behavior they may only be spelling.
-  3: ['test', '--bail', '--timeout', '15000', 'test/rip.test.js', '-t', '^rip: \\S+ (test|fail) '],
+  3: ['test', '--isolate', '--bail', '--timeout', '15000', 'test/rip.test.js', '-t', '^rip: \\S+ (test|fail) '],
 };
 
 async function runOne(dir, stage, timeoutMs, m) {
