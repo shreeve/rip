@@ -166,7 +166,20 @@ const diagnosticError = (file, path, d) => {
 // fabricate, and inventing a closing quote would change what every
 // byte after it means; the editor rides out those keystrokes on the
 // last good face instead.
-export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, script = false, browserModule = false, foldProjections = false, ambientBindings = null, repl = false, tolerant = false, hmr = false, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
+export function compile(source, options = {}) {
+  return emitSource(parseSource(source, options), options);
+}
+
+// compile() in its two halves, for a caller that emits one parse more
+// than once — `rip check` re-emits a file with pins after probing it,
+// and only the emission depends on pins. The parse is everything up to
+// the tree, including what rewrites the tree (projection folding), so
+// an emission never mutates what a later emission reads. Options that
+// shape the parse — the face, whether it is tolerant, folding — are
+// fixed by parseSource; emitSource rejects a different face or
+// tolerance rather than emit from a parse that does not carry what that
+// face reads.
+export function parseSource(source, { path = '<anonymous>', face = 'js', tolerant = false, foldProjections = false } = {}) {
   // One stable identifying error for a non-string source — without
   // it, malformed input fails in whichever subsystem dereferences it
   // first, with an incidental TypeError.
@@ -214,6 +227,14 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
   }
 
   if (foldProjections) foldDerivedSchemas(result.sexpr);
+  return { source, path, file, face, tolerant, dataPayload, result };
+}
+
+export function emitSource(parsed, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, script = false, browserModule = false, ambientBindings = null, repl = false, tolerant = false, hmr = false, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
+  if (face !== parsed.face || tolerant !== parsed.tolerant || path !== parsed.path) {
+    throw new CompileError(`emitSource: emits the parse it was given — face ${JSON.stringify(face)}, tolerant ${tolerant}, path ${JSON.stringify(path)} must match the parse (face ${JSON.stringify(parsed.face)}, tolerant ${parsed.tolerant}, path ${JSON.stringify(parsed.path)})`, { path });
+  }
+  const { source, file, dataPayload, result } = parsed;
 
   let emitted;
   try {

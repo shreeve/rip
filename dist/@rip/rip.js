@@ -25680,7 +25680,10 @@ var diagnosticError = (file, path, d) => {
   (${hint})` : d.message;
   return positioned(file, path, message, d.start, d.end);
 };
-function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", face = "js", pins = null, strict = false, script = false, browserModule = false, foldProjections = false, ambientBindings = null, repl = false, tolerant = false, hmr = false, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
+function compile(source, options = {}) {
+  return emitSource(parseSource(source, options), options);
+}
+function parseSource(source, { path = "<anonymous>", face = "js", tolerant = false, foldProjections = false } = {}) {
   if (typeof source !== "string") {
     const kind = source === null ? "null" : Array.isArray(source) ? "an array" : `a ${typeof source}`;
     throw new CompileError(`compile: source must be a string; got ${kind}`, { path });
@@ -25716,6 +25719,13 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
   }
   if (foldProjections)
     foldDerivedSchemas(result.sexpr);
+  return { source, path, file, face, tolerant, dataPayload, result };
+}
+function emitSource(parsed, { path = "<anonymous>", runtimeDelivery = "inline", face = "js", pins = null, strict = false, script = false, browserModule = false, ambientBindings = null, repl = false, tolerant = false, hmr = false, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
+  if (face !== parsed.face || tolerant !== parsed.tolerant || path !== parsed.path) {
+    throw new CompileError(`emitSource: emits the parse it was given — face ${JSON.stringify(face)}, tolerant ${tolerant}, path ${JSON.stringify(path)} must match the parse (face ${JSON.stringify(parsed.face)}, tolerant ${parsed.tolerant}, path ${JSON.stringify(parsed.path)})`, { path });
+  }
+  const { source, file, dataPayload, result } = parsed;
   let emitted;
   try {
     emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, browserModule, dataPayload, ambientBindings, repl, hmr, tolerant, modulePath: path, appStashSpec, routesUnion, routeParams });
@@ -34488,7 +34498,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "7c2cbc08786e9909";
+var compilerBuild = () => "82d91ae791f59302";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
