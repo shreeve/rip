@@ -384,6 +384,11 @@ async function run(args) {
           appendFileSync(args.out, JSON.stringify({ id: m.id, stage, verdict: 'equivalent', by: 'identical table' }) + '\n');
           continue;
         }
+      } else if (src.slice(m.start, m.end) !== m.from) {
+        // The file moved under the mutant since it was generated: its
+        // offset no longer holds the token it names.
+        appendFileSync(args.out, JSON.stringify({ id: m.id, stage, verdict: 'moved' }) + '\n');
+        continue;
       } else mutated = src.slice(0, m.start) + m.to + src.slice(m.end);
       writeFileSync(target, mutated);
       let r;
@@ -612,6 +617,9 @@ async function observe(args) {
           appendFileSync(args.out, JSON.stringify({ id: m.id, verdict: 'invalid' }) + '\n');
           continue;
         }
+      } else if (src.slice(m.start, m.end) !== m.from) {
+        appendFileSync(args.out, JSON.stringify({ id: m.id, verdict: 'moved' }) + '\n');
+        continue;
       } else mutated = src.slice(0, m.start) + m.to + src.slice(m.end);
       writeFileSync(target, mutated);
       let r;
