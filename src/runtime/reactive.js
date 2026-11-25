@@ -161,92 +161,229 @@ function __flushEffects() {
   }
 }
 
-// Shared primitive coercion (used by state and computed)
-const __primitiveCoercion = {
-  valueOf() { return this.value; },
-  toString() { return String(this.value); },
+// ── The dependency graph ─────────────────────────────────────────────
+//
+// One Link per edge, shared by both ends: it sits in its subscriber's
+// dependency list (singly linked, in read order) and in its source's
+// subscriber list (doubly linked, in notify order). A re-run walks its
+// previous list in step with its reads and reuses each link whose source
+// comes up again in the same place, so a run that reads what it read
+// last time allocates nothing and touches no hash table. Links the run
+// did not reach are unlinked when it ends.
+//
+// Two rules keep this observably identical to a graph that drops every
+// edge at run start and re-adds each one on read:
+//   - a reused link moves to the END of its source's subscriber list,
+//     where re-adding would put it — notify order decides queue order,
+//     and queue order decides flush order within an owner depth;
+//   - while a subscriber runs, a link it has not yet re-read this run
+//     is not followed by notification (a dropped edge would not be).
+// A link carries the epoch of the run that last read it; the run's own
+// epoch tells current links from not-yet-re-read ones.
+
+class Link {
+  constructor(dep, sub) {
+    this.dep = dep;
+    this.sub = sub;
+    this.epoch = sub._epoch;
+    this.version = -1;       // a computed source's version as this read saw it
+    this.nextDep = null;
+    this.prevSub = null;
+    this.nextSub = null;
+    this.attached = false;   // in dep's subscriber list (free()/kill() detach)
+  }
+}
+
+function attachSub(dep, link) {
+  const tail = dep._subsTail;
+  link.prevSub = tail;
+  link.nextSub = null;
+  if (tail === null) dep._subsHead = link; else tail.nextSub = link;
+  dep._subsTail = link;
+  link.attached = true;
+}
+
+function detachSub(dep, link) {
+  if (!link.attached) return;
+  const p = link.prevSub, n = link.nextSub;
+  if (p === null) dep._subsHead = n; else p.nextSub = n;
+  if (n === null) dep._subsTail = p; else n.prevSub = p;
+  link.prevSub = link.nextSub = null;
+  link.attached = false;
+}
+
+// free()/kill(): the source forgets its subscribers. Their dependency
+// lists keep the links (detached), exactly as they kept a stale edge to
+// a cleared subscriber set: a later read re-attaches, a later run or
+// dispose discards.
+function detachAllSubs(dep) {
+  let l = dep._subsHead;
+  while (l !== null) {
+    const n = l.nextSub;
+    l.prevSub = l.nextSub = null;
+    l.attached = false;
+    l = n;
+  }
+  dep._subsHead = dep._subsTail = null;
+}
+
+// Record that sub read dep in its current run; returns the edge.
+function track(dep, sub) {
+  const cursor = sub._cursor;
+  if (cursor !== null && cursor.dep === dep) return cursor;
+  const next = cursor === null ? sub._depsHead : cursor.nextDep;
+  if (next !== null && next.dep === dep) {
+    next.epoch = sub._epoch;
+    if (!next.attached || dep._subsTail !== next) { detachSub(dep, next); attachSub(dep, next); }
+    sub._cursor = next;
+    return next;
+  }
+  const link = new Link(dep, sub);
+  if (cursor === null) { link.nextDep = sub._depsHead; sub._depsHead = link; }
+  else { link.nextDep = cursor.nextDep; cursor.nextDep = link; }
+  attachSub(dep, link);
+  sub._cursor = link;
+  return link;
+}
+
+function beginRun(sub) {
+  sub._epoch++;
+  sub._cursor = null;
+  sub._running++;
+}
+
+// Everything past the cursor is what this run did not read.
+function endRun(sub) {
+  const cursor = sub._cursor;
+  let l = cursor === null ? sub._depsHead : cursor.nextDep;
+  while (l !== null) { detachSub(l.dep, l); l = l.nextDep; }
+  if (cursor === null) sub._depsHead = null; else cursor.nextDep = null;
+  sub._running--;
+}
+
+function dropAllDeps(sub) {
+  for (let l = sub._depsHead; l !== null; l = l.nextDep) detachSub(l.dep, l);
+  sub._depsHead = null;
+  sub._cursor = null;
+}
+
+// Is this edge followed by notification right now?
+function live(link) {
+  const sub = link.sub;
+  return sub._running === 0 || link.epoch === sub._epoch;
+}
+
+// Has the subscriber read dep during its current run so far?
+function readThisRun(sub, dep) {
+  const end = sub._cursor;
+  if (end === null) return false;
+  for (let l = sub._depsHead; l !== null; l = l.nextDep) {
+    if (l.dep === dep) return true;
+    if (l === end) break;
+  }
+  return false;
+}
+
+const DEPENDENCY_WRITE = 'reactive runtime: computed dependency changed during evaluation — ' +
+  'computed functions must derive without writing or touching a dependency';
+
+// Shared by state and computed: the subscriber list and primitive
+// coercion. A container serializes as `{ value }`, its one public field.
+class Source {
+  valueOf() { return this.value; }
+  toString() { return String(this.value); }
   [Symbol.toPrimitive](hint) { return hint === 'string' ? this.toString() : this.valueOf(); }
-};
+  toJSON() { return { value: this.value }; }
+}
 
-function __state(initialValue) {
-  if (initialValue != null && typeof initialValue === 'object' && typeof initialValue.read === 'function') return initialValue;
-  let value = initialValue;
-  const subscribers = new Set();
-  let notifying = false;
-  let locked = false;
-  let dead = false;
-  const rejectComputedDependencyMutation = () => {
-    if (__currentEffect && typeof __currentEffect.markDirty === 'function' &&
-        __currentEffect.dependencies.has(subscribers)) {
-      throw new Error(
-        'reactive runtime: computed dependency changed during evaluation — ' +
-        'computed functions must derive without writing or touching a dependency');
-    }
-  };
-  const recordComputedMutation = () => {
-    for (const computed of __computingStack) computed.writtenSignals.add(subscribers);
-  };
+class State extends Source {
+  constructor(value) {
+    super();
+    this._value = value;
+    this._subsHead = null;
+    this._subsTail = null;
+    this._notifying = false;
+    this._locked = false;
+    this._dead = false;
+  }
 
-  // Notify subscribers of a change: computeds mark dirty (invalidation
-  // propagates without recomputation), effects queue for the flush.
-  // `notifying` is the reentrancy guard — a write to THIS state from
-  // an effect running inside this state's own flush is dropped (the
-  // self-feeding loop has no terminating reading). The finally
-  // restores the guard even when a flushed effect throws, so the
-  // state stays writable after an aborted flush.
-  const notify = () => {
-    notifying = true;
+  get value() {
+    const cur = __currentEffect;
+    if (cur === null || this._dead) return this._value;
+    if (cur._isComputed && writtenDuringComputation(this)) throw new Error(DEPENDENCY_WRITE);
+    track(this, cur);
+    return this._value;
+  }
+
+  set value(newValue) {
+    if (this._dead || this._locked || newValue === this._value) return;
+    this._rejectDependencyWrite();
+    if (this._notifying) return;
+    recordComputedMutation(this);
+    this._value = newValue;
+    this._notify();
+  }
+
+  read() { return this._value; }
+  touch() {
+    if (this._dead) return;
+    this._rejectDependencyWrite();
+    if (this._notifying) return;
+    recordComputedMutation(this);
+    this._notify();
+  }
+  lock() { this._locked = true; return this; }
+  free() { detachAllSubs(this); return this; }
+  kill() { this._dead = true; detachAllSubs(this); return this._value; }
+
+  _rejectDependencyWrite() {
+    const cur = __currentEffect;
+    if (cur !== null && cur._isComputed && readThisRun(cur, this)) throw new Error(DEPENDENCY_WRITE);
+  }
+
+  // Computeds mark dirty (invalidation propagates without
+  // recomputation), effects queue for the flush. `_notifying` is the
+  // reentrancy guard — a write to THIS state from an effect running
+  // inside this state's own flush is dropped (the self-feeding loop has
+  // no terminating reading). The finally restores the guard even when a
+  // flushed effect throws, so the state stays writable after an aborted
+  // flush.
+  _notify() {
+    this._notifying = true;
     try {
-      for (const sub of subscribers) {
-        if (sub.markDirty) sub.markDirty(true);
+      for (let l = this._subsHead; l !== null; l = l.nextSub) {
+        if (!live(l)) continue;
+        const sub = l.sub;
+        if (sub._isComputed) sub.markDirty(true);
         else { sub._hard = true; __pendingEffects.add(sub); }
       }
       if (!__batching) __flushEffects();
     } finally {
-      notifying = false;
+      this._notifying = false;
     }
-  };
+  }
+}
 
-  const state = {
-    get value() {
-      if (dead) return value;
-      if (__currentEffect?.writtenSignals &&
-          __computingStack.some((computed) => computed.writtenSignals.has(subscribers))) {
-        throw new Error(
-          'reactive runtime: computed dependency changed during evaluation — ' +
-          'computed functions must derive without writing or touching a dependency');
-      }
-      if (__currentEffect) {
-        subscribers.add(__currentEffect);
-        __currentEffect.dependencies.add(subscribers);
-      }
-      return value;
-    },
+// A state written during a computed's evaluation may not then be read
+// by any computation still on the stack.
+function writtenDuringComputation(state) {
+  for (let i = 0; i < __computingStack.length; i++) {
+    const w = __computingStack[i]._written;
+    if (w !== null && w.has(state)) return true;
+  }
+  return false;
+}
 
-    set value(newValue) {
-      if (dead || locked || newValue === value) return;
-      rejectComputedDependencyMutation();
-      if (notifying) return;
-      recordComputedMutation();
-      value = newValue;
-      notify();
-    },
+function recordComputedMutation(state) {
+  for (let i = 0; i < __computingStack.length; i++) {
+    const c = __computingStack[i];
+    (c._written ??= new Set()).add(state);
+  }
+}
 
-    read() { return value; },
-    touch() {
-      if (dead) return;
-      rejectComputedDependencyMutation();
-      if (notifying) return;
-      recordComputedMutation();
-      notify();
-    },
-    lock() { locked = true; return state; },
-    free() { subscribers.clear(); return state; },
-    kill() { dead = true; subscribers.clear(); return value; },
-
-    ...__primitiveCoercion
-  };
-  return state;
+function __state(initialValue) {
+  if (initialValue != null && typeof initialValue === 'object' && typeof initialValue.read === 'function') return initialValue;
+  return new State(initialValue);
 }
 
 const CLEAN = 0, CHECK = 1, DIRTY = 2;
@@ -258,9 +395,11 @@ function __computedDepsChanged(consumer) {
   const prev = __currentEffect;
   __currentEffect = null;
   try {
-    for (const [dep, seen] of consumer.computedDeps) {
+    for (let l = consumer._depsHead; l !== null; l = l.nextDep) {
+      const dep = l.dep;
+      if (!dep._isComputed) continue;
       dep.value;
-      if (dep.version !== seen) return true;
+      if (dep.version !== l.version) return true;
     }
     return false;
   } finally {
@@ -268,110 +407,107 @@ function __computedDepsChanged(consumer) {
   }
 }
 
+class Computed extends Source {
+  constructor(fn) {
+    super();
+    this._fn = fn;
+    this._value = undefined;
+    this._dirty = DIRTY;
+    this._subsHead = null;
+    this._subsTail = null;
+    this._depsHead = null;
+    this._cursor = null;
+    this._epoch = 0;
+    this._running = 0;
+    this._written = null;
+    this._locked = false;
+    this._dead = false;
+    this._computing = false;
+    this.version = 0;
+  }
+
+  // hard: a state dependency changed (must recompute). soft: an
+  // upstream computed was invalidated (recompute only if it turns out
+  // to have changed). Propagation happens once, on CLEAN → not.
+  markDirty(hard) {
+    if (this._dead || this._locked) return;
+    if (this._computing) throw new Error(DEPENDENCY_WRITE);
+    const was = this._dirty;
+    if (hard) this._dirty = DIRTY; else if (was === CLEAN) this._dirty = CHECK;
+    if (was !== CLEAN) return;
+    for (let l = this._subsHead; l !== null; l = l.nextSub) {
+      if (!live(l)) continue;
+      const sub = l.sub;
+      if (sub._isComputed) sub.markDirty(false);
+      else __pendingEffects.add(sub);
+    }
+  }
+
+  get value() {
+    if (this._dead) return this._value;
+    // A reentrant external reader must retain its dependency edge even
+    // though the value cannot be read until this computation commits.
+    // The computing value itself never subscribes to itself. The edge's
+    // version starts at -1, which no version matches: a throw between
+    // here and the bottom leaves the next pull-check treating this
+    // computed as changed (conservative).
+    const cur = __currentEffect;
+    let link = null;
+    if (cur !== null && cur !== this) { link = track(this, cur); link.version = -1; }
+    if (this._computing) {
+      throw new Error(
+        'reactive runtime: computed value read during its own evaluation — ' +
+        'recursive computed reads are not supported');
+    }
+    if (this._dirty === CHECK && !this._locked) {
+      this._dirty = __computedDepsChanged(this) ? DIRTY : CLEAN;
+    }
+    if (this._dirty === DIRTY && !this._locked) {
+      beginRun(this);
+      this._written = null;
+      __currentEffect = this;
+      __computingStack.push(this);
+      this._computing = true;
+      try {
+        const next = this._fn();
+        if (next !== this._value) this.version++;
+        this._value = next;
+        this._dirty = CLEAN;
+      } finally {
+        this._computing = false;
+        __computingStack.pop();
+        this._written = null;
+        __currentEffect = cur;
+        endRun(this);
+      }
+    }
+    if (link !== null) link.version = this.version;
+    return this._value;
+  }
+
+  read() { return this._value; }
+  // Freeze the CACHE, not the current answer: locking sets the flag
+  // before the .value touch, so a computed locked before its first
+  // read stays undefined forever (the touch subscribes a current
+  // effect but never evaluates — locked reads skip recomputation).
+  lock() { this._locked = true; this.value; return this; }
+  free() {
+    dropAllDeps(this);
+    detachAllSubs(this);
+    return this;
+  }
+  kill() {
+    this._dead = true;
+    const result = this._value;
+    this.free();
+    return result;
+  }
+}
+Computed.prototype._isComputed = true;
+State.prototype._isComputed = false;
+
 function __computed(fn) {
-  let value;
-  let dirty = DIRTY;
-  const subscribers = new Set();
-  let locked = false;
-  let dead = false;
-  let computing = false;
-
-  const computed = {
-    dependencies: new Set(),
-    computedDeps: new Map(),
-    writtenSignals: new Set(),
-    version: 0,
-
-    // hard: a state dependency changed (must recompute). soft: an
-    // upstream computed was invalidated (recompute only if it turns
-    // out to have changed). Propagation happens once, on CLEAN → not.
-    markDirty(hard) {
-      if (dead || locked) return;
-      if (computing) {
-        throw new Error(
-          'reactive runtime: computed dependency changed during evaluation — ' +
-          'computed functions must derive without writing or touching a dependency');
-      }
-      const was = dirty;
-      if (hard) dirty = DIRTY; else if (dirty === CLEAN) dirty = CHECK;
-      if (was !== CLEAN) return;
-      for (const sub of subscribers) {
-        if (sub.markDirty) sub.markDirty(false);
-        else __pendingEffects.add(sub);
-      }
-    },
-
-    get value() {
-      if (dead) return value;
-      // A reentrant external reader must retain its dependency edge even
-      // though the value cannot be read until this computation commits.
-      // The computing value itself never subscribes to itself.
-      if (__currentEffect && __currentEffect !== computed) {
-        subscribers.add(__currentEffect);
-        __currentEffect.dependencies.add(subscribers);
-        // Placeholder until the read commits: a throw between here and
-        // the bottom leaves -1, which no version matches, so the next
-        // pull-check treats this computed as changed (conservative).
-        __currentEffect.computedDeps.set(computed, -1);
-      }
-      if (computing) {
-        throw new Error(
-          'reactive runtime: computed value read during its own evaluation — ' +
-          'recursive computed reads are not supported');
-      }
-      if (dirty === CHECK && !locked) {
-        dirty = __computedDepsChanged(computed) ? DIRTY : CLEAN;
-      }
-      if (dirty === DIRTY && !locked) {
-        for (const dep of computed.dependencies) dep.delete(computed);
-        computed.dependencies.clear();
-        computed.computedDeps.clear();
-        const prev = __currentEffect;
-        computed.writtenSignals.clear();
-        __currentEffect = computed;
-        __computingStack.push(computed);
-        computing = true;
-        try {
-          const next = fn();
-          if (next !== value) computed.version++;
-          value = next;
-          dirty = CLEAN;
-        } finally {
-          computing = false;
-          __computingStack.pop();
-          computed.writtenSignals.clear();
-          __currentEffect = prev;
-        }
-      }
-      if (__currentEffect && __currentEffect !== computed) {
-        __currentEffect.computedDeps.set(computed, computed.version);
-      }
-      return value;
-    },
-
-    read() { return value; },
-    // Freeze the CACHE, not the current answer: locking sets the flag
-    // before the .value touch, so a computed locked before its first
-    // read stays undefined forever (the touch subscribes a current
-    // effect but never evaluates — locked reads skip recomputation).
-    lock() { locked = true; computed.value; return computed; },
-    free() {
-      for (const dep of computed.dependencies) dep.delete(computed);
-      computed.dependencies.clear();
-      computed.computedDeps.clear();
-      subscribers.clear();
-      return computed;
-    },
-    kill() {
-      dead = true;
-      const result = value;
-      computed.free();
-      return result;
-    },
-
-    ...__primitiveCoercion
-  };
-  return computed;
+  return new Computed(fn);
 }
 
 // Runs fn with no effect current, so a reactive read inside it
@@ -398,138 +534,147 @@ function __runCleanup(effect) {
   effect._cleanup = null;
 }
 
-function __effect(fn) {
-  let controller = null;
-  let runId = 0; // increments per run; async resolutions check it to drop stale results
-  // The creation-time owner, restored around EVERY run body —
-  // symmetric with __currentEffect. A re-run arrives from whatever
-  // context wrote the signal (usually no owner at all), so without
-  // the restore, effects and frames created DURING a re-run (a
-  // reconcile factory rebuilding blocks inside a loop effect) would
-  // be ownerless and survive the owning frame's disposal. Free
-  // effects capture null.
-  const owner = __currentOwner;
-  const effect = {
-    depth: owner ? owner.depth + 1 : 0,
-    dependencies: new Set(),
-    computedDeps: new Map(),
-    _hard: true, // the creation run always runs; a state write sets it again
-    _disposed: false,
+class Effect {
+  constructor(fn, owner) {
+    this._fn = fn;
+    // The creation-time owner, restored around EVERY run body —
+    // symmetric with __currentEffect. A re-run arrives from whatever
+    // context wrote the signal (usually no owner at all), so without
+    // the restore, effects and frames created DURING a re-run (a
+    // reconcile factory rebuilding blocks inside a loop effect) would
+    // be ownerless and survive the owning frame's disposal. Free
+    // effects capture null.
+    this._owner = owner;
+    this.depth = owner ? owner.depth + 1 : 0;
+    this._depsHead = null;
+    this._cursor = null;
+    this._epoch = 0;
+    this._running = 0;
+    this._hard = true; // the creation run always runs; a state write sets it again
+    this._disposed = false;
+    this._cleanup = null;
+    this._controller = null;
+    this._runId = 0;   // increments per run; async resolutions check it to drop stale results
+  }
 
-    // AbortSignal for the current run; aborts on re-run / dispose. Made
-    // on first read: most effects never ask, and a controller per run
-    // is the larger part of a small effect's cost. Read after dispose,
-    // it arrives already aborted.
-    get signal() {
-      if (!controller && typeof AbortController !== 'undefined') {
-        controller = new AbortController();
-        if (effect._disposed) controller.abort();
-      }
-      return controller ? controller.signal : null;
-    },
-
-    run() {
-      // Zombie-run guard. An effect can be queued in __pendingEffects
-      // and then disposed before the flush reaches it — an earlier
-      // effect in the same flush may have disposed it. Running it
-      // anyway would re-subscribe it to every signal its body reads,
-      // leaking one subscriber per flush cycle that hits the race.
-      if (effect._disposed) return;
-      // Reached only through computeds? Pull-check them; if none
-      // changed its output, this run is a no-op: edges, cleanup and
-      // the AbortSignal all stay as the previous run left them.
-      const hard = effect._hard;
-      effect._hard = false;
-      if (!hard && !__computedDepsChanged(effect)) return;
-      // Abort the previous run's signal, if that run asked for one:
-      // async work still mid-flight from it (a fetch carrying the
-      // signal) sees the abort and can bail, and 'abort' listeners
-      // user code attached fire. This run gets its own on first read.
-      if (controller) {
-        try { controller.abort(); } catch {}
-        controller = null;
-      }
-      // Per-run id captured by the closures below. When the effect
-      // re-runs while a prior async body is still awaiting, the prior
-      // body's eventual resolution sees myRun !== runId and bails —
-      // stale cleanup never overwrites the current run's cleanup.
-      const myRun = ++runId;
-
-      __runCleanup(effect);
-      for (const dep of effect.dependencies) dep.delete(effect);
-      effect.dependencies.clear();
-      effect.computedDeps.clear();
-      const prev = __currentEffect;
-      __currentEffect = effect;
-      const prevOwner = __currentOwner;
-      __currentOwner = owner;
-      try {
-        const result = fn();
-        if (typeof result === 'function') {
-          effect._cleanup = result;
-        } else if (result && typeof result.then === 'function') {
-          // Async effect body. A pending await cannot be unwound, but
-          // the eventual resolution can be intercepted to decide
-          // whether the cleanup it returns is still wanted:
-          //   - effect disposed while the body was awaiting: run the
-          //     cleanup immediately so resources release, store nothing;
-          //   - effect re-ran (a newer run superseded this one): same.
-          // In both cases effect._cleanup is left alone — it belongs
-          // to a different run.
-          result.then(
-            (cleanup) => {
-              if (myRun !== runId || effect._disposed) {
-                if (typeof cleanup === 'function') {
-                  try { cleanup(); }
-                  catch (e) { __effectErrorReporter('[Rip] superseded async cleanup error:', e); }
-                }
-                return;
-              }
-              if (typeof cleanup === 'function') effect._cleanup = cleanup;
-            },
-            (err) => {
-              // AbortError from a dispose or supersede is expected
-              // (the body passed our signal to fetch/etc. and it
-              // aborted). Swallow silently.
-              if (err && err.name === 'AbortError') return;
-              // Stale rejection from a superseded run: the caller has
-              // already moved on.
-              if (myRun !== runId || effect._disposed) return;
-              __effectErrorReporter('[Rip] async effect error:', err);
-            }
-          );
-        }
-      } finally { __currentEffect = prev; __currentOwner = prevOwner; }
-    },
-
-    dispose() {
-      // Idempotent: tangled cleanup paths may reach the same effect
-      // twice. The quick exit avoids re-running cleanup and re-walking
-      // already-empty dependencies.
-      if (effect._disposed) return;
-      effect._disposed = true;
-      // Proactive pending-set eviction. The flush-time guard also
-      // handles this, but evicting here keeps the set bounded across
-      // long batched cycles and makes disposal semantics direct
-      // rather than dependent on flush ordering.
-      __pendingEffects.delete(effect);
-      // Abort the current signal so in-flight async work unwinds via
-      // AbortError and the body can bail.
-      if (controller) {
-        try { controller.abort(); } catch {}
-      }
-      __runCleanup(effect);
-      for (const dep of effect.dependencies) dep.delete(effect);
-      effect.dependencies.clear();
+  // AbortSignal for the current run; aborts on re-run / dispose. Made
+  // on first read: most effects never ask, and a controller per run is
+  // the larger part of a small effect's cost. Read after dispose, it
+  // arrives already aborted.
+  get signal() {
+    if (!this._controller && typeof AbortController !== 'undefined') {
+      this._controller = new AbortController();
+      if (this._disposed) this._controller.abort();
     }
-  };
+    return this._controller ? this._controller.signal : null;
+  }
 
+  run() {
+    // Zombie-run guard. An effect can be queued in __pendingEffects and
+    // then disposed before the flush reaches it — an earlier effect in
+    // the same flush may have disposed it. Running it anyway would
+    // re-subscribe it to every signal its body reads, leaking one
+    // subscriber per flush cycle that hits the race.
+    if (this._disposed) return;
+    // Reached only through computeds? Pull-check them; if none changed
+    // its output, this run is a no-op: edges, cleanup and the
+    // AbortSignal all stay as the previous run left them.
+    const hard = this._hard;
+    this._hard = false;
+    if (!hard && !__computedDepsChanged(this)) return;
+    // Abort the previous run's signal, if that run asked for one: async
+    // work still mid-flight from it (a fetch carrying the signal) sees
+    // the abort and can bail, and 'abort' listeners user code attached
+    // fire. This run gets its own on first read.
+    if (this._controller) {
+      try { this._controller.abort(); } catch {}
+      this._controller = null;
+    }
+    // Per-run id captured by the closures below. When the effect re-runs
+    // while a prior async body is still awaiting, the prior body's
+    // eventual resolution sees myRun !== _runId and bails — stale
+    // cleanup never overwrites the current run's cleanup.
+    const myRun = ++this._runId;
+
+    __runCleanup(this);
+    beginRun(this);
+    const prev = __currentEffect;
+    __currentEffect = this;
+    const prevOwner = __currentOwner;
+    __currentOwner = this._owner;
+    try {
+      const result = this._fn();
+      if (typeof result === 'function') {
+        this._cleanup = result;
+      } else if (result && typeof result.then === 'function') {
+        // Async effect body. A pending await cannot be unwound, but the
+        // eventual resolution can be intercepted to decide whether the
+        // cleanup it returns is still wanted:
+        //   - effect disposed while the body was awaiting: run the
+        //     cleanup immediately so resources release, store nothing;
+        //   - effect re-ran (a newer run superseded this one): same.
+        // In both cases _cleanup is left alone — it belongs to a
+        // different run.
+        result.then(
+          (cleanup) => {
+            if (myRun !== this._runId || this._disposed) {
+              if (typeof cleanup === 'function') {
+                try { cleanup(); }
+                catch (e) { __effectErrorReporter('[Rip] superseded async cleanup error:', e); }
+              }
+              return;
+            }
+            if (typeof cleanup === 'function') this._cleanup = cleanup;
+          },
+          (err) => {
+            // AbortError from a dispose or supersede is expected (the
+            // body passed our signal to fetch/etc. and it aborted).
+            // Swallow silently.
+            if (err && err.name === 'AbortError') return;
+            // Stale rejection from a superseded run: the caller has
+            // already moved on.
+            if (myRun !== this._runId || this._disposed) return;
+            __effectErrorReporter('[Rip] async effect error:', err);
+          }
+        );
+      }
+    } finally {
+      __currentEffect = prev;
+      __currentOwner = prevOwner;
+      endRun(this);
+    }
+  }
+
+  dispose() {
+    // Idempotent: tangled cleanup paths may reach the same effect twice.
+    // The quick exit avoids re-running cleanup and re-walking
+    // already-empty dependencies.
+    if (this._disposed) return;
+    this._disposed = true;
+    // Proactive pending-set eviction. The flush-time guard also handles
+    // this, but evicting here keeps the set bounded across long batched
+    // cycles and makes disposal semantics direct rather than dependent
+    // on flush ordering.
+    __pendingEffects.delete(this);
+    // Abort the current signal so in-flight async work unwinds via
+    // AbortError and the body can bail.
+    if (this._controller) {
+      try { this._controller.abort(); } catch {}
+    }
+    __runCleanup(this);
+    dropAllDeps(this);
+  }
+}
+Effect.prototype._isComputed = false;
+
+function __effect(fn) {
+  const effect = new Effect(fn, __currentOwner);
   // A throwing creation run propagates to the creator, but the read
   // subscriptions the body made before throwing must not survive it:
-  // registration follows the run, so no disposer exists anywhere and
-  // the effect would be an un-disposable zombie re-firing (and
-  // re-throwing) on every write.
-  // Dispose before rethrowing so the dependencies unsubscribe.
+  // registration follows the run, so no disposer exists anywhere and the
+  // effect would be an un-disposable zombie re-firing (and re-throwing)
+  // on every write. Dispose before rethrowing so the dependencies
+  // unsubscribe.
   try {
     effect.run();
   } catch (e) {
@@ -537,9 +682,9 @@ function __effect(fn) {
     throw e;
   }
   const dispose = () => effect.dispose();
-  // Ownership: the disposer registers on the creation-time owner
-  // frame, so frame disposal (component unmount, render-block
-  // teardown) fires it.
+  // Ownership: the disposer registers on the creation-time owner frame,
+  // so frame disposal (component unmount, render-block teardown) fires
+  // it.
   if (__currentOwner) __currentOwner.add(dispose);
   return dispose;
 }
@@ -570,7 +715,11 @@ function __batch(fn) {
 // render-block factories hold nested frames, which is what makes a
 // block's teardown ride its component structurally.
 function __ownerFrame({ nested = true } = {}) {
-  let disposers = [];
+  // Insertion-ordered: disposal runs in registration order, and a
+  // disposer leaving early (a child frame, a replaced writer) is an O(1)
+  // delete — an array's indexOf-and-splice made removing n children
+  // quadratic.
+  let disposers = new Set();
   let detach = null;
   // How many frames enclose this one — the flush's ordering key for
   // every effect the frame owns.
@@ -580,17 +729,15 @@ function __ownerFrame({ nested = true } = {}) {
     get disposed() { return disposers === null; },
     // The live disposer count — harness-facing (the accumulation
     // gate reads it); nothing emits or delivers it.
-    get size() { return disposers === null ? 0 : disposers.length; },
+    get size() { return disposers === null ? 0 : disposers.size; },
     add(disposer) {
       // A disposer arriving after disposal runs immediately: the
       // frame's lifetime is over, so deferring it would mean never.
       if (disposers === null) disposer();
-      else disposers.push(disposer);
+      else disposers.add(disposer);
     },
     remove(disposer) {
-      if (disposers === null) return;
-      const i = disposers.indexOf(disposer);
-      if (i >= 0) disposers.splice(i, 1);
+      if (disposers !== null) disposers.delete(disposer);
     },
     dispose() {
       if (disposers === null) return;
