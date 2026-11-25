@@ -1085,15 +1085,17 @@ grammar =
     o 'WHILE Expression WHEN Expression Block'     , '["while", 2, 4, 5]'         , 'while: _, condition, guard, body'
     o 'UNTIL Expression WHEN Expression Block'     , '["while", ["!", 2], 4, 5]'  , 'while: _, condition(unary: operator, operand), guard, body'
     # Postfix forms: the body is a plain [statement] array (the
-    # postfix-if convention).
-    o 'Expression WHILE Expression'                , '["while", 3, [1]]'          , 'while: _, condition, _(body)'
-    o 'Statement WHILE Expression'                 , '["while", 3, [1]]'          , 'while: _, condition, _(body)'
-    o 'Expression UNTIL Expression'                , '["while", ["!", 3], [1]]'   , 'while: _, condition(unary: operator, operand), _(body)'
-    o 'Statement UNTIL Expression'                 , '["while", ["!", 3], [1]]'   , 'while: _, condition(unary: operator, operand), _(body)'
-    o 'Expression WHILE Expression WHEN Expression', '["while", 3, 5, [1]]'       , 'while: _, condition, guard, _(body)'
-    o 'Statement WHILE Expression WHEN Expression' , '["while", 3, 5, [1]]'       , 'while: _, condition, guard, _(body)'
-    o 'Expression UNTIL Expression WHEN Expression', '["while", ["!", 3], 5, [1]]', 'while: _, condition(unary: operator, operand), guard, _(body)'
-    o 'Statement UNTIL Expression WHEN Expression' , '["while", ["!", 3], 5, [1]]', 'while: _, condition(unary: operator, operand), guard, _(body)'
+    # postfix-if convention). prec POST_IF, below the loose operators:
+    # a loose `then`/`else` after the condition shifts into it, as `or`
+    # does (`y = a while b else c` loops while `b || c`).
+    o 'Expression WHILE Expression'                , '["while", 3, [1]]'          , 'while: _, condition, _(body)', prec: 'POST_IF'
+    o 'Statement WHILE Expression'                 , '["while", 3, [1]]'          , 'while: _, condition, _(body)', prec: 'POST_IF'
+    o 'Expression UNTIL Expression'                , '["while", ["!", 3], [1]]'   , 'while: _, condition(unary: operator, operand), _(body)', prec: 'POST_IF'
+    o 'Statement UNTIL Expression'                 , '["while", ["!", 3], [1]]'   , 'while: _, condition(unary: operator, operand), _(body)', prec: 'POST_IF'
+    o 'Expression WHILE Expression WHEN Expression', '["while", 3, 5, [1]]'       , 'while: _, condition, guard, _(body)', prec: 'POST_IF'
+    o 'Statement WHILE Expression WHEN Expression' , '["while", 3, 5, [1]]'       , 'while: _, condition, guard, _(body)', prec: 'POST_IF'
+    o 'Expression UNTIL Expression WHEN Expression', '["while", ["!", 3], 5, [1]]', 'while: _, condition(unary: operator, operand), guard, _(body)', prec: 'POST_IF'
+    o 'Statement UNTIL Expression WHEN Expression' , '["while", ["!", 3], 5, [1]]', 'while: _, condition(unary: operator, operand), guard, _(body)', prec: 'POST_IF'
     o 'Loop'
   ]
 

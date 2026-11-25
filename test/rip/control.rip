@@ -139,6 +139,25 @@ test "loose else after a postfix ternary runs", '''
   [y, log]
 ''', [null, ["fallback"]]
 
+# A comma inside an implicit call or object belongs to it: the ternary's
+# `else` still closes the postfix conditional around it.
+code "postfix ternary over an implicit call with commas", "y = z if g a, b else c", "let y;\n\ny = (g(a, b) ? z : c);"
+code "returned postfix ternary over an implicit call", "f = -> return z if obj.has k, v else c", "let f = function() {\n  return (obj.has(k, v) ? z : c);\n};"
+fail "postfix unless over an implicit call keeps its else rejection", "z unless g a, b else c", "postfix 'unless' has no else form"
+code "loose else inside an implicit object in a postfix condition", "z if g a: b else c", "if (g({a: (b || c)})) z;"
+fail "else then chain through an implicit call rejects", "y = a else g b, c then d", "an expression takes one loose `then` or `else`"
+
+# A postfix loop's condition takes a loose operator as it takes `or`.
+code "loose else in a postfix while condition", "y = a while b else c", "let y;\n\nwhile (b || c) {\n  y = a;\n}"
+code "loose else in a postfix until condition", "y = a until b else c", "let y;\n\nwhile (!(b || c)) {\n  y = a;\n}"
+code "loose else in a postfix until over an implicit call", "z until g a, b else c", "while (!(g(a, b) || c)) {\n  z;\n}"
+test "loose else in a postfix while condition runs", '''
+  n = 0
+  stop = no
+  n += 1 while (n < 3) else (n < 5 and not stop)
+  n
+''', 5
+
 # Loose then/else guards: same rewrite as `and return` / `or continue`
 code "then return assignment lowers to an if-guard", "f = (x) ->\n  y = x then return 22\n  y", '''
   let f = function(x) {

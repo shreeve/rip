@@ -2422,11 +2422,13 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
 
   // Post-scan passes: scan → tagParams → tagDynamicKeys →
   // rewriteTypes → implicitBlocks → tagPostfixConditionals →
-  // tagLooseElse → implicitObjects → implicitCalls → tape. Order matters:
+  // implicitObjects → implicitCalls → tagLooseElse → tape. Order matters:
   // parameter retagging reads pre-insertion arrow context; implicit
   // INDENTs must exist before postfix detection (a then-body if is a
   // PREFIX if); postfix retagging must precede implicit calls so `f if
-  // x` guards f instead of calling it.
+  // x` guards f instead of calling it; loose-else tagging needs the
+  // implicit calls and objects in place, since a comma inside `g a, b`
+  // belongs to the call and closes nothing outside it.
   const mintId = () => nextId++;
   tagParams(tokens);
   tagDynamicKeys(tokens);
@@ -2451,14 +2453,13 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     : null);
   // `do` invokes a function literal, and tagParams retagged every one it
   // heads to DO_IIFE. A DO before a parenthesis heads the function the
-  // parentheses hold (the emitter rejects anything else inside), and one
-  // with nothing after it awaits its function, a DO_IIFE the input ended
-  // inside (the parser reports an unfinished line; the REPL reads on); a
-  // DO left after those heads anything else. Schema fields named `do`
-  // collapsed above.
+  // parentheses hold (the emitter rejects anything else inside); a DO
+  // left after that heads anything else, or nothing — and a line break
+  // cannot supply its function, so a trailing `do` is an error, never an
+  // unfinished line. Schema fields named `do` collapsed above.
   for (let i = 0; i < tokens.length; i++) {
     if (tokens[i].kind !== 'DO') continue;
-    if (tokens[i + 1]?.kind === '(' || tokens.slice(i + 1).every((t) => t.kind === 'TERMINATOR' || t.kind === 'OUTDENT')) {
+    if (tokens[i + 1]?.kind === '(') {
       tokens[i].kind = 'DO_IIFE';
       continue;
     }
@@ -2488,9 +2489,10 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   tagCompoundKeys(tokens);
   implicitBlocks(tokens, mintId);
   tagPostfixConditionals(tokens);
-  tagLooseElse(tokens, fail);
   implicitObjects(tokens, mintId);
   implicitCalls(tokens, mintId);
+  tagLooseElse(tokens, fail);
+  rejectDoTails(tokens, fail);
   insertArrowCommas(tokens);
 
   return { tokens, trivia, source, lexDiagnostics };
@@ -2575,6 +2577,28 @@ export function tagLooseElse(tokens, fail) {
       fail(`an expression takes one loose \`then\` or \`else\` — \`a then b else c\` is \`(a && b) || c\`, not a conditional; write \`if a then b else c\`, or chain with \`and\`/\`or\``, t.start, t.end);
     }
     loose[d] = true;
+  }
+  return tokens;
+}
+
+// `do (…)` invokes what its parentheses hold, so a tail after them —
+// `do (-> f)(x)`, `.x`, `[0]`, `?`, a juxtaposed argument — could read
+// as applying to the function before the invocation or to its result.
+// Neither reading is the obvious one; both reject. Runs after the
+// implicit passes, which turn a juxtaposed argument into a CALL_START.
+const DO_TAILS = new Set(['CALL_START', 'INDEX_START', 'ES6_OPTIONAL_INDEX', '.', '?.', '?', 'TEMPLATE_TAG', 'PICK_START', 'OPTPICK_START', 'DAMMIT', 'MAYBE_DAMMIT']);
+export function rejectDoTails(tokens, fail) {
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i].kind !== 'DO_IIFE' || tokens[i + 1]?.kind !== '(') continue;
+    let depth = 0, j = i + 1;
+    for (; j < tokens.length; j++) {
+      if (PASS_OPENERS.has(tokens[j].kind)) depth++;
+      else if (PASS_CLOSERS.has(tokens[j].kind) && --depth === 0) break;
+    }
+    const tail = tokens[j + 1];
+    if (tail && DO_TAILS.has(tail.kind)) {
+      fail('`do (…)` takes no call, member or index tail — it could apply before the invocation or after it; parenthesize the one you mean: `(do (-> …)).x`', tail.start, tail.end);
+    }
   }
   return tokens;
 }
