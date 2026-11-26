@@ -1734,11 +1734,12 @@ expectedConflicts = [
 # ==============================================================================
 # The terminals whose values are the tree's leaves. The parser builds
 # each as a node of its own, [kind, {}, raw] with `raw` the token's
-# value, and records its NodeStore row with the token's span. Keyword
-# words stay strings: the `this` of `@x`, `super`, the `import` of a
-# dynamic import and of `import.meta`, the `new` of `new.target`, and
-# the specifier words `*` and `default`; so do operators, type text,
-# symbol names and regex flags.
+# value, and records its NodeStore row with the token's span. `@` alone
+# is a `this` leaf spelled `@`. Keyword words stay strings: the
+# receiver the grammar writes for `@x`, `@"s"` and a key's `@[k]`,
+# `super`, the `import` of a dynamic import and of `import.meta`, the
+# `new` of `new.target`, and the specifier words `*` and `default`; so
+# do operators, type text, symbol names and regex flags.
 
 leaves =
   IDENTIFIER: 'name'

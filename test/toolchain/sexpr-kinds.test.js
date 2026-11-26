@@ -178,12 +178,18 @@ test('every token value is a leaf node with its own row over the token', () => {
 });
 
 test('`@` alone is the this leaf spelled `@`; `@x` keeps the receiver word', () => {
-  const result = parse('a = @\nb = @x\n');
-  const [, , first, second] = result.sexpr;
-  expect(first[3]).toEqual(['this', {}, '@']);
-  const row = result.stores.nodes[result.stores.nodeIds.get(first[3]) - 1];
+  const result = parse('a = @\nb = @x\nc = @[k]\nd = @.y\n');
+  const [, , first, second, third, fourth] = result.sexpr;
+  const at = ['this', {}, '@'];
+  expect(first[3]).toEqual(at);
+  const id = result.stores.nodeIds.get(first[3]);
+  const row = result.stores.nodes.find((r) => r.nodeId === id);
   expect([row.semanticKind, row.sourceStart, row.sourceEnd]).toEqual(['this', 4, 5]);
+  // `@x` is one sigil spelling: the grammar writes its receiver.
   expect(second[3]).toEqual(['.', {}, 'this', n('x')]);
+  // `@[k]` and `@.y` are `@` followed by an access: the receiver is the leaf.
+  expect(third[3]).toEqual(['[]', {}, at, n('k')]);
+  expect(fourth[3]).toEqual(['.', {}, at, n('y')]);
 });
 
 test('an expression slot never takes a raw string', () => {
