@@ -137,6 +137,16 @@ test 'four-level inheritance', '''
 code "ruby-style new", "Counter.new()", "new Counter();"
 code "ruby-style new args", "Counter.new(1, 2)", "new Counter(1, 2);"
 code "ruby-style new expression", "getClass().new(x)", "new (getClass())(x);"
+# A pure spine (names, members, indexes) is its own constructor and
+# stands bare; an index that reads through a call (`.at(-n)`,
+# `.slice()`, a regex match) is a call in the output and seals, or
+# `new` would construct the method.
+code "a member-spine target stands bare", "a.B.new(c)", "new a.B(c);"
+code "an index-spine target stands bare", "x[k].new(y)", "new x[k](y);"
+code "a this-member target stands bare", "-> @Foo.new(x)", "(function() { return new this.Foo(x); });"
+code "a negative-index target seals", "x[-1].new()", "new (x.at(-1))();"
+code "a negative index deeper in the spine seals", "a[-1].b.new(2)", "new (a.at(-1).b)(2);"
+code "a range-index target seals", "a[1..2].new()", "new (a.slice(1, 3))();"
 
 # ==============================================================================
 # Meta Properties

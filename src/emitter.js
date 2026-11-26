@@ -1028,8 +1028,18 @@ class Emitter {
 
   // A constructor spine with no call in it: a name, or a member/index
   // chain rooted at one. Only such a spine may stand bare under `new`.
+  // An index whose read lowers to a call — a range (`.slice()`), a
+  // negative literal (`.at(-n)`), a regex key (the match read) — is a
+  // call in the output, so it is not pure: printed bare, `new` would
+  // construct the method.
   pureSpine(x) {
-    return typeof x === 'string' || (this.isSpine(x) && !isRubyNew(x) && this.pureSpine(x[1]));
+    if (typeof x === 'string') return true;
+    if (!this.isSpine(x) || isRubyNew(x)) return false;
+    if (x[0] === '[]' || x[0] === 'optindex') {
+      const key = x[2];
+      if (isRange(key) || Emitter.negativeLiteralKey(key) || (typeof key === 'string' && key[0] === '/')) return false;
+    }
+    return this.pureSpine(x[1]);
   }
 
   // A member/index link — `optindex` spells a legal callee, so a call
@@ -18289,11 +18299,15 @@ class Emitter {
   rubyNewTarget(member) {
     const ctor = member[1];
     this.mark(member, 'object', () => {
-      // Any non-name constructor expression groups: `new` consumes
-      // the FIRST argument list it reaches, so a call in the
-      // constructor position (`getClass().new(x)`) must
+      // A PURE spine (names, members, indexes, no soak) stands bare:
+      // `a.B.new(c)` is `new a.B(c)`. Any other constructor expression
+      // groups: `new` consumes the FIRST argument list it reaches, so a
+      // call in the constructor position (`getClass().new(x)`) must
       // parenthesize or `new` would construct the getter.
-      if (isNode(ctor)) {
+      if (isNode(ctor) && this.pureSpine(ctor) && !this.optionalGuard(ctor)) {
+        if (ctor[0] === '.' || ctor[0] === '?.') this.member(ctor);
+        else this.call(ctor);
+      } else if (isNode(ctor)) {
         this.b.emit('(');
         this.expr(ctor);
         // A soaking target cannot be constructed THROUGH here any

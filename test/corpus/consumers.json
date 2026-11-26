@@ -72,8 +72,8 @@
   "ts": "2ndev37r4o83z"
  },
  "pkg packages/app/rash.rip": {
-  "js": "3m88991ldr3yi",
-  "ts": "2mvslysetesgh"
+  "js": "3b0106jc3hhxa",
+  "ts": "13mq1h2sm6xlo"
  },
  "pkg packages/app/renderer.rip": {
   "js": "gvkbjsbwkstd",
@@ -124,8 +124,8 @@
   "ts": "240iaxn1q36va"
  },
  "pkg packages/barcodes/dom.rip": {
-  "js": "2aox9angqu3j1",
-  "ts": "mo4n1lfub91w"
+  "js": "2ozb8ri3atcq9",
+  "ts": "360ypufkgq1aw"
  },
  "pkg packages/barcodes/eci.rip": {
   "js": "243vmf01b6h5d",
@@ -156,8 +156,8 @@
   "ts": "2fl0vpybiodsp"
  },
  "pkg packages/barcodes/test/compare.rip": {
-  "js": "1tkwf8wbm4jr0",
-  "ts": "3kqx3dfeg3ld1"
+  "js": "iqdopgdd7hi9",
+  "ts": "3e2qjazlyuqrg"
  },
  "pkg packages/barcodes/test/corpus.rip": {
   "js": "9e1knsvpmxst",
@@ -276,8 +276,8 @@
   "ts": "isva6rxlgmtf"
  },
  "pkg packages/emdb/test.rip": {
-  "js": "1kgceot5e2ojp",
-  "ts": "3ay62rrtxc43j"
+  "js": "30mxcgdl91srh",
+  "ts": "4tsucxc4wje2"
  },
  "pkg packages/fake/fake.rip": {
   "js": "38tw97uvk6s6z",
@@ -376,8 +376,8 @@
   "ts": "es1fukyxkm12"
  },
  "pkg packages/sites/control.rip": {
-  "js": "8thqr98tqpa2",
-  "ts": "12lq5do9ih0g6"
+  "js": "29fa66mea3otx",
+  "ts": "3j15vyzqi77af"
  },
  "pkg packages/sites/demos/cart/api/db.rip": {
   "js": "2qirehmniqml2",
@@ -404,8 +404,8 @@
   "ts": "1zt7pobxg2xld"
  },
  "pkg packages/sites/demos/cart/app/config.rip": {
-  "js": "1bfugjz59s96d",
-  "ts": "3rp0vazi4knvq"
+  "js": "3i6posuok9eyi",
+  "ts": "13pxvz96oin67"
  },
  "pkg packages/sites/demos/cart/app/routes/_404.rip": {
   "js": "1t7pmx9ughbod",
@@ -532,24 +532,24 @@
   "ts": "1u01qp7zalrwc"
  },
  "pkg packages/sites/generate.rip": {
-  "js": "27e3oarnrect2",
-  "ts": "29155mbrzmqqb"
+  "js": "1uunbgl9nfnpp",
+  "ts": "35dc9g17ytbx5"
  },
  "pkg packages/sites/logs.rip": {
   "js": "11xsiprst2w7m",
   "ts": "38hhim4xoxsfe"
  },
  "pkg packages/sites/manager.rip": {
-  "js": "uj7lyndcpye3",
-  "ts": "1k0sx6bqwusht"
+  "js": "2z3xhbi9l22hn",
+  "ts": "m6dju87rmqns"
  },
  "pkg packages/sites/middleware.rip": {
   "js": "izxpvtcq36jp",
   "ts": "3o9hi8lf45fsg"
  },
  "pkg packages/sites/monitor.rip": {
-  "js": "24f6vn1op39vm",
-  "ts": "205ic28lyh3do"
+  "js": "1gfglxx280ax7",
+  "ts": "zfvmsjm4y7zg"
  },
  "pkg packages/sites/serve-hosts.rip": {
   "js": "3exobb6l986ur",
@@ -844,8 +844,8 @@
   "ts": "2wkso2ncvjtft"
  },
  "pkg packages/time/time.rip": {
-  "js": "mms8h7by7fyg",
-  "ts": "3lkxm9ovbbh1v"
+  "js": "2bowvvuitklwa",
+  "ts": "2piujczoiilh"
  },
  "pkg packages/tray/build.rip": {
   "js": "2wh3j8g01yg3x",
@@ -872,8 +872,8 @@
   "ts": "1qfh9kkepnew5"
  },
  "pkg packages/tui/bench/harness.rip": {
-  "js": "oo2y93ru4dqf",
-  "ts": "35d9ba9luoho2"
+  "js": "2d9eb6jagp86l",
+  "ts": "367p5k6cttkme"
  },
  "pkg packages/tui/bench/hit.rip": {
   "js": "1cyogc7mkdnrz",
@@ -980,8 +980,8 @@
   "ts": "u0clhhn26lhc"
  },
  "pkg packages/tui/demo/input.rip": {
-  "js": "36yi2p0qkktup",
-  "ts": "4je2jt675l3s"
+  "js": "3mgqqpfug6lbw",
+  "ts": "18d8lwrmeuy3f"
  },
  "pkg packages/tui/demo/log.rip": {
   "js": "3hla6at6ch6ui",
@@ -1032,8 +1032,8 @@
   "ts": "2un02ndxnnl6r"
  },
  "pkg packages/tui/test/damage.rip": {
-  "js": "1arn0nvv7vu3p",
-  "ts": "1ksqu6v5d4s93"
+  "js": "32ivboyxbuewo",
+  "ts": "27ibh832ti2ud"
  },
  "pkg packages/tui/test/demo.rip": {
   "js": "36iyq97yjdqpp",
@@ -1044,8 +1044,8 @@
   "ts": "1la7m84fedk88"
  },
  "pkg packages/tui/test/events.rip": {
-  "js": "zi7vrot15e4h",
-  "ts": "1b4cb47ikdzv2"
+  "js": "1izklx3eqagy5",
+  "ts": "131kjsssbfdyh"
  },
  "pkg packages/tui/test/events/harness.rip": {
   "js": "3hp1a9bmii9q",
@@ -1088,8 +1088,8 @@
   "ts": "vqrtsqpi8ay7"
  },
  "pkg packages/tui/test/ink/cells.rip": {
-  "js": "1ocmvphnkxhco",
-  "ts": "2p0u2txh17a6r"
+  "js": "2kxepmxcjxyvl",
+  "ts": "27sg2kpdz4z39"
  },
  "pkg packages/tui/test/ink/clip-wide-background.rip": {
   "js": "3b9gzuvmpx84t",
@@ -1272,12 +1272,12 @@
   "ts": "372afi3te755s"
  },
  "pkg packages/tui/test/yoga.rip": {
-  "js": "a7f3wkzpyfd8",
-  "ts": "25s1ojfz5wxn1"
+  "js": "1ixgg0qedbd1u",
+  "ts": "2i54h01r51rnu"
  },
  "pkg packages/tui/text.rip": {
-  "js": "g42teso481vo",
-  "ts": "18dfh2k7q1sjo"
+  "js": "2hym938baar1i",
+  "ts": "97bpy8c0tp1i"
  },
  "pkg packages/tui/tui.rip": {
   "js": "1w5zwdgt9dmb7",
@@ -1352,8 +1352,8 @@
   "ts": "1zm2oxyzdjjdd"
  },
  "pkg packages/ui/test/browser/serve.rip": {
-  "js": "y8md8kehm8xm",
-  "ts": "y8md8kehm8xm"
+  "js": "28qz0mqu25s79",
+  "ts": "28qz0mqu25s79"
  },
  "pkg packages/ui/ui.rip": {
   "js": "2lfma1clg0pj3",
@@ -3514,6 +3514,30 @@
  "row classes.rip › code ruby-style new expression": {
   "js": "13lwlt2pg8450",
   "ts": "a453bq1qsfg6"
+ },
+ "row classes.rip › code a member-spine target stands bare": {
+  "js": "cfn6nfx6dyrs",
+  "ts": "2bzo0zljqo0s7"
+ },
+ "row classes.rip › code an index-spine target stands bare": {
+  "js": "3fv4bj0pn0i9i",
+  "ts": "21qyukxow6din"
+ },
+ "row classes.rip › code a this-member target stands bare": {
+  "js": "zslch7wtvw0h",
+  "ts": "1u49gogoyzlh5"
+ },
+ "row classes.rip › code a negative-index target seals": {
+  "js": "1q8g0tn2gwlgq",
+  "ts": "1nxn7ksc8ct1j"
+ },
+ "row classes.rip › code a negative index deeper in the spine seals": {
+  "js": "2yln0nozvt51t",
+  "ts": "2rlrftvehbcrm"
+ },
+ "row classes.rip › code a range-index target seals": {
+  "js": "b5rssp40u48w",
+  "ts": "1f1111zrid321"
  },
  "row classes.rip › fail class with member-access name does not parse": {
   "js": "7f4s2sh4vejj",
