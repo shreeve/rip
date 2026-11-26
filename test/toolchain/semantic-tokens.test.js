@@ -170,112 +170,6 @@ describeExtended('semantic tokens — the readonly modifier', () => {
   }, 60000);
 });
 
-// An enum lowers to a const object PLUS a companion type alias sharing the
-// name, so the two symbols merge and TypeScript classifies the merged
-// symbol `type` at every position. The token names the construct the
-// author declared (RULINGS.md, Tokens). All three positions answer
-// separately — a correction reaching the declaration alone leaves two
-// thirds standing — so all three are pinned.
-describeExtended('semantic tokens — an enum name', () => {
-  const ENUMS = [
-    'enum Color',              // line 0
-    '  Red = 1',               // line 1
-    '  Blue = 2',              // line 2
-    'shade: Color = Color.Red', // line 3
-    'def paint(c: Color)',     // line 4
-    '  c',                     // line 5
-    '',
-  ].join('\n');
-
-  test('every occurrence classifies `enum` — declaration, annotation, value use', async () => {
-    const tokens = await tokensOf({ 'enums.rip': ENUMS });
-    expect(tokens.length).toBeGreaterThan(0);   // liveness
-
-    for (const [label, line, character] of [
-      ['the declaration', 0, 5],
-      ['the annotation', 3, 7],
-      ['the value use', 3, 15],
-      ['a parameter annotation', 4, 13],
-    ]) {
-      const tok = at(tokens, line, character);
-      expect(tok, `${label} has a token`).toBeDefined();
-      expect(tok.type, label).toBe('enum');
-      // The `readonly` the merged symbol carries off its const-object
-      // half goes with the type — TypeScript's own enum tokens have none.
-      expect(tok.modifiers, label).not.toContain('readonly');
-    }
-  }, 60000);
-
-  // The correction resolves by SCOPE, never by spelling. A local that
-  // re-binds the name is not the enum, and painting it `enum` is exactly
-  // the over-reach v3's source-regex mechanism has.
-  // An imported enum carries the same merged-symbol `type` classification
-  // its declaration does, and the importing file's compile cannot know
-  // that — the kind lives in the declaring module. In any project of more
-  // than one file this is where MOST enum uses are, so a correction that
-  // stopped at the declaring file would leave the majority mis-colored.
-  test('an enum imported from another module classifies `enum` at its uses', async () => {
-    const tokens = await tokensOf({
-      'lib.rip': 'export enum Color\n  Red = 1\n  Blue = 2\n\nexport plain = 7\n',
-      'enum-app.rip': [
-        "import { Color, plain } from './lib.rip'",  // line 0
-        '',
-        'shade: Color = Color.Red',                  // line 2
-        'console.log plain',                         // line 3
-        '',
-      ].join('\n'),
-    }, 'enum-app.rip');
-    expect(tokens.length).toBeGreaterThan(0);   // liveness
-
-    expect(at(tokens, 2, 7)?.type, 'the imported annotation').toBe('enum');
-    expect(at(tokens, 2, 15)?.type, 'the imported value use').toBe('enum');
-    // The negative control: an imported name that is NOT an enum keeps
-    // TypeScript's own answer. Without it, a correction that repainted
-    // every imported reference would pass the two assertions above.
-    const notAnEnum = at(tokens, 3, 12);
-    expect(notAnEnum, 'the plain import has a token').toBeDefined();
-    expect(notAnEnum.type, 'a non-enum import is untouched').not.toBe('enum');
-  }, 60000);
-
-  // Every position that re-uses the spelling, DECLARATIONS INCLUDED. The
-  // first version of this test asserted only the body read and passed
-  // while the parameter one line above it was painted `enum` — the two
-  // scope walks answer about the ENCLOSING scope, and at a parameter or a
-  // class member the binding being written is not in that scope yet. A
-  // read is the easy half; the declaration is where this breaks.
-  test('nothing that merely re-uses the spelling is the enum — parameter, class member, local', async () => {
-    const SHADOW = [
-      'enum Color',                 // line 0
-      '  Red = 1',                  // line 1
-      'def paint(Color)',           // line 2  the PARAMETER — was painted `enum`
-      '  Color',                    // line 3  its read
-      'class P',                    // line 4
-      '  Color: 3',                 // line 5  a class member — was painted `enum`
-      'def repaint()',              // line 6
-      '  Color = "not the enum"',   // line 7
-      '  Color',                    // line 8
-      '',
-    ].join('\n');
-    const tokens = await tokensOf({ 'shadow.rip': SHADOW });
-    expect(tokens.length).toBeGreaterThan(0);   // liveness
-
-    // The positive control: the enum itself still classifies, so a
-    // guard that simply stopped recording would not pass this.
-    expect(at(tokens, 0, 5)?.type, 'the enum itself').toBe('enum');
-
-    for (const [label, line, character] of [
-      ['the parameter declaration', 2, 10],
-      ['the parameter read', 3, 2],
-      ['the class member', 5, 2],
-      ['the shadowing local', 8, 2],
-    ]) {
-      const tok = at(tokens, line, character);
-      expect(tok, `${label} has a token`).toBeDefined();
-      expect(tok.type, label).not.toBe('enum');
-    }
-  }, 60000);
-});
-
 // A FORWARD-REFERENCED class binding keeps its `class` color.
 //
 // TypeScript classifies a binding from its DECLARATION's initializer, so
@@ -283,8 +177,8 @@ describeExtended('semantic tokens — an enum name', () => {
 // the two — the binding hoists to a bare `let Box;` and the class expression
 // assigns below it — and the initializer tsgo would have read is not there.
 // The compile reports the declaration's generated span (`classDecls`) and
-// `ripSemanticTokens` repaints exactly those, the third correction of the
-// shape `mutables` and `enums` already use.
+// `ripSemanticTokens` repaints exactly those, the second correction of the
+// shape `mutables` already uses.
 //
 // The three fixtures are one assertion each, and the last two carry the
 // weight: a server that simply painted every hoisted name `class` would
@@ -361,7 +255,7 @@ describeExtended('semantic tokens — a forward-referenced class binding', () =>
   // uses, so a correction that repainted only the declaration would leave the
   // name disagreeing with itself everywhere it is read — more visible than the
   // defect it replaced. References join the channel through `noteNameSpan`,
-  // the same funnel enum references use.
+  // the funnel every identifier passes through.
   test('every occurrence colors `class` — the use site, not only the declaration', async () => {
     // `new Box()` on line 0; the declaration below it on line 1.
     expect(await typeAt({ 'fwd.rip': FWD }, 'fwd.rip', 0, 15, 'the Box use')).toBe('class');
@@ -372,6 +266,39 @@ describeExtended('semantic tokens — a forward-referenced class binding', () =>
 
   test('a forward-referenced component declaration colors `class` too', async () => {
     expect(await typeAt({ 'component.rip': COMPONENT }, 'component.rip', 4, 0, 'the Child declaration')).toBe('class');
+  }, 60000);
+
+  // The correction resolves by SCOPE, never by spelling — every position
+  // that re-uses the spelling, DECLARATIONS INCLUDED. The scope walks
+  // answer about the ENCLOSING scope, and at a parameter or a class member
+  // the binding being written is not in that scope yet. A read is the easy
+  // half; the declaration is where this breaks.
+  test('nothing that merely re-uses the spelling is the class — parameter, class member', async () => {
+    const SHADOW = [
+      'Color = class',              // line 0
+      '  r: -> 1',                  // line 1
+      'def paint(Color)',           // line 2  the PARAMETER
+      '  Color',                    // line 3  its read
+      'class P',                    // line 4
+      '  Color: 3',                 // line 5  a class member
+      '',
+    ].join('\n');
+    const tokens = await tokensOf({ 'shadow.rip': SHADOW });
+    expect(tokens.length).toBeGreaterThan(0);   // liveness
+
+    // The positive control: the class itself still classifies, so a
+    // guard that simply stopped recording would not pass this.
+    expect(at(tokens, 0, 0)?.type, 'the class itself').toBe('class');
+
+    for (const [label, line, character] of [
+      ['the parameter declaration', 2, 10],
+      ['the parameter read', 3, 2],
+      ['the class member', 5, 2],
+    ]) {
+      const tok = at(tokens, line, character);
+      expect(tok, `${label} has a token`).toBeDefined();
+      expect(tok.type, label).not.toBe('class');
+    }
   }, 60000);
 
   test('a forward-referenced NON-class stays `variable` — the correction is the compiler\'s span, not the hoist', async () => {

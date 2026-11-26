@@ -68,14 +68,6 @@ code "import list continued on an indented line", '''
 
 code "import default as alias", 'import { default as d } from \'m\'', 'import { default as d } from \'m\';'
 code "empty export", 'export {}', 'export {};'
-code "export enum", '''
-  export enum Color
-    red
-    green
-  ''', '''
-  export const Color = {red: 0, green: 1, 0: "red", 1: "green"};
-  '''
-
 code "export computed", '''
   a := 1
   export b ~= a * 2

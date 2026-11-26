@@ -127,15 +127,14 @@ test('the export scan reads the forms a workspace actually writes', () => {
     'export class Widget',
     'export type Padding = number',
     'export interface Config',
-    'export enum Priority',
   ].join('\n'));
   expect(scan.values.sort()).toEqual(
-    ['Options', 'Priority', 'Widget', 'alpha', 'count', 'debounce', 'delay', 'ready', 'second', 'shout', 'theme', 'wait'],
+    ['Options', 'Widget', 'alpha', 'count', 'debounce', 'delay', 'ready', 'second', 'shout', 'theme', 'wait'],
   );
-  // A class and an enum occupy BOTH declaration spaces; a type alias and a
+  // A class occupies BOTH declaration spaces; a type alias and a
   // variable of the same name are legal together, which is what lets the
   // stub say so.
-  expect(scan.types.sort()).toEqual(['Config', 'Padding', 'Priority', 'Widget']);
+  expect(scan.types.sort()).toEqual(['Config', 'Padding', 'Widget']);
 });
 
 // THE LINE THAT LANDS IN THE BUFFER, which is the feature's whole payoff

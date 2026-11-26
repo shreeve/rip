@@ -74,28 +74,25 @@ let registry: Registry<Alarm> = { entries: [alarm], find: (key) => registry.entr
 
 console.log('alarm:', alarm.level, sink.accept('log'), sink.flush?.(), registry.find('smoke')?.acknowledged)
 
-// ── enums: one const object, forward and reverse entries ──
+// ── a closed set of values: a type union names the set, and a plain object carries the runtime values ──
 
-const Direction = { north: 0, south: 1, 0: 'north', 1: 'south' }
-type Direction = (typeof Direction)[keyof typeof Direction]
+let Direction = { north: 0, south: 1 }
 
-const Status = { draft: 'D', final: 'F', D: 'draft', F: 'final' }
-type Status = (typeof Status)[keyof typeof Status]
+type Status = 'draft' | 'final'
 
-export const Priority = { low: 1, standby: 2, urgent: 9, 1: 'low', 2: 'standby', 9: 'urgent' }
-export type Priority = (typeof Priority)[keyof typeof Priority]
+export const Priority = { low: 1, standby: 2, urgent: 9 }
 
-let pick: Status = Status.final
+let pick: Status = 'final'
 
-console.log('direction:', Direction, Direction.north, Direction[1])
-console.log('status:', Status.draft, 'priority:', Priority.standby, Priority.urgent)
+console.log('direction:', Direction, Direction.north, Direction.south)
+console.log('priority:', Priority.standby, Priority.urgent)
 console.log('pick:', pick)
 
 // ── the bare typed forward declaration ──
 
 function choosePort(): Port {
   let chosen!: Port
-  if (Direction.north < Direction.south) {
+  if (Priority.low < Priority.urgent) {
     chosen = 443
   } else {
     chosen = 80

@@ -123,7 +123,7 @@ repository root; consulted for UNDERSTANDING → docs/.
 
 - **One binding per name per scope.** A second DECLARING form for a
  name already declared in the same scope (`=` creating a binding,
- `:=`, `~=`, `=!`, `def`, `class`, `enum`, an import binding, a
+ `:=`, `~=`, `=!`, `def`, `class`, an import binding, a
  parameter, a loop variable, a catch binding, a destructuring name)
  rejects positioned, naming both sites and the prior kind
  (`checkScopeRedeclarations`, scope-wide pre-pass, order-independent

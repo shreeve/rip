@@ -398,34 +398,6 @@ const isLoopNode = (x) => isNode(x) && (
 // backslashes) must escape or the emitted specifier breaks the
 // string it sits in. Shared with declaration emission — the two
 // renderings of one module edge must never drift.
-// Enum members with AUTO-NUMBERING resolved: a bare member takes the
-// next number — 0-based, continuing after an explicit NUMERIC value
-// (the TS rule; negatives continue too). A bare member after a
-// STRING value has no number to continue: value null, callers reject
-// loudly. Non-member shapes pass through untouched for the callers'
-// own rejections.
-export function resolveEnumMembers(items) {
-  let auto = 0;
-  let numeric = true;
-  const isNodeX = (x) => Array.isArray(x);
-  return items.map((item) => {
-    if (typeof item === 'string') {
-      if (!numeric) return { item, name: item, value: null };
-      return { item, name: item, value: String(auto++) };
-    }
-    if (isNodeX(item) && item[0] === '=' && item.length === 3) {
-      const v = item[2];
-      const num = typeof v === 'string' && /^[0-9]/.test(v) ? Number(v.replace(/_/g, ''))
-        : isNodeX(v) && v[0] === '-' && typeof v[1] === 'string' ? -Number(v[1].replace(/_/g, ''))
-        : null;
-      if (num !== null && Number.isFinite(num)) { auto = num + 1; numeric = true; }
-      else if (typeof v === 'string' && v.startsWith('"')) numeric = false;
-      return { item, name: item[1], value: v };
-    }
-    return { item, name: null, value: undefined };
-  });
-}
-
 export const bareSpecifier = (s) => String(s).replace(/^['"`]|['"`]$/g, '');
 
 export function moduleSourceText(s) {
@@ -626,14 +598,6 @@ class Emitter {
     // written and read is three colors for one binding, and the write
     // site is the position that proves the classification false.
     this.mutables = [];
-    // Generated `[start, end]` spans of ENUM names, every occurrence. The
-    // lowering emits a const object plus a companion type alias sharing
-    // the name, so the two symbols MERGE and tsgo classifies the merged
-    // symbol — `type` wins at the declaration, the annotation and the
-    // value use alike. The lowering is deliberate (a native TS enum
-    // diverges at runtime), so the color is corrected rather than the
-    // emission changed.
-    this.enums = [];
     // Generated `[start, end]` spans of a hoisted CLASS-EXPRESSION binding's
     // declaration name. TypeScript classifies a binding from its
     // DECLARATION's initializer, so `let Shape = class {…}` colors `class`
@@ -684,9 +648,7 @@ class Emitter {
     // the module it came from: `[start, end, name, specifier]`. One
     // file's compile cannot know an imported name's KIND — that lives in
     // the declaring module — so the compiler reports WHERE to ask and
-    // WHOM, and the editor resolves. The enum correction needs it because
-    // an enum's uses in a consuming module carry the same merged-symbol
-    // `type` classification its declaration does.
+    // WHOM, and the editor resolves.
     this.importedRefs = [];
     // The names runtime delivery injects into this module — name →
     // `{ runtime, typed }`, where `typed` says the TS face asserts a
@@ -912,7 +874,7 @@ class Emitter {
     // Reactive scope frames, innermost last: { reactive, bound }.
     // `reactive` is the set of names the frame's scope declares with
     // `:=`/`~=`; `bound` is every OTHER binding the scope introduces
-    // (params, hoist targets, imports, defs/classes/enums, loop
+    // (params, hoist targets, imports, defs/classes, loop
     // variables, catch bindings). A name READS reactive iff the
     // innermost frame that knows it at all knows it as reactive —
     // shadowing is scope-aware BY CONSTRUCTION from the tree
@@ -1118,7 +1080,7 @@ class Emitter {
   collectReactiveNames(stmts) {
     const names = new Set();
     const walk = (n, nested) => {
-      if (!isNode(n) || isDefHead(n[0]) || isFunc(n) || n[0] === 'class' || n[0] === 'enum') return;
+      if (!isNode(n) || isDefHead(n[0]) || isFunc(n) || n[0] === 'class') return;
       // A component body is the member model's, never scope
       // declarations.
       if (n[0] === 'component' && n.length === 3) return;
@@ -1158,7 +1120,7 @@ class Emitter {
   collectEffectHandles(stmts) {
     const names = new Set();
     const walk = (n, nested) => {
-      if (!isNode(n) || isDefHead(n[0]) || isFunc(n) || n[0] === 'class' || n[0] === 'enum') return;
+      if (!isNode(n) || isDefHead(n[0]) || isFunc(n) || n[0] === 'class') return;
       if (n[0] === 'component' && n.length === 3) return;
       if (this.isReactiveDecl(n)) return;
       if (this.isEffectDecl(n)) {
@@ -1191,7 +1153,7 @@ class Emitter {
   collectReadonlyNames(stmts) {
     const names = new Set();
     const walk = (n, nested) => {
-      if (!isNode(n) || isDefHead(n[0]) || isFunc(n) || n[0] === 'class' || n[0] === 'enum') return;
+      if (!isNode(n) || isDefHead(n[0]) || isFunc(n) || n[0] === 'class') return;
       if (n[0] === 'component' && n.length === 3) return;
       if (this.isReactiveDecl(n) || this.isEffectDecl(n)) return;
       if (this.isReadonlyDecl(n)) {
@@ -1310,8 +1272,8 @@ class Emitter {
   }
 
   // The explicit-span variant, for offending positions that are
-  // primitives with no NodeStore row (a bare enum member): the span
-  // is DERIVED from recorded neighbor rows, never invented.
+  // primitives with no NodeStore row: the span is DERIVED from recorded
+  // neighbor rows, never invented.
   positionedErrorAt(start, end, message) {
     const err = new Error(message);
     err.start = start;
@@ -1320,14 +1282,14 @@ class Emitter {
   }
 
   // Non-hoist bindings a scope's statement list declares (def
-  // functions, class declarations, enum consts — bare and exported):
+  // functions and class declarations — bare and exported):
   // shadow detection needs them in the frame's bound set, but they
   // must NOT enter this.scopes (hoist filtering has its own rules).
   static declaredNames(stmts) {
     const names = [];
     const declared = (s) => {
       if (!isNode(s)) return;
-      if ((s[0] === 'enum' || s[0] === 'class') && typeof s[1] === 'string') names.push(s[1]);
+      if (s[0] === 'class' && typeof s[1] === 'string') names.push(s[1]);
       if (isDefHead(s[0]) && s.length === 4 && typeof s[1] === 'string') names.push(s[1]);
     };
     for (const s of stmts) {
@@ -1337,16 +1299,9 @@ class Emitter {
     return names;
   }
 
-  // The ENUM subset of the above. `enum` is the one declaration whose
-  // token color the face cannot carry — the lowering emits a const
-  // object plus a companion type alias, the two symbols merge, and tsgo
-  // classifies the merged symbol `type` at every position. The editor
-  // rewrites it back, and needs to know which names those are with the
-  // same scope discipline every other name question here gets: a local
-  // that re-binds the spelling is not the enum.
-  // The names a scope binds to a CLASS EXPRESSION, the sibling of
-  // declaredEnumNames. Hoisting is not asked about: a declare-in-place
-  // binding keeps its initializer and tsgo already answers `class` there,
+  // The names a scope binds to a CLASS EXPRESSION. Hoisting is not asked
+  // about: a declare-in-place binding keeps its initializer and tsgo
+  // already answers `class` there,
   // so repainting it is a no-op — and a rule that tried to exclude it
   // would have to predict a decision applyDeclareInPlace has not made yet
   // at the point references are emitted.
@@ -1357,18 +1312,6 @@ class Emitter {
       if (typeof s[1] !== 'string') return;
       const v = s[2];
       if (isNode(v) && (v[0] === 'class' || v[0] === 'component')) names.add(s[1]);
-    };
-    for (const s of stmts) {
-      declared(s);
-      if (isNode(s) && s[0] === 'export' && isNode(s[1])) declared(s[1]);
-    }
-    return names;
-  }
-
-  static declaredEnumNames(stmts) {
-    const names = new Set();
-    const declared = (s) => {
-      if (isNode(s) && s[0] === 'enum' && typeof s[1] === 'string') names.add(s[1]);
     };
     for (const s of stmts) {
       declared(s);
@@ -1400,7 +1343,7 @@ class Emitter {
   //
   // Declaring forms carry the binding-inventory kind vocabulary:
   // parameter, import, state (:=), computed (~=), readonly (=!),
-  // effect (a bound handle), def, class, enum — the AUTHORITATIVE
+  // effect (a bound handle), def, class — the AUTHORITATIVE
   // forms — and plain (an assignment that creates the binding: a
   // bare-name `=`/compound/merge target, a destructuring element, a
   // catch-pattern element). Two authoritative forms for one name
@@ -1421,7 +1364,7 @@ class Emitter {
   // (shadowing, never a same-scope duplicate): loop variables (the
   // for-head), simple catch bindings (the JS catch parameter),
   // comprehension clause variables, nested function bodies, and
-  // block-nested def/class/enum (block-scoped declarations). The
+  // block-nested def/class (block-scoped declarations). The
   // emitter-minted last-match `_` never participates — a match write
   // is a write, not a declaring form. Duplicate names WITHIN one
   // pattern (a parameter list, a destructuring pattern, a loop head,
@@ -1473,10 +1416,6 @@ class Emitter {
       if (isFunc(n)) return;
       if (isDefHead(n[0])) {
         if (!nested && n.length === 4 && typeof n[1] === 'string') auth(n[1], 'def', n);
-        return;
-      }
-      if (n[0] === 'enum') {
-        if (!nested) auth(n[1], 'enum', n);
         return;
       }
       if (n[0] === 'component' && n.length === 3) return;
@@ -1641,7 +1580,6 @@ class Emitter {
       readonly,
       handles,
       bound: new Set([...bound, ...Emitter.declaredNames(stmts), ...handles, ...readonly]),
-      enums: Emitter.declaredEnumNames(stmts),
       classes: Emitter.declaredClassNames(stmts),
       importSpecs: Emitter.importedSpecs(stmts),
       exportedConst: Emitter.exportedConstNames(stmts),
@@ -1755,24 +1693,9 @@ class Emitter {
     return false;
   }
 
-  // Does `name` name an ENUM here? The walk mirrors resolveBareRead, and
-  // the `enums` test precedes `bound` within a frame because
-  // declaredNames puts every enum in `bound` too — an inner frame's own
-  // binding still shadows, which is the whole reason this resolves
-  // rather than matching the spelling.
-  isEnumName(name) {
-    for (let i = this.rframes.length - 1; i >= 0; i--) {
-      const f = this.rframes[i];
-      if (f.enums !== undefined && f.enums.has(name)) return true;
-      if (f.reactive.has(name) || f.bound.has(name)) return false;
-      if (f.members !== undefined && f.members.has(name)) return false;
-    }
-    return false;
-  }
-
-  // Is `name` a class-expression binding here? Same walk as isEnumName,
-  // and for the same reason: an inner binding that re-uses the spelling is
-  // not the class, so the frame's own set is asked before its `bound`.
+  // Is `name` a class-expression binding here? The walk mirrors
+  // resolveBareRead: an inner binding that re-uses the spelling is not
+  // the class, so the frame's own set is asked before its `bound`.
   isClassName(name) {
     for (let i = this.rframes.length - 1; i >= 0; i--) {
       const f = this.rframes[i];
@@ -1784,7 +1707,7 @@ class Emitter {
   }
 
   // Is `name` a RENDER loop's item/index binding here? Same walk as
-  // isEnumName, same reason — and the frame's own set is asked before its
+  // isClassName, same reason — and the frame's own set is asked before its
   // `bound` because a factory frame carries its loop bindings in BOTH: an
   // inner frame that re-binds the spelling (a handler's parameter) still
   // answers no before the walk reaches the loop's own frame.
@@ -1827,7 +1750,7 @@ class Emitter {
   }
 
   // The module `name` was imported from and its original exported name,
-  // or null when `name` is not an import here. Same walk as isEnumName,
+  // or null when `name` is not an import here. Same walk as isClassName,
   // same reason: an inner binding that re-uses the spelling is not the
   // import.
   importSpecOf(name) {
@@ -2016,7 +1939,7 @@ class Emitter {
   collectComputedNames(stmts) {
     const names = new Set();
     const walk = (n, nested) => {
-      if (!isNode(n) || isDefHead(n[0]) || isFunc(n) || n[0] === 'class' || n[0] === 'enum') return;
+      if (!isNode(n) || isDefHead(n[0]) || isFunc(n) || n[0] === 'class') return;
       if (n[0] === 'component' && n.length === 3) return;
       if (this.isReactiveDecl(n)) {
         if (!nested && n[0] === 'computed' && typeof n[1] === 'string') names.add(n[1]);
@@ -2222,7 +2145,6 @@ class Emitter {
     }
     const start = this.b.offset;
     this.b.emit(value);
-    if (this.isEnumName(value)) { this.enums.push([start, this.b.offset]); return; }
     if (this.isReactiveName(value) && !this.isComputedName(value)) { this.mutables.push([start, this.b.offset]); return; }
     if (this.isClassName(value)) { this.classDecls.push([start, this.b.offset]); return; }
     if (this.isRenderLoopName(value)) {
@@ -2246,8 +2168,8 @@ class Emitter {
   // parameter or a class member the binding being written is not in that
   // scope yet — a parameter's own frame is pushed after its list is
   // emitted, and a member name is a property, not a binding at all. Both
-  // resolved to the outer name and repainted it, which is how `enum
-  // Color` made the parameter of `def paint(Color)` read `enum`.
+  // would resolve to the outer name and repaint it: `Color = class` would
+  // make the parameter of `def paint(Color)` read `class`.
   withDeclaredName(fn) {
     const prev = this.declaringName;
     this.declaringName = true;
@@ -2939,7 +2861,7 @@ class Emitter {
   }
 
   // The module's own type-shaped declarations, by name: `type`/`interface`
-  // /`enum` heads, schema declarations, and schema DERIVATIONS
+  // heads, schema declarations, and schema DERIVATIONS
   // (`UserPublic = User.pick(…)`), whose companion alias is a declaration
   // like any other. Spans come from the match's own group bounds, never a
   // search of the matched text — a derivation names two schemas on one
@@ -2950,7 +2872,7 @@ class Emitter {
     if (this._typeDeclSpans === undefined) {
       const spans = new Map();
       if (this.b.source !== null) {
-        const DECL = new RegExp(String.raw`^(?:export\s+)?(?:(?:type|interface|enum)\s+(${IDENT_SOURCE})|(${IDENT_SOURCE})\s*=\s*schema\b|(${IDENT_SOURCE})\s*=\s*${IDENT_SOURCE}\s*\.\s*(?:pick|omit|partial|required|extend)\b)`, 'gmd');
+        const DECL = new RegExp(String.raw`^(?:export\s+)?(?:(?:type|interface)\s+(${IDENT_SOURCE})|(${IDENT_SOURCE})\s*=\s*schema\b|(${IDENT_SOURCE})\s*=\s*${IDENT_SOURCE}\s*\.\s*(?:pick|omit|partial|required|extend)\b)`, 'gmd');
         for (const m of this.b.source.matchAll(DECL)) {
           const at = m.indices[1] ?? m.indices[2] ?? m.indices[3];
           const name = this.b.source.slice(at[0], at[1]);
@@ -3293,7 +3215,7 @@ class Emitter {
     this.b = new CodeBuilder(this.stores, { source });
     const { n, used } = this.temps;
     this.temps.used = new Set(used);
-    const channels = ['pinnables', 'mutables', 'enums', 'classDecls', 'loopVars', 'attrNames', 'importedRefs', 'runtimeRefs',
+    const channels = ['pinnables', 'mutables', 'classDecls', 'loopVars', 'attrNames', 'importedRefs', 'runtimeRefs',
       'vocabulary', 'silences', 'memberDecls', 'narrowedDecls', 'importSpans', 'pendingTypeDecls', 'loopVarDecls', 'indexedLoops'];
     const saved = {};
     for (const k of channels) { saved[k] = this[k]; this[k] = []; }
@@ -3486,7 +3408,7 @@ class Emitter {
     });
   }
 
-  // The companion interface (the enum type-companion pattern): a
+  // The companion interface: a
   // component binding is a VALUE (an anonymous class expression), so
   // an annotation naming it (`c: Counter`) would find no type; the
   // instance surface is the honest companion, and TS's separate
@@ -4403,7 +4325,7 @@ class Emitter {
           return;
         }
         // Exported plain (and void) assigns: the value walks the
-        // same way; other exported forms (class/def/enum,
+        // same way; other exported forms (class/def,
         // specifier lists) carry no module-scope initializer.
         if (ASSIGNS.has(spec[0]) && spec.length === 3) walk(spec[2]);
         return;
@@ -4482,7 +4404,7 @@ class Emitter {
     for (const x of exclude) this.patternNames(x, excludeNames, true);
     for (const x of excludeNames) targets.delete(x);
     for (const x of reactive) targets.delete(x);
-    // One binding per name: a def/class/enum declaration or an import
+    // One binding per name: a def/class declaration or an import
     // already binds the name through its own keyword — the hoist line
     // must never re-declare it (`def f` then `f = 2` is a plain
     // reassignment of the function binding, not a second `let f`).
@@ -4608,7 +4530,7 @@ class Emitter {
     const top = new Set(stmts.filter(isNode));
     const facts = new Map();
     // inFn levels: 0 — the scope's own straight line; 1 — inside a
-    // DEFERRED construct (function expression, class, component, enum:
+    // DEFERRED construct (function expression, class, component:
     // none can execute before the statement that creates it without
     // first referencing a binding at a textual position the
     // execution-order rule already sees); 2 — inside a hoisted `def`,
@@ -4672,7 +4594,7 @@ class Emitter {
       // subtree pins the disqualifying level even where it could only
       // run later (over-conservative, never a miss).
       if (isFunc(n)) { for (const el of n.slice(1)) walk(el, Math.max(inFn, 1)); return; }
-      if (isDefHead(head) || head === 'class' || head === 'component' || head === 'enum') {
+      if (isDefHead(head) || head === 'class' || head === 'component') {
         const level = isDefHead(head) ? 2 : Math.max(inFn, 1);
         if (head === 'class') {
           // A class-body `def` is a method: it runs no earlier than a
@@ -5265,7 +5187,7 @@ class Emitter {
   }
 
   // Module bindings that never ride the hoist line — exported value
-  // declarations (`export const`), classes, defs, enums. The child-
+  // declarations (`export const`), classes, defs. The child-
   // component resolution (#137's compile-knowable half) consults this
   // beside the scope chain; nothing else does (the hoist filtering
   // semantics stay untouched). NEGATIVE SPACE, deliberate (the PR
@@ -5281,7 +5203,7 @@ class Emitter {
     const noteSpec = (spec) => {
       if (!isNode(spec)) return;
       if (ASSIGNS.has(spec[0]) && spec.length === 3 && typeof spec[1] === 'string') names.add(spec[1]);
-      else if ((spec[0] === 'class' || spec[0] === 'enum') && typeof spec[1] === 'string') names.add(spec[1]);
+      else if (spec[0] === 'class' && typeof spec[1] === 'string') names.add(spec[1]);
       else if (isDefHead(spec[0]) && typeof spec[1] === 'string') names.add(spec[1]);
     };
     for (const n of stmts) {
@@ -5472,7 +5394,6 @@ class Emitter {
     // statements to be named, so it takes the statement-grouping path
     // below .
     'class': (e, node, ind) => node[1] != null && (e.classStatement(node, ind), true),
-    'enum': (e, node) => (e.enumStatement(node), true),
     // Reactive declarations. The heads are spellable, so a
     // user call `state a, 0` builds the identical array —
     // the semanticKind check declines it to the expression path (call
@@ -5859,11 +5780,6 @@ class Emitter {
           this.b.emit('export ');
           this.defStatement(spec, ind);
           this.b.emit(';');
-        } else if (isNode(spec) && spec[0] === 'enum') {
-          this.b.emit('export ');
-          this.enumCode(spec);
-          this.b.emit(';');
-          this.tsEnumCompanion(spec, true);
         } else if (this.isReactiveDecl(spec)) {
           // `export count := 0` → `export const count = __state(0);`.
           // The declaration's own emission carries the
@@ -5934,219 +5850,6 @@ class Emitter {
           this.b.emit(' };');
         }
       }
-    });
-  }
-
-  // ── Enum codegen ─────────────────────────────────────────────
-  // `enum Name` lowers to ONE const object carrying both directions:
-  // forward (member → value) and reverse (value → member).
-  // Members are `name = <literal>` lines — number or string
-  // literals only (the reverse direction needs a key), each usable
-  // exactly once across BOTH directions. Bare members, expression
-  // values, and colliding keys each reject loudly
-
-  // A member value's [emitText, runtimeKey] — or null when the value
-  // has no literal key form. String values decode through JSON.parse;
-  // a JS-only escape (`\x5f`, `\v`, …) has no JSON decoding, so it
-  // rejects with the escape named rather than surfacing a raw parser
-  // error (`\uXXXX` spells every such character).
-  enumValue(v, enumName, memberName, member) {
-    if (typeof v === 'string') {
-      if (v.startsWith('"')) {
-        try {
-          return [v, JSON.parse(v)];
-        } catch {
-          const escape = /\\u(?![0-9a-fA-F]{4})|\\[^"\\/bfnrtu]/.exec(v)?.[0] ?? '\\';
-          throw this.positionedError(member,
-            `emitter: enum '${enumName}' member '${memberName}' — its string value uses the ` +
-            `'${escape}' escape, which enum values do not support (JSON escapes only; ` +
-            `'\\uXXXX' spells the same character)`,
-          );
-        }
-      }
-      if (/^[\d.]/.test(v)) {
-        const canon = v.replace(/_/g, '').replace(/n$/, '');
-        return [v, String(Number(canon))];
-      }
-      return null;
-    }
-    if (isNode(v) && v[0] === '-' && v.length === 2) {
-      const inner = this.enumValue(v[1], enumName, memberName, member);
-      if (inner === null || v[1].startsWith('"')) return null;
-      return [`-${v[1]}`, `-${inner[1]}`];
-    }
-    return null;
-  }
-
-  enumStatement(node) {
-    this.enumCode(node);
-    this.b.emit(';');
-    this.tsEnumCompanion(node, false);
-  }
-
-  // TS face: the enum's TYPE companion. The const-object lowering is a
-  // VALUE only, so an annotation naming the enum (`pick: Color`) would
-  // find no type; the member-value union is the lowering's honest
-  // type, and TS's separate type/value namespaces make the same-name
-  // pairing legal (the dts face's `declare enum` analogue). A second
-  // generated manifestation of the enum — cover rows by construction.
-  tsEnumCompanion(node, exported) {
-    if (!this.ts || typeof node[1] !== 'string') return;
-    const name = node[1];
-    this.b.tsOnly(() => {
-      this.b.emit('\n');
-      this.mark(node, '$self', () => {
-        // Every copy of the name in the companion marks the enum's own
-        // declaration bytes, so a rename reaching the companion lands on
-        // the span the declaration and the companion share.
-        const id = this.stores.idOf(node);
-        const span = id !== null ? this.stores.selfSpan(id) : null;
-        const decl = span !== null ? this.stores.primitiveSpans(name, span[0], span[1])[0] ?? null : null;
-        const nm = () => (decl ? this.b.markSpan(id, 'identifier', decl.sourceStart, decl.sourceEnd, () => this.b.emit(name)) : this.b.emit(name));
-        this.b.emit(`${exported ? 'export ' : ''}type `); nm(); this.b.emit(' = (typeof '); nm(); this.b.emit(')[keyof typeof '); nm(); this.b.emit('];');
-      });
-    });
-  }
-
-  enumCode(node) {
-    const [, name, body] = node;
-    const items = this.isBlock(body) ? body.slice(1) : [body];
-    const pairs = []; // [item, keyText, valueText, valueKey]
-    const usedKeys = new Set();
-    const claim = (key, what, at) => {
-      if (usedKeys.has(key)) {
-        throw this.positionedError(at,
-          `emitter: enum '${name}' key '${key}' is used more than once (${what}) — ` +
-          `forward and reverse entries share one object, so every member name and value must be distinct ` +
-          ``,
-          node,
-        );
-      }
-      usedKeys.add(key);
-    };
-    // A BARE member is a primitive with no NodeStore row; its span
-    // derives from the recorded neighbors — the cursor starts at the
-    // block row's start (the anchor rule anchors it at the first member) and
-    // advances past each earlier item's row (or bare text), so the
-    // window before the offending member holds only separators and
-    // the indexOf is anchored and exact.
-    const resolved = resolveEnumMembers(items);
-    const bareSpan = (k) => {
-      const src = this.b.source;
-      const bodyId = this.stores.idOf(body);
-      let cursor = bodyId !== null ? (this.stores.selfSpan(bodyId)?.[0] ?? null) : null;
-      if (src === null || cursor === null || typeof items[k] !== 'string') return null;
-      for (let j = 0; j < k; j++) {
-        const it = items[j];
-        const id = isNode(it) ? this.stores.idOf(it) : null;
-        const span = id !== null ? this.stores.selfSpan(id) : null;
-        if (span) cursor = span[1];
-        else if (typeof it === 'string') {
-          const at = src.indexOf(it, cursor);
-          if (at >= 0) cursor = at + it.length;
-        }
-      }
-      const at = src.indexOf(items[k], cursor);
-      return at >= 0 ? [at, at + items[k].length] : null;
-    };
-    for (let k = 0; k < items.length; k++) {
-      const item = items[k];
-      // A bracket-spelled member (`["__proto__"] = 1`) parses as a
-      // destructuring assignment — never an enum form: member names
-      // are plain identifiers (the emission handles the one dangerous
-      // name itself).
-      if (isNode(item) && item[0] === '=' && item.length === 3 && typeof item[1] !== 'string') {
-        throw this.positionedError(item,
-          `emitter: enum '${name}' member names are plain identifiers — ` +
-          `a computed/bracket-spelled member ('["…"] = value') is not an enum form`,
-          node,
-        );
-      }
-      if (typeof item === 'string' && isIdentifierName(item)) {
-        // Bare member: auto-numbered (the TS rule) — resolved once
-        // for the whole member list so explicit numerics thread the
-        // counter.
-        const rv = resolved[k].value;
-        if (rv === null) {
-          const message =
-            `emitter: enum '${name}' bare member '${item}' follows a STRING value — ` +
-            `auto-numbering has no number to continue; give it an explicit value`;
-          const span = bareSpan(k);
-          if (span) throw this.positionedErrorAt(span[0], span[1], message);
-          throw this.positionedError(node, message);
-        }
-        claim(item, `member '${item}'`, node);
-        claim(Number(rv), `value of '${item}'`, node);
-        pairs.push([node, item, rv, Number(rv)]);
-        continue;
-      }
-      if (!isNode(item) || item[0] !== '=' || item.length !== 3) {
-        const message =
-          `emitter: enum '${name}' members are 'name = <literal>' lines — ` +
-          `a bare or computed member has no enum form here`;
-        const span = bareSpan(k);
-        if (span) throw this.positionedErrorAt(span[0], span[1], message);
-        throw this.positionedError(item, message, node);
-      }
-      const value = this.enumValue(item[2], name, item[1], item);
-      if (value === null) {
-        throw this.positionedError(item,
-          `emitter: enum '${name}' member '${item[1]}' needs a number or string literal value — ` +
-          `the reverse mapping uses the value as an object key, so expressions have no enum form ` +
-          ``,
-          node,
-        );
-      }
-      const [valueText, valueKey] = value;
-      claim(item[1], `member '${item[1]}'`, item);
-      claim(valueKey, `value of '${item[1]}'`, item);
-      pairs.push([item, item[1], valueText, valueKey]);
-    }
-    // A member (or string value) named `__proto__` emits through
-    // ownKeyText so both lookup directions are real entries. Every
-    // other Object.prototype name (`constructor`, `hasOwnProperty`,
-    // …) is an ordinary own property in literal form and keys
-    // verbatim.
-    const ownKey = Emitter.ownKeyText;
-    this.mark(node, '$self', () => {
-      this.b.emit('const ');
-      // The declaration's own name joins the enum span channel here
-      // rather than through the identifier funnel: it is written
-      // directly, and it is the one occurrence that is not a read.
-      this.mark(node, 'name', () => this.noteNameSpan(name));
-      this.b.emit(' = ');
-      this.mark(node, 'body', () => {
-        this.b.emit('{');
-        pairs.forEach(([item, key, valueText], i) => {
-          if (i > 0) this.b.emit(', ');
-          this.mark(item, '$self', () => {
-            this.mark(item, 'target', () => {
-              // A BARE member's `item` is the enum node, so this frame is the
-              // whole declaration and the key has no row of its own. It emits
-              // verbatim unless the one dangerous name forces quoting, so it
-              // claims its occurrence exactly like any other primitive read.
-              const keyText = ownKey(key, key);
-              if (keyText === key) this.emitPrimitive(key);
-              else this.b.emit(keyText);
-            });
-            this.b.emit(': ');
-            this.mark(item, 'value', () => this.b.emit(valueText));
-          });
-        });
-        pairs.forEach(([item, key, valueText, valueKey]) => {
-          this.b.emit(', ');
-          // The reverse entry is a second generated manifestation of
-          // the member — its text is derived, so
-          // the rows are covers, never fake exacts.
-          this.mark(item, '$self', () => {
-            // A negative value's key form must quote (a bare `-1:` is
-            // invalid JS); positive literals key verbatim.
-            this.b.emit(valueText.startsWith('-') ? JSON.stringify(valueKey) : ownKey(valueText, valueKey));
-            this.b.emit(`: "${key}"`);
-          });
-        });
-        this.b.emit('}');
-      });
     });
   }
 
@@ -6665,7 +6368,7 @@ class Emitter {
       this.b.emit(';');
     }
     // A component BINDING statement gains its companion interface
-    // (the enum-companion placement — after the statement).
+    // (after the statement).
     if (this.ts && isNode(node) && node[0] === '=' && node.length === 3 &&
         typeof node[1] === 'string' && this.componentInfo.has(node[2])) {
       this.tsComponentCompanion(node[2], node[1], false, this.annotationText(node, 'typeParams'));
@@ -8351,7 +8054,7 @@ class Emitter {
       const rest = isNode(stmt[3]) && stmt[3][0] === 'if' ? stmt[3] : last(stmt[3]);
       return this.tailLeaves(last(stmt[2]), effect) && this.tailLeaves(rest, effect);
     }
-    if (h === 'try' || h === 'switch' || h === 'enum') return false;
+    if (h === 'try' || h === 'switch') return false;
     if ((h === 'while' && (stmt.length === 3 || stmt.length === 4)) || (h === 'loop' && stmt.length === 2)) return false;
     if (Emitter.returnGuard(stmt) || Emitter.stmtGuard(stmt)) return false;
     if (h === '=' && stmt.length === 3 &&
@@ -9200,7 +8903,7 @@ class Emitter {
   // rule is added HERE and both walks follow.
   //
   //   'skip'           nothing inside reaches this scope (a nested
-  //                    function, def, component body, or enum)
+  //                    function, def, or component body)
   //   'effect'         the body is its own function scope; only the
   //                    handle name binds here
   //   'reactive'       a reactive declaration — the value emits inline
@@ -9220,7 +8923,6 @@ class Emitter {
   scopeBoundary(n) {
     if (!isNode(n) || isDefHead(n[0]) || isFunc(n)) return 'skip';
     if (n[0] === 'component' && n.length === 3) return 'skip';
-    if (n[0] === 'enum') return 'skip';
     if (this.isEffectDecl(n)) return 'effect';
     if (this.isReactiveDecl(n)) return 'reactive';
     if (this.isReadonlyDecl(n)) return 'readonly';
@@ -10088,7 +9790,7 @@ class Emitter {
     }
     if (isAssignHead(h) || isUpdate(stmt)) return true;
     if (Emitter.LOOP_HEADS.has(h) && !this.isCallNode(stmt)) return true;
-    if (isDefHead(h) || h === 'class' || h === 'enum' || h === 'export') return true;
+    if (isDefHead(h) || h === 'class' || h === 'export') return true;
     if (this.isModuleImport(stmt) || this.isReactiveDecl(stmt) || this.isReadonlyDecl(stmt)) return true;
     return this.isEffectDecl(stmt) && stmt[1] !== null;
   }
@@ -12878,9 +12580,8 @@ class Emitter {
     // label: "x", w‸`) had no exact row to map through and answered
     // empty. The scan walks the construct's args in SOURCE order,
     // advancing a cursor past each item's recorded span (registered
-    // nodes) or literal text (string primitives — the enum bareSpan
-    // convention), so the next word-boundary match IS the word's own
-    // span; any item the cursor cannot consume stops the derivation
+    // nodes) or literal text (string primitives), so the next
+    // word-boundary match IS the word's own span; any item the cursor cannot consume stops the derivation
     // for everything after it (honest gap, never a guessed anchor).
     const scanSelfSpan = markNode !== null && this.stores.idOf(markNode) !== null
       ? this.stores.selfSpan(this.stores.idOf(markNode)) : null;
@@ -18215,15 +17916,11 @@ class Emitter {
       // A slice assignment likewise: it splices in place, and the
       // function returns undefined.
       if (h === '=' && stmt.length === 3 && Emitter.sliceTarget(stmt[1]) !== null) return this.statement(stmt, ind);
-      // A tail-position enum stays a statement — its lowering is a
-      // `const` declaration, which has no value form
-      if (h === 'enum') return this.statement(stmt, ind);
-      // A tail-position reactive declaration follows the enum
-      // precedent: the declaration stands, the function returns
-      // undefined. A BOUND effect is the same class,
-      // and so
-      // is a readonly declaration (#94); a
-      // BARE tail effect falls through and RETURNS the disposer — the
+      // A tail-position reactive declaration stays a statement — its
+      // lowering is a `const` declaration, which has no value form: the
+      // declaration stands and the function returns undefined. A BOUND
+      // effect is the same class, and so is a readonly declaration (#94);
+      // a BARE tail effect falls through and RETURNS the disposer — the
       // caller owns disposal.
       if (this.isReactiveDecl(stmt) || this.isReadonlyDecl(stmt)) return this.statement(stmt, ind);
       if (this.isEffectDecl(stmt) && stmt[1] !== null) return this.statement(stmt, ind);
@@ -18618,10 +18315,9 @@ class Emitter {
 
   // A '__proto__' OBJECT-LITERAL key — bare or quoted — is
   // JavaScript's prototype-set form, not an own property; only the
-  // computed spelling `["__proto__"]:` creates one. Everywhere the
-  // language means an ordinary data property (enum members and
-  // reverse entries, pick destinations), the key emits through this
-  // helper. The check reads the DECODED key, so an escape spelling
+  // computed spelling `["__proto__"]:` creates one. Where the language
+  // means an ordinary data property (a pick destination), the key emits
+  // through this helper. The check reads the DECODED key, so an escape spelling
   // is the same key.
   static ownKeyText(text, decoded) {
     return decoded === '__proto__' ? '["__proto__"]' : text;
@@ -19177,8 +18873,8 @@ class Emitter {
 //              needed names bind; the runtime's own sentinel rejects
 //              two standalone copies meeting in one process.
 // Scope-aware suppression: a user binding shadowing a runtime name at
-// PROGRAM scope (hoist target, import binding, export const, enum
-// const — decided statically) suppresses injection for that name;
+// PROGRAM scope (hoist target, import binding, export const —
+// decided statically) suppresses injection for that name;
 // function-scope shadowing is the user's local choice and suppresses
 // nothing.
 
@@ -19857,11 +19553,6 @@ const runtimeAliasBindings = (emitter, trees) => {
       }
       return;
     }
-    if (head === 'enum') {
-      if (typeof x[1] === 'string') names.add(x[1]);
-      for (const part of x.slice(2)) walk(part, isDecl);
-      return;
-    }
     if (isDecl(x)) {
       if (typeof x[1] === 'string') names.add(x[1]);
       else if (isNode(x[1])) addPattern(x[1]);
@@ -19892,7 +19583,7 @@ const runtimeAliasBindings = (emitter, trees) => {
 // The program-scope binding set — EVERY name module-level emission
 // declares: hoisted `let` targets, import bindings, and the
 // statement forms that bind without hoisting (class declarations,
-// def functions, enum consts, exported bindings — bare and under
+// def functions, exported bindings — bare and under
 // `export`). hoistTargets deliberately skips those statement forms
 // (they declare through their own keywords), so they enumerate here;
 // a name this walk misses would collide with an injected runtime
@@ -19911,7 +19602,6 @@ const programScopeNames = (emitter, sexpr) => {
   for (const n of emitter.collectReadonlyNames(stmts)) names.add(n);
   const declared = (s) => {
     if (!isNode(s)) return;
-    if (s[0] === 'enum' && typeof s[1] === 'string') names.add(s[1]);
     if (s[0] === 'class' && typeof s[1] === 'string') names.add(s[1]);
     if (isDefHead(s[0]) && s.length === 4 && typeof s[1] === 'string') names.add(s[1]);
     if ((s[0] === '=' || s[0] === 'void-assign') && typeof s[1] === 'string') names.add(s[1]);
@@ -19926,7 +19616,7 @@ const programScopeNames = (emitter, sexpr) => {
 // The binding kinds an ambient seed may carry — exactly the kinds the
 // binding inventory reports (one vocabulary; a REPL feeds one line's
 // inventory back as the next line's seed).
-const AMBIENT_KINDS = new Set(['plain', 'state', 'computed', 'effect', 'readonly', 'import', 'class', 'def', 'enum']);
+const AMBIENT_KINDS = new Set(['plain', 'state', 'computed', 'effect', 'readonly', 'import', 'class', 'def']);
 
 // Validate and normalize the ambientBindings option: an array of
 // {name, kind} with identifier names (the LEXER's identifier
@@ -19972,7 +19662,7 @@ const inventoryBindings = (emitter, sexpr, ambientNames) => {
   // inventory must not claim it (a REPL feeding the inventory back
   // as the next seed would silently downgrade a state kind to plain,
   // severing the signal on the line after next). A DECLARATION of an
-  // ambient name (state/computed/readonly/effect/class/def/enum) is
+  // ambient name (state/computed/readonly/effect/class/def) is
   // a real shadow and reports normally.
   const plain = (name) => {
     if (!ambientNames.has(name)) add(name, 'plain');
@@ -19986,7 +19676,6 @@ const inventoryBindings = (emitter, sexpr, ambientNames) => {
   for (const n of emitter.collectReadonlyNames(stmts)) add(n, 'readonly');
   const declared = (s, exported) => {
     if (!isNode(s)) return;
-    if (s[0] === 'enum' && typeof s[1] === 'string') add(s[1], 'enum');
     if (s[0] === 'class' && typeof s[1] === 'string') add(s[1], 'class');
     if (isDefHead(s[0]) && s.length === 4 && typeof s[1] === 'string') add(s[1], 'def');
     if ((s[0] === '=' || s[0] === 'void-assign') && typeof s[1] === 'string') {
@@ -20810,7 +20499,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   const partNames = emitter.exportedObjects
     .filter(([, values]) => values.every((value) => emitter.componentNames.includes(value)))
     .map(([name]) => name);
-  return { code: builder.code, mappings: builder.rows, runtimeImports: emitter.runtimeImports, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, enums: emitter.enums, importedRefs: emitter.importedRefs, runtimeRefs: emitter.runtimeRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, indexedLoops: emitter.indexedLoops, componentUses: emitter.componentUses, componentProps: emitter.componentProps, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
+  return { code: builder.code, mappings: builder.rows, runtimeImports: emitter.runtimeImports, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, importedRefs: emitter.importedRefs, runtimeRefs: emitter.runtimeRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, indexedLoops: emitter.indexedLoops, componentUses: emitter.componentUses, componentProps: emitter.componentProps, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
 }
 
 // The strip transform: delete the recorded TS-only regions from a

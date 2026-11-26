@@ -1929,11 +1929,6 @@ async function refresh(document) {
     // binds their cell `const`. Semantic tokens clear TypeScript's `readonly`
     // on exactly these.
     mutables: result.mutables,
-    // Generated spans of every enum-name occurrence. The face's const
-    // object and its companion type alias merge into one symbol tsgo
-    // classifies `type`; the token names the construct the author
-    // declared.
-    enums: result.enums,
     // Hoisted class-expression bindings whose declaration lost its
     // initializer to the hoist split (see ripSemanticTokens).
     classDecls: result.classDecls ?? [],
@@ -4445,27 +4440,13 @@ function isComponentConstruction(sig) {
   return presented !== null && /^\): [A-Za-z_$][\w$]*(?:<.*>)?$/.test(flat.slice(presented.at));
 }
 
-// Does the module `specifier` names, resolved from `fromDir`, declare
-// `name` as an enum? An OPEN buffer answers from its own last-good
-// compile; a disk file from its manifest entry, which the closure fills
-// as it materializes and which is invalidated with the file's source
-// hash. Unknown (not in the closure, or unreadable) answers no — a
-// missing correction leaves TypeScript's own answer, which is the
-// conservative direction.
-function declaresEnum(fromDir, specifier, name) {
-  if (fromDir === null || !specifier.endsWith('.rip')) return false;
-  if (!specifier.startsWith('./') && !specifier.startsWith('../')) return false;
-  const abs = path.resolve(fromDir, specifier);
-  const open = states.get('file://' + abs);
-  if (open?.lastGood?.enumNames) return open.lastGood.enumNames.includes(name);
-  return (cacheManifest.entries[abs]?.enumNames ?? []).includes(name);
-}
-
 // What the module `specifier` names, relative or stdlib, records `name`
 // as: 'namespace' (`export * as name`, or an exported object of the
-// module's own components), 'component', or null. Answered as
-// declaresEnum is: an open buffer from its last good compile, a disk
-// file from its manifest entry.
+// module's own components), 'component', or null. An OPEN buffer
+// answers from its own last-good compile; a disk file from its manifest
+// entry, which the closure fills as it materializes and which is
+// invalidated with the file's source hash. Unknown answers null — a
+// missing correction leaves TypeScript's own answer.
 function importedKindOf(fromDir, specifier, name) {
   if (fromDir === null) return null;
   const abs = ripSpecifierTarget(specifier, fromDir);
@@ -4514,7 +4495,6 @@ function ripSemanticTokens(ctx, data) {
   const tokens = correctSemanticTokens(ctx, data, {
     legend: semanticTokensLegend,
     importedKindOf: (specifier, name) => importedKindOf(ctx.good.dir, specifier, name),
-    declaresEnum: (specifier, name) => declaresEnum(ctx.good.dir, specifier, name),
   });
   const builder = new SemanticTokensBuilder();
   for (const t of tokens) {
@@ -4642,15 +4622,15 @@ connection.onDocumentLinks(async (params) => {
 // NAME range (selectionRange) maps generated → Rip (verbatim first,
 // cover tolerance for navigation) and the construct range rides
 // along (clamped to contain the name). Symbols DEDUP by mapped name
-// span: one symbol per Rip declaration — an enum's const object and
-// its same-name type companion are two generated manifestations of ONE
+// span: one symbol per Rip declaration — a hoisted binding's `let`
+// line and its assignment are two generated manifestations of ONE
 // source declaration (the semantic-tokens dedup, symbol-shaped).
 // Scaffolding names and synthetic landings drop.
 //
 // The name range maps STRICTLY (verbatim-verified only): a symbol's
 // name must land on the bytes that spell it, so a manifestation whose
-// name bytes are generated-only (an enum companion's `type Color` —
-// the `type` head never matches the `enum` source) drops here, and
+// name bytes are generated-only (a companion declaration the lowering
+// writes, whose head never matches the source) drops here, and
 // the dedup below never even sees it. The construct range keeps the
 // lenient cover tolerance (navigation).
 function ripDocumentSymbols(ctx, symbols, seen = new Set()) {

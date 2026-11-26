@@ -45,7 +45,7 @@
 //
 // The emitted type names are a module-level namespace: a collision —
 // with the intrinsic vocabulary, between two schema-derived aliases,
-// or with a user-declared type/interface/class/enum name — REJECTS
+// or with a user-declared type/interface/class name — REJECTS
 // loudly at the typed artifact; JS shipping output never
 // carries these names and is untouched.
 //
@@ -413,9 +413,8 @@ export function collectAssignedNames(programSexpr) {
 
 // User-declared TYPE-SPACE names among one scope's own statements —
 // everything that occupies a TS type name in the emitted artifacts:
-// type/interface declarations, class declarations, and enum
-// declarations (the enum companion). The collision check runs the
-// scope's schema alias names against this set.
+// type/interface declarations and class declarations. The collision
+// check runs the scope's schema alias names against this set.
 export function userTypeNamesOf(stmts) {
   const names = new Map(); // name → {what, node} (message + face position)
   const consider = (stmt) => {
@@ -425,8 +424,6 @@ export function userTypeNamesOf(stmts) {
       if (m) names.set(m[2], { what: `the ${m[1]} declaration '${m[2]}'`, node: stmt });
     } else if (stmt[0] === 'class' && typeof stmt[1] === 'string') {
       names.set(stmt[1], { what: `class ${stmt[1]}`, node: stmt });
-    } else if (stmt[0] === 'enum' && typeof stmt[1] === 'string') {
-      names.set(stmt[1], { what: `enum ${stmt[1]}`, node: stmt });
     }
   };
   for (const stmt of stmts) {
@@ -880,7 +877,7 @@ export function buildSchemaTypeStory(programSexpr, source = null, imported = [],
   const withMixin = everyDecl.some((d) => d.descriptor.kind === 'mixin');
 
   // The user-vs-intrinsic direction: the module is about to EMIT the
-  // intrinsic block, so a user type/interface/class/enum name in the
+  // intrinsic block, so a user type/interface/class name in the
   // emitted tier would duplicate (aliases, TS2300) or silently merge
   // (interfaces) with it — and a function scope that declares a schema
   // reads the intrinsic names through its cast, so a user type of that

@@ -410,13 +410,10 @@ export const CONTRACT = [
     property: 'the server delivers a semantic token for every probed declaration',
     red: (s) => s.tk.missing.length > 0,
   },
-  // Split so the enum classification carries its own agreement: `want.type`
-  // separates it exactly, and every other wanted type — `function` among them —
-  // is a fresh red here rather than one absorbed by a blanket tolerance.
   {
     name: 'token.type', lane: 'token',
-    property: "each declaration's token type is the one its binding form fixes, outside the form agreed below",
-    red: (s) => s.tk.badType.some((r) => r.want?.type !== 'enum'),
+    property: "each declaration's token type is the one its binding form fixes",
+    red: (s) => s.tk.badType.length > 0,
   },
   {
     // The half `token.type` cannot reach. Its population is a line-shape
@@ -437,11 +434,6 @@ export const CONTRACT = [
     name: 'token.type.nested', lane: 'token',
     property: "a name a construct's own syntax binds carries that type wherever it appears, not only where it starts a line",
     red: (s) => s.tk.badKind.length > 0,
-  },
-  {
-    name: 'token.type.enum', lane: 'token',
-    property: 'an enum name is classified by its own declaring form',
-    red: (s) => s.tk.badType.some((r) => r.want?.type === 'enum'),
   },
   {
     // USE SITES, the half `token.delivery` cannot reach: it enumerates probed

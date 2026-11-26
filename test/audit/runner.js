@@ -1025,8 +1025,8 @@ const PATTERN_ASSIGN = /^\s*=(?![=>])/;
 const TWIN_PATTERN_ASSIGN = /^\s*(?::|=(?![=>]))/;
 
 // Top-level declarations: a name at column 0, optionally after a leading
-// export/def/class/interface/enum/type keyword. Heuristic, not a parser.
-const DECL = /^(?:export\s+)?(?:(def|class|interface|enum|type)\s+)?([A-Za-z_$][\w$]*)/;
+// export/def/class/interface/type keyword. Heuristic, not a parser.
+const DECL = /^(?:export\s+)?(?:(def|class|interface|type)\s+)?([A-Za-z_$][\w$]*)/;
 const KEYWORDS = new Set(['import', 'return', 'if', 'unless', 'for', 'while', 'export', 'switch', 'try', 'throw']);
 function declsOf(src) {
   const out = [];
@@ -1770,7 +1770,7 @@ function faceSurvival(src, code, mappings, faceDecoded, serverTokens, bindingNam
 
 // The declaration to poll for READINESS: one whose hover cannot legitimately be
 // `any`, so "it answered a type" means the program is built and nothing else.
-// A keyword declaration (`def`/`class`/`interface`/`enum`/`type`) or an
+// A keyword declaration (`def`/`class`/`interface`/`type`) or an
 // annotated binding qualifies; a bare `x = …` does not, because a write-only
 // local genuinely hovers `any` and polling it would wait out the
 // full timeout on a correct answer. `null` when a fixture offers neither.
@@ -1829,7 +1829,7 @@ const bindingForm = (code) => /~>/.test(code) ? 'effect'
   : /=!/.test(code) ? 'pinned'
   : 'plain';
 const READONLY_FORMS = new Set(['pinned', 'computed', 'effect']);
-const KEYWORD_TOKEN = { def: 'function', class: 'class', interface: 'interface', enum: 'enum', type: 'type' };
+const KEYWORD_TOKEN = { def: 'function', class: 'class', interface: 'interface', type: 'type' };
 // The VALUE side of a declaration — everything past the binding operator.
 // Needed because a test against the whole line cannot tell an arrow that
 // IS the value (`f = (x) -> x`) from one merely contained in it
@@ -2394,7 +2394,7 @@ if (RUN_GRAMMAR) {
   const CONSTRUCT_HEADS = new Set([
     'component', 'render', 'schema', 'class', 'if', 'switch', 'when', 'for-in', 'for-of', 'for-as',
     'while', 'loop', 'try', 'throw', 'state', 'computed', 'effect', 'gate', 'readonly', 'def',
-    '->', '=>', 'export', 'import', 'enum',
+    '->', '=>', 'export', 'import',
     // Constructs whose containment is a distinct type question and which
     // the matrix could not express before: whether a cast's type survives
     // its context, whether a comprehension's element type does, whether a

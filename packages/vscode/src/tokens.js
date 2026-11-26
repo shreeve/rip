@@ -44,14 +44,13 @@ export const FALLBACK_LEGEND = {
 };
 
 // What a module's compile records for its IMPORTERS — the facts an
-// importing file's compile cannot compute for itself: the names it
-// declares as enums, the names a tag qualifies through (a module
-// namespace from `export * as`, or an exported object of the module's
-// own components — one list, because the one reader tokens both as
-// `namespace`), and the names that are components.
+// importing file's compile cannot compute for itself: the names a tag
+// qualifies through (a module namespace from `export * as`, or an
+// exported object of the module's own components — one list, because
+// the one reader tokens both as `namespace`), and the names that are
+// components.
 export function importRecordOf(result) {
   return {
-    enumNames: (result.bindings ?? []).filter((b) => b.kind === 'enum').map((b) => b.name),
     namespaceNames: [...(result.namespaceExports ?? []), ...(result.partNames ?? [])],
     componentNames: result.componentNames ?? [],
   };
@@ -67,9 +66,9 @@ export function importedKindInRecord(record, name) {
 // tsgo's token data over the face, corrected and mapped onto the
 // document's CURRENT text: the sorted list of { start, length, type,
 // modifiers } in document offsets. `importedKindOf(specifier, name)`
-// and `declaresEnum(specifier, name)` answer for the modules the file
-// imports, relative to the file's own directory.
-export function correctSemanticTokens(ctx, data, { legend, importedKindOf, declaresEnum }) {
+// answers for the modules the file imports, relative to the file's own
+// directory.
+export function correctSemanticTokens(ctx, data, { legend, importedKindOf }) {
   const mapSpan = exactSpanMapper(ctx.good.mappings);
   const roIndex = legend?.tokenModifiers?.indexOf('readonly') ?? -1;
   const roBit = roIndex < 0 ? 0 : (1 << roIndex);
@@ -78,21 +77,17 @@ export function correctSemanticTokens(ctx, data, { legend, importedKindOf, decla
   // than a scan of every span for every token on a surface that fires on each
   // edit.
   const mutableStarts = new Set((ctx.good.mutables ?? []).map(([s]) => s));
-  // Same keying, the other correction: an enum name's TYPE, not a
-  // modifier bit. -1 when the client's legend omits `enum`, and then the
-  // rewrite is skipped rather than pointed at some other type's index.
-  const enumType = legend?.tokenTypes?.indexOf('enum') ?? -1;
-  const enumStarts = new Set((ctx.good.enums ?? []).map(([s]) => s));
-  // The third correction of the same shape: TypeScript classifies a binding
-  // from its DECLARATION's initializer, so `let Shape = class {…}` colors
-  // `class` on its own and reports nothing here — but a forward reference
-  // splits the declaration from the class expression, and `let Box;` is a
-  // variable as far as tsgo can see. -1 when the client's legend omits
+  // Same keying, the other correction: a TYPE, not a modifier bit.
+  // TypeScript classifies a binding from its DECLARATION's initializer,
+  // so `let Shape = class {…}` colors `class` on its own and reports
+  // nothing here — but a forward reference splits the declaration from
+  // the class expression, and `let Box;` is a variable as far as tsgo
+  // can see. -1 when the client's legend omits
   // `class`, and then the rewrite is skipped rather than pointed at some
-  // other type's index, exactly as the enum correction does.
+  // other type's index.
   const classType = legend?.tokenTypes?.indexOf('class') ?? -1;
   const classStarts = new Set((ctx.good.classDecls ?? []).map(([s]) => s));
-  // The fourth correction of the same shape: a render loop's body lowers
+  // The third correction of the same shape: a render loop's body lowers
   // to a block-function factory, so its item/index binding genuinely IS a
   // parameter in the face — the factory header, the keyed callback, every
   // read — and tsgo classifies each occurrence so. The author declared a
@@ -110,10 +105,9 @@ export function correctSemanticTokens(ctx, data, { legend, importedKindOf, decla
   // and the drop is keyed by the compiler's span, so a property inside an
   // attribute's VALUE keeps its own.
   const attrStarts = new Set((ctx.good.attrNames ?? []).map(([s]) => s));
-  // An IMPORTED enum carries the same merged-symbol `type` classification
-  // its declaration does, and the importing file's compile cannot know
-  // that — the kind lives in the declaring module. The compiler reports
-  // which references are imports and from where; the module answers.
+  // An IMPORTED name's kind lives in the declaring module, and the
+  // importing file's compile cannot know it. The compiler reports which
+  // references are imports and from where; the module answers.
   // Only `./`-relative `.rip` specifiers resolve, matching the closure's
   // own rule (mirror.js): a package import is TypeScript's to classify.
   // tsgo emits no token on an import line, nor for a binding that resolves
@@ -146,8 +140,7 @@ export function correctSemanticTokens(ctx, data, { legend, importedKindOf, decla
       silentRefs.push([genStart, genEnd, namespaceType]);
       continue;
     }
-    if (kind === 'component' && classType >= 0) { silentRefs.push([genStart, genEnd, classType]); continue; }
-    if (declaresEnum(specifier, importedName)) enumStarts.add(genStart);
+    if (kind === 'component' && classType >= 0) silentRefs.push([genStart, genEnd, classType]);
   }
   const tokens = new Map(); // start → { start, length, type, modifiers }
   let line = 0, char = 0;
@@ -168,16 +161,7 @@ export function correctSemanticTokens(ctx, data, { legend, importedKindOf, decla
     // of the same name would put the bit straight back.
     let modifiers = data[i + 4];
     if (roBit && mutableStarts.has(genStart)) modifiers &= ~roBit;
-    // An enum name carries the merged symbol's `readonly` too, off the
-    // `const` object half. The construct is a declaration, not a
-    // binding whose mutability is at issue, so the corrected token
-    // drops it with the type — TypeScript's own enum tokens carry
-    // neither.
     let type = data[i + 3];
-    if (enumType >= 0 && enumStarts.has(genStart)) {
-      type = enumType;
-      modifiers &= ~roBit;
-    }
     if (classType >= 0 && classStarts.has(genStart)) type = classType;
     if (variableType >= 0 && loopStarts.has(genStart)) type = variableType;
     if (namespaceType >= 0 && namespaceStarts.has(genStart)) {

@@ -97,7 +97,6 @@ grammar =
     o 'Import'
     o 'Export'
     o 'TypeDecl'
-    o 'Enum'
   ]
 
   # ============================================================================
@@ -191,7 +190,6 @@ grammar =
     o 'EXPORT { ExportSpecifierList OptComma }'            , '["export", 3]'                  , 'export: _, spec'
     o 'EXPORT Class'                                       , '["export", 2]'                  , 'export: _, spec'
     o 'EXPORT Def'                                         , '["export", 2]'                  , 'export: _, spec'
-    o 'EXPORT Enum'                                        , '["export", 2]'                  , 'export: _, spec'
     o 'EXPORT ExportAssign'                                , '["export", 2]'                  , 'export: _, spec'
     # Exported reactive declarations: the ReactiveAssign /
     # ComputedAssign node itself carries the roles (operator label,
@@ -919,17 +917,6 @@ grammar =
   ]
 
   # ============================================================================
-  # Enums: a const object mapping forward
-  # (key → value) and reverse (value → key). A STATEMENT, not an
-  # expression: enum lowers to a `const` declaration, so expression
-  # positions reject at parse.
-  # ============================================================================
-
-  Enum: [
-    o 'ENUM Identifier Block', '["enum", 2, 3]', 'enum: _, name, body'
-  ]
-
-  # ============================================================================
   # Schema — `schema [:kind] INDENT … OUTDENT` is parsed entirely
   # by the schema sub-parser at lexer-rewrite time (src/schema.js). The
   # pass emits SCHEMA + SCHEMA_BODY, where SCHEMA_BODY's value is the
@@ -1459,7 +1446,6 @@ displays =
   DYNAMIC_IMPORT: 'import('
   CLASS: 'class'
   EXTENDS: 'extends'
-  ENUM: 'enum'
   SCHEMA: 'schema'
   COMPONENT: 'component'
   OFFER: 'offer'
@@ -1565,7 +1551,6 @@ kinds =
   'dynamicKey':    ['key']
   'dynimport':     ['args', 'keyword']
   'effect':        ['annotation', 'operator', 'target', 'value']
-  'enum':          ['body', 'name']
   'existence':     ['operator', 'value']
   'expansion':     []
   'export':        ['alias', 'source', 'spec', 'typeOnly']

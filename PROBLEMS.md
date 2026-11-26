@@ -50,7 +50,7 @@ p (f() for f in fs)  # [undefined, undefined]
 Also `it = 3; f = -> it` returns `undefined`. Rule 2: a minted parameter
 never captures a source binding.
 
-**C9 M — In a nested function, `=` to a `def`, `class` or `enum` name declares a local instead of writing the outer binding.**
+**C9 M — In a nested function, `=` to a `def` or `class` name declares a local instead of writing the outer binding.**
 `def f` → `g = -> f = -> 2; g(); p f()` prints 1 (the inner function
 emits `let f;`). A plain outer name is written, as HANDOFF.md states. The
 `export` variant is pinned in test/rip/modules.rip as a recorded limit,

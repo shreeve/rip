@@ -58,11 +58,11 @@ describe('the audit contract judges in both directions', () => {
   test('a red carrying its reason PASSES, and reports that reason', () => {
     const states = cleanStates();
     states.tk.badType = [{ name: 'Direction' }];
-    const { failures, verdicts } = judge({ states, ran: allRan, table: withRed('token.type', 'the server says type where the form fixes enum') });
+    const { failures, verdicts } = judge({ states, ran: allRan, table: withRed('token.type', 'the server says type where the form fixes class') });
     expect(failures).toEqual([]);
     const v = verdicts.find((x) => x.name === 'token.type');
     expect(v.state).toBe('red-expected');
-    expect(v.redBecause).toBe('the server says type where the form fixes enum');
+    expect(v.redBecause).toBe('the server says type where the form fixes class');
   });
 
   // The direction a one-directional baseline swallows, and the reason this is
@@ -162,7 +162,6 @@ describe('the audit contract judges in both directions', () => {
       'token.delivery': (s) => { s.tk.missing = [{}]; },
       'token.type': (s) => { s.tk.badType = [{ want: { type: 'variable' } }]; },
       'token.type.nested': (s) => { s.tk.badKind = [{}]; },
-      'token.type.enum': (s) => { s.tk.badType = [{ want: { type: 'enum' } }]; },
       'token.readonly': (s) => { s.tk.badReadonly = [{}]; },
       'token.delivery.use-site': (s) => { s.tk.survDrops = [{ name: 'x', count: 1 }]; },
       'token.delivery.oracle': (s) => { s.tk.survUnclassified = 1; },

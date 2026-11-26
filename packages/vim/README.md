@@ -17,7 +17,7 @@ Vim plugin for the [Rip](https://github.com/shreeve/rip) programming language.
 - **Object keys** — `method:` and `optional?:`, including keys spelled with a value word (`{on: 2}`)
 - **Declarations** — `x = 5`, readonly `x =! 5`, state `x := 0`, computed `x ~= y`
 - **Function definitions** — `def name`, `name = ->`, and `name: ->`
-- **Class / enum / interface** — name and extends capture
+- **Class / interface** — name and extends capture
 - **Reactive operators** — `:=`, `~=`, `~>`, `!>`, `<~`, `<=>`, `=!`
 - **Type annotations** — single-colon `name: Type` and `type Name =` (`::` is prototype access, e.g. `String::trim`)
 - **Regular expressions** — `/regex/` and `///heregex///` with interpolation, with Rip's regex-vs-division rule

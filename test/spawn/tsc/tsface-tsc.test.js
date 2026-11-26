@@ -110,8 +110,6 @@ const CLEAN_ROWS = [
  'def pick(a: number): string\ndef pick(a: string): string\ndef pick(a)\n  String(a)\npick(1).length',
     // class surface
  'class A\n  x: number = 5\n  m: (v: number): number -> v + @x\na = new A()\na.m(2)',
-    // enum + its type companion
- 'enum Color\n  red = 0\n  green = 1\npick: Color = Color.red',
     // reactive containers/readonly/effect handles
  'count: number := 0\ntotal: number ~= count * 2\nro: string =! "s"\ncount = total + ro.length',
     // void definitions

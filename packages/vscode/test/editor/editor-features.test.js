@@ -685,30 +685,6 @@ describe.concurrent.skipIf(!tsgoAvailable)('semantic tokens', () => {
     });
   }, 30000);
 
-  test('an aliased imported enum receives the direct import token correction', async () => {
-    await inWorkspace({
-      'colors.rip': 'export enum Color\n  red = 0\n',
-    }, async (api) => {
-      const cases = {
-        direct: ['import { Color } from "./colors.rip"', 'x = Color.red', 'Color'],
-        aliased: ['import { Color as Shade } from "./colors.rip"', 'x = Shade.red', 'Shade'],
-      };
-      for (const [file, [clause, use, name]] of Object.entries(cases)) {
-        await api.open(`${file}.rip`, `${clause}\n${use}\n`);
-        const result = await api.semanticTokens(`${file}.rip`);
-        const tokens = decodeTokens(result.data, api.capabilities.semanticTokensProvider.legend);
-        expect(tokens).toContainEqual({
-          line: 1,
-          character: 4,
-          length: name.length,
-          type: 'enum',
-          modifiers: [],
-          modifierBits: 0,
-        });
-      }
-    });
-  }, 30000);
-
   test('range requests answer exactly the requested Rip range', async () => {
     await inWorkspace({}, async (api) => {
       await api.open('app.rip', SRC);
@@ -733,11 +709,8 @@ describe.concurrent.skipIf(!tsgoAvailable)('document and workspace symbols', () 
         '  name: string = "hi"',            // 1
         '  greet: (who: string): string ->', // 2
         '    who',                           // 3
-        'enum Color',                        // 4
-        '  red = 0',                         // 5
-        '  green = 1',                       // 6
-        'count: number = 42',                // 7
-        'tick := 0',                         // 8 (reactive: injects __ runtime scaffolding)
+        'count: number = 42',                // 4
+        'tick := 0',                         // 5 (reactive: injects __ runtime scaffolding)
         '',
       ].join('\n');
       await api.open('app.rip', SRC);
@@ -757,18 +730,12 @@ describe.concurrent.skipIf(!tsgoAvailable)('document and workspace symbols', () 
       const nameField = greeter.children.find((c) => c.name === 'name');
       expect(nameField.selectionRange.start).toEqual({ line: 1, character: 2 });
 
-      // The enum emits a const object AND a same-name type companion —
-      // two generated manifestations of ONE Rip declaration: one symbol.
-      expect(names.filter((n) => n === 'Color')).toHaveLength(1);
-      const color = symbols.find((s) => s.name === 'Color');
-      expect(color.selectionRange.start.line).toBe(4);
-
       // The typed declaration hoists (let line + assignment): one
       // symbol, positioned at the Rip declaration.
       expect(names.filter((n) => n === 'count')).toHaveLength(1);
       const count = symbols.find((s) => s.name === 'count');
       expect(count.selectionRange).toEqual({
-        start: { line: 7, character: 0 }, end: { line: 7, character: 5 },
+        start: { line: 4, character: 0 }, end: { line: 4, character: 5 },
       });
 
       // The reactive's injected __ runtime never surfaces as symbols.

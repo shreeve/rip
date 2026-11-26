@@ -250,7 +250,7 @@ const KEYWORD_WORDS = new Set([
   'until', 'loop', 'do', 'return', 'break', 'continue', 'throw', 'try',
   'catch', 'finally', 'yield', 'await', 'import', 'export', 'from',
   'default', 'delete', 'typeof', 'instanceof', 'new', 'super', 'and',
-  'or', 'not', 'is', 'isnt', 'class', 'def', 'enum', 'interface',
+  'or', 'not', 'is', 'isnt', 'class', 'def', 'interface',
   'type', 'extends', 'own', 'schema', 'private', 'in', 'of', 'by', 'as',
   'component', 'render', 'slot', 'offer', 'accept', 'use', 'debugger', 'it',
 ]);
@@ -385,7 +385,7 @@ export function mintFresh(base, used) {
 // Kinds whose in-file lowering binds `const` restore as const — a
 // stray write throws JS's own TypeError, exactly as in-file. Plain,
 // class, and def bindings are reassignable and restore as `let`.
-const CONST_RESTORE = new Set(['state', 'computed', 'effect', 'readonly', 'import', 'enum']);
+const CONST_RESTORE = new Set(['state', 'computed', 'effect', 'readonly', 'import']);
 
 // Build the AsyncFunction body for one entry:
 //
@@ -653,7 +653,7 @@ export const isHistoryNavKey = (key) =>
 
 const KIND_INDICATOR = {
   state: ':=', computed: '~=', effect: '~>', readonly: '=!',
-  plain: '=', import: 'import', class: 'class', def: 'def', enum: 'enum',
+  plain: '=', import: 'import', class: 'class', def: 'def',
 };
 
 const DOT_COMMANDS = ['.help', '.clear', '.vars', '.history', '.editor', '.theme', '.color', '.tokens', '.sexp', '.js', '.exit'];

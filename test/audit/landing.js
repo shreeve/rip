@@ -51,11 +51,11 @@ const SCAFFOLD_NAME = /^(?:__[A-Za-z$][\w$]*|_(?:el|t|inst|frag|anchor|empty|slo
 const KEYWORD_MEMBERS = new Set(['constructor', 'super', 'this', 'new', 'static', 'get', 'set'])
 const RUNTIME_MEMBERS = new Set(['value', 'read', 'touch', 'parse', 'safe', 'ok', 'toJSONSchema', 'pick', 'omit', 'partial', 'required', 'extend', 'derive', 'mount'])
 // Top-level declarations: a name at column 0, after an optional keyword
-// (def/class/interface/enum/type/export), that the next token makes a
+// (def/class/interface/type/export), that the next token makes a
 // declaration — an assignment, an annotation, a reactive operator, a
 // type-parameter list — never a usage (`console.log(…)`). Heuristic, the
 // same one the token audit's inventory takes.
-const DECL = /^(?:export\s+)?(?:(def|class|interface|enum|type)\s+)?([A-Za-z_$][\w$]*)/
+const DECL = /^(?:export\s+)?(?:(def|class|interface|type)\s+)?([A-Za-z_$][\w$]*)/
 const NOT_DECL = new Set(['import', 'return', 'if', 'unless', 'for', 'while', 'export', 'switch', 'try', 'throw', 'console', 'p'])
 export function topLevelDecls(text) {
   const out = []

@@ -142,13 +142,14 @@ import {
 export const behaviorName = (name) => `__${name}__behavior`;
 
 // The symbol spelling: ':' followed by an UNSPACED word. The kind
-// position additionally admits keyword-kind tokens (`:enum` scans the
-// ENUM keyword).
+// position additionally admits keyword- and reserved-word tokens
+// (`:enum` scans a RESERVED token).
 const symWordAt = (tokens, i, keywordOk = false) => {
   if (tokens[i]?.kind !== ':') return null;
   const w = tokens[i + 1];
   if (!w || w.spaced) return null;
-  if (isWord(w) || (keywordOk && /^[a-z]+$/.test(w.value) && w.kind === w.value.toUpperCase())) return w;
+  if (isWord(w) || (keywordOk && /^[a-z]+$/.test(w.value) &&
+      (w.kind === w.value.toUpperCase() || w.kind === 'RESERVED'))) return w;
   return null;
 };
 

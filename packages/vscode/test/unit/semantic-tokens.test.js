@@ -80,7 +80,6 @@ describe('an imported object of components is a namespace to the token lane', ()
   const tokens = correctSemanticTokens(ctx, data, {
     legend: FALLBACK_LEGEND,
     importedKindOf: (specifier, name) => (specifier === './page.rip' ? importedKindInRecord(record, name) : null),
-    declaresEnum: () => false,
   });
   const tokenAt = (start) => tokens.find((t) => t.start === start) ?? null;
   const afterImport = USE.indexOf('\n') + 1;

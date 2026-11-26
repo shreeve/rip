@@ -23,8 +23,6 @@ describe('result.bindings reports every top-level binding with its kind', () => 
       'class Foo',
       'def g(n)',
       '  n',
-      'enum Color',
-      '  red = 1',
       'plainOne = 9',
       '[a, b] = [1, 2]',
     ].join('\n');
@@ -36,7 +34,6 @@ describe('result.bindings reports every top-level binding with its kind', () => 
       frozen: 'readonly',
       Foo: 'class',
       g: 'def',
-      Color: 'enum',
       plainOne: 'plain',
       a: 'plain', b: 'plain',
     });

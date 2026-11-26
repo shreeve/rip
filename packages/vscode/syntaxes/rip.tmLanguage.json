@@ -2,7 +2,7 @@
   "information_for_contributors": [
     "Adapted from VS Code's built-in CoffeeScript grammar (MIT licensed).",
     "Original: https://github.com/atom/language-coffee-script",
-    "Extended for Rip: type annotations, reactive operators, enums, interfaces, components."
+    "Extended for Rip: type annotations, reactive operators, interfaces, components."
   ],
   "name": "Rip",
   "scopeName": "source.rip",
@@ -119,7 +119,7 @@
       ]
     },
 
-    {"comment": "=== TYPE DECLARATIONS (type, enum, interface — before keywords to get name capture) ==="},
+    {"comment": "=== TYPE DECLARATIONS (type, interface — before keywords to get name capture) ==="},
     {
       "begin": "\\b(type)\\s+([A-Z]\\w*)",
       "beginCaptures": {
@@ -143,13 +143,6 @@
         { "include": "#type_expression" },
         { "include": "$self" }
       ]
-    },
-    {
-      "match": "\\b(enum)\\s+([A-Z]\\w*)",
-      "captures": {
-        "1": { "name": "storage.type.enum.rip" },
-        "2": { "name": "entity.name.type.enum.rip" }
-      }
     },
     {
       "begin": "\\b(interface)\\s+([A-Z]\\w*)(?:\\s+(extends)\\s+([A-Z]\\w*))?",
@@ -314,7 +307,7 @@
 
     {"comment": "=== COMPONENT DEFINITIONS (export Name = component extends tag) ==="},
     {
-      "comment": "`component` is a DECLARATION keyword, not control flow — it introduces a named thing with members and a render block, the role `class`, `interface`, `enum`, `type` and `def` all play, and every one of those sits in storage.type here. The name it declares is already scoped like a class name, so filing the declaring word under control flow was the odd half of that pair. TS has no `component`, so internal consistency governs.",
+      "comment": "`component` is a DECLARATION keyword, not control flow — it introduces a named thing with members and a render block, the role `class`, `interface`, `type` and `def` all play, and every one of those sits in storage.type here. The name it declares is already scoped like a class name, so filing the declaring word under control flow was the odd half of that pair. TS has no `component`, so internal consistency governs.",
       "match": "\\b(export\\s+)?([A-Z]\\w*)\\s*(=)\\s*(component)(?:\\s+(extends)\\s+([a-z]\\w*))?\\b",
       "captures": {
         "1": { "name": "keyword.control.rip" },

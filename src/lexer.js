@@ -324,7 +324,6 @@ const KEYWORDS = {
   // `do` scans as DO; tagParams retags it to DO_IIFE, the immediate
   // invocation of the function literal that follows.
   do: 'DO',
-  enum: 'ENUM',
   // Components. `component` and `render` are keywords
   // everywhere (property/key positions capture first, so `x.render`
   // and `render: 1` stay legal); `offer`/`accept` are CONTEXT-
@@ -339,7 +338,8 @@ const STATEMENTS = new Set(['break', 'continue', 'debugger']);
 
 // Keywords and JS reserved words with no feature behind them yet
 // (`private` has one position: the class-member modifier, scanned
-// PRIVATE at the head of a member line and reserved everywhere else).
+// PRIVATE at the head of a member line and reserved everywhere else;
+// `enum` rejects naming the forms that cover it).
 // They must never reach the parser as IDENTIFIER: with implicit calls
 // live, `do f x` or `new Date` would otherwise compile silently to a
 // CALL of a reserved word — invalid or wrong JS. Property positions
@@ -350,7 +350,7 @@ const STATEMENTS = new Set(['break', 'continue', 'debugger']);
 const RESERVED_WORDS = new Set([
   'default', // contextual: DEFAULT inside import/export lines only
   'function', 'var', 'let', 'const', 'void', 'with', 'case',
-  'implements', 'interface', 'package',
+  'enum', 'implements', 'interface', 'package',
   'private', 'protected', 'public', 'static', 'native',
 ]);
 
@@ -2478,6 +2478,9 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     if (t.kind === 'RESERVED') {
       if (t.value === 'private') {
         fail("'private' marks a class member — it heads a member line in a class body (`private helper: ->`) and is reserved everywhere else", t.start);
+      }
+      if (t.value === 'enum') {
+        fail("'enum' is reserved — a set of values is a `type` union (`type Color = 'red' | 'green'`), and runtime values are a plain object", t.start);
       }
       fail(`'${t.value}' is reserved and not supported yet`, t.start);
     }
