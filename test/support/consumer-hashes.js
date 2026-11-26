@@ -8,7 +8,7 @@
 // observed is exactly one this gate kills.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadBattery } from './battery.js';
+import { loadBattery, dedent } from './battery.js';
 import { ripFiles } from './rip-files.js';
 
 // Tracked package modules, by repository-relative path.
@@ -21,7 +21,9 @@ export function packageInputs(root) {
 
 // Language-suite rows, keyed by file, verb and name — never by position,
 // so adding a row moves no other key. A repeated name takes an
-// occurrence suffix.
+// occurrence suffix. Each source is dedented exactly as the battery
+// dedents it before compiling, so a row pins its real output, never the
+// rejection an indented heredoc body would earn.
 export async function rowInputs(root) {
   const dir = join(root, 'test/rip');
   const inputs = [];
@@ -32,7 +34,7 @@ export async function rowInputs(root) {
       const base = `row ${file} › ${row.verb} ${row.name}`;
       const n = (seen.get(base) ?? 0) + 1;
       seen.set(base, n);
-      inputs.push({ key: n === 1 ? base : `${base} #${n}`, src: row.src, path: `<${file}>` });
+      inputs.push({ key: n === 1 ? base : `${base} #${n}`, src: dedent(row.src), path: `<${file}>` });
     }
   }
   return inputs;
