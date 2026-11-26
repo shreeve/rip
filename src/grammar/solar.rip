@@ -1980,6 +1980,7 @@ class Generator
       ruleNames: #{JSON.stringify @_ruleNames()},
       ruleActions: #{@ruleActions},
       #{String(@parse).replace(/^function /, '')},
+      #{String(@accepts).replace(/^function /, '')},
       ctx: {},
     }"""
 
@@ -2069,8 +2070,20 @@ class Generator
   # OFF, every site below is skipped as one unit and the driver is
   # byte-for-byte the strict one.
   parse: (input, {primitives: wantPrimitives = false, tolerant = false} = {}) ->
-    [stk, vals, locs, primitiveLocs] = [[0], [null], [null], [[]]]
+    # `stk` holds states only, parallel to `vals` and `locs`: a goto reads
+    # the rule's lhs from ruleTable, so the stack never needs the symbols.
+    # `ids` is parallel too: the node id of each value, 0 for a value that
+    # was not registered when it was pushed. Rule actions read `vals` and
+    # never write it (they build and return values; an accumulator mutates
+    # the list a slot holds, never the slot), which is what keeps `ids`,
+    # `locs` and `base` in step with `vals` across the action call.
+    [stk, vals, locs, primitiveLocs, ids] = [[0], [null], [null], [[]], [0]]
     parseTable = @parseTable
+    ruleTable = @ruleTable
+    leaves = @leaves ?? {}
+    # A reduction that carries no primitive spans pushes this shared list;
+    # frozen, so a push onto it throws instead of leaking between nodes.
+    noPrimitives = Object.freeze []
     EOF = 1
     diagnostics = []
     pendingSymbols = []
@@ -2104,8 +2117,60 @@ class Generator
     roles = []
     primitives = []
     nodeIds = WeakMap.new()
-    leafNodes = WeakSet.new()
     nextNodeId = 1
+
+    # Register one constructed array: its nested nodes first (ids stay
+    # bottom-up, as reductions are), then its own NodeStore row and
+    # RoleStore rows. The rule's own node takes the reduction span; a
+    # nested node spans the matched symbols it and its descendants carry
+    # (the reduction span when it carries none). It reads the reduction in
+    # progress (`action`, `base`, `span`) from the enclosing parse. Every
+    # name it assigns is its own: a name the parse method also assigns
+    # would be shared, and the recursion would clobber it.
+    register = (arr, kind, parts, nestedParts, ownSpan) =>
+      kidIds  = []
+      lowest  = Infinity
+      highest = -Infinity
+      for entry in nestedParts
+        kid = arr
+        kid = kid[step] for step in entry.path
+        throw Error.new "parse: nested annotation '#{entry.role}' of rule #{-action} does not address a fresh array" unless Array.isArray(kid) and not nodeIds.has(kid)
+        kidId = register kid, entry.kind, entry.roles, entry.nested, null
+        kidIds.push kidId
+        lowest  = Math.min lowest, nodes[kidId - 1].sourceStart
+        highest = Math.max highest, nodes[kidId - 1].sourceEnd
+      for part in parts when part.grammarRef?
+        refLoc = locs[base + part.grammarRef - 1]
+        # Annotated refs address real matched symbols, whose locs the lexer
+        # protocol guarantees; a hole is a protocol violation, never a
+        # position to default.
+        throw Error.new "parse: missing loc for grammarRef #{part.grammarRef} of rule #{-action} — lexer protocol violation" unless refLoc?
+        lowest  = Math.min lowest, refLoc.start
+        highest = Math.max highest, refLoc.end
+      nodeSpan = ownSpan ?? (if lowest is Infinity then span else {start: lowest, end: highest})
+      ownId = nextNodeId++
+      nodeIds.set arr, ownId
+      nodes.push {nodeId: ownId, fileId: 0, semanticKind: kind, ruleId: -action, sourceStart: nodeSpan.start, sourceEnd: nodeSpan.end}
+      for part in parts
+        if part.grammarRef?
+          pos    = base + part.grammarRef - 1
+          refLoc = locs[pos]
+          roleRow = {nodeId: ownId, role: part.name, grammarRef: part.grammarRef, childSlot: part.childSlot, sourceStart: refLoc.start, sourceEnd: refLoc.end, childNodeId: null, fileId: 0}
+          if part.spread
+            # Spread span covers the spliced children's full extent (the
+            # ref'd symbol's span); per-element spans come from the
+            # children's own NodeStore rows.
+            roleRow.spread = true
+          else
+            roleRow.childNodeId = nodeIds.get(vals[pos]) ?? null
+          roles.push roleRow
+        else
+          # Literal-sourced role: statically-known value, no span.
+          roles.push {nodeId: ownId, role: part.name, grammarRef: null, childSlot: part.childSlot, literal: part.literal, fileId: 0}
+      for entry, kidIndex in nestedParts
+        kidRow = nodes[kidIds[kidIndex] - 1]
+        roles.push {nodeId: ownId, role: entry.role, grammarRef: null, childSlot: (if entry.path.length is 1 then entry.path[0] else null), sourceStart: kidRow.sourceStart, sourceEnd: kidRow.sourceEnd, childNodeId: kidIds[kidIndex], fileId: 0}
+      ownId
 
     lexer = Object.create @lexer
     sharedState = {ctx: {}}
@@ -2265,18 +2330,19 @@ class Generator
 
       if action > 0  # SHIFT or GOTO
         repairedHere.clear() if tolerant and not lexer.token?.hole
-        stk.push symbol, action
+        stk.push action
         # A leaf token's value is a node of its own, with its own row.
-        leafKind = @leaves?[symbol]
+        leafKind = leaves[symbol]
         if leafKind?
           leaf = [leafKind, {}, lexer.text]
           leafId = nextNodeId++
           nodeIds.set leaf, leafId
-          leafNodes.add leaf
           nodes.push {nodeId: leafId, fileId: 0, semanticKind: leafKind, ruleId: 0, sourceStart: lexer.loc?.start ?? null, sourceEnd: lexer.loc?.end ?? null}
           vals.push leaf
+          ids.push leafId
         else
           vals.push lexer.text
+          ids.push 0
         locs.push (lexer.loc ?? null)
         if wantPrimitives
           primitiveLocs.push if Array.isArray lexer.text?.primitiveSpans
@@ -2288,37 +2354,41 @@ class Generator
         symbol = null
 
       else if action < 0  # REDUCE
+        rule = -action
         # Coverage hook: an instrument (the grammar gate) may set ctx.onReduce
         # to observe which rules a parse exercises; unset, this is one guard.
-        @ctx.onReduce(-action) if @ctx?.onReduce
-        len = @ruleTable[(-action) * 2 + 1]
+        @ctx.onReduce(rule) if @ctx?.onReduce
+        len = ruleTable[rule * 2 + 1]
+        base = vals.length - len
 
         # Span of the whole reduction: from the first RHS symbol's start to
         # the last one's end. Empty productions get a zero-width span at the
         # current lookahead's start (the position where the empty match
         # sits), falling back to the previous symbol's end.
-        span = if len
-          first = locs[locs.length - len]
+        if len
+          first = locs[base]
           last  = locs[locs.length - 1]
-          {start: first?.start ?? 0, end: last?.end ?? (first?.end ?? 0)}
+          span = {start: first?.start ?? 0, end: last?.end ?? (first?.end ?? 0)}
         else
           at = tokenLoc?.start ?? (locs[locs.length - 1]?.end ?? 0)
-          {start: at, end: at}
+          span = {start: at, end: at}
 
         rv.$  = vals[vals.length - (len or 1)]
         rv._$ = span
 
-        r = @ruleActions.call rv, -action, vals, locs, sharedState.ctx
+        r = @ruleActions.call rv, rule, vals, locs, sharedState.ctx
         rv.$ = r if r?
 
         # Primitive spans follow only RHS values the action carries. This is
         # the occurrence identity a primitive string cannot hold itself; it
         # survives accumulator mutation and spread-copying as side-table data.
-        base = vals.length - len
-        carriedPrimitives = []
+        carriedPrimitives = noPrimitives
         if wantPrimitives
-          for ref in @primitiveRefs[-action]
-            carriedPrimitives.push ...(primitiveLocs[base + ref - 1] ?? [])
+          for ref in @primitiveRefs[rule]
+            spans = primitiveLocs[base + ref - 1]
+            continue unless spans?.length
+            carriedPrimitives = [] if carriedPrimitives is noPrimitives
+            carriedPrimitives.push carried for carried in spans
 
         # A reduction that CONSTRUCTED a node (a fresh array) registers it:
         # NodeStore row always, RoleStore rows when the rule is annotated.
@@ -2331,68 +2401,26 @@ class Generator
         # span extends to the current reduction span. The refresh is
         # scoped to accumulator rules only — pass-through/Parenthetical
         # reductions never touch the child's own span.
+        # Most reductions pass a right-hand value through; its id is on the
+        # `ids` stack, which saves the WeakMap lookup. A slot's nonzero id is
+        # final (an array is registered once), so the answer always equals
+        # nodeIds.get(node) (given that actions never write `vals`, above); a
+        # value found nowhere on the right-hand side, or pushed unregistered,
+        # asks the WeakMap.
         node = rv.$
-        if Array.isArray(node) and nodeIds.has(node) and @accumulators[-action]
-          row = nodes[nodeIds.get(node) - 1]
-          row.sourceStart = span.start
-          row.sourceEnd = span.end
-        if Array.isArray(node) and not nodeIds.has(node)
-          sem = @semantics[-action]
-          base = vals.length - len
-          # Register one constructed array: its nested nodes first (ids
-          # stay bottom-up, as reductions are), then its own NodeStore
-          # row and RoleStore rows. The rule's own node takes the
-          # reduction span; a nested node spans the matched symbols it
-          # and its descendants carry (the reduction span when it
-          # carries none).
-          # (Names inside are unique to this closure: a name the parse
-          # method also assigns would be shared, and the recursion
-          # would clobber it.)
-          register = (arr, kind, parts, nestedParts, ownSpan) =>
-            kidIds  = []
-            lowest  = Infinity
-            highest = -Infinity
-            for entry in nestedParts
-              kid = arr
-              kid = kid[step] for step in entry.path
-              throw Error.new "parse: nested annotation '#{entry.role}' of rule #{-action} does not address a fresh array" unless Array.isArray(kid) and not nodeIds.has(kid)
-              kidId = register kid, entry.kind, entry.roles, entry.nested, null
-              kidIds.push kidId
-              lowest  = Math.min lowest, nodes[kidId - 1].sourceStart
-              highest = Math.max highest, nodes[kidId - 1].sourceEnd
-            for part in parts when part.grammarRef?
-              refLoc = locs[base + part.grammarRef - 1]
-              # Annotated refs address real matched symbols, whose locs
-              # the lexer protocol guarantees; a hole is a protocol
-              # violation, never a position to default.
-              throw Error.new "parse: missing loc for grammarRef #{part.grammarRef} of rule #{-action} — lexer protocol violation" unless refLoc?
-              lowest  = Math.min lowest, refLoc.start
-              highest = Math.max highest, refLoc.end
-            nodeSpan = ownSpan ?? (if lowest is Infinity then span else {start: lowest, end: highest})
-            ownId = nextNodeId++
-            nodeIds.set arr, ownId
-            nodes.push {nodeId: ownId, fileId: 0, semanticKind: kind, ruleId: -action, sourceStart: nodeSpan.start, sourceEnd: nodeSpan.end}
-            for part in parts
-              if part.grammarRef?
-                pos    = base + part.grammarRef - 1
-                refLoc = locs[pos]
-                roleRow = {nodeId: ownId, role: part.name, grammarRef: part.grammarRef, childSlot: part.childSlot, sourceStart: refLoc.start, sourceEnd: refLoc.end, childNodeId: null, fileId: 0}
-                if part.spread
-                  # Spread span covers the spliced children's full extent
-                  # (the ref'd symbol's span); per-element spans come from
-                  # the children's own NodeStore rows.
-                  roleRow.spread = true
-                else
-                  roleRow.childNodeId = nodeIds.get(vals[pos]) ?? null
-                roles.push roleRow
-              else
-                # Literal-sourced role: statically-known value, no span.
-                roles.push {nodeId: ownId, role: part.name, grammarRef: null, childSlot: part.childSlot, literal: part.literal, fileId: 0}
-            for entry, k in nestedParts
-              kidRow = nodes[kidIds[k] - 1]
-              roles.push {nodeId: ownId, role: entry.role, grammarRef: null, childSlot: (if entry.path.length is 1 then entry.path[0] else null), sourceStart: kidRow.sourceStart, sourceEnd: kidRow.sourceEnd, childNodeId: kidIds[k], fileId: 0}
-            ownId
-          register node, (sem?.kind ?? null), (sem?.roles ?? []), (sem?.nested ?? []), span
+        nodeId = undefined
+        if Array.isArray(node)
+          slot = base
+          slot++ while slot < vals.length and vals[slot] isnt node
+          nodeId = if slot < vals.length and ids[slot] isnt 0 then ids[slot] else nodeIds.get(node)
+        if nodeId?
+          if @accumulators[rule]
+            row = nodes[nodeId - 1]
+            row.sourceStart = span.start
+            row.sourceEnd = span.end
+        else if Array.isArray(node)
+          sem = @semantics[rule]
+          nodeId = register node, (sem?.kind ?? null), (sem?.roles ?? []), (sem?.nested ?? []), span
 
         # A primitive occurrence belongs to the FIRST constructed node that
         # carries it. Ancestors recover it by source containment, so the row is
@@ -2400,29 +2428,58 @@ class Generator
         # carried occurrence has an owner, no descendant list needs to flow
         # farther up the reduction stack; direct terminals continue until the
         # first node-producing reduction claims them.
-        # A leaf passed through a rule is not a constructed node: the
-        # primitive belongs to the node that takes the leaf in.
-        if wantPrimitives and Array.isArray(node) and nodeIds.has(node) and not leafNodes.has(node)
-          ownerNodeId = nodeIds.get node
+        # A leaf passed through a rule is not a constructed node (its row's
+        # ruleId is 0): the primitive belongs to the node that takes the
+        # leaf in.
+        if wantPrimitives and nodeId? and nodes[nodeId - 1].ruleId isnt 0
           for p in carriedPrimitives when not p.ownerNodeId?
-            p.ownerNodeId = ownerNodeId
-            primitives.push {nodeId: ownerNodeId, value: p.value, sourceStart: p.sourceStart, sourceEnd: p.sourceEnd, fileId: 0}
-          carriedPrimitives = []
+            p.ownerNodeId = nodeId
+            primitives.push {nodeId, value: p.value, sourceStart: p.sourceStart, sourceEnd: p.sourceEnd, fileId: 0}
+          carriedPrimitives = noPrimitives
 
         if len
-          stk.length  -= len * 2
+          stk.length  -= len
           vals.length -= len
+          ids.length  -= len
           locs.length -= len
           primitiveLocs.length -= len if wantPrimitives
 
-        stk.push @ruleTable[(-action) * 2]
+        stk.push parseTable[stk[stk.length - 1]][ruleTable[rule * 2]]
         vals.push rv.$
+        ids.push nodeId ?? 0
         locs.push span
         primitiveLocs.push carriedPrimitives if wantPrimitives
-        stk.push parseTable[stk[stk.length - 2]][stk[stk.length - 1]]
 
       else  # ACCEPT
         return {sexpr: vals[vals.length - 1], stores: {nodes, roles, primitives, nodeIds}, diagnostics, trivia: lexer.trivia ?? null, tokens: lexer.tokens ?? null}
+
+  # Lookahead correction (LAC): whether the configuration `stack` (the
+  # driver's state stack, bottom first) would SHIFT `symbol`, or accept on
+  # it. An LALR table can reduce on a token it then rejects, so "the state
+  # has an action for t" over-answers; this runs the reductions t triggers
+  # on a virtual stack — the real stack's untouched prefix plus the states
+  # the simulated gotos push — and answers true only when t is consumed.
+  # The real stack is never written. A configuration that reduces without
+  # end would be a generator defect, so the walk is bounded and throws.
+  accepts: (stack, symbol) ->
+    table = @parseTable
+    rules = @ruleTable
+    depth = stack.length
+    pushed = []
+    steps = 0
+    loop
+      top = if pushed.length then pushed[pushed.length - 1] else stack[depth - 1]
+      act = table[top]?[symbol]
+      return false unless act?
+      return true if act >= 0
+      throw Error.new "accepts: no shift after #{steps} reductions on symbol #{symbol}" if ++steps > 100000
+      popLen = rules[(-act) * 2 + 1]
+      fromPushed = Math.min popLen, pushed.length
+      pushed.length -= fromPushed
+      depth -= popLen - fromPushed
+      return false if depth < 1
+      from = if pushed.length then pushed[pushed.length - 1] else stack[depth - 1]
+      pushed.push table[from][rules[(-act) * 2]]
 
 # ==============================================================================
 # Exports
