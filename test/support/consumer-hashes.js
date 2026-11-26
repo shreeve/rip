@@ -3,9 +3,7 @@
 // JS face and the TS face, one hash per output. The manifest
 // (test/corpus/consumers.json) pins those hashes, so any engine change
 // that moves the output of real code fails loudly until the change is
-// reviewed and the manifest regenerated (`bun run corpus`). The mutation
-// runner's `observe` reads the same inputs, so a survivor it reports as
-// observed is exactly one this gate kills.
+// reviewed and the manifest regenerated (`bun run corpus`).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadBattery, dedent } from './battery.js';
