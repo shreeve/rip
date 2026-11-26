@@ -8,6 +8,7 @@ import parser from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
 import { emit } from '../../src/emitter.js';
 import { Stores, Mappings } from '../../src/stores.js';
+import { isLeaf } from '../../src/sexpr.js';
 import { ripFiles } from '../support/rip-files.js';
 
 parser.lexer = makeParserLexer();
@@ -48,6 +49,10 @@ describe('TS face: a primitive read owns its own exact row', () => {
     ['type Ω = Ξ\nx: Ω = 1\n', 'Ω', 1],                        // Unicode annotation
     ['nums = [1]\nd = (n * 2 for n in nums)', 'nums', 1],      // comprehension source
     ['Alpha = schema :shape\n  units!  number\n', 'units', 0], // inside a collapsed schema body
+    ['x = [null, undefined, this, true]', 'null', 0],          // literal words, each a leaf
+    ['x = [null, undefined, this, true]', 'undefined', 0],
+    ['x = [null, undefined, this, true]', 'this', 0],
+    ['x = [null, undefined, this, true]', 'true', 0],
   ])('%p resolves %p occurrence %i at its own bytes', (src, name, occurrence) => {
     let at = -1;
     for (let i = 0; i <= occurrence; i++) at = src.indexOf(name, at + 1);
@@ -685,7 +690,7 @@ describe('construct by construct: spans, grouping, and lowerings', () => {
     expect(code).toBe('let x = `a${b}c`;'); // locals declare in place
     // The interpolation chunk (a Body node) has an honest source span
     // over `b` and a generated span inside ${…}.
-    const chunk = stores.nodes.find(n => src.slice(n.sourceStart, n.sourceEnd) === 'b');
+    const chunk = stores.nodes.find(n => n.semanticKind === null && src.slice(n.sourceStart, n.sourceEnd) === 'b');
     expect(chunk).toBeDefined();
     const row = mappings.of(chunk.nodeId, '$self')[0];
     expect(code.slice(row.generatedStart, row.generatedEnd)).toBe('b');
@@ -699,11 +704,12 @@ describe('construct by construct: spans, grouping, and lowerings', () => {
 
   test('nested inline-then binds else to the nearest if', () => {
     const src = 'if a then if b then c else d';
+    const n = (raw) => ['name', {}, raw];
     const r = parser.parse(src);
     expect(r.diagnostics).toEqual([]);
     // else belongs to the inner if (the JS convention).
     expect(JSON.stringify(r.sexpr)).toBe(JSON.stringify(
-      ['program', {}, ['if', {}, 'a', ['block', {}, ['if', {}, 'b', ['block', {}, 'c'], ['block', {}, 'd']]], ['none', {}]]],
+      ['program', {}, ['if', {}, n('a'), ['block', {}, ['if', {}, n('b'), ['block', {}, n('c')], ['block', {}, n('d')]]], ['none', {}]]],
     ));
   });
 
@@ -1326,7 +1332,9 @@ describe('node identity survives emission', () => {
     const walk = (node) => {
       if (!Array.isArray(node)) return;
       const id = stores.idOf(node);
-      if (id !== null && stores.node(id).semanticKind !== null) {
+      // A leaf reaches the emitter as its raw value (src/emitter-shape.js
+      // unwraps it), so its mappings join by span, not by id.
+      if (id !== null && stores.node(id).semanticKind !== null && !isLeaf(node)) {
         expect(mappings.of(id, '$self')).not.toHaveLength(0);
       }
       for (const el of node) walk(el);

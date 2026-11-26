@@ -66,13 +66,15 @@ describe('explain: plain exact-mapped identifier (x = y + 1)', () => {
     expect(out).toContain('<fixture>:1:5 (offset 4) — source position');
     // caret excerpt under `y`
     expect(out).toContain('  1 | x = y + 1\n    |     ^');
-    expect(out).toContain('4 nodes contain this position (innermost first):');
+    expect(out).toContain('5 nodes contain this position (innermost first):');
 
-    // innermost node first: binary before assign before program
+    // innermost node first: the `y` leaf, then binary, assign, program
+    const leafAt = out.indexOf('name  $self [4,5) 1:5-1:6  `y`');
     const binaryAt = out.indexOf('binary  $self [4,9) 1:5-1:10  `y + 1`');
     const assignAt = out.indexOf('assign  $self [0,9) 1:1-1:10  `x = y + 1`');
     const programAt = out.indexOf('program  $self [0,9)');
-    expect(binaryAt).toBeGreaterThan(-1);
+    expect(leafAt).toBeGreaterThan(-1);
+    expect(binaryAt).toBeGreaterThan(leafAt);
     expect(assignAt).toBeGreaterThan(binaryAt);
     expect(programAt).toBeGreaterThan(assignAt);
 
@@ -224,16 +226,16 @@ describe('explain: reverse direction (x = y + 1 generated side)', () => {
     const hoistedSrc = 'if y\n  x = 1\n';
     const out = explainGenerated(hoistedSrc, { path, pos: { line: 1, col: 5 } });
     expect(out).toContain('  1 | let x;\n    |     ^');
-    expect(out).toMatch(row('#1 assign.target', 'exact', '[4,5) 1:5-1:6', '<-', '[7,8) 2:3-2:4', '`x`', 'V3 map'));
-    expect(out).toMatch(/bestAtGenerated resolves to #1 assign\.target \(exact\) — source <fixture>:2:3/);
+    expect(out).toMatch(row('#4 assign.target', 'exact', '[4,5) 1:5-1:6', '<-', '[7,8) 2:3-2:4', '`x`', 'V3 map'));
+    expect(out).toMatch(/bestAtGenerated resolves to #4 assign\.target \(exact\) — source <fixture>:2:3/);
     expect(out).toContain('  2 |   x = 1\n    |   ^');
   });
 
   test('a synthetic glyph is reachable from the generated side, reverse-only', () => {
     // generated 1:11 = the emitted `+` in `let x = y + 1;`
     const out = explainGenerated(src, { path, pos: { line: 1, col: 11 } });
-    expect(out).toMatch(row('#1 binary.operator', 'synthetic', '[10,11) 1:11-1:12', '<-', '[4,4) 1:5-1:5', '`+`', 'reverse-only'));
-    expect(out).toMatch(/bestAtGenerated resolves to #1 binary\.operator \(synthetic\)/);
+    expect(out).toMatch(row('#4 binary.operator', 'synthetic', '[10,11) 1:11-1:12', '<-', '[4,4) 1:5-1:5', '`+`', 'reverse-only'));
+    expect(out).toMatch(/bestAtGenerated resolves to #4 binary\.operator \(synthetic\)/);
   });
 
   test('rows print innermost first', () => {

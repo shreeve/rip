@@ -14,7 +14,16 @@
 // where a slot admits `expr`, and the walk still validates every
 // kinded node inside it.
 
-import { kinds as shippedKinds, executable as shippedExecutable } from './parser.js';
+import { kinds as shippedKinds, executable as shippedExecutable, leafKinds } from './parser.js';
+
+// ── leaves ──────────────────────────────────────────────────────────
+// A leaf: [kind, {}, raw], a token's value as a node of its own (the
+// grammar's `leaves` table names the kinds). leafValue reads its raw
+// value (a `this` leaf spelled `@` reads "this") and passes any other
+// value through.
+export const LEAF_KINDS = new Set(leafKinds);
+export const isLeaf = (x) => Array.isArray(x) && x.length === 3 && LEAF_KINDS.has(x[0]) && isAttrs(x[1]);
+export const leafValue = (x) => (isLeaf(x) ? (x[0] === 'this' ? 'this' : x[2]) : x);
 
 // ── call shapes ─────────────────────────────────────────────────────
 // A call: ["call", attrs, callee, ...args]. The attribute record says
@@ -101,7 +110,6 @@ export function validateSexpr(result, { kinds = shippedKinds, executable = shipp
       case 'none': return Array.isArray(value) && value.length === 2 && value[0] === 'none' && isAttrs(value[1]) && kindOf(value) == null;
       case 'lit': return value === alt.value;
       case 'expr': {
-        if (typeof value === 'string') return true;
         if (!Array.isArray(value)) return false;
         const kind = kindOf(value);
         return kind != null ? kinds[kind]?.part !== true : isExecutable(value);

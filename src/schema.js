@@ -119,7 +119,7 @@ const isKeywordWord = (t) =>
   (t.kind === t.value.toUpperCase() || t.kind === 'LEADING_WHEN' || t.kind === 'RELATION' || t.kind === 'STATEMENT');
 
 import { isIdentifierName, identifierRunAt } from './ident.js';
-import { isPlainCall } from './sexpr.js';
+import { isPlainCall, leafValue } from './sexpr.js';
 import { counter } from './counter.js';
 import { normalizeTypeText } from './ts/types.js';
 // The schema vocabulary and naming rules, shared verbatim with the two
@@ -2157,7 +2157,7 @@ function serializeLiteral(v) {
 
 const FOLD_ALGEBRA = new Set(['pick', 'omit', 'partial', 'required', 'extend']);
 
-function foldStr(n) { return n && n.valueOf ? n.valueOf() : n; }
+function foldStr(n) { const v = leafValue(n); return v && v.valueOf ? v.valueOf() : v; }
 
 // True when a descriptor pulls fields in via `@mixin`. The fold can't
 // expand mixins (resolution is a runtime `_normalize` concern), so any
@@ -2333,7 +2333,7 @@ function foldParseChain(rhs) {
     if (foldStr(callee[0]) !== '.') return null;
     const method = foldStr(callee[3]);
     if (!FOLD_ALGEBRA.has(method)) return null;
-    const argNodes = node.slice(3);
+    const argNodes = node.slice(3).map(leafValue);
     let op;
     if (method === 'partial') {
       if (argNodes.length) return null;
@@ -2360,7 +2360,7 @@ function foldParseChain(rhs) {
       op = { method, keys };
     }
     ops.unshift(op);
-    const obj = callee[2];
+    const obj = leafValue(callee[2]);
     if (Array.isArray(obj)) { node = obj; continue; } // inner call in the chain
     const base = foldStr(obj);
     if (typeof base !== 'string') return null;

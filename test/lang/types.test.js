@@ -246,7 +246,8 @@ describe('erasure boundary pins: guards, forwards, segments, ternary casts', () 
     // each brace depth pairs its own colons, so the brace-inner pair
     // colon never claims the ternary's else-colon...
     const r = parser.parse('y = a ? {x: 1} : b');
-    expect(r.sexpr).toEqual(['program', {}, ['=', {}, 'y', ['?:', {}, 'a', ['object', {}, [':', {}, 'x', '1']], 'b']]]);
+    const n = (raw) => ['name', {}, raw];
+    expect(r.sexpr).toEqual(['program', {}, ['=', {}, n('y'), ['?:', {}, n('a'), ['object', {}, [':', {}, n('x'), ['num', {}, '1']]], n('b')]]]);
     // ...and an `as` PROPERTY key keeps its implicit-object reading.
     expect(compile('f as: 1').code).toBe('f({as: 1});');
   });
@@ -691,7 +692,7 @@ describe('erased declarations add no imports and no preamble', () => {
 describe('s-expressions: erased statements carry stable trees', () => {
   test('type/interface declarations parse to erased type-decl statements (raw text as the value)', () => {
     expect(JSON.stringify(parser.parse('type ID = string\nx = 5').sexpr))
-      .toBe(JSON.stringify(['program', {}, ['type-decl', {}, 'type ID = string'], ['=', {}, 'x', '5']]));
+      .toBe(JSON.stringify(['program', {}, ['type-decl', {}, 'type ID = string'], ['=', {}, ['name', {}, 'x'], ['num', {}, '5']]]));
     expect(JSON.stringify(parser.parse('export type Pair<A, B> = [A, B]').sexpr))
       .toBe(JSON.stringify(['program', {}, ['type-decl', {}, 'export type Pair<A, B> = [A, B]']]));
     expect(JSON.stringify(parser.parse('interface Q extends P\n  z: number').sexpr))
@@ -700,9 +701,9 @@ describe('s-expressions: erased statements carry stable trees', () => {
 
   test('bare declarations and class fields carry the erased typed wrapper', () => {
     expect(JSON.stringify(parser.parse('r: number\nr = 5').sexpr))
-      .toBe(JSON.stringify(['program', {}, ['typed-var', {}, 'r', 'number'], ['=', {}, 'r', '5']]));
+      .toBe(JSON.stringify(['program', {}, ['typed-var', {}, ['name', {}, 'r'], 'number'], ['=', {}, ['name', {}, 'r'], ['num', {}, '5']]]));
     expect(JSON.stringify(parser.parse('class A\n  @x: number').sexpr))
-      .toBe(JSON.stringify(['program', {}, ['class', {}, 'A', ['none', {}], ['block', {}, ['typed-var', {}, ['.', {}, 'this', 'x'], 'number']]]]));
+      .toBe(JSON.stringify(['program', {}, ['class', {}, ['name', {}, 'A'], ['none', {}], ['block', {}, ['typed-var', {}, ['.', {}, 'this', ['name', {}, 'x']], 'number']]]]));
     // The typed initialized field is the SAME node as its twin — the
     // annotation lives only in the side tables.
     expect(JSON.stringify(parser.parse('class A\n  x: number = 5').sexpr))

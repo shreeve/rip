@@ -12,6 +12,9 @@ import { pathToFileURL } from 'url';
 import parser from '../../src/parser.js';
 import { makeParserLexer, tokenize } from '../../src/lexer.js';
 import { emit } from '../../src/emitter.js';
+
+// Leaves: the driver builds each token value as [kind, {}, raw].
+const n = (raw) => ['name', {}, raw];
 import { Mappings } from '../../src/stores.js';
 
 parser.lexer = makeParserLexer();
@@ -41,8 +44,8 @@ describe('dammit tokenization: the explicit DAMMIT token', () => {
   });
 
   test('sexpr shape: dammit is a call carrying the await attribute', () => {
-    expect(JSON.stringify(parser.parse('x = f!').sexpr)).toBe(JSON.stringify(['program', {}, ['=', {}, 'x', ['call', { await: true }, 'f']]]));
-    expect(JSON.stringify(parser.parse('x = f! 1').sexpr)).toBe(JSON.stringify(['program', {}, ['=', {}, 'x', ['call', {}, ['call', { await: true }, 'f'], '1']]]));
+    expect(JSON.stringify(parser.parse('x = f!').sexpr)).toBe(JSON.stringify(['program', {}, ['=', {}, n('x'), ['call', { await: true }, n('f')]]]));
+    expect(JSON.stringify(parser.parse('x = f! 1').sexpr)).toBe(JSON.stringify(['program', {}, ['=', {}, n('x'), ['call', {}, ['call', { await: true }, n('f')], ['num', {}, '1']]]]));
   });
 
   test('collision impossible: a user function named `dammit` compiles as a CALL', () => {
@@ -74,13 +77,13 @@ describe('maybe dammit forms', () => {
   test('bare, empty, parenthesized, and juxta forms are all maybe dammit', () => {
     const maybe = { opt: true, await: true };
     expect(parser.parse('x = fn?!').sexpr)
-      .toEqual(['program', {}, ['=', {}, 'x', ['call', maybe, 'fn']]]);
+      .toEqual(['program', {}, ['=', {}, n('x'), ['call', maybe, n('fn')]]]);
     expect(parser.parse('x = fn?!()').sexpr)
-      .toEqual(['program', {}, ['=', {}, 'x', ['call', maybe, 'fn']]]);
+      .toEqual(['program', {}, ['=', {}, n('x'), ['call', maybe, n('fn')]]]);
     expect(parser.parse('x = fn?!(arg)').sexpr)
-      .toEqual(['program', {}, ['=', {}, 'x', ['call', maybe, 'fn', 'arg']]]);
+      .toEqual(['program', {}, ['=', {}, n('x'), ['call', maybe, n('fn'), n('arg')]]]);
     expect(parser.parse('x = fn?! arg').sexpr)
-      .toEqual(['program', {}, ['=', {}, 'x', ['call', maybe, 'fn', 'arg']]]);
+      .toEqual(['program', {}, ['=', {}, n('x'), ['call', maybe, n('fn'), n('arg')]]]);
   });
 });
 

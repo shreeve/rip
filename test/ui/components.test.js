@@ -147,8 +147,8 @@ describe('the component surface: keywords and context', () => {
     const r = parser.parse('C = component\n  offer theme := 1\n  accept locale\n  render\n    div "x"');
     expect(r.diagnostics).toEqual([]);
     const body = r.sexpr[2][3][3]; // program → assign → component → block
-    expect(JSON.stringify(body[2])).toBe('["offer",{},["state",{},"theme","1"]]');
-    expect(JSON.stringify(body[3])).toBe('["accept",{},"locale",["none",{}]]');
+    expect(JSON.stringify(body[2])).toBe('["offer",{},["state",{},["name",{},"theme"],["num",{},"1"]]]');
+    expect(JSON.stringify(body[3])).toBe('["accept",{},["name",{},"locale"],["none",{}]]');
   });
 
   test('render scan context: tight #word is id syntax, spaced # word stays a comment', () => {
@@ -311,7 +311,7 @@ describe('typed and optional props', () => {
     expect(annotation).not.toBeNull();
     expect(src.slice(annotation.sourceStart, annotation.sourceEnd)).toBe(': string');
     // Sexpr stays the unmarked/untyped shape.
-    expect(JSON.stringify(decl)).toBe('["state",{},[".",{},"this","name"],"\\"anon\\""]');
+    expect(JSON.stringify(decl)).toBe('["state",{},[".",{},"this",["name",{},"name"]],["string",{},"\\"anon\\""]]');
   });
 
   test('the widened `?:` minting never disturbs existence-adjacent shapes', () => {

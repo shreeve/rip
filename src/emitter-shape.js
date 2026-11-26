@@ -10,9 +10,10 @@
 // the original's node id, so marks and role lookups resolve to the same
 // rows; arrays without a row (scaffolds) stay without one. The
 // `.parenthesized` flag travels with its node. Calls keep their shape
-// (["call", attrs, callee, ...args]), which the emitter reads directly.
+// (["call", attrs, callee, ...args]), which the emitter reads directly,
+// and every leaf ([kind, {}, raw]) is its raw string.
 
-import { isAttrs, isCall } from './sexpr.js';
+import { isAttrs, isCall, isLeaf, leafValue } from './sexpr.js';
 
 const isNone = (x) => Array.isArray(x) && x.length === 2 && x[0] === 'none' && isAttrs(x[1]);
 const orNull = (x) => (isNone(x) ? null : x);
@@ -24,6 +25,7 @@ export function emitterShape(sexpr, nodeIds) {
     if (!Array.isArray(x)) return x;
     const seen = done.get(x);
     if (seen !== undefined) return seen;
+    if (isLeaf(x)) return leafValue(x);
     const out = isNode(x) ? node(x) : x.map(conv);
     const id = nodeIds.get(x);
     if (id !== undefined) nodeIds.set(out, id);

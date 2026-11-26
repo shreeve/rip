@@ -321,8 +321,8 @@ grammar =
   Literal: [
     o 'Atom'
     o 'Regex'
-    o 'UNDEFINED', '"undefined"'
-    o 'NULL'     , '"null"'
+    o 'UNDEFINED'
+    o 'NULL'
     o 'BOOL'
   ]
 
@@ -567,8 +567,9 @@ grammar =
   # ============================================================================
 
   This: [
-    o 'THIS', '"this"'
-    o '@'   , '"this"'
+    o 'THIS'
+    # `@` alone is the `this` leaf, spelled `@`.
+    o '@'   , '["this", {}, "@"]', 'this: _, _, _'
   ]
 
   # No object role: the `@` spelling has no object to name, and a
@@ -1496,10 +1497,10 @@ displays =
 # A type is alternatives joined by `|`, with a trailing `?` admitting
 # null:
 #
-#   leaf              a primitive tree value (a string)
-#   expr              a leaf, a node of any kind that is not a part, or
-#                     an array built by an executable action (the
-#                     Parenthetical and postfix if-else rules)
+#   leaf              a raw token string
+#   expr              a node of any kind that is not a part, or an array
+#                     built by an executable action (the Parenthetical
+#                     and postfix if-else rules); never a raw string
 #   bool              true or false
 #   null              null alone
 #   descriptor        a plain object (the schema sub-parser's descriptor)
@@ -1519,13 +1520,13 @@ displays =
 # registry.
 
 kinds =
-  'accept':        forms: ['"accept" attrs:{} name:leaf provider:leaf|member|none']
+  'accept':        forms: ['"accept" attrs:{} name:name provider:name|member|none']
   'array':         forms: ['"array" attrs:{} ...items:expr|splat|none ...elisions:none']
-  'as':            forms: ['"as" attrs:{} name:leaf alias:leaf'], part: true
+  'as':            forms: ['"as" attrs:{} name:name|"*"|"default" alias:name|"default"'], part: true
   'assign':
     forms: [
       'operator:"="|"+="|"-="|"*="|"/="|"%="|"**="|"//="|"%%="|"<<="|">>="|">>>="|"&="|"^="|"|="|"&&="|"||="|"??=" attrs:{} target:expr value:expr'
-      '"=" attrs:{void} target:leaf value:expr'
+      '"=" attrs:{void} target:name value:expr'
     ]
     side:  ['annotation', 'operator', 'optionalMarker', 'typeParams', 'visibility', 'voidMarker']
   'await':         forms: ['"await" attrs:{} value:expr'], side: ['operator']
@@ -1534,16 +1535,16 @@ kinds =
   'call':          forms: ['"call" attrs:{} callee:expr ...args:expr|splat']
   'cast':          forms: ['"cast" attrs:{} value:expr annotation:leaf']
   'catch':         forms: ['"catch" attrs:{} binding:expr|none body:block'], part: true
-  'class':         forms: ['"class" attrs:{} name:leaf|member|none parent:expr|none body:block|none']
+  'class':         forms: ['"class" attrs:{} name:name|member|none parent:expr|none body:block|none']
   'component':     forms: ['"component" attrs:{} parent:expr|none body:block']
   'comprehension': forms: ['"comprehension" attrs:{} value:expr loop:forin|forof|foras']
   'computed':      forms: ['"computed" attrs:{} target:expr value:expr|block'], side: ['annotation', 'operator', 'optionalMarker']
   'dammit':        forms: ['"call" attrs:{await} callee:expr'], side: ['operator']
   'def':
-    forms: ['"def" attrs:{}|{void} name:leaf|member params:[expr|default|rest|expansion] body:block']
+    forms: ['"def" attrs:{}|{void} name:name|member params:[expr|default|rest|expansion] body:block']
     side:  ['returnType', 'typeParams', 'visibility', 'voidMarker']
   'default':       forms: ['"default" attrs:{} name:expr value:expr'], part: true
-  'defsig':        forms: ['"def-sig" attrs:{} name:leaf params:[expr|default|rest|expansion] returnType:leaf'], side: ['typeParams']
+  'defsig':        forms: ['"def-sig" attrs:{} name:name params:[expr|default|rest|expansion] returnType:leaf'], side: ['typeParams']
   'doiife':        forms: ['"do-iife" attrs:{} func:expr']
   'dynamicKey':    forms: ['"dynamicKey" attrs:{} key:expr'], part: true
   'dynimport':     forms: ['"call" attrs:{}|{await} callee:"import" ...args:expr|splat'], side: ['operator']
@@ -1552,10 +1553,10 @@ kinds =
   'expansion':     forms: ['"expansion" attrs:{}'], part: true
   'export':
     forms: [
-      '"export" attrs:{} spec:expr|[leaf|as]'
+      '"export" attrs:{} spec:expr|[name|as]'
       '"export-default" attrs:{} spec:expr'
-      '"export-all" attrs:{} source:leaf alias:leaf|none'
-      '"export-from" attrs:{} spec:[leaf|as] source:leaf'
+      '"export-all" attrs:{} source:string alias:name|"default"|none'
+      '"export-from" attrs:{} spec:[name|as|"default"] source:string'
     ]
     side: ['typeOnly']
   'foras':
@@ -1575,7 +1576,7 @@ kinds =
     ]
   'func':          forms: ['kind:"->"|"=>" attrs:{} params:[expr|default|rest|expansion] body:block'], side: ['returnType']
   'gate':          forms: ['"gate" attrs:{} target:expr rhs:expr ...key:expr|splat'], side: ['annotation', 'operator']
-  'heregex':       forms: ['"here-regex" attrs:{} flags:leaf ...parts:leaf|[expr]|none']
+  'heregex':       forms: ['"here-regex" attrs:{} flags:leaf ...parts:string|[expr]|none']
   'if':
     forms: [
       '"if" attrs:{} condition:expr then:block else:block|if|none'
@@ -1583,9 +1584,9 @@ kinds =
     ]
   'ifelse':        forms: ['operator:"?:" attrs:{} condition:expr then:expr else:expr']
   'import':
-    forms: ['"import" attrs:{} spec:leaf|as|[leaf|as]|none extra:as|[leaf|as]|none attributes:withattrs|none source:leaf']
+    forms: ['"import" attrs:{} spec:name|as|[name|as|"default"]|none extra:as|[name|as]|none attributes:withattrs|none source:string']
     side: ['typeOnly']
-  'index':         forms: ['operator:"[]" attrs:{} object:expr key:expr']
+  'index':         forms: ['operator:"[]" attrs:{} object:expr|"this"|"super" key:expr']
   'loop':
     forms: [
       '"loop" attrs:{over:"forever"} vars:none count:none step:none guard:none body:block'
@@ -1593,7 +1594,7 @@ kinds =
     ]
   'map':           forms: ['"map" attrs:{} ...pairs:pair|splat']
   'maybe-dammit':  forms: ['"call" attrs:{opt await} callee:expr ...args:expr|splat'], side: ['operator']
-  'member':        forms: ['operator:"."|"?." attrs:{} object:expr property:leaf']
+  'member':        forms: ['operator:"."|"?." attrs:{} object:expr|"this"|"super"|"import"|"new" property:name|string']
   'object':        forms: ['"object" attrs:{} ...pairs:pair|splat']
   'offer':         forms: ['"offer" attrs:{} value:expr']
   'optcall':       forms: ['"call" attrs:{opt} callee:expr ...args:expr|splat']
@@ -1601,16 +1602,16 @@ kinds =
   'pair':
     forms: [
       'operator:":"|"=" attrs:{} key:expr|dynamicKey value:expr'
-      '":" attrs:{void}|{shorthand} key:leaf|member value:expr'
+      '":" attrs:{void}|{shorthand} key:name|member value:expr'
     ]
     side:  ['operator', 'visibility', 'voidMarker']
     part:  true
   'pick':          forms: ['".{}"|"?.{}" attrs:{} source:expr ...items:pickitem']
-  'pickitem':      forms: ['"pickitem" attrs:{} key:leaf target:leaf default:expr|none'], part: true
+  'pickitem':      forms: ['"pickitem" attrs:{} key:name target:name default:expr|none'], part: true
   'program':       forms: ['"program" attrs:{} ...body:expr'], part: true
   'range':         forms: ['operator:".."|"..." attrs:{} from:expr|none to:expr|none']
   'readonly':
-    forms: ['"readonly" attrs:{} target:expr value:expr', '"readonly" attrs:{void} target:leaf value:expr']
+    forms: ['"readonly" attrs:{} target:expr value:expr', '"readonly" attrs:{void} target:name value:expr']
     side:  ['annotation', 'operator', 'optionalMarker', 'voidMarker']
   'regexindex':    forms: ['"regex-index" attrs:{} object:expr key:expr capture:expr']
   'relation':      forms: ['operator:leaf attrs:{} left:expr right:expr']
@@ -1621,11 +1622,11 @@ kinds =
   'schema':        forms: ['"schema" attrs:{} body:descriptor']
   'splat':         forms: ['"..." attrs:{} value:expr'], part: true
   'state':         forms: ['"state" attrs:{} target:expr value:expr'], side: ['annotation', 'operator', 'optionalMarker']
-  'str':           forms: ['"str" attrs:{} ...parts:leaf|[expr]|none']
+  'str':           forms: ['"str" attrs:{} ...parts:string|[expr]|none']
   'super':         forms: ['"call" attrs:{} "super" ...args:expr|splat']
   'switch':        forms: ['"switch" attrs:{} subject:expr|none cases:[when] default:block|none']
   'symbol':        forms: ['"symbol" attrs:{} name:leaf']
-  'tagged':        forms: ['"tagged-template" attrs:{} tag:expr str:str|leaf']
+  'tagged':        forms: ['"tagged-template" attrs:{} tag:expr str:str|string']
   'ternary':       forms: ['operator:"?:" attrs:{} condition:expr then:expr else:expr']
   'throw':         forms: ['"throw" attrs:{} value:expr']
   'try':           forms: ['"try" attrs:{} body:expr|block handler:catch|none finalizer:block|none']
@@ -1642,6 +1643,14 @@ kinds =
     ]
   'yield':         forms: ['"yield" attrs:{} value:expr|none']
   'yieldfrom':     forms: ['"yield-from" attrs:{} value:expr']
+  # The leaves (the `leaves` table below): the driver builds each.
+  'name':          forms: ['"name" attrs:{} raw:leaf']
+  'num':           forms: ['"num" attrs:{} raw:leaf']
+  'string':        forms: ['"string" attrs:{} raw:leaf']
+  'regex':         forms: ['"regex" attrs:{} raw:leaf']
+  'lit':           forms: ['"lit" attrs:{} raw:"true"|"false"|"null"|"undefined"']
+  'this':          forms: ['"this" attrs:{} raw:"this"|"@"']
+  'statement':     forms: ['"statement" attrs:{} raw:"break"|"continue"|"debugger"']
 
 # ==============================================================================
 # Expected Conflicts
@@ -1720,4 +1729,28 @@ expectedConflicts = [
 # Export
 # ==============================================================================
 
-export default {grammar, operators, displays, kinds, expectedConflicts, start: 'Root'}
+# ==============================================================================
+# Leaves
+# ==============================================================================
+# The terminals whose values are the tree's leaves. The parser builds
+# each as a node of its own, [kind, {}, raw] with `raw` the token's
+# value, and records its NodeStore row with the token's span. `@` alone
+# is a `this` leaf spelled `@`. Keyword words stay strings: the
+# receiver the grammar writes for `@x`, `@"s"` and a key's `@[k]`,
+# `super`, the `import` of a dynamic import and of `import.meta`, the
+# `new` of `new.target`, and the specifier words `*` and `default`; so
+# do operators, type text, symbol names and regex flags.
+
+leaves =
+  IDENTIFIER: 'name'
+  PROPERTY: 'name'
+  NUMBER: 'num'
+  STRING: 'string'
+  REGEX: 'regex'
+  BOOL: 'lit'
+  NULL: 'lit'
+  UNDEFINED: 'lit'
+  THIS: 'this'
+  STATEMENT: 'statement'
+
+export default {grammar, operators, displays, kinds, leaves, expectedConflicts, start: 'Root'}

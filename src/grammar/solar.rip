@@ -207,7 +207,20 @@ class Generator
     if @unannotatedConstructors.length > 0
       list = @unannotatedConstructors.map((r) -> "  • #{r}").join('\n')
       throw Error.new "annotation coverage: #{@unannotatedConstructors.length} constructor rule(s) lack annotations (annotate, or opt out with '~ reason'):\n#{list}"
+    @_processLeaves grammar.leaves
     @_checkKindSchema grammar.kinds
+
+  # The leaf table: terminal → kind. The driver builds each such
+  # token's value as [kind, {}, raw] with a NodeStore row of its own.
+  # Every name must be a terminal of the grammar.
+  _processLeaves!: (leaves) ->
+    @leaves = {}
+    return unless leaves?
+    for own name, kind of leaves
+      symbol = @symbolTable.get name
+      throw Error.new "leaves: '#{name}' is not a terminal of the grammar" unless symbol? and not @nonterminals[name]
+      throw Error.new "leaves: '#{name}' names no kind" unless typeof kind is 'string' and kind.length > 0
+      @leaves[symbol.id] = kind
 
   # The kind-registry gate: a grammar that ships a `kinds` registry
   # declares every semantic kind an annotation may name, the tree forms
@@ -224,6 +237,22 @@ class Generator
     problems = []
     usedForms = Map.new()
     usedSide = Map.new()
+    # A leaf kind is built by the driver, not a template: its forms
+    # describe the leaf, and the tree validator checks them.
+    # Each form is the leaf's shape: the kind word, an empty record, and
+    # one raw slot (a raw string, or the words the token can spell).
+    for own symbolId, leafKind of @leaves
+      if registry[leafKind]?
+        for form in registry[leafKind].forms
+          [head, attrs, raw] = form.slots
+          leafShaped = form.slots.length is 3 and head.lit?.length is 1 and head.lit[0] is leafKind and
+            attrs.type?.alts.length is 1 and attrs.type.alts[0].t is 'attrs' and attrs.type.alts[0].keys.length is 0 and
+            raw.role? and not raw.spread and raw.type.alts.every (a) -> a.t is 'leaf' or a.t is 'lit'
+          problems.push "  • leaf kind '#{leafKind}' form (#{form.text}) is not \"#{leafKind}\" attrs:{} raw:<leaf or words>" unless leafShaped
+        usedForms.set leafKind, Set.new(registry[leafKind].forms.map (f, i) -> i)
+        usedSide.set leafKind, Set.new(registry[leafKind].side)
+      else
+        problems.push "  • leaf kind '#{leafKind}' is not in the registry"
     for own ruleId, info of shapes
       @_checkLayout info.kind, info.shape, info.rule, problems, usedForms
       entry = registry[info.kind]
@@ -467,7 +496,7 @@ class Generator
         return false unless a.t is 'attrs' and a.keys.join(' ') is flags.join(' ')
         flags.every (k) -> if a.values?[k]? then value[k] in a.values[k] else value[k] is true
     else
-      type.alts.some (a) -> a.t is 'leaf' or a.t is 'expr' or (a.t is 'lit' and a.value is value)
+      type.alts.some (a) -> a.t is 'leaf' or (a.t is 'lit' and a.value is value)
 
   _processOperators!: (ops) ->
     for precedence, i in ops
@@ -1921,6 +1950,9 @@ class Generator
     // template: their values are unkinded arrays outside the registry.
     export const executable = #{JSON.stringify @executable}
 
+    // The kinds the driver builds leaves of, one per leaf terminal.
+    export const leafKinds = #{JSON.stringify [...Set.new(Object.values(@leaves))]}
+
     export default parser
     """
 
@@ -1941,6 +1973,7 @@ class Generator
       semantics: #{JSON.stringify @semantics},
       primitiveRefs: #{JSON.stringify @primitiveRefs},
       accumulators: #{JSON.stringify @accumulators},
+      leaves: #{JSON.stringify @leaves},
       parseTable: #{tableCode},
       repairTable: #{JSON.stringify @repairTable},
       ruleTable: #{JSON.stringify @ruleTable},
@@ -2071,6 +2104,7 @@ class Generator
     roles = []
     primitives = []
     nodeIds = WeakMap.new()
+    leafNodes = WeakSet.new()
     nextNodeId = 1
 
     lexer = Object.create @lexer
@@ -2232,7 +2266,17 @@ class Generator
       if action > 0  # SHIFT or GOTO
         repairedHere.clear() if tolerant and not lexer.token?.hole
         stk.push symbol, action
-        vals.push lexer.text
+        # A leaf token's value is a node of its own, with its own row.
+        leafKind = @leaves?[symbol]
+        if leafKind?
+          leaf = [leafKind, {}, lexer.text]
+          leafId = nextNodeId++
+          nodeIds.set leaf, leafId
+          leafNodes.add leaf
+          nodes.push {nodeId: leafId, fileId: 0, semanticKind: leafKind, ruleId: 0, sourceStart: lexer.loc?.start ?? null, sourceEnd: lexer.loc?.end ?? null}
+          vals.push leaf
+        else
+          vals.push lexer.text
         locs.push (lexer.loc ?? null)
         if wantPrimitives
           primitiveLocs.push if Array.isArray lexer.text?.primitiveSpans
@@ -2356,7 +2400,9 @@ class Generator
         # carried occurrence has an owner, no descendant list needs to flow
         # farther up the reduction stack; direct terminals continue until the
         # first node-producing reduction claims them.
-        if wantPrimitives and Array.isArray(node) and nodeIds.has(node)
+        # A leaf passed through a rule is not a constructed node: the
+        # primitive belongs to the node that takes the leaf in.
+        if wantPrimitives and Array.isArray(node) and nodeIds.has(node) and not leafNodes.has(node)
           ownerNodeId = nodeIds.get node
           for p in carriedPrimitives when not p.ownerNodeId?
             p.ownerNodeId = ownerNodeId

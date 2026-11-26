@@ -162,13 +162,14 @@ describe('un-annotated constructed nodes get rows', () => {
 
 describe('pass-through creates no identity', () => {
   // Exact node counts: every count below includes ONLY constructed arrays
-  // (construct rules + list plumbing). Any pass-through or Parenthetical
-  // reduction registering its child again would inflate these.
+  // (construct rules + list plumbing) and the leaves the driver builds on
+  // shift. Any pass-through or Parenthetical reduction registering its
+  // child again would inflate these.
   test.each([
-    ['x = y + 1', 4],       // binary, assign, Body, program
-    ['(y + 1)', 4],         // binary, paren-Body, Body, program — Parenthetical itself passes through
-    ['x = 1; b = 2', 4],    // assign, Body (ONE row — the accumulator grows), assign, program
-    ['((z))', 4],           // two paren-Bodys, Body, program — both paren layers pass through
+    ['x = y + 1', 7],       // leaves x, y, 1; binary, assign, Body, program
+    ['(y + 1)', 6],         // leaves y, 1; binary, paren-Body, Body, program — Parenthetical itself passes through
+    ['x = 1; b = 2', 8],    // leaves x, 1, b, 2; assign, Body (ONE row — the accumulator grows), assign, program
+    ['((z))', 5],           // leaf z; two paren-Bodys, Body, program — both paren layers pass through
   ])('%p constructs exactly %i nodes', (src, count) => {
     const { stores } = parse(src);
     expect(stores.nodes.length).toBe(count);
@@ -717,5 +718,27 @@ describe('store rows: an empty one-line body anchors at its introducer', () => {
 
   test('an empty then-body before else', () => {
     expect(blockSpans('if a then else b')[0]).toEqual([9, 9]);
+  });
+});
+
+describe('PrimitiveStore ownership skips leaves', () => {
+  // A leaf passed through a rule (`Identifier: IDENTIFIER`) is not a
+  // constructed node: the primitive belongs to the node that takes it in.
+  test('a passed-through leaf leaves its primitive with the assignment', () => {
+    const r = parser.parse('x = y', { primitives: true });
+    const rows = new Map(r.stores.nodes.map((n) => [n.nodeId, n]));
+    expect(r.stores.primitives.map((p) => [String(p.value), rows.get(p.nodeId).semanticKind])).toEqual([
+      ['x', 'assign'],
+      ['y', 'assign'],
+    ]);
+  });
+
+  test('a literal word passed through a rule is a primitive like a name', () => {
+    const r = parser.parse('x = null', { primitives: true });
+    const rows = new Map(r.stores.nodes.map((n) => [n.nodeId, n]));
+    expect(r.stores.primitives.map((p) => [String(p.value), rows.get(p.nodeId).semanticKind])).toEqual([
+      ['x', 'assign'],
+      ['null', 'assign'],
+    ]);
   });
 });
