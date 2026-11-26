@@ -18739,7 +18739,7 @@ const containsModelSchema = (sexpr) => {
 // `__state`/`__computed`/`__effect` (references the source never
 // spells). isTrigger is the semanticKind check for exactly those
 // constructs (a plumbing list can spell the heads: `when state, a` or
-// a parameter list `(effect, h)` must not deliver a runtime). Readonly
+// a parameter list `(effect, h, x)` must not deliver a runtime). Readonly
 // declarations
 // are deliberately NOT triggers: the lowering is a plain `const`
 // that calls no runtime name, so a readonly-only file stays

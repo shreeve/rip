@@ -33,3 +33,13 @@ test('an optional member call in render text reads like any other call', () => {
   const code = js('A = component\n  g: (x) -> x\n  render\n    p "#{@g?(2)}"\n');
   expect(code).not.toContain('__effect');
 });
+
+// Inside render, `p item` is the <p> element, not the stdlib's `p`: a
+// render loop of elements delivers no stdlib, while a handler that
+// prints does, as an ordinary loop that prints does.
+test('a render loop of <p> elements delivers no stdlib; printing still does', () => {
+  const runtimes = (src) => [...compile(src, { path: 'x.rip', runtimeDelivery: 'import' }).runtimes];
+  expect(runtimes('A = component\n  items := [1, 2]\n  render\n    for item in @items\n      p item\n')).toEqual(['reactive', 'components']);
+  expect(runtimes("A = component\n  items := [1, 2]\n  render\n    for item in @items\n      button @click: (-> p item), 'show'\n")).toEqual(['reactive', 'stdlib', 'components']);
+  expect(runtimes('items = [1, 2]\nfor item in items\n  p item\n')).toEqual(['stdlib']);
+});
