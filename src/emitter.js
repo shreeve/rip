@@ -41,6 +41,7 @@ import { restAliasName, restPassthroughText, restOfComponentText, restViewOfComp
   syntacticLiteralType,
   selfArgsOf, anyArgsOf, readonlyCastType, routeArgType, gateProjection,
 } from './ts/components.js';
+import { emitterShape } from './emitter-shape.js';
 import { isCall, mkCall, isSuperCall, isDynamicImport, isDammit, isMaybeDammit, isPlainCall, isOptCall, isAwaitedCall } from './sexpr.js';
 
 // Component member vocabulary — emission owns these sets. The type story
@@ -6246,7 +6247,7 @@ class Emitter {
     // it must read the store rows these nodes registered under. The
     // rows still never join the module's mapping story (the schema
     // node's cover rows are the construct's story).
-    return { stmts: result.sexpr.slice(1), stores: new Stores(result.stores) };
+    return { stmts: emitterShape(result.sexpr, result.stores.nodeIds).slice(1), stores: new Stores(result.stores) };
   }
 
   bareBlockStatement(node, ind) {
@@ -19733,6 +19734,10 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   if (face !== 'js' && face !== 'ts') {
     throw new Error(`emitter: unknown face '${face}' — expected 'js' (the shipping emission) or 'ts' (the editor face)`);
   }
+  // The emitter reads its own shape of the tree; the parser's tree is
+  // kept for the schema story's derived-schema reading.
+  const parserSexpr = parseResult.sexpr;
+  parseResult = { ...parseResult, sexpr: emitterShape(parseResult.sexpr, parseResult.stores.nodeIds) };
   const ambient = normalizeAmbient(ambientBindings);
   const stores = new Stores(parseResult.stores);
   const builder = new CodeBuilder(stores, { source, primitives: face === 'ts' });
@@ -19987,7 +19992,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
     try {
       story = buildSchemaTypeStory(parseResult.sexpr, builder.source,
         Emitter.importedNames(parseResult.sexpr.slice(1).filter((s) => emitter.isModuleImport(s))),
-        { boundary: (n) => emitter.scopeBoundary(n), isBlock: (n) => emitter.isBlock(n) });
+        { boundary: (n) => emitter.scopeBoundary(n), isBlock: (n) => emitter.isBlock(n) }, parserSexpr);
     } catch (err) {
       if (err instanceof SchemaTypeError) {
         const e = new Error(`emitter: ${err.message}`);

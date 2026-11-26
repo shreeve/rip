@@ -187,7 +187,7 @@ describe('pass-through creates no identity', () => {
     // The binary node in the tree is the SAME array the Parenthetical
     // returned; exactly one binary row exists and program's tree holds it.
     expect(stores.nodesByKind('binary')).toHaveLength(1);
-    expect(sexpr[1][0]).toBe('+');
+    expect(sexpr[2][0]).toBe('+');
   });
 });
 

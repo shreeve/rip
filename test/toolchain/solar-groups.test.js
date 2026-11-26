@@ -45,10 +45,10 @@ test('an unclosed or unbalanced group fails generation', () => {
   expect(() => tiny([['A B)?', 1]])).toThrow(/unbalanced '\)'/);
 });
 
-test('a binding whose label is absent becomes the literal null', () => {
+test('a binding whose label is absent becomes the absent marker', () => {
   const g = tiny([['A[x]? B[y]', '["one", @x, @y]', 'one: _, x, y']]);
   expect(patterns(g)).toEqual(['B', 'A B']);
-  expect(roles(g)).toEqual([['x=null', 'y:1'], ['x:1', 'y:2']]);
+  expect(roles(g)).toEqual([['x=["none",{}]', 'y:1'], ['x:1', 'y:2']]);
 });
 
 test('a presence binding is true or false and consumes the label', () => {

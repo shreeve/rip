@@ -1053,7 +1053,7 @@ describe('schema: stores and mappings', () => {
 
   test('the model sexpr carries the kind string through toJSON', () => {
     const { sexpr } = compile('M = schema :model\n  a! string');
-    expect(JSON.stringify(sexpr)).toBe('["program",["=","M",["schema","model"]]]');
+    expect(JSON.stringify(sexpr)).toBe('["program",{},["=",{},"M",["schema",{},"model"]]]');
   });
 
   test('the TS face carries the schema type story as TS-only bytes; strip reproduces JS mode', () => {
@@ -1074,7 +1074,7 @@ describe('schema: stores and mappings', () => {
 
   test('the sexpr carries the kind string through toJSON', () => {
     const { sexpr } = compile('S = schema :shape\n  a! string');
-    expect(JSON.stringify(sexpr)).toBe('["program",["=","S",["schema","shape"]]]');
+    expect(JSON.stringify(sexpr)).toBe('["program",{},["=",{},"S",["schema",{},"shape"]]]');
   });
 });
 

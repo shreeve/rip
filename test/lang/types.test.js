@@ -170,7 +170,7 @@ describe('sexpr erasure: a typed program parses to its stripped twin\'s tree', (
   // from the tree by construction (side-band roles).
   const canon = (x) => {
     if (!Array.isArray(x)) return x;
-    if (x.length === 3 && x[0] === 'typed-var' && typeof x[2] === 'string') return canon(x[1]);
+    if (x.length === 4 && x[0] === 'typed-var' && (typeof x[3] === 'string' || (Array.isArray(x[3]) && x[3][0] === 'none'))) return canon(x[2]);
     return x.map(canon);
   };
   for (const [typed, plain] of PAIRS) {
@@ -246,7 +246,7 @@ describe('erasure boundary pins: guards, forwards, segments, ternary casts', () 
     // each brace depth pairs its own colons, so the brace-inner pair
     // colon never claims the ternary's else-colon...
     const r = parser.parse('y = a ? {x: 1} : b');
-    expect(r.sexpr).toEqual(['program', ['=', 'y', ['?:', 'a', ['object', [':', 'x', '1']], 'b']]]);
+    expect(r.sexpr).toEqual(['program', {}, ['=', {}, 'y', ['?:', {}, 'a', ['object', {}, [':', {}, 'x', '1']], 'b']]]);
     // ...and an `as` PROPERTY key keeps its implicit-object reading.
     expect(compile('f as: 1').code).toBe('f({as: 1});');
   });
@@ -691,18 +691,18 @@ describe('erased declarations add no imports and no preamble', () => {
 describe('s-expressions: erased statements carry stable trees', () => {
   test('type/interface declarations parse to erased type-decl statements (raw text as the value)', () => {
     expect(JSON.stringify(parser.parse('type ID = string\nx = 5').sexpr))
-      .toBe(JSON.stringify(['program', ['type-decl', 'type ID = string'], ['=', 'x', '5']]));
+      .toBe(JSON.stringify(['program', {}, ['type-decl', {}, 'type ID = string'], ['=', {}, 'x', '5']]));
     expect(JSON.stringify(parser.parse('export type Pair<A, B> = [A, B]').sexpr))
-      .toBe(JSON.stringify(['program', ['type-decl', 'export type Pair<A, B> = [A, B]']]));
+      .toBe(JSON.stringify(['program', {}, ['type-decl', {}, 'export type Pair<A, B> = [A, B]']]));
     expect(JSON.stringify(parser.parse('interface Q extends P\n  z: number').sexpr))
-      .toBe(JSON.stringify(['program', ['type-decl', 'interface Q extends P\n  z: number']]));
+      .toBe(JSON.stringify(['program', {}, ['type-decl', {}, 'interface Q extends P\n  z: number']]));
   });
 
   test('bare declarations and class fields carry the erased typed wrapper', () => {
     expect(JSON.stringify(parser.parse('r: number\nr = 5').sexpr))
-      .toBe(JSON.stringify(['program', ['typed-var', 'r', 'number'], ['=', 'r', '5']]));
+      .toBe(JSON.stringify(['program', {}, ['typed-var', {}, 'r', 'number'], ['=', {}, 'r', '5']]));
     expect(JSON.stringify(parser.parse('class A\n  @x: number').sexpr))
-      .toBe(JSON.stringify(['program', ['class', 'A', null, ['block', ['typed-var', ['.', 'this', 'x'], 'number']]]]));
+      .toBe(JSON.stringify(['program', {}, ['class', {}, 'A', ['none', {}], ['block', {}, ['typed-var', {}, ['.', {}, 'this', 'x'], 'number']]]]));
     // The typed initialized field is the SAME node as its twin — the
     // annotation lives only in the side tables.
     expect(JSON.stringify(parser.parse('class A\n  x: number = 5').sexpr))
@@ -943,7 +943,7 @@ describe('negative: malformed declarations reject loudly', () => {
     ]) {
       const r = parser.parse(src);
       expect(r.diagnostics).toEqual([]);
-      expect(r.sexpr[1][0]).toBe('type-decl');
+      expect(r.sexpr[2][0]).toBe('type-decl');
       expect(compile(src).code).toBe(compile('z = 1').code);
     }
     // The plain forms parse, and generic types remain legal in MEMBER

@@ -41,8 +41,8 @@ test("the '??' and '?' terminals are never sugar", () => {
   expect(patterns(g)).toEqual(['A ?? B']);
 });
 
-test('a binding to an optional symbol is null in the absent variant', () => {
+test('a binding to an optional symbol is the absent marker in the absent variant', () => {
   const g = tiny([['A[x]? B', '["one", @x]', 'one: _, x']]);
-  expect(g.ruleActions).toContain('return ["one", null];');
+  expect(g.ruleActions).toContain('return ["one", ["none", {}]];');
   expect(g.ruleActions).toContain('return ["one", $[$0-1]];');
 });

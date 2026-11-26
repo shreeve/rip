@@ -55,7 +55,8 @@ const typeText = (type) => {
       case 'kind': return a.kind;
       case 'lit': return JSON.stringify(a.value);
       case 'list': return `[${typeText(a.of)}]`;
-      case 'attrs': return `{${a.keys.join(' ')}}`;
+      case 'attrs': return `{${a.keys.map((k) => (a.values?.[k] ? `${k}:${a.values[k].map((v) => JSON.stringify(v)).join('|')}` : k)).join(' ')}}`;
+      case 'none': return 'none';
       default: return a.t;
     }
   };
@@ -94,8 +95,10 @@ export function validateSexpr(result, { kinds = shippedKinds, executable = shipp
       case 'attrs': {
         if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
         const flags = Object.keys(value).sort();
-        return flags.join(' ') === alt.keys.join(' ') && flags.every((k) => value[k] === true);
+        return flags.join(' ') === alt.keys.join(' ') &&
+          flags.every((k) => (alt.values?.[k] ? alt.values[k].includes(value[k]) : value[k] === true));
       }
+      case 'none': return Array.isArray(value) && value.length === 2 && value[0] === 'none' && isAttrs(value[1]) && kindOf(value) == null;
       case 'lit': return value === alt.value;
       case 'expr': {
         if (typeof value === 'string') return true;

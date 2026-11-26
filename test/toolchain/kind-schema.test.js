@@ -18,31 +18,41 @@ test('an annotation using an undeclared kind fails generation', () => {
 });
 
 test('a template no form admits fails generation, naming the closest form', () => {
-  const renamed = { ...state, forms: ['"state" target:expr init:expr'] };
+  const renamed = { ...state, forms: ['"state" attrs:{} target:expr init:expr'] };
   expect(() => new Generator(withKind('state', renamed)))
-    .toThrow(/kind 'state' has no form for this template — closest is \("state" target:expr init:expr\): element 2: expected 'init', got 'value'/);
+    .toThrow(/kind 'state' has no form for this template — closest is \("state" attrs:\{\} target:expr init:expr\): element 3: expected 'init', got 'value'/);
   // A misfitting template still counts as a use of its kind.
   expect(() => new Generator(withKind('state', renamed))).not.toThrow(/declared kind 'state' is used by no rule/);
 });
 
 test('a constant the form does not admit fails generation', () => {
-  const head = { ...state, forms: ['"reactive" target:expr value:expr'] };
+  const head = { ...state, forms: ['"reactive" attrs:{} target:expr value:expr'] };
   expect(() => new Generator(withKind('state', head)))
     .toThrow(/element 0: expected the constant "reactive"/);
 });
 
 test('a literal the slot type does not admit fails generation', () => {
-  // `for-of` writes its own-flag as a boolean literal.
-  const forof = grammar.kinds.forof;
-  const strict = { forms: forof.forms.map((f) => f.replace('own:bool', 'own:leaf')) };
-  expect(() => new Generator(withKind('forof', strict)))
-    .toThrow(/slot 'own' does not admit (true|false)/);
+  // A bare `class` writes the absent marker for its name.
+  const klass = grammar.kinds.class;
+  const strict = { forms: klass.forms.map((f) => f.replace('name:leaf|member|none', 'name:leaf|member')) };
+  expect(() => new Generator(withKind('class', strict)))
+    .toThrow(/slot 'name' does not admit \["none",\{\}\]/);
 });
 
-test('a scaffold in a slot that takes no array fails generation', () => {
+test('a slot is a spread only where the form writes `...`', () => {
+  for (const [kind, entry] of Object.entries(new Generator(grammar).kindRegistry)) {
+    for (const form of entry.forms) {
+      for (const slot of form.slots) {
+        if (slot.role) expect(slot.spread === true, `${kind} ${slot.role}`).toBe(form.text.includes(`...${slot.role}:`));
+      }
+    }
+  }
+});
+
+test('an empty list in a slot that takes no array fails generation', () => {
   const func = grammar.kinds.func;
-  const strict = { ...func, forms: ['kind:"->"|"=>" params:expr body:block'] };
-  expect(() => new Generator(withKind('func', strict))).toThrow(/slot 'params' takes no array/);
+  const strict = { ...func, forms: ['kind:"->"|"=>" attrs:{} params:expr body:block'] };
+  expect(() => new Generator(withKind('func', strict))).toThrow(/slot 'params' does not admit \[\]/);
 });
 
 test('a nested node is checked against its own kind', () => {
@@ -65,9 +75,9 @@ test('a declared kind no rule uses fails generation', () => {
 });
 
 test('a declared form no rule builds fails generation', () => {
-  const extra = { ...state, forms: [...state.forms, '"state" target:expr'] };
+  const extra = { ...state, forms: [...state.forms, '"state" attrs:{} target:expr'] };
   expect(() => new Generator(withKind('state', extra)))
-    .toThrow(/kind 'state' form 2 \("state" target:expr\) is built by no rule/);
+    .toThrow(/kind 'state' form 2 \("state" attrs:\{\} target:expr\) is built by no rule/);
 });
 
 test('a declared side role no rule records fails generation', () => {
@@ -159,6 +169,33 @@ test('malformed attribute-record types reject', () => {
   expect(bad('{a a}')).toThrow(/repeats a key/);
   expect(bad('{a-b}')).toThrow(/malformed attribute record/);
   expect(bad('{a')).toThrow(/unbalanced/);
+});
+
+test('an attribute record may hold words, typed by the values the registry lists', () => {
+  const kinds = (attrs) => ({ x: { forms: [`"x" attrs:${attrs} name:leaf`] } });
+  expect(() => tiny('["x", {over: "in"}, 1]', 'x: _, _, name', kinds('{over:"in"|"of"}'))).not.toThrow();
+  expect(() => tiny('["x", {over: "as"}, 1]', 'x: _, _, name', kinds('{over:"in"|"of"}')))
+    .toThrow(/slot 'attrs' does not admit \{"over":"as"\}/);
+  expect(() => tiny('["x", {over: "in"}, 1]', 'x: _, _, name', kinds('{over}')))
+    .toThrow(/slot 'attrs' does not admit \{"over":"in"\}/);
+});
+
+test('a presence flag in an attribute record is the key when present and nothing when absent', () => {
+  const g = new Generator({
+    start: 'Root',
+    grammar: { Root: [['(OWN[own])? ID[n]', '["x", {over: "of", own: @own?}, @n]', 'x: _, _, name']] },
+    kinds: { x: { forms: ['"x" attrs:{over:"of"}|{over:"of" own} name:leaf'] } },
+  });
+  expect(g.ruleActions).toContain('{over: "of"}');
+  expect(g.ruleActions).toContain('{over: "of", own: true}');
+});
+
+test('the absent marker fits only a slot that admits none; unnamed, it records no role', () => {
+  expect(() => tiny('["x", {}, ["none", {}]]', 'x: _, _, name', { x: { forms: ['"x" attrs:{} name:leaf|none'] } })).not.toThrow();
+  expect(() => tiny('["x", {}, ["none", {}]]', 'x: _, _, name', { x: { forms: ['"x" attrs:{} name:leaf'] } }))
+    .toThrow(/slot 'name' does not admit \["none",\{\}\]/);
+  const unnamed = tiny('["x", {}, ["none", {}]]', 'x: _, _, _', { x: { forms: ['"x" attrs:{} name:leaf|none'] } });
+  expect(Object.values(unnamed.semantics)[0].roles).toEqual([]);
 });
 
 test('a grammar without a registry is not gated', () => {

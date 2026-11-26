@@ -128,17 +128,18 @@ test('an until loop registers its negation as a unary node the condition role po
   expect([stores.role(neg.nodeId, 'operand').sourceStart, stores.role(neg.nodeId, 'operand').sourceEnd]).toEqual([6, 10]);
 });
 
-test('a comprehension registers its loop clause as a forin node and the guard through the scaffold', () => {
+test('a comprehension registers its loop clause as a forin node that owns the guard', () => {
   const stores = parse('x = (v * 2 for v in list when v > 1)');
   const [comp] = stores.nodesByKind('comprehension');
   const [clause] = stores.nodesByKind('forin');
   expect(stores.role(comp.nodeId, 'loop').childNodeId).toBe(clause.nodeId);
-  expect([clause.sourceStart, clause.sourceEnd]).toEqual([15, 24]);
+  expect([clause.sourceStart, clause.sourceEnd]).toEqual([15, 35]);
   expect([stores.role(clause.nodeId, 'iterable').sourceStart, stores.role(clause.nodeId, 'iterable').sourceEnd]).toEqual([20, 24]);
-  expect(stores.role(clause.nodeId, 'step').literal).toBeNull();
-  const guard = stores.role(comp.nodeId, 'guard');
-  expect(guard.childSlot).toBeNull();
+  // An absent step is the marker, recorded as a literal role.
+  expect(stores.role(clause.nodeId, 'step').literal).toEqual(['none', {}]);
+  const guard = stores.role(clause.nodeId, 'guard');
   expect([guard.sourceStart, guard.sourceEnd]).toEqual([30, 35]);
+  expect(stores.role(comp.nodeId, 'guard')).toBeNull();
 });
 
 test('a postfix conditional keeps its statement as the then role', () => {

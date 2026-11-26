@@ -5,7 +5,8 @@
 # pins them byte-for-byte.
 #
 # Each rule is:  o pattern, action, annotation?, options?
-#   - action is the s-expression construction template ('["=", 1, 3]')
+#   - action is the s-expression construction template ('["=", {}, 1, 3]':
+#     the head, the attribute record, then the children)
 #   - annotation (string) names the semantic kind and one part per template
 #     element ('assign: operator, target, value'; '_' marks structural
 #     constants) — validated by Solar against the template, and the
@@ -19,9 +20,9 @@
 # Pattern sugar (expanded by Solar, one rule per variant): 'X?' makes a
 # symbol optional, '(A B)?' a run of symbols, '(A | B)' picks one
 # alternative. Bindings let one action serve every variant — '@name'
-# is the labeled symbol's value (null where its group is absent),
-# '...@name' a spread that drops out when absent, '@name?' a
-# true/false presence flag.
+# is the labeled symbol's value (["none", {}] where its group is absent),
+# '...@name' a spread that drops out when absent, and `key: @name?` in
+# an attribute record the flag, present only when the symbol is.
 #
 # Three conventions the rows below lean on, stated once:
 #   - ERASURE: a labeled symbol the template drops (TYPE[annotation],
@@ -78,8 +79,8 @@ grammar =
   # ============================================================================
 
   Root: [
-    o ''    , '["program"]'      , 'program: _'
-    o 'Body', '["program", ...1]', 'program: _, ...body'
+    o ''    , '["program", {}]'      , 'program: _, _'
+    o 'Body', '["program", {}, ...1]', 'program: _, _, ...body'
   ]
 
   Body: [
@@ -114,21 +115,21 @@ grammar =
   # ============================================================================
 
   TypeDecl: [
-    o 'TYPE_DECL'                    , '["type-decl", 1]'    , 'typedecl: _, declaration'
+    o 'TYPE_DECL'                    , '["type-decl", {}, 1]'    , 'typedecl: _, _, declaration'
     # PRIVATE is the class-member modifier on a bodiless typed field
     # (`private x: T`), erased as the visibility side-band role.
-    o '(PRIVATE[visibility])? Assignable[target] TYPE[annotation]'                            , '["typed-var", @target, @annotation]', 'typedvar: _, target, annotation'
+    o '(PRIVATE[visibility])? Assignable[target] TYPE[annotation]'                            , '["typed-var", {}, @target, @annotation]', 'typedvar: _, _, target, annotation'
     # Optional-marked bodiless typed prop: `@label?: string` —
     # the marker drops as the side-band optionalMarker role beside the
     # annotation; the wrapper is the unmarked form's.
-    o '(PRIVATE[visibility])? Assignable[target] OPT_MARKER[optionalMarker] TYPE[annotation]', '["typed-var", @target, @annotation]', 'typedvar: _, target, annotation'
+    o '(PRIVATE[visibility])? Assignable[target] OPT_MARKER[optionalMarker] TYPE[annotation]', '["typed-var", {}, @target, @annotation]', 'typedvar: _, _, target, annotation'
     # Bodiless typed-def OVERLOAD signature (`def f(a: T): R` with no
     # body): erases to nothing at emission and exists FOR the d.ts
     # consumer. The return TYPE is required — a bodiless def
     # WITHOUT one stays the loud missing-body parse error, so a
     # forgotten body can never erase silently.
-    o 'DEF Identifier OptParams TYPE', '["def-sig", 2, 3, 4]', 'defsig: _, name, params, returnType'
-    o 'DEF Identifier TYPE_PARAMS[typeParams] OptParams TYPE', '["def-sig", 2, 4, 5]', 'defsig: _, name, params, returnType'
+    o 'DEF Identifier OptParams TYPE', '["def-sig", {}, 2, 3, 4]', 'defsig: _, _, name, params, returnType'
+    o 'DEF Identifier TYPE_PARAMS[typeParams] OptParams TYPE', '["def-sig", {}, 2, 4, 5]', 'defsig: _, _, name, params, returnType'
   ]
 
   # ============================================================================
@@ -137,24 +138,25 @@ grammar =
 
   Import: [
     # A SIDE-EFFECT import carries no clause and none is minted for it:
-    # `["import", source]` stays distinct from `import {} from …`, whose
+    # its spec is absent, distinct from `import {} from …` (an empty spec
+    # list), whose
     # empty named list reads to TypeScript as a clause waiting to be filled.
-    o 'IMPORT STRING'                                                                           , '["import", 2]'                , 'import: _, source'
-    o 'IMPORT ImportDefaultSpecifier FROM STRING'                                               , '["import", 2, 4]'             , 'import: _, spec, source'
-    o 'IMPORT ImportNamespaceSpecifier FROM STRING'                                             , '["import", 2, 4]'             , 'import: _, spec, source'
-    o 'IMPORT { } FROM STRING'                                                                  , '["import", "{}", 5]'          , 'import: _, spec, source'
-    o 'IMPORT { ImportSpecifierList OptComma } FROM STRING'                                     , '["import", 3, 7]'             , 'import: _, spec, source'
-    o 'IMPORT ImportDefaultSpecifier , ImportNamespaceSpecifier FROM STRING'                    , '["import", 2, 4, 6]'          , 'import: _, spec, extra, source'
-    o 'IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM STRING'            , '["import", 2, 5, 9]'          , 'import: _, spec, extra, source'
+    o 'IMPORT STRING'                                                                           , '["import", {}, ["none", {}], ["none", {}], ["none", {}], 2]'                , 'import: _, _, _, _, _, source'
+    o 'IMPORT ImportDefaultSpecifier FROM STRING'                                               , '["import", {}, 2, ["none", {}], ["none", {}], 4]'             , 'import: _, _, spec, _, _, source'
+    o 'IMPORT ImportNamespaceSpecifier FROM STRING'                                             , '["import", {}, 2, ["none", {}], ["none", {}], 4]'             , 'import: _, _, spec, _, _, source'
+    o 'IMPORT { } FROM STRING'                                                                  , '["import", {}, [], ["none", {}], ["none", {}], 5]'          , 'import: _, _, spec, _, _, source'
+    o 'IMPORT { ImportSpecifierList OptComma } FROM STRING'                                     , '["import", {}, 3, ["none", {}], ["none", {}], 7]'             , 'import: _, _, spec, _, _, source'
+    o 'IMPORT ImportDefaultSpecifier , ImportNamespaceSpecifier FROM STRING'                    , '["import", {}, 2, 4, ["none", {}], 6]'          , 'import: _, _, spec, extra, _, source'
+    o 'IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM STRING'            , '["import", {}, 2, 5, ["none", {}], 9]'          , 'import: _, _, spec, extra, _, source'
     # Import attributes (`import data from './d.json' with { type: 'json' }`):
     # the clause rides BEFORE the source so the source stays last (every
     # consumer reads the specifier there); the emitter prints it after.
-    o 'IMPORT STRING WITH Object'                                                               , '["import", [3, 4], 2]'        , 'import: _, attributes(withattrs: keyword, value), source'
-    o 'IMPORT ImportDefaultSpecifier FROM STRING WITH Object'                                   , '["import", 2, [5, 6], 4]'     , 'import: _, spec, attributes(withattrs: keyword, value), source'
-    o 'IMPORT ImportNamespaceSpecifier FROM STRING WITH Object'                                 , '["import", 2, [5, 6], 4]'     , 'import: _, spec, attributes(withattrs: keyword, value), source'
-    o 'IMPORT { ImportSpecifierList OptComma } FROM STRING WITH Object'                         , '["import", 3, [8, 9], 7]'     , 'import: _, spec, attributes(withattrs: keyword, value), source'
-    o 'IMPORT ImportDefaultSpecifier , ImportNamespaceSpecifier FROM STRING WITH Object'        , '["import", 2, 4, [7, 8], 6]'  , 'import: _, spec, extra, attributes(withattrs: keyword, value), source'
-    o 'IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM STRING WITH Object', '["import", 2, 5, [10, 11], 9]', 'import: _, spec, extra, attributes(withattrs: keyword, value), source'
+    o 'IMPORT STRING WITH Object'                                                               , '["import", {}, ["none", {}], ["none", {}], [3, {}, 4], 2]'        , 'import: _, _, _, _, attributes(withattrs: keyword, _, value), source'
+    o 'IMPORT ImportDefaultSpecifier FROM STRING WITH Object'                                   , '["import", {}, 2, ["none", {}], [5, {}, 6], 4]'     , 'import: _, _, spec, _, attributes(withattrs: keyword, _, value), source'
+    o 'IMPORT ImportNamespaceSpecifier FROM STRING WITH Object'                                 , '["import", {}, 2, ["none", {}], [5, {}, 6], 4]'     , 'import: _, _, spec, _, attributes(withattrs: keyword, _, value), source'
+    o 'IMPORT { ImportSpecifierList OptComma } FROM STRING WITH Object'                         , '["import", {}, 3, ["none", {}], [8, {}, 9], 7]'     , 'import: _, _, spec, _, attributes(withattrs: keyword, _, value), source'
+    o 'IMPORT ImportDefaultSpecifier , ImportNamespaceSpecifier FROM STRING WITH Object'        , '["import", {}, 2, 4, [7, {}, 8], 6]'  , 'import: _, _, spec, extra, attributes(withattrs: keyword, _, value), source'
+    o 'IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM STRING WITH Object', '["import", {}, 2, 5, [10, {}, 11], 9]', 'import: _, _, spec, extra, attributes(withattrs: keyword, _, value), source'
     # A TYPE-ONLY import (`import type … from …`): the keyword rides the
     # side-band typeOnly role and the node keeps the plain import's
     # shape, so everything that consumes an import statement consumes
@@ -164,19 +166,19 @@ grammar =
     # default-plus-clause rows have no type-only mirror on purpose:
     # TypeScript rejects `import type D, { A } from …` (TS1363), and a
     # side-effect `import type 'mod'` names a contradiction.
-    o 'IMPORT IMPORT_TYPE[typeOnly] ImportDefaultSpecifier FROM STRING'                         , '["import", 3, 5]'             , 'import: _, spec, source'
-    o 'IMPORT IMPORT_TYPE[typeOnly] ImportNamespaceSpecifier FROM STRING'                       , '["import", 3, 5]'             , 'import: _, spec, source'
-    o 'IMPORT IMPORT_TYPE[typeOnly] { } FROM STRING'                                            , '["import", "{}", 6]'          , 'import: _, spec, source'
-    o 'IMPORT IMPORT_TYPE[typeOnly] { ImportSpecifierList OptComma } FROM STRING'               , '["import", 4, 8]'             , 'import: _, spec, source'
+    o 'IMPORT IMPORT_TYPE[typeOnly] ImportDefaultSpecifier FROM STRING'                         , '["import", {}, 3, ["none", {}], ["none", {}], 5]'             , 'import: _, _, spec, _, _, source'
+    o 'IMPORT IMPORT_TYPE[typeOnly] ImportNamespaceSpecifier FROM STRING'                       , '["import", {}, 3, ["none", {}], ["none", {}], 5]'             , 'import: _, _, spec, _, _, source'
+    o 'IMPORT IMPORT_TYPE[typeOnly] { } FROM STRING'                                            , '["import", {}, [], ["none", {}], ["none", {}], 6]'          , 'import: _, _, spec, _, _, source'
+    o 'IMPORT IMPORT_TYPE[typeOnly] { ImportSpecifierList OptComma } FROM STRING'               , '["import", {}, 4, ["none", {}], ["none", {}], 8]'             , 'import: _, _, spec, _, _, source'
   ]
 
   ImportSpecifierList: list 'ImportSpecifierList', 'ImportSpecifier', indented: true, reason: 'specifier plumbing; import.spec owns the span'
 
   ImportSpecifier: [
     o 'Identifier'
-    o 'Identifier AS Identifier', '[1, 3]', 'as: name, alias'
+    o 'Identifier AS Identifier', '["as", {}, 1, 3]', 'as: _, _, name, alias'
     o 'DEFAULT'
-    o 'DEFAULT AS Identifier'   , '[1, 3]', 'as: name, alias'
+    o 'DEFAULT AS Identifier'   , '["as", {}, 1, 3]', 'as: _, _, name, alias'
   ]
 
   ImportDefaultSpecifier: [
@@ -184,38 +186,38 @@ grammar =
   ]
 
   ImportNamespaceSpecifier: [
-    o 'IMPORT_ALL AS Identifier', '["*", 3]', 'as: name, alias'
+    o 'IMPORT_ALL AS Identifier', '["as", {}, "*", 3]', 'as: _, _, name, alias'
   ]
 
   Export: [
-    o 'EXPORT { }'                                         , '["export", "{}"]'               , 'export: _, spec'
-    o 'EXPORT { ExportSpecifierList OptComma }'            , '["export", 3]'                  , 'export: _, spec'
-    o 'EXPORT Class'                                       , '["export", 2]'                  , 'export: _, spec'
-    o 'EXPORT Def'                                         , '["export", 2]'                  , 'export: _, spec'
-    o 'EXPORT ExportAssign'                                , '["export", 2]'                  , 'export: _, spec'
+    o 'EXPORT { }'                                         , '["export", {}, []]'               , 'export: _, _, spec'
+    o 'EXPORT { ExportSpecifierList OptComma }'            , '["export", {}, 3]'                  , 'export: _, _, spec'
+    o 'EXPORT Class'                                       , '["export", {}, 2]'                  , 'export: _, _, spec'
+    o 'EXPORT Def'                                         , '["export", {}, 2]'                  , 'export: _, _, spec'
+    o 'EXPORT ExportAssign'                                , '["export", {}, 2]'                  , 'export: _, _, spec'
     # Exported reactive declarations: the ReactiveAssign /
     # ComputedAssign node itself carries the roles (operator label,
     # typed annotation label), so the nested template loses nothing.
-    o 'EXPORT ReactiveAssign'                              , '["export", 2]'                  , 'export: _, spec'
-    o 'EXPORT ComputedAssign'                              , '["export", 2]'                  , 'export: _, spec'
+    o 'EXPORT ReactiveAssign'                              , '["export", {}, 2]'                  , 'export: _, _, spec'
+    o 'EXPORT ComputedAssign'                              , '["export", {}, 2]'                  , 'export: _, _, spec'
     # Exported readonly: `export x =! 5` → `export const x = 5;`
-    o 'EXPORT Readonly'                                    , '["export", 2]'                  , 'export: _, spec'
+    o 'EXPORT Readonly'                                    , '["export", {}, 2]'                  , 'export: _, _, spec'
     # Exported effects: only the BOUND form has a meaning
     # (`export const h = __effect(…)`); the emitter rejects a bare
     # `export ~>` — nothing binds.
-    o 'EXPORT Effect'                                      , '["export", 2]'                  , 'export: _, spec'
+    o 'EXPORT Effect'                                      , '["export", {}, 2]'                  , 'export: _, _, spec'
     # prec REACTIVE_ASSIGN (below POST_IF/POST_UNLESS): a postfix guard
     # after the default value shifts INTO the Expression — the value is
     # conditional, the export is not (an export has no guardable
     # statement form).
-    o 'EXPORT DEFAULT Expression'                          , '["export-default", 3]'          , 'export: _, spec', prec: 'REACTIVE_ASSIGN'
-    o 'EXPORT DEFAULT INDENT Object OUTDENT'               , '["export-default", 4]'          , 'export: _, spec'
-    o 'EXPORT EXPORT_ALL FROM STRING'                      , '["export-all", 4]'              , 'export: _, source'
+    o 'EXPORT DEFAULT Expression'                          , '["export-default", {}, 3]'          , 'export: _, _, spec', prec: 'REACTIVE_ASSIGN'
+    o 'EXPORT DEFAULT INDENT Object OUTDENT'               , '["export-default", {}, 4]'          , 'export: _, _, spec'
+    o 'EXPORT EXPORT_ALL FROM STRING'                      , '["export-all", {}, 4, ["none", {}]]'              , 'export: _, _, source, _'
     # `export * as ns from` / `export * as default from` (DEFAULT is
     # contextual after AS on an export line).
-    o 'EXPORT EXPORT_ALL AS (Identifier[alias] | DEFAULT[alias]) FROM STRING[source]', '["export-all", @source, @alias]', 'export: _, source, alias'
-    o 'EXPORT { } FROM STRING'                             , '["export-from", "{}", 5]'       , 'export: _, spec, source'
-    o 'EXPORT { ExportSpecifierList OptComma } FROM STRING', '["export-from", 3, 7]'          , 'export: _, spec, source'
+    o 'EXPORT EXPORT_ALL AS (Identifier[alias] | DEFAULT[alias]) FROM STRING[source]', '["export-all", {}, @source, @alias]', 'export: _, _, source, alias'
+    o 'EXPORT { } FROM STRING'                             , '["export-from", {}, [], 5]'       , 'export: _, _, spec, source'
+    o 'EXPORT { ExportSpecifierList OptComma } FROM STRING', '["export-from", {}, 3, 7]'          , 'export: _, _, spec, source'
     # A TYPE-ONLY re-export (`export type { … } from …`), the mirror of
     # `import type`: the keyword rides the side-band typeOnly role and
     # the node keeps the plain re-export's shape. The statement erases
@@ -223,11 +225,11 @@ grammar =
     # TS face and the declarations keep it as `export type …`. One
     # spelling: no per-specifier `type`, and no source-less form, since
     # a local type exports at its own declaration.
-    o 'EXPORT EXPORT_TYPE[typeOnly] { ExportSpecifierList OptComma } FROM STRING', '["export-from", 4, 8]', 'export: _, spec, source'
+    o 'EXPORT EXPORT_TYPE[typeOnly] { ExportSpecifierList OptComma } FROM STRING', '["export-from", {}, 4, 8]', 'export: _, _, spec, source'
   ]
 
   # An exported binding (`export x = v`; typed `export x: T = v`).
-  # Flat rules rather than a nested ["export", ["=", …]] template so
+  # Flat rules rather than a nested ["export", {}, ["=", …]] template so
   # the assign node EXISTS to carry roles — the typed forms hang the
   # pattern label on it (a nested template cannot carry side-band
   # roles), and the untyped forms gain ordinary assign side-table rows.
@@ -235,36 +237,36 @@ grammar =
   # the value (`export x = v if c` exports a conditional value), as
   # the reactive tier already reads it — `if (c) export …` is not JS.
   ExportAssign: [
-    o "Identifier[target] (TYPE[annotation])? = #{RHS}"                                                                                , '["=", @target, @value]'          , 'assign: operator, target, value', prec: 'REACTIVE_ASSIGN'
+    o "Identifier[target] (TYPE[annotation])? = #{RHS}"                                                                                , '["=", {}, @target, @value]'          , 'assign: operator, _, target, value', prec: 'REACTIVE_ASSIGN'
     # Exported generic component: the Assign row's TYPE_PARAMS twin
     # (inline only, as there).
-    o 'Identifier[target] TYPE_PARAMS[typeParams] = Expression[value]'                                                                 , '["=", @target, @value]'          , 'assign: operator, target, value', prec: 'REACTIVE_ASSIGN'
+    o 'Identifier[target] TYPE_PARAMS[typeParams] = Expression[value]'                                                                 , '["=", {}, @target, @value]'          , 'assign: operator, _, target, value', prec: 'REACTIVE_ASSIGN'
     # Exported void definition (`export save! = ->`): the Assign row's
     # void twin, flat for the same role-carrying reason.
-    o "Identifier[target] VOID_MARKER[voidMarker] =[operator] #{RHS}"                                                                  , '["void-assign", @target, @value]', 'assign: _, target, value'       , prec: 'REACTIVE_ASSIGN'
+    o "Identifier[target] VOID_MARKER[voidMarker] =[operator] #{RHS}"                                                                  , '["=", {void: true}, @target, @value]', 'assign: _, _, target, value'       , prec: 'REACTIVE_ASSIGN'
     # Exported void readonly definition (`export save! =! ->`): the
     # readonly row's void twin, flat for the same reason.
-    o "Identifier[target] VOID_MARKER[voidMarker] READONLY_ASSIGN[operator] #{RHS}"                                                    , '["void-readonly", @target, @value]', 'readonly: _, target, value'   , prec: 'REACTIVE_ASSIGN'
+    o "Identifier[target] VOID_MARKER[voidMarker] READONLY_ASSIGN[operator] #{RHS}"                                                    , '["readonly", {void: true}, @target, @value]', 'readonly: _, _, target, value'   , prec: 'REACTIVE_ASSIGN'
     # Exported TYPED reactive declarations (`export count: number := 0`):
     # after `EXPORT Identifier` the parser shifts a TYPE into these flat
     # rows (the typed ExportAssign path), so the reactive twins must
     # exist here too — the untyped forms ride `EXPORT ReactiveAssign` /
     # `EXPORT ComputedAssign` (adding them here as well would be a
     # reduce-reduce ambiguity).
-    o "Identifier[target] TYPE[annotation] REACTIVE_ASSIGN[operator] #{RHS}"                                                           , '["state", @target, @value]'      , 'state: _, target, value'
-    o 'Identifier[target] TYPE[annotation] COMPUTED_ASSIGN[operator] (Expression[value] | TERMINATOR Expression[value] | Block[value])', '["computed", @target, @value]'   , 'computed: _, target, value'
-    o "Identifier[target] TYPE[annotation] READONLY_ASSIGN[operator] #{RHS}"                                                           , '["readonly", @target, @value]'   , 'readonly: _, target, value'
-    o 'Identifier[target] TYPE[annotation] EFFECT[operator] (Expression[value] | TERMINATOR Expression[value] | Block[value])'         , '["effect", @target, @value]'     , 'effect: _, target, value'
+    o "Identifier[target] TYPE[annotation] REACTIVE_ASSIGN[operator] #{RHS}"                                                           , '["state", {}, @target, @value]'      , 'state: _, _, target, value'
+    o 'Identifier[target] TYPE[annotation] COMPUTED_ASSIGN[operator] (Expression[value] | TERMINATOR Expression[value] | Block[value])', '["computed", {}, @target, @value]'   , 'computed: _, _, target, value'
+    o "Identifier[target] TYPE[annotation] READONLY_ASSIGN[operator] #{RHS}"                                                           , '["readonly", {}, @target, @value]'   , 'readonly: _, _, target, value'
+    o 'Identifier[target] TYPE[annotation] EFFECT[operator] (Expression[value] | TERMINATOR Expression[value] | Block[value])'         , '["effect", {}, @target, @value]'     , 'effect: _, _, target, value'
   ]
 
   ExportSpecifierList: list 'ExportSpecifierList', 'ExportSpecifier', indented: true, reason: 'specifier plumbing; export.spec owns the span'
 
   ExportSpecifier: [
     o 'Identifier'
-    o 'Identifier AS Identifier', '[1, 3]', 'as: name, alias'
-    o 'Identifier AS DEFAULT'   , '[1, 3]', 'as: name, alias'
+    o 'Identifier AS Identifier', '["as", {}, 1, 3]', 'as: _, _, name, alias'
+    o 'Identifier AS DEFAULT'   , '["as", {}, 1, 3]', 'as: _, _, name, alias'
     o 'DEFAULT'
-    o 'DEFAULT AS Identifier'   , '[1, 3]', 'as: name, alias'
+    o 'DEFAULT AS Identifier'   , '["as", {}, 1, 3]', 'as: _, _, name, alias'
   ]
 
   # ============================================================================
@@ -310,7 +312,7 @@ grammar =
     o 'Value DAMMIT[operator]'   , '["call", {await: true}, 1]', 'dammit: _, _, callee'
     # Tagged templates: a string against a value (`tag"x"`) or
     # bridged by `$` (`sh $"cmd"`) calls the tag with the template.
-    o 'Value TEMPLATE_TAG String', '["tagged-template", 1, 3]', 'tagged: _, tag, str'
+    o 'Value TEMPLATE_TAG String', '["tagged-template", {}, 1, 3]', 'tagged: _, _, tag, str'
   ]
 
   # Atom is a grammatical POSITION, not just an alternation:
@@ -329,12 +331,12 @@ grammar =
     o 'String'
     # Symbol literals: `:name` is Symbol.for("name") — interned,
     # identity-comparable across modules.
-    o 'SYMBOL', '["symbol", 1]', 'symbol: _, name'
+    o 'SYMBOL', '["symbol", {}, 1]', 'symbol: _, _, name'
   ]
 
   String: [
     o 'STRING'
-    o 'STRING_START Interpolations STRING_END', '["str", ...2]', 'str: _, ...parts'
+    o 'STRING_START Interpolations STRING_END', '["str", {}, ...2]', 'str: _, _, ...parts'
   ]
 
   Interpolations: [
@@ -345,7 +347,7 @@ grammar =
   InterpolationChunk: [
     o 'INTERPOLATION_START Body INTERPOLATION_END', 2
     o 'INTERPOLATION_START INDENT Body OUTDENT INTERPOLATION_END', 3
-    o 'INTERPOLATION_START INTERPOLATION_END'     , '""'
+    o 'INTERPOLATION_START INTERPOLATION_END'     , '["none", {}]', '~ an empty interpolation is an absent part; str.parts owns the span'
     o 'String'
   ]
 
@@ -354,7 +356,7 @@ grammar =
     # Interpolated heregex: stripped chunks + expressions, lowered by
     # the emitter to a RegExp(...) call. HEREGEX_END's value is the
     # flags text ('' when none).
-    o 'HEREGEX_START Interpolations HEREGEX_END', '["here-regex", 3, ...2]', 'heregex: _, flags, ...parts'
+    o 'HEREGEX_START Interpolations HEREGEX_END', '["here-regex", {}, 3, ...2]', 'heregex: _, _, flags, ...parts'
   ]
 
   Identifier: [
@@ -377,29 +379,29 @@ grammar =
     # PRIVATE is the class-member modifier (`private x: T = v`), erased
     # as the visibility side-band role; the lexer mints it only at the
     # head of a class body's member line.
-    o "(PRIVATE[visibility])? Assignable[target] (OPT_MARKER[optionalMarker])? (TYPE[annotation])? = #{RHS}", '["=", @target, @value]', 'assign: operator, target, value'
+    o "(PRIVATE[visibility])? Assignable[target] (OPT_MARKER[optionalMarker])? (TYPE[annotation])? = #{RHS}", '["=", {}, @target, @value]', 'assign: operator, _, target, value'
     # String-NAMED members: `"data-src" = v` — legal only as a class
     # field (the TS spelling for names identifiers cannot carry); the
     # emitter rejects the shape everywhere else.
-    o '(PRIVATE[visibility])? STRING[target] (TYPE[annotation])? = Expression[value]', '["=", @target, @value]'          , 'assign: operator, target, value'
+    o '(PRIVATE[visibility])? STRING[target] (TYPE[annotation])? = Expression[value]', '["=", {}, @target, @value]'          , 'assign: operator, _, target, value'
     # Generic component declaration (`Select<T extends Shape> = component
     # extends select`): the lexer mints TYPE_PARAMS only when `= component`
     # follows on the same line, so the row cannot claim ordinary
     # assignments and has no wrapped forms. TYPE_PARAMS erases as
     # typeParams; the TS face re-emits it on the lowered class.
-    o 'Assignable[target] TYPE_PARAMS[typeParams] = Expression[value]'               , '["=", @target, @value]'          , 'assign: operator, target, value'
-    o 'SimpleAssignable[target] COMPOUND_ASSIGN[operator] (Expression[value] | INDENT Expression[value] OUTDENT | TERMINATOR Expression[value])', '[@operator, @target, @value]'    , 'assign: operator, target, value'
+    o 'Assignable[target] TYPE_PARAMS[typeParams] = Expression[value]'               , '["=", {}, @target, @value]'          , 'assign: operator, _, target, value'
+    o 'SimpleAssignable[target] COMPOUND_ASSIGN[operator] (Expression[value] | INDENT Expression[value] OUTDENT | TERMINATOR Expression[value])', '[@operator, {}, @target, @value]'    , 'assign: operator, _, target, value'
 
     # Void definition (`save! = ->`): the bang on the target name marks
     # the assigned function void (no implicit return). Word-form head
     # (`=!` is the readonly glyph); VOID_MARKER erases as voidMarker.
     # Plain-name targets only — the lexer mints VOID_MARKER solely before
     # `=` — and the emitter requires a function value.
-    o "Identifier[target] VOID_MARKER[voidMarker] =[operator] #{RHS}"                , '["void-assign", @target, @value]', 'assign: _, target, value'
+    o "Identifier[target] VOID_MARKER[voidMarker] =[operator] #{RHS}"                , '["=", {void: true}, @target, @value]', 'assign: _, _, target, value'
     # Void readonly definition (`save! =! ->`): the void marker and the
     # readonly glyph compose — a function that never changes and never
     # returns a value.
-    o "Identifier[target] VOID_MARKER[voidMarker] READONLY_ASSIGN[operator] #{RHS}"  , '["void-readonly", @target, @value]', 'readonly: _, target, value'
+    o "Identifier[target] VOID_MARKER[voidMarker] READONLY_ASSIGN[operator] #{RHS}"  , '["readonly", {void: true}, @target, @value]', 'readonly: _, _, target, value'
   ]
 
   Assignable: [
@@ -409,9 +411,9 @@ grammar =
   ]
 
   # ============================================================================
-  # Reactive declarations. Locked heads — ["state", target, value] /
-  # ["computed", target, value] are what `state a, 0` builds. The
-  # operator token erases as operator; typed twins (`count: number := 0`)
+  # Reactive declarations: ["state", {}, target, value] and
+  # ["computed", {}, target, value]. The operator token erases as
+  # operator; typed twins (`count: number := 0`)
   # erase TYPE as annotation. The rows sit BELOW POST_IF/POST_UNLESS in
   # precedence, so a postfix guard shifts INTO the value (`count := 0 if c`
   # declares count with a conditional initializer; a const declaration
@@ -446,11 +448,11 @@ grammar =
   # the lowering is the unmarked one (optionality changes nothing at
   # runtime).
   ReactiveAssign: [
-    o 'Assignable[target] OPT_MARKER[optionalMarker]? TYPE[annotation]? REACTIVE_ASSIGN[operator] Rhs[value]'     , '["state", @target, @value]', 'state: _, target, value'
+    o 'Assignable[target] OPT_MARKER[optionalMarker]? TYPE[annotation]? REACTIVE_ASSIGN[operator] Rhs[value]'     , '["state", {}, @target, @value]', 'state: _, _, target, value'
   ]
 
   ComputedAssign: [
-    o 'Assignable[target] OPT_MARKER[optionalMarker]? TYPE[annotation]? COMPUTED_ASSIGN[operator] BlockRhs[value]', '["computed", @target, @value]', 'computed: _, target, value'
+    o 'Assignable[target] OPT_MARKER[optionalMarker]? TYPE[annotation]? COMPUTED_ASSIGN[operator] BlockRhs[value]', '["computed", {}, @target, @value]', 'computed: _, _, target, value'
   ]
 
   # Render-ready gates bind a private reactive component member to a
@@ -462,9 +464,9 @@ grammar =
   # plain Arguments reading and rule order picks the keyed-gate form —
   # declared, with rationale, in the expectedConflicts manifest.
   Gate: [
-    o 'Assignable[target] TYPE[annotation]? GATE[operator] Value[rhs]'                                          , '["gate", @target, @rhs]'         , 'gate: _, target, rhs'
-    o 'Assignable[target] TYPE[annotation]? GATE[operator] Value[rhs] CALL_START CALL_END'                      , '["gate", @target, @rhs]'         , 'gate: _, target, rhs'
-    o 'Assignable[target] TYPE[annotation]? GATE[operator] Value[rhs] CALL_START ArgList[key] OptComma CALL_END', '["gate", @target, @rhs, ...@key]', 'gate: _, target, rhs, ...key'
+    o 'Assignable[target] TYPE[annotation]? GATE[operator] Value[rhs]'                                          , '["gate", {}, @target, @rhs]'         , 'gate: _, _, target, rhs'
+    o 'Assignable[target] TYPE[annotation]? GATE[operator] Value[rhs] CALL_START CALL_END'                      , '["gate", {}, @target, @rhs]'         , 'gate: _, _, target, rhs'
+    o 'Assignable[target] TYPE[annotation]? GATE[operator] Value[rhs] CALL_START ArgList[key] OptComma CALL_END', '["gate", {}, @target, @rhs, ...@key]', 'gate: _, _, target, rhs, ...key'
   ]
 
   # Readonly declarations (locked head; lowers to a plain `const`, no
@@ -474,11 +476,12 @@ grammar =
   # declares unconditionally with a conditional initializer).
 
   Readonly: [
-    o 'Assignable[target] OPT_MARKER[optionalMarker]? TYPE[annotation]? READONLY_ASSIGN[operator] Rhs[value]', '["readonly", @target, @value]', 'readonly: _, target, value'
+    o 'Assignable[target] OPT_MARKER[optionalMarker]? TYPE[annotation]? READONLY_ASSIGN[operator] Rhs[value]', '["readonly", {}, @target, @value]', 'readonly: _, _, target, value'
   ]
 
   # ============================================================================
-  # Reactive effects (locked head: ["effect", target|null, body]). The
+  # Reactive effects (["effect", {}, target, body], the target absent
+  # in the bare form). The
   # BOUND form (`h ~> body`) binds the dispose handle as a plain const;
   # the BARE form runs for its subscriptions. EFFECT erases as operator
   # and the bound typed twin (`h: T ~> body`) erases TYPE as annotation.
@@ -488,35 +491,35 @@ grammar =
   # ============================================================================
 
   Effect: [
-    o 'Assignable[target] TYPE[annotation]? EFFECT[operator] BlockRhs[value]', '["effect", @target, @value]', 'effect: _, target, value'
-    o 'EFFECT[operator] BlockRhs[value]'                                     , '["effect", null, @value]'   , 'effect: _, target, value'
+    o 'Assignable[target] TYPE[annotation]? EFFECT[operator] BlockRhs[value]', '["effect", {}, @target, @value]', 'effect: _, _, target, value'
+    o 'EFFECT[operator] BlockRhs[value]'                                     , '["effect", {}, ["none", {}], @value]'   , 'effect: _, _, target, value'
   ]
 
   SimpleAssignable: [
     o 'Identifier'
     o 'ThisProperty'
-    o 'Subjectable . Property'                                             , '[".", 1, 3]'                , 'member: operator, object, property'
-    o 'Subjectable ?. Property'                                            , '["?.", 1, 3]'               , 'member: operator, object, property'
-    o 'Subjectable[object] INDEX_START (Expression[key] | INDENT Expression[key] OUTDENT) INDEX_END', '["[]", @object, @key]'      , 'index: operator, object, key'
+    o 'Subjectable . Property'                                             , '[".", {}, 1, 3]'                , 'member: operator, _, object, property'
+    o 'Subjectable ?. Property'                                            , '["?.", {}, 1, 3]'               , 'member: operator, _, object, property'
+    o 'Subjectable[object] INDEX_START (Expression[key] | INDENT Expression[key] OUTDENT) INDEX_END', '["[]", {}, @object, @key]'      , 'index: operator, _, object, key'
     # Regex capture index: `text[/re/, n]` — the match's nth capture
     # (the emitter requires a regex-literal key; any other two-part
     # index rejects loudly there).
-    o 'Subjectable INDEX_START Expression , Expression INDEX_END'          , '["regex-index", 1, 3, 5]'   , 'regexindex: _, object, key, capture'
-    o 'Subjectable[object] INDEX_START (Slice[key] | INDENT Slice[key] OUTDENT) INDEX_END', '["[]", @object, @key]'      , 'index: operator, object, key'
+    o 'Subjectable INDEX_START Expression , Expression INDEX_END'          , '["regex-index", {}, 1, 3, 5]'   , 'regexindex: _, _, object, key, capture'
+    o 'Subjectable[object] INDEX_START (Slice[key] | INDENT Slice[key] OUTDENT) INDEX_END', '["[]", {}, @object, @key]'      , 'index: operator, _, object, key'
     # Optional index (`a?.[k]`); Expression keys only — slices have no
     # optional form.
-    o 'Subjectable[object] ES6_OPTIONAL_INDEX INDEX_START (Expression[key] | INDENT Expression[key] OUTDENT) INDEX_END', '["optindex", @object, @key]', 'optindex: _, object, key'
+    o 'Subjectable[object] ES6_OPTIONAL_INDEX INDEX_START (Expression[key] | INDENT Expression[key] OUTDENT) INDEX_END', '["optindex", {}, @object, @key]', 'optindex: _, _, object, key'
     # Pick (`obj.{a, b: c, d = e}` → `{a: obj.a, c: obj.b, d: obj.d ?? e}`):
     # one kind covers both heads, `.{}`/`?.{}` discriminating optionality
     # exactly as member's '.'/'?.' does.
-    o 'Subjectable PICK_START    PickList OptComma PICK_END'               , '[".{}",  1, ...3]'          , 'pick: _, source, ...items'
-    o 'Subjectable OPTPICK_START PickList OptComma PICK_END'               , '["?.{}", 1, ...3]'          , 'pick: _, source, ...items'
-    o 'Subjectable PICK_START    INDENT PickList OptComma OUTDENT PICK_END', '[".{}",  1, ...4]'          , 'pick: _, source, ...items'
-    o 'Subjectable OPTPICK_START INDENT PickList OptComma OUTDENT PICK_END', '["?.{}", 1, ...4]'          , 'pick: _, source, ...items'
+    o 'Subjectable PICK_START    PickList OptComma PICK_END'               , '[".{}", {}, 1, ...3]'          , 'pick: _, _, source, ...items'
+    o 'Subjectable OPTPICK_START PickList OptComma PICK_END'               , '["?.{}", {}, 1, ...3]'          , 'pick: _, _, source, ...items'
+    o 'Subjectable PICK_START    INDENT PickList OptComma OUTDENT PICK_END', '[".{}", {}, 1, ...4]'          , 'pick: _, _, source, ...items'
+    o 'Subjectable OPTPICK_START INDENT PickList OptComma OUTDENT PICK_END', '["?.{}", {}, 1, ...4]'          , 'pick: _, _, source, ...items'
     # import.meta: a member node whose object is the token's own value
     # ('import'), so chains read through it (`import.meta.url`).
-    o 'IMPORT_META . Property'                                             , '[".", 1, 3]'                , 'member: operator, object, property'
-    o 'NEW_TARGET . Property'                                              , '[".", 1, 3]'                , 'member: operator, object, property'
+    o 'IMPORT_META . Property'                                             , '[".", {}, 1, 3]'                , 'member: operator, _, object, property'
+    o 'NEW_TARGET . Property'                                              , '[".", {}, 1, 3]'                , 'member: operator, _, object, property'
   ]
 
   # Subjectable — anything that can carry a postfix accessor chain. Code
@@ -537,10 +540,10 @@ grammar =
   # ============================================================================
 
   Code: [
-    o 'PARAM_START ParamList PARAM_END ArrowKind Block', '[4, 2, 5]' , 'func: kind, params, body'
+    o 'PARAM_START ParamList PARAM_END ArrowKind Block', '[4, {}, 2, 5]' , 'func: kind, _, params, body'
     # Arrow return type (`(a): T -> body`): TYPE erases as returnType.
-    o 'PARAM_START ParamList PARAM_END TYPE[returnType] ArrowKind Block', '[5, 2, 6]' , 'func: kind, params, body'
-    o 'ArrowKind Block'                                , '[1, [], 2]', 'func: kind, _, body'
+    o 'PARAM_START ParamList PARAM_END TYPE[returnType] ArrowKind Block', '[5, {}, 2, 6]' , 'func: kind, _, params, body'
+    o 'ArrowKind Block'                                , '[1, {}, [], 2]', 'func: kind, _, _, body'
   ]
 
   ArrowKind: [
@@ -555,8 +558,8 @@ grammar =
   # anything else there. The lexer retags DO to DO_IIFE and rejects a
   # `do` heading anything but a function or a parenthesis.
   DoIife: [
-    o 'DO_IIFE Code', '["do-iife", 2]', 'doiife: _, func'
-    o 'DO_IIFE Parenthetical', '["do-iife", 2]', 'doiife: _, func'
+    o 'DO_IIFE Code', '["do-iife", {}, 2]', 'doiife: _, _, func'
+    o 'DO_IIFE Parenthetical', '["do-iife", {}, 2]', 'doiife: _, _, func'
   ]
 
   # ============================================================================
@@ -576,10 +579,10 @@ grammar =
   # (every wrong-typed `@name = v` write) reaches the source instead
   # of dropping in transit.
   ThisProperty: [
-    o '@ Property', '[".", "this", 2]', 'member: operator, _, property'
+    o '@ Property', '[".", {}, "this", 2]', 'member: operator, _, _, property'
     # Static string-named member: `@"data-src" = v` in a class body;
     # anywhere else the read is this["data-src"].
-    o '@ STRING'  , '[".", "this", 2]', 'member: operator, _, property'
+    o '@ STRING'  , '[".", {}, "this", 2]', 'member: operator, _, _, property'
   ]
 
   # ============================================================================
@@ -587,9 +590,9 @@ grammar =
   # ============================================================================
 
   Array: [
-    o '[ ]'         , '["array"]'            , 'array: _'
-    o '[ Elisions ]', '["array", ...2]'      , 'array: _, ...elisions'
-    o '[ ArgElisionList OptElisions ]', '["array", ...2, ...3]', 'array: _, ...items, ...elisions'
+    o '[ ]'         , '["array", {}]'            , 'array: _, _'
+    o '[ Elisions ]', '["array", {}, ...2]'      , 'array: _, _, ...elisions'
+    o '[ ArgElisionList OptElisions ]', '["array", {}, ...2, ...3]', 'array: _, _, ...items, ...elisions'
   ]
 
   ArgElisionList: [
@@ -616,7 +619,7 @@ grammar =
   ]
 
   Elision: [
-    o ',', 'null'
+    o ',', '["none", {}]', '~ an elision is an absent element; array.items owns the span'
     o 'Elision TERMINATOR'
   ]
 
@@ -628,30 +631,30 @@ grammar =
   # ============================================================================
 
   Object: [
-    o '{ AssignList OptComma }'          , '["object", ...2]', 'object: _, ...pairs'
+    o '{ AssignList OptComma }'          , '["object", {}, ...2]', 'object: _, _, ...pairs'
     # Map literals: `*{ k: v, … }` — same pair grammar, Map semantics
     # (any-typed keys preserved; identifier keys read as strings).
-    o 'MAP_START { AssignList OptComma }', '["map", ...3]'   , 'map: _, ...pairs'
+    o 'MAP_START { AssignList OptComma }', '["map", {}, ...3]'   , 'map: _, _, ...pairs'
   ]
 
   AssignList: list 'AssignList', 'AssignObj', empty: 'empty pair list; object.pairs owns the span', reason: 'pair-list plumbing; object.pairs owns the span'
 
   AssignObj: [
-    o 'ObjAssignable'                                                                    , '[null, 1, 1]'               , 'pair: _, key, value'
+    o 'ObjAssignable'                                                                    , '[":", {shorthand: true}, 1, 1]'               , 'pair: _, _, key, value'
     o 'ObjRestValue'
     # PRIVATE is the class-member modifier on a method pair (`private
     # m: ->`), erased as the visibility side-band role; the lexer mints
     # it only at the head of a class body's member line.
-    o '(PRIVATE[visibility])? ObjAssignable[key] : (Expression[value] | INDENT Expression[value] OUTDENT)', '[":", @key, @value]', 'pair: operator, key, value'
+    o '(PRIVATE[visibility])? ObjAssignable[key] : (Expression[value] | INDENT Expression[value] OUTDENT)', '[":", {}, @key, @value]', 'pair: operator, _, key, value'
     # Regex keys exist for MAP literals (`*{ /^N/: 1 }` — any-typed
     # keys); a plain object rejects them at emission (no JS reading).
-    o 'Regex : Expression'                                                               , '[":", 1, 3]'                , 'pair: operator, key, value'
-    o 'SimpleObjAssignable[key] = (Expression[value] | INDENT Expression[value] OUTDENT)', '["=", @key, @value]'        , 'pair: operator, key, value'
+    o 'Regex : Expression'                                                               , '[":", {}, 1, 3]'                , 'pair: operator, _, key, value'
+    o 'SimpleObjAssignable[key] = (Expression[value] | INDENT Expression[value] OUTDENT)', '["=", {}, @key, @value]'        , 'pair: operator, _, key, value'
     # Void-method pair (`fn!: ->` in class bodies and object literals):
     # the bang on the KEY marks the method void. Name-shaped keys only
     # (identifier/property/@-static — the positions a trailing bang can
     # lex after); the emitter requires a function value. Word-form head.
-    o '(PRIVATE[visibility])? SimpleObjAssignable[key] VOID_MARKER[voidMarker] :[operator] (Expression[value] | INDENT Expression[value] OUTDENT)', '["void-pair", @key, @value]', 'pair: _, key, value'
+    o '(PRIVATE[visibility])? SimpleObjAssignable[key] VOID_MARKER[voidMarker] :[operator] (Expression[value] | INDENT Expression[value] OUTDENT)', '[":", {void: true}, @key, @value]', 'pair: _, _, key, value'
   ]
 
   # Object rest/spread: the full ObjSpreadExpr family — chained
@@ -662,8 +665,8 @@ grammar =
   # object-LITERAL values only — in a destructuring pattern the rest
   # target must be a plain name (the emitter owns that rejection).
   ObjRestValue: [
-    o '... SimpleObjAssignable', '["...", 2]', 'splat: _, value'
-    o '... ObjSpreadExpr'      , '["...", 2]', 'splat: _, value'
+    o '... SimpleObjAssignable', '["...", {}, 2]', 'splat: _, _, value'
+    o '... ObjSpreadExpr'      , '["...", {}, 2]', 'splat: _, _, value'
   ]
 
   ObjSpreadExpr: [
@@ -676,9 +679,9 @@ grammar =
     o 'DYNAMIC_IMPORT Arguments'                                             , '["call", {}, 1, ...2]'      , 'dynimport: _, _, callee, ...args'
     o 'SimpleObjAssignable Arguments'                                        , '["call", {}, 1, ...2]'      , 'call: _, _, callee, ...args'
     o 'ObjSpreadExpr Arguments'                                              , '["call", {}, 1, ...2]'      , 'call: _, _, callee, ...args'
-    o 'ObjSpreadExpr . Property'                                             , '[".", 1, 3]'          , 'member: operator, object, property'
-    o 'ObjSpreadExpr ?. Property'                                            , '["?.", 1, 3]'         , 'member: operator, object, property'
-    o 'ObjSpreadExpr[object] INDEX_START (Expression[key] | INDENT Expression[key] OUTDENT) INDEX_END', '["[]", @object, @key]', 'index: operator, object, key'
+    o 'ObjSpreadExpr . Property'                                             , '[".", {}, 1, 3]'          , 'member: operator, _, object, property'
+    o 'ObjSpreadExpr ?. Property'                                            , '["?.", {}, 1, 3]'         , 'member: operator, _, object, property'
+    o 'ObjSpreadExpr[object] INDEX_START (Expression[key] | INDENT Expression[key] OUTDENT) INDEX_END', '["[]", {}, @object, @key]', 'index: operator, _, object, key'
     # The dammit operator on a spread head (`{...f!}` awaits the call
     # and spreads the result); chains read through it (`{...f!.data}`).
     # Maybe dammit is its twin (`{...f?!}` spreads nothing when `f` is
@@ -691,10 +694,10 @@ grammar =
     o 'ObjSpreadExpr MAYBE_DAMMIT[operator]'                                 , '["call", {opt: true, await: true}, 1]'     , 'maybe-dammit: _, _, callee'
     # Pick on a spread head: `{...obj.{a, b}}` spreads the picked
     # literal (the four spread-head pick rules).
-    o 'ObjSpreadExpr PICK_START    PickList OptComma PICK_END'               , '[".{}",  1, ...3]'    , 'pick: _, source, ...items'
-    o 'ObjSpreadExpr OPTPICK_START PickList OptComma PICK_END'               , '["?.{}", 1, ...3]'    , 'pick: _, source, ...items'
-    o 'ObjSpreadExpr PICK_START    INDENT PickList OptComma OUTDENT PICK_END', '[".{}",  1, ...4]'    , 'pick: _, source, ...items'
-    o 'ObjSpreadExpr OPTPICK_START INDENT PickList OptComma OUTDENT PICK_END', '["?.{}", 1, ...4]'    , 'pick: _, source, ...items'
+    o 'ObjSpreadExpr PICK_START    PickList OptComma PICK_END'               , '[".{}", {}, 1, ...3]'    , 'pick: _, _, source, ...items'
+    o 'ObjSpreadExpr OPTPICK_START PickList OptComma PICK_END'               , '["?.{}", {}, 1, ...3]'    , 'pick: _, _, source, ...items'
+    o 'ObjSpreadExpr PICK_START    INDENT PickList OptComma OUTDENT PICK_END', '[".{}", {}, 1, ...4]'    , 'pick: _, _, source, ...items'
+    o 'ObjSpreadExpr OPTPICK_START INDENT PickList OptComma OUTDENT PICK_END', '["?.{}", {}, 1, ...4]'    , 'pick: _, _, source, ...items'
   ]
 
   # ============================================================================
@@ -711,10 +714,10 @@ grammar =
   PickList: list 'PickList', 'PickItem', reason: 'item plumbing; pick.items owns the span'
 
   PickItem: [
-    o 'PickKey'             , '[1, 1, null]', 'pickitem: key, target, _'
-    o 'PickKey : PickKey'   , '[1, 3, null]', 'pickitem: key, target, _'
-    o 'PickKey = Expression', '[1, 1, 3]'   , 'pickitem: key, target, default'
-    o 'PickKey : PickKey = Expression', '[1, 3, 5]'   , 'pickitem: key, target, default'
+    o 'PickKey'             , '["pickitem", {}, 1, 1, ["none", {}]]', 'pickitem: _, _, key, target, _'
+    o 'PickKey : PickKey'   , '["pickitem", {}, 1, 3, ["none", {}]]', 'pickitem: _, _, key, target, _'
+    o 'PickKey = Expression', '["pickitem", {}, 1, 1, 3]'   , 'pickitem: _, _, key, target, default'
+    o 'PickKey : PickKey = Expression', '["pickitem", {}, 1, 3, 5]'   , 'pickitem: _, _, key, target, default'
   ]
 
   PickKey: [
@@ -733,8 +736,8 @@ grammar =
     o 'Atom'
     # Computed keys: `{[k]: v}` and the this-index form `{@[k]: v}`
     # (the emitter owns where each is legal).
-    o '[ Expression ]'  , '["dynamicKey", 2]', 'dynamicKey: _, key'
-    o '@ [ Expression ]', '["[]", "this", 3]', 'index: operator, object, key'
+    o '[ Expression ]'  , '["dynamicKey", {}, 2]', 'dynamicKey: _, _, key'
+    o '@ [ Expression ]', '["[]", {}, "this", 3]', 'index: operator, _, object, key'
   ]
 
   # ============================================================================
@@ -747,14 +750,14 @@ grammar =
   ]
 
   Range: [
-    o '[ Expression RangeDots Expression ]', '[3, 2, 4]', 'range: operator, from, to'
+    o '[ Expression RangeDots Expression ]', '[3, {}, 2, 4]', 'range: operator, _, from, to'
   ]
 
   Slice: [
-    o 'Expression RangeDots Expression', '[2, 1, 3]'      , 'range: operator, from, to'
-    o 'Expression RangeDots', '[2, 1, null]'   , 'range: operator, from, to'
-    o 'RangeDots Expression', '[1, null, 2]'   , 'range: operator, from, to'
-    o 'RangeDots'           , '[1, null, null]', 'range: operator, from, to'
+    o 'Expression RangeDots Expression', '[2, {}, 1, 3]'      , 'range: operator, _, from, to'
+    o 'Expression RangeDots', '[2, {}, 1, ["none", {}]]'   , 'range: operator, _, from, to'
+    o 'RangeDots Expression', '[1, {}, ["none", {}], 2]'   , 'range: operator, _, from, to'
+    o 'RangeDots'           , '[1, {}, ["none", {}], ["none", {}]]', 'range: operator, _, from, to'
   ]
 
   # ============================================================================
@@ -766,29 +769,29 @@ grammar =
   # line, so the shape reaches the emitter as a class member alone. It
   # erases as the visibility side-band role; the TS face re-emits it.
   Def: [
-    o '(PRIVATE[visibility])? DEF Identifier[name] OptParams[params] Block[body]'                                          , '["def", @name, @params, @body]'     , 'def: _, name, params, body'
+    o '(PRIVATE[visibility])? DEF Identifier[name] OptParams[params] Block[body]'                                          , '["def", {}, @name, @params, @body]'     , 'def: _, _, name, params, body'
     # Return type (`def f(a): T`, parameterless `def f: T`): TYPE erases
     # as returnType.
-    o '(PRIVATE[visibility])? DEF Identifier[name] OptParams[params] TYPE[returnType] Block[body]'                         , '["def", @name, @params, @body]'     , 'def: _, name, params, body'
+    o '(PRIVATE[visibility])? DEF Identifier[name] OptParams[params] TYPE[returnType] Block[body]'                         , '["def", {}, @name, @params, @body]'     , 'def: _, _, name, params, body'
     # Generic def (`def wrap<T extends string>(v: T): Promise<[T]>`):
     # TYPE_PARAMS erases as typeParams; the TS face re-emits it after the name.
-    o '(PRIVATE[visibility])? DEF Identifier[name] TYPE_PARAMS[typeParams] OptParams[params] Block[body]'                  , '["def", @name, @params, @body]'     , 'def: _, name, params, body'
-    o '(PRIVATE[visibility])? DEF Identifier[name] TYPE_PARAMS[typeParams] OptParams[params] TYPE[returnType] Block[body]' , '["def", @name, @params, @body]'     , 'def: _, name, params, body'
+    o '(PRIVATE[visibility])? DEF Identifier[name] TYPE_PARAMS[typeParams] OptParams[params] Block[body]'                  , '["def", {}, @name, @params, @body]'     , 'def: _, _, name, params, body'
+    o '(PRIVATE[visibility])? DEF Identifier[name] TYPE_PARAMS[typeParams] OptParams[params] TYPE[returnType] Block[body]' , '["def", {}, @name, @params, @body]'     , 'def: _, _, name, params, body'
     # Void def (`def save!(x)`): the bang on the def name marks the
     # function void (no implicit return). Word-form head; VOID_MARKER
     # erases as voidMarker.
-    o '(PRIVATE[visibility])? DEF Identifier[name] VOID_MARKER[voidMarker] OptParams[params] Block[body]'                  , '["void-def", @name, @params, @body]', 'def: _, name, params, body'
-    o '(PRIVATE[visibility])? DEF Identifier[name] VOID_MARKER[voidMarker] OptParams[params] TYPE[returnType] Block[body]' , '["void-def", @name, @params, @body]', 'def: _, name, params, body'
+    o '(PRIVATE[visibility])? DEF Identifier[name] VOID_MARKER[voidMarker] OptParams[params] Block[body]'                  , '["def", {void: true}, @name, @params, @body]', 'def: _, _, name, params, body'
+    o '(PRIVATE[visibility])? DEF Identifier[name] VOID_MARKER[voidMarker] OptParams[params] TYPE[returnType] Block[body]' , '["def", {void: true}, @name, @params, @body]', 'def: _, _, name, params, body'
     # Generic void def (`def run!<T>(x: T)`): the bang precedes the list.
-    o '(PRIVATE[visibility])? DEF Identifier[name] VOID_MARKER[voidMarker] TYPE_PARAMS[typeParams] OptParams[params] Block[body]'                  , '["void-def", @name, @params, @body]', 'def: _, name, params, body'
-    o '(PRIVATE[visibility])? DEF Identifier[name] VOID_MARKER[voidMarker] TYPE_PARAMS[typeParams] OptParams[params] TYPE[returnType] Block[body]' , '["void-def", @name, @params, @body]', 'def: _, name, params, body'
+    o '(PRIVATE[visibility])? DEF Identifier[name] VOID_MARKER[voidMarker] TYPE_PARAMS[typeParams] OptParams[params] Block[body]'                  , '["def", {void: true}, @name, @params, @body]', 'def: _, _, name, params, body'
+    o '(PRIVATE[visibility])? DEF Identifier[name] VOID_MARKER[voidMarker] TYPE_PARAMS[typeParams] OptParams[params] TYPE[returnType] Block[body]' , '["def", {void: true}, @name, @params, @body]', 'def: _, _, name, params, body'
     # Static def (`def @m(a)`, `def @m!(a)`): the ThisProperty name marks
     # a static class method; anywhere but a class body the shape
     # rejects at emission.
-    o '(PRIVATE[visibility])? DEF ThisProperty[name] OptParams[params] (TYPE[returnType])? Block[body]'                                   , '["def", @name, @params, @body]'     , 'def: _, name, params, body'
-    o '(PRIVATE[visibility])? DEF ThisProperty[name] TYPE_PARAMS[typeParams] OptParams[params] (TYPE[returnType])? Block[body]'           , '["def", @name, @params, @body]'     , 'def: _, name, params, body'
-    o '(PRIVATE[visibility])? DEF ThisProperty[name] VOID_MARKER[voidMarker] OptParams[params] (TYPE[returnType])? Block[body]'           , '["void-def", @name, @params, @body]', 'def: _, name, params, body'
-    o '(PRIVATE[visibility])? DEF ThisProperty[name] VOID_MARKER[voidMarker] TYPE_PARAMS[typeParams] OptParams[params] (TYPE[returnType])? Block[body]', '["void-def", @name, @params, @body]', 'def: _, name, params, body'
+    o '(PRIVATE[visibility])? DEF ThisProperty[name] OptParams[params] (TYPE[returnType])? Block[body]'                                   , '["def", {}, @name, @params, @body]'     , 'def: _, _, name, params, body'
+    o '(PRIVATE[visibility])? DEF ThisProperty[name] TYPE_PARAMS[typeParams] OptParams[params] (TYPE[returnType])? Block[body]'           , '["def", {}, @name, @params, @body]'     , 'def: _, _, name, params, body'
+    o '(PRIVATE[visibility])? DEF ThisProperty[name] VOID_MARKER[voidMarker] OptParams[params] (TYPE[returnType])? Block[body]'           , '["def", {void: true}, @name, @params, @body]', 'def: _, _, name, params, body'
+    o '(PRIVATE[visibility])? DEF ThisProperty[name] VOID_MARKER[voidMarker] TYPE_PARAMS[typeParams] OptParams[params] (TYPE[returnType])? Block[body]', '["def", {void: true}, @name, @params, @body]', 'def: _, _, name, params, body'
   ]
 
   OptParams: [
@@ -800,29 +803,29 @@ grammar =
 
   Param: [
     o 'TypedParamVar'
-    o 'TypedParamVar = Expression', '["default", 1, 3]', 'default: _, name, value'
-    o '... TypedParamVar'         , '["rest", 2]'      , 'rest: _, name'
-    o '...'                       , '["expansion"]'    , 'expansion: _'
+    o 'TypedParamVar = Expression', '["default", {}, 1, 3]', 'default: _, _, name, value'
+    o '... TypedParamVar'         , '["rest", {}, 2]'      , 'rest: _, _, name'
+    o '...'                       , '["expansion", {}]'    , 'expansion: _, _'
   ]
 
   # A parameter with an optional type annotation. Unlike the owner-node
   # forms (Assign/Def/Code side-band roles), a bare param is a
   # pass-through STRING in the s-expression — there is no node to hang
   # a side-band role on — so the typed form constructs a wrapper node
-  # the emitter erases: ["typed-var", target, "T"] (an invented head).
+  # the emitter erases: ["typed-var", {}, target, "T"] (an invented head).
   # The corpus tests canonicalize the wrapper away.
   TypedParamVar: [
     o 'ParamVar'
-    o 'ParamVar TYPE'                           , '["typed-var", 1, 2]' , 'typedvar: _, target, annotation'
+    o 'ParamVar TYPE'                           , '["typed-var", {}, 1, 2]' , 'typedvar: _, _, target, annotation'
     # Optional parameter (`title?: string`): the lexer retypes the param's
     # `?` to OPT_MARKER when a type annotation follows; it erases as
     # optionalMarker and the TS face emits `?` after the name (the JS
     # twin is the bare name — an omitted argument is undefined either way).
-    o 'ParamVar OPT_MARKER[optionalMarker] TYPE', '["typed-var", 1, 3]' , 'typedvar: _, target, annotation'
+    o 'ParamVar OPT_MARKER[optionalMarker] TYPE', '["typed-var", {}, 1, 3]' , 'typedvar: _, _, target, annotation'
     # Bare optional (`title?` — no annotation): same wrapper, empty
     # annotation text; the face emits just the `?` (TS infers the
     # rest under gradual typing).
-    o 'ParamVar OPT_MARKER[optionalMarker]'     , '["typed-var", 1, ""]', 'typedvar: _, target, annotation'
+    o 'ParamVar OPT_MARKER[optionalMarker]'     , '["typed-var", {}, 1, ["none", {}]]', 'typedvar: _, _, target, annotation'
   ]
 
   ParamVar: [
@@ -838,7 +841,7 @@ grammar =
   # Spread in calls and arrays — ES6 prefix only (the postfix
   # `rest...` spelling rejects).
   Splat: [
-    o '... Expression', '["...", 2]', 'splat: _, value'
+    o '... Expression', '["...", {}, 2]', 'splat: _, _, value'
   ]
 
   # ============================================================================
@@ -852,19 +855,19 @@ grammar =
   ]
 
   Class: [
-    o 'CLASS'                                      , '["class", null, null]'   , 'class: _, name, parent'
-    o 'CLASS Block'                                , '["class", null, null, 2]', 'class: _, name, parent, body'
-    o 'CLASS EXTENDS Expression'                   , '["class", null, 3]'      , 'class: _, name, parent'
-    o 'CLASS EXTENDS Expression Block'             , '["class", null, 3, 4]'   , 'class: _, name, parent, body'
-    o 'CLASS ClassName'                            , '["class", 2, null]'      , 'class: _, name, parent'
-    o 'CLASS ClassName Block'                      , '["class", 2, null, 3]'   , 'class: _, name, parent, body'
-    o 'CLASS ClassName EXTENDS Expression'         , '["class", 2, 4]'         , 'class: _, name, parent'
-    o 'CLASS ClassName EXTENDS Expression Block'   , '["class", 2, 4, 5]'      , 'class: _, name, parent, body'
+    o 'CLASS'                                      , '["class", {}, ["none", {}], ["none", {}], ["none", {}]]'   , 'class: _, _, name, parent, _'
+    o 'CLASS Block'                                , '["class", {}, ["none", {}], ["none", {}], 2]', 'class: _, _, name, parent, body'
+    o 'CLASS EXTENDS Expression'                   , '["class", {}, ["none", {}], 3, ["none", {}]]'      , 'class: _, _, name, parent, _'
+    o 'CLASS EXTENDS Expression Block'             , '["class", {}, ["none", {}], 3, 4]'   , 'class: _, _, name, parent, body'
+    o 'CLASS ClassName'                            , '["class", {}, 2, ["none", {}], ["none", {}]]'      , 'class: _, _, name, parent, _'
+    o 'CLASS ClassName Block'                      , '["class", {}, 2, ["none", {}], 3]'   , 'class: _, _, name, parent, body'
+    o 'CLASS ClassName EXTENDS Expression'         , '["class", {}, 2, 4, ["none", {}]]'         , 'class: _, _, name, parent, _'
+    o 'CLASS ClassName EXTENDS Expression Block'   , '["class", {}, 2, 4, 5]'      , 'class: _, _, name, parent, body'
     # Static inner class: `class @Baby` inside a class body becomes a
     # static member class (`static Baby = class { … }`); anywhere
     # else the shape rejects at emission.
-    o 'CLASS ThisProperty Block'                   , '["class", 2, null, 3]'   , 'class: _, name, parent, body'
-    o 'CLASS ThisProperty EXTENDS Expression Block', '["class", 2, 4, 5]'      , 'class: _, name, parent, body'
+    o 'CLASS ThisProperty Block'                   , '["class", {}, 2, ["none", {}], 3]'   , 'class: _, _, name, parent, body'
+    o 'CLASS ThisProperty EXTENDS Expression Block', '["class", {}, 2, 4, 5]'      , 'class: _, _, name, parent, body'
   ]
 
   # ============================================================================
@@ -877,12 +880,12 @@ grammar =
   # ============================================================================
 
   Schema: [
-    o 'SCHEMA SCHEMA_BODY', '["schema", 2]', 'schema: _, body'
+    o 'SCHEMA SCHEMA_BODY', '["schema", {}, 2]', 'schema: _, _, body'
   ]
 
   # ============================================================================
   # Components — `Name = component` declarations. The sexpr
-  # shape is ["component", parent, ["block", …statements]] —
+  # shape is ["component", {}, parent, ["block", {}, …statements]] —
   # via ComponentBlock (a flat, annotatable list shape). The body's
   # member categorization, the parse-time defect layer,
   # and the render DSL live in the emitter; OFFER/ACCEPT are
@@ -891,12 +894,12 @@ grammar =
   # ============================================================================
 
   Component: [
-    o 'COMPONENT ComponentBlock'                   , '["component", null, 2]', 'component: _, parent, body'
-    o 'COMPONENT EXTENDS Expression ComponentBlock', '["component", 3, 4]'   , 'component: _, parent, body'
+    o 'COMPONENT ComponentBlock'                   , '["component", {}, ["none", {}], 2]', 'component: _, _, parent, body'
+    o 'COMPONENT EXTENDS Expression ComponentBlock', '["component", {}, 3, 4]'   , 'component: _, _, parent, body'
   ]
 
   ComponentBlock: [
-    o 'INDENT ComponentBody OUTDENT', '["block", ...2]', 'block: _, ...statements'
+    o 'INDENT ComponentBody OUTDENT', '["block", {}, ...2]', 'block: _, _, ...statements'
   ]
 
   ComponentBody: [
@@ -908,9 +911,9 @@ grammar =
   ComponentLine: [
     o 'Expression'
     o 'Statement'
-    o 'OFFER Expression' , '["offer", 2]' , 'offer: _, value'
-    o 'ACCEPT IDENTIFIER'                  , '["accept", 2]'   , 'accept: _, name'
-    o 'ACCEPT IDENTIFIER FROM ProviderPath', '["accept", 2, 4]', 'accept: _, name, provider'
+    o 'OFFER Expression' , '["offer", {}, 2]' , 'offer: _, _, value'
+    o 'ACCEPT IDENTIFIER'                  , '["accept", {}, 2, ["none", {}]]'   , 'accept: _, _, name, _'
+    o 'ACCEPT IDENTIFIER FROM ProviderPath', '["accept", {}, 2, 4]', 'accept: _, _, name, provider'
   ]
 
   # The provider an accept names: a component binding, or a member path
@@ -919,20 +922,20 @@ grammar =
   # provider reading, and rejects here rather than in the emitter.
   ProviderPath: [
     o 'IDENTIFIER'
-    o 'ProviderPath . Property', '[".", 1, 3]', 'member: operator, object, property'
+    o 'ProviderPath . Property', '[".", {}, 1, 3]', 'member: operator, _, object, property'
   ]
 
   # Render block: the template DSL for fine-grained reactive DOM.
   # Legal only inside a component body (the emitter owns that
   # rejection, positioned).
   Render: [
-    o 'RENDER Block'     , '["render", 2]', 'render: _, body'
-    o 'RENDER Expression', '["render", 2]', 'render: _, body'
+    o 'RENDER Block'     , '["render", {}, 2]', 'render: _, _, body'
+    o 'RENDER Expression', '["render", {}, 2]', 'render: _, _, body'
   ]
 
   Super: [
-    o 'SUPER . Property'                                                              , '[".", "super", 3]'    , 'member: operator, object, property'
-    o 'SUPER INDEX_START (Expression[key] | INDENT Expression[key] OUTDENT) INDEX_END', '["[]", "super", @key]', 'index: operator, object, key'
+    o 'SUPER . Property'                                                              , '[".", {}, "super", 3]'    , 'member: operator, _, object, property'
+    o 'SUPER INDEX_START (Expression[key] | INDENT Expression[key] OUTDENT) INDEX_END', '["[]", {}, "super", @key]', 'index: operator, _, object, key'
   ]
 
   # ============================================================================
@@ -986,13 +989,13 @@ grammar =
   # ============================================================================
 
   Block: [
-    o 'INDENT OUTDENT'     , '["block"]'      , 'block: _'
-    o 'INDENT Body OUTDENT', '["block", ...2]', 'block: _, ...statements'
+    o 'INDENT OUTDENT'     , '["block", {}]'      , 'block: _, _'
+    o 'INDENT Body OUTDENT', '["block", {}, ...2]', 'block: _, _, ...statements'
   ]
 
   Parenthetical: [
-    o '( Body )'               , '$2.length === 1 ? (Array.isArray($2[0]) && ($2[0].parenthesized = true), $2[0]) : ["block", ...$2]'
-    o '( INDENT Body OUTDENT )', '$3.length === 1 ? (Array.isArray($3[0]) && ($3[0].parenthesized = true), $3[0]) : ["block", ...$3]'
+    o '( Body )'               , '$2.length === 1 ? (Array.isArray($2[0]) && ($2[0].parenthesized = true), $2[0]) : ["block", {}, ...$2]'
+    o '( INDENT Body OUTDENT )', '$3.length === 1 ? (Array.isArray($3[0]) && ($3[0].parenthesized = true), $3[0]) : ["block", {}, ...$3]'
   ]
 
   # ============================================================================
@@ -1000,9 +1003,9 @@ grammar =
   # ============================================================================
 
   Return: [
-    o 'RETURN Expression', '["return", 2]', 'return: _, value'
-    o 'RETURN INDENT Object OUTDENT', '["return", 3]', 'return: _, value'
-    o 'RETURN'           , '["return"]'   , 'return: _'
+    o 'RETURN Expression', '["return", {}, 2]', 'return: _, _, value'
+    o 'RETURN INDENT Object OUTDENT', '["return", {}, 3]', 'return: _, _, value'
+    o 'RETURN'           , '["return", {}, ["none", {}]]'   , 'return: _, _, _'
   ]
 
   # ============================================================================
@@ -1016,26 +1019,26 @@ grammar =
   # ============================================================================
 
   While: [
-    o 'WHILE Expression Block'                     , '["while", 2, 3]'            , 'while: _, condition, body'
-    o 'UNTIL Expression Block'                     , '["while", ["!", 2], 3]'     , 'while: _, condition(unary: operator, operand), body'
-    # WHEN-guarded forms: the guard rides as a third slot —
-    # ["while", condition, guard, body] (arity discriminates it from
-    # the plain form). Statement emission nests the body in
+    o 'WHILE Expression Block'                     , '["while", {}, 2, ["none", {}], 3]'            , 'while: _, _, condition, _, body'
+    o 'UNTIL Expression Block'                     , '["while", {}, ["!", {}, 2], ["none", {}], 3]'     , 'while: _, _, condition(unary: operator, _, operand), _, body'
+    # WHEN-guarded forms: the guard fills the guard slot —
+    # ["while", {}, condition, guard, body], absent in the plain form.
+    # Statement emission nests the body in
     # `if (guard)`; value emission skips iterations with `continue`.
-    o 'WHILE Expression WHEN Expression Block'     , '["while", 2, 4, 5]'         , 'while: _, condition, guard, body'
-    o 'UNTIL Expression WHEN Expression Block'     , '["while", ["!", 2], 4, 5]'  , 'while: _, condition(unary: operator, operand), guard, body'
+    o 'WHILE Expression WHEN Expression Block'     , '["while", {}, 2, 4, 5]'         , 'while: _, _, condition, guard, body'
+    o 'UNTIL Expression WHEN Expression Block'     , '["while", {}, ["!", {}, 2], 4, 5]'  , 'while: _, _, condition(unary: operator, _, operand), guard, body'
     # Postfix forms: the body is a plain [statement] array (the
     # postfix-if convention). prec POST_IF, below the loose operators:
     # a loose `then`/`else` after the condition shifts into it, as `or`
     # does (`y = a while b else c` loops while `b || c`).
-    o 'Expression WHILE Expression'                , '["while", 3, [1]]'          , 'while: _, condition, _(body)', prec: 'POST_IF'
-    o 'Statement WHILE Expression'                 , '["while", 3, [1]]'          , 'while: _, condition, _(body)', prec: 'POST_IF'
-    o 'Expression UNTIL Expression'                , '["while", ["!", 3], [1]]'   , 'while: _, condition(unary: operator, operand), _(body)', prec: 'POST_IF'
-    o 'Statement UNTIL Expression'                 , '["while", ["!", 3], [1]]'   , 'while: _, condition(unary: operator, operand), _(body)', prec: 'POST_IF'
-    o 'Expression WHILE Expression WHEN Expression', '["while", 3, 5, [1]]'       , 'while: _, condition, guard, _(body)', prec: 'POST_IF'
-    o 'Statement WHILE Expression WHEN Expression' , '["while", 3, 5, [1]]'       , 'while: _, condition, guard, _(body)', prec: 'POST_IF'
-    o 'Expression UNTIL Expression WHEN Expression', '["while", ["!", 3], 5, [1]]', 'while: _, condition(unary: operator, operand), guard, _(body)', prec: 'POST_IF'
-    o 'Statement UNTIL Expression WHEN Expression' , '["while", ["!", 3], 5, [1]]', 'while: _, condition(unary: operator, operand), guard, _(body)', prec: 'POST_IF'
+    o 'Expression WHILE Expression'                , '["while", {}, 3, ["none", {}], [1]]'          , 'while: _, _, condition, _, _(body)', prec: 'POST_IF'
+    o 'Statement WHILE Expression'                 , '["while", {}, 3, ["none", {}], [1]]'          , 'while: _, _, condition, _, _(body)', prec: 'POST_IF'
+    o 'Expression UNTIL Expression'                , '["while", {}, ["!", {}, 3], ["none", {}], [1]]'   , 'while: _, _, condition(unary: operator, _, operand), _, _(body)', prec: 'POST_IF'
+    o 'Statement UNTIL Expression'                 , '["while", {}, ["!", {}, 3], ["none", {}], [1]]'   , 'while: _, _, condition(unary: operator, _, operand), _, _(body)', prec: 'POST_IF'
+    o 'Expression WHILE Expression WHEN Expression', '["while", {}, 3, 5, [1]]'       , 'while: _, _, condition, guard, _(body)', prec: 'POST_IF'
+    o 'Statement WHILE Expression WHEN Expression' , '["while", {}, 3, 5, [1]]'       , 'while: _, _, condition, guard, _(body)', prec: 'POST_IF'
+    o 'Expression UNTIL Expression WHEN Expression', '["while", {}, ["!", {}, 3], 5, [1]]', 'while: _, _, condition(unary: operator, _, operand), guard, _(body)', prec: 'POST_IF'
+    o 'Statement UNTIL Expression WHEN Expression' , '["while", {}, ["!", {}, 3], 5, [1]]', 'while: _, _, condition(unary: operator, _, operand), guard, _(body)', prec: 'POST_IF'
     o 'Loop'
   ]
 
@@ -1044,13 +1047,13 @@ grammar =
   # ============================================================================
 
   IfBlock: [
-    o 'IF Expression Block'           , '["if", 2, 3]'   , 'if: _, condition, then'
-    o 'IF Expression Block IfElseTail', '["if", 2, 3, 4]', 'if: _, condition, then, else'
+    o 'IF Expression Block'           , '["if", {}, 2, 3, ["none", {}]]'   , 'if: _, _, condition, then, _'
+    o 'IF Expression Block IfElseTail', '["if", {}, 2, 3, 4]', 'if: _, _, condition, then, else'
   ]
 
   IfElseTail: [
-    o 'ELSE IF Expression Block', '["if", 3, 4]'   , 'if: _, condition, then'
-    o 'ELSE IF Expression Block IfElseTail', '["if", 3, 4, 5]', 'if: _, condition, then, else'
+    o 'ELSE IF Expression Block', '["if", {}, 3, 4, ["none", {}]]'   , 'if: _, _, condition, then, _'
+    o 'ELSE IF Expression Block IfElseTail', '["if", {}, 3, 4, 5]', 'if: _, _, condition, then, else'
     o 'ELSE Block'              , 2
   ]
 
@@ -1058,28 +1061,28 @@ grammar =
     # prec IF (the ELSE precedence class, right-assoc): a dangling ELSE
     # shifts — it binds the nearest conditional (the dangling-else
     # convention).
-    o 'UNLESS Expression Block'           , '["if", ["!", 2], 3]'   , 'if: _, condition(unary: operator, operand), then', prec: 'IF'
-    o 'UNLESS Expression Block ELSE Block', '["if", ["!", 2], 3, 5]', 'if: _, condition(unary: operator, operand), then, else'
+    o 'UNLESS Expression Block'           , '["if", {}, ["!", {}, 2], 3, ["none", {}]]'   , 'if: _, _, condition(unary: operator, _, operand), then, _', prec: 'IF'
+    o 'UNLESS Expression Block ELSE Block', '["if", {}, ["!", {}, 2], 3, 5]', 'if: _, _, condition(unary: operator, _, operand), then, else'
   ]
 
   If: [
     o 'IfBlock'
     o 'UnlessBlock'
-    o 'Statement POST_IF Expression'     , '["if", 3, [1]]'       , 'if: _, condition, _(then)'
-    o 'Expression POST_IF Expression'    , '["if", 3, [1]]'       , 'if: _, condition, _(then)'
-    o 'Statement POST_UNLESS Expression' , '["if", ["!", 3], [1]]', 'if: _, condition(unary: operator, operand), _(then)'
-    o 'Expression POST_UNLESS Expression', '["if", ["!", 3], [1]]', 'if: _, condition(unary: operator, operand), _(then)'
+    o 'Statement POST_IF Expression'     , '["if", {}, 3, [1], ["none", {}]]'       , 'if: _, _, condition, _(then), _'
+    o 'Expression POST_IF Expression'    , '["if", {}, 3, [1], ["none", {}]]'       , 'if: _, _, condition, _(then), _'
+    o 'Statement POST_UNLESS Expression' , '["if", {}, ["!", {}, 3], [1], ["none", {}]]', 'if: _, _, condition(unary: operator, _, operand), _(then), _'
+    o 'Expression POST_UNLESS Expression', '["if", {}, ["!", {}, 3], [1], ["none", {}]]', 'if: _, _, condition(unary: operator, _, operand), _(then), _'
     # Postfix conditional WITH else — the Python-style ternary spelling
     # (`b if c else d`). Its own kind: the left-nested chain this parses
     # (`x if a else y if b else z`) re-associates at emission, and the
     # operator `c ? x : y`, which shares the node shape, never does.
-    o 'Expression[then] POST_IF Expression[condition] ELSE (INDENT Expression[else] OUTDENT | Expression[else])', '["?:", @condition, @then, @else]', 'ifelse: operator, condition, then, else'
+    o 'Expression[then] POST_IF Expression[condition] ELSE (INDENT Expression[else] OUTDENT | Expression[else])', '["?:", {}, @condition, @then, @else]', 'ifelse: operator, _, condition, then, else'
     # A statement's postfix if-else: `return x if c else y` returns the
     # ternary, the reading the same words have after any expression. The
     # Return reduces before POST_IF (the guard form needs it to), so the
     # value is lifted out here; a statement with no value has no else
     # reading.
-    o 'Statement POST_IF Expression ELSE Expression', '$1[0] === "return" && $1.length === 2 ? ["return", ["?:", $3, $1[1], $5]] : (() => { throw Object.assign(new Error("a postfix if-else on a statement takes its value from the statement, and this one has no value — write the if as a block"), { start: locs[locs.length - 5].start, end: locs[locs.length - 1].end }); })()', '~ the returned ternary carries the statement and condition spans'
+    o 'Statement POST_IF Expression ELSE Expression', '$1[0] === "return" && !($1[2].length === 2 && $1[2][0] === "none") ? ["return", {}, ["?:", {}, $3, $1[2], $5]] : (() => { throw Object.assign(new Error("a postfix if-else on a statement takes its value from the statement, and this one has no value — write the if as a block"), { start: locs[locs.length - 5].start, end: locs[locs.length - 1].end }); })()', '~ the returned ternary carries the statement and condition spans'
     # POST_UNLESS has no ELSE form: `x unless c else y` would otherwise
     # fold the else into the condition. It rejects, positioned. (An
     # action with no `$n` reference reads as a template, whose bare
@@ -1097,53 +1100,53 @@ grammar =
   # ============================================================================
 
   Try: [
-    o 'TRY Block'                     , '["try", 2]'      , 'try: _, body'
+    o 'TRY Block'                     , '["try", {}, 2, ["none", {}], ["none", {}]]'      , 'try: _, _, body, _, _'
     # Inline try: `x = try f()` — the expression is the body; errors
     # swallow (the no-handler form), the value is the expression or
     # undefined on throw.
-    o 'TRY Expression'                , '["try", 2]'      , 'try: _, body'
-    o 'TRY Expression Catch'          , '["try", 2, 3]'   , 'try: _, body, handler'
+    o 'TRY Expression'                , '["try", {}, 2, ["none", {}], ["none", {}]]'      , 'try: _, _, body, _, _'
+    o 'TRY Expression Catch'          , '["try", {}, 2, 3, ["none", {}]]'   , 'try: _, _, body, handler, _'
     # Statement body: `try return x catch then return y` — Return (and
     # break/continue/debugger) is Statement, not Expression; without
     # these rows the CATCH after `try return …` is Unexpected.
-    o 'TRY Statement'                 , '["try", 2]'      , 'try: _, body'
-    o 'TRY Statement Catch'           , '["try", 2, 3]'   , 'try: _, body, handler'
-    o 'TRY Block Catch'               , '["try", 2, 3]'   , 'try: _, body, handler'
-    o 'TRY Block Finalizer'           , '["try", 2, 3]'   , 'try: _, body, finalizer'
-    o 'TRY Block Catch Finalizer'     , '["try", 2, 3, 4]', 'try: _, body, handler, finalizer'
-    o 'TRY Expression Finalizer'      , '["try", 2, 3]'   , 'try: _, body, finalizer'
-    o 'TRY Expression Catch Finalizer', '["try", 2, 3, 4]', 'try: _, body, handler, finalizer'
-    o 'TRY Statement Finalizer'       , '["try", 2, 3]'   , 'try: _, body, finalizer'
-    o 'TRY Statement Catch Finalizer' , '["try", 2, 3, 4]', 'try: _, body, handler, finalizer'
+    o 'TRY Statement'                 , '["try", {}, 2, ["none", {}], ["none", {}]]'      , 'try: _, _, body, _, _'
+    o 'TRY Statement Catch'           , '["try", {}, 2, 3, ["none", {}]]'   , 'try: _, _, body, handler, _'
+    o 'TRY Block Catch'               , '["try", {}, 2, 3, ["none", {}]]'   , 'try: _, _, body, handler, _'
+    o 'TRY Block Finalizer'           , '["try", {}, 2, ["none", {}], 3]'   , 'try: _, _, body, _, finalizer'
+    o 'TRY Block Catch Finalizer'     , '["try", {}, 2, 3, 4]', 'try: _, _, body, handler, finalizer'
+    o 'TRY Expression Finalizer'      , '["try", {}, 2, ["none", {}], 3]'   , 'try: _, _, body, _, finalizer'
+    o 'TRY Expression Catch Finalizer', '["try", {}, 2, 3, 4]', 'try: _, _, body, handler, finalizer'
+    o 'TRY Statement Finalizer'       , '["try", {}, 2, ["none", {}], 3]'   , 'try: _, _, body, _, finalizer'
+    o 'TRY Statement Catch Finalizer' , '["try", {}, 2, 3, 4]', 'try: _, _, body, handler, finalizer'
   ]
 
   # JavaScript requires a block finalizer. Rip's inline spelling wraps its
   # expression here so every downstream consumer sees the one canonical tree.
   Finalizer: [
     o 'FINALLY Block'     , 2
-    o 'FINALLY Expression', '["block", 2]', 'block: _, statements'
+    o 'FINALLY Expression', '["block", {}, 2]', 'block: _, _, statements'
   ]
 
   # Catch bindings: an identifier, an object/array pattern (the emitter
   # lowers patterns to a plain `catch (error)` plus a pattern
   # assignment), or the bare form.
   Catch: [
-    o 'CATCH CatchVar Block'  , '[2, 3]'   , 'catch: binding, body'
-    o 'CATCH Object Block'    , '[2, 3]'   , 'catch: binding, body'
-    o 'CATCH Array Block'     , '[2, 3]'   , 'catch: binding, body'
-    o 'CATCH Block'           , '[null, 2]', 'catch: binding, body'
+    o 'CATCH CatchVar Block'  , '["catch", {}, 2, 3]'   , 'catch: _, _, binding, body'
+    o 'CATCH Object Block'    , '["catch", {}, 2, 3]'   , 'catch: _, _, binding, body'
+    o 'CATCH Array Block'     , '["catch", {}, 2, 3]'   , 'catch: _, _, binding, body'
+    o 'CATCH Block'           , '["catch", {}, ["none", {}], 2]', 'catch: _, _, binding, body'
   ]
 
   # A named catch binding, optionally annotated (`catch error: any`) —
   # the same erased wrapper a typed parameter takes.
   CatchVar: [
     o 'Identifier'
-    o 'Identifier TYPE', '["typed-var", 1, 2]', 'typedvar: _, target, annotation'
+    o 'Identifier TYPE', '["typed-var", {}, 1, 2]', 'typedvar: _, _, target, annotation'
   ]
 
   Throw: [
-    o 'THROW Expression'           , '["throw", 2]', 'throw: _, value'
-    o 'THROW INDENT Object OUTDENT', '["throw", 3]', 'throw: _, value'
+    o 'THROW Expression'           , '["throw", {}, 2]', 'throw: _, _, value'
+    o 'THROW INDENT Object OUTDENT', '["throw", {}, 3]', 'throw: _, _, value'
   ]
 
   # ============================================================================
@@ -1151,10 +1154,10 @@ grammar =
   # ============================================================================
 
   Switch: [
-    o 'SWITCH Expression INDENT Cases OUTDENT'           , '["switch", 2, 4, null]'   , 'switch: _, subject, cases, default'
-    o 'SWITCH Expression INDENT Cases ELSE Block OUTDENT', '["switch", 2, 4, 6]'      , 'switch: _, subject, cases, default'
-    o 'SWITCH INDENT Cases OUTDENT'                      , '["switch", null, 3, null]', 'switch: _, subject, cases, default'
-    o 'SWITCH INDENT Cases ELSE Block OUTDENT'           , '["switch", null, 3, 5]'   , 'switch: _, subject, cases, default'
+    o 'SWITCH Expression INDENT Cases OUTDENT'           , '["switch", {}, 2, 4, ["none", {}]]'   , 'switch: _, _, subject, cases, default'
+    o 'SWITCH Expression INDENT Cases ELSE Block OUTDENT', '["switch", {}, 2, 4, 6]'      , 'switch: _, _, subject, cases, default'
+    o 'SWITCH INDENT Cases OUTDENT'                      , '["switch", {}, ["none", {}], 3, ["none", {}]]', 'switch: _, _, subject, cases, default'
+    o 'SWITCH INDENT Cases ELSE Block OUTDENT'           , '["switch", {}, ["none", {}], 3, 5]'   , 'switch: _, _, subject, cases, default'
   ]
 
   Cases: [
@@ -1163,8 +1166,8 @@ grammar =
   ]
 
   When: [
-    o 'LEADING_WHEN SimpleArgs Block'           , '["when", 2, 3]', 'when: _, conditions, body'
-    o 'LEADING_WHEN SimpleArgs Block TERMINATOR', '["when", 2, 3]', 'when: _, conditions, body'
+    o 'LEADING_WHEN SimpleArgs Block'           , '["when", {}, 2, 3]', 'when: _, _, conditions, body'
+    o 'LEADING_WHEN SimpleArgs Block TERMINATOR', '["when", {}, 2, 3]', 'when: _, _, conditions, body'
   ]
 
   SimpleArgs: [
@@ -1173,42 +1176,41 @@ grammar =
   ]
 
   # ============================================================================
-  # For loops. Structure:
-  #   ["for-in", vars, iterable, step, guard, body]
-  #   ["for-of", vars, object, own, guard, body]
-  #   ["for-as", vars, iterable, await, guard, body]
-  # for-as iterates the iterator protocol (`for x as iterable` — an ES
+  # For loops: ["loop", {over, own?, await?}, vars, source, step, guard,
+  # body], `over` "in", "of" or "as" (absent slots ["none", {}]); a
+  # comprehension's clause is the same node with its body absent. `as`
+  # iterates the iterator protocol (`for x as iterable` — an ES
   # for-of); its await forms (`for await x as it`, `for x as! it`) are
   # the async-iteration spellings.
   # ============================================================================
 
   For: [
     # A guard and a step take either order after the iterable.
-    o 'FOR ForVariables[vars] FORIN Expression[iterable] (WHEN Expression[guard])? (BY Expression[step])? Block[body]', '["for-in", @vars, @iterable, @step, @guard, @body]'        , 'forin: _, vars, iterable, step, guard, body'
-    o 'FOR ForVariables[vars] FORIN Expression[iterable] BY Expression[step] WHEN Expression[guard] Block[body]', '["for-in", @vars, @iterable, @step, @guard, @body]'        , 'forin: _, vars, iterable, step, guard, body'
-    o 'FOR (OWN[own])? ForVariables[vars] FOROF Expression[object] (WHEN Expression[guard])? Block[body]', '["for-of", @vars, @object, @own?, @guard, @body]'          , 'forof: _, vars, object, own, guard, body'
-    o 'FOR (AWAIT[await])? ForVariables[vars] FORAS Expression[iterable] (WHEN Expression[guard])? Block[body]', '["for-as", @vars, @iterable, @await?, @guard, @body]'      , 'foras: _, vars, iterable, await, guard, body'
-    o 'FOR ForVariables[vars] FORASAWAIT Expression[iterable] (WHEN Expression[guard])? Block[body]', '["for-as", @vars, @iterable, true, @guard, @body]'         , 'foras: _, vars, iterable, await, guard, body'
+    o 'FOR ForVariables[vars] FORIN Expression[iterable] (WHEN Expression[guard])? (BY Expression[step])? Block[body]', '["loop", {over: "in"}, @vars, @iterable, @step, @guard, @body]'        , 'forin: _, _, vars, iterable, step, guard, body'
+    o 'FOR ForVariables[vars] FORIN Expression[iterable] BY Expression[step] WHEN Expression[guard] Block[body]', '["loop", {over: "in"}, @vars, @iterable, @step, @guard, @body]'        , 'forin: _, _, vars, iterable, step, guard, body'
+    o 'FOR (OWN[own])? ForVariables[vars] FOROF Expression[object] (WHEN Expression[guard])? Block[body]', '["loop", {over: "of", own: @own?}, @vars, @object, ["none", {}], @guard, @body]'          , 'forof: _, _, vars, object, _, guard, body'
+    o 'FOR (AWAIT[await])? ForVariables[vars] FORAS Expression[iterable] (WHEN Expression[guard])? Block[body]', '["loop", {over: "as", await: @await?}, @vars, @iterable, ["none", {}], @guard, @body]'      , 'foras: _, _, vars, iterable, _, guard, body'
+    o 'FOR ForVariables[vars] FORASAWAIT Expression[iterable] (WHEN Expression[guard])? Block[body]', '["loop", {over: "as", await: true}, @vars, @iterable, ["none", {}], @guard, @body]'         , 'foras: _, _, vars, iterable, _, guard, body'
 
     # A var-less ranged loop (either form) parses only so the emitter
     # can reject it precisely: the repeat idiom takes a binding.
-    o 'FOR Range[iterable] (BY Expression[step])? Block[body]'                    , '["for-in", [], @iterable, @step, null, @body]'             , 'forin: _, _, iterable, step, guard, body'
+    o 'FOR Range[iterable] (BY Expression[step])? Block[body]'                    , '["loop", {over: "in"}, [], @iterable, @step, ["none", {}], @body]'             , 'forin: _, _, _, iterable, step, guard, body'
 
-    o 'Expression FOR ForVariables FORIN Expression'                              , '["comprehension", 1, [["for-in", 3, 5, null]], []]'        , 'comprehension: _, value, _(loop(forin: _, vars, iterable, step    )), _'
-    o 'Expression FOR ForVariables FORIN Expression WHEN Expression'              , '["comprehension", 1, [["for-in", 3, 5, null]], [7]]'       , 'comprehension: _, value, _(loop(forin: _, vars, iterable, step    )), _(guard)'
-    o 'Expression FOR ForVariables FORIN Expression BY Expression'                , '["comprehension", 1, [["for-in", 3, 5, 7]], []]'           , 'comprehension: _, value, _(loop(forin: _, vars, iterable, step    )), _'
-    o 'Expression FOR ForVariables FORIN Expression WHEN Expression BY Expression', '["comprehension", 1, [["for-in", 3, 5, 9]], [7]]'          , 'comprehension: _, value, _(loop(forin: _, vars, iterable, step    )), _(guard)'
-    o 'Expression FOR ForVariables FORIN Expression BY Expression WHEN Expression', '["comprehension", 1, [["for-in", 3, 5, 7]], [9]]'          , 'comprehension: _, value, _(loop(forin: _, vars, iterable, step    )), _(guard)'
-    o 'Expression FOR ForVariables FOROF Expression'                              , '["comprehension", 1, [["for-of", 3, 5, false]], []]'       , 'comprehension: _, value, _(loop(forof: _, vars, object, own       )), _'
-    o 'Expression FOR ForVariables FOROF Expression WHEN Expression'              , '["comprehension", 1, [["for-of", 3, 5, false]], [7]]'      , 'comprehension: _, value, _(loop(forof: _, vars, object, own       )), _(guard)'
-    o 'Expression FOR OWN ForVariables FOROF Expression'                          , '["comprehension", 1, [["for-of", 4, 6, true]], []]'        , 'comprehension: _, value, _(loop(forof: _, vars, object, own       )), _'
-    o 'Expression FOR OWN ForVariables FOROF Expression WHEN Expression'          , '["comprehension", 1, [["for-of", 4, 6, true]], [8]]'       , 'comprehension: _, value, _(loop(forof: _, vars, object, own       )), _(guard)'
-    o 'Expression FOR ForVariables FORAS Expression'                              , '["comprehension", 1, [["for-as", 3, 5, false, null]], []]' , 'comprehension: _, value, _(loop(foras: _, vars, iterable, await, _)), _'
-    o 'Expression FOR ForVariables FORAS Expression WHEN Expression'              , '["comprehension", 1, [["for-as", 3, 5, false, null]], [7]]', 'comprehension: _, value, _(loop(foras: _, vars, iterable, await, _)), _(guard)'
-    o 'Expression FOR AWAIT ForVariables FORAS Expression'                        , '["comprehension", 1, [["for-as", 4, 6, true, null]], []]'  , 'comprehension: _, value, _(loop(foras: _, vars, iterable, await, _)), _'
-    o 'Expression FOR AWAIT ForVariables FORAS Expression WHEN Expression'        , '["comprehension", 1, [["for-as", 4, 6, true, null]], [8]]' , 'comprehension: _, value, _(loop(foras: _, vars, iterable, await, _)), _(guard)'
-    o 'Expression FOR ForVariables FORASAWAIT Expression'                         , '["comprehension", 1, [["for-as", 3, 5, true, null]], []]'  , 'comprehension: _, value, _(loop(foras: _, vars, iterable, await, _)), _'
-    o 'Expression FOR ForVariables FORASAWAIT Expression WHEN Expression'         , '["comprehension", 1, [["for-as", 3, 5, true, null]], [7]]' , 'comprehension: _, value, _(loop(foras: _, vars, iterable, await, _)), _(guard)'
+    o 'Expression FOR ForVariables FORIN Expression'                              , '["comprehension", {}, 1, ["loop", {over: "in"}, 3, 5, ["none", {}], ["none", {}], ["none", {}]]]'        , 'comprehension: _, _, value, loop(forin: _, _, vars, iterable, step, _, _)'
+    o 'Expression FOR ForVariables FORIN Expression WHEN Expression'              , '["comprehension", {}, 1, ["loop", {over: "in"}, 3, 5, ["none", {}], 7, ["none", {}]]]'       , 'comprehension: _, _, value, loop(forin: _, _, vars, iterable, step, guard, _)'
+    o 'Expression FOR ForVariables FORIN Expression BY Expression'                , '["comprehension", {}, 1, ["loop", {over: "in"}, 3, 5, 7, ["none", {}], ["none", {}]]]'           , 'comprehension: _, _, value, loop(forin: _, _, vars, iterable, step, _, _)'
+    o 'Expression FOR ForVariables FORIN Expression WHEN Expression BY Expression', '["comprehension", {}, 1, ["loop", {over: "in"}, 3, 5, 9, 7, ["none", {}]]]'          , 'comprehension: _, _, value, loop(forin: _, _, vars, iterable, step, guard, _)'
+    o 'Expression FOR ForVariables FORIN Expression BY Expression WHEN Expression', '["comprehension", {}, 1, ["loop", {over: "in"}, 3, 5, 7, 9, ["none", {}]]]'          , 'comprehension: _, _, value, loop(forin: _, _, vars, iterable, step, guard, _)'
+    o 'Expression FOR ForVariables FOROF Expression'                              , '["comprehension", {}, 1, ["loop", {over: "of"}, 3, 5, ["none", {}], ["none", {}], ["none", {}]]]'       , 'comprehension: _, _, value, loop(forof: _, _, vars, object, _, _, _)'
+    o 'Expression FOR ForVariables FOROF Expression WHEN Expression'              , '["comprehension", {}, 1, ["loop", {over: "of"}, 3, 5, ["none", {}], 7, ["none", {}]]]'      , 'comprehension: _, _, value, loop(forof: _, _, vars, object, _, guard, _)'
+    o 'Expression FOR OWN ForVariables FOROF Expression'                          , '["comprehension", {}, 1, ["loop", {over: "of", own: true}, 4, 6, ["none", {}], ["none", {}], ["none", {}]]]'        , 'comprehension: _, _, value, loop(forof: _, _, vars, object, _, _, _)'
+    o 'Expression FOR OWN ForVariables FOROF Expression WHEN Expression'          , '["comprehension", {}, 1, ["loop", {over: "of", own: true}, 4, 6, ["none", {}], 8, ["none", {}]]]'       , 'comprehension: _, _, value, loop(forof: _, _, vars, object, _, guard, _)'
+    o 'Expression FOR ForVariables FORAS Expression'                              , '["comprehension", {}, 1, ["loop", {over: "as"}, 3, 5, ["none", {}], ["none", {}], ["none", {}]]]' , 'comprehension: _, _, value, loop(foras: _, _, vars, iterable, _, _, _)'
+    o 'Expression FOR ForVariables FORAS Expression WHEN Expression'              , '["comprehension", {}, 1, ["loop", {over: "as"}, 3, 5, ["none", {}], 7, ["none", {}]]]', 'comprehension: _, _, value, loop(foras: _, _, vars, iterable, _, guard, _)'
+    o 'Expression FOR AWAIT ForVariables FORAS Expression'                        , '["comprehension", {}, 1, ["loop", {over: "as", await: true}, 4, 6, ["none", {}], ["none", {}], ["none", {}]]]'  , 'comprehension: _, _, value, loop(foras: _, _, vars, iterable, _, _, _)'
+    o 'Expression FOR AWAIT ForVariables FORAS Expression WHEN Expression'        , '["comprehension", {}, 1, ["loop", {over: "as", await: true}, 4, 6, ["none", {}], 8, ["none", {}]]]' , 'comprehension: _, _, value, loop(foras: _, _, vars, iterable, _, guard, _)'
+    o 'Expression FOR ForVariables FORASAWAIT Expression'                         , '["comprehension", {}, 1, ["loop", {over: "as", await: true}, 3, 5, ["none", {}], ["none", {}], ["none", {}]]]'  , 'comprehension: _, _, value, loop(foras: _, _, vars, iterable, _, _, _)'
+    o 'Expression FOR ForVariables FORASAWAIT Expression WHEN Expression'         , '["comprehension", {}, 1, ["loop", {over: "as", await: true}, 3, 5, ["none", {}], 7, ["none", {}]]]' , 'comprehension: _, _, value, loop(foras: _, _, vars, iterable, _, guard, _)'
   ]
 
   ForValue: [
@@ -1225,10 +1227,10 @@ grammar =
   # ============================================================================
 
   Loop: [
-    o 'LOOP Block'           , '["loop", 2]'     , 'loop: _, body'
+    o 'LOOP Block'           , '["loop", {over: "forever"}, ["none", {}], ["none", {}], ["none", {}], ["none", {}], 2]'     , 'loop: _, _, _, _, _, _, body'
     # Counted loop: `loop n` runs the block n times with `it` as the
     # counter binding; as a value it collects each iteration's result.
-    o 'LOOP Expression Block', '["loop-n", 2, 3]', 'loop: _, count, body'
+    o 'LOOP Expression Block', '["loop", {over: "times"}, ["none", {}], 2, ["none", {}], ["none", {}], 3]', 'loop: _, _, _, count, _, _, body'
   ]
 
   # ============================================================================
@@ -1236,14 +1238,14 @@ grammar =
   # ============================================================================
 
   Operation: [
-    o '-- SimpleAssignable'                       , '["--", 2, false]' , 'update: operator, target, prefix'
-    o '++ SimpleAssignable'                       , '["++", 2, false]' , 'update: operator, target, prefix'
-    o 'SimpleAssignable --'                       , '["--", 1, true]'  , 'update: operator, target, prefix'
-    o 'SimpleAssignable ++'                       , '["++", 1, true]'  , 'update: operator, target, prefix'
+    o '-- SimpleAssignable'                       , '["--", {}, 2]' , 'update: operator, _, target'
+    o '++ SimpleAssignable'                       , '["++", {}, 2]' , 'update: operator, _, target'
+    o 'SimpleAssignable --'                       , '["--", {postfix: true}, 1]'  , 'update: operator, _, target'
+    o 'SimpleAssignable ++'                       , '["++", {postfix: true}, 1]'  , 'update: operator, _, target'
 
     # Postfix existence check: `expr?` lowers to `expr != null` (loose —
     # one comparison covers null and undefined).
-    o 'Value ?'                                   , '["?", 1]'         , 'existence: operator, value'
+    o 'Value ?'                                   , '["?", {}, 1]'         , 'existence: operator, _, value'
 
     # Postfix `expr as Type` cast. The lexer's rewriteTypes pass has
     # collapsed the `as Type` run into a single CAST token whose value
@@ -1251,51 +1253,51 @@ grammar =
     # node erases at emission (the value alone emits). Left-associative
     # (`x as A as B` nests left) and looser than arithmetic/member/call
     # but tighter than relational/comparison.
-    o 'Expression CAST'                           , '["cast", 1, 2]'   , 'cast: _, value, annotation'
+    o 'Expression CAST'                           , '["cast", {}, 1, 2]'   , 'cast: _, _, value, annotation'
 
     # Postfix `expr satisfies Type`: the same token shape and binding as
     # the cast, erased the same way. The TS face keeps the value's own
     # type and checks it against the annotation, where a cast replaces it.
-    o 'Expression SATISFIES'                      , '["satisfies", 1, 2]', 'satisfies: _, value, annotation'
+    o 'Expression SATISFIES'                      , '["satisfies", {}, 1, 2]', 'satisfies: _, _, value, annotation'
 
-    o 'Expression TERNARY Expression : Expression', '["?:", 1, 3, 5]'  , 'ternary: operator, condition, then, else'
+    o 'Expression TERNARY Expression : Expression', '["?:", {}, 1, 3, 5]'  , 'ternary: operator, _, condition, then, else'
 
-    o 'UNARY Expression'                          , '[1, 2]'           , 'unary: operator, operand'
-    o 'UNARY_MATH Expression'                     , '[1, 2]'           , 'unary: operator, operand'
+    o 'UNARY Expression'                          , '[1, {}, 2]'           , 'unary: operator, _, operand'
+    o 'UNARY_MATH Expression'                     , '[1, {}, 2]'           , 'unary: operator, _, operand'
     # AWAIT is labeled so the keyword owns its span: TS80007 reports on
     # the generated `await`, and the author-spelled keyword is where it
     # honestly lands (the row is verbatim-exact here, a cover onto the
     # `!` for the dammit sugar).
-    o 'AWAIT[operator] Expression'                , '["await", 2]'     , 'await: _, value'
-    o 'AWAIT[operator] INDENT Object OUTDENT'     , '["await", 3]'     , 'await: _, value'
-    o 'YIELD'                                     , '["yield"]'        , 'yield: _'
-    o 'YIELD Expression'                          , '["yield", 2]'     , 'yield: _, value'
-    o 'YIELD INDENT Object OUTDENT'               , '["yield", 3]'     , 'yield: _, value'
-    o 'YIELD FROM Expression'                     , '["yield-from", 3]', 'yieldfrom: _, value'
-    o '- Expression'                              , '["-", 2]'         , 'unary: operator, operand', prec: 'UNARY_MATH'
-    o '+ Expression'                              , '["+", 2]'         , 'unary: operator, operand', prec: 'UNARY_MATH'
+    o 'AWAIT[operator] Expression'                , '["await", {}, 2]'     , 'await: _, _, value'
+    o 'AWAIT[operator] INDENT Object OUTDENT'     , '["await", {}, 3]'     , 'await: _, _, value'
+    o 'YIELD'                                     , '["yield", {}, ["none", {}]]'        , 'yield: _, _, _'
+    o 'YIELD Expression'                          , '["yield", {}, 2]'     , 'yield: _, _, value'
+    o 'YIELD INDENT Object OUTDENT'               , '["yield", {}, 3]'     , 'yield: _, _, value'
+    o 'YIELD FROM Expression'                     , '["yield-from", {}, 3]', 'yieldfrom: _, _, value'
+    o '- Expression'                              , '["-", {}, 2]'         , 'unary: operator, _, operand', prec: 'UNARY_MATH'
+    o '+ Expression'                              , '["+", {}, 2]'         , 'unary: operator, _, operand', prec: 'UNARY_MATH'
 
-    o 'Expression ** Expression'                  , '["**", 1, 3]'     , 'binary: operator, left, right'
-    o 'Expression + Expression'                   , '["+", 1, 3]'      , 'binary: operator, left, right'
-    o 'Expression - Expression'                   , '["-", 1, 3]'      , 'binary: operator, left, right'
-    o 'Expression MATH Expression'                , '[2, 1, 3]'        , 'binary: operator, left, right'
-    o 'Expression SHIFT Expression'               , '[2, 1, 3]'        , 'binary: operator, left, right'
-    o 'Expression & Expression'                   , '["&", 1, 3]'      , 'binary: operator, left, right'
-    o 'Expression ^ Expression'                   , '["^", 1, 3]'      , 'binary: operator, left, right'
-    o 'Expression | Expression'                   , '["|", 1, 3]'      , 'binary: operator, left, right'
-    o 'Expression COMPARE Expression'             , '[2, 1, 3]'        , 'binary: operator, left, right'
-    o 'Expression MATCH Expression'               , '["=~", 1, 3]'     , 'binary: operator, left, right'
-    o 'Expression RELATION Expression'            , '[2, 1, 3]'        , 'relation: operator, left, right'
-    o 'Expression && Expression'                  , '["&&", 1, 3]'     , 'binary: operator, left, right'
-    o 'Expression || Expression'                  , '["||", 1, 3]'     , 'binary: operator, left, right'
-    o 'Expression ?? Expression'                  , '["??", 1, 3]'     , 'binary: operator, left, right'
+    o 'Expression ** Expression'                  , '["**", {}, 1, 3]'     , 'binary: operator, _, left, right'
+    o 'Expression + Expression'                   , '["+", {}, 1, 3]'      , 'binary: operator, _, left, right'
+    o 'Expression - Expression'                   , '["-", {}, 1, 3]'      , 'binary: operator, _, left, right'
+    o 'Expression MATH Expression'                , '[2, {}, 1, 3]'        , 'binary: operator, _, left, right'
+    o 'Expression SHIFT Expression'               , '[2, {}, 1, 3]'        , 'binary: operator, _, left, right'
+    o 'Expression & Expression'                   , '["&", {}, 1, 3]'      , 'binary: operator, _, left, right'
+    o 'Expression ^ Expression'                   , '["^", {}, 1, 3]'      , 'binary: operator, _, left, right'
+    o 'Expression | Expression'                   , '["|", {}, 1, 3]'      , 'binary: operator, _, left, right'
+    o 'Expression COMPARE Expression'             , '[2, {}, 1, 3]'        , 'binary: operator, _, left, right'
+    o 'Expression MATCH Expression'               , '["=~", {}, 1, 3]'     , 'binary: operator, _, left, right'
+    o 'Expression RELATION Expression'            , '[2, {}, 1, 3]'        , 'relation: operator, _, left, right'
+    o 'Expression && Expression'                  , '["&&", {}, 1, 3]'     , 'binary: operator, _, left, right'
+    o 'Expression || Expression'                  , '["||", {}, 1, 3]'     , 'binary: operator, _, left, right'
+    o 'Expression ?? Expression'                  , '["??", {}, 1, 3]'     , 'binary: operator, _, left, right'
 
-    o 'Expression && Return'                      , '["&&", 1, 3]'     , 'binary: operator, left, right'
-    o 'Expression || Return'                      , '["||", 1, 3]'     , 'binary: operator, left, right'
-    o 'Expression ?? Return'                      , '["??", 1, 3]'     , 'binary: operator, left, right'
-    o 'Expression && STATEMENT'                   , '["&&", 1, 3]'     , 'binary: operator, left, right'
-    o 'Expression || STATEMENT'                   , '["||", 1, 3]'     , 'binary: operator, left, right'
-    o 'Expression ?? STATEMENT'                   , '["??", 1, 3]'     , 'binary: operator, left, right'
+    o 'Expression && Return'                      , '["&&", {}, 1, 3]'     , 'binary: operator, _, left, right'
+    o 'Expression || Return'                      , '["||", {}, 1, 3]'     , 'binary: operator, _, left, right'
+    o 'Expression ?? Return'                      , '["??", {}, 1, 3]'     , 'binary: operator, _, left, right'
+    o 'Expression && STATEMENT'                   , '["&&", {}, 1, 3]'     , 'binary: operator, _, left, right'
+    o 'Expression || STATEMENT'                   , '["||", {}, 1, 3]'     , 'binary: operator, _, left, right'
+    o 'Expression ?? STATEMENT'                   , '["??", {}, 1, 3]'     , 'binary: operator, _, left, right'
     # Loose `and` / `or`, Ruby's low-precedence pair: `x = get() then
     # print "ok"` / `x = get() else error "nope"` bind below assignment.
     # The lexer hands these two their own tokens: every THEN implicitBlocks
@@ -1305,12 +1307,12 @@ grammar =
     # associative: an expression takes one of the pair (the lexer rejects
     # a second by name). Return / STATEMENT mirror the tight `&&` / `||`
     # guards (`x = 17 then return 22`, `x else continue`).
-    o 'Expression THEN Expression'                , '["&&", 1, 3]'     , 'binary: operator, left, right'
-    o 'Expression LOOSE_ELSE Expression'          , '["||", 1, 3]'     , 'binary: operator, left, right'
-    o 'Expression THEN Return'                    , '["&&", 1, 3]'     , 'binary: operator, left, right'
-    o 'Expression LOOSE_ELSE Return'              , '["||", 1, 3]'     , 'binary: operator, left, right'
-    o 'Expression THEN STATEMENT'                 , '["&&", 1, 3]'     , 'binary: operator, left, right'
-    o 'Expression LOOSE_ELSE STATEMENT'           , '["||", 1, 3]'     , 'binary: operator, left, right'
+    o 'Expression THEN Expression'                , '["&&", {}, 1, 3]'     , 'binary: operator, _, left, right'
+    o 'Expression LOOSE_ELSE Expression'          , '["||", {}, 1, 3]'     , 'binary: operator, _, left, right'
+    o 'Expression THEN Return'                    , '["&&", {}, 1, 3]'     , 'binary: operator, _, left, right'
+    o 'Expression LOOSE_ELSE Return'              , '["||", {}, 1, 3]'     , 'binary: operator, _, left, right'
+    o 'Expression THEN STATEMENT'                 , '["&&", {}, 1, 3]'     , 'binary: operator, _, left, right'
+    o 'Expression LOOSE_ELSE STATEMENT'           , '["||", {}, 1, 3]'     , 'binary: operator, _, left, right'
   ]
 
 # ==============================================================================
@@ -1482,7 +1484,10 @@ displays =
 # its `side` roles: labeled tokens whose spans reach RoleStore while
 # the tree drops them. A `part` kind is a clause of another node (a
 # catch, a pair, a parameter default): only a slot that names it admits
-# it. A form is its slots in tree order:
+# it. Every node is its head, its attribute record (the node's
+# modifiers: `void`, a loop's `over`, `own` and `await`, a call's `opt`
+# and `await`; `{}` when it has none), then its children; an absent
+# child is the marker ["none", {}]. A form is its slots in tree order:
 #
 #   "lit"|"lit2"      an unnamed constant slot (the head of most kinds)
 #   role:type         a named slot; the annotation names its element
@@ -1502,148 +1507,141 @@ displays =
 #   <kind>            a node of that kind
 #   [type]            an unkinded array whose elements each match type
 #   "lit"             exactly that string
-#   {flag flag2}      an attribute record holding exactly those flags,
-#                     each true ({} is the empty record)
+#   none              the absent marker ["none", {}]
+#   {flag key:"w"}    an attribute record holding exactly those keys: a
+#                     flag is true, a keyed word is one of the listed
+#                     words (`over:"in"|"of"`); {} is the empty record
 #
-# The registry records the tree as it is, including its irregular
-# shapes: several forms for one kind, null-filled slots, the "{}"
-# sentinel, the "," elision string, and boolean slots. Executable
-# actions carry no annotation and sit outside the registry.
+# A kind takes several forms where its heads differ (export), its
+# attribute records do (a void assignment, a loop's source), a loop is a
+# comprehension's clause (no body), or a statement keeps its postfix
+# scaffold. Executable actions carry no annotation and sit outside the
+# registry.
 
 kinds =
-  'accept':        forms: ['"accept" name:leaf', '"accept" name:leaf provider:leaf|member']
-  'array':         forms: ['"array" ...items:expr|splat ...elisions:","']
-  'as':            forms: ['name:leaf alias:leaf'], part: true
+  'accept':        forms: ['"accept" attrs:{} name:leaf provider:leaf|member|none']
+  'array':         forms: ['"array" attrs:{} ...items:expr|splat|none ...elisions:none']
+  'as':            forms: ['"as" attrs:{} name:leaf alias:leaf'], part: true
   'assign':
     forms: [
-      'operator:"="|"+="|"-="|"*="|"/="|"%="|"**="|"//="|"%%="|"<<="|">>="|">>>="|"&="|"^="|"|="|"&&="|"||="|"??=" target:expr value:expr'
-      '"void-assign" target:leaf value:expr'
+      'operator:"="|"+="|"-="|"*="|"/="|"%="|"**="|"//="|"%%="|"<<="|">>="|">>>="|"&="|"^="|"|="|"&&="|"||="|"??=" attrs:{} target:expr value:expr'
+      '"=" attrs:{void} target:leaf value:expr'
     ]
     side:  ['annotation', 'operator', 'optionalMarker', 'typeParams', 'visibility', 'voidMarker']
-  'await':         forms: ['"await" value:expr'], side: ['operator']
-  'binary':        forms: ['operator:leaf left:expr right:expr']
-  'block':         forms: ['"block" ...statements:expr'], part: true
+  'await':         forms: ['"await" attrs:{} value:expr'], side: ['operator']
+  'binary':        forms: ['operator:leaf attrs:{} left:expr right:expr']
+  'block':         forms: ['"block" attrs:{} ...statements:expr'], part: true
   'call':          forms: ['"call" attrs:{} callee:expr ...args:expr|splat']
-  'cast':          forms: ['"cast" value:expr annotation:leaf']
-  'catch':         forms: ['binding:expr? body:block'], part: true
-  'class':         forms: ['"class" name:leaf? parent:expr?', '"class" name:leaf|member? parent:expr? body:block']
-  'component':     forms: ['"component" parent:expr? body:block']
-  'comprehension': forms: ['"comprehension" value:expr loop:[forin|forof|foras] guard:[expr]']
-  'computed':      forms: ['"computed" target:expr value:expr|block'], side: ['annotation', 'operator', 'optionalMarker']
+  'cast':          forms: ['"cast" attrs:{} value:expr annotation:leaf']
+  'catch':         forms: ['"catch" attrs:{} binding:expr|none body:block'], part: true
+  'class':         forms: ['"class" attrs:{} name:leaf|member|none parent:expr|none body:block|none']
+  'component':     forms: ['"component" attrs:{} parent:expr|none body:block']
+  'comprehension': forms: ['"comprehension" attrs:{} value:expr loop:forin|forof|foras']
+  'computed':      forms: ['"computed" attrs:{} target:expr value:expr|block'], side: ['annotation', 'operator', 'optionalMarker']
   'dammit':        forms: ['"call" attrs:{await} callee:expr'], side: ['operator']
   'def':
-    forms: ['"def"|"void-def" name:leaf|member params:[expr|default|rest|expansion] body:block']
+    forms: ['"def" attrs:{}|{void} name:leaf|member params:[expr|default|rest|expansion] body:block']
     side:  ['returnType', 'typeParams', 'visibility', 'voidMarker']
-  'default':       forms: ['"default" name:expr value:expr'], part: true
-  'defsig':        forms: ['"def-sig" name:leaf params:[expr|default|rest|expansion] returnType:leaf'], side: ['typeParams']
-  'doiife':        forms: ['"do-iife" func:expr']
-  'dynamicKey':    forms: ['"dynamicKey" key:expr'], part: true
+  'default':       forms: ['"default" attrs:{} name:expr value:expr'], part: true
+  'defsig':        forms: ['"def-sig" attrs:{} name:leaf params:[expr|default|rest|expansion] returnType:leaf'], side: ['typeParams']
+  'doiife':        forms: ['"do-iife" attrs:{} func:expr']
+  'dynamicKey':    forms: ['"dynamicKey" attrs:{} key:expr'], part: true
   'dynimport':     forms: ['"call" attrs:{}|{await} callee:"import" ...args:expr|splat'], side: ['operator']
-  'effect':        forms: ['"effect" target:expr? value:expr|block'], side: ['annotation', 'operator']
-  'existence':     forms: ['operator:"?" value:expr']
-  'expansion':     forms: ['"expansion"'], part: true
+  'effect':        forms: ['"effect" attrs:{} target:expr|none value:expr|block'], side: ['annotation', 'operator']
+  'existence':     forms: ['operator:"?" attrs:{} value:expr']
+  'expansion':     forms: ['"expansion" attrs:{}'], part: true
   'export':
     forms: [
-      '"export" spec:expr|[leaf|as]'
-      '"export-default" spec:expr'
-      '"export-all" source:leaf'
-      '"export-all" source:leaf alias:leaf'
-      '"export-from" spec:leaf|[leaf|as] source:leaf'
+      '"export" attrs:{} spec:expr|[leaf|as]'
+      '"export-default" attrs:{} spec:expr'
+      '"export-all" attrs:{} source:leaf alias:leaf|none'
+      '"export-from" attrs:{} spec:[leaf|as] source:leaf'
     ]
     side: ['typeOnly']
   'foras':
     forms: [
-      '"for-as" vars:[expr] iterable:expr await:bool guard:expr? body:block'
-      '"for-as" vars:[expr] iterable:expr await:bool guard:null'
+      '"loop" attrs:{over:"as"}|{over:"as" await} vars:[expr] iterable:expr step:none guard:expr|none body:block'
+      '"loop" attrs:{over:"as"}|{over:"as" await} vars:[expr] iterable:expr step:none guard:expr|none body:none'
     ]
   'forin':
     forms: [
-      '"for-in" vars:[expr] iterable:expr step:expr? guard:expr? body:block'
-      '"for-in" vars:[expr] iterable:expr step:expr?'
+      '"loop" attrs:{over:"in"} vars:[expr] iterable:expr step:expr|none guard:expr|none body:block'
+      '"loop" attrs:{over:"in"} vars:[expr] iterable:expr step:expr|none guard:expr|none body:none'
     ]
   'forof':
     forms: [
-      '"for-of" vars:[expr] object:expr own:bool guard:expr? body:block'
-      '"for-of" vars:[expr] object:expr own:bool'
+      '"loop" attrs:{over:"of"}|{over:"of" own} vars:[expr] object:expr step:none guard:expr|none body:block'
+      '"loop" attrs:{over:"of"}|{over:"of" own} vars:[expr] object:expr step:none guard:expr|none body:none'
     ]
-  'func':          forms: ['kind:"->"|"=>" params:[expr|default|rest|expansion] body:block'], side: ['returnType']
-  'gate':          forms: ['"gate" target:expr rhs:expr ...key:expr|splat'], side: ['annotation', 'operator']
-  'heregex':       forms: ['"here-regex" flags:leaf ...parts:leaf|[expr]']
+  'func':          forms: ['kind:"->"|"=>" attrs:{} params:[expr|default|rest|expansion] body:block'], side: ['returnType']
+  'gate':          forms: ['"gate" attrs:{} target:expr rhs:expr ...key:expr|splat'], side: ['annotation', 'operator']
+  'heregex':       forms: ['"here-regex" attrs:{} flags:leaf ...parts:leaf|[expr]|none']
   'if':
     forms: [
-      '"if" condition:expr then:block'
-      '"if" condition:expr then:block else:block|if'
-      '"if" condition:expr then:[expr]'
+      '"if" attrs:{} condition:expr then:block else:block|if|none'
+      '"if" attrs:{} condition:expr then:[expr] else:none'
     ]
-  'ifelse':        forms: ['operator:"?:" condition:expr then:expr else:expr']
+  'ifelse':        forms: ['operator:"?:" attrs:{} condition:expr then:expr else:expr']
   'import':
-    forms: [
-      '"import" source:leaf'
-      '"import" spec:leaf|as|[leaf|as] source:leaf'
-      '"import" spec:leaf extra:as|[leaf|as] source:leaf'
-      '"import" attributes:withattrs source:leaf'
-      '"import" spec:leaf|as|[leaf|as] attributes:withattrs source:leaf'
-      '"import" spec:leaf extra:as|[leaf|as] attributes:withattrs source:leaf'
-    ]
+    forms: ['"import" attrs:{} spec:leaf|as|[leaf|as]|none extra:as|[leaf|as]|none attributes:withattrs|none source:leaf']
     side: ['typeOnly']
-  'index':         forms: ['operator:"[]" object:expr key:expr']
-  'loop':          forms: ['"loop" body:block', '"loop-n" count:expr body:block']
-  'map':           forms: ['"map" ...pairs:pair|splat']
+  'index':         forms: ['operator:"[]" attrs:{} object:expr key:expr']
+  'loop':
+    forms: [
+      '"loop" attrs:{over:"forever"} vars:none count:none step:none guard:none body:block'
+      '"loop" attrs:{over:"times"} vars:none count:expr step:none guard:none body:block'
+    ]
+  'map':           forms: ['"map" attrs:{} ...pairs:pair|splat']
   'maybe-dammit':  forms: ['"call" attrs:{opt await} callee:expr ...args:expr|splat'], side: ['operator']
-  'member':        forms: ['operator:"."|"?." object:expr property:leaf']
-  'object':        forms: ['"object" ...pairs:pair|splat']
-  'offer':         forms: ['"offer" value:expr']
+  'member':        forms: ['operator:"."|"?." attrs:{} object:expr property:leaf']
+  'object':        forms: ['"object" attrs:{} ...pairs:pair|splat']
+  'offer':         forms: ['"offer" attrs:{} value:expr']
   'optcall':       forms: ['"call" attrs:{opt} callee:expr ...args:expr|splat']
-  'optindex':      forms: ['"optindex" object:expr key:expr']
+  'optindex':      forms: ['"optindex" attrs:{} object:expr key:expr']
   'pair':
-    forms: ['operator:":"|"="|null key:expr|dynamicKey value:expr', '"void-pair" key:expr|dynamicKey value:expr']
+    forms: [
+      'operator:":"|"=" attrs:{} key:expr|dynamicKey value:expr'
+      '":" attrs:{void}|{shorthand} key:leaf|member value:expr'
+    ]
     side:  ['operator', 'visibility', 'voidMarker']
     part:  true
-  'pick':          forms: ['".{}"|"?.{}" source:expr ...items:pickitem']
-  'pickitem':      forms: ['key:leaf target:leaf default:expr?'], part: true
-  'program':       forms: ['"program" ...body:expr'], part: true
-  'range':         forms: ['operator:".."|"..." from:expr? to:expr?']
+  'pick':          forms: ['".{}"|"?.{}" attrs:{} source:expr ...items:pickitem']
+  'pickitem':      forms: ['"pickitem" attrs:{} key:leaf target:leaf default:expr|none'], part: true
+  'program':       forms: ['"program" attrs:{} ...body:expr'], part: true
+  'range':         forms: ['operator:".."|"..." attrs:{} from:expr|none to:expr|none']
   'readonly':
-    forms: ['"readonly"|"void-readonly" target:expr value:expr']
+    forms: ['"readonly" attrs:{} target:expr value:expr', '"readonly" attrs:{void} target:leaf value:expr']
     side:  ['annotation', 'operator', 'optionalMarker', 'voidMarker']
-  'regexindex':    forms: ['"regex-index" object:expr key:expr capture:expr']
-  'relation':      forms: ['operator:leaf left:expr right:expr']
-  'render':        forms: ['"render" body:expr|block']
-  'rest':          forms: ['"rest" name:expr'], part: true
-  'return':        forms: ['"return"', '"return" value:expr']
-  'satisfies':     forms: ['"satisfies" value:expr annotation:leaf']
-  'schema':        forms: ['"schema" body:descriptor']
-  'splat':         forms: ['"..." value:expr'], part: true
-  'state':         forms: ['"state" target:expr value:expr'], side: ['annotation', 'operator', 'optionalMarker']
-  'str':           forms: ['"str" ...parts:leaf|[expr]']
+  'regexindex':    forms: ['"regex-index" attrs:{} object:expr key:expr capture:expr']
+  'relation':      forms: ['operator:leaf attrs:{} left:expr right:expr']
+  'render':        forms: ['"render" attrs:{} body:expr|block']
+  'rest':          forms: ['"rest" attrs:{} name:expr'], part: true
+  'return':        forms: ['"return" attrs:{} value:expr|none']
+  'satisfies':     forms: ['"satisfies" attrs:{} value:expr annotation:leaf']
+  'schema':        forms: ['"schema" attrs:{} body:descriptor']
+  'splat':         forms: ['"..." attrs:{} value:expr'], part: true
+  'state':         forms: ['"state" attrs:{} target:expr value:expr'], side: ['annotation', 'operator', 'optionalMarker']
+  'str':           forms: ['"str" attrs:{} ...parts:leaf|[expr]|none']
   'super':         forms: ['"call" attrs:{} "super" ...args:expr|splat']
-  'switch':        forms: ['"switch" subject:expr? cases:[when] default:block?']
-  'symbol':        forms: ['"symbol" name:leaf']
-  'tagged':        forms: ['"tagged-template" tag:expr str:str|leaf']
-  'ternary':       forms: ['operator:"?:" condition:expr then:expr else:expr']
-  'throw':         forms: ['"throw" value:expr']
-  'try':
-    forms: [
-      '"try" body:expr|block'
-      '"try" body:expr|block handler:catch'
-      '"try" body:expr|block finalizer:block'
-      '"try" body:expr|block handler:catch finalizer:block'
-    ]
-  'typedecl':      forms: ['"type-decl" declaration:leaf']
-  'typedvar':      forms: ['"typed-var" target:expr annotation:leaf'], side: ['optionalMarker', 'visibility']
-  'unary':         forms: ['operator:leaf operand:expr']
-  'update':        forms: ['operator:"++"|"--" target:expr prefix:bool']
-  'when':          forms: ['"when" conditions:[expr] body:block'], part: true
-  'withattrs':     forms: ['keyword:"with" value:object'], part: true
+  'switch':        forms: ['"switch" attrs:{} subject:expr|none cases:[when] default:block|none']
+  'symbol':        forms: ['"symbol" attrs:{} name:leaf']
+  'tagged':        forms: ['"tagged-template" attrs:{} tag:expr str:str|leaf']
+  'ternary':       forms: ['operator:"?:" attrs:{} condition:expr then:expr else:expr']
+  'throw':         forms: ['"throw" attrs:{} value:expr']
+  'try':           forms: ['"try" attrs:{} body:expr|block handler:catch|none finalizer:block|none']
+  'typedecl':      forms: ['"type-decl" attrs:{} declaration:leaf']
+  'typedvar':      forms: ['"typed-var" attrs:{} target:expr annotation:leaf|none'], side: ['optionalMarker', 'visibility']
+  'unary':         forms: ['operator:leaf attrs:{} operand:expr']
+  'update':        forms: ['operator:"++"|"--" attrs:{}|{postfix} target:expr']
+  'when':          forms: ['"when" attrs:{} conditions:[expr] body:block'], part: true
+  'withattrs':     forms: ['keyword:"with" attrs:{} value:object'], part: true
   'while':
     forms: [
-      '"while" condition:expr body:block'
-      '"while" condition:expr guard:expr body:block'
-      '"while" condition:expr body:[expr]'
-      '"while" condition:expr guard:expr body:[expr]'
+      '"while" attrs:{} condition:expr guard:expr|none body:block'
+      '"while" attrs:{} condition:expr guard:expr|none body:[expr]'
     ]
-  'yield':         forms: ['"yield"', '"yield" value:expr']
-  'yieldfrom':     forms: ['"yield-from" value:expr']
+  'yield':         forms: ['"yield" attrs:{} value:expr|none']
+  'yieldfrom':     forms: ['"yield-from" attrs:{} value:expr']
 
 # ==============================================================================
 # Expected Conflicts

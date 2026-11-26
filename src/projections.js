@@ -25,18 +25,18 @@ const schemaBindingsOf = (sexpr) => {
   const byName = new Map();
   if (!Array.isArray(sexpr)) return byName;
   const head = foldStr(sexpr[0]);
-  const stmts = (head === 'program' || head === 'block') ? sexpr.slice(1) : [sexpr];
+  const stmts = (head === 'program' || head === 'block') ? sexpr.slice(2) : [sexpr];
   for (const stmt of stmts) {
     if (!Array.isArray(stmt)) continue;
     let assign = stmt;
-    if (foldStr(stmt[0]) === 'export' && Array.isArray(stmt[1])) assign = stmt[1];
-    if (foldStr(assign[0]) !== '=' || !Array.isArray(assign[2])) continue;
-    const name = foldStr(assign[1]);
+    if (foldStr(stmt[0]) === 'export' && Array.isArray(stmt[2])) assign = stmt[2];
+    if (foldStr(assign[0]) !== '=' || !Array.isArray(assign[3])) continue;
+    const name = foldStr(assign[2]);
     if (typeof name !== 'string') continue;
-    const rhs = assign[2];
-    if (foldStr(rhs[0]) === 'schema' && rhs.length === 2 &&
-        rhs[1] && typeof rhs[1] === 'object' && Array.isArray(rhs[1].entries)) {
-      byName.set(name, rhs[1]);
+    const rhs = assign[3];
+    if (foldStr(rhs[0]) === 'schema' && rhs.length === 3 &&
+        rhs[2] && typeof rhs[2] === 'object' && Array.isArray(rhs[2].entries)) {
+      byName.set(name, rhs[2]);
     }
   }
   return byName;

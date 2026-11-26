@@ -42,6 +42,7 @@ import {
 import { buildSchemaTypeStory, SchemaTypeError } from './schema.js';
 import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, isModuleImportNode, ctorAtFields, containsYield, containsAwait } from '../emitter.js';
 import { isCall, isPlainCall, isAwaitedCall } from '../sexpr.js';
+import { emitterShape } from '../emitter-shape.js';
 import {
   componentTypeInfo, componentCtorMembers, instanceTypeLines, containerType, MINTED, DOM_LIB_GLOBALS,
   segmentsText,
@@ -97,7 +98,8 @@ const importBoundNames = (node) => {
   return names;
 };
 
-export function emitDeclarations({ sexpr, stores, source }) {
+export function emitDeclarations({ sexpr: parserSexpr, stores, source }) {
+  const sexpr = emitterShape(parserSexpr, stores.nodeIds);
   if (!isNode(sexpr) || sexpr[0] !== 'program') return '';
 
   // The schema type story: module-level named schema
@@ -108,7 +110,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   let schemaStory = null;
   try {
     schemaStory = buildSchemaTypeStory(sexpr, source,
-      sexpr.slice(1).filter((s) => isModuleImportNode(stores, s)).flatMap(importBoundNames));
+      sexpr.slice(1).filter((s) => isModuleImportNode(stores, s)).flatMap(importBoundNames), null, parserSexpr);
   } catch (err) {
     if (err instanceof SchemaTypeError) throw new DtsError(`declaration emission: ${err.message}`);
     throw err;
@@ -117,7 +119,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   const schemaDerivedByNode = new Map();
   if (schemaStory) {
     for (const s of schemaStory.stories) schemaByNode.set(s.decl.node, s);
-    for (const d of schemaStory.derivations) schemaDerivedByNode.set(d.decl.node, d);
+    for (const d of schemaStory.derivations) schemaDerivedByNode.set(stores.idOf(d.decl.node), d);
   }
 
   // One schema declaration's lines: exported schemas export their
@@ -585,8 +587,8 @@ export function emitDeclarations({ sexpr, stores, source }) {
     else if (isDefHead(head) && stmt.length === 4) defDecl(stmt, exported);
     else if (head === '=' && stmt.length === 3 && schemaByNode.has(stmt[2])) {
       schemaDecl(schemaByNode.get(stmt[2]), exported);
-    } else if (head === '=' && stmt.length === 3 && schemaDerivedByNode.has(stmt)) {
-      schemaDecl(schemaDerivedByNode.get(stmt), exported);
+    } else if (head === '=' && stmt.length === 3 && schemaDerivedByNode.has(stores.idOf(stmt))) {
+      schemaDecl(schemaDerivedByNode.get(stores.idOf(stmt)), exported);
     } else if (head === '=' && stmt.length === 3 && typeof stmt[1] === 'string' && isComponentDecl(stmt[2])) {
       componentDecl(stmt[2], stmt[1], exported, stmt);
     } else if (head === '=' && stmt.length === 3 && protoMemberTarget(stmt) !== null) {
