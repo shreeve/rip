@@ -43,6 +43,6 @@ test("the '??' and '?' terminals are never sugar", () => {
 
 test('a binding to an optional symbol is the absent marker in the absent variant', () => {
   const g = tiny([['A[x]? B', '["one", @x]', 'one: _, x']]);
-  expect(g.ruleActions).toContain('return ["one", ["none"]];');
+  expect(g.ruleActions).toContain('return ["one", ["none", {}]];');
   expect(g.ruleActions).toContain('return ["one", $[$0-1]];');
 });

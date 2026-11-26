@@ -135,8 +135,8 @@ test('a comprehension registers its loop clause as a forin node that owns the gu
   expect(stores.role(comp.nodeId, 'loop').childNodeId).toBe(clause.nodeId);
   expect([clause.sourceStart, clause.sourceEnd]).toEqual([15, 35]);
   expect([stores.role(clause.nodeId, 'iterable').sourceStart, stores.role(clause.nodeId, 'iterable').sourceEnd]).toEqual([20, 24]);
-  // An absent step records no role.
-  expect(stores.role(clause.nodeId, 'step')).toBeNull();
+  // An absent step is the marker, recorded as a literal role.
+  expect(stores.role(clause.nodeId, 'step').literal).toEqual(['none', {}]);
   const guard = stores.role(clause.nodeId, 'guard');
   expect([guard.sourceStart, guard.sourceEnd]).toEqual([30, 35]);
   expect(stores.role(comp.nodeId, 'guard')).toBeNull();

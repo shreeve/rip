@@ -148,7 +148,7 @@ describe('the component surface: keywords and context', () => {
     expect(r.diagnostics).toEqual([]);
     const body = r.sexpr[2][3][3]; // program → assign → component → block
     expect(JSON.stringify(body[2])).toBe('["offer",{},["state",{},"theme","1"]]');
-    expect(JSON.stringify(body[3])).toBe('["accept",{},"locale",["none"]]');
+    expect(JSON.stringify(body[3])).toBe('["accept",{},"locale",["none",{}]]');
   });
 
   test('render scan context: tight #word is id syntax, spaced # word stays a comment', () => {

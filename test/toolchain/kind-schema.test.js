@@ -36,7 +36,7 @@ test('a literal the slot type does not admit fails generation', () => {
   const klass = grammar.kinds.class;
   const strict = { forms: klass.forms.map((f) => f.replace('name:leaf|member|none', 'name:leaf|member')) };
   expect(() => new Generator(withKind('class', strict)))
-    .toThrow(/slot 'name' does not admit \["none"\]/);
+    .toThrow(/slot 'name' does not admit \["none",\{\}\]/);
 });
 
 test('a slot is a spread only where the form writes `...`', () => {
@@ -49,10 +49,10 @@ test('a slot is a spread only where the form writes `...`', () => {
   }
 });
 
-test('a scaffold in a slot that takes no array fails generation', () => {
+test('an empty list in a slot that takes no array fails generation', () => {
   const func = grammar.kinds.func;
   const strict = { ...func, forms: ['kind:"->"|"=>" attrs:{} params:expr body:block'] };
-  expect(() => new Generator(withKind('func', strict))).toThrow(/slot 'params' takes no array/);
+  expect(() => new Generator(withKind('func', strict))).toThrow(/slot 'params' does not admit \[\]/);
 });
 
 test('a nested node is checked against its own kind', () => {
@@ -190,12 +190,12 @@ test('a presence flag in an attribute record is the key when present and nothing
   expect(g.ruleActions).toContain('{over: "of", own: true}');
 });
 
-test('the absent marker fits only a slot that admits none, and records no role', () => {
-  expect(() => tiny('["x", {}, ["none"]]', 'x: _, _, name', { x: { forms: ['"x" attrs:{} name:leaf|none'] } })).not.toThrow();
-  expect(() => tiny('["x", {}, ["none"]]', 'x: _, _, name', { x: { forms: ['"x" attrs:{} name:leaf'] } }))
-    .toThrow(/slot 'name' does not admit \["none"\]/);
-  const g = tiny('["x", {}, ["none"]]', 'x: _, _, name', { x: { forms: ['"x" attrs:{} name:leaf|none'] } });
-  expect(Object.values(g.semantics)[0].roles).toEqual([]);
+test('the absent marker fits only a slot that admits none; unnamed, it records no role', () => {
+  expect(() => tiny('["x", {}, ["none", {}]]', 'x: _, _, name', { x: { forms: ['"x" attrs:{} name:leaf|none'] } })).not.toThrow();
+  expect(() => tiny('["x", {}, ["none", {}]]', 'x: _, _, name', { x: { forms: ['"x" attrs:{} name:leaf'] } }))
+    .toThrow(/slot 'name' does not admit \["none",\{\}\]/);
+  const unnamed = tiny('["x", {}, ["none", {}]]', 'x: _, _, _', { x: { forms: ['"x" attrs:{} name:leaf|none'] } });
+  expect(Object.values(unnamed.semantics)[0].roles).toEqual([]);
 });
 
 test('a grammar without a registry is not gated', () => {

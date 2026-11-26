@@ -202,10 +202,10 @@ test('an attribute record must hold exactly its slot\'s flags', () => {
 
 test('an absent slot is the none marker, and only a slot that admits none takes it', () => {
   const result = parse('return\n');
-  expect(nodeOfKind(result, 'return')).toEqual(['return', {}, ['none']]);
+  expect(nodeOfKind(result, 'return')).toEqual(['return', {}, ['none', {}]]);
   expect(messages(result)).toEqual([]);
   const filled = parse('f()\ny = 1\n');
-  nodeOfKind(filled, 'assign')[3] = ['none'];
+  nodeOfKind(filled, 'assign')[3] = ['none', {}];
   expect(messages(filled)).toEqual([expect.stringMatching(/element 3 is an unkinded array, the slot takes value:expr$/)]);
 });
 

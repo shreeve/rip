@@ -77,3 +77,25 @@ test('a loop over an unknown source has no emitter shape', () => {
   r.sexpr[2][1] = { over: 'sideways' };
   expect(() => emitterShape(r.sexpr, r.stores.nodeIds)).toThrow(/a loop over 'sideways' has no emitter shape/);
 });
+
+test('a comprehension clause answers to its own node id', () => {
+  const r = parser.parse('y = (v for v in xs when v)\n');
+  const clause = r.sexpr[2][3][3];
+  expect(clause[0]).toBe('loop');
+  const out = emitterShape(r.sexpr, r.stores.nodeIds);
+  expect(r.stores.nodeIds.get(out[1][2][2][0])).toBe(r.stores.nodeIds.get(clause));
+});
+
+// The absent marker is ["none", {}], a node no list can spell: a list
+// that holds a name `none` (an interpolation chunk, a specifier list)
+// stays that list.
+import { compile } from '../../src/compiler.js';
+const js = (src, face = 'js') => compile(src, { path: 'x.rip', runtimeDelivery: 'none', face }).code;
+
+test('a name `none` in an interpolation or a specifier list is never the absent marker', () => {
+  expect(js('none = 1\ns = "a#{none}"\n')).toContain('`a${none}`');
+  expect(js('none = 1\nr = ///a#{none}///\n')).toContain('none');
+  expect(js('import {none} from "./x.js"\np none\n')).toContain("import { none } from './x.js';");
+  expect(js('import d, {none} from "./x.js"\np d, none\n')).toContain("import d, { none } from './x.js';");
+  expect(js('import type {none} from "./x.js"\nv: none = 1\n', 'ts')).toContain("import type { none } from './x.js';");
+});

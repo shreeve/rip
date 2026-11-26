@@ -457,7 +457,10 @@ class Generator
     else if typeof value is 'boolean'
       type.alts.some (a) -> a.t is 'bool'
     else if Array.isArray value
-      value.length is 1 and value[0] is 'none' and type.alts.some (a) -> a.t is 'none'
+      if value.length is 0
+        type.alts.some (a) -> a.t is 'list'
+      else
+        value.length is 2 and value[0] is 'none' and type.alts.some (a) -> a.t is 'none'
     else if typeof value is 'object'
       flags = Object.keys(value).sort()
       type.alts.some (a) ->
@@ -596,7 +599,7 @@ class Generator
   #
   # Named bindings let one action serve the whole family. In a variant
   # where a binding's label is absent, '@name' becomes the absent marker
-  # ["none"] and a spread '...@name' drops out of the template together
+  # ["none", {}] and a spread '...@name' drops out of the template together
   # with its annotation part. '@name?' is a presence flag — the literal
   # true or false, or inside an attribute record the key or nothing —
   # and consumes the label, so the symbol carries no side-band role of
@@ -686,11 +689,13 @@ class Generator
     text = @_outsideQuotes action, (plain) ->
       # A presence flag inside an attribute record (`{own: @own?}`) is
       # the flag when its label is present and no key when it is absent.
+      # A removed flag takes its separating comma with it.
+      GONE = '\u0001'
       flagged = plain.replace /([A-Za-z_$][\w$]*)\s*:\s*@([A-Za-z$][\w$-]*|_[\w$-]+)\?/g, (m, key, name) ->
         return m unless known.has name
         presence.add name
-        if present.has name then "#{key}: true" else ''
-      flagged = flagged.replace(/\{\s*,\s*/g, '{').replace(/,\s*,/g, ',').replace(/,\s*\}/g, '}').replace(/\{\s+\}/g, '{}')
+        if present.has name then "#{key}: true" else GONE
+      flagged = flagged.replace(/\s*,\s*\u0001/g, '').replace(/\u0001\s*,\s*/g, '').replace(/\u0001/g, '')
       flagged.replace /(\.\.\.)?@([A-Za-z$][\w$-]*|_[\w$-]+)(\?)?/g, (m, spread, name, flag) ->
         return m unless known.has name
         if flag
@@ -698,7 +703,7 @@ class Generator
           return if present.has name then 'true' else 'false'
         bound.add name
         return m if present.has name
-        if spread then DROP else '["none"]'
+        if spread then DROP else '["none", {}]'
 
     # A presence label is consumed: the symbol carries no side-band role
     # unless the action also binds its value.
@@ -996,7 +1001,7 @@ class Generator
         j += (if t[j] is '\\' then 2 else 1) while j < t.length and t[j] isnt q
         return null unless j is t.length - 1
         elements.push {literal: t, childSlot}
-      else if t is 'true' or t is 'false' or t is 'null' or t is '["none"]'
+      else if t is 'true' or t is 'false' or t is 'null' or t is '["none", {}]' or t is '[]'
         elements.push {literal: t, childSlot}
       else if t[0] is '{'
         # An attribute record: an object literal whose values are `true`
@@ -1147,8 +1152,7 @@ class Generator
           fail "literal element #{element.literal} cannot take a spread role '...#{name}'" if spread
           fail "literal element #{element.literal} takes no sub-annotation ('#{raw}')" if sub?
           layout.push {literal: @_literalValue(element.literal), name}
-          # An absent slot (the ["none"] marker) records no role.
-          continue if name is '_' or element.literal is '["none"]'
+          continue if name is '_'
 
         layout.push {ref: element.grammarRef, name, spread: element.spread} if element.grammarRef?
         checkName name, seen

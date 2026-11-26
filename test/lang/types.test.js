@@ -702,7 +702,7 @@ describe('s-expressions: erased statements carry stable trees', () => {
     expect(JSON.stringify(parser.parse('r: number\nr = 5').sexpr))
       .toBe(JSON.stringify(['program', {}, ['typed-var', {}, 'r', 'number'], ['=', {}, 'r', '5']]));
     expect(JSON.stringify(parser.parse('class A\n  @x: number').sexpr))
-      .toBe(JSON.stringify(['program', {}, ['class', {}, 'A', ['none'], ['block', {}, ['typed-var', {}, ['.', {}, 'this', 'x'], 'number']]]]));
+      .toBe(JSON.stringify(['program', {}, ['class', {}, 'A', ['none', {}], ['block', {}, ['typed-var', {}, ['.', {}, 'this', 'x'], 'number']]]]));
     // The typed initialized field is the SAME node as its twin — the
     // annotation lives only in the side tables.
     expect(JSON.stringify(parser.parse('class A\n  x: number = 5').sexpr))

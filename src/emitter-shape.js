@@ -14,7 +14,7 @@
 
 import { isAttrs, isCall } from './sexpr.js';
 
-const isNone = (x) => Array.isArray(x) && x.length === 1 && x[0] === 'none';
+const isNone = (x) => Array.isArray(x) && x.length === 2 && x[0] === 'none' && isAttrs(x[1]);
 const orNull = (x) => (isNone(x) ? null : x);
 const isNode = (x) => Array.isArray(x) && typeof x[0] === 'string' && isAttrs(x[1]);
 

@@ -845,6 +845,7 @@ export function schemaTypeStory(decl, byName, known, source = null) {
 // `parserSexpr` is the same program in the parser's shape, which the
 // derived-schema folder reads.
 export function buildSchemaTypeStory(programSexpr, source = null, imported = [], hooks = null, parserSexpr) {
+  if (parserSexpr === undefined) throw new Error('buildSchemaTypeStory: the parser\'s tree is required for the derived-schema reading');
   const scoped = hooks !== null
     ? collectScopedSchemaDecls(programSexpr, hooks)
     : { module: collectSchemaDecls(programSexpr), scopes: [] };
