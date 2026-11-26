@@ -753,6 +753,13 @@ fail '@emit names no member: a child notifies its parent through a callback prop
     render null
 ''', 'emitter: `@emit` is not a component member'
 
+fail '@emit names no member in an optional call either', '''
+  A = component
+    fire = -> @emit?('ended', 1)
+    render
+      button @click: @fire, 'x'
+''', 'emitter: `@emit` is not a component member'
+
 fail 'accept names its provider', '''
   Child = component
     accept active

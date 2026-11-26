@@ -119,6 +119,7 @@ const isKeywordWord = (t) =>
   (t.kind === t.value.toUpperCase() || t.kind === 'LEADING_WHEN' || t.kind === 'RELATION' || t.kind === 'STATEMENT');
 
 import { isIdentifierName, identifierRunAt } from './ident.js';
+import { isPlainCall } from './sexpr.js';
 import { counter } from './counter.js';
 import { normalizeTypeText } from './ts/types.js';
 // The schema vocabulary and naming rules, shared verbatim with the two
@@ -2326,13 +2327,13 @@ function foldParseChain(rhs) {
   const ops = [];
   let node = rhs;
   while (true) {
-    if (!Array.isArray(node)) return null;
-    const callee = node[0];
+    if (!isPlainCall(node)) return null;
+    const callee = node[2];
     if (!Array.isArray(callee)) return null;
     if (foldStr(callee[0]) !== '.') return null;
     const method = foldStr(callee[2]);
     if (!FOLD_ALGEBRA.has(method)) return null;
-    const argNodes = node.slice(1);
+    const argNodes = node.slice(3);
     let op;
     if (method === 'partial') {
       if (argNodes.length) return null;

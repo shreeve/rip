@@ -252,7 +252,7 @@ class Generator
     simple = ['leaf', 'expr', 'bool', 'null', 'descriptor', 'any']
     registry = {}
     named = []
-    # Split at `sep` characters outside quotes and brackets.
+    # Split at `sep` characters outside quotes, brackets and braces.
     splitTop = (text, sep, where) ->
       pieces = []
       cur = ''
@@ -263,17 +263,17 @@ class Generator
           quote = false if ch is '"'
         else if ch is '"'
           quote = true
-        else if ch is '['
+        else if ch is '[' or ch is '{'
           depth++
-        else if ch is ']'
+        else if ch is ']' or ch is '}'
           depth--
-          fail "unbalanced ']' in #{where}" if depth < 0
+          fail "unbalanced '#{ch}' in #{where}" if depth < 0
         else if depth is 0 and sep.test ch
           pieces.push cur
           cur = ''
           continue
         cur += ch
-      fail "unbalanced '[' or '\"' in #{where}" if depth isnt 0 or quote
+      fail "unbalanced '[', '{' or '\"' in #{where}" if depth isnt 0 or quote
       pieces.push cur
       pieces
     literalOf = (text, where) ->
@@ -286,6 +286,11 @@ class Generator
       alts = for alt in splitTop body, /\|/, where
         if alt.startsWith('[') and alt.endsWith(']')
           {t: 'list', of: parseType(alt[1...-1], where)}
+        else if alt.startsWith('{') and alt.endsWith('}')
+          keys = alt[1...-1].trim().split(/\s+/).filter((k) -> k)
+          fail "malformed attribute record '#{alt}' in #{where}" unless keys.every (k) -> /^[A-Za-z_$][\w$]*$/.test k
+          fail "attribute record '#{alt}' repeats a key in #{where}" if Set.new(keys).size isnt keys.length
+          {t: 'attrs', keys: keys.sort()}
         else if alt.startsWith '"'
           {t: 'lit', value: literalOf(alt, where)}
         else if alt in simple
@@ -440,6 +445,9 @@ class Generator
       type.nullable is true or type.alts.some (a) -> a.t is 'null'
     else if typeof value is 'boolean'
       type.alts.some (a) -> a.t is 'bool'
+    else if typeof value is 'object'
+      flags = Object.keys(value).sort()
+      type.alts.some (a) -> a.t is 'attrs' and a.keys.join(' ') is flags.join(' ')
     else
       type.alts.some (a) -> a.t is 'leaf' or a.t is 'expr' or (a.t is 'lit' and a.value is value)
 
@@ -691,7 +699,9 @@ class Generator
         else if ch is '"' or ch is "'" then quote = ch
         else if ch is '[' then counters.push 0
         else if ch is ']' then counters.pop()
-        else if ch is ',' and counters.length > 0 then counters[counters.length - 1]++
+        else if ch is '{' then counters.push -1
+        else if ch is '}' then counters.pop()
+        else if ch is ',' and counters.length > 0 and counters[counters.length - 1] >= 0 then counters[counters.length - 1]++
         else if ch is DROP and counters.length > 0 then dropped.push counters.slice()
         i++
       text = text.replace(/\s*,\s*\u0000/g, '').replace(/\u0000\s*,\s*/g, '').replace(/\u0000/g, '')
@@ -879,9 +889,10 @@ class Generator
   # Classify an action as an array construction template and extract its
   # elements, one entry per element in template order: position refs as
   # {grammarRef, childSlot, spread}, literals as {literal, childSlot} where
-  # literal is the raw literal text (e.g. '"="' or 'true'), and nested array
-  # scaffolds as {structural, childSlot}. Returns null for pass-through
-  # numbers and executable JS with $n refs.
+  # literal is the raw literal text (e.g. '"="', 'true', or an attribute
+  # record '{opt: true}'), and nested array scaffolds as {structural,
+  # childSlot}. Returns null for pass-through numbers and executable JS
+  # with $n refs.
   #
   # childSlot is the index in the produced s-expression array where the
   # element's value lands. It is null for any element that follows a spread,
@@ -890,18 +901,19 @@ class Generator
   #
   # The template is scanned structurally (string literals may contain commas
   # and brackets); it is split into top-level elements only at commas that
-  # sit outside quotes.
+  # sit outside quotes, brackets and braces.
   _templateElements: (action, allowNested = false) ->
     return null unless typeof action is 'string'
     s = action.trim()
     return null unless s.startsWith('[') and s.endsWith(']')
     inner = s[1...s.length - 1]
 
-    parts = []
-    cur   = ''
-    quote = null
-    depth = 0
-    i     = 0
+    parts  = []
+    cur    = ''
+    quote  = null
+    depth  = 0
+    braces = 0
+    i      = 0
     while i < inner.length
       ch = inner[i]
       if quote
@@ -923,13 +935,20 @@ class Generator
         return null if depth is 0
         depth--
         cur += ch
-      else if ch is ',' and depth is 0
+      else if ch is '{'
+        braces++
+        cur += ch
+      else if ch is '}'
+        return null if braces is 0
+        braces--
+        cur += ch
+      else if ch is ',' and depth is 0 and braces is 0
         parts.push cur
         cur = ''
       else
         cur += ch
       i++
-    return null if quote or depth isnt 0
+    return null if quote or depth isnt 0 or braces isnt 0
     parts.push cur
 
     elements = []
@@ -955,6 +974,13 @@ class Generator
         return null unless j is t.length - 1
         elements.push {literal: t, childSlot}
       else if t is 'true' or t is 'false' or t is 'null'
+        elements.push {literal: t, childSlot}
+      else if t[0] is '{'
+        # An attribute record: an object literal of flags, each `true`.
+        # Anything else in braces is executable.
+        return null unless /^\{\s*(?:[A-Za-z_$][\w$]*\s*:\s*true(?:\s*,\s*[A-Za-z_$][\w$]*\s*:\s*true)*)?\s*\}$/.test t
+        flags = t.match(/[A-Za-z_$][\w$]*(?=\s*:)/g) ?? []
+        return null if Set.new(flags).size isnt flags.length
         elements.push {literal: t, childSlot}
       else if t.startsWith('[') and t.endsWith(']')
         nested = @_templateElements t, true

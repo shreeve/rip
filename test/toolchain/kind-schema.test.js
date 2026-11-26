@@ -134,6 +134,33 @@ test('a repeated form fails generation', () => {
     .toThrow(/kind 'state' form 2 repeats form 1/);
 });
 
+test('an attribute record is a template literal the registry types by its exact flags', () => {
+  const kinds = (attrs) => ({ x: { forms: [`"x" attrs:${attrs} name:leaf`] } });
+  expect(() => tiny('["x", {opt: true}, 1]', 'x: _, _, name', kinds('{opt}'))).not.toThrow();
+  expect(() => tiny('["x", {}, 1]', 'x: _, _, name', kinds('{}'))).not.toThrow();
+  expect(() => tiny('["x", {opt: true, await: true}, 1]', 'x: _, _, name', kinds('{await opt}'))).not.toThrow();
+  expect(() => tiny('["x", {opt: true}, 1]', 'x: _, _, name', kinds('{}')))
+    .toThrow(/slot 'attrs' does not admit \{"opt":true\}/);
+  expect(() => tiny('["x", {}, 1]', 'x: _, _, name', kinds('{opt}')))
+    .toThrow(/slot 'attrs' does not admit \{\}/);
+});
+
+test('a braced element other than a record of true flags is not a template', () => {
+  expect(() => tiny('["x", {opt: false}, 1]', 'x: _, _, name', { x: { forms: ['"x" attrs:{opt} name:leaf'] } }))
+    .toThrow(/only flat array construction templates can be annotated/);
+  expect(() => tiny('["x", {n: 1}, 1]', 'x: _, _, name', { x: { forms: ['"x" attrs:{n} name:leaf'] } }))
+    .toThrow(/only flat array construction templates can be annotated/);
+  expect(() => tiny('["x", {opt: true, opt: true}, 1]', 'x: _, _, name', { x: { forms: ['"x" attrs:{opt} name:leaf'] } }))
+    .toThrow(/only flat array construction templates can be annotated/);
+});
+
+test('malformed attribute-record types reject', () => {
+  const bad = (type) => () => tiny('["x", 1]', 'x: _, name', { x: { forms: [`"x" name:${type}`] } });
+  expect(bad('{a a}')).toThrow(/repeats a key/);
+  expect(bad('{a-b}')).toThrow(/malformed attribute record/);
+  expect(bad('{a')).toThrow(/unbalanced/);
+});
+
 test('a grammar without a registry is not gated', () => {
   const { kinds, ...ungated } = grammar;
   expect(() => new Generator(ungated)).not.toThrow();

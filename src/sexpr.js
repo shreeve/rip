@@ -16,6 +16,27 @@
 
 import { kinds as shippedKinds, executable as shippedExecutable } from './parser.js';
 
+// ── call shapes ─────────────────────────────────────────────────────
+// A call: ["call", attrs, callee, ...args]. The attribute record says
+// whether the call is optional (`opt`) or awaited (`await`).
+export const isAttrs = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
+export const isCall = (x) => Array.isArray(x) && x[0] === 'call' && isAttrs(x[1]);
+export const mkCall = (callee, ...args) => ['call', {}, callee, ...args];
+// `super(…)` and `import(…)` are calls whose callee is the keyword.
+export const isSuperCall = (x) => isCall(x) && x[2] === 'super';
+export const isDynamicImport = (x) => isCall(x) && x[2] === 'import';
+// `f!`: the awaited call of a callee with no arguments of its own.
+export const isDammit = (x) => isCall(x) && x[1].await === true && x[1].opt !== true && x.length === 3 && !isDynamicImport(x);
+// `f?!` / `f?! args`: the awaited optional call.
+export const isMaybeDammit = (x) => isCall(x) && x[1].await === true && x[1].opt === true;
+// A call that is neither optional nor awaited.
+export const isPlainCall = (x) => isCall(x) && x[1].opt !== true && x[1].await !== true;
+// `f?.(args)` / `f? args`.
+export const isOptCall = (x) => isCall(x) && x[1].opt === true && x[1].await !== true;
+// A call that emits `await …`: an awaited call, or a call whose callee
+// is a dammit (`f! x` folds into `await f(x)`).
+export const isAwaitedCall = (x) => isCall(x) && (x[1].await === true || isDammit(x[2]));
+
 const describeValue = (value, kindOf) => {
   if (value === null) return 'null';
   if (value === undefined) return 'nothing';
@@ -25,7 +46,7 @@ const describeValue = (value, kindOf) => {
     const kind = kindOf(value);
     return kind ? `${/^[aeiou]/.test(kind) ? 'an' : 'a'} ${kind} node` : 'an unkinded array';
   }
-  return typeof value === 'object' ? 'a plain object' : typeof value;
+  return typeof value === 'object' ? `the record ${JSON.stringify(value)}` : typeof value;
 };
 
 const typeText = (type) => {
@@ -34,6 +55,7 @@ const typeText = (type) => {
       case 'kind': return a.kind;
       case 'lit': return JSON.stringify(a.value);
       case 'list': return `[${typeText(a.of)}]`;
+      case 'attrs': return `{${a.keys.join(' ')}}`;
       default: return a.t;
     }
   };
@@ -69,6 +91,11 @@ export function validateSexpr(result, { kinds = shippedKinds, executable = shipp
       case 'bool': return typeof value === 'boolean';
       case 'null': return false;
       case 'descriptor': return value !== null && typeof value === 'object' && !Array.isArray(value);
+      case 'attrs': {
+        if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+        const flags = Object.keys(value).sort();
+        return flags.join(' ') === alt.keys.join(' ') && flags.every((k) => value[k] === true);
+      }
       case 'lit': return value === alt.value;
       case 'expr': {
         if (typeof value === 'string') return true;

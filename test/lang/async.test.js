@@ -1,6 +1,7 @@
 // Async/await, the dammit operator, and generators. The dammit
-// operator is an explicit DAMMIT token and an explicit
-// ["dammit!", target] node — the compiler has no hidden channels.
+// operator is an explicit DAMMIT token and an explicit awaited call
+// node (["call", {await: true}, callee]) — the compiler has no hidden
+// channels.
 // The contract here is the emitted JS and its behavior under the
 // module-loader eval (top-level await needs a real module context).
 import { describe, test, expect } from 'bun:test';
@@ -39,15 +40,14 @@ describe('dammit tokenization: the explicit DAMMIT token', () => {
     expect(tokenize('r = a.b!').tokens.map(t => t.kind)).toEqual(['IDENTIFIER', '=', 'IDENTIFIER', '.', 'PROPERTY', 'DAMMIT']);
   });
 
-  test('sexpr shape: an explicit ["dammit!", target] node with a non-spellable head', () => {
-    expect(JSON.stringify(parser.parse('x = f!').sexpr)).toBe(JSON.stringify(['program', ['=', 'x', ['dammit!', 'f']]]));
-    expect(JSON.stringify(parser.parse('x = f! 1').sexpr)).toBe(JSON.stringify(['program', ['=', 'x', [['dammit!', 'f'], '1']]]));
+  test('sexpr shape: dammit is a call carrying the await attribute', () => {
+    expect(JSON.stringify(parser.parse('x = f!').sexpr)).toBe(JSON.stringify(['program', ['=', 'x', ['call', { await: true }, 'f']]]));
+    expect(JSON.stringify(parser.parse('x = f! 1').sexpr)).toBe(JSON.stringify(['program', ['=', 'x', ['call', {}, ['call', { await: true }, 'f'], '1']]]));
   });
 
   test('collision impossible: a user function named `dammit` compiles as a CALL', () => {
-    // The head is `dammit!` — not a spellable identifier — so the
-    // 1-arg call shape ["dammit", arg] can never be mistaken for the
-    // operator node.
+    // Every call is ["call", attrs, callee, …], so a call of a
+    // function named `dammit` is never the operator.
     for (const src of ['dammit = (a) -> a\nr = dammit f', 'dammit = (a) -> a\nr = dammit(5)']) {
       expect(compile(src)).toContain('dammit(');
     }
@@ -72,14 +72,15 @@ describe('maybe dammit forms', () => {
   });
 
   test('bare, empty, parenthesized, and juxta forms are all maybe dammit', () => {
+    const maybe = { opt: true, await: true };
     expect(parser.parse('x = fn?!').sexpr)
-      .toEqual(['program', ['=', 'x', ['dammit?', 'fn']]]);
+      .toEqual(['program', ['=', 'x', ['call', maybe, 'fn']]]);
     expect(parser.parse('x = fn?!()').sexpr)
-      .toEqual(['program', ['=', 'x', ['dammit?', 'fn']]]);
+      .toEqual(['program', ['=', 'x', ['call', maybe, 'fn']]]);
     expect(parser.parse('x = fn?!(arg)').sexpr)
-      .toEqual(['program', ['=', 'x', ['dammit?', 'fn', 'arg']]]);
+      .toEqual(['program', ['=', 'x', ['call', maybe, 'fn', 'arg']]]);
     expect(parser.parse('x = fn?! arg').sexpr)
-      .toEqual(['program', ['=', 'x', ['dammit?', 'fn', 'arg']]]);
+      .toEqual(['program', ['=', 'x', ['call', maybe, 'fn', 'arg']]]);
   });
 });
 
@@ -132,17 +133,17 @@ describe('dammit mapping surfaces', () => {
     return { code: out.code, mappings: new Mappings(out.mappings), stores: out.stores };
   };
 
-  test('["dammit!", target] role spans: $self covers `name!`, target is exact on the name', () => {
+  test('dammit role spans: $self covers `name!`, callee is exact on the name', () => {
     const src = 'x = fetchUsers!';
     const { code, mappings, stores } = compileFull(src);
     const [dammit] = stores.nodesByKind('dammit');
     expect(dammit).toBeDefined();
     // $self spans the full sugar (`fetchUsers!`, offsets 4..15).
     expect([dammit.sourceStart, dammit.sourceEnd]).toEqual([4, 15]);
-    const [target] = mappings.of(dammit.nodeId, 'target');
-    expect(src.slice(target.sourceStart, target.sourceEnd)).toBe('fetchUsers');
-    expect(code.slice(target.generatedStart, target.generatedEnd)).toBe('fetchUsers');
-    expect(target.mappingKind).toBe('exact');
+    const [callee] = mappings.of(dammit.nodeId, 'callee');
+    expect(src.slice(callee.sourceStart, callee.sourceEnd)).toBe('fetchUsers');
+    expect(code.slice(callee.generatedStart, callee.generatedEnd)).toBe('fetchUsers');
+    expect(callee.mappingKind).toBe('exact');
   });
 
   test('dammit bidirectional round-trip: source name → generated → back', () => {

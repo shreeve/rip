@@ -509,3 +509,15 @@ describe("a postfix guard on a call's named arguments binds the CALL", () => {
     expect(compile('y = f a: 1 if c')).toBe('let y;\n\nif (c) y = f({a: 1});');
   });
 });
+
+describe('expression dispatch', () => {
+  // Every call is ["call", attrs, callee, …], so a node no expression
+  // form claims is an emitter defect; it rejects rather than emitting
+  // as a call of its head.
+  test('a node no expression form claims rejects, naming its head', () => {
+    parser.lexer = makeParserLexer();
+    const result = parser.parse('x = 1\n');
+    result.sexpr[1][2] = ['bogus', '1'];
+    expect(() => emit(result, { source: 'x = 1\n' })).toThrow(/no expression emission for a 'bogus' node/);
+  });
+});

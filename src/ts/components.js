@@ -40,6 +40,7 @@ import { isIdentifierName } from '../ident.js';
 import { tidyType, normalizeTypeText, renderParams, optionalReader } from './types.js';
 import { attributeNamesFor, BOOLEAN_ATTRS, SVG_ONLY_TAGS } from '../dom.js';
 import { isComponentName, componentPathText, restReadKeys } from '../render.js';
+import { isCall, isPlainCall } from '../sexpr.js';
 import { CAMEL, CLASS_TYPE, STYLE_TYPE, CSS_PROPERTIES_TEXT, hostText } from './dom-types.js';
 
 // Same spellings as src/emitter.js COMPONENT_HOOKS (emission owns the
@@ -61,12 +62,11 @@ const memberTarget = (t) => {
 
 // containsAwait's shape (the Promise spelling for async methods):
 // nested function/class bodies keep their own awaits, and an effect's
-// body is one — its NodeStore row tells it from a call spelled
-// `effect(a, b)`.
+// body is one — its NodeStore row identifies it.
 const awaitsIn = (x, stores) => {
   if (!isNode(x)) return false;
   const h = x[0];
-  if (h === 'await' || h === 'dammit!' || h === 'dammit?') return true;
+  if (h === 'await' || (isCall(x) && x[1].await === true)) return true;
   if (h === 'for-as' && x[3] === true) return true;
   if (h === 'class') return awaitsIn(x[2], stores);
   if (h === '->' || h === '=>' || h === 'def' || h === 'void-def') return false;
@@ -124,10 +124,11 @@ function hostLine(stmts, host, isComponent) {
   const walk = (items) => {
     for (const item of items) {
       // A bare member path is its own head; a call's head is its callee.
-      const head = headOf(isNode(item) && item[0] !== '.' ? item[0] : item);
+      const call = isPlainCall(item);
+      const head = headOf(call ? item[2] : !isNode(item) || item[0] === '.' ? item : null);
       if (head !== null && (isComponent ? head === host : tagOf(head) === host)) return isNode(item) ? item : null;
-      if (isNode(item) && head !== null && !/^[A-Z]/.test(tagOf(head) ?? '') && componentPathText(item[0]) === null) {
-        for (const arg of item.slice(1)) {
+      if (call && head !== null && !/^[A-Z]/.test(tagOf(head) ?? '') && componentPathText(item[2]) === null) {
+        for (const arg of item.slice(3)) {
           if (!isNode(arg) || arg[0] !== '->' || !isBlock(arg[2])) continue;
           const found = walk(arg[2].slice(1));
           if (found !== undefined) return found;
@@ -148,7 +149,7 @@ const linePairs = (line) => {
       pairs.push([pair[1].replace(/^"|"$/g, ''), pair[2]]);
     }
   };
-  for (const arg of line.slice(1)) {
+  for (const arg of isPlainCall(line) ? line.slice(3) : []) {
     if (isNode(arg) && arg[0] === 'object') take(arg);
     else if (isNode(arg) && arg[0] === '->' && isBlock(arg[2])) for (const child of arg[2].slice(1)) if (isNode(child) && child[0] === 'object') take(child);
   }
@@ -165,9 +166,10 @@ function lineOwnedKeys(line, isComponent, reads) {
   const owned = new Set();
   if (line === null) return owned;
   if (!isComponent) {
-    const head = headOf(line[0]) ?? '';
+    const callee = isPlainCall(line) ? line[2] : line;
+    const head = headOf(callee) ?? '';
     if (head.includes('#')) owned.add('id');
-    if (head.includes('.') || (isNode(line[0]) && line[0][0] === '.')) { owned.add('class'); owned.add('className'); }
+    if (head.includes('.') || (isNode(callee) && callee[0] === '.')) { owned.add('class'); owned.add('className'); }
   }
   for (const [key] of linePairs(line)) {
     if (key === 'ref' || key === 'key' || key.startsWith('__')) continue;
@@ -182,13 +184,11 @@ function lineOwnedKeys(line, isComponent, reads) {
 // of an object literal spelled with plain keys and no spread, or a
 // string literal. Any other value is computed, and its keys are the
 // runtime's to check at each write.
-function lineStyleLiteral(line, stores) {
+function lineStyleLiteral(line) {
   if (line === null) return null;
   const pair = linePairs(line).find(([key]) => key === 'style');
   if (!pair) return null;
   const value = pair[1];
-  const id = isNode(value) ? stores.idOf(value) : null;
-  if (id !== null && stores.node(id)?.semanticKind === 'call') return null;
   if (isNode(value) && value[0] === 'str') return { kind: 'string', keys: [] };
   if (typeof value === 'string' && /^["']/.test(value)) return { kind: 'string', keys: [] };
   if (!isNode(value) || value[0] !== 'object') return null;
@@ -335,8 +335,7 @@ export function componentTypeInfo(stores, source, node, behavior = null, { spell
         optional: false, hasDefault: true,
         annotation: roleText(stmt, 'annotation'),
         // The stores' semanticKind decides component-ness (the emitter's
-        // own doctrine) — a user function named `component` builds a
-        // same-headed CALL node, which a shape test would misread.
+        // own doctrine).
         isComponentValued: semantic(stmt[2]) === 'component',
         ...nameMark(stmt, stmt[1]),
       });
@@ -363,14 +362,14 @@ export function componentTypeInfo(stores, source, node, behavior = null, { spell
   // initializer rooted at another member cannot spell module-scope
   // typeof).
   const siblings = new Set(members.map((m) => m.name));
-  for (const m of members) { m.siblings = siblings; m.behavior = behavior; m.spellable = spellable; m.stores = stores; }
+  for (const m of members) { m.siblings = siblings; m.behavior = behavior; m.spellable = spellable; }
   const restReads = restReadKeys(stmts);
   const line = hostLine(stmts, extendsTag ?? extendsComponent, extendsComponent !== null);
   const lineOwned = lineOwnedKeys(line, extendsComponent !== null, restReads);
   // The line's style as the merge knows it: under either host, in
   // automatic mode (no `@rest.style` read), a literal the surface can
   // subtract from the caller's object. Null otherwise.
-  const lineStyle = (extendsTag ?? extendsComponent) !== null && !restReads.has('style') ? lineStyleLiteral(line, stores) : null;
+  const lineStyle = (extendsTag ?? extendsComponent) !== null && !restReads.has('style') ? lineStyleLiteral(line) : null;
   return {
     extendsTag,
     extendsComponent,
@@ -524,9 +523,7 @@ export const restContainerType = (t) => `{ readonly value: ${t}; read(): ${t}${M
 // alone (no checker in the emitter; the same widening rules as
 // declare-in-place: literals widen, `let` members stay mutable).
 // Non-evident initializers keep `any`.
-// `stores` keeps a CALL out: `str(x)` and `array(1, 2)` spell the
-// literal heads, and the call row is what says they are calls.
-export const syntacticLiteralType = (v, stores) => {
+export const syntacticLiteralType = (v) => {
   if (typeof v === 'string') {
     if (v === 'true' || v === 'false') return 'boolean';
     if (/^-?\d[\d_]*(\.\d+)?$/.test(v)) return 'number';
@@ -534,29 +531,27 @@ export const syntacticLiteralType = (v, stores) => {
     return null;
   }
   if (!Array.isArray(v)) return null;
-  const id = stores.idOf(v);
-  if (id !== null && stores.node(id)?.semanticKind === 'call') return null;
   const h = v[0];
   if (h === 'str') return 'string';
   if (h === 'array') {
     if (v.length === 1) return 'any[]';
-    const el = new Set(v.slice(1).map((el) => syntacticLiteralType(el, stores)));
+    const el = new Set(v.slice(1).map((el) => syntacticLiteralType(el)));
     return el.size === 1 && !el.has(null) ? `${[...el][0]}[]` : null;
   }
   // Operator results with syntactically-fixed types (the reactive
   // faces lean on these: `clicks * 2` is number whatever clicks is;
   // comparisons are boolean; `+` only when both sides agree).
   if (v.length === 3 && ['*', '/', '%', '**', '//', '%%', '-', '<<', '>>', '>>>', '&', '^', '|'].includes(h)) return 'number';
-  if (v.length === 2 && (h === '-' || h === '+')) return syntacticLiteralType(v[1], stores) === 'number' ? 'number' : null;
+  if (v.length === 2 && (h === '-' || h === '+')) return syntacticLiteralType(v[1]) === 'number' ? 'number' : null;
   if (v.length === 3 && ['<', '>', '<=', '>=', '==', '!='].includes(h)) return 'boolean';
   if (v.length === 2 && (h === '!' || h === 'not')) return 'boolean';
   if (v.length === 3 && (h === '&&' || h === '||' || h === '??')) {
-    const a = syntacticLiteralType(v[1], stores);
-    return a !== null && a === syntacticLiteralType(v[2], stores) ? a : null;
+    const a = syntacticLiteralType(v[1]);
+    return a !== null && a === syntacticLiteralType(v[2]) ? a : null;
   }
   if (v.length === 3 && h === '+') {
-    const a = syntacticLiteralType(v[1], stores);
-    const b = syntacticLiteralType(v[2], stores);
+    const a = syntacticLiteralType(v[1]);
+    const b = syntacticLiteralType(v[2]);
     return a === 'number' && b === 'number' ? 'number' : a === 'string' && b === 'string' ? 'string' : null;
   }
   return null;
@@ -584,7 +579,7 @@ const typeofSpelling = (v, spellable = null) => {
   if (path !== null) {
     return spellable === null || spellable(path.split('.')[0]) ? `typeof ${path}` : null;
   }
-  const ctor = Array.isArray(v) && Array.isArray(v[0]) && v[0][0] === '.' && v[0].length === 3 && v[0][2] === 'new' ? v[0][1] : null;
+  const ctor = isPlainCall(v) && Array.isArray(v[2]) && v[2][0] === '.' && v[2].length === 3 && v[2][2] === 'new' ? v[2][1] : null;
   if (typeof ctor === 'string' && isIdentifierName(ctor)) {
     return spellable === null || spellable(ctor) ? `InstanceType<typeof ${ctor}>` : null;
   }
@@ -634,7 +629,7 @@ export const formTableType = (m) => {
   const siblingRooted = m.siblings !== undefined && init !== undefined && m.siblings.has(rootOf(init));
   return m.annotation ??
     (m.hasDefault && !siblingRooted && init !== undefined
-      ? (syntacticLiteralType(init, m.stores) ?? typeofSpelling(init, m.spellable ?? null))
+      ? (syntacticLiteralType(init) ?? typeofSpelling(init, m.spellable ?? null))
       : null);
 };
 

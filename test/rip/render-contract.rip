@@ -950,12 +950,9 @@ code '@member read in text and interpolation', '''
     _create() {
       this._el0 = document.createElement('p');
       this._el0.setAttribute('data-part', 'A');
-      this._t0 = document.createTextNode('');
+      this._t0 = document.createTextNode(String(`count ${this.count}`));
       this._el0.appendChild(this._t0);
       return this._el0;
-    }
-    _setup() {
-      __effect(() => { this._t0.data = `count ${this.count}`; });
     }
   };
   '''
