@@ -83,17 +83,22 @@ test('malformed sub-annotations fail generation with the rule named', () => {
     .toThrow(/follows a spread — its element cannot be located/);
 });
 
-test('a nested kind and its parent role count as uses in the kinds registry', () => {
+test('a nested node is a use of its own kind and fits that kind\'s forms', () => {
   const grammar = {
     start: 'Root',
     grammar: { Root: [['UNTIL ID ID', '["while", ["!", 2], 3]', 'while: _, condition(unary: operator, operand), body']] },
-    kinds: { while: ['body', 'condition'], unary: ['operand', 'operator'] },
+    kinds: {
+      while: { forms: ['"while" condition:unary body:leaf'] },
+      unary: { forms: ['operator:"!" operand:leaf'] },
+    },
   };
   expect(() => new Generator(structuredClone(grammar))).not.toThrow();
-  expect(() => new Generator({ ...structuredClone(grammar), kinds: { while: ['body', 'condition'] } }))
-    .toThrow(/undeclared kind 'unary'/);
-  expect(() => new Generator({ ...structuredClone(grammar), kinds: { while: ['body'], unary: ['operand', 'operator'] } }))
-    .toThrow(/kind 'while' carries undeclared role 'condition'/);
+  expect(() => new Generator({ ...structuredClone(grammar), kinds: { while: grammar.kinds.while } }))
+    .toThrow(/names undeclared kind 'unary'/);
+  expect(() => new Generator({ ...structuredClone(grammar), kinds: { ...grammar.kinds, while: { forms: ['"while" condition:leaf body:leaf'] } } }))
+    .toThrow(/slot 'condition' does not admit a unary node/);
+  expect(() => new Generator({ ...structuredClone(grammar), kinds: { ...grammar.kinds, unary: { forms: ['operator:"-" operand:leaf'] } } }))
+    .toThrow(/kind 'unary' has no form for this template[\s\S]*slot 'operator' does not admit "!"/);
 });
 
 test('a nested template without an annotation fails generation', () => {

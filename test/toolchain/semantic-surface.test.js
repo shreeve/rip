@@ -1,22 +1,23 @@
-// The parser ships its semantic surface: `kinds` in the generated
-// module names every kind the annotated rules produce with the role
-// vocabulary each may carry, derived from the same semantics table
-// the actions populate — in sync with the parse by construction.
-// These tests bind the two worlds that meet there: the grammar's
-// declared registry above, and the compiler's hardcoded kind/role
-// query names below. A grammar rename that would orphan a query site
-// fails here instead of returning null forever at runtime.
+// The parser ships its tree contract: `kinds` in the generated module
+// is the grammar's kind registry, parsed — every kind with its forms
+// (named, typed slots) and side roles. These tests bind the two worlds
+// that meet there: the grammar's declared registry above, and the
+// compiler's hardcoded kind/role query names below. A grammar rename
+// that would orphan a query site fails here instead of returning null
+// forever at runtime.
 import { test, expect } from 'bun:test';
 import { kinds } from '../../src/parser.js';
+import { Generator } from '../../src/grammar/solar.rip';
 import grammar from '../../src/grammar/grammar.rip';
 
 test('the shipped surface is the declared registry, kind for kind', () => {
-  const declared = Object.fromEntries(
-    Object.entries(grammar.kinds)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([kind, roles]) => [kind, [...roles].sort()]),
-  );
-  expect(kinds).toEqual(declared);
+  const generated = new Generator(grammar).kindRegistry;
+  expect(kinds).toEqual(JSON.parse(JSON.stringify(generated)));
+  expect(Object.keys(kinds).sort()).toEqual(Object.keys(grammar.kinds).sort());
+  for (const [kind, entry] of Object.entries(grammar.kinds)) {
+    expect(kinds[kind].forms.map((f) => f.text), kind).toEqual(entry.forms);
+    expect(kinds[kind].side, kind).toEqual(entry.side ?? []);
+  }
 });
 
 // Every kind the compiler discriminates on via semanticKind.
@@ -40,7 +41,10 @@ const ROLE_QUERIES = [
 ];
 
 test('every role name the compiler queries exists in some kind', () => {
-  const allRoles = new Set(Object.values(kinds).flat());
+  const allRoles = new Set(Object.values(kinds).flatMap((entry) => [
+    ...entry.side,
+    ...entry.forms.flatMap((form) => form.slots.filter((slot) => slot.role).map((slot) => slot.role)),
+  ]));
   for (const role of ROLE_QUERIES) {
     expect(allRoles.has(role), `role '${role}'`).toBe(true);
   }

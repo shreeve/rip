@@ -149,6 +149,15 @@ class Generator
     # a rule opts out with a '~ reason' annotation string.
     @unannotatedConstructors = []
     @optedOutConstructors = []
+    # Rules whose action is executable JS rather than a construction
+    # template (ruleId → true). Most return a leaf; those that build an
+    # array build one the registry cannot describe, which the tree
+    # validator admits where a slot takes an expression.
+    @executable = {}
+    # Each annotated rule's template shape (ruleId → {kind, shape,
+    # labels, rule}), the generation-time input of the kind-registry
+    # gate. Never emitted.
+    @shapes = {}
 
     # Initialize symbol table with special symbols
     @symbolTable = Map.new()
@@ -200,31 +209,239 @@ class Generator
       throw Error.new "annotation coverage: #{@unannotatedConstructors.length} constructor rule(s) lack annotations (annotate, or opt out with '~ reason'):\n#{list}"
     @_checkKindSchema grammar.kinds
 
-  # The kind-schema gate: a grammar that ships a `kinds` registry
-  # declares every semantic kind an annotation may name, with the full
-  # role vocabulary that kind may carry. Every annotated rule's kind
-  # must be declared and its roles drawn from the kind's vocabulary; a
-  # declared kind no rule uses is equally a failure. Drift prints the
-  # actual inventory for review-and-paste. Grammars without a registry
-  # are ungated.
+  # The kind-registry gate: a grammar that ships a `kinds` registry
+  # declares every semantic kind an annotation may name, the tree forms
+  # each kind takes (named, typed slots), and the side roles its labels
+  # may record. Every annotated template — and every nested node a
+  # template builds — must fit one form of its kind slot for slot, and
+  # every label must be a declared side role. Drift the other way fails
+  # too: a declared kind, form or side role that no rule uses. Grammars
+  # without a registry are ungated.
   _checkKindSchema!: (kinds) ->
     return unless kinds?
-    used = @_kindInventory()
+    registry = @kindRegistry = @_parseKindRegistry kinds
+    shapes = @shapes
     problems = []
-    for [kind, roles] as used
-      declared = kinds[kind]
-      unless declared?
-        problems.push "  • undeclared kind '#{kind}' (roles: #{[...roles].sort().join ', '})"
+    usedForms = Map.new()
+    usedSide = Map.new()
+    for own ruleId, info of shapes
+      @_checkLayout info.kind, info.shape, info.rule, problems, usedForms
+      entry = registry[info.kind]
+      continue unless entry?
+      for label in info.labels
+        if label in entry.side
+          (usedSide.get(info.kind) or usedSide.set(info.kind, Set.new()).get(info.kind)).add label
+        else
+          problems.push "  • #{info.rule}: label '[#{label}]' is not a side role of kind '#{info.kind}'"
+    for own kind, entry of registry
+      unless usedForms.has kind
+        problems.push "  • declared kind '#{kind}' is used by no rule"
         continue
-      for role as roles when role not in declared
-        problems.push "  • kind '#{kind}' carries undeclared role '#{role}'"
-    for own kind of kinds when not used.has kind
-      problems.push "  • declared kind '#{kind}' is used by no rule"
-
+      for form, i in entry.forms when not usedForms.get(kind).has i
+        problems.push "  • kind '#{kind}' form #{i + 1} (#{form.text}) is built by no rule"
+      for role in entry.side when not usedSide.get(kind)?.has role
+        problems.push "  • kind '#{kind}' side role '#{role}' is recorded by no rule"
     if problems.length
-      inventory = ([...used].sort (a, b) -> a[0].localeCompare b[0]).map ([kind, roles]) ->
-        "  #{kind}: [#{[...roles].sort().map((r) -> "'#{r}'").join ', '}]"
-      throw Error.new "kind schema: annotations drifted from the declared kinds registry:\n#{problems.join '\n'}\n\nActual inventory:\n#{inventory.join '\n'}"
+      throw Error.new "kind registry: annotations drifted from the declared kinds registry:\n#{problems.join '\n'}"
+
+  # Parse the registry's form and type strings (the grammar's `kinds`
+  # header documents the notation). Malformed entries reject.
+  _parseKindRegistry: (kinds) ->
+    fail = (msg) -> throw Error.new "kind registry: #{msg}"
+    ident = /^[A-Za-z$][\w$-]*$/
+    simple = ['leaf', 'expr', 'bool', 'null', 'descriptor', 'any']
+    registry = {}
+    named = []
+    # Split at `sep` characters outside quotes and brackets.
+    splitTop = (text, sep, where) ->
+      pieces = []
+      cur = ''
+      depth = 0
+      quote = false
+      for ch in text
+        if quote
+          quote = false if ch is '"'
+        else if ch is '"'
+          quote = true
+        else if ch is '['
+          depth++
+        else if ch is ']'
+          depth--
+          fail "unbalanced ']' in #{where}" if depth < 0
+        else if depth is 0 and sep.test ch
+          pieces.push cur
+          cur = ''
+          continue
+        cur += ch
+      fail "unbalanced '[' or '\"' in #{where}" if depth isnt 0 or quote
+      pieces.push cur
+      pieces
+    literalOf = (text, where) ->
+      fail "malformed literal #{text} in #{where}" unless /^"[^"\\]*"$/.test text
+      text[1...-1]
+    parseType = (text, where) ->
+      nullable = text.endsWith '?'
+      body = if nullable then text[...-1] else text
+      fail "empty type in #{where}" unless body
+      alts = for alt in splitTop body, /\|/, where
+        if alt.startsWith('[') and alt.endsWith(']')
+          {t: 'list', of: parseType(alt[1...-1], where)}
+        else if alt.startsWith '"'
+          {t: 'lit', value: literalOf(alt, where)}
+        else if alt in simple
+          {t: alt}
+        else if ident.test alt
+          named.push [alt, where]
+          {t: 'kind', kind: alt}
+        else
+          fail "malformed type '#{alt}' in #{where}"
+      type = {alts}
+      type.nullable = true if nullable
+      type
+    for own kind, entry of kinds
+      where = "kind '#{kind}'"
+      fail "#{where} must be {forms, side?, part?}" unless entry? and typeof entry is 'object' and Array.isArray(entry.forms)
+      for own key of entry when key not in ['forms', 'side', 'part']
+        fail "#{where} has an unknown key '#{key}'"
+      fail "#{where} declares no forms" if entry.forms.length is 0
+      side = entry.side ?? []
+      fail "#{where} side must be a list of role names" unless Array.isArray(side) and side.every (r) -> typeof r is 'string' and ident.test r
+      fail "#{where} repeats a side role" if Set.new(side).size isnt side.length
+      fail "#{where} part must be true when present" if entry.part? and entry.part isnt true
+      forms = for text, i in entry.forms
+        formWhere = "#{where} form #{i + 1}"
+        fail "#{formWhere} must be a string" unless typeof text is 'string'
+        slots = []
+        roles = Set.new()
+        trailing = false
+        for token in splitTop(text.trim(), /\s/, formWhere) when token
+          if token.startsWith '"'
+            fail "#{formWhere}: a constant slot cannot follow a spread" if trailing
+            slots.push {lit: (literalOf(l, formWhere) for l in splitTop(token, /\|/, formWhere))}
+            continue
+          m = token.match /^(\.\.\.)?([A-Za-z$][\w$-]*):(.+)$/
+          fail "#{formWhere}: malformed slot '#{token}'" unless m
+          fail "#{formWhere}: slot '#{m[2]}' follows a spread; spreads are trailing" if trailing and not m[1]
+          fail "#{formWhere}: duplicate slot '#{m[2]}'" if roles.has m[2]
+          roles.add m[2]
+          trailing = true if m[1]
+          slot = {role: m[2], type: parseType(m[3], "#{formWhere} slot '#{m[2]}'")}
+          slot.spread = true if m[1]
+          slots.push slot
+        fail "#{formWhere} has no slots" if slots.length is 0
+        {text, slots}
+      shapesSeen = Map.new()
+      for form, i in forms
+        signature = JSON.stringify form.slots
+        fail "#{where} form #{i + 1} repeats form #{shapesSeen.get(signature) + 1}" if shapesSeen.has signature
+        shapesSeen.set signature, i
+      registry[kind] = {forms, side}
+      registry[kind].part = true if entry.part
+    for [kind, where] in named when not registry[kind]?
+      fail "#{where} names undeclared kind '#{kind}'"
+    registry
+
+  # Check one template layout against its kind's forms, then each
+  # nested node it builds against that node's own kind. A layout fits
+  # when it fits some form, and every form it fits counts as used; a
+  # misfit names the closest form's first mismatch.
+  _checkLayout!: (kind, layout, rule, problems, usedForms) ->
+    for nestedNode in @_nestedNodes layout
+      @_checkLayout nestedNode.node, nestedNode.layout, rule, problems, usedForms
+    entry = @kindRegistry[kind]
+    unless entry?
+      problems.push "  • #{rule}: undeclared kind '#{kind}'"
+      return
+    # A kind some template names is used even when that template misfits.
+    usedForms.set kind, Set.new() unless usedForms.has kind
+    best = null
+    fits = false
+    for form, i in entry.forms
+      result = @_fitLayout layout, form.slots
+      if result.ok
+        usedForms.get(kind).add i
+        fits = true
+      else if not best? or result.depth > best.result.depth
+        best = {result, form}
+    return if fits
+    problems.push "  • #{rule}: kind '#{kind}' has no form for this template — closest is (#{best.form.text}): #{best.result.why}"
+
+  # The nested nodes a layout builds, through transparent scaffolds.
+  _nestedNodes: (layout) ->
+    found = []
+    for entry in layout
+      found.push entry if entry.node?
+      found.push ...@_nestedNodes(entry.layout) if entry.scaffold is 'transparent'
+    found
+
+  # Fit a layout to a form's slots: {ok} or {ok: false, depth, why},
+  # depth counting the elements that fit before the mismatch.
+  _fitLayout: (layout, slots) ->
+    fixed = slots.findIndex (s) -> s.spread
+    fixed = slots.length if fixed < 0
+    run = fixed
+    for entry, i in layout
+      if i < fixed
+        why = @_fitElement entry, slots[i]
+        return {ok: false, depth: i, why: "element #{i}: #{why}"} if why
+        continue
+      return {ok: false, depth: i, why: "element #{i} has no slot (the form has #{slots.length})"} if fixed is slots.length
+      # Trailing elements take the spread slots in order: each element
+      # stays in the current spread slot or moves to a later one.
+      start = run
+      run++ while run < slots.length and @_fitElement(entry, slots[run])?
+      return {ok: false, depth: i, why: "element #{i}: #{@_fitElement entry, slots[start]}"} if run is slots.length
+    if layout.length < fixed
+      missing = slots[layout.length]
+      label = if missing.role? then "slot '#{missing.role}'" else "the constant #{missing.lit.map((l) -> JSON.stringify l).join ' or '}"
+      return {ok: false, depth: layout.length, why: "#{label} has no element"}
+    {ok: true}
+
+  # Why one template element does not fit one slot, or null when it does.
+  _fitElement: (entry, slot) ->
+    unless slot.role?
+      return null if entry.literal? and entry.name is '_' and entry.literal in slot.lit
+      return "expected the constant #{slot.lit.map((l) -> JSON.stringify l).join ' or '}"
+    if entry.ref?
+      return "expected '#{slot.role}', got '#{entry.name}'" if entry.name isnt slot.role
+      return "spread '...#{entry.name}' in a single slot" if entry.spread and not slot.spread
+      return null
+    if entry.node?
+      return "expected '#{slot.role}', got '#{entry.name}'" if entry.name isnt slot.role
+      return null if @_typeAdmitsKind slot.type, entry.node
+      return "slot '#{slot.role}' does not admit a #{entry.node} node"
+    if entry.scaffold?
+      lists = slot.type.alts.filter (a) -> a.t is 'list'
+      return "slot '#{slot.role}' takes no array" unless lists.length
+      if entry.scaffold is 'opaque'
+        return null if entry.size is 0
+        return "an opaque scaffold of #{entry.size} element(s) fills slot '#{slot.role}' — name its element with '_(…)'"
+      return "a transparent scaffold of #{entry.layout.length} elements fills slot '#{slot.role}'" unless entry.layout.length is 1
+      only = entry.layout[0]
+      return "a scaffold nested in a scaffold fills slot '#{slot.role}'" if only.scaffold?
+      return "expected '#{slot.role}', got '#{only.name}'" if only.name isnt slot.role
+      if only.node? and not lists.some((a) => @_typeAdmitsKind a.of, only.node)
+        return "slot '#{slot.role}' holds no #{only.node} node"
+      if 'literal' of only and not lists.some((a) => @_typeAdmitsLiteral a.of, only.literal)
+        return "slot '#{slot.role}' holds no #{JSON.stringify only.literal}"
+      return null
+    return "expected '#{slot.role}', got '#{entry.name}'" if entry.name isnt '_' and entry.name isnt slot.role
+    return null if @_typeAdmitsLiteral slot.type, entry.literal
+    "slot '#{slot.role}' does not admit #{JSON.stringify entry.literal}"
+
+  # `expr` admits every kind but a part, which only a slot naming it takes.
+  _typeAdmitsKind: (type, kind) ->
+    part = @kindRegistry[kind]?.part is true
+    type.alts.some (a) -> a.t is 'any' or (a.t is 'expr' and not part) or (a.t is 'kind' and a.kind is kind)
+
+  _typeAdmitsLiteral: (type, value) ->
+    return true if type.alts.some (a) -> a.t is 'any'
+    if value is null
+      type.nullable is true or type.alts.some (a) -> a.t is 'null'
+    else if typeof value is 'boolean'
+      type.alts.some (a) -> a.t is 'bool'
+    else
+      type.alts.some (a) -> a.t is 'leaf' or a.t is 'expr' or (a.t is 'lit' and a.value is value)
 
   _processOperators!: (ops) ->
     for precedence, i in ops
@@ -287,6 +504,7 @@ class Generator
           # each referenced position once in first-appearance order.
           refs = (parseInt(m[1], 10) for m in action.matchAll /\$(\d+)/g)
           @primitiveRefs[ruleId] = refs.filter (ref, i) -> refs.indexOf(ref) is i
+          @executable[ruleId] = true
         else
           @primitiveRefs[ruleId] = []
 
@@ -302,7 +520,7 @@ class Generator
           throw Error.new "Grammar error in '#{lhs}': pattern label '[#{labels[0].name}]' requires an annotated rule, not a coverage opt-out" if labels.length > 0
           @optedOutConstructors.push "#{lhs} → #{pattern or 'ε'} (#{reason})"
         else if annotation?
-          @semantics[ruleId] = @_parseAnnotation annotation, action, symbols, lhs, pattern, labels
+          @semantics[ruleId] = @_parseAnnotation annotation, action, symbols, lhs, pattern, labels, ruleId
         else
           throw Error.new "Grammar error in '#{lhs}': pattern label '[#{labels[0].name}]' requires an annotated rule — the label's role records on the rule's node" if labels.length > 0
           if typeof action is 'string' and @_templateElements(action, true)?
@@ -760,7 +978,7 @@ class Generator
   # its own: the nested array registers with that kind and those roles,
   # and this node's `role` points at it). Sub-annotations nest. A
   # nested element after a spread cannot be located and rejects.
-  _parseAnnotation: (annotation, action, symbols, lhs, pattern, labels = []) ->
+  _parseAnnotation: (annotation, action, symbols, lhs, pattern, labels = [], ruleId = null) ->
     ruleDesc = "#{lhs} → #{pattern or 'ε'}"
     fail = (msg) ->
       throw Error.new "Annotation error (#{ruleDesc}): #{msg}"
@@ -807,6 +1025,7 @@ class Generator
       fail "template has #{elements.length} element(s); annotation must be 'kind: part, ...' naming each one" unless elements.length is 0
       roles = []
       applyLabels roles, Set.new()
+      @shapes[ruleId] = {kind, shape: [], labels: (l.name for l in labels), rule: ruleDesc} if ruleId?
       return {kind, roles}
 
     fail "kind-only annotation takes no parts; template has no elements" if elements.length is 0
@@ -824,8 +1043,11 @@ class Generator
     # One template level. `path` is the child-slot path from the node
     # being described down to `els` (non-empty inside a transparent
     # scaffold); a named nested node starts its own path. Returns the
-    # node's roles and its nested-node descriptors
-    # {role, path, kind, roles, nested}.
+    # node's roles, its nested-node descriptors
+    # {role, path, kind, roles, nested}, and its layout: one entry per
+    # element for the kind-registry gate ({ref, name, spread},
+    # {literal, name}, {scaffold: 'opaque', size}, {scaffold:
+    # 'transparent', layout}, or {node: kind, name, layout}).
     describe = (els, partsText, path, seen) =>
       parts = if partsText.trim() is '' then [] else splitParts partsText
       fail "template has #{els.length} element(s) but annotation names #{parts.length} part(s) — every element needs one" unless els.length is parts.length
@@ -834,6 +1056,7 @@ class Generator
       # would clobber its caller's loop and lists.)
       found  = []
       inner  = []
+      layout = []
       for element, index in els
         raw    = parts[index]
         spread = raw.startsWith('...')
@@ -852,6 +1075,7 @@ class Generator
           fail "nested structural element cannot take a spread role '...#{name}'" if spread
           unless sub?
             fail "nested structural element must be named '_' — or annotated: '_(part, ...)' names its elements as roles of this node, 'role(kind: part, ...)' makes it a node of its own" unless name is '_'
+            layout.push {scaffold: 'opaque', size: element.elements.length}
             continue
           slot = element.childSlot
           fail "nested annotation '#{raw}' follows a spread — its element cannot be located" unless slot?
@@ -859,6 +1083,7 @@ class Generator
             below = describe element.elements, sub, [...path, slot], seen
             found.push ...below.roles
             inner.push ...below.nested
+            layout.push {scaffold: 'transparent', layout: below.layout}
             continue
           checkName name, seen
           c = sub.indexOf ':'
@@ -866,12 +1091,15 @@ class Generator
           fail "invalid semantic kind '#{subKind}' in nested annotation '#{raw}'" unless subKind and ident.test(subKind)
           below = describe element.elements, (if c >= 0 then sub[c + 1..] else ''), [], Set.new()
           inner.push {role: name, path: [...path, slot], kind: subKind, roles: below.roles, nested: below.nested}
+          layout.push {node: subKind, name, layout: below.layout}
           continue
         else
           fail "literal element #{element.literal} cannot take a spread role '...#{name}'" if spread
           fail "literal element #{element.literal} takes no sub-annotation ('#{raw}')" if sub?
+          layout.push {literal: @_literalValue(element.literal), name}
           continue if name is '_'
 
+        layout.push {ref: element.grammarRef, name, spread: element.spread} if element.grammarRef?
         checkName name, seen
         # An element reached through a scaffold is not a direct child:
         # its slot is runtime-dependent, as after a spread.
@@ -880,11 +1108,12 @@ class Generator
           found.push {name, grammarRef: element.grammarRef, childSlot, spread: element.spread}
         else
           found.push {name, grammarRef: null, childSlot, literal: @_literalValue element.literal}
-      {roles: found, nested: inner}
+      {roles: found, nested: inner, layout}
 
     seen = Set.new()
     top = describe elements, annotation[colon + 1..], [], seen
     applyLabels top.roles, seen
+    @shapes[ruleId] = {kind, shape: top.layout, labels: (l.name for l in labels), rule: ruleDesc} if ruleId?
     sem = {kind, roles: top.roles}
     sem.nested = top.nested if top.nested.length
     sem
@@ -1480,24 +1709,6 @@ class Generator
     rule = "#{c.lhs} → #{c.ruleSymbols}"
     if c.winner? then "#{c.winner} over #{rule}" else rule
 
-  # The kind inventory derived from the semantics table: every kind
-  # the annotated rules produce, with the union of role names each
-  # carries. The kind-schema gate checks the declared registry against
-  # it; the generated module ships it as the parser's semantic surface.
-  _kindInventory: ->
-    inventory = Map.new()
-    add = (sem) ->
-      entry = inventory.get(sem.kind) or Set.new()
-      entry.add role.name for role in sem.roles
-      inventory.set sem.kind, entry
-      # A nested node is a use of ITS kind; the role naming it belongs
-      # to the enclosing node's vocabulary.
-      for d in sem.nested ?? []
-        entry.add d.role
-        add d
-    add sem for own ruleId, sem of @semantics
-    inventory
-
   # Resolve conflicts using precedence and associativity
   _resolveConflict: (rule, op, reduce, shift) ->
     solution = {rule, operator: op, r: reduce, s: shift}
@@ -1624,9 +1835,6 @@ class Generator
 
   generate: ->
     parserInstance = @_generateModuleCore()
-    kinds = {}
-    for [kind, roles] as [...@_kindInventory()].sort (a, b) -> a[0].localeCompare b[0]
-      kinds[kind] = [...roles].sort()
     """
     // ES6 Parser generated by Solar #{VERSION}
 
@@ -1649,9 +1857,14 @@ class Generator
     export const Parser = createParser
     export const parse = parser.parse.bind(parser)
 
-    // Semantic surface: every kind the parser's annotated rules
-    // produce, with the role vocabulary each may carry.
-    export const kinds = #{JSON.stringify kinds}
+    // The tree contract: every kind the annotated rules build, its
+    // forms (slots in tree order, each named and typed) and its side
+    // roles. Empty when the grammar declares no registry.
+    export const kinds = #{JSON.stringify(@kindRegistry ?? {})}
+
+    // Rules whose action is executable JS rather than a construction
+    // template: their values are unkinded arrays outside the registry.
+    export const executable = #{JSON.stringify @executable}
 
     export default parser
     """
