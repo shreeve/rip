@@ -31,13 +31,12 @@
 #     stays byte-identical to the unlabeled form. The type story lives
 #     in RoleStore and the TS face; the JS never sees it. A row that
 #     says a token "erases as <role>" means exactly this.
-#   - HEADS: a head a user could spell (`["state", …]` is what `state a, 0`
-#     builds) is discriminated by the declaration node's semanticKind —
-#     the locked-head convention. Invented heads are hyphenated or
-#     glyph-shaped (`typed-var`, `dammit!`, `.{}`) so no call can forge
-#     them. The void family (`void-assign`, `void-readonly`, `void-def`, `void-pair`)
-#     takes a word-form head, so its `=`/`:` token carries the operator
-#     label instead.
+#   - HEADS: every call is ["call", attrs, callee, …args], so no program
+#     spells any other head: `state a, 0` builds a call of `state`, never
+#     the ["state", …] node `a := 0` builds. The void family
+#     (`void-assign`, `void-readonly`, `void-def`, `void-pair`) takes a
+#     word-form head, so its `=`/`:` token carries the operator label
+#     instead.
 #   - "THE EMITTER REJECTS": the shape parses on purpose so the emitter
 #     can position a precise diagnostic; src/emitter.js owns the rule.
 # ==============================================================================
@@ -302,11 +301,11 @@ grammar =
     o 'DoIife'
     o 'This'
     o 'Super'
-    # The dammit operator: `f!` is call-plus-await sugar — a real
-    # token and a real node. DAMMIT is labeled so the `!` keeps its span:
+    # The dammit operator: `f!` is the awaited call, a call node with
+    # the `await` attribute. DAMMIT is labeled so the `!` keeps its span:
     # the lowering's `await` is synthetic, and a diagnostic on that
     # keyword (TS80007) must land on the one character that means await.
-    o 'Value DAMMIT[operator]'   , '["dammit!", 1]'           , 'dammit: _, target'
+    o 'Value DAMMIT[operator]'   , '["call", {await: true}, 1]', 'dammit: _, _, callee'
     # Tagged templates: a string against a value (`tag"x"`) or
     # bridged by `$` (`sh $"cmd"`) calls the tag with the template.
     o 'Value TEMPLATE_TAG String', '["tagged-template", 1, 3]', 'tagged: _, tag, str'
@@ -671,10 +670,10 @@ grammar =
     o 'Parenthetical'
     o 'Super'
     o 'This'
-    o 'SUPER Arguments'                                                      , '["super", ...2]'      , 'super: _, ...args'
-    o 'DYNAMIC_IMPORT Arguments'                                             , '[1, ...2]'            , 'dynimport: keyword, ...args'
-    o 'SimpleObjAssignable Arguments'                                        , '[1, ...2]'            , 'call: callee, ...args'
-    o 'ObjSpreadExpr Arguments'                                              , '[1, ...2]'            , 'call: callee, ...args'
+    o 'SUPER Arguments'                                                      , '["call", {}, "super", ...2]', 'super: _, _, _, ...args'
+    o 'DYNAMIC_IMPORT Arguments'                                             , '["call", {}, 1, ...2]'      , 'dynimport: _, _, callee, ...args'
+    o 'SimpleObjAssignable Arguments'                                        , '["call", {}, 1, ...2]'      , 'call: _, _, callee, ...args'
+    o 'ObjSpreadExpr Arguments'                                              , '["call", {}, 1, ...2]'      , 'call: _, _, callee, ...args'
     o 'ObjSpreadExpr . Property'                                             , '[".", 1, 3]'          , 'member: operator, object, property'
     o 'ObjSpreadExpr ?. Property'                                            , '["?.", 1, 3]'         , 'member: operator, object, property'
     o 'ObjSpreadExpr[object] INDEX_START (Expression[key] | INDENT Expression[key] OUTDENT) INDEX_END', '["[]", @object, @key]', 'index: operator, object, key'
@@ -685,9 +684,9 @@ grammar =
     # where the emitter folds them into the awaited call; maybe dammit
     # owns its arguments in the node, so it takes them here, or
     # `{...f?!(x)}` would call the awaited result.
-    o 'ObjSpreadExpr DAMMIT[operator]'                                       , '["dammit!", 1]'       , 'dammit: _, target'
-    o 'ObjSpreadExpr MAYBE_DAMMIT[operator] Arguments'                       , '["dammit?", 1, ...3]' , 'maybe-dammit: _, callee, ...args'
-    o 'ObjSpreadExpr MAYBE_DAMMIT[operator]'                                 , '["dammit?", 1]'       , 'maybe-dammit: _, callee'
+    o 'ObjSpreadExpr DAMMIT[operator]'                                       , '["call", {await: true}, 1]'             , 'dammit: _, _, callee'
+    o 'ObjSpreadExpr MAYBE_DAMMIT[operator] Arguments'                       , '["call", {opt: true, await: true}, 1, ...3]', 'maybe-dammit: _, _, callee, ...args'
+    o 'ObjSpreadExpr MAYBE_DAMMIT[operator]'                                 , '["call", {opt: true, await: true}, 1]'     , 'maybe-dammit: _, _, callee'
     # Pick on a spread head: `{...obj.{a, b}}` spreads the picked
     # literal (the four spread-head pick rules).
     o 'ObjSpreadExpr PICK_START    PickList OptComma PICK_END'               , '[".{}",  1, ...3]'    , 'pick: _, source, ...items'
@@ -938,27 +937,29 @@ grammar =
   # Function Calls
   # ============================================================================
 
+  # Every call is ["call", attrs, callee, ...args]. The attribute record
+  # carries `opt` (an optional call) and `await` (an awaited one); the
+  # semantic kind names the call's family.
   Invocation: [
-    o 'Value Arguments'                          , '[1, ...2]'                  , 'call: callee, ...args'
-    o 'SUPER Arguments'                          , '["super", ...2]'            , 'super: _, ...args'
+    o 'Value Arguments'                          , '["call", {}, 1, ...2]'      , 'call: _, _, callee, ...args'
+    o 'SUPER Arguments'                          , '["call", {}, "super", ...2]', 'super: _, _, _, ...args'
     # Optional call (`f?.(args)`). The juxta form `f? x` is the same
     # node: the lexer opens an implicit call after postfix `?`, and
     # CALL_START outranks `?` so `Value ? Arguments` shifts instead of
     # reducing bare existence (`f?` alone still lowers to `f != null`).
-    o 'Value ES6_OPTIONAL_CALL Arguments'        , '["optcall", 1, ...3]'       , 'optcall: _, callee, ...args'
-    o 'Value ? Arguments'                        , '["optcall", 1, ...3]'       , 'optcall: _, callee, ...args'
+    o 'Value ES6_OPTIONAL_CALL Arguments'        , '["call", {opt: true}, 1, ...3]', 'optcall: _, _, callee, ...args'
+    o 'Value ? Arguments'                        , '["call", {opt: true}, 1, ...3]', 'optcall: _, _, callee, ...args'
     # Maybe dammit awaits the optional call itself: `f?!` is
     # `await f?.()`, and `f?!(args)` / `f?! args` pass arguments — dammit's
     # shapes with an optional callee. Its unspellable head is a real
     # mapped node. CALL_START outranks MAYBE_DAMMIT, so a following
     # argument list shifts instead of reducing the bare form.
-    o 'Value MAYBE_DAMMIT[operator] Arguments'   , '["dammit?", 1, ...3]'       , 'maybe-dammit: _, callee, ...args'
-    o 'Value MAYBE_DAMMIT[operator]'             , '["dammit?", 1]'             , 'maybe-dammit: _, callee'
-    # Dynamic import: `import(url)` is a call node whose callee is the
-    # token's own value; `import!(url)` is its awaited form (a real
-    # await node).
-    o 'DYNAMIC_IMPORT Arguments'                 , '[1, ...2]'                  , 'dynimport: keyword, ...args'
-    o 'DYNAMIC_IMPORT DAMMIT[operator] Arguments', '["await", ["import", ...3]]', 'await: _, value(dynimport: keyword, ...args)'
+    o 'Value MAYBE_DAMMIT[operator] Arguments'   , '["call", {opt: true, await: true}, 1, ...3]', 'maybe-dammit: _, _, callee, ...args'
+    o 'Value MAYBE_DAMMIT[operator]'             , '["call", {opt: true, await: true}, 1]'     , 'maybe-dammit: _, _, callee'
+    # Dynamic import: `import(url)` is a call whose callee is the
+    # token's own value; `import!(url)` is the awaited call.
+    o 'DYNAMIC_IMPORT Arguments'                 , '["call", {}, 1, ...2]'             , 'dynimport: _, _, callee, ...args'
+    o 'DYNAMIC_IMPORT DAMMIT[operator] Arguments', '["call", {await: true}, 1, ...3]', 'dynimport: _, _, callee, ...args'
   ]
 
   Arguments: [
@@ -1499,6 +1500,8 @@ displays =
 #   <kind>            a node of that kind
 #   [type]            an unkinded array whose elements each match type
 #   "lit"             exactly that string
+#   {flag flag2}      an attribute record holding exactly those flags,
+#                     each true ({} is the empty record)
 #
 # The registry records the tree as it is, including its irregular
 # shapes: several forms for one kind, null-filled slots, the "{}"
@@ -1518,14 +1521,14 @@ kinds =
   'await':         forms: ['"await" value:expr'], side: ['operator']
   'binary':        forms: ['operator:leaf left:expr right:expr']
   'block':         forms: ['"block" ...statements:expr'], part: true
-  'call':          forms: ['callee:expr ...args:expr|splat']
+  'call':          forms: ['"call" attrs:{} callee:expr ...args:expr|splat']
   'cast':          forms: ['"cast" value:expr annotation:leaf']
   'catch':         forms: ['binding:expr? body:block'], part: true
   'class':         forms: ['"class" name:leaf? parent:expr?', '"class" name:leaf|member? parent:expr? body:block']
   'component':     forms: ['"component" parent:expr? body:block']
   'comprehension': forms: ['"comprehension" value:expr loop:[forin|forof|foras] guard:[expr]']
   'computed':      forms: ['"computed" target:expr value:expr|block'], side: ['annotation', 'operator', 'optionalMarker']
-  'dammit':        forms: ['"dammit!" target:expr'], side: ['operator']
+  'dammit':        forms: ['"call" attrs:{await} callee:expr'], side: ['operator']
   'def':
     forms: ['"def"|"void-def" name:leaf|member params:[expr|default|rest|expansion] body:block']
     side:  ['returnType', 'typeParams', 'visibility', 'voidMarker']
@@ -1533,7 +1536,7 @@ kinds =
   'defsig':        forms: ['"def-sig" name:leaf params:[expr|default|rest|expansion] returnType:leaf'], side: ['typeParams']
   'doiife':        forms: ['"do-iife" func:expr']
   'dynamicKey':    forms: ['"dynamicKey" key:expr'], part: true
-  'dynimport':     forms: ['keyword:"import" ...args:expr|splat']
+  'dynimport':     forms: ['"call" attrs:{}|{await} callee:"import" ...args:expr|splat'], side: ['operator']
   'effect':        forms: ['"effect" target:expr? value:expr|block'], side: ['annotation', 'operator']
   'existence':     forms: ['operator:"?" value:expr']
   'expansion':     forms: ['"expansion"'], part: true
@@ -1584,11 +1587,11 @@ kinds =
   'index':         forms: ['operator:"[]" object:expr key:expr']
   'loop':          forms: ['"loop" body:block', '"loop-n" count:expr body:block']
   'map':           forms: ['"map" ...pairs:pair|splat']
-  'maybe-dammit':  forms: ['"dammit?" callee:expr ...args:expr|splat'], side: ['operator']
+  'maybe-dammit':  forms: ['"call" attrs:{opt await} callee:expr ...args:expr|splat'], side: ['operator']
   'member':        forms: ['operator:"."|"?." object:expr property:leaf']
   'object':        forms: ['"object" ...pairs:pair|splat']
   'offer':         forms: ['"offer" value:expr']
-  'optcall':       forms: ['"optcall" callee:expr ...args:expr|splat']
+  'optcall':       forms: ['"call" attrs:{opt} callee:expr ...args:expr|splat']
   'optindex':      forms: ['"optindex" object:expr key:expr']
   'pair':
     forms: ['operator:":"|"="|null key:expr|dynamicKey value:expr', '"void-pair" key:expr|dynamicKey value:expr']
@@ -1611,7 +1614,7 @@ kinds =
   'splat':         forms: ['"..." value:expr'], part: true
   'state':         forms: ['"state" target:expr value:expr'], side: ['annotation', 'operator', 'optionalMarker']
   'str':           forms: ['"str" ...parts:leaf|[expr]']
-  'super':         forms: ['"super" ...args:expr|splat']
+  'super':         forms: ['"call" attrs:{} "super" ...args:expr|splat']
   'switch':        forms: ['"switch" subject:expr? cases:[when] default:block?']
   'symbol':        forms: ['"symbol" name:leaf']
   'tagged':        forms: ['"tagged-template" tag:expr str:str|leaf']

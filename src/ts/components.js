@@ -40,6 +40,7 @@ import { isIdentifierName } from '../ident.js';
 import { tidyType, normalizeTypeText, renderParams, optionalReader } from './types.js';
 import { attributeNamesFor, BOOLEAN_ATTRS, SVG_ONLY_TAGS } from '../dom.js';
 import { isComponentName, componentPathText, restReadKeys } from '../render.js';
+import { isCall, isPlainCall } from '../sexpr.js';
 import { CAMEL, CLASS_TYPE, STYLE_TYPE, CSS_PROPERTIES_TEXT, hostText } from './dom-types.js';
 
 // Same spellings as src/emitter.js COMPONENT_HOOKS (emission owns the
@@ -66,7 +67,7 @@ const memberTarget = (t) => {
 const awaitsIn = (x, stores) => {
   if (!isNode(x)) return false;
   const h = x[0];
-  if (h === 'await' || h === 'dammit!' || h === 'dammit?') return true;
+  if (h === 'await' || (isCall(x) && x[1].await === true)) return true;
   if (h === 'for-as' && x[3] === true) return true;
   if (h === 'class') return awaitsIn(x[2], stores);
   if (h === '->' || h === '=>' || h === 'def' || h === 'void-def') return false;
@@ -124,10 +125,11 @@ function hostLine(stmts, host, isComponent) {
   const walk = (items) => {
     for (const item of items) {
       // A bare member path is its own head; a call's head is its callee.
-      const head = headOf(isNode(item) && item[0] !== '.' ? item[0] : item);
+      const call = isPlainCall(item);
+      const head = headOf(call ? item[2] : !isNode(item) || item[0] === '.' ? item : null);
       if (head !== null && (isComponent ? head === host : tagOf(head) === host)) return isNode(item) ? item : null;
-      if (isNode(item) && head !== null && !/^[A-Z]/.test(tagOf(head) ?? '') && componentPathText(item[0]) === null) {
-        for (const arg of item.slice(1)) {
+      if (call && head !== null && !/^[A-Z]/.test(tagOf(head) ?? '') && componentPathText(item[2]) === null) {
+        for (const arg of item.slice(3)) {
           if (!isNode(arg) || arg[0] !== '->' || !isBlock(arg[2])) continue;
           const found = walk(arg[2].slice(1));
           if (found !== undefined) return found;
@@ -148,7 +150,7 @@ const linePairs = (line) => {
       pairs.push([pair[1].replace(/^"|"$/g, ''), pair[2]]);
     }
   };
-  for (const arg of line.slice(1)) {
+  for (const arg of isPlainCall(line) ? line.slice(3) : []) {
     if (isNode(arg) && arg[0] === 'object') take(arg);
     else if (isNode(arg) && arg[0] === '->' && isBlock(arg[2])) for (const child of arg[2].slice(1)) if (isNode(child) && child[0] === 'object') take(child);
   }
@@ -165,9 +167,10 @@ function lineOwnedKeys(line, isComponent, reads) {
   const owned = new Set();
   if (line === null) return owned;
   if (!isComponent) {
-    const head = headOf(line[0]) ?? '';
+    const callee = isPlainCall(line) ? line[2] : line;
+    const head = headOf(callee) ?? '';
     if (head.includes('#')) owned.add('id');
-    if (head.includes('.') || (isNode(line[0]) && line[0][0] === '.')) { owned.add('class'); owned.add('className'); }
+    if (head.includes('.') || (isNode(callee) && callee[0] === '.')) { owned.add('class'); owned.add('className'); }
   }
   for (const [key] of linePairs(line)) {
     if (key === 'ref' || key === 'key' || key.startsWith('__')) continue;
@@ -584,7 +587,7 @@ const typeofSpelling = (v, spellable = null) => {
   if (path !== null) {
     return spellable === null || spellable(path.split('.')[0]) ? `typeof ${path}` : null;
   }
-  const ctor = Array.isArray(v) && Array.isArray(v[0]) && v[0][0] === '.' && v[0].length === 3 && v[0][2] === 'new' ? v[0][1] : null;
+  const ctor = isPlainCall(v) && Array.isArray(v[2]) && v[2][0] === '.' && v[2].length === 3 && v[2][2] === 'new' ? v[2][1] : null;
   if (typeof ctor === 'string' && isIdentifierName(ctor)) {
     return spellable === null || spellable(ctor) ? `InstanceType<typeof ${ctor}>` : null;
   }

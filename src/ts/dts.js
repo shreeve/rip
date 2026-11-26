@@ -41,6 +41,7 @@ import {
 } from './types.js';
 import { buildSchemaTypeStory, SchemaTypeError } from './schema.js';
 import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, isModuleImportNode, ctorAtFields, containsYield, containsAwait } from '../emitter.js';
+import { isCall, isPlainCall, isAwaitedCall } from '../sexpr.js';
 import {
   componentTypeInfo, componentCtorMembers, instanceTypeLines, containerType, MINTED, DOM_LIB_GLOBALS,
   segmentsText,
@@ -70,9 +71,9 @@ const classMethodPairs = (stmt) => {
   if (isDefHead(stmt[0]) && stmt.length === 4) {
     return [{ pair: [stmt[0] === 'void-def' ? 'void-pair' : ':', stmt[1], ['->', stmt[2], stmt[3]]], form: 'def', typed: stmt }];
   }
-  if ((stmt[0] === 'get' || stmt[0] === 'set') && stmt.length === 2 && isNode(stmt[1]) && stmt[1][0] === 'object' && stmt[1].length === 2) {
-    const pair = stmt[1][1];
-    if (isNode(pair) && pair[0] === ':' && pair.length === 3 && isFunc(pair[2])) return [{ pair, form: stmt[0], typed: pair[2] }];
+  if (isPlainCall(stmt) && (stmt[2] === 'get' || stmt[2] === 'set') && stmt.length === 4 && isNode(stmt[3]) && stmt[3][0] === 'object' && stmt[3].length === 2) {
+    const pair = stmt[3][1];
+    if (isNode(pair) && pair[0] === ':' && pair.length === 3 && isFunc(pair[2])) return [{ pair, form: stmt[2], typed: pair[2] }];
   }
   return [];
 };

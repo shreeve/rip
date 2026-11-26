@@ -2074,8 +2074,8 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       // existence check (`a?` → `a != null`) — real tokens and nodes.
       // A juxta argument after that existence token (`f? x`) is an
       // optional call: `?` is IMPLICIT_FUNC, so implicitCalls wraps the
-      // args and the grammar lowers `Value ? Arguments` to optcall
-      // (same as `f?(x)`). Bare `a?` with no juxta arg stays existence.
+      // args and the grammar builds `Value ? Arguments` as the optional
+      // call (same as `f?(x)`). Bare `a?` with no juxta arg stays existence.
       if (!pendingSpaced) {
         if (text[pos + 1] === '(' || text[pos + 1] === '[') {
           push('?.', '?', pos, pos + 1);
