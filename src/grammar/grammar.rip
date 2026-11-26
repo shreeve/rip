@@ -568,7 +568,8 @@ grammar =
 
   This: [
     o 'THIS'
-    o '@'   , '"this"'
+    # `@` alone is the `this` leaf, spelled `@`.
+    o '@'   , '["this", {}, "@"]', 'this: _, _, _'
   ]
 
   # No object role: the `@` spelling has no object to name, and a
@@ -1497,9 +1498,9 @@ displays =
 # null:
 #
 #   leaf              a raw token string
-#   expr              a raw token string, a node of any kind that is
-#                     not a part, or an array built by an executable
-#                     action (the Parenthetical and postfix if-else rules)
+#   expr              a node of any kind that is not a part, or an array
+#                     built by an executable action (the Parenthetical
+#                     and postfix if-else rules); never a raw string
 #   bool              true or false
 #   null              null alone
 #   descriptor        a plain object (the schema sub-parser's descriptor)
@@ -1585,7 +1586,7 @@ kinds =
   'import':
     forms: ['"import" attrs:{} spec:name|as|[name|as|"default"]|none extra:as|[name|as]|none attributes:withattrs|none source:string']
     side: ['typeOnly']
-  'index':         forms: ['operator:"[]" attrs:{} object:expr key:expr']
+  'index':         forms: ['operator:"[]" attrs:{} object:expr|"this"|"super" key:expr']
   'loop':
     forms: [
       '"loop" attrs:{over:"forever"} vars:none count:none step:none guard:none body:block'
@@ -1593,7 +1594,7 @@ kinds =
     ]
   'map':           forms: ['"map" attrs:{} ...pairs:pair|splat']
   'maybe-dammit':  forms: ['"call" attrs:{opt await} callee:expr ...args:expr|splat'], side: ['operator']
-  'member':        forms: ['operator:"."|"?." attrs:{} object:expr property:name|string']
+  'member':        forms: ['operator:"."|"?." attrs:{} object:expr|"this"|"super"|"import"|"new" property:name|string']
   'object':        forms: ['"object" attrs:{} ...pairs:pair|splat']
   'offer':         forms: ['"offer" attrs:{} value:expr']
   'optcall':       forms: ['"call" attrs:{opt} callee:expr ...args:expr|splat']
@@ -1648,7 +1649,7 @@ kinds =
   'string':        forms: ['"string" attrs:{} raw:leaf']
   'regex':         forms: ['"regex" attrs:{} raw:leaf']
   'lit':           forms: ['"lit" attrs:{} raw:"true"|"false"|"null"|"undefined"']
-  'this':          forms: ['"this" attrs:{} raw:"this"']
+  'this':          forms: ['"this" attrs:{} raw:"this"|"@"']
   'statement':     forms: ['"statement" attrs:{} raw:"break"|"continue"|"debugger"']
 
 # ==============================================================================

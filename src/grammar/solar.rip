@@ -488,7 +488,7 @@ class Generator
         return false unless a.t is 'attrs' and a.keys.join(' ') is flags.join(' ')
         flags.every (k) -> if a.values?[k]? then value[k] in a.values[k] else value[k] is true
     else
-      type.alts.some (a) -> a.t is 'leaf' or a.t is 'expr' or (a.t is 'lit' and a.value is value)
+      type.alts.some (a) -> a.t is 'leaf' or (a.t is 'lit' and a.value is value)
 
   _processOperators!: (ops) ->
     for precedence, i in ops

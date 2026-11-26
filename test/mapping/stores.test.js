@@ -732,4 +732,13 @@ describe('PrimitiveStore ownership skips leaves', () => {
       ['y', 'assign'],
     ]);
   });
+
+  test('a literal word passed through a rule is a primitive like a name', () => {
+    const r = parser.parse('x = null', { primitives: true });
+    const rows = new Map(r.stores.nodes.map((n) => [n.nodeId, n]));
+    expect(r.stores.primitives.map((p) => [String(p.value), rows.get(p.nodeId).semanticKind])).toEqual([
+      ['x', 'assign'],
+      ['null', 'assign'],
+    ]);
+  });
 });

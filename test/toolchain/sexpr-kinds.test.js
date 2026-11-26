@@ -177,6 +177,23 @@ test('every token value is a leaf node with its own row over the token', () => {
   ]);
 });
 
+test('`@` alone is the this leaf spelled `@`; `@x` keeps the receiver word', () => {
+  const result = parse('a = @\nb = @x\n');
+  const [, , first, second] = result.sexpr;
+  expect(first[3]).toEqual(['this', {}, '@']);
+  const row = result.stores.nodes[result.stores.nodeIds.get(first[3]) - 1];
+  expect([row.semanticKind, row.sourceStart, row.sourceEnd]).toEqual(['this', 4, 5]);
+  expect(second[3]).toEqual(['.', {}, 'this', n('x')]);
+});
+
+test('an expression slot never takes a raw string', () => {
+  const result = parse('x = a + b\n');
+  nodeOfKind(result, 'binary')[2] = 'a';
+  expect(messages(result)).toEqual([
+    expect.stringMatching(/^binary node fits no form; .*element 2 is leaf "a", the slot takes left:expr/),
+  ]);
+});
+
 test('a leaf whose raw value its form does not list rejects', () => {
   const result = parse('x = true\n');
   nodeOfKind(result, 'lit')[2] = 'maybe';
