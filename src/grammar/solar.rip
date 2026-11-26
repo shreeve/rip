@@ -345,12 +345,14 @@ class Generator
     unless entry?
       problems.push "  • #{rule}: undeclared kind '#{kind}'"
       return
+    # A kind some template names is used even when that template misfits.
+    usedForms.set kind, Set.new() unless usedForms.has kind
     best = null
     fits = false
     for form, i in entry.forms
       result = @_fitLayout layout, form.slots
       if result.ok
-        (usedForms.get(kind) or usedForms.set(kind, Set.new()).get(kind)).add i
+        usedForms.get(kind).add i
         fits = true
       else if not best? or result.depth > best.result.depth
         best = {result, form}

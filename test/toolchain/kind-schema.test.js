@@ -21,6 +21,8 @@ test('a template no form admits fails generation, naming the closest form', () =
   const renamed = { ...state, forms: ['"state" target:expr init:expr'] };
   expect(() => new Generator(withKind('state', renamed)))
     .toThrow(/kind 'state' has no form for this template — closest is \("state" target:expr init:expr\): element 2: expected 'init', got 'value'/);
+  // A misfitting template still counts as a use of its kind.
+  expect(() => new Generator(withKind('state', renamed))).not.toThrow(/declared kind 'state' is used by no rule/);
 });
 
 test('a constant the form does not admit fails generation', () => {
