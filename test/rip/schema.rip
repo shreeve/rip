@@ -1078,7 +1078,7 @@ test "transform: derives from other raw keys", '''
 
 test "transform: coerces wire string to Date via constructor", '''
   Order = schema :shape
-    shippedAt? datetime, -> if it.shippedAt then new Date(it.shippedAt) else null
+    shippedAt? datetime, -> if it.shippedAt then Date.new(it.shippedAt) else null
   out = Order.parse({shippedAt: "2026-04-18T10:00:00Z"})
   out.shippedAt instanceof Date
   ''', true
@@ -1116,7 +1116,7 @@ test "transform: output validated against declared type", '''
 
 test "transform: thrown error surfaces as issue", '''
   X = schema
-    x! -> throw new Error("bad")
+    x! -> throw Error.new("bad")
   r = X.safe({})
   [r.ok, r.errors[0].error, r.errors[0].message]
   ''', [false, 'transform', 'bad']
@@ -1279,7 +1279,7 @@ test "ensure: truthy non-boolean (object, array) pass", '''
 test "ensure: thrown exception becomes ensure issue with user message", '''
   X = schema :shape
     name!
-    @ensure "custom msg", (u) -> throw new Error("boom")
+    @ensure "custom msg", (u) -> throw Error.new("boom")
   r = X.safe({name: "x"})
   [r.ok, r.errors[0].error, r.errors[0].message]
   ''', [false, "ensure", "custom msg"]
@@ -1335,7 +1335,7 @@ test "ensure: mixed inline and array forms in same schema", '''
 test "ensure: short-circuits when field validation fails", '''
   X = schema :shape
     name! 1..50
-    @ensure "never seen", (u) -> throw new Error("should not run")
+    @ensure "never seen", (u) -> throw Error.new("should not run")
   r = X.safe({})
   [r.ok, r.errors[0].error]
   ''', [false, "required"]
@@ -4941,7 +4941,7 @@ test "@ensure!: async predicates run concurrently; all failures collect in order
 test "@ensure!: rejected async predicate counts as failure with declared message", '''
   X = schema
     n! integer
-    @ensure! "boom guard", (u) -> Promise.reject(new Error("io"))
+    @ensure! "boom guard", (u) -> Promise.reject(Error.new("io"))
   r = X.safeAsync! {n: 1}
   [r.ok, r.errors[0].message]
 ''', [false, "boom guard"]

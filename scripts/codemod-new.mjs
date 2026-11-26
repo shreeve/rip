@@ -58,10 +58,88 @@ async function pinnedCompiler() {
     if (!existsSync(dir)) renameSync(staging, dir);
     else rmSync(staging, { recursive: true, force: true });
   }
-  return import(join(dir, 'src/compiler.js'));
+  return {
+    ...await import(join(dir, 'src/compiler.js')),
+    ...await import(join(dir, 'src/types.js')),
+    ...await import(join(dir, 'src/implicit.js')),
+    ...await import(join(dir, 'src/lexer.js')),
+    ...await import(join(dir, 'src/parser.js')),
+    ...await import(join(dir, 'src/stores.js')),
+  };
 }
 
-const { compile } = await pinnedCompiler();
+const engine = await pinnedCompiler();
+const { compile } = engine;
+
+// A schema body is captured whole by the lexer, and each function body in
+// it (a transform, a hook, a method) is parsed on its own when the schema
+// emits; the module's tokens and stores never hold it. Each captured token
+// list is a parse context of its own, sub-parsed here exactly as the
+// engine's schemaSubParse does, so its constructions have spans too.
+function capturedBodies(tokens) {
+  const out = [];
+  const isTokenList = (x) => Array.isArray(x) && x.length > 0 &&
+    x.every((t) => t && typeof t === 'object' && typeof t.kind === 'string' && typeof t.start === 'number');
+  const walk = (x, seen) => {
+    if (!x || typeof x !== 'object' || seen.has(x)) return;
+    seen.add(x);
+    if (isTokenList(x)) { out.push(x); return; }
+    for (const v of Array.isArray(x) ? x : Object.values(x)) walk(v, seen);
+  };
+  for (const t of tokens) if (t.kind === 'SCHEMA_BODY') walk(t.value?.entries, new Set());
+  return out;
+}
+
+function subParse(bodyTokens, source) {
+  let toks = bodyTokens.map((t) => ({ ...t }));
+  if (toks[0]?.kind === 'INDENT') {
+    let d = 0;
+    let lastOutdent = -1;
+    for (let k = 0; k < toks.length; k++) {
+      if (toks[k].kind === 'INDENT') d++;
+      else if (toks[k].kind === 'OUTDENT' && --d === 0) { lastOutdent = k; break; }
+    }
+    if (lastOutdent === toks.length - 1) toks = toks.slice(1, -1);
+  }
+  let nextId = 1e9;
+  const mintId = () => nextId++;
+  const fail = (message, at) => { throw Object.assign(new Error(`schema: ${message}`), { start: at, end: at }); };
+  engine.rewriteTypes(toks, mintId, source, fail);
+  engine.implicitBlocks(toks, mintId);
+  engine.tagPostfixConditionals(toks);
+  engine.implicitObjects(toks, mintId);
+  engine.implicitCalls(toks, mintId);
+  const parser = engine.Parser();
+  parser.lexer = {
+    tokens: toks, index: 0, text: '', loc: null,
+    setInput() { this.index = 0; },
+    lex() {
+      const t = this.tokens[this.index];
+      if (!t) return null;
+      this.index++;
+      this.text = t.value;
+      this.loc = { start: t.start, end: t.end };
+      return t.kind;
+    },
+  };
+  const result = parser.parse('');
+  if (result.diagnostics.length > 0) throw new Error(`schema body does not parse: ${result.diagnostics[0].message}`);
+  return { tokens: toks, stores: new engine.Stores(result.stores) };
+}
+
+function parseContexts(source, path) {
+  const result = compile(source, { path, runtimeDelivery: 'none' });
+  const contexts = [{ tokens: result.tokens, stores: result.stores }];
+  // Captured bodies come from a fresh lex: emission sub-parses each body
+  // and its passes retag the captured tokens in place.
+  const pristine = engine.tokenize(source, path).tokens;
+  for (let i = 0; i < contexts.length; i++) {
+    for (const body of capturedBodies(i === 0 ? pristine : contexts[i].tokens)) {
+      if (body.some((t) => t.kind === 'NEW' || t.kind === 'SCHEMA_BODY')) contexts.push(subParse(body, source));
+    }
+  }
+  return contexts;
+}
 
 const VERBS = new Set(['test', 'code', 'fail', 'type']);
 
@@ -104,8 +182,14 @@ function outputsOf(source, path) {
 // Throws (with every refusal) when a NEW token has no construction the
 // tree can place.
 export function constructionEdits(source, path) {
-  const result = compile(source, { path, runtimeDelivery: 'none' });
-  const { tokens, stores } = result;
+  const edits = [];
+  const refusals = [];
+  for (const context of parseContexts(source, path)) contextEdits(source, path, context, edits, refusals);
+  if (refusals.length > 0) throw Object.assign(new Error(refusals.join('\n')), { refusals });
+  return { edits, count: edits.length / 2 };
+}
+
+function contextEdits(source, path, { tokens, stores }, edits, refusals) {
   const real = tokens.filter((t) => !t.generated && typeof t.start === 'number');
   const parents = new Map();
   for (const n of stores.nodes) {
@@ -123,8 +207,6 @@ export function constructionEdits(source, path) {
     return r?.childNodeId == null ? null : stores.node(r.childNodeId);
   };
 
-  const edits = [];
-  const refusals = [];
   real.forEach((t, i) => {
     if (t.kind !== 'NEW') return;
     const next = real[i + 1];
@@ -169,8 +251,6 @@ export function constructionEdits(source, path) {
     edits.push({ start: t.start, end: next.start, text: '', depth: insert.depth });
     edits.push({ start: insert.start, end: insert.start, text: insert.text, depth: insert.depth });
   });
-  if (refusals.length > 0) throw Object.assign(new Error(refusals.join('\n')), { refusals });
-  return { edits, count: edits.length / 2 };
 }
 
 // Edits apply in offset order; insertions at one offset apply innermost
@@ -200,7 +280,7 @@ export function rewriteProgram(source, path) {
         `--- program ---\n${source}\n--- rewritten ---\n${output}\n--- before (${face}) ---\n${before[face]}\n--- after (${face}) ---\n${after[face]}`);
     }
   }
-  const left = compile(output, { path, runtimeDelivery: 'none' }).tokens.filter((t) => t.kind === 'NEW' && !t.generated).length;
+  const left = parseContexts(output, path).flatMap((c) => c.tokens).filter((t) => t.kind === 'NEW' && !t.generated).length;
   if (left !== 0) throw new Error(`${path}: ${left} \`new\` token(s) survive the rewrite`);
   return { output, count, edits };
 }
@@ -393,9 +473,11 @@ function rewriteRows(source, path, report) {
 }
 
 function hasNewToken(program) {
-  // The lexer alone: a program that does not parse still tokenizes.
+  // The lexer alone: a program that does not parse still tokenizes. One
+  // that does not even tokenize is judged by its text, conservatively.
   try {
-    return compile(program, { runtimeDelivery: 'none', tolerant: true }).tokens.some((t) => t.kind === 'NEW' && !t.generated);
+    const { tokens } = engine.tokenize(program);
+    return [tokens, ...capturedBodies(tokens)].some((list) => list.some((t) => t.kind === 'NEW' && !t.generated));
   } catch {
     return /(^|[^\w$.])new\s/.test(program);
   }
