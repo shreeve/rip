@@ -214,7 +214,11 @@ describe('no reactive class members', () => {
 describe('a computed object-literal value groups', () => {
 });
 
-describe('the heads are spellable — semanticKind is the discriminator (D6)', () => {
+// A call never spells a construct head (every call is ["call", …]),
+// but a plumbing list does: a specifier, parameter or condition list
+// begins with the user's own first name. The NodeStore kind is what
+// tells such a list from the construct its first name spells.
+describe('a plumbing list can spell a construct head — semanticKind is the discriminator (D6)', () => {
 
   test('a user call does not trigger reactive delivery (zero-cost holds for impersonating spellings)', () => {
     for (const mode of ['none', 'import', 'inline']) {
@@ -229,6 +233,29 @@ describe('the heads are spellable — semanticKind is the discriminator (D6)', (
       const { runtimes } = fullCompile(`${head} = (a, b) -> b\nx = ${head}(0, pp)`, { runtimeDelivery: 'import' });
       expect([...runtimes]).toEqual(['stdlib']);
     }
+  });
+
+  test('an import list beginning with a reactive head imports plain bindings', () => {
+    for (const head of ['state', 'computed']) {
+      const { code, runtimes } = fullCompile(`import { ${head}, dispatch, subscribe } from "./store.js"\ndispatch("go")`, { runtimeDelivery: 'import' });
+      expect(code).toContain('dispatch("go")');
+      expect(code).not.toContain('.value');
+      expect([...runtimes]).toEqual([]);
+    }
+  });
+
+  test('a when-condition list beginning with a construct head still delivers what its names read', () => {
+    for (const head of ['cast', 'satisfies', 'gate']) {
+      const { runtimes } = fullCompile(`${head} = 0\nv = 1\nswitch v\n  when ${head}, 5, sleep then 1\n`, { runtimeDelivery: 'import' });
+      expect([...runtimes]).toEqual(['stdlib']);
+    }
+  });
+
+  test('condition, export and parameter lists beginning with `state` compile as lists', () => {
+    expect(() => fullCompile('state = a = b = 0\nv = 1\nswitch v\n  when state, a, b then 1\n')).not.toThrow();
+    expect(() => fullCompile('state = a = b = 0\nexport { state, a, b }\n')).not.toThrow();
+    const { runtimes } = fullCompile('f = (state, a, b) -> a\n', { runtimeDelivery: 'import' });
+    expect([...runtimes]).toEqual([]);
   });
 });
 

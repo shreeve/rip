@@ -322,8 +322,9 @@ const isDefNode = (x) => isNode(x) && (x[0] === 'def' || x[0] === 'void-def') &&
 // aliases are visible, and schemaExpr rejects it.
 // `hooks.boundary` is the emitter's scope classifier (scopeBoundary),
 // the one definition of what opens a scope — the reactive and effect
-// heads are spellable shapes that only the NodeStore's semanticKind
-// tells from a call — and `hooks.isBlock` its block test.
+// heads are shapes a plumbing list can spell, which only the
+// NodeStore's semanticKind tells apart — and `hooks.isBlock` its block
+// test.
 // Returns { module, scopes }: `module` as collectSchemaDecls gives it
 // plus the block-nested module-scope declarations, each scope as
 // { owner, keys, decls, parent } — `keys` are the body's own statement

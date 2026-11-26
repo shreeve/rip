@@ -979,6 +979,8 @@ class Generator
         # An attribute record: an object literal of flags, each `true`.
         # Anything else in braces is executable.
         return null unless /^\{\s*(?:[A-Za-z_$][\w$]*\s*:\s*true(?:\s*,\s*[A-Za-z_$][\w$]*\s*:\s*true)*)?\s*\}$/.test t
+        flags = t.match(/[A-Za-z_$][\w$]*(?=\s*:)/g) ?? []
+        return null if Set.new(flags).size isnt flags.length
         elements.push {literal: t, childSlot}
       else if t.startsWith('[') and t.endsWith(']')
         nested = @_templateElements t, true

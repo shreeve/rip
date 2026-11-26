@@ -1,6 +1,7 @@
 // Async/await, the dammit operator, and generators. The dammit
-// operator is an explicit DAMMIT token and an explicit
-// ["dammit!", target] node — the compiler has no hidden channels.
+// operator is an explicit DAMMIT token and an explicit awaited call
+// node (["call", {await: true}, callee]) — the compiler has no hidden
+// channels.
 // The contract here is the emitted JS and its behavior under the
 // module-loader eval (top-level await needs a real module context).
 import { describe, test, expect } from 'bun:test';

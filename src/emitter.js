@@ -295,8 +295,9 @@ const isDefHead = (h) => h === 'def' || h === 'void-def';
 // in a flag slot rather than a nested node. Nested function and class
 // bodies own their own awaits, so the walk stops at them — an effect's
 // body among them: it emits as the effect's own function, async when it
-// awaits. The NodeStore row tells the effect from a user call spelled
-// `effect(a, b)`, so the walk takes the stores. Exported for the same
+// awaits. The NodeStore row identifies the effect (a plumbing list can
+// begin with the name `effect`), so the walk takes the stores. Exported
+// for the same
 // reason as containsYield below: the return type it decides is spelled
 // independently by the face and by the declarations.
 export function containsAwait(sexpr, stores) {
@@ -380,9 +381,9 @@ const isTernary = (x) => isNode(x) && x[0] === '?:' && x.length === 4;
 // letter distinguishes `Counter` from ALLCAPS constants) are
 // component references.
 const isHtmlTag = (name) => { const tag = String(name).split('#')[0]; return TEMPLATE_TAGS.has(tag) || isCustomElementName(tag); };
-// A REAL comprehension node — the loop-spec list (a plain array of
-// ['for-…'] arrays) is a shape no user call constructs; a call of a
-// function NAMED comprehension must keep its call reading everywhere.
+// A comprehension node, by its full shape — the loop-spec list (a plain
+// array of ['for-…'] arrays) — since a plumbing list can begin with the
+// name `comprehension`.
 const isComprehensionNode = (x) =>
   isNode(x) && x[0] === 'comprehension' && x.length === 4 && Array.isArray(x[2]) &&
   x[2].length > 0 && Array.isArray(x[2][0]) && String(x[2][0][0]).startsWith('for-');
@@ -907,11 +908,9 @@ class Emitter {
 
   // ── Reactive declarations ──────────────────────────────────
 
-  // Is this node a REAL reactive declaration — not a user call that
-  // impersonates the head? The heads are spellable shapes
-  // (`["state", target, value]` — `state a, 0` builds the same array),
-  // so the sexpr alone cannot discriminate; the NodeStore semanticKind
-  // can, and is the decider everywhere (the locked-head record).
+  // Is this node a REAL reactive declaration? The head alone cannot say:
+  // a plumbing list (a parameter, specifier or condition list) begins with the user's first name, and `when state, a, b` builds ['state', 'a', 'b']. The
+  // NodeStore semanticKind decides everywhere (the locked-head record).
   isReactiveDecl(x) {
     return Emitter.isReactiveDeclIn(this.stores, x);
   }
@@ -935,12 +934,10 @@ class Emitter {
     return (id !== null ? stores.node(id)?.semanticKind : null) === 'gate';
   }
 
-  // A REAL effect — same discrimination as the reactive
-  // declarations: the head is a spellable sexpr shape (["effect",
-  // target, body] — `effect h, 5` builds the same array), so the
-  // NodeStore semanticKind decides (the locked-head
-  // convention). Covers both the bare form (target null) and
-  // the bound form (the dispose handle).
+  // A REAL effect — the same discrimination as the reactive
+  // declarations (a plumbing list can begin with the name `effect`).
+  // Covers both the bare form (target null) and the bound form (the
+  // dispose handle).
   isEffectDecl(x) {
     return Emitter.isEffectDeclIn(this.stores, x);
   }
@@ -952,10 +949,8 @@ class Emitter {
     return kind === 'effect';
   }
 
-  // A REAL readonly declaration — the same discrimination:
-  // the head is a spellable shape (["readonly", target, value] —
-  // `readonly x, 5` builds the identical array —
-  // the impersonation class), so the NodeStore semanticKind decides.
+  // A REAL readonly declaration — the same discrimination (a plumbing
+  // list can begin with the name `readonly`).
   isReadonlyDecl(x) {
     return Emitter.isReadonlyDeclIn(this.stores, x);
   }
@@ -971,24 +966,18 @@ class Emitter {
   // head spells a construct ('array', 'str', 'map', …) is the REAL
   // construct only when its NodeStore row says so (the grammar rules
   // annotate the semanticKind) or when it has no row at all (emitter-
-  // synthesized lowerings). A user call `array(1)` builds the same
-  // shape through the call rule — its row carries no such kind, so it
-  // falls through to call() and the name stays an ordinary binding.
+  // synthesized lowerings). A plumbing list that begins with such a
+  // name carries a row of no kind.
   lockedHead(node, kind) {
     const id = this.stores.idOf(node);
     if (id === null) return true;
     return this.stores.node(id)?.semanticKind === kind;
   }
 
-  // Any call node: ["call", attrs, callee, ...args].
-  isCallNode(x) {
-    return isCall(x);
-  }
-
   // A REAL postfix type operator — `["cast", value, "T"]` /
-  // `["satisfies", value, "T"]` — and never a call of a function so
-  // named, which spells the identical array. The walks that skip the
-  // operator's type slot ask this, or they would skip a call argument.
+  // `["satisfies", value, "T"]` — never a plumbing list beginning with
+  // either name. The walks that skip the operator's type slot ask this,
+  // or they would skip a list element.
   isPostfixType(x) {
     return Emitter.isPostfixTypeIn(this.stores, x);
   }
@@ -1005,24 +994,22 @@ class Emitter {
 
   // A call standing where a destructuring pattern needs a write target.
   // The pattern is an Array/Object literal reinterpreted as a target, so
-  // the grammar parses any element there; the pattern walks are where a
-  // call can still be told from the pattern shape its callee may spell —
-  // `[cast(a, b)] = x` builds the cast node, `[array(a)] = x` a nested
-  // array pattern. A call's result is never assignable.
+  // the grammar parses any element there. A call's result is never
+  // assignable.
   rejectCallTarget(p) {
     if (isNode(p) && Emitter.CALL_KINDS.has(this.semanticKindOf(p))) {
       throw this.positionedError(p, "emitter: a call cannot be a destructuring target — a pattern element writes a name or a member, and a call's result is neither");
     }
   }
 
-  // An object literal — never a call of a function named `object`.
+  // An object literal.
   isObject(x) {
-    return isObjectShape(x) && !this.isCallNode(x);
+    return isObjectShape(x);
   }
 
-  // A statement block — never a call of a function named `block`.
+  // A statement block.
   isBlock(x) {
-    return isNode(x) && x[0] === 'block' && !this.isCallNode(x);
+    return isNode(x) && x[0] === 'block';
   }
 
   // A constructor spine with no call in it: a name or literal, or a
@@ -1042,10 +1029,9 @@ class Emitter {
     return this.pureSpine(x[1]);
   }
 
-  // A member/index link — `optindex` spells a legal callee, so a call
-  // of a function so named is never a link.
+  // A member/index link.
   isSpine(x) {
-    return isNode(x) && typeof x[0] === 'string' && SPINE_HEADS.has(x[0]) && !this.isCallNode(x);
+    return isNode(x) && typeof x[0] === 'string' && SPINE_HEADS.has(x[0]);
   }
 
   // The semanticKind the grammar annotated on a node's row, or null for
@@ -1055,14 +1041,8 @@ class Emitter {
     return id !== null ? this.stores.node(id)?.semanticKind ?? null : null;
   }
 
-  // A MODULE import statement — not the dynamic-import CALL, whose
-  // node spells the same head ("import" is the keyword's token value:
-  // ["import", url] / ["import", url, options] vs ["import", spec…,
-  // source]). The shapes collide at three elements —
-  // `import(Foo, "./m.js")` builds the same array as
-  // `import Foo from "./m.js"` — so length alone cannot discriminate;
-  // the NodeStore semanticKind decides :
-  // the statement rules annotate 'import', the call rules 'dynimport'.
+  // A MODULE import statement: the node the import rules build
+  // (semanticKind 'import'; a dynamic import is a call).
   isModuleImport(x) {
     return Emitter.isModuleImportIn(this.stores, x);
   }
@@ -1112,7 +1092,7 @@ class Emitter {
       // An effect body is its OWN function scope — declarations inside
       // it collect when the body emits, never here.
       if (this.isEffectDecl(n)) return;
-      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n));
+      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]));
       for (const el of n) walk(el, below);
     };
     for (const n of stmts) walk(n, false);
@@ -1147,7 +1127,7 @@ class Emitter {
         // The body is its own function scope (bare and bound alike).
         return;
       }
-      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n));
+      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]));
       for (const el of n) walk(el, below);
     };
     for (const n of stmts) walk(n, false);
@@ -1180,7 +1160,7 @@ class Emitter {
         walk(n[2], nested);
         return;
       }
-      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n));
+      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]));
       for (const el of n) walk(el, below);
     };
     for (const n of stmts) walk(n, false);
@@ -1520,7 +1500,7 @@ class Emitter {
           }
         }
       }
-      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n));
+      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]));
       for (const el of n) walk(el, below);
     };
     for (const s of stmts) walk(s, false);
@@ -1656,15 +1636,6 @@ class Emitter {
   // binding or parameter, or a component member? The walk is
   // resolveBareRead's, which answers null for a plain binding and for
   // nothing alike.
-  // A hyphenated head names a custom element only on a CALL node: the
-  // compiler's own hyphenated heads (`do-iife`, `loop-n`, …) share the
-  // shape `[head, …]`, and the stores' semanticKind is what tells them
-  // apart.
-  callShapedTagHead(sexpr, tag) {
-    if (TEMPLATE_TAGS.has(tag)) return true;
-    const id = this.stores.idOf(sexpr);
-    return (id !== null ? this.stores.node(id)?.semanticKind : null) === 'call';
-  }
 
   // A positioned render rejection whose node may be a bare string (a
   // tag word carries no span of its own): the open mark positions it.
@@ -1956,7 +1927,7 @@ class Emitter {
         return;
       }
       if (this.isEffectDecl(n)) return;
-      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n));
+      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]));
       for (const el of n) walk(el, below);
     };
     for (const n of stmts) walk(n, false);
@@ -3648,7 +3619,8 @@ class Emitter {
       if (x[0] === 'def-sig') { walk(x[2]); return; }
       if (x[0] === 'type-decl') return;
       if (this.isPostfixType(x)) { walk(x[1]); return; }
-      for (const c of x) walk(c);
+      // A call's head and attribute record are not uses.
+      for (const c of isCall(x) ? x.slice(2) : x) walk(c);
     };
     walk(sexpr);
     if (bound.length === 0 || !source) return;
@@ -4058,8 +4030,7 @@ class Emitter {
 
   // The erased typed wrapper: ["typed-var", target, "T"]. Hyphenated
   // like every invented head (the naming convention) — no identifier
-  // spells it, so no user call can ever build the same shape and the
-  // head ALONE discriminates.
+  // spells it, so the head ALONE discriminates.
   static isTypedWrapper(s) {
     return isNode(s) && s[0] === 'typed-var' && s.length === 3;
   }
@@ -5410,24 +5381,15 @@ class Emitter {
     // statements to be named, so it takes the statement-grouping path
     // below .
     'class': (e, node, ind) => node[1] != null && (e.classStatement(node, ind), true),
-    // Reactive declarations. The heads are spellable, so a
-    // user call `state a, 0` builds the identical array —
-    // the semanticKind check declines it to the expression path (call
-    // emission).
+    // Reactive declarations, effects and readonly declarations: a
+    // plumbing list can spell the heads, and the semanticKind check
+    // declines it.
     'state': (e, node, ind) => e.isReactiveDecl(node) && (e.reactiveDecl(node, ind), true),
     'computed': (e, node, ind) => e.isReactiveDecl(node) && (e.reactiveDecl(node, ind), true),
-    // Effects — the same spellable-head discipline: a user call
-    // `effect h, 5` builds the identical array and declines to call
-    // emission on its semanticKind.
     'effect': (e, node, ind) => e.isEffectDecl(node) && (e.effectStatement(node, ind), true),
-    // Readonly — the same discipline again: `readonly x, 5`
-    // declines to call emission on its semanticKind
     'readonly': (e, node, ind) => e.isReadonlyDecl(node) && (e.readonlyDecl(node, ind), true),
     'void-readonly': (e, node, ind) => e.isReadonlyDecl(node) && (e.readonlyDecl(node, ind), true),
-    // Module imports only (spec + source): the dynamic-import CALL
-    // spells the same head and declines to the expression path on its
-    // semanticKind — length cannot discriminate (`import(Foo, "./m.js")`
-    // and `import Foo from "./m.js"` build the same array).
+    // Module imports (a dynamic import is a call).
     'import': (e, node) => e.isModuleImport(node) && (e.importStatement(node), true),
     'export': (e, node, ind) => (e.exportStatement(node, ind), true),
     'export-default': (e, node, ind) => (e.exportStatement(node, ind), true),
@@ -6309,7 +6271,7 @@ class Emitter {
     // false BEFORE its own dispatch runs, so a stale true can never
     // leak into a deeper statement's handler.
     this.funcBodyStmt = funcBody;
-    if (isNode(node) && !this.isCallNode(node)) {
+    if (isNode(node)) {
       const form = Emitter.STATEMENT_FORMS[node[0]];
       if (form && form(this, node, ind)) {
         this.replDeclEcho(node);
@@ -6545,7 +6507,7 @@ class Emitter {
       // A guarded LOOP emits braced: a loop may open with a hoisted
       // temp (`const _ref = …;` ahead of `for (… in _ref)`), and a
       // braceless `if` would guard only that first statement.
-      const braced = isNode(stmt) && Emitter.LOOP_HEADS.has(stmt[0]) && !this.isCallNode(stmt);
+      const braced = isNode(stmt) && Emitter.LOOP_HEADS.has(stmt[0]);
       this.mark(node, '$self', () => {
         this.b.emit('if (');
         this.mark(node, 'condition', () => this.expr(node[1]));
@@ -8744,10 +8706,7 @@ class Emitter {
     if ((head === 'yield' || head === 'yield-from') && node.length <= 2) return this.yieldExpr(node);
     if (head === 'class') return this.classExpr(node);
     // A reactive declaration lowers to a `const` declaration, which has
-    // no value form — expression positions reject
-    //. A user CALL that impersonates the head
-    // (`state a, 0` — semanticKind 'call') passes through to call
-    // emission below.
+    // no value form — expression positions reject.
     if (this.isReactiveDecl(node)) {
       const op = head === 'state' ? ':=' : '~=';
       throw this.positionedError(node, `emitter: a reactive declaration ('${typeof node[1] === 'string' ? node[1] : '…'} ${op} …') is a statement — it lowers to a const declaration, which has no expression form`);
@@ -8757,8 +8716,7 @@ class Emitter {
         "emitter: a render gate ('<~') can only be used as a direct component body line");
     }
     // A readonly declaration is the same class: it lowers to a const
-    // declaration, which has no expression form. A user CALL impersonating the head passes
-    // through to call emission.
+    // declaration, which has no expression form.
     if (this.isReadonlyDecl(node)) {
       throw this.positionedError(node, `emitter: a readonly declaration ('${typeof node[1] === 'string' ? node[1] : '…'} =! …') is a statement — it lowers to a const declaration, which has no expression form`);
     }
@@ -8776,9 +8734,7 @@ class Emitter {
     // Components. The declaration lowers to an anonymous
     // class expression; render/offer/accept nodes reaching expression
     // position sit OUTSIDE a component's direct body — reject with
-    // the rule, positioned. (User CALLS spelling the heads —
-    // `offer(x)` outside a component — have semanticKind 'call' and
-    // fall through to call emission.)
+    // the rule, positioned.
     if (this.isComponentDecl(node)) return this.componentExpr(node);
     if (this.isRenderNode(node)) {
       throw this.positionedError(node, 'emitter: render blocks can only be used inside a component (as a direct body line)');
@@ -8847,7 +8803,7 @@ class Emitter {
   // (withDeopt): the guard already proved the whole spine non-null.
   optionalGuard(t) {
     if (!isNode(t) || t.length !== 3) return null;
-    if (t[0] === '?.' || (t[0] === 'optindex' && !this.isCallNode(t))) return t;
+    if (t[0] === '?.' || (t[0] === 'optindex')) return t;
     if (t[0] === '.' || t[0] === '[]') return this.optionalGuard(t[1]);
     return null;
   }
@@ -9441,7 +9397,7 @@ class Emitter {
         // so the cell CHECKS and the hover has a value type to present.
         // Other initializers infer through the runtime's generic signature.
         // No `satisfies` here: the type came FROM the value.
-        const t = syntacticLiteralType(value, this.stores);
+        const t = syntacticLiteralType(value);
         if (t !== null) {
           const ro = head === 'computed' ? 'readonly ' : '';
           this.b.tsOnly(() => this.b.emit(`: ${containerType(t, ro, MINTED)}`));
@@ -9675,8 +9631,8 @@ class Emitter {
     if (head === 'await' || (isCall(n) && n[1].await === true) || head === 'yield' || head === 'yield-from') return n;
     if (head === 'for-as' && n[3] === true) return n;
     // An effect is a function too: effectValue pushes its scope and
-    // emits it async when it awaits. Its NodeStore row tells the real
-    // construct from a user call spelled `effect(a, b)`; a BOUND effect
+    // emits it async when it awaits. Its NodeStore row identifies the
+    // real construct; a BOUND effect
     // in an expression position is left to its own diagnostic. A class
     // body owns its awaits, but its HERITAGE evaluates here.
     if (head === 'class') return this.firstAwaitIn(n[2]);
@@ -9790,7 +9746,7 @@ class Emitter {
       return this.effectTailWrites(stmt[2]) || this.effectBranchWrites(stmt[2]);
     }
     if (isAssignHead(h) || isUpdate(stmt)) return true;
-    if (Emitter.LOOP_HEADS.has(h) && !this.isCallNode(stmt)) return true;
+    if (Emitter.LOOP_HEADS.has(h)) return true;
     if (isDefHead(h) || h === 'class' || h === 'export') return true;
     if (this.isModuleImport(stmt) || this.isReactiveDecl(stmt) || this.isReadonlyDecl(stmt)) return true;
     return this.isEffectDecl(stmt) && stmt[1] !== null;
@@ -9847,10 +9803,9 @@ class Emitter {
 
   static SVG_NS = 'http://www.w3.org/2000/svg';
 
-  // The kind checks. `component` is a keyword (its head is not
-  // spellable), but render/offer/accept heads ARE — `offer(x)` outside
-  // a component builds ["offer", …] with semanticKind 'call' — so the
-  // NodeStore semanticKind decides everywhere (the head-naming convention).
+  // The kind checks: a plumbing list can begin with the names `render`,
+  // `offer` or `accept`, so the NodeStore semanticKind decides
+  // everywhere (the head-naming convention).
   isComponentDecl(x) {
     return Emitter.isComponentDeclIn(this.stores, x);
   }
@@ -11464,14 +11419,15 @@ class Emitter {
     };
     if (sexpr[0] === '.' && sexpr.length === 3 && rootsAtThis(sexpr[1])) return true;
     if ((sexpr[0] === '.' || sexpr[0] === '[]') && sexpr.length === 3 && rootsAtLoopReactive(sexpr)) return true;
-    if (isCall(sexpr) && isNode(sexpr[2]) && sexpr[2][0] === '.' && sexpr[2][1] === 'this' && typeof sexpr[2][2] === 'string' &&
+    if (isPlainCall(sexpr) && isNode(sexpr[2]) && sexpr[2][0] === '.' && sexpr[2][1] === 'this' && typeof sexpr[2][2] === 'string' &&
         this.cframes.length > 0 && this.cframes[this.cframes.length - 1].members.has(sexpr[2][2])) {
       return true;
     }
     if (isPlainCall(sexpr) && typeof sexpr[2] === 'string' && this.renderVarKind(sexpr[2]) === null && this.resolveBareRead(sexpr[2]) === 'member') {
       return true;
     }
-    return sexpr.some((c) => this.renderReactive(c));
+    // A call's head and attribute record are not reads.
+    return (isCall(sexpr) ? sexpr.slice(2) : sexpr).some((c) => this.renderReactive(c));
   }
 
   isRenderBinding(stmt) {
@@ -11654,7 +11610,7 @@ class Emitter {
     // rendered as text below; locals are plain identifiers, so a
     // `#id`-carrying head can never be one).
     if (calleeStr !== null && isHtmlTag(calleeStr.split('#')[0]) &&
-        this.renderVarKind(calleeStr) === null && this.callShapedTagHead(sexpr, calleeStr.split('#')[0])) {
+        this.renderVarKind(calleeStr) === null) {
       const [tagName, id] = calleeStr.split('#');
       return this.renderTag(sexpr, tagName || 'div', [], args, id);
     }
@@ -14025,7 +13981,8 @@ class Emitter {
           walk(x[1]);
           return;
         }
-        for (const el of x) walk(el);
+        // A call's head and attribute record are not reads.
+        for (const el of isCall(x) ? x.slice(2) : x) walk(el);
       };
       for (const s of rec.stmts) walk(s);
       if (reads === 0) {
@@ -15480,11 +15437,11 @@ class Emitter {
     return Emitter.chainHeadSlotRest(x);
   }
 
-  // The 'optindex' head is a legal identifier, so the static slot test
-  // alone can hijack a call of a function so named — the instance twin
-  // applies the locked-head discrimination and is what every reading
-  // uses; the static form serves only the grouping lattice, where a
-  // misread call over-groups and never changes meaning.
+  // The 'optindex' head is a legal identifier a plumbing list can begin
+  // with — the instance twin applies the locked-head discrimination and
+  // is what every reading uses; the static form serves only the
+  // grouping lattice, where a misread over-groups and never changes
+  // meaning.
   chainHeadSlotOf(x) {
     if ((x[0] === '.' || x[0] === '?.' || x[0] === '[]') && x.length === 3) return 1;
     if (x[0] === 'optindex' && x.length === 3 && this.lockedHead(x, 'optindex')) return 1;
@@ -18781,8 +18738,9 @@ const containsModelSchema = (sexpr) => {
 // or an effect anywhere in the tree — its emission calls
 // `__state`/`__computed`/`__effect` (references the source never
 // spells). isTrigger is the semanticKind check for exactly those
-// constructs (the heads are spellable; a user call `state a, 0` or
-// `effect h, 5` must not deliver a runtime). Readonly declarations
+// constructs (a plumbing list can spell the heads: `when state, a` or
+// a parameter list `(effect, h)` must not deliver a runtime). Readonly
+// declarations
 // are deliberately NOT triggers: the lowering is a plain `const`
 // that calls no runtime name, so a readonly-only file stays
 // zero-cost. They still count as DECLARATIONS in the reference walk

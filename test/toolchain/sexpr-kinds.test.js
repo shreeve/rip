@@ -182,8 +182,8 @@ test('a call of a construct name is a call, never the construct', () => {
   expect(tree('effect h, 5')).toEqual(['call', {}, 'effect', 'h', '5']);
   expect(tree('readonly x, 5')).toEqual(['call', {}, 'readonly', 'x', '5']);
   expect(tree('block 1, 2')).toEqual(['call', {}, 'block', '1', '2']);
-  // A zero-argument call is no longer the interpolation chunk it once
-  // spelled: `c()` against `"#{c}"`.
+  // A zero-argument call and an interpolation chunk are distinct:
+  // `c()` against `"#{c}"`.
   expect(tree('c()')).toEqual(['call', {}, 'c']);
   expect(tree('"#{c}"')).toEqual(['str', '""', ['c'], '""']);
 });

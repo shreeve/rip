@@ -150,6 +150,8 @@ test('a braced element other than a record of true flags is not a template', () 
     .toThrow(/only flat array construction templates can be annotated/);
   expect(() => tiny('["x", {n: 1}, 1]', 'x: _, _, name', { x: { forms: ['"x" attrs:{n} name:leaf'] } }))
     .toThrow(/only flat array construction templates can be annotated/);
+  expect(() => tiny('["x", {opt: true, opt: true}, 1]', 'x: _, _, name', { x: { forms: ['"x" attrs:{opt} name:leaf'] } }))
+    .toThrow(/only flat array construction templates can be annotated/);
 });
 
 test('malformed attribute-record types reject', () => {

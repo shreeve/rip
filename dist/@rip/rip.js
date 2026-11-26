@@ -10576,9 +10576,6 @@ class Emitter {
       return true;
     return this.stores.node(id)?.semanticKind === kind;
   }
-  isCallNode(x) {
-    return isCall(x);
-  }
   isPostfixType(x) {
     return Emitter.isPostfixTypeIn(this.stores, x);
   }
@@ -10595,10 +10592,10 @@ class Emitter {
     }
   }
   isObject(x) {
-    return isObjectShape(x) && !this.isCallNode(x);
+    return isObjectShape(x);
   }
   isBlock(x) {
-    return isNode(x) && x[0] === "block" && !this.isCallNode(x);
+    return isNode(x) && x[0] === "block";
   }
   pureSpine(x) {
     if (typeof x === "string")
@@ -10613,7 +10610,7 @@ class Emitter {
     return this.pureSpine(x[1]);
   }
   isSpine(x) {
-    return isNode(x) && typeof x[0] === "string" && SPINE_HEADS.has(x[0]) && !this.isCallNode(x);
+    return isNode(x) && typeof x[0] === "string" && SPINE_HEADS.has(x[0]);
   }
   semanticKindOf(node) {
     const id = this.stores.idOf(node);
@@ -10644,7 +10641,7 @@ class Emitter {
       }
       if (this.isEffectDecl(n))
         return;
-      const below = nested || Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n);
+      const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
       for (const el of n)
         walk(el, below);
     };
@@ -10671,7 +10668,7 @@ class Emitter {
         }
         return;
       }
-      const below = nested || Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n);
+      const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
       for (const el of n)
         walk(el, below);
     };
@@ -10697,7 +10694,7 @@ class Emitter {
         walk(n[2], nested);
         return;
       }
-      const below = nested || Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n);
+      const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
       for (const el of n)
         walk(el, below);
     };
@@ -10958,7 +10955,7 @@ class Emitter {
           }
         }
       }
-      const below = nested || Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n);
+      const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
       for (const el of n)
         walk(el, below);
     };
@@ -11050,12 +11047,6 @@ class Emitter {
   }
   isReactiveName(name) {
     return this.resolveBareRead(name) === "reactive";
-  }
-  callShapedTagHead(sexpr, tag) {
-    if (TEMPLATE_TAGS.has(tag))
-      return true;
-    const id = this.stores.idOf(sexpr);
-    return (id !== null ? this.stores.node(id)?.semanticKind : null) === "call";
   }
   renderAmbiguity(node, message) {
     const m = this.b.currentMark;
@@ -11302,7 +11293,7 @@ class Emitter {
       }
       if (this.isEffectDecl(n))
         return;
-      const below = nested || Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n);
+      const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
       for (const el of n)
         walk(el, below);
     };
@@ -12452,7 +12443,7 @@ class Emitter {
         walk(x[1]);
         return;
       }
-      for (const c of x)
+      for (const c of isCall(x) ? x.slice(2) : x)
         walk(c);
     };
     walk(sexpr);
@@ -14335,7 +14326,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
   statementCore(node, ind, funcBody) {
     this.ind = ind;
     this.funcBodyStmt = funcBody;
-    if (isNode(node) && !this.isCallNode(node)) {
+    if (isNode(node)) {
       const form = Emitter.STATEMENT_FORMS[node[0]];
       if (form && form(this, node, ind)) {
         this.replDeclEcho(node);
@@ -14493,7 +14484,7 @@ const ${this.replSlot()} = ${name}${unwrap ? ".value" : ""};`);
   ifStatement(node, ind) {
     if (!this.isBlock(node[2]) && isNode(node[2])) {
       const stmt = node[2][0];
-      const braced = isNode(stmt) && Emitter.LOOP_HEADS.has(stmt[0]) && !this.isCallNode(stmt);
+      const braced = isNode(stmt) && Emitter.LOOP_HEADS.has(stmt[0]);
       this.mark(node, "$self", () => {
         this.b.emit("if (");
         this.mark(node, "condition", () => this.expr(node[1]));
@@ -16535,7 +16526,7 @@ ${pad}${into}.push(...${tmp});`);
   optionalGuard(t) {
     if (!isNode(t) || t.length !== 3)
       return null;
-    if (t[0] === "?." || t[0] === "optindex" && !this.isCallNode(t))
+    if (t[0] === "?." || t[0] === "optindex")
       return t;
     if (t[0] === "." || t[0] === "[]")
       return this.optionalGuard(t[1]);
@@ -16940,7 +16931,7 @@ ${pad}${into}.push(...${tmp});`);
         const ro = head === "computed" ? "readonly " : "";
         this.tsAnnotate(node, "annotation", containerType(this.annotationText(node), ro, MINTED));
       } else if (this.ts) {
-        const t = syntacticLiteralType(value, this.stores);
+        const t = syntacticLiteralType(value);
         if (t !== null) {
           const ro = head === "computed" ? "readonly " : "";
           this.b.tsOnly(() => this.b.emit(`: ${containerType(t, ro, MINTED)}`));
@@ -17164,7 +17155,7 @@ ${pad}${into}.push(...${tmp});`);
     }
     if (isAssignHead(h) || isUpdate(stmt))
       return true;
-    if (Emitter.LOOP_HEADS.has(h) && !this.isCallNode(stmt))
+    if (Emitter.LOOP_HEADS.has(h))
       return true;
     if (isDefHead(h) || h === "class" || h === "export")
       return true;
@@ -18501,13 +18492,13 @@ ${pad}${into}.push(...${tmp});`);
       return true;
     if ((sexpr[0] === "." || sexpr[0] === "[]") && sexpr.length === 3 && rootsAtLoopReactive(sexpr))
       return true;
-    if (isCall(sexpr) && isNode(sexpr[2]) && sexpr[2][0] === "." && sexpr[2][1] === "this" && typeof sexpr[2][2] === "string" && this.cframes.length > 0 && this.cframes[this.cframes.length - 1].members.has(sexpr[2][2])) {
+    if (isPlainCall(sexpr) && isNode(sexpr[2]) && sexpr[2][0] === "." && sexpr[2][1] === "this" && typeof sexpr[2][2] === "string" && this.cframes.length > 0 && this.cframes[this.cframes.length - 1].members.has(sexpr[2][2])) {
       return true;
     }
     if (isPlainCall(sexpr) && typeof sexpr[2] === "string" && this.renderVarKind(sexpr[2]) === null && this.resolveBareRead(sexpr[2]) === "member") {
       return true;
     }
-    return sexpr.some((c) => this.renderReactive(c));
+    return (isCall(sexpr) ? sexpr.slice(2) : sexpr).some((c) => this.renderReactive(c));
   }
   isRenderBinding(stmt) {
     return isNode(stmt) && RENDER_BINDING_HEADS.has(stmt[0]) && stmt.length === 3 && typeof stmt[1] === "string" && isIdentifierName(stmt[1]);
@@ -18629,7 +18620,7 @@ ${pad}${into}.push(...${tmp});`);
         throw this.renderSpreadError(args[0]);
       return this.renderTextExpr(args[0] ?? "undefined", sexpr, true);
     }
-    if (calleeStr !== null && isHtmlTag2(calleeStr.split("#")[0]) && this.renderVarKind(calleeStr) === null && this.callShapedTagHead(sexpr, calleeStr.split("#")[0])) {
+    if (calleeStr !== null && isHtmlTag2(calleeStr.split("#")[0]) && this.renderVarKind(calleeStr) === null) {
       const [tagName, id] = calleeStr.split("#");
       return this.renderTag(sexpr, tagName || "div", [], args, id);
     }
@@ -20387,7 +20378,7 @@ ${this.replayPad}}` : " }");
           walk(x[1]);
           return;
         }
-        for (const el of x)
+        for (const el of isCall(x) ? x.slice(2) : x)
           walk(el);
       };
       for (const s of rec.stmts)
@@ -34219,7 +34210,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "f39cde1760e72eef";
+var compilerBuild = () => "4080640bade0e004";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
