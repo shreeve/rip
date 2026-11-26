@@ -43,7 +43,9 @@
 // spellings and with `.new` lowering a pure spine bare — extracted once
 // from this script's own repository into the temp directory. The script
 // therefore runs against files anywhere, from any revision that holds
-// PINNED.
+// PINNED. At PINNED the two spellings type a component member differently
+// on the TS face (`X.new()` reaches InstanceType only later), so such a
+// member is refused rather than proven; convert it by hand.
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';

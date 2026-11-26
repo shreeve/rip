@@ -7987,7 +7987,7 @@ function rejectReservedWords(tokens, text, fail) {
       if (text[t.end] === ".")
         fail("'new.' heads only `new.target`", t.start, t.end);
       const ctor = ["IDENTIFIER", "@", "THIS", "SUPER", "(", "RESERVED"].includes(tokens[i + 1]?.kind);
-      fail(ctor ? "construction is spelled `X.new(…)` — `new X` is not Rip" : "'new' is reserved — construction is spelled `X.new(…)`", t.start, t.end);
+      fail(ctor ? "construction is spelled `X.new(…)` — `new X` is not Rip" : "'new' is reserved — construction is spelled `X.new(…)`; a method named new is the member `new: ->`, called as `o['new']()`", t.start, t.end);
     }
     fail(`'${t.value}' is reserved and not supported yet`, t.start);
   }
@@ -34194,7 +34194,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "5f8d60158e03b88b";
+var compilerBuild = () => "5fc57d5debd3a312";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

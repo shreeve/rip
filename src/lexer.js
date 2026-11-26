@@ -2514,7 +2514,7 @@ export function rejectReservedWords(tokens, text, fail) {
       // construction; anywhere else (`{new}`) it is a reserved word.
       const ctor = ['IDENTIFIER', '@', 'THIS', 'SUPER', '(', 'RESERVED'].includes(tokens[i + 1]?.kind);
       fail(ctor ? "construction is spelled `X.new(…)` — `new X` is not Rip"
-        : "'new' is reserved — construction is spelled `X.new(…)`", t.start, t.end);
+        : "'new' is reserved — construction is spelled `X.new(…)`; a method named new is the member `new: ->`, called as `o['new']()`", t.start, t.end);
     }
     fail(`'${t.value}' is reserved and not supported yet`, t.start);
   }

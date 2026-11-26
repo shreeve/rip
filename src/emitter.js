@@ -1026,9 +1026,9 @@ class Emitter {
     return isNode(x) && x[0] === 'block' && !this.isCallNode(x);
   }
 
-  // A constructor spine with no call in it: a name, or a member/index
-  // chain rooted at one. Only such a spine may stand bare as the
-  // constructor of `.new`.
+  // A constructor spine with no call in it: a name or literal, or a
+  // member/index chain rooted at one. Only such a spine may stand bare as
+  // the constructor of `.new`.
   // An index whose read lowers to a call — a range (`.slice()`), a
   // negative literal (`.at(-n)`), a regex key (the match read) — is a
   // call in the output, so it is not pure: printed bare, `new` would
