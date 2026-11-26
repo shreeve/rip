@@ -14,7 +14,15 @@
 // where a slot admits `expr`, and the walk still validates every
 // kinded node inside it.
 
-import { kinds as shippedKinds, executable as shippedExecutable } from './parser.js';
+import { kinds as shippedKinds, executable as shippedExecutable, leafKinds } from './parser.js';
+
+// ── leaves ──────────────────────────────────────────────────────────
+// A leaf: [kind, {}, raw], a token's value as a node of its own (the
+// grammar's `leaves` table names the kinds). leafValue reads its raw
+// value and passes any other value through.
+export const LEAF_KINDS = new Set(leafKinds);
+export const isLeaf = (x) => Array.isArray(x) && x.length === 3 && LEAF_KINDS.has(x[0]) && isAttrs(x[1]);
+export const leafValue = (x) => (isLeaf(x) ? x[2] : x);
 
 // ── call shapes ─────────────────────────────────────────────────────
 // A call: ["call", attrs, callee, ...args]. The attribute record says

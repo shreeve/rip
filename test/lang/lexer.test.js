@@ -283,7 +283,7 @@ describe('collection tokens', () => {
     parser.lexer = makeParserLexer();
     const r = parser.parse('x [0]');
     expect(r.diagnostics).toEqual([]);
-    expect(JSON.stringify(r.sexpr)).toBe(JSON.stringify(['program', {}, ['call', {}, 'x', ['array', {}, '0']]]));
+    expect(JSON.stringify(r.sexpr)).toBe(JSON.stringify(['program', {}, ['call', {}, ['name', {}, 'x'], ['array', {}, ['num', {}, '0']]]]));
   });
 
   test('mismatched closers fail loudly', () => {

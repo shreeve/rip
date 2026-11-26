@@ -14,12 +14,13 @@
 import { makeParserLexer } from './lexer.js';
 import { Parser } from './parser.js';
 import { descriptorSegments, foldDerivedSchemas } from './schema.js';
+import { leafValue } from './sexpr.js';
 
 const BEHAVIOR_TAGS = new Set([
   'computed', 'method', 'hook', 'ensure', 'derived', 'scope', 'defaultScope',
 ]);
 
-const foldStr = (n) => (n && n.valueOf ? n.valueOf() : n);
+const foldStr = (n) => { const v = leafValue(n); return v && v.valueOf ? v.valueOf() : v; };
 
 const schemaBindingsOf = (sexpr) => {
   const byName = new Map();

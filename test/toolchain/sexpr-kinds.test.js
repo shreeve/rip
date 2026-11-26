@@ -16,6 +16,12 @@ import { validateSexpr } from '../../src/sexpr.js';
 import { packageInputs, rowInputs } from '../support/consumer-hashes.js';
 
 const ROOT = join(import.meta.dir, '../..');
+
+// Leaves: the driver builds each token value as [kind, {}, raw].
+const n = (raw) => ['name', {}, raw];
+const num = (raw) => ['num', {}, raw];
+const str = (raw) => ['string', {}, raw];
+
 parser.lexer = makeParserLexer();
 
 const parse = (src) => {
@@ -145,6 +151,40 @@ test('an element past the form arity rejects', () => {
   ]);
 });
 
+test('every token value is a leaf node with its own row over the token', () => {
+  const src = 'x = f 1, "a", /b/, true, null, undefined, this\nloop\n  break\n';
+  const result = parse(src);
+  const rows = new Map(result.stores.nodes.map((row) => [row.nodeId, row]));
+  const leaves = [];
+  const walk = (node) => {
+    if (!Array.isArray(node)) return;
+    const row = rows.get(result.stores.nodeIds.get(node));
+    if (row?.ruleId === 0) leaves.push([node, row.semanticKind, src.slice(row.sourceStart, row.sourceEnd)]);
+    node.forEach(walk);
+  };
+  walk(result.sexpr);
+  expect(leaves).toEqual([
+    [n('x'), 'name', 'x'],
+    [n('f'), 'name', 'f'],
+    [num('1'), 'num', '1'],
+    [str('"a"'), 'string', '"a"'],
+    [['regex', {}, '/b/'], 'regex', '/b/'],
+    [['lit', {}, 'true'], 'lit', 'true'],
+    [['lit', {}, 'null'], 'lit', 'null'],
+    [['lit', {}, 'undefined'], 'lit', 'undefined'],
+    [['this', {}, 'this'], 'this', 'this'],
+    [['statement', {}, 'break'], 'statement', 'break'],
+  ]);
+});
+
+test('a leaf whose raw value its form does not list rejects', () => {
+  const result = parse('x = true\n');
+  nodeOfKind(result, 'lit')[2] = 'maybe';
+  expect(messages(result)).toEqual([
+    expect.stringMatching(/^lit node fits no form; closest \("lit" attrs:\{\} raw:"true"\|"false"\|"null"\|"undefined"\): element 2 is leaf "maybe"/),
+  ]);
+});
+
 test('a wrong constant head rejects', () => {
   const result = parse('loop\n  p 1\n');
   nodeOfKind(result, 'loop')[0] = 'loop-x';
@@ -164,28 +204,28 @@ test('a root that is not a program rejects', () => {
 
 test('every call is ["call", attrs, callee, ...args], and the attribute record carries opt and await', () => {
   const tree = (src) => parse(src).sexpr[2];
-  expect(tree('f a')).toEqual(['call', {}, 'f', 'a']);
-  expect(tree('f?.(a)')).toEqual(['call', { opt: true }, 'f', 'a']);
-  expect(tree('f? a')).toEqual(['call', { opt: true }, 'f', 'a']);
-  expect(tree('f!')).toEqual(['call', { await: true }, 'f']);
-  expect(tree('f?! a')).toEqual(['call', { opt: true, await: true }, 'f', 'a']);
-  expect(tree('x = import("m")')[3]).toEqual(['call', {}, 'import', '"m"']);
-  expect(tree('x = import!("m")')[3]).toEqual(['call', { await: true }, 'import', '"m"']);
+  expect(tree('f a')).toEqual(['call', {}, n('f'), n('a')]);
+  expect(tree('f?.(a)')).toEqual(['call', { opt: true }, n('f'), n('a')]);
+  expect(tree('f? a')).toEqual(['call', { opt: true }, n('f'), n('a')]);
+  expect(tree('f!')).toEqual(['call', { await: true }, n('f')]);
+  expect(tree('f?! a')).toEqual(['call', { opt: true, await: true }, n('f'), n('a')]);
+  expect(tree('x = import("m")')[3]).toEqual(['call', {}, 'import', str('"m"')]);
+  expect(tree('x = import!("m")')[3]).toEqual(['call', { await: true }, 'import', str('"m"')]);
   const ctor = parse('class A extends B\n  constructor: -> super(1)\n').sexpr[2][4][2][2][3][3][2];
-  expect(ctor).toEqual(['call', {}, 'super', '1']);
+  expect(ctor).toEqual(['call', {}, 'super', num('1')]);
 });
 
 test('a call of a construct name is a call, never the construct', () => {
   const tree = (src) => parse(src).sexpr[2];
-  expect(tree('state a, 0')).toEqual(['call', {}, 'state', 'a', '0']);
-  expect(tree('a := 0')).toEqual(['state', {}, 'a', '0']);
-  expect(tree('effect h, 5')).toEqual(['call', {}, 'effect', 'h', '5']);
-  expect(tree('readonly x, 5')).toEqual(['call', {}, 'readonly', 'x', '5']);
-  expect(tree('block 1, 2')).toEqual(['call', {}, 'block', '1', '2']);
+  expect(tree('state a, 0')).toEqual(['call', {}, n('state'), n('a'), num('0')]);
+  expect(tree('a := 0')).toEqual(['state', {}, n('a'), num('0')]);
+  expect(tree('effect h, 5')).toEqual(['call', {}, n('effect'), n('h'), num('5')]);
+  expect(tree('readonly x, 5')).toEqual(['call', {}, n('readonly'), n('x'), num('5')]);
+  expect(tree('block 1, 2')).toEqual(['call', {}, n('block'), num('1'), num('2')]);
   // A zero-argument call and an interpolation chunk are distinct:
   // `c()` against `"#{c}"`.
-  expect(tree('c()')).toEqual(['call', {}, 'c']);
-  expect(tree('"#{c}"')).toEqual(['str', {}, '""', ['c'], '""']);
+  expect(tree('c()')).toEqual(['call', {}, n('c')]);
+  expect(tree('"#{c}"')).toEqual(['str', {}, str('""'), [n('c')], str('""')]);
 });
 
 test('an attribute record must hold exactly its slot\'s flags', () => {

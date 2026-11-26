@@ -34,7 +34,7 @@ test('a constant the form does not admit fails generation', () => {
 test('a literal the slot type does not admit fails generation', () => {
   // A bare `class` writes the absent marker for its name.
   const klass = grammar.kinds.class;
-  const strict = { forms: klass.forms.map((f) => f.replace('name:leaf|member|none', 'name:leaf|member')) };
+  const strict = { forms: klass.forms.map((f) => f.replace('name:name|member|none', 'name:name|member')) };
   expect(() => new Generator(withKind('class', strict)))
     .toThrow(/slot 'name' does not admit \["none",\{\}\]/);
 });
@@ -201,4 +201,14 @@ test('the absent marker fits only a slot that admits none; unnamed, it records n
 test('a grammar without a registry is not gated', () => {
   const { kinds, ...ungated } = grammar;
   expect(() => new Generator(ungated)).not.toThrow();
+});
+
+test('a leaves entry that is not a terminal fails generation', () => {
+  expect(() => new Generator({ ...grammar, leaves: { ...grammar.leaves, Expression: 'name' } }))
+    .toThrow(/leaves: 'Expression' is not a terminal of the grammar/);
+});
+
+test('a leaf kind missing from the registry fails generation', () => {
+  const { num: _, ...rest } = grammar.kinds;
+  expect(() => new Generator(withKinds(rest))).toThrow(/leaf kind 'num' is not in the registry/);
 });
