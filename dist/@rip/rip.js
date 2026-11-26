@@ -1143,12 +1143,56 @@ var parserInstance = {
     }
   },
   parse(input, { primitives: wantPrimitives = false, tolerant = false } = {}) {
-    let action, allowedAll, at, atPos, base, carriedPrimitives, end, expected, first, got, guardKey, inserted, last, leaf, leafId, leafKind, len, message, node, ownerNodeId, q, r, recordFirst, register, row, sem, span, start, state, [stk, vals, locs, primitiveLocs] = [[0], [null], [null], [[]]], parseTable = this.parseTable, EOF = 1, diagnostics = [], pendingSymbols = [], repairBudget = 24, inputEnd = input.length;
+    let action, allowedAll, at, atPos, base, carriedPrimitives, end, expected, first, got, guardKey, inserted, last, leaf, leafId, leafKind, len, message, node, nodeId, q, r, recordFirst, register, row, rule, sem, slot, span, spans, start, state, [stk, vals, locs, primitiveLocs, ids] = [[0], [null], [null], [[]], [0]], parseTable = this.parseTable, ruleTable = this.ruleTable, leaves = this.leaves ?? {}, noPrimitives = Object.freeze([]), EOF = 1, diagnostics = [], pendingSymbols = [], repairBudget = 24, inputEnd = input.length;
     if (tolerant)
       while (inputEnd > 0 && (input[inputEnd - 1] === `
 ` || input[inputEnd - 1] === "\r"))
         inputEnd--;
-    let repairedHere = new Set, parserRecorded = false, nodes = [], roles = [], primitives = [], nodeIds = new WeakMap, leafNodes = new WeakSet, nextNodeId = 1, lexer = Object.create(this.lexer), sharedState = { ctx: {} };
+    let repairedHere = new Set, parserRecorded = false, nodes = [], roles = [], primitives = [], nodeIds = new WeakMap, nextNodeId = 1;
+    register = (arr, kind, parts, nestedParts, ownSpan) => {
+      let kid, kidId, kidRow, pos, refLoc, roleRow, kidIds = [], lowest = 1 / 0, highest = -1 / 0;
+      for (let entry of nestedParts) {
+        kid = arr;
+        for (let step of entry.path)
+          kid = kid[step];
+        if (!(Array.isArray(kid) && !nodeIds.has(kid)))
+          throw Error(`parse: nested annotation '${entry.role}' of rule ${-action} does not address a fresh array`);
+        kidId = register(kid, entry.kind, entry.roles, entry.nested, null);
+        kidIds.push(kidId);
+        lowest = Math.min(lowest, nodes[kidId - 1].sourceStart);
+        highest = Math.max(highest, nodes[kidId - 1].sourceEnd);
+      }
+      for (let part of parts)
+        if (part.grammarRef != null) {
+          refLoc = locs[base + part.grammarRef - 1];
+          if (refLoc == null)
+            throw Error(`parse: missing loc for grammarRef ${part.grammarRef} of rule ${-action} — lexer protocol violation`);
+          lowest = Math.min(lowest, refLoc.start);
+          highest = Math.max(highest, refLoc.end);
+        }
+      let nodeSpan = ownSpan ?? (lowest === 1 / 0 ? span : { start: lowest, end: highest }), ownId = nextNodeId++;
+      nodeIds.set(arr, ownId);
+      nodes.push({ nodeId: ownId, fileId: 0, semanticKind: kind, ruleId: -action, sourceStart: nodeSpan.start, sourceEnd: nodeSpan.end });
+      for (let part of parts)
+        if (part.grammarRef != null) {
+          pos = base + part.grammarRef - 1;
+          refLoc = locs[pos];
+          roleRow = { nodeId: ownId, role: part.name, grammarRef: part.grammarRef, childSlot: part.childSlot, sourceStart: refLoc.start, sourceEnd: refLoc.end, childNodeId: null, fileId: 0 };
+          if (part.spread)
+            roleRow.spread = true;
+          else
+            roleRow.childNodeId = nodeIds.get(vals[pos]) ?? null;
+          roles.push(roleRow);
+        } else
+          roles.push({ nodeId: ownId, role: part.name, grammarRef: null, childSlot: part.childSlot, literal: part.literal, fileId: 0 });
+      for (let kidIndex = 0;kidIndex < nestedParts.length; kidIndex++) {
+        let entry = nestedParts[kidIndex];
+        kidRow = nodes[kidIds[kidIndex] - 1];
+        roles.push({ nodeId: ownId, role: entry.role, grammarRef: null, childSlot: entry.path.length === 1 ? entry.path[0] : null, sourceStart: kidRow.sourceStart, sourceEnd: kidRow.sourceEnd, childNodeId: kidIds[kidIndex], fileId: 0 });
+      }
+      return ownId;
+    };
+    let lexer = Object.create(this.lexer), sharedState = { ctx: {} };
     const _ref5 = this.ctx;
     for (let k in _ref5) {
       if (!Object.hasOwn(_ref5, k))
@@ -1260,123 +1304,116 @@ var parserInstance = {
       if (action > 0) {
         if (tolerant && !lexer.token?.hole)
           repairedHere.clear();
-        stk.push(symbol, action);
-        leafKind = this.leaves?.[symbol];
+        stk.push(action);
+        leafKind = leaves[symbol];
         if (leafKind != null) {
           leaf = [leafKind, {}, lexer.text];
           leafId = nextNodeId++;
           nodeIds.set(leaf, leafId);
-          leafNodes.add(leaf);
           nodes.push({ nodeId: leafId, fileId: 0, semanticKind: leafKind, ruleId: 0, sourceStart: lexer.loc?.start ?? null, sourceEnd: lexer.loc?.end ?? null });
           vals.push(leaf);
-        } else
+          ids.push(leafId);
+        } else {
           vals.push(lexer.text);
+          ids.push(0);
+        }
         locs.push(lexer.loc ?? null);
         if (wantPrimitives)
           primitiveLocs.push(Array.isArray(lexer.text?.primitiveSpans) ? lexer.text.primitiveSpans : lexer.loc != null ? [{ value: lexer.text, sourceStart: lexer.loc.start, sourceEnd: lexer.loc.end }] : []);
         symbol = null;
       } else if (action < 0) {
+        rule = -action;
         if (this.ctx?.onReduce)
-          this.ctx.onReduce(-action);
-        len = this.ruleTable[-action * 2 + 1];
-        span = (() => {
-          if (len) {
-            first = locs[locs.length - len];
-            last = locs[locs.length - 1];
-            return { start: first?.start ?? 0, end: last?.end ?? (first?.end ?? 0) };
-          } else {
-            at = tokenLoc?.start ?? (locs[locs.length - 1]?.end ?? 0);
-            return { start: at, end: at };
-          }
-        })();
+          this.ctx.onReduce(rule);
+        len = ruleTable[rule * 2 + 1];
+        base = vals.length - len;
+        if (len) {
+          first = locs[base];
+          last = locs[locs.length - 1];
+          span = { start: first?.start ?? 0, end: last?.end ?? (first?.end ?? 0) };
+        } else {
+          at = tokenLoc?.start ?? (locs[locs.length - 1]?.end ?? 0);
+          span = { start: at, end: at };
+        }
         rv.$ = vals[vals.length - (len || 1)];
         rv._$ = span;
-        r = this.ruleActions.call(rv, -action, vals, locs, sharedState.ctx);
+        r = this.ruleActions.call(rv, rule, vals, locs, sharedState.ctx);
         if (r != null)
           rv.$ = r;
-        base = vals.length - len;
-        carriedPrimitives = [];
+        carriedPrimitives = noPrimitives;
         if (wantPrimitives)
-          for (let ref of this.primitiveRefs[-action])
-            carriedPrimitives.push(...primitiveLocs[base + ref - 1] ?? []);
+          for (let ref of this.primitiveRefs[rule]) {
+            spans = primitiveLocs[base + ref - 1];
+            if (!spans?.length)
+              continue;
+            if (carriedPrimitives === noPrimitives)
+              carriedPrimitives = [];
+            for (let carried of spans)
+              carriedPrimitives.push(carried);
+          }
         node = rv.$;
-        if (Array.isArray(node) && nodeIds.has(node) && this.accumulators[-action]) {
-          row = nodes[nodeIds.get(node) - 1];
-          row.sourceStart = span.start;
-          row.sourceEnd = span.end;
+        nodeId = undefined;
+        if (Array.isArray(node)) {
+          slot = base;
+          while (slot < vals.length && vals[slot] !== node)
+            slot++;
+          nodeId = slot < vals.length && ids[slot] !== 0 ? ids[slot] : nodeIds.get(node);
         }
-        if (Array.isArray(node) && !nodeIds.has(node)) {
-          sem = this.semantics[-action];
-          base = vals.length - len;
-          register = (arr, kind, parts, nestedParts, ownSpan) => {
-            let kid, kidId, kidRow, pos, refLoc, roleRow, kidIds = [], lowest = 1 / 0, highest = -1 / 0;
-            for (let entry of nestedParts) {
-              kid = arr;
-              for (let step of entry.path)
-                kid = kid[step];
-              if (!(Array.isArray(kid) && !nodeIds.has(kid)))
-                throw Error(`parse: nested annotation '${entry.role}' of rule ${-action} does not address a fresh array`);
-              kidId = register(kid, entry.kind, entry.roles, entry.nested, null);
-              kidIds.push(kidId);
-              lowest = Math.min(lowest, nodes[kidId - 1].sourceStart);
-              highest = Math.max(highest, nodes[kidId - 1].sourceEnd);
-            }
-            for (let part of parts)
-              if (part.grammarRef != null) {
-                refLoc = locs[base + part.grammarRef - 1];
-                if (refLoc == null)
-                  throw Error(`parse: missing loc for grammarRef ${part.grammarRef} of rule ${-action} — lexer protocol violation`);
-                lowest = Math.min(lowest, refLoc.start);
-                highest = Math.max(highest, refLoc.end);
-              }
-            let nodeSpan = ownSpan ?? (lowest === 1 / 0 ? span : { start: lowest, end: highest }), ownId = nextNodeId++;
-            nodeIds.set(arr, ownId);
-            nodes.push({ nodeId: ownId, fileId: 0, semanticKind: kind, ruleId: -action, sourceStart: nodeSpan.start, sourceEnd: nodeSpan.end });
-            for (let part of parts)
-              if (part.grammarRef != null) {
-                pos = base + part.grammarRef - 1;
-                refLoc = locs[pos];
-                roleRow = { nodeId: ownId, role: part.name, grammarRef: part.grammarRef, childSlot: part.childSlot, sourceStart: refLoc.start, sourceEnd: refLoc.end, childNodeId: null, fileId: 0 };
-                if (part.spread)
-                  roleRow.spread = true;
-                else
-                  roleRow.childNodeId = nodeIds.get(vals[pos]) ?? null;
-                roles.push(roleRow);
-              } else
-                roles.push({ nodeId: ownId, role: part.name, grammarRef: null, childSlot: part.childSlot, literal: part.literal, fileId: 0 });
-            for (let k = 0;k < nestedParts.length; k++) {
-              let entry = nestedParts[k];
-              kidRow = nodes[kidIds[k] - 1];
-              roles.push({ nodeId: ownId, role: entry.role, grammarRef: null, childSlot: entry.path.length === 1 ? entry.path[0] : null, sourceStart: kidRow.sourceStart, sourceEnd: kidRow.sourceEnd, childNodeId: kidIds[k], fileId: 0 });
-            }
-            return ownId;
-          };
-          register(node, sem?.kind ?? null, sem?.roles ?? [], sem?.nested ?? [], span);
+        if (nodeId != null) {
+          if (this.accumulators[rule]) {
+            row = nodes[nodeId - 1];
+            row.sourceStart = span.start;
+            row.sourceEnd = span.end;
+          }
+        } else if (Array.isArray(node)) {
+          sem = this.semantics[rule];
+          nodeId = register(node, sem?.kind ?? null, sem?.roles ?? [], sem?.nested ?? [], span);
         }
-        if (wantPrimitives && Array.isArray(node) && nodeIds.has(node) && !leafNodes.has(node)) {
-          ownerNodeId = nodeIds.get(node);
+        if (wantPrimitives && nodeId != null && nodes[nodeId - 1].ruleId !== 0) {
           for (let p of carriedPrimitives)
             if (p.ownerNodeId == null) {
-              p.ownerNodeId = ownerNodeId;
-              primitives.push({ nodeId: ownerNodeId, value: p.value, sourceStart: p.sourceStart, sourceEnd: p.sourceEnd, fileId: 0 });
+              p.ownerNodeId = nodeId;
+              primitives.push({ nodeId, value: p.value, sourceStart: p.sourceStart, sourceEnd: p.sourceEnd, fileId: 0 });
             }
-          carriedPrimitives = [];
+          carriedPrimitives = noPrimitives;
         }
         if (len) {
-          stk.length -= len * 2;
+          stk.length -= len;
           vals.length -= len;
+          ids.length -= len;
           locs.length -= len;
           if (wantPrimitives)
             primitiveLocs.length -= len;
         }
-        stk.push(this.ruleTable[-action * 2]);
+        stk.push(parseTable[stk[stk.length - 1]][ruleTable[rule * 2]]);
         vals.push(rv.$);
+        ids.push(nodeId ?? 0);
         locs.push(span);
         if (wantPrimitives)
           primitiveLocs.push(carriedPrimitives);
-        stk.push(parseTable[stk[stk.length - 2]][stk[stk.length - 1]]);
       } else
         return { sexpr: vals[vals.length - 1], stores: { nodes, roles, primitives, nodeIds }, diagnostics, trivia: lexer.trivia ?? null, tokens: lexer.tokens ?? null };
+    }
+  },
+  accepts(stack, symbol) {
+    let act, from, fromPushed, popLen, top, table = this.parseTable, rules = this.ruleTable, depth = stack.length, pushed = [], steps = 0;
+    while (true) {
+      top = pushed.length ? pushed[pushed.length - 1] : stack[depth - 1];
+      act = table[top]?.[symbol];
+      if (act == null)
+        return false;
+      if (act >= 0)
+        return true;
+      if (++steps > 1e5)
+        throw Error(`accepts: no shift after ${steps} reductions on symbol ${symbol}`);
+      popLen = rules[-act * 2 + 1];
+      fromPushed = Math.min(popLen, pushed.length);
+      pushed.length -= fromPushed;
+      depth -= popLen - fromPushed;
+      if (depth < 1)
+        return false;
+      from = pushed.length ? pushed[pushed.length - 1] : stack[depth - 1];
+      pushed.push(table[from][rules[-act * 2]]);
     }
   },
   ctx: {}
@@ -34380,7 +34417,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "c8d0245ce4cba3f8";
+var compilerBuild = () => "dbcfd942b92745d8";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
