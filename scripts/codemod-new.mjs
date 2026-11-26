@@ -19,6 +19,13 @@
 // string rewritten, in place and in its own quoting. A row source is the
 // second argument of a `test`/`code`/`fail`/`type` call.
 //
+// A JavaScript or TypeScript file (`.js`, `.mjs`, `.cjs`, `.ts`, …) is a
+// host: each string literal that holds a compiling Rip program with a
+// `new` is rewritten the same way. A test's name and an assertion's
+// expected text (`.toBe(…)`, `.toContain(…)`, …) are skipped. A literal
+// that only parses as Rip by accident (prose, a JavaScript expectation
+// elsewhere) is rewritten too, so review a host's diff before keeping it.
+//
 // The proof: every rewritten program — a whole file, or one row's source
 // as the battery compiles it — is compiled before and after on the JS face
 // and the TS face, and the outputs must be byte-identical (a program that
@@ -26,9 +33,10 @@
 // proof is reported and none of its edits are written. --check reports
 // without writing anything. The exit code is 1 when anything was refused.
 //
-// Refused, each named by file and position, for a person to rewrite: a row
-// source that does not compile (its `new` has no span), one assembled from
-// an expression (`header + '''…'''`), and one with interpolation.
+// Refused, each named by file and position, for a person to rewrite: an
+// embedded program that does not compile on its own (its `new` has no
+// span), a row source assembled from an expression (`header + '''…'''`),
+// and an interpolated source or substituted template literal.
 //
 // The proof needs a compiler that still parses `new X`, so every compile
 // here runs on the engine as of PINNED — the last revision with both
@@ -409,65 +417,142 @@ function rewriteRows(source, path, report) {
       }
       continue;
     }
-    const raw = source.slice(lit.start, lit.end);
-    const value = valueOf(lit.token);
-    const common = dedentOf(value);
-    const program = dedent(value, common);
-    let rewritten;
-    try {
-      rewritten = rewriteProgram(program, `${where} (row source)`);
-    } catch (e) {
-      // A row whose source does not compile carries no spans; if it
-      // holds a NEW token it needs a person.
-      if (e.refusals || /proof failed|survive/.test(e.message)) { report.refused.push(e.message); continue; }
-      if (hasNewToken(program)) report.refused.push(`${where}: the row source does not compile, so its \`new\` has no span — ${String(e.message).split('\n')[0]}`);
+    const result = rewriteLiteral({
+      raw: source.slice(lit.start, lit.end), value: valueOf(lit.token), start: lit.start, where,
+      dedented: true, decode: (raw) => valueOf(compile(`x = ${raw}`, { runtimeDelivery: 'none' }).tokens.find((t) => t.kind === 'STRING')),
+    }, report);
+    if (result) { edits.push(...result.edits); count += result.count; report.rows++; }
+  }
+  return { edits, count };
+}
+
+// Rewrite the Rip program one string literal holds, in place. `value` is
+// the literal's decoded text; the program is that text, dedented first
+// when `dedented` (a language-suite row). `decode` re-reads an edited raw
+// literal, so the written bytes are checked to decode to exactly the
+// proven program. Returns { edits, count } in file offsets, or null.
+function rewriteLiteral({ raw, value, start, where, dedented, decode }, report) {
+  const common = dedented ? dedentOf(value) : 0;
+  const program = dedent(value, common);
+  let rewritten;
+  try {
+    rewritten = rewriteProgram(program, `${where} (embedded program)`);
+  } catch (e) {
+    // A program that does not compile carries no spans; if it holds a
+    // NEW token it needs a person.
+    if (e.refusals || /proof failed|survive/.test(e.message)) { report.refused.push(e.message); return null; }
+    if (hasNewToken(program)) report.refused.push(`${where}: the embedded program does not compile, so its \`new\` has no span — ${String(e.message).split('\n')[0]}`);
+    return null;
+  }
+  if (rewritten.count === 0) return null;
+  // Map each program edit back through the dedent and the literal.
+  const align = alignLiteral(raw, value);
+  if (!align) { report.refused.push(`${where}: the literal could not be aligned with its value`); return null; }
+  const lineStarts = [0];
+  for (let i = 0; i < value.length; i++) if (value[i] === '\n') lineStarts.push(i + 1);
+  const programLineStarts = [0];
+  for (let i = 0; i < program.length; i++) if (program[i] === '\n') programLineStarts.push(i + 1);
+  const toValue = (offset) => {
+    let line = 0;
+    while (line + 1 < programLineStarts.length && programLineStarts[line + 1] <= offset) line++;
+    return lineStarts[line] + common + (offset - programLineStarts[line]);
+  };
+  const edits = [];
+  for (const e of rewritten.edits) {
+    // A deletion starts and ends on real characters (`n` of `new`, the
+    // next token's first character); an insertion lands right after the
+    // real character before it.
+    if (e.start === e.end) {
+      const v = toValue(e.start) - 1;
+      if (v < 0 || v >= align.ends.length) { report.refused.push(`${where}: an edit falls outside the literal`); return null; }
+      edits.push({ ...e, start: start + align.ends[v], end: start + align.ends[v] });
+    } else {
+      const a = toValue(e.start);
+      const b = toValue(e.end);
+      if (b >= align.starts.length) { report.refused.push(`${where}: an edit falls outside the literal`); return null; }
+      edits.push({ ...e, start: start + align.starts[a], end: start + align.starts[b] });
+    }
+  }
+  const newRaw = applyEdits(raw, edits.map((e) => ({ ...e, start: e.start - start, end: e.end - start })));
+  let check;
+  try {
+    const decoded = decode(newRaw);
+    check = dedent(decoded, dedented ? dedentOf(decoded) : 0);
+  } catch {
+    check = null;
+  }
+  if (check !== rewritten.output) { report.refused.push(`${where}: the edited literal does not decode to the proven program`); return null; }
+  return { edits, count: rewritten.count };
+}
+
+// ── programs embedded in JavaScript ─────────────────────────────────
+
+// The string literals of a JavaScript (or TypeScript) file: quoted
+// strings and substitution-free template literals, with their raw spans.
+// A template with substitutions is assembled at run time; one whose
+// static text spells `new` is reported for a person. Comments are
+// skipped; a regex literal is not recognized, so a quote inside one can
+// misalign the scan, which the per-literal proof and decode check catch.
+function jsLiterals(text) {
+  const out = [];
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '/' && text[i + 1] === '/') { while (i < text.length && text[i] !== '\n') i++; continue; }
+    if (c === '/' && text[i + 1] === '*') { const close = text.indexOf('*/', i + 2); i = close < 0 ? text.length : close + 2; continue; }
+    if (c === "'" || c === '"') {
+      const st = i++;
+      while (i < text.length && text[i] !== c && text[i] !== '\n') { if (text[i] === '\\') i++; i++; }
+      i++;
+      out.push({ start: st, end: i });
       continue;
     }
-    if (rewritten.count === 0) continue;
-    // Map each program edit back through the dedent and the literal.
-    const align = alignLiteral(raw, value);
-    if (!align) { report.refused.push(`${where}: the row source literal could not be aligned with its value`); continue; }
-    const lineStarts = [0];
-    for (let i = 0; i < value.length; i++) if (value[i] === '\n') lineStarts.push(i + 1);
-    const programLineStarts = [0];
-    for (let i = 0; i < program.length; i++) if (program[i] === '\n') programLineStarts.push(i + 1);
-    const toValue = (offset) => {
-      let line = 0;
-      while (line + 1 < programLineStarts.length && programLineStarts[line + 1] <= offset) line++;
-      return lineStarts[line] + common + (offset - programLineStarts[line]);
-    };
-    const rowEdits = [];
-    let ok = true;
-    for (const e of rewritten.edits) {
-      // A deletion starts and ends on real characters (`n` of `new`, the
-      // next token's first character); an insertion lands right after
-      // the real character before it.
-      if (e.start === e.end) {
-        const v = toValue(e.start) - 1;
-        if (v < 0 || v >= align.ends.length) { ok = false; break; }
-        rowEdits.push({ ...e, start: lit.start + align.ends[v], end: lit.start + align.ends[v] });
-      } else {
-        const a = toValue(e.start);
-        const b = toValue(e.end);
-        if (b >= align.starts.length) { ok = false; break; }
-        rowEdits.push({ ...e, start: lit.start + align.starts[a], end: lit.start + align.starts[b] });
+    if (c === '`') {
+      const st = i++;
+      let substituted = false;
+      while (i < text.length && text[i] !== '`') {
+        if (text[i] === '\\') { i += 2; continue; }
+        if (text[i] === '$' && text[i + 1] === '{') {
+          substituted = true;
+          let d = 1;
+          i += 2;
+          while (i < text.length && d) { if (text[i] === '{') d++; else if (text[i] === '}') d--; i++; }
+          continue;
+        }
+        i++;
       }
+      i++;
+      out.push({ start: st, end: i, substituted });
+      continue;
     }
-    if (!ok) { report.refused.push(`${where}: an edit falls outside the row source literal`); continue; }
-    // Re-decode the edited literal through the compiler and require it to
-    // be exactly the proven program.
-    const newRaw = applyEdits(raw, rowEdits.map((e) => ({ ...e, start: e.start - lit.start, end: e.end - lit.start })));
-    let check;
-    try {
-      const tok = compile(`x = ${newRaw}`, { runtimeDelivery: 'none' }).tokens.find((t) => t.kind === 'STRING');
-      check = dedent(valueOf(tok), dedentOf(valueOf(tok)));
-    } catch (e) {
-      check = null;
+    i++;
+  }
+  return out;
+}
+
+const jsValueOf = (raw) => new Function(`return ${raw};`)();
+const NOT_A_PROGRAM = /(?:\b(?:test|it|describe)(?:\.\w+)*\(|\.(?:toBe|toContain|toEqual|toStrictEqual|toMatch|toThrow)\()\s*$/;
+
+function rewriteJsHost(source, path, report) {
+  const edits = [];
+  let count = 0;
+  for (const lit of jsLiterals(source)) {
+    const raw = source.slice(lit.start, lit.end);
+    const where = `${path}:${lineCol(source, lit.start)}`;
+    if (lit.substituted) {
+      if (hasNewToken(raw.slice(1, -1).replace(/\$\{[^}]*\}/g, '0'))) {
+        report.refused.push(`${where}: a template literal with substitutions is assembled at run time — rewrite it by hand if it is Rip`);
+      }
+      continue;
     }
-    if (check !== rewritten.output) { report.refused.push(`${where}: the edited row literal does not decode to the proven program`); continue; }
-    edits.push(...rowEdits);
-    count += rewritten.count;
-    report.rows++;
+    // A test's name and an assertion's expected text are not programs,
+    // however much prose or JavaScript happens to parse as Rip.
+    if (NOT_A_PROGRAM.test(source.slice(Math.max(0, lit.start - 40), lit.start))) continue;
+    let value;
+    try { value = jsValueOf(raw); } catch { continue; }
+    if (typeof value !== 'string' || !hasNewToken(value)) continue;
+    const result = rewriteLiteral({ raw, value, start: lit.start, where, dedented: false, decode: jsValueOf }, report);
+    if (result) { edits.push(...result.edits); count += result.count; report.rows++; }
   }
   return { edits, count };
 }
@@ -501,12 +586,18 @@ if (import.meta.main) {
     const report = { refused: [], rows: 0 };
     let edits = [];
     let count = 0;
-    try {
-      const own = rewriteProgram(source, file);
-      edits.push(...own.edits);
-      count += own.count;
-    } catch (e) {
-      report.refused.push(e.message);
+    if (/\.(?:[cm]?js|[cm]?ts)$/.test(file)) {
+      const host = rewriteJsHost(source, file, report);
+      edits.push(...host.edits);
+      count += host.count;
+    } else {
+      try {
+        const own = rewriteProgram(source, file);
+        edits.push(...own.edits);
+        count += own.count;
+      } catch (e) {
+        report.refused.push(e.message);
+      }
     }
     if (rowsAll || file.includes(`${sep}test${sep}rip${sep}`)) {
       try {
@@ -521,7 +612,7 @@ if (import.meta.main) {
     refusedAny ||= report.refused.length > 0;
     if (count === 0) continue;
     total += count;
-    console.log(`${check ? 'would rewrite' : 'rewrote'} ${count} construction(s)${report.rows ? ` in ${report.rows} row(s)` : ''}: ${file}`);
+    console.log(`${check ? 'would rewrite' : 'rewrote'} ${count} construction(s)${report.rows ? ` in ${report.rows} embedded program(s)` : ''}: ${file}`);
     if (!check) writeFileSync(file, applyEdits(source, edits));
   }
   console.log(`${total} construction(s) ${check ? 'to rewrite' : 'rewritten'}${refusedAny ? '; some programs were refused' : ''}`);
