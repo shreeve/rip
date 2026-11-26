@@ -1165,8 +1165,8 @@ grammar =
   ]
 
   SimpleArgs: [
-    o 'Expression'             , '[$1]'
-    o 'SimpleArgs , Expression', '[...$1, $3]'
+    o 'Expression'             , '[1]'      , '~ when-condition list plumbing; when.conditions owns the span'
+    o 'SimpleArgs , Expression', '[...1, 3]', '~ when-condition list plumbing; when.conditions owns the span'
   ]
 
   # ============================================================================
@@ -1477,7 +1477,9 @@ displays =
 #
 # Each kind lists its `forms`, one string per distinct node shape, and
 # its `side` roles: labeled tokens whose spans reach RoleStore while
-# the tree drops them. A form is its slots in tree order:
+# the tree drops them. A `part` kind is a clause of another node (a
+# catch, a pair, a parameter default): only a slot that names it admits
+# it. A form is its slots in tree order:
 #
 #   "lit"|"lit2"      an unnamed constant slot (the head of most kinds)
 #   role:type         a named slot; the annotation names its element
@@ -1487,8 +1489,9 @@ displays =
 # null:
 #
 #   leaf              a primitive tree value (a string)
-#   expr              a leaf, a node of any kind, or the value of an
-#                     executable action (which builds unkinded arrays)
+#   expr              a leaf, a node of any kind that is not a part, or
+#                     an array built by an executable action (the
+#                     Parenthetical and postfix if-else rules)
 #   bool              true or false
 #   null              null alone
 #   descriptor        a plain object (the schema sub-parser's descriptor)
@@ -1497,16 +1500,15 @@ displays =
 #   [type]            an unkinded array whose elements each match type
 #   "lit"             exactly that string
 #
-# Several forms for one kind, null-filled slots, sentinels such as
-# "{}" and the "," elision string, and boolean slots are the shapes the
-# s-expression work removes; each one is written down here until it
-# goes. Executable actions carry no annotation and sit outside the
-# registry: their values pass where a slot admits `expr`.
+# The registry records the tree as it is, including its irregular
+# shapes: several forms for one kind, null-filled slots, the "{}"
+# sentinel, the "," elision string, and boolean slots. Executable
+# actions carry no annotation and sit outside the registry.
 
 kinds =
   'accept':        forms: ['"accept" name:leaf', '"accept" name:leaf provider:leaf|member']
-  'array':         forms: ['"array" ...items:expr ...elisions:","']
-  'as':            forms: ['name:leaf alias:leaf']
+  'array':         forms: ['"array" ...items:expr|splat ...elisions:","']
+  'as':            forms: ['name:leaf alias:leaf'], part: true
   'assign':
     forms: [
       'operator:"="|"+="|"-="|"*="|"/="|"%="|"**="|"//="|"%%="|"<<="|">>="|">>>="|"&="|"^="|"|="|"&&="|"||="|"??=" target:expr value:expr'
@@ -1515,26 +1517,26 @@ kinds =
     side:  ['annotation', 'operator', 'optionalMarker', 'typeParams', 'visibility', 'voidMarker']
   'await':         forms: ['"await" value:expr'], side: ['operator']
   'binary':        forms: ['operator:leaf left:expr right:expr']
-  'block':         forms: ['"block" ...statements:expr']
-  'call':          forms: ['callee:expr ...args:expr']
+  'block':         forms: ['"block" ...statements:expr'], part: true
+  'call':          forms: ['callee:expr ...args:expr|splat']
   'cast':          forms: ['"cast" value:expr annotation:leaf']
-  'catch':         forms: ['binding:expr? body:block']
-  'class':         forms: ['"class" name:leaf|member? parent:expr?', '"class" name:leaf|member? parent:expr? body:block']
+  'catch':         forms: ['binding:expr? body:block'], part: true
+  'class':         forms: ['"class" name:leaf? parent:expr?', '"class" name:leaf|member? parent:expr? body:block']
   'component':     forms: ['"component" parent:expr? body:block']
   'comprehension': forms: ['"comprehension" value:expr loop:[forin|forof|foras] guard:[expr]']
-  'computed':      forms: ['"computed" target:expr value:expr'], side: ['annotation', 'operator', 'optionalMarker']
+  'computed':      forms: ['"computed" target:expr value:expr|block'], side: ['annotation', 'operator', 'optionalMarker']
   'dammit':        forms: ['"dammit!" target:expr'], side: ['operator']
   'def':
-    forms: ['"def"|"void-def" name:leaf|member params:[expr] body:block']
+    forms: ['"def"|"void-def" name:leaf|member params:[expr|default|rest|expansion] body:block']
     side:  ['returnType', 'typeParams', 'visibility', 'voidMarker']
-  'default':       forms: ['"default" name:expr value:expr']
-  'defsig':        forms: ['"def-sig" name:leaf params:[expr] returnType:leaf'], side: ['typeParams']
+  'default':       forms: ['"default" name:expr value:expr'], part: true
+  'defsig':        forms: ['"def-sig" name:leaf params:[expr|default|rest|expansion] returnType:leaf'], side: ['typeParams']
   'doiife':        forms: ['"do-iife" func:expr']
-  'dynamicKey':    forms: ['"dynamicKey" key:expr']
-  'dynimport':     forms: ['keyword:"import" ...args:expr']
-  'effect':        forms: ['"effect" target:expr? value:expr'], side: ['annotation', 'operator']
+  'dynamicKey':    forms: ['"dynamicKey" key:expr'], part: true
+  'dynimport':     forms: ['keyword:"import" ...args:expr|splat']
+  'effect':        forms: ['"effect" target:expr? value:expr|block'], side: ['annotation', 'operator']
   'existence':     forms: ['operator:"?" value:expr']
-  'expansion':     forms: ['"expansion"']
+  'expansion':     forms: ['"expansion"'], part: true
   'export':
     forms: [
       '"export" spec:expr|[leaf|as]'
@@ -1559,8 +1561,8 @@ kinds =
       '"for-of" vars:[expr] object:expr own:bool guard:expr? body:block'
       '"for-of" vars:[expr] object:expr own:bool'
     ]
-  'func':          forms: ['kind:"->"|"=>" params:[expr] body:block'], side: ['returnType']
-  'gate':          forms: ['"gate" target:expr rhs:expr ...key:expr'], side: ['annotation', 'operator']
+  'func':          forms: ['kind:"->"|"=>" params:[expr|default|rest|expansion] body:block'], side: ['returnType']
+  'gate':          forms: ['"gate" target:expr rhs:expr ...key:expr|splat'], side: ['annotation', 'operator']
   'heregex':       forms: ['"here-regex" flags:leaf ...parts:leaf|[expr]']
   'if':
     forms: [
@@ -1582,33 +1584,34 @@ kinds =
   'index':         forms: ['operator:"[]" object:expr key:expr']
   'loop':          forms: ['"loop" body:block', '"loop-n" count:expr body:block']
   'map':           forms: ['"map" ...pairs:pair|splat']
-  'maybe-dammit':  forms: ['"dammit?" callee:expr ...args:expr'], side: ['operator']
+  'maybe-dammit':  forms: ['"dammit?" callee:expr ...args:expr|splat'], side: ['operator']
   'member':        forms: ['operator:"."|"?." object:expr property:leaf']
   'object':        forms: ['"object" ...pairs:pair|splat']
   'offer':         forms: ['"offer" value:expr']
-  'optcall':       forms: ['"optcall" callee:expr ...args:expr']
+  'optcall':       forms: ['"optcall" callee:expr ...args:expr|splat']
   'optindex':      forms: ['"optindex" object:expr key:expr']
   'pair':
-    forms: ['operator:":"|"="|null key:expr value:expr', '"void-pair" key:expr value:expr']
+    forms: ['operator:":"|"="|null key:expr|dynamicKey value:expr', '"void-pair" key:expr|dynamicKey value:expr']
     side:  ['operator', 'visibility', 'voidMarker']
+    part:  true
   'pick':          forms: ['".{}"|"?.{}" source:expr ...items:pickitem']
-  'pickitem':      forms: ['key:leaf target:leaf default:expr?']
-  'program':       forms: ['"program" ...body:expr']
+  'pickitem':      forms: ['key:leaf target:leaf default:expr?'], part: true
+  'program':       forms: ['"program" ...body:expr'], part: true
   'range':         forms: ['operator:".."|"..." from:expr? to:expr?']
   'readonly':
     forms: ['"readonly"|"void-readonly" target:expr value:expr']
     side:  ['annotation', 'operator', 'optionalMarker', 'voidMarker']
   'regexindex':    forms: ['"regex-index" object:expr key:expr capture:expr']
   'relation':      forms: ['operator:leaf left:expr right:expr']
-  'render':        forms: ['"render" body:expr']
-  'rest':          forms: ['"rest" name:expr']
+  'render':        forms: ['"render" body:expr|block']
+  'rest':          forms: ['"rest" name:expr'], part: true
   'return':        forms: ['"return"', '"return" value:expr']
   'satisfies':     forms: ['"satisfies" value:expr annotation:leaf']
   'schema':        forms: ['"schema" body:descriptor']
-  'splat':         forms: ['"..." value:expr']
+  'splat':         forms: ['"..." value:expr'], part: true
   'state':         forms: ['"state" target:expr value:expr'], side: ['annotation', 'operator', 'optionalMarker']
   'str':           forms: ['"str" ...parts:leaf|[expr]']
-  'super':         forms: ['"super" ...args:expr']
+  'super':         forms: ['"super" ...args:expr|splat']
   'switch':        forms: ['"switch" subject:expr? cases:[when] default:block?']
   'symbol':        forms: ['"symbol" name:leaf']
   'tagged':        forms: ['"tagged-template" tag:expr str:str|leaf']
@@ -1616,17 +1619,17 @@ kinds =
   'throw':         forms: ['"throw" value:expr']
   'try':
     forms: [
-      '"try" body:expr'
-      '"try" body:expr handler:catch'
-      '"try" body:expr finalizer:block'
-      '"try" body:expr handler:catch finalizer:block'
+      '"try" body:expr|block'
+      '"try" body:expr|block handler:catch'
+      '"try" body:expr|block finalizer:block'
+      '"try" body:expr|block handler:catch finalizer:block'
     ]
   'typedecl':      forms: ['"type-decl" declaration:leaf']
   'typedvar':      forms: ['"typed-var" target:expr annotation:leaf'], side: ['optionalMarker', 'visibility']
   'unary':         forms: ['operator:leaf operand:expr']
   'update':        forms: ['operator:"++"|"--" target:expr prefix:bool']
-  'when':          forms: ['"when" conditions:[expr] body:block']
-  'withattrs':     forms: ['keyword:"with" value:object']
+  'when':          forms: ['"when" conditions:[expr] body:block'], part: true
+  'withattrs':     forms: ['keyword:"with" value:object'], part: true
   'while':
     forms: [
       '"while" condition:expr body:block'

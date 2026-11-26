@@ -78,7 +78,7 @@ test('a declared side role no rule records fails generation', () => {
 
 test('malformed registry entries reject', () => {
   const bad = (entry) => () => new Generator(withKind('state', entry));
-  expect(bad(['annotation', 'target'])).toThrow(/kind 'state' must be \{forms, side\?\}/);
+  expect(bad(['annotation', 'target'])).toThrow(/kind 'state' must be \{forms, side\?, part\?\}/);
   expect(bad({ forms: [] })).toThrow(/kind 'state' declares no forms/);
   expect(bad({ ...state, extra: 1 })).toThrow(/kind 'state' has an unknown key 'extra'/);
   expect(bad({ ...state, forms: ['"state" target'] })).toThrow(/malformed slot 'target'/);
@@ -88,6 +88,50 @@ test('malformed registry entries reject', () => {
   expect(bad({ ...state, forms: ['"state" target:expr value:[expr'] })).toThrow(/unbalanced/);
   expect(bad({ ...state, forms: ['"state" target:expr value:"x"y'] })).toThrow(/malformed literal/);
   expect(bad({ ...state, side: ['operator', 'operator'] })).toThrow(/repeats a side role/);
+});
+
+// A one-rule grammar under a registry, for the gate's element rules.
+const tiny = (action, annotation, kinds) => new Generator({
+  start: 'Root',
+  grammar: { Root: [['ID ID', action, annotation]] },
+  kinds,
+});
+
+test('an opaque scaffold with elements fails generation', () => {
+  expect(() => tiny('["x", [1]]', 'x: _, _', { x: { forms: ['"x" items:[leaf]'] } }))
+    .toThrow(/an opaque scaffold of 1 element\(s\) fills slot 'items'/);
+  expect(() => tiny('["x", []]', 'x: _, _', { x: { forms: ['"x" items:[leaf]'] } })).not.toThrow();
+});
+
+test('a literal in a transparent scaffold must fit the list element type', () => {
+  expect(() => tiny('["x", [null]]', 'x: _, _(items)', { x: { forms: ['"x" items:[leaf]'] } }))
+    .toThrow(/slot 'items' holds no null/);
+});
+
+test('a scaffold nested in a scaffold fails generation', () => {
+  expect(() => tiny('["x", [[1]]]', 'x: _, _(_(items))', { x: { forms: ['"x" items:[[leaf]]'] } }))
+    .toThrow(/a scaffold nested in a scaffold fills slot 'items'/);
+});
+
+test('a missing constant is named in the misfit', () => {
+  expect(() => tiny('[1]', 'x: name', { x: { forms: ['name:leaf "end"'] } }))
+    .toThrow(/the constant "end" has no element/);
+});
+
+test('expr does not admit a part kind; a slot naming it does', () => {
+  const nested = '["x", ["y", 1]]';
+  const annotation = 'x: _, inner(y: _, name)';
+  const y = { forms: ['"y" name:leaf'], part: true };
+  expect(() => tiny(nested, annotation, { x: { forms: ['"x" inner:expr'] }, y }))
+    .toThrow(/slot 'inner' does not admit a y node/);
+  expect(() => tiny(nested, annotation, { x: { forms: ['"x" inner:y'] }, y })).not.toThrow();
+  expect(() => tiny(nested, annotation, { x: { forms: ['"x" inner:y'] }, y: { ...y, part: 'yes' } }))
+    .toThrow(/kind 'y' part must be true when present/);
+});
+
+test('a repeated form fails generation', () => {
+  expect(() => new Generator(withKind('state', { ...state, forms: [...state.forms, ...state.forms] })))
+    .toThrow(/kind 'state' form 2 repeats form 1/);
 });
 
 test('a grammar without a registry is not gated', () => {

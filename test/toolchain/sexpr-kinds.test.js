@@ -2,13 +2,16 @@
 // program — each corpus file, tracked package module and language-suite
 // row — fits the kind registry (grammar.rip `kinds`, shipped as
 // `kinds` in src/parser.js), and every declared form is one some real
-// tree takes. The negative cases prove the validator rejects each way a
-// tree can leave the contract.
+// tree takes. The negative cases pin the validator's rejections: a
+// value of the wrong type, a part kind or plumbing list where an
+// expression belongs, a role row naming the wrong slot, an arity or
+// constant mismatch, an unknown kind, and a root that is not a program.
 import { test, expect } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import parser, { kinds } from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
+import { parseSource } from '../../src/compiler.js';
 import { validateSexpr } from '../../src/sexpr.js';
 import { packageInputs, rowInputs } from '../support/consumer-hashes.js';
 
@@ -33,17 +36,17 @@ test('every corpus, package and language-suite tree fits the registry, and every
   const failures = [];
   let validated = 0;
   for (const { key, src } of inputs) {
-    let result;
+    // Only a `fail` row may not parse: it pins a rejection, and builds
+    // no tree the contract covers. Every other input must parse.
+    let parsed;
     try {
-      result = parser.parse(src);
-    } catch {
+      parsed = parseSource(src, { path: 'input.rip' });
+    } catch (e) {
+      if (!/ › fail /.test(key)) failures.push(`${key}: does not parse: ${String(e.message).split('\n')[0]}`);
       continue;
     }
-    // A program that does not parse (a rejection row) builds no tree
-    // the contract covers; tolerant repair's tree is not a program's.
-    if (result.diagnostics.length) continue;
     validated++;
-    for (const issue of validateSexpr(result, { coverage })) {
+    for (const issue of validateSexpr(parsed.result, { coverage })) {
       failures.push(`${key} @${issue.start}..${issue.end}: ${issue.message}`);
     }
   }
@@ -88,15 +91,41 @@ test('a node of the wrong kind in a typed slot rejects', () => {
   const tryNode = nodeOfKind(result, 'try');
   tryNode[2] = nodeOfKind(result, 'call');
   expect(messages(result)).toEqual([
-    expect.stringMatching(/^try node fits no form; closest \("try" body:expr handler:catch\): element 2 is a call node, the slot takes handler:catch$/),
+    expect.stringMatching(/^try node fits no form; closest \("try" body:expr\|block handler:catch\): element 2 is a call node, the slot takes handler:catch$/),
   ]);
 });
 
-test('an unkinded plumbing array where an expression belongs rejects', () => {
-  const result = parse('x = y\n');
-  nodeOfKind(result, 'assign')[2] = ['y'];
+test('a plumbing list where an expression belongs rejects', () => {
+  // The when's conditions list is a real plumbing array with its own
+  // NodeStore row.
+  const result = parse('switch s\n  when a, b\n    p 1\nx = y\n');
+  const conditions = nodeOfKind(result, 'when')[1];
+  expect(result.stores.nodeIds.has(conditions)).toBe(true);
+  nodeOfKind(result, 'assign')[2] = conditions;
   expect(messages(result)).toEqual([
     expect.stringMatching(/element 2 is an unkinded array, the slot takes value:expr$/),
+  ]);
+});
+
+test('a part node where an expression belongs rejects', () => {
+  const result = parse('try a() catch e then b()\nx = y\n');
+  nodeOfKind(result, 'assign')[2] = nodeOfKind(result, 'catch');
+  expect(messages(result)).toEqual([
+    expect.stringMatching(/^assign node fits no form; closest .*: element 2 is a catch node, the slot takes value:expr$/),
+  ]);
+  const root = parse('x = y\n');
+  nodeOfKind(root, 'assign')[2] = root.sexpr;
+  expect(messages(root)).toEqual([expect.stringMatching(/element 2 is a program node, the slot takes value:expr$/)]);
+});
+
+test('a role row naming a different slot rejects', () => {
+  // A finally block recorded as the handler: the value fits the
+  // finalizer slot's type, but the RoleStore row names the wrong slot.
+  const result = parse('try\n  a\nfinally\n  b\n');
+  const id = result.stores.nodeIds.get(nodeOfKind(result, 'try'));
+  result.stores.roles.find((r) => r.nodeId === id && r.role === 'finalizer').role = 'handler';
+  expect(messages(result)).toEqual([
+    "try node fits no form; closest (\"try\" body:expr|block finalizer:block): role 'handler' sits at element 2, which the form names 'finalizer'",
   ]);
 });
 

@@ -150,9 +150,9 @@ class Generator
     @unannotatedConstructors = []
     @optedOutConstructors = []
     # Rules whose action is executable JS rather than a construction
-    # template (ruleId → true). Their values are unkinded arrays the
-    # registry cannot describe; the tree validator admits them where a
-    # slot takes an expression.
+    # template (ruleId → true). Most return a leaf; those that build an
+    # array build one the registry cannot describe, which the tree
+    # validator admits where a slot takes an expression.
     @executable = {}
     # Each annotated rule's template shape (ruleId → {kind, shape,
     # labels, rule}), the generation-time input of the kind-registry
@@ -300,13 +300,14 @@ class Generator
       type
     for own kind, entry of kinds
       where = "kind '#{kind}'"
-      fail "#{where} must be {forms, side?}" unless entry? and typeof entry is 'object' and Array.isArray(entry.forms)
-      for own key of entry when key not in ['forms', 'side']
+      fail "#{where} must be {forms, side?, part?}" unless entry? and typeof entry is 'object' and Array.isArray(entry.forms)
+      for own key of entry when key not in ['forms', 'side', 'part']
         fail "#{where} has an unknown key '#{key}'"
       fail "#{where} declares no forms" if entry.forms.length is 0
       side = entry.side ?? []
       fail "#{where} side must be a list of role names" unless Array.isArray(side) and side.every (r) -> typeof r is 'string' and ident.test r
       fail "#{where} repeats a side role" if Set.new(side).size isnt side.length
+      fail "#{where} part must be true when present" if entry.part? and entry.part isnt true
       forms = for text, i in entry.forms
         formWhere = "#{where} form #{i + 1}"
         fail "#{formWhere} must be a string" unless typeof text is 'string'
@@ -329,7 +330,13 @@ class Generator
           slots.push slot
         fail "#{formWhere} has no slots" if slots.length is 0
         {text, slots}
+      shapesSeen = Map.new()
+      for form, i in forms
+        signature = JSON.stringify form.slots
+        fail "#{where} form #{i + 1} repeats form #{shapesSeen.get(signature) + 1}" if shapesSeen.has signature
+        shapesSeen.set signature, i
       registry[kind] = {forms, side}
+      registry[kind].part = true if entry.part
     for [kind, where] in named when not registry[kind]?
       fail "#{where} names undeclared kind '#{kind}'"
     registry
@@ -385,7 +392,9 @@ class Generator
       run++ while run < slots.length and @_fitElement(entry, slots[run])?
       return {ok: false, depth: i, why: "element #{i}: #{@_fitElement entry, slots[start]}"} if run is slots.length
     if layout.length < fixed
-      return {ok: false, depth: layout.length, why: "slot '#{slots[layout.length].role ?? "constant"}' has no element"}
+      missing = slots[layout.length]
+      label = if missing.role? then "slot '#{missing.role}'" else "the constant #{missing.lit.map((l) -> JSON.stringify l).join ' or '}"
+      return {ok: false, depth: layout.length, why: "#{label} has no element"}
     {ok: true}
 
   # Why one template element does not fit one slot, or null when it does.
@@ -404,19 +413,26 @@ class Generator
     if entry.scaffold?
       lists = slot.type.alts.filter (a) -> a.t is 'list'
       return "slot '#{slot.role}' takes no array" unless lists.length
-      return null if entry.scaffold is 'opaque'
+      if entry.scaffold is 'opaque'
+        return null if entry.size is 0
+        return "an opaque scaffold of #{entry.size} element(s) fills slot '#{slot.role}' — name its element with '_(…)'"
       return "a transparent scaffold of #{entry.layout.length} elements fills slot '#{slot.role}'" unless entry.layout.length is 1
       only = entry.layout[0]
+      return "a scaffold nested in a scaffold fills slot '#{slot.role}'" if only.scaffold?
       return "expected '#{slot.role}', got '#{only.name}'" if only.name isnt slot.role
       if only.node? and not lists.some((a) => @_typeAdmitsKind a.of, only.node)
         return "slot '#{slot.role}' holds no #{only.node} node"
+      if 'literal' of only and not lists.some((a) => @_typeAdmitsLiteral a.of, only.literal)
+        return "slot '#{slot.role}' holds no #{JSON.stringify only.literal}"
       return null
     return "expected '#{slot.role}', got '#{entry.name}'" if entry.name isnt '_' and entry.name isnt slot.role
     return null if @_typeAdmitsLiteral slot.type, entry.literal
     "slot '#{slot.role}' does not admit #{JSON.stringify entry.literal}"
 
+  # `expr` admits every kind but a part, which only a slot naming it takes.
   _typeAdmitsKind: (type, kind) ->
-    type.alts.some (a) -> a.t is 'any' or a.t is 'expr' or (a.t is 'kind' and a.kind is kind)
+    part = @kindRegistry[kind]?.part is true
+    type.alts.some (a) -> a.t is 'any' or (a.t is 'expr' and not part) or (a.t is 'kind' and a.kind is kind)
 
   _typeAdmitsLiteral: (type, value) ->
     return true if type.alts.some (a) -> a.t is 'any'
@@ -1030,8 +1046,8 @@ class Generator
     # node's roles, its nested-node descriptors
     # {role, path, kind, roles, nested}, and its layout: one entry per
     # element for the kind-registry gate ({ref, name, spread},
-    # {literal, name}, {scaffold: 'opaque'}, {scaffold: 'transparent',
-    # layout}, or {node: kind, name, layout}).
+    # {literal, name}, {scaffold: 'opaque', size}, {scaffold:
+    # 'transparent', layout}, or {node: kind, name, layout}).
     describe = (els, partsText, path, seen) =>
       parts = if partsText.trim() is '' then [] else splitParts partsText
       fail "template has #{els.length} element(s) but annotation names #{parts.length} part(s) — every element needs one" unless els.length is parts.length
@@ -1059,7 +1075,7 @@ class Generator
           fail "nested structural element cannot take a spread role '...#{name}'" if spread
           unless sub?
             fail "nested structural element must be named '_' — or annotated: '_(part, ...)' names its elements as roles of this node, 'role(kind: part, ...)' makes it a node of its own" unless name is '_'
-            layout.push {scaffold: 'opaque'}
+            layout.push {scaffold: 'opaque', size: element.elements.length}
             continue
           slot = element.childSlot
           fail "nested annotation '#{raw}' follows a spread — its element cannot be located" unless slot?

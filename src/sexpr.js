@@ -1,15 +1,18 @@
 // The s-expression validator: checks a parse tree against the kind
 // registry the parser ships (`kinds` in src/parser.js, declared in
 // grammar.rip). Every node the grammar built with a kind must fit one
-// of that kind's forms, slot for slot and type for type; the root must
-// be a program. Solar already checks every grammar template against
-// the registry; this checks the trees real programs produce.
+// of that kind's forms: each element's value fits its slot's type, and
+// each positional RoleStore row of the node names the slot it sits in.
+// The root must be a program. Solar checks the grammar's templates
+// against the registry by slot name and constant; the types of the
+// values a template's refs carry are checked here, on the trees real
+// programs produce.
 //
 // A tree node's kind comes from its NodeStore row. An unkinded array
-// is plumbing (a list or scaffold), or the value of an executable
-// action, which the registry cannot describe: an executable value
-// passes where a slot admits `expr`, and the walk still validates
-// every kinded node inside it.
+// is plumbing (a list or scaffold), or an array an executable action
+// built, which the registry cannot describe: such an array passes
+// where a slot admits `expr`, and the walk still validates every
+// kinded node inside it.
 
 import { kinds as shippedKinds, executable as shippedExecutable } from './parser.js';
 
@@ -67,9 +70,12 @@ export function validateSexpr(result, { kinds = shippedKinds, executable = shipp
       case 'null': return false;
       case 'descriptor': return value !== null && typeof value === 'object' && !Array.isArray(value);
       case 'lit': return value === alt.value;
-      case 'expr':
-        return typeof value === 'string' ||
-          (Array.isArray(value) && (kindOf(value) != null || isExecutable(value)));
+      case 'expr': {
+        if (typeof value === 'string') return true;
+        if (!Array.isArray(value)) return false;
+        const kind = kindOf(value);
+        return kind != null ? kinds[kind]?.part !== true : isExecutable(value);
+      }
       case 'kind': return Array.isArray(value) && kindOf(value) === alt.kind;
       case 'list':
         return Array.isArray(value) && kindOf(value) == null && value.every((v) => fits(v, alt.of));
@@ -104,6 +110,28 @@ export function validateSexpr(result, { kinds = shippedKinds, executable = shipp
     return null;
   };
 
+  // A node's positional role rows (a ref, spread or named literal with a
+  // known child slot) must name the slot they sit in.
+  const rolesByNode = new Map();
+  for (const role of stores.roles) {
+    if (role.childSlot == null) continue;
+    let list = rolesByNode.get(role.nodeId);
+    if (!list) rolesByNode.set(role.nodeId, list = []);
+    list.push(role);
+  }
+  const namesFit = (node, slots) => {
+    const roles = rolesByNode.get(nodeIds.get(node)) ?? [];
+    let fixed = slots.findIndex((sl) => sl.spread);
+    if (fixed < 0) fixed = slots.length;
+    for (const role of roles) {
+      const named = role.childSlot < fixed
+        ? slots[role.childSlot]?.role === role.role
+        : slots.slice(fixed).some((sl) => sl.role === role.role);
+      if (!named) return `role '${role.role}' sits at element ${role.childSlot}, which the form names ${role.childSlot < fixed ? (slots[role.childSlot]?.role ? `'${slots[role.childSlot].role}'` : 'a constant') : 'otherwise'}`;
+    }
+    return null;
+  };
+
   const issues = [];
   const report = (node, kind, message) => {
     const row = rowOf(node);
@@ -127,7 +155,11 @@ export function validateSexpr(result, { kinds = shippedKinds, executable = shipp
         let best = null;
         let fit = false;
         entry.forms.forEach((form, i) => {
-          const miss = fitForm(node, form.slots);
+          let miss = fitForm(node, form.slots);
+          if (miss === null) {
+            const why = namesFit(node, form.slots);
+            if (why) miss = { depth: node.length, why };
+          }
           if (miss === null) {
             fit = true;
             if (coverage) (coverage.get(kind) ?? coverage.set(kind, new Set()).get(kind)).add(i);
