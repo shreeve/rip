@@ -73,3 +73,18 @@ console.log(
   `corpus: ${files.length} corpus files → ${written} artifact(s) written, ` +
   `${unchanged} unchanged, ${stale.size} orphan(s) removed`,
 );
+
+// The consumer corpus: every package module and language-suite row, one
+// hash per face (test/support/consumer-hashes.js). Rewritten only when an
+// output moved; the manifest's diff names each moved program.
+{
+  const { compile } = await import('../src/compiler.js');
+  const { packageInputs, rowInputs, hashInputs, MANIFEST } = await import('../test/support/consumer-hashes.js');
+  const root = join(import.meta.dir, '..');
+  const hashes = hashInputs([...packageInputs(root), ...(await rowInputs(root))], compile);
+  const text = `${JSON.stringify(hashes, null, 1)}\n`;
+  const path = join(root, MANIFEST);
+  const before = existsSync(path) ? readFileSync(path, 'utf8') : '';
+  if (before !== text) writeFileSync(path, text);
+  console.log(`corpus: ${Object.keys(hashes).length} consumer programs → manifest ${before === text ? 'unchanged' : 'rewritten'}`);
+}
