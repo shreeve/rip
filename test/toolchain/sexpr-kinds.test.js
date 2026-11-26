@@ -161,3 +161,41 @@ test('a root that is not a program rejects', () => {
   const result = parse('x = y\n');
   expect(messages({ ...result, sexpr: result.sexpr[1] })).toContain('the root is an assign node, not a program node');
 });
+
+test('every call is ["call", attrs, callee, ...args], and the attribute record carries opt and await', () => {
+  const tree = (src) => parse(src).sexpr[1];
+  expect(tree('f a')).toEqual(['call', {}, 'f', 'a']);
+  expect(tree('f?.(a)')).toEqual(['call', { opt: true }, 'f', 'a']);
+  expect(tree('f? a')).toEqual(['call', { opt: true }, 'f', 'a']);
+  expect(tree('f!')).toEqual(['call', { await: true }, 'f']);
+  expect(tree('f?! a')).toEqual(['call', { opt: true, await: true }, 'f', 'a']);
+  expect(tree('x = import("m")')[2]).toEqual(['call', {}, 'import', '"m"']);
+  expect(tree('x = import!("m")')[2]).toEqual(['call', { await: true }, 'import', '"m"']);
+  const ctor = parse('class A extends B\n  constructor: -> super(1)\n').sexpr[1][3][1][1][2][2][1];
+  expect(ctor).toEqual(['call', {}, 'super', '1']);
+});
+
+test('a call of a construct name is a call, never the construct', () => {
+  const tree = (src) => parse(src).sexpr[1];
+  expect(tree('state a, 0')).toEqual(['call', {}, 'state', 'a', '0']);
+  expect(tree('a := 0')).toEqual(['state', 'a', '0']);
+  expect(tree('effect h, 5')).toEqual(['call', {}, 'effect', 'h', '5']);
+  expect(tree('readonly x, 5')).toEqual(['call', {}, 'readonly', 'x', '5']);
+  expect(tree('block 1, 2')).toEqual(['call', {}, 'block', '1', '2']);
+  // A zero-argument call is no longer the interpolation chunk it once
+  // spelled: `c()` against `"#{c}"`.
+  expect(tree('c()')).toEqual(['call', {}, 'c']);
+  expect(tree('"#{c}"')).toEqual(['str', '""', ['c'], '""']);
+});
+
+test('an attribute record must hold exactly its slot\'s flags', () => {
+  const result = parse('f!\n');
+  const call = nodeOfKind(result, 'dammit');
+  call[1] = { await: true, opt: true };
+  expect(messages(result)).toEqual([
+    expect.stringMatching(/^dammit node fits no form; closest \("call" attrs:\{await\} callee:expr\): element 1 is the record \{"await":true,"opt":true\}, the slot takes attrs:\{await\}$/),
+  ]);
+  const flag = parse('f!\n');
+  nodeOfKind(flag, 'dammit')[1] = { await: 'yes' };
+  expect(messages(flag)[0]).toMatch(/element 1 is the record \{"await":"yes"\}/);
+});

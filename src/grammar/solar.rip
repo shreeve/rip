@@ -288,7 +288,7 @@ class Generator
           {t: 'list', of: parseType(alt[1...-1], where)}
         else if alt.startsWith('{') and alt.endsWith('}')
           keys = alt[1...-1].trim().split(/\s+/).filter((k) -> k)
-          fail "malformed attribute record '#{alt}' in #{where}" unless keys.every (k) -> ident.test k
+          fail "malformed attribute record '#{alt}' in #{where}" unless keys.every (k) -> /^[A-Za-z_$][\w$]*$/.test k
           fail "attribute record '#{alt}' repeats a key in #{where}" if Set.new(keys).size isnt keys.length
           {t: 'attrs', keys: keys.sort()}
         else if alt.startsWith '"'
