@@ -158,18 +158,22 @@ describe('rip.lint.calls — findings', () => {
 describe('rip.lint — configuration', () => {
   test('a package without the key reads lint null, and null rules report nothing', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-lint-'));
-    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ rip: { strict: true } }));
-    const cfg = readProjectConfig(dir);
-    expect(cfg.strict).toBe(true);
-    expect(cfg.lint).toBeNull();
-    expect(lintRulesOf(cfg.lint)).toBeNull();
-    expect(findings('f a, b\n', null)).toEqual([]);
+    try {
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ rip: { strict: true } }));
+      const cfg = readProjectConfig(dir);
+      expect(cfg.strict).toBe(true);
+      expect(cfg.lint).toBeNull();
+      expect(lintRulesOf(cfg.lint)).toBeNull();
+      expect(findings('f a, b\n', null)).toEqual([]);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
   test('the key is read as written', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-lint-'));
-    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ rip: { lint: { calls: 'explicit' } } }));
-    expect(readProjectConfig(dir).lint).toEqual({ calls: 'explicit' });
+    try {
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ rip: { lint: { calls: 'explicit' } } }));
+      expect(readProjectConfig(dir).lint).toEqual({ calls: 'explicit' });
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
   test('a rule the block leaves out is off', () => {

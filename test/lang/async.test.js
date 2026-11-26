@@ -4,7 +4,7 @@
 // The contract here is the emitted JS and its behavior under the
 // module-loader eval (top-level await needs a real module context).
 import { describe, test, expect } from 'bun:test';
-import { mkdtempSync, writeFileSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { pathToFileURL } from 'url';
@@ -28,7 +28,8 @@ async function loadDefault(code) {
   const dir = mkdtempSync(join(tmpdir(), 'rip-async-'));
   const file = join(dir, `m${seq++}.mjs`);
   writeFileSync(file, code);
-  return (await import(pathToFileURL(file).href)).default;
+  // The module is in memory once imported; the directory is not needed.
+  try { return (await import(pathToFileURL(file).href)).default; } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
 describe('dammit tokenization: the explicit DAMMIT token', () => {
