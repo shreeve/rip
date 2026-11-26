@@ -8,7 +8,7 @@
 // eval checks, the disambiguation-boundary token fixtures, the
 // mapping pins, and the negative surface.
 import { describe, test, expect } from 'bun:test';
-import { mkdtempSync, writeFileSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { pathToFileURL } from 'url';
@@ -39,7 +39,8 @@ async function loadDefault(code) {
   const dir = mkdtempSync(join(tmpdir(), 'rip-void-'));
   const file = join(dir, `m${seq++}.mjs`);
   writeFileSync(file, code);
-  return (await import(pathToFileURL(file).href)).default;
+  // The module is in memory once imported; the directory is not needed.
+  try { return (await import(pathToFileURL(file).href)).default; } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
 describe('void definitions: emitted bytes', () => {
