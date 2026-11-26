@@ -239,8 +239,16 @@ class Generator
     usedSide = Map.new()
     # A leaf kind is built by the driver, not a template: its forms
     # describe the leaf, and the tree validator checks them.
+    # Each form is the leaf's shape: the kind word, an empty record, and
+    # one raw slot (a raw string, or the words the token can spell).
     for own symbolId, leafKind of @leaves
       if registry[leafKind]?
+        for form in registry[leafKind].forms
+          [head, attrs, raw] = form.slots
+          leafShaped = form.slots.length is 3 and head.lit?.length is 1 and head.lit[0] is leafKind and
+            attrs.type?.alts.length is 1 and attrs.type.alts[0].t is 'attrs' and attrs.type.alts[0].keys.length is 0 and
+            raw.role? and not raw.spread and raw.type.alts.every (a) -> a.t is 'leaf' or a.t is 'lit'
+          problems.push "  • leaf kind '#{leafKind}' form (#{form.text}) is not \"#{leafKind}\" attrs:{} raw:<leaf or words>" unless leafShaped
         usedForms.set leafKind, Set.new(registry[leafKind].forms.map (f, i) -> i)
         usedSide.set leafKind, Set.new(registry[leafKind].side)
       else

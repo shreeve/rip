@@ -212,3 +212,10 @@ test('a leaf kind missing from the registry fails generation', () => {
   const { num: _, ...rest } = grammar.kinds;
   expect(() => new Generator(withKinds(rest))).toThrow(/leaf kind 'num' is not in the registry/);
 });
+
+test('a leaf kind whose form is not a leaf shape fails generation', () => {
+  expect(() => new Generator(withKind('num', { forms: ['"num" attrs:{} raw:expr'] })))
+    .toThrow(/leaf kind 'num' form \("num" attrs:\{\} raw:expr\) is not "num" attrs:\{\} raw:<leaf or words>/);
+  expect(() => new Generator(withKind('num', { forms: ['"num" attrs:{opt} raw:leaf'] })))
+    .toThrow(/leaf kind 'num' form/);
+});
