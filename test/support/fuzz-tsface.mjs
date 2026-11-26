@@ -48,7 +48,7 @@ const SCALARS = [
   ['number[]', '[1, 2]'],
   ['string[]', '["a"]'],
   ['Array<boolean>', '[true]'],
-  ['Map<string, number>', 'new Map()'],
+  ['Map<string, number>', 'Map.new()'],
   ['{a: number, b?: string}', '{a: 1}'],
 ];
 
@@ -132,7 +132,7 @@ const CONSTRUCTS = [
     const [t, v] = pick(rng, SCALARS);
     return {
       kind: 'class with typed field and method return',
-      source: `class C${id}\n  x: ${t} = ${v}\n  m: (v: number): number -> v + 1\nc${id} = new C${id}()\nc${id}.m(2)\n`,
+      source: `class C${id}\n  x: ${t} = ${v}\n  m: (v: number): number -> v + 1\nc${id} = C${id}.new()\nc${id}.m(2)\n`,
     };
   },
   (rng, id) => {

@@ -74,7 +74,7 @@ certification = ->
   import { get, start } from 'rip/sites'
 
   get '/api/version' -> { version: 'one' }
-  get '/api/send' -> new Response null, { headers: { 'X-Sendfile': #{JSON.stringify(privateFile)} } }
+  get '/api/send' -> Response.new null, { headers: { 'X-Sendfile': #{JSON.stringify(privateFile)} } }
   start!
   """
 
@@ -233,7 +233,7 @@ certification = ->
     import { get, start } from 'rip/sites'
 
     get '/api/version' -> { version: 'two' }
-    get '/api/send' -> new Response null, { headers: { 'X-Sendfile': #{JSON.stringify(privateFile)} } }
+    get '/api/send' -> Response.new null, { headers: { 'X-Sendfile': #{JSON.stringify(privateFile)} } }
     start!
     """
     second = waitFor! 'reloaded API response', ->

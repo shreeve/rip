@@ -257,11 +257,11 @@ describeExtended('semantic tokens — a forward-referenced class binding', () =>
   // defect it replaced. References join the channel through `noteNameSpan`,
   // the funnel every identifier passes through.
   test('every occurrence colors `class` — the use site, not only the declaration', async () => {
-    // `new Box()` on line 0; the declaration below it on line 1.
-    expect(await typeAt({ 'fwd.rip': FWD }, 'fwd.rip', 0, 15, 'the Box use')).toBe('class');
+    // `Box.new()` on line 0; the declaration below it on line 1.
+    expect(await typeAt({ 'fwd.rip': FWD }, 'fwd.rip', 0, 11, 'the Box use')).toBe('class');
     // Declare-in-place is repainted too, idempotently: tsgo already answers
     // `class` there, so this asserts the correction never makes it worse.
-    expect(await typeAt({ 'plain.rip': PLAIN }, 'plain.rip', 2, 17, 'the Shape use')).toBe('class');
+    expect(await typeAt({ 'plain.rip': PLAIN }, 'plain.rip', 2, 13, 'the Shape use')).toBe('class');
   }, 60000);
 
   test('a forward-referenced component declaration colors `class` too', async () => {

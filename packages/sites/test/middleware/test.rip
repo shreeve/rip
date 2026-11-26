@@ -77,7 +77,7 @@ runMode = (encrypt) ->
 
   get '/timed/abort', (c) ->
     signal = c.req.raw.signal
-    new Promise (_, reject) ->
+    Promise.new (_, reject) ->
       signal.addEventListener 'abort', -> reject signal.reason
 
   get '/timed/ignore' ->
