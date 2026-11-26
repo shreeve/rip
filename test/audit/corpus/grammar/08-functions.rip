@@ -106,8 +106,8 @@ class Crate
   constructor: (@holder: string, @weight: number = 1) ->
   manifest: -> "#{@holder} carries #{@weight}"
 
-badge = new Badge('ada')
-crate = new Crate('grace', 3)
+badge = Badge.new('ada')
+crate = Crate.new('grace', 3)
 console.log('badge:', badge.describe())
 console.log('crate:', crate.manifest(), crate.holder, crate.weight)
 

@@ -22,7 +22,7 @@ test 'pr handles class instance', '''
     class Foo
       constructor: -> @x = 1
     result = try
-      pr new Foo
+      pr Foo.new()
       'ok'
     catch
       'threw'
@@ -36,9 +36,9 @@ test 'pj passes nested array through', 'y = [[1,2],[3,4]]; pj(y) is y', true
 # pr robustness — every value kind prints without throwing (inline
 # try-catch: a multi-statement inline body parenthesizes)
 # ==============================================================================
-test 'pr handles Date', "(try (pr new Date(); 'ok') catch then 'threw')", 'ok'
-test 'pr handles Map', "(try (pr new Map(); 'ok') catch then 'threw')", 'ok'
-test 'pr handles Set', "(try (pr new Set(); 'ok') catch then 'threw')", 'ok'
+test 'pr handles Date', "(try (pr Date.new(); 'ok') catch then 'threw')", 'ok'
+test 'pr handles Map', "(try (pr Map.new(); 'ok') catch then 'threw')", 'ok'
+test 'pr handles Set', "(try (pr Set.new(); 'ok') catch then 'threw')", 'ok'
 test 'pr handles BigInt', "(try (pr 1n; 'ok') catch then 'threw')", 'ok'
 test 'pr handles non-interned symbol', "(try (pr Symbol(\'local\'); 'ok') catch then 'threw')", 'ok'
 test 'pr handles function', "(try (pr (-> 42); 'ok') catch then 'threw')", 'ok'
@@ -46,7 +46,7 @@ test 'pr handles null', "(try (pr null; 'ok') catch then 'threw')", 'ok'
 test 'pr handles undefined', "(try (pr undefined; 'ok') catch then 'threw')", 'ok'
 
 test 'pr falls back when a nested value has no faithful Rip literal', '''
-  value = {events: [new Date(0)]}
+  value = {events: [Date.new(0)]}
   calls = []
   oldLog = console.log
   oldDir = console.dir

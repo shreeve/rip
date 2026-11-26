@@ -457,7 +457,7 @@ test 'floor-div assign reads target before RHS', '''
   handler.get = (o, k) -> (log.push('get'); o[k])
   handler.set = (o, k, v) -> (log.push('set'); o[k] = v; true)
   target = {x: 9}
-  obj = new Proxy target, handler
+  obj = Proxy.new target, handler
   rhs = -> (log.push('rhs'); 2)
   obj.x //= rhs()
   [target.x, log]
@@ -469,7 +469,7 @@ test 'modulo assign reads target before RHS', '''
   handler.get = (o, k) -> (log.push('get'); o[k])
   handler.set = (o, k, v) -> (log.push('set'); o[k] = v; true)
   target = {x: 9}
-  obj = new Proxy target, handler
+  obj = Proxy.new target, handler
   rhs = -> (log.push('rhs'); 7)
   obj.x %%= rhs()
   [target.x, log]

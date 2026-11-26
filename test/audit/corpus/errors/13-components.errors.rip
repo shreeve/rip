@@ -33,7 +33,7 @@ Wrong = component
 # the twin's Wrong body closes above; the gated-contract negatives follow
 
 wrongMount = Gated.mount()
-wrongConstruct = new Gated({})
+wrongConstruct = Gated.new({})
 
 Member = component
   wrongPlain: string = 42

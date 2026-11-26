@@ -250,7 +250,7 @@ res = http.get! url, searchParams: { page: 1, limit: 20 }
 res = http.get! url, searchParams: 'page=1&limit=20'
 
 # URLSearchParams
-params = new URLSearchParams()
+params = URLSearchParams.new()
 params.set 'page', '1'
 res = http.get! url, searchParams: params
 ```

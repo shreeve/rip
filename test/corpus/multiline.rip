@@ -153,6 +153,6 @@ results = [
   join(2, 3)
   prod(4, 5)
   build().a
-  new SubBox({k: 9}).get("k")
+  SubBox.new({k: 9}).get("k")
   doubled[1]
 ]

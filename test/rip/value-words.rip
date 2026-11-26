@@ -48,13 +48,13 @@ test "value words as object keys", "a = { yes: 3, no: 4 }\na.yes + a.no", 7
 
 # A class field so named stays reachable: reads are `@`/`this.`
 # property accesses.
-test "class field named no", "class A\n  no: boolean = false\n  m: -> @no\nnew A().m()", false
+test "class field named no", "class A\n  no: boolean = false\n  m: -> @no\nA.new().m()", false
 
 # A bare typed class field (no initializer) claims and erases.
 test "bare typed class field named no", "class A\n  no: boolean\ntypeof A", "function"
 
 # A promoted parameter's name stays PROPERTY (`@no` is the binding).
-test "promoted parameter named no", "class A\n  constructor: (@no: boolean) ->\nnew A(true).no", true
+test "promoted parameter named no", "class A\n  constructor: (@no: boolean) ->\nA.new(true).no", true
 
 # A component @-prop so named stays legal for the same reason.
 test 'component @-prop named no', '''

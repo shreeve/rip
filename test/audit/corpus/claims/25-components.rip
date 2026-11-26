@@ -13,7 +13,7 @@ Dial = component
 
   render null
 
-probe = new Dial({})
+probe = Dial.new({})
 tallied: string = probe.tally(2)
 spanned: number = probe.spanning(3)
 dialled: string = probe.tally(4, 'step')
@@ -92,7 +92,7 @@ Ledger = component
 
   render null
 
-ledger = new Ledger({})
+ledger = Ledger.new({})
 ledgerHead: string = ledger.entries.value[0]
 ledgerStatus: string = ledger.status.value
 
@@ -113,7 +113,7 @@ Meter = component
 
   render null
 
-meter = new Meter({})
+meter = Meter.new({})
 meterWidth: number = meter.width.value
 meterSpan: number = meter.span.value
 meterLabel: string = meter.labels.value[0]
@@ -168,7 +168,7 @@ Stamper = component
 
   render null
 
-stamper = new Stamper({})
+stamper = Stamper.new({})
 stampedTag: string = stamper.tag
 stampedFixed: string = stamper.fixedTag
 stampedLive: string = stamper.liveTag.value

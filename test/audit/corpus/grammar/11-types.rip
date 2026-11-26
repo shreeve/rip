@@ -168,7 +168,7 @@ console.log('keywords:', loose, typeof bag, typeof marked, huge, affirmed, denie
 # ── never: the return of a def that only throws ──
 
 def refuse(reason: string): never
-  throw new Error(reason)
+  throw Error.new(reason)
 
 console.log('never:', typeof refuse)
 
@@ -252,7 +252,7 @@ def looksText(value: unknown): value is string
 
 def mustText(value: unknown): asserts value is string
   if typeof value != 'string'
-    throw new Error('not text')
+    throw Error.new('not text')
 
 console.log('predicate:', looksText('a'), looksText(1), typeof mustText, guard.check('a'))
 
@@ -264,7 +264,7 @@ class Tally
     @count = @count + 1
     @
 
-console.log('this:', new Tally().bump().bump().count)
+console.log('this:', Tally.new().bump().bump().count)
 
 # ── an abstract construct signature: parenthesized, since a bare `new` at annotation start parses as an expression ──
 

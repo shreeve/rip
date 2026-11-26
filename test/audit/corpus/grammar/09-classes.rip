@@ -6,9 +6,9 @@ class Marker
 
 class SubMarker extends Marker
 
-bare = new Marker
+bare = Marker.new()
 
-console.log('markers:', bare instanceof Marker, new SubMarker() instanceof Marker)
+console.log('markers:', bare instanceof Marker, SubMarker.new() instanceof Marker)
 
 # ── The full named shape: fields, constructor, methods, statics ──
 
@@ -20,7 +20,7 @@ class Animal
   speak: -> 'generic'
   describe: -> "#{@name} says #{@speak()}"
   @kingdom: string = 'Animalia'
-  @found: -> new this
+  @found: -> this.new()
 
 generic = Animal.found()
 
@@ -38,7 +38,7 @@ Grown = class extends Marker
 Refined = class extends Tagged
   note: string = 'refined'
 
-console.log('anonymous:', new Blank() instanceof Blank, new Tagged().tag, new Grown() instanceof Marker, new Refined().note)
+console.log('anonymous:', Blank.new() instanceof Blank, Tagged.new().tag, Grown.new() instanceof Marker, Refined.new().note)
 
 # ── Static inner classes: the @-targeted declaration forms ──
 
@@ -48,7 +48,7 @@ class Shelf
   class @Bin extends Shelf.Box
     lidded: boolean = true
 
-console.log('shelf:', new Shelf.Box().label, new Shelf.Bin().lidded, new Shelf.Bin().label)
+console.log('shelf:', Shelf.Box.new().label, Shelf.Bin.new().lidded, Shelf.Bin.new().label)
 
 # ── Subclassing: constructor super(), and method super in every form ──
 
@@ -64,7 +64,7 @@ class Dog extends Animal
       'describe'
     ]()
 
-rex = new Dog('Rex')
+rex = Dog.new('Rex')
 
 console.log('dog:', rex.describe(), rex.formal(), rex.keyed(), rex.tall())
 
@@ -75,27 +75,27 @@ nested = { inner: blueprints }
 mintClass = (parts: TemplateStringsArray) -> class Minted
   label: -> parts[0]
 
-viaDot = new blueprints.marker
-viaIndex = new blueprints['marker']
-viaParen = new (blueprints.animal)('Via')
-viaSoak = new blueprints?.marker
-viaSoakCall = new blueprints?.animal('Soaked')
-viaSoakBelow = new nested?.inner.marker
-viaSoakIndex = new nested?.inner['marker']
-viaTag = new mintClass"minted"
+viaDot = blueprints.marker.new()
+viaIndex = blueprints['marker'].new()
+viaParen = (blueprints.animal).new('Via')
+viaSoak = blueprints?.marker.new()
+viaSoakCall = blueprints?.animal.new('Soaked')
+viaSoakBelow = nested?.inner.marker.new()
+viaSoakIndex = nested?.inner['marker'].new()
+viaTag = mintClass"minted".new()
 
 console.log('spines:', viaDot instanceof Marker, viaIndex instanceof Marker, viaParen.name)
 console.log('soaks:', viaSoak instanceof Marker, viaSoakCall.name, viaSoakBelow instanceof Marker, viaSoakIndex instanceof Marker)
-console.log('tag:', viaTag.label(), (new mintClass"chained").label())
+console.log('tag:', viaTag.label(), (mintClass"chained".new()).label())
 
 class Kennel
   Tenant: typeof Dog = Dog
-  adopt: (name: string) -> new @Tenant(name)
+  adopt: (name: string) -> @Tenant.new(name)
 
 class Crate extends Shelf
-  @unbox: -> new super.Box
+  @unbox: -> super.Box.new()
 
-console.log('kept:', new Kennel().adopt('Fido').name, Crate.unbox().label)
+console.log('kept:', Kennel.new().adopt('Fido').name, Crate.unbox().label)
 
 # ── Construction dammit: the construction itself is the awaited call ──
 
@@ -104,8 +104,8 @@ class Ticket
   constructor: (serial: number = 1) ->
     @serial = serial
 
-instant = new Ticket!
-numbered = new Ticket!(7)
+instant = Ticket.new!
+numbered = Ticket.new!(7)
 
 console.log('tickets:', instant.serial, numbered.serial)
 
@@ -120,9 +120,9 @@ class Hatchery
 
 # the cast records what TypeScript cannot express: this constructor genuinely returns a class, so constructing it yields a constructor
 Hatch = Hatchery as new () => new () => { chirp: string }
-hatched = new new Hatch
+hatched = Hatch.new().new()
 mints = { hatch: Hatch }
-hatchedSoak = new new mints?.hatch
+hatchedSoak = mints?.hatch.new().new()
 
 console.log('hatched:', hatched.chirp, hatchedSoak.chirp)
 
@@ -140,7 +140,7 @@ console.log('prototype:', typeof speaker, typeof speakerOf(Animal), speakerOf(un
 export class Shipped
   version: number = 4
 
-console.log('shipped:', new Shipped().version)
+console.log('shipped:', Shipped.new().version)
 
 # ── def methods: `def` in a class body, the static `def @`, the bang void form, and get/set accessors ──
 
@@ -152,9 +152,9 @@ class Counter
     @history.push(n)
     @count += n
   def @of(n: number): Counter
-    new Counter(n)
+    Counter.new(n)
   def @fresh()
-    new Counter()
+    Counter.new()
   def @pair<T>(x: T)
     [x, x]
   def @only<T>(x: T): T[]
@@ -232,9 +232,9 @@ class Vault
   private def keepTyped!<T>(x: T): void
     @memo = String(x)
   private def @mint()
-    new Vault('mint')
+    Vault.new('mint')
   private def @mintTyped(): Vault
-    new Vault('typed')
+    Vault.new('typed')
   private def @pairOf<T>(x: T)
     [x, x]
   private def @pairOfTyped<T>(x: T): T[]
@@ -261,6 +261,6 @@ class Vault
     minted = [Vault.mint(), Vault.mintTyped(), Vault.pairOf(1), Vault.pairOfTyped(2)].length
     @bump() + @lifted() + @peek() + @peekTyped() + @mirror(1).length + @mirrorTyped(2).length + minted + @maybe + @maybeCarried + @maybeDropped + @maybeTyped + @maybeTypedCarried + @maybeTypedDropped
 
-vault = new Vault('ada')
+vault = Vault.new('ada')
 
 console.log('vault:', vault.tally())

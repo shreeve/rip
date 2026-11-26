@@ -261,9 +261,9 @@ test "for-of when key of object", '''
 test "for-in when instanceof", '''
   class Fruit
   class Veggie
-  apple = new Fruit
-  grape = new Fruit
-  carrot = new Veggie
+  apple = Fruit.new()
+  grape = Fruit.new()
+  carrot = Veggie.new()
   items = [apple, grape, carrot]
   result = []
   for item in items when item instanceof Fruit
@@ -290,7 +290,7 @@ test 'for-as with even filter', '''
   ''', [2, 4, 6]
 
 test 'for-as set with guard', '''
-  s = new Set([10, 20, 30, 40, 50])
+  s = Set.new([10, 20, 30, 40, 50])
   result = []
   for x as s when x > 25
     result.push(x)
@@ -298,7 +298,7 @@ test 'for-as set with guard', '''
   ''', [30, 40, 50]
 
 test 'for-as destructure with guard', '''
-  m = new Map([["a", 1], ["b", 2], ["c", 3]])
+  m = Map.new([["a", 1], ["b", 2], ["c", 3]])
   result = []
   for [k, v] as m.entries() when v > 1
     result.push(k)
@@ -338,9 +338,9 @@ test 'for-of when key not of object', '''
 test 'for-in when not instanceof', '''
   class Fruit
   class Veggie
-  apple = new Fruit
-  grape = new Fruit
-  carrot = new Veggie
+  apple = Fruit.new()
+  grape = Fruit.new()
+  carrot = Veggie.new()
   items = [apple, grape, carrot]
   result = []
   for item in items when item not instanceof Fruit

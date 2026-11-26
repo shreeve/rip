@@ -97,5 +97,5 @@ class WideRow extends Row
   meta: -> { ...super.base(), noted: true }
   dump: -> { ...this }
 
-wide = new WideRow()
+wide = WideRow.new()
 console.log('classes:', wide.base(), wide.meta(), wide.dump())

@@ -587,7 +587,7 @@ get '/object' -> { ok: true }        # JSON
 get '/text'   -> 'hello'             # text/plain
 get '/html'   -> '<h1>Hello</h1>'    # text/html
 get '/empty'  -> null                # 204
-get '/raw'    -> new Response('raw') # unchanged
+get '/raw'    -> Response.new('raw') # unchanged
 ```
 
 Use explicit helpers when status, headers, or representation must be clear:
@@ -745,7 +745,7 @@ use '/api/reports', timeout 120, grace: 2
 use htmlJson
 
 use '/api/private', (request, next) ->
-  return new Response('unauthorized', { status: 401 }) unless session.user
+  return Response.new('unauthorized', { status: 401 }) unless session.user
   next!()
 ```
 

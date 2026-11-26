@@ -174,7 +174,7 @@ test 'throw in else block no return', '''
     if hash.recoverable
       @trace str
     else
-      error = new Error str
+      error = Error.new str
       error.hash = hash
       throw error
   result = null
@@ -187,7 +187,7 @@ test 'throw in else block no return', '''
 
 test 'throw as last statement in function', '''
   fn = (x) ->
-    throw new Error("bad: #{x}")
+    throw Error.new("bad: #{x}")
   result = null
   try
     fn(42)
@@ -201,7 +201,7 @@ test 'throw in if-else', '''
     if x > 0
       x * 2
     else
-      throw new Error("negative")
+      throw Error.new("negative")
   result = fn(5)
   result
   ''', 10
@@ -211,7 +211,7 @@ code "throw in else block", '''
     if x
       "ok"
     else
-      throw new Error("bad")
+      throw Error.new("bad")
   ''', '''
   let fn = function(x) {
     if (x) {
@@ -336,7 +336,7 @@ fail 'value-position throw cannot capture yield', '''
 
 test 'value-position throw preserves await', '''
   f = ->
-    x = false or throw (await Promise.resolve(new Error('boom')))
+    x = false or throw (await Promise.resolve(Error.new('boom')))
   msg = ''
   try
     await f()
@@ -522,7 +522,7 @@ test "closure assigns a catch pattern name", '''
   run = ->
     out = []
     try
-      throw new Error 'boom'
+      throw Error.new 'boom'
     catch {message}
       fix = -> message = 'handled'
       out.push fix(), message

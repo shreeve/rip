@@ -20,7 +20,7 @@ filesystem (`fs`). One `.rip` file.
 import { X12 } from 'rip/x12'
 
 # Parse an X12 message
-x12 = new X12 rawString
+x12 = X12.new rawString
 
 # Get values using path addressing
 sender   = x12.get "ISA-6"        # ISA segment, field 6
