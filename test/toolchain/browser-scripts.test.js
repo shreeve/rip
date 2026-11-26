@@ -144,7 +144,7 @@ describe('processRipScripts', () => {
     const { host, reported } = makeHost({
       scripts: [
         { text: 'globalThis.__ran.push 1' },
-        { text: 'throw new Error "boom at runtime"' },
+        { text: 'throw Error.new "boom at runtime"' },
         { text: 'globalThis.__ran.push 3' },
       ],
     });
@@ -161,7 +161,7 @@ describe('processRipScripts', () => {
 
   test('a user EvalError is a runtime error, never a CSP diagnostic', async () => {
     const { host, reported } = makeHost({
-      scripts: [{ text: 'throw new EvalError "my own eval problem"' }],
+      scripts: [{ text: 'throw EvalError.new "my own eval problem"' }],
     });
     const result = await processRipScripts(host);
     expect(result.failures[0].label).toBe('<runtime>');

@@ -83,7 +83,7 @@ describe('seeded plain/class/def/import: bindings persist, never re-hoist', () =
   });
 
   test('seeded class/def/import names read plain and suppress hoisting', () => {
-    const r = seeded('r = new Foo(g(z))', [
+    const r = seeded('r = Foo.new(g(z))', [
       { name: 'Foo', kind: 'class' },
       { name: 'g', kind: 'def' },
       { name: 'z', kind: 'import' },

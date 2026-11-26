@@ -582,7 +582,7 @@ describe.concurrent.skipIf(!tsgoAvailable)('definition', () => {
         'import { Point } from "./shapes.rip"',
         'interface Config',
         '  depth: number',
-        'p = new Point()',
+        'p = Point.new()',
         'cfg: Config = { depth: 1 }',
         'k = cfg',
         'w = p.x',

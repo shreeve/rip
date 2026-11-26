@@ -106,7 +106,7 @@ const runBatch = () => { batch ??= tscBatch(TSC, files); return batch; };
 describeTscExtended('module edges resolve for a consumer program', () => {
   test('imports, default export, and re-exports carry through declarations', () => {
     const model = compile('export class User\n  name: string = ""');
-    const main = compile('import { User } from "./model.js"\nexport current: User = new User()\nexport { User } from "./model.js"');
+    const main = compile('import { User } from "./model.js"\nexport current: User = User.new()\nexport { User } from "./model.js"');
     const dflt = compile('x: number = 5\nexport default x');
     const consumer = [
       "import def from './dflt.js';",
@@ -424,8 +424,8 @@ describeTscExtended('component declarations: consumer programs check against the
       'export Tag = component',
       '  @basket := cart',
       '  @lid := lid',
-      '  @other := new Other()',
-      '  @store := new Store()',
+      '  @other := Other.new()',
+      '  @store := Store.new()',
       '  @pi := Math.PI',
       '  render null',
       '',

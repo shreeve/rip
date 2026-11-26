@@ -92,7 +92,7 @@ describeTscExtended('tier 1: every corpus TS face parses as TypeScript (no TS1xx
 const CLEAN_ROWS = [
     // hoisted-let typing: annotation reaches the declaration
  'x: number = 5\nx = 7',
- 'r: Map<string, number>\nr = new Map()',
+ 'r: Map<string, number>\nr = Map.new()',
     // the TS2454 class stays quiet (definite-assignment
     // assertion): read-before-assign and conditional-assign-then-read
     // are LEGAL Rip (hoisted reads yield undefined) — annotating must
@@ -109,7 +109,7 @@ const CLEAN_ROWS = [
     // overloads through the face
  'def pick(a: number): string\ndef pick(a: string): string\ndef pick(a)\n  String(a)\npick(1).length',
     // class surface
- 'class A\n  x: number = 5\n  m: (v: number): number -> v + @x\na = new A()\na.m(2)',
+ 'class A\n  x: number = 5\n  m: (v: number): number -> v + @x\na = A.new()\na.m(2)',
     // reactive containers/readonly/effect handles
  'count: number := 0\ntotal: number ~= count * 2\nro: string =! "s"\ncount = total + ro.length',
     // void definitions
@@ -120,7 +120,7 @@ const CLEAN_ROWS = [
     // row here, and each was red before the rule reached it
  'def pump!()\n  yield 1\npump()',
  'pump! = ->\n  yield 1\npump()',
- 'class A\n  pump!: ->\n    yield 1\na = new A()\na.pump()',
+ 'class A\n  pump!: ->\n    yield 1\na = A.new()\na.pump()',
  'o =\n  pump!: ->\n    yield 1\no.pump()',
     // the author-spelled iterator passes through unwrapped, which is
     // the escape hatch that makes emitting nothing above sufficient
@@ -171,7 +171,7 @@ const CLEAN_ROWS = [
  '# @ts-expect-error unresolved alias body\ntype X = Missing\nz = 1\nz = 2',
     // class member placement (the review-round HIGH): the field row
     // carries the violation, the directive sits directly above it
- 'class A\n  # @ts-expect-error field violation\n  x: number = "s"\na = new A()',
+ 'class A\n  # @ts-expect-error field violation\n  x: number = "s"\na = A.new()',
     // file-level @ts-nocheck: the whole file skips checking
  '# @ts-nocheck\nx: number = 5\nx = "not a number"',
     // types-gaps wave: type declarations in LOWERED value bodies —
@@ -508,7 +508,7 @@ describeTscExtended('tier 2: self-contained typed faces check CLEAN — annotati
   }, TSC_TIMEOUT);
 
   test('unused directive above a class FIELD draws TS2578 — the self-check reaches class bodies', () => {
-    const faced = compile('class A\n  # @ts-expect-error\n  x: number = 5\na = new A()\n', { runtimeDelivery: 'none', face: 'ts' });
+    const faced = compile('class A\n  # @ts-expect-error\n  x: number = 5\na = A.new()\n', { runtimeDelivery: 'none', face: 'ts' });
     const { status, output } = tscRun({ 'mod.ts': `${faced.code}\nexport {};\n` });
     expect(status).not.toBe(0);
     expect(output).toContain('TS2578');

@@ -35,7 +35,7 @@ describe('the stack-trace showcase: an error in reactive code points at source',
  'armed = false',         // 2
  '~>',                    // 3
  '  probe = count',       // 4
- '  throw new Error "effect kapow #{probe}" if armed', // 5 — `Error` at col 13
+ '  throw Error.new "effect kapow #{probe}" if armed', // 5 — `Error` at col 9
  'armed = true',          // 6
  'count = 1',             // 7 — the write that triggers the flush
  '',
@@ -51,7 +51,7 @@ describe('the stack-trace showcase: an error in reactive code points at source',
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('effect kapow 1');
     // The throw frame: source line 5, the `Error` construction column.
-    expect(r.stderr).toMatch(/fx\.rip:5:13/);
+    expect(r.stderr).toMatch(/fx\.rip:5:9/);
     // The triggering write's frame resolves to source line 7.
     expect(r.stderr).toMatch(/fx\.rip:7(?![.\d])/);
     // No frame leaks the generated coordinates for the throw.
@@ -113,7 +113,7 @@ describe('async effect errors resolve to .rip coordinates', () => {
  '~> =>',                                            // 3
  '  v = count',                                      // 4
  '  await Promise.resolve()',                        // 5
- '  throw new Error "async kapow #{v}" if v > 0',    // 6 — `Error` at col 13
+ '  throw Error.new "async kapow #{v}" if v > 0',    // 6 — `Error` at col 9
  'count = 1',                                        // 7
  '',
     ].join('\n');
@@ -132,7 +132,7 @@ describe('async effect errors resolve to .rip coordinates', () => {
       // …and the report tells the truth about the source position.
       expect(r.stderr).toContain('[Rip] async effect error:');
       expect(r.stderr).toContain('async kapow 1');
-      expect(r.stderr).toMatch(/afx\.rip:6:13/);
+      expect(r.stderr).toMatch(/afx\.rip:6:9/);
       expect(r.stderr).not.toMatch(new RegExp(`afx\\.rip:${genLine}:`));
     } finally {
       rmSync(dir, { recursive: true, force: true });

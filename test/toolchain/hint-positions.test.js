@@ -27,8 +27,8 @@ const SRC = [
   '  constructor: (serial: number = 1) ->',                          // line 2
   '    @serial = serial',                                            // line 3
   '',                                                                // line 4
-  'instant = new Ticket!',                                           // line 5  bang at col 20
-  'numbered = new Ticket!(7)',                                       // line 6  bang at col 21
+  'instant = Ticket.new!',                                           // line 5  bang at col 20
+  'numbered = Ticket.new!(7)',                                       // line 6  bang at col 21
   'syncFn: () => number = -> 42',                                    // line 7 annotated: types line 8's read
   'got = syncFn!',                                                   // line 8  bang at col 12
   'fetchReal = -> Promise.resolve(7)',                               // line 9
@@ -56,8 +56,8 @@ describeExtended('hint positions — the await hint lands on the operator the au
         return [h.range.start.character, h.range.end.line, h.range.end.character];
       };
       // The three sugar spellings: exactly the bang, one character.
-      expect(spanOf(5), 'new Ticket! — the bang').toEqual([20, 5, 21]);
-      expect(spanOf(6), 'new Ticket!(7) — the bang').toEqual([21, 6, 22]);
+      expect(spanOf(5), 'Ticket.new! — the bang').toEqual([20, 5, 21]);
+      expect(spanOf(6), 'Ticket.new!(7) — the bang').toEqual([21, 6, 22]);
       expect(spanOf(8), 'syncFn! — the bang').toEqual([12, 8, 13]);
       // The author-spelled control: the keyword itself, never bang-hunted.
       expect(spanOf(11), 'await 5 — the keyword').toEqual([16, 11, 21]);

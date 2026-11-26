@@ -1884,7 +1884,7 @@ App = component
 Bad = component
   mounted = ->
     failedRoots.push @_root
-    throw new Error("setup boom")
+    throw Error.new("setup boom")
   render
     i "failed"
 Good = component

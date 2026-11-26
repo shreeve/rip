@@ -369,7 +369,7 @@ describe('cli: run surface (loader end-to-end)', () => {
   });
 
   test('runtime stack traces resolve to .rip source lines', () => {
-    write('crash.rip', 'def boom()\n  throw new Error("kapow")\n\nboom()\n');
+    write('crash.rip', 'def boom()\n  throw Error.new("kapow")\n\nboom()\n');
     const r = rip(['crash.rip']);
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('kapow');
@@ -401,46 +401,46 @@ describe('cli: run surface (loader end-to-end)', () => {
 describe('cli: stack frames carry true .rip positions, not generated ones', () => {
   test('entry-module throw: function frame and call frame', () => {
     // Generated: throw at 4:13, call at 6:1. Source: throw's `Error`
-    // at 2:13, call at 4:1.
-    write('shifted.rip', 'greet = (name) ->\n  throw new Error "no greeting for #{name}"\n\ngreet "world"\n');
+    // at 2:9, call at 4:1.
+    write('shifted.rip', 'greet = (name) ->\n  throw Error.new "no greeting for #{name}"\n\ngreet "world"\n');
     const r = rip(['shifted.rip']);
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('no greeting for world');
-    expect(r.stderr).toMatch(/at greet \(.*shifted\.rip:2:13\)/);
+    expect(r.stderr).toMatch(/at greet \(.*shifted\.rip:2:9\)/);
     expect(r.stderr).toMatch(/at .*shifted\.rip:4(?![.\d])/);
     expect(r.stderr).not.toMatch(/shifted\.rip:4:13/);
     expect(r.stderr).not.toMatch(/shifted\.rip:6/);
   });
 
   test('throw inside an imported module: both modules remap', () => {
-    // lib.rip: generated throw 4:13 → source 2:13. shiftmain.rip:
+    // lib.rip: generated throw 4:13 → source 2:9. shiftmain.rip:
     // generated call 2:1 → source line 3.
-    write('shiftlib.rip', 'greet = (name) ->\n  throw new Error "no greeting for #{name}"\n\nexport {greet}\n');
+    write('shiftlib.rip', 'greet = (name) ->\n  throw Error.new "no greeting for #{name}"\n\nexport {greet}\n');
     write('shiftmain.rip', 'import {greet} from "./shiftlib.rip"\n\ngreet "world"\n');
     const r = rip(['shiftmain.rip']);
     expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/at greet \(.*shiftlib\.rip:2:13\)/);
+    expect(r.stderr).toMatch(/at greet \(.*shiftlib\.rip:2:9\)/);
     expect(r.stderr).toMatch(/at .*shiftmain\.rip:3(?![.\d])/);
     expect(r.stderr).not.toMatch(/shiftlib\.rip:4/);
   });
 
   test('async callback throw (uncaughtException path) remaps', () => {
-    // Generated throw at 5:13 → source `Error` at 2:26.
-    write('shifttick.rip', 'pad = 1\nsetTimeout (-> throw new Error "tick"), 1\n');
+    // Generated throw at 5:13 → source `Error` at 2:22.
+    write('shifttick.rip', 'pad = 1\nsetTimeout (-> throw Error.new "tick"), 1\n');
     const r = rip(['shifttick.rip']);
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('tick');
-    expect(r.stderr).toMatch(/shifttick\.rip:2:26/);
+    expect(r.stderr).toMatch(/shifttick\.rip:2:22/);
     expect(r.stderr).not.toMatch(/shifttick\.rip:5/);
   });
 
   test('unhandled rejection (unhandledRejection path) remaps', () => {
-    // Generated rejection site at 4:20 → source 2:20.
-    write('shiftreject.rip', 'pad = 1\nPromise.reject new Error "nope"\n');
+    // Generated rejection site at 4:20 → source 2:16.
+    write('shiftreject.rip', 'pad = 1\nPromise.reject Error.new "nope"\n');
     const r = rip(['shiftreject.rip']);
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('nope');
-    expect(r.stderr).toMatch(/shiftreject\.rip:2:20/);
+    expect(r.stderr).toMatch(/shiftreject\.rip:2:16/);
     expect(r.stderr).not.toMatch(/shiftreject\.rip:4/);
   });
 
@@ -451,12 +451,12 @@ describe('cli: stack frames carry true .rip positions, not generated ones', () =
   test('throw inside an accumulator-IIFE comprehension: function frame and IIFE-interior call frame', () => {
     // Generated (Tier 1 declare-in-place): boom's throw on line 2, the
     // accumulator body's call at 7:17 (`result.push(boom(n))`). Source:
-    // `Error` at 2:13, the `boom(n)` call at 4:8.
-    write('shiftcomp.rip', 'boom = (x) ->\n  throw new Error "bad #{x}"\n\nout = (boom(n) for n in [1, 2])\n');
+    // `Error` at 2:9, the `boom(n)` call at 4:8.
+    write('shiftcomp.rip', 'boom = (x) ->\n  throw Error.new "bad #{x}"\n\nout = (boom(n) for n in [1, 2])\n');
     const r = rip(['shiftcomp.rip']);
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('bad 1');
-    expect(r.stderr).toMatch(/at boom \(.*shiftcomp\.rip:2:13\)/);
+    expect(r.stderr).toMatch(/at boom \(.*shiftcomp\.rip:2:9\)/);
     expect(r.stderr).toMatch(/at <anonymous> \(.*shiftcomp\.rip:4:8\)/);
     // The push line's GENERATED position (7:17) must not leak — any
     // frame on generated line 7 carries segments and must remap.
@@ -468,23 +468,23 @@ describe('cli: stack frames carry true .rip positions, not generated ones', () =
 
   test('throw inside a value-lowered try IIFE remaps', () => {
     // Generated: the catch's throw at 7:13 (the try IIFE opens on the
-    // assignment line). Source: its `Error` at 5:13.
-    write('shifttryv.rip', 'pad = 1\nv = try\n  throw new Error "inside try"\ncatch e\n  throw new Error "from catch: #{e.message}"\nconsole.log v\n');
+    // assignment line). Source: its `Error` at 5:9.
+    write('shifttryv.rip', 'pad = 1\nv = try\n  throw Error.new "inside try"\ncatch e\n  throw Error.new "from catch: #{e.message}"\nconsole.log v\n');
     const r = rip(['shifttryv.rip']);
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('from catch: inside try');
-    expect(r.stderr).toMatch(/at <anonymous> \(.*shifttryv\.rip:5:13\)/);
+    expect(r.stderr).toMatch(/at <anonymous> \(.*shifttryv\.rip:5:9\)/);
     expect(r.stderr).not.toMatch(/shifttryv\.rip:7:13/);
   });
 
   test('throw inside a value-lowered switch IIFE remaps', () => {
     // Generated: the case's throw at 6:15. Source: its `Error` at
-    // 3:25 (the one-line `when … then throw` spelling).
-    write('shiftswitchv.rip', 'k = 1\nv = switch k\n  when 1 then throw new Error "one"\n  else 2\nconsole.log v\n');
+    // 3:21 (the one-line `when … then throw` spelling).
+    write('shiftswitchv.rip', 'k = 1\nv = switch k\n  when 1 then throw Error.new "one"\n  else 2\nconsole.log v\n');
     const r = rip(['shiftswitchv.rip']);
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('one');
-    expect(r.stderr).toMatch(/at <anonymous> \(.*shiftswitchv\.rip:3:25\)/);
+    expect(r.stderr).toMatch(/at <anonymous> \(.*shiftswitchv\.rip:3:21\)/);
     expect(r.stderr).not.toMatch(/shiftswitchv\.rip:6:15/);
   });
 
@@ -493,10 +493,10 @@ describe('cli: stack frames carry true .rip positions, not generated ones', () =
     // trailing :line:col — whitespace inside the path is part of it.
     const spaced = mkdtempSync(join(tmpdir(), 'rip cli space-'));
     try {
-      writeFileSync(join(spaced, 'crash.rip'), 'greet = (name) ->\n  throw new Error "no greeting for #{name}"\n\ngreet "world"\n');
+      writeFileSync(join(spaced, 'crash.rip'), 'greet = (name) ->\n  throw Error.new "no greeting for #{name}"\n\ngreet "world"\n');
       const r = spawnSync('bun', [BIN, 'crash.rip'], { cwd: spaced, encoding: 'utf8' });
       expect(r.status).toBe(1);
-      expect(r.stderr).toMatch(/at greet \(.*crash\.rip:2:13\)/);
+      expect(r.stderr).toMatch(/at greet \(.*crash\.rip:2:9\)/);
       expect(r.stderr).not.toMatch(/crash\.rip:4:13/);
       expect(r.stderr).not.toMatch(/crash\.rip:6/);
     } finally {
@@ -508,11 +508,11 @@ describe('cli: stack frames carry true .rip positions, not generated ones', () =
     // The message deliberately contains this module's own registered
     // path followed by generated-looking coordinates; only FRAME
     // locations may change.
-    write('msgsafe.rip', 'boom = ->\n  throw new Error "see #{process.argv[1]}:4:13 for details"\n\nboom()\n');
+    write('msgsafe.rip', 'boom = ->\n  throw Error.new "see #{process.argv[1]}:4:13 for details"\n\nboom()\n');
     const r = rip(['msgsafe.rip']);
     expect(r.status).toBe(1);
     expect(r.stderr).toMatch(/Error: see .*msgsafe\.rip:4:13 for details/);
-    expect(r.stderr).toMatch(/at boom \(.*msgsafe\.rip:2:13\)/);
+    expect(r.stderr).toMatch(/at boom \(.*msgsafe\.rip:2:9\)/);
   });
 
   test("the entry's own uncaughtException handler wins over the harness fallback", () => {
@@ -521,7 +521,7 @@ describe('cli: stack frames carry true .rip positions, not generated ones', () =
       '  console.log "mine: #{err.message}"',
       '  process.exit 5',
       '',
-      'setTimeout (-> throw new Error "handled here"), 1',
+      'setTimeout (-> throw Error.new "handled here"), 1',
     ].join('\n') + '\n');
     const r = rip(['ownhandler.rip']);
     expect(r.status).toBe(5);
@@ -770,8 +770,8 @@ describe('remapStack: frame lines remap, message lines never change', () => {
     // sample's generated lines coincide with its source lines — a
     // leading comment (dropped by the compiler) keeps them distinct so
     // the remap stays observable: greet's throw is generated 2:13 →
-    // source 3:13, the call generated 4:1 → source 5:1.
-    const source = '# padding line: keeps generated lines distinct from source lines\ngreet = (name) ->\n  throw new Error "x"\n\ngreet "y"\n';
+    // source 3:9, the call generated 4:1 → source 5:1.
+    const source = '# padding line: keeps generated lines distinct from source lines\ngreet = (name) ->\n  throw Error.new "x"\n\ngreet "y"\n';
     const path = '/tmp/spaced dir/unit msg.rip';
     const { map } = compile(source, { path });
     registerModuleMap(path, map);
@@ -785,7 +785,7 @@ describe('remapStack: frame lines remap, message lines never change', () => {
 
     expect(remapStack(stack).split('\n')).toEqual([
       `Error: see ${path}:2:13 and call ${path}:4:1`,
-      `    at greet (${path}:3:13)`,
+      `    at greet (${path}:3:9)`,
       `    at ${path}:5:1`,
       '    at other (/elsewhere/not-registered.js:9:9)',
     ]);

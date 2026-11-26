@@ -30,7 +30,7 @@ third    = x12.get "EB(3)-4"      # 3rd EB segment, field 4
 comp     = x12.get "EB(3)-4(2).1" # 3rd EB, field 4, repeat 2, component 1
 count    = x12.get "EB(?)"        # Count of EB segments
 
-# Set values (a fresh `new X12()` seeds a valid fixed-width ISA envelope)
+# Set values (a fresh `X12.new()` seeds a valid fixed-width ISA envelope)
 x12.set "ISA-6", "NEWSENDER"
 x12.set "GS-2", "NEWID"
 x12.set "REF(+)-1", ["EI", "123456789"]   # append a new REF segment
@@ -49,7 +49,7 @@ x12.each 'EB', (row) -> console.log row
 output = x12.raw()
 ```
 
-`new X12()` accepts a raw string, another `X12` instance (an exact
+`X12.new()` accepts a raw string, another `X12` instance (an exact
 clone), an array of `selector, value` pairs, or an object of
 `selector: value` entries; the latter two start from the default
 fixed-width ISA template. `X12.load path` reads a file.
