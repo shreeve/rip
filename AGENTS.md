@@ -495,9 +495,14 @@ the affected final gates again.
 - `bun run parser` — regenerate `src/parser.js` from the grammar.
 - `bun run corpus` — regenerate the corpus expected outputs and the
   consumer-corpus manifest (`test/corpus/consumers.json`: one output hash
-  per face for every package module and language-suite row). Review a
-  moved manifest with `bun scripts/consumer-diff.mjs <ref>` before
-  accepting it.
+  per face for every package module and language-suite row) and the
+  front-end manifest (`test/corpus/frontend.json`: the same programs'
+  token tape, strict tree with its store rows, tolerant parse and REPL
+  verdict). Review a moved manifest before accepting it:
+  `bun scripts/consumer-diff.mjs <ref>` for output and
+  `bun scripts/frontend-diff.mjs <ref>` for the front end. A change
+  meant to leave trees alone proves it with an unmoved front-end
+  manifest.
 - `bun run decls` — regenerate the declaration beside each typed
   runtime (`src/runtime/<key>.d.ts`) from the runtime table's face
   signatures and `src/ts/runtime-exports.js`, the signatures of the

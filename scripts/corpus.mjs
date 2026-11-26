@@ -87,4 +87,14 @@ console.log(
   const before = existsSync(path) ? readFileSync(path, 'utf8') : '';
   if (before !== text) writeFileSync(path, text);
   console.log(`corpus: ${Object.keys(hashes).length} consumer programs → manifest ${before === text ? 'unchanged' : 'rewritten'}`);
+
+  // The same programs at the front end: tape, tree, tolerant parse, REPL
+  // verdict (test/support/frontend-hashes.js).
+  const { hashFrontEnd, FRONTEND_MANIFEST } = await import('../test/support/frontend-hashes.js');
+  const front = hashFrontEnd([...packageInputs(root), ...(await rowInputs(root))]);
+  const frontText = `${JSON.stringify(front, null, 1)}\n`;
+  const frontPath = join(root, FRONTEND_MANIFEST);
+  const frontBefore = existsSync(frontPath) ? readFileSync(frontPath, 'utf8') : '';
+  if (frontBefore !== frontText) writeFileSync(frontPath, frontText);
+  console.log(`corpus: ${Object.keys(front).length} consumer programs → front-end manifest ${frontBefore === frontText ? 'unchanged' : 'rewritten'}`);
 }

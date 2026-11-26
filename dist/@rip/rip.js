@@ -25568,27 +25568,25 @@ var diagnosticError = (file, path, d) => {
 function compile(source, options = {}) {
   return emitSource(parseSource(source, options), options);
 }
+function splitData(source) {
+  const lines = source.split(`
+`);
+  const at = lines.findIndex((line) => line === "__DATA__");
+  if (at === -1)
+    return { text: source, dataPayload: null };
+  const rest = lines.slice(at + 1);
+  return { text: lines.slice(0, at).join(`
+`), dataPayload: rest.length > 0 ? rest.join(`
+`) + `
+` : "" };
+}
 function parseSource(source, { path = "<anonymous>", face = "js", tolerant = false, foldProjections = false } = {}) {
   if (typeof source !== "string") {
     const kind = source === null ? "null" : Array.isArray(source) ? "an array" : `a ${typeof source}`;
     throw new CompileError(`compile: source must be a string; got ${kind}`, { path });
   }
   const file = new SourceFile(source, path);
-  let dataPayload = null;
-  let parseSource = source;
-  {
-    const lines = source.split(`
-`);
-    const at = lines.findIndex((line) => line === "__DATA__");
-    if (at !== -1) {
-      const rest = lines.slice(at + 1);
-      dataPayload = rest.length > 0 ? rest.join(`
-`) + `
-` : "";
-      parseSource = lines.slice(0, at).join(`
-`);
-    }
-  }
+  const { text: parseSource, dataPayload } = splitData(source);
   const parser = Parser();
   parser.lexer = makeParserLexer(path, { tolerant });
   let result;
@@ -34382,7 +34380,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "09ac6280932d76cc";
+var compilerBuild = () => "c8d0245ce4cba3f8";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
