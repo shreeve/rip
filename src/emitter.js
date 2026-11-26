@@ -299,15 +299,15 @@ const isDefHead = (h) => h === 'def' || h === 'void-def';
 // `effect(a, b)`, so the walk takes the stores. Exported for the same
 // reason as containsYield below: the return type it decides is spelled
 // independently by the face and by the declarations.
-export function containsAwait(sexpr) {
+export function containsAwait(sexpr, stores) {
   if (!isNode(sexpr)) return false;
   const head = sexpr[0];
   if (head === 'await' || (isCall(sexpr) && sexpr[1].await === true)) return true;
   if (head === 'for-as' && sexpr[3] === true) return true;
   // A class body owns its awaits; its heritage evaluates in this scope.
-  if (head === 'class') return containsAwait(sexpr[2]);
-  if (head === '->' || head === '=>' || isDefHead(head) || isEffectDecl(sexpr)) return false;
-  return sexpr.some((item) => containsAwait(item));
+  if (head === 'class') return containsAwait(sexpr[2], stores);
+  if (head === '->' || head === '=>' || isDefHead(head) || Emitter.isEffectDeclIn(stores, sexpr)) return false;
+  return sexpr.some((item) => containsAwait(item, stores));
 }
 
 // Does this subtree yield — i.e. is the function owning it a GENERATOR?
@@ -417,27 +417,21 @@ function isPostfixTernary(stores, x) {
   return (id !== null ? stores.node(id)?.semanticKind : null) !== 'ternary';
 }
 
-// The declaration, type and module constructs, by shape: every call is
-// ["call", …], so these heads are never a call's. Exported because the
-// .d.ts emitter asks the same questions, and asking them from private
-// copies is how the two came to disagree.
-
-// A module IMPORT STATEMENT (a dynamic import is a call).
-export const isModuleImportNode = (x) => isNode(x) && x[0] === 'import' && x.length >= 2;
-// A reactive declaration: `:=` (state) or `~=` (computed).
-export const isReactiveDecl = (x) => isNode(x) && (x[0] === 'state' || x[0] === 'computed') && x.length === 3;
-// A render gate (`<~`).
-export const isGateDecl = (x) => isNode(x) && x[0] === 'gate' && x.length >= 3;
-// An effect: the bare form (target null) or the bound form (the
-// dispose handle).
-export const isEffectDecl = (x) => isNode(x) && x[0] === 'effect' && x.length === 3;
-// A readonly declaration (`=!`, and its void spelling).
-export const isReadonlyDecl = (x) => isNode(x) && (x[0] === 'readonly' || x[0] === 'void-readonly') && x.length === 3;
-// A postfix type operator — `["cast", value, "T"]` / `["satisfies",
-// value, "T"]`. The walks that skip the operator's type slot ask this.
-export const isPostfixType = (x) => isNode(x) && (x[0] === 'cast' || x[0] === 'satisfies') && x.length === 3;
-// A component declaration.
-export const isComponentDecl = (x) => isNode(x) && x[0] === 'component' && x.length === 3;
+// Is this node a module IMPORT STATEMENT? Shape alone cannot say: a
+// dynamic `import(expr)` shares the head AND the length with a
+// side-effect `import './x.rip'` (both `["import", x]`), so the stores'
+// semanticKind is the only discriminator — `import` against `dynimport`.
+// The length test below is a fast reject, nothing more; it was once `< 3`
+// and silently stopped recognizing side-effect imports the day they
+// gained their own node shape.
+//
+// Exported because the .d.ts emitter asks the same question, and asking
+// it from a private copy is how the two came to disagree.
+export function isModuleImportNode(stores, x) {
+  if (!isNode(x) || x[0] !== 'import' || x.length < 2) return false;
+  const id = stores.idOf(x);
+  return (id !== null ? stores.node(id)?.semanticKind : null) === 'import';
+}
 
 class Emitter {
   constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false, browserModule = false, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
@@ -913,6 +907,97 @@ class Emitter {
 
   // ── Reactive declarations ──────────────────────────────────
 
+  // Is this node a REAL reactive declaration — not a user call that
+  // impersonates the head? The heads are spellable shapes
+  // (`["state", target, value]` — `state a, 0` builds the same array),
+  // so the sexpr alone cannot discriminate; the NodeStore semanticKind
+  // can, and is the decider everywhere (the locked-head record).
+  isReactiveDecl(x) {
+    return Emitter.isReactiveDeclIn(this.stores, x);
+  }
+
+  // The stores-parameterized twin: the delivery decision walks schema
+  // sub-trees, whose semanticKinds live in the SUB-parse's stores.
+  static isReactiveDeclIn(stores, x) {
+    if (!isNode(x) || (x[0] !== 'state' && x[0] !== 'computed') || x.length !== 3) return false;
+    const id = stores.idOf(x);
+    const kind = id !== null ? stores.node(id)?.semanticKind : null;
+    return kind === 'state' || kind === 'computed';
+  }
+
+  isGateDecl(x) {
+    return Emitter.isGateDeclIn(this.stores, x);
+  }
+
+  static isGateDeclIn(stores, x) {
+    if (!isNode(x) || x[0] !== 'gate' || x.length < 3) return false;
+    const id = stores.idOf(x);
+    return (id !== null ? stores.node(id)?.semanticKind : null) === 'gate';
+  }
+
+  // A REAL effect — same discrimination as the reactive
+  // declarations: the head is a spellable sexpr shape (["effect",
+  // target, body] — `effect h, 5` builds the same array), so the
+  // NodeStore semanticKind decides (the locked-head
+  // convention). Covers both the bare form (target null) and
+  // the bound form (the dispose handle).
+  isEffectDecl(x) {
+    return Emitter.isEffectDeclIn(this.stores, x);
+  }
+
+  static isEffectDeclIn(stores, x) {
+    if (!isNode(x) || x[0] !== 'effect' || x.length !== 3) return false;
+    const id = stores.idOf(x);
+    const kind = id !== null ? stores.node(id)?.semanticKind : null;
+    return kind === 'effect';
+  }
+
+  // A REAL readonly declaration — the same discrimination:
+  // the head is a spellable shape (["readonly", target, value] —
+  // `readonly x, 5` builds the identical array —
+  // the impersonation class), so the NodeStore semanticKind decides.
+  isReadonlyDecl(x) {
+    return Emitter.isReadonlyDeclIn(this.stores, x);
+  }
+
+  static isReadonlyDeclIn(stores, x) {
+    if (!isNode(x) || (x[0] !== 'readonly' && x[0] !== 'void-readonly') || x.length !== 3) return false;
+    const id = stores.idOf(x);
+    const kind = id !== null ? stores.node(id)?.semanticKind : null;
+    return kind === 'readonly';
+  }
+
+  // The locked-head discriminator for LITERAL constructs: a node whose
+  // head spells a construct ('array', 'str', 'map', …) is the REAL
+  // construct only when its NodeStore row says so (the grammar rules
+  // annotate the semanticKind) or when it has no row at all (emitter-
+  // synthesized lowerings). A user call `array(1)` builds the same
+  // shape through the call rule — its row carries no such kind, so it
+  // falls through to call() and the name stays an ordinary binding.
+  lockedHead(node, kind) {
+    const id = this.stores.idOf(node);
+    if (id === null) return true;
+    return this.stores.node(id)?.semanticKind === kind;
+  }
+
+  // Any call node: ["call", attrs, callee, ...args].
+  isCallNode(x) {
+    return isCall(x);
+  }
+
+  // A REAL postfix type operator — `["cast", value, "T"]` /
+  // `["satisfies", value, "T"]` — and never a call of a function so
+  // named, which spells the identical array. The walks that skip the
+  // operator's type slot ask this, or they would skip a call argument.
+  isPostfixType(x) {
+    return Emitter.isPostfixTypeIn(this.stores, x);
+  }
+
+  static isPostfixTypeIn(stores, x) {
+    if (!isNode(x) || (x[0] !== 'cast' && x[0] !== 'satisfies') || x.length !== 3) return false;
+    const id = stores.idOf(x);
+    return id === null || stores.node(id)?.semanticKind === x[0];
+  }
 
   // Every row whose evaluation invokes a function, whatever the callee
   // spells: `f!` is the awaited call, a tagged template calls its tag.
@@ -930,14 +1015,14 @@ class Emitter {
     }
   }
 
-  // An object literal.
+  // An object literal — never a call of a function named `object`.
   isObject(x) {
-    return isObjectShape(x);
+    return isObjectShape(x) && !this.isCallNode(x);
   }
 
-  // A statement block.
+  // A statement block — never a call of a function named `block`.
   isBlock(x) {
-    return isNode(x) && x[0] === 'block';
+    return isNode(x) && x[0] === 'block' && !this.isCallNode(x);
   }
 
   // A constructor spine with no call in it: a name or literal, or a
@@ -957,9 +1042,10 @@ class Emitter {
     return this.pureSpine(x[1]);
   }
 
-  // A member/index link.
+  // A member/index link — `optindex` spells a legal callee, so a call
+  // of a function so named is never a link.
   isSpine(x) {
-    return isNode(x) && typeof x[0] === 'string' && SPINE_HEADS.has(x[0]);
+    return isNode(x) && typeof x[0] === 'string' && SPINE_HEADS.has(x[0]) && !this.isCallNode(x);
   }
 
   // The semanticKind the grammar annotated on a node's row, or null for
@@ -967,6 +1053,22 @@ class Emitter {
   semanticKindOf(node) {
     const id = this.stores.idOf(node);
     return id !== null ? this.stores.node(id)?.semanticKind ?? null : null;
+  }
+
+  // A MODULE import statement — not the dynamic-import CALL, whose
+  // node spells the same head ("import" is the keyword's token value:
+  // ["import", url] / ["import", url, options] vs ["import", spec…,
+  // source]). The shapes collide at three elements —
+  // `import(Foo, "./m.js")` builds the same array as
+  // `import Foo from "./m.js"` — so length alone cannot discriminate;
+  // the NodeStore semanticKind decides :
+  // the statement rules annotate 'import', the call rules 'dynimport'.
+  isModuleImport(x) {
+    return Emitter.isModuleImportIn(this.stores, x);
+  }
+
+  static isModuleImportIn(stores, x) {
+    return isModuleImportNode(stores, x);
   }
 
   // Reactive names a statement list's OWN scope declares. The walk
@@ -992,7 +1094,7 @@ class Emitter {
       // A component body is the member model's, never scope
       // declarations.
       if (n[0] === 'component' && n.length === 3) return;
-      if (isReactiveDecl(n)) {
+      if (this.isReactiveDecl(n)) {
         if (nested) {
           const op = n[0] === 'state' ? ':=' : '~=';
           throw this.positionedError(n,
@@ -1009,8 +1111,8 @@ class Emitter {
       }
       // An effect body is its OWN function scope — declarations inside
       // it collect when the body emits, never here.
-      if (isEffectDecl(n)) return;
-      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]));
+      if (this.isEffectDecl(n)) return;
+      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n));
       for (const el of n) walk(el, below);
     };
     for (const n of stmts) walk(n, false);
@@ -1030,8 +1132,8 @@ class Emitter {
     const walk = (n, nested) => {
       if (!isNode(n) || isDefHead(n[0]) || isFunc(n) || n[0] === 'class') return;
       if (n[0] === 'component' && n.length === 3) return;
-      if (isReactiveDecl(n)) return;
-      if (isEffectDecl(n)) {
+      if (this.isReactiveDecl(n)) return;
+      if (this.isEffectDecl(n)) {
         if (n[1] !== null) {
           if (nested) {
             throw this.positionedError(n,
@@ -1045,7 +1147,7 @@ class Emitter {
         // The body is its own function scope (bare and bound alike).
         return;
       }
-      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]));
+      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n));
       for (const el of n) walk(el, below);
     };
     for (const n of stmts) walk(n, false);
@@ -1063,8 +1165,8 @@ class Emitter {
     const walk = (n, nested) => {
       if (!isNode(n) || isDefHead(n[0]) || isFunc(n) || n[0] === 'class') return;
       if (n[0] === 'component' && n.length === 3) return;
-      if (isReactiveDecl(n) || isEffectDecl(n)) return;
-      if (isReadonlyDecl(n)) {
+      if (this.isReactiveDecl(n) || this.isEffectDecl(n)) return;
+      if (this.isReadonlyDecl(n)) {
         if (nested) {
           throw this.positionedError(n,
             `emitter: a readonly declaration ('${typeof n[1] === 'string' ? n[1] : '…'} =! …') must sit at module or function scope — ` +
@@ -1078,7 +1180,7 @@ class Emitter {
         walk(n[2], nested);
         return;
       }
-      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]));
+      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n));
       for (const el of n) walk(el, below);
     };
     for (const n of stmts) walk(n, false);
@@ -1317,7 +1419,7 @@ class Emitter {
     }
     const walk = (n, nested) => {
       if (!isNode(n)) return;
-      if (isModuleImportNode(n)) {
+      if (this.isModuleImport(n)) {
         for (const name of Emitter.importedNames([n])) auth(name, 'import', n);
         return;
       }
@@ -1341,16 +1443,16 @@ class Emitter {
         }
         return;
       }
-      if (isReactiveDecl(n)) {
+      if (this.isReactiveDecl(n)) {
         auth(n[1], n[0] === 'computed' ? 'computed' : 'state', n);
         if (!(n[0] === 'computed' && this.isBlock(n[2]) && n[2].length > 2)) walk(n[2], nested);
         return;
       }
-      if (isEffectDecl(n)) {
+      if (this.isEffectDecl(n)) {
         if (n[1] !== null) auth(n[1], 'effect', n);
         return;
       }
-      if (isReadonlyDecl(n)) {
+      if (this.isReadonlyDecl(n)) {
         auth(n[1], 'readonly', n);
         walk(n[2], nested);
         return;
@@ -1418,7 +1520,7 @@ class Emitter {
           }
         }
       }
-      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]));
+      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n));
       for (const el of n) walk(el, below);
     };
     for (const s of stmts) walk(s, false);
@@ -1554,6 +1656,15 @@ class Emitter {
   // binding or parameter, or a component member? The walk is
   // resolveBareRead's, which answers null for a plain binding and for
   // nothing alike.
+  // A hyphenated head names a custom element only on a CALL node: the
+  // compiler's own hyphenated heads (`do-iife`, `loop-n`, …) share the
+  // shape `[head, …]`, and the stores' semanticKind is what tells them
+  // apart.
+  callShapedTagHead(sexpr, tag) {
+    if (TEMPLATE_TAGS.has(tag)) return true;
+    const id = this.stores.idOf(sexpr);
+    return (id !== null ? this.stores.node(id)?.semanticKind : null) === 'call';
+  }
 
   // A positioned render rejection whose node may be a bare string (a
   // tag word carries no span of its own): the open mark positions it.
@@ -1840,12 +1951,12 @@ class Emitter {
     const walk = (n, nested) => {
       if (!isNode(n) || isDefHead(n[0]) || isFunc(n) || n[0] === 'class') return;
       if (n[0] === 'component' && n.length === 3) return;
-      if (isReactiveDecl(n)) {
+      if (this.isReactiveDecl(n)) {
         if (!nested && n[0] === 'computed' && typeof n[1] === 'string') names.add(n[1]);
         return;
       }
-      if (isEffectDecl(n)) return;
-      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]));
+      if (this.isEffectDecl(n)) return;
+      const below = nested || (Emitter.BLOCK_HEADS.has(n[0]) && !this.isCallNode(n));
       for (const el of n) walk(el, below);
     };
     for (const n of stmts) walk(n, false);
@@ -3165,7 +3276,7 @@ class Emitter {
     const rec = entry.owner;
     const { iter } = entry;
     if (!this.ts || rec === undefined || iter === undefined) return null;
-    if (containsAwait(iter) || containsYield(iter)) return null;
+    if (this.containsAwait(iter) || containsYield(iter)) return null;
     if (referencesNames(iter, rec.parent.locals, this.stores)) return null;
     const leaves = new Set();
     Emitter.collectLeafNames(iter, leaves);
@@ -3524,7 +3635,7 @@ class Emitter {
       // bindings stay out entirely: the whole statement erases, so its
       // names never need per-name elision — which is what lets its clause
       // print through the shared arms with no separator bookkeeping.
-      if (isModuleImportNode(x)) {
+      if (isModuleImportNode(this.stores, x)) {
         const id = this.stores.idOf(x);
         if (id === null || this.stores.role(id, 'typeOnly') === null) bound.push(...Emitter.importedNames([x]));
         return;
@@ -3536,7 +3647,7 @@ class Emitter {
       if (x[0] === 'typed-var' && x.length === 3) { walk(x[1]); return; }
       if (x[0] === 'def-sig') { walk(x[2]); return; }
       if (x[0] === 'type-decl') return;
-      if (isPostfixType(x)) { walk(x[1]); return; }
+      if (this.isPostfixType(x)) { walk(x[1]); return; }
       for (const c of x) walk(c);
     };
     walk(sexpr);
@@ -3558,7 +3669,7 @@ class Emitter {
   collectAppAccessors(sexpr) {
     this.appAccessors = { stash: null, router: null };
     for (const x of sexpr.slice(1)) {
-      if (!isModuleImportNode(x)) continue;
+      if (!isModuleImportNode(this.stores, x)) continue;
       const from = x[x.length - 1];
       if (typeof from !== 'string' || from.slice(1, -1) !== 'rip/app') continue;
       const id = this.stores.idOf(x);
@@ -3586,7 +3697,7 @@ class Emitter {
     if (!this.ts) return;
     const locals = new Set();
     for (const x of sexpr.slice(1)) {
-      if (!isModuleImportNode(x)) continue;
+      if (!isModuleImportNode(this.stores, x)) continue;
       const from = x[x.length - 1];
       if (typeof from !== 'string' || from.slice(1, -1) !== 'rip/validate') continue;
       const id = this.stores.idOf(x);
@@ -4216,9 +4327,9 @@ class Emitter {
       // their own function scopes and hoist internally.
       if (n[0] === 'export' && isNode(n[1])) {
         const spec = n[1];
-        if ((isReactiveDecl(spec) || isEffectDecl(spec) || isReadonlyDecl(spec)) && typeof spec[1] === 'string') {
+        if ((this.isReactiveDecl(spec) || this.isEffectDecl(spec) || this.isReadonlyDecl(spec)) && typeof spec[1] === 'string') {
           reactive.add(spec[1]);
-          if (!isEffectDecl(spec) && !(spec[0] === 'computed' && this.isBlock(spec[2]) && spec[2].length > 2)) {
+          if (!this.isEffectDecl(spec) && !(spec[0] === 'computed' && this.isBlock(spec[2]) && spec[2].length > 2)) {
             walk(spec[2]);
           }
           return;
@@ -4314,7 +4425,7 @@ class Emitter {
     for (const x of Emitter.declaredNames(nodes)) targets.delete(x);
     for (const x of extraDeclared) targets.delete(x);
     for (const s of nodes) {
-      if (isModuleImportNode(s)) for (const x of Emitter.importedNames([s])) targets.delete(x);
+      if (this.isModuleImport(s)) for (const x of Emitter.importedNames([s])) targets.delete(x);
     }
     // Component member names never hoist: a bare write inside a
     // member body targets the instance member (`this.name = …`),
@@ -4731,7 +4842,7 @@ class Emitter {
       const v = write?.[2];
       if (!isNode(v)) continue;
       if (v[0] === 'class' || v[0] === 'component') kept.classBindings.add(name);
-      if (!this.ts || !isComponentDecl(v)) continue;
+      if (!this.ts || !this.isComponentDecl(v)) continue;
       // A GENERIC component DECLINES and keeps the floor. Its class
       // expression instantiates its own parameter through the optional
       // props slot — the constructor yields `Box<T | undefined>` where
@@ -5045,9 +5156,10 @@ class Emitter {
     // the live program (a `type` declaration above the imports must
     // not push them below the hoist line).
     const all = this.liveStmts(sexpr.slice(1), { forwards: true });
-    // Leading MODULE imports emit ABOVE the hoist line.
+    // Leading MODULE imports emit ABOVE the hoist line (a dynamic-import
+    // CALL spells the same head; isModuleImport discriminates).
     let lead = 0;
-    while (lead < all.length && isModuleImportNode(all[lead])) lead++;
+    while (lead < all.length && this.isModuleImport(all[lead])) lead++;
     this.lastProgramStmt = all[all.length - 1] ?? null;
 
     if (lead > 0) {
@@ -5061,7 +5173,7 @@ class Emitter {
         // the import binding, never a second `let`) and the module
         // scope, which is what `inScope` answers for an extends host or
         // an accept provider. The emission split is layout.
-        const imported = Emitter.importedNames(all.filter((n) => isModuleImportNode(n)));
+        const imported = Emitter.importedNames(all.filter((n) => this.isModuleImport(n)));
         let entries = this.ambientHoistFilter(this.hoistTargets(rest, [], imported));
         this.attachSchemaConsts(entries, this.schemaModuleStories);
         const names = new Set([...entries.map(([n]) => n), ...imported]);
@@ -5205,7 +5317,7 @@ class Emitter {
       this.emitDataConst();
       // No leading import, but an import may still follow a statement,
       // and it binds for the whole module.
-      const imported = Emitter.importedNames(stmts.filter((n) => isModuleImportNode(n)));
+      const imported = Emitter.importedNames(stmts.filter((n) => this.isModuleImport(n)));
       let entries = this.ambientHoistFilter(this.hoistTargets(stmts, [], imported));
       this.attachSchemaConsts(entries, this.schemaModuleStories);
       const names = new Set([...entries.map(([n]) => n), ...imported]);
@@ -5298,14 +5410,25 @@ class Emitter {
     // statements to be named, so it takes the statement-grouping path
     // below .
     'class': (e, node, ind) => node[1] != null && (e.classStatement(node, ind), true),
-    // Reactive declarations, effects, readonly declarations and module
-    // imports.
-    'state': (e, node, ind) => isReactiveDecl(node) && (e.reactiveDecl(node, ind), true),
-    'computed': (e, node, ind) => isReactiveDecl(node) && (e.reactiveDecl(node, ind), true),
-    'effect': (e, node, ind) => isEffectDecl(node) && (e.effectStatement(node, ind), true),
-    'readonly': (e, node, ind) => isReadonlyDecl(node) && (e.readonlyDecl(node, ind), true),
-    'void-readonly': (e, node, ind) => isReadonlyDecl(node) && (e.readonlyDecl(node, ind), true),
-    'import': (e, node) => isModuleImportNode(node) && (e.importStatement(node), true),
+    // Reactive declarations. The heads are spellable, so a
+    // user call `state a, 0` builds the identical array —
+    // the semanticKind check declines it to the expression path (call
+    // emission).
+    'state': (e, node, ind) => e.isReactiveDecl(node) && (e.reactiveDecl(node, ind), true),
+    'computed': (e, node, ind) => e.isReactiveDecl(node) && (e.reactiveDecl(node, ind), true),
+    // Effects — the same spellable-head discipline: a user call
+    // `effect h, 5` builds the identical array and declines to call
+    // emission on its semanticKind.
+    'effect': (e, node, ind) => e.isEffectDecl(node) && (e.effectStatement(node, ind), true),
+    // Readonly — the same discipline again: `readonly x, 5`
+    // declines to call emission on its semanticKind
+    'readonly': (e, node, ind) => e.isReadonlyDecl(node) && (e.readonlyDecl(node, ind), true),
+    'void-readonly': (e, node, ind) => e.isReadonlyDecl(node) && (e.readonlyDecl(node, ind), true),
+    // Module imports only (spec + source): the dynamic-import CALL
+    // spells the same head and declines to the expression path on its
+    // semanticKind — length cannot discriminate (`import(Foo, "./m.js")`
+    // and `import Foo from "./m.js"` build the same array).
+    'import': (e, node) => e.isModuleImport(node) && (e.importStatement(node), true),
     'export': (e, node, ind) => (e.exportStatement(node, ind), true),
     'export-default': (e, node, ind) => (e.exportStatement(node, ind), true),
     'export-all': (e, node, ind) => (e.exportStatement(node, ind), true),
@@ -5673,17 +5796,17 @@ class Emitter {
           this.b.emit('export ');
           this.defStatement(spec, ind);
           this.b.emit(';');
-        } else if (isReactiveDecl(spec)) {
+        } else if (this.isReactiveDecl(spec)) {
           // `export count := 0` → `export const count = __state(0);`.
           // The declaration's own emission carries the
           // roles and the trailing semicolon.
           this.b.emit('export ');
           this.reactiveDecl(spec, ind);
-        } else if (isReadonlyDecl(spec)) {
+        } else if (this.isReadonlyDecl(spec)) {
           // `export x =! 5` → `export const x = 5;`.
           this.b.emit('export ');
           this.readonlyDecl(spec, ind);
-        } else if (isEffectDecl(spec)) {
+        } else if (this.isEffectDecl(spec)) {
           // Only the BOUND form exports (`export const h =
           // __effect(…)`); a bare effect binds nothing to export
           if (spec[1] === null) {
@@ -5717,7 +5840,7 @@ class Emitter {
             const prevComponentTypeParams = this._componentTypeParams;
             this._componentTypeParams = null;
             if (isNode(spec[2]) && spec[2][0] === 'schema') this._schemaName = spec[1];
-            if (isComponentDecl(spec[2]) && typeof spec[1] === 'string') {
+            if (this.isComponentDecl(spec[2]) && typeof spec[1] === 'string') {
               this._componentName = spec[1];
               // Exported generic component: the ExportAssign's
               // TYPE_PARAMS role rides to the lowered class, same
@@ -5983,11 +6106,11 @@ class Emitter {
     const names = params.map((p) => p.name);
     const { stmts, stores } = this.subParse(bodyTokens);
     if (stmts.length === 0) return { code: '(function() {})', thisAt: '(function('.length, annots: [], bound: new Set(names) };
-    const isDecl = (x) => isReactiveDecl(x) || isEffectDecl(x) ||
-      isReadonlyDecl(x) || isGateDecl(x);
+    const isDecl = (x) => Emitter.isReactiveDeclIn(stores, x) || Emitter.isEffectDeclIn(stores, x) ||
+      Emitter.isReadonlyDeclIn(stores, x) || Emitter.isGateDeclIn(stores, x);
     const bound = runtimeAliasBindings(this, [{ tree: ['program', ...stmts], atoms: names, isDecl }]);
     const bodyNode = stmts.length === 1 ? stmts[0] : ['block', ...stmts];
-    const isAsync = containsAwait(bodyNode);
+    const isAsync = this.containsAwait(bodyNode);
     const isGen = Emitter.containsYield(bodyNode);
     const sub = this.subEmitter(stores);
     let bodyText;
@@ -6067,8 +6190,8 @@ class Emitter {
 
   // THE construction seam for nested emitters (schema callable
   // bodies). Everything the parent threads into a sub-emitter goes
-  // through here: the SUB-parse's stores (its nodes' role and kind
-  // rows), the enclosing
+  // through here: the SUB-parse's stores (its nodes carry the
+  // semanticKinds the kind-checked paths dispatch on), the enclosing
   // scope chain, and the reactive frames — a body reading or writing
   // an outer reactive name unwraps to `n.value` exactly like any
   // other function body; its params shadow like any other params.
@@ -6157,7 +6280,8 @@ class Emitter {
       throw err;
     }
     // The statements plus the sub-parse's OWN stores: the sub-emitter
-    // reads the store rows these nodes registered under. The
+    // dispatches on semanticKinds (reactive declarations included), so
+    // it must read the store rows these nodes registered under. The
     // rows still never join the module's mapping story (the schema
     // node's cover rows are the construct's story).
     return { stmts: result.sexpr.slice(1), stores: new Stores(result.stores) };
@@ -6185,7 +6309,7 @@ class Emitter {
     // false BEFORE its own dispatch runs, so a stale true can never
     // leak into a deeper statement's handler.
     this.funcBodyStmt = funcBody;
-    if (isNode(node)) {
+    if (isNode(node) && !this.isCallNode(node)) {
       const form = Emitter.STATEMENT_FORMS[node[0]];
       if (form && form(this, node, ind)) {
         this.replDeclEcho(node);
@@ -6359,12 +6483,12 @@ class Emitter {
     if (!this.repl || node !== this.lastProgramStmt || !isNode(node)) return;
     let name = null;
     let unwrap = false;
-    if (isReactiveDecl(node) && typeof node[1] === 'string') {
+    if (this.isReactiveDecl(node) && typeof node[1] === 'string') {
       name = node[1];
       unwrap = true;
-    } else if (isReadonlyDecl(node) && typeof node[1] === 'string') {
+    } else if (this.isReadonlyDecl(node) && typeof node[1] === 'string') {
       name = node[1];
-    } else if (isEffectDecl(node) && typeof node[1] === 'string') {
+    } else if (this.isEffectDecl(node) && typeof node[1] === 'string') {
       name = node[1];
     }
     if (name === null) return;
@@ -6421,7 +6545,7 @@ class Emitter {
       // A guarded LOOP emits braced: a loop may open with a hoisted
       // temp (`const _ref = …;` ahead of `for (… in _ref)`), and a
       // braceless `if` would guard only that first statement.
-      const braced = isNode(stmt) && Emitter.LOOP_HEADS.has(stmt[0]);
+      const braced = isNode(stmt) && Emitter.LOOP_HEADS.has(stmt[0]) && !this.isCallNode(stmt);
       this.mark(node, '$self', () => {
         this.b.emit('if (');
         this.mark(node, 'condition', () => this.expr(node[1]));
@@ -7416,9 +7540,9 @@ class Emitter {
     // therefore reads it unbound — the spelling of someone expecting the
     // clauses to flatten in written order. Independent clauses build the
     // nested array they say.
-    if (isNode(expr) && isComprehensionNode(expr) && !expr.parenthesized) {
+    if (isNode(expr) && isComprehensionNode(expr) && !expr.parenthesized && this.lockedHead(expr, 'comprehension')) {
       const earlier = [];
-      for (let c = expr; isNode(c) && isComprehensionNode(c) && !c.parenthesized; c = c[1]) {
+      for (let c = expr; isNode(c) && isComprehensionNode(c) && !c.parenthesized && this.lockedHead(c, 'comprehension'); c = c[1]) {
         earlier.push(...this.loopBindingNames(c));
       }
       const reads = new Set();
@@ -7439,7 +7563,7 @@ class Emitter {
     const pad = '  '.repeat(ind);
     this.rejectYieldInIIFE(node);
     this.mark(node, '$self', () => {
-      this.b.emit(containsAwait(node) ? 'await (async () => {\n' : '(() => {\n');
+      this.b.emit(this.containsAwait(node) ? 'await (async () => {\n' : '(() => {\n');
       const acc = this.loopTempName('result');
       this.b.emit(`${pad}  const ${acc} = ${keyExpr === null ? '[]' : '{}'};\n`);
       this.b.emit(`${pad}  `);
@@ -7650,7 +7774,7 @@ class Emitter {
       // `if` itself.
       const ind = this.ind;
       this.rejectYieldInIIFE(node);
-      const isAsync = containsAwait(node);
+      const isAsync = this.containsAwait(node);
       this.b.emit(isAsync ? 'await (async () => { ' : '(() => { ');
       this.mark(node, '$self', () => this.returnifyIf(node, ind));
       this.b.emit(' })()');
@@ -7793,7 +7917,7 @@ class Emitter {
   valueTry(node) {
     const ind = this.ind;
     this.rejectYieldInIIFE(node);
-    this.b.emit(containsAwait(node) ? 'await (async () => { ' : '(() => { ');
+    this.b.emit(this.containsAwait(node) ? 'await (async () => { ' : '(() => { ');
     this.tryBranches(node, ind);
     this.b.emit(' })()');
   }
@@ -7860,7 +7984,7 @@ class Emitter {
 
   valueSwitch(node, effect = false) {
     this.rejectYieldInIIFE(node);
-    this.b.emit(containsAwait(node) ? 'await (async () => { ' : '(() => { ');
+    this.b.emit(this.containsAwait(node) ? 'await (async () => { ' : '(() => { ');
     this.mark(node, '$self', () => this.switchArms(node, this.ind, effect));
     this.b.emit(' })()');
   }
@@ -7951,8 +8075,8 @@ class Emitter {
     if (Emitter.returnGuard(stmt) || Emitter.stmtGuard(stmt)) return false;
     if (h === '=' && stmt.length === 3 &&
         (Emitter.returnGuard(stmt[2]) || Emitter.stmtGuard(stmt[2]) || Emitter.sliceTarget(stmt[1]) !== null)) return false;
-    if (isReactiveDecl(stmt) || isReadonlyDecl(stmt)) return false;
-    if (isEffectDecl(stmt) && stmt[1] !== null) return false;
+    if (this.isReactiveDecl(stmt) || this.isReadonlyDecl(stmt)) return false;
+    if (this.isEffectDecl(stmt) && stmt[1] !== null) return false;
     return true;
   }
 
@@ -8010,7 +8134,7 @@ class Emitter {
     const ind = this.ind;
     const p1 = '  '.repeat(ind + 1);
     this.rejectYieldInIIFE(node);
-    this.b.emit(containsAwait(node) ? 'await (async () => {\n' : '(() => {\n');
+    this.b.emit(this.containsAwait(node) ? 'await (async () => {\n' : '(() => {\n');
     const acc = this.loopTempName('result');
     this.b.emit(`${p1}const ${acc} = [];\n`);
     this.b.emit(p1);
@@ -8233,7 +8357,7 @@ class Emitter {
     if (typeof node[1] !== 'string') {
       throw this.positionedError(node, "emitter: `def @name` declares a static class method — spell it inside a class body");
     }
-    const isAsync = containsAwait(node[3]);
+    const isAsync = this.containsAwait(node[3]);
     const isGen = Emitter.containsYield(node[3]);
     // TS face: recorded overload signatures print immediately above
     // the implementation, outside its covers.
@@ -8320,6 +8444,9 @@ class Emitter {
   // stops at nested function/class boundaries, so an inner arrow's
   // await marks the INNER function only. Dammit nodes are awaits by
   // construction.
+  containsAwait(sexpr) {
+    return containsAwait(sexpr, this.stores);
+  }
 
   static isStringLiteral(sexpr) {
     if (Array.isArray(sexpr)) return String(sexpr[0]) === 'str';
@@ -8546,7 +8673,7 @@ class Emitter {
     }
     const head = node[0];
     if (isCall(node)) return this.call(node);
-    if (head === 'str') return this.strTemplate(node);
+    if (head === 'str' && this.lockedHead(node, 'str')) return this.strTemplate(node);
     if (head === 'tagged-template' && node.length === 3) return this.taggedTemplate(node);
     if (head === 'here-regex') return this.heregex(node);
     // A slice target reaches here only in VALUE position, or under a
@@ -8565,12 +8692,12 @@ class Emitter {
     if ((head === '.' || head === '?.') && node.length === 3) return this.member(node);
     if ((head === '.{}' || head === '?.{}') && node.length >= 3) return this.pick(node);
     if (head === '[]' && node.length === 3) return this.index(node);
-    if (head === 'optindex' && node.length === 3) return this.optIndex(node);
+    if (head === 'optindex' && node.length === 3 && this.lockedHead(node, 'optindex')) return this.optIndex(node);
     if (isFunc(node)) return this.func(node);
     if (isUpdate(node)) return this.update(node);
     if (isTernary(node)) return this.ternary(node);
-    if (head === 'array') return this.array(node);
-    if (head === 'object') return this.object(node);
+    if (head === 'array' && this.lockedHead(node, 'array')) return this.array(node);
+    if (head === 'object' && this.lockedHead(node, 'object')) return this.object(node);
     if (isRange(node)) return this.range(node);
     if ((head === 'in' || head === 'of' || head === '!in' || head === '!of' || head === '!instanceof') && node.length === 3) return this.relation(node);
     if (head === 'instanceof' && node.length === 3) {
@@ -8588,14 +8715,14 @@ class Emitter {
     if (head === '%%' && node.length === 3) return this.modulo(node);
     if (head === '//=' && node.length === 3) return this.floorDivAssign(node);
     if (head === '=~' && node.length === 3) return this.matchOp(node);
-    if (head === 'map') return this.mapLiteral(node);
+    if (head === 'map' && this.lockedHead(node, 'map')) return this.mapLiteral(node);
     if (head === 'regex-index' && node.length === 4) {
       if (!(typeof node[2] === 'string' && node[2][0] === '/')) {
         throw this.positionedError(node, 'emitter: a two-part index is the regex-capture form (`text[/re/, n]`) — its key must be a regex literal');
       }
       return this.regexIndex(node, node[1], node[2], node[3]);
     }
-    if (head === 'symbol' && node.length === 2) {
+    if (head === 'symbol' && node.length === 2 && this.lockedHead(node, 'symbol')) {
       // Interned symbol: identity holds across realms and modules.
       return this.mark(node, '$self', () => {
         // `:alpha` → `Symbol.for("alpha")`: the name survives verbatim as the
@@ -8617,24 +8744,28 @@ class Emitter {
     if ((head === 'yield' || head === 'yield-from') && node.length <= 2) return this.yieldExpr(node);
     if (head === 'class') return this.classExpr(node);
     // A reactive declaration lowers to a `const` declaration, which has
-    // no value form — expression positions reject.
-    if (isReactiveDecl(node)) {
+    // no value form — expression positions reject
+    //. A user CALL that impersonates the head
+    // (`state a, 0` — semanticKind 'call') passes through to call
+    // emission below.
+    if (this.isReactiveDecl(node)) {
       const op = head === 'state' ? ':=' : '~=';
       throw this.positionedError(node, `emitter: a reactive declaration ('${typeof node[1] === 'string' ? node[1] : '…'} ${op} …') is a statement — it lowers to a const declaration, which has no expression form`);
     }
-    if (isGateDecl(node)) {
+    if (this.isGateDecl(node)) {
       throw this.positionedError(node,
         "emitter: a render gate ('<~') can only be used as a direct component body line");
     }
     // A readonly declaration is the same class: it lowers to a const
-    // declaration, which has no expression form.
-    if (isReadonlyDecl(node)) {
+    // declaration, which has no expression form. A user CALL impersonating the head passes
+    // through to call emission.
+    if (this.isReadonlyDecl(node)) {
       throw this.positionedError(node, `emitter: a readonly declaration ('${typeof node[1] === 'string' ? node[1] : '…'} =! …') is a statement — it lowers to a const declaration, which has no expression form`);
     }
     // A BARE effect is a valid expression — `x = (~> f())` binds the
     // disposer. The BOUND form lowers to a const declaration, which
     // has no expression form .
-    if (isEffectDecl(node)) {
+    if (this.isEffectDecl(node)) {
       if (node[1] !== null) {
         throw this.positionedError(node, `emitter: a bound effect ('${typeof node[1] === 'string' ? node[1] : '…'} ~> …') is a statement — it lowers to a const declaration, which has no expression form ; a BARE '~> …' is the expression form`);
       }
@@ -8645,8 +8776,10 @@ class Emitter {
     // Components. The declaration lowers to an anonymous
     // class expression; render/offer/accept nodes reaching expression
     // position sit OUTSIDE a component's direct body — reject with
-    // the rule, positioned.
-    if (isComponentDecl(node)) return this.componentExpr(node);
+    // the rule, positioned. (User CALLS spelling the heads —
+    // `offer(x)` outside a component — have semanticKind 'call' and
+    // fall through to call emission.)
+    if (this.isComponentDecl(node)) return this.componentExpr(node);
     if (this.isRenderNode(node)) {
       throw this.positionedError(node, 'emitter: render blocks can only be used inside a component (as a direct body line)');
     }
@@ -8688,13 +8821,13 @@ class Emitter {
     if (head === 'throw' && node.length === 2) {
       this.rejectYieldInIIFE(node);
       this.mark(node, '$self', () => {
-        this.b.emit(containsAwait(node) ? 'await (async () => { throw ' : '(() => { throw ');
+        this.b.emit(this.containsAwait(node) ? 'await (async () => { throw ' : '(() => { throw ');
         this.mark(node, 'value', () => this.expr(node[1]));
         this.b.emit('; })()');
       });
       return;
     }
-    if (isDefHead(head) || head === 'return' || (head === 'program')) {
+    if (isDefHead(head) || head === 'return' || (head === 'program' && this.lockedHead(node, 'program'))) {
       throw this.positionedError(node, `emitter: '${head}' is not supported in expression position`);
     }
     // Erased type statements never emit as expressions — every
@@ -8714,7 +8847,7 @@ class Emitter {
   // (withDeopt): the guard already proved the whole spine non-null.
   optionalGuard(t) {
     if (!isNode(t) || t.length !== 3) return null;
-    if (t[0] === '?.' || (t[0] === 'optindex')) return t;
+    if (t[0] === '?.' || (t[0] === 'optindex' && !this.isCallNode(t))) return t;
     if (t[0] === '.' || t[0] === '[]') return this.optionalGuard(t[1]);
     return null;
   }
@@ -8791,9 +8924,9 @@ class Emitter {
   scopeBoundary(n) {
     if (!isNode(n) || isDefHead(n[0]) || isFunc(n)) return 'skip';
     if (n[0] === 'component' && n.length === 3) return 'skip';
-    if (isEffectDecl(n)) return 'effect';
-    if (isReactiveDecl(n)) return 'reactive';
-    if (isReadonlyDecl(n)) return 'readonly';
+    if (this.isEffectDecl(n)) return 'effect';
+    if (this.isReactiveDecl(n)) return 'reactive';
+    if (this.isReadonlyDecl(n)) return 'readonly';
     if (n[0] === 'class') return 'class';
     if (n[0] === 'for-in' || n[0] === 'for-of' || n[0] === 'for-as') return 'loop';
     if (isComprehensionNode(n)) return 'comprehension';
@@ -9218,7 +9351,7 @@ class Emitter {
       if (isNode(node[2]) && node[2][0] === 'schema' && typeof node[1] === 'string') {
         this._schemaName = node[1];
       }
-      if (isComponentDecl(node[2]) && typeof node[1] === 'string') {
+      if (this.isComponentDecl(node[2]) && typeof node[1] === 'string') {
         this._componentName = node[1];
         // Generic component: the assign's TYPE_PARAMS role rides to
         // the lowered class (componentExpr) through the same channel
@@ -9272,7 +9405,7 @@ class Emitter {
     // A computed body evaluates SYNCHRONOUSLY (the runtime computes
     // lazily and caches — there is no async
     // computed). Nested functions keep their own awaits/yields.
-    if (head === 'computed' && containsAwait(value)) {
+    if (head === 'computed' && this.containsAwait(value)) {
       throw this.positionedError(node, "emitter: a computed ('~=') body cannot await — computeds evaluate synchronously (make it a state written by an effect)");
     }
     if (head === 'computed' && Emitter.containsYield(value)) {
@@ -9308,7 +9441,7 @@ class Emitter {
         // so the cell CHECKS and the hover has a value type to present.
         // Other initializers infer through the runtime's generic signature.
         // No `satisfies` here: the type came FROM the value.
-        const t = syntacticLiteralType(value);
+        const t = syntacticLiteralType(value, this.stores);
         if (t !== null) {
           const ro = head === 'computed' ? 'readonly ' : '';
           this.b.tsOnly(() => this.b.emit(`: ${containerType(t, ro, MINTED)}`));
@@ -9547,7 +9680,7 @@ class Emitter {
     // in an expression position is left to its own diagnostic. A class
     // body owns its awaits, but its HERITAGE evaluates here.
     if (head === 'class') return this.firstAwaitIn(n[2]);
-    if (isFunc(n) || isDefHead(head) || isEffectDecl(n)) return null;
+    if (isFunc(n) || isDefHead(head) || this.isEffectDecl(n)) return null;
     for (const el of n) {
       const hit = this.firstAwaitIn(el);
       if (hit !== null) return hit;
@@ -9583,7 +9716,7 @@ class Emitter {
       this.b.emit(')');
       return;
     }
-    const isAsync = containsAwait(body);
+    const isAsync = this.containsAwait(body);
     emitName();
     this.b.emit(isAsync ? '(async () => ' : '(() => ');
     if (this.isBlock(body)) {
@@ -9657,10 +9790,10 @@ class Emitter {
       return this.effectTailWrites(stmt[2]) || this.effectBranchWrites(stmt[2]);
     }
     if (isAssignHead(h) || isUpdate(stmt)) return true;
-    if (Emitter.LOOP_HEADS.has(h)) return true;
+    if (Emitter.LOOP_HEADS.has(h) && !this.isCallNode(stmt)) return true;
     if (isDefHead(h) || h === 'class' || h === 'export') return true;
-    if (isModuleImportNode(stmt) || isReactiveDecl(stmt) || isReadonlyDecl(stmt)) return true;
-    return isEffectDecl(stmt) && stmt[1] !== null;
+    if (this.isModuleImport(stmt) || this.isReactiveDecl(stmt) || this.isReadonlyDecl(stmt)) return true;
+    return this.isEffectDecl(stmt) && stmt[1] !== null;
   }
 
   // Does a branching tail end in a statement on any arm? Each arm then
@@ -9714,10 +9847,29 @@ class Emitter {
 
   static SVG_NS = 'http://www.w3.org/2000/svg';
 
-  // The component body constructs, by shape.
-  isRenderNode(x) { return isNode(x) && x[0] === 'render' && x.length === 2; }
-  isOfferNode(x) { return isNode(x) && x[0] === 'offer' && x.length === 2; }
-  isAcceptNode(x) { return isNode(x) && x[0] === 'accept' && (x.length === 2 || x.length === 3); }
+  // The kind checks. `component` is a keyword (its head is not
+  // spellable), but render/offer/accept heads ARE — `offer(x)` outside
+  // a component builds ["offer", …] with semanticKind 'call' — so the
+  // NodeStore semanticKind decides everywhere (the head-naming convention).
+  isComponentDecl(x) {
+    return Emitter.isComponentDeclIn(this.stores, x);
+  }
+
+  static isComponentDeclIn(stores, x) {
+    if (!isNode(x) || x[0] !== 'component' || x.length !== 3) return false;
+    const id = stores.idOf(x);
+    return (id !== null ? stores.node(id)?.semanticKind : null) === 'component';
+  }
+
+  componentKindOf(x, kind, len) {
+    if (!isNode(x) || x[0] !== kind || x.length !== len) return false;
+    const id = this.stores.idOf(x);
+    return (id !== null ? this.stores.node(id)?.semanticKind : null) === kind;
+  }
+
+  isRenderNode(x) { return this.componentKindOf(x, 'render', 2); }
+  isOfferNode(x) { return this.componentKindOf(x, 'offer', 2); }
+  isAcceptNode(x) { return this.componentKindOf(x, 'accept', 2) || this.componentKindOf(x, 'accept', 3); }
 
   // A member TARGET: `x` (private) or `@x` ([".", "this", "x"] —
   // public). Returns { name, isPublic } or null.
@@ -10077,7 +10229,7 @@ class Emitter {
         acceptProviders.set(stmt[1], stmt[2]);
         return;
       }
-      if (isGateDecl(stmt)) {
+      if (this.isGateDecl(stmt)) {
         if (offered) rejectOffer(stmt);
         const target = Emitter.memberTarget(stmt[1]);
         if (target === null) {
@@ -10105,7 +10257,7 @@ class Emitter {
         gateVars.push({ name: target.name, ...source, node: stmt });
         return;
       }
-      if (isReactiveDecl(stmt)) {
+      if (this.isReactiveDecl(stmt)) {
         const t = Emitter.memberTarget(stmt[1]);
         if (t === null) {
           throw this.positionedError(stmt,
@@ -10119,7 +10271,7 @@ class Emitter {
           declare(t.name, 'state', stmt, true);
           stateVars.push({ name: t.name, value: stmt[2], isPublic: t.isPublic, required: false, node: stmt });
         } else {
-          if (containsAwait(stmt[2])) {
+          if (this.containsAwait(stmt[2])) {
             throw this.positionedError(stmt, "emitter: a computed ('~=') body cannot await — computeds evaluate synchronously (make it a state written by an effect)", node);
           }
           if (Emitter.containsYield(stmt[2])) {
@@ -10130,7 +10282,7 @@ class Emitter {
         }
         return;
       }
-      if (isReadonlyDecl(stmt)) {
+      if (this.isReadonlyDecl(stmt)) {
         const t = Emitter.memberTarget(stmt[1]);
         if (t === null) {
           throw this.positionedError(stmt,
@@ -10143,7 +10295,7 @@ class Emitter {
         readonlyVars.push({ name: t.name, value: stmt[2], isPublic: t.isPublic, node: stmt });
         return;
       }
-      if (isEffectDecl(stmt)) {
+      if (this.isEffectDecl(stmt)) {
         if (offered) rejectOffer(stmt);
         if (stmt[1] !== null) {
           throw this.positionedError(stmt,
@@ -10244,7 +10396,7 @@ class Emitter {
     for (const stmt of stmts) {
       if (this.isOfferNode(stmt)) {
         const payload = stmt[1];
-        if (!(isReactiveDecl(payload) && payload[0] === 'state')) rejectOffer(stmt);
+        if (!(this.isReactiveDecl(payload) && payload[0] === 'state')) rejectOffer(stmt);
         this.noteHeadKeyword('context-channel', 'offer', stmt);
         categorize(payload, true);
         const t = Emitter.memberTarget(payload[1]);
@@ -10560,7 +10712,7 @@ class Emitter {
           // nested declaration inherits the ENCLOSING component's
           // name (graduated here).
           const prevCN = this._componentName;
-          if (isComponentDecl(m.value)) this._componentName = m.name;
+          if (this.isComponentDecl(m.value)) this._componentName = m.name;
           memberValue(m.node, m.value);
           this._componentName = prevCN;
         });
@@ -10706,7 +10858,7 @@ class Emitter {
       const emitBodyEffects = (bodyPad) => {
         for (const eff of effects) {
           const bodyNode = eff[2];
-          const isAsync = containsAwait(bodyNode);
+          const isAsync = this.containsAwait(bodyNode);
           this.b.emit(bodyPad);
           this.mark(eff, '$self', () => {
             this.mark(eff, 'operator', () => this.b.emit(this.runtimeName('__effect')));
@@ -10867,13 +11019,13 @@ class Emitter {
           : hookParamTypes(name);
         this.b.emit(pad);
         this.mark(owner, '$self', () => {
-          if (containsAwait(block)) this.b.emit('async ');
+          if (this.containsAwait(block)) this.b.emit('async ');
           if (Emitter.containsYield(block)) this.b.emit('*');
           this.mark(owner, 'target', () => this.mark(owner, 'key', () => this.b.emit(name)));
           this.b.emit('(');
           this.emitParams(params, evParamType);
           this.b.emit(')');
-          this.tsReturnAnnotation(func, containsAwait(block), isVoid, Emitter.containsYield(block), owner);
+          this.tsReturnAnnotation(func, this.containsAwait(block), isVoid, Emitter.containsYield(block), owner);
           this.b.emit(' ');
           this.mark(owner, 'value', () => {
             this.methodBlock(func, block, ind + 1, {
@@ -11446,7 +11598,7 @@ class Emitter {
         'emitter: only `for … in` drives list rendering — while/loop/comprehensions have no reconcile reading inside ' +
         'render');
     }
-    if (isEffectDecl(sexpr) || isReactiveDecl(sexpr) || isReadonlyDecl(sexpr)) {
+    if (this.isEffectDecl(sexpr) || this.isReactiveDecl(sexpr) || this.isReadonlyDecl(sexpr)) {
       throw this.positionedError(sexpr,
         'emitter: declarations and effects have no render-body reading — declare members in the component body, above render');
     }
@@ -11502,7 +11654,7 @@ class Emitter {
     // rendered as text below; locals are plain identifiers, so a
     // `#id`-carrying head can never be one).
     if (calleeStr !== null && isHtmlTag(calleeStr.split('#')[0]) &&
-        this.renderVarKind(calleeStr) === null) {
+        this.renderVarKind(calleeStr) === null && this.callShapedTagHead(sexpr, calleeStr.split('#')[0])) {
       const [tagName, id] = calleeStr.split('#');
       return this.renderTag(sexpr, tagName || 'div', [], args, id);
     }
@@ -15328,6 +15480,17 @@ class Emitter {
     return Emitter.chainHeadSlotRest(x);
   }
 
+  // The 'optindex' head is a legal identifier, so the static slot test
+  // alone can hijack a call of a function so named — the instance twin
+  // applies the locked-head discrimination and is what every reading
+  // uses; the static form serves only the grouping lattice, where a
+  // misread call over-groups and never changes meaning.
+  chainHeadSlotOf(x) {
+    if ((x[0] === '.' || x[0] === '?.' || x[0] === '[]') && x.length === 3) return 1;
+    if (x[0] === 'optindex' && x.length === 3 && this.lockedHead(x, 'optindex')) return 1;
+    return Emitter.chainHeadSlotRest(x);
+  }
+
   // A call continues the spine through its callee (element 2): an
   // optional call always, a plain call when its callee is a node. The
   // awaited and keyword calls, dammit callees and `.new` constructor
@@ -15341,7 +15504,7 @@ class Emitter {
   }
 
   isChainNodeOf(x) {
-    return isNode(x) && Emitter.chainHeadSlot(x) !== null;
+    return isNode(x) && this.chainHeadSlotOf(x) !== null;
   }
 
   chain(node) {
@@ -15356,7 +15519,7 @@ class Emitter {
     const spine = [node];
     while (true) {
       const cur = spine[spine.length - 1];
-      const child = cur[Emitter.chainHeadSlot(cur)];
+      const child = cur[this.chainHeadSlotOf(cur)];
       if (!this.isChainNodeOf(child)) break;
       spine.push(child);
     }
@@ -15371,7 +15534,7 @@ class Emitter {
       const head = n[0];
       const isInner = j === spine.length - 1;
       const fkind = (head === '.' || head === '?.') && n.length === 3 ? 'member'
-        : (head === '[]' && n.length === 3) || (head === 'optindex' && n.length === 3) ? 'index'
+        : (head === '[]' && n.length === 3) || (head === 'optindex' && n.length === 3 && this.lockedHead(n, 'optindex')) ? 'index'
         : isOptCall(n) ? 'optcall'
         : 'call';
       // An optional call of `.new` has no reading: the `.new` call is
@@ -15579,7 +15742,7 @@ class Emitter {
     if (!this.ts || !(this.cframes?.length > 0)) return;
     let root = node;
     while (isNode(root)) {
-      const slot = Emitter.chainHeadSlot(root);
+      const slot = this.chainHeadSlotOf(root);
       if (slot === null || !isNode(root[slot])) break;
       root = root[slot];
     }
@@ -15619,7 +15782,7 @@ class Emitter {
     // JS both ways).
     if (!simple) {
       for (const item of items) {
-        if (item[2] !== null && containsAwait(item[2])) {
+        if (item[2] !== null && this.containsAwait(item[2])) {
           throw this.positionedError(item, "emitter: a pick default cannot await when the source needs single evaluation — the lowering's '(_) =>' arrow is not async; bind the source first", node);
         }
         if (item[2] !== null && Emitter.containsYield(item[2])) {
@@ -16226,7 +16389,7 @@ class Emitter {
             // return suppressed; its voidMarker role covers the whole
             // emitted method.
             this.mark(pair, 'voidMarker', () => this.mark(pair, '$self', () => this.withThisBoundary(() => {
-              if (containsAwait(pair[2][2])) this.b.emit('async ');
+              if (this.containsAwait(pair[2][2])) this.b.emit('async ');
               if (Emitter.containsYield(pair[2][2])) this.b.emit('*');
               this.mark(pair, 'key', () => this.b.emit(pair[1]));
               const [, params, block] = pair[2];
@@ -16237,7 +16400,7 @@ class Emitter {
               this.b.emit('(');
               this.mark(pair[2], 'params', () => this.emitParams(params, null, !inArgs));
               this.b.emit(')');
-              this.tsReturnAnnotation(pair[2], containsAwait(block), pair[0] === 'void-pair', Emitter.containsYield(block), pair);
+              this.tsReturnAnnotation(pair[2], this.containsAwait(block), pair[0] === 'void-pair', Emitter.containsYield(block), pair);
               this.b.emit(' ');
               this.mark(pair, 'value', () => {
                 this.methodBlock(pair[2], block, objInd, { isConstructor: false, binds: [], methodName: pair[1], voidBody: pair[0] === 'void-pair' });
@@ -16592,7 +16755,7 @@ class Emitter {
           if (pair[2][0] === '=>') {
             throw this.positionedError(pair, `emitter: a ${form.form} accessor takes '->' — accessors are looked up on the instance, never bound`, stmt);
           }
-          if (containsAwait(pair[2][2]) || Emitter.containsYield(pair[2][2])) {
+          if (this.containsAwait(pair[2][2]) || Emitter.containsYield(pair[2][2])) {
             throw this.positionedError(pair, `emitter: a ${form.form} accessor cannot await or yield — JavaScript has no async or generator accessors`, stmt);
           }
           if (form.form === 'get' && arity !== 0) {
@@ -16618,7 +16781,7 @@ class Emitter {
           if (hasConstructor) {
             throw this.positionedError(pair, 'emitter: a class has one constructor — JavaScript refuses a second at load', stmt);
           }
-          if (isFunc(pair[2]) && (containsAwait(pair[2][2]) || Emitter.containsYield(pair[2][2]))) {
+          if (isFunc(pair[2]) && (this.containsAwait(pair[2][2]) || Emitter.containsYield(pair[2][2]))) {
             throw this.positionedError(pair, 'emitter: a constructor cannot await or yield — JavaScript has no async or generator constructors (await in a static factory method instead)', stmt);
           }
           hasConstructor = true;
@@ -16731,7 +16894,7 @@ class Emitter {
   }
 
   classFieldValue(value) {
-    if (containsAwait(value)) {
+    if (this.containsAwait(value)) {
       throw this.positionedError(value,
         'emitter: a class field initializer cannot await — JavaScript evaluates class fields synchronously');
     }
@@ -16800,7 +16963,7 @@ class Emitter {
           this.mark(pair, 'voidMarker', () => this.mark(pair, '$self', () => {
             this.tsPrivate(pair);
             if (isStaticKey(key)) this.b.emit('static ');
-            if (containsAwait(value[2])) this.b.emit('async ');
+            if (this.containsAwait(value[2])) this.b.emit('async ');
             if (Emitter.containsYield(value[2])) this.b.emit('*');
             if (accessor !== null) {
               // The word parsed as a call's callee; the emission is the
@@ -16870,7 +17033,7 @@ class Emitter {
             this.b.emit(')');
             // Constructors take no return annotation in TS.
             if (!isCtor) {
-              this.tsReturnAnnotation(value, containsAwait(value[2]), isVoidPair, Emitter.containsYield(value[2]), pair);
+              this.tsReturnAnnotation(value, this.containsAwait(value[2]), isVoidPair, Emitter.containsYield(value[2]), pair);
             }
             this.b.emit(' ');
             this.mark(pair, 'value', () => {
@@ -16948,18 +17111,18 @@ class Emitter {
       }
       // A reactive declaration is no class member: its lowering is a
       // `const` declaration, which cannot sit in a class body
-      if (isReactiveDecl(stmt)) {
+      if (this.isReactiveDecl(stmt)) {
         throw this.positionedError(stmt, `emitter: a reactive declaration ('${typeof stmt[1] === 'string' ? stmt[1] : '…'} ${stmt[0] === 'state' ? ':=' : '~='} …') cannot be a class member — declare it at module or function scope`);
       }
       // An effect is no class member either: the bare form is an
       // expression statement, the bound form a const declaration —
       // neither has a member reading .
-      if (isEffectDecl(stmt)) {
+      if (this.isEffectDecl(stmt)) {
         throw this.positionedError(stmt, `emitter: an effect ('~>') cannot be a class member — run it at module or function scope, or inside a method`);
       }
       // A readonly declaration is the same class (a `const` lowering
       // with no class-body reading).
-      if (isReadonlyDecl(stmt)) {
+      if (this.isReadonlyDecl(stmt)) {
         throw this.positionedError(stmt, `emitter: a readonly declaration ('${typeof stmt[1] === 'string' ? stmt[1] : '…'} =! …') cannot be a class member — declare it at module or function scope`);
       }
       throw this.positionedError(stmt, "emitter: unsupported class member — fields take `name = value`, `name: T = value`, `name: T`, or their `@`-static forms; methods take `name: -> …`", body);
@@ -17333,7 +17496,7 @@ class Emitter {
     const { entries: hoist, names } = this.scopedHoist(stmts, params);
     for (const n of this.pushReactiveFrame(stmts, names, params, node)) names.add(n);
     this.scopes.push(names);
-    const isAsync = containsAwait(block);
+    const isAsync = this.containsAwait(block);
     const isGen = Emitter.containsYield(block);
     // Fat arrows cannot be generators: JS has no generator-arrow
     // form, so a yielding fat arrow is unemittable — rejected at the
@@ -17592,8 +17755,8 @@ class Emitter {
       // effect is the same class, and so is a readonly declaration (#94);
       // a BARE tail effect falls through and RETURNS the disposer — the
       // caller owns disposal.
-      if (isReactiveDecl(stmt) || isReadonlyDecl(stmt)) return this.statement(stmt, ind);
-      if (isEffectDecl(stmt) && stmt[1] !== null) return this.statement(stmt, ind);
+      if (this.isReactiveDecl(stmt) || this.isReadonlyDecl(stmt)) return this.statement(stmt, ind);
+      if (this.isEffectDecl(stmt) && stmt[1] !== null) return this.statement(stmt, ind);
       if ((h === 'for-in' || h === 'for-of' || h === 'for-as') && stmt.length === 6) {
         return this.returnifyLoop(stmt, ind);
       }
@@ -18000,7 +18163,7 @@ class Emitter {
       if (isNode(ctor) && this.pureSpine(ctor) && !this.optionalGuard(ctor)) {
         if (ctor[0] === '.' || ctor[0] === '?.') this.member(ctor);
         else this.call(ctor);
-      } else if (this.ts && isPostfixType(ctor)) {
+      } else if (this.ts && this.isPostfixType(ctor)) {
         // On the TS face a cast or `satisfies` prints its own group,
         // which is the seal.
         this.expr(ctor);
@@ -18617,7 +18780,9 @@ const containsModelSchema = (sexpr) => {
 // Structural trigger for the reactive runtime: a reactive DECLARATION
 // or an effect anywhere in the tree — its emission calls
 // `__state`/`__computed`/`__effect` (references the source never
-// spells). isTrigger names exactly those constructs. Readonly declarations
+// spells). isTrigger is the semanticKind check for exactly those
+// constructs (the heads are spellable; a user call `state a, 0` or
+// `effect h, 5` must not deliver a runtime). Readonly declarations
 // are deliberately NOT triggers: the lowering is a plain `const`
 // that calls no runtime name, so a readonly-only file stays
 // zero-cost. They still count as DECLARATIONS in the reference walk
@@ -18631,7 +18796,8 @@ const containsReactive = (sexpr, isTrigger) => {
 // Structural trigger for the component runtime: a component
 // DECLARATION node anywhere in the tree — its emission extends
 // `__Component` and calls the context API (references the source
-// never spells).
+// never spells). The semanticKind check keeps forged shapes out
+// (`component` is a keyword, but the discipline is uniform).
 const containsComponentDecl = (sexpr, isComponent) => {
   if (!isNode(sexpr)) return false;
   if (isComponent(sexpr)) return true;
@@ -19091,6 +19257,10 @@ const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
     if (live.length === names.size) return walk(body);
     return referencesNames(body, new Set(live), stores, isDecl);
   };
+  const semanticKind = (x) => {
+    const id = stores.idOf(x);
+    return id !== null ? stores.node(id)?.semanticKind : null;
+  };
   const isTagWord = (w) => typeof w === 'string' && isHtmlTag(w.split('#')[0]);
   const tagOf = (head) => {
     if (isTagWord(head)) return true;
@@ -19145,7 +19315,7 @@ const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
     if (h === 'do-iife' && x.length === 2 && isFunc(x[1])) return [...paramBindings(x[1][1])].some(ref) || walk(x[1]);
     if (isFunc(x)) return walkParams(x[1]) || walkBody(x[1], x[2]);
     if (isDefHead(h) && x.length === 4) return walkParams(x[2]) || walkBody(x[2], x[3]);
-    if (h === 'render' && x.length === 2) return walkRender(x[1]);
+    if (h === 'render' && x.length === 2 && semanticKind(x) === 'render') return walkRender(x[1]);
     // A reactive DECLARATION's target is a binding name, never a
     // reference; its initializer is expression territory.
     if (isDecl(x)) return walk(x[2]);
@@ -19167,7 +19337,7 @@ const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
     }
     if (h === 'class' && x.length >= 2) return x.slice(2).some(walk);
     if (h === 'typed-var' && x.length === 3) return isNode(x[1]) && walk(x[1]);
-    if (isPostfixType(x)) return walk(x[1]);
+    if (Emitter.isPostfixTypeIn(stores, x)) return walk(x[1]);
     if (h === 'import' || h === 'type-decl') return false;
     // A call's head and attribute record are not references.
     if (isCall(x)) return x.slice(2).some(walk);
@@ -19176,8 +19346,8 @@ const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
   return walk(sexpr);
 };
 
-// Every tree the delivery decision must see, each with ITS stores: the
-// program itself, plus each schema
+// Every tree the delivery decision must see, each with the semanticKind
+// check bound to ITS stores: the program itself, plus each schema
 // callable body (sub-parsed once through the emitter's cache — the
 // captured token slices never appear in the parent tree, so a walk of
 // the program alone would miss a reactive lowering inside a schema
@@ -19190,10 +19360,10 @@ const deliveryTrees = (emitter, sexpr) => {
     // included), but only the constructs whose emission CALLS a
     // runtime name are structural triggers (isTrigger — readonly
     // excluded: its lowering is a plain const).
-    const isDecl = (x) => isReactiveDecl(x) || isEffectDecl(x) ||
-      isReadonlyDecl(x) || isGateDecl(x);
-    const isTrigger = (x) => isReactiveDecl(x) || isEffectDecl(x);
-    const isComponent = (x) => isComponentDecl(x);
+    const isDecl = (x) => Emitter.isReactiveDeclIn(stores, x) || Emitter.isEffectDeclIn(stores, x) ||
+      Emitter.isReadonlyDeclIn(stores, x) || Emitter.isGateDeclIn(stores, x);
+    const isTrigger = (x) => Emitter.isReactiveDeclIn(stores, x) || Emitter.isEffectDeclIn(stores, x);
+    const isComponent = (x) => Emitter.isComponentDeclIn(stores, x);
     trees.push({ tree, stores, atoms, isDecl, isTrigger, isComponent });
     const walk = (x) => {
       if (!isNode(x)) return;
@@ -19232,7 +19402,7 @@ const runtimeAliasBindings = (emitter, trees) => {
   const walk = (x, isDecl) => {
     if (!isNode(x)) return;
     const [head] = x;
-    if (isModuleImportNode(x)) {
+    if (emitter.isModuleImport(x)) {
       for (const name of Emitter.importedNames([x])) names.add(name);
       return;
     }
@@ -19303,7 +19473,7 @@ const runtimeAliasBindings = (emitter, trees) => {
 const programScopeNames = (emitter, sexpr) => {
   const stmts = sexpr.slice(1);
   const names = new Set(emitter.hoistTargets(stmts).map(([n]) => n));
-  const imports = stmts.filter((s) => isModuleImportNode(s));
+  const imports = stmts.filter((s) => emitter.isModuleImport(s));
   for (const n of Emitter.importedNames(imports)) names.add(n);
   // Reactive declarations, effect handles, and readonly names bind
   // through `const` at module level — every scope-visible one counts,
@@ -19379,7 +19549,7 @@ const inventoryBindings = (emitter, sexpr, ambientNames) => {
     if (!ambientNames.has(name)) add(name, 'plain');
   };
   for (const s of stmts) {
-    if (isModuleImportNode(s)) for (const n of Emitter.importedNames([s])) add(n, 'import');
+    if (emitter.isModuleImport(s)) for (const n of Emitter.importedNames([s])) add(n, 'import');
   }
   const computed = emitter.collectComputedNames(stmts);
   for (const n of emitter.collectReactiveNames(stmts)) add(n, computed.has(n) ? 'computed' : 'state');
@@ -19858,7 +20028,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
     let story = null;
     try {
       story = buildSchemaTypeStory(parseResult.sexpr, builder.source,
-        Emitter.importedNames(parseResult.sexpr.slice(1).filter((s) => isModuleImportNode(s))),
+        Emitter.importedNames(parseResult.sexpr.slice(1).filter((s) => emitter.isModuleImport(s))),
         { boundary: (n) => emitter.scopeBoundary(n), isBlock: (n) => emitter.isBlock(n) });
     } catch (err) {
       if (err instanceof SchemaTypeError) {
@@ -20177,7 +20347,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // schema intrinsic aliases (TS2300): false diagnostics no runtime
   // collision backs. A TS-only `export {}` makes each face a module;
   // stripping it reproduces the JS emission exactly.
-  if (face === 'ts' && !isModuleShaped(parseResult.sexpr, (s) => isModuleImportNode(s))) {
+  if (face === 'ts' && !isModuleShaped(parseResult.sexpr, (s) => emitter.isModuleImport(s))) {
     builder.tsOnly(() => builder.emit('\nexport {};\n'));
   }
   // Pin candidates for the editor's probe pass: still-hoisted names

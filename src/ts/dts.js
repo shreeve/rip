@@ -40,7 +40,7 @@ import {
   renderParams, paramTyped, optionalReader,
 } from './types.js';
 import { buildSchemaTypeStory, SchemaTypeError } from './schema.js';
-import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, isModuleImportNode, isReactiveDecl, isComponentDecl, isEffectDecl, isReadonlyDecl, ctorAtFields, containsYield, containsAwait } from '../emitter.js';
+import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, isModuleImportNode, ctorAtFields, containsYield, containsAwait } from '../emitter.js';
 import { isCall, isPlainCall, isAwaitedCall } from '../sexpr.js';
 import {
   componentTypeInfo, componentCtorMembers, instanceTypeLines, containerType, MINTED, DOM_LIB_GLOBALS,
@@ -108,7 +108,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   let schemaStory = null;
   try {
     schemaStory = buildSchemaTypeStory(sexpr, source,
-      sexpr.slice(1).filter((s) => isModuleImportNode(s)).flatMap(importBoundNames));
+      sexpr.slice(1).filter((s) => isModuleImportNode(stores, s)).flatMap(importBoundNames));
   } catch (err) {
     if (err instanceof SchemaTypeError) throw new DtsError(`declaration emission: ${err.message}`);
     throw err;
@@ -197,7 +197,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   const returnTypeOf = (fnNode, body, isVoid) => {
     const declared = roleType(fnNode, 'returnType');
     const isGen = containsYield(body);
-    const isAsync = containsAwait(body);
+    const isAsync = containsAwait(body, stores);
     if (declared !== null) {
       return isAsync && !isGen && !/^Promise\s*</.test(declared) ? `Promise<${declared}>` : declared;
     }
@@ -397,6 +397,13 @@ export function emitDeclarations({ sexpr, stores, source }) {
     pass.lines.push(`${exported ? 'export ' : ''}declare const ${node[1]}: ${containerType(annotation, ro, MINTED)};`);
   };
 
+  const isReactiveDecl = (stmt) => {
+    if (!isNode(stmt) || (stmt[0] !== 'state' && stmt[0] !== 'computed') || stmt.length !== 3) return false;
+    const id = stores.idOf(stmt);
+    const kind = id !== null ? stores.node(id)?.semanticKind : null;
+    return kind === 'state' || kind === 'computed';
+  };
+
   // Which module names a member's `typeof` spelling may root at — set by
   // the declaring pass below, read at each component declaration.
   let spellable = null;
@@ -408,6 +415,12 @@ export function emitDeclarations({ sexpr, stores, source }) {
   // consumer's `c: Name` annotation finds a type) beside the binding's
   // constructor type — the props surface (src/ts/components.js, the
   // renderer the face marks through) plus the static mount mirror.
+  const isComponentDecl = (x) => {
+    if (!isNode(x) || x[0] !== 'component' || x.length !== 3) return false;
+    const id = stores.idOf(x);
+    return (id !== null ? stores.node(id)?.semanticKind : null) === 'component';
+  };
+
   const componentDecl = (node, name, exported, stmt) => {
     const info = componentTypeInfo(stores, source, node, null, { spellable });
     const exp = exported ? 'export ' : '';
@@ -431,6 +444,12 @@ export function emitDeclarations({ sexpr, stores, source }) {
   // A typed BOUND effect (`h: T ~> body`) declares its dispose handle
   // AS the annotated type — the handle is a plain const, no container
   // wrapping (unlike the reactive declarations above).
+  const isEffectDecl = (stmt) => {
+    if (!isNode(stmt) || stmt[0] !== 'effect' || stmt.length !== 3) return false;
+    const id = stores.idOf(stmt);
+    return (id !== null ? stores.node(id)?.semanticKind : null) === 'effect';
+  };
+
   const effectDecl = (node, exported) => {
     if (typeof node[1] !== 'string') return;
     const annotation = roleType(node, 'annotation');
@@ -443,6 +462,12 @@ export function emitDeclarations({ sexpr, stores, source }) {
   // consumer reassignment a TS error, so no container or wrapper
   // exists to surface (the effect-handle shape, not the reactive
   // `{ value: T }` one).
+  const isReadonlyDecl = (stmt) => {
+    if (!isNode(stmt) || (stmt[0] !== 'readonly' && stmt[0] !== 'void-readonly') || stmt.length !== 3) return false;
+    const id = stores.idOf(stmt);
+    return (id !== null ? stores.node(id)?.semanticKind : null) === 'readonly';
+  };
+
   // ── module edges ─────────────────────────────────────────────────
   // The declaration artifact must describe the SAME module surface as
   // the emitted JavaScript: imports whose names the declarations
@@ -497,7 +522,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   // The emitter's own predicate, not a copy of it: shape cannot tell a
   // side-effect import from a dynamic one, and the copy that used to live
   // here fell out of step the day the two stopped sharing a node shape.
-  const isModuleImport = (x) => isModuleImportNode(x);
+  const isModuleImport = (x) => isModuleImportNode(stores, x);
 
   // An export payload that is a specifier LIST, not a declaration.
   // Three tests, all required: no structural statement head, no
