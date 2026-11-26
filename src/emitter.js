@@ -18307,6 +18307,10 @@ class Emitter {
       if (isNode(ctor) && this.pureSpine(ctor) && !this.optionalGuard(ctor)) {
         if (ctor[0] === '.' || ctor[0] === '?.') this.member(ctor);
         else this.call(ctor);
+      } else if (this.ts && this.isPostfixType(ctor)) {
+        // On the TS face a cast or `satisfies` prints its own group,
+        // which is the seal.
+        this.expr(ctor);
       } else if (isNode(ctor)) {
         this.b.emit('(');
         this.expr(ctor);

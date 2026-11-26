@@ -592,6 +592,11 @@ describe('TS-face emission pins', () => {
     expect(ts('x = y as A\nfoo()\n').code).toBe('let x = (y as A);\nfoo();' + MARKER);
   });
 
+  test('a cast constructor under `.new` prints its own group, once', () => {
+    expect(ts('x = (k as any).new()\n').code).toBe('let x = new (k as any)();' + MARKER);
+    expect(ts('x = (k as any).new(1)\n').code).toBe('let x = new (k as any)(1);' + MARKER);
+  });
+
   test('a block body inside explicit brackets claims its annotations like its unbracketed twin', () => {
     const body = '  fetch: ->\n    type T = number\n    sent: T = 1\n    r: number\n    r = 2\n    try\n      g()\n    catch e: any\n      e\n    sent + r\n';
     const want = 'let o = {fetch() {\n  type T = number;\n  let sent: T = 1;\n  let r: number = 2;\n' +
