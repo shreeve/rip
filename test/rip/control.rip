@@ -287,7 +287,7 @@ test "continue in a switch inside a loop continues the loop", "seen = []\nfor x 
 # with no value form) breaks itself instead of running the next arm
 test "a tail switch arm ending in a loop does not run the next arm", "n = 0\nf = (x) ->\n  switch x\n    when 1\n      while n < 3\n        n += 1\n    when 2\n      n = 100\n[f(1), n]", [undefined, 3]
 test "a value switch arm ending in a loop does not run the next arm", "n = 0\nr = switch 1\n  when 1\n    loop\n      n += 1\n      break if n > 2\n  when 2\n    n = 100\n[r, n]", [undefined, 3]
-test "a tail switch arm ending in an enum or debugger does not run the next arm", "n = 0\nf = (x) ->\n  switch x\n    when 1\n      enum E\n        a = 1\n    when 2\n      debugger\n    when 3\n      n = 100\n[f(1), f(2), n]", [undefined, undefined, 0]
+test "a tail switch arm ending in a slice write or debugger does not run the next arm", "n = 0\na = [1, 2]\nf = (x) ->\n  switch x\n    when 1\n      a[0..0] = [9]\n    when 2\n      debugger\n    when 3\n      n = 100\n[f(1), f(2), n, a]", [undefined, undefined, 0, [9, 2]]
 fail "continue in a tail switch arm rejects", "f = (x) ->\n  switch x\n    when 1 then continue\n    else 2", "'continue' outside a loop"
 test "tail switch arm in an async function awaits", "h = (x) ->\n  switch x\n    when 1 then await Promise.resolve 'one'\n    else 'other'\nawait h 1", 'one'
 

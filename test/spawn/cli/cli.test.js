@@ -730,12 +730,6 @@ describe('emitter rejections carry source positions emitter-wide', () => {
     ['void marker on a non-function value', 'pad = 1\nsave! = 5', 2],
     ['rest as a destructuring target', 'pad = 1\n[a, rest b] = xs', 2],
     ['overload signature without implementation', 'pad = 1\ndef f(x: number): number', 2],
-    // A bare member is a primitive with no NodeStore row — its span
-    // derives from the block row and its recorded neighbors, so the
-    // caret lands on the member itself (both list positions pinned).
-    ['bare enum member after a string value', 'pad = 1\nenum Mix\n  ok = "s"\n  broken', 4],
-    ['enum member with an expression value', 'pad = 1\nenum C\n  a = f()', 3],
-    ['enum duplicate key', 'pad = 1\nenum C\n  a = 1\n  b = 1', 4],
     ['BY step of 0', 'pad = 1\nfor x in xs by 0\n  f x', 2],
     ['for…of pattern key with own', 'pad = 1\nfor own [k] of o\n  f k', 2],
     ['for-as with two loop variables', 'pad = 1\nfor a, b as xs\n  f a', 2],

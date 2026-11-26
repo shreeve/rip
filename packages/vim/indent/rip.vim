@@ -18,7 +18,7 @@ if exists('*GetRipIndent')
 endif
 
 " Patterns that increase indent
-let s:increase = '^\s*\%(if\|unless\|for\|while\|until\|loop\|do\|switch\|when\|try\|catch\|finally\|class\|def\|enum\|interface\|component\|render\)\>'
+let s:increase = '^\s*\%(if\|unless\|for\|while\|until\|loop\|do\|switch\|when\|try\|catch\|finally\|class\|def\|interface\|component\|render\)\>'
 
 " `else` opens a block only bare or as `else if` / `else unless`. With any
 " other content after it the body is inline (`else p 1`), or the line is a

@@ -18,9 +18,9 @@ interface Strobe extends Beacon {
 let veiled: unknown = 'kept'
 let notify: () => void = () => undefined
 let label = 'five'
-const Tier = {
-  free: 0, 0: 'free',
-  paid: 1, 1: 'paid' }
+let Tier = {
+  free: 0,
+  paid: 1 }
 type Loose = any
 type Locked = { readonly id: number }
 type Counts = { [label: string]: number }

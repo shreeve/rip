@@ -70,25 +70,25 @@ registry: Registry<Alarm> = { entries: [alarm], find: (key) -> registry.entries.
 
 console.log('alarm:', alarm.level, sink.accept('log'), sink.flush?(), registry.find('smoke')?.acknowledged)
 
-# ── enums: one const object, forward and reverse entries; bare members auto-number, explicit numerics thread the counter, and a string member needs a value ──
+# ── a closed set of values: a `type` union names the set, and a plain object carries the runtime values ──
 
-enum Direction
-  north
-  south
+Direction =
+  north: 0
+  south: 1
 
-enum Status
-  draft = 'D'
-  final = 'F'
+type Status =
+  | 'draft'
+  | 'final'
 
-export enum Priority
-  low = 1
-  standby
-  urgent = 9
+export Priority =
+  low: 1
+  standby: 2
+  urgent: 9
 
-pick: Status = Status.final
+pick: Status = 'final'
 
-console.log('direction:', Direction, Direction.north, Direction[1])
-console.log('status:', Status.draft, 'priority:', Priority.standby, Priority.urgent)
+console.log('direction:', Direction, Direction.north, Direction.south)
+console.log('priority:', Priority.standby, Priority.urgent)
 console.log('pick:', pick)
 
 # ── the bare typed forward declaration: `name: T` alone, erased, the binding hoisted with a definite-assignment face ──
@@ -96,7 +96,7 @@ console.log('pick:', pick)
 
 def choosePort(): Port
   chosen: Port
-  if (Direction.north < Direction.south) then chosen = 443 else chosen = 80
+  if (Priority.low < Priority.urgent) then chosen = 443 else chosen = 80
   chosen
 
 console.log('chosen:', choosePort())

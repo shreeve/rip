@@ -58,9 +58,6 @@ const HAND_ROWS = [
   'f = (...xs: number[]) -> xs\ng = (...ys: [number, string]) -> ys\nh = (...zs: Array<boolean>) -> zs\nk = (...ws: ReadonlyArray<string>) -> ws\nu = (...vs: number[] | string[]) -> vs',
   // the block-alias object-member grammar, end to end under tsc
   'type M =\n  [key: string]: number\ntype C =\n  (x: number): string\ntype Q =\n  "a-b": string\n  0: boolean\ntype R2 =\n  readonly x: number\nm: M = {}\nz = 1',
-  // enum declarations: numeric, string, negative, exported —
-  // and the enum NAME usable in type position
-  'enum Color\n  red = 0\n  green = 1\nexport enum Tier\n  free = "f"\nenum Dir\n  up = 1\n  down = -1\npick: Color = Color.red',
   // a type predicate in a parameter, and in a type body reached
   // through one: the declaration path renders the token VALUE, so
   // rip's `is`→`==` alias reaching type text ships a `.d.ts` that
@@ -143,7 +140,6 @@ describeTscExtended('tsc validates every corpus file\'s declarations', () => {
     expect(declared).toContain('types.rip');
     expect(declared).toContain('typedecls.rip');
     expect(declared).toContain('voidmarker.rip');
-    expect(declared).toContain('enum.rip');
   });
 
   test('no diagnostic escapes row attribution — a global tsc error cannot vanish between rows', () => {

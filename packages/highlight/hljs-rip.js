@@ -16,7 +16,7 @@ export default function(hljs) {
     'delete', 'typeof', 'instanceof', 'new', 'super',
     'and', 'or', 'not', 'is', 'isnt',
     // Declarations
-    'class', 'def', 'enum', 'interface', 'type', 'extends', 'own', 'schema', 'private',
+    'class', 'def', 'interface', 'type', 'extends', 'own', 'schema', 'private',
     // Iteration
     'in', 'of', 'by', 'as', 'satisfies',
     // Component system

@@ -73,7 +73,7 @@ syn keyword ripKeyword      it
 " Declaring words are syn-MATCH, not syn-keyword: a keyword outranks every
 " match at its own position, which would leave the definition rules below —
 " all of which anchor on one of these words — unable to claim their name.
-syn match  ripKeyword       /\<\%(class\|def\|enum\|interface\|type\|schema\)\>/
+syn match  ripKeyword       /\<\%(class\|def\|interface\|type\|schema\)\>/
 
 " The class-member modifier: `private` before a member head (a name, a
 " string, an `@`-static, or a def). A match with a lookahead, so the key
@@ -214,16 +214,15 @@ syn match  ripFuncName      /\%(\<def\s\+\)\@<=[a-zA-Z_$][a-zA-Z0-9_$]*[!?]\?/ c
 syn match  ripFuncAssign    /[a-zA-Z_$][a-zA-Z0-9_$]*\ze\s*=\s*\%(([^)]*)\s*\)\?[=-]>/
 syn match  ripFuncMethod    /[a-zA-Z_$][a-zA-Z0-9_$]*\ze\s*:\s*\%(([^)]*)\s*\)\?[=-]>/
 
-" --- Class / Enum / Interface -----------------------------------------------
+" --- Class / Interface ------------------------------------------------------
 
 syn match  ripClassDef      /\<class\s\+\w\+\%(\s\+extends\s\+\w\+\%(\.\w\+\)*\)\?/ contains=ripKeyword,ripClassName,ripSuperName
-syn match  ripEnumDef       /\<enum\s\+[A-Z]\w*/                 contains=ripKeyword,ripTypeName
 syn match  ripInterfaceDef  /\<interface\s\+[A-Z]\w*\%(\s\+extends\s\+[A-Z]\w*\)\?/ contains=ripKeyword,ripTypeName,ripSuperName
 syn match  ripTypeAliasDef  /\<type\s\+[A-Z]\w*/                 contains=ripKeyword,ripTypeName
 
 syn match  ripClassName     /\%(\<class\s\+\)\@<=\w\+/          contained
 syn match  ripSuperName     /\%(\<extends\s\+\)\@<=\w\+\%(\.\w\+\)*/ contained
-syn match  ripTypeName      /\%(\<\%(enum\|interface\|type\)\s\+\)\@<=[A-Z]\w*/ contained
+syn match  ripTypeName      /\%(\<\%(interface\|type\)\s\+\)\@<=[A-Z]\w*/ contained
 
 " PascalCase identifiers (type names)
 syn match  ripPascalCase    /\<[A-Z]\w*/

@@ -813,7 +813,7 @@ const EXPORT_KEYWORDS = new Set([
 ]);
 const DECLARATION = new RegExp(
   String.raw`^(?:declare\s+)?(?:async\s+)?(?:abstract\s+)?(?:const\s+)?` +
-  String.raw`(type|interface|class|enum|function|def|const|let|var|namespace|module)\s+(${IDENT})\b`,
+  String.raw`(type|interface|class|function|def|const|let|var|namespace|module)\s+(${IDENT})\b`,
 );
 const STAR = new RegExp(String.raw`^\*\s*(?:as\s+(${IDENT})\s+)?from\s*['"]([^'"]+)['"]`);
 const CLAUSE = new RegExp(String.raw`^(?:(type)\s+)?(${IDENT}|default)(?:\s+as\s+(${IDENT}|default))?$`);
@@ -890,7 +890,7 @@ export function scanExportNames(source) {
     if (decl) {
       const [, keyword, name] = decl;
       if (keyword === 'type' || keyword === 'interface') types.add(name);
-      else if (keyword === 'class' || keyword === 'enum') { values.add(name); types.add(name); }
+      else if (keyword === 'class') { values.add(name); types.add(name); }
       else values.add(name);
       continue;
     }
@@ -934,7 +934,7 @@ export function scanExportNames(source) {
 // The stub text for one file's exported names — every name `any`: the
 // stub makes NAMES reachable, and a guessed shape could be wrong. A type
 // alias and a variable occupy different declaration spaces, so a class
-// or enum is legally both. `defaultName`: see defaultLocalName.
+// is legally both. `defaultName`: see defaultLocalName.
 export function stubFace({ values = [], types = [], hasDefault = false, defaultName = '_default', globals = [] } = {}) {
   const lines = [];
   for (const name of types) lines.push(`export type ${name} = any;`);

@@ -98,7 +98,6 @@ const FLOORS = {
   // chained assignment, never a statement of its own).
   'voidmarker.rip': 78,
   'while.rip': 31,
-  'enum.rip': 74,
   'schema.rip': 31,
   'reactive.rip': 163,
   'effects.rip': 120,

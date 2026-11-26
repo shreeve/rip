@@ -136,50 +136,16 @@ code "multiple interfaces erased", '''
   ''', ""
 
 # ==============================================================================
-# Enums — Runtime JS Output
+# `enum` is reserved — JavaScript reserves it, and a set of values is a
+# `type` union, runtime values a plain object
 # ==============================================================================
 
-test "enum creates object", '''
-  enum Color
-    red = 0
-    green = 1
-    blue = 2
-  Color.red
-  ''', 0
-
-test "enum reverse mapping", '''
-  enum Color
-    red = 0
-    green = 1
-    blue = 2
-  Color[1]
-  ''', "green"
-
-test "enum with large values", '''
-  enum HttpCode
-    ok = 200
-    created = 201
-    notFound = 404
-    serverError = 500
-  HttpCode.ok + HttpCode.notFound
-  ''', 604
-
-test "enum member access", '''
-  enum Dir
-    up = 0
-    down = 1
-    left = 2
-    right = 3
-  [Dir.up, Dir.down, Dir.left, Dir.right]
-  ''', [0, 1, 2, 3]
-
-test "enum reverse all", '''
-  enum Size
-    sm = 1
-    md = 2
-    lg = 3
-  [Size[1], Size[2], Size[3]]
-  ''', ["sm", "md", "lg"]
+fail "enum declaration rejects at the keyword", "enum Color\n  red = 0\n  green = 1", "types.rip>:1:1: 'enum' is reserved — a set of values is a `type` union (`type Color = 'red' | 'green'`), and runtime values are a plain object"
+fail "export enum rejects at the keyword", "export enum X\n  a = 1", "types.rip>:1:8: 'enum' is reserved"
+fail "enum as a variable name rejects", "enum = 3", "types.rip>:1:1: 'enum' is reserved"
+fail "enum as a read rejects", "x = enum", "types.rip>:1:5: 'enum' is reserved"
+fail "enum as a parameter rejects", "f = (enum) -> 1", "types.rip>:1:6: 'enum' is reserved"
+test "enum as a property name stays legal", "o = {enum: 1}\no.enum", 1
 
 # ==============================================================================
 # Runtime Behavior — Types Don't Affect Execution
@@ -244,14 +210,6 @@ test "interface with code", '''
   x
   ''', 99
 
-test "enum with other code", '''
-  enum Dir
-    up = 0
-    down = 1
-  x = Dir.up
-  x
-  ''', 0
-
 test "multiple types then code", '''
   type ID = number
   type Name = string
@@ -270,31 +228,6 @@ test "type alias between functions", '''
     2
   first() + second()
   ''', 3
-
-test "interface then enum then code", '''
-  interface Shape
-    area: number
-  enum Color
-    red = 0
-    blue = 1
-  result = Color.red
-  result
-  ''', 0
-
-test "enum used in computation", '''
-  enum Op
-    add = 1
-    sub = 2
-    mul = 3
-  def apply(op: number, a: number, b: number): number
-    if op is Op.add
-      a + b
-    else if op is Op.mul
-      a * b
-    else
-      a - b
-  apply(Op.add, 10, 20)
-  ''', 30
 
 # ==============================================================================
 # Complex Type Annotations
@@ -369,14 +302,6 @@ test "typed param used in expression", '''
   negate(5)
   ''', -5
 
-# Enum with single member
-
-test "enum single member", '''
-  enum Single
-    only = 1
-  Single.only
-  ''', 1
-
 # Type alias then immediate use
 
 test "type alias immediate code", '''
@@ -384,16 +309,6 @@ test "type alias immediate code", '''
   id = 123
   id
   ''', 123
-
-# Sequential enums
-
-test "multiple enums", '''
-  enum A
-    x = 1
-  enum B
-    y = 2
-  A.x + B.y
-  ''', 3
 
 # Typed function calling another typed function
 
@@ -893,44 +808,6 @@ type 'callback prop: a bare function type in the head groups wherever the face u
     new (props: { onPick?: ((label: string) => void) | { value: ((label: string) => void) | undefined; read(): ((label: string) => void) | undefined; touch?(): void }; __bind_onPick__?: { value: ((label: string) => void) | undefined; read(): ((label: string) => void) | undefined; touch?(): void }; onDone?: (() => void) | { value: () => void; read(): () => void; touch?(): void }; __bind_onDone__?: { value: () => void; read(): () => void; touch?(): void }; children?: globalThis.Node | string | number | boolean | null } & ({ onDone: (() => void) | { value: () => void; read(): () => void; touch?(): void } } | { __bind_onDone__: { value: () => void; read(): () => void; touch?(): void } })): Picker;
   };
   '''
-
-# ==============================================================================
-# Enum auto-numbering — bare members take the next number (0-based,
-# continuing after an explicit numeric; a bare member after a STRING
-# value rejects)
-# ==============================================================================
-type 'enum dts', '''
-  enum Direction
-    North
-    South
-    East = 10
-    West
-  ''', '''
-  declare enum Direction {
-    North = 0,
-    South = 1,
-    East = 10,
-    West = 11
-  }
-  '''
-
-test 'enum bare members take any identifier', '''
-  enum Measure
-    größe
-    size
-  [Measure.größe, Measure.size, Measure[0]]
-  ''', [0, 1, 'größe']
-
-test 'enum auto-numbering runtime', '''
-  enum Direction
-    North
-    South
-    East = 10
-    West
-  [Direction.North, Direction.West, Direction[1]]
-  ''', [0, 11, 'South']
-
-fail 'bare enum member after a string value rejects', 'enum Mix\n  ok = "fine"\n  broken', 'no number to continue'
 
 test 'generic function runtime', '''
     def identity<T>(value: T): T

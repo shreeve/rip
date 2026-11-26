@@ -24,11 +24,6 @@
 //   save! = (x: T) ->       → declare function save(x: T): void;
 //   type/interface          → re-emitted as TS declarations
 //   class with typed members→ declare class N { x: T; m(a: T): R; }
-//   enum N           → declare enum N { a = 0, b = 1 }
-//     (an enum IS a type declaration — the one construct that
-//     declares without carrying an annotation; TS's enum view lacks
-//     the reverse index for STRING-valued members, a documented
-//     usability gap, never a soundness hole)
 // Untyped constructs declare NOTHING: a file with no types yields the
 // trivial (empty) declaration — the zero-cost gate's dts face.
 // Function-internal locals never declare — a d.ts is a MODULE
@@ -45,7 +40,7 @@ import {
   renderParams, paramTyped, optionalReader,
 } from './types.js';
 import { buildSchemaTypeStory, SchemaTypeError } from './schema.js';
-import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, resolveEnumMembers, isModuleImportNode, ctorAtFields, containsYield, containsAwait } from '../emitter.js';
+import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, isModuleImportNode, ctorAtFields, containsYield, containsAwait } from '../emitter.js';
 import {
   componentTypeInfo, componentCtorMembers, instanceTypeLines, containerType, MINTED, DOM_LIB_GLOBALS,
   segmentsText,
@@ -385,24 +380,6 @@ export function emitDeclarations({ sexpr, stores, source }) {
     pass.lines.push('}');
   };
 
-  // Enum members re-render from the tree (the emitter already
-  // validated literal-only values); TS enum declarations take the
-  // same `name = literal` rows.
-  const enumDecl = (node, exported) => {
-    const [, name, body] = node;
-    const items = isNode(body) && body[0] === 'block' ? body.slice(1) : [body];
-    const memberText = (v) => (isNode(v) && v[0] === '-' ? `-${v[1]}` : v);
-    const resolved = resolveEnumMembers(items);
-    pass.lines.push(`${exported ? 'export ' : ''}declare enum ${name} {`);
-    resolved.forEach((m, i) => {
-      if (m.name === null || m.value === null) {
-        throw new DtsError(`declaration emission: enum '${name}' member has no resolvable value`);
-      }
-      pass.lines.push(`  ${m.name} = ${memberText(m.value)}${i < resolved.length - 1 ? ',' : ''}`);
-    });
-    pass.lines.push('}');
-  };
-
   // A typed reactive declaration declares its CONTAINER: the module's
   // export surface is the container object the lowering binds
   // (imported reactive names never auto-unwrap — the cross-module
@@ -431,8 +408,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   let spellable = null;
 
   // A component declaration: the component is a STRUCTURAL
-  // construct — like an enum it declares without carrying an
-  // annotation. The shape is the companion-interface pattern the face
+  // construct — it declares without carrying an annotation. The shape is the companion-interface pattern the face
   // uses: `interface Name { …instance surface… }` (TS's separate
   // type/value namespaces make the same-name pairing legal, and a
   // consumer's `c: Name` annotation finds a type) beside the binding's
@@ -554,7 +530,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   // authority), and every element a plain identifier or an
   // identifier pair.
   const STMT_HEADS = new Set([
-    '=', 'void-assign', 'class', 'enum', 'type-decl', 'typed-var',
+    '=', 'void-assign', 'class', 'type-decl', 'typed-var',
     'def', 'void-def', 'def-sig', 'state', 'computed', 'effect',
     'readonly', 'void-readonly', 'gate', 'component', 'schema',
   ]);
@@ -627,7 +603,6 @@ export function emitDeclarations({ sexpr, stores, source }) {
       }
     } else if ((head === '=' || head === 'void-assign') && stmt.length === 3) assignDecl(stmt, exported);
     else if (head === 'class') classDecl(stmt, exported);
-    else if (head === 'enum') enumDecl(stmt, exported);
   };
 
   // Module-declared heads, for the prototype-augmentation split: a
@@ -636,14 +611,14 @@ export function emitDeclarations({ sexpr, stores, source }) {
   for (const s of sexpr.slice(1)) {
     const t = isNode(s) && s[0] === 'export' && isNode(s[1]) ? s[1] : s;
     if (!isNode(t)) continue;
-    if ((t[0] === 'class' || t[0] === 'enum' || t[0] === 'typed-var' ||
+    if ((t[0] === 'class' || t[0] === 'typed-var' ||
          t[0] === '=' || t[0] === 'void-assign') && typeof t[1] === 'string') moduleHeads.add(t[1]);
   }
 
   // The module-scope names the source binds, a destructuring pattern
   // walked to its leaves.
   const BINDING_HEADS = new Set(['=', 'void-assign', 'state', 'computed', 'readonly', 'effect',
-    'def', 'void-def', 'class', 'enum', 'typed-var', 'def-sig']);
+    'def', 'void-def', 'class', 'typed-var', 'def-sig']);
   const patternNames = (p, out) => {
     if (typeof p === 'string') { out.add(p); return; }
     if (!isNode(p)) return;
@@ -680,7 +655,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   for (const stmt of sexpr.slice(1)) stmtDecl(stmt, false);
   const passText = pass.lines.join('\n');
   const refused = new Set([...roots].filter((name) => sourceBinds.has(name) &&
-    !new RegExp(`\\b(?:let|const|function|class|enum) ${name.replace(/[$]/g, '\\$&')}\\b`).test(passText)));
+    !new RegExp(`\\b(?:let|const|function|class) ${name.replace(/[$]/g, '\\$&')}\\b`).test(passText)));
   if (refused.size > 0) {
     startPass();
     spellable = (name) => !refused.has(name);
@@ -696,7 +671,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   // specifier drops (the untyped-export rule), never a dangling name.
   const declaredName = (name) => {
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp(`\\b(?:let|const|function|class|interface|enum|type) ${escaped}\\b`).test(lines.join('\n'));
+    return new RegExp(`\\b(?:let|const|function|class|interface|type) ${escaped}\\b`).test(lines.join('\n'));
   };
   for (const name of pendingDefaults) {
     if (declaredName(name)) lines.push(`export default ${name};`);

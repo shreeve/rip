@@ -607,7 +607,6 @@ describe('schema type-name collisions reject loudly on the typed artifacts', () 
     ['a user type alias on an emitted alias name', 'type SData = {k: number}\nS = schema :shape\n  a! string\n  m: -> @a', /collides with the type declaration 'SData'/],
     ['a user interface on the schema name', 'interface S\n  x: number\nS = schema :shape\n  a! string', /collides with the interface declaration 'S'/],
     ['a class on the schema name', 'class S\n  m: -> 1\nS = schema :shape\n  a! string', /collides with class S/],
-    ['an enum companion on the schema name', 'enum S\n  a = 0\nS = schema :shape\n  a! string', /collides with enum S/],
   ];
   for (const [name, src, re] of cases) {
     test(name, () => {

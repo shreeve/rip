@@ -1,7 +1,7 @@
 # Test: Same-scope redeclaration
 # One binding per name per scope: a second DECLARING form for a name
 # rejects positioned, naming the prior site and its binding kind
-# (state/computed/readonly/plain/def/class/enum/import/parameter/effect).
+# (state/computed/readonly/plain/def/class/import/parameter/effect).
 # Writes stay legal: plain reassignment, state write-through, and
 # nested-scope shadowing are the negative space and pin here too.
 
@@ -26,7 +26,7 @@ fail "computed then state", "x ~= 1 + 2\nx := 3", "'x' was already declared as c
 fail "readonly then state", "x =! 1\nx := 2", "'x' was already declared as readonly on line 1"
 fail "effect handle twice", "h ~> 1\nh ~> 2", "'h' was already declared as effect on line 1"
 fail "class then state", "class X\n  m: -> 1\nX := 2", "'X' was already declared as class on line 1"
-fail "enum twice", "enum E\n  a = 0\nenum E\n  b = 1", "'E' was already declared as enum on line 1"
+fail "class twice", "class E\n  a: -> 0\nclass E\n  b: -> 1", "'E' was already declared as class on line 1"
 fail "import then def", "import x from './probe.js'\ndef x\n  1", "'x' was already declared as import on line 1"
 fail "state then export assign", "x := 1\nexport x = 2", "'x' was already declared as state on line 1"
 

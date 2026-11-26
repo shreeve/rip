@@ -13,7 +13,7 @@
 //   3. EMISSION PINS per surface: annotations (hoist line, params,
 //      returns, class fields, const lowerings), structured aliases/
 //      interfaces (generics included), overload rows, hoisted-let
-//      typing, the enum companion.
+//      typing.
 //   4. MAPPING PINS: TS-face rows ride the SAME CodeBuilder mark
 //      protocol — annotations get exact rows when the emitted bytes
 //      match their recorded store spans, cover rows otherwise; no
@@ -77,7 +77,7 @@ const REGION_SHAPES = [
   new RegExp(String.raw`^${ID} = __computed\(\(\) => __${ID}__computed\.${ID}\.call\(this as any\)\);$`, 'su'), // an unannotated computed's INFERRED position — a field with no type node, so quickinfo prints the resolved type instead of echoing a projection
   new RegExp(String.raw`^(readonly )?${ID} = (__state\()?__${ID}__computed\.${ID}\.call\(this as any\)\)?;$`, 'su'), // an unannotated private plain, `=!`, or state member's INFERRED position, through the thunk of its initializer
   new RegExp(String.raw`^const __${ID}__(behavior|computed) = \{`, 'su'), // the behavior objects (schema callable / component computed return types)
-  new RegExp(String.raw`^(export )?type ${ID}`, 'u'),      // alias / enum companion / schema alias
+  new RegExp(String.raw`^(export )?type ${ID}`, 'u'),      // alias / schema alias
   new RegExp(String.raw`^/\*\* [^\n]* \*/\ntype __Rip${ID}`, 'u'), // a minted alias carrying its doc — the sentence the editor shows on the name
   new RegExp(String.raw`^(export )?interface ${ID}`, 'u'), // interface / schema intrinsic block
   new RegExp(String.raw`^function ${ID}\(.*\): [^;]+;$`, 'su'), // overload signature
@@ -496,14 +496,14 @@ describe('scratch captures leave no trace in the real emission', () => {
   });
 
   test('token-correction spans all slice to their own name in the emitted face', () => {
-    // A captured body that reads a state/enum/class/imported name
+    // A captured body that reads a state/class/imported name
     // reaches noteNameSpan with the scratch builder installed;
     // un-shadowed, the channel keeps a scratch-relative span that
     // slices to arbitrary bytes of the real face.
     const src = 'count := 0\n\nCounter = component\n  double ~= count * 2\n';
     const faced = ts(src);
     const name = /^[$_A-Za-z][$\w]*$/;
-    for (const channel of ['mutables', 'enums', 'classDecls']) {
+    for (const channel of ['mutables', 'classDecls']) {
       for (const [start, end] of faced[channel]) {
         expect(faced.code.slice(start, end)).toMatch(name);
       }
@@ -1295,13 +1295,6 @@ describe('TS-face emission pins', () => {
     expect(code).toContain('const total: { readonly value: number; read(): number } = __computed<number>(() => (count.value * 2));');
     expect(code).toContain('const ro: string = "s";');
     expect(code).toContain('const h: Function = __effect(() => { return console.log(count.value); });');
-  });
-
-  test('an enum gains its type companion — annotations naming the enum resolve', () => {
-    expect(ts('enum Color\n  red = 0\n  green = 1\npick: Color = Color.red\n').code)
-      .toBe('const Color = {red: 0, green: 1, 0: "red", 1: "green"};\ntype Color = (typeof Color)[keyof typeof Color];\nlet pick: Color = Color.red;' + MARKER);
-    expect(ts('export enum Tier\n  free = "f"\n').code)
-      .toBe('export const Tier = {free: "f", "f": "free"};\nexport type Tier = (typeof Tier)[keyof typeof Tier];');
   });
 
   test('casts spell into the face as TS-only `(value as T)` (M10-C); stripping restores the bare value', () => {

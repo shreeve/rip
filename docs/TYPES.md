@@ -53,7 +53,6 @@ Rip supports:
 - type aliases and interfaces, with block bodies whose bare-colon members take their type from the indented block beneath them;
 - typed class, static, string-named, and prototype members;
 - overload signatures;
-- enum type companions;
 - typed reactive, computed, and readonly containers;
 - schema and model declarations;
 - typed component props, members, constructors, and declaration
@@ -133,8 +132,8 @@ files requested as declarations produce the trivial valid surface.
 ### TypeScript face
 
 The normal emitter renders annotations, casts, declarations, overloads,
-reactive containers, enum companions, schema intrinsics, and component
-types through TS-only regions.
+reactive containers, schema intrinsics, and component types through
+TS-only regions.
 
 `src/ts/types.js` owns shared type-text and signature rendering so the
 face and declarations cannot drift structurally.

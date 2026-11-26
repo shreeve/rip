@@ -147,7 +147,7 @@ const diagnosticError = (file, path, d) => {
 // `ambientBindings` seeds the emitter's program scope with bindings
 // from OUTSIDE this source (the REPL's prior lines): `[{name, kind}]`
 // with kind plain / state / computed / effect / readonly / import /
-// class / def / enum. A seeded name emits exactly as if its
+// class / def. A seeded name emits exactly as if its
 // declaration were in-file — reactive reads/writes unwrap `.value`,
 // readonly and computed writes reject positioned, the name never
 // re-hoists, and minted temporaries dodge it.
@@ -306,7 +306,7 @@ export function emitSource(parsed, { path = '<anonymous>', runtimeDelivery = 'in
     runtimes: emitted.runtimes,
     // The program's top-level binding inventory: [{name, kind}] with
     // kind plain / state / computed / effect / readonly / import /
-    // class / def / enum — the REPL's `.vars` data and the ambient
+    // class / def — the REPL's `.vars` data and the ambient
     // seed for its next line. Unconditional on every compile.
     bindings: emitted.bindings,
     // Every binding in every emitted scope, including parameters and
@@ -339,11 +339,6 @@ export function emitSource(parsed, { path = '<anonymous>', runtimeDelivery = 'in
     // Generated spans of `:=` state names — writable in rip, `const` in the
     // face. The editor clears TypeScript's `readonly` token modifier on these.
     mutables: emitted.mutables,
-    // Generated spans of every ENUM name occurrence. The face's const
-    // object and its companion type alias share the name, so the symbols
-    // merge and tsgo colors every position `type`; the editor repaints
-    // the construct the author declared. TS face only; empty otherwise.
-    enums: emitted.enums,
     // Generated spans of a HOISTED class-expression binding's declaration
     // name. TypeScript classifies a binding from its declaration's
     // initializer, and a forward reference splits the two — the editor

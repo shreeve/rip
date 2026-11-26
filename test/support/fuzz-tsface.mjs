@@ -158,10 +158,6 @@ const CONSTRUCTS = [
     source: `interface G${id}<T extends string>\n  x: T\nh${id} = (q: G${id}<"k">) -> q.x\n`,
   }),
   (rng, id) => ({
-    kind: 'enum + type companion use',
-    source: `enum E${id}\n  red = 0\n  green = 1\nn${id}: E${id} = E${id}.red\nn${id} = E${id}.green\n`,
-  }),
-  (rng, id) => ({
     kind: 'def-sig overloads',
     source: `def o${id}(a: number): string\ndef o${id}(a: string): string\ndef o${id}(a)\n  String(a)\no${id}(1).length\n`,
   }),

@@ -18,9 +18,9 @@ interface Strobe extends Beacon
 veiled: unknown = 'kept'
 notify: () => void = -> undefined
 label = 'five'
-enum Tier
-  free
-  paid
+Tier =
+  free: 0
+  paid: 1
 type Loose = any
 type Locked = { readonly id: number }
 type Counts = { [label: string]: number }
