@@ -439,11 +439,8 @@ export function collectUserTypeNames(programSexpr) {
 
 // Is the program a MODULE by its own VALUE-LEVEL syntax — a
 // top-level module import or an export STATEMENT node? The caller
-// supplies isModuleImport (the emitter's semanticKind-backed
-// discriminator): a dynamic-import CALL statement spells the same
-// head as a module import and must stay non-module-making, and the
-// shapes collide at three elements (`import(Foo, "./m.js")` vs
-// `import Foo from "./m.js"`), so shape alone cannot decide.
+// supplies isModuleImport (the emitter's isModuleImportNode); a dynamic
+// import is a call and never makes a module.
 // Type-only exports (`export type Q = …`) parse as type-decl
 // statements, not export nodes, so they are not detected; the
 // consequence is a redundant marker beside a line that already makes
