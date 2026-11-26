@@ -9037,11 +9037,11 @@ var parserInstance = {
 ` || input[inputEnd - 1] === "\r"))
         inputEnd--;
     let repairedHere = new Set, parserRecorded = false, nodes = [], roles = [], primitives = [], nodeIds = new WeakMap, nextNodeId = 1, lexer = Object.create(this.lexer), sharedState = { ctx: {} };
-    const _ref5 = this.ctx;
-    for (let k in _ref5) {
-      if (!Object.hasOwn(_ref5, k))
+    const _ref4 = this.ctx;
+    for (let k in _ref4) {
+      if (!Object.hasOwn(_ref4, k))
         continue;
-      let v = _ref5[k];
+      let v = _ref4[k];
       sharedState.ctx[k] = v;
     }
     lexer.setInput(input, sharedState.ctx);
@@ -9055,9 +9055,9 @@ var parserInstance = {
       return token;
     }, symbol = null, tokenLoc = null, rv = {}, expectedForState = () => {
       expected = [];
-      const _ref6 = parseTable[state];
-      for (let p in _ref6) {
-        if (!Object.hasOwn(_ref6, p))
+      const _ref5 = parseTable[state];
+      for (let p in _ref5) {
+        if (!Object.hasOwn(_ref5, p))
           continue;
         if (this.tokenNames[p] && +p > 2) {
           if (!expected.includes(this.tokenNames[p]))
@@ -34194,7 +34194,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "5fc57d5debd3a312";
+var compilerBuild = () => "c4a376711c707fe6";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
