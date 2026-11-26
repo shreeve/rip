@@ -80,7 +80,7 @@ const CAST_LHS_ENDERS = new Set([
 const TYPE_STARTERS = new Set([
   'IDENTIFIER', 'PROPERTY', '(', 'CALL_START', 'PARAM_START', '{', '[',
   'INDEX_START', 'STRING', 'NUMBER', 'BOOL', 'NULL', 'UNDEFINED', '-',
-  'UNARY', 'NEW', 'RESERVED',
+  'UNARY', 'RESERVED',
 ]);
 
 const RUN_OPENERS = new Set(['(', 'CALL_START', 'PARAM_START', '[', 'INDEX_START', '{', 'PICK_START', 'OPTPICK_START']);

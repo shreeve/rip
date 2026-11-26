@@ -601,7 +601,7 @@ fail "an unspaced ? after an operator with no carve-out", "x = [a]*?: b", "unspa
 fail "an unspaced ? between a tight operator and a colon", "x = a+?: b", "unspaced '?' needs a value"
 fail "is not with a tab rejects", "x is\tnot y", "'is not' compares against a negation"
 fail "and followed by == is no compound assignment", "x and== y", "Unexpected '=='"
-fail "new followed by a member other than target rejects", "f = -> new.foo", "1:11: Unexpected '.'"
+fail "new followed by a member other than target rejects", "f = -> new.foo", "1:8: 'new.' heads only `new.target`"
 
 # A colon tight to a name after a value-ending token is structural (here a
 # ternary's else colon), never a symbol literal.

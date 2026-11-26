@@ -100,6 +100,7 @@ Measured over 14-schema's spellings (the `ruled` gauge, hover-pins.json's `posit
 | --- | --- | --- |
 | key of a `*{}` literal (`*{ alpha: 1 }`) | silence — the literal lowers to `new Map([["alpha", 1]])`, and the key reaches the face as a string literal with no symbol; an answer would need a record the lowering does not keep | pinned null |
 | an import from an absent module, and its uses (`import { pad } from '@rip-audit/absent'`) | silence — nothing resolves, so nothing answers; the gradual fixtures exist to hold exactly this | pinned null |
+| the `.new` of a construction whose constructor seals (`x['k'].new()`, `a?.b.new()`, `tag"t".new()`, `X.new().new()`) | silence — the word is the `new` keyword it lowers to, and where the constructor is an expression the lowering parenthesizes (`new (a?.b ?? undefined)()`) TypeScript answers nothing at the keyword; over a plain name or member spine the keyword answers the constructor | pinned null |
 
 ## Tokens
 

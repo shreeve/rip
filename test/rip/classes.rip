@@ -148,6 +148,26 @@ code "a negative-index target seals", "x[-1].new()", "new (x.at(-1))();"
 code "a negative index deeper in the spine seals", "a[-1].b.new(2)", "new (a.at(-1).b)(2);"
 code "a range-index target seals", "a[1..2].new()", "new (a.slice(1, 3))();"
 
+# `new X` is not Rip: construction has one spelling, `X.new(…)`, and a
+# prefix `new` rejects at the keyword. `new` stays a property name, an
+# object key, the head of `new.target`, and the word of a TS constructor
+# type.
+fail "prefix construction rejects at the keyword", "x = new X(1)", "1:5: construction is spelled `X.new(…)` — `new X` is not Rip"
+fail "a bare prefix construction rejects", "x = new X", "1:5: construction is spelled `X.new(…)`"
+fail "a prefix construction over a member rejects", "x = new a.B(c)", "1:5: construction is spelled `X.new(…)`"
+fail "a prefix construction as an implicit argument rejects", "f new X", "1:3: construction is spelled `X.new(…)`"
+fail "a prefix construction dammit rejects", "x = new X!", "1:5: construction is spelled `X.new(…)`"
+fail "nested prefix construction rejects at the first new", "x = new new X", "1:5: construction is spelled `X.new(…)`"
+fail "a prefix construction in a schema function body rejects", "U = schema\n  x! -> throw new Error('m')", "2:15: schema: construction is spelled `X.new(…)`"
+fail "new is reserved as a shorthand name", "c = {new}", "1:6: 'new' is reserved — construction is spelled `X.new(…)`"
+fail "a trailing new is reserved", "x = new", "1:5: 'new' is reserved — construction is spelled `X.new(…)`"
+test "new is a property name", "o = {new: 1}\no.new", 1
+test "new is a bare object key", "o = new: 2\no.new", 2
+test "new is a this-property", "o = {new: 3, get: -> @new}\no.get()", 3
+test "a method named new is defined and read as a property", "class A\n  new: -> 4\nA.prototype.new.call(null)", 4
+code "a bare .new is a property read", "x = obj.new", "let x = obj.new;"
+code "a TS constructor type keeps its new", "x: new () => Foo = Foo", "let x = Foo;"
+
 # ==============================================================================
 # Meta Properties
 # ==============================================================================
@@ -245,15 +265,17 @@ code 'an index read after a member construction reads the instance', 'x = (a.b.n
 code 'a call after a member construction calls the instance', 'x = (a.b.new())(1)', 'let x = new a.b()(1);'
 code 'a method call after a member construction calls the instance', 'x = (a.b.new()).c()', 'let x = new a.b().c();'
 code 'a member read after an index construction reads the instance', 'x = (a[0].new()).c', 'let x = new a[0]().c;'
-# An optional call or index DIRECTLY on a construction that spells no
-# argument list has no reading: JavaScript refuses `new X?.()`, and the
-# spelling does not say whether the soak guards the constructor or the
-# instance. An argument list closes the construction, and so do parens.
-fail 'an optional call directly on a bare construction rejects', 'x = new a.b?(1)', 'directly on a construction with no argument list has no reading'
-fail 'an optional call directly on a bare named construction rejects', 'x = new Foo?(1)', 'directly on a construction with no argument list has no reading'
-fail 'an optional index directly on a bare construction rejects', 'x = new a.b?[0]', 'directly on a construction with no argument list has no reading'
-fail 'a parenthesized call operand spells no argument list of its own', 'x = new (f())?(1)', 'directly on a construction with no argument list has no reading'
-fail 'the rejection names the conditional-construction spelling', 'x = new Foo?(1)', 'To construct only when the class exists, test it'
+# An optional call of `.new` has no reading: JavaScript refuses
+# `new X?.()`, and the spelling does not say whether the soak guards the
+# constructor or the instance. A completed construction soaks its
+# instance; an optional INDEX on a bare `.new` reads the property, as
+# the bare `.new` read itself does.
+fail 'an optional call of a member construction rejects', 'x = a.b.new?(1)', 'an optional call of `.new` has no reading'
+fail 'an optional call of a named construction rejects', 'x = Foo.new?(1)', 'an optional call of `.new` has no reading'
+fail 'an optional call of a parenthesized constructor rejects', 'x = (f()).new?(1)', 'an optional call of `.new` has no reading'
+fail 'the rejection names the conditional-construction spelling', 'x = Foo.new?(1)', 'To construct only when the class exists, test it'
+code 'an optional call after a completed construction soaks the instance', 'x = Foo.new()?(1)', 'let x = new Foo()?.(1);'
+code 'an optional index on a bare .new reads the property', 'x = a.b.new?[0]', 'let x = a.b.new?.[0];'
 code 'constructing only when the class exists is spelled with a test', 'x = if Foo? then Foo.new(1)', 'let x = (Foo != null) ? new Foo(1) : undefined;'
 test 'a tested construction skips a missing class and builds a present one', '''
   class Here

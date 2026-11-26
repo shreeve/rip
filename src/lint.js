@@ -15,7 +15,7 @@
 
 // Each rule's accepted values: a rule names its subject, and its value names
 // the spelling it requires. A rule the block leaves out is off.
-const RULES = { calls: ['explicit'], construction: ['.new'], await: ['dammit'], dammit: ['bare'] };
+const RULES = { calls: ['explicit'], await: ['dammit'], dammit: ['bare'] };
 const CALL_KINDS = new Set(['call', 'optcall', 'maybe-dammit', 'super']);
 
 // The validated rule set for a package's `rip.lint` block, or null when the
@@ -45,8 +45,7 @@ export function lintRulesOf(raw) {
 // ends in one (`count db.sql! """`): the block closes the argument. A render
 // tree is template, not code, except inside a handler body.
 //
-// `construction: '.new'`: `X.new(a)`, never `new X(a)`. `await: 'dammit'`:
-// a call is awaited with dammit, `f!(a)` for `await f(a)`; a written `await`
+// `await: 'dammit'`: a call is awaited with dammit, `f!(a)` for `await f(a)`; a written `await`
 // is for a promise already in hand. `dammit: 'bare'`: a dammit call without
 // arguments is `f!`, never `f!()`.
 export function lintFindingsOf(tokens, stores, source, rules) {
@@ -194,15 +193,15 @@ export function lintFindingsOf(tokens, stores, source, rules) {
     });
   }
 
-  found.push(...spellingFindingsOf(stores, source, rules, { parents, depthOf, real, tokenAt, lastRealEndBefore }));
+  found.push(...spellingFindingsOf(stores, source, rules, { real, tokenAt, lastRealEndBefore }));
   for (const f of found) for (const e of f.edits ?? []) e.rule = f.rule;
 
   // Each message shows its own source with every fix it or a call inside it
   // owns applied, so a nested call reads as it will once the whole file is
   // fixed. Ownership, not position, decides: an enclosing call's closer can
   // sit at exactly this call's end. Another rule's rewrite strictly inside
-  // the span applies too, wherever it is owned (`X.new(a)` for the call in
-  // `new X a`). When the fix drops grouping parens, the
+  // the span applies too, wherever it is owned (`f!` for the dammit call
+  // in `g f!()`). When the fix drops grouping parens, the
   // message names the text it replaces, since the fixed call alone would
   // read as if the parens stayed.
   const all = found.flatMap((f) => f.edits ?? []);
@@ -222,41 +221,15 @@ export function lintFindingsOf(tokens, stores, source, rules) {
   }).sort((a, b) => a.start - b.start || a.end - b.end);
 }
 
-// The construction, await, and dammit rules. Each rewrites one keyword or
-// operator in place. `await new X(a)` has one owner, the await rule, which
-// writes `X.new!(a)` whole; the construction rule leaves that `new` to it.
-//
-// `.new` and `!` insert where the callee's last real token ends, ahead of the
-// calls rule's `(` at the same offset (`.new` before `!`). `.new()` after a
-// bare constructor closes like a call, ahead of any enclosing closer there.
-function spellingFindingsOf(stores, source, rules, { parents, depthOf, real, tokenAt, lastRealEndBefore }) {
+// The await and dammit rules. Each rewrites one keyword or operator in
+// place. `!` inserts where the callee's last real token ends, ahead of
+// the calls rule's `(` at the same offset.
+function spellingFindingsOf(stores, source, rules, { real, tokenAt, lastRealEndBefore }) {
   const found = [];
   const role = (id, name) => stores.role(id, name);
   const child = (id, name) => { const r = role(id, name); return r?.childNodeId == null ? null : stores.node(r.childNodeId); };
   const nextRealStart = (offset) => real.find((t) => t.start >= offset)?.start ?? offset;
   const isAwait = (n) => n?.semanticKind === 'await' && tokenAt(n.sourceStart, 'AWAIT', false) !== null;
-  const isNew = (n) => n?.semanticKind === 'unary' && tokenAt(n.sourceStart, 'NEW', false) !== null;
-  // A constructor the rewrite can name as a receiver: a plain identifier.
-  // `a.B.new(c)` compiles to `new (a.B)(c)`, not to `new a.B(c)`.
-  const plainCallee = (call) => {
-    const callee = role(call.nodeId, 'callee');
-    return callee && callee.childNodeId == null && tokenAt(callee.sourceStart, 'IDENTIFIER', false)?.end === callee.sourceEnd;
-  };
-  const plainOperand = (unary) => {
-    const operand = role(unary.nodeId, 'operand');
-    return operand && operand.childNodeId == null && tokenAt(operand.sourceStart, 'IDENTIFIER', false)?.end === operand.sourceEnd ? operand : null;
-  };
-  // `new X(a)` → `.new` at the callee's end; bare `new X` → `.new()` after
-  // it, since `X.new` alone reads the property (`X.new!` constructs).
-  const constructionEdits = (unary, suffix) => {
-    const operand = child(unary.nodeId, 'operand');
-    if (operand?.semanticKind === 'call' && plainCallee(operand)) {
-      const args = role(operand.nodeId, 'args');
-      return [{ start: lastRealEndBefore(args.sourceStart), text: `.new${suffix}`, rank: 1 }, ...(suffix ? emptyArgs(operand) : [])];
-    }
-    const bare = plainOperand(unary);
-    return bare ? [{ start: bare.sourceEnd, text: suffix ? `.new${suffix}` : '.new()', rank: -depthOf(unary.nodeId) - 1 }] : null;
-  };
   // The `()` an awaited call drops when the project writes dammit calls bare.
   const emptyArgs = (call) => {
     const args = role(call.nodeId, 'args');
@@ -269,17 +242,10 @@ function spellingFindingsOf(stores, source, rules, { parents, depthOf, real, tok
   };
 
   for (const node of stores.nodes) {
-    if (rules.construction && isNew(node) && !(rules.await && isAwait(stores.node(parents.get(node.nodeId) ?? -1)))) {
-      const edits = constructionEdits(node, '');
-      push('construction', 'prefix construction', node, edits && [{ start: node.sourceStart, end: nextRealStart(node.sourceStart + 3), text: '', rank: 0 }, ...edits]);
-    }
     if (rules.await && isAwait(node)) {
       const value = child(node.nodeId, 'value');
       const drop = { start: node.sourceStart, end: nextRealStart(node.sourceStart + 5), text: '', rank: 0 };
-      if (isNew(value)) {
-        const edits = constructionEdits(value, '!');
-        push('await', 'await on a call', node, edits && [{ ...drop, end: nextRealStart(value.sourceStart + 3) }, ...edits]);
-      } else if (value && ['call', 'optcall', 'dynimport'].includes(value.semanticKind)) {
+      if (value && ['call', 'optcall', 'dynimport'].includes(value.semanticKind)) {
         const callee = child(value.nodeId, 'callee');
         const awaited = callee?.semanticKind === 'dammit' || callee?.semanticKind === 'maybe-dammit';
         const args = role(value.nodeId, 'args');

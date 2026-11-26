@@ -182,7 +182,7 @@ code "maybe dammit paren or stays outside", "fn?!(a) or b", "await fn?.(a) || b;
 # constructed instance is an ordinary one.
 fail 'maybe dammit rejects a bare construction', "x = Foo.new?!", 'maybe dammit has no reading on a constructor'
 fail 'maybe dammit rejects a member construction', "x = a.b.new?!(1)", 'maybe dammit has no reading on a constructor'
-fail 'maybe dammit rejects the .new construction alias', "x = K.new?! 1", 'maybe dammit has no reading on a constructor'
+fail 'maybe dammit rejects a construction with a juxta argument', "x = K.new?! 1", 'maybe dammit has no reading on a constructor'
 
 # Maybe dammit calls what dammit calls: a name. After any other value it
 # has no reading, where dammit's `!` has none either.

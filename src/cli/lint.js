@@ -25,15 +25,13 @@ Options:
 Rules are set per package in package.json#rip.lint (the nearest package.json
 wins); a package without the key is not linted:
 
-  { "rip": { "lint": { "calls": "explicit", "construction": ".new" } } }
+  { "rip": { "lint": { "calls": "explicit", "await": "dammit" } } }
 
   calls: "explicit"
           every call with arguments is spelled with parentheses and every
           object argument with braces — except a call whose last argument
           opens a block on the lines below (a function body, keyword pairs,
           or a heredoc), and a render tree
-  construction: ".new"
-          X.new(a), never new X(a)
   await: "dammit"
           f!(a), never await f(a); a written await is for a promise
           already in hand

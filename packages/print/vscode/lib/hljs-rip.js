@@ -14,7 +14,7 @@ module.exports = function(hljs) {
     // Modules
     'import', 'export', 'from', 'default',
     // Operators as keywords
-    'delete', 'typeof', 'instanceof', 'new', 'super',
+    'delete', 'typeof', 'instanceof', 'super',
     'and', 'or', 'not', 'is', 'isnt',
     // Declarations
     'class', 'def', 'interface', 'type', 'extends', 'own', 'schema', 'private',
@@ -219,6 +219,19 @@ module.exports = function(hljs) {
     relevance: 0,
   };
 
+  // `new` is a keyword in two places only: a called `.new` (construction,
+  // with an argument list, the dammit bang, or an implicit argument) and
+  // the `new.target` meta-property. Anywhere else it is a property name.
+  const CONSTRUCTION = {
+    match: [/\./, /new(?=\s*\(|!|[ \t]+(?!(?:and|or|not|is|isnt|in|of|instanceof|if|unless|then|else|for|while|until|when|by|as|satisfies)\b)[\w$@"'[{])/],
+    scope: { 2: 'keyword' },
+    relevance: 0,
+  };
+  const NEW_TARGET = {
+    match: /\bnew\.target\b/,
+    className: 'keyword',
+  };
+
   const TYPE_KEYWORDS = {
     className: 'type',
     begin: /\b(?:number|string|boolean|void|any|never|unknown|object|symbol|bigint)\b/,
@@ -252,6 +265,8 @@ module.exports = function(hljs) {
       INSTANCE_VAR,
       SIGIL_ATTR,
       TYPE_KEYWORDS,
+      NEW_TARGET,
+      CONSTRUCTION,
       MAP_LITERAL,
       OPERATORS,
       { // inline JS (backtick)

@@ -1337,7 +1337,7 @@ describe('node identity survives emission', () => {
 
 // The synthetic `await` keyword answers for the source that produced it.
 //
-// Every dammit spelling (`f!`, `new X!`, `new X!(a)`) lowers to an `await`
+// Every dammit spelling (`f!`, `f!(a)`, `X.new!`, `X.new!(a)`) lowers to an `await`
 // the source never spells, and a diagnostic tsgo puts on that keyword
 // (TS80007 lives there) maps through whatever row contains it. A
 // construct-wide cover made the whole expression light up for a hint about
@@ -1371,8 +1371,9 @@ describe('the await keyword maps to the operator that produced it', () => {
   // [source, the operator's spelling in source]
   test.each([
     ['f = -> 42\nx = f!\n', '!'],                    // call dammit
-    ['class T\n  n: number = 0\nx = new T!\n', '!'], // construction dammit
-    ['class T\n  constructor: (n: number = 1) ->\n    @n = n\n  n: number = 0\nx = new T!(7)\n', '!'], // with ctor args
+    ['f = (n) -> n\nx = f!(7)\n', '!'],              // call dammit with args
+    ['class T\n  n: number = 0\nx = T.new!\n', '!'], // construction dammit
+    ['class T\n  constructor: (n: number = 1) ->\n    @n = n\n  n: number = 0\nx = T.new!(7)\n', '!'], // with ctor args
     ['x = await 5\n', 'await'],                      // the author-spelled control
   ])('%p: the generated keyword answers %p', (src, op) => {
     const { code, mappings } = compileTS(src);
@@ -1383,5 +1384,23 @@ describe('the await keyword maps to the operator that produced it', () => {
     const span = sourceSpanOf(mappings, g, 'await'.length);
     expect(span, 'the keyword maps').not.toBeNull();
     expect(span).toEqual([at, at + op.length]);
+  });
+
+  // The `.new` word IS the construction keyword: the generated `new` maps
+  // back to it exactly, plain, sealed, and awaited — so a diagnostic
+  // TypeScript puts on the keyword lands on the word.
+  test.each([
+    'x = X.new(1)\n',
+    'x = a.b.new()\n',
+    'x = a?.b.new(1)\n',
+    'x = (f()).new(1)\n',
+    'f = -> X.new!(1)\n',
+    'f = -> X.new!\n',
+  ])('%p: the generated new keyword maps to the .new word', (src) => {
+    const { code, mappings } = compileTS(src);
+    const g = code.indexOf('new ');
+    expect(g, 'generated new not found').toBeGreaterThan(-1);
+    const at = src.lastIndexOf('new');
+    expect(sourceSpanOf(mappings, g, 'new'.length)).toEqual([at, at + 3]);
   });
 });

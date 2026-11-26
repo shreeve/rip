@@ -564,10 +564,10 @@ export const syntacticLiteralType = (v, stores) => {
 
 // typeof spelling for member initializers whose type is a NAME's:
 // `store ~= cart` declares `typeof cart` (the module binding's full
-// inferred type); `ref ~= new X({})` declares `InstanceType<typeof X>`.
+// inferred type); `ref ~= X.new({})` declares `InstanceType<typeof X>`.
 // Only entity paths — plain identifiers, dotted identifier chains, and
-// new-expressions over them — spell; anything else stays null, and so
-// does a path whose root name `spellable` refuses.
+// constructions of a plain identifier — spell; anything else stays null,
+// and so does a path whose root name `spellable` refuses.
 const entityPath = (v) => {
   if (typeof v === 'string') {
     return isIdentifierName(v) &&
@@ -584,9 +584,9 @@ const typeofSpelling = (v, spellable = null) => {
   if (path !== null) {
     return spellable === null || spellable(path.split('.')[0]) ? `typeof ${path}` : null;
   }
-  if (Array.isArray(v) && v[0] === 'new' && v.length === 2 &&
-      Array.isArray(v[1]) && typeof v[1][0] === 'string' && isIdentifierName(v[1][0])) {
-    return spellable === null || spellable(v[1][0]) ? `InstanceType<typeof ${v[1][0]}>` : null;
+  const ctor = Array.isArray(v) && Array.isArray(v[0]) && v[0][0] === '.' && v[0].length === 3 && v[0][2] === 'new' ? v[0][1] : null;
+  if (typeof ctor === 'string' && isIdentifierName(ctor)) {
+    return spellable === null || spellable(ctor) ? `InstanceType<typeof ${ctor}>` : null;
   }
   return null;
 };

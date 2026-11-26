@@ -874,5 +874,89 @@
         "expect": "const Beacon: typeof Beacon"
       }
     ]
+  },
+  "09-classes.rip": {
+    "positions": [
+      {
+        "line": 79,
+        "character": 32,
+        "token": "new",
+        "expect": null,
+        "rule": "the .new of a sealed construction",
+        "why": "the word is the `new` keyword it lowers to, and the constructor here seals into a parenthesized expression, where TypeScript answers nothing at the keyword — ruled silent; RULINGS: words the lowering spends outside a construct"
+      },
+      {
+        "line": 81,
+        "character": 29,
+        "token": "new",
+        "expect": null,
+        "rule": "the .new of a sealed construction",
+        "why": "the same"
+      },
+      {
+        "line": 82,
+        "character": 33,
+        "token": "new",
+        "expect": null,
+        "rule": "the .new of a sealed construction",
+        "why": "the same"
+      },
+      {
+        "line": 83,
+        "character": 36,
+        "token": "new",
+        "expect": null,
+        "rule": "the .new of a sealed construction",
+        "why": "the same"
+      },
+      {
+        "line": 84,
+        "character": 39,
+        "token": "new",
+        "expect": null,
+        "rule": "the .new of a sealed construction",
+        "why": "the same"
+      },
+      {
+        "line": 85,
+        "character": 27,
+        "token": "new",
+        "expect": null,
+        "rule": "the .new of a sealed construction",
+        "why": "the same"
+      },
+      {
+        "line": 89,
+        "character": 56,
+        "token": "new",
+        "expect": null,
+        "rule": "the .new of a sealed construction",
+        "why": "the same"
+      },
+      {
+        "line": 123,
+        "character": 22,
+        "token": "new",
+        "expect": null,
+        "rule": "the .new of a sealed construction",
+        "why": "the same"
+      },
+      {
+        "line": 125,
+        "character": 27,
+        "token": "new",
+        "expect": null,
+        "rule": "the .new of a sealed construction",
+        "why": "the same"
+      },
+      {
+        "line": 125,
+        "character": 33,
+        "token": "new",
+        "expect": null,
+        "rule": "the .new of a sealed construction",
+        "why": "the same"
+      }
+    ]
   }
 }

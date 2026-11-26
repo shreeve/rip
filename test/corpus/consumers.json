@@ -296,8 +296,8 @@
   "ts": "3dba4lsngctyl"
  },
  "pkg packages/highlight/test.rip": {
-  "js": "j11pzcmkk37x",
-  "ts": "1g6cj1u9ir1na"
+  "js": "xcl43hxxn8yl",
+  "ts": "1ssmsl27xzao4"
  },
  "pkg packages/http/http.rip": {
   "js": "35dg4j9080yx5",
@@ -921,7 +921,7 @@
  },
  "pkg packages/tui/demo/hn/app.rip": {
   "js": "1zrtjv3cranra",
-  "ts": "2ifi674q6r2kc"
+  "ts": "3d9t7qar1g8t0"
  },
  "pkg packages/tui/demo/hn/fake.rip": {
   "js": "7a7qpe1kwwwt",
@@ -961,7 +961,7 @@
  },
  "pkg packages/tui/demo/hn/wipe.rip": {
   "js": "beyw8uumrz0t",
-  "ts": "2igrs1f0w3r62"
+  "ts": "3st0fiwb08nrd"
  },
  "pkg packages/tui/demo/ink/borders.rip": {
   "js": "1g42pbg6trkpg",
@@ -3216,8 +3216,8 @@
   "ts": "g5yhk1qlnzlf"
  },
  "row basic.rip › fail a line-leading ?. before a digit is no continuation": {
-  "js": "3hnzhnma8j08p",
-  "ts": "3hnzhnma8j08p"
+  "js": "k5jbensw2zfn",
+  "ts": "k5jbensw2zfn"
  },
  "row basic.rip › test a line-leading .5 is a number, not a member continuation": {
   "js": "83iey0ldk6bm",
@@ -3539,6 +3539,66 @@
   "js": "b5rssp40u48w",
   "ts": "1f1111zrid321"
  },
+ "row classes.rip › fail prefix construction rejects at the keyword": {
+  "js": "zzo4ifno6m5b",
+  "ts": "zzo4ifno6m5b"
+ },
+ "row classes.rip › fail a bare prefix construction rejects": {
+  "js": "zzo4ifno6m5b",
+  "ts": "zzo4ifno6m5b"
+ },
+ "row classes.rip › fail a prefix construction over a member rejects": {
+  "js": "zzo4ifno6m5b",
+  "ts": "zzo4ifno6m5b"
+ },
+ "row classes.rip › fail a prefix construction as an implicit argument rejects": {
+  "js": "13fg2pwsc3a40",
+  "ts": "13fg2pwsc3a40"
+ },
+ "row classes.rip › fail a prefix construction dammit rejects": {
+  "js": "zzo4ifno6m5b",
+  "ts": "zzo4ifno6m5b"
+ },
+ "row classes.rip › fail nested prefix construction rejects at the first new": {
+  "js": "zzo4ifno6m5b",
+  "ts": "zzo4ifno6m5b"
+ },
+ "row classes.rip › fail a prefix construction in a schema function body rejects": {
+  "js": "1zx2spwot9nnn",
+  "ts": "1zx2spwot9nnn"
+ },
+ "row classes.rip › fail new is reserved as a shorthand name": {
+  "js": "1gp3lkc8hyqwn",
+  "ts": "1gp3lkc8hyqwn"
+ },
+ "row classes.rip › fail a trailing new is reserved": {
+  "js": "3qjrnem345kq9",
+  "ts": "3qjrnem345kq9"
+ },
+ "row classes.rip › test new is a property name": {
+  "js": "1ndm8jvwa4bg8",
+  "ts": "3hpxv1bpf1rsk"
+ },
+ "row classes.rip › test new is a bare object key": {
+  "js": "n71lak8h1l80",
+  "ts": "2fbjnzaxw1tff"
+ },
+ "row classes.rip › test new is a this-property": {
+  "js": "2iefhyz1vtv8s",
+  "ts": "23yu9ixdwc2ye"
+ },
+ "row classes.rip › test a method named new is defined and read as a property": {
+  "js": "kqdhnhiepz2y",
+  "ts": "31lmk7di40d6a"
+ },
+ "row classes.rip › code a bare .new is a property read": {
+  "js": "1smh9ecei6i63",
+  "ts": "7xgh5nmg2xrb"
+ },
+ "row classes.rip › code a TS constructor type keeps its new": {
+  "js": "2ivy1mdvjlcsk",
+  "ts": "pp8ss90hnrcg"
+ },
  "row classes.rip › fail class with member-access name does not parse": {
   "js": "7f4s2sh4vejj",
   "ts": "7f4s2sh4vejj"
@@ -3639,25 +3699,29 @@
   "js": "292runky7pl80",
   "ts": "v19hm12ds1bk"
  },
- "row classes.rip › fail an optional call directly on a bare construction rejects": {
-  "js": "125et5iwq2j17",
-  "ts": "125et5iwq2j17"
+ "row classes.rip › fail an optional call of a member construction rejects": {
+  "js": "3fzmluvhh95q",
+  "ts": "3fzmluvhh95q"
  },
- "row classes.rip › fail an optional call directly on a bare named construction rejects": {
-  "js": "125et5iwq2j17",
-  "ts": "125et5iwq2j17"
+ "row classes.rip › fail an optional call of a named construction rejects": {
+  "js": "3fzmluvhh95q",
+  "ts": "3fzmluvhh95q"
  },
- "row classes.rip › fail an optional index directly on a bare construction rejects": {
-  "js": "2y3a7g05vozxd",
-  "ts": "2y3a7g05vozxd"
- },
- "row classes.rip › fail a parenthesized call operand spells no argument list of its own": {
-  "js": "125et5iwq2j17",
-  "ts": "125et5iwq2j17"
+ "row classes.rip › fail an optional call of a parenthesized constructor rejects": {
+  "js": "3fzmluvhh95q",
+  "ts": "3fzmluvhh95q"
  },
  "row classes.rip › fail the rejection names the conditional-construction spelling": {
-  "js": "125et5iwq2j17",
-  "ts": "125et5iwq2j17"
+  "js": "3fzmluvhh95q",
+  "ts": "3fzmluvhh95q"
+ },
+ "row classes.rip › code an optional call after a completed construction soaks the instance": {
+  "js": "49z63gb44h6m",
+  "ts": "3qrbygb1559w"
+ },
+ "row classes.rip › code an optional index on a bare .new reads the property": {
+  "js": "1xqxo5pwk0fx",
+  "ts": "2omkl1559iktq"
  },
  "row classes.rip › code constructing only when the class exists is spelled with a test": {
   "js": "2kkdoq564bnue",
@@ -7432,24 +7496,24 @@
   "ts": "2s9xtnboxsxp8"
  },
  "row errors.rip › fail unexpected in": {
-  "js": "3s1o3o6jshc9h",
-  "ts": "3s1o3o6jshc9h"
+  "js": "dx2nra9nzd0p",
+  "ts": "dx2nra9nzd0p"
  },
  "row errors.rip › fail unexpected comma": {
-  "js": "15pdoj5o4a388",
-  "ts": "15pdoj5o4a388"
+  "js": "3kwqjiqjjppez",
+  "ts": "3kwqjiqjjppez"
  },
  "row errors.rip › fail unexpected closing paren": {
-  "js": "od34biwd6cys",
-  "ts": "od34biwd6cys"
+  "js": "2r5bx3236j7ug",
+  "ts": "2r5bx3236j7ug"
  },
  "row errors.rip › fail unexpected end after colon": {
-  "js": "15pdoj5o4a388",
-  "ts": "15pdoj5o4a388"
+  "js": "3kwqjiqjjppez",
+  "ts": "3kwqjiqjjppez"
  },
  "row errors.rip › fail unexpected end after plus": {
-  "js": "e95rahbcmo3e",
-  "ts": "e95rahbcmo3e"
+  "js": "3bgel9po7twjo",
+  "ts": "3bgel9po7twjo"
  },
  "row errors.rip › test full ternary still compiles": {
   "js": "6kxzzrvpngc8",
@@ -7472,16 +7536,16 @@
   "ts": "395q6v86jbunp"
  },
  "row errors.rip › fail double comma": {
-  "js": "3ii7cleplrhph",
-  "ts": "3ii7cleplrhph"
+  "js": "3dsynvc2zi65v",
+  "ts": "3dsynvc2zi65v"
  },
  "row errors.rip › fail invalid extends": {
   "js": "371anx1qmwn7j",
   "ts": "371anx1qmwn7j"
  },
  "row errors.rip › fail modulo requires expression": {
-  "js": "e95rahbcmo3e",
-  "ts": "e95rahbcmo3e"
+  "js": "3bgel9po7twjo",
+  "ts": "3bgel9po7twjo"
  },
  "row errors.rip › fail super outside method": {
   "js": "wjgc7bijhoy",
@@ -10092,16 +10156,16 @@
   "ts": "17myxgnewbiu9"
  },
  "row objects.rip › fail a program starting with a colon rejects at the colon": {
-  "js": "121cgojy1143r",
-  "ts": "121cgojy1143r"
+  "js": "1ieh8d3txewve",
+  "ts": "1ieh8d3txewve"
  },
  "row objects.rip › fail a colon heading an indented pair rejects at the colon": {
-  "js": "121cgojy1143r",
-  "ts": "121cgojy1143r"
+  "js": "1ieh8d3txewve",
+  "ts": "1ieh8d3txewve"
  },
  "row objects.rip › fail a line starting with a colon rejects at the colon": {
-  "js": "38srpuyhme3lr",
-  "ts": "38srpuyhme3lr"
+  "js": "3s5j3vkta7a73",
+  "ts": "3s5j3vkta7a73"
  },
  "row objects.rip › test a semicolon-ended bare object statement is the program's value": {
   "js": "5hnlc0uv5eor",
@@ -10764,16 +10828,16 @@
   "ts": "yfa3o5hvhmnt"
  },
  "row operators.rip › fail a second colon after a ternary's else": {
-  "js": "1rqkv0498jxzp",
-  "ts": "1rqkv0498jxzp"
+  "js": "hqdpdeqtiq97",
+  "ts": "hqdpdeqtiq97"
  },
  "row operators.rip › fail a second colon after a ternary whose then branch is an operation": {
-  "js": "41pr6pbzsror",
-  "ts": "41pr6pbzsror"
+  "js": "35uink6j7zvcn",
+  "ts": "35uink6j7zvcn"
  },
  "row operators.rip › fail a symbol then a second colon after a ternary": {
-  "js": "30otv134e0dpq",
-  "ts": "30otv134e0dpq"
+  "js": "1bp20fzfshijk",
+  "ts": "1bp20fzfshijk"
  },
  "row operators.rip › code a call's pairs after a ternary's else colon stay pairs": {
   "js": "1wzmc9ru1zvom",
@@ -11024,8 +11088,8 @@
   "ts": "1aor0f6itj14f"
  },
  "row operators.rip › fail merge assignment is no longer an operator": {
-  "js": "1d21q5o7ljcn8",
-  "ts": "1d21q5o7ljcn8"
+  "js": "2j0llimvvv3p3",
+  "ts": "2j0llimvvv3p3"
  },
  "row operators.rip › fail 'is not' is rejected with the isnt spelling": {
   "js": "out4ncva0hvk",
@@ -11112,20 +11176,20 @@
   "ts": "out4ncva0hvk"
  },
  "row operators.rip › fail and followed by == is no compound assignment": {
-  "js": "3t061a176ktzn",
-  "ts": "3t061a176ktzn"
+  "js": "30meb70vcclv8",
+  "ts": "30meb70vcclv8"
  },
  "row operators.rip › fail new followed by a member other than target rejects": {
-  "js": "2iu4whob43qu",
-  "ts": "2iu4whob43qu"
+  "js": "1pm80dr4p0id2",
+  "ts": "1pm80dr4p0id2"
  },
  "row operators.rip › test a tight else colon after any value-ending token closes the ternary": {
   "js": "17uk8ke57rw88",
   "ts": "2axxmx06kcphz"
  },
  "row operators.rip › fail a dangling not in rejects at not": {
-  "js": "10igc22qkd3ao",
-  "ts": "10igc22qkd3ao"
+  "js": "3rf0q4t5jseb3",
+  "ts": "3rf0q4t5jseb3"
  },
  "row optional.rip › test existence check value": {
   "js": "12t4zfb1gkmtv",
@@ -11412,16 +11476,16 @@
   "ts": "19xo8xe5fsswc"
  },
  "row optional.rip › fail maybe dammit rejects a bare construction": {
-  "js": "2perr4hx8k30r",
-  "ts": "2perr4hx8k30r"
+  "js": "2osh7kpv3dboe",
+  "ts": "2osh7kpv3dboe"
  },
  "row optional.rip › fail maybe dammit rejects a member construction": {
-  "js": "2perr4hx8k30r",
-  "ts": "2perr4hx8k30r"
+  "js": "2osh7kpv3dboe",
+  "ts": "2osh7kpv3dboe"
  },
- "row optional.rip › fail maybe dammit rejects the .new construction alias": {
-  "js": "2perr4hx8k30r",
-  "ts": "2perr4hx8k30r"
+ "row optional.rip › fail maybe dammit rejects a construction with a juxta argument": {
+  "js": "2osh7kpv3dboe",
+  "ts": "2osh7kpv3dboe"
  },
  "row optional.rip › fail maybe dammit rejects a literal callee": {
   "js": "133vjllsulzag",
@@ -17176,8 +17240,8 @@
   "ts": "2kcb7dg8qgiwp"
  },
  "row types.rip › fail a generic list on a property target is no component target": {
-  "js": "1ml9nq0bfr0ms",
-  "ts": "1ml9nq0bfr0ms"
+  "js": "1bpkh1z1w6f49",
+  "ts": "1bpkh1z1w6f49"
  },
  "row types.rip › test an unspaced comparison chain into a component is no generic list": {
   "js": "16dnjr712gw94",
@@ -17248,8 +17312,8 @@
   "ts": "diwpgykgclec"
  },
  "row types.rip › fail a component prop function type with a generic default is no type": {
-  "js": "2c1h46a1aaep6",
-  "ts": "2c1h46a1aaep6"
+  "js": "3tc7kl707wytk",
+  "ts": "3tc7kl707wytk"
  },
  "row types.rip › fail class generics after a parent call reject": {
   "js": "bmdgg4qgx8vk",
@@ -17540,8 +17604,8 @@
   "ts": "diwpgykgclec"
  },
  "row types.rip › fail an assignment after an open union in a fn-type declaration rejects": {
-  "js": "3ihdlpwgp0zxr",
-  "ts": "3ihdlpwgp0zxr"
+  "js": "1ck6r4he1cih6",
+  "ts": "1ck6r4he1cih6"
  },
  "row types.rip › type a string-literal union class field": {
   "js": "1tmbl38uprexo",

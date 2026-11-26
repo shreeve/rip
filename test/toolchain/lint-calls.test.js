@@ -43,7 +43,7 @@ const FLAGGED = [
   ['an implicit call ahead of a chain', 'f a\n.then (r) -> r\n', 'f(a)\n.then((r) -> r)\n'],
   ['a single parenthesized argument', 'f (a)\n', 'f(a)\n'],
   ['a parenthesized first argument', 'f (a), b\n', 'f((a), b)\n'],
-  ['a construction', 'x = new X a\n', 'x = new X(a)\n'],
+  ['a construction', 'x = X.new a\n', 'x = X.new(a)\n'],
   ['an optional call', 'f? x\n', 'f?(x)\n'],
   ['an optional call whose argument has a logical operator', 'f? a or b\n', 'f?(a or b)\n'],
   ['a dammit call', 'x = load! id\n', 'x = load!(id)\n'],
@@ -173,7 +173,7 @@ describe('rip.lint — configuration', () => {
   });
 
   test('a rule the block leaves out is off', () => {
-    expect(lintRulesOf({})).toEqual({ calls: null, construction: null, await: null, dammit: null });
+    expect(lintRulesOf({})).toEqual({ calls: null, await: null, dammit: null });
     expect(findings('f a\n', lintRulesOf({}))).toEqual([]);
   });
 

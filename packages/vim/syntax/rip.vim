@@ -63,7 +63,7 @@ syn keyword ripKeyword      return break continue throw
 syn keyword ripKeyword      try catch finally
 syn keyword ripKeyword      yield await
 syn keyword ripKeyword      import export from default
-syn keyword ripKeyword      delete typeof instanceof new super
+syn keyword ripKeyword      delete typeof instanceof super
 syn keyword ripKeyword      debugger own extends
 syn keyword ripKeyword      in of by as
 syn keyword ripKeyword      component render slot offer accept
@@ -186,6 +186,13 @@ syn match  ripMethodCall    /\.\zs[a-zA-Z_$][a-zA-Z0-9_$]*\ze\s*(/
 " a!== is strict inequality, so ! followed by = does not count
 syn match  ripDammitCall    /\<[a-zA-Z_$][a-zA-Z0-9_$]*\ze!=\@!/
 syn match  ripDammitCall    /\<[a-zA-Z_$][a-zA-Z0-9_$]*\ze?!/
+
+" `new` is a keyword in two places only: a called `.new` (construction,
+" with an argument list, the dammit bang, or an implicit argument that is
+" no word operator) and the `new.target` meta-property. Anywhere else it
+" is a name. Defined after the call rules so these win at `new`.
+syn match  ripKeyword       /\.\zsnew\>\ze\%(\s*(\|!\|[ \t]\+\%(\%(and\|or\|not\|is\|isnt\|in\|of\|instanceof\|if\|unless\|then\|else\|for\|while\|until\|when\|by\|as\|satisfies\)\>\)\@![a-zA-Z0-9_$@"'[{]\)/
+syn match  ripKeyword       /\<new\ze\.target\>/
 
 " --- Assignments ------------------------------------------------------------
 
