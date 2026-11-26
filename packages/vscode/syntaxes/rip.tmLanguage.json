@@ -265,21 +265,10 @@
       "patterns": [{ "include": "#function_params" }]
     },
 
-    {"comment": "=== CONSTRUCTOR: new and .new() ==="},
+    {"comment": "=== CONSTRUCTOR: .new ==="},
     {
-      "comment": "`super`, `this` and a second `new` are not the name of the thing being constructed, so `new super.Box`, `new this` and `new new Hatch` decline this rule here and are matched again one word along. Without the guard the whole spine reads as a constructed name: `super` comes out looking like a function, and in `new new Hatch` the inner `new` takes the name's place while `Hatch` — the actual name — is left with no scope at all.",
-      "match": "(new)\\s+(?:(?:(class)\\s+(\\w+(?:\\.\\w*)*)?)|(?!(?:super|this|new)\\b)(\\w+(?:\\.\\w*)*))",
-      "name": "meta.class.instance.constructor.rip",
-      "captures": {
-        "1": { "name": "keyword.operator.new.rip" },
-        "2": { "name": "storage.type.class.rip" },
-        "3": { "name": "entity.name.function.rip" },
-        "4": { "name": "entity.name.function.rip" }
-      }
-    },
-    {
-      "comment": "Ruby-style .new()",
-      "match": "(\\.)(new)\\s*(?=\\()",
+      "comment": "`X.new` is construction when it is called: an argument list, the dammit bang (`X.new!`), or an implicit argument (`X.new n`). A bare `obj.new` reads the property and keeps the member rule's scope; a word operator after it (`obj.new and x`) is no argument.",
+      "match": "(\\.)(new)(?=\\s*\\(|!|[ \\t]+(?!(?:and|or|not|is|isnt|in|of|instanceof|if|unless|then|else|for|while|until|when|by|as|satisfies)\\b)[\\w$@\"'\\[{])",
       "captures": {
         "1": { "name": "punctuation.accessor.rip" },
         "2": { "name": "keyword.operator.new.rip" }
@@ -536,8 +525,8 @@
 
     {"comment": "=== KEYWORDS ==="},
     {
-      "comment": "expression operators — keyword.operator, never keyword.control: typeof/instanceof/delete/in/of match TS's taxonomy (and its colors). The wordy spellings take the scope of the symbol they lower to, so `is` reads like `===` and `and` like `&&`. The five WORD-shaped ones (`is`, `isnt`, `and`, `or`, `not`) carry keyword.operator.wordlike beside that scope: Dark+ and its descendants paint keyword.operator as plain text, which a symbol survives (it is legible as punctuation uncolored) and a word does not — `not x` in plain text is two identifiers. Those themes paint wordlike in the same keyword color as keyword.operator.expression and keyword.operator.new, so the five read like typeof/in/of/new rather than like the names beside them. for-loop in/of never reaches here (the for rule above owns them), and the constructor rule owns `new Foo` — this bare `new` keeps the same scope it carries there.",
-      "match": "\\b(?:(typeof)|(instanceof)|(delete)|(in)|(of)|(is|isnt)|(and|or|not)|(new))\\b",
+      "comment": "expression operators — keyword.operator, never keyword.control: typeof/instanceof/delete/in/of match TS's taxonomy (and its colors). The wordy spellings take the scope of the symbol they lower to, so `is` reads like `===` and `and` like `&&`. The five WORD-shaped ones (`is`, `isnt`, `and`, `or`, `not`) carry keyword.operator.wordlike beside that scope: Dark+ and its descendants paint keyword.operator as plain text, which a symbol survives (it is legible as punctuation uncolored) and a word does not — `not x` in plain text is two identifiers. Those themes paint wordlike in the same keyword color as keyword.operator.expression and keyword.operator.new, so the five read like typeof/in/of rather than like the names beside them. for-loop in/of never reaches here (the for rule above owns them).",
+      "match": "\\b(?:(typeof)|(instanceof)|(delete)|(in)|(of)|(is|isnt)|(and|or|not))\\b",
       "captures": {
         "1": { "name": "keyword.operator.expression.typeof.rip" },
         "2": { "name": "keyword.operator.expression.instanceof.rip" },
@@ -545,8 +534,7 @@
         "4": { "name": "keyword.operator.expression.in.rip" },
         "5": { "name": "keyword.operator.expression.of.rip" },
         "6": { "name": "keyword.operator.comparison.rip keyword.operator.wordlike.rip" },
-        "7": { "name": "keyword.operator.logical.rip keyword.operator.wordlike.rip" },
-        "8": { "name": "keyword.operator.new.rip" }
+        "7": { "name": "keyword.operator.logical.rip keyword.operator.wordlike.rip" }
       }
     },
     {
@@ -680,7 +668,7 @@
     { "comment": "Maybe dammit: `?!` is the awaited optional call — `f?!` is `await f?.()`, and `f?!(x)` / `f?! x` pass arguments — so it reads in the control family with the dammit bang.", "match": "\\?!", "name": "keyword.control.await.rip" },
     { "match": "\\?\\?",          "name": "keyword.operator.nullish.rip" },
     { "match": "\\?\\.(?![0-9])", "name": "keyword.operator.optional-chaining.rip" },
-    { "comment": "The dammit bang IS await — `fetchIt!` is `await fetchIt()`, `new Ticket!(7)` is `await new Ticket(7)`, `as!` is `for await … as` — so it reads in the control family, the same color the word `await` carries here and in TS. (The def-site bang is a different operator: `def announce!` suppresses the implicit return, and takes storage.modifier above.)", "match": "(?<=[a-zA-Z0-9_$)])!(?![=?])", "name": "keyword.control.await.rip" },
+    { "comment": "The dammit bang IS await — `fetchIt!` is `await fetchIt()`, `Ticket.new!(7)` is `await new Ticket(7)`, `as!` is `for await … as` — so it reads in the control family, the same color the word `await` carries here and in TS. (The def-site bang is a different operator: `def announce!` suppresses the implicit return, and takes storage.modifier above.)", "match": "(?<=[a-zA-Z0-9_$)])!(?![=?])", "name": "keyword.control.await.rip" },
 
     {"comment": "=== REGEX MATCH (before comparison) ==="},
     { "match": "=~", "name": "keyword.operator.regex-match.rip" },

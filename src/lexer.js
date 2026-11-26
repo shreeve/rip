@@ -339,18 +339,19 @@ const STATEMENTS = new Set(['break', 'continue', 'debugger']);
 // Keywords and JS reserved words with no feature behind them yet
 // (`private` has one position: the class-member modifier, scanned
 // PRIVATE at the head of a member line and reserved everywhere else;
-// `enum` rejects naming the forms that cover it).
+// `enum` and `new` reject naming the forms that cover them — `new` is
+// otherwise `new.target` and a TS constructor type, `new () => T`).
 // They must never reach the parser as IDENTIFIER: with implicit calls
-// live, `do f x` or `new Date` would otherwise compile silently to a
-// CALL of a reserved word — invalid or wrong JS. Property positions
-// (`a.new`, `new: 1`) stay legal. They scan as RESERVED
+// live, `new Date` would otherwise compile silently to a CALL of a
+// reserved word — invalid or wrong JS. Property positions (`a.new`,
+// `new: 1`) stay legal. They scan as RESERVED
 // tokens so a type-annotation run can absorb them (`(cb: () => void)`
 // — TS types legitimately spell reserved words); any RESERVED token
 // that survives rewriteTypes rejects loudly from its own position.
 const RESERVED_WORDS = new Set([
   'default', // contextual: DEFAULT inside import/export lines only
   'function', 'var', 'let', 'const', 'void', 'with', 'case',
-  'enum', 'implements', 'interface', 'package',
+  'enum', 'implements', 'interface', 'package', 'new',
   'private', 'protected', 'public', 'static', 'native',
 ]);
 
@@ -361,7 +362,6 @@ export const ALIASES = {
   and: ['&&', '&&'],
   or: ['||', '||'],
   not: ['UNARY', '!'], // word-not is UNARY; symbol ! is UNARY_MATH
-  new: ['NEW', 'new'], // dedicated token: the grammar owns the new/member split
   typeof: ['UNARY', 'typeof'],
   delete: ['UNARY', 'delete'],
   instanceof: ['RELATION', 'instanceof'],
@@ -451,7 +451,7 @@ const OPS2 = {
 // it continues through the grammar's dedicated `= TERMINATOR` /
 // `= INDENT` rules instead.
 const UNFINISHED = new Set([
-  '.', '?.', 'UNARY', 'NEW', 'DO', 'DO_IIFE', 'MATH', 'UNARY_MATH', '+', '-', '**', 'SHIFT',
+  '.', '?.', 'UNARY', 'DO', 'DO_IIFE', 'MATH', 'UNARY_MATH', '+', '-', '**', 'SHIFT',
   'RELATION', 'COMPARE', '&', '^', '|', '&&', '||', '??', 'TERNARY', 'EXTENDS',
 ]);
 
@@ -1772,11 +1772,6 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         if ((word === 'and' || word === 'or') && text[pos] === '=' && text[pos + 1] !== '=') {
           pos++;
           push('COMPOUND_ASSIGN', `${value}=`, start, pos);
-        } else if (word === 'new' && text[pos] === '.' && /^\.target\b/.test(text.slice(pos))) {
-          // `new.target` heads a meta-property member (the
-          // import.meta precedent); a bare `new.` anything else keeps
-          // its UNARY reading and rejects at the parser.
-          push('NEW_TARGET', 'new', start, pos);
         } else {
           // Type text owns the `is` predicate spelling; the source word
           // rides with rewritten tokens so collectTypeRun can preserve
@@ -1808,6 +1803,10 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
           fail('`private` is not supported on a get/set accessor — it marks methods and fields', start);
         }
         push('PRIVATE', word, start, pos);
+      } else if (word === 'new' && text[pos] === '.' && /^\.target\b/.test(text.slice(pos))) {
+        // `new.target` heads a meta-property member (the import.meta
+        // precedent); any other `new` is RESERVED.
+        push('NEW_TARGET', 'new', start, pos);
       } else if (RESERVED_WORDS.has(word)) {
         push('RESERVED', word, start, pos);
       } else {
@@ -2474,17 +2473,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   rewriteTypes(tokens, mintId, text, fail);
   // Reserved words are legal inside type runs (absorbed above); one
   // surviving in VALUE position is the original loud rejection.
-  for (const t of tokens) {
-    if (t.kind === 'RESERVED') {
-      if (t.value === 'private') {
-        fail("'private' marks a class member — it heads a member line in a class body (`private helper: ->`) and is reserved everywhere else", t.start);
-      }
-      if (t.value === 'enum') {
-        fail("'enum' is reserved — a set of values is a `type` union (`type Color = 'red' | 'green'`), and runtime values are a plain object", t.start);
-      }
-      fail(`'${t.value}' is reserved and not supported yet`, t.start);
-    }
-  }
+  rejectReservedWords(tokens, text, fail);
   // Render blocks rewrite BEFORE the implicit-structure passes: every
   // INDENT the pass sees is a real scanner block (never a synthesized
   // single-liner wrapper), and the tokens it injects (CALL_START,
@@ -2505,6 +2494,30 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   insertArrowCommas(tokens);
 
   return { tokens, trivia, source, lexDiagnostics };
+}
+
+// Every RESERVED token left after rewriteTypes rejects from its own
+// position. Shared with the schema sub-parse, whose captured function
+// bodies skip this pass in tokenize.
+export function rejectReservedWords(tokens, text, fail) {
+  for (const [i, t] of tokens.entries()) {
+    if (t.kind !== 'RESERVED') continue;
+    if (t.value === 'private') {
+      fail("'private' marks a class member — it heads a member line in a class body (`private helper: ->`) and is reserved everywhere else", t.start);
+    }
+    if (t.value === 'enum') {
+      fail("'enum' is reserved — a set of values is a `type` union (`type Color = 'red' | 'green'`), and runtime values are a plain object", t.start);
+    }
+    if (t.value === 'new') {
+      if (text[t.end] === '.') fail("'new.' heads only `new.target`", t.start, t.end);
+      // Followed by what could name a constructor, it is the prefix
+      // construction; anywhere else (`{new}`) it is a reserved word.
+      const ctor = ['IDENTIFIER', '@', 'THIS', 'SUPER', '(', 'RESERVED'].includes(tokens[i + 1]?.kind);
+      fail(ctor ? "construction is spelled `X.new(…)` — `new X` is not Rip"
+        : "'new' is reserved — construction is spelled `X.new(…)`; a method named new is the member `new: ->`, called as `o['new']()`", t.start, t.end);
+    }
+    fail(`'${t.value}' is reserved and not supported yet`, t.start);
+  }
 }
 
 // Postfix-conditional tagging:

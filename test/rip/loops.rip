@@ -277,12 +277,12 @@ for (let x of [1]) {
 
 # Basic for-as
 test "for-as array", "sum = 0; for x as [1, 2, 3]\n  sum += x\nsum", 6
-test "for-as set", "sum = 0; s = new Set([10, 20, 30]); for x as s\n  sum += x\nsum", 60
+test "for-as set", "sum = 0; s = Set.new([10, 20, 30]); for x as s\n  sum += x\nsum", 60
 
 # For-as with destructuring (used in packages for Map.entries())
 
 test "for-as destructure", '''
-  m = new Map()
+  m = Map.new()
   m.set("a", 1)
   m.set("b", 2)
   result = []
@@ -310,7 +310,7 @@ test "for-as closure captures per iteration", '''
   ''', [10, 20, 30]
 
 test "for-as destructured closure captures per iteration", '''
-  bundles = new Map()
+  bundles = Map.new()
   bundles.set 'ui',  ['a']
   bundles.set 'app', ['b']
   handlers = {}
@@ -911,7 +911,7 @@ test "closure assigns a for-own key", '''
 test "closure assigns a for-as variable", '''
   run = ->
     out = []
-    for x as new Set([3, 17])
+    for x as Set.new([3, 17])
       bump = -> x = x + 100
       out.push bump(), x
     out
@@ -1201,13 +1201,13 @@ test "collecting loop tail match switch with no default", "r = for s in ['ab', '
 # A tail try with a jump collects per branch: the body's tail, each
 # handler's tail, and undefined for a swallowed throw.
 test "collecting loop tail try with a continue in its body", "r = for x in [1, 2, 3]\n  try\n    continue if x is 2\n    x\n  catch e then 0\nr", [1, 3]
-test "collecting loop tail try collects its handler's tail", "r = for x in [1, 2, 3, 4]\n  try\n    continue if x is 2\n    throw new Error('t') if x is 3\n    x\n  catch e then e.message\nr", [1, 't', 4]
-test "collecting loop tail handler-less try collects undefined on a throw", "r = for x in [1, 2, 3]\n  try\n    break if x is 3\n    throw new Error('t') if x is 2\n    x\nr", [1, undefined]
+test "collecting loop tail try collects its handler's tail", "r = for x in [1, 2, 3, 4]\n  try\n    continue if x is 2\n    throw Error.new('t') if x is 3\n    x\n  catch e then e.message\nr", [1, 't', 4]
+test "collecting loop tail handler-less try collects undefined on a throw", "r = for x in [1, 2, 3]\n  try\n    break if x is 3\n    throw Error.new('t') if x is 2\n    x\nr", [1, undefined]
 test "collecting loop tail try with a pattern catch", "r = for x in [1, 2, 3]\n  try\n    continue if x is 2\n    throw {code: x} if x is 3\n    x\n  catch {code}\n    code * 10\nr", [1, 30]
 test "function-tail loop tail try keeps its return", "f = ->\n  for x in [1, 2, 3]\n    try\n      return 'early' if x is 2\n      continue if x is 1\n      x\nf()", 'early'
 # A finally runs after the branch's value is in hand: a throw or jump
 # there takes the iteration's value with it.
-test "collecting loop tail try whose finally throws collects the outer handler alone", "boom = (x) -> throw new Error('b')\nr = for x in [1, 2]\n  try\n    try\n      continue if x is 5\n      x\n    finally\n      boom(x) if x is 2\n  catch e\n    'caught'\nr", [1, 'caught']
+test "collecting loop tail try whose finally throws collects the outer handler alone", "boom = (x) -> throw Error.new('b')\nr = for x in [1, 2]\n  try\n    try\n      continue if x is 5\n      x\n    finally\n      boom(x) if x is 2\n  catch e\n    'caught'\nr", [1, 'caught']
 test "collecting loop tail try whose finally continues drops the value", "r = for x in [1, 2, 3]\n  try\n    continue if x is 9\n    x\n  finally\n    continue if x is 2\nr", [1, 3]
 test "collecting loop tail try whose finally breaks drops the value", "r = for x in [1, 2, 3]\n  try\n    continue if x is 9\n    x\n  finally\n    break if x is 2\nr", [1]
 test "a destructured loop variable may wrap across lines", "r = []\nfor [a,\n  b] in [[1, 2]]\n  r.push a + b\nr", [3]

@@ -660,7 +660,7 @@ code "pick list continued on an indented line", '''
 
 code "new on a this-property", '''
   class A
-    make: -> new @Inner
+    make: -> @Inner.new()
   ''', '''
   class A {
     make() {
@@ -671,7 +671,7 @@ code "new on a this-property", '''
 
 code "new on this", '''
   class A
-    clone: -> new @
+    clone: -> @.new()
   ''', '''
   class A {
     clone() {
@@ -682,7 +682,7 @@ code "new on this", '''
 
 code "new on a super member", '''
   class A extends B
-    make: -> new super.Inner
+    make: -> super.Inner.new()
   ''', '''
   class A extends B {
     make() {

@@ -254,3 +254,34 @@ describe('class-member visibility lockstep (editor grammars ⇄ compiler)', () =
     expect(hljs).toMatch(/'schema', 'private'/);
   });
 });
+
+describe('construction keyword lockstep (editor grammars ⇄ compiler)', () => {
+  const constructionRule = grammar.patterns.find((p) =>
+    typeof p.match === 'string' && p.match.startsWith('(\\.)(new)'));
+  const re = new RegExp(constructionRule.match);
+  const hljs = readFileSync(
+    path.resolve(import.meta.dir, '..', '..', '..', 'highlight', 'hljs-rip.js'), 'utf8');
+
+  test('TextMate scopes a called `.new` and never a bare property read', () => {
+    expect(constructionRule.captures['2'].name).toBe('keyword.operator.new.rip');
+    for (const called of ['X.new(1)', 'X.new!', 'X.new!(1)', 'X.new n', 'X.new 1, 2']) expect(called).toMatch(re);
+    for (const read of ['obj.new', 'obj.new and x', 'obj.new = 1', 'obj.new.x']) expect(read).not.toMatch(re);
+    expect(compile('x = X.new n\ny = obj.new\n', { runtimeDelivery: 'none' }).code).toBe('let x = new X(n);\nlet y = obj.new;');
+  });
+
+  test('a bare `new` is no operator keyword, because the compiler rejects it', () => {
+    const operatorRule = grammar.patterns.find((p) =>
+      typeof p.match === 'string' && p.match.includes('(is|isnt)'));
+    expect(operatorRule.match).not.toContain('new');
+    expect(() => compile('x = new X(1)\n')).toThrow('construction is spelled `X.new(…)`');
+  });
+
+  test('Vim and highlight.js keep `new` for `.new` and `new.target` alone', () => {
+    expect(vimSyntax).toMatch(/syn keyword ripKeyword\s+delete typeof instanceof super\n/);
+    expect(vimSyntax).toContain('syn match  ripKeyword       /\\.\\zsnew\\>');
+    expect(vimSyntax).toContain('syn match  ripKeyword       /\\<new\\ze\\.target\\>/');
+    expect(hljs).toMatch(/'delete', 'typeof', 'instanceof', 'super',/);
+    expect(hljs).toContain('const CONSTRUCTION = {');
+    expect(hljs).toContain('const NEW_TARGET = {');
+  });
+});

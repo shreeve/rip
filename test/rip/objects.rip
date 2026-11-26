@@ -285,7 +285,7 @@ test 'a computed key on the next line continues the object', '''
 test 'a static void-method key after a comma continues the class body', '''
   class A
     x: (-> 1), @b!: (-> 2)
-  [(new A).x(), A.b()]
+  [(A.new()).x(), A.b()]
 ''', [1, undefined]
 
 fail 'a guard before a private member line binds the pair value', 'class A\n  x: (-> 1) if c\n  private y: -> 2', 'a class field takes'

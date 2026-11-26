@@ -249,7 +249,7 @@ function subjectOf(flat) {
 
 // Rip's own structure words: a hover here is a cover landing answering
 // about a NEIGHBOR — real, chatty, and its own bucket.
-const KEYWORDS = new Set(('if unless else then switch when for while until in of and or not is isnt new return def render '
+const KEYWORDS = new Set(('if unless else then switch when for while until in of and or not is isnt return def render '
   + 'component extends class enum type import export from try catch finally throw do break continue slot').split(' '))
 
 // The text judge every surface shares: what an answer's TEXT may never
@@ -392,13 +392,15 @@ async function sweep(wsRoot, files) {
         || (b.includes('-') && b.split('-').includes(a))
         // `import.meta`'s member answers the lib's own ImportMeta,
         // and `.new` answers the constructor it invokes — both the
-        // platform's own conventions. The constructor arrives in three
-        // spellings and all three are the same right answer: a bare
+        // platform's own conventions. The constructor arrives in four
+        // spellings and all four are the same right answer: a bare
         // construct signature, a GENERIC one carrying its type-parameter
         // list between the keyword and the parameters, and tsgo's
-        // `constructor X(): X` head for a class.
+        // `constructor X(): X` head for a class. A constructor VALUE
+        // typed by its class is the fourth (`this.new()` answers
+        // `this: typeof Animal`, the class `this` names).
         || (a === 'meta' && b === 'ImportMeta')
-        || (a === 'new' && (/: new\s*[<(]/.test(flat) || flat.startsWith('constructor ')))
+        || (a === 'new' && (/: new\s*[<(]/.test(flat) || flat.startsWith('constructor ') || /: typeof [A-Za-z_$][\w$.]*$/.test(flat)))
         // `::` lexes as the `prototype` property it means, and hover
         // there answering `.prototype` is the spelling's own truth.
         || (b === 'prototype' && text.slice(Math.max(0, p.off - 2), p.off + 2).includes('::'))

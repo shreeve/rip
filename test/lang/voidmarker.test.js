@@ -78,7 +78,7 @@ describe('void definitions: the function returns undefined', () => {
 
 describe('void method keys', () => {
   test('class body `fn!: ->` voids the method', async () => {
-    const src = 'class A\n  fn!: -> 42\nexport default (new A).fn()';
+    const src = 'class A\n  fn!: -> 42\nexport default (A.new()).fn()';
     const code = compile(src);
     expect(code).toContain('fn() {\n    42;\n    return;\n  }');
     expect(await loadDefault(code)).toBeUndefined();
@@ -92,7 +92,7 @@ describe('void method keys', () => {
   });
 
   test('bound `fn!: =>` in a class voids with the bind (constructor required)', async () => {
-    const src = 'class A\n  constructor: ->\n    @x = 2\n  fn!: => @x + 1\nexport default (new A).fn()';
+    const src = 'class A\n  constructor: ->\n    @x = 2\n  fn!: => @x + 1\nexport default (A.new()).fn()';
     expect(await loadDefault(compile(src))).toBeUndefined();
   });
 
@@ -126,7 +126,7 @@ describe('void method keys', () => {
       'obj = {',
       '  go!: (v) -> ran.push(v * 10)',
       '}',
-      'r1 = (new A).fn(7)',
+      'r1 = (A.new()).fn(7)',
       'r2 = obj.go(3)',
       'export default {ran, r1, r2}',
     ].join('\n');

@@ -401,7 +401,7 @@ fail 'a string is not an assignment target outside classes', '"foo" = "bar"', 'l
 test 'typed string-named field', '''
   class S
     "k": string = "v"
-  new S()["k"]
+  S.new()["k"]
   ''', 'v'
 
 test 'static string-named field', '''
@@ -422,7 +422,7 @@ test 'string-named member write via @ in a method', '''
   class Widget
     "data-src" = "default"
     bump: -> @"data-src" = "changed"
-  w = new Widget()
+  w = Widget.new()
   w.bump()
   w["data-src"]
   ''', 'changed'
@@ -438,7 +438,7 @@ test 'quoted and bare spellings of a plain member are interchangeable', '''
   class C
     count = 5
     both: -> [@count, @"count"]
-  new C().both()
+  C.new().both()
   ''', [5, 5]
 
 test 'static methods write both spellings via @', '''
@@ -456,7 +456,7 @@ test 'static methods write both spellings via @', '''
 test 'prefix and suffix construction are the same call', '''
   class P
     constructor: (@v) ->
-  a = new P(1)
+  a = P.new(1)
   b = P.new(2)
   [a.v, b.v, a.constructor is b.constructor]
   ''', [1, 2, true]
@@ -555,7 +555,7 @@ test 'a call of a function named optindex is never an optional link', '''
     calls += 1
     held.k = K
     held
-  made = new (optindex(1, 2).k)()
+  made = (optindex(1, 2).k).new()
   optindex(null, 2).c = 1
   [made.v, calls, held.c]
   ''', [7, 2, 1]

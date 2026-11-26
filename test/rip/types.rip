@@ -1259,7 +1259,7 @@ test 'a bare typed field before an else arrow is still a field', '''
     class A
       x: number
   else -> 1
-  Object.keys(new r())
+  Object.keys(r.new())
 ''', ["x"]
 
 # ==============================================================================
@@ -1488,7 +1488,7 @@ test "a class that extends keeps symbols in its body", '''
   class B
   class A extends B
     m: -> :ok
-  new A().m().description
+  A.new().m().description
 ''', 'ok'
 test "a block at an interface body's depth after the interface is code", '''
   interface P

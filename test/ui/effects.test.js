@@ -129,7 +129,7 @@ describe('eval checks: paired runs against each side\'s own runtime', () => {
  '~>',
  '  v = count',
  '  signal = getEffectSignal()',
- '  await new Promise (r) -> setTimeout r, 10',
+ '  await Promise.new (r) -> setTimeout r, 10',
  '  log.push [v, signal.aborted]',
  'count = 1',
     ].join('\n');

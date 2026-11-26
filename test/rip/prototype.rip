@@ -15,7 +15,7 @@ test "method on a class", '''
   class A
     constructor: -> @v = 21
   A::double = -> @v * 2
-  new A().double()
+  A.new().double()
 ''', 42
 
 test "extend a builtin", '''
@@ -29,7 +29,7 @@ test "prototype read through an instance", '''
   class Beast
     constructor: (name) -> @name = name
   Beast::describe = -> "a beast named #{@name}"
-  new Beast("rex").describe()
+  Beast.new("rex").describe()
 ''', "a beast named rex"
 
 # ==============================================================================

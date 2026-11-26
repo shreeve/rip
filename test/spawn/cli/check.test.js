@@ -744,7 +744,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     "str = 'abc'",
     'for ch, i in str',
     '  console.log ch, i',
-    'u8 = new Uint8Array(2)',
+    'u8 = Uint8Array.new(2)',
     'for b, i in u8',
     '  console.log b, i',
     'al: ArrayLike<number> = [1]',
@@ -883,7 +883,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
         '',
         '  render null',
         '',
-        'panel = new Panel({})',
+        'panel = Panel.new({})',
         'total: number = panel.summary.value',
         'console.log total',
       ].join('\n') + '\n',
@@ -933,7 +933,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
         '    bind = => @bound = 2',   // a BOUND arrow: its `this` IS the instance
         '    bind()',
         '',
-        'b = new Box()',
+        'b = Box.new()',
         'console.log b.size, b.label, b.tag, b.flag, b.bound',
       ].join('\n') + '\n',
       'live.rip': "n: number = 'oops'\nconsole.log n\n",
@@ -966,7 +966,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
         '    later',
         '    outer',
         '',
-        'c = new Crate()',
+        'c = Crate.new()',
         'c.wide = null',                // legal: the annotation rode onto the declaration
         'c.plain = null',               // rejects: inferred from the assignment alone
         'wrongNested = c.nested',
@@ -1878,12 +1878,12 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       const target = path.join('packages', 'app');
 
       // The braced form, as a control: this one already worked.
-      fs.writeFileSync(app, "import { Session } from '@n/lib'\ns = new Session()\nconsole.log s\n");
+      fs.writeFileSync(app, "import { Session } from '@n/lib'\ns = Session.new()\nconsole.log s\n");
       expect((await check(dir, [target])).stdout).toContain('imported from `@n/lib`');
 
       // The same leak reached through an alias, in each legal spelling.
       for (const line of ["import * as lib from '@n/lib'", "import *as lib from '@n/lib'"]) {
-        fs.writeFileSync(app, `${line}\ns = new lib.Session()\nconsole.log s\n`);
+        fs.writeFileSync(app, `${line}\ns = lib.Session.new()\nconsole.log s\n`);
         const out = (await check(dir, [target])).stdout;
         expect(out).toContain('imported from `@n/lib`');
         expect(out).toContain('`Session`');
@@ -1941,7 +1941,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
     const twoEntry = workspace({
       'package.json': JSON.stringify({ name: '@q5/two', exports: { '.': './index.rip', './s': './s.rip' } }),
       's.rip': 'export class Session\n  run: (x) -> x\n',
-      'index.rip': "import { Session } from './s.rip'\nexport class Client\n  session: Session = new Session()\n",
+      'index.rip': "import { Session } from './s.rip'\nexport class Client\n  session: Session = Session.new()\n",
     });
     try {
       const a = (await check(typeOnly, ['--public'])).stdout;
@@ -3286,7 +3286,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
         'export class Session',
         '  run: (x) -> x',
         '',
-        'export api = { session: new Session() }',
+        'export api = { session: Session.new() }',
       ].join('\n') + '\n');
       fs.symlinkSync(path.join('..', '..', 'packages', 'lib'), path.join(dir, 'node_modules', '@d', 'lib'));
       fs.writeFileSync(path.join(dir, 'packages', 'app', 'package.json'),
@@ -4021,7 +4021,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
   test('a forward-referenced class and a forward-rendered component both check clean — no minted symbol escapes the probe', async () => {
     const dir = workspace({
       'fwd.rip': [
-        'make = -> new Box()',    // reads Box above its declaration — forces the hoist split
+        'make = -> Box.new()',    // reads Box above its declaration — forces the hoist split
         'Box = class',
         "  greet: -> 'hi'",
         'console.log make().greet()',
@@ -4070,7 +4070,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
   test('under rip.strict the unpinned forward reference is an ordinary missing annotation — reordering or annotating answers it', async () => {
     const dir = workspace({
       'bare.rip': [
-        'make = -> (new Box())',
+        'make = -> (Box.new())',
         'Box = class',
         "  greet: -> 'hi'",
         'console.log make().greet()',
@@ -4078,13 +4078,13 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
       'first.rip': [
         'class Box',                       // declared before its uses — never rounds
         "  greet: -> 'hi'",
-        'make = -> (new Box())',
+        'make = -> (Box.new())',
         'console.log make().greet()',
       ].join('\n') + '\n',
       'said.rip': [
         'interface BoxT',                  // the author states the shape
         '  greet(): string',
-        'make = -> (new Box())',
+        'make = -> (Box.new())',
         'Box: { new(): BoxT } = class',
         "  greet: -> 'hi'",
         'console.log make().greet()',
@@ -4104,7 +4104,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
   test('the refused answer leaves the binding unpinned — a wrong call through it is the floor\'s accepted cost', async () => {
     const dir = workspace({
       'unpinned.rip': [
-        'make = -> new Box()',
+        'make = -> Box.new()',
         'Box = class',
         "  greet: -> 'hi'",
         'console.log make().greet(1, 2, 3)',   // arity nobody declared — unpinned, so unchecked
@@ -4151,7 +4151,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
         '      = @text',
       ].join('\n') + '\n',
       'generic.rip': [
-        "mk = -> new Box({ item: 'hi' })",
+        "mk = -> Box.new({ item: 'hi' })",
         'Box<T> = component',
         '  @item: T',
         '  render',
@@ -4226,9 +4226,9 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
         '  name: string',
         '  read: -> @name',
         '',
-        "crate = new Crate('ada', 2, 'blue')",
-        "console.log(new Toggle().read(), new Toggle('off').read())",
-        "console.log(crate.owner, crate.describe(), new Badge('b').who(), new Tag('t').read())",
+        "crate = Crate.new('ada', 2, 'blue')",
+        "console.log(Toggle.new().read(), Toggle.new('off').read())",
+        "console.log(crate.owner, crate.describe(), Badge.new('b').who(), Tag.new('t').read())",
         '',
       ].join('\n'),
       'live.rip': [
@@ -4238,7 +4238,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
         'class Vault',
         '  constructor: (@holder: string) ->',
         '',
-        'wrongPromoted = new Vault(7)',
+        'wrongPromoted = Vault.new(7)',
         'console.log wrongPromoted',
         '',
       ].join('\n'),
@@ -5062,7 +5062,7 @@ describeExtended.concurrent('rip check: type diagnostics over the real server', 
   test('bun:* builtin modules are typed from the checkout\'s host types in every mode', async () => {
     const dir = freshProject({ withTypes: false });
     try {
-      fs.writeFileSync(path.join(dir, 'app.rip'), "import { Database } from 'bun:sqlite'\ndb: number = new Database(':memory:')\nconsole.log db\n");
+      fs.writeFileSync(path.join(dir, 'app.rip'), "import { Database } from 'bun:sqlite'\ndb: number = Database.new(':memory:')\nconsole.log db\n");
       expect(JSON.parse((await check(dir, ['--json'])).stdout).map((d) => d.code)).toEqual([2322]);
       fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'fresh', rip: { strict: true } }));
       expect(JSON.parse((await check(dir, ['--json'])).stdout).map((d) => d.code)).toEqual([2322]);

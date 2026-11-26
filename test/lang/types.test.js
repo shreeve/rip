@@ -874,9 +874,9 @@ describe('composition: erased declarations leave running programs intact (eval)'
   });
 
   test('typed class fields initialize and methods read them', () => {
-    expect(evalOf('class A\n  x: number = 5\n  m: -> @x + 1\na = new A()\nr = a.m()')).toBe(6);
+    expect(evalOf('class A\n  x: number = 5\n  m: -> @x + 1\na = A.new()\nr = a.m()')).toBe(6);
     expect(evalOf('class B\n  @k: number = 7\nr = B.k')).toBe(7);
-    expect(evalOf('class C\n  x: number\nc = new C()\nr = c.x == undefined')).toBe(true);
+    expect(evalOf('class C\n  x: number\nc = C.new()\nr = c.x == undefined')).toBe(true);
   });
 });
 
@@ -1439,7 +1439,7 @@ describe('sibling runs of bare typed forwards claim all-or-nothing', () => {
     // Without the run claim, a sibling guard would block BOTH lines
     // and the object reading would choke on the generic's comma — an
     // unpositioned parse error for a legal-looking pair of forwards.
-    expect(compile('a: Map<string, number>\nb: Set<number>\na = new Map\nb = new Set').code)
+    expect(compile('a: Map<string, number>\nb: Set<number>\na = Map.new()\nb = Set.new()').code)
       .toBe('let a = new Map();\nlet b = new Set();');
     expect(compile('a: number | string\nb: string\na = 1\nb = "x"').code)
       .toBe('let a = 1;\nlet b = "x";');

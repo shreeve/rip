@@ -15,7 +15,7 @@ t3 = typeof obj.a
 
 class Tool
   kind: -> "tool"
-tool = new Tool
+tool = Tool.new()
 i1 = tool instanceof Tool
 i2 = {} instanceof Tool
 

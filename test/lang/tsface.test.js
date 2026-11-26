@@ -592,6 +592,11 @@ describe('TS-face emission pins', () => {
     expect(ts('x = y as A\nfoo()\n').code).toBe('let x = (y as A);\nfoo();' + MARKER);
   });
 
+  test('a cast constructor under `.new` prints its own group, once', () => {
+    expect(ts('x = (k as any).new()\n').code).toBe('let x = new (k as any)();' + MARKER);
+    expect(ts('x = (k as any).new(1)\n').code).toBe('let x = new (k as any)(1);' + MARKER);
+  });
+
   test('a block body inside explicit brackets claims its annotations like its unbracketed twin', () => {
     const body = '  fetch: ->\n    type T = number\n    sent: T = 1\n    r: number\n    r = 2\n    try\n      g()\n    catch e: any\n      e\n    sent + r\n';
     const want = 'let o = {fetch() {\n  type T = number;\n  let sent: T = 1;\n  let r: number = 2;\n' +
@@ -631,7 +636,7 @@ describe('TS-face emission pins', () => {
     // unannotated twin never draws.
     // The bare `r` read before the write keeps `r` legitimately
     // hoisted (a straight-line forward would re-home inline).
-    expect(ts('r: Map<string, number>\nr\nr = new Map()\n').code)
+    expect(ts('r: Map<string, number>\nr\nr = Map.new()\n').code)
       .toBe('let r!: Map<string, number>;\n\nr;\nr = new Map();' + MARKER);
   });
 
@@ -662,7 +667,7 @@ describe('TS-face emission pins', () => {
     expect(faced.code).toBe('let a!: number, b!: string;\n\na;\nb;\na = 1;\nb = "s";' + MARKER);
     expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
     // Generic members carry their full type text.
-    expect(ts('a: Map<string, number>\nb: Set<number>\na\nb\na = new Map()\nb = new Set()\n').code)
+    expect(ts('a: Map<string, number>\nb: Set<number>\na\nb\na = Map.new()\nb = Set.new()\n').code)
       .toBe('let a!: Map<string, number>, b!: Set<number>;\n\na;\nb;\na = new Map();\nb = new Set();' + MARKER);
   });
 
@@ -1233,7 +1238,7 @@ describe('TS-face emission pins', () => {
     // visibility side-band role, emits TS-only before `static`, and
     // binds to its own member — `b` is private, its neighbors in the
     // same method object are not.
-    const src = 'class A\n  a: -> 1\n  private b: (x: number) -> 2\n  c: -> 3\n  private d!: -> @n = 1\n  private @make: -> new A()\n  private def e(x: number): number\n    x\n  private f: number = 0\n  private g = 1\n  private h: string\n  private @i = 2\n';
+    const src = 'class A\n  a: -> 1\n  private b: (x: number) -> 2\n  c: -> 3\n  private d!: -> @n = 1\n  private @make: -> A.new()\n  private def e(x: number): number\n    x\n  private f: number = 0\n  private g = 1\n  private h: string\n  private @i = 2\n';
     const face = ts(src);
     expect(face.code).toBe('class A {\n  n;\n  a() {\n    return 1;\n  }\n  private b(x: number) {\n    return 2;\n  }\n  c() {\n    return 3;\n  }\n  private d(): void {\n    this.n = 1;\n    return;\n  }\n  private static make() {\n    return new A();\n  }\n  private e(x: number): number {\n    return x;\n  }\n  private f: number = 0;\n  private g = 1;\n  private h: string;\n  private static i = 2;\n}' + MARKER);
     expect(stripFace(face.code, face.tsRegions)).toBe(js(src).code);
@@ -1329,9 +1334,9 @@ describe('TS-face emission pins', () => {
 
   test('a call of a function named cast or satisfies is a call on the face, never the operator', () => {
     for (const head of ['cast', 'satisfies']) {
-      const called = ts(`r = new (${head}(a, b))(c)\n`);
+      const called = ts(`r = (${head}(a, b)).new(c)\n`);
       expect(called.code).toBe(`let r = new (${head}(a, b))(c);` + MARKER);
-      expect(ts(`r = new (${head}(a, b))\n`).code).toBe(`let r = new (${head}(a, b))();` + MARKER);
+      expect(ts(`r = (${head}(a, b)).new()\n`).code).toBe(`let r = new (${head}(a, b))();` + MARKER);
       expect(ts(`r = f ${head}(1, 2)\n`).code).toBe(`let r = f(${head}(1, 2));` + MARKER);
     }
   });
@@ -1543,13 +1548,13 @@ describe('TS directive comments', () => {
 
   test('class members (the review-round HIGH): a directive above a field row places at the member, with class padding', () => {
     pin(
- 'class A\n  # @ts-expect-error\n  x: number = "s"\na = new A()\n',
+ 'class A\n  # @ts-expect-error\n  x: number = "s"\na = A.new()\n',
  'class A {\n  // @ts-expect-error\n  x: number = "s";\n}\nlet a = new A();',
     );
     // The typed bodiless field is a member row too — never the
     // enclosing scope's hoist line.
     pin(
- 'class B\n  # @ts-expect-error\n  y: Missing\nb = new B()\n',
+ 'class B\n  # @ts-expect-error\n  y: Missing\nb = B.new()\n',
  'class B {\n  // @ts-expect-error\n  y: Missing;\n}\nlet b = new B();',
     );
   });
@@ -1569,7 +1574,7 @@ describe('TS directive comments', () => {
     // governs; an inner-line error stays visible as TS2578,'s
     // behavior, never a silent drop).
     expect(ts('# @ts-expect-error\nf = (x) ->\n  y = x\n  y\nf(1)\n').code).toContain('// @ts-expect-error');
-    expect(ts('class C\n  constructor: ->\n    @v = 1\n  # @ts-expect-error\n  m: (v) ->\n    v\nc = new C()\n').code)
+    expect(ts('class C\n  constructor: ->\n    @v = 1\n  # @ts-expect-error\n  m: (v) ->\n    v\nc = C.new()\n').code)
       .toContain('// @ts-expect-error');
   });
 
@@ -1989,7 +1994,7 @@ describe('the component face (M12-E): TS-only member declares, the props ctor, t
     // only same-function reads. The component's own published surface
     // answers instead: the SAME members the shipped `.d.ts` declares, so
     // a consumer and the declaring module cannot read one differently.
-    const src = 'mk = -> new Chip()\nChip = component\n  @label := "c"\n';
+    const src = 'mk = -> Chip.new()\nChip = component\n  @label := "c"\n';
     const faced = ts(src);
     expect(faced.code).toContain(
       'let Chip!: { new (props?: { label?: string | { value: string; read(): string; touch?(): void }; __bind_label__?: { value: string; read(): string; touch?(): void }; children?: __RipChildren }): Chip; mount(target?: globalThis.Node | string): Chip; };',

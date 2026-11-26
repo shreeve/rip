@@ -8,20 +8,20 @@ import { test, code, fail, type } from '../support/testing.js'
 # ==============================================================================
 
 # Class with methods
-test "class methods", "class Math\n  add: (a, b) -> a + b\n  multiply: (a, b) -> a * b\nm = new Math(); m.add(2, 3)", 5
+test "class methods", "class Math\n  add: (a, b) -> a + b\n  multiply: (a, b) -> a * b\nm = Math.new(); m.add(2, 3)", 5
 
 # Static methods
 test "static method", "class Utils\n  @square: (x) -> x * x\nUtils.square(5)", 25
 
 # Class with constructor logic
-test "constructor logic", "class Counter\n  constructor: ->\n    @count = 0\n  increment: -> @count += 1\nc = new Counter(); c.increment(); c.count", 1
+test "constructor logic", "class Counter\n  constructor: ->\n    @count = 0\n  increment: -> @count += 1\nc = Counter.new(); c.increment(); c.count", 1
 
 # ==============================================================================
 # Super Calls: "super"
 # ==============================================================================
 
 # Super method call
-test "super method call", "class Animal\n  speak: -> 'sound'\nclass Dog extends Animal\n  speak: -> super.speak() + '!'\nd = new Dog(); d.speak()", "sound!"
+test "super method call", "class Animal\n  speak: -> 'sound'\nclass Dog extends Animal\n  speak: -> super.speak() + '!'\nd = Dog.new(); d.speak()", "sound!"
 
 # Super with spread arguments (Rip ES6 prefix syntax)
 
@@ -32,7 +32,7 @@ test "super with spread args", '''
   class Child extends Parent
     method: -> super(...arguments)
 
-  c = new Child()
+  c = Child.new()
   c.method(1, 2, 3)
 ''', '1-2-3'
 
@@ -45,20 +45,20 @@ test "super with spread args", '''
 test 'class expression', '''
   Animal = class
     speak: -> 'sound'
-  new Animal().speak()
+  Animal.new().speak()
   ''', 'sound'
 
 # Empty class
 
 test 'empty class', '''
   class Empty
-  new Empty().constructor.name
+  Empty.new().constructor.name
   ''', 'Empty'
 
 # One-line class body — `then` is the body introducer, not loose `and`
 test 'class then-body', '''
   class E extends Error then noop
-  (new E()) instanceof Error
+  (E.new()) instanceof Error
 ''', true
 
 # Method chaining
@@ -67,7 +67,7 @@ test 'method chaining', '''
   class Builder
     setValue: (v) -> @value = v; this
     getValue: -> @value
-  new Builder().setValue(42).getValue()
+  Builder.new().setValue(42).getValue()
   ''', 42
 
 # Bound methods
@@ -76,7 +76,7 @@ test 'bound method', '''
   class Counter
     constructor: -> @count = 0
     increment: => @count++
-  c = new Counter()
+  c = Counter.new()
   fn = c.increment
   fn()
   c.count
@@ -86,7 +86,7 @@ test 'bound method', '''
 
 test 'instanceof check', '''
   class Animal
-  a = new Animal()
+  a = Animal.new()
   a instanceof Animal
   ''', true
 
@@ -97,7 +97,7 @@ test 'override method', '''
     speak: -> 'sound'
   class Dog extends Animal
     speak: -> 'bark'
-  new Dog().speak()
+  Dog.new().speak()
   ''', 'bark'
 
 # Constructor explicit return
@@ -106,7 +106,7 @@ test 'constructor explicit return', '''
   class A
     constructor: ->
       return {custom: 'object'}
-  new A().custom
+  A.new().custom
   ''', 'object'
 
 # Async method
@@ -115,7 +115,7 @@ test 'async method', '''
   class Async
     getData: -> await Promise.resolve(42)
   do ->
-    await new Async().getData()
+    await Async.new().getData()
   ''', 42
 
 # Four-level inheritance
@@ -126,7 +126,7 @@ test 'four-level inheritance', '''
   class B extends A
   class C extends B
   class D extends C
-  new D().val()
+  D.new().val()
   ''', 'a'
 
 # ==============================================================================
@@ -137,6 +137,36 @@ test 'four-level inheritance', '''
 code "ruby-style new", "Counter.new()", "new Counter();"
 code "ruby-style new args", "Counter.new(1, 2)", "new Counter(1, 2);"
 code "ruby-style new expression", "getClass().new(x)", "new (getClass())(x);"
+# A pure spine (names, members, indexes) is its own constructor and
+# stands bare; an index that reads through a call (`.at(-n)`,
+# `.slice()`, a regex match) is a call in the output and seals, or
+# `new` would construct the method.
+code "a member-spine target stands bare", "a.B.new(c)", "new a.B(c);"
+code "an index-spine target stands bare", "x[k].new(y)", "new x[k](y);"
+code "a this-member target stands bare", "-> @Foo.new(x)", "(function() { return new this.Foo(x); });"
+code "a negative-index target seals", "x[-1].new()", "new (x.at(-1))();"
+code "a negative index deeper in the spine seals", "a[-1].b.new(2)", "new (a.at(-1).b)(2);"
+code "a range-index target seals", "a[1..2].new()", "new (a.slice(1, 3))();"
+
+# `new X` is not Rip: construction has one spelling, `X.new(…)`, and a
+# prefix `new` rejects at the keyword. `new` stays a property name, an
+# object key, the head of `new.target`, and the word of a TS constructor
+# type.
+fail "prefix construction rejects at the keyword", "x = new X(1)", "1:5: construction is spelled `X.new(…)` — `new X` is not Rip"
+fail "a bare prefix construction rejects", "x = new X", "1:5: construction is spelled `X.new(…)`"
+fail "a prefix construction over a member rejects", "x = new a.B(c)", "1:5: construction is spelled `X.new(…)`"
+fail "a prefix construction as an implicit argument rejects", "f new X", "1:3: construction is spelled `X.new(…)`"
+fail "a prefix construction dammit rejects", "x = new X!", "1:5: construction is spelled `X.new(…)`"
+fail "nested prefix construction rejects at the first new", "x = new new X", "1:5: construction is spelled `X.new(…)`"
+fail "a prefix construction in a schema function body rejects", "U = schema\n  x! -> throw new Error('m')", "2:15: schema: construction is spelled `X.new(…)`"
+fail "new is reserved as a shorthand name", "c = {new}", "1:6: 'new' is reserved — construction is spelled `X.new(…)`"
+fail "a trailing new is reserved", "x = new", "1:5: 'new' is reserved — construction is spelled `X.new(…)`"
+test "new is a property name", "o = {new: 1}\no.new", 1
+test "new is a bare object key", "o = new: 2\no.new", 2
+test "new is a this-property", "o = {new: 3, get: -> @new}\no.get()", 3
+test "a method named new is defined and read as a property", "class A\n  new: -> 4\nA.prototype.new.call(null)", 4
+code "a bare .new is a property read", "x = obj.new", "let x = obj.new;"
+code "a TS constructor type keeps its new", "x: new () => Foo = Foo", "let x = Foo;"
 
 # ==============================================================================
 # Meta Properties
@@ -171,7 +201,7 @@ test "new.target in constructor", '''
   class A
     constructor: ->
       @viaNew = new.target isnt undefined
-  new A().viaNew
+  A.new().viaNew
 ''', true
 
 code "new.target passes through", "class A\n  constructor: ->\n    @t = new.target", "class A {\n  constructor() {\n    this.t = new.target;\n  }\n};"
@@ -186,7 +216,7 @@ test 'basic class', '''
   class Animal
     constructor: (@name) ->
     speak: -> @name
-  a = new Animal('Dog'); a.speak()
+  a = Animal.new('Dog'); a.speak()
 ''', 'Dog'
 
 test 'class inheritance', '''
@@ -194,7 +224,7 @@ test 'class inheritance', '''
     constructor: (@name) ->
   class Dog extends Animal
     bark: -> 'woof'
-  d = new Dog('Spot'); d.name
+  d = Dog.new('Spot'); d.name
 ''', 'Spot'
 
 code 'simple class', '''
@@ -208,140 +238,142 @@ code 'simple class', '''
 # under `new`. So the seal has to yield a value, which is what the
 # coalesce is for: it reads like a no-op and is not, so the bytes are
 # pinned here rather than left to a comment.
-code 'new through a soaking spine seals it', 'x = new a?.b', 'let x = new (a?.b ?? undefined)();'
-code 'a sealed spine keeps its own arguments', 'x = new a?.b(1)', 'let x = new (a?.b ?? undefined)(1);'
-code 'a soak deeper in the spine seals the whole spine', 'x = new a.b?.c.d', 'let x = new (a.b?.c.d ?? undefined)();'
+code 'new through a soaking spine seals it', 'x = a?.b.new()', 'let x = new (a?.b ?? undefined)();'
+code 'a sealed spine keeps its own arguments', 'x = a?.b.new(1)', 'let x = new (a?.b ?? undefined)(1);'
+code 'a soak deeper in the spine seals the whole spine', 'x = a.b?.c.d.new()', 'let x = new (a.b?.c.d ?? undefined)();'
 # An INDEX link fails exactly as a member link does, so the seal walks
 # both — the spine's four link kinds are `.`, `?.`, `[]` and `optindex`.
-code 'an index tail after a soak seals too', 'x = new a?.b["c"]', 'let x = new (a?.b["c"] ?? undefined)();'
-code 'an index-tailed soak keeps its arguments', 'x = new a?.b["c"](1)', 'let x = new (a?.b["c"] ?? undefined)(1);'
-code 'a soaking spine under new new seals inside', 'x = new new a?.b', 'let x = new (new (a?.b ?? undefined)())();'
-code 'an ordinary new new groups the inner construction', 'x = new new a', 'let x = new (new a())();'
-code 'a plain index spine takes no seal', 'x = new a["b"]', 'let x = new a["b"]();'
+code 'an index tail after a soak seals too', 'x = a?.b["c"].new()', 'let x = new (a?.b["c"] ?? undefined)();'
+code 'an index-tailed soak keeps its arguments', 'x = a?.b["c"].new(1)', 'let x = new (a?.b["c"] ?? undefined)(1);'
+code 'a soaking spine under new new seals inside', 'x = a?.b.new().new()', 'let x = new (new (a?.b ?? undefined)())();'
+code 'an ordinary new new groups the inner construction', 'x = a.new().new()', 'let x = new (new a())();'
+code 'a plain index spine takes no seal', 'x = a["b"].new()', 'let x = new a["b"]();'
 # `X.new(...)` is rip's own construction sugar, so a soaking target
 # seals there too — and `new` OVER that form constructs what the ruby
 # construction returned, rather than reading a property named `new`.
 code 'ruby construction seals a soaking target', 'x = a?.b.new(1)', 'let x = new (a?.b ?? undefined)(1);'
-code 'new over a soaking ruby construction still constructs', 'x = new a?.b.new(1)', 'let x = new (new (a?.b ?? undefined)(1))();'
+code 'new over a soaking ruby construction still constructs', 'x = a?.b.new(1).new()', 'let x = new (new (a?.b ?? undefined)(1))();'
 code 'a bare .new read on a soaking spine stays a read', 'x = a?.b.new', 'let x = a?.b.new;'
-code 'a spine with no soak takes no seal', 'x = new a.b', 'let x = new a.b();'
+code 'a spine with no soak takes no seal', 'x = a.b.new()', 'let x = new a.b();'
 
 # A construction always spells its argument list. `new a.b` alone means
 # the same in JavaScript, but anything chained after it would bind into
 # the constructor spine: printed bare, `(new a.b).c` is `new a.b.c`,
 # which constructs a different thing.
-code 'a member read after a member construction reads the instance', 'x = (new a.b).c', 'let x = new a.b().c;'
-code 'an index read after a member construction reads the instance', 'x = (new a.b)[0]', 'let x = new a.b()[0];'
-code 'a call after a member construction calls the instance', 'x = (new a.b)(1)', 'let x = new a.b()(1);'
-code 'a method call after a member construction calls the instance', 'x = (new a.b).c()', 'let x = new a.b().c();'
-code 'a member read after an index construction reads the instance', 'x = (new a[0]).c', 'let x = new a[0]().c;'
-# An optional call or index DIRECTLY on a construction that spells no
-# argument list has no reading: JavaScript refuses `new X?.()`, and the
-# spelling does not say whether the soak guards the constructor or the
-# instance. An argument list closes the construction, and so do parens.
-fail 'an optional call directly on a bare construction rejects', 'x = new a.b?(1)', 'directly on a construction with no argument list has no reading'
-fail 'an optional call directly on a bare named construction rejects', 'x = new Foo?(1)', 'directly on a construction with no argument list has no reading'
-fail 'an optional index directly on a bare construction rejects', 'x = new a.b?[0]', 'directly on a construction with no argument list has no reading'
-fail 'a parenthesized call operand spells no argument list of its own', 'x = new (f())?(1)', 'directly on a construction with no argument list has no reading'
-fail 'the rejection names the conditional-construction spelling', 'x = new Foo?(1)', 'To construct only when the class exists, test it'
-code 'constructing only when the class exists is spelled with a test', 'x = if Foo? then new Foo(1)', 'let x = (Foo != null) ? new Foo(1) : undefined;'
+code 'a member read after a member construction reads the instance', 'x = (a.b.new()).c', 'let x = new a.b().c;'
+code 'an index read after a member construction reads the instance', 'x = (a.b.new())[0]', 'let x = new a.b()[0];'
+code 'a call after a member construction calls the instance', 'x = (a.b.new())(1)', 'let x = new a.b()(1);'
+code 'a method call after a member construction calls the instance', 'x = (a.b.new()).c()', 'let x = new a.b().c();'
+code 'a member read after an index construction reads the instance', 'x = (a[0].new()).c', 'let x = new a[0]().c;'
+# An optional call of `.new` has no reading: JavaScript refuses
+# `new X?.()`, and the spelling does not say whether the soak guards the
+# constructor or the instance. A completed construction soaks its
+# instance; an optional INDEX on a bare `.new` reads the property, as
+# the bare `.new` read itself does.
+fail 'an optional call of a member construction rejects', 'x = a.b.new?(1)', 'an optional call of `.new` has no reading'
+fail 'an optional call of a named construction rejects', 'x = Foo.new?(1)', 'an optional call of `.new` has no reading'
+fail 'an optional call of a parenthesized constructor rejects', 'x = (f()).new?(1)', 'an optional call of `.new` has no reading'
+fail 'the rejection names the conditional-construction spelling', 'x = Foo.new?(1)', 'To construct only when the class exists, test it'
+code 'an optional call after a completed construction soaks the instance', 'x = Foo.new()?(1)', 'let x = new Foo()?.(1);'
+code 'an optional index on a bare .new reads the property', 'x = a.b.new?[0]', 'let x = a.b.new?.[0];'
+code 'constructing only when the class exists is spelled with a test', 'x = if Foo? then Foo.new(1)', 'let x = (Foo != null) ? new Foo(1) : undefined;'
 test 'a tested construction skips a missing class and builds a present one', '''
   class Here
     constructor: (n) -> @n = n
   Gone = null
-  a = if Here? then new Here(7)
-  b = if Gone? then new Gone(7)
+  a = if Here? then Here.new(7)
+  b = if Gone? then Gone.new(7)
   [a.n, b]
 ''', [7, undefined]
-code 'an optional call after a closed construction soaks the instance', 'x = new X(1)?(2)', 'let x = new X(1)?.(2);'
-code 'an optional index after a closed construction soaks the instance', 'x = new X(1)?[0]', 'let x = new X(1)?.[0];'
-code 'an empty argument list closes the construction too', 'x = new X()?(2)', 'let x = new X()?.(2);'
-code 'a sealed constructor with its list is closed', 'x = new (a or b)(1)?(2)', 'let x = new (a || b)(1)?.(2);'
-code 'an optional call after a parenthesized construction soaks the instance', 'x = (new a.b)?(1)', 'let x = new a.b()?.(1);'
-code 'an optional index after a parenthesized construction soaks the instance', 'x = (new a.b)?[0]', 'let x = new a.b()?.[0];'
-code 'an optional member after a parenthesized construction', 'x = (new a.b)?.c', 'let x = new a.b()?.c;'
+code 'an optional call after a closed construction soaks the instance', 'x = X.new(1)?(2)', 'let x = new X(1)?.(2);'
+code 'an optional index after a closed construction soaks the instance', 'x = X.new(1)?[0]', 'let x = new X(1)?.[0];'
+code 'an empty argument list closes the construction too', 'x = X.new()?(2)', 'let x = new X()?.(2);'
+code 'a sealed constructor with its list is closed', 'x = (a or b).new(1)?(2)', 'let x = new (a || b)(1)?.(2);'
+code 'an optional call after a parenthesized construction soaks the instance', 'x = (a.b.new())?(1)', 'let x = new a.b()?.(1);'
+code 'an optional index after a parenthesized construction soaks the instance', 'x = (a.b.new())?[0]', 'let x = new a.b()?.[0];'
+code 'an optional member after a parenthesized construction', 'x = (a.b.new())?.c', 'let x = new a.b()?.c;'
 test 'a member read after a member construction reads the instance, at run time', '''
   class K
     constructor: -> @c = 'instance'
   K.c = 'static'
   ns = { K }
-  (new ns.K).c
+  (ns.K.new()).c
 ''', 'instance'
 test 'a call after a member construction calls the instance, at run time', '''
   Make = -> return (n) -> n * 2
   ns = { Make }
-  (new ns.Make)(21)
+  (ns.Make.new())(21)
 ''', 42
 
 # `new` constructs an EXPRESSION standing in parens whole. A parenthesized
 # call constructs what the call returns, never the callee; an operator,
 # control, cast, function, or class expression is the constructor itself.
-code 'a parenthesized call is the constructor', 'x = new (f())', 'let x = new (f())();'
-code 'a parenthesized call keeps the outer arguments', 'x = new (f(1))(2)', 'let x = new (f(1))(2);'
-code 'an unparenthesized call constructs its callee', 'x = new f(1)', 'let x = new f(1);'
-code 'parens around a pure constructor spine are redundant', 'x = new (a.b)(1)', 'let x = new a.b(1);'
-code 'parens around a spine that holds a call decide what is constructed', 'x = new (a().b)(1)', 'let x = new (a().b)(1);'
-code 'parens around a deeper call-holding spine are kept', 'x = new (a.b().c)(1)', 'let x = new (a.b().c)(1);'
+code 'a parenthesized call is the constructor', 'x = (f()).new()', 'let x = new (f())();'
+code 'a parenthesized call keeps the outer arguments', 'x = (f(1)).new(2)', 'let x = new (f(1))(2);'
+code 'an unparenthesized call constructs its callee', 'x = f.new(1)', 'let x = new f(1);'
+code 'parens around a pure constructor spine are redundant', 'x = (a.b).new(1)', 'let x = new a.b(1);'
+code 'parens around a spine that holds a call decide what is constructed', 'x = (a().b).new(1)', 'let x = new (a().b)(1);'
+code 'parens around a deeper call-holding spine are kept', 'x = (a.b().c).new(1)', 'let x = new (a.b().c)(1);'
 # A spine that holds a call seals WHOLE, wherever its parens stood in the
 # source, with or without an argument list. Printed bare, each of these
 # would construct the call's callee and then run the rest on the instance.
-code 'a call-holding spine with no argument list seals', 'x = new (a().b)', 'let x = new (a().b)();'
-code 'a member of a parenthesized call seals with the call', 'x = new (f()).b', 'let x = new (f().b)();'
-code 'a member of a parenthesized call keeps its arguments', 'x = new (f()).b(1)', 'let x = new (f().b)(1);'
-code 'an index of a parenthesized call seals with the call', 'x = new (f())[0](1)', 'let x = new (f()[0])(1);'
-code 'a deeper member of a call-holding spine seals whole', 'x = new (a().b).c(1)', 'let x = new (a().b.c)(1);'
-code 'a chain after a sealed construction reads the instance', 'x = (new (a().b)).c', 'let x = new (a().b)().c;'
-code 'a chain after new new reads the outer instance', 'x = (new new a).c', 'let x = new (new a())().c;'
-code 'a call after new new calls the outer instance', 'x = (new new F)(1)', 'let x = new (new F())()(1);'
-code 'new over a ruby construction constructs what it returns', 'x = new Outer.new(1)', 'let x = new (new Outer(1))();'
-code 'a chain after new over a ruby construction reads the instance', 'x = (new Outer.new(1)).c', 'let x = new (new Outer(1))().c;'
+code 'a call-holding spine with no argument list seals', 'x = (a().b).new()', 'let x = new (a().b)();'
+code 'a member of a parenthesized call seals with the call', 'x = (f()).b.new()', 'let x = new (f().b)();'
+code 'a member of a parenthesized call keeps its arguments', 'x = (f()).b.new(1)', 'let x = new (f().b)(1);'
+code 'an index of a parenthesized call seals with the call', 'x = (f())[0].new(1)', 'let x = new (f()[0])(1);'
+code 'a deeper member of a call-holding spine seals whole', 'x = (a().b).c.new(1)', 'let x = new (a().b.c)(1);'
+code 'a chain after a sealed construction reads the instance', 'x = ((a().b).new()).c', 'let x = new (a().b)().c;'
+code 'a chain after new new reads the outer instance', 'x = (a.new().new()).c', 'let x = new (new a())().c;'
+code 'a call after new new calls the outer instance', 'x = (F.new().new())(1)', 'let x = new (new F())()(1);'
+code 'new over a ruby construction constructs what it returns', 'x = Outer.new(1).new()', 'let x = new (new Outer(1))();'
+code 'a chain after new over a ruby construction reads the instance', 'x = (Outer.new(1).new()).c', 'let x = new (new Outer(1))().c;'
 test 'a member of a parenthesized call constructs what the call holds', '''
   class Inner
     constructor: (n) -> @n = n ?? 'none'
   host = -> { Inner }
-  [(new (host()).Inner).n, (new (host()).Inner(7)).n, (new (host().Inner)).n]
+  [((host()).Inner.new()).n, ((host()).Inner.new(7)).n, ((host().Inner).new()).n]
 ''', ['none', 7, 'none']
 test 'a chain after new new reads the outer instance, at run time', '''
   class Leaf
     constructor: -> @c = 'leaf-instance'
   Outer = -> return Leaf
-  (new new Outer).c
+  (Outer.new().new()).c
 ''', 'leaf-instance'
 test 'a parenthesized call-holding spine constructs what it names', '''
   class Inner
     constructor: (n) -> @n = n
   host = -> { Inner }
-  (new (host().Inner)(7)).n
+  ((host().Inner).new(7)).n
 ''', 7
-code 'a parenthesized logical is the constructor', 'x = new (a or b)', 'let x = new (a || b)();'
-code 'a parenthesized logical keeps its arguments', 'x = new (a or b)(1)', 'let x = new (a || b)(1);'
-code 'a parenthesized nullish is the constructor', 'x = new (a ?? b)', 'let x = new (a ?? b)();'
-code 'a parenthesized conditional is the constructor', 'x = new (if c then A else B)', 'let x = new (c ? A : B)();'
-code 'a parenthesized await is the constructor', 'x = new (await f())', 'let x = new (await f())();'
-code 'a parenthesized cast is the constructor', 'x = new (k as any)', 'let x = new (k)();'
-code 'a parenthesized maybe dammit is the constructor', 'x = new (f?!)', 'let x = new (await f?.())();'
-code 'a parenthesized existence is the constructor', 'x = new (f?)', 'let x = new (f != null)();'
+code 'a parenthesized logical is the constructor', 'x = (a or b).new()', 'let x = new (a || b)();'
+code 'a parenthesized logical keeps its arguments', 'x = (a or b).new(1)', 'let x = new (a || b)(1);'
+code 'a parenthesized nullish is the constructor', 'x = (a ?? b).new()', 'let x = new (a ?? b)();'
+code 'a parenthesized conditional is the constructor', 'x = (if c then A else B).new()', 'let x = new (c ? A : B)();'
+code 'a parenthesized await is the constructor', 'x = (await f()).new()', 'let x = new (await f())();'
+code 'a parenthesized cast is the constructor', 'x = (k as any).new()', 'let x = new (k)();'
+code 'a parenthesized maybe dammit is the constructor', 'x = (f?!).new()', 'let x = new (await f?.())();'
+code 'a parenthesized existence is the constructor', 'x = (f?).new()', 'let x = new (f != null)();'
 test 'a parenthesized call constructs what the call returns', '''
   pick = -> class then constructor: -> @kind = 'returned'
   pick.prototype.kind = 'callee'
-  (new (pick())).kind
+  ((pick()).new()).kind
 ''', 'returned'
 test 'a parenthesized conditional constructs the chosen class', '''
   A = class then constructor: -> @n = 1
   B = class then constructor: -> @n = 2
-  [(new (if true then A else B)).n, (new (if false then A else B)).n]
+  [((if true then A else B).new()).n, ((if false then A else B).new()).n]
 ''', [1, 2]
 test 'a parenthesized arrow is the constructor', '''
-  x = new (-> @n = 7)
+  x = (-> @n = 7).new()
   x.n
 ''', 7
 test 'a parenthesized class expression is the constructor', '''
-  x = new (class then constructor: -> @n = 9)
+  x = (class then constructor: -> @n = 9).new()
   x.n
 ''', 9
 # The tag call IS the constructor: `new tag"hi"` constructs what the tag
 # returns, and the ordinary expression path already lowers the template.
-code 'new on a tagged template constructs the tag result', 'x = new tag"hi"', 'let x = new (tag`hi`)();'
+code 'new on a tagged template constructs the tag result', 'x = tag"hi".new()', 'let x = new (tag`hi`)();'
 
 test 'super in constructor', '''
   class Animal
@@ -349,27 +381,27 @@ test 'super in constructor', '''
   class Dog extends Animal
     constructor: (name, @breed) ->
       super(name)
-  d = new Dog('Spot', 'Terrier'); d.name
+  d = Dog.new('Spot', 'Terrier'); d.name
 ''', 'Spot'
 
 test 'multiple @ parameters', '''
   class Person
     constructor: (@first, @last) ->
-  p = new Person('John', 'Doe')
+  p = Person.new('John', 'Doe')
   [p.first, p.last]
 ''', ['John', 'Doe']
 
 test 'promoted parameter with default', '''
   class P
     constructor: (@x = 5) ->
-  [new P().x, new P(9).x]
+  [P.new().x, P.new(9).x]
   ''', [5, 9]
 
 test 'promoted beside plain parameters', '''
   class M
     constructor: (@a, b, @c) ->
       @sum = @a + b + @c
-  new M(1, 2, 3).sum
+  M.new(1, 2, 3).sum
   ''', 6
 
 test 'subclass super with promoted parameter', '''
@@ -377,7 +409,7 @@ test 'subclass super with promoted parameter', '''
     constructor: (@name) ->
   class Dog extends Animal
     constructor: (@name) -> super(@name)
-  new Dog('Spot').name
+  Dog.new('Spot').name
   ''', 'Spot'
 
 fail 'promoted parameter rejects outside constructors', 'f = (@x) -> 1', 'promotes only in a constructor'
@@ -424,7 +456,7 @@ test '@param works with extra statements', '''
     speak: -> @name
     class @Baby
       cry: -> "waa"
-  a = new Animal('Dog')
+  a = Animal.new('Dog')
   [a.name, a.speak(), Animal.Baby?]
 ''', ['Dog', 'Dog', true]
 
@@ -436,7 +468,7 @@ test 'subclass @param works with extra statements', '''
       super(id)
     class @Helper
       help: -> true
-  s = new Sub(1, 'x')
+  s = Sub.new(1, 'x')
   [s.id, s.label]
 ''', [1, 'x']
 
@@ -447,7 +479,7 @@ test 'bound method works with extra statements', '''
     onClick: => @count += 1
     class @Util
       noop: ->
-  h = new Handler()
+  h = Handler.new()
   fn = h.onClick
   fn()
   h.count
@@ -459,7 +491,7 @@ test 'async method works with extra statements', '''
     class @Inner
       noop: ->
   do ->
-    s = new Svc()
+    s = Svc.new()
     await s.fetch()
 ''', 42
 
@@ -469,7 +501,7 @@ test 'static inner class extends', '''
   class Ext
     class @Kid extends Animal
       who: -> @name
-  new Ext.Kid('kid').who()
+  Ext.Kid.new('kid').who()
   ''', 'kid'
 
 fail 'class @Name rejects at the top level', 'class @Top\n  x: -> 1', 'STATIC member class'
@@ -477,7 +509,7 @@ fail 'class @Name rejects at the top level', 'class @Top\n  x: -> 1', 'STATIC me
 # `new new X()` constructs from a construction: the inner `new X()` is
 # the constructor, so it groups — bare, the outer `new` would read the
 # inner as a call of a function named `new`.
-code 'new of a construction groups the inner construction', 'new new X()', 'new (new X())();'
+code 'new of a construction groups the inner construction', 'X.new().new()', 'new (new X())();'
 
 # ==============================================================================
 # `def` methods and get/set accessors in class bodies
@@ -488,7 +520,7 @@ test 'def declares a class method, def @ a static one', '''
       def double(x)
         x * 2
       def @make()
-        new A()
+        A.new()
       def @typed(): number
         7
     [A.make().double(4), A.typed()]
@@ -502,7 +534,7 @@ test 'a void def method returns undefined', '''
         @count = 0
       def @bump!()
         @count++
-    a = new A()
+    a = A.new()
     A.reset()
     A.bump()
     [a.run(), a.ran, A.count]
@@ -512,7 +544,7 @@ test 'def constructor promotes parameters', '''
     class P
       def constructor(@name)
         @ok = true
-    p = new P('x')
+    p = P.new('x')
     [p.name, p.ok]
   ''', ['x', true]
 
@@ -522,7 +554,7 @@ test 'get and set accessors', '''
       get v: -> @_v * 10
       set v: (n) -> @_v = n
       get @kind: -> 'T'
-    t = new T()
+    t = T.new()
     t.v = 3
     [t.v, T.kind]
   ''', [30, 'T']
@@ -550,7 +582,7 @@ test 'parenless def forms in a class body', '''
         @x = 1
       def e: string
         'typed'
-    a = new A()
+    a = A.new()
     [a.b(), A.c(), a.d(), a.x, a.e()]
   ''', ['hello', 'static', null, 1, 'typed']
 
@@ -562,7 +594,7 @@ test 'generic defs in a class body, instance and static', '''
         [x]
       def @pair<T>(x: T)
         [x, x]
-    [new Box().id(3), Box.wrap(4), Box.pair(5)]
+    [Box.new().id(3), Box.wrap(4), Box.pair(5)]
   ''', [3, [4], [5, 5]]
 
 code 'a class def sees module bindings as a method does', 'x = 1\nclass A\n  def m()\n    x = 2', '''
@@ -608,7 +640,7 @@ code 'a conditional heritage groups', 'x = class extends (if c then A else B)', 
   let x = class extends (c ? A : B) {
   };
   '''
-code 'a construction heritage stays bare', 'x = class extends new Base', '''
+code 'a construction heritage stays bare', 'x = class extends Base.new()', '''
   let x = class extends new Base() {
   };
   '''
@@ -630,14 +662,14 @@ test 'a conditional heritage extends the chosen class', '''
   class B
     who: -> 'b'
   K = class extends (if false then A else B)
-  (new K).who()
+  (K.new()).who()
 ''', 'b'
 fail 'a parameter default cannot await in a class heritage', 'g = (a = class extends (f!)) -> a', 'a parameter cannot await or yield'
 
 # A class has one constructor; JavaScript refuses a second at load.
 fail "a second constructor rejects", "class A\n  constructor: -> @a = 1\n  constructor: -> @a = 2", "a class has one constructor"
-test "a static member named constructor is not the constructor", "class A\n  constructor: -> @a = 1\n  @constructor: -> 'static'\n[(new A).a, A.constructor()]", [1, "static"]
+test "a static member named constructor is not the constructor", "class A\n  constructor: -> @a = 1\n  @constructor: -> 'static'\n[(A.new()).a, A.constructor()]", [1, "static"]
 fail "a constructor that awaits rejects", "class A\n  constructor: -> @x = f!()", "a constructor cannot await or yield"
 fail "a constructor that yields rejects", "class A\n  constructor: ->\n    yield 1", "a constructor cannot await or yield"
-test "a constructor may build an async function that awaits", "class A\n  constructor: -> @load = -> f!()\ntypeof (new A).load", "function"
+test "a constructor may build an async function that awaits", "class A\n  constructor: -> @load = -> f!()\ntypeof (A.new()).load", "function"
 fail "private at the top level is reserved", "x = 1\nprivate y = 2", "'private' marks a class member"

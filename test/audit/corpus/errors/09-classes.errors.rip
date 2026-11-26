@@ -7,11 +7,11 @@ class Gauge
   constructor: (level: number) ->
     @level = level
 
-wrongTarget = new notAClass
-wrongArity = new Gauge()
-wrongMember = new Gauge(1).depth
-wrongKind: string = new Gauge(2)
-wrongQuery: typeof Gauge = new Gauge(3)
+wrongTarget = notAClass.new()
+wrongArity = Gauge.new()
+wrongMember = Gauge.new(1).depth
+wrongKind: string = Gauge.new(2)
+wrongQuery: typeof Gauge = Gauge.new(3)
 wrongMaker: (new () => Gauge) = 'nope'
 class WrongBase extends notAClass
 

@@ -1657,6 +1657,12 @@ function faceSurvival(src, code, mappings, faceDecoded, serverTokens, bindingNam
   const masked = codeMask(src);
   const sourceTokens = tokenize(src).tokens;
   const spans = specifierSpans(masked, sourceTokens);
+  const constructionWordAt = new Set();
+  sourceTokens.forEach((t, i) => {
+    const next = sourceTokens[i + 1];
+    if (t.kind === 'PROPERTY' && t.value === 'new' && sourceTokens[i - 1]?.kind === '.' &&
+        (next?.kind === 'CALL_START' || next?.kind === 'DAMMIT')) constructionWordAt.add(t.start);
+  });
   // Spellings this fixture BINDS as values (`symbol = :alpha` is
   // ordinary corpus code): the word-set excuse tiers STAND DOWN for
   // them. Keyed by spelling alone, those tiers would auto-excuse a
@@ -1724,6 +1730,11 @@ function faceSurvival(src, code, mappings, faceDecoded, serverTokens, bindingNam
         !boundWords.has(name) && !standsAsProperty && !standsAsKey) continue;
     if (spans.some(([s, e]) => index >= s && index < e)) continue;
     if (src.slice(Math.max(0, index - 7), index) === 'import.') continue; // `import.meta` — a meta-property, no symbol
+    // `X.new(…)` / `X.new!`: the called `.new` IS the construction and
+    // lowers to the `new` keyword, so the face holds no identifier here.
+    // Derived from the source tape: the word's own token is followed by a
+    // call (an argument list, implicit or written) or the dammit bang.
+    if (name === 'new' && standsAsProperty && constructionWordAt.has(index)) continue;
     const { line, character } = posOf(index);
     const key = `${line}:${character}:${name}`;
     if (excused[key] !== undefined) { excusedSeen.add(key); continue; }

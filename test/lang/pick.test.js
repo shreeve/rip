@@ -95,7 +95,7 @@ describe('pick emission and evaluation', () => {
       'f o.{a}',
       'f(o?.{a})',
       'f(w.x.{a})',
-      'x = new C(o.{a})',
+      'x = C.new(o.{a})',
       's = "v: #{o.{a}}"',
       'x = f(g(o.{a}))',
       'console.log o.{a}, o.{b}',

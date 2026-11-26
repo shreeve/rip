@@ -185,7 +185,7 @@ describeExtended('semantic tokens — the readonly modifier', () => {
 // satisfy the first on its own.
 describeExtended('semantic tokens — a forward-referenced class binding', () => {
   const FWD = [
-    'make = -> (new Box())',   // line 0 — reads Box above its declaration
+    'make = -> (Box.new())',   // line 0 — reads Box above its declaration
     'Box = class',             // line 1 — hoisted, so the face spells it `let`
     "  greet: -> 'hi'",
     'console.log make().greet()',
@@ -195,7 +195,7 @@ describeExtended('semantic tokens — a forward-referenced class binding', () =>
   const PLAIN = [
     'Shape = class',           // line 0 — declared before any use
     "  area: -> 1",
-    'console.log (new Shape()).area()',
+    'console.log (Shape.new()).area()',
     '',
   ].join('\n');
 
@@ -238,7 +238,7 @@ describeExtended('semantic tokens — a forward-referenced class binding', () =>
   // spelling most likely to start needing one — a change to how exports
   // lower would move it into the split silently, and this reds.
   const EXPORTED = [
-    'make = -> (new Box())',
+    'make = -> (Box.new())',
     'export Box = class',      // line 1 — keeps its initializer
     '  g: -> 1',
     'console.log make().g()',

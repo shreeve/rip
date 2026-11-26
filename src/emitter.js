@@ -24,7 +24,7 @@ import { CodeBuilder } from './builder.js';
 import { descriptorSegments, behaviorObjectText, paramsOf, relationOf, splitTopLevelByComma } from './schema.js';
 import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './ts/schema.js';
 import { Parser } from './parser.js';
-import { tagPostfixConditionals } from './lexer.js';
+import { rejectReservedWords, tagPostfixConditionals } from './lexer.js';
 import { rewriteTypes } from './types.js';
 import { identifierRunAt, isIdentifierName, isCustomElementName, IDENT_START, IDENT_PART, IDENT_SOURCE, IDENT_RE, identifierMatches } from './ident.js';
 import { implicitBlocks, implicitObjects, implicitCalls } from './implicit.js';
@@ -119,7 +119,7 @@ const isNode = (x) => Array.isArray(x);
 const isBinary = (x) => isNode(x) && BINOPS.has(x[0]) && x.length === 3;
 // The four links a member/index spine is built from. A spine carrying
 // an optional link anywhere along it cannot be constructed THROUGH —
-// `new a?.b` is a syntax error, not a runtime one — so it seals first;
+// `new a?.b()` is a syntax error, not a runtime one — so it seals first;
 // `Emitter.optionalGuard` is the walk that finds the link, and it
 // already descends every one of these.
 const SPINE_HEADS = new Set(['.', '?.', '[]', 'optindex']);
@@ -1026,10 +1026,21 @@ class Emitter {
     return isNode(x) && x[0] === 'block' && !this.isCallNode(x);
   }
 
-  // A constructor spine with no call in it: a name, or a member/index
-  // chain rooted at one. Only such a spine may stand bare under `new`.
+  // A constructor spine with no call in it: a name or literal, or a
+  // member/index chain rooted at one. Only such a spine may stand bare as
+  // the constructor of `.new`.
+  // An index whose read lowers to a call — a range (`.slice()`), a
+  // negative literal (`.at(-n)`), a regex key (the match read) — is a
+  // call in the output, so it is not pure: printed bare, `new` would
+  // construct the method.
   pureSpine(x) {
-    return typeof x === 'string' || (this.isSpine(x) && !isRubyNew(x) && this.pureSpine(x[1]));
+    if (typeof x === 'string') return true;
+    if (!this.isSpine(x) || isRubyNew(x)) return false;
+    if (x[0] === '[]' || x[0] === 'optindex') {
+      const key = x[2];
+      if (isRange(key) || Emitter.negativeLiteralKey(key) || (typeof key === 'string' && key[0] === '/')) return false;
+    }
+    return this.pureSpine(x[1]);
   }
 
   // A member/index link — `optindex` spells a legal callee, so a call
@@ -6226,13 +6237,14 @@ class Emitter {
     if (toks.length === 0) return { stmts: [], stores: null };
     let nextId = 1e9;
     const mintId = () => nextId++;
-    const fail = (message, at) => {
+    const fail = (message, at, end = at) => {
       const err = new Error(`schema: ${message}`);
       err.start = at;
-      err.end = at;
+      err.end = end;
       throw err;
     };
     rewriteTypes(toks, mintId, source ?? '', fail);
+    rejectReservedWords(toks, source ?? '', fail);
     implicitBlocks(toks, mintId);
     tagPostfixConditionals(toks);
     implicitObjects(toks, mintId);
@@ -8422,7 +8434,7 @@ class Emitter {
   // `.parenthesized` fat-node flag is never read for grouping — its
   // readers are SEMANTIC decisions where source parens select the
   // program (the postfix-if-else hoist guard, chain-link detection,
-  // sealed dammit-as-callee / `new (f!)` serialization).
+  // sealed dammit-as-callee serialization).
   //
   // Async marking: a function is async iff its BODY awaits — the walk
   // stops at nested function/class boundaries, so an inner arrow's
@@ -8787,7 +8799,6 @@ class Emitter {
       throw this.positionedError(node, 'emitter: accept can only be used as a direct component body line');
     }
     if (head === 'super') return this.superCall(node);
-    if (head === 'new' && node.length === 2) return this.newExpr(node);
     if (head === '...' && node.length === 2) return this.spread(node);
     if (isBinary(node)) return this.binary(node);
     if (isUnary(node)) return this.unary(node);
@@ -15530,19 +15541,16 @@ class Emitter {
         : (head === '[]' && n.length === 3) || (head === 'optindex' && n.length === 3 && this.lockedHead(n, 'optindex')) ? 'index'
         : head === 'optcall' && this.lockedHead(n, 'optcall') ? 'optcall'
         : 'call';
-      // An optional call or index DIRECTLY on a construction that spells
-      // no argument list has no reading: JavaScript refuses `new X?.()`,
-      // and the spelling does not say whether the soak guards the
-      // constructor or the instance. An argument list closes the
-      // construction (`new X(1)?(2)` soaks the instance), and so do
-      // parens (`(new X)?(…)`).
-      const soaks = fkind === 'optcall' || (fkind === 'index' && head === 'optindex');
-      const built = soaks && isNode(n[1]) && n[1][0] === 'new' && n[1].length === 2 && !n[1].parenthesized ? n[1][1] : undefined;
-      if (built !== undefined && !(isNode(built) && !built.parenthesized && this.semanticKindOf(built) === 'call')) {
+      // An optional call of `.new` has no reading: the `.new` call is
+      // the construction, JavaScript refuses `new X?.()`, and the
+      // spelling does not say whether the soak guards the constructor
+      // or the instance. A completed construction soaks its instance
+      // (`X.new()?(…)`).
+      if (fkind === 'optcall' && isRubyNew(n[1])) {
         throw this.positionedError(n,
-          `emitter: an optional ${fkind === 'optcall' ? 'call' : 'index'} directly on a construction with no argument list has no reading — ` +
-          'JavaScript refuses `new X?.()`. To construct only when the class exists, test it (`if X? then new X(…)`); ' +
-          'to soak the INSTANCE, close the construction first (`new X()?(…)` or `(new X)?(…)`)');
+          'emitter: an optional call of `.new` has no reading — construction is never optional. ' +
+          'To construct only when the class exists, test it (`if X? then X.new(…)`); ' +
+          'to soak the INSTANCE, construct first (`X.new()?(…)`)');
       }
       const f = { role: false, kind: fkind };
       frames.push(f);
@@ -17275,166 +17283,6 @@ class Emitter {
     });
   }
 
-  // ["new", operand] — a construction always spells its argument list:
-  // a name or a PURE spine (names, members, indexes) prints bare with
-  // `()` (`new A()`, `new a.B()`), a call-array operand becomes
-  // `new Ctor(args)`, and every other operand is an EXPRESSION standing
-  // as the constructor, sealed in parens so `new` binds to it whole —
-  // a spine that holds a call included (`new (a().b)()` is not
-  // `new a().b()`). A sealed dammit operand (`new (f!)`) emits the
-  // awaited call, then empty construction args.
-  newExpr(node) {
-    const [, operand] = node;
-    this.mark(node, '$self', () => {
-      this.mark(node, 'operator', () => this.b.emit('new'));
-      this.b.emit(' ');
-      this.mark(node, 'operand', () => {
-        if (this.isSpine(operand) && this.optionalGuard(operand)) {
-          // A soaking spine seals into a VALUE before `new` reaches
-          // it, at every link kind — a member tail and an index tail
-          // fail the same way. `?? undefined` is the seal rather than
-          // parens alone: parens are what the spec asks for and node
-          // takes them, but bun's MODULE parser refuses a parenthesized
-          // chain whose tail value is the chain itself (its own `eval`
-          // does not), so parens alone would trade a module node
-          // rejects for one bun rejects. The coalesce changes nothing
-          // semantically: a short-circuited chain is already undefined,
-          // and constructing it throws either way.
-          this.b.emit('(');
-          this.expr(operand);
-          this.b.emit(' ?? undefined)()');
-        } else if (isNode(operand) && (operand[0] === '.' || operand[0] === '?.')) {
-          // The argument list is always spelled. `new a.b` alone means
-          // the same, but anything chained after it would bind into the
-          // constructor spine: `(new a.b).c` printed bare is `new a.b.c`.
-          // A spine that holds a call seals whole: printed bare,
-          // `new (a().b)` would construct `a`.
-          if (this.pureSpine(operand)) {
-            this.member(operand);
-            this.b.emit('()');
-          } else {
-            this.b.emit('(');
-            this.expr(operand);
-            this.b.emit(')()');
-          }
-        } else if (isNode(operand) && operand[0] === 'new' && operand.length === 2 &&
-                   this.optionalGuard(operand[1])) {
-          // `new new a?.b` — the inner construction is the constructor,
-          // and its spine has to seal before either `new` reaches it.
-          // Only the soaking case reroutes; an ordinary `new new X`
-          // keeps the path that already lowers it.
-          this.b.emit('(');
-          this.newExpr(operand);
-          this.b.emit(')()');
-        } else if (isNode(operand) && operand[0] === 'tagged-template') {
-          // The tag call IS the constructor — `new tag"hi"` constructs
-          // what the tag returns. The ordinary expression path already
-          // lowers the template correctly, so the case is copied, and
-          // sealing keeps `new` from binding to the tag instead.
-          this.b.emit('(');
-          this.taggedTemplate(operand);
-          this.b.emit(')()');
-        } else if (isNode(operand) && isNode(operand[0]) && !isRubyNew(operand[0]) &&
-                   this.isSpine(operand[0]) && this.optionalGuard(operand[0])) {
-          // The same seal with the call's own argument list kept:
-          // `new Registry?.Box(a)` → `new (Registry?.Box ?? undefined)(a)`.
-          // The `.new` branch of the call walk is the precedent — a
-          // non-primary constructor expression groups so `new` binds
-          // to it whole.
-          this.mark(operand, '$self', () => {
-            this.b.emit('(');
-            this.expr(operand[0]);
-            this.b.emit(' ?? undefined)');
-            this.mark(operand, 'args', () => {
-              this.b.emit('(');
-              operand.slice(1).forEach((arg, i) => {
-                if (i > 0) this.b.emit(', ');
-                this.callArg(arg);
-              });
-              this.b.emit(')');
-            });
-          });
-        } else if (isNode(operand) && operand[0] === 'new' && operand.length === 2) {
-          // `new new X()` — the inner construction is the constructor:
-          // `new (new X())()`. Bare, the outer `new` would read the inner
-          // as a call of a function named `new`; without its own list,
-          // a chain after it would bind into the inner construction.
-          this.b.emit('(');
-          this.newExpr(operand);
-          this.b.emit(')()');
-        } else if (isNode(operand) && operand[0] === 'dammit!') {
-          // `new (f!)` → `new (await f())()`. Source parens selected
-          // the program (sealed Value-dammit as the constructor).
-          if (operand.parenthesized) this.b.emit('(');
-          this.dammit(operand);
-          if (operand.parenthesized) this.b.emit(')');
-          this.b.emit('()');
-        } else if (isNode(operand)) {
-          // A call node — [ctor, ...args] — emits Ctor(args); with the
-          // `new ` prefix already written this is `new Ctor(args)`. That
-          // reading holds only for an UNPARENTHESIZED call whose callee
-          // is a name, a spine, or the parenthesized dammit the call
-          // walk seals itself (an index spine rides the same walk).
-          // Everything else is an EXPRESSION standing
-          // as the constructor and seals in parens, so `new` binds to it
-          // whole: a parenthesized call (`new (f())` constructs what `f`
-          // returns, never `f`), an operator or control expression
-          // (`new (a or b)`), a function or class, and a call whose
-          // callee is one of those (`new (f(1))(2)`).
-          const isCall = this.semanticKindOf(operand) === 'call';
-          const callee = operand[0];
-          // Parens around a PURE spine (names, members, indexes) are
-          // redundant; a spine that holds a call seals, wherever its
-          // parens stood (`new (a().b)(1)` and `new (a()).b(1)` are not
-          // `new a().b(1)`).
-          // `X.new(args)` is a construction of its own, so as a callee
-          // it is an expression too: `new a.new(1)` constructs what that
-          // construction returns.
-          const plainCallee = !isRubyNew(callee) && (this.pureSpine(callee) ||
-            (isNode(callee) && !callee.parenthesized && this.semanticKindOf(callee) === 'call') ||
-            (isNode(callee) && callee[0] === 'dammit!'));
-          if (this.isSpine(operand) && this.pureSpine(operand)) {
-            // An index spine, with its argument list spelled for the
-            // same reason a member spine's is.
-            this.call(operand);
-            this.b.emit('()');
-          } else if (isCall && !operand.parenthesized && isRubyNew(callee)) {
-            this.b.emit('(');
-            this.call(operand);
-            this.b.emit(')()');
-          } else if (isCall && !operand.parenthesized && plainCallee) {
-            this.call(operand);
-          } else if (isCall && !operand.parenthesized) {
-            const selfGrouped = this.ts && this.isPostfixType(callee);
-            this.mark(operand, '$self', () => {
-              if (!selfGrouped) this.b.emit('(');
-              this.expr(callee);
-              if (!selfGrouped) this.b.emit(')');
-              this.mark(operand, 'args', () => {
-                this.b.emit('(');
-                operand.slice(1).forEach((arg, i) => {
-                  if (i > 0) this.b.emit(', ');
-                  this.callArg(arg);
-                });
-                this.b.emit(')');
-              });
-            });
-          } else {
-            // On the TS face a cast or `satisfies` operand prints its own
-            // group, which is the seal.
-            const grouped = this.ts && this.isPostfixType(operand);
-            if (!grouped) this.b.emit('(');
-            this.expr(operand);
-            this.b.emit(grouped ? '()' : ')()');
-          }
-        } else {
-          this.emitPrimitive(operand);
-          this.b.emit('()');
-        }
-      });
-    });
-  }
-
   // One parameter: a plain name, a rest (`...name`), a default
   // (`name = expr`), or an array/object pattern (emitted like the
   // matching literal — the pattern element cases live on object/array).
@@ -18224,7 +18072,7 @@ class Emitter {
     // `await f(1, 2)` — the await surrounds the whole invocation, so
     // no callee grouping is needed. A PARENTHESIZED dammit sealed the
     // await-call inside its parens; outer args belong to THIS call
-    // (`(f!)(a)` / `new (f!)(a)` → `(await f())(a)`, not `await f(a)`).
+    // (`(f!)(a)` → `(await f())(a)`, not `await f(a)`).
     // This spelling keeps its inline path; every other call emits
     // through the chain driver.
     if (isNode(node[0]) && node[0][0] === 'dammit!') {
@@ -18248,7 +18096,15 @@ class Emitter {
       const target = node[0][1];
       const constructing = isRubyNew(target);
       this.mark(node, '$self', () => {
-        this.b.emit(constructing ? 'await new ' : 'await ');
+        // The keyword rides the dammit's operator role, as the bare
+        // dammit's does: TS80007's position resolves to the `!`.
+        this.mark(node[0], 'operator', () => this.b.emit('await'));
+        this.b.emit(' ');
+        // The `.new` word IS the construction keyword it lowers to.
+        if (constructing) {
+          this.mark(target, 'property', () => this.b.emit('new'));
+          this.b.emit(' ');
+        }
         this.mark(node[0], '$self', () => {
           if (constructing) this.mark(node[0], 'target', () => this.rubyNewTarget(target));
           else this.asReference(target, () => this.head(node[0], 'target', target));
@@ -18270,7 +18126,9 @@ class Emitter {
     // expression groups so the `new` binds to it whole.
     if (isNode(node[0]) && node[0][0] === '.' && node[0].length === 3 && node[0][2] === 'new') {
       this.mark(node, '$self', () => {
-        this.b.emit('new ');
+        // The `.new` word IS the construction keyword it lowers to.
+        this.mark(node[0], 'property', () => this.b.emit('new'));
+        this.b.emit(' ');
         this.rubyNewTarget(node[0]);
         this.mark(node, 'args', () => {
           this.b.emit('(');
@@ -18289,15 +18147,27 @@ class Emitter {
   rubyNewTarget(member) {
     const ctor = member[1];
     this.mark(member, 'object', () => {
-      // Any non-name constructor expression groups: `new` consumes
-      // the FIRST argument list it reaches, so a call in the
-      // constructor position (`getClass().new(x)`) must
+      // A PURE spine (names, members, indexes, no soak) stands bare:
+      // `a.B.new(c)` is `new a.B(c)`. Any other constructor expression
+      // groups: `new` consumes the FIRST argument list it reaches, so a
+      // call in the constructor position (`getClass().new(x)`) must
       // parenthesize or `new` would construct the getter.
-      if (isNode(ctor)) {
+      if (isNode(ctor) && this.pureSpine(ctor) && !this.optionalGuard(ctor)) {
+        if (ctor[0] === '.' || ctor[0] === '?.') this.member(ctor);
+        else this.call(ctor);
+      } else if (this.ts && this.isPostfixType(ctor)) {
+        // On the TS face a cast or `satisfies` prints its own group,
+        // which is the seal.
+        this.expr(ctor);
+      } else if (isNode(ctor)) {
         this.b.emit('(');
         this.expr(ctor);
-        // A soaking target cannot be constructed THROUGH here any
-        // more than under `new` — same seal, same reason.
+        // A soaking target cannot be constructed THROUGH: JavaScript
+        // refuses `new a?.b()`, so the spine seals into a value. Parens
+        // alone are what the spec asks for, but bun's module parser
+        // refuses a parenthesized optional chain under `new`, so the
+        // coalesce is the seal; a short-circuited chain is undefined
+        // either way, and constructing it throws.
         this.b.emit(this.optionalGuard(ctor) ? ' ?? undefined)' : ')');
       } else this.expr(ctor);
     });
@@ -18793,7 +18663,9 @@ class Emitter {
     if (isRubyNew(node[1])) {
       this.mark(node, '$self', () => {
         this.mark(node, 'operator', () => this.b.emit('await'));
-        this.b.emit(' new ');
+        this.b.emit(' ');
+        this.mark(node[1], 'property', () => this.b.emit('new'));
+        this.b.emit(' ');
         this.mark(node, 'target', () => this.rubyNewTarget(node[1]));
         this.b.emit('()');
       });
@@ -18811,16 +18683,15 @@ class Emitter {
   // `f?!` carries no arguments and calls with none, as dammit's `f!` does.
   maybeDammit(node) {
     this.renderSyncGuard(node);
-    // A constructor is never an optional callee. `?!` follows a name, so
-    // on a construction it lands on the spine (`new X?!`, `new a.b?!`,
-    // the `X.new?!` alias) and would make the constructor one, which
+    // A constructor is never an optional callee. `?!` on `.new`
+    // (`X.new?!`, `a.b.new?! 1`) would make the constructor one, which
     // JavaScript refuses. A method of the instance is an ordinary callee
-    // (`new X(1).go?!`).
+    // (`X.new(1).go?!`).
     const callee = node[1];
-    if ((isNode(callee) && callee[0] === 'new') || isRubyNew(callee)) {
+    if (isRubyNew(callee)) {
       throw this.positionedError(node,
         "emitter: maybe dammit has no reading on a constructor — `?!` on a construction would make the " +
-        "constructor an optional callee; construct and await with `new X!`");
+        "constructor an optional callee; construct and await with `X.new!`");
     }
     this.mark(node, '$self', () => {
       // The keyword's row maps to the labeled MAYBE_DAMMIT token — the `?!`

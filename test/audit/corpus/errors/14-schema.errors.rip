@@ -20,5 +20,5 @@ wrongAssign: Person = { name: 42, tag: 'a' }
 wrongLiteral: Person = { name: 'ok', tag: 'c' }
 wrongRead = Person.parse({ name: 'x', tag: 'a' }).nope
 wrongEnum: Color = 'mauve'
-wrongConstruct = new Person()
+wrongConstruct = Person.new()
 wrongGetter: string = Cart.parse({ items: [3] }).total

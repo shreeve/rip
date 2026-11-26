@@ -29,7 +29,7 @@ code "for with guard", "for x in arr when x > 5\n  x", "for (let x of arr) {\n  
 # ==============================================================================
 
 code "function arg simple", "fn((x + y))", "fn(x + y);"
-code "function arg with or", "new Set((arr or []))", "new Set(arr || []);"
+code "function arg with or", "Set.new((arr or []))", "new Set(arr || []);"
 code "function arg logical", "fn((a && b))", "fn(a && b);"
 
 # ==============================================================================

@@ -26,9 +26,9 @@ class Counter
     @n
 
 # instantiation: implicit args, explicit args, bare new
-d = new Dog "Rex"
-a = new Animal("Generic")
-c = new Counter
+d = Dog.new "Rex"
+a = Animal.new("Generic")
+c = Counter.new()
 
 # methods, inheritance, statics
 s1 = d.speak()
@@ -45,12 +45,12 @@ t2 = tick()
 # array element, member access on an instance of an expression class
 Maker = class
   make: -> "made"
-made = (new Maker()).make()
+made = (Maker.new()).make()
 
 hold = (x) -> x
 Held = hold class Token
   kind: -> "held"
-h = (new Held()).kind()
+h = (Held.new()).kind()
 
 pair = [class L, class R]
 lname = pair[0].name
@@ -61,4 +61,4 @@ add = (p, q) -> p + q
 class Calc
   two: -> add 1, 1
   three: -> add 1, add 1, 1
-sums = [new Calc().two(), (new Calc()).three()]
+sums = [Calc.new().two(), (Calc.new()).three()]

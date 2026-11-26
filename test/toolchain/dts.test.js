@@ -25,7 +25,7 @@ const ROWS = [
   // default export is real, re-export lists and star re-exports pass
   // through, unreferenced and side-effect imports drop, and an
   // untyped name's export specifier drops (no declaration to name)
-  ['import { User } from "./model.js"\nexport current: User = new User()', "import { User } from './model.js';\nexport declare let current: User;\n"],
+  ['import { User } from "./model.js"\nexport current: User = User.new()', "import { User } from './model.js';\nexport declare let current: User;\n"],
   ['x: number = 5\nexport default x', 'declare let x: number;\nexport default x;\n'],
   ['export { User } from "./model.js"', "export { User } from './model.js';\n"],
   ['export * from "./model.js"', "export * from './model.js';\n"],
@@ -220,7 +220,7 @@ const ROWS = [
   // module-scope typed bindings inside control flow or function bodies
   // a private member declares by its name alone, as TypeScript's own
   // emit spells it — typed or not, static or not
-  ['export class A\n  private helper: (x: number) -> x\n  private @make: -> new A()\n  private count: number = 0\n  private name: string\n  private plain = 1\n  pub: (x: number): number -> @helper x', 'export declare class A {\n  private helper;\n  private static make;\n  private count;\n  private name;\n  private plain;\n  pub(x: number): number;\n}\n'],
+  ['export class A\n  private helper: (x: number) -> x\n  private @make: -> A.new()\n  private count: number = 0\n  private name: string\n  private plain = 1\n  pub: (x: number): number -> @helper x', 'export declare class A {\n  private helper;\n  private static make;\n  private count;\n  private name;\n  private plain;\n  pub(x: number): number;\n}\n'],
   // do NOT declare (a d.ts is a module boundary)
   ['f = ->\n  r: number = g()\n  r', ''],
   ['if c\n  x: number = 5\n  x', ''],
@@ -520,7 +520,7 @@ describe('component declarations: the class shape, the props surface, the extend
       '  @a := seed',
       '  @b := lid',
       '  @c := Cfg.n',
-      '  @d := new Store()',
+      '  @d := Store.new()',
       '  @e := Math.PI',
       '',
     ].join('\n')).declarations;

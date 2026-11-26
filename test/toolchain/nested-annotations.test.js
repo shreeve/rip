@@ -143,14 +143,3 @@ test('a postfix conditional keeps its statement as the then role', () => {
   expect([then.sourceStart, then.sourceEnd]).toEqual([0, 5]);
   expect(stores.role(cond.nodeId, 'condition').childNodeId).toBe(stores.nodesByKind('unary')[0].nodeId);
 });
-
-test('an awaited construction nests unary and call nodes under the await', () => {
-  const stores = parse('y = new Foo!(1)');
-  const [aw] = stores.nodesByKind('await');
-  const [ctor] = stores.nodesByKind('unary');
-  expect(stores.role(aw.nodeId, 'value').childNodeId).toBe(ctor.nodeId);
-  expect(stores.role(ctor.nodeId, 'operator').literal).toBe('new');
-  const call = stores.node(stores.role(ctor.nodeId, 'operand').childNodeId);
-  expect(call.semanticKind).toBe('call');
-  expect([call.sourceStart, call.sourceEnd]).toEqual([8, 15]);
-});

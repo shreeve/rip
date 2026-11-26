@@ -180,9 +180,9 @@ code "maybe dammit paren or stays outside", "fn?!(a) or b", "await fn?.(a) || b;
 
 # A constructor is never an optional callee. A member call on the
 # constructed instance is an ordinary one.
-fail 'maybe dammit rejects a bare construction', "x = new Foo?!", 'maybe dammit has no reading on a constructor'
-fail 'maybe dammit rejects a member construction', "x = new a.b?!(1)", 'maybe dammit has no reading on a constructor'
-fail 'maybe dammit rejects the .new construction alias', "x = K.new?! 1", 'maybe dammit has no reading on a constructor'
+fail 'maybe dammit rejects a bare construction', "x = Foo.new?!", 'maybe dammit has no reading on a constructor'
+fail 'maybe dammit rejects a member construction', "x = a.b.new?!(1)", 'maybe dammit has no reading on a constructor'
+fail 'maybe dammit rejects a construction with a juxta argument', "x = K.new?! 1", 'maybe dammit has no reading on a constructor'
 
 # Maybe dammit calls what dammit calls: a name. After any other value it
 # has no reading, where dammit's `!` has none either.
@@ -201,7 +201,7 @@ test "maybe dammit on a spread head passes its arguments to the callee", "f = (n
 test "a nullish maybe dammit with arguments spreads nothing", "g = null\nx = {...g?!(1), k: 1}\nObject.keys(x).join()", "k"
 code "maybe dammit on a spread head, chained", "x = {...f?!.data, a: 1}", "let x = {...(await f?.()).data, a: 1};"
 test "a nullish maybe dammit spreads nothing", "f = null\nx = {...f?!, a: 1}\nObject.keys(x).join()", "a"
-code "maybe dammit on a constructed instance's method", "new Foo(1).go?!", "await new Foo(1).go?.()"
+code "maybe dammit on a constructed instance's method", "Foo.new(1).go?!", "await new Foo(1).go?.()"
 
 fail 'render attributes reject maybe dammit with arguments', '''
   A = component

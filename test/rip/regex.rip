@@ -387,7 +387,7 @@ test 'a class method owns its last match', '''
     grab: (s) ->
       s =~ /c(\\w)/
       _[1]
-  r = (new C).grab("cY")
+  r = (C.new()).grab("cY")
   [r, _[1]]
 ''', ['Y', '0']
 

@@ -7,7 +7,7 @@ Knob = component
 
   render null
 
-knob = new Knob({})
+knob = Knob.new({})
 wrongStep = knob.tally("nope")
 
 Swatch = component extends input
@@ -69,7 +69,7 @@ Gauge = component
 
   render null
 
-gauge = new Gauge({})
+gauge = Gauge.new({})
 wrongWidth: string = gauge.width.value
 gauge.cap = 4
 
@@ -84,7 +84,7 @@ Sonde = component
 
   render null
 
-sonde = new Sonde({})
+sonde = Sonde.new({})
 
 wrongTag: number = sonde.tag
 wrongFixedTag: number = sonde.fixedTag

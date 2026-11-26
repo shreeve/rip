@@ -35,7 +35,7 @@ Contents: [Language core](#language-core) ·
 class A
   @s: 1
   x: 1
-p A.s, (new A).x    # undefined undefined
+p A.s, A.new().x    # undefined undefined
 ```
 The value is read as a TypeScript literal type (`static s;`, `x;`).
 `x: -1`, `x: f()` reject with "a class field takes '=' for its value".
@@ -73,7 +73,7 @@ member: `s =! 1` then `[s] = [5]` in a method writes it silently.
 a number); `w /2 + h /2` rejects only because `2` is no regex flag.
 
 **C35 M — `in` on a Set or Map tests a property, not membership.**
-`1 in new Set([1])` is false and `'size' in s` true; the membership
+`1 in Set.new([1])` is false and `'size' in s` true; the membership
 lowering knows arrays and strings only.
 
 **C36 M — A chained comprehension reads an outer binding instead of rejecting.**
@@ -383,11 +383,6 @@ a missing path exits 2.
 
 **D5 L — packages/sites/README.md describes exact-path rehash and a reload on the next hash.** Lines ~1018–1022, ~1203, ~1290 (the Manager snapshots the whole tree) and ~1074 (feed.rip recovers in place); the watch-time assembly failure's Hub `assembly` message is undocumented (ECOSYSTEM.md's Sites watch cautions).
 
-**D8 L — README code examples escape the style gate.** Prefix `new` in
-packages/x12/README.md and packages/http/README.md, `await Bun.sleep` and
-`throw new Error` in packages/swarm/README.md; package-rip-style.test.js
-reads `.rip` files only.
-
 ---
 
 ## Package mold
@@ -413,7 +408,6 @@ proposes a preferred form for each.
 | booleans | `yes` · `on` · `true` — `no` · `off` · `false` |
 | conditional expression | `if c then a else b` · `c ? a : b` · `a if c else b` |
 | delegation | `yield from` · `yield*` |
-| construction | `X.new(a)` · `new X(a)` |
 | optional access and call | `a?[0]` · `a?.[0]` — `f? x` · `f?(x)` · `f?.(x)` |
 | template handler | `(-> a(); @b())` · `-> a(); @b()` · a method |
 

@@ -5,7 +5,7 @@ reasonCode = 500
 
 wrongMaybe: string = try 'value'
 wrongUnion: number = try 'text' catch e then 0
-wrongBuilt = -> throw new Error(reasonCode)
+wrongBuilt = -> throw Error.new(reasonCode)
 wrongAccess = ->
   try
     'ok'

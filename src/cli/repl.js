@@ -249,7 +249,7 @@ const KEYWORD_WORDS = new Set([
   'if', 'else', 'unless', 'then', 'switch', 'when', 'for', 'while',
   'until', 'loop', 'do', 'return', 'break', 'continue', 'throw', 'try',
   'catch', 'finally', 'yield', 'await', 'import', 'export', 'from',
-  'default', 'delete', 'typeof', 'instanceof', 'new', 'super', 'and',
+  'default', 'delete', 'typeof', 'instanceof', 'super', 'and',
   'or', 'not', 'is', 'isnt', 'class', 'def', 'interface',
   'type', 'extends', 'own', 'schema', 'private', 'in', 'of', 'by', 'as',
   'component', 'render', 'slot', 'offer', 'accept', 'use', 'debugger', 'it',

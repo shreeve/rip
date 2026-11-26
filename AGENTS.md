@@ -350,13 +350,14 @@ alters surface syntax updates ALL THREE in the same change.
   conflict-neutral. Pins: `test/rip/control.rip` (`try return catch
   then return`). Expanding to braced JS `try`/`catch` in user code to
   dodge the parse error is rejected.
-- **`new` × dammit → grammar.** `new Response(x).text!` nested the
-  dammit under `new`; the emitter leaked a `dammit!` head. Owned by
-  the grammar (JS NewExpression/MemberExpression split): retag
-  `new`→`NEW`; `NewValue`/`NewCall`/`NewSpine` in `grammar.rip`;
-  conflict-neutral. The competing lexer-rewriter scored the same on
-  in-scope cells but re-detected construction boundaries the parse
-  owns — rejected.
+- **Construction → one spelling, `X.new`.** A `.new` member call is
+  the construction: the emitter lowers `X.new(a)` to `new X(a)` (a
+  pure spine stands bare, any other constructor seals), `X.new!`
+  awaits it, and a bare `X.new` reads the property. A prefix `new` is
+  a reserved word: `rejectReservedWords` (lexer, shared with the
+  schema sub-parse) rejects it at the keyword, so the grammar has no
+  construction rule. `new` survives only as `new.target` and inside a
+  TS constructor type. Pins: `test/rip/classes.rip`.
 - **REPL dynamic imports → minted runtime resolver.** Literal-only
  span recording would leave computed specifiers (`import(someVar)`)
  silently broken — the forbidden defect class. Instead `repl: true`

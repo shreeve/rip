@@ -387,7 +387,7 @@ code "do block", '''
 # Control flow short-circuits: or return / or throw / and return / and throw
 # ==============================================================================
 
-code "or throw assignment rewrites as an if-guard", "  data = fetchData() or throw new Error 'No data'", "let data;\n\nif (!(data = fetchData())) throw new Error(\"No data\");"
+code "or throw assignment rewrites as an if-guard", "  data = fetchData() or throw Error.new 'No data'", "let data;\n\nif (!(data = fetchData())) throw new Error(\"No data\");"
 
 # Return guards rewrite as statements — the one lowering that keeps
 # the return's function target (an IIFE would capture it)
@@ -418,35 +418,35 @@ code "and throw assignment rewrites as an if-guard", "  error = validate() and t
   if ((error = validate())) throw error;
 '''
 
-code "standalone and throw rewrites as an if-guard", "  isError and throw new Error 'Failed'", "if (isError) throw new Error(\"Failed\");"
+code "standalone and throw rewrites as an if-guard", "  isError and throw Error.new 'Failed'", "if (isError) throw new Error(\"Failed\");"
 
 # ==============================================================================
 # Nullish coalescing control flow: ?? return / ?? throw
 # Key difference: ?? only triggers on null/undefined, not other falsy values
 # ==============================================================================
 
-code "?? throw assignment rewrites with a nullish check", "  data = getValue() ?? throw new Error 'Missing'", "let data;\n\nif ((data = getValue()) == null) throw new Error(\"Missing\");"
-code "standalone ?? throw rewrites with a nullish check", "  getValue() ?? throw new Error 'Not found'", "if (getValue() == null) throw new Error(\"Not found\");"
+code "?? throw assignment rewrites with a nullish check", "  data = getValue() ?? throw Error.new 'Missing'", "let data;\n\nif ((data = getValue()) == null) throw new Error(\"Missing\");"
+code "standalone ?? throw rewrites with a nullish check", "  getValue() ?? throw Error.new 'Not found'", "if (getValue() == null) throw new Error(\"Not found\");"
 
 # The short-circuit SEMANTICS, executed: the arm only throws when the
 # left side demands it.
 
 test "or throw passes a truthy left through", '''
   fetchData = -> 42
-  d = fetchData() or throw new Error "No data"
+  d = fetchData() or throw Error.new "No data"
   d
 ''', 42
 
 test "?? throw keeps a FALSY-but-present left (nullish only)", '''
   v = false
-  w = v ?? throw new Error "Missing"
+  w = v ?? throw Error.new "Missing"
   w
 ''', false
 
 test "?? throw fires on null", '''
   grab = -> null
   try
-    grab() ?? throw new Error "Missing"
+    grab() ?? throw Error.new "Missing"
   catch e
     e.message
 ''', "Missing"
@@ -454,7 +454,7 @@ test "?? throw fires on null", '''
 test "an annotated catch binding (`catch e: any`) is the plain parameter at runtime", '''
   grab = -> null
   try
-    grab() ?? throw new Error "Missing"
+    grab() ?? throw Error.new "Missing"
   catch e: any
     e.message
 ''', "Missing"
@@ -1069,7 +1069,7 @@ test "postfix if else with complex condition", '''
 
 code "or-throw in sibling exports declares in each function", '''
     export first = (data) ->
-      store = getData() or throw new Error 'no context'
+      store = getData() or throw Error.new 'no context'
       store.value
 
     export second = ->
@@ -1128,7 +1128,7 @@ test 'bare try expression returns value on success', '''
 ''', 42
 
 test 'bare try statement swallows error', '''
-    try (throw new Error('boom'))
+    try (throw Error.new('boom'))
     'ok'
 ''', 'ok'
 
@@ -1162,13 +1162,13 @@ test 'try return catch then return falls back', '''
 ''', 'nope'
 
 test 'bare try expression returns undefined on throw', '''
-  boom = -> throw new Error 'no'
+  boom = -> throw Error.new 'no'
   x = try boom()
   x is undefined
   ''', true
 
 test 'multi-line handler-less try swallows', '''
-  boom = -> throw new Error 'no'
+  boom = -> throw Error.new 'no'
   try
     boom()
   'after'
@@ -1207,7 +1207,7 @@ test 'an inline try pair value ends the object at its line', '''
   [x.a, y]
 ''', [1, 2]
 
-code 'or throw assignment generates if', '  data = fetchData() or throw new Error \'No data\'', '''
+code 'or throw assignment generates if', '  data = fetchData() or throw Error.new \'No data\'', '''
   let data;
 
   if (!(data = fetchData())) throw new Error('No data');
@@ -1219,9 +1219,9 @@ code 'and throw assignment generates if', '  error = validate() and throw error'
   if ((error = validate())) throw error;
 '''
 
-code 'standalone and throw generates if', '  isError and throw new Error \'Failed\'', 'if (isError) throw new Error(\'Failed\');'
+code 'standalone and throw generates if', '  isError and throw Error.new \'Failed\'', 'if (isError) throw new Error(\'Failed\');'
 
-code '?? throw assignment generates if with nullish check', '  data = getValue() ?? throw new Error \'Missing\'', '''
+code '?? throw assignment generates if with nullish check', '  data = getValue() ?? throw Error.new \'Missing\'', '''
   let data;
 
   if ((data = getValue()) == null) throw new Error('Missing');
@@ -1244,7 +1244,7 @@ test 'or return with assignment truthy', '''
 test 'or throw with assignment falsy', '''
     fn = ->
       try
-        data = null or throw new Error 'No data'
+        data = null or throw Error.new 'No data'
         'got: ' + data
       catch e
         'caught: ' + e.message
@@ -1254,7 +1254,7 @@ test 'or throw with assignment falsy', '''
 test 'or throw with assignment truthy', '''
     fn = ->
       try
-        data = 'value' or throw new Error 'No data'
+        data = 'value' or throw Error.new 'No data'
         'got: ' + data
       catch e
         'caught: ' + e.message
@@ -1278,7 +1278,7 @@ test 'and return with assignment falsy', '''
 test 'and throw with assignment truthy', '''
     fn = ->
       try
-        error = 'validation failed' and throw new Error 'validation failed'
+        error = 'validation failed' and throw Error.new 'validation failed'
         'success'
       catch e
         'caught: ' + e.message
@@ -1288,7 +1288,7 @@ test 'and throw with assignment truthy', '''
 test 'and throw with assignment falsy', '''
     fn = ->
       try
-        error = null and throw new Error 'should not throw'
+        error = null and throw Error.new 'should not throw'
         'success'
       catch e
         'caught: ' + e.message
@@ -1305,7 +1305,7 @@ test 'standalone or return', '''
 test 'standalone and throw', '''
     fn = (isError) ->
       try
-        isError and throw new Error 'error!'
+        isError and throw Error.new 'error!'
         'ok'
       catch e
         e.message
@@ -1357,7 +1357,7 @@ test '?? return with truthy value', '''
 test '?? throw with null', '''
     fn = ->
       try
-        data = null ?? throw new Error 'was null'
+        data = null ?? throw Error.new 'was null'
         'got: ' + data
       catch e
         'caught: ' + e.message
@@ -1367,7 +1367,7 @@ test '?? throw with null', '''
 test '?? throw with undefined', '''
     fn = ->
       try
-        data = undefined ?? throw new Error 'was undefined'
+        data = undefined ?? throw Error.new 'was undefined'
         'got: ' + data
       catch e
         'caught: ' + e.message
@@ -1377,7 +1377,7 @@ test '?? throw with undefined', '''
 test '?? throw with empty string (should NOT throw)', '''
     fn = ->
       try
-        data = '' ?? throw new Error 'was nullish'
+        data = '' ?? throw Error.new 'was nullish'
         'got empty: ' + (data is '')
       catch e
         'caught: ' + e.message
@@ -1387,7 +1387,7 @@ test '?? throw with empty string (should NOT throw)', '''
 test '?? throw with zero (should NOT throw)', '''
     fn = ->
       try
-        data = 0 ?? throw new Error 'was nullish'
+        data = 0 ?? throw Error.new 'was nullish'
         'got zero: ' + data
       catch e
         'caught: ' + e.message
@@ -1411,7 +1411,7 @@ test 'standalone ?? return with empty string', '''
 test 'standalone ?? throw with undefined', '''
     fn = (val) ->
       try
-        val ?? throw new Error 'was nullish'
+        val ?? throw Error.new 'was nullish'
         'got: ' + val
       catch e
         e.message

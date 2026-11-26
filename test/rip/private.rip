@@ -30,7 +30,7 @@ test 'a private method is callable from the class', '''
   class A
     private helper: (x) -> x + 1
     pub: -> @helper 1
-  (new A).pub()
+  (A.new()).pub()
   ''', 2
 
 test 'the modifier binds to its own pair — neighbors in one method object stay public', '''
@@ -38,7 +38,7 @@ test 'the modifier binds to its own pair — neighbors in one method object stay
     a: -> 1
     private b: -> 2
     c: -> 3
-  k = new A
+  k = A.new()
   [k.a(), k.b(), k.c()]
   ''', [1, 2, 3]
 
@@ -46,7 +46,7 @@ test 'a private method whose arrow sits on the next line', '''
   class A
     private m:
       -> 7
-  (new A).m()
+  (A.new()).m()
   ''', 7
 
 code 'a private void method keeps its bare return', '''
@@ -65,13 +65,13 @@ test 'a private void method whose arrow sits on the next line', '''
   class A
     private reset!:
       -> @n = 0
-  k = new A
+  k = A.new()
   [k.reset(), k.n]
   ''', [undefined, 0]
 
 code 'a private static method pair emits the plain static', '''
   class A
-    private @make: -> new A()
+    private @make: -> A.new()
   ''', '''
   class A {
     static make() {
@@ -100,7 +100,7 @@ test 'a private def with a return type', '''
   class A
     private def m(x): number
       x * 2
-  (new A).m 4
+  (A.new()).m 4
   ''', 8
 
 test 'a private generic def, with and without a return type', '''
@@ -109,7 +109,7 @@ test 'a private generic def, with and without a return type', '''
       x
     private def same<T>(x: T): T
       x
-  k = new A
+  k = A.new()
   [k.id(1), k.same('s')]
   ''', [1, 's']
 
@@ -119,7 +119,7 @@ test 'a private void def, with and without a return type', '''
       x
     private def tock!(x): void
       x
-  k = new A
+  k = A.new()
   [k.tick(1), k.tock(2)]
   ''', [undefined, undefined]
 
@@ -129,7 +129,7 @@ test 'a private generic void def, with and without a return type', '''
       x
     private def tock!<T>(x: T): void
       x
-  k = new A
+  k = A.new()
   [k.tick(1), k.tock(2)]
   ''', [undefined, undefined]
 
@@ -188,7 +188,7 @@ test 'a private field value wrapped onto the next line, bare and indented', '''
     1
     private b =
       2
-  k = new A
+  k = A.new()
   [k.a, k.b]
   ''', [1, 2]
 
@@ -207,7 +207,7 @@ test 'a private typed field value wrapped onto the next line, bare and indented'
     1
     private b: number =
       2
-  k = new A
+  k = A.new()
   [k.a, k.b]
   ''', [1, 2]
 
@@ -237,7 +237,7 @@ test 'the optional marker rides a private field as it rides any other', '''
     private f?: number =
       6
     private g?: number
-  k = new A
+  k = A.new()
   [k.a, k.b, k.c, k.d, k.e, k.f, k.g]
   ''', [1, 2, 3, 4, 5, 6, undefined]
 
@@ -254,7 +254,7 @@ test 'a private string-named field, bare and typed', '''
   class A
     private "data-a" = 1
     private "data-b": number = 2
-  k = new A
+  k = A.new()
   [k['data-a'], k['data-b']]
   ''', [1, 2]
 
@@ -265,7 +265,7 @@ test 'a private string-named field, bare and typed', '''
 type 'private members declare by name alone, typed or not', '''
   export class A
     private helper: (x: number) -> x
-    private @make: -> new A()
+    private @make: -> A.new()
     private count: number = 0
     private name: string
     pub: (x: number): number -> @helper x
@@ -303,7 +303,7 @@ test 'private is an ordinary property name', '''
   o = { private: 1 }
   class A
     private: -> 2
-  [o.private, (new A).private()]
+  [o.private, (A.new()).private()]
   ''', [1, 2]
 fail 'a private accessor rejects by name', '''
   class A
@@ -313,6 +313,6 @@ test 'a private method named get or set is a method', '''
   class A
     private get: -> 1
     private set: (v) -> v
-  k = new A
+  k = A.new()
   [k.get(), k.set(2)]
   ''', [1, 2]

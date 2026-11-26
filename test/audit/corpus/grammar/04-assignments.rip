@@ -104,7 +104,7 @@ class MediaCard
   'data-width': number = 320
   describe: -> "#{@'data-src'} at #{@'data-width'}px"
 
-card = new MediaCard()
+card = MediaCard.new()
 console.log(card.describe())
 
 # ── Index targets: the inline and indented key, slices, and the optional index ──

@@ -1078,7 +1078,7 @@ test "transform: derives from other raw keys", '''
 
 test "transform: coerces wire string to Date via constructor", '''
   Order = schema :shape
-    shippedAt? datetime, -> if it.shippedAt then new Date(it.shippedAt) else null
+    shippedAt? datetime, -> if it.shippedAt then Date.new(it.shippedAt) else null
   out = Order.parse({shippedAt: "2026-04-18T10:00:00Z"})
   out.shippedAt instanceof Date
   ''', true
@@ -1116,7 +1116,7 @@ test "transform: output validated against declared type", '''
 
 test "transform: thrown error surfaces as issue", '''
   X = schema
-    x! -> throw new Error("bad")
+    x! -> throw Error.new("bad")
   r = X.safe({})
   [r.ok, r.errors[0].error, r.errors[0].message]
   ''', [false, 'transform', 'bad']
@@ -1279,7 +1279,7 @@ test "ensure: truthy non-boolean (object, array) pass", '''
 test "ensure: thrown exception becomes ensure issue with user message", '''
   X = schema :shape
     name!
-    @ensure "custom msg", (u) -> throw new Error("boom")
+    @ensure "custom msg", (u) -> throw Error.new("boom")
   r = X.safe({name: "x"})
   [r.ok, r.errors[0].error, r.errors[0].message]
   ''', [false, "ensure", "custom msg"]
@@ -1335,7 +1335,7 @@ test "ensure: mixed inline and array forms in same schema", '''
 test "ensure: short-circuits when field validation fails", '''
   X = schema :shape
     name! 1..50
-    @ensure "never seen", (u) -> throw new Error("should not run")
+    @ensure "never seen", (u) -> throw Error.new("should not run")
   r = X.safe({})
   [r.ok, r.errors[0].error]
   ''', [false, "required"]
@@ -3095,7 +3095,7 @@ test "markDirty() throws on non-persisted instance (INSERT writes every set fiel
   User = schema :model
     name! string
   klass = User._getClass()
-  u = new klass({name: "Alice"}, false)
+  u = klass.new({name: "Alice"}, false)
   msg = null
   try
     u.markDirty 'name'
@@ -3511,7 +3511,7 @@ test "save() rejects a persisted instance with no snapshot identity", modelHeade
   User = schema :model
     name! string
   klass = User._getClass()
-  u = new klass({}, true)
+  u = klass.new({}, true)
   Object.defineProperty(u, "id", {value: 42, enumerable: true, writable: true, configurable: true})
   u.name = "Bob"
   warnings = []
@@ -4417,7 +4417,7 @@ test "relation accessor memoizes; {reload: true} busts the memo", modelHeader + 
 test "UNIQUE violation surfaces as SchemaError {field, error: 'unique'}", '''
   adapter =
     query: (sql, params) ->
-      throw new Error('Constraint Error: Duplicate key "email: a@b.c" violates unique constraint.')
+      throw Error.new('Constraint Error: Duplicate key "email: a@b.c" violates unique constraint.')
   __schemaSetAdapter adapter
   SchemaRegistry.reset()
   User = schema :model
@@ -4434,7 +4434,7 @@ test "UNIQUE violation surfaces as SchemaError {field, error: 'unique'}", '''
 test "NOT NULL violation surfaces as {field, error: 'required'}", '''
   adapter =
     query: (sql, params) ->
-      throw new Error("Constraint Error: NOT NULL constraint failed: users.name")
+      throw Error.new("Constraint Error: NOT NULL constraint failed: users.name")
   __schemaSetAdapter adapter
   SchemaRegistry.reset()
   User = schema :model
@@ -4450,7 +4450,7 @@ test "NOT NULL violation surfaces as {field, error: 'required'}", '''
 test "FK violation surfaces as {field, error: 'reference'}", '''
   adapter =
     query: (sql, params) ->
-      throw new Error('Constraint Error: Violates foreign key constraint because key "user_id: 99" does not exist in the referenced table')
+      throw Error.new('Constraint Error: Violates foreign key constraint because key "user_id: 99" does not exist in the referenced table')
   __schemaSetAdapter adapter
   SchemaRegistry.reset()
   User = schema :model
@@ -4468,7 +4468,7 @@ test "FK violation surfaces as {field, error: 'reference'}", '''
 
 test "non-constraint DB errors propagate untouched", '''
   adapter =
-    query: (sql, params) -> throw new Error("Catalog Error: table users does not exist")
+    query: (sql, params) -> throw Error.new("Catalog Error: table users does not exist")
   __schemaSetAdapter adapter
   SchemaRegistry.reset()
   User = schema :model
@@ -4941,7 +4941,7 @@ test "@ensure!: async predicates run concurrently; all failures collect in order
 test "@ensure!: rejected async predicate counts as failure with declared message", '''
   X = schema
     n! integer
-    @ensure! "boom guard", (u) -> Promise.reject(new Error("io"))
+    @ensure! "boom guard", (u) -> Promise.reject(Error.new("io"))
   r = X.safeAsync! {n: 1}
   [r.ok, r.errors[0].message]
 ''', [false, "boom guard"]
@@ -5400,7 +5400,7 @@ test "transaction!: throw rolls back and the exception propagates", txHeader + '
   try
     schema.transaction! ->
       User.create! {name: "A"}
-      throw new Error "boom"
+      throw Error.new "boom"
   catch e
     err = e.message
   [err, events]
@@ -5577,7 +5577,7 @@ test 'afterRollback fires on rollback; afterCommit does not', '''
     try
       schema.transaction! ->
         User.create! {name: "A"}
-        throw new Error "x"
+        throw Error.new "x"
     events
 ''', ['BEGIN', 'stmt', 'ROLLBACK', 'afterRollback']
 

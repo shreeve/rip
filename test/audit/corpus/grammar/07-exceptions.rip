@@ -71,7 +71,7 @@ settle = (risky: () => string) ->
     console.log('settled as', outcome)
   outcome
 
-console.log(settle(-> 'delivered'), settle(-> throw new Error('nope')))
+console.log(settle(-> 'delivered'), settle(-> throw Error.new('nope')))
 
 # ── try as an expression: inline, inline with a catch, and the two together ──
 
@@ -123,7 +123,7 @@ reject = (code: number) ->
     code: code
     retriable: code >= 500
 
-demand = (value: string | null) -> value ?? throw new Error('missing value')
+demand = (value: string | null) -> value ?? throw Error.new('missing value')
 
 held = try reject(503) catch caught then caught
 
