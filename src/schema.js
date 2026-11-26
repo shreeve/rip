@@ -2331,7 +2331,7 @@ function foldParseChain(rhs) {
     const callee = node[2];
     if (!Array.isArray(callee)) return null;
     if (foldStr(callee[0]) !== '.') return null;
-    const method = foldStr(callee[2]);
+    const method = foldStr(callee[3]);
     if (!FOLD_ALGEBRA.has(method)) return null;
     const argNodes = node.slice(3);
     let op;
@@ -2346,8 +2346,7 @@ function foldParseChain(rhs) {
         // :shape …)`) — its descriptor rides on the node itself, so it
         // folds with no name resolution at all. Field-less kinds
         // (:enum/:union) bail like any other unfoldable argument.
-        const inline = foldStr(a[0]) === 'schema' && a.length === 2 && a[1] &&
-          typeof a[1] === 'object' && Array.isArray(a[1].entries) ? a[1] : null;
+        const inline = schemaLiteralOf(a);
         if (!inline || (inline.kind !== 'shape' && inline.kind !== 'input')) return null;
         op = { method, otherDescriptor: inline };
       } else {
@@ -2361,7 +2360,7 @@ function foldParseChain(rhs) {
       op = { method, keys };
     }
     ops.unshift(op);
-    const obj = callee[1];
+    const obj = callee[2];
     if (Array.isArray(obj)) { node = obj; continue; } // inner call in the chain
     const base = foldStr(obj);
     if (typeof base !== 'string') return null;
@@ -2377,7 +2376,7 @@ function foldLiteralKeys(argNodes) {
   for (const a of argNodes) {
     if (Array.isArray(a)) {
       if (foldStr(a[0]) !== 'array') return null;
-      for (let i = 1; i < a.length; i++) {
+      for (let i = 2; i < a.length; i++) {
         const k = foldParseStrLit(a[i]);
         if (k == null) return null;
         keys.push(k);
@@ -2405,6 +2404,12 @@ function foldParseStrLit(node) {
   return inner;
 }
 
+// A schema literal's descriptor (["schema", {}, descriptor]), or null.
+function schemaLiteralOf(node) {
+  return Array.isArray(node) && foldStr(node[0]) === 'schema' && node.length === 3 &&
+    node[2] && typeof node[2] === 'object' && Array.isArray(node[2].entries) ? node[2] : null;
+}
+
 // Walk the program's top-level statements and evaluate every foldable
 // derived-schema assignment, threading each result into the same-file
 // schema map so a later `.extend`/chain can reference an already-folded
@@ -2414,25 +2419,25 @@ function foldParseStrLit(node) {
 function walkDerivedSchemas(sexpr, onFolded) {
   if (!Array.isArray(sexpr)) return;
   const head = foldStr(sexpr[0]);
-  const stmts = (head === 'program' || head === 'block') ? sexpr.slice(1) : [sexpr];
+  const stmts = (head === 'program' || head === 'block') ? sexpr.slice(2) : [sexpr];
   const byName = new Map();
   for (const stmt of stmts) {
     if (!Array.isArray(stmt)) continue;
     // Unwrap `export <assign>` to reach the assignment node.
-    const exported = foldStr(stmt[0]) === 'export' && Array.isArray(stmt[1]);
-    const assign = exported ? stmt[1] : stmt;
-    if (foldStr(assign[0]) !== '=' || !Array.isArray(assign[2])) continue;
-    const name = foldStr(assign[1]);
+    const exported = foldStr(stmt[0]) === 'export' && Array.isArray(stmt[2]);
+    const assign = exported ? stmt[2] : stmt;
+    if (foldStr(assign[0]) !== '=' || !Array.isArray(assign[3])) continue;
+    const name = foldStr(assign[2]);
     if (typeof name !== 'string') continue;
 
     // Already a schema literal — register its descriptor and move on.
-    if (foldStr(assign[2][0]) === 'schema' && assign[2].length === 2 &&
-        assign[2][1] && typeof assign[2][1] === 'object' && Array.isArray(assign[2][1].entries)) {
-      byName.set(name, assign[2][1]);
+    const literal = schemaLiteralOf(assign[3]);
+    if (literal !== null) {
+      byName.set(name, literal);
       continue;
     }
 
-    const chain = foldParseChain(assign[2]);
+    const chain = foldParseChain(assign[3]);
     if (!chain) continue;
     const baseDesc = byName.get(chain.base);
     if (!baseDesc) continue; // base not a same-file schema — leave the runtime call
@@ -2448,7 +2453,7 @@ function walkDerivedSchemas(sexpr, onFolded) {
 // self-contained schema literal. Mutates `sexpr`. Called by compile()
 // only when options.foldProjections is set.
 export function foldDerivedSchemas(sexpr) {
-  walkDerivedSchemas(sexpr, ({ descriptor, node }) => { node[2] = ['schema', descriptor]; });
+  walkDerivedSchemas(sexpr, ({ descriptor, node }) => { node[3] = ['schema', {}, descriptor]; });
 }
 
 // The same projections, READ rather than written: the shape each

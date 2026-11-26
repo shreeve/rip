@@ -156,7 +156,7 @@ describe('repl: dot commands', () => {
   test('.js shows the compiled emission; .sexp the tree; .tokens the tape', () => {
     const r = repl('.js\n.sexp\n.tokens\n1 + 1\n');
     expect(r.stdout).toContain('const __result = 1 + 1;');
-    expect(r.stdout).toContain('["program",["+","1","1"]]');
+    expect(r.stdout).toContain('["program",{},["+",{},"1","1"]]');
     expect(r.stdout).toContain('NUMBER "1"');
   });
 

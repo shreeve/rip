@@ -116,7 +116,7 @@ describe('cli: compile surface', () => {
     const r = rip(['-s', 'bump.rip']);
     expect(r.status).toBe(0);
     expect(JSON.parse(r.stdout)[0]).toBe('program');
-    expect(r.stdout).toContain('"def","bump"');
+    expect(r.stdout).toContain('"def",{},"bump"');
   });
 
   test('--version and --help exit 0', () => {

@@ -249,7 +249,7 @@ class Generator
   _parseKindRegistry: (kinds) ->
     fail = (msg) -> throw Error.new "kind registry: #{msg}"
     ident = /^[A-Za-z$][\w$-]*$/
-    simple = ['leaf', 'expr', 'bool', 'null', 'descriptor', 'any']
+    simple = ['leaf', 'expr', 'bool', 'null', 'none', 'descriptor', 'any']
     registry = {}
     named = []
     # Split at `sep` characters outside quotes, brackets and braces.
@@ -287,10 +287,21 @@ class Generator
         if alt.startsWith('[') and alt.endsWith(']')
           {t: 'list', of: parseType(alt[1...-1], where)}
         else if alt.startsWith('{') and alt.endsWith('}')
-          keys = alt[1...-1].trim().split(/\s+/).filter((k) -> k)
-          fail "malformed attribute record '#{alt}' in #{where}" unless keys.every (k) -> /^[A-Za-z_$][\w$]*$/.test k
-          fail "attribute record '#{alt}' repeats a key in #{where}" if Set.new(keys).size isnt keys.length
-          {t: 'attrs', keys: keys.sort()}
+          # `flag` holds true; `key:"a"|"b"` holds one of those words.
+          # (These names are unique to this closure: a name the method
+          # also assigns would be shared with it.)
+          attrFields = alt[1...-1].trim().split(/\s+/).filter((k) -> k)
+          attrKeys = []
+          attrValues = {}
+          for attrField in attrFields
+            attrMatch = attrField.match /^([A-Za-z_$][\w$]*)(?::((?:"[\w-]+")(?:\|"[\w-]+")*))?$/
+            fail "malformed attribute record '#{alt}' in #{where}" unless attrMatch
+            attrKeys.push attrMatch[1]
+            attrValues[attrMatch[1]] = (literalOf(w, where) for w in attrMatch[2].split('|')) if attrMatch[2]?
+          fail "attribute record '#{alt}' repeats a key in #{where}" if Set.new(attrKeys).size isnt attrKeys.length
+          attrRecord = {t: 'attrs', keys: attrKeys.sort()}
+          attrRecord.values = attrValues if Object.keys(attrValues).length
+          attrRecord
         else if alt.startsWith '"'
           {t: 'lit', value: literalOf(alt, where)}
         else if alt in simple
@@ -445,9 +456,13 @@ class Generator
       type.nullable is true or type.alts.some (a) -> a.t is 'null'
     else if typeof value is 'boolean'
       type.alts.some (a) -> a.t is 'bool'
+    else if Array.isArray value
+      value.length is 1 and value[0] is 'none' and type.alts.some (a) -> a.t is 'none'
     else if typeof value is 'object'
       flags = Object.keys(value).sort()
-      type.alts.some (a) -> a.t is 'attrs' and a.keys.join(' ') is flags.join(' ')
+      type.alts.some (a) ->
+        return false unless a.t is 'attrs' and a.keys.join(' ') is flags.join(' ')
+        flags.every (k) -> if a.values?[k]? then value[k] in a.values[k] else value[k] is true
     else
       type.alts.some (a) -> a.t is 'leaf' or a.t is 'expr' or (a.t is 'lit' and a.value is value)
 
@@ -580,11 +595,12 @@ class Generator
   # form takes the lowest rule id.
   #
   # Named bindings let one action serve the whole family. In a variant
-  # where a binding's label is absent, '@name' becomes the literal
-  # null and a spread '...@name' drops out of the template together
-  # with its annotation part. '@name?' is a presence flag — the
-  # literal true or false — and consumes the label, so the symbol
-  # carries no side-band role of its own.
+  # where a binding's label is absent, '@name' becomes the absent marker
+  # ["none"] and a spread '...@name' drops out of the template together
+  # with its annotation part. '@name?' is a presence flag — the literal
+  # true or false, or inside an attribute record the key or nothing —
+  # and consumes the label, so the symbol carries no side-band role of
+  # its own.
   _expandOptionals: (handle) ->
     pattern = if Array.isArray handle
       if typeof handle[0] is 'string' then handle[0] else handle[0].join ' '
@@ -668,14 +684,21 @@ class Generator
     presence = Set.new()
     bound = Set.new()
     text = @_outsideQuotes action, (plain) ->
-      plain.replace /(\.\.\.)?@([A-Za-z$][\w$-]*|_[\w$-]+)(\?)?/g, (m, spread, name, flag) ->
+      # A presence flag inside an attribute record (`{own: @own?}`) is
+      # the flag when its label is present and no key when it is absent.
+      flagged = plain.replace /([A-Za-z_$][\w$]*)\s*:\s*@([A-Za-z$][\w$-]*|_[\w$-]+)\?/g, (m, key, name) ->
+        return m unless known.has name
+        presence.add name
+        if present.has name then "#{key}: true" else ''
+      flagged = flagged.replace(/\{\s*,\s*/g, '{').replace(/,\s*,/g, ',').replace(/,\s*\}/g, '}').replace(/\{\s+\}/g, '{}')
+      flagged.replace /(\.\.\.)?@([A-Za-z$][\w$-]*|_[\w$-]+)(\?)?/g, (m, spread, name, flag) ->
         return m unless known.has name
         if flag
           presence.add name
           return if present.has name then 'true' else 'false'
         bound.add name
         return m if present.has name
-        if spread then DROP else 'null'
+        if spread then DROP else '["none"]'
 
     # A presence label is consumed: the symbol carries no side-band role
     # unless the action also binds its value.
@@ -973,12 +996,13 @@ class Generator
         j += (if t[j] is '\\' then 2 else 1) while j < t.length and t[j] isnt q
         return null unless j is t.length - 1
         elements.push {literal: t, childSlot}
-      else if t is 'true' or t is 'false' or t is 'null'
+      else if t is 'true' or t is 'false' or t is 'null' or t is '["none"]'
         elements.push {literal: t, childSlot}
       else if t[0] is '{'
-        # An attribute record: an object literal of flags, each `true`.
-        # Anything else in braces is executable.
-        return null unless /^\{\s*(?:[A-Za-z_$][\w$]*\s*:\s*true(?:\s*,\s*[A-Za-z_$][\w$]*\s*:\s*true)*)?\s*\}$/.test t
+        # An attribute record: an object literal whose values are `true`
+        # (a flag) or a double-quoted word. Anything else in braces is
+        # executable.
+        return null unless /^\{\s*(?:[A-Za-z_$][\w$]*\s*:\s*(?:true|"[\w-]+")(?:\s*,\s*[A-Za-z_$][\w$]*\s*:\s*(?:true|"[\w-]+"))*)?\s*\}$/.test t
         flags = t.match(/[A-Za-z_$][\w$]*(?=\s*:)/g) ?? []
         return null if Set.new(flags).size isnt flags.length
         elements.push {literal: t, childSlot}
@@ -1123,7 +1147,8 @@ class Generator
           fail "literal element #{element.literal} cannot take a spread role '...#{name}'" if spread
           fail "literal element #{element.literal} takes no sub-annotation ('#{raw}')" if sub?
           layout.push {literal: @_literalValue(element.literal), name}
-          continue if name is '_'
+          # An absent slot (the ["none"] marker) records no role.
+          continue if name is '_' or element.literal is '["none"]'
 
         layout.push {ref: element.grammarRef, name, spread: element.spread} if element.grammarRef?
         checkName name, seen

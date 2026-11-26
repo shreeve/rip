@@ -517,7 +517,7 @@ describe('expression dispatch', () => {
   test('a node no expression form claims rejects, naming its head', () => {
     parser.lexer = makeParserLexer();
     const result = parser.parse('x = 1\n');
-    result.sexpr[1][2] = ['bogus', '1'];
+    result.sexpr[2][3] = ['bogus', {}, '1'];
     expect(() => emit(result, { source: 'x = 1\n' })).toThrow(/no expression emission for a 'bogus' node/);
   });
 });

@@ -842,7 +842,9 @@ export function schemaTypeStory(decl, byName, known, source = null) {
 // scope's schemas and the module's as `known`, and is never seen by
 // them: a module field naming a function-local schema renders
 // `unknown`, never an unresolved identifier.
-export function buildSchemaTypeStory(programSexpr, source = null, imported = [], hooks = null) {
+// `parserSexpr` is the same program in the parser's shape, which the
+// derived-schema folder reads.
+export function buildSchemaTypeStory(programSexpr, source = null, imported = [], hooks = null, parserSexpr) {
   const scoped = hooks !== null
     ? collectScopedSchemaDecls(programSexpr, hooks)
     : { module: collectSchemaDecls(programSexpr), scopes: [] };
@@ -861,7 +863,7 @@ export function buildSchemaTypeStory(programSexpr, source = null, imported = [],
   // than a `Pick<…>` the reader has to apply. Folding is conservative
   // and bails to nothing on an unknown base, dynamic keys, or a mixin —
   // each of those keeps today's behavior, never a wrong companion.
-  const derived = derivedSchemaDescriptors(programSexpr);
+  const derived = derivedSchemaDescriptors(parserSexpr);
   const assignedNames = collectAssignedNames(programSexpr);
   // Only names that actually resolve in type space may be `known` —
   // an alias this module emits, or an import binding — a field

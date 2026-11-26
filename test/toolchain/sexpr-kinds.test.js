@@ -78,20 +78,20 @@ const messages = (result, options) => validateSexpr(result, options).map((i) => 
 
 test('a null in a slot that does not admit null rejects', () => {
   const result = parse('for k, v of o\n  p k\n');
-  nodeOfKind(result, 'forof')[2] = null;
+  nodeOfKind(result, 'forof')[3] = null;
   expect(messages(result)).toEqual([
-    expect.stringMatching(/^forof node fits no form; closest \("for-of" .*\): element 2 is null, the slot takes object:expr$/),
+    expect.stringMatching(/^forof node fits no form; closest \("loop" .*\): element 3 is null, the slot takes object:expr$/),
   ]);
 });
 
 test('a node of the wrong kind in a typed slot rejects', () => {
-  // A try's third element is a catch handler or a finally block; a
-  // call node is neither.
+  // A try's handler slot holds a catch node or nothing; a call node is
+  // neither.
   const result = parse('try a() catch e then b()\n');
   const tryNode = nodeOfKind(result, 'try');
-  tryNode[2] = nodeOfKind(result, 'call');
+  tryNode[3] = nodeOfKind(result, 'call');
   expect(messages(result)).toEqual([
-    expect.stringMatching(/^try node fits no form; closest \("try" body:expr\|block handler:catch\): element 2 is a call node, the slot takes handler:catch$/),
+    expect.stringMatching(/^try node fits no form; closest \("try" .*\): element 3 is a call node, the slot takes handler:catch\|none$/),
   ]);
 });
 
@@ -99,23 +99,23 @@ test('a plumbing list where an expression belongs rejects', () => {
   // The when's conditions list is a real plumbing array with its own
   // NodeStore row.
   const result = parse('switch s\n  when a, b\n    p 1\nx = y\n');
-  const conditions = nodeOfKind(result, 'when')[1];
+  const conditions = nodeOfKind(result, 'when')[2];
   expect(result.stores.nodeIds.has(conditions)).toBe(true);
-  nodeOfKind(result, 'assign')[2] = conditions;
+  nodeOfKind(result, 'assign')[3] = conditions;
   expect(messages(result)).toEqual([
-    expect.stringMatching(/element 2 is an unkinded array, the slot takes value:expr$/),
+    expect.stringMatching(/element 3 is an unkinded array, the slot takes value:expr$/),
   ]);
 });
 
 test('a part node where an expression belongs rejects', () => {
   const result = parse('try a() catch e then b()\nx = y\n');
-  nodeOfKind(result, 'assign')[2] = nodeOfKind(result, 'catch');
+  nodeOfKind(result, 'assign')[3] = nodeOfKind(result, 'catch');
   expect(messages(result)).toEqual([
-    expect.stringMatching(/^assign node fits no form; closest .*: element 2 is a catch node, the slot takes value:expr$/),
+    expect.stringMatching(/^assign node fits no form; closest .*: element 3 is a catch node, the slot takes value:expr$/),
   ]);
   const root = parse('x = y\n');
-  nodeOfKind(root, 'assign')[2] = root.sexpr;
-  expect(messages(root)).toEqual([expect.stringMatching(/element 2 is a program node, the slot takes value:expr$/)]);
+  nodeOfKind(root, 'assign')[3] = root.sexpr;
+  expect(messages(root)).toEqual([expect.stringMatching(/element 3 is a program node, the slot takes value:expr$/)]);
 });
 
 test('a role row naming a different slot rejects', () => {
@@ -125,14 +125,14 @@ test('a role row naming a different slot rejects', () => {
   const id = result.stores.nodeIds.get(nodeOfKind(result, 'try'));
   result.stores.roles.find((r) => r.nodeId === id && r.role === 'finalizer').role = 'handler';
   expect(messages(result)).toEqual([
-    "try node fits no form; closest (\"try\" body:expr|block finalizer:block): role 'handler' sits at element 2, which the form names 'finalizer'",
+    "try node fits no form; closest (\"try\" attrs:{} body:expr|block handler:catch|none finalizer:block|none): role 'handler' sits at element 4, which the form names 'finalizer'",
   ]);
 });
 
 test('an executable action value passes where an expression belongs', () => {
   // `(a; b)` is built by the Parenthetical rule's executable action.
   const result = parse('x = (a; b)\n');
-  const value = nodeOfKind(result, 'assign')[2];
+  const value = nodeOfKind(result, 'assign')[3];
   expect(value[0]).toBe('block');
   expect(messages(result)).toEqual([]);
 });
@@ -141,7 +141,7 @@ test('an element past the form arity rejects', () => {
   const result = parse('return 1\n');
   nodeOfKind(result, 'return').push('2');
   expect(messages(result)).toEqual([
-    expect.stringMatching(/^return node fits no form; closest \("return" value:expr\): element 2 has no slot \(the form has 2\)$/),
+    expect.stringMatching(/^return node fits no form; closest \("return" attrs:\{\} value:expr\|none\): element 3 has no slot \(the form has 3\)$/),
   ]);
 });
 
@@ -159,33 +159,33 @@ test('a kind missing from the registry rejects', () => {
 
 test('a root that is not a program rejects', () => {
   const result = parse('x = y\n');
-  expect(messages({ ...result, sexpr: result.sexpr[1] })).toContain('the root is an assign node, not a program node');
+  expect(messages({ ...result, sexpr: result.sexpr[2] })).toContain('the root is an assign node, not a program node');
 });
 
 test('every call is ["call", attrs, callee, ...args], and the attribute record carries opt and await', () => {
-  const tree = (src) => parse(src).sexpr[1];
+  const tree = (src) => parse(src).sexpr[2];
   expect(tree('f a')).toEqual(['call', {}, 'f', 'a']);
   expect(tree('f?.(a)')).toEqual(['call', { opt: true }, 'f', 'a']);
   expect(tree('f? a')).toEqual(['call', { opt: true }, 'f', 'a']);
   expect(tree('f!')).toEqual(['call', { await: true }, 'f']);
   expect(tree('f?! a')).toEqual(['call', { opt: true, await: true }, 'f', 'a']);
-  expect(tree('x = import("m")')[2]).toEqual(['call', {}, 'import', '"m"']);
-  expect(tree('x = import!("m")')[2]).toEqual(['call', { await: true }, 'import', '"m"']);
-  const ctor = parse('class A extends B\n  constructor: -> super(1)\n').sexpr[1][3][1][1][2][2][1];
+  expect(tree('x = import("m")')[3]).toEqual(['call', {}, 'import', '"m"']);
+  expect(tree('x = import!("m")')[3]).toEqual(['call', { await: true }, 'import', '"m"']);
+  const ctor = parse('class A extends B\n  constructor: -> super(1)\n').sexpr[2][4][2][2][3][3][2];
   expect(ctor).toEqual(['call', {}, 'super', '1']);
 });
 
 test('a call of a construct name is a call, never the construct', () => {
-  const tree = (src) => parse(src).sexpr[1];
+  const tree = (src) => parse(src).sexpr[2];
   expect(tree('state a, 0')).toEqual(['call', {}, 'state', 'a', '0']);
-  expect(tree('a := 0')).toEqual(['state', 'a', '0']);
+  expect(tree('a := 0')).toEqual(['state', {}, 'a', '0']);
   expect(tree('effect h, 5')).toEqual(['call', {}, 'effect', 'h', '5']);
   expect(tree('readonly x, 5')).toEqual(['call', {}, 'readonly', 'x', '5']);
   expect(tree('block 1, 2')).toEqual(['call', {}, 'block', '1', '2']);
   // A zero-argument call and an interpolation chunk are distinct:
   // `c()` against `"#{c}"`.
   expect(tree('c()')).toEqual(['call', {}, 'c']);
-  expect(tree('"#{c}"')).toEqual(['str', '""', ['c'], '""']);
+  expect(tree('"#{c}"')).toEqual(['str', {}, '""', ['c'], '""']);
 });
 
 test('an attribute record must hold exactly its slot\'s flags', () => {
@@ -198,4 +198,19 @@ test('an attribute record must hold exactly its slot\'s flags', () => {
   const flag = parse('f!\n');
   nodeOfKind(flag, 'dammit')[1] = { await: 'yes' };
   expect(messages(flag)[0]).toMatch(/element 1 is the record \{"await":"yes"\}/);
+});
+
+test('an absent slot is the none marker, and only a slot that admits none takes it', () => {
+  const result = parse('return\n');
+  expect(nodeOfKind(result, 'return')).toEqual(['return', {}, ['none']]);
+  expect(messages(result)).toEqual([]);
+  const filled = parse('f()\ny = 1\n');
+  nodeOfKind(filled, 'assign')[3] = ['none'];
+  expect(messages(filled)).toEqual([expect.stringMatching(/element 3 is an unkinded array, the slot takes value:expr$/)]);
+});
+
+test('a loop record names its source exactly', () => {
+  const result = parse('for k, v of o\n  p k\n');
+  nodeOfKind(result, 'forof')[1] = { over: 'in' };
+  expect(messages(result)[0]).toMatch(/element 1 is the record \{"over":"in"\}, the slot takes attrs:\{over:"of"\}\|\{over:"of" own\}/);
 });

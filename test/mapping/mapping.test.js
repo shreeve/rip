@@ -703,7 +703,7 @@ describe('construct by construct: spans, grouping, and lowerings', () => {
     expect(r.diagnostics).toEqual([]);
     // else belongs to the inner if (the JS convention).
     expect(JSON.stringify(r.sexpr)).toBe(JSON.stringify(
-      ['program', ['if', 'a', ['block', ['if', 'b', ['block', 'c'], ['block', 'd']]]]],
+      ['program', {}, ['if', {}, 'a', ['block', {}, ['if', {}, 'b', ['block', {}, 'c'], ['block', {}, 'd']]], ['none']]],
     ));
   });
 

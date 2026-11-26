@@ -146,9 +146,9 @@ describe('the component surface: keywords and context', () => {
   test('the offer/accept sexpr is \'s exact shape', () => {
     const r = parser.parse('C = component\n  offer theme := 1\n  accept locale\n  render\n    div "x"');
     expect(r.diagnostics).toEqual([]);
-    const body = r.sexpr[1][2][2]; // program → assign → component → block
-    expect(JSON.stringify(body[1])).toBe('["offer",["state","theme","1"]]');
-    expect(JSON.stringify(body[2])).toBe('["accept","locale"]');
+    const body = r.sexpr[2][3][3]; // program → assign → component → block
+    expect(JSON.stringify(body[2])).toBe('["offer",{},["state",{},"theme","1"]]');
+    expect(JSON.stringify(body[3])).toBe('["accept",{},"locale",["none"]]');
   });
 
   test('render scan context: tight #word is id syntax, spaced # word stays a comment', () => {
@@ -243,7 +243,7 @@ describe('typed and optional props', () => {
     //  type story reads it).
     const r = parser.parse(src);
     const out = emit(r, { source: src });
-    const decl = r.sexpr[1][2][2][1];
+    const decl = r.sexpr[2][3][3][2];
     const id = out.stores.idOf(decl);
     const role = out.stores.role(id, 'optionalMarker');
     expect(role).not.toBeNull();
@@ -272,7 +272,7 @@ describe('typed and optional props', () => {
     const src = 'C = component\n  @name? =! 1\n  render\n    div "x"\n';
     const r = parser.parse(src);
     const out = emit(r, { source: src });
-    const decl = r.sexpr[1][2][2][1];
+    const decl = r.sexpr[2][3][3][2];
     const role = out.stores.role(out.stores.idOf(decl), 'optionalMarker');
     expect(role).not.toBeNull();
     expect(src.slice(role.sourceStart, role.sourceEnd)).toBe('?');
@@ -302,7 +302,7 @@ describe('typed and optional props', () => {
     const src = 'C = component\n  @name?: string := "anon"\n  render\n    div "x"\n';
     const r = parser.parse(src);
     const out = emit(r, { source: src });
-    const decl = r.sexpr[1][2][2][1];
+    const decl = r.sexpr[2][3][3][2];
     const id = out.stores.idOf(decl);
     const marker = out.stores.role(id, 'optionalMarker');
     expect(marker).not.toBeNull();
@@ -311,7 +311,7 @@ describe('typed and optional props', () => {
     expect(annotation).not.toBeNull();
     expect(src.slice(annotation.sourceStart, annotation.sourceEnd)).toBe(': string');
     // Sexpr stays the unmarked/untyped shape.
-    expect(JSON.stringify(decl)).toBe('["state",[".","this","name"],"\\"anon\\""]');
+    expect(JSON.stringify(decl)).toBe('["state",{},[".",{},"this","name"],"\\"anon\\""]');
   });
 
   test('the widened `?:` minting never disturbs existence-adjacent shapes', () => {
