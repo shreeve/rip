@@ -175,6 +175,19 @@ export function compile(source, options = {}) {
   return emitSource(parseSource(source, options), options);
 }
 
+// The __DATA__ marker: everything after a line that is exactly
+// `__DATA__` is the program's DATA constant — raw text, never parsed.
+// The parse sees the truncated text; offsets before the marker are
+// unchanged, so every diagnostic and mapping span stays exact against
+// the full file. `dataPayload` is null when there is no marker.
+export function splitData(source) {
+  const lines = source.split('\n');
+  const at = lines.findIndex((line) => line === '__DATA__');
+  if (at === -1) return { text: source, dataPayload: null };
+  const rest = lines.slice(at + 1);
+  return { text: lines.slice(0, at).join('\n'), dataPayload: rest.length > 0 ? rest.join('\n') + '\n' : '' };
+}
+
 // compile() in its two halves, for a caller that emits one parse more
 // than once — `rip check` re-emits a file with pins after probing it,
 // and only the emission depends on pins. The parse is everything up to
@@ -194,22 +207,7 @@ export function parseSource(source, { path = '<anonymous>', face = 'js', toleran
   }
   const file = new SourceFile(source, path);
 
-  // The __DATA__ marker: everything after a line that is exactly
-  // `__DATA__` is the program's DATA constant — raw text, never
-  // parsed. The parse sees the truncated source; offsets before the
-  // marker are unchanged, so every diagnostic and mapping span stays
-  // exact against the full file.
-  let dataPayload = null;
-  let parseSource = source;
-  {
-    const lines = source.split('\n');
-    const at = lines.findIndex((line) => line === '__DATA__');
-    if (at !== -1) {
-      const rest = lines.slice(at + 1);
-      dataPayload = rest.length > 0 ? rest.join('\n') + '\n' : '';
-      parseSource = lines.slice(0, at).join('\n');
-    }
-  }
+  const { text: parseSource, dataPayload } = splitData(source);
 
   const parser = Parser();
   parser.lexer = makeParserLexer(path, { tolerant });
