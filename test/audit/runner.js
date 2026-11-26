@@ -249,6 +249,7 @@ import { compile } from '../../src/compiler.js';
 import { readProjectConfig } from '../../src/config.js';
 import { codeMask, specifierSpans } from './mask.js';
 import { Parser } from '../../src/parser.js';
+import { emitterShape } from '../../src/emitter-shape.js';
 import { makeParserLexer, tokenize, ALIASES } from '../../src/lexer.js';
 import { identifierRuns, isIdentifierName } from '../../src/ident.js';
 import { renderTypeDecl } from '../../src/ts/types.js';
@@ -2546,9 +2547,12 @@ if (RUN_GRAMMAR) {
         continue;
       }
       for (const m of text.matchAll(/(?:from|import)\s+['"]\.\/([^'"]+\.rip)['"]/g)) importedFixtures.set(m[1], f);
-      walkPairs(tree.sexpr, []);
+      // The walkers read the emitter's input shape (src/emitter-shape.js),
+      // which keeps each node's id.
+      const shaped = emitterShape(tree.sexpr, tree.stores.nodeIds);
+      walkPairs(shaped, []);
       {
-        const { sigil, bare } = memberReadCensus(tree.sexpr);
+        const { sigil, bare } = memberReadCensus(shaped);
         const listed = SIGIL_READ_COVERAGE.get(f);
         // The line is decoration on the finding, read through the parse
         // tree's own stores; a lookup that fails names the read without it.
