@@ -12,7 +12,7 @@
 //                               [--md <report.md>]
 //   bun scripts/mutate.mjs try    --in <mutants.json> --ids <id,…|ids file> -- <command…>
 //   bun scripts/mutate.mjs observe --in <mutants.json> --ids <ids file> --out <observe.jsonl>
-//                               [--workers N] [--workdir <dir>] [--cap [--mem SIZE]]
+//                               [--workers N] [--workdir <dir>] [--cap [--mem SIZE]] [--keys <file>]
 //
 // `gen` mutates only lines the lcov file marks executed: an unexecuted
 // line survives every mutant by construction, and the coverage report
@@ -547,8 +547,12 @@ async function tryMutants(args, cmd) {
 async function corpusHashes() {
   const { compile } = await import(join(ROOT, 'src/compiler.js'));
   const { packageInputs, rowInputs, hashInputs } = await import(join(ROOT, 'test/support/consumer-hashes.js'));
+  // RIP_CORPUS_KEYS names a file of consumer keys to hash alone: a
+  // recheck after the corpus itself changed needs only the moved programs.
+  const only = process.env.RIP_CORPUS_KEYS ? new Set(readFileSync(process.env.RIP_CORPUS_KEYS, 'utf8').split('\n').filter(Boolean)) : null;
+  const inputs = [...packageInputs(ROOT), ...(await rowInputs(ROOT))].filter((i) => !only || only.has(i.key));
   const out = {};
-  for (const [key, faces] of Object.entries(hashInputs([...packageInputs(ROOT), ...(await rowInputs(ROOT))], compile))) {
+  for (const [key, faces] of Object.entries(hashInputs(inputs, compile))) {
     out[`js ${key}`] = faces.js;
     out[`ts ${key}`] = faces.ts;
   }
@@ -579,7 +583,7 @@ async function observe(args) {
   const hashesIn = async (dir) => {
     const cmd = ['bun', 'scripts/mutate.mjs', 'corpus-hashes'];
     const proc = spawn(args.cap ? ['cpuq', 'cap', '--mem', args.mem ?? MEM_CAP, '--time', '300s', '--', ...cmd] : cmd,
-      { cwd: dir, env: { ...process.env, RIP_NO_CACHE: '1', FORCE_COLOR: '0' }, stdout: 'pipe', stderr: 'pipe' });
+      { cwd: dir, env: { ...process.env, RIP_NO_CACHE: '1', FORCE_COLOR: '0', ...(args.keys ? { RIP_CORPUS_KEYS: resolve(args.keys) } : {}) }, stdout: 'pipe', stderr: 'pipe' });
     const [out] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
     const code = await proc.exited;
     if (code !== 0) return { failed: code };
