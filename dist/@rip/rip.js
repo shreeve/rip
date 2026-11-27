@@ -10944,6 +10944,7 @@ var typeIdentifierTokens = (text, base = 0) => {
   }
   return out;
 };
+var FACTS = null;
 var isNode2 = (x) => Array.isArray(x);
 var isBinary = (x) => isNode2(x) && BINOPS.has(x[0]) && x.length === 3;
 var SPINE_HEADS = new Set([".", "?.", "[]", "optindex"]);
@@ -11696,6 +11697,7 @@ class Emitter {
         continue;
       decls.set(f.name, f);
     }
+    FACTS?.("decls", { owner, stmts }, decls);
   }
   pushReactiveFrame(stmts, bound, params = [], owner = null) {
     const reactive = this.collectReactiveNames(stmts);
@@ -11712,6 +11714,7 @@ class Emitter {
       importSpecs: Emitter.importedSpecs(stmts),
       exportedConst: Emitter.exportedConstNames(stmts)
     });
+    FACTS?.("frame", { owner, stmts, declared: Emitter.declaredNames(stmts) }, this.rframes[this.rframes.length - 1]);
     return new Set([...reactive, ...handles, ...readonly]);
   }
   withBindings(names, fn) {
@@ -12904,10 +12907,13 @@ class Emitter {
       saved[k] = this[k];
       this[k] = [];
     }
+    const facts = FACTS;
+    FACTS = null;
     try {
       this.withExpression(fn);
       return this.b.code;
     } finally {
+      FACTS = facts;
       this.b = prevB;
       Object.assign(this.temps, { n, used });
       for (const k of channels)
@@ -25189,7 +25195,9 @@ var runtimeAliasBindings = (emitter, trees) => {
 };
 var programScopeNames = (emitter, sexpr) => {
   const stmts = sexpr.slice(1);
-  const names = new Set(emitter.hoistTargets(stmts).map(([n]) => n));
+  const hoisted = emitter.hoistTargets(stmts);
+  FACTS?.("programHoist", null, hoisted);
+  const names = new Set(hoisted.map(([n]) => n));
   const imports = stmts.filter((s) => emitter.isModuleImport(s));
   for (const n of Emitter.importedNames(imports))
     names.add(n);
@@ -25428,7 +25436,16 @@ function recordSchemaFields(emitter, block, text, at) {
     }
   }
 }
-function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js", pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
+function emit(parseResult, options = {}) {
+  const outer = FACTS;
+  FACTS = options.facts ?? null;
+  try {
+    return emitWith(parseResult, options);
+  } finally {
+    FACTS = outer;
+  }
+}
+function emitWith(parseResult, { source = "", runtimeDelivery = "none", face = "js", pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
   if (!parseResult.sexpr) {
     throw new Error("emitter: cannot emit a failed parse");
   }
@@ -25450,7 +25467,9 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
   emitter.collectSourceChannels(parseResult.tokens ?? [], parseResult.trivia ?? []);
   emitter.collectTsDirectives(parseResult.sexpr, parseResult.trivia ?? [], source);
   emitter.collectTypeOnlyImports(parseResult.sexpr, source);
+  FACTS?.("typeOnlyImports", null, emitter.typeOnlyImports);
   emitter.collectAppAccessors(parseResult.sexpr);
+  FACTS?.("appAccessors", null, emitter.appAccessors);
   emitter.collectValidatorRegistrations(parseResult.sexpr);
   if (emitter.tsNocheck !== null) {
     const programId = stores.idOf(parseResult.sexpr);
@@ -25479,6 +25498,8 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
   }
   for (const { name } of ambient)
     emitter.temps.used.add(name);
+  FACTS?.("trees", null, trees);
+  FACTS?.("atoms", null, emitter.temps.used);
   const aliasUsed = runtimeAliasBindings(emitter, trees);
   for (const { name } of ambient)
     aliasUsed.add(name);
@@ -25489,6 +25510,7 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
     }
   }
   const bound = programScopeNames(emitter, parseResult.sexpr);
+  FACTS?.("programScopeNames", null, bound);
   const bindings = inventoryBindings(emitter, parseResult.sexpr, new Set(ambient.map(({ name }) => name)));
   for (const { name } of ambient)
     bound.add(name);
@@ -35029,7 +35051,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "6659c75e633d1ef4";
+var compilerBuild = () => "8e0ad9ec08ec6f97";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

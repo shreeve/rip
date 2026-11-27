@@ -324,15 +324,18 @@ describe('generated-scope inventory', () => {
       }
     }
     expect(unknown).toEqual([]);
-    // semantic 20: ctorAtFields' arrow-boundary propagation compares a
+    // semantic 21: ctorAtFields' arrow-boundary propagation compares a
     // node head against '=>' — whose `this` an assignment describes,
     // not an emission of one; classMethodForm spells '->' as the kind
-    // of the method pair a class-body `def` reads as.
+    // of the method pair a class-body `def` reads as; analyze.js's
+    // FUNC_HEADS names the two function heads its walk tests for.
+    // diagnostic 45 counts analyze.js's three block-nesting rejections,
+    // v1's messages restated where analysis now finds them.
     // type 51: the runtime table's face signatures and the alias text
     // they reference, the schema and orm entries' among them —
     // `__schema`'s open return included — the components entry's
     // context API with the provider alias it names, the lowering's own
     // component calls, and the intrinsics.
-    expect(categories).toEqual({ diagnostic: 42, semantic: 20, type: 51 });
+    expect(categories).toEqual({ diagnostic: 45, semantic: 21, type: 51 });
   });
 });

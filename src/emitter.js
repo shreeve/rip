@@ -113,6 +113,13 @@ const typeIdentifierTokens = (text, base = 0) => {
   return out;
 };
 
+// The fact sink: set by emit()'s internal `facts` option for one emit()
+// and null otherwise. Each `FACTS?.(kind, key, value)` hands the sink a
+// value the emitter has already computed; with no sink the optional call
+// evaluates nothing, so emission is byte-identical either way. Only the
+// analysis differential (test/support/analyze-diff.js) sets it.
+let FACTS = null;
+
 const isNode = (x) => Array.isArray(x);
 const isBinary = (x) => isNode(x) && BINOPS.has(x[0]) && x.length === 3;
 // The four links a member/index spine is built from. A spine carrying
@@ -1533,6 +1540,7 @@ class Emitter {
       if (this.cframes.some((fr) => fr.members.has(f.name))) continue;
       decls.set(f.name, f);
     }
+    FACTS?.('decls', { owner, stmts }, decls);
   }
 
   // Open a reactive frame for a scope (paired with a this.scopes push
@@ -1569,6 +1577,7 @@ class Emitter {
       importSpecs: Emitter.importedSpecs(stmts),
       exportedConst: Emitter.exportedConstNames(stmts),
     });
+    FACTS?.('frame', { owner, stmts, declared: Emitter.declaredNames(stmts) }, this.rframes[this.rframes.length - 1]);
     return new Set([...reactive, ...handles, ...readonly]);
   }
 
@@ -3195,10 +3204,15 @@ class Emitter {
       'vocabulary', 'silences', 'memberDecls', 'narrowedDecls', 'importSpans', 'pendingTypeDecls', 'loopVarDecls', 'indexedLoops'];
     const saved = {};
     for (const k of channels) { saved[k] = this[k]; this[k] = []; }
+    // A capture repeats emission the real pass performs again, so its
+    // facts would be duplicates: the sink is off for its duration.
+    const facts = FACTS;
+    FACTS = null;
     try {
       this.withExpression(fn);
       return this.b.code;
     } finally {
+      FACTS = facts;
       this.b = prevB;
       Object.assign(this.temps, { n, used });
       for (const k of channels) this[k] = saved[k];
@@ -19334,7 +19348,9 @@ const runtimeAliasBindings = (emitter, trees) => {
 // recorded.
 const programScopeNames = (emitter, sexpr) => {
   const stmts = sexpr.slice(1);
-  const names = new Set(emitter.hoistTargets(stmts).map(([n]) => n));
+  const hoisted = emitter.hoistTargets(stmts);
+  FACTS?.('programHoist', null, hoisted);
+  const names = new Set(hoisted.map(([n]) => n));
   const imports = stmts.filter((s) => emitter.isModuleImport(s));
   for (const n of Emitter.importedNames(imports)) names.add(n);
   // Reactive declarations, effect handles, and readonly names bind
@@ -19630,7 +19646,19 @@ function recordSchemaFields(emitter, block, text, at) {
   }
 }
 
-export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
+// `facts` is internal: the analysis differential's sink (FACTS above),
+// installed for this emit() alone.
+export function emit(parseResult, options = {}) {
+  const outer = FACTS;
+  FACTS = options.facts ?? null;
+  try {
+    return emitWith(parseResult, options);
+  } finally {
+    FACTS = outer;
+  }
+}
+
+function emitWith(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
   if (!parseResult.sexpr) {
     throw new Error('emitter: cannot emit a failed parse');
   }
@@ -19661,7 +19689,9 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // before all code.
   emitter.collectTsDirectives(parseResult.sexpr, parseResult.trivia ?? [], source);
   emitter.collectTypeOnlyImports(parseResult.sexpr, source);
+  FACTS?.('typeOnlyImports', null, emitter.typeOnlyImports);
   emitter.collectAppAccessors(parseResult.sexpr);
+  FACTS?.('appAccessors', null, emitter.appAccessors);
   emitter.collectValidatorRegistrations(parseResult.sexpr);
   if (emitter.tsNocheck !== null) {
     const programId = stores.idOf(parseResult.sexpr);
@@ -19704,6 +19734,8 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   // prior line binding `__state` shifts the delivered alias the same
   // way an in-file binding does).
   for (const { name } of ambient) emitter.temps.used.add(name);
+  FACTS?.('trees', null, trees);
+  FACTS?.('atoms', null, emitter.temps.used);
   const aliasUsed = runtimeAliasBindings(emitter, trees);
   for (const { name } of ambient) aliasUsed.add(name);
   const bindingNames = [...aliasUsed];
@@ -19718,6 +19750,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
     }
   }
   const bound = programScopeNames(emitter, parseResult.sexpr);
+  FACTS?.('programScopeNames', null, bound);
   // The result's binding inventory — computed from the same read-only
   // pre-walks, BEFORE ambient names join the bound set (the inventory
   // is this program's own bindings, never the environment's).

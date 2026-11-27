@@ -115,6 +115,17 @@ zero unexplained differences and a coverage floor.
 `bun scripts/emit-bench.mjs` times both engines on the programs v2
 covers.
 
+v2's analysis pass, [src/emit/analyze.js](../src/emit/analyze.js),
+walks the parser's tree once and gathers the facts emission reads
+before it writes: the binding inventory, the runtime delivery decision,
+the program scope's names, and each function-like scope's frame sets
+and redeclaration verdict, rejecting with v1's message and span where
+v1 rejects. v1 reports the same facts through an internal sink on
+`emit()` that moves no output byte. `bun scripts/analyze-diff.mjs`
+compares the two over the consumer corpus on both faces and in the REPL
+with an ambient seed, and `test/toolchain/analyze.test.js` holds the
+language rows to zero differences.
+
 ## 5a. The shipping path — JavaScript
 
 - **Bun**: [src/loader.js](../src/loader.js) is a Bun plugin
