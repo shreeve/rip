@@ -311,18 +311,31 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
     // A member named by a word the scanner reads as a keyword or an
     // operator (`then(…): T`, `catch(): T`, `import(): T`, `is(): T`):
     // in a member row, before its parameter list or generics, the word
-    // is only a name.
-    if (!TYPE_VOCAB.has(kd) && memberRows() && isIdentifierName(t.word ?? t.value) && headsMember(j)) {
-      const next = tokens[j + 1]?.kind;
-      if (next === '(' || next === 'CALL_START' || next === 'ES6_OPTIONAL_CALL' ||
-          (next === 'COMPARE' && tokens[j + 1].value === '<')) {
-        if (next === '(' && !opts.annotation && !isSetter(j)) {
-          let d = 0, k = j + 1;
+    // is only a name. `import` before a string argument stays the import
+    // type it spells (`import("m").T` opening a block body's row).
+    if (!TYPE_VOCAB.has(kd) && memberRows() && isIdentifierName(t.word ?? t.value) && headsMember(j) &&
+        !((kd === 'DYNAMIC_IMPORT' || kd === 'IMPORT') && tokens[j + 2]?.kind === 'STRING')) {
+      let open = j + 1;
+      if (tokens[open]?.kind === 'ES6_OPTIONAL_CALL') open++;
+      // Generics on the name close before the parameter list.
+      if (tokens[open]?.kind === 'COMPARE' && tokens[open].value === '<') {
+        open = skipAngleGroup(tokens, open);
+        if (open < 0 || open >= to) open = -1;
+      }
+      const opener = open < 0 ? undefined : tokens[open]?.kind;
+      if (opener === '(' || opener === 'CALL_START' || opener === 'PARAM_START') {
+        // A plain group: find its close to judge the member's shape.
+        if (opener !== 'CALL_START') {
+          const closer = opener === '(' ? ')' : 'PARAM_END';
+          let d = 0, k = open;
           for (; k < to; k++) {
-            if (tokens[k].kind === '(') d++;
-            else if (tokens[k].kind === ')' && --d === 0) break;
+            if (tokens[k].kind === opener) d++;
+            else if (tokens[k].kind === closer && --d === 0) break;
           }
-          if (tokens[k + 1]?.kind !== ':') {
+          if (isSetter(j) && k === open + 1) {
+            fail(`a setter takes one parameter — \`set ${t.word ?? t.value}(v: T)\``, t.start);
+          }
+          if (tokens[k + 1]?.kind !== ':' && !opts.annotation && !isSetter(j)) {
             fail(`an interface method shorthand needs a return type — \`${t.word ?? t.value}(…): T\``, t.start);
           }
         }
@@ -471,6 +484,10 @@ const assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
           if (tokens[k].kind === 'CALL_START') d++;
           else if (tokens[k].kind === 'CALL_END') d--;
           k++;
+        }
+        if (isSetter(at) && tokens[j + 1]?.kind === 'CALL_END') {
+          const key = name.kind === ']' || name.kind === 'INDEX_END' ? '[…]' : name.word ?? name.value;
+          fail(`a setter takes one parameter — \`set ${key}(v: T)\``, tokens[at].start);
         }
         // An annotation's object type also takes a member with no
         // return type (`x: {m()}`), which the types entry reads.

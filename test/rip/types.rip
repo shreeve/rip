@@ -1764,6 +1764,12 @@ fail "an interpolated string in an annotation rejects", 'x: "a#{b}" = 1', "types
 fail "a keyword-named member call in a value position rejects", "x: {a: then()} = 1", "types.rip>:1:8: code expression ('then') in a type body"
 fail "a keyword-named interface method needs a return type", "interface I\n  then(x: number)\nz = 1", "types.rip>:2:3: an interface method shorthand needs a return type — `then(…): T`"
 
+fail "a keyword name with generics and no parameter list rejects", "interface I\n  if<T>\nz = 1", "types.rip>:2:3: code expression ('if') in a type body"
+fail "a setter with no parameter rejects", "x: {set a()} = 1", "types.rip>:1:9: a setter takes one parameter — `set a(v: T)`"
+fail "a keyword-named setter with no parameter rejects", "interface I\n  set then()\nz = 1", "types.rip>:2:7: a setter takes one parameter — `set then(v: T)`"
+code "an import type opening a block alias row erases", 'type T =\n  import("m").A | B\nz = 1', "let z = 1;"
+code "an import type with attributes opening a block alias row erases", 'type T =\n  import("m", {with: {a: "b"}}).T\nz = 1', "let z = 1;"
+code "an import type on an interface member's own line erases", 'interface I\n  b:\n    import("m").T\nz = 1', "let z = 1;"
 code "an accessor pair in an annotation's object type erases", "x: {get a(): string, set a(v: string)} = v", "let x = v;"
 code "a computed-key method in an annotation erases", "x: {[Symbol.iterator](): Iterator<number>} = v", "let x = v;"
 code "string- and number-keyed methods in an annotation erase", 'x: {"m"(): void, "n"?(): void, 1(): void} = v', "let x = v;"

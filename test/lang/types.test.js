@@ -1817,6 +1817,10 @@ describe('the types entry', () => {
         ['import("m"). T', 'a member of an import type: the type grammar reads `import("m")` bare, and the face prints the member'],
         ['import("m", { with: { "resolution-mode": "import" } }). T', 'an import type with attributes: the type grammar reads one string argument'],
         ['typeof this . a . b', 'a type query on a member of this: the type grammar\'s query reads a name'],
+        ['{ get a(): string, set a(v: string)}', 'accessor signatures: the type grammar has no get/set member, and the face prints them'],
+        ['{ then(): void }', 'a method named by a keyword: the type grammar reads an identifier member name'],
+        ['{ then<R>(f :(v: T) => R): Promise<R>, catch(): void, import(): void, is(): void }', 'methods named by keywords and operator words: the type grammar reads an identifier member name'],
+        ['{[Symbol . iterator](): Iterator<number>}', 'a computed-key method: the type grammar reads a computed key only as an index signature or mapped row'],
       ]);
       const root = join(import.meta.dir, '../..');
       const found = new Set();
