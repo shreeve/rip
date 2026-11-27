@@ -31,8 +31,17 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { availableParallelism, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { ROOT_SHARDS } from '../../../scripts/lanes.mjs';
 
 const ORCHESTRATOR = resolve(import.meta.dir, '../../../scripts/test-all.mjs');
+
+// This file may itself run as a cpuq task (`cpuq run -- bun run
+// test:spawn` sets CPUQ_TASK=1 of CPUQ_TASKS=1), and an orchestrator that
+// inherits those runs one task of its fixture's plan. Every spawn here
+// starts from the environment without them; the cpuq tests set their own.
+const HOST_ENV = { ...process.env };
+delete HOST_ENV.CPUQ_TASK;
+delete HOST_ENV.CPUQ_TASKS;
 
 const PASSING = "import { expect, test } from 'bun:test';\ntest('ok', () => { expect(1).toBe(1) });\n";
 const FAILING = "import { expect, test } from 'bun:test';\ntest('no', () => { expect(1).toBe(2) });\n";
@@ -70,7 +79,7 @@ const fixture = (packages) => {
 const orchestrate = (root, env = {}, ...extra) =>
   spawnSync(process.execPath, [ORCHESTRATOR, '--root', root, '--timeout', '120000', ...extra], {
     encoding: 'utf8',
-    env: { ...process.env, CI: '', NO_COLOR: '1', ...env },
+    env: { ...HOST_ENV, CI: '', NO_COLOR: '1', ...env },
     ...BOUND,
   });
 
@@ -213,7 +222,7 @@ describe('the lane orchestrator', () => {
       ),
     };
     const root = fixture({ probe });
-    const env = { ...process.env, CI: '', FORCE_COLOR: '1' };
+    const env = { ...HOST_ENV, CI: '', FORCE_COLOR: '1' };
     delete env.NO_COLOR;
     const r = spawnSync(process.execPath, [ORCHESTRATOR, '--root', root, '--timeout', '120000'], {
       encoding: 'utf8',
@@ -235,7 +244,7 @@ describe('the lane orchestrator', () => {
     spawnSync(process.execPath, [ORCHESTRATOR, '--root', fixture({}), ...extra], {
       encoding: 'utf8',
       timeout: 30_000,
-      env: { ...process.env, CI: '', NO_COLOR: '1' },
+      env: { ...HOST_ENV, CI: '', NO_COLOR: '1' },
     });
 
   test('a non-numeric --jobs is refused (NaN would start no lane and hang forever)', () => {
@@ -325,7 +334,7 @@ describe('the lane orchestrator', () => {
     expect(plain.status).toBe(0);
     expect(plain.stdout).toBe(expected((_, s) => s));
 
-    const env = { ...process.env, CI: '', FORCE_COLOR: '1' };
+    const env = { ...HOST_ENV, CI: '', FORCE_COLOR: '1' };
     delete env.NO_COLOR;
     const painted = spawnSync(process.execPath, [ORCHESTRATOR, '--root', root, '--plan', '--jobs', '2'], {
       encoding: 'utf8',
@@ -353,6 +362,120 @@ describe('the lane orchestrator', () => {
 
 });
 
+// Under cpuq (AGENTS.md "Heavy commands run under cpuq") `-n N` copies of
+// the run start at once, each on one CPU and told its CPUQ_TASK of
+// CPUQ_TASKS. Each copy runs one lane: a package lane, or one of the
+// ROOT_SHARDS root shards. The failure that matters is the same one as
+// above, lost coverage that exits 0, so a count that does not match the
+// plan is refused, and a task's red lane exits nonzero.
+describe('the run as cpuq tasks', () => {
+  const task = (root, n, of, ...extra) => orchestrate(root, { CPUQ_TASK: String(n), CPUQ_TASKS: String(of) }, ...extra);
+  // The lanes a run reported, by the header each one's block opens with.
+  const ran = (r) => [...r.stdout.matchAll(/^[✓✗] (.+?) [\d.]+s(?: — .*)?$/gm)].map((m) => m[1]).filter((l) => !/ lanes, /.test(l));
+
+  test('--tasks prints the count: every root shard and every package lane, a skipped one included', () => {
+    const root = fixture({ alpha: GREEN, toolless: TOOLLESS, emdb: GREEN });
+    const r = orchestrate(root, {}, '--tasks');
+    expect(r.status).toBe(0);
+    // emdb is excluded by name, so it is no task; toolless is skipped
+    // here, and still a task, so the count is the same on every machine.
+    expect(r.stdout).toBe(`${ROOT_SHARDS + 2}\n`);
+    expect(readdirSync(join(root, 'test'))).toEqual(['root.test.js']); // it ran nothing
+  });
+
+  test('--tasks --plan numbers the tasks in the order cpuq hands them out, root shards first', () => {
+    const r = orchestrate(fixture({ zebra: GREEN, sites: GREEN }), {}, '--tasks', '--plan');
+    expect(r.status).toBe(0);
+    const tasks = [...r.stdout.matchAll(/^ *(\d+) (.+)$/gm)].map((m) => `${m[1]} ${m[2]}`);
+    expect(tasks).toEqual([
+      ...Array.from({ length: ROOT_SHARDS }, (_, i) => `${i + 1} root (extended tier) ${i + 1}/${ROOT_SHARDS}`),
+      `${ROOT_SHARDS + 1} packages/sites`,
+      `${ROOT_SHARDS + 2} packages/zebra`,
+    ]);
+    expect(r.stdout).toContain(`(cpuq run -n ${ROOT_SHARDS + 2})`);
+    expect(r.stdout).toContain(`root shards: bun test --isolate --shard=<task>/${ROOT_SHARDS} --timeout 60000`);
+    expect(r.stdout).toContain('package lanes: bun run test  (RIP_LANE_WORKERS=1)');
+  });
+
+  test('a task runs its one lane and no other', () => {
+    const root = fixture({ alpha: GREEN, beta: GREEN });
+    const r = task(root, ROOT_SHARDS + 2, ROOT_SHARDS + 2);
+    expect(r.stdout).toContain(`cpuq task ${ROOT_SHARDS + 2} of ${ROOT_SHARDS + 2}: packages/beta`);
+    expect(ran(r)).toEqual(['packages/beta']);
+    expect(r.stdout).toContain('1 lanes, 1 tests passed');
+    expect(r.status).toBe(0);
+  });
+
+  test("a task whose lane fails exits nonzero and repeats the lane's (fail) lines after its summary", () => {
+    const root = fixture({ alpha: GREEN, beta: RED });
+    const r = task(root, ROOT_SHARDS + 2, ROOT_SHARDS + 2);
+    expect(r.status).not.toBe(0);
+    const afterSummary = r.stdout.slice(r.stdout.indexOf('summary —'));
+    expect(afterSummary).toContain('✗ packages/beta');
+    expect(afterSummary).toContain('(fail) no');
+    // The green lane belongs to another task, which this one never ran.
+    expect(task(root, ROOT_SHARDS + 1, ROOT_SHARDS + 2).status).toBe(0);
+  });
+
+  test('a root task runs its shard of the root suite, in one process', () => {
+    const root = fixture({ alpha: GREEN });
+    // One file per shard, so every shard has a test to run.
+    for (let i = 2; i <= ROOT_SHARDS; i++) writeFileSync(join(root, `test/root${i}.test.js`), PASSING);
+    const plan = task(root, 2, ROOT_SHARDS + 1, '--plan');
+    expect(plan.stdout).toContain(`· bun test --isolate --shard=2/${ROOT_SHARDS} --timeout 60000\n`);
+    const r = task(root, 2, ROOT_SHARDS + 1);
+    expect(ran(r)).toEqual([`root (extended tier) 2/${ROOT_SHARDS}`]);
+    expect(r.stdout).toMatch(new RegExp(`✓ root \\(extended tier\\) 2/${ROOT_SHARDS}\\s+[\\d.]+s\\s+1 test\\b`));
+    expect(r.status).toBe(0);
+  });
+
+  test('a package lane gets one worker, and never sees the task selection', () => {
+    const probe = {
+      script: 'bun -e ' + JSON.stringify("console.log('1 tests: lane-workers=' + process.env.RIP_LANE_WORKERS + ' cpuq=' + process.env.CPUQ_TASK + '/' + process.env.CPUQ_TASKS)"),
+    };
+    const r = task(fixture({ probe }), ROOT_SHARDS + 1, ROOT_SHARDS + 1);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('lane-workers=1 cpuq=undefined/undefined\n');
+  });
+
+  test('a task whose tool is missing skips locally, and fails in CI', () => {
+    const root = fixture({ toolless: TOOLLESS });
+    const local = task(root, ROOT_SHARDS + 1, ROOT_SHARDS + 1);
+    expect(local.stdout).toContain('⊘ packages/toolless SKIPPED');
+    expect(local.status).toBe(0);
+    const ci = orchestrate(root, { CI: '1', CPUQ_TASK: String(ROOT_SHARDS + 1), CPUQ_TASKS: String(ROOT_SHARDS + 1) });
+    expect(ci.stdout).toContain('lane(s) skipped in CI');
+    expect(ci.status).not.toBe(0);
+  });
+
+  // `cpuq run` without -n is one task, CPUQ_TASKS=1: run as asked, it
+  // would cover one lane and pass.
+  test('a task count that does not match the plan is refused, naming the right one', () => {
+    const root = fixture({ alpha: GREEN });
+    for (const of of [1, ROOT_SHARDS, ROOT_SHARDS + 2]) {
+      const r = task(root, 1, of);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain(`test:all is ${ROOT_SHARDS + 1} cpuq tasks, not ${of}: run it as \`cpuq run -n ${ROOT_SHARDS + 1}`);
+      expect(r.stdout).toBe('');
+    }
+  });
+
+  test('a malformed task is refused', () => {
+    const root = fixture({ alpha: GREEN });
+    for (const [n, of] of [['0', '9'], ['10', '9'], ['', '9'], ['x', '9'], ['1', 'x']]) {
+      const r = orchestrate(root, { CPUQ_TASK: n, CPUQ_TASKS: of });
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain('is not a task');
+    }
+  });
+
+  test('--jobs is refused under cpuq: a task runs one lane', () => {
+    const r = task(fixture({ alpha: GREEN }), 1, ROOT_SHARDS + 1, '--jobs', '3');
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('--jobs has no meaning under cpuq');
+  });
+});
+
 // This repository's own plan, asserted without running anything (`--plan`
 // spawns no lanes, so this belongs in the fast tier): the lanes the
 // orchestrator would spawn here must actually cover the packages that
@@ -362,7 +485,7 @@ test('the plan for this repository is one lane per packages/*/ suite plus root',
   const repo = resolve(import.meta.dir, '../../..');
   const r = spawnSync(process.execPath, [ORCHESTRATOR, '--root', repo, '--plan'], {
     encoding: 'utf8',
-    env: { ...process.env, CI: '', NO_COLOR: '1' },
+    env: { ...HOST_ENV, CI: '', NO_COLOR: '1' },
   });
   expect(r.status).toBe(0);
   // What this gates is DISCOVERY — the walk over packages/*/ finding
@@ -411,7 +534,7 @@ describe('an interrupted run takes its lanes down', () => {
     const pidFile = join(root, 'packages', 'parked', 'lane.pid');
     const orchestrator = spawn(process.execPath, [ORCHESTRATOR, '--root', root, '--timeout', '120000'], {
       stdio: 'ignore',
-      env: { ...process.env, CI: '', NO_COLOR: '1' },
+      env: { ...HOST_ENV, CI: '', NO_COLOR: '1' },
     });
     expect(await until(() => existsSync(pidFile), 15000)).toBe(true);
     const lane = Number(readFileSync(pidFile, 'utf8'));
@@ -436,7 +559,7 @@ describe('an interrupted run takes its lanes down', () => {
     const pidFile = join(root, 'packages', 'tree', 'lane.pid');
     const orchestrator = spawn(process.execPath, [ORCHESTRATOR, '--root', root, '--timeout', '120000'], {
       stdio: 'ignore',
-      env: { ...process.env, CI: '', NO_COLOR: '1' },
+      env: { ...HOST_ENV, CI: '', NO_COLOR: '1' },
     });
     expect(await until(() => existsSync(pidFile) && readFileSync(pidFile, 'utf8').includes(' '), 15000)).toBe(true);
     const [lane, detached] = readFileSync(pidFile, 'utf8').split(' ').map(Number);
