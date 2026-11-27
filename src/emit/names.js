@@ -37,6 +37,17 @@ export const PROMOTED_IN_PATTERN = (name) =>
   `emitter: a promoted parameter ('@${name}') cannot sit inside a rest or a destructuring pattern — ` +
   `JavaScript binds no \`this.${name}\` there; bind a plain name and assign '@${name} = ${name}' in the body`;
 
+// The heads of a member or index target: a pattern element that writes
+// a property rather than binding a name.
+export const MEMBER_HEADS = new Set(['.', '?.', '[]', 'optindex']);
+
+// A parameter list and a loop head declare their names, and a member is
+// no name: JavaScript has no declaring form for it.
+export const MEMBER_IN_PARAMETER = 'emitter: a parameter pattern binds names only — a member or index target cannot sit inside it, ' +
+  'since JavaScript declares no property in a parameter list; bind a plain name and assign the member in the body';
+export const MEMBER_LOOP_VARIABLE = 'emitter: a loop variable binds names only — a member or index target cannot be one, ' +
+  'since JavaScript declares loop variables with `let`; loop over a plain name and assign the member in the body';
+
 // Is re-reading the spelled word `w` free of user code? true for
 // `this` and a literal spelling (a number, a quoted string, a literal
 // word); false for a regex spelling, which is a match and assigns `_`;

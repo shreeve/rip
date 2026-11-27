@@ -72,6 +72,8 @@ const FAMILY = [
   /is declared by a destructuring pattern, which cannot carry this annotation/,
   /cannot sit inside a rest or a destructuring pattern/,
   /bare `it` has no binding here/,
+  /a parameter pattern binds names only/,
+  /a loop variable binds names only/,
 ];
 const inFamily = (message) => FAMILY.some((re) => re.test(message));
 

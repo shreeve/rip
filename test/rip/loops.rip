@@ -48,6 +48,15 @@ fail "annotated single loop variable rejects", "for x: string in xs\n  x", "a lo
 fail "annotated pattern loop variable rejects", "for {a}: T in xs\n  a", "a loop variable does not take a type annotation"
 fail "annotated variable after a pattern rejects", "for [a, b], i: number in xs\n  a", "a loop variable does not take a type annotation"
 fail "annotated for-of key rejects", "for k: string, v of obj\n  k", "a loop variable does not take a type annotation"
+# A loop head declares its variables with `let`, which binds names only:
+# a member or index target there rejects at the member.
+fail "a field loop variable rejects", "for @a in xs\n  1", ":1:5: emitter: a loop variable binds names only — a member or index target cannot be one, since JavaScript declares loop variables with `let`; loop over a plain name and assign the member in the body"
+fail "a field element of a loop pattern rejects", "for [@a] in xs\n  1", ":1:6: emitter: a loop variable binds names only"
+fail "a member element of a loop pattern rejects", "for [a.b] in xs\n  1", ":1:6: emitter: a loop variable binds names only"
+fail "an index value of a loop pattern rejects", "for {k: a[0]} in xs\n  1", ":1:9: emitter: a loop variable binds names only"
+fail "a field for-of key rejects", "for @a of o\n  1", ":1:5: emitter: a loop variable binds names only"
+fail "a field for-of value rejects", "for k, @v of o\n  1", ":1:8: emitter: a loop variable binds names only"
+fail "a field loop index rejects", "for x, @i in xs\n  1", ":1:8: emitter: a loop variable binds names only"
 fail "annotated own for-of key rejects", "for own k: string of obj\n  k", "a loop variable does not take a type annotation"
 fail "annotated for-as variable rejects", "for x: T as it\n  x", "a loop variable does not take a type annotation"
 fail "annotated for-await variable rejects", "for await x: T as it\n  x", "a loop variable does not take a type annotation"

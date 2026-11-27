@@ -439,6 +439,17 @@ fail 'a promoted element of a nested pattern rejects', 'class A\n  constructor: 
 fail 'a promoted element of a gap tail pattern rejects', 'class A\n  constructor: (a, ..., [@z]) ->', ":2:26: emitter: a promoted parameter ('@z') cannot sit inside a rest or a destructuring pattern"
 fail 'a promoted pattern element rejects outside a constructor', 'f = ([@a, b]) -> b', ":1:7: emitter: a promoted parameter ('@a') cannot sit inside a rest or a destructuring pattern"
 fail 'a promoted rest rejects outside a constructor', 'f = (...@rest) -> 1', ":1:9: emitter: a promoted parameter ('@rest') cannot sit inside a rest or a destructuring pattern"
+# Any member or index target in a parameter pattern rejects: a parameter
+# list declares names.
+fail 'a member element of a parameter pattern rejects', 'f = ([a.b]) -> 1', ":1:7: emitter: a parameter pattern binds names only — a member or index target cannot sit inside it, since JavaScript declares no property in a parameter list; bind a plain name and assign the member in the body"
+fail 'a member value of a parameter pattern rejects', 'f = ({k: a.b}) -> 1', ":1:10: emitter: a parameter pattern binds names only"
+fail 'a field member element of a method parameter pattern rejects', 'class A\n  m: ([@a.b]) -> 1', ":2:8: emitter: a parameter pattern binds names only"
+fail 'a field index element of a constructor parameter pattern rejects', 'class A\n  constructor: ([@a[0]]) ->\n    1', ":2:18: emitter: a parameter pattern binds names only"
+# A class field named `it` is a member, never a bare `it`; a field's
+# value is an expression and reads one.
+test 'a typed class field named it is no bare it', "f = (x) ->\n  class A\n    it: number\n  A.name\nf 3", 'A'
+test 'a class field named it is no bare it', "f = (x) ->\n  class A\n    it = 5\n    m: -> @it\n  A.new().m()\nf 3", 5
+fail 'a class field value reads a bare it', "f = (x) ->\n  class A\n    k = it\n  1", ":3:9: emitter: bare `it` has no binding here"
 test 'a parameter default reads a field', '''
   class A
     k = 3

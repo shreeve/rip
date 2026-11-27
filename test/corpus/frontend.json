@@ -6047,6 +6047,48 @@
   "tolerant": "2rvwysqjhs011",
   "complete": "6j7t1thlgyju"
  },
+ "row classes.rip › fail a member element of a parameter pattern rejects": {
+  "tokens": "2go8hz801pedw",
+  "tree": "1n4o4s601cuku",
+  "tolerant": "2ry8rtg07wrbr",
+  "complete": "6j7t1thlgyju"
+ },
+ "row classes.rip › fail a member value of a parameter pattern rejects": {
+  "tokens": "11wno2sh140ta",
+  "tree": "ds2ae7gch077",
+  "tolerant": "qosg4jiwiwbp",
+  "complete": "6j7t1thlgyju"
+ },
+ "row classes.rip › fail a field member element of a method parameter pattern rejects": {
+  "tokens": "1dsqki6nyn38q",
+  "tree": "3rp9qxkluthiv",
+  "tolerant": "26yo09ov7gqyk",
+  "complete": "6j7t1thlgyju"
+ },
+ "row classes.rip › fail a field index element of a constructor parameter pattern rejects": {
+  "tokens": "2a1n27enojz27",
+  "tree": "24lf18prqw282",
+  "tolerant": "20me37vq162zu",
+  "complete": "6j7t1thlgyju"
+ },
+ "row classes.rip › test a typed class field named it is no bare it": {
+  "tokens": "3d5g549uzg967",
+  "tree": "24h12ci7sfa6g",
+  "tolerant": "2y1h7n69yoh9c",
+  "complete": "6j7t1thlgyju"
+ },
+ "row classes.rip › test a class field named it is no bare it": {
+  "tokens": "2c8eu88g3vy35",
+  "tree": "1hiqknq6qj7of",
+  "tolerant": "3kjqaq6sd7wa7",
+  "complete": "6j7t1thlgyju"
+ },
+ "row classes.rip › fail a class field value reads a bare it": {
+  "tokens": "1yz9snd3i8jnb",
+  "tree": "3pi00qulisn62",
+  "tolerant": "8fw33d93rici",
+  "complete": "6j7t1thlgyju"
+ },
  "row classes.rip › test a parameter default reads a field": {
   "tokens": "2tagdj8ztwowz",
   "tree": "jtzs2ergqr04",
@@ -6921,6 +6963,12 @@
   "tokens": "1b0dzejot3pk9",
   "tree": "1dxyrofd6f753",
   "tolerant": "d40gkyrmyybm",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › fail a def in a component body rejects as a body line before its bare it": {
+  "tokens": "1zzb0cyfdyv0a",
+  "tree": "23of1qcetb9a5",
+  "tolerant": "l70e4f7us93o",
   "complete": "6j7t1thlgyju"
  },
  "row components.rip › fail an annotated offer is still a state declaration, not a readonly": {
@@ -9327,6 +9375,24 @@
   "tokens": "sm8bi4vsp92g",
   "tree": "131nhptfvveht",
   "tolerant": "16qk9c8mkn56",
+  "complete": "6j7t1thlgyju"
+ },
+ "row comprehensions.rip › fail a field comprehension variable rejects": {
+  "tokens": "2r0b7v2e6hm18",
+  "tree": "1anewbadd4kn3",
+  "tolerant": "t1wqtxgsxl20",
+  "complete": "6j7t1thlgyju"
+ },
+ "row comprehensions.rip › fail a field element of a comprehension pattern rejects": {
+  "tokens": "kre2vry2gpeo",
+  "tree": "ac7jt16pmzpy",
+  "tolerant": "11kfhqezwta6l",
+  "complete": "6j7t1thlgyju"
+ },
+ "row comprehensions.rip › fail a field variable of a later comprehension clause rejects": {
+  "tokens": "238chwulij82t",
+  "tree": "2029xbx962zlu",
+  "tolerant": "10nxr82wsq7w2",
   "complete": "6j7t1thlgyju"
  },
  "row comprehensions.rip › fail a chained statement clause cannot read an earlier clause variable": {
@@ -12791,6 +12857,60 @@
   "tolerant": "1mk1qpt8excam",
   "complete": "6j7t1thlgyju"
  },
+ "row functions.rip › fail an implicit it shadows a module it": {
+  "tokens": "ji19sp226urq",
+  "tree": "up9zzzuvrfj6",
+  "tolerant": "2zh7bmibgwg69",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › fail an implicit it shadows a module it for a function declared before its read": {
+  "tokens": "1pxc810lgz9dr",
+  "tree": "1n50vakwip753",
+  "tolerant": "22aseqm5mec0c",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › test a parameterless function that assigns it answers a nested function": {
+  "tokens": "12r08sw4gwmof",
+  "tree": "2os5d4gm8kosn",
+  "tolerant": "1cdcgevlvq029",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › test a parameterless fat arrow that assigns it answers a nested function": {
+  "tokens": "xdwdlnlbohuc",
+  "tree": "1n5fa9yythry5",
+  "tolerant": "2pichn1g0h8i5",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › test a parameterless function that destructures it answers a nested function": {
+  "tokens": "15aztvl54uv51",
+  "tree": "394wb8uwbaxs3",
+  "tolerant": "2rn2smnbo9yd3",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › test an assigned implicit it answers under a module it": {
+  "tokens": "36l0ywn6lmihw",
+  "tree": "3n1xlj84kz6tv",
+  "tolerant": "236hz8sw9fccy",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › test a loop variable inside an implicit it's function answers": {
+  "tokens": "1lox2w5pbb98l",
+  "tree": "3i4frlqn83yve",
+  "tolerant": "3aq1wms0vvb5h",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › test a type named it is no bare it": {
+  "tokens": "382kdxe716nsv",
+  "tree": "jmsphodkhbtj",
+  "tolerant": "d2oocol6g2ac",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › test a cast to a type named it is no bare it": {
+  "tokens": "oh5nhq9lpsbb",
+  "tree": "5t7xyu1sf62g",
+  "tolerant": "3udmjfkm97nn4",
+  "complete": "6j7t1thlgyju"
+ },
  "row functions.rip › test a parameterless def with a generic return type keeps its body": {
   "tokens": "1278j7r01cwkg",
   "tree": "p3jpke9wc49z",
@@ -13492,6 +13612,48 @@
   "tree": "1n6ls40g9x5sm",
   "tolerant": "2glt2b6ki06fg",
   "complete": "jnrac8c0vdig"
+ },
+ "row loops.rip › fail a field loop variable rejects": {
+  "tokens": "2f7kcq33cypk9",
+  "tree": "2aipd36idiced",
+  "tolerant": "3med7dhnuhg2s",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a field element of a loop pattern rejects": {
+  "tokens": "1ar57kjnqqz91",
+  "tree": "1h2klio0avhus",
+  "tolerant": "j8tcn05zwnn",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a member element of a loop pattern rejects": {
+  "tokens": "2z1mpvb5pcdik",
+  "tree": "3fstujp8a7ft4",
+  "tolerant": "3puhxhigisujw",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail an index value of a loop pattern rejects": {
+  "tokens": "3jb25cwifx364",
+  "tree": "3r5tyfenoldl0",
+  "tolerant": "4nfvxa12y99u",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a field for-of key rejects": {
+  "tokens": "goa5nizhsq8b",
+  "tree": "1mkbsxgkbh48d",
+  "tolerant": "2vsafbkmpe46",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a field for-of value rejects": {
+  "tokens": "11h7wt099ppbd",
+  "tree": "30r18cq979mb1",
+  "tolerant": "1da6tcvdzfx17",
+  "complete": "6j7t1thlgyju"
+ },
+ "row loops.rip › fail a field loop index rejects": {
+  "tokens": "1wve570xm5nnv",
+  "tree": "2lq9e7xhxf9p2",
+  "tolerant": "scgxn4k6g6jy",
+  "complete": "6j7t1thlgyju"
  },
  "row loops.rip › fail annotated own for-of key rejects": {
   "tokens": "nar6duhmgol5",
@@ -20418,9 +20580,9 @@
   "complete": "6j7t1thlgyju"
  },
  "row redeclare.rip › test a def in a finally block is outside the catch binding": {
-  "tokens": "2um1mcsdl84ol",
-  "tree": "2wng9ww85xaqr",
-  "tolerant": "1ldccfld3khg2",
+  "tokens": "1hums40m6w59u",
+  "tree": "nctpdyjm97bx",
+  "tolerant": "a2dfse0t8ofp",
   "complete": "6j7t1thlgyju"
  },
  "row redeclare.rip › test a handler assigns its catch binding": {

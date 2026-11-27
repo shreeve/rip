@@ -552,6 +552,9 @@ fail 'a later clause cannot read an earlier clause variable', "(item for xs in [
 fail 'a later clause cannot read an earlier variable through a call', "(x for xs in [[1]] for x in f(xs))", "reads 'xs', which only the clause written before it binds"
 fail 'a later clause guard cannot read an earlier clause variable', "(v for a in [1] for v in [2] when a > 0)", "reads 'a', which only the clause written before it binds"
 fail 'a third clause cannot read a second clause variable', "(v for a in [1] for b in [2] for v in [b])", "reads 'b', which only the clause written before it binds"
+fail 'a field comprehension variable rejects', "r = (1 for @a in xs)", ":1:12: emitter: a loop variable binds names only"
+fail 'a field element of a comprehension pattern rejects', "r = (1 for [@a] in xs)", ":1:13: emitter: a loop variable binds names only"
+fail 'a field variable of a later comprehension clause rejects', "xs = [1]\nr = (1 for x in xs for @a in xs)", ":2:24: emitter: a loop variable binds names only"
 fail 'a chained statement clause cannot read an earlier clause variable', '''
   seen = []
   seen.push(x) for xs in [[1, 2]] for x in xs

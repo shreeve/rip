@@ -4031,6 +4031,34 @@
   "js": "2bulyt3go0yzp",
   "ts": "2bulyt3go0yzp"
  },
+ "row classes.rip › fail a member element of a parameter pattern rejects": {
+  "js": "2a8vyntylivx7",
+  "ts": "2a8vyntylivx7"
+ },
+ "row classes.rip › fail a member value of a parameter pattern rejects": {
+  "js": "1ts9ibk65gife",
+  "ts": "1ts9ibk65gife"
+ },
+ "row classes.rip › fail a field member element of a method parameter pattern rejects": {
+  "js": "2nukv2ozanpci",
+  "ts": "2nukv2ozanpci"
+ },
+ "row classes.rip › fail a field index element of a constructor parameter pattern rejects": {
+  "js": "9yu4j63x9czn",
+  "ts": "9yu4j63x9czn"
+ },
+ "row classes.rip › test a typed class field named it is no bare it": {
+  "js": "qa49mrcmbbgy",
+  "ts": "21q6v36h8dbaa"
+ },
+ "row classes.rip › test a class field named it is no bare it": {
+  "js": "f6pz5n5fxmcp",
+  "ts": "qyqnmpqq1e6x"
+ },
+ "row classes.rip › fail a class field value reads a bare it": {
+  "js": "2f2h6nvmrmdwo",
+  "ts": "2f2h6nvmrmdwo"
+ },
  "row classes.rip › test a parameter default reads a field": {
   "js": "btyb1f1i0c8b",
   "ts": "3ezubq3q9un61"
@@ -4614,6 +4642,10 @@
  "row components.rip › test an annotated public offer is a prop the caller can set": {
   "js": "27ogp699fo0rg",
   "ts": "oe6mmb3emk0c"
+ },
+ "row components.rip › fail a def in a component body rejects as a body line before its bare it": {
+  "js": "1z0zvgzm8aiak",
+  "ts": "1z0zvgzm8aiak"
  },
  "row components.rip › fail an annotated offer is still a state declaration, not a readonly": {
   "js": "2cay4e1lqpjhv",
@@ -6218,6 +6250,18 @@
  "row comprehensions.rip › fail a third clause cannot read a second clause variable": {
   "js": "2wre6liook2uz",
   "ts": "2wre6liook2uz"
+ },
+ "row comprehensions.rip › fail a field comprehension variable rejects": {
+  "js": "w1xzldfwn1fy",
+  "ts": "w1xzldfwn1fy"
+ },
+ "row comprehensions.rip › fail a field element of a comprehension pattern rejects": {
+  "js": "yro0s2sh3xnm",
+  "ts": "yro0s2sh3xnm"
+ },
+ "row comprehensions.rip › fail a field variable of a later comprehension clause rejects": {
+  "js": "3uy5qwh5j5h6h",
+  "ts": "3uy5qwh5j5h6h"
  },
  "row comprehensions.rip › fail a chained statement clause cannot read an earlier clause variable": {
   "js": "281vpcit7fja8",
@@ -8527,6 +8571,42 @@
   "js": "27d5nkkg45fn8",
   "ts": "2e4y8z3hjjgrz"
  },
+ "row functions.rip › fail an implicit it shadows a module it": {
+  "js": "2cvavm4svr1cb",
+  "ts": "2cvavm4svr1cb"
+ },
+ "row functions.rip › fail an implicit it shadows a module it for a function declared before its read": {
+  "js": "fd5sznjoruog",
+  "ts": "fd5sznjoruog"
+ },
+ "row functions.rip › test a parameterless function that assigns it answers a nested function": {
+  "js": "2m6co573s4rtq",
+  "ts": "3g1ibltdlqqe3"
+ },
+ "row functions.rip › test a parameterless fat arrow that assigns it answers a nested function": {
+  "js": "16uhw24xi2go5",
+  "ts": "jz0f9ao6dd9m"
+ },
+ "row functions.rip › test a parameterless function that destructures it answers a nested function": {
+  "js": "2fmi9sg81qpml",
+  "ts": "36t1aw1201c9s"
+ },
+ "row functions.rip › test an assigned implicit it answers under a module it": {
+  "js": "2p65ds0cxanoq",
+  "ts": "3jbpl8pxqdun0"
+ },
+ "row functions.rip › test a loop variable inside an implicit it's function answers": {
+  "js": "22i2fakn9aw0i",
+  "ts": "1prkiaa3f01qg"
+ },
+ "row functions.rip › test a type named it is no bare it": {
+  "js": "v1k0rycboz9v",
+  "ts": "32a9aa3ku0ngo"
+ },
+ "row functions.rip › test a cast to a type named it is no bare it": {
+  "js": "v1k0rycboz9v",
+  "ts": "2lor3rr8te8qn"
+ },
  "row functions.rip › test a parameterless def with a generic return type keeps its body": {
   "js": "3o94dxdsspj2t",
   "ts": "2mhv07o2drczw"
@@ -8994,6 +9074,34 @@
  "row loops.rip › fail annotated for-of key rejects": {
   "js": "1l17jpbpe4iv6",
   "ts": "1l17jpbpe4iv6"
+ },
+ "row loops.rip › fail a field loop variable rejects": {
+  "js": "og08bilw2vo",
+  "ts": "og08bilw2vo"
+ },
+ "row loops.rip › fail a field element of a loop pattern rejects": {
+  "js": "17u2f9883kp46",
+  "ts": "17u2f9883kp46"
+ },
+ "row loops.rip › fail a member element of a loop pattern rejects": {
+  "js": "17u2f9883kp46",
+  "ts": "17u2f9883kp46"
+ },
+ "row loops.rip › fail an index value of a loop pattern rejects": {
+  "js": "3c7dwlo4rend5",
+  "ts": "3c7dwlo4rend5"
+ },
+ "row loops.rip › fail a field for-of key rejects": {
+  "js": "og08bilw2vo",
+  "ts": "og08bilw2vo"
+ },
+ "row loops.rip › fail a field for-of value rejects": {
+  "js": "2lacp0qs07fgh",
+  "ts": "2lacp0qs07fgh"
+ },
+ "row loops.rip › fail a field loop index rejects": {
+  "js": "2lacp0qs07fgh",
+  "ts": "2lacp0qs07fgh"
  },
  "row loops.rip › fail annotated own for-of key rejects": {
   "js": "ql6n0hlp6ldz",
@@ -13612,8 +13720,8 @@
   "ts": "bdpgf0gp23hx"
  },
  "row redeclare.rip › test a def in a finally block is outside the catch binding": {
-  "js": "3i4rbqh6dwxg",
-  "ts": "1f5kant8ow8g2"
+  "js": "2idw6bk9xyqho",
+  "ts": "2jeyaudexg347"
  },
  "row redeclare.rip › test a handler assigns its catch binding": {
   "js": "3s0u028a2js2d",

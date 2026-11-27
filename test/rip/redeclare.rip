@@ -116,7 +116,7 @@ fail "class redeclares a catch array pattern name", "try\n  g()\ncatch [e]\n  cl
 fail "def redeclares a catch binding inside a function", "f = ->\n  try\n    g()\n  catch e\n    def e\n      1\n    null", ":5:5: emitter: 'e' was already declared as catch binding on line 4"
 fail "def redeclares an inner catch binding", "try\n  g()\ncatch e\n  try\n    h()\n  catch e\n    def e\n      1", ":7:5: emitter: 'e' was already declared as catch binding on line 6"
 test "a def in a deeper block shadows a catch binding", "r = null\ntry\n  throw 5\ncatch e\n  if true\n    def e\n      7\n    r = e()\nr", 7
-test "a def in a finally block is outside the catch binding", "try\n  g = 1\ncatch e\n  null\nfinally\n  def e\n    3\ne()", 3
+test "a def in a finally block is outside the catch binding", "try\n  g = 1\ncatch e\n  null\nfinally\n  def e\n    3\n  r = e()\nr", 3
 test "a handler assigns its catch binding", "try\n  throw 1\ncatch e\n  e = e + 1\n  e", 2
 
 # Comprehension clause variables bind per-construct.

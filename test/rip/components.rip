@@ -766,6 +766,9 @@ test 'an annotated public offer is a prop the caller can set', '''
   result
 ''', 'right'
 
+# A body line no member category takes rejects before any check inside it.
+fail 'a def in a component body rejects as a body line before its bare it', "A = component\n  def m(x)\n    it", ':2:3: emitter: a component body line must be a member declaration'
+
 fail 'an annotated offer is still a state declaration, not a readonly', '''
   Root = component
     offer limit: number =! 10
