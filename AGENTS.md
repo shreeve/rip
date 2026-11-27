@@ -468,7 +468,13 @@ the affected final gates again.
   on every run. Run it explicitly for release certification; the
   manual `repository-certification` workflow runs it with the corpus
   audit and generated-byte gates. It is not the edit loop or an
-  automatic pull-request gate. Beyond those exclusions, the one suite
+  automatic pull-request gate. Under cpuq it runs as one task per
+  lane, the root suite split into `ROOT_SHARDS` shards of `bun test
+  --isolate --shard`; `--tasks` prints the count `-n` must match (a
+  mismatch exits 2), and `--tasks --plan` lists the tasks:
+  `cpuq run --label rip:test-all -n "$(bun run test:all --tasks)" -t 30m -- sh -c 'bun run test:all'`.
+  Each task exits nonzero when its lane fails, so cpuq's summary names
+  the failed lanes. Beyond those exclusions, the one suite
   it does not carry is `test/browser` — it needs installed
   Playwright browsers. CI runs its deterministic Chromium/WebKit
   smoke matrix as a required job (`bun run test:browser`); the live
