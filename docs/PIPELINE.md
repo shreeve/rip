@@ -47,6 +47,21 @@ default rather than by declared precedence is listed, with its reason,
 in the grammar's `expectedConflicts` manifest; generation fails when
 the table drifts from it.
 
+The one table has more than one start symbol. Besides the program's
+`Root`, each grammar **entry** names a start symbol and the terminals
+that head it. Such a token carries a payload, a token list the lexer
+keeps beside it, and the driver parses that payload from the entry's
+start state on the same stack before it shifts the token. The token's
+value is then `[kind, {}, raw, body]`. Types are the grammar's one entry:
+`rewriteTypes` collapses each annotation into one `TYPE`, `CAST` or
+`SATISFIES` token, keeps the annotation's tokens as its payload, and
+the payload parses from `TypeAnnotation` into `type-*` nodes. A payload
+the entry's grammar rejects keeps its raw text and the body
+`["none", {}]`, and the parse reports nothing: the checker owns that
+annotation's verdict. An entry's states come after the program's, so
+adding one never renumbers a program state, and Solar fails generation
+when any entry state holds two actions for one token.
+
 ## 3. S-expressions and side tables
 
 Grammar actions build an s-expression tree (`["=", target, value]`,
@@ -58,6 +73,10 @@ on the tree. They live in side tables keyed by node id, built by
 - **NodeStore**: each node's kind, rule and source span;
 - **RoleStore**: which child plays which role (`condition`, `body`, …),
   from the grammar's role annotations;
+- **entry values**: every entry token's value in source order
+  (`stores.entryValue(nodeId)`). A rule that erases a type annotation
+  from the tree still records it as a side-band role, and that role's
+  `childNodeId` names the annotation's value here;
 - **MappingStore**: generated ↔ source mappings, filled in during
   emission.
 

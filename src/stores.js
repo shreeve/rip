@@ -33,12 +33,14 @@
 import { counter } from './counter.js';
 
 export class Stores {
-  constructor({ nodes, roles, primitives = [], nodeIds = null }) {
+  constructor({ nodes, roles, primitives = [], nodeIds = null, entryValues = [] }) {
     this.nodes = nodes;
     this.roles = roles;
     this.primitives = primitives;
     this.nodeIds = nodeIds;
+    this.entryValues = entryValues;
     this.byId = new Map(nodes.map(n => [n.nodeId, n]));
+    this.entryValuesById = new Map(entryValues.map((v) => [nodeIds?.get(v), v]));
     // Lookup indexes over the plain row arrays (the arrays stay the
     // source of truth): role() and rolesOf() are called once per mark
     // during emission, so they must be O(1), not row scans.
@@ -80,6 +82,13 @@ export class Stores {
 
   node(nodeId) {
     return this.byId.get(nodeId) ?? null;
+  }
+
+  // The value of an entry terminal (a type annotation's
+  // ["type", {}, raw, body]) by its node id: a side-band role's
+  // childNodeId reaches the annotation a rule left out of the tree.
+  entryValue(nodeId) {
+    return this.entryValuesById.get(nodeId) ?? null;
   }
 
   nodesByKind(kind) {

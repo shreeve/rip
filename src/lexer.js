@@ -2470,7 +2470,8 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     }
     fail('`do` invokes a function literal (`do ->`, `do (x) ->`, `do (-> …)`); call any other value directly: `f()`', tokens[i].start, tokens[i].end);
   }
-  rewriteTypes(tokens, mintId, text, fail);
+  const payloads = new Map();
+  rewriteTypes(tokens, mintId, text, fail, payloads);
   // Reserved words are legal inside type runs (absorbed above); one
   // surviving in VALUE position is the original loud rejection.
   rejectReservedWords(tokens, text, fail);
@@ -2493,7 +2494,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   rejectDoTails(tokens, fail);
   insertArrowCommas(tokens);
 
-  return { tokens, trivia, source, lexDiagnostics };
+  return { tokens, trivia, source, lexDiagnostics, payloads };
 }
 
 // Every RESERVED token left after rewriteTypes rejects from its own
@@ -2629,6 +2630,8 @@ export function rejectDoTails(tokens, fail) {
 //   setInput(input) then lex() → kind (falsy at EOF), exposing .text and
 //   .loc = {start, end} after each lex(). A FRESH loc object is allocated
 //   per token — the parser stores loc references on its location stack.
+//   payload() is the current token's run when the token heads a grammar
+//   entry (a TYPE, CAST or SATISFIES token: rewriteTypes' typeTape).
 export function makeParserLexer(path = '<anonymous>', { tolerant = false } = {}) {
   return {
     setInput(input) {
@@ -2637,6 +2640,7 @@ export function makeParserLexer(path = '<anonymous>', { tolerant = false } = {})
       this.trivia = tape.trivia;
       this.source = tape.source;
       this.lexDiagnostics = tape.lexDiagnostics ?? [];
+      this.payloads = tape.payloads;
       this.index = 0;
       this.text = '';
       this.loc = null;
@@ -2650,6 +2654,9 @@ export function makeParserLexer(path = '<anonymous>', { tolerant = false } = {})
       this.loc = { start: t.start, end: t.end };
       this.token = t;
       return t.kind;
+    },
+    payload() {
+      return this.payloads.get(this.token) ?? null;
     },
   };
 }

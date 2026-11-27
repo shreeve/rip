@@ -55,98 +55,98 @@
  },
  "pkg packages/app/apply.rip": {
   "tokens": "229arugai725h",
-  "tree": "rho6o9x28oyw",
-  "tolerant": "pfoewfirlaw1",
+  "tree": "1nojh8vsvq7jm",
+  "tolerant": "2wbvp5hld46cg",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/aria.rip": {
   "tokens": "26huzhuttnimv",
-  "tree": "20sf4loe5wz00",
-  "tolerant": "gbimsf7lbz54",
+  "tree": "2og93v9q7019s",
+  "tolerant": "lld43uaycc8w",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/components.rip": {
   "tokens": "3llic7o18b8jp",
-  "tree": "2fl9bgumntwxm",
-  "tolerant": "38rwxt50ymw0f",
+  "tree": "3q3iwk3fu4t0f",
+  "tolerant": "1pg3yhrg14m9",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/feed.rip": {
   "tokens": "2a0kgcuqnlw6j",
-  "tree": "2pndspih6ewth",
-  "tolerant": "2yzx5dv4qkxfz",
+  "tree": "1e5si9g8gdpo6",
+  "tolerant": "13uv4yu15r543",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/index.rip": {
   "tokens": "sszrf90qecz5",
-  "tree": "54phddplyufb",
-  "tolerant": "36697rqxyoi2k",
+  "tree": "23f13lvyzple0",
+  "tolerant": "unlhxmn7ewp0",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/launch.rip": {
   "tokens": "1tvagmwcxreph",
-  "tree": "2nh4s91pbqs93",
-  "tolerant": "38icrkwyj25yr",
+  "tree": "24hz4wjalda8l",
+  "tolerant": "2e21lmf1fbt7n",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/links.rip": {
   "tokens": "1g1usdhps40jo",
-  "tree": "13rqwnn5ouwx6",
-  "tolerant": "pyxdm342au9",
+  "tree": "c0vfthmv3apf",
+  "tolerant": "amzpi1jhuu3c",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/mutation.rip": {
   "tokens": "2e6f1hdf9rr2l",
-  "tree": "67lovi3gn6wx",
-  "tolerant": "2hkap35invwip",
+  "tree": "w95e6n3xnmpc",
+  "tolerant": "2mkoe8y89yxvo",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/persist.rip": {
   "tokens": "9f1tkvtg0b4t",
-  "tree": "33tup15qz6b87",
-  "tolerant": "20zvlc53c50zy",
+  "tree": "1ifcjors8bn9l",
+  "tolerant": "5dnu8jz8f8nf",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/rash.rip": {
   "tokens": "2fjttrxfjxtw5",
-  "tree": "dff5bu9ws7dt",
-  "tolerant": "1fgvya7vq9ie2",
+  "tree": "2hxalrai4zyag",
+  "tolerant": "3mf2dw5vbmnqy",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/renderer.rip": {
   "tokens": "3kkj1cd1i6j3w",
-  "tree": "36p6vb3ooefot",
-  "tolerant": "2x9fg1qjjglf1",
+  "tree": "w2ko57wk4xt8",
+  "tolerant": "1bv8i5glj90qp",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/router.rip": {
   "tokens": "1ydmn9iq56kh5",
-  "tree": "r92c09dtv8oa",
-  "tolerant": "1x13vpy8kvmma",
+  "tree": "303hg0agl49vu",
+  "tolerant": "3b79w0ezqejzp",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/routes.rip": {
   "tokens": "z8j0ah1yidgc",
-  "tree": "3586ybcako8gh",
-  "tolerant": "xlpe5g1jl67r",
+  "tree": "n8xdm27kf7ok",
+  "tolerant": "1wqtdeed4jywv",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/source.rip": {
   "tokens": "144y08v0nf4xe",
-  "tree": "6wjpkhlaykh5",
-  "tolerant": "222qnmssho9jm",
+  "tree": "1yu38h00xvndh",
+  "tolerant": "2aica2iws74xw",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/stash.rip": {
   "tokens": "2yoendui54xex",
-  "tree": "b8z5p8gu3dof",
-  "tolerant": "30u2026n1vcky",
+  "tree": "4a2hrz9ydaoy",
+  "tolerant": "1am7rzohrhls0",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/styles.rip": {
   "tokens": "1ouuw5kvca2rt",
-  "tree": "3u2x6s273b7uv",
-  "tolerant": "71fe17fcmkbw",
+  "tree": "1p7ewvqlhlg6t",
+  "tolerant": "h6wl3usdbl0t",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/test/apply.rip": {
@@ -163,14 +163,14 @@
  },
  "pkg packages/app/timing.rip": {
   "tokens": "10ggu51guovut",
-  "tree": "103cm5cy6tdcd",
-  "tolerant": "tjoznoi5enzw",
+  "tree": "1l9fhyw2bu2oo",
+  "tolerant": "1d5kf0rj3eqj2",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/app/workspace.rip": {
   "tokens": "pvbowpaqimut",
-  "tree": "2892jxnocu1vu",
-  "tolerant": "3sjaenhln1ncv",
+  "tree": "1r5cgnouq9f02",
+  "tolerant": "lrauhg1ua8bn",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/barcodes/barcodes.rip": {
@@ -181,14 +181,14 @@
  },
  "pkg packages/barcodes/code128.rip": {
   "tokens": "1yi5w5srnzx4g",
-  "tree": "1s7j2yp7wa7wf",
-  "tolerant": "1jume3dr4y3fr",
+  "tree": "12evfk9r10kz4",
+  "tolerant": "hhu93m420lde",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/barcodes/dom.rip": {
   "tokens": "3cc4hxvolfw2e",
-  "tree": "1sp62l40vw0x0",
-  "tolerant": "2vahiwh1l6y3w",
+  "tree": "3ffmhhqc36j7q",
+  "tolerant": "3jgvuz9puc0jl",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/barcodes/eci.rip": {
@@ -205,26 +205,26 @@
  },
  "pkg packages/barcodes/image.rip": {
   "tokens": "2evbnybkptoq7",
-  "tree": "1cpv9d84ogdx3",
-  "tolerant": "3uukb5im18aat",
+  "tree": "2nor2vxj70250",
+  "tolerant": "3e8gajgcf3ap9",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/barcodes/pdf417.rip": {
   "tokens": "vk92ey3bjxec",
-  "tree": "2ei5jc0ogrdnx",
-  "tolerant": "j1xat02aon48",
+  "tree": "qgxtz2epe3on",
+  "tolerant": "t271ztgaltg8",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/barcodes/qr.rip": {
   "tokens": "2jivt3au4zuog",
-  "tree": "6o3v61ime2f5",
-  "tolerant": "8c0niaqsbdvo",
+  "tree": "3pbjcqsyq0408",
+  "tolerant": "2nrikq30p9jgx",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/barcodes/test.rip": {
   "tokens": "2snrroaz8rpn8",
-  "tree": "2oqkoaqurhtls",
-  "tolerant": "f8ar7tpeenox",
+  "tree": "2wtztqboxtgv7",
+  "tolerant": "336szb7n1xoy8",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/barcodes/test/bench.rip": {
@@ -235,8 +235,8 @@
  },
  "pkg packages/barcodes/test/compare.rip": {
   "tokens": "4pynquqkyatx",
-  "tree": "roqffkfg9aph",
-  "tolerant": "2ab8nllkl0gv9",
+  "tree": "eu1rx0d0ocac",
+  "tolerant": "13fj6hb6qajuj",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/barcodes/test/corpus.rip": {
@@ -247,20 +247,20 @@
  },
  "pkg packages/barcodes/test/probe-encode.rip": {
   "tokens": "2o4mk2vi5j06q",
-  "tree": "2gvfv80cgouel",
-  "tolerant": "18sn29nh2ilty",
+  "tree": "e9apdwt3j4oe",
+  "tolerant": "1ntmibsuzk7gk",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/barcodes/test/probe-pixels.rip": {
   "tokens": "2k7kcxn7k6rth",
-  "tree": "3os92zyiv9lna",
-  "tolerant": "2153g27333jpz",
+  "tree": "26jk3yodaduov",
+  "tolerant": "2b72ygco3w1m9",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/barcodes/test/probe-stages.rip": {
   "tokens": "13e0ob2202xfd",
-  "tree": "3q92o57lpqf0p",
-  "tolerant": "uk2ui9ors5kl",
+  "tree": "ctmlfjsu2zid",
+  "tolerant": "3s2gf79cnqoqw",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/csv/bench.rip": {
@@ -277,8 +277,8 @@
  },
  "pkg packages/csv/csv.rip": {
   "tokens": "2micjovn4t5mt",
-  "tree": "25l2oxxs0gk6c",
-  "tolerant": "3dlyv5vb55k0d",
+  "tree": "3w3rpy4t7jd9y",
+  "tolerant": "14ap8dlqgj0dn",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/csv/test.rip": {
@@ -289,8 +289,8 @@
  },
  "pkg packages/db/db.rip": {
   "tokens": "1z7c2s0jnemt0",
-  "tree": "eeuknp4k6f3i",
-  "tolerant": "1z724665y141q",
+  "tree": "2yxd81ebros9b",
+  "tolerant": "3mvlefov5h68k",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/db/example.rip": {
@@ -301,8 +301,8 @@
  },
  "pkg packages/db/test.rip": {
   "tokens": "1jsu8ojmsdk0w",
-  "tree": "4lnix00odort",
-  "tolerant": "3190zpgzm2w8u",
+  "tree": "2kvgo99l7rujq",
+  "tolerant": "g27xz617kkmp",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/decimal/decimal.rip": {
@@ -325,38 +325,38 @@
  },
  "pkg packages/email/dom.rip": {
   "tokens": "3ohz12mobofbu",
-  "tree": "hl48mx9citjx",
-  "tolerant": "2prkxav6vbw7y",
+  "tree": "3oxf1552fzh65",
+  "tolerant": "t61ia5npftaa",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/email/email.rip": {
   "tokens": "kzwbp1dwo6xa",
-  "tree": "3eoomp1uf0k7q",
-  "tolerant": "2s85y0wa1amj5",
+  "tree": "1851e3edv74g9",
+  "tolerant": "1dcbpxd8nrqy6",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/email/preview/app/components/notice.rip": {
   "tokens": "1h2zg3vrc8qnm",
-  "tree": "1mskv3t1yui3s",
-  "tolerant": "3exsvhant93t7",
+  "tree": "ijl3b8eg9wdu",
+  "tolerant": "xk9i8qtbg4er",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/email/preview/app/dark.rip": {
   "tokens": "2lgzs4b0170iy",
-  "tree": "1sr8bid0jc149",
-  "tolerant": "26p4dg2xqpbip",
+  "tree": "3nnj2n8p453ev",
+  "tolerant": "1hl9z3kf50l4n",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/email/preview/app/routes/[...rest].rip": {
   "tokens": "3tu3h4013ot1n",
-  "tree": "ezlo86z9d672",
-  "tolerant": "2krsd64buyot6",
+  "tree": "3urqzgcmho670",
+  "tolerant": "x8e8hluvcg5z",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/email/preview/app/routes/_layout.rip": {
   "tokens": "1b51i9a6wfxam",
-  "tree": "219pa9ub6qwof",
-  "tolerant": "21nminxpxibhs",
+  "tree": "2b7h7djgpevpk",
+  "tolerant": "33rbf48v5yo0j",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/email/preview/app/routes/index.rip": {
@@ -367,26 +367,26 @@
  },
  "pkg packages/email/preview/app/source.rip": {
   "tokens": "118mndecqbust",
-  "tree": "2fbyp16tgldjw",
-  "tolerant": "3oniu522xapk4",
+  "tree": "23mpsmlkhad0a",
+  "tolerant": "2o36c94456ka4",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/email/preview/app/stash.rip": {
   "tokens": "sdpjksjw3e3k",
-  "tree": "1677l4lcrng0o",
-  "tolerant": "fltrjh6pfr3u",
+  "tree": "23ci1ai7fdhvv",
+  "tolerant": "3l0esriaesczl",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/email/preview/index.rip": {
   "tokens": "lzknlimlkjqr",
-  "tree": "2xj29d0jfu5qr",
-  "tolerant": "1cbolt5dba9r0",
+  "tree": "1hfe8qtd8s1wd",
+  "tolerant": "218q5ewfzo64d",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/email/render.rip": {
   "tokens": "3ixbhejpb5t3b",
-  "tree": "pzat1vakju7n",
-  "tolerant": "15pipfsy1pibu",
+  "tree": "2v41cy40gvoas",
+  "tolerant": "1ziemqtxt5l6c",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/email/test/fixtures/basic-email.rip": {
@@ -397,8 +397,8 @@
  },
  "pkg packages/email/test/fixtures/typed.rip": {
   "tokens": "2h08vhg4t92wi",
-  "tree": "91khzl4oiyc5",
-  "tolerant": "6va87j82i11n",
+  "tree": "14300e7dqamcm",
+  "tolerant": "3ka8tdv9reqpf",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/emdb/bench.rip": {
@@ -421,14 +421,14 @@
  },
  "pkg packages/fake/fake.rip": {
   "tokens": "3r9hac0uxxxtl",
-  "tree": "1ya4r5z9wbw5j",
-  "tolerant": "27il6tpmyrotw",
+  "tree": "2hgawh787lp6s",
+  "tolerant": "2oa6wylva5x9i",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/fake/test.rip": {
   "tokens": "dv2o68z7db07",
-  "tree": "1d16nqz5nle4v",
-  "tolerant": "3bnjkarzijlgr",
+  "tree": "1xibb876nhj2b",
+  "tolerant": "2uzoc445lx9yw",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/googlesheets/googlesheets.rip": {
@@ -451,8 +451,8 @@
  },
  "pkg packages/http/http.rip": {
   "tokens": "33ei9kiqvsbw2",
-  "tree": "3fu2bppm13jja",
-  "tolerant": "yyoo72iz9yv1",
+  "tree": "3quuwomz942xi",
+  "tolerant": "ldyyhvm6cym2",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/http/test.rip": {
@@ -463,14 +463,14 @@
  },
  "pkg packages/pdf/demo.rip": {
   "tokens": "2gqqqrxtmd0gm",
-  "tree": "1u2jig4jngwmd",
-  "tolerant": "1t7d25sgfr6i3",
+  "tree": "g5af8vz3u3d0",
+  "tolerant": "3vsdjbbxpbltk",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/pdf/pdf.rip": {
   "tokens": "2cf3i6v3sbeak",
-  "tree": "28pdxtgo4947s",
-  "tolerant": "22ltlxfilqyym",
+  "tree": "2zcjmv03uq6v8",
+  "tolerant": "158wo1ogjgz72",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/pdf/test.rip": {
@@ -559,8 +559,8 @@
  },
  "pkg packages/sites/catalog.rip": {
   "tokens": "3j4u4y6v0bhb5",
-  "tree": "1oc92s9x6ddip",
-  "tolerant": "2t2mqt4a3lbpj",
+  "tree": "urr8z2ygbfjt",
+  "tolerant": "z99n571xil0k",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/control.rip": {
@@ -577,8 +577,8 @@
  },
  "pkg packages/sites/demos/cart/api/index.rip": {
   "tokens": "bqlak1816ugu",
-  "tree": "2690f4qw24od7",
-  "tolerant": "1lawvtqm9ydmc",
+  "tree": "39nuu8y72ap64",
+  "tolerant": "kcgzj5y9wdc5",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/demos/cart/api/models.rip": {
@@ -595,20 +595,20 @@
  },
  "pkg packages/sites/demos/cart/app/api-client.rip": {
   "tokens": "1zj0e03br1m45",
-  "tree": "nkw5a4nxt7ko",
-  "tolerant": "3ntg4ix9i7wys",
+  "tree": "dsxnbbw1ir15",
+  "tolerant": "1ijcrgxm71veu",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/demos/cart/app/components/button.rip": {
   "tokens": "8kdna5cse85w",
-  "tree": "kg5yod2fxgzf",
-  "tolerant": "25tmype444fpe",
+  "tree": "2kls4tnc9q1au",
+  "tolerant": "22ypki25k02ht",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/demos/cart/app/config.rip": {
   "tokens": "1ee07atjnvuts",
-  "tree": "mp2p5c1z4f2j",
-  "tolerant": "28q4laqymxj2v",
+  "tree": "rvl4zev7ec31",
+  "tolerant": "3q4dw93tid04x",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/demos/cart/app/routes/_404.rip": {
@@ -619,20 +619,20 @@
  },
  "pkg packages/sites/demos/cart/app/routes/_layout.rip": {
   "tokens": "1pij5i0asv21i",
-  "tree": "n407oqyeoy81",
-  "tolerant": "1cuoi5tapai58",
+  "tree": "rb574ob19hj",
+  "tolerant": "k0yozzwd37f",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/demos/cart/app/routes/cart.rip": {
   "tokens": "3soztova8h5ca",
-  "tree": "2beja3ccxjtln",
-  "tolerant": "37jk81y5db41k",
+  "tree": "1kox3pfg0xyjn",
+  "tolerant": "37vxualtrk6e3",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/demos/cart/app/routes/index.rip": {
   "tokens": "2s4thk40a71ut",
-  "tree": "2hj7ku663t8t0",
-  "tolerant": "v65te3fjhnfh",
+  "tree": "3nk0em4af7jj3",
+  "tolerant": "3q7cxu0iakaa1",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/demos/cart/app/routes/orders/[id].rip": {
@@ -649,14 +649,14 @@
  },
  "pkg packages/sites/demos/cart/app/routes/profile.rip": {
   "tokens": "267cz9l6hy2uz",
-  "tree": "fdv493ch7eia",
-  "tolerant": "3luntopuu7wjw",
+  "tree": "3llmndevteykx",
+  "tolerant": "367fstm0935ea",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/demos/cart/app/stash.rip": {
   "tokens": "3z1zwmn64qsw",
-  "tree": "1qxdx2dkbuhix",
-  "tolerant": "117tnsy6loyqv",
+  "tree": "1jinm6e6lbzl9",
+  "tolerant": "g5xbbk44gl2n",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/demos/cart/app/types.rip": {
@@ -685,8 +685,8 @@
  },
  "pkg packages/sites/demos/cart/test/cart.spec.rip": {
   "tokens": "3bwpl10ea5mit",
-  "tree": "2qr30eqtubvk3",
-  "tolerant": "2sqrbo4lt0gz2",
+  "tree": "2smn0yrkyjynk",
+  "tolerant": "3s3j0ssahnonu",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/demos/cart/test/layout.spec.rip": {
@@ -697,20 +697,20 @@
  },
  "pkg packages/sites/demos/cart/test/orders.spec.rip": {
   "tokens": "10z7ialcsldv4",
-  "tree": "3e27s30em2wxi",
-  "tolerant": "kio75xnzdzr2",
+  "tree": "ayvq7g2yqeao",
+  "tolerant": "36684kw1pb2qc",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/demos/cart/test/products.spec.rip": {
   "tokens": "3owhrbgjdu484",
-  "tree": "twylc7pzjkvb",
-  "tolerant": "29lwtz7s7act8",
+  "tree": "1bgiber2ulax0",
+  "tolerant": "232co1376nofy",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/demos/cart/test/profile.spec.rip": {
   "tokens": "1pt5vuuolt1g8",
-  "tree": "2vtyevsdkgjxh",
-  "tolerant": "2oux2ncpe6dx",
+  "tree": "c3nl6lf98aqp",
+  "tolerant": "2x3fmpftt90fz",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/demos/cart/test/support/setup.rip": {
@@ -721,8 +721,8 @@
  },
  "pkg packages/sites/demos/cart/test/support/util.rip": {
   "tokens": "2ca5i27s92ff8",
-  "tree": "29p27jpd20y6o",
-  "tolerant": "2ue7vvvkg8et8",
+  "tree": "kzz608kyp4xo",
+  "tolerant": "2hlpmavj1zl6l",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/demos/hello/app/routes/index.rip": {
@@ -745,8 +745,8 @@
  },
  "pkg packages/sites/demos/pulse/app/mood.rip": {
   "tokens": "k4ew8axz2krp",
-  "tree": "hq7i06kb7dd3",
-  "tolerant": "2pgs0cphtwdky",
+  "tree": "1atwdvoqtwxfz",
+  "tolerant": "1rq388gd3pp5w",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/demos/pulse/app/routes/index.rip": {
@@ -793,8 +793,8 @@
  },
  "pkg packages/sites/edge.rip": {
   "tokens": "257fixdpbmi0d",
-  "tree": "pbebem29yof9",
-  "tolerant": "5t3ay9foatwb",
+  "tree": "ai093u3o8l2t",
+  "tolerant": "37asazhge4hfn",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/generate.rip": {
@@ -811,14 +811,14 @@
  },
  "pkg packages/sites/manager.rip": {
   "tokens": "2todtvklefxqe",
-  "tree": "h9drz7oei5ao",
-  "tolerant": "16cu5zs084lmo",
+  "tree": "3iv9tfi46m8u5",
+  "tolerant": "22x7bql0nhejz",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/middleware.rip": {
   "tokens": "11q3ngdcwbjl6",
-  "tree": "347vj138d1enm",
-  "tolerant": "3e6rwg1tox9z",
+  "tree": "1242lgwpmy9b8",
+  "tolerant": "204laxak1iug1",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/monitor.rip": {
@@ -835,8 +835,8 @@
  },
  "pkg packages/sites/site.rip": {
   "tokens": "1sndnrz6kp860",
-  "tree": "1dtjbh79fbqkn",
-  "tolerant": "sv4xotvaygzg",
+  "tree": "2quwa3h5syn1s",
+  "tolerant": "3jwbjlly8lxvh",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/sites.rip": {
@@ -883,8 +883,8 @@
  },
  "pkg packages/sites/test/framework/test.rip": {
   "tokens": "ewwskq38isg2",
-  "tree": "3c7s7zy47yxi9",
-  "tolerant": "15qwiy4883v4u",
+  "tree": "2ejhaeowhv69t",
+  "tolerant": "k75gg1qy7qo7",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/test/hello-api/entry.rip": {
@@ -937,14 +937,14 @@
  },
  "pkg packages/sites/test/middleware/test.rip": {
   "tokens": "dcqun2t3ucyj",
-  "tree": "u3if8endxrio",
-  "tolerant": "15ahnhdzkjctr",
+  "tree": "nwbt6qs1wqwy",
+  "tolerant": "j3sp6p3c7t3m",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/test/monitor/test.rip": {
   "tokens": "14evm6g1b28x7",
-  "tree": "skl4qlwc03h8",
-  "tolerant": "eel724zogo62",
+  "tree": "3k6pe55w3l81a",
+  "tolerant": "1pcxxyugae9bc",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/test/operations/test.rip": {
@@ -1225,20 +1225,20 @@
  },
  "pkg packages/swarm/swarm.rip": {
   "tokens": "2c43bf93l5iha",
-  "tree": "38glilfzrvl2e",
-  "tolerant": "2zwxneb87n6qj",
+  "tree": "1q06ahkx2bbh1",
+  "tolerant": "3oqrlozdiyrem",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/swarm/test.rip": {
   "tokens": "2jqvl5jdtbv72",
-  "tree": "3r7eyj61mj9gq",
-  "tolerant": "3r8sz7xbtv8it",
+  "tree": "2eor6in2msi0e",
+  "tolerant": "1v6v3yd61d6sl",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/testing/app.rip": {
   "tokens": "2zyr4scwb2cna",
-  "tree": "1beksz5mpybw0",
-  "tolerant": "3f5pgbebbehyy",
+  "tree": "2rwyj6p571a7q",
+  "tolerant": "1yz1c6lhr62mh",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/testing/test.rip": {
@@ -1249,8 +1249,8 @@
  },
  "pkg packages/testing/testing.rip": {
   "tokens": "1c50lumgfka5e",
-  "tree": "3tjcp8y0lv3uv",
-  "tolerant": "6os2h36fvxc2",
+  "tree": "3n2b4jp3ar14p",
+  "tolerant": "22p0l0tcku2l5",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/time/demo.rip": {
@@ -1267,8 +1267,8 @@
  },
  "pkg packages/time/time.rip": {
   "tokens": "28bbzzkjf9h68",
-  "tree": "hysd4jfegdrf",
-  "tolerant": "28cbbnz5nmte2",
+  "tree": "17gwlygf4rn1k",
+  "tolerant": "37lw87u7mhlpi",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tray/build.rip": {
@@ -1567,8 +1567,8 @@
  },
  "pkg packages/tui/test/events.rip": {
   "tokens": "jrrgdm61eix5",
-  "tree": "3cbnf102p4jn5",
-  "tolerant": "1yrwyxfboiqop",
+  "tree": "33knn7ld13th8",
+  "tolerant": "3flgv9eh1ikz9",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tui/test/events/harness.rip": {
@@ -1849,8 +1849,8 @@
  },
  "pkg packages/tui/test/layout.rip": {
   "tokens": "2hjhvq422wcnw",
-  "tree": "3b3pljpr5spuz",
-  "tolerant": "33n05qb5zvi02",
+  "tree": "1dkrzgrbznw3c",
+  "tolerant": "28rcik3us2enm",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/tui/test/lines.rip": {
@@ -1927,80 +1927,80 @@
  },
  "pkg packages/ui/components/anchored.rip": {
   "tokens": "2dokswnkmytc",
-  "tree": "po753yp3h9sy",
-  "tolerant": "rr03bup7ggzh",
+  "tree": "2ttds02r5b9kh",
+  "tolerant": "1xosodtgossys",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ui/components/combobox.rip": {
   "tokens": "u9rjykl8avhs",
-  "tree": "2nw47gx1gv3vu",
-  "tolerant": "41xpi6i7dwh5",
+  "tree": "3fsvksk8abp3",
+  "tolerant": "3r4hqt1yu68o2",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ui/components/dialog.rip": {
   "tokens": "227rat06h793r",
-  "tree": "2rolk8l14a3pt",
-  "tolerant": "1ap59c055yoe4",
+  "tree": "1nqoiznjel5t1",
+  "tolerant": "r81zkul0px3b",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ui/components/drawer.rip": {
   "tokens": "1m0wcucqz63xq",
-  "tree": "85cqswpol2fz",
-  "tolerant": "2j7lpqk2vgfsx",
+  "tree": "3sadpbqey8og1",
+  "tolerant": "3gm0hq53ycofq",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ui/components/menu.rip": {
   "tokens": "2j6s17vv6g4de",
-  "tree": "1jaxaiheiwnt",
-  "tolerant": "2str5ynw4c5ba",
+  "tree": "2lg6qrh8atut6",
+  "tolerant": "24rq86unpeq7q",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ui/demo/app/components.rip": {
   "tokens": "1bwoztv39yic3",
-  "tree": "3m58zpiu5jnok",
-  "tolerant": "2m5bq18r7xrlp",
+  "tree": "1nc2zj8njz1wz",
+  "tolerant": "cmglzv8ta503",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ui/demo/app/components/button.rip": {
   "tokens": "21mwzffysp35s",
-  "tree": "3hhj284yv371p",
-  "tolerant": "1hg9a7x8gsi80",
+  "tree": "29h8hjnw1hi2g",
+  "tolerant": "1qrx8isge3cel",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ui/demo/app/components/icon.rip": {
   "tokens": "2wtwepdbaecr9",
-  "tree": "yt9rreiulw49",
-  "tolerant": "2egn65pq3cv8y",
+  "tree": "31fxe3vvc3lup",
+  "tolerant": "2tfquq2t6rpbz",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ui/demo/app/components/page.rip": {
   "tokens": "1071rba0h0u6w",
-  "tree": "10eozybgopn0e",
-  "tolerant": "3j36rxnj4wlyy",
+  "tree": "8ia8mg17xlp9",
+  "tolerant": "bblra985j0t0",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ui/demo/app/routes/_layout.rip": {
   "tokens": "3f7vtuwcciu1k",
-  "tree": "1ob5g6gvwbac6",
-  "tolerant": "4we68qzv7hbp",
+  "tree": "1cm04psh985ih",
+  "tolerant": "20y3bz2fcrmyg",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ui/demo/app/routes/combobox.rip": {
   "tokens": "2qyc6vlszi81x",
-  "tree": "k0lla4a89tng",
-  "tolerant": "11r3d6ia245m",
+  "tree": "1a9caug3u709q",
+  "tolerant": "16dwkbjcxwjw5",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ui/demo/app/routes/dialog.rip": {
   "tokens": "25nscyrrsexpw",
-  "tree": "1omsx4x40syyg",
-  "tolerant": "1uzz14ra45wrb",
+  "tree": "3t933rs5vv9sm",
+  "tolerant": "9f7tt6m1prrz",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ui/demo/app/routes/drawer.rip": {
   "tokens": "2lnxirinzwp8y",
-  "tree": "2n9ylpubv50ts",
-  "tolerant": "sfrusovqylxt",
+  "tree": "35vc9ohyfos8g",
+  "tolerant": "wstsi2ru35v2",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ui/demo/app/routes/index.rip": {
@@ -2011,8 +2011,8 @@
  },
  "pkg packages/ui/demo/app/routes/menu.rip": {
   "tokens": "e676iw1fjc2w",
-  "tree": "2rwjvnrlq1sqa",
-  "tolerant": "3umqbuw1i60qk",
+  "tree": "3j64e4zkqrohb",
+  "tolerant": "y6zfjxzz9rrq",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/ui/demo/index.rip": {
@@ -2053,14 +2053,14 @@
  },
  "pkg packages/validate/test.rip": {
   "tokens": "76029lqz4b2y",
-  "tree": "2zwis1oyp6gnm",
-  "tolerant": "3vigfyca71g1y",
+  "tree": "15cmpkgm9p2lr",
+  "tolerant": "ctu9aq2n6k8g",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/validate/validate.rip": {
   "tokens": "tmza09ntardw",
-  "tree": "316d9zbfthnm1",
-  "tolerant": "14nbi1cscro76",
+  "tree": "3pmxm3uef5l9t",
+  "tolerant": "3442ggol5722k",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/vim/test.rip": {
@@ -2899,8 +2899,8 @@
  },
  "row assignment.rip › test destructure: postfix cast element": {
   "tokens": "3fmlbkfmrrz5e",
-  "tree": "3a3jtcey5mr50",
-  "tolerant": "3kakphpkbsu6s",
+  "tree": "1ora9mtobbfrs",
+  "tolerant": "14cimpnl49xuw",
   "complete": "6j7t1thlgyju"
  },
  "row assignment.rip › test nullish assignment null": {
@@ -4591,8 +4591,8 @@
  },
  "row basic.rip › test typed string-named field": {
   "tokens": "3chirc3pel7pt",
-  "tree": "2ipzz175mokb7",
-  "tolerant": "1ahcqohurzzly",
+  "tree": "1s98m3bwxg7gt",
+  "tolerant": "2eimrnz94w90f",
   "complete": "6j7t1thlgyju"
  },
  "row basic.rip › test static string-named field": {
@@ -4873,152 +4873,152 @@
  },
  "row cast.rip › code cast on identifier erased": {
   "tokens": "moz1ewn6edja",
-  "tree": "1kvsy3emu74rs",
-  "tolerant": "3khm9bg8o3uyk",
+  "tree": "1ius2uiga6g36",
+  "tolerant": "2mvs0idlocwbk",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code parenthesized cast erased": {
   "tokens": "2ns58wakol3ub",
-  "tree": "3h83j3gn412qx",
-  "tolerant": "24mvm4zmvs7m5",
+  "tree": "2pecx7zm2m2ak",
+  "tolerant": "3uarb96ohjlk5",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code cast inside call erased": {
   "tokens": "bm87m05cz1f6",
-  "tree": "3pc5qv1q1ob5y",
-  "tolerant": "was0yfqjtusz",
+  "tree": "260y7d78l3awk",
+  "tolerant": "2caclayv7dtiu",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code cast inside array erased": {
   "tokens": "1kdfirjgs4hno",
-  "tree": "2gok2aztgll5z",
-  "tolerant": "2uddux5kfu9z0",
+  "tree": "2jxcokn2zmlsh",
+  "tolerant": "3lp4dqkv2wrsd",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code cast on member access erased": {
   "tokens": "2bf9r9u771qei",
-  "tree": "1tqa68g6ra5u0",
-  "tolerant": "vb0v9iz3dihz",
+  "tree": "2o00l9jhxj3wb",
+  "tolerant": "4x1c4vqdlqpg",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code cast on call result erased": {
   "tokens": "kw2wl3718sal",
-  "tree": "nl7x4glrmnnd",
-  "tolerant": "2w8jnjtjiwkhg",
+  "tree": "18umbv2if2iph",
+  "tolerant": "18gog6carsbfr",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code cast on index erased": {
   "tokens": "hp4mg3iiwmvc",
-  "tree": "102nb2j4myx9q",
-  "tolerant": "35ue1u2y85nuk",
+  "tree": "2e1uco75lo3yu",
+  "tolerant": "6a12sbplk9zu",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code cast stops before plus": {
   "tokens": "jr9yqclhz99q",
-  "tree": "25rgtgfwpdsuj",
-  "tolerant": "20tjylmcmoh9d",
+  "tree": "kvgvcd3g0e2w",
+  "tolerant": "1bhm2eqbjqxxq",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code cast with generic type": {
   "tokens": "3h5le4zkbgv22",
-  "tree": "f8ngfbwrctdm",
-  "tolerant": "3qn1dul1ap998",
+  "tree": "1g2lcxq0et6f",
+  "tolerant": "307dyg5molspy",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code cast with union type": {
   "tokens": "bpsgs27d6l6l",
-  "tree": "rwkmgkjdkvm3",
-  "tolerant": "39lbl6kio1czr",
+  "tree": "3v5n0zajve9n4",
+  "tolerant": "33v56v54rfg5j",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code cast with intersection type": {
   "tokens": "3swtqqn6zmsjp",
-  "tree": "31orpghnya5bw",
-  "tolerant": "3upi56l15ytxp",
+  "tree": "1ixi841epmnsj",
+  "tolerant": "2pjsb1rbhwcf7",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code cast with object type": {
   "tokens": "30et194toofa2",
-  "tree": "mnavk7p17vzi",
-  "tolerant": "1536q60h0ta90",
+  "tree": "14vdytndwkqbn",
+  "tolerant": "slafs2oyv8uy",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code cast with array type": {
   "tokens": "18e7hgnj7w553",
-  "tree": "3qov6fblvmfk5",
-  "tolerant": "3e0c1y6wmelo6",
+  "tree": "3je9p78sutfl0",
+  "tolerant": "2w3du7eje8ym",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › test cast union continues past a trailing |": {
   "tokens": "3rlgq8z830bdl",
-  "tree": "1cuoesu2uq6g1",
-  "tolerant": "35eag7l17zodn",
+  "tree": "2y67clechr00e",
+  "tolerant": "1vqqiu6yn48rx",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › test cast intersection continues past a trailing &": {
   "tokens": "2effxn2ldm6ap",
-  "tree": "1tn12szpdxr6m",
-  "tolerant": "2ko9v5z5zdyiv",
+  "tree": "gq9jzcime54y",
+  "tolerant": "3pvxui5oj9zvi",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code chained casts erased": {
   "tokens": "j5ae4adalyym",
-  "tree": "2ajtk3htigaup",
-  "tolerant": "3dflx1jizegbj",
+  "tree": "al4v2h5junpi",
+  "tolerant": "107md3lby0xq3",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code satisfies on identifier erased": {
   "tokens": "2kew8izvra0vy",
-  "tree": "qp3p6cuyko53",
-  "tolerant": "18difhdo2y2zt",
+  "tree": "105w6ws3cfu06",
+  "tolerant": "1afroz1i8h77f",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code satisfies on object literal erased": {
   "tokens": "264huelockixj",
-  "tree": "1rx07hzfxxy2l",
-  "tolerant": "307ts9v90cxsw",
+  "tree": "ajl3jyefv39k",
+  "tolerant": "1sedjc9odrals",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code satisfies inside call erased": {
   "tokens": "1z7cwu0r89yvj",
-  "tree": "p19b3zk1f50s",
-  "tolerant": "ibzpjynt81nj",
+  "tree": "1cv41v1eu7pvv",
+  "tolerant": "mpqykksh53py",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code satisfies on member access erased": {
   "tokens": "1u2hx7zyi54ji",
-  "tree": "2er10cbuc7b5g",
-  "tolerant": "3hxx2wy1zcnu3",
+  "tree": "3g1g86kgwgc17",
+  "tolerant": "4rw48sa7yg7a",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code parenthesized satisfies as a member head": {
   "tokens": "3c96l26xzfggs",
-  "tree": "3s7sexdpu8co0",
-  "tolerant": "wgwwblrp322v",
+  "tree": "1b9dlvzhvgn0o",
+  "tolerant": "10yq9gjbs1q9m",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code satisfies stops before plus": {
   "tokens": "1x6xziv0z3ocd",
-  "tree": "3o7m2leoa8brv",
-  "tolerant": "2twloo77tl1f9",
+  "tree": "2xct1qafk7ize",
+  "tolerant": "15fjol7dv6a2k",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code satisfies with union type": {
   "tokens": "1wwongxsvsgj9",
-  "tree": "29ls6h6nhit94",
-  "tolerant": "303ow6cqra5qi",
+  "tree": "37fkv4egt3uvi",
+  "tolerant": "2xifnyt813tco",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code satisfies chained with a cast, either order": {
   "tokens": "1hra9c5xu7h90",
-  "tree": "2ygxv6te656mw",
-  "tolerant": "3uxfw1ti0cvmo",
+  "tree": "nlnv0cxmy0b5",
+  "tolerant": "29qd16brgcszr",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code a postfix guard ends the satisfies run": {
   "tokens": "3em0my3pqdtsr",
-  "tree": "24hbxjcxjj16l",
-  "tolerant": "2rxac6h618saa",
+  "tree": "sjrnt5k18zeh",
+  "tolerant": "3e2b233e48d4t",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code satisfies is a name outside the postfix position": {
@@ -5059,20 +5059,20 @@
  },
  "row cast.rip › code a spaced paren type still casts": {
   "tokens": "3529nvtw52o9e",
-  "tree": "oio57gw3ip5m",
-  "tolerant": "ahukedgzgba",
+  "tree": "3dg7wkyu61w3u",
+  "tolerant": "ugyvviaoccsy",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code a spaced bracket type still casts": {
   "tokens": "2revi9h43ghqd",
-  "tree": "1v0wx1ew4firv",
-  "tolerant": "2qu3myune2blq",
+  "tree": "1j8g1iu4jixic",
+  "tolerant": "1qtj4ffpt88ce",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › fail a chained operator word with a tight paren rejects": {
   "tokens": "3tta073sgslp3",
   "tree": "2ijl8cneqd8yt",
-  "tolerant": "10qzx5zny1jk",
+  "tolerant": "25fv7inhjele8",
   "complete": "5viwh6mb20m6"
  },
  "row cast.rip › code for-as iteration unaffected": {
@@ -5113,14 +5113,14 @@
  },
  "row cast.rip › test a negative literal cast erases": {
   "tokens": "1vzlfbc9z2g8i",
-  "tree": "3v88liwp6lu4k",
-  "tolerant": "3ob7msk3xhptk",
+  "tree": "j8mkaxvbm8kr",
+  "tolerant": "3lhqvkrmy6o6y",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code the negative literal reaches the face type": {
   "tokens": "93btr0ra1sd2",
-  "tree": "1p0lara6gqmn0",
-  "tolerant": "1qeyw4m9yrhiv",
+  "tree": "3980c7rz6vlil",
+  "tolerant": "1sg9zm4mopfy5",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › fail a plus-signed literal is not a type": {
@@ -5143,26 +5143,26 @@
  },
  "row cast.rip › code a clause keyword ends the cast's type run": {
   "tokens": "1537bwu69haua",
-  "tree": "33qkkt735paki",
-  "tolerant": "18iqfgujfj9ht",
+  "tree": "84570izcr6ik",
+  "tolerant": "2bczdz00d535u",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code block-final generic cast keeps the dedent": {
   "tokens": "3dpxx16xxu0v3",
-  "tree": "1swtqnifehdop",
-  "tolerant": "2mbwbrnx2rpmm",
+  "tree": "fvkxwcezso73",
+  "tolerant": "39kv19pbe0ar6",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code block-final generic cast before a sibling if": {
   "tokens": "1rdaerojy6wlu",
-  "tree": "7v3kfzi9f0l0",
-  "tolerant": "4i2uqm5sy56g",
+  "tree": "kralt0y76kbw",
+  "tolerant": "9ee15zw51pl1",
   "complete": "6j7t1thlgyju"
  },
  "row cast.rip › code a cast inside an exported array's object": {
   "tokens": "1y9ye1kj1qdhf",
-  "tree": "1dquhzjn9xj1i",
-  "tolerant": "1rp6yjo7feo5u",
+  "tree": "31shn9womhaa",
+  "tolerant": "2dbyz32o5m3mx",
   "complete": "6j7t1thlgyju"
  },
  "row classes.rip › test class methods": {
@@ -5395,8 +5395,8 @@
  },
  "row classes.rip › code a TS constructor type keeps its new": {
   "tokens": "3on7gidu2yn38",
-  "tree": "1q0lm7r0jt506",
-  "tolerant": "39iki6yr9c3yr",
+  "tree": "18q1zznmp3fam",
+  "tolerant": "ibu97mjdiie5",
   "complete": "6j7t1thlgyju"
  },
  "row classes.rip › fail class with member-access name does not parse": {
@@ -5797,8 +5797,8 @@
  },
  "row classes.rip › code a parenthesized cast is the constructor": {
   "tokens": "240jn832zlbrp",
-  "tree": "1ue3vnja6s9nz",
-  "tolerant": "2x6vpz1h1t93e",
+  "tree": "7yetxk6yghdj",
+  "tolerant": "35rcr2o3nefld",
   "complete": "6j7t1thlgyju"
  },
  "row classes.rip › code a parenthesized maybe dammit is the constructor": {
@@ -5953,14 +5953,14 @@
  },
  "row classes.rip › test def declares a class method, def @ a static one": {
   "tokens": "21qi2vdu2m86m",
-  "tree": "2dixr3mmfi9wt",
-  "tolerant": "nd226zbpz2u7",
+  "tree": "201xy0uliqbw",
+  "tolerant": "3i1k15acdi04a",
   "complete": "6j7t1thlgyju"
  },
  "row classes.rip › test a void def method returns undefined": {
   "tokens": "3cbxxej7l94z6",
-  "tree": "3pmlwfhsvp1tl",
-  "tolerant": "1dw3mj0mxgyof",
+  "tree": "39e4m7gmceg97",
+  "tolerant": "2y4kz5wrdo9nl",
   "complete": "6j7t1thlgyju"
  },
  "row classes.rip › test def constructor promotes parameters": {
@@ -6007,14 +6007,14 @@
  },
  "row classes.rip › test parenless def forms in a class body": {
   "tokens": "3ogj1oythpipr",
-  "tree": "1u8psb3x0l35d",
-  "tolerant": "11k4tm0w9l5gc",
+  "tree": "1du3v9xi827m5",
+  "tolerant": "3b13f86ll15qw",
   "complete": "6j7t1thlgyju"
  },
  "row classes.rip › test generic defs in a class body, instance and static": {
   "tokens": "3l5fyeb5vhp0s",
-  "tree": "lfuwd9xjj4sb",
-  "tolerant": "4nsuqv9f6cur",
+  "tree": "5zn37vxfg98d",
+  "tolerant": "3frv8hx09nquz",
   "complete": "6j7t1thlgyju"
  },
  "row classes.rip › code a class def sees module bindings as a method does": {
@@ -6055,8 +6055,8 @@
  },
  "row classes.rip › fail a typed field and a setter cannot share a name": {
   "tokens": "2mpis0bhtmhmx",
-  "tree": "34pww3eof4d8p",
-  "tolerant": "1eysf2lejr9ne",
+  "tree": "9qhsxxlny60p",
+  "tolerant": "17i8hzi0btd2w",
   "complete": "6j7t1thlgyju"
  },
  "row classes.rip › fail a static field and a static accessor cannot share a name": {
@@ -6079,26 +6079,26 @@
  },
  "row classes.rip › code a parameterless static def with a return type": {
   "tokens": "3kwvpxkst0zcm",
-  "tree": "2abavkopms2jk",
-  "tolerant": "3lim6enhu6gc8",
+  "tree": "cdx8gliiuc7v",
+  "tolerant": "31ivqw79u9suk",
   "complete": "6j7t1thlgyju"
  },
  "row classes.rip › code a parameterless static void def with a return type": {
   "tokens": "4dky8tykq8fp",
-  "tree": "wttjygm44gyr",
-  "tolerant": "97nld89kqxn1",
+  "tree": "2csgj9eudctu5",
+  "tolerant": "38aqy0edfwja6",
   "complete": "6j7t1thlgyju"
  },
  "row classes.rip › code a parameterless generic def takes a return type": {
   "tokens": "3dr2uvjmc4zfa",
-  "tree": "xivoqqooowsp",
-  "tolerant": "42xigsjh25lq",
+  "tree": "kzugq27wkolp",
+  "tolerant": "3te3mr5xbyax7",
   "complete": "6j7t1thlgyju"
  },
  "row classes.rip › code generic void defs in a class body, instance and static": {
   "tokens": "16yl83ajh9gzq",
-  "tree": "ulplawrfdsro",
-  "tolerant": "3jgznzgledmh2",
+  "tree": "1cynfz427pgib",
+  "tolerant": "yg6r80cmbeht",
   "complete": "6j7t1thlgyju"
  },
  "row classes.rip › code a name heritage stays bare": {
@@ -6457,8 +6457,8 @@
  },
  "row components.rip › test tag-named local passed as a child component prop compiles": {
   "tokens": "1jn9tonizdbkr",
-  "tree": "3opdn9sn17wg3",
-  "tolerant": "30pwpbiamvjuu",
+  "tree": "35yuf69zg91bs",
+  "tolerant": "39r89kgg8tuqu",
   "complete": "6j7t1thlgyju"
  },
  "row components.rip › test duplicate render-local assignments don't double-declare": {
@@ -6607,26 +6607,26 @@
  },
  "row components.rip › test extends class-merge pattern via @rest in computed": {
   "tokens": "qll1kvvbwcz2",
-  "tree": "17fq8xx9fw0a6",
-  "tolerant": "1ddhv3t9j45cj",
+  "tree": "kwaau3i5joln",
+  "tolerant": "2qdxweryvbbn3",
   "complete": "6j7t1thlgyju"
  },
  "row components.rip › test optional typed prop without default accepts a value": {
   "tokens": "1epjx9ztjiy75",
-  "tree": "e84evck4hbvm",
-  "tolerant": "3ea1au5001xar",
+  "tree": "1hzlvgoh5nin2",
+  "tolerant": "1w0z6q2iy7ipm",
   "complete": "6j7t1thlgyju"
  },
  "row components.rip › test optional typed prop with default falls back when omitted": {
   "tokens": "174os35u5su5z",
-  "tree": "2e2vefay9nqcm",
-  "tolerant": "k8dvcpeb1vo6",
+  "tree": "5vlf3i7owc3l",
+  "tolerant": "1yao1w1h38dew",
   "complete": "6j7t1thlgyju"
  },
  "row components.rip › test typed prop with default but no ? still applies the default at runtime": {
   "tokens": "2u0n6oljvq387",
-  "tree": "3q87qbo7yqgu5",
-  "tolerant": "3131qpk20amdq",
+  "tree": "3l02jvs7tvw4x",
+  "tolerant": "16u4af0rm3yij",
   "complete": "6j7t1thlgyju"
  },
  "row components.rip › test component effect runs on state change": {
@@ -6733,20 +6733,20 @@
  },
  "row components.rip › test an annotated offer is a state declaration, shared with its accept": {
   "tokens": "2k6884a6vtvyt",
-  "tree": "24sdhpoy14qy0",
-  "tolerant": "2l6q4y0ewdacx",
+  "tree": "3sry2lc8uy0bf",
+  "tolerant": "1k4l5ho06ksl6",
   "complete": "6j7t1thlgyju"
  },
  "row components.rip › test an annotated public offer is a prop the caller can set": {
   "tokens": "1b0dzejot3pk9",
-  "tree": "2gapjsds47jq5",
-  "tolerant": "3hyyh0l64i4mk",
+  "tree": "1dxyrofd6f753",
+  "tolerant": "d40gkyrmyybm",
   "complete": "6j7t1thlgyju"
  },
  "row components.rip › fail an annotated offer is still a state declaration, not a readonly": {
   "tokens": "x575pinz2dfb",
-  "tree": "2sl1kenx0gann",
-  "tolerant": "sjfr5uxm5trr",
+  "tree": "3j01ei238ireq",
+  "tolerant": "1szeabl70nloy",
   "complete": "6j7t1thlgyju"
  },
  "row components.rip › fail @emit names no member: a child notifies its parent through a callback prop": {
@@ -7339,8 +7339,8 @@
  },
  "row components.rip › code a style value spelled as a name takes the style road, which removes on null": {
   "tokens": "3r4egx0frl39z",
-  "tree": "andre7ved9xn",
-  "tolerant": "hgm59brzdgs4",
+  "tree": "1cys4ymzvo6yp",
+  "tolerant": "2smza7lcj7m2m",
   "complete": "6j7t1thlgyju"
  },
  "row components.rip › code multiple boolean attributes": {
@@ -7663,8 +7663,8 @@
  },
  "row components.rip › code component extends: inherits tag, rest props forwarded": {
   "tokens": "utfsjy7n22am",
-  "tree": "7qld18nmssvp",
-  "tolerant": "2jbgv38kuq0af",
+  "tree": "266wcmnypvik0",
+  "tolerant": "rhrx0zyu08of",
   "complete": "6j7t1thlgyju"
  },
  "row components.rip › code component extends: the host line forks on asChild and the slot append is guarded": {
@@ -7705,8 +7705,8 @@
  },
  "row components.rip › fail asChild is reserved on an extends component": {
   "tokens": "3idyo3fxtqgm1",
-  "tree": "1eixvwhdavkad",
-  "tolerant": "1302fggz221es",
+  "tree": "1r0ikufdpj2ln",
+  "tolerant": "14ey4ha4gw43e",
   "complete": "6j7t1thlgyju"
  },
  "row components.rip › test asChild rides rest and is read as the mode; a component with no host has no flag": {
@@ -7873,8 +7873,8 @@
  },
  "row components.rip › test optional typed prop without default omitted by caller is undefined at runtime": {
   "tokens": "2wq93skv8lzq4",
-  "tree": "ea7nilblx991",
-  "tolerant": "29qm70di7nd1s",
+  "tree": "1epcbfkzokrsk",
+  "tolerant": "ywe1aof5v3qw",
   "complete": "6j7t1thlgyju"
  },
  "row components.rip › code outer auto-index avoids inner explicit `i`": {
@@ -8161,8 +8161,8 @@
  },
  "row components.rip › fail a component prop default cannot await": {
   "tokens": "1m65gxs96iuij",
-  "tree": "14cln6lu3klmy",
-  "tolerant": "2os8955lqr3zx",
+  "tree": "pf3nfyat8l3j",
+  "tolerant": "2hwoiq1z9pvzh",
   "complete": "6j7t1thlgyju"
  },
  "row components.rip › fail a component computed body cannot await": {
@@ -9967,8 +9967,8 @@
  },
  "row control.rip › test an annotated catch binding (`catch e: any`) is the plain parameter at runtime": {
   "tokens": "2s0ok3emdh4ek",
-  "tree": "2j07ww9qi56xk",
-  "tolerant": "35gra3anrw8t1",
+  "tree": "2juektr08dmh",
+  "tolerant": "2nn1h0c5crifr",
   "complete": "6j7t1thlgyju"
  },
  "row control.rip › test switch case with explicit return": {
@@ -10771,8 +10771,8 @@
  },
  "row control.rip › test a class body consumes its frame, so a later guard is the statement": {
   "tokens": "3w3olmqh1uba3",
-  "tree": "2iwfhmqpwukod",
-  "tolerant": "2boogj5kcykph",
+  "tree": "31pvmhh6p4mxh",
+  "tolerant": "fqciqj71siv7",
   "complete": "6j7t1thlgyju"
  },
  "row control.rip › test a closer retires an inline try frame inside the call": {
@@ -11143,32 +11143,32 @@
  },
  "row errors.rip › test cast body keeps its inline finally": {
   "tokens": "18owkqdcrntju",
-  "tree": "1esa8sn4t0ig3",
-  "tolerant": "2pxtaan13xmb1",
+  "tree": "3p86lcl6cujg6",
+  "tolerant": "1p7gvznwl3wzb",
   "complete": "6j7t1thlgyju"
  },
  "row errors.rip › code cast stops before an inline finally": {
   "tokens": "1d8wjxkj2z229",
-  "tree": "3glrw0ryu4a3a",
-  "tolerant": "2k1z977msvl92",
+  "tree": "1gm00wzi67q55",
+  "tolerant": "1kotxzeywvz81",
   "complete": "6j7t1thlgyju"
  },
  "row errors.rip › test cast stops before a match operator": {
   "tokens": "12i8z2qx8abze",
-  "tree": "2kalpa2brym9s",
-  "tolerant": "1brleluiom43v",
+  "tree": "3asxweea4pq9h",
+  "tolerant": "1wt6jnm3g7rr9",
   "complete": "6j7t1thlgyju"
  },
  "row errors.rip › test cast stops before inclusive range dots": {
   "tokens": "1nv39nrpsedon",
-  "tree": "22h3z3kb7nep5",
-  "tolerant": "je69u8ot096a",
+  "tree": "1l0a50g0s7723",
+  "tolerant": "i0j1hx3epyw7",
   "complete": "6j7t1thlgyju"
  },
  "row errors.rip › test cast stops before exclusive range dots": {
   "tokens": "8hwif1vo90rc",
-  "tree": "7g2zvfk9p8ar",
-  "tolerant": "1rpffpk67tzue",
+  "tree": "15bbtrtxnlqhu",
+  "tolerant": "ep1hn5bq8tqr",
   "complete": "6j7t1thlgyju"
  },
  "row errors.rip › test catch with pattern": {
@@ -11611,8 +11611,8 @@
  },
  "row errors.rip › test closure assigns an annotated catch binding": {
   "tokens": "3fqsxwiouesbw",
-  "tree": "1t0z10zri442j",
-  "tolerant": "25humeeucykqx",
+  "tree": "2zpi99uf58zs6",
+  "tolerant": "12ljtqeif5rtk",
   "complete": "6j7t1thlgyju"
  },
  "row errors.rip › test closure assigns a catch pattern name": {
@@ -11923,14 +11923,14 @@
  },
  "row functions.rip › test a parameter line after a default's inline else stays a parameter": {
   "tokens": "2mpoqy0eahju9",
-  "tree": "13wz67duqdn26",
-  "tolerant": "29bapr5skqsyi",
+  "tree": "3eiulkosfo2dr",
+  "tolerant": "16g2puoga6or2",
   "complete": "6j7t1thlgyju"
  },
  "row functions.rip › test a parameter line after a default's inline finally stays a parameter": {
   "tokens": "36lwfhc9re7ui",
-  "tree": "2p0xnithj9ja",
-  "tolerant": "p96l72vp32b1",
+  "tree": "1iyuvh2hlqh8m",
+  "tolerant": "1jrxmb1yxc2u9",
   "complete": "6j7t1thlgyju"
  },
  "row functions.rip › test a parameter after a default's else block stays a parameter": {
@@ -12265,32 +12265,32 @@
  },
  "row functions.rip › test a parameterless def with a generic return type keeps its body": {
   "tokens": "1278j7r01cwkg",
-  "tree": "3j3cxx1cv5cf4",
-  "tolerant": "1am7f1g4d95ag",
+  "tree": "p3jpke9wc49z",
+  "tolerant": "1tjpl8wwt47zp",
   "complete": "6j7t1thlgyju"
  },
  "row functions.rip › code a parameterless generic def takes a return type": {
   "tokens": "1jk46sy7ncfru",
-  "tree": "437qbjmqzxlw",
-  "tolerant": "whzukchcv0ea",
+  "tree": "1m61j4uqm3lhp",
+  "tolerant": "fe0u27udplxw",
   "complete": "6j7t1thlgyju"
  },
  "row functions.rip › code a generic void def": {
   "tokens": "2j76z8mxei2c",
-  "tree": "36jfl48nk0kqj",
-  "tolerant": "3itcef0v2tx5p",
+  "tree": "2e3wcgj05wxjn",
+  "tolerant": "12xwxdu4nc0cg",
   "complete": "6j7t1thlgyju"
  },
  "row functions.rip › code a generic void def takes a return type": {
   "tokens": "cykfia46246p",
-  "tree": "2u9qio59jm5rk",
-  "tolerant": "3qug2hujzmz4",
+  "tree": "3a89mqeyt9qlu",
+  "tolerant": "2wz1qvofqzu3l",
   "complete": "6j7t1thlgyju"
  },
  "row functions.rip › code a parameterless generic void def takes a return type": {
   "tokens": "1evau3oa1njus",
-  "tree": "3inybd7m1eczd",
-  "tolerant": "1c2z70zw3f9l5",
+  "tree": "13vlhnbt5aj1w",
+  "tolerant": "1f9551zsw07qy",
   "complete": "6j7t1thlgyju"
  },
  "row functions.rip › fail the void bang precedes the generic list": {
@@ -12997,14 +12997,14 @@
  },
  "row loops.rip › test a cast on the iterable types the loop": {
   "tokens": "38ttt9mx4t0l6",
-  "tree": "rih7dnr6gcby",
-  "tolerant": "206etmbeu4ai2",
+  "tree": "2p9dy7zvpakus",
+  "tolerant": "38gyjfe8hkow1",
   "complete": "6j7t1thlgyju"
  },
  "row loops.rip › code a cast on a plain for-in iterable erases": {
   "tokens": "1n5k0ka67l6nr",
-  "tree": "3s2a1wbgqjsw",
-  "tolerant": "qhgjrlbpyfzy",
+  "tree": "35avttuuvgchy",
+  "tolerant": "1x4wdna2lk9ry",
   "complete": "6j7t1thlgyju"
  },
  "row loops.rip › test a pattern rename in an indexed loop head binds the renamed name": {
@@ -14317,20 +14317,20 @@
  },
  "row modules.rip › code export var cast after an identifier": {
   "tokens": "1quf01z5ggurc",
-  "tree": "2lfrmw8g1tywz",
-  "tolerant": "6kvxerttv165",
+  "tree": "39wsvpces9q13",
+  "tolerant": "26hdsmsd2a55h",
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code export var satisfies after an identifier": {
   "tokens": "1z8g12aezrx5m",
-  "tree": "1ixpcgpxyx9rj",
-  "tolerant": "3vxuj4t5ytkx0",
+  "tree": "1fndby1kpgwd7",
+  "tolerant": "gkctk31dbwbh",
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code export default cast after an identifier": {
   "tokens": "6fb1j11rh299",
-  "tree": "2bw4egpuvjfx0",
-  "tolerant": "ietdlqxh64ql",
+  "tree": "2t7v98z08ncaq",
+  "tolerant": "zaezm5pjmbrv",
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code export function": {
@@ -14701,14 +14701,14 @@
  },
  "row modules.rip › fail a cast in an array pattern rejects": {
   "tokens": "1tntfalw09geb",
-  "tree": "br62hgkre4zg",
-  "tolerant": "3pbo45s5uhc8c",
+  "tree": "2ugcwyvfawx4x",
+  "tolerant": "1o609jvkbizkb",
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › fail a cast in a pair value rejects": {
   "tokens": "37kyw2o38dxv0",
-  "tree": "bktbu1j5os19",
-  "tolerant": "382c3mab7lbwe",
+  "tree": "1ra01697dhg9a",
+  "tolerant": "10gbwpcx08vkl",
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code a nested reactive binding shadows an exported name": {
@@ -14815,20 +14815,20 @@
  },
  "row modules.rip › code an imported name used only in a type is elided": {
   "tokens": "2j31vfxgi77ef",
-  "tree": "3l0azllk31it5",
-  "tolerant": "32espslikt9jt",
+  "tree": "3pq3tnvuh9b5a",
+  "tolerant": "2xwgeug8mpjsi",
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code a name passed to a function named cast keeps its import": {
   "tokens": "3e0see33at2uu",
-  "tree": "1odlh57knzty8",
-  "tolerant": "1bpvm5qjyd4zt",
+  "tree": "rxvxkp8wsrn5",
+  "tolerant": "2h4bm0notvf44",
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code an all-type clause keeps the module's side effect": {
   "tokens": "g7fhwfyz1ed",
-  "tree": "1v9pwv5dnzwct",
-  "tolerant": "2ndc323koqt41",
+  "tree": "443za6b3ghm8",
+  "tolerant": "2knva2nq4rwsx",
   "complete": "6j7t1thlgyju"
  },
  "row modules.rip › code an unreferenced value import survives": {
@@ -16207,8 +16207,8 @@
  },
  "row operators.rip › test ternary after a typed target": {
   "tokens": "f6kd3nsv02cr",
-  "tree": "1e8mjcpdn721u",
-  "tolerant": "1xrubxy29qur8",
+  "tree": "1gfuroqigpo8o",
+  "tolerant": "3v4rf4rnl003m",
   "complete": "6j7t1thlgyju"
  },
  "row operators.rip › test ternary else branch is a symbol after a binary operation": {
@@ -18541,26 +18541,26 @@
  },
  "row private.rip › test a private def with a return type": {
   "tokens": "3zx67t5bcqe7",
-  "tree": "1z78p34dgx1h4",
-  "tolerant": "32k7gmfniqa4n",
+  "tree": "3ium6nnrwwgx7",
+  "tolerant": "1j7r2f1oa5x46",
   "complete": "6j7t1thlgyju"
  },
  "row private.rip › test a private generic def, with and without a return type": {
   "tokens": "3t4nue0bamqx3",
-  "tree": "1tai90i5057ab",
-  "tolerant": "arznmveyamjw",
+  "tree": "17vavuipzho34",
+  "tolerant": "3510z4gsf7zxw",
   "complete": "6j7t1thlgyju"
  },
  "row private.rip › test a private void def, with and without a return type": {
   "tokens": "1yn14fjeekmxz",
-  "tree": "1y8gznl0f3hrp",
-  "tolerant": "3pjj7cvuzygph",
+  "tree": "db3a2nzv68ok",
+  "tolerant": "390vl8yke0uun",
   "complete": "6j7t1thlgyju"
  },
  "row private.rip › test a private generic void def, with and without a return type": {
   "tokens": "2r9yvmlpvsbfb",
-  "tree": "1upg5qtn7bzih",
-  "tolerant": "3rgf5witf5gwb",
+  "tree": "boe5p8ita67q",
+  "tolerant": "y7s6pcea935k",
   "complete": "6j7t1thlgyju"
  },
  "row private.rip › code a private static def emits the plain static": {
@@ -18571,14 +18571,14 @@
  },
  "row private.rip › test private static defs: return type, generic, and void spellings": {
   "tokens": "3hs8pofkxyf6o",
-  "tree": "3t5hri051a9p3",
-  "tolerant": "1d5rwfwos4tds",
+  "tree": "26r3ai40ahx1e",
+  "tolerant": "2r6mk555oabcu",
   "complete": "6j7t1thlgyju"
  },
  "row private.rip › test private static generic void defs, with and without a return type": {
   "tokens": "3c34j5uwjvdqo",
-  "tree": "pl9f246df43t",
-  "tolerant": "1vt3nwqdjuqex",
+  "tree": "2d0md83njsu39",
+  "tolerant": "2pdrld1ntqrs",
   "complete": "6j7t1thlgyju"
  },
  "row private.rip › code a private field with an initializer emits the plain field": {
@@ -18595,26 +18595,26 @@
  },
  "row private.rip › code a private typed field erases its annotation": {
   "tokens": "58pgxngt8jm4",
-  "tree": "1p6c49hq186y6",
-  "tolerant": "3g31b5oxucgkh",
+  "tree": "3mwxoki2rbk2r",
+  "tolerant": "3sm3n5ther85b",
   "complete": "6j7t1thlgyju"
  },
  "row private.rip › test a private typed field value wrapped onto the next line, bare and indented": {
   "tokens": "37qnppiqwaiqo",
-  "tree": "2f0puyxw5exaw",
-  "tolerant": "33hvgn5okh9g0",
+  "tree": "258o9iz9y1gpq",
+  "tolerant": "2ol08bx5yb885",
   "complete": "6j7t1thlgyju"
  },
  "row private.rip › code a private bodiless typed field declares the bare name": {
   "tokens": "s1m8t8yw943j",
-  "tree": "32zeaz573k4pp",
-  "tolerant": "3pfsttrvemmvk",
+  "tree": "1d0es25iw8i0e",
+  "tolerant": "28udv7sbzdvos",
   "complete": "6j7t1thlgyju"
  },
  "row private.rip › test the optional marker rides a private field as it rides any other": {
   "tokens": "2lwoonzfhusws",
-  "tree": "oezxzo766wbk",
-  "tolerant": "1khqqkme5xpzw",
+  "tree": "343w8u337t3yh",
+  "tolerant": "erp5zvvud1nt",
   "complete": "6j7t1thlgyju"
  },
  "row private.rip › code a private static field emits the plain static": {
@@ -18625,14 +18625,14 @@
  },
  "row private.rip › test a private string-named field, bare and typed": {
   "tokens": "2ms6qjup12a1n",
-  "tree": "29d19yekwbtxw",
-  "tolerant": "3jr3sh7exof0g",
+  "tree": "2kvznvie66t7z",
+  "tolerant": "31r59gxm7ga42",
   "complete": "6j7t1thlgyju"
  },
  "row private.rip › type private members declare by name alone, typed or not": {
   "tokens": "gfsgbklud3m4",
-  "tree": "1o0jh3bh83ggw",
-  "tolerant": "16hjj26o44e2m",
+  "tree": "3iwskfkj50cqt",
+  "tolerant": "1uxiwd0sse0zw",
   "complete": "6j7t1thlgyju"
  },
  "row private.rip › fail private at module level is reserved": {
@@ -18871,20 +18871,20 @@
  },
  "row prototype.rip › test annotated prototype write runs": {
   "tokens": "s9j7wzrf0k36",
-  "tree": "20fxtrwt661mw",
-  "tolerant": "cl1lydb0dbul",
+  "tree": "3vndnjrzvtya2",
+  "tolerant": "1sa4rsvam8e2w",
   "complete": "6j7t1thlgyju"
  },
  "row prototype.rip › code annotation erases from the write": {
   "tokens": "3gdp4fpjmefqb",
-  "tree": "3s2935uy7arym",
-  "tolerant": "2hbvk14ikjdot",
+  "tree": "1vos1pk615bfs",
+  "tolerant": "1nihooi08vwia",
   "complete": "6j7t1thlgyju"
  },
  "row prototype.rip › type typed prototype member on an outside type declares globally": {
   "tokens": "2w5w4jqoypljd",
-  "tree": "2kqvmev5f78o3",
-  "tolerant": "4zpxjw7u4xsx",
+  "tree": "jl42ev8rgtvh",
+  "tolerant": "36c8rglidb9kp",
   "complete": "6j7t1thlgyju"
  },
  "row prototype.rip › fail doubled colon as a type sigil": {
@@ -18919,14 +18919,14 @@
  },
  "row prototype.rip › fail annotated write below the module top level": {
   "tokens": "2v2005m2lvwoq",
-  "tree": "3nsggpjmg6pp1",
-  "tolerant": "10osu6cfnxoat",
+  "tree": "1ugiog2iibkcf",
+  "tolerant": "1tdb05q9re8dq",
   "complete": "6j7t1thlgyju"
  },
  "row prototype.rip › fail annotated write on a non-class module binding": {
   "tokens": "3npbigd3j90ma",
-  "tree": "4bhyg41ks73g",
-  "tolerant": "qdsmbomumewh",
+  "tree": "2eu600br6o7jo",
+  "tolerant": "3mn08a8bre9y3",
   "complete": "6j7t1thlgyju"
  },
  "row prototype.rip › code soak prototype read": {
@@ -20107,8 +20107,8 @@
  },
  "row render-contract.rip › code class: an array mixing strings, objects, conditionals and and-items": {
   "tokens": "3rmxzz24pewtb",
-  "tree": "1zlubmzvgknxx",
-  "tolerant": "3eixz70a40ai5",
+  "tree": "22365ivhmst8m",
+  "tolerant": "lmvfz7c4zycj",
   "complete": "6j7t1thlgyju"
  },
  "row render-contract.rip › code class: an object": {
@@ -20215,8 +20215,8 @@
  },
  "row render-contract.rip › code @member read in text and interpolation": {
   "tokens": "2yz0q8d2mfw9j",
-  "tree": "k7qvvogyj3rh",
-  "tolerant": "z1f5htc77vut",
+  "tree": "3qdx8a3ebr3he",
+  "tolerant": "3fqaiu118kyer",
   "complete": "6j7t1thlgyju"
  },
  "row render-contract.rip › code tag.class selectors": {
@@ -20353,8 +20353,8 @@
  },
  "row render-gates.rip › type gate: annotated value is a non-null readonly computed container": {
   "tokens": "2eey5n3fbggmx",
-  "tree": "3m1f5xnvdy76i",
-  "tolerant": "2d0sscbke9jmc",
+  "tree": "948q45c28evn",
+  "tolerant": "2jd6nhik1yi8u",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code input default kind": {
@@ -24049,26 +24049,26 @@
  },
  "row sweep.rip › code export typed assign": {
   "tokens": "3r4rvnog9lyp",
-  "tree": "23rf4mrwql7vu",
-  "tolerant": "1ioqe8zdjj6te",
+  "tree": "2r7a6yoqi54zc",
+  "tolerant": "1dgsmjr362975",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code export typed assign wrapped": {
   "tokens": "3ueqtpi9ivlo5",
-  "tree": "20oqd4vrywpz4",
-  "tolerant": "1fkvxx6ydaipk",
+  "tree": "5mstyc6lm51r",
+  "tolerant": "1pc41nkq1fxnu",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code export typed assign indented": {
   "tokens": "2f1d6tkxk60jx",
-  "tree": "2g70szgqszdwe",
-  "tolerant": "227e25f8ccnq3",
+  "tree": "2jsy83ntfpq12",
+  "tolerant": "nxymd4wwu1ys",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code export generic component": {
   "tokens": "3dcsdjrg7vozo",
-  "tree": "184efk4bu6u1z",
-  "tolerant": "1ebl6o7vb3fvw",
+  "tree": "j4qxhq2zz26l",
+  "tolerant": "1aa1o4jsoxfoc",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code export void assign wrapped": {
@@ -24097,68 +24097,68 @@
  },
  "row sweep.rip › code export typed state wrapped": {
   "tokens": "207xechmgylxw",
-  "tree": "i55cbh6n3i60",
-  "tolerant": "39tqrrogo7hst",
+  "tree": "bz6mvzn1geab",
+  "tolerant": "20zq9oaiece68",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code export typed state indented": {
   "tokens": "rp2zi9zwuxnl",
-  "tree": "1q2i5wsojbyn7",
-  "tolerant": "1uwjj542zau4s",
+  "tree": "2vudjz9k5kt1y",
+  "tolerant": "2cpxu073x97nu",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code export typed computed": {
   "tokens": "18ue0zxtd0b9s",
-  "tree": "277tal9eojsd9",
-  "tolerant": "35z0qgrqqqv1j",
+  "tree": "9akswvuabmpm",
+  "tolerant": "2qfwp0rq0l9of",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code export typed computed wrapped": {
   "tokens": "2zi8n398oeb39",
-  "tree": "25r42xvgulis9",
-  "tolerant": "34cp6hfehrimz",
+  "tree": "24v1km4q0p3uw",
+  "tolerant": "bvn8ds29sujb",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code export typed computed block": {
   "tokens": "2fpuj384rffm2",
-  "tree": "19kptnot0fbir",
-  "tolerant": "4vaue290yfh4",
+  "tree": "a8fprl2merbn",
+  "tolerant": "2qrpgvzboj0i8",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code export typed readonly": {
   "tokens": "2mdunr3bjo2hl",
-  "tree": "2l6ya6munme38",
-  "tolerant": "3eg2mpkmt04cr",
+  "tree": "3r3rysxiuudej",
+  "tolerant": "3jiofgjjphfb8",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code export typed readonly wrapped": {
   "tokens": "1kcokchhgxfu4",
-  "tree": "1z82r5k9xdvee",
-  "tolerant": "9kyno7boa3n6",
+  "tree": "1wx09qa4f2cst",
+  "tolerant": "1u4qx3j6nhpox",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code export typed readonly indented": {
   "tokens": "2aeykp30kv09a",
-  "tree": "3frvtg09upzce",
-  "tolerant": "2y47wmcof4mwl",
+  "tree": "275atxs4wbtyu",
+  "tolerant": "2qo0avhwefd1c",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code export typed effect": {
   "tokens": "2nhfv3pet3o00",
-  "tree": "15xbg4ae2t4rd",
-  "tolerant": "1uu854t8s0bt8",
+  "tree": "3ezj3hu1hsx2n",
+  "tolerant": "n8c65ehq0bc6",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code export typed effect wrapped": {
   "tokens": "2th5gx39i3c6j",
-  "tree": "136xy6nm0epfu",
-  "tolerant": "3izlyus4pc9jy",
+  "tree": "382y37s73mlm5",
+  "tolerant": "1xubs4g9z0pna",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code export typed effect block": {
   "tokens": "23im5pd4hjm64",
-  "tree": "on68tmuyj4ix",
-  "tolerant": "hhzqjc0gpnf0",
+  "tree": "3ucaxmdip3geb",
+  "tolerant": "3rmab0w9koyrw",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code export list continued on an indented line": {
@@ -24205,14 +24205,14 @@
  },
  "row sweep.rip › code typed assign wrapped": {
   "tokens": "2kmtru5cvun4b",
-  "tree": "1ns9s4zz334hg",
-  "tolerant": "3o440ws5l6zp1",
+  "tree": "21big77barunc",
+  "tolerant": "3orqwo3trf6tn",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code typed assign indented": {
   "tokens": "ts6bnqa57f79",
-  "tree": "2f40qpn2sexbg",
-  "tolerant": "1iy5ktohd71fg",
+  "tree": "2aek2fyq49kt2",
+  "tolerant": "2v014nvm3pnf4",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code optional member": {
@@ -24235,26 +24235,26 @@
  },
  "row sweep.rip › code optional typed member": {
   "tokens": "12sxh2oolfdtn",
-  "tree": "hbrog7zbghra",
-  "tolerant": "3qm3w4xr0tnr9",
+  "tree": "lhduqgckrxm1",
+  "tolerant": "1fs8j8demao2s",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code optional typed member wrapped": {
   "tokens": "bgwxvct428os",
-  "tree": "14384zgjplsoo",
-  "tolerant": "1l34s102gxebe",
+  "tree": "295x2bn1iedpa",
+  "tolerant": "3jdclj6dcqzmn",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code optional typed member indented": {
   "tokens": "ytqqu2ssal3x",
-  "tree": "237rncbrjq3lo",
-  "tolerant": "xqk913dwjldk",
+  "tree": "2e8fjs7vjrqp6",
+  "tolerant": "cf3edanxsr4j",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code generic component": {
   "tokens": "1juezdcofw2pg",
-  "tree": "1p4c1zx1koi46",
-  "tolerant": "1m9p2yge6pzwt",
+  "tree": "wq6tdt255qr9",
+  "tolerant": "3dizfnsuoigpl",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code compound assign indented": {
@@ -24325,8 +24325,8 @@
  },
  "row sweep.rip › code optional typed computed member": {
   "tokens": "a4kka7z4rx7v",
-  "tree": "1lh5wj1kfu74y",
-  "tolerant": "meev49hacnu2",
+  "tree": "1y3dcv1w1jwlp",
+  "tolerant": "3o2mgc53z4eqe",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code optional readonly member": {
@@ -24337,8 +24337,8 @@
  },
  "row sweep.rip › code optional typed readonly member": {
   "tokens": "1apacxi7dwnmp",
-  "tree": "22f4pmrcztoey",
-  "tolerant": "2b3ua71e5qa2n",
+  "tree": "3stah69hhfuaf",
+  "tolerant": "3kzwqj504j35o",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code gate with an empty call": {
@@ -24349,14 +24349,14 @@
  },
  "row sweep.rip › code typed gate with an empty call": {
   "tokens": "3facime19nyvs",
-  "tree": "370bhguwyjomd",
-  "tolerant": "2gmcn9k3yr8hu",
+  "tree": "czzvbt0uhrnf",
+  "tolerant": "23kehlsi8ajkm",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code typed keyed gate": {
   "tokens": "3n9b9884l7m34",
-  "tree": "3s4c0bkls1hck",
-  "tolerant": "10ldk1q70cr70",
+  "tree": "2ivn98henk8ng",
+  "tolerant": "341grrjm4a67i",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code index with an indented key": {
@@ -24571,14 +24571,14 @@
  },
  "row sweep.rip › code generic def": {
   "tokens": "cxpytgkj9pw",
-  "tree": "s3ceyif3khw9",
-  "tolerant": "3uslj9i80c5e7",
+  "tree": "80g357l66t7l",
+  "tolerant": "nsatl27121d0",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code void def with a return type": {
   "tokens": "1u4yyenvtoga6",
-  "tree": "2n7h32s0h6ovl",
-  "tolerant": "ssfj96yqpdbc",
+  "tree": "f1h48tyo9wiu",
+  "tolerant": "12gzmjslzk2ij",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code params wrapped after a comma": {
@@ -24595,8 +24595,8 @@
  },
  "row sweep.rip › code optional typed param": {
   "tokens": "1zwkpvwv6dh09",
-  "tree": "3f31n6xba55ff",
-  "tolerant": "2xs0ndiqmgq5i",
+  "tree": "2wqikim162jvy",
+  "tolerant": "2n06w8d43a6r4",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code optional bare param": {
@@ -24607,32 +24607,32 @@
  },
  "row sweep.rip › code bodiless def overload": {
   "tokens": "1o19j3wkmb1v7",
-  "tree": "2bc7bg2imqzkg",
-  "tolerant": "1srdr9xaxg5ut",
+  "tree": "14nfjhem5jppu",
+  "tolerant": "kyzukv9hat5v",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code generic bodiless def overload": {
   "tokens": "2kry2qzv6cv6",
-  "tree": "37eq3zr5axb8v",
-  "tolerant": "11rqd5ez0cto1",
+  "tree": "2agxvm06wp7y8",
+  "tolerant": "2g7oc2618589e",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code bodiless def overload above an exported def": {
   "tokens": "2w7re4o169bcr",
-  "tree": "79vgx92luvka",
-  "tolerant": "1y8fhf6wpcaso",
+  "tree": "aj9ie9tsy9xh",
+  "tolerant": "3tyv99wmip3qp",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code generic bodiless def overloads above an exported def": {
   "tokens": "3av6fa67n53w4",
-  "tree": "3sv5npy2r07co",
-  "tolerant": "26phg52u56jd7",
+  "tree": "xk9wfgpof88a",
+  "tolerant": "krp4zpqlfo6q",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › fail bodiless def overload with no implementation": {
   "tokens": "3hiylxerlo7q4",
-  "tree": "3vicwr1ok9q7",
-  "tolerant": "3s6iit7q3tr9l",
+  "tree": "k4hucjvbrz9h",
+  "tolerant": "2fjev9q03i39x",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code bare class": {
@@ -25243,62 +25243,62 @@
  },
  "row types.rip › code typed variable": {
   "tokens": "2nc1px6knt30y",
-  "tree": "2l5vechqfvom",
-  "tolerant": "2n7fu70kswgdp",
+  "tree": "p362z7unzkp6",
+  "tolerant": "38ha0pj8xqjae",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code typed string variable": {
   "tokens": "3mp8qjqrz5qxs",
-  "tree": "37dui1hf12r4q",
-  "tolerant": "2kfwyuo1srnop",
+  "tree": "1la6j2vgcvj6u",
+  "tolerant": "284syfvkc6c3z",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code typed array variable": {
   "tokens": "15v5rvdidut2h",
-  "tree": "frb1f49262dk",
-  "tolerant": "2vwfude7b3t02",
+  "tree": "1djy9p35hyq03",
+  "tolerant": "2qaxa7rfncvpy",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code typed generic variable": {
   "tokens": "18jjieb3wwnwu",
-  "tree": "2fjxx4vkrx1vu",
-  "tolerant": "2k2w1eiava5i9",
+  "tree": "2869xnqj6cf4q",
+  "tolerant": "3as9ps6evz0sl",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code typed constant": {
   "tokens": "yn5lgdmbz081",
-  "tree": "2wvcrzf6jdync",
-  "tolerant": "n2kipfkaw674",
+  "tree": "lwmcmv0z7tds",
+  "tolerant": "jdq66m6hor45",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code typed string constant": {
   "tokens": "2j1wo3pxzhxzq",
-  "tree": "i2th0mqqyg0p",
-  "tolerant": "1k3xyxxldlxsz",
+  "tree": "1sycl0efxnncq",
+  "tolerant": "9ntkwk7h44tt",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code typed function params": {
   "tokens": "oqkjavpoetiu",
-  "tree": "l5le21z99wl9",
-  "tolerant": "3p1zf41u9tthn",
+  "tree": "3o33lz13zkkj",
+  "tolerant": "3c55ppn07730i",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code typed function return": {
   "tokens": "jmosi7qbpocy",
-  "tree": "3gcdroqnc39uv",
-  "tolerant": "3n4gw4507ciji",
+  "tree": "nkc314a1h370",
+  "tolerant": "2t0kxssdrffzo",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code parameterless typed function": {
   "tokens": "26aaw94fxc891",
-  "tree": "3g2qphchvov7l",
-  "tolerant": "p65n1o6q50c4",
+  "tree": "3fglk7tjkny7s",
+  "tolerant": "z5ppu1woogi7",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code typed function three params": {
   "tokens": "3f2nvw0v5aatp",
-  "tree": "1m9zoi8dot72x",
-  "tolerant": "h3irgivf4uhe",
+  "tree": "nlu2v5hpjv1y",
+  "tolerant": "3n1el4uqgosg",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code type alias erased": {
@@ -25399,62 +25399,62 @@
  },
  "row types.rip › test typed variable runtime": {
   "tokens": "1q8vrvfmcw3f8",
-  "tree": "q30481j0s72o",
-  "tolerant": "3bdcnk1stobg4",
+  "tree": "kp2ow552t65i",
+  "tolerant": "3qqt3tpqnee3v",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test typed constant runtime": {
   "tokens": "4vobzlwboi1t",
-  "tree": "3j3aiycvd4vkx",
-  "tolerant": "1x5gsh7xkttnm",
+  "tree": "1uqgfuttv1ck8",
+  "tolerant": "p7w6v27swfcj",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test typed boolean runtime": {
   "tokens": "2l994l312ri3f",
-  "tree": "aodrxwxq0s0e",
-  "tolerant": "29k92eatj4yt2",
+  "tree": "epat5h2g10kd",
+  "tolerant": "12i5k71nh799m",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test typed null runtime": {
   "tokens": "3jbde3j2z8yu8",
-  "tree": "22msd28z8b9z8",
-  "tolerant": "3qxvaa5d0jvqt",
+  "tree": "wokj58a58i6i",
+  "tolerant": "xhwtwq8gy72x",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test typed function runtime": {
   "tokens": "3jcibx714a9jj",
-  "tree": "1dg59otyvux4f",
-  "tolerant": "1wzpp74tg9t18",
+  "tree": "26hacte7bhl58",
+  "tolerant": "2lqm7jetklcsr",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test typed params runtime": {
   "tokens": "1ttqwws92wvwx",
-  "tree": "2v6xm34iggr6z",
-  "tolerant": "2w41qhbsjb7l7",
+  "tree": "2t82y5uk8nks1",
+  "tolerant": "1atk90r5fvjh1",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test typed function multiple calls": {
   "tokens": "2hxgwd8hf5zpv",
-  "tree": "bek10eyochi4",
-  "tolerant": "1tvk97ox12ww",
+  "tree": "3ncge60hrwtr4",
+  "tolerant": "2hrkhkn1xkgwn",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test typed function with string return": {
   "tokens": "1tb31hs5z0r3s",
-  "tree": "14odb6rivczuv",
-  "tolerant": "3fvawit3hbtcw",
+  "tree": "1vag5w6obyq3o",
+  "tolerant": "2ox501pqw9by",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test typed function with array return": {
   "tokens": "3bb1kcfpbumnw",
-  "tree": "t05jxaqmp3mh",
-  "tolerant": "7we8f77ti081",
+  "tree": "2xuhl7kkycd5y",
+  "tolerant": "3b29l2mx849oo",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test typed parameterless runtime": {
   "tokens": "38y2d3x5n36bf",
-  "tree": "1yg6f4qjrnbql",
-  "tolerant": "1y2iuvn8i9i7o",
+  "tree": "1f7b8cfi0c7d7",
+  "tolerant": "aa83aqe86n9i",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test type alias with code": {
@@ -25477,32 +25477,32 @@
  },
  "row types.rip › test type alias between functions": {
   "tokens": "4w9hm96te0i4",
-  "tree": "1fu9w4i5hkh6c",
-  "tolerant": "1mhoft3p7qf4h",
+  "tree": "2msog2w3jnykn",
+  "tolerant": "mp763gi9j4s8",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code nested generic annotation": {
   "tokens": "1srpaa80ynrbe",
-  "tree": "auzwsysd4me0",
-  "tolerant": "3aor1orjgmj9",
+  "tree": "st2id4mppdbz",
+  "tolerant": "2c73zkwxe3ts7",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test multiple typed variables": {
   "tokens": "17pw290gqvwhc",
-  "tree": "k94pk0us2d9f",
-  "tolerant": "g8q1x25grwd6",
+  "tree": "3djen720jzif3",
+  "tolerant": "4dx6qunj7o3",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test typed variables in expression": {
   "tokens": "3nqj6ji7t6ull",
-  "tree": "33f1nq2hjap17",
-  "tolerant": "3mvvrywwtzf1q",
+  "tree": "2i8j2f5s2cm1",
+  "tolerant": "3f6ks2fv1u7zo",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test typed constant in function": {
   "tokens": "1u5d243dk3k0w",
-  "tree": "25ossg4b4soae",
-  "tolerant": "1viwzv1mkgc6z",
+  "tree": "1whu2ulkwsjsn",
+  "tolerant": "1t38tg878tmkg",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code block union three members": {
@@ -25519,8 +25519,8 @@
  },
  "row types.rip › test typed param used in expression": {
   "tokens": "2zk15upe65fax",
-  "tree": "18orfb0n5jmdk",
-  "tolerant": "2njttnsonaysp",
+  "tree": "2vd6vam3oo286",
+  "tolerant": "2guogeo51b9g1",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test type alias immediate code": {
@@ -25531,50 +25531,50 @@
  },
  "row types.rip › test typed functions calling each other": {
   "tokens": "34t92vvyobuaz",
-  "tree": "lvwokta4f4lo",
-  "tolerant": "4ljmdrasxsxb",
+  "tree": "nd3i2or9mrg",
+  "tolerant": "3ozlztb0ohmi",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test function many typed params": {
   "tokens": "2ovy84oewkwtb",
-  "tree": "1k57z8duppng9",
-  "tolerant": "n5t6rza3fg0k",
+  "tree": "20u4mmzfjnshn",
+  "tolerant": "37digou5kfm2x",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › type typed variable dts": {
   "tokens": "2nc1px6knt30y",
-  "tree": "2l5vechqfvom",
-  "tolerant": "2n7fu70kswgdp",
+  "tree": "p362z7unzkp6",
+  "tolerant": "38ha0pj8xqjae",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › type typed constant dts": {
   "tokens": "yn5lgdmbz081",
-  "tree": "2wvcrzf6jdync",
-  "tolerant": "n2kipfkaw674",
+  "tree": "lwmcmv0z7tds",
+  "tolerant": "jdq66m6hor45",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › type reactive state dts": {
   "tokens": "23cd6fioqaumo",
-  "tree": "2f23ttndponqa",
-  "tolerant": "2vupk9jwy1t5w",
+  "tree": "1py8tn60xbyof",
+  "tolerant": "meo250nf4krk",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › type computed dts": {
   "tokens": "3ege89qtoon3p",
-  "tree": "y30i63e411ek",
-  "tolerant": "oim6qwo32vzr",
+  "tree": "2kc0lmay41d0h",
+  "tolerant": "2d5hb0zccdy1f",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › type effect dts": {
   "tokens": "2xc6pu0wbc8cd",
-  "tree": "3em1vnfgharn5",
-  "tolerant": "2m1henusg8e9e",
+  "tree": "2p6chjbm5yz0f",
+  "tolerant": "13fbyucwejnl0",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › type typed function dts": {
   "tokens": "jmosi7qbpocy",
-  "tree": "3gcdroqnc39uv",
-  "tolerant": "3n4gw4507ciji",
+  "tree": "nkc314a1h370",
+  "tolerant": "2t0kxssdrffzo",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › type interface dts": {
@@ -25591,26 +25591,26 @@
  },
  "row types.rip › type export reactive dts": {
   "tokens": "1jsigbz8mpvaa",
-  "tree": "2gfd30qrloans",
-  "tolerant": "2lt2993rqntxr",
+  "tree": "a4de8kuexiyw",
+  "tolerant": "tamz0w4fpztb",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › type arrow function dts": {
   "tokens": "1prnjl15rlapn",
-  "tree": "1d6fw0pca8lhf",
-  "tolerant": "2ccgiw6ienypx",
+  "tree": "32s1c51gb8asg",
+  "tolerant": "2p1r5jhiiqgpx",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code fat arrow return type erased": {
   "tokens": "2y36fbj54p8nf",
-  "tree": "26qlxlt6tzjwy",
-  "tolerant": "3kphd9jj07hbk",
+  "tree": "241kjvr0a5kp0",
+  "tolerant": "2dfdahjjdmq1g",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › type fat arrow return type dts": {
   "tokens": "2y36fbj54p8nf",
-  "tree": "26qlxlt6tzjwy",
-  "tolerant": "3kphd9jj07hbk",
+  "tree": "241kjvr0a5kp0",
+  "tolerant": "2dfdahjjdmq1g",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › fail fat arrow bare function-type return": {
@@ -25645,20 +25645,20 @@
  },
  "row types.rip › code single-colon function-type-valued decl": {
   "tokens": "2v7q18v3s9kiv",
-  "tree": "37o6xcdibyqi9",
-  "tolerant": "1lume51vnxhd3",
+  "tree": "3afroiorc5f28",
+  "tolerant": "19p6pkxubmctx",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code single-colon generic function-type-valued decl": {
   "tokens": "3tae7rilncmuc",
-  "tree": "12t5cv529wjdz",
-  "tolerant": "1pvlprrxkgsip",
+  "tree": "1eajk3ixbttm",
+  "tolerant": "3lfv79mmebulw",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code single-colon bare typed decl (assigned later)": {
   "tokens": "2gdd5uy552dmj",
-  "tree": "2e0n8jzh10inh",
-  "tolerant": "1puqrg7slrfu6",
+  "tree": "1c95t3nb74ff6",
+  "tolerant": "2a6ohh963ubf6",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code bare name: value stays an object": {
@@ -25699,68 +25699,68 @@
  },
  "row types.rip › code typed local in a braced object's method": {
   "tokens": "1qifbwvzw5apv",
-  "tree": "1sszcv850lonx",
-  "tolerant": "xcdpv3fchars",
+  "tree": "cs8nhie68ecw",
+  "tolerant": "1vx6yn1mg0lnd",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code typed local in a braced call argument's method": {
   "tokens": "3avzjsvaxi8k7",
-  "tree": "tudq802co0t2",
-  "tolerant": "2i82tucr6m6lo",
+  "tree": "1v442sv37jgyi",
+  "tolerant": "8ykdxztri0tq",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code typed local in a parenthesized callback": {
   "tokens": "xokv32srwid3",
-  "tree": "37bbhqtvr6tov",
-  "tolerant": "1kvrv7fc1im",
+  "tree": "2zk6zgm92djt4",
+  "tolerant": "21c08fz1avx1i",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code typed local in an arrow inside an array": {
   "tokens": "1zzj9mbulsrkp",
-  "tree": "22gagcyzv1fta",
-  "tolerant": "2ynm2whhws793",
+  "tree": "2a4d7q7mhg5pc",
+  "tolerant": "3ezhwg33w7ayp",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code typed local in a parameter default's body": {
   "tokens": "2aqk0rhnk1sld",
-  "tree": "1y2500a0kdk3v",
-  "tolerant": "3neehil5vzy6",
+  "tree": "8thajg6r5kwj",
+  "tolerant": "4fyzfsqfgjkh",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code typed forward in a braced object's method": {
   "tokens": "2ezh4nh7yjwi8",
-  "tree": "hpi5hjoo2uwj",
-  "tolerant": "1qbii5t34q619",
+  "tree": "2qlzzkw4ty14g",
+  "tolerant": "37e6r2plrk3ge",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code typed catch binding in a braced object's method": {
   "tokens": "3c7w5tjsfuaep",
-  "tree": "16e036aam03nj",
-  "tolerant": "3ftrsu4vfsjpx",
+  "tree": "8ctk0u2iyt9h",
+  "tolerant": "1z211osy8dskx",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code type alias in a braced object's method": {
   "tokens": "ujv2vkwgllkl",
-  "tree": "2opcfb1q77kdc",
-  "tolerant": "37orict6vvq4x",
+  "tree": "1jpgoo1i1sbvc",
+  "tolerant": "3vptyy920pm7x",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code typed field in a class inside a braced object": {
   "tokens": "2zutyi8hv68ek",
-  "tree": "3tjveo3fjvt9p",
-  "tolerant": "pc1wciii6tj",
+  "tree": "o0ldlhk3pr4k",
+  "tolerant": "us6pxkfrb7dh",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code typed reactive local in a braced object's method": {
   "tokens": "1v0s2delnl8i6",
-  "tree": "30b8p8979i9pr",
-  "tolerant": "3q7etfcc9b5g9",
+  "tree": "8mvs2i2myyvn",
+  "tolerant": "9imh5pqu9sb",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code typed local in a parenthesized if body": {
   "tokens": "2ob7uttp5adg8",
-  "tree": "3p1lquqc35siu",
-  "tolerant": "3ggv2lojy5t3v",
+  "tree": "127g04mz63o27",
+  "tolerant": "1guac48l4phf5",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code pairs in a braced object's method stay pairs": {
@@ -25777,26 +25777,26 @@
  },
  "row types.rip › type generic function dts": {
   "tokens": "3aw4vji05tn4g",
-  "tree": "1861rbpvlh7wj",
-  "tolerant": "2o7mbw0ve6a6d",
+  "tree": "xlh6sup52hl0",
+  "tolerant": "1oxm8rvatpyvm",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › type generic constraint dts": {
   "tokens": "1orl6i63cqx4e",
-  "tree": "f577wvj735w2",
-  "tolerant": "2557qfpjqx7ve",
+  "tree": "2kq1t53yaryu8",
+  "tolerant": "3qivx2y4oyq3m",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › type generic void function dts": {
   "tokens": "35y6tmzxzzmx9",
-  "tree": "gmobyp72i1ia",
-  "tolerant": "2w7cw1n9liomx",
+  "tree": "jlnhf1lc2109",
+  "tolerant": "2yo24rq5y1b1j",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › type generic void methods dts": {
   "tokens": "2kl5b1m7inb86",
-  "tree": "1yjnp6w7o5g5q",
-  "tolerant": "3ldufkr6yffih",
+  "tree": "s3i33gln7uxh",
+  "tolerant": "169xc8kys7nv0",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › fail 'void' in value position stays reserved": {
@@ -25807,8 +25807,8 @@
  },
  "row types.rip › type typed promoted parameter declares its class field": {
   "tokens": "3kpkum44pv1vb",
-  "tree": "1s9ny35utctf",
-  "tolerant": "w9688aikhpo0",
+  "tree": "14zxw2t5imj8w",
+  "tolerant": "1ojqvv5g3731k",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › type type alias dts": {
@@ -25825,38 +25825,38 @@
  },
  "row types.rip › type class with methods dts": {
   "tokens": "2np5exlfom8jh",
-  "tree": "26vdbnxxrkmm0",
-  "tolerant": "26aem62r8lu8s",
+  "tree": "2ppf5tm41ts88",
+  "tolerant": "4tkalvsf6780",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › type void slot: optionality reaches inside the container only where absence can live": {
   "tokens": "38p7dz4ur1uzq",
-  "tree": "qetuz57prxm1",
-  "tolerant": "1l0vu0n6mz3f9",
+  "tree": "3tvwfozsk0mo1",
+  "tolerant": "1qm3u9v1d41il",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › type callback prop: a bare function type in the head groups wherever the face unions it": {
   "tokens": "1bsfeamp07rby",
-  "tree": "3kzarwezbobj0",
-  "tolerant": "1eud89o9fs3uh",
+  "tree": "2kfzvfetkyyew",
+  "tolerant": "2ifmcbuxs2kc6",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test generic function runtime": {
   "tokens": "1nlkxk237i715",
-  "tree": "2gi5d79lx12bk",
-  "tolerant": "xewmnzgw2tq5",
+  "tree": "c0v8f48ntgl8",
+  "tolerant": "2hgtdcjzglrlz",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test generic function with string": {
   "tokens": "2zom49fldqo08",
-  "tree": "2f5he4icdkz4a",
-  "tolerant": "pmpewrav5vs9",
+  "tree": "36q01auhwhbn6",
+  "tolerant": "aqdyghx9ux18",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test generic function with array": {
   "tokens": "1j0leyalnygxq",
-  "tree": "ir3qq7a4lhxp",
-  "tolerant": "1lslb1d1awldi",
+  "tree": "14ffyz7k3ztk9",
+  "tolerant": "2iq698fl51ado",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › code structural type optional prop erased": {
@@ -25897,14 +25897,14 @@
  },
  "row types.rip › test a cast before a closing paren on the next line": {
   "tokens": "37j96szdwnllg",
-  "tree": "nia3m0u8ysjk",
-  "tolerant": "1arpnru33vdkr",
+  "tree": "xwkjfeo7lkc0",
+  "tolerant": "35ldbx24ttf5j",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a cast before an interpolation close on the next line": {
   "tokens": "3pndtz8yjbdn",
-  "tree": "22xe714bkpsyz",
-  "tolerant": "11n3kxfefrqdz",
+  "tree": "2tueyshblnawx",
+  "tolerant": "y5f12b9b9lcv",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › fail a second generic group after a def name stays a comparison": {
@@ -25933,8 +25933,8 @@
  },
  "row types.rip › test a parenthesized generic constraint keeps the def parameter list": {
   "tokens": "2xxw1spuukvd8",
-  "tree": "789uff42991f",
-  "tolerant": "36xajyls2gy5n",
+  "tree": "2jtye7246vgcl",
+  "tolerant": "s27nv9vaz6vx",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › fail an optional marker after a destructuring parameter rejects": {
@@ -26017,8 +26017,8 @@
  },
  "row types.rip › test a static class method with a typed parameter returning a name": {
   "tokens": "2lpce1ma64avi",
-  "tree": "35ggji99gozkl",
-  "tolerant": "huwgcuu2rbd4",
+  "tree": "21ew7egdhkodd",
+  "tolerant": "3gg2qpkl0stu7",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › fail a class field with a call value rejects": {
@@ -26071,26 +26071,26 @@
  },
  "row types.rip › test a typed declaration after a bracketed function block": {
   "tokens": "2wkxk3qutg9st",
-  "tree": "2kqw3qbsm2wig",
-  "tolerant": "ue9d9ku3am1w",
+  "tree": "32lbzaf2ofnuw",
+  "tolerant": "3mbd12lae5owd",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a key line two lines up does not block a bare typed forward": {
   "tokens": "152p5wj4widh",
-  "tree": "1pfbg9gnm4iyi",
-  "tolerant": "216vloi2q9tar",
+  "tree": "2qwpsbb8hvi3u",
+  "tolerant": "10w5ob5cvdkgy",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a key line before a block does not block its first bare typed forward": {
   "tokens": "xov3gy2a2gmf",
-  "tree": "6e21zk4k5a16",
-  "tolerant": "2nhzzxupmxnak",
+  "tree": "3nzzqj66sqybq",
+  "tolerant": "3cnjp75bqia69",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a key line opening a block does not block bare typed forwards inside it": {
   "tokens": "2hwxqegd0lc0i",
-  "tree": "2jw3rz6uvrpi9",
-  "tolerant": "135k7ejjv7ec8",
+  "tree": "3frctcmwep0bt",
+  "tolerant": "2ehl9hqdplgij",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a nested block inside a default body keeps its key lines": {
@@ -26101,14 +26101,14 @@
  },
  "row types.rip › test a parameter after an empty arrow default takes its annotation": {
   "tokens": "tpyl0h15xlmg",
-  "tree": "56esta5udgjb",
-  "tolerant": "20cvov5kb9fty",
+  "tree": "1fw64lqd4zqny",
+  "tolerant": "3iopv86tzg7zi",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a parameter after a class default takes its annotation": {
   "tokens": "2p2ynlaolas6k",
-  "tree": "38seeexee7od8",
-  "tolerant": "11wqvqcattsxf",
+  "tree": "2julr66if7xg",
+  "tolerant": "drm7vwdkrfor",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a colon after a parameter default is an object key": {
@@ -26119,8 +26119,8 @@
  },
  "row types.rip › test a newline after a semicolon ends an inline default body": {
   "tokens": "1ozp7d4t2ticg",
-  "tree": "3kof8mnslo3hl",
-  "tolerant": "2zsdp9fpqa937",
+  "tree": "kifqe5twl2hh",
+  "tolerant": "2y8u9l5eqek2y",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › type a method member after a generic member in an inline object type": {
@@ -26287,26 +26287,26 @@
  },
  "row types.rip › test a cast to a multi-line object type": {
   "tokens": "32wtcp5r0tmy4",
-  "tree": "1hjhj9gr9brcw",
-  "tolerant": "1jdu7mmmllp8e",
+  "tree": "24df90mt6yga9",
+  "tolerant": "2otw4ykco633n",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a cast to a double generic close": {
   "tokens": "26gk5bfwy9mrt",
-  "tree": "3pqq2cw6h8fed",
-  "tolerant": "vgvmsbqjx26b",
+  "tree": "1ad26avo7jv0y",
+  "tolerant": "3dba55lba2f0x",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a cast to a triple generic close": {
   "tokens": "24mxvmq45my5x",
-  "tree": "1jv4788ckk1sn",
-  "tolerant": "2zmx3jcyao0dg",
+  "tree": "2t0yncyhys3bx",
+  "tolerant": "pamycrcy90re",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a right shift after a cast is the operator": {
   "tokens": "23hkcnkdtqyle",
-  "tree": "1vur6m025vay5",
-  "tolerant": "2zh6uyuipbeen",
+  "tree": "1lfscxzb1rzvq",
+  "tolerant": "12e7mzp3alp7i",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › fail a closer over two open generics in a cast rejects at the inner one": {
@@ -26317,44 +26317,44 @@
  },
  "row types.rip › type a multi-line object parameter type separates its fields": {
   "tokens": "3r7zlmvi00pry",
-  "tree": "22sxpob0k92co",
-  "tolerant": "3k0cgpmst148",
+  "tree": "2mkg7a3r9ekpp",
+  "tolerant": "1e9jya6300ye9",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › type an optional member in a parameter object type": {
   "tokens": "qlhubnip8y44",
-  "tree": "xiblgm19ltd1",
-  "tolerant": "1jypqut8kqpa4",
+  "tree": "37nk9gjgzesir",
+  "tolerant": "1j5o6fj9q7ibt",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a string-keyed line ends a bare typed-forward run": {
   "tokens": "2tw0valhqxqwm",
-  "tree": "euvtmorj0vrz",
-  "tolerant": "2xqm5293gupl4",
+  "tree": "18fgdbka00c7r",
+  "tolerant": "1itgvwyhohinv",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a trailing comparison line after a generic return type continues": {
   "tokens": "2zs55oq7n20db",
-  "tree": "14aly3m1alpms",
-  "tolerant": "2nv7t0h50xlql",
+  "tree": "1jpr9f5no82me",
+  "tolerant": "38mxuk20kf8uq",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a trailing <= after a cast continues the line": {
   "tokens": "1i70ades403fc",
-  "tree": "25ga6y2vfffbg",
-  "tolerant": "viugycleiglw",
+  "tree": "2xyl9rjf657fa",
+  "tolerant": "3jkchbodyi8ws",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a trailing << after a cast continues the line": {
   "tokens": "16aysawew1fig",
-  "tree": "p2m3fjtx2sh3",
-  "tolerant": "2gl5q4jaj9s80",
+  "tree": "3rpect2llfj1y",
+  "tolerant": "3jl42tu15i6jd",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a cast ending in a generic close ends its line before a line starting with as": {
   "tokens": "3nlqe8yhud0fv",
-  "tree": "1o6nyfo9tdwcq",
-  "tolerant": "y4cc65zm2xvt",
+  "tree": "2phk1k2bfu9hl",
+  "tolerant": "284w1rqt6vv3j",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test as after an opening bracket is no cast head for a trailing comparison": {
@@ -26401,50 +26401,50 @@
  },
  "row types.rip › test a parenthesized single type is an arrow return": {
   "tokens": "3bg7zhdyaa8kk",
-  "tree": "3gfii4yw76jiw",
-  "tolerant": "1ro2z4dlgi1va",
+  "tree": "2me2wrc55y4j9",
+  "tolerant": "7gaxxbglbomt",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a parenthesized object type is an arrow return": {
   "tokens": "30qf758xr7f7j",
-  "tree": "9knjivgot93v",
-  "tolerant": "28g1vhl906f4c",
+  "tree": "nqnrubgwmv3f",
+  "tolerant": "27sm5rj5ylpd",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a parenthesized conditional type is an arrow return": {
   "tokens": "2y6xof5l8wm6s",
-  "tree": "1d4k973jx1fqd",
-  "tolerant": "11ek43mf722re",
+  "tree": "1c92csu0dsev4",
+  "tolerant": "xq4pwjxk6chq",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › fail a typed fat-arrow value in a class body is a bound method, not a field type": {
   "tokens": "1fbepmx80unst",
-  "tree": "27c55fcnocd51",
-  "tolerant": "1ugdi46narozw",
+  "tree": "3vahzu7gwur6r",
+  "tolerant": "r5ega8jf2g1i",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › fail a union ending in a fat-arrow value in a class body is no field type": {
   "tokens": "2jd7wd2kpcva4",
-  "tree": "2m6ay3o7ihaza",
-  "tolerant": "25fvhi15f087x",
+  "tree": "3nkiv1izpuvjg",
+  "tolerant": "1vik1z1qpyaeq",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a bare typed field before an else arrow is still a field": {
   "tokens": "1ea4uohqhihwu",
-  "tree": "2rfmet9pg491c",
-  "tolerant": "3agpp0vw79i5p",
+  "tree": "2xn20m7abhqwq",
+  "tolerant": "2vi2nhiao4u8i",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a tuple parameter in a fn-type-valued declaration": {
   "tokens": "3ki8kr2bod700",
-  "tree": "1rw2wm8t40c32",
-  "tolerant": "2mgmzpwls9akg",
+  "tree": "3q47lwg2202tn",
+  "tolerant": "18zrueqivaoho",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a generic default in a fn-type-valued declaration": {
   "tokens": "9g7qbd5tdrk4",
-  "tree": "2ggtvcscdgofy",
-  "tolerant": "1ww1l3hhwrp39",
+  "tree": "31qalnodgybiu",
+  "tolerant": "3uc9s8qx60oc",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a fat arrow after a union member is no type, so the line stays an object": {
@@ -26473,20 +26473,20 @@
  },
  "row types.rip › type a string-literal union class field": {
   "tokens": "fs7pmowxuqvz",
-  "tree": "1s8znrxzx8ruz",
-  "tolerant": "lgh4asme6jzo",
+  "tree": "1d95ojdan5y8e",
+  "tolerant": "3udn2hig14djj",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › type a class field type admitting undefined": {
   "tokens": "rbmodm7f7bqs",
-  "tree": "3gcwnof9ebvoz",
-  "tolerant": "3ez9x1x1y5gae",
+  "tree": "1y14xazph15zx",
+  "tolerant": "3fnu465k5zx9y",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › type a boolean-literal class field type": {
   "tokens": "23ae1txqpksbw",
-  "tree": "1ooe814jvnn8r",
-  "tolerant": "3j5gybs8q4i2y",
+  "tree": "1rrywtyz8d1gb",
+  "tolerant": "2c8vwjegd2ulp",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test an object-key colon is no type head for a trailing comparison": {
@@ -26569,20 +26569,20 @@
  },
  "row types.rip › test a type predicate on a generic ends the def head line": {
   "tokens": "13xrnemspvwo9",
-  "tree": "21owo2c6xpbsh",
-  "tolerant": "1w701l4oppryi",
+  "tree": "14dezb32h3rxk",
+  "tolerant": "2jy993c0u6ui7",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a TERMINATOR resets the trailing-close answer": {
   "tokens": "3n28pmmbsda4h",
-  "tree": "1nd0pbhwq9i93",
-  "tolerant": "3dnl0a3jzqnea",
+  "tree": "2v1lqhlzpljh4",
+  "tolerant": "b1i4dbnm93pg",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test an INDENT resets the trailing-close answer": {
   "tokens": "1su5ly234ghtr",
-  "tree": "aeor426t859c",
-  "tolerant": "n83lvmgnfhtp",
+  "tree": "1zov9i1py38l2",
+  "tolerant": "2wph9iklyfhr3",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test an object key after a comma inside a loop body is no loop variable": {
@@ -26593,20 +26593,20 @@
  },
  "row types.rip › test a reactive declaration separates bare typed forwards": {
   "tokens": "2w2v9id5uohbo",
-  "tree": "d40m23lz2ul9",
-  "tolerant": "ijs645fcz6eq",
+  "tree": "1kuzrwwpbrzg0",
+  "tolerant": "25sju5w6liw08",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a readonly declaration separates bare typed forwards": {
   "tokens": "1rv6ksnxuvmy0",
-  "tree": "35q77gr18f4w5",
-  "tolerant": "qfvc0lcpks20",
+  "tree": "2ddry7hnftrr7",
+  "tolerant": "1lrosggaqmp71",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test an effect declaration separates bare typed forwards": {
   "tokens": "12kct78nbuc8h",
-  "tree": "1qsj9avfbc9ch",
-  "tolerant": "21i85w2mqoyen",
+  "tree": "17fcne4teg43e",
+  "tolerant": "2la0l42l1umco",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a clause after a parenthesized value keeps the run an object": {
@@ -26629,26 +26629,26 @@
  },
  "row types.rip › test an arrow return type may be an import type": {
   "tokens": "iqcts3njaoou",
-  "tree": "36iup8407ni7p",
-  "tolerant": "27n2vd1h26uwm",
+  "tree": "166futl6re8e1",
+  "tolerant": "2g1m9q4m9r1fq",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test an arrow return type may close two generics with one token": {
   "tokens": "h42rhzg3ixer",
-  "tree": "10mnd6ai1fin4",
-  "tolerant": "1ci8eoomof1rb",
+  "tree": "276prawpwk35v",
+  "tolerant": "1psdsl609hlyk",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test an arrow return type may close three generics with one token": {
   "tokens": "c5mowms4351j",
-  "tree": "1zpub0o5z8yhh",
-  "tolerant": "eof6l3lnq8pp",
+  "tree": "211rwji7r9bho",
+  "tolerant": "387ilovxud1yj",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › test a parenthesized arrow return type before a parenthesized body": {
   "tokens": "2d1pg4cury0np",
-  "tree": "2i536bsh6h45n",
-  "tolerant": "bqkp2inb9utl",
+  "tree": "3muosuczw86aw",
+  "tolerant": "2n1zkg0wmgg22",
   "complete": "6j7t1thlgyju"
  },
  "row types.rip › fail an arrow return type with an unparenthesized function type in a union": {
@@ -26703,6 +26703,384 @@
   "tokens": "11ca5ue5gw1pu",
   "tree": "2lan2h4k628q5",
   "tolerant": "1c498kj5kjyyq",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: an asserts predicate with a type": {
+  "tokens": "3rfx5zj04db6k",
+  "tree": "qtz0epbyxs51",
+  "tolerant": "2cq84wfllc3cb",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: an asserts predicate alone": {
+  "tokens": "1medw0lsckrm3",
+  "tree": "22if2851ocdh4",
+  "tolerant": "gurn9ywpyugh",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a predicate return in a method type": {
+  "tokens": "3szawm4g4xpwn",
+  "tree": "2ypi986pgyq30",
+  "tolerant": "3dm0vw32pvf67",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a this parameter in a function type": {
+  "tokens": "bn5mr55j6qmc",
+  "tree": "216c50q29si59",
+  "tolerant": "39usr29tx90tj",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a generic function type": {
+  "tokens": "2ceplqvgv5s4d",
+  "tree": "28j9bzbafkkg8",
+  "tolerant": "fd6udmszih4d",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a generic constructor type": {
+  "tokens": "2mu5d1nnbcrgf",
+  "tree": "3mczumh5a6xoz",
+  "tolerant": "dblz1mohf9du",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: an abstract constructor type": {
+  "tokens": "2esdgfdp9civk",
+  "tree": "1mnjdpgz546nt",
+  "tolerant": "1r28pn2gauimv",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: an abstract generic constructor type": {
+  "tokens": "2ejj3vr2dqphu",
+  "tree": "1dfw41jgi08y",
+  "tolerant": "2tospuyihi20p",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a trailing comma after a function type's parameters": {
+  "tokens": "nxhlisd2twv5",
+  "tree": "35q1ctfu3bstq",
+  "tolerant": "1q76tyrk46t3u",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: two parameters in a function type": {
+  "tokens": "2rz6sshw6rzp3",
+  "tree": "13k41o0wjvp7d",
+  "tolerant": "2fromw98kxgni",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: untyped parameters in a cast's function type": {
+  "tokens": "3tmjzk14zk6qs",
+  "tree": "8sbfch9xxepe",
+  "tolerant": "2td2m2cuc0bl6",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: an untyped optional parameter in a cast's function type": {
+  "tokens": "3cjv8r9c1bpiq",
+  "tree": "12iovg65170k9",
+  "tolerant": "29cwtygx0rasu",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: an optional parameter in a function type": {
+  "tokens": "2rgyu20ifimil",
+  "tree": "b3ppsgqvith5",
+  "tolerant": "2bkb981mcoysk",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: an untyped rest parameter in a cast's function type": {
+  "tokens": "48geihxeq4s6",
+  "tree": "22ivahth06vwz",
+  "tolerant": "srqe8rhtq9rg",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a typed rest parameter in a function type": {
+  "tokens": "w0rmsa99uqud",
+  "tree": "3ps4wedayu6a3",
+  "tolerant": "toam2w4y9nc8",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: constrained and defaulted type variables": {
+  "tokens": "357344d9qybty",
+  "tree": "35upbvyqn8rt2",
+  "tolerant": "364yrsqicpsr5",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a leading bar before one type": {
+  "tokens": "27dz7qoeqxufa",
+  "tree": "263uigez5slld",
+  "tolerant": "2yjrjs8p58w0u",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a leading bar before a union": {
+  "tokens": "14r8ktmhhddtr",
+  "tree": "s6hqni09a6hx",
+  "tolerant": "1thjamwfb3t0m",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a three-member union": {
+  "tokens": "3b4hmjh0yedcl",
+  "tree": "2x0bmrz5h3lt0",
+  "tolerant": "1cufkf7p3qwsj",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a three-member intersection": {
+  "tokens": "1kmzvss22018d",
+  "tree": "kjmvq5xrt4o8",
+  "tolerant": "3a5pi64nk2rxm",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a keyof type": {
+  "tokens": "1rc76ju7i5d1n",
+  "tree": "j3b5icp3i6ng",
+  "tolerant": "2uimx75c12fyx",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a readonly array type": {
+  "tokens": "3dcl8p2cgvjoq",
+  "tree": "3mnbl9lshwb60",
+  "tolerant": "264jxhs0d7lut",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a unique symbol type": {
+  "tokens": "38jon891kjoag",
+  "tree": "1lrpiirfxe5s9",
+  "tolerant": "3bdhalbzrydy1",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: an infer type in a conditional": {
+  "tokens": "1fcrd6m5a5ihg",
+  "tree": "1z17mif6kwkml",
+  "tolerant": "1a5vrns4sgz19",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: an indexed access type": {
+  "tokens": "1h53lrxptvy3z",
+  "tree": "3psai2r8ucy62",
+  "tolerant": "1v28pg9l9osll",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a this return type": {
+  "tokens": "133vl69n0kq94",
+  "tree": "94h4p7c8vfw8",
+  "tolerant": "2urehau0t5ak1",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a typeof type": {
+  "tokens": "28isk8gw6d9y1",
+  "tree": "bnz3xa78u70o",
+  "tolerant": "2dcarvvb8obcn",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: an empty object type": {
+  "tokens": "3j1jer3l9pnc0",
+  "tree": "3gm9gptoc7g8o",
+  "tolerant": "368mp0k8mbxj1",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a trailing comma in an object type": {
+  "tokens": "35vyum4is6bkz",
+  "tree": "3c5y1o9y3odhl",
+  "tolerant": "fw2sal37wdt1",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: comma-separated members": {
+  "tokens": "18ksmrcdcy0y1",
+  "tree": "zklsqjluzmny",
+  "tolerant": "17oljetd6mg4f",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a readonly member": {
+  "tokens": "2dhb6d80d1n86",
+  "tree": "qohqeuluu7el",
+  "tolerant": "28ei8anx07b92",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a readonly optional member": {
+  "tokens": "33wj61anme5vx",
+  "tree": "4dlwp6vyd4zq",
+  "tolerant": "xms2mame57f2",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a method member with no parameters": {
+  "tokens": "i6vamd01lco3",
+  "tree": "8p2vqhwc3uty",
+  "tolerant": "3qp7anzbf5blh",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a method member with a return type": {
+  "tokens": "2o8hqxq2zrmug",
+  "tree": "q31sq0sptlz4",
+  "tolerant": "2w6exeotyo7rn",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a generic method member with a return type": {
+  "tokens": "2wkf5cxmqjq8j",
+  "tree": "rj547p217wz4",
+  "tolerant": "1auq5csm3fgju",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a generic method member": {
+  "tokens": "1k3bp95pd1zt7",
+  "tree": "2zpkqz8guw7f0",
+  "tolerant": "1rdlnggvd32o",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: an index signature": {
+  "tokens": "2ts36fb6wv3rp",
+  "tree": "2isga478673x3",
+  "tolerant": "fc8o4ymympjs",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a readonly index signature": {
+  "tokens": "1syav3ip208b3",
+  "tree": "2hz5dhsb2yizw",
+  "tolerant": "2ar8rfmxnwf6m",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a mapped type": {
+  "tokens": "2ie4zc64wl1i5",
+  "tree": "3ek6a2apdi40o",
+  "tolerant": "39lxs8jakjv1t",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a readonly mapped type": {
+  "tokens": "1fbqp1bs41tsj",
+  "tree": "34u9tb2s01et2",
+  "tolerant": "efsqvmdgb0y6",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: an optional mapped type": {
+  "tokens": "2yyeauiflutil",
+  "tree": "297oe83tmklob",
+  "tolerant": "1x2mto0a85opk",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a readonly optional mapped type": {
+  "tokens": "14s6fro75szq8",
+  "tree": "3ld8hlujp6bsk",
+  "tolerant": "17vsdgfc4vru9",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a string member key": {
+  "tokens": "fshwgxvnjput",
+  "tree": "1aol4uxgzj0xs",
+  "tolerant": "32nkxkpmsfj6k",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a numeric member key": {
+  "tokens": "2th9pxjbheb7p",
+  "tree": "3f08skfsrbzad",
+  "tolerant": "1g4w4hjze06yq",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: an empty tuple": {
+  "tokens": "14tr0u0ts11b",
+  "tree": "39kogm9hkawd9",
+  "tolerant": "bspk697r9msh",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a trailing comma in a tuple": {
+  "tokens": "3fueg5ki5utpv",
+  "tree": "6pwek5w8updo",
+  "tolerant": "1y3vklp6hapf5",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: an optional tuple element": {
+  "tokens": "3h1l7ywq0hqpi",
+  "tree": "1eu41uolykfu0",
+  "tolerant": "x7zhc62bo45c",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a rest tuple element": {
+  "tokens": "aadb0tw7pt1r",
+  "tree": "2ilzppfxhzycd",
+  "tolerant": "3657jo8l00r0y",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a named tuple element": {
+  "tokens": "3e39bzl0q2f8c",
+  "tree": "271ay1zbii12f",
+  "tolerant": "240pymgftkxdl",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a named optional tuple element": {
+  "tokens": "37rbddquq9v0s",
+  "tree": "36vxr5pmflz22",
+  "tolerant": "d6n242d0j4g7",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a named rest tuple element": {
+  "tokens": "2uoubyik76862",
+  "tree": "3puuzo33pgy3s",
+  "tolerant": "2vg7hp2flt79",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: an optional method member": {
+  "tokens": "1sjo06e39065m",
+  "tree": "1s52ps0yk0m58",
+  "tolerant": "1w4ok5uj373t8",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: an optional method member with no return type": {
+  "tokens": "2s3yz58598ke5",
+  "tree": "1vkyo0f26ppxc",
+  "tolerant": "1zambo3nt2ncs",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a call signature": {
+  "tokens": "28o11f4dgxcfq",
+  "tree": "3f1rky6capp7w",
+  "tolerant": "21624jjw961l",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a generic call signature": {
+  "tokens": "nayu81nlaq7x",
+  "tree": "coorypiitt81",
+  "tolerant": "3ctau5izwzyfw",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a construct signature": {
+  "tokens": "2chmtq3vli533",
+  "tree": "5i91j4vijkxf",
+  "tolerant": "2v075aa8gkwpk",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a generic construct signature": {
+  "tokens": "26avf4h7kj9yn",
+  "tree": "3qticy3oh6izc",
+  "tolerant": "yx546deyl083",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a trailing comma in type arguments": {
+  "tokens": "pt5gs1vbby6l",
+  "tree": "278idhlekm1q1",
+  "tolerant": "7j0jzasnji2g",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › code types entry: a trailing comma in type variables": {
+  "tokens": "3q9avismyqpdn",
+  "tree": "3hf7at6kp89mn",
+  "tolerant": "5cmf6nqrh4fl",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › type a readonly member keeps its name in a def parameter's declaration": {
+  "tokens": "3rrt2hwqnzcf7",
+  "tree": "2dbsam1i8a2dr",
+  "tolerant": "16rdsdlopi9qb",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › type a readonly member opening a line after a generic member is separated": {
+  "tokens": "1xlm59txa0aqf",
+  "tree": "y9uyhx90il22",
+  "tolerant": "9fvbg9sglvbd",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › type a trailing comma before a line break separates an object type's members once": {
+  "tokens": "2f3e9wot4oog4",
+  "tree": "2javpic0jikhk",
+  "tolerant": "1s6oxowp2b4sq",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › type a trailing comma before a line break separates a tuple's elements once": {
+  "tokens": "1p39m7yyelgf",
+  "tree": "3fcdiy3pp89r0",
+  "tolerant": "363w6m3rlgqpy",
   "complete": "6j7t1thlgyju"
  },
  "row value-words.rip › fail annotated declaration": {
@@ -26803,26 +27181,26 @@
  },
  "row value-words.rip › test class field named no": {
   "tokens": "1c4qljj84qjk4",
-  "tree": "mqlf0dd0untz",
-  "tolerant": "vqec9qeuv7uw",
+  "tree": "2xdyporgdntmp",
+  "tolerant": "2kn8gg4x7zqke",
   "complete": "6j7t1thlgyju"
  },
  "row value-words.rip › test bare typed class field named no": {
   "tokens": "36823re5oh99k",
-  "tree": "ev94q1n5qejo",
-  "tolerant": "321ma78f3j4xg",
+  "tree": "1ovqebqpfo29w",
+  "tolerant": "2tl5qvgrhhfv8",
   "complete": "6j7t1thlgyju"
  },
  "row value-words.rip › test promoted parameter named no": {
   "tokens": "3teai73yev0qh",
-  "tree": "2jzfv8c77pysx",
-  "tolerant": "te07s2r37v5b",
+  "tree": "260omkw7xtka5",
+  "tolerant": "395reeylzv5ke",
   "complete": "6j7t1thlgyju"
  },
  "row value-words.rip › test component @-prop named no": {
   "tokens": "13u1hyl16m3zj",
-  "tree": "2m8mxribfsmqo",
-  "tolerant": "14edxk79mx5i2",
+  "tree": "cda8rnepco7y",
+  "tolerant": "9o2gaqw0aa6k",
   "complete": "6j7t1thlgyju"
  },
  "row value-words.rip › test this-param in a type alias": {
@@ -26845,8 +27223,8 @@
  },
  "row value-words.rip › test on and off as annotated state and destructured names": {
   "tokens": "2kipbsgrqqgqx",
-  "tree": "3ipzome8qe791",
-  "tolerant": "4zpwtmphl7g2",
+  "tree": "154e63gjwklia",
+  "tolerant": "1995sfh0wzmmi",
   "complete": "6j7t1thlgyju"
  },
  "row value-words.rip › fail array-destructured value word": {

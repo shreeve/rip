@@ -1,8 +1,9 @@
-// Types — the compile-time type surface, which is an ERASURE. Rip
-// types are annotations the grammar never parses: this pass finds each
-// one, collapses its token run into a single opaque TYPE, CAST, or
-// SATISFIES token, and that token carries text the emitter drops on the
-// floor. Nothing here survives into JavaScript.
+// Types — the compile-time type surface, which is an ERASURE. This pass
+// finds each type annotation and collapses its token run into a single
+// TYPE, CAST, or SATISFIES token the program grammar shifts; the run
+// itself rides beside that token (typeTape, below) for the grammar's
+// types entry to parse. The emitter drops both on the floor: nothing
+// here survives into JavaScript.
 //
 // That is the whole symmetry with schema.js. Both files are a rewrite
 // pass plus the compile-time surface of one construct, and both sit
@@ -26,10 +27,11 @@ import { counter } from './counter.js';
 // Rip types are erased annotations: a single-colon
 // annotation in a TYPE POSITION (function params, return types,
 // statement-level typed declarations) and the postfix `expr as Type`
-// cast. The grammar never parses a type — this pass collapses each
-// annotation's token run into ONE token carrying the opaque type
-// string as its value and the annotation's full source extent as its
-// span:
+// cast. Deciding WHERE a type runs is this pass's job, not the
+// grammar's: it collapses each annotation's token run into ONE token
+// carrying the normalized type string as its value and the
+// annotation's full source extent as its span, and records the run's
+// tokens (typeTape) in the payload map the parser reads them from:
 //   TYPE — `: run` (span from the colon through the type's end)
 //   CAST — `as run` (span from `as` through the type's end)
 //   SATISFIES — `satisfies run` (the same span shape)
@@ -82,6 +84,20 @@ const TYPE_STARTERS = new Set([
   'INDEX_START', 'STRING', 'NUMBER', 'BOOL', 'NULL', 'UNDEFINED', '-',
   'UNARY', 'RESERVED',
 ]);
+
+// Does tokens[j] open an object-type member row? A member name does
+// (the scanner key-tags it PROPERTY before its `:`), unless the member
+// modifier `readonly` opened the row before it; the modifier does when
+// it opens a line ahead of a member name. A `>`-ending member keeps its
+// line break from scanning a TERMINATOR, so the row it leaves needs a
+// separator the source never spelled.
+const isReadonlyWord = (t) => (t?.kind === 'IDENTIFIER' || t?.kind === 'PROPERTY') && t.value === 'readonly';
+const opensMemberRow = (tokens, j) => {
+  const t = tokens[j];
+  if (t.kind === 'PROPERTY') return !isReadonlyWord(tokens[j - 1]);
+  const after = tokens[j + 1];
+  return isReadonlyWord(t) && t.newLine === true && (after?.kind === 'PROPERTY' || after?.kind === 'IDENTIFIER');
+};
 
 const RUN_OPENERS = new Set(['(', 'CALL_START', 'PARAM_START', '[', 'INDEX_START', '{', 'PICK_START', 'OPTPICK_START']);
 export const RUN_CLOSERS = new Set([')', 'CALL_END', 'PARAM_END', ']', 'INDEX_END', '}', 'PICK_END']);
@@ -561,13 +577,16 @@ const collectTypeRun = (tokens, j, opts, fail) => {
     } else {
       // Inside brackets, INDENT/OUTDENT are pure layout; TERMINATOR
       // separates structural-type fields (emitted as ';' so the type
-      // string is valid TS).
+      // string is valid TS), unless a comma already ended the field.
       if (kd === 'INDENT' || kd === 'OUTDENT') { j++; continue; }
-      if (kd === 'TERMINATOR') { parts.push(';'); end = t.end; j++; continue; }
-      // A `>`-ending field suppresses its TERMINATOR (the scanner's
-      // unfinished-line rule); a new PROPERTY at the top of a `{`
-      // marks the seam — inject the separator.
-      if (kd === 'PROPERTY' && braceStack[braceStack.length - 1] === '{') {
+      if (kd === 'TERMINATOR') {
+        const prev = parts[parts.length - 1];
+        if (prev !== ',' && prev !== ';') parts.push(';');
+        end = t.end; j++; continue;
+      }
+      // A member row the scanner left unseparated (opensMemberRow)
+      // takes the separator here.
+      if (braceStack[braceStack.length - 1] === '{' && opensMemberRow(tokens, j)) {
         const prev = parts[parts.length - 1];
         if (prev && prev !== '{' && prev !== ',' && prev !== ';') parts.push(';');
       }
@@ -594,7 +613,107 @@ const collectTypeRun = (tokens, j, opts, fail) => {
   return { parts, consumed: j - startJ, end };
 };
 
-// The opaque type string: parts joined and whitespace-normalized
+// The payload of one claimed run, tokens[from, to): the tokens the
+// grammar's types entry parses (TypeAnnotation in grammar.rip), each
+// {kind, value, start, end}. A run is a type's tokens as the scanner
+// read them, so a few are renamed where a type reads them differently:
+//   - `<` and `>` are angle brackets, and a `>>`/`>>>` closes two or
+//     three, one token per character;
+//   - INDEX_START/INDEX_END are plain brackets (a type has no index
+//     operator to tell apart), an optional method's `?(` is a `?`
+//     before its paren, and every name is an IDENTIFIER;
+//   - a `?` directly before a `:` fuses with it into OPTIONAL_COLON
+//     (`a?: T`), so an optional name and an optional tuple element
+//     (`[T?]`) need no second token of lookahead;
+//   - the contextual type words become terminals of their own where
+//     they act as operators: `keyof`, `readonly` before a type or a
+//     member, `infer` and `asserts` before a name, `unique symbol`,
+//     `abstract new`, `new` before a parameter list or generics, `in`
+//     in a mapped type, `typeof`, and the predicate's `is`. Anywhere
+//     else the word is the name it spells;
+//   - block layout inside brackets is the collector's: INDENT/OUTDENT
+//     drop, a line break separates members unless a comma already did,
+//     and a member row a `>` kept from breaking (opensMemberRow) is
+//     preceded by one.
+// Every other token keeps its kind, so a code-shaped token reaches the
+// grammar as itself and the run reads as no type.
+const TAPE_NAME_KINDS = new Set(['IDENTIFIER', 'PROPERTY', 'RESERVED']);
+const TAPE_TYPE_STARTERS = new Set([
+  'IDENTIFIER', 'PROPERTY', 'RESERVED', 'STRING', 'NUMBER', 'BOOL', 'NULL',
+  'UNDEFINED', 'THIS', '(', 'PARAM_START', '[', 'INDEX_START', '{', '-',
+  'UNARY', 'DYNAMIC_IMPORT',
+]);
+const TAPE_RENAMES = new Map([['INDEX_START', '['], ['INDEX_END', ']'], ['TERNARY', '?'], ['OPT_MARKER', '?'], ['ES6_OPTIONAL_CALL', '?']]);
+const isTapeLayout = (t) => t.kind === 'INDENT' || t.kind === 'OUTDENT';
+
+export const typeTape = (tokens, from, to) => {
+  const tape = [];
+  const groups = []; // open bracket kinds, innermost last
+  const nextAt = (k) => {
+    for (let j = k + 1; j < to; j++) if (!isTapeLayout(tokens[j])) return j;
+    return -1;
+  };
+  const next = (k) => tokens[nextAt(k)] ?? null;
+  const push = (kind, t, value = t.value, start = t.start, end = t.end) => tape.push({ kind, value, start, end });
+  for (let k = from; k < to; k++) {
+    if (counter.on) counter.n++;
+    const t = tokens[k];
+    const kd = t.kind;
+    if (isTapeLayout(t)) continue;
+    if (kd === 'COMPARE' && t.value === '<') { groups.push('<'); push('<', t); continue; }
+    if (kd === 'COMPARE' && t.value === '>') { groups.pop(); push('>', t); continue; }
+    if (kd === 'SHIFT' && (t.value === '>>' || t.value === '>>>')) {
+      for (let c = 0; c < t.value.length; c++) { groups.pop(); push('>', t, '>', t.start + c, t.start + c + 1); }
+      continue;
+    }
+    if (RUN_OPENERS.has(kd)) groups.push(kd === '{' ? '{' : kd);
+    else if (RUN_CLOSERS.has(kd)) groups.pop();
+    if (kd === '?' || kd === 'TERNARY' || kd === 'OPT_MARKER') {
+      const at = nextAt(k);
+      if (at !== -1 && tokens[at].kind === ':') {
+        push('OPTIONAL_COLON', t, '?:', t.start, tokens[at].end);
+        k = at;
+        continue;
+      }
+      push('?', t);
+      continue;
+    }
+    if (t.word === 'is') { push('IS', t); continue; }
+    if (kd === 'UNARY' && t.value === 'typeof') { push('TYPEOF', t); continue; }
+    if (kd === 'RELATION' && t.value === 'in') { push('IN', t); continue; }
+    // A line break after a comma separates nothing more (collectTypeRun).
+    if (kd === 'TERMINATOR' && (tape[tape.length - 1]?.kind === ',' || tape[tape.length - 1]?.kind === 'TERMINATOR')) continue;
+    if (TAPE_NAME_KINDS.has(kd)) {
+      const after = next(k);
+      // The member-row seam the collector marks with ';' (collectTypeRun).
+      if (groups[groups.length - 1] === '{' && opensMemberRow(tokens, k)) {
+        const prev = tape[tape.length - 1];
+        if (prev && prev.kind !== '{' && prev.kind !== ',' && prev.kind !== 'TERMINATOR') {
+          tape.push({ kind: 'TERMINATOR', value: '', start: t.start, end: t.start });
+        }
+      }
+      const word = t.value;
+      const startsType = after != null && TAPE_TYPE_STARTERS.has(after.kind);
+      if (word === 'keyof' && startsType) { push('KEYOF', t); continue; }
+      if (word === 'readonly' && startsType) { push('READONLY', t); continue; }
+      if (word === 'infer' && after != null && TAPE_NAME_KINDS.has(after.kind)) { push('INFER', t); continue; }
+      if (word === 'asserts' && after != null && (TAPE_NAME_KINDS.has(after.kind) || after.kind === 'THIS')) { push('ASSERTS', t); continue; }
+      if (word === 'unique' && after?.value === 'symbol') { push('UNIQUE', t); continue; }
+      if (word === 'abstract' && after?.kind === 'RESERVED' && after.value === 'new') { push('ABSTRACT', t); continue; }
+      if (kd === 'RESERVED' && word === 'new' && after != null &&
+          (after.kind === 'PARAM_START' || after.kind === '(' || (after.kind === 'COMPARE' && after.value === '<'))) {
+        push('NEW', t);
+        continue;
+      }
+      push('IDENTIFIER', t);
+      continue;
+    }
+    push(TAPE_RENAMES.get(kd) ?? kd, t);
+  }
+  return tape;
+};
+
+// The type string: parts joined and whitespace-normalized
 // (cast strings land in the s-expression,
 // pinned byte-for-byte by the tests).
 const buildTypeString = (parts) => {
@@ -1111,7 +1230,9 @@ const VALUE_WORDS = new Map([
   ['null', 'null'], ['undefined', 'undefined'], ['this', 'this'],
 ]);
 
-export function rewriteTypes(tokens, mintId, text, fail) {
+// `payloads` receives each minted TYPE/CAST/SATISFIES token's run
+// (typeTape), keyed by the token.
+export function rewriteTypes(tokens, mintId, text, fail, payloads) {
   const out = [];
   // Bracket frames over SURVIVING tokens: 'param' (arrow param list),
   // 'defparam' (a def's CALL_START list), 'other'. Param frames carry
@@ -1322,7 +1443,9 @@ export function rewriteTypes(tokens, mintId, text, fail) {
         tokens[runStart].start,
       );
     }
-    out.push(mint(kind, buildTypeString(run.parts), from.start, run.end, from));
+    const token = mint(kind, buildTypeString(run.parts), from.start, run.end, from);
+    payloads.set(token, typeTape(tokens, runStart, runStart + run.consumed));
+    out.push(token);
     return runStart + run.consumed - 1;
   };
 

@@ -91,7 +91,10 @@ const addState = (kernel) => {
   trans.push(new Map());
   return id;
 };
-addState(new Set([0]));
+// One start state per accept rule: the program's (rule 0) and each
+// grammar entry's.
+const acceptRules = rules.filter((r) => r.lhs === '$accept').map((r) => r.id);
+const starts = acceptRules.map((id) => addState(new Set([id * STRIDE])));
 for (let k = 0; k < kernels.length; k++) {
   const bySym = new Map();
   for (const it of closure0(kernels[k])) {
@@ -102,10 +105,12 @@ for (let k = 0; k < kernels.length; k++) {
   }
   for (const [X, kernel] of bySym) trans[k].set(X, addState(kernel));
 }
+const acceptIds = new Set(acceptRules);
+const isAccept = (rid) => acceptIds.has(rid);
 
 // Solar's state → oracle state, by kernel signature.
 const solarSig = (st) => [...st.items]
-  .filter((i) => i.dot > 0 || i.rule.id === 0)
+  .filter((i) => i.dot > 0 || i.rule.lhs === '$accept')
   .map((i) => i.rule.id * STRIDE + i.dot).sort((a, b) => a - b).join('|');
 
 test('LR(0): the same states and transitions', () => {
@@ -145,7 +150,7 @@ const closure1 = (seed) => {
 
 test('LALR(1): the same lookahead set on every reduction', () => {
   const LA = kernels.map((k) => new Map([...k].map((it) => [it, new Set()])));
-  LA[0].get(0).add('$end');
+  starts.forEach((k, i) => LA[k].get(acceptRules[i] * STRIDE).add('$end'));
   const prop = kernels.map(() => []);
   for (let k = 0; k < kernels.length; k++) {
     for (const it of kernels[k]) {
@@ -175,7 +180,7 @@ test('LALR(1): the same lookahead set on every reduction', () => {
     const out = new Map();
     for (const [jt, las] of closure1(LA[i])) {
       const rid = ruleOf(jt);
-      if (rid !== 0 && dotOf(jt) === rhsOf[rid].length) out.set(rid, las);
+      if (!isAccept(rid) && dotOf(jt) === rhsOf[rid].length) out.set(rid, las);
     }
     return out;
   });
@@ -184,7 +189,7 @@ test('LALR(1): the same lookahead set on every reduction', () => {
   for (const st of gen.states) {
     const want = oracleReductions[index.get(solarSig(st))];
     for (const item of st.reductions) {
-      if (item.rule.id === 0) continue;
+      if (item.rule.lhs === '$accept') continue;
       compared++;
       const expected = [...(want.get(item.rule.id) ?? [])].sort();
       const actual = [...item.lookaheads].sort();
