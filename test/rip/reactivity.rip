@@ -489,6 +489,24 @@ code 'render block with identifier property value compiles to reactive setAttrib
   '''
 
 # ==============================================================================
+# An effect or computed body binds no implicit `it`: a bare `it` there reads a
+# declared binding or rejects positioned.
+# ==============================================================================
+
+fail "a bare it in an effect rejects", "~> console.log it", ":1:16: emitter: bare `it` has no binding here"
+fail "a bare it in an effect block rejects", "~>\n  x = 1\n  console.log it", ":3:15: emitter: bare `it` has no binding here"
+fail "a bare it in an expression effect rejects", "x = ~> it", ":1:8: emitter: bare `it` has no binding here"
+fail "a bare it in a bound effect rejects", "stop ~> console.log it", ":1:21: emitter: bare `it` has no binding here"
+fail "a bare it in a computed rejects", "y ~= it", ":1:6: emitter: bare `it` has no binding here"
+fail "a bare it in a computed expression rejects", "y ~= it + 1", ":1:6: emitter: bare `it` has no binding here"
+fail "a bare it in a computed block rejects", "y ~=\n  z = 1\n  z + it", ":3:7: emitter: bare `it` has no binding here"
+fail "an implicit it answers no effect inside its function", "f = -> ~> it", ":1:11: emitter: bare `it` has no binding here"
+test "a module it answers an effect", "it = 5\nseen = 0\n~> seen = it\nseen", 5
+test "a module state it answers a computed", "it := 2\ny ~= it * 3\ny", 6
+test "an effect's own it answers", "seen = 0\n~>\n  it = 4\n  seen = it\nseen", 4
+test "a parameterless function inside an effect keeps its implicit it", "seen = null\n~> seen = [1, 2].map -> it * 2\nseen", [2, 4]
+
+# ==============================================================================
 # Effect bodies cannot yield in ANY position — statement, expression, or tail —
 # because the runtime calls the effect function as a normal callable. A named
 # generator the effect calls stays legal.

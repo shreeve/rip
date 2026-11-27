@@ -401,6 +401,7 @@ class Analysis {
     this.siteTrees = new Map();
     this.renderPos = new Map();
     this.caseBlocks = new Map();  // a switch case body block → the switch's block unit
+    this.renderFence = null;      // the bare-`it` fence of the render the walk is inside
     this.rsink = null;       // the render factory the walk is inside: its sink and the env it opened at
     this.childrenFuncs = new Set();
     this.methodFuncs = new Set();
@@ -1008,21 +1009,43 @@ class Analysis {
     return this.positioned(promoted && message === MEMBER_IN_PARAMETER ? PROMOTED_IN_PATTERN(wordOf(hit[3])) : message, hit, p);
   }
 
-  // A function that takes parameters checks its bare `it` reads: its
-  // fence, open over its parameters and body (null for a parameterless
-  // one, whose `it` is its own).
-  openItFence(x, params, scoped) {
-    const fence = scoped && params.length > 0 && this.preempted === 0
-      ? { fn: x, params, scope: null, env: this.env, sub: this.inSub, rsink: this.rsink, hit: null, inParams: false, hitParam: false } : null;
+  // A def, a method, and a function that takes parameters check their
+  // bare `it` reads: the fence, open over the parameters and body (null
+  // for a parameterless function value, whose `it` is its own). A
+  // render's children block is inlined into the render, under its fence.
+  openItFence(x, params, scoped, implicit) {
     const saved = [this.itFence, this.itScope];
+    if (!scoped) return saved;
+    const fence = (params.length > 0 || !implicit) && this.preempted === 0
+      ? { fn: x, params, scope: null, env: this.env, sub: this.inSub, rsink: this.rsink, hit: null, inParams: false, hitParam: false } : null;
     this.itFence = fence;
     if (fence !== null) this.itScope = null;
     return saved;
   }
 
+  // An effect's, a computed's or a render's body binds no implicit `it`:
+  // its fence. It leaves the enclosing implicit-`it` scope alone, since
+  // a parameterless function's own scan reads through these bodies.
+  // `scope` is the body's scope (null for a body emitted inline, whose
+  // rejection lands between the scopes around it); `root` anchors an
+  // `it` with no node of its own above it.
+  openBodyFence(stmts, scope, root, render = false) {
+    const saved = this.itFence;
+    this.itFence = this.preempted === 0
+      ? { fn: null, stmts, params: EMPTY_ARRAY, scope, root, env: this.env, sub: this.inSub, rsink: this.rsink, hit: null, inParams: false, hitParam: false, at: this.scopes.length, render, itBound: false }
+      : null;
+    return saved;
+  }
+
+  closeBodyFence(saved) {
+    const fence = this.itFence;
+    if (fence !== null && fence.hit !== null) this.itFences.push(fence);
+    this.itFence = saved;
+  }
+
   closeItFence(saved) {
     const fence = this.itFence;
-    if (fence !== null && fence.hit !== null && fence.scope !== null) this.itFences.push(fence);
+    if (fence !== null && fence !== saved[0] && fence.hit !== null && fence.scope !== null) this.itFences.push(fence);
     [this.itFence, this.itScope] = saved;
   }
 
@@ -1042,7 +1065,7 @@ class Analysis {
     this.headWord(x[0], m);
     let scope = null;
     const scoped = !this.childrenFuncs.has(x);
-    const saved = this.openItFence(x, params, scoped);
+    const saved = this.openItFence(x, params, scoped, !method);
     if (method) this.visitFenceParams(params, m);
     const outer = this.env;
     if (scoped) {
@@ -1161,7 +1184,7 @@ class Analysis {
     if (rs !== null && !(m & RNEST) && name !== undefined) this.auth(rs, name, 'def', x);
     this.headWord(hv, m);
     this.visit(x[2], (m & ~(RN | HOIST | HMATCH | CNEST | RNEST)) | NORAB | NOIT, null, null);
-    const saved = this.openItFence(x, x[3], true);
+    const saved = this.openItFence(x, x[3], true, false);
     this.visitFenceParams(x[3], m);
     // A def emits as its own scope: defStatement, whose hoist reads the
     // body's statements raw, or a class body's method form, emitted as
@@ -1437,10 +1460,14 @@ class Analysis {
       const value = x[3];
       const scope = this.openScope(null, value, [], false);
       this.hoistBody(scope, value, [], false, {});
+      const saved = this.openBodyFence([value], scope, x);
       this.visitBody(value, vm, scope, []);
+      this.closeBodyFence(saved);
       return;
     }
+    const saved = this.openBodyFence([x[3]], null, x);
     this.visit(x[3], vm & ~CNEST, null, rs);
+    this.closeBodyFence(saved);
   }
 
   visitEffect(x, m, cs, rs, member) {
@@ -1476,7 +1503,10 @@ class Analysis {
       }
       const scope = this.openScope(null, body, [], false);
       this.hoistBody(scope, body, [], false, {});
-      return this.visitBody(body, bm, scope, []);
+      const saved = this.openBodyFence([body], scope, x);
+      this.visitBody(body, bm, scope, []);
+      this.closeBodyFence(saved);
+      return;
     }
     if (member) return this.visitSingleEffect(x, body, bm, null);
     // effectValue's single expression: checked as its own scope, no
@@ -1487,11 +1517,13 @@ class Analysis {
     scope.hparams = [];
     scope.capKey = body;
     this.addHoist(scope);
+    const saved = this.openBodyFence([body], scope, x);
     this.inHoist(scope, () => {
       this.curTop = body;
       this.visit(body, bm | HOIST | PLAN, null, scope);
     });
     this.endScope(scope);
+    this.closeBodyFence(saved);
   }
 
   // A component effect with one statement: no frame and no check, but
@@ -1506,10 +1538,12 @@ class Analysis {
     this.scopes.push(scope);
     this.addHoist(scope);
     if (block !== null) this.visitWord('block', bm);
+    const saved = this.openBodyFence([block ?? single], scope, x);
     this.inHoist(scope, () => {
       this.curTop = single;
       this.visit(single, bm | HOIST | PLAN, null, null);
     });
+    this.closeBodyFence(saved);
   }
 
   visitReadonly(x, m, cs, rs) {
@@ -2146,7 +2180,14 @@ class Analysis {
     else this.renderAt(body, sink);
     const c = Analysis.childMode(m, 'render');
     this.visitWord('render', c & ~RN);
+    // A render local or loop variable named `it` anywhere in the render
+    // answers every bare `it` in it (renderChild marks the fence).
+    const saved = this.openBodyFence([body], null, x, true);
+    const outerRender = this.renderFence;
+    this.renderFence = this.itFence;
     this.visit(x[2], (c & ~RN) | ((m & RN) ? RN_RENDER : 0), cs, rs);
+    this.renderFence = outerRender;
+    this.closeBodyFence(saved);
   }
 
   // ── render emission ────────────────────────────────────────────────
@@ -2174,7 +2215,10 @@ class Analysis {
     const hv = headOf(x);
     const branch = () => ({ locals: new Set(), loops: sink.loops });
     if (RENDER_BINDING_HEADS.has(hv) && x.length === 4 && isIdentifierName(wordOf(x[2]))) {
-      if (hv === '=') sink.locals.add(wordOf(x[2]));
+      if (hv === '=') {
+        sink.locals.add(wordOf(x[2]));
+        if (wordOf(x[2]) === 'it' && this.renderFence !== null) this.renderFence.itBound = true;
+      }
       return;
     }
     if (hv === 'if') {
@@ -2193,6 +2237,7 @@ class Analysis {
     if (hv === 'for-in' && !isNone(x[6])) {
       const loops = [...sink.loops];
       for (const v of x[2]) { const w = wordOf(v); if (w !== undefined) loops.push(w); }
+      if (loops.includes('it') && this.renderFence !== null) this.renderFence.itBound = true;
       this.renderBlock(x[6], { locals: new Set(), loops });
       return;
     }
@@ -2306,12 +2351,12 @@ class Analysis {
 
   // A schema callable body: its own delivery tree, and (when it is a
   // callable rather than the adapter value) its own scope with the
-  // body parameters as plain names. A callable that takes parameters
-  // checks its bare `it` reads, as a function does.
+  // body parameters as plain names. A callable checks its bare `it`
+  // reads, as a def does.
   visitSchemaBody(stmts, names, value, tokens) {
     this.beginTree(names, stmts);
     const scope = value ? null : this.openScope(null, stmts, names);
-    if (scope !== null && names.length > 0 && this.preempted === 0) {
+    if (scope !== null && this.preempted === 0) {
       this.itFence = { fn: null, stmts, span: islandSpan(tokens), params: names, scope, env: this.env, sub: true, rsink: this.rsink, hit: null, inParams: false, hitParam: false };
     }
     this.visitWord('program', RN_EXPR);
@@ -2546,10 +2591,16 @@ class Analysis {
   // answer it only through a parameter named `it`.
   settleIt(fence) {
     const scope = fence.scope;
-    const outer = scope.env ?? fence.env;
-    if (fence.hitParam
-      ? this.paramsNameIt(fence.params) || this.declaresIt(outer, fence.sub, fence.rsink)
-      : this.declaresIt({ scope, next: outer }, fence.sub, fence.rsink)) return;
+    if (fence.render) {
+      if (fence.itBound || this.declaresIt(fence.env, fence.sub, null)) return;
+    } else if (scope === null) {
+      if (this.declaresIt(fence.env, fence.sub, fence.rsink)) return;
+    } else {
+      const outer = scope.env ?? fence.env;
+      if (fence.hitParam
+        ? this.paramsNameIt(fence.params) || this.declaresIt(outer, fence.sub, fence.rsink)
+        : this.declaresIt({ scope, next: outer }, fence.sub, fence.rsink)) return;
+    }
     let anchor = null;
     const find = (x, at) => {
       if (x === fence.hit) { anchor = at; return true; }
@@ -2562,13 +2613,19 @@ class Analysis {
       return false;
     };
     const fn = fence.fn;
-    if (fn === null) { for (const s of fence.stmts) if (find(s, null)) break; }
+    if (fn === null) { for (const s of fence.stmts) if (find(s, fence.root ?? null)) break; }
     else if (fn[0] === 'def') { if (!find(fn[3], fn)) find(fn[4], fn); }
     else if (!find(fn[2], fn)) find(fn[3], fn);
     const span = (anchor === null ? null : bareItSpan(this.stores, this.source, this.idOf(anchor))) ?? fence.span ?? null;
     const err = new Error(UNBOUND_IT);
     if (span !== null) { err.start = span[0]; err.end = span[1]; }
-    scope.itErr = err;
+    if (scope !== null) { scope.itErr = err; return; }
+    // A body emitted inline rejects where it emits: after the scopes
+    // opened before it.
+    const points = this.pointErrs;
+    let i = points.length;
+    while (i > 0 && points[i - 1].at > fence.at) i--;
+    points.splice(i, 0, { at: fence.at, err });
   }
 
   // Does a parameter name `it`? (A pattern the parameter walk rejects

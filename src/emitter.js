@@ -9640,11 +9640,13 @@ class Emitter {
       const { entries, names } = this.scopedHoist(value.slice(1), []);
       for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
       this.scopes.push(names);
+      this.rejectUnboundIt([], value, null, null, node);
       this.funcBlock(node, value, stmts, ind, entries);
       this.scopes.pop();
       this.rframes.pop();
       return;
     }
+    this.rejectUnboundIt([], value, null, null, node);
     const wrap = Emitter.needsGrouping(value, 'operand') || this.isObject(value);
     if (wrap) this.b.emit('(');
     this.expr(value);
@@ -9840,6 +9842,7 @@ class Emitter {
         const { entries, names } = this.scopedHoist(body.slice(1), []);
         for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
         this.scopes.push(names);
+        this.rejectUnboundIt([], body, null, null, node);
         this.funcBlock(node, body, stmts, ind, entries, false, true);
         this.scopes.pop();
         this.rframes.pop();
@@ -9856,6 +9859,7 @@ class Emitter {
     this.checkScopeRedeclarations([body], [], node);
     this.scopes.push(names);
     this.rframes.push({ reactive: new Set(), bound: names });
+    this.rejectUnboundIt([], body, null, null, node);
     this.b.emit('{ ');
     if (entries.length) {
       this.hoistLine(entries);
@@ -10979,9 +10983,10 @@ class Emitter {
             if (this.isBlock(bodyNode) && bodyNode.length > 2) {
               this.mark(eff, 'value', () => this.withExpression(() => {
                 const bodyStmts = this.liveStmts(bodyNode.slice(1), { forwards: true });
-                const { entries, names } = this.scopedHoist(bodyStmts, []);
+                const { entries, names } = this.scopedHoist(bodyNode.slice(1), []);
                 for (const n of this.pushReactiveFrame(bodyStmts, names)) names.add(n);
                 this.scopes.push(names);
+                this.rejectUnboundIt([], bodyNode, null, null, eff);
                 this.funcBlock(eff, bodyNode, bodyStmts, ind + 2, entries, false, true);
                 this.scopes.pop();
                 this.rframes.pop();
@@ -10991,6 +10996,7 @@ class Emitter {
               const { entries, names } = this.scopedHoist([single], []);
               this.scopes.push(names);
               this.rframes.push({ reactive: new Set(), bound: names });
+              this.rejectUnboundIt([], bodyNode, null, null, eff);
               this.b.emit('{ ');
               if (entries.length) {
                 this.hoistLine(entries);
@@ -11226,6 +11232,8 @@ class Emitter {
       records: [], sink: classRecord, classRecord,
       transitionSlot: null, suppressedPairs: new Set(),
       slotSeen: false, scopeDepth: this.scopes.length,
+      // The function arguments the walk inlines as children blocks.
+      childFuncs: new Set(),
     };
     // ── Phase 1: the walk (collection only — no emission) ──
     const body = renderNode[1];
@@ -11239,6 +11247,7 @@ class Emitter {
       this.rframes.pop();
     }
     this.closeRenderScope(classRecord);
+    this.rejectRenderIt(renderNode);
     // ── Phase 2: replay through the builder ──
     this.b.emit(pad);
     if (this.ts) this.b.tsOnly(() => this.b.emit('private '));
@@ -11262,6 +11271,19 @@ class Emitter {
     }
     for (const rec of this.rstate.records) this.emitFactory(rec, ind, renderNode);
     this.rstate = prev;
+  }
+
+  // A render body binds no implicit `it`: a bare `it` in it reads a
+  // binding the component's scopes declare, or a render local or loop
+  // variable named `it` anywhere in the render answers it. Checked after
+  // the walk, which settles every factory's locals and loop variables
+  // and which function arguments are inlined children blocks.
+  rejectRenderIt(renderNode) {
+    const R = this.rstate;
+    for (const rec of [R.classRecord, ...R.records]) {
+      if (rec.locals.has('it') || rec.bindings.has('it')) return;
+    }
+    this.rejectUnboundIt([], renderNode[1], null, R.childFuncs, renderNode);
   }
 
   // The render-root walk: the renderable counting — binding
@@ -11797,6 +11819,7 @@ class Emitter {
       }
     }
     if (headStr === '->' || headStr === '=>') {
+      this.rstate.childFuncs.add(sexpr);
       return this.renderChildBlock(sexpr[2]);
     }
     // General expression → text (static or live).
@@ -12160,6 +12183,7 @@ class Emitter {
             '(an indented `.method (v) -> …` continuation re-reads as a NEW element inside render; put the chain on one ' +
             'line or bind it in a method)', this.rstate.node);
         }
+        this.rstate.childFuncs.add(arg);
         const block = arg[2];
         if (this.isBlock(block)) {
           for (let j = 1; j < block.length; j++) {
@@ -12822,6 +12846,7 @@ class Emitter {
         }
         // The injected children arrow: objects are props, bare words
         // follow the scope rule, everything else is child DOM.
+        this.rstate.childFuncs.add(arg);
         const block = arg[2];
         const stmts = this.isBlock(block) ? block.slice(1) : block != null ? [block] : [];
         for (const child of stmts) {
@@ -17687,17 +17712,21 @@ class Emitter {
     try { return this.emitFunc(node); } finally { this._narrowedReads = prev; }
   }
 
-  // A function that takes parameters binds no implicit `it`: a bare `it`
-  // in its parameters or its body reads a binding some scope declares,
-  // or rejects at the first one that has none. Called with the
-  // function's own scope pushed. A parameter default runs before the
-  // body, so the body's own declarations answer only the body; a
-  // parameter named `it` answers both. The walk is containsBareIt's,
-  // with the bindings a loop, a comprehension, a counted loop and a
-  // catch handler make inside the function. `fallback` is the span an
-  // `it` with no node above it rejects at (a schema callable's site).
-  rejectUnboundIt(params, block, fallback = null) {
-    if (params.length === 0) return;
+  // Only a parameterless function value binds an implicit `it`: in a
+  // def, a method, a schema callable, an effect, a computed, a render
+  // body or a function that takes parameters, a bare `it` in the
+  // parameters or the body reads a binding some scope declares, or
+  // rejects at the first one that has none. Called with the body's own
+  // scope pushed. A parameter default runs before the body, so the
+  // body's own declarations answer only the body; a parameter named `it`
+  // answers both. The walk is containsBareIt's, with the bindings a
+  // loop, a comprehension, a counted loop and a catch handler make
+  // inside the body; it enters the functions in `inline` (a render's
+  // children blocks, which the render inlines). `root` is the node a
+  // body with no node of its own above an `it` anchors at (an effect's
+  // or computed's declaration); `fallback` the span an `it` with no node
+  // above it rejects at (a schema callable's site).
+  rejectUnboundIt(params, block, fallback = null, inline = null, root = null) {
     const inBody = this.declaresIt();
     let inParams = inBody;
     if (inBody && !this.paramsNameIt(params)) inParams = this.declaresIt(this.rframes.length - 2);
@@ -17722,6 +17751,7 @@ class Emitter {
       if (this.stores.idOf(n) !== null) anchor = n;
       if (isHeadless(n)) { for (const el of n) walk(el, anchor, bound); return; }
       const head = n[0];
+      if ((head === '->' || head === '=>') && inline !== null && inline.has(n)) { walk(n[2], anchor, bound); return; }
       if (head === '->' || head === '=>' || isDefHead(head)) return;
       if ((head === '.' || head === '?.') && n.length === 3) {
         walk(n[1], anchor, bound);
@@ -17775,7 +17805,7 @@ class Emitter {
       for (const el of n) walk(el, anchor, inner);
     };
     if (!inParams) for (const p of params) walk(p, params, false);
-    if (!inBody) walk(block, null, false);
+    if (!inBody) walk(block, root, false);
     if (found === undefined) return;
     const id = found === null ? null : this.stores.idOf(found);
     const span = (id !== null ? bareItSpan(this.stores, this.b.source ?? this.parentSource, id) : null) ?? fallback;
@@ -17831,7 +17861,7 @@ class Emitter {
     // is the function's own declared binding. Any declaring form of `it`
     // beside the implicit parameter is a redeclaration and rejects.
     if (bareIt && !paramTargets.includes('it')) this.implicitItScopes.add(this.rframes[this.rframes.length - 1].bound);
-    this.rejectUnboundIt(rawParams, block);
+    if (rawParams.length !== 0) this.rejectUnboundIt(rawParams, block);
     const isAsync = this.containsAwait(block);
     const isGen = Emitter.containsYield(block);
     // Fat arrows cannot be generators: JS has no generator-arrow

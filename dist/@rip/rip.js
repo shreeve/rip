@@ -7041,10 +7041,46 @@ var typedDeclEq = (tokens, i) => {
   }
   return -1;
 };
+var patternBindingTokens = (tokens, open, close, bind) => {
+  const levels = [false];
+  for (let k = open + 1;k < close; k++) {
+    if (counter.on)
+      counter.n++;
+    const kd = tokens[k].kind;
+    if (RUN_OPENERS.has(kd)) {
+      if (!levels[levels.length - 1] && (kd === "[" || kd === "{")) {
+        levels.push(false);
+        continue;
+      }
+      for (let depth = 1;depth > 0 && k + 1 < close; ) {
+        k++;
+        if (RUN_OPENERS.has(tokens[k].kind))
+          depth++;
+        else if (RUN_CLOSERS.has(tokens[k].kind))
+          depth--;
+      }
+    } else if (RUN_CLOSERS.has(kd))
+      levels.pop();
+    else if (kd === ",")
+      levels[levels.length - 1] = false;
+    else if (kd === "=")
+      levels[levels.length - 1] = true;
+    else if (kd === "IDENTIFIER" && !levels[levels.length - 1])
+      bind(k);
+  }
+};
 var buildAssignIndex = (tokens) => {
   const blockMaps = [new Map];
   const blockIdAt = new Array(tokens.length);
   const stack = [{ id: 0, up: null, floor: 0 }];
+  const register = (j) => {
+    for (let f = stack[stack.length - 1];f; f = f.up) {
+      if (counter.on)
+        counter.n++;
+      blockMaps[f.id].set(tokens[j].value, j);
+    }
+  };
+  const opens = [];
   let bracket = 0;
   for (let j = 0;j < tokens.length; j++) {
     if (counter.on)
@@ -7062,15 +7098,16 @@ var buildAssignIndex = (tokens) => {
       if (stack.length > 1)
         stack.pop();
     } else if (RUN_OPENERS.has(kd)) {
+      opens.push(j);
       bracket++;
     } else if (RUN_CLOSERS.has(kd)) {
+      const open = opens.pop();
       bracket--;
-    } else if (bracket === stack[stack.length - 1].floor && (kd === "IDENTIFIER" || kd === "PROPERTY") && tokens[j + 1]?.kind === "=") {
-      for (let f = stack[stack.length - 1];f; f = f.up) {
-        if (counter.on)
-          counter.n++;
-        blockMaps[f.id].set(tokens[j].value, j);
+      if (bracket === stack[stack.length - 1].floor && tokens[j + 1]?.kind === "=" && open !== undefined && (tokens[open].kind === "[" || tokens[open].kind === "{")) {
+        patternBindingTokens(tokens, open, j, register);
       }
+    } else if (bracket === stack[stack.length - 1].floor && (kd === "IDENTIFIER" || kd === "PROPERTY") && tokens[j + 1]?.kind === "=") {
+      register(j);
     }
   }
   return { blockMaps, blockIdAt };
@@ -11463,7 +11500,7 @@ var locateRuntimes = (base) => RUNTIMES.map((rt) => ({ ...rt, url: new URL(rt.mo
 // src/emit/names.js
 var LITERAL_WORDS2 = new Set(["true", "false", "null", "undefined", "NaN", "Infinity"]);
 var COMPONENT_HOOKS = new Set(["beforeMount", "mounted", "beforeUnmount", "unmounted", "onError", "load"]);
-var UNBOUND_IT = "emitter: bare `it` has no binding here — a function that takes parameters binds no implicit `it` " + "(only a parameterless one does); name a parameter `it`, or read the parameter by its own name";
+var UNBOUND_IT = "emitter: bare `it` has no binding here — only a parameterless function value binds an implicit `it` " + "(a def, a method, an effect, a computed, a render body and a function that takes parameters bind none); " + "name a parameter `it`, or read the value by its own name";
 function bareItSpan(stores, source, nodeId) {
   let hit = null;
   for (const r of stores.rolesOf(nodeId)) {
@@ -12492,6 +12529,44 @@ class Emitter {
         }
       }
     };
+    const blockUnit = (n) => {
+      const start = forms.length;
+      let names = null;
+      const stmt = (st) => {
+        if (isNode2(st) && typeof st[1] === "string" && (isDefHead(st[0]) && st.length === 4 || st[0] === "class")) {
+          for (let i = start;i < forms.length; i++) {
+            const f = forms[i];
+            if (!f.auth && !f.blockBound && f.name === st[1])
+              reject({ name: st[1], node: st }, f);
+          }
+          (names ??= new Set).add(st[1]);
+        }
+        walk(st, true);
+      };
+      const body = (b) => {
+        if (this.isBlock(b))
+          for (const st of b.slice(1))
+            stmt(st);
+        else
+          stmt(b);
+      };
+      if (n[0] === "block")
+        body(n);
+      else {
+        walk(n[1], true);
+        for (const w of n[2] ?? []) {
+          walk(w[1], true);
+          body(w[2]);
+        }
+        if (n[3] != null)
+          body(n[3]);
+      }
+      if (names !== null) {
+        for (let i = start;i < forms.length; i++)
+          if (!forms[i].auth && names.has(forms[i].name))
+            forms[i].blockBound = true;
+      }
+    };
     const walk = (n, nested) => {
       if (!isNode2(n))
         return;
@@ -12507,6 +12582,10 @@ class Emitter {
       }
       if (isFunc(n))
         return;
+      if (n[0] === "block" || n[0] === "switch") {
+        blockUnit(n);
+        return;
+      }
       if (isDefHead(n[0])) {
         if (!nested && n.length === 4 && typeof n[1] === "string")
           auth(n[1], "def", n);
@@ -14541,6 +14620,7 @@ class Emitter {
       if (!targets.has(name))
         targets.set(name, node);
     };
+    const caught = new Map;
     const matchScan = (n) => {
       if (this.scopeBoundary(n) === "skip")
         return;
@@ -14639,11 +14719,14 @@ class Emitter {
         updated.add(n[1]);
       if (ASSIGNS.has(n[0]) && n.length === 3) {
         if (typeof n[1] === "string") {
-          add(n[1], n);
-          noteAnnotation(n[1], n);
+          if (!caught.has(n[1])) {
+            add(n[1], n);
+            noteAnnotation(n[1], n);
+          }
         } else if (n[0] === "=" && Emitter.isPattern(n[1])) {
           for (const name of this.patternNames(n[1]))
-            add(name, n);
+            if (!caught.has(name))
+              add(name, n);
         }
       }
       if (n[0] === "try") {
@@ -14652,6 +14735,19 @@ class Emitter {
             for (const name of this.patternNames(part[1]))
               add(name, n);
           }
+        }
+      }
+      if (isCatchClause(n)) {
+        const name = Emitter.isTypedWrapper(n[1]) ? n[1][1] : n[1];
+        if (typeof name === "string") {
+          walk(n[1]);
+          caught.set(name, (caught.get(name) ?? 0) + 1);
+          walk(n[2]);
+          if (caught.get(name) === 1)
+            caught.delete(name);
+          else
+            caught.set(name, caught.get(name) - 1);
+          return;
         }
       }
       for (const el of n)
@@ -14704,12 +14800,13 @@ class Emitter {
   captureScan(stmts) {
     const top = new Set(stmts.filter(isNode2));
     const facts = new Map;
+    const forwards = new Map;
     const occur = (name, inFn, write = false, declStmt = null, writeNode = null, writePath = "") => {
       if (typeof name !== "string" || !isIdentifierName(name))
         return;
       let f = facts.get(name);
       if (f === undefined)
-        facts.set(name, f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: null, firstWrite: null, firstWritePath: "" });
+        facts.set(name, f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: forwards.get(name) ?? null, firstWrite: null, firstWritePath: "" });
       if (!f.seen) {
         f.seen = true;
         f.decl = declStmt;
@@ -14777,7 +14874,10 @@ class Emitter {
       if (Emitter.isTypedWrapper(n)) {
         if (typeof n[1] === "string") {
           const af = facts.get(n[1]);
-          if (af !== undefined && af.annotated === null)
+          if (af === undefined) {
+            if (!forwards.has(n[1]))
+              forwards.set(n[1], n);
+          } else if (af.annotated === null)
             af.annotated = n;
         }
         return;
@@ -18658,15 +18758,17 @@ ${pad}${into}.push(...${tmp});`);
   computedBody(node, value, ind) {
     if (this.isBlock(value) && value.length > 2) {
       const stmts = this.liveStmts(value.slice(1), { forwards: true });
-      const { entries, names } = this.scopedHoist(stmts, []);
+      const { entries, names } = this.scopedHoist(value.slice(1), []);
       for (const n of this.pushReactiveFrame(stmts, names))
         names.add(n);
       this.scopes.push(names);
+      this.rejectUnboundIt([], value, null, null, node);
       this.funcBlock(node, value, stmts, ind, entries);
       this.scopes.pop();
       this.rframes.pop();
       return;
     }
+    this.rejectUnboundIt([], value, null, null, node);
     const wrap = Emitter.needsGrouping(value, "operand") || this.isObject(value);
     if (wrap)
       this.b.emit("(");
@@ -18788,10 +18890,11 @@ ${pad}${into}.push(...${tmp});`);
     if (this.isBlock(body)) {
       this.mark(node, "value", () => this.withExpression(() => {
         const stmts = this.liveStmts(body.slice(1), { forwards: true });
-        const { entries, names } = this.scopedHoist(stmts, []);
+        const { entries, names } = this.scopedHoist(body.slice(1), []);
         for (const n of this.pushReactiveFrame(stmts, names))
           names.add(n);
         this.scopes.push(names);
+        this.rejectUnboundIt([], body, null, null, node);
         this.funcBlock(node, body, stmts, ind, entries, false, true);
         this.scopes.pop();
         this.rframes.pop();
@@ -18803,6 +18906,7 @@ ${pad}${into}.push(...${tmp});`);
     this.checkScopeRedeclarations([body], [], node);
     this.scopes.push(names);
     this.rframes.push({ reactive: new Set, bound: names });
+    this.rejectUnboundIt([], body, null, null, node);
     this.b.emit("{ ");
     if (entries.length) {
       this.hoistLine(entries);
@@ -19677,10 +19781,11 @@ ${pad}${into}.push(...${tmp});`);
             if (this.isBlock(bodyNode) && bodyNode.length > 2) {
               this.mark(eff, "value", () => this.withExpression(() => {
                 const bodyStmts = this.liveStmts(bodyNode.slice(1), { forwards: true });
-                const { entries, names } = this.scopedHoist(bodyStmts, []);
+                const { entries, names } = this.scopedHoist(bodyNode.slice(1), []);
                 for (const n of this.pushReactiveFrame(bodyStmts, names))
                   names.add(n);
                 this.scopes.push(names);
+                this.rejectUnboundIt([], bodyNode, null, null, eff);
                 this.funcBlock(eff, bodyNode, bodyStmts, ind + 2, entries, false, true);
                 this.scopes.pop();
                 this.rframes.pop();
@@ -19690,6 +19795,7 @@ ${pad}${into}.push(...${tmp});`);
               const { entries, names } = this.scopedHoist([single], []);
               this.scopes.push(names);
               this.rframes.push({ reactive: new Set, bound: names });
+              this.rejectUnboundIt([], bodyNode, null, null, eff);
               this.b.emit("{ ");
               if (entries.length) {
                 this.hoistLine(entries);
@@ -19892,7 +19998,8 @@ ${pad}${into}.push(...${tmp});`);
       transitionSlot: null,
       suppressedPairs: new Set,
       slotSeen: false,
-      scopeDepth: this.scopes.length
+      scopeDepth: this.scopes.length,
+      childFuncs: new Set
     };
     const body = renderNode[1];
     const stmts = this.isBlock(body) ? body.slice(1) : [body];
@@ -19905,6 +20012,7 @@ ${pad}${into}.push(...${tmp});`);
       this.rframes.pop();
     }
     this.closeRenderScope(classRecord);
+    this.rejectRenderIt(renderNode);
     this.b.emit(pad);
     if (this.ts)
       this.b.tsOnly(() => this.b.emit("private "));
@@ -19936,6 +20044,14 @@ ${pad}${into}.push(...${tmp});`);
     for (const rec of this.rstate.records)
       this.emitFactory(rec, ind, renderNode);
     this.rstate = prev;
+  }
+  rejectRenderIt(renderNode) {
+    const R = this.rstate;
+    for (const rec of [R.classRecord, ...R.records]) {
+      if (rec.locals.has("it") || rec.bindings.has("it"))
+        return;
+    }
+    this.rejectUnboundIt([], renderNode[1], null, R.childFuncs, renderNode);
   }
   walkRenderRoot(stmts, record) {
     if (stmts.length === 0 || stmts.length === 1 && stmts[0] === "null") {
@@ -20336,6 +20452,7 @@ ${pad}${into}.push(...${tmp});`);
       }
     }
     if (headStr === "->" || headStr === "=>") {
+      this.rstate.childFuncs.add(sexpr);
       return this.renderChildBlock(sexpr[2]);
     }
     return this.renderTextExpr(sexpr);
@@ -20638,6 +20755,7 @@ ${pad}${into}.push(...${tmp});`);
         if (isNode2(arg[1]) && arg[1].length > 0) {
           throw this.positionedError(arg, "emitter: a parameterized function is not a render child — element children arrows carry no parameters " + "(an indented `.method (v) -> …` continuation re-reads as a NEW element inside render; put the chain on one " + "line or bind it in a method)", this.rstate.node);
         }
+        this.rstate.childFuncs.add(arg);
         const block = arg[2];
         if (this.isBlock(block)) {
           for (let j = 1;j < block.length; j++) {
@@ -21068,6 +21186,7 @@ ${pad}${into}.push(...${tmp});`);
         if (isNode2(arg[1]) && arg[1].length > 0) {
           throw this.positionedError(arg, `emitter: a parameterized function is not a render child — the children of '${name}' arrive as a bare block ` + "(a callback the component should run is passed as a named prop)", this.rstate.node);
         }
+        this.rstate.childFuncs.add(arg);
         const block = arg[2];
         const stmts = this.isBlock(block) ? block.slice(1) : block != null ? [block] : [];
         for (const child of stmts) {
@@ -24819,9 +24938,7 @@ ${"  ".repeat(ind)}`);
       this._narrowedReads = prev;
     }
   }
-  rejectUnboundIt(params, block, fallback = null) {
-    if (params.length === 0)
-      return;
+  rejectUnboundIt(params, block, fallback = null, inline = null, root = null) {
     const inBody = this.declaresIt();
     let inParams = inBody;
     if (inBody && !this.paramsNameIt(params))
@@ -24859,6 +24976,10 @@ ${"  ".repeat(ind)}`);
         return;
       }
       const head = n[0];
+      if ((head === "->" || head === "=>") && inline !== null && inline.has(n)) {
+        walk(n[2], anchor, bound);
+        return;
+      }
       if (head === "->" || head === "=>" || isDefHead(head))
         return;
       if ((head === "." || head === "?.") && n.length === 3) {
@@ -24936,7 +25057,7 @@ ${"  ".repeat(ind)}`);
       for (const p of params)
         walk(p, params, false);
     if (!inBody)
-      walk(block, null, false);
+      walk(block, root, false);
     if (found === undefined)
       return;
     const id = found === null ? null : this.stores.idOf(found);
@@ -24975,13 +25096,14 @@ ${"  ".repeat(ind)}`);
     const ind = this.ind;
     const isVoid = this.voidFuncs.has(node);
     const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block], { forwards: true });
-    const { entries: hoist, names, paramTargets } = this.scopedHoist(stmts, params);
+    const { entries: hoist, names, paramTargets } = this.scopedHoist(this.isBlock(block) ? block.slice(1) : [block], params);
     for (const n of this.pushReactiveFrame(stmts, names, params, node))
       names.add(n);
     this.scopes.push(names);
     if (bareIt && !paramTargets.includes("it"))
       this.implicitItScopes.add(this.rframes[this.rframes.length - 1].bound);
-    this.rejectUnboundIt(rawParams, block);
+    if (rawParams.length !== 0)
+      this.rejectUnboundIt(rawParams, block);
     const isAsync = this.containsAwait(block);
     const isGen = Emitter.containsYield(block);
     if (isGen && kind === "=>") {
@@ -36128,7 +36250,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "b42aa24901ec7419";
+var compilerBuild = () => "7ec2aaf6e019157a";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
