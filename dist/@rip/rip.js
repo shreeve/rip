@@ -8207,16 +8207,44 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
   let lastNewlinePos = -1;
   let pendingSpaced = false;
   let pendingNewLine = false;
-  let seenFor = null;
+  const modes = [];
+  const openModes = { render: 0, "render-code": 0, type: 0, class: 0, component: 0, import: 0, export: 0, for: 0 };
+  const inMode = (kind) => openModes[kind] > 0;
+  const modeFrame = (kind) => {
+    if (openModes[kind] === 0)
+      return null;
+    for (let k = modes.length - 1;k >= 0; k--)
+      if (modes[k].kind === kind)
+        return modes[k];
+    return null;
+  };
+  const openMode = (kind) => {
+    const frame = { kind, depth: indents.length, parens: parens.length };
+    modes.push(frame);
+    openModes[kind]++;
+    return frame;
+  };
+  const closeMode = (k) => {
+    openModes[modes[k].kind]--;
+    modes.splice(k, 1);
+  };
+  const closeModeKind = (kind) => {
+    if (openModes[kind] === 0)
+      return;
+    for (let k = modes.length - 1;k >= 0; k--)
+      if (modes[k].kind === kind)
+        closeMode(k);
+  };
+  const closeBlocksBelow = () => {
+    for (let k = modes.length - 1;k >= 0; k--) {
+      const f = modes[k];
+      if ((f.kind === "render-code" || f.kind === "type" || f.kind === "class" || f.kind === "component") && indents.length < f.depth)
+        closeMode(k);
+    }
+  };
   const specifierStart = (prev) => prev?.kind === "{" || prev?.kind === "," || (prev?.kind === "INDENT" || prev?.kind === "TERMINATOR") && parens.length > 0;
   const reservedSpelling = (word) => Boolean(KEYWORDS[word] && word !== "own") || RESERVED_WORDS.has(word) || STATEMENTS.has(word) || Boolean(ALIASES[word]) || word === "in" || word === "of" || word === "when" || word === "import" || word === "export";
-  const foreignModuleName = (prev, afterWord) => seenImport && specifierStart(prev) && /^[^\S\n]+as[^\S\n]/.test(afterWord) || seenExport && prev?.kind === "AS";
-  let seenImport = false;
-  let seenExport = false;
-  let inRender = false;
-  let renderDepth = 0;
-  let renderCodeFloor = null;
-  let renderParenDepth = 0;
+  const foreignModuleName = (prev, afterWord) => inMode("import") && specifierStart(prev) && /^[^\S\n]+as[^\S\n]/.test(afterWord) || inMode("export") && prev?.kind === "AS";
   let nextId = 0;
   const pendingOrigin = [];
   const fail = (message, at, end = at) => {
@@ -8236,7 +8264,7 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
     }
   };
   const push = (kind, value, start, end, extra = {}) => {
-    if ((kind === "STRING" || kind === "STRING_START") && (seenImport || seenExport)) {
+    if ((kind === "STRING" || kind === "STRING_START") && (inMode("import") || inMode("export"))) {
       const prevTok = tokens[tokens.length - 1];
       if (prevTok?.kind === "IDENTIFIER" && prevTok.value === "from")
         prevTok.kind = "FROM";
@@ -8307,8 +8335,9 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
     const tag = String(root.value).split("#")[0];
     return TEMPLATE_TAGS.has(tag) || tag.includes("-");
   };
+  const renderCodeScope = () => inMode("render-code") || parens.length > modeFrame("render").parens;
   const selectorScope = () => {
-    if (renderCodeFloor !== null || parens.length > renderParenDepth)
+    if (renderCodeScope())
       return false;
     for (let k = tokens.length - 1;k >= 0; k--) {
       const kind = tokens[k].kind;
@@ -8360,7 +8389,7 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
     fail(`an id shorthand is a name starting with a letter — write \`id: '${written}'\``, start - 1);
   };
   const customElementEnd = (prev, at) => {
-    if (!inRender || text[at] !== "-" || !IDENT_START.test(text[at + 1] ?? "") || !customElementStart(prev))
+    if (!inMode("render") || text[at] !== "-" || !IDENT_START.test(text[at + 1] ?? "") || !customElementStart(prev))
       return null;
     let j = at;
     while (text[j] === "-" && IDENT_START.test(text[j + 1] ?? "")) {
@@ -8378,7 +8407,7 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
     return !(t.kind === "->" && before && (before.kind === "IDENTIFIER" || before.kind === "PROPERTY") && !before.generated);
   };
   const customElementStart = (prev) => {
-    if (renderCodeFloor !== null || parens.length > renderParenDepth)
+    if (renderCodeScope())
       return false;
     for (let k = tokens.length - 1;k >= 0; k--) {
       const kind = tokens[k].kind;
@@ -8411,52 +8440,24 @@ function tokenize(text, path = "<anonymous>", { tolerant = false } = {}) {
     const tag = String(root.value).split("#")[0];
     return TEMPLATE_TAGS.has(tag) || tag.includes("-");
   };
-  const insideComponentBody = () => {
-    let depth = 0;
-    let min = 0;
-    for (let i = tokens.length - 1;i >= 0; i--) {
-      const k = tokens[i].kind;
-      if (k === "OUTDENT") {
-        depth++;
-      } else if (k === "INDENT") {
-        depth--;
-        if (depth < min) {
-          min = depth;
-          for (let j = i - 1;j >= 0; j--) {
-            const h = tokens[j].kind;
-            if (h === "TERMINATOR" || h === "INDENT" || h === "OUTDENT")
-              break;
-            if (h === "COMPONENT")
-              return true;
-          }
-        }
-      }
+  const openBodyModes = () => {
+    let cls = false, cmp = false;
+    for (let j = tokens.length - 1;j >= 0; j--) {
+      const h = tokens[j].kind;
+      if (h === "TERMINATOR" || h === "INDENT" || h === "OUTDENT")
+        break;
+      if (h === "CLASS")
+        cls = true;
+      else if (h === "COMPONENT")
+        cmp = true;
     }
-    return false;
+    if (cls)
+      openMode("class");
+    if (cmp)
+      openMode("component");
   };
-  const insideClassBody = () => {
-    let depth = 0;
-    for (let i = tokens.length - 1;i >= 0; i--) {
-      const k = tokens[i].kind;
-      if (k === "OUTDENT") {
-        depth++;
-      } else if (k === "INDENT") {
-        if (depth > 0) {
-          depth--;
-          continue;
-        }
-        for (let j = i - 1;j >= 0; j--) {
-          const h = tokens[j].kind;
-          if (h === "TERMINATOR" || h === "INDENT" || h === "OUTDENT")
-            return false;
-          if (h === "CLASS")
-            return true;
-        }
-        return false;
-      }
-    }
-    return false;
-  };
+  const insideComponentBody = () => inMode("component");
+  const insideClassBody = () => modeFrame("class")?.depth === indents.length;
   const inPickKeyPos = () => {
     const frame = parens[parens.length - 1];
     if (!frame?.pickKeys)
@@ -8682,9 +8683,11 @@ ${baseline}`).join(`
   const openBracket = (kind, at, extra = {}) => {
     parens.push({ kind, at, depth: indents.length, ...extra });
   };
-  let typeBodyFloor = null;
   const typeGenericMemo = { upTo: 0, ref: null, level: 0, answers: new Map };
-  const insideTypeBody = () => typeBodyFloor !== null && indents.length >= typeBodyFloor;
+  const insideTypeBody = () => {
+    const frame = modeFrame("type");
+    return frame !== null && indents.length >= frame.depth;
+  };
   const aliasHeadOpen = () => {
     for (let j = tokens.length - 1;j >= 0; j--) {
       const kd = tokens[j].kind;
@@ -8694,10 +8697,6 @@ ${baseline}`).join(`
         return typeAliasEq(tokens, j);
     }
     return false;
-  };
-  const clearTypeBodyBelowFloor = () => {
-    if (typeBodyFloor !== null && indents.length < typeBodyFloor)
-      typeBodyFloor = null;
   };
   const typeBodyHead = () => {
     const n = tokens.length;
@@ -8799,11 +8798,9 @@ ${baseline}`).join(`
     const blockEnd = lastRealEnd();
     while (indents.length > frame.depth) {
       indents.pop();
-      if (renderCodeFloor !== null && indents.length < renderCodeFloor)
-        renderCodeFloor = null;
       synth("OUTDENT", blockEnd);
     }
-    clearTypeBodyBelowFloor();
+    closeBlocksBelow();
     return frame;
   };
   const dedentTo = (prefix, lineStart, hint = "") => {
@@ -8814,11 +8811,9 @@ ${baseline}`).join(`
         fail(`dedent to ${JSON.stringify(prefix)} crosses the enclosing bracket's ` + `indentation floor ${JSON.stringify(indents[indents.length - 1])}`, lineStart);
       }
       indents.pop();
-      if (renderCodeFloor !== null && indents.length < renderCodeFloor)
-        renderCodeFloor = null;
       synth("OUTDENT", blockEnd);
     }
-    clearTypeBodyBelowFloor();
+    closeBlocksBelow();
     if (indents[indents.length - 1] !== prefix) {
       fail(`inconsistent indentation: ${JSON.stringify(prefix)} neither extends the ` + `enclosing block's ${JSON.stringify(indents[indents.length - 1])} nor matches any open block${hint}`, lineStart);
     }
@@ -8841,7 +8836,7 @@ ${baseline}`).join(`
         pos += nlLen;
         continue;
       }
-      const renderIdLine = inRender && text[pos] === "#" && IDENT_START.test(text[pos + 1] ?? "") && prefix.length > (indents[renderDepth - 1] ?? "").length;
+      const renderIdLine = inMode("render") && text[pos] === "#" && IDENT_START.test(text[pos + 1] ?? "") && prefix.length > (indents[modeFrame("render").depth - 1] ?? "").length;
       if (text[pos] === "#" && !renderIdLine) {
         let end = pos;
         if (text.startsWith("###", pos) && text[pos + 3] !== "#") {
@@ -8876,7 +8871,7 @@ ${baseline}`).join(`
           return false;
         if (parens.length > 0)
           return false;
-        if (inRender) {
+        if (inMode("render")) {
           const before = tokens[tokens.length - 2];
           return !before || before.kind === "INDENT" || before.kind === "OUTDENT" || before.kind === "TERMINATOR" || before.kind === "RENDER";
         }
@@ -8894,7 +8889,7 @@ ${baseline}`).join(`
       const prevUnfinished = prev != null && UNFINISHED.has(prev.kind) && !closesTypeGeneric(tokens, insideTypeBody(), typeGenericMemo) && !danglingDot();
       const commaCont = text[pos] === ",";
       const dotAt = text[pos] === "?" && text[pos + 1] === "." ? pos + 1 : text[pos] === "." ? pos : -1;
-      const dotCont = dotAt >= 0 && text[dotAt + 1] !== "." && !DIGIT.test(text[dotAt + 1] ?? "") && !inRender;
+      const dotCont = dotAt >= 0 && text[dotAt + 1] !== "." && !DIGIT.test(text[dotAt + 1] ?? "") && !inMode("render");
       if (commaCont && !prevUnfinished && prefix.length < current.length) {
         dedentTo(prefix, lineStart, " — align the ',' with the statement it continues");
         atLineStart = false;
@@ -8907,32 +8902,35 @@ ${baseline}`).join(`
         continue;
       }
       if (prefix !== current && prefix.startsWith(current)) {
-        if (typeBodyFloor === null && typeBodyHead())
-          typeBodyFloor = indents.length + 1;
-        if (inRender && renderCodeFloor === null && codeArrowAt(tokens.length - 1))
-          renderCodeFloor = indents.length + 1;
+        const opensType = !inMode("type") && typeBodyHead();
+        const opensCode = inMode("render") && !inMode("render-code") && codeArrowAt(tokens.length - 1);
         indents.push(prefix);
+        if (opensType)
+          openMode("type");
+        if (opensCode)
+          openMode("render-code");
+        openBodyModes();
         synth("INDENT", pos);
       } else {
         if (prefix !== current)
           dedentTo(prefix, lineStart);
-        const continues = ["else", "catch", "finally"].some((w) => text.startsWith(w, pos) && !IDENT_PART.test(text[pos + w.length] ?? "") && !(inRender && text[pos + w.length] === "-" && IDENT_START.test(text[pos + w.length + 1] ?? "")));
+        const continues = ["else", "catch", "finally"].some((w) => text.startsWith(w, pos) && !IDENT_PART.test(text[pos + w.length] ?? "") && !(inMode("render") && text[pos + w.length] === "-" && IDENT_START.test(text[pos + w.length + 1] ?? "")));
         if (tokens.length > 0 && lastNewlinePos >= 0 && !continues && last()?.kind !== "TERMINATOR") {
           const nl = text[lastNewlinePos] === "\r" ? 2 : 1;
           push("TERMINATOR", text.slice(lastNewlinePos, lastNewlinePos + nl), lastNewlinePos, lastNewlinePos + nl, { generated: true });
         }
       }
-      if (inRender && indents.length <= renderDepth) {
-        inRender = false;
-        renderCodeFloor = null;
+      if (inMode("render") && indents.length <= modeFrame("render").depth) {
+        closeModeKind("render");
+        closeModeKind("render-code");
       }
       atLineStart = false;
       pendingNewLine = true;
-      if (seenFor !== null && parens.length <= seenFor)
-        seenFor = null;
+      if (inMode("for") && parens.length <= modeFrame("for").parens)
+        closeModeKind("for");
       if (parens.length === 0) {
-        seenImport = false;
-        seenExport = false;
+        closeModeKind("import");
+        closeModeKind("export");
       }
       continue;
     }
@@ -8960,7 +8958,7 @@ ${baseline}`).join(`
       while ((tokens[root]?.kind === "NUMBER" || root < tokens.length - 1 && tokens[root]?.kind === "PROPERTY") && isHyphen(tokens[root - 1]) && (tokens[root - 2]?.kind === "NUMBER" || tokens[root - 2]?.kind === "PROPERTY"))
         root -= 2;
       const digitClass = prev?.kind === "NUMBER" && /^[0-9]+$/.test(prev.value) && root < tokens.length - 1 && tokens[root]?.kind === "PROPERTY" && tokens[root - 1]?.kind === ".";
-      const glued = inRender && prev && (prev.kind === "IDENTIFIER" || prev.kind === "PROPERTY" || digitClass) && !pendingSpaced && !prev.generated && text[pos + 1] !== undefined && !/\s/.test(text[pos + 1]);
+      const glued = inMode("render") && prev && (prev.kind === "IDENTIFIER" || prev.kind === "PROPERTY" || digitClass) && !pendingSpaced && !prev.generated && text[pos + 1] !== undefined && !/\s/.test(text[pos + 1]);
       if (glued && selectorScope()) {
         if (!headSelectorAt(chainStartFrom(tokens.length - 1))) {
           const written = /^[^\s"'`,()]*/.exec(text.slice(pos + 1))[0];
@@ -8985,7 +8983,7 @@ ${baseline}`).join(`
         pos = end;
         continue;
       }
-      if (inRender && IDENT_START.test(text[pos + 1] ?? "") && prev && (prev.kind === "TERMINATOR" || prev.kind === "INDENT" || prev.kind === "OUTDENT" || prev.kind === "RENDER")) {
+      if (inMode("render") && IDENT_START.test(text[pos + 1] ?? "") && prev && (prev.kind === "TERMINATOR" || prev.kind === "INDENT" || prev.kind === "OUTDENT" || prev.kind === "RENDER")) {
         let end = pos + 2;
         while (end < text.length && (IDENT_PART.test(text[end]) || text[end] === "-" && IDENT_PART.test(text[end + 1] ?? "")))
           end++;
@@ -9026,7 +9024,7 @@ ${baseline}`).join(`
       const keysColon = (tightColon || spacedColon !== null && !symbolish) && !ternary.pending;
       if (prev && (prev.kind === "." || prev.kind === "?." || prev.kind === "@" && !pendingSpaced)) {
         let value = word;
-        if (inRender && prev.kind === "." && !keysColon && classSelectorChain()) {
+        if (inMode("render") && prev.kind === "." && !keysColon && classSelectorChain()) {
           while (text[pos] === "-" && IDENT_START.test(text[pos + 1] ?? "")) {
             let j = pos + 1;
             while (j < text.length && IDENT_PART.test(text[j]))
@@ -9043,7 +9041,7 @@ ${baseline}`).join(`
         push("IDENTIFIER", text.slice(start, pos), start, pos);
       } else if (word !== "default" && word !== "as" && foreignModuleName(prev, afterWord)) {
         push("IDENTIFIER", word, start, pos);
-      } else if (seenImport && word !== "default" && word !== "type" && reservedSpelling(word) && (specifierStart(prev) || prev?.kind === "AS" || prev?.kind === "IMPORT")) {
+      } else if (inMode("import") && word !== "default" && word !== "type" && reservedSpelling(word) && (specifierStart(prev) || prev?.kind === "AS" || prev?.kind === "IMPORT")) {
         fail(`'${word}' is a Rip keyword, so it cannot be the local name of an import — bind it under another name (\`import { ${word} as ${word}_ } from '…'\`)`, start, pos);
       } else if (word === "import") {
         if (text[pos] === "(" || text[pos] === "!" && text[pos + 1] === "(") {
@@ -9051,11 +9049,13 @@ ${baseline}`).join(`
         } else if (text[pos] === ".") {
           push("IMPORT_META", word, start, pos);
         } else {
-          seenImport = true;
+          if (!inMode("import"))
+            openMode("import");
           push("IMPORT", word, start, pos);
         }
       } else if (word === "export") {
-        seenExport = true;
+        if (!inMode("export"))
+          openMode("export");
         push("EXPORT", word, start, pos);
       } else if (word === "type" && prev?.kind === "IMPORT" && (() => {
         let at = pos;
@@ -9090,33 +9090,34 @@ ${baseline}`).join(`
           j++;
         return text.slice(at, j) !== "as";
       })()) {
-        const verb = seenImport ? "import" : "export";
-        fail(`a specifier takes no \`type\` keyword — type-only is the whole statement's: write \`${verb} type { … } from '…'\` for the type names, beside a plain ${verb} for the rest` + (seenImport ? "" : "; a local type exports at its own declaration"), start, pos);
-      } else if (word === "as" && seenFor !== null) {
+        const verb = inMode("import") ? "import" : "export";
+        fail(`a specifier takes no \`type\` keyword — type-only is the whole statement's: write \`${verb} type { … } from '…'\` for the type names, beside a plain ${verb} for the rest` + (inMode("import") ? "" : "; a local type exports at its own declaration"), start, pos);
+      } else if (word === "as" && inMode("for")) {
         if (text[pos] === "!") {
           pos++;
           push("FORASAWAIT", "as", start, pos);
         } else {
           push("FORAS", word, start, pos);
         }
-        seenFor = null;
-      } else if (word === "as" && (seenImport || seenExport) && (prev?.kind === "DEFAULT" || prev?.kind === "IMPORT_ALL" || prev?.kind === "EXPORT_ALL" || prev?.kind === "IDENTIFIER" && parens[parens.length - 1]?.specifiers === true)) {
+        closeModeKind("for");
+      } else if (word === "as" && (inMode("import") || inMode("export")) && (prev?.kind === "DEFAULT" || prev?.kind === "IMPORT_ALL" || prev?.kind === "EXPORT_ALL" || prev?.kind === "IDENTIFIER" && parens[parens.length - 1]?.specifiers === true)) {
         push("AS", word, start, pos);
-      } else if (word === "with" && seenImport && (prev?.kind === "STRING" || prev?.kind === "STRING_END")) {
+      } else if (word === "with" && inMode("import") && (prev?.kind === "STRING" || prev?.kind === "STRING_END")) {
         push("WITH", word, start, pos);
-      } else if (word === "default" && (seenImport || seenExport) && (prev?.kind === "EXPORT" || prev?.kind === "AS" || prev?.kind === "{" || prev?.kind === ",")) {
+      } else if (word === "default" && (inMode("import") || inMode("export")) && (prev?.kind === "EXPORT" || prev?.kind === "AS" || prev?.kind === "{" || prev?.kind === ",")) {
         push("DEFAULT", word, start, pos);
       } else if (word === "when") {
         push(pendingNewLine ? "LEADING_WHEN" : "WHEN", word, start, pos);
       } else if (word === "in" || word === "of") {
-        if (seenFor !== null) {
+        if (inMode("for")) {
           push(word === "in" ? "FORIN" : "FOROF", word, start, pos);
-          seenFor = null;
+          closeModeKind("for");
         } else {
           push("RELATION", word, start, pos);
         }
       } else if (word === "for") {
-        seenFor = parens.length;
+        closeModeKind("for");
+        openMode("for");
         push("FOR", word, start, pos);
       } else if (STATEMENTS.has(word)) {
         push("STATEMENT", word, start, pos);
@@ -9141,9 +9142,9 @@ ${baseline}`).join(`
       } else if (KEYWORDS[word]) {
         push(KEYWORDS[word], word, start, pos);
         if (KEYWORDS[word] === "RENDER") {
-          inRender = true;
-          renderDepth = indents.length;
-          renderParenDepth = parens.length;
+          const frame = modeFrame("render") ?? openMode("render");
+          frame.depth = indents.length;
+          frame.parens = parens.length;
         }
       } else if (word === "private" && insideClassBody() && (prev?.kind === "INDENT" || prev?.kind === "TERMINATOR" || prev?.kind === "OUTDENT")) {
         if (ACCESSOR_HEAD.test(afterWord)) {
@@ -9160,7 +9161,7 @@ ${baseline}`).join(`
       continue;
     }
     if (DIGIT.test(ch) || ch === "." && DIGIT.test(text[pos + 1] ?? "")) {
-      if (ch === "." && inRender && selectorScope() && !pendingSpaced) {
+      if (ch === "." && inMode("render") && selectorScope() && !pendingSpaced) {
         const before = last();
         const headTag = before?.kind === "IDENTIFIER" && !before.generated && headSelectorAt(tokens.length - 1);
         if (headTag || !before || SELECTOR_LINE_STARTS.has(before.kind))
@@ -9181,7 +9182,7 @@ ${baseline}`).join(`
     if (ch === '"' || ch === "'") {
       const prevTok = tokens[tokens.length - 1];
       if (prevTok && TAGGABLE.has(prevTok.kind) && prevTok.end === pos) {
-        if (inRender && (prevTok.kind === "IDENTIFIER" || prevTok.kind === "PROPERTY") && !prevTok.generated && selectorScope() && headSelectorAt(chainStartFrom(tokens.length - 1))) {
+        if (inMode("render") && (prevTok.kind === "IDENTIFIER" || prevTok.kind === "PROPERTY") && !prevTok.generated && selectorScope() && headSelectorAt(chainStartFrom(tokens.length - 1))) {
           fail("a space goes between an element's selector and its text", pos);
         }
         push("TEMPLATE_TAG", "$", pos, pos);
@@ -9328,7 +9329,7 @@ ${baseline}`).join(`
       continue;
     }
     if (ch === "*" || ch === "/" || ch === "%") {
-      if (ch === "*" && seenImport && (last()?.kind === "IMPORT" || last()?.kind === "IMPORT_TYPE" || last()?.kind === ","))
+      if (ch === "*" && inMode("import") && (last()?.kind === "IMPORT" || last()?.kind === "IMPORT_TYPE" || last()?.kind === ","))
         push("IMPORT_ALL", ch, pos, pos + 1);
       else if (ch === "*" && last()?.kind === "EXPORT")
         push("EXPORT_ALL", ch, pos, pos + 1);
@@ -9453,7 +9454,7 @@ ${baseline}`).join(`
         openBracket("object", pos, { pick: true, pickKeys: text[pos + 1] !== " " && text[pos + 1] !== "\t" });
         push(dot.kind === "?." ? "OPTPICK_START" : "PICK_START", "{", pos, pos + 1);
       } else {
-        const specifiers = dot != null && (dot.kind === "IMPORT" || dot.kind === "IMPORT_TYPE" || dot.kind === "EXPORT" || dot.kind === "EXPORT_TYPE" || seenImport && dot.kind === ",");
+        const specifiers = dot != null && (dot.kind === "IMPORT" || dot.kind === "IMPORT_TYPE" || dot.kind === "EXPORT" || dot.kind === "EXPORT_TYPE" || inMode("import") && dot.kind === ",");
         openBracket("object", pos, specifiers ? { specifiers: true } : {});
         push("{", "{", pos, pos + 1);
       }
@@ -14873,7 +14874,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
     return sub;
   }
   static schemaSubParse(bodyTokens, source) {
-    let toks = bodyTokens.slice();
+    let toks = bodyTokens.map((t) => ({ ...t }));
     if (toks.length === 0)
       return { stmts: [], stores: null };
     if (toks[0].kind === "INDENT") {
@@ -26081,12 +26082,14 @@ function emitSource(parsed, { path = "<anonymous>", runtimeDelivery = "inline", 
     }
     throw new CompileError(`${path}: ${err.message}`, { path });
   }
-  const map = toSourceMap(emitted, { source, sourcePath: path, file: `${path}.js` });
+  let map = null;
   let declarations = null;
   return {
     parseDiagnostics: result.diagnostics,
     code: emitted.code,
-    map,
+    get map() {
+      return map ??= toSourceMap(emitted, { source, sourcePath: path, file: `${path}.js` });
+    },
     stores: emitted.stores,
     tokens: result.tokens ?? null,
     mappings: new Mappings(emitted.mappings),
@@ -34840,7 +34843,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "b281d10059deba06";
+var compilerBuild = () => "5847baa013595a84";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

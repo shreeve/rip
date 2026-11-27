@@ -352,7 +352,7 @@ describe('the tagPostfixConditionals pass', () => {
     expect(kinds('x = if a\n  1')).toEqual(['IDENTIFIER', '=', 'IF', 'IDENTIFIER', 'INDENT', 'NUMBER', 'OUTDENT']);
   });
 
-  test("`in`/`of` are FORIN/FOROF after FOR on the line, RELATION elsewhere (seenFor)", () => {
+  test("`in`/`of` are FORIN/FOROF after FOR on the line, RELATION elsewhere (the `for` mode frame)", () => {
     expect(kinds('for x in arr\n  x')).toEqual(['FOR', 'IDENTIFIER', 'FORIN', 'IDENTIFIER', 'INDENT', 'IDENTIFIER', 'OUTDENT']);
     expect(kinds('for k of obj\n  k')).toEqual(['FOR', 'IDENTIFIER', 'FOROF', 'IDENTIFIER', 'INDENT', 'IDENTIFIER', 'OUTDENT']);
     expect(kinds('x = a in b')).toEqual(['IDENTIFIER', '=', 'IDENTIFIER', 'RELATION', 'IDENTIFIER']);
@@ -376,6 +376,20 @@ describe('the tagPostfixConditionals pass', () => {
     expect(kinds('try\n  a\ncatch e\n  b')).toEqual([
       'TRY', 'INDENT', 'IDENTIFIER', 'OUTDENT', 'CATCH', 'IDENTIFIER', 'INDENT', 'IDENTIFIER', 'OUTDENT',
     ]);
+  });
+});
+
+describe('the scanner mode stack', () => {
+  test('a FOR with no connector on its line ends at the next logical line outside its brackets', () => {
+    expect(kinds('f(for)\nz in w')).toEqual(['IDENTIFIER', 'CALL_START', 'FOR', 'CALL_END', 'TERMINATOR', 'IDENTIFIER', 'RELATION', 'IDENTIFIER']);
+  });
+
+  test('a module statement\'s contextual words end with its line, outside every bracket', () => {
+    // `from` before a string is the module keyword only inside the
+    // import or export statement; the next line reads it as a name.
+    expect(kinds('import a from "m"\nlog from "s"')).toEqual(['IMPORT', 'IDENTIFIER', 'FROM', 'STRING', 'TERMINATOR', 'IDENTIFIER', 'CALL_START', 'IDENTIFIER', 'CALL_START', 'STRING', 'CALL_END', 'CALL_END']);
+    expect(kinds('export x = 1\nlog from "s"')).toEqual(['EXPORT', 'IDENTIFIER', '=', 'NUMBER', 'TERMINATOR', 'IDENTIFIER', 'CALL_START', 'IDENTIFIER', 'CALL_START', 'STRING', 'CALL_END', 'CALL_END']);
+    expect(kinds('import {\n  a\n} from "m"')).toEqual(['IMPORT', '{', 'INDENT', 'IDENTIFIER', 'OUTDENT', '}', 'FROM', 'STRING']);
   });
 });
 

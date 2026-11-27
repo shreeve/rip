@@ -109,7 +109,7 @@ describe('the component surface: keywords and context', () => {
     const inside = kinds('C = component\n  offer theme := 1\n  accept locale\n  render\n    div "x"');
     expect(inside).toContain('OFFER');
     expect(inside).toContain('ACCEPT');
-    // Inside the extends form too (the walk spans it).
+    // Inside the extends form too (its opening line carries COMPONENT).
     expect(kinds('C = component extends button\n  offer theme := 1\n  render\n    button "x"')).toContain('OFFER');
   });
 
@@ -118,10 +118,9 @@ describe('the component surface: keywords and context', () => {
   });
 
   test('an earlier CLOSED component never poisons later code — offer/accept stay identifiers outside every component body', () => {
-    // The backward walk credits only the word's ENCLOSING chain (new
-    // depth minimums), never the INDENT of a sibling block that
-    // already closed — an earlier component must not turn ordinary
-    // identifiers into keywords for the rest of the file.
+    // A component frame closes with its block, so an earlier component
+    // must not turn ordinary identifiers into keywords for the rest of
+    // the file.
     const componentFirst = 'A = component\n  x := 1\n  render\n    div "a"\n\nhandleRequest = (req) ->\n  accept = req.headers.accept\n';
     expect(compile(componentFirst).code).toContain('(accept = req.headers.accept);');
     // Param and function-body positions after a component.
