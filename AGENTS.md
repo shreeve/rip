@@ -77,7 +77,12 @@ repository root; consulted for UNDERSTANDING → docs/.
  surfaces and negative tests). If a test fails, fix the code or (with
  justification) the test — never weaken an acceptance criterion to
  pass. Every confirmed defect converts to a permanent pin in the same
- commit as its fix; a pin asserts the CORRECT behavior, never the bug.
+ commit as its fix; a pin asserts the CORRECT behavior, never the bug. A
+ check that a source compiles to given output, evaluates to a value, or
+ rejects with a message is a `code`, `test` or `fail` row in
+ `test/rip/*.rip`. A JavaScript test is only for what a row cannot see
+ (token tapes, parse tables, tree and store records, corpus hashes), and
+ it joins the existing suite that owns its subject, not a new file.
 
 7. **Emitted output never changes silently.** A change that alters the
  compiler's output bytes lands with its regenerated corpus snapshots
