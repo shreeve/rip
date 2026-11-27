@@ -18903,6 +18903,26 @@
   "js": "2czs3b9ch669l",
   "ts": "2czs3b9ch669l"
  },
+ "row types.rip › fail a component prop typed by a bare number rejects": {
+  "js": "3apw4u1ojs963",
+  "ts": "3apw4u1ojs963"
+ },
+ "row types.rip › fail an optional component prop typed by a bare string rejects": {
+  "js": "2cketfd3jvm8o",
+  "ts": "2cketfd3jvm8o"
+ },
+ "row types.rip › fail a component prop typed by a negative number rejects": {
+  "js": "3h5aj6so0wnjs",
+  "ts": "3h5aj6so0wnjs"
+ },
+ "row types.rip › test a component prop typed by a literal union stays a prop": {
+  "js": "2uf7or55syh71",
+  "ts": "3bo50p1fuvv9e"
+ },
+ "row types.rip › test a component prop with a literal default stays a prop": {
+  "js": "1t9tero97936q",
+  "ts": "2u2lt8z5hncx5"
+ },
  "row types.rip › code a class field typed by a literal union stays a field": {
   "js": "1t940hepwcnqs",
   "ts": "2sq5al194mcs5"

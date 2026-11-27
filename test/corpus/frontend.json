@@ -28355,6 +28355,36 @@
   "tolerant": "317xgyp1ig22y",
   "complete": "1r2ho12en287z"
  },
+ "row types.rip › fail a component prop typed by a bare number rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "15uai1ze6y6ig",
+  "tolerant": "1a0pzif1hzir2",
+  "complete": "2sey8poxp60xe"
+ },
+ "row types.rip › fail an optional component prop typed by a bare string rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "2qe8rx7u69xfg",
+  "tolerant": "2n22q5bk6asnl",
+  "complete": "3fqcu53k1mtjf"
+ },
+ "row types.rip › fail a component prop typed by a negative number rejects": {
+  "tokens": "nar6duhmgol5",
+  "tree": "2ocjhmwq0em0o",
+  "tolerant": "vunjezxszemd",
+  "complete": "2dbo2w4unpjyu"
+ },
+ "row types.rip › test a component prop typed by a literal union stays a prop": {
+  "tokens": "35kb7hmfouc4y",
+  "tree": "1iwgufyaf6acx",
+  "tolerant": "2eeo7v1subeos",
+  "complete": "6j7t1thlgyju"
+ },
+ "row types.rip › test a component prop with a literal default stays a prop": {
+  "tokens": "3avphh5feqnsl",
+  "tree": "qaxxv9wkgsh0",
+  "tolerant": "2kjf9ai3xlpgo",
+  "complete": "6j7t1thlgyju"
+ },
  "row types.rip › code a class field typed by a literal union stays a field": {
   "tokens": "1xaosgexcutkk",
   "tree": "1855wqlzuwffv",
