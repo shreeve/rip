@@ -85,8 +85,10 @@ function instrument() {
   }
   if (!t.includes(ATOMS)) throw new Error('analyze-bench: src/emitter.js has no atom collection loop');
   t = t.replace(ATOMS, `  __time('walks', () => {\n${ATOMS}\n  }, null, []);`);
-  t = t.replace(/^import \{ emitterShape \} from '\.\/emitter-shape\.js';/m,
-    "import { emitterShape as __shape } from './emitter-shape.js';\nconst emitterShape = (...a) => __time('shape', __shape, null, a);");
+  const SHAPE_IMPORT = /^import \{([^}]*)\} from '\.\/emitter-shape\.js';/m;
+  const shapeImport = t.match(SHAPE_IMPORT);
+  if (shapeImport === null || !/\bemitterShape\b/.test(shapeImport[1])) throw new Error('analyze-bench: src/emitter.js imports no emitterShape');
+  t = t.replace(SHAPE_IMPORT, `import {${shapeImport[1].replace(/\bemitterShape\b/, 'emitterShape as __shape')}} from './emitter-shape.js';\nconst emitterShape = (...a) => __time('shape', __shape, null, a);`);
   if (!t.includes(DELIVERY_REFS)) throw new Error('analyze-bench: src/emitter.js has no delivery reference walk');
   t = t.replace(DELIVERY_REFS, "__time('walks', referencesNames, null, [tree, unboundSet, stores, isDecl])");
   for (const [site, timed] of CALL_SITES) {
