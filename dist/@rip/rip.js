@@ -25894,6 +25894,148 @@ export {};
   return { code: builder.code, mappings: builder.rows, runtimeImports: emitter.runtimeImports, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, importedRefs: emitter.importedRefs, runtimeRefs: emitter.runtimeRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, indexedLoops: emitter.indexedLoops, componentUses: emitter.componentUses, componentProps: emitter.componentProps, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
 }
 
+// src/emit/index.js
+class EmitUnimplemented extends Error {
+  constructor(kind, span) {
+    super(`emitter v2: '${kind}' is not implemented yet`);
+    this.kind = kind;
+    if (span) {
+      this.start = span[0];
+      this.end = span[1];
+    }
+  }
+}
+var LOWERINGS = new Map;
+var FACES = ["js", "ts"];
+var DELIVERIES = ["none", "import", "inline"];
+function emit2(parseResult, { source = "", runtimeDelivery = "none", face = "js", pins = null, strict = false, script = false, browserModule = false, dataPayload = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
+  if (!parseResult.sexpr) {
+    throw new Error("emitter: cannot emit a failed parse");
+  }
+  if (!FACES.includes(face)) {
+    throw new Error(`emitter: unknown face '${face}' — expected 'js' (the shipping emission) or 'ts' (the editor face)`);
+  }
+  if (!DELIVERIES.includes(runtimeDelivery)) {
+    throw new Error(`emitter: unknown runtimeDelivery '${runtimeDelivery}' — expected 'none', 'import', or 'inline'`);
+  }
+  const stores = new Stores(parseResult.stores);
+  const builder = new CodeBuilder(stores, { source, primitives: face === "ts" });
+  const ctx = {
+    stores,
+    builder,
+    face,
+    runtimeDelivery,
+    pins,
+    strict,
+    script,
+    browserModule,
+    dataPayload,
+    ambientBindings,
+    repl,
+    hmr,
+    tolerant,
+    modulePath,
+    appStashSpec,
+    routesUnion,
+    routeParams
+  };
+  program(ctx, parseResult.sexpr);
+  return record(ctx);
+}
+var rowOf = (ctx, node) => {
+  const id = ctx.stores.idOf(node);
+  return id === null ? null : ctx.stores.node(id);
+};
+var kindOf = (ctx, node) => rowOf(ctx, node)?.semanticKind ?? node[0];
+function lower(ctx, node) {
+  const kind = kindOf(ctx, node);
+  const lowering = LOWERINGS.get(kind);
+  if (lowering === undefined) {
+    const row = rowOf(ctx, node);
+    throw new EmitUnimplemented(kind, row ? [row.sourceStart, row.sourceEnd] : null);
+  }
+  return lowering(ctx, node);
+}
+function program(ctx, node) {
+  const { builder, stores } = ctx;
+  const body = node.slice(2);
+  builder.mark(stores.idOf(node), "$self", () => {
+    for (const stmt of body)
+      lower(ctx, stmt);
+  });
+  if (ctx.face === "ts" && !body.some((stmt) => MODULE_KINDS.has(kindOf(ctx, stmt)))) {
+    builder.tsOnly(() => builder.emit(`
+export {};
+`));
+  }
+}
+var MODULE_KINDS = new Set(["import", "export"]);
+function record(ctx) {
+  const { builder, stores } = ctx;
+  return {
+    code: builder.code,
+    mappings: builder.rows,
+    runtimeImports: [],
+    vocabulary: [],
+    silences: [],
+    memberDecls: [],
+    narrowedDecls: [],
+    importedRefs: [],
+    runtimeRefs: [],
+    stores,
+    runtimes: new Set,
+    bindings: [],
+    bindingNames: [],
+    replResultName: null,
+    replImportResolver: null,
+    tsRegions: builder.tsRegions,
+    echoSpans: builder.echoSpans,
+    globalDecls: [],
+    pinnables: [],
+    mutables: [],
+    classDecls: [],
+    pinSpans: [],
+    loopVars: [],
+    readLoopVarDecls: [],
+    attrNames: [],
+    routeWraps: [],
+    sourceKeys: [],
+    stashMembers: [],
+    stashKeys: null,
+    memberInits: [],
+    imports: [],
+    intrinsics: [],
+    indexedLoops: [],
+    componentUses: [],
+    componentProps: {},
+    namespaceExports: [],
+    componentNames: [],
+    partNames: [],
+    renderPairs: [],
+    kinds: []
+  };
+}
+
+// src/emit/switch.js
+var EMITTERS = ["v1", "v2"];
+var DEFAULT = "v1";
+function resolveEmitter(option, envValue) {
+  if (option !== undefined) {
+    if (!EMITTERS.includes(option)) {
+      throw new Error(`compile: unknown emitter ${JSON.stringify(option)} — expected 'v1' or 'v2'`);
+    }
+    return option;
+  }
+  if (envValue == null || envValue === "")
+    return DEFAULT;
+  if (!EMITTERS.includes(envValue)) {
+    throw new Error(`RIP_EMITTER: unknown emitter ${JSON.stringify(envValue)} — expected 'v1' or 'v2'`);
+  }
+  return envValue;
+}
+var envValue = () => globalThis.process?.env?.RIP_EMITTER ?? null;
+var emitterDefault = () => resolveEmitter(undefined, envValue());
+
 // src/sourcemap.js
 var B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 var B64_INDEX = new Map([...B64].map((c, i) => [c, i]));
@@ -26060,14 +26202,21 @@ function parseSource(source, { path = "<anonymous>", face = "js", tolerant = fal
     foldDerivedSchemas(result.sexpr);
   return { source, path, file, face, tolerant, dataPayload, result };
 }
-function emitSource(parsed, { path = "<anonymous>", runtimeDelivery = "inline", face = "js", pins = null, strict = false, script = false, browserModule = false, ambientBindings = null, repl = false, tolerant = false, hmr = false, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
+function emitSource(parsed, { path = "<anonymous>", runtimeDelivery = "inline", face = "js", pins = null, strict = false, script = false, browserModule = false, ambientBindings = null, repl = false, tolerant = false, hmr = false, appStashSpec = null, routesUnion = null, routeParams = null, emitter = undefined } = {}) {
   if (face !== parsed.face || tolerant !== parsed.tolerant || path !== parsed.path) {
     throw new CompileError(`emitSource: emits the parse it was given — face ${JSON.stringify(face)}, tolerant ${tolerant}, path ${JSON.stringify(path)} must match the parse (face ${JSON.stringify(parsed.face)}, tolerant ${parsed.tolerant}, path ${JSON.stringify(parsed.path)})`, { path });
   }
+  let engine;
+  try {
+    engine = emitter === undefined ? emitterDefault() : resolveEmitter(emitter, null);
+  } catch (err) {
+    throw new CompileError(err.message, { path });
+  }
+  const emit3 = engine === "v2" ? emit2 : emit;
   const { source, file, dataPayload, result } = parsed;
   let emitted;
   try {
-    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, browserModule, dataPayload, ambientBindings, repl, hmr, tolerant, modulePath: path, appStashSpec, routesUnion, routeParams });
+    emitted = emit3(result, { source, runtimeDelivery, face, pins, strict, script, browserModule, dataPayload, ambientBindings, repl, hmr, tolerant, modulePath: path, appStashSpec, routesUnion, routeParams });
   } catch (err) {
     if (typeof err.start === "number") {
       throw positioned(file, path, err.message, err.start, err.end);
@@ -34838,7 +34987,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "dd38d53fda3d308f";
+var compilerBuild = () => "cb12a1b1d90a5154";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

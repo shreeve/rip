@@ -20,7 +20,9 @@ import { IDENT_SOURCE } from './ident.js';
 import { SourceFile } from './source.js';
 import { makeParserLexer } from './lexer.js';
 import { Parser } from './parser.js';
-import { emit } from './emitter.js';
+import { emit as emitV1 } from './emitter.js';
+import { emit as emitV2 } from './emit/index.js';
+import { resolveEmitter, emitterDefault } from './emit/switch.js';
 import { toSourceMap } from './sourcemap.js';
 import { Mappings } from './stores.js';
 // Declaration emission is IDE/CLI weight. The getter below stays sync
@@ -174,6 +176,10 @@ const diagnosticError = (file, path, d) => {
 // fabricate, and inventing a closing quote would change what every
 // byte after it means; the editor rides out those keystrokes on the
 // last good face instead.
+// `emitter: 'v1' | 'v2'` chooses the emitting engine: v1 is
+// src/emitter.js, v2 is src/emit/ (src/emit/switch.js). With no option
+// the RIP_EMITTER environment variable decides, defaulting to v1. Any
+// other value rejects.
 export function compile(source, options = {}) {
   return emitSource(parseSource(source, options), options);
 }
@@ -236,10 +242,17 @@ export function parseSource(source, { path = '<anonymous>', face = 'js', toleran
   return { source, path, file, face, tolerant, dataPayload, result };
 }
 
-export function emitSource(parsed, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, script = false, browserModule = false, ambientBindings = null, repl = false, tolerant = false, hmr = false, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
+export function emitSource(parsed, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, script = false, browserModule = false, ambientBindings = null, repl = false, tolerant = false, hmr = false, appStashSpec = null, routesUnion = null, routeParams = null, emitter = undefined } = {}) {
   if (face !== parsed.face || tolerant !== parsed.tolerant || path !== parsed.path) {
     throw new CompileError(`emitSource: emits the parse it was given — face ${JSON.stringify(face)}, tolerant ${tolerant}, path ${JSON.stringify(path)} must match the parse (face ${JSON.stringify(parsed.face)}, tolerant ${parsed.tolerant}, path ${JSON.stringify(parsed.path)})`, { path });
   }
+  let engine;
+  try {
+    engine = emitter === undefined ? emitterDefault() : resolveEmitter(emitter, null);
+  } catch (err) {
+    throw new CompileError(err.message, { path });
+  }
+  const emit = engine === 'v2' ? emitV2 : emitV1;
   const { source, file, dataPayload, result } = parsed;
 
   let emitted;

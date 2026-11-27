@@ -13,10 +13,15 @@
 // mapping doctrine's no-scanning rule applies to emitted code and its
 // mapping facts, not to auditing the emitter itself).
 import { test, expect, describe } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-const src = readFileSync(join(import.meta.dir, '../../src/emitter.js'), 'utf8');
+// Both engines' sources: v1 (src/emitter.js) and every v2 module under
+// src/emit/, so a v2 site registers here in the PR that adds it.
+const srcDir = join(import.meta.dir, '../../src');
+const src = ['emitter.js', ...readdirSync(join(srcDir, 'emit')).filter((f) => f.endsWith('.js')).sort().map((f) => `emit/${f}`)]
+  .map((f) => readFileSync(join(srcDir, f), 'utf8'))
+  .join('\n');
 
 // sig: a byte-exact slice of the emission statement. count: how many
 // times it appears. policy: how source control flow is kept legal.
