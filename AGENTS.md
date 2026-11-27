@@ -517,6 +517,11 @@ the affected final gates again.
   ledger entry or a stale one. `--rows` narrows to the language rows.
   `bun scripts/emit-bench.mjs` times both engines on the programs v2
   covers.
+- `bun scripts/analyze-diff.mjs` — the analysis differential
+  (docs/PIPELINE.md §4): `src/emit/analyze.js` against the facts v1
+  reports through `emit()`'s internal sink, for every consumer-corpus
+  program on both faces and in the REPL; exits 1 on any difference.
+  `--rows` narrows to the language rows.
 - `bun run browser` — regenerate `dist/@rip/rip.js` (and
  `rip.min.js` / `rip.min.js.br` / `watch.js`) after any change under
  `src/`, and after every merge: a merge keeps this side's bundle

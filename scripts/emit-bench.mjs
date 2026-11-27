@@ -21,7 +21,7 @@ const inputs = [...packageInputs(root), ...(await rowInputs(root))];
 
 const options = (parsed, set) => {
   const { face = 'js', tolerant = false, ...rest } = OPTION_SETS[set];
-  return { ...rest, face, tolerant, source: parsed.source, dataPayload: parsed.dataPayload, modulePath: parsed.path };
+  return { ...rest, face, tolerant, source: parsed.source, dataPayload: parsed.dataPayload, dataLine: parsed.dataLine, modulePath: parsed.path };
 };
 
 const sameRecord = (a, b) => canonical(a) === canonical(b);
