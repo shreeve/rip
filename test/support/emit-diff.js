@@ -22,6 +22,10 @@ import { join } from 'node:path';
 import { parseSource } from '../../src/compiler.js';
 import { emit as emitV1 } from '../../src/emitter.js';
 import { emit as emitV2, EmitUnimplemented } from '../../src/emit/index.js';
+import { CodeBuilder } from '../../src/builder.js';
+import { Stores } from '../../src/stores.js';
+import { Builder } from '../../src/emit/builder.js';
+import { MappingBuilder } from '../../src/emit/mapping.js';
 
 // The option sets real callers emit with: compile() and the loader on
 // the JS face, the browser (with and without watch-mode hmr), the
@@ -155,4 +159,103 @@ export function differential(inputs, { sets = Object.keys(OPTION_SETS), ledger =
     return keys.has(e.key) || namespaces.has(namespaceOf(e.key));
   });
   return { summary, different, stale, unimplementedKinds };
+}
+
+// ── the builder differential ─────────────────────────────────────────
+// v2's Builder against v1's CodeBuilder on the calls v1 really makes:
+// each program's emission by v1, recorded as the sequence of calls on
+// the builder whose rows its record returns, replayed through both
+// builders. A replay through v1's builder must give back v1's code, so
+// no emitted text escaped the trace (the rows v1's emit() adds after the
+// build are not the builder's, and are compared nowhere here); v2's
+// MappingBuilder must then give the same code, rows, TS-only regions and
+// echoes as that replay, and its plain Builder the same code, regions and
+// echoes. v1 records leaves as caller-span marks, so leaf() is not
+// exercised here: its rows are pinned in emit-v2.test.js.
+
+// The ops: [EMIT, text], [BEGIN, nodeId, role], [SPAN, nodeId, role,
+// start, end], [TS], [ECHO], each frame closed by [END].
+const EMIT = 0, BEGIN = 1, SPAN = 2, TS = 3, ECHO = 4, END = 5;
+
+// v1's emission of one parse with its main builder's trace, or null when
+// v1 rejects it. A crash inside v1 (a TypeError, a RangeError, a
+// ReferenceError) is no rejection and propagates.
+export function builderTrace(parsed, options) {
+  const P = CodeBuilder.prototype;
+  const saved = { emit: P.emit, beginMark: P.beginMark, endMark: P.endMark, markSpan: P.markSpan, tsOnly: P.tsOnly, echo: P.echo };
+  const traces = new Map();
+  const opsOf = (b) => {
+    let ops = traces.get(b);
+    if (ops === undefined) traces.set(b, ops = []);
+    return ops;
+  };
+  // markSpan closes through endMark, which records its END.
+  P.emit = function (text) { opsOf(this).push(EMIT, text); return saved.emit.call(this, text); };
+  P.beginMark = function (id, role) { opsOf(this).push(BEGIN, id, role); return saved.beginMark.call(this, id, role); };
+  P.endMark = function () { opsOf(this).push(END); return saved.endMark.call(this); };
+  P.markSpan = function (id, role, s, e, fn) { opsOf(this).push(SPAN, id, role, s, e); return saved.markSpan.call(this, id, role, s, e, fn); };
+  P.tsOnly = function (fn) { const ops = opsOf(this); ops.push(TS); return saved.tsOnly.call(this, () => { fn(); ops.push(END); }); };
+  P.echo = function (fn) { const ops = opsOf(this); ops.push(ECHO); return saved.echo.call(this, () => { fn(); ops.push(END); }); };
+  const { face = 'js', tolerant = false, ...rest } = options;
+  try {
+    const record = emitV1(parsed.result, { ...rest, face, tolerant, source: parsed.source, dataPayload: parsed.dataPayload, modulePath: parsed.path });
+    for (const [b, ops] of traces) if (b.rows === record.mappings) return { ops, record };
+    throw new Error(`emit-diff: v1's record names no traced builder (${parsed.path})`);
+  } catch (err) {
+    if (err.message.startsWith('emit-diff:') || err instanceof TypeError || err instanceof RangeError || err instanceof ReferenceError) throw err;
+    return null;
+  } finally {
+    Object.assign(P, saved);
+  }
+}
+
+// Replays ops from `i` into builder `b`, up to the END closing the
+// current frame; returns the index past it.
+export function replay(b, ops, i = 0) {
+  while (i < ops.length) {
+    switch (ops[i]) {
+      case EMIT: b.emit(ops[i + 1]); i += 2; break;
+      case BEGIN: b.beginMark(ops[i + 1], ops[i + 2]); i = replay(b, ops, i + 3); b.endMark(); break;
+      case SPAN: { let j; b.markSpan(ops[i + 1], ops[i + 2], ops[i + 3], ops[i + 4], () => { j = replay(b, ops, i + 5); }); i = j; break; }
+      case TS: { let j; b.tsOnly(() => { j = replay(b, ops, i + 1); }); i = j; break; }
+      case ECHO: { let j; b.echo(() => { j = replay(b, ops, i + 1); }); i = j; break; }
+      default: return i + 1;
+    }
+  }
+  return i;
+}
+
+// Every input through every named option set: the programs compared, the
+// rows they hold, and each program whose replays disagree.
+export function builderDifferential(inputs, { sets = ['js-inline', 'ts-import'] } = {}) {
+  let programs = 0, rows = 0;
+  const different = [];
+  const same = (x, y) => JSON.stringify(x) === JSON.stringify(y);
+  for (const set of sets) {
+    const options = OPTION_SETS[set];
+    const { face = 'js', tolerant = false } = options;
+    for (const { key, src, path } of inputs) {
+      let parsed;
+      try { parsed = parseSource(src, { path, face, tolerant }); } catch { continue; }
+      const trace = builderTrace(parsed, options);
+      if (trace === null) continue;
+      const stores = new Stores(parsed.result.stores);
+      const v1 = new CodeBuilder(stores, { source: parsed.source, primitives: face === 'ts' });
+      replay(v1, trace.ops);
+      const on = new MappingBuilder(stores, parsed.source, { leaves: face === 'ts' });
+      replay(on, trace.ops);
+      const off = new Builder();
+      replay(off, trace.ops);
+      programs++;
+      rows += v1.rows.length;
+      const why = v1.code !== trace.record.code ? 'the trace does not reproduce v1\'s code'
+        : on.code !== v1.code || off.code !== v1.code ? 'code'
+        : !same(on.rows, v1.rows) ? 'mapping rows'
+        : !same(on.tsRegions, v1.tsRegions) || !same(off.tsRegions, v1.tsRegions) ? 'TS-only regions'
+        : !same(on.echoSpans, v1.echoSpans) || !same(off.echoSpans, v1.echoSpans) ? 'echo spans'
+        : null;
+      if (why !== null) different.push({ key, set, why });
+    }
+  }
+  return { programs, rows, different };
 }
