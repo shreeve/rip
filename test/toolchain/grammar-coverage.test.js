@@ -24,6 +24,13 @@ const EXCLUDED = new Map([
   ['If → Statement POST_UNLESS Expression ELSE Expression', 'banned by design — postfix unless has no else form; the production exists to reject it rather than fold the else into the condition (control.rip pins the rejection)'],
   ['If → Expression POST_UNLESS Expression ELSE Expression', 'banned by design — postfix unless has no else form; the production exists to reject it rather than fold the else into the condition (control.rip pins the rejection)'],
   ['ComponentLine → ACCEPT IDENTIFIER', 'an accept names its provider; the emitter rejects the bare form, pointing at `accept name from Component` (components.rip pins the rejection)'],
+  ['GateSource → Literal', "a gate source only a literal @stash path makes legal; the production carries the emitter's rejection (render-gates.rip pins it)"],
+  ['GateSource → Range', "a gate source only a literal @stash path makes legal; the production carries the emitter's rejection (render-gates.rip pins it)"],
+  ['GateSource → MarkedInvocation', "a gate source only a literal @stash path makes legal; the production carries the emitter's rejection (render-gates.rip pins it)"],
+  ['GateSource → DoIife', "a gate source only a literal @stash path makes legal; the production carries the emitter's rejection (render-gates.rip pins it)"],
+  ['GateSource → This', "a gate source only a literal @stash path makes legal; the production carries the emitter's rejection (render-gates.rip pins it)"],
+  ['GateSource → Super', "a gate source only a literal @stash path makes legal; the production carries the emitter's rejection (render-gates.rip pins it)"],
+  ['GateSource → SuffixedCall', "a gate source only a literal @stash path makes legal; the production carries the emitter's rejection (render-gates.rip pins it)"],
 ]);
 
 const names = Parser().ruleNames;

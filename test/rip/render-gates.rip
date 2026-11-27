@@ -24,6 +24,30 @@ code 'gate: hoists static __gates and binds via __gateBind', '''
   };
 '''
 
+code 'gate: a parenthesized path is the path', '''
+  export A = component
+    user <~ (@stash.user)
+    render
+      div user.name
+''', '''
+  export const A = class extends __Component {
+    static __gates = ['user'];
+    _init(__given) {
+      this.user = __gateBind(this, 0);
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode('');
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._t0.data = this.user.value.name; });
+    }
+  };
+'''
+
 code 'gate: keyed source hoists (path, key fn) pair', '''
   export A = component
     order <~ @stash.order(params.id)
@@ -158,6 +182,59 @@ fail 'gate: <~ outside a component body is a compile error', '''
 fail 'gate: non-literal path is a compile error', '''
   C = component
     user <~ someVar.user
+    render null
+''', "'<~' requires a literal @stash.<path>"
+
+# Every Value parses as a gate source, so a source that is not a literal
+# path reaches the emitter's own message, never a parse error: a called
+# call (the keyed form over a call), and one row per GateSource form only
+# the emitter's rejection carries (test/toolchain/grammar-coverage.test.js
+# excludes those productions, pointing here).
+fail 'gate: a call of a call is a compile error, not a parse error', '''
+  C = component
+    user <~ @stash.user(1)(2)
+    render null
+''', "'<~' requires a literal @stash.<path>"
+
+fail 'gate: an awaited path is a compile error, not a parse error', '''
+  C = component
+    user <~ @stash.user!
+    render null
+''', "'<~' requires a literal @stash.<path>"
+
+fail 'gate: an optional call is a compile error, not a parse error', '''
+  C = component
+    user <~ @stash.user?(1)
+    render null
+''', "'<~' requires a literal @stash.<path>"
+
+fail 'gate: a literal source is a compile error, not a parse error', '''
+  C = component
+    user <~ 1
+    render null
+''', "'<~' requires a literal @stash.<path>"
+
+fail 'gate: a range source is a compile error, not a parse error', '''
+  C = component
+    user <~ [1..2]
+    render null
+''', "'<~' requires a literal @stash.<path>"
+
+fail 'gate: a do invocation source is a compile error, not a parse error', '''
+  C = component
+    user <~ do -> 1
+    render null
+''', "'<~' requires a literal @stash.<path>"
+
+fail 'gate: this source is a compile error, not a parse error', '''
+  C = component
+    user <~ this
+    render null
+''', "'<~' requires a literal @stash.<path>"
+
+fail 'gate: a super member source is a compile error, not a parse error', '''
+  C = component
+    user <~ super.x
     render null
 ''', "'<~' requires a literal @stash.<path>"
 
