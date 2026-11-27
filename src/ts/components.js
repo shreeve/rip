@@ -42,10 +42,7 @@ import { attributeNamesFor, BOOLEAN_ATTRS, SVG_ONLY_TAGS } from '../dom.js';
 import { isComponentName, componentPathText, restReadKeys } from '../render.js';
 import { isCall, isPlainCall } from '../sexpr.js';
 import { CAMEL, CLASS_TYPE, STYLE_TYPE, CSS_PROPERTIES_TEXT, hostText } from './dom-types.js';
-
-// Same spellings as src/emitter.js COMPONENT_HOOKS (emission owns the
-// JS-face list; this file cannot import the emitter).
-const COMPONENT_HOOKS = new Set(['beforeMount', 'mounted', 'beforeUnmount', 'unmounted', 'onError', 'load']);
+import { COMPONENT_HOOKS } from '../emit/names.js';
 
 const isNode = (x) => Array.isArray(x);
 const isFunc = (x) => isNode(x) && (x[0] === '->' || x[0] === '=>') && x.length === 3;
