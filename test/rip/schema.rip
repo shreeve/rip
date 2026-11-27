@@ -6031,3 +6031,186 @@ fail "an inline @ensure predicate's comma ends it", '''
     a! string
     @ensure "m", (u) -> f u, 2
 ''', "@ensure inline form takes 'message[, :field], fn' (got 3 comma-separated parts)"
+
+# Every DSL form the grammar reads, one row each.
+
+code 'modifiers stack in the order written', '''
+  S = schema :shape
+    y!? string
+''', '''
+  let S = __schema({kind: "shape", name: "S", entries: [{tag: "field", name: "y", modifiers: ["!","?"], typeName: "string", array: false}]});
+''', opts
+
+code "a bracketed first member marks a union's default", '''
+  S = schema :shape
+    role ["a"] | "b"
+''', '''
+  let S = __schema({kind: "shape", name: "S", entries: [{tag: "field", name: "role", modifiers: [], typeName: "literal-union", array: false, literals: ["a","b"], constraints: {default: "a"}}]});
+''', opts
+
+code "a bracketed later member marks a union's default", '''
+  S = schema :shape
+    role "a" | ["b"]
+''', '''
+  let S = __schema({kind: "shape", name: "S", entries: [{tag: "field", name: "role", modifiers: [], typeName: "literal-union", array: false, literals: ["a","b"], constraints: {default: "b"}}]});
+''', opts
+
+code "after an inline attribute the transform's comma is optional", '''
+  U = schema :model
+    code! string @unique -> it.trim()
+''', '''
+  let U = __schema({kind: "model", name: "U", entries: [{tag: "field", name: "code", modifiers: ["!"], typeName: "string", array: false, unique: true, transform: (function(it) { return it.trim(); })}]});
+''', opts
+
+code 'field attrs, keyed with or without a colon', '''
+  U = schema :model
+    name! string, {column: "USER_NAME", was "full_name"}
+''', '''
+  let U = __schema({kind: "model", name: "U", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false, attrs: {column: "USER_NAME", was: "full_name"}}]});
+''', opts
+
+code 'relation options continue on a deeper line', '''
+  M = schema :model
+    t! string
+    @belongsTo User, {as: author,
+      foreignKey: "boss_id"}
+''', '''
+  let M = __schema({kind: "model", name: "M", entries: [{tag: "field", name: "t", modifiers: ["!"], typeName: "string", array: false}, {tag: "directive", name: "belongsTo", args: [{target: "User", as: "author", foreignKey: "boss_id"}]}]});
+''', opts
+
+code 'relation options in an indented block', '''
+  M = schema :model
+    t! string
+    @belongsTo User, {
+      as: author
+      foreignKey: "boss_id"
+    }
+''', '''
+  let M = __schema({kind: "model", name: "M", entries: [{tag: "field", name: "t", modifiers: ["!"], typeName: "string", array: false}, {tag: "directive", name: "belongsTo", args: [{target: "User", as: "author", foreignKey: "boss_id"}]}]});
+''', opts
+
+code 'relation options continue after a trailing comma', '''
+  M = schema :model
+    t! string
+    @belongsTo User, {as: author,
+    foreignKey: "boss_id"}
+''', '''
+  let M = __schema({kind: "model", name: "M", entries: [{tag: "field", name: "t", modifiers: ["!"], typeName: "string", array: false}, {tag: "directive", name: "belongsTo", args: [{target: "User", as: "author", foreignKey: "boss_id"}]}]});
+''', opts
+
+code 'trailers continue on a deeper line', '''
+  S = schema :shape
+    a! integer, [5],
+      1..10
+''', '''
+  let S = __schema({kind: "shape", name: "S", entries: [{tag: "field", name: "a", modifiers: ["!"], typeName: "integer", array: false, constraints: {min: 1, max: 10, default: 5}}]});
+''', opts
+
+code 'an @ensure array on one line', '''
+  S = schema :input
+    a! string
+    @ensure ["m", (u) -> u.a, "n", (u) -> u.b]
+''', '''
+  let S = __schema({kind: "input", name: "S", entries: [{tag: "field", name: "a", modifiers: ["!"], typeName: "string", array: false}, {tag: "ensure", message: "m", fn: (function(u) { return u.a; })}, {tag: "ensure", message: "n", fn: (function(u) { return u.b; })}]});
+''', opts
+
+code 'an @ensure array continues after a trailing comma', '''
+  S = schema :input
+    a! string
+    @ensure [
+      "m", (u) -> u.a,
+      "n", (u) -> u.b
+    ]
+''', '''
+  let S = __schema({kind: "input", name: "S", entries: [{tag: "field", name: "a", modifiers: ["!"], typeName: "string", array: false}, {tag: "ensure", message: "m", fn: (function(u) { return u.a; })}, {tag: "ensure", message: "n", fn: (function(u) { return u.b; })}]});
+''', opts
+
+code 'an @ensure array continues on a deeper line', '''
+  S = schema :input
+    a! string
+    @ensure ["m", (u) -> u.a,
+      "n", (u) -> u.b]
+''', '''
+  let S = __schema({kind: "input", name: "S", entries: [{tag: "field", name: "a", modifiers: ["!"], typeName: "string", array: false}, {tag: "ensure", message: "m", fn: (function(u) { return u.a; })}, {tag: "ensure", message: "n", fn: (function(u) { return u.b; })}]});
+''', opts
+
+code "a scope's comma before its function is optional", '''
+  U = schema :model
+    a! string
+    @scope :hot -> @where(a: 1)
+''', '''
+  let U = __schema({kind: "model", name: "U", entries: [{tag: "field", name: "a", modifiers: ["!"], typeName: "string", array: false}, {tag: "scope", name: "hot", fn: (function() { return this.where({a: 1}); })}]});
+''', opts
+
+code 'a quoted table name is the literal table', '''
+  U = schema :model
+    a! string
+    @table "user_master"
+''', '''
+  let U = __schema({kind: "model", name: "U", entries: [{tag: "field", name: "a", modifiers: ["!"], typeName: "string", array: false}, {tag: "directive", name: "table", args: [{name: "user_master"}]}]});
+''', opts
+
+code "an enum member's value may be a literal word", '''
+  E = schema :enum
+    :on true
+    :off false
+''', '''
+  let E = __schema({kind: "enum", name: "E", entries: [{tag: "enum-member", name: "on", value: true}, {tag: "enum-member", name: "off", value: false}]});
+''', opts
+
+# Shapes the grammar reads so the reader can say what is missing.
+fail 'a bare @ensure names its two forms', '''
+  S = schema :input
+    a! string
+    @ensure
+''', "3:3: @ensure requires 'message, (x) -> body' or a '[…]' array of pairs"
+
+fail 'a bare @ensure! names its two forms', '''
+  S = schema :input
+    a! string
+    @ensure!
+''', "3:3: @ensure requires 'message, (x) -> body' or a '[…]' array of pairs"
+
+fail "an @ensure message is a string literal, not a name", '''
+  S = schema :input
+    a! string
+    @ensure msg, (u) -> u.a
+''', "3:11: @ensure: each refinement's first element must be a string literal message"
+
+fail "an @ensure array's messages are string literals", '''
+  S = schema :input
+    a! string
+    @ensure ["m", (u) -> u.a, 5, (u) -> u.b]
+''', "3:29: @ensure: each refinement's first element must be a string literal message"
+
+fail "an @ensure array's messages are not names", '''
+  S = schema :input
+    a! string
+    @ensure ["m", (u) -> u.a, x, (u) -> u.b]
+''', "3:29: @ensure: each refinement's first element must be a string literal message"
+
+fail "a bare '..' range constrains nothing", '''
+  S = schema :input
+    a! ..
+''', "2:6: a bare '..' range constrains nothing on field 'a'"
+
+fail 'an empty options bracket rejects', '''
+  U = schema :model
+    a! string, {}
+''', "2:14: field 'a' has an empty '{…}' options bracket"
+
+fail 'a nested array type rejects', '''
+  S = schema :input
+    a! string[][]
+''', "field 'a' — nested array types ('string[][]') are not supported"
+
+fail 'a regex default is written bare', '''
+  S = schema :input
+    zip! string, [/^\d{5}$/]
+''', "regex constraints are written bare, not in brackets"
+
+fail 'a dotted table name is two tokens, not one name', '''
+  U = schema :model
+    a! string
+    @table crm.accounts
+''', "@table: takes one table name — unexpected ."

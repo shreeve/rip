@@ -504,15 +504,32 @@ const VALID_FLAGS_RE = /^(?!.*(.).*\1)[gimsuy]*$/;
 const NOT_REGEX = new Set([...INDEXABLE, '++', '--']);
 
 // Token kinds after which `schema` may begin an expression (schema mode's
-// opener set). test/toolchain/schema-entry.test.js derives the set the
-// parse table admits SCHEMA after and gates this one against it.
+// opener set): the terminals the parse table shifts SCHEMA after, in their
+// scan-time spellings (a postfix IF is still IF here, a loose `else` still
+// ELSE). An arrow stands for the block the implicit passes open after it.
+// test/toolchain/schema-entry.test.js derives the table's set and gates
+// this one against it.
 export const SCHEMA_OPENERS = new Set([
-  'TERMINATOR', 'INDENT', 'OUTDENT',
-  '=', 'COMPOUND_ASSIGN',
-  'RETURN', 'THROW', 'YIELD', 'AWAIT', 'EXPORT',
-  ',', '(', '[', '{', 'CALL_START', 'PARAM_START', 'INDEX_START',
-  '->', '=>', ':', 'WHEN', 'LEADING_WHEN', 'THEN', 'IF', 'UNLESS',
-  'UNARY', 'UNARY_MATH',
+  'TERMINATOR', 'INDENT', '->', '=>',
+  '=', 'COMPOUND_ASSIGN', 'REACTIVE_ASSIGN', 'COMPUTED_ASSIGN', 'READONLY_ASSIGN', 'EFFECT', 'MATCH',
+  'RETURN', 'THROW', 'YIELD', 'FROM', 'AWAIT', 'DEFAULT', 'EXTENDS', 'OFFER', 'RENDER',
+  ',', '(', '[', 'CALL_START', 'INDEX_START', 'INTERPOLATION_START', '...', '..', ':',
+  'IF', 'UNLESS', 'ELSE', 'THEN', 'WHEN', 'LEADING_WHEN', 'SWITCH', 'TRY', 'FINALLY',
+  'WHILE', 'UNTIL', 'LOOP', 'BY', 'FORIN', 'FOROF', 'FORAS', 'FORASAWAIT',
+  'UNARY', 'UNARY_MATH', 'TERNARY',
+  '+', '-', '**', 'MATH', 'SHIFT', '&', '^', '|', 'COMPARE', 'RELATION', '&&', '||', '??',
+]);
+
+// Without a kind marker a schema is told only by its body (a `;`, or a
+// deeper next line), so a bare `schema` opens one only where a value
+// starts a statement, an assignment or an argument — never after an
+// operator, where `if a and schema` + a block is a condition.
+export const SCHEMA_BARE_OPENERS = new Set([
+  'TERMINATOR', 'INDENT', '->', '=>',
+  '=', 'COMPOUND_ASSIGN', 'REACTIVE_ASSIGN', 'COMPUTED_ASSIGN', 'READONLY_ASSIGN',
+  'RETURN', 'THROW', 'YIELD', 'AWAIT', 'DEFAULT',
+  ',', '(', '[', 'CALL_START', 'INDEX_START', ':',
+  'IF', 'UNLESS', 'THEN', 'WHEN', 'LEADING_WHEN', 'UNARY', 'UNARY_MATH',
 ]);
 
 // `schema.<key> =` — a schema pragma's head (never `==`, `=>`, `=~`, `=!`).
@@ -1453,7 +1470,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
           case 'S_KIND': case 'S_SYMBOL': case 'SYMBOL': case 'S_DIRECTIVE':
           case 'S_ENSURE': case 'S_SCOPE': case 'S_DEFAULT_SCOPE':
             add(t.value, t.start + 1, t.end); break;
-          default: add(t.value, t.start, t.end);
+          default: if (!t.generated) add(t.value, t.start, t.end);
         }
       }
     };
@@ -1602,11 +1619,11 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   const schemaOpens = (prev, spaced) => {
     let j = pos;
     while (text[j] === ' ' || text[j] === '\t') j++;
-    const exprStart = prev === null || SCHEMA_OPENERS.has(prev.kind);
     if (j > pos && text[j] === ':' && IDENT_START.test(text[j + 1] ?? '')) {
-      return exprStart || (spaced && (prev.kind === 'IDENTIFIER' || prev.kind === 'PROPERTY') && !prev.generated);
+      return prev === null || SCHEMA_OPENERS.has(prev.kind) ||
+        (spaced && (prev.kind === 'IDENTIFIER' || prev.kind === 'PROPERTY') && !prev.generated);
     }
-    if (!exprStart) return false;
+    if (prev !== null && !SCHEMA_BARE_OPENERS.has(prev.kind)) return false;
     if (text[j] === ';') return true;
     if (j < text.length && text[j] !== '\n' && text[j] !== '\r' && text[j] !== '#') return false;
     return nextLineDeeper(j);
