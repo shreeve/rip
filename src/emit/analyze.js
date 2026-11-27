@@ -59,7 +59,7 @@ import { identifierMatches, isCustomElementName, isIdentifierName } from '../ide
 import { TEMPLATE_TAGS } from '../dom.js';
 import { isComponentName } from '../render.js';
 import { RUNTIMES, runtimeRequires, bareSpecifier } from './runtimes.js';
-import { COMPONENT_HOOKS, MEMBER_HEADS, MEMBER_IN_PARAMETER, MEMBER_LOOP_VARIABLE, PROMOTED_IN_PATTERN, UNBOUND_IT, bareItSpan, wordSafety } from './names.js';
+import { COMPONENT_HOOKS, MEMBER_HEADS, MEMBER_IN_PARAMETER, MEMBER_LOOP_VARIABLE, PROMOTED_IN_PATTERN, UNBOUND_IT, bareItSpan, islandSpan, wordSafety } from './names.js';
 
 // ── the mode word ────────────────────────────────────────────────────
 // RN: the free-reference walk's position (off, expression, binding
@@ -265,6 +265,7 @@ class Scope {
     this.bareIt = false;
     this.implicitIt = false;
     this.itAssigned = false;
+    this.itUpdated = false;
     this.decls = null;
     this.rejection = null;
     this.itErr = null;
@@ -398,6 +399,7 @@ class Analysis {
     this.schemaBodies = [];
     this.siteTrees = new Map();
     this.renderPos = new Map();
+    this.rsink = null;       // the render factory the walk is inside: its sink and the env it opened at
     this.childrenFuncs = new Set();
     this.methodFuncs = new Set();
     this.dataLine = null;
@@ -636,6 +638,16 @@ class Analysis {
       if (e.block !== undefined && e.block.has('it')) return;
     }
     fence.hit = x;
+    fence.hitParam = fence.inParams;
+  }
+
+  // Walk a parameter list, its bare `it` reads marked as the parameters'
+  // for the function's fence.
+  visitFenceParams(params, m) {
+    const fence = this.itFence;
+    if (fence !== null) fence.inParams = true;
+    this.visitParams(params, m);
+    if (fence !== null) fence.inParams = false;
   }
 
   free(w) {
@@ -676,7 +688,17 @@ class Analysis {
     if (!isNodeP(x)) return this.visitList(x, m, cs, rs);
     if (this.renderPos.size !== 0) {
       const sink = this.renderPos.get(x);
-      if (sink !== undefined) this.renderChild(x, sink);
+      if (sink !== undefined) {
+        this.renderChild(x, sink);
+        // Below a render child its factory's locals and loop variables
+        // are in scope, between the scopes inside the child and the env
+        // the child stands in.
+        const saved = this.rsink;
+        this.rsink = { sink, env: this.env };
+        this.visit(x, m, cs, rs);
+        this.rsink = saved;
+        return;
+      }
     }
     if (this.hoistAt.size !== 0) {
       const scope = this.hoistAt.get(x);
@@ -758,6 +780,9 @@ class Analysis {
   // structural runtime triggers and the program hoist's match writes.
   noteNode(x, hv, m) {
     if (m & HOIST) this.noteChain(x, hv);
+    // An update writes its bare name without hoisting it: an implicit
+    // `it` it updates is the function's declared binding.
+    if ((hv === '++' || hv === '--') && (m & HOIST) && x.length === 3 && wordOf(x[2]) === 'it') this.hs.itUpdated = true;
     if ((hv === '//=' || hv === '%%=') && (m & PLAN)) this.planSite(x, hv, m);
     if (hv === '=~' && x.length === 4) this.matchWrite(x, m);
     else if (hv === 'regex-index' && x.length === 5) this.matchWrite(x, m);
@@ -968,7 +993,8 @@ class Analysis {
   // fence, open over its parameters and body (null for a parameterless
   // one, whose `it` is its own).
   openItFence(x, params, scoped) {
-    const fence = scoped && params.length > 0 && this.preempted === 0 ? { fn: x, scope: null, env: this.env, sub: this.inSub, hit: null } : null;
+    const fence = scoped && params.length > 0 && this.preempted === 0
+      ? { fn: x, params, scope: null, env: this.env, sub: this.inSub, rsink: this.rsink, hit: null, inParams: false, hitParam: false } : null;
     const saved = [this.itFence, this.itScope];
     this.itFence = fence;
     if (fence !== null) this.itScope = null;
@@ -998,7 +1024,7 @@ class Analysis {
     let scope = null;
     const scoped = !this.childrenFuncs.has(x);
     const saved = this.openItFence(x, params, scoped);
-    if (method) this.visitParams(params, m);
+    if (method) this.visitFenceParams(params, m);
     const outer = this.env;
     if (scoped) {
       scope = this.openScope(x, body, params, false);
@@ -1009,7 +1035,7 @@ class Analysis {
     // emitFunc emits the parameters inside the function's own scope.
     if (!method) {
       if (scope !== null && scope.hoists) this.env = { scope, next: outer };
-      this.visitParams(params, m);
+      this.visitFenceParams(params, m);
       this.env = outer;
     }
     this.visitBody(body, m, scope, params, 'func', rnRender ? RN_RENDER : RN_EXPR);
@@ -1117,7 +1143,7 @@ class Analysis {
     this.headWord(hv, m);
     this.visit(x[2], (m & ~(RN | HOIST | HMATCH | CNEST | RNEST)) | NORAB | NOIT, null, null);
     const saved = this.openItFence(x, x[3], true);
-    this.visitParams(x[3], m);
+    this.visitFenceParams(x[3], m);
     // A def emits as its own scope: defStatement, whose hoist reads the
     // body's statements raw, or a class body's method form, emitted as
     // a method over its live statements.
@@ -2194,7 +2220,7 @@ class Analysis {
           if (this.schemaErr === null) this.schemaErr = err;
         }
       }
-      this.visitSchemaBody(stmts, names, site.value);
+      this.visitSchemaBody(stmts, names, site.value, site.tokens);
     }
   }
 
@@ -2206,10 +2232,14 @@ class Analysis {
 
   // A schema callable body: its own delivery tree, and (when it is a
   // callable rather than the adapter value) its own scope with the
-  // body parameters as plain names.
-  visitSchemaBody(stmts, names, value) {
+  // body parameters as plain names. A callable that takes parameters
+  // checks its bare `it` reads, as a function does.
+  visitSchemaBody(stmts, names, value, tokens) {
     this.beginTree(names, stmts);
     const scope = value ? null : this.openScope(null, stmts, names);
+    if (scope !== null && names.length > 0 && this.preempted === 0) {
+      this.itFence = { fn: null, stmts, span: islandSpan(tokens), params: names, scope, env: this.env, sub: true, rsink: this.rsink, hit: null, inParams: false, hitParam: false };
+    }
     this.visitWord('program', RN_EXPR);
     const walk = (m) => {
       for (const s of stmts) {
@@ -2233,6 +2263,7 @@ class Analysis {
       this.inSub = sub;
       this.endScope(scope);
     }
+    if (this.itFence !== null && this.itFence.hit !== null) this.itFences.push(this.itFence);
     this.endTree();
   }
 
@@ -2344,7 +2375,7 @@ class Analysis {
     // The program's targets also name its bindings (result): its copy.
     const targets = program ? new Map(s.targets) : s.targets;
     // An implicit `it` the body assigns is the function's declared binding.
-    s.itAssigned = targets.has('it');
+    s.itAssigned = targets.has('it') || s.itUpdated;
     for (const n of exclude) targets.delete(n);
     for (const n of s.hreactive) targets.delete(n);
     // The statement-level declarations: a framed scope's walk noted
@@ -2436,10 +2467,15 @@ class Analysis {
 
   // A function that takes parameters and reads a bare `it` no binding
   // inside it answers: a scope around it declares `it`, or the read
-  // rejects at its nearest node with a NodeStore row.
+  // rejects at its nearest node with a NodeStore row. A parameter
+  // default runs before the body, so the function's own declarations
+  // answer it only through a parameter named `it`.
   settleIt(fence) {
     const scope = fence.scope;
-    if (this.declaresIt({ scope, next: scope.env ?? fence.env }, fence.sub)) return;
+    const outer = scope.env ?? fence.env;
+    if (fence.hitParam
+      ? this.paramsNameIt(fence.params) || this.declaresIt(outer, fence.sub, fence.rsink)
+      : this.declaresIt({ scope, next: outer }, fence.sub, fence.rsink)) return;
     let anchor = null;
     const find = (x, at) => {
       if (x === fence.hit) { anchor = at; return true; }
@@ -2452,19 +2488,36 @@ class Analysis {
       return false;
     };
     const fn = fence.fn;
-    if (fn[0] === 'def') { if (!find(fn[3], fn)) find(fn[4], fn); }
+    if (fn === null) { for (const s of fence.stmts) if (find(s, null)) break; }
+    else if (fn[0] === 'def') { if (!find(fn[3], fn)) find(fn[4], fn); }
     else if (!find(fn[2], fn)) find(fn[3], fn);
-    const span = anchor === null ? null : bareItSpan(this.stores, this.source, this.idOf(anchor));
+    const span = (anchor === null ? null : bareItSpan(this.stores, this.source, this.idOf(anchor))) ?? fence.span ?? null;
     const err = new Error(UNBOUND_IT);
     if (span !== null) { err.start = span[0]; err.end = span[1]; }
     scope.itErr = err;
   }
 
+  // Does a parameter name `it`? (A pattern the parameter walk rejects
+  // names nothing here.)
+  paramsNameIt(params) {
+    try {
+      const names = [];
+      for (const p of params) this.patternNames(p, names, true);
+      return names.includes('it');
+    } catch {
+      return false;
+    }
+  }
+
   // Does the nearest scope around `env` that binds `it` declare it? A
   // parameterless function's implicit `it` the body never assigns is no
-  // declaration, and it shadows every `it` outside it.
-  declaresIt(env, sub) {
+  // declaration, and it shadows every `it` outside it. A render
+  // factory's locals and loop variables (`rsink`) declare, at the env
+  // their render child stands in.
+  declaresIt(env, sub, rsink = null) {
+    const inSink = () => rsink.sink.locals.has('it') || rsink.sink.loops.includes('it');
     for (let f = env; f !== null; f = f.next) {
+      if (rsink !== null && f === rsink.env && inSink()) return true;
       if (f.scope !== undefined) {
         const sc = f.scope;
         if (sc.framed() && sc.reactive.has('it')) return true;
@@ -2477,6 +2530,7 @@ class Analysis {
         if (f.members.has('it')) return true;
       } else if (f.ambient.has('it')) return true;
     }
+    if (rsink !== null && rsink.env === null && inSink()) return true;
     return !sub && this.moduleBound().has('it');
   }
 

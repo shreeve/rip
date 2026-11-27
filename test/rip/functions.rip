@@ -613,6 +613,16 @@ test "an assigned implicit it answers under a module it", "it = 9\ng = ->\n  it 
 test "a loop variable inside an implicit it's function answers", "g = -> [it, (((x) -> it + x)(1) for it in [5])]\ng(1)", [1, [6]]
 test "a type named it is no bare it", "type it = number\nf = (x: it) -> x\nf 3", 3
 test "a cast to a type named it is no bare it", "type it = number\nf = (x) -> (x as it)\nf 3", 3
+test "a parameterless function that increments it answers a nested function", "g = ->\n  it++\n  ((x) -> it + x)(1)\ng(1)", 3
+test "a parameterless function that pre-increments it answers a nested function", "g = ->\n  ++it\n  ((x) -> it + x)(1)\ng(1)", 3
+test "a parameterless function that decrements it answers a nested function", "g = ->\n  it--\n  ((x) -> it + x)(1)\ng(1)", 1
+# A parameter default runs before the body: the body's own `it` cannot
+# answer it, only a parameter named `it` or a scope outside the function.
+fail "a parameter default it the body declares rejects", "f = (a = it) ->\n  it = 1\n  a", ":1:10: emitter: bare `it` has no binding here"
+fail "a def's parameter default it the body declares rejects", "def f(a = it)\n  it = 1\n  a", ":1:11: emitter: bare `it` has no binding here"
+fail "a method's parameter default it the body declares rejects", "class C\n  m: (a = it) ->\n    it = 1\n    a", ":2:11: emitter: bare `it` has no binding here"
+test "a module it answers a parameter default beside a body write", "it = 0\nf = (a = it) ->\n  it = 1\n  a\n[f(), it]", [0, 1]
+test "an earlier parameter named it answers a parameter default", "f = (it, a = it) ->\n  it = 1\n  [a, it]\nf 3", [3, 1]
 
 test 'a parameterless def with a generic return type keeps its body', '''
     def g: Map<string, number>

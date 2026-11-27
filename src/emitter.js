@@ -29,7 +29,7 @@ import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParam
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute, suggestAttribute } from './dom.js';
 import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls } from './ts/dom-types.js';
 import { locateRuntimes, runtimeRequires, faceRuntimeType, faceClassDecls, bareSpecifier } from './emit/runtimes.js';
-import { COMPONENT_HOOKS, LITERAL_WORDS, MEMBER_HEADS, MEMBER_IN_PARAMETER, MEMBER_LOOP_VARIABLE, PROMOTED_IN_PATTERN, UNBOUND_IT, bareItSpan, wordSafety } from './emit/names.js';
+import { COMPONENT_HOOKS, LITERAL_WORDS, MEMBER_HEADS, MEMBER_IN_PARAMETER, MEMBER_LOOP_VARIABLE, PROMOTED_IN_PATTERN, UNBOUND_IT, bareItSpan, islandSpan, wordSafety } from './emit/names.js';
 import { restAliasName, restPassthroughText, restOfComponentText, restViewOfComponentText, hookParamTypes,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer, ambientClassDeclares, plainBehaviorValued, stateBehaviorValued, OFFERS, offersRecordText, HOST, hostTypeText, publicProps,
@@ -922,6 +922,9 @@ class Emitter {
     // implicit `it` they never assign: theirs answers no other
     // function's bare `it`.
     this.implicitItScopes = new WeakSet();
+    // A sub-emitter's parent source: its own builder has none, and the
+    // body's nodes index the parent's.
+    this.parentSource = null;
     // The render-factory self prefix: null everywhere except
     // inside a block factory's deferred emission, where component
     // members and `this`/`@` chains read through the factory's `ctx`
@@ -4275,6 +4278,9 @@ class Emitter {
 
   hoistTargets(nodes, exclude = [], extraDeclared = []) {
     const targets = new Map();
+    // The bare names a `++`/`--` updates: no hoist target (an update
+    // assumes its binding exists), but a write of a parameter all the same.
+    const updated = new Set();
     // True when this scope's own statements contain a match write
     // (`=~`, a regex index) — carried out on the entries so
     // scopedHoist can apply the per-invocation `_` rule.
@@ -4435,6 +4441,7 @@ class Emitter {
         add('_', n);
         matchWrite = true;
       }
+      if (isUpdate(n) && typeof n[1] === 'string') updated.add(n[1]);
       if (ASSIGNS.has(n[0]) && n.length === 3) {
         if (typeof n[1] === 'string') {
           add(n[1], n);
@@ -4459,7 +4466,7 @@ class Emitter {
     for (const x of exclude) this.patternNames(x, excludeNames, true);
     // The parameters the scope's own statements write: an implicit `it`
     // the body assigns is the function's declared binding.
-    const paramTargets = excludeNames.filter((x) => targets.has(x));
+    const paramTargets = excludeNames.filter((x) => targets.has(x) || updated.has(x));
     for (const x of excludeNames) targets.delete(x);
     for (const x of reactive) targets.delete(x);
     // One binding per name: a def/class declaration or an import
@@ -6030,7 +6037,7 @@ class Emitter {
       // the face as the minted parameter carrying the declared `any`
       // boundary. That IS its answer: `(parameter) it: any`, the boundary
       // stated at the word (RULINGS.md, Schema).
-      const fn = this.schemaFnCode(params, stmts);
+      const fn = this.schemaFnCode(params, stmts, islandSpan(tokens));
       // A plain @ensure reads its check's result as truthy-or-not, so a
       // check that awaits — compiled async, answering with a Promise —
       // would always pass. Only @ensure! awaits.
@@ -6209,8 +6216,8 @@ class Emitter {
   // follows. The code itself is the runtime spelling and holds neither.
   // `bound` is every name the callable binds, parameters and locals at
   // any depth: the parent re-emits this text word by word under its own
-  // scopes, which know none of them.
-  schemaFnCode(params, stmts) {
+  // scopes, which know none of them. `span` is the site's source span.
+  schemaFnCode(params, stmts, span = null) {
     const names = params.map((p) => p.name);
     const stores = this.stores;
     if (stmts.length === 0) return { code: '(function() {})', thisAt: '(function('.length, annots: [], bound: new Set(names) };
@@ -6231,6 +6238,7 @@ class Emitter {
       const { entries, names: scoped } = sub.scopedHoist([stmt], names);
       for (const n of sub.pushReactiveFrame(stmts, scoped, names)) scoped.add(n);
       sub.scopes.push(scoped);
+      sub.rejectUnboundIt(names, bodyNode, span);
       if (entries.length) {
         sub.hoistLine(entries);
         sub.b.emit(' ');
@@ -6242,6 +6250,7 @@ class Emitter {
       const { entries, names: scoped } = sub.scopedHoist(stmts, names);
       for (const n of sub.pushReactiveFrame(stmts, scoped, names)) scoped.add(n);
       sub.scopes.push(scoped);
+      sub.rejectUnboundIt(names, bodyNode, span);
       sub.b.emit('{\n');
       if (entries.length) {
         sub.b.emit('  ');
@@ -6301,6 +6310,10 @@ class Emitter {
     const sub = new Emitter(this.stores, new CodeBuilder(this.stores, { source: null }));
     sub.scopes = [...this.scopes];
     sub.rframes = [...this.rframes];
+    // The frames' implicit-`it` marks, and the source the body's spans
+    // index (the sub's own builder has none), for the bare-`it` check.
+    sub.implicitItScopes = this.implicitItScopes;
+    sub.parentSource = this.b.source ?? this.parentSource;
     // One temp allocator per module: chain temps in a callable body
     // draw from the same name pool as the parent's (both emit into
     // the same output module).
@@ -17621,12 +17634,21 @@ class Emitter {
   // A function that takes parameters binds no implicit `it`: a bare `it`
   // in its parameters or its body reads a binding some scope declares,
   // or rejects at the first one that has none. Called with the
-  // function's own scope pushed. The walk is containsBareIt's, with the
-  // bindings a loop, a comprehension, a counted loop and a catch handler
-  // make inside the function.
-  rejectUnboundIt(params, block) {
-    if (params.length === 0 || this.declaresIt()) return;
-    let found = null;
+  // function's own scope pushed. A parameter default runs before the
+  // body, so the body's own declarations answer only the body; a
+  // parameter named `it` answers both. The walk is containsBareIt's,
+  // with the bindings a loop, a comprehension, a counted loop and a
+  // catch handler make inside the function. `fallback` is the span an
+  // `it` with no node above it rejects at (a schema callable's site).
+  rejectUnboundIt(params, block, fallback = null) {
+    if (params.length === 0) return;
+    const inBody = this.declaresIt();
+    let inParams = inBody;
+    if (inBody && !this.paramsNameIt(params)) inParams = this.declaresIt(this.rframes.length - 2);
+    if (inBody && inParams) return;
+    // The anchor of the first unbound `it`: undefined while none is
+    // found, null when no node with a NodeStore row stands above it.
+    let found;
     const loopBinds = (vars) => {
       if (!isNode(vars)) return false;
       try {
@@ -17638,7 +17660,7 @@ class Emitter {
       }
     };
     const walk = (n, anchor, bound) => {
-      if (found !== null) return;
+      if (found !== undefined) return;
       if (n === 'it') { if (!bound) found = anchor; return; }
       if (!isNode(n)) return;
       if (this.stores.idOf(n) !== null) anchor = n;
@@ -17696,20 +17718,32 @@ class Emitter {
       }
       for (const el of n) walk(el, anchor, inner);
     };
-    for (const p of params) walk(p, params, false);
-    walk(block, null, false);
-    if (found === null) return;
-    const id = this.stores.idOf(found);
-    const span = id !== null ? bareItSpan(this.stores, this.b.source, id) : null;
+    if (!inParams) for (const p of params) walk(p, params, false);
+    if (!inBody) walk(block, null, false);
+    if (found === undefined) return;
+    const id = found === null ? null : this.stores.idOf(found);
+    const span = (id !== null ? bareItSpan(this.stores, this.b.source ?? this.parentSource, id) : null) ?? fallback;
     if (span === null) throw new Error(UNBOUND_IT);
     throw this.positionedErrorAt(span[0], span[1], UNBOUND_IT);
   }
 
-  // Does the nearest scope around the current position that binds `it`
+  // Does a parameter name `it`? (A pattern the parameter walk rejects
+  // names nothing here.)
+  paramsNameIt(params) {
+    try {
+      const names = [];
+      for (const p of params) this.patternNames(p, names, true);
+      return names.includes('it');
+    } catch {
+      return false;
+    }
+  }
+
+  // Does the nearest scope at or around frame `top` that binds `it`
   // declare it? A parameterless function's implicit `it` is no
   // declaration, and it shadows every `it` outside it.
-  declaresIt() {
-    for (let i = this.rframes.length - 1; i >= 0; i--) {
+  declaresIt(top = this.rframes.length - 1) {
+    for (let i = top; i >= 0; i--) {
       const f = this.rframes[i];
       if (f.reactive.has('it') || (f.members !== undefined && f.members.has('it'))) return true;
       if (f.bound.has('it')) return !this.implicitItScopes.has(f.bound);

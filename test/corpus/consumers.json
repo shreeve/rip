@@ -4643,6 +4643,18 @@
   "js": "27ogp699fo0rg",
   "ts": "oe6mmb3emk0c"
  },
+ "row components.rip › test a render local it answers a handler with parameters": {
+  "js": "15pxzuu1b5ot7",
+  "ts": "15gvtvpfxywkr"
+ },
+ "row components.rip › test a render local it answers a function with parameters in a render loop body": {
+  "js": "268fvj34gfhym",
+  "ts": "276nxy1asmpno"
+ },
+ "row components.rip › test a render local it answers a function with parameters in an interpolation": {
+  "js": "1a4hjmxgawa8g",
+  "ts": "3mjktg98sgkpg"
+ },
  "row components.rip › fail a def in a component body rejects as a body line before its bare it": {
   "js": "1z0zvgzm8aiak",
   "ts": "1z0zvgzm8aiak"
@@ -8606,6 +8618,38 @@
  "row functions.rip › test a cast to a type named it is no bare it": {
   "js": "v1k0rycboz9v",
   "ts": "2lor3rr8te8qn"
+ },
+ "row functions.rip › test a parameterless function that increments it answers a nested function": {
+  "js": "37nvf9nmr33nv",
+  "ts": "3enwbgxwzdtej"
+ },
+ "row functions.rip › test a parameterless function that pre-increments it answers a nested function": {
+  "js": "2sd6x5nv21mku",
+  "ts": "rrouylwdju7x"
+ },
+ "row functions.rip › test a parameterless function that decrements it answers a nested function": {
+  "js": "3orjnd62glrrv",
+  "ts": "1kkqti9nzm1l3"
+ },
+ "row functions.rip › fail a parameter default it the body declares rejects": {
+  "js": "1ks8a51w4k4fe",
+  "ts": "1ks8a51w4k4fe"
+ },
+ "row functions.rip › fail a def's parameter default it the body declares rejects": {
+  "js": "3tumz1wa5fgen",
+  "ts": "3tumz1wa5fgen"
+ },
+ "row functions.rip › fail a method's parameter default it the body declares rejects": {
+  "js": "hft0qhpjrnbn",
+  "ts": "hft0qhpjrnbn"
+ },
+ "row functions.rip › test a module it answers a parameter default beside a body write": {
+  "js": "nklaksh76e3d",
+  "ts": "3kv5qvfwkbi8"
+ },
+ "row functions.rip › test an earlier parameter named it answers a parameter default": {
+  "js": "3cl8hwm94i7x5",
+  "ts": "12w7bi7r5nano"
  },
  "row functions.rip › test a parameterless def with a generic return type keeps its body": {
   "js": "3o94dxdsspj2t",
@@ -14978,6 +15022,22 @@
  "row schema.rip › test :shape .parse returns instance with getters and methods": {
   "js": "281ndp2i31iim",
   "ts": "160w5z7zgobbx"
+ },
+ "row schema.rip › fail a bare it in a schema method with parameters rejects": {
+  "js": "3qlyxlkxn5sjt",
+  "ts": "3qlyxlkxn5sjt"
+ },
+ "row schema.rip › fail a bare it in a schema method expression rejects": {
+  "js": "3etbgqrz6ing3",
+  "ts": "3etbgqrz6ing3"
+ },
+ "row schema.rip › test a module it answers a schema method with parameters": {
+  "js": "20krhwbojz46q",
+  "ts": "1v1c5jygd0p5t"
+ },
+ "row schema.rip › test a schema method parameter named it answers": {
+  "js": "gc6oyk2d3p1l",
+  "ts": "3m88ueewel2ez"
  },
  "row schema.rip › test :shape .parse throws SchemaError on invalid": {
   "js": "2kfz2qqdrafjy",

@@ -31,6 +31,20 @@ export function bareItSpan(stores, source, nodeId) {
   return hit ?? stores.selfSpan(nodeId);
 }
 
+// A schema code site's source span, from its written tokens: where a
+// bare `it` with no node above it (a body that is the word alone)
+// rejects. null for a site with no written token.
+export function islandSpan(tokens) {
+  let start = null;
+  let end = null;
+  for (const t of tokens) {
+    if (t.generated) continue;
+    if (start === null) start = t.start;
+    end = t.end;
+  }
+  return start === null ? null : [start, end];
+}
+
 // A promoted `@name` binds a field, which only a whole parameter can:
 // inside a rest or a destructuring pattern JavaScript has no binding form.
 export const PROMOTED_IN_PATTERN = (name) =>

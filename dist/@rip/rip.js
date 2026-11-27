@@ -11475,6 +11475,18 @@ function bareItSpan(stores, source, nodeId) {
   }
   return hit ?? stores.selfSpan(nodeId);
 }
+function islandSpan(tokens) {
+  let start = null;
+  let end = null;
+  for (const t of tokens) {
+    if (t.generated)
+      continue;
+    if (start === null)
+      start = t.start;
+    end = t.end;
+  }
+  return start === null ? null : [start, end];
+}
 var PROMOTED_IN_PATTERN = (name) => `emitter: a promoted parameter ('@${name}') cannot sit inside a rest or a destructuring pattern — ` + `JavaScript binds no \`this.${name}\` there; bind a plain name and assign '@${name} = ${name}' in the body`;
 var MEMBER_HEADS = new Set([".", "?.", "[]", "optindex"]);
 var MEMBER_IN_PARAMETER = "emitter: a parameter pattern binds names only — a member or index target cannot sit inside it, " + "since JavaScript declares no property in a parameter list; bind a plain name and assign the member in the body";
@@ -12108,6 +12120,7 @@ class Emitter {
     this._componentName = null;
     this.moduleBound = new Set;
     this.implicitItScopes = new WeakSet;
+    this.parentSource = null;
     this.renderSelf = null;
     this.projectionHost = null;
   }
@@ -14514,6 +14527,7 @@ class Emitter {
   }
   hoistTargets(nodes, exclude = [], extraDeclared = []) {
     const targets = new Map;
+    const updated = new Set;
     let matchWrite = false;
     const reactive = new Set;
     const chainTemps = [];
@@ -14621,6 +14635,8 @@ class Emitter {
         add("_", n);
         matchWrite = true;
       }
+      if (isUpdate(n) && typeof n[1] === "string")
+        updated.add(n[1]);
       if (ASSIGNS.has(n[0]) && n.length === 3) {
         if (typeof n[1] === "string") {
           add(n[1], n);
@@ -14646,7 +14662,7 @@ class Emitter {
     const excludeNames = [];
     for (const x of exclude)
       this.patternNames(x, excludeNames, true);
-    const paramTargets = excludeNames.filter((x) => targets.has(x));
+    const paramTargets = excludeNames.filter((x) => targets.has(x) || updated.has(x));
     for (const x of excludeNames)
       targets.delete(x);
     for (const x of reactive)
@@ -15765,7 +15781,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
         continue;
       }
       const params = this.schemaBodyParams(e);
-      const fn = this.schemaFnCode(params, stmts);
+      const fn = this.schemaFnCode(params, stmts, islandSpan(tokens));
       if (e.tag === "ensure" && !e.async && fn.code.startsWith("(async ")) {
         Emitter.schemaFail(`@ensure: this check awaits, so it answers with a promise a plain @ensure reads as passing — declare it '@ensure!' to await it`, tokens[0]?.start ?? e.start);
       }
@@ -15874,7 +15890,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
       return [{ name: "it", type: null }];
     return paramsOf(entry.paramTokens ?? [], entry.tag === "ensure" ? "@ensure" : `'${entry.name}'`, Emitter.schemaFail, this.b.source);
   }
-  schemaFnCode(params, stmts) {
+  schemaFnCode(params, stmts, span = null) {
     const names = params.map((p) => p.name);
     const stores = this.stores;
     if (stmts.length === 0)
@@ -15892,6 +15908,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
       for (const n of sub.pushReactiveFrame(stmts, scoped, names))
         scoped.add(n);
       sub.scopes.push(scoped);
+      sub.rejectUnboundIt(names, bodyNode, span);
       if (entries.length) {
         sub.hoistLine(entries);
         sub.b.emit(" ");
@@ -15906,6 +15923,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
       for (const n of sub.pushReactiveFrame(stmts, scoped, names))
         scoped.add(n);
       sub.scopes.push(scoped);
+      sub.rejectUnboundIt(names, bodyNode, span);
       sub.b.emit(`{
 `);
       if (entries.length) {
@@ -15952,6 +15970,8 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
     const sub = new Emitter(this.stores, new CodeBuilder(this.stores, { source: null }));
     sub.scopes = [...this.scopes];
     sub.rframes = [...this.rframes];
+    sub.implicitItScopes = this.implicitItScopes;
+    sub.parentSource = this.b.source ?? this.parentSource;
     sub.temps = this.temps;
     sub.runtimeAliases = this.runtimeAliases;
     sub.schemaCode = this.schemaCode;
@@ -24799,10 +24819,16 @@ ${"  ".repeat(ind)}`);
       this._narrowedReads = prev;
     }
   }
-  rejectUnboundIt(params, block) {
-    if (params.length === 0 || this.declaresIt())
+  rejectUnboundIt(params, block, fallback = null) {
+    if (params.length === 0)
       return;
-    let found = null;
+    const inBody = this.declaresIt();
+    let inParams = inBody;
+    if (inBody && !this.paramsNameIt(params))
+      inParams = this.declaresIt(this.rframes.length - 2);
+    if (inBody && inParams)
+      return;
+    let found;
     const loopBinds = (vars) => {
       if (!isNode2(vars))
         return false;
@@ -24816,7 +24842,7 @@ ${"  ".repeat(ind)}`);
       }
     };
     const walk = (n, anchor, bound) => {
-      if (found !== null)
+      if (found !== undefined)
         return;
       if (n === "it") {
         if (!bound)
@@ -24906,19 +24932,31 @@ ${"  ".repeat(ind)}`);
       for (const el of n)
         walk(el, anchor, inner);
     };
-    for (const p of params)
-      walk(p, params, false);
-    walk(block, null, false);
-    if (found === null)
+    if (!inParams)
+      for (const p of params)
+        walk(p, params, false);
+    if (!inBody)
+      walk(block, null, false);
+    if (found === undefined)
       return;
-    const id = this.stores.idOf(found);
-    const span = id !== null ? bareItSpan(this.stores, this.b.source, id) : null;
+    const id = found === null ? null : this.stores.idOf(found);
+    const span = (id !== null ? bareItSpan(this.stores, this.b.source ?? this.parentSource, id) : null) ?? fallback;
     if (span === null)
       throw new Error(UNBOUND_IT);
     throw this.positionedErrorAt(span[0], span[1], UNBOUND_IT);
   }
-  declaresIt() {
-    for (let i = this.rframes.length - 1;i >= 0; i--) {
+  paramsNameIt(params) {
+    try {
+      const names = [];
+      for (const p of params)
+        this.patternNames(p, names, true);
+      return names.includes("it");
+    } catch {
+      return false;
+    }
+  }
+  declaresIt(top = this.rframes.length - 1) {
+    for (let i = top;i >= 0; i--) {
       const f = this.rframes[i];
       if (f.reactive.has("it") || f.members !== undefined && f.members.has("it"))
         return true;
@@ -36090,7 +36128,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "165f4089c2c9475f";
+var compilerBuild = () => "b42aa24901ec7419";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

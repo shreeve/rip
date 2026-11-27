@@ -6965,6 +6965,24 @@
   "tolerant": "d40gkyrmyybm",
   "complete": "6j7t1thlgyju"
  },
+ "row components.rip › test a render local it answers a handler with parameters": {
+  "tokens": "1oxlwabqbydvo",
+  "tree": "3vxnsd65957vp",
+  "tolerant": "wylq7c5je6z",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › test a render local it answers a function with parameters in a render loop body": {
+  "tokens": "g741rkrvh0fe",
+  "tree": "3pj803kqig96e",
+  "tolerant": "3b0iafde0v52j",
+  "complete": "6j7t1thlgyju"
+ },
+ "row components.rip › test a render local it answers a function with parameters in an interpolation": {
+  "tokens": "2noainawij5w",
+  "tree": "uv6952f7w4s",
+  "tolerant": "kan5pcab8b6p",
+  "complete": "6j7t1thlgyju"
+ },
  "row components.rip › fail a def in a component body rejects as a body line before its bare it": {
   "tokens": "1zzb0cyfdyv0a",
   "tree": "23of1qcetb9a5",
@@ -12909,6 +12927,54 @@
   "tokens": "oh5nhq9lpsbb",
   "tree": "5t7xyu1sf62g",
   "tolerant": "3udmjfkm97nn4",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › test a parameterless function that increments it answers a nested function": {
+  "tokens": "1bxtwimvoqv27",
+  "tree": "1oqc2iesf6ppg",
+  "tolerant": "jmcpbkew58p6",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › test a parameterless function that pre-increments it answers a nested function": {
+  "tokens": "1d3dpz5jqj2zz",
+  "tree": "ytpgic90sv8d",
+  "tolerant": "3re3ipu0wntul",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › test a parameterless function that decrements it answers a nested function": {
+  "tokens": "3oanx316quydi",
+  "tree": "1j5xr056jt2lu",
+  "tolerant": "zlcjw7w2dx46",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › fail a parameter default it the body declares rejects": {
+  "tokens": "twqi9l591ehf",
+  "tree": "3qtlm0bmtlmp2",
+  "tolerant": "wl0x90mdn2vi",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › fail a def's parameter default it the body declares rejects": {
+  "tokens": "1hjwi2cbbi5ed",
+  "tree": "zwq8q2sk8rph",
+  "tolerant": "28pqdzd134he7",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › fail a method's parameter default it the body declares rejects": {
+  "tokens": "2o0ek07o7xjje",
+  "tree": "2gjpd6h1kezdz",
+  "tolerant": "2o82j4ej5wv36",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › test a module it answers a parameter default beside a body write": {
+  "tokens": "13gbnfz1fwc25",
+  "tree": "2zwinnamdbb6f",
+  "tolerant": "2vi653l1ghkd7",
+  "complete": "6j7t1thlgyju"
+ },
+ "row functions.rip › test an earlier parameter named it answers a parameter default": {
+  "tokens": "3tiy7eth01pty",
+  "tree": "3vw68me24okt2",
+  "tolerant": "30zigvs2l4jgh",
   "complete": "6j7t1thlgyju"
  },
  "row functions.rip › test a parameterless def with a generic return type keeps its body": {
@@ -22467,6 +22533,30 @@
   "tokens": "3ol82sq4m4z2g",
   "tree": "1qyivjbtdwd1g",
   "tolerant": "2pwjvc512ozy2",
+  "complete": "6j7t1thlgyju"
+ },
+ "row schema.rip › fail a bare it in a schema method with parameters rejects": {
+  "tokens": "36llztz3zwsky",
+  "tree": "2wexfo9neuvam",
+  "tolerant": "3hhk6z8k97toy",
+  "complete": "6j7t1thlgyju"
+ },
+ "row schema.rip › fail a bare it in a schema method expression rejects": {
+  "tokens": "1a5ly9z31rau1",
+  "tree": "37vj3m6c7091s",
+  "tolerant": "zigspw49ivs5",
+  "complete": "6j7t1thlgyju"
+ },
+ "row schema.rip › test a module it answers a schema method with parameters": {
+  "tokens": "pmrj5gqfej85",
+  "tree": "cvlvgjqv4r5t",
+  "tolerant": "3ro8uqnc30txv",
+  "complete": "6j7t1thlgyju"
+ },
+ "row schema.rip › test a schema method parameter named it answers": {
+  "tokens": "366oh3pnk7p1o",
+  "tree": "26ot0eyghhaz0",
+  "tolerant": "3v2pyksq3ejpw",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :shape .parse throws SchemaError on invalid": {
