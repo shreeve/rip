@@ -7240,96 +7240,108 @@
   "ts": "2bxi0hgair35q"
  },
  "row data.rip › test data marker length": {
-  "js": "2c4txzhygrxda",
-  "ts": "1ueo7x01gh1pg"
+  "js": "3o853ot8vg8zi",
+  "ts": "hmhluvlarzfl"
  },
  "row data.rip › test data marker empty": {
-  "js": "2h5ndb06z3ji0",
-  "ts": "y2j2mv860fls"
+  "js": "25ntrjpujbc6x",
+  "ts": "e2nlsl9l11np"
  },
  "row data.rip › test data marker multiline": {
-  "js": "1vljutokz80vd",
-  "ts": "25ycifrupue30"
+  "js": "2dwgfzkvtjkt0",
+  "ts": "25u290wqcvb4k"
  },
  "row data.rip › test data marker first line": {
-  "js": "3da60vwr0kmm5",
-  "ts": "1kz9kukbw2ksu"
+  "js": "1r1lqztgt9u2g",
+  "ts": "10g2brnyt7tmy"
  },
  "row data.rip › test data marker last line": {
-  "js": "2twe2l8qfykbj",
-  "ts": "33mndh4xe5bvu"
+  "js": "2yz1s9cxv9ro0",
+  "ts": "12k4xiq94za62"
  },
  "row data.rip › test data marker config": {
-  "js": "2j9hbkqkt8n4o",
-  "ts": "92sz0cxepc1d"
+  "js": "1povwye13h48n",
+  "ts": "1oes5a5dgb1gx"
  },
  "row data.rip › test data marker csv": {
-  "js": "36fscgdbpbdm5",
-  "ts": "14pybzo0hzufp"
+  "js": "25130x4p9ofl7",
+  "ts": "3aqbce55khsgh"
  },
  "row data.rip › test data marker special chars": {
-  "js": "31x8ljblvs8nj",
-  "ts": "28k6yci07oeuh"
+  "js": "u3xe3uypbsat",
+  "ts": "2eqw53f8eyaqm"
  },
  "row data.rip › test data marker quotes": {
-  "js": "29yoh9hvrwpvu",
-  "ts": "lft52alnx0ps"
+  "js": "39wutm6srm93j",
+  "ts": "373ohwpzobtyl"
  },
  "row data.rip › test data marker whitespace": {
-  "js": "nbeuneixzl2z",
-  "ts": "1v4ph93tdz6kr"
+  "js": "1mlr80vtcvn8c",
+  "ts": "23us0vfrvwwh0"
  },
  "row data.rip › test data marker users": {
-  "js": "u3p2xrzh3dpa",
-  "ts": "2orcwz1szkug8"
+  "js": "3r2s3tr2qpqsv",
+  "ts": "18xwnlw1istk2"
  },
  "row data.rip › test data marker json": {
-  "js": "3s1bynlm2uqhy",
-  "ts": "3f5386fm0n2u"
+  "js": "qp76u3fopz7l",
+  "ts": "129ug093a2jrs"
  },
  "row data.rip › test data marker env parsing": {
-  "js": "28gw6xhtqyn1b",
-  "ts": "qg8xae91tyaf"
+  "js": "lj82k6j2f26l",
+  "ts": "32www9hvhg5ef"
  },
- "row data.rip › test data marker payload keeps its newline": {
-  "js": "335qdt0b0inr9",
-  "ts": "3mikrie4wsrrl"
+ "row data.rip › test data marker is the lines as written": {
+  "js": "3ikscvfkzhssx",
+  "ts": "2yvyj07c0yclx"
+ },
+ "row data.rip › test data marker file newline is not text": {
+  "js": "350sq3pshyy6b",
+  "ts": "q8rf24mls22b"
+ },
+ "row data.rip › test data marker written blank line stays": {
+  "js": "1uwrf291yull5",
+  "ts": "3dinzohfr45o3"
+ },
+ "row data.rip › test data marker last line empty section": {
+  "js": "25ntrjpujbc6x",
+  "ts": "e2nlsl9l11np"
  },
  "row data.rip › test data marker simple": {
-  "js": "16orjxvz2tjyt",
-  "ts": "ns2xw0g6c1ti"
+  "js": "36cah1ochnj91",
+  "ts": "zhhlxeov0j5y"
  },
  "row data.rip › test data marker template": {
-  "js": "2lyc7yxlm0iey",
-  "ts": "2s60uq3fej64r"
+  "js": "21w3vl45t1re5",
+  "ts": "mo5jwy3tfm9n"
  },
  "row data.rip › test data marker only": {
-  "js": "27qif5xrp1o52",
-  "ts": "b0psnhlvqcn7"
+  "js": "1r9yqlo4f9u47",
+  "ts": "11i739nop3k0l"
  },
  "row data.rip › code data marker compiler": {
-  "js": "1bu4z51ai540l",
-  "ts": "1xd2j4dyf6yud"
+  "js": "df1xo93inr64",
+  "ts": "2a98npd5khq33"
  },
  "row data.rip › code data marker hoisting": {
-  "js": "f8unlu8qkvjm",
-  "ts": "31fooftwuudms"
+  "js": "172qwoqjv6bi6",
+  "ts": "1ngq4lfj8vkks"
  },
  "row data.rip › code data marker text closes the output": {
-  "js": "1gij2fo9rif5w",
-  "ts": "1gij2fo9rif5w"
+  "js": "3mhtwz5j6l7eq",
+  "ts": "3mhtwz5j6l7eq"
  },
  "row data.rip › code data marker function name dodges the program": {
-  "js": "2pssuynv77hpc",
-  "ts": "37jazgqs5b31t"
+  "js": "1pr6w3zkz7wh9",
+  "ts": "12o6x6jx9j7y7"
  },
  "row data.rip › test data marker DATA is writable": {
-  "js": "qyaslqr73efg",
-  "ts": "545yb822bir1"
+  "js": "360ky9d63ieq0",
+  "ts": "1eoqieiig51lx"
  },
  "row data.rip › test data marker a nested scope shadows DATA": {
-  "js": "1mqnujwbcdjmz",
-  "ts": "871aojnlcfc3"
+  "js": "3bnfilq6wosl7",
+  "ts": "2jq8qslhw8j8z"
  },
  "row data.rip › fail data marker then def DATA": {
   "js": "5r7am6m4cs6r",

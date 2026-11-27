@@ -14291,7 +14291,7 @@ class Emitter {
   emitDataBinding() {
     if (this.dataPayload == null)
       return;
-    this.dataFn = Emitter.mintName("__data", this.temps.used);
+    this.dataFn = Emitter.mintName("__data__", this.temps.used);
     this.b.emit(`let DATA = ${this.dataFn}();
 
 `);
@@ -26054,10 +26054,11 @@ function splitData(source) {
   if (at === -1)
     return { text: source, dataPayload: null, dataLine: null };
   const rest = lines.slice(at + 1);
+  if (rest.at(-1) === "")
+    rest.pop();
   return { text: lines.slice(0, at).join(`
-`), dataPayload: rest.length > 0 ? rest.join(`
-`) + `
-` : "", dataLine: at + 1 };
+`), dataPayload: rest.join(`
+`), dataLine: at + 1 };
 }
 function parseSource(source, { path = "<anonymous>", face = "js", tolerant = false, foldProjections = false } = {}) {
   if (typeof source !== "string") {
@@ -34861,7 +34862,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "82930a6f2c0b644f";
+var compilerBuild = () => "b20b6129b96c9635";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

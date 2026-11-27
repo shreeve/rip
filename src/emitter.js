@@ -5268,10 +5268,11 @@ class Emitter {
   // rejects naming the marker's line. The binding opens the program
   // (below any leading imports) and the raw text closes it, inside a
   // function declaration that hoists, so a long section never sits
-  // ahead of the code. The function's name is minted.
+  // ahead of the code. The function is `__data__`, minted so a user's
+  // own `__data__` keeps its name.
   emitDataBinding() {
     if (this.dataPayload == null) return;
-    this.dataFn = Emitter.mintName('__data', this.temps.used);
+    this.dataFn = Emitter.mintName('__data__', this.temps.used);
     this.b.emit(`let DATA = ${this.dataFn}();\n\n`);
     this.dataBodyAt = this.b.offset;
   }

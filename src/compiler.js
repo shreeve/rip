@@ -178,8 +178,10 @@ export function compile(source, options = {}) {
   return emitSource(parseSource(source, options), options);
 }
 
-// The __DATA__ marker: everything after a line that is exactly
-// `__DATA__` is the program's DATA constant — raw text, never parsed.
+// The __DATA__ marker: the lines after a line that is exactly
+// `__DATA__` are the program's DATA — raw text, never parsed. DATA is
+// those lines as written: joined by newlines, the file's own final
+// newline ending the file rather than the text.
 // The parse sees the truncated text; offsets before the marker are
 // unchanged, so every diagnostic and mapping span stays exact against
 // the full file. `dataPayload` is null when there is no marker;
@@ -189,7 +191,8 @@ export function splitData(source) {
   const at = lines.findIndex((line) => line === '__DATA__');
   if (at === -1) return { text: source, dataPayload: null, dataLine: null };
   const rest = lines.slice(at + 1);
-  return { text: lines.slice(0, at).join('\n'), dataPayload: rest.length > 0 ? rest.join('\n') + '\n' : '', dataLine: at + 1 };
+  if (rest.at(-1) === '') rest.pop();
+  return { text: lines.slice(0, at).join('\n'), dataPayload: rest.join('\n'), dataLine: at + 1 };
 }
 
 // compile() in its two halves, for a caller that emits one parse more

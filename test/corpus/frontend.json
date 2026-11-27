@@ -10937,10 +10937,28 @@
   "tolerant": "2tthsf6kmfguy",
   "complete": "6j7t1thlgyju"
  },
- "row data.rip › test data marker payload keeps its newline": {
+ "row data.rip › test data marker is the lines as written": {
   "tokens": "1oo08k5xow9pd",
   "tree": "24d6st0948d2w",
   "tolerant": "24fc8s8j0f7wk",
+  "complete": "6j7t1thlgyju"
+ },
+ "row data.rip › test data marker file newline is not text": {
+  "tokens": "2sr0e27oms3ud",
+  "tree": "26adw5unch9il",
+  "tolerant": "zaiucula7kw5",
+  "complete": "6j7t1thlgyju"
+ },
+ "row data.rip › test data marker written blank line stays": {
+  "tokens": "2sr0e27oms3ud",
+  "tree": "26adw5unch9il",
+  "tolerant": "zaiucula7kw5",
+  "complete": "6j7t1thlgyju"
+ },
+ "row data.rip › test data marker last line empty section": {
+  "tokens": "2sr0e27oms3ud",
+  "tree": "26adw5unch9il",
+  "tolerant": "zaiucula7kw5",
   "complete": "6j7t1thlgyju"
  },
  "row data.rip › test data marker simple": {
@@ -10980,9 +10998,9 @@
   "complete": "6j7t1thlgyju"
  },
  "row data.rip › code data marker function name dodges the program": {
-  "tokens": "35o19ilirh4f5",
-  "tree": "3vi6vx6ankf9v",
-  "tolerant": "1kee53udrgehd",
+  "tokens": "1eqz9uji3x8dv",
+  "tree": "3jwle7xqy1zu7",
+  "tolerant": "38733jp3zfs6y",
   "complete": "6j7t1thlgyju"
  },
  "row data.rip › test data marker DATA is writable": {
