@@ -11464,6 +11464,9 @@ function bareItSpan(stores, source, nodeId) {
   return hit ?? stores.selfSpan(nodeId);
 }
 var PROMOTED_IN_PATTERN = (name) => `emitter: a promoted parameter ('@${name}') cannot sit inside a rest or a destructuring pattern — ` + `JavaScript binds no \`this.${name}\` there; bind a plain name and assign '@${name} = ${name}' in the body`;
+var MEMBER_HEADS = new Set([".", "?.", "[]", "optindex"]);
+var MEMBER_IN_PARAMETER = "emitter: a parameter pattern binds names only — a member or index target cannot sit inside it, " + "since JavaScript declares no property in a parameter list; bind a plain name and assign the member in the body";
+var MEMBER_LOOP_VARIABLE = "emitter: a loop variable binds names only — a member or index target cannot be one, " + "since JavaScript declares loop variables with `let`; loop over a plain name and assign the member in the body";
 function wordSafety(w) {
   if (w === "this")
     return true;
@@ -12536,6 +12539,8 @@ class Emitter {
           const names = [];
           for (const pattern of n[1])
             this.patternNames(pattern, names, true);
+          for (const pattern of n[1])
+            this.rejectMemberTarget(pattern, MEMBER_LOOP_VARIABLE);
           dupIn(names, n, "loop head");
         }
         for (const el of n.slice(2))
@@ -12546,9 +12551,12 @@ class Emitter {
         walk(n[1], true);
         for (const clause of n[2] ?? []) {
           const names = [];
-          if (isNode2(clause[1]))
+          if (isNode2(clause[1])) {
             for (const pattern of clause[1])
               this.patternNames(pattern, names, true);
+            for (const pattern of clause[1])
+              this.rejectMemberTarget(pattern, MEMBER_LOOP_VARIABLE);
+          }
           dupIn(names, n, "comprehension clause");
           walk(clause[2], true);
         }
@@ -14490,7 +14498,7 @@ class Emitter {
       entries = this.applyDeclareInPlace(entries, stmts, { tailIsExpression: true });
     }
     this.attachSchemaConsts(entries, this.schemaScopeOf(stmts)?.stories ?? null);
-    return { entries, names };
+    return { entries, names, paramTargets: collected.paramTargets };
   }
   hoistTargets(nodes, exclude = [], extraDeclared = []) {
     const targets = new Map;
@@ -14626,6 +14634,7 @@ class Emitter {
     const excludeNames = [];
     for (const x of exclude)
       this.patternNames(x, excludeNames, true);
+    const paramTargets = excludeNames.filter((x) => targets.has(x));
     for (const x of excludeNames)
       targets.delete(x);
     for (const x of reactive)
@@ -14645,6 +14654,7 @@ class Emitter {
     }
     const entries = [...targets.entries()].map(([name, node]) => [name, node, "target"]);
     entries.matchWrite = matchWrite;
+    entries.paramTargets = paramTargets;
     entries.push(...chainTemps);
     const knownHere = new Set([...targets.keys(), ...excludeNames, ...reactive]);
     entries.push(...this.planReferenceTemps(nodes, knownHere));
@@ -24699,19 +24709,18 @@ ${"  ".repeat(ind)}`);
     })();
     return this._annotatedValueSpans.has(`${self.sourceStart}:${self.sourceEnd}`);
   }
-  static promotedInPattern(p) {
-    if (!isNode2(p))
-      return null;
-    if (p[0] === "." && p[1] === "this" && typeof p[2] === "string" && p.length === 3)
-      return p;
-    if (isHeadless(p))
+  static memberInPattern(p) {
+    if (!isNode2(p) || isHeadless(p))
       return null;
     const h = p[0];
-    if (h === "rest" || h === "..." || h === "default" || h === "=" || h === "typed-var")
-      return Emitter.promotedInPattern(p[1]);
+    if (MEMBER_HEADS.has(h))
+      return p;
+    if (h === "rest" || h === "..." || h === "default" || h === "=" || h === "typed-var" || h === "cast" || h === "satisfies") {
+      return Emitter.memberInPattern(p[1]);
+    }
     if (h === "array") {
       for (const el of p.slice(1)) {
-        const hit = Emitter.promotedInPattern(el);
+        const hit = Emitter.memberInPattern(el);
         if (hit !== null)
           return hit;
       }
@@ -24722,12 +24731,19 @@ ${"  ".repeat(ind)}`);
         if (!isNode2(pair))
           continue;
         const slot = pair[0] === ":" || pair[0] === null ? pair[2] : pair[0] === "=" || pair[0] === "..." ? pair[1] : null;
-        const hit = Emitter.promotedInPattern(slot);
+        const hit = Emitter.memberInPattern(slot);
         if (hit !== null)
           return hit;
       }
     }
     return null;
+  }
+  rejectMemberTarget(p, message) {
+    const hit = Emitter.memberInPattern(p);
+    if (hit === null)
+      return;
+    const promoted = hit[0] === "." && hit[1] === "this" && typeof hit[2] === "string" && hit.length === 3;
+    throw this.positionedError(hit, promoted && message === MEMBER_IN_PARAMETER ? PROMOTED_IN_PATTERN(hit[2]) : message, p);
   }
   emitParams(params, injectedTypes = null, jsArity = true) {
     const list = this.expansionSplit(params).list;
@@ -24741,13 +24757,9 @@ ${"  ".repeat(ind)}`);
     if (restAt !== -1 && restAt < list.length - 1) {
       throw this.positionedError(list[restAt], "emitter: a rest parameter must be the last parameter — JavaScript has no middle rest; take `...rest` last and read the tail from it");
     }
-    for (const p of params) {
-      if (atParamField(p) !== null)
-        continue;
-      const promoted = Emitter.promotedInPattern(p);
-      if (promoted !== null)
-        throw this.positionedError(promoted, PROMOTED_IN_PATTERN(promoted[2]), p);
-    }
+    for (const p of params)
+      if (atParamField(p) === null)
+        this.rejectMemberTarget(p, MEMBER_IN_PARAMETER);
     list.forEach((p, i) => {
       const control = this.firstAwaitIn(p);
       if (control !== null) {
@@ -24832,6 +24844,29 @@ ${"  ".repeat(ind)}`);
         walk(n[3], anchor, bound);
         return;
       }
+      if (Emitter.isTypedWrapper(n)) {
+        if (typeof n[1] !== "string")
+          walk(n[1], anchor, bound);
+        return;
+      }
+      if ((head === "cast" || head === "satisfies") && n.length === 3) {
+        walk(n[1], anchor, bound);
+        return;
+      }
+      if (head === "class") {
+        if (n[2] != null)
+          walk(n[2], anchor, bound);
+        if (this.isBlock(n[3])) {
+          const inBody = this.stores.idOf(n[3]) !== null ? n[3] : anchor;
+          for (const stmt of n[3].slice(1)) {
+            if (isNode2(stmt) && ASSIGNS.has(stmt[0]) && stmt.length === 3) {
+              walk(stmt[2], this.stores.idOf(stmt) !== null ? stmt : inBody, bound);
+            } else
+              walk(stmt, inBody, bound);
+          }
+        }
+        return;
+      }
       let inner = bound;
       if (head === "for-in" || head === "for-of" || head === "for-as")
         inner = bound || loopBinds(n[1]);
@@ -24871,15 +24906,14 @@ ${"  ".repeat(ind)}`);
     throw this.positionedErrorAt(span[0], span[1], UNBOUND_IT);
   }
   declaresIt() {
-    const declared = (set) => set.has("it") && !this.implicitItScopes.has(set);
     for (let i = this.rframes.length - 1;i >= 0; i--) {
       const f = this.rframes[i];
-      if (f.reactive.has("it") || declared(f.bound))
+      if (f.reactive.has("it") || f.members !== undefined && f.members.has("it"))
         return true;
-      if (f.members !== undefined && f.members.has("it"))
-        return true;
+      if (f.bound.has("it"))
+        return !this.implicitItScopes.has(f.bound);
     }
-    return this.scopes.some(declared) || this.moduleBound.has("it");
+    return this.moduleBound.has("it");
   }
   emitFunc(node) {
     const [srcKind, rawParams, block] = node;
@@ -24891,14 +24925,12 @@ ${"  ".repeat(ind)}`);
     const ind = this.ind;
     const isVoid = this.voidFuncs.has(node);
     const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block], { forwards: true });
-    const { entries: hoist, names } = this.scopedHoist(stmts, params);
+    const { entries: hoist, names, paramTargets } = this.scopedHoist(stmts, params);
     for (const n of this.pushReactiveFrame(stmts, names, params, node))
       names.add(n);
     this.scopes.push(names);
-    if (bareIt) {
-      this.implicitItScopes.add(names);
+    if (bareIt && !paramTargets.includes("it"))
       this.implicitItScopes.add(this.rframes[this.rframes.length - 1].bound);
-    }
     this.rejectUnboundIt(rawParams, block);
     const isAsync = this.containsAwait(block);
     const isGen = Emitter.containsYield(block);
@@ -36046,7 +36078,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "9b582ba9a0e2f94b";
+var compilerBuild = () => "280e1c169d50593c";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
