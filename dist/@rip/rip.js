@@ -10642,6 +10642,241 @@ ${COMPONENTS_DECLS}`,
   }
 };
 
+// src/emit/runtimes.js
+var bareSpecifier = (s) => String(s).replace(/^['"`]|['"`]$/g, "");
+var SCHEMA_TYPE_DECLS = [
+  "type __RipSchemaIssue = { field: string; error: string; message: string };",
+  "type __RipSchemaError = Error & { issues: __RipSchemaIssue[]; schemaName: string | null; schemaKind: string | null };"
+].join(`
+`);
+var COMPONENTS_TYPE_DECLS = [
+  "type __RipProvider = abstract new (...args: never[]) => { __offers?: object };",
+  "type __RipOffers<P extends __RipProvider> = NonNullable<InstanceType<P>['__offers']>;",
+  "type __RipProviding<P extends __RipProvider> = '__offers' extends keyof InstanceType<P> ? P : never;",
+  "type __RipListBlock = { c(): void; m(parent: Node, anchor: Node | null): void; p(ctx: unknown, item: unknown, index: number, ...outer: unknown[]): void; d(detaching: boolean): void; _s?: boolean; _first?: Node | null };",
+  "type __RipListState = { keys: unknown[]; items?: unknown[]; blocks: __RipListBlock[] };"
+].join(`
+`);
+var COERCER_TYPE = "{ <F extends (value: string) => unknown>(name: string, fn: F, options?: { raw?: false }): F; <F extends (value: unknown) => unknown>(name: string, fn: F, options: { raw: boolean }): F }";
+var ORM_TYPE_DECLS = [
+  "type __RipAdapterResult = { columns: { name: string; type?: string; duckdbType?: string; encoding?: string }[]; data: unknown[][]; rowCount?: number; rows?: number };",
+  "type __RipAdapterQuery = (sql: string, params?: unknown[] | null, options?: { signal?: AbortSignal | null; timeoutMs?: number | null }) => __RipAdapterResult | Promise<__RipAdapterResult>;",
+  "type __RipAdapter = { query: __RipAdapterQuery; begin?: (options?: unknown) => Promise<{ query: __RipAdapterQuery; commit: () => Promise<void>; rollback: () => Promise<void> }>; catalog?: (options?: { signal?: AbortSignal | null; timeoutMs?: number | null }) => Promise<Record<string, unknown>>; capabilities?: { tx?: boolean; ddlTransactional?: boolean } };",
+  "type __RipSequence = { name: string; start: number };"
+].join(`
+`);
+var ORM_SCHEMA_TYPE = "{ " + "transaction: { <T>(fn: () => T): Promise<Awaited<T>>; <T>(options: { on?: __RipAdapter; [option: string]: unknown }, fn: () => T): Promise<Awaited<T>> }; " + "connect: (options: string | { url: string; timeoutMs?: number | null }) => __RipAdapter; " + "setAdapter: (adapter: __RipAdapter) => void; " + "sequence: { (): __RipSequence | null; (name: null): null; (name: string, options?: { start?: number }): __RipSequence }; " + `registerCoercer: ${COERCER_TYPE}; ` + "plan: () => never; status: () => never; make: () => never; migrate: () => never; introspect: () => never" + " }";
+var RUNTIMES = [
+  {
+    key: "intrinsics",
+    names: ["__toPropertyKey", "__defineOwnDataProperty"],
+    generatedNames: ["__toPropertyKey", "__defineOwnDataProperty"],
+    types: {
+      __toPropertyKey: "(value: unknown) => string | symbol",
+      __defineOwnDataProperty: "<T extends object>(target: T, key: PropertyKey, value: unknown) => T"
+    },
+    module: "intrinsics.js",
+    trigger: "objectComprehension"
+  },
+  {
+    key: "vocab",
+    names: [],
+    module: "vocab.js",
+    trigger: null
+  },
+  {
+    key: "schema",
+    names: ["__schema", "SchemaError", "registerCoercer"],
+    module: "schema.js",
+    requires: ["vocab"],
+    trigger: "schema",
+    decls: SCHEMA_TYPE_DECLS,
+    types: {
+      __schema: "(descriptor: unknown) => unknown",
+      SchemaError: "{ new (issues: __RipSchemaIssue[], schemaName?: string | null, schemaKind?: string | null): __RipSchemaError; prototype: __RipSchemaError }",
+      registerCoercer: COERCER_TYPE
+    }
+  },
+  {
+    key: "duckdb",
+    names: [],
+    module: "duckdb.js",
+    trigger: null
+  },
+  {
+    key: "orm",
+    names: ["schema", "__schemaSetAdapter"],
+    module: "orm.js",
+    requires: ["schema", "duckdb", "vocab"],
+    trigger: "modelSchema",
+    decls: ORM_TYPE_DECLS,
+    types: {
+      schema: ORM_SCHEMA_TYPE,
+      __schemaSetAdapter: "(adapter: __RipAdapter) => void"
+    }
+  },
+  {
+    key: "reactive",
+    names: [
+      "__state",
+      "__computed",
+      "__effect",
+      "__batch",
+      "__readonly",
+      "__setErrorHandler",
+      "__handleError",
+      "__catchErrors",
+      "getEffectSignal"
+    ],
+    generatedNames: ["__state", "__computed", "__effect", "__batch"],
+    module: "reactive.js",
+    trigger: "reactive",
+    types: {
+      __state: "<T>(value: T | { value: T; read(): T }) => { value: T; read(): T; touch(): void }",
+      __computed: "<T>(fn: () => T) => { readonly value: T; read(): T }",
+      __effect: "(fn: () => unknown) => () => void",
+      __batch: "<T>(fn: () => T) => T",
+      __readonly: "<T>(value: T) => Readonly<{ value: T }>",
+      __setErrorHandler: "(handler: ((error: unknown) => void) | null) => ((error: unknown) => void) | null",
+      __handleError: "(error: unknown) => void",
+      __catchErrors: "<F extends (...args: never[]) => unknown>(fn: F) => (this: ThisParameterType<F>, ...args: Parameters<F>) => ReturnType<F> | undefined",
+      getEffectSignal: "() => AbortSignal | null"
+    }
+  },
+  {
+    key: "stdlib",
+    names: [
+      "abort",
+      "assert",
+      "exit",
+      "kind",
+      "noop",
+      "p",
+      "pp",
+      "pj",
+      "pr",
+      "raise",
+      "rand",
+      "sleep",
+      "toMatchable",
+      "todo",
+      "warn",
+      "zip"
+    ],
+    generatedNames: ["toMatchable"],
+    module: "stdlib.js",
+    trigger: "matchRead",
+    types: {
+      abort: "(msg?: string) => never",
+      assert: "(v: unknown, msg?: string) => void",
+      exit: "(code?: number) => never",
+      kind: "(v: unknown) => string",
+      noop: "() => void",
+      p: "(...args: unknown[]) => void",
+      pp: "<T>(v: T) => T",
+      pj: "<T>(v: T) => T",
+      pr: "<T>(v: T) => T",
+      raise: "{ (message: unknown): never; <A>(ctor: new (arg: A) => unknown, arg: A): never }",
+      rand: "(a?: number, b?: number) => number",
+      sleep: "(ms: number) => Promise<void>",
+      toMatchable: "(v: unknown) => string",
+      todo: "(msg?: string) => never",
+      warn: "(...args: unknown[]) => void",
+      zip: "<T extends unknown[][]>(...arrays: T) => { [I in keyof T]: T[I] extends (infer E)[] ? E : never }[]"
+    }
+  },
+  {
+    key: "components",
+    names: [
+      "setContext",
+      "getContext",
+      "hasContext",
+      "__Component",
+      "__pushComponent",
+      "__popComponent",
+      "__clsx",
+      "__style",
+      "__lis",
+      "__reconcile",
+      "__transition",
+      "__handleComponentError",
+      "__gateBind",
+      "__detach",
+      "__heldSlot",
+      "__reportChildFailure",
+      "__hostOf",
+      "__ownerFrame",
+      "__pushOwner",
+      "__popOwner",
+      "__detachRef"
+    ],
+    generatedNames: [
+      "setContext",
+      "getContext",
+      "__Component",
+      "__pushComponent",
+      "__popComponent",
+      "__clsx",
+      "__style",
+      "__reconcile",
+      "__transition",
+      "__gateBind",
+      "__detach",
+      "__heldSlot",
+      "__reportChildFailure",
+      "__hostOf",
+      "__ownerFrame",
+      "__pushOwner",
+      "__popOwner",
+      "__detachRef"
+    ],
+    decls: COMPONENTS_TYPE_DECLS,
+    types: {
+      setContext: "(key: string, value: unknown) => void",
+      getContext: "<P extends __RipProvider, K extends keyof __RipOffers<P>>(provider: __RipProviding<P>, key: K) => __RipOffers<P>[K]",
+      hasContext: "<P extends __RipProvider>(provider: __RipProviding<P>, key: keyof __RipOffers<P>) => boolean",
+      __clsx: CLSX_TYPE,
+      __style: STYLE_FN_TYPE,
+      __Component: { class: COMPONENT_CLASS, decls: `${OWNER_FRAME_DECLS}
+${TEARDOWN_DECL}` },
+      __pushComponent: "(component: __Component | null) => __Component | null",
+      __popComponent: "(prev: __Component | null) => void",
+      __lis: "(arr: readonly number[]) => number[]",
+      __reconcile: "<C, T, O extends unknown[]>(anchor: Node | null | undefined, state: __RipListState, items: readonly T[], ctx: C, factory: (ctx: C, item: T, index: number, ...outer: O) => __RipListBlock, keyFn: ((item: T, index: number) => unknown) | null | undefined, ...outer: O) => void",
+      __transition: "(el: Element, name: string, dir: string, done?: (() => void) | null) => void",
+      __handleComponentError: "(error: unknown, component: __Component | null | undefined) => void",
+      __gateBind: "<T>(self: __Component, index: number) => { readonly value: T; read(): T }",
+      __detach: "(node: Node | null | undefined) => void",
+      __heldSlot: "(children: unknown) => Node",
+      __reportChildFailure: "(name: string, error: unknown) => void",
+      __hostOf: "(inst: __Component, event: string) => Element",
+      ...OWNER_FRAME_TYPES
+    },
+    module: "components.js",
+    requires: "reactive",
+    trigger: "component"
+  }
+];
+var faceClassName = (name) => `__Rip${name.replace(/^_+/, "")}`;
+var faceRuntimeType = (name, signature, types = {}) => {
+  if (typeof signature === "object")
+    return `typeof ${faceClassName(name)}`;
+  let text = signature;
+  for (const [cls, sig] of Object.entries(types)) {
+    if (typeof sig === "object")
+      text = text.replace(new RegExp(`\\b${cls}\\b`, "g"), faceClassName(cls));
+  }
+  return text;
+};
+var faceClassDecls = (types) => Object.entries(types ?? {}).filter(([, signature]) => typeof signature === "object").map(([name, { class: body, decls }]) => {
+  const text = body.replace(new RegExp(`\\b${name}\\b`, "g"), faceClassName(name));
+  return `${decls ? `${decls}
+` : ""}declare class ${faceClassName(name)} ${text}`;
+}).join(`
+`);
+var runtimeRequires = (rt) => rt.requires == null ? [] : Array.isArray(rt.requires) ? rt.requires : [rt.requires];
+var locateRuntimes = (base) => RUNTIMES.map((rt) => ({ ...rt, url: new URL(rt.module, base) }));
+
 // rip-ide-stub:components.js
 var componentTypeInfo = () => {
   throw new Error("rip: component type story is unavailable in the browser");
@@ -11110,7 +11345,6 @@ var isHtmlTag2 = (name) => {
 var isComprehensionNode = (x) => isNode2(x) && x[0] === "comprehension" && x.length === 4 && Array.isArray(x[2]) && x[2].length > 0 && Array.isArray(x[2][0]) && String(x[2][0][0]).startsWith("for-");
 var STATEMENT_HEADS = new Set(["for-in", "for-of", "for-as", "switch", "try", "throw", "loop", "loop-n", "comprehension"]);
 var isLoopNode = (x) => isNode2(x) && ((x[0] === "for-in" || x[0] === "for-of" || x[0] === "for-as") && x.length === 6 || x[0] === "while" && (x.length === 3 || x.length === 4) || x[0] === "loop" && x.length === 2 || x[0] === "loop-n" && x.length === 3);
-var bareSpecifier = (s) => String(s).replace(/^['"`]|['"`]$/g, "");
 function moduleSourceText(s) {
   const inner = String(s).slice(1, -1).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
   return `'${inner}'`;
@@ -11329,6 +11563,7 @@ class Emitter {
   static BLOCK_HEADS = new Set(["if", "while", "loop", "for-in", "for-of", "for-as", "switch", "when", "try", "block", "comprehension"]);
   collectReactiveNames(stmts) {
     const names = new Set;
+    FACTS?.("collect", "reactive", null);
     const walk = (n, nested) => {
       if (!isNode2(n) || isDefHead(n[0]) || isFunc(n) || n[0] === "class")
         return;
@@ -11339,8 +11574,10 @@ class Emitter {
           const op = n[0] === "state" ? ":=" : "~=";
           throw this.positionedError(n, `emitter: a reactive declaration ('${typeof n[1] === "string" ? n[1] : "…"} ${op} …') must sit at module or function scope — ` + `inside a statement block it lowers to a block-scoped const, and any later read would unwrap '.value' off a binding ` + `that no longer exists`);
         }
-        if (typeof n[1] === "string")
+        if (typeof n[1] === "string") {
           names.add(n[1]);
+          FACTS?.("declares", "reactive", [n, n[1]]);
+        }
         return;
       }
       if (this.isEffectDecl(n))
@@ -11355,6 +11592,7 @@ class Emitter {
   }
   collectEffectHandles(stmts) {
     const names = new Set;
+    FACTS?.("collect", "handles", null);
     const walk = (n, nested) => {
       if (!isNode2(n) || isDefHead(n[0]) || isFunc(n) || n[0] === "class")
         return;
@@ -11367,8 +11605,10 @@ class Emitter {
           if (nested) {
             throw this.positionedError(n, `emitter: a bound effect ('${typeof n[1] === "string" ? n[1] : "…"} ~> …') must sit at module or function scope — ` + `inside a statement block its dispose handle would be a block-scoped const, dead to every later read ` + `; a BARE '~> …' stays legal here`);
           }
-          if (typeof n[1] === "string")
+          if (typeof n[1] === "string") {
             names.add(n[1]);
+            FACTS?.("declares", "handles", [n, n[1]]);
+          }
         }
         return;
       }
@@ -11382,6 +11622,7 @@ class Emitter {
   }
   collectReadonlyNames(stmts) {
     const names = new Set;
+    FACTS?.("collect", "readonly", null);
     const walk = (n, nested) => {
       if (!isNode2(n) || isDefHead(n[0]) || isFunc(n) || n[0] === "class")
         return;
@@ -11393,8 +11634,10 @@ class Emitter {
         if (nested) {
           throw this.positionedError(n, `emitter: a readonly declaration ('${typeof n[1] === "string" ? n[1] : "…"} =! …') must sit at module or function scope — ` + `inside a statement block it lowers to a block-scoped const, dead to every later read ` + ``);
         }
-        if (typeof n[1] === "string")
+        if (typeof n[1] === "string") {
           names.add(n[1]);
+          FACTS?.("declares", "readonly", [n, n[1]]);
+        }
         walk(n[2], nested);
         return;
       }
@@ -11408,12 +11651,14 @@ class Emitter {
   }
   static exportedConstNames(stmts) {
     const names = new Set;
+    FACTS?.("collect", "exportedConst", null);
     for (const n of stmts) {
       if (!isNode2(n) || n[0] !== "export")
         continue;
       for (const spec of n.slice(1)) {
         if (isNode2(spec) && (spec[0] === "=" || spec[0] === "void-assign") && spec.length === 3 && typeof spec[1] === "string") {
           names.add(spec[1]);
+          FACTS?.("declares", "exportedConst", [spec, spec[1]]);
         }
       }
     }
@@ -11471,13 +11716,18 @@ class Emitter {
   }
   static declaredNames(stmts) {
     const names = [];
+    FACTS?.("collect", "declared", null);
     const declared = (s) => {
       if (!isNode2(s))
         return;
-      if (s[0] === "class" && typeof s[1] === "string")
+      if (s[0] === "class" && typeof s[1] === "string") {
         names.push(s[1]);
-      if (isDefHead(s[0]) && s.length === 4 && typeof s[1] === "string")
+        FACTS?.("declares", "declared", [s, s[1]]);
+      }
+      if (isDefHead(s[0]) && s.length === 4 && typeof s[1] === "string") {
         names.push(s[1]);
+        FACTS?.("declares", "declared", [s, s[1]]);
+      }
     };
     for (const s of stmts) {
       declared(s);
@@ -11488,14 +11738,17 @@ class Emitter {
   }
   static declaredClassNames(stmts) {
     const names = new Set;
+    FACTS?.("collect", "classes", null);
     const declared = (s) => {
       if (!isNode2(s) || !DECLARING_ASSIGNS.has(s[0]) || s.length !== 3)
         return;
       if (typeof s[1] !== "string")
         return;
       const v = s[2];
-      if (isNode2(v) && (v[0] === "class" || v[0] === "component"))
+      if (isNode2(v) && (v[0] === "class" || v[0] === "component")) {
         names.add(s[1]);
+        FACTS?.("declares", "classes", [s, s[1]]);
+      }
     };
     for (const s of stmts) {
       declared(s);
@@ -11987,14 +12240,17 @@ class Emitter {
   }
   collectComputedNames(stmts) {
     const names = new Set;
+    FACTS?.("collect", "computed", null);
     const walk = (n, nested) => {
       if (!isNode2(n) || isDefHead(n[0]) || isFunc(n) || n[0] === "class")
         return;
       if (n[0] === "component" && n.length === 3)
         return;
       if (this.isReactiveDecl(n)) {
-        if (!nested && n[0] === "computed" && typeof n[1] === "string")
+        if (!nested && n[0] === "computed" && typeof n[1] === "string") {
           names.add(n[1]);
+          FACTS?.("declares", "computed", [n, n[1]]);
+        }
         return;
       }
       if (this.isEffectDecl(n))
@@ -14253,7 +14509,7 @@ class Emitter {
       const source = node[node.length - 1];
       if (typeof source !== "string")
         continue;
-      const specifier = source.replace(/^['"`]|['"`]$/g, "");
+      const specifier = bareSpecifier(source);
       for (const spec of Emitter.importSpecs(node)) {
         if (spec === "{}")
           continue;
@@ -24702,236 +24958,15 @@ var containsMatchRead = (sexpr) => {
     return true;
   return sexpr.some(containsMatchRead);
 };
-var SCHEMA_TYPE_DECLS = [
-  "type __RipSchemaIssue = { field: string; error: string; message: string };",
-  "type __RipSchemaError = Error & { issues: __RipSchemaIssue[]; schemaName: string | null; schemaKind: string | null };"
-].join(`
-`);
-var COMPONENTS_TYPE_DECLS = [
-  "type __RipProvider = abstract new (...args: never[]) => { __offers?: object };",
-  "type __RipOffers<P extends __RipProvider> = NonNullable<InstanceType<P>['__offers']>;",
-  "type __RipProviding<P extends __RipProvider> = '__offers' extends keyof InstanceType<P> ? P : never;",
-  "type __RipListBlock = { c(): void; m(parent: Node, anchor: Node | null): void; p(ctx: unknown, item: unknown, index: number, ...outer: unknown[]): void; d(detaching: boolean): void; _s?: boolean; _first?: Node | null };",
-  "type __RipListState = { keys: unknown[]; items?: unknown[]; blocks: __RipListBlock[] };"
-].join(`
-`);
-var COERCER_TYPE = "{ <F extends (value: string) => unknown>(name: string, fn: F, options?: { raw?: false }): F; <F extends (value: unknown) => unknown>(name: string, fn: F, options: { raw: boolean }): F }";
-var ORM_TYPE_DECLS = [
-  "type __RipAdapterResult = { columns: { name: string; type?: string; duckdbType?: string; encoding?: string }[]; data: unknown[][]; rowCount?: number; rows?: number };",
-  "type __RipAdapterQuery = (sql: string, params?: unknown[] | null, options?: { signal?: AbortSignal | null; timeoutMs?: number | null }) => __RipAdapterResult | Promise<__RipAdapterResult>;",
-  "type __RipAdapter = { query: __RipAdapterQuery; begin?: (options?: unknown) => Promise<{ query: __RipAdapterQuery; commit: () => Promise<void>; rollback: () => Promise<void> }>; catalog?: (options?: { signal?: AbortSignal | null; timeoutMs?: number | null }) => Promise<Record<string, unknown>>; capabilities?: { tx?: boolean; ddlTransactional?: boolean } };",
-  "type __RipSequence = { name: string; start: number };"
-].join(`
-`);
-var ORM_SCHEMA_TYPE = "{ " + "transaction: { <T>(fn: () => T): Promise<Awaited<T>>; <T>(options: { on?: __RipAdapter; [option: string]: unknown }, fn: () => T): Promise<Awaited<T>> }; " + "connect: (options: string | { url: string; timeoutMs?: number | null }) => __RipAdapter; " + "setAdapter: (adapter: __RipAdapter) => void; " + "sequence: { (): __RipSequence | null; (name: null): null; (name: string, options?: { start?: number }): __RipSequence }; " + `registerCoercer: ${COERCER_TYPE}; ` + "plan: () => never; status: () => never; make: () => never; migrate: () => never; introspect: () => never" + " }";
-var RUNTIME_TABLE = [
-  {
-    key: "intrinsics",
-    names: ["__toPropertyKey", "__defineOwnDataProperty"],
-    generatedNames: ["__toPropertyKey", "__defineOwnDataProperty"],
-    types: {
-      __toPropertyKey: "(value: unknown) => string | symbol",
-      __defineOwnDataProperty: "<T extends object>(target: T, key: PropertyKey, value: unknown) => T"
-    },
-    url: new URL("./runtime/intrinsics.js", import.meta.url),
-    triggers: (sexpr, preds) => containsObjectComprehension(sexpr)
-  },
-  {
-    key: "vocab",
-    names: [],
-    url: new URL("./runtime/vocab.js", import.meta.url),
-    triggers: () => false
-  },
-  {
-    key: "schema",
-    names: ["__schema", "SchemaError", "registerCoercer"],
-    url: new URL("./runtime/schema.js", import.meta.url),
-    requires: ["vocab"],
-    triggers: (sexpr, preds) => containsSchema(sexpr),
-    decls: SCHEMA_TYPE_DECLS,
-    types: {
-      __schema: "(descriptor: unknown) => unknown",
-      SchemaError: "{ new (issues: __RipSchemaIssue[], schemaName?: string | null, schemaKind?: string | null): __RipSchemaError; prototype: __RipSchemaError }",
-      registerCoercer: COERCER_TYPE
-    }
-  },
-  {
-    key: "duckdb",
-    names: [],
-    url: new URL("./runtime/duckdb.js", import.meta.url),
-    triggers: () => false
-  },
-  {
-    key: "orm",
-    names: ["schema", "__schemaSetAdapter"],
-    url: new URL("./runtime/orm.js", import.meta.url),
-    requires: ["schema", "duckdb", "vocab"],
-    triggers: (sexpr, preds) => containsModelSchema(sexpr),
-    decls: ORM_TYPE_DECLS,
-    types: {
-      schema: ORM_SCHEMA_TYPE,
-      __schemaSetAdapter: "(adapter: __RipAdapter) => void"
-    }
-  },
-  {
-    key: "reactive",
-    names: [
-      "__state",
-      "__computed",
-      "__effect",
-      "__batch",
-      "__readonly",
-      "__setErrorHandler",
-      "__handleError",
-      "__catchErrors",
-      "getEffectSignal"
-    ],
-    generatedNames: ["__state", "__computed", "__effect", "__batch"],
-    url: new URL("./runtime/reactive.js", import.meta.url),
-    triggers: (sexpr, preds) => containsReactive(sexpr, preds.isTrigger),
-    types: {
-      __state: "<T>(value: T | { value: T; read(): T }) => { value: T; read(): T; touch(): void }",
-      __computed: "<T>(fn: () => T) => { readonly value: T; read(): T }",
-      __effect: "(fn: () => unknown) => () => void",
-      __batch: "<T>(fn: () => T) => T",
-      __readonly: "<T>(value: T) => Readonly<{ value: T }>",
-      __setErrorHandler: "(handler: ((error: unknown) => void) | null) => ((error: unknown) => void) | null",
-      __handleError: "(error: unknown) => void",
-      __catchErrors: "<F extends (...args: never[]) => unknown>(fn: F) => (this: ThisParameterType<F>, ...args: Parameters<F>) => ReturnType<F> | undefined",
-      getEffectSignal: "() => AbortSignal | null"
-    }
-  },
-  {
-    key: "stdlib",
-    names: [
-      "abort",
-      "assert",
-      "exit",
-      "kind",
-      "noop",
-      "p",
-      "pp",
-      "pj",
-      "pr",
-      "raise",
-      "rand",
-      "sleep",
-      "toMatchable",
-      "todo",
-      "warn",
-      "zip"
-    ],
-    generatedNames: ["toMatchable"],
-    url: new URL("./runtime/stdlib.js", import.meta.url),
-    triggers: (sexpr, preds) => containsMatchRead(sexpr),
-    types: {
-      abort: "(msg?: string) => never",
-      assert: "(v: unknown, msg?: string) => void",
-      exit: "(code?: number) => never",
-      kind: "(v: unknown) => string",
-      noop: "() => void",
-      p: "(...args: unknown[]) => void",
-      pp: "<T>(v: T) => T",
-      pj: "<T>(v: T) => T",
-      pr: "<T>(v: T) => T",
-      raise: "{ (message: unknown): never; <A>(ctor: new (arg: A) => unknown, arg: A): never }",
-      rand: "(a?: number, b?: number) => number",
-      sleep: "(ms: number) => Promise<void>",
-      toMatchable: "(v: unknown) => string",
-      todo: "(msg?: string) => never",
-      warn: "(...args: unknown[]) => void",
-      zip: "<T extends unknown[][]>(...arrays: T) => { [I in keyof T]: T[I] extends (infer E)[] ? E : never }[]"
-    }
-  },
-  {
-    key: "components",
-    names: [
-      "setContext",
-      "getContext",
-      "hasContext",
-      "__Component",
-      "__pushComponent",
-      "__popComponent",
-      "__clsx",
-      "__style",
-      "__lis",
-      "__reconcile",
-      "__transition",
-      "__handleComponentError",
-      "__gateBind",
-      "__detach",
-      "__heldSlot",
-      "__reportChildFailure",
-      "__hostOf",
-      "__ownerFrame",
-      "__pushOwner",
-      "__popOwner",
-      "__detachRef"
-    ],
-    generatedNames: [
-      "setContext",
-      "getContext",
-      "__Component",
-      "__pushComponent",
-      "__popComponent",
-      "__clsx",
-      "__style",
-      "__reconcile",
-      "__transition",
-      "__gateBind",
-      "__detach",
-      "__heldSlot",
-      "__reportChildFailure",
-      "__hostOf",
-      "__ownerFrame",
-      "__pushOwner",
-      "__popOwner",
-      "__detachRef"
-    ],
-    decls: COMPONENTS_TYPE_DECLS,
-    types: {
-      setContext: "(key: string, value: unknown) => void",
-      getContext: "<P extends __RipProvider, K extends keyof __RipOffers<P>>(provider: __RipProviding<P>, key: K) => __RipOffers<P>[K]",
-      hasContext: "<P extends __RipProvider>(provider: __RipProviding<P>, key: keyof __RipOffers<P>) => boolean",
-      __clsx: CLSX_TYPE,
-      __style: STYLE_FN_TYPE,
-      __Component: { class: COMPONENT_CLASS, decls: `${OWNER_FRAME_DECLS}
-${TEARDOWN_DECL}` },
-      __pushComponent: "(component: __Component | null) => __Component | null",
-      __popComponent: "(prev: __Component | null) => void",
-      __lis: "(arr: readonly number[]) => number[]",
-      __reconcile: "<C, T, O extends unknown[]>(anchor: Node | null | undefined, state: __RipListState, items: readonly T[], ctx: C, factory: (ctx: C, item: T, index: number, ...outer: O) => __RipListBlock, keyFn: ((item: T, index: number) => unknown) | null | undefined, ...outer: O) => void",
-      __transition: "(el: Element, name: string, dir: string, done?: (() => void) | null) => void",
-      __handleComponentError: "(error: unknown, component: __Component | null | undefined) => void",
-      __gateBind: "<T>(self: __Component, index: number) => { readonly value: T; read(): T }",
-      __detach: "(node: Node | null | undefined) => void",
-      __heldSlot: "(children: unknown) => Node",
-      __reportChildFailure: "(name: string, error: unknown) => void",
-      __hostOf: "(inst: __Component, event: string) => Element",
-      ...OWNER_FRAME_TYPES
-    },
-    url: new URL("./runtime/components.js", import.meta.url),
-    requires: "reactive",
-    triggers: (sexpr, preds) => containsComponentDecl(sexpr, preds.isComponent)
-  }
-];
-var faceClassName = (name) => `__Rip${name.replace(/^_+/, "")}`;
-var _faceRuntimeType = (name, signature, types = {}) => {
-  if (typeof signature === "object")
-    return `typeof ${faceClassName(name)}`;
-  let text = signature;
-  for (const [cls, sig] of Object.entries(types)) {
-    if (typeof sig === "object")
-      text = text.replace(new RegExp(`\\b${cls}\\b`, "g"), faceClassName(cls));
-  }
-  return text;
+var RUNTIME_TABLE = locateRuntimes(new URL("./runtime/", import.meta.url));
+var STRUCTURAL_TRIGGERS = {
+  objectComprehension: (sexpr) => containsObjectComprehension(sexpr),
+  schema: (sexpr) => containsSchema(sexpr),
+  modelSchema: (sexpr) => containsModelSchema(sexpr),
+  reactive: (sexpr, preds) => containsReactive(sexpr, preds.isTrigger),
+  matchRead: (sexpr) => containsMatchRead(sexpr),
+  component: (sexpr, preds) => containsComponentDecl(sexpr, preds.isComponent)
 };
-var _faceClassDecls = (types) => Object.entries(types ?? {}).filter(([, signature]) => typeof signature === "object").map(([name, { class: body, decls }]) => {
-  const text = body.replace(new RegExp(`\\b${name}\\b`, "g"), faceClassName(name));
-  return `${decls ? `${decls}
-` : ""}declare class ${faceClassName(name)} ${text}`;
-}).join(`
-`);
 var runtimeBodies = new Map;
 var RUNTIME_EXPORT_LINE = /^export \{([^}]*)\};\s*$/gm;
 var runtimeText = (rt) => {
@@ -24946,7 +24981,6 @@ var runtimeText = (rt) => {
   }
   return runtimeBodies.get(rt.key);
 };
-var runtimeRequires = (rt) => rt.requires == null ? [] : Array.isArray(rt.requires) ? rt.requires : [rt.requires];
 var referencesNames = (sexpr, names, stores, isDecl = () => false) => {
   if (names.size === 0)
     return false;
@@ -25517,7 +25551,7 @@ function emitWith(parseResult, { source = "", runtimeDelivery = "none", face = "
   const runtimes = new Set;
   for (const rt of RUNTIME_TABLE) {
     const unboundSet = new Set(rt.names.filter((n) => !bound.has(n)));
-    if (trees.some(({ tree, stores, isDecl, isTrigger, isComponent }) => rt.triggers?.(tree, { isTrigger, isComponent }) || referencesNames(tree, unboundSet, stores, isDecl))) {
+    if (trees.some(({ tree, stores, isDecl, isTrigger, isComponent }) => rt.trigger !== null && STRUCTURAL_TRIGGERS[rt.trigger](tree, { isTrigger, isComponent }) || referencesNames(tree, unboundSet, stores, isDecl))) {
       runtimes.add(rt.key);
     }
   }
@@ -25596,7 +25630,7 @@ function emitWith(parseResult, { source = "", runtimeDelivery = "none", face = "
         emitter.runtimeImports.push([start, builder.offset]);
       } else {
         if (face === "ts" && unit.types) {
-          const decls = [unit.decls, _faceClassDecls(unit.types)].filter(Boolean).join(`
+          const decls = [unit.decls, faceClassDecls(unit.types)].filter(Boolean).join(`
 `);
           if (decls !== "")
             builder.tsOnly(() => builder.emit(`${decls}
@@ -25605,7 +25639,7 @@ function emitWith(parseResult, { source = "", runtimeDelivery = "none", face = "
             emitter._needsCssProperties = true;
         }
         builder.emit(`const { ${bindings.map(({ name, local }) => name === local ? name : `${name}: ${local}`).join(", ")} }`);
-        const types = face === "ts" && unit.types ? `{ ${bindings.map(({ name }) => `${name}: ${_faceRuntimeType(name, unit.types[name] ?? "any", unit.types)}`).join("; ")} }` : null;
+        const types = face === "ts" && unit.types ? `{ ${bindings.map(({ name }) => `${name}: ${faceRuntimeType(name, unit.types[name] ?? "any", unit.types)}`).join("; ")} }` : null;
         if (types !== null && types.includes("__RipClassValue"))
           emitter._needsClassValue = true;
         if (types !== null && types.includes("__RipCSSProperties"))
@@ -35051,7 +35085,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "8e0ad9ec08ec6f97";
+var compilerBuild = () => "9b68de7a389c7bde";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

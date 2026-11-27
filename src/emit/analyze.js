@@ -37,7 +37,7 @@ import { schemaCodeSites, paramsOf } from '../schema.js';
 import { identifierMatches, isCustomElementName, isIdentifierName } from '../ident.js';
 import { TEMPLATE_TAGS } from '../dom.js';
 import { isComponentName } from '../render.js';
-import { _runtimeTable } from '../emitter.js';
+import { RUNTIMES, runtimeRequires, bareSpecifier } from './runtimes.js';
 
 // ── the mode word ────────────────────────────────────────────────────
 // RN: the free-reference walk's position (off, expression, binding
@@ -66,24 +66,13 @@ const TYPE_ROLES = new Set(['annotation', 'returnType', 'typeParams', 'declarati
 const RENDER_BINDING_HEADS = new Set(['=', '+=', '-=', '*=', '/=', '%=', '**=', '&&=', '||=', '??=']);
 const AMBIENT_KINDS = new Set(['plain', 'state', 'computed', 'effect', 'readonly', 'import', 'class', 'def']);
 
-// Each runtime's structural trigger, by key: the construct whose
-// emission calls the runtime whether or not the source names it.
-const TRIGGERS = {
-  intrinsics: (t) => t.objectComprehension,
-  vocab: () => false,
-  schema: (t) => t.schema,
-  duckdb: () => false,
-  orm: (t) => t.modelSchema,
-  reactive: (t) => t.reactive,
-  stdlib: (t) => t.matchRead,
-  components: (t) => t.component,
-};
+// A word's flags in Analysis.words: every word spelled is an atom; a
+// word in a use position, a use; a word read as a free reference, free.
+const W_ATOM = 1, W_USED = 2, W_FREE = 4;
 
 // The shared empty collections a scope holds until it records something.
 const EMPTY_MAP = Object.freeze(new Map());
 const EMPTY_SET = Object.freeze(new Set());
-
-const requiresOf = (rt) => (rt.requires == null ? [] : (Array.isArray(rt.requires) ? rt.requires : [rt.requires]));
 
 const isHtmlTag = (name) => {
   const tag = String(name).split('#')[0];
@@ -206,15 +195,21 @@ class Scope {
     this.implicitIt = false;
     this.decls = null;
     this.rejection = null;
+    // The statement-level facts, gathered as the walk meets each live
+    // statement: def/class declarations, class-valued bindings,
+    // exported plain consts, import specifiers, and (for a scope with
+    // no owner node, which its statements identify) the statement ids.
+    this.declared = null;
+    this.classes = EMPTY_MAP;
+    this.exportedConst = EMPTY_MAP;
+    this.importSpecs = EMPTY_MAP;
+    this.stmtIds = owner === null ? [] : null;
   }
 
-  get stmts() {
-    return Array.isArray(this.body) && !isNodeP(this.body) ? this.body : bodyStmts(this.body);
-  }
-
+  // The first declaration of a name is its declaring node.
   record(set, name, node) {
     if (this[set] === EMPTY_MAP) this[set] = new Map();
-    this[set].set(name, node);
+    if (!this[set].has(name)) this[set].set(name, node);
   }
 }
 
@@ -223,9 +218,8 @@ class Analysis {
     this.stores = stores;
     this.source = source;
     this.face = face;
-    this.atoms = new Set();
-    this.used = new Set();
-    this.free = new Set();
+    this.words = new Map();
+    this.importBound = [];
     this.shadow = new Map();
     this.trig = { schema: false, modelSchema: false, reactive: false, component: false, objectComprehension: false, matchRead: false };
     this.trees = [];         // [{ names: Set, atoms }] in delivery order
@@ -378,7 +372,7 @@ class Analysis {
     const hasSpec = !isNone(x[2]);
     const hasExtra = !isNone(x[3]);
     if (!hasSpec && !hasExtra) return;
-    const specifier = src.replace(/^['"`]|['"`]$/g, '');
+    const specifier = bareSpecifier(src);
     for (const spec of [x[2], x[3]]) {
       if (isNone(spec)) continue;
       if (Array.isArray(spec) && spec.length === 0 && spec === x[2]) continue;
@@ -410,6 +404,7 @@ class Analysis {
     this.visitWord('program', USED | RN_EXPR);
     for (const s of stmts) {
       const isLive = !isErased(s);
+      if (isLive) this.noteStmt(program, s);
       this.visit(s, USED | RN_EXPR | HOIST, isLive ? program : null, isLive ? program : null);
     }
     this.endScope(program);
@@ -422,7 +417,7 @@ class Analysis {
     this.tree = tree;
     this.shadow = new Map();
     this.itScope = null;
-    for (const atom of atoms) this.atoms.add(atom);
+    for (const atom of atoms) this.flag(atom, W_ATOM);
   }
 
   endTree() {
@@ -433,19 +428,22 @@ class Analysis {
   }
 
   // ── words ──────────────────────────────────────────────────────────
+  flag(w, bits) {
+    const f = this.words.get(w);
+    if (f === undefined) this.words.set(w, bits);
+    else if ((f | bits) !== f) this.words.set(w, f | bits);
+  }
+
   visitWord(w, m) {
-    if (m & RNONLY) {
-      const rn = m & RN;
-      if ((rn === RN_EXPR || (rn === RN_RENDER && !isTagWord(w))) && !this.shadow.has(w)) this.free.add(w);
-      return;
-    }
-    this.atoms.add(w);
-    if (m & USED) this.used.add(w);
     const rn = m & RN;
-    if (rn === RN_EXPR || (rn === RN_RENDER && !isTagWord(w))) {
-      if (!this.shadow.has(w)) this.free.add(w);
-    }
-    if (w === 'it' && this.itScope !== null && !(m & NOIT)) this.itScope.bareIt = true;
+    let bits = (m & RNONLY) ? 0 : W_ATOM | ((m & USED) ? W_USED : 0);
+    if ((rn === RN_EXPR || (rn === RN_RENDER && !isTagWord(w))) && (this.shadow.size === 0 || !this.shadow.has(w))) bits |= W_FREE;
+    if (bits !== 0) this.flag(w, bits);
+    if (w === 'it' && this.itScope !== null && !(m & (NOIT | RNONLY))) this.itScope.bareIt = true;
+  }
+
+  free(w) {
+    if (!this.shadow.has(w)) this.flag(w, W_FREE);
   }
 
   // The alias-binding walk's pattern names, recorded in the current
@@ -614,6 +612,10 @@ class Analysis {
   // ── imports ────────────────────────────────────────────────────────
   visitImport(x, m, rs) {
     const names = this.importedNames(x);
+    if (m & USED) {
+      const id = this.idOf(x);
+      if (id === null || this.stores.role(id, 'typeOnly') === null) for (const n of names) this.importBound.push(n);
+    }
     if (!(m & NORAB)) for (const n of names) this.tree.names.add(n);
     if (rs !== null) for (const n of names) this.auth(rs, n, 'import', x);
     const w = (m & ~(RN | USED)) | NOIT;
@@ -677,16 +679,23 @@ class Analysis {
   // A render children block (childrenFuncs) is inlined into its render
   // and is no scope. `rnRender` reads the body as render statements for
   // the free-reference walk (a tag call's children).
+  //
+  // Scope order is emission order: a function opens its own scope
+  // before the scopes inside its parameter defaults (it checks its body,
+  // then emits its parameters); a method emits its parameters first,
+  // as a def does.
   visitFunc(x, m, cs, rs, as, rnRender = false) {
     const params = x[2];
     const body = x[3];
     this.headWord(x[0], m);
-    this.visitParams(params, m);
     let scope = null;
-    if (!this.childrenFuncs.has(x)) {
+    const scoped = !this.childrenFuncs.has(x);
+    if (as === 'method') this.visitParams(params, m);
+    if (scoped) {
       scope = this.openScope(x, body, params, false, m);
       scope.implicitIt = as !== 'method' && params.length === 0;
     }
+    if (as !== 'method') this.visitParams(params, m);
     this.visitBody(body, m, scope, params, 'func', rnRender ? RN_RENDER : RN_EXPR);
   }
 
@@ -714,9 +723,11 @@ class Analysis {
       for (let i = 2; i < body.length; i++) {
         const s = body[i];
         const live = scope !== null && !isErased(s);
+        if (live) this.noteStmt(scope, s);
         this.visit(s, m, live ? scope : null, live ? scope : null);
       }
     } else {
+      if (scope !== null) this.noteStmt(scope, body);
       this.visit(body, m, scope, scope);
     }
   }
@@ -928,6 +939,7 @@ class Analysis {
     // effectValue's single expression: checked as its own scope, no
     // frame.
     const scope = this.openScope(x, [body], [], true, m);
+    this.noteStmt(scope, body);
     this.visit(body, bm, null, scope);
     this.endScope(scope);
   }
@@ -1192,7 +1204,7 @@ class Analysis {
     const el = emitterElements(body)[1];
     if (el === undefined) return;
     if (el.word !== undefined) {
-      if (!this.shadow.has(el.word)) this.free.add(el.word);
+      this.free(el.word);
     } else if (el.node !== undefined) {
       this.visit(el.node, (c & ~(RN | USED | HOIST | HMATCH | CNEST | RNEST)) | RN_EXPR | NORAB | RNONLY, null, null);
     }
@@ -1418,7 +1430,7 @@ class Analysis {
     this.visitWord('do-iife', c & ~RN);
     if (m & RN) {
       for (const n of this.paramBindings(fn[2], new Set())) {
-        if (!this.shadow.has(n)) this.free.add(n);
+        this.free(n);
       }
     }
     this.visit(fn, (c & ~RN) | ((m & RN) ? RN_EXPR : 0), cs, rs);
@@ -1590,7 +1602,10 @@ class Analysis {
     this.beginTree(names, stmts);
     const scope = value ? null : this.openScope(null, stmts, names);
     this.visitWord('program', RN_EXPR);
-    for (const s of stmts) this.visit(s, RN_EXPR, scope, scope);
+    for (const s of stmts) {
+      if (scope !== null) this.noteStmt(scope, s);
+      this.visit(s, RN_EXPR, scope, scope);
+    }
     if (scope !== null) this.endScope(scope);
     this.endTree();
   }
@@ -1699,7 +1714,7 @@ class Analysis {
     // its def/class declarations and its imports.
     const hoist = new Map(this.hoistTargets);
     for (const n of this.hoistReactive) hoist.delete(n);
-    for (const n of declaredNames(stmts)) hoist.delete(n);
+    for (const [n] of declaredNames(stmts)) hoist.delete(n);
     const imports = [];
     for (const s of stmts) if (isNodeP(s) && this.isModuleImport(s)) this.importedNames(s, imports);
     for (const n of imports) hoist.delete(n);
@@ -1745,24 +1760,25 @@ class Analysis {
       for (const atom of t.atoms) for (const n of this.patternNames(atom, [], true)) aliasUsed.add(n);
     }
     for (const { name } of ambient) aliasUsed.add(name);
-    const atoms = this.atoms;
+    const atoms = new Set(this.words.keys());
     for (const { name } of ambient) atoms.add(name);
 
     // The delivery decision.
     const deliveryBound = new Set(bound);
     for (const { name } of ambient) deliveryBound.add(name);
-    const table = _runtimeTable();
     const runtimes = new Set();
-    for (const rt of table) {
-      const trigger = TRIGGERS[rt.key];
-      if (trigger === undefined) throw new Error(`analyze: the runtime '${rt.key}' has no structural trigger reading`);
-      if (trigger(this.trig) || rt.names.some((n) => !deliveryBound.has(n) && this.free.has(n))) runtimes.add(rt.key);
+    for (const rt of RUNTIMES) {
+      if (rt.trigger !== null && !Object.hasOwn(this.trig, rt.trigger)) {
+        throw new Error(`analyze: the runtime '${rt.key}' names the structural trigger '${rt.trigger}', which analysis does not detect`);
+      }
+      const triggered = rt.trigger !== null && this.trig[rt.trigger];
+      if (triggered || rt.names.some((n) => !deliveryBound.has(n) && ((this.words.get(n) ?? 0) & W_FREE) !== 0)) runtimes.add(rt.key);
     }
     for (let grew = true; grew;) {
       grew = false;
-      for (const rt of table) {
+      for (const rt of RUNTIMES) {
         if (!runtimes.has(rt.key)) continue;
-        for (const dep of requiresOf(rt)) if (!runtimes.has(dep)) { runtimes.add(dep); grew = true; }
+        for (const dep of runtimeRequires(rt)) if (!runtimes.has(dep)) { runtimes.add(dep); grew = true; }
       }
     }
 
@@ -1782,93 +1798,89 @@ class Analysis {
     };
   }
 
-  scopeFacts(s) {
-    const stmts = s.stmts;
-    const ids = (map) => (map.size === 0 ? EMPTY_MAP : new Map([...map].map(([n, node]) => [n, this.idOf(node)])));
-    const declared = declaredNames(stmts);
-    let own = EMPTY_MAP;
-    if (declared.length || s.handles.size || s.readonly.size) {
-      own = new Map();
-      for (const n of declared) own.set(n, null);
-      for (const [n, node] of s.handles) own.set(n, this.idOf(node));
-      for (const [n, node] of s.readonly) own.set(n, this.idOf(node));
-    }
-    let classes = EMPTY_MAP;
-    let exportedConst = EMPTY_MAP;
-    let importSpecs = EMPTY_MAP;
-    const classDecl = (st) => {
-      if (!isNodeP(st)) return;
-      const hv = headOf(st);
-      if ((hv !== '=' && hv !== 'void-assign') || st.length !== 4) return;
-      const n = wordOf(st[2]);
-      if (n === undefined) return;
-      const v = st[3];
-      if (isNodeP(v) && (v[0] === 'class' || v[0] === 'component')) {
-        if (classes === EMPTY_MAP) classes = new Map();
-        classes.set(n, this.idOf(st));
-      }
-    };
-    for (const st of stmts) {
-      classDecl(st);
-      if (isNodeP(st) && st[0] === 'export' && isStruct(st[2])) classDecl(st[2]);
-      if (isNodeP(st) && st[0] === 'export' && isNodeP(st[2])) {
-        const spec = st[2];
+  // A live statement of a scope: its statement-level facts.
+  noteStmt(scope, st) {
+    if (scope.stmtIds !== null) scope.stmtIds.push(wordOf(st) === undefined ? this.idOf(st) : null);
+    if (!isNodeP(st)) return;
+    const h = st[0];
+    if (h === 'export') {
+      const spec = st[2];
+      if (isStruct(spec)) this.noteDeclared(scope, spec);
+      if (isNodeP(spec)) {
         const hv = headOf(spec);
         if ((hv === '=' || hv === 'void-assign') && spec.length === 4 && wordOf(spec[2]) !== undefined) {
-          if (exportedConst === EMPTY_MAP) exportedConst = new Map();
-          exportedConst.set(wordOf(spec[2]), this.idOf(spec));
+          if (scope.exportedConst === EMPTY_MAP) scope.exportedConst = new Map();
+          scope.exportedConst.set(wordOf(spec[2]), this.idOf(spec));
         }
       }
-      if (isNodeP(st) && st[0] === 'import' && (!isNone(st[2]) || !isNone(st[3]) || !isNone(st[4]))) {
-        if (importSpecs === EMPTY_MAP) importSpecs = new Map();
-        this.importSpecs(st, importSpecs);
+    } else if (h === 'import') {
+      if (!isNone(st[2]) || !isNone(st[3]) || !isNone(st[4])) {
+        if (scope.importSpecs === EMPTY_MAP) scope.importSpecs = new Map();
+        this.importSpecs(st, scope.importSpecs);
       }
+    }
+    this.noteDeclared(scope, st);
+  }
+
+  // A def or class declaration, or a binding of a class or component
+  // value, at a scope's own level (a statement, or an exported spec).
+  noteDeclared(scope, st) {
+    if (!isNodeP(st)) return;
+    const hv = headOf(st);
+    if (hv === 'class' || hv === 'def' || hv === 'void-def') {
+      const n = isNone(st[2]) ? undefined : wordOf(st[2]);
+      if (n !== undefined) (scope.declared ??= []).push([n, st]);
+      return;
+    }
+    if ((hv !== '=' && hv !== 'void-assign') || st.length !== 4) return;
+    const n = wordOf(st[2]);
+    const v = st[3];
+    if (n !== undefined && isNodeP(v) && (v[0] === 'class' || v[0] === 'component')) {
+      if (scope.classes === EMPTY_MAP) scope.classes = new Map();
+      scope.classes.set(n, this.idOf(st));
+    }
+  }
+
+  scopeFacts(s) {
+    const ids = (map) => (map.size === 0 ? EMPTY_MAP : new Map([...map].map(([n, node]) => [n, this.idOf(node)])));
+    let own = EMPTY_MAP;
+    if (s.declared !== null || s.handles.size || s.readonly.size) {
+      own = new Map();
+      if (s.declared !== null) for (const [n, node] of s.declared) own.set(n, this.idOf(node));
+      for (const [n, node] of s.handles) own.set(n, this.idOf(node));
+      for (const [n, node] of s.readonly) own.set(n, this.idOf(node));
     }
     return {
       owner: s.owner,
       ownerId: this.idOf(s.owner),
-      stmtIds: stmts.map((x) => (wordOf(x) === undefined ? this.idOf(x) : null)),
+      stmtIds: s.stmtIds,
       checkOnly: s.checkOnly,
       reactive: ids(s.reactive),
       computed: ids(s.computed),
       readonly: ids(s.readonly),
       handles: ids(s.handles),
       own,
-      classes,
-      importSpecs: importSpecs.size ? importSpecs : EMPTY_MAP,
-      exportedConst,
+      classes: s.classes,
+      importSpecs: s.importSpecs.size ? s.importSpecs : EMPTY_MAP,
+      exportedConst: s.exportedConst,
       decls: s.decls === null ? null : s.decls.size === 0 ? EMPTY_MAP
         : new Map([...s.decls].filter(([, f]) => f.auth).map(([n, f]) => [n, { kind: f.kind, nodeId: this.idOf(f.node) }])),
     };
   }
 
   // Imported names that appear in type text and nowhere as a value
-  // word (the emitter's collectTypeOnlyImports).
+  // word (the emitter's collectTypeOnlyImports): the value imports the
+  // walk met, against the identifiers of every role span of type text.
   typeOnlyImports() {
     const out = new Set();
-    const boundNames = [];
-    const walk = (x) => {
-      if (!isNodeP(x)) {
-        if (Array.isArray(x)) for (const el of x) walk(el);
-        return;
-      }
-      if (x[0] === 'import' && this.isModuleImport(x)) {
-        const id = this.idOf(x);
-        if (id === null || this.stores.role(id, 'typeOnly') === null) this.importedNames(x, boundNames);
-        return;
-      }
-      for (let i = 2; i < x.length; i++) walk(x[i]);
-    };
-    walk(this.rawStmts);
-    if (boundNames.length === 0 || !this.source) return out;
+    const unused = this.importBound.filter((n) => ((this.words.get(n) ?? 0) & W_USED) === 0);
+    if (unused.length === 0 || !this.source) return out;
     const inTypes = new Set();
-    for (const n of this.stores.nodes ?? []) {
-      for (const r of this.stores.rolesOf(n.nodeId)) {
-        if (!TYPE_ROLES.has(r.role) || typeof r.sourceStart !== 'number') continue;
-        for (const mt of identifierMatches(this.source.slice(r.sourceStart, r.sourceEnd))) inTypes.add(mt[0]);
-      }
+    for (const r of this.stores.roles) {
+      if (!TYPE_ROLES.has(r.role) || typeof r.sourceStart !== 'number') continue;
+      for (const mt of identifierMatches(this.source.slice(r.sourceStart, r.sourceEnd))) inTypes.add(mt[0]);
     }
-    for (const name of boundNames) if (inTypes.has(name) && !this.used.has(name)) out.add(name);
+    for (const name of unused) if (inTypes.has(name)) out.add(name);
     return out;
   }
 
@@ -1907,14 +1919,6 @@ function schemaFail(message, at) {
   throw err;
 }
 
-// A body's statements: a block's, or the one expression.
-function bodyStmts(body) {
-  if (!(isNodeP(body) && body[0] === 'block')) return [body];
-  const out = [];
-  for (let i = 2; i < body.length; i++) if (!isErased(body[i])) out.push(body[i]);
-  return out;
-}
-
 // Whole statements that compile to nothing: type declarations, bare
 // typed forwards, overload signatures.
 function isErased(s) {
@@ -1922,14 +1926,15 @@ function isErased(s) {
   return s[0] === 'type-decl' || (s[0] === 'typed-var' && s.length === 4) || s[0] === 'def-sig';
 }
 
-// The def and class names a statement list declares at its own level.
+// The def and class names a statement list declares at its own level,
+// each [name, declaring node].
 function declaredNames(stmts) {
   const names = [];
   const declared = (s) => {
     if (!isNodeP(s)) return;
     const hv = headOf(s);
-    if (hv === 'class' && !isNone(s[2]) && wordOf(s[2]) !== undefined) names.push(wordOf(s[2]));
-    if ((hv === 'def' || hv === 'void-def') && wordOf(s[2]) !== undefined) names.push(wordOf(s[2]));
+    if (hv === 'class' && !isNone(s[2]) && wordOf(s[2]) !== undefined) names.push([wordOf(s[2]), s]);
+    if ((hv === 'def' || hv === 'void-def') && wordOf(s[2]) !== undefined) names.push([wordOf(s[2]), s]);
   };
   for (const s of stmts) {
     declared(s);

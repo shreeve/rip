@@ -21,9 +21,9 @@
 //   walked as delivery trees;
 //   per scope v1 opens: the frame sets (reactive, computed, readonly,
 //   handles, the scope's own const and declaration bindings, classes,
-//   importSpecs, exportedConst) and the authoritative declarations the
-//   redeclaration check settled.
-import { parseSource } from '../../src/compiler.js';
+//   importSpecs, exportedConst), each name with its declaring node id,
+//   and the authoritative declarations the redeclaration check settled.
+import { parseSource, CompileError } from '../../src/compiler.js';
 import { emit as emitV1 } from '../../src/emitter.js';
 import { analyze } from '../../src/emit/analyze.js';
 import { Stores } from '../../src/stores.js';
@@ -65,8 +65,18 @@ export function v1Facts(parsed, options) {
   const stores = new Stores(parsed.result.stores);
   const idOf = (x) => (Array.isArray(x) ? stores.idOf(x) : null);
   const facts = { frames: new Map(), decls: new Map(), trees: [] };
+  // Each collector call's declaring nodes, name → node id (the first
+  // declaration of a name, as the collector's set keeps it).
+  const declaring = new Map();
   const sink = (kind, key, value) => {
     switch (kind) {
+      case 'collect': declaring.set(key, new Map()); break;
+      case 'declares': {
+        const [node, name] = value;
+        const into = declaring.get(key);
+        if (!into.has(name)) into.set(name, idOf(node));
+        break;
+      }
       case 'atoms': facts.atoms = sortedNames(value); break;
       case 'trees':
         facts.trees = value.slice(1).map((t) => ({ stmtIds: t.tree.slice(1).map(idOf), atoms: [...t.atoms] }));
@@ -80,10 +90,15 @@ export function v1Facts(parsed, options) {
       case 'appAccessors': facts.appAccessors = { ...value }; break;
       case 'frame': {
         const k = scopeKey(idOf(key.owner), key.stmts.map(idOf));
+        const ids = (set, collector) => [...set].map((n) => [n, declaring.get(collector)?.get(n) ?? null]);
+        const own = new Map();
+        for (const [n, id] of ids(key.declared, 'declared')) own.set(n, id);
+        for (const [n, id] of ids(value.handles, 'handles')) own.set(n, id);
+        for (const [n, id] of ids(value.readonly, 'readonly')) own.set(n, id);
         const text = JSON.stringify(frameText({
-          reactive: [...value.reactive], computed: [...value.computed], readonly: [...value.readonly],
-          handles: [...value.handles], own: new Set([...key.declared, ...value.handles, ...value.readonly]),
-          classes: [...value.classes], importSpecs: [...value.importSpecs], exportedConst: [...value.exportedConst],
+          reactive: ids(value.reactive, 'reactive'), computed: ids(value.computed, 'computed'), readonly: ids(value.readonly, 'readonly'),
+          handles: ids(value.handles, 'handles'), own,
+          classes: ids(value.classes, 'classes'), importSpecs: [...value.importSpecs], exportedConst: ids(value.exportedConst, 'exportedConst'),
         }));
         const prior = facts.frames.get(k);
         facts.frames.set(k, prior !== undefined && prior !== text ? `CONFLICT ${prior} | ${text}` : text);
@@ -109,11 +124,12 @@ export function v1Facts(parsed, options) {
   }
 }
 
-// One frame's sets in a comparable spelling.
+// One frame's sets in a comparable spelling: each name with its
+// declaring node id, in the set's order (own sorted by name).
 function frameText(f) {
   return {
     reactive: f.reactive, computed: f.computed, readonly: f.readonly, handles: f.handles,
-    own: sortedNames(f.own), classes: f.classes,
+    own: [...f.own].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)), classes: f.classes,
     importSpecs: f.importSpecs.map(([n, s]) => [n, s.specifier, s.importedName]), exportedConst: f.exportedConst,
   };
 }
@@ -152,9 +168,9 @@ export function compareFacts(v1, v2) {
     const k = scopeKey(s.ownerId, s.stmtIds);
     if (!s.checkOnly) {
       frames.set(k, JSON.stringify(frameText({
-        reactive: [...s.reactive.keys()], computed: [...s.computed.keys()], readonly: [...s.readonly.keys()],
-        handles: [...s.handles.keys()], own: new Set(s.own.keys()), classes: [...s.classes.keys()],
-        importSpecs: [...s.importSpecs], exportedConst: [...s.exportedConst.keys()],
+        reactive: [...s.reactive], computed: [...s.computed], readonly: [...s.readonly],
+        handles: [...s.handles], own: s.own, classes: [...s.classes],
+        importSpecs: [...s.importSpecs], exportedConst: [...s.exportedConst],
       })));
     }
     decls.set(k, JSON.stringify([...s.decls].map(([n, d]) => [n, d.kind, d.nodeId])));
@@ -197,7 +213,11 @@ export function differential(inputs, { sets = Object.keys(OPTION_SETS) } = {}) {
     const at = `${face}\0${key}`;
     if (!parses.has(at)) {
       let parsed = null;
-      try { parsed = parseSource(src, { path, face }); } catch { /* the parser rejects it */ }
+      try {
+        parsed = parseSource(src, { path, face });
+      } catch (err) {
+        if (!(err instanceof CompileError)) throw err;
+      }
       parses.set(at, parsed);
     }
     return parses.get(at);

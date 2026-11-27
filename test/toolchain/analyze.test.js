@@ -167,6 +167,23 @@ describe('rejections, each exactly v1\'s', () => {
     rejectsLikeV1('f = ->\n  g = ->\n    y := 1\n    y := 2\n  if c\n    n := 1', "emitter: a reactive declaration ('n := …') must sit at module or function scope — inside a statement block it lowers to a block-scoped const, and any later read would unwrap '.value' off a binding that no longer exists");
   });
 
+  test('a function checks its body before the functions in its parameter defaults', () => {
+    const b = "emitter: 'b' is bound twice in one destructuring pattern — one binding per name; rename or drop the duplicate";
+    rejectsLikeV1('f = (a = (-> [c, c] = 1)) ->\n  [b, b] = 1', b);
+    rejectsLikeV1('f = ([a = (-> [c, c] = 1)]) ->\n  [b, b] = 1', b);
+    rejectsLikeV1('f = ({a = (-> [c, c] = 1)}) =>\n  [b, b] = 1', b);
+    rejectsLikeV1('do (a = (-> [c, c] = 1)) ->\n  [b, b] = 1', b);
+    rejectsLikeV1('f = (a = (-> (x := 1; x := 2))) ->\n  y := 1\n  y := 2', "emitter: 'y' was already declared as state on line 2 — assign with 'y = …' to update it, or choose a different name");
+  });
+
+  test('a def and a method emit their parameters first', () => {
+    const c = "emitter: 'c' is bound twice in one destructuring pattern — one binding per name; rename or drop the duplicate";
+    rejectsLikeV1('def f(a = (-> [c, c] = 1))\n  [b, b] = 1', c);
+    rejectsLikeV1('class A\n  m: (a = (-> [c, c] = 1)) ->\n    [b, b] = 1', c);
+    rejectsLikeV1('class A\n  constructor: (a = (-> [c, c] = 1)) ->\n    [b, b] = 1', c);
+    rejectsLikeV1('o = {m: (a = (-> [c, c] = 1)) ->\n  [b, b] = 1}', c);
+  });
+
   test('a single-expression effect is checked as its own scope', () => {
     rejectsLikeV1('~> (y := 1; y := 2)', "emitter: 'y' was already declared as state on line 1 — assign with 'y = …' to update it, or choose a different name");
   });

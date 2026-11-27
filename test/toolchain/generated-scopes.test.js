@@ -329,8 +329,8 @@ describe('generated-scope inventory', () => {
     // not an emission of one; classMethodForm spells '->' as the kind
     // of the method pair a class-body `def` reads as; analyze.js's
     // FUNC_HEADS names the two function heads its walk tests for.
-    // diagnostic 45 counts analyze.js's three block-nesting rejections,
-    // v1's messages restated where analysis now finds them.
+    // diagnostic 45 counts analyze.js's three block-nesting rejections:
+    // v1's messages, restated for the rejections analysis owns.
     // type 51: the runtime table's face signatures and the alias text
     // they reference, the schema and orm entries' among them —
     // `__schema`'s open return included — the components entry's
