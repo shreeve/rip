@@ -12,7 +12,6 @@ import { Stores } from '../../src/stores.js';
 import { Generator } from '../../src/grammar/solar.rip';
 import grammar from '../../src/grammar/grammar.rip';
 import { packageInputs, rowInputs } from '../support/consumer-hashes.js';
-import { splitData } from '../../src/compiler.js';
 import { join } from 'node:path';
 
 const parse = (src, opts = {}) => {
@@ -196,7 +195,7 @@ describe('a run the grammar cannot read stays opaque', () => {
       const p = Parser();
       p.lexer = makeParserLexer(path);
       let r;
-      try { r = p.parse(splitData(src).text); } catch { continue; }
+      try { r = p.parse(src); } catch { continue; }
       for (const v of r.stores?.entryValues ?? []) if (v[3][0] === 'none') found.add(v[2]);
     }
     expect([...found].sort()).toEqual([...PINNED.keys()].sort());

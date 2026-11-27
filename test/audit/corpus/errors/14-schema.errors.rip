@@ -14,6 +14,15 @@ Color = schema :enum
   :red
   :green
 
+Stamp = schema :mixin
+  at string
+
+Order = schema :shape
+  @mixin Stamp
+  qty!   integer, 1..99
+  code!  string, -> it.code
+  @ensure 'sized', (o) -> o.qty > 0
+
 # the schema declarations close above; the negatives follow
 
 wrongAssign: Person = { name: 42, tag: 'a' }

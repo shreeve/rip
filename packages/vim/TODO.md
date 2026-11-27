@@ -119,8 +119,6 @@ does not compile, and on a machine without `bun`/tsgo.
       in backticks. A backtick in value position is a hard lexer error
       (`src/lexer.js:2030`); the one legitimate use is a template-literal type
       (`src/lexer.js:2017-2027`).
-- [ ] `__DATA__` is unhandled in vscode and `packages/highlight`
-      (`src/compiler.js:178-193`). Vim covers it at `syntax/rip.vim:22`.
 
 ## Verifying a change
 

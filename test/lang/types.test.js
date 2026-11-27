@@ -1622,7 +1622,7 @@ describe('nested array types across the annotation surface', () => {
   });
 
   test('the schema-DSL rejection stands: one [] validates element-wise, deeper nesting rejects', () => {
-    expect(() => tokenize('X = schema :shape\n  tags! string[][]'))
+    expect(() => compile('X = schema :shape\n  tags! string[][]'))
       .toThrow(/nested array types.*are not supported/);
   });
 });

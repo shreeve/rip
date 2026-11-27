@@ -285,3 +285,26 @@ describe('construction keyword lockstep (editor grammars ⇄ compiler)', () => {
     expect(hljs).toContain('const NEW_TARGET = {');
   });
 });
+
+describe('__DATA__ marker lockstep (editor grammars ⇄ compiler)', () => {
+  const hljs = readFileSync(
+    path.resolve(import.meta.dir, '..', '..', '..', 'highlight', 'hljs-rip.js'), 'utf8');
+  const dataRule = grammar.patterns.find((p) => typeof p.begin === 'string' && p.begin.includes('__DATA__'));
+
+  test('each grammar opens the section on a line that is exactly the marker, CRLF included, to the end of the file', () => {
+    expect(grammar.patterns.find((p) => typeof p.begin === 'string')).toBe(dataRule);
+    expect(dataRule.begin).toBe('^(__DATA__)\\r?$');
+    expect(dataRule.end).toBe('(?!)');
+    expect(vimSyntax).toContain('start=/^__DATA__\\r\\=$/ end=/\\%$/');
+    expect(hljs).toContain('begin: /^__DATA__(?=\\r?$)/m,');
+    expect(hljs).toMatch(/contains: \[\n\s+DATA_SECTION,/);
+  });
+
+  test('the compiler reads the same marker: LF or CRLF, column 0, nothing else on the line', () => {
+    const run = (src) => compile(src, { runtimeDelivery: 'none' }).code;
+    expect(run('p DATA\n__DATA__\na\n')).toContain('return "a";');
+    expect(run('p DATA\r\n__DATA__\r\na\r\n')).toContain('return "a";');
+    expect(run('if a\n  __DATA__\n')).not.toContain('__data__');
+    expect(run('__DATA__ = 1\n')).not.toContain('__data__');
+  });
+});

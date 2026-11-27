@@ -1,6 +1,8 @@
-# Test: The __DATA__ marker — everything after a line that is exactly
-# __DATA__ is the program's DATA constant: raw text, never parsed,
-# bound below any leading imports.
+# Test: The __DATA__ marker — the lines after a line that is exactly
+# __DATA__ are the program's DATA: raw text, never parsed, the lines as
+# written (the file's final newline ends the file, not the text). DATA
+# is declared below any leading imports; the text closes the output in
+# a hoisted `__data__()`.
 
 import { test, code, fail, type } from '../support/testing.js'
 
@@ -8,7 +10,7 @@ test 'data marker length', '''
   DATA.length
   __DATA__
   test
-''', 5
+''', 4
 
 test 'data marker empty', '''
   DATA
@@ -111,19 +113,25 @@ test 'data marker env parsing', '''
   PORT=3000
 ''', '3000'
 
-test 'data marker payload keeps its newline', '''
+test 'data marker is the lines as written', '''
   x = DATA
   x.length
   __DATA__
   hello world
-''', 12
+''', 11
+
+# A file's final newline ends the file, not the text; a blank line
+# written before it stays.
+test 'data marker file newline is not text', "DATA\n__DATA__\na\nb\n", 'a\nb'
+test 'data marker written blank line stays', "DATA\n__DATA__\na\n\n", 'a\n'
+test 'data marker last line empty section', "DATA\n__DATA__\n", ''
 
 test 'data marker simple', '''
   x = DATA
   x
   __DATA__
   hello world
-  ''', 'hello world\n'
+  ''', 'hello world'
 
 test 'data marker template', '''
   name = 'Alice'
@@ -136,7 +144,7 @@ test 'data marker only', '''
   DATA
   __DATA__
   just data
-  ''', 'just data\n'
+  ''', 'just data'
 
 code 'data marker compiler', '''
   x = 42
@@ -144,9 +152,12 @@ code 'data marker compiler', '''
   __DATA__
   test data
   ''', '''
-  const DATA = "test data\\n";
+  let DATA = __data__();
   let x = 42;
   console.log(DATA);
+  function __data__() {
+    return "test data";
+  }
   '''
 
 code 'data marker hoisting', '''
@@ -154,6 +165,143 @@ code 'data marker hoisting', '''
   __DATA__
   hoisted!
   ''', '''
-  const DATA = "hoisted!\\n";
+  let DATA = __data__();
   console.log(DATA);
+  function __data__() {
+    return "hoisted!";
+  }
   '''
+
+# The section's text closes the output, after every statement; DATA
+# opens it below the leading imports.
+code 'data marker text closes the output', '''
+  import { a } from './a.js'
+  b = a DATA
+  __DATA__
+  x
+  ''', '''
+  import { a } from './a.js';
+  let DATA = __data__();
+  let b = a(DATA);
+  function __data__() {
+    return "x";
+  }
+  '''
+
+# The section's function name is minted: a user `__data__` keeps its own.
+code 'data marker function name dodges the program', '''
+  __data__ = 1
+  DATA + __data__
+  __DATA__
+  z
+  ''', '''
+  let DATA = __data___();
+  let __data__;
+  __data__ = 1;
+  DATA + __data__;
+  function __data___() {
+    return "z";
+  }
+  '''
+
+# The marker declares DATA; a plain assignment writes it, at module
+# scope or from a function, and never declares it a second time.
+test 'data marker DATA is writable', '''
+  DATA = DATA.toUpperCase()
+  shout = -> DATA += "!"
+  shout()
+  DATA
+  __DATA__
+  hello
+  ''', 'HELLO!'
+
+test 'data marker a nested scope shadows DATA', '''
+  f = ->
+    DATA := 2
+    DATA
+  [f(), DATA]
+  __DATA__
+  q
+  ''', [2, 'q']
+
+fail 'data marker then def DATA', '''
+  def DATA
+    1
+  __DATA__
+  q
+  ''', "'DATA' was already declared as the __DATA__ section on line 3"
+
+fail 'data marker then state DATA', '''
+  DATA := 1
+  __DATA__
+  q
+  ''', "'DATA' was already declared as the __DATA__ section on line 2"
+
+fail 'data marker then import DATA', '''
+  import DATA from './probe.js'
+  __DATA__
+  q
+  ''', "'DATA' was already declared as the __DATA__ section on line 2"
+
+fail 'data marker then export DATA', '''
+  export DATA = 1
+  __DATA__
+  q
+  ''', "'DATA' was already declared as the __DATA__ section on line 2"
+
+# The scanner ends the program at the marker line and reads nothing
+# after it: the section may hold text that would not scan as Rip.
+test 'data marker the section is never scanned', '''
+  DATA
+  __DATA__
+  """ unclosed ### { ( 'quote
+''', '""" unclosed ### { ( \'quote'
+
+# Windows line endings: the marker line ends in CRLF, and the section
+# keeps the line endings it was written with.
+test 'data marker CRLF file', "DATA\r\n__DATA__\r\na\r\nb\r\n", 'a\r\nb'
+
+# The marker is seen only where a line starts in code: a `__DATA__`
+# line inside a string or a block comment is that token's text.
+test 'data marker inside a heredoc is string text', '''
+  s = """
+  __DATA__
+  """
+  s
+''', '__DATA__'
+
+test 'data marker inside a block comment is comment text', '''
+  ###
+  __DATA__
+  ###
+  x = 1
+  x
+''', 1
+
+# Only a line that is exactly the marker: an indented one, or one with
+# more on the line, is code.
+code 'data marker indented is an identifier', '''
+  if a
+    __DATA__
+''', '''
+  if (a) {
+    __DATA__;
+  }
+  '''
+
+code 'data marker with more on its line is code', '''
+  __DATA__ = 1
+''', '''
+  let __DATA__;
+  __DATA__ = 1;
+  '''
+
+# A schema body open at the marker ends with the program: the scanner's
+# schema frame closes there, and a member body reads DATA like any code.
+test 'data marker closes an open schema body', '''
+  S = schema :shape
+    m: -> DATA
+  DATA
+  __DATA__
+  x
+''', 'x'
