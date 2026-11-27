@@ -115,7 +115,7 @@ value is `["type", {}, raw, body]`: `raw` the normalized text, `body`
 the type's tree of `type-*` nodes (a name, string, number, literal or
 `this` type is its leaf). A payload the entry cannot read keeps its raw
 text and the body `["none", {}]`, and the checker owns its verdict;
-`test/toolchain/types-entry.test.js` pins the opaque payloads the
+`test/lang/types.test.js` pins the opaque payloads the
 corpus holds.
 
 A rule that erases the annotation (a typed declaration, a return type)

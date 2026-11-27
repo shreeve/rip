@@ -1525,7 +1525,7 @@ test 'an alias line before an else leaves the else body a value', '''
 # (grammar.rip); these rows reduce every type production the rest of the
 # suite leaves unreached (test/toolchain/grammar-coverage.test.js). Types
 # erase, so each compiles to its untyped twin; the trees are pinned by the
-# front-end manifest and test/toolchain/types-entry.test.js.
+# front-end manifest and test/lang/types.test.js.
 
 code "types entry: an asserts predicate with a type", "def f(x: unknown): asserts x is Foo\n  x", "function f(x) {\n  return x;\n}"
 code "types entry: an asserts predicate alone", "def f(x: unknown): asserts x\n  x", "function f(x) {\n  return x;\n}"
