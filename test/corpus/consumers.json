@@ -17207,22 +17207,6 @@
   "js": "1nm38v1iafmxm",
   "ts": "bqz8z3ax1g9s"
  },
- "row types.rip › fail a typed forward above an array pattern that declares the name rejects": {
-  "js": "cxro9xhmh52i",
-  "ts": "cxro9xhmh52i"
- },
- "row types.rip › fail a typed forward above an object pattern that declares the name rejects": {
-  "js": "3co8lg9m9we9y",
-  "ts": "3co8lg9m9we9y"
- },
- "row types.rip › fail a typed forward above a pattern in a function body rejects": {
-  "js": "k0y8ywbnd9yx",
-  "ts": "k0y8ywbnd9yx"
- },
- "row types.rip › test a typed forward above a hoisted pattern is the hoisted name's type": {
-  "js": "3hmt906n7bf84",
-  "ts": "39k8o91n9ki3k"
- },
  "row types.rip › code braced inline fn-type field erased": {
   "js": "27k1wwwhf13t",
   "ts": "23p83tx7z6l4z"

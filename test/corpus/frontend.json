@@ -25811,30 +25811,6 @@
   "tolerant": "16ca0lwezu775",
   "complete": "6j7t1thlgyju"
  },
- "row types.rip › fail a typed forward above an array pattern that declares the name rejects": {
-  "tokens": "1spmn5x8cixrb",
-  "tree": "1avabn0wtoraj",
-  "tolerant": "hwnfhec7lmwu",
-  "complete": "6j7t1thlgyju"
- },
- "row types.rip › fail a typed forward above an object pattern that declares the name rejects": {
-  "tokens": "38wb7ohlkeh8h",
-  "tree": "2fgizh9256i3y",
-  "tolerant": "2nt0gy0yhu7h0",
-  "complete": "6j7t1thlgyju"
- },
- "row types.rip › fail a typed forward above a pattern in a function body rejects": {
-  "tokens": "vk5koifwxgk2",
-  "tree": "2oxj6xse8ql",
-  "tolerant": "3lr6rzmzz4r4m",
-  "complete": "6j7t1thlgyju"
- },
- "row types.rip › test a typed forward above a hoisted pattern is the hoisted name's type": {
-  "tokens": "38dk1adoloy78",
-  "tree": "22lp08koqyols",
-  "tolerant": "h2w2thjcl5pz",
-  "complete": "6j7t1thlgyju"
- },
  "row types.rip › code braced inline fn-type field erased": {
   "tokens": "24eseru3zcqvs",
   "tree": "hb7az4bwjziy",

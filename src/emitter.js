@@ -4517,10 +4517,6 @@ class Emitter {
     // this scope and never declare in place.
     const top = new Set(stmts.filter(isNode));
     const facts = new Map();
-    // Bare typed forwards seen before their name's first occurrence: the
-    // forward is invisible to the occurrence rules, but its annotation is
-    // the name's, wherever the name's facts begin.
-    const forwards = new Map();
     // inFn levels: 0 — the scope's own straight line; 1 — inside a
     // DEFERRED construct (function expression, class, component:
     // none can execute before the statement that creates it without
@@ -4533,7 +4529,7 @@ class Emitter {
     const occur = (name, inFn, write = false, declStmt = null, writeNode = null, writePath = '') => {
       if (typeof name !== 'string' || !isIdentifierName(name)) return;
       let f = facts.get(name);
-      if (f === undefined) facts.set(name, (f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: forwards.get(name) ?? null, firstWrite: null, firstWritePath: '' }));
+      if (f === undefined) facts.set(name, (f = { decl: null, seen: false, nested: false, nestedWrite: false, inDef: false, annotated: null, firstWrite: null, firstWritePath: '' }));
       if (!f.seen) { f.seen = true; f.decl = declStmt; }
       // The textually first WRITE with a known statement node — the
       // pin pipeline's probe site (its RHS is what TS infers from).
@@ -4576,11 +4572,7 @@ class Emitter {
       // pattern that declares the name has nowhere to carry it and
       // rejects the forward (applyDeclareInPlace).
       if (Emitter.isTypedWrapper(n)) {
-        if (typeof n[1] === 'string') {
-          const af = facts.get(n[1]);
-          if (af === undefined) { if (!forwards.has(n[1])) forwards.set(n[1], n); }
-          else if (af.annotated === null) af.annotated = n;
-        }
+        if (typeof n[1] === 'string') { const af = facts.get(n[1]); if (af !== undefined && af.annotated === null) af.annotated = n; }
         return;
       }
       const head = n[0];
@@ -9412,7 +9404,7 @@ class Emitter {
   computedBody(node, value, ind) {
     if (this.isBlock(value) && value.length > 2) {
       const stmts = this.liveStmts(value.slice(1), { forwards: true });
-      const { entries, names } = this.scopedHoist(value.slice(1), []);
+      const { entries, names } = this.scopedHoist(stmts, []);
       for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
       this.scopes.push(names);
       this.funcBlock(node, value, stmts, ind, entries);
@@ -9612,7 +9604,7 @@ class Emitter {
       // dispose; the runtime owns that contract).
       this.mark(node, 'value', () => this.withExpression(() => {
         const stmts = this.liveStmts(body.slice(1), { forwards: true });
-        const { entries, names } = this.scopedHoist(body.slice(1), []);
+        const { entries, names } = this.scopedHoist(stmts, []);
         for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
         this.scopes.push(names);
         this.funcBlock(node, body, stmts, ind, entries, false, true);
@@ -17380,7 +17372,7 @@ class Emitter {
     // the body suppresses its implicit return.
     const isVoid = this.voidFuncs.has(node);
     const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block], { forwards: true });
-    const { entries: hoist, names } = this.scopedHoist(this.isBlock(block) ? block.slice(1) : [block], params);
+    const { entries: hoist, names } = this.scopedHoist(stmts, params);
     for (const n of this.pushReactiveFrame(stmts, names, params, node)) names.add(n);
     this.scopes.push(names);
     const isAsync = this.containsAwait(block);
