@@ -7102,6 +7102,7 @@ var buildAssignIndex = (tokens) => {
   }
   return { blockMaps, blockIdAt };
 };
+var BARE_LITERALS = new Set(["NUMBER", "STRING", "BOOL", "NULL", "UNDEFINED"]);
 var methodValueAhead = (tokens, j) => {
   let depth = 0;
   for (;j < tokens.length; j++) {
@@ -7600,6 +7601,17 @@ function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = new Map)
             if (t2 === "INDENT" || t2 === "=" || t2 === "COMPOUND_ASSIGN" || t2 === "REACTIVE_ASSIGN" || t2 === "COMPUTED_ASSIGN" || t2 === "READONLY_ASSIGN" || t2 === "GATE" || t2 === "EFFECT")
               break;
           }
+        }
+        const lit = tokens[i + 1];
+        const negative = lit?.kind === "-" && tokens[i + 2]?.kind === "NUMBER" && end === i + 3;
+        const prop = isAtName && classBodyKind() === "component";
+        if ((prop || classBodyKind() === "class") && (negative || end === i + 2 && BARE_LITERALS.has(lit.kind))) {
+          const name = (isAtName ? "@" : "") + nameTok.value, field = name + (marker ? "?" : "");
+          const written = negative ? "-" + text.slice(tokens[i + 2].start, tokens[i + 2].end) : text.slice(lit.start, tokens[end - 1].end);
+          const value = written.includes(`
+`) ? written.slice(0, written.indexOf(`
+`)) + " …" : written;
+          fail(prop ? `a component prop \`${field}: ${value}\` types the prop as the literal ${value} and gives it no default — write \`${field} := ${value}\` for a default, or \`${field}: T\` for a type` : `a class field \`${field}: ${value}\` types the field as the literal ${value} and gives it no value — write \`${name} = ${value}\` for a value, or \`${field}: T\` for a type`, lit.start, tokens[end - 1].end);
         }
         if (end > i + 1 && isCompleteTypeExpr(tokens, i + 1, end)) {
           const last = claim("TYPE", tok, i + 1, {});
@@ -36417,7 +36429,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "3d478636b44c780f";
+var compilerBuild = () => "3bc8ac914b4e6dd8";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
