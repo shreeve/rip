@@ -1464,6 +1464,37 @@ class Emitter {
         }
       }
     };
+    // A def or class in a block binds its name across the whole block
+    // (JavaScript hoists the declaration to the block's top; a switch's
+    // cases share one block), so an assignment to the name earlier in
+    // the block would write the def. The def rejects, naming the
+    // assignment, as it does at the top of a function body; an
+    // assignment after it writes the def. The block's own assignments
+    // to the names it declares then answer no enclosing block's def.
+    const blockUnit = (n) => {
+      const start = forms.length;
+      let names = null;
+      const stmt = (st) => {
+        if (isNode(st) && typeof st[1] === 'string' && ((isDefHead(st[0]) && st.length === 4) || st[0] === 'class')) {
+          for (let i = start; i < forms.length; i++) {
+            const f = forms[i];
+            if (!f.auth && !f.blockBound && f.name === st[1]) reject({ name: st[1], node: st }, f);
+          }
+          (names ??= new Set()).add(st[1]);
+        }
+        walk(st, true);
+      };
+      const body = (b) => { if (this.isBlock(b)) for (const st of b.slice(1)) stmt(st); else stmt(b); };
+      if (n[0] === 'block') body(n);
+      else {
+        walk(n[1], true);
+        for (const w of n[2] ?? []) { walk(w[1], true); body(w[2]); }
+        if (n[3] != null) body(n[3]);
+      }
+      if (names !== null) {
+        for (let i = start; i < forms.length; i++) if (!forms[i].auth && names.has(forms[i].name)) forms[i].blockBound = true;
+      }
+    };
     const walk = (n, nested) => {
       if (!isNode(n)) return;
       if (isHeadless(n)) { for (const el of n) walk(el, nested); return; }
@@ -1472,6 +1503,7 @@ class Emitter {
         return;
       }
       if (isFunc(n)) return;
+      if (n[0] === 'block' || n[0] === 'switch') { blockUnit(n); return; }
       if (isDefHead(n[0])) {
         if (!nested && n.length === 4 && typeof n[1] === 'string') auth(n[1], 'def', n);
         return;

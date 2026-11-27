@@ -399,6 +399,7 @@ class Analysis {
     this.schemaBodies = [];
     this.siteTrees = new Map();
     this.renderPos = new Map();
+    this.caseBlocks = new Map();  // a switch case body block → the switch's block unit
     this.rsink = null;       // the render factory the walk is inside: its sink and the env it opened at
     this.childrenFuncs = new Set();
     this.methodFuncs = new Set();
@@ -872,7 +873,17 @@ class Analysis {
   // A block: in a render statement its statements are render and its
   // head is no reference; otherwise the generic rule.
   visitBlock(x, m, cs, rs) {
-    if ((m & RN) !== RN_RENDER) return this.generic(x, 'block', m, cs, rs);
+    if ((m & RN) !== RN_RENDER) {
+      if (rs === null) return this.generic(x, 'block', m, cs, rs);
+      this.noteNode(x, 'block', m);
+      const c = Analysis.childMode(m, 'block');
+      this.visitWord('block', c);
+      const shared = this.caseBlocks.get(x);
+      const unit = shared ?? this.blockUnit(rs);
+      for (let i = 2; i < x.length; i++) this.unitStmt(unit, x[i], c, cs, rs);
+      if (shared === undefined) this.endBlockUnit(unit, rs);
+      return;
+    }
     const c = Analysis.childMode(m, 'block');
     this.visitWord('block', c & ~RN);
     const r = (c & ~RN) | RN_RENDER;
@@ -1855,8 +1866,53 @@ class Analysis {
     const c = Analysis.childMode(m, 'switch');
     this.visitWord('switch', c);
     if (!isNone(x[2])) this.visit(x[2], c, cs, rs);
+    if (rs === null) {
+      this.visit(x[3], c, cs, rs);
+      if (!isNone(x[4])) this.visit(x[4], c, cs, rs);
+      return;
+    }
+    // A switch's cases share one block: each case body's statements
+    // are the switch's own (blockUnit).
+    const unit = this.blockUnit(rs);
+    for (const w of x[3]) if (isNodeP(w) && w[0] === 'when' && isNodeP(w[3]) && w[3][0] === 'block') this.caseBlocks.set(w[3], unit);
+    if (isNodeP(x[4]) && x[4][0] === 'block') this.caseBlocks.set(x[4], unit);
     this.visit(x[3], c, cs, rs);
     if (!isNone(x[4])) this.visit(x[4], c, cs, rs);
+    this.endBlockUnit(unit, rs);
+  }
+
+  // A def or class in a block binds its name across the whole block,
+  // so an assignment to the name earlier in the block rejects at the
+  // def (the emitter's blockUnit). A unit marks where its forms begin
+  // and collects the names it declares.
+  blockUnit(rs) {
+    return { start: rs.forms.length, names: null };
+  }
+
+  unitStmt(unit, st, c, cs, rs) {
+    if (isNodeP(st) && (st[0] === 'def' || st[0] === 'class')) {
+      const n = wordOf(st[2]);
+      if (n !== undefined) {
+        for (let i = unit.start; i < rs.forms.length; i++) {
+          const f = rs.forms[i];
+          if (f.auth || f.blockBound || f.name !== n) continue;
+          const line = f.node !== null ? this.nodeLine(f.node) : null;
+          rs.forms.push({ error: this.positioned(`emitter: '${n}' was already declared as plain${line !== null ? ` on line ${line}` : ''} — assign with '${n} = …' to update it, or choose a different name`,
+            st, ...(rs.owner !== null ? [rs.owner] : [])) });
+          break;
+        }
+        (unit.names ??= new Set()).add(n);
+      }
+    }
+    this.visit(st, c, cs, rs);
+  }
+
+  endBlockUnit(unit, rs) {
+    if (unit.names === null) return;
+    for (let i = unit.start; i < rs.forms.length; i++) {
+      const f = rs.forms[i];
+      if (!f.auth && unit.names.has(f.name)) f.blockBound = true;
+    }
   }
 
   visitOptionalTail(x, m, cs, rs) {

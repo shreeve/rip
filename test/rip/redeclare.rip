@@ -119,6 +119,22 @@ test "a def in a deeper block shadows a catch binding", "r = null\ntry\n  throw 
 test "a def in a finally block is outside the catch binding", "try\n  g = 1\ncatch e\n  null\nfinally\n  def e\n    3\n  r = e()\nr", 3
 test "a handler assigns its catch binding", "try\n  throw 1\ncatch e\n  e = e + 1\n  e", 2
 
+# A def or class in a block binds its name across the whole block (a
+# switch's cases share one block), so an assignment to the name earlier
+# in that block would write the def: the def rejects, naming it. An
+# assignment after the def writes the def, as in a function body.
+fail "a def in a block rejects an earlier assignment to an outer name", "x = 0\nif true\n  x = 1\n  def x\n    2\nx", ":4:3: emitter: 'x' was already declared as plain on line 3 — assign with 'x = …' to update it, or choose a different name"
+fail "a def in a block rejects an earlier assignment to a new name", "if true\n  x = 1\n  def x\n    2", ":3:3: emitter: 'x' was already declared as plain on line 2"
+fail "a class in a block rejects an earlier assignment", "x = 0\nif true\n  x = 1\n  class x", ":4:3: emitter: 'x' was already declared as plain on line 3"
+fail "a def in a block rejects an assignment in a block nested before it", "x = 0\nif true\n  if true\n    x = 1\n  def x\n    2", ":5:3: emitter: 'x' was already declared as plain on line 4"
+fail "a def in a case rejects an assignment in an earlier case", "x = 0\nswitch 1\n  when 1\n    x = 1\n  when 2\n    def x\n      2", ":6:5: emitter: 'x' was already declared as plain on line 4"
+fail "a def in a switch's else rejects an assignment in a case", "x = 0\nswitch 1\n  when 1\n    x = 1\n  else\n    def x\n      2", ":6:5: emitter: 'x' was already declared as plain on line 4"
+fail "a def in a loop body rejects an earlier assignment there", "f = ->\n  x = 0\n  for i in [1]\n    x = i\n    def x\n      2\n  x", ":5:5: emitter: 'x' was already declared as plain on line 4"
+fail "a def in a block rejects an earlier pattern element", "x = 0\nif true\n  [x, y] = [1, 2]\n  def x\n    2", ":4:3: emitter: 'x' was already declared as plain on line 3"
+test "an assignment after a def in a block writes the def", "r = 0\nif true\n  def x\n    2\n  x = 5\n  r = x\nr", 5
+test "an inner block's def answers that block's assignment", "r = 0\nif true\n  if true\n    def x\n      1\n    x = 3\n    r = x\n  def x\n    2\nr", 3
+test "an else block's assignment is outside the if block's def", "x = 0\nif false\n  def x\n    2\nelse\n  x = 7\nx", 7
+
 # Comprehension clause variables bind per-construct.
 test "comprehension clause shadows plain", "x = 1\nys = (x * 2 for x in [2, 3])\nys.concat([x])", [4, 6, 1]
 
