@@ -328,7 +328,7 @@ const KEYWORDS = {
   // everywhere (property/key positions capture first, so `x.render`
   // and `render: 1` stay legal); `offer`/`accept` are CONTEXT-
   // sensitive — keywords only lexically inside a component body
-  // (classified by the scanner's backward walk, never listed here).
+  // (the scanner's `component` mode frame decides, never this table).
   component: 'COMPONENT',
   render: 'RENDER',
 };
@@ -564,14 +564,14 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   //                so `from = 1` and `as = 2` stay identifiers. It
   //                survives line breaks inside brackets, so a multiline
   //                specifier list still retags the `from` after its
-  //                closing brace; a line start outside every bracket
-  //                ends it.
+  //                closing brace; a new logical line outside every
+  //                bracket ends it (a continuation line does not).
   //   for          FOR on the current logical line, pinned to the
   //                bracket count at the FOR so it survives newlines
   //                inside brackets opened after it (`for x in [1,\n2]`).
   //                The connector (`in`/`of`/`as`) ends it, a FOR replaces
-  //                it, and a line start at or below its bracket count
-  //                ends it.
+  //                it, and a new logical line at or below its bracket
+  //                count ends it.
   // Frames carry `depth` (indents.length when the frame opened; for a
   // block frame, the depth of the block it owns) and `parens`
   // (parens.length when it opened). `openModes` counts the open frames
@@ -716,16 +716,6 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
 
   const last = () => tokens[tokens.length - 1] ?? null;
 
-  // Context-sensitive `offer`/`accept`: keywords only
-  // lexically inside a component body. The backward walk tracks net
-  // block depth; an INDENT is on the word's ENCLOSING CHAIN exactly
-  // when it takes the depth to a NEW MINIMUM (a sibling block closed
-  // earlier in the walk raises depth first, so its own INDENT never
-  // reaches a fresh minimum — an already-CLOSED component elsewhere in
-  // the file can never poison later code). Each chain INDENT's header
-  // line is scanned back to its line boundary for COMPONENT, so the
-  // extends form (`… = component extends button` + INDENT) classifies
-  // like the plain one.
   // Is the trailing `.`-chain a class SELECTOR chain — rooted at a
   // template tag or at a bare line-start dot? Walks the emitted
   // `.PROPERTY` pairs back to the chain root. Member chains (rooted
@@ -883,7 +873,12 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     if (cmp) openMode('component');
   };
 
-  // Inside a component body at any depth: OFFER/ACCEPT are keywords there.
+  // Context-sensitive `offer`/`accept`: keywords only lexically inside a
+  // component body, at any depth. A component frame lives exactly as long
+  // as its block, so a component closed earlier in the file never turns
+  // later words into keywords; the opening line is scanned for COMPONENT
+  // wherever it sits, so the extends form (`… = component extends
+  // button` + INDENT) opens one like the plain form.
   const insideComponentBody = () => inMode('component');
 
   // Is the scanner inside a CLASS body — directly, not in a block
