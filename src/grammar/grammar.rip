@@ -893,12 +893,11 @@ grammar =
   ]
 
   # ============================================================================
-  # Schema — `schema [:kind] INDENT … OUTDENT`'s declarations are read
-  # by the schema sub-parser at lexer-rewrite time (src/schema.js). The
-  # pass emits SCHEMA + SCHEMA_BODY, where SCHEMA_BODY's raw value is the
-  # structured descriptor (serializing as its kind string) and its
-  # payload is the body's embedded Rip code, which the schema entry
-  # parses (`SchemaBody` below).
+  # Schema — `schema [:kind] INDENT … OUTDENT`. The scanner's schema mode
+  # leaves SCHEMA + SCHEMA_BODY on the tape; SCHEMA_BODY's raw value is the
+  # descriptor src/schema.js fills from the tree (serializing as its kind
+  # string) and its payload is the body in the schema alphabet, which the
+  # schema entry parses (`SchemaBody` below).
   # ============================================================================
 
   Schema: [
@@ -1575,25 +1574,276 @@ grammar =
   ]
 
   # ============================================================================
-  # Schema code — the schema entry point (`entries` below)
+  # Schema DSL — the schema entry point (`entries` below)
   # ============================================================================
-  # A schema body's payload: one SCHEMA_CODE token per code site
-  # (schemaCodeSites in src/schema.js) — each callable, scope, @ensure
-  # predicate and field transform, then the `on:` adapter. A SCHEMA_CODE
-  # token's own payload is that code run through every lexer pass, and
-  # the driver parses it from the program's own start symbol (`Root` in
-  # `entries`): embedded code is program code. Neither entry is opaque:
-  # when either rejects its payload, the rejection is the parse's own
-  # error, at the offending token.
+  # A schema body's payload is the scanner's schema alphabet (src/lexer.js,
+  # the `schema` mode frame): every word is S_WORD, a `:word` is S_SYMBOL,
+  # tight `!`/`?` are the modifiers S_BANG/S_OPT, `[]` is S_ARRAY, each
+  # code-bearing directive family has its own terminal (S_ENSURE, S_SCOPE,
+  # S_DEFAULT_SCOPE) and every other `@word` is S_DIRECTIVE, whose argument
+  # shapes the vocabulary owns (src/runtime/vocab.js). A parameter list is
+  # one S_PARAMS token; embedded Rip is one SCHEMA_CODE token whose own
+  # payload the driver parses from the program's start symbol (`Root` in
+  # `entries`). These rows own the DSL's shape; src/schema.js reads the tree
+  # into the descriptor and owns what the vocabulary and the kinds decide.
+  # Neither entry is opaque: a rejection is the parse's own error, at the
+  # offending token.
 
   SchemaBody: [
-    o ''           , '["schema-codes", {}]'      , 'schema-codes: _, _'
-    o 'SchemaCodes', '["schema-codes", {}, ...1]', 'schema-codes: _, _, ...codes'
+    o '(S_KIND[kind])? (SchemaAdapter[adapter])? INDENT SchemaLines[lines] OUTDENT', '["schema-dsl", {}, @kind, @adapter, ...@lines]'            , 'schema-dsl: _, _, kind, adapter, ...lines'
+    o '(S_KIND[kind])? (SchemaAdapter[adapter])? TERMINATOR SchemaLines[lines]'    , '["schema-dsl", {inline: true}, @kind, @adapter, ...@lines]', 'schema-dsl: _, _, kind, adapter, ...lines'
   ]
 
-  SchemaCodes: [
-    o 'SCHEMA_CODE'            , '[1]'      , '~ code-list plumbing; schema-codes owns the span'
-    o 'SchemaCodes SCHEMA_CODE', '[...1, 2]', '~ code-list plumbing; schema-codes owns the span'
+  # `, on: expr` — the per-schema adapter, a value expression.
+  SchemaAdapter: [
+    o ', S_ON SCHEMA_CODE', '["schema-adapter", {}, 2, 3]', 'schema-adapter: _, _, keyword, body'
+  ]
+
+  SchemaLines: [
+    o 'SchemaLine'                       , '[1]'      , '~ line-list plumbing; schema-dsl.lines owns the span'
+    o 'SchemaLines TERMINATOR SchemaLine', '[...1, 3]', '~ line-list plumbing; schema-dsl.lines owns the span'
+  ]
+
+  SchemaLine: [
+    o 'SchemaField'
+    o 'SchemaCallable'
+    o 'SchemaEnsure'
+    o 'SchemaScope'
+    o 'SchemaDirective'
+    o 'SchemaMember'
+  ]
+
+  # name[!|?]* [type] [trailers] — the first trailer's comma is optional.
+  SchemaField: [
+    o 'S_WORD[name] (SchemaModifiers[modifiers])? (SchemaType[type])? (SchemaTrailers[parts])?', '["schema-field", {}, @name, @modifiers, @type, @parts]', 'schema-field: _, _, name, modifiers, type, parts'
+  ]
+
+  SchemaModifiers: [
+    o 'SchemaModifier'                , '[1]'      , '~ modifier-list plumbing; schema-field.modifiers owns the span'
+    o 'SchemaModifiers SchemaModifier', '[...1, 2]', '~ modifier-list plumbing; schema-field.modifiers owns the span'
+  ]
+
+  SchemaModifier: [
+    o 'S_BANG'
+    o 'S_OPT'
+  ]
+
+  SchemaType: [
+    o 'SchemaTypeCore'             , '["schema-type", {}, 1]'                , 'schema-type: _, _, core'
+    o 'SchemaTypeCore SchemaArrays', '["schema-type", {}, 1, ...2]'          , 'schema-type: _, _, core, ...arrays'
+    o 'SchemaArrays'               , '["schema-type", {}, ["none", {}], ...1]', 'schema-type: _, _, core, ...arrays'
+  ]
+
+  SchemaArrays: [
+    o 'S_ARRAY'             , '[1]'      , '~ array-suffix plumbing; schema-type.arrays owns the span'
+    o 'SchemaArrays S_ARRAY', '[...1, 2]', '~ array-suffix plumbing; schema-type.arrays owns the span'
+  ]
+
+  # A type word, a `~` coercion (a coercible type or a named coercer), or
+  # a string-literal union whose bracketed member is the default.
+  SchemaTypeCore: [
+    o 'S_WORD'
+    o 'S_TILDE S_WORD'  , '["schema-coerce", {}, 2]', 'schema-coerce: _, _, target'
+    o 'S_TILDE S_SYMBOL', '["schema-coerce", {}, 2]', 'schema-coerce: _, _, target'
+    o 'SchemaUnion'
+  ]
+
+  SchemaUnion: [
+    o 'STRING'                               , '["schema-union", {}, 1]'      , 'schema-union: _, _, first'
+    o 'STRING | SchemaUnionMembers'          , '["schema-union", {}, 1, ...3]', 'schema-union: _, _, first, ...rest'
+    o 'SchemaBracket | SchemaUnionMembers'   , '["schema-union", {}, 1, ...3]', 'schema-union: _, _, first, ...rest'
+  ]
+
+  SchemaUnionMembers: [
+    o 'SchemaUnionMember'                     , '[1]'      , '~ member-list plumbing; schema-union.members owns the span'
+    o 'SchemaUnionMembers | SchemaUnionMember', '[...1, 3]', '~ member-list plumbing; schema-union.members owns the span'
+  ]
+
+  SchemaUnionMember: [
+    o 'STRING'
+    o 'SchemaBracket'
+  ]
+
+  # The trailer list keeps its commas as "," markers: a transform's own
+  # comma is a rule src/schema.js judges against what precedes it.
+  SchemaTrailers: [
+    o 'SchemaParts'
+    o ', SchemaParts'                   , '[",", ...2]', '~ trailer-list plumbing; schema-field.parts owns the span'
+    o ', INDENT SchemaPartLines OUTDENT', '[",", ...3]', '~ trailer-list plumbing; schema-field.parts owns the span'
+  ]
+
+  SchemaParts: [
+    o 'SchemaPart'                         , '[1]'           , '~ trailer-list plumbing; schema-field.parts owns the span'
+    o 'SchemaParts , SchemaPart'           , '[...1, ",", 3]', '~ trailer-list plumbing; schema-field.parts owns the span'
+    o 'SchemaParts , TERMINATOR SchemaPart', '[...1, ",", 4]', '~ trailer-list plumbing; schema-field.parts owns the span'
+    o 'SchemaParts SchemaTransform'        , '[...1, 2]'     , '~ trailer-list plumbing; schema-field.parts owns the span'
+  ]
+
+  SchemaPartLines: [
+    o 'SchemaParts'
+    o 'SchemaPartLines TERMINATOR SchemaParts', '[...1, ",", ...3]', '~ trailer-list plumbing; schema-field.parts owns the span'
+  ]
+
+  SchemaPart: [
+    o 'SchemaBracket'
+    o 'SchemaAttrs'
+    o 'SchemaRange'
+    o 'REGEX'
+    o 'SchemaTransform'
+    o 'S_DIRECTIVE'   , '["schema-attr", {}, 1]', 'schema-attr: _, _, name'
+  ]
+
+  SchemaTransform: [
+    o '-> SCHEMA_CODE', '["schema-transform", {}, 2]', 'schema-transform: _, _, body'
+  ]
+
+  SchemaRange: [
+    o 'SchemaNum .. SchemaNum', '["schema-range", {}, 1, 3]'                    , 'schema-range: _, _, min, max'
+    o 'SchemaNum ..'          , '["schema-range", {}, 1, ["none", {}]]'          , 'schema-range: _, _, min, max'
+    o '.. SchemaNum'          , '["schema-range", {}, ["none", {}], 2]'          , 'schema-range: _, _, min, max'
+    o '..'                    , '["schema-range", {}, ["none", {}], ["none", {}]]', 'schema-range: _, _, min, max'
+  ]
+
+  SchemaNum: [
+    o 'NUMBER'
+    o '- NUMBER', '["schema-neg", {}, 2]', 'schema-neg: _, _, value'
+  ]
+
+  # `[…]` — a default, a bracketed union member, or a column list; how
+  # many values it may hold is the reader's rule, so its message can say.
+  SchemaBracket: [
+    o '[ SchemaValues ]', '["schema-bracket", {}, ...2]', 'schema-bracket: _, _, ...values'
+  ]
+
+  SchemaValues: [
+    o 'SchemaValue'               , '[1]'      , '~ value-list plumbing; schema-bracket.values owns the span'
+    o 'SchemaValues , SchemaValue', '[...1, 3]', '~ value-list plumbing; schema-bracket.values owns the span'
+  ]
+
+  SchemaValue: [
+    o 'SchemaNum'
+    o 'STRING'
+    o 'S_WORD'
+    o 'S_SYMBOL'
+    o 'REGEX'
+  ]
+
+  # `{key: value}` options, the colon optional; which keys exist and which
+  # namespace a value lives in is the vocabulary's.
+  SchemaAttrs: [
+    o '{ }'                              , '["schema-attrs", {}]'      , 'schema-attrs: _, _'
+    o '{ SchemaOptions }'                , '["schema-attrs", {}, ...2]', 'schema-attrs: _, _, ...options'
+    o '{ INDENT SchemaOptions OUTDENT }' , '["schema-attrs", {}, ...3]', 'schema-attrs: _, _, ...options'
+  ]
+
+  SchemaOptions: [
+    o 'SchemaOption'                           , '[1]'      , '~ option-list plumbing; schema-attrs.options owns the span'
+    o 'SchemaOptions , SchemaOption'           , '[...1, 3]', '~ option-list plumbing; schema-attrs.options owns the span'
+    o 'SchemaOptions , TERMINATOR SchemaOption', '[...1, 4]', '~ option-list plumbing; schema-attrs.options owns the span'
+    o 'SchemaOptions TERMINATOR SchemaOption'  , '[...1, 3]', '~ option-list plumbing; schema-attrs.options owns the span'
+  ]
+
+  SchemaOption: [
+    o 'S_WORD : SchemaValue', '["schema-option", {}, 1, 3]', 'schema-option: _, _, key, value'
+    o 'S_WORD SchemaValue'  , '["schema-option", {}, 1, 2]', 'schema-option: _, _, key, value'
+  ]
+
+  # `name: -> body` (method or hook), `name: ~> body` (computed),
+  # `name: !> body` (eager derived), each optionally `name: (params) …`.
+  SchemaCallable: [
+    o 'S_WORD : (SchemaParams[params])? SchemaArrow[arrow] SCHEMA_CODE[body]', '["schema-callable", {}, 1, @params, @arrow, @body]', 'schema-callable: _, _, name, params, arrow, body'
+  ]
+
+  SchemaArrow: [
+    o '->'
+    o 'EFFECT'
+    o '!>'
+  ]
+
+  SchemaParams: [
+    o 'S_PARAMS', '["schema-params", {}, 1]', 'schema-params: _, _, raw'
+  ]
+
+  SchemaFn: [
+    o '(SchemaParams[params])? -> SCHEMA_CODE[body]', '["schema-fn", {}, @params, @body]', 'schema-fn: _, _, params, body'
+  ]
+
+  # `@ensure[!] "message"[, :field], (x) -> body` or `@ensure[!] […]` —
+  # the items stay a list so the reader can say which one is missing.
+  SchemaEnsure: [
+    o 'S_ENSURE (S_BANG[async])?'                            , '["schema-ensure", {async: @async?}]'           , 'schema-ensure: _, _'
+    o 'S_ENSURE (S_BANG[async])? SchemaEnsureItems[items]'   , '["schema-ensure", {async: @async?}, ...@items]', 'schema-ensure: _, _, ...items'
+  ]
+
+  SchemaEnsureItems: [
+    o 'SchemaEnsureItem'                    , '[1]'      , '~ item-list plumbing; schema-ensure.items owns the span'
+    o 'SchemaEnsureItems , SchemaEnsureItem', '[...1, 3]', '~ item-list plumbing; schema-ensure.items owns the span'
+  ]
+
+  SchemaEnsureItem: [
+    o 'STRING'
+    o 'SchemaNum'
+    o 'S_WORD'
+    o 'S_SYMBOL'
+    o 'SchemaFn'
+    o '[ SchemaEnsureElements ]'                , '["schema-ensure-list", {}, ...2]', 'schema-ensure-list: _, _, ...elements'
+    o '[ INDENT SchemaEnsureElements OUTDENT ]' , '["schema-ensure-list", {}, ...3]', 'schema-ensure-list: _, _, ...elements'
+  ]
+
+  # Array elements separate on a comma or a line break, as array literals do.
+  SchemaEnsureElements: [
+    o 'SchemaEnsureElement'                                  , '[1]'      , '~ element-list plumbing; schema-ensure-list.elements owns the span'
+    o 'SchemaEnsureElements , SchemaEnsureElement'           , '[...1, 3]', '~ element-list plumbing; schema-ensure-list.elements owns the span'
+    o 'SchemaEnsureElements TERMINATOR SchemaEnsureElement'  , '[...1, 3]', '~ element-list plumbing; schema-ensure-list.elements owns the span'
+    o 'SchemaEnsureElements , TERMINATOR SchemaEnsureElement', '[...1, 4]', '~ element-list plumbing; schema-ensure-list.elements owns the span'
+  ]
+
+  SchemaEnsureElement: [
+    o 'STRING'
+    o 'SchemaNum'
+    o 'S_WORD'
+    o 'S_SYMBOL'
+    o 'SchemaFn'
+  ]
+
+  # `@scope :name[,] fn` and `@defaultScope fn`.
+  SchemaScope: [
+    o 'S_SCOPE S_SYMBOL (,)? SchemaFn[fn]', '["schema-scope", {}, 2, @fn]'                          , 'schema-scope: _, _, name, fn'
+    o 'S_DEFAULT_SCOPE SchemaFn'          , '["schema-scope", {default: true}, ["none", {}], 2]', 'schema-scope: _, _, name, fn'
+  ]
+
+  SchemaDirective: [
+    o 'S_DIRECTIVE'              , '["schema-directive", {}, 1]'      , 'schema-directive: _, _, name'
+    o 'S_DIRECTIVE SchemaDirArgs', '["schema-directive", {}, 1, ...2]', 'schema-directive: _, _, name, ...args'
+  ]
+
+  SchemaDirArgs: [
+    o 'SchemaDirArg'              , '[1]'      , '~ argument-list plumbing; schema-directive.args owns the span'
+    o 'SchemaDirArgs SchemaDirArg', '[...1, 2]', '~ argument-list plumbing; schema-directive.args owns the span'
+  ]
+
+  SchemaDirArg: [
+    o 'S_WORD'
+    o 'S_SYMBOL'
+    o 'SchemaNum'
+    o 'STRING'
+    o 'SchemaBracket'
+    o 'SchemaAttrs'
+    o ','    , '","'
+    o '.'    , '"."'
+    o 'S_OPT', '"?"'
+  ]
+
+  # `:name [value]` — an :enum member.
+  SchemaMember: [
+    o 'S_SYMBOL'                  , '["schema-member", {}, 1, ["none", {}]]', 'schema-member: _, _, name, value'
+    o 'S_SYMBOL SchemaMemberValue', '["schema-member", {}, 1, 2]'           , 'schema-member: _, _, name, value'
+  ]
+
+  SchemaMemberValue: [
+    o 'SchemaNum'
+    o 'STRING'
+    o 'S_WORD'
   ]
 
 # ==============================================================================
@@ -1654,6 +1904,20 @@ displays =
   TYPE_PARAMS: '<…>'
   SCHEMA_BODY: 'a schema body'
   SCHEMA_CODE: "a schema body's code"
+  # The schema alphabet (the scanner's `schema` mode).
+  S_WORD: 'a name'
+  S_SYMBOL: 'a :symbol'
+  S_KIND: 'a schema kind'
+  S_BANG: '!'
+  S_OPT: '?'
+  S_TILDE: '~'
+  S_ARRAY: '[]'
+  S_ENSURE: '@ensure'
+  S_SCOPE: '@scope'
+  S_DEFAULT_SCOPE: '@defaultScope'
+  S_DIRECTIVE: 'a directive'
+  S_ON: 'on'
+  S_PARAMS: 'a parameter list'
   IDENTIFIER: 'a name'
   PROPERTY: 'a property name'
   NUMBER: 'a number'
@@ -1950,11 +2214,33 @@ kinds =
   # nodes; a name, string, number, literal or `this` type is its leaf.
   'type':                 forms: ['"type" attrs:{} raw:leaf body:expr|type-predicate|none']
   # The schema entry (`entries` below): a schema body token's value is its
-  # descriptor and the trees of its embedded code, one `code` per code
-  # site, each a program the program's own start symbol parsed.
-  'schema-body':          forms: ['"schema-body" attrs:{} raw:descriptor body:schema-codes'], part: true
-  'schema-codes':         forms: ['"schema-codes" attrs:{} ...codes:code'], part: true
+  # descriptor and the tree of its DSL, whose embedded code sites are each
+  # a `code` the program's own start symbol parsed. A projection folded
+  # from a schema has no DSL of its own (`none`).
+  'schema-body':          forms: ['"schema-body" attrs:{} raw:descriptor body:schema-dsl|none'], part: true
   'code':                 forms: ['"code" attrs:{} raw:leaf body:program'], part: true
+  'sym':                  forms: ['"sym" attrs:{} raw:leaf']
+  'schema-dsl':           forms: ['"schema-dsl" attrs:{}|{inline} kind:sym|none adapter:schema-adapter|none ...lines:schema-field|schema-callable|schema-ensure|schema-scope|schema-directive|schema-member'], part: true
+  'schema-adapter':       forms: ['"schema-adapter" attrs:{} keyword:name body:code'], part: true
+  'schema-field':         forms: ['"schema-field" attrs:{} name:name modifiers:[leaf]|none type:schema-type|none parts:[schema-bracket|schema-attrs|schema-range|regex|schema-transform|schema-attr|","]|none'], part: true
+  'schema-type':          forms: ['"schema-type" attrs:{} core:name|schema-coerce|schema-union|none ...arrays:leaf'], part: true
+  'schema-coerce':        forms: ['"schema-coerce" attrs:{} target:name|sym'], part: true
+  'schema-union':         forms: ['"schema-union" attrs:{} first:string|schema-bracket ...rest:string|schema-bracket'], part: true
+  'schema-bracket':       forms: ['"schema-bracket" attrs:{} ...values:num|schema-neg|string|name|sym|regex'], part: true
+  'schema-neg':           forms: ['"schema-neg" attrs:{} value:num'], part: true
+  'schema-range':         forms: ['"schema-range" attrs:{} min:num|schema-neg|none max:num|schema-neg|none'], part: true
+  'schema-attrs':         forms: ['"schema-attrs" attrs:{} ...options:schema-option'], part: true
+  'schema-option':        forms: ['"schema-option" attrs:{} key:name value:num|schema-neg|string|name|sym|regex'], part: true
+  'schema-transform':     forms: ['"schema-transform" attrs:{} body:code'], part: true
+  'schema-attr':          forms: ['"schema-attr" attrs:{} name:name'], part: true
+  'schema-callable':      forms: ['"schema-callable" attrs:{} name:name params:schema-params|none arrow:"->"|"~>"|"!>" body:code'], part: true
+  'schema-params':        forms: ['"schema-params" attrs:{} raw:leaf'], part: true
+  'schema-fn':            forms: ['"schema-fn" attrs:{} params:schema-params|none body:code'], part: true
+  'schema-ensure':        forms: ['"schema-ensure" attrs:{}|{async} ...items:string|num|schema-neg|name|sym|schema-fn|schema-ensure-list'], part: true
+  'schema-ensure-list':   forms: ['"schema-ensure-list" attrs:{} ...elements:string|num|schema-neg|name|sym|schema-fn'], part: true
+  'schema-scope':         forms: ['"schema-scope" attrs:{}|{default} name:sym|none fn:schema-fn'], part: true
+  'schema-directive':     forms: ['"schema-directive" attrs:{} name:name ...args:name|sym|num|schema-neg|string|schema-bracket|schema-attrs|","|"."|"?"'], part: true
+  'schema-member':        forms: ['"schema-member" attrs:{} name:sym value:num|schema-neg|string|name|none'], part: true
   'type-apply':           forms: ['"type-apply" attrs:{} base:expr ...args:expr']
   'type-array':           forms: ['"type-array" attrs:{} element:expr']
   'type-conditional':     forms: ['"type-conditional" attrs:{} check:expr extends:expr then:expr else:expr']
@@ -2078,6 +2364,11 @@ leaves =
   UNDEFINED: 'lit'
   THIS: 'this'
   STATEMENT: 'statement'
+  S_WORD: 'name'
+  S_DIRECTIVE: 'name'
+  S_ON: 'name'
+  S_SYMBOL: 'sym'
+  S_KIND: 'sym'
 
 # ==============================================================================
 # Entries

@@ -14,7 +14,6 @@ import { makeParserLexer, tokenize } from '../../src/lexer.js';
 import { emit, stripFace } from '../../src/emitter.js';
 import { compile as fullCompile } from '../../src/compiler.js';
 import { Mappings } from '../../src/stores.js';
-import { carrySchemaRejection } from '../../src/schema.js';
 
 parser.lexer = makeParserLexer();
 
@@ -25,7 +24,15 @@ const compile = (src, opts = {}) => {
   return { ...out, mappings: new Mappings(out.mappings), stores: out.stores, sexpr: r.sexpr };
 };
 
-const lexFails = (src, pattern) => expect(() => tokenize(src)).toThrow(pattern);
+// A schema's whole verdict: the scanner, the SchemaBody grammar, and the
+// reader that fills the descriptor once the parse accepts. A rejection is
+// thrown positioned or recorded as the parse's diagnostic.
+const parseSchema = (src) => {
+  const r = parser.parse(src);
+  if (r.diagnostics.length) throw new Error(r.diagnostics[0].message);
+  return r;
+};
+const schemaFails = (src, pattern) => expect(() => parseSchema(src)).toThrow(pattern);
 const emitFails = (src, pattern) => {
   const r = parser.parse(src);
   expect(r.diagnostics).toEqual([]);
@@ -277,29 +284,20 @@ describe('schema runtime: the validation pipeline', () => {
 // ════════════════════════════════════════════════════════════════════
 
 describe('schema DSL: loud rejections', () => {
-  test('tolerant schema recovery carries positioned rejections and propagates compiler faults', () => {
-    const carried = [];
-    const rejection = Object.assign(new Error('half-typed callable'), { start: 12, end: 18 });
-    carrySchemaRejection(rejection, (err) => carried.push(err));
-    expect(carried).toEqual([rejection]);
-    expect(() => carrySchemaRejection(new TypeError('compiler fault'), () => {}))
-      .toThrow(TypeError);
-  });
-
   test('the persistence spellings stay :model-only on the other kinds (the completed matrix)', () => {
-    lexFails('S = schema :shape\n  a! string, {was: "b"}', /persistence metadata.*:model\/:mixin-only/);
-    lexFails('S = schema :shape\n  a! string @unique', /persistence metadata.*:model\/:mixin-only/);
-    lexFails('I = schema :input\n  a! string\n  @times', /:model-only/);
-    lexFails('S = schema :shape\n  a! string\n  @belongsTo User', /:model-only/);
-    lexFails('S = schema :shape\n  a! string\n  @scope :hot, -> @where(a: 1)', /query scopes.*:model-only/);
-    lexFails('M = schema :mixin\n  a! string\n  @defaultScope -> @where(a: 1)', /query scopes.*:model-only/);
-    lexFails('S = schema :shape, on: analytics\n  a! string', /'on:'.*applies to :model only/);
-    lexFails('E = schema :enum, on: analytics\n  :a\n  :b', /'on:'.*applies to :model only/);
+    schemaFails('S = schema :shape\n  a! string, {was: "b"}', /persistence metadata.*:model\/:mixin-only/);
+    schemaFails('S = schema :shape\n  a! string @unique', /persistence metadata.*:model\/:mixin-only/);
+    schemaFails('I = schema :input\n  a! string\n  @times', /:model-only/);
+    schemaFails('S = schema :shape\n  a! string\n  @belongsTo User', /:model-only/);
+    schemaFails('S = schema :shape\n  a! string\n  @scope :hot, -> @where(a: 1)', /query scopes.*:model-only/);
+    schemaFails('M = schema :mixin\n  a! string\n  @defaultScope -> @where(a: 1)', /query scopes.*:model-only/);
+    schemaFails('S = schema :shape, on: analytics\n  a! string', /'on:'.*applies to :model only/);
+    schemaFails('E = schema :enum, on: analytics\n  :a\n  :b', /'on:'.*applies to :model only/);
   });
 
   test('an enum whose input would name two members rejects', () => {
-    lexFails('E = schema :enum\n  :a "b"\n  :b "c"', /enum member ':a' has the value "b", which is the name of member ':b'/);
-    lexFails('E = schema :enum\n  :a 1\n  :a 2', /enum member ':a' is declared twice/);
+    schemaFails('E = schema :enum\n  :a "b"\n  :b "c"', /enum member ':a' has the value "b", which is the name of member ':b'/);
+    schemaFails('E = schema :enum\n  :a 1\n  :a 2', /enum member ':a' is declared twice/);
     // the hand-built form takes the same check
     expect(() => __schema({ kind: 'enum', name: 'H', entries: [
       { tag: 'enum-member', name: 'a', value: 'b' }, { tag: 'enum-member', name: 'b', value: 'c' },
@@ -319,16 +317,16 @@ describe('schema DSL: loud rejections', () => {
     expect(run('E = schema :enum\n  :a 1_000\n  :b -2_000', 'return [...E._normalize().enumMembers.values()];')).toEqual([1000, -2000]);
     expect(run('S = schema :shape\n  n? integer, 1_000..2_000, [1_500]', 'return [S.parse({}).n, S.safe({ n: 2_500 }).ok];'))
       .toEqual([1500, false]);
-    lexFails('E = schema :enum\n  :a 1n\n  :b 2', /enum member ':a' value cannot be a BigInt \(1n\)/);
+    schemaFails('E = schema :enum\n  :a 1n\n  :b 2', /enum member ':a' value cannot be a BigInt \(1n\)/);
   });
 
   test('unknown :model directives reject by name at parse time, positioned', () => {
-    lexFails('U = schema :model\n  name! string\n  @timestamp', /unknown directive '@timestamp' on :model — legal: @mixin, @times/);
-    lexFails('U = schema :model\n  name! string\n  @bogus', /unknown directive '@bogus' on :model/);
-    lexFails('U = schema :model\n  name! string\n  @belongs_too Order', /unknown directive '@belongs_too' on :model/);
+    schemaFails('U = schema :model\n  name! string\n  @timestamp', /unknown directive '@timestamp' on :model — legal: @mixin, @times/);
+    schemaFails('U = schema :model\n  name! string\n  @bogus', /unknown directive '@bogus' on :model/);
+    schemaFails('U = schema :model\n  name! string\n  @belongs_too Order', /unknown directive '@belongs_too' on :model/);
     // positioned at the directive name, not the schema head
     try {
-      tokenize('U = schema :model\n  name! string\n  @timestamp');
+      parser.parse('U = schema :model\n  name! string\n  @timestamp');
       throw new Error('unreachable');
     } catch (e) {
       expect(e.start).toBe('U = schema :model\n  name! string\n  @'.length);
@@ -336,38 +334,38 @@ describe('schema DSL: loud rejections', () => {
   });
 
   test('malformed or junk-bearing directive args reject at their own position', () => {
-    lexFails('U = schema :model\n  name! string\n  @belongsTo User Order junk 42', /@belongsTo: takes one target name and an optional '\{…\}' options bracket/);
-    lexFails('U = schema :model\n  name! string\n  @times yes please', /@times: takes no arguments/);
-    lexFails('U = schema :model\n  name! string\n  @softDelete now', /@softDelete: takes no arguments/);
-    lexFails('U = schema :model\n  name! string\n  @belongsTo', /@belongsTo requires a target name/);
-    lexFails('U = schema :model\n  name! string\n  @idStart soon', /@idStart requires an integer literal/);
-    lexFails('U = schema :model\n  name! string\n  @idStart 1.5', /integer literal; got 1\.5/);
-    lexFails('U = schema :model\n  name! string\n  @idStart 10 20', /unexpected NUMBER after the integer/);
-    lexFails('U = schema :model\n  name! string\n  @unique', /@unique requires a field name or list/);
-    lexFails('U = schema :model\n  name! string\n  @index', /@index requires a field name or list/);
-    lexFails('U = schema :model\n  name! string\n  @unique [:name] extra', /unexpected IDENTIFIER after the column list/);
-    lexFails('U = schema :model\n  name! string\n  @tableWas', /@tableWas requires the previous table name/);
-    lexFails('U = schema :model\n  name! string\n  @tableWas a b', /takes one table name/);
-    lexFails('U = schema :model\n  name! string\n  @table', /@table requires a table name/);
-    lexFails('U = schema :model\n  name! string\n  @table a b', /takes one table name/);
+    schemaFails('U = schema :model\n  name! string\n  @belongsTo User Order junk 42', /@belongsTo: takes one target name and an optional '\{…\}' options bracket/);
+    schemaFails('U = schema :model\n  name! string\n  @times yes please', /@times: takes no arguments/);
+    schemaFails('U = schema :model\n  name! string\n  @softDelete now', /@softDelete: takes no arguments/);
+    schemaFails('U = schema :model\n  name! string\n  @belongsTo', /@belongsTo requires a target name/);
+    schemaFails('U = schema :model\n  name! string\n  @idStart soon', /@idStart requires an integer literal/);
+    schemaFails('U = schema :model\n  name! string\n  @idStart 1.5', /integer literal; got 1\.5/);
+    schemaFails('U = schema :model\n  name! string\n  @idStart 10 20', /unexpected NUMBER after the integer/);
+    schemaFails('U = schema :model\n  name! string\n  @unique', /@unique requires a field name or list/);
+    schemaFails('U = schema :model\n  name! string\n  @index', /@index requires a field name or list/);
+    schemaFails('U = schema :model\n  name! string\n  @unique [:name] extra', /unexpected IDENTIFIER after the column list/);
+    schemaFails('U = schema :model\n  name! string\n  @tableWas', /@tableWas requires the previous table name/);
+    schemaFails('U = schema :model\n  name! string\n  @tableWas a b', /takes one table name/);
+    schemaFails('U = schema :model\n  name! string\n  @table', /@table requires a table name/);
+    schemaFails('U = schema :model\n  name! string\n  @table a b', /takes one table name/);
     // A dotted name would ride through the identifier quoter as ONE
     // identifier — `"crm.accounts"` names a table literally called that.
     // Bare form is caught by the lexer; the quoted form needs its own
     // guard, and both must refuse rather than target the wrong table.
-    lexFails('U = schema :model\n  name! string\n  @table crm.accounts', /takes one table name/);
-    lexFails('U = schema :model\n  name! string\n  @table "crm.accounts"',
+    schemaFails('U = schema :model\n  name! string\n  @table crm.accounts', /takes one table name/);
+    schemaFails('U = schema :model\n  name! string\n  @table "crm.accounts"',
       /schema-qualified table names are not supported yet/);
   });
 
   test('@unique/@index columns must exist on the table (mixin-free models)', () => {
-    lexFails('U = schema :model\n  name! string\n  @unique [nope, missing]', /@unique: unknown column 'nope' — the table has: id, name/);
-    lexFails('U = schema :model\n  name! string\n  @index bogus_column', /@index: unknown column 'bogus_column'/);
+    schemaFails('U = schema :model\n  name! string\n  @unique [nope, missing]', /@unique: unknown column 'nope' — the table has: id, name/);
+    schemaFails('U = schema :model\n  name! string\n  @index bogus_column', /@index: unknown column 'bogus_column'/);
     // implicit columns count as known
     const ok = 'U = schema :model\n  name! string\n  @times\n  @softDelete\n  @belongsTo Org\n  @index createdAt\n  @index [org_id, deleted_at]\n  @unique :name';
-    expect(() => tokenize(ok)).not.toThrow();
+    expect(() => parseSchema(ok)).not.toThrow();
     // a @mixin defers the whole check to the runtime root (its fields
     // are not parse-visible; normalize re-checks the expanded set)
-    expect(() => tokenize('U = schema :model\n  name! string\n  @mixin Stamps\n  @index createdAt')).not.toThrow();
+    expect(() => parseSchema('U = schema :model\n  name! string\n  @mixin Stamps\n  @index createdAt')).not.toThrow();
   });
 
   // @index/@unique are written in FIELD space and resolve through
@@ -377,10 +375,10 @@ describe('schema DSL: loud rejections', () => {
   // itself. (The runtime accepted both all along.)
   test('@index/@unique resolve through {column:}, from either side', () => {
     const src = (line) => 'U = schema :model\n  name! string, {column: "USER_NAME"}\n  ' + line;
-    expect(() => tokenize(src('@index [:USER_NAME]'))).not.toThrow();
-    expect(() => tokenize(src('@index [:name]'))).not.toThrow();
-    expect(() => tokenize(src('@unique :USER_NAME'))).not.toThrow();
-    lexFails(src('@index [:nope]'), /@index: unknown column 'nope' — the table has: USER_NAME, id/);
+    expect(() => parseSchema(src('@index [:USER_NAME]'))).not.toThrow();
+    expect(() => parseSchema(src('@index [:name]'))).not.toThrow();
+    expect(() => parseSchema(src('@unique :USER_NAME'))).not.toThrow();
+    schemaFails(src('@index [:nope]'), /@index: unknown column 'nope' — the table has: USER_NAME, id/);
   });
 
   // A surrogate primary key is a property↔column pair like any
@@ -389,13 +387,13 @@ describe('schema DSL: loud rejections', () => {
   // exactly as the runtime's columnFor resolves it.
   test('@index/@unique resolve the surrogate primary key through its {column:}', () => {
     const pk = 'U = schema :model\n  name! string\n  @primary pid, {column: "PID"}\n  ';
-    expect(() => tokenize(pk + '@index [pid]')).not.toThrow();
-    expect(() => tokenize(pk + '@unique [pid]')).not.toThrow();
-    expect(() => tokenize(pk + '@index [:PID]')).not.toThrow();
+    expect(() => parseSchema(pk + '@index [pid]')).not.toThrow();
+    expect(() => parseSchema(pk + '@unique [pid]')).not.toThrow();
+    expect(() => parseSchema(pk + '@index [:PID]')).not.toThrow();
     // A natural key resolves through its field declaration.
-    expect(() => tokenize('U = schema :model\n  mrn! string\n  @primary mrn\n  @index [mrn]')).not.toThrow();
+    expect(() => parseSchema('U = schema :model\n  mrn! string\n  @primary mrn\n  @index [mrn]')).not.toThrow();
     // A genuinely unknown name still rejects with the column list.
-    lexFails(pk + '@index [nope]', /@index: unknown column 'nope' — the table has: PID, name/);
+    schemaFails(pk + '@index [nope]', /@index: unknown column 'nope' — the table has: PID, name/);
     // The descriptor carries the pair the runtime resolves: the pk's
     // property→column mapping beside the index written in field space.
     const desc = new Function('__schema', compile(pk + '@index [pid]').code + '\nreturn U;')((d) => d);
@@ -410,42 +408,42 @@ describe('schema DSL: loud rejections', () => {
   // column is one property reading two columns — duplicate-column DDL
   // and INSERTs hidden behind the rename.
   test('a property claiming two columns rejects positioned', () => {
-    lexFails('U = schema :model\n  userId! integer, {column: "USER_REF"}\n  @belongsTo User',
+    schemaFails('U = schema :model\n  userId! integer, {column: "USER_REF"}\n  @belongsTo User',
       /field 'userId' and the @belongsTo User relation both own property 'userId' \(columns 'USER_REF' and 'user_id'\) — every property reads exactly one column/);
-    lexFails('U = schema :model\n  createdAt! datetime, {column: "CREATED"}\n  @times',
+    schemaFails('U = schema :model\n  createdAt! datetime, {column: "CREATED"}\n  @times',
       /field 'createdAt' and @times both own property 'createdAt' \(columns 'CREATED' and 'created_at'\)/);
     // Same column on both sides is the column-side collision, unchanged.
-    lexFails('U = schema :model\n  userId! integer, {column: "user_id"}\n  @belongsTo User',
+    schemaFails('U = schema :model\n  userId! integer, {column: "user_id"}\n  @belongsTo User',
       /field 'userId' and the @belongsTo User relation both own column 'user_id' — every table column has exactly one owner/);
     // An unrelated field+relation pair still compiles.
-    expect(() => tokenize('U = schema :model\n  title! string, {column: "TITLE"}\n  @belongsTo User')).not.toThrow();
+    expect(() => parseSchema('U = schema :model\n  title! string, {column: "TITLE"}\n  @belongsTo User')).not.toThrow();
   });
 
   // Two spellings that canonicalize to one column make DDL the
   // database refuses — rejected here with the runtime's wording,
   // before membership, as the runtime judges it.
   test('@index/@unique columns must be distinct after canonicalization', () => {
-    lexFails('U = schema :model\n  email! string\n  @unique [:email, :email]',
+    schemaFails('U = schema :model\n  email! string\n  @unique [:email, :email]',
       /@unique columns must be distinct after canonicalization: email, email/);
-    lexFails('U = schema :model\n  userId! integer\n  @index [:userId, :user_id]',
+    schemaFails('U = schema :model\n  userId! integer\n  @index [:userId, :user_id]',
       /@index columns must be distinct after canonicalization: user_id, user_id/);
     // A legitimate multi-column index still compiles.
-    expect(() => tokenize('U = schema :model\n  a! string\n  b! string\n  @index [:a, :b]')).not.toThrow();
+    expect(() => parseSchema('U = schema :model\n  a! string\n  b! string\n  @index [:a, :b]')).not.toThrow();
   });
 
   test('relation targets must be canonical PascalCase', () => {
-    lexFails('U = schema :model\n  name! string\n  @belongsTo MDMUser', /target 'MDMUser' is not canonical PascalCase/);
-    lexFails('U = schema :model\n  name! string\n  @hasMany APIKey', /not canonical PascalCase/);
-    lexFails('U = schema :model\n  name! string\n  @hasOne profile', /not canonical PascalCase/);
-    expect(() => tokenize('U = schema :model\n  name! string\n  @belongsTo MdmUser')).not.toThrow();
+    schemaFails('U = schema :model\n  name! string\n  @belongsTo MDMUser', /target 'MDMUser' is not canonical PascalCase/);
+    schemaFails('U = schema :model\n  name! string\n  @hasMany APIKey', /not canonical PascalCase/);
+    schemaFails('U = schema :model\n  name! string\n  @hasOne profile', /not canonical PascalCase/);
+    expect(() => parseSchema('U = schema :model\n  name! string\n  @belongsTo MdmUser')).not.toThrow();
   });
 
   test('model-only field spellings: attrs and inline @unique errors', () => {
-    lexFails('U = schema :model\n  a! string, {wat: "b"}', /unknown field 'a' option 'wat' — known options: column, was/);
-    lexFails('U = schema :model\n  a! string, {was: 5}', /'was' names a database column, so it is QUOTED/);
-    lexFails('U = schema :model\n  a! string, {was: "x"}, {was: "y"}', /more than one '\{…\}' attrs bracket/);
-    lexFails('U = schema :model\n  a! string @uniq', /unknown inline attribute '@uniq'.*inline attributes are '@unique' and '@primary'/);
-    lexFails('U = schema :model\n  a! string, @unique, @unique', /more than one '@unique'/);
+    schemaFails('U = schema :model\n  a! string, {wat: "b"}', /unknown field 'a' option 'wat' — known options: column, was/);
+    schemaFails('U = schema :model\n  a! string, {was: 5}', /'was' names a database column, so it is QUOTED/);
+    schemaFails('U = schema :model\n  a! string, {was: "x"}, {was: "y"}', /more than one '\{…\}' attrs bracket/);
+    schemaFails('U = schema :model\n  a! string @uniq', /unknown inline attribute '@uniq'.*inline attributes are '@unique' and '@primary'/);
+    schemaFails('U = schema :model\n  a! string, @unique, @unique', /more than one '@unique'/);
   });
 
   test('literal-union defaults: bracket the member, in place', () => {
@@ -457,48 +455,48 @@ describe('schema DSL: loud rejections', () => {
     expect(un('U = schema :model\n  role ["admin"] | "user"').constraints.default).toBe('admin');
     expect(un('U = schema :model\n  role "admin" | ["user"]').literals).toEqual(['admin', 'user']);
     // one default only, whichever spelling
-    lexFails('U = schema :model\n  role "a" | ["b"] | ["c"]', /brackets more than one union member/);
-    lexFails('U = schema :model\n  role "a" | ["b"], ["c"]', /more than one '\[…\]' default bracket/);
+    schemaFails('U = schema :model\n  role "a" | ["b"] | ["c"]', /brackets more than one union member/);
+    schemaFails('U = schema :model\n  role "a" | ["b"], ["c"]', /more than one '\[…\]' default bracket/);
     // a default outside the union is a typo, both spellings
-    lexFails('U = schema :model\n  role "admin" | "user", ["usr"]', /defaults to "usr", which is not a member/);
+    schemaFails('U = schema :model\n  role "admin" | "user", ["usr"]', /defaults to "usr", which is not a member/);
     // a lone leading bracket stays the ordinary default (typeless field)
     expect(fieldOf('U = schema :model\n  label! ["x"]', 'label').constraints.default).toBe('x');
   });
 
   test('inline @primary: one identity, one spelling, :model-only', () => {
-    lexFails('U = schema :model\n  a! string @primary\n  b! string @primary',
+    schemaFails('U = schema :model\n  a! string @primary\n  b! string @primary',
       /both 'a' and 'b' declare '@primary' — a row has one identity/);
-    lexFails('U = schema :model\n  @primary a\n  a! string @primary',
+    schemaFails('U = schema :model\n  @primary a\n  a! string @primary',
       /'@primary a' and inline '@primary' on field 'a' are two answers to one question/);
-    lexFails('M = schema :mixin\n  a! string @primary',
+    schemaFails('M = schema :mixin\n  a! string @primary',
       /inline '@primary' on field 'a' is :model-only — a mixin cannot declare the primary key/);
     // The compact spellings: elided type defaults to string; the comma
     // before a transform is optional after an inline attribute.
-    expect(() => tokenize("U = schema :model\n  id! @primary -> it.id or 'x'\n  n! string")).not.toThrow();
+    expect(() => parseSchema("U = schema :model\n  id! @primary -> it.id or 'x'\n  n! string")).not.toThrow();
   });
 
   test('a field and a directive owning one column collide (mixin-free models)', () => {
     // the exact repro: the field's snake column IS the relation's FK
-    lexFails('U = schema :model\n  userId! integer\n  name! string\n  @belongsTo User',
+    schemaFails('U = schema :model\n  userId! integer\n  name! string\n  @belongsTo User',
       /field 'userId' and the @belongsTo User relation both own column 'user_id'/);
-    lexFails('U = schema :model\n  createdAt! datetime\n  @times',
+    schemaFails('U = schema :model\n  createdAt! datetime\n  @times',
       /field 'createdAt' and @times both own column 'created_at'/);
-    lexFails('U = schema :model\n  deletedAt? datetime\n  @softDelete',
+    schemaFails('U = schema :model\n  deletedAt? datetime\n  @softDelete',
       /field 'deletedAt' and @softDelete both own column 'deleted_at'/);
     // duplicate relations claim one column too — directive-vs-directive
-    lexFails('U = schema :model\n  name! string\n  @belongsTo Org\n  @belongsTo Org',
+    schemaFails('U = schema :model\n  name! string\n  @belongsTo Org\n  @belongsTo Org',
       /the @belongsTo Org relation and the @belongsTo Org relation both own column 'org_id'/);
     // the legal neighbors stay legal
-    expect(() => tokenize('U = schema :model\n  userName! string\n  @belongsTo User')).not.toThrow();
+    expect(() => parseSchema('U = schema :model\n  userName! string\n  @belongsTo User')).not.toThrow();
   });
 
   test('duplicate @idStart / @tableWas reject at the second occurrence (the silent last-wins family)', () => {
-    lexFails('U = schema :model\n  name! string\n  @idStart 100\n  @idStart 200',
+    schemaFails('U = schema :model\n  name! string\n  @idStart 100\n  @idStart 200',
       /duplicate '@idStart' — a :model declares it at most once/);
-    lexFails('U = schema :model\n  name! string\n  @tableWas "old_users"\n  @tableWas "older_users"',
+    schemaFails('U = schema :model\n  name! string\n  @tableWas "old_users"\n  @tableWas "older_users"',
       /duplicate '@tableWas'/);
-    lexFails('U = schema :model\n  name! string\n  @table "a"\n  @table "b"', /duplicate '@table'/);
-    lexFails('U = schema :model\n  name! string\n  @table Alpha\n  @table Beta', /duplicate '@table'/);
+    schemaFails('U = schema :model\n  name! string\n  @table "a"\n  @table "b"', /duplicate '@table'/);
+    schemaFails('U = schema :model\n  name! string\n  @table Alpha\n  @table Beta', /duplicate '@table'/);
   });
 
   test('duplicate @times / @softDelete reject as once-directives, not as column two-owners', () => {
@@ -506,9 +504,9 @@ describe('schema DSL: loud rejections', () => {
     // duplicate is still refused — it declares itself once — and the
     // runtime holds the same verdict on hand-built descriptors
     // (pinned in runtime-orm.test.js).
-    lexFails('U = schema :model\n  name! string\n  @times\n  @times',
+    schemaFails('U = schema :model\n  name! string\n  @times\n  @times',
       /duplicate '@times' — declared twice; a :model declares it once/);
-    lexFails('U = schema :model\n  name! string\n  @softDelete\n  @softDelete',
+    schemaFails('U = schema :model\n  name! string\n  @softDelete\n  @softDelete',
       /duplicate '@softDelete' — declared twice; a :model declares it once/);
   });
 
@@ -546,7 +544,7 @@ describe('schema DSL: loud rejections', () => {
     // The one bare-form guard, shared with every other bare name in the
     // language: consecutive capitals convert surprisingly, and quoting
     // is the escape.
-    lexFails('M = schema :model\n  n! string\n  @table MDMUser',
+    schemaFails('M = schema :model\n  n! string\n  @table MDMUser',
       /consecutive capitals convert surprisingly \('MDMUser' → 'mdmuser'\).*'@table "MDMUser"'/s);
   });
 
@@ -562,32 +560,32 @@ describe('schema DSL: loud rejections', () => {
       '  @belongsTo User, {as: reviewer, foreignKey: "reviewer_id"}',
       '  @hasMany Tag, {as: labels, foreignKey: "post_id"}',
     ].join('\n');
-    expect(() => tokenize(ok)).not.toThrow();
+    expect(() => parseSchema(ok)).not.toThrow();
     // optional marker still binds to the target, before the options
-    expect(() => tokenize('P = schema :model\n  t! string\n  @belongsTo User?, {as: author}')).not.toThrow();
+    expect(() => parseSchema('P = schema :model\n  t! string\n  @belongsTo User?, {as: author}')).not.toThrow();
 
-    lexFails('P = schema :model\n  t! string\n  @belongsTo User, {inverse: "x"}',
+    schemaFails('P = schema :model\n  t! string\n  @belongsTo User, {inverse: "x"}',
       /unknown @belongsTo option 'inverse' — known options: as, foreignKey, through, targetKey/);
-    lexFails('P = schema :model\n  t! string\n  @belongsTo User, {as: Author}',
+    schemaFails('P = schema :model\n  t! string\n  @belongsTo User, {as: Author}',
       /'as' is a property name — canonical camelCase/);
-    lexFails('P = schema :model\n  t! string\n  @belongsTo User, {as: authorID}',
+    schemaFails('P = schema :model\n  t! string\n  @belongsTo User, {as: authorID}',
       /'as' is a property name — canonical camelCase/);
-    lexFails('P = schema :model\n  t! string\n  @belongsTo User, {foreignKey: "authorId"}',
+    schemaFails('P = schema :model\n  t! string\n  @belongsTo User, {foreignKey: "authorId"}',
       /'foreignKey' is a column name Rip generates/);
-    lexFails('P = schema :model\n  t! string\n  @belongsTo User, {as: a, as: b}',
+    schemaFails('P = schema :model\n  t! string\n  @belongsTo User, {as: a, as: b}',
       /@belongsTo repeats option 'as'/);
-    lexFails('P = schema :model\n  t! string\n  @belongsTo User, {}',
+    schemaFails('P = schema :model\n  t! string\n  @belongsTo User, {}',
       /@belongsTo has an empty '\{…\}' options bracket/);
-    lexFails('P = schema :model\n  t! string\n  @belongsTo User, {as: 5}',
+    schemaFails('P = schema :model\n  t! string\n  @belongsTo User, {as: 5}',
       /option 'as' names a property, so it is written BARE/);
     // QUOTING PICKS THE NAMESPACE, both ways
-    lexFails('P = schema :model\n  t! string\n  @belongsTo User, {as: "author"}',
+    schemaFails('P = schema :model\n  t! string\n  @belongsTo User, {as: "author"}',
       /option 'as' names a property, so it is written BARE — '\{as: author\}'/);
-    lexFails('P = schema :model\n  t! string\n  @belongsTo User, {foreignKey: author_id}',
+    schemaFails('P = schema :model\n  t! string\n  @belongsTo User, {foreignKey: author_id}',
       /option 'foreignKey' names a database column, so it is QUOTED/);
     // positioned at the SECOND occurrence
     try {
-      tokenize('U = schema :model\n  name! string\n  @idStart 100\n  @idStart 200');
+      parser.parse('U = schema :model\n  name! string\n  @idStart 100\n  @idStart 200');
       throw new Error('unreachable');
     } catch (e) {
       expect(e.start).toBe('U = schema :model\n  name! string\n  @idStart 100\n  @'.length);
@@ -599,16 +597,16 @@ describe('schema DSL: loud rejections', () => {
   // half in runtime-orm.test.js).
   test('the belongsTo column claim follows the accessor: {as:} alone derives its own column', () => {
     // two same-target relations coexist with no explicit keys
-    expect(() => tokenize('P = schema :model\n  t! string\n  @belongsTo User, {as: author}\n  @belongsTo User, {as: reviewer}')).not.toThrow();
+    expect(() => parseSchema('P = schema :model\n  t! string\n  @belongsTo User, {as: author}\n  @belongsTo User, {as: reviewer}')).not.toThrow();
     // the claimed column IS the accessor-derived one…
-    lexFails('P = schema :model\n  authorId! integer\n  @belongsTo User, {as: author}',
+    schemaFails('P = schema :model\n  authorId! integer\n  @belongsTo User, {as: author}',
       /field 'authorId' and the @belongsTo User \(as author\) relation both own column 'author_id'/);
     // …so the target-derived column stays free for a field
-    expect(() => tokenize('P = schema :model\n  userId! integer\n  @belongsTo User, {as: author}')).not.toThrow();
+    expect(() => parseSchema('P = schema :model\n  userId! integer\n  @belongsTo User, {as: author}')).not.toThrow();
     // explicit foreignKey still wins over the accessor derivation
-    lexFails('P = schema :model\n  bossId! integer\n  @belongsTo User, {as: author, foreignKey: "boss_id"}',
+    schemaFails('P = schema :model\n  bossId! integer\n  @belongsTo User, {as: author, foreignKey: "boss_id"}',
       /field 'bossId' and the @belongsTo User \(as author\) relation both own column 'boss_id'/);
-    expect(() => tokenize('P = schema :model\n  authorId! integer\n  @belongsTo User, {as: author, foreignKey: "boss_id"}')).not.toThrow();
+    expect(() => parseSchema('P = schema :model\n  authorId! integer\n  @belongsTo User, {as: author, foreignKey: "boss_id"}')).not.toThrow();
   });
 
   test('projection folding projects the FK the runtime would: accessor-derived, explicit foreignKey camelized', () => {
@@ -628,92 +626,92 @@ describe('schema DSL: loud rejections', () => {
   });
 
   test("a :model's `id` field collides with the runtime-managed primary key", () => {
-    lexFails('U = schema :model\n  id! integer\n  name! string', /field 'id' collides with the runtime-managed primary key/);
+    schemaFails('U = schema :model\n  id! integer\n  name! string', /field 'id' collides with the runtime-managed primary key/);
     // non-model kinds keep `id` as an ordinary field
-    expect(() => tokenize('S = schema :shape\n  id! integer')).not.toThrow();
+    expect(() => parseSchema('S = schema :shape\n  id! integer')).not.toThrow();
   });
 
   test('@scope / @defaultScope grammar errors', () => {
-    lexFails('U = schema :model\n  a! string\n  @scope active, -> @where(a: 1)', /@scope name must be a :symbol/);
-    lexFails('U = schema :model\n  a! string\n  @scope :active', /missing its body/);
-    lexFails('U = schema :model\n  a! string\n  @scope :Active, -> @where(a: 1)', /lowercase-first alphanumeric/);
-    lexFails('U = schema :model\n  a! string\n  @scope :hot, @where(a: 1)', /expected '->' to start the body/);
-    lexFails('U = schema :model\n  a! string\n  @defaultScope (d) -> @where(a: d)', /@defaultScope takes no parameters/);
-    lexFails('U = schema :model\n  a! string\n  @defaultScope ->', /function body is empty/);
+    schemaFails('U = schema :model\n  a! string\n  @scope active, -> @where(a: 1)', /@scope name must be a :symbol/);
+    schemaFails('U = schema :model\n  a! string\n  @scope :active', /missing its body/);
+    schemaFails('U = schema :model\n  a! string\n  @scope :Active, -> @where(a: 1)', /lowercase-first alphanumeric/);
+    schemaFails('U = schema :model\n  a! string\n  @scope :hot, @where(a: 1)', /expected '->' to start the body/);
+    schemaFails('U = schema :model\n  a! string\n  @defaultScope (d) -> @where(a: d)', /@defaultScope takes no parameters/);
+    schemaFails('U = schema :model\n  a! string\n  @defaultScope ->', /function body is empty/);
   });
 
   test("hook binding: lifecycle hooks take no parameters; 'on:' body-shape errors", () => {
-    lexFails('U = schema :model\n  a! string\n  beforeSave: (x) -> x', /lifecycle hooks take no parameters — only methods do/);
-    lexFails('U = schema :model, on:\n  a! string', /'on:' requires an adapter expression/);
-    lexFails('U = schema :model; a!; @scope :hot, -> @where(a: 1)', /inline schema bodies do not support '->'/);
+    schemaFails('U = schema :model\n  a! string\n  beforeSave: (x) -> x', /lifecycle hooks take no parameters — only methods do/);
+    schemaFails('U = schema :model, on:\n  a! string', /'on:' requires an adapter expression/);
+    schemaFails('U = schema :model; a!; @scope :hot, -> @where(a: 1)', /inline schema bodies do not support '->'/);
   });
 
   test('kind and body-shape errors', () => {
-    lexFails('U = schema :wat\n  a! string', /unknown schema kind :wat/);
-    lexFails('S = schema :shape', /expected an indented schema body/);
-    lexFails('S = schema :shape;', /inline schema body is empty/);
-    lexFails('S = schema :shape; m: -> 1', /inline schema bodies do not support/);
+    schemaFails('U = schema :wat\n  a! string', /unknown schema kind :wat/);
+    schemaFails('S = schema :shape', /expected an indented schema body/);
+    schemaFails('S = schema :shape;', /inline schema body is empty/);
+    schemaFails('S = schema :shape; m: -> 1', /inline schema bodies do not support/);
   });
 
   test('nested array types reject — one `[]` validates element-wise, deeper nesting never silently flattens', () => {
-    lexFails('X = schema :shape\n  tags! string[][]', /nested array types.*not supported/);
-    lexFails('X = schema :shape\n  m! integer[][][]', /nested array types/);
+    schemaFails('X = schema :shape\n  tags! string[][]', /nested array types.*not supported/);
+    schemaFails('X = schema :shape\n  m! integer[][][]', /nested array types/);
   });
 
   test('field-line errors', () => {
-    lexFails('U = schema\n  name: string', /space, no colon/);
-    lexFails('S = schema\n  a! string -> 1', /comma is required before '->'/);
-    lexFails('S = schema\n  a! string, 1..2, 3..4', /more than one range/);
-    lexFails('S = schema\n  a! string, 9..2', /reversed/);
-    lexFails('S = schema\n  a! ~text', /is not coercible/);
-    lexFails('S = schema\n  a! ~integer[]', /does not apply to array types/);
-    lexFails('S = schema\n  a! ~integer, -> 5', /transform replaces coercion/);
-    lexFails('S = schema\n  a! "x" | 5', /literal unions contain string literals only/);
-    lexFails('S = schema\n  a! string, [/re/]', /written bare, not in brackets/);
+    schemaFails('U = schema\n  name: string', /space, no colon/);
+    schemaFails('S = schema\n  a! string -> 1', /comma is required before '->'/);
+    schemaFails('S = schema\n  a! string, 1..2, 3..4', /more than one range/);
+    schemaFails('S = schema\n  a! string, 9..2', /reversed/);
+    schemaFails('S = schema\n  a! ~text', /is not coercible/);
+    schemaFails('S = schema\n  a! ~integer[]', /does not apply to array types/);
+    schemaFails('S = schema\n  a! ~integer, -> 5', /transform replaces coercion/);
+    schemaFails('S = schema\n  a! "x" | 5', /literal unions contain string literals only/);
+    schemaFails('S = schema\n  a! string, [/re/]', /written bare, not in brackets/);
   });
 
   test('capability matrix by kind', () => {
-    lexFails('M = schema :mixin\n  a! string\n  m: -> 1', /:mixin schemas are fields-only/);
-    lexFails('M = schema :mixin\n  a! string\n  @ensure "m", (u) -> u.a', /don't accept @ensure/);
-    lexFails('I = schema :input\n  a! string\n  m: -> 1', /:input schemas are fields-only/);
+    schemaFails('M = schema :mixin\n  a! string\n  m: -> 1', /:mixin schemas are fields-only/);
+    schemaFails('M = schema :mixin\n  a! string\n  @ensure "m", (u) -> u.a', /don't accept @ensure/);
+    schemaFails('I = schema :input\n  a! string\n  m: -> 1', /:input schemas are fields-only/);
     // `!>` on a :mixin rejects too — mixin expansion copies fields
     // only, so a derived entry would silently vanish on inclusion.
-    lexFails('M = schema :mixin\n  base! integer\n  dbl: !> @base * 2', /:mixin schemas are fields-only/);
+    schemaFails('M = schema :mixin\n  base! integer\n  dbl: !> @base * 2', /:mixin schemas are fields-only/);
   });
 
   test('@ensure grammar errors', () => {
-    lexFails('S = schema :input\n  a! string\n  @ensure "msg"', /did you forget the comma/);
-    lexFails('S = schema :input\n  a! string\n  @ensure "msg", -> 1', /declare their parameter explicitly/);
-    lexFails('S = schema :input\n  a! string\n  @ensure 5, (u) -> u.a', /string literal message/);
+    schemaFails('S = schema :input\n  a! string\n  @ensure "msg"', /did you forget the comma/);
+    schemaFails('S = schema :input\n  a! string\n  @ensure "msg", -> 1', /declare their parameter explicitly/);
+    schemaFails('S = schema :input\n  a! string\n  @ensure 5, (u) -> u.a', /string literal message/);
   });
 
   test(':enum and :union body errors', () => {
-    lexFails('E = schema :enum\n  admin', /must be a :symbol/);
-    lexFails('E = schema :enum\n  :a : 1', /drop the ':' before the value/);
-    lexFails('E = schema :enum\n  @on :x', /don't accept/);
-    lexFails('U = schema :union\n  A\n  B', /requires an '@on :field' discriminator/);
-    lexFails('U = schema :union\n  @on :k\n  A', /at least two constituent/);
-    lexFails('U = schema :union\n  @on :k\n  @on :j\n  A\n  B', /exactly one/);
+    schemaFails('E = schema :enum\n  admin', /must be a :symbol/);
+    schemaFails('E = schema :enum\n  :a : 1', /drop the ':' before the value/);
+    schemaFails('E = schema :enum\n  @on :x', /don't accept/);
+    schemaFails('U = schema :union\n  A\n  B', /requires an '@on :field' discriminator/);
+    schemaFails('U = schema :union\n  @on :k\n  A', /at least two constituent/);
+    schemaFails('U = schema :union\n  @on :k\n  @on :j\n  A\n  B', /exactly one/);
   });
 
-  test("keyword-named fields: `when!` works; `when?` is a scan-level rejection", () => {
-    // `when`, `loop`, `for` are legitimate column names. The `!`
-    // modifier scans fine after a keyword word; `?` trips the scanner's
-    // postfix-existence guard BEFORE the schema pass sees it — loud.
-    expect(compile('W = schema\n  when! date').code).toContain('__schema(');
-    lexFails('W = schema\n  when? date', /unspaced '\?' needs a value/);
+  test('keyword-named fields take both modifiers: a body word is a name, never a keyword', () => {
+    // `when`, `loop`, `for` are legitimate column names. Schema mode
+    // reads every word in a body as a name, so `?` after one is the
+    // optional modifier as after any other.
+    expect(compile('W = schema\n  when! date').code).toContain('{tag: "field", name: "when", modifiers: ["!"]');
+    expect(compile('W = schema\n  when? date').code).toContain('{tag: "field", name: "when", modifiers: ["?"]');
   });
 
   test('pragma errors', () => {
-    lexFails('schema.defaultMacString = 100', /unknown schema pragma/);
-    lexFails('f = ->\n  schema.defaultMaxString = 5', /file top level/);
-    lexFails('schema.defaultMaxString = "x"', /number literal/);
+    schemaFails('schema.defaultMacString = 100', /unknown schema pragma/);
+    schemaFails('f = ->\n  schema.defaultMaxString = 5', /file top level/);
+    schemaFails('schema.defaultMaxString = "x"', /number literal/);
   });
 
   test('callable param and method-shape errors', () => {
-    lexFails('S = schema :shape\n  m: => 1', /must be followed by '->'/);
+    schemaFails('S = schema :shape\n  m: => 1', /must be followed by '->'/);
     emitFails('S = schema :shape\n  m: ({a}) -> a', /plain identifiers/);
-    lexFails('S = schema :shape\n  full: (x) ~> @a', /take no parameters/);
+    schemaFails('S = schema :shape\n  full: (x) ~> @a', /take no parameters/);
     // …but a computed whose BODY is a function value stays legal
     // (`full: ~> (x) -> x` — the getter returns a function).
     const r = parser.parse('S = schema :shape\n  full: ~> (x) -> x');
@@ -1053,7 +1051,7 @@ describe('schema: stores and mappings', () => {
 
   test('the model sexpr carries the kind string through toJSON', () => {
     const { sexpr } = compile('M = schema :model\n  a! string');
-    expect(JSON.stringify(sexpr)).toBe('["program",{},["=",{},["name",{},"M"],["schema",{},["schema-body",{},"model",["schema-codes",{}]]]]]');
+    expect(JSON.stringify(sexpr)).toBe('["program",{},["=",{},["name",{},"M"],["schema",{},["schema-body",{},"model",["schema-dsl",{},["sym",{},"model"],["none",{}],["schema-field",{},["name",{},"a"],["!"],["schema-type",{},["name",{},"string"]],["none",{}]]]]]]]');
   });
 
   test('the TS face carries the schema type story as TS-only bytes; strip reproduces JS mode', () => {
@@ -1074,7 +1072,7 @@ describe('schema: stores and mappings', () => {
 
   test('the sexpr carries the kind string through toJSON', () => {
     const { sexpr } = compile('S = schema :shape\n  a! string');
-    expect(JSON.stringify(sexpr)).toBe('["program",{},["=",{},["name",{},"S"],["schema",{},["schema-body",{},"shape",["schema-codes",{}]]]]]');
+    expect(JSON.stringify(sexpr)).toBe('["program",{},["=",{},["name",{},"S"],["schema",{},["schema-body",{},"shape",["schema-dsl",{},["sym",{},"shape"],["none",{}],["schema-field",{},["name",{},"a"],["!"],["schema-type",{},["name",{},"string"]],["none",{}]]]]]]]');
   });
 });
 

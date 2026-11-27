@@ -5843,10 +5843,23 @@ fail 'a code body the program grammar rejects fails at its token', '''
     m: -> 1 2
 ''', "3:11: Unexpected '2'"
 
-fail "an embedded body's end is named as the body's end", '''
+# The adapter is program code to the end of its head line: a `;` inside
+# its brackets is the expression's own, and a `;` outside them opens the
+# inline body.
+code "an adapter keeps a ';' inside its brackets", '''
   S = schema :model, on: (a; b)
     name string
-''', "1:26: Unexpected end of a schema body's code"
+''', '''
+  let S;
+  S = __schema({kind: "model", name: "S", entries: [{tag: "field", name: "name", modifiers: [], typeName: "string", array: false}], adapter: (a, b)});
+''', opts
+
+code "an adapter ends at the ';' that opens an inline body", '''
+  S = schema :model, on: db; name!
+''', '''
+  let S;
+  S = __schema({kind: "model", name: "S", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}], adapter: db});
+''', opts
 
 fail 'a do tail inside a callable body is the lexer rejection it is everywhere', '''
   S = schema :shape
@@ -5943,3 +5956,78 @@ fail 'an inline schema nested in a method body takes no callables, as anywhere',
       X = schema :shape; a!; f: -> 1
       X
 ''', "inline schema bodies do not support '->'"
+
+# ==============================================================================
+# The schema alphabet: a body is read in schema mode, not as program code
+# ==============================================================================
+
+# Every word in a field position is a name: no keyword lookup, so a
+# keyword-named field neither joins the line above (`else`) nor needs a
+# value before its modifier (`when?`).
+code 'a field named else is its own line', '''
+  S = schema :shape
+    a string
+    else string
+''', '''
+  let S;
+  S = __schema({kind: "shape", name: "S", entries: [{tag: "field", name: "a", modifiers: [], typeName: "string", array: false}, {tag: "field", name: "else", modifiers: [], typeName: "string", array: false}]});
+''', opts
+
+code 'keyword-named fields take modifiers and types', '''
+  S = schema :shape
+    if string
+    for! integer
+    type? string
+''', '''
+  let S;
+  S = __schema({kind: "shape", name: "S", entries: [{tag: "field", name: "if", modifiers: [], typeName: "string", array: false}, {tag: "field", name: "for", modifiers: ["!"], typeName: "integer", array: false}, {tag: "field", name: "type", modifiers: ["?"], typeName: "string", array: false}]});
+''', opts
+
+# An unspaced bracket after a type spells an index, never a default: the
+# default follows a comma.
+fail 'an unspaced bracket after a type is no default', '''
+  S = schema :input
+    w string[5]
+''', "'w string[5]': an unspaced '[' after a schema type is no default — a default follows a comma: write 'w string, [5]'"
+
+fail 'an unspaced bracket after a bare name is no default either', '''
+  S = schema :input
+    w![5]
+''', "write 'w!, [5]'"
+
+code 'an array suffix, spaced or not, and a spaced default', '''
+  S = schema :input
+    tags[]
+    w string []
+    v string [5]
+''', '''
+  let S;
+  S = __schema({kind: "input", name: "S", entries: [{tag: "field", name: "tags", modifiers: [], typeName: "string", array: true}, {tag: "field", name: "w", modifiers: [], typeName: "string", array: true}, {tag: "field", name: "v", modifiers: [], typeName: "string", array: false, constraints: {default: 5}}]});
+''', opts
+
+fail 'a default of undefined declares nothing and rejects', '''
+  S = schema :input
+    w string, [undefined]
+''', "2:14: field 'w': a default of undefined is no default; drop the bracket"
+
+# A schema is a value, so it is an implicit call's argument.
+code 'a schema as an implicit call argument', '''
+  x = validate schema :shape
+    a! string
+''', '''
+  let x;
+  x = validate(__schema({kind: "shape", entries: [{tag: "field", name: "a", modifiers: ["!"], typeName: "string", array: false}]}));
+''', opts
+
+# A transform's island ends at a comma at its own level, so a comma inside
+# an implicit call there ends the transform and rejects.
+fail "a transform's comma ends it, and a trailer after it rejects", '''
+  S = schema :shape
+    a! string, -> f a, b
+''', "2:14: transform '-> …' must be the last element on the field line for 'a'"
+
+fail "an inline @ensure predicate's comma ends it", '''
+  S = schema :input
+    a! string
+    @ensure "m", (u) -> f u, 2
+''', "@ensure inline form takes 'message[, :field], fn' (got 3 comma-separated parts)"

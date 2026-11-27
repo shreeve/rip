@@ -1,45 +1,32 @@
-// Schema DSL — the lexer collapse pass and body sub-parser.
+// Schema DSL — the reader: from a schema body's tree to its descriptor.
 //
-// `schema [:kind]` blocks are parsed entirely here, at lexer-rewrite
-// time: the pass recognizes a schema declaration, parses its body with
-// the schema-specific line grammar below, and collapses the whole
-// region into two tokens — SCHEMA and SCHEMA_BODY — so the main
-// grammar carries exactly one production and schema body syntax never
-// reaches the LR tables.
+// `schema [:kind]` declarations are a small language of their own. The
+// scanner reads a body in the schema alphabet (src/lexer.js, the `schema`
+// mode frame) and cuts it from the tape: SCHEMA + SCHEMA_BODY stay, and
+// SCHEMA_BODY's payload is the body, which the grammar's SchemaBody entry
+// parses (src/grammar/grammar.rip). Embedded Rip — callable, scope and
+// @ensure bodies, field transforms, the `on:` adapter — rides in the
+// payload as SCHEMA_CODE islands that the program's own start symbol
+// parses.
 //
-// SCHEMA_BODY's token VALUE is the parsed descriptor object. Its
+// SCHEMA_BODY's token VALUE is the descriptor. The scanner creates it
+// with its span and primitive occurrences; once the parse accepts,
+// finishSchemas reads each body's tree into it — kind, entries, adapter —
+// applying every rule the grammar cannot: the kind capability matrix,
+// the vocabulary (src/runtime/vocab.js) and its namespaces, literal
+// values, cross-entry rules, the `schema.defaultMaxString` pragma. Its
 // toJSON() returns the KIND string, so the s-expression serializes as
-// `["schema", "input"]` — the value IS the construct's parsed
-// content, exactly as a string token's value is its text. The
-// construct's spans reach the side tables through the ordinary
-// grammar path: the schema rule's annotation records the SCHEMA_BODY
-// span as the `body` role.
+// `["schema", "input"]`. Every rejection is positioned, read from the
+// tree's NodeStore rows.
 //
-// Kinds: :input (default), :shape, :mixin, :enum, :union,
-// :model. The :model kind carries the persistence surface —
-// directives (@times, @softDelete, relations, @unique/@index,
-// @idStart, @tableWas), @scope/@defaultScope, lifecycle hook binding,
-// field attrs ({was:}) and inline @unique, and the `on:` declaration
-// option (a per-schema adapter expression). Every persistence
-// spelling stays :model-only on the other kinds. Malformed
-// persistence spellings reject HERE, at parse time, positioned — the
-// runtime (src/runtime/orm.js) re-rejects at the root, since
-// a descriptor is hand-buildable.
-//
-// Spelling notes (there is no SYMBOL token kind):
-//   - a "symbol" is a ':' token followed by an UNSPACED identifier
-//     (`:input`, `:admin`, `@on :kind`);
-//   - field modifiers arrive as separate unspaced tokens (DAMMIT for
-//     `!`, '?' for `?`), not identifier metadata;
-//   - `~>` and `!>` are single scan tokens (OPS2), so a trailing one
-//     never reads as a line-continuing COMPARE.
-//
-// The pass runs BEFORE rewriteTypes and the implicit-structure
-// passes (a schema body's spellings are schema grammar, not type or
-// object syntax), so body token slices are raw. Each embedded code
-// slice (schemaCodeSites) becomes a SCHEMA_CODE payload that the lexer
-// runs through every pass after this one and the parser reads from the
-// program's own start symbol.
+// Kinds: :input (default), :shape, :mixin, :enum, :union, :model. The
+// :model kind carries the persistence surface — directives (@times,
+// @softDelete, relations, @unique/@index, @idStart, @tableWas),
+// @scope/@defaultScope, lifecycle hook binding, field attrs ({was:}) and
+// inline @unique, and the `on:` declaration option (a per-schema adapter
+// expression). Every persistence spelling stays :model-only on the other
+// kinds. The runtime (src/runtime/orm.js) re-rejects at the root, since a
+// descriptor is hand-buildable.
 
 const VALID_KINDS = new Set(['input', 'shape', 'mixin', 'enum', 'union', 'model']);
 const KIND_DEFAULT = 'input';
@@ -56,15 +43,6 @@ const HOOK_NAMES = new Set([
   'beforeDestroy', 'afterDestroy',
   'afterCommit', 'afterRollback',
 ]);
-
-// The :model directive vocabulary with each name's argument shape —
-// the parse-time mirror of the runtime's MODEL_DIRECTIVES.
-// An unknown name, or a known one with junk-bearing args, rejects
-// positioned; relation targets must be canonical PascalCase.
-// The vocabulary itself lives in src/runtime/vocab.js, which the ORM
-// runtime imports too — one definition, three consumers. Aliased here
-// to this file's local spellings.
-
 
 // Wire-friendly built-ins the `~type` coercion marker accepts (each
 // has a strict coercion table in the runtime).
@@ -96,32 +74,14 @@ const SCHEMA_NAMED_COERCER_TYPES = {
 // literals narrow the field. `text` stays uncapped by design.
 const VARCHAR_TYPES = new Set(['string', 'email', 'url', 'phone', 'zip']);
 
-// Positions where `schema` can legitimately start an expression.
-const EXPR_START_PREV = new Set([
-  'TERMINATOR', 'INDENT', 'OUTDENT',
-  '=', 'COMPOUND_ASSIGN',
-  'RETURN', 'THROW', 'YIELD', 'AWAIT', 'EXPORT',
-  ',', '(', '[', '{', 'CALL_START', 'PARAM_START', 'INDEX_START',
-  '->', '=>', ':', 'WHEN', 'LEADING_WHEN', 'THEN', 'IF', 'UNLESS',
-  'UNARY', 'UNARY_MATH',
-]);
+export const SCHEMA_PRAGMA_KEYS = new Set(['defaultMaxString']);
 
-const SCHEMA_PRAGMA_KEYS = new Set(['defaultMaxString']);
-
-// ── token helpers ────────────────────────────────────────────────────
-
-const isWord = (t) => t && (t.kind === 'IDENTIFIER' || t.kind === 'PROPERTY');
-
-// A keyword-classified token whose value is a plain lowercase word
-// (`when` → LEADING_WHEN, `loop` → LOOP): a legitimate NAME in schema
-// field position.
-const isKeywordWord = (t) =>
-  t && typeof t.value === 'string' && /^[a-z]+$/.test(t.value) &&
-  (t.kind === t.value.toUpperCase() || t.kind === 'LEADING_WHEN' || t.kind === 'RELATION' || t.kind === 'STATEMENT');
+// The words a literal position reads as values (the program's literal
+// spellings).
+const LITERAL_WORDS = { __proto__: null, true: true, yes: true, false: false, no: false, null: null };
 
 import { isIdentifierName, identifierRunAt } from './ident.js';
 import { isPlainCall, leafValue } from './sexpr.js';
-import { counter } from './counter.js';
 import { normalizeTypeText } from './ts/types.js';
 // The schema vocabulary and naming rules, shared verbatim with the two
 // runtimes that also need them (src/runtime/schema.js validates
@@ -143,317 +103,20 @@ import {
 // name without the IDE type machinery.
 export const behaviorName = (name) => `__${name}__behavior`;
 
-// The symbol spelling: ':' followed by an UNSPACED word. The kind
-// position additionally admits keyword- and reserved-word tokens
-// (`:enum` scans a RESERVED token).
-const symWordAt = (tokens, i, keywordOk = false) => {
-  if (tokens[i]?.kind !== ':') return null;
-  const w = tokens[i + 1];
-  if (!w || w.spaced) return null;
-  if (isWord(w) || (keywordOk && /^[a-z]+$/.test(w.value) &&
-      (w.kind === w.value.toUpperCase() || w.kind === 'RESERVED'))) return w;
-  return null;
-};
-
-// ── the pass ─────────────────────────────────────────────────────────
-
-// `tolerate` (tolerant compiles only, else null): a sink that records a
-// shape rejection as a carried diagnostic instead of throwing. The LINE
-// is the repair unit — a half-typed callable member (`greet: `, the
-// keystroke run between ':' and a completed '->') records and drops,
-// and the rest of the schema keeps its face. Strict compiles pass null
-// and every rejection throws.
-export function carrySchemaRejection(err, tolerate) {
-  if (typeof err?.start !== 'number') throw err;
-  tolerate(err);
-}
-
-// `bodies` receives each collapsed SCHEMA_BODY token with its
-// descriptor and the pragma state it was read under, in collapse order;
-// the lexer turns each code site's slice into the token's payload once
-// the tape's own passes are done. `within` is that recorded state when
-// the tokens are a schema body's embedded code: a pragma there is not
-// at file top level, and a nested schema reads the enclosing schema's
-// pragma state.
-export function rewriteSchema(tokens, mintId, text, fail, tolerate = null, bodies = [], within = null) {
-  // Cheap probe first: files without the word `schema` skip the walk's
-  // per-token checks entirely (they still pay one indexOf).
-  if (text.indexOf('schema') === -1) return;
-
-  const out = [];
-  const config = { defaultMaxString: within ? within.defaultMaxString : null, tolerate, bodies };
-  let depth = within ? 1 : 0;
-  let i = 0;
-  while (i < tokens.length) {
-    if (counter.on) counter.n++;
-    const t = tokens[i];
-    if (t.kind === 'INDENT') depth++;
-    else if (t.kind === 'OUTDENT') depth--;
-
-    const consumed = matchSchemaPragma(tokens, i, config, depth, fail);
-    if (consumed > 0) {
-      i += consumed;
-      continue;
-    }
-    if (isSchemaStart(tokens, i, fail)) {
-      i = collapseSchemaAt(tokens, i, out, config, mintId, fail, text);
-      continue;
-    }
-    out.push(t);
-    i++;
-  }
-  tokens.length = 0;
-  for (const t of out) tokens.push(t);
-}
-
-// `schema.<key> = <value>` at statement position, file top level.
-// Returns tokens consumed (incl. a trailing TERMINATOR) or 0.
-function matchSchemaPragma(tokens, i, config, depth, fail) {
-  const t = tokens[i];
-  if (!t || t.kind !== 'IDENTIFIER' || t.value !== 'schema') return 0;
-  if (tokens[i + 1]?.kind !== '.') return 0;
-  const keyTok = tokens[i + 2];
-  if (!keyTok || keyTok.kind !== 'PROPERTY') return 0;
-  if (tokens[i + 3]?.kind !== '=') return 0;
-  const prev = tokens[i - 1];
-  if (prev && prev.kind !== 'TERMINATOR' && prev.kind !== 'INDENT' && prev.kind !== 'OUTDENT') return 0;
-  const key = keyTok.value;
-  if (!SCHEMA_PRAGMA_KEYS.has(key)) {
-    fail(`unknown schema pragma 'schema.${key}' — known pragmas: ${[...SCHEMA_PRAGMA_KEYS].join(', ')}`, keyTok.start);
-  }
-  if (depth > 0) {
-    fail(`schema pragma 'schema.${key}' must be declared at file top level — inside a nested block it would leak into later top-level schemas`, keyTok.start);
-  }
-  const valTok = tokens[i + 4];
-  if (!valTok || valTok.kind !== 'NUMBER') {
-    fail(`pragma 'schema.${key}' requires a number literal — example: schema.${key} = 100`, (valTok ?? keyTok).start);
-  }
-  const n = numberOf(valTok, `pragma 'schema.${key}'`, fail);
-  if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
-    fail(`pragma 'schema.${key}' expects a non-negative integer (got ${valTok.value}); use 0 to disable`, valTok.start);
-  }
-  config[key] = n === 0 ? null : n;
-  let end = i + 5;
-  if (tokens[end]?.kind === 'TERMINATOR') end++;
-  return end - i;
-}
-
-// The KIND spelling is `schema :word`: a SPACED ':' with the word
-// unspaced after it — `{schema: shape}` (key colon, unspaced) and
-// `{schema:shape}` never match.
-const kindSymAt = (tokens, j) => {
-  // The scanner mints a SYMBOL token for the spaced `:word` spelling;
-  // the raw ':' + word pair survives only where minting was blocked.
-  if (tokens[j]?.kind === 'SYMBOL') return tokens[j];
-  return tokens[j]?.kind === ':' && tokens[j].spaced ? symWordAt(tokens, j, true) : null;
-};
-
-// A kind marker's token width: the minted SYMBOL is one token, the
-// raw pair is two.
-const kindSymWidth = (tokens, j) => (tokens[j]?.kind === 'SYMBOL' ? 1 : 2);
-
-// The `on:` declaration option after a kind marker: `, on <:> …` up
-// to the line end. Returns the index AFTER the option (the position
-// of the TERMINATOR/INDENT that ends the head line), or j unchanged.
-const scanOnOption = (tokens, j) => {
-  if (tokens[j]?.kind !== ',' || !isWord(tokens[j + 1]) || tokens[j + 1].value !== 'on') return j;
-  let k = j + 2;
-  if (tokens[k]?.kind === ':') k++;
-  while (k < tokens.length && tokens[k].kind !== 'TERMINATOR' && tokens[k].kind !== 'INDENT') k++;
-  return k;
-};
-
-function isSchemaStart(tokens, i, fail) {
-  const t = tokens[i];
-  if (!t || t.value !== 'schema' || !isWord(t)) return false;
-  const prev = tokens[i - 1];
-  if (prev) {
-    if (prev.kind === '.' || prev.kind === '?.' || prev.kind === '@') return false;
-    if (!EXPR_START_PREV.has(prev.kind)) return false;
-  }
-  let j = i + 1;
-  const kind = kindSymAt(tokens, j);
-  if (kind) {
-    j += kindSymWidth(tokens, j);
-    j = scanOnOption(tokens, j);
-  }
-  if (tokens[j]?.kind === 'TERMINATOR') {
-    if (tokens[j].value === ';') return true;
-    j++;
-  }
-  if (tokens[j]?.kind === 'INDENT') return true;
-  // A kind marker with no body is unambiguous schema intent — reject
-  // rather than let the implicit-object pass silently reshape it
-  // (`S = {schema: shape}`).
-  if (kind) {
-    fail(`expected an indented schema body (or an inline '; field; …' body) after 'schema :${kind.value}'`, t.start);
-  }
-  return false;
-}
-
-// Collapse the region starting at `i` into SCHEMA + SCHEMA_BODY,
-// pushing both onto `out`. Returns the index AFTER the region.
-function collapseSchemaAt(tokens, i, out, config, mintId, fail, text) {
-  const schemaTok = tokens[i];
-  let kind = KIND_DEFAULT;
-  let kindTok = null;
-  let j = i + 1;
-
-  const kw = kindSymAt(tokens, j);
-  if (kw) {
-    const k = kw.value;
-    if (!VALID_KINDS.has(k)) {
-      fail(`unknown schema kind :${k} — expected one of :input, :shape, :model, :mixin, :enum, :union`, kw.start);
-    }
-    kind = k;
-    kindTok = kw;
-    j += kindSymWidth(tokens, j);
-  }
-
-  // `schema :model, on: <expr>` — the per-schema adapter expression,
-  // captured raw as a code site (evaluated at declaration time in the
-  // user's scope).
-  let adapterTokens = null;
-  if (tokens[j]?.kind === ',' && isWord(tokens[j + 1]) && tokens[j + 1].value === 'on') {
-    if (kind !== 'model') {
-      fail(`'on:' (the per-schema adapter) applies to :model only — :${kind} never queries a database`, tokens[j + 1].start);
-    }
-    let k2 = j + 2;
-    if (tokens[k2]?.kind === ':') k2++;
-    const exprStart = k2;
-    while (k2 < tokens.length && tokens[k2].kind !== 'TERMINATOR' && tokens[k2].kind !== 'INDENT') k2++;
-    adapterTokens = tokens.slice(exprStart, k2);
-    if (!adapterTokens.length) {
-      fail(`'on:' requires an adapter expression — 'schema :model, on: analytics'`, tokens[j + 1].start);
-    }
-    j = k2;
-  }
-
-  let bodyTokens;
-  let endIdx;
-  let bodyEnd;
-  if (tokens[j]?.kind === 'TERMINATOR' && tokens[j].value === ';') {
-    // Inline one-liner: `schema [:kind]; field; field; …` up to the
-    // first newline-bearing TERMINATOR at depth 0 (the lexer folds
-    // `;\n` into one TERMINATOR whose value carries the newline).
-    const inlineStart = j + 1;
-    let end = inlineStart;
-    let depth = 0;
-    while (end < tokens.length) {
-      const tk = tokens[end];
-      const tag = tk.kind;
-      if (tag === '(' || tag === '[' || tag === '{' ||
-          tag === 'CALL_START' || tag === 'INDEX_START' || tag === 'PARAM_START') depth++;
-      else if (tag === ')' || tag === ']' || tag === '}' ||
-               tag === 'CALL_END' || tag === 'INDEX_END' || tag === 'PARAM_END') {
-        depth--;
-        if (depth < 0) break; // the enclosing expression's closer
-      } else if (depth === 0 && tag === 'TERMINATOR' && tk.value !== ';') break;
-      else if (depth === 0 && tag === 'TERMINATOR' &&
-               /\n/.test(text.slice(tk.start, tokens[end + 1]?.start ?? tk.end))) {
-        // A trailing `;` at line end folds with its newline into one
-        // ';'-valued TERMINATOR — the raw source between it and the
-        // next token carries the line break, so the body still ends
-        // here (`schema :shape; name!;` never swallows the next line).
-        break;
-      }
-      else if (depth === 0 && (tag === 'INDENT' || tag === 'OUTDENT')) break;
-      else if (depth === 0 && tag === '->') {
-        fail(`inline schema bodies do not support '->' (methods/hooks/scopes/transforms) — use the indented form`, tk.start);
-      } else if (depth === 0 && (tag === 'EFFECT' || tag === '!>')) {
-        fail(`inline schema bodies do not support '${tk.value}' (${tag === 'EFFECT' ? 'computed getters' : 'eager-derived fields'}) — use the indented form`, tk.start);
-      }
-      end++;
-    }
-    while (end > inlineStart && tokens[end - 1].kind === 'TERMINATOR') end--;
-    bodyTokens = tokens.slice(inlineStart, end);
-    endIdx = end;
-    if (!bodyTokens.length) {
-      fail(`inline schema body is empty — add '; field; …' entries or switch to the indented form`, schemaTok.start);
-    }
-    bodyEnd = bodyTokens[bodyTokens.length - 1].end;
-  } else {
-    if (tokens[j]?.kind === 'TERMINATOR') j++;
-    if (tokens[j]?.kind !== 'INDENT') {
-      fail(`expected an indented schema body after 'schema${kindTok ? ' :' + kind : ''}'`, schemaTok.start);
-    }
-    const indentIdx = j;
-    let d = 0;
-    let outdentIdx = -1;
-    for (let k = indentIdx; k < tokens.length; k++) {
-      if (counter.on) counter.n++;
-      if (tokens[k].kind === 'INDENT') d++;
-      else if (tokens[k].kind === 'OUTDENT') {
-        d--;
-        if (d === 0) { outdentIdx = k; break; }
-      }
-    }
-    if (outdentIdx < 0) fail('unterminated schema body', tokens[indentIdx].start);
-    bodyTokens = tokens.slice(indentIdx + 1, outdentIdx);
-    endIdx = outdentIdx + 1;
-    bodyEnd = bodyTokens.length ? bodyTokens[bodyTokens.length - 1].end : tokens[indentIdx].end;
-  }
-
-  // Scanner-minted SYMBOL tokens split back into ':' + word pairs
-  // inside the body — schema grammar reads the two-token spelling
-  // everywhere (`@unique [:total, :status]`, `@ensure "…", :pw2`).
-  // A `!`/`?`-suffixed name rides the word whole (`:draft!` → `draft!`);
-  // consumers with narrower name contracts (@scope's identifier gate,
-  // field/column resolution) keep their own positioned rejections.
-  // Embedded Rip code is not schema grammar: each code site's slice is
-  // re-cut from the unsplit body below, so its symbols stay symbols.
-  const unsplitBody = bodyTokens;
-  bodyTokens = bodyTokens.flatMap((tk) => tk.kind === 'SYMBOL'
-    ? [{ ...tk, kind: ':', value: ':', end: tk.start + 1 },
-       { ...tk, kind: 'IDENTIFIER', start: tk.start + 1, spaced: false }]
-    : [tk]);
-
-  const descriptor = parseSchemaBody(kind, kindTok, bodyTokens, {
-    schemaStart: schemaTok.start,
-    defaultMaxString: config.defaultMaxString,
-    tolerate: config.tolerate ?? null,
-  }, fail);
-  if (adapterTokens) descriptor.adapterTokens = adapterTokens;
-  // A split pair keeps its symbol's id, so the slice's first and last
-  // ids bound the same run in the unsplit body.
-  for (const site of schemaCodeSites(descriptor)) {
-    if (site.value || site.tokens.length === 0) continue;
-    const from = unsplitBody.findIndex((tk) => tk.id === site.tokens[0].id);
-    const to = unsplitBody.findIndex((tk) => tk.id === site.tokens[site.tokens.length - 1].id);
-    site.entry[site.key] = unsplitBody.slice(from, to + 1);
-  }
-  descriptor.start = (kindTok ?? bodyTokens[0]).start;
-  descriptor.end = bodyEnd;
-  // SCHEMA_BODY collapses the entire DSL into one opaque parser token. Keep
-  // every word-token occurrence as side-band span data so the generated
-  // parser can carry primitive identity through that collapse just as it does
-  // for ordinary list elements. The descriptor remains the same tree value.
-  descriptor.primitiveSpans = [kindTok, ...bodyTokens]
-    .filter((t) => t && typeof t.value === 'string' && isIdentifierName(t.value))
-    .map((t) => ({
-      value: t.value,
-      sourceStart: t === kindTok && t.end - t.start === t.value.length + 1 ? t.start + 1 : t.start,
-      sourceEnd: t.end,
-    }));
-
-  out.push({
-    id: mintId(), kind: 'SCHEMA', value: 'schema',
-    start: schemaTok.start, end: schemaTok.end, spaced: schemaTok.spaced,
-  });
-  const bodyTok = {
-    id: mintId(), kind: 'SCHEMA_BODY', value: descriptor,
-    start: descriptor.start, end: descriptor.end, spaced: true,
-  };
-  out.push(bodyTok);
-  config.bodies.push({ token: bodyTok, descriptor, defaultMaxString: config.defaultMaxString });
-  return endIdx;
-}
+// What the scanner hands the reader beside the tree, on the descriptor
+// (never enumerable): each island's tokens and each parameter list's
+// tokens, keyed by source offset, and the pragma state the body was
+// read under.
+export const SCHEMA_SCAN = Symbol('schema scan');
+// The tree of each code site, keyed by the token array the descriptor
+// holds for it (schemaCodeSites); emitterShape reads it.
+export const SCHEMA_TREES = Symbol('schema code trees');
 
 // The embedded Rip code a descriptor carries, in the one order the
-// lexer cuts its SCHEMA_CODE payloads and the emitter reads their trees:
-// each callable, scope, @ensure predicate and field transform in entry
-// order, then the `on:` adapter. `key` names the entry field holding
-// the slice; the adapter is a VALUE expression, not a function body.
+// emitter reads their trees: each callable, scope, @ensure predicate and
+// field transform in entry order, then the `on:` adapter. `key` names the
+// entry field holding the island's tokens; the adapter is a VALUE
+// expression, not a function body.
 export function schemaCodeSites(descriptor) {
   const out = [];
   descriptor.entries.forEach((entry, index) => {
@@ -470,41 +133,110 @@ export function schemaCodeSites(descriptor) {
   return out;
 }
 
-// ── the body sub-parser ──────────────────────────────────────────────
+// ── reading the tree ─────────────────────────────────────────────────
 
-function parseSchemaBody(kind, kindTok, bodyTokens, ctx, fail) {
-  const entries = [];
-  const lines = splitBodyLines(bodyTokens);
+const isNone = (x) => Array.isArray(x) && x[0] === 'none' && x.length === 2;
+const headOf = (x) => (Array.isArray(x) ? x[0] : x);
 
-  // Kind inference: a default-kind body whose first line begins with a
-  // symbol is unambiguously an enum (`schema` + `:draft` lines).
-  if (kind === KIND_DEFAULT && !kindTok && lines.length > 0 &&
-      symWordAt(lines[0], 0)) {
-    kind = 'enum';
+// The token kind a message names for a node, in the program's vocabulary.
+const kindName = (x) => {
+  switch (headOf(x)) {
+    case 'name': return 'IDENTIFIER';
+    case 'num': return 'NUMBER';
+    case 'string': return 'STRING';
+    case 'regex': return 'REGEX';
+    case 'sym': return ':';
+    case 'schema-neg': return '-';
+    case 'schema-bracket': return '[';
+    case 'schema-attrs': return '{';
+    default: return String(headOf(x));
   }
+};
 
+// The descriptors of every schema the accepted parse holds, filled in
+// place, outer schemas first.
+export function finishSchemas(result, source, path) {
+  const { stores } = result;
+  const bodies = stores.entryValues.filter((v) => v[0] === 'schema-body' && headOf(v[3]) === 'schema-dsl');
+  if (bodies.length === 0) return;
+  const fail = (message, at, end = at) => {
+    const { line, col } = source.lineColAt(at);
+    const err = new Error(`${path}:${line + 1}:${col + 1}: ${message}`);
+    err.reason = message;
+    err.start = at;
+    err.end = end;
+    throw err;
+  };
+  const span = (node) => {
+    const row = stores.nodes[stores.nodeIds.get(node) - 1];
+    return row ? [row.sourceStart, row.sourceEnd] : [0, 0];
+  };
+  bodies.sort((a, b) => a[2].start - b[2].start);
+  for (const v of bodies) readSchema(v[2], v[3], { fail, span, at: (n) => span(n)[0] });
+}
+
+function readSchema(descriptor, dsl, ctx) {
+  const { fail, at } = ctx;
+  const scan = descriptor[SCHEMA_SCAN];
+  const trees = new Map();
+  Object.defineProperty(descriptor, SCHEMA_TREES, { value: trees, configurable: true });
+  ctx.scan = scan;
+  ctx.trees = trees;
+  ctx.island = (code) => {
+    const tokens = scan.islands.get(at(code)) ?? [];
+    trees.set(tokens, code);
+    return tokens;
+  };
+  ctx.params = (node) => (isNone(node) ? [] : scan.params.get(at(node)) ?? []);
+  const [, , kindNode, adapter, ...lines] = dsl;
+
+  let kind = KIND_DEFAULT;
+  const kindTok = isNone(kindNode) ? null : kindNode;
+  if (kindTok) {
+    const k = kindTok[2];
+    if (!VALID_KINDS.has(k)) {
+      fail(`unknown schema kind :${k} — expected one of :input, :shape, :model, :mixin, :enum, :union`, at(kindTok));
+    }
+    kind = k;
+  }
+  if (!isNone(adapter)) {
+    const [, , onLeaf, code] = adapter;
+    if (kind !== 'model') {
+      fail(`'on:' (the per-schema adapter) applies to :model only — :${kind} never queries a database`, at(onLeaf));
+    }
+    const tokens = ctx.island(code);
+    if (!tokens.length) fail(`'on:' requires an adapter expression — 'schema :model, on: analytics'`, at(onLeaf));
+    descriptor.adapterTokens = tokens;
+  }
+  // Kind inference: a default-kind body whose first line is a :symbol
+  // member is unambiguously an enum (`schema` + `:draft` lines).
+  if (kind === KIND_DEFAULT && !kindTok && headOf(lines[0]) === 'schema-member') kind = 'enum';
+  ctx.kind = kind;
+  ctx.defaultMaxString = scan.defaultMaxString;
+
+  const entries = [];
   if (kind === 'enum') {
-    for (const line of lines) parseEnumLine(line, entries, fail);
+    for (const line of lines) readEnumLine(line, entries, ctx);
     checkEnumMembers(entries, fail);
   } else if (kind === 'union') {
-    for (const line of lines) parseUnionLine(line, entries, fail);
+    for (const line of lines) readUnionLine(line, entries, ctx);
     const onCount = entries.filter((e) => e.tag === 'directive' && e.name === 'on').length;
     const members = entries.filter((e) => e.tag === 'union-member');
+    const schemaStart = descriptor.start;
     if (onCount !== 1) {
       fail(onCount === 0
         ? `:union requires an '@on :field' discriminator — untagged unions are not supported`
-        : `:union takes exactly one '@on :field' discriminator (got ${onCount})`, ctx.schemaStart);
+        : `:union takes exactly one '@on :field' discriminator (got ${onCount})`, schemaStart);
     }
     if (members.length < 2) {
-      fail(`:union needs at least two constituent schemas (got ${members.length})`, ctx.schemaStart);
+      fail(`:union needs at least two constituent schemas (got ${members.length})`, schemaStart);
     }
   } else {
-    for (const line of lines) parseFieldedLine(kind, line, entries, ctx, fail);
-    // Capability matrix by kind.
-    // `@mixin` adds fields, so every fielded kind takes it; the
-    // persistence spellings are :model-only everywhere else.
+    for (const line of lines) readFieldedLine(line, entries, ctx);
+    // Capability matrix by kind. `@mixin` adds fields, so every fielded
+    // kind takes it; the persistence spellings are :model-only elsewhere.
     if (kind === 'model') {
-      finishModelBody(entries, fail);
+      finishModelBody(entries, ctx);
     } else {
       for (const e of entries) {
         if (e.tag === 'scope' || e.tag === 'defaultScope') {
@@ -525,156 +257,148 @@ function parseSchemaBody(kind, kindTok, bodyTokens, ctx, fail) {
       }
     }
   }
-
-  return {
-    kind,
-    entries,
-    toJSON() { return this.kind; },
-  };
+  descriptor.kind = kind;
+  descriptor.entries = entries;
 }
 
-// Top-level lines of a schema body: nested INDENT/OUTDENT stays inside
-// its owning line (callable bodies, multi-line trailers).
-function splitBodyLines(tokens) {
-  const lines = [];
-  let cur = [];
-  let depth = 0;
-  for (const t of tokens) {
-    if (t.kind === 'INDENT') depth++;
-    if (t.kind === 'OUTDENT') depth--;
-    if (t.kind === 'TERMINATOR' && depth === 0) {
-      if (cur.length) { lines.push(cur); cur = []; }
-      continue;
+// The argument nodes a directive entry was read from (its args parse in
+// finishModelBody, once the whole body is known).
+const argNodesOf = new WeakMap();
+
+// A directive's arguments as the token run a hover and the emitter read
+// (`argTokens`): each word the author wrote is an IDENTIFIER (an option's
+// key a PROPERTY), at its own span; punctuation carries no span.
+function argTokensOf(nodes, ctx) {
+  const out = [];
+  const mark = (kind, value = kind) => out.push({ kind, value, start: null, end: null });
+  const node = (n) => {
+    const [s, e] = ctx.span(n);
+    switch (headOf(n)) {
+      case 'name': out.push({ kind: 'IDENTIFIER', value: n[2], start: s, end: e }); break;
+      case 'sym':
+        out.push({ kind: ':', value: ':', start: s, end: s + 1 });
+        out.push({ kind: 'IDENTIFIER', value: n[2], start: s + 1, end: e });
+        break;
+      case 'num': out.push({ kind: 'NUMBER', value: n[2], start: s, end: e }); break;
+      case 'string': out.push({ kind: 'STRING', value: n[2], start: s, end: e }); break;
+      case 'regex': out.push({ kind: 'REGEX', value: n[2], start: s, end: e }); break;
+      case 'schema-neg': mark('-'); node(n[2]); break;
+      case 'schema-bracket':
+        out.push({ kind: '[', value: '[', start: s, end: s + 1 });
+        n.slice(2).forEach((v, i) => { if (i) mark(','); node(v); });
+        out.push({ kind: ']', value: ']', start: e - 1, end: e });
+        break;
+      case 'schema-attrs':
+        out.push({ kind: '{', value: '{', start: s, end: s + 1 });
+        n.slice(2).forEach((o, i) => {
+          if (i) mark(',');
+          const [ks, ke] = ctx.span(o[2]);
+          out.push({ kind: 'PROPERTY', value: o[2][2], start: ks, end: ke });
+          mark(':');
+          node(o[3]);
+        });
+        out.push({ kind: '}', value: '}', start: e - 1, end: e });
+        break;
+      default: mark(n);
     }
-    cur.push(t);
-  }
-  if (cur.length) lines.push(cur);
-  return lines;
+  };
+  nodes.forEach(node);
+  return out;
 }
 
-// ── fielded lines: field | directive | callable ─────────────────────
+function readFieldedLine(line, entries, ctx) {
+  const { fail, at } = ctx;
+  const start = at(line);
+  switch (line[0]) {
+    case 'schema-directive': {
+      const [, , nameLeaf, ...args] = line;
+      const name = nameLeaf[2];
+      const entry = { tag: 'directive', name, args: null, argTokens: argTokensOf(args, ctx), start, nameStart: at(nameLeaf) + 1 };
+      if (name === 'mixin') {
+        if (headOf(args[0]) !== 'name') fail(`@mixin requires a target name — '@mixin Timestamps'`, start);
+        if (args.length > 1) fail(`@mixin takes exactly one schema name`, Array.isArray(args[1]) ? at(args[1]) : start);
+        entry.args = [{ target: args[0][2] }];
+      }
+      argNodesOf.set(entry, args);
+      entries.push(entry);
+      return;
+    }
+    case 'schema-ensure': {
+      const items = line.slice(2);
+      for (const p of readEnsurePairs(items, start, ctx)) {
+        entries.push({
+          tag: 'ensure', name: 'ensure',
+          message: p.message, field: p.field, fieldStart: p.fieldStart, async: line[1].async === true,
+          paramTokens: p.paramTokens, bodyTokens: p.bodyTokens,
+          start,
+        });
+      }
+      return;
+    }
+    case 'schema-scope': {
+      const [, attrs, sym, fn] = line;
+      const [, , paramsNode, code] = fn;
+      if (attrs.default === true) {
+        if (!isNone(paramsNode)) fail(`@defaultScope takes no parameters — write '@defaultScope -> @where(...)'`, start);
+        const bodyTokens = ctx.island(code);
+        if (!bodyTokens.length) fail(`@defaultScope: function body is empty`, at(fn));
+        entries.push({ tag: 'defaultScope', name: 'defaultScope', paramTokens: [], bodyTokens, start });
+        return;
+      }
+      const name = sym[2];
+      checkScopeName(name, at(sym) + 1, fail);
+      const bodyTokens = ctx.island(code);
+      if (!bodyTokens.length) fail(`@scope :${name}: function body is empty`, at(fn));
+      entries.push({ tag: 'scope', name, paramTokens: ctx.params(paramsNode), bodyTokens, start });
+      return;
+    }
+    case 'schema-callable': {
+      const [, , nameLeaf, paramsNode, arrow, code] = line;
+      const name = nameLeaf[2];
+      // On a :model, a `->` callable whose name is a recognized lifecycle
+      // hook binds as one (exact match — anything else stays a plain
+      // method, a working reading).
+      const tag = arrow === '~>' ? 'computed'
+        : arrow === '!>' ? 'derived'
+        : ctx.kind === 'model' && HOOK_NAMES.has(name) ? 'hook'
+        : 'method';
+      if (!isNone(paramsNode) && tag !== 'method') {
+        fail(`'${name}': ${tag === 'computed' ? 'computed getters (~>)' : tag === 'derived' ? 'eager-derived fields (!>)' : 'lifecycle hooks'} take no parameters — only methods do`, ctx.span(nameLeaf)[1]);
+      }
+      entries.push({ tag, name, paramTokens: ctx.params(paramsNode), bodyTokens: ctx.island(code), start });
+      return;
+    }
+    case 'schema-member':
+      fail(`unexpected : at schema top level — allowed: fields ('name! type'), directives ('@name'), methods ('name: -> body'), computed getters ('name: ~> body')`, start);
+      return;
+    case 'schema-field':
+      readField(line, entries, ctx);
+  }
+}
+
+// `@scope` names chain as query-builder methods.
+function checkScopeName(name, at, fail) {
+  if (!/^[a-z][a-zA-Z0-9]*$/.test(name)) {
+    fail(`@scope name ':${name}' must be a lowercase-first alphanumeric identifier — scopes chain as query-builder methods`, at);
+  }
+}
+
+// ── fields ───────────────────────────────────────────────────────────
 //
 // Field-line grammar (locked):
 //   name[!|?]*  [type]  [, range]  [, [default]]  [, /regex/]  [, -> transform]
 // The `{…}` attrs bracket and inline `@unique` are persistence
 // metadata — rejected with the :model surface.
 
-function parseFieldedLine(kind, line, entries, ctx, fail) {
-  const first = line[0];
-  if (!first) return;
-
-  // Directive: @NAME [args]
-  if (first.kind === '@') {
-    const nameTok = line[1];
-    if (!isWord(nameTok)) {
-      fail(`expected a directive name after '@'`, first.start);
-    }
-    const dname = nameTok.value;
-
-    if (dname === 'ensure') {
-      // `@ensure!` (dammit) marks ASYNC refinements.
-      let argStart = 2;
-      let isAsync = false;
-      if (line[2]?.kind === 'DAMMIT' && !line[2].spaced) {
-        isAsync = true;
-        argStart = 3;
-      }
-      const pairs = parseEnsurePairs(line.slice(argStart), first, fail);
-      for (const p of pairs) {
-        entries.push({
-          tag: 'ensure', name: 'ensure',
-          message: p.message, field: p.field, fieldStart: p.fieldStart, async: isAsync,
-          paramTokens: p.paramTokens, bodyTokens: p.bodyTokens,
-          start: first.start,
-        });
-      }
-      return;
-    }
-
-    // `@scope :name, fn` and `@defaultScope fn` — named query scopes,
-    // :model-only (the matrix rejects the tags elsewhere).
-    if (dname === 'scope') {
-      const parsed = parseScopeDirective(line.slice(2), first, fail);
-      entries.push({
-        tag: 'scope', name: parsed.name,
-        paramTokens: parsed.paramTokens, bodyTokens: parsed.bodyTokens,
-        start: first.start,
-      });
-      return;
-    }
-    if (dname === 'defaultScope') {
-      const parsed = parseScopeFnTokens(line.slice(2), first, '@defaultScope', fail);
-      if (parsed.paramTokens.length) {
-        fail(`@defaultScope takes no parameters — write '@defaultScope -> @where(...)'`, first.start);
-      }
-      entries.push({
-        tag: 'defaultScope', name: 'defaultScope',
-        paramTokens: [], bodyTokens: parsed.bodyTokens,
-        start: first.start,
-      });
-      return;
-    }
-
-    let args = null;
-    let argTokens = line.slice(2);
-    if (dname === 'mixin') {
-      const t0 = argTokens[0];
-      if (!isWord(t0)) {
-        fail(`@mixin requires a target name — '@mixin Timestamps'`, first.start);
-      }
-      if (argTokens.length > 1) {
-        fail(`@mixin takes exactly one schema name`, argTokens[1].start);
-      }
-      args = [{ target: t0.value }];
-    }
-    entries.push({ tag: 'directive', name: dname, args, argTokens, start: first.start, nameStart: nameTok.start });
-    return;
-  }
-
-  // Callable: `name: -> body` | `name: ~> body` | `name: !> body`
-  // (the scanner keys `name:` as PROPERTY).
-  if (first.kind === 'PROPERTY') {
-    // Tolerant compiles treat the LINE as the repair unit: a half-typed
-    // callable (`greet: `, `greet: str` — every keystroke between ':'
-    // and a completed '->') records its rejection and drops, keeping
-    // the rest of the schema's face alive. Safe to unwind mid-line:
-    // `entries` mutates only on a successful parse.
-    if (ctx.tolerate) {
-      try { parseCallableLine(kind, first, line, entries, fail); }
-      catch (err) { carrySchemaRejection(err, ctx.tolerate); }
-      return;
-    }
-    parseCallableLine(kind, first, line, entries, fail);
-    return;
-  }
-  // Field names may spell keywords (`when`, `loop`, `for` are
-  // legitimate column names): the scanner classified the word, but in
-  // field-name position it is a name.
-  if (first.kind !== 'IDENTIFIER' && !isKeywordWord(first)) {
-    fail(`unexpected ${first.kind} at schema top level — allowed: fields ('name! type'), directives ('@name'), methods ('name: -> body'), computed getters ('name: ~> body')`, first.start);
-  }
-
-  const name = first.value;
-  if (line[1]?.kind === ':') {
-    fail(`schema fields use 'name type' (space, no colon) — got '${name}:'`, line[1].start);
-  }
+function readField(line, entries, ctx) {
+  const { fail, at, span, kind } = ctx;
+  const [, , nameLeaf, modsNode, typeNode, partsNode] = line;
+  const name = nameLeaf[2];
+  const start = at(line);
   // A declared field named for the pk is checked in finishModelBody,
   // not here: whether it is a collision or a NATURAL KEY declaration
-  // depends on an @primary elsewhere in the body, which this
-  // per-line pass cannot see yet.
-
-  // Modifiers: adjacent (unspaced) `!` / `?` tokens. A bang after an
-  // IDENTIFIER scans DAMMIT; after a keyword-word name it stays
-  // UNARY_MATH — both are the `!` modifier here.
-  const modifiers = [];
-  let pos = 1;
-  while (pos < line.length) {
-    const tk = line[pos];
-    if (tk.spaced) break;
-    if (tk.kind === 'DAMMIT' || (tk.kind === 'UNARY_MATH' && tk.value === '!')) { modifiers.push('!'); pos++; continue; }
-    if (tk.kind === '?') { modifiers.push('?'); pos++; continue; }
-    break;
-  }
+  // depends on an @primary elsewhere in the body.
+  const modifiers = isNone(modsNode) ? [] : [...modsNode];
 
   // Type slot (optional; default `string`): identifier type, `~type` /
   // `~:name` coercion, or a string-literal union.
@@ -683,133 +407,94 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
   let coerce = false;
   let coercer = null;
   let coercerArray = false;
-  let typeConsumed = false;
-  let typeFirst = line[pos];
-  const typeAt = pos;
-  const unionMemberAt = (p) => {
-    if (line[p]?.kind === 'STRING' && line[p].value.startsWith('"')) {
-      return { value: JSON.parse(line[p].value), bracketed: false, start: line[p].start, end: line[p].end, next: p + 1 };
-    }
-    if ((line[p]?.kind === '[' || line[p]?.kind === 'INDEX_START') &&
-        line[p + 1]?.kind === 'STRING' && line[p + 1].value.startsWith('"') &&
-        (line[p + 2]?.kind === ']' || line[p + 2]?.kind === 'INDEX_END')) {
-      return { value: JSON.parse(line[p + 1].value), bracketed: true, start: line[p].start, end: line[p + 2].end, next: p + 3 };
-    }
-    return null;
-  };
-  let unionDefault = undefined;
-  let unionDefaultSpan = null;
-  const unionFirst = unionMemberAt(pos);
-  if (typeFirst?.kind === 'UNARY_MATH' && typeFirst.value === '~') {
-    const sym = symWordAt(line, pos + 1);
-    const typeTok = line[pos + 1];
-    if (sym) {
-      coerce = true;
-      coercer = sym.value;
-      const out = SCHEMA_NAMED_COERCER_TYPES[coercer];
-      if (out && typeof out === 'object') {
-        typeName = out.type;
-        coercerArray = true;
-      } else {
-        typeName = out || 'any';
-      }
-      pos += 3;
-    } else if (typeTok?.kind === 'IDENTIFIER' && !typeTok.spaced) {
-      if (!SCHEMA_COERCIBLE_TYPES.has(typeTok.value)) {
-        fail(`'~${typeTok.value}' is not coercible — built-in coercion exists for: ${[...SCHEMA_COERCIBLE_TYPES].join(', ')}; named coercers use a symbol ('~:${typeTok.value}'); otherwise write a transform ('${name}, -> …')`, typeTok.start);
-      }
-      coerce = true;
-      typeName = typeTok.value;
-      pos += 2;
-    } else {
-      fail(`'~' in the type slot marks coercion and needs a type name ('~integer', '~date', …) or a registered coercer symbol ('~:ssn', …)`, typeFirst.start);
-    }
-    typeConsumed = true;
-  } else if (typeFirst?.kind === 'IDENTIFIER') {
-    typeName = typeFirst.value;
-    typeConsumed = true;
-    pos++;
-  } else if (unionFirst && (!unionFirst.bracketed || line[unionFirst.next]?.kind === '|')) {
-    // A union member is `"string"` or, bracketed, `["string"]` — the
-    // default marked in place, so it can never name a value outside
-    // the union. Bracketed-first counts only when a '|' follows;
-    // otherwise a leading `[…]` stays the ordinary default bracket.
-    literals = [];
-    const takeMember = (m) => {
-      literals.push(m.value);
-      if (m.bracketed) {
-        if (unionDefaultSpan) {
-          fail(`field '${name}' brackets more than one union member as its default — a field has one default`, m.start);
-        }
-        unionDefault = m.value;
-        unionDefaultSpan = { start: m.start, end: m.end };
-      }
-    };
-    takeMember(unionFirst);
-    pos = unionFirst.next;
-    typeConsumed = true;
-    while (line[pos]?.kind === '|') {
-      const m = unionMemberAt(pos + 1);
-      if (!m) {
-        fail(`literal unions contain string literals only — '${line[pos + 1]?.kind ?? '<end>'}' is not allowed as a union member; use the '?' modifier for nullability`, line[pos].start);
-      }
-      takeMember(m);
-      pos = m.next;
-    }
-    typeName = 'literal-union';
-  }
-
   let array = false;
-  const arraySuffixAt = (p) =>
-    (line[p]?.kind === '[' || line[p]?.kind === 'INDEX_START') &&
-    (line[p + 1]?.kind === ']' || line[p + 1]?.kind === 'INDEX_END');
-  if (arraySuffixAt(pos)) {
-    array = true;
-    pos += 2;
-    // Nested arrays (`string[][]`) have no validation semantics here —
-    // one array dimension validates element-wise; deeper nesting needs
-    // `json` or a transform.
-    if (arraySuffixAt(pos)) {
-      fail(`field '${name}' — nested array types ('${typeName}[][]') are not supported: one '[]' validates element-wise; use 'json' or a '-> transform' for deeper nesting`, line[pos].start);
+  let typeSpan = null;
+  let unionDefault;
+  let unionDefaultSpan = null;
+  if (!isNone(typeNode)) {
+    const [, , core, ...arrays] = typeNode;
+    const typeStart = at(typeNode);
+    if (headOf(core) === 'name') {
+      typeName = core[2];
+    } else if (headOf(core) === 'schema-coerce') {
+      const target = core[2];
+      coerce = true;
+      if (headOf(target) === 'sym') {
+        coercer = target[2];
+        const out = SCHEMA_NAMED_COERCER_TYPES[coercer];
+        if (out && typeof out === 'object') {
+          typeName = out.type;
+          coercerArray = true;
+        } else {
+          typeName = out || 'any';
+        }
+      } else {
+        const t = target[2];
+        if (!SCHEMA_COERCIBLE_TYPES.has(t)) {
+          fail(`'~${t}' is not coercible — built-in coercion exists for: ${[...SCHEMA_COERCIBLE_TYPES].join(', ')}; named coercers use a symbol ('~:${t}'); otherwise write a transform ('${name}, -> …')`, at(target));
+        }
+        typeName = t;
+      }
+    } else if (headOf(core) === 'schema-union') {
+      // A union member is `"string"` or, bracketed, `["string"]` — the
+      // default marked in place, so it can never name a value outside
+      // the union.
+      literals = [];
+      for (const m of core.slice(2)) {
+        if (headOf(m) === 'string') {
+          literals.push(JSON.parse(m[2]));
+          continue;
+        }
+        const values = m.slice(2);
+        if (values.length !== 1 || headOf(values[0]) !== 'string') {
+          fail(`literal unions contain string literals only — '${kindName(values.find((v) => headOf(v) !== 'string') ?? m)}' is not allowed as a union member; use the '?' modifier for nullability`, at(m));
+        }
+        const value = JSON.parse(values[0][2]);
+        literals.push(value);
+        if (unionDefaultSpan) {
+          fail(`field '${name}' brackets more than one union member as its default — a field has one default`, at(m));
+        }
+        unionDefault = value;
+        unionDefaultSpan = span(m);
+      }
+      typeName = 'literal-union';
+    }
+    if (arrays.length > 0) {
+      array = true;
+      // Nested arrays (`string[][]`) have no validation semantics here —
+      // one array dimension validates element-wise; deeper nesting needs
+      // `json` or a transform.
+      if (arrays.length > 1) {
+        fail(`field '${name}' — nested array types ('${typeName}[][]') are not supported: one '[]' validates element-wise; use 'json' or a '-> transform' for deeper nesting`, start);
+      }
+    }
+    if (coerce && array) {
+      fail(`coercion ('~${typeName}') does not apply to array types — coerce per-element with a transform instead`, typeStart);
+    }
+    if (coercerArray) array = true;
+    if (array && literals) {
+      fail(`array-of-literal-union is not supported — use 'string[]' for an array of strings`, typeStart);
+    }
+    // The type slot's own span, whatever spelling filled it, with its
+    // optional `[]`. The editor answers a hover here from the companion
+    // member's annotation, so the span covers the whole slot — from the
+    // WORD, not the `~` ahead of it.
+    if (!isNone(core)) {
+      const word = headOf(core) === 'schema-coerce' ? core[2] : core;
+      typeSpan = [at(word), span(typeNode)[1]];
     }
   }
-  if (coerce && array) {
-    fail(`coercion ('~${typeName}') does not apply to array types — coerce per-element with a transform instead`, typeFirst.start);
-  }
-  if (coercerArray) array = true;
-  if (array && literals) {
-    fail(`array-of-literal-union is not supported — use 'string[]' for an array of strings`, typeFirst.start);
-  }
 
-  // The type slot's own span, whatever spelling filled it — an
-  // identifier, a `~coercion`'s word, a literal union, each with an
-  // optional `[]`. The editor answers a hover here from the companion
-  // member's annotation, so the span covers the whole slot the annotation
-  // stands for — from the WORD, not the `~` ahead of it: the marker is
-  // punctuation, and unlike `!`/`?` it precedes its word, so no cursor
-  // bias makes it the word's own byte.
-  const typeWord = typeFirst?.kind === 'UNARY_MATH' && typeFirst.value === '~' ? line[typeAt + 1] : typeFirst;
-  const typeSpan = typeConsumed ? [typeWord.start, line[pos - 1].end] : null;
-
-  // Trailers: `,`-separated parts, each self-identifying by head shape.
-  let rest = line.slice(pos);
-  if (typeConsumed && rest[0]?.kind === '->') {
-    fail(`field '${name}' has a transform after the type; a comma is required before '->' — write '${name} ${typeName}, -> …'`, rest[0].start);
-  }
   let range = null;
-  let bracketDefault = undefined;
+  let bracketDefault;
   let hasDefault = false;
+  // The default literal's own source span — the face marks its
+  // `satisfies` there, so a wrong-typed default anchors on the value.
+  let defaultSpan = null;
   if (unionDefaultSpan) {
     bracketDefault = unionDefault;
     hasDefault = true;
-  }
-  // The default literal's own source span — the face marks its
-  // `satisfies` there, so a wrong-typed default anchors on the value
-  // the author wrote instead of on the enclosing entry list.
-  const defaultSpan = {};
-  if (unionDefaultSpan) {
-    defaultSpan.start = unionDefaultSpan.start;
-    defaultSpan.end = unionDefaultSpan.end;
+    defaultSpan = unionDefaultSpan;
   }
   let regex = null;
   let transformTokens = null;
@@ -817,106 +502,78 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
   let uniqueAttr = false;
   let primaryAttr = false;
 
-  if (rest.length > 0) {
-    if (rest[0]?.kind === ',') rest = rest.slice(1);
-    // Multi-line trailers arrive wrapped in one INDENT…OUTDENT pair —
-    // strip it when it spans the whole remainder so the inner commas
-    // split at top level.
-    if (rest.length >= 2 && rest[0].kind === 'INDENT') {
-      let d = 0;
-      let lastIdx = -1;
-      for (let k = 0; k < rest.length; k++) {
-        if (rest[k].kind === 'INDENT') d++;
-        else if (rest[k].kind === 'OUTDENT' && --d === 0) { lastIdx = k; break; }
-      }
-      if (lastIdx === rest.length - 1) rest = rest.slice(1, -1);
-    }
-    const parts = splitTopLevelByComma(rest);
-    for (let p = 0; p < parts.length; p++) {
-      let part = parts[p];
-      while (part.length && (part[0].kind === 'INDENT' || part[0].kind === 'TERMINATOR')) part = part.slice(1);
-      if (!part.length) continue;
-      if (part[0].kind !== '->') {
-        const innerArrow = findTopLevelArrowIdx(part);
-        // `@primary -> …` / `@unique -> …`: after an inline attribute
-        // the comma before the transform is optional, mirroring call
-        // syntax (`get '/x' ->`). The '@' branch below splits it.
-        const attrArrow = part[0].kind === '@' && innerArrow === 2;
-        if (innerArrow > 0 && !attrArrow) {
-          fail(`field '${name}' has a transform after other content; a comma is required before '->'`, part[innerArrow].start);
+  const parts = isNone(partsNode) ? [] : partsNode;
+  const real = parts.filter((p) => p !== ',');
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (part === ',') continue;
+    const comma = parts[i - 1] === ',';
+    const head = headOf(part);
+    if (head === 'schema-transform') {
+      if (!comma) {
+        // `@primary -> …` / `@unique -> …`: after an inline attribute the
+        // comma before the transform is optional, mirroring call syntax.
+        const before = parts[i - 1];
+        if (before === undefined && !isNone(typeNode) && !isNone(typeNode[2])) {
+          fail(`field '${name}' has a transform after the type; a comma is required before '->' — write '${name} ${typeName}, -> …'`, at(part));
         }
-        if (!attrArrow) {
-          while (part.length && (part[part.length - 1].kind === 'OUTDENT' || part[part.length - 1].kind === 'TERMINATOR')) part = part.slice(0, -1);
-          if (!part.length) continue;
+        if (before !== undefined && headOf(before) !== 'schema-attr') {
+          fail(`field '${name}' has a transform after other content; a comma is required before '->'`, at(part));
         }
       }
-      const head = part[0];
-      if (head.kind === '[' || head.kind === 'INDEX_START') {
-        if (hasDefault) fail(`field '${name}' has more than one '[…]' default bracket`, head.start);
-        bracketDefault = parseDefaultBracket(part, name, fail, defaultSpan);
-        hasDefault = true;
-      } else if (head.kind === '{') {
-        // Persistence metadata may also ride a :mixin field — it takes
-        // effect when a :model includes the mixin; inclusion into any
-        // other kind rejects at expansion (expandMixins).
-        if (kind !== 'model' && kind !== 'mixin') {
-          fail(`field attrs ('{…}') are persistence metadata — :model/:mixin-only ('{was: "old_column"}' annotates a column rename)`, head.start);
+      if (part !== real[real.length - 1]) {
+        fail(`transform '-> …' must be the last element on the field line for '${name}'`, at(part));
+      }
+      transformTokens = ctx.island(part[2]);
+    } else if (head === 'schema-bracket') {
+      if (hasDefault) fail(`field '${name}' has more than one '[…]' default bracket`, at(part));
+      const values = part.slice(2);
+      defaultSpan = [at(values[0]), span(values[values.length - 1])[1]];
+      bracketDefault = readDefault(part, name, ctx);
+      hasDefault = true;
+    } else if (head === 'schema-attrs') {
+      // Persistence metadata may also ride a :mixin field — it takes
+      // effect when a :model includes the mixin; inclusion into any
+      // other kind rejects at expansion (expandMixins).
+      if (kind !== 'model' && kind !== 'mixin') {
+        fail(`field attrs ('{…}') are persistence metadata — :model/:mixin-only ('{was: "old_column"}' annotates a column rename)`, at(part));
+      }
+      if (attrs) fail(`field '${name}' has more than one '{…}' attrs bracket`, at(part));
+      attrs = readOptions(part, FIELD_ATTRS, `field '${name}'`, ctx);
+    } else if (head === 'schema-range') {
+      if (range) fail(`field '${name}' has more than one range constraint — one 'min..max' per field`, at(part));
+      range = readRange(part, name, ctx);
+    } else if (head === 'regex') {
+      if (regex) fail(`field '${name}' has more than one regex constraint`, at(part));
+      regex = readRegex(part[2], at(part), fail);
+    } else if (head === 'schema-attr') {
+      const attrName = part[2][2];
+      if (kind !== 'model' && kind !== 'mixin') {
+        fail(`inline '@${attrName}' on field '${name}' is persistence metadata — :model/:mixin-only ('@unique' marks single-column uniqueness)`, at(part));
+      }
+      if (attrName === 'unique') {
+        if (uniqueAttr) fail(`field '${name}' has more than one '@unique'`, at(part));
+        uniqueAttr = true;
+      } else if (attrName === 'primary') {
+        // Inline form of '@primary <name>': declaring the pk ON the field
+        // it describes. :model-only — a mixin doesn't own a row identity.
+        if (kind !== 'model') {
+          fail(`inline '@primary' on field '${name}' is :model-only — a mixin cannot declare the primary key`, at(part));
         }
-        if (attrs) fail(`field '${name}' has more than one '{…}' attrs bracket`, head.start);
-        attrs = parseAttrsTokens(part, name, fail);
-      } else if (isRangeConstraintTokens(part)) {
-        if (range) fail(`field '${name}' has more than one range constraint — one 'min..max' per field`, head.start);
-        range = parseRangeTokens(part, name, fail);
-      } else if (head.kind === 'REGEX' && part.length === 1) {
-        if (regex) fail(`field '${name}' has more than one regex constraint`, head.start);
-        regex = parseRegexToken(head, fail);
-      } else if (head.kind === '->') {
-        if (p !== parts.length - 1) {
-          fail(`transform '-> …' must be the last element on the field line for '${name}'`, head.start);
-        }
-        transformTokens = part.slice(1);
-      } else if (head.kind === '@') {
-        const attrName = isWord(part[1]) ? part[1].value : null;
-        if (kind !== 'model' && kind !== 'mixin') {
-          fail(`inline '@${attrName ?? ''}' on field '${name}' is persistence metadata — :model/:mixin-only ('@unique' marks single-column uniqueness)`, head.start);
-        }
-        if (part.length > 2 && part[2].kind === '->') {
-          // Comma-elided transform after the attribute: split it off
-          // and keep judging the attribute as the two tokens it is.
-          if (p !== parts.length - 1) {
-            fail(`transform '-> …' must be the last element on the field line for '${name}'`, part[2].start);
-          }
-          transformTokens = part.slice(3);
-          part = part.slice(0, 2);
-        }
-        if (part.length === 2 && attrName === 'unique') {
-          if (uniqueAttr) fail(`field '${name}' has more than one '@unique'`, head.start);
-          uniqueAttr = true;
-        } else if (part.length === 2 && attrName === 'primary') {
-          // Inline form of '@primary <name>': declaring the pk ON the
-          // field it describes. :model-only — a mixin doesn't own a
-          // row identity to declare.
-          if (kind !== 'model') {
-            fail(`inline '@primary' on field '${name}' is :model-only — a mixin cannot declare the primary key`, head.start);
-          }
-          if (primaryAttr) fail(`field '${name}' has more than one '@primary'`, head.start);
-          primaryAttr = true;
-        } else {
-          fail(`unknown inline attribute '@${attrName ?? ''}' on field '${name}' — the inline attributes are '@unique' and '@primary'`, head.start);
-        }
+        if (primaryAttr) fail(`field '${name}' has more than one '@primary'`, at(part));
+        primaryAttr = true;
       } else {
-        fail(`unexpected trailer for field '${name}' — expected '[…]' default, '/regex/', 'min..max' range, or '-> transform'`, head.start);
+        fail(`unknown inline attribute '@${attrName}' on field '${name}' — the inline attributes are '@unique' and '@primary'`, at(part));
       }
     }
   }
 
   if (coerce && transformTokens) {
-    fail(`field '${name}' has both '~${typeName}' coercion and a '->' transform — a transform replaces coercion; coerce inside it instead`, first.start);
+    fail(`field '${name}' has both '~${typeName}' coercion and a '->' transform — a transform replaces coercion; coerce inside it instead`, start);
   }
 
-  // Merge constraints: the pragma default
-  // max fills only when nothing narrowed the max; the `!` open-left
-  // sugar implies min=1.
+  // Merge constraints: the pragma default max fills only when nothing
+  // narrowed the max; the `!` open-left sugar implies min=1.
   const c = {};
   if (range) {
     if (range.min !== undefined) c.min = range.min;
@@ -928,13 +585,13 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
   // Either spelling of a literal-union default must name a member —
   // `["usr"]` beside "user" is a typo, not a policy.
   if (literals && c.default !== undefined && !literals.includes(c.default)) {
-    fail(`field '${name}' defaults to ${JSON.stringify(c.default)}, which is not a member of its literal union (${literals.map((l) => JSON.stringify(l)).join(' | ')})`, first.start);
+    fail(`field '${name}' defaults to ${JSON.stringify(c.default)}, which is not a member of its literal union (${literals.map((l) => JSON.stringify(l)).join(' | ')})`, start);
   }
   if (ctx.defaultMaxString != null && !regex && !literals && VARCHAR_TYPES.has(typeName) && c.max === undefined) {
     c.max = ctx.defaultMaxString;
   }
   if (c.min !== undefined && c.max !== undefined && c.min > c.max) {
-    fail(`field '${name}' would have impossible constraints min=${c.min} > max=${c.max} after sugar is applied — write an explicit range or drop the conflicting pragma`, first.start);
+    fail(`field '${name}' would have impossible constraints min=${c.min} > max=${c.max} after sugar is applied — write an explicit range or drop the conflicting pragma`, start);
   }
   const constraints =
     c.min !== undefined || c.max !== undefined || c.default !== undefined || c.regex !== undefined ? c : null;
@@ -943,14 +600,35 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
     tag: 'field', name, modifiers, typeName, array,
     literals, coerce, coercer, constraints, transformTokens,
     unique: uniqueAttr, primary: primaryAttr, attrs,
-    start: first.start, typeSpan,
-    defaultSpan: defaultSpan.start === undefined ? null : [defaultSpan.start, defaultSpan.end],
+    start, typeSpan,
+    defaultSpan,
   });
 }
 
-// A `{key: value}` options bracket — one parser for both, because the
-// only thing that differs is which vocabulary it reads and how the
-// errors name the thing being configured.
+// `[value]` — a single literal default.
+function readDefault(bracket, fieldName, ctx) {
+  const { fail, at } = ctx;
+  const values = bracket.slice(2);
+  if (values.length !== 1) {
+    fail(values.length === 2
+      ? `size/value ranges use 'min..max' syntax, not brackets — replace the bracket pair with a range`
+      : `the constraint bracket takes a single default value (got ${values.length} elements)`, at(bracket));
+  }
+  const v = values[0];
+  if (headOf(v) === 'regex') {
+    fail(`regex constraints are written bare, not in brackets — replace '[${v[2]}]' with '${v[2]}'`, at(bracket));
+  }
+  if (headOf(v) === 'sym') return v[2];
+  // `undefined` names no value: a field without a default already
+  // defaults to nothing.
+  if (headOf(v) === 'name' && v[2] === 'undefined') {
+    fail(`field '${fieldName}': a default of undefined is no default; drop the bracket`, at(v));
+  }
+  return literalOf(v, `field '${fieldName}' default`, ctx);
+}
+
+// A `{key: value}` options bracket — one reader for both field attrs and
+// relation options; only the vocabulary and the error wording differ.
 //
 // QUOTING PICKS THE NAMESPACE, exactly as it does for `@table`: bare
 // identifiers live in Rip's naming, quoted strings live in the
@@ -959,147 +637,414 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
 // `{column: "USER_NAME"}` are columns, so they are quoted. Each key's
 // namespace is declared once, in vocab.js, and read here — writing a
 // name in the wrong one is a positioned error, never a silent guess.
-function parseOptionsBracket(part, vocab, what, fail) {
-  if (part[part.length - 1]?.kind !== '}') {
-    fail(`${what} — the '{…}' options bracket never closes`, part[0].start);
-  }
-  const inner = part.slice(1, -1).filter((t) =>
-    t.kind !== 'TERMINATOR' && t.kind !== 'INDENT' && t.kind !== 'OUTDENT');
+function readOptions(node, vocab, what, ctx) {
+  const { fail, at } = ctx;
+  const options = node.slice(2);
+  if (options.length === 0) fail(`${what} has an empty '{…}' options bracket`, at(node));
   const attrs = {};
-  for (const item of splitTopLevelByComma(inner)) {
-    if (!item.length) continue;
-    const keyTok = item[0];
-    if (!isWord(keyTok)) {
-      fail(`${what} options must be '{key: value}' pairs — got ${keyTok.kind}`, keyTok.start);
-    }
-    const key = keyTok.value;
+  for (const [, , keyLeaf, valNode] of options) {
+    const key = keyLeaf[2];
     const kind = vocab[key];
     if (kind === undefined) {
-      fail(`unknown ${what} option '${key}' — known options: ${Object.keys(vocab).join(', ')}`, keyTok.start);
+      fail(`unknown ${what} option '${key}' — known options: ${Object.keys(vocab).join(', ')}`, at(keyLeaf));
     }
-    if (key in attrs) fail(`${what} repeats option '${key}'`, keyTok.start);
-    let vs = 1;
-    if (item[vs]?.kind === ':') vs++;
-    const valToks = item.slice(vs);
-    if (valToks.length !== 1) {
-      fail(`${what} option '${key}' takes a single value`, (valToks[0] ?? keyTok).start);
-    }
-    const valTok = valToks[0];
+    if (key in attrs) fail(`${what} repeats option '${key}'`, at(keyLeaf));
     const bare = kind === 'property' || kind === 'model';
     let value;
     if (bare) {
-      if (!isWord(valTok) && !isKeywordWord(valTok)) {
+      if (headOf(valNode) !== 'name') {
         // Echo their own word unquoted when that is the whole fix;
         // otherwise show the shape, so the suggestion is never a name
         // that would fail its own namespace check.
-        const wrote = valTok.kind === 'STRING' && valTok.value.startsWith('"')
-          ? JSON.parse(valTok.value) : null;
+        const wrote = headOf(valNode) === 'string' ? JSON.parse(valNode[2]) : null;
         const shown = wrote && !attrValueError(kind, key, wrote)
           ? wrote : (kind === 'model' ? 'Membership' : 'author');
         fail(`${what} option '${key}' names ${kind === 'model' ? 'a model' : 'a property'}, ` +
           `so it is written BARE — '{${key}: ${shown}}', ` +
-          `not ${valTok.kind === 'STRING' ? valTok.value : `a ${valTok.kind}`}. ` +
-          `Quoting would name a database identifier, which is a different thing`, valTok.start);
+          `not ${headOf(valNode) === 'string' ? valNode[2] : `a ${kindName(valNode)}`}. ` +
+          `Quoting would name a database identifier, which is a different thing`, at(valNode));
       }
-      value = valTok.value;
+      value = valNode[2];
     } else {
-      if (valTok.kind !== 'STRING' || !valTok.value.startsWith('"')) {
+      if (headOf(valNode) !== 'string') {
         fail(`${what} option '${key}' names a database column, so it is QUOTED — ` +
-          `'{${key}: "${isWord(valTok) ? snakeCase(valTok.value) : 'author_id'}"}'. ` +
-          `A bare name would be a Rip name, which is a different thing`, valTok.start);
+          `'{${key}: "${headOf(valNode) === 'name' ? snakeCase(valNode[2]) : 'author_id'}"}'. ` +
+          `A bare name would be a Rip name, which is a different thing`, at(valNode));
       }
-      value = JSON.parse(valTok.value);
+      value = JSON.parse(valNode[2]);
     }
     const why = attrValueError(kind, key, value);
-    if (why) fail(`${what} option ${why}; got '${value}'`, keyTok.start);
+    if (why) fail(`${what} option ${why}; got '${value}'`, at(keyLeaf));
     attrs[key] = value;
-  }
-  if (!Object.keys(attrs).length) {
-    fail(`${what} has an empty '{…}' options bracket`, part[0].start);
   }
   return attrs;
 }
 
-function parseAttrsTokens(part, fieldName, fail) {
-  return parseOptionsBracket(part, FIELD_ATTRS, `field '${fieldName}'`, fail);
-}
-
-function parseRelationAttrs(part, directiveName, fail) {
-  const attrs = parseOptionsBracket(part, RELATION_ATTRS, `@${directiveName}`, fail);
+function readRelationAttrs(node, directiveName, ctx) {
+  const attrs = readOptions(node, RELATION_ATTRS, `@${directiveName}`, ctx);
   // `through:` names a hop the OWNER does not store, which is what
   // @hasMany and @hasOne both are. @belongsTo stores its key in its own
   // row, so a `through` on it is not a relation, it is a query.
   if (attrs.through && directiveName === 'belongsTo') {
-    fail(`@belongsTo option 'through' is for @hasMany/@hasOne — a @belongsTo holds its key in its own row, so it has nothing to read through`, part[0].start);
+    ctx.fail(`@belongsTo option 'through' is for @hasMany/@hasOne — a @belongsTo holds its key in its own row, so it has nothing to read through`, ctx.at(node));
   }
   // `targetKey:` names a column ON the join model, so without one there
   // is nothing for it to name.
   if (attrs.targetKey && !attrs.through) {
-    fail(`@${directiveName} option 'targetKey' names a column on the join model, so it requires 'through' — '{through: Membership, targetKey: "team_id"}'`, part[0].start);
+    ctx.fail(`@${directiveName} option 'targetKey' names a column on the join model, so it requires 'through' — '{through: Membership, targetKey: "team_id"}'`, ctx.at(node));
   }
   return attrs;
 }
 
-// `@scope :name, fn` — the name is a :symbol; the fn is `-> body` or
-// `(args) -> body` (scopes read the query builder through `this`, so
-// most take no arguments).
-function parseScopeDirective(argTokens, directiveTok, fail) {
-  if (!argTokens.length) {
-    fail(`@scope requires ':name, -> body' (or ':name, (args) -> body')`, directiveTok.start);
+// ── @ensure ──────────────────────────────────────────────────────────
+// Inline: `@ensure "msg"[, :field], (args) -> body`
+// Array:  `@ensure ["msg", (u) -> body, "msg2", (u) -> body, …]`
+
+function readEnsurePairs(items, start, ctx) {
+  const { fail, at } = ctx;
+  if (!items.length) {
+    fail(`@ensure requires 'message, (x) -> body' or a '[…]' array of pairs`, start);
   }
-  const sym = symWordAt(argTokens, 0);
-  if (!sym) {
-    fail(`@scope name must be a :symbol — '@scope :active, -> @where(active: true)'`, argTokens[0].start);
+  if (headOf(items[0]) === 'schema-ensure-list') {
+    if (items.length > 1) fail(`@ensure […] must be the only argument — extra tokens after ']'`, at(items[1]));
+    return consumeEnsureTuples(items[0].slice(2), items[0], ctx);
   }
-  const name = sym.value;
-  // After '@scope' the ':' is structural, so the raw pair spelling
-  // governs and a tight `!`/`?` lands as its own token — fold it into
-  // the gate so the rejection echoes the user's spelling.
-  const suf = argTokens[2];
-  const suffixed = suf && !suf.spaced && suf.start === sym.end &&
-    (suf.value === '!' || suf.value === '?');
-  if (suffixed || !/^[a-z][a-zA-Z0-9]*$/.test(name)) {
-    fail(`@scope name ':${name}${suffixed ? suf.value : ''}' must be a lowercase-first alphanumeric identifier — scopes chain as query-builder methods`, sym.start);
+  if (items.length < 2) {
+    fail(`@ensure inline form must be 'message, (x) -> body' — did you forget the comma?`, at(items[0]));
   }
-  let rest = argTokens.slice(2);
-  if (rest[0]?.kind === ',') rest = rest.slice(1);
-  if (!rest.length) {
-    fail(`@scope :${name} is missing its body — '@scope :${name}, -> @where(...)'`, sym.start);
+  if (items.length > 3 || (items.length === 3 && headOf(items[1]) !== 'sym')) {
+    fail(`@ensure inline form takes 'message[, :field], fn' (got ${items.length} comma-separated parts) — use '@ensure […]' for multiple refinements`, at(items[0]));
   }
-  const fn = parseScopeFnTokens(rest, sym, `@scope :${name}`, fail);
-  return { name, paramTokens: fn.paramTokens, bodyTokens: fn.bodyTokens };
+  return consumeEnsureTuples(items, items[0], ctx);
 }
 
-// A scope function token slice: `-> body` or `(params) -> body`.
-function parseScopeFnTokens(tokens, anchorTok, label, fail) {
-  if (!tokens.length) {
-    fail(`${label}: expected '-> body' or '(args) -> body'`, anchorTok.start);
-  }
-  const paramTokens = [];
-  let pos = 0;
-  const t0 = tokens[0];
-  if (t0.kind === '(' || t0.kind === 'PARAM_START' || t0.kind === 'CALL_START') {
-    let depth = 1;
-    pos = 1;
-    while (pos < tokens.length && depth > 0) {
-      const tag = tokens[pos].kind;
-      if (tag === '(' || tag === 'PARAM_START' || tag === 'CALL_START') depth++;
-      if (tag === ')' || tag === 'PARAM_END' || tag === 'CALL_END') {
-        depth--;
-        if (depth === 0) { pos++; break; }
-      }
-      paramTokens.push(tokens[pos]);
-      pos++;
+function consumeEnsureTuples(parts, anchor, ctx) {
+  const { fail, at } = ctx;
+  const pairs = [];
+  let i = 0;
+  while (i < parts.length) {
+    const msg = parts[i++];
+    const field = i < parts.length && headOf(parts[i]) === 'sym' ? parts[i++] : null;
+    if (i >= parts.length) {
+      fail(`@ensure: missing function after message${field ? ' and :field' : ''}`, at(msg));
     }
-    if (depth !== 0) fail(`${label}: unclosed '(' in parameters`, t0.start);
+    const fn = parts[i++];
+    if (headOf(msg) !== 'string') {
+      fail(`@ensure: each refinement's first element must be a string literal message`, at(msg));
+    }
+    if (headOf(fn) !== 'schema-fn' || isNone(fn[2])) {
+      fail(`@ensure: expected '(args) -> body' after the message — predicates declare their parameter explicitly ('(u) -> …')`, at(fn));
+    }
+    const bodyTokens = ctx.island(fn[3]);
+    if (!bodyTokens.length) fail(`@ensure: predicate function body is empty`, at(fn));
+    pairs.push({
+      message: JSON.parse(msg[2]),
+      field: field ? field[2] : null,
+      fieldStart: field ? at(field) + 1 : null,
+      paramTokens: ctx.params(fn[2]),
+      bodyTokens,
+    });
   }
-  const arrowTok = tokens[pos];
-  if (arrowTok?.kind !== '->') {
-    fail(`${label}: expected '->' ${paramTokens.length ? 'after parameters' : 'to start the body'}`, (arrowTok ?? anchorTok).start);
+  return pairs;
+}
+
+// ── :union and :enum lines ───────────────────────────────────────────
+
+const directiveNameOf = (line) => (line[0] === 'schema-directive' ? line[2][2]
+  : line[0] === 'schema-ensure' ? 'ensure'
+  : line[1].default === true ? 'defaultScope' : 'scope');
+
+function readUnionLine(line, entries, ctx) {
+  const { fail, at } = ctx;
+  const start = at(line);
+  if (line[0] === 'schema-directive' || line[0] === 'schema-ensure' || line[0] === 'schema-scope') {
+    const name = directiveNameOf(line);
+    if (name !== 'on' || line[0] !== 'schema-directive') {
+      fail(`:union bodies accept only '@on :field' and constituent schema names — '@${name}' is not allowed`, start + 1);
+    }
+    const args = line.slice(3);
+    if (headOf(args[0]) !== 'sym') {
+      fail(`@on requires the discriminator field as a symbol — '@on :kind'`, Array.isArray(args[0]) ? at(args[0]) : start + 1);
+    }
+    if (args.length > 1) fail(`@on takes exactly one :field symbol`, Array.isArray(args[1]) ? at(args[1]) : start);
+    entries.push({ tag: 'directive', name: 'on', args: [{ field: args[0][2] }], start });
+    return;
   }
-  const bodyTokens = tokens.slice(pos + 1);
-  if (!bodyTokens.length) fail(`${label}: function body is empty`, arrowTok.start);
-  return { paramTokens, bodyTokens };
+  if (line[0] === 'schema-field' && isNone(line[3]) && isNone(line[4]) && isNone(line[5])) {
+    entries.push({ tag: 'union-member', name: line[2][2], start });
+    return;
+  }
+  const [first, second] = line[0] === 'schema-field' ? ['IDENTIFIER', isNone(line[3]) ? (isNone(line[4]) ? kindName(line[5].find((p) => p !== ',')) : 'IDENTIFIER') : (line[3][0] === '!' ? 'DAMMIT' : '?')]
+    : line[0] === 'schema-callable' ? ['PROPERTY', ':']
+    : [':', 'IDENTIFIER'];
+  fail(`:union bodies accept only '@on :field' and bare constituent schema names (one per line) — got ${first} followed by ${second}`, start);
+}
+
+function readEnumLine(line, entries, ctx) {
+  const { fail, at } = ctx;
+  const start = at(line);
+  if (line[0] === 'schema-directive' || line[0] === 'schema-ensure' || line[0] === 'schema-scope') {
+    fail(`:enum schemas don't accept '@${directiveNameOf(line)}' — enums hold only :symbol members`, start);
+  }
+  if (line[0] !== 'schema-member') {
+    const word = line[2][2];
+    fail(`enum member must be a :symbol — use ':${word}' for a bare member or ':${word} value' for a valued one`, start);
+  }
+  const [, , sym, valueNode] = line;
+  const name = sym[2];
+  const what = `enum member ':${name}' value`;
+  const value = isNone(valueNode) ? undefined
+    : headOf(valueNode) === 'name' && valueNode[2] === 'undefined' ? undefined
+    : literalOf(valueNode, what, ctx);
+  entries.push({ tag: 'enum-member', name, value, start });
+}
+
+// An input names a member by its name or by its value, so the two
+// vocabularies must not cross: a value that is the name of a member
+// holding a DIFFERENT value (`:a "b"` beside `:b "c"`) makes the input
+// "b" resolve to two values. A member name declared twice is the same
+// ambiguity. Values may repeat — two names for one value are aliases
+// (`:active` beside `:enabled "active"`), and every input resolves to it.
+function checkEnumMembers(entries, fail) {
+  const members = entries.filter((e) => e.tag === 'enum-member');
+  const byName = new Map();
+  for (const m of members) {
+    if (byName.has(m.name)) fail(`enum member ':${m.name}' is declared twice`, m.start);
+    byName.set(m.name, m);
+  }
+  const valueOf = (m) => (m.value === undefined ? m.name : m.value);
+  for (const m of members) {
+    const other = typeof m.value === 'string' ? byName.get(m.value) : undefined;
+    if (other && valueOf(other) !== m.value) {
+      fail(`enum member ':${m.name}' has the value ${JSON.stringify(m.value)}, which is the name of member ':${other.name}' — an input ${JSON.stringify(m.value)} would name both`, m.start);
+    }
+  }
+}
+
+// ── literal values ───────────────────────────────────────────────────
+
+function readRange(node, fieldName, ctx) {
+  const { fail, at } = ctx;
+  const [, , minNode, maxNode] = node;
+  const min = isNone(minNode) ? undefined : signedNumber(minNode, 'a range endpoint', ctx);
+  const max = isNone(maxNode) ? undefined : signedNumber(maxNode, 'a range endpoint', ctx);
+  // A bare '..' constrains nothing — noise, not a range. Omitting the
+  // trailer entirely says the same thing loudly less.
+  if (min === undefined && max === undefined) {
+    fail(`a bare '..' range constrains nothing on field '${fieldName}' — give an endpoint (1.., ..60, 1..60) or drop the range`, at(node));
+  }
+  if (min !== undefined && max !== undefined && min > max) {
+    fail(`range '${min}..${max}' is reversed — write the smaller endpoint first`, at(node));
+  }
+  const out = {};
+  if (min !== undefined) out.min = min;
+  if (max !== undefined) out.max = max;
+  return out;
+}
+
+function readRegex(text, at, fail) {
+  const m = /^\/((?:\\.|[^\\/])+)\/([a-z]*)$/.exec(text);
+  if (!m) fail(`invalid regex literal ${JSON.stringify(text)}`, at);
+  try {
+    return new RegExp(m[1], m[2]);
+  } catch (e) {
+    fail(`invalid regex '${text}': ${e.message}`, at);
+  }
+}
+
+// A NUMBER's value. Separators are spelling (`1_000`); a BigInt (`1n`)
+// rejects, since a schema value serializes as a JSON number.
+function numberOf(raw, what, at, fail) {
+  const text = raw.replace(/_/g, '');
+  if (text.endsWith('n')) fail(`${what} cannot be a BigInt (${raw}) — schema values are JSON numbers`, at);
+  return Number(text);
+}
+
+function signedNumber(node, what, ctx) {
+  if (headOf(node) === 'schema-neg') return -numberOf(node[2][2], what, ctx.at(node[2]), ctx.fail);
+  return numberOf(node[2], what, ctx.at(node), ctx.fail);
+}
+
+function literalOf(node, what, ctx) {
+  switch (headOf(node)) {
+    case 'num': case 'schema-neg': return signedNumber(node, what, ctx);
+    case 'string': return JSON.parse(node[2]);
+    case 'name':
+      if (node[2] in LITERAL_WORDS) return LITERAL_WORDS[node[2]];
+  }
+  ctx.fail(`${what} must be a literal (number, string, boolean, null) — got ${kindName(node)}`, ctx.at(node));
+}
+
+// ── syntax messages ──────────────────────────────────────────────────
+// A rejection inside a schema body: the message the line's own shape
+// calls for, or null to keep the parser's. `at` indexes the payload's
+// offending token (the payload's length at its end).
+
+const tokenKindName = (t) => {
+  if (!t) return '<end>';
+  switch (t.kind) {
+    case 'S_WORD': return 'IDENTIFIER';
+    case 'S_SYMBOL': case 'S_KIND': return ':';
+    case 'S_BANG': return 'DAMMIT';
+    case 'S_OPT': return '?';
+    case 'S_TILDE': return 'UNARY_MATH';
+    case 'S_ARRAY': return '[';
+    case 'S_PARAMS': return '(';
+    case 'S_DIRECTIVE': case 'S_ENSURE': case 'S_SCOPE': case 'S_DEFAULT_SCOPE': return '@';
+    default: return t.kind;
+  }
+};
+
+export function explainSchemaReject(payload, at) {
+  // The body's lines: a header, then lines separated by the body's own
+  // TERMINATORs (inside its INDENT for a block body).
+  let depth = 0;
+  let bodyDepth = null;
+  let lineStart = -1;
+  let line = null;
+  for (let i = 0; i <= payload.length && line === null; i++) {
+    const t = payload[i];
+    const k = t?.kind;
+    if (bodyDepth === null) {
+      if (k === 'INDENT' || k === 'TERMINATOR') {
+        bodyDepth = k === 'INDENT' ? 1 : 0;
+        depth = bodyDepth;
+        lineStart = i + 1;
+      }
+      if (i >= at) return null;
+      continue;
+    }
+    const ends = t === undefined || (k === 'TERMINATOR' && depth === bodyDepth) ||
+      ((k === 'OUTDENT' || k === ']' || k === '}') && depth === bodyDepth);
+    if (ends) {
+      if (at <= i) line = [lineStart, i];
+      lineStart = i + 1;
+      continue;
+    }
+    if (k === 'INDENT' || k === '[' || k === '{') depth++;
+    else if (k === 'OUTDENT' || k === ']' || k === '}') depth--;
+  }
+  if (line === null || line[0] > at) return null;
+  const toks = payload.slice(line[0], line[1]);
+  const idx = at - line[0];
+  const head = toks[0];
+  const bad = toks[idx];
+  const msg = (message, t) => ({ message, start: t.start, end: t.start });
+  if (!head) return null;
+  switch (head.kind) {
+    case 'S_SCOPE': {
+      const sym = toks[1];
+      if (!sym) return msg(`@scope requires ':name, -> body' (or ':name, (args) -> body')`, head);
+      if (sym.kind !== 'S_SYMBOL') return msg(`@scope name must be a :symbol — '@scope :active, -> @where(active: true)'`, sym);
+      const named = { start: sym.start + 1 };
+      if (!/^[a-z][a-zA-Z0-9]*$/.test(sym.value)) {
+        return msg(`@scope name ':${sym.value}' must be a lowercase-first alphanumeric identifier — scopes chain as query-builder methods`, named);
+      }
+      const rest = toks.slice(toks[2]?.kind === ',' ? 3 : 2);
+      if (!rest.length) return msg(`@scope :${sym.value} is missing its body — '@scope :${sym.value}, -> @where(...)'`, named);
+      return fnMessage(rest, `@scope :${sym.value}`, msg);
+    }
+    case 'S_DEFAULT_SCOPE': {
+      const rest = toks.slice(1);
+      if (!rest.length) return msg(`@defaultScope: expected '-> body' or '(args) -> body'`, head);
+      return fnMessage(rest, '@defaultScope', msg);
+    }
+    case 'S_SYMBOL': {
+      const name = head.value;
+      const v = toks[1];
+      if (v?.kind === ':' || v?.kind === 'S_SYMBOL') return msg(`enum member ':${name}' — drop the ':' before the value; use ':${name} value'`, v);
+      if (v && v.kind !== 'NUMBER' && v.kind !== '-' && v.kind !== 'STRING' && v.kind !== 'S_WORD') {
+        return msg(`enum member ':${name}' value must be a literal (number, string, boolean, null) — got ${tokenKindName(v)}`, v);
+      }
+      const extra = toks[v?.kind === '-' ? 3 : 2];
+      if (extra) return msg(`extra tokens after enum member ':${name}' value`, extra);
+      return null;
+    }
+    case 'S_WORD': {
+      if (toks[1]?.kind === ':') return null;
+      const before = toks[idx - 1];
+      if (before?.kind === '|') {
+        return msg(`literal unions contain string literals only — '${tokenKindName(bad)}' is not allowed as a union member; use the '?' modifier for nullability`, before);
+      }
+      if (before?.kind === 'S_TILDE') {
+        return msg(`'~' in the type slot marks coercion and needs a type name ('~integer', '~date', …) or a registered coercer symbol ('~:ssn', …)`, before);
+      }
+      let d = 0;
+      let arrow = null;
+      for (let k = 0; k < idx; k++) {
+        const kk = toks[k].kind;
+        if (kk === '[' || kk === '{' || kk === 'INDENT') d++;
+        else if (kk === ']' || kk === '}' || kk === 'OUTDENT') d--;
+        else if (kk === '->' && d === 0) arrow = toks[k];
+      }
+      // A transform's island ends at a comma, so what follows one is
+      // another trailer, and a transform is the last.
+      if (d === 0 && arrow !== null) {
+        return msg(`transform '-> …' must be the last element on the field line for '${head.value}'`, arrow);
+      }
+      if (d === 0 && bad) {
+        return msg(`unexpected trailer for field '${head.value}' — expected '[…]' default, '/regex/', 'min..max' range, or '-> transform'`, bad);
+      }
+      return null;
+    }
+    case 'S_ENSURE': case 'S_DIRECTIVE':
+      return null;
+  }
+  if (idx === 0) {
+    return msg(`unexpected ${tokenKindName(head)} at schema top level — allowed: fields ('name! type'), directives ('@name'), methods ('name: -> body'), computed getters ('name: ~> body')`, head);
+  }
+  return null;
+}
+
+// A scope function's shape: `-> body` or `(args) -> body`.
+function fnMessage(rest, label, msg) {
+  if (rest[0].kind === 'S_PARAMS') {
+    if (rest[1]?.kind !== '->') return msg(`${label}: expected '->' after parameters`, rest[1] ?? rest[0]);
+    return null;
+  }
+  if (rest[0].kind !== '->') return msg(`${label}: expected '->' to start the body`, rest[0]);
+  return null;
+}
+
+// Each parameter of a captured `(a, b)` slice: a plain identifier,
+// optionally typed (`other: Money`). The name is what the runtime
+// spelling emits; the annotation is type-surface only and never reaches
+// the emitted JS, exactly like annotations everywhere else in the
+// language, so it reaches the face as a spliced segment instead. Its
+// text is sliced from SOURCE rather than rebuilt from tokens, and
+// lowers through normalizeTypeText like every other annotation — the
+// rip boolean spellings, single-quoted literals, and a comment inside
+// a wrapped annotation all read as TS on both roads.
+export function paramsOf(paramTokens, what, fail, source = null) {
+  if (!paramTokens.length) return [];
+  const params = paramsRaw(paramTokens, what, fail, source);
+  // JS ARITY, the same rule an ordinary function's parameters follow
+  // (emitParams): a TRAILING run of parameters the author never
+  // annotated is optional, because calling with fewer arguments is
+  // legal in rip as in JavaScript. A run stops at the first annotated
+  // parameter — TypeScript admits no required parameter after an
+  // optional one.
+  for (let i = params.length - 1; i >= 0 && params[i].type === null; i--) params[i].optional = true;
+  return params;
+}
+
+function paramsRaw(paramTokens, what, fail, source) {
+  const carries = (t) => t.kind !== 'TERMINATOR' && t.kind !== 'INDENT' && t.kind !== 'OUTDENT';
+  return splitTopLevelByComma(paramTokens).map((part) => {
+    const toks = part.filter((t) => carries(t) && t.kind !== 'TYPE');
+    // A typed parameter's name arrives as PROPERTY (the lexer's
+    // `word:` tagging) with the raw ':' following it.
+    const typed = toks.length >= 3 && (toks[0].kind === 'IDENTIFIER' || toks[0].kind === 'PROPERTY') && toks[1].kind === ':';
+    if (!typed && (toks.length !== 1 || toks[0].kind !== 'IDENTIFIER')) {
+      fail(`${what}: parameters must be plain identifiers, optionally typed ('name' or 'name: Type')`, (toks[0] ?? part[0]).start);
+    }
+    // The span runs to the last token the PART carries, not the last
+    // the filter kept — a TYPE token inside the annotation is dropped
+    // from the scan but still occupies source.
+    const last = typed ? [...part].filter(carries).pop() : null;
+    const type = typed && source !== null ? normalizeTypeText(source.slice(toks[1].end, last.end)).trim() : null;
+    return { name: toks[0].value, type, optional: false };
+  });
 }
 
 // The :model post-pass — the capability matrix plus the parse-time
@@ -1112,7 +1057,8 @@ function parseScopeFnTokens(tokens, anchorTok, label, fail) {
 // the table — validated here when the full column set is
 // parse-visible (no @mixin; a mixin adds fields only the runtime can
 // see, whose normalize re-checks the expanded set at the root).
-function finishModelBody(entries, fail) {
+function finishModelBody(entries, ctx) {
+  const { fail } = ctx;
   // Single-occurrence directives: a second @idStart/@table/@tableWas would
   // silently last-win in the runtime's read loops — reject the
   // duplicate at its own position.
@@ -1134,7 +1080,7 @@ function finishModelBody(entries, fail) {
       }
       seenOnce.add(e.name);
     }
-    if (e.name !== 'mixin') e.args = parseModelDirectiveArgs(e, shape, fail);
+    if (e.name !== 'mixin') e.args = readModelDirectiveArgs(e, shape, ctx);
   }
 
   const hasMixin = entries.some((e) => e.tag === 'directive' && e.name === 'mixin');
@@ -1267,37 +1213,41 @@ function finishModelBody(entries, fail) {
   }
 }
 
-// One directive's argument tokens → the serialized args shape
-// (the runtime's `_normalize` entry surface).
-function parseModelDirectiveArgs(e, shape, fail) {
-  const tokens = e.argTokens ?? [];
-  const junk = (at, why) => fail(`@${e.name}: ${why}`, at.start);
+// One directive's arguments → the serialized args shape (the runtime's
+// `_normalize` entry surface). The shape is the vocabulary's
+// (MODEL_DIRECTIVES), so the grammar reads every directive's arguments as
+// one list and this reads them by shape.
+function readModelDirectiveArgs(e, shape, ctx) {
+  const { fail, at } = ctx;
+  const args = argNodesOf.get(e) ?? [];
+  const pos = (n) => (Array.isArray(n) ? at(n) : e.start);
+  const junk = (n, why) => fail(`@${e.name}: ${why}`, pos(n));
   switch (shape) {
     case 'none': {
-      if (tokens.length) junk(tokens[0], `takes no arguments`);
+      if (args.length) junk(args[0], `takes no arguments`);
       return null;
     }
     case 'target': {
-      const t0 = tokens[0];
-      if (!isWord(t0)) {
-        fail(`@${e.name} requires a target name — '@${e.name} User'`, (t0 ?? { start: e.start }).start);
+      const t0 = args[0];
+      if (headOf(t0) !== 'name') {
+        fail(`@${e.name} requires a target name — '@${e.name} User'`, pos(t0));
       }
       let optional = false;
-      let pos = 1;
-      if (tokens[pos]?.kind === '?' && !tokens[pos].spaced) { optional = true; pos++; }
-      // `@belongsTo User, {as: "author", foreignKey: "author_id"}`
+      let i = 1;
+      if (args[i] === '?') { optional = true; i++; }
+      // `@belongsTo User, {as: author, foreignKey: "author_id"}`
       let relAttrs = null;
-      if (tokens[pos]?.kind === ',' && tokens[pos + 1]?.kind === '{') {
-        relAttrs = parseRelationAttrs(tokens.slice(pos + 1), e.name, fail);
-        pos = tokens.length;
+      if (args[i] === ',' && headOf(args[i + 1]) === 'schema-attrs') {
+        relAttrs = readRelationAttrs(args[i + 1], e.name, ctx);
+        i += 2;
       }
-      if (pos < tokens.length) junk(tokens[pos], `takes one target name and an optional '{…}' options bracket — unexpected ${tokens[pos].kind} after '${t0.value}${optional ? '?' : ''}'`);
+      if (i < args.length) junk(args[i], `takes one target name and an optional '{…}' options bracket — unexpected ${kindName(args[i])} after '${t0[2]}${optional ? '?' : ''}'`);
       // The FK/accessor derivation rides the snake_case
       // bijection, which acronym-style names break.
-      if (!isCanonicalTarget(t0.value)) {
-        fail(`@${e.name}: target '${t0.value}' is not canonical PascalCase — use an uppercase-first, alphanumeric name with no consecutive uppercase letters (e.g. 'MdmUser' not 'MDMUser'); the derived FK column and accessor names ride the snake_case bijection`, t0.start);
+      if (!isCanonicalTarget(t0[2])) {
+        fail(`@${e.name}: target '${t0[2]}' is not canonical PascalCase — use an uppercase-first, alphanumeric name with no consecutive uppercase letters (e.g. 'MdmUser' not 'MDMUser'); the derived FK column and accessor names ride the snake_case bijection`, at(t0));
       }
-      const arg = { target: t0.value };
+      const arg = { target: t0[2] };
       if (optional) arg.optional = true;
       if (relAttrs?.as) arg.as = relAttrs.as;
       if (relAttrs?.foreignKey) arg.foreignKey = relAttrs.foreignKey;
@@ -1308,62 +1258,39 @@ function parseModelDirectiveArgs(e, shape, fail) {
     case 'columns': {
       const fields = [];
       const colTokens = [];
-      const isName = (t) => isWord(t) || isKeywordWord(t);
-      let pos = 0;
-      if (symWordAt(tokens, 0)) {
-        const s = symWordAt(tokens, 0);
-        fields.push(s.value);
-        colTokens.push(s);
-        pos = 2;
-      } else if (isName(tokens[0])) {
-        fields.push(tokens[0].value);
-        colTokens.push(tokens[0]);
-        pos = 1;
-      } else if (tokens[0]?.kind === '[' || tokens[0]?.kind === 'INDEX_START') {
-        let depth = 1;
-        pos = 1;
-        const inner = [];
-        while (pos < tokens.length && depth > 0) {
-          const t = tokens[pos];
-          if (t.kind === '[' || t.kind === 'INDEX_START') depth++;
-          if (t.kind === ']' || t.kind === 'INDEX_END') {
-            depth--;
-            if (depth === 0) { pos++; break; }
-          }
-          if (depth >= 1) inner.push(t);
-          pos++;
+      const column = (n) => {
+        fields.push(n[2]);
+        colTokens.push({ start: at(n) + (headOf(n) === 'sym' ? 1 : 0) });
+      };
+      const a0 = args[0];
+      let i = 0;
+      if (headOf(a0) === 'sym' || headOf(a0) === 'name') {
+        column(a0);
+        i = 1;
+      } else if (headOf(a0) === 'schema-bracket') {
+        for (const v of a0.slice(2)) {
+          if (headOf(v) !== 'sym' && headOf(v) !== 'name') junk(v, `column names are bare identifiers or :symbols — '@${e.name} [:a, :b]'`);
+          column(v);
         }
-        if (depth !== 0) junk(tokens[0], `unclosed '[' in the column list`);
-        for (const item of splitTopLevelByComma(inner)) {
-          const s = symWordAt(item, 0);
-          const nameTok = s ?? (isName(item[0]) ? item[0] : null);
-          if (!nameTok || item.length > (s ? 2 : 1)) {
-            junk(item[s ? 2 : 1] ?? item[0] ?? tokens[0], `column names are bare identifiers or :symbols — '@${e.name} [:a, :b]'`);
-          }
-          fields.push(nameTok.value);
-          colTokens.push(nameTok);
-        }
+        i = 1;
       }
       if (!fields.length) {
-        fail(`@${e.name} requires a field name or list — '@${e.name} :email' or '@${e.name} [:a, :b]'`, (tokens[0] ?? { start: e.start }).start);
+        fail(`@${e.name} requires a field name or list — '@${e.name} :email' or '@${e.name} [:a, :b]'`, pos(a0));
       }
-      if (pos < tokens.length) junk(tokens[pos], `unexpected ${tokens[pos].kind} after the column list`);
+      if (i < args.length) junk(args[i], `unexpected ${kindName(args[i])} after the column list`);
       e.colTokens = colTokens;
       return [{ fields }];
     }
     case 'int': {
-      let sign = 1;
-      let pos = 0;
-      if (tokens[0]?.kind === '-') { sign = -1; pos = 1; }
-      const numTok = tokens[pos];
-      if (!numTok || numTok.kind !== 'NUMBER') {
-        fail(`@${e.name} requires an integer literal — '@idStart 10001'`, (numTok ?? tokens[0] ?? { start: e.start }).start);
+      const a0 = args[0];
+      if (headOf(a0) !== 'num' && headOf(a0) !== 'schema-neg') {
+        fail(`@${e.name} requires an integer literal — '@idStart 10001'`, pos(a0));
       }
-      const n = sign * numberOf(numTok, `@${e.name}`, fail);
+      const n = signedNumber(a0, `@${e.name}`, ctx);
       if (!Number.isInteger(n)) {
-        fail(`@${e.name} requires an integer literal; got ${numTok.value}`, numTok.start);
+        fail(`@${e.name} requires an integer literal; got ${headOf(a0) === 'schema-neg' ? a0[2][2] : a0[2]}`, at(a0));
       }
-      if (pos + 1 < tokens.length) junk(tokens[pos + 1], `unexpected ${tokens[pos + 1].kind} after the integer`);
+      if (args.length > 1) junk(args[1], `unexpected ${kindName(args[1])} after the integer`);
       return [{ value: n }];
     }
     // Quoting picks the NAMESPACE, and that is the whole point:
@@ -1373,23 +1300,20 @@ function parseModelDirectiveArgs(e, shape, fail) {
     // quoted because it names a column). Bare identifiers live in Rip's
     // naming; quoted strings live in the database's.
     case 'name': {
-      const t0 = tokens[0];
+      const a0 = args[0];
       let name = null;
       let quoted = false;
-      if (t0?.kind === 'STRING') {
-        if (!t0.value.startsWith('"')) {
-          fail(`@${e.name} takes a plain string literal (heredocs have no literal form)`, t0.start);
-        }
-        name = JSON.parse(t0.value);
+      if (headOf(a0) === 'string') {
+        name = JSON.parse(a0[2]);
         quoted = true;
-      } else if (isWord(t0) || isKeywordWord(t0)) {
-        name = t0.value;
+      } else if (headOf(a0) === 'name') {
+        name = a0[2];
       }
       const want = e.name === 'table'
         ? `a table name — '@table UserProfile' or '@table "user_profile"'`
         : `the previous table name — '@tableWas LegacyUsers' or '@tableWas "legacy_users"'`;
       if (name === null || !name.length) {
-        fail(`@${e.name} requires ${want}`, (t0 ?? { start: e.start }).start);
+        fail(`@${e.name} requires ${want}`, pos(a0));
       }
       // A dot would ride through quoteIdent as ONE quoted
       // identifier — `"crm.accounts"` names a table literally called
@@ -1397,24 +1321,20 @@ function parseModelDirectiveArgs(e, shape, fail) {
       // silently target the wrong thing; qualified names need their own
       // representation through the differ and the catalog reads.
       if (name.includes('.')) {
-        fail(`@${e.name} '${name}': schema-qualified table names are not supported yet — use a bare table name`, (t0 ?? { start: e.start }).start);
+        fail(`@${e.name} '${name}': schema-qualified table names are not supported yet — use a bare table name`, pos(a0));
       }
-      if (tokens.length > 1) junk(tokens[1], `takes one table name — unexpected ${tokens[1].kind}`);
-      if (quoted) {
-        // VERBATIM. Nothing is checked beyond what would break the SQL,
-        // because the whole point of the literal form is reaching a
-        // table Rip did not name — `"USER_MASTER"`, `"tblUsers"`, an
-        // inherited schema's whatever. A literal escape hatch that only
-        // accepts pretty names is not an escape hatch.
-      } else {
+      if (args.length > 1) junk(args[1], `takes one table name — unexpected ${kindName(args[1])}`);
+      if (!quoted) {
         // LOGICAL. Any identifier shape is fine and snake_cases the
         // same way — `UserProfile`, `userProfile`, and `user_profile`
         // all land on `user_profile`. The one guard is consecutive
         // capitals, which every other bare name in the language also
         // refuses: `MDMUser` would silently give `mdmuser`, not
-        // `mdm_user`. Quote it, or spell it `MdmUser`.
+        // `mdm_user`. Quote it, or spell it `MdmUser`. A quoted name is
+        // VERBATIM: the literal form exists to reach a table Rip did not
+        // name, so nothing beyond what would break the SQL is checked.
         if (/[A-Z]{2,}/.test(name)) {
-          fail(`@${e.name} ${name}: a bare name is a LOGICAL name that Rip snake_cases, and consecutive capitals convert surprisingly ('${name}' → '${snakeCase(name)}'). Spell it 'MdmUser'-style, or name the table exactly by quoting it: '@${e.name} "${name}"'`, t0.start);
+          fail(`@${e.name} ${name}: a bare name is a LOGICAL name that Rip snake_cases, and consecutive capitals convert surprisingly ('${name}' → '${snakeCase(name)}'). Spell it 'MdmUser'-style, or name the table exactly by quoting it: '@${e.name} "${name}"'`, at(a0));
         }
         name = snakeCase(name);
       }
@@ -1428,447 +1348,35 @@ function parseModelDirectiveArgs(e, shape, fail) {
     //   @primary patientId                            → column patient_id
     //   @primary patientId, {column: "PATIENT_ID"}   → column PATIENT_ID
     case 'field': {
-      const t0 = tokens[0];
-      if (!isWord(t0) && !isKeywordWord(t0)) {
-        fail(`@${e.name} requires a property name — '@${e.name} patientId'`, (t0 ?? { start: e.start }).start);
+      const a0 = args[0];
+      if (headOf(a0) !== 'name') {
+        fail(`@${e.name} requires a property name — '@${e.name} patientId'`, pos(a0));
       }
-      let pos = 1;
+      let i = 1;
       let attrs = null;
-      if (tokens[pos]?.kind === ',' && tokens[pos + 1]?.kind === '{') {
-        attrs = parseOptionsBracket(tokens.slice(pos + 1), FIELD_ATTRS, `@${e.name}`, fail);
-        pos = tokens.length;
+      if (args[i] === ',' && headOf(args[i + 1]) === 'schema-attrs') {
+        attrs = readOptions(args[i + 1], FIELD_ATTRS, `@${e.name}`, ctx);
+        i += 2;
       }
-      if (pos < tokens.length) junk(tokens[pos], `takes one property name and an optional '{…}' options bracket — unexpected ${tokens[pos].kind} after '${t0.value}'`);
+      if (i < args.length) junk(args[i], `takes one property name and an optional '{…}' options bracket — unexpected ${kindName(args[i])} after '${a0[2]}'`);
       if (attrs?.was) {
         fail(`@${e.name} option 'was' is a field-rename annotation; a primary-key rename is not a supported migration`, e.start);
       }
       // The property is read back off every instance and every JSON
       // body, so it rides the same bijection every other property does.
-      if (!isCanonicalName(t0.value)) {
-        fail(`@${e.name} '${t0.value}' is not canonical camelCase — lowercase-first, alphanumeric, no consecutive capitals ('patientId' not 'patientID'); the property, the snapshot key and the JSON key all ride the snake_case bijection`, t0.start);
+      if (!isCanonicalName(a0[2])) {
+        fail(`@${e.name} '${a0[2]}' is not canonical camelCase — lowercase-first, alphanumeric, no consecutive capitals ('patientId' not 'patientID'); the property, the snapshot key and the JSON key all ride the snake_case bijection`, at(a0));
       }
       // `column` is emitted only when the author WROTE one. The
       // derived default lives in the runtime, so a natural key (whose
       // column comes from the field) can tell "no column stated" from
       // "this column stated" and refuse only a real disagreement.
-      const arg = { name: t0.value };
+      const arg = { name: a0[2] };
       if (attrs?.column) arg.column = attrs.column;
       return [arg];
     }
   }
   return null;
-}
-
-// `name: -> body` (method) | `name: ~> body` (computed) |
-// `name: !> body` (eager derived). Methods may take plain-identifier
-// parameters; computed/derived are accessor-shaped.
-function parseCallableLine(kind, headerTok, line, entries, fail) {
-  const name = headerTok.value;
-  if (line[1]?.kind !== ':') {
-    fail(`expected ':' after '${name}' before the arrow`, headerTok.start);
-  }
-  let pos = 2;
-  const paramTokens = [];
-  if (line[pos] && (line[pos].kind === 'PARAM_START' || line[pos].kind === '(' || line[pos].kind === 'CALL_START')) {
-    let depth = 1;
-    pos++;
-    while (pos < line.length && depth > 0) {
-      const tag = line[pos].kind;
-      if (tag === '(' || tag === 'PARAM_START' || tag === 'CALL_START') depth++;
-      if (tag === ')' || tag === 'PARAM_END' || tag === 'CALL_END') {
-        depth--;
-        if (depth === 0) { pos++; break; }
-      }
-      paramTokens.push(line[pos]);
-      pos++;
-    }
-    if (depth !== 0) fail(`'${name}': unclosed '(' in parameters`, line[2].start);
-  }
-  const arrowTok = line[pos];
-  let arrow = null;
-  let bodyStart = -1;
-  // `~>` scans as EFFECT (the reactive head) — inside a schema body it
-  // spells the computed getter; the value carries the glyph.
-  if (arrowTok?.kind === '->' || arrowTok?.kind === 'EFFECT' || arrowTok?.kind === '!>') {
-    arrow = arrowTok.kind === 'EFFECT' ? '~>' : arrowTok.kind;
-    bodyStart = pos + 1;
-  } else if (isWord(arrowTok) || arrowTok?.kind === 'STRING' || arrowTok?.kind === 'NUMBER') {
-    // The common colon mistake: `name: type` where a field was meant.
-    fail(`schema fields use 'name type' (space, no colon) — got '${name}:'; for methods/computed use 'name: -> body' or 'name: ~> body'`, line[1].start);
-  } else {
-    fail(`schema top-level '${name}:' must be followed by '->' (method), '~>' (computed getter), or '!>' (eager derived)`, line[1].start);
-  }
-  // On a :model, a `->` callable whose name is a recognized lifecycle
-  // hook binds as one (exact match — anything else stays a plain
-  // method, a working reading).
-  const tag = arrow === '~>' ? 'computed'
-    : arrow === '!>' ? 'derived'
-    : kind === 'model' && HOOK_NAMES.has(name) ? 'hook'
-    : 'method';
-  if (paramTokens.length && tag !== 'method') {
-    fail(`'${name}': ${tag === 'computed' ? 'computed getters (~>)' : tag === 'derived' ? 'eager-derived fields (!>)' : 'lifecycle hooks'} take no parameters — only methods do`, line[1].start);
-  }
-  entries.push({
-    tag, name,
-    paramTokens, bodyTokens: line.slice(bodyStart),
-    start: headerTok.start,
-  });
-}
-
-// ── @ensure ──────────────────────────────────────────────────────────
-// Inline: `@ensure "msg"[, :field], (args) -> body`
-// Array:  `@ensure ["msg", (u) -> body, "msg2", (u) -> body, …]`
-
-function parseEnsurePairs(argTokens, directiveTok, fail) {
-  let tokens = argTokens;
-  if (!tokens.length) {
-    fail(`@ensure requires 'message, (x) -> body' or a '[…]' array of pairs`, directiveTok.start);
-  }
-  const first = tokens[0];
-  if (first.kind === '[' || first.kind === 'INDEX_START') {
-    const inner = extractBracketInner(tokens, first, fail);
-    const parts = splitEnsureElements(inner);
-    if (parts.length === 0) {
-      fail(`@ensure […] must contain at least one 'message, fn' pair`, first.start);
-    }
-    return consumeEnsureTuples(parts, first, fail);
-  }
-  const parts = splitTopLevelByComma(tokens);
-  if (parts.length < 2) {
-    fail(`@ensure inline form must be 'message, (x) -> body' — did you forget the comma?`, first.start);
-  }
-  if (parts.length > 3 || (parts.length === 3 && !isEnsureFieldPart(parts[1]))) {
-    fail(`@ensure inline form takes 'message[, :field], fn' (got ${parts.length} comma-separated parts) — use '@ensure […]' for multiple refinements`, first.start);
-  }
-  return consumeEnsureTuples(parts, first, fail);
-}
-
-const isEnsureFieldPart = (part) => part && part.length === 2 && symWordAt(part, 0) !== null;
-
-function consumeEnsureTuples(parts, anchorTok, fail) {
-  const pairs = [];
-  let i = 0;
-  while (i < parts.length) {
-    const msgPart = parts[i++];
-    let fieldPart = null;
-    if (i < parts.length && isEnsureFieldPart(parts[i])) fieldPart = parts[i++];
-    if (i >= parts.length) {
-      fail(`@ensure: missing function after message${fieldPart ? ' and :field' : ''}`, (msgPart[0] ?? anchorTok).start);
-    }
-    pairs.push(extractEnsurePair(msgPart, fieldPart, parts[i++], anchorTok, fail));
-  }
-  return pairs;
-}
-
-function extractBracketInner(tokens, openTok, fail) {
-  let depth = 0;
-  const inner = [];
-  for (let i = 0; i < tokens.length; i++) {
-    const t = tokens[i];
-    if (t.kind === '[' || t.kind === 'INDEX_START') {
-      depth++;
-      if (depth === 1) continue;
-    }
-    if (t.kind === ']' || t.kind === 'INDEX_END') {
-      depth--;
-      if (depth === 0) {
-        if (i < tokens.length - 1) {
-          fail(`@ensure […] must be the only argument — extra tokens after ']'`, tokens[i + 1].start);
-        }
-        // Strip one INDENT/OUTDENT pair wrapping the whole inner body.
-        if (inner.length >= 2 && inner[0].kind === 'INDENT' && inner[inner.length - 1].kind === 'OUTDENT') {
-          let wd = 0;
-          let matched = false;
-          for (let k = 0; k < inner.length; k++) {
-            if (inner[k].kind === 'INDENT') wd++;
-            else if (inner[k].kind === 'OUTDENT' && --wd === 0) { matched = k === inner.length - 1; break; }
-          }
-          if (matched) return inner.slice(1, -1);
-        }
-        return inner;
-      }
-    }
-    if (depth >= 1) inner.push(t);
-  }
-  fail(`@ensure: unclosed '['`, openTok.start);
-}
-
-// Array-form elements split on both ',' and newlines at depth 0
-// (mirroring Rip's array-literal rule).
-function splitEnsureElements(tokens) {
-  const parts = [];
-  let cur = [];
-  let depth = 0;
-  for (const t of tokens) {
-    const tag = t.kind;
-    if (tag === '(' || tag === '[' || tag === '{' ||
-        tag === 'CALL_START' || tag === 'INDEX_START' ||
-        tag === 'PARAM_START' || tag === 'INDENT') depth++;
-    if (tag === ')' || tag === ']' || tag === '}' ||
-        tag === 'CALL_END' || tag === 'INDEX_END' ||
-        tag === 'PARAM_END' || tag === 'OUTDENT') depth--;
-    if (depth === 0 && (tag === ',' || tag === 'TERMINATOR')) {
-      if (cur.length) { parts.push(cur); cur = []; }
-      continue;
-    }
-    cur.push(t);
-  }
-  if (cur.length) parts.push(cur);
-  return parts;
-}
-
-function extractEnsurePair(messagePart, fieldPart, fnPart, refTok, fail) {
-  if (!messagePart?.length) {
-    fail(`@ensure: missing message (expected a string literal)`, refTok.start);
-  }
-  if (messagePart.length !== 1 || messagePart[0].kind !== 'STRING' || !messagePart[0].value.startsWith('"')) {
-    fail(`@ensure: each refinement's first element must be a string literal message`, (messagePart[0] ?? refTok).start);
-  }
-  const msgTok = messagePart[0];
-  const message = JSON.parse(msgTok.value);
-  const fieldTok = fieldPart ? symWordAt(fieldPart, 0) : null;
-  const field = fieldPart ? fieldTok.value : null;
-  const fieldStart = fieldTok?.start ?? null;
-  if (!fnPart?.length) {
-    fail(`@ensure: missing function after message`, msgTok.start);
-  }
-  const t0 = fnPart[0];
-  if (t0.kind !== '(' && t0.kind !== 'PARAM_START') {
-    fail(`@ensure: expected '(args) -> body' after the message — predicates declare their parameter explicitly ('(u) -> …')`, t0.start);
-  }
-  let depth = 1;
-  let pos = 1;
-  const paramTokens = [];
-  while (pos < fnPart.length && depth > 0) {
-    const tag = fnPart[pos].kind;
-    if (tag === '(' || tag === 'PARAM_START') depth++;
-    if (tag === ')' || tag === 'PARAM_END') {
-      depth--;
-      if (depth === 0) { pos++; break; }
-    }
-    paramTokens.push(fnPart[pos]);
-    pos++;
-  }
-  if (depth !== 0) fail(`@ensure: unclosed '(' in predicate parameters`, t0.start);
-  const arrowTok = fnPart[pos];
-  if (arrowTok?.kind !== '->') {
-    fail(`@ensure: expected '->' after predicate parameters`, (arrowTok ?? msgTok).start);
-  }
-  const bodyTokens = fnPart.slice(pos + 1);
-  if (!bodyTokens.length) fail(`@ensure: predicate function body is empty`, arrowTok.start);
-  return { message, field, fieldStart, paramTokens, bodyTokens };
-}
-
-// Each parameter of a captured `(a, b)` slice: a plain identifier,
-// optionally typed (`other: Money`). The name is what the runtime
-// spelling emits; the annotation is type-surface only and never reaches
-// the emitted JS, exactly like annotations everywhere else in the
-// language, so it reaches the face as a spliced segment instead. Its
-// text is sliced from SOURCE rather than rebuilt from tokens, and
-// lowers through normalizeTypeText like every other annotation — the
-// rip boolean spellings, single-quoted literals, and a comment inside
-// a wrapped annotation all read as TS on both roads.
-export function paramsOf(paramTokens, what, fail, source = null) {
-  if (!paramTokens.length) return [];
-  const params = paramsRaw(paramTokens, what, fail, source);
-  // JS ARITY, the same rule an ordinary function's parameters follow
-  // (emitParams): a TRAILING run of parameters the author never
-  // annotated is optional, because calling with fewer arguments is
-  // legal in rip as in JavaScript. A run stops at the first annotated
-  // parameter — TypeScript admits no required parameter after an
-  // optional one.
-  for (let i = params.length - 1; i >= 0 && params[i].type === null; i--) params[i].optional = true;
-  return params;
-}
-
-function paramsRaw(paramTokens, what, fail, source) {
-  const carries = (t) => t.kind !== 'TERMINATOR' && t.kind !== 'INDENT' && t.kind !== 'OUTDENT';
-  return splitTopLevelByComma(paramTokens).map((part) => {
-    const toks = part.filter((t) => carries(t) && t.kind !== 'TYPE');
-    // A typed parameter's name arrives as PROPERTY (the lexer's
-    // `word:` tagging) with the raw ':' following it.
-    const typed = toks.length >= 3 && (toks[0].kind === 'IDENTIFIER' || toks[0].kind === 'PROPERTY') && toks[1].kind === ':';
-    if (!typed && (toks.length !== 1 || toks[0].kind !== 'IDENTIFIER')) {
-      fail(`${what}: parameters must be plain identifiers, optionally typed ('name' or 'name: Type')`, (toks[0] ?? part[0]).start);
-    }
-    // The span runs to the last token the PART carries, not the last
-    // the filter kept — a TYPE token inside the annotation is dropped
-    // from the scan but still occupies source.
-    const last = typed ? [...part].filter(carries).pop() : null;
-    const type = typed && source !== null ? normalizeTypeText(source.slice(toks[1].end, last.end)).trim() : null;
-    return { name: toks[0].value, type, optional: false };
-  });
-}
-
-// ── :union and :enum lines ───────────────────────────────────────────
-
-function parseUnionLine(line, entries, fail) {
-  const first = line[0];
-  if (!first) return;
-  if (first.kind === '@') {
-    const nameTok = line[1];
-    if (!nameTok || nameTok.value !== 'on') {
-      fail(`:union bodies accept only '@on :field' and constituent schema names — '@${nameTok?.value ?? ''}' is not allowed`, (nameTok ?? first).start);
-    }
-    const sym = symWordAt(line, 2);
-    if (!sym) {
-      fail(`@on requires the discriminator field as a symbol — '@on :kind'`, (line[2] ?? nameTok).start);
-    }
-    if (line.length > 4) fail(`@on takes exactly one :field symbol`, line[4].start);
-    entries.push({ tag: 'directive', name: 'on', args: [{ field: sym.value }], start: first.start });
-    return;
-  }
-  if (first.kind === 'IDENTIFIER' && line.length === 1) {
-    entries.push({ tag: 'union-member', name: first.value, start: first.start });
-    return;
-  }
-  fail(`:union bodies accept only '@on :field' and bare constituent schema names (one per line) — got ${first.kind}${line.length > 1 ? ' followed by ' + line[1].kind : ''}`, first.start);
-}
-
-function parseEnumLine(line, entries, fail) {
-  const first = line[0];
-  if (!first) return;
-  if (first.kind === '@') {
-    fail(`:enum schemas don't accept '@${line[1]?.value ?? 'directive'}' — enums hold only :symbol members`, first.start);
-  }
-  const sym = symWordAt(line, 0);
-  if (!sym) {
-    fail(`enum member must be a :symbol — use ':${first.value ?? 'name'}' for a bare member or ':${first.value ?? 'name'} value' for a valued one`, first.start);
-  }
-  const name = sym.value;
-  const valueTok = line[2];
-  if (!valueTok) {
-    entries.push({ tag: 'enum-member', name, value: undefined, start: first.start });
-    return;
-  }
-  if (valueTok.kind === ':') {
-    fail(`enum member ':${name}' — drop the ':' before the value; use ':${name} value'`, valueTok.start);
-  }
-  if (line.length > 3 && !(line.length === 4 && valueTok.kind === '-' && line[3].kind === 'NUMBER')) {
-    fail(`extra tokens after enum member ':${name}' value`, line[3].start);
-  }
-  const value = valueTok.kind === '-' && line[3]?.kind === 'NUMBER'
-    ? -numberOf(line[3], `enum member ':${name}' value`, fail)
-    : literalOf(valueTok, `enum member ':${name}' value`, fail);
-  entries.push({ tag: 'enum-member', name, value, start: first.start });
-}
-
-// An input names a member by its name or by its value, so the two
-// vocabularies must not cross: a value that is the name of a member
-// holding a DIFFERENT value (`:a "b"` beside `:b "c"`) makes the input
-// "b" resolve to two values. A member name declared twice is the same
-// ambiguity. Values may repeat — two names for one value are aliases
-// (`:active` beside `:enabled "active"`), and every input resolves to it.
-function checkEnumMembers(entries, fail) {
-  const members = entries.filter((e) => e.tag === 'enum-member');
-  const byName = new Map();
-  for (const m of members) {
-    if (byName.has(m.name)) fail(`enum member ':${m.name}' is declared twice`, m.start);
-    byName.set(m.name, m);
-  }
-  const valueOf = (m) => (m.value === undefined ? m.name : m.value);
-  for (const m of members) {
-    const other = typeof m.value === 'string' ? byName.get(m.value) : undefined;
-    if (other && valueOf(other) !== m.value) {
-      fail(`enum member ':${m.name}' has the value ${JSON.stringify(m.value)}, which is the name of member ':${other.name}' — an input ${JSON.stringify(m.value)} would name both`, m.start);
-    }
-  }
-}
-
-// ── constraint parsing (values evaluated here, fail-fast) ────────────
-
-function isRangeConstraintTokens(tokens) {
-  return tokens.some((t) => t.kind === '..') &&
-    tokens.every((t) => t.kind === '..' || t.kind === 'NUMBER' || t.kind === '-');
-}
-
-function parseRangeTokens(tokens, fieldName, fail) {
-  let i = 0;
-  const readOne = () => {
-    let sign = 1;
-    if (tokens[i]?.kind === '-') { sign = -1; i++; }
-    const numTok = tokens[i++];
-    if (numTok?.kind !== 'NUMBER') {
-      fail(`range endpoints must be numeric literals`, (numTok ?? tokens[0]).start);
-    }
-    return sign * numberOf(numTok, 'a range endpoint', fail);
-  };
-  let min;
-  if (tokens[i]?.kind !== '..') min = readOne();
-  i++; // consume '..'
-  let max;
-  if (i < tokens.length) max = readOne();
-  // A bare '..' constrains nothing — noise, not a range. Omitting the
-  // trailer entirely says the same thing loudly less.
-  if (min === undefined && max === undefined) {
-    fail(`a bare '..' range constrains nothing on field '${fieldName}' — give an endpoint (1.., ..60, 1..60) or drop the range`, tokens[0].start);
-  }
-  if (min !== undefined && max !== undefined && min > max) {
-    fail(`range '${min}..${max}' is reversed — write the smaller endpoint first`, tokens[0].start);
-  }
-  const out = {};
-  if (min !== undefined) out.min = min;
-  if (max !== undefined) out.max = max;
-  return out;
-}
-
-// `[value]` — a single literal default.
-function parseDefaultBracket(tokens, fieldName, fail, span = {}) {
-  const inner = tokens.slice(1, -1);
-  if (inner.length) { span.start = inner[0].start; span.end = inner[inner.length - 1].end; }
-  const items = splitTopLevelByComma(inner);
-  if (items.length !== 1) {
-    fail(items.length === 2
-      ? `size/value ranges use 'min..max' syntax, not brackets — replace the bracket pair with a range`
-      : `the constraint bracket takes a single default value (got ${items.length} elements)`, tokens[0].start);
-  }
-  const part = items[0];
-  if (part.length === 1 && part[0].kind === 'REGEX') {
-    fail(`regex constraints are written bare, not in brackets — replace '[${part[0].value}]' with '${part[0].value}'`, tokens[0].start);
-  }
-  if (part.length === 2 && part[0].kind === '-' && part[1].kind === 'NUMBER') {
-    return -numberOf(part[1], `field '${fieldName}' default`, fail);
-  }
-  const sym = symWordAt(part, 0);
-  if (sym && part.length === 2) return sym.value;
-  if (part.length !== 1) {
-    fail(`default values must be literals (number, string, boolean, null, :symbol) — field '${fieldName}'`, part[0].start);
-  }
-  return literalOf(part[0], `field '${fieldName}' default`, fail);
-}
-
-function parseRegexToken(tok, fail) {
-  const m = /^\/((?:\\.|[^\\/])+)\/([a-z]*)$/.exec(tok.value);
-  if (!m) fail(`invalid regex literal ${JSON.stringify(tok.value)}`, tok.start);
-  try {
-    return new RegExp(m[1], m[2]);
-  } catch (e) {
-    fail(`invalid regex '${tok.value}': ${e.message}`, tok.start);
-  }
-}
-
-// A NUMBER token's value. Separators are spelling (`1_000`); a BigInt
-// (`1n`) rejects, since a schema value serializes as a JSON number.
-function numberOf(tok, what, fail) {
-  const text = tok.value.replace(/_/g, '');
-  if (text.endsWith('n')) fail(`${what} cannot be a BigInt (${tok.value}) — schema values are JSON numbers`, tok.start);
-  return Number(text);
-}
-
-function literalOf(tok, what, fail) {
-  switch (tok.kind) {
-    case 'NUMBER': return numberOf(tok, what, fail);
-    case 'STRING':
-      if (!tok.value.startsWith('"')) {
-        fail(`${what} must be a plain string literal (heredocs have no literal key form)`, tok.start);
-      }
-      return JSON.parse(tok.value);
-    case 'BOOL': return tok.value === 'true';
-    case 'NULL': return null;
-    case 'UNDEFINED': return undefined;
-    default:
-      fail(`${what} must be a literal (number, string, boolean, null) — got ${tok.kind}`, tok.start);
-  }
 }
 
 // ── shared token-slice helpers ───────────────────────────────────────
@@ -1894,19 +1402,6 @@ export function splitTopLevelByComma(tokens) {
   }
   if (cur.length) parts.push(cur);
   return parts;
-}
-
-function findTopLevelArrowIdx(tokens) {
-  let depth = 0;
-  for (let i = 0; i < tokens.length; i++) {
-    const tag = tokens[i].kind;
-    if (tag === '(' || tag === '[' || tag === '{' ||
-        tag === 'CALL_START' || tag === 'INDEX_START' || tag === 'PARAM_START' || tag === 'INDENT') depth++;
-    else if (tag === ')' || tag === ']' || tag === '}' ||
-             tag === 'CALL_END' || tag === 'INDEX_END' || tag === 'PARAM_END' || tag === 'OUTDENT') depth--;
-    else if (depth === 0 && tag === '->') return i;
-  }
-  return -1;
 }
 
 // ── descriptor serialization (emission side) ─────────────────────────
@@ -2447,7 +1942,7 @@ function foldParseStrLit(node) {
 }
 
 // A schema literal's descriptor (["schema", {}, ["schema-body", {},
-// descriptor, codes]]), or null.
+// descriptor, dsl]]), or null.
 export function schemaLiteralOf(node) {
   if (!Array.isArray(node) || foldStr(node[0]) !== 'schema' || node.length !== 3) return null;
   const body = node[2];
@@ -2498,7 +1993,7 @@ function walkDerivedSchemas(sexpr, onFolded) {
 // self-contained schema literal. Mutates `sexpr`. Called by compile()
 // only when options.foldProjections is set.
 export function foldDerivedSchemas(sexpr) {
-  walkDerivedSchemas(sexpr, ({ descriptor, node }) => { node[3] = ['schema', {}, ['schema-body', {}, descriptor, ['schema-codes', {}]]]; });
+  walkDerivedSchemas(sexpr, ({ descriptor, node }) => { node[3] = ['schema', {}, ['schema-body', {}, descriptor, ['none', {}]]]; });
 }
 
 // The same projections, READ rather than written: the shape each
