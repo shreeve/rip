@@ -160,7 +160,7 @@ export function v1Facts(parsed, options) {
   try {
     const record = emitV1(parsed.result, {
       face: options.face, repl: options.repl ?? false, ambientBindings: options.ambientBindings ?? null,
-      source: parsed.source, dataPayload: parsed.dataPayload, modulePath: parsed.path, facts: sink,
+      source: parsed.source, dataPayload: parsed.dataPayload, dataLine: parsed.dataLine, modulePath: parsed.path, facts: sink,
     });
     return { record, facts };
   } catch (err) {
@@ -241,7 +241,7 @@ function frameText(f) {
 export function v2Facts(parsed, options) {
   try {
     const stores = new Stores(parsed.result.stores);
-    const a = analyze(parsed.result, { source: parsed.source, face: options.face, ambientBindings: options.ambientBindings ?? null, repl: options.repl ?? false, stores });
+    const a = analyze(parsed.result, { source: parsed.source, face: options.face, ambientBindings: options.ambientBindings ?? null, repl: options.repl ?? false, stores, dataLine: parsed.dataLine });
     // v1's tree spells a word as a string, with no id: a leaf's id is
     // not v1's to key by.
     const idOf = (x) => (Array.isArray(x) && !isWord(x) ? stores.idOf(x) : null);

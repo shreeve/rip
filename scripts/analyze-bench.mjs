@@ -157,7 +157,7 @@ for (const face of ['js', 'ts']) {
     let p;
     try { p = parseSource(src, { path, face }); } catch { continue; }
     try {
-      V1.emit(p.result, { source: p.source, face, dataPayload: p.dataPayload, modulePath: path });
+      V1.emit(p.result, { source: p.source, face, dataPayload: p.dataPayload, dataLine: p.dataLine, modulePath: path });
       analyze(p.result, { source: p.source, face });
     } catch { continue; }
     pop.push(p);
@@ -169,7 +169,7 @@ for (const face of ['js', 'ts']) {
   const v1Pass = () => {
     V1.__reset();
     const s = performance.now();
-    for (const p of pop) V1.emit(p.result, { source: p.source, face, dataPayload: p.dataPayload, modulePath: p.path });
+    for (const p of pop) V1.emit(p.result, { source: p.source, face, dataPayload: p.dataPayload, dataLine: p.dataLine, modulePath: p.path });
     return { total: performance.now() - s, walks: V1.__T.get('walks') ?? 0, shape: V1.__T.get('shape') ?? 0, calls: V1.__calls };
   };
   const anPass = () => {

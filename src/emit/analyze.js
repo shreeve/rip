@@ -170,11 +170,15 @@ function headOf(x) {
 
 // ── the analysis ─────────────────────────────────────────────────────
 
-export function analyze(parseResult, { source = '', face = 'js', ambientBindings = null, repl = false, stores = null } = {}) {
+// `dataLine` is the __DATA__ marker's 1-based line when the program has a
+// section (parseSource's dataLine): the marker declares DATA in the
+// program scope.
+export function analyze(parseResult, { source = '', face = 'js', ambientBindings = null, repl = false, stores = null, dataLine = null } = {}) {
   if (!parseResult.sexpr) throw new Error('analyze: cannot analyze a failed parse');
   const st = stores ?? new Stores(parseResult.stores);
   const ambient = normalizeAmbient(ambientBindings);
   const a = new Analysis(st, source, face, ambient, repl);
+  a.dataLine = dataLine;
   a.run(parseResult.sexpr);
   return a.result(ambient);
 }
@@ -352,6 +356,7 @@ class Analysis {
     this.renderPos = new Map();
     this.childrenFuncs = new Set();
     this.methodFuncs = new Set();
+    this.dataLine = null;
   }
 
   kindOf(x) {
@@ -513,6 +518,8 @@ class Analysis {
     const stmts = sexpr.slice(2);
     const live = stmts.filter((s) => !isErased(s));
     const program = new Scope(null, live, []);
+    // The __DATA__ marker declares DATA ahead of every statement.
+    if (this.dataLine !== null) program.forms.push({ name: 'DATA', kind: 'the __DATA__ section', node: null, line: this.dataLine, auth: true });
     // The program hoists its live statements; the scan for declare-in-
     // place reads them all.
     program.hoisting(null, stmts, false, this.ambientFrame, { tailExpr: this.repl });
@@ -2164,8 +2171,8 @@ class Analysis {
     const forms = pforms.length === 0 ? scope.forms : [...pforms, ...scope.forms];
     forms.forEach((f, i) => { f.order = i; });
     const reject = (at, prior) => {
-      const line = prior.node !== null ? this.nodeLine(prior.node) : null;
-      const hint = prior.kind === 'state' || prior.kind === 'parameter' || prior.kind === 'plain'
+      const line = prior.node !== null ? this.nodeLine(prior.node) : prior.line ?? null;
+      const hint = prior.kind === 'state' || prior.kind === 'parameter' || prior.kind === 'plain' || prior.line != null
         ? ` — assign with '${at.name} = …' to update it, or choose a different name`
         : ' — choose a different name';
       return this.positioned(`emitter: '${at.name}' was already declared as ${prior.kind}${line !== null ? ` on line ${line}` : ''}${hint}`,
@@ -2226,6 +2233,8 @@ class Analysis {
     if (program) {
       const imports = [];
       for (const st of this.rawStmts) if (isNodeP(st) && this.isModuleImport(st)) this.importedNames(st, imports);
+      // The __DATA__ marker's DATA binds with the imports (v1's moduleSeeds).
+      if (this.dataLine !== null) imports.push('DATA');
       for (const n of imports) targets.delete(n);
       s.imports = imports;
     }
