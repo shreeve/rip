@@ -74,6 +74,8 @@ const FAMILY = [
   /bare `it` has no binding here/,
   /a parameter pattern binds names only/,
   /a loop variable binds names only/,
+  /before this (def|class) in the same block/,
+  /is updated (on line \d+ )?before its/,
 ];
 const inFamily = (message) => FAMILY.some((re) => re.test(message));
 
