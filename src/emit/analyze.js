@@ -48,7 +48,9 @@
 // A program the emitter must reject throws here with the emitter's
 // message and span: a redeclaration, a block-nested declaration, a
 // destructuring target that cannot bind, a parameter default's match
-// write, an annotation a declaring pattern cannot carry.
+// write, an annotation a declaring pattern cannot carry, a promoted
+// parameter inside a pattern, a bare `it` no declared binding answers in
+// a function that takes parameters.
 
 import { Stores } from '../stores.js';
 import { isAttrs, LEAF_KINDS } from '../sexpr.js';
@@ -57,7 +59,7 @@ import { identifierMatches, isCustomElementName, isIdentifierName } from '../ide
 import { TEMPLATE_TAGS } from '../dom.js';
 import { isComponentName } from '../render.js';
 import { RUNTIMES, runtimeRequires, bareSpecifier } from './runtimes.js';
-import { COMPONENT_HOOKS, wordSafety } from './names.js';
+import { COMPONENT_HOOKS, MEMBER_HEADS, MEMBER_IN_PARAMETER, MEMBER_LOOP_VARIABLE, PROMOTED_IN_PATTERN, UNBOUND_IT, bareItSpan, islandSpan, wordSafety } from './names.js';
 
 // ── the mode word ────────────────────────────────────────────────────
 // RN: the free-reference walk's position (off, expression, binding
@@ -123,6 +125,34 @@ const isNone = (x) => Array.isArray(x) && x.length === 2 && x[0] === 'none' && i
 // A function node: `->` or `=>` (a head test, never an emission).
 const FUNC_HEADS = new Set(['->', '=>']);
 const isFuncNode = (x) => isNodeP(x) && FUNC_HEADS.has(x[0]);
+// The heads of the component body lines a member category takes; the
+// emitter rejects every other line as it classifies the body.
+const COMPONENT_LINE_HEADS = new Set(['offer', 'accept', 'gate', 'state', 'computed', 'readonly', 'effect', 'render', '?', 'typed-var', '.', '=', 'object']);
+
+// The first member or index target a binding's positions hold (the
+// binding itself, a rest's operand, a pattern's elements, a default's,
+// annotation's or cast's target), or null. A default's value and a
+// computed key are expressions.
+function memberInPattern(p) {
+  if (!isNodeP(p)) return null;
+  const h = p[0];
+  if (MEMBER_HEADS.has(h)) return p;
+  if (h === 'rest' || h === '...' || h === 'default' || h === '=' || h === 'typed-var' || h === 'cast' || h === 'satisfies') return memberInPattern(p[2]);
+  if (h === 'array') {
+    for (let i = 2; i < p.length; i++) { const hit = memberInPattern(p[i]); if (hit !== null) return hit; }
+    return null;
+  }
+  if (h === 'object') {
+    for (let i = 2; i < p.length; i++) {
+      const pair = p[i];
+      if (!isNodeP(pair)) continue;
+      const slot = pair[0] === ':' ? pair[3] : pair[0] === '=' || pair[0] === '...' ? pair[2] : null;
+      const hit = memberInPattern(slot);
+      if (hit !== null) return hit;
+    }
+  }
+  return null;
+}
 
 // The bare name a promoted `@name` parameter binds, read through a
 // default and an annotation; undefined for any other parameter.
@@ -234,8 +264,11 @@ class Scope {
     this.forms = [];
     this.bareIt = false;
     this.implicitIt = false;
+    this.itAssigned = false;
+    this.itUpdated = false;
     this.decls = null;
     this.rejection = null;
+    this.itErr = null;
     // The statement-level facts, gathered as the walk meets each live
     // statement: def/class declarations, class-valued bindings,
     // exported plain consts, import specifiers, and (for a scope with
@@ -356,9 +389,17 @@ class Analysis {
     this.rabErr = null;
     this.schemaErr = null;
     this.itScope = null;
+    // The function that takes parameters whose bare `it` reads the walk
+    // is checking (null outside one, and inside a parameterless function).
+    this.itFence = null;
+    this.itFences = [];
+    this.itQuiet = false;      // walking a catch name, which binds `it`
+    this.preempted = 0;        // inside a component line the emitter rejects first
+    this.pointErrs = [];       // rejections between two scopes' checks
     this.schemaBodies = [];
     this.siteTrees = new Map();
     this.renderPos = new Map();
+    this.rsink = null;       // the render factory the walk is inside: its sink and the env it opened at
     this.childrenFuncs = new Set();
     this.methodFuncs = new Set();
     this.dataLine = null;
@@ -555,11 +596,12 @@ class Analysis {
   }
 
   beginTree(atoms, stmts = null) {
-    const tree = { names: new Set(), atoms, stmts, outer: this.tree, shadow: this.shadow, itScope: this.itScope };
+    const tree = { names: new Set(), atoms, stmts, outer: this.tree, shadow: this.shadow, itScope: this.itScope, itFence: this.itFence };
     this.trees.push(tree);
     this.tree = tree;
     this.shadow = new Map();
     this.itScope = null;
+    this.itFence = null;
     for (const atom of atoms) this.flag(atom, W_ATOM);
   }
 
@@ -568,6 +610,7 @@ class Analysis {
     this.tree = tree.outer;
     this.shadow = tree.shadow;
     this.itScope = tree.itScope;
+    this.itFence = tree.itFence;
   }
 
   // ── words ──────────────────────────────────────────────────────────
@@ -583,6 +626,28 @@ class Analysis {
     if ((rn === RN_EXPR || (rn === RN_RENDER && !isTagWord(w))) && (this.shadow.size === 0 || !this.shadow.has(w))) bits |= W_FREE;
     this.flag(w, bits);
     if (w === 'it' && this.itScope !== null && !(m & NOIT)) this.itScope.bareIt = true;
+  }
+
+  // A bare `it` read inside a function that takes parameters: the first
+  // one no loop, comprehension, counted loop or catch name inside the
+  // function binds is checked against the scopes once they settle.
+  fenceIt(x, m) {
+    const fence = this.itFence;
+    if ((m & NOIT) || fence.hit !== null || this.itQuiet) return;
+    for (let e = this.env; e !== null && e !== fence.env && e.scope !== fence.scope; e = e.next) {
+      if (e.block !== undefined && e.block.has('it')) return;
+    }
+    fence.hit = x;
+    fence.hitParam = fence.inParams;
+  }
+
+  // Walk a parameter list, its bare `it` reads marked as the parameters'
+  // for the function's fence.
+  visitFenceParams(params, m) {
+    const fence = this.itFence;
+    if (fence !== null) fence.inParams = true;
+    this.visitParams(params, m);
+    if (fence !== null) fence.inParams = false;
   }
 
   free(w) {
@@ -623,7 +688,17 @@ class Analysis {
     if (!isNodeP(x)) return this.visitList(x, m, cs, rs);
     if (this.renderPos.size !== 0) {
       const sink = this.renderPos.get(x);
-      if (sink !== undefined) this.renderChild(x, sink);
+      if (sink !== undefined) {
+        this.renderChild(x, sink);
+        // Below a render child its factory's locals and loop variables
+        // are in scope, between the scopes inside the child and the env
+        // the child stands in.
+        const saved = this.rsink;
+        this.rsink = { sink, env: this.env };
+        this.visit(x, m, cs, rs);
+        this.rsink = saved;
+        return;
+      }
     }
     if (this.hoistAt.size !== 0) {
       const scope = this.hoistAt.get(x);
@@ -638,7 +713,10 @@ class Analysis {
       }
     }
     const h = x[0];
-    if (x.length === 3 && LEAF_KINDS.has(h)) return this.visitWord(h === 'this' ? 'this' : x[2], m);
+    if (x.length === 3 && LEAF_KINDS.has(h)) {
+      if (this.itFence !== null && x[2] === 'it' && h !== 'this') this.fenceIt(x, m);
+      return this.visitWord(h === 'this' ? 'this' : x[2], m);
+    }
     if (h === 'type' && x.length === 4 && typeof x[2] === 'string') return this.visitWord(x[2], m);
     if (h === 'none') return;
     switch (h) {
@@ -702,6 +780,9 @@ class Analysis {
   // structural runtime triggers and the program hoist's match writes.
   noteNode(x, hv, m) {
     if (m & HOIST) this.noteChain(x, hv);
+    // An update writes its bare name without hoisting it: an implicit
+    // `it` it updates is the function's declared binding.
+    if ((hv === '++' || hv === '--') && (m & HOIST) && x.length === 3 && wordOf(x[2]) === 'it') this.hs.itUpdated = true;
     if ((hv === '//=' || hv === '%%=') && (m & PLAN)) this.planSite(x, hv, m);
     if (hv === '=~' && x.length === 4) this.matchWrite(x, m);
     else if (hv === 'regex-index' && x.length === 5) this.matchWrite(x, m);
@@ -883,12 +964,47 @@ class Analysis {
   // and walks into its default values and computed keys.
   visitParams(params, m) {
     const pm = (m & ~(RN | HOIST | HMATCH | PLAN | CNEST | RNEST)) | ((m & RN) ? RN_PAT : 0);
+    let err = null;
     for (const p of params) {
       const promoted = promotedName(p);
       if (promoted !== undefined) this.rabName(promoted, m);
-      else this.rabPattern(p, m);
+      else {
+        this.rabPattern(p, m);
+        if (err === null) err = this.memberTargetErr(p, MEMBER_IN_PARAMETER);
+      }
       this.visit(p, pm, null, null);
     }
+    // The emitter checks a parameter list as it emits it: after the
+    // scopes opened before it, before the scopes its defaults open.
+    if (err !== null && this.preempted === 0) this.pointErrs.push({ at: this.scopes.length, err });
+  }
+
+  // The rejection a member a binding holds earns, at the member: a
+  // promoted `@name` in a parameter in its own vocabulary, any other in
+  // `message`'s; null when the binding holds none.
+  memberTargetErr(p, message) {
+    const hit = memberInPattern(p);
+    if (hit === null) return null;
+    const promoted = hit[0] === '.' && hit.length === 4 && wordOf(hit[2]) === 'this' && wordOf(hit[3]) !== undefined;
+    return this.positioned(promoted && message === MEMBER_IN_PARAMETER ? PROMOTED_IN_PATTERN(wordOf(hit[3])) : message, hit, p);
+  }
+
+  // A function that takes parameters checks its bare `it` reads: its
+  // fence, open over its parameters and body (null for a parameterless
+  // one, whose `it` is its own).
+  openItFence(x, params, scoped) {
+    const fence = scoped && params.length > 0 && this.preempted === 0
+      ? { fn: x, params, scope: null, env: this.env, sub: this.inSub, rsink: this.rsink, hit: null, inParams: false, hitParam: false } : null;
+    const saved = [this.itFence, this.itScope];
+    this.itFence = fence;
+    if (fence !== null) this.itScope = null;
+    return saved;
+  }
+
+  closeItFence(saved) {
+    const fence = this.itFence;
+    if (fence !== null && fence.hit !== null && fence.scope !== null) this.itFences.push(fence);
+    [this.itFence, this.itScope] = saved;
   }
 
   // `->` / `=>`. A method (`as` 'method', or a function its class or
@@ -907,20 +1023,23 @@ class Analysis {
     this.headWord(x[0], m);
     let scope = null;
     const scoped = !this.childrenFuncs.has(x);
-    if (method) this.visitParams(params, m);
+    const saved = this.openItFence(x, params, scoped);
+    if (method) this.visitFenceParams(params, m);
     const outer = this.env;
     if (scoped) {
       scope = this.openScope(x, body, params, false);
       scope.implicitIt = !method && params.length === 0;
       this.hoistBody(scope, body, params, true, {});
+      if (this.itFence !== null) this.itFence.scope = scope;
     }
     // emitFunc emits the parameters inside the function's own scope.
     if (!method) {
       if (scope !== null && scope.hoists) this.env = { scope, next: outer };
-      this.visitParams(params, m);
+      this.visitFenceParams(params, m);
       this.env = outer;
     }
     this.visitBody(body, m, scope, params, 'func', rnRender ? RN_RENDER : RN_EXPR);
+    this.closeItFence(saved);
   }
 
   // A scope over a function-like body: its hoist reads the body's
@@ -1023,13 +1142,16 @@ class Analysis {
     if (rs !== null && !(m & RNEST) && name !== undefined) this.auth(rs, name, 'def', x);
     this.headWord(hv, m);
     this.visit(x[2], (m & ~(RN | HOIST | HMATCH | CNEST | RNEST)) | NORAB | NOIT, null, null);
-    this.visitParams(x[3], m);
+    const saved = this.openItFence(x, x[3], true);
+    this.visitFenceParams(x[3], m);
     // A def emits as its own scope: defStatement, whose hoist reads the
     // body's statements raw, or a class body's method form, emitted as
     // a method over its live statements.
     const scope = this.openScope(x, x[4], x[3], false);
     this.hoistBody(scope, x[4], x[3], inClass, {});
+    if (this.itFence !== null) this.itFence.scope = scope;
     this.visitBody(x[4], m, scope, x[3], 'def');
+    this.closeItFence(saved);
   }
 
   // An overload signature: erased, read generically by every walk but
@@ -1075,7 +1197,11 @@ class Analysis {
         continue;
       }
       if (isNodeP(s) && s[0] === 'typed-var' && s.length === 4) {
+        // A typed field's name is a member, never a bare `it`.
+        const quiet = this.itQuiet;
+        this.itQuiet = true;
         this.visit(s, bm & ~(HOIST | HMATCH), null, null);
+        this.itQuiet = quiet;
         continue;
       }
       this.visitClassMember(s, bm, rs);
@@ -1132,7 +1258,11 @@ class Analysis {
     else if (Analysis.isPattern(target)) this.rabPattern(target, m);
     this.headWord(hv, m);
     const tm = (m & ~(HOIST | HMATCH | RN)) | ((m & RN) ? RN_PAT : 0);
+    // The target names a member, never a bare `it`.
+    const quiet = this.itQuiet;
+    this.itQuiet = true;
     this.visit(target, tm, null, null);
+    this.itQuiet = quiet;
     const vm = (m & ~RN) | ((m & RN) ? RN_EXPR : 0);
     const staticKey = isNodeP(target) && target[0] === '.' && target.length === 4 && wordOf(target[2]) === 'this' && wordOf(target[3]) !== undefined;
     if (hv !== '=' || (tw === undefined && !staticKey)) return this.visit(x[3], vm, null, rs);
@@ -1186,7 +1316,13 @@ class Analysis {
         else if (s[0] === ':') this.noteMethodPair(s);
         else if (s[0] === '=' && s.length === 4 && isFuncNode(s[3])) this.methodFuncs.add(s[3]);
       }
+      // A line no member category takes rejects as the emitter
+      // classifies the body, before any member's function emits: the
+      // parameter and bare-`it` checks inside it never run.
+      const preempted = isNodeP(s) && !COMPONENT_LINE_HEADS.has(s[0]);
+      if (preempted) this.preempted++;
       this.visit(s, c, null, null);
+      if (preempted) this.preempted--;
     }
     this.env = env;
   }
@@ -1532,6 +1668,7 @@ class Analysis {
       try {
         const names = [];
         for (const p of vars) this.patternNames(p, names, true);
+        for (const p of vars) { const err = this.memberTargetErr(p, MEMBER_LOOP_VARIABLE); if (err !== null) throw err; }
         this.dupIn(names, x, 'loop head', rs);
       } catch (err) {
         rs.forms.push({ error: err });
@@ -1584,6 +1721,7 @@ class Analysis {
       try {
         const names = [];
         for (const p of clause[2]) this.patternNames(p, names, true);
+        for (const p of clause[2]) { const err = this.memberTargetErr(p, MEMBER_LOOP_VARIABLE); if (err !== null) throw err; }
         this.dupIn(names, x, 'comprehension clause', rs);
       } catch (err) {
         rs.forms.push({ error: err });
@@ -1638,13 +1776,19 @@ class Analysis {
         if (rs !== null) {
           try {
             for (const n of this.dupIn(this.patternNames(binding), binding, 'catch pattern', rs)) this.plain(rs, n, x);
+            this.handlerDecls(handler, this.patternNames(binding), rs);
           } catch (err) {
             rs.forms.push({ error: err });
           }
         }
         this.visit(binding, (c & ~RN) | (rn ? RN_PAT : 0), cs, null);
       } else if (binding !== null) {
+        const w = wordOf(binding) ?? (isNodeP(binding) && binding[0] === 'typed-var' ? wordOf(binding[2]) : undefined);
+        if (rs !== null && w !== undefined) this.handlerDecls(handler, [w], rs);
+        const quiet = this.itQuiet;
+        this.itQuiet = true;
         this.visit(binding, (c & ~RN) | (rn ? RN_PAT : 0), cs, rs);
+        this.itQuiet = quiet;
       }
       // A pattern's names are the planner's own in the handler; a plain
       // or typed binding binds for the handler's emission.
@@ -1664,6 +1808,23 @@ class Analysis {
     }
     if (finalizer !== null) this.visit(finalizer, ec, cs, rs);
     if (rs !== null) for (const f of bodyForms) rs.forms.push(f);
+  }
+
+  // A def or class statement of a catch handler's own block declares in
+  // the block the catch binding scopes: one of the binding's names
+  // there is a redeclaration of it. A deeper block shadows freely.
+  handlerDecls(handler, names, rs) {
+    const body = handler[3];
+    const stmts = isNodeP(body) && body[0] === 'block' ? body.slice(2) : [body];
+    for (const st of stmts) {
+      if (!isNodeP(st) || (st[0] !== 'def' && st[0] !== 'class')) continue;
+      const n = wordOf(st[2]);
+      if (n === undefined || !names.includes(n)) continue;
+      const line = this.nodeLine(handler);
+      rs.forms.push({ error: this.positioned(`emitter: '${n}' was already declared as catch binding${line !== null ? ` on line ${line}` : ''} — assign with '${n} = …' to update it, or choose a different name`,
+        st, ...(rs.owner !== null ? [rs.owner] : [])) });
+      return;
+    }
   }
 
   visitIf(x, m, cs, rs) {
@@ -2059,7 +2220,7 @@ class Analysis {
           if (this.schemaErr === null) this.schemaErr = err;
         }
       }
-      this.visitSchemaBody(stmts, names, site.value);
+      this.visitSchemaBody(stmts, names, site.value, site.tokens);
     }
   }
 
@@ -2071,10 +2232,14 @@ class Analysis {
 
   // A schema callable body: its own delivery tree, and (when it is a
   // callable rather than the adapter value) its own scope with the
-  // body parameters as plain names.
-  visitSchemaBody(stmts, names, value) {
+  // body parameters as plain names. A callable that takes parameters
+  // checks its bare `it` reads, as a function does.
+  visitSchemaBody(stmts, names, value, tokens) {
     this.beginTree(names, stmts);
     const scope = value ? null : this.openScope(null, stmts, names);
+    if (scope !== null && names.length > 0 && this.preempted === 0) {
+      this.itFence = { fn: null, stmts, span: islandSpan(tokens), params: names, scope, env: this.env, sub: true, rsink: this.rsink, hit: null, inParams: false, hitParam: false };
+    }
     this.visitWord('program', RN_EXPR);
     const walk = (m) => {
       for (const s of stmts) {
@@ -2098,6 +2263,7 @@ class Analysis {
       this.inSub = sub;
       this.endScope(scope);
     }
+    if (this.itFence !== null && this.itFence.hit !== null) this.itFences.push(this.itFence);
     this.endTree();
   }
 
@@ -2155,7 +2321,7 @@ class Analysis {
     forms.forEach((f, i) => { f.order = i; });
     const reject = (at, prior) => {
       const line = prior.node !== null ? this.nodeLine(prior.node) : prior.line ?? null;
-      const hint = prior.kind === 'state' || prior.kind === 'parameter' || prior.kind === 'plain' || prior.line != null
+      const hint = prior.kind === 'state' || prior.kind === 'parameter' || prior.kind === 'catch binding' || prior.kind === 'plain' || prior.line != null
         ? ` — assign with '${at.name} = …' to update it, or choose a different name`
         : ' — choose a different name';
       return this.positioned(`emitter: '${at.name}' was already declared as ${prior.kind}${line !== null ? ` on line ${line}` : ''}${hint}`,
@@ -2184,6 +2350,7 @@ class Analysis {
   // scan and the predicates, then the declare-in-place decisions.
   settle() {
     for (const s of this.hscopes) this.settleHoist(s);
+    for (const fence of this.itFences) this.settleIt(fence);
     for (const f of this.fieldScopes) f.plans = this.settlePlans(f, EMPTY_SET, f.env, false, f.sub);
     this.captureAll();
   }
@@ -2207,6 +2374,8 @@ class Analysis {
     }
     // The program's targets also name its bindings (result): its copy.
     const targets = program ? new Map(s.targets) : s.targets;
+    // An implicit `it` the body assigns is the function's declared binding.
+    s.itAssigned = targets.has('it') || s.itUpdated;
     for (const n of exclude) targets.delete(n);
     for (const n of s.hreactive) targets.delete(n);
     // The statement-level declarations: a framed scope's walk noted
@@ -2294,6 +2463,75 @@ class Analysis {
       if (recv || obj || key) plans.push({ node: site.node, recv, obj, key });
     }
     return plans;
+  }
+
+  // A function that takes parameters and reads a bare `it` no binding
+  // inside it answers: a scope around it declares `it`, or the read
+  // rejects at its nearest node with a NodeStore row. A parameter
+  // default runs before the body, so the function's own declarations
+  // answer it only through a parameter named `it`.
+  settleIt(fence) {
+    const scope = fence.scope;
+    const outer = scope.env ?? fence.env;
+    if (fence.hitParam
+      ? this.paramsNameIt(fence.params) || this.declaresIt(outer, fence.sub, fence.rsink)
+      : this.declaresIt({ scope, next: outer }, fence.sub, fence.rsink)) return;
+    let anchor = null;
+    const find = (x, at) => {
+      if (x === fence.hit) { anchor = at; return true; }
+      if (!Array.isArray(x) || wordOf(x) !== undefined) return false;
+      const here = this.idOf(x) !== null ? x : at;
+      // The emitter's tree moves a comprehension's guard out of its
+      // clause, to stand beside it.
+      if (x[0] === 'comprehension' && isNodeP(x) && !isNone(x[3][5]) && find(x[3][5], here)) return true;
+      for (const el of x) if (find(el, here)) return true;
+      return false;
+    };
+    const fn = fence.fn;
+    if (fn === null) { for (const s of fence.stmts) if (find(s, null)) break; }
+    else if (fn[0] === 'def') { if (!find(fn[3], fn)) find(fn[4], fn); }
+    else if (!find(fn[2], fn)) find(fn[3], fn);
+    const span = (anchor === null ? null : bareItSpan(this.stores, this.source, this.idOf(anchor))) ?? fence.span ?? null;
+    const err = new Error(UNBOUND_IT);
+    if (span !== null) { err.start = span[0]; err.end = span[1]; }
+    scope.itErr = err;
+  }
+
+  // Does a parameter name `it`? (A pattern the parameter walk rejects
+  // names nothing here.)
+  paramsNameIt(params) {
+    try {
+      const names = [];
+      for (const p of params) this.patternNames(p, names, true);
+      return names.includes('it');
+    } catch {
+      return false;
+    }
+  }
+
+  // Does the nearest scope around `env` that binds `it` declare it? A
+  // parameterless function's implicit `it` the body never assigns is no
+  // declaration, and it shadows every `it` outside it. A render
+  // factory's locals and loop variables (`rsink`) declare, at the env
+  // their render child stands in.
+  declaresIt(env, sub, rsink = null) {
+    const inSink = () => rsink.sink.locals.has('it') || rsink.sink.loops.includes('it');
+    for (let f = env; f !== null; f = f.next) {
+      if (rsink !== null && f === rsink.env && inSink()) return true;
+      if (f.scope !== undefined) {
+        const sc = f.scope;
+        if (sc.framed() && sc.reactive.has('it')) return true;
+        if (sc.implicitIt && sc.bareIt) return sc.itAssigned;
+        if (sc.names.has('it')) return true;
+        if (sc.framed() && sc.declares('it')) return true;
+      } else if (f.block !== undefined) {
+        if (f.block.has('it')) return true;
+      } else if (f.members !== undefined) {
+        if (f.members.has('it')) return true;
+      } else if (f.ambient.has('it')) return true;
+    }
+    if (rsink !== null && rsink.env === null && inSink()) return true;
+    return !sub && this.moduleBound().has('it');
   }
 
   // The emitter's repeatSafeValue over this pass's environment model.
@@ -2902,7 +3140,10 @@ class Analysis {
     if (this.rabErr !== null) return this.rabErr.err;
     const program = this.program;
     if (program.hoistErr !== null) return program.hoistErr;
-    for (const s of this.scopes) {
+    const points = this.pointErrs;
+    for (let i = 0; i < this.scopes.length; i++) {
+      if (points.length !== 0 && points[0].at <= i) return points[0].err;
+      const s = this.scopes[i];
       // A scope hoists before it pushes its frame: a parameter's match
       // write, a target that cannot bind, an annotation a declaring
       // pattern cannot carry. The program's hoist line comes after its
@@ -2918,9 +3159,10 @@ class Analysis {
         if (s.errReadonly !== null) return s.errReadonly;
       }
       if (s.rejection !== null) return s.rejection;
+      if (s.itErr !== null) return s.itErr;
       if (s === program && s.dipErr !== null) return s.dipErr;
     }
-    return null;
+    return points.length !== 0 ? points[0].err : null;
   }
 
   result(ambient) {

@@ -13,6 +13,55 @@ export const LITERAL_WORDS = new Set(['true', 'false', 'null', 'undefined', 'NaN
 // members.
 export const COMPONENT_HOOKS = new Set(['beforeMount', 'mounted', 'beforeUnmount', 'unmounted', 'onError', 'load']);
 
+// A function that takes parameters binds no implicit `it`, so a bare
+// `it` there must read a binding some scope declares.
+export const UNBOUND_IT = 'emitter: bare `it` has no binding here — a function that takes parameters binds no implicit `it` ' +
+  '(only a parameterless one does); name a parameter `it`, or read the parameter by its own name';
+
+// The span a bare `it` rejects at, from the nearest node with a NodeStore
+// row above it: the one role span of that node spelled `it`, or the
+// node's own span when its roles spell `it` nowhere or more than once.
+export function bareItSpan(stores, source, nodeId) {
+  let hit = null;
+  for (const r of stores.rolesOf(nodeId)) {
+    if (r.sourceEnd - r.sourceStart !== 2 || source.slice(r.sourceStart, r.sourceEnd) !== 'it') continue;
+    if (hit !== null && hit[0] !== r.sourceStart) return stores.selfSpan(nodeId);
+    hit = [r.sourceStart, r.sourceEnd];
+  }
+  return hit ?? stores.selfSpan(nodeId);
+}
+
+// A schema code site's source span, from its written tokens: where a
+// bare `it` with no node above it (a body that is the word alone)
+// rejects. null for a site with no written token.
+export function islandSpan(tokens) {
+  let start = null;
+  let end = null;
+  for (const t of tokens) {
+    if (t.generated) continue;
+    if (start === null) start = t.start;
+    end = t.end;
+  }
+  return start === null ? null : [start, end];
+}
+
+// A promoted `@name` binds a field, which only a whole parameter can:
+// inside a rest or a destructuring pattern JavaScript has no binding form.
+export const PROMOTED_IN_PATTERN = (name) =>
+  `emitter: a promoted parameter ('@${name}') cannot sit inside a rest or a destructuring pattern — ` +
+  `JavaScript binds no \`this.${name}\` there; bind a plain name and assign '@${name} = ${name}' in the body`;
+
+// The heads of a member or index target: a pattern element that writes
+// a property rather than binding a name.
+export const MEMBER_HEADS = new Set(['.', '?.', '[]', 'optindex']);
+
+// A parameter list and a loop head declare their names, and a member is
+// no name: JavaScript has no declaring form for it.
+export const MEMBER_IN_PARAMETER = 'emitter: a parameter pattern binds names only — a member or index target cannot sit inside it, ' +
+  'since JavaScript declares no property in a parameter list; bind a plain name and assign the member in the body';
+export const MEMBER_LOOP_VARIABLE = 'emitter: a loop variable binds names only — a member or index target cannot be one, ' +
+  'since JavaScript declares loop variables with `let`; loop over a plain name and assign the member in the body';
+
 // Is re-reading the spelled word `w` free of user code? true for
 // `this` and a literal spelling (a number, a quoted string, a literal
 // word); false for a regex spelling, which is a match and assigns `_`;

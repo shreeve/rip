@@ -1548,6 +1548,13 @@ test ":shape .parse returns instance with getters and methods", '''
   [before, a.city, a.full]
   ''', ["X,  Y ", "Y", "X, Y"]
 
+# A schema callable that takes parameters binds no implicit `it`, as a
+# function does: a bare `it` reads a declared binding or rejects.
+fail "a bare it in a schema method with parameters rejects", "X = schema :shape\n  name! string\n  greet: (x) -> it", ":3:17: emitter: bare `it` has no binding here"
+fail "a bare it in a schema method expression rejects", "X = schema :shape\n  name! string\n  greet: (x) -> x + it", ":3:21: emitter: bare `it` has no binding here"
+test "a module it answers a schema method with parameters", "it = 5\nX = schema :shape\n  name! string\n  greet: (x) -> x + it\nX.parse({name: 'a'}).greet(1)", 6
+test "a schema method parameter named it answers", "X = schema :shape\n  name! string\n  greet: (it) -> it * 2\nX.parse({name: 'a'}).greet(4)", 8
+
 test ":shape .parse throws SchemaError on invalid", '''
   X = schema :shape
     name! string

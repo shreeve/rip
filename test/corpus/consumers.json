@@ -3991,6 +3991,78 @@
   "js": "3vxthuzhkzljg",
   "ts": "3vxthuzhkzljg"
  },
+ "row classes.rip › fail a promoted rest rejects": {
+  "js": "3h55thdo0334v",
+  "ts": "3h55thdo0334v"
+ },
+ "row classes.rip › fail a promoted array element rejects": {
+  "js": "1ipmrd5lwsio9",
+  "ts": "1ipmrd5lwsio9"
+ },
+ "row classes.rip › fail a promoted defaulted array element rejects": {
+  "js": "1ipmrd5lwsio9",
+  "ts": "1ipmrd5lwsio9"
+ },
+ "row classes.rip › fail a promoted object shorthand rejects": {
+  "js": "1ipmrd5lwsio9",
+  "ts": "1ipmrd5lwsio9"
+ },
+ "row classes.rip › fail a promoted defaulted object shorthand rejects": {
+  "js": "1ipmrd5lwsio9",
+  "ts": "1ipmrd5lwsio9"
+ },
+ "row classes.rip › fail a promoted object value rejects": {
+  "js": "bz6t9cwh8nav",
+  "ts": "bz6t9cwh8nav"
+ },
+ "row classes.rip › fail a promoted element of a nested pattern rejects": {
+  "js": "3btnmywc4q0qa",
+  "ts": "3btnmywc4q0qa"
+ },
+ "row classes.rip › fail a promoted element of a gap tail pattern rejects": {
+  "js": "2za6kyo7hmv5b",
+  "ts": "2za6kyo7hmv5b"
+ },
+ "row classes.rip › fail a promoted pattern element rejects outside a constructor": {
+  "js": "d6df4la0bt99",
+  "ts": "d6df4la0bt99"
+ },
+ "row classes.rip › fail a promoted rest rejects outside a constructor": {
+  "js": "2bulyt3go0yzp",
+  "ts": "2bulyt3go0yzp"
+ },
+ "row classes.rip › fail a member element of a parameter pattern rejects": {
+  "js": "2a8vyntylivx7",
+  "ts": "2a8vyntylivx7"
+ },
+ "row classes.rip › fail a member value of a parameter pattern rejects": {
+  "js": "1ts9ibk65gife",
+  "ts": "1ts9ibk65gife"
+ },
+ "row classes.rip › fail a field member element of a method parameter pattern rejects": {
+  "js": "2nukv2ozanpci",
+  "ts": "2nukv2ozanpci"
+ },
+ "row classes.rip › fail a field index element of a constructor parameter pattern rejects": {
+  "js": "9yu4j63x9czn",
+  "ts": "9yu4j63x9czn"
+ },
+ "row classes.rip › test a typed class field named it is no bare it": {
+  "js": "qa49mrcmbbgy",
+  "ts": "21q6v36h8dbaa"
+ },
+ "row classes.rip › test a class field named it is no bare it": {
+  "js": "f6pz5n5fxmcp",
+  "ts": "qyqnmpqq1e6x"
+ },
+ "row classes.rip › fail a class field value reads a bare it": {
+  "js": "2f2h6nvmrmdwo",
+  "ts": "2f2h6nvmrmdwo"
+ },
+ "row classes.rip › test a parameter default reads a field": {
+  "js": "btyb1f1i0c8b",
+  "ts": "3ezubq3q9un61"
+ },
  "row classes.rip › test super with @param": {
   "js": "177wt2k57pc7t",
   "ts": "21hzdrlakjclb"
@@ -4570,6 +4642,22 @@
  "row components.rip › test an annotated public offer is a prop the caller can set": {
   "js": "27ogp699fo0rg",
   "ts": "oe6mmb3emk0c"
+ },
+ "row components.rip › test a render local it answers a handler with parameters": {
+  "js": "15pxzuu1b5ot7",
+  "ts": "15gvtvpfxywkr"
+ },
+ "row components.rip › test a render local it answers a function with parameters in a render loop body": {
+  "js": "268fvj34gfhym",
+  "ts": "276nxy1asmpno"
+ },
+ "row components.rip › test a render local it answers a function with parameters in an interpolation": {
+  "js": "1a4hjmxgawa8g",
+  "ts": "3mjktg98sgkpg"
+ },
+ "row components.rip › fail a def in a component body rejects as a body line before its bare it": {
+  "js": "1z0zvgzm8aiak",
+  "ts": "1z0zvgzm8aiak"
  },
  "row components.rip › fail an annotated offer is still a state declaration, not a readonly": {
   "js": "2cay4e1lqpjhv",
@@ -6174,6 +6262,18 @@
  "row comprehensions.rip › fail a third clause cannot read a second clause variable": {
   "js": "2wre6liook2uz",
   "ts": "2wre6liook2uz"
+ },
+ "row comprehensions.rip › fail a field comprehension variable rejects": {
+  "js": "w1xzldfwn1fy",
+  "ts": "w1xzldfwn1fy"
+ },
+ "row comprehensions.rip › fail a field element of a comprehension pattern rejects": {
+  "js": "yro0s2sh3xnm",
+  "ts": "yro0s2sh3xnm"
+ },
+ "row comprehensions.rip › fail a field variable of a later comprehension clause rejects": {
+  "js": "3uy5qwh5j5h6h",
+  "ts": "3uy5qwh5j5h6h"
  },
  "row comprehensions.rip › fail a chained statement clause cannot read an earlier clause variable": {
   "js": "281vpcit7fja8",
@@ -8399,6 +8499,158 @@
   "js": "gpf1gr7snjdt",
   "ts": "35hz8ucivc9l"
  },
+ "row functions.rip › fail a bare it in a body with parameters rejects": {
+  "js": "2x03zripk4fw7",
+  "ts": "2x03zripk4fw7"
+ },
+ "row functions.rip › fail a bare it in a parameter default rejects": {
+  "js": "1ks8a51w4k4fe",
+  "ts": "1ks8a51w4k4fe"
+ },
+ "row functions.rip › fail a bare it in a nested function's parameter default rejects": {
+  "js": "d11qu0vbm15l",
+  "ts": "d11qu0vbm15l"
+ },
+ "row functions.rip › fail a bare it under a parameterless function rejects": {
+  "js": "nglhgmd03xzf",
+  "ts": "nglhgmd03xzf"
+ },
+ "row functions.rip › fail an outer implicit it answers no function with parameters": {
+  "js": "25vcxu62nkjf8",
+  "ts": "25vcxu62nkjf8"
+ },
+ "row functions.rip › fail a bare it in a fat arrow with parameters rejects": {
+  "js": "2x03zripk4fw7",
+  "ts": "2x03zripk4fw7"
+ },
+ "row functions.rip › fail a bare it in a method with parameters rejects": {
+  "js": "84x4ibthji1a",
+  "ts": "84x4ibthji1a"
+ },
+ "row functions.rip › fail a bare it in a def with parameters rejects": {
+  "js": "6mpym4pb42mf",
+  "ts": "6mpym4pb42mf"
+ },
+ "row functions.rip › fail a bare it in a comprehension guard rejects": {
+  "js": "d11qu0vbm15l",
+  "ts": "d11qu0vbm15l"
+ },
+ "row functions.rip › fail a bare it in a loop body rejects": {
+  "js": "3gex691m2m0xw",
+  "ts": "3gex691m2m0xw"
+ },
+ "row functions.rip › fail a bare it in an interpolation rejects": {
+  "js": "2qgid3ohip5ge",
+  "ts": "2qgid3ohip5ge"
+ },
+ "row functions.rip › test a module it answers a function with parameters": {
+  "js": "3scvo8srbzrl1",
+  "ts": "1qein19g42f1q"
+ },
+ "row functions.rip › test a later module it answers a function with parameters": {
+  "js": "31ce1my510m98",
+  "ts": "1fpvogs2cwdpy"
+ },
+ "row functions.rip › test a parameter named it answers": {
+  "js": "24c4wzxlzqcgo",
+  "ts": "3vjau0fqundwc"
+ },
+ "row functions.rip › test a local it answers": {
+  "js": "10rv6179y9ffw",
+  "ts": "2y4fy2jy041p8"
+ },
+ "row functions.rip › test a loop variable named it answers": {
+  "js": "2hng5davbvac",
+  "ts": "170f1abme8kr3"
+ },
+ "row functions.rip › test a catch binding named it answers": {
+  "js": "3muwr96ke3odc",
+  "ts": "1tsrjkflcwiuh"
+ },
+ "row functions.rip › test a counted loop's it answers": {
+  "js": "1n3huy9qprdbl",
+  "ts": "1xe26uhuru7bf"
+ },
+ "row functions.rip › test a member named it is no bare it": {
+  "js": "1ss0csklaa6b6",
+  "ts": "2sq9dqfn9h053"
+ },
+ "row functions.rip › test a key named it is no bare it": {
+  "js": "1ybn26je8u9s9",
+  "ts": "uauhw9cik2uh"
+ },
+ "row functions.rip › test a parameterless function inside one with parameters keeps its implicit it": {
+  "js": "27d5nkkg45fn8",
+  "ts": "2e4y8z3hjjgrz"
+ },
+ "row functions.rip › fail an implicit it shadows a module it": {
+  "js": "2cvavm4svr1cb",
+  "ts": "2cvavm4svr1cb"
+ },
+ "row functions.rip › fail an implicit it shadows a module it for a function declared before its read": {
+  "js": "fd5sznjoruog",
+  "ts": "fd5sznjoruog"
+ },
+ "row functions.rip › test a parameterless function that assigns it answers a nested function": {
+  "js": "2m6co573s4rtq",
+  "ts": "3g1ibltdlqqe3"
+ },
+ "row functions.rip › test a parameterless fat arrow that assigns it answers a nested function": {
+  "js": "16uhw24xi2go5",
+  "ts": "jz0f9ao6dd9m"
+ },
+ "row functions.rip › test a parameterless function that destructures it answers a nested function": {
+  "js": "2fmi9sg81qpml",
+  "ts": "36t1aw1201c9s"
+ },
+ "row functions.rip › test an assigned implicit it answers under a module it": {
+  "js": "2p65ds0cxanoq",
+  "ts": "3jbpl8pxqdun0"
+ },
+ "row functions.rip › test a loop variable inside an implicit it's function answers": {
+  "js": "22i2fakn9aw0i",
+  "ts": "1prkiaa3f01qg"
+ },
+ "row functions.rip › test a type named it is no bare it": {
+  "js": "v1k0rycboz9v",
+  "ts": "32a9aa3ku0ngo"
+ },
+ "row functions.rip › test a cast to a type named it is no bare it": {
+  "js": "v1k0rycboz9v",
+  "ts": "2lor3rr8te8qn"
+ },
+ "row functions.rip › test a parameterless function that increments it answers a nested function": {
+  "js": "37nvf9nmr33nv",
+  "ts": "3enwbgxwzdtej"
+ },
+ "row functions.rip › test a parameterless function that pre-increments it answers a nested function": {
+  "js": "2sd6x5nv21mku",
+  "ts": "rrouylwdju7x"
+ },
+ "row functions.rip › test a parameterless function that decrements it answers a nested function": {
+  "js": "3orjnd62glrrv",
+  "ts": "1kkqti9nzm1l3"
+ },
+ "row functions.rip › fail a parameter default it the body declares rejects": {
+  "js": "1ks8a51w4k4fe",
+  "ts": "1ks8a51w4k4fe"
+ },
+ "row functions.rip › fail a def's parameter default it the body declares rejects": {
+  "js": "3tumz1wa5fgen",
+  "ts": "3tumz1wa5fgen"
+ },
+ "row functions.rip › fail a method's parameter default it the body declares rejects": {
+  "js": "hft0qhpjrnbn",
+  "ts": "hft0qhpjrnbn"
+ },
+ "row functions.rip › test a module it answers a parameter default beside a body write": {
+  "js": "nklaksh76e3d",
+  "ts": "3kv5qvfwkbi8"
+ },
+ "row functions.rip › test an earlier parameter named it answers a parameter default": {
+  "js": "3cl8hwm94i7x5",
+  "ts": "12w7bi7r5nano"
+ },
  "row functions.rip › test a parameterless def with a generic return type keeps its body": {
   "js": "3o94dxdsspj2t",
   "ts": "2mhv07o2drczw"
@@ -8866,6 +9118,34 @@
  "row loops.rip › fail annotated for-of key rejects": {
   "js": "1l17jpbpe4iv6",
   "ts": "1l17jpbpe4iv6"
+ },
+ "row loops.rip › fail a field loop variable rejects": {
+  "js": "og08bilw2vo",
+  "ts": "og08bilw2vo"
+ },
+ "row loops.rip › fail a field element of a loop pattern rejects": {
+  "js": "17u2f9883kp46",
+  "ts": "17u2f9883kp46"
+ },
+ "row loops.rip › fail a member element of a loop pattern rejects": {
+  "js": "17u2f9883kp46",
+  "ts": "17u2f9883kp46"
+ },
+ "row loops.rip › fail an index value of a loop pattern rejects": {
+  "js": "3c7dwlo4rend5",
+  "ts": "3c7dwlo4rend5"
+ },
+ "row loops.rip › fail a field for-of key rejects": {
+  "js": "og08bilw2vo",
+  "ts": "og08bilw2vo"
+ },
+ "row loops.rip › fail a field for-of value rejects": {
+  "js": "2lacp0qs07fgh",
+  "ts": "2lacp0qs07fgh"
+ },
+ "row loops.rip › fail a field loop index rejects": {
+  "js": "2lacp0qs07fgh",
+  "ts": "2lacp0qs07fgh"
  },
  "row loops.rip › fail annotated own for-of key rejects": {
   "js": "ql6n0hlp6ldz",
@@ -13451,6 +13731,46 @@
   "js": "398a2n7hfl4ed",
   "ts": "252vp2rlpozuy"
  },
+ "row redeclare.rip › fail def redeclares a catch binding": {
+  "js": "ewizz75m4l23",
+  "ts": "ewizz75m4l23"
+ },
+ "row redeclare.rip › fail class redeclares a catch binding": {
+  "js": "ewizz75m4l23",
+  "ts": "ewizz75m4l23"
+ },
+ "row redeclare.rip › fail def redeclares a typed catch binding": {
+  "js": "ewizz75m4l23",
+  "ts": "ewizz75m4l23"
+ },
+ "row redeclare.rip › fail def redeclares a catch pattern name": {
+  "js": "ewizz75m4l23",
+  "ts": "ewizz75m4l23"
+ },
+ "row redeclare.rip › fail class redeclares a catch array pattern name": {
+  "js": "ewizz75m4l23",
+  "ts": "ewizz75m4l23"
+ },
+ "row redeclare.rip › fail def redeclares a catch binding inside a function": {
+  "js": "3a043sypxcme6",
+  "ts": "3a043sypxcme6"
+ },
+ "row redeclare.rip › fail def redeclares an inner catch binding": {
+  "js": "1j9hgkk0q9fy3",
+  "ts": "1j9hgkk0q9fy3"
+ },
+ "row redeclare.rip › test a def in a deeper block shadows a catch binding": {
+  "js": "24s62gvd0w69r",
+  "ts": "bdpgf0gp23hx"
+ },
+ "row redeclare.rip › test a def in a finally block is outside the catch binding": {
+  "js": "2idw6bk9xyqho",
+  "ts": "2jeyaudexg347"
+ },
+ "row redeclare.rip › test a handler assigns its catch binding": {
+  "js": "3s0u028a2js2d",
+  "ts": "a5ym156c5qu8"
+ },
  "row redeclare.rip › test comprehension clause shadows plain": {
   "js": "218thza7nkeh0",
   "ts": "1t6tc3y20dx1b"
@@ -14702,6 +15022,22 @@
  "row schema.rip › test :shape .parse returns instance with getters and methods": {
   "js": "281ndp2i31iim",
   "ts": "160w5z7zgobbx"
+ },
+ "row schema.rip › fail a bare it in a schema method with parameters rejects": {
+  "js": "3qlyxlkxn5sjt",
+  "ts": "3qlyxlkxn5sjt"
+ },
+ "row schema.rip › fail a bare it in a schema method expression rejects": {
+  "js": "3etbgqrz6ing3",
+  "ts": "3etbgqrz6ing3"
+ },
+ "row schema.rip › test a module it answers a schema method with parameters": {
+  "js": "20krhwbojz46q",
+  "ts": "1v1c5jygd0p5t"
+ },
+ "row schema.rip › test a schema method parameter named it answers": {
+  "js": "gc6oyk2d3p1l",
+  "ts": "3m88ueewel2ez"
  },
  "row schema.rip › test :shape .parse throws SchemaError on invalid": {
   "js": "2kfz2qqdrafjy",

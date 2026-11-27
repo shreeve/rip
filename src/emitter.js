@@ -29,7 +29,7 @@ import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParam
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute, suggestAttribute } from './dom.js';
 import { attrValsName, elSurfaceName, hostText, surfaceableTag, domSurfaceDecls } from './ts/dom-types.js';
 import { locateRuntimes, runtimeRequires, faceRuntimeType, faceClassDecls, bareSpecifier } from './emit/runtimes.js';
-import { COMPONENT_HOOKS, LITERAL_WORDS, wordSafety } from './emit/names.js';
+import { COMPONENT_HOOKS, LITERAL_WORDS, MEMBER_HEADS, MEMBER_IN_PARAMETER, MEMBER_LOOP_VARIABLE, PROMOTED_IN_PATTERN, UNBOUND_IT, bareItSpan, islandSpan, wordSafety } from './emit/names.js';
 import { restAliasName, restPassthroughText, restOfComponentText, restViewOfComponentText, hookParamTypes,
   componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   declaresContainer, ambientClassDeclares, plainBehaviorValued, stateBehaviorValued, OFFERS, offersRecordText, HOST, hostTypeText, publicProps,
@@ -918,6 +918,13 @@ class Emitter {
     // Module bindings outside the hoist line (exports, classes, defs)
     // — the child-component name resolution's second channel.
     this.moduleBound = new Set();
+    // The frame name sets of parameterless functions that bound an
+    // implicit `it` they never assign: theirs answers no other
+    // function's bare `it`.
+    this.implicitItScopes = new WeakSet();
+    // A sub-emitter's parent source: its own builder has none, and the
+    // body's nodes index the parent's.
+    this.parentSource = null;
     // The render-factory self prefix: null everywhere except
     // inside a block factory's deferred emission, where component
     // members and `this`/`@` chains read through the factory's `ctx`
@@ -1428,6 +1435,35 @@ class Emitter {
       dupIn(names, isNode(params?.[0]) ? params[0] : owner, 'parameter list');
       names.forEach((n, i) => auth(n, 'parameter', sites[i]));
     }
+    const reject = (at, prior) => {
+      if (prior.reserved) {
+        throw this.positionedError(at.node,
+          `emitter: '${at.name}' is reserved for ${prior.kind} — choose a different name`,
+          ...(owner !== null ? [owner] : []));
+      }
+      const line = prior.node !== null ? this.nodeLine(prior.node) : prior.line ?? null;
+      const hint = prior.kind === 'state' || prior.kind === 'parameter' || prior.kind === 'catch binding' || prior.kind === 'plain' || prior.line != null
+        ? ` — assign with '${at.name} = …' to update it, or choose a different name`
+        : ' — choose a different name';
+      throw this.positionedError(at.node,
+        `emitter: '${at.name}' was already declared as ${prior.kind}${line !== null ? ` on line ${line}` : ''}${hint}`,
+        ...(owner !== null ? [owner] : []));
+    };
+    // A def or class statement of a catch handler's own block declares in
+    // the block the catch binding scopes, so one of a binding's names is a
+    // redeclaration of it (JavaScript refuses the pair). A deeper block
+    // shadows freely.
+    const rejectHandlerDecls = (clause) => {
+      const binding = Emitter.isTypedWrapper(clause[1]) ? clause[1][1] : clause[1];
+      const names = typeof binding === 'string' ? [binding] : this.patternNames(binding);
+      const body = clause[2];
+      for (const st of this.isBlock(body) ? body.slice(1) : [body]) {
+        if (!isNode(st) || typeof st[1] !== 'string' || !names.includes(st[1])) continue;
+        if ((isDefHead(st[0]) && st.length === 4) || st[0] === 'class') {
+          reject({ name: st[1], node: st }, { name: st[1], kind: 'catch binding', node: clause });
+        }
+      }
+    };
     const walk = (n, nested) => {
       if (!isNode(n)) return;
       if (isHeadless(n)) { for (const el of n) walk(el, nested); return; }
@@ -1491,6 +1527,7 @@ class Emitter {
         if (isNode(n[1])) {
           const names = [];
           for (const pattern of n[1]) this.patternNames(pattern, names, true);
+          for (const pattern of n[1]) this.rejectMemberTarget(pattern, MEMBER_LOOP_VARIABLE);
           dupIn(names, n, 'loop head');
         }
         for (const el of n.slice(2)) walk(el, true);
@@ -1500,7 +1537,10 @@ class Emitter {
         walk(n[1], true);
         for (const clause of n[2] ?? []) {
           const names = [];
-          if (isNode(clause[1])) for (const pattern of clause[1]) this.patternNames(pattern, names, true);
+          if (isNode(clause[1])) {
+            for (const pattern of clause[1]) this.patternNames(pattern, names, true);
+            for (const pattern of clause[1]) this.rejectMemberTarget(pattern, MEMBER_LOOP_VARIABLE);
+          }
           dupIn(names, n, 'comprehension clause');
           walk(clause[2], true);
         }
@@ -1516,8 +1556,10 @@ class Emitter {
             for (const name of dupIn(this.patternNames(part[1]), part[1], 'catch pattern')) {
               plainForm(name, n);
             }
+            rejectHandlerDecls(part);
             walk(part[2], true);
           } else {
+            if (isCatchClause(part) && part[1] !== null) rejectHandlerDecls(part);
             walk(part, true);
           }
         }
@@ -1537,20 +1579,6 @@ class Emitter {
     };
     for (const s of stmts) walk(s, false);
     forms.forEach((f, i) => { f.order = i; });
-    const reject = (at, prior) => {
-      if (prior.reserved) {
-        throw this.positionedError(at.node,
-          `emitter: '${at.name}' is reserved for ${prior.kind} — choose a different name`,
-          ...(owner !== null ? [owner] : []));
-      }
-      const line = prior.node !== null ? this.nodeLine(prior.node) : prior.line ?? null;
-      const hint = prior.kind === 'state' || prior.kind === 'parameter' || prior.kind === 'plain' || prior.line != null
-        ? ` — assign with '${at.name} = …' to update it, or choose a different name`
-        : ' — choose a different name';
-      throw this.positionedError(at.node,
-        `emitter: '${at.name}' was already declared as ${prior.kind}${line !== null ? ` on line ${line}` : ''}${hint}`,
-        ...(owner !== null ? [owner] : []));
-    };
     const decls = new Map();
     for (const f of forms) {
       if (!f.auth) continue;
@@ -4245,11 +4273,14 @@ class Emitter {
       entries = this.applyDeclareInPlace(entries, stmts, { tailIsExpression: true });
     }
     this.attachSchemaConsts(entries, this.schemaScopeOf(stmts)?.stories ?? null);
-    return { entries, names };
+    return { entries, names, paramTargets: collected.paramTargets };
   }
 
   hoistTargets(nodes, exclude = [], extraDeclared = []) {
     const targets = new Map();
+    // The bare names a `++`/`--` updates: no hoist target (an update
+    // assumes its binding exists), but a write of a parameter all the same.
+    const updated = new Set();
     // True when this scope's own statements contain a match write
     // (`=~`, a regex index) — carried out on the entries so
     // scopedHoist can apply the per-invocation `_` rule.
@@ -4410,6 +4441,7 @@ class Emitter {
         add('_', n);
         matchWrite = true;
       }
+      if (isUpdate(n) && typeof n[1] === 'string') updated.add(n[1]);
       if (ASSIGNS.has(n[0]) && n.length === 3) {
         if (typeof n[1] === 'string') {
           add(n[1], n);
@@ -4432,6 +4464,9 @@ class Emitter {
     for (const n of nodes) walk(n);
     const excludeNames = [];
     for (const x of exclude) this.patternNames(x, excludeNames, true);
+    // The parameters the scope's own statements write: an implicit `it`
+    // the body assigns is the function's declared binding.
+    const paramTargets = excludeNames.filter((x) => targets.has(x) || updated.has(x));
     for (const x of excludeNames) targets.delete(x);
     for (const x of reactive) targets.delete(x);
     // One binding per name: a def/class declaration or an import
@@ -4456,6 +4491,7 @@ class Emitter {
     }
     const entries = [...targets.entries()].map(([name, node]) => [name, node, 'target']);
     entries.matchWrite = matchWrite;
+    entries.paramTargets = paramTargets;
     entries.push(...chainTemps);
     // Reference-capture temps: a second pass over the same statements
     // plans single-evaluation captures for optional assignments and
@@ -6001,7 +6037,7 @@ class Emitter {
       // the face as the minted parameter carrying the declared `any`
       // boundary. That IS its answer: `(parameter) it: any`, the boundary
       // stated at the word (RULINGS.md, Schema).
-      const fn = this.schemaFnCode(params, stmts);
+      const fn = this.schemaFnCode(params, stmts, islandSpan(tokens));
       // A plain @ensure reads its check's result as truthy-or-not, so a
       // check that awaits — compiled async, answering with a Promise —
       // would always pass. Only @ensure! awaits.
@@ -6180,8 +6216,8 @@ class Emitter {
   // follows. The code itself is the runtime spelling and holds neither.
   // `bound` is every name the callable binds, parameters and locals at
   // any depth: the parent re-emits this text word by word under its own
-  // scopes, which know none of them.
-  schemaFnCode(params, stmts) {
+  // scopes, which know none of them. `span` is the site's source span.
+  schemaFnCode(params, stmts, span = null) {
     const names = params.map((p) => p.name);
     const stores = this.stores;
     if (stmts.length === 0) return { code: '(function() {})', thisAt: '(function('.length, annots: [], bound: new Set(names) };
@@ -6202,6 +6238,7 @@ class Emitter {
       const { entries, names: scoped } = sub.scopedHoist([stmt], names);
       for (const n of sub.pushReactiveFrame(stmts, scoped, names)) scoped.add(n);
       sub.scopes.push(scoped);
+      sub.rejectUnboundIt(names, bodyNode, span);
       if (entries.length) {
         sub.hoistLine(entries);
         sub.b.emit(' ');
@@ -6213,6 +6250,7 @@ class Emitter {
       const { entries, names: scoped } = sub.scopedHoist(stmts, names);
       for (const n of sub.pushReactiveFrame(stmts, scoped, names)) scoped.add(n);
       sub.scopes.push(scoped);
+      sub.rejectUnboundIt(names, bodyNode, span);
       sub.b.emit('{\n');
       if (entries.length) {
         sub.b.emit('  ');
@@ -6272,6 +6310,10 @@ class Emitter {
     const sub = new Emitter(this.stores, new CodeBuilder(this.stores, { source: null }));
     sub.scopes = [...this.scopes];
     sub.rframes = [...this.rframes];
+    // The frames' implicit-`it` marks, and the source the body's spans
+    // index (the sub's own builder has none), for the bare-`it` check.
+    sub.implicitItScopes = this.implicitItScopes;
+    sub.parentSource = this.b.source ?? this.parentSource;
     // One temp allocator per module: chain temps in a callable body
     // draw from the same name pool as the parent's (both emit into
     // the same output module).
@@ -8396,6 +8438,7 @@ class Emitter {
       const { entries, names } = this.scopedHoist(this.isBlock(node[3]) ? node[3].slice(1) : [node[3]], node[2]);
       for (const n of this.pushReactiveFrame(stmts, names, node[2], node)) names.add(n);
       this.scopes.push(names);
+      this.rejectUnboundIt(node[2], node[3]);
       // def bodies implicitly return their last expression, same as
       // arrow functions — unless the def is void.
       this.funcBlock(node, node[3], stmts, ind, entries, isVoid);
@@ -17260,6 +17303,7 @@ class Emitter {
     const { entries: hoist, names } = this.scopedHoist(stmts, funcNode[1]);
     for (const n of this.pushReactiveFrame(stmts, names, funcNode[1], funcNode)) names.add(n);
     this.scopes.push(names);
+    this.rejectUnboundIt(funcNode[1], block);
     const outerMethod = this.methodName;
     this.methodName = methodName;
     const prevSEO = this.sideEffectOnly;
@@ -17483,6 +17527,41 @@ class Emitter {
     return this._annotatedValueSpans.has(`${self.sourceStart}:${self.sourceEnd}`);
   }
 
+  // The first member or index target a binding's positions hold (the
+  // binding itself, a rest's operand, a pattern's elements, a default's,
+  // annotation's or cast's target), or null. A default's value and a
+  // computed key are expressions and read members freely.
+  static memberInPattern(p) {
+    if (!isNode(p) || isHeadless(p)) return null;
+    const h = p[0];
+    if (MEMBER_HEADS.has(h)) return p;
+    if (h === 'rest' || h === '...' || h === 'default' || h === '=' || h === 'typed-var' || h === 'cast' || h === 'satisfies') {
+      return Emitter.memberInPattern(p[1]);
+    }
+    if (h === 'array') {
+      for (const el of p.slice(1)) { const hit = Emitter.memberInPattern(el); if (hit !== null) return hit; }
+      return null;
+    }
+    if (h === 'object') {
+      for (const pair of p.slice(1)) {
+        if (!isNode(pair)) continue;
+        const slot = pair[0] === ':' || pair[0] === null ? pair[2] : pair[0] === '=' || pair[0] === '...' ? pair[1] : null;
+        const hit = Emitter.memberInPattern(slot);
+        if (hit !== null) return hit;
+      }
+    }
+    return null;
+  }
+
+  // A member a binding holds rejects at the member: a promoted `@name`
+  // in a parameter in its own vocabulary, any other in `message`'s.
+  rejectMemberTarget(p, message) {
+    const hit = Emitter.memberInPattern(p);
+    if (hit === null) return;
+    const promoted = hit[0] === '.' && hit[1] === 'this' && typeof hit[2] === 'string' && hit.length === 3;
+    throw this.positionedError(hit, promoted && message === MEMBER_IN_PARAMETER ? PROMOTED_IN_PATTERN(hit[2]) : message, p);
+  }
+
   emitParams(params, injectedTypes = null, jsArity = true) {
     const list = this.expansionSplit(params).list;
     // Arity softens only the TS face (`?` markers); the JS face never
@@ -17499,6 +17578,7 @@ class Emitter {
       throw this.positionedError(list[restAt],
         'emitter: a rest parameter must be the last parameter — JavaScript has no middle rest; take `...rest` last and read the tail from it');
     }
+    for (const p of params) if (atParamField(p) === null) this.rejectMemberTarget(p, MEMBER_IN_PARAMETER);
     list.forEach((p, i) => {
       // JavaScript refuses `await` and `yield` anywhere in formal
       // parameters — a default, a pattern's default, a computed key —
@@ -17551,6 +17631,126 @@ class Emitter {
     try { return this.emitFunc(node); } finally { this._narrowedReads = prev; }
   }
 
+  // A function that takes parameters binds no implicit `it`: a bare `it`
+  // in its parameters or its body reads a binding some scope declares,
+  // or rejects at the first one that has none. Called with the
+  // function's own scope pushed. A parameter default runs before the
+  // body, so the body's own declarations answer only the body; a
+  // parameter named `it` answers both. The walk is containsBareIt's,
+  // with the bindings a loop, a comprehension, a counted loop and a
+  // catch handler make inside the function. `fallback` is the span an
+  // `it` with no node above it rejects at (a schema callable's site).
+  rejectUnboundIt(params, block, fallback = null) {
+    if (params.length === 0) return;
+    const inBody = this.declaresIt();
+    let inParams = inBody;
+    if (inBody && !this.paramsNameIt(params)) inParams = this.declaresIt(this.rframes.length - 2);
+    if (inBody && inParams) return;
+    // The anchor of the first unbound `it`: undefined while none is
+    // found, null when no node with a NodeStore row stands above it.
+    let found;
+    const loopBinds = (vars) => {
+      if (!isNode(vars)) return false;
+      try {
+        const names = [];
+        for (const v of vars) this.patternNames(v, names, true);
+        return names.includes('it');
+      } catch {
+        return false;
+      }
+    };
+    const walk = (n, anchor, bound) => {
+      if (found !== undefined) return;
+      if (n === 'it') { if (!bound) found = anchor; return; }
+      if (!isNode(n)) return;
+      if (this.stores.idOf(n) !== null) anchor = n;
+      if (isHeadless(n)) { for (const el of n) walk(el, anchor, bound); return; }
+      const head = n[0];
+      if (head === '->' || head === '=>' || isDefHead(head)) return;
+      if ((head === '.' || head === '?.') && n.length === 3) {
+        walk(n[1], anchor, bound);
+        if (typeof n[2] !== 'string') walk(n[2], anchor, bound);
+        return;
+      }
+      if (head === 'object') {
+        for (const pair of n.slice(1)) {
+          if (isNode(pair) && pair[0] === ':' && pair.length === 3) {
+            walk(pair[2], anchor, bound);
+            if (typeof pair[1] !== 'string') walk(pair[1], anchor, bound);
+          } else walk(pair, anchor, bound);
+        }
+        return;
+      }
+      if (head === 'pickitem' && n.length === 4) { walk(n[3], anchor, bound); return; }
+      // An annotation's or cast's type is no reference, and a typed name
+      // declares (a class's typed field names a member).
+      if (Emitter.isTypedWrapper(n)) { if (typeof n[1] !== 'string') walk(n[1], anchor, bound); return; }
+      if ((head === 'cast' || head === 'satisfies') && n.length === 3) { walk(n[1], anchor, bound); return; }
+      // A class's field names are members; its parent and field values
+      // are expressions here (checkScopeRedeclarations' class rule).
+      if (head === 'class') {
+        if (n[2] != null) walk(n[2], anchor, bound);
+        if (this.isBlock(n[3])) {
+          const inBody = this.stores.idOf(n[3]) !== null ? n[3] : anchor;
+          for (const stmt of n[3].slice(1)) {
+            if (isNode(stmt) && ASSIGNS.has(stmt[0]) && stmt.length === 3) {
+              walk(stmt[2], this.stores.idOf(stmt) !== null ? stmt : inBody, bound);
+            } else walk(stmt, inBody, bound);
+          }
+        }
+        return;
+      }
+      let inner = bound;
+      if (head === 'for-in' || head === 'for-of' || head === 'for-as') inner = bound || loopBinds(n[1]);
+      else if (head === 'loop-n') inner = true;
+      else if (isComprehensionNode(n)) inner = bound || (n[2] ?? []).some((clause) => loopBinds(clause[1]));
+      else if (head === 'try') {
+        walk(n[1], anchor, bound);
+        for (const part of n.slice(2)) {
+          if (!isCatchClause(part)) { walk(part, anchor, bound); continue; }
+          const binding = Emitter.isTypedWrapper(part[1]) ? part[1][1] : part[1];
+          // A plain catch name binds the handler; a pattern's names hoist
+          // into the function, and its defaults read here.
+          if (typeof binding === 'string') walk(part[2], anchor, bound || binding === 'it');
+          else { walk(part[1], anchor, bound); walk(part[2], anchor, bound); }
+        }
+        return;
+      }
+      for (const el of n) walk(el, anchor, inner);
+    };
+    if (!inParams) for (const p of params) walk(p, params, false);
+    if (!inBody) walk(block, null, false);
+    if (found === undefined) return;
+    const id = found === null ? null : this.stores.idOf(found);
+    const span = (id !== null ? bareItSpan(this.stores, this.b.source ?? this.parentSource, id) : null) ?? fallback;
+    if (span === null) throw new Error(UNBOUND_IT);
+    throw this.positionedErrorAt(span[0], span[1], UNBOUND_IT);
+  }
+
+  // Does a parameter name `it`? (A pattern the parameter walk rejects
+  // names nothing here.)
+  paramsNameIt(params) {
+    try {
+      const names = [];
+      for (const p of params) this.patternNames(p, names, true);
+      return names.includes('it');
+    } catch {
+      return false;
+    }
+  }
+
+  // Does the nearest scope at or around frame `top` that binds `it`
+  // declare it? A parameterless function's implicit `it` is no
+  // declaration, and it shadows every `it` outside it.
+  declaresIt(top = this.rframes.length - 1) {
+    for (let i = top; i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.reactive.has('it') || (f.members !== undefined && f.members.has('it'))) return true;
+      if (f.bound.has('it')) return !this.implicitItScopes.has(f.bound);
+    }
+    return this.moduleBound.has('it');
+  }
+
   emitFunc(node) {
     const [srcKind, rawParams, block] = node;
     // Implicit `it`: a zero-param arrow that references
@@ -17567,9 +17767,15 @@ class Emitter {
     // the body suppresses its implicit return.
     const isVoid = this.voidFuncs.has(node);
     const stmts = this.liveStmts(this.isBlock(block) ? block.slice(1) : [block], { forwards: true });
-    const { entries: hoist, names } = this.scopedHoist(stmts, params);
+    const { entries: hoist, names, paramTargets } = this.scopedHoist(stmts, params);
     for (const n of this.pushReactiveFrame(stmts, names, params, node)) names.add(n);
     this.scopes.push(names);
+    // An implicit `it` the body never assigns answers no other function's
+    // bare `it`; one the body assigns (a plain write or a pattern target)
+    // is the function's own declared binding. Any declaring form of `it`
+    // beside the implicit parameter is a redeclaration and rejects.
+    if (bareIt && !paramTargets.includes('it')) this.implicitItScopes.add(this.rframes[this.rframes.length - 1].bound);
+    this.rejectUnboundIt(rawParams, block);
     const isAsync = this.containsAwait(block);
     const isGen = Emitter.containsYield(block);
     // Fat arrows cannot be generators: JS has no generator-arrow

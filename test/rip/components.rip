@@ -766,6 +766,48 @@ test 'an annotated public offer is a prop the caller can set', '''
   result
 ''', 'right'
 
+# A body line no member category takes rejects before any check inside it.
+# A render local is a declared binding: it answers a bare `it` in a
+# function with parameters inside its render scope.
+test 'a render local it answers a handler with parameters', '''
+  prev = globalThis.document
+  globalThis.document = { createElement: (tag) -> { setAttribute: (->), appendChild: (->), addEventListener: ((k, f) -> @click = f) } }
+  seen = null
+  A = component
+    render
+      it = 3
+      button @click: (e) -> seen = it + e
+  el = A.new()._create()
+  globalThis.document = prev
+  el.click 1
+  seen
+''', 4
+
+test 'a render local it answers a function with parameters in a render loop body', '''
+  A = component
+    xs := [1]
+    render
+      for x in xs
+        it = x
+        button @click: (e) -> log it
+  inst = A.new()
+  inst._init({})
+  typeof inst._create
+''', 'function'
+
+test 'a render local it answers a function with parameters in an interpolation', '''
+  A = component
+    render
+      it = 3
+      div
+        span "#{[1].map((y) -> y + it)}"
+  inst = A.new()
+  inst._init({})
+  typeof inst._create
+''', 'function'
+
+fail 'a def in a component body rejects as a body line before its bare it', "A = component\n  def m(x)\n    it", ':2:3: emitter: a component body line must be a member declaration'
+
 fail 'an annotated offer is still a state declaration, not a readonly', '''
   Root = component
     offer limit: number =! 10
