@@ -120,6 +120,23 @@ receive it according to `runtimeDelivery`: `inline` (self-contained
 output, the default), `import` (the toolchain's shared runtime module),
 or `none` (the browser, whose loader provides the runtime bindings).
 
+A second engine, [src/emit/](../src/emit/index.js) (v2), sits beside
+v1. It reads the parser's tree directly and lowers each node kind it
+covers through a table keyed by kind. The `emitter: 'v1' | 'v2'`
+compile option picks the engine; with no option, `RIP_EMITTER` decides,
+and v1 is the default ([src/emit/switch.js](../src/emit/switch.js)).
+v2 rejects whatever it does not lower (a node of an uncovered kind, at
+the node; an input that shapes the output from outside the tree, such
+as the `__DATA__` payload or the `repl` option) and never hands it back
+to v1. `bun scripts/emit-diff.mjs` compiles
+every consumer-corpus program with both engines in every caller's
+option set and reports each pair as identical, not yet covered,
+explained by a ledger entry (`test/corpus/emit-v2-explained.json`), or
+different. `test/toolchain/emit-v2.test.js` holds the language rows to
+zero unexplained differences and a coverage floor.
+`bun scripts/emit-bench.mjs` times both engines on the programs v2
+covers.
+
 ## 5a. The shipping path — JavaScript
 
 - **Bun**: [src/loader.js](../src/loader.js) is a Bun plugin
