@@ -2639,6 +2639,18 @@
   "tolerant": "mujb0m9q5yoh",
   "complete": "6j7t1thlgyju"
  },
+ "row assignment.rip › code a loop variable key rereads bare": {
+  "tokens": "2jz8zea16agk4",
+  "tree": "30r4l3efwyo9w",
+  "tolerant": "qs6zbavmtbc5",
+  "complete": "6j7t1thlgyju"
+ },
+ "row assignment.rip › code a first loop variable spelled array binds no differently": {
+  "tokens": "t06312ez5bp5",
+  "tree": "3gjcf5hklny9e",
+  "tolerant": "14tt4z50bfykd",
+  "complete": "6j7t1thlgyju"
+ },
  "row assignment.rip › test optional chain assign: sets when present": {
   "tokens": "1ww4lsmy5i4mx",
   "tree": "1retm502hb0u8",
@@ -4721,6 +4733,66 @@
   "tolerant": "vtur3bkpm53y",
   "complete": "6j7t1thlgyju"
  },
+ "row basic.rip › test a name spelled object read in a comprehension guard before its write": {
+  "tokens": "1aertqc72q2iq",
+  "tree": "3c3ox1vdszjc0",
+  "tolerant": "1dmmy2ly32y53",
+  "complete": "6j7t1thlgyju"
+ },
+ "row basic.rip › test a name spelled object read in an interpolation before its write": {
+  "tokens": "2fp9wi7yv3dpm",
+  "tree": "x5sjtzt81osh",
+  "tolerant": "276863ejk9maz",
+  "complete": "6j7t1thlgyju"
+ },
+ "row basic.rip › test a name spelled object as a postfix-if body before its write": {
+  "tokens": "b682dylwoood",
+  "tree": "3a1ac1mkpa4uy",
+  "tolerant": "1rtkyhtj7ddpo",
+  "complete": "6j7t1thlgyju"
+ },
+ "row basic.rip › test a name spelled object as a when-test before its write": {
+  "tokens": "28pq85yf9zj7f",
+  "tree": "cb2btlfmriqd",
+  "tolerant": "xj8ameq39htb",
+  "complete": "6j7t1thlgyju"
+ },
+ "row basic.rip › test a catch binding named block is a handler, never a finalizer": {
+  "tokens": "2ayuefs2a4p2j",
+  "tree": "1isrwq9h8ln53",
+  "tolerant": "29sqvq7p6rtkh",
+  "complete": "6j7t1thlgyju"
+ },
+ "row basic.rip › test a name spelled block as a postfix-if body is its value": {
+  "tokens": "1ifct3emaj637",
+  "tree": "1td9onukc7cjx",
+  "tolerant": "19elalxfa0vsw",
+  "complete": "6j7t1thlgyju"
+ },
+ "row basic.rip › test reads inside a copied optional-assignment key keep their order": {
+  "tokens": "3ks13s8tygz7d",
+  "tree": "3ftjjnq7ucggh",
+  "tolerant": "vxdhfch82x06",
+  "complete": "6j7t1thlgyju"
+ },
+ "row basic.rip › test a name spelled block in a copied optional-assignment key is its value": {
+  "tokens": "mob042nts6sd",
+  "tree": "3blbmak9djj0s",
+  "tolerant": "1wvrl7lclsq68",
+  "complete": "6j7t1thlgyju"
+ },
+ "row basic.rip › test a parenthesized comparison in a copied optional-assignment key never chains": {
+  "tokens": "10f4rfb289j29",
+  "tree": "306yeaoium60w",
+  "tolerant": "h2qt6lo99xid",
+  "complete": "6j7t1thlgyju"
+ },
+ "row basic.rip › test reads inside a copied super argument keep their order": {
+  "tokens": "6oqv6kem8bpk",
+  "tree": "1crxq88owqs45",
+  "tolerant": "hwavfscadp8c",
+  "complete": "6j7t1thlgyju"
+ },
  "row basic.rip › test a function named block is callable in every position": {
   "tokens": "1fceo9t6osb6e",
   "tree": "376h370pb9413",
@@ -5469,6 +5541,12 @@
   "tokens": "26zj7anjlijgt",
   "tree": "s87tjafm1pmr",
   "tolerant": "2asz9t2jq4i0s",
+  "complete": "6j7t1thlgyju"
+ },
+ "row classes.rip › test a promoted name inside a super argument with its own this stays a member": {
+  "tokens": "2uhe6lf2fefrd",
+  "tree": "1dxopy97jj1bt",
+  "tolerant": "2f3e9mtt59w6j",
   "complete": "6j7t1thlgyju"
  },
  "row classes.rip › code new through a soaking spine seals it": {
@@ -18267,6 +18345,24 @@
   "tokens": "vt0gfuhq5t5o",
   "tree": "1pnbk3rhhy5q2",
   "tolerant": "195bo4y3g6811",
+  "complete": "6j7t1thlgyju"
+ },
+ "row pick.rip › test a pick default's assignment binds in the enclosing function": {
+  "tokens": "17hucugvmhzwt",
+  "tree": "26fwyvhvnnnd4",
+  "tolerant": "1rfo1d6qwv8tz",
+  "complete": "6j7t1thlgyju"
+ },
+ "row pick.rip › test a pick default's assignment binds at module scope": {
+  "tokens": "23cf376str0c3",
+  "tree": "kxa7q1gs7b9d",
+  "tolerant": "25ax72m4pgd3s",
+  "complete": "6j7t1thlgyju"
+ },
+ "row pick.rip › test a pick key spelled await or yield leaves the function plain": {
+  "tokens": "3q8dlbmey079g",
+  "tree": "9ohz9jyt27xe",
+  "tolerant": "1frtw4wjxesei",
   "complete": "6j7t1thlgyju"
  },
  "row pick.rip › test complex source: evaluated once": {

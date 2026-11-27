@@ -232,6 +232,19 @@ code 'simple class', '''
     constructor: (@name) ->
 ''', 'class Animal { constructor(name) { this.name = name; } }'
 
+# Only the constructor's own `this` is not yet available in super's
+# arguments: a thin arrow, a def or a class there binds its own `this`,
+# so its `@x` stays a member read.
+test 'a promoted name inside a super argument with its own this stays a member', '''
+  class A
+    constructor: (@v, @w, @u) ->
+  class B extends A
+    constructor: (@x) ->
+      super(@x, (-> @x).call({x: "other"}), (=> @x)())
+  b = B.new(7)
+  [b.v, b.w, b.u]
+''', [7, 'other', 7]
+
 # A soaking spine cannot be constructed THROUGH — it seals into a value
 # first. Parens alone are what the spec asks for and node accepts them,
 # but bun, which runs rip, refuses every parenthesized optional chain

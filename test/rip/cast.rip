@@ -165,9 +165,7 @@ fail "a satisfies that claims no type rejects", "x = y satisfies -z",
 code "a clause keyword ends the cast's type run", '''
   cast = try JSON.parse('broken') as { live: boolean } catch e then { live: false }
 ''', '''
-  let cast;
-
-  cast = (() => { try {
+  let cast = (() => { try {
     return JSON.parse("broken");
   } catch (e) {
     return {live: false};

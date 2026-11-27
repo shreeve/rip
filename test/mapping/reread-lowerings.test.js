@@ -193,6 +193,14 @@ describe('assignment and class-field capture mappings', () => {
     noMintedNames(r);
   });
 
+  test('a super call copied for promoted parameters keeps its operands exact', () => {
+    const source = 'class A\n  constructor: (@v, @w) ->\nclass B extends A\n  constructor: (@x) ->\n    super(@x, qq + rr(qq))';
+    const r = compile(source);
+    exactOperand(r, 'qq + rr(qq)');
+    exactOperand(r, 'rr(qq)');
+    exactOperand(r, 'rr');
+  });
+
   test('UTF-16 source spans and names preserve non-ASCII operands without minted names', () => {
     const r = compile('préfixe = "😀"\nrésultat = obtenir()?.boîte[clé()] //= droite()');
     for (const text of ['obtenir()', 'boîte', 'clé()', 'droite()']) exactOperand(r, text);

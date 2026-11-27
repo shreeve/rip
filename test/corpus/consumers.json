@@ -216,8 +216,8 @@
   "ts": "q5tbkvecbao5"
  },
  "pkg packages/email/dom.rip": {
-  "js": "2c24njhqod7mc",
-  "ts": "2htg1ju02ylf9"
+  "js": "3osi9o0b8humu",
+  "ts": "2cllrwfuneabq"
  },
  "pkg packages/email/email.rip": {
   "js": "z61u8kcoev4r",
@@ -1759,6 +1759,14 @@
   "js": "36gize9te96pj",
   "ts": "12a3dq70lwelq"
  },
+ "row assignment.rip › code a loop variable key rereads bare": {
+  "js": "3uzwwzlcqwmoy",
+  "ts": "aplhld6pjypi"
+ },
+ "row assignment.rip › code a first loop variable spelled array binds no differently": {
+  "js": "2wfqseymcfveo",
+  "ts": "3le331nnv8h09"
+ },
  "row assignment.rip › test optional chain assign: sets when present": {
   "js": "si6o1q13zgjg",
   "ts": "1m555w6lmj10k"
@@ -3147,9 +3155,49 @@
   "js": "31o5vcmyusdp",
   "ts": "15rsk2nbsohmg"
  },
+ "row basic.rip › test a name spelled object read in a comprehension guard before its write": {
+  "js": "15yba1dsefv00",
+  "ts": "2bdb6sak57jvz"
+ },
+ "row basic.rip › test a name spelled object read in an interpolation before its write": {
+  "js": "3u5k386gyup4i",
+  "ts": "3pg4vab3v3vil"
+ },
+ "row basic.rip › test a name spelled object as a postfix-if body before its write": {
+  "js": "32i6c51f0ud8k",
+  "ts": "350nubl3l7qcu"
+ },
+ "row basic.rip › test a name spelled object as a when-test before its write": {
+  "js": "2i8q0msjb6x1m",
+  "ts": "3d96tzjv7phro"
+ },
+ "row basic.rip › test a catch binding named block is a handler, never a finalizer": {
+  "js": "1zklxqit90jjk",
+  "ts": "2h5xovrufr4pb"
+ },
+ "row basic.rip › test a name spelled block as a postfix-if body is its value": {
+  "js": "nznkzhedqnn4",
+  "ts": "xooyz72z0vu0"
+ },
+ "row basic.rip › test reads inside a copied optional-assignment key keep their order": {
+  "js": "bvr6fifvgpbx",
+  "ts": "3lwgwf7a247uc"
+ },
+ "row basic.rip › test a name spelled block in a copied optional-assignment key is its value": {
+  "js": "3sg1k3ijoljf1",
+  "ts": "3boqq0zvmnt3d"
+ },
+ "row basic.rip › test a parenthesized comparison in a copied optional-assignment key never chains": {
+  "js": "4qi1inldqfoy",
+  "ts": "8yo6664sby1c"
+ },
+ "row basic.rip › test reads inside a copied super argument keep their order": {
+  "js": "ykpgb5914mg6",
+  "ts": "38ir4quyqs4xo"
+ },
  "row basic.rip › test a function named block is callable in every position": {
-  "js": "14rkm35q3ebm",
-  "ts": "3v1g3632phfl3"
+  "js": "1mnwavxm2pi0p",
+  "ts": "2jh1y3wl6tksw"
  },
  "row basic.rip › test functions named cast and satisfies are callable with two arguments": {
   "js": "g3u1pw606epo",
@@ -3444,8 +3492,8 @@
   "ts": "18v8x16jeand6"
  },
  "row cast.rip › code a clause keyword ends the cast's type run": {
-  "js": "2pcs4ha5iq66c",
-  "ts": "1y2y40v800q3e"
+  "js": "422iy3hay9i7",
+  "ts": "1sufxc21ssecw"
  },
  "row cast.rip › code block-final generic cast keeps the dedent": {
   "js": "2vcmsopzj0npt",
@@ -3646,6 +3694,10 @@
  "row classes.rip › code simple class": {
   "js": "3mwhwf4ozp2rn",
   "ts": "1nok0fp9o5cgz"
+ },
+ "row classes.rip › test a promoted name inside a super argument with its own this stays a member": {
+  "js": "3d5detg0o6pb0",
+  "ts": "1ww6c3u3749fe"
  },
  "row classes.rip › code new through a soaking spine seals it": {
   "js": "hnq4vcmnpg37",
@@ -12178,6 +12230,18 @@
  "row pick.rip › test optpick nullish → default not evaluated": {
   "js": "21ha7yhphw54u",
   "ts": "14w0rda9bud6z"
+ },
+ "row pick.rip › test a pick default's assignment binds in the enclosing function": {
+  "js": "10v5yk7gmxbcs",
+  "ts": "gwhnyexxhmvv"
+ },
+ "row pick.rip › test a pick default's assignment binds at module scope": {
+  "js": "168zcwzsud989",
+  "ts": "363joichiktty"
+ },
+ "row pick.rip › test a pick key spelled await or yield leaves the function plain": {
+  "js": "3swr5xqwdsqjt",
+  "ts": "359xyns6tpsyj"
  },
  "row pick.rip › test complex source: evaluated once": {
   "js": "1euw9nua873u6",

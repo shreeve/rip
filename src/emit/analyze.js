@@ -116,7 +116,8 @@ const isTagWord = (w) => typeof w === 'string' && isHtmlTag(w.split('#')[0]);
 // value (["type", {}, raw, body]) and a bare literal slot ("this",
 // "super", "default", "*") each read as one word, the string the
 // emitter's tree holds in that place. Anything else that is an array
-// is a plumbing list.
+// is a plumbing list, headless in the emitter's tree: its first element
+// is a child like the rest, whatever head it spells.
 const isNodeP = (x) => Array.isArray(x) && typeof x[0] === 'string' && isAttrs(x[1]);
 const isNone = (x) => Array.isArray(x) && x.length === 2 && x[0] === 'none' && isAttrs(x[1]);
 // A function node: `->` or `=>` (a head test, never an emission).
@@ -147,13 +148,10 @@ function wordOf(x) {
 const isStruct = (x) => Array.isArray(x) && wordOf(x) === undefined && !isNone(x);
 
 // The head the emitter's tree gives a node: one per loop form, the void
-// spellings, and no head at all for the headless parts (a catch handler
-// and an `as` specifier: their first child stands where a head would).
+// spellings, and null for the headless parts (a plumbing list, an `as`
+// specifier, a shorthand pair).
 function headOf(x) {
-  if (!isNodeP(x)) {
-    if (!Array.isArray(x) || x.length === 0) return undefined;
-    return wordOf(x[0]);
-  }
+  if (!isNodeP(x)) return Array.isArray(x) && x.length > 0 ? null : undefined;
   const h = x[0];
   const a = x[1];
   switch (h) {
@@ -170,8 +168,7 @@ function headOf(x) {
     case '=': return a.void === true ? 'void-assign' : '=';
     case 'readonly': return a.void === true ? 'void-readonly' : 'readonly';
     case 'def': return a.void === true ? 'void-def' : 'def';
-    case 'catch': return isNone(x[2]) ? null : wordOf(x[2]);
-    case 'as': return wordOf(x[2]);
+    case 'as': return null;
   }
   return h;
 }
@@ -442,8 +439,7 @@ class Analysis {
     }
     const h = headOf(p);
     if (!isNodeP(p)) {
-      // A plumbing list spelled where a pattern stands: its first word
-      // is its head in the emitter's tree.
+      // A plumbing list where a pattern stands binds nothing.
       return out;
     }
     if (h === 'array') {
@@ -678,7 +674,7 @@ class Analysis {
       case 'while': return this.visitWhile(x, m, cs, rs);
       case 'switch': return this.visitSwitch(x, m, cs, rs);
       case 'type-decl': return this.visitTypeDecl(x, m);
-      case 'catch': case 'as': return this.visitHeadless(x, m, cs, rs);
+      case 'as': return this.visitHeadless(x, m, cs, rs);
       case 'pickitem': return this.visitPickItem(x, m, cs, rs);
       case 'return': case 'yield': case 'accept': return this.visitOptionalTail(x, m, cs, rs);
       case '..': case '...':
@@ -816,8 +812,7 @@ class Analysis {
   }
 
   visitList(x, m, cs, rs) {
-    const hv = x.length ? wordOf(x[0]) : undefined;
-    const c = Analysis.childMode(m, hv);
+    const c = Analysis.childMode(m, null);
     for (const el of x) this.visit(el, c, cs, rs);
   }
 
@@ -1543,7 +1538,7 @@ class Analysis {
       }
     }
     this.visitVars(vars, (c & ~(RN | HOIST | PLAN)) | (rn ? RN_PAT : 0) | ((m & (HOIST | HMATCH)) ? HMATCH : 0), cs);
-    if (m & PLAN) this.extra = { names: listPatternNames(vars), next: extra };
+    if (m & PLAN) this.extra = { names: this.bindingNames(vars), next: extra };
     const sm = (c & ~RN) | (rn ? RN_EXPR : 0);
     this.visit(x[3], sm, cs, rs);
     if (!isNone(x[4])) this.visit(x[4], sm, cs, rs);
@@ -1583,7 +1578,7 @@ class Analysis {
     const extra = this.extra;
     const bound = this.bindingNames(clause[2]);
     this.env = { block: bound, next: env };
-    if (m & PLAN) this.extra = { names: listPatternNames(clause[2]), next: extra };
+    if (m & PLAN) this.extra = { names: bound, next: extra };
     this.visit(x[2], ec, cs, rs);
     if (rs !== null) {
       try {
@@ -1637,7 +1632,8 @@ class Analysis {
       rs.forms = saved;
     }
     if (handler !== null) {
-      // The handler is headless: [binding, block].
+      // The handler: ["catch", binding|null, block].
+      this.visitWord('catch', c & ~RN);
       if (pattern) {
         if (rs !== null) {
           try {
@@ -1715,10 +1711,10 @@ class Analysis {
     if (!isNone(x[3])) this.visit(x[3], c, cs, rs);
   }
 
-  // catch, as: no head in the emitter's tree; the first child stands in
-  // its place.
+  // An `as` specifier: headless in the emitter's tree, its children
+  // alone.
   visitHeadless(x, m, cs, rs) {
-    const c = Analysis.childMode(m, headOf(x));
+    const c = Analysis.childMode(m, null);
     for (let i = 2; i < x.length; i++) if (!isNone(x[i])) this.visit(x[i], c, cs, rs);
   }
 
@@ -2536,34 +2532,16 @@ class Analysis {
     if (this.capAt.size !== 0 && isNodeP(x)) {
       const rec = this.capAt.get(x);
       if (rec !== undefined) return this.keep(x, this.cwScope(x, rec));
-      if (x[0] === 'block' && x.length === 3 && this.capAt.has(x[2])) return this.keep(x, this.cword('block') | this.cwBody(x[2]));
+      if (x[0] === 'block' && x.length === 3 && this.capAt.has(x[2])) return this.keep(x, this.cwBody(x[2]));
     }
     return this.cw(x);
   }
 
-  // A plumbing list: its elements, read generically.
+  // A plumbing list: its elements, read generically, the first
+  // included.
   cwList(x) {
     let bits = 0;
-    // A list whose first element spells `object` reads as an object
-    // literal in the emitter's tree: that element is no occurrence.
-    const from = x.length > 0 && wordOf(x[0]) === 'object' ? 1 : 0;
-    for (let i = from; i < x.length; i++) bits |= this.cw(x[i]);
-    return bits;
-  }
-
-  // A headless node of the emitter's tree (a catch handler, an `as`
-  // specifier): its first child stands where a head would, so a first
-  // child spelling `object` reads as an object literal's head, no
-  // occurrence.
-  cwHeadless(x, from) {
-    let bits = 0;
-    let first = true;
-    for (let i = from; i < x.length; i++) {
-      if (isNone(x[i])) { first = false; continue; }
-      if (first && wordOf(x[i]) === 'object') { first = false; continue; }
-      first = false;
-      bits |= this.cw(x[i]);
-    }
+    for (let i = 0; i < x.length; i++) bits |= this.cw(x[i]);
     return bits;
   }
 
@@ -2571,7 +2549,6 @@ class Analysis {
   cwScope(x, rec) {
     let bits = 0;
     const block = isNodeP(x) && x[0] === 'block';
-    if (block) this.cword('block');
     this.activate(rec);
     if (block) {
       for (let i = 2; i < x.length; i++) {
@@ -2624,12 +2601,12 @@ class Analysis {
         return bits;
       }
       case 'effect': {
-        let bits = this.cword('effect');
+        let bits = 0;
         if (!isNone(x[2])) bits |= this.cw(x[2]);
         bits |= this.cwEffectBody(x[3]);
         return this.isEffectDecl(x) ? bits & ~P_AWAIT : bits;
       }
-      case 'computed': if (x.length === 4) return this.cword('computed') | this.cw(x[2]) | this.cwBody(x[3]); break;
+      case 'computed': if (x.length === 4) return this.cw(x[2]) | this.cwBody(x[3]); break;
       case 'typed-var': {
         const w = wordOf(x[2]);
         if (w !== undefined && this.interest.size !== 0) this.annotate(w, x);
@@ -2681,60 +2658,64 @@ class Analysis {
         break;
       case 'loop': return this.cwLoop(x, isNone(x[6]));
       case 'comprehension': {
-        let bits = this.cword('comprehension') | this.cw(x[2]);
+        let bits = this.cw(x[2]);
         const clause = x[3];
         // The clause wrapper and the clause (no guard, no body).
         bits |= this.cwLoop(clause, true);
         // The guard stands in a one-element list.
-        if (!isNone(clause[5])) bits |= wordOf(clause[5]) === 'object' ? 0 : this.cw(clause[5]);
+        if (!isNone(clause[5])) bits |= this.cw(clause[5]);
         return bits;
       }
       case 'try': {
-        let bits = this.cword('try') | this.cw(x[2]);
+        let bits = this.cw(x[2]);
         if (!isNone(x[3])) {
+          // The handler: ["catch", binding|null, body].
           const handler = x[3];
-          // Headless: [binding, block].
-          bits |= this.cwHeadless(handler, 2);
+          if (!isNone(handler[2])) bits |= this.cw(handler[2]);
+          bits |= this.cw(handler[3]);
         }
         if (!isNone(x[4])) bits |= this.cw(x[4]);
         return bits;
       }
       case 'if': case 'while': case 'switch': case 'return': case 'yield': case 'yield-from': case 'await': case 'throw': case 'accept': case '..': case '...': {
         let bits = h === 'await' ? P_AWAIT : (h === 'yield' || h === 'yield-from') ? P_YIELD : h === 'return' ? P_RETURN | P_CTRL : h === 'throw' ? P_CTRL : 0;
-        bits |= this.cword(h);
         for (let i = 2; i < x.length; i++) if (!isNone(x[i])) bits |= this.cw(x[i]);
         return bits;
       }
-      case 'catch': case 'as': return this.cwHeadless(x, 2);
+      case 'as': {
+        let bits = 0;
+        for (let i = 2; i < x.length; i++) if (!isNone(x[i])) bits |= this.cw(x[i]);
+        return bits;
+      }
       case 'pickitem': {
         // The key and the target are occurrences to the scan, but no
         // bare `it`.
-        let bits = this.cword('pickitem') | ((this.cw(x[2]) | this.cw(x[3])) & ~P_IT);
+        let bits = (this.cw(x[2]) | this.cw(x[3])) & ~P_IT;
         if (!isNone(x[4])) bits |= this.cw(x[4]);
         return bits;
       }
-      case 'schema': return this.cword('schema');
+      case 'schema': return 0;
       case 'import': {
-        let bits = this.cword('import');
+        let bits = 0;
         if (Array.isArray(x[2]) && x[2].length === 0) bits |= this.cword('{}');
         else if (!isNone(x[2])) bits |= this.cw(x[2]);
         for (let i = 3; i < x.length; i++) if (!isNone(x[i])) bits |= this.cw(x[i]);
         return bits;
       }
       case 'export': case 'export-from': {
-        let bits = this.cword(h);
+        let bits = 0;
         if (Array.isArray(x[2]) && x[2].length === 0) bits |= this.cword('{}');
         else bits |= this.cw(x[2]);
         if (h === 'export-from') bits |= this.cw(x[3]);
         return bits;
       }
       case 'export-all': {
-        let bits = this.cword(h) | this.cw(x[2]);
+        let bits = this.cw(x[2]);
         if (!isNone(x[3])) bits |= this.cw(x[3]);
         return bits;
       }
       case 'array': case 'str': case 'here-regex': {
-        let bits = this.cword(h);
+        let bits = 0;
         const from = h === 'here-regex' ? 3 : 2;
         for (let i = 2; i < x.length; i++) {
           if (i >= from && isNone(x[i])) bits |= this.cword(h === 'array' ? ',' : '');
@@ -2745,8 +2726,9 @@ class Analysis {
     }
     const hv = headOf(x);
     if (ASSIGNS.has(hv) && x.length === 4) return this.cwAssign(x, hv);
-    // Generic: the head word, then every child.
-    let bits = hv === null ? 0 : this.cword(hv);
+    // Generic: every child; the head is the node's kind, never an
+    // occurrence, even where it spells a legal name.
+    let bits = 0;
     for (let i = 2; i < x.length; i++) bits |= this.cw(x[i]);
     return bits;
   }
@@ -2783,9 +2765,9 @@ class Analysis {
   // A loop, or a comprehension's clause, in the emitter's element order.
   cwLoop(x, clause) {
     const over = x[1].over;
-    if (over === 'forever') return this.cword('loop') | this.cw(x[6]);
-    if (over === 'times') return this.cword('loop-n') | this.cw(x[3]) | this.cw(x[6]);
-    let bits = this.cword(headOf(x)) | this.cwList(x[2]) | this.cw(x[3]);
+    if (over === 'forever') return this.cw(x[6]);
+    if (over === 'times') return this.cw(x[3]) | this.cw(x[6]);
+    let bits = this.cwList(x[2]) | this.cw(x[3]);
     if (over === 'in' && !isNone(x[4])) bits |= this.cw(x[4]);
     if (over === 'as' && x[1].await === true) bits |= P_AWAIT;
     if (clause) return bits;
@@ -3369,35 +3351,6 @@ function predicateBits(x) {
     bits |= predicateBits(el);
   }
   return bits;
-}
-
-// The names the planner takes from a loop's or clause's variable list:
-// the emitter reads the list itself as a pattern, so only a list whose
-// first variable spells a pattern head yields any (`array` its other
-// variables; `rest`, `default`, `...` and `=` the second).
-function listPatternNames(vars) {
-  const names = new Set();
-  const head = vars.length > 0 ? wordOf(vars[0]) : undefined;
-  const add = (p) => {
-    if (isNone(p)) return;
-    const w = wordOf(p);
-    if (w !== undefined) { if (w !== ',' && !PATTERN_LITERALS.has(w)) names.add(w); return; }
-    if (!isNodeP(p)) return;
-    const h = headOf(p);
-    if (h === 'array') for (let i = 2; i < p.length; i++) add(p[i]);
-    else if (h === 'object') {
-      for (let i = 2; i < p.length; i++) {
-        const pair = p[i];
-        if (!isNodeP(pair)) continue;
-        const ph = headOf(pair);
-        if (ph === null || ph === ':') add(pair[3]);
-        else if (ph === '=' || ph === '...') add(pair[2]);
-      }
-    } else if (h === 'rest' || h === '...' || h === 'default' || h === '=') add(p[2]);
-  };
-  if (head === 'array') for (let i = 1; i < vars.length; i++) add(vars[i]);
-  else if ((head === 'rest' || head === 'default' || head === '...' || head === '=') && vars.length > 1) add(vars[1]);
-  return names.size === 0 ? EMPTY_SET : names;
 }
 
 // The optional link a write target's spine carries (its own link or

@@ -338,20 +338,19 @@ describe('scope facts: declare in place and its scan', () => {
     expect(none.inPlace.size).toBe(0);
   });
 
-  test('a target spelled like a head of the emitter\'s tree is read wherever that head stands', () => {
-    // `str` heads every interpolated string: its value reads it first.
+  test('a head of the emitter\'s tree is the node\'s kind, never a read of the name it spells', () => {
+    // `str` heads every interpolated string; the write still declares in place.
     const h = hoistOf('f = ->\n  str = "x#{y}"\n  s2 = "x#{y}"\n  str + s2\n').find('->');
-    expect([...h.inPlace.keys()]).toEqual(['s2']);
+    expect([...h.inPlace.keys()]).toEqual(['s2', 'str']);
   });
 
-  test('a headless node whose first child spells `object` reads as an object literal: no occurrence there', () => {
-    // A v1-fidelity pin: the scan reads [object, …] by its head, so the
-    // guard's read of `object` goes unseen and the later write declares
-    // in place (a TDZ read at runtime; a v1 defect a later v1 PR fixes).
+  test('a headless array\'s first element is a child: a name there spelled `object` is read', () => {
+    // The guard reads `object` before its write, and the nested handler's
+    // binding is an occurrence there: both writes stay hoisted.
     const guard = hoistOf('x = (k for c in xs when object)\nobject = 1\n').find(null);
-    expect([...guard.inPlace.keys()]).toEqual(['object', 'x']);
+    expect([...guard.inPlace.keys()]).toEqual(['x']);
     const handler = hoistOf('object = ->\n  try\n    g()\n  catch object\n    log 1\n').find(null);
-    expect([...handler.inPlace.keys()]).toEqual(['object']);
+    expect([...handler.inPlace.keys()]).toEqual([]);
   });
 
   test('a nested write marks the name nested; a pattern binding records its accessor path', () => {
@@ -398,9 +397,9 @@ describe('scope facts: temp sites', () => {
   // patternNames, which reads no name from it, so a re-read loop
   // variable captures (a conservative temp, a v1 defect a later v1 PR
   // removes); this row moves with that fix.
-  test('loop variables are never repeat-safe to the planner; a catch pattern\'s names are, a plain catch binding\'s not', () => {
-    const { find, text } = hoistOf('f = ->\n  for x in xs\n    x?.p = 1\n  try\n    t()\n  catch e\n    e?.p = 1\n  try\n    t()\n  catch {k}\n    k?.p = 1\n  null\n');
-    expect(find('->').plans.map((p) => text(p.node))).toEqual(['x?.p = 1', 'e?.p = 1']);
+  test('loop variables and a catch pattern\'s names are repeat-safe to the planner; a plain catch binding is not', () => {
+    const { find, text } = hoistOf('f = ->\n  for x, i in xs\n    x?.p = 1\n    i?.p = 1\n  try\n    t()\n  catch e\n    e?.p = 1\n  try\n    t()\n  catch {k}\n    k?.p = 1\n  null\n');
+    expect(find('->').plans.map((p) => text(p.node))).toEqual(['e?.p = 1']);
   });
 
   test('a synthesized compound captures its object and key unless repeat-safe', () => {
