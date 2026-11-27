@@ -1310,12 +1310,12 @@ describe('structured-type validation', () => {
     ]) {
       expect(parser.parse(ok).diagnostics).toEqual([]);
     }
-    // The code shape stays loud — the call is the rejection, not the
-    // word: `foo`'s unspaced `(` scans CALL_START, which is not type
-    // vocabulary. (`this()` alone reads as THIS + a grouping-paren pair
-    // — vocabulary-shaped junk TEXT, which stays opaque for the checker
-    // to diagnose, the `'T: U'` precedent.)
-    expect(() => tokenize('interface Bad\n  a: this.foo()\nz = 1')).toThrow(/in a type body/);
+    // The code shape stays loud: a member of `this` outside `typeof` is a
+    // value read, rejected at the member before the call is reached.
+    // (`this()` alone reads as THIS + a grouping-paren pair —
+    // vocabulary-shaped junk TEXT, which stays opaque for the checker to
+    // diagnose, the `'T: U'` precedent.)
+    expect(() => tokenize('interface Bad\n  a: this.foo()\nz = 1')).toThrow(/2:10: a member read off a value \('\.foo'\) in a type/);
     // `this` outside the predicate's subject slot buys `is` nothing:
     // between two completed atoms it is still rip's comparison.
     expect(() => tokenize('type Bad = { a: string is this }')).toThrow(/code expression \('is'\) in a type body/);
@@ -1814,6 +1814,9 @@ describe('the types entry', () => {
       // Each entry: the run's raw text, and why it is no type the grammar reads.
       const PINNED = new Map([
         ['() => Foo<T = number>', 'a default inside type arguments: the mutation-audit pin in test/rip/types.rip keeps it compiling, and the checker owns the verdict'],
+        ['import("m"). T', 'a member of an import type: the type grammar reads `import("m")` bare, and the face prints the member'],
+        ['import("m", { with: { "resolution-mode": "import" } }). T', 'an import type with attributes: the type grammar reads one string argument'],
+        ['typeof this . a . b', 'a type query on a member of this: the type grammar\'s query reads a name'],
       ]);
       const root = join(import.meta.dir, '../..');
       const found = new Set();
