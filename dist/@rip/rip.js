@@ -10094,7 +10094,8 @@ ${baseline}`).join(`
     }
     if (ch === ":" && IDENT_START.test(text[pos + 1] ?? "") && !insideTypeBody() && !aliasHeadOpen()) {
       const prevTok = tokens[tokens.length - 1];
-      const structural = prevTok !== undefined && (prevTok.kind === "PROPERTY" || prevTok.kind === ")" || prevTok.kind === "]" || prevTok.kind === "}" || prevTok.kind === "CALL_END" || prevTok.kind === "INDEX_END" || prevTok.kind === "PARAM_END" || prevTok.kind === "PICK_END" || prevTok.kind === "STRING" || prevTok.kind === "STRING_END" || prevTok.kind === "NUMBER" || prevTok.kind === "REGEX" || prevTok.kind === "HEREGEX_END" || prevTok.kind === "BOOL" || prevTok.kind === "NULL" || prevTok.kind === "UNDEFINED" || prevTok.kind === "DAMMIT" || prevTok.kind === "?" || prevTok.kind === "MAYBE_DAMMIT" || prevTok.kind === "OPT_MARKER" || prevTok.kind === "THIS" || prevTok.kind === "@" || prevTok.kind === "SYMBOL" || ternary.pending && prevTok.kind === "IDENTIFIER");
+      const callsArgument = pendingSpaced && prevTok !== undefined && IMPLICIT_FUNC.has(prevTok.kind) && !ternary.pending;
+      const structural = prevTok !== undefined && !callsArgument && (prevTok.kind === "PROPERTY" || prevTok.kind === ")" || prevTok.kind === "]" || prevTok.kind === "}" || prevTok.kind === "CALL_END" || prevTok.kind === "INDEX_END" || prevTok.kind === "PARAM_END" || prevTok.kind === "PICK_END" || prevTok.kind === "STRING" || prevTok.kind === "STRING_END" || prevTok.kind === "NUMBER" || prevTok.kind === "REGEX" || prevTok.kind === "HEREGEX_END" || prevTok.kind === "BOOL" || prevTok.kind === "NULL" || prevTok.kind === "UNDEFINED" || prevTok.kind === "DAMMIT" || prevTok.kind === "?" || prevTok.kind === "MAYBE_DAMMIT" || prevTok.kind === "OPT_MARKER" || prevTok.kind === "THIS" || prevTok.kind === "@" || prevTok.kind === "SYMBOL" || ternary.pending && prevTok.kind === "IDENTIFIER");
       if (!structural) {
         const end2 = symbolNameEnd(text, pos + 1);
         push("SYMBOL", text.slice(pos + 1, end2), pos, end2);
@@ -36128,7 +36129,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "b42aa24901ec7419";
+var compilerBuild = () => "fbe7b3098ce66447";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

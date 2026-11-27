@@ -46,7 +46,7 @@ const ACCESSOR_HEAD = new RegExp(`^[ \\t]+(get|set)[ \\t]+(?=${IDENT_START.sourc
 // tagPostfixConditionals) stay here — they never add tokens.
 import {
   implicitBlocks, implicitObjects, implicitCalls,
-  PASS_OPENERS, PASS_CLOSERS, TernaryClaims,
+  PASS_OPENERS, PASS_CLOSERS, TernaryClaims, IMPLICIT_FUNC,
 } from './implicit.js';
 // The type-annotation collapse pass, plus the four type-shape
 // predicates the SCANNER consults: a trailing `<` continues a line only
@@ -2949,13 +2949,18 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     // where the
     // colon CANNOT be structural: after a value-ending token the
     // colon is a key/annotation/ternary colon (`{a:b}`, `x:number`,
-    // `c ? a :b` all keep their readings). A schema's kind and its
+    // `c ? a :b` all keep their readings). A SPACED colon after a
+    // callable head is the argument of an implicit call, never a key —
+    // `x.y :z`, `@y :z` and `x[0] :z` call as `f :z` does — unless a
+    // pending ternary claims it (`c ? x.y :z`). A schema's kind and its
     // body's symbols are schema mode's own. Type bodies use colons
     // structurally and never mint.
     if (ch === ':' && IDENT_START.test(text[pos + 1] ?? '') &&
         !insideTypeBody() && !aliasHeadOpen()) {
       const prevTok = tokens[tokens.length - 1];
-      const structural = prevTok !== undefined && (
+      const callsArgument = pendingSpaced && prevTok !== undefined &&
+        IMPLICIT_FUNC.has(prevTok.kind) && !ternary.pending;
+      const structural = prevTok !== undefined && !callsArgument && (
         prevTok.kind === 'PROPERTY' ||
         prevTok.kind === ')' || prevTok.kind === ']' || prevTok.kind === '}' ||
         prevTok.kind === 'CALL_END' || prevTok.kind === 'INDEX_END' ||

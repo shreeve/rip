@@ -108,3 +108,62 @@ code 'a symbol key in an object literal', 'o = { :sym: 1 }', 'let o = {[Symbol.f
 test 'a symbol-keyed property reads back', 'o = { :k: 5 }\no[:k]', 5
 fail 'a bound symbol-keyed method rejects', 'class A\n  constructor: ->\n  :sym: => 1', 'symbol-keyed method cannot be bound'
 fail 'a symbol name stops at a hyphen before a digit', 'x = :a-1', 'Cannot convert a symbol'
+
+# ==============================================================================
+# A spaced symbol after ANY callable head is a call argument, as it is
+# after a name (`f :z`): a member, an `@` member, an index, a call
+# result, a dammit or an existence check. A tight colon keys, a spaced
+# colon with a spaced value pairs, and a pending ternary keeps its
+# else-colon.
+# ==============================================================================
+
+code 'a member before a spaced symbol calls', 'x.y :z', 'x.y(Symbol.for("z"));'
+code 'a member call assigns', 'o = x.y :z', 'let o = x.y(Symbol.for("z"));'
+code 'a member call in a function body', 'g = -> x.y :z', '''
+  let g = function() {
+    return x.y(Symbol.for("z"));
+  };
+  '''
+code 'a member call takes more arguments', 'g = -> x.y :z, 1', '''
+  let g = function() {
+    return x.y(Symbol.for("z"), 1);
+  };
+  '''
+code 'an @ member call in a function body', 'g = -> @y :z', '''
+  let g = function() {
+    return this.y(Symbol.for("z"));
+  };
+  '''
+code 'an index call in a function body', 'g = -> x[0] :z', '''
+  let g = function() {
+    return x[0](Symbol.for("z"));
+  };
+  '''
+code 'an @ member before a spaced symbol calls', '@y :z', 'this.y(Symbol.for("z"));'
+code 'an index before a spaced symbol calls', 'x[0] :z', 'x[0](Symbol.for("z"));'
+code 'a call result before a spaced symbol calls', 'f() :z', 'f()(Symbol.for("z"));'
+code 'a dammit member before a spaced symbol calls', 'x.y! :z', 'await x.y(Symbol.for("z"));'
+code 'an existence member before a spaced symbol calls optionally', 'x.y? :z', 'x.y?.(Symbol.for("z"));'
+code 'an optional-chain member before a spaced symbol calls', 'x?.y :z', 'x?.y(Symbol.for("z"));'
+code 'a member call under postfix if', 'x.y :z if c', 'if (c) x.y(Symbol.for("z"));'
+code 'a member call as an argument', 'f x.y :z', 'f(x.y(Symbol.for("z")));'
+code 'a member call with two symbols', 'x.y :z, :w', 'x.y(Symbol.for("z"), Symbol.for("w"));'
+code 'a member call inside a ternary branch group', 'c ? (x.y :z) : w', '(c ? x.y(Symbol.for("z")) : w);'
+test 'a member call passes the symbol', 'x = {y: (s) -> s.description}\nx.y :hello', 'hello'
+test 'an index call passes the symbol', 'x = [(s) -> s.description]\nx[0] :hi', 'hi'
+test 'an @ member call passes the symbol', 'class A\n  y: (s) -> s.description\n  run: -> @y :ok\nA.new().run()', 'ok'
+
+code 'a bare key still pairs', 'x: z', '({x: z});'
+code 'a quoted dotted key still pairs', '"x.y": z', '({"x.y": z});'
+code 'a dotted key still pairs', 'x.y: z', '({"x.y": z});'
+code 'a tight dotted key still pairs', 'x.y:z', '({"x.y": z});'
+code 'a spaced dotted pair still pairs', 'x.y : z', '({"x.y": z});'
+code 'a class-body @ key is an annotated static field', 'class A\n  @y: z', '''
+  class A {
+    static y;
+  }
+  '''
+code 'a ternary keeps the else-colon after a member', 'c ? x.y :z', '(c ? x.y : z);'
+code 'a ternary keeps the else-colon after an @ member', 'c ? @y :z', '(c ? this.y : z);'
+code 'a ternary keeps the else-colon after an index', 'c ? x[0] :z', '(c ? x[0] : z);'
+code 'a ternary keeps the else-colon after a call', 'c ? f() :z', '(c ? f() : z);'

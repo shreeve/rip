@@ -26819,6 +26819,180 @@
   "tolerant": "11t9w0qgm5h0c",
   "complete": "6j7t1thlgyju"
  },
+ "row symbols.rip › code a member before a spaced symbol calls": {
+  "tokens": "2k5qeo1v5okmt",
+  "tree": "jcci1fw96xhd",
+  "tolerant": "1jwl1x6p8yzv6",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a member call assigns": {
+  "tokens": "1ts8s02pzj20",
+  "tree": "2szazq6izaowp",
+  "tolerant": "icfpqgngez8h",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a member call in a function body": {
+  "tokens": "216i94nabijcy",
+  "tree": "33pzhuxnqurv9",
+  "tolerant": "3rxc4u1eigp5w",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a member call takes more arguments": {
+  "tokens": "syp5rzphu03y",
+  "tree": "36jewuv09pewh",
+  "tolerant": "c4kdkyes8qt1",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code an @ member call in a function body": {
+  "tokens": "207nz90ua2lmw",
+  "tree": "3k1c3lsolb702",
+  "tolerant": "3rzr343hj7n87",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code an index call in a function body": {
+  "tokens": "si8olg39njkf",
+  "tree": "128y2fpq5cm8q",
+  "tolerant": "3g73pltnsmn0t",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code an @ member before a spaced symbol calls": {
+  "tokens": "12jhln7oeay24",
+  "tree": "8nodjob0iy3o",
+  "tolerant": "g46kgll33grg",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code an index before a spaced symbol calls": {
+  "tokens": "3qgmvw9qvopzc",
+  "tree": "pwlxsb4plc36",
+  "tolerant": "471e2j7phim9",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a call result before a spaced symbol calls": {
+  "tokens": "3fuqn67bmgl2e",
+  "tree": "1qoa5ty2scz7e",
+  "tolerant": "2wk07222ff2fl",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a dammit member before a spaced symbol calls": {
+  "tokens": "3ugumlrhsavqz",
+  "tree": "2dygmkawff24h",
+  "tolerant": "3ihrb3khouxie",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code an existence member before a spaced symbol calls optionally": {
+  "tokens": "3ja8kbodda385",
+  "tree": "mu9cqx0mj3hs",
+  "tolerant": "1xcfiy9tnkyth",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code an optional-chain member before a spaced symbol calls": {
+  "tokens": "2g3b1zh9nfyqy",
+  "tree": "25aeav1usg0dx",
+  "tolerant": "9doy329y06fw",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a member call under postfix if": {
+  "tokens": "3nf5dxtb2ddve",
+  "tree": "2iuq6jgsnb41",
+  "tolerant": "2kjbyd3bzqelz",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a member call as an argument": {
+  "tokens": "e1ut0ip6ukci",
+  "tree": "30d05g4b94l54",
+  "tolerant": "17s8snemi222g",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a member call with two symbols": {
+  "tokens": "tyez3ttjldxn",
+  "tree": "2chn6c7pdnty8",
+  "tolerant": "1m5mlh6bhuwpx",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a member call inside a ternary branch group": {
+  "tokens": "34ih8m1a97gmy",
+  "tree": "ymn7wdy8luhq",
+  "tolerant": "b21pip0d59ek",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › test a member call passes the symbol": {
+  "tokens": "48loon5hy95g",
+  "tree": "2n3mo1nbwrnei",
+  "tolerant": "1t3p3t33aimw2",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › test an index call passes the symbol": {
+  "tokens": "2j8wkkxqk1e8x",
+  "tree": "1v05sr9j880jk",
+  "tolerant": "2zt2mptmcrmy2",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › test an @ member call passes the symbol": {
+  "tokens": "1zchmsxh0zvgv",
+  "tree": "2j8sxdwv15v0",
+  "tolerant": "2ozb5yl5p9shl",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a bare key still pairs": {
+  "tokens": "t81gfuru4n5j",
+  "tree": "grnrdb6xi5v4",
+  "tolerant": "3rh9po9i4200t",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a quoted dotted key still pairs": {
+  "tokens": "e5yraj3xv14b",
+  "tree": "dj59yquimj58",
+  "tolerant": "x832djfydvdj",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a dotted key still pairs": {
+  "tokens": "2jm4hdhp558ep",
+  "tree": "32tvpzyrfbpdn",
+  "tolerant": "3c4hvmtf3dvkf",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a tight dotted key still pairs": {
+  "tokens": "ja37n5v04ld3",
+  "tree": "1hz8ftet0rymc",
+  "tolerant": "3jk8azeyrgkic",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a spaced dotted pair still pairs": {
+  "tokens": "2zvikgcaf7pw",
+  "tree": "13181nf11f20b",
+  "tolerant": "lp3x8o3rew1o",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a class-body @ key is an annotated static field": {
+  "tokens": "34di0d5vmijih",
+  "tree": "1500ajrn2aotf",
+  "tolerant": "2g2c5y4kmga5n",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a ternary keeps the else-colon after a member": {
+  "tokens": "1ubvegzfw7hqr",
+  "tree": "lrbiimp1gu1c",
+  "tolerant": "r9ru72h3si91",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a ternary keeps the else-colon after an @ member": {
+  "tokens": "3h1ditof7joy2",
+  "tree": "2d0i7ufdy79eh",
+  "tolerant": "2uvq0n41dxf6s",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a ternary keeps the else-colon after an index": {
+  "tokens": "arz7kn4rldtl",
+  "tree": "36imsf0lbgspe",
+  "tolerant": "2yu7dt9ae6dh3",
+  "complete": "6j7t1thlgyju"
+ },
+ "row symbols.rip › code a ternary keeps the else-colon after a call": {
+  "tokens": "3iu9etd1xf8yl",
+  "tree": "1xzxdwcixhc77",
+  "tolerant": "wq91htxo5voc",
+  "complete": "6j7t1thlgyju"
+ },
  "row types.rip › code typed variable": {
   "tokens": "2nc1px6knt30y",
   "tree": "p362z7unzkp6",
