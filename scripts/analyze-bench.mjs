@@ -14,20 +14,37 @@
 //   runs untimed), collectTypeOnlyImports, collectAppAccessors, every
 //   pushReactiveFrame (the frame collectors, the redeclaration check,
 //   declaredNames/declaredClassNames/importedSpecs/exportedConstNames),
-//   the single-expression effect's checkScopeRedeclarations, and the
-//   atom collection loop. emitterShape (the converter analyze.js makes
-//   unnecessary) is timed on its own. programScopeNames and
-//   inventoryBindings run hoistTargets, which also mints chain temps
-//   and reference plans (4.1b's facts), so the group slightly favors
-//   analyze.js.
+//   the single-expression effect's checkScopeRedeclarations, the atom
+//   collection loop; and the scope facts: every scopedHoist (its
+//   hoistTargets walk, the reference planner, applyDeclareInPlace and
+//   its captureScan), the program's own hoistTargets and
+//   applyDeclareInPlace calls, classFieldValue's planReferenceTemps,
+//   and the predicates — containsAwait and containsYield through their
+//   emitter entry points, containsBareIt, containsReturn and
+//   containsCtrl at their call sites, so no recursion runs through a
+//   timer. emitterShape (the converter analyze.js makes unnecessary) is
+//   timed on its own.
+//
+// The group also does work analyze.js leaves to emission, which favors
+// analyze.js: temp-name minting (chainTemp/freshTempName, the planner's
+// loopTempName and used-name reservations), attachSchemaConsts, the TS
+// face's directive bookkeeping in hoistTargets, and applyDeclareInPlace's
+// component type text and pin keys. v1's walks also run interleaved with
+// emission, analyze.js in a tight loop. The timers' own calls nested in
+// a timed region (about 1% of the group) are not subtracted.
 //
 // Rounds interleave the two sides (alternating which goes first) and
 // each side reports its fastest round. Both sides read one Stores per
 // program built outside the timing (v1 builds its own inside emit(),
 // outside the group); Stores construction is reported on its own. The
-// group's per-call timer cost is calibrated and subtracted. Retained
-// size is each side's construction held for the whole population after
-// a full collection: analyze.js's facts against emitterShape's trees.
+// group's per-call timer cost is calibrated and subtracted.
+//
+// Retained size is held for the whole population after a full
+// collection: analyze.js's facts against every value v1's fact sink
+// receives for the same programs (the facts the differential compares,
+// as v1 computes them), net of the recording itself (see the sink
+// below). v1's values point into its converted tree, so that figure
+// carries the emitterShape trees, reported alone beside it.
 import { writeFileSync, readFileSync, rmSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -43,7 +60,15 @@ const root = join(import.meta.dir, '..');
 const rounds = Number(process.argv[2] ?? 7);
 if (!Number.isInteger(rounds) || rounds < 1) throw new Error(`analyze-bench: rounds must be a whole number, got ${process.argv[2]}`);
 
-const METHODS = ['collectTypeOnlyImports', 'collectAppAccessors', 'pushReactiveFrame', 'checkScopeRedeclarations'];
+const METHODS = ['collectTypeOnlyImports', 'collectAppAccessors', 'pushReactiveFrame', 'checkScopeRedeclarations',
+  'scopedHoist', 'hoistTargets', 'applyDeclareInPlace', 'captureScan', 'planReferenceTemps', 'containsAwait', 'containsYield'];
+// Predicates whose recursion calls the entry point itself: timed where
+// the emitter calls them.
+const CALL_SITES = [
+  ['Emitter.containsBareIt(block)', "__time('walks', Emitter.containsBareIt, null, [block])"],
+  ['Emitter.containsReturn(stmt)', "__time('walks', Emitter.containsReturn, null, [stmt])"],
+  ['Emitter.containsCtrl(stmt)', "__time('walks', Emitter.containsCtrl, null, [stmt])"],
+];
 const FUNCS = ['deliveryTrees', 'runtimeAliasBindings', 'programScopeNames', 'inventoryBindings'];
 const DELIVERY_REFS = 'referencesNames(tree, unboundSet, stores, isDecl)';
 const ATOMS = `  for (const { tree, atoms } of trees) {
@@ -64,6 +89,10 @@ function instrument() {
     "import { emitterShape as __shape } from './emitter-shape.js';\nconst emitterShape = (...a) => __time('shape', __shape, null, a);");
   if (!t.includes(DELIVERY_REFS)) throw new Error('analyze-bench: src/emitter.js has no delivery reference walk');
   t = t.replace(DELIVERY_REFS, "__time('walks', referencesNames, null, [tree, unboundSet, stores, isDecl])");
+  for (const [site, timed] of CALL_SITES) {
+    if (t.split(site).length !== 2) throw new Error(`analyze-bench: src/emitter.js has no single call site '${site}'`);
+    t = t.replace(site, timed);
+  }
   t = t.replace(/^class Emitter /m, 'export class Emitter ');
   const src = pathToFileURL(join(root, 'src')).href;
   t = t.replace(/ from '\.\//g, ` from '${src}/`);
@@ -171,13 +200,40 @@ for (const face of ['js', 'ts']) {
   const h1 = heap();
   const shapes = pop.map((p) => emitterShape(p.result.sexpr, new WeakMap()));
   const h2 = heap();
+  shapes.length = 0;
+  const h3 = heap();
+  // The sink's values, without what recording them costs: an event
+  // with no value ('collect') is skipped, the tuples the hook allocates
+  // to hand over a declaring node or a predicate's verdict are unpacked,
+  // a delivery tree's record keeps its tree and atoms (its Stores is no
+  // fact), and the recording arrays themselves are measured apart and
+  // subtracted.
+  const sunk = pop.map((p) => {
+    const values = [];
+    const keep = (kind, key, value) => {
+      if (kind === 'collect') return;
+      if (kind === 'declares') values.push(value[0], value[1]);
+      else if (kind === 'predicate') values.push(value[1]);
+      else values.push(key, kind === 'trees' ? value.map(({ tree, atoms }) => [tree, atoms]) : value);
+    };
+    V1.emit(p.result, { source: p.source, face, dataPayload: p.dataPayload, modulePath: p.path, facts: keep });
+    return values;
+  });
+  const h4 = heap();
+  const lengths = sunk.map((v) => v.length);
+  sunk.length = 0;
+  const h5 = heap();
+  const slot = {};
+  const arrays = lengths.map((n) => { const a = []; for (let i = 0; i < n; i++) a.push(slot); return a; });
+  const h6 = heap();
+  arrays.length = 0;
+  const sinkMB = ((h4 - h3) - (h6 - h5)) / 1e6;
 
   console.log(`\nface ${face}: ${pop.length} programs, best of ${rounds} interleaved rounds`);
   console.log(`  v1 replaced walks      ${fmt(walks)} (${best1.calls} timed calls, ${(cost * 1e6).toFixed(0)} ns each subtracted)`);
   console.log(`  v1 emitterShape        ${fmt(best1.shape)}`);
   console.log(`  analyze.js             ${fmt(bestA)}  = ${(100 * bestA / walks).toFixed(1)}% of the replaced walks, ${(100 * bestA / base).toFixed(1)}% of walks + emitterShape`);
   console.log(`  Stores construction    ${fmt(storesMs)} (shared by both sides, outside both timings)`);
-  console.log(`  retained               analyze.js facts ${((h1 - h0) / 1e6).toFixed(1)} MB; emitterShape trees ${((h2 - h1) / 1e6).toFixed(1)} MB`);
+  console.log(`  retained               analyze.js facts ${((h1 - h0) / 1e6).toFixed(1)} MB; v1 sink values ${sinkMB.toFixed(1)} MB (recording arrays ${((h6 - h5) / 1e6).toFixed(1)} MB subtracted), of which emitterShape trees ${((h2 - h1) / 1e6).toFixed(1)} MB`);
   held.length = 0;
-  shapes.length = 0;
 }
