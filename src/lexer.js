@@ -41,9 +41,9 @@ import { IDENT_START, IDENT_PART, isIdentifierName, identifierMatches, identifie
 // classes so a word that merely starts with `not` or a name stays a word.
 const NOT_WORD = new RegExp(`^[ \\t]+not(?!${IDENT_PART.source})`);
 const ACCESSOR_HEAD = new RegExp(`^[ \\t]+(get|set)[ \\t]+(?=${IDENT_START.source}|[@"'])`);
-// The three insertion passes; each applies itself. The retag passes
-// (retagTape, tagCompoundKeys, tagPostfixConditionals) stay here — they
-// never add tokens.
+// The three insertion passes; each applies itself. The passes that never
+// add tokens (retagTape, tagCompoundKeys, tagPostfixConditionals) stay
+// here.
 import {
   implicitBlocks, implicitObjects, implicitCalls,
   NESTING, TernaryClaims, IMPLICIT_FUNC,
@@ -58,12 +58,14 @@ import {
 } from './types.js';
 
 // ── Pipeline: post-scan passes ──────────────────────────────────────────
-// A retag pass takes the finished TokenTape and changes token KINDS in
-// place — never inserts or deletes records — so tape indices and origins
-// stay stable by construction. Passes that add tokens collect their
-// insertions against original indices and apply them in one backward
-// merge (the runner in ./implicit.js, and finishLayout's commas), never
-// by a splice per insertion.
+// A retag pass (retagTape, tagPostfixConditionals) takes the finished
+// TokenTape and changes token KINDS in place — never inserts or deletes
+// records — so tape indices and origins stay stable by construction.
+// The passes that change the tape's length do it without a splice per
+// change: rewriteTypes and rewriteRender build a fresh array; the
+// implicit passes and finishLayout's commas collect insertions against
+// original indices and apply them in one backward merge. tagCompoundKeys
+// is the exception: it collapses each compound key with one splice.
 
 // The three retags the scanner's tape needs before any rewrite pass,
 // in ONE forward walk: arrow parameter lists, dynamic keys and
