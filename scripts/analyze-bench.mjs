@@ -1,8 +1,8 @@
 // analyze.js against exactly the v1 walks it replaces, over the
 // consumer corpus: every program both v1 emits and analyze.js accepts,
-// per face. Run it under the timing lane:
+// per face. Run it on a quiet machine:
 //
-//   cpuq drain --label rip:timing --max 10m -- bun scripts/analyze-bench.mjs [rounds]
+//   bun scripts/analyze-bench.mjs [rounds]
 //
 // The v1 side is an instrumented copy of src/emitter.js (written to a
 // temporary directory, its imports pointed back at src/) whose replaced

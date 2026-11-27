@@ -7,8 +7,7 @@
 //
 //   bun scripts/emit-bench.mjs [rounds]
 //
-// Run it under cpuq's timing lane (AGENTS.md "Heavy commands run under
-// cpuq"); numbers from a loaded machine rank, they do not measure.
+// Run it on a quiet machine: numbers from a loaded machine rank, they do not measure.
 import { join } from 'node:path';
 import { parseSource } from '../src/compiler.js';
 import { emit as emitV1 } from '../src/emitter.js';
