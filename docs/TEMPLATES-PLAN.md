@@ -17,7 +17,7 @@ sites, email).
 
 - **No layer owns template structure.** The grammar has only
   `Render → RENDER Block | RENDER Expression` (src/grammar/grammar.rip
-  ~975). The lexer (`inRender`, `renderCodeFloor`, `renderParenDepth`),
+  ~975). The lexer (its `render` and `render-code` mode frames),
   the render rewriter (src/render.js, with its own `inRender`) and the
   emitter each decide where a template starts and ends and what a token
   means, and they disagree. An inline `render div "x"` never closes for

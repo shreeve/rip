@@ -1035,7 +1035,7 @@ describe('statement-erasure pins: aliases, empty blocks, generic tails', () => {
 
   test('wrapped generics: a tail generic spanning body LINES still ends the body', () => {
     // The tail classifier must not bail at a line boundary with
-    // unbalanced angles — the type-body floor answers O(1) for
+    // unbalanced angles — the `type` mode frame answers O(1) for
     // anything at or beyond a `type … =`/`interface` body indent,
     // wraps included. The silent-erasure shape (follower fits the
     // vocabulary):
@@ -1123,7 +1123,7 @@ describe('structured-type validation', () => {
     expect(() => tokenize('x = `nope`')).toThrow(/cannot tokenize '`'/);
     // The literal stays on one line: consuming a newline would carry
     // the scan past an indentation boundary the indent stack never
-    // sees, and the type-body floor reads that stack.
+    // sees, and the `type` mode frame reads that stack.
     expect(() => tokenize('type T = `a\nz = 1')).toThrow(/stays on one line/);
     expect(() => tokenize('type T = `abc')).toThrow(/never closes/);
     // An ESCAPE must not swallow the line break either. A scan that

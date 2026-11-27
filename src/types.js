@@ -768,7 +768,7 @@ const looksLikeBareFunctionType = (tokens, a, b) => {
 // (`<…>`; `>>`/`>>>` close two/three levels), returning the index
 // AFTER the close — j unchanged when no group opens there, -1 when
 // the group breaks its line (generic HEADS are one-line; bodies wrap
-// through the type-body floor instead).
+// through the scanner's `type` mode frame instead).
 const skipAngleGroup = (tokens, j) => {
   if (!(tokens[j]?.kind === 'COMPARE' && tokens[j].value === '<' && !tokens[j].spaced)) return j;
   let depth = 0;
@@ -824,7 +824,7 @@ export const typeAliasEq = (tokens, eqIdx) => {
 // but a generic close in a type run ends its logical line.
 //
 // Two answers, cheapest first:
-//   BLOCK BODIES — `inTypeBody` (the scanner's type-body floor): at
+//   BLOCK BODIES — `inTypeBody` (the scanner's `type` mode frame): at
 //     or beyond the indent a verified `type … =` / `interface Name`
 //     head opened, EVERYTHING is type text, so a trailing generic
 //     close always ends its line — O(1), no walk. This is the only

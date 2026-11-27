@@ -541,10 +541,71 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   let lastNewlinePos = -1; // offset of the newline that ended the previous LOGICAL line
   let pendingSpaced = false;
   let pendingNewLine = false;
-  // FOR seen on the current logical line, held as the bracket depth at
-  // the FOR so the state survives newlines inside brackets opened after
-  // it (`for x in [1,\n2]`); null = no pending FOR.
-  let seenFor = null;
+  // The scanner's mode stack: one frame per open context that changes
+  // how a word or glyph scans, in opening order. Every context opens,
+  // closes and is asked about here, and each frame closes by its own
+  // rule:
+  //   render       RENDER opens it at the current indent depth and
+  //                bracket count; a line back at (or above) that depth
+  //                leaves it. A RENDER inside it restarts it at the new
+  //                depth. Inside, a TIGHT `#word` is element-id syntax
+  //                (spaced `# word` stays a comment) and `.class-name`
+  //                chains consume tight hyphens.
+  //   render-code  inside render, a function body (`@click: ->` +
+  //                INDENT) is code, not template, until indentation
+  //                drops below it; leaving render ends it too.
+  //   type         a `type Name =` / `interface Name` head's block body:
+  //                every line at or beyond it is TYPE TEXT, until
+  //                indentation drops below it.
+  //   class        a block whose opening line carries CLASS (or
+  //   component    COMPONENT), until indentation drops below it.
+  //   import       an import (or export) statement: the contextual
+  //   export       keywords `as`/`from`/`default` tag only inside one,
+  //                so `from = 1` and `as = 2` stay identifiers. It
+  //                survives line breaks inside brackets, so a multiline
+  //                specifier list still retags the `from` after its
+  //                closing brace; a line start outside every bracket
+  //                ends it.
+  //   for          FOR on the current logical line, pinned to the
+  //                bracket count at the FOR so it survives newlines
+  //                inside brackets opened after it (`for x in [1,\n2]`).
+  //                The connector (`in`/`of`/`as`) ends it, a FOR replaces
+  //                it, and a line start at or below its bracket count
+  //                ends it.
+  // Frames carry `depth` (indents.length when the frame opened; for a
+  // block frame, the depth of the block it owns) and `parens`
+  // (parens.length when it opened). `openModes` counts the open frames
+  // of each kind, so asking whether one is open is one lookup.
+  const modes = [];
+  const openModes = { render: 0, 'render-code': 0, type: 0, class: 0, component: 0, import: 0, export: 0, for: 0 };
+  const inMode = (kind) => openModes[kind] > 0;
+  const modeFrame = (kind) => {
+    if (openModes[kind] === 0) return null;
+    for (let k = modes.length - 1; k >= 0; k--) if (modes[k].kind === kind) return modes[k];
+    return null;
+  };
+  const openMode = (kind) => {
+    const frame = { kind, depth: indents.length, parens: parens.length };
+    modes.push(frame);
+    openModes[kind]++;
+    return frame;
+  };
+  const closeMode = (k) => {
+    openModes[modes[k].kind]--;
+    modes.splice(k, 1);
+  };
+  const closeModeKind = (kind) => {
+    if (openModes[kind] === 0) return;
+    for (let k = modes.length - 1; k >= 0; k--) if (modes[k].kind === kind) closeMode(k);
+  };
+  // A block frame closes the moment indentation drops below its block.
+  const closeBlocksBelow = () => {
+    for (let k = modes.length - 1; k >= 0; k--) {
+      const f = modes[k];
+      if ((f.kind === 'render-code' || f.kind === 'type' || f.kind === 'class' || f.kind === 'component') &&
+          indents.length < f.depth) closeMode(k);
+    }
+  };
   // Where a module line's specifier begins: after its brace, after a
   // comma, or at the head of a line inside the braces.
   const specifierStart = (prev) => prev?.kind === '{' || prev?.kind === ',' ||
@@ -557,28 +618,8 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // specifier's start with `as` after it; on an export line, the word
   // after `as`.
   const foreignModuleName = (prev, afterWord) =>
-    (seenImport && specifierStart(prev) && /^[^\S\n]+as[^\S\n]/.test(afterWord)) ||
-    (seenExport && prev?.kind === 'AS');
-
-  // Module-statement scan state (seenImport/seenExport): the
-  // contextual keywords `as`/`from`/`default` only tag inside an
-  // import/export line — `from = 1` and `as = 2` stay identifiers. The
-  // state survives line breaks inside brackets, so a multiline specifier
-  // list still retags the `from` after its closing brace.
-  let seenImport = false;
-  let seenExport = false;
-  // Render-block scan context: RENDER opens it; the first line
-  // back at (or above) the render statement's own indent depth closes
-  // it. Inside, a TIGHT `#word` is element-id syntax (spaced `# word`
-  // stays a comment) and `.class-name` chains consume tight hyphens.
-  let inRender = false;
-  let renderDepth = 0;
-  // Inside render, a function body (`@click: ->` + INDENT) is code, not
-  // template: the indent depth that opened it, while it lasts.
-  let renderCodeFloor = null;
-  // The bracket depth at RENDER: a line inside a bracket opened within
-  // the render block continues a value, never a child list.
-  let renderParenDepth = 0;
+    (inMode('import') && specifierStart(prev) && /^[^\S\n]+as[^\S\n]/.test(afterWord)) ||
+    (inMode('export') && prev?.kind === 'AS');
   let nextId = 0; // stable token ids, creation order
   const pendingOrigin = []; // synthetic tokens awaiting the next real token's id
 
@@ -613,7 +654,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     // Lazy FROM tagging: `from` scans as an IDENTIFIER; the module
     // source STRING that follows retags it — so `from` stays a plain
     // identifier everywhere else (`from = 1`, `x = from + as`).
-    if ((kind === 'STRING' || kind === 'STRING_START') && (seenImport || seenExport)) {
+    if ((kind === 'STRING' || kind === 'STRING_START') && (inMode('import') || inMode('export'))) {
       const prevTok = tokens[tokens.length - 1];
       if (prevTok?.kind === 'IDENTIFIER' && prevTok.value === 'from') prevTok.kind = 'FROM';
     }
@@ -702,10 +743,15 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     return TEMPLATE_TAGS.has(tag) || tag.includes('-');
   };
 
+  // Inside render, is the scanner in code rather than template: a
+  // function body, or a bracket opened within the render block (whose
+  // lines continue a value, never a child list)?
+  const renderCodeScope = () => inMode('render-code') || parens.length > modeFrame('render').parens;
+
   // Is a selector shorthand (`.class`, `#id`) possible here: markup, not a
   // handler body, a bracket group or the rest of a line after a code arrow?
   const selectorScope = () => {
-    if (renderCodeFloor !== null || parens.length > renderParenDepth) return false;
+    if (renderCodeScope()) return false;
     for (let k = tokens.length - 1; k >= 0; k--) {
       const kind = tokens[k].kind;
       if (kind === 'TERMINATOR' || kind === 'INDENT' || kind === 'OUTDENT' || kind === 'RENDER') break;
@@ -771,7 +817,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // at `at`) opens one: a render child position, a tight hyphen, and a
   // run that keys no pair (`aria-busy: true` stays the attribute).
   const customElementEnd = (prev, at) => {
-    if (!inRender || text[at] !== '-' || !IDENT_START.test(text[at + 1] ?? '') || !customElementStart(prev)) return null;
+    if (!inMode('render') || text[at] !== '-' || !IDENT_START.test(text[at + 1] ?? '') || !customElementStart(prev)) return null;
     let j = at;
     while (text[j] === '-' && IDENT_START.test(text[j + 1] ?? '')) {
       j++;
@@ -792,7 +838,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   };
 
   const customElementStart = (prev) => {
-    if (renderCodeFloor !== null || parens.length > renderParenDepth) return false;
+    if (renderCodeScope()) return false;
     // A function arrow earlier on the line opens a one-line code body.
     for (let k = tokens.length - 1; k >= 0; k--) {
       const kind = tokens[k].kind;
@@ -822,50 +868,29 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     return TEMPLATE_TAGS.has(tag) || tag.includes('-');
   };
 
-  const insideComponentBody = () => {
-    let depth = 0;
-    let min = 0;
-    for (let i = tokens.length - 1; i >= 0; i--) {
-      const k = tokens[i].kind;
-      if (k === 'OUTDENT') {
-        depth++;
-      } else if (k === 'INDENT') {
-        depth--;
-        if (depth < min) {
-          min = depth;
-          for (let j = i - 1; j >= 0; j--) {
-            const h = tokens[j].kind;
-            if (h === 'TERMINATOR' || h === 'INDENT' || h === 'OUTDENT') break;
-            if (h === 'COMPONENT') return true;
-          }
-        }
-      }
+  // Open the class and component frames of a block about to open: its
+  // opening line (the tokens since the line's last TERMINATOR, INDENT or
+  // OUTDENT) carries CLASS, COMPONENT, or both.
+  const openBodyModes = () => {
+    let cls = false, cmp = false;
+    for (let j = tokens.length - 1; j >= 0; j--) {
+      const h = tokens[j].kind;
+      if (h === 'TERMINATOR' || h === 'INDENT' || h === 'OUTDENT') break;
+      if (h === 'CLASS') cls = true;
+      else if (h === 'COMPONENT') cmp = true;
     }
-    return false;
+    if (cls) openMode('class');
+    if (cmp) openMode('component');
   };
 
+  // Inside a component body at any depth: OFFER/ACCEPT are keywords there.
+  const insideComponentBody = () => inMode('component');
+
   // Is the scanner inside a CLASS body — directly, not in a block
-  // nested under one? The innermost unclosed INDENT decides: it is a
-  // class body when the line that opened it carries CLASS. A method's
-  // body, a field's indented value, and every deeper block answer no.
-  const insideClassBody = () => {
-    let depth = 0;
-    for (let i = tokens.length - 1; i >= 0; i--) {
-      const k = tokens[i].kind;
-      if (k === 'OUTDENT') {
-        depth++;
-      } else if (k === 'INDENT') {
-        if (depth > 0) { depth--; continue; }
-        for (let j = i - 1; j >= 0; j--) {
-          const h = tokens[j].kind;
-          if (h === 'TERMINATOR' || h === 'INDENT' || h === 'OUTDENT') return false;
-          if (h === 'CLASS') return true;
-        }
-        return false;
-      }
-    }
-    return false;
-  };
+  // nested under one? The innermost open block decides: it is a class
+  // body when the line that opened it carries CLASS. A method's body, a
+  // field's indented value, and every deeper block answer no.
+  const insideClassBody = () => modeFrame('class')?.depth === indents.length;
 
   // Pick-key position, answered in O(1) from the open-bracket frame:
   // the innermost bracket is a tight-keyed pick body and the previous
@@ -1165,17 +1190,16 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     parens.push({ kind, at, depth: indents.length, ...extra });
   };
 
-  // Type-body floor: the indent-stack size at which a verified
-  // `type … =` or `interface Name [extends N]` head opened its block
-  // body (null when none is open). Every line at or beyond the floor
-  // is TYPE TEXT — the O(1) answer closesTypeGeneric needs for
-  // trailing generic closes, wrapped-across-lines generics included.
-  // Cleared the moment indentation drops below the body.
-  let typeBodyFloor = null;
+  // Inside a type body (the `type` mode frame): the O(1) answer
+  // closesTypeGeneric needs for trailing generic closes,
+  // wrapped-across-lines generics included.
   // The closesTypeGeneric incremental state for this run (one map
   // lookup per trailing-angle line; every token processed once).
   const typeGenericMemo = { upTo: 0, ref: null, level: 0, answers: new Map() };
-  const insideTypeBody = () => typeBodyFloor !== null && indents.length >= typeBodyFloor;
+  const insideTypeBody = () => {
+    const frame = modeFrame('type');
+    return frame !== null && indents.length >= frame.depth;
+  };
 
   // On a `type Name =` alias head's own line, after the `=` — the other
   // scanner-known type position besides a type body.
@@ -1186,9 +1210,6 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       if (kd === '=') return typeAliasEq(tokens, j);
     }
     return false;
-  };
-  const clearTypeBodyBelowFloor = () => {
-    if (typeBodyFloor !== null && indents.length < typeBodyFloor) typeBodyFloor = null;
   };
   // Does the tape end with a type-body HEAD about to open its block —
   // `type Name [<params>] =`, or `interface Name [extends Name]` at a
@@ -1281,10 +1302,9 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     const blockEnd = lastRealEnd();
     while (indents.length > frame.depth) {
       indents.pop();
-      if (renderCodeFloor !== null && indents.length < renderCodeFloor) renderCodeFloor = null;
       synth('OUTDENT', blockEnd);
     }
-    clearTypeBodyBelowFloor();
+    closeBlocksBelow();
     return frame;
   };
 
@@ -1304,10 +1324,9 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         );
       }
       indents.pop();
-      if (renderCodeFloor !== null && indents.length < renderCodeFloor) renderCodeFloor = null;
       synth('OUTDENT', blockEnd);
     }
-    clearTypeBodyBelowFloor();
+    closeBlocksBelow();
     if (indents[indents.length - 1] !== prefix) {
       fail(
         `inconsistent indentation: ${JSON.stringify(prefix)} neither extends the ` +
@@ -1341,8 +1360,8 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       // normal line handling so the indent machinery runs first. The
       // line must sit DEEPER than the render statement itself — a
       // shallower `#…` line has already left the block.
-      const renderIdLine = inRender && text[pos] === '#' && IDENT_START.test(text[pos + 1] ?? '') &&
-        prefix.length > (indents[renderDepth - 1] ?? '').length;
+      const renderIdLine = inMode('render') && text[pos] === '#' && IDENT_START.test(text[pos + 1] ?? '') &&
+        prefix.length > (indents[modeFrame('render').depth - 1] ?? '').length;
       if (text[pos] === '#' && !renderIdLine) {
         let end = pos;
         // A `###` line (three hashes then anything but a fourth) opens
@@ -1411,7 +1430,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         // the render grammar's to say, and it is not saying it here —
         // except a `.` alone on its line, which is an element (an implicit
         // `div`), so its line ends there.
-        if (inRender) {
+        if (inMode('render')) {
           const before = tokens[tokens.length - 2];
           return !before || before.kind === 'INDENT' || before.kind === 'OUTDENT' ||
             before.kind === 'TERMINATOR' || before.kind === 'RENDER';
@@ -1431,7 +1450,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       // Inside render blocks a line-leading '.' is a NEW element
       // (`.card` — implicit-div class selector), never a member-chain
       // continuation.
-      const dotCont = dotAt >= 0 && text[dotAt + 1] !== '.' && !DIGIT.test(text[dotAt + 1] ?? '') && !inRender;
+      const dotCont = dotAt >= 0 && text[dotAt + 1] !== '.' && !DIGIT.test(text[dotAt + 1] ?? '') && !inMode('render');
       if (commaCont && !prevUnfinished && prefix.length < current.length) {
         // A comma at a LOWER indent continues the enclosing list: the
         // open blocks above it close, but no statement boundary appears
@@ -1448,12 +1467,16 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       }
 
       if (prefix !== current && prefix.startsWith(current)) {
-        // A type-body head opening its block: everything at or beyond
-        // this indent is type text (nested layout indents inherit
-        // through the floor comparison).
-        if (typeBodyFloor === null && typeBodyHead()) typeBodyFloor = indents.length + 1;
-        if (inRender && renderCodeFloor === null && codeArrowAt(tokens.length - 1)) renderCodeFloor = indents.length + 1;
+        // The block may open a mode: a type-body head's block is type
+        // text (nested layout indents inherit through the depth
+        // comparison), a code arrow's block inside render is code, and
+        // a class or component line's block is that body.
+        const opensType = !inMode('type') && typeBodyHead();
+        const opensCode = inMode('render') && !inMode('render-code') && codeArrowAt(tokens.length - 1);
         indents.push(prefix);
+        if (opensType) openMode('type');
+        if (opensCode) openMode('render-code');
+        openBodyModes();
         // Anchor at the first real token of the deeper line, not the line
         // start — a block's $self span begins at its content.
         synth('INDENT', pos);
@@ -1467,7 +1490,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         // (`else-x`), never the continuation keyword.
         const continues = ['else', 'catch', 'finally'].some(
           (w) => text.startsWith(w, pos) && !IDENT_PART.test(text[pos + w.length] ?? '') &&
-            !(inRender && text[pos + w.length] === '-' && IDENT_START.test(text[pos + w.length + 1] ?? '')),
+            !(inMode('render') && text[pos + w.length] === '-' && IDENT_START.test(text[pos + w.length + 1] ?? '')),
         );
         if (tokens.length > 0 && lastNewlinePos >= 0 && !continues && last()?.kind !== 'TERMINATOR') {
           const nl = text[lastNewlinePos] === '\r' ? 2 : 1;
@@ -1476,16 +1499,16 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       }
       // A line back at (or above) the render statement's own depth
       // leaves the render block.
-      if (inRender && indents.length <= renderDepth) {
-        inRender = false;
-        renderCodeFloor = null;
+      if (inMode('render') && indents.length <= modeFrame('render').depth) {
+        closeModeKind('render');
+        closeModeKind('render-code');
       }
       atLineStart = false;
       pendingNewLine = true;
-      if (seenFor !== null && parens.length <= seenFor) seenFor = null;
+      if (inMode('for') && parens.length <= modeFrame('for').parens) closeModeKind('for');
       if (parens.length === 0) {
-        seenImport = false;
-        seenExport = false;
+        closeModeKind('import');
+        closeModeKind('export');
       }
       continue;
     }
@@ -1528,7 +1551,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
              isHyphen(tokens[root - 1]) && (tokens[root - 2]?.kind === 'NUMBER' || tokens[root - 2]?.kind === 'PROPERTY')) root -= 2;
       const digitClass = prev?.kind === 'NUMBER' && /^[0-9]+$/.test(prev.value) &&
         root < tokens.length - 1 && tokens[root]?.kind === 'PROPERTY' && tokens[root - 1]?.kind === '.';
-      const glued = inRender && prev && (prev.kind === 'IDENTIFIER' || prev.kind === 'PROPERTY' || digitClass) &&
+      const glued = inMode('render') && prev && (prev.kind === 'IDENTIFIER' || prev.kind === 'PROPERTY' || digitClass) &&
         !pendingSpaced && !prev.generated && text[pos + 1] !== undefined && !/\s/.test(text[pos + 1]);
       if (glued && selectorScope()) {
         // An element's id: one, glued to the tag or `.class` chain that
@@ -1554,7 +1577,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         pos = end;
         continue;
       }
-      if (inRender && IDENT_START.test(text[pos + 1] ?? '') && prev &&
+      if (inMode('render') && IDENT_START.test(text[pos + 1] ?? '') && prev &&
           (prev.kind === 'TERMINATOR' || prev.kind === 'INDENT' || prev.kind === 'OUTDENT' || prev.kind === 'RENDER')) {
         let end = pos + 2;
         while (end < text.length && (IDENT_PART.test(text[end]) || (text[end] === '-' && IDENT_PART.test(text[end + 1] ?? '')))) end++;
@@ -1616,7 +1639,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         // value positions keep the subtraction reading (`@box.w-pad`
         // is `this.box.value.w - pad`).
         let value = word;
-        if (inRender && prev.kind === '.' && !keysColon && classSelectorChain()) {
+        if (inMode('render') && prev.kind === '.' && !keysColon && classSelectorChain()) {
           while (text[pos] === '-' && IDENT_START.test(text[pos + 1] ?? '')) {
             let j = pos + 1;
             while (j < text.length && IDENT_PART.test(text[j])) j++;
@@ -1641,7 +1664,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         // the way a word after a dot is (`{ render as draw }`,
         // `{ draw as render }`). JavaScript reads both sides the same.
         push('IDENTIFIER', word, start, pos);
-      } else if (seenImport && word !== 'default' && word !== 'type' && reservedSpelling(word) &&
+      } else if (inMode('import') && word !== 'default' && word !== 'type' && reservedSpelling(word) &&
                  (specifierStart(prev) || prev?.kind === 'AS' || prev?.kind === 'IMPORT')) {
         // The LOCAL side is a binding, and a keyword cannot be one.
         fail(`'${word}' is a Rip keyword, so it cannot be the local name of an import — bind it under another name (\`import { ${word} as ${word}_ } from '…'\`)`, start, pos);
@@ -1654,11 +1677,11 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         } else if (text[pos] === '.') {
           push('IMPORT_META', word, start, pos);
         } else {
-          seenImport = true;
+          if (!inMode('import')) openMode('import');
           push('IMPORT', word, start, pos);
         }
       } else if (word === 'export') {
-        seenExport = true;
+        if (!inMode('export')) openMode('export');
         push('EXPORT', word, start, pos);
       } else if (word === 'type' && prev?.kind === 'IMPORT' && (() => {
         // Contextual: `import type` opens a TYPE-ONLY import — the
@@ -1704,10 +1727,10 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         while (j < text.length && IDENT_PART.test(text[j])) j++;
         return text.slice(at, j) !== 'as';
       })()) {
-        const verb = seenImport ? 'import' : 'export';
+        const verb = inMode('import') ? 'import' : 'export';
         fail(`a specifier takes no \`type\` keyword — type-only is the whole statement's: write \`${verb} type { … } from '…'\` for the type names, beside a plain ${verb} for the rest` +
-          (seenImport ? '' : '; a local type exports at its own declaration'), start, pos);
-      } else if (word === 'as' && seenFor !== null) {
+          (inMode('import') ? '' : '; a local type exports at its own declaration'), start, pos);
+      } else if (word === 'as' && inMode('for')) {
         // After FOR on the same logical line, `as` is the iterator-
         // protocol connector (`for x as iterable`); `as!` is its
         // async-iteration shorthand. The token value is `as` either
@@ -1718,8 +1741,8 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         } else {
           push('FORAS', word, start, pos);
         }
-        seenFor = null;
-      } else if (word === 'as' && (seenImport || seenExport) &&
+        closeModeKind('for');
+      } else if (word === 'as' && (inMode('import') || inMode('export')) &&
                  (prev?.kind === 'DEFAULT' || prev?.kind === 'IMPORT_ALL' || prev?.kind === 'EXPORT_ALL' ||
                   (prev?.kind === 'IDENTIFIER' && parens[parens.length - 1]?.specifiers === true))) {
         // Contextual: only inside a module line, after a specifier
@@ -1727,12 +1750,12 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         // only inside the specifier braces; in an export's value the
         // name is an operand and its `as` is the cast.
         push('AS', word, start, pos);
-      } else if (word === 'with' && seenImport && (prev?.kind === 'STRING' || prev?.kind === 'STRING_END')) {
+      } else if (word === 'with' && inMode('import') && (prev?.kind === 'STRING' || prev?.kind === 'STRING_END')) {
         // Contextual: import attributes, after the module source
         // (`import d from './d.json' with { type: 'json' }`) —
         // reserved everywhere else.
         push('WITH', word, start, pos);
-      } else if (word === 'default' && (seenImport || seenExport) &&
+      } else if (word === 'default' && (inMode('import') || inMode('export')) &&
                  (prev?.kind === 'EXPORT' || prev?.kind === 'AS' || prev?.kind === '{' || prev?.kind === ',')) {
         // Contextual: `export default …`, `{default as d}`, `a as
         // default` — reserved everywhere else.
@@ -1743,16 +1766,17 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         push(pendingNewLine ? 'LEADING_WHEN' : 'WHEN', word, start, pos);
       } else if (word === 'in' || word === 'of') {
         // After FOR on the same logical line, `in`/`of` are the for-loop
-        // connectors (the seenFor scan state); elsewhere they are the
+        // connectors (the `for` mode frame); elsewhere they are the
         // RELATION operators.
-        if (seenFor !== null) {
+        if (inMode('for')) {
           push(word === 'in' ? 'FORIN' : 'FOROF', word, start, pos);
-          seenFor = null;
+          closeModeKind('for');
         } else {
           push('RELATION', word, start, pos);
         }
       } else if (word === 'for') {
-        seenFor = parens.length;
+        closeModeKind('for');
+        openMode('for');
         push('FOR', word, start, pos);
       } else if (STATEMENTS.has(word)) {
         push('STATEMENT', word, start, pos);
@@ -1787,9 +1811,9 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       } else if (KEYWORDS[word]) {
         push(KEYWORDS[word], word, start, pos);
         if (KEYWORDS[word] === 'RENDER') {
-          inRender = true;
-          renderDepth = indents.length;
-          renderParenDepth = parens.length;
+          const frame = modeFrame('render') ?? openMode('render');
+          frame.depth = indents.length;
+          frame.parens = parens.length;
         }
       } else if (word === 'private' && insideClassBody() &&
                  (prev?.kind === 'INDENT' || prev?.kind === 'TERMINATOR' || prev?.kind === 'OUTDENT')) {
@@ -1820,7 +1844,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     if (DIGIT.test(ch) || (ch === '.' && DIGIT.test(text[pos + 1] ?? ''))) {
       // `div.2xl` / `.2xl` at the head of a line: a class starting with a
       // digit, which the shorthand cannot hold.
-      if (ch === '.' && inRender && selectorScope() && !pendingSpaced) {
+      if (ch === '.' && inMode('render') && selectorScope() && !pendingSpaced) {
         const before = last();
         const headTag = before?.kind === 'IDENTIFIER' && !before.generated && headSelectorAt(tokens.length - 1);
         if (headTag || !before || SELECTOR_LINE_STARTS.has(before.kind)) failSelector('class', pos + 1);
@@ -1855,7 +1879,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
       if (prevTok && TAGGABLE.has(prevTok.kind) && prevTok.end === pos) {
         // In a template, an element's tag or selector heading its line is
         // never a tag function: text glued to it (`div#a"x"`) is a typo.
-        if (inRender && (prevTok.kind === 'IDENTIFIER' || prevTok.kind === 'PROPERTY') && !prevTok.generated &&
+        if (inMode('render') && (prevTok.kind === 'IDENTIFIER' || prevTok.kind === 'PROPERTY') && !prevTok.generated &&
             selectorScope() && headSelectorAt(chainStartFrom(tokens.length - 1))) {
           fail("a space goes between an element's selector and its text", pos);
         }
@@ -2034,7 +2058,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
     if (ch === '*' || ch === '/' || ch === '%') {
       // A namespace/re-export star in specifier position (`import * as
       // ns`, `import d, * as ns`, `export * from`).
-      if (ch === '*' && seenImport && (last()?.kind === 'IMPORT' || last()?.kind === 'IMPORT_TYPE' || last()?.kind === ',')) push('IMPORT_ALL', ch, pos, pos + 1);
+      if (ch === '*' && inMode('import') && (last()?.kind === 'IMPORT' || last()?.kind === 'IMPORT_TYPE' || last()?.kind === ',')) push('IMPORT_ALL', ch, pos, pos + 1);
       else if (ch === '*' && last()?.kind === 'EXPORT') push('EXPORT_ALL', ch, pos, pos + 1);
       // `yield*` on the yield's own line is delegation, the same FROM
       // token `yield from` produces: JavaScript reads the spelling that
@@ -2222,7 +2246,7 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
         // A module statement's specifier list: the brace an import or
         // export keyword opens, or the one after a default binding's comma.
         const specifiers = dot != null && (dot.kind === 'IMPORT' || dot.kind === 'IMPORT_TYPE' ||
-          dot.kind === 'EXPORT' || dot.kind === 'EXPORT_TYPE' || (seenImport && dot.kind === ','));
+          dot.kind === 'EXPORT' || dot.kind === 'EXPORT_TYPE' || (inMode('import') && dot.kind === ','));
         openBracket('object', pos, specifiers ? { specifiers: true } : {});
         push('{', '{', pos, pos + 1);
       }
