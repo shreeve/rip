@@ -59,3 +59,17 @@ test 'pr falls back when a nested value has no faithful Rip literal', '''
     console.dir = oldDir
   [calls[0][0], calls[0][1] is value]
 ''', ['dir', true]
+
+# An inline `try` body is a delivery site like any other: the stdlib
+# arrives and the call runs — never a ReferenceError the handler-less
+# catch swallows.
+test 'an inline try body delivers the stdlib and calls p', '''
+  calls = []
+  oldLog = console.log
+  console.log = (v) -> calls.push v
+  try p 1
+  console.log = oldLog
+  calls
+''', [1]
+test 'an inline try value delivers the stdlib', 'x = try kind 1\nx', 'number'
+test 'an inline try tail value delivers the stdlib', 'f = -> try kind 1\nf()', 'number'

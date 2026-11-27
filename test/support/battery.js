@@ -43,12 +43,27 @@ const ENV = {
   ...intrinsicRuntime,
 };
 
-// The stdlib names bind PER ROW, mirroring delivery's shadow rule: a
-// name binds only when the compiled row references it and does not
-// declare it itself (a row's `let p = Post.create(…)` must keep its
-// own p — in delivered output a user binding suppresses the helper).
-const stdlibEnv = (code) => {
+// The stdlib names bind PER ROW, mirroring delivery: nothing binds
+// unless the compiler delivered the stdlib runtime, and then a name
+// binds only when the compiled row references it and does not declare
+// it itself (a row's `let p = Post.create(…)` must keep its own p — in
+// delivered output a user binding suppresses the helper).
+// A generated runtime reference whose public name a source binding
+// takes is spelled through a minted alias (`__state_`, `__state_1`);
+// each alias the compiled row spells binds to its runtime export, as
+// delivery's `{ __state: __state_ }` would.
+const aliasEnv = (code) => {
   const out = {};
+  for (const [k, v] of Object.entries(ENV)) {
+    const esc = k.replace(/\$/g, '\\$');
+    for (const [alias] of code.matchAll(new RegExp(`(?<![\\w$])${esc}_\\d*(?![\\w$])`, 'g'))) out[alias] = v;
+  }
+  return out;
+};
+
+const stdlibEnv = (code, runtimes) => {
+  const out = {};
+  if (!runtimes.has('stdlib')) return out;
   for (const [k, v] of Object.entries(stdlibRuntime)) {
     if (new RegExp(`\\b${k}\\b`).test(code) &&
         !new RegExp(`\\b(?:let|const|var|function|class)\\s+${k}\\b`).test(code)) {
@@ -314,7 +329,7 @@ async function withQuietConsole(fn) {
   }
 }
 
-async function evaluate(compiled) {
+async function evaluate(compiled, runtimes) {
   // Battery snippets redeclare the same schema names across hundreds
   // of rows in one process — replace semantics apply DURING a battery
   // evaluation only (the collision rejection itself is pinned by the
@@ -323,7 +338,7 @@ async function evaluate(compiled) {
   const prior = registry?.replace;
   if (registry) registry.replace = true;
   try {
-    const env = { ...ENV, ...stdlibEnv(compiled) };
+    const env = { ...ENV, ...aliasEnv(compiled), ...stdlibEnv(compiled, runtimes) };
     return await withQuietConsole(async () => {
       if (needsAsyncWrapper(compiled)) {
         const fn = new AsyncFunction(...Object.keys(env), injectReturn(compiled));
@@ -364,8 +379,8 @@ export async function runRow(row) {
   const where = `${row.file} › ${row.verb} "${row.name}"`;
   try {
     if (row.verb === 'test') {
-      const { code: compiled } = compile(dedent(row.src), { path: `<${row.file}>`, runtimeDelivery: 'none' });
-      const actual = await evaluate(compiled);
+      const { code: compiled, runtimes } = compile(dedent(row.src), { path: `<${row.file}>`, runtimeDelivery: 'none' });
+      const actual = await evaluate(compiled, runtimes);
       const got = JSON.stringify(actual);
       const want = JSON.stringify(row.expected);
       if (got !== want) return `${where}\n  expected: ${want}\n  actual:   ${got}`;
@@ -409,15 +424,15 @@ export async function runRow(row) {
       return null;
     }
     if (row.verb === 'fail') {
-      let compiled;
+      let compiled, runtimes;
       try {
-        ({ code: compiled } = compile(dedent(row.src), { path: `<${row.file}>`, runtimeDelivery: 'none' }));
+        ({ code: compiled, runtimes } = compile(dedent(row.src), { path: `<${row.file}>`, runtimeDelivery: 'none' }));
       } catch (err) {
         if (row.expected == null || `${err.message}`.includes(row.expected)) return null;
         return `${where}\n  expected error to include: ${JSON.stringify(row.expected)}\n  got: ${err.message.split('\n')[0]}`;
       }
       try {
-        await evaluate(compiled);
+        await evaluate(compiled, runtimes);
       } catch (err) {
         if (row.expected == null || `${err.message}`.includes(row.expected)) return null;
         return `${where}\n  expected error to include: ${JSON.stringify(row.expected)}\n  got: ${err.message.split('\n')[0]}`;

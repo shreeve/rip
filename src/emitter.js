@@ -15618,7 +15618,8 @@ class Emitter {
     }
   }
 
-  // ['.{}'|'?.{}', source, ...items] — the pick operator:
+  // ['.{}'|'?.{}', source, ...['pickitem', key, target, default|null]]
+  // — the pick operator:
   // `o.{a, b: c, d = e}` lowers to an always-parenthesized object
   // literal reading the source per key —
   // `({a: o.a, c: o.b, d: (o.d ?? e)})`. Defaults fire on NULLISH
@@ -15644,10 +15645,10 @@ class Emitter {
     // JS both ways).
     if (!simple) {
       for (const item of items) {
-        if (item[2] !== null && this.containsAwait(item[2])) {
+        if (item[3] !== null && this.containsAwait(item[3])) {
           throw this.positionedError(item, "emitter: a pick default cannot await when the source needs single evaluation — the lowering's '(_) =>' arrow is not async; bind the source first", node);
         }
-        if (item[2] !== null && Emitter.containsYield(item[2])) {
+        if (item[3] !== null && Emitter.containsYield(item[3])) {
           throw this.positionedError(item, "emitter: a pick default cannot yield when the source needs single evaluation — yield cannot cross the lowering's '(_) =>' arrow; bind the source first", node);
         }
       }
@@ -15655,7 +15656,7 @@ class Emitter {
     const body = (emitRef) => this.mark(node, 'items', () => {
       items.forEach((item, i) => {
         if (i > 0) this.b.emit(', ');
-        const [srcKey, dstKey, def] = item;
+        const [, srcKey, dstKey, def] = item;
         this.mark(item, '$self', () => {
           // A picked or renamed-to '__proto__' destination is caller
           // DATA — it materializes as an own key, never the
@@ -16177,6 +16178,15 @@ class Emitter {
             this.b.emit(item[1]);
             return;
           }
+          // A middle rest has no JS destructuring form. The one
+          // lowering — a statement `[a, ...mid, b] = src` — never emits
+          // its pattern, so a pattern reaching here is a parameter, a
+          // loop variable, a catch binding, or a nested element.
+          if (isNode(item) && item[0] === '...' && this.inPattern && i !== items.length - 1) {
+            throw this.positionedError(item,
+              'emitter: a rest element must end its pattern — JavaScript destructuring has no middle rest, ' +
+              'and only a statement `[a, ...mid, b] = src` (plain names, at the top) lowers one', node);
+          }
           // Array elements are operand positions: compound items group
           // (spreads never do — `...` binds its operand; pattern
           // elements never do — they are binding positions, and
@@ -16234,6 +16244,13 @@ class Emitter {
           this.comprehension(comp[2], this.ind, keySpec)))));
     }
     const pairs = node.slice(1);
+    if (this.inPattern) {
+      const restAt = pairs.findIndex((pair) => isNode(pair) && pair[0] === '...');
+      if (restAt !== -1 && restAt < pairs.length - 1) {
+        throw this.positionedError(pairs[restAt],
+          'emitter: a rest element must end its pattern — JavaScript destructuring takes `...rest` last', node);
+      }
+    }
     // Capture the statement indent ONCE: emitting an earlier pair's
     // method body mutates this.ind.
     const objInd = this.ind;
@@ -17289,6 +17306,13 @@ class Emitter {
     // leaves that param alone — it is no longer unannotated.
     const injected = injectedTypes === null ? [] : [].concat(injectedTypes);
     injected.forEach((type, i) => { if (type != null) optional.delete(i); });
+    // JavaScript takes a rest parameter last; a named rest before
+    // another parameter has no formal-parameter form.
+    const restAt = list.findIndex((p) => isNode(p) && (p[0] === 'rest' || p[0] === '...'));
+    if (restAt !== -1 && restAt < list.length - 1) {
+      throw this.positionedError(list[restAt],
+        'emitter: a rest parameter must be the last parameter — JavaScript has no middle rest; take `...rest` last and read the tail from it');
+    }
     list.forEach((p, i) => {
       // JavaScript refuses `await` and `yield` anywhere in formal
       // parameters — a default, a pattern's default, a computed key —
@@ -19191,14 +19215,20 @@ const referencesNames = (sexpr, names, stores, isDecl = () => false) => {
     if (h === 'for-in' || h === 'for-of' || h === 'for-as') {
       return (isNode(x[1]) && x[1].some(walkPattern)) || x.slice(2).some(walk);
     }
+    // Slot 1 is the body — a block, or an inline expression or
+    // statement (`try f()`, `try return x`). Later slots are
+    // [binding, block] handlers and block finalizers.
     if (h === 'try') {
-      return x.slice(1).some((part) => {
+      return walk(x[1]) || x.slice(2).some((part) => {
         if (!isNode(part)) return false;
         if (part[0] === 'block') return walk(part);
         return walkPattern(part[0]) || walk(part[1]);
       });
     }
     if (h === 'class' && x.length >= 2) return x.slice(2).some(walk);
+    // A pick item's key and target are property names; only its
+    // default is an expression.
+    if (h === 'pickitem' && x.length === 4) return walk(x[3]);
     if (h === 'typed-var' && x.length === 3) return isNode(x[1]) && walk(x[1]);
     if (Emitter.isPostfixTypeIn(stores, x)) return walk(x[1]);
     if (h === 'import' || h === 'type-decl') return false;
@@ -19261,6 +19291,15 @@ const runtimeAliasBindings = (emitter, trees) => {
   const addPattern = (pattern) => {
     for (const name of emitter.patternNames(pattern, [], true)) names.add(name);
   };
+  // A parameter binds its pattern's names, and its default values and
+  // computed keys are expressions whose nested functions bind too.
+  const addParams = (params, isDecl) => {
+    if (!isNode(params)) return;
+    for (const param of params) {
+      addPattern(param);
+      walk(param, isDecl);
+    }
+  };
   const walk = (x, isDecl) => {
     if (!isNode(x)) return;
     const [head] = x;
@@ -19269,13 +19308,13 @@ const runtimeAliasBindings = (emitter, trees) => {
       return;
     }
     if (isFunc(x)) {
-      if (isNode(x[1])) for (const param of x[1]) addPattern(param);
+      addParams(x[1], isDecl);
       walk(x[2], isDecl);
       return;
     }
     if (isDefHead(head) && x.length === 4) {
       if (typeof x[1] === 'string') names.add(x[1]);
-      if (isNode(x[2])) for (const param of x[2]) addPattern(param);
+      addParams(x[2], isDecl);
       walk(x[3], isDecl);
       return;
     }
@@ -19287,7 +19326,7 @@ const runtimeAliasBindings = (emitter, trees) => {
         const stmts = emitter.isBlock(part) ? part.slice(1) : [part];
         for (const st of stmts) {
           if (isNode(st) && isDefHead(st[0]) && st.length === 4) {
-            if (isNode(st[2])) for (const param of st[2]) addPattern(param);
+            addParams(st[2], isDecl);
             walk(st[3], isDecl);
           } else {
             walk(st, isDecl);

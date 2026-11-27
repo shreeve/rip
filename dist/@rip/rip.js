@@ -10815,7 +10815,7 @@ function emitterShape(sexpr, nodeIds, schemaCode = new Map) {
       case "as":
         return [c(0), c(1)];
       case "pickitem":
-        return [c(0), c(1), conv(orNull(kids[2]))];
+        return ["pickitem", c(0), c(1), conv(orNull(kids[2]))];
       case "import": {
         const out = ["import"];
         const spec = kids[0];
@@ -22438,10 +22438,10 @@ ${this.replayPad}}` : " }");
     const simple = typeof source === "string" && (source === "this" || isIdentifierName(source));
     if (!simple) {
       for (const item of items) {
-        if (item[2] !== null && this.containsAwait(item[2])) {
+        if (item[3] !== null && this.containsAwait(item[3])) {
           throw this.positionedError(item, "emitter: a pick default cannot await when the source needs single evaluation — the lowering's '(_) =>' arrow is not async; bind the source first", node);
         }
-        if (item[2] !== null && Emitter.containsYield(item[2])) {
+        if (item[3] !== null && Emitter.containsYield(item[3])) {
           throw this.positionedError(item, "emitter: a pick default cannot yield when the source needs single evaluation — yield cannot cross the lowering's '(_) =>' arrow; bind the source first", node);
         }
       }
@@ -22450,7 +22450,7 @@ ${this.replayPad}}` : " }");
       items.forEach((item, i) => {
         if (i > 0)
           this.b.emit(", ");
-        const [srcKey, dstKey, def] = item;
+        const [, srcKey, dstKey, def] = item;
         this.mark(item, "$self", () => {
           this.mark(item, "target", () => this.b.emit(Emitter.ownKeyText(dstKey, dstKey)));
           this.b.emit(": ");
@@ -22823,6 +22823,9 @@ ${this.replayPad}}` : " }");
             this.b.emit(item[1]);
             return;
           }
+          if (isNode2(item) && item[0] === "..." && this.inPattern && i !== items.length - 1) {
+            throw this.positionedError(item, "emitter: a rest element must end its pattern — JavaScript destructuring has no middle rest, " + "and only a statement `[a, ...mid, b] = src` (plain names, at the top) lowers one", node);
+          }
           const wrap = !this.inPattern && !(isNode2(item) && item[0] === "...") && Emitter.needsGrouping(item, "operand");
           if (wrap)
             this.b.emit("(");
@@ -22858,6 +22861,12 @@ ${this.replayPad}}` : " }");
       return this.mark(node, "$self", () => this.mark(node, "pairs", () => this.mark(comp, "$self", () => this.mark(comp, "value", () => this.comprehension(comp[2], this.ind, keySpec)))));
     }
     const pairs = node.slice(1);
+    if (this.inPattern) {
+      const restAt = pairs.findIndex((pair) => isNode2(pair) && pair[0] === "...");
+      if (restAt !== -1 && restAt < pairs.length - 1) {
+        throw this.positionedError(pairs[restAt], "emitter: a rest element must end its pattern — JavaScript destructuring takes `...rest` last", node);
+      }
+    }
     const objInd = this.ind;
     const isMethod = pairs.map((p) => !this.inPattern && Emitter.isMethodPair(p));
     const sep = (i) => isMethod[i] || isMethod.slice(0, i).some(Boolean) ? `,
@@ -23654,6 +23663,10 @@ ${"  ".repeat(ind)}`);
       if (type != null)
         optional.delete(i);
     });
+    const restAt = list.findIndex((p) => isNode2(p) && (p[0] === "rest" || p[0] === "..."));
+    if (restAt !== -1 && restAt < list.length - 1) {
+      throw this.positionedError(list[restAt], "emitter: a rest parameter must be the last parameter — JavaScript has no middle rest; take `...rest` last and read the tail from it");
+    }
     list.forEach((p, i) => {
       const control = this.firstAwaitIn(p);
       if (control !== null) {
@@ -25057,7 +25070,7 @@ var referencesNames = (sexpr, names, stores, isDecl = () => false) => {
       return isNode2(x[1]) && x[1].some(walkPattern) || x.slice(2).some(walk);
     }
     if (h === "try") {
-      return x.slice(1).some((part) => {
+      return walk(x[1]) || x.slice(2).some((part) => {
         if (!isNode2(part))
           return false;
         if (part[0] === "block")
@@ -25067,6 +25080,8 @@ var referencesNames = (sexpr, names, stores, isDecl = () => false) => {
     }
     if (h === "class" && x.length >= 2)
       return x.slice(2).some(walk);
+    if (h === "pickitem" && x.length === 4)
+      return walk(x[3]);
     if (h === "typed-var" && x.length === 3)
       return isNode2(x[1]) && walk(x[1]);
     if (Emitter.isPostfixTypeIn(stores, x))
@@ -25110,6 +25125,14 @@ var runtimeAliasBindings = (emitter, trees) => {
     for (const name of emitter.patternNames(pattern, [], true))
       names.add(name);
   };
+  const addParams = (params, isDecl) => {
+    if (!isNode2(params))
+      return;
+    for (const param of params) {
+      addPattern(param);
+      walk(param, isDecl);
+    }
+  };
   const walk = (x, isDecl) => {
     if (!isNode2(x))
       return;
@@ -25120,18 +25143,14 @@ var runtimeAliasBindings = (emitter, trees) => {
       return;
     }
     if (isFunc(x)) {
-      if (isNode2(x[1]))
-        for (const param of x[1])
-          addPattern(param);
+      addParams(x[1], isDecl);
       walk(x[2], isDecl);
       return;
     }
     if (isDefHead(head) && x.length === 4) {
       if (typeof x[1] === "string")
         names.add(x[1]);
-      if (isNode2(x[2]))
-        for (const param of x[2])
-          addPattern(param);
+      addParams(x[2], isDecl);
       walk(x[3], isDecl);
       return;
     }
@@ -25142,9 +25161,7 @@ var runtimeAliasBindings = (emitter, trees) => {
         const stmts = emitter.isBlock(part) ? part.slice(1) : [part];
         for (const st of stmts) {
           if (isNode2(st) && isDefHead(st[0]) && st.length === 4) {
-            if (isNode2(st[2]))
-              for (const param of st[2])
-                addPattern(param);
+            addParams(st[2], isDecl);
             walk(st[3], isDecl);
           } else {
             walk(st, isDecl);
@@ -34838,7 +34855,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "dd38d53fda3d308f";
+var compilerBuild = () => "3acd22bffa30730f";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

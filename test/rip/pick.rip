@@ -302,3 +302,12 @@ test 'optional pick preserves an own __proto__ key', '''
   out = get()?.{__proto__}
   [Object.hasOwn(out, '__proto__'), Object.getPrototypeOf(out).polluted is undefined]
   ''', [true, true]
+
+test 'picks of a keyword key repeat freely', '''
+  o = {class: 1}
+  p = {class: 2}
+  a = o.{class}
+  b = p.{class}
+  c = o.{class: k}
+  [a, b, c]
+  ''', [{class: 1}, {class: 2}, {k: 1}]

@@ -127,6 +127,15 @@ code "rest params", "(first, ...rest) -> rest", "(function(first, ...rest) {\n  
 # Rest with no other params
 test "rest only", "fn = (...all) -> all.length\nfn(1, 2, 3)", 3
 
+# JavaScript takes a rest last: a middle rest in a parameter list or a
+# parameter pattern rejects at the rest, never ships unparseable bytes.
+fail "a middle rest parameter rejects", "f = (a, ...b, c) -> b", ":1:9: emitter: a rest parameter must be the last parameter"
+fail "two rest parameters reject", "f = (...a, ...b) -> b", ":1:6: emitter: a rest parameter must be the last parameter"
+fail "a middle rest in a parameter pattern rejects", "f = ([a, ...b, c]) -> b", ":1:10: emitter: a rest element must end its pattern"
+fail "a middle rest in a nested parameter pattern rejects", "f = ({x: [a, ...b, c]}) -> b", ":1:14: emitter: a rest element must end its pattern"
+fail "a middle rest in a def parameter pattern rejects", "def f([a, ...b, c])\n  b", ":1:11: emitter: a rest element must end its pattern"
+fail "a middle object rest in a parameter pattern rejects", "f = ({a, ...b, c}) -> b", ":1:10: emitter: a rest element must end its pattern"
+
 # ==============================================================================
 # Default Parameters: "default"
 # ==============================================================================
