@@ -245,7 +245,7 @@ class Scope {
   // reads (null for the program), `raw` the list its declare-in-place
   // scan reads, `live` whether that scan skips the list's erased
   // statements, `env` the enclosing environment.
-  hoisting(list, raw, live, env, { declareInPlace = true, tailExpr = true, annotate = 'walk' } = {}) {
+  hoisting(list, raw, live, env, { declareInPlace = true, tailExpr = true } = {}) {
     this.hoists = true;
     this.sub = false;
     this.subRoot = false;
@@ -257,10 +257,6 @@ class Scope {
     this.env = env;
     this.declareInPlace = declareInPlace;
     this.tailExpr = tailExpr;
-    // How the TS face's hoist annotations meet the bare typed forwards
-    // the scope's statement list erases: 'walk' — in walk order with
-    // the assignments; 'after' — only where no assignment annotated.
-    this.annotate = annotate;
     this.targets = new Map();
     this.hreactive = new Set();
     this.matchWrite = false;
@@ -519,7 +515,7 @@ class Analysis {
     const program = new Scope(null, live, []);
     // The program hoists its live statements; the scan for declare-in-
     // place reads them all.
-    program.hoisting(null, stmts, false, this.ambientFrame, { tailExpr: this.repl, annotate: 'after' });
+    program.hoisting(null, stmts, false, this.ambientFrame, { tailExpr: this.repl });
     program.hparams = [];
     this.scopes.push(program);
     this.hscopes.push(program);
@@ -727,15 +723,18 @@ class Analysis {
   }
 
   // The TS face's hoist-line annotation for a name: the first annotated
-  // assignment or bare typed forward the hoist walk meets. A forward the
-  // scope's statement list erases (`after`) waits for the walk's own.
+  // assignment or bare typed forward the hoist walk meets. A hoist that
+  // reads its live statements (the program's, a function's, a method's)
+  // never meets its own top-level forwards: they annotate only the names
+  // its walk left bare. A def's hoist reads its raw statements, forwards
+  // in walk order.
   hoistAnnotation(name, node, forward) {
     if (this.quiet) return;
     const s = this.hs;
     if (forward && node === this.curTop) {
       if (s.fwd === null) s.fwd = new Map();
       if (!s.fwd.has(name)) s.fwd.set(name, node);
-      if (s.annotate === 'after') return;
+      if (s === this.program || s.live) return;
     }
     if ((s.ann !== null && s.ann.has(name)) || !this.annotated(node)) return;
     if (s.ann === null) s.ann = new Map();
@@ -913,7 +912,7 @@ class Analysis {
   // A scope over a function-like body: its hoist reads the body's
   // statements, live (erased statements filtered) or raw.
   hoistBody(scope, body, params, live, opts) {
-    scope.hoisting(null, null, live, this.env, { annotate: live ? 'after' : 'walk', ...opts });
+    scope.hoisting(null, null, live, this.env, opts);
     scope.hbody = body;
     scope.hparams = params;
     scope.capKey = body;
@@ -1015,7 +1014,7 @@ class Analysis {
     // body's statements raw, or a class body's method form, emitted as
     // a method over its live statements.
     const scope = this.openScope(x, x[4], x[3], false, m);
-    if (!(m & RNONLY)) this.hoistBody(scope, x[4], x[3], inClass, inClass ? {} : { annotate: 'walk' });
+    if (!(m & RNONLY)) this.hoistBody(scope, x[4], x[3], inClass, {});
     this.visitBody(x[4], m, scope, x[3], 'def');
   }
 
@@ -2101,7 +2100,7 @@ class Analysis {
       // other bindings, its components' members or its source text.
       const sub = this.inSub;
       this.inSub = true;
-      scope.hoisting(stmts, stmts, false, this.env, { annotate: 'walk' });
+      scope.hoisting(stmts, stmts, false, this.env);
       scope.hparams = names;
       scope.subRoot = true;
       this.addHoist(scope);

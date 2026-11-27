@@ -42,8 +42,9 @@
 // Retained size is held for the whole population after a full
 // collection: analyze.js's facts against every value v1's fact sink
 // receives for the same programs (the facts the differential compares,
-// as v1 computes them). v1's values point into its converted tree, so
-// that figure carries the emitterShape trees, reported alone beside it.
+// as v1 computes them), net of the recording itself (see the sink
+// below). v1's values point into its converted tree, so that figure
+// carries the emitterShape trees, reported alone beside it.
 import { writeFileSync, readFileSync, rmSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -201,22 +202,38 @@ for (const face of ['js', 'ts']) {
   const h2 = heap();
   shapes.length = 0;
   const h3 = heap();
+  // The sink's values, without what recording them costs: an event
+  // with no value ('collect') is skipped, the tuples the hook allocates
+  // to hand over a declaring node or a predicate's verdict are unpacked,
+  // a delivery tree's record keeps its tree and atoms (its Stores is no
+  // fact), and the recording arrays themselves are measured apart and
+  // subtracted.
   const sunk = pop.map((p) => {
     const values = [];
-    // A delivery tree's record also carries the emit's Stores, which is
-    // no fact: the tree and its atoms are kept.
-    const keep = (kind, key, value) => values.push(key, kind === 'trees' ? value.map(({ tree, atoms }) => [tree, atoms]) : value);
+    const keep = (kind, key, value) => {
+      if (kind === 'collect') return;
+      if (kind === 'declares') values.push(value[0], value[1]);
+      else if (kind === 'predicate') values.push(value[1]);
+      else values.push(key, kind === 'trees' ? value.map(({ tree, atoms }) => [tree, atoms]) : value);
+    };
     V1.emit(p.result, { source: p.source, face, dataPayload: p.dataPayload, modulePath: p.path, facts: keep });
     return values;
   });
   const h4 = heap();
+  const lengths = sunk.map((v) => v.length);
+  sunk.length = 0;
+  const h5 = heap();
+  const slot = {};
+  const arrays = lengths.map((n) => { const a = []; for (let i = 0; i < n; i++) a.push(slot); return a; });
+  const h6 = heap();
+  arrays.length = 0;
+  const sinkMB = ((h4 - h3) - (h6 - h5)) / 1e6;
 
   console.log(`\nface ${face}: ${pop.length} programs, best of ${rounds} interleaved rounds`);
   console.log(`  v1 replaced walks      ${fmt(walks)} (${best1.calls} timed calls, ${(cost * 1e6).toFixed(0)} ns each subtracted)`);
   console.log(`  v1 emitterShape        ${fmt(best1.shape)}`);
   console.log(`  analyze.js             ${fmt(bestA)}  = ${(100 * bestA / walks).toFixed(1)}% of the replaced walks, ${(100 * bestA / base).toFixed(1)}% of walks + emitterShape`);
   console.log(`  Stores construction    ${fmt(storesMs)} (shared by both sides, outside both timings)`);
-  console.log(`  retained               analyze.js facts ${((h1 - h0) / 1e6).toFixed(1)} MB; v1 sink values ${((h4 - h3) / 1e6).toFixed(1)} MB, of which emitterShape trees ${((h2 - h1) / 1e6).toFixed(1)} MB`);
+  console.log(`  retained               analyze.js facts ${((h1 - h0) / 1e6).toFixed(1)} MB; v1 sink values ${sinkMB.toFixed(1)} MB (recording arrays ${((h6 - h5) / 1e6).toFixed(1)} MB subtracted), of which emitterShape trees ${((h2 - h1) / 1e6).toFixed(1)} MB`);
   held.length = 0;
-  sunk.length = 0;
 }

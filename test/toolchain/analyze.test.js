@@ -293,11 +293,14 @@ describe('scope facts: hoist entries', () => {
     expect(names(find('->\n    n ='))).toEqual(['k']);
   });
 
-  test('TS: a function body annotates from its assignments before its bare typed forwards; a def in walk order', () => {
+  test('TS: a function body and the program annotate from their assignments before their bare typed forwards; a def in walk order', () => {
     const fn = hoistOf('f = ->\n  r: number\n  q()\n  r: string = "a"\n  r = "b"\n  r\n', { face: 'ts' });
     expect(fn.text(fn.find('->').annotations.get('r'))).toBe('r: string = "a"');
     const def = hoistOf('def f\n  r: number\n  q()\n  r: string = "a"\n  r = "b"\n  r\n', { face: 'ts' });
     expect(def.text(def.find('def').annotations.get('r'))).toBe('r: number');
+    // The program's hoist reads its live statements, as a function's.
+    const program = hoistOf('r: number\nq()\nr: string = "a"\nr = "b"\nlog r\n', { face: 'ts' });
+    expect(program.text(program.find(null).annotations.get('r'))).toBe('r: string = "a"');
   });
 });
 
