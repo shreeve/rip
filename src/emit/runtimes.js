@@ -5,11 +5,8 @@
 import { CLSX_TYPE, STYLE_FN_TYPE } from '../ts/dom-types.js';
 import { COMPONENT_CLASS, OWNER_FRAME_DECLS, OWNER_FRAME_TYPES, TEARDOWN_DECL } from '../ts/runtime-exports.js';
 
-// Module source strings emit single-quoted; the token value carries
-// normalized double quotes, so embedded single quotes (and
-// backslashes) must escape or the emitted specifier breaks the
-// string it sits in. Shared with declaration emission — the two
-// renderings of one module edge must never drift.
+// A module source token's specifier: the text inside its quotes (the
+// token carries them). One spelling for every reader of a module edge.
 export const bareSpecifier = (s) => String(s).replace(/^['"`]|['"`]$/g, '');
 
 // The face vocabulary of the runtime table below. An entry's `types`

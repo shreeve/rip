@@ -4,12 +4,14 @@
 //
 //   cpuq drain --label rip:timing --max 10m -- bun scripts/analyze-bench.mjs [rounds]
 //
-// The v1 side is an instrumented copy of src/emitter.js (written beside
-// it, removed on exit) whose replaced walks are timed as one group,
-// outermost call only, so a walk nested in another is counted once:
+// The v1 side is an instrumented copy of src/emitter.js (written to a
+// temporary directory, its imports pointed back at src/) whose replaced
+// walks are timed as one group, outermost call only, so a walk nested
+// in another is counted once:
 //   deliveryTrees, runtimeAliasBindings, programScopeNames,
-//   inventoryBindings, referencesNames, the six structural contains*
-//   triggers, collectTypeOnlyImports, collectAppAccessors, every
+//   inventoryBindings, the delivery decision's referencesNames call and
+//   structural triggers (timed at their call sites, so their recursion
+//   runs untimed), collectTypeOnlyImports, collectAppAccessors, every
 //   pushReactiveFrame (the frame collectors, the redeclaration check,
 //   declaredNames/declaredClassNames/importedSpecs/exportedConstNames),
 //   the single-expression effect's checkScopeRedeclarations, and the
@@ -17,7 +19,9 @@
 //   unnecessary) is timed on its own. programScopeNames and
 //   inventoryBindings run hoistTargets, which also mints chain temps
 //   and reference plans (4.1b's facts), so the group slightly favors
-//   analyze.js.
+//   analyze.js. The plain src/emitter.js runs in the same rounds: the
+//   instrumented copy's whole-emit time over it is the residual
+//   instrumentation cost the group may still carry, reported.
 //
 // Rounds interleave the two sides (alternating which goes first) and
 // each side reports its fastest round. Both sides read one Stores per
@@ -26,8 +30,11 @@
 // group's per-call timer cost is calibrated and subtracted. Retained
 // size is each side's construction held for the whole population after
 // a full collection: analyze.js's facts against emitterShape's trees.
-import { writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { writeFileSync, readFileSync, rmSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
+import { emit as emitPlain } from '../src/emitter.js';
 import { heapStats } from 'bun:jsc';
 import { packageInputs, rowInputs } from '../test/support/consumer-hashes.js';
 import { parseSource } from '../src/compiler.js';
@@ -40,8 +47,8 @@ const rounds = Number(process.argv[2] ?? 7);
 if (!Number.isInteger(rounds) || rounds < 1) throw new Error(`analyze-bench: rounds must be a whole number, got ${process.argv[2]}`);
 
 const METHODS = ['collectTypeOnlyImports', 'collectAppAccessors', 'pushReactiveFrame', 'checkScopeRedeclarations'];
-const FUNCS = ['deliveryTrees', 'runtimeAliasBindings', 'programScopeNames', 'inventoryBindings', 'referencesNames',
-  'containsSchema', 'containsModelSchema', 'containsReactive', 'containsComponentDecl', 'containsObjectComprehension', 'containsMatchRead'];
+const FUNCS = ['deliveryTrees', 'runtimeAliasBindings', 'programScopeNames', 'inventoryBindings'];
+const DELIVERY_REFS = 'referencesNames(tree, unboundSet, stores, isDecl)';
 const ATOMS = `  for (const { tree, atoms } of trees) {
     collectAtoms(tree);
     collectAtoms(atoms);
@@ -58,7 +65,13 @@ function instrument() {
   t = t.replace(ATOMS, `  __time('walks', () => {\n${ATOMS}\n  }, null, []);`);
   t = t.replace(/^import \{ emitterShape \} from '\.\/emitter-shape\.js';/m,
     "import { emitterShape as __shape } from './emitter-shape.js';\nconst emitterShape = (...a) => __time('shape', __shape, null, a);");
+  if (!t.includes(DELIVERY_REFS)) throw new Error('analyze-bench: src/emitter.js has no delivery reference walk');
+  t = t.replace(DELIVERY_REFS, "__time('walks', referencesNames, null, [tree, unboundSet, stores, isDecl])");
   t = t.replace(/^class Emitter /m, 'export class Emitter ');
+  const src = pathToFileURL(join(root, 'src')).href;
+  t = t.replace(/ from '\.\//g, ` from '${src}/`);
+  if (!t.includes("new URL('./runtime/', import.meta.url)")) throw new Error('analyze-bench: src/emitter.js locates its runtimes differently');
+  t = t.replace("new URL('./runtime/', import.meta.url)", `new URL('${src}/runtime/')`);
   t += `
 export const __T = new Map();
 export let __calls = 0;
@@ -79,15 +92,21 @@ for (const m of ${JSON.stringify(METHODS)}) {
   o[m] = function (...a) { return __time('walks', f, this, a); };
 }
 ${FUNCS.map((f) => `{ const g = ${f}; ${f} = (...a) => __time('walks', g, null, a); }`).join('\n')}
+for (const k of Object.keys(STRUCTURAL_TRIGGERS)) {
+  const f = STRUCTURAL_TRIGGERS[k];
+  STRUCTURAL_TRIGGERS[k] = (...a) => __time('walks', f, null, a);
+}
 export const __reset = () => { __T.clear(); __calls = 0; };
 `;
-  const file = join(root, 'src/.analyze-bench-v1.js');
+  const dir = mkdtempSync(join(tmpdir(), 'analyze-bench-'));
+  const file = join(dir, 'emitter-v1.js');
   writeFileSync(file, t);
-  return file;
+  return dir;
 }
 
-const file = instrument();
-process.on('exit', () => rmSync(file, { force: true }));
+const dir = instrument();
+process.on('exit', () => rmSync(dir, { recursive: true, force: true }));
+const file = join(dir, 'emitter-v1.js');
 const V1 = await import(file);
 
 // The timer's own cost per outermost call, subtracted from the group.
@@ -123,25 +142,36 @@ for (const face of ['js', 'ts']) {
 
   const v1Pass = () => {
     V1.__reset();
+    const s = performance.now();
     for (const p of pop) V1.emit(p.result, { source: p.source, face, dataPayload: p.dataPayload, modulePath: p.path });
-    return { walks: V1.__T.get('walks') ?? 0, shape: V1.__T.get('shape') ?? 0, calls: V1.__calls };
+    return { total: performance.now() - s, walks: V1.__T.get('walks') ?? 0, shape: V1.__T.get('shape') ?? 0, calls: V1.__calls };
+  };
+  const plainPass = () => {
+    const s = performance.now();
+    for (const p of pop) emitPlain(p.result, { source: p.source, face, dataPayload: p.dataPayload, modulePath: p.path });
+    return performance.now() - s;
   };
   const anPass = () => {
     const s = performance.now();
     for (let i = 0; i < pop.length; i++) analyze(pop[i].result, { source: pop[i].source, face, stores: stores[i] });
     return performance.now() - s;
   };
-  v1Pass(); anPass();
+  v1Pass(); anPass(); plainPass();
   let best1 = null;
   let bestA = Infinity;
+  let bestTotal = Infinity;
+  let bestPlain = Infinity;
+  const orders = [['v1', 'an', 'plain'], ['an', 'plain', 'v1'], ['plain', 'v1', 'an']];
   for (let r = 0; r < rounds; r++) {
-    const order = r % 2 === 0 ? ['v1', 'an'] : ['an', 'v1'];
-    for (const side of order) {
+    for (const side of orders[r % orders.length]) {
       if (side === 'v1') {
         const x = v1Pass();
+        bestTotal = Math.min(bestTotal, x.total);
         if (best1 === null || x.walks + x.shape < best1.walks + best1.shape) best1 = x;
-      } else {
+      } else if (side === 'an') {
         bestA = Math.min(bestA, anPass());
+      } else {
+        bestPlain = Math.min(bestPlain, plainPass());
       }
     }
   }
@@ -158,6 +188,7 @@ for (const face of ['js', 'ts']) {
   console.log(`\nface ${face}: ${pop.length} programs, best of ${rounds} interleaved rounds`);
   console.log(`  v1 replaced walks      ${fmt(walks)} (${best1.calls} timed calls, ${(cost * 1e6).toFixed(0)} ns each subtracted)`);
   console.log(`  v1 emitterShape        ${fmt(best1.shape)}`);
+  console.log(`  residual instrumentation ${fmt(bestTotal - bestPlain - best1.calls * cost)} (instrumented emit over plain emit, timer cost aside; not subtracted)`);
   console.log(`  analyze.js             ${fmt(bestA)}  = ${(100 * bestA / walks).toFixed(1)}% of the replaced walks, ${(100 * bestA / base).toFixed(1)}% of walks + emitterShape`);
   console.log(`  Stores construction    ${fmt(storesMs)} (shared by both sides, outside both timings)`);
   console.log(`  retained               analyze.js facts ${((h1 - h0) / 1e6).toFixed(1)} MB; emitterShape trees ${((h2 - h1) / 1e6).toFixed(1)} MB`);

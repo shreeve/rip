@@ -18721,6 +18721,11 @@ const STRUCTURAL_TRIGGERS = {
   matchRead: (sexpr) => containsMatchRead(sexpr),
   component: (sexpr, preds) => containsComponentDecl(sexpr, preds.isComponent),
 };
+const structuralTrigger = (rt) => {
+  const detect = STRUCTURAL_TRIGGERS[rt.trigger];
+  if (detect === undefined) throw new Error(`emitter: the runtime '${rt.key}' names the structural trigger '${rt.trigger}', which the emitter does not detect`);
+  return detect;
+};
 
 // Inline-mode body text, lazily read and cached per runtime. The
 // export line is the module's ES seam, and a runtime's import of a
@@ -19442,7 +19447,7 @@ function emitWith(parseResult, { source = '', runtimeDelivery = 'none', face = '
   for (const rt of RUNTIME_TABLE) {
     const unboundSet = new Set(rt.names.filter((n) => !bound.has(n)));
     if (trees.some(({ tree, stores, isDecl, isTrigger, isComponent }) =>
-          (rt.trigger !== null && STRUCTURAL_TRIGGERS[rt.trigger](tree, { isTrigger, isComponent })) || referencesNames(tree, unboundSet, stores, isDecl))) {
+          (rt.trigger !== null && structuralTrigger(rt)(tree, { isTrigger, isComponent })) || referencesNames(tree, unboundSet, stores, isDecl))) {
       runtimes.add(rt.key);
     }
   }

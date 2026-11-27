@@ -21,7 +21,7 @@
 //                            name → declaring node id
 //   typeOnlyImports          imported names used only in type text
 //   appAccessors             the rip/app accessor bindings
-//   atoms                    every string the trees spell, the seed of
+//   isAtom / atoms           every string the trees spell, the seed of
 //                            the used-name registry
 //   schemaBodies             the schema callable bodies, each walked as
 //                            its own delivery tree
@@ -206,10 +206,10 @@ class Scope {
     this.stmtIds = owner === null ? [] : null;
   }
 
-  // The first declaration of a name is its declaring node.
-  record(set, name, node) {
+  // The first declaration of a name is its declaring node, kept by id.
+  record(set, name, id) {
     if (this[set] === EMPTY_MAP) this[set] = new Map();
-    if (!this[set].has(name)) this[set].set(name, node);
+    if (!this[set].has(name)) this[set].set(name, id);
   }
 }
 
@@ -236,6 +236,7 @@ class Analysis {
     this.siteTrees = new Map();
     this.renderPos = new Map();
     this.childrenFuncs = new Set();
+    this.methodFuncs = new Set();
   }
 
   kindOf(x) {
@@ -450,6 +451,11 @@ class Analysis {
   // tree; a rejection is kept as the walk's first.
   rabPattern(p, m) {
     if (m & NORAB) return;
+    const w = wordOf(p);
+    if (w !== undefined && !PATTERN_LITERALS.has(w)) {
+      if (!isNone(p)) this.tree.names.add(w);
+      return;
+    }
     try {
       for (const n of this.patternNames(p, [], true)) this.tree.names.add(n);
     } catch (err) {
@@ -675,27 +681,28 @@ class Analysis {
     }
   }
 
-  // `->` / `=>`. `as` 'method' marks a method body (no implicit `it`).
-  // A render children block (childrenFuncs) is inlined into its render
+  // `->` / `=>`. A method (`as` 'method', or a function its class or
+  // component body registered in methodFuncs) is emitted by the
+  // emitter's methodBlock: parameters first, then its body's scope, and
+  // no implicit `it`. Any other function is emitted by emitFunc, which
+  // checks its body's scope before it emits its parameters, so its
+  // scope opens before the scopes inside its parameter defaults. A
+  // render children block (childrenFuncs) is inlined into its render
   // and is no scope. `rnRender` reads the body as render statements for
   // the free-reference walk (a tag call's children).
-  //
-  // Scope order is emission order: a function opens its own scope
-  // before the scopes inside its parameter defaults (it checks its body,
-  // then emits its parameters); a method emits its parameters first,
-  // as a def does.
   visitFunc(x, m, cs, rs, as, rnRender = false) {
     const params = x[2];
     const body = x[3];
+    const method = as === 'method' || this.methodFuncs.has(x);
     this.headWord(x[0], m);
     let scope = null;
     const scoped = !this.childrenFuncs.has(x);
-    if (as === 'method') this.visitParams(params, m);
+    if (method) this.visitParams(params, m);
     if (scoped) {
       scope = this.openScope(x, body, params, false, m);
-      scope.implicitIt = as !== 'method' && params.length === 0;
+      scope.implicitIt = !method && params.length === 0;
     }
-    if (as !== 'method') this.visitParams(params, m);
+    if (!method) this.visitParams(params, m);
     this.visitBody(body, m, scope, params, 'func', rnRender ? RN_RENDER : RN_EXPR);
   }
 
@@ -802,13 +809,25 @@ class Analysis {
   }
 
   // A class member that is not a def, field or typed field: walked in
-  // the enclosing scope by the redeclaration walk (a `name: ->`
-  // method's function is its own scope).
+  // the enclosing scope by the redeclaration walk. The emitter's
+  // classMember emits every function a member pair holds through
+  // methodBlock — whatever the key (a name, `@static`, a string) and
+  // either arrow — and so the `get`/`set` accessor's.
   visitClassMember(x, m, rs) {
-    if (isNodeP(x) && x[0] === ':' && x.length === 4 && !x[1].shorthand && isFuncNode(x[3])) {
-      return this.visitPair(x, m, null, rs, 'method');
+    if (isNodeP(x)) {
+      if (x[0] === 'object') for (let i = 2; i < x.length; i++) this.noteMethodPair(x[i]);
+      else if (x[0] === ':') this.noteMethodPair(x);
+      else if (x[0] === 'call' && x[1].opt !== true && x[1].await !== true && x.length === 4) {
+        const w = wordOf(x[2]);
+        if ((w === 'get' || w === 'set') && isNodeP(x[3]) && x[3][0] === 'object' && x[3].length === 3) this.noteMethodPair(x[3][2]);
+      }
     }
     return this.visit(x, m, null, rs);
+  }
+
+  // A pair whose value the emitter emits as a method.
+  noteMethodPair(pair) {
+    if (isNodeP(pair) && pair[0] === ':' && pair[1].shorthand !== true && isFuncNode(pair[3])) this.methodFuncs.add(pair[3]);
   }
 
   // A member access: the free-reference walk reads only the object; a
@@ -854,9 +873,13 @@ class Analysis {
     for (let i = 2; i < body.length; i++) {
       const s = body[i];
       if (isNodeP(s) && s[0] === 'effect' && this.isEffectDecl(s)) { this.visitEffect(s, c, null, null, true); continue; }
-      if (isNodeP(s) && s[0] === ':' && s.length === 4 && isFuncNode(s[3])) {
-        this.visitPair(s, c, null, null, 'method');
-        continue;
+      // The emitter emits a component's methods and lifecycle hooks
+      // through methodBlock: a `name = ->` member, and every pair of a
+      // colon-method group.
+      if (isNodeP(s)) {
+        if (s[0] === 'object') for (let j = 2; j < s.length; j++) this.noteMethodPair(s[j]);
+        else if (s[0] === ':') this.noteMethodPair(s);
+        else if (s[0] === '=' && s.length === 4 && isFuncNode(s[3])) this.methodFuncs.add(s[3]);
       }
       this.visit(s, c, null, null);
     }
@@ -889,8 +912,8 @@ class Analysis {
             `that no longer exists`, x);
         }
       } else if (name !== undefined) {
-        cs.record('reactive', name, x);
-        if (hv === 'computed') cs.record('computed', name, x);
+        cs.record('reactive', name, this.idOf(x));
+        if (hv === 'computed') cs.record('computed', name, this.idOf(x));
       }
     }
     if (rs !== null) this.auth(rs, name, hv === 'computed' ? 'computed' : 'state', x);
@@ -921,7 +944,7 @@ class Analysis {
             `; a BARE '~> …' stays legal here`, x);
         }
       } else if (name !== undefined) {
-        cs.record('handles', name, x);
+        cs.record('handles', name, this.idOf(x));
       }
     }
     if (target !== null && rs !== null) this.auth(rs, name, 'effect', x);
@@ -956,7 +979,7 @@ class Analysis {
             `inside a statement block it lowers to a block-scoped const, dead to every later read `, x);
         }
       } else if (name !== undefined) {
-        cs.record('readonly', name, x);
+        cs.record('readonly', name, this.idOf(x));
       }
     }
     if (rs !== null) this.auth(rs, name, 'readonly', x);
@@ -1620,6 +1643,7 @@ class Analysis {
   }
 
   dupIn(names, node, what, scope) {
+    if (names.length < 2) return names;
     const seen = new Set();
     for (const n of names) {
       if (seen.has(n)) {
@@ -1637,7 +1661,9 @@ class Analysis {
   endScope(scope) {
     const owner = scope.owner;
     const params = scope.implicitIt && scope.bareIt ? ['it'] : scope.params;
-    if (params.length === 0 && scope.forms.length === 0) { scope.decls = EMPTY_MAP; return; }
+    // With no parameter and no authoritative form there is nothing to
+    // redeclare, and no walk error to report.
+    if (params.length === 0 && scope.forms.every((f) => !f.auth && f.error === undefined)) { scope.decls = EMPTY_MAP; return; }
     const pforms = [];
     let perr = null;
     try {
@@ -1760,8 +1786,9 @@ class Analysis {
       for (const atom of t.atoms) for (const n of this.patternNames(atom, [], true)) aliasUsed.add(n);
     }
     for (const { name } of ambient) aliasUsed.add(name);
-    const atoms = new Set(this.words.keys());
-    for (const { name } of ambient) atoms.add(name);
+    // Every word is an atom; the ambient names join them.
+    for (const { name } of ambient) this.flag(name, W_ATOM);
+    const words = this.words;
 
     // The delivery decision.
     const deliveryBound = new Set(bound);
@@ -1783,7 +1810,7 @@ class Analysis {
     }
 
     const scopes = this.scopes.map((s) => this.scopeFacts(s));
-    return {
+    return withAtoms(words, {
       bindings,
       bindingNames: [...aliasUsed],
       runtimes,
@@ -1791,11 +1818,10 @@ class Analysis {
       programHoist: hoistNames.map((n) => [n, this.idOf(hoist.get(n))]),
       typeOnlyImports: this.typeOnlyImports(),
       appAccessors: this.appAccessors(),
-      atoms,
       schemaBodies: this.schemaBodies,
       schemaTrees: this.trees.slice(1).map((t) => ({ stmtIds: t.stmts.map((x) => (wordOf(x) === undefined ? this.idOf(x) : null)), atoms: [...t.atoms] })),
       scopes,
-    };
+    });
   }
 
   // A live statement of a scope: its statement-level facts.
@@ -1826,6 +1852,8 @@ class Analysis {
   // value, at a scope's own level (a statement, or an exported spec).
   noteDeclared(scope, st) {
     if (!isNodeP(st)) return;
+    const h = st[0];
+    if (h !== 'class' && h !== 'def' && h !== '=') return;
     const hv = headOf(st);
     if (hv === 'class' || hv === 'def' || hv === 'void-def') {
       const n = isNone(st[2]) ? undefined : wordOf(st[2]);
@@ -1842,23 +1870,22 @@ class Analysis {
   }
 
   scopeFacts(s) {
-    const ids = (map) => (map.size === 0 ? EMPTY_MAP : new Map([...map].map(([n, node]) => [n, this.idOf(node)])));
     let own = EMPTY_MAP;
     if (s.declared !== null || s.handles.size || s.readonly.size) {
       own = new Map();
       if (s.declared !== null) for (const [n, node] of s.declared) own.set(n, this.idOf(node));
-      for (const [n, node] of s.handles) own.set(n, this.idOf(node));
-      for (const [n, node] of s.readonly) own.set(n, this.idOf(node));
+      for (const [n, id] of s.handles) own.set(n, id);
+      for (const [n, id] of s.readonly) own.set(n, id);
     }
     return {
       owner: s.owner,
       ownerId: this.idOf(s.owner),
       stmtIds: s.stmtIds,
       checkOnly: s.checkOnly,
-      reactive: ids(s.reactive),
-      computed: ids(s.computed),
-      readonly: ids(s.readonly),
-      handles: ids(s.handles),
+      reactive: s.reactive,
+      computed: s.computed,
+      readonly: s.readonly,
+      handles: s.handles,
       own,
       classes: s.classes,
       importSpecs: s.importSpecs.size ? s.importSpecs : EMPTY_MAP,
@@ -1911,6 +1938,15 @@ class Analysis {
     }
     return acc;
   }
+}
+
+// The used-name registry's seed on a result: `isAtom` answers it and
+// `atoms` spells it out as a set when a reader needs one. Built outside
+// the analysis so the result holds the word map alone.
+function withAtoms(words, result) {
+  result.isAtom = (name) => words.has(name);
+  Object.defineProperty(result, 'atoms', { enumerable: true, get: () => new Set(words.keys()) });
+  return result;
 }
 
 function schemaFail(message, at) {

@@ -24967,6 +24967,12 @@ var STRUCTURAL_TRIGGERS = {
   matchRead: (sexpr) => containsMatchRead(sexpr),
   component: (sexpr, preds) => containsComponentDecl(sexpr, preds.isComponent)
 };
+var structuralTrigger = (rt) => {
+  const detect = STRUCTURAL_TRIGGERS[rt.trigger];
+  if (detect === undefined)
+    throw new Error(`emitter: the runtime '${rt.key}' names the structural trigger '${rt.trigger}', which the emitter does not detect`);
+  return detect;
+};
 var runtimeBodies = new Map;
 var RUNTIME_EXPORT_LINE = /^export \{([^}]*)\};\s*$/gm;
 var runtimeText = (rt) => {
@@ -25551,7 +25557,7 @@ function emitWith(parseResult, { source = "", runtimeDelivery = "none", face = "
   const runtimes = new Set;
   for (const rt of RUNTIME_TABLE) {
     const unboundSet = new Set(rt.names.filter((n) => !bound.has(n)));
-    if (trees.some(({ tree, stores, isDecl, isTrigger, isComponent }) => rt.trigger !== null && STRUCTURAL_TRIGGERS[rt.trigger](tree, { isTrigger, isComponent }) || referencesNames(tree, unboundSet, stores, isDecl))) {
+    if (trees.some(({ tree, stores, isDecl, isTrigger, isComponent }) => rt.trigger !== null && structuralTrigger(rt)(tree, { isTrigger, isComponent }) || referencesNames(tree, unboundSet, stores, isDecl))) {
       runtimes.add(rt.key);
     }
   }
@@ -35085,7 +35091,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "9b68de7a389c7bde";
+var compilerBuild = () => "9469d5923446a04b";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

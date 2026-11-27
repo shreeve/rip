@@ -184,6 +184,32 @@ describe('rejections, each exactly v1\'s', () => {
     rejectsLikeV1('o = {m: (a = (-> [c, c] = 1)) ->\n  [b, b] = 1}', c);
   });
 
+  test('every function a class or component member pair holds is a method; other functions check their body first', () => {
+    const c = "emitter: 'c' is bound twice in one destructuring pattern — one binding per name; rename or drop the duplicate";
+    const b = "emitter: 'b' is bound twice in one destructuring pattern — one binding per name; rename or drop the duplicate";
+    const D = '(a = (-> [c, c] = 1))';
+    for (const src of [
+      `class A\n  @s: ${D} ->\n    [b, b] = 1`,
+      `class A extends B2\n  @s: ${D} ->\n    [b, b] = 1`,
+      `class A\n  @s: ${D} =>\n    [b, b] = 1`,
+      `class A\n  constructor: -> 1\n  m: ${D} =>\n    [b, b] = 1`,
+      `class A\n  'q': ${D} ->\n    [b, b] = 1`,
+      `class A\n  m!: ${D} ->\n    [b, b] = 1`,
+      'class A\n  set x: (v = (-> [c, c] = 1)) ->\n    [b, b] = 1',
+      `A = component\n  m: ${D} =>\n    [b, b] = 1`,
+      `A = component\n  m: ${D} ->\n    [b, b] = 1`,
+      `A = component\n  m = ${D} ->\n    [b, b] = 1`,
+      `A = component\n  mounted = ${D} ->\n    [b, b] = 1`,
+    ]) rejectsLikeV1(src, c);
+    // A class field's function, and an object pair that is no method
+    // (a string key, a fat arrow), are ordinary functions.
+    for (const src of [
+      `class A\n  f = ${D} ->\n    [b, b] = 1`,
+      `o = {'q': ${D} ->\n  [b, b] = 1}`,
+      `o = {m: ${D} =>\n  [b, b] = 1}`,
+    ]) rejectsLikeV1(src, b);
+  });
+
   test('a single-expression effect is checked as its own scope', () => {
     rejectsLikeV1('~> (y := 1; y := 2)', "emitter: 'y' was already declared as state on line 1 — assign with 'y = …' to update it, or choose a different name");
   });
