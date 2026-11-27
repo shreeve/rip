@@ -56,6 +56,31 @@ Row = component
     expect(code).toContain('export const __hmrComponents = { Counter, Row };');
   });
 
+  test('hmr:true reserves the component table name at module scope, positioned', () => {
+    const row = 'Row = component\n  render\n    li\n      = 1\n';
+    const message = "emitter: '__hmrComponents' is reserved for the HMR component table — choose a different name";
+    const at = {
+      '__hmrComponents = 1\n': '1:1',
+      '__hmrComponents := 1\n': '1:1',
+      '__hmrComponents =! 1\n': '1:1',
+      'def __hmrComponents\n  1\n': '1:1',
+      'class __hmrComponents\n': '1:1',
+      '{__hmrComponents} = o\n': '1:1',
+      'import { __hmrComponents } from "./x.rip"\n': '1:1',
+      'export __hmrComponents = 1\n': '1:8',
+      'if ok\n  __hmrComponents = 2\n': '2:3',
+    };
+    for (const [src, pos] of Object.entries(at)) {
+      expect(() => compileHmr(src + row, 'r.rip')).toThrow(`r.rip:${pos}: ${message}`);
+      expect(() => compile(src + row, { path: 'r.rip', runtimeDelivery: 'none' })).not.toThrow(message);
+    }
+    // A nested scope shadows it, a loop variable and a catch name bind in
+    // their own scopes, and a read is no declaration.
+    for (const src of ['f = ->\n  __hmrComponents = 1\n', 'for __hmrComponents in xs\n  1\n', 'try\n  f()\ncatch __hmrComponents\n  1\n', 'x = __hmrComponents\n']) {
+      expect(compileHmr(src + row, 'r.rip').code).toContain('export const __hmrComponents = { Row };');
+    }
+  });
+
   test('hmr:false (default) emits no __hmrId, __hmrSig, or component table', () => {
     const off = compile(SRC, { path: 'routes/counter.rip', runtimeDelivery: 'none' });
     const explicit = compile(SRC, { path: 'routes/counter.rip', runtimeDelivery: 'none', hmr: false });

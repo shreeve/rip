@@ -12364,7 +12364,7 @@ class Emitter {
     return line;
   }
   checkScopeRedeclarations(stmts, params = [], owner = null, seeds = []) {
-    const forms = seeds.map(({ name, kind, line }) => ({ name, kind, node: null, line, auth: true }));
+    const forms = seeds.map(({ name, kind, line = null, reserved = false }) => ({ name, kind, node: null, line, auth: true, reserved }));
     const auth = (name, kind, node) => {
       if (typeof name === "string")
         forms.push({ name, kind, node, auth: true });
@@ -12515,6 +12515,9 @@ class Emitter {
       f.order = i;
     });
     const reject = (at, prior) => {
+      if (prior.reserved) {
+        throw this.positionedError(at.node, `emitter: '${at.name}' is reserved for ${prior.kind} — choose a different name`, ...owner !== null ? [owner] : []);
+      }
       const line = prior.node !== null ? this.nodeLine(prior.node) : prior.line ?? null;
       const hint = prior.kind === "state" || prior.kind === "parameter" || prior.kind === "plain" || prior.line != null ? ` — assign with '${at.name} = …' to update it, or choose a different name` : " — choose a different name";
       throw this.positionedError(at.node, `emitter: '${at.name}' was already declared as ${prior.kind}${line !== null ? ` on line ${line}` : ""}${hint}`, ...owner !== null ? [owner] : []);
@@ -12533,6 +12536,8 @@ class Emitter {
         continue;
       const prior = decls.get(f.name);
       if (prior !== undefined) {
+        if (prior.reserved)
+          reject(f, prior);
         if (prior.auth && f.order < prior.order)
           reject(prior, f);
         continue;
@@ -15045,7 +15050,7 @@ class Emitter {
         this.attachSchemaConsts(entries, this.schemaModuleStories);
         FACTS?.("hoist", null, { entries, sites: collected, matchWrite: entries.matchWrite, declareInPlace: true });
         const names = new Set([...entries.map(([n]) => n), ...imported]);
-        for (const n of this.pushReactiveFrame(all, names, [], null, seeds))
+        for (const n of this.pushReactiveFrame(all, names, [], null, [...seeds, ...this.moduleReserved()]))
           names.add(n);
         this.moduleBound = Emitter.moduleBoundNames(rest);
         this.moduleClassNames = Emitter.classDeclNames(rest);
@@ -15168,6 +15173,9 @@ class Emitter {
   moduleSeeds() {
     return this.dataPayload == null ? [] : [{ name: "DATA", kind: "the __DATA__ section", line: this.dataLine }];
   }
+  moduleReserved() {
+    return this.hmr && this.modulePath ? [{ name: "__hmrComponents", kind: "the HMR component table", reserved: true }] : [];
+  }
   emitHmrComponentTable() {
     if (!this.hmr || !this.modulePath || this.moduleComponentNames.size === 0)
       return;
@@ -15185,7 +15193,7 @@ export const __hmrComponents = { ${[...this.moduleComponentNames.keys()].join(",
       this.attachSchemaConsts(entries, this.schemaModuleStories);
       FACTS?.("hoist", null, { entries, sites: collected, matchWrite: entries.matchWrite, declareInPlace: true });
       const names = new Set([...entries.map(([n]) => n), ...imported]);
-      for (const n of this.pushReactiveFrame(stmts, names, [], null, seeds))
+      for (const n of this.pushReactiveFrame(stmts, names, [], null, [...seeds, ...this.moduleReserved()]))
         names.add(n);
       this.moduleBound = Emitter.moduleBoundNames(stmts);
       this.moduleClassNames = Emitter.classDeclNames(stmts);
@@ -35748,7 +35756,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "2bde5e232e1286b5";
+var compilerBuild = () => "160f0901d71a1966";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";
