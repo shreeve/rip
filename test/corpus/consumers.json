@@ -15411,6 +15411,30 @@
   "js": "1uv4wn25r1l1d",
   "ts": "35wvp89mo62km"
  },
+ "row schema.rip › code an empty callable body is an empty function": {
+  "js": "28ymphd74cvl3",
+  "ts": "20sk2n5dmygxo"
+ },
+ "row schema.rip › code a symbol argument inside a method body is a symbol, not an object key": {
+  "js": "1lky1nss73wg5",
+  "ts": "2ph1ne6dtfyrj"
+ },
+ "row schema.rip › code a compound key inside a method body is one key": {
+  "js": "10vr1496bly3w",
+  "ts": "thq14qvsvamz"
+ },
+ "row schema.rip › code an inline schema nested in a method body is a schema": {
+  "js": "30l6kqvx7u1xe",
+  "ts": "33vq45tmixv69"
+ },
+ "row schema.rip › code a render attribute inside a method body is an attribute": {
+  "js": "1wmomiqtypg7w",
+  "ts": "3gplfv64tehc7"
+ },
+ "row schema.rip › fail an inline schema nested in a method body takes no callables, as anywhere": {
+  "js": "1vdi0p56wtg31",
+  "ts": "1vdi0p56wtg31"
+ },
  "row semicolons.rip › code function declaration": {
   "js": "2ldduga4j5f4o",
   "ts": "ej7rgm7qvv58"

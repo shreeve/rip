@@ -1582,8 +1582,9 @@ grammar =
   # predicate and field transform, then the `on:` adapter. A SCHEMA_CODE
   # token's own payload is that code run through every lexer pass, and
   # the driver parses it from the program's own start symbol (`Root` in
-  # `entries`): embedded code is program code. Neither entry is opaque,
-  # so a payload either rejects is the parse's error at its token.
+  # `entries`): embedded code is program code. Neither entry is opaque:
+  # when either rejects its payload, the rejection is the parse's own
+  # error, at the offending token.
 
   SchemaBody: [
     o ''           , '["schema-codes", {}]'      , 'schema-codes: _, _'

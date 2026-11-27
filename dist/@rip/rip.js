@@ -2167,7 +2167,7 @@ function collapseSchemaAt(tokens, i, out, config, mintId, fail, text) {
   if (adapterTokens)
     descriptor.adapterTokens = adapterTokens;
   for (const site of schemaCodeSites(descriptor)) {
-    if (site.value)
+    if (site.value || site.tokens.length === 0)
       continue;
     const from = unsplitBody.findIndex((tk) => tk.id === site.tokens[0].id);
     const to = unsplitBody.findIndex((tk) => tk.id === site.tokens[site.tokens.length - 1].id);
@@ -9648,12 +9648,13 @@ ${baseline}`).join(`
   layout(tokens);
   for (let b = 0;b < schemaBodies.length; b++) {
     const { token, descriptor, defaultMaxString } = schemaBodies[b];
-    payloads.set(token, schemaCodeSites(descriptor).map(({ tokens: slice }) => {
+    payloads.set(token, schemaCodeSites(descriptor).map(({ entry, tokens: slice }) => {
       let toks = slice.map((t) => ({ ...t }));
-      if (toks[0].kind === "INDENT" && closingOutdent(toks, 0) === toks.length - 1)
+      if (toks[0]?.kind === "INDENT" && closingOutdent(toks, 0) === toks.length - 1)
         toks = toks.slice(1, -1);
       layout(toks, { defaultMaxString });
-      const start = slice[0].start, end = slice[slice.length - 1].end;
+      const start = slice.length ? slice[0].start : entry.start;
+      const end = slice.length ? slice[slice.length - 1].end : start;
       const code = { id: mintId(), kind: "SCHEMA_CODE", value: text.slice(start, end), start, end, spaced: true };
       payloads.set(code, toks);
       return code;
@@ -34837,7 +34838,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "243f3e8355d83f60";
+var compilerBuild = () => "dd38d53fda3d308f";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

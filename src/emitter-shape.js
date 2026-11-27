@@ -4,9 +4,8 @@
 // `void-*` heads, one head per loop form, and headless catch, specifier,
 // pick-item and shorthand-pair nodes, a type annotation as its
 // normalized text, and a schema as ["schema", descriptor]. emitterShape
-// rewrites the
-// parser's tree (the shape grammar.rip's kind registry documents) into
-// that shape.
+// rewrites the parser's tree (the shape grammar.rip's kind registry
+// documents) into that shape.
 //
 // Every rebuilt array that carried a NodeStore row is registered under
 // the original's node id, so marks and role lookups resolve to the same

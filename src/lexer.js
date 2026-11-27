@@ -2522,14 +2522,17 @@ export function tokenize(text, path = '<anonymous>', { tolerant = false } = {}) 
   // the tape's alone; a nested schema a slice collapses joins the queue.
   // The passes rewrite tokens in place and the descriptor keeps its
   // slices, so each runs over copies; one INDENT…OUTDENT pair wrapping a
-  // whole block body is the callable's, not a block of its code.
+  // whole block body is the callable's, not a block of its code. An
+  // empty body (`m: ->`) is an empty payload, zero-width at its entry,
+  // which the program's start symbol reads as an empty program.
   for (let b = 0; b < schemaBodies.length; b++) {
     const { token, descriptor, defaultMaxString } = schemaBodies[b];
-    payloads.set(token, schemaCodeSites(descriptor).map(({ tokens: slice }) => {
+    payloads.set(token, schemaCodeSites(descriptor).map(({ entry, tokens: slice }) => {
       let toks = slice.map((t) => ({ ...t }));
-      if (toks[0].kind === 'INDENT' && closingOutdent(toks, 0) === toks.length - 1) toks = toks.slice(1, -1);
+      if (toks[0]?.kind === 'INDENT' && closingOutdent(toks, 0) === toks.length - 1) toks = toks.slice(1, -1);
       layout(toks, { defaultMaxString });
-      const start = slice[0].start, end = slice[slice.length - 1].end;
+      const start = slice.length ? slice[0].start : entry.start;
+      const end = slice.length ? slice[slice.length - 1].end : start;
       const code = { id: mintId(), kind: 'SCHEMA_CODE', value: text.slice(start, end), start, end, spaced: true };
       payloads.set(code, toks);
       return code;

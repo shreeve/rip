@@ -417,7 +417,7 @@ function collapseSchemaAt(tokens, i, out, config, mintId, fail, text) {
   // A split pair keeps its symbol's id, so the slice's first and last
   // ids bound the same run in the unsplit body.
   for (const site of schemaCodeSites(descriptor)) {
-    if (site.value) continue;
+    if (site.value || site.tokens.length === 0) continue;
     const from = unsplitBody.findIndex((tk) => tk.id === site.tokens[0].id);
     const to = unsplitBody.findIndex((tk) => tk.id === site.tokens[site.tokens.length - 1].id);
     site.entry[site.key] = unsplitBody.slice(from, to + 1);

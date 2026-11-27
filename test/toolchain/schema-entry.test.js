@@ -40,6 +40,14 @@ describe('the payload tapes', () => {
     expect(payloads.get(code).map((t) => t.kind)).toEqual(['IDENTIFIER', 'TERMINATOR', 'IDENTIFIER']);
   });
 
+  test('an empty body is an empty payload, zero-width at its entry', () => {
+    const { tokens, payloads } = tokenize('S = schema :shape\n  m: ->\n  a string');
+    const [code] = payloads.get(tokens.find((t) => t.kind === 'SCHEMA_BODY'));
+    expect([code.value, code.start, code.end, payloads.get(code)]).toEqual(['', 20, 20, []]);
+    const [v] = bodies('S = schema :shape\n  m: ->\n  a string');
+    expect(JSON.stringify(v[3])).toBe('["schema-codes",{},["code",{},"",["program",{}]]]');
+  });
+
   test('the descriptor keeps each code site its unsplit slice', () => {
     const { tokens } = tokenize('S = schema :shape\n  m: -> [:a]');
     const { entries } = tokens.find((t) => t.kind === 'SCHEMA_BODY').value;
