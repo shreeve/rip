@@ -116,7 +116,7 @@ export function v1Facts(parsed, options) {
   try {
     const record = emitV1(parsed.result, {
       face: options.face, repl: options.repl ?? false, ambientBindings: options.ambientBindings ?? null,
-      source: parsed.source, dataPayload: parsed.dataPayload, modulePath: parsed.path, facts: sink,
+      source: parsed.source, dataPayload: parsed.dataPayload, dataLine: parsed.dataLine, modulePath: parsed.path, facts: sink,
     });
     return { record, facts };
   } catch (err) {
@@ -136,7 +136,7 @@ function frameText(f) {
 
 export function v2Facts(parsed, options) {
   try {
-    const a = analyze(parsed.result, { source: parsed.source, face: options.face, ambientBindings: options.ambientBindings ?? null });
+    const a = analyze(parsed.result, { source: parsed.source, face: options.face, ambientBindings: options.ambientBindings ?? null, dataLine: parsed.dataLine });
     return { analysis: a };
   } catch (err) {
     return { error: err };
