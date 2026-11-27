@@ -893,12 +893,12 @@ grammar =
   ]
 
   # ============================================================================
-  # Schema — `schema [:kind] INDENT … OUTDENT` is parsed entirely
+  # Schema — `schema [:kind] INDENT … OUTDENT`'s declarations are read
   # by the schema sub-parser at lexer-rewrite time (src/schema.js). The
-  # pass emits SCHEMA + SCHEMA_BODY, where SCHEMA_BODY's value is the
-  # structured descriptor (serializing as its kind string), so the main
-  # grammar carries one production and schema body syntax never grows
-  # the LR tables.
+  # pass emits SCHEMA + SCHEMA_BODY, where SCHEMA_BODY's raw value is the
+  # structured descriptor (serializing as its kind string) and its
+  # payload is the body's embedded Rip code, which the schema entry
+  # parses (`SchemaBody` below).
   # ============================================================================
 
   Schema: [
@@ -1574,6 +1574,28 @@ grammar =
     o '... IDENTIFIER : Type'         , '["type-element", {rest: true}, 2, 4]'               , 'type-element: _, _, name, type'
   ]
 
+  # ============================================================================
+  # Schema code — the schema entry point (`entries` below)
+  # ============================================================================
+  # A schema body's payload: one SCHEMA_CODE token per code site
+  # (schemaCodeSites in src/schema.js) — each callable, scope, @ensure
+  # predicate and field transform, then the `on:` adapter. A SCHEMA_CODE
+  # token's own payload is that code run through every lexer pass, and
+  # the driver parses it from the program's own start symbol (`Root` in
+  # `entries`): embedded code is program code. Neither entry is opaque:
+  # when either rejects its payload, the rejection is the parse's own
+  # error, at the offending token.
+
+  SchemaBody: [
+    o ''           , '["schema-codes", {}]'      , 'schema-codes: _, _'
+    o 'SchemaCodes', '["schema-codes", {}, ...1]', 'schema-codes: _, _, ...codes'
+  ]
+
+  SchemaCodes: [
+    o 'SCHEMA_CODE'            , '[1]'      , '~ code-list plumbing; schema-codes owns the span'
+    o 'SchemaCodes SCHEMA_CODE', '[...1, 2]', '~ code-list plumbing; schema-codes owns the span'
+  ]
+
 # ==============================================================================
 # Operator Precedence (high to low)
 # ==============================================================================
@@ -1631,6 +1653,7 @@ displays =
   TYPE: 'a type annotation'
   TYPE_PARAMS: '<…>'
   SCHEMA_BODY: 'a schema body'
+  SCHEMA_CODE: "a schema body's code"
   IDENTIFIER: 'a name'
   PROPERTY: 'a property name'
   NUMBER: 'a number'
@@ -1889,7 +1912,7 @@ kinds =
   'rest':          forms: ['"rest" attrs:{} name:expr'], part: true
   'return':        forms: ['"return" attrs:{} value:expr|none']
   'satisfies':     forms: ['"satisfies" attrs:{} value:expr annotation:type']
-  'schema':        forms: ['"schema" attrs:{} body:descriptor']
+  'schema':        forms: ['"schema" attrs:{} body:schema-body']
   'splat':         forms: ['"..." attrs:{} value:expr'], part: true
   'state':         forms: ['"state" attrs:{} target:expr value:expr'], side: ['annotation', 'operator', 'optionalMarker']
   'str':           forms: ['"str" attrs:{} ...parts:string|[expr]|none']
@@ -1926,6 +1949,12 @@ kinds =
   # the payload is no type the grammar reads. The rest are the payload's
   # nodes; a name, string, number, literal or `this` type is its leaf.
   'type':                 forms: ['"type" attrs:{} raw:leaf body:expr|type-predicate|none']
+  # The schema entry (`entries` below): a schema body token's value is its
+  # descriptor and the trees of its embedded code, one `code` per code
+  # site, each a program the program's own start symbol parsed.
+  'schema-body':          forms: ['"schema-body" attrs:{} raw:descriptor body:schema-codes'], part: true
+  'schema-codes':         forms: ['"schema-codes" attrs:{} ...codes:code'], part: true
+  'code':                 forms: ['"code" attrs:{} raw:leaf body:program'], part: true
   'type-apply':           forms: ['"type-apply" attrs:{} base:expr ...args:expr']
   'type-array':           forms: ['"type-array" attrs:{} element:expr']
   'type-conditional':     forms: ['"type-conditional" attrs:{} check:expr extends:expr then:expr else:expr']
@@ -2061,5 +2090,12 @@ entries =
   TypeAnnotation:
     kind: 'type'
     terminals: ['TYPE', 'CAST', 'SATISFIES']
+    opaque: true
+  SchemaBody:
+    kind: 'schema-body'
+    terminals: ['SCHEMA_BODY']
+  Root:
+    kind: 'code'
+    terminals: ['SCHEMA_CODE']
 
 export default {grammar, operators, displays, kinds, leaves, entries, expectedConflicts, start: 'Root'}

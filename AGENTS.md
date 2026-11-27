@@ -354,8 +354,8 @@ alters surface syntax updates ALL THREE in the same change.
   the construction: the emitter lowers `X.new(a)` to `new X(a)` (a
   pure spine stands bare, any other constructor seals), `X.new!`
   awaits it, and a bare `X.new` reads the property. A prefix `new` is
-  a reserved word: `rejectReservedWords` (lexer, shared with the
-  schema sub-parse) rejects it at the keyword, so the grammar has no
+  a reserved word: `rejectReservedWords` (lexer, run over the tape
+  and over each schema body's embedded code) rejects it at the keyword, so the grammar has no
   construction rule. `new` survives only as `new.target` and inside a
   TS constructor type. Pins: `test/rip/classes.rip`.
 - **REPL dynamic imports → minted runtime resolver.** Literal-only

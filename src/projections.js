@@ -13,7 +13,7 @@
 // is not itself shippable refuses the whole extract.
 import { makeParserLexer } from './lexer.js';
 import { Parser } from './parser.js';
-import { descriptorSegments, foldDerivedSchemas } from './schema.js';
+import { descriptorSegments, foldDerivedSchemas, schemaLiteralOf } from './schema.js';
 import { leafValue } from './sexpr.js';
 
 const BEHAVIOR_TAGS = new Set([
@@ -35,10 +35,8 @@ const schemaBindingsOf = (sexpr) => {
     const name = foldStr(assign[2]);
     if (typeof name !== 'string') continue;
     const rhs = assign[3];
-    if (foldStr(rhs[0]) === 'schema' && rhs.length === 3 &&
-        rhs[2] && typeof rhs[2] === 'object' && Array.isArray(rhs[2].entries)) {
-      byName.set(name, rhs[2]);
-    }
+    const descriptor = schemaLiteralOf(rhs);
+    if (descriptor !== null) byName.set(name, descriptor);
   }
   return byName;
 };

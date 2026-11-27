@@ -301,8 +301,8 @@
  },
  "pkg packages/db/test.rip": {
   "tokens": "1jsu8ojmsdk0w",
-  "tree": "2kvgo99l7rujq",
-  "tolerant": "g27xz617kkmp",
+  "tree": "1vhq5z23p89ou",
+  "tolerant": "17dtjkfqsr2kr",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/decimal/decimal.rip": {
@@ -313,8 +313,8 @@
  },
  "pkg packages/decimal/test.rip": {
   "tokens": "15rq0g7o1ye84",
-  "tree": "24vkpznaplsso",
-  "tolerant": "2418zube7v9ch",
+  "tree": "2bhn936wje4yf",
+  "tolerant": "1wsggnfqv4q0d",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/email/cli.rip": {
@@ -373,8 +373,8 @@
  },
  "pkg packages/email/preview/app/stash.rip": {
   "tokens": "sdpjksjw3e3k",
-  "tree": "23ci1ai7fdhvv",
-  "tolerant": "3l0esriaesczl",
+  "tree": "2eoxv5ozdxee9",
+  "tolerant": "3kejqokkrzh2",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/email/preview/index.rip": {
@@ -427,8 +427,8 @@
  },
  "pkg packages/fake/test.rip": {
   "tokens": "dv2o68z7db07",
-  "tree": "1xibb876nhj2b",
-  "tolerant": "2uzoc445lx9yw",
+  "tree": "1l9camxzz0jhb",
+  "tolerant": "rmko4qc95qql",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/googlesheets/googlesheets.rip": {
@@ -583,8 +583,8 @@
  },
  "pkg packages/sites/demos/cart/api/models.rip": {
   "tokens": "1wlyb5ux9a2j5",
-  "tree": "2zkk99hnr5yt8",
-  "tolerant": "171iohu0jxj8y",
+  "tree": "xir4cyyts1dy",
+  "tolerant": "182d5g6ei0b4j",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/demos/cart/api/seed.rip": {
@@ -595,8 +595,8 @@
  },
  "pkg packages/sites/demos/cart/app/api-client.rip": {
   "tokens": "1zj0e03br1m45",
-  "tree": "dsxnbbw1ir15",
-  "tolerant": "1ijcrgxm71veu",
+  "tree": "1iq5qvx0frrwx",
+  "tolerant": "2wujbbvdz1qry",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/demos/cart/app/components/button.rip": {
@@ -883,8 +883,8 @@
  },
  "pkg packages/sites/test/framework/test.rip": {
   "tokens": "ewwskq38isg2",
-  "tree": "2ejhaeowhv69t",
-  "tolerant": "k75gg1qy7qo7",
+  "tree": "3eaxt92tujdqc",
+  "tolerant": "2rh4l2bku895m",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/sites/test/hello-api/entry.rip": {
@@ -2053,8 +2053,8 @@
  },
  "pkg packages/validate/test.rip": {
   "tokens": "76029lqz4b2y",
-  "tree": "15cmpkgm9p2lr",
-  "tolerant": "ctu9aq2n6k8g",
+  "tree": "3736log7erhp4",
+  "tolerant": "1u4p8r725fc94",
   "complete": "6j7t1thlgyju"
  },
  "pkg packages/validate/validate.rip": {
@@ -5346,10 +5346,10 @@
   "complete": "ohnds1b0yzf8"
  },
  "row classes.rip › fail a prefix construction in a schema function body rejects": {
-  "tokens": "1osxeiip6e8ut",
-  "tree": "2oq39zjn53bb5",
-  "tolerant": "1v2gzfqbu0b0w",
-  "complete": "6j7t1thlgyju"
+  "tokens": "nar6duhmgol5",
+  "tree": "1zixx0fuwx3kb",
+  "tolerant": "3tvnp6uo8llc8",
+  "complete": "181fk1ki3rz8k"
  },
  "row classes.rip › fail new is reserved as a shorthand name": {
   "tokens": "nar6duhmgol5",
@@ -20359,32 +20359,32 @@
  },
  "row schema.rip › code input default kind": {
   "tokens": "20gpmnse6g9en",
-  "tree": "23uqoxrdllkn5",
-  "tolerant": "2niq9dsw4gboj",
+  "tree": "16xjs28eblhxf",
+  "tolerant": "33s10whc8eerf",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code explicit :input kind": {
   "tokens": "1trtxgc34q4wl",
-  "tree": "2xj45calwydlx",
-  "tolerant": "x5ak0l8ghkdz",
+  "tree": "2gif5oc1t0ia",
+  "tolerant": "1fhf2j9n7wjvy",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code shape with fields": {
   "tokens": "1p9nh7248kedx",
-  "tree": "3ff7kmszt954",
-  "tolerant": "3p11y2t1bvkip",
+  "tree": "279psf6bpojv5",
+  "tolerant": "l0ryz38fl7kq",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code shape with method and computed": {
   "tokens": "3rfyyt2cza49e",
-  "tree": "1e1bghzwwla9h",
-  "tolerant": "pscqiv4zegjv",
+  "tree": "5u34zf6mly1v",
+  "tolerant": "79qscx3qsfpj",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code bare :symbol enum": {
   "tokens": "jxi1gnw1agqb",
-  "tree": "jv1e1zhsirwb",
-  "tolerant": "1iq2x2ztp6um6",
+  "tree": "11rxbrm1z35de",
+  "tolerant": "3ffgm7qdupbo6",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail bare identifier enum members are rejected": {
@@ -20395,50 +20395,50 @@
  },
  "row schema.rip › code valued enum": {
   "tokens": "p53z2w53mp6k",
-  "tree": "1kaso57dyvb5n",
-  "tolerant": "3q4rcgzmseiec",
+  "tree": "9c0r7q33upht",
+  "tolerant": "18nl24zw5rh5m",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code string-valued enum": {
   "tokens": "3rgyuqbb8sicg",
-  "tree": "mfgdthzfmffu",
-  "tolerant": "1acggm4nojlp9",
+  "tree": "1i4ct26o4lcoc",
+  "tolerant": "3r97a6kic8rn9",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code mixin with fields only": {
   "tokens": "1ei9hh7mxlivz",
-  "tree": "2fistsehmqbpz",
-  "tolerant": "1w9ptvfh6nr7d",
+  "tree": "136b3r7kt5lri",
+  "tolerant": "1kd5f263fpwjf",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code model with modifiers and directives": {
   "tokens": "2lgdy7k10xf9s",
-  "tree": "2u4jd1lke65a7",
-  "tolerant": "1zoypacpygdou",
+  "tree": "2xvr7zl7jhizq",
+  "tolerant": "m2xccjsnmtvi",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code model recognizes known hook names": {
   "tokens": "3ffu55yrfggzi",
-  "tree": "1hf22wx6otf2u",
-  "tolerant": "37sp86yvzpy9k",
+  "tree": "3q2tutm6u4ex",
+  "tolerant": "32kuq4nprke7m",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code shape does not classify hook names as hooks": {
   "tokens": "3r5ix0qokav0y",
-  "tree": "2qqel2em3c0tj",
-  "tolerant": "ok0v6lmen9ci",
+  "tree": "nv9ocbzxzhw0",
+  "tolerant": "2y3luxo30q7ab",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code array field type": {
   "tokens": "qk7jnb44bgry",
-  "tree": "3huz05sbl08rp",
-  "tolerant": "1y33ygytv1c6k",
+  "tree": "368ac9hlb73nl",
+  "tolerant": "3w0lbjj6hfv7w",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code exported schema": {
   "tokens": "3fk6er4t7big4",
-  "tree": "1zlo7ajwu3wmb",
-  "tolerant": "3hybmrdttg535",
+  "tree": "29508b2i823ci",
+  "tolerant": "1n9o1wllsrko7",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code schema.member access": {
@@ -20449,50 +20449,50 @@
  },
  "row schema.rip › code inline: three bare fields": {
   "tokens": "8b9616bns6zs",
-  "tree": "1j4sbdxsc38il",
-  "tolerant": "spcdlf43mp6n",
+  "tree": "2lq6dfuw9ps8e",
+  "tolerant": "201wvxv3duhcb",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code inline: fields with ranges": {
   "tokens": "1ougum3t7w8ry",
-  "tree": "i2kx5zwscsum",
-  "tolerant": "2fmr4l3s0dtc1",
+  "tree": "32ljfehipphof",
+  "tolerant": "3k5s2du7jt260",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code inline: required + email type": {
   "tokens": "1h3kusk26ig2y",
-  "tree": "2w2p06zu4rbkk",
-  "tolerant": "3hm7kz6b31ejb",
+  "tree": "d85q9tp8m0mv",
+  "tolerant": "3uimdm2q00lud",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code inline: enum members": {
   "tokens": "11pmopum48ch3",
-  "tree": "1f1hi84azz142",
-  "tolerant": "2afyhzft4o3a5",
+  "tree": "1lcg6uohlkw4r",
+  "tolerant": "ilkqm2r7u1pj",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code inline: bare schema infers :enum from :symbol members": {
   "tokens": "23si7yo2k9mdb",
-  "tree": "3brc7r5qlvq1p",
-  "tolerant": "n3px4hkz3fbt",
+  "tree": "27tm8skh44rp2",
+  "tolerant": "1tndpx5yauob2",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code inline: directive + field": {
   "tokens": "2all3qc1b6ojt",
-  "tree": "jug1mnsyw88p",
-  "tolerant": "a8nz2fifojz5",
+  "tree": "2kl4j390qw2l5",
+  "tolerant": "3l0riy39u4gk4",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code inline: composes with schema.defaultMaxString pragma": {
   "tokens": "1mpjrxnn36veb",
-  "tree": "3ifusnxupmq2u",
-  "tolerant": "r4ee0vq9t439",
+  "tree": "35m4f1de1pvp0",
+  "tolerant": "2iq45aoxe3i4q",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code inline: required implies min=1 with ..N shorthand": {
   "tokens": "2dvoki3qtosud",
-  "tree": "391vi2iu99z60",
-  "tolerant": "14h0tnp5p4w8b",
+  "tree": "24iug6vnjq6cd",
+  "tolerant": "3l7bawfuwfpdn",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail inline: rejects `->` (method/hook/transform)": {
@@ -20521,14 +20521,14 @@
  },
  "row schema.rip › test inline: .parse validates fields": {
   "tokens": "1wbkv3tgzxfy5",
-  "tree": "3vo07gooqglrf",
-  "tolerant": "2omlml3pr6f67",
+  "tree": "2ek2cnmiaz82t",
+  "tolerant": "3vbj087wlavuh",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test inline: rejects field over max": {
   "tokens": "1qxen603x6apj",
-  "tree": "2t1v48aradya6",
-  "tolerant": "z1za249oxfsk",
+  "tree": "2lge9yyj76dxm",
+  "tolerant": "2p09sm6ggb06f",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail inline: empty body rejected with :kind": {
@@ -20545,26 +20545,26 @@
  },
  "row schema.rip › code inline: newline at depth 0 ends body, next statement survives": {
   "tokens": "3v1e55opggsxh",
-  "tree": "3assudymmkqb3",
-  "tolerant": "25wswtvhuzkpl",
+  "tree": "1sxi7dmdsat4j",
+  "tolerant": "2tnhdkqfebcv3",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code inline: two inline schemas on consecutive lines": {
   "tokens": "33jvd3tf0n98e",
-  "tree": "nglaqgda9kpe",
-  "tolerant": "3it3fjhtzq932",
+  "tree": "22bhx3t24hfvy",
+  "tolerant": "262swwcg02w3y",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test inline: literal-union + other fields parse in order": {
   "tokens": "1su61ny995nxb",
-  "tree": "108y3rro9u1sg",
-  "tolerant": "1xfs9aka1750j",
+  "tree": "2d7lii3gxyps5",
+  "tolerant": "31u58ir8xx8d6",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code inline: multiple directives + fields in one schema": {
   "tokens": "c41q3ac10ee2",
-  "tree": "32nm47bi8giu0",
-  "tolerant": "2ob8twpgpcg4b",
+  "tree": "128kxlubnoy8h",
+  "tolerant": "g6o0vqza243j",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code schema as variable still works": {
@@ -20576,13 +20576,13 @@
  "row schema.rip › fail field with colon before type": {
   "tokens": "nar6duhmgol5",
   "tree": "357ruue2hmrfp",
-  "tolerant": "2fsaafo2hqcsl",
+  "tolerant": "2ytsd5zoh464e",
   "complete": "1ht5evervjsl2"
  },
  "row schema.rip › fail bare value binding in non-enum": {
   "tokens": "nar6duhmgol5",
   "tree": "1fyfm6it9wo92",
-  "tolerant": "31bwzno9dn21i",
+  "tolerant": "24xzgvcngphcb",
   "complete": "30febxsygp9n9"
  },
  "row schema.rip › fail unknown schema kind": {
@@ -20594,43 +20594,43 @@
  "row schema.rip › fail bad arrow after colon": {
   "tokens": "nar6duhmgol5",
   "tree": "pzuutiks43m0",
-  "tolerant": "gmg69tlq3v6y",
+  "tolerant": "1cbkmpfc8ayaq",
   "complete": "35j7fjv0ojbwq"
  },
  "row schema.rip › code multi-line method body (nested indent)": {
   "tokens": "2xrfm2giraae2",
-  "tree": "1xwyvt4da3dvb",
-  "tolerant": "1qf6vqecinbrz",
+  "tree": "3adlwi8gyfmdw",
+  "tolerant": "209d1g9d5eq21",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code multi-line computed body": {
   "tokens": "3fi1mlifkrqoz",
-  "tree": "3ogbaoojagikp",
-  "tolerant": "1lbrzl7m3tkt",
+  "tree": "2ais4b0qfvq1e",
+  "tolerant": "qagal5ra0bls",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code field with constraints": {
   "tokens": "14ivxlw7eiupy",
-  "tree": "2jvw1z8opje1o",
-  "tolerant": "20oo1i8ibvbg1",
+  "tree": "2pdbyef8nmlmo",
+  "tolerant": "3t4lcuraf9t9b",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code comments between entries": {
   "tokens": "5vtj5z370f9f",
-  "tree": "cr67u4dl6c0w",
-  "tolerant": "ah7eil2f8dk3",
+  "tree": "lou6ychxvn95",
+  "tolerant": "2atxwdvq2f2dh",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code :admin 1 is a valued symbol member": {
   "tokens": "113m9e8fi1rez",
-  "tree": "naa1onlbzks8",
-  "tolerant": "2koc8e28pmj9k",
+  "tree": "2oofj30mol7lk",
+  "tolerant": "1shh8fvn1rcih",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail admin: 1 in :model is not allowed (bare value binding)": {
   "tokens": "nar6duhmgol5",
   "tree": "13nqpxghkju2r",
-  "tolerant": "1ukyjysgxpgvi",
+  "tolerant": "13rwx3t5gbska",
   "complete": "2ggvzqmh2bxes"
  },
  "row schema.rip › fail valued enum with bare name: value form is rejected": {
@@ -20677,98 +20677,98 @@
  },
  "row schema.rip › test diamond mixin inclusion dedupes": {
   "tokens": "ttjbczur6p39",
-  "tree": "11nf4fupzgrse",
-  "tolerant": "3qfbppl20r808",
+  "tree": "1cpwiv1lgw0ay",
+  "tolerant": "yxdlgghb5d48",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test @unique survives mixin expansion into a :model": {
   "tokens": "yn854ola107x",
-  "tree": "3moxqszah78zw",
-  "tolerant": "2krj0zn0lbi15",
+  "tree": "bk3v75fbbkq7",
+  "tolerant": "2wpnbb7vcbf5u",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail a mixin field carrying @unique rejects inclusion into a :shape": {
   "tokens": "f1b1pdtfn3jw",
-  "tree": "1qto7msxn9j8b",
-  "tolerant": "1fecdaebxpk2d",
+  "tree": "3ue3s3894iabc",
+  "tolerant": "2inw8inwjuert",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code required @unique + ..N implies min=1": {
   "tokens": "1c4e39mgx7zvj",
-  "tree": "18w03gc6bldp2",
-  "tolerant": "30z958sn2paf1",
+  "tree": "2vzj3zk718zmf",
+  "tolerant": "3mghz24j57bsd",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code :input + @mixin is allowed (field sharing)": {
   "tokens": "3q6w7hzro5rsu",
-  "tree": "3qgqwmfdvkj3i",
-  "tolerant": "2nufq7mqly8aq",
+  "tree": "109ufbrbzg4dj",
+  "tolerant": "25qr0rehrzns1",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code :shape + @mixin is allowed (field sharing)": {
   "tokens": "2w8ezhur0a4v0",
-  "tree": "30212eiwikr8f",
-  "tolerant": "8enjkna9mvht",
+  "tree": "3osccizu60fwv",
+  "tolerant": "2z5qxr111co39",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ~:name resolves through the registry; output validates and constrains": {
   "tokens": "2fdqpp92ybw1t",
-  "tree": "217203heryxb2",
-  "tolerant": "2fre305emvtfi",
+  "tree": "25c7sqh5f9au3",
+  "tolerant": "2lpss9py4cjo6",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ~:name failures use the coercer's name in the issue": {
   "tokens": "2k4enu1uvqcyb",
-  "tree": "3fo56kh9uw58t",
-  "tolerant": "3fmn0coftvh8v",
+  "tree": "2grxv4kninkog",
+  "tolerant": "5g4ohbsng31i",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test custom ~:name coercers type as any — value-typed constraints still apply": {
   "tokens": "3nilwla22usue",
-  "tree": "1yndfoft3by8q",
-  "tolerant": "md9mdp04b9lp",
+  "tree": "awipyp8bvgji",
+  "tolerant": "29dogenqyp8mf",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail field vs computed collision in :model": {
   "tokens": "2cpt6q1ffhlt1",
-  "tree": "1l07rmspt77cl",
-  "tolerant": "2xrdzornqamoi",
+  "tree": "2ed4t6qf8dhtr",
+  "tolerant": "30w1mhaw05knz",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail reserved instance method name collides as a field": {
   "tokens": "81pohqdtvzda",
-  "tree": "2m1fomnm63yq",
-  "tolerant": "3aash4u6p1i6g",
+  "tree": "34o267eg8mjvw",
+  "tolerant": "1665pkke6v8fe",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test algebra on :input returns :shape (kind transition)": {
   "tokens": "2ng192ggudf52",
-  "tree": "2srq2up1hv8wk",
-  "tolerant": "387coqrmhw2v4",
+  "tree": "3fohnm6woewhc",
+  "tolerant": "2iwo4mj9byv9l",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code multi-line field constraints parse": {
   "tokens": "11apyp0nu4bx0",
-  "tree": "16p6m9lbw4m54",
-  "tolerant": "1r2zi4lilmab9",
+  "tree": "rrxuffbcwj5q",
+  "tolerant": "3ke5c1m6cszgs",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code :symbol members work under explicit :enum": {
   "tokens": "30hhx8cjwopxm",
-  "tree": "3jmey4konvid7",
-  "tolerant": "2x1egrqglirj9",
+  "tree": "1ek40loyfwwnt",
+  "tolerant": "2r913vskar2r6",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code bare schema with :symbol body infers :enum kind": {
   "tokens": "388uqctc75k5a",
-  "tree": "nf2entf2ox8r",
-  "tolerant": "3in0ry5sfcju8",
+  "tree": "30f65fltcrjyp",
+  "tolerant": "3tp82akxpkoim",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code :symbol with value drops the colon separator": {
   "tokens": "1s55m8io7vamb",
-  "tree": "2ksjz1yontjwn",
-  "tolerant": "a9zeppw2lp1a",
+  "tree": "3snv076r3v9lh",
+  "tolerant": "2fovk9ilou3q1",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail :symbol with trailing-colon separator is rejected": {
@@ -20779,20 +20779,20 @@
  },
  "row schema.rip › test :symbol valued enum round-trip": {
   "tokens": "3ewney0w5ijdo",
-  "tree": "1az6hifxc5gkc",
-  "tolerant": "2v5q7esj1qk0e",
+  "tree": "37uwr855sxl07",
+  "tolerant": "1snvz7eg805xy",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code constraint :symbol compiles to its name string": {
   "tokens": "39mv8yp8n3vrz",
-  "tree": "46ype4q9cjyl",
-  "tolerant": "132ycic43017b",
+  "tree": "2qrzkv7w3g5sh",
+  "tolerant": "3jq4ix03oe6vx",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :symbol enum round-trips the member name": {
   "tokens": "3qgz57w154xsz",
-  "tree": "thkiszbc3rv7",
-  "tolerant": "22k60e0658ebx",
+  "tree": "132nuokaoht4l",
+  "tolerant": "3gsjilk2ndvav",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail explicit :input prevents inference (:symbol is not a field)": {
@@ -20803,80 +20803,80 @@
  },
  "row schema.rip › test :input .parse returns cleaned value": {
   "tokens": "2w488kq99hw6t",
-  "tree": "1n0oxk7n7yled",
-  "tolerant": "3eu1xzwajquwo",
+  "tree": "3j9qsti72hy6q",
+  "tolerant": "3h0m53eftvlyw",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test email: trimmed and lower-cased before it validates": {
   "tokens": "1chkgwd8w89hk",
-  "tree": "fiwuesimx6eg",
-  "tolerant": "ovsom2blef7k",
+  "tree": "c2tavy8xya3b",
+  "tolerant": "2rpsi1v9x0285",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test email: constraints see the normalized value": {
   "tokens": "1pjxg552jej8v",
-  "tree": "3exbbyu1romur",
-  "tolerant": "3c0mnvhc6otrf",
+  "tree": "36vflxuj2x20z",
+  "tolerant": "2d8wcjjuzmihx",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test email: still refuses what is not an email": {
   "tokens": "1cycj3okdd2vq",
-  "tree": "2yj65symacn2t",
-  "tolerant": "1ctjhho19u4r1",
+  "tree": "2h1rtogzu77ma",
+  "tolerant": "2vscv9ulc5axb",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test default-string: bare required modifier": {
   "tokens": "3m0z6lk8k7eae",
-  "tree": "2ugphgdniin6l",
-  "tolerant": "pcwzlbr3usq",
+  "tree": "3gyi31izx1mp4",
+  "tolerant": "268cl9niu2ui5",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test default-string: bare optional modifier accepts missing field": {
   "tokens": "1cmqzh1mmi8y7",
-  "tree": "17ro6c7xqg2qt",
-  "tolerant": "1s4hbk623s1t7",
+  "tree": "xv474lj1klni",
+  "tolerant": "264kjqspqenwh",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test default-string: required+unique without explicit type": {
   "tokens": "1gv2z5bxc60mb",
-  "tree": "3k30tvwaz8z9v",
-  "tolerant": "hpwe3tci91uj",
+  "tree": "1orohhuiqg8w1",
+  "tolerant": "3ao8g9rtv7q1",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test default-string: still validates the inferred string type": {
   "tokens": "2t4rt64kevevt",
-  "tree": "a2z6rlsqzizh",
-  "tolerant": "11yfyr2wrhws0",
+  "tree": "ialyvuvu94ns",
+  "tolerant": "2jvs5mp216mhx",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test default-string: constraint immediately after modifier": {
   "tokens": "2tatt1q4kry7z",
-  "tree": "18o7oqy8mpl68",
-  "tolerant": "22bt2ofyky2oo",
+  "tree": "2kovp9u580k5w",
+  "tolerant": "1ma07pzgokrz",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test range: string length": {
   "tokens": "26ppie0uav9ez",
-  "tree": "15nuuptrtxpj3",
-  "tolerant": "29mzrhzx2w2yg",
+  "tree": "15mkqsy5p8ab3",
+  "tolerant": "3dg7vcvdfx4de",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test range: integer value": {
   "tokens": "nn6a7yqn5xw6",
-  "tree": "1ifqp7j1yg90m",
-  "tolerant": "qt3fz4j0bwji",
+  "tree": "3acdml58z09hy",
+  "tolerant": "wdqttkn7f6zb",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test range: exactly-N via n..n": {
   "tokens": "28xpumo4wbpky",
-  "tree": "2tk0dzyw56s4x",
-  "tolerant": "2csajrgjxqn2a",
+  "tree": "h6rgtl48dtoc",
+  "tolerant": "1jcqbuva3gi67",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test range: combined with default in bracket": {
   "tokens": "37o4el6ylzbqo",
-  "tree": "j9yc7i0as6hv",
-  "tolerant": "2t6wt1glkzks6",
+  "tree": "2qryifinsr44b",
+  "tolerant": "2r5ns5s6nmujn",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail range: old bracket form [n, n] is rejected": {
@@ -20905,62 +20905,62 @@
  },
  "row schema.rip › code open-ended: max-only (..N) on optional field has no implicit min": {
   "tokens": "j3zu7smiw0kl",
-  "tree": "134kgyi60rj8t",
-  "tolerant": "3u1vcsq7b222r",
+  "tree": "bm1s2khqvh4z",
+  "tolerant": "3hnyu4mx8seoz",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code open-ended: max-only (..N) on required field implies min=1": {
   "tokens": "f68pen45hi63",
-  "tree": "134kgyi60rj8t",
-  "tolerant": "1orxg9odzdo7m",
+  "tree": "bm1s2khqvh4z",
+  "tolerant": "36qehfmuvy1vi",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code open-ended: min-only (N..) emits min without max": {
   "tokens": "1eabdnuv206ij",
-  "tree": "28b9noam81urv",
-  "tolerant": "27yr1vzbbahdi",
+  "tree": "1rw7j9lboxgmm",
+  "tolerant": "3lowp5mz99dc4",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test open-ended max-only on ? allows empty string": {
   "tokens": "312284i9796vo",
-  "tree": "3uhf3qmlcs2bv",
-  "tolerant": "3piw707bjtnu4",
+  "tree": "7btyb4lf8nmr",
+  "tolerant": "3sclwdzdabi4j",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test open-ended max-only on ! rejects empty string (implicit min=1)": {
   "tokens": "1sixyzdgu3pi6",
-  "tree": "3uhf3qmlcs2bv",
-  "tolerant": "1kh3lkrhslu95",
+  "tree": "7btyb4lf8nmr",
+  "tolerant": "3f456vezobswa",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test open-ended min-only validates lower bound": {
   "tokens": "kr45obnk65ts",
-  "tree": "1jx3yjuterk69",
-  "tolerant": "2oxo6lfz4jael",
+  "tree": "2izx09r1w9fxx",
+  "tolerant": "3kiqfuwag0g9h",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test open-ended range on integer field": {
   "tokens": "3vogo733vd9xe",
-  "tree": "29y5n79eytvsp",
-  "tolerant": "26lovjg0yezb8",
+  "tree": "3vxol0s2058ba",
+  "tolerant": "2qro80w1ewqap",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test open-ended range composes with pragma (min from user, max from pragma)": {
   "tokens": "inh9ap76wnal",
-  "tree": "onwcbjdofrf2",
-  "tolerant": "1w4dre1dtjbeq",
+  "tree": "1bsdbaei7736y",
+  "tolerant": "lwnqpwe6nzk6",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test open-ended range with explicit max overrides pragma": {
   "tokens": "2r0f3stqq45kg",
-  "tree": "1i2rffyn4f2mj",
-  "tolerant": "10c6q803ilru5",
+  "tree": "3k8ld5y7pnlwf",
+  "tolerant": "3t6ystyy21kiv",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code open-ended: max-only negative (..-1)": {
   "tokens": "1k6yesllut0h2",
-  "tree": "3c7xkju5fxsyc",
-  "tolerant": "3e4sbtmrrrakv",
+  "tree": "3eatby31okm7g",
+  "tolerant": "1pozxkvfp4ch1",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail post-merge consistency catches sugar-induced min > max": {
@@ -20977,26 +20977,26 @@
  },
  "row schema.rip › code open-ended: min-only negative (-5..)": {
   "tokens": "2calbwjarz6jo",
-  "tree": "3c7xkju5fxsyc",
-  "tolerant": "3kiwzzo6qld3j",
+  "tree": "3eatby31okm7g",
+  "tolerant": "3tuejce4zn9jn",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code bounded: negative-to-negative range (-5..-1)": {
   "tokens": "154b5w681cr4c",
-  "tree": "sl4iio78tz2o",
-  "tolerant": "2kpb5fmbd4qfm",
+  "tree": "18pk9ir7v3l4l",
+  "tolerant": "2n8ma2iyqapmb",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code emit-shape: ..N omits min key entirely": {
   "tokens": "2dds4wnu0osp3",
-  "tree": "2fmr0rer3bq80",
-  "tolerant": "1yexma0hbqw3z",
+  "tree": "ritbx8zmjv41",
+  "tolerant": "3evp690x5p6ev",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code emit-shape: N.. omits max key entirely": {
   "tokens": "c659sputoozn",
-  "tree": "3kzumkqtjn9a1",
-  "tolerant": "1qxlvxxh5tstm",
+  "tree": "3jn0i15gdtn2j",
+  "tolerant": "pq7g7dez0lov",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail reversed check fires on closed range": {
@@ -21007,80 +21007,80 @@
  },
  "row schema.rip › code reversed check does not fire on open-ended ..N": {
   "tokens": "3skmtmpvq2u8m",
-  "tree": "1t7qtfe6zxwgh",
-  "tolerant": "fg6su1reu3qk",
+  "tree": "1p57h41z24gn2",
+  "tolerant": "1amkmzo5a8g1o",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code reversed check does not fire on open-ended N..": {
   "tokens": "1573hwwwqh29q",
-  "tree": "1t7qtfe6zxwgh",
-  "tolerant": "3lghf1cwtjykp",
+  "tree": "1p57h41z24gn2",
+  "tolerant": "1qlrs3o3sw5li",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test pragma does not override explicit ..N on optional field": {
   "tokens": "3fvbqn8kwxycd",
-  "tree": "330od3z5i6i2n",
-  "tolerant": "3mduqll79lf7o",
+  "tree": "3kezl6epax3wj",
+  "tolerant": "24xl19rhu3vz8",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code ! + ..N implies min=1": {
   "tokens": "2xxf779a14up",
-  "tree": "1sbm0zxw6i1gz",
-  "tolerant": "ftmfltnkd7fs",
+  "tree": "3c9raxnyz1vax",
+  "tolerant": "s7rz3o16bl4n",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code ? + ..N has no implicit min": {
   "tokens": "3su7t25g42wbn",
-  "tree": "1sbm0zxw6i1gz",
-  "tolerant": "yj0gntw22ovu",
+  "tree": "3c9raxnyz1vax",
+  "tolerant": "1re6uhoidjcfs",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code bare modifier (no ! no ?) has no implicit min": {
   "tokens": "jcpz3zbiu24x",
-  "tree": "3kzumkqtjn9a1",
-  "tolerant": "147y0tm03m0hg",
+  "tree": "3jn0i15gdtn2j",
+  "tolerant": "m8g4vniua48j",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code ! + N..N (explicit min) does not override": {
   "tokens": "1a7656kipnakl",
-  "tree": "1xbzyn98r9bq",
-  "tolerant": "3vqsel90yjhar",
+  "tree": "3ubzb1xtv2bn8",
+  "tolerant": "2r13cdn7dxsxw",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code ! + N.. (explicit min, open max) does not trigger implicit": {
   "tokens": "3h64pyc97qkzo",
-  "tree": "23na9ai3mpu5y",
-  "tolerant": "wnml12fq33sz",
+  "tree": "1sm7ch6rcqvdz",
+  "tolerant": "22jrhlrb9jyj5",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code ! bare (no range) leaves min unset — existing semantics preserved": {
   "tokens": "2t1qcyppnvt04",
-  "tree": "3l0wjzwxnqgs1",
-  "tolerant": "3eqbl503qv8zt",
+  "tree": "1sxd3aoz9qi11",
+  "tolerant": "5h4ya380jgbp",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ! bare still accepts empty string (min unchanged)": {
   "tokens": "292ff5lmavq2m",
-  "tree": "to544bxzfxzd",
-  "tolerant": "3il0z6sklugub",
+  "tree": "1072krm3hczwi",
+  "tolerant": "12q27jdilsdrr",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ! + pragma only (no ..N) does not imply min=1": {
   "tokens": "3hrneo1fyr8xz",
-  "tree": "2f95no6xdk4by",
-  "tolerant": "2li7lp9jagsjl",
+  "tree": "2huqlrp57i0yv",
+  "tolerant": "2h9a1c5ynj3sw",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test regex: bare regex validates pattern": {
   "tokens": "2itzgri4d1j63",
-  "tree": "54nv4f1poy0l",
-  "tolerant": "3nbxiysijup6j",
+  "tree": "2l3dem3zgn3xs",
+  "tolerant": "2ym8ba5cyydrl",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test regex: combined with range": {
   "tokens": "3qexsymj2f4a9",
-  "tree": "35160iye62xzj",
-  "tolerant": "szjuuyfbxxt6",
+  "tree": "3nw4aijnsdshx",
+  "tolerant": "1wsp6e05upg2w",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail regex: old bracket form [/.../] is rejected": {
@@ -21097,26 +21097,26 @@
  },
  "row schema.rip › test literal union: accepts declared members": {
   "tokens": "3uboopyl4bdp6",
-  "tree": "2bw54m6gebaty",
-  "tolerant": "znmciyqgagau",
+  "tree": "arr4fkqvikqf",
+  "tolerant": "1uax28gacq7tf",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test literal union: rejects non-members": {
   "tokens": "11o48e2x9podd",
-  "tree": "31q4srr6t6mab",
-  "tolerant": "34juibaju6g56",
+  "tree": "1uv49mem70woe",
+  "tolerant": "6d3jzc0qnh3c",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test literal union: works with default": {
   "tokens": "11xbw2od9xmbb",
-  "tree": "1n2ycdxpm1tle",
-  "tolerant": "3hh1g7kht3fcn",
+  "tree": "gx8gber86yex",
+  "tolerant": "3f46ni61esd49",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test literal union: SchemaError lists allowed members": {
   "tokens": "236nrrz8ohvv2",
-  "tree": "2jrlkux046lhh",
-  "tolerant": "3jq8e7edcynhi",
+  "tree": "19pjqvxq1hyzh",
+  "tolerant": "31e2qxtln235h",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail literal union: rejects mixing with identifier type": {
@@ -21127,8 +21127,8 @@
  },
  "row schema.rip › test literal union: single literal is a constant field": {
   "tokens": "3dp7u656qek8b",
-  "tree": "3al9pthpk4ahp",
-  "tolerant": "3lqc3v6lm6pb7",
+  "tree": "dayxesmdtwhr",
+  "tolerant": "24incxela6j14",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail literal union: rejects array suffix": {
@@ -21139,56 +21139,56 @@
  },
  "row schema.rip › test transform: remaps input field name": {
   "tokens": "7yk7p824e0ky",
-  "tree": "2ab194g22tz9w",
-  "tolerant": "6heh3zmqg1qy",
+  "tree": "tuqusauf40r6",
+  "tolerant": "4tims264fy4w",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test transform: derives from other raw keys": {
   "tokens": "2py8r2y2qgzr9",
-  "tree": "1cw7nn5fjxn4c",
-  "tolerant": "36l7mbu676jzz",
+  "tree": "25om6l8c0ce4b",
+  "tolerant": "v46s53rucjru",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test transform: coerces wire string to Date via constructor": {
   "tokens": "384aft5bp8f6z",
-  "tree": "37h8zw8dyg1vs",
-  "tolerant": "26nupqk4k7mi6",
+  "tree": "27ijzya3fqkmb",
+  "tolerant": "3qr3iafjl762c",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test date coercion: ISO string coerces to Date; non-ISO junk is rejected": {
   "tokens": "1nev4bgdhxgzi",
-  "tree": "h10uqsnc057b",
-  "tolerant": "de54wfhcsd1t",
+  "tree": "2haempfn9n1bd",
+  "tolerant": "3ry1mgj1vswnw",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test date coercion: array-of-date coerces each ISO element": {
   "tokens": "3twy5f0bgln3m",
-  "tree": "1xcvgtrgxixym",
-  "tolerant": "2gi3v0eaax3cq",
+  "tree": "2gz1wlg9yf1fi",
+  "tolerant": "2d0jtkk8d4lzq",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test transform: combined with default for missing input": {
   "tokens": "1aqqrdhanykbe",
-  "tree": "3ggeo6rsna48s",
-  "tolerant": "zus0xtg9hmwl",
+  "tree": "2uvtpmznac6sl",
+  "tolerant": "3dok7igrj1gco",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test transform: output validated against declared type": {
   "tokens": "1buii0obdg1n",
-  "tree": "g8hafjoe11dj",
-  "tolerant": "2ajhxu5oozz25",
+  "tree": "2uv3suj25bots",
+  "tolerant": "2xtf7qmfwppyq",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test transform: thrown error surfaces as issue": {
   "tokens": "2ve1l0p2friwm",
-  "tree": "nijkkj4g015p",
-  "tolerant": "3nkdrleshhuuh",
+  "tree": "32ce6lwmzbnuu",
+  "tolerant": "1ue11ik080ovg",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test transform: survives algebra (.pick preserves transform)": {
   "tokens": "2euax9v4z9qmj",
-  "tree": "1glw453fv6tou",
-  "tolerant": "2jirvjbl5azcd",
+  "tree": "6zqpykduuhc4",
+  "tolerant": "rhuv1oc9euzz",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail transform: must be the last element on the line": {
@@ -21199,20 +21199,20 @@
  },
  "row schema.rip › test transform: comma-less bare form (no type, no constraints)": {
   "tokens": "3vrifgv7lchs2",
-  "tree": "3auowba4gc458",
-  "tolerant": "378ziqkhifawz",
+  "tree": "1icq3wlihmk1t",
+  "tolerant": "21oyurs8l7ud5",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test transform: comma required after type": {
   "tokens": "niutg6uj7hcw",
-  "tree": "2xmt5k7oe5ut",
-  "tolerant": "3jb25gn3h0kcv",
+  "tree": "30dmb38neirow",
+  "tolerant": "2nvav3iftmjas",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test transform: comma required after range": {
   "tokens": "2vycqvf73sd21",
-  "tree": "32h7mmpf92s7x",
-  "tolerant": "qcdy1zlb9muu",
+  "tree": "8j2xzmgh3nph",
+  "tolerant": "2t347011hf6lt",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail transform: missing comma after type is rejected": {
@@ -21241,122 +21241,122 @@
  },
  "row schema.rip › test eager derived: computed at parse, stored as own property": {
   "tokens": "2cc4k60lhxz74",
-  "tree": "258e6f3zghqnc",
-  "tolerant": "2iprzmk725xfi",
+  "tree": "6cog1os2dqgn",
+  "tolerant": "zoxz788gozl4",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test eager derived: does NOT re-run on field mutation (stale by design)": {
   "tokens": "2gypvvls380kp",
-  "tree": "129f54jwkvcrp",
-  "tolerant": "1eicni45t85pn",
+  "tree": "24w7vhg7fdnch",
+  "tolerant": "xp0pphmzchsf",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test eager derived: different from ~> (lazy getter)": {
   "tokens": "2kne9w4z16vk4",
-  "tree": "3gyrqkhktxsvt",
-  "tolerant": "3p89b6m3f6vt1",
+  "tree": "7txh6vu8ieoa",
+  "tolerant": "1o60fzbw6u69b",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test eager derived: runs in declaration order (can read earlier !>)": {
   "tokens": "1qh6to01qjew8",
-  "tree": "19nev1ar3sc86",
-  "tolerant": "3pgvaicfcluzv",
+  "tree": "3pp3ocnzri439",
+  "tolerant": "3447vo8iuw34q",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test eager derived: collides with field name (runtime error)": {
   "tokens": "3hxxwcn03vlmf",
-  "tree": "2sx9usrcyf97b",
-  "tolerant": "2vkrslaied0bh",
+  "tree": "90n18xugg43i",
+  "tolerant": "1x0vqw00ue3ny",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ensure: inline form passes when predicate returns truthy": {
   "tokens": "1qltq2wtby3z7",
-  "tree": "2zs3s680bictp",
-  "tolerant": "2ngqdxba62g9z",
+  "tree": "25k3nlq2gcqih",
+  "tolerant": "3nxlxvlhuxy7k",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ensure: inline form fails when predicate returns false": {
   "tokens": "342bqh58d7j30",
-  "tree": "dl5tix4bwxfd",
-  "tolerant": "fest042liska",
+  "tree": "3nxfmcyixfxdl",
+  "tolerant": "1rl8cz6d5hrid",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ensure: falsy values (null, 0, '') all fail": {
   "tokens": "1wr8sgsuajok4",
-  "tree": "2luia72dlqck8",
-  "tolerant": "n7m3js0ii97a",
+  "tree": "10pg8n3pzxs7h",
+  "tolerant": "3dr852iikwaua",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ensure: truthy non-boolean (object, array) pass": {
   "tokens": "3ikit8euymcym",
-  "tree": "20dldmbldrtga",
-  "tolerant": "2qd2lrdkkbd8t",
+  "tree": "1fpby9ypuumni",
+  "tolerant": "mmmnudwyx3kf",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ensure: thrown exception becomes ensure issue with user message": {
   "tokens": "1lct53ii45wnx",
-  "tree": "xpp1m21anmns",
-  "tolerant": "3eap8drxikmfm",
+  "tree": "ufc5ibg88k1e",
+  "tolerant": "i193ct6uxjwt",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ensure: array form — multiple refinements collect all issues": {
   "tokens": "1gct1f4fjfrqo",
-  "tree": "d32ahs0rqka7",
-  "tolerant": "1bst6820nlou",
+  "tree": "2364vx7w3r3fk",
+  "tolerant": "iodmij7yv3ps",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ensure: array form — declaration order preserved": {
   "tokens": "1w90kooaaqyrz",
-  "tree": "1rh9vkr6e2tt4",
-  "tolerant": "170avkmhqlkhd",
+  "tree": "kwl0ioyltz9p",
+  "tolerant": "3e65ryoc5yskg",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ensure: multiple inline @ensure lines also collect all issues": {
   "tokens": "1oi163qpnsjt7",
-  "tree": "1nrqobpy24d1l",
-  "tolerant": "3402amw7gcz4f",
+  "tree": "3l4sf81rb1k8g",
+  "tolerant": "lr2ur52sxdvc",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ensure: mixed inline and array forms in same schema": {
   "tokens": "33i431eznv742",
-  "tree": "361v6cptkqrn4",
-  "tolerant": "3q2y0txeqhk5b",
+  "tree": "1dbctwwjmmz0p",
+  "tolerant": "281tc0gr84z4e",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ensure: short-circuits when field validation fails": {
   "tokens": "gdts2jo0gbcq",
-  "tree": "30eod1nex99tx",
-  "tolerant": "3gf4yatuanran",
+  "tree": "2cw20mbxq0wk3",
+  "tolerant": "1bmeywty8k2kd",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ensure: sees defaulted values": {
   "tokens": "2nfu5zvrqrgzd",
-  "tree": "2arxlo4qc7fxr",
-  "tolerant": "3gfj3pr5kqjjh",
+  "tree": "12z2r85kcsye4",
+  "tolerant": "2chiyww0n5i39",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ensure: sees transformed values": {
   "tokens": "3n1caiuyw4xmh",
-  "tree": "2p2p2xbrz1sqy",
-  "tolerant": "15wntxqycg6gr",
+  "tree": "358zzi38sfhyb",
+  "tolerant": "2dx2kcgk0nbxt",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ensure: runs BEFORE eager-derived fields": {
   "tokens": "30v68yz13cyj3",
-  "tree": "120gpciz1sj5l",
-  "tolerant": "c6hpm83yauqv",
+  "tree": "3u0qyzhysfsn7",
+  "tolerant": "3arbkwail0qxh",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ensure: .ok() runs refinements": {
   "tokens": "1pkr2o5k897d6",
-  "tree": "129eszqeerju8",
-  "tolerant": "2tvyodg00ubb1",
+  "tree": "1xl3chb9hyclf",
+  "tolerant": "29tixq006umzq",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ensure: multi-line fn body in array form": {
   "tokens": "bvdfse9wgt6o",
-  "tree": "1gswirnv1ae3s",
-  "tolerant": "1g7gxvlc2q68o",
+  "tree": "1qiz0vi7x91fm",
+  "tolerant": "3siat1kgool2t",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail ensure: rejected on :enum": {
@@ -21373,200 +21373,200 @@
  },
  "row schema.rip › test pick, omit and required: an unknown field name throws": {
   "tokens": "1vso5ro5794r8",
-  "tree": "29stvtu0b5kr4",
-  "tolerant": "31te3ak1rnrok",
+  "tree": "2ff9eokyx3h0b",
+  "tolerant": "3u18dl2cg8fti",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ensure: dropped on .pick": {
   "tokens": "2dpule37cgh6i",
-  "tree": "agbnnq39t2co",
-  "tolerant": "27kwl0tmt0g1k",
+  "tree": "20jpt35krfa2e",
+  "tolerant": "1wgzgq3dg7qtz",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ensure: dropped on .omit": {
   "tokens": "55whueto7d3j",
-  "tree": "2cnhwlk5pani8",
-  "tolerant": "38tj19oorp24b",
+  "tree": "1iwh7oqfl8xcy",
+  "tolerant": "fuhucxb97y71",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ensure: dropped on .partial": {
   "tokens": "3rp2y90tw96ma",
-  "tree": "1g434eu59hnlt",
-  "tolerant": "2g8xhdygw2nbi",
+  "tree": "3u9jxao5h2j",
+  "tolerant": "2h8land5zv63n",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ensure: dropped on .extend": {
   "tokens": "1a2d2uo81uujj",
-  "tree": "3c2dozv6shlez",
-  "tolerant": "1ms1u1c4sw106",
+  "tree": "38jj40goscxlc",
+  "tolerant": "qwww1pqsihsw",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ensure: works on :input schemas": {
   "tokens": "e9k3xu8u1h2i",
-  "tree": "1780j9x4rdm8e",
-  "tolerant": "1xk1iqzyvmqov",
+  "tree": "233cqzzflr0k8",
+  "tolerant": "20d9h8dpeczyk",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ensure: hydrate skips refinements (trusted data)": {
   "tokens": "388ijifl41u9r",
-  "tree": "354k3mjd5j7k5",
-  "tolerant": "1k3jv7akhqo6e",
+  "tree": "2qkn9wq9m9v01",
+  "tolerant": "24lupqvxptt5q",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :input .ok returns boolean true on valid": {
   "tokens": "263huosf8nucv",
-  "tree": "14xyubjkqhqsh",
-  "tolerant": "1qauuawzt75b5",
+  "tree": "317p2qgg5xge2",
+  "tolerant": "6uy82qderq1e",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :input .ok returns boolean false on invalid": {
   "tokens": "o8qw577aebba",
-  "tree": "3nlfzl8nv4bhe",
-  "tolerant": "novn8wjpkaaw",
+  "tree": "ots8ilp86xtg",
+  "tolerant": "32wuvd8ta52y4",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :input .safe returns {ok, value, errors: null} on success": {
   "tokens": "2m0fbcv9d9o2e",
-  "tree": "a8q0oxr35kcc",
-  "tolerant": "1dhib96w5f9br",
+  "tree": "2zjflpq9ji7lf",
+  "tolerant": "akcrquaeyzw4",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :input .safe returns {ok: false, value: null, errors: [...]} on failure": {
   "tokens": "xnb9ax6tnr7t",
-  "tree": "3fhl8wjv4ws66",
-  "tolerant": "fc8uwmqjt4yy",
+  "tree": "2jwwxl5487o7y",
+  "tolerant": "2fctyfkt829eq",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test zip type accepts US 5-digit form": {
   "tokens": "3fhjeg330gygf",
-  "tree": "23o5u6ys96ynw",
-  "tolerant": "2ov8fdz3mtrpo",
+  "tree": "23a6amhsxgkey",
+  "tolerant": "2809xcd26dihy",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test zip type accepts ZIP+4 form": {
   "tokens": "2ln7hng5r3xxw",
-  "tree": "19cdfhtkn5qt2",
-  "tolerant": "19yy010lkcdc",
+  "tree": "1fyko4m0otx1s",
+  "tolerant": "2nspxupfqblh4",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test zip type rejects non-matching strings": {
   "tokens": "2kxibmnygco7e",
-  "tree": "3c18q4lshlbhd",
-  "tolerant": "nmsinvnf9e0r",
+  "tree": "rgfvja0evyii",
+  "tolerant": "3c697uius4xfz",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test required field missing is an error": {
   "tokens": "1a5ad24cfg33m",
-  "tree": "3cwxth06dcqfn",
-  "tolerant": "2p6249eonl14w",
+  "tree": "zao3gbknj6uz",
+  "tolerant": "1rxqdqfkednd3",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test optional field missing is fine": {
   "tokens": "1oycuyymrb1oj",
-  "tree": "3g0agbw7hjf2u",
-  "tolerant": "3c1j4lzatgn4s",
+  "tree": "1t3yaziavb3bb",
+  "tolerant": "11x6m5v1s9ckj",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :enum bare members": {
   "tokens": "1oa78z9qot6mp",
-  "tree": "8rskyo6s6kqm",
-  "tolerant": "1fzqwtezvvzf2",
+  "tree": "d97nqwz9w1sp",
+  "tolerant": "1yoa4cnj82bvn",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :enum valued members return value": {
   "tokens": "28tzjuj7qdcnu",
-  "tree": "174e1ul5z7h5h",
-  "tolerant": "1rkaj55qu5rnp",
+  "tree": "3ioqwhsx4t2au",
+  "tolerant": "qufxqm8fzsiu",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :shape .parse returns instance with getters and methods": {
   "tokens": "s0yq9agboooz",
-  "tree": "waezpduohpm0",
-  "tolerant": "32e6wk4fovwvq",
+  "tree": "3iagky3bybn8a",
+  "tolerant": "3ida1zzsv9mxb",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :shape .parse throws SchemaError on invalid": {
   "tokens": "dom0x75s1d4m",
-  "tree": "2e4z5kcaky8km",
-  "tolerant": "1r5mv94cxeeee",
+  "tree": "23nrb6qssimec",
+  "tolerant": "xxpiqn9k0acz",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test .parse! (dammit) works for sync validators": {
   "tokens": "3i4so05y2b1dh",
-  "tree": "3bqsg8zz4e832",
-  "tolerant": "ngbdg650mc7h",
+  "tree": "3bfka3dcftfwr",
+  "tolerant": "rwnv6qvmxk2k",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :shape generated class instance has enumerable own fields only": {
   "tokens": "3p5o3bic5ka47",
-  "tree": "2em76sz4bzr0p",
-  "tolerant": "2m6nmphfteqjo",
+  "tree": "2popmo8nxe0yh",
+  "tolerant": "1m2ewvdshzbnr",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :mixin is not instantiable": {
   "tokens": "33w19i1c3a2oa",
-  "tree": "2wmqk35fw2bil",
-  "tolerant": "psd2m6e6xdhe",
+  "tree": "2223m6uenygz8",
+  "tolerant": "205qoiqi7ocro",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :input field array validation": {
   "tokens": "jwtqmtp0sldv",
-  "tree": "3b36jf3xudlet",
-  "tolerant": "3n3m5ngukev8x",
+  "tree": "2ws76wxbw1ssf",
+  "tolerant": "1ts2yt0bcb2mi",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code pragma caps bare and explicit string types": {
   "tokens": "3seic52kvtj6",
-  "tree": "u5a8i8cxksav",
-  "tolerant": "3pftqgs83e0ra",
+  "tree": "3s4tyogl56lns",
+  "tolerant": "2cgg8u8k6d47t",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code pragma does not touch text type (long-form opt-out)": {
   "tokens": "23t8c61sm66bd",
-  "tree": "h2rdscons8ji",
-  "tolerant": "3d0yixyswwiwr",
+  "tree": "1y2u695oen4s4",
+  "tolerant": "30ijl0h6c4in6",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code pragma does not touch explicit range": {
   "tokens": "2c1ldl6j8cd3r",
-  "tree": "2sm0yzodzawj2",
-  "tolerant": "k287x6pgmvgv",
+  "tree": "3phmpasw0ovhs",
+  "tolerant": "1bn3bmsuy6mjb",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code pragma does not touch regex-constrained field": {
   "tokens": "1s0wnace2ds71",
-  "tree": "2yd4y99d5f856",
-  "tolerant": "2lt4rsl8iqq8c",
+  "tree": "p1ngdfmuv2pt",
+  "tolerant": "93rn24uyer9z",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code pragma does not touch literal-union field": {
   "tokens": "551rstgiodsd",
-  "tree": "2g3vz0en0408p",
-  "tolerant": "3csavf353cc9a",
+  "tree": "2wzwvdpgcfv7q",
+  "tolerant": "8u7oaro7snub",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code pragma does not touch integer/number/boolean/date types": {
   "tokens": "1vxusvza3r20j",
-  "tree": "16vc031whq7rg",
-  "tolerant": "2nvugm9chuadz",
+  "tree": "1pfrok3xxg4ul",
+  "tolerant": "17c7hfmjgees8",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code pragma applies to later schemas only (snapshotted per decl)": {
   "tokens": "ue02qp6rdim5",
-  "tree": "1wye5jnpa37kt",
-  "tolerant": "3u98klue17tge",
+  "tree": "35bu2bx5oz4vn",
+  "tolerant": "tagoy6gr7tdw",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code pragma = 0 disables previously-set default": {
   "tokens": "i35u2a9k1siw",
-  "tree": "317l1sx365dnm",
-  "tolerant": "2p2xzlkmkr9gc",
+  "tree": "2e41bbt8043ad",
+  "tolerant": "a8050vut6dbq",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code pragma composes with user-declared bracket default": {
   "tokens": "1hgyaus8lcn5w",
-  "tree": "355eyq54iz6gm",
-  "tolerant": "4fopw9k5wgkm",
+  "tree": "37k91r9en411h",
+  "tolerant": "3iabtj3eznzs",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail pragma rejects unknown key": {
@@ -21619,272 +21619,272 @@
  },
  "row schema.rip › code pragma accepted after nested INDENTED schema ends": {
   "tokens": "uu7z5u162wot",
-  "tree": "szrqpng4nq0k",
-  "tolerant": "3bcrhafzo7asp",
+  "tree": "1x2rgz011uzvp",
+  "tolerant": "1ac2lmaev8joo",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code pragma accepted after nested INLINE schema ends": {
   "tokens": "23y69g4vckcd7",
-  "tree": "2m2ncqtwcynag",
-  "tolerant": "3f3kk8me6wvq5",
+  "tree": "39czq1py2t4iz",
+  "tolerant": "xfj9gh31zbpa",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code pragma caps phone": {
   "tokens": "vudju9t26vs6",
-  "tree": "w462x5dcj7ls",
-  "tolerant": "1c95nhirmdacn",
+  "tree": "3ls7bsqnwbnxq",
+  "tolerant": "25upmcytoq5cc",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code pragma caps zip": {
   "tokens": "3kmnem2ct8e9z",
-  "tree": "3ip7rp5cbpvzh",
-  "tolerant": "lla5bhpn2z6v",
+  "tree": "3gqeg7pv1n1uc",
+  "tolerant": "1r3uq6u5z9421",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code pragma does NOT cap uuid (fixed-format)": {
   "tokens": "30xlemkvprzu4",
-  "tree": "1tsi3livmnzf9",
-  "tolerant": "3d18c2uqugkgn",
+  "tree": "1snqiwkns5fmy",
+  "tolerant": "2bgyk93ypgshz",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code multiple pragma updates are snapshotted per declaration": {
   "tokens": "3etw1r39n8vtd",
-  "tree": "1xp4tmqbtixmh",
-  "tolerant": "pywzy77aetpi",
+  "tree": "swf2ftfndszq",
+  "tolerant": "2rymtfqzi854n",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test pragma enforces cap at runtime": {
   "tokens": "3fcvac4v4tqx1",
-  "tree": "1bg6kiuv916w1",
-  "tolerant": "1ibs1muk4wwmp",
+  "tree": "14om28gnlurob",
+  "tolerant": "2f8wc3cfab2h8",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test pragma cap surfaces as max issue at runtime": {
   "tokens": "3pbd5v5m561sx",
-  "tree": "1gqdqdvdwccej",
-  "tolerant": "2kwk9mvb6rv7x",
+  "tree": "b4kmctkcfn68",
+  "tolerant": "1v2ewpci53w7n",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test nested :shape field validates each property": {
   "tokens": "3bag9b8cuqw7x",
-  "tree": "1h6s5izwmmx6f",
-  "tolerant": "1didw6icu2tln",
+  "tree": "2arwltk9l6yy8",
+  "tolerant": "18ifvgygh0jx8",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test nested :shape field accepts valid nested value": {
   "tokens": "30md1z4lsu4fm",
-  "tree": "1emon3tact32p",
-  "tolerant": "12n28v0g68wvz",
+  "tree": "w7ekhpnmz5gh",
+  "tolerant": "3ujcsvha2eltq",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test nested :shape field rejects non-object value": {
   "tokens": "1q6w0xkfm39zk",
-  "tree": "229lq8odgxmxj",
-  "tolerant": "2frulksnzbv8j",
+  "tree": "36pml6iwi05jl",
+  "tolerant": "1capyd34v94z4",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test nested :shape field validates missing nested required field": {
   "tokens": "2tfrmtcujatm9",
-  "tree": "3afn6tzu2awfh",
-  "tolerant": "v54dntg0vkof",
+  "tree": "2jlmu7mzuc69r",
+  "tolerant": "1ft9o6jujux70",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test array of nested :shape validates each element": {
   "tokens": "1i2gwv2upmbc4",
-  "tree": "15a788u1v0x9n",
-  "tolerant": "3s2u6rkt5lzhx",
+  "tree": "1tbkvv64hnbuc",
+  "tolerant": "lftl9xaaqv9p",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test array of nested :shape accepts valid elements": {
   "tokens": "ismmdwaobnox",
-  "tree": "19m190momy3lm",
-  "tolerant": "1rk46q643ulz8",
+  "tree": "1bkgxvlh5m5p6",
+  "tolerant": "3i57v3pjr7ez4",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test nested :input field validates via registry": {
   "tokens": "2zuyja2gljyun",
-  "tree": "3931l5kwirvbu",
-  "tolerant": "1kqf7daoz2vps",
+  "tree": "1ytxxyyq51m8m",
+  "tolerant": "g5yymryopiu2",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test enum-typed field accepts declared members": {
   "tokens": "t19amfibsnk6",
-  "tree": "27vw8076il7tm",
-  "tolerant": "xkoxflytb59",
+  "tree": "2m4bmav6frwlb",
+  "tolerant": "3m0ivgtpmx2in",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test enum-typed field rejects non-members": {
   "tokens": "z8314exfawcs",
-  "tree": "27msktmoamh63",
-  "tolerant": "13rb269nm519o",
+  "tree": "3cy4a73qu0yb2",
+  "tolerant": "38ztuaeyzl4a0",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test nested schemas survive .parse() (throws with prefixed path)": {
   "tokens": "1kruapjja5sgv",
-  "tree": "utu023e2j1b1",
-  "tolerant": "1uw1smdv4vrd9",
+  "tree": "11elm6szva77u",
+  "tolerant": "26f151qcve5nu",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test unknown typename throws at first validation, naming field and type": {
   "tokens": "1hz1uzv11hwr8",
-  "tree": "1k38wzvmr6qui",
-  "tolerant": "dpq5w2tdyqpd",
+  "tree": "3tjxdm4b4vmqm",
+  "tolerant": "f3dq7cjieye8",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test unknown typename throws even when the field is absent": {
   "tokens": "15aqv0d5c5ni3",
-  "tree": "1pk5mt5j7nfpn",
-  "tolerant": "1654q35oaglat",
+  "tree": "ca6bbezp2c2s",
+  "tolerant": "3pcoeaq9jbvwq",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test unknown array element typename throws": {
   "tokens": "208zlpgml7rcz",
-  "tree": "2gzn1nqduxg7g",
-  "tolerant": "3a9fvw0m3o186",
+  "tree": "iu9c4nqzm8hs",
+  "tolerant": "1cf6wgufrf45d",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test unknown typename throws from the async path": {
   "tokens": "2lpa9vdayyiuy",
-  "tree": "1wfu1hyvktpo6",
-  "tolerant": "2c1xawmkl6tbb",
+  "tree": "1ewjgm8i1xv40",
+  "tolerant": "1ek1wpzukysyr",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test forward reference to a later schema resolves": {
   "tokens": "25hicqd25ozi8",
-  "tree": "1qj5uwz8twhge",
-  "tolerant": "tp1rmcy6luwj",
+  "tree": "275og9xk08119",
+  "tolerant": "1hgx35ot53b7d",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test nested :shape in optional field skips when missing": {
   "tokens": "n37hrr948h1f",
-  "tree": "w6ioubdj849h",
-  "tolerant": "85lqb1083i6v",
+  "tree": "1w2v36kkf35to",
+  "tolerant": "4mc2lmdn4mze",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test deeply nested (3 levels) propagates path": {
   "tokens": "22omi06rnwirm",
-  "tree": "3ns77a81mk8c9",
-  "tolerant": "3mhf77yqb83f8",
+  "tree": "wen7rszw2wv8",
+  "tolerant": "7e9rqnxtmwx5",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › type :input emits a bare value type": {
   "tokens": "15usa35ksv1k1",
-  "tree": "34zoqyw14sul5",
-  "tolerant": "i2cuadxbwi99",
+  "tree": "3t24hsti9lih0",
+  "tolerant": "px2bca7ddxhl",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › type :shape emits Data + Instance types": {
   "tokens": "3ermskm62bg75",
-  "tree": "35z1pltrk5bh7",
-  "tolerant": "12uwueaeylxte",
+  "tree": "2m9g343upwkqq",
+  "tolerant": "381cdzm45xs13",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › type :shape eager-derived (!>) attaches to instance, not Data": {
   "tokens": "27nespv39hwo5",
-  "tree": "3sm9l7s3han7b",
-  "tolerant": "26f3c1ly02pl7",
+  "tree": "28npov860br4b",
+  "tolerant": "1y6cmox715bjo",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › type :input eager-derived (!>) splits Data from the bare instance": {
   "tokens": "6ew1hsxiiwn3",
-  "tree": "h6lu7b6vkunj",
-  "tolerant": "3uekc7bbrjrge",
+  "tree": "1g1kr754f7wcq",
+  "tolerant": "3k4c0zdwinoid",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › type :enum emits union + const with predicate ok()": {
   "tokens": "muu7rgdi59ch",
-  "tree": "1gnyapcb0wng2",
-  "tolerant": "1msqy2zpvbnr7",
+  "tree": "x6i3qvvungu8",
+  "tolerant": "1sbloae2agbcb",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › type valued :enum emits number union": {
   "tokens": "rszumq2txjtg",
-  "tree": "3q3gw0a13p8d",
-  "tolerant": "2mfneijh9fain",
+  "tree": "3o9cpdno0xaoh",
+  "tolerant": "3tjvwldues0p2",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › type optional fields marked with ?": {
   "tokens": "s06zd82af95u",
-  "tree": "ezzcjnx1e4ud",
-  "tolerant": "3cynj1l55uqvp",
+  "tree": "3p3y89ygzd94u",
+  "tolerant": "2sn9gciq89gfy",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › type :model emits ModelSchema<Instance, Data> with relation accessors": {
   "tokens": "2a8g0cyj2tc80",
-  "tree": "1y6f3ugx8h8fv",
-  "tolerant": "1jpdwnan6ejy6",
+  "tree": "3c4ly5s5h8ihw",
+  "tolerant": "rgm83qwtxad4",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › type :mixin emits field-type alias; host Data intersects mixins": {
   "tokens": "21nrph4scstvi",
-  "tree": "k7q9uaol5i25",
-  "tolerant": "11b9cibd20z2v",
+  "tree": "3i1a82k0c4vwn",
+  "tolerant": "24aj9hk54ugf6",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › type cross-file relation target degrades to unknown": {
   "tokens": "1ajewk3fb6xr0",
-  "tree": "154j3llgl6zeq",
-  "tolerant": "1pob8gauv3oi8",
+  "tree": "3rs4tvs9wn3kr",
+  "tolerant": "1aqyelix0q0io",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › type derived schema emits a bare projection type": {
   "tokens": "1x0209c9a41hk",
-  "tree": "17txkky39wf12",
-  "tolerant": "gqlaj114tqs1",
+  "tree": "3hnhhgytqaag9",
+  "tolerant": "29lezgabxyotp",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › type chained + exported derived schema emits one bare type each": {
   "tokens": "1mhlcfrtr5l77",
-  "tree": "3vc87dh2lw6m9",
-  "tolerant": "1sku6da7xu7hp",
+  "tree": "qebj49fag0wh",
+  "tolerant": "2hscnrgnchkng",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › type non-schema algebra-shaped call is not given a schema type": {
   "tokens": "foppjvuz818h",
-  "tree": "1ken3le6fhkjm",
-  "tolerant": "9g4z5sv6etq6",
+  "tree": "13wm879y4zs17",
+  "tolerant": "z0bxwbkq8xk5",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :model toSQL emits CREATE TABLE": {
   "tokens": "37170pxsemah7",
-  "tree": "qj0yx20vmnc",
-  "tolerant": "2phabavfvfor0",
+  "tree": "x94t79v3qvf6",
+  "tolerant": "jnpbh8drkfeu",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :model toSQL emits the belongsTo FK column — no REFERENCES constraint": {
   "tokens": "3qetfv08deh8h",
-  "tree": "2u94ql99ah410",
-  "tolerant": "2rpbb3wk9hwc2",
+  "tree": "1hi76stkgv9td",
+  "tolerant": "3twfs0y7u2fks",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :model toSQL marks optional belongsTo as nullable": {
   "tokens": "99ru2hnkgzbt",
-  "tree": "3fl9wfuclshba",
-  "tolerant": "7snlcfnyqamb",
+  "tree": "3p8vlmknzn4x1",
+  "tolerant": "300sdtphtgtb7",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :model toSQL defaults sequence to START 1": {
   "tokens": "ubgp4znh9nrq",
-  "tree": "31w8br2juq5as",
-  "tolerant": "xuq2dbixlbxp",
+  "tree": "vddieqddmsp",
+  "tolerant": "razg6rmg5fcq",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :model toSQL honors @idStart directive": {
   "tokens": "1vawts3x5khoh",
-  "tree": "sqkkxm3pmpzs",
-  "tolerant": "1fj3i3tzo9bnu",
+  "tree": "1lm355zdtmn2c",
+  "tolerant": "1cey76vj908w7",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :model toSQL option idStart overrides @idStart directive": {
   "tokens": "e1sc6r1w6ew4",
-  "tree": "vuxk3wd9pvoh",
-  "tolerant": "1mnr7nbylycsx",
+  "tree": "32chn2crzhkc7",
+  "tolerant": "8xxukda80tga",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :model toSQL accepts negative @idStart": {
   "tokens": "239k69v9ke96n",
-  "tree": "2akmvmgx4oae8",
-  "tolerant": "1t5d68yv9vn7t",
+  "tree": "xyh1fy8j4cw3",
+  "tolerant": "2ezbtp1yztfu6",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail @idStart rejects non-integer literal": {
@@ -21901,254 +21901,254 @@
  },
  "row schema.rip › test :model.create inserts and hydrates": {
   "tokens": "76t5pz1k5awg",
-  "tree": "ghkoo3xc1dvm",
-  "tolerant": "cil0gqbuhe34",
+  "tree": "2hgh8cgtbbe59",
+  "tolerant": "2dj98dr55jgls",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :model.find returns null when no row": {
   "tokens": "5w5u08p1an4e",
-  "tree": "8bqpahu2fo6v",
-  "tolerant": "1rhd6mpxgohph",
+  "tree": "2h0v12dha7g3a",
+  "tolerant": "33rvcaytog49p",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :model.where.all issues SELECT with WHERE clause": {
   "tokens": "3t5nmiofuc3vl",
-  "tree": "1b2s831hl9jni",
-  "tolerant": "1r6ri9l8lluks",
+  "tree": "3ubdpcatg74wu",
+  "tolerant": "18vzhnxjo4uh3",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test save() hook order: beforeValidation -> validate -> beforeSave -> INSERT -> afterCreate -> afterSave": {
   "tokens": "16vpewevcstsx",
-  "tree": "ss80zdrm2qnb",
-  "tolerant": "v5pbhz09mmfj",
+  "tree": "c5g6lszua9n",
+  "tolerant": "fur8yj6f724l",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test save() throws SchemaError on invalid without running beforeSave": {
   "tokens": "2fd9157fleag9",
-  "tree": "2b6dek3js7l6h",
-  "tolerant": "gu7odgkooivu",
+  "tree": "364zn7r4vqqd8",
+  "tolerant": "12wybgpxfx7lj",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test .save() persists declared fields only (not computed getters)": {
   "tokens": "1mqx2frbrr8ck",
-  "tree": "20h46fju4ldpa",
-  "tolerant": "99xtjv0hqm6e",
+  "tree": "12osju5254f2t",
+  "tolerant": "pmxlv5onggv5",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test .save() with no changes emits no UPDATE": {
   "tokens": "2kwzj1mqr3xyo",
-  "tree": "1bpnxslllwcrg",
-  "tolerant": "2q4e1aoqjdn10",
+  "tree": "3l0ud99cez0sy",
+  "tolerant": "14frdy8eufakd",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test .save() with one field change emits UPDATE for only that column": {
   "tokens": "gsz6pae96qwl",
-  "tree": "3j7ldrhqbq6pm",
-  "tolerant": "1u4enqrk224fk",
+  "tree": "1mm6hesxd1lkl",
+  "tolerant": "2wpkrcabki9jn",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test .save() after a second mutation refreshes snapshot and writes only the new diff": {
   "tokens": "56pmjhyid7iy",
-  "tree": "3kz663cbbbd0f",
-  "tolerant": "3d69d75qv875k",
+  "tree": "gf07yidzrfob",
+  "tolerant": "m1uv3v9j7c0m",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test markDirty() forces an in-place-mutated json field into the next UPDATE": {
   "tokens": "1vyq3h6yfk6vi",
-  "tree": "t203gvufze1k",
-  "tolerant": "sm713mw56d2a",
+  "tree": "39pqsk8mzkzam",
+  "tolerant": "22jjqjcikef4r",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test markDirty() throws on unknown field name (typo guard)": {
   "tokens": "af1bupogn71l",
-  "tree": "2fjqlfznzul7g",
-  "tolerant": "3nxkc4n07cgxk",
+  "tree": "35n7kku8l37lr",
+  "tolerant": "10r9sd4oefi58",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test markDirty() throws on non-persisted instance (INSERT writes every set field)": {
   "tokens": "1m01hviuyynue",
-  "tree": "3ugw2v3p7xpks",
-  "tolerant": "2bf7w4gmt76ok",
+  "tree": "d4qrbrufoien",
+  "tolerant": "xgi4xr49rzxl",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test markDirty() accepts snake_case alias and resolves to camelCase field": {
   "tokens": "353yo26en42bc",
-  "tree": "1k2sry77wpdbq",
-  "tolerant": "2lcisp1qgydth",
+  "tree": "33ccpwnyoh53v",
+  "tolerant": "2owv3zihuaujo",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test NaN-valued field doesn't trigger forever-dirty UPDATE on no-op save": {
   "tokens": "21xxa8yo8ux7k",
-  "tree": "2cpvza7snvpks",
-  "tolerant": "kawrjxojxt9n",
+  "tree": "39ldqnzbbwvnd",
+  "tolerant": "6q728ptygwc9",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test snapshot built BEFORE await: concurrent mutation during save survives to next save": {
   "tokens": "2r4c57hcsk0mr",
-  "tree": "1e2jy9uhx6bc6",
-  "tolerant": "29w1sjr1wz3hv",
+  "tree": "2a8yjttkm0tzw",
+  "tolerant": "ntrjave7l09v",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test savedChanges on INSERT records [null, newValue] for every declared field written": {
   "tokens": "pdcg115e4vac",
-  "tree": "3sx0f1amkhze5",
-  "tolerant": "uwjazzawekrj",
+  "tree": "3e2ek18aasc1r",
+  "tolerant": "2ng09jys0mil7",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test savedChanges on UPDATE records [oldValue, newValue] for changed fields only": {
   "tokens": "3bj1j4xtfhjqx",
-  "tree": "3obmc6dirfgjz",
-  "tolerant": "kt1gp12a3zoh",
+  "tree": "1hl4vnd04idc3",
+  "tolerant": "mm2kalmu9w26",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test savedChanges is empty after a no-op save": {
   "tokens": "2yvp1tqdu7s9c",
-  "tree": "rbdr7kgiguy4",
-  "tolerant": "2s2g3wochsayb",
+  "tree": "lxm53ckzusy0",
+  "tolerant": "jwtks8v4lfoj",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test savedChanges resets at the start of every save (no accumulation)": {
   "tokens": "2vwlm6wgdcbrk",
-  "tree": "3q0ylzpbeqnpd",
-  "tolerant": "h65naqufl9u5",
+  "tree": "3h91u2j1rkfqq",
+  "tolerant": "3l7yxk4qbbjkz",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test afterUpdate hook can read savedChanges and observe the diff": {
   "tokens": "1ipskolcjfgst",
-  "tree": "10eydorq747ae",
-  "tolerant": "3t02waim7hc8v",
+  "tree": "2fay2fzqzvjh7",
+  "tolerant": "3qmqnvx55qjab",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test afterUpdate hook on a no-op save sees empty savedChanges (AR-compatible)": {
   "tokens": "3tok0sbiowo9j",
-  "tree": "3np3ddzz8q0rs",
-  "tolerant": "2a4z091rbp2es",
+  "tree": "1c1yx35cgxnkt",
+  "tolerant": "bn06x9wqjd1z",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test .save() writes belongsTo FK column when reassigned": {
   "tokens": "16ekovkw793zy",
-  "tree": "2befo9a09xgns",
-  "tolerant": "xrhefl1ayn6y",
+  "tree": "ufo6h0ngfeja",
+  "tolerant": "1kx7n81ecdfwe",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test .save() with no FK change emits no UPDATE": {
   "tokens": "1dzz4xi0ehxr1",
-  "tree": "3cxycpth3r3lo",
-  "tolerant": "2x53txa8iydfo",
+  "tree": "3syjfftra9wa",
+  "tolerant": "1ly3a0o75ff36",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test .save() writes both a declared field and an FK column when both change": {
   "tokens": "1gemv7j1ytg1j",
-  "tree": "3ywjq9zfs7ti",
-  "tolerant": "2xn6vs3e6tfia",
+  "tree": "j0ul1z5shc7m",
+  "tolerant": "1c5u2vrl4ia0u",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test markDirty() accepts belongsTo FK column name (camelCase or snake_case)": {
   "tokens": "m3htxyg6pthi",
-  "tree": "121ephlzxwsz4",
-  "tolerant": "17u1ray1624qe",
+  "tree": "6wxae3rza023",
+  "tolerant": "3lm75s8obqp9",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test Order.create! records FK column in savedChanges with [null, newValue]": {
   "tokens": "147zrul65drj7",
-  "tree": "3rk47jdr0qsf6",
-  "tolerant": "1v51i89loid2s",
+  "tree": "qczlh7opzuiv",
+  "tolerant": "2nfa4sur959ni",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test @times INSERT records createdAt and updatedAt in savedChanges from RETURNING": {
   "tokens": "19dhvqstm10iz",
-  "tree": "j201zz46vtg4",
-  "tolerant": "2fjazsbomuodb",
+  "tree": "fd1w7hmiqcx7",
+  "tolerant": "3r64gvvhlk2x3",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test @times UPDATE bumps updated_at when fields change": {
   "tokens": "38n437sv6h7ty",
-  "tree": "3tdg427fbc9qw",
-  "tolerant": "31xmym0u2stcf",
+  "tree": "be3dzkq7yljk",
+  "tolerant": "1ohwsz8xme7l7",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test @times UPDATE on a no-op save does NOT bump updated_at (no SQL)": {
   "tokens": "2380wianylhj1",
-  "tree": "85ruqeechkeq",
-  "tolerant": "3meys65mlvhsf",
+  "tree": "3r1g3nt43p15r",
+  "tolerant": "3vukjbwh5ioh1",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test @times UPDATE bumps updated_at when only an FK changes": {
   "tokens": "1ge2ojx6m7yda",
-  "tree": "29svz1xs00q5a",
-  "tolerant": "1gbnj6b8mp3ra",
+  "tree": "3eoidy7mgyo",
+  "tolerant": "1f1qr289kl9z",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test @times schema without directive does NOT touch updated_at": {
   "tokens": "2yk8gcg1lerip",
-  "tree": "3i124w4a133ze",
-  "tolerant": "15c03buuog92h",
+  "tree": "3b9yn6r72nh33",
+  "tolerant": "iv6eq7g65ton",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test save() throws on same-instance re-entry from a hook": {
   "tokens": "24hajxtgkzi3f",
-  "tree": "1uft08asaq3sp",
-  "tolerant": "1av5iywgjj8ez",
+  "tree": "3j1ru9pkrx5rs",
+  "tolerant": "18nkfqrqagm59",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test save() guard clears in finally so a second save on the same instance works": {
   "tokens": "1xcq9zv6432qt",
-  "tree": "1efte403iktc9",
-  "tolerant": "erp5g66z0ctk",
+  "tree": "3meckw17f250o",
+  "tolerant": "73v7djxijeqa",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test save() throws clear the re-entry guard (no leak on validation error)": {
   "tokens": "33ann47qsdm37",
-  "tree": "3kipub7gmr8va",
-  "tolerant": "3918sc2b04388",
+  "tree": "1uwmdrj32c3ao",
+  "tolerant": "1722trsdwd4ob",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test save() guard is per-instance: parallel saves on different instances do not interfere": {
   "tokens": "3r1gz5o442dwc",
-  "tree": "2edeax6ish4gg",
-  "tolerant": "1yieo2wg9zndc",
+  "tree": "68a7s9tblrnp",
+  "tolerant": "1eal0gaktkgv",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test save() rejects a persisted instance with no snapshot identity": {
   "tokens": "74c6onktvhai",
-  "tree": "2l5zth4k3mfq6",
-  "tolerant": "1c7clsdkhqqjz",
+  "tree": "bpg98eqsgz2f",
+  "tolerant": "3n0qdckf6ditx",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test save() does NOT warn when _snapshot is present": {
   "tokens": "14enfgpvy5h0d",
-  "tree": "307mk4sey3bzk",
-  "tolerant": "ivl8mjf4btjl",
+  "tree": "3hy5qvgmul4iu",
+  "tolerant": "3hs66ct9qqoqb",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test UPDATE WHERE uses original PK from snapshot, not the mutated in-memory id": {
   "tokens": "1lgnxm8hwdvit",
-  "tree": "24gx7yb8eq9k9",
-  "tolerant": "1cwb2ms8kcr98",
+  "tree": "2hmptihe82l2z",
+  "tolerant": "1nni2qbwgmvah",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test UPDATE WHERE PK survives multiple consecutive saves AND in-memory id mutation": {
   "tokens": "3795e4ts0mf8l",
-  "tree": "z1mso5lruiuq",
-  "tolerant": "115did902hpl1",
+  "tree": "1kn0fzf8ns73o",
+  "tolerant": "2knct5kjlu7bo",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail field name 'mdmID' (acronym style) is rejected at schema-definition time": {
   "tokens": "33soc3uh52ysj",
-  "tree": "gdcyco0gdyb0",
-  "tolerant": "2z6frezzwg0ao",
+  "tree": "20legz6ic9474",
+  "tolerant": "31vf2mo02b41a",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail field name 'XMLPath' (leading acronym) is rejected": {
   "tokens": "18355s6woabdk",
-  "tree": "2v9tej3rjon2",
-  "tolerant": "3e49oodgxoolg",
+  "tree": "10t7t83z5hxcj",
+  "tolerant": "27n4lm9pnlz03",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail field name '_dirty' (leading underscore, not lowercase letter) is rejected": {
   "tokens": "2x7za8erlv9kx",
-  "tree": "1i3uu5h6j0sr8",
-  "tolerant": "3uqqxoqcnzx3f",
+  "tree": "200art7kj9pc4",
+  "tolerant": "2dkzotcs4koas",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail field name '1stPlace' (leading digit) is rejected": {
@@ -22159,158 +22159,158 @@
  },
  "row schema.rip › test field name 'mdmId' (canonical camelCase) is accepted": {
   "tokens": "1p4xe3dy0gy8h",
-  "tree": "dz0oq0q5d14j",
-  "tolerant": "3phfmix5q71po",
+  "tree": "1zbk43rtb1tzl",
+  "tolerant": "3bmthrwa8h24v",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test field name with adjacent vowels and digits accepted": {
   "tokens": "235b615gfdjh8",
-  "tree": "11ly112zb88pg",
-  "tolerant": "vf1qeg2dall9",
+  "tree": "4hn2vsv32o59",
+  "tolerant": "1anzl0aqeq54q",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :model toJSON includes id and declared fields": {
   "tokens": "10y7l8m3b6e5c",
-  "tree": "17557istw599i",
-  "tolerant": "2xix2vu8p0zen",
+  "tree": "2fbgvk29wa064",
+  "tolerant": "2bp6fgtbuhdd1",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :model toJSON includes @times columns": {
   "tokens": "1q2f9xs9xggve",
-  "tree": "3g7tq3spit5rg",
-  "tolerant": "15h5a3whm3n5z",
+  "tree": "1d2xbb8r8jr4f",
+  "tolerant": "2u6qxjagegsf0",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :model toJSON includes @belongsTo FK columns": {
   "tokens": "389798tcbe1ox",
-  "tree": "10l5yaff585y",
-  "tolerant": "ovrgozrj68p4",
+  "tree": "q3x29m5decjt",
+  "tolerant": "39b3763sxotb7",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :model toJSON includes !> eager-derived fields": {
   "tokens": "ct4o6ueifot9",
-  "tree": "2wwmhepqp59d9",
-  "tolerant": "3de4vt9obbfi1",
+  "tree": "2lt19t3cdf0xg",
+  "tolerant": "135yyi7scxkhd",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :model.create() runs !> eager-derived after RETURNING columns arrive": {
   "tokens": "2f13bnmepzstd",
-  "tree": "2vcbsg278uc7w",
-  "tolerant": "uk9dovxp4j9q",
+  "tree": "3n2zlouuqg66q",
+  "tolerant": "2d7r760lr77fx",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :model toJSON excludes methods, ~> computed getters, and internal state": {
   "tokens": "29isflir1wscl",
-  "tree": "2b4ezeurnuwnc",
-  "tolerant": "3hp18m2tlhbw4",
+  "tree": "yr9wukg28smn",
+  "tolerant": "28m92q185q2ih",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :model toJSON survives JSON.stringify round-trip with id preserved": {
   "tokens": "146l3ihwwtinp",
-  "tree": "2zby99axq4i47",
-  "tolerant": "1u77oncfjt2g2",
+  "tree": "1i1tdxwf6e7mh",
+  "tolerant": "1wy6b8e6grv64",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test belongsTo relation resolves from registry": {
   "tokens": "49vlt2gauzkm",
-  "tree": "7lf2a992d52u",
-  "tolerant": "1i808n73wd7q7",
+  "tree": "wdztoosn4efv",
+  "tolerant": "1ubdmp59rqz6d",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test hasMany relation resolves from registry": {
   "tokens": "1y1hjdxdug2vp",
-  "tree": "11s8oscwk86d2",
-  "tolerant": "1xk33p1emv137",
+  "tree": "3lszgtar7zdz9",
+  "tolerant": "16bzvibsrzlhd",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test self-referential :model — Category @belongsTo Category?": {
   "tokens": "1ui13vmsuij3n",
-  "tree": "2r6j6m28bfybt",
-  "tolerant": "2f89km95wp3vj",
+  "tree": "83pjutstmgwq",
+  "tolerant": "36mnca9bbwo4w",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test .toSQL() with circular @belongsTo / @hasMany doesn't loop": {
   "tokens": "1bg2rd0ccidnc",
-  "tree": "1ijzmnohm452e",
-  "tolerant": "28icj1gmvcbqa",
+  "tree": "27ql94nxtavb5",
+  "tolerant": "1u6e51q7ww7fa",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail field vs method collision in :model": {
   "tokens": "3u88a5zbntvbg",
-  "tree": "31op7jnob1x01",
-  "tolerant": "3920574inhkjn",
+  "tree": "1q5fy563vttkv",
+  "tolerant": "bnea2lq72mpk",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail reserved ORM name as field in :model": {
   "tokens": "bk562hr86euh",
-  "tree": "texne59hn8ke",
-  "tolerant": "3m9w2nlfufzpg",
+  "tree": "7psazzjciuhf",
+  "tolerant": "3fpaber9y9i27",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test a model named Schema is fine — it renders to `schemas`": {
   "tokens": "1x0syag0wquy1",
-  "tree": "17sjvtafe88u7",
-  "tolerant": "1caqsfx56ja7j",
+  "tree": "3a71x7tdvl67b",
+  "tolerant": "3sm99rk5uaewt",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail @table cannot claim `schema`": {
   "tokens": "1s2bunt71p671",
-  "tree": "2hmalhoig6wab",
-  "tolerant": "30yg9nlc0d9s0",
+  "tree": "20g6chh7k3nbq",
+  "tolerant": "12i2l43o8m798",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail field 'updatedAt' as a field in :model is reserved (implicit timestamp column)": {
   "tokens": "2kq55kvm3rdwb",
-  "tree": "2kj1kv91ezvq2",
-  "tolerant": "1hrka8v858x71",
+  "tree": "x5dhbtwejy5e",
+  "tolerant": "1pd4mndw7s2a3",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail field 'createdAt' as a field in :model is reserved": {
   "tokens": "13o1ke6uqr129",
-  "tree": "cerlkdmtu5vg",
-  "tolerant": "1ako5uoyy44ty",
+  "tree": "2tpw2f6wofgrn",
+  "tolerant": "170us9797wir4",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail field 'deletedAt' as a field in :model is reserved": {
   "tokens": "1ln2yhrsvg4ze",
-  "tree": "19ndhhifndjk2",
-  "tolerant": "3d7743zelj75p",
+  "tree": "39klzqnl2j5r5",
+  "tolerant": "1gpam12vd0bb3",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail field 'savedChanges' as a field in :model is reserved (instance API)": {
   "tokens": "wm004c4ojy2t",
-  "tree": "oswsalfzet1b",
-  "tolerant": "24qthr8bbbxb7",
+  "tree": "23u3jdq3rpf70",
+  "tolerant": "1e0n2ufovvl4m",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail field 'markDirty' as a field in :model is reserved (instance API)": {
   "tokens": "1fcul5uxgqfd3",
-  "tree": "3maf03k5i668a",
-  "tolerant": "1zakdfgah34bh",
+  "tree": "27qmqzvfmues5",
+  "tolerant": "370rzfbbeisww",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test mixin expands fields into host :model": {
   "tokens": "35gigg7vacdb",
-  "tree": "20isflvpzbkoj",
-  "tolerant": "2y8v65l44ntmg",
+  "tree": "2nrw52bl4ovqi",
+  "tolerant": "6gysbudx5nmg",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test mixin chains via nested @mixin": {
   "tokens": "b2cazy8ompy1",
-  "tree": "1kdtiuie9utov",
-  "tolerant": "19dmv83cxbq2g",
+  "tree": "213hatgxr6fmt",
+  "tolerant": "17dfuxyo6eyu6",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test mixin collision is a compile-time error": {
   "tokens": "2emc8dquym0n1",
-  "tree": "3noovyykquc5g",
-  "tolerant": "2zsedcg3rqn7w",
+  "tree": "hs17bpyr82jc",
+  "tolerant": "1zwzvio5zsocm",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test mixin cycle throws with chain": {
   "tokens": "2glsrl6l9wts6",
-  "tree": "2t149s63myd6a",
-  "tolerant": "3ct2e5hsnciu9",
+  "tree": "1genbndplpw2f",
+  "tolerant": "3gcmgt6w1ia3v",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail :mixin rejects method entries at parse time": {
@@ -22333,302 +22333,302 @@
  },
  "row schema.rip › test .pick returns a :shape with only named fields": {
   "tokens": "2lowua1olx25l",
-  "tree": "3onodcnalcwx3",
-  "tolerant": "2pw2jlsug461b",
+  "tree": "3eq9hodxwjf6z",
+  "tolerant": "35ubv2kfmwpr",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test .omit returns a :shape without named fields": {
   "tokens": "36q17c2vingue",
-  "tree": "2tso72yko4wjb",
-  "tolerant": "3l1jbs0slxfi1",
+  "tree": "3asrhvybaudun",
+  "tolerant": "ayboe09bacon",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test .partial flips all fields to optional": {
   "tokens": "1buy840kj09zs",
-  "tree": "3dk4a8a9vouto",
-  "tolerant": "1ja1l1mper0aa",
+  "tree": "f2ymef8e6mbh",
+  "tolerant": "2fcs23m7wbe7",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test .required(keys) forces required on listed fields": {
   "tokens": "15tdzemrp160b",
-  "tree": "1hhh6xw8zbypq",
-  "tolerant": "sjgnn74fi83u",
+  "tree": "20tf91d338uts",
+  "tolerant": "3n0cc8d0w6a40",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test multi-line trailers split on commas (range + regex across lines)": {
   "tokens": "758myq1b6zgm",
-  "tree": "1t657fqn21lak",
-  "tolerant": "bb1xetl0bvyl",
+  "tree": "2wm3w3v8wrrff",
+  "tolerant": "zrhfgeq35ue8",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test multi-line trailer ending in a transform still parses": {
   "tokens": "3t5sdcl86724b",
-  "tree": "1uxwi5ptgam4s",
-  "tolerant": "tovql4d0ywj5",
+  "tree": "2al3w5ziwg58y",
+  "tolerant": "2klzmw3g6syz4",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test .extend accepts an inline schema argument inside call parens": {
   "tokens": "17v42cdzfgt0m",
-  "tree": "2yd12o7y67k1s",
-  "tolerant": "3ac72oy4nroxf",
+  "tree": "yfsak6krnv0c",
+  "tolerant": "3sf8x1fckj851",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test .extend accepts a parenthesized indented schema argument": {
   "tokens": "3bs9jrun7ftop",
-  "tree": "1ulpxnlx6v4t5",
-  "tolerant": "3jhko9mxsntj4",
+  "tree": "3h9tqp60mhflv",
+  "tolerant": "2xspnrhx5yapa",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test .extend merges two schemas' fields": {
   "tokens": "1zme3q62xn195",
-  "tree": "6bqk47eoaq3u",
-  "tolerant": "ce3bm4q6r0zq",
+  "tree": "it6sumjs7vxq",
+  "tolerant": "dak97revvc6f",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test .extend throws on field collision": {
   "tokens": "3gb4gbkvp10cy",
-  "tree": "7s6iivicxj51",
-  "tolerant": "3iz0wtn6dpc12",
+  "tree": "hkpm5vux7iga",
+  "tolerant": "69uidoumfw4m",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test algebra on :model returns :shape; ORM methods throw": {
   "tokens": "3hr8ugvzm5cur",
-  "tree": "bu4tkiex3kjw",
-  "tolerant": "2qxy9hohp6j8r",
+  "tree": "2h56bbaptw19a",
+  "tolerant": "zyhgm90ndttb",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test algebra drops behavior": {
   "tokens": "39mdqmhuqscc1",
-  "tree": "366cwjj847k53",
-  "tolerant": "1ff3mk6cm7haf",
+  "tree": "14kr84e43ii2k",
+  "tolerant": "6twgc20c34pj",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test methods accept parameters (typed and untyped) at runtime": {
   "tokens": "183uuq0ah2o1n",
-  "tree": "1guvhm1e3wwyp",
-  "tolerant": "ons1y0gb2s3o",
+  "tree": "13mvc3znwvrn1",
+  "tolerant": "2blgvzp2qtaq8",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test single-statement method body declares its match _": {
   "tokens": "3jxk3h4jacjky",
-  "tree": "6a2t257fbzi9",
-  "tolerant": "2kuiw6brskdce",
+  "tree": "27fq3kxgh5uh1",
+  "tolerant": "bukmq7vphzl3",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test single-statement method body declares its local": {
   "tokens": "13t20pwnn0j81",
-  "tree": "1gph3hc3puakt",
-  "tolerant": "1i3owvz5zfl9r",
+  "tree": "1gu64huu8wiba",
+  "tolerant": "1yrv8ue6emtrn",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test multi-statement method body declares its match _": {
   "tokens": "1pn8refgppvlu",
-  "tree": "30um8c797rdg9",
-  "tolerant": "7xem1xnlur68",
+  "tree": "125e2623fq2ih",
+  "tolerant": "1yuleg0b9o5o6",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test algebra preserves sourceModel through chain": {
   "tokens": "2x9mqresk58r8",
-  "tree": "3q77cxb4yzv6j",
-  "tolerant": "1a43bz6hz51tb",
+  "tree": "v96bltwibuhp",
+  "tolerant": "uog91qzeyfrq",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code fold off by default: derived schema stays a runtime call": {
   "tokens": "rbpxch6u1crx",
-  "tree": "jpm1jez7lx34",
-  "tolerant": "84kwpxl82956",
+  "tree": "14x0xzoj9r5nq",
+  "tolerant": "2faztm4hnadwm",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code fold: pick emits a self-contained shape literal": {
   "tokens": "rbpxch6u1crx",
-  "tree": "jpm1jez7lx34",
-  "tolerant": "84kwpxl82956",
+  "tree": "14x0xzoj9r5nq",
+  "tolerant": "2faztm4hnadwm",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › type exported schema emits export declare const": {
   "tokens": "37kdd7n8nzi5r",
-  "tree": "10zwmzh236hvg",
-  "tolerant": "uz2ovllv0e0o",
+  "tree": "1n4bms1rbygwd",
+  "tolerant": "3l70girz03rmg",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › type recursive :shape emits a self-referencing type alias": {
   "tokens": "2nk8aqncym1k1",
-  "tree": "1jglq1vlpy2oc",
-  "tolerant": "3gouqeqvmsulf",
+  "tree": "2j4zzpby1gu1",
+  "tolerant": "3c5qdt6u5gwu2",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › type mutually recursive shapes resolve through bare-name aliases": {
   "tokens": "2bcja7fcjgsj6",
-  "tree": "3vlez52j5bnzw",
-  "tolerant": "dlcv080p39lu",
+  "tree": "ebbkh8gt0a72",
+  "tolerant": "u72bfxa5659e",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › type nested same-file schema reference resolves to its bare type": {
   "tokens": "2c64zvwtq8sla",
-  "tree": "8pfanpuo7lwe",
-  "tolerant": "27ruwcg75kykz",
+  "tree": "7lcy56szwqac",
+  "tolerant": "33f7phad3ppbk",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test registry: different definition under same name throws collision": {
   "tokens": "4cedz8l57n17",
-  "tree": "12kykufwhhrcr",
-  "tolerant": "2mcodcpy1ckcp",
+  "tree": "26gt9oeskvjje",
+  "tolerant": "2auyxl882ltn7",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test registry: identical redeclaration rebinds silently": {
   "tokens": "1f5suwfp9jenz",
-  "tree": "q9vkrf64clip",
-  "tolerant": "2j2gkct5nt93l",
+  "tree": "300bz8zkj4n4y",
+  "tolerant": "3uaz0k4xfvjal",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test registry: replace = true restores last-loaded-wins (dev/HMR)": {
   "tokens": "3r0meoa4wivel",
-  "tree": "6oko1jekzr49",
-  "tolerant": "2g4dw9bdm334h",
+  "tree": "hxs90wf3rh37",
+  "tolerant": "1t9gwk0w2evzj",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test registry: scope() runs against a fresh registry and restores": {
   "tokens": "3po4ktzv87ckt",
-  "tree": "2hagpgyd18qm0",
-  "tolerant": "3h627hkbo7rsh",
+  "tree": "irenash5zhrs",
+  "tolerant": "3bhdv7a44ot0p",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test findMany issues one IN query; [] short-circuits with no SQL": {
   "tokens": "x03p7wp0mrec",
-  "tree": "2q8yp27pmk3dy",
-  "tolerant": "2v9rhuemndezz",
+  "tree": "1ky0g4umfjuh6",
+  "tolerant": "295gjf7ziiw7",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test find is pk-only; with is the exactly-one conditions lookup (LIMIT 2)": {
   "tokens": "awnhx8jxznfz",
-  "tree": "2du1keuj3r7b8",
-  "tolerant": "xw6e9qbics0b",
+  "tree": "2aejt84kicdty",
+  "tolerant": "1mv0lpex92med",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test with refuses ambiguity — two matches throw, zero is a null miss": {
   "tokens": "1l0xbkf41ybc9",
-  "tree": "hq4bbf9if2kq",
-  "tolerant": "1bsh3rnwjzdcb",
+  "tree": "201grehe6r7d1",
+  "tolerant": "usvvttjsb6r3",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test relation accessor memoizes; {reload: true} busts the memo": {
   "tokens": "dc35udp5t0ey",
-  "tree": "2srspnugt6rd5",
-  "tolerant": "2sqvw021dv88r",
+  "tree": "152lrifvco90n",
+  "tolerant": "1tsro9jqcf6gq",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test UNIQUE violation surfaces as SchemaError {field, error: 'unique'}": {
   "tokens": "1qdlkc75oq8zq",
-  "tree": "2ibdnuxqxfhns",
-  "tolerant": "3hfykscbkc44y",
+  "tree": "1y41yiiue3lgu",
+  "tolerant": "1fivjsgkrtrxc",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test NOT NULL violation surfaces as {field, error: 'required'}": {
   "tokens": "ci78advumg9q",
-  "tree": "27z3bbxuepru6",
-  "tolerant": "2sn6nkee3xh6n",
+  "tree": "3kphhwyktjpxa",
+  "tolerant": "2qq7a9iywnsgz",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test FK violation surfaces as {field, error: 'reference'}": {
   "tokens": "1px4ue5llwri7",
-  "tree": "2jpr5gksgck8p",
-  "tolerant": "1r84ecbw5e2sd",
+  "tree": "1v3mgi28xhd3u",
+  "tolerant": "3uzv455fmd4vj",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test non-constraint DB errors propagate untouched": {
   "tokens": "30kmyyhq8ep3f",
-  "tree": "1ww00y9ran7to",
-  "tolerant": "7k7r04no7pdk",
+  "tree": "kxumwchaq57k",
+  "tolerant": "1c7qpzz6d7ttl",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test @softDelete: withDeleted / onlyDeleted control the filter": {
   "tokens": "1z8x42fpoj0x7",
-  "tree": "2p36rlp8zjtm8",
-  "tolerant": "13num65guj2pd",
+  "tree": "j0jyf0gk5poe",
+  "tolerant": "lbjgewa18q5e",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test @softDelete: restore() clears deleted_at; destroy(hard: true) DELETEs": {
   "tokens": "11764qn5hvw45",
-  "tree": "2a1n58mjkyhw8",
-  "tolerant": "15mntulfjgwxp",
+  "tree": "sh3t9llq9v5n",
+  "tolerant": "2mobntzsqfc76",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test restore() on a model without @softDelete throws": {
   "tokens": "2v4r9f5yuza0w",
-  "tree": "3ujqqwk6fh2x7",
-  "tolerant": "3u4ltlm17odxi",
+  "tree": "3azgend3hna7a",
+  "tolerant": "y4fikcq3x4xg",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test .where().updateAll! emits one UPDATE and bypasses hooks": {
   "tokens": "2g1rhi9pepfbz",
-  "tree": "2xkftwwk2nstq",
-  "tolerant": "1wvciexjd7met",
+  "tree": "2mhpc1vanvazh",
+  "tolerant": "39y9d9hebmrow",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test .deleteAll! is soft-delete aware": {
   "tokens": "3jlm2eki24iuj",
-  "tree": "f3crax73igie",
-  "tolerant": "hd96otflbzuj",
+  "tree": "fe10mpj6wfcg",
+  "tolerant": "k718cm748nys",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test .insertMany! validates every row before any SQL, then one INSERT": {
   "tokens": "2fcx3xyurh87z",
-  "tree": "1pd8s31zcots2",
-  "tolerant": "dk1u98qrflq3",
+  "tree": "1yv9ghhl9p5f6",
+  "tolerant": "1myttvdxhct7z",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test .upsert! without a conflict target throws": {
   "tokens": "xagqs4ex8zll",
-  "tree": "3nu70qwl3ze60",
-  "tolerant": "232zn1o205dpp",
+  "tree": "3h7oglj3yiprz",
+  "tolerant": "2o9xipsg88ebq",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test @scope: composes on the model and the builder, in any order": {
   "tokens": "24joij2y38prb",
-  "tree": "3po30mfbu34ql",
-  "tolerant": "2av5vyu1kd1js",
+  "tree": "1wmiwkzohzj3r",
+  "tolerant": "34lgs689o9vy3",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test @scope: chains with order/limit and terminates normally": {
   "tokens": "2olhqhlcnh2sl",
-  "tree": "2pabp3gyilbe8",
-  "tolerant": "38n61fj29kc08",
+  "tree": "aa0w9h2q598f",
+  "tolerant": "1ulk0id7erzcm",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test @defaultScope: applies to where/all/count/find; .unscoped() skips it": {
   "tokens": "bsgog83djyej",
-  "tree": "2nqfu4ncwocac",
-  "tolerant": "tmkb4xyuqe1q",
+  "tree": "1zs9apgnxt573",
+  "tolerant": "2ihpcbg26qldi",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test @defaultScope composes with @softDelete filtering": {
   "tokens": "2gtnsw3rvb0uu",
-  "tree": "3lbg2016uxbiy",
-  "tolerant": "ljwnw9y8q8wl",
+  "tree": "13i68zt0njp5n",
+  "tolerant": "b50gbhbq8emi",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test @scope: name colliding with the query API throws at normalize": {
   "tokens": "1nxj260v4jjfr",
-  "tree": "28i4dk7mmn61b",
-  "tolerant": "9o8mvqalu2rz",
+  "tree": "6xo9t2yjcm3z",
+  "tolerant": "3c9ledtf69182",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test @scope: duplicate scope names throw at normalize": {
   "tokens": "c1olxfpdklso",
-  "tree": "2md1p2t0qktky",
-  "tolerant": "35mbbnxk05v5r",
+  "tree": "3kk9u7mdzgrcr",
+  "tolerant": "2nz22g9hay52f",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test @defaultScope: more than one throws at normalize": {
   "tokens": "20u4avjz3abha",
-  "tree": "3lzshcyauhfzj",
-  "tolerant": "1585k1nvujgfg",
+  "tree": "1qmt8k9u0rnys",
+  "tolerant": "10p2a92awrrx7",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test @scope: a field and a scope may share a name (static vs instance)": {
   "tokens": "prfr3a1htfg6",
-  "tree": "2eqiddgug009u",
-  "tolerant": "se7kvmy8nl30",
+  "tree": "1s1cqu1b2fiqz",
+  "tolerant": "1q0zk31yy2prc",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail @scope on :shape is rejected at compile time": {
@@ -22657,44 +22657,44 @@
  },
  "row schema.rip › test @scope: multi-line body parses and runs": {
   "tokens": "3oaii1kmz5q5",
-  "tree": "wvqcqwdudjhh",
-  "tolerant": "3u8d16jdqwp93",
+  "tree": "au2giq0z4fjd",
+  "tolerant": "60qniyklgliz",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › type @scope emits typed statics and a per-model query alias": {
   "tokens": "39k4om7uxnp0g",
-  "tree": "3rs6d91jgyd4d",
-  "tolerant": "dmaoi3pi1gnm",
+  "tree": "1bngxgerc5ca4",
+  "tolerant": "278ixfjbmbdsg",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ~integer: integral strings coerce; floats and junk fail with {error: 'coerce'}": {
   "tokens": "278d8dlr3y1b3",
-  "tree": "37wwvtbn7njw",
-  "tolerant": "3k75bnzh80dub",
+  "tree": "3dbsfx7esyx6v",
+  "tolerant": "34yjhxbya4ayl",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ~number / ~boolean coerce their strict token sets": {
   "tokens": "1uwen4ynvryik",
-  "tree": "21yexr3wbqiw7",
-  "tolerant": "1rbrvx9lgl83b",
+  "tree": "rp0irxfclsnj",
+  "tolerant": "22uddqizq7jy8",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test ~date: ISO strings and epoch numbers become Dates; junk fails": {
   "tokens": "jfpqslttqbpa",
-  "tree": "2lg2xak4huifn",
-  "tolerant": "1w4ps9p2kfmqe",
+  "tree": "1dcpzpedm64is",
+  "tolerant": "20vu26to7r2m0",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test coercion runs before constraints; missing values untouched": {
   "tokens": "2xqqmfwly0ekx",
-  "tree": "o607pmhvpv48",
-  "tolerant": "14r6i3gw86jk5",
+  "tree": "2qre93u3v32df",
+  "tolerant": "1flwj7684nrzs",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test coercion survives algebra (field semantics carry through .pick)": {
   "tokens": "14txfoe6ds9hf",
-  "tree": "203by1466pgo4",
-  "tolerant": "3cg0j12q1wame",
+  "tree": "mx7enjv271mj",
+  "tolerant": "sk0evfbjisqm",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail ~ rejects non-coercible types": {
@@ -22717,98 +22717,98 @@
  },
  "row schema.rip › test ~:name with an unregistered coercer fails loud at parse (config error)": {
   "tokens": "2vg9uhk6uv0rj",
-  "tree": "149n84qrd0xks",
-  "tolerant": "1abmouy6jqvou",
+  "tree": "38b72vny62wpq",
+  "tolerant": "5jjppxaafcnn",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test @ensure with :field attributes the failure to that field": {
   "tokens": "1c2v9cvqqbe6z",
-  "tree": "235qp0qqs88n7",
-  "tolerant": "2hdm81h6fkf8d",
+  "tree": "3sb4vz9q6nq7l",
+  "tolerant": "2v8lir65ea4e6",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test @ensure array form accepts mixed attributed and bare tuples": {
   "tokens": "2nwr29ir80xbe",
-  "tree": "3dhk8uyx9ox95",
-  "tolerant": "1r21yuyiiozzc",
+  "tree": "1v2cmr68vteys",
+  "tolerant": "2d5cwecepjo0t",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test @ensure!: schema becomes async-validating; sync entry points throw": {
   "tokens": "3ha1n91jnk5dg",
-  "tree": "24t77mj5xuq4e",
-  "tolerant": "1ca3pqnhs30dg",
+  "tree": "33i31ue7nmnlz",
+  "tolerant": "1xh4uxhh9zv1j",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test @ensure!: async predicates run concurrently; all failures collect in order": {
   "tokens": "1kexcbpb7t8z2",
-  "tree": "3onq686ls4wbg",
-  "tolerant": "25u1q10mzs85c",
+  "tree": "x5d1fj719u48",
+  "tolerant": "yzyjaggxfjkw",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test @ensure!: rejected async predicate counts as failure with declared message": {
   "tokens": "5vz4da6x6sfv",
-  "tree": "2xera0sz5cm7i",
-  "tolerant": "3qopgktwedtrn",
+  "tree": "33k453c34az21",
+  "tolerant": "39f774e3hquzu",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail @ensure: a check that awaits must be declared @ensure!": {
   "tokens": "1inaqeavmh2bg",
-  "tree": "2a5z2bopcoovp",
-  "tolerant": "2ts2do5mr71wn",
+  "tree": "1wr6w8oufy8e1",
+  "tolerant": "awh5jvyfcf1e",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test @ensure: a plain check that returns a promise throws, never passes": {
   "tokens": "2bvttmykvufzy",
-  "tree": "1fduyailrblyj",
-  "tolerant": "e36lz29yl6m1",
+  "tree": "2g1ujrlpjfvmo",
+  "tolerant": "3cd34m0b9s4qr",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test parseAsync works on plain sync schemas too (uniform surface)": {
   "tokens": "wpo6kt6tnco8",
-  "tree": "1vta8cvthjlj1",
-  "tolerant": "3luekvw3lkc8j",
+  "tree": "1199i0ilqnyr0",
+  "tolerant": "19ox4dy1h35s0",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :union dispatches on the discriminator and returns constituent instances": {
   "tokens": "33bpvhhjgmbwb",
-  "tree": "yib0zy6fgcho",
-  "tolerant": "2ejhpn5tzafsu",
+  "tree": "uaw2vzsw6nfy",
+  "tolerant": "261gmkm94l2wn",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :union: unknown discriminator value fails with the expected list": {
   "tokens": "1c0fwzz68wori",
-  "tree": "1y9mhvitlll8t",
-  "tolerant": "32nw8kta2eebc",
+  "tree": "2rvgo70v4b62m",
+  "tolerant": "1r0rle35jqjt0",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :union: non-object input and constituent validation errors surface": {
   "tokens": "nrafifstyqoj",
-  "tree": "1ew4ki0v8mo9e",
-  "tolerant": "cw6p2rr78qac",
+  "tree": "1lzlxub8fu7yv",
+  "tolerant": "9zc4frpxxk98",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :union works as a field type, including arrays": {
   "tokens": "1s02drvucb4yo",
-  "tree": "djwymugto2c6",
-  "tolerant": "1l65lurlupvh6",
+  "tree": "2cp73i1rnxjtx",
+  "tolerant": "270yplbtpe7ki",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :union: algebra throws; ok() delegates": {
   "tokens": "iy77j9pcjw6u",
-  "tree": "3hp04e5aaj78t",
-  "tolerant": "129hvqrnq9p5a",
+  "tree": "tt1yhgrsbvfb",
+  "tolerant": "2gsr8cfn7oylu",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :union: duplicate discriminator values across constituents throw at first parse": {
   "tokens": "3pxk7uo3zi3h1",
-  "tree": "1g4cm4cm3x7uf",
-  "tolerant": "3vsl3f9y2juwg",
+  "tree": "b62a6bc4zvlx",
+  "tolerant": "3sjs5ifddm1i7",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test :union: constituent missing the discriminator literal throws at first parse": {
   "tokens": "f9sbwfx62z5j",
-  "tree": "2ok9bw88lyinz",
-  "tolerant": "1pxej4u0zh2lh",
+  "tree": "ex6e836p4zb2",
+  "tolerant": "2nbzoh299r4wm",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail :union requires @on": {
@@ -22831,32 +22831,32 @@
  },
  "row schema.rip › type :union emits a TS union + validation-only const": {
   "tokens": "2b7f2vibtg4zy",
-  "tree": "1456q87nzr98o",
-  "tolerant": "1ugk8rl9z7td",
+  "tree": "23g3b7ce1715x",
+  "tolerant": "3vgip4zb0gd1p",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail computed getters reject parameters": {
   "tokens": "nar6duhmgol5",
   "tree": "6y8wrd3hi7vo",
-  "tolerant": "1tvdoqu8g062f",
+  "tolerant": "2srfdminip04q",
   "complete": "7ha1a3e8u1to"
  },
  "row schema.rip › fail hooks reject parameters": {
   "tokens": "nar6duhmgol5",
   "tree": "1yrxep7nweb9g",
-  "tolerant": "3v1ynkgwnsuz5",
+  "tolerant": "3bg7hn65ohbsp",
   "complete": "54zk7647g2y3"
  },
  "row schema.rip › test on: routes a model's SQL to its own adapter; others use the global": {
   "tokens": "1cuc2y0z619s6",
-  "tree": "3ae1jrbx3rec6",
-  "tolerant": "1q1rlj9iawhdn",
+  "tree": "3fcgzaiiokqea",
+  "tolerant": "itg7r2hhmf1u",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test cross-adapter @belongsTo: accessor still works across databases": {
   "tokens": "2tsako7oybefv",
-  "tree": "t5pfwpc1mius",
-  "tolerant": "1xml0du8je0oj",
+  "tree": "3f0t1dywoj0jh",
+  "tolerant": "jqjg1pa5r5mz",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail on: is :model-only": {
@@ -22867,116 +22867,116 @@
  },
  "row schema.rip › test toJSONSchema maps fields, constraints, formats, defaults, required": {
   "tokens": "3978kvxknkhwm",
-  "tree": "1zldcv9x492lv",
-  "tolerant": "648dk8fcx9cg",
+  "tree": "1to08e9rp72cw",
+  "tolerant": "2vkqpyf5rjeg7",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test toJSONSchema: nested schemas become $refs; enums and unions map": {
   "tokens": "3pddjj0n518le",
-  "tree": "3jdc1bwmq7pgn",
-  "tolerant": "1amc8d2vyxawq",
+  "tree": "dwvy9srhsxzk",
+  "tolerant": "86jftvlq1yff",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test toJSONSchema: models include DB-managed columns; refinements annotate": {
   "tokens": "uj38ptod330d",
-  "tree": "1os1x1mh4cst",
-  "tolerant": "24fv6onfqchdx",
+  "tree": "1881nmopuixnj",
+  "tolerant": "nq1t9oodf4v9",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test toJSONSchema: recursive shapes are cycle-safe via $defs": {
   "tokens": "38jgndni1uvo3",
-  "tree": "2yybx2l0bhu7l",
-  "tolerant": "gqhqzm588606",
+  "tree": "2ovd8ve095glk",
+  "tolerant": "1qicbex0y5qqp",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test _tableSpec exposes the canonical table structure": {
   "tokens": "twxmn1wdpdlg",
-  "tree": "3ejlle46mtz0q",
-  "tolerant": "igxtbsz1li0w",
+  "tree": "3b2uxzdnyswdu",
+  "tolerant": "7pwz17pinsuc",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test @unique directive: single + composite emit unique indexes": {
   "tokens": "3gdu7us2jrbkz",
-  "tree": "14rorq73zo5m",
-  "tolerant": "as38jkohripb",
+  "tree": "2oghnlhb30sjr",
+  "tolerant": "a58xl325q0qa",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test duplicate index on the same columns is rejected": {
   "tokens": "2c376rqbtba66",
-  "tree": "11ay4o5vkt3au",
-  "tolerant": "2x588bby39t17",
+  "tree": "1sy0lb5nmn44r",
+  "tolerant": "3p12gsbljxho",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test transaction!: SQL routes through the tx handle; commit; block value returned": {
   "tokens": "1j53jk30jle86",
-  "tree": "2ql2vqnfjk6ib",
-  "tolerant": "2174g866krtqd",
+  "tree": "2dxpljmo4ro0x",
+  "tolerant": "308y6x08tb3b",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test transaction!: throw rolls back and the exception propagates": {
   "tokens": "1pqy6cilg8z4g",
-  "tree": "3r8cdabt27vek",
-  "tolerant": "la7entm48299",
+  "tree": "330erk8tibcnw",
+  "tolerant": "sojzcdgi2644",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test transaction!: nested call joins the outer transaction": {
   "tokens": "p72qsgd6wc45",
-  "tree": "1kpoj5lyx6e64",
-  "tolerant": "ed5sve2e74z0",
+  "tree": "3tto1q6dqprul",
+  "tolerant": "29l3g9szjth56",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test transaction!: ORM calls outside the block use the base adapter": {
   "tokens": "3jlhplt517wwn",
-  "tree": "joc5s5z0g03p",
-  "tolerant": "18v8xs1bz6120",
+  "tree": "1oh5huu9fmon9",
+  "tolerant": "3auap2jdlwfid",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test afterCommit fires after COMMIT, exactly once per instance": {
   "tokens": "es1xr0f9cfu",
-  "tree": "30dkdl6exq6gb",
-  "tolerant": "2r62ex0kjt8th",
+  "tree": "2u75u90x7gyi5",
+  "tolerant": "32sfllnx8zb8m",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test afterCommit fires immediately when no transaction is open": {
   "tokens": "25mlzttmkngbs",
-  "tree": "2y2qtoqhunvpm",
-  "tolerant": "10p1w5rz41ygo",
+  "tree": "24fewubduxib4",
+  "tolerant": "hewphbn589n1",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test transaction! on an adapter without begin() throws a clear error": {
   "tokens": "188hcufhihh3c",
-  "tree": "3jd1x1g4hqq30",
-  "tolerant": "1le9fngjc3gji",
+  "tree": "2g8s5gt8fsb9j",
+  "tolerant": "20o87rq7eujy8",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test a /g constraint validates identically on repeat": {
   "tokens": "2y3ya8pzbe2zd",
-  "tree": "36llinro79m0y",
-  "tolerant": "1to4uihupdm0p",
+  "tree": "1bxtlhin0y8v3",
+  "tolerant": "zf19pfreepq1",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test an object schema rejects non-object input": {
   "tokens": "3op3reqem6lm9",
-  "tree": "32peipifojmq2",
-  "tolerant": "27mnc5racet2w",
+  "tree": "3n9kckllja2qu",
+  "tolerant": "18n94hsbra1hg",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test an impossible calendar date fails instead of normalizing": {
   "tokens": "1cb3ttoxb5wjl",
-  "tree": "1jirkbh3870s8",
-  "tolerant": "3cwgahxrkfia4",
+  "tree": "1yx8li4myoijm",
+  "tolerant": "180oxxyflv5ky",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test the coercing form rejects impossible dates too": {
   "tokens": "1bjyuuu1m61zh",
-  "tree": "3uoddbytggkfc",
-  "tolerant": "8k8h4yfafwqw",
+  "tree": "35b9czqqcc807",
+  "tolerant": "37u4tkx9p76ht",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code fold: bails to the runtime call on dynamic keys": {
   "tokens": "1an96zrqxwydd",
-  "tree": "1vo7bmms54sje",
-  "tolerant": "zj54vwthuuyd",
+  "tree": "2vn2pcr4egcks",
+  "tolerant": "2hx2nkt8mdiyz",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail migration verbs are CLI-only in programs": {
@@ -22987,56 +22987,56 @@
  },
  "row schema.rip › test transaction! on: pins one adapter; other-adapter calls run outside": {
   "tokens": "sq7anhaaouai",
-  "tree": "clss7h7yb9aq",
-  "tolerant": "229bw0x7tg43q",
+  "tree": "3ub6lquw0fej5",
+  "tolerant": "2qvoc5s8zk81p",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test afterRollback fires on rollback; afterCommit does not": {
   "tokens": "3eza1y5mp6kuh",
-  "tree": "o8laz3w3i7vc",
-  "tolerant": "1ld4o4yd7ziij",
+  "tree": "2f5m30exiet9p",
+  "tolerant": "2neyzzuql4o81",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test two parallel transactions use independent handles (no cross-talk)": {
   "tokens": "2f0iwx73ttjzc",
-  "tree": "sbf80oma386x",
-  "tolerant": "kjbrp18f7adz",
+  "tree": "3ct8d7rpm3q6u",
+  "tolerant": "2hh13f5sox2hl",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test .includes(:orders) batches one IN query and fills the memo": {
   "tokens": "oum1ad56ly8x",
-  "tree": "3bmlvunplpll9",
-  "tolerant": "30q1ro9tbga7u",
+  "tree": "1sbf5cwtakg4b",
+  "tolerant": "23sb3n0xz736a",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test .includes(:user) on belongsTo batches via findMany; instances shared": {
   "tokens": "1pru8yitrlb3t",
-  "tree": "p6okfs04ga7x",
-  "tolerant": "1trrqjo2svg34",
+  "tree": "3gklv4jv24739",
+  "tolerant": "10hqf3yol84fl",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test nested includes: {orders: :user} preloads two levels": {
   "tokens": "20soskzcjetdq",
-  "tree": "qdbb9fc151se",
-  "tolerant": "njkb2lr8vy00",
+  "tree": "3fwlaw1uewl3i",
+  "tolerant": "28x7bykt8lvj7",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test .includes with unknown relation throws a helpful error": {
   "tokens": "3malg4voan1ei",
-  "tree": "21cj3t6ksbavd",
-  "tolerant": "nl8o0r54fv5f",
+  "tree": "1sxp29izfhurj",
+  "tolerant": "g9eh8oapy7mu",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test .upsert! emits ON CONFLICT DO UPDATE; branch hooks skipped": {
   "tokens": "aepdm7rv47b6",
-  "tree": "11qirxnmo9xia",
-  "tolerant": "1zs2q5p26x4es",
+  "tree": "c7aq2fozpp3j",
+  "tolerant": "6gvth3vwdrap",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › code inline: trailing semicolon before newline": {
   "tokens": "22svpkk4ay2xp",
-  "tree": "886ky1zldggi",
-  "tolerant": "1kva3wr1hawgy",
+  "tree": "3n2pbcdtbwrdl",
+  "tolerant": "3eypjzmx5hvdg",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail open-ended: bare '..' is rejected": {
@@ -23047,14 +23047,14 @@
  },
  "row schema.rip › test suffixed symbols as enum members": {
   "tokens": "d4t6x3yw8dtq",
-  "tree": "hq0aw1fjufoz",
-  "tolerant": "12zq91wzicshx",
+  "tree": "32fm1qigl70mn",
+  "tolerant": "1thgj75bfdacc",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › test suffixed symbol as a literal-union default": {
   "tokens": "2yae75dkgzzrt",
-  "tree": "3fabcdhowerjc",
-  "tolerant": "27p5cfta5bq0k",
+  "tree": "2o1tth6dzb0jo",
+  "tolerant": "u0cc31yy4dhm",
   "complete": "6j7t1thlgyju"
  },
  "row schema.rip › fail a suffixed @scope name rejects — scopes chain as builder methods": {
@@ -23062,6 +23062,96 @@
   "tree": "2ts8jvtl4d0uz",
   "tolerant": "jeta5ofq9qwj",
   "complete": "23rl5azjzvv19"
+ },
+ "row schema.rip › code symbols inside a method body stay symbols": {
+  "tokens": "3084adr76gcvw",
+  "tree": "2m17ja6ednn1i",
+  "tolerant": "wys47klkdpbl",
+  "complete": "6j7t1thlgyju"
+ },
+ "row schema.rip › test a symbol inside a method body is the symbol": {
+  "tokens": "27x5vcpqjwpxu",
+  "tree": "24jwcrqg7fo7t",
+  "tolerant": "3agc80rwkk7ag",
+  "complete": "6j7t1thlgyju"
+ },
+ "row schema.rip › code a schema nested in a method body compiles": {
+  "tokens": "1nzqyd52546jw",
+  "tree": "1t9vzmob5aiuz",
+  "tolerant": "2laqvyw2z5k9a",
+  "complete": "6j7t1thlgyju"
+ },
+ "row schema.rip › test a schema nested in a method body validates": {
+  "tokens": "5gva5ccfepf6",
+  "tree": "27jmlv4nsvexd",
+  "tolerant": "3astvbhtb9rm6",
+  "complete": "6j7t1thlgyju"
+ },
+ "row schema.rip › fail a code body the program grammar rejects fails at its token": {
+  "tokens": "2m57uis9wp520",
+  "tree": "37n4v599radjp",
+  "tolerant": "3nzczqko5ad3",
+  "complete": "3hpduky5skb3j"
+ },
+ "row schema.rip › fail an embedded body's end is named as the body's end": {
+  "tokens": "wvbgyxgy2vqh",
+  "tree": "35v1eqcznofv8",
+  "tolerant": "70r76v862z3t",
+  "complete": "14j86joe5b7f9"
+ },
+ "row schema.rip › fail a do tail inside a callable body is the lexer rejection it is everywhere": {
+  "tokens": "nar6duhmgol5",
+  "tree": "111fax02bbfux",
+  "tolerant": "5rf5192l4vqo",
+  "complete": "mrcwi5upmqs8"
+ },
+ "row schema.rip › fail a schema pragma inside a callable body is not at file top level": {
+  "tokens": "nar6duhmgol5",
+  "tree": "204v9xo1v91ir",
+  "tolerant": "34ymtbyvo12lq",
+  "complete": "2o60jm1lh3ppr"
+ },
+ "row schema.rip › test a nested schema reads the pragma in force where its enclosing schema sits": {
+  "tokens": "3560w3jw7ujjx",
+  "tree": "rr7qk2noywrz",
+  "tolerant": "1jwaaazngxqtj",
+  "complete": "6j7t1thlgyju"
+ },
+ "row schema.rip › code an empty callable body is an empty function": {
+  "tokens": "cvihn4g5tf2a",
+  "tree": "1avyo97n36xo3",
+  "tolerant": "1l9fiidyqobya",
+  "complete": "6j7t1thlgyju"
+ },
+ "row schema.rip › code a symbol argument inside a method body is a symbol, not an object key": {
+  "tokens": "2bnkfepgquyb8",
+  "tree": "29o5jmmhk67ye",
+  "tolerant": "2he8a6nzuxoig",
+  "complete": "6j7t1thlgyju"
+ },
+ "row schema.rip › code a compound key inside a method body is one key": {
+  "tokens": "2j69uizppb5dg",
+  "tree": "3bjaucl65wq8u",
+  "tolerant": "uvgr32efhfij",
+  "complete": "6j7t1thlgyju"
+ },
+ "row schema.rip › code an inline schema nested in a method body is a schema": {
+  "tokens": "21f3bvuldeloh",
+  "tree": "22p6dceg3ow4g",
+  "tolerant": "1a77cnauu4i1y",
+  "complete": "6j7t1thlgyju"
+ },
+ "row schema.rip › code a render attribute inside a method body is an attribute": {
+  "tokens": "3mfhretufvaj5",
+  "tree": "3489lxofkxfpy",
+  "tolerant": "i39619p2q0o",
+  "complete": "6j7t1thlgyju"
+ },
+ "row schema.rip › fail an inline schema nested in a method body takes no callables, as anywhere": {
+  "tokens": "nar6duhmgol5",
+  "tree": "2m7oh5t285hi6",
+  "tolerant": "hkpucb7f1xgo",
+  "complete": "2s73scmhja71p"
  },
  "row semicolons.rip › code function declaration": {
   "tokens": "3ef7ijwet3dg1",
@@ -24751,8 +24841,8 @@
  },
  "row sweep.rip › code a schema field may be named do": {
   "tokens": "1naia2lr86ib4",
-  "tree": "31rhrgys9arrh",
-  "tolerant": "z7lqsk6ty6em",
+  "tree": "36cxf2y3l7u1l",
+  "tolerant": "1ithsazqs9svw",
   "complete": "6j7t1thlgyju"
  },
  "row sweep.rip › code await an indented object": {
