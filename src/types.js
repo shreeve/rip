@@ -180,16 +180,41 @@ const TYPE_VOCAB = new Set([
 // A `.` in a type continues a name (`A.B`, `typeof this.x`,
 // `import("m").T`); after a literal, a closing bracket or a generic it
 // reads a member of a value (`'a'.length`, `[1].length`), which no type
-// spells, and `?.` never belongs to a type. So tokens[j], a `.` or `?.`
-// in the type run that starts at `from`, rejects unless it continues a
-// name.
-const TYPE_NAME_PARTS = new Set(['IDENTIFIER', 'PROPERTY', 'THIS']);
+// spells, and so does a member of `this` outside `typeof`. `?.` never
+// belongs to a type. So tokens[j], a `.` or `?.` in the type run that
+// starts at `from`, rejects unless it continues a name.
+const TYPE_NAME_PARTS = new Set(['IDENTIFIER', 'PROPERTY']);
+const isTypeofAt = (t) => t !== undefined && (t.kind === 'TYPEOF' || (t.kind === 'UNARY' && t.value === 'typeof'));
+const continuesName = (tokens, j, from) => {
+  if (tokens[j].kind !== '.' || j === from) return false;
+  const before = tokens[j - 1];
+  if (TYPE_NAME_PARTS.has(before.kind)) return true;
+  if (before.kind === 'THIS') return j - 2 >= from && isTypeofAt(tokens[j - 2]);
+  if (before.kind !== 'CALL_END' && before.kind !== ')') return false;
+  // `import("m", attributes).T`, tight or spaced: the group's opener
+  // follows the import keyword.
+  let depth = 0;
+  for (let k = j - 1; k >= from; k--) {
+    const kind = tokens[k].kind;
+    if (kind === 'CALL_END' || kind === ')') depth++;
+    else if ((kind === 'CALL_START' || kind === '(') && --depth === 0) {
+      const head = tokens[k - 1]?.kind;
+      return head === 'DYNAMIC_IMPORT' || head === 'IMPORT';
+    }
+  }
+  return false;
+};
 const rejectValueMember = (tokens, j, from, fail) => {
-  const before = j > from ? tokens[j - 1] : null;
-  if (tokens[j].kind === '.' && before !== null && (TYPE_NAME_PARTS.has(before.kind) ||
-      (before.kind === 'CALL_END' && j - 4 >= from && tokens[j - 4].kind === 'DYNAMIC_IMPORT'))) return;
+  if (continuesName(tokens, j, from)) return;
   const t = tokens[j], member = tokens[j + 1];
   fail(`a member read off a value ('${t.value}${member?.value ?? ''}') in a type — a type names a member only through a name (\`A.B\`, \`typeof x.y\`)`, t.start, member?.end ?? t.end);
+};
+// Every member read in tokens[from, to), a type run or a generic list.
+const rejectValueMembers = (tokens, from, to, fail) => {
+  for (let k = from; k < to; k++) {
+    if (counter.on) counter.n++;
+    if (tokens[k].kind === '.' || tokens[k].kind === '?.') rejectValueMember(tokens, k, from, fail);
+  }
 };
 const TYPE_ATOM_ENDERS = new Set([
   'IDENTIFIER', 'PROPERTY', 'RESERVED', 'NUMBER', 'STRING', 'TYPE_TEMPLATE', 'BOOL',
@@ -1452,8 +1477,8 @@ export function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = n
       if (t.kind === 'PROPERTY' && t.value === 'prototype' && text.slice(t.start, t.end) === '::') {
         fail("type annotations use a single ':' (e.g. `x: number`), not '::'", t.start, t.end);
       }
-      if (t.kind === '.' || t.kind === '?.') rejectValueMember(tokens, k, runStart, fail);
     }
+    rejectValueMembers(tokens, runStart, runStart + run.consumed, fail);
     if (opts.stopAtFatArrow && looksLikeBareFunctionType(tokens, runStart, runStart + run.consumed)) {
       fail(
         'a function-type return on an arrow must be parenthesized as a whole — ' +
@@ -1477,9 +1502,11 @@ export function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = n
     if (tokens[j]?.kind !== 'IDENTIFIER') return -1;
     j++;
     // Optional generic parameter list on the name: balanced `<…>`.
+    const generics = j;
     j = skipAngleGroup(tokens, j);
     if (j < 0) return -1;
     if (tokens[j]?.kind !== '=') return -1;
+    rejectValueMembers(tokens, generics, j, fail);
     j++;
     // Block body (structural type / block union): INDENT … OUTDENT,
     // every interior token checked against the type vocabulary — a
@@ -1525,13 +1552,17 @@ export function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = n
     let j = i + 1;
     if (tokens[j]?.kind !== 'IDENTIFIER') return -1;
     j++;
+    let group = j;
     j = skipAngleGroup(tokens, j);
     if (j === -1) return -1;
+    rejectValueMembers(tokens, group, j, fail);
     if (tokens[j]?.kind === 'EXTENDS') {
       if (tokens[j + 1]?.kind !== 'IDENTIFIER') return -1;
       j += 2;
+      group = j;
       j = skipAngleGroup(tokens, j);
       if (j === -1) return -1;
+      rejectValueMembers(tokens, group, j, fail);
     }
     if (tokens[j]?.kind !== 'INDENT') return -1;
     const out = matchingOutdent(tokens, j);
@@ -1645,6 +1676,7 @@ export function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = n
               }
             }
           }
+          rejectValueMembers(tokens, i, j + 1, fail);
           out.push(mint('TYPE_PARAMS', text.slice(tok.start, tokens[j].end), tok.start, tokens[j].end, tok));
           i = j;
           continue;

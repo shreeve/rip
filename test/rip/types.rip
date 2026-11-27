@@ -1698,3 +1698,19 @@ type 'typeof this with a member stays a type', 'type T = typeof this.x', '''
 type 'an import type stays a type', 'x: import("m").T = 1', '''
   declare let x: import("m").T;
 '''
+fail 'a member of this outside typeof in a type rejects', 'x: this.y = 1', ":1:8: a member read off a value ('.y') in a type"
+fail 'a member read off a literal in a type alias generic rejects', "type G<T extends 'a'.length> = T", ":1:21: a member read off a value ('.length') in a type"
+fail 'a member read off a literal in an interface generic default rejects', "interface I<T = 'a'.length>\n  a: T", ":1:20: a member read off a value ('.length') in a type"
+fail 'a member read off a literal in a def generic rejects', "def f<T extends 'a'.length>(a: T)\n  a", ":1:20: a member read off a value ('.length') in a type"
+type 'typeof a member chain of this stays a type', 'x: typeof this.a.b = 1', '''
+  declare let x: typeof this.a.b;
+'''
+type 'an import type with attributes stays a type', 'x: import("m", { with: { "resolution-mode": "import" } }).T = 1', '''
+  declare let x: import("m", { with: { "resolution-mode": "import" } }).T;
+'''
+type 'a spaced import type stays a type', 'x: import ("m").T = 1', '''
+  declare let x: import ("m").T;
+'''
+type 'a qualified name in a generic constraint stays a type', 'type G<T extends A.B> = T', '''
+  type G<T extends A.B> = T;
+'''

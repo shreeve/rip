@@ -6269,13 +6269,43 @@ var TYPE_VOCAB = new Set([
   "OUTDENT",
   "TERMINATOR"
 ]);
-var TYPE_NAME_PARTS = new Set(["IDENTIFIER", "PROPERTY", "THIS"]);
+var TYPE_NAME_PARTS = new Set(["IDENTIFIER", "PROPERTY"]);
+var isTypeofAt = (t) => t !== undefined && (t.kind === "TYPEOF" || t.kind === "UNARY" && t.value === "typeof");
+var continuesName = (tokens, j, from) => {
+  if (tokens[j].kind !== "." || j === from)
+    return false;
+  const before = tokens[j - 1];
+  if (TYPE_NAME_PARTS.has(before.kind))
+    return true;
+  if (before.kind === "THIS")
+    return j - 2 >= from && isTypeofAt(tokens[j - 2]);
+  if (before.kind !== "CALL_END" && before.kind !== ")")
+    return false;
+  let depth = 0;
+  for (let k = j - 1;k >= from; k--) {
+    const kind = tokens[k].kind;
+    if (kind === "CALL_END" || kind === ")")
+      depth++;
+    else if ((kind === "CALL_START" || kind === "(") && --depth === 0) {
+      const head = tokens[k - 1]?.kind;
+      return head === "DYNAMIC_IMPORT" || head === "IMPORT";
+    }
+  }
+  return false;
+};
 var rejectValueMember = (tokens, j, from, fail) => {
-  const before = j > from ? tokens[j - 1] : null;
-  if (tokens[j].kind === "." && before !== null && (TYPE_NAME_PARTS.has(before.kind) || before.kind === "CALL_END" && j - 4 >= from && tokens[j - 4].kind === "DYNAMIC_IMPORT"))
+  if (continuesName(tokens, j, from))
     return;
   const t = tokens[j], member = tokens[j + 1];
   fail(`a member read off a value ('${t.value}${member?.value ?? ""}') in a type — a type names a member only through a name (\`A.B\`, \`typeof x.y\`)`, t.start, member?.end ?? t.end);
+};
+var rejectValueMembers = (tokens, from, to, fail) => {
+  for (let k = from;k < to; k++) {
+    if (counter.on)
+      counter.n++;
+    if (tokens[k].kind === "." || tokens[k].kind === "?.")
+      rejectValueMember(tokens, k, from, fail);
+  }
 };
 var TYPE_ATOM_ENDERS = new Set([
   "IDENTIFIER",
@@ -7342,9 +7372,8 @@ function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = new Map)
       if (t.kind === "PROPERTY" && t.value === "prototype" && text.slice(t.start, t.end) === "::") {
         fail("type annotations use a single ':' (e.g. `x: number`), not '::'", t.start, t.end);
       }
-      if (t.kind === "." || t.kind === "?.")
-        rejectValueMember(tokens, k, runStart, fail);
     }
+    rejectValueMembers(tokens, runStart, runStart + run.consumed, fail);
     if (opts.stopAtFatArrow && looksLikeBareFunctionType(tokens, runStart, runStart + run.consumed)) {
       fail("a function-type return on an arrow must be parenthesized as a whole — " + "`(x): ((a: T) => R) => body`, not `(x): (a: T) => R => body`", tokens[runStart].start);
     }
@@ -7358,11 +7387,13 @@ function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = new Map)
     if (tokens[j]?.kind !== "IDENTIFIER")
       return -1;
     j++;
+    const generics = j;
     j = skipAngleGroup(tokens, j);
     if (j < 0)
       return -1;
     if (tokens[j]?.kind !== "=")
       return -1;
+    rejectValueMembers(tokens, generics, j, fail);
     j++;
     if (tokens[j]?.kind === "INDENT") {
       const out = matchingOutdent(tokens, j);
@@ -7385,16 +7416,20 @@ function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = new Map)
     if (tokens[j]?.kind !== "IDENTIFIER")
       return -1;
     j++;
+    let group = j;
     j = skipAngleGroup(tokens, j);
     if (j === -1)
       return -1;
+    rejectValueMembers(tokens, group, j, fail);
     if (tokens[j]?.kind === "EXTENDS") {
       if (tokens[j + 1]?.kind !== "IDENTIFIER")
         return -1;
       j += 2;
+      group = j;
       j = skipAngleGroup(tokens, j);
       if (j === -1)
         return -1;
+      rejectValueMembers(tokens, group, j, fail);
     }
     if (tokens[j]?.kind !== "INDENT")
       return -1;
@@ -7477,6 +7512,7 @@ function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = new Map)
               }
             }
           }
+          rejectValueMembers(tokens, i, j + 1, fail);
           out.push(mint("TYPE_PARAMS", text.slice(tok.start, tokens[j].end), tok.start, tokens[j].end, tok));
           i = j;
           continue;
@@ -36192,7 +36228,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "ada534f799f3f0a0";
+var compilerBuild = () => "9aef77523d1da2a9";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

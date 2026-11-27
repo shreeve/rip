@@ -19395,6 +19395,38 @@
   "js": "j89pdpxk2cq1",
   "ts": "tgn6tkzpib28"
  },
+ "row types.rip › fail a member of this outside typeof in a type rejects": {
+  "js": "17ad6yy5aa7u",
+  "ts": "17ad6yy5aa7u"
+ },
+ "row types.rip › fail a member read off a literal in a type alias generic rejects": {
+  "js": "105w1aom9zthv",
+  "ts": "105w1aom9zthv"
+ },
+ "row types.rip › fail a member read off a literal in an interface generic default rejects": {
+  "js": "1ijzwm0p61j96",
+  "ts": "1ijzwm0p61j96"
+ },
+ "row types.rip › fail a member read off a literal in a def generic rejects": {
+  "js": "1ijzwm0p61j96",
+  "ts": "1ijzwm0p61j96"
+ },
+ "row types.rip › type typeof a member chain of this stays a type": {
+  "js": "j89pdpxk2cq1",
+  "ts": "2czwlca3jpajv"
+ },
+ "row types.rip › type an import type with attributes stays a type": {
+  "js": "j89pdpxk2cq1",
+  "ts": "22n9ajs2zha6c"
+ },
+ "row types.rip › type a spaced import type stays a type": {
+  "js": "j89pdpxk2cq1",
+  "ts": "1qvc3ewmp8fw"
+ },
+ "row types.rip › type a qualified name in a generic constraint stays a type": {
+  "js": "27k1wwwhf13t",
+  "ts": "1x19n40epx5jg"
+ },
  "row value-words.rip › fail annotated declaration": {
   "js": "2i32mgajydlkm",
   "ts": "2i32mgajydlkm"
