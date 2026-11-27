@@ -12,8 +12,9 @@
 // trees, and a silent hand-off would hide what v2 does not cover.
 
 import { Stores } from '../stores.js';
-import { CodeBuilder } from '../builder.js';
 import { SourceFile } from '../source.js';
+import { Builder } from './builder.js';
+import { MappingBuilder } from './mapping.js';
 
 // Something v2 has no lowering for. Distinct from every rejection a
 // program earns on its own: the differential harness counts these as
@@ -39,7 +40,9 @@ const DELIVERIES = ['none', 'import', 'inline'];
 // carries it into the output.
 const TS_DIRECTIVE = /^#[ \t]*@ts-(expect-error|ignore|nocheck)(?=\s|$)/;
 
-export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, dataLine = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
+// `mappings: false` records no MappingStore row (the record's `mappings`
+// is empty): the build pays for no source span.
+export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, browserModule = false, dataPayload = null, dataLine = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null, mappings = true } = {}) {
   if (!parseResult.sexpr) {
     throw new Error('emitter: cannot emit a failed parse');
   }
@@ -49,11 +52,14 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   if (!DELIVERIES.includes(runtimeDelivery)) {
     throw new Error(`emitter: unknown runtimeDelivery '${runtimeDelivery}' — expected 'none', 'import', or 'inline'`);
   }
+  if (typeof mappings !== 'boolean') {
+    throw new Error(`emitter: mappings must be true or false; got ${typeof mappings}`);
+  }
   if (ambientBindings != null && !Array.isArray(ambientBindings)) {
     throw new Error(`emitter: ambientBindings must be an array of {name, kind}; got ${typeof ambientBindings}`);
   }
   const stores = new Stores(parseResult.stores);
-  const builder = new CodeBuilder(stores, { source, primitives: face === 'ts' });
+  const builder = mappings ? new MappingBuilder(stores, source, { leaves: face === 'ts' }) : new Builder();
   const ctx = {
     stores, builder, source, face, runtimeDelivery, pins, strict, script, browserModule, dataPayload, dataLine,
     ambientBindings, repl, hmr, tolerant, modulePath, appStashSpec, routesUnion, routeParams,
@@ -139,7 +145,7 @@ function record(ctx) {
   const { builder, stores } = ctx;
   return {
     code: builder.code,
-    mappings: builder.rows,
+    mappings: builder.rows ?? [],
     runtimeImports: [],
     vocabulary: [],
     silences: [],
