@@ -84,6 +84,14 @@ describe('module facts', () => {
     expect([...run('t = "a" =~ /a/').runtimes]).toEqual(['stdlib']);
   });
 
+  test('a loop or clause variable spelled like a runtime name binds it: no reference', () => {
+    for (const src of ['for p in xs\n  log 1', 'x = (1 for p in xs)', 'for [p] in xs\n  1', 'for k, p of xs\n  1']) {
+      expect([...run(src).runtimes]).toEqual([]);
+      expect(v1Facts(parseSource(src), { face: 'js' }).record.runtimes.size).toBe(0);
+    }
+    expect([...run('for [a = p] in xs\n  1').runtimes]).toEqual(['stdlib']);
+  });
+
   test('typeOnlyImports: an import named only in type text', () => {
     expect([...run('import {T, v} from "m"\nx: T = v\n').typeOnlyImports]).toEqual(['T']);
   });

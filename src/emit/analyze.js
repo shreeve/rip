@@ -1538,7 +1538,7 @@ class Analysis {
         rs.forms.push({ error: err });
       }
     }
-    this.visitList(vars, (c & ~(RN | HOIST | PLAN)) | (rn ? RN_PAT : 0) | ((m & (HOIST | HMATCH)) ? HMATCH : 0), cs, null);
+    this.visitVars(vars, (c & ~(RN | HOIST | PLAN)) | (rn ? RN_PAT : 0) | ((m & (HOIST | HMATCH)) ? HMATCH : 0), cs);
     if (m & PLAN) this.extra = { names: listPatternNames(vars), next: extra };
     const sm = (c & ~RN) | (rn ? RN_EXPR : 0);
     this.visit(x[3], sm, cs, rs);
@@ -1559,6 +1559,13 @@ class Analysis {
       return EMPTY_SET;
     }
     return new Set(names);
+  }
+
+  // A loop's or clause's variables: each a binding pattern (its
+  // defaults and computed keys are the free-reference walk's only
+  // references there).
+  visitVars(vars, m, cs) {
+    for (const p of vars) this.visit(p, m, cs, null);
   }
 
   visitComprehension(x, m, cs, rs) {
@@ -1589,7 +1596,7 @@ class Analysis {
     const cc = Analysis.childMode(ec, hv);
     this.visitWord(hv, cc & ~RN);
     for (const p of clause[2]) this.rabPattern(p, m);
-    this.visitList(clause[2], (cc & ~(RN | HOIST | PLAN)) | (rn ? RN_PAT : 0) | ((m & (HOIST | HMATCH)) ? HMATCH : 0), cs, null);
+    this.visitVars(clause[2], (cc & ~(RN | HOIST | PLAN)) | (rn ? RN_PAT : 0) | ((m & (HOIST | HMATCH)) ? HMATCH : 0), cs);
     this.visit(clause[3], cc, cs, rs);
     const over = clause[1].over;
     if (over === 'in') {
