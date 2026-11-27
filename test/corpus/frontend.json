@@ -20987,6 +20987,18 @@
   "tolerant": "3tuhcojvns9nu",
   "complete": "6j7t1thlgyju"
  },
+ "row redeclare.rip › test a catch pattern inside a loop writes the loop's variable": {
+  "tokens": "1u055bpdlpx56",
+  "tree": "1u341j6t4ic7w",
+  "tolerant": "3dr107nr81q3m",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › test a counted loop's update of its it declares nothing for a later def": {
+  "tokens": "2fulkbjy8xaz7",
+  "tree": "2ejl5iqhze9py",
+  "tolerant": "3pygx1ak6ynnc",
+  "complete": "6j7t1thlgyju"
+ },
  "row redeclare.rip › fail an update before a def of its name rejects": {
   "tokens": "38bfvkejw88d3",
   "tree": "18mwup3s77n18",
@@ -21021,6 +21033,12 @@
   "tokens": "1f9rf85s1472g",
   "tree": "2scs2fa14ial4",
   "tolerant": "34f5qsveval1e",
+  "complete": "6j7t1thlgyju"
+ },
+ "row redeclare.rip › test an update in a class field's value runs at construction": {
+  "tokens": "2nmxq8v7xkx20",
+  "tree": "4gxwytf6frbn",
+  "tolerant": "3fhwaqv21qms",
   "complete": "6j7t1thlgyju"
  },
  "row redeclare.rip › test a loop variable's update in its body is the loop's": {

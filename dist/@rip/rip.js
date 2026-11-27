@@ -6269,6 +6269,44 @@ var TYPE_VOCAB = new Set([
   "OUTDENT",
   "TERMINATOR"
 ]);
+var TYPE_NAME_PARTS = new Set(["IDENTIFIER", "PROPERTY"]);
+var isTypeofAt = (t) => t !== undefined && (t.kind === "TYPEOF" || t.kind === "UNARY" && t.value === "typeof");
+var continuesName = (tokens, j, from) => {
+  if (tokens[j].kind !== "." || j === from)
+    return false;
+  const before = tokens[j - 1];
+  if (TYPE_NAME_PARTS.has(before.kind))
+    return true;
+  if (before.kind === "THIS")
+    return j - 2 >= from && isTypeofAt(tokens[j - 2]);
+  if (before.kind !== "CALL_END" && before.kind !== ")")
+    return false;
+  let depth = 0;
+  for (let k = j - 1;k >= from; k--) {
+    const kind = tokens[k].kind;
+    if (kind === "CALL_END" || kind === ")")
+      depth++;
+    else if ((kind === "CALL_START" || kind === "(") && --depth === 0) {
+      const head = tokens[k - 1]?.kind;
+      return head === "DYNAMIC_IMPORT" || head === "IMPORT";
+    }
+  }
+  return false;
+};
+var rejectValueMember = (tokens, j, from, fail) => {
+  if (continuesName(tokens, j, from))
+    return;
+  const t = tokens[j], member = tokens[j + 1];
+  fail(`a member read off a value ('${t.value}${member?.value ?? ""}') in a type — a type names a member only through a name (\`A.B\`, \`typeof x.y\`)`, t.start, member?.end ?? t.end);
+};
+var rejectValueMembers = (tokens, from, to, fail) => {
+  for (let k = from;k < to; k++) {
+    if (counter.on)
+      counter.n++;
+    if (tokens[k].kind === "." || tokens[k].kind === "?.")
+      rejectValueMember(tokens, k, from, fail);
+  }
+};
 var TYPE_ATOM_ENDERS = new Set([
   "IDENTIFIER",
   "PROPERTY",
@@ -6412,6 +6450,8 @@ var assertTypeVocabulary = (tokens, from, to, fail, opts = {}) => {
       atomEnd = true;
       continue;
     }
+    if (kd === "." || kd === "?.")
+      rejectValueMember(tokens, j, from, fail);
     if (TYPE_VOCAB.has(kd)) {
       if (GROUP_OPENERS.has(kd))
         groups.push(GROUP_OPENERS.get(kd));
@@ -7376,6 +7416,7 @@ function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = new Map)
         fail("type annotations use a single ':' (e.g. `x: number`), not '::'", t.start, t.end);
       }
     }
+    rejectValueMembers(tokens, runStart, runStart + run.consumed, fail);
     if (opts.stopAtFatArrow && looksLikeBareFunctionType(tokens, runStart, runStart + run.consumed)) {
       fail("a function-type return on an arrow must be parenthesized as a whole — " + "`(x): ((a: T) => R) => body`, not `(x): (a: T) => R => body`", tokens[runStart].start);
     }
@@ -7389,11 +7430,13 @@ function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = new Map)
     if (tokens[j]?.kind !== "IDENTIFIER")
       return -1;
     j++;
+    const generics = j;
     j = skipAngleGroup(tokens, j);
     if (j < 0)
       return -1;
     if (tokens[j]?.kind !== "=")
       return -1;
+    rejectValueMembers(tokens, generics, j, fail);
     j++;
     if (tokens[j]?.kind === "INDENT") {
       const out = matchingOutdent(tokens, j);
@@ -7416,16 +7459,20 @@ function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = new Map)
     if (tokens[j]?.kind !== "IDENTIFIER")
       return -1;
     j++;
+    let group = j;
     j = skipAngleGroup(tokens, j);
     if (j === -1)
       return -1;
+    rejectValueMembers(tokens, group, j, fail);
     if (tokens[j]?.kind === "EXTENDS") {
       if (tokens[j + 1]?.kind !== "IDENTIFIER")
         return -1;
       j += 2;
+      group = j;
       j = skipAngleGroup(tokens, j);
       if (j === -1)
         return -1;
+      rejectValueMembers(tokens, group, j, fail);
     }
     if (tokens[j]?.kind !== "INDENT")
       return -1;
@@ -7508,6 +7555,7 @@ function rewriteTypes(tokens, mintId, text, fail, payloads, bodyKinds = new Map)
               }
             }
           }
+          rejectValueMembers(tokens, i, j + 1, fail);
           out.push(mint("TYPE_PARAMS", text.slice(tok.start, tokens[j].end), tok.start, tokens[j].end, tok));
           i = j;
           continue;
@@ -12572,6 +12620,7 @@ class Emitter {
     };
     const heads = new Map;
     const within = (names, fn) => withHeads(heads, names, fn);
+    let fieldDepth = 0;
     const plainForm = (name, node) => {
       if (typeof name === "string" && !heads.has(name))
         forms.push({ name, kind: "plain", node, auth: false });
@@ -12697,12 +12746,14 @@ class Emitter {
           walk(n[2], true);
         const body = n[3];
         if (this.isBlock(body)) {
+          fieldDepth++;
           for (const stmt of body.slice(1)) {
             if (isNode2(stmt) && ASSIGNS.has(stmt[0]) && stmt.length === 3)
               walk(stmt[2], true);
             else if (!Emitter.isTypedWrapper(stmt))
               walk(stmt, true);
           }
+          fieldDepth--;
         }
         return;
       }
@@ -12799,7 +12850,12 @@ class Emitter {
           }
         }
       }
-      if (isUpdate(n) && typeof n[1] === "string" && !heads.has(n[1]))
+      if (n[0] === "loop-n" && n.length === 3) {
+        walk(n[1], true);
+        within(["it"], () => walk(n[2], true));
+        return;
+      }
+      if (isUpdate(n) && typeof n[1] === "string" && !heads.has(n[1]) && fieldDepth === 0)
         forms.push({ name: n[1], kind: "update", node: n, auth: false, update: true });
       const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
       for (const el of n)
@@ -14855,7 +14911,8 @@ class Emitter {
         for (const part of n.slice(2)) {
           if (isCatchClause(part) && Emitter.isPattern(part[1])) {
             for (const name of this.patternNames(part[1]))
-              add(name, n);
+              if (!heads.has(name))
+                add(name, n);
           }
         }
       }
@@ -14866,6 +14923,11 @@ class Emitter {
           within([name], () => walk(n[2]));
           return;
         }
+      }
+      if (n[0] === "loop-n" && n.length === 3) {
+        walk(n[1]);
+        within(["it"], () => walk(n[2]));
+        return;
       }
       for (const el of n)
         walk(el);
@@ -27279,6 +27341,252 @@ export {};
   return { code: builder.code, mappings: builder.rows, runtimeImports: emitter.runtimeImports, vocabulary: emitter.vocabulary, silences: emitter.silences, memberDecls: emitter.memberDecls, narrowedDecls: emitter.narrowedDecls, importedRefs: emitter.importedRefs, runtimeRefs: emitter.runtimeRefs, stores, runtimes, bindings, bindingNames, replResultName: emitter.replResultName, replImportResolver: emitter.replImportResolver, tsRegions: builder.tsRegions, echoSpans: builder.echoSpans, globalDecls: globalDecls.map((g) => g.name), pinnables, mutables: emitter.mutables, classDecls: emitter.classDecls, pinSpans: emitter.pinSpans, loopVars: emitter.loopVars, readLoopVarDecls: emitter.loopVarDecls.filter((d) => d.owner.readVars.has(d.which)).map((d) => d.span), attrNames: emitter.attrNames, routeWraps: emitter.routeWrapSpans, sourceKeys: emitter.sourceKeySpans, stashMembers: emitter.stashMemberSpans, stashKeys: emitter.stashKeys ?? null, memberInits: emitter.memberInitSites, imports: emitter.importSpans, intrinsics: emitter.intrinsics, indexedLoops: emitter.indexedLoops, componentUses: emitter.componentUses, componentProps: emitter.componentProps, namespaceExports: emitter.namespaceExports, componentNames: emitter.componentNames, partNames, renderPairs: emitter.renderPairs, kinds: emitter.kinds };
 }
 
+// src/emit/builder.js
+class Builder {
+  constructor() {
+    this.chunks = [];
+    this.length = 0;
+    this.frames = [];
+    this.tsRegions = [];
+    this.tsDepth = 0;
+    this.echoSpans = [];
+  }
+  get offset() {
+    return this.length;
+  }
+  get code() {
+    if (this.frames.length !== 0)
+      return this.chunks.join("");
+    if (this.chunks.length !== 1) {
+      this.chunks = [this.chunks.join("")];
+      this.renumbered();
+    }
+    return this.chunks[0] ?? "";
+  }
+  renumbered() {}
+  get frameNode() {
+    const f = this.frames;
+    return f.length === 0 ? null : f[f.length - 2];
+  }
+  emit(text) {
+    this.chunks.push(text);
+    this.length += text.length;
+    return this;
+  }
+  beginMark(nodeId, role) {
+    this.frames.push(nodeId, role);
+  }
+  endMark() {
+    this.frames.length -= 2;
+  }
+  mark(nodeId, role, fn) {
+    this.beginMark(nodeId, role);
+    fn();
+    this.endMark();
+  }
+  markSpan(nodeId, role, sourceStart, sourceEnd, fn) {
+    spanRole(role);
+    this.beginMark(nodeId, role);
+    fn();
+    this.endMark();
+  }
+  leaf(leafId, text) {
+    this.emit(text);
+  }
+  tsOnly(fn) {
+    const start = this.length;
+    this.tsDepth++;
+    fn();
+    this.tsDepth--;
+    if (this.tsDepth === 0 && this.length > start)
+      this.tsRegions.push([start, this.length]);
+  }
+  echo(fn) {
+    const start = this.length;
+    fn();
+    if (this.length > start)
+      this.echoSpans.push([start, this.length]);
+  }
+}
+function spanRole(role) {
+  if (!CALLER_SPAN_ROLES.has(role)) {
+    throw new Error(`builder: markSpan role '${role}' is not in the TS-face trivia allowlist ` + `(${[...CALLER_SPAN_ROLES].join(", ")}) — every other role resolves through RoleStore`);
+  }
+}
+
+// src/emit/mapping.js
+var NORMALIZED_ROLES = new Set(["annotation", "returnType"]);
+
+class MappingBuilder extends Builder {
+  constructor(stores, source = null, { leaves = false } = {}) {
+    super();
+    this.stores = stores;
+    this.source = source;
+    this.leaves = leaves;
+    this.rows = [];
+    this.exact = new Map;
+  }
+  get frameNode() {
+    const f = this.frames;
+    return f.length === 0 ? null : f[f.length - 1].nodeId;
+  }
+  beginMark(nodeId, role) {
+    let sourceStart, sourceEnd;
+    let kind = null;
+    if (role === "$self") {
+      const n = this.stores.node(nodeId);
+      sourceStart = n.sourceStart;
+      sourceEnd = n.sourceEnd;
+    } else {
+      const r = this.stores.role(nodeId, role);
+      if ("literal" in r) {
+        kind = "synthetic";
+        sourceStart = sourceEnd = this.stores.node(nodeId).sourceStart;
+      } else {
+        sourceStart = r.sourceStart;
+        sourceEnd = r.sourceEnd;
+      }
+    }
+    this.frames.push({ nodeId, role, sourceStart, sourceEnd, kind, generatedStart: this.length, chunkStart: this.chunks.length });
+  }
+  markSpan(nodeId, role, sourceStart, sourceEnd, fn) {
+    this.beginSpan(nodeId, role, sourceStart, sourceEnd);
+    fn();
+    this.endMark();
+  }
+  beginSpan(nodeId, role, sourceStart, sourceEnd) {
+    spanRole(role);
+    this.frames.push({ nodeId, role, sourceStart, sourceEnd, kind: null, generatedStart: this.length, chunkStart: this.chunks.length });
+  }
+  endMark() {
+    const f = this.frames.pop();
+    let kind = f.kind;
+    if (kind === null) {
+      kind = this.matches(f) ? "exact" : "cover";
+      if (kind === "cover" && NORMALIZED_ROLES.has(f.role))
+        this.layoutTwin(f);
+    }
+    this.rows.push({
+      nodeId: f.nodeId,
+      role: f.role,
+      mappingKind: kind,
+      sourceStart: f.sourceStart,
+      sourceEnd: f.sourceEnd,
+      generatedStart: f.generatedStart,
+      generatedEnd: this.length,
+      fileId: 0
+    });
+  }
+  leaf(leafId, text) {
+    if (!this.leaves || this.frames.length === 0 || this.source === null) {
+      this.emit(text);
+      return;
+    }
+    const n = this.stores.node(leafId);
+    let { sourceStart, sourceEnd } = n;
+    const spelled = this.source.slice(sourceStart, sourceEnd);
+    if (spelled !== text && spelled.endsWith(text) && !IDENT_PART.test(spelled[spelled.length - text.length - 1] ?? "")) {
+      sourceStart = sourceEnd - text.length;
+    }
+    this.beginSpan(this.frameNode, isIdentifierName(text) ? "identifier" : "literal", sourceStart, sourceEnd);
+    this.emit(text);
+    this.endMark();
+  }
+  renumbered() {
+    this.exact.clear();
+  }
+  matches(f) {
+    const src = this.source;
+    if (src === null)
+      return false;
+    if (f.sourceStart < 0 || f.sourceEnd > src.length) {
+      throw new Error(`builder: mark (nodeId ${f.nodeId}, role '${f.role}') has source span ` + `[${f.sourceStart}, ${f.sourceEnd}) outside the source text ` + `[0, ${src.length}) — store-protocol violation`);
+    }
+    const genEnd = this.length;
+    if (genEnd - f.generatedStart !== f.sourceEnd - f.sourceStart)
+      return false;
+    const delta = f.sourceStart - f.generatedStart;
+    const m = this.exact.get(delta);
+    const skippable = m !== undefined && m.genEnd <= genEnd;
+    const chunks = this.chunks;
+    const chunkEnd = chunks.length;
+    let pos = f.generatedStart;
+    let i = f.chunkStart;
+    while (i < chunkEnd) {
+      if (skippable && pos >= m.genStart && pos < m.genEnd) {
+        pos = m.genEnd;
+        i = m.chunkEnd;
+        continue;
+      }
+      const chunk = chunks[i];
+      if (!src.startsWith(chunk, pos + delta))
+        return false;
+      pos += chunk.length;
+      i++;
+    }
+    if (genEnd === f.generatedStart)
+      return true;
+    if (m !== undefined && (f.generatedStart <= m.genEnd || bridges(chunks, m, f, delta, src))) {
+      if (f.generatedStart < m.genStart) {
+        m.genStart = f.generatedStart;
+        m.chunkStart = f.chunkStart;
+      }
+      m.genEnd = genEnd;
+      m.chunkEnd = chunkEnd;
+    } else {
+      this.exact.set(delta, { genStart: f.generatedStart, genEnd, chunkStart: f.chunkStart, chunkEnd });
+    }
+    return true;
+  }
+  layoutTwin(f) {
+    if (this.source === null)
+      return;
+    const srcLen = f.sourceEnd - f.sourceStart;
+    const genLen = this.length - f.generatedStart;
+    if (srcLen === 0 || genLen === 0 || srcLen > 256 || genLen > 256)
+      return;
+    const src = this.source.slice(f.sourceStart, f.sourceEnd);
+    const gen = this.chunks.slice(f.chunkStart).join("");
+    if (src.replace(/\s+/g, " ") !== gen.replace(/\s+/g, " "))
+      return;
+    let si = 0, gi = 0;
+    while (si < src.length && gi < gen.length) {
+      if (/\s/.test(src[si])) {
+        while (si < src.length && /\s/.test(src[si]))
+          si++;
+        while (gi < gen.length && /\s/.test(gen[gi]))
+          gi++;
+        continue;
+      }
+      let len = 0;
+      while (si + len < src.length && !/\s/.test(src[si + len]))
+        len++;
+      this.rows.push({
+        nodeId: f.nodeId,
+        role: f.role,
+        mappingKind: "exact",
+        sourceStart: f.sourceStart + si,
+        sourceEnd: f.sourceStart + si + len,
+        generatedStart: f.generatedStart + gi,
+        generatedEnd: f.generatedStart + gi + len,
+        fileId: 0
+      });
+      si += len;
+      gi += len;
+    }
+  }
+}
+function bridges(chunks, m, f, delta, src) {
+  let pos = m.genEnd;
+  for (let i = m.chunkEnd;i < f.chunkStart; i++) {
+    const chunk = chunks[i];
+    if (!src.startsWith(chunk, pos + delta))
+      return false;
+    pos += chunk.length;
+  }
+  return true;
+}
+
 // src/emit/index.js
 class EmitUnimplemented extends Error {
   constructor(kind, what, span) {
@@ -27294,7 +27602,7 @@ var LOWERINGS = new Map;
 var FACES = ["js", "ts"];
 var DELIVERIES = ["none", "import", "inline"];
 var TS_DIRECTIVE = /^#[ \t]*@ts-(expect-error|ignore|nocheck)(?=\s|$)/;
-function emit2(parseResult, { source = "", runtimeDelivery = "none", face = "js", pins = null, strict = false, script = false, browserModule = false, dataPayload = null, dataLine = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null } = {}) {
+function emit2(parseResult, { source = "", runtimeDelivery = "none", face = "js", pins = null, strict = false, script = false, browserModule = false, dataPayload = null, dataLine = null, ambientBindings = null, repl = false, hmr = false, tolerant = false, modulePath = null, appStashSpec = null, routesUnion = null, routeParams = null, mappings = true } = {}) {
   if (!parseResult.sexpr) {
     throw new Error("emitter: cannot emit a failed parse");
   }
@@ -27304,11 +27612,14 @@ function emit2(parseResult, { source = "", runtimeDelivery = "none", face = "js"
   if (!DELIVERIES.includes(runtimeDelivery)) {
     throw new Error(`emitter: unknown runtimeDelivery '${runtimeDelivery}' — expected 'none', 'import', or 'inline'`);
   }
+  if (typeof mappings !== "boolean") {
+    throw new Error(`emitter: mappings must be true or false; got ${typeof mappings}`);
+  }
   if (ambientBindings != null && !Array.isArray(ambientBindings)) {
     throw new Error(`emitter: ambientBindings must be an array of {name, kind}; got ${typeof ambientBindings}`);
   }
   const stores = new Stores(parseResult.stores);
-  const builder = new CodeBuilder(stores, { source, primitives: face === "ts" });
+  const builder = mappings ? new MappingBuilder(stores, source, { leaves: face === "ts" }) : new Builder;
   const ctx = {
     stores,
     builder,
@@ -27398,7 +27709,7 @@ function record(ctx) {
   const { builder, stores } = ctx;
   return {
     code: builder.code,
-    mappings: builder.rows,
+    mappings: builder.rows ?? [],
     runtimeImports: [],
     vocabulary: [],
     silences: [],
@@ -36401,7 +36712,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "655081e805c8d311";
+var compilerBuild = () => "f456e81a67839e52";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

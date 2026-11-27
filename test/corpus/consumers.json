@@ -13991,6 +13991,14 @@
   "js": "3sy081hr8l0ev",
   "ts": "3oj2dqqaoo2vm"
  },
+ "row redeclare.rip › test a catch pattern inside a loop writes the loop's variable": {
+  "js": "2u7wafdeai1o5",
+  "ts": "1zk3xyjunc15m"
+ },
+ "row redeclare.rip › test a counted loop's update of its it declares nothing for a later def": {
+  "js": "2xapcfn3ib03t",
+  "ts": "1qxa26lflyb58"
+ },
  "row redeclare.rip › fail an update before a def of its name rejects": {
   "js": "2id54zzlt9o4e",
   "ts": "2id54zzlt9o4e"
@@ -14014,6 +14022,10 @@
  "row redeclare.rip › test an update of an outer name declares nothing": {
   "js": "17wncbvpyxn84",
   "ts": "4dokw75kc7ca"
+ },
+ "row redeclare.rip › test an update in a class field's value runs at construction": {
+  "js": "1hctm23a0s29g",
+  "ts": "5kkhv11phfnj"
  },
  "row redeclare.rip › test a loop variable's update in its body is the loop's": {
   "js": "3588dbincnpaz",
