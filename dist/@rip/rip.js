@@ -8826,7 +8826,7 @@ ${baseline}`).join(`
   };
   const schemaState = { defaultMaxString: null };
   const bodyKinds = new Map;
-  const islandLineElse = new Set;
+  const islandLineKeywords = new Set;
   const islands = [];
   const payloads = new Map;
   const dslTop = () => {
@@ -9488,8 +9488,8 @@ ${baseline}`).join(`
           dedentTo(prefix, lineStart);
         const continues = !inDsl() && ["else", "catch", "finally"].some((w) => text.startsWith(w, pos) && !IDENT_PART.test(text[pos + w.length] ?? "") && !(inMode("render") && text[pos + w.length] === "-" && IDENT_START.test(text[pos + w.length + 1] ?? "")));
         const top = dslTop();
-        if (continues && top?.kind === "island" && top.exit !== "params" && indents.length <= top.depth && text.startsWith("else", pos)) {
-          islandLineElse.add(nextId);
+        if (continues && top?.kind === "island" && top.exit !== "params" && indents.length <= top.depth) {
+          islandLineKeywords.add(nextId);
         }
         if (tokens.length > 0 && lastNewlinePos >= 0 && !continues && last()?.kind !== "TERMINATOR") {
           const nl = text[lastNewlinePos] === "\r" ? 2 : 1;
@@ -10214,13 +10214,13 @@ ${baseline}`).join(`
     if (toks[0]?.kind === "INDENT" && closingOutdent(toks, 0) === toks.length - 1)
       toks = toks.slice(1, -1);
     layout(toks);
-    const loose = toks.find((t) => t.kind === "LOOSE_ELSE" && t.newLine && islandLineElse.has(t.id));
+    const loose = toks.find((t) => t.kind === "LOOSE_ELSE" && t.newLine && islandLineKeywords.has(t.id));
     if (loose) {
       fail("an `else` line after a member's body continues that body as `a or b`, closing no `if` — a field named `else` goes above the member, and code continuing the body is indented", loose.start, loose.end);
     }
     payloads.set(code, toks);
   }
-  return { tokens, trivia, source, lexDiagnostics, payloads, data };
+  return { tokens, trivia, source, lexDiagnostics, payloads, data, islandLineKeywords };
 }
 var closingOutdent = (tokens, at) => {
   let depth = 0;
@@ -10359,6 +10359,7 @@ function makeParserLexer(path = "<anonymous>", { tolerant = false } = {}) {
       this.source = tape.source;
       this.lexDiagnostics = tape.lexDiagnostics ?? [];
       this.payloads = tape.payloads;
+      this.islandLineKeywords = tape.islandLineKeywords;
       this.index = 0;
       this.text = "";
       this.loc = null;
@@ -10378,7 +10379,18 @@ function makeParserLexer(path = "<anonymous>", { tolerant = false } = {}) {
       return this.payloads.get(this.token) ?? null;
     },
     explain(token, payload, at) {
-      return token?.kind === "SCHEMA_BODY" ? explainSchemaReject(payload, at) : null;
+      if (token?.kind === "SCHEMA_BODY")
+        return explainSchemaReject(payload, at);
+      const t = payload?.[at];
+      if (token?.kind === "SCHEMA_CODE" && (t?.kind === "CATCH" || t?.kind === "FINALLY") && this.islandLineKeywords.has(t.id)) {
+        const word = t.value;
+        return {
+          message: `a \`${word}\` line after a member's body continues that body, closing no \`try\` — a field named \`${word}\` goes above the member, and code continuing the body is indented`,
+          start: t.start,
+          end: t.end
+        };
+      }
+      return null;
     },
     finish(result) {
       finishSchemas(result, this.source, path, tolerant);
@@ -36078,7 +36090,7 @@ function createModuleLoaderImpl({
     }
   };
 }
-var compilerBuild = () => "280e1c169d50593c";
+var compilerBuild = () => "165f4089c2c9475f";
 var CACHE_DATABASE = "rip-compiled-modules";
 var CACHE_MODULES = "modules";
 var CACHE_META = "meta";

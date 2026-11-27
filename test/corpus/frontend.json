@@ -24497,6 +24497,24 @@
   "tolerant": "ztqcr64bf50v",
   "complete": "2sn34e15syk8b"
  },
+ "row schema.rip › fail a catch line after a member's body closes no try, so it names the field it cannot be": {
+  "tokens": "1ozjxusqavz7t",
+  "tree": "1k6g62b19r07b",
+  "tolerant": "3vsll3p2pm0uj",
+  "complete": "2xnkl2rcl3lpo"
+ },
+ "row schema.rip › fail a finally line after a computed body closes no try either": {
+  "tokens": "252258cy0cmr5",
+  "tree": "1nq6u4sveog9d",
+  "tolerant": "2l1pbhe376u7b",
+  "complete": "30fs2vo2geqfn"
+ },
+ "row schema.rip › fail a catch line after a transform closes no try either": {
+  "tokens": "2hkt68pjlih92",
+  "tree": "2uervfys38ab0",
+  "tolerant": "1rrdgauw7h6my",
+  "complete": "1tumb4ccq345t"
+ },
  "row schema.rip › fail a scope body must start with ->": {
   "tokens": "q8crjqcneqnp",
   "tree": "zy0xxnialn7y",
